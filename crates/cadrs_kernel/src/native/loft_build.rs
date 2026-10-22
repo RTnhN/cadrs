@@ -943,10 +943,13 @@ fn loft_exact_with(k: &NativeKernel, spec: &LoftSpec, secs: &mut [Sec], solid: b
             }
     }
     let mut prev_dir: Option<V3> = None;
+    // The previous section's part starts, as directions from its centre across the axis.
+    let mut prev_starts: Vec<V3> = Vec::new();
     for i in (0..secs.len()).filter(|_| align && closed_u) {
         let c = centroid(&secs[i]);
         if let Sec::Loop { parts, .. } = &mut secs[i] {
             let perp = |d: V3| d - axis.normalize() * d.dot(&axis.normalize());
+            let dirs = |parts: &[Part]| -> Vec<V3> { parts.iter().map(|p| perp(p.start() - c).try_normalize(tol::DEGENERATE).unwrap_or_else(V3::zeros)).collect() };
             if count == 1 && parts[0].c.is_periodic() && (parts[0].t1 - parts[0].t0) >= TAU - tol::ANGULAR {
                 // A whole circle or ellipse: restart it where it lines up.
                 if let Some(pd) = prev_dir {
@@ -957,16 +960,21 @@ fn loft_exact_with(k: &NativeKernel, spec: &LoftSpec, secs: &mut [Sec], solid: b
                     p.t0 = t;
                     p.t1 = t + span;
                 }
-            } else if let Some(pd) = prev_dir {
+            } else if prev_dir.is_some() {
+                // The turn that lines every part start up with the previous section's, not just
+                // the first: with many close starts (a spline's spans along a wide profile) the
+                // first alone is a degree or two from its neighbours and picks one off by one.
+                let here = dirs(parts);
                 let best = (0..count)
                     .min_by(|&a, &b| {
-                        let cost = |r: usize| (perp(parts[r].start() - c).normalize() - pd.normalize()).norm_squared();
+                        let cost = |r: usize| (0..count).map(|j| (here[(j + r) % count] - prev_starts[j]).norm_squared()).sum::<f64>();
                         cost(a).total_cmp(&cost(b))
                     })
                     .unwrap_or(0);
                 parts.rotate_left(best);
             }
             prev_dir = Some(perp(parts[0].start() - c));
+            prev_starts = dirs(parts);
         }
     }
     // Compatible curves per part across the sections.
