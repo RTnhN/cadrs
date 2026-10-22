@@ -42,7 +42,9 @@ pub enum Call {
     CreateDocument(CreateDocument),
     OpenDocument(OpenDocument),
     GetDocument,
+    GetFrameStats,
     AddPartStudio(AddPartStudio),
+    AddAssembly(AddPartStudio),
     AddSketch(AddSketch),
     Extrude(Extrude),
     Screenshot(Screenshot),
@@ -60,6 +62,9 @@ pub enum Call {
     CreateDrawing(CreateDrawing),
     AddAnnotation(AddAnnotation),
     RenameTab(RenameTab),
+    DeleteTab(TabName),
+    GetAssembly(AssemblyName),
+    InsertInstance(InsertInstance),
     GetBoard(BoardName),
     GetBoardFit(BoardFit),
     DeriveBoard(DeriveBoard),
@@ -206,6 +211,15 @@ impl Cadrs {
         self.call(Call::GetDocument).await
     }
 
+    #[tool(description = "The app's frame rate over the last two seconds: fps, the number of frames, and \
+        frame times in ms (mean, median, 95th percentile, max); and where the last second's frames went \
+        (profile): CPU ms a frame of the main loop's schedules, the slowest schedules and systems (with \
+        their most in one frame and runs a frame), and the GPU ms of the slowest render passes. The panel \
+        at the bottom left of the 3D view shows the same (F12 steps through it, the fps line, nothing).")]
+    async fn get_frame_stats(&self) -> Result<CallToolResult, ErrorData> {
+        self.call(Call::GetFrameStats).await
+    }
+
     #[tool(description = "Create a drawing of a Part Studio and open it as a tab: its front, top, side and \
         isometric views (four_views) on a sheet, at the largest scale that fits or at the given scale. Returns \
         the drawing's name and its views (names, ids, anchors and frames) for add_annotation.")]
@@ -224,9 +238,35 @@ impl Cadrs {
         self.call(Call::RenameTab(p)).await
     }
 
+    #[tool(description = "Delete a tab. A Part Studio or Assembly that an assembly still has instances of \
+        is refused (delete those instances first).")]
+    async fn delete_tab(&self, Parameters(p): Parameters<TabName>) -> Result<CallToolResult, ErrorData> {
+        self.call(Call::DeleteTab(p)).await
+    }
+
+    #[tool(description = "Describe an Assembly tab: its instances (name, id, source tab and part, position \
+        in mm, fixed, hidden, suppressed) and its mate features.")]
+    async fn get_assembly(&self, Parameters(p): Parameters<AssemblyName>) -> Result<CallToolResult, ErrorData> {
+        self.call(Call::GetAssembly(p)).await
+    }
+
+    #[tool(description = "Insert into an assembly a whole Part Studio (one rigid instance of all its parts) \
+        or one of its parts, at a position (mm; omitted: the origin, so the parts sit where they are in their \
+        Part Studio), optionally fixed. One undo step. Returns the assembly as get_assembly does.")]
+    async fn insert_instance(&self, Parameters(p): Parameters<InsertInstance>) -> Result<CallToolResult, ErrorData> {
+        self.call(Call::InsertInstance(p)).await
+    }
+
     #[tool(description = "Add a Part Studio tab to the open document and make it the active tab.")]
     async fn add_part_studio(&self, Parameters(p): Parameters<AddPartStudio>) -> Result<CallToolResult, ErrorData> {
         self.call(Call::AddPartStudio(p)).await
+    }
+
+    #[tool(description = "Add an empty Assembly tab to the open document (name omitted: the next default, \
+        \"Assembly 2\"). insert_instance puts Part Studios or parts into it. Returns the assembly as \
+        get_assembly does.")]
+    async fn add_assembly(&self, Parameters(p): Parameters<AddPartStudio>) -> Result<CallToolResult, ErrorData> {
+        self.call(Call::AddAssembly(p)).await
     }
 
     #[tool(description = "Add a sketch on a default plane (Top, Front or Right) of a Part Studio, with rectangles, \

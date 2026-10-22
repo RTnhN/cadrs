@@ -334,7 +334,7 @@ fn curve_of(st: &mut Stream, fmt: Fmt, ty: i64) -> R<NurbsCurve> {
 fn curve_on_surface(uv: &NurbsCurve, s: &NurbsSurface) -> NurbsCurve {
     let affine = s.du == 1 && s.dv == 1 && s.cps.len() == 2 && s.cps[0].len() == 2 && s.cps.iter().flatten().all(|h| (h.w - 1.0).abs() < 1e-14) && {
         let c = |i: usize, j: usize| s.cps[i][j].xyz();
-        (c(1, 1) - c(1, 0) - c(0, 1) + c(0, 0)).norm() < 1e-12 * (1.0 + c(0, 0).norm())
+        (c(1, 1) - c(1, 0) - c(0, 1) + c(0, 0)).norm() < tol::REL_FINE * (1.0 + c(0, 0).norm())
     };
     let ((su0, su1), (sv0, sv1)) = s.range();
     let on = |q: P3| s.point(q.x.clamp(su0, su1), q.y.clamp(sv0, sv1));
@@ -541,7 +541,7 @@ fn face_surface(rec: &SurfRec, warnings: &mut Vec<String>, k: usize) -> (Surface
         let q = exact.eval(eu, ev);
         let n2 = exact.normal(eu, ev);
         let size = rec.nurbs.cps.iter().flatten().map(|h| super::nurbs::dehom(h).coords.norm()).fold(1.0, f64::max);
-        if (q - p).norm() > 1e-6 * size {
+        if (q - p).norm() > tol::REL_POINT * size {
             warnings.push(format!("surface {k}: the analytic surface misses its B-spline form by {:.2e}", (q - p).norm()));
             return (nurbs, false);
         }
@@ -896,7 +896,7 @@ pub fn face_centroids(body: &Body) -> Vec<P3> {
     for fi in 0..body.faces.len() {
         bb.union(&body.face_bbox(fi));
     }
-    let defl = if bb.is_empty() { 1e-3 } else { (bb.diagonal() * 1e-3).max(1e-6) };
+    let defl = if bb.is_empty() { 1e-3 } else { (bb.diagonal() * 1e-3).max(tol::POINT) };
     let es = super::tess::edge_samples(body, defl, 0.3);
     body.faces
         .iter()
@@ -1114,7 +1114,7 @@ mod tests {
         let b = read_brep(&fixture("offset/OffsetBoxSphOnCorner.smb")).unwrap();
         solid(&b, "OffsetBoxSphOnCorner");
         // SMLib's (its props of the file): volume 1197773.92576, the face 12187.311.
-        let v = super::super::mass::body_mass(&b.body).volume;
+        let v = super::super::mass::body_volume(&b.body);
         assert!((v - 1197773.92576).abs() < 1e-6 * v, "volume {v}");
         let big = (0..b.body.faces.len()).filter(|&f| matches!(b.body.faces[f].surf, Surface::Nurbs(_))).map(|f| super::super::mass::face_area(&b.body, f).0).fold(0.0, f64::max);
         assert!((big - 12187.311).abs() < 1e-4 * big, "the corner face's area {big}");

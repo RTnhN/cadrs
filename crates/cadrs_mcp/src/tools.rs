@@ -387,6 +387,42 @@ pub struct RenameTab {
     pub to: String,
 }
 
+/// A tab, by name.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TabName {
+    /// The tab's name.
+    pub name: String,
+}
+
+/// An Assembly tab, by name.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AssemblyName {
+    /// The Assembly tab's name; omitted: the active tab.
+    #[serde(default)]
+    pub assembly: Option<String>,
+}
+
+/// Inserts a Part Studio, or one of its parts, into an assembly.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct InsertInstance {
+    /// The Assembly tab's name; omitted: the active tab.
+    #[serde(default)]
+    pub assembly: Option<String>,
+    /// The Part Studio tab to insert from.
+    pub part_studio: String,
+    /// One part of it, by name ("Part 1"); omitted: the whole Part Studio as one rigid
+    /// instance (all its parts, moving as one).
+    #[serde(default)]
+    pub part: Option<String>,
+    /// Where the instance's origin goes in the assembly, [x, y, z] in mm; omitted: the
+    /// assembly's origin, so the parts sit where they are in their Part Studio.
+    #[serde(default)]
+    pub translation: Option<[f64; 3]>,
+    /// Fix the instance in place (the solver keeps it put, as ground); default false.
+    #[serde(default)]
+    pub fixed: bool,
+}
+
 /// A PCB Studio board, by name.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct BoardName {

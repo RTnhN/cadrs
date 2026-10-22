@@ -70,6 +70,157 @@ pub struct XBuilder {
     pc_cache: std::cell::RefCell<std::collections::HashMap<(usize, usize), Curve>>,
 }
 
+/// A boundary piece of a face given without topology: a curve from `a` to `b` along it.
+#[derive(Debug, Clone)]
+pub struct LooseSeg {
+    pub c: Curve,
+    pub a: P3,
+    pub b: P3,
+}
+
+/// The boundary of a spline surface's whole parameter range, counter-clockwise in (u, v).
+pub fn natural_boundary(surf: &Surface) -> Result<Vec<LooseSeg>, String> {
+    let Surface::Nurbs(n) = surf else { return Err("an untrimmed surface that is not a spline".into()) };
+    let ((u0, u1), (v0, v1)) = n.range();
+    let (nu, nv) = (n.cps.len(), n.cps[0].len());
+    let row = |j: usize| NurbsCurve { degree: n.du, knots: n.ku.clone(), cps: (0..nu).map(|i| n.cps[i][j]).collect() };
+    let col = |i: usize| NurbsCurve { degree: n.dv, knots: n.kv.clone(), cps: n.cps[i].clone() };
+    let mut out = Vec::new();
+    for (c, (pa, pb)) in [
+        (row(0), ((u0, v0), (u1, v0))),
+        (col(nu - 1), ((u1, v0), (u1, v1))),
+        (row(nv - 1), ((u1, v1), (u0, v1))),
+        (col(0), ((u0, v1), (u0, v0))),
+    ] {
+        let (a, b) = (surf.eval(pa.0, pa.1), surf.eval(pb.0, pb.1));
+        out.push(LooseSeg { c: Curve::Nurbs(Arc::new(c)), a, b });
+    }
+    Ok(out)
+}
+
+/// Faces given without topology (IGES trimmed and bounded surfaces, STEP curve-bounded
+/// surfaces), sewn by their boundary curves: vertices welded within `tol`, segments matched to
+/// the edges other faces already have, each connected group of faces a shell (a solid when
+/// closed). `unoriented`: the file says nothing of the faces' sides (they are then made
+/// consistent and outward). The vertices and edges take the gaps left (up to ten weld
+/// distances) as their tolerances. Returns the body and the problems met.
+pub fn sew_loose(faces: Vec<(Surface, Vec<Vec<LooseSeg>>)>, tol: f64, unoriented: bool) -> (Body, Vec<String>) {
+    let mut xb = XBuilder::new();
+    let mut weld: Vec<P3> = Vec::new();
+    let mut cells: std::collections::HashMap<[i64; 3], Vec<usize>> = std::collections::HashMap::new();
+    let mut vertex = |xb: &mut XBuilder, p: P3| -> usize {
+        let k = [p.x, p.y, p.z].map(|c| (c / tol).floor() as i64);
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                for dz in -1..=1 {
+                    if let Some(v) = cells.get(&[k[0] + dx, k[1] + dy, k[2] + dz]) {
+                        for &i in v {
+                            if (weld[i] - p).norm() <= tol {
+                                return i;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        weld.push(p);
+        let i = xb.vertex(p);
+        cells.entry(k).or_default().push(i);
+        i
+    };
+    let mut by_pair: std::collections::HashMap<(usize, usize), Vec<usize>> = std::collections::HashMap::new();
+    let mut fids = Vec::new();
+    for (surf, seg_loops) in faces {
+        let mut loops = Vec::new();
+        for segs in seg_loops {
+            let mut l = Vec::new();
+            for sg in segs {
+                let (va, vb) = (vertex(&mut xb, sg.a), vertex(&mut xb, sg.b));
+                let Some(ne) = xb.edge(sg.c, va, vb) else { continue };
+                // The same edge as one of another face's?
+                let key = (va.min(vb), va.max(vb));
+                let found = by_pair.get(&key).and_then(|cands| {
+                    let new = &xb.body.edges[ne];
+                    let mid = new.point(new.mid_t());
+                    cands.iter().copied().find(|&c| {
+                        let old = &xb.body.edges[c];
+                        (old.point(old.curve.closest(&mid, old.t[0], old.t[1])) - mid).norm() < tol * LOOSE_SHARE
+                    })
+                });
+                match found {
+                    Some(c) => {
+                        let fwd = if va != vb {
+                            xb.body.edges[c].v[0] == va
+                        } else {
+                            let (new, old) = (&xb.body.edges[ne], &xb.body.edges[c]);
+                            new.curve.tangent(new.t[0]).dot(&old.curve.tangent(old.t[0])) > 0.0
+                        };
+                        xb.body.edges.pop();
+                        l.push((c, fwd));
+                    }
+                    None => {
+                        by_pair.entry(key).or_default().push(ne);
+                        l.push((ne, true));
+                    }
+                }
+            }
+            if !l.is_empty() {
+                loops.push(l);
+            }
+        }
+        if !loops.is_empty() {
+            fids.push(xb.face(XFace { surf, sense: true, loops }));
+        }
+    }
+    // Shells: faces connected through shared edges; closed when every edge is used twice.
+    let mut parent: Vec<usize> = (0..fids.len()).collect();
+    fn find(p: &mut [usize], x: usize) -> usize {
+        let mut r = x;
+        while p[r] != r {
+            r = p[r];
+        }
+        p[x] = r;
+        r
+    }
+    let mut users: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
+    for (k, &fi) in fids.iter().enumerate() {
+        for &(e, _) in xb.faces[fi].loops.iter().flatten() {
+            users.entry(e).or_default().push(k);
+        }
+    }
+    for us in users.values() {
+        for w in us.windows(2) {
+            let (a, b) = (find(&mut parent, w[0]), find(&mut parent, w[1]));
+            parent[a.max(b)] = a.min(b);
+        }
+    }
+    let mut groups: Vec<(usize, Vec<usize>)> = Vec::new();
+    for k in 0..fids.len() {
+        let g = find(&mut parent, k);
+        match groups.iter_mut().find(|x| x.0 == g) {
+            Some(x) => x.1.push(k),
+            None => groups.push((g, vec![k])),
+        }
+    }
+    for (_, ks) in groups {
+        let closed = ks.iter().all(|&k| xb.faces[fids[k]].loops.iter().flatten().all(|&(e, _)| users[&e].len() == 2));
+        let sh = xb.shell(ks.iter().map(|&k| fids[k]).collect(), closed);
+        if closed {
+            xb.solid(vec![sh]);
+        }
+    }
+    xb.unoriented = unoriented;
+    let (mut body, w) = xb.finish();
+    // The faces' curves meet within the weld distance, not exactly: the vertices and edges
+    // take their gaps as their tolerances.
+    body.fit_tolerances(tol * LOOSE_SHARE);
+    (body, w)
+}
+
+/// How close (in weld distances) a loose face's boundary segment must run to another face's
+/// edge between the same vertices to be that edge.
+const LOOSE_SHARE: f64 = 10.0;
+
 /// The distance under which two points of a file are the same point (files are written to about
 /// 1e-7 of their size; exporters' tolerances are often 1e-6 to 1e-5 mm).
 const JOIN: f64 = 1e-5;
@@ -106,7 +257,7 @@ pub fn edge_range(c: &Curve, p0: &P3, p1: &P3, closed: bool) -> Option<(f64, f64
                 return Some((t0, t0 + TAU));
             }
             let mut t1 = param_of(c, p1);
-            while t1 <= t0 + 1e-12 {
+            while t1 <= t0 + tol::ROUNDOFF_FINE {
                 t1 += TAU;
             }
             while t1 > t0 + TAU {
@@ -117,7 +268,7 @@ pub fn edge_range(c: &Curve, p0: &P3, p1: &P3, closed: bool) -> Option<(f64, f64
         Curve::Nurbs(n) if closed => Some(n.range()),
         _ => {
             let (t0, t1) = (param_of(c, p0), param_of(c, p1));
-            if t1 > t0 + 1e-12 { Some((t0, t1)) } else { None }
+            if t1 > t0 + tol::ROUNDOFF_FINE { Some((t0, t1)) } else { None }
         }
     }
 }
@@ -366,7 +517,7 @@ fn pcurve_unsnapped(s: &Surface, c: &Curve, t0: f64, t1: f64, etol: f64) -> Curv
         // An exact p-curve must put the surface on the curve.
         let on = |pc: &Curve| samples(pc).iter().all(|&t| {
             let q = pc.point(t);
-            (s.eval(q.x, q.y) - c.point(t)).norm() < 1e-6
+            (s.eval(q.x, q.y) - c.point(t)).norm() < tol::POINT
         });
         if on(&pc) {
             return pc;
@@ -416,15 +567,7 @@ fn fit_pieces(s: &Surface, per: &Periods, c: &Curve, pieces: &[f64], tol: &Tol) 
             fit_span(s, per, tol, c, w[0], w[1], &mut hint, 0, &mut segs);
         }
     }
-    let mut it = segs.into_iter();
-    let mut out = it.next()?;
-    for fit in it {
-        // Join at the shared end: a knot of full multiplicity there.
-        let p = out.degree;
-        out.knots.pop();
-        out.knots.extend_from_slice(&fit.knots[p + 1..]);
-        out.cps.extend_from_slice(&fit.cps[1..]);
-    }
+    let out = join_spans(segs)?;
     let pc = Curve::Nurbs(Arc::new(out));
     if let Some(((u0, u1), (v0, v1))) = per.domain {
         let (a, b) = (pieces[0], *pieces.last().unwrap());
@@ -442,6 +585,28 @@ fn fit_pieces(s: &Surface, per: &Periods, c: &Curve, pieces: &[f64], tol: &Tol) 
         }
     }
     Some(pc)
+}
+
+/// Fitted spans joined end to end into one spline: a knot of full multiplicity at each joint,
+/// the spans first raised to one degree (a span's interpolation falls back to degree one where
+/// cubics fail). None for no spans.
+fn join_spans(segs: Vec<NurbsCurve>) -> Option<NurbsCurve> {
+    let mut it = segs.into_iter();
+    let mut out = it.next()?;
+    for mut fit in it {
+        while fit.degree < out.degree {
+            fit = fit.elevated();
+        }
+        while out.degree < fit.degree {
+            out = out.elevated();
+        }
+        // Join at the shared end: a knot of full multiplicity there.
+        let p = out.degree;
+        out.knots.pop();
+        out.knots.extend_from_slice(&fit.knots[p + 1..]);
+        out.cps.extend_from_slice(&fit.cps[1..]);
+    }
+    Some(out)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -602,8 +767,20 @@ impl XBuilder {
                     return None;
                 }
                 let (rc, _, _) = curve.reversed(0.0, 1.0);
-                let r = edge_range(&rc, &p0, &p1, closed)?;
-                (rc, r)
+                match edge_range(&rc, &p0, &p1, closed) {
+                    Some(r) => (rc, r),
+                    // A closed spline the edge runs across its start: restarted at the edge's
+                    // first vertex (either way round).
+                    None => [curve, rc].into_iter().find_map(|c| {
+                        let Curve::Nurbs(n) = &c else { return None };
+                        let (a, b) = n.range();
+                        if (n.point(a) - n.point(b)).norm() >= JOIN {
+                            return None;
+                        }
+                        let rs = Curve::Nurbs(Arc::new(n.restarted(param_of(&c, &p0)).ok()?));
+                        edge_range(&rs, &p0, &p1, closed).map(|r| (rs, r))
+                    })?,
+                }
             }
         };
         // Empty? (A sampled length: exact lengths of long splines cost.)
@@ -612,7 +789,7 @@ impl XBuilder {
             return None;
         }
         // Rounding residue (atan2(1e-49, 1)) would reach the triangulator, which rejects it.
-        let small = 1e-12 * (1.0 + (t1 - t0).abs());
+        let small = tol::REL_FINE * (1.0 + (t1 - t0).abs());
         let z = |t: f64| if t.abs() < small { 0.0 } else { t };
         let (t0, t1) = (z(t0), z(t1));
         Some(self.body.add_edge(curve, t0, t1, v0, v1))
@@ -877,7 +1054,7 @@ impl XBuilder {
             }
             let sh = shifts(&m);
             let a = area(&sh);
-            if a.abs() < 1e-12 {
+            if a.abs() < tol::DEGENERATE {
                 continue;
             }
             let matches = (a > 0.0) == hint;
@@ -1026,7 +1203,7 @@ impl XBuilder {
                 let s1 = i as f64 / m as f64;
                 let cur = f(s1);
                 if prev.abs() < PI / 2.0 && cur.abs() < PI / 2.0 && prev * cur <= 0.0 {
-                    if cur.abs() < 1e-12 && i == m {
+                    if cur.abs() < tol::ROUNDOFF_FINE && i == m {
                         break; // the next coedge's start
                     }
                     let (mut lo, mut hi) = ((i - 1) as f64 / m as f64, s1);
@@ -1631,7 +1808,7 @@ pub fn orient_shells(b: &mut Body, always: bool) -> usize {
             // The sign of the enclosed volume from a coarse tessellation (exact integration of
             // spline faces would cost far more).
             let shift = bb.center().coords;
-            let defl = (bb.diagonal() * 1e-2).max(1e-6);
+            let defl = (bb.diagonal() * 1e-2).max(tol::POINT);
             let es = super::tess::edge_samples(b, defl, 0.5);
             let vol: f64 = faces
                 .iter()
@@ -1775,5 +1952,59 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Loose faces whose boundary curves meet only within the weld distance (as IGES trimmed
+    /// surfaces do): two triangles sharing an edge, one's copy of the shared corner 4e-4 off.
+    /// The sewn sheet's vertices take the gap as their tolerance, so it checks clean.
+    #[test]
+    fn loose_faces_sew_within_the_weld_distance() {
+        let tri = |p: [P3; 3]| {
+            let n = (p[1] - p[0]).cross(&(p[2] - p[0])).normalize();
+            let f = Frame::from_xz(p[0], (p[1] - p[0]).normalize(), n);
+            let segs = (0..3).map(|k| {
+                let (a, b) = (p[k], p[(k + 1) % 3]);
+                LooseSeg { c: Curve::line(a, b).0, a, b }
+            });
+            (Surface::Plane { f }, vec![segs.collect()])
+        };
+        let off = P3::new(1.0004, 0.0, 0.0);
+        let faces = vec![tri([P3::origin(), P3::new(1.0, 0.0, 0.0), P3::new(0.0, 1.0, 0.0)]), tri([off, P3::new(1.0, 1.0, 0.0), P3::new(0.0, 1.0, 0.0)])];
+        let (b, _) = sew_loose(faces, 1e-3, true);
+        assert_eq!(b.faces.len(), 2);
+        assert_eq!(b.verts.len(), 4);
+        assert!(b.check().is_empty(), "{:?}", b.check());
+    }
+
+    /// Spans of different degrees (a cubic and a linear fallback) join into a valid spline
+    /// through both (r0901_ec's p-curve had 50 control points and 52 knots).
+    #[test]
+    fn spans_of_mixed_degree_join() {
+        let pts: Vec<P3> = (0..5).map(|i| P3::new(i as f64, (i as f64).sin(), 0.0)).collect();
+        let ts: Vec<f64> = (0..5).map(|i| i as f64).collect();
+        let cubic = NurbsCurve::interpolate(&pts, &ts, 3, None, None);
+        let line = NurbsCurve { degree: 1, knots: vec![4.0, 4.0, 6.0, 6.0], cps: vec![super::super::nurbs::hom(&pts[4], 1.0), super::super::nurbs::hom(&P3::new(6.0, 0.0, 0.0), 1.0)] };
+        let j = join_spans(vec![cubic.clone(), line]).unwrap();
+        assert!(j.validate().is_ok());
+        assert!((j.point(2.0) - cubic.point(2.0)).norm() < 1e-9);
+        assert!((j.point(5.0) - P3::new(5.0, (4f64.sin()) / 2.0, 0.0)).norm() < 1e-9);
+    }
+
+    /// An edge along a closed spline ending at the spline's start (its vertex projects to the
+    /// start's parameter, before the edge's first): read along the spline from its first
+    /// vertex, not dropped (as1_motor's, r0901_ec's and trj*-ec's loops lost such edges).
+    #[test]
+    fn edges_ending_at_a_closed_splines_start() {
+        let pts = [P3::origin(), P3::new(1.0, 0.0, 0.0), P3::new(1.0, 1.0, 0.0), P3::new(0.0, 1.0, 0.0), P3::origin()];
+        let knots = vec![0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 4.0];
+        let sq = NurbsCurve { degree: 1, knots, cps: pts.iter().map(|p| super::super::nurbs::hom(p, 1.0)).collect() };
+        let mut xb = XBuilder::new();
+        let (a, b) = (xb.vertex(P3::new(0.0, 1.0, 0.0)), xb.vertex(P3::origin()));
+        let e = xb.edge(Curve::Nurbs(Arc::new(sq)), a, b).expect("the edge");
+        let ed = &xb.body.edges[e];
+        assert!((ed.point(ed.t[0]) - P3::new(0.0, 1.0, 0.0)).norm() < 1e-9);
+        assert!((ed.point(ed.t[1]) - P3::origin()).norm() < 1e-9);
+        // The last side, not the other three.
+        assert!((ed.point(0.5 * (ed.t[0] + ed.t[1])) - P3::new(0.0, 0.5, 0.0)).norm() < 1e-9);
     }
 }

@@ -24,6 +24,7 @@ use super::split::Arc as SArc;
 use super::surface::Surface;
 use super::topo::{Body, Coedge, Edge, Face};
 use crate::Result;
+use super::tol;
 
 /// A parameter direction of a surface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,7 +78,7 @@ pub fn iso_curve(s: &Surface, dir: Dir, c: f64) -> Option<Curve> {
         (Surface::Cone { f, r, a }, Dir::U) => Curve::Line { o: f.o + rot(f, c) * *r, d: rot(f, c) * a.sin() + f.z * a.cos() },
         (Surface::Cone { f, r, a }, Dir::V) => {
             let rr = r + c * a.sin();
-            if rr.abs() < 1e-12 {
+            if rr.abs() < tol::DEGENERATE {
                 return None;
             }
             // (A negative radius is the circle half a turn on.)
@@ -86,7 +87,7 @@ pub fn iso_curve(s: &Surface, dir: Dir, c: f64) -> Option<Curve> {
         (Surface::Sphere { f, r }, Dir::U) => Curve::Circle { c: f.o, x: rot(f, c), y: f.z, r: *r },
         (Surface::Sphere { f, r }, Dir::V) => {
             let rr = r * c.cos();
-            if rr.abs() < 1e-12 * r {
+            if rr.abs() < tol::REL_FINE * r {
                 return None;
             }
             Curve::Circle { c: f.o + f.z * (r * c.sin()), x: f.x * rr.signum(), y: f.y * rr.signum(), r: rr.abs() }
@@ -94,7 +95,7 @@ pub fn iso_curve(s: &Surface, dir: Dir, c: f64) -> Option<Curve> {
         (Surface::Torus { f, rmaj, rmin }, Dir::U) => Curve::Circle { c: f.o + rot(f, c) * *rmaj, x: rot(f, c), y: f.z, r: *rmin },
         (Surface::Torus { f, rmaj, rmin }, Dir::V) => {
             let rr = rmaj + rmin * c.cos();
-            if rr.abs() < 1e-12 {
+            if rr.abs() < tol::DEGENERATE {
                 return None;
             }
             Curve::Circle { c: f.o + f.z * (rmin * c.sin()), x: f.x * rr.signum(), y: f.y * rr.signum(), r: rr.abs() }
@@ -111,7 +112,7 @@ pub fn iso_curve(s: &Surface, dir: Dir, c: f64) -> Option<Curve> {
         (Surface::Revolution { f, m }, Dir::V) => {
             let l = f.local(&m.point(c));
             let rho = (l.x * l.x + l.y * l.y).sqrt();
-            if rho < 1e-12 {
+            if rho < tol::DEGENERATE {
                 return None;
             }
             // The meridian's point at u = 0 lies at angle φ in the frame's xy plane.
@@ -216,7 +217,7 @@ fn split_in(b: &mut Body, fi: usize, dir: Dir, values: &[f64]) -> Option<Vec<usi
     if values.is_empty() {
         return None;
     }
-    let size = b.face_bbox(fi).diagonal().max(1e-9);
+    let size = b.face_bbox(fi).diagonal().max(tol::ROUNDOFF);
     let area0 = super::mass::face_area(b, fi).0;
     // 1. Where the loops cross each iso-line.
     let mut hits: Vec<Vec<Hit>> = values.iter().map(|_| Vec::new()).collect();
@@ -234,9 +235,9 @@ fn split_in(b: &mut Body, fi: usize, dir: Dir, values: &[f64]) -> Option<Vec<usi
                 for t in roots(&g, lo, hi, n) {
                     let along = coord(c.pc.point(t)).1;
                     // (A pole's crossing is its vertex.)
-                    let vertex = if e.degenerate || (t - e.t[0]).abs() <= 1e-9 * (1.0 + (hi - lo)) || (e.point(t) - b.verts[e.v[0]].p).norm() <= 1e-9 * size {
+                    let vertex = if e.degenerate || (t - e.t[0]).abs() <= tol::REL * (1.0 + (hi - lo)) || (e.point(t) - b.verts[e.v[0]].p).norm() <= tol::REL * size {
                         Some(e.v[0])
-                    } else if (t - e.t[1]).abs() <= 1e-9 * (1.0 + (hi - lo)) || (e.point(t) - b.verts[e.v[1]].p).norm() <= 1e-9 * size {
+                    } else if (t - e.t[1]).abs() <= tol::REL * (1.0 + (hi - lo)) || (e.point(t) - b.verts[e.v[1]].p).norm() <= tol::REL * size {
                         Some(e.v[1])
                     } else {
                         None
@@ -250,7 +251,7 @@ fn split_in(b: &mut Body, fi: usize, dir: Dir, values: &[f64]) -> Option<Vec<usi
     // the edge's index).
     let mut splits: Vec<(usize, f64)> = hits.iter().flatten().filter(|h| h.vertex.is_none()).map(|h| (h.edge, h.t)).collect();
     splits.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.total_cmp(&a.1)));
-    splits.dedup_by(|x, y| x.0 == y.0 && (x.1 - y.1).abs() <= 1e-12 * (1.0 + x.1.abs()));
+    splits.dedup_by(|x, y| x.0 == y.0 && (x.1 - y.1).abs() <= tol::REL_FINE * (1.0 + x.1.abs()));
     let mut made: Vec<((usize, f64), usize)> = Vec::new();
     for &(e, t) in &splits {
         let v = super::unify::split_edge(b, e, t);
@@ -258,7 +259,7 @@ fn split_in(b: &mut Body, fi: usize, dir: Dir, values: &[f64]) -> Option<Vec<usi
     }
     for h in hits.iter_mut().flatten() {
         if h.vertex.is_none() {
-            h.vertex = made.iter().find(|((e, t), _)| *e == h.edge && (*t - h.t).abs() <= 1e-12 * (1.0 + t.abs())).map(|x| x.1);
+            h.vertex = made.iter().find(|((e, t), _)| *e == h.edge && (*t - h.t).abs() <= tol::REL_FINE * (1.0 + t.abs())).map(|x| x.1);
         }
     }
     // 3. The stretches of each iso-line inside the face: new edges.
@@ -270,10 +271,10 @@ fn split_in(b: &mut Body, fi: usize, dir: Dir, values: &[f64]) -> Option<Vec<usi
             .filter_map(|h| {
                 let mut s = h.along;
                 if per_s {
-                    while s < s0 - 1e-9 {
+                    while s < s0 - tol::ROUNDOFF {
                         s += TAU;
                     }
-                    while s > s1 + 1e-9 {
+                    while s > s1 + tol::ROUNDOFF {
                         s -= TAU;
                     }
                 }
@@ -281,11 +282,11 @@ fn split_in(b: &mut Body, fi: usize, dir: Dir, values: &[f64]) -> Option<Vec<usi
             })
             .collect();
         pts.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
-        pts.dedup_by(|x, y| x.1 == y.1 && (x.0 - y.0).abs() <= 1e-9 * (1.0 + (s1 - s0)));
+        pts.dedup_by(|x, y| x.1 == y.1 && (x.0 - y.0).abs() <= tol::REL * (1.0 + (s1 - s0)));
         let curve = iso_curve(&surf, dir, val)?;
         for w in pts.windows(2) {
             let ((sa, va), (sb, vb)) = (w[0], w[1]);
-            if sb - sa <= 1e-9 * (1.0 + (s1 - s0)) {
+            if sb - sa <= tol::REL * (1.0 + (s1 - s0)) {
                 continue;
             }
             let mid = 0.5 * (sa + sb);
@@ -335,7 +336,7 @@ fn split_in(b: &mut Body, fi: usize, dir: Dir, values: &[f64]) -> Option<Vec<usi
                 let mut edge = a.edge;
                 let (lo, hi) = (a.t[0].min(a.t[1]), a.t[0].max(a.t[1]));
                 let e = &b.edges[edge];
-                if a.deg && ((lo - e.t[0]).abs() > 1e-12 || (hi - e.t[1]).abs() > 1e-12) {
+                if a.deg && ((lo - e.t[0]).abs() > tol::ROUNDOFF_FINE || (hi - e.t[1]).abs() > tol::ROUNDOFF_FINE) {
                     // A piece of a pole: an edge of its own.
                     let key = (edge, (lo * 1e9).round() as i64, (hi * 1e9).round() as i64);
                     edge = match deg_pieces.iter().find(|(k, _)| *k == key) {
@@ -370,7 +371,7 @@ fn split_in(b: &mut Body, fi: usize, dir: Dir, values: &[f64]) -> Option<Vec<usi
         }
     }
     let area: f64 = out.iter().map(|&g| super::mass::face_area(b, g).0).sum();
-    if !((area - area0).abs() <= 1e-6 * area0.abs().max(1e-12)) {
+    if !((area - area0).abs() <= tol::REL_POINT * area0.abs().max(tol::DEGENERATE)) {
         return None;
     }
     for s in &mut b.shells {
@@ -398,10 +399,10 @@ pub fn split_angle(b: &mut Body, max_angle: f64) -> Result<Vec<usize>> {
         }
         let Some(((u0, u1), _)) = face_uv_box(b, fi) else { return Ok(vec![fi]) };
         let span = u1 - u0;
-        if span <= max_angle * (1.0 + 1e-9) {
+        if span <= max_angle * (1.0 + tol::REL) {
             return Ok(vec![fi]);
         }
-        let n = (span / max_angle - 1e-9).ceil() as usize;
+        let n = (span / max_angle - tol::ROUNDOFF).ceil() as usize;
         let values: Vec<f64> = (1..n).map(|k| u0 + span * k as f64 / n as f64).collect();
         split_face_iso(b, fi, Dir::U, &values)
     })
@@ -423,7 +424,7 @@ fn closed_across(b: &Body, fi: usize, dir: Dir) -> bool {
                         Dir::U => ((p.x - q.x).abs(), (p.y - q.y).abs()),
                         Dir::V => ((p.y - q.y).abs(), (p.x - q.x).abs()),
                     };
-                    dp > 1e-6 && other <= 1e-6 * (1.0 + dp)
+                    dp > tol::POINT && other <= tol::REL_POINT * (1.0 + dp)
                 }
             })
     })
@@ -463,10 +464,10 @@ fn c0_knots(degree: usize, knots: &[f64], a: f64, b: f64, tangent: &dyn Fn(f64, 
     distinct_knots(knots, a, b)
         .into_iter()
         .filter(|&k| {
-            let m = knots.iter().filter(|x| (**x - k).abs() <= 1e-12 * (1.0 + k.abs())).count();
+            let m = knots.iter().filter(|x| (**x - k).abs() <= tol::REL_FINE * (1.0 + k.abs())).count();
             m >= degree && {
                 let (l, r) = (tangent(k, false), tangent(k, true));
-                (l - r).norm() > 1e-9 * (l.norm() + r.norm())
+                (l - r).norm() > tol::REL * (l.norm() + r.norm())
             }
         })
         .collect()
@@ -474,9 +475,9 @@ fn c0_knots(degree: usize, knots: &[f64], a: f64, b: f64, tangent: &dyn Fn(f64, 
 
 /// The distinct knot values strictly inside (a, b).
 fn distinct_knots(knots: &[f64], a: f64, b: f64) -> Vec<f64> {
-    let eps = 1e-9 * (1.0 + (b - a).abs());
+    let eps = tol::REL * (1.0 + (b - a).abs());
     let mut out: Vec<f64> = knots.iter().copied().filter(|&k| k > a + eps && k < b - eps).collect();
-    out.dedup_by(|x, y| (*x - *y).abs() <= 1e-12 * (1.0 + x.abs()));
+    out.dedup_by(|x, y| (*x - *y).abs() <= tol::REL_FINE * (1.0 + x.abs()));
     out
 }
 
@@ -498,12 +499,12 @@ pub fn split_continuity(b: &mut Body) -> Result<Vec<usize>> {
         let Some(((u0, u1), (v0, v1))) = face_uv_box(b, fi) else { return Ok(vec![fi]) };
         let (vm, um) = (0.5 * (v0 + v1), 0.5 * (u0 + u1));
         let du = |u: f64, right: bool| {
-            let h = 1e-7 * (u1 - u0).max(1e-12);
+            let h = 1e-7 * (u1 - u0).max(tol::DEGENERATE);
             let s = if right { u + h } else { u - h };
             n.ders1(s, vm).1
         };
         let dv = |v: f64, right: bool| {
-            let h = 1e-7 * (v1 - v0).max(1e-12);
+            let h = 1e-7 * (v1 - v0).max(tol::DEGENERATE);
             let s = if right { v + h } else { v - h };
             n.ders1(um, s).2
         };
@@ -590,7 +591,7 @@ fn split_edges_at(b: &mut Body, at: &dyn Fn(&NurbsCurve, f64, f64) -> Vec<f64>) 
             && !e.degenerate
         {
             let (lo, hi) = n.range();
-            if e.t[0] > lo + 1e-12 * (hi - lo) || e.t[1] < hi - 1e-12 * (hi - lo) {
+            if e.t[0] > lo + tol::REL_FINE * (hi - lo) || e.t[1] < hi - tol::REL_FINE * (hi - lo) {
                 e.curve = Curve::Nurbs(std::sync::Arc::new(n.restricted(e.t[0], e.t[1])));
             }
         }
@@ -631,8 +632,8 @@ pub fn count_c0(b: &Body) -> (usize, usize) {
             Surface::Nurbs(n) => {
                 let ((u0, u1), (v0, v1)) = n.range();
                 let mid = (0.5 * (u0 + u1), 0.5 * (v0 + v1));
-                !c0_knots(n.du, &n.ku, u0, u1, &|u, r| n.ders1(u + if r { 1e-9 } else { -1e-9 } * (u1 - u0), mid.1).1).is_empty()
-                    || !c0_knots(n.dv, &n.kv, v0, v1, &|v, r| n.ders1(mid.0, v + if r { 1e-9 } else { -1e-9 } * (v1 - v0)).2).is_empty()
+                !c0_knots(n.du, &n.ku, u0, u1, &|u, r| n.ders1(u + if r { tol::REL } else { -tol::REL } * (u1 - u0), mid.1).1).is_empty()
+                    || !c0_knots(n.dv, &n.kv, v0, v1, &|v, r| n.ders1(mid.0, v + if r { tol::REL } else { -tol::REL } * (v1 - v0)).2).is_empty()
             }
             _ => false,
         })

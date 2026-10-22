@@ -71,7 +71,7 @@ pub fn face_from_surface(s: &Surface, domain: Option<UvBox>) -> Result<Body> {
     let size = s.patch_bbox((u0, u1), (v0, v1)).diagonal().max(tol::ROUNDOFF);
     // Sides and poles meet within this: approximate poles and seams of B-splines read from
     // other systems are off by more than exact geometry (1e-6 of the face's size).
-    let tol = (1e-6 * size).max(super::tol::CONFUSION);
+    let tol = (tol::REL_POINT * size).max(super::tol::CONFUSION);
     // Longest distance between samples of two curves of the surface, or of one curve from its
     // first point.
     let spread = |f: &dyn Fn(f64) -> (P3, P3)| (0..=16).map(|i| f(i as f64 / 16.0)).map(|(p, q)| (p - q).norm()).fold(0.0, f64::max);

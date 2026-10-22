@@ -88,7 +88,7 @@ fn one_chart(surf: &Surface, boundary: &[Vec<Arc>], cuts: &[Arc]) -> (Vec<Vec<Ar
     }
     // Where the boundary's vertices are.
     let ends: Vec<(usize, P2)> = loops.iter().flatten().flat_map(|a| [(a.v[0], a.uv_at(0.0)), (a.v[1], a.uv_at(1.0))]).collect();
-    let tol = 1e-6 * (1.0 + (hi - lo).norm());
+    let tol = tol::REL_POINT * (1.0 + (hi - lo).norm());
     let meets = |v: usize, q: P2| ends.iter().any(|(w, p)| *w == v && (p - q).norm() <= tol);
     let out_cuts = cuts
         .iter()
@@ -151,7 +151,7 @@ pub fn split_face(surf: &Surface, flip: bool, boundary: &[Vec<Arc>], cuts: &[Arc
                 }
                 let s = (q - u0).dot(&(u1 - u0)) / (span * span);
                 let off = (u0 + (u1 - u0) * s - q).norm();
-                (s > tol::REL && s < 1.0 - tol::REL && off < 1e-6 * (1.0 + span)).then_some(s)
+                (s > tol::REL && s < 1.0 - tol::REL && off < tol::REL_POINT * (1.0 + span)).then_some(s)
             })
             .collect();
         fr.sort_by(f64::total_cmp);
@@ -344,7 +344,7 @@ pub fn split_face(surf: &Surface, flip: bool, boundary: &[Vec<Arc>], cuts: &[Arc
         let pn = o(a0.uv_at(0.5 + 1e-3));
         let d = pn - pm;
         let d = if d.norm() > 0.0 { d.normalize() } else { d };
-        let q = pm + V2::new(-d.y, d.x) * (size * 1e-6);
+        let q = pm + V2::new(-d.y, d.x) * (size * tol::REL_POINT);
         let _ = &pts;
         let mut best: Option<(f64, usize)> = None;
         for (i, (_, op, a)) in outers.iter().enumerate() {

@@ -652,7 +652,7 @@ pub fn ortho_projection(scale: f32) -> Projection {
         scaling_mode: ScalingMode::WindowSize,
         scale,
         near: 0.0,
-        far: camera::CAMERA_FAR,
+        far: camera::camera_far(scale),
         ..OrthographicProjection::default_3d()
     })
 }
@@ -1821,6 +1821,7 @@ pub fn apply_view_to_camera(
             let origin = Vec2::new(c.x / size.x, 1.0 - c.y / size.y);
             if o.scale != v.scale || o.viewport_origin != origin {
                 o.scale = v.scale;
+                o.far = camera::camera_far(v.scale);
                 o.viewport_origin = origin;
             }
         }

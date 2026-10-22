@@ -106,7 +106,7 @@ impl Writer {
                 let (p, q) = (pts[i].coords - c, pts[(i + 1) % pts.len()].coords - c);
                 nrm += p.cross(&q);
             }
-            if nrm.norm() > 1e-12 && pts.iter().all(|p| (p.coords - c).dot(&nrm.normalize()).abs() < tol::ROUNDOFF) { Some(nrm.normalize()) } else { None }
+            if nrm.norm() > tol::DEGENERATE && pts.iter().all(|p| (p.coords - c).dot(&nrm.normalize()).abs() < tol::ROUNDOFF) { Some(nrm.normalize()) } else { None }
         };
         let closed = (pts[0] - pts[k]).norm() < tol::ROUNDOFF;
         let mut p = vec![k.to_string(), m.to_string(), (planar.is_some() as u8).to_string(), (closed as u8).to_string(), (!n.is_rational() as u8).to_string(), "0".into()];
@@ -132,7 +132,7 @@ impl Writer {
                 let z = x.cross(y);
                 let tm = self.matrix(cc, x, y, &z);
                 let (s, e) = ((t0.cos() * r, t0.sin() * r), (t1.cos() * r, t1.sin() * r));
-                let full = (t1 - t0 - TAU).abs() < 1e-12;
+                let full = (t1 - t0 - TAU).abs() < tol::ANGULAR_FINE;
                 let e = if full { s } else { e };
                 let de = self.add(100, 0, vec!["0.".into(), "0.".into(), "0.".into(), real(s.0), real(s.1), real(e.0), real(e.1)]);
                 self.ent(de).transform = tm;
@@ -607,7 +607,7 @@ fn parse(bytes: &[u8]) -> R<File> {
         let params = if params.is_empty() { params } else { params[1..].to_vec() };
         ents.insert(de, DirEnt { kind, form, transform, label, params, independent });
     }
-    let resolution = gt.get(18).and_then(|t| t.f()).filter(|r| *r > 0.0).unwrap_or(1e-6) * scale;
+    let resolution = gt.get(18).and_then(|t| t.f()).filter(|r| *r > 0.0).unwrap_or(tol::POINT) * scale;
     Ok(File { ents, scale, resolution })
 }
 
@@ -948,11 +948,7 @@ fn name_of(f: &File, e: &DirEnt, nparams: usize) -> String {
 }
 
 /// A piece of a trimmed surface's boundary: a 3D curve from `a` to `b`.
-struct Seg {
-    c: Curve,
-    a: P3,
-    b: P3,
-}
+type Seg = super::xbuild::LooseSeg;
 
 impl<'a> Reader<'a> {
     /// The 3D segments of a model space boundary curve, composites (102) flattened, in order.
@@ -968,7 +964,7 @@ impl<'a> Reader<'a> {
             }
             110 => {
                 let (a, b) = (pl.point(&P3::new(n(0)?, n(1)?, n(2)?)), pl.point(&P3::new(n(3)?, n(4)?, n(5)?)));
-                if (b - a).norm() > 1e-12 {
+                if (b - a).norm() > tol::DEGENERATE {
                     out.push(Seg { c: Curve::line(a, b).0, a, b });
                 }
             }
@@ -991,7 +987,7 @@ impl<'a> Reader<'a> {
                 let (v0, v1) = (n(vb).unwrap_or(r0).clamp(r0, r1), n(vb + 1).unwrap_or(r1).clamp(r0, r1));
                 let c = match &c {
                     // A sub-range of the spline: trim it, so its ends are the segment's.
-                    Curve::Nurbs(nc) if v0 > r0 + 1e-12 || v1 < r1 - 1e-12 => Curve::Nurbs(Arc::new(Curve::Nurbs(nc.clone()).to_nurbs(v0.min(v1), v0.max(v1)))),
+                    Curve::Nurbs(nc) if v0 > r0 + tol::ROUNDOFF_FINE || v1 < r1 - tol::ROUNDOFF_FINE => Curve::Nurbs(Arc::new(Curve::Nurbs(nc.clone()).to_nurbs(v0.min(v1), v0.max(v1)))),
                     _ => c,
                 };
                 let (a, b) = (c.point(v0), c.point(v1));
@@ -1022,7 +1018,7 @@ impl<'a> Reader<'a> {
                         let unscale = |p: &P3| P3::new(p.x / s, p.y / s, 0.0);
                         let (pa, pb) = (unscale(&sg.a), unscale(&sg.b));
                         let c2 = sg.c.transformed(&Affine { m: nalgebra::Matrix3::identity() / s, t: V3::zeros() });
-                        let (t0, t1) = super::xbuild::edge_range(&c2, &pa, &pb, (pa - pb).norm() < 1e-12).unwrap_or((0.0, 1.0));
+                        let (t0, t1) = super::xbuild::edge_range(&c2, &pa, &pb, (pa - pb).norm() < tol::DEGENERATE).unwrap_or((0.0, 1.0));
                         let ts: Vec<f64> = (0..=32).map(|i| t0 + (t1 - t0) * i as f64 / 32.0).collect();
                         let pts: Vec<P3> = ts.iter().map(|&t| {
                             let q = c2.point(t);
@@ -1059,26 +1055,6 @@ impl<'a> Reader<'a> {
     }
 }
 
-/// The boundary of a spline surface's whole parameter range, counter-clockwise in (u, v).
-fn natural_boundary(surf: &Surface) -> R<Vec<Seg>> {
-    let Surface::Nurbs(n) = surf else { return Err("an untrimmed surface that is not a spline".into()) };
-    let ((u0, u1), (v0, v1)) = n.range();
-    let (nu, nv) = (n.cps.len(), n.cps[0].len());
-    let row = |j: usize| NurbsCurve { degree: n.du, knots: n.ku.clone(), cps: (0..nu).map(|i| n.cps[i][j]).collect() };
-    let col = |i: usize| NurbsCurve { degree: n.dv, knots: n.kv.clone(), cps: n.cps[i].clone() };
-    let mut out = Vec::new();
-    for (c, (pa, pb)) in [
-        (row(0), ((u0, v0), (u1, v0))),
-        (col(nu - 1), ((u1, v0), (u1, v1))),
-        (row(nv - 1), ((u1, v1), (u0, v1))),
-        (col(0), ((u0, v1), (u0, v0))),
-    ] {
-        let (a, b) = (surf.eval(pa.0, pa.1), surf.eval(pb.0, pb.1));
-        out.push(Seg { c: Curve::Nurbs(Arc::new(c)), a, b });
-    }
-    Ok(out)
-}
-
 /// Sews trimmed (144) and bounded (143) surfaces — faces with no topology — by their boundary
 /// curves: vertices welded within the file's resolution, segments matched to shared edges,
 /// each connected group of faces a shell (a solid when closed). The faces' orientation is then
@@ -1103,31 +1079,8 @@ fn read_trimmed(f: &File, out: &mut ReadModel) {
         .fold(0.0, f64::max)
         .max(1e-3);
     let tol = (f.resolution * 10.0).clamp(tol::REL * size, 1e-4 * size).max(tol::ROUNDOFF);
-    let mut r = Reader { f, xb: XBuilder::new(), verts: HashMap::new(), edges: HashMap::new() };
-    let mut weld: Vec<P3> = Vec::new();
-    let mut cells: HashMap<[i64; 3], Vec<usize>> = HashMap::new();
-    let mut vertex = |xb: &mut XBuilder, p: P3| -> usize {
-        let k = [p.x, p.y, p.z].map(|c| (c / tol).floor() as i64);
-        for dx in -1..=1 {
-            for dy in -1..=1 {
-                for dz in -1..=1 {
-                    if let Some(v) = cells.get(&[k[0] + dx, k[1] + dy, k[2] + dz]) {
-                        for &i in v {
-                            if (weld[i] - p).norm() <= tol {
-                                return i;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        weld.push(p);
-        let i = xb.vertex(p);
-        cells.entry(k).or_default().push(i);
-        i
-    };
-    let mut by_pair: HashMap<(usize, usize), Vec<usize>> = HashMap::new();
-    let mut faces = Vec::new();
+    let r = Reader { f, xb: XBuilder::new(), verts: HashMap::new(), edges: HashMap::new() };
+    let mut loose = Vec::new();
     for de in des {
         let e = &f.ents[&de];
         let res = (|| -> R<(Surface, Vec<Vec<Seg>>)> {
@@ -1135,7 +1088,7 @@ fn read_trimmed(f: &File, out: &mut ReadModel) {
             let mut loops = Vec::new();
             if e.kind == 144 {
                 let (n1, n2, pto) = (Reader::ptr(e, 1)?, Reader::ptr(e, 2)?, Reader::ptr(e, 3)?);
-                loops.push(if n1 == 0 || pto == 0 { natural_boundary(&surf)? } else { r.boundary(pto, &surf)? });
+                loops.push(if n1 == 0 || pto == 0 { super::xbuild::natural_boundary(&surf)? } else { r.boundary(pto, &surf)? });
                 for k in 0..n2 {
                     loops.push(r.boundary(Reader::ptr(e, 4 + k)?, &surf)?);
                 }
@@ -1148,94 +1101,14 @@ fn read_trimmed(f: &File, out: &mut ReadModel) {
             }
             Ok((surf, loops))
         })();
-        let (surf, seg_loops) = match res {
-            Ok(x) => x,
-            Err(err) => {
-                out.warnings.push(format!("IGES face {de}: {err}"));
-                continue;
-            }
-        };
-        let mut loops = Vec::new();
-        for segs in seg_loops {
-            let mut l = Vec::new();
-            for sg in segs {
-                let (va, vb) = (vertex(&mut r.xb, sg.a), vertex(&mut r.xb, sg.b));
-                let Some(ne) = r.xb.edge(sg.c, va, vb) else { continue };
-                // The same edge as one of another face's?
-                let key = (va.min(vb), va.max(vb));
-                let found = by_pair.get(&key).and_then(|cands| {
-                    let new = &r.xb.body.edges[ne];
-                    let mid = new.point(new.mid_t());
-                    cands.iter().copied().find(|&c| {
-                        let old = &r.xb.body.edges[c];
-                        (old.point(old.curve.closest(&mid, old.t[0], old.t[1])) - mid).norm() < tol * 10.0
-                    })
-                });
-                match found {
-                    Some(c) => {
-                        let fwd = if va != vb {
-                            r.xb.body.edges[c].v[0] == va
-                        } else {
-                            let (new, old) = (&r.xb.body.edges[ne], &r.xb.body.edges[c]);
-                            new.curve.tangent(new.t[0]).dot(&old.curve.tangent(old.t[0])) > 0.0
-                        };
-                        r.xb.body.edges.pop();
-                        l.push((c, fwd));
-                    }
-                    None => {
-                        by_pair.entry(key).or_default().push(ne);
-                        l.push((ne, true));
-                    }
-                }
-            }
-            if !l.is_empty() {
-                loops.push(l);
-            }
-        }
-        if !loops.is_empty() {
-            faces.push(r.xb.face(XFace { surf, sense: true, loops }));
+        match res {
+            Ok(x) => loose.push(x),
+            Err(err) => out.warnings.push(format!("IGES face {de}: {err}")),
         }
     }
-    // Shells: faces connected through shared edges; closed when every edge is used twice.
-    let mut parent: Vec<usize> = (0..faces.len()).collect();
-    fn find(p: &mut [usize], x: usize) -> usize {
-        let mut r = x;
-        while p[r] != r {
-            r = p[r];
-        }
-        p[x] = r;
-        r
-    }
-    let mut users: HashMap<usize, Vec<usize>> = HashMap::new();
-    for (k, &fi) in faces.iter().enumerate() {
-        for &(e, _) in r.xb.faces[fi].loops.iter().flatten() {
-            users.entry(e).or_default().push(k);
-        }
-    }
-    for us in users.values() {
-        for w in us.windows(2) {
-            let (a, b) = (find(&mut parent, w[0]), find(&mut parent, w[1]));
-            parent[a.max(b)] = a.min(b);
-        }
-    }
-    let mut groups: Vec<(usize, Vec<usize>)> = Vec::new();
-    for k in 0..faces.len() {
-        let g = find(&mut parent, k);
-        match groups.iter_mut().find(|x| x.0 == g) {
-            Some(x) => x.1.push(k),
-            None => groups.push((g, vec![k])),
-        }
-    }
-    for (_, ks) in groups {
-        let closed = ks.iter().all(|&k| r.xb.faces[faces[k]].loops.iter().flatten().all(|&(e, _)| users[&e].len() == 2));
-        let sh = r.xb.shell(ks.iter().map(|&k| faces[k]).collect(), closed);
-        if closed {
-            r.xb.solid(vec![sh]);
-        }
-    }
-    r.xb.unoriented = true;
-    let (body, w) = r.xb.finish();
+    let (body, w) = super::xbuild::sew_loose(loose, tol, true);
     out.warnings.extend(w);
+
     // Each solid a part; the loose sheets together.
     for piece in super::exchange::split_into_solids(&body) {
         if !piece.faces.is_empty() {

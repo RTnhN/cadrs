@@ -26,12 +26,15 @@ env:
 
 jobs:
   # Per push and pull request: the kernel's builds without the test feature, its clippy gate and
-  # its fast tests (unit tests and conformance); any failed step fails the job. It is the merge
-  # requirement for main and kernel-10: mark "Kernel (checks, clippy, fast tests)" as a required
-  # status check in both branches' protection rules (Settings > Branches), with "Build and test
-  # (Linux)" for main.
+  # a fast subset of the gate (tools/kernel_gate.sh: the unit tests, conformance, smlib_booleans,
+  # validity, determinism and every 4th runnable case of OCCT's boolean suite, generated from
+  # OCCT's test scripts without the dataset, classified as the nightly gate does: a regression,
+  # a stale or panicking known failure, a hang or a crash fails it); any failed step fails the
+  # job. It is the merge requirement for main and kernel-10: mark "Kernel (checks, clippy, fast
+  # gate)" as a required status check in both branches' protection rules (Settings > Branches),
+  # with "Build and test (Linux)" for main.
   kernel:
-    name: Kernel (checks, clippy, fast tests)
+    name: Kernel (checks, clippy, fast gate)
     if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -59,8 +62,30 @@ jobs:
       - name: Clippy (kernel)
         run: tools/kernel_clippy.sh
 
-      - name: Test (kernel unit tests, conformance)
-        run: cargo test -r -p cadrs_kernel --lib --test conformance
+      - name: OCCT test scripts (7.8.1)
+        run: |
+          git clone --depth 1 --branch V7_8_1 --filter=blob:none --sparse \
+            https://github.com/Open-Cascade-SAS/OCCT "$GITHUB_WORKSPACE/../occt"
+          git -C "$GITHUB_WORKSPACE/../occt" sparse-checkout set tests/boolean
+          python3 -I tools/occt_to_rust.py "$GITHUB_WORKSPACE/../occt/tests" crates/cadrs_kernel/tests boolean
+
+      # The checks ran above (--no-checks); the slice of occt_boolean is the same cases each run.
+      - name: Fast gate (lib, conformance, smlib_booleans, validity, determinism, occt_boolean 1 in 4)
+        env:
+          RUST_TEST_THREADS: 4
+        run: |
+          tools/kernel_gate.sh --tree . --commit "$GITHUB_SHA" --out "$GITHUB_WORKSPACE/kernel_gate" \
+            --no-checks --only lib,conformance,smlib_booleans,validity,determinism,occt_boolean \
+            --sample occt_boolean=4 --hang 600
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kernel-fast-gate
+          path: |
+            kernel_gate/results.json
+            kernel_gate/summary.txt
+            kernel_gate/stderr.log
 
   # Nightly, for main and kernel-10: tools/kernel_gate.sh on a clean export of the branch, with
   # OCCT's DRAW suites regenerated from OCCT 7.8.1's test scripts and its 7.8.0 dataset, and every

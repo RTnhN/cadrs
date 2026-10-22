@@ -87,7 +87,7 @@ impl Helix {
     fn angle_of(&self, p: &P3, near: f64) -> f64 {
         let w = p - self.o;
         let a = w.dot(&self.e2).atan2(w.dot(&self.e1));
-        let guess = if self.c.abs() > 1e-12 { w.dot(&self.a) / self.c } else { near };
+        let guess = if self.c.abs() > tol::DEGENERATE { w.dot(&self.a) / self.c } else { near };
         a + ((guess - a) / TAU).round() * TAU
     }
     /// The screw motion that turns the helix by `phi` along itself.
@@ -137,7 +137,7 @@ fn fit_helix(pts: &[P3], tans: &[V3], tol: f64) -> Option<Helix> {
     let k = (0..3).min_by(|&x, &y| eig.eigenvalues[x].total_cmp(&eig.eigenvalues[y])).unwrap();
     let mut a = eig.eigenvectors.column(k).into_owned().normalize();
     // The tangents must turn round it (not a straight line or a plane curve's single direction).
-    if eig.eigenvalues.iter().filter(|e| **e > 1e-6 * n as f64).count() < 2 {
+    if eig.eigenvalues.iter().filter(|e| **e > tol::REL_POINT * n as f64).count() < 2 {
         return None;
     }
     if mean.dot(&a) < 0.0 {
@@ -175,7 +175,7 @@ fn fit_helix(pts: &[P3], tans: &[V3], tol: f64) -> Option<Helix> {
         num += (t - st) * (z - sz);
         den += (t - st) * (t - st);
     }
-    if den < 1e-12 {
+    if den < tol::DEGENERATE {
         return None;
     }
     let c = num / den;
@@ -325,13 +325,13 @@ impl PathSweep {
         let mut kmax: f64 = 0.0;
         for i in 0..fine {
             let ds = (pts[i + 1] - pts[i]).norm();
-            if ds > 1e-12 {
+            if ds > tol::ROUNDOFF_FINE {
                 kmax = kmax.max(tans[i].angle(&tans[i + 1]) / ds);
             }
         }
         let length: f64 = (0..fine).map(|i| (pts[i + 1] - pts[i]).norm()).sum();
         let k_rail = kmax * (1.0 + reach * kmax);
-        let by_err = if k_rail > 1e-12 {
+        let by_err = if k_rail > tol::ROUNDOFF_FINE {
             let h = (384.0 * 1e-8 / k_rail.powi(3)).powf(0.25);
             length / h
         } else {
@@ -667,7 +667,7 @@ fn iso_pcurve(n0: &NurbsCurve, c: &Curve, t0: f64, t1: f64, ua: f64, ub: f64, v:
         for k in 0..ts.len() - 1 {
             let tm = 0.5 * (ts[k] + ts[k + 1]);
             let q = fit.point(tm);
-            if (n0.point(q.x) - c.point(tm)).norm() > 1e-12 * (1.0 + c.point(tm).coords.norm()) {
+            if (n0.point(q.x) - c.point(tm)).norm() > tol::REL_FINE * (1.0 + c.point(tm).coords.norm()) {
                 ins.push(tm);
             }
         }

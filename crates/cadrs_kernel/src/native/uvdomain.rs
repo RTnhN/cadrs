@@ -28,7 +28,7 @@ impl<'a> FaceDomain<'a> {
         }
         let area: f64 = polys.iter().map(|p| polygon_area(p)).sum();
         let boxed = (ub.1 - ub.0) * (vb.1 - vb.0);
-        let whole = boxed > 0.0 && area.abs() < 1e-12 * boxed;
+        let whole = boxed > 0.0 && area.abs() < tol::REL_FINE * boxed;
         Self { surf, polys, ub, vb, whole }
     }
 
@@ -57,7 +57,7 @@ impl<'a> FaceDomain<'a> {
         };
         for u in shifts(u, self.ub, self.surf.u_periodic()) {
             for v in shifts(v, self.vb, self.surf.v_periodic()) {
-                match in_face(self.polys, self.surf, P2::new(u, v), 1e-6) {
+                match in_face(self.polys, self.surf, P2::new(u, v), tol::POINT) {
                     InFace::Inside => return true,
                     InFace::Boundary if !strict => return true,
                     _ => {}

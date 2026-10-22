@@ -21,6 +21,7 @@ use crate::native::math::*;
 use crate::native::profile::{MergedFace, Piece};
 use crate::native::topo::Body;
 use crate::{BoolOp, KernelError, Loop, Origin, Plane, Profile, Region, Result};
+use crate::native::tol;
 
 /// The largest corner (radians) a sweep joins: past it the mitre plane runs almost along the
 /// path.
@@ -56,7 +57,7 @@ pub(crate) fn join(faces: &[MergedFace], chains: &[Vec<Piece>], acc: &Tagged, ne
         Join::None => crate::native::features::tagged_union(acc, next),
         Join::Mitre => {
             let m = (c.d1 + c.d2).normalize();
-            let ext = reach * (theta * 0.5).tan() * 1.05 + reach * 1e-3 + 1e-6;
+            let ext = reach * (theta * 0.5).tan() * 1.05 + reach * 1e-3 + tol::POINT;
             let size = 4.0 * reach + 2.0 * ext;
             // The piece before: extended along d1, cut at the mitre plane.
             let ea = Tagged::from_built(sweep_full(faces, chains, &Prism { plane: c.end, dir: c.d1 }, 0.0, ext, false, true)?);
@@ -71,7 +72,7 @@ pub(crate) fn join(faces: &[MergedFace], chains: &[Vec<Piece>], acc: &Tagged, ne
             crate::native::features::tagged_union(&a, &b)
         }
         Join::Round => {
-            let axis = c.d1.cross(&c.d2).try_normalize(1e-12).ok_or_else(|| failed("no turn"))?;
+            let axis = c.d1.cross(&c.d2).try_normalize(tol::DEGENERATE).ok_or_else(|| failed("no turn"))?;
             // Towards the inside of the turn, square to d1.
             let inward = (c.d2 - c.d1 * c.d2.dot(&c.d1)).normalize();
             let cap = crate::native::kernel::subset(&acc.body, &ends, false);
@@ -136,7 +137,7 @@ fn boundary_points(b: &Body, f: usize) -> Vec<P3> {
 /// The names of the face of `t` beside the caps `ends` along the cap edge through `p` (a
 /// point of an edge of the caps, as cut).
 fn side_tags(t: &Tagged, ends: &[usize], p: &P3, reach: f64) -> Vec<Origin> {
-    let tol = 1e-6 * (1.0 + reach);
+    let tol = tol::REL_POINT * (1.0 + reach);
     let b = &t.body;
     let edge = ends.iter().flat_map(|&f| b.faces[f].loops.iter().flatten()).map(|c| c.edge).find(|&e| {
         let ed = &b.edges[e];

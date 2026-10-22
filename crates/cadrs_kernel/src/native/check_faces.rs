@@ -25,6 +25,7 @@ use super::classify::{face_polygons, in_face, periodic_candidates, InFace};
 use super::math::*;
 use super::surface::Surface;
 use super::topo::Body;
+use super::tol;
 
 /// Points sampled along each crossing curve.
 const SAMPLES: usize = 24;
@@ -77,7 +78,7 @@ pub fn face_crossings(b: &Body) -> Vec<String> {
         .filter_map(|&(i, j)| {
             let ov = Bbox { min: boxes[i].min.sup(&boxes[j].min), max: boxes[i].max.inf(&boxes[j].max) };
             // Clear of the boundaries by the faces' tolerances, and by a part in 10⁶ of the body.
-            let margin = 2.0 * tol[i].max(tol[j]) + 1e-6 * size;
+            let margin = 2.0 * tol[i].max(tol[j]) + tol::REL_POINT * size;
             let p = crossing(b, &polys, (i, j), &ov, margin)?;
             Some(format!("faces {i} and {j} cross away from their edges near ({:.6}, {:.6}, {:.6})", p.x, p.y, p.z))
         })
@@ -147,7 +148,7 @@ fn sided_roots(e: &super::topo::Edge, t0: f64, t1: f64, s: &Surface) -> Vec<f64>
         let ((da, ga), (db, gb)) = (ds[k], ds[k + 1]);
         // A sign change of the offset where the feet are true (the point's distance is its
         // offset along the normal), not a jump between two feet on different sheets.
-        if !(da * db < 0.0) || ga > 1.01 * da.abs() + 1e-9 || gb > 1.01 * db.abs() + 1e-9 {
+        if !(da * db < 0.0) || ga > 1.01 * da.abs() + tol::ROUNDOFF || gb > 1.01 * db.abs() + tol::ROUNDOFF {
             continue;
         }
         let (mut lo, mut hi, mut dlo) = (ts[k], ts[k + 1], da);

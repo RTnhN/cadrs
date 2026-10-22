@@ -262,11 +262,7 @@ impl MateConnectorFeature {
         let o = self.origin.as_ref()?;
         match o {
             ConnectorOrigin::Face(f) => find_face(parts, f).map(|(p, _)| p.id),
-            ConnectorOrigin::Edge(e) => parts
-                .iter()
-                .find(|p| p.id == e.part && p.solid.edge(&e.edge).is_some())
-                .or_else(|| parts.iter().find(|p| p.solid.edge(&e.edge).is_some()))
-                .map(|p| p.id),
+            ConnectorOrigin::Edge(e) => find_edge(parts, e).map(|(p, _)| p.id),
             _ => o.part(),
         }
     }
@@ -366,7 +362,7 @@ pub fn between_point(b: &ConnectorOrigin, p: Vec3, features: &[Feature], parts: 
             if planar { onto_plane(&f) } else { onto_line(&f) }
         }
         ConnectorOrigin::Edge(e) => {
-            let circle = parts.iter().find_map(|q| q.solid.edge(&e.edge)).is_some_and(|x| x.circle.is_some());
+            let circle = find_edge(parts, e).is_some_and(|(q, i)| q.solid.edges[i].circle.is_some());
             if circle { f.origin } else { onto_line(&f) }
         }
         _ => f.origin,
@@ -420,16 +416,12 @@ pub fn origin_frame(o: &ConnectorOrigin, features: &[Feature], parts: &[Part]) -
             Err("A mate connector needs a flat face or a face of revolution".into())
         }
         ConnectorOrigin::Edge(e) => {
-            let part = parts
-                .iter()
-                .find(|p| p.id == e.part && p.solid.edge(&e.edge).is_some())
-                .or_else(|| parts.iter().find(|p| p.solid.edge(&e.edge).is_some()))
-                .ok_or_else(lost)?;
-            let edge = part.solid.edge(&e.edge).ok_or_else(lost)?;
+            let (part, i) = find_edge(parts, e).ok_or_else(lost)?;
+            let edge = &part.solid.edges[i];
             if let Some(c) = edge.circle {
                 // Z out of the flat face the circle bounds (a hole's rim on a top face: up).
                 let mut z = c.normal;
-                for fname in e.edge.faces {
+                for fname in edge.name.faces {
                     if let Some(pl) = part.solid.face(&fname).and_then(|x| x.plane) {
                         let n = pl.normal();
                         if dot(n, z).abs() > 1.0 - 1e-6 {
@@ -473,6 +465,24 @@ pub fn origin_frame(o: &ConnectorOrigin, features: &[Feature], parts: &[Part]) -
             Ok(PlaneFrame { origin: frame.to_world(at), u: frame.u, v: frame.v })
         }
     }
+}
+
+/// The part and display edge an edge reference is on now: by name (its faces by any of their
+/// names, a split face's piece or a re-indexed edge nearest where it was) on any part, then
+/// where it was (the kernel may have made the edge between differently named faces).
+pub fn find_edge<'a>(parts: &'a [Part], e: &EdgeRef) -> Option<(&'a Part, usize)> {
+    let ordered: Vec<&Part> = parts.iter().filter(|p| p.id == e.part).chain(parts.iter().filter(|p| p.id != e.part)).collect();
+    for by_name in [true, false] {
+        for p in &ordered {
+            if let Ok((i, how)) = p.solid.resolve_edge(&e.edge, |x| Some(x.distance(e.seed))) {
+                if by_name && how == cadrs_kernel::naming::Match::Geometric {
+                    continue;
+                }
+                return Some((p, i));
+            }
+        }
+    }
+    None
 }
 
 /// The part and display face a face reference is on now (by name, then where it was).

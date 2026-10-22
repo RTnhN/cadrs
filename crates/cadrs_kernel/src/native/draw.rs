@@ -126,6 +126,9 @@ pub struct NbShapes {
 struct OcctOrder {
     edges: Vec<P3>,
     faces: Vec<P3>,
+    /// The edges (indices into `edges`) OCCT makes degenerate (a vertex on a revolution's
+    /// axis): matched where the body has such edges too, else left out.
+    degenerate: Vec<usize>,
 }
 
 thread_local! {
@@ -154,6 +157,7 @@ fn revolved_order(ax: &Ax3, r1: f64, r2: f64, h: f64) -> OcctOrder {
     OcctOrder {
         edges: vec![w(-rhi, 0.0, hi), w((r1 + r2) / 2.0, 0.0, (lo + hi) / 2.0), w(-rlo, 0.0, lo)],
         faces: vec![w(0.0, (r1 + r2) / 2.0, (lo + hi) / 2.0), w(0.0, 0.0, hi), w(0.0, 0.0, lo)],
+        degenerate: vec![],
     }
 }
 
@@ -210,7 +214,7 @@ fn one_axis_order(ax: &Ax3, bot: (f64, f64), top: (f64, f64), mid: (f64, f64), c
         faces.push(w(r, 0.0, z));
         faces.push(w(r, angle, z));
     }
-    OcctOrder { edges, faces }
+    OcctOrder { edges, faces, degenerate: vec![] }
 }
 
 /// OCCT's order for a face swept along a path (BRepSweep): the shell holds each wire edge's
@@ -228,6 +232,7 @@ fn sweep_order(loops: &[Vec<DEdge>], at: &dyn Fn(&P3, f64) -> P3, swept: &dyn Fn
         }
     };
     let mut faces: Vec<P3> = Vec::new();
+    let mut degenerate: Vec<usize> = Vec::new();
     let mid = |e: &DEdge| e.curve.point(0.5 * (e.t0 + e.t1));
     for l in loops {
         for e in l {
@@ -240,6 +245,10 @@ fn sweep_order(loops: &[Vec<DEdge>], at: &dyn Fn(&P3, f64) -> P3, swept: &dyn Fn
             for v in [a, b] {
                 if swept(&v) {
                     add(&mut edges, at(&v, 0.5));
+                } else if !edges.iter().any(|q| (q - v).norm() < 1e-9 * (1.0 + v.coords.norm())) {
+                    // A vertex on the axis: OCCT's degenerate edge there (BRepSweep_Rotation).
+                    degenerate.push(edges.len());
+                    edges.push(v);
                 }
             }
             add(&mut edges, m);
@@ -258,7 +267,7 @@ fn sweep_order(loops: &[Vec<DEdge>], at: &dyn Fn(&P3, f64) -> P3, swept: &dyn Fn
             faces.push(at(&c, s));
         }
     }
-    OcctOrder { edges, faces }
+    OcctOrder { edges, faces, degenerate }
 }
 
 fn err(m: &str) -> KernelError {
@@ -289,6 +298,41 @@ pub fn ax2_x(v: &V3) -> V3 {
 pub fn check_rel(what: &str, got: f64, want: f64) -> Result<()> {
     let ok = if want == 0.0 { got.abs() < 1e-9 } else { ((got - want) / want).abs() <= 1e-2 };
     if ok { Ok(()) } else { Err(err(&format!("the {what} is {got}, expected {want}"))) }
+}
+
+/// The marker of [`sub`]'s error: the shape exploded has other topology than OCCT's.
+pub const TOPOLOGY_MISMATCH: &str = "topology mismatch";
+
+/// Sub-shape `n` (1-based, as DRAW names it: `s_7`) of the `subs` that exploding the shape
+/// `of` into `kind` gave. When there are fewer, the shape's topology differs from OCCT's (an
+/// edge or face split or merged differently before this command): a failure that says so,
+/// not an index out of bounds.
+pub fn sub<'a>(subs: &'a [Shape], n: usize, of: &str, kind: &str) -> Result<&'a Shape> {
+    n.checked_sub(1).and_then(|i| subs.get(i)).ok_or_else(|| {
+        err(&format!("{TOPOLOGY_MISMATCH}: explode {of} gave {} {kind}, the script expects at least {n} ({of}_{n})", subs.len()))
+    })
+}
+
+/// The marker of [`known_failure`]'s panic for a known failure that panicked.
+pub const KNOWN_FAILURE_PANICKED: &str = "a known failure panicked";
+
+/// Ends a generated known failure (`tools/occt_known_failures.txt`): `r` is the case's run
+/// under `catch_unwind`. A known failure must still fail, and fail by returning its error:
+/// this panics (failing the test) when the case passes ("a known failure now passes", the
+/// gate's STALE) or when it panicked, unless the panic's message contains `expected_panic`
+/// (the list's `[panic: …]`; the gate's PANIC otherwise, a bug the known failure would hide).
+pub fn known_failure(case: &str, r: std::thread::Result<Result<()>>, expected_panic: Option<&str>) {
+    match r {
+        Ok(Ok(())) => panic!("a known failure now passes: remove `{case}` from tools/occt_known_failures.txt"),
+        Ok(Err(e)) => eprintln!("known failure {case}: {e:?}"),
+        Err(payload) => {
+            let msg = payload.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| payload.downcast_ref::<String>().cloned()).unwrap_or_default();
+            match expected_panic {
+                Some(want) if msg.contains(want) => eprintln!("known failure {case}: panicked as expected: {msg}"),
+                _ => panic!("{KNOWN_FAILURE_PANICKED}: {case}: {msg}"),
+            }
+        }
+    }
 }
 
 impl NativeKernel {
@@ -795,7 +839,7 @@ impl NativeKernel {
             w(xm, y0, z0), w(xm, y0, z1), w(xm, y1, z0), w(xm, y1, z1),
         ];
         let faces = vec![w(x0, ym, zm), w(x1, ym, zm), w(xm, y0, zm), w(xm, y1, zm), w(xm, ym, z0), w(xm, ym, z1)];
-        set_order(r.bodies[0], OcctOrder { edges, faces });
+        set_order(r.bodies[0], OcctOrder { edges, faces, degenerate: vec![] });
         Ok(Shape::Body(r.bodies[0]))
     }
 
@@ -1119,7 +1163,7 @@ impl NativeKernel {
                     // Nearly planar (within its tolerance, as OCCT's FindSurface): offset in the
                     // plane fitting it best, the wire projected onto it.
                     let pts: Vec<P3> = edges.iter().flat_map(|e| (0..=16).map(move |i| e.curve.point(e.t0 + (e.t1 - e.t0) * i as f64 / 16.0))).collect();
-                    let (o, n) = super::offset2d::best_plane(&pts, 1e-2).ok_or_else(|| err("mkoffset: the wire isn't planar"))?;
+                    let (o, n) = super::offset::wire::best_plane(&pts, 1e-2).ok_or_else(|| err("mkoffset: the wire isn't planar"))?;
                     Plane { origin: o, x_dir: nalgebra::Unit::new_normalize(ax2_x(&n)), normal: nalgebra::Unit::new_normalize(n) }
                 } else {
                     Plane { origin: P3::new(0.0, 0.0, z), x_dir: V3::x_axis(), normal: V3::z_axis() }
@@ -1130,7 +1174,7 @@ impl NativeKernel {
         let mt = to_w.m.transpose();
         let to_l = Affine { m: mt, t: -(mt * to_w.t) };
         let local: Vec<(Curve, f64, f64)> = edges.iter().map(|e| (e.curve.transformed(&to_l), e.t0, e.t1)).collect();
-        let loops = super::offset2d::offset_wire(&local, d)?;
+        let loops = super::offset::wire::offset_wire(&local, d)?;
         let wires: Vec<Shape> = loops
             .into_iter()
             .map(|l| Shape::Wire(l.into_iter().map(|p| DEdge { curve: p.c.transformed(&to_w), t0: p.t0, t1: p.t1 }).collect()))
@@ -1290,7 +1334,7 @@ impl NativeKernel {
             let mut es: Vec<DEdge> = r.free_edges.into_iter().map(|(curve, t0, t1)| DEdge { curve, t0, t1 }).collect();
             return Ok(if es.len() == 1 && !r.wires { Shape::Edge(es.remove(0)) } else { Shape::Wire(es) });
         };
-        let edges = r.edge_order;
+        let (edges, degenerate) = (r.edge_order, r.degenerate_order);
         let nf = body.faces.len();
         let b = self.insert(body);
         let infos = self.faces(b)?;
@@ -1304,7 +1348,7 @@ impl NativeKernel {
                     s.eval(u, v)
                 })
                 .collect();
-            set_order(b, OcctOrder { edges, faces });
+            set_order(b, OcctOrder { edges, faces, degenerate });
         }
         Ok(Shape::Body(b))
     }
@@ -1322,6 +1366,46 @@ impl NativeKernel {
         body.solids.clear();
         super::boolean::assemble_shells(&mut body)?;
         Ok(Shape::Body(self.insert(body)))
+    }
+
+    // --- Evolved solids --------------------------------------------------------------------
+
+    /// `evolved result -s spine -p profile [-a] [-solid] [-v]` (`BRepOffsetAPI_MakeEvolved`):
+    /// the profile wire swept along the closed planar spine, offsets of the spine rounded at
+    /// their outer corners ([`super::evolved::evolved_wire`]), measured from the spine point
+    /// nearest it (`-v`, `volume`; without it, `-a` (`global`) puts the profile in the frame of
+    /// the spine's plane, OCCT's own choice of axes, taken as the same). An open profile is closed by flat lids
+    /// at its ends; without `-solid` the lids are left out (the faces of the solid off them).
+    pub fn evolved(&mut self, spine: &Shape, profile: &Shape, global: bool, solid: bool, volume: bool) -> Result<Shape> {
+        if !volume && !global {
+            return Err(KernelError::Unsupported("evolved profiles placed on the spine (DRAW's evolved without -a or -v)"));
+        }
+        let (path, closed) = self.path_of(spine)?;
+        if !closed {
+            return Err(KernelError::Unsupported("evolved solids along open spines"));
+        }
+        let edges: Vec<(Curve, f64, f64)> = path.into_iter().map(|s| if s.rev { (s.c, s.t1, s.t0) } else { (s.c, s.t0, s.t1) }).collect();
+        let dedges: Vec<DEdge> = edges.iter().map(|(c, t0, t1)| DEdge { curve: c.clone(), t0: *t0, t1: *t1 }).collect();
+        let plane = fit_plane(&dedges).ok_or_else(|| err("evolved: the spine isn't planar"))?;
+        let face = face_profile(&Shape::Face { plane, loops: vec![dedges] })?;
+        let (prof, _) = self.path_of(profile)?;
+        let prof: Vec<(Curve, f64, f64)> = prof.into_iter().map(|s| if s.rev { (s.c, s.t1, s.t0) } else { (s.c, s.t0, s.t1) }).collect();
+        let r = super::evolved::evolved_wire(self, &edges, &face, &prof)?;
+        if solid || r.lids.is_empty() {
+            return Ok(Shape::Body(r.body));
+        }
+        // The faces off the lids.
+        let body = self.get(r.body)?;
+        let size = body.verts.iter().map(|v| v.p.coords.norm()).fold(1.0, f64::max);
+        let on_lid = |f: &super::topo::Face| match &f.surf {
+            super::surface::Surface::Plane { f: fr } => {
+                let n = fr.x.cross(&fr.y);
+                r.lids.iter().any(|(o, up)| n.cross(up).norm() < super::tol::POINT && (fr.o - o).dot(up).abs() < super::tol::POINT * size)
+            }
+            _ => false,
+        };
+        let faces = body.faces.iter().enumerate().filter(|(_, f)| !on_lid(f)).map(|(i, _)| Shape::BodyFace(r.body, FaceId(i as u64))).collect();
+        Ok(Shape::Compound(faces))
     }
 
     // --- Pipes ------------------------------------------------------------------------------
@@ -1424,7 +1508,67 @@ impl NativeKernel {
             Shape::Body(b) => !self.get(*b)?.faces.is_empty(),
             _ => false,
         };
-        self.buildsweep(spine, &[(profile, false, false)], "CF", [0.0, 0.0, 1.0], 'M', solid)
+        let out = self.buildsweep(spine, &[(profile, false, false)], "CF", [0.0, 0.0, 1.0], 'M', solid)?;
+        if let (Shape::Face { plane, loops }, Shape::Body(b)) = (profile, &out)
+            && let [outer] = &loops[..]
+        {
+            let (path, _) = self.path_of(spine)?;
+            let reversed = plane.normal.dot(&path[0].dir(0.0)) < 0.0;
+            if let Some(o) = self.pipe_order(*b, outer, reversed) {
+                set_order(*b, o);
+            }
+        }
+        Ok(out)
+    }
+
+    /// OCCT's order for a face of one loop piped from where it sits (BRepFill_Pipe, through
+    /// BRepFill_Sweep): the start face, each lateral face in the order the loop is explored
+    /// (backwards from its first edge when the face looks back along the spine: `reversed`),
+    /// then the end face; a lateral face's wire is the edge swept from the profile edge's first
+    /// vertex, the profile edge at the start, the edge swept from its last vertex, the profile
+    /// edge at the end. Found on the body itself: `None` when its start isn't the profile.
+    fn pipe_order(&self, b: BodyId, outer: &[DEdge], reversed: bool) -> Option<OcctOrder> {
+        let body = self.get(b).ok()?;
+        let infos = self.faces(b).ok()?;
+        let size = body.verts.iter().fold(Bbox::empty(), |mut bb, v| {
+            bb.add(&v.p);
+            bb
+        });
+        let tol = super::tol::CONFUSION * (1.0 + size.diagonal());
+        let mid = |i: usize| body.edges[i].point(body.edges[i].mid_t());
+        let near_edge = |p: &P3| (0..body.edges.len()).filter(|&i| !body.edges[i].degenerate).min_by(|&x, &y| (mid(x) - p).norm().total_cmp(&(mid(y) - p).norm())).filter(|&i| (mid(i) - p).norm() < tol);
+        let near_vert = |p: &P3| (0..body.verts.len()).find(|&v| (body.verts[v].p - p).norm() < tol);
+        let n = outer.len();
+        let walk: Vec<usize> = if reversed { std::iter::once(0).chain((1..n).rev()).collect() } else { (0..n).collect() };
+        let ef = body.edge_faces();
+        let starts: Vec<usize> = walk.iter().map(|&k| near_edge(&outer[k].curve.point(0.5 * (outer[k].t0 + outer[k].t1)))).collect::<Option<_>>()?;
+        // The start face holds every start edge.
+        let cap = (0..body.faces.len()).find(|&f| starts.iter().all(|&e| ef[e].contains(&f)))?;
+        let mut edges: Vec<usize> = starts.clone();
+        let mut faces = vec![cap];
+        let push = |edges: &mut Vec<usize>, e: usize| {
+            if !edges.contains(&e) {
+                edges.push(e);
+            }
+        };
+        for (j, &k) in walk.iter().enumerate() {
+            let s = starts[j];
+            let lat = *ef[s].iter().find(|&&f| f != cap)?;
+            faces.push(lat);
+            let ring: Vec<usize> = body.faces[lat].loops.iter().flatten().map(|c| c.edge).filter(|&e| e != s && !body.edges[e].degenerate).collect();
+            let (v0, v1) = (near_vert(&outer[k].start())?, near_vert(&outer[k].end())?);
+            let swept_from = |v: usize| ring.iter().copied().find(|&e| body.edges[e].v.contains(&v));
+            let a = swept_from(v0)?;
+            let z = if v1 == v0 { a } else { swept_from(v1)? };
+            let end = ring.iter().copied().find(|&e| e != a && e != z)?;
+            push(&mut edges, a);
+            push(&mut edges, z);
+            push(&mut edges, end);
+        }
+        let end_cap = (0..body.faces.len()).find(|f| !faces.contains(f))?;
+        faces.push(end_cap);
+        let all = (0..body.edges.len()).filter(|&i| !body.edges[i].degenerate).count();
+        (edges.len() == all && faces.len() == body.faces.len()).then(|| OcctOrder { edges: edges.into_iter().map(mid).collect(), faces: faces.into_iter().map(|f| infos[f].center).collect(), degenerate: vec![] })
     }
 
     /// `mksweep spine; setsweep mode; addsweep section [-T] [-R]; buildsweep result [-M|-C|-R]
@@ -1864,7 +2008,7 @@ impl NativeKernel {
 
     /// `offset name surface d`: the surface moved `d` along its normal (Su × Sv).
     pub fn offset_surf(&self, s: &DSurface, d: f64) -> Result<DSurface> {
-        let o = super::local::offset_surface(&s.s, true, d).ok_or(KernelError::Unsupported("this offset surface"))?;
+        let o = super::offset::sharp::offset_surface(&s.s, true, d).ok_or(KernelError::Unsupported("this offset surface"))?;
         let base = match &s.base {
             Some((b, d0)) => (b.clone(), d0 + d),
             None => (s.s.clone(), d),
@@ -1895,7 +2039,7 @@ impl NativeKernel {
         let domain = domain.map(|(u, v)| (clamp(u, pu0, pu1, s.s.u_periodic()), clamp(v, pv0, pv1, s.s.v_periodic())));
         // An offset past its base's Bézier range: the base extended there, offset.
         let reoffset = match (&s.base, domain) {
-            (Some((b, d)), Some(dom)) => super::face_build::extended_past(b, dom).and_then(|e| super::local::offset_surface(&e, true, *d)),
+            (Some((b, d)), Some(dom)) => super::face_build::extended_past(b, dom).and_then(|e| super::offset::sharp::offset_surface(&e, true, *d)),
             _ => None,
         };
         let sheet = super::face_build::face_from_surface(reoffset.as_ref().unwrap_or(&s.s), domain)?;
@@ -1924,14 +2068,28 @@ impl NativeKernel {
         let tris: Vec<[P3; 3]> = quads.iter().flat_map(|q| [[q[0], q[1], q[2]], [q[0], q[2], q[3]]]).collect();
         let size = (dx.abs() + dy.abs() + dz.abs()).max(1e-9);
         let b = crate::Kernel::mesh_solid(self, &tris, 1e-9 * size)?;
-        let mid = |a: P3, b: P3| P3::from((a.coords + b.coords) / 2.0);
-        let edges = vec![
-            mid(c(0, 0, 0), c(0, 0, 1)), mid(c(0, 0, 1), c(0, 1, 1)), mid(c(0, 1, 0), c(0, 1, 1)), mid(c(0, 0, 0), c(0, 1, 0)),
-            mid(c(1, 0, 0), c(1, 0, 1)), mid(c(1, 0, 1), c(1, 1, 1)), mid(c(1, 1, 0), c(1, 1, 1)), mid(c(1, 0, 0), c(1, 1, 0)),
-            mid(c(0, 0, 0), c(1, 0, 0)), mid(c(0, 0, 1), c(1, 0, 1)), mid(c(0, 1, 0), c(1, 1, 0)), mid(c(0, 1, 1), c(1, 1, 1)),
+        let pairs = [
+            (c(0, 0, 0), c(0, 0, 1)), (c(0, 0, 1), c(0, 1, 1)), (c(0, 1, 0), c(0, 1, 1)), (c(0, 0, 0), c(0, 1, 0)),
+            (c(1, 0, 0), c(1, 0, 1)), (c(1, 0, 1), c(1, 1, 1)), (c(1, 1, 0), c(1, 1, 1)), (c(1, 0, 0), c(1, 1, 0)),
+            (c(0, 0, 0), c(1, 0, 0)), (c(0, 0, 1), c(1, 0, 1)), (c(0, 1, 0), c(1, 1, 0)), (c(0, 1, 1), c(1, 1, 1)),
         ];
-        let faces = quads.iter().map(|q| P3::from(q.iter().fold(V3::zeros(), |a, p| a + p.coords) / 4.0)).collect();
-        set_order(b, OcctOrder { edges, faces });
+        // A top narrowed to a line or a point has no edges of zero length (OCCT's
+        // BRepPrim_GWedge::HasEdge), and its sides meet in one edge there, counted once; a top of
+        // no area is no face.
+        let tol = super::tol::REL * size;
+        let mut edges: Vec<P3> = Vec::new();
+        for (a, b) in pairs {
+            let m = P3::from((a.coords + b.coords) / 2.0);
+            if (a - b).norm() > tol && !edges.iter().any(|q| (q - m).norm() <= tol) {
+                edges.push(m);
+            }
+        }
+        let faces = quads
+            .iter()
+            .filter(|q| (q[1] - q[0]).cross(&(q[3] - q[0])).norm() + (q[1] - q[2]).cross(&(q[3] - q[2])).norm() > tol * size)
+            .map(|q| P3::from(q.iter().fold(V3::zeros(), |a, p| a + p.coords) / 4.0))
+            .collect();
+        set_order(b, OcctOrder { edges, faces, degenerate: vec![] });
         Ok(Shape::Body(b))
     }
 
@@ -2012,23 +2170,304 @@ impl NativeKernel {
         Ok((pl.origin - profile.plane.origin).dot(&n) / den)
     }
 
+    /// The centre of a feature's profile: the mean of points along its boundary (the line
+    /// through it along the feature finds the limit faces, as BRepFeat's test curve).
+    fn feat_centre(&self, pbase: &Shape) -> Result<P3> {
+        const SAMPLES: usize = 8;
+        let sec = self.section_of(pbase, &V3::z())?;
+        let pts: Vec<P3> = sec.loops.first().into_iter().flatten().flat_map(|e| (0..SAMPLES).map(move |i| e.curve.point(e.t0 + (e.t1 - e.t0) * i as f64 / SAMPLES as f64))).collect();
+        if pts.is_empty() {
+            return Err(err("the feature's profile has no boundary"));
+        }
+        Ok(P3::from(pts.iter().fold(V3::zeros(), |a, p| a + p.coords) / pts.len() as f64))
+    }
+
+    /// The height a feature sweeps to reach everything (BRepFeat's HeightMax): the largest side
+    /// of the box round the base, the profile and the bodies of its limit faces.
+    fn feat_height(&self, base: BodyId, pbase: &Shape, limits: &[BodyId]) -> Result<f64> {
+        let mut bb = crate::Kernel::bounding_box(self, base)?;
+        for &l in limits {
+            let lb = crate::Kernel::bounding_box(self, l)?;
+            bb.min = bb.min.inf(&lb.min);
+            bb.max = bb.max.sup(&lb.max);
+        }
+        for e in self.section_of(pbase, &V3::z())?.loops.iter().flatten() {
+            for p in [e.start(), e.end()] {
+                bb.min = bb.min.inf(&p);
+                bb.max = bb.max.sup(&p);
+            }
+        }
+        Ok((bb.max - bb.min).max().max(super::tol::POINT))
+    }
+
+    /// The surface of a feature's limit face.
+    fn limit_surface(&self, (b, f): (BodyId, FaceId)) -> Result<Surface> {
+        Ok(self.get(b)?.faces.get(f.0 as usize).ok_or_else(|| err("an unknown face"))?.surf.clone())
+    }
+
+    /// Where the line `p + t·d` crosses a feature's limit faces (sorted, with the face crossed
+    /// there): on the faces themselves (BRepFeat's intersector), or, when it misses them all,
+    /// their whole surfaces (OCCT extends a face made from a surface to the surface's bounds).
+    fn limit_crossings(&self, lims: &[(BodyId, FaceId)], p: P3, d: V3, reach: f64) -> Result<Vec<(f64, usize)>> {
+        let tol = super::tol::POINT * (1.0 + reach);
+        let mut on: Vec<(f64, usize)> = Vec::new();
+        let mut all: Vec<(f64, usize)> = Vec::new();
+        for (i, &(b, f)) in lims.iter().enumerate() {
+            let body = self.get(b)?;
+            let face = body.faces.get(f.0 as usize).ok_or_else(|| err("an unknown face"))?;
+            let polys = super::classify::face_polygons(body, face);
+            for (t, u, v) in super::classify::ray_surface(&face.surf, &p, &d, -reach, reach) {
+                all.push((t, i));
+                if super::classify::periodic_candidates(&face.surf, u, v, &polys).into_iter().any(|uv| super::classify::in_face(&polys, &face.surf, uv, tol) != super::classify::InFace::Outside) {
+                    on.push((t, i));
+                }
+            }
+        }
+        let mut ts = if on.is_empty() { all } else { on };
+        ts.sort_by(|a, b| a.0.total_cmp(&b.0));
+        ts.dedup_by(|a, b| (a.0 - b.0).abs() <= tol);
+        Ok(ts)
+    }
+
+    /// A feature's limit (`featperform`'s From or Until) as faces: a face, a compound of faces,
+    /// or every face of a body.
+    fn feat_faces(&mut self, s: &Shape) -> Result<Vec<(BodyId, FaceId)>> {
+        match s {
+            Shape::Compound(v) => {
+                let mut out = Vec::new();
+                for x in v {
+                    out.extend(self.feat_faces(x)?);
+                }
+                Ok(out)
+            }
+            Shape::Body(b) if self.get(*b)?.faces.len() > 1 => Ok((0..self.get(*b)?.faces.len()).map(|i| (*b, FaceId(i as u64))).collect()),
+            _ => Ok(vec![self.feat_face(s)?]),
+        }
+    }
+
+    /// Where along the line `c + t·travel` a feature stops at its limit face, of its crossings
+    /// `ts` (sorted): where it leaves the base's material (a pocket) or enters it (a boss) at
+    /// the face; failing that (the line misses the base there), BRepFeat's choice for a face
+    /// off the base: the last crossing for a pocket, the first for a boss.
+    fn feat_stop(&self, base: BodyId, c: P3, travel: V3, ts: &[f64], fuse: i64, h: f64) -> Result<Option<f64>> {
+        Ok(match self.feat_transition(base, c, travel, ts, fuse == 1, h)? {
+            Some(t) => Some(t),
+            None => if fuse == 1 { ts.first() } else { ts.last() }.copied(),
+        })
+    }
+
+    /// The first of the crossings `ts` along `c + t·travel` where the line enters the base's
+    /// material (`entering`) or leaves it.
+    fn feat_transition(&self, base: BodyId, c: P3, travel: V3, ts: &[f64], entering: bool, h: f64) -> Result<Option<f64>> {
+        let eps = super::tol::REL_POINT * (1.0 + h);
+        for &t in ts {
+            let before = crate::Kernel::classify(self, base, c + travel * (t - eps), eps * super::tol::REL_POINT)? == PointClass::Inside;
+            let after = crate::Kernel::classify(self, base, c + travel * (t + eps), eps * super::tol::REL_POINT)? == PointClass::Inside;
+            if before != after && after == entering {
+                return Ok(Some(t));
+            }
+        }
+        Ok(None)
+    }
+
+    /// A solid on one side of a feature's limit surface, and whether it is the side holding `q`
+    /// (else the other): a half-space box for a plane, the cylinder or sphere itself for those.
+    /// `size` is how far it must reach round `q`.
+    fn limit_side(&mut self, surf: &Surface, q: P3, size: f64) -> Result<(BodyId, bool)> {
+        match surf {
+            Surface::Plane { f } => {
+                let n = f.x.cross(&f.y).normalize();
+                let z = if (q - f.o).dot(&n) >= 0.0 { n } else { -n };
+                let x = f.x.normalize();
+                let foot = q - n * (q - f.o).dot(&n);
+                let ax = Ax3 { origin: foot - x * size - z.cross(&x) * size, z, x };
+                let side = self.box_on(&ax, 2.0 * size, 2.0 * size, size)?;
+                Ok((self.body_of(&side)?, true))
+            }
+            Surface::Cylinder { f, r } => {
+                let z = f.z.normalize();
+                let w = q - f.o;
+                let along = w.dot(&z);
+                let side = self.pcylinder_on(&Ax3 { origin: f.o + z * (along - size), z, x: f.x }, *r, 2.0 * size)?;
+                Ok((self.body_of(&side)?, (w - z * along).norm() < *r))
+            }
+            Surface::Sphere { f, r } => {
+                let side = self.psphere_on(&Ax3 { origin: f.o, z: f.z, x: f.x }, *r)?;
+                Ok((self.body_of(&side)?, (q - f.o).norm() < *r))
+            }
+            Surface::Cone { f, r, a } => {
+                // The cone's nappe from its apex (or `size` below q) to `size` above q.
+                let z = f.z.normalize();
+                let ta = a.tan();
+                let radius = |h: f64| r + h * ta;
+                let zq = (q - f.o).dot(&z);
+                let (mut z0, mut z1) = (zq - size, zq + size);
+                if ta.abs() > super::tol::ANGULAR {
+                    let apex = -r / ta;
+                    if ta > 0.0 { z0 = z0.max(apex) } else { z1 = z1.min(apex) }
+                }
+                if z1 - z0 <= super::tol::POINT {
+                    return Err(KernelError::Unsupported("features up to a cone past its apex"));
+                }
+                let side = self.pcone_on(&Ax3 { origin: f.o + z * z0, z, x: f.x }, radius(z0).max(0.0), radius(z1).max(0.0), z1 - z0)?;
+                let w = q - f.o;
+                let inside = radius(zq) > 0.0 && (w - z * zq).norm() < radius(zq);
+                Ok((self.body_of(&side)?, inside))
+            }
+            _ => Err(KernelError::Unsupported("features up to faces other than planes, cylinders, cones and spheres")),
+        }
+    }
+
+    /// `tool` less the side of the limit surface holding `q` (BRepFeat::Tool's solid); `None`
+    /// when nothing is left.
+    fn feat_cut_side(&mut self, tool: BodyId, surf: &Surface, q: P3, size: f64) -> Result<Option<BodyId>> {
+        let (side, holds_q) = self.limit_side(surf, q, size)?;
+        let op = if holds_q { BoolOp::Subtract } else { BoolOp::Intersect };
+        match crate::Kernel::boolean(self, op, tool, &[side]) {
+            Ok(r) => Ok(Some(r.bodies[0])),
+            Err(KernelError::EmptyResult(_)) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// The solid of a body nearest `p` (the piece of a cut-off feature by its profile).
+    fn nearest_piece(&mut self, body: BodyId, p: P3) -> Result<BodyId> {
+        let pieces = super::exchange::split_into_solids(self.get(body)?);
+        if pieces.len() < 2 {
+            return Ok(body);
+        }
+        let mut best: Option<(f64, BodyId)> = None;
+        for piece in pieces {
+            let id = self.insert(piece);
+            let bb = crate::Kernel::bounding_box(self, id)?;
+            let d = (p.coords.sup(&bb.min.coords).inf(&bb.max.coords) - p.coords).norm();
+            if best.is_none_or(|(bd, _)| d < bd) {
+                best = Some((d, id));
+            }
+        }
+        best.map(|(_, id)| id).ok_or_else(|| err("the feature has no solid"))
+    }
+
+    /// The feature's solid along `dir` from `s0` to `s1` off the profile's plane: a prism, or
+    /// (`dprism`) a drafted one, its walls leaning by the draft angle about the profile's own
+    /// plane (so a drafted prism running both ways tapers on through the profile).
+    fn feat_tool(&mut self, pbase: &Shape, kind: &str, params: [f64; 6], dir: V3, s0: f64, s1: f64) -> Result<BodyId> {
+        let prism = self.feat_extrude(pbase, dir, s0, ExtrudeEnd::Blind(s1 - s0), false, vec![])?;
+        let angle = params[0] * PI / 360.0;
+        if kind != "dprism" || angle.abs() < super::tol::ANGULAR {
+            return Ok(prism);
+        }
+        let plane = self.feat_profile(pbase)?.0.plane;
+        let n = plane.normal.into_inner();
+        // The walls: the faces that aren't square to the profile's normal.
+        let walls: Vec<FaceId> = self.faces(prism)?.into_iter().filter(|f| f.plane.is_none_or(|p| p.normal.dot(&n).abs() < 1.0 - super::tol::ANGULAR)).map(|f| f.id).collect();
+        // The taper is linear along the profile's normal whichever way the prism runs
+        // (LocOpe_DPrism's slanted generator through the profile): pulled along the normal by
+        // the angle's sign.
+        let pull = nalgebra::Unit::new_normalize(n * params[0].signum());
+        let spec = DraftSpec { faces: walls, angle: -angle, pull, neutral: plane.origin, neutral_normal: None, tangent_propagation: false };
+        Ok(crate::Kernel::draft(self, prism, &spec)?.bodies[0])
+    }
+
+    /// A prism or drafted prism up to (`until`) or between (`from`, `until`) faces of any
+    /// surface (BRepFeat's tool cut off by its limit faces' solids): the feature long enough to
+    /// reach past everything, cut off past the until face (at the first crossing of the line
+    /// through the profile's centre for a boss, the last for a pocket) and before the from
+    /// face (its first crossing); the piece by the profile, or between the two, is kept.
+    fn feat_limited(&mut self, base: BodyId, pbase: &Shape, kind: &str, params: [f64; 6], dir: V3, fuse: i64, from: Option<&[(BodyId, FaceId)]>, until: &[(BodyId, FaceId)]) -> Result<BodyId> {
+        let c = self.feat_centre(pbase)?;
+        let bodies: Vec<BodyId> = from.unwrap_or(&[]).iter().chain(until).map(|l| l.0).collect();
+        let h = self.feat_height(base, pbase, &bodies)?;
+        let reach = FEAT_REACH * h;
+        let tu = self.limit_crossings(until, c, dir, reach)?;
+        let same = from == Some(until);
+        let sens = if !same && !tu.is_empty() && tu.iter().all(|t| t.0 < 0.0) { -1.0 } else { 1.0 };
+        let travel = dir * sens;
+        let tf = match from {
+            Some(f) => self.limit_crossings(f, c, dir, reach)?,
+            None => Vec::new(),
+        };
+        // How far the long feature runs: on from the profile, or both ways for a pair of
+        // limits on either side of it.
+        let both = from.is_some() && (same || (!tf.is_empty() && tf.iter().all(|t| t.0 * sens < 0.0)));
+        let (s0, s1) = match (kind, from.is_some(), both) {
+            ("dprism", true, _) => (-h, h),
+            ("dprism", false, _) => (0.0, h),
+            (_, true, true) => (-1.5 * h, 1.5 * h),
+            _ => (0.0, 2.0 * h),
+        };
+        let mut tool = self.feat_tool(pbase, kind, params, travel, s0, s1)?;
+        let eps = super::tol::POINT * (1.0 + h);
+        let mut ts_u: Vec<(f64, usize)> = tu.iter().map(|&(t, i)| (t * sens, i)).collect();
+        ts_u.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let times: Vec<f64> = ts_u.iter().map(|t| t.0).collect();
+        let tu_stop = self.feat_stop(base, c, travel, &times, fuse, h)?.ok_or_else(|| err("the feature never meets its until face"))?;
+        let iu = ts_u.iter().find(|t| t.0 == tu_stop).map_or(0, |t| t.1);
+        let su = self.limit_surface(until[iu])?;
+        tool = self.feat_cut_side(tool, &su, c + travel * (tu_stop + eps), reach)?.ok_or_else(|| err("the feature lies past its until face"))?;
+        let mut keep = c;
+        if let Some(from) = from {
+            let mut ts_f: Vec<(f64, usize)> = tf.iter().map(|&(t, i)| (t * sens, i)).collect();
+            ts_f.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let times: Vec<f64> = ts_f.iter().map(|t| t.0).collect();
+            // It starts where it enters the base's material (a pocket) or leaves it (a boss).
+            let first = *times.first().ok_or_else(|| err("the feature never meets its from face"))?;
+            let tf_start = self.feat_transition(base, c, travel, &times, fuse != 1, h)?.unwrap_or(first);
+            let i = ts_f.iter().find(|t| t.0 == tf_start).map_or(0, |t| t.1);
+            let sf = self.limit_surface(from[i])?;
+            tool = self.feat_cut_side(tool, &sf, c + travel * (tf_start - eps), reach)?.ok_or_else(|| err("the feature lies before its from face"))?;
+            keep = c + travel * (0.5 * (tf_start + tu_stop));
+        }
+        self.nearest_piece(tool, keep)
+    }
+
     /// `featprism|featrevol|featdprism base pbase skface …; featperform kind result [from] [until]`
     /// (BRepFeat_MakePrism, MakeRevol, MakeDPrism): the profile face `pbase` (on the base's face
     /// `skface`) swept through everything (no limits: a prism both ways, a revolution all
     /// round), up to `until`, or from `from` to `until`; added to the base or cut from it.
-    pub fn featperform(&mut self, base: &Shape, pbase: &Shape, kind: &str, params: [f64; 6], fuse: i64, from: Option<&Shape>, until: Option<&Shape>) -> Result<Shape> {
+    pub fn featperform(&mut self, base: &Shape, pbase: &Shape, skface: &Shape, kind: &str, params: [f64; 6], fuse: i64, from: Option<&Shape>, until: Option<&Shape>) -> Result<Shape> {
         let b = self.body_of(base)?;
+        // From (or Until) the sketch face itself: the feature up to the other (BRepFeat glues
+        // it to the sketch face).
+        let (from, until) = match (from, until) {
+            (Some(f), Some(u)) if same_face(f, skface) => (None, Some(u)),
+            (Some(f), Some(u)) if same_face(u, skface) => (None, Some(f)),
+            other => other,
+        };
         let tool = match kind {
             "prism" | "dprism" => {
                 let dir = if kind == "prism" { V3::new(params[0], params[1], params[2]).normalize() } else { self.feat_profile(pbase)?.0.plane.normal.into_inner() };
+                let fl = from.map(|f| self.feat_faces(f)).transpose()?;
+                let ul = until.map(|u| self.feat_faces(u)).transpose()?;
+                let simple = fl.iter().chain(ul.iter()).all(|l| l.len() == 1 && self.plane_of(l[0].0, l[0].1).is_some());
+                if !simple {
+                    // Up to (or between) curved faces or several faces: the long feature cut
+                    // off at them.
+                    let ul = ul.ok_or_else(|| err("featperform: a From face needs an Until face"))?;
+                    let tool = self.feat_limited(b, pbase, kind, params, dir, fuse, fl.as_deref(), &ul)?;
+                    return self.feat_apply(base, tool, fuse);
+                }
                 if kind == "dprism" {
-                    // Up to a planar face: its height there.
                     let height = match (from, until) {
+                        // Through all: both ways, the draft running on through the profile.
+                        (None, None) => {
+                            let h = self.feat_height(b, pbase, &[])?;
+                            let tool = self.feat_tool(pbase, kind, params, dir, -h, h)?;
+                            return self.feat_apply(base, tool, fuse);
+                        }
+                        // Up to a planar face: its height there.
                         (None, Some(u)) => {
                             let (ub, uf) = self.feat_face(u)?;
                             self.feat_reach(pbase, &dir, ub, uf)?
                         }
-                        _ => return Err(KernelError::Unsupported("drafted prisms through all or between faces")),
+                        // Between planar faces: the drafted prism between their heights.
+                        (Some(f), Some(u)) => {
+                            let ((fb, ff), (ub, uf)) = (self.feat_face(f)?, self.feat_face(u)?);
+                            let (d0, d1) = (self.feat_reach(pbase, &dir, fb, ff)?, self.feat_reach(pbase, &dir, ub, uf)?);
+                            let tool = self.feat_tool(pbase, kind, params, dir, d0.min(d1), d0.max(d1))?;
+                            return self.feat_apply_limited(base, tool, fuse);
+                        }
+                        (Some(_), None) => return Err(err("featperform: a From face needs an Until face")),
                     };
                     return self.featperformval(base, pbase, kind, params, fuse, height);
                 }
@@ -2287,16 +2726,69 @@ impl NativeKernel {
     }
 
     /// `featperformval kind result value until` (PerformUntilHeight): a prism or drafted prism
-    /// `value` long from the planar face `until` on.
+    /// `value` long from the profile, towards the face `until` (the way the line through the
+    /// profile's centre meets it), cut off at it if it gets there: at the first crossing for a
+    /// boss, the last for a pocket.
     pub fn featperformval_until(&mut self, base: &Shape, pbase: &Shape, kind: &str, params: [f64; 6], fuse: i64, value: f64, until: &Shape) -> Result<Shape> {
+        let b = self.body_of(base)?;
+        let limit = self.feat_face(until)?;
+        if kind == "revol" {
+            return self.featperformval_revol_until(base, pbase, params, fuse, value, limit);
+        }
         let dir = match kind {
             "prism" => V3::new(params[0], params[1], params[2]).normalize(),
             "dprism" => self.feat_profile(pbase)?.0.plane.normal.into_inner(),
-            _ => return Err(KernelError::Unsupported("revolved features up to a face and an angle")),
+            _ => return Err(KernelError::Unsupported("this kind of form feature")),
         };
-        let (ub, uf) = self.feat_face(until)?;
-        let start = self.feat_reach(pbase, &dir, ub, uf)?;
-        self.featperformval_from(base, pbase, kind, params, fuse, value, Some(start))
+        let surf = self.limit_surface(limit)?;
+        let c = self.feat_centre(pbase)?;
+        let h = self.feat_height(b, pbase, &[limit.0])?;
+        let ts: Vec<f64> = self.limit_crossings(&[limit], c, dir, FEAT_REACH * h)?.into_iter().map(|t| t.0).collect();
+        let sens = if !ts.is_empty() && ts.iter().all(|t| *t < 0.0) { -1.0 } else { 1.0 };
+        let travel = dir * sens;
+        let mut tool = self.feat_tool(pbase, kind, params, travel, 0.0, value)?;
+        let ahead: Vec<f64> = ts.iter().map(|t| t * sens).filter(|t| *t > 0.0).collect();
+        let stop = self.feat_stop(b, c, travel, &ahead, fuse, h)?;
+        if let Some(t) = stop
+            && t < value.abs()
+        {
+            let q = c + travel * (t + super::tol::POINT * (1.0 + h));
+            tool = self.feat_cut_side(tool, &surf, q, FEAT_REACH * h)?.ok_or_else(|| err("the feature lies past its limit face"))?;
+            tool = self.nearest_piece(tool, c)?;
+        }
+        self.feat_apply(base, tool, fuse)
+    }
+
+    /// `featperformval revol result angle until` (PerformUntilAngle): the revolution `angle`
+    /// (degrees) round, cut off at the face `until` where the circle the profile's centre turns
+    /// on first meets it (a boss) or last (a pocket).
+    fn featperformval_revol_until(&mut self, base: &Shape, pbase: &Shape, params: [f64; 6], fuse: i64, value: f64, limit: (BodyId, FaceId)) -> Result<Shape> {
+        let axis = Axis { origin: P3::new(params[0], params[1], params[2]), dir: nalgebra::Unit::try_new(V3::new(params[3], params[4], params[5]), super::tol::REL).ok_or_else(|| err("a null axis"))? };
+        let a = value.to_radians();
+        let turn = if a < 0.0 { -axis.dir.into_inner() } else { axis.dir.into_inner() };
+        let (profile, faces) = self.feat_profile(pbase)?;
+        let spec = RevolveSpec { faces, ..RevolveSpec::solid(Axis { origin: axis.origin, dir: nalgebra::Unit::new_normalize(turn) }, Some(a.abs().min(TAU))) };
+        let mut tool = crate::Kernel::revolve_with(self, &profile, &spec)?.bodies[0];
+        // The circle the profile's centre turns on.
+        let c = self.feat_centre(pbase)?;
+        let foot = axis.origin + turn * (c - axis.origin).dot(&turn);
+        let r = (c - foot).norm();
+        if r > super::tol::POINT {
+            let x = (c - foot) / r;
+            let circle = Curve::Circle { c: foot, x, y: turn.cross(&x), r };
+            let surf = self.limit_surface(limit)?;
+            let mut ts = super::ssi::curve_surface(&circle, 0.0, a.abs().min(TAU), &surf);
+            ts.sort_by(f64::total_cmp);
+            ts.retain(|t| *t > super::tol::ANGULAR);
+            if let Some(&t) = if fuse == 1 { ts.first() } else { ts.last() } {
+                let b = self.body_of(base)?;
+                let h = self.feat_height(b, pbase, &[limit.0])?;
+                let q = circle.point(t + super::tol::POINT * (1.0 + h) / r);
+                tool = self.feat_cut_side(tool, &surf, q, FEAT_REACH * h)?.ok_or_else(|| err("the feature lies past its limit face"))?;
+                tool = self.nearest_piece(tool, circle.point(super::tol::POINT * (1.0 + h) / r))?;
+            }
+        }
+        self.feat_apply(base, tool, fuse)
     }
 
     fn featperformval_from(&mut self, base: &Shape, pbase: &Shape, kind: &str, params: [f64; 6], fuse: i64, value: f64, start: Option<f64>) -> Result<Shape> {
@@ -2316,7 +2808,8 @@ impl NativeKernel {
                     // The walls: the faces that aren't square to the profile's normal.
                     let walls: Vec<FaceId> = self.faces(prism)?.into_iter().filter(|f| f.plane.is_none_or(|p| p.normal.dot(&n).abs() < 1.0 - 1e-9)).map(|f| f.id).collect();
                     let o = self.feat_profile(pbase)?.0.plane.origin + n * s0;
-                    let pull = nalgebra::Unit::new_normalize(n * value.signum());
+                    // (As feat_tool: the taper along the normal by the angle's sign.)
+                    let pull = nalgebra::Unit::new_normalize(n * params[0].signum());
                     let spec = DraftSpec { faces: walls, angle: -angle, pull, neutral: o, neutral_normal: None, tangent_propagation: false };
                     crate::Kernel::draft(self, prism, &spec)?.bodies[0]
                 }
@@ -2341,6 +2834,30 @@ impl NativeKernel {
             Shape::Body(b) => Ok(*b),
             _ => Err(KernelError::Unsupported("booleans of shapes other than solids")),
         }
+    }
+
+    /// The edges of a shape that isn't a body's (an edge, a wire, a planar face's loops, a
+    /// compound of them), each once.
+    fn loose_edges_of(s: &Shape) -> Option<Vec<DEdge>> {
+        let mut out: Vec<DEdge> = Vec::new();
+        let mut add = |e: &DEdge| {
+            let m = e.curve.point(0.5 * (e.t0 + e.t1));
+            if !out.iter().any(|o| (o.curve.point(0.5 * (o.t0 + o.t1)) - m).norm() <= super::tol::CONFUSION) {
+                out.push(e.clone());
+            }
+        };
+        match s {
+            Shape::Edge(e) => add(e),
+            Shape::Wire(w) => w.iter().for_each(add),
+            Shape::Face { loops, .. } => loops.iter().flatten().for_each(add),
+            Shape::Compound(v) => {
+                for x in v {
+                    Self::loose_edges_of(x)?.iter().for_each(&mut add);
+                }
+            }
+            _ => return None,
+        }
+        Some(out)
     }
 
     /// A shape's edges, when it is edges (a wire, an edge).
@@ -2383,9 +2900,10 @@ impl NativeKernel {
                 _ => return Err(KernelError::Unsupported("booleans of edges with this shape")),
             },
         };
-        // A fuse keeps a wire's pieces where the other argument runs along them too; a loose
-        // edge's only where it doesn't (OCCT's compound holds the wire as rebuilt).
-        let wire_b = matches!(b, Shape::Wire(_));
+        // A fuse keeps a wire's pieces where the other argument, a wire too, runs along them;
+        // else only where it doesn't (OCCT's compound holds each wire as rebuilt, so a stretch
+        // two wires share is in both; a loose edge's shared stretch is the wire's).
+        let wire_b = matches!(a, Shape::Wire(_)) && matches!(b, Shape::Wire(_));
         let r = edge_boolean(op, &edges, &other, wire_b).ok_or(KernelError::Unsupported("a fuse of arguments of different dimensions"))?;
         if r.is_empty() {
             return Ok(Shape::Empty);
@@ -2532,7 +3050,7 @@ impl NativeKernel {
                 let body = self.get(*b)?.transformed(m);
                 let nb = self.insert(body);
                 if let Some(o) = order_of(*b) {
-                    set_order(nb, OcctOrder { edges: o.edges.iter().map(|p| m.point(p)).collect(), faces: o.faces.iter().map(|p| m.point(p)).collect() });
+                    set_order(nb, OcctOrder { edges: o.edges.iter().map(|p| m.point(p)).collect(), faces: o.faces.iter().map(|p| m.point(p)).collect(), degenerate: o.degenerate.clone() });
                 }
                 Shape::Body(nb)
             }
@@ -2595,6 +3113,9 @@ impl NativeKernel {
             }
             return Ok(out);
         }
+        if let Some(es) = Self::loose_edges_of(s) {
+            return Ok(es.into_iter().map(Shape::Edge).collect());
+        }
         let b = self.body_of(s)?;
         let body = self.get(b)?;
         let mut ids: Vec<usize> = (0..body.edges.len()).filter(|&i| !body.edges[i].degenerate).collect();
@@ -2607,9 +3128,29 @@ impl NativeKernel {
             if std::env::var_os("CADRS_ORDER_DEBUG").is_some() {
                 eprintln!("explode e: OCCT order has {} edges, the body {} ({} not degenerate)", o.edges.len(), body.edges.len(), ids.len());
             }
+            let mid = |i: usize| body.edges[i].point(body.edges[i].mid_t());
             if o.edges.len() == ids.len() {
-                let mid = |i: usize| body.edges[i].point(body.edges[i].mid_t());
                 ids = o.edges.iter().map(|p| *ids.iter().min_by(|&&x, &&y| (mid(x) - p).norm().total_cmp(&(mid(y) - p).norm())).unwrap()).collect();
+            } else if o.edges.len() > ids.len() && o.edges.len() <= body.edges.len() {
+                // Some of OCCT's degenerate edges (a cone's apex) but not all of ours: each
+                // reference point takes the nearest edge not yet taken, when that takes every edge
+                // that isn't degenerate.
+                let mut taken: Vec<usize> = Vec::new();
+                for p in &o.edges {
+                    if let Some(i) = (0..body.edges.len()).filter(|i| !taken.contains(i)).min_by(|&x, &y| (mid(x) - p).norm().total_cmp(&(mid(y) - p).norm())) {
+                        taken.push(i);
+                    }
+                }
+                if ids.iter().all(|i| taken.contains(i)) {
+                    ids = taken;
+                } else if o.edges.len() - o.degenerate.len() == ids.len() {
+                    // The body has none of them: the order without.
+                    let kept: Vec<&P3> = o.edges.iter().enumerate().filter(|(i, _)| !o.degenerate.contains(i)).map(|(_, p)| p).collect();
+                    ids = kept.iter().map(|p| *ids.iter().min_by(|&&x, &&y| (mid(x) - *p).norm().total_cmp(&(mid(y) - *p).norm())).unwrap()).collect();
+                }
+            } else if o.edges.len() - o.degenerate.len() == ids.len() {
+                let kept: Vec<&P3> = o.edges.iter().enumerate().filter(|(i, _)| !o.degenerate.contains(i)).map(|(_, p)| p).collect();
+                ids = kept.iter().map(|p| *ids.iter().min_by(|&&x, &&y| (mid(x) - *p).norm().total_cmp(&(mid(y) - *p).norm())).unwrap()).collect();
             }
         }
         Ok(ids.into_iter().map(|i| Shape::BodyEdge(b, EdgeId(i as u64))).collect())
@@ -2618,6 +3159,15 @@ impl NativeKernel {
     /// `nexplode shape e`: the edges sorted by their centres of mass (DRAW's key
     /// x·999 + y·99 + z·0.9; a stable order, the same as OCCT's for the same shape).
     pub fn nexplode_edges(&self, s: &Shape) -> Result<Vec<Shape>> {
+        if let Some(es) = Self::loose_edges_of(s) {
+            let key = |e: &DEdge| {
+                let ed = super::topo::Edge { curve: e.curve.clone(), t: [e.t0, e.t1], v: [0, 0], tol: 0.0, degenerate: false };
+                linear_centre(&[&ed]).map_or(0.0, |c| nexplode_key(&c))
+            };
+            let mut keyed: Vec<(f64, DEdge)> = es.into_iter().map(|e| (key(&e), e)).collect();
+            keyed.sort_by(|x, y| x.0.total_cmp(&y.0));
+            return Ok(keyed.into_iter().map(|(_, e)| Shape::Edge(e)).collect());
+        }
         let b = self.body_of(s)?;
         let body = self.get(b)?;
         let mut ids: Vec<(f64, usize)> = Vec::new();
@@ -3726,6 +4276,15 @@ fn meet(a: &DEdge, b: &DEdge) -> Result<(DEdge, DEdge)> {
     Err(err("the edges don't share a vertex"))
 }
 
+/// How far past the feature's height (BRepFeat's HeightMax) its limit faces are searched and
+/// its limit solids reach.
+const FEAT_REACH: f64 = 4.0;
+
+/// Whether two shapes name the same face.
+fn same_face(a: &Shape, b: &Shape) -> bool {
+    matches!((a, b), (Shape::BodyFace(ab, af), Shape::BodyFace(bb, bf)) if ab == bb && af == bf)
+}
+
 /// The tangents of an edge at its start and end (in its direction of travel).
 fn tangent_at(e: &DEdge) -> (V3, V3) {
     let s = if e.t1 >= e.t0 { 1.0 } else { -1.0 };
@@ -4025,4 +4584,123 @@ fn foot_param(e: &DEdge, p: &P3) -> Option<f64> {
         _ => return None,
     };
     (t >= lo - 1e-9 && t <= hi + 1e-9).then_some(t.clamp(lo, hi))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Each exploded edge's middle point (a degenerate edge's: its vertex), and whether it is
+    /// degenerate.
+    fn exploded(k: &NativeKernel, s: &Shape) -> Vec<(P3, bool)> {
+        let Shape::Body(b) = s else { panic!("not a body") };
+        let body = k.get(*b).unwrap();
+        k.explode_edges(s)
+            .unwrap()
+            .iter()
+            .map(|e| {
+                let Shape::BodyEdge(_, id) = e else { panic!("not an edge") };
+                let ed = &body.edges[id.0 as usize];
+                (ed.point(ed.mid_t()), ed.degenerate)
+            })
+            .collect()
+    }
+
+    fn near(p: &P3, q: [f64; 3]) -> bool {
+        (p - P3::from(q)).norm() < 1e-6
+    }
+
+    /// A wedge whose top narrows to a line (`wedge s 40 100 100 0`): OCCT's 9 edges, its sides'
+    /// common edge at the top counted once and the top's zero-length edges left out, so s_5 is
+    /// the edge along z at (40, 0) (blend simple_a7).
+    #[test]
+    fn wedge_narrowed_to_a_line_explodes_as_occt() {
+        let mut k = NativeKernel::new();
+        let s = k.wedge(40.0, 100.0, 100.0, [0.0, 0.0, 0.0, 100.0]).unwrap();
+        let es = exploded(&k, &s);
+        assert_eq!(es.len(), 9);
+        assert!(near(&es[4].0, [40.0, 0.0, 50.0]), "{:?}", es[4]);
+        assert!(near(&es[8].0, [20.0, 0.0, 100.0]), "{:?}", es[8]);
+    }
+
+    /// A quarter cone up to its apex (`pcone s 50 0 120 90`): OCCT lists the apex's degenerate
+    /// edge first, so s_3 is the base's arc (blend simple_c9).
+    #[test]
+    fn partial_cone_explodes_with_its_apex_edge() {
+        let mut k = NativeKernel::new();
+        let s = k.pcone_a(None, 50.0, 0.0, 120.0, 90.0).unwrap();
+        let es = exploded(&k, &s);
+        assert_eq!(es.len(), 7);
+        assert!(es[0].1 && near(&es[0].0, [0.0, 0.0, 120.0]), "{:?}", es[0]);
+        let r = std::f64::consts::FRAC_1_SQRT_2 * 50.0;
+        assert!(near(&es[2].0, [r, r, 0.0]), "{:?}", es[2]);
+    }
+
+    /// A face revolved 270° whose wire runs along the axis: a degenerate edge where each lateral
+    /// face meets the axis, the axis edge once (11 edges; blend simple_h4's s_10 is the slant's
+    /// copy at the end).
+    #[test]
+    fn revolution_touching_its_axis_explodes_as_occt() {
+        let mut k = NativeKernel::new();
+        let w1 = k.ellipse([0.0, 0.0, 0.0], None, None, 15.0, 10.0);
+        let w1 = k.mkedge(&w1, 0.0, std::f64::consts::FRAC_PI_2);
+        let w1 = k.trotate(&w1, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 90.0).unwrap();
+        let w2 = k.polyline(&[[0.0, 0.0, 10.0], [0.0, 0.0, -10.0], [25.0, 0.0, -10.0], [15.0, 0.0, 0.0]]).unwrap();
+        let w = k.wire(&[&w1, &w2]).unwrap();
+        let w = k.mkplane(&w).unwrap();
+        let s = k.revol(&w, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 270.0).unwrap();
+        let es = exploded(&k, &s);
+        assert_eq!(es.len(), 11);
+        assert!(es[1].1 && es[4].1 && !es[9].1);
+        assert!(near(&es[9].0, [0.0, -20.0, -5.0]), "{:?}", es[9]);
+    }
+
+    /// A triangle piped along a quarter circle, its face looking back along the spine: OCCT
+    /// explores the loop backwards from its first edge, start face first, so s_4 is the edge
+    /// swept from the triangle's first vertex (blend simple_i1).
+    #[test]
+    fn pipe_explodes_as_occt() {
+        let mut k = NativeKernel::new();
+        let w = k.circle(-20.0, 0.0, 0.0, 20.0);
+        let w = k.mkedge(&w, 0.0, std::f64::consts::FRAC_PI_2);
+        let w = k.wire(&[&w]).unwrap();
+        let profile = k.polyline(&[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [5.0, 0.0, 5.0], [0.0, 0.0, 0.0]]).unwrap();
+        let profile = k.mkplane(&profile).unwrap();
+        let s = k.pipe(&w, &profile).unwrap();
+        let es = exploded(&k, &s);
+        assert_eq!(es.len(), 9);
+        assert!(near(&es[0].0, [5.0, 0.0, 0.0]) && near(&es[1].0, [2.5, 0.0, 2.5]), "{:?}", &es[..2]);
+        let h = 20.0 * std::f64::consts::FRAC_1_SQRT_2;
+        assert!(near(&es[3].0, [h - 20.0, h, 0.0]), "{:?}", es[3]);
+    }
+
+    /// A script's sub-shape past the end of an explode is a "topology mismatch" failure, not an
+    /// index out of bounds (review 4: 17 blend known failures panicked in their test code).
+    #[test]
+    fn sub_past_the_end_is_a_topology_mismatch() {
+        let subs = vec![Shape::Vertex(P3::origin()), Shape::Empty];
+        assert!(matches!(sub(&subs, 2, "s", "edges"), Ok(Shape::Empty)));
+        let e = sub(&subs, 7, "s", "edges").unwrap_err().to_string();
+        assert!(e.contains("topology mismatch: explode s gave 2 edges, the script expects at least 7 (s_7)"), "{e}");
+        assert!(sub(&subs, 0, "s", "edges").is_err());
+    }
+
+    /// A known failure passes the test by failing with its error, or with the panic it lists.
+    #[test]
+    fn known_failure_that_fails_or_panics_as_listed() {
+        known_failure("g c", Ok(Err(err("the area differs"))), None);
+        known_failure("g c", Err(Box::new("index out of bounds: the len is 6")), Some("index out of bounds"));
+    }
+
+    #[test]
+    #[should_panic(expected = "a known failure now passes: remove `g c`")]
+    fn known_failure_that_passes_is_stale() {
+        known_failure("g c", Ok(Ok(())), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "a known failure panicked: g c: index out of bounds")]
+    fn known_failure_that_panics_fails_loudly() {
+        known_failure("g c", Err(Box::new(String::from("index out of bounds: the len is 6"))), None);
+    }
 }

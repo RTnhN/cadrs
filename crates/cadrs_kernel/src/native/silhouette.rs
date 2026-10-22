@@ -204,7 +204,7 @@ pub fn domain_silhouettes(dom: &FaceDomain, view: &View, opts: &SilOptions) -> F
                 View::Perspective(e) => {
                     let w = e - f.o;
                     let dd = w.norm();
-                    if dd <= r * (1.0 + 1e-12) {
+                    if dd <= r * (1.0 + tol::REL_FINE) {
                         return Found::Curves(vec![]);
                     }
                     let wn = w / dd;
@@ -214,7 +214,7 @@ pub fn domain_silhouettes(dom: &FaceDomain, view: &View, opts: &SilOptions) -> F
             };
             Found::Curves(exact_runs(dom, Curve::Circle { c, x, y, r: rad }, (0.0, TAU), true))
         }
-        Surface::Torus { f, .. } if matches!(view, View::Parallel(d) if d.normalize().dot(&f.z).abs() > 1.0 - 1e-12) => {
+        Surface::Torus { f, .. } if matches!(view, View::Parallel(d) if d.normalize().dot(&f.z).abs() > 1.0 - tol::ANGULAR_FINE) => {
             let mut out = Vec::new();
             for v in [0.0, PI] {
                 if let Some(c) = dom.surf.iso_v(v) {
@@ -315,7 +315,7 @@ pub(crate) fn clip(a: f64, b: f64, n: usize, inside: impl Fn(f64) -> bool) -> Ve
     if let Some(s) = start {
         runs.push((s, b));
     }
-    runs.retain(|r| r.1 - r.0 > 1e-12);
+    runs.retain(|r| r.1 - r.0 > tol::ROUNDOFF_FINE);
     runs
 }
 
@@ -425,7 +425,7 @@ impl<'a> Tracer<'a> {
             // A pole or apex (a collapsed row of a B-spline too): the normal just inside the face,
             // a step towards the middle of its box.
             let (cu, cv) = (0.5 * (self.dom.ub.0 + self.dom.ub.1), 0.5 * (self.dom.vb.0 + self.dom.vb.1));
-            let (qu, qv) = (u + (cu - u) * 1e-6, v + (cv - v) * 1e-6);
+            let (qu, qv) = (u + (cu - u) * tol::DIFF_STEP, v + (cv - v) * tol::DIFF_STEP);
             let e = s.d2(qu, qv);
             let m = e[1].cross(&e[2]);
             if m.norm() > tol::TINY { m.normalize() } else { s.normal(u, v) }
@@ -548,7 +548,7 @@ impl<'a> Tracer<'a> {
             if (q.x - c.x).abs() > self.au.step || (q.y - c.y).abs() > self.av.step {
                 return None;
             }
-            if du.abs() < 1e-12 * self.au.step && dv.abs() < 1e-12 * self.av.step {
+            if du.abs() < tol::REL_FINE * self.au.step && dv.abs() < tol::REL_FINE * self.av.step {
                 break;
             }
         }
@@ -557,7 +557,7 @@ impl<'a> Tracer<'a> {
 
     /// `m` pulled onto g = 0 by Newton along ∇g, moving at most `reach` (uv).
     fn to_zero(&self, m: P2, reach: f64) -> Option<P2> {
-        let (hu, hv) = (1e-6 * self.au.step, 1e-6 * self.av.step);
+        let (hu, hv) = (tol::DIFF_STEP * self.au.step, tol::DIFF_STEP * self.av.step);
         let mut q = m;
         for _ in 0..8 {
             let g0 = self.g(q);
@@ -716,7 +716,7 @@ pub fn kernel_silhouettes(k: &super::NativeKernel, body: crate::BodyId, view: &c
         return Err(KernelError::InvalidParameter(format!("a silhouette tolerance of {tolerance} mm")));
     }
     let v = match view {
-        SilhouetteView::Parallel(d) if d.iter().all(|x| x.is_finite()) && d.norm() > 1e-12 => View::Parallel(*d),
+        SilhouetteView::Parallel(d) if d.iter().all(|x| x.is_finite()) && d.norm() > tol::DEGENERATE => View::Parallel(*d),
         SilhouetteView::Perspective(e) if e.iter().all(|x| x.is_finite()) => View::Perspective(*e),
         _ => return Err(KernelError::InvalidParameter("a view direction must be a finite non-zero vector, an eye point finite".into())),
     };

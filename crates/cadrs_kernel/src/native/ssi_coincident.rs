@@ -16,7 +16,7 @@ type UvBox = ((f64, f64), (f64, f64));
 /// Whether (u, v) lies in the box (angles modulo a turn), within a relative `e`.
 fn in_box(s: &Surface, bx: UvBox, (u, v): (f64, f64), e: f64) -> bool {
     let ok = |x: f64, (lo, hi): (f64, f64), periodic: bool| {
-        let m = (hi - lo) * e + 1e-12 * (1.0 + lo.abs().max(hi.abs()));
+        let m = (hi - lo) * e + tol::REL_FINE * (1.0 + lo.abs().max(hi.abs()));
         if periodic {
             hi - lo >= TAU - tol::ANGULAR || wrap(x, lo - m, TAU) <= hi + m
         } else {
@@ -201,7 +201,7 @@ pub fn crossing_sides(a: &Surface, ua: UvBox, b: &Surface, ub: UvBox, tol: f64) 
     let all_b = ((pu0.max(-1e4), pu1.min(1e4)), (pv0.max(-1e4), pv1.min(1e4)));
     for (on_a, s, bx, o, obx) in [(true, a, ua, b, all_b), (false, b, ub, a, ua)] {
         let ((u0, u1), (v0, v1)) = bx;
-        let whole = |periodic: bool, (lo, hi): (f64, f64)| periodic && hi - lo >= TAU - 1e-9;
+        let whole = |periodic: bool, (lo, hi): (f64, f64)| periodic && hi - lo >= TAU - tol::ANGULAR;
         for (fix_u, val, range) in [(true, u0, (v0, v1)), (true, u1, (v0, v1)), (false, v0, (u0, u1)), (false, v1, (u0, u1))] {
             if (fix_u && whole(s.u_periodic(), (u0, u1))) || (!fix_u && whole(s.v_periodic(), (v0, v1))) {
                 continue;
@@ -263,12 +263,12 @@ pub fn interior_boundary(a: &Surface, ua: UvBox, b: &Surface, ub: UvBox, tol: f6
     // foot on the edge of b's domain: a side of b there, not where the two part).
     let ((pu0, pu1), (pv0, pv1)) = b.param_box();
     let rim = |(u, v): (f64, f64)| {
-        let at = |x: f64, (lo, hi): (f64, f64), periodic: bool| !periodic && ((x - lo).abs() <= 1e-9 * (hi - lo).abs().max(1.0) || (x - hi).abs() <= 1e-9 * (hi - lo).abs().max(1.0));
+        let at = |x: f64, (lo, hi): (f64, f64), periodic: bool| !periodic && ((x - lo).abs() <= tol::REL * (hi - lo).abs().max(1.0) || (x - hi).abs() <= tol::REL * (hi - lo).abs().max(1.0));
         at(u, (pu0, pu1), b.u_periodic()) || at(v, (pv0, pv1), b.v_periodic())
     };
     let state = |uv: (f64, f64), hint: Option<(f64, f64)>| -> (u8, (f64, f64)) {
         let (d, f) = foot(b, &a.eval(uv.0, uv.1), hint);
-        (if d > tol && !rim(f) { 0 } else if d <= tol && in_box(b, ub, f, 1e-6) { 1 } else { 2 }, f)
+        (if d > tol && !rim(f) { 0 } else if d <= tol && in_box(b, ub, f, tol::POINT) { 1 } else { 2 }, f)
     };
     let nodes: Vec<Vec<(u8, (f64, f64))>> = (0..=N)
         .into_par_iter()
@@ -519,7 +519,7 @@ fn fit_on(s: &Surface, mut uvs: Vec<(f64, f64)>, closed: bool, between: &dyn Fn(
     if closed {
         uvs.push(uvs[0]);
     }
-    uvs.dedup_by(|x, y| (s.eval(x.0, x.1) - s.eval(y.0, y.1)).norm() < 1e-12);
+    uvs.dedup_by(|x, y| (s.eval(x.0, x.1) - s.eval(y.0, y.1)).norm() < tol::DEGENERATE);
     if uvs.len() < 2 {
         return (None, 0);
     }

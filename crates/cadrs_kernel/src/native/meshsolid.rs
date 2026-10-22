@@ -1,15 +1,22 @@
 //! A solid from a closed triangle mesh (STL import, [`crate::Kernel::mesh_solid`]).
 //!
-//! 1. Corners within `tol` are welded into vertices; triangles that collapse are dropped.
-//! 2. The mesh must be closed and consistently oriented: every directed edge used by exactly one
-//!    triangle and its reverse by exactly one other (an open or non-manifold mesh is an error).
-//! 3. Coplanar neighbouring triangles are flooded into planar regions (normals within ~1e-5 rad
+//! 1. Corners within `tol` are welded into vertices; triangles that collapse are dropped, and
+//!    repeated ones (the same corners) kept once, or dropped both when wound against each other
+//!    (a wall of no thickness).
+//! 2. Triangles wound against their neighbours are turned to agree, when the mesh is otherwise
+//!    a closed surface (OCCT sewed such meshes, which orients them).
+//! 3. An edge where two parts of the surface touch (four triangles, two each way) is paired up
+//!    by the order of its triangles about it, and the vertices there are split per part, so each
+//!    part keeps its own edge (OCCT accepted such meshes as wound).
+//! 4. The mesh must then be closed and consistently oriented: every directed edge used by
+//!    exactly one triangle and its reverse by exactly one other (an open mesh is an error).
+//! 5. Coplanar neighbouring triangles are flooded into planar regions (normals within ~1e-5 rad
 //!    and corners within `tol` of the region's first triangle's plane, so curved meshes don't
 //!    drift into one face).
-//! 4. Each region's boundary half-edges are chained into polygon loops; a boundary vertex used by
+//! 6. Each region's boundary half-edges are chained into polygon loops; a boundary vertex used by
 //!    only two boundary segments in line with each other is dropped, so straight edges are one
 //!    edge. Loops run counter-clockwise about the outward normal, holes clockwise.
-//! 5. A mesh oriented inside out (negative volume) has every face reversed.
+//! 7. A mesh oriented inside out (negative volume) has every face reversed.
 
 use std::collections::HashMap;
 
@@ -54,7 +61,7 @@ impl Weld {
 }
 
 pub fn mesh_solid(triangles: &[[P3; 3]], tol: f64) -> Result<Body, String> {
-    let tol = if tol.is_finite() && tol > 0.0 { tol } else { 1e-6 };
+    let tol = if tol.is_finite() && tol > 0.0 { tol } else { tol::POINT };
     let mut weld = Weld { tol, cells: HashMap::new(), pts: Vec::new() };
     let mut tris: Vec<[usize; 3]> = Vec::with_capacity(triangles.len());
     for t in triangles {
@@ -68,10 +75,14 @@ pub fn mesh_solid(triangles: &[[P3; 3]], tol: f64) -> Result<Body, String> {
         }
         tris.push(ix);
     }
+    let mut pts = weld.pts;
+    let tris = drop_repeats(tris);
+    let tris = orient(tris)?;
+    let tris = split_touching(tris, &mut pts)?;
     if tris.len() < 4 {
         return Err("fewer than four usable triangles".into());
     }
-    let pts = &weld.pts;
+    let pts = &pts;
     // Directed edges.
     let mut half: HashMap<(usize, usize), usize> = HashMap::with_capacity(tris.len() * 3);
     for (ti, t) in tris.iter().enumerate() {
@@ -229,12 +240,203 @@ pub fn mesh_solid(triangles: &[[P3; 3]], tol: f64) -> Result<Body, String> {
     let nf = body.faces.len();
     body.shells.push(Shell { faces: (0..nf).collect(), closed: true });
     body.solids.push(Solid { shells: vec![0] });
-    if super::mass::body_mass(&body).volume < 0.0 {
+    if super::mass::body_volume(&body) < 0.0 {
         for f in &mut body.faces {
             Body::reverse_face(f);
         }
     }
     Ok(body)
+}
+
+/// The triangles with each set of corners once: repeats wound the same way kept once, pairs
+/// wound against each other (a wall of no thickness) dropped.
+fn drop_repeats(tris: Vec<[usize; 3]>) -> Vec<[usize; 3]> {
+    // Corners sorted, and the winding (+1 when the sort is an even permutation).
+    let canon = |t: &[usize; 3]| -> ([usize; 3], i32) {
+        let mut c = *t;
+        c.sort_unstable();
+        let r = t.iter().position(|&v| v == c[0]).unwrap_or(0);
+        (c, if t[(r + 1) % 3] == c[1] { 1 } else { -1 })
+    };
+    let mut net: HashMap<[usize; 3], (i32, usize)> = HashMap::with_capacity(tris.len());
+    for (i, t) in tris.iter().enumerate() {
+        let (c, w) = canon(t);
+        let e = net.entry(c).or_insert((0, i));
+        e.0 += w;
+    }
+    if net.len() == tris.len() {
+        return tris;
+    }
+    let mut keep: Vec<usize> = net.values().filter(|(w, _)| *w != 0).map(|&(_, i)| i).collect();
+    keep.sort_unstable();
+    keep.into_iter()
+        .map(|i| {
+            let (c, w) = canon(&tris[i]);
+            let net_w = net[&c].0;
+            if (net_w > 0) == (w > 0) { tris[i] } else { [tris[i][0], tris[i][2], tris[i][1]] }
+        })
+        .collect()
+}
+
+/// The triangles turned to agree with their neighbours across edges two triangles share, when
+/// some edge is used twice the same way; each part that hangs together is oriented from its
+/// first triangle (the volume's sign turns the whole body round later). Unchanged when already
+/// consistent.
+fn orient(mut tris: Vec<[usize; 3]>) -> Result<Vec<[usize; 3]>, String> {
+    let mut directed: HashMap<(usize, usize), u32> = HashMap::with_capacity(tris.len() * 3);
+    for t in &tris {
+        for k in 0..3 {
+            *directed.entry((t[k], t[(k + 1) % 3])).or_default() += 1;
+        }
+    }
+    if directed.iter().all(|(&(a, b), n)| directed.get(&(b, a)) == Some(n)) {
+        return Ok(tris);
+    }
+    let mut uses: HashMap<(usize, usize), Vec<usize>> = HashMap::with_capacity(tris.len() * 3);
+    for (i, t) in tris.iter().enumerate() {
+        for k in 0..3 {
+            let (a, b) = (t[k], t[(k + 1) % 3]);
+            uses.entry((a.min(b), a.max(b))).or_default().push(i);
+        }
+    }
+    let mut seen = vec![false; tris.len()];
+    for s in 0..tris.len() {
+        if seen[s] {
+            continue;
+        }
+        seen[s] = true;
+        let mut stack = vec![s];
+        while let Some(i) = stack.pop() {
+            let t = tris[i];
+            for k in 0..3 {
+                let (a, b) = (t[k], t[(k + 1) % 3]);
+                // Only across edges of exactly two triangles (a manifold edge).
+                let [x, y] = uses[&(a.min(b), a.max(b))][..] else { continue };
+                let j = if x == i { y } else { x };
+                if seen[j] {
+                    continue;
+                }
+                seen[j] = true;
+                // Agreeing: the neighbour runs the edge b → a.
+                let u = tris[j];
+                let runs_ab = (0..3).any(|m| u[m] == a && u[(m + 1) % 3] == b);
+                if runs_ab {
+                    tris[j] = [u[0], u[2], u[1]];
+                }
+                stack.push(j);
+            }
+        }
+    }
+    Ok(tris)
+}
+
+/// Pairs the triangles at edges where parts of the surface touch (an edge used by several
+/// triangles each way) by their order about the edge, and gives each part its own copy of the
+/// vertices where the parts meet, so every directed edge is then used once (with `pts` grown by
+/// the copies).
+fn split_touching(mut tris: Vec<[usize; 3]>, pts: &mut Vec<P3>) -> Result<Vec<[usize; 3]>, String> {
+    // The triangles (and the corner the edge starts at) using each directed edge.
+    let mut half: HashMap<(usize, usize), Vec<(usize, usize)>> = HashMap::with_capacity(tris.len() * 3);
+    for (i, t) in tris.iter().enumerate() {
+        for k in 0..3 {
+            half.entry((t[k], t[(k + 1) % 3])).or_default().push((i, k));
+        }
+    }
+    if half.values().all(|v| v.len() == 1) {
+        return Ok(tris);
+    }
+    // across[i][k]: the triangle across triangle i's edge k (from corner k).
+    let mut across: Vec<[usize; 3]> = vec![[usize::MAX; 3]; tris.len()];
+    for (&(a, b), fwd) in &half {
+        let Some(back) = half.get(&(b, a)) else { continue };
+        if fwd.len() != back.len() {
+            return Err("the mesh is not consistently oriented or not manifold (an edge is used more often one way than the other)".into());
+        }
+        if fwd.len() == 1 {
+            across[fwd[0].0][fwd[0].1] = back[0].0;
+            continue;
+        }
+        // About the edge a → b: each triangle's angle, from its third corner.
+        let (pa, pb) = (pts[a], pts[b]);
+        let axis = (pb - pa).normalize();
+        let x = {
+            let t = tris[fwd[0].0];
+            let c = pts[t[(fwd[0].1 + 2) % 3]] - pa;
+            (c - axis * c.dot(&axis)).normalize()
+        };
+        let y = axis.cross(&x);
+        let angle = |&(i, k): &(usize, usize)| {
+            let c = pts[tris[i][(k + 2) % 3]] - pa;
+            c.dot(&y).atan2(c.dot(&x))
+        };
+        let mut around: Vec<(f64, bool, usize)> = fwd.iter().map(|h| (angle(h), true, h.0)).chain(back.iter().map(|h| (angle(h), false, h.0))).collect();
+        around.sort_by(|p, q| p.0.total_cmp(&q.0));
+        // A triangle running a → b has its outside turning positively about the edge, so the
+        // material (and its partner) is the next one turning back.
+        let n = around.len();
+        for m in 0..n {
+            let (_, is_fwd, i) = around[m];
+            if !is_fwd {
+                continue;
+            }
+            let (_, partner_fwd, j) = around[(m + n - 1) % n];
+            if partner_fwd {
+                return Err("the mesh is not consistently oriented or not manifold (the triangles about an edge don't alternate)".into());
+            }
+            let k = fwd.iter().find(|h| h.0 == i).map_or(0, |h| h.1);
+            across[i][k] = j;
+        }
+    }
+    // Corners joined across paired edges at the same vertex; each group of corners of a
+    // vertex beyond the first gets its own copy of the vertex.
+    let mut parent: Vec<usize> = (0..tris.len() * 3).collect();
+    fn find(p: &mut [usize], x: usize) -> usize {
+        let mut r = x;
+        while p[r] != r {
+            r = p[r];
+        }
+        let mut y = x;
+        while p[y] != r {
+            let n = p[y];
+            p[y] = r;
+            y = n;
+        }
+        r
+    }
+    for i in 0..tris.len() {
+        for k in 0..3 {
+            let j = across[i][k];
+            if j == usize::MAX {
+                continue;
+            }
+            let (a, b) = (tris[i][k], tris[i][(k + 1) % 3]);
+            for v in [a, b] {
+                let ci = 3 * i + (0..3).find(|&m| tris[i][m] == v).unwrap_or(0);
+                let Some(m) = (0..3).find(|&m| tris[j][m] == v) else { continue };
+                let (r1, r2) = (find(&mut parent, ci), find(&mut parent, 3 * j + m));
+                if r1 != r2 {
+                    parent[r1.max(r2)] = r1.min(r2);
+                }
+            }
+        }
+    }
+    let mut copy: HashMap<(usize, usize), usize> = HashMap::new();
+    let mut first: HashMap<usize, usize> = HashMap::new();
+    for (i, t) in tris.iter_mut().enumerate() {
+        for (k, corner) in t.iter_mut().enumerate() {
+            let v = *corner;
+            let root = find(&mut parent, 3 * i + k);
+            let owner = *first.entry(v).or_insert(root);
+            if owner == root {
+                continue;
+            }
+            *corner = *copy.entry((v, root)).or_insert_with(|| {
+                pts.push(pts[v]);
+                pts.len() - 1
+            });
+        }
+    }
+    Ok(tris)
 }
 
 #[cfg(test)]
@@ -264,10 +466,54 @@ mod tests {
         assert!(b.check().is_empty(), "{:?}", b.check());
         assert_eq!(b.faces.len(), 6);
         assert_eq!(b.edges.len(), 12);
-        assert!((super::super::mass::body_mass(&b).volume - 1000.0).abs() < 1e-9);
+        assert!((super::super::mass::body_volume(&b) - 1000.0).abs() < 1e-9);
         // Inside out: reversed back.
         let inv: Vec<[P3; 3]> = tris.iter().map(|t| [t[0], t[2], t[1]]).collect();
-        assert!((super::super::mass::body_mass(&mesh_solid(&inv, 1e-6).unwrap()).volume - 1000.0).abs() < 1e-9);
+        assert!((super::super::mass::body_volume(&mesh_solid(&inv, 1e-6).unwrap()) - 1000.0).abs() < 1e-9);
         assert!(mesh_solid(&tris[..20], 1e-6).is_err());
+    }
+
+    /// A cube's twelve outward triangles, of side `s` from corner `o`.
+    fn cube(o: P3, s: f64) -> Vec<[P3; 3]> {
+        let c = |x: f64, y: f64, z: f64| o + V3::new(x, y, z) * s;
+        let quads = [
+            [c(0., 0., 0.), c(0., 1., 0.), c(1., 1., 0.), c(1., 0., 0.)],
+            [c(0., 0., 1.), c(1., 0., 1.), c(1., 1., 1.), c(0., 1., 1.)],
+            [c(0., 0., 0.), c(1., 0., 0.), c(1., 0., 1.), c(0., 0., 1.)],
+            [c(0., 1., 0.), c(0., 1., 1.), c(1., 1., 1.), c(1., 1., 0.)],
+            [c(0., 0., 0.), c(0., 0., 1.), c(0., 1., 1.), c(0., 1., 0.)],
+            [c(1., 0., 0.), c(1., 1., 0.), c(1., 1., 1.), c(1., 0., 1.)],
+        ];
+        quads.iter().flat_map(|q| [[q[0], q[1], q[2]], [q[0], q[2], q[3]]]).collect()
+    }
+
+    /// mirror_test's STL: two parts of the surface touch along an edge (four triangles there,
+    /// two each way). Two cubes sharing an edge are one solid of two shells' worth of volume.
+    #[test]
+    fn cubes_touching_along_an_edge() {
+        let mut tris = cube(P3::origin(), 10.0);
+        tris.extend(cube(P3::new(10.0, 10.0, 0.0), 10.0));
+        let b = mesh_solid(&tris, tol::POINT).unwrap();
+        assert!(b.check().is_empty(), "{:?}", b.check());
+        assert!((super::super::mass::body_volume(&b) - 2000.0).abs() < tol::ROUNDOFF);
+        assert_eq!(b.faces.len(), 12);
+    }
+
+    /// Triangles wound against their neighbours are turned; a repeated triangle counts once,
+    /// and a pair wound against each other (a wall of no thickness) not at all.
+    #[test]
+    fn badly_wound_and_repeated_triangles() {
+        let mut tris = cube(P3::origin(), 10.0);
+        tris[3] = [tris[3][0], tris[3][2], tris[3][1]];
+        tris[7] = [tris[7][1], tris[7][0], tris[7][2]];
+        tris.push(tris[0]);
+        let fin = [P3::new(0.0, 0.0, 0.0), P3::new(10.0, 0.0, 0.0), P3::new(5.0, 5.0, 5.0)];
+        tris.push(fin);
+        tris.push([fin[0], fin[2], fin[1]]);
+        let b = mesh_solid(&tris, tol::POINT).unwrap();
+        assert!(b.check().is_empty(), "{:?}", b.check());
+        assert!((super::super::mass::body_volume(&b) - 1000.0).abs() < tol::ROUNDOFF);
+        // Still not a solid: open.
+        assert!(mesh_solid(&tris[..11], tol::POINT).is_err());
     }
 }

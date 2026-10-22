@@ -58,7 +58,7 @@ pub mod types;
 pub mod testkit {
     pub use crate::native::{
         blend, boolean, brep_occt, classify, curve, draw, evolved, exchange, face_build, features, iges, kernel, local, mass, math, nurbs,
-        offset2d, offset_round, oracle, profile, silhouette, slab, smb, ssi, ssi_numeric, step, surface, surfacing, tess, topo, unify, xbuild,
+        offset, oracle, profile, silhouette, smb, ssi, ssi_numeric, step, surface, surfacing, tess, topo, unify, xbuild,
     };
 }
 
@@ -75,6 +75,7 @@ pub use native::NativeKernel as DefaultKernel;
 use std::fmt;
 
 use nalgebra::{Point3, Vector3};
+use crate::native::tol;
 
 /// Why an operation failed. Each variant carries a message in words for the user; the variant
 /// says what a caller can do about it (e.g. read `EmptyResult` of an Intersect as "no
@@ -105,9 +106,21 @@ pub enum KernelError {
     /// The operation ran out of its work budget at `stage` (a count of steps, the same on
     /// every run, not a time): the input is too complex for it, or the algorithm ran away.
     /// For a boolean the stages are `"surface intersection"`, `"face splitting"`,
-    /// `"classification"` and `"shell assembly"`; for a blend, `"sections"`.
+    /// `"classification"` and `"shell assembly"`; for a blend, `"sections"`; for a local
+    /// fillet, `"fillet"` (its rolling-ball solves).
     BudgetExhausted {
         /// Where the work ran out.
+        stage: &'static str,
+        /// The message in words.
+        why: String,
+    },
+    /// A local fillet or chamfer (trimmed into its faces) couldn't build its result at `stage`:
+    /// `"rolling ball"` (the ball lost along an edge), `"corner"` (where blends meet at a
+    /// vertex), `"end"` (where a blend stops on an end face), `"surface"` (the blend surface
+    /// from its sections) or `"trimming"` (cutting the blend's rails into its faces). The
+    /// operation may still succeed through another method; this is what the local one hit.
+    BlendFailed {
+        /// Where the blend gave up.
         stage: &'static str,
         /// The message in words.
         why: String,
@@ -163,6 +176,7 @@ impl KernelError {
     pub fn message(&self) -> String {
         match self {
             Self::BooleanFailed { why, .. }
+            | Self::BlendFailed { why, .. }
             | Self::BudgetExhausted { why, .. }
             | Self::TooLarge { why, .. }
             | Self::InvalidGeometry { why, .. }
@@ -179,13 +193,14 @@ impl KernelError {
     }
 
     /// Whether the algorithm gave up on this input ([`KernelError::OperationFailed`] or one of
-    /// the typed failures, `BooleanFailed`, `BudgetExhausted`, `TooLarge`, `InvalidGeometry`,
-    /// `InvalidResult`), as opposed to refusing its arguments or finding nothing to make.
+    /// the typed failures, `BooleanFailed`, `BlendFailed`, `BudgetExhausted`, `TooLarge`,
+    /// `InvalidGeometry`, `InvalidResult`), as opposed to refusing its arguments or finding nothing to make.
     pub fn is_failure(&self) -> bool {
         matches!(
             self,
             Self::OperationFailed(_)
                 | Self::BooleanFailed { .. }
+                | Self::BlendFailed { .. }
                 | Self::BudgetExhausted { .. }
                 | Self::TooLarge { .. }
                 | Self::InvalidGeometry { .. }
@@ -200,6 +215,7 @@ impl fmt::Display for KernelError {
             Self::InvalidProfile(why) => write!(f, "invalid profile: {why}"),
             Self::OperationFailed(why) | Self::EmptyResult(why) | Self::OpenResult(why) => write!(f, "operation failed: {why}"),
             Self::BooleanFailed { why, .. }
+            | Self::BlendFailed { why, .. }
             | Self::BudgetExhausted { why, .. }
             | Self::TooLarge { why, .. }
             | Self::InvalidGeometry { why, .. }
@@ -301,8 +317,8 @@ pub enum HealOp {
 /// - **Errors**: [`KernelError::InvalidParameter`] for a size, angle or selection that can't
 ///   build (non-positive radius, unknown face), [`KernelError::InvalidProfile`] for a profile
 ///   that doesn't close, a failure ([`KernelError::is_failure`]: `TooLarge` for a size the
-///   geometry can't hold, `InvalidGeometry`, `BooleanFailed`, `BudgetExhausted`,
-///   `InvalidResult` or `OperationFailed`) when the algorithm gives up, and
+///   geometry can't hold, `InvalidGeometry`, `BooleanFailed`, `BlendFailed`,
+///   `BudgetExhausted`, `InvalidResult` or `OperationFailed`) when the algorithm gives up, and
 ///   [`KernelError::OpenResult`] when faces didn't close into a solid. An operation never
 ///   returns a body it found invalid: results pass the native kernel's `Body::check`.
 /// - **Tolerance**: exact geometry is within `native::tol::POINT` (1e-6 mm); vertices and edges
@@ -357,7 +373,7 @@ pub trait Kernel {
     /// plane normal, from the plane, regions only) and refuses the rest.
     fn extrude_with(&mut self, profile: &Profile, spec: &ExtrudeSpec) -> Result<OpResult> {
         let along = spec.direction.dot(&profile.plane.normal);
-        let normal = (along.abs() - 1.0).abs() < 1e-12;
+        let normal = (along.abs() - 1.0).abs() < tol::ANGULAR_FINE;
         let simple = spec.body == BodyKind::Solid
             && spec.start_offset == 0.0
             && spec.faces.is_empty()
@@ -375,6 +391,29 @@ pub trait Kernel {
     /// profile's plane, not crossing the regions) by `angle` radians, counter-clockwise about
     /// `axis.dir`; a whole turn at 2π or more. An axis square to the plane or through a region
     /// is an error. History as [`Kernel::extrude`]'s.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use cadrs_kernel::{Axis, DefaultKernel, Kernel};
+    /// # use nalgebra::{Point3, Vector3};
+    /// # use cadrs_kernel::{Curve2, Loop, Plane, Profile, Region};
+    /// # fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Profile {
+    /// #     let c = [nalgebra::Point2::new(x0, y0), nalgebra::Point2::new(x1, y0), nalgebra::Point2::new(x1, y1), nalgebra::Point2::new(x0, y1)];
+    /// #     let curves = (0..4).map(|i| Curve2::Line { a: c[i], b: c[(i + 1) % 4], source: None }).collect();
+    /// #     Profile::new(Plane::top(), vec![Region { outer: Loop { curves }, holes: vec![], source: None }])
+    /// # }
+    /// let mut k = DefaultKernel::new();
+    /// // The rectangle 2 ≤ x ≤ 6, 0 ≤ y ≤ 5 on the XZ plane (its y is z), turned once about Z: a
+    /// // ring of volume π(6² − 2²)·5.
+    /// let xz = Plane { origin: Point3::origin(), x_dir: Vector3::x_axis(), normal: -Vector3::y_axis() };
+    /// let profile = Profile { plane: xz, ..rect(2.0, 0.0, 6.0, 5.0) };
+    /// let z = Axis { origin: Point3::origin(), dir: Vector3::z_axis() };
+    /// let ring = k.revolve(&profile, z, std::f64::consts::TAU)?.bodies[0];
+    /// let want = std::f64::consts::PI * 32.0 * 5.0;
+    /// assert!((k.mass_properties(ring)?.volume - want).abs() < 1e-6 * want);
+    /// # Ok::<(), cadrs_kernel::KernelError>(())
+    /// ```
     fn revolve(&mut self, profile: &Profile, axis: Axis, angle: f64) -> Result<OpResult>;
 
     /// The full revolve of Onshape's dialog (P3.4, PS7): Solid, Surface or Thin; Full, an angle,
@@ -393,11 +432,56 @@ pub trait Kernel {
     /// A sweep of a profile along a path (P3.7, PS19): Solid, Surface or Thin, with a profile
     /// control. Faces are named as an extrude's: the side of each profile curve, the start cap
     /// (on the profile) and the end cap.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use cadrs_kernel::{BodyKind, DefaultKernel, Kernel, PathCurve, SweepControl, SweepSpec};
+    /// # use nalgebra::{Point2, Point3, Vector3};
+    /// # use cadrs_kernel::{Curve2, Loop, Plane, Profile, Region};
+    /// # fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Profile {
+    /// #     let c = [nalgebra::Point2::new(x0, y0), nalgebra::Point2::new(x1, y0), nalgebra::Point2::new(x1, y1), nalgebra::Point2::new(x0, y1)];
+    /// #     let curves = (0..4).map(|i| Curve2::Line { a: c[i], b: c[(i + 1) % 4], source: None }).collect();
+    /// #     Profile::new(Plane::top(), vec![Region { outer: Loop { curves }, holes: vec![], source: None }])
+    /// # }
+    /// let mut k = DefaultKernel::new();
+    /// // A unit disc square to X, swept 10 along X: a cylinder of volume 10π.
+    /// let across = Plane { origin: Point3::origin(), x_dir: Vector3::y_axis(), normal: Vector3::x_axis() };
+    /// let disc = Curve2::Circle { center: Point2::origin(), radius: 1.0, source: None };
+    /// let profile = Profile::new(across, vec![Region { outer: Loop { curves: vec![disc] }, holes: vec![], source: None }]);
+    /// let line = Curve2::Line { a: Point2::new(0.0, 0.0), b: Point2::new(10.0, 0.0), source: None };
+    /// let path = vec![PathCurve::Sketch { plane: Plane::top(), curve: line }];
+    /// let spec = SweepSpec { body: BodyKind::Solid, path, control: SweepControl::None, faces: vec![] };
+    /// let rod = k.sweep_with(&profile, &spec)?.bodies[0];
+    /// assert!((k.mass_properties(rod)?.volume - 10.0 * std::f64::consts::PI).abs() < 1e-6);
+    /// # Ok::<(), cadrs_kernel::KernelError>(())
+    /// ```
     fn sweep_with(&mut self, profile: &Profile, spec: &SweepSpec) -> Result<OpResult>;
 
     /// A loft through sections (P3.7, PS20), with start and end conditions. Faces: the side of
     /// each curve of the first profile section (`ProfileCurve { region: spec.source, .. }`), and
     /// the start and end caps (`StartCap`/`EndCap { region: spec.source }`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use cadrs_kernel::{BodyKind, DefaultKernel, Kernel, LoftEnd, LoftSection, LoftSpec};
+    /// # use nalgebra::Point3;
+    /// # use cadrs_kernel::{Curve2, Loop, Plane, Profile, Region};
+    /// # fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Profile {
+    /// #     let c = [nalgebra::Point2::new(x0, y0), nalgebra::Point2::new(x1, y0), nalgebra::Point2::new(x1, y1), nalgebra::Point2::new(x0, y1)];
+    /// #     let curves = (0..4).map(|i| Curve2::Line { a: c[i], b: c[(i + 1) % 4], source: None }).collect();
+    /// #     Profile::new(Plane::top(), vec![Region { outer: Loop { curves }, holes: vec![], source: None }])
+    /// # }
+    /// let mut k = DefaultKernel::new();
+    /// // Two 10 × 10 squares 20 apart: the loft between them is the prism, 2000.
+    /// let at = |z: f64| Profile { plane: Plane { origin: Point3::new(0.0, 0.0, z), ..Plane::top() }, ..rect(-5.0, -5.0, 5.0, 5.0) };
+    /// let sections = vec![LoftSection::Profile(at(0.0)), LoftSection::Profile(at(20.0))];
+    /// let spec = LoftSpec { body: BodyKind::Solid, sections, start: LoftEnd::default(), end: LoftEnd::default(), source: 1 };
+    /// let prism = k.loft_with(&spec)?.bodies[0];
+    /// assert!((k.mass_properties(prism)?.volume - 2000.0).abs() < 1e-6);
+    /// # Ok::<(), cadrs_kernel::KernelError>(())
+    /// ```
     fn loft_with(&mut self, spec: &LoftSpec) -> Result<OpResult>;
 
     /// An evolved solid (OCCT's `BRepOffsetAPI_MakeEvolved` in volume mode): the `profile`'s
@@ -536,6 +620,25 @@ pub trait Kernel {
 
     /// Where a point is relative to a solid body (P3.8: whether a face tool is a pocket or a
     /// boss), within `tol`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use cadrs_kernel::{DefaultKernel, Extent, Kernel, PointClass};
+    /// # use nalgebra::Point3;
+    /// # use cadrs_kernel::{Curve2, Loop, Plane, Profile, Region};
+    /// # fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Profile {
+    /// #     let c = [nalgebra::Point2::new(x0, y0), nalgebra::Point2::new(x1, y0), nalgebra::Point2::new(x1, y1), nalgebra::Point2::new(x0, y1)];
+    /// #     let curves = (0..4).map(|i| Curve2::Line { a: c[i], b: c[(i + 1) % 4], source: None }).collect();
+    /// #     Profile::new(Plane::top(), vec![Region { outer: Loop { curves }, holes: vec![], source: None }])
+    /// # }
+    /// let mut k = DefaultKernel::new();
+    /// let block = k.extrude(&rect(0.0, 0.0, 20.0, 10.0), Extent::Blind(5.0))?.bodies[0];
+    /// assert_eq!(k.classify(block, Point3::new(10.0, 5.0, 2.5), 1e-6)?, PointClass::Inside);
+    /// assert_eq!(k.classify(block, Point3::new(10.0, 5.0, 5.0), 1e-6)?, PointClass::OnBoundary);
+    /// assert_eq!(k.classify(block, Point3::new(30.0, 5.0, 2.5), 1e-6)?, PointClass::Outside);
+    /// # Ok::<(), cadrs_kernel::KernelError>(())
+    /// ```
     fn classify(&self, body: BodyId, point: Point3<f64>, tol: f64) -> Result<PointClass>;
     /// Rounds `edges` (and the edges tangent to them) with a constant `radius`: the rolling-ball
     /// fillet, [`Kernel::fillet_with`] with [`FilletSpec::radius`].
@@ -570,6 +673,25 @@ pub trait Kernel {
     /// Bevels `edges` (and the edges tangent to them) by `spec`'s distances measured along each
     /// face ([`Kernel::chamfer_with`] with the default options). Errors and history as
     /// [`Kernel::fillet`]'s: chamfer faces are generated [`Origin::FromEdge`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use cadrs_kernel::{ChamferSpec, DefaultKernel, Extent, Kernel};
+    /// # use cadrs_kernel::{Curve2, Loop, Plane, Profile, Region};
+    /// # fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Profile {
+    /// #     let c = [nalgebra::Point2::new(x0, y0), nalgebra::Point2::new(x1, y0), nalgebra::Point2::new(x1, y1), nalgebra::Point2::new(x0, y1)];
+    /// #     let curves = (0..4).map(|i| Curve2::Line { a: c[i], b: c[(i + 1) % 4], source: None }).collect();
+    /// #     Profile::new(Plane::top(), vec![Region { outer: Loop { curves }, holes: vec![], source: None }])
+    /// # }
+    /// let mut k = DefaultKernel::new();
+    /// let block = k.extrude(&rect(0.0, 0.0, 20.0, 10.0), Extent::Blind(5.0))?.bodies[0];
+    /// let edge = k.edges(block)?.into_iter().find(|e| (e.length - 20.0).abs() < 1e-9).unwrap().id;
+    /// let r = k.chamfer(block, &[edge], ChamferSpec::EqualDistance(1.0))?;
+    /// // The bevel takes a right triangle of legs 1 along the 20 mm edge: 10.
+    /// assert!((k.mass_properties(r.bodies[0])?.volume - 990.0).abs() < 1e-6);
+    /// # Ok::<(), cadrs_kernel::KernelError>(())
+    /// ```
     fn chamfer(&mut self, body: BodyId, edges: &[EdgeId], spec: ChamferSpec) -> Result<OpResult>;
     /// Hollows a solid inward to walls `thickness` thick, open where the faces `remove` were
     /// ([`Kernel::shell_with`] inward, rounded joins).
@@ -611,6 +733,26 @@ pub trait Kernel {
     /// continues (a face split in pieces lists each piece; merged faces list each input);
     /// input faces left in no result face are `deleted`. The result is a body `Body::check`
     /// passes, or an `InvalidResult` error.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use cadrs_kernel::{DefaultKernel, Extent, HealOp, Kernel};
+    /// # use cadrs_kernel::{Curve2, Loop, Plane, Profile, Region};
+    /// # fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Profile {
+    /// #     let c = [nalgebra::Point2::new(x0, y0), nalgebra::Point2::new(x1, y0), nalgebra::Point2::new(x1, y1), nalgebra::Point2::new(x0, y1)];
+    /// #     let curves = (0..4).map(|i| Curve2::Line { a: c[i], b: c[(i + 1) % 4], source: None }).collect();
+    /// #     Profile::new(Plane::top(), vec![Region { outer: Loop { curves }, holes: vec![], source: None }])
+    /// # }
+    /// let mut k = DefaultKernel::new();
+    /// let block = k.extrude(&rect(0.0, 0.0, 20.0, 10.0), Extent::Blind(5.0))?.bodies[0];
+    /// // A sound body comes through unchanged in shape.
+    /// let ops = [HealOp::Fix { precision: 1e-7, max_tolerance: 1e-3 }, HealOp::UpdateTolerance];
+    /// let healed = Kernel::heal(&mut k, block, &ops)?.bodies[0];
+    /// assert_eq!(k.faces(healed)?.len(), 6);
+    /// assert!((k.mass_properties(healed)?.volume - 1000.0).abs() < 1e-9);
+    /// # Ok::<(), cadrs_kernel::KernelError>(())
+    /// ```
     fn heal(&mut self, body: BodyId, ops: &[HealOp]) -> Result<OpResult>;
 
     /// The fillet of Onshape's Edge tab (P3.6, PS14.2–14.6): a radius or a constant width, and
@@ -655,10 +797,52 @@ pub trait Kernel {
     /// A draft (P3.10, PS4.9): the faces turned by the angle about where they meet the neutral
     /// plane, for the pull direction; the other faces follow. Faces kept or drafted are
     /// `modified`. Only planes, cylinders and cones can be drafted.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use cadrs_kernel::{DefaultKernel, DraftSpec, Extent, Kernel};
+    /// # use nalgebra::{Point3, Vector3};
+    /// # use cadrs_kernel::{Curve2, Loop, Plane, Profile, Region};
+    /// # fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Profile {
+    /// #     let c = [nalgebra::Point2::new(x0, y0), nalgebra::Point2::new(x1, y0), nalgebra::Point2::new(x1, y1), nalgebra::Point2::new(x0, y1)];
+    /// #     let curves = (0..4).map(|i| Curve2::Line { a: c[i], b: c[(i + 1) % 4], source: None }).collect();
+    /// #     Profile::new(Plane::top(), vec![Region { outer: Loop { curves }, holes: vec![], source: None }])
+    /// # }
+    /// let mut k = DefaultKernel::new();
+    /// let block = k.extrude(&rect(-10.0, -10.0, 10.0, 10.0), Extent::Blind(10.0))?.bodies[0];
+    /// let sides = k.faces(block)?.into_iter().filter(|f| f.plane.is_some_and(|p| p.normal.z.abs() < 1e-9)).map(|f| f.id).collect();
+    /// // The four sides leaned in 5° about the bottom (pull +Z): a square frustum.
+    /// let angle = 5f64.to_radians();
+    /// let spec = DraftSpec { faces: sides, angle, pull: Vector3::z_axis(), neutral: Point3::origin(), neutral_normal: None, tangent_propagation: true };
+    /// let drafted = k.draft(block, &spec)?.bodies[0];
+    /// let (a, b) = (20.0, 20.0 - 2.0 * 10.0 * angle.tan());
+    /// let want = 10.0 / 3.0 * (a * a + b * b + a * b);
+    /// assert!((k.mass_properties(drafted)?.volume - want).abs() < 1e-6 * want);
+    /// # Ok::<(), cadrs_kernel::KernelError>(())
+    /// ```
     fn draft(&mut self, body: BodyId, spec: &DraftSpec) -> Result<OpResult>;
 
     /// The solid with its faces offset (P3.10, the Boolean feature's Subtract offset): every
     /// face moved outward by `distance`, or by its own distance. Faces are `modified`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use cadrs_kernel::{DefaultKernel, Extent, Kernel, OffsetSpec};
+    /// # use cadrs_kernel::{Curve2, Loop, Plane, Profile, Region};
+    /// # fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Profile {
+    /// #     let c = [nalgebra::Point2::new(x0, y0), nalgebra::Point2::new(x1, y0), nalgebra::Point2::new(x1, y1), nalgebra::Point2::new(x0, y1)];
+    /// #     let curves = (0..4).map(|i| Curve2::Line { a: c[i], b: c[(i + 1) % 4], source: None }).collect();
+    /// #     Profile::new(Plane::top(), vec![Region { outer: Loop { curves }, holes: vec![], source: None }])
+    /// # }
+    /// let mut k = DefaultKernel::new();
+    /// let block = k.extrude(&rect(0.0, 0.0, 20.0, 10.0), Extent::Blind(5.0))?.bodies[0];
+    /// // Every face out by 1 with sharp corners: a 22 × 12 × 7 block.
+    /// let grown = k.offset(block, &OffsetSpec { distance: 1.0, faces: vec![], sharp: true })?.bodies[0];
+    /// assert!((k.mass_properties(grown)?.volume - 22.0 * 12.0 * 7.0).abs() < 1e-6);
+    /// # Ok::<(), cadrs_kernel::KernelError>(())
+    /// ```
     fn offset(&mut self, body: BodyId, spec: &OffsetSpec) -> Result<OpResult>;
 
     /// The solid with faces given new surfaces (SMLib's `SmBrep::LocalOperation`, a direct
@@ -666,6 +850,17 @@ pub trait Kernel {
     /// neighbours, the topology kept, each face keeping the side its material is on. Faces are
     /// `modified`.
     fn replace_faces(&mut self, body: BodyId, faces: &[FaceReplacement]) -> Result<OpResult>;
+
+    /// Move face's Translate and Rotate (Onshape's Move face): the faces moved rigidly by
+    /// `motion` (a translation or a rotation, not a reflection) and the faces round them
+    /// extended or trimmed to meet them where they now are, the topology kept. Moving faces
+    /// along their normals is [`Kernel::offset`] with per-face distances. Faces are `modified`.
+    /// A move that would change the topology (a face shrinking to nothing, or running into a
+    /// face it doesn't border) is an `InvalidParameter` error, never a wrong body.
+    fn move_faces(&mut self, body: BodyId, faces: &[FaceId], motion: &Motion) -> Result<OpResult> {
+        let _ = (body, faces, motion);
+        Err(KernelError::Unsupported("Move face by a translation or rotation"))
+    }
 
     /// A fillet whose radius varies along each edge (P3.10, PS14.6 Variable fillet). Every edge
     /// tangent to a listed edge must be listed too (OCCT continues a fillet along them). With
@@ -854,7 +1049,7 @@ pub trait Kernel {
         let r = self.boolean(BoolOp::Intersect, a, &[b])?;
         let v = self.mass_properties(r.bodies[0]).map(|m| m.volume).unwrap_or(0.0);
         self.release(r.bodies[0]);
-        Ok(v > 1e-9)
+        Ok(v > tol::ROUNDOFF)
     }
 
     /// A tight axis-aligned bounding box of the body's exact geometry.
@@ -910,6 +1105,27 @@ pub trait Kernel {
 
     /// Reads a STEP or IGES file (P3F.2, [`exchange`]): each distinct part once as a body, with
     /// its occurrences (placements and names) as the file's assembly structure gives them.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use cadrs_kernel::{DefaultKernel, Extent, Kernel};
+    /// # use cadrs_kernel::exchange::ExchangeFormat;
+    /// # use cadrs_kernel::{Curve2, Loop, Plane, Profile, Region};
+    /// # fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Profile {
+    /// #     let c = [nalgebra::Point2::new(x0, y0), nalgebra::Point2::new(x1, y0), nalgebra::Point2::new(x1, y1), nalgebra::Point2::new(x0, y1)];
+    /// #     let curves = (0..4).map(|i| Curve2::Line { a: c[i], b: c[(i + 1) % 4], source: None }).collect();
+    /// #     Profile::new(Plane::top(), vec![Region { outer: Loop { curves }, holes: vec![], source: None }])
+    /// # }
+    /// let mut k = DefaultKernel::new();
+    /// let block = k.extrude(&rect(0.0, 0.0, 20.0, 10.0), Extent::Blind(5.0))?.bodies[0];
+    /// // Written as STEP and read back: the same solid.
+    /// let bytes = k.export_model(ExchangeFormat::Step, "model", &[(block, "block".into())], &[])?;
+    /// let m = k.import_model(ExchangeFormat::Step, &bytes)?;
+    /// assert_eq!(m.parts.len(), 1);
+    /// assert!((k.mass_properties(m.parts[0].body)?.volume - 1000.0).abs() < 1e-6);
+    /// # Ok::<(), cadrs_kernel::KernelError>(())
+    /// ```
     fn import_model(&mut self, format: exchange::ExchangeFormat, bytes: &[u8]) -> Result<exchange::ImportedModel>;
 
     /// Writes `parts` (bodies with names) to STEP or IGES (P3F.2). With `instances`, the file
@@ -996,49 +1212,53 @@ pub trait Kernel {
     /// every edge reached from it through vertices where the two edges' tangents are parallel
     /// (within [`TANGENT_ANGLE`]). In id order.
     fn tangent_chain(&self, body: BodyId, edge: EdgeId) -> Result<Vec<EdgeId>> {
-        let edges = self.edges(body)?;
-        let vertices = self.vertices(body)?;
-        let tol = naming::joint_tolerance(&edges);
-        let get = |id: EdgeId| edges.iter().find(|e| e.id == id);
-        if get(edge).is_none() {
-            return Err(KernelError::InvalidParameter(format!("unknown {edge:?}")));
+        tangent_chain_of(&self.edges(body)?, &self.vertices(body)?, edge)
+    }
+}
+
+/// [`Kernel::tangent_chain`] over a body's edges and vertices (their lengths aren't used: a
+/// kernel may leave them out).
+pub(crate) fn tangent_chain_of(edges: &[EdgeInfo], vertices: &[VertexInfo], edge: EdgeId) -> Result<Vec<EdgeId>> {
+    let tol = naming::joint_tolerance(edges);
+    let get = |id: EdgeId| edges.iter().find(|e| e.id == id);
+    if get(edge).is_none() {
+        return Err(KernelError::InvalidParameter(format!("unknown {edge:?}")));
+    }
+    // The tangent of an edge where it touches the point `p` (either end of a closed edge).
+    let tangents_at = |e: &EdgeInfo, p: Point3<f64>| -> Vec<nalgebra::Vector3<f64>> {
+        let mut t = Vec::new();
+        if (e.start - p).norm() < tol {
+            t.push(e.start_tangent);
         }
-        // The tangent of an edge where it touches the point `p` (either end of a closed edge).
-        let tangents_at = |e: &EdgeInfo, p: Point3<f64>| -> Vec<nalgebra::Vector3<f64>> {
-            let mut t = Vec::new();
-            if (e.start - p).norm() < tol {
-                t.push(e.start_tangent);
-            }
-            if (e.end - p).norm() < tol {
-                t.push(e.end_tangent);
-            }
-            t
-        };
-        let cos = TANGENT_ANGLE.cos();
-        let mut chain = vec![edge];
-        let mut todo = vec![edge];
-        while let Some(cur) = todo.pop() {
-            let Some(e) = get(cur) else { continue };
-            for v in vertices.iter().filter(|v| v.edges.contains(&cur)) {
-                let mine = tangents_at(e, v.point);
-                for &other in &v.edges {
-                    if chain.contains(&other) {
-                        continue;
-                    }
-                    let Some(o) = get(other) else { continue };
-                    let tangent = tangents_at(o, v.point)
-                        .iter()
-                        .any(|t| mine.iter().any(|m| m.dot(t).abs() >= cos));
-                    if tangent {
-                        chain.push(other);
-                        todo.push(other);
-                    }
+        if (e.end - p).norm() < tol {
+            t.push(e.end_tangent);
+        }
+        t
+    };
+    let cos = TANGENT_ANGLE.cos();
+    let mut chain = vec![edge];
+    let mut todo = vec![edge];
+    while let Some(cur) = todo.pop() {
+        let Some(e) = get(cur) else { continue };
+        for v in vertices.iter().filter(|v| v.edges.contains(&cur)) {
+            let mine = tangents_at(e, v.point);
+            for &other in &v.edges {
+                if chain.contains(&other) {
+                    continue;
+                }
+                let Some(o) = get(other) else { continue };
+                let tangent = tangents_at(o, v.point)
+                    .iter()
+                    .any(|t| mine.iter().any(|m| m.dot(t).abs() >= cos));
+                if tangent {
+                    chain.push(other);
+                    todo.push(other);
                 }
             }
         }
-        chain.sort_by_key(|e| e.0);
-        Ok(chain)
     }
+    chain.sort_by_key(|e| e.0);
+    Ok(chain)
 }
 
 /// How far apart (radians) two edges' tangents may be at a shared vertex and still count as

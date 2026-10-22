@@ -58,7 +58,7 @@ pub fn project_along(s: &Surface, p: &P3, hint: Option<(f64, f64)>, periods: [Op
         let (x, su, sv) = s.d1(q.x, q.y);
         let d = p - x;
         let n = d.norm();
-        n <= 1e-4 * (1.0 + p.coords.norm()) && d.dot(&su).abs() <= 1e-6 * n * su.norm() && d.dot(&sv).abs() <= 1e-6 * n * sv.norm()
+        n <= 1e-4 * (1.0 + p.coords.norm()) && d.dot(&su).abs() <= tol::REL_POINT * n * su.norm() && d.dot(&sv).abs() <= tol::REL_POINT * n * sv.norm()
     };
     if hint.is_some() && (s.eval(q.x, q.y) - p).norm() > near_enough && !foot(q) {
         let (u2, v2) = s.project(p, None);
@@ -125,7 +125,7 @@ fn beyond_range(s: &Surface, p: &P3, q: P2) -> Option<P2> {
     let (eu, ev) = ((u1 - u0) * 0.2, (v1 - v0) * 0.2);
     let ok = u.is_finite() && v.is_finite() && u > u0 - eu && u < u1 + eu && v > v0 - ev && v < v1 + ev;
     // It must reach the point (the extension merely passing nearer isn't the surface).
-    (ok && (s.eval(u, v) - p).norm() <= 1e-6 * (1.0 + p.coords.norm())).then_some(P2::new(u, v))
+    (ok && (s.eval(u, v) - p).norm() <= tol::REL_POINT * (1.0 + p.coords.norm())).then_some(P2::new(u, v))
 }
 
 /// Whether u (first) and v (second) are free at `q`: the surface doesn't move along them
@@ -244,7 +244,7 @@ fn exact(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve> {
             Some(flatten(pc))
         }
         Surface::Cylinder { f, r } => match c {
-            Curve::Line { o, d } if d.cross(&f.z).norm() < 1e-12 * d.norm() => {
+            Curve::Line { o, d } if d.cross(&f.z).norm() < tol::REL_FINE * d.norm() => {
                 let l = f.local(o);
                 Some(line2(P2::new(l.y.atan2(l.x), l.z), V2::new(0.0, d.dot(&f.z))))
             }
@@ -286,7 +286,7 @@ fn exact(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve> {
                 let v = l.z.atan2((l.x * l.x + l.y * l.y).sqrt());
                 Some(line2(P2::new(ang(f, x), v), V2::new(sgn, 0.0)))
             }
-            Curve::Circle { c: cc, x, y, .. } if (cc - f.o).norm() < tol::ROUNDOFF && x.cross(y).dot(&f.z).abs() < 1e-12 => {
+            Curve::Circle { c: cc, x, y, .. } if (cc - f.o).norm() < tol::ROUNDOFF && x.cross(y).dot(&f.z).abs() < tol::ANGULAR_FINE => {
                 // A meridian: u const, v = ±t + v0, in the half plane holding the arc.
                 let m = c.point((t0 + t1) * 0.5) - f.o;
                 let side = m - f.z * m.dot(&f.z);
@@ -304,14 +304,18 @@ fn exact(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve> {
             }
             _ => None,
         },
-        Surface::Torus { f, rmaj, .. } => match c {
+        Surface::Torus { f, rmaj, rmin } => match c {
             Curve::Circle { c: cc, x, y, .. } if coaxial_circle(f, cc, x, y) => {
                 let sgn = x.cross(y).dot(&f.x.cross(&f.y)).signum();
                 let l = f.local(&c.point(0.0));
-                let v = l.z.atan2((l.x * l.x + l.y * l.y).sqrt() - rmaj);
-                Some(line2(P2::new(ang(f, x), v), V2::new(sgn, 0.0)))
+                let rho = (l.x * l.x + l.y * l.y).sqrt();
+                // On a spindle torus (minor radius past the major) a circle of the part past
+                // the axis lies on the far meridian: u + π, at radius −ρ.
+                let far = rmin > rmaj && ((-rho - rmaj).hypot(l.z) - rmin).abs() < ((rho - rmaj).hypot(l.z) - rmin).abs();
+                let (u, v) = if far { (ang(f, x) + PI, l.z.atan2(-rho - rmaj)) } else { (ang(f, x), l.z.atan2(rho - rmaj)) };
+                Some(line2(P2::new(u, v), V2::new(sgn, 0.0)))
             }
-            Curve::Circle { c: cc, x, y, .. } if x.cross(y).dot(&f.z).abs() < 1e-12 => {
+            Curve::Circle { c: cc, x, y, .. } if x.cross(y).dot(&f.z).abs() < tol::ANGULAR_FINE => {
                 let l = f.local(cc);
                 if l.z.abs() > tol::ROUNDOFF || ((l.x * l.x + l.y * l.y).sqrt() - rmaj).abs() > tol::ROUNDOFF {
                     return None;
@@ -334,7 +338,7 @@ fn exact(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve> {
             _ => None,
         },
         Surface::Extrusion { c: base, d } => match c {
-            Curve::Line { o, d: dl } if dl.cross(d).norm() < 1e-12 * dl.norm() => {
+            Curve::Line { o, d: dl } if dl.cross(d).norm() < tol::REL_FINE * dl.norm() => {
                 let (u, v) = s.project(o, None);
                 let _ = base;
                 Some(line2(P2::new(u, v), V2::new(0.0, dl.dot(d) / d.norm_squared())))
@@ -405,7 +409,7 @@ pub(super) fn iso_line(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve
     let d = (b - a) / (t1 - t0);
     let line = Curve::Line { o: P3::new(a.x - d.x * t0, a.y - d.y * t0, 0.0), d: V3::new(d.x, d.y, 0.0) };
     // Straight in uv and affine in t, and an iso-line (u or v constant).
-    if d.x.abs() > 1e-12 * d.y.abs().max(tol::TINY) && d.y.abs() > 1e-12 * d.x.abs().max(tol::TINY) {
+    if d.x.abs() > tol::REL_FINE * d.y.abs().max(tol::TINY) && d.y.abs() > tol::REL_FINE * d.x.abs().max(tol::TINY) {
         return None;
     }
     let tol = 1e-10 * (1.0 + a.coords.norm() + b.coords.norm());

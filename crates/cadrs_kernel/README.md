@@ -19,9 +19,10 @@ crates/cadrs_kernel/
   src/projection.rs   # drawing-view projection types and source matching (P3C.2)
   src/native/          # the B-rep kernel (see "The native kernel" below)
   src/backend/mod.rs   # `backend::native::NativeKernel` (also `cadrs_kernel::DefaultKernel`)
-  tests/conformance.rs # the conformance suite, 83 cases
+  tests/conformance.rs # the conformance suite, 84 cases
   tests/occt_*.rs, smlib_*.rs # suites generated from OCCT's and SMLib's tests (see "Tests")
   tests/fuzz_readers.rs # property tests: no input panics a reader or a B-spline constructor
+  tests/exchange_corpus.rs # OCCT's dataset STEP and IGES files read and checked (needs the dataset)
   tests/native_debug.rs # reproductions and timings (several replay CADRS_DUMP_DIR dumps)
 ```
 There's no Bevy dependency. `cadrs_core` depends on `cadrs_kernel`, and features rebuild through it
@@ -78,7 +79,10 @@ let step = k.export_step(&round.bodies)?;               // and import_step / imp
   `read_body` are the exact native body format (`native::bodyio`), which keeps every face,
   edge and vertex in order, so names stay valid across a cache or the network.
 - **Determinism.** The same inputs are to give the same bytes (bodies, meshes, STEP text)
-  whatever the number of rayon threads; `tests/determinism.rs` checks it.
+  whatever the number of rayon threads; `tests/determinism.rs` checks it for every family of
+  operation (extrude, revolve, the three booleans, fillet, chamfer, shell, offsets, draft, sweep,
+  loft, sew, heal, tessellation, mass properties, STEP export and import), run twice and on 1
+  and 4 threads.
 - `Profile` is built from `cadrs_sketch` regions using **exact** boundary curves (lines, arcs,
   circles, ellipses, Béziers) on a sketch `Plane`, never the polyline used for display.
 - About 45 trait methods default to `Unsupported` so a backend can start small; the native
@@ -86,8 +90,10 @@ let step = k.export_step(&round.bodies)?;               // and import_step / imp
 
 ### Curated API
 `native/mod.rs` declares the kernel's modules `pub(crate)` and re-exports a small stable set:
-`NativeKernel`; the B-rep data model (`Body`, `Vertex`, `Edge`, `Coedge`, `Face`, `Shell`,
-`Solid`, `Wire`, `CheckLevel`); its geometry (`Curve`, `Surface`, `NurbsCurve`, `NurbsSurface`)
+`NativeKernel`; the B-rep data model (`Body`, `BodyBuilder`, `Vertex`, `Edge`, `Coedge`, `Face`,
+`Shell`, `Solid`, `Wire`, `CheckLevel`: a `Body`'s entity lists are read through `Body::verts`,
+`edges`, `faces`, … and a body is built with `BodyBuilder`, which checks it; the lists are
+`pub` only under `testkit`); its geometry (`Curve`, `Surface`, `NurbsCurve`, `NurbsSurface`)
 and vector types (`P3`, `V3`, `Frame`, `Affine`); and the modules `tol` (the tolerance model)
 and `bodyio` (the body format). That, `Kernel`, `DefaultKernel` and the types are the public
 surface, all documented (`#![warn(missing_docs)]` holds for the whole crate without features).
@@ -177,7 +183,7 @@ orientation (`build::fix_senses`). Periodic faces have seams (an edge used twice
 |---|---|
 | `profile`, `sweep`, `build`, `features` | Sketch regions to profile pieces (merged across shared curves), and one sweep builder for prisms and revolutions (`SweepKind`: the side surface per piece and its p-curves); extrudes and revolves with every end type, thin walls and surfaces. |
 | `sweep::path`, `sweep::frames`, `sweep::corner`, `sweep::body` | Sweeps along paths: lines and arcs exactly (prism and revolve pieces glued at their caps); other curves with rotation-minimizing frames (double reflection), one skinned B-spline surface per profile curve over a tangent run of path curves, whose rails are exactly the surfaces' iso-curves; mitred and round corner joins; points, wires and sheets swept one kind higher. |
-| `evolved`, `cells` | Evolved solids (`Kernel::evolved`: a profile swept square to a planar spine of lines and arcs, arc joins at its outer corners) and the cells of an arrangement of solids (`Kernel::cells`). |
+| `evolved`, `cells` | Evolved solids (`Kernel::evolved`: a profile swept square to a planar spine of lines and arcs, arc joins at its outer corners; DRAW's `evolved` with wire profiles, open ones closed by lids, cut into strips that reach the spine) and the cells of an arrangement of solids (`Kernel::cells`). |
 | `loft_build` | Lofts: exact skinning of compatible section curves (two sections give ruled surfaces), or sampled interpolation with end conditions. `loft_pieces` skins sections that already correspond. |
 | `ssi` | Surface intersections: analytic cases (planes, quadrics, tori, coaxial surfaces of revolution, plane × extrusion, plane × cone as exact conics), and numeric contouring of one surface's signed distance over the other's uv box, refined onto both and fitted (projections hinted by the neighbouring point). Curve–curve and curve–surface hits. |
 | `boolean`, `boolean_kinds`, `split`, `classify`, `unify` | Booleans: a pool of the inputs' vertices and edges, split at vertex-on-edge, edge–edge, edge–face and face–face intersections; coincident faces imprinted and coincident pieces made one edge; faces split in uv; pieces classified by exact ray parity; the kept faces assembled into shells; coplanar and same-surface faces merged (`unify`). Sheets, wires and points (`boolean_kinds`): sheets split by `imprint` and their pieces kept by a point inside each, solid − sheet a split into solids, wires through `edge_bop`; the result kind per operation is tabled in the module. |
@@ -206,7 +212,13 @@ Below these, the code's round-off margins are named by meaning (all 1e-9, so res
 they were as literals): `tol::REL` (relative: scaled by a size, a span or `1 + |t|`, or a
 parameter fraction), `tol::ANGULAR` (unit vectors parallel or square, angles in radians),
 `tol::ROUNDOFF` (absolute lengths and parameters of exact geometry), and `tol::TINY` (1e-300, the
-guard of a division or normalisation against zero).
+guard of a division or normalisation against zero). A thousandth of them (1e-12) for values
+computed exactly: `tol::REL_FINE`, `ANGULAR_FINE`, `ROUNDOFF_FINE`, and `tol::DEGENERATE` (a
+computed length, norm or denominator taken as zero: no direction, nothing to divide by). At the
+merge level (1e-6): `tol::POINT` (absolute), `REL_POINT` (a fraction of a size or span),
+`ANGULAR_POINT` (directions or angles taken as the same) and `DIFF_STEP` (the step of a finite
+difference or of a nudge off a point). Bare literals of these values are left only in tests and
+where a constant names them already.
 
 Above these, vertices and edges carry their own tolerance (a read or healed body's gaps,
 `Body::fit_tolerances`, as OCCT), and operations take the larger of their own and the entities'.
@@ -229,8 +241,9 @@ size box), `InvalidParameter` and `InvalidProfile` (the caller's values), `Unsup
 `TooLarge { op }` (a radius, distance or thickness the geometry can't hold: a smaller one may
 work), `InvalidGeometry { op }` (tangent faces at a blended edge, a degenerate section, faces
 that no longer meet), `BooleanFailed { stage }` (`"face closure"`, `"validity"`, `"sheet
-union"`), `BudgetExhausted { stage }` (a boolean's or a blend's deterministic work budget ran
-out), `InvalidResult { op }` (a built body failed its check and was not returned), and
+union"`), `BlendFailed { stage }` (a local fillet or chamfer that gave up: `"rolling ball"`,
+`"corner"`, `"end"`, `"surface"`, `"trimming"`), `BudgetExhausted { stage }` (a boolean's or a
+blend's deterministic work budget ran out), `InvalidResult { op }` (a built body failed its check and was not returned), and
 `OperationFailed` for the rest. The enum is `#[non_exhaustive]`. `KernelError::message` gives
 the words without the kind's prefix; `Display` is "operation failed: ..." for every failure.
 
@@ -254,6 +267,7 @@ Debug output (on stderr; results don't change):
   the local fillet's progress, with times; the blend tool's chains, stations and corners (and why
   a local fillet fell back to it); a draft's edges and unsupported faces; a sweep's path and
   helix fits.
+- `CADRS_BOOL_WORK=1` (`boolean.rs`): each boolean's work count against its budget.
 - `CADRS_EXCHANGE_DEBUG=1`: the warnings of a STEP, IGES or BRep import. `CADRS_ORDER_DEBUG=1`:
   the DRAW harness's edge order (`explode e`, test code).
 - `CADRS_DUMP_DIR=<dir>`: shells, fillets and chamfers write their input body (exact bytes) and
@@ -286,7 +300,7 @@ default `../occt-dataset/opencascade-dataset-7.8.0` beside the checkout), `CADRS
 `PROPTEST_CASES`, `FUZZ_TRACE`, `FUZZ_REPRO` (`tests/fuzz_readers.rs`) and the `CADRS_REPRO*`
 inputs of `tests/native_debug.rs`'s replays.
 
-**Status.** All 83 conformance cases pass (`cargo test -r -p cadrs_kernel --test conformance`,
+**Status.** All 84 conformance cases pass (`cargo test -r -p cadrs_kernel --test conformance`,
 about 3 s). The measured state of every suite is the gate's: `tools/kernel_gate.sh` (below).
 `python3 -I tools/kernel_scoreboard.py` shows its last results per test binary (cases run,
 passing, known failures, stale ones, regressions, hangs, and why the rest don't run yet); with no
@@ -296,17 +310,23 @@ results, or with `--static`, it falls back to reading the suites' source, which 
 - Unit tests in the modules (`cargo test -r -p cadrs_kernel --lib`), the conformance suite, and
   the suites generated from OCCT's DRAW scripts (`tests/occt_*.rs`, `tools/occt_to_rust.py`) and
   SMLib's tests (`tests/smlib_*.rs`). A generated case listed in `tools/occt_known_failures.txt`
-  or `tools/smlib_known_failures*` asserts that it still fails; when it passes, remove the line
-  and regenerate the file.
+  or `tools/smlib_known_failures*` asserts that it still fails, and that it fails by returning
+  its error: a panic (an index out of bounds in the test code, an unwrap) fails the test, and
+  the gate calls it a PANIC. When it passes, remove the line and regenerate the file. Every line
+  of `tools/occt_known_failures.txt` gives its reason, inline (`group case  # why`) or in the
+  comment just above its group of lines (a blank line ends a group); the generator refuses a
+  line without one, copies the reason above the generated case, and warns about lines that
+  aren't a converted case. A reason holding `[panic: text]` lets the case panic with that text.
+  The DRAW harness reports a script's sub-shape past the end of an `explode` as a "topology
+  mismatch" failure (`draw::sub`): the shape exploded has other topology than OCCT's.
 - The generated suites run on a DRAW-style harness (`native::draw`) and the SMLib oracle's body
   writer (`native::oracle`): test code, built only for tests and with the `testkit` feature
   (the crate's own tests turn it on through a dev-dependency on itself), not kernel API.
-- `tests/fuzz_readers.rs`: property tests (proptest) that feed the STEP, IGES, OCCT BRep and
-  body readers edited files (numbers swapped for extreme ones, bytes flipped, cut short) and
+- `tests/fuzz_readers.rs`: property tests (proptest) that feed the STEP, IGES, OCCT BRep, SMLib
+  and body readers edited files (numbers swapped for extreme ones, bytes flipped, cut short) and
   random bytes, and the B-spline constructors random knots, degrees, weights and points; nothing
   may panic. `PROPTEST_CASES=<n>` runs more cases, `FUZZ_TRACE=1` prints each, and the ignored
-  `replay` test reads the file `FUZZ_REPRO` names with every reader. (The SMLib reader's case is
-  ignored until that reader stops panicking on bad face references.)
+  `replay` test reads the file `FUZZ_REPRO` names with every reader (the one ignored test).
 - Clippy is a gate: `tools/kernel_clippy.sh` (all targets, warnings denied; CI runs it). The lint
   levels are in the crate's `Cargo.toml` (`unsafe_code` denied).
 - The full `cargo test -r -p cadrs_kernel` takes about 12 minutes; run the suites a change
@@ -315,23 +335,32 @@ results, or with `--static`, it falls back to reading the suites' source, which 
   tree (`git archive HEAD`, or `--rev`; `--tree DIR` tests a tree as it is) and regenerates the
   gitignored OCCT suites there (`OCCT_TESTS`: OCCT 7.8.1's `tests/`; `CADRS_OCCT_DATA`). It
   checks that the library builds without features (`cargo check -p cadrs_kernel`: every test
-  turns `testkit` on) and that `cargo check -p cadrs_core`, the kernel's consumer, passes. Then
+  turns `testkit` on), that `cargo check -p cadrs_core`, the kernel's consumer, passes, and that
+  `tools/kernel_clippy.sh` is clean. Then
   it builds with `--profile kernel` and runs every test binary, `RUST_TEST_THREADS` (3) at a
   time, with every kind of ignored test that can run: the known failures, `slow`, and the ones
   ignored with a reason (not the OCCT suites' cases waiting for a command, whose bodies are
   comments, nor debugging tools and tests that need a file, a checkout or the SMLib oracle they
   aren't given). Each case is a pass, a known failure still failing, STALE (a listed known
   failure that passes: take it off the list), STALE-IGNORE (an ignored test that passes:
-  un-ignore it), a REGRESSION (an unlisted failure), a HANG (over `--hang`, 900 s; the binary
+  un-ignore it), a PANIC (a listed known failure that panicked instead of returning its
+  error), a REGRESSION (an unlisted failure), a HANG (over `--hang`, 900 s; the binary
   goes on without it) or a CRASH; slow over 60 s is flagged. With a baseline (`--baseline`, the
   durations of an earlier run; `--write-baseline` writes one when the gate passes), a case more
   than 3× and 5 s slower than its baseline, scaled by the run's load (the median ratio of the
   durations), is a SLOW-REGRESSION. It writes `results.json` and `summary.txt` (a table per
   suite, the lists, the slowest 20 cases) to `$CARGO_TARGET_DIR/kernel_gate/` and exits 1 when
-  any list or check fails. `--only occt_blend,smlib_fillets` runs some binaries. CI runs the
-  checks, clippy and the fast kernel tests on every push and pull request (the merge
-  requirement), and the gate nightly on main and kernel-10 against the branch's last passing
-  run (delete its `kernel-gate-baseline-<branch>-*` Actions cache to accept a slowdown).
+  any list or check fails. `results.json` records the commit measured: the exported revision,
+  or for `--tree` the tree's git HEAD (`+dirty` with uncommitted changes), `--commit SHA` or
+  `$CADRS_GATE_COMMIT`; a baseline records the commit of the run it came from
+  (`kernel_gate.py --make-baseline RESULTS FILE [--commit SHA]`). `--only
+  occt_blend,smlib_fillets` builds and runs some binaries; `--sample occt_boolean=4` runs every
+  4th case of a binary. CI runs the checks, clippy and a fast subset of the gate on every push
+  and pull request (the merge requirement: the unit tests, conformance, smlib_booleans,
+  validity, determinism and every 4th runnable case of the OCCT boolean suite, generated
+  without the dataset), and the whole gate nightly on main and kernel-10 against the branch's
+  last passing run (delete its `kernel-gate-baseline-<branch>-*` Actions cache to accept a
+  slowdown).
 
 **GPU** (spike, `crates/cadrs_gpu_kernels`, `crates/cadrs_gpu`; see `bench/gpu_spike.md` in the
 working notes): kernels written in Rust compile to SPIR-V with rust-gpu (f64 included) and run
@@ -432,8 +461,17 @@ one STEP file with their product names), used by `assembly::interference::{check
 
 The native reader and writer are `native::step` and `native::iges`, sharing `native::xbuild`,
 which rebuilds the files' faces into valid bodies (p-curves fitted where a file has none; faces
-sewn by their edges). On 638 real files (OCCT's samples, Onshape, FreeCAD, KiCad) 624 read to
-valid solids; the others have non-manifold edges or gaps in the files themselves. FreeCAD reads
+sewn by their edges). `tests/exchange_corpus.rs` reads every STEP and IGES file of OCCT's public
+dataset (389: OCCT's samples and its bug-report files, many broken on purpose) and checks each
+part (valid topology within the file's own tolerance, each solid's volume positive, equal to its
+tessellation's within 1 % and unchanged by a move, no face dropped): 315 read clean, 198 of them
+with solids. The other 74 are listed in the test with the first problem each hits (the commonest:
+p-curves off their edges by more than a ten-thousandth of the model, loops that don't close,
+files with no geometry of their own), and the
+test fails when a listed file reads clean or an unlisted one doesn't. The gate runs it (it needs
+the dataset, so CI's per-push subset doesn't). An earlier count, 624 of 638 files from OCCT's
+samples, Onshape, FreeCAD and KiCad, was taken on a corpus that isn't in the repository; it is
+superseded by this one. FreeCAD reads
 our STEP and IGES exports as valid solids with the same volume and area to about 1e-14.
 
 **Mesh files are ours**, not a backend's: `exchange::write_stl_binary`, `write_stl_ascii` and

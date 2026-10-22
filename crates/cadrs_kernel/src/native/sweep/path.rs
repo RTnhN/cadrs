@@ -285,7 +285,7 @@ fn sweep_spine(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, spine:
                 let axis = x.cross(y).normalize();
                 // The axis must lie in the profile's plane (where it will be when the run ends:
                 // only checked once the run is flushed, so be conservative).
-                run.is_empty() && axis.dot(&place.normal).abs() <= 1e-7 && (c - place.origin).dot(&place.normal).abs() <= 1e-6
+                run.is_empty() && axis.dot(&place.normal).abs() <= 1e-7 && (c - place.origin).dot(&place.normal).abs() <= tol::POINT
             }
             _ => false,
         };
@@ -339,7 +339,7 @@ fn sweep_spine(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, spine:
 
 /// The least rotation about `o` taking direction `a` to `b`.
 fn least_turn(a: &V3, b: &V3, o: &P3) -> Affine {
-    let r = match a.cross(b).try_normalize(1e-12) {
+    let r = match a.cross(b).try_normalize(tol::DEGENERATE) {
         Some(axis) => nalgebra::Rotation3::from_axis_angle(&nalgebra::Unit::new_unchecked(axis), a.angle(b)).into_inner(),
         None => nalgebra::Matrix3::identity(),
     };
@@ -439,7 +439,7 @@ pub(crate) fn sweep_spines(faces: &[MergedFace], chains: &[Vec<Piece>], plane: P
         let (mut these, mut at) = sweep_spine(faces, chains, plane, &spine, frames, join, solid)?;
         if std::env::var("CADRS_SWEEP_DEBUG").is_ok() {
             for t in &these {
-                eprintln!("piece: volume {} faces {} solids {} check {:?}", crate::native::mass::body_mass(&t.body).volume, t.body.faces.len(), t.body.solids.len(), t.body.check());
+                eprintln!("piece: volume {} faces {} solids {} check {:?}", crate::native::mass::body_volume(&t.body), t.body.faces.len(), t.body.solids.len(), t.body.check());
                 for (fi, f) in t.body.faces.iter().enumerate() {
                     let q = crate::native::mass::face_integrals(&t.body, f, &V3::zeros());
                     let pcs: Vec<String> = f.loops.iter().flatten().map(|c| match &c.pc { Curve::Line { d, .. } => format!("L({:.2e},{:.2e})", d.x, d.y), Curve::Nurbs(n) => format!("N{}", n.cps.len()), _ => "?".into() }).collect();
@@ -498,7 +498,7 @@ pub(crate) fn sweep_spines(faces: &[MergedFace], chains: &[Vec<Piece>], plane: P
             compound(acc, p)
         };
         if std::env::var("CADRS_SWEEP_DEBUG").is_ok() {
-            eprintln!("join: volume {} faces {}", crate::native::mass::body_mass(&acc.body).volume, acc.body.faces.len());
+            eprintln!("join: volume {} faces {}", crate::native::mass::body_volume(&acc.body), acc.body.faces.len());
         }
     }
     // A closed path: the last piece's end cap meets the first piece's start cap.
@@ -531,7 +531,7 @@ pub(crate) fn glue(a: &Tagged, b: &Tagged) -> Option<Tagged> {
     let mut pairs: Vec<(usize, usize)> = Vec::new();
     for (fa, ca, aa) in &ea {
         for (fb, cb, ab) in &sb {
-            if (ca - cb).norm() < 1e-6 && (aa - ab).abs() < 1e-6 * (1.0 + aa) {
+            if (ca - cb).norm() < tol::POINT && (aa - ab).abs() < tol::REL_POINT * (1.0 + aa) {
                 pairs.push((*fa, *fb));
             }
         }
@@ -554,12 +554,12 @@ pub(crate) fn glue(a: &Tagged, b: &Tagged) -> Option<Tagged> {
             let found = ea_list.iter().copied().find(|&x| {
                 let o = &body.edges[x];
                 let om = o.point(o.mid_t());
-                (om - m).norm() < 1e-6
-                    && ((body.verts[o.v[0]].p - body.verts[e.v[0]].p).norm() < 1e-6 || (body.verts[o.v[0]].p - body.verts[e.v[1]].p).norm() < 1e-6)
+                (om - m).norm() < tol::POINT
+                    && ((body.verts[o.v[0]].p - body.verts[e.v[0]].p).norm() < tol::POINT || (body.verts[o.v[0]].p - body.verts[e.v[1]].p).norm() < tol::POINT)
             });
             let x = found?;
             let o = &body.edges[x];
-            let same = (body.verts[o.v[0]].p - body.verts[e.v[0]].p).norm() < 1e-6 && (o.v[0] != o.v[1] || o.curve.tangent(o.mid_t()).dot(&e.curve.tangent(e.mid_t())) > 0.0);
+            let same = (body.verts[o.v[0]].p - body.verts[e.v[0]].p).norm() < tol::POINT && (o.v[0] != o.v[1] || o.curve.tangent(o.mid_t()).dot(&e.curve.tangent(e.mid_t())) > 0.0);
             emap.insert(c.edge, (x, same));
             for k in 0..2 {
                 let ov = if same { o.v[k] } else { o.v[1 - k] };
@@ -625,7 +625,7 @@ pub(crate) fn glue_self(t: &Tagged) -> Option<Tagged> {
     let s = caps(t, false);
     for (fe, ce, ae) in &e {
         for (fs, cs, as_) in &s {
-            if (ce - cs).norm() < 1e-6 && (ae - as_).abs() < 1e-6 * (1.0 + ae) {
+            if (ce - cs).norm() < tol::POINT && (ae - as_).abs() < tol::REL_POINT * (1.0 + ae) {
                 // A body without the two caps, their edges identified.
                 return glue_within(t, *fe, *fs);
             }
@@ -645,10 +645,10 @@ fn glue_within(t: &Tagged, fa: usize, fb: usize) -> Option<Tagged> {
         let m = e.point(e.mid_t());
         let x = ea_list.iter().copied().find(|&x| {
             let o = &body.edges[x];
-            (o.point(o.mid_t()) - m).norm() < 1e-6
+            (o.point(o.mid_t()) - m).norm() < tol::POINT
         })?;
         let o = &body.edges[x];
-        let same = (body.verts[o.v[0]].p - body.verts[e.v[0]].p).norm() < 1e-6 && (o.v[0] != o.v[1] || o.curve.tangent(o.mid_t()).dot(&e.curve.tangent(e.mid_t())) > 0.0);
+        let same = (body.verts[o.v[0]].p - body.verts[e.v[0]].p).norm() < tol::POINT && (o.v[0] != o.v[1] || o.curve.tangent(o.mid_t()).dot(&e.curve.tangent(e.mid_t())) > 0.0);
         emap.insert(c.edge, (x, same));
         for k in 0..2 {
             vmap.insert(e.v[k], if same { o.v[k] } else { o.v[1 - k] });
@@ -713,7 +713,7 @@ fn transfer_pcurve(old: &crate::native::topo::Edge, pc: &Curve, new: &crate::nat
     let u2 = old.curve.closest(&new.point(t2), old.t[0], old.t[1]);
     let a = (u2 - u1) / (t2 - t1);
     let b = u1 - a * t1;
-    if !(a.abs() > 1e-12) {
+    if !(a.abs() > tol::DEGENERATE) {
         return None;
     }
     for f in [0.0, 0.125, 0.5, 0.875, 1.0] {

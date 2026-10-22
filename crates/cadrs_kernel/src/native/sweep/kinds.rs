@@ -36,7 +36,7 @@ impl SweepKind for Prism {
                     across: Box::new(move |t| line2(P2::origin() + a * t, b)),
                 }
             }
-            Curve::Circle { c, x, y, r } if x.cross(y).cross(&dir).norm() < 1e-12 => {
+            Curve::Circle { c, x, y, r } if x.cross(y).cross(&dir).norm() < tol::ANGULAR_FINE => {
                 let z = x.cross(y);
                 let k = z.dot(&dir);
                 SideGeo {
@@ -110,7 +110,7 @@ impl SweepKind for Revolve {
                 if ra.abs() < TOL && rb.abs() < TOL {
                     return None;
                 }
-                if dr.abs() < 1e-12 {
+                if dr.abs() < tol::DEGENERATE {
                     // Cylinder: u = s, v = h0 + dh·len·t.
                     let k = dh * len;
                     Some(SideGeo {
@@ -118,7 +118,7 @@ impl SweepKind for Revolve {
                         along: Box::new(move |s| line2(P2::new(s, h0), V2::new(0.0, k))),
                         across: Box::new(move |t| line2(P2::new(0.0, h0 + k * t), V2::new(1.0, 0.0))),
                     })
-                } else if dh.abs() < 1e-12 {
+                } else if dh.abs() < tol::DEGENERATE {
                     // Plane square to the axis at h0: uv = ρ(t)(cos s, sin s).
                     let fr = Frame { o: f.o + f.z * h0, x: f.x, y: f.y, z: f.z };
                     let k = dr * len;
@@ -156,9 +156,26 @@ impl SweepKind for Revolve {
                 let phim = wrap(sig * tm + ax, -PI, TAU);
                 let phi0 = phim - sig * tm;
                 let fr = Frame { o: f.o + f.z * hc, x: f.x, y: f.y, z: f.z };
-                let surf = if rc < TOL { Surface::Sphere { f: fr, r: *r } } else { Surface::Torus { f: fr, rmaj: rc, rmin: *r } };
+                if rc < TOL {
+                    return Some(SideGeo {
+                        surf: Surface::Sphere { f: fr, r: *r },
+                        along: Box::new(move |s| line2(P2::new(s, phi0), V2::new(0.0, sig))),
+                        across: Box::new(move |t| line2(P2::new(0.0, sig * t + phi0), V2::new(1.0, 0.0))),
+                    });
+                }
+                // An arc whose centre lies behind the axis (ρ = −rc + r cos φ: a spindle torus's
+                // part past its axis) is on the torus of the frame turned half round, whose
+                // meridian at u = s has that centre: along its x, ρ' = rc − r cos φ, so v = π − φ.
+                if f.local(c).x < 0.0 {
+                    let fr = Frame { x: -f.x, y: -f.y, ..fr };
+                    return Some(SideGeo {
+                        surf: Surface::Torus { f: fr, rmaj: rc, rmin: *r },
+                        along: Box::new(move |s| line2(P2::new(s, PI - phi0), V2::new(0.0, -sig))),
+                        across: Box::new(move |t| line2(P2::new(0.0, PI - (sig * t + phi0)), V2::new(1.0, 0.0))),
+                    });
+                }
                 Some(SideGeo {
-                    surf,
+                    surf: Surface::Torus { f: fr, rmaj: rc, rmin: *r },
                     along: Box::new(move |s| line2(P2::new(s, phi0), V2::new(0.0, sig))),
                     across: Box::new(move |t| line2(P2::new(0.0, sig * t + phi0), V2::new(1.0, 0.0))),
                 })
@@ -231,15 +248,15 @@ impl Turn {
         });
         let in_half = in_half
             && match c3 {
-                Curve::Line { d, .. } => half.y.dot(d).abs() <= 1e-12 * d.norm(),
-                Curve::Circle { x, y, .. } | Curve::Ellipse { x, y, .. } => half.y.dot(x).abs() <= 1e-12 * x.norm() && half.y.dot(y).abs() <= 1e-12 * y.norm(),
+                Curve::Line { d, .. } => half.y.dot(d).abs() <= tol::REL_FINE * d.norm(),
+                Curve::Circle { x, y, .. } | Curve::Ellipse { x, y, .. } => half.y.dot(x).abs() <= tol::REL_FINE * x.norm() && half.y.dot(y).abs() <= tol::REL_FINE * y.norm(),
                 Curve::Nurbs(_) => true,
             };
         if in_half {
             return Revolve { plane: self.plane, f: half }.side(piece, c3);
         }
         if let Curve::Line { o, d } = c3
-            && f.z.dot(d).abs() <= 1e-12 * d.norm()
+            && f.z.dot(d).abs() <= tol::REL_FINE * d.norm()
         {
             // A line square to the axis, off every half plane through it: it turns in the plane
             // at its height; uv = its point's local (x, y) turned by s.

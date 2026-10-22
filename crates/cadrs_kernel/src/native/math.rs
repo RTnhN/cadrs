@@ -43,7 +43,7 @@ impl Frame {
     pub fn from_xz(o: P3, x_hint: V3, z: V3) -> Self {
         let z = z.normalize();
         let mut x = x_hint - z * x_hint.dot(&z);
-        if x.norm() < 1e-12 {
+        if x.norm() < tol::DEGENERATE {
             x = any_perpendicular(&z);
         }
         let x = x.normalize();

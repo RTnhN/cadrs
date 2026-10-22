@@ -130,7 +130,7 @@ impl ViewportPerspective {
     /// The projection for `view` with the viewport centred at `center` in a target of `size`.
     pub fn of(view: &ViewState, center: Vec2, size: Vec2) -> Self {
         let eye = view.eye_distance();
-        Self { focal: FOCAL_PX, center, size: size.max(Vec2::ONE), near: (eye * 0.01).max(1e-3), far: eye + crate::camera::CAMERA_FAR }
+        Self { focal: FOCAL_PX, center, size: size.max(Vec2::ONE), near: (eye * 0.01).max(1e-3), far: eye + crate::camera::camera_far(view.scale) }
     }
 
     /// The view-space point (x, y, z with z < 0) at screen `px` (logical px from the target's

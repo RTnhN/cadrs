@@ -14,7 +14,9 @@
 //! The natural normal is Su × Sv; for the analytic surfaces it points away from the axis
 //! (outward from the material of a solid cylinder etc.).
 
-use std::sync::Arc;
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::sync::{Arc, Weak};
 
 use super::curve::Curve;
 use super::math::*;
@@ -197,7 +199,7 @@ impl Surface {
             }
             Surface::Cone { .. } => {
                 // Apex: the average normal is along −z·sin a (outward-ish); use a nearby point.
-                let e = 1e-6;
+                let e = tol::DIFF_STEP;
                 let d = self.d2(u, v + e);
                 d[1].cross(&d[2]).normalize()
             }
@@ -242,7 +244,7 @@ impl Surface {
                 // generator and much nearer that one: a point near this side, or inside the cone
                 // by its axis, keeps this side's foot, as faces expect.)
                 let (d_here, d_across) = (((rho - r) * ca - l.z * sa).abs(), ((-rho - r) * ca - l.z * sa).abs());
-                if d_here > 1e-6 * (1.0 + p.coords.norm()) && d_across < 0.5 * d_here {
+                if d_here > tol::REL_POINT * (1.0 + p.coords.norm()) && d_across < 0.5 * d_here {
                     let u = ang(f) + PI;
                     let u = match hint {
                         Some((hu, _)) => unwrap_near(u, hu, TAU),
@@ -257,18 +259,33 @@ impl Surface {
                 let l = f.local(p);
                 let rho = (l.x * l.x + l.y * l.y).sqrt();
                 let v = l.z.atan2(rho);
-                let u = if rho < 1e-12 { hint.map(|h| h.0).unwrap_or(0.0) } else { ang(f) };
+                let u = if rho < tol::ROUNDOFF_FINE { hint.map(|h| h.0).unwrap_or(0.0) } else { ang(f) };
                 (u, v)
             }
-            Surface::Torus { f, rmaj, .. } => {
+            Surface::Torus { f, rmaj, rmin } => {
                 let l = f.local(p);
                 let rho = (l.x * l.x + l.y * l.y).sqrt();
-                let v = l.z.atan2(rho - rmaj);
+                // A spindle torus (minor radius past the major: a revolved arc crossing its
+                // axis) reaches each side of the axis from both meridians: the point is on the
+                // far one (u + π, at radius −ρ) when that circle runs nearer it.
+                let (mut u, mut v) = (ang(f), l.z.atan2(rho - rmaj));
+                if rmin > rmaj {
+                    let near = ((rho - rmaj).hypot(l.z) - rmin).abs();
+                    let far = ((-rho - rmaj).hypot(l.z) - rmin).abs();
+                    let hint_far = hint.is_some_and(|(hu, _)| (unwrap_near(u + PI, hu, TAU) - hu).abs() < (u - hu).abs());
+                    if far < near - tol::CONFUSION || (far <= near + tol::CONFUSION && hint_far) {
+                        u = match hint {
+                            Some((hu, _)) => unwrap_near(u + PI, hu, TAU),
+                            None => wrap(u + PI, 0.0, TAU),
+                        };
+                        v = l.z.atan2(-rho - rmaj);
+                    }
+                }
                 let v = match hint {
                     Some((_, hv)) => unwrap_near(v, hv, TAU),
                     None => wrap(v, -PI, TAU),
                 };
-                (ang(f), v)
+                (u, v)
             }
             Surface::Revolution { f, m } if meridian_off_plane(f, m) => project_off_plane(f, m, p, hint),
             Surface::Revolution { f, m } => {
@@ -298,7 +315,7 @@ impl Surface {
                         let step = r.dot(&d1) / df;
                         let next = (t - step).clamp(a, b);
                         // Converged, or held at an end of the meridian.
-                        if (next - t).abs() <= 1e-12 * (1.0 + t.abs()) {
+                        if (next - t).abs() <= tol::REL_FINE * (1.0 + t.abs()) {
                             return Some(next);
                         }
                         t = next;
@@ -338,16 +355,8 @@ impl Surface {
             Some(h) => h,
             None => {
                 let at = |i: usize, j: usize| (u0 + (u1 - u0) * i as f64 / n as f64, v0 + (v1 - v0) * j as f64 / n as f64);
-                let d: Vec<Vec<f64>> = (0..=n)
-                    .map(|i| {
-                        (0..=n)
-                            .map(|j| {
-                                let (a, b) = at(i, j);
-                                (self.eval(a, b) - p).norm_squared()
-                            })
-                            .collect()
-                    })
-                    .collect();
+                let grid = self.grid_points(n, &at);
+                let d: Vec<Vec<f64>> = (0..=n).map(|i| grid[i * (n + 1)..(i + 1) * (n + 1)].iter().map(|g| (g - p).norm_squared()).collect()).collect();
                 for i in 0..=n {
                     for j in 0..=n {
                         let lowest = (i.saturating_sub(1)..=(i + 1).min(n)).all(|a| (j.saturating_sub(1)..=(j + 1).min(n)).all(|b| d[a][b] >= d[i][j]));
@@ -388,7 +397,7 @@ impl Surface {
                 // down the gradient (scaled per direction), halved the same way.
                 // (A step down to rounding noise has converged: no point checking it, as the
                 // distance it changes is noise too.)
-                if (nu - u).abs() + (nv - v).abs() < 1e-12 * (1.0 + u.abs() + v.abs()) {
+                if (nu - u).abs() + (nv - v).abs() < tol::REL_FINE * (1.0 + u.abs() + v.abs()) {
                     (u, v) = (nu, nv);
                     break;
                 }
@@ -486,6 +495,45 @@ impl Surface {
         (u, v)
     }
 
+    /// The points of [`Self::project_grid`]'s (n + 1)² grid, row by row (`at` gives a node's
+    /// parameters). They don't depend on the point projected, and a B-spline surface is
+    /// projected unhinted many times over (fitting p-curves, seeding intersections): its grids
+    /// are kept, per thread, for the last few surfaces (known by their `Arc`; the `Weak` held
+    /// keeps the allocation, so no other surface can come to share its address).
+    fn grid_points(&self, n: usize, at: &dyn Fn(usize, usize) -> (f64, f64)) -> Rc<[P3]> {
+        let compute = || -> Rc<[P3]> {
+            (0..=n)
+                .flat_map(|i| (0..=n).map(move |j| (i, j)))
+                .map(|(i, j)| {
+                    let (a, b) = at(i, j);
+                    self.eval(a, b)
+                })
+                .collect()
+        };
+        let Surface::Nurbs(ns) = self else { return compute() };
+        /// The grids kept per thread.
+        const KEPT: usize = 8;
+        type Kept = Vec<(Weak<NurbsSurface>, usize, Rc<[P3]>)>;
+        thread_local! {
+            static GRIDS: RefCell<(Kept, usize)> = const { RefCell::new((Vec::new(), 0)) };
+        }
+        let key = Arc::as_ptr(ns);
+        if let Some(g) = GRIDS.with_borrow(|(kept, _)| kept.iter().find(|(w, m, _)| *m == n && std::ptr::eq(w.as_ptr(), key)).map(|k| k.2.clone())) {
+            return g;
+        }
+        let g = compute();
+        GRIDS.with_borrow_mut(|(kept, next)| {
+            let entry = (Arc::downgrade(ns), n, g.clone());
+            if kept.len() < KEPT {
+                kept.push(entry);
+            } else {
+                kept[*next] = entry;
+                *next = (*next + 1) % KEPT;
+            }
+        });
+        g
+    }
+
     fn clamp_u(&self, u: f64, u0: f64, u1: f64) -> f64 {
         if self.u_periodic() { u } else { u.clamp(u0, u1) }
     }
@@ -553,7 +601,7 @@ impl Surface {
             }
         }
         let e = auu * hu * hu / 8.0 + avv * hv * hv / 8.0;
-        bb.grow(e * (1.0 + tol::REL) + 1e-12)
+        bb.grow(e * (1.0 + tol::REL) + tol::ROUNDOFF_FINE)
     }
 
     /// The surface over the parameter rectangle u × v as an exact NURBS surface on the same
@@ -653,7 +701,11 @@ impl Surface {
             Surface::Torus { f, rmaj, rmin } => {
                 let l = f.local(p);
                 let rho = (l.x * l.x + l.y * l.y).sqrt();
-                ((rho - rmaj).powi(2) + l.z * l.z).sqrt() - rmin
+                let near = (rho - rmaj).hypot(l.z) - rmin;
+                // A spindle torus (minor radius past the major) is also the far meridian's
+                // turn, at radius −ρ: the nearer of the two.
+                let far = (rho + rmaj).hypot(l.z) - rmin;
+                if rmin > rmaj && far.abs() < near.abs() { far } else { near }
             }
             _ => return None,
         })
@@ -975,7 +1027,7 @@ pub fn meridian_off_plane(f: &Frame, m: &Curve) -> bool {
         let l = f.local(p);
         l.y.abs() > tol::REL * (1.0 + l.norm())
     };
-    let off_v = |d: &V3| f.y.dot(d).abs() > 1e-12 * d.norm();
+    let off_v = |d: &V3| f.y.dot(d).abs() > tol::REL_FINE * d.norm();
     match m {
         Curve::Line { o, d } => off(o) || off_v(d),
         Curve::Circle { c, x, y, .. } | Curve::Ellipse { c, x, y, .. } => off(c) || off_v(x) || off_v(y),

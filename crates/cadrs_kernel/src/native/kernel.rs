@@ -20,11 +20,15 @@ use super::tol;
 pub struct Entry {
     pub body: Arc<Body>,
     polys: OnceLock<Vec<Vec<Vec<P2>>>>,
+    /// What [`Kernel::faces`] and [`Kernel::edges`] report (face areas and edge lengths are
+    /// integrals: a rebuild asks for them over the same bodies many times).
+    faces: OnceLock<Vec<FaceInfo>>,
+    edges: OnceLock<Vec<EdgeInfo>>,
 }
 
 impl Entry {
     pub fn new(body: Body) -> Self {
-        Self { body: Arc::new(body), polys: OnceLock::new() }
+        Self { body: Arc::new(body), polys: OnceLock::new(), faces: OnceLock::new(), edges: OnceLock::new() }
     }
     pub fn polys(&self) -> &Vec<Vec<Vec<P2>>> {
         self.polys.get_or_init(|| self.body.faces.iter().map(|f| classify::face_polygons(&self.body, f)).collect())
@@ -297,6 +301,12 @@ pub fn face_info(b: &Body, fi: usize) -> FaceInfo {
 }
 
 pub fn edge_infos(b: &Body) -> Vec<EdgeInfo> {
+    edge_infos_with(b, true)
+}
+
+/// [`edge_infos`], with each edge's length (an adaptive integral along a B-spline: most of the
+/// work) or 0 when `lengths` is false, for the queries that don't read it.
+fn edge_infos_with(b: &Body, lengths: bool) -> Vec<EdgeInfo> {
     let ef = b.edge_faces();
     b.edges
         .iter()
@@ -320,7 +330,7 @@ pub fn edge_infos(b: &Body) -> Vec<EdgeInfo> {
             EdgeInfo {
                 id: EdgeId(ei as u64),
                 faces,
-                length: if e.degenerate { 0.0 } else { e.curve.length(t0, t1) },
+                length: if e.degenerate || !lengths { 0.0 } else { e.curve.length(t0, t1) },
                 curve: curve_kind(e),
                 start: b.verts[e.v[0]].p,
                 end: b.verts[e.v[1]].p,
@@ -477,11 +487,23 @@ impl Kernel for NativeKernel {
     }
 
     fn extrude_with(&mut self, profile: &Profile, spec: &ExtrudeSpec) -> Result<OpResult> {
-        super::features::extrude_with(self, profile, spec)
+        let r = super::features::extrude_with(self, profile, spec)?;
+        // A gap the profile closed is how far its curves and the faces they sweep may be from
+        // where the sketch drew them: its edges and vertices carry it (OCCT's did), so a
+        // boolean finds the faces of the sketch's other features there coincident.
+        let gap = profile::closed_gap(profile);
+        if gap > profile::JOIN {
+            for id in &r.bodies {
+                if let Some(e) = self.bodies.get_mut(&id.0) {
+                    profile::carry_gap(Arc::make_mut(&mut e.body), gap);
+                }
+            }
+        }
+        Ok(r)
     }
 
     fn revolve(&mut self, profile: &Profile, axis: Axis, angle: f64) -> Result<OpResult> {
-        let spec = RevolveSpec { full: angle.abs() >= TAU - 1e-12, ..RevolveSpec::solid(axis, Some(angle)) };
+        let spec = RevolveSpec { full: angle.abs() >= TAU - tol::ANGULAR_FINE, ..RevolveSpec::solid(axis, Some(angle)) };
         self.revolve_with(profile, &spec)
     }
 
@@ -578,7 +600,7 @@ impl Kernel for NativeKernel {
     }
 
     fn offset(&mut self, body: BodyId, spec: &OffsetSpec) -> Result<OpResult> {
-        let r = super::local::offset(self, body, spec);
+        let r = super::offset::offset(self, body, spec);
         self.colored(r)
     }
 
@@ -592,16 +614,21 @@ impl Kernel for NativeKernel {
         self.colored(r)
     }
 
+    fn move_faces(&mut self, body: BodyId, faces: &[FaceId], motion: &Motion) -> Result<OpResult> {
+        let r = super::local::move_faces(self, body, faces, motion);
+        self.colored(r)
+    }
+
     fn shell(&mut self, body: BodyId, remove: &[FaceId], thickness: f64) -> Result<OpResult> {
         dump("shell", self.get(body)?, &format!("remove {remove:?} thickness {thickness}"));
-        let r = super::offset_round::shell(self, body, &ShellSpec { remove: remove.to_vec(), thickness, outward: false, hollow: false, sharp: false });
+        let r = super::offset::round::shell(self, body, &ShellSpec { remove: remove.to_vec(), thickness, outward: false, hollow: false, sharp: false });
         let r = self.dumped(&r);
         self.colored(r)
     }
 
     fn shell_with(&mut self, body: BodyId, spec: &ShellSpec) -> Result<OpResult> {
         dump("shell", self.get(body)?, &format!("{spec:?}"));
-        let r = super::offset_round::shell(self, body, spec);
+        let r = super::offset::round::shell(self, body, spec);
         let r = self.dumped(&r);
         self.colored(r)
     }
@@ -799,7 +826,7 @@ impl Kernel for NativeKernel {
                 let x = if z.x.abs() < 0.9 { V3::x() } else { V3::y() };
                 let x = (x - z * x.dot(&z)).normalize();
                 let turn = super::sweep::Turn { plane: Plane::top(), f: Frame { o: axis.origin, x, y: z.cross(&x), z }, up: true };
-                let whole = angle.abs() >= TAU - 1e-12;
+                let whole = angle.abs() >= TAU - tol::ANGULAR_FINE;
                 super::sweep::sweep_body(&b, &super::sweep::BodyMove::Turn(&turn), if whole { TAU } else { angle.abs() }, whole, body.0)?
             }
         };
@@ -824,7 +851,7 @@ impl Kernel for NativeKernel {
         if !(0.0..TAU).contains(&a0) {
             return bad("A cylindrical box's start angle must lie in [0°, 360°)");
         }
-        if !(a1 > a0) || a1 - a0 > TAU + 1e-12 {
+        if !(a1 > a0) || a1 - a0 > TAU + tol::ANGULAR_FINE {
             return bad("A cylindrical box's end angle must come after its start angle, at most a turn past it");
         }
         let z = frame.normal.into_inner();
@@ -840,13 +867,29 @@ impl Kernel for NativeKernel {
     }
 
     fn faces(&self, body: BodyId) -> Result<Vec<FaceInfo>> {
-        let b = self.get(body)?;
+        let e = self.entry(body)?;
         use rayon::prelude::*;
-        Ok((0..b.faces.len()).into_par_iter().map(|i| face_info(b, i)).collect())
+        Ok(e.faces.get_or_init(|| (0..e.body.faces.len()).into_par_iter().map(|i| face_info(&e.body, i)).collect()).clone())
     }
 
     fn edges(&self, body: BodyId) -> Result<Vec<EdgeInfo>> {
-        Ok(edge_infos(self.get(body)?))
+        let e = self.entry(body)?;
+        Ok(e.edges.get_or_init(|| edge_infos(&e.body)).clone())
+    }
+
+    fn overlaps(&mut self, a: BodyId, b: BodyId) -> Result<bool> {
+        // [`Kernel::overlaps`] with the intersection's volume alone (the same number as its
+        // mass properties', for a fraction of the work).
+        let r = self.boolean(BoolOp::Intersect, a, &[b])?;
+        let v = self.get(r.bodies[0]).map(|x| super::mass::body_volume(x)).unwrap_or(0.0);
+        self.release(r.bodies[0]);
+        Ok(v > tol::ROUNDOFF)
+    }
+
+    fn tangent_chain(&self, body: BodyId, edge: EdgeId) -> Result<Vec<EdgeId>> {
+        // (The edges without their lengths: the chain doesn't read them, and rebuilds ask for
+        // chains over bodies of many B-spline edges again and again.)
+        crate::tangent_chain_of(&edge_infos_with(self.get(body)?, false), &self.vertices(body)?, edge)
     }
 
     fn vertices(&self, body: BodyId) -> Result<Vec<VertexInfo>> {
@@ -1011,4 +1054,40 @@ pub(crate) fn dump(op: &str, b: &Body, params: &str) {
     let _ = std::fs::write(base.with_extension("body"), super::bodyio::write(b));
     let _ = std::fs::write(base.with_extension("txt"), params);
     eprintln!("dump: {op}-{n:03} {params}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The session's shortcuts answer as the trait's defaults do: the tangent chain over edges
+    /// without their lengths, faces and edges kept per body, and `overlaps` by the volume alone.
+    #[test]
+    fn shortcuts_match_the_defaults() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/smlib/fillets");
+        for name in ["blade_hub.smb", "cyl_on_box_w_fillet.smb", "Heart.smb", "box_diff_3cyls.smb"] {
+            let b = super::super::smb::read_brep(&std::fs::read(format!("{dir}/{name}")).unwrap()).unwrap().body;
+            let mut k = NativeKernel::new();
+            let id = k.insert(b);
+            let (edges, vertices) = (k.edges(id).unwrap(), k.vertices(id).unwrap());
+            assert_eq!(edges, edge_infos(k.get(id).unwrap()), "{name}");
+            assert_eq!(k.edges(id).unwrap(), edges, "{name}");
+            assert_eq!(k.faces(id).unwrap(), k.faces(id).unwrap(), "{name}");
+            for e in edges.iter().step_by(3) {
+                assert_eq!(k.tangent_chain(id, e.id).unwrap(), crate::tangent_chain_of(&edges, &vertices, e.id).unwrap(), "{name} {:?}", e.id);
+            }
+        }
+        // `overlaps` of a model with a box across it.
+        for name in ["cyl_on_box_w_fillet.smb", "box_diff_3cyls.smb"] {
+            let b = super::super::smb::read_brep(&std::fs::read(format!("{dir}/{name}")).unwrap()).unwrap().body;
+            let bb = b.bbox();
+            let mut k = NativeKernel::new();
+            let id = k.insert(b);
+            let c = bb.center();
+            let d = bb.max - bb.min;
+            let Ok(super::super::draw::Shape::Body(tool)) = k.box_at(c.x - 0.1 * d.x, c.y - 0.2 * d.y, c.z - 0.3 * d.z, d.x, d.y, d.z) else { panic!("no box") };
+            let full = k.boolean(BoolOp::Intersect, id, &[tool]).and_then(|r| k.mass_properties(r.bodies[0])).map(|m| m.volume > tol::ROUNDOFF);
+            assert_eq!(k.overlaps(id, tool).ok(), full.ok(), "{name}");
+        }
+    }
 }

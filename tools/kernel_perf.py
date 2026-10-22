@@ -2,6 +2,7 @@
 """Times the native kernel against OCCT 7.8 on the same operations and inputs.
 
     tools/kernel_perf.py [--out DIR] [--reps N] [--timeout SECS] [--only CAT,...] [--report-only]
+                         [--known] [--occt-bench EXE] [--commit SHA]
 
 1. Builds `crates/cadrs_kernel/examples/kernel_bench.rs` and the conformance test binary
    (release, `$CARGO_TARGET_DIR`), and `tools/occt_bench` against the static OCCT
@@ -13,7 +14,9 @@
      small groups) plus the slow outliers the reviews name;
    - SMLib's fillet, boolean and offset cases that pass (`tests/smlib_<suite>.rs`);
    - tessellation and mass properties of the largest SMLib models;
-   - STEP import and export of a range of files of OCCT's dataset.
+   - STEP import and export of a range of files of OCCT's dataset;
+   - with `--known`, the known failures of the same suites too (category `known_<category>`), sampled
+     alike: timed to their result or their error, reported apart and kept out of the means.
    `kernel_bench prep` then writes the case files of each side: OCCT reads the SMLib models as
    STEP that the native kernel wrote.
 3. Runs each case in its own process (a hung case times out alone), `--reps` runs, medians:
@@ -23,7 +26,9 @@
    OCCT backend; times of whole tests).
 4. Writes `<out>/results.json` and the report `PERF.md`: per case the CPU time (user +
    system, all threads) of each side on one thread and the ratio, per category the geometric
-   mean of the ratios over the cases both sides complete; the load average while measuring.
+   mean of the ratios over the cases both sides complete; the load average while measuring, and
+   the commit measured (`--commit`, else `$CADRS_COMMIT`, else `git rev-parse` of the tree, with
+   `+dirty` for a modified one).
 
 CPU time is what's compared: the machine is shared, and under load wall times stretch with
 the queue while CPU times don't.
@@ -167,59 +172,68 @@ def known_failures():
     return kf
 
 
-def occt_cases(strides):
+def occt_cases(strides, with_known=False):
     kf = known_failures()
     out = []
     for g in GROUPS:
         src = open(os.path.join(TESTS, f"occt_{g}.rs")).read()
-        conv = []
+        conv = {False: [], True: []}
         for t in re.split(r"\n/// OCCT ", src)[1:]:
             head, _, rest = t.partition("fn ")
-            if "#[ignore" in head:
-                continue
             name = re.match(r"(\w+)\(", rest).group(1)
-            if f"{g} {name}" in kf or "known failure" in rest:
+            known = f"{g} {name}" in kf or "known failure" in rest
+            # Ignored for another reason than being a known failure (e.g. waiting for a command).
+            if ("#[ignore" in head and not known) or (known and not with_known):
                 continue
-            body = rest.split("let mut k = NativeKernel::new();", 1)[-1]
+            # A known failure's statements sit in a closure, up to its `Ok(())`.
+            body = rest.split("let mut k = NativeKernel::new();", 1)[-1].split("Ok(())", 1)[0]
             lines = convert_body(body)
             if lines:
-                conv.append((name, lines))
+                conv[known].append((name, lines))
         stride = strides.get(g, 1)
-        picked = [c for i, c in enumerate(conv) if i % stride == 0 or c[0] in OUTLIERS]
-        print(f"occt {g}: {len(conv)} passing cases convert, {len(picked)} sampled", file=sys.stderr)
-        out += [(f"{g}/{n}", f"occt_{g}", l) for n, l in picked]
+        for known, cases in conv.items():
+            picked = [c for i, c in enumerate(cases) if i % stride == 0 or c[0] in OUTLIERS]
+            what = "known failures" if known else "passing cases"
+            print(f"occt {g}: {len(cases)} {what} convert, {len(picked)} sampled", file=sys.stderr)
+            cat = f"known_occt_{g}" if known else f"occt_{g}"
+            out += [(f"{g}/{n}", cat, l) for n, l in picked]
     return out
 
 
-def smlib_cases():
+def smlib_cases(with_known=False):
     out = []
 
     def passing(suite, pat):
+        """(name, match, category prefix) of the suite's passing cases, and of its known failures
+        (`known_failure(…)`, ignored or not) with `with_known`."""
         src = open(os.path.join(TESTS, f"smlib_{suite}.rs")).read()
         for t in re.split(r"\n#\[test\]\n", src)[1:]:
-            if t.lstrip().startswith("#[ignore"):
-                continue
             name = re.search(r"fn (\w+)\(", t).group(1)
             m = re.search(r"\n    " + pat, t)
             if m:
-                yield name, m
+                if not t.lstrip().startswith("#[ignore"):
+                    yield name, m, ""
+                continue
+            m = re.search(r"\n    known_failure\(" + pat, t)
+            if m and with_known:
+                yield name, m, "known_"
 
-    for name, m in passing("fillets", r'blend\("([^"]+)", &\[([^\]]*)\], (true|false), Op::Fillet\(([-0-9.e]+)\)'):
+    for name, m, kn in passing("fillets", r'blend\("([^"]+)", &\[([^\]]*)\], (true|false), Op::Fillet\(([-0-9.e]+)\)'):
         ranges = [f"{a}-{b}" for a, b in re.findall(r"\((\d+), (\d+)\)", m.group(2))]
         inc = "1" if m.group(3) == "true" else "0"
-        out.append((f"fillets/{name}", "smlib_fillet", [f"m = smb {SMLIB}/fillets/{m.group(1)}", f"*r = smbfillet m {m.group(4)} {inc} {' '.join(ranges)}"]))
+        out.append((f"fillets/{name}", f"{kn}smlib_fillet", [f"m = smb {SMLIB}/fillets/{m.group(1)}", f"*r = smbfillet m {m.group(4)} {inc} {' '.join(ranges)}"]))
     ops = {"U": "bfuse", "I": "bcommon", "D": "bcut"}
-    for name, m in passing("booleans", r'chain\(&\[([^\]]*)\], ([UID]),'):
+    for name, m, kn in passing("booleans", r'chain\(&\[([^\]]*)\], ([UID]),'):
         files = re.findall(r'"([^"]+)"', m.group(1))
         lines = [f"b{i} = smb {SMLIB}/booleans/{f}" for i, f in enumerate(files)]
         acc = "b0"
         for i in range(1, len(files)):
             lines.append(f"*r{i} = {ops[m.group(2)]} {acc} b{i}")
             acc = f"r{i}"
-        out.append((f"booleans/{name}", "smlib_boolean", lines))
-    for name, m in passing("offset", r'offset\("([^"]+)", ([-0-9.e]+), None, None,'):
-        out.append((f"offset/{name}", "smlib_offset", [f"m = smb {SMLIB}/offset/{m.group(1)}", f"*r = offset m {m.group(2)}"]))
-    print(f"smlib: {len(out)} passing fillet, boolean and offset cases", file=sys.stderr)
+        out.append((f"booleans/{name}", f"{kn}smlib_boolean", lines))
+    for name, m, kn in passing("offset", r'offset\("([^"]+)", ([-0-9.e]+), None, None,'):
+        out.append((f"offset/{name}", f"{kn}smlib_offset", [f"m = smb {SMLIB}/offset/{m.group(1)}", f"*r = offset m {m.group(2)}"]))
+    print(f"smlib: {len(out)} fillet, boolean and offset cases", file=sys.stderr)
     return out
 
 
@@ -366,11 +380,14 @@ NOTES = [
 
 
 def report(R, path):
-    rows, cats = [], {}
+    rows, cats, known = [], {}, []
     for name, ours in R["cadrs_1t"].items():
         occ = R["occt_1t"].get(name, {})
         mt = R["cadrs_mt"].get(name, {})
         cat = ours["category"]
+        if cat.startswith("known_"):
+            known.append((cat[6:], name, ours, occ))
+            continue
         ratio = None
         if ours.get("ok") and occ.get("ok"):
             ratio = max(ours["cpu"], FLOOR_MS) / max(occ["cpu"], FLOOR_MS)
@@ -395,9 +412,9 @@ def report(R, path):
     L.append("matter for speed.")
     L.append("")
     m = R["meta"]
-    L.append(f"Measured {m['date']} on {m['cpu']} ({m['cores']} threads), native kernel at `{m['git']}`")
-    L.append(f"plus the working tree, OCCT 7.8.0 (static, `-O2`). Load average while measuring: native kernel")
-    L.append(f"{m['load_cadrs_1t']}, OCCT {m['load_occt_1t']} (other jobs share the machine; hence CPU time).")
+    L.append(f"Measured {m['date']} on {m['cpu']} ({m['cores']} threads), native kernel at `{m['git'] or '?'}`")
+    L.append(f"(`{m.get('toolchain', '?')}`), OCCT 7.8.0 (static, `-O2`). Load average (1 min) while measuring:")
+    L.append(f"native kernel {m['load_cadrs_1t']}, OCCT {m['load_occt_1t']} (other jobs may share the machine; hence CPU time).")
     L.append("")
     L.append("**How.** A case is a DRAW-like script both sides read: `kernel_bench` (an example of the")
     L.append("crate) for the native kernel, `tools/occt_bench` for OCCT, each command mapped onto the")
@@ -451,6 +468,20 @@ def report(R, path):
             b = f"{occ['cpu']:.2f} ms" if occ.get("ok") else occ.get("msg", "missing")[:80]
             L.append(f"| `{name}` | {a} | {b} |")
     L.append("")
+    if known:
+        L.append("## Known failures")
+        L.append("")
+        L.append("Cases on the suites' known-failure lists: the native kernel's CPU time on one thread to its")
+        L.append("result (which the suite's checks then reject) or to its error, and OCCT's. Not in the means.")
+        L.append("")
+        L.append("| Case | Category | Native ms | Native outcome | OCCT ms |")
+        L.append("|---|---|---:|---|---:|")
+        for cat, name, ours, occ in sorted(known, key=lambda r: -r[2].get("cpu", 0.0)):
+            t = f"{ours['cpu']:.2f}" if "cpu" in ours and (ours.get("ok") or ours["cpu"] > 0) else ""
+            how = "result" if ours.get("ok") else ours.get("msg", "")[:70].replace("|", "/")
+            o = f"{occ['cpu']:.2f}" if occ.get("ok") else "fail"
+            L.append(f"| `{name}` | {cat} | {t} | {how} | {o} |")
+        L.append("")
     L.append("## All cases")
     L.append("")
     L.append("CPU ms on one thread; `mt` wall ms on the default pool.")
@@ -490,7 +521,11 @@ def main():
     ap.add_argument("--stride-blend", type=int, default=2)
     ap.add_argument("--stride-offset", type=int, default=4)
     ap.add_argument("--report-only", action="store_true")
-    ap.add_argument("--doc", default=os.path.join(REPO, "docs", "PERF.md"))
+    ap.add_argument("--doc", default=os.path.join(KERNEL, "PERF.md"))
+    ap.add_argument("--known", action="store_true", help="also time the known failures (reported apart)")
+    ap.add_argument("--occt-bench", help="a built tools/occt_bench to use instead of building one")
+    ap.add_argument("--commit", default=os.environ.get("CADRS_COMMIT", ""), help="the commit measured (default $CADRS_COMMIT, else git)")
+    ap.add_argument("--cases-only", action="store_true", help="write the case files to --out, and stop")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     rpath = os.path.join(a.out, "results.json")
@@ -498,31 +533,41 @@ def main():
     if not a.report_only:
         target = os.environ.get("CARGO_TARGET_DIR", os.path.join(REPO, "target"))
         bench, conf_bin = cargo_build(target)
-        occt_bin = os.path.join(a.out, "occt_bench")
-        subprocess.run([os.path.join(REPO, "tools", "occt_bench", "build.sh"), occt_bin], check=True)
+        occt_bin = a.occt_bench or os.path.join(a.out, "occt_bench")
+        if not a.occt_bench and not a.cases_only:
+            subprocess.run([os.path.join(REPO, "tools", "occt_bench", "build.sh"), occt_bin], check=True)
         strides = {"boolean": a.stride_boolean, "blend": a.stride_blend, "offset": a.stride_offset}
-        cases = occt_cases(strides) + smlib_cases() + model_cases() + step_cases(a.out)
+        cases = occt_cases(strides, a.known) + smlib_cases(a.known) + model_cases() + step_cases(a.out)
         only = set(a.only.split(",")) if a.only else None
         if only:
-            cases = [c for c in cases if c[1] in only]
+            cases = [c for c in cases if c[1] in only or (c[1].startswith("known_") and c[1][6:] in only)]
         raw = os.path.join(a.out, "cases.txt")
         write_cases(raw, cases)
         ours_f, occt_f = os.path.join(a.out, "cadrs.cases"), os.path.join(a.out, "occt.cases")
         subprocess.run([bench, "prep", raw, ours_f, occt_f, os.path.join(a.out, "step")], check=True)
         names = case_names(ours_f)
+        if a.cases_only:
+            print(f"{len(names)} cases in {ours_f} and {occt_f}", file=sys.stderr)
+            return
         one = dict(os.environ, RAYON_NUM_THREADS="1")
         for key, cmd, f, env in [("cadrs_1t", [bench, "run"], ours_f, one), ("occt_1t", [occt_bin], occt_f, one), ("cadrs_mt", [bench, "run"], ours_f, dict(os.environ))]:
             res, loads = run_side(key, cmd, f, names, env, a.timeout, a.reps)
-            old = {n: r for n, r in R.get(key, {}).items() if only and r["category"] not in only}
+            old = {n: r for n, r in R.get(key, {}).items() if only and r["category"].removeprefix("known_") not in only}
             R[key] = {**old, **res}
             R.setdefault("meta", {})[f"load_{key}"] = f"{min(loads):.0f}–{max(loads):.0f}"
         if not only or "conformance" in only:
             R["conformance_1t"] = conformance(conf_bin, a.reps, 1)
             R["conformance_mt"] = conformance(conf_bin, a.reps, None)
             R["occt_conformance"] = occt_conformance()
-        git = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=REPO, capture_output=True, text=True).stdout.strip()
+        git = a.commit
+        if not git:
+            git = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=REPO, capture_output=True, text=True).stdout.strip()
+            dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=REPO, capture_output=True, text=True).stdout.strip()
+            if git and dirty:
+                git += "+dirty"
+        toolchain = subprocess.run(["rustc", "--version"], cwd=REPO, capture_output=True, text=True).stdout.strip()
         cpu = next((l.split(":", 1)[1].strip() for l in open("/proc/cpuinfo") if l.startswith("model name")), "?")
-        R["meta"].update({"date": time.strftime("%Y-%m-%d"), "git": git, "cpu": cpu, "cores": os.cpu_count(), "reps": a.reps})
+        R["meta"].update({"date": time.strftime("%Y-%m-%d"), "git": git, "cpu": cpu, "cores": os.cpu_count(), "reps": a.reps, "toolchain": toolchain})
         json.dump(R, open(rpath, "w"), indent=1)
     cats, worst = report(R, a.doc)
     for c in sorted(cats):

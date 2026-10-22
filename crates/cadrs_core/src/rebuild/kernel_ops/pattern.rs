@@ -485,7 +485,11 @@ impl Rebuilder {
             .enumerate()
             .map(|(i, f)| f.unwrap_or_else(|| FaceName::new(op, FaceOrigin::Unnamed { index: i as u32 })))
             .collect();
-        self.names_from_faces(body, faces)
+        let mut names = self.names_from_faces(body, faces)?;
+        // The source's merged-away names carry over: a reference to the copy of a face the
+        // kernel merged into another finds the copy of that face.
+        names.aliases = source.aliases.iter().map(|(a, b)| (instance_face(op, a, k), instance_face(op, b, k))).collect();
+        Ok(names)
     }
 
     /// Edge and vertex names for a body whose faces are named `faces`.

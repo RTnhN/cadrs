@@ -10,10 +10,12 @@ uses a command the API doesn't have yet (or Tcl control flow, or OCCT's data fil
 left to do.
 """
 
+import json
 import math
 import os
 import re
 import sys
+import textwrap
 
 KEYWORDS = {
     "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn", "for", "if", "impl", "in", "let", "loop",
@@ -67,6 +69,13 @@ def split_commands(text):
                 continue
             out.append(part)
     return out
+
+
+# The sub-shapes an explode's kind names, in words (draw::sub's message).
+KIND_WORDS = {
+    "": "sub-shapes", "e": "edges", "edge": "edges", "f": "faces", "face": "faces", "v": "vertices", "vertex": "vertices",
+    "w": "wires", "wire": "wires", "sh": "shells", "shell": "shells", "so": "solids", "solid": "solids",
+}
 
 
 class Case:
@@ -134,9 +143,16 @@ class Case:
             return "&" + self.vars[name]
         m = re.fullmatch(r"(.+)_(\d+)", name)
         if m and m.group(1) in self.exploded:
-            vec, _ = self.exploded[m.group(1)]
-            return f"&{vec}[{int(m.group(2)) - 1}]"
+            # Checked: the shape exploded may have other topology than OCCT's (fewer edges),
+            # a failure that says so rather than an index out of bounds.
+            vec, kind = self.exploded[m.group(1)]
+            return f"draw::sub(&{vec}, {int(m.group(2))}, \"{m.group(1)}\", \"{KIND_WORDS[kind]}\")?"
         raise Unsupported(f"the shape {name}")
+
+    def owned(self, name):
+        """A Rust expression for a copy of a DRAW shape (see shape)."""
+        e = self.shape(name)
+        return f"{e[1:]}.clone()" if e.startswith("&") else f"{e}.clone()"
 
     def bind(self, name, expr):
         r = ident(name)
@@ -255,6 +271,33 @@ class Case:
         elif c == "polyline" and len(a) >= 7 and (len(a) - 1) % 3 == 0:
             pts = [f"[{L(a[i])}, {L(a[i + 1])}, {L(a[i + 2])}]" for i in range(1, len(a), 3)]
             self.bind(a[0], f"k.polyline(&[{', '.join(pts)}])?")
+        elif c == "bopargcheck" and len(a) == 1:
+            # The boolean's argument check (self-interference, small edges): our full check,
+            # face–face crossings included.
+            self.lines.append(f"k.checkshape({self.shape(a[0])})?;")
+        elif c == "evolved" and len(a) >= 5:
+            # evolved result -s spine -p profile [-a] [-solid] [-v] [-t tol]
+            spine = prof = None
+            flags = {"-a": False, "-solid": False, "-v": False}
+            i = 1
+            while i < len(a):
+                if a[i] in ("-s", "-p") and i + 1 < len(a):
+                    if a[i] == "-s":
+                        spine = self.shape(a[i + 1])
+                    else:
+                        prof = self.shape(a[i + 1])
+                    i += 2
+                elif a[i] == "-t" and i + 1 < len(a):
+                    i += 2  # the tolerance: the kernel's own
+                elif a[i] in flags:
+                    flags[a[i]] = True
+                    i += 1
+                else:
+                    raise Unsupported(f"evolved {a[i]}")
+            if spine is None or prof is None:
+                raise Unsupported("evolved with these arguments")
+            b = lambda x: "true" if x else "false"
+            self.bind(a[0], f"k.evolved({spine}, {prof}, {b(flags['-a'])}, {b(flags['-solid'])}, {b(flags['-v'])})?")
         elif c == "DT_SplitByNumber" and len(a) in (3, 4):
             if len(a) == 3:
                 self.bind(a[0], f"k.split_by_number({self.shape(a[1])}, {int(self.num(a[2]))}, None)?")
@@ -564,14 +607,15 @@ class Case:
         elif c == "mkface" and len(a) == 2 and a[1] in self.surfaces:
             # The face's whole surface: the face itself stands for it (as a limit of a feature,
             # only its surface counts).
-            self.bind(a[0], f"{self.surfaces[a[1]][1:]}.clone()")
+            e = self.surfaces[a[1]]
+            self.bind(a[0], f"{e[1:]}.clone()" if e.startswith("&") else f"{e}.clone()")
         elif c in ("featprism", "featrevol", "featdprism") and len(a) in (6, 8, 11):
             kind = c[4:]
             want = {"prism": 8, "revol": 11, "dprism": 6}[kind]
             if len(a) != want:
                 raise Unsupported(f"{c} with these arguments")
             nums = [L(x) for x in a[3:-2]] + ["0.0"] * 6
-            self.feat = (kind, self.shape(a[0]), self.shape(a[1]), f"[{', '.join(nums[:6])}]", int(self.num(a[-2])))
+            self.feat = (kind, self.shape(a[0]), self.shape(a[1]), f"[{', '.join(nums[:6])}]", int(self.num(a[-2])), self.shape(a[2]))
         elif c == "featlf" and len(a) == 11:
             if a[2] not in self.planes:
                 raise Unsupported(f"the plane {a[2]}")
@@ -593,7 +637,7 @@ class Case:
         elif c in ("featperform", "featperformval") and len(a) >= 2:
             if self.feat is None or a[0].lower() != self.feat[0]:
                 raise Unsupported(f"{c} {a[0]} without its definition")
-            kind, base, pbase, params, fuse = self.feat
+            kind, base, pbase, params, fuse, skface = self.feat
             if c == "featperformval":
                 if len(a) == 4:
                     self.bind(a[1], f'k.featperformval_until({base}, {pbase}, "{kind}", {params}, {fuse}, {L(a[2])}, {self.shape(a[3])})?')
@@ -606,7 +650,7 @@ class Case:
                 if len(lim) > 2:
                     raise Unsupported("featperform with these arguments")
                 fr, un = ("None", "None") if not lim else (("None", lim[0]) if len(lim) == 1 else (lim[0], lim[1]))
-                self.bind(a[1], f'k.featperform({base}, {pbase}, "{kind}", {params}, {fuse}, {fr}, {un})?')
+                self.bind(a[1], f'k.featperform({base}, {pbase}, {skface}, "{kind}", {params}, {fuse}, {fr}, {un})?')
         elif c == "orientation" and len(a) == 2:
             self.bind(a[0], f"k.orientation({self.shape(a[0])}, \"{a[1].upper()}\")?")
         elif c == "treverse" and len(a) >= 1:
@@ -621,7 +665,7 @@ class Case:
                 for k in kinds:
                     k.add(a[1])
             else:
-                self.bind(a[1], f"{self.shape(a[0])[1:]}.clone()")
+                self.bind(a[1], self.owned(a[0]))
         elif c == "revol" and len(a) == 9:
             self.bind(a[0], f"k.revol({self.shape(a[1])}, {', '.join(L(x) for x in a[2:])})?")
         elif c in ("bfuse", "bcut", "bcommon") and len(a) == 3:
@@ -724,10 +768,10 @@ class Case:
             for s in shapes:
                 self.bind(s, f"k.{c}({self.shape(s)}, {', '.join(L(x) for x in nums)})?")
         elif c in ("copy", "tcopy") and len(a) == 2:
-            self.bind(a[1], f"{self.shape(a[0])[1:]}.clone()")
+            self.bind(a[1], self.owned(a[0]))
         elif c == "nurbsconvert" and len(a) == 2:
             # The same geometry (our surfaces stay exact): a copy.
-            self.bind(a[0], f"{self.shape(a[1])[1:]}.clone()")
+            self.bind(a[0], self.owned(a[1]))
         elif c == "explode" and (len(a) == 1 or (len(a) == 2 and a[1].lower() in ("v", "vertex", "w", "wire", "sh", "shell", "so", "solid", "edge", "face"))):
             kind = a[1].lower() if len(a) == 2 else ""
             vec = ident(a[0]) + "_x" + (kind or "sub")
@@ -999,15 +1043,42 @@ def group_consts(tests, group):
 
 
 def known_failures():
+    """{(group, case): reason} of tools/occt_known_failures.txt. Each line is `group case`,
+    with its reason inline (`group case  # why`) or in the comment lines just above its group of
+    lines (a blank line ends a group's comment); a reason may hold `[panic: text]`, a panic the
+    case is expected to raise (its message containing the text). A line without a reason is an
+    error."""
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "occt_known_failures.txt")
-    out = set()
-    if os.path.exists(path):
-        for line in open(path):
-            line = line.strip()
-            if line and not line.startswith("#"):
-                g, n = line.split()
-                out.add((g, n))
+    out = {}
+    if not os.path.exists(path):
+        return out
+    block, last_entry, missing = [], False, []
+    for i, line in enumerate(open(path), 1):
+        line = line.strip()
+        if not line:
+            block, last_entry = [], False
+            continue
+        if line.startswith("#"):
+            if last_entry:
+                block, last_entry = [], False
+            block.append(line[1:].strip())
+            continue
+        entry, _, inline = line.partition("#")
+        g, n = entry.split()
+        why = inline.strip() or " ".join(block)
+        if not why:
+            missing.append(f"{path}:{i}: {g} {n}")
+        out[(g, n)] = why
+        last_entry = True
+    if missing:
+        sys.exit("known failures without a reason (add `# why` to the line or a comment above its group):\n  " + "\n  ".join(missing))
     return out
+
+
+def expected_panic(why):
+    """The text of a known failure's `[panic: text]` (None without one)."""
+    m = re.search(r"\[panic: ([^\]]+)\]", why)
+    return m.group(1).strip() if m else None
 
 
 # Groups whose end script's `checkshape result` is a case's check when it measures nothing else
@@ -1041,6 +1112,85 @@ WRONG_REFERENCE = {
     # 2128159, is 2.6 % under the faces kept × 5 (2185475), the walls' overlap at its corners.
     ("offset", "shape_a1"): "the input's volume (ours: 2128159, the kept faces' area × 5 less the corners' overlap)",
 }
+
+# OCCT's 2D booleans of case_9 (tests/boolean/{bcommon,bcut,bfuse,bopcommon,bopcut,bopfuse,
+# boptuc}_2d) whose reference misses an overlap: the rational quadratic B-spline of
+# case_9_edge.brep and case_9_wire_a.brep is straight between its knots 1.5795 and 1.8666 (its
+# poles 2, 3 and 4 lie on the line of case_9_edge3.brep within 5e-13), so it runs along that line
+# for 143.8 mm within the tolerance 1e-7 (79.9 mm along case_9_edge5.brep, the line moved 150 mm
+# along itself; the lines of case_9_wire2/3.brep are the same). OCCT's IntTools_EdgeEdge finds one
+# crossing there. Its result for the same shape made of exact arcs and lines (case_9_wire.brep)
+# has the overlap: bopcommon_2d n5, 143.787 mm, 2 vertices, 1 edge. Each case's length, vertex
+# and edge counts are instead those of tools/occt_case9_model.py, an independent model (the
+# files' curves in double precision, the overlap where the distance is within 1e-7, OCCT's
+# common/cut/fuse of edges and wires): {name: (length, vertices, edges)}.
+WRONG_2D = {
+    "bcommon_2d_o4": (143.8018, 2, 1),  # common edge3 wire_a
+    "bcommon_2d_o6": (79.9102, 2, 1),  # common edge5 wire_a
+    "bcommon_2d_o8": (143.8018, 2, 1),  # common wire2 wire_a
+    "bcommon_2d_o9": (79.9102, 2, 1),  # common wire3 wire_a
+    "bcommon_2d_p3": (143.8018, 2, 1),  # common edge3 edge
+    "bcommon_2d_p5": (79.9102, 2, 1),  # common edge5 edge
+    "bcommon_2d_p7": (143.8018, 2, 1),  # common wire2 edge
+    "bcommon_2d_p8": (79.9102, 2, 1),  # common wire3 edge
+    "bcut_2d_p8": (206.1982, 4, 2),  # cut edge3 wire_a
+    "bcut_2d_p9": (469.8759, 4, 2),  # cut wire_a edge3
+    "bcut_2d_q3": (270.0898, 2, 1),  # cut edge5 wire_a
+    "bcut_2d_q4": (533.7675, 4, 2),  # cut wire_a edge5
+    "bcut_2d_q7": (936.8427, 7, 6),  # cut wire2 wire_a
+    "bcut_2d_q8": (469.8759, 4, 2),  # cut wire_a wire2
+    "bcut_2d_q9": (1000.7343, 6, 5),  # cut wire3 wire_a
+    "bcut_2d_r1": (533.7675, 4, 2),  # cut wire_a wire3
+    "bcut_2d_r6": (206.1982, 4, 2),  # cut edge3 edge
+    "bcut_2d_r7": (469.8759, 4, 2),  # cut edge edge3
+    "bcut_2d_s1": (270.0898, 2, 1),  # cut edge5 edge
+    "bcut_2d_s2": (533.7675, 4, 2),  # cut edge edge5
+    "bcut_2d_s5": (936.8427, 7, 6),  # cut wire2 edge
+    "bcut_2d_s6": (469.8759, 4, 2),  # cut edge wire2
+    "bcut_2d_s7": (1000.7343, 6, 5),  # cut wire3 edge
+    "bcut_2d_s8": (533.7675, 4, 2),  # cut edge wire3
+    "bfuse_2d_b6": (819.8759, 6, 5),  # fuse wire_a edge3
+    "bfuse_2d_b8": (883.7675, 5, 4),  # fuse wire_a edge5
+    "bfuse_2d_c1": (1694.3222, 9, 9),  # fuse wire_a wire2
+    "bfuse_2d_c2": (1694.3222, 8, 8),  # fuse wire_a wire3
+    "bfuse_2d_c5": (819.8759, 6, 5),  # fuse edge edge3
+    "bfuse_2d_c7": (883.7675, 5, 4),  # fuse edge edge5
+    "bfuse_2d_c9": (1550.5204, 9, 9),  # fuse edge wire2
+    "bfuse_2d_d1": (1614.4119, 8, 8),  # fuse edge wire3
+    "bopcommon_2d_o4": (143.8018, 2, 1),  # common wire_a edge3
+    "bopcommon_2d_o6": (79.9102, 2, 1),  # common wire_a edge5
+    "bopcommon_2d_o8": (143.8018, 2, 1),  # common wire_a wire2
+    "bopcommon_2d_o9": (79.9102, 2, 1),  # common wire_a wire3
+    "bopcommon_2d_p3": (143.8018, 2, 1),  # common edge edge3
+    "bopcommon_2d_p5": (79.9102, 2, 1),  # common edge edge5
+    "bopcommon_2d_p7": (143.8018, 2, 1),  # common edge wire2
+    "bopcommon_2d_p8": (79.9102, 2, 1),  # common edge wire3
+    "bopcut_2d_b9": (469.8759, 4, 2),  # cut wire_a edge3
+    "bopcut_2d_c2": (533.7675, 4, 2),  # cut wire_a edge5
+    "bopcut_2d_c4": (469.8759, 4, 2),  # cut wire_a wire2
+    "bopcut_2d_c5": (533.7675, 4, 2),  # cut wire_a wire3
+    "bopcut_2d_d1": (533.7675, 4, 2),  # cut edge edge5
+    "bopcut_2d_d3": (469.8759, 4, 2),  # cut edge wire2
+    "bopcut_2d_d4": (533.7675, 4, 2),  # cut edge wire3
+    "bopfuse_2d_b6": (819.8759, 6, 5),  # fuse wire_a edge3
+    "bopfuse_2d_b8": (883.7675, 5, 4),  # fuse wire_a edge5
+    "bopfuse_2d_c1": (1694.3222, 9, 9),  # fuse wire_a wire2
+    "bopfuse_2d_c2": (1694.3222, 8, 8),  # fuse wire_a wire3
+    "bopfuse_2d_c5": (819.8759, 6, 5),  # fuse edge edge3
+    "bopfuse_2d_c7": (883.7675, 5, 4),  # fuse edge edge5
+    "bopfuse_2d_c9": (1550.5204, 9, 9),  # fuse edge wire2
+    "bopfuse_2d_d1": (1614.4119, 8, 8),  # fuse edge wire3
+    "boptuc_2d_o1": (206.1982, 4, 2),  # cut edge3 wire_a
+    "boptuc_2d_o3": (270.0898, 2, 1),  # cut edge5 wire_a
+    "boptuc_2d_o5": (936.8427, 7, 6),  # cut wire2 wire_a
+    "boptuc_2d_o6": (1000.7343, 6, 5),  # cut wire3 wire_a
+    "boptuc_2d_o9": (206.1982, 4, 2),  # cut edge3 edge
+    "boptuc_2d_p2": (270.0898, 2, 1),  # cut edge5 edge
+    "boptuc_2d_p4": (936.8427, 7, 6),  # cut wire2 edge
+    "boptuc_2d_p5": (1000.7343, 6, 5),  # cut wire3 edge
+    "bopcut_2d_d5": (533.7675, 4, 2),  # cut edge wire3
+}
+
 
 # Cases whose reference area is wrong, checked against a value of ours found another way
 # instead (the case's `checkprops -s` takes it): (why OCCT's is wrong, ours, how ours is known).
@@ -1086,6 +1236,7 @@ def main():
         grids = [g for g in sorted(os.listdir(gdir)) if os.path.isdir(os.path.join(gdir, g))]
         body = []
         n_ok = n_ign = 0
+        converted = set()
         seen = set()
         for grid in grids:
             gconsts = dict(consts)
@@ -1113,6 +1264,7 @@ def main():
                     body.append("}")
                 else:
                     n_ok += 1
+                    converted.add(name)
                     body.append(f"/// OCCT `tests/{group}/{grid}/{case}`.")
                     body.append("#[test]")
                     if (group, name) in WRONG_REFERENCE:
@@ -1127,9 +1279,24 @@ def main():
                                 l = re.sub(r"checkprops_s\((.*), [-0-9.e+]+\)", lambda m: f"checkprops_s({m.group(1)}, {ours})", l)
                             fixed.append(l)
                         lines = fixed
+                    if group == "boolean" and name in WRONG_2D:
+                        length, nv, ne = WRONG_2D[name]
+                        fixed = []
+                        for l in lines:
+                            if "checkprops_l(" in l or "checkprops_empty(" in l:
+                                fixed.append(f"// (OCCT's reference misses the overlap of case_9's B-spline and line: ours, as tools/occt_case9_model.py has it.)")
+                                l = f"k.checkprops_l(&result, {length})?;"
+                            elif "draw::check_nb(" in l:
+                                l = re.sub(r"check_nb\(k\.nbshapes\(&result\)\?, Some\(\d+\), Some\(\d+\)", f"check_nb(k.nbshapes(&result)?, Some({nv}), Some({ne})", l)
+                            fixed.append(l)
+                        lines = fixed
                     if (group, name) in known:
-                        # Two-sided: a known failure must still fail (and says so when it
-                        # passes). Slow groups run them only with --ignored.
+                        # Two-sided: a known failure must still fail, by returning its error
+                        # (draw::known_failure says when it passes or panics). Slow groups run
+                        # them only with --ignored.
+                        reason = known[(group, name)]
+                        for i, l in enumerate(textwrap.wrap("Known failure: " + reason, 96)):
+                            body.append(("// " if i == 0 else "//   ") + l)
                         if group in SLOW_GROUPS:
                             body.append('#[ignore = "known failure, slow (tools/occt_known_failures.txt)"]')
                         body.append(f"fn {name}() {{")
@@ -1141,11 +1308,8 @@ def main():
                         body.append("        Ok(())")
                         body.append("    };")
                         body.append("    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(run));")
-                        body.append("    if let Ok(Err(e)) = &r {")
-                        body.append(f'        eprintln!("known failure {group} {name}: {{e:?}}");')
-                        body.append("    }")
-                        body.append("    let passed = matches!(r, Ok(Ok(())));")
-                        body.append(f'    assert!(!passed, "a known failure now passes: remove `{group} {name}` from tools/occt_known_failures.txt");')
+                        panic = expected_panic(reason)
+                        body.append(f'    draw::known_failure("{group} {name}", r, {"Some(" + json.dumps(panic) + ")" if panic else "None"});')
                         body.append("}")
                         continue
                     body.append(f"fn {name}() -> Result<()> {{")
@@ -1183,6 +1347,9 @@ def main():
         with open(os.path.join(out, f"occt_{group}.rs"), "w") as f:
             f.write("\n".join(head + body) + "\n")
         print(f"{group}: {n_ok} converted, {n_ign} waiting")
+        dead = sorted(n for g, n in known if g == group and n not in converted)
+        if dead:
+            print(f"{group}: known failures that aren't converted cases (take them off the list): {', '.join(dead)}", file=sys.stderr)
 
 
 if __name__ == "__main__":

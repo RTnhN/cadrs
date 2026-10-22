@@ -997,40 +997,80 @@ fn rulings(
         Piece::Arc(a) => Some(std::f64::consts::TAU / a.sweep.abs().max(1e-300)),
         Piece::Ellipse { sweep, .. } => Some(std::f64::consts::TAU / sweep.abs().max(1e-300)),
     };
+    // Each triangle's edges laid out flat (the periodic ones unwrapped, at each shift), indexed
+    // by the range of `param` they span in buckets: a lookup per lone point scans the edges of
+    // its bucket instead of every triangle (a face of thousands of triangles with hundreds of
+    // lone points spent seconds here). The bucket only narrows the candidates: each is tested as
+    // before, and the bounds are minima and maxima, so the result is the same.
+    let shifts: &[f64] = match period {
+        Some(per) => &[0.0, per, -per],
+        None => &[0.0],
+    };
+    let mut segs: Vec<(f64, (f64, f64), (f64, f64))> = Vec::new();
+    for t in tris {
+        let Some(mut c) = t.iter().map(|v| flat.get(v).copied()).collect::<Option<Vec<(f64, f64)>>>() else { continue };
+        if let Some(per) = period {
+            let q0 = c[0].0;
+            for q in c.iter_mut().skip(1) {
+                if q.0 - q0 > per / 2.0 {
+                    q.0 -= per;
+                } else if q0 - q.0 > per / 2.0 {
+                    q.0 += per;
+                }
+            }
+        }
+        for &shift in shifts {
+            for k in 0..3 {
+                segs.push((shift, c[k], c[(k + 1) % 3]));
+            }
+        }
+    }
+    // A segment's `param` range: where `param + shift` lies in [lo, hi] (grown by the test's
+    // 1e-9, and by a margin for the rounding of the shift).
+    let span = |&(shift, a, b): &(f64, (f64, f64), (f64, f64))| {
+        let m = 1e-9 + 1e-12 * (1.0 + shift.abs() + a.0.abs() + b.0.abs());
+        (a.0.min(b.0) - shift - m, a.0.max(b.0) - shift + m)
+    };
+    let (plo, phi) = segs.iter().map(span).fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), (a, b)| (l.min(a), h.max(b)));
+    let nb = (segs.len() / 4).clamp(1, 4096);
+    let width = (phi - plo) / nb as f64;
+    let bucket = |x: f64| -> usize { if width > 0.0 { (((x - plo) / width).floor().max(0.0) as usize).min(nb - 1) } else { 0 } };
+    let mut buckets: Vec<Vec<usize>> = vec![Vec::new(); nb];
+    // (Segments without a range, from a coordinate that isn't a number, are tested always.)
+    let mut always: Vec<usize> = Vec::new();
+    for (i, sg) in segs.iter().enumerate() {
+        let (a, b) = span(sg);
+        if !(a <= b) {
+            always.push(i);
+            continue;
+        }
+        for bk in buckets.iter_mut().take(bucket(b) + 1).skip(bucket(a)) {
+            bk.push(i);
+        }
+    }
+    let all: Vec<usize> = (0..segs.len()).collect();
     let reach = |param: f64| -> Option<(f64, f64)> {
         let mut out: Option<(f64, f64)> = None;
-        for t in tris {
-            let Some(mut c) = t.iter().map(|v| flat.get(v).copied()).collect::<Option<Vec<(f64, f64)>>>() else { continue };
-            if let Some(per) = period {
-                let q0 = c[0].0;
-                for q in c.iter_mut().skip(1) {
-                    if q.0 - q0 > per / 2.0 {
-                        q.0 -= per;
-                    } else if q0 - q.0 > per / 2.0 {
-                        q.0 += per;
-                    }
-                }
+        let near: &[usize] = if param.is_nan() {
+            &all
+        } else if param >= plo && param <= phi {
+            &buckets[bucket(param)]
+        } else {
+            &[]
+        };
+        for &i in near.iter().chain(if param.is_nan() { &[][..] } else { &always[..] }) {
+            let (shift, a, b) = segs[i];
+            let x = param + shift;
+            let (lo, hi) = (a.0.min(b.0), a.0.max(b.0));
+            if x < lo - 1e-9 || x > hi + 1e-9 {
+                continue;
             }
-            let shifts: &[f64] = match period {
-                Some(per) => &[0.0, per, -per],
-                None => &[0.0],
-            };
-            for shift in shifts {
-                let x = param + shift;
-                for k in 0..3 {
-                    let (a, b) = (c[k], c[(k + 1) % 3]);
-                    let (lo, hi) = (a.0.min(b.0), a.0.max(b.0));
-                    if x < lo - 1e-9 || x > hi + 1e-9 {
-                        continue;
-                    }
-                    let h = if hi - lo < 1e-12 { a.1.min(b.1) } else { a.1 + (b.1 - a.1) * (x - a.0) / (b.0 - a.0) };
-                    let h2 = if hi - lo < 1e-12 { a.1.max(b.1) } else { h };
-                    out = Some(match out {
-                        Some((l, u)) => (l.min(h), u.max(h2)),
-                        None => (h, h2),
-                    });
-                }
-            }
+            let h = if hi - lo < 1e-12 { a.1.min(b.1) } else { a.1 + (b.1 - a.1) * (x - a.0) / (b.0 - a.0) };
+            let h2 = if hi - lo < 1e-12 { a.1.max(b.1) } else { h };
+            out = Some(match out {
+                Some((l, u)) => (l.min(h), u.max(h2)),
+                None => (h, h2),
+            });
         }
         out
     };

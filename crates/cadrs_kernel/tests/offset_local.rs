@@ -1,5 +1,4 @@
-//! Regressions for offsets, shells and local operations (`native::local`, `native::offset_round`,
-//! `native::slab`) through the `Kernel` trait, checked against closed forms.
+//! Regressions for offsets, shells and local operations (`native::local` and `native::offset`) through the `Kernel` trait, checked against closed forms.
 
 use std::f64::consts::PI;
 
@@ -285,7 +284,7 @@ fn extrusion_loop_n(fi: usize, li: usize, in_plane: bool) -> Vec<(cadrs_kernel::
 #[test]
 fn wire_offset_takes_reversed_edges() {
     use cadrs_kernel::native::curve::Curve;
-    use cadrs_kernel::native::offset2d::offset_wire;
+    use cadrs_kernel::native::offset::wire::offset_wire;
     let wire = extrusion_loop(0, true);
     assert!(wire.iter().any(|e| matches!(e.0, Curve::Nurbs(_))) && wire.iter().any(|e| e.1 > e.2), "a spline and a reversed edge");
     for d in [0.3, -0.3, 1.0] {
@@ -302,7 +301,7 @@ fn wire_offset_takes_reversed_edges() {
 /// loop at every distance, its area growing with the distance.
 #[test]
 fn wire_offset_trims_a_swallowtail() {
-    use cadrs_kernel::native::offset2d::offset_wire;
+    use cadrs_kernel::native::offset::wire::offset_wire;
     let wire = extrusion_loop(0, true);
     let area = |d: f64| -> f64 {
         let loops = offset_wire(&wire, d).unwrap_or_else(|e| panic!("offset by {d}: {e:?}"));
@@ -350,7 +349,7 @@ fn slab_of_a_face_with_a_cone_like_apex() {
     let fi = 11;
     let apex = cadrs_kernel::native::math::P3::new(12.0, -8.0, 0.0);
     assert!(b.faces[fi].loops.iter().flatten().any(|c| b.edges[c.edge].degenerate && (b.verts[b.edges[c.edge].v[0]].p - apex).norm() < 1e-9), "face {fi} has no pole at the apex");
-    let slab = cadrs_kernel::native::slab::face_slab(&b, fi, 0.3).unwrap();
+    let slab = cadrs_kernel::native::offset::slab::face_slab(&b, fi, 0.3).unwrap();
     assert_eq!(slab.check_with(CheckLevel::Full), Vec::<String>::new());
     // The fan: a closed edge 0.3 from the apex all round.
     let fan = slab.edges.iter().any(|e| !e.degenerate && e.v[0] == e.v[1] && (0..8).all(|i| ((e.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 8.0) - apex).norm() - 0.3).abs() < 1e-6));
@@ -380,7 +379,7 @@ fn slab_of_a_face_round_a_pole_along_its_seam() {
         }
     };
     let t = 2.54;
-    let slab = cadrs_kernel::native::slab::face_slab(&b, fi, -t).unwrap();
+    let slab = cadrs_kernel::native::offset::slab::face_slab(&b, fi, -t).unwrap();
     assert_eq!(slab.check_with(CheckLevel::Full), Vec::<String>::new());
     let want = mass::face_area(&b, fi).0 * ((r - t) / r).powi(2);
     let got = (0..slab.faces.len()).map(|f| mass::face_area(&slab, f).0).fold(f64::NAN, |best, a| if (a - want).abs() < (best - want).abs() || best.is_nan() { a } else { best });
@@ -439,10 +438,10 @@ fn names_survive_offsets_and_shells() {
 /// holes out), × 9.7, is the volume to the inset spline's fit.
 #[test]
 fn rounded_inset_of_an_extrusion_is_its_eroded_profile() {
-    use cadrs_kernel::native::offset2d::offset_wire;
+    use cadrs_kernel::native::offset::wire::offset_wire;
     let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/smlib/offset/off_extrusion.smb")).unwrap();
     let b = cadrs_kernel::native::smb::read_brep(&bytes).unwrap().body;
-    let area = |loops: &[Vec<cadrs_kernel::native::offset2d::Piece2>]| -> f64 {
+    let area = |loops: &[Vec<cadrs_kernel::native::offset::wire::Piece2>]| -> f64 {
         let mut a = 0.0;
         for p in loops.iter().flatten() {
             for k in 0..400 {
@@ -729,4 +728,85 @@ fn move_face_refuses_topology_changes() {
         let r = moved(&mut k, f, d);
         assert!(matches!(r, Err(KernelError::InvalidParameter(_))), "{f:?} by {d}: {r:?}");
     }
+}
+
+/// Move face, Translate: a 10 × 10 × 10 cube's top lifted by 3 (the sides follow up) and a side
+/// pushed in by 2 along the x axis; volumes and the moved face's place exact.
+#[test]
+fn move_face_translates_and_neighbours_follow() {
+    let mut k = NativeKernel::new();
+    let cube = prism(&mut k, polygon(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]), vec![], 10.0);
+    let top = face_at(&k, cube, Vector3::z(), 10.0);
+    let up = one(k.move_faces(cube, &[top], &Motion::translation(Vector3::new(0.0, 0.0, 3.0))).unwrap());
+    close(volume(&k, up), 1300.0, 1e-9);
+    assert!(face_at(&k, up, Vector3::z(), 13.0).0 == top.0);
+    // Moved within its own plane, the face (and the body) stays as it was.
+    let slid = one(k.move_faces(cube, &[top], &Motion::translation(Vector3::new(4.0, 0.0, 0.0))).unwrap());
+    close(volume(&k, slid), 1000.0, 1e-9);
+    let side = face_at(&k, cube, Vector3::x(), 10.0);
+    let thin = one(k.move_faces(cube, &[side], &Motion::translation(Vector3::new(-2.0, 0.0, 0.0))).unwrap());
+    close(volume(&k, thin), 800.0, 1e-9);
+    assert!(k.get(thin).unwrap().check_with(cadrs_kernel::native::CheckLevel::Full).is_empty());
+}
+
+/// Move face, Rotate: the cube's top turned 10° about its edge over the y axis: the body is the
+/// cube with a wedge of 10 × 10 × 10·tan 10° (half its box) more.
+#[test]
+fn move_face_rotates_about_an_edge() {
+    let mut k = NativeKernel::new();
+    let cube = prism(&mut k, polygon(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]), vec![], 10.0);
+    let top = face_at(&k, cube, Vector3::z(), 10.0);
+    // About the top's edge x = 0, z = 10 (counter-clockwise seen from +y lowers +x: turn by −10°
+    // to raise it).
+    let axis = Axis { origin: Point3::new(0.0, 0.0, 10.0), dir: nalgebra::Unit::new_normalize(Vector3::y()) };
+    let tilted = one(k.move_faces(cube, &[top], &Motion::rotation(&axis, -10f64.to_radians())).unwrap());
+    close(volume(&k, tilted), 1000.0 + 0.5 * 10.0 * 10.0 * 10.0 * 10f64.to_radians().tan(), 1e-9);
+    assert!(k.get(tilted).unwrap().check_with(cadrs_kernel::native::CheckLevel::Full).is_empty());
+}
+
+/// Move face of a boss: its wall and top translated across its base, the base's hole loop
+/// following; moved off the base's edge (the wall would run into the base's sides) it is
+/// refused with `InvalidParameter`, and a reflection is refused outright.
+#[test]
+fn move_face_moves_a_boss_and_refuses_topology_changes() {
+    let mut k = NativeKernel::new();
+    let base = prism(&mut k, polygon(&[(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)]), vec![], 5.0);
+    let boss = one(k.extrude(&Profile::new(Plane { origin: Point3::new(0.0, 0.0, 5.0), ..Plane::top() }, vec![Region { outer: circle((10.0, 10.0), 3.0), holes: vec![], source: None }]), Extent::Blind(4.0)).unwrap());
+    let part = one(k.boolean(BoolOp::Union, base, &[boss]).unwrap());
+    let v0 = volume(&k, part);
+    let faces: Vec<FaceId> = k.faces(part).unwrap().into_iter().filter(|f| f.center.z > 5.0 + 1e-6).map(|f| f.id).collect();
+    assert_eq!(faces.len(), 2, "the boss's wall and top");
+    let moved = one(k.move_faces(part, &faces, &Motion::translation(Vector3::new(4.0, -2.0, 0.0))).unwrap());
+    close(volume(&k, moved), v0, 1e-7);
+    let top = k.faces(moved).unwrap().into_iter().find(|f| (f.center.z - 9.0).abs() < 1e-9).expect("the boss's top");
+    assert!((top.center - Point3::new(14.0, 8.0, 9.0)).norm() < 1e-6, "{:?}", top.center);
+    assert!(k.get(moved).unwrap().check_with(cadrs_kernel::native::CheckLevel::Full).is_empty());
+    match k.move_faces(part, &faces, &Motion::translation(Vector3::new(9.0, 0.0, 0.0))) {
+        Err(KernelError::InvalidParameter(_)) => {}
+        r => panic!("a boss moved off its base: {r:?}"),
+    }
+    let mirror = Motion::reflection(Point3::new(10.0, 10.0, 0.0), Vector3::x_axis());
+    assert!(matches!(k.move_faces(part, &faces, &mirror), Err(KernelError::InvalidParameter(_))));
+}
+
+/// Sharp offsets of a whole sphere and of a sphere cut by a plane (OCCT's offset
+/// shape_type_i_e3/e4/d4): the sphere's seam keeps its two sides when the sphere grows or shrinks
+/// (its p-curves were projected onto one side, leaving a loop that encloses nothing).
+#[test]
+fn sharp_offset_of_a_sphere_keeps_its_seam() {
+    use cadrs_kernel::native::draw::Shape;
+    let mut k = NativeKernel::new();
+    let Shape::Body(ball) = k.psphere(15.0).unwrap() else { panic!("a sphere body") };
+    for d in [1.0, -1.0] {
+        let r = one(k.offset(ball, &OffsetSpec { distance: d, faces: vec![], sharp: true }).unwrap());
+        close(volume(&k, r), 4.0 / 3.0 * PI * (15.0f64 + d).powi(3), 1e-6);
+        assert!(k.get(r).unwrap().check_with(cadrs_kernel::native::CheckLevel::Full).is_empty());
+    }
+    // Below latitude 60°: a sphere and a plane; grown by 1 the cap's plane rises by 1.
+    let Shape::Body(zone) = k.psphere_zone(None, 15.0, -90.0, 60.0, 360.0).unwrap() else { panic!("a sphere body") };
+    let r = one(k.offset(zone, &OffsetSpec { distance: 1.0, faces: vec![], sharp: true }).unwrap());
+    let (rr, h) = (16.0f64, 15.0 * 60f64.to_radians().sin() + 1.0);
+    // The ball of radius 16 less its cap above z = h.
+    let cap = PI * (rr - h).powi(2) * (3.0 * rr - (rr - h)) / 3.0;
+    close(volume(&k, r), 4.0 / 3.0 * PI * rr.powi(3) - cap, 1e-6);
 }

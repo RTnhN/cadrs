@@ -21,8 +21,24 @@ use bevy::math::{Mat3, Quat, Vec2, Vec3};
 /// How far the camera sits from the focus point along the view direction (mm). The projection is
 /// orthographic, so this only has to keep the scene between the near and far planes.
 pub const CAMERA_DISTANCE: f32 = 20_000.0;
-/// The far plane of the main camera.
+/// The far plane of the main camera at the usual zoom ([`camera_far`]).
 pub const CAMERA_FAR: f32 = 40_000.0;
+/// Zoomed out, the camera keeps this many pixels' worth of the view's scale in front of the
+/// focus (and as much behind it), so a scene as deep as it is wide on screen (a site, a
+/// building) stays between the near and far planes.
+const DEPTH_PX: f32 = 4000.0;
+
+/// How far the orthographic camera sits in front of the focus at `scale` mm per pixel:
+/// [`CAMERA_DISTANCE`], or more when zoomed out past it. Close views keep the depth precision
+/// of the fixed range ([`crate::picture::SURFACE_BIAS`] is tuned to it).
+pub fn camera_distance(scale: f32) -> f32 {
+    CAMERA_DISTANCE.max(scale * DEPTH_PX)
+}
+
+/// The orthographic far plane at `scale`: the focus in the middle of the depth range.
+pub fn camera_far(scale: f32) -> f32 {
+    2.0 * camera_distance(scale)
+}
 /// Onshape's default zoom: a 150 mm default plane measures about 592 px on screen (so a
 /// normal-to sketch view shows about 3.95 px per mm: `screens/11`, 49.12 mm across 194 px).
 pub const DEFAULT_SCALE: f32 = 150.0 / 592.0;
@@ -275,7 +291,7 @@ impl ViewState {
         if self.perspective {
             return self.focus + self.back() * self.eye_distance();
         }
-        self.focus + self.back() * CAMERA_DISTANCE
+        self.focus + self.back() * camera_distance(self.scale)
     }
 
     /// In perspective, how much larger than on the focus plane a point `p` is drawn (1 on the
@@ -315,7 +331,7 @@ impl ViewState {
             return (eye, (self.unproject(offset) - eye).normalize());
         }
         (
-            self.unproject(offset) + self.back() * CAMERA_DISTANCE,
+            self.unproject(offset) + self.back() * camera_distance(self.scale),
             -self.back(),
         )
     }
@@ -806,6 +822,20 @@ mod tests {
         assert!(v.fitted(&[], Vec2::splat(100.0), 0.5).approx_eq(&v));
         // Zooming in shows more pixels per mm.
         assert!(v.zoomed(1.25).scale < v.scale);
+    }
+
+    /// Zoomed out over a site 60 m across, the whole of it stays between the near and far
+    /// planes; close views keep the fixed range.
+    #[test]
+    fn the_depth_range_grows_with_the_view() {
+        assert_eq!(camera_distance(DEFAULT_SCALE), CAMERA_DISTANCE);
+        assert_eq!(camera_far(DEFAULT_SCALE), CAMERA_FAR);
+        // 60 m on a 1500 px viewport: 40 mm per pixel.
+        let v = ViewState { scale: 40.0, ..ViewState::default() };
+        let corner = v.focus + Vec3::new(30_000.0, 30_000.0, 10_000.0);
+        let depth = (v.camera_position() - corner).dot(v.back());
+        assert!(depth > 0.0 && depth < camera_far(v.scale), "depth {depth}");
+        assert!(v.ray(Vec2::ZERO).0.distance(v.camera_position()) < 1e-2);
     }
 
     #[test]

@@ -34,6 +34,7 @@ use super::nurbs::{hom, NurbsCurve, NurbsSurface, H};
 use super::surface::Surface;
 use super::topo::{co_range, Body, Coedge, Face, Shell, Solid, TOL_MIN};
 use super::xbuild::{XBuilder, XFace};
+use super::tol;
 
 type R<T> = Result<T, String>;
 
@@ -471,8 +472,8 @@ fn to_curve(g: &GCurve, t0: f64, t1: f64) -> R<Curve> {
             let v = v.normalize();
             match &c {
                 // The offset direction is T × V.
-                Curve::Line { o, d: dir } if dir.cross(&v).norm() > 1e-12 => Curve::Line { o: o + dir.cross(&v).normalize() * *d, d: *dir },
-                Curve::Circle { c: o, x, y, r } if x.cross(y).normalize().cross(&v).norm() < 1e-12 => {
+                Curve::Line { o, d: dir } if dir.cross(&v).norm() > tol::ANGULAR_FINE => Curve::Line { o: o + dir.cross(&v).normalize() * *d, d: *dir },
+                Curve::Circle { c: o, x, y, r } if x.cross(y).normalize().cross(&v).norm() < tol::ANGULAR_FINE => {
                     let r2 = r + d * x.cross(y).normalize().dot(&v);
                     if r2 <= 0.0 {
                         return Err("an offset circle of no radius".into());
@@ -498,6 +499,15 @@ fn curve_range(g: &GCurve) -> Option<(f64, f64)> {
     }
 }
 
+/// A line (through trims), as our curve; None for other curves.
+fn base_line(g: &GCurve) -> Option<Curve> {
+    match g {
+        GCurve::Line(o, d) => Some(Curve::Line { o: *o, d: d.normalize() }),
+        GCurve::Trimmed(c) => base_line(c),
+        _ => None,
+    }
+}
+
 /// Our surface and whether its natural normal is OCCT's.
 fn to_surface(g: &GSurf, exact: bool) -> R<(Surface, bool)> {
     let fr = |ax: &Ax| if exact { ax.frame_exact() } else { ax.frame() };
@@ -509,8 +519,13 @@ fn to_surface(g: &GSurf, exact: bool) -> R<(Surface, bool)> {
         GSurf::Sphere(ax, r) => (Surface::Sphere { f: fr(ax), r: *r }, hand(ax)),
         GSurf::Torus(ax, rmaj, rmin) => (Surface::Torus { f: fr(ax), rmaj: *rmaj, rmin: *rmin }, hand(ax)),
         GSurf::Extrusion(d, c) => {
-            let (a, b) = curve_range(c).ok_or("an extrusion of an unbounded curve")?;
-            let c = to_curve(c, a, b)?;
+            // A line (unbounded, its parameter the length along it) needs no range: the
+            // extrusion of one is a plane, parametrized as OCCT's.
+            let c = match (curve_range(c), base_line(c)) {
+                (Some((a, b)), _) => to_curve(c, a, b)?,
+                (None, Some(line)) => line,
+                (None, None) => return Err("an extrusion of an unbounded curve".into()),
+            };
             // OCCT's normal is C' × d, ours Su × Sv: the same.
             (Surface::Extrusion { c, d: d.normalize() }, true)
         }
@@ -534,7 +549,7 @@ fn offset_surface(d: f64, g: &GSurf, exact: bool) -> R<(Surface, bool)> {
     let (base, same) = to_surface(g, exact)?;
     // Along OCCT's normal: ours, or ours turned round.
     let d = if same { d } else { -d };
-    let pos = |r: f64| if r > 1e-12 { Ok(r) } else { Err("an offset surface of no radius".to_string()) };
+    let pos = |r: f64| if r > tol::ROUNDOFF_FINE { Ok(r) } else { Err("an offset surface of no radius".to_string()) };
     Ok((
         match &base {
             Surface::Plane { f } => Surface::Plane { f: Frame { o: f.o + f.z * d, ..*f } },
@@ -624,7 +639,7 @@ impl Loc {
 // ---------------------------------------------------------------------------------------------
 // Shapes
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Ori {
     Fwd,
     Rev,
@@ -897,6 +912,135 @@ fn parse(text: &str) -> R<File> {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Unbounded planes
+
+/// Half the side of the square that stands for a plane face the file leaves unbounded (no
+/// wire: OCCT's infinite plane), and the depth of the box that stands for a half-space (a solid
+/// of one such face). Large against any model the kernel builds, small enough that coordinates
+/// on it keep about 1e-10 of absolute precision.
+pub const UNBOUNDED: f64 = 1e6;
+
+/// Gives every plane face of the file without a wire a square of side 2·[`UNBOUNDED`] about
+/// its origin; a shell of one such face only (a half-space, `halfspace` in DRAW) becomes the
+/// box of that depth behind the face as the shape uses it (its orientation composed from the
+/// root down). OCCT reads both as infinite; the kernel's bodies are bounded, and against any
+/// finite body the result is the same.
+fn bound_unbounded_planes(f: &mut File) {
+    let has_wire = |f: &File, s: usize| f.shapes[s].subs.iter().any(|&(_, w, _)| matches!(f.shapes[w].kind, Kind::Wire));
+    let unbounded = |f: &File, s: usize| matches!(f.shapes[s].kind, Kind::Face(Some((si, _))) if matches!(f.surfaces[si], GSurf::Plane(_))) && !has_wire(f, s);
+    let faces: Vec<usize> = (0..f.shapes.len()).filter(|&s| unbounded(f, s)).collect();
+    if faces.is_empty() {
+        return;
+    }
+    // Shells of one unbounded face, and how they use it.
+    let halfspaces: Vec<(usize, Ori, usize)> = (0..f.shapes.len())
+        .filter(|&s| matches!(f.shapes[s].kind, Kind::Shell))
+        .filter_map(|s| match f.shapes[s].subs[..] {
+            [(o, fs, l)] if unbounded(f, fs) => Some((s, o, l)),
+            _ => None,
+        })
+        .collect();
+    // The orientation each shell is used with, composed from the root.
+    let mut used: HashMap<usize, Ori> = HashMap::new();
+    let mut stack = vec![(f.root.1, f.root.0)];
+    let mut seen = std::collections::HashSet::new();
+    while let Some((s, o)) = stack.pop() {
+        if !seen.insert((s, o)) {
+            continue;
+        }
+        if matches!(f.shapes[s].kind, Kind::Shell) {
+            used.entry(s).or_insert(o);
+        } else if matches!(f.shapes[s].kind, Kind::Compound | Kind::Solid) {
+            stack.extend(f.shapes[s].subs.iter().map(|&(c, sub, _)| (sub, o.compose(c))));
+        }
+    }
+    for fs in faces {
+        let Kind::Face(Some((si, sl))) = f.shapes[fs].kind else { continue };
+        let GSurf::Plane(ax) = f.surfaces[si] else { continue };
+        let (x, y) = (ax.x.normalize(), ax.y.normalize());
+        // (u, v) on the plane as the file's axes give them: a loop counter-clockwise in (u, v)
+        // runs round the face's natural normal x × y.
+        let m = x.cross(&y);
+        let at = |u: f64, v: f64, w: f64| ax.o + x * u + y * v + m * w;
+        let l = UNBOUNDED;
+        let square = [at(-l, -l, 0.0), at(l, -l, 0.0), at(l, l, 0.0), at(-l, l, 0.0)];
+        let users: Vec<(usize, Ori, usize)> = halfspaces.iter().copied().filter(|h| f.shapes[h.0].subs[0].1 == fs).collect();
+        let mut b = PlaneBuilder { f: &mut *f, verts: Vec::new(), edges: Vec::new() };
+        let wire = b.wire(&square);
+        b.f.shapes[fs].subs.push((Ori::Fwd, wire, sl));
+        for (sh, o, fl) in users {
+            // The material lies behind the face as the shape uses it: away from m when it
+            // takes the face forward.
+            let fwd = used.get(&sh).copied().unwrap_or(Ori::Fwd).compose(o) != Ori::Rev;
+            let d = if fwd { -2.0 * l } else { 2.0 * l };
+            let far = [at(-l, -l, d), at(l, -l, d), at(l, l, d), at(-l, l, d)];
+            let mut quads: Vec<[P3; 4]> = (0..4).map(|k| [square[k], far[k], far[(k + 1) % 4], square[(k + 1) % 4]]).collect();
+            quads.push([far[0], far[3], far[2], far[1]]);
+            for q in quads {
+                // Each quad runs round its face's natural normal n, and the shell takes the new
+                // faces as it takes the plane's: forward, n is the outward normal (the quads
+                // run round the box's outside); reversed, the box lies on the other side of the
+                // plane and the same order runs round the inward normal.
+                let n = (q[1] - q[0]).cross(&(q[2] - q[1])).normalize();
+                let qx = (q[1] - q[0]).normalize();
+                b.f.surfaces.push(GSurf::Plane(Ax { o: q[0], z: n, x: qx, y: n.cross(&qx) }));
+                let w = b.wire(&q);
+                b.f.shapes.push(TShape { kind: Kind::Face(Some((b.f.surfaces.len() - 1, sl))), tol: 0.0, closed: false, subs: vec![(Ori::Fwd, w, sl)] });
+                let nf = b.f.shapes.len() - 1;
+                b.f.shapes[sh].subs.push((o, nf, fl));
+            }
+            b.f.shapes[sh].closed = true;
+        }
+    }
+}
+
+/// Adds vertices, line edges and wires to a file (for [`bound_unbounded_planes`]), sharing a
+/// vertex or edge between the loops that meet there.
+struct PlaneBuilder<'a> {
+    f: &'a mut File,
+    verts: Vec<(P3, usize)>,
+    /// (start vertex, end vertex, edge shape).
+    edges: Vec<(usize, usize, usize)>,
+}
+
+impl PlaneBuilder<'_> {
+    fn vertex(&mut self, p: P3) -> usize {
+        if let Some(&(_, v)) = self.verts.iter().find(|(q, _)| (q - p).norm() <= super::tol::CONFUSION) {
+            return v;
+        }
+        self.f.shapes.push(TShape { kind: Kind::Vertex(p), tol: super::tol::CONFUSION, closed: false, subs: Vec::new() });
+        let v = self.f.shapes.len() - 1;
+        self.verts.push((p, v));
+        v
+    }
+
+    /// A wire through `pts` (closed), as the file's shapes.
+    fn wire(&mut self, pts: &[P3]) -> usize {
+        let mut subs = Vec::new();
+        for k in 0..pts.len() {
+            let (p, q) = (pts[k], pts[(k + 1) % pts.len()]);
+            let (a, b) = (self.vertex(p), self.vertex(q));
+            let found = self.edges.iter().find_map(|&(s, e, ed)| if (s, e) == (a, b) { Some((ed, Ori::Fwd)) } else if (s, e) == (b, a) { Some((ed, Ori::Rev)) } else { None });
+            let (ed, o) = match found {
+                Some(x) => x,
+                None => {
+                    let len = (q - p).norm();
+                    self.f.curves.push(GCurve::Line(p, (q - p) / len));
+                    let c = self.f.curves.len() - 1;
+                    self.f.shapes.push(TShape { kind: Kind::Edge(Some((c, 0, 0.0, len)), false, Vec::new()), tol: super::tol::CONFUSION, closed: false, subs: vec![(Ori::Fwd, a, 0), (Ori::Rev, b, 0)] });
+                    let ed = self.f.shapes.len() - 1;
+                    self.edges.push((a, b, ed));
+                    (ed, Ori::Fwd)
+                }
+            };
+            subs.push((o, ed, 0));
+        }
+        self.f.shapes.push(TShape { kind: Kind::Wire, tol: 0.0, closed: true, subs });
+        self.f.shapes.len() - 1
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
 // Building
 
 /// The 3D curve of an edge the file gives only p-curves (OCCT's `BRepLib::BuildCurves3d`): its
@@ -940,7 +1084,12 @@ struct Builder<'a> {
     free_edges: Vec<usize>,
     /// Whether any free edge is in a wire.
     wires: bool,
+    /// Vertices outside any edge (a compound's), placed.
+    free_points: Vec<P3>,
     warnings: Vec<String>,
+    /// The file's degenerate edges (left out): how many edges were made before each, and its
+    /// point, for OCCT's exploration order.
+    degenerate: Vec<(usize, P3)>,
 }
 
 impl Builder<'_> {
@@ -970,6 +1119,12 @@ impl Builder<'_> {
         let sh = &self.f.shapes[s];
         let Kind::Edge(c3, degenerate, ref pcs) = sh.kind else { return None };
         if degenerate {
+            let at = self.xb.body.edges.len();
+            if let Some(&(_, vs, l)) = sh.subs.first()
+                && let Some(v) = self.vertex(vs, &loc.then(&self.f.locs[l]))
+            {
+                self.degenerate.push((at, self.xb.body.verts[v].p));
+            }
             return None;
         }
         let (mut v0, mut v1) = (None, None);
@@ -1102,7 +1257,12 @@ impl Builder<'_> {
                             self.free_edges.push(e);
                         }
             }
-            _ => {}
+            Kind::Vertex(p) => {
+                let q = loc.m.point(&p);
+                if !self.free_points.iter().any(|x| (x - q).norm() <= super::tol::CONFUSION) {
+                    self.free_points.push(q);
+                }
+            }
         }
     }
 }
@@ -1439,25 +1599,35 @@ pub struct BrepRead {
     /// The faces' body (solids, then sheets); None when the file has no faces.
     pub body: Option<Body>,
     /// The middle points of the body's edges in OCCT's exploration order (the order of first
-    /// use, depth first, as `TopExp_Explorer` meets them; degenerate edges left out). The faces
+    /// use, depth first, as `TopExp_Explorer` meets them; a degenerate edge at its vertex). The faces
     /// keep the file's order.
     pub edge_order: Vec<P3>,
+    /// The degenerate edges' places in `edge_order` (their vertices' points there).
+    pub degenerate_order: Vec<usize>,
     /// Edges outside faces (a wire's or a compound's): curve and parameter range.
     pub free_edges: Vec<(Curve, f64, f64)>,
     /// Whether the free edges are in wires (else loose edges).
     pub wires: bool,
     /// The vertices of a file with no faces or edges.
     pub points: Vec<P3>,
+    /// Vertices outside any edge in a file with faces or edges (a compound's loose vertices).
+    pub loose_points: Vec<P3>,
     pub warnings: Vec<String>,
 }
 
 /// [`read`], with free edges and OCCT's edge order.
 pub fn read_ordered(bytes: &[u8]) -> R<BrepRead> {
     let text = String::from_utf8_lossy(bytes);
-    let f = parse(&text)?;
+    let mut f = parse(&text)?;
+    // The shape itself used internal or external (DRAW saves a face so): as it is. Below the
+    // root those uses stay left out, as OCCT's explorers leave them.
+    if !matches!(f.root.0, Ori::Fwd | Ori::Rev) {
+        f.root.0 = Ori::Fwd;
+    }
+    bound_unbounded_planes(&mut f);
     let mut xb = XBuilder::new();
     xb.trust_orientation = true;
-    let mut b = Builder { f: &f, xb, verts: HashMap::new(), edges: HashMap::new(), free_faces: Vec::new(), free_edges: Vec::new(), wires: false, warnings: Vec::new() };
+    let mut b = Builder { f: &f, xb, verts: HashMap::new(), edges: HashMap::new(), free_faces: Vec::new(), free_edges: Vec::new(), wires: false, free_points: Vec::new(), warnings: Vec::new(), degenerate: Vec::new() };
     let (o, s, l) = f.root;
     b.visit(s, o, &f.locs[l]);
     let free = std::mem::take(&mut b.free_faces);
@@ -1469,7 +1639,21 @@ pub fn read_ordered(bytes: &[u8]) -> R<BrepRead> {
         let ed = &b.xb.body.edges[e];
         (ed.curve.clone(), ed.t[0], ed.t[1])
     }).collect();
-    let mids: Vec<P3> = b.xb.body.edges.iter().map(|e| e.point(e.mid_t())).collect();
+    // The edges' middles in order, the degenerate ones' points where they came.
+    let mut mids: Vec<P3> = Vec::new();
+    let mut degenerate_order: Vec<usize> = Vec::new();
+    let mut pending = b.degenerate.iter().peekable();
+    for (i, e) in b.xb.body.edges.iter().enumerate() {
+        while let Some(&(_, p)) = pending.next_if(|x| x.0 <= i) {
+            degenerate_order.push(mids.len());
+            mids.push(p);
+        }
+        mids.push(e.point(e.mid_t()));
+    }
+    for &(_, p) in pending {
+        degenerate_order.push(mids.len());
+        mids.push(p);
+    }
     let has_faces = !b.xb.faces.is_empty();
     // Straight from the file when that gives a valid body; else rebuilt.
     let direct = if has_faces && std::env::var_os("CADRS_OCCT_REBUILD").is_none() {
@@ -1523,7 +1707,7 @@ pub fn read_ordered(bytes: &[u8]) -> R<BrepRead> {
         for si in 0..x.solids.len() {
             let faces = x.solid_faces(si);
             let sub = super::kernel::subset(&x, &faces, true);
-            if super::mass::body_mass(&sub).volume < 0.0 {
+            if super::mass::body_volume(&sub) < 0.0 {
                 for f in faces {
                     Body::reverse_face(&mut x.faces[f]);
                 }
@@ -1535,7 +1719,9 @@ pub fn read_ordered(bytes: &[u8]) -> R<BrepRead> {
     };
     // A file of only vertices (or of edges without curves, a wire collapsed to a point).
     let mut points: Vec<P3> = Vec::new();
+    let mut loose_points = std::mem::take(&mut b.free_points);
     if body.is_none() && free_edges.is_empty() {
+        loose_points.clear();
         fn walk(f: &File, s: usize, loc: &Loc, out: &mut Vec<P3>) {
             if let Kind::Vertex(p) = f.shapes[s].kind {
                 let q = loc.m.point(&p);
@@ -1552,19 +1738,51 @@ pub fn read_ordered(bytes: &[u8]) -> R<BrepRead> {
             return Err(format!("no faces or edges read ({})", warnings.join("; ")));
         }
     }
-    Ok(BrepRead { body, edge_order: mids, free_edges, wires: b.wires, points, warnings })
+    Ok(BrepRead { body, edge_order: mids, degenerate_order, free_edges, wires: b.wires, points, loose_points, warnings })
 }
 
-/// Reads an OCCT BRep text file into a body (its solids, then sheets) and the problems met.
+/// Reads an OCCT BRep text file into a body and the problems met: its solids, then sheets,
+/// then the edges outside faces chained into wires ([`Body::chain_wires`]: a wire's, or loose
+/// edges of a compound) and the vertices outside edges as acorn points. A file of only edges
+/// gives a wire body, of only vertices a point body.
 pub fn read(bytes: &[u8]) -> R<(Body, Vec<String>)> {
     let r = read_ordered(bytes)?;
-    let warnings = r.warnings;
-    r.body.map(|b| (b, warnings)).ok_or_else(|| "no faces read".to_string())
+    let mut body = r.body.unwrap_or_default();
+    with_loose(&mut body, &r.free_edges, if r.points.is_empty() { &r.loose_points } else { &r.points });
+    if body.faces.is_empty() && body.edges.is_empty() && body.points.is_empty() {
+        return Err("no faces, edges or vertices read".to_string());
+    }
+    if let Some(why) = body.check().into_iter().next() {
+        return Err(format!("the file's edges and vertices: {why}"));
+    }
+    Ok((body, r.warnings))
+}
+
+/// Adds edges outside faces (chained into wires) and loose vertices (acorn points) to `b`. An
+/// edge end within [`super::tol::POINT`] of another such edge's end shares its vertex.
+fn with_loose(b: &mut Body, edges: &[(Curve, f64, f64)], points: &[P3]) {
+    let first_new = b.verts.len();
+    let vertex = |b: &mut Body, p: P3| match (first_new..b.verts.len()).find(|&v| (b.verts[v].p - p).norm() <= super::tol::POINT) {
+        Some(v) => v,
+        None => b.add_vertex(p),
+    };
+    for (c, t0, t1) in edges {
+        let (v0, v1) = (vertex(b, c.point(*t0)), vertex(b, c.point(*t1)));
+        b.add_edge(c.clone(), *t0, *t1, v0, v1);
+    }
+    if !edges.is_empty() {
+        b.chain_wires();
+    }
+    for &p in points {
+        let v = b.add_vertex(p);
+        b.points.push(v);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::BodyClass;
 
     /// A unit box as OCCT 7.8 writes it (`box b 1 2 3; save b`), trimmed of its p-curves.
     const BOX: &str = include_str!("../../tests/data/occt_box.brep");
@@ -1573,8 +1791,19 @@ mod tests {
     fn reads_a_box() {
         let (b, w) = read(BOX.as_bytes()).unwrap();
         assert_eq!((b.verts.len(), b.edges.len(), b.faces.len(), b.solids.len()), (8, 12, 6, 1), "{w:?}");
-        let v = super::super::mass::body_mass(&b).volume;
+        let v = super::super::mass::body_volume(&b);
         assert!((v - 6.0).abs() < 1e-9, "{v}");
+    }
+
+    /// A surface of linear extrusion of a line (unbounded: no parameter range of its own) is
+    /// read, parametrized as OCCT's (CFI_5_b12fgg.rle's two such faces were dropped, leaving 7
+    /// of its 12 edges).
+    #[test]
+    fn reads_extrusions_of_lines() {
+        let g = GSurf::Extrusion(V3::z(), GCurve::Line(P3::new(1.0, 2.0, 0.0), V3::new(2.0, 0.0, 0.0)));
+        let (s, same) = to_surface(&g, false).unwrap();
+        assert!(same);
+        assert!((s.eval(3.0, 4.0) - P3::new(4.0, 2.0, 4.0)).norm() < 1e-12);
     }
 
     #[test]
@@ -1732,5 +1961,68 @@ Fa
         let co = |edge: usize, fwd: bool| Coedge { edge, fwd, pc: line.clone() };
         let l = chain(vec![co(ca, false), co(l1, true), co(l2, false), co(cb, true)], &b).expect("the loop chains");
         assert_eq!(l.iter().map(|c| c.edge).collect::<Vec<_>>(), vec![ca, l2, cb, l1]);
+    }
+
+    /// A file's head with one plane, z = 0 with normal +z (DRAW's `plane p` as a face).
+    fn plane_file(shapes: &str) -> String {
+        format!("CASCADE Topology V1, (c) Matra-Datavision\nLocations 0\nCurve2ds 0\nCurves 0\nPolygon3D 0\nPolygonOnTriangulations 0\nSurfaces 1\n1 0 0 0 0 0 1 1 0 0 0 1 0\nTriangulations 0\n\n{shapes}")
+    }
+
+    #[test]
+    fn unbounded_plane_is_a_large_square() {
+        // `mkface f p` with no bounds: OCCT's infinite plane, read as a square of side 2·UNBOUNDED.
+        let text = plane_file("TShapes 1\nFa\n0  1e-07 1 0\n\n0101000\n*\n\n+1 0\n");
+        let (b, w) = read(text.as_bytes()).unwrap();
+        assert_eq!((b.faces.len(), b.edges.len(), b.solids.len()), (1, 4, 0), "{w:?}");
+        assert!(b.check_with(super::super::topo::CheckLevel::Full).is_empty());
+        let (a, c) = super::super::mass::face_area(&b, 0);
+        assert!((a - 4.0 * UNBOUNDED * UNBOUNDED).abs() < 1e-6 * a, "{a}");
+        assert!(c.coords.norm() < 1e-6 * UNBOUNDED, "{c:?}");
+    }
+
+    #[test]
+    fn halfspace_is_a_box_behind_its_plane() {
+        // A solid of one shell of the unbounded plane (DRAW's `halfspace`): the shell takes the
+        // face forward, so the material lies below z = 0; the solid reversed, above it.
+        for (solid_ori, below) in [("+", true), ("-", false)] {
+            let text = plane_file(&format!("TShapes 3\nFa\n0  1e-07 1 0\n\n0101000\n*\nSh\n\n0101100\n+3 0 *\nSo\n\n0100000\n{solid_ori}2 0 *\n\n+1 0\n"));
+            let (b, w) = read(text.as_bytes()).unwrap();
+            assert_eq!((b.faces.len(), b.edges.len(), b.solids.len()), (6, 12, 1), "{w:?}");
+            assert!(b.check().is_empty(), "{:?}", b.check());
+            let m = super::super::mass::body_mass(&b);
+            let l = UNBOUNDED;
+            assert!((m.volume - 8.0 * l * l * l).abs() < 1e-6 * m.volume, "{}", m.volume);
+            assert!((m.center_of_mass.z + if below { l } else { -l }).abs() < 1e-6 * l, "{:?}", m.center_of_mass);
+        }
+    }
+
+    #[test]
+    fn wires_and_loose_vertices_are_read() {
+        // A compound of a face (the unbounded plane), an edge on the line y = 5 from x = 0 to 2,
+        // in a wire with a second from x = 2 to 3, and a loose vertex: the body holds all three
+        // kinds. Without the face, the wire alone.
+        let edges = "Curves 1\n1 0 5 0 1 0 0\nPolygon3D 0\nPolygonOnTriangulations 0\nSurfaces 1\n1 0 0 0 0 0 1 1 0 0 0 1 0\nTriangulations 0\n\n";
+        let shapes = "Ve\n1e-07\n0 5 0\n0 0\n\n0101101\n*\nVe\n1e-07\n2 5 0\n0 0\n\n0101101\n*\nVe\n1e-07\n3 5 0\n0 0\n\n0101101\n*\n\
+            Ed\n 1e-07 1 1 0\n1  1 0 0 2\n0\n\n0101000\n+9 0 -8 0 *\nEd\n 1e-07 1 1 0\n1  1 0 2 3\n0\n\n0101000\n+8 0 -7 0 *\n\
+            Wi\n\n0101000\n+6 0 +5 0 *\nVe\n1e-07\n7 7 7\n0 0\n\n0101101\n*\nFa\n0  1e-07 1 0\n\n0101000\n*\n";
+        let head = "CASCADE Topology V1, (c) Matra-Datavision\nLocations 0\nCurve2ds 0\n";
+        let with_face = format!("{head}{edges}TShapes 9\n{shapes}Co\n\n1100000\n+4 0 +3 0 +2 0 *\n\n+1 0\n");
+        let (b, w) = read(with_face.as_bytes()).unwrap();
+        assert_eq!((b.faces.len(), b.wires.len(), b.points.len()), (1, 1, 1), "{w:?}");
+        assert_eq!(b.wires[0].edges.len(), 2);
+        assert!((b.verts[b.points[0]].p - P3::new(7.0, 7.0, 7.0)).norm() < 1e-12);
+        assert_eq!(b.class(), BodyClass::Mixed);
+        assert!(b.check().is_empty(), "{:?}", b.check());
+        // (References count back from the table's end: the same shapes renumbered.)
+        let wire_only = format!(
+            "{head}{edges}TShapes 6\n{}{}{}\n+1 0\n",
+            &shapes[..shapes.find("Ed").unwrap()],
+            "Ed\n 1e-07 1 1 0\n1  1 0 0 2\n0\n\n0101000\n+6 0 -5 0 *\nEd\n 1e-07 1 1 0\n1  1 0 2 3\n0\n\n0101000\n+5 0 -4 0 *\n",
+            "Wi\n\n0101000\n+3 0 +2 0 *\n"
+        );
+        let (b, w) = read(wire_only.as_bytes()).unwrap();
+        assert_eq!((b.faces.len(), b.wires.len(), b.edges.len(), b.class()), (0, 1, 2, BodyClass::Wire), "{w:?}");
+        let len: f64 = b.edges.iter().map(|e| e.curve.length(e.t[0], e.t[1])).sum();
+        assert!((len - 3.0).abs() < 1e-12, "{len}");
     }
 }

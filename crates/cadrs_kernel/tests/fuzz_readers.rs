@@ -308,3 +308,17 @@ fn replay() {
     eprintln!("smb: {:?}", smb::read(&bytes).map(|(b, w)| (b.faces.len(), w)));
     eprintln!("body: {:?}", bodyio::read(&bytes).map(|b| b.faces.len()));
 }
+
+/// Inputs the fuzzing found that once panicked, kept as plain cases.
+#[test]
+fn smb_reader_regressions() {
+    // "1e-320" put into the file: a closed spline's restart parameter is not a number, which
+    // NurbsCurve::split unwrapped (now a typed error, and the edge is dropped).
+    let cases: &[&[Edit]] = &[&[Edit::Insert(1562873202180017185, 4)]];
+    for edits in cases {
+        let bytes = apply(smb_seed(), edits);
+        if let Ok((b, _)) = smb::read(&bytes) {
+            use_body(b);
+        }
+    }
+}

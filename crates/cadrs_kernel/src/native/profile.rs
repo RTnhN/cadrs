@@ -140,7 +140,7 @@ impl Piece {
     pub fn split_at(&self, mut ts: Vec<f64>) -> Vec<Piece> {
         ts.retain(|t| *t > self.t0 && *t < self.t1);
         ts.sort_by(f64::total_cmp);
-        ts.dedup_by(|a, b| (*a - *b).abs() < 1e-12);
+        ts.dedup_by(|a, b| (*a - *b).abs() < tol::ROUNDOFF_FINE);
         let mut bounds = vec![self.t0];
         bounds.extend(ts);
         bounds.push(self.t1);
@@ -239,7 +239,7 @@ pub fn piece_of(c: &Curve2, src: Src) -> Result<Piece> {
             Piece { c: ellipse(center, major_radius, minor_radius, rotation), t0: 0.0, t1: TAU, rev: false, src, more: vec![] }
         }
         Curve2::EllipseArc { center, major_radius, minor_radius, rotation, start, sweep, .. } => {
-            if major_radius.abs() < TOL || minor_radius.abs() < TOL || sweep.abs() < 1e-12 {
+            if major_radius.abs() < TOL || minor_radius.abs() < TOL || sweep.abs() < tol::ROUNDOFF_FINE {
                 return Err(KernelError::InvalidProfile("a degenerate ellipse arc".into()));
             }
             arc(ellipse(center, major_radius, minor_radius, rotation), start, sweep)
@@ -282,7 +282,7 @@ fn offset_ellipse_nurbs(center: P2, major: f64, minor: f64, rotation: f64, start
         })
         .collect();
     // End derivatives by central differences of the exact curve.
-    let h = 1e-6;
+    let h = tol::DIFF_STEP;
     let d = |t: f64| {
         let a = crate::offset_ellipse_point(center, major, minor, rotation, offset, t - h);
         let b = crate::offset_ellipse_point(center, major, minor, rotation, offset, t + h);
@@ -295,6 +295,7 @@ fn offset_ellipse_nurbs(center: P2, major: f64, minor: f64, rotation: f64, start
 /// clockwise.
 pub fn regions(profile: &Profile) -> Result<Vec<Region2>> {
     let mut out = Vec::new();
+    let snap = profile_snap(profile);
     for (ri, r) in profile.regions.iter().enumerate() {
         let source = r.source.unwrap_or(ri as u64);
         let lp = |l: &crate::Loop, li: usize| -> Result<Loop2> {
@@ -303,9 +304,7 @@ pub fn regions(profile: &Profile) -> Result<Vec<Region2>> {
                 let cs = c.source().unwrap_or(unsourced_curve(li, ci));
                 pieces.push(piece_of(c, Src::Curve { region: source, curve: cs })?);
             }
-            let pieces = chain_loop(pieces)?;
-            check_closed(&pieces)?;
-            Ok(pieces)
+            closed_loop(pieces, snap)
         };
         let mut outer = lp(&r.outer, 0)?;
         let a = loop_area(&outer);
@@ -327,13 +326,254 @@ pub fn regions(profile: &Profile) -> Result<Vec<Region2>> {
             }
             holes.push(h);
         }
+        let outer = outer.iter().map(along_travel).collect();
+        let holes = holes.iter().map(|h| h.iter().map(along_travel).collect()).collect();
         out.push(Region2 { outer, holes, source });
     }
     Ok(out)
 }
 
+/// A line piece on a line that runs the way the loop does (so its edges do: a straight edge
+/// used as a direction points the way the loop runs, outer loops counter-clockwise about the
+/// plane's normal, as OCCT's profile edges did); other pieces as they are.
+fn along_travel(p: &Piece) -> Piece {
+    if !p.rev || !matches!(p.c, Curve::Line { .. }) {
+        return p.clone();
+    }
+    let (s, e) = (p.start(), p.end());
+    let (c, l) = Curve::line(P3::new(s.x, s.y, 0.0), P3::new(e.x, e.y, 0.0));
+    Piece { c, t0: 0.0, t1: l, rev: false, ..p.clone() }
+}
+
 /// Joints within this distance count as joined.
 pub const JOIN: f64 = 1e-5;
+
+/// The largest gap between consecutive sketch curves that [`closed_loop`] closes, in mm, for a
+/// sketch of up to 100 mm. A sketch merges curve ends closer than [`SKETCH_REL`] of its size
+/// into one point when it finds its regions, so its loops can arrive with gaps of that order
+/// (OCCT, which built main's profiles, joined each curve to the next whatever the gap).
+pub const SNAP: f64 = 1e-3;
+
+/// The sketch's own point-merging distance as a fraction of its size (cadrs_sketch's regions).
+pub const SKETCH_REL: f64 = 1e-5;
+
+/// A gap is closed only when it is under this fraction of the length of each curve it moves,
+/// so snapping never turns or swallows a curve.
+const SNAP_SHARE: f64 = 0.25;
+
+/// How far a joint may move when two curves are extended or trimmed to where they cross, as a
+/// multiple of the gap (beyond it the crossing is some other point of the carriers).
+const MEET_REACH: f64 = 4.0;
+
+/// The gap [`closed_loop`] closes for this profile: [`SNAP`], or [`SKETCH_REL`] of the
+/// profile's size when that is larger.
+fn profile_snap(profile: &Profile) -> f64 {
+    let mut bb = Bbox::empty();
+    for r in &profile.regions {
+        for c in std::iter::once(&r.outer).chain(r.holes.iter()).flat_map(|l| l.curves.iter()) {
+            for p in [c.start(), c.end()] {
+                bb.add(&P3::new(p.x, p.y, 0.0));
+            }
+        }
+    }
+    let size = if bb.min.x <= bb.max.x { bb.diagonal() } else { 0.0 };
+    SNAP.max(SKETCH_REL * size)
+}
+
+/// Orders a sketch loop's pieces head to tail ([`chain_loop`]) and closes the gaps up to `snap`
+/// between consecutive pieces ([`close_gaps`]): the loop a sketch's region solver found, whose
+/// curve ends it merged within its own tolerance.
+pub fn closed_loop(pieces: Vec<Piece>, snap: f64) -> Result<Loop2> {
+    let mut l = chain_loop_within(pieces, snap)?;
+    close_gaps(&mut l, snap)?;
+    check_closed(&l)?;
+    Ok(l)
+}
+
+/// Closes each gap between consecutive pieces wider than [`JOIN`] and at most `snap`: the two
+/// carriers extended or trimmed to where they cross near the gap (so lines stay on their lines
+/// and arcs on their circles), or, where they don't cross there (tangent curves), one piece
+/// moved onto the other's end: a line's end, a circular arc through its own start, middle and
+/// the new end, or a B-spline's end pole. Wider gaps are left (the loop is open).
+pub fn close_gaps(l: &mut [Piece], snap: f64) -> Result<()> {
+    let n = l.len();
+    if n < 2 {
+        return Ok(());
+    }
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let gap = (l[i].end() - l[j].start()).norm();
+        if gap <= JOIN || gap > snap {
+            continue;
+        }
+        if let Some((a, b)) = meet(&l[i], &l[j], gap) {
+            l[i] = a;
+            l[j] = b;
+            continue;
+        }
+        // Move a line before a curve, else the shorter piece.
+        let (ea, sb) = (l[i].end(), l[j].start());
+        let line_first = |p: &Piece| (!matches!(p.c, Curve::Line { .. }), p.length());
+        let mut order = [(i, false, sb), (j, true, ea)];
+        order.sort_by(|x, y| {
+            let (kx, ky) = (line_first(&l[x.0]), line_first(&l[y.0]));
+            kx.0.cmp(&ky.0).then(kx.1.total_cmp(&ky.1))
+        });
+        for (k, at_start, q) in order {
+            if gap > SNAP_SHARE * l[k].length() {
+                continue;
+            }
+            if let Some(p) = moved_end(&l[k], at_start, q) {
+                l[k] = p;
+                break;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Pieces `a` and `b`, which leave a gap between `a`'s end and `b`'s start, extended or trimmed
+/// to where their carriers cross near the gap (Newton on `a(s) = b(t)` from the gap's ends).
+/// None when they don't cross there: tangent, or the crossing is far or off a B-spline's range.
+fn meet(a: &Piece, b: &Piece, gap: f64) -> Option<(Piece, Piece)> {
+    const ITERATIONS: usize = 32;
+    let (mut s, mut t) = (a.te(), b.ts());
+    let at = |c: &Curve, u: f64| {
+        let (p, d, _) = c.d2(u);
+        (P2::new(p.x, p.y), V2::new(d.x, d.y))
+    };
+    let mut converged = false;
+    for _ in 0..ITERATIONS {
+        let ((pa, da), (pb, db)) = (at(&a.c, s), at(&b.c, t));
+        let r = pa - pb;
+        if r.norm() < tol::CONFUSION {
+            converged = true;
+            break;
+        }
+        // [da, −db]·(Δs, Δt) = −r.
+        let det = cross2(&db, &da);
+        if det.abs() <= tol::ANGULAR * da.norm() * db.norm() || !det.is_finite() {
+            return None;
+        }
+        s += cross2(&r, &db) / det;
+        t -= cross2(&da, &r) / det;
+    }
+    if !converged {
+        return None;
+    }
+    let q = at(&a.c, s).0;
+    let reach = MEET_REACH * gap;
+    if (q - a.end()).norm() > reach || (q - b.start()).norm() > reach {
+        return None;
+    }
+    let a2 = with_end(a, false, s)?;
+    let b2 = with_end(b, true, t)?;
+    (gap <= SNAP_SHARE * a2.length().min(b2.length())).then_some((a2, b2))
+}
+
+/// The piece with its start (`at_start`) or end in the direction of travel at carrier
+/// parameter `u`; None when that empties it, passes a whole turn or leaves a B-spline's range.
+fn with_end(p: &Piece, at_start: bool, u: f64) -> Option<Piece> {
+    let mut q = p.clone();
+    // The start of travel is t1 for a reversed piece.
+    if at_start != p.rev { q.t0 = u } else { q.t1 = u }
+    if q.t1 - q.t0 <= tol::ROUNDOFF || p.c.is_periodic() && q.t1 - q.t0 > TAU + tol::ANGULAR {
+        return None;
+    }
+    if let Some((lo, hi)) = p.c.nurbs_range()
+        && (q.t0 < lo || q.t1 > hi)
+    {
+        return None;
+    }
+    Some(q)
+}
+
+/// The piece with its start (`at_start`) or end moved to `to`: a line between its other end
+/// and `to`, a circular arc through its other end, its middle and `to`, or a clamped B-spline
+/// with its end pole moved. None for other curves, or an arc that would turn the other way.
+fn moved_end(p: &Piece, at_start: bool, to: P2) -> Option<Piece> {
+    let (s, e) = if at_start { (to, p.end()) } else { (p.start(), to) };
+    let p3 = |q: P2| P3::new(q.x, q.y, 0.0);
+    match &p.c {
+        Curve::Line { .. } => {
+            let (c, l) = Curve::line(p3(s), p3(e));
+            (l > tol::ROUNDOFF).then(|| Piece { c, t0: 0.0, t1: l, rev: false, ..p.clone() })
+        }
+        Curve::Circle { .. } => {
+            let m = p.at(0.5);
+            // The circle through s, m and e: its centre is equidistant from the three.
+            let (u, v) = (m - s, e - s);
+            let den = 2.0 * cross2(&u, &v);
+            if den.abs() <= tol::TINY {
+                return None;
+            }
+            let (uu, vv) = (u.norm_squared(), v.norm_squared());
+            let c = s + V2::new(v.y * uu - u.y * vv, u.x * vv - v.x * uu) / den;
+            let r = (s - c).norm();
+            let ang = |q: P2| (q.y - c.y).atan2(q.x - c.x);
+            // Counter-clockwise when the turn from s through m to e is to the left.
+            let ccw = den > 0.0;
+            let (a0, a1) = if ccw { (ang(s), ang(e)) } else { (ang(e), ang(s)) };
+            let sweep = (a1 - a0).rem_euclid(TAU);
+            let sweep = if sweep <= tol::ANGULAR { TAU } else { sweep };
+            if (sweep - (p.t1 - p.t0)).abs() > SNAP_SHARE {
+                return None;
+            }
+            let c = Curve::Circle { c: p3(c), x: V3::x(), y: V3::y(), r };
+            Some(Piece { c, t0: a0, t1: a0 + sweep, rev: !ccw, ..p.clone() })
+        }
+        Curve::Nurbs(n) => {
+            let (lo, hi) = n.range();
+            let first = at_start != p.rev;
+            let k = if first { 0 } else { n.cps.len() - 1 };
+            let clamped = if first { p.t0 == lo && n.knots[0] == lo } else { p.t1 == hi && n.knots[n.knots.len() - 1] == hi };
+            if !clamped {
+                return None;
+            }
+            let mut m = (**n).clone();
+            let w = m.cps[k].w;
+            m.cps[k] = super::nurbs::H::new(to.x * w, to.y * w, 0.0, w);
+            Some(Piece { c: Curve::Nurbs(Arc::new(m)), ..p.clone() })
+        }
+        Curve::Ellipse { .. } => None,
+    }
+}
+
+/// The widest gap [`regions`] closes between consecutive curves of the profile's loops (0 when
+/// they all join within [`JOIN`]).
+pub fn closed_gap(profile: &Profile) -> f64 {
+    let snap = profile_snap(profile);
+    let mut widest: f64 = 0.0;
+    for (ri, r) in profile.regions.iter().enumerate() {
+        let source = r.source.unwrap_or(ri as u64);
+        for (li, l) in std::iter::once(&r.outer).chain(r.holes.iter()).enumerate() {
+            let pieces: Result<Vec<Piece>> = l
+                .curves
+                .iter()
+                .enumerate()
+                .map(|(ci, c)| piece_of(c, Src::Curve { region: source, curve: c.source().unwrap_or(unsourced_curve(li, ci)) }))
+                .collect();
+            let Ok(chain) = pieces.and_then(|p| chain_loop_within(p, snap)) else { continue };
+            for (k, a) in chain.iter().enumerate() {
+                let gap = (a.end() - chain[(k + 1) % chain.len()].start()).norm();
+                if gap <= snap {
+                    widest = widest.max(gap);
+                }
+            }
+        }
+    }
+    widest
+}
+
+/// Raises the tolerance of a body's edges and vertices to `gap` (see [`closed_gap`]).
+pub fn carry_gap(b: &mut super::topo::Body, gap: f64) {
+    for e in &mut b.edges {
+        e.tol = e.tol.max(gap);
+    }
+    for v in &mut b.verts {
+        v.tol = v.tol.max(gap);
+    }
+}
 
 pub fn check_closed(l: &[Piece]) -> Result<()> {
     if l.is_empty() {
@@ -355,7 +595,13 @@ pub fn check_closed(l: &[Piece]) -> Result<()> {
 
 /// Puts a loop's pieces in order and direction so each starts where the previous ends (sketch
 /// loops list their curves in their own directions).
-pub fn chain_loop(mut pieces: Vec<Piece>) -> Result<Loop2> {
+pub fn chain_loop(pieces: Vec<Piece>) -> Result<Loop2> {
+    chain_loop_within(pieces, JOIN)
+}
+
+/// [`chain_loop`], joining a piece to the next within [`JOIN`], or else to the nearest piece end
+/// within `snap` (the gap [`close_gaps`] then closes).
+fn chain_loop_within(mut pieces: Vec<Piece>, snap: f64) -> Result<Loop2> {
     if pieces.len() <= 1 {
         return Ok(pieces);
     }
@@ -374,6 +620,9 @@ pub fn chain_loop(mut pieces: Vec<Piece>) -> Result<Loop2> {
                 break;
             }
         }
+        if found.is_none() {
+            found = nearest_end(&pieces, &end, snap);
+        }
         match found {
             Some((i, flip)) => {
                 let p = pieces.remove(i);
@@ -384,7 +633,7 @@ pub fn chain_loop(mut pieces: Vec<Piece>) -> Result<Loop2> {
                     // Try the first piece the other way round.
                     out[0] = out[0].reversed();
                     let end = out[0].end();
-                    if !pieces.iter().any(|p| (p.start() - end).norm() < JOIN || (p.end() - end).norm() < JOIN) {
+                    if nearest_end(&pieces, &end, snap.max(JOIN)).is_none() {
                         return Err(KernelError::InvalidProfile("the loop is not closed".into()));
                     }
                     continue;
@@ -394,6 +643,18 @@ pub fn chain_loop(mut pieces: Vec<Piece>) -> Result<Loop2> {
         }
     }
     Ok(out)
+}
+
+/// The piece with an end nearest `p` within `within`, and whether it is its end (so the piece
+/// runs reversed to start there).
+fn nearest_end(pieces: &[Piece], p: &P2, within: f64) -> Option<(usize, bool)> {
+    pieces
+        .iter()
+        .enumerate()
+        .flat_map(|(i, q)| [((q.start() - p).norm(), (i, false)), ((q.end() - p).norm(), (i, true))])
+        .filter(|(d, _)| *d < within)
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, f)| f)
 }
 
 /// Merges regions that share boundary pieces into faces (one cap per connected group).
@@ -513,7 +774,7 @@ pub fn merge_regions(regions: &[Region2]) -> Result<Vec<MergedFace>> {
                 return Err(KernelError::InvalidProfile("the regions' boundaries don't close after merging".into()));
             }
         }
-        traced.push(fuse_pieces(lp, tol));
+        traced.push(fuse_pieces(lp, tol, false));
     }
     // Outer loops and holes.
     let mut outers: Vec<(Loop2, Vec<P2>, f64)> = Vec::new();
@@ -563,9 +824,25 @@ pub fn merge_regions(regions: &[Region2]) -> Result<Vec<MergedFace>> {
     Ok(faces)
 }
 
-/// Fuses consecutive pieces of different regions that continue each other on one line or
-/// circle (Parasolid merges the side faces of touching regions).
-fn fuse_pieces(mut lp: Loop2, tol: f64) -> Loop2 {
+/// The faces with each loop's pieces that continue each other on one line fused into one (a
+/// feature's profile: the app's OCCT kernel merged the faces they swept, on one surface,
+/// after every operation; a DRAW-level prism keeps them apart, as OCCT's does).
+pub fn fuse_sides(faces: Vec<MergedFace>) -> Vec<MergedFace> {
+    faces
+        .into_iter()
+        .map(|f| MergedFace {
+            outer: fuse_pieces(f.outer, JOIN, true),
+            holes: f.holes.into_iter().map(|h| fuse_pieces(h, JOIN, true)).collect(),
+            regions: f.regions,
+        })
+        .collect()
+}
+
+/// Fuses consecutive pieces (of one curve, of one region's curves or of touching regions') that
+/// continue each other on one line, or on one circle unless `lines_only`: OCCT merged the faces they sweep into one after
+/// every operation (and Parasolid merges the side faces of touching regions). The fused piece
+/// keeps the first piece's origin and lists the others in `more`.
+fn fuse_pieces(mut lp: Loop2, tol: f64, lines_only: bool) -> Loop2 {
     let mut changed = true;
     while changed && lp.len() > 1 {
         changed = false;
@@ -573,15 +850,20 @@ fn fuse_pieces(mut lp: Loop2, tol: f64) -> Loop2 {
         for i in 0..n {
             let j = (i + 1) % n;
             let (a, b) = (&lp[i], &lp[j]);
-            if a.src.region() == b.src.region() || !a.same_carrier(b, tol) || a.rev != b.rev {
+            // A feature's lines of one region (`lines_only`), else pieces of touching regions.
+            let apart = if lines_only { a.src == b.src || !matches!(a.c, Curve::Line { .. }) } else { a.src.region() == b.src.region() };
+            if apart || !a.same_carrier(b, tol) || a.rev != b.rev {
                 continue;
             }
             if a.dir(1.0).dot(&b.dir(0.0)) < 1.0 - tol::ANGULAR {
                 continue;
             }
             let mut more = a.more.clone();
-            more.push(b.src);
-            more.extend(b.more.iter().copied());
+            for o in std::iter::once(b.src).chain(b.more.iter().copied()) {
+                if o != a.src && !more.contains(&o) {
+                    more.push(o);
+                }
+            }
             let fused = match &a.c {
                 Curve::Line { .. } => {
                     let (s, e) = (a.start(), b.end());

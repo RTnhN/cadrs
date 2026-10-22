@@ -672,7 +672,7 @@ impl<'a> Geo<'a> {
             }
             _ => return Ok(None),
         };
-        if t1 - t0 < 1e-12 {
+        if t1 - t0 < tol::ROUNDOFF_FINE {
             return Ok(None);
         }
         // The middle control point: where the end tangents meet (the weight makes it exact).
@@ -905,10 +905,16 @@ impl Geo<'_> {
                 let (t0, t1) = c.nurbs_range().unwrap_or((0.0, 1.0));
                 let (a, b) = (c.point(t0), c.point(t1));
                 segs.push(WireSeg { closed: (a - b).norm() <= tol::REL * (1.0 + a.coords.norm()), c, a, b });
+            } else if let Some(sc) = ["SURFACE_CURVE", "SEAM_CURVE", "INTERSECTION_CURVE", "BOUNDED_SURFACE_CURVE"].iter().find_map(|k| r.part(k)) {
+                // A curve on a surface (complex form, no name): its 3D curve.
+                self.wire_items(self.rf(sc, 0)?, segs, pts, depth + 1)?;
             }
             return Ok(());
         }
         match r.kind() {
+            "SURFACE_CURVE" | "SEAM_CURVE" | "INTERSECTION_CURVE" | "BOUNDED_SURFACE_CURVE" => self.wire_items(self.rf(ps, 1)?, segs, pts, depth + 1)?,
+            // Surfaces in a set are faces ([`Self::loose_faces`]), placements nothing to draw.
+            k if is_surface_kind(k) || k.starts_with("AXIS") => {}
             "GEOMETRIC_CURVE_SET" | "GEOMETRIC_SET" => {
                 for e in at(ps, 1)?.as_list().ok_or("a set's elements are not a list")? {
                     self.wire_items(e.as_ref().ok_or("a set's element is not a reference")?, segs, pts, depth + 1)?;
@@ -935,7 +941,7 @@ impl Geo<'_> {
                 };
                 segs.push(ends(&curve, a, b));
             }
-            "COMPOSITE_CURVE" => {
+            "COMPOSITE_CURVE" | "BOUNDARY_CURVE" | "OUTER_BOUNDARY_CURVE" | "COMPOSITE_CURVE_ON_SURFACE" => {
                 for sg in at(ps, 1)?.as_list().ok_or("segments are not a list")? {
                     let sr = self.rec(sg.as_ref().ok_or("a segment is not a reference")?)?;
                     self.wire_items(self.rf(sr.params(), 2)?, segs, pts, depth + 1)?;
@@ -956,6 +962,65 @@ impl Geo<'_> {
         }
         Ok(())
     }
+}
+
+impl Geo<'_> {
+    /// The faces of a wireframe-and-surface set (`GEOMETRIC_SET`): curve-bounded surfaces (a
+    /// surface and loops of curves on it), and B-spline surfaces bounded by their whole
+    /// parameter range. Unbounded and trimmed surfaces are skipped.
+    fn loose_faces(&self, id: u64, out: &mut Vec<(Surface, Vec<Vec<super::xbuild::LooseSeg>>)>, depth: usize) -> R<()> {
+        if depth > 8 {
+            return Ok(());
+        }
+        let r = self.rec(id)?;
+        let ps = r.params();
+        let natural = |s: Surface| -> R<(Surface, Vec<Vec<super::xbuild::LooseSeg>>)> {
+            let b = super::xbuild::natural_boundary(&s)?;
+            Ok((s, vec![b]))
+        };
+        if r.is_complex() {
+            if r.has("B_SPLINE_SURFACE") {
+                out.push(natural(self.surface(id)?)?);
+            }
+            return Ok(());
+        }
+        match r.kind() {
+            "GEOMETRIC_CURVE_SET" | "GEOMETRIC_SET" => {
+                for e in at(ps, 1)?.as_list().ok_or("a set's elements are not a list")? {
+                    if let Some(e) = e.as_ref() {
+                        self.loose_faces(e, out, depth + 1)?;
+                    }
+                }
+            }
+            "CURVE_BOUNDED_SURFACE" => {
+                let surf = self.surface(self.rf(ps, 1)?)?;
+                let mut loops = Vec::new();
+                for b in at(ps, 2)?.as_list().ok_or("boundaries are not a list")? {
+                    let (mut segs, mut pts) = (Vec::new(), Vec::new());
+                    self.wire_items(b.as_ref().ok_or("a boundary is not a reference")?, &mut segs, &mut pts, depth + 1)?;
+                    let l: Vec<super::xbuild::LooseSeg> = segs.into_iter().map(|w| super::xbuild::LooseSeg { c: w.c, a: w.a, b: if w.closed { w.a } else { w.b } }).collect();
+                    if !l.is_empty() {
+                        loops.push(l);
+                    }
+                }
+                if loops.is_empty() {
+                    if matches!(surf, Surface::Nurbs(_)) {
+                        out.push(natural(surf)?);
+                    }
+                } else {
+                    out.push((surf, loops));
+                }
+            }
+            "B_SPLINE_SURFACE_WITH_KNOTS" | "BEZIER_SURFACE" | "UNIFORM_SURFACE" | "QUASI_UNIFORM_SURFACE" => out.push(natural(self.surface(id)?)?),
+            _ => {}
+        }
+        Ok(())
+    }
+}
+
+/// Whether a record kind is a surface (in a wireframe set it is not a curve).
+fn is_surface_kind(k: &str) -> bool {
+    k.ends_with("_SURFACE") || k.starts_with("B_SPLINE_SURFACE") || matches!(k, "PLANE" | "BEZIER_SURFACE" | "UNIFORM_SURFACE" | "QUASI_UNIFORM_SURFACE")
 }
 
 /// A wire body from a file's curves and points: the curves' ends welded within `tol` into
@@ -979,7 +1044,7 @@ pub fn wire_body(segs: &[WireSeg], pts: &[P3], tol: f64) -> Body {
     for p in pts {
         b.add_point(*p);
     }
-    b.fit_tolerances(tol.max(1e-6));
+    b.fit_tolerances(tol.max(tol::POINT));
     b
 }
 
@@ -1058,7 +1123,7 @@ impl<'a> TopoReader<'a> {
                 None => {
                     let (va, vb) = (self.vertex(key.0)?, self.vertex(key.1)?);
                     let (pa, pb) = (self.xb.body.verts[va].p, self.xb.body.verts[vb].p);
-                    let e = if (pb - pa).norm() > 1e-12 { self.xb.edge(Curve::Line { o: pa, d: (pb - pa).normalize() }, va, vb) } else { None };
+                    let e = if (pb - pa).norm() > tol::DEGENERATE { self.xb.edge(Curve::Line { o: pa, d: (pb - pa).normalize() }, va, vb) } else { None };
                     self.segs.insert(key, e);
                     e
                 }
@@ -1232,7 +1297,88 @@ impl<'a> TopoReader<'a> {
 }
 
 fn is_shape_item(kind: &str) -> bool {
-    matches!(kind, "MANIFOLD_SOLID_BREP" | "BREP_WITH_VOIDS" | "FACETED_BREP" | "SHELL_BASED_SURFACE_MODEL" | "CLOSED_SHELL" | "OPEN_SHELL" | "ADVANCED_FACE" | "FACE_SURFACE") || is_wire_item(kind)
+    matches!(kind, "MANIFOLD_SOLID_BREP" | "BREP_WITH_VOIDS" | "FACETED_BREP" | "SHELL_BASED_SURFACE_MODEL" | "CLOSED_SHELL" | "OPEN_SHELL" | "ADVANCED_FACE" | "FACE_SURFACE") || is_wire_item(kind) || is_tess_item(kind)
+}
+
+/// Tessellated geometry (AP242's triangulated faces, alone or as shells and solids).
+fn is_tess_item(kind: &str) -> bool {
+    matches!(kind, "TESSELLATED_SOLID" | "TESSELLATED_SHELL" | "TRIANGULATED_FACE" | "COMPLEX_TRIANGULATED_FACE" | "TRIANGULATED_SURFACE_SET" | "COMPLEX_TRIANGULATED_SURFACE_SET")
+}
+
+impl Geo<'_> {
+    /// The triangles of a tessellated item (`TESSELLATED_SOLID` and `TESSELLATED_SHELL` through
+    /// their faces; `TRIANGULATED_FACE`s' triangles, `COMPLEX_TRIANGULATED_FACE`s' strips and
+    /// fans, and their surface-set forms), each counter-clockwise about its outward normal.
+    fn triangles(&self, id: u64, out: &mut Vec<[P3; 3]>, depth: usize) -> R<()> {
+        if depth > 8 {
+            return Ok(());
+        }
+        let r = self.rec(id)?;
+        let ps = r.params();
+        let ints = |p: &Param| -> R<Vec<usize>> { p.as_list().ok_or("indices are not a list")?.iter().map(|x| x.as_f64().filter(|v| *v >= 1.0).map(|v| v as usize).ok_or_else(|| "an index is not a positive integer".to_string())).collect() };
+        let lists = |p: &Param| -> R<Vec<Vec<usize>>> { p.as_list().ok_or("index lists are not a list")?.iter().map(ints).collect() };
+        // (coordinates, pnindex, then the triangles, strips and fans' positions)
+        let (coords_at, pn_at, tri_at, strip_at, fan_at) = match r.kind() {
+            "TESSELLATED_SOLID" | "TESSELLATED_SHELL" => {
+                for it in at(ps, 1)?.as_list().ok_or("a tessellated shell's items are not a list")? {
+                    if let Some(it) = it.as_ref() {
+                        self.triangles(it, out, depth + 1)?;
+                    }
+                }
+                return Ok(());
+            }
+            "TRIANGULATED_FACE" => (1, 5, Some(6), None, None),
+            "COMPLEX_TRIANGULATED_FACE" => (1, 5, None, Some(6), Some(7)),
+            "TRIANGULATED_SURFACE_SET" => (1, 4, Some(5), None, None),
+            "COMPLEX_TRIANGULATED_SURFACE_SET" => (1, 4, None, Some(5), Some(6)),
+            _ => return Ok(()),
+        };
+        let cl = self.rec(self.rf(ps, coords_at)?)?;
+        let pts: Vec<P3> = at(cl.params(), 2)?
+            .as_list()
+            .ok_or("coordinates are not a list")?
+            .iter()
+            .map(|c| {
+                let c = c.as_list().ok_or("a coordinate triple is not a list")?;
+                let g = |k: usize| c.get(k).and_then(|x| x.as_f64()).unwrap_or(0.0) * self.ls;
+                Ok(P3::new(g(0), g(1), g(2)))
+            })
+            .collect::<R<_>>()?;
+        let pn = ps.get(pn_at).map(ints).transpose()?.unwrap_or_default();
+        let point = |i: usize| -> R<P3> {
+            let j = if pn.is_empty() { i } else { *pn.get(i - 1).ok_or("a triangle index past the point index")? };
+            pts.get(j - 1).copied().ok_or_else(|| "a point index past the coordinates".to_string())
+        };
+        let mut tri = |a: usize, b: usize, c: usize| -> R<()> {
+            if a != b && b != c && c != a {
+                out.push([point(a)?, point(b)?, point(c)?]);
+            }
+            Ok(())
+        };
+        if let Some(i) = tri_at {
+            for t in lists(at(ps, i)?)? {
+                if let [a, b, c] = t[..] {
+                    tri(a, b, c)?;
+                }
+            }
+        }
+        if let Some(i) = strip_at {
+            // A strip's triangles alternate in direction.
+            for s in lists(at(ps, i)?)? {
+                for k in 2..s.len() {
+                    if k % 2 == 0 { tri(s[k - 2], s[k - 1], s[k])? } else { tri(s[k - 1], s[k - 2], s[k])? }
+                }
+            }
+        }
+        if let Some(i) = fan_at {
+            for f in lists(at(ps, i)?)? {
+                for k in 2..f.len() {
+                    tri(f[0], f[k - 1], f[k])?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1699,6 +1845,13 @@ impl<'a> Model<'a> {
     }
 }
 
+/// The largest gap (of an edge from its faces, a vertex from its edges) a read body's
+/// tolerances grow to, relative to the model's size.
+const FIT_REL: f64 = 1e-4;
+
+/// ... and in the file's stated uncertainties, when that is larger.
+const FIT_UNCERTAINTY: f64 = 10.0;
+
 /// Builds shape items (each with the representation holding it and a placement) into one body,
 /// with its faces' colours (empty when the file styles none).
 fn build_shapes(m: &mut Model, shapes: &[(u64, u64, Affine)], warnings: &mut Vec<String>) -> Option<(Body, Vec<Option<Rgba>>)> {
@@ -1710,20 +1863,69 @@ fn build_shapes(m: &mut Model, shapes: &[(u64, u64, Affine)], warnings: &mut Vec
     // Curves and points (wireframes), read only for a part with nothing else.
     let mut wires = Body::default();
     let is_wire: Vec<bool> = shapes.iter().map(|(it, ..)| m.rec(*it).is_some_and(|r| is_wire_item(r.kind()))).collect();
+    let is_tess: Vec<bool> = shapes.iter().map(|(it, ..)| m.rec(*it).is_some_and(|r| is_tess_item(r.kind()))).collect();
+    // Tessellated items: a closed triangle mesh a solid, else the triangles sewn into sheets;
+    // read only for a part with no B-rep faces (files often hold both).
+    let mut meshes = Body::default();
+    for ((it, rep, at), _) in shapes.iter().zip(&is_tess).filter(|(_, t)| **t) {
+        let g = m.geo(*rep);
+        let mut tris = Vec::new();
+        if let Err(e) = g.triangles(*it, &mut tris, 0) {
+            warnings.push(e);
+        }
+        if tris.is_empty() {
+            continue;
+        }
+        let size = tris.iter().flatten().map(|p| p.coords.amax().max(-p.coords.min())).fold(1.0, f64::max);
+        let tol = m.rep_uncertainty(*rep).unwrap_or(tol::REL_POINT * size).max(tol::REL * size);
+        let b = match super::meshsolid::mesh_solid(&tris, tol) {
+            Ok(b) => b,
+            Err(_) => {
+                let loose = tris
+                    .iter()
+                    .filter_map(|t| {
+                        let n = (t[1] - t[0]).cross(&(t[2] - t[0])).try_normalize(tol::DEGENERATE)?;
+                        let f = Frame::from_xz(t[0], (t[1] - t[0]).normalize(), n);
+                        let segs = (0..3).map(|k| {
+                            let (a, b) = (t[k], t[(k + 1) % 3]);
+                            let (c, _) = Curve::line(a, b);
+                            super::xbuild::LooseSeg { c, a, b }
+                        });
+                        Some((Surface::Plane { f }, vec![segs.collect()]))
+                    })
+                    .collect();
+                let (b, w) = super::xbuild::sew_loose(loose, tol, false);
+                warnings.extend(w);
+                b
+            }
+        };
+        meshes.append(&if *at == Affine::identity() { b } else { b.transformed(at) });
+    }
+    // Surfaces in the sets (curve-bounded and spline surfaces): faces, sewn where they meet.
+    let mut sheets = Body::default();
     for (it, rep, at) in shapes.iter().zip(&is_wire).filter(|(_, w)| **w).map(|(s, _)| s) {
         let g = m.geo(*rep);
         let (mut segs, mut pts) = (Vec::new(), Vec::new());
         if let Err(e) = g.wire_items(*it, &mut segs, &mut pts, 0) {
             warnings.push(e);
         }
-        let size = segs.iter().flat_map(|s| [s.a, s.b]).chain(pts.iter().copied()).map(|p| p.coords.amax().max(-p.coords.min())).fold(1.0, f64::max);
+        let mut loose = Vec::new();
+        if let Err(e) = g.loose_faces(*it, &mut loose, 0) {
+            warnings.push(e);
+        }
+        let size = segs.iter().flat_map(|s| [s.a, s.b]).chain(pts.iter().copied()).chain(loose.iter().flat_map(|(_, ls)| ls.iter().flatten().map(|s| s.a))).map(|p| p.coords.amax().max(-p.coords.min())).fold(1.0, f64::max);
         let tol = m.rep_uncertainty(*rep).unwrap_or(1e-7 * size).max(tol::REL * size);
+        if !loose.is_empty() {
+            let (b, w) = super::xbuild::sew_loose(loose, tol, true);
+            warnings.extend(w);
+            sheets.append(&if *at == Affine::identity() { b } else { b.transformed(at) });
+        }
         let w = wire_body(&segs, &pts, tol);
         wires.append(&if *at == Affine::identity() { w } else { w.transformed(at) });
     }
     // Each item gets its own vertices and edges (solids that share edge records in the file,
     // touching along them, stay separate solids).
-    let groups: Vec<(u64, Affine, Vec<u64>)> = shapes.iter().zip(&is_wire).filter(|(_, w)| !**w).map(|((it, rep, at), _)| (*rep, *at, vec![*it])).collect();
+    let groups: Vec<(u64, Affine, Vec<u64>)> = shapes.iter().zip(is_wire.iter().zip(&is_tess)).filter(|(_, (w, t))| !**w && !**t).map(|((it, rep, at), _)| (*rep, *at, vec![*it])).collect();
     for (rep, at, items) in groups {
         let g = m.geo(rep);
         let mut tr = TopoReader { g, xb: XBuilder::new(), verts: HashMap::new(), edges: HashMap::new(), segs: HashMap::new(), errors: Vec::new(), faces_of: HashMap::new() };
@@ -1760,7 +1962,8 @@ fn build_shapes(m: &mut Model, shapes: &[(u64, u64, Affine)], warnings: &mut Vec
             }
         }
         // The file's precision is its entities' tolerance (OCCT's reader does the same).
-        if let Some(u) = m.rep_uncertainty(rep).filter(|u| *u > super::topo::TOL_MIN) {
+        let u = m.rep_uncertainty(rep).filter(|u| *u > super::topo::TOL_MIN);
+        if let Some(u) = u {
             for v in &mut b.verts {
                 v.tol = v.tol.max(u);
             }
@@ -1768,9 +1971,33 @@ fn build_shapes(m: &mut Model, shapes: &[(u64, u64, Affine)], warnings: &mut Vec
                 e.tol = e.tol.max(u);
             }
         }
+        // Files' edges stray from their surfaces and vertices further than they say: as
+        // ShapeFix's same-parameter, the tolerances grow to the gaps, up to a fraction of the
+        // model's size (a larger gap is a defect, left to the check).
+        let cap = (b.bbox().diagonal() * FIT_REL).max(u.unwrap_or(0.0) * FIT_UNCERTAINTY);
+        b.fit_tolerances_searched(cap);
+        // A solid whose faces all point in (a sphere or cylinder band whose loops are only
+        // seams and circles, read against the file's own sense): turned round.
+        for si in 0..b.solids.len() {
+            let faces = b.solid_faces(si);
+            let sub = super::kernel::subset(&b, &faces, true);
+            if super::mass::body_volume(&sub) < 0.0 {
+                for f in faces {
+                    Body::reverse_face(&mut b.faces[f]);
+                }
+            }
+        }
         let b = if at == Affine::identity() { b } else { b.transformed(&at) };
         body.append(&b);
         colors.extend(cols);
+    }
+    if body.faces.is_empty() && !meshes.faces.is_empty() {
+        colors.extend(std::iter::repeat_n(None, meshes.faces.len()));
+        body.append(&meshes);
+    }
+    if !sheets.faces.is_empty() {
+        colors.extend(std::iter::repeat_n(None, sheets.faces.len()));
+        body.append(&sheets);
     }
     if body.faces.is_empty() {
         body.append(&wires);
@@ -1846,7 +2073,7 @@ pub fn read(bytes: &[u8]) -> Result<ReadModel, String> {
     }
     if out.parts.is_empty() {
         // No product structure: every shape item in the file, as one part.
-        let reps: Vec<u64> = ["ADVANCED_BREP_SHAPE_REPRESENTATION", "MANIFOLD_SURFACE_SHAPE_REPRESENTATION", "SHAPE_REPRESENTATION", "FACETED_BREP_SHAPE_REPRESENTATION", "GEOMETRICALLY_BOUNDED_WIREFRAME_SHAPE_REPRESENTATION"].iter().flat_map(|k| m.ids(k).iter().copied()).collect();
+        let reps: Vec<u64> = ["ADVANCED_BREP_SHAPE_REPRESENTATION", "MANIFOLD_SURFACE_SHAPE_REPRESENTATION", "SHAPE_REPRESENTATION", "FACETED_BREP_SHAPE_REPRESENTATION", "GEOMETRICALLY_BOUNDED_WIREFRAME_SHAPE_REPRESENTATION", "TESSELLATED_SHAPE_REPRESENTATION"].iter().flat_map(|k| m.ids(k).iter().copied()).collect();
         let mut shapes = Vec::new();
         let mut seen = HashSet::new();
         for rep in reps {
@@ -2400,6 +2627,70 @@ END-ISO-10303-21;
         for x in [1.0, 0.1, -2.5e-9, 1e20, 123456.789, 1e-4] {
             assert_eq!(parse_real(&real(x)), Some(x), "{}", real(x));
         }
+    }
+
+    /// A wireframe-and-surface set (as CATIA writes them): a disc as a CURVE_BOUNDED_SURFACE on
+    /// a plane, bounded by a composite of a complex SURFACE_CURVE, next to a placement. It reads
+    /// as one face (the placement no curve), area πr².
+    #[test]
+    fn reads_curve_bounded_surfaces_in_a_set() {
+        let src = b"ISO-10303-21;
+HEADER;
+FILE_SCHEMA(('AUTOMOTIVE_DESIGN'));
+ENDSEC;
+DATA;
+#1=CARTESIAN_POINT('',(0.,0.,0.));
+#2=DIRECTION('',(0.,0.,1.));
+#3=DIRECTION('',(1.,0.,0.));
+#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);
+#5=PLANE('',#4);
+#6=CIRCLE('',#4,2.);
+#7=TRIMMED_CURVE('',#6,(0.),(6.283185307179586),.T.,.PARAMETER.);
+#8=(BOUNDED_CURVE()CURVE()GEOMETRIC_REPRESENTATION_ITEM()REPRESENTATION_ITEM('')SURFACE_CURVE(#7,(#5),.CURVE_3D.));
+#9=COMPOSITE_CURVE_SEGMENT(.CONTINUOUS.,.T.,#8);
+#10=BOUNDARY_CURVE('',(#9),.F.);
+#11=CURVE_BOUNDED_SURFACE('',#5,(#10),.F.);
+#12=GEOMETRIC_SET('',(#11,#4));
+#13=GEOMETRICALLY_BOUNDED_WIREFRAME_SHAPE_REPRESENTATION('',(#12),#14);
+#14=(GEOMETRIC_REPRESENTATION_CONTEXT(3)GLOBAL_UNIT_ASSIGNED_CONTEXT((#15))REPRESENTATION_CONTEXT('',''));
+#15=(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.));
+ENDSEC;
+END-ISO-10303-21;
+";
+        let m = read(src).unwrap();
+        assert_eq!(m.parts.len(), 1);
+        let b = &m.parts[0].body;
+        assert_eq!(b.faces.len(), 1, "{:?}", m.warnings);
+        let area = super::super::mass::body_mass(b).surface_area;
+        assert!((area - std::f64::consts::PI * 4.0).abs() < 1e-6, "{area}");
+    }
+
+    /// AP242 tessellated geometry: a tetrahedron as a TESSELLATED_SOLID of a TRIANGULATED_FACE
+    /// (two triangles) and a COMPLEX_TRIANGULATED_FACE (a strip of two, through a point index),
+    /// in a TESSELLATED_SHAPE_REPRESENTATION. It reads as a solid of volume 1/6.
+    #[test]
+    fn reads_tessellated_solids() {
+        let src = b"ISO-10303-21;
+HEADER;
+FILE_SCHEMA(('AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF'));
+ENDSEC;
+DATA;
+#1=COORDINATES_LIST('',4,((0.,0.,0.),(1.,0.,0.),(0.,1.,0.),(0.,0.,1.)));
+#2=TRIANGULATED_FACE('',#1,4,(),$,(),((1,3,2),(1,2,4)));
+#3=COMPLEX_TRIANGULATED_FACE('',#1,4,(),$,(4,3,2,1),((4,1,2,3)),());
+#4=TESSELLATED_SOLID('',(#2,#3),$);
+#5=TESSELLATED_SHAPE_REPRESENTATION('',(#4),#6);
+#6=(GEOMETRIC_REPRESENTATION_CONTEXT(3)GLOBAL_UNIT_ASSIGNED_CONTEXT((#7))REPRESENTATION_CONTEXT('',''));
+#7=(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.));
+ENDSEC;
+END-ISO-10303-21;
+";
+        let m = read(src).unwrap();
+        assert_eq!(m.parts.len(), 1);
+        let b = &m.parts[0].body;
+        assert_eq!(b.solids.len(), 1, "{:?}", m.warnings);
+        let v = super::super::mass::body_volume(b);
+        assert!((v - 1.0 / 6.0).abs() < 1e-9, "{v}");
     }
 
     /// A unit cube by hand, as other systems write it: inch units, edges with same_sense .F.,

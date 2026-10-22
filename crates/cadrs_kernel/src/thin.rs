@@ -30,7 +30,7 @@ const EPS: f64 = 1e-9;
 /// The regions of a thin wall along every curve of `profile` (its regions' loops and its open
 /// chains). Each band and fill keeps the source of the region or chain it came from.
 pub fn thin_profile(profile: &Profile, left: f64, right: f64) -> Result<Profile> {
-    if !(left >= 0.0 && right >= 0.0 && left + right > 1e-6) {
+    if !(left >= 0.0 && right >= 0.0 && left + right > tol::POINT) {
         return Err(KernelError::InvalidParameter(
             "the wall thickness must be greater than zero".into(),
         ));
@@ -293,10 +293,10 @@ fn tangent(c: &Curve2, s: f64) -> Vector2<f64> {
             // they get no corner fill).
             let u = 1.0 - s;
             let v = (poles[1] - poles[0]) * (u * u) + (poles[2] - poles[1]) * (2.0 * u * s) + (poles[3] - poles[2]) * (s * s);
-            if v.norm() > 1e-12 { v.normalize() } else { (poles[3] - poles[0]).normalize() }
+            if v.norm() > tol::DEGENERATE { v.normalize() } else { (poles[3] - poles[0]).normalize() }
         }
         _ => {
-            let (a, b) = (c.point_at((s - 1e-6).max(0.0)), c.point_at((s + 1e-6).min(1.0)));
+            let (a, b) = (c.point_at((s - tol::DIFF_STEP).max(0.0)), c.point_at((s + tol::DIFF_STEP).min(1.0)));
             (b - a).normalize()
         }
     }

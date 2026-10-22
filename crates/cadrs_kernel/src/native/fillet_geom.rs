@@ -57,7 +57,7 @@ impl Ball {
         let b = self.q[1].p - self.c;
         let r = a.norm();
         let th = a.normalize().dot(&b.normalize()).clamp(-1.0, 1.0).acos();
-        if th < 1e-12 {
+        if th < tol::ANGULAR_FINE {
             return self.q[0].p;
         }
         // Slerp.
@@ -70,14 +70,14 @@ impl Ball {
     pub fn arc(&self) -> Option<(Curve, f64, f64)> {
         if self.flat {
             let (c, l) = Curve::line(self.q[0].p, self.q[1].p);
-            return (l > 1e-12).then_some((c, 0.0, l));
+            return (l > tol::DEGENERATE).then_some((c, 0.0, l));
         }
         let a = self.q[0].p - self.c;
         let b = self.q[1].p - self.c;
         let r = a.norm();
         let x = a.normalize();
         let yv = b - x * b.dot(&x);
-        if yv.norm() < 1e-12 * (1.0 + r) || r < 1e-12 {
+        if yv.norm() < tol::REL_FINE * (1.0 + r) || r < tol::DEGENERATE {
             return None;
         }
         let y = yv.normalize();
@@ -106,7 +106,7 @@ impl Ball {
         }
         let (a, o) = (a - self.c, o - self.c);
         let whole = a.angle(&o);
-        if whole < 1e-12 { 0.0 } else { a.angle(&(x - self.c)) / whole }
+        if whole < tol::ANGULAR_FINE { 0.0 } else { a.angle(&(x - self.c)) / whole }
     }
 }
 
@@ -284,13 +284,22 @@ pub fn rail_crossings(f: [&Face; 2], k: [f64; 2], side: usize, bd: &Boundary, ne
         let q = contact(fo, uv);
         ((c - q.p).dot(&q.n) - k[other], uv)
     };
-    let n = 48;
     let (t0, t1) = (bd.t[0], bd.t[1]);
+    // Samples a tenth of the reach apart at most (on a long boundary, a large circle, the ball
+    // may cross in and out between coarser ones), at least 48; only those near the balls solved.
+    let at = |i: usize, n: usize| bd.curve.point(t0 + (t1 - t0) * i as f64 / n as f64);
+    let len: f64 = (1..=48).map(|i| (at(i, 48) - at(i - 1, 48)).norm()).sum();
+    let n = ((len / (0.1 * reach).max(tol::TINY)).ceil() as usize).clamp(48, 4800);
+    let near_bd = reach + 2.0 * k[side].abs();
     let mut hint: Option<P2> = None;
     let mut prev: Option<(f64, f64)> = None;
     let mut brackets: Vec<(f64, f64)> = Vec::new();
     for i in 0..=n {
         let t = t0 + (t1 - t0) * i as f64 / n as f64;
+        if n > 48 && (bd.curve.point(t) - near).norm() > near_bd {
+            prev = None;
+            continue;
+        }
         let Some((c, _, _)) = centre(t) else {
             prev = None;
             continue;
@@ -551,7 +560,7 @@ fn exact_flat(kind: Exact, b: &Ball, spine: &Spine) -> Option<Strip> {
             let ((h0, r0), (h1, r1)) = (ring(&q0), ring(&q1));
             let rail = |h: f64, rr: f64| Curve::Circle { c: c + z * h, x: *x, y: yy, r: rr };
             let rails = [rail(h0, r0), rail(h1, r1)];
-            let tol = 1e-12 * (1.0 + r0.max(r1));
+            let tol = tol::REL_FINE * (1.0 + r0.max(r1));
             let surf = if (h1 - h0).abs() < tol {
                 Surface::Plane { f: Frame { o: c + z * h0, x: *x, y: yy, z } }
             } else if (r1 - r0).abs() < tol {
@@ -576,7 +585,7 @@ fn section_cps(b: &Ball) -> Option<[H; 3]> {
     let e = b.q[1].p - b.c;
     let r = 0.5 * (a.norm() + e.norm());
     // A ball of no size (a radius law reaching 0): the section is a point.
-    if r < 1e-12 * (1.0 + b.c.coords.abs().max()) {
+    if r < tol::REL_FINE * (1.0 + b.c.coords.abs().max()) {
         return Some([hom(&b.c, 1.0); 3]);
     }
     let half = 0.5 * a.normalize().dot(&e.normalize()).clamp(-1.0, 1.0).acos();

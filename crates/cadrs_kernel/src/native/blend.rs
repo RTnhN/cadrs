@@ -136,7 +136,7 @@ pub struct Corner2 {
 pub fn section_loop(c: &Corner2, kind: SectionKind, src: Src) -> Result<(Vec<Piece>, P2, P2)> {
     let cos = c.u1.dot(&c.u2).clamp(-1.0, 1.0);
     let theta = cos.acos();
-    if theta < 1e-6 || theta > PI - 1e-6 {
+    if theta < tol::ANGULAR_POINT || theta > PI - tol::ANGULAR_POINT {
         return Err(KernelError::InvalidGeometry { op: "blend", why: "the faces at the edge are tangent: nothing to blend".into() });
     }
     let bis = (c.u1 + c.u2).normalize();
@@ -209,7 +209,7 @@ fn arc_section_loop(c: &Corner2, centre: P2, c1: P2, c2: P2, r: f64, src: Src) -
 pub(crate) fn ball_in_plane(f1: &Face, f2: &Face, p: &P3, tan: &V3, w1: &V3, w2: &V3, r: f64, convex: bool) -> Option<(P3, P3, P3)> {
     let s = if convex { -1.0 } else { 1.0 };
     let theta = w1.dot(w2).clamp(-1.0, 1.0).acos();
-    if theta < 1e-6 {
+    if theta < tol::ANGULAR_POINT {
         return None;
     }
     let bis = (w1 + w2).normalize();
@@ -612,7 +612,7 @@ fn corner_triangle(b: &Body, e: usize, ca: usize, cb: usize, v: usize, d1: f64, 
     let p_b = meet3(pb, fill, wb)?;
     let q = meet3(pa, pb, top)?;
     let mut n = (p_b - p_a).cross(&(q - p_a));
-    if n.norm() < 1e-12 {
+    if n.norm() < tol::DEGENERATE {
         return None;
     }
     n = n.normalize();
@@ -671,6 +671,47 @@ fn edge_convex(b: &Body, e: usize) -> Option<bool> {
     if c.abs() < tol::ANGULAR { None } else { Some(c < 0.0) }
 }
 
+/// Whether the faces at edge `e` join smoothly all along it (their normals the same at every
+/// sample): the edge marks no corner, and a blend there has nothing to take off or fill.
+fn smooth_edge(b: &Body, e: usize) -> bool {
+    let ed = &b.edges[e];
+    let Ok([s1, s2]) = edge_sides(b, e) else { return false };
+    if ed.degenerate {
+        return false;
+    }
+    (0..=8).all(|i| {
+        let t = ed.t[0] + (ed.t[1] - ed.t[0]) * i as f64 / 8.0;
+        let p = ed.point(t);
+        let normal = |fi: usize| {
+            let f = &b.faces[fi];
+            let (u, v) = f.surf.project(&p, None);
+            f.surf.normal(u, v) * if f.sense { 1.0 } else { -1.0 }
+        };
+        let (n1, n2) = (normal(s1.0), normal(s2.0));
+        n1.dot(&n2) > 0.0 && n1.cross(&n2).norm() < tol::ANGULAR_POINT
+    })
+}
+
+/// The picked edges less those whose faces join smoothly (OCCT's blends pass over them too);
+/// when every one does, there is nothing to blend.
+fn sharp_edges(b: &Body, edges: &[EdgeId]) -> Result<Vec<EdgeId>> {
+    let kept: Vec<EdgeId> = edges.iter().copied().filter(|e| (e.0 as usize) >= b.edges.len() || !smooth_edge(b, e.0 as usize)).collect();
+    if kept.is_empty() && !edges.is_empty() {
+        return Err(KernelError::InvalidGeometry { op: "blend", why: "the faces at the edge are tangent: nothing to blend".into() });
+    }
+    Ok(kept)
+}
+
+/// The picked edges less degenerate ones (a pole's, an apex's): OCCT's blends pass over them
+/// (`BRepFilletAPI` adds no contour for one), and there's nothing to round there.
+fn real_edges(b: &Body, edges: &[EdgeId]) -> Result<Vec<EdgeId>> {
+    let kept: Vec<EdgeId> = edges.iter().copied().filter(|e| b.edges.get(e.0 as usize).is_none_or(|ed| !ed.degenerate)).collect();
+    if kept.is_empty() && !edges.is_empty() {
+        return Err(KernelError::InvalidParameter("A degenerate edge can't be blended".into()));
+    }
+    Ok(kept)
+}
+
 /// Whether the solid is convex round vertex `v`: every edge there convex.
 fn vertex_convex(b: &Body, v: usize) -> bool {
     b.edges.iter().enumerate().filter(|(_, x)| !x.degenerate && x.v.contains(&v)).all(|(i, _)| edge_convex(b, i) == Some(true))
@@ -684,7 +725,7 @@ fn continues_smoothly(b: &Body, v: usize, out: V3, except: &[usize]) -> bool {
             return false;
         }
         let d = if o.v[0] == v { o.curve.tangent(o.t[0]) } else { -o.curve.tangent(o.t[1]) };
-        d.norm() > 0.0 && d.normalize().dot(&out) > 1.0 - 1e-6
+        d.norm() > 0.0 && d.normalize().dot(&out) > 1.0 - tol::ANGULAR_POINT
     })
 }
 
@@ -703,9 +744,9 @@ fn end_cut(b: &Body, v: usize, out: V3, sides: &[usize], convex: bool) -> Option
         }
         if let Surface::Plane { f: fr } = &f.surf {
             let n = fr.x.cross(&fr.y) * if f.sense { 1.0 } else { -1.0 };
-            if convex && n.dot(&out) < -1e-6 {
+            if convex && n.dot(&out) < -tol::ANGULAR_POINT {
                 plane = Some((p, -n));
-            } else if !convex && n.dot(&out) > 1e-6 {
+            } else if !convex && n.dot(&out) > tol::ANGULAR_POINT {
                 plane = Some((p, n));
             }
         }
@@ -806,7 +847,7 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[EdgeBlend], corners: b
         }
         let o = others[0];
         // Tangent: this edge's direction out of v equals the other's direction into it.
-        (tangent_out(e, v).dot(&-tangent_out(o, v)) > 1.0 - 1e-6).then_some(o)
+        (tangent_out(e, v).dot(&-tangent_out(o, v)) > 1.0 - tol::ANGULAR_POINT).then_some(o)
     };
     let mut in_chain = vec![false; b.edges.len()];
     let mut chain_tools: Vec<(Vec<(usize, bool)>, usize)> = Vec::new(); // (chain, index of the spec)
@@ -957,7 +998,7 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[EdgeBlend], corners: b
             let mine = edge_convex(&b, e);
             let others: Vec<usize> = at_vertex.get(v).map(|x| x.iter().copied().filter(|&o| o != e && edge_convex(&b, o) == mine).collect()).unwrap_or_default();
             // A tangent-continuing neighbour: no extension; the tools meet square to the edges.
-            if others.len() == 1 && tangent_at(end).dot(&other_dir(others[0], *v)) > 1.0 - 1e-12 {
+            if others.len() == 1 && tangent_at(end).dot(&other_dir(others[0], *v)) > 1.0 - tol::ANGULAR_FINE {
                 if end == 0 {
                     extend.0 = false;
                 } else {
@@ -1174,7 +1215,7 @@ fn check_fits(b: &Body, e: usize, kind: &dyn Fn(f64) -> SectionKind) -> Result<(
         let f = &b.faces[s.0];
         let polys = super::classify::face_polygons(b, f);
         let (u, v) = f.surf.project(&q, None);
-        if (f.surf.eval(u, v) - q).norm() > 1e-6 * (1.0 + a) {
+        if (f.surf.eval(u, v) - q).norm() > tol::REL_POINT * (1.0 + a) {
             // Curved across the edge: the contact point isn't on the face's surface; leave the
             // check to the boolean.
             fits[side] = true;
@@ -1266,11 +1307,59 @@ fn local_problem(input: &Body, out: &Body) -> Option<String> {
     out.check_with(CheckLevel::Fast).into_iter().next()
 }
 
+/// Flat faces two of `edges` bound on opposite sides, parallel lines exactly two radii `r`
+/// apart (the fillets on them meet across the face and consume it whole: a full round), when
+/// two such faces meet: the width of one. A single full round builds; two meeting at a corner
+/// don't yet.
+fn consumed_face(b: &Body, edges: &[EdgeId], r: f64) -> Option<f64> {
+    let consumed: Vec<(usize, f64)> = (0..b.faces.len()).filter_map(|f| consumed_width(b, f, edges, r).map(|w| (f, w))).collect();
+    let edges_of = |f: usize| -> Vec<usize> { b.faces[f].loops.iter().flatten().map(|c| c.edge).collect() };
+    for (i, &(f, w)) in consumed.iter().enumerate() {
+        let mine = edges_of(f);
+        if consumed[i + 1..].iter().any(|&(g, _)| edges_of(g).iter().any(|e| mine.contains(e))) {
+            return Some(w);
+        }
+    }
+    None
+}
+
+/// The width of face `f` when it is flat and two of `edges` bound it on opposite sides exactly
+/// two radii `r` apart.
+fn consumed_width(b: &Body, f: usize, edges: &[EdgeId], r: f64) -> Option<f64> {
+    let close = tol::POINT.max(tol::REL_POINT * r);
+    let line = |e: usize| -> Option<(P3, V3)> {
+        let ed = &b.edges[e];
+        let Curve::Line { .. } = ed.curve else { return None };
+        let (p, q) = (ed.point(ed.t[0]), ed.point(ed.t[1]));
+        let d = q - p;
+        (d.norm() > tol::POINT).then(|| (p, d / d.norm()))
+    };
+    let face = &b.faces[f];
+    if !matches!(face.surf, Surface::Plane { .. }) {
+        return None;
+    }
+    let on: Vec<(P3, V3)> = face.loops.iter().flatten().filter(|c| edges.contains(&EdgeId(c.edge as u64))).filter_map(|c| line(c.edge)).collect();
+    for (i, (p, d)) in on.iter().enumerate() {
+        for (q, d2) in &on[i + 1..] {
+            if d.cross(d2).norm() > tol::ANGULAR_POINT {
+                continue;
+            }
+            let w = q - p;
+            let width = (w - d * w.dot(d)).norm();
+            if (width - 2.0 * r).abs() <= close {
+                return Some(width);
+            }
+        }
+    }
+    None
+}
+
 pub fn fillet(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], spec: &FilletSpec) -> Result<OpResult> {
     let (FilletSize::Radius(r) | FilletSize::Width(r)) = spec.size;
     if !(r > 0.0) {
         return Err(KernelError::InvalidParameter("The fillet's size must be positive".into()));
     }
+    let edges = &real_edges(k.get(body)?, edges)?[..];
     let mut all: Vec<EdgeId> = Vec::new();
     for &e in edges {
         let chain = if spec.propagate { k.tangent_chain(body, e)? } else { vec![e] };
@@ -1296,7 +1385,9 @@ pub fn fillet(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], spec: &Fille
     // A width: the radius whose contacts lie that far apart, on each edge whose faces meet at
     // one angle (normals φ apart: r = w / (2 sin(φ/2))).
     let b = (**k.get(body)?).clone();
-    let laws: Option<Vec<super::fillet::RadiusLaw>> = all
+    // (Local trimming passes over edges whose faces join smoothly.)
+    let sharp = sharp_edges(&b, &all)?;
+    let laws: Option<Vec<super::fillet::RadiusLaw>> = sharp
         .iter()
         .map(|e| {
             let e = e.0 as usize;
@@ -1349,11 +1440,26 @@ pub fn fillet(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], spec: &Fille
         })
         .collect();
     let corners = matches!(spec.profile, FilletProfile::Circular) && matches!(spec.size, FilletSize::Radius(_));
-    let r = blend(k, body, &list, corners)?;
+    let res = match blend(k, body, &list, corners) {
+        Ok(res) => res,
+        // Neither method builds full rounds that meet at a corner: say so (OCCT's fillet does;
+        // a slightly smaller radius leaves a strip of each face here).
+        Err(e) => {
+            let FilletSize::Radius(radius) = spec.size else { return Err(e) };
+            return Err(consumed_face(&b, &all, radius).map_or(e, |width| KernelError::TooLarge {
+                op: "fillet",
+                why: format!(
+                    "the R{radius} fillets make full rounds of two faces that meet (one {width:.3} mm wide, its \
+                     opposite edges' fillets meeting across it): full rounds meeting at a corner aren't \
+                     supported (a radius a little smaller works)"
+                ),
+            }));
+        }
+    };
     if !spec.allow_overflow {
-        check_overflow(k, body, &all, &r)?;
+        check_overflow(k, body, &all, &res)?;
     }
-    Ok(r)
+    Ok(res)
 }
 
 /// With Allow edge overflow off: a fillet face may only touch faces continuing the faces at its
@@ -1400,15 +1506,25 @@ fn check_overflow(k: &NativeKernel, body: BodyId, edges: &[EdgeId], r: &OpResult
 pub fn chamfer(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], opts: &ChamferOpts) -> Result<OpResult> {
     let spec = opts.spec;
     let b = (**k.get(body)?).clone();
+    let edges = &real_edges(&b, edges)?[..];
+    // (Local trimming passes over edges whose faces join smoothly.)
+    let sharp = sharp_edges(&b, edges)?;
     // Equal distances where the faces meet at a constant angle: by local trimming, as the
     // ball whose contacts are that far along the faces, cut straight across.
     if let (ChamferSpec::EqualDistance(d), ChamferMeasure::Offset) = (spec, opts.measurement)
         && d > 0.0
         && std::env::var_os("CADRS_NO_LOCAL_FILLET").is_none()
     {
-        let laws: Option<Vec<super::fillet::RadiusLaw>> = edges
+        let laws: Option<Vec<super::fillet::RadiusLaw>> = sharp
             .iter()
-            .map(|e| super::fillet::chamfer_radius(&b, e.0 as usize, d).map(|r| (e.0 as usize, vec![(0.0, r), (1.0, r)])))
+            .map(|e| {
+                let e = e.0 as usize;
+                // (Where the faces' angle varies along the edge, a law of radii.)
+                match super::fillet::chamfer_radius(&b, e, d) {
+                    Some(r) => Some((e, vec![(0.0, r), (1.0, r)])),
+                    None => Some((e, super::fillet::chamfer_law(&b, e, d)?)),
+                }
+            })
             .collect();
         if let Some(laws) = laws {
             let local = super::fillet::fillet_edges_laws(&b, body, &laws, true).and_then(|(out, src)| {
@@ -1437,7 +1553,7 @@ pub fn chamfer(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], opts: &Cham
     // distances that differ only along straight edges between flat faces; equal ones wherever
     // the faces meet at one angle (as the equal-distance chamfer above).
     if !matches!((spec, opts.measurement), (ChamferSpec::EqualDistance(_), ChamferMeasure::Offset)) && std::env::var_os("CADRS_NO_LOCAL_FILLET").is_none() {
-        let dists: Option<Vec<(usize, [f64; 2])>> = edges
+        let dists: Option<Vec<(usize, [f64; 2])>> = sharp
             .iter()
             .map(|&e| {
                 let ei = e.0 as usize;
@@ -1659,7 +1775,7 @@ pub fn fillet_partial(k: &mut NativeKernel, body: BodyId, edge: EdgeId, spec: &F
             && let Surface::Plane { f: fr } = &f.surf {
                 let n = fr.x.cross(&fr.y);
                 let t = ed.curve.tangent(ed.mid_t()).normalize();
-                if n.cross(&t).norm() < 1e-6 || matches!(ed.curve, Curve::Circle { .. }) {
+                if n.cross(&t).norm() < tol::ANGULAR_POINT || matches!(ed.curve, Curve::Circle { .. }) {
                     caps.push(fi);
                 }
             }
@@ -1688,6 +1804,9 @@ pub fn fillet_partial(k: &mut NativeKernel, body: BodyId, edge: EdgeId, spec: &F
 /// through sections at the law's points (and past the edge's ends).
 pub fn fillet_variable(k: &mut NativeKernel, body: BodyId, laws: &[FilletLaw], _allow_overflow: bool) -> Result<OpResult> {
     let b = (**k.get(body)?).clone();
+    let real = real_edges(&b, &laws.iter().map(|l| l.edge).collect::<Vec<_>>())?;
+    let laws: Vec<FilletLaw> = laws.iter().filter(|l| real.contains(&l.edge)).cloned().collect();
+    let laws = &laws[..];
     // By local trimming first (any edge and faces), then the tool for straight edges between
     // flat faces.
     if laws.iter().all(|l| (l.edge.0 as usize) < b.edges.len() && !l.radii.is_empty()) && std::env::var_os("CADRS_NO_LOCAL_FILLET").is_none() {
@@ -1904,7 +2023,7 @@ fn chain_tool_lofted(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dy
         }
     }
     stations.sort_by(|a, c| (starts[a.0] + a.1 * lens[a.0]).total_cmp(&(starts[c.0] + c.1 * lens[c.0])));
-    stations.dedup_by(|a, c| ((starts[a.0] + a.1 * lens[a.0]) - (starts[c.0] + c.1 * lens[c.0])).abs() < 1e-6);
+    stations.dedup_by(|a, c| ((starts[a.0] + a.1 * lens[a.0]) - (starts[c.0] + c.1 * lens[c.0])).abs() < tol::POINT);
     let mut sections = Vec::new();
     for &(k, fr) in &stations {
     let (e, fwd) = chain[k];
@@ -1957,7 +2076,7 @@ fn chain_tool_lofted(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dy
         };
         // The section's plane: through the contacts and the corner.
         let nrm = (c1 - p).cross(&(c2 - p));
-        if nrm.norm() < 1e-12 {
+        if nrm.norm() < tol::DEGENERATE {
             return Err(KernelError::InvalidGeometry { op: "blend", why: "the blend's section degenerates along the edge".into() });
         }
         let nrm = nrm.normalize();

@@ -8,15 +8,15 @@
 //! less each kept face swept in, a tube round each concave edge and a ball at each concave
 //! vertex. Outward, the grown body less the body, cut back to the removed faces' planes.
 
-use super::blend::{ball_body, Tracked};
-use super::boolean::boolean_bodies;
-use super::curve::Curve;
-use super::kernel::NativeKernel;
-use super::math::*;
-use super::surface::Surface;
-use super::topo::Body;
+use crate::native::blend::{ball_body, Tracked};
+use crate::native::boolean::boolean_bodies;
+use crate::native::curve::Curve;
+use crate::native::kernel::NativeKernel;
+use crate::native::math::*;
+use crate::native::surface::Surface;
+use crate::native::topo::Body;
 use crate::*;
-use super::tol;
+use crate::native::tol;
 
 /// A planar face swept along its outward normal by `d` (negative: inward).
 fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
@@ -35,14 +35,14 @@ fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
     };
     let n = fr.x.cross(&fr.y) * if f.sense { 1.0 } else { -1.0 };
     let plane = Plane { origin: fr.o, x_dir: nalgebra::Unit::new_normalize(fr.x), normal: nalgebra::Unit::new_normalize(n) };
-    let tmp = super::kernel::subset(b, &[fi], false);
+    let tmp = crate::native::kernel::subset(b, &[fi], false);
     let mut k = NativeKernel::new();
     let id = k.insert(tmp);
     let prof = Profile::new(plane, vec![]);
-    let mut mf = super::features::face_as_profile(&k, &prof, &FaceInput { body: id, face: FaceId(0), source: 0 })?;
+    let mut mf = crate::native::features::face_as_profile(&k, &prof, &FaceInput { body: id, face: FaceId(0), source: 0 })?;
     // A closed spline edge would sweep a band round a closed, non-periodic surface (one seam
     // edge used twice), which the boolean doesn't take: in two halves, two plain sides.
-    let halve = |l: &mut super::profile::Loop2| {
+    let halve = |l: &mut crate::native::profile::Loop2| {
         *l = l
             .drain(..)
             .flat_map(|p| {
@@ -68,8 +68,8 @@ fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
     halve(&mut mf.outer);
     mf.holes.iter_mut().for_each(halve);
     let dir = if d >= 0.0 { n } else { -n };
-    let kind = super::sweep::Prism { plane, dir };
-    Ok(super::sweep::sweep_full(&[mf], &[], &kind, 0.0, d.abs(), false, true)?.body)
+    let kind = crate::native::sweep::Prism { plane, dir };
+    Ok(crate::native::sweep::sweep_full(&[mf], &[], &kind, 0.0, d.abs(), false, true)?.body)
 }
 
 /// A tube of radius r round an edge (a cylinder along a line, a torus section round an arc),
@@ -83,11 +83,11 @@ fn edge_tube(b: &Body, e: usize, r: f64) -> Result<Body> {
             let fr = Frame::from_z(p0, t);
             let plane = Plane { origin: p0, x_dir: nalgebra::Unit::new_normalize(fr.x), normal: nalgebra::Unit::new_normalize(t) };
             let prof = Profile::new(plane, vec![Region { outer: Loop { curves: vec![Curve2::Circle { center: nalgebra::Point2::origin(), radius: r, source: None }] }, holes: vec![], source: None }]);
-            let regions = super::profile::regions(&prof)?;
-            let mf = super::profile::merge_regions(&regions)?;
+            let regions = crate::native::profile::regions(&prof)?;
+            let mf = crate::native::profile::merge_regions(&regions)?;
             let len = (ed.t[1] - ed.t[0]) * d.norm();
-            let kind = super::sweep::Prism { plane, dir: t };
-            Ok(super::sweep::sweep_full(&mf, &[], &kind, 0.0, len, false, true)?.body)
+            let kind = crate::native::sweep::Prism { plane, dir: t };
+            Ok(crate::native::sweep::sweep_full(&mf, &[], &kind, 0.0, len, false, true)?.body)
         }
         Curve::Circle { c, x, y, r: rc } => {
             let q = ed.point(ed.t[0]);
@@ -119,13 +119,13 @@ fn edge_tube(b: &Body, e: usize, r: f64) -> Result<Body> {
                 }
             };
             let prof = Profile::new(plane, vec![Region { outer, holes: vec![], source: None }]);
-            let regions = super::profile::regions(&prof)?;
-            let mf = super::profile::merge_regions(&regions)?;
+            let regions = crate::native::profile::regions(&prof)?;
+            let mf = crate::native::profile::merge_regions(&regions)?;
             let f = Frame { o: *c, x: radial, y: axis.cross(&radial), z: axis };
             let span = ed.t[1] - ed.t[0];
             let whole = span >= TAU - tol::ANGULAR;
-            let kind = super::sweep::Revolve { plane, f };
-            Ok(super::sweep::sweep_full(&mf, &[], &kind, 0.0, if whole { TAU } else { span }, whole, true)?.body)
+            let kind = crate::native::sweep::Revolve { plane, f };
+            Ok(crate::native::sweep::sweep_full(&mf, &[], &kind, 0.0, if whole { TAU } else { span }, whole, true)?.body)
         }
         // Any other curve: a disc square to the edge at its start swept along it (a pipe).
         _ => {
@@ -140,7 +140,7 @@ fn edge_tube(b: &Body, e: usize, r: f64) -> Result<Body> {
                 return Err(KernelError::Unsupported("a tube round an edge curved tighter than its radius"));
             }
             let p0 = ed.point(ed.t[0]);
-            let t = ed.curve.tangent(ed.t[0]).try_normalize(1e-12).ok_or(KernelError::Unsupported("a tube round an edge with no direction"))?;
+            let t = ed.curve.tangent(ed.t[0]).try_normalize(tol::DEGENERATE).ok_or(KernelError::Unsupported("a tube round an edge with no direction"))?;
             let fr = Frame::from_z(p0, t);
             let plane = Plane { origin: p0, x_dir: nalgebra::Unit::new_normalize(fr.x), normal: nalgebra::Unit::new_normalize(t) };
             let prof = Profile::new(plane, vec![Region { outer: Loop { curves: vec![Curve2::Circle { center: nalgebra::Point2::origin(), radius: r, source: None }] }, holes: vec![], source: None }]);
@@ -186,8 +186,8 @@ fn combine(acc: &Body, piece: &Body, op: BoolOp, what: &dyn Fn() -> String) -> R
     let debug = std::env::var_os("CADRS_OFFSET_DEBUG").is_some();
     let dump = || {
         if std::env::var_os("CADRS_DUMP_DIR").is_some() {
-            super::kernel::dump("offset-target", acc, &format!("{op:?} {}", what()));
-            super::kernel::dump("offset-tool", piece, &format!("{op:?} {}", what()));
+            crate::native::kernel::dump("offset-target", acc, &format!("{op:?} {}", what()));
+            crate::native::kernel::dump("offset-tool", piece, &format!("{op:?} {}", what()));
         }
     };
     // (The boolean returns only valid bodies, so a piece is never built on a broken result:
@@ -218,7 +218,7 @@ fn merged(b: &Body) -> Body {
 /// The body grown by a ball of radius d (all faces moved out by d, edges and corners rounded).
 pub fn offset_rounded(b: &Body, dist: &[f64]) -> Result<Body> {
     let d = dist[0];
-    if dist.iter().any(|x| (x - d).abs() > 1e-12) || d <= 0.0 {
+    if dist.iter().any(|x| (x - d).abs() > tol::ROUNDOFF_FINE) || d <= 0.0 {
         return Err(KernelError::Unsupported("rounded offsets with different distances per face"));
     }
     grown_except(b, d, &[])
@@ -316,7 +316,7 @@ fn combine_all(mut acc: Body, mut todo: Vec<(Body, String)>, op: BoolOp) -> Resu
                 Ok(r) => {
                     acc = r;
                     if std::env::var("CADRS_SHELL_DEBUG").is_ok() {
-                        eprintln!("after {what}: {:.6} solids {}", super::mass::body_mass(&acc).volume, acc.solids.len());
+                        eprintln!("after {what}: {:.6} solids {}", crate::native::mass::body_volume(&acc), acc.solids.len());
                     }
                 }
                 Err(e) => {
@@ -357,7 +357,7 @@ pub fn shell(k: &mut NativeKernel, body: BodyId, spec: &ShellSpec) -> Result<OpR
         return Err(too_thick());
     }
     let cur = Tracked::of(b.clone());
-    let v0 = super::mass::body_mass(&b).volume;
+    let v0 = crate::native::mass::body_volume(&b);
     let result = if !spec.outward {
         // The cavity: kept faces moved in by t, removed faces moved out past the body, or,
         // failing that (a spline wall's offset doesn't reach that far), where they are (the
@@ -369,8 +369,8 @@ pub fn shell(k: &mut NativeKernel, body: BodyId, spec: &ShellSpec) -> Result<OpR
         // tried in turn until the body less it comes out (a cavity flush with a removed face
         // shares that face with the body, which the boolean may not settle).
         let concave = (0..b.edges.len()).any(|e| !b.edges[e].degenerate && convex(&b, e) == Some(false));
-        let sharp = |x: &Vec<f64>| super::local::offset_sharp(&b, x).and_then(|c| {
-            if super::mass::body_mass(&c).volume > 0.0 { Ok(c) } else { Err(KernelError::TooLarge { op: "shell", why: "the inset is empty".into() }) }
+        let sharp = |x: &Vec<f64>| super::sharp::offset_sharp(&b, x).and_then(|c| {
+            if crate::native::mass::body_volume(&c) > 0.0 { Ok(c) } else { Err(KernelError::TooLarge { op: "shell", why: "the inset is empty".into() }) }
         });
         let regions = || cavity_by_regions(&b, &remove, t);
         let ways: Vec<Box<dyn Fn() -> Result<Body>>> = if (concave || crossing) && !spec.sharp {
@@ -390,7 +390,7 @@ pub fn shell(k: &mut NativeKernel, body: BodyId, spec: &ShellSpec) -> Result<OpR
                     }
                     out.body.solids[0].shells.sort();
                 }
-                let v1 = super::mass::body_mass(&out.body).volume;
+                let v1 = crate::native::mass::body_volume(&out.body);
                 if v1 <= tol::ROUNDOFF || v1 > v0 + tol::ROUNDOFF {
                     return Err(KernelError::InvalidResult { op: "shell", why: "the shell came out wrong".into() });
                 }
@@ -440,7 +440,7 @@ pub fn shell(k: &mut NativeKernel, body: BodyId, spec: &ShellSpec) -> Result<OpR
             }
             // walls − body: the body's faces bound the inside.
             let r = boolean_bodies(&walls.body, &b, BoolOp::Subtract)?;
-            let src = r.from.iter().map(|s| s.iter().filter(|(o, _)| *o == 1).map(|(_, f)| super::blend::FaceSrc::Input(*f)).collect()).collect();
+            let src = r.from.iter().map(|s| s.iter().filter(|(o, _)| *o == 1).map(|(_, f)| crate::native::blend::FaceSrc::Input(*f)).collect()).collect();
             Ok(Tracked { body: r.body, src })
         };
         // With sharp corners: the kept faces moved out by t (the removed ones staying where
@@ -451,9 +451,9 @@ pub fn shell(k: &mut NativeKernel, body: BodyId, spec: &ShellSpec) -> Result<OpR
         let corners = (0..b.edges.len()).any(|e| !b.edges[e].degenerate && convex(&b, e) == Some(true) && ef[e].iter().all(|f| !remove.contains(f)));
         let sharp = || -> Result<Tracked> {
             let dist: Vec<f64> = (0..b.faces.len()).map(|f| if remove.contains(&f) { 0.0 } else { t }).collect();
-            let grown = super::local::offset_sharp(&b, &dist)?;
+            let grown = super::sharp::offset_sharp(&b, &dist)?;
             let r = boolean_bodies(&grown, &b, BoolOp::Subtract)?;
-            let src = r.from.iter().map(|s| s.iter().filter(|(o, _)| *o == 1).map(|(_, f)| super::blend::FaceSrc::Input(*f)).collect()).collect();
+            let src = r.from.iter().map(|s| s.iter().filter(|(o, _)| *o == 1).map(|(_, f)| crate::native::blend::FaceSrc::Input(*f)).collect()).collect();
             Ok(Tracked { body: r.body, src })
         };
         if spec.sharp && corners {
@@ -480,7 +480,7 @@ pub fn shell(k: &mut NativeKernel, body: BodyId, spec: &ShellSpec) -> Result<OpR
             *s = f;
         }
     }
-    let v1 = super::mass::body_mass(&result.body).volume;
+    let v1 = crate::native::mass::body_volume(&result.body);
     if std::env::var("CADRS_SHELL_DEBUG").is_ok() {
         eprintln!("shell: body {v0} result {v1} solids {} faces {}", result.body.solids.len(), result.body.faces.len());
     }
@@ -495,24 +495,24 @@ pub fn shell(k: &mut NativeKernel, body: BodyId, spec: &ShellSpec) -> Result<OpR
 /// ([`FaceSrc::Input`], the face moved: modified), else the edge or vertex its round is about
 /// ([`FaceSrc::New`], generated: it lies the distance from that edge or vertex). Names survive
 /// an offset however its pieces were united. Empty for a face that is neither.
-pub fn offset_sources(b: &Body, input: BodyId, out: &Body, dist: &[f64], rounded: bool) -> Vec<Vec<super::blend::FaceSrc>> {
-    use super::blend::FaceSrc;
+pub fn offset_sources(b: &Body, input: BodyId, out: &Body, dist: &[f64], rounded: bool) -> Vec<Vec<crate::native::blend::FaceSrc>> {
+    use crate::native::blend::FaceSrc;
     let size = 1.0 + b.bbox().diagonal();
     let moved: Vec<Option<Surface>> = b
         .faces
         .iter()
         .zip(dist)
-        .map(|(f, d)| if d.is_nan() { None } else if *d == 0.0 { Some(f.surf.clone()) } else { super::local::offset_surface(&f.surf, f.sense, *d) })
+        .map(|(f, d)| if d.is_nan() { None } else if *d == 0.0 { Some(f.surf.clone()) } else { super::sharp::offset_surface(&f.surf, f.sense, *d) })
         .collect();
     let reach = dist.iter().filter(|d| !d.is_nan()).fold(0.0f64, |m, d| m.max(d.abs()));
     // A sharp offset's step between neighbours moved apart (or a face that closes over a slot
     // their moves filled): from the input edges it holds, on its plane and within it.
-    let steps = |f: &super::topo::Face| -> Vec<FaceSrc> {
+    let steps = |f: &crate::native::topo::Face| -> Vec<FaceSrc> {
         if !matches!(f.surf, Surface::Plane { .. }) {
             return Vec::new();
         }
         let tol = 1e-7 * size;
-        let polys = super::classify::face_polygons(out, f);
+        let polys = crate::native::classify::face_polygons(out, f);
         (0..b.edges.len())
             .filter(|&e| !b.edges[e].degenerate)
             .filter(|&e| {
@@ -522,7 +522,7 @@ pub fn offset_sources(b: &Body, input: BodyId, out: &Body, dist: &[f64], rounded
                     return false;
                 }
                 let (u, v) = f.surf.project(&m, None);
-                !matches!(super::classify::in_face(&polys, &f.surf, P2::new(u, v), tol), super::classify::InFace::Outside)
+                !matches!(crate::native::classify::in_face(&polys, &f.surf, P2::new(u, v), tol), crate::native::classify::InFace::Outside)
             })
             .map(|e| FaceSrc::New(Origin::FromEdge { body: input, edge: EdgeId(e as u64) }))
             .collect()
@@ -556,7 +556,7 @@ pub fn offset_sources(b: &Body, input: BodyId, out: &Body, dist: &[f64], rounded
             }
             // A round: the edge it lies the distance from (nearest within the edge, not at an
             // end: a corner's ball is that far from its edges' ends too), else the vertex.
-            let tol = 1e-6 * size;
+            let tol = tol::REL_POINT * size;
             let off = |d: f64| (d - reach).abs();
             let edge = (0..b.edges.len())
                 .filter(|&e| !b.edges[e].degenerate)
@@ -583,7 +583,7 @@ pub fn offset_sources(b: &Body, input: BodyId, out: &Body, dist: &[f64], rounded
 fn half_space(o: P3, n: V3, size: f64) -> Result<Body> {
     let f = Frame::from_z(o, n);
     let c = |x: f64, y: f64, z: f64| f.o + f.x * x + f.y * y + f.z * z;
-    super::blend::hexahedron(&[
+    crate::native::blend::hexahedron(&[
         c(-size, -size, 0.0),
         c(size, -size, 0.0),
         c(size, size, 0.0),
@@ -606,7 +606,7 @@ fn walls_cross(b: &Body, remove: &[usize], t: f64) -> bool {
         .filter_map(|(i, f)| match &f.surf {
             Surface::Plane { f: fr } => {
                 let n = fr.x.cross(&fr.y) * if f.sense { 1.0 } else { -1.0 };
-                let sub = super::kernel::subset(b, &[i], false);
+                let sub = crate::native::kernel::subset(b, &[i], false);
                 Some((i, fr.o, n, sub.bbox()))
             }
             _ => None,
@@ -635,12 +635,12 @@ fn walls_cross(b: &Body, remove: &[usize], t: f64) -> bool {
 /// shrinks to its sharp inset.
 pub fn inset_rounded(b: &Body, dist: &[f64]) -> Result<Body> {
     let t = -dist.iter().copied().fold(0.0, f64::min);
-    if dist.iter().any(|x| *x != 0.0 && (x + t).abs() > 1e-12) || !(t > 0.0) {
+    if dist.iter().any(|x| *x != 0.0 && (x + t).abs() > tol::ROUNDOFF_FINE) || !(t > 0.0) {
         return Err(KernelError::Unsupported("rounded insets with different distances per face"));
     }
     let concave = (0..b.edges.len()).any(|e| !b.edges[e].degenerate && convex(b, e) == Some(false));
     if !concave
-        && let Ok(c) = super::local::offset_sharp(b, dist)
+        && let Ok(c) = super::sharp::offset_sharp(b, dist)
     {
         return Ok(c);
     }
@@ -711,7 +711,7 @@ fn face_band(b: &Body, fi: usize, t: f64) -> Result<Body> {
     let f = &b.faces[fi];
     let convex = f.surf.frame().is_some_and(|fr| f.sense == fr.right_handed());
     match &f.surf {
-        Surface::Cylinder { r, .. } | Surface::Sphere { r, .. } if convex && t >= r * (1.0 - 1e-9) => {
+        Surface::Cylinder { r, .. } | Surface::Sphere { r, .. } if convex && t >= r * (1.0 - tol::REL) => {
             return collapsed_round(b, fi, t)?.ok_or(KernelError::Unsupported("a shell thicker than a round's radius"));
         }
         _ => {}
@@ -747,7 +747,7 @@ fn collapsed_round(b: &Body, fi: usize, t: f64) -> Result<Option<Body>> {
                 // α e0 + β e1 with α + β g = a0, α g + β = a1.
                 let g = e0.dot(e1);
                 let det = 1.0 - g * g;
-                (det > 1e-9).then(|| e0 * ((a[0] - g * a[1]) / det) + e1 * ((a[1] - g * a[0]) / det))
+                (det > tol::ROUNDOFF).then(|| e0 * ((a[0] - g * a[1]) / det) + e1 * ((a[1] - g * a[0]) / det))
             }
             [e0, e1, e2] => Some(e0 * a[0] + e1 * a[1] + e2 * a[2]),
             _ => None,
@@ -757,7 +757,7 @@ fn collapsed_round(b: &Body, fi: usize, t: f64) -> Result<Option<Body>> {
     match &f.surf {
         Surface::Cylinder { f: fr, r } => {
             let Some((lo, hi, u0, u1)) = cylinder_domain(b, fi) else { return Ok(None) };
-            if u1 - u0 >= PI - 1e-9 {
+            if u1 - u0 >= PI - tol::ANGULAR {
                 return Ok(None);
             }
             let radial = |u: f64| fr.x * u.cos() + fr.y * u.sin();
@@ -768,7 +768,7 @@ fn collapsed_round(b: &Body, fi: usize, t: f64) -> Result<Option<Body>> {
                 c[k] = fr.o + fr.z * lo + q;
                 c[k + 4] = fr.o + fr.z * hi + q;
             }
-            Ok(Some(super::blend::hexahedron(&c)?))
+            Ok(Some(crate::native::blend::hexahedron(&c)?))
         }
         Surface::Sphere { f: fr, r } => {
             // The planes of its edges, which must hold the centre.
@@ -785,13 +785,13 @@ fn collapsed_round(b: &Body, fi: usize, t: f64) -> Result<Option<Body>> {
                     return Ok(None);
                 }
                 let n = x.cross(y).normalize();
-                if !normals.iter().any(|m| m.cross(&n).norm() < 1e-9) {
+                if !normals.iter().any(|m| m.cross(&n).norm() < tol::ANGULAR) {
                     normals.push(n);
                 }
                 mid += (e.point(e.mid_t()) - o).normalize();
             }
             let [n1, n2, n3] = normals[..] else { return Ok(None) };
-            if n1.dot(&n2).abs() > 1e-9 || n2.dot(&n3).abs() > 1e-9 || n3.dot(&n1).abs() > 1e-9 {
+            if n1.dot(&n2).abs() > tol::ANGULAR || n2.dot(&n3).abs() > tol::ANGULAR || n3.dot(&n1).abs() > tol::ANGULAR {
                 return Ok(None);
             }
             // The octant's axes: each plane's normal towards the face.
@@ -804,7 +804,7 @@ fn collapsed_round(b: &Body, fi: usize, t: f64) -> Result<Option<Body>> {
                     c[k + off] = o + q;
                 }
             }
-            Ok(Some(super::blend::hexahedron(&c)?))
+            Ok(Some(crate::native::blend::hexahedron(&c)?))
         }
         _ => Ok(None),
     }
@@ -862,10 +862,10 @@ fn cylinder_band(b: &Body, fi: usize, r0: f64, r1: f64) -> Result<Option<Body>> 
         },
     };
     let prof = Profile::new(plane, vec![region]);
-    let regions = super::profile::regions(&prof)?;
-    let mf = super::profile::merge_regions(&regions)?;
-    let kind = super::sweep::Prism { plane, dir: fr.z };
-    Ok(Some(super::sweep::sweep_full(&mf, &[], &kind, 0.0, hi - lo, false, true)?.body))
+    let regions = crate::native::profile::regions(&prof)?;
+    let mf = crate::native::profile::merge_regions(&regions)?;
+    let kind = crate::native::sweep::Prism { plane, dir: fr.z };
+    Ok(Some(crate::native::sweep::sweep_full(&mf, &[], &kind, 0.0, hi - lo, false, true)?.body))
 }
 
 /// A cylindrical face's heights along its axis and angles (its p-curves' u), when it spans
@@ -890,8 +890,8 @@ fn cylinder_domain(b: &Body, fi: usize) -> Option<(f64, f64, f64, f64)> {
     if !rect {
         return None;
     }
-    let sub = super::kernel::subset(b, &[fi], false);
-    let (lo, hi) = super::kernel::extent_along(&sub, &fr.o, &fr.z);
+    let sub = crate::native::kernel::subset(b, &[fi], false);
+    let (lo, hi) = crate::native::kernel::extent_along(&sub, &fr.o, &fr.z);
     let (mut u0, mut u1) = (f64::INFINITY, f64::NEG_INFINITY);
     for c in f.loops.iter().flatten() {
         let e = &b.edges[c.edge];

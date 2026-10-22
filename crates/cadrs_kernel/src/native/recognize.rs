@@ -25,13 +25,13 @@ pub fn curve(n: &NurbsCurve) -> Option<Curve> {
         bb.add(p);
     }
     let size = bb.diagonal();
-    if size < 1e-12 {
+    if size < tol::DEGENERATE {
         return None;
     }
     let tol = size * REL;
     // A line: every sample on the chord's line.
     let (p0, p1) = (pts[0], pts[m]);
-    if let Some(d) = (p1 - p0).try_normalize(1e-12)
+    if let Some(d) = (p1 - p0).try_normalize(tol::DEGENERATE)
         && pts.iter().all(|p| ((p - p0) - d * (p - p0).dot(&d)).norm() < tol) && n.cps.iter().all(|h| ((dehom(h) - p0) - d * (dehom(h) - p0).dot(&d)).norm() < tol * 10.0) {
             return Some(Curve::Line { o: p0, d });
         }
@@ -68,7 +68,7 @@ fn extrusion(n: &NurbsSurface) -> Option<Surface> {
         // a[i] = [first, second] per pole: one translation for all, weights equal.
         let mut d: Option<V3> = None;
         for r in a {
-            if r.len() != 2 || (r[0].w - r[1].w).abs() > 1e-12 * r[0].w.abs().max(1.0) {
+            if r.len() != 2 || (r[0].w - r[1].w).abs() > tol::REL_FINE * r[0].w.abs().max(1.0) {
                 return None;
             }
             let t = dehom(&r[1]) - dehom(&r[0]);
@@ -78,7 +78,7 @@ fn extrusion(n: &NurbsSurface) -> Option<Surface> {
                 _ => return None,
             }
         }
-        d.filter(|d| d.norm() > 1e-12)
+        d.filter(|d| d.norm() > tol::DEGENERATE)
     };
     if n.dv == 1 && n.cps[0].len() == 2 {
         let d = rows(&n.cps)?;
@@ -170,7 +170,7 @@ fn torus(n: &NurbsSurface) -> Option<Surface> {
         }
         // The seam (u = 0) towards the patch's first corner.
         let corner = at(0, 0);
-        let x = ((corner - o) - a * (corner - o).dot(&a)).try_normalize(1e-12).unwrap_or_else(|| radial / rmaj);
+        let x = ((corner - o) - a * (corner - o).dot(&a)).try_normalize(tol::DEGENERATE).unwrap_or_else(|| radial / rmaj);
         return Some(Surface::Torus { f: Frame { o, x, y: a.cross(&x), z: a }, rmaj, rmin });
     }
     None
@@ -190,7 +190,7 @@ fn candidate(n: &NurbsSurface, poles: bool) -> Option<Surface> {
             // rounding noise.)
             let c = d[1].cross(&d[2]);
             if (!poles || c.norm() > tol::REL * d[1].norm_squared().max(d[2].norm_squared()))
-                && let Some(nn) = c.try_normalize(1e-12)
+                && let Some(nn) = c.try_normalize(tol::DEGENERATE)
             {
                 nrms.push((P3::from(d[0]), nn));
             }
@@ -201,7 +201,7 @@ fn candidate(n: &NurbsSurface, poles: bool) -> Option<Surface> {
         bb.add(p);
     }
     let size = bb.diagonal();
-    if size < 1e-12 || nrms.len() < 4 {
+    if size < tol::DEGENERATE || nrms.len() < 4 {
         return None;
     }
     let tol = size * REL;
@@ -209,7 +209,7 @@ fn candidate(n: &NurbsSurface, poles: bool) -> Option<Surface> {
     // A plane: all samples on the plane through one with its normal.
     let (o, n0) = nrms[nrms.len() / 2];
     if pts.iter().all(|p| (p - o).dot(&n0).abs() < tol) {
-        let x = (sample_u[1] - n0 * sample_u[1].dot(&n0)).try_normalize(1e-12).unwrap_or_else(|| any_perpendicular(&n0));
+        let x = (sample_u[1] - n0 * sample_u[1].dot(&n0)).try_normalize(tol::DEGENERATE).unwrap_or_else(|| any_perpendicular(&n0));
         return Some(Surface::Plane { f: Frame { o, x, y: n0.cross(&x), z: n0 } });
     }
     // A sphere: every normal line through one centre at one distance.
@@ -218,7 +218,7 @@ fn candidate(n: &NurbsSurface, poles: bool) -> Option<Surface> {
         let w = p - q;
         let (a, b, c, d, e) = (nn.dot(&nn), nn.dot(&mm), mm.dot(&mm), nn.dot(&w), mm.dot(&w));
         let den = a * c - b * b;
-        if den.abs() < 1e-12 {
+        if den.abs() < tol::DEGENERATE {
             return None;
         }
         let s = (b * e - c * d) / den;
@@ -228,7 +228,7 @@ fn candidate(n: &NurbsSurface, poles: bool) -> Option<Surface> {
     if let Some(c) = centre_of(nrms[0], nrms[k / 2]) {
         let r = (pts[0] - c).norm();
         if r > tol && pts.iter().all(|p| ((p - c).norm() - r).abs() < tol) {
-            let x = (pts[0] - c).try_normalize(1e-12).map(|d| (d - V3::z() * d.z).try_normalize(tol::ANGULAR).unwrap_or(V3::x())).unwrap_or(V3::x());
+            let x = (pts[0] - c).try_normalize(tol::DEGENERATE).map(|d| (d - V3::z() * d.z).try_normalize(tol::ANGULAR).unwrap_or(V3::x())).unwrap_or(V3::x());
             return Some(Surface::Sphere { f: Frame { o: c, x, y: V3::z().cross(&x), z: V3::z() }, r });
         }
     }
@@ -308,7 +308,7 @@ fn candidate(n: &NurbsSurface, poles: bool) -> Option<Surface> {
     // The seam (u = 0) at the patch's corner, so a face on it keeps its parameters in one
     // piece.
     let corner = pts[0];
-    let radial = ((corner - c0) - a * (corner - c0).dot(&a)).try_normalize(1e-12).unwrap_or_else(|| any_perpendicular(&a));
+    let radial = ((corner - c0) - a * (corner - c0).dot(&a)).try_normalize(tol::DEGENERATE).unwrap_or_else(|| any_perpendicular(&a));
     let seam_frame = Frame { o: c0, x: radial, y: a.cross(&radial), z: a };
     if s.abs() < tol::ROUNDOFF {
         let r = s0.1;

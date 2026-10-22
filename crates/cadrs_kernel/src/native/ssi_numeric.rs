@@ -155,7 +155,8 @@ impl<'a> Dom<'a> {
             wrap_v: pv && !full(bx.dv()),
             free_u: pu && full(bx.du()),
             free_v: pv && full(bx.dv()),
-            exact: matches!(s, Surface::Plane { .. } | Surface::Cylinder { .. } | Surface::Sphere { .. } | Surface::Torus { .. }),
+            // (Not a spindle torus's: its distance is to the nearer of two meridians.)
+            exact: matches!(s, Surface::Plane { .. } | Surface::Cylinder { .. } | Surface::Sphere { .. }) || matches!(s, Surface::Torus { rmaj, rmin, .. } if rmin <= rmaj),
         }
     }
 
@@ -175,8 +176,8 @@ impl<'a> Dom<'a> {
     /// Whether (u, v) lies in the box grown by the fraction `f` of its sides (angles modulo a
     /// turn), with the offsets that bring it into the box's window.
     fn locate(&self, (u, v): (f64, f64), f: f64) -> Option<(f64, f64)> {
-        let eu = self.bx.du() * f + 1e-12 * (1.0 + self.bx.u.0.abs().max(self.bx.u.1.abs()));
-        let ev = self.bx.dv() * f + 1e-12 * (1.0 + self.bx.v.0.abs().max(self.bx.v.1.abs()));
+        let eu = self.bx.du() * f + tol::REL_FINE * (1.0 + self.bx.u.0.abs().max(self.bx.u.1.abs()));
+        let ev = self.bx.dv() * f + tol::REL_FINE * (1.0 + self.bx.v.0.abs().max(self.bx.v.1.abs()));
         Some((Self::offset1(u, self.bx.u, eu, self.wrap_u, self.free_u)?, Self::offset1(v, self.bx.v, ev, self.wrap_v, self.free_v)?))
     }
 }
@@ -226,7 +227,7 @@ fn cell(s: &Surface, uv: UvBox) -> Cell {
             mvv = mvv.max(d[5].norm());
             let c = d[1].cross(&d[2]);
             let l = c.norm();
-            if l > 1e-12 * (d[1].norm() * d[2].norm()).max(tol::TINY) {
+            if l > tol::REL_FINE * (d[1].norm() * d[2].norm()).max(tol::TINY) {
                 *n = c / l;
             } else {
                 // A pole or an apex: the normal there is a limit, and the cone is wide.
@@ -238,7 +239,7 @@ fn cell(s: &Surface, uv: UvBox) -> Cell {
     let (hu, hv) = (uv.du() / (N - 1) as f64, uv.dv() / (N - 1) as f64);
     let sag = 2.0 * (hu * hu * muu + hv * hv * mvv) / 8.0;
     let scale = (bb.max - bb.min).abs().max() + bb.min.coords.abs().max().max(bb.max.coords.abs().max());
-    let bb = bb.grow(sag + 1e-12 * (1.0 + scale));
+    let bb = bb.grow(sag + tol::REL_FINE * (1.0 + scale));
     let sum: V3 = ns.iter().flatten().sum();
     let (axis, half) = match sum.try_normalize(tol::ANGULAR) {
         Some(axis) if !degenerate => {
@@ -334,7 +335,7 @@ fn separated(a: &Cell, b: &Cell) -> bool {
 /// The parameter cuts of one direction: the box's ends, B-spline knots inside it, and every
 /// quarter turn of an angle (so cells start out near flat), thinned to at most 24 pieces.
 fn cuts(lo: f64, hi: f64, knots: &[f64], angular: bool) -> Vec<f64> {
-    let mut xs: Vec<f64> = knots.iter().copied().filter(|&k| k > lo + 1e-12 * (hi - lo) && k < hi - 1e-12 * (hi - lo)).collect();
+    let mut xs: Vec<f64> = knots.iter().copied().filter(|&k| k > lo + tol::REL_FINE * (hi - lo) && k < hi - tol::REL_FINE * (hi - lo)).collect();
     if angular {
         let q = PI / 2.0;
         let mut k = (lo / q).floor() + 1.0;
@@ -346,7 +347,7 @@ fn cuts(lo: f64, hi: f64, knots: &[f64], angular: bool) -> Vec<f64> {
         }
     }
     xs.sort_by(f64::total_cmp);
-    xs.dedup_by(|a, b| (*a - *b).abs() < 1e-12 * (1.0 + a.abs()));
+    xs.dedup_by(|a, b| (*a - *b).abs() < tol::REL_FINE * (1.0 + a.abs()));
     if xs.len() > 23 {
         let step = xs.len().div_ceil(23);
         xs = xs.into_iter().step_by(step).collect();
@@ -803,7 +804,7 @@ fn boundary_end(ctx: &Ctx, s: &Pt, out: &Pt) -> Option<Pt> {
     let mut best: Option<(f64, usize, f64)> = None;
     for (k, dom) in [(0usize, &ctx.a), (2usize, &ctx.bt)] {
         let (from, to) = if k == 0 { (s.a, out.a) } else { (s.b, out.b) };
-        let Some(off) = dom.locate(from, 1e-6) else { continue };
+        let Some(off) = dom.locate(from, tol::POINT) else { continue };
         for (axis, (x0, x1), lo, hi, free) in [(0usize, (from.0, to.0), dom.bx.u.0, dom.bx.u.1, dom.free_u), (1usize, (from.1, to.1), dom.bx.v.0, dom.bx.v.1, dom.free_v)] {
             if free {
                 continue;
@@ -1146,7 +1147,7 @@ pub fn intersect_stats(a: &Surface, ua: UvBox, b: &Surface, ub: UvBox, region: &
     }
     let size = r.diagonal().max(tol::ROUNDOFF);
     let tol = REL_TOL * size.max(1.0);
-    let r = r.grow(1e-6 * size + tol);
+    let r = r.grow(tol::REL_POINT * size + tol);
     let ((pu0, pu1), (pv0, pv1)) = b.param_box();
     let bt = Dom::new(b, UvBox::new((pu0.max(-1e4), pu1.min(1e4)), (pv0.max(-1e4), pv1.min(1e4))));
     let ctx = Ctx { a: Dom::new(a, ua), b: Dom::new(b, ub), bt, region: r, size, tiny: TINY * size, tol };
@@ -1166,7 +1167,7 @@ pub fn intersect_stats(a: &Surface, ua: UvBox, b: &Surface, ub: UvBox, region: &
     // Inside a cell of a lying on b the surfaces are one: a seed, a touching point or a traced
     // point there is rounding (the region's boundary is found apart).
     let in_coin = |uv: (f64, f64)| {
-        let Some((ou, ov)) = ctx.a.locate(uv, 1e-9) else { return false };
+        let Some((ou, ov)) = ctx.a.locate(uv, tol::ROUNDOFF) else { return false };
         let (u, v) = (uv.0 - ou, uv.1 - ov);
         coin.iter().any(|c| u > c.u.0 && u < c.u.1 && v > c.v.0 && v < c.v.1)
     };
@@ -1237,7 +1238,7 @@ pub fn intersect_stats(a: &Surface, ua: UvBox, b: &Surface, ub: UvBox, region: &
         if singular.iter().any(|q| (q.p - t.p).norm() < 4.0 * ctx.tiny) {
             continue;
         }
-        if let Some(q) = singular_point(&ctx, t).filter(|q| !singular.iter().any(|x| (x.p - q.p).norm() < 1e-6 * ctx.size)) {
+        if let Some(q) = singular_point(&ctx, t).filter(|q| !singular.iter().any(|x| (x.p - q.p).norm() < tol::REL_POINT * ctx.size)) {
             singular.push(q);
         }
     }
@@ -1255,7 +1256,7 @@ pub fn intersect_stats(a: &Surface, ua: UvBox, b: &Surface, ub: UvBox, region: &
     // Curves cut at the singular points they pass (a figure eight marched through its waist
     // becomes its two loops), so that the points are the pieces' ends.
     if !singular.is_empty() {
-        let at_singular = |p: &P3| singular.iter().any(|q| (q.p - p).norm() <= 1e-12 * (1.0 + ctx.size));
+        let at_singular = |p: &P3| singular.iter().any(|q| (q.p - p).norm() <= tol::REL_FINE * (1.0 + ctx.size));
         traced = traced
             .into_iter()
             .flat_map(|(c, _)| split_at(c, &at_singular))
@@ -1312,7 +1313,7 @@ fn singular_point(ctx: &Ctx, mut p: Pt) -> Option<Pt> {
         let rv = nalgebra::Vector6::from_column_slice(&r);
         let jt = j.transpose();
         let m = jt * j;
-        let lambda = 1e-12 * m.trace().max(tol::TINY);
+        let lambda = tol::REL_FINE * m.trace().max(tol::TINY);
         let dx = (m + nalgebra::Matrix4::identity() * lambda).lu().solve(&(-(jt * rv)))?;
         if !dx.iter().all(|v| v.is_finite()) {
             return None;
@@ -1328,12 +1329,12 @@ fn singular_point(ctx: &Ctx, mut p: Pt) -> Option<Pt> {
     // not a hair across it (where a boolean would see it a turn away).
     for (k, periodic) in [sa.u_periodic(), sa.v_periodic(), sb.u_periodic(), sb.v_periodic()].into_iter().enumerate() {
         let seam = (x[k] / TAU).round() * TAU;
-        if periodic && (x[k] - seam).abs() < 1e-12 {
+        if periodic && (x[k] - seam).abs() < tol::ROUNDOFF_FINE {
             x[k] = seam;
         }
     }
     let pa = sa.eval(x[0], x[1]);
-    let tangent = sa.normal(x[0], x[1]).cross(&sb.normal(x[2], x[3])).norm() < 1e-6;
+    let tangent = sa.normal(x[0], x[1]).cross(&sb.normal(x[2], x[3])).norm() < tol::ANGULAR_POINT;
     if (pa - sb.eval(x[2], x[3])).norm() > ctx.tol || !tangent || (pa - p.p).norm() > 8.0 * ctx.tiny {
         return None;
     }

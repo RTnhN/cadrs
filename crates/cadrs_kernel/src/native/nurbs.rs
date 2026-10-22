@@ -115,6 +115,9 @@ pub fn basis_ders(span: usize, u: f64, p: usize, d: usize, knots: &[f64]) -> Vec
 const MAXP: usize = 7;
 /// The highest derivative they take without allocating.
 const MAXD: usize = 2;
+/// The largest degree [`Basis`] takes in fixed arrays of its own width ([`Wide`]): the high
+/// degrees of lofts and blends' fits, evaluated millions of times by projections.
+const WIDEP: usize = 15;
 
 /// Basis values and derivatives in a fixed array: `[k][j]`, the k-th derivative of the j-th
 /// non-zero function.
@@ -126,18 +129,35 @@ type Fixed = [[f64; MAXP + 1]; MAXD + 1];
 /// so its tables are just as large as they need to be.
 fn basis_ders_fixed(span: usize, u: f64, p: usize, d: usize, knots: &[f64]) -> Fixed {
     match p {
-        0 => basis_ders_n::<1>(span, u, d, knots),
-        1 => basis_ders_n::<2>(span, u, d, knots),
-        2 => basis_ders_n::<3>(span, u, d, knots),
-        3 => basis_ders_n::<4>(span, u, d, knots),
-        4 => basis_ders_n::<5>(span, u, d, knots),
-        5 => basis_ders_n::<6>(span, u, d, knots),
-        6 => basis_ders_n::<7>(span, u, d, knots),
-        _ => basis_ders_n::<8>(span, u, d, knots),
+        0 => basis_ders_n::<1, { MAXP + 1 }>(span, u, d, knots),
+        1 => basis_ders_n::<2, { MAXP + 1 }>(span, u, d, knots),
+        2 => basis_ders_n::<3, { MAXP + 1 }>(span, u, d, knots),
+        3 => basis_ders_n::<4, { MAXP + 1 }>(span, u, d, knots),
+        4 => basis_ders_n::<5, { MAXP + 1 }>(span, u, d, knots),
+        5 => basis_ders_n::<6, { MAXP + 1 }>(span, u, d, knots),
+        6 => basis_ders_n::<7, { MAXP + 1 }>(span, u, d, knots),
+        _ => basis_ders_n::<8, { MAXP + 1 }>(span, u, d, knots),
     }
 }
 
-fn basis_ders_n<const N: usize>(span: usize, u: f64, d: usize, knots: &[f64]) -> Fixed {
+/// [`basis_ders_fixed`] for `MAXP < p <= WIDEP`.
+type Wide = [[f64; WIDEP + 1]; MAXD + 1];
+
+fn basis_ders_wide(span: usize, u: f64, p: usize, d: usize, knots: &[f64]) -> Wide {
+    match p {
+        8 => basis_ders_n::<9, { WIDEP + 1 }>(span, u, d, knots),
+        9 => basis_ders_n::<10, { WIDEP + 1 }>(span, u, d, knots),
+        10 => basis_ders_n::<11, { WIDEP + 1 }>(span, u, d, knots),
+        11 => basis_ders_n::<12, { WIDEP + 1 }>(span, u, d, knots),
+        12 => basis_ders_n::<13, { WIDEP + 1 }>(span, u, d, knots),
+        13 => basis_ders_n::<14, { WIDEP + 1 }>(span, u, d, knots),
+        14 => basis_ders_n::<15, { WIDEP + 1 }>(span, u, d, knots),
+        _ => basis_ders_n::<16, { WIDEP + 1 }>(span, u, d, knots),
+    }
+}
+
+/// A2.3 for degree `N - 1`, into rows `W` wide (`W >= N`).
+fn basis_ders_n<const N: usize, const W: usize>(span: usize, u: f64, d: usize, knots: &[f64]) -> [[f64; W]; MAXD + 1] {
     let p = N - 1;
     let mut ndu = [[0.0; N]; N];
     let mut left = [0.0; N];
@@ -156,7 +176,7 @@ fn basis_ders_n<const N: usize>(span: usize, u: f64, d: usize, knots: &[f64]) ->
         ndu[j][j] = saved;
     }
     let d = d.min(p);
-    let mut ders = [[0.0; MAXP + 1]; MAXD + 1];
+    let mut ders = [[0.0; W]; MAXD + 1];
     for j in 0..=p {
         ders[0][j] = ndu[j][p];
     }
@@ -276,6 +296,7 @@ impl BasisAt for B1 {
 /// Basis function values and derivatives, in fixed arrays when the degree allows.
 enum Basis {
     Fixed(Fixed),
+    Wide(Wide),
     Heap(Vec<Vec<f64>>),
 }
 
@@ -288,7 +309,13 @@ impl BasisAt for Basis {
 
 impl Basis {
     fn new(span: usize, u: f64, p: usize, d: usize, knots: &[f64]) -> Self {
-        if p <= MAXP && d <= MAXD { Basis::Fixed(basis_ders_fixed(span, u, p, d, knots)) } else { Basis::Heap(basis_ders(span, u, p, d, knots)) }
+        if p <= MAXP && d <= MAXD {
+            Basis::Fixed(basis_ders_fixed(span, u, p, d, knots))
+        } else if p <= WIDEP && d <= MAXD {
+            Basis::Wide(basis_ders_wide(span, u, p, d, knots))
+        } else {
+            Basis::Heap(basis_ders(span, u, p, d, knots))
+        }
     }
 
     /// The k-th derivative of the j-th non-zero function.
@@ -296,6 +323,7 @@ impl Basis {
     fn at(&self, k: usize, j: usize) -> f64 {
         match self {
             Basis::Fixed(b) => b[k][j],
+            Basis::Wide(b) => b[k][j],
             Basis::Heap(b) => b[k][j],
         }
     }
@@ -557,7 +585,7 @@ impl NurbsCurve {
         let mut c = Self { degree: p, knots, cps };
         // Clamp: knots of multiplicity p at both ends of the period, then cut.
         let (lo, hi) = (params[0], params[m]);
-        let eps = 1e-12 * (1.0 + period.abs());
+        let eps = tol::REL_FINE * (1.0 + period.abs());
         let mult = |c: &Self, u: f64| c.knots.iter().filter(|k| (*k - u).abs() <= eps).count();
         while mult(&c, lo) < p {
             c = c.insert_knot(lo);
@@ -771,26 +799,35 @@ impl NurbsCurve {
         let mut t = vec![0.0];
         let mut s = 0.0;
         for w in pts.windows(2) {
-            s += (w[1] - w[0]).norm().sqrt().max(1e-12);
+            s += (w[1] - w[0]).norm().sqrt().max(tol::DEGENERATE);
             t.push(s);
         }
         t.iter().map(|x| x / s).collect()
     }
 
     /// Splits at `u` into two curves (knot insertion to full multiplicity).
-    pub fn split(&self, u: f64) -> (Self, Self) {
+    ///
+    /// # Errors
+    /// `InvalidParameter` when `u` isn't strictly inside the curve's range (or isn't a number,
+    /// as a corrupt file's curves can give).
+    pub fn split(&self, u: f64) -> crate::Result<(Self, Self)> {
+        let (a, b) = self.range();
+        let outside = || crate::KernelError::InvalidParameter(format!("a B-spline split at {u}, outside its range {a}..{b}"));
+        if !(u > a && u < b) {
+            return Err(outside());
+        }
         let p = self.degree;
         let mut c = self.clone();
         let mult = c.knots.iter().filter(|k| (**k - u).abs() < 1e-14).count();
         for _ in mult..p + 1 {
             c = c.insert_knot(u);
         }
-        let idx = c.knots.iter().position(|k| (*k - u).abs() < 1e-14).unwrap();
+        let idx = c.knots.iter().position(|k| (*k - u).abs() < 1e-14).ok_or_else(outside)?;
         // knots[idx..idx+p+1] == u: the left curve's poles end at idx − 1, the right's start at
         // idx (both the point at u).
         let left = Self { degree: p, knots: c.knots[..idx + p + 1].to_vec(), cps: c.cps[..idx].to_vec() };
         let right = Self { degree: p, knots: c.knots[idx..].to_vec(), cps: c.cps[idx..].to_vec() };
-        (left, right)
+        Ok((left, right))
     }
 
     /// This curve followed by `next` (which starts where this one ends, same degree): a C0
@@ -809,18 +846,24 @@ impl NurbsCurve {
     }
 
     /// A closed curve restarted at `u`: from `u` to its end, then from its start back to `u`.
-    pub fn restarted(&self, u: f64) -> Self {
+    ///
+    /// # Errors
+    /// `InvalidParameter` when `u` isn't a number.
+    pub fn restarted(&self, u: f64) -> crate::Result<Self> {
         let (a, b) = self.range();
+        if !u.is_finite() {
+            return Err(crate::KernelError::InvalidParameter(format!("a closed B-spline restarted at {u}")));
+        }
         // (A start a rounding error from an end is that end: splitting there leaves an empty
         // piece.)
-        if u <= a + 1e-12 * (b - a) || u >= b - 1e-12 * (b - a) {
-            return self.clone();
+        if u <= a + tol::REL_FINE * (b - a) || u >= b - tol::REL_FINE * (b - a) {
+            return Ok(self.clone());
         }
-        let (l, r) = self.split(u);
+        let (l, r) = self.split(u)?;
         if l.cps.is_empty() || r.cps.is_empty() {
-            return self.clone();
+            return Ok(self.clone());
         }
-        r.joined(&l)
+        Ok(r.joined(&l))
     }
 
     /// Inserts the knot `u` once (A5.1).
@@ -850,7 +893,7 @@ impl NurbsCurve {
     pub fn elevated(&self) -> Self {
         let p = self.degree;
         let (a, b) = self.range();
-        let eps = 1e-12 * (1.0 + a.abs().max(b.abs()));
+        let eps = tol::REL_FINE * (1.0 + a.abs().max(b.abs()));
         let mut c = self.clone();
         let inner: Vec<f64> = {
             let mut v: Vec<f64> = Vec::new();
@@ -932,11 +975,15 @@ impl NurbsCurve {
         let (lo, hi) = self.range();
         let (a, b) = (a.max(lo), b.min(hi));
         let mut c = self.clone();
-        if a > lo && a < hi {
-            c = c.split(a).1;
+        if a > lo && a < hi
+            && let Ok((_, r)) = c.split(a)
+        {
+            c = r;
         }
-        if b < hi && b > a {
-            c = c.split(b).0;
+        if b < hi && b > a
+            && let Ok((l, _)) = c.split(b)
+        {
+            c = l;
         }
         c
     }
@@ -1019,9 +1066,13 @@ impl NurbsSurface {
         // Homogeneous derivatives A[k][l].
         let mut a = [[H::zeros(); 3]; 3];
         let mut fixed = [H::zeros(); MAXP + 1];
+        let mut wide;
         let mut heap = Vec::new();
         let temp: &mut [H] = if self.dv <= MAXP {
             &mut fixed[..=self.dv]
+        } else if self.dv <= WIDEP {
+            wide = [H::zeros(); WIDEP + 1];
+            &mut wide[..=self.dv]
         } else {
             heap.resize(self.dv + 1, H::zeros());
             &mut heap
@@ -1314,8 +1365,9 @@ mod tests {
     use super::*;
 
     /// The allocation-free evaluators (`Basis`, `ders_upto`, `hders_fixed`) give the values of
-    /// A2.3/A4.4 computed with [`basis_ders`]'s vectors, to the bit, for a rational surface and
-    /// curve of low degree and one above `MAXP` (the vector path).
+    /// A2.3/A4.4 computed with [`basis_ders`]'s vectors, to the bit, for rational surfaces and a
+    /// curve of low degree, of degrees above `MAXP` (the wide arrays) and above `WIDEP` (the
+    /// vector path).
     #[test]
     fn fixed_evaluators_match_the_allocating_ones() {
         fn reference(s: &NurbsSurface, u: f64, v: f64) -> [V3; 6] {
@@ -1363,7 +1415,8 @@ mod tests {
             k.extend(vec![1.0; p + 1]);
             k
         };
-        for (du, dv) in [(2, 3), (3, 1), (13, 2)] {
+        // (Degrees up to `MAXP`, up to `WIDEP`, and above: the three evaluators' paths.)
+        for (du, dv) in [(2, 3), (3, 1), (13, 2), (2, 12), (17, 9)] {
             let (nu, nv) = (du + 4, dv + 3);
             let cps: Vec<Vec<H>> = (0..nu)
                 .map(|i| (0..nv).map(|j| {
@@ -1411,7 +1464,7 @@ mod tests {
     fn split_halves_are_valid_curves() {
         let c = NurbsCurve::interpolate(&[P3::new(0.0, 0.0, 0.0), P3::new(1.0, 2.0, 0.0), P3::new(3.0, 1.0, 1.0), P3::new(4.0, 3.0, 0.0), P3::new(6.0, 0.0, 2.0)], &[0.0, 0.2, 0.5, 0.7, 1.0], 3, None, None);
         for u in [0.3, 0.5] {
-            let (l, r) = c.split(u);
+            let (l, r) = c.split(u).unwrap();
             for h in [&l, &r] {
                 assert_eq!(h.knots.len(), h.cps.len() + h.degree + 1);
             }
@@ -1513,7 +1566,7 @@ mod tests {
         let r = std::f64::consts::FRAC_1_SQRT_2;
         let pts = [(1.0, 0.0, 1.0), (1.0, 1.0, r), (0.0, 1.0, 1.0), (-1.0, 1.0, r), (-1.0, 0.0, 1.0), (-1.0, -1.0, r), (0.0, -1.0, 1.0), (1.0, -1.0, r), (1.0, 0.0, 1.0)];
         let c = NurbsCurve { degree: 2, knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 4.0], cps: pts.iter().map(|&(x, y, w)| H::new(x * w, y * w, 0.0, w)).collect() };
-        let d = c.restarted(1.3);
+        let d = c.restarted(1.3).unwrap();
         assert_eq!(d.knots.len(), d.cps.len() + d.degree + 1);
         assert_eq!(d.range(), (1.3, 5.3));
         assert!((d.point(1.3) - c.point(1.3)).norm() < 1e-12);
@@ -1529,7 +1582,7 @@ mod tests {
     #[test]
     fn split_keeps_shape() {
         let c = NurbsCurve::bezier(&[P3::new(0.0, 0.0, 0.0), P3::new(0.0, 10.0, 0.0), P3::new(20.0, 10.0, 0.0), P3::new(20.0, 0.0, 0.0)], &[1.0; 4]);
-        let (a, b) = c.split(0.3);
+        let (a, b) = c.split(0.3).unwrap();
         assert!((a.point(0.15) - c.point(0.15)).norm() < 1e-12);
         assert!((b.point(0.8) - c.point(0.8)).norm() < 1e-12);
     }

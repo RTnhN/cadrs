@@ -46,12 +46,12 @@ fn slab(face: &Body, d: f64) -> Result<Body> {
             let kind = super::sweep::Prism { plane, dir };
             Ok(super::sweep::sweep_full(&[mf], &[], &kind, 0.0, d.abs(), false, true)?.body)
         }
-        _ => super::slab::face_slab(face, 0, d),
+        _ => super::offset::slab::face_slab(face, 0, d),
     }
 }
 
 pub fn thicken(k: &mut NativeKernel, spec: &ThickenSpec) -> Result<OpResult> {
-    if !(spec.along >= 0.0 && spec.against >= 0.0 && spec.along + spec.against > 1e-6) {
+    if !(spec.along >= 0.0 && spec.against >= 0.0 && spec.along + spec.against > tol::POINT) {
         return Err(invalid("The thickness must be greater than zero"));
     }
     let mut sheets: Vec<Body> = Vec::new();
@@ -129,7 +129,7 @@ fn thicken_sheet(k: &mut NativeKernel, sheets: &[Body], spec: &ThickenSpec) -> O
         all.append(s);
         normals.push(face_normal(s, 0)?);
     }
-    let sewn = sew_faces(all, 1e-6).ok()?;
+    let sewn = sew_faces(all, tol::POINT).ok()?;
     if sewn.faces.len() != sheets.len() {
         return None;
     }
@@ -151,9 +151,14 @@ fn thicken_sheet(k: &mut NativeKernel, sheets: &[Body], spec: &ThickenSpec) -> O
     if comp.contains(&usize::MAX) {
         return None;
     }
-    // Orienting may have flipped faces: "along" follows the majority of the picked normals.
+    // Orienting may have flipped faces. Picked faces whose normals don't agree on a side of the
+    // sheet (a box's walls facing out and its lid in) are each thickened along their own normal,
+    // as OCCT did, by the slabs below.
     let agree: usize = (0..sewn.faces.len()).filter(|&f| face_normal(&sewn, f).is_some_and(|(_, n)| n.dot(&normals[f].1) > 0.0)).count();
-    let along_is_sewn = 2 * agree >= sewn.faces.len();
+    if agree != 0 && agree != sewn.faces.len() {
+        return None;
+    }
+    let along_is_sewn = agree == sewn.faces.len();
     let n = sewn.faces.len();
     let id = k.insert(sewn);
     let tool = super::ops::face_tool(k, id, &(0..n as u64).map(FaceId).collect::<Vec<_>>(), spec.source).ok()?;
@@ -166,7 +171,7 @@ fn thicken_sheet(k: &mut NativeKernel, sheets: &[Body], spec: &ThickenSpec) -> O
     let solid = k.get(tid).ok()?.clone();
     let sewn_b = k.get(id).ok()?.clone();
     let (p, nsheet) = face_normal(&sewn_b, 0)?;
-    let fi = (0..solid.faces.len()).find(|&f| !caps.contains(&FaceId(f as u64)) && face_normal(&solid, f).is_some_and(|(q, _)| (q - p).norm() < 1e-6)).unwrap_or(0);
+    let fi = (0..solid.faces.len()).find(|&f| !caps.contains(&FaceId(f as u64)) && face_normal(&solid, f).is_some_and(|(q, _)| (q - p).norm() < tol::POINT)).unwrap_or(0);
     let (_, nsolid) = face_normal(&solid, fi)?;
     let sheet_out = nsheet.dot(&nsolid) > 0.0;
     let along_out = sheet_out == along_is_sewn;
@@ -175,7 +180,7 @@ fn thicken_sheet(k: &mut NativeKernel, sheets: &[Body], spec: &ThickenSpec) -> O
         if d < tol::ROUNDOFF {
             continue;
         }
-        let r = super::offset_round::shell(k, tid, &ShellSpec { remove: caps.clone(), thickness: d, outward: out, hollow: false, sharp: false }).ok()?;
+        let r = super::offset::round::shell(k, tid, &ShellSpec { remove: caps.clone(), thickness: d, outward: out, hollow: false, sharp: false }).ok()?;
         parts.push(r.bodies[0]);
     }
     let body = match parts.as_slice() {
@@ -198,12 +203,12 @@ fn best_plane(pts: &[P3]) -> Option<(P3, V3)> {
     for i in 0..pts.len() {
         n += (pts[i] - c).cross(&(pts[(i + 1) % pts.len()] - c));
     }
-    if n.norm() < 1e-12 {
+    if n.norm() < tol::DEGENERATE {
         return None;
     }
     let n = n.normalize();
     let size = pts.iter().map(|p| (p - c).norm()).fold(0.0, f64::max);
-    pts.iter().all(|p| (p - c).dot(&n).abs() < 1e-6 * (1.0 + size)).then_some((c, n))
+    pts.iter().all(|p| (p - c).dot(&n).abs() < tol::REL_POINT * (1.0 + size)).then_some((c, n))
 }
 
 pub fn fill(k: &mut NativeKernel, spec: &FillSpec) -> Result<OpResult> {
@@ -340,7 +345,7 @@ pub fn sew(k: &mut NativeKernel, bodies: &[BodyId], tol: f64) -> Result<OpResult
     if b.solids.is_empty() {
         return Err(invalid("The surfaces don't close"));
     }
-    let mut v = super::mass::body_mass(&b).volume;
+    let mut v = super::mass::body_volume(&b);
     if v < 0.0 {
         for f in &mut b.faces {
             Body::reverse_face(f);
