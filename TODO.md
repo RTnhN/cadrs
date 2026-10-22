@@ -25,8 +25,6 @@ pvc and rianatest blends, references (mate connectors, pibox thicken, t20, trimm
 faces), mirror_test's mesh import.
 
 Still new against main:
-- [ ] squish_bottle_adapter, Extrude 6: the union leaves an open shell. The tool sits 7e-5 mm off
-  the thread faces; the boolean must honour the edge tolerance the profile now carries.
 - [ ] Dr Browns cap, Fillet 1: two r 4 rounds on either side of the same 1.2 mm wall cut into each
   other. The fillet builds them one after the other, and the second tool crosses the first's
   face; main builds all four edges in one operation. The first round's boolean issues (touching
