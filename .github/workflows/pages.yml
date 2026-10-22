@@ -65,18 +65,23 @@ jobs:
         id: proa
         run: echo "rev=$(git ls-remote "$PROA_REPO" "refs/heads/$PROA_BRANCH" | cut -f1)" >> "$GITHUB_OUTPUT"
 
+      # The CLI lives in a directory of its own: rust-cache manages ~/.cargo/bin, and a binary
+      # installed there was never saved by this cache.
       - name: Cache the Proa CLI
         id: proa-cache
         uses: actions/cache@v4
         with:
-          path: ~/.cargo/bin/proa
+          path: ~/proa-cli
           key: proa-cli-${{ steps.proa.outputs.rev }}
 
       - name: Install the Proa CLI
         if: steps.proa-cache.outputs.cache-hit != 'true'
         # From site/, so cargo uses the site's stable toolchain.
         working-directory: site
-        run: cargo install --locked --git "$PROA_REPO" --rev "${{ steps.proa.outputs.rev }}" proa-cli --bin proa
+        run: cargo install --locked --root ~/proa-cli --git "$PROA_REPO" --rev "${{ steps.proa.outputs.rev }}" proa-cli --bin proa
+
+      - name: Put the Proa CLI on PATH
+        run: echo "$HOME/proa-cli/bin" >> "$GITHUB_PATH"
 
       # The Cargo registry only: rust-cache prunes target directories, which deletes the
       # ownership markers `proa build` keeps in target/proa-rsjs.
