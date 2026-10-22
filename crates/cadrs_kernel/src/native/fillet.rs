@@ -73,8 +73,25 @@ fn unsupported(why: &'static str) -> KernelError {
     KernelError::Unsupported(why)
 }
 
-fn failed(why: impl Into<String>) -> KernelError {
-    KernelError::OperationFailed(why.into())
+/// The local fillet gave up at `stage` (`"rolling ball"`, `"corner"`, `"end"`, `"surface"` or
+/// `"trimming"`): see [`KernelError::BlendFailed`].
+fn failed(stage: &'static str, why: &str) -> KernelError {
+    KernelError::BlendFailed { stage, why: why.into() }
+}
+
+/// A radius too large for the faces at its edge.
+fn too_large(why: &str) -> KernelError {
+    KernelError::TooLarge { op: "fillet", why: why.into() }
+}
+
+/// Geometry at the edge that doesn't allow the fillet.
+fn bad_geometry(why: &str) -> KernelError {
+    KernelError::InvalidGeometry { op: "fillet", why: why.into() }
+}
+
+/// The ball-solve budget ([`BALL_SOLVES`]) ran out.
+fn out_of_budget(why: &str) -> KernelError {
+    KernelError::BudgetExhausted { stage: "fillet", why: why.into() }
 }
 
 /// The faces on either side of edge `e` (distinct), with their coedge directions.
@@ -214,7 +231,7 @@ impl EdgeFillet {
                 None => break,
             }
         }
-        Err(failed("the fillet's ball doesn't reach the edge's end"))
+        Err(failed("end", "the fillet's ball doesn't reach the edge's end"))
     }
 
     fn spine_len(&self, t0: f64, t1: f64) -> f64 {
@@ -373,7 +390,7 @@ fn edge_fillet(b: &Body, e: usize, law: &[(f64, f64)], flat: bool, ratio: f64, b
     // The contacts lie r / tan(θ/2) from the edge in a wedge of angle θ.
     let theta = (0..=8).filter_map(|i| wedge(b, &ef, ed.t[0] + (ed.t[1] - ed.t[0]) * i as f64 / 8.0).map(|w| w.2)).fold(std::f64::consts::PI, f64::min);
     ef.reach = ef.reach.max(2.0 * rr / (theta / 2.0).tan().max(1e-3) + rr);
-    ef.mid = ef.ball(b, tm, None).ok_or_else(|| failed("the fillet is too large for the faces at the edge"))?;
+    ef.mid = ef.ball(b, tm, None).ok_or_else(|| too_large("the fillet is too large for the faces at the edge"))?;
     // The centre on the side the faces' normals say (inside a convex edge, outside a concave
     // one), and the contacts on the faces' sides of the edge (not a far branch of a curved
     // surface).
@@ -387,11 +404,11 @@ fn edge_fillet(b: &Body, e: usize, law: &[(f64, f64)], flat: bool, ratio: f64, b
         .sum();
     if (ef.mid.c - p).dot(&nsum) * ef.k[0] < 0.0 {
         debug(|| format!("edge {e}: the middle ball {:?} is on the wrong side", ef.mid.c));
-        return Err(failed("the fillet's ball is on the wrong side of the edge"));
+        return Err(bad_geometry("the fillet's ball is on the wrong side of the edge"));
     }
     for q in &ef.mid.q {
         if (q.p - p).norm() > ef.reach {
-            return Err(failed("the fillet is too large for the faces at the edge"));
+            return Err(too_large("the fillet is too large for the faces at the edge"));
         }
     }
     Ok(ef)
@@ -584,7 +601,7 @@ fn square_end(b: &Body, ef: &EdgeFillet, j: usize) -> Result<End> {
     let te = b.edges[ef.e].t[j];
     let vp = b.verts[b.edges[ef.e].v[j]].p;
     let n = ef.spine.at(te).1.normalize();
-    let lost = || failed("the fillet's ball doesn't reach its square end");
+    let lost = || failed("end", "the fillet's ball doesn't reach its square end");
     let ball = ef.ball_from(b, &ef.mid, ef.tm, te).ok_or_else(lost)?;
     let sc = 1.0 + vp.coords.abs().max() + ef.r();
     let h = 1e-3 * ef.r() / ef.spine.curve.d2(te).1.norm().max(1e-12);
@@ -820,7 +837,7 @@ fn tri_corner(b: &Body, efs: &[EdgeFillet], a: (usize, usize), bb: (usize, usize
         // The rail on the common face runs on towards the vertex: its direction there.
         let te = b.edges[s.e].t[j];
         let h = 1e-6 * (1.0 + s.r()) * (te - s.tm).signum() / s.spine.curve.d2(x.t).1.norm().max(1e-12);
-        let y = s.ball_from(b, &x.ball, x.t, x.t + h).ok_or_else(|| failed("the fillet's ball is lost at a three-sided corner"))?;
+        let y = s.ball_from(b, &x.ball, x.t, x.t + h).ok_or_else(|| failed("corner", "the fillet's ball is lost at a three-sided corner"))?;
         mates.push((x.ball.q[ks].uv, (y.q[ks].p - x.ball.q[ks].p).normalize()));
         ends.push(End::Section { ball: x.ball, t: x.t, key: SectionKey::Tri(v, s.e) });
     }
@@ -845,8 +862,8 @@ fn tri_corner(b: &Body, efs: &[EdgeFillet], a: (usize, usize), bb: (usize, usize
             P2::from(u0 * h00 + t0 * h10 + u1 * h01 + t1 * h11)
         })
         .collect();
-    let e1 = ends.pop().ok_or_else(|| failed("a three-sided corner without ends"))?;
-    let e0 = ends.pop().ok_or_else(|| failed("a three-sided corner without ends"))?;
+    let e1 = ends.pop().ok_or_else(|| failed("corner", "a three-sided corner without ends"))?;
+    let e0 = ends.pop().ok_or_else(|| failed("corner", "a three-sided corner without ends"))?;
     debug(|| format!("vertex {v}: three-sided corner of edges {} and {} from {:?}", efs[a.0].e, efs[bb.0].e, sides_at[0]));
     Ok((TriCorner { v, edges: [efs[a.0].e, efs[bb.0].e], shared: fs, side: [sides_at[0], sides_at[1]], bridge }, e0, e1))
 }
@@ -874,7 +891,7 @@ fn mitre(b: &Body, efs: &[EdgeFillet], a: (usize, usize), bb: (usize, usize), v:
     // Where the strips' rails on the common face cross (the ball touching all three faces when
     // the radii there agree): the mitre starts there.
     let (t1e, t2e) = (b.edges[s1.e].t[j1], b.edges[s2.e].t[j2]);
-    let (t1s, ball1s, t2s, ball2s) = rail_cross(b, s1, k1s, b1, t1e, s2, k2s, b2, t2e).ok_or_else(|| failed("the fillets' rails don't cross at their mitre"))?;
+    let (t1s, ball1s, t2s, ball2s) = rail_cross(b, s1, k1s, b1, t1e, s2, k2s, b2, t2e).ok_or_else(|| failed("corner", "the fillets' rails don't cross at their mitre"))?;
     let q1p = ball1s.q[k1s].p;
     // The fraction of the way across a ball's section from its contact on side ks.
     let frac = |bl: &Ball, ks: usize, x: &P3| -> f64 { bl.frac(ks, x) };
@@ -887,7 +904,7 @@ fn mitre(b: &Body, efs: &[EdgeFillet], a: (usize, usize), bb: (usize, usize), v:
     };
     // Strip 1's section at t1 meets strip 2 a fraction u1 across (from the common face), nearest
     // `prev`: (u1, the point, strip 2's fraction there, strip 1's ball).
-    let lost = || failed("the fillets' mitre can't be traced");
+    let lost = || failed("corner", "the fillets' mitre can't be traced");
     let root = |t1: f64, from: &(f64, Ball), prev: f64, st2: &mut (f64, Ball)| -> Result<Option<(f64, P3, f64, Ball)>> {
         let bl = s1.ball_from(b, &from.1, from.0, t1).ok_or_else(lost)?;
         let at = |u: f64| bl.arc_point(if k1s == 0 { u } else { 1.0 - u });
@@ -953,7 +970,7 @@ fn mitre(b: &Body, efs: &[EdgeFillet], a: (usize, usize), bb: (usize, usize), v:
         cur = (t1, bl);
         last = Some((u, p, u2, bl, t1));
     }
-    let (Some(mut t_bad), Some(l)) = (end_t, last) else { return Err(failed("the fillets' mitre doesn't end")) };
+    let (Some(mut t_bad), Some(l)) = (end_t, last) else { return Err(failed("corner", "the fillets' mitre doesn't end")) };
     // Where the mitre leaves the strips: bisection between the last good step and the first bad.
     let mut good_end = l;
     let mut t_good = l.4;
@@ -1229,14 +1246,14 @@ fn patch_corner(b: &Body, efs: &[EdgeFillet], here: &[(usize, usize)], v: usize)
     let mut ends = Vec::new();
     for (h, &(i, _)) in here.iter().enumerate() {
         let ef = &efs[i];
-        let [Some((t0, b0)), Some((t1, b1))] = at[h] else { return Err(failed("a patched fillet corner without its crossings")) };
+        let [Some((t0, b0)), Some((t1, b1))] = at[h] else { return Err(failed("corner", "a patched fillet corner without its crossings")) };
         let n = 16;
         let mut pts = vec![b0.q[0].p];
         let mut cur = (t0, b0);
         for s in 1..n {
             let w = s as f64 / n as f64;
             let t = t0 + (t1 - t0) * w;
-            let x = ef.ball_from(b, &cur.1, cur.0, t).ok_or_else(|| failed("the fillet's ball is lost at a patched corner"))?;
+            let x = ef.ball_from(b, &cur.1, cur.0, t).ok_or_else(|| failed("corner", "the fillet's ball is lost at a patched corner"))?;
             pts.push(x.arc_point(w));
             cur = (t, x);
         }
@@ -1246,12 +1263,12 @@ fn patch_corner(b: &Body, efs: &[EdgeFillet], here: &[(usize, usize)], v: usize)
     // The strips in turn round the vertex: each shares a face with the next.
     let mut order = vec![0usize];
     while order.len() < here.len() {
-        let last = *order.last().ok_or_else(|| failed("a patched fillet corner without strips"))?;
+        let last = *order.last().ok_or_else(|| failed("corner", "a patched fillet corner without strips"))?;
         let fl = efs[here[last].0].faces;
         let next = (0..here.len()).find(|h| !order.contains(h) && efs[here[*h].0].faces.iter().any(|f| fl.contains(f)));
         match next {
             Some(h) => order.push(h),
-            None => return Err(failed("a patched fillet corner's strips don't go round it")),
+            None => return Err(failed("corner", "a patched fillet corner's strips don't go round it")),
         }
     }
     debug(|| format!("vertex {v}: patched corner of {} strips", here.len()));
@@ -1354,7 +1371,7 @@ fn hole_corner(b: &Body, efs: &[EdgeFillet], here: &[(usize, usize)], v: usize) 
     for &(i, _) in here {
         let s = &efs[i];
         let t = param_at(b, s.e, v, d).filter(|_| d < 0.5 * ed_len(b, s.e)).ok_or_else(|| unsupported("a fillet corner set back past its edges' middles"))?;
-        let ball = s.ball_from(b, &s.mid, s.tm, t).ok_or_else(|| failed("the fillet's ball is lost at a set-back corner"))?;
+        let ball = s.ball_from(b, &s.mid, s.tm, t).ok_or_else(|| failed("corner", "the fillet's ball is lost at a set-back corner"))?;
         ends.push(End::Hole { c: usize::MAX, t, ball });
     }
     if fan.iter().any(|&(e, _)| strip_of(e).is_none() && param_at(b, e, v, d).is_none_or(|_| d > 0.9 * ed_len(b, e))) {
@@ -1416,7 +1433,7 @@ fn across_points(b: &Body, ef: &EdgeFillet, a: &Exit, z: &Exit) -> Result<Vec<P3
     for s in 1..n {
         let w = s as f64 / n as f64;
         let t = a.t + (z.t - a.t) * w;
-        let x = ef.ball_from(b, &cur.1, cur.0, t).ok_or_else(|| failed("the fillet's ball is lost at its open end"))?;
+        let x = ef.ball_from(b, &cur.1, cur.0, t).ok_or_else(|| failed("end", "the fillet's ball is lost at its open end"))?;
         pts.push(x.arc_point(w));
         cur = (t, x);
     }
@@ -1698,7 +1715,7 @@ fn pieces_of(b: &Body, e: usize, law: &[(f64, f64)], flat: bool, ratio: f64, bud
             let te = ed.t[j];
             let Some((k, into, ball, t)) = first_roll(b, &cur, &cur.mid, cur.tm, te)? else { break };
             if side.len() > 16 {
-                return Err(failed("the fillet's ball rolls over too many faces"));
+                return Err(failed("rolling ball", "the fillet's ball rolls over too many faces"));
             }
             let mut faces = cur.faces;
             faces[k] = into;
@@ -1928,12 +1945,12 @@ fn plan(b: &Body, edges: &[RadiusLaw], ratios: &[f64], flat: bool, budget: &Budg
                 }
                 let kk = efs[here[0].0].k_at(b.edges[efs[here[0].0].e].t[here[0].1])[0];
                 let fs = [&b.faces[faces[0].0], &b.faces[faces[1].0], &b.faces[faces[2].0]];
-                let (c, q) = geom::ball3(fs, [kk; 3], [faces[0].1, faces[1].1, faces[2].1]).ok_or_else(|| failed("no ball touches the three faces at the fillets' corner"))?;
+                let (c, q) = geom::ball3(fs, [kk; 3], [faces[0].1, faces[1].1, faces[2].1]).ok_or_else(|| failed("corner", "no ball touches the three faces at the fillets' corner"))?;
                 let contacts: Vec<(usize, Contact)> = (0..3).map(|i| (faces[i].0, q[i])).collect();
                 let on = |fi: usize| contacts.iter().find(|x| x.0 == fi).map(|x| x.1);
                 for &(i, j) in here {
                     let ef = &efs[i];
-                    let (Some(qa), Some(qb)) = (on(ef.faces[0]), on(ef.faces[1])) else { return Err(failed("a corner fillet without its faces")) };
+                    let (Some(qa), Some(qb)) = (on(ef.faces[0]), on(ef.faces[1])) else { return Err(failed("corner", "a corner fillet without its faces")) };
                     let t = ef.spine.param_of(&c, b.edges[ef.e].t[j]);
                     ends[i][j] = Some(End::Section { ball: Ball { c, q: [qa, qb], flat: false }, t, key: SectionKey::Corner(v, ef.e) });
                 }
@@ -1992,7 +2009,7 @@ fn march_on(b: &Body, ef: &EdgeFillet, a: &Mark, z: &Mark, g: &Face) -> Result<V
         (p - c.p).dot(&c.n)
     };
     let r = ef.r();
-    let lost = || failed("the fillet's end can't be traced");
+    let lost = || failed("end", "the fillet's end can't be traced");
     let dt = (z.t - a.t) / n as f64;
     for i in 1..n {
         let w = a.w + (z.w - a.w) * i as f64 / n as f64;
@@ -2036,7 +2053,7 @@ fn march_on(b: &Body, ef: &EdgeFillet, a: &Mark, z: &Mark, g: &Face) -> Result<V
         let _ = (ta, ba);
         if !ok {
             debug(|| format!("edge {}: end march lost at w {w}: t {ta}..{tb}, g {ga}..{gb}", ef.e));
-            return Err(failed("the fillet's end doesn't meet its end face"));
+            return Err(failed("end", "the fillet's end doesn't meet its end face"));
         }
         t = tb;
         ball = bb;
@@ -2062,7 +2079,7 @@ fn build_strip(b: &Body, ef: &EdgeFillet, cover: &[f64], tol: f64) -> Result<Str
         (cover.iter().copied().fold(f64::INFINITY, f64::min), cover.iter().copied().fold(f64::NEG_INFINITY, f64::max))
     };
     if !(hi > lo) {
-        return Err(failed("the fillet strip is empty"));
+        return Err(failed("surface", "the fillet strip is empty"));
     }
     let span = hi - lo;
     // Stations: evenly spaced (one per four radii of length, at most 64; more where the sections need them), plus every parameter the ends need
@@ -2091,12 +2108,12 @@ fn build_strip(b: &Body, ef: &EdgeFillet, cover: &[f64], tol: f64) -> Result<Str
         let balls = balls_at(b, ef, &ts)?;
         debug(|| format!("edge {}: {} stations", ef.e, ts.len()));
         let kink_at: Vec<usize> = kinks.iter().filter_map(|k| ts.iter().position(|t| t == k)).collect();
-        let strip = geom::nurbs_strip(&balls, &ts, ef.closed, &kink_at).ok_or_else(|| failed("the fillet surface can't be built"))?;
+        let strip = geom::nurbs_strip(&balls, &ts, ef.closed, &kink_at).ok_or_else(|| failed("surface", "the fillet surface can't be built"))?;
         // Check between stations; add stations where it strays.
         let mut truth: Vec<(f64, Ball)> = Vec::new();
         for (w, bl) in ts.windows(2).zip(&balls) {
             let t = 0.5 * (w[0] + w[1]);
-            let x = ef.ball_from(b, bl, w[0], t).ok_or_else(|| failed("the fillet's ball is lost along the edge"))?;
+            let x = ef.ball_from(b, bl, w[0], t).ok_or_else(|| failed("rolling ball", "the fillet's ball is lost along the edge"))?;
             truth.push((t, x));
         }
         let errs = geom::strip_error(&strip, &truth);
@@ -2114,7 +2131,7 @@ fn build_strip(b: &Body, ef: &EdgeFillet, cover: &[f64], tol: f64) -> Result<Str
                 if worst <= 100.0 * tol {
                     return Ok(strip);
                 }
-                return Err(failed("the fillet's sections kink along the edge"));
+                return Err(failed("surface", "the fillet's sections kink along the edge"));
             }
             debug(|| format!("edge {}: kinks at {fresh:?}", ef.e));
             kinks.extend(fresh.iter().copied());
@@ -2124,7 +2141,7 @@ fn build_strip(b: &Body, ef: &EdgeFillet, cover: &[f64], tol: f64) -> Result<Str
         }
         stalled = ts.len();
         if ts.len() + bad.len() > 4000 {
-            return Err(failed("the fillet surface needs too many sections"));
+            return Err(failed("surface", "the fillet surface needs too many sections"));
         }
         ts.extend(bad);
     }
@@ -2135,7 +2152,7 @@ fn balls_at(b: &Body, ef: &EdgeFillet, ts: &[f64]) -> Result<Vec<Ball>> {
     let tm = ef.tm;
     let i0 = ts.iter().position(|&t| t >= tm).unwrap_or(ts.len() - 1);
     let mut out = vec![dummy_ball(); ts.len()];
-    let lost = || failed("the fillet's ball is lost along the edge");
+    let lost = || failed("rolling ball", "the fillet's ball is lost along the edge");
     out[i0] = ef.ball_from(b, &ef.mid, tm, ts[i0]).ok_or_else(lost)?;
     for i in i0 + 1..ts.len() {
         out[i] = ef.ball_from(b, &out[i - 1], ts[i - 1], ts[i]).ok_or_else(lost)?;
@@ -2503,16 +2520,16 @@ fn hole_face(b: &Body, nb: &mut Body, h: &Hole, vtol: f64, out: &mut Pieces, inp
         if out.hole_ends.contains_key(&(v, e)) {
             continue;
         }
-        let t = param_at(b, e, v, h.d).ok_or_else(|| failed("a fillet corner's setback is past an edge's end"))?;
-        let x = vertex_on_boundary(nb, f, &b.edges[e].point(t), vtol).ok_or_else(|| failed("a fillet corner's setback point isn't on its edge"))?;
+        let t = param_at(b, e, v, h.d).ok_or_else(|| failed("corner", "a fillet corner's setback is past an edge's end"))?;
+        let x = vertex_on_boundary(nb, f, &b.edges[e].point(t), vtol).ok_or_else(|| failed("corner", "a fillet corner's setback point isn't on its edge"))?;
         points.insert(e, x);
     }
     // Where face f meets the hole beside edge e.
     let at = |e: usize, f: usize| -> Result<usize> {
         match out.hole_ends.get(&(v, e)) {
             Some(x) if x.faces.contains(&f) => Ok(x.rv[if x.faces[0] == f { 0 } else { 1 }]),
-            Some(_) => Err(failed("a set-back corner's strip isn't on its face")),
-            None => points.get(&e).copied().ok_or_else(|| failed("a set-back corner's edge has no setback point")),
+            Some(_) => Err(failed("corner", "a set-back corner's strip isn't on its face")),
+            None => points.get(&e).copied().ok_or_else(|| failed("corner", "a set-back corner's edge has no setback point")),
         }
     };
     // The hole's rim runs against the faces' loops: on each face from the side of the edge
@@ -2533,7 +2550,7 @@ fn hole_face(b: &Body, nb: &mut Body, h: &Hole, vtol: f64, out: &mut Pieces, inp
     for (i, &(before, f, after)) in order.iter().enumerate() {
         let (a, z) = (at(before, f)?, at(after, f)?);
         if a == z {
-            return Err(failed("a set-back corner's cut across a face degenerates"));
+            return Err(bad_geometry("a set-back corner's cut across a face degenerates"));
         }
         let (pa, pz) = (nb.verts[a].p, nb.verts[z].p);
         let cut = face_cut(&b.faces[f], &pa, &pz, vtol, a, z, nb);
@@ -2548,7 +2565,7 @@ fn hole_face(b: &Body, nb: &mut Body, h: &Hole, vtol: f64, out: &mut Pieces, inp
             let to = at(after, next)?;
             let ed = nb.edges[x.section].v;
             if !(ed == [from, to] || ed == [to, from]) {
-                return Err(failed("a set-back corner's section doesn't join its faces' cuts"));
+                return Err(failed("corner", "a set-back corner's section doesn't join its faces' cuts"));
             }
             rim.push((x.section, ed[0] == from, Side::Strip(x.ball)));
         }
@@ -2587,7 +2604,7 @@ fn hole_face(b: &Body, nb: &mut Body, h: &Hole, vtol: f64, out: &mut Pieces, inp
 /// surface, its pole, its seam (the iso-line u = 0 from the pole, on [0, 1]) and the rim edges'
 /// p-curves.
 fn disc(nb: &Body, rim: &[(usize, bool)], normal: &dyn Fn(usize, &P3) -> V3, towards: P3) -> Result<(Surface, P3, Curve, Vec<Curve>)> {
-    let bad = || failed("a set-back corner's patch can't be built");
+    let bad = || failed("corner", "a set-back corner's patch can't be built");
     let m = 16;
     // Each rim edge's samples along the rim: edge parameters, points, rim tangents.
     let mut ts: Vec<Vec<f64>> = Vec::new();
@@ -2725,13 +2742,13 @@ fn chain(b: &Body, edges: &[(usize, Option<bool>)]) -> Result<Vec<(usize, bool)>
         let mut lp = chain(b, &rest)?;
         for (e, dir) in deg {
             let v = b.edges[e].v[0];
-            let at = lp.iter().position(|&(x, fwd)| (if fwd { b.edges[x].v[1] } else { b.edges[x].v[0] }) == v).ok_or_else(|| failed("a fillet face's pole isn't on its loop"))?;
+            let at = lp.iter().position(|&(x, fwd)| (if fwd { b.edges[x].v[1] } else { b.edges[x].v[0] }) == v).ok_or_else(|| failed("trimming", "a fillet face's pole isn't on its loop"))?;
             lp.insert(at + 1, (e, dir.unwrap_or(true)));
         }
         return Ok(lp);
     }
     let n = edges.len();
-    let start = edges.iter().position(|x| x.1.is_some()).ok_or_else(|| failed("a fillet face with no known edge direction"))?;
+    let start = edges.iter().position(|x| x.1.is_some()).ok_or_else(|| failed("trimming", "a fillet face with no known edge direction"))?;
     let mut used = vec![false; n];
     used[start] = true;
     let ends = |e: usize, fwd: bool| -> (usize, usize) {
@@ -2797,7 +2814,7 @@ fn chain(b: &Body, edges: &[(usize, Option<bool>)]) -> Result<Vec<(usize, bool)>
         stack.push(options(at, &used));
     }
     debug(|| format!("chain: no loop through {:?}", edges.iter().map(|&(e, d)| (e, d, b.edges[e].v)).collect::<Vec<_>>()));
-    Err(failed("a fillet face's edges don't close up"))
+    Err(failed("trimming", "a fillet face's edges don't close up"))
 }
 
 /// What the strips add to the body: cuts in faces, new faces and new-edge marks.
@@ -2857,7 +2874,7 @@ fn edge_side<'a>(g: &'a Face, x: &'a super::topo::Edge) -> impl Fn(&P3) -> f64 +
 
 /// [`trace`], stopping where `stop` changes sign: the points so far and, if it stopped, where.
 fn trace_to(b: &Body, ef: &EdgeFillet, g: &Face, a: &Mark, z: &Mark, stop: Option<&dyn Fn(&P3) -> f64>) -> Result<(Vec<P3>, Option<Mark>)> {
-    let lost = || failed("the fillet's curve on a face can't be traced");
+    let lost = || failed("trimming", "the fillet's curve on a face can't be traced");
     let sd_stop = |p: &P3| -> f64 { stop.map_or(0.0, |f| f(p)) };
     let r = ef.r();
     let mut hint: Option<P2> = None;
@@ -3011,7 +3028,7 @@ fn cliff(b: &Body, nb: &mut Body, ef: &EdgeFillet, (k, a, va): (usize, &Crossing
             let g = a.into;
             let seam = b.faces[g].loops.iter().flatten().map(|c| c.edge).find(|&e| is_seam(nb, g, e));
             if let Some((tc, at, _)) = seam.and_then(|x| seam_crossing_of(nb, g, ce, x)) {
-                let cv = vertex_on_boundary(nb, g, &at, tol).ok_or_else(|| failed("a fillet's cut across a face's seam isn't on it"))?;
+                let cv = vertex_on_boundary(nb, g, &at, tol).ok_or_else(|| failed("trimming", "a fillet's cut across a face's seam isn't on it"))?;
                 let (ed, vz) = (nb.edges[ce].clone(), nb.edges[ce].v[1]);
                 nb.edges[ce].t = [ed.t[0], tc];
                 nb.edges[ce].v[1] = cv;
@@ -3049,7 +3066,7 @@ fn cliff(b: &Body, nb: &mut Body, ef: &EdgeFillet, (k, a, va): (usize, &Crossing
     let mut joints: Vec<Joint> = Vec::new();
     for w in chain.windows(2) {
         let (g, h) = (w[0], w[1]);
-        let from = marks.last().map(|x| x.0).ok_or_else(|| failed("a fillet's cut has no start"))?;
+        let from = marks.last().map(|x| x.0).ok_or_else(|| failed("trimming", "a fillet's cut has no start"))?;
         let x = common_edge(b, g, h).ok_or_else(|| unsupported("a closed fillet whose rail runs off over faces that don't meet"))?;
         // The next face on the same surface (a hole's wall in two halves): up to the edge
         // between them.
@@ -3059,11 +3076,11 @@ fn cliff(b: &Body, nb: &mut Body, ef: &EdgeFillet, (k, a, va): (usize, &Crossing
         } else {
             trace_until(b, ef, &b.faces[g], &from, &mz, Some(&b.faces[h]))?
         };
-        let at = at.ok_or_else(|| failed("a fillet's cut doesn't reach the next face round the corner"))?;
+        let at = at.ok_or_else(|| failed("corner", "a fillet's cut doesn't reach the next face round the corner"))?;
         let xe = &b.edges[x];
         let tx = xe.curve.closest(&at.p, xe.t[0] - 1e6, xe.t[1] + 1e6);
         if tx >= xe.t[0] - tol::ROUNDOFF && tx <= xe.t[1] + tol::ROUNDOFF {
-            let xv = vertex_on_boundary(nb, g, &at.p, tol.max(1e-6)).ok_or_else(|| failed("a fillet's cut round a corner isn't on the corner's edge"))?;
+            let xv = vertex_on_boundary(nb, g, &at.p, tol.max(1e-6)).ok_or_else(|| failed("corner", "a fillet's cut round a corner isn't on the corner's edge"))?;
             joints.push(Joint::OnEdge);
             marks.push((at, xv));
         } else {
@@ -3076,8 +3093,8 @@ fn cliff(b: &Body, nb: &mut Body, ef: &EdgeFillet, (k, a, va): (usize, &Crossing
         }
         pieces.push(pts);
     }
-    let last = *chain.last().ok_or_else(|| failed("a fillet's cut over no faces"))?;
-    let from = marks.last().map(|x| x.0).ok_or_else(|| failed("a fillet's cut has no start"))?;
+    let last = *chain.last().ok_or_else(|| failed("trimming", "a fillet's cut over no faces"))?;
+    let from = marks.last().map(|x| x.0).ok_or_else(|| failed("trimming", "a fillet's cut has no start"))?;
     pieces.push(trace(b, ef, &b.faces[last], &from, &mz)?);
     marks.push((mz, vz));
     // The cut on each face, then how each face takes it.
@@ -3266,7 +3283,7 @@ impl StripRails<'_> {
     /// Rail k's crossing `c` of its face's boundary: its vertex there and its rail parameter.
     fn at(&self, nb: &mut Body, k: usize, c: &Crossing, near: f64) -> Result<(usize, f64)> {
         let p = c.ball.q[k].p;
-        let v = vertex_on_boundary(nb, self.ef.faces[k], &p, self.vtol).ok_or_else(|| failed("a fillet rail's crossing isn't on its face's boundary"))?;
+        let v = vertex_on_boundary(nb, self.ef.faces[k], &p, self.vtol).ok_or_else(|| failed("trimming", "a fillet rail's crossing isn't on its face's boundary"))?;
         Ok((v, self.st.rail_param(k, &p, c.t, near)))
     }
 
@@ -3417,7 +3434,7 @@ fn open_cliffs(b: &Body, ef: &EdgeFillet, k: usize, t0: f64, t1: f64, ends: [P3;
     // Each stretch between a pair really off the face.
     let pairs: Vec<(Crossing, Crossing)> = cs.chunks(2).map(|w| (w[0], w[1])).collect();
     for (a, z) in &pairs {
-        let mid = ef.ball_from(b, &a.ball, a.t, 0.5 * (a.t + z.t)).ok_or_else(|| failed("the fillet's ball is lost along the edge"))?;
+        let mid = ef.ball_from(b, &a.ball, a.t, 0.5 * (a.t + z.t)).ok_or_else(|| failed("rolling ball", "the fillet's ball is lost along the edge"))?;
         if point_in_face(b, fi, &mid.q[k].p) {
             return Err(unsupported("a fillet whose rail touches its face's edges"));
         }
@@ -3434,7 +3451,7 @@ fn cliff_faces(b: &Body, ef: &EdgeFillet, k: usize, a: &Crossing, z: &Crossing) 
     let fi = ef.faces[k];
     let l = b.faces[fi].loops.iter().find(|l| l.iter().any(|c| c.edge == a.edge) && l.iter().any(|c| c.edge == z.edge)).ok_or_else(|| unsupported("a closed fillet whose rail runs off over another loop"))?;
     let n = l.len();
-    let ia = l.iter().position(|c| c.edge == a.edge).ok_or_else(|| failed("a crossing's edge isn't on its face"))?;
+    let ia = l.iter().position(|c| c.edge == a.edge).ok_or_else(|| failed("trimming", "a crossing's edge isn't on its face"))?;
     let way = |step: usize| -> Vec<usize> {
         let mut i = ia;
         let mut out = vec![l[i].edge];
@@ -3445,7 +3462,7 @@ fn cliff_faces(b: &Body, ef: &EdgeFillet, k: usize, a: &Crossing, z: &Crossing) 
         out
     };
     // The rail's point halfway along the stretch, and the edge of the face nearest it.
-    let mid = ef.ball_from(b, &a.ball, a.t, 0.5 * (a.t + z.t)).ok_or_else(|| failed("the fillet's ball is lost along the edge"))?.q[k].p;
+    let mid = ef.ball_from(b, &a.ball, a.t, 0.5 * (a.t + z.t)).ok_or_else(|| failed("rolling ball", "the fillet's ball is lost along the edge"))?.q[k].p;
     let near = l
         .iter()
         .map(|c| {
@@ -3583,7 +3600,7 @@ fn seam_crossing(b: &Body, ef: &EdgeFillet, k: usize, period: f64) -> Result<Opt
     let axis = if (a.x - z.x).abs() < (a.y - z.y).abs() { 0 } else { 1 };
     let vals: Vec<f64> = f.loops.iter().flatten().filter(|c| c.edge == seam.edge).map(|c| c.pc.point(se.mid_t())[axis]).collect();
     let ed = &b.edges[ef.e];
-    let lost = || failed("the fillet's ball is lost along the edge");
+    let lost = || failed("rolling ball", "the fillet's ball is lost along the edge");
     let n = 128;
     let mut cur = (ef.tm, ef.mid);
     let mut prev: Option<(f64, Ball)> = None;
@@ -3679,7 +3696,7 @@ fn closed_strip(b: &Body, nb: &mut Body, ef: &EdgeFillet, fit_tol: f64, out: &mu
     }
     let cliffs = cross.iter().any(|c| !c.is_empty());
     debug(|| format!("edge {}: seam crossings {:?}, {:?}; cliffs {} {}", ef.e, seams[0].map(|x| (ef.spine.param_of(&x.c, ed.t[0]), x.q[0].p)), seams[1].map(|x| (ef.spine.param_of(&x.c, ed.t[0]), x.q[1].p)), cross[0].len(), cross[1].len()));
-    let rail_point = |k: usize, t: f64| -> Result<P3> { Ok(ef.ball_from(b, &ef.mid, ef.tm, t).ok_or_else(|| failed("the fillet's ball is lost along the edge"))?.q[k].p) };
+    let rail_point = |k: usize, t: f64| -> Result<P3> { Ok(ef.ball_from(b, &ef.mid, ef.tm, t).ok_or_else(|| failed("rolling ball", "the fillet's ball is lost along the edge"))?.q[k].p) };
     let inside = |k: usize, t: f64| -> Result<bool> { Ok(point_in_face(b, ef.faces[k], &rail_point(k, t)?)) };
     // The band's seam: at a face's seam, else at the edge's vertex, else, with cliffs, inside
     // both faces.
@@ -3736,7 +3753,7 @@ fn closed_strip(b: &Body, nb: &mut Body, ef: &EdgeFillet, fit_tol: f64, out: &mu
             debug(|| format!("edge {}: rail {k} off its face from {} (into {}) to {} (from {})", ef.e, a.t, a.into, z.t, z.into));
             if inside(k, 0.5 * (a.t + z.t))? {
                 debug(|| format!("edge {}: rail {k} crossings from ts {ts}: {:?}", ef.e, cross[k].iter().map(|c| (c.t, c.into, c.edge)).collect::<Vec<_>>()));
-                return Err(failed("a closed fillet's rail crossings don't pair up"));
+                return Err(failed("trimming", "a closed fillet's rail crossings don't pair up"));
             }
             events[k].push(Event::Off(a, z));
         }
@@ -3748,7 +3765,7 @@ fn closed_strip(b: &Body, nb: &mut Body, ef: &EdgeFillet, fit_tol: f64, out: &mu
             t(a).total_cmp(&t(b))
         });
     }
-    let ball = ef.ball_from(b, &ef.mid, ef.tm, ts).ok_or_else(|| failed("the fillet's ball is lost along the edge"))?;
+    let ball = ef.ball_from(b, &ef.mid, ef.tm, ts).ok_or_else(|| failed("rolling ball", "the fillet's ball is lost along the edge"))?;
     let st = build_strip(b, ef, &[ts], fit_tol)?;
     let st = &st;
     let mut rv = [0usize; 2];
@@ -3776,15 +3793,15 @@ fn closed_strip(b: &Body, nb: &mut Body, ef: &EdgeFillet, fit_tol: f64, out: &mu
             match ev {
                 Event::Seam(t, sb) => {
                     let p = sb.q[k].p;
-                    let v = vertex_on_boundary(nb, ef.faces[k], &p, tol).ok_or_else(|| failed("a fillet rail's seam crossing isn't on its face's seam"))?;
+                    let v = vertex_on_boundary(nb, ef.faces[k], &p, tol).ok_or_else(|| failed("trimming", "a fillet rail's seam crossing isn't on its face's seam"))?;
                     let tr = st.rail_param(k, &p, *t, *t);
                     rail_to(nb, tr, v, at_v, at_t, &mut fe, out);
                     (at_v, at_t) = (v, tr);
                 }
                 Event::Off(a, z) => {
                     let (pa, pz) = (a.ball.q[k].p, z.ball.q[k].p);
-                    let va = vertex_on_boundary(nb, ef.faces[k], &pa, tol).ok_or_else(|| failed("a fillet rail's crossing isn't on its face's boundary"))?;
-                    let vz = vertex_on_boundary(nb, ef.faces[k], &pz, tol).ok_or_else(|| failed("a fillet rail's crossing isn't on its face's boundary"))?;
+                    let va = vertex_on_boundary(nb, ef.faces[k], &pa, tol).ok_or_else(|| failed("trimming", "a fillet rail's crossing isn't on its face's boundary"))?;
+                    let vz = vertex_on_boundary(nb, ef.faces[k], &pz, tol).ok_or_else(|| failed("trimming", "a fillet rail's crossing isn't on its face's boundary"))?;
                     let ta = st.rail_param(k, &pa, a.t, a.t);
                     let tz = st.rail_param(k, &pz, z.t, z.t);
                     rail_to(nb, ta, va, at_v, at_t, &mut fe, out);
@@ -3795,7 +3812,7 @@ fn closed_strip(b: &Body, nb: &mut Body, ef: &EdgeFillet, fit_tol: f64, out: &mu
         }
         rail_to(nb, t0 + period, rv[k], at_v, at_t, &mut fe, out);
     }
-    let (c, a0, a1) = ball.arc().ok_or_else(|| failed("a fillet section degenerates"))?;
+    let (c, a0, a1) = ball.arc().ok_or_else(|| bad_geometry("a fillet section degenerates"))?;
     let seam = add_edge(nb, c, a0, a1, rv[0], rv[1]);
     fe.push(seam);
     fe.push(seam);
@@ -3952,7 +3969,7 @@ fn local_blend(b: &Body, input: BodyId, edges: &[RadiusLaw], ratios: &[f64], fla
     // the volume and area agreement wanted, with spans few enough to integrate quickly.
     let fit_tol = 1e-5 * (1.0 + size);
     let vtol = 1e-6 * (1.0 + r);
-    let out_of_work = || failed("the local fillet takes more work than its budget");
+    let out_of_work = || out_of_budget("the local fillet takes more work than its budget");
     let p = plan(b, edges, ratios, flat, &budget).map_err(|e| if budget.spent() { out_of_work() } else { e })?;
     debug(|| format!("planned {} strips, {} corners", p.efs.len(), p.corners.len()));
     // Rails running off their faces mid-strip are cut by the faces beyond; where that fails,
@@ -4036,7 +4053,7 @@ fn trim(b: &Body, input: BodyId, p: &Plan, size: f64, fit_tol: f64, vtol: f64, c
                         }
                     }
                 }
-                None if !ef.closed => return Err(failed("a fillet end without a plan")),
+                None if !ef.closed => return Err(failed("end", "a fillet end without a plan")),
                 None => {}
             }
         }
@@ -4074,7 +4091,7 @@ fn trim(b: &Body, input: BodyId, p: &Plan, size: f64, fit_tol: f64, vtol: f64, c
                         let x = &exits[k];
                         let q = x.ball.q[k].p;
                         rv[j][k] = match x.ext {
-                            None => vertex_on_boundary(&mut nb, ef.faces[k], &q, vtol).ok_or_else(|| failed("a fillet rail's end isn't on its face's boundary"))?,
+                            None => vertex_on_boundary(&mut nb, ef.faces[k], &q, vtol).ok_or_else(|| failed("end", "a fillet rail's end isn't on its face's boundary"))?,
                             Some((y, ty)) => {
                                 // A new vertex inside the face, joined to the vertex along the edge's
                                 // extension; on its boundary (the rail running along one of its
@@ -4136,7 +4153,7 @@ fn trim(b: &Body, input: BodyId, p: &Plan, size: f64, fit_tol: f64, vtol: f64, c
                     for k in 0..2 {
                         let x = &exits[k];
                         let q = x.ball.q[k].p;
-                        rv[j][k] = vertex_on_boundary(&mut nb, ef.faces[k], &q, vtol).ok_or_else(|| failed("a fillet rail's end isn't on its face's boundary"))?;
+                        rv[j][k] = vertex_on_boundary(&mut nb, ef.faces[k], &q, vtol).ok_or_else(|| failed("end", "a fillet rail's end isn't on its face's boundary"))?;
                         rt[j][k] = st.rail_param(k, &q, x.t, x.t);
                     }
                     let mut xs = pts.clone();
@@ -4150,7 +4167,7 @@ fn trim(b: &Body, input: BodyId, p: &Plan, size: f64, fit_tol: f64, vtol: f64, c
                     for k in 0..2 {
                         let x = &exits[k];
                         let q = x.ball.q[k].p;
-                        rv[j][k] = vertex_on_boundary(&mut nb, ef.faces[k], &q, vtol).ok_or_else(|| failed("a fillet rail's end isn't on its face's boundary"))?;
+                        rv[j][k] = vertex_on_boundary(&mut nb, ef.faces[k], &q, vtol).ok_or_else(|| failed("end", "a fillet rail's end isn't on its face's boundary"))?;
                         rt[j][k] = st.rail_param(k, &q, x.t, x.t);
                     }
                     // One cut on each face round the vertex, from mark to mark; where the faces
@@ -4161,14 +4178,14 @@ fn trim(b: &Body, input: BodyId, p: &Plan, size: f64, fit_tol: f64, vtol: f64, c
                     for l in links {
                         if l.past {
                             let xv = nb.add_vertex(l.mark.p);
-                            let d = common_edge(b, marks[marks.len() - 1].2, l.after).filter(|&d| b.edges[d].v.contains(&v)).ok_or_else(|| failed("a fillet end's faces don't meet at its vertex"))?;
+                            let d = common_edge(b, marks[marks.len() - 1].2, l.after).filter(|&d| b.edges[d].v.contains(&v)).ok_or_else(|| failed("end", "a fillet end's faces don't meet at its vertex"))?;
                             let de = &b.edges[d];
                             let tx = de.curve.closest(&l.mark.p, de.t[0] - 1e6, de.t[1] + 1e6);
                             let tv = if de.v[0] == v { de.t[0] } else { de.t[1] };
                             ext.push(Some(add_edge(&mut nb, de.curve.clone(), tv, tx, v, xv)));
                             marks.push((l.mark, xv, l.after));
                         } else {
-                            let xv = vertex_on_boundary(&mut nb, l.after, &l.mark.p, vtol).ok_or_else(|| failed("a fillet end's crossing isn't on its edge"))?;
+                            let xv = vertex_on_boundary(&mut nb, l.after, &l.mark.p, vtol).ok_or_else(|| failed("end", "a fillet end's crossing isn't on its edge"))?;
                             ext.push(None);
                             marks.push((l.mark, xv, l.after));
                         }
@@ -4302,7 +4319,7 @@ fn trim(b: &Body, input: BodyId, p: &Plan, size: f64, fit_tol: f64, vtol: f64, c
                         None => {
                             let x = if mi.q_on_edge {
                                 let [(fa, _), _] = sides(b, mi.e3)?;
-                                vertex_on_boundary(&mut nb, fa, &mi.q, vtol).ok_or_else(|| failed("a mitre's end isn't on its edge"))?
+                                vertex_on_boundary(&mut nb, fa, &mi.q, vtol).ok_or_else(|| failed("corner", "a mitre's end isn't on its edge"))?
                             } else {
                                 nb.add_vertex(mi.q)
                             };
@@ -4332,7 +4349,7 @@ fn trim(b: &Body, input: BodyId, p: &Plan, size: f64, fit_tol: f64, vtol: f64, c
                         }
                         MitreEnd::Exit { exit, k, pts } => {
                             let xp = exit.ball.q[*k].p;
-                            rv[j][ko] = vertex_on_boundary(&mut nb, ef.faces[ko], &xp, vtol).ok_or_else(|| failed("a fillet rail's end isn't on its face's boundary"))?;
+                            rv[j][ko] = vertex_on_boundary(&mut nb, ef.faces[ko], &xp, vtol).ok_or_else(|| failed("end", "a fillet rail's end isn't on its face's boundary"))?;
                             rt[j][ko] = st.rail_param(ko, &xp, exit.t, exit.t);
                             let mut xs: Vec<P3> = pts.iter().map(|x| x.1).collect();
                             let last = xs.len() - 1;
@@ -4388,7 +4405,7 @@ fn trim(b: &Body, input: BodyId, p: &Plan, size: f64, fit_tol: f64, vtol: f64, c
                         None => {
                             let pts = match &marched[j] {
                                 Some(pts) => pts.clone(),
-                                None => return Err(failed("a square fillet end without its cut")),
+                                None => return Err(failed("end", "a square fillet end without its cut")),
                             };
                             let mut xs: Vec<P3> = pts.iter().map(|x| x.1).collect();
                             let last = xs.len() - 1;
@@ -4413,7 +4430,7 @@ fn trim(b: &Body, input: BodyId, p: &Plan, size: f64, fit_tol: f64, vtol: f64, c
                         rv[j][k] = nb.add_vertex(q);
                         rt[j][k] = st.rail_param(k, &q, *t, *t);
                     }
-                    let (arc, a0, a1) = ball.arc().ok_or_else(|| failed("a fillet section degenerates"))?;
+                    let (arc, a0, a1) = ball.arc().ok_or_else(|| bad_geometry("a fillet section degenerates"))?;
                     let section = add_edge(&mut nb, arc, a0, a1, rv[j][0], rv[j][1]);
                     out.hole_ends.insert((p.holes[*c].v, ef.e), HoleEnd { section, rv: rv[j], faces: ef.faces, ball: *ball });
                     across.push(section);
@@ -4468,7 +4485,7 @@ fn trim(b: &Body, input: BodyId, p: &Plan, size: f64, fit_tol: f64, vtol: f64, c
                     let se = match out.section_edges.get(key) {
                         Some(&x) => x,
                         None => {
-                            let (c, a0, a1) = ball.arc().ok_or_else(|| failed("a fillet section degenerates"))?;
+                            let (c, a0, a1) = ball.arc().ok_or_else(|| bad_geometry("a fillet section degenerates"))?;
                             let x = add_edge(&mut nb, c, a0, a1, rv[j][0], rv[j][1]);
                             out.section_edges.insert(*key, x);
                             x
@@ -4536,8 +4553,8 @@ fn trim(b: &Body, input: BodyId, p: &Plan, size: f64, fit_tol: f64, vtol: f64, c
         hole_face(b, &mut nb, h, vtol, &mut out, input)?;
     }
     for c in &p.caps {
-        let edges: Vec<usize> = c.edges.iter().map(|&e| out.section_edges.get(&SectionKey::Cap(c.v, e)).copied().ok_or_else(|| failed("a chamfer corner's strip has no end"))).collect::<Result<_>>()?;
-        let [o, x, y] = [nb.edges[edges[0]].v[0], nb.edges[edges[0]].v[1], nb.edges[edges[1]].v.into_iter().find(|w| !nb.edges[edges[0]].v.contains(w)).ok_or_else(|| failed("a chamfer corner's triangle doesn't close"))?].map(|w| nb.verts[w].p);
+        let edges: Vec<usize> = c.edges.iter().map(|&e| out.section_edges.get(&SectionKey::Cap(c.v, e)).copied().ok_or_else(|| failed("corner", "a chamfer corner's strip has no end"))).collect::<Result<_>>()?;
+        let [o, x, y] = [nb.edges[edges[0]].v[0], nb.edges[edges[0]].v[1], nb.edges[edges[1]].v.into_iter().find(|w| !nb.edges[edges[0]].v.contains(w)).ok_or_else(|| failed("corner", "a chamfer corner's triangle doesn't close"))?].map(|w| nb.verts[w].p);
         let xd = (x - o).normalize();
         let z = xd.cross(&(y - o)).normalize();
         let surf = Surface::Plane { f: Frame { o, x: xd, y: z.cross(&xd), z } };
@@ -4551,7 +4568,7 @@ fn trim(b: &Body, input: BodyId, p: &Plan, size: f64, fit_tol: f64, vtol: f64, c
 /// The face of a three-sided corner: the bridge on the common face (a new cut there), the two
 /// strips' sections, and a Coons patch through them, degenerate at the point on the third edge.
 fn tri_face(b: &Body, nb: &mut Body, tc: &TriCorner, out: &mut Pieces, input: BodyId) -> Result<()> {
-    let sec: Vec<usize> = tc.edges.iter().map(|&e| out.section_edges.get(&SectionKey::Tri(tc.v, e)).copied().ok_or_else(|| failed("a three-sided corner's strip has no section"))).collect::<Result<_>>()?;
+    let sec: Vec<usize> = tc.edges.iter().map(|&e| out.section_edges.get(&SectionKey::Tri(tc.v, e)).copied().ok_or_else(|| failed("corner", "a three-sided corner's strip has no section"))).collect::<Result<_>>()?;
     let tol = 1e-6 * (1.0 + b.bbox().diagonal());
     let near = |nb: &Body, p: &P3| -> Option<usize> { (0..nb.verts.len()).filter(|&v| (nb.verts[v].p - p).norm() < tol).min_by(|&x, &y| (nb.verts[x].p - p).norm().total_cmp(&(nb.verts[y].p - p).norm())) };
     let face = &b.faces[tc.shared];
@@ -4559,8 +4576,8 @@ fn tri_face(b: &Body, nb: &mut Body, tc: &TriCorner, out: &mut Pieces, input: Bo
     let last = pts.len() - 1;
     // The sections' ends on the common face and on the third edge.
     let other_end = |nb: &Body, e: usize, at: usize| if nb.edges[e].v[0] == at { nb.edges[e].v[1] } else { nb.edges[e].v[0] };
-    let sv = near(nb, &tc.side[0]).ok_or_else(|| failed("a three-sided corner's side point has no vertex"))?;
-    let sv1 = near(nb, &tc.side[1]).ok_or_else(|| failed("a three-sided corner's side point has no vertex"))?;
+    let sv = near(nb, &tc.side[0]).ok_or_else(|| failed("corner", "a three-sided corner's side point has no vertex"))?;
+    let sv1 = near(nb, &tc.side[1]).ok_or_else(|| failed("corner", "a three-sided corner's side point has no vertex"))?;
     let (m0, m1) = (other_end(nb, sec[0], sv), other_end(nb, sec[1], sv1));
     let mut xs = pts;
     xs[0] = nb.verts[m0].p;
@@ -4577,7 +4594,7 @@ fn tri_face(b: &Body, nb: &mut Body, tc: &TriCorner, out: &mut Pieces, input: Bo
         let top = along_from(nb, sec[1], sv1);
         let right = along_from(nb, rr, m0);
         let left = along_from(nb, k, sv);
-        let surf = coons(&*bottom, &*top, &*left, &*right).ok_or_else(|| failed("a fillet corner's surface can't be built"))?;
+        let surf = coons(&*bottom, &*top, &*left, &*right).ok_or_else(|| failed("corner", "a fillet corner's surface can't be built"))?;
         let pcs = vec![
             (sec[0], side_pcurve(nb, sec[0], sv, (1, 0.0))),
             (sec[1], side_pcurve(nb, sec[1], sv1, (1, 1.0))),
@@ -4593,7 +4610,7 @@ fn tri_face(b: &Body, nb: &mut Body, tc: &TriCorner, out: &mut Pieces, input: Bo
     let right = along_from(nb, rr, m0);
     let sp = nb.verts[sv].p;
     let left = move |_: f64| sp;
-    let surf = coons(&*bottom, &*top, &left, &*right).ok_or_else(|| failed("a three-sided corner's surface can't be built"))?;
+    let surf = coons(&*bottom, &*top, &left, &*right).ok_or_else(|| failed("corner", "a three-sided corner's surface can't be built"))?;
     let deg = nb.add_degenerate(sp, 0.0, 1.0, sv);
     // The p-curves: the patch's sides, each linear in its edge's parameter (as sampled).
     let pcs = vec![
@@ -4615,7 +4632,7 @@ fn corner_patches(b: &Body, nb: &mut Body, p: &Plan, pc: &PatchCorner, out: &mut
     if n <= 4 {
         return corner_face(b, nb, p, pc, out, input);
     }
-    let halves: Vec<(usize, usize, usize)> = pc.strips.iter().map(|&i| out.patch_halves.get(&(pc.v, i)).copied().ok_or_else(|| failed("a patched corner's strip has no curve across"))).collect::<Result<_>>()?;
+    let halves: Vec<(usize, usize, usize)> = pc.strips.iter().map(|&i| out.patch_halves.get(&(pc.v, i)).copied().ok_or_else(|| failed("corner", "a patched corner's strip has no curve across"))).collect::<Result<_>>()?;
     let centre = P3::from(halves.iter().map(|h| nb.verts[h.2].p.coords).sum::<V3>() / n as f64);
     let cv = nb.add_vertex(centre);
     let spokes: Vec<usize> = halves
@@ -4634,8 +4651,8 @@ fn corner_patches(b: &Body, nb: &mut Body, p: &Plan, pc: &PatchCorner, out: &mut
             let xv = nb.edges[x].v;
             [hb.0, hb.1].into_iter().find(|y| nb.edges[*y].v.iter().any(|v| xv.contains(v) && *v != ha.2 && *v != hb.2)).map(|y| (x, y))
         });
-        let (ea, eb) = shared.ok_or_else(|| failed("a patched corner's strips don't meet"))?;
-        let pv = nb.edges[ea].v.iter().copied().find(|v| nb.edges[eb].v.contains(v)).ok_or_else(|| failed("a patched corner's strips don't meet"))?;
+        let (ea, eb) = shared.ok_or_else(|| failed("corner", "a patched corner's strips don't meet"))?;
+        let pv = nb.edges[ea].v.iter().copied().find(|v| nb.edges[eb].v.contains(v)).ok_or_else(|| failed("corner", "a patched corner's strips don't meet"))?;
         // Curves from the crossing: along a's half to its middle, along b's half to its middle.
         let along = |e: usize, from: usize| -> Box<dyn Fn(f64) -> P3 + '_> {
             let ed = nb.edges[e].clone();
@@ -4647,7 +4664,7 @@ fn corner_patches(b: &Body, nb: &mut Body, p: &Plan, pc: &PatchCorner, out: &mut
         let left = along(ea, pv);
         let top = move |u: f64| P3::from(ma.coords * (1.0 - u) + centre.coords * u);
         let right = move |v: f64| P3::from(mb.coords * (1.0 - v) + centre.coords * v);
-        let surf = coons(&*bottom, &top, &*left, &right).ok_or_else(|| failed("a patched corner's surface can't be built"))?;
+        let surf = coons(&*bottom, &top, &*left, &right).ok_or_else(|| failed("corner", "a patched corner's surface can't be built"))?;
         let ef = &p.efs[pc.strips[a]];
         out.new_faces.push(NewFace { surf, edges: vec![ea, eb, spokes[a], spokes[bn]], src: FaceSrc::New(Origin::FromVertex { body: input, vertex: VertexId(vi as u64) }), u_period: None, beside: ef.faces[0], pcurves: Vec::new() });
     }
@@ -4678,12 +4695,12 @@ fn side_pcurve(nb: &Body, e: usize, from: usize, fixed: (usize, f64)) -> Curve {
 /// across (with three, degenerate at one corner).
 fn corner_face(b: &Body, nb: &mut Body, p: &Plan, pc: &PatchCorner, out: &mut Pieces, input: BodyId) -> Result<()> {
     let n = pc.strips.len();
-    let curves: Vec<usize> = pc.strips.iter().map(|&i| out.patch_halves.get(&(pc.v, i)).map(|h| h.0).ok_or_else(|| failed("a patched corner's strip has no curve across"))).collect::<Result<_>>()?;
+    let curves: Vec<usize> = pc.strips.iter().map(|&i| out.patch_halves.get(&(pc.v, i)).map(|h| h.0).ok_or_else(|| failed("corner", "a patched corner's strip has no curve across"))).collect::<Result<_>>()?;
     // Corner points: P[i] where curve i−1 meets curve i; curve i runs from P[i] to P[i+1].
     let mut pts = Vec::new();
     for i in 0..n {
         let (a, c) = (&nb.edges[curves[(i + n - 1) % n]], &nb.edges[curves[i]]);
-        let v = a.v.iter().copied().find(|v| c.v.contains(v)).ok_or_else(|| failed("a patched corner's strips don't meet"))?;
+        let v = a.v.iter().copied().find(|v| c.v.contains(v)).ok_or_else(|| failed("corner", "a patched corner's strips don't meet"))?;
         pts.push(v);
     }
     let vi = super::blend::vertex_index(b, pc.v);
@@ -4695,7 +4712,7 @@ fn corner_face(b: &Body, nb: &mut Body, p: &Plan, pc: &PatchCorner, out: &mut Pi
         let right = along_from(nb, curves[1], pts[1]);
         let top = along_from(nb, curves[2], pts[3]);
         let left = along_from(nb, curves[3], pts[0]);
-        let surf = coons(&*bottom, &*top, &*left, &*right).ok_or_else(|| failed("a patched corner's surface can't be built"))?;
+        let surf = coons(&*bottom, &*top, &*left, &*right).ok_or_else(|| failed("corner", "a patched corner's surface can't be built"))?;
         let pcs = vec![
             (curves[0], side_pcurve(nb, curves[0], pts[0], (1, 0.0))),
             (curves[1], side_pcurve(nb, curves[1], pts[1], (0, 1.0))),
@@ -4711,7 +4728,7 @@ fn corner_face(b: &Body, nb: &mut Body, p: &Plan, pc: &PatchCorner, out: &mut Pi
     let top = along_from(nb, curves[2], pts[0]);
     let p0 = nb.verts[pts[0]].p;
     let left = move |_: f64| p0;
-    let surf = coons(&*bottom, &*top, &left, &*right).ok_or_else(|| failed("a patched corner's surface can't be built"))?;
+    let surf = coons(&*bottom, &*top, &left, &*right).ok_or_else(|| failed("corner", "a patched corner's surface can't be built"))?;
     let deg = nb.add_degenerate(p0, 0.0, 1.0, pts[0]);
     let pcs = vec![
         (curves[0], side_pcurve(nb, curves[0], pts[0], (1, 0.0))),
@@ -4750,7 +4767,7 @@ fn inside_face(b: &Body, fi: usize, e: &super::topo::Edge) -> bool {
 
 /// Applies a [`Patch`] to its face's loops.
 fn patch(b: &mut Body, p: &Patch) -> Result<()> {
-    let bad = || failed("a fillet's end doesn't meet its end face's boundary");
+    let bad = || failed("end", "a fillet's end doesn't meet its end face's boundary");
     let fi = p.face;
     if !p.stretch.is_empty() {
         // Those edges' coedges, a run between the path's ends (either way).
@@ -4902,7 +4919,7 @@ fn assemble(mut nb: Body, out: &Pieces, picked: &[usize], size: f64) -> Result<(
                             o
                         });
                         debug(|| format!("cut edges {:?}", cs.iter().map(|&c| (nb.edges[c].v, nb.verts[nb.edges[c].v[0]].p, nb.verts[nb.edges[c].v[1]].p)).collect::<Vec<_>>()));
-                        return Err(failed("a fillet's rail doesn't split its face"));
+                        return Err(failed("trimming", "a fillet's rail doesn't split its face"));
                     }
                 }
                 pieces.extend(ps.into_iter().map(|f| (fi, f)));
@@ -4928,7 +4945,7 @@ fn assemble(mut nb: Body, out: &Pieces, picked: &[usize], size: f64) -> Result<(
     }
     while let Some(pi) = stack.pop() {
         if !out.cuts.contains_key(&pieces[pi].0) && !out.consumed.contains(&pieces[pi].0) {
-            return Err(failed("the fillet's trimming leaks into faces it doesn't touch"));
+            return Err(failed("trimming", "the fillet's trimming leaks into faces it doesn't touch"));
         }
         for c in pieces[pi].1.loops.iter().flatten() {
             if new_edge.get(c.edge).copied().unwrap_or(false) {
@@ -4944,7 +4961,7 @@ fn assemble(mut nb: Body, out: &Pieces, picked: &[usize], size: f64) -> Result<(
     }
     for &fi in out.cuts.keys() {
         if !out.consumed.contains(&fi) && pieces.iter().zip(&removed).all(|((f, _), &rm)| *f != fi || rm) {
-            return Err(failed("the fillet consumes a whole face"));
+            return Err(too_large("the fillet consumes a whole face"));
         }
     }
     // The new faces' loops: each new edge used against the way a kept piece uses it.
@@ -5037,7 +5054,7 @@ fn assemble(mut nb: Body, out: &Pieces, picked: &[usize], size: f64) -> Result<(
     // check's, which would only compute them again.
     let errs = nb.check_structure();
     if !errs.is_empty() {
-        return Err(failed(format!("the local fillet doesn't close: {}", errs[0])));
+        return Err(KernelError::InvalidResult { op: "fillet", why: format!("the local fillet doesn't close: {}", errs[0]) });
     }
     debug(|| format!("result: {} faces, {} edges", nb.faces.len(), nb.edges.iter().filter(|e| !e.degenerate).count()));
     Ok((nb, src))

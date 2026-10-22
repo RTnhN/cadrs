@@ -105,9 +105,21 @@ pub enum KernelError {
     /// The operation ran out of its work budget at `stage` (a count of steps, the same on
     /// every run, not a time): the input is too complex for it, or the algorithm ran away.
     /// For a boolean the stages are `"surface intersection"`, `"face splitting"`,
-    /// `"classification"` and `"shell assembly"`; for a blend, `"sections"`.
+    /// `"classification"` and `"shell assembly"`; for a blend, `"sections"`; for a local
+    /// fillet, `"fillet"` (its rolling-ball solves).
     BudgetExhausted {
         /// Where the work ran out.
+        stage: &'static str,
+        /// The message in words.
+        why: String,
+    },
+    /// A local fillet or chamfer (trimmed into its faces) couldn't build its result at `stage`:
+    /// `"rolling ball"` (the ball lost along an edge), `"corner"` (where blends meet at a
+    /// vertex), `"end"` (where a blend stops on an end face), `"surface"` (the blend surface
+    /// from its sections) or `"trimming"` (cutting the blend's rails into its faces). The
+    /// operation may still succeed through another method; this is what the local one hit.
+    BlendFailed {
+        /// Where the blend gave up.
         stage: &'static str,
         /// The message in words.
         why: String,
@@ -163,6 +175,7 @@ impl KernelError {
     pub fn message(&self) -> String {
         match self {
             Self::BooleanFailed { why, .. }
+            | Self::BlendFailed { why, .. }
             | Self::BudgetExhausted { why, .. }
             | Self::TooLarge { why, .. }
             | Self::InvalidGeometry { why, .. }
@@ -179,13 +192,14 @@ impl KernelError {
     }
 
     /// Whether the algorithm gave up on this input ([`KernelError::OperationFailed`] or one of
-    /// the typed failures, `BooleanFailed`, `BudgetExhausted`, `TooLarge`, `InvalidGeometry`,
-    /// `InvalidResult`), as opposed to refusing its arguments or finding nothing to make.
+    /// the typed failures, `BooleanFailed`, `BlendFailed`, `BudgetExhausted`, `TooLarge`,
+    /// `InvalidGeometry`, `InvalidResult`), as opposed to refusing its arguments or finding nothing to make.
     pub fn is_failure(&self) -> bool {
         matches!(
             self,
             Self::OperationFailed(_)
                 | Self::BooleanFailed { .. }
+                | Self::BlendFailed { .. }
                 | Self::BudgetExhausted { .. }
                 | Self::TooLarge { .. }
                 | Self::InvalidGeometry { .. }
@@ -200,6 +214,7 @@ impl fmt::Display for KernelError {
             Self::InvalidProfile(why) => write!(f, "invalid profile: {why}"),
             Self::OperationFailed(why) | Self::EmptyResult(why) | Self::OpenResult(why) => write!(f, "operation failed: {why}"),
             Self::BooleanFailed { why, .. }
+            | Self::BlendFailed { why, .. }
             | Self::BudgetExhausted { why, .. }
             | Self::TooLarge { why, .. }
             | Self::InvalidGeometry { why, .. }
@@ -301,8 +316,8 @@ pub enum HealOp {
 /// - **Errors**: [`KernelError::InvalidParameter`] for a size, angle or selection that can't
 ///   build (non-positive radius, unknown face), [`KernelError::InvalidProfile`] for a profile
 ///   that doesn't close, a failure ([`KernelError::is_failure`]: `TooLarge` for a size the
-///   geometry can't hold, `InvalidGeometry`, `BooleanFailed`, `BudgetExhausted`,
-///   `InvalidResult` or `OperationFailed`) when the algorithm gives up, and
+///   geometry can't hold, `InvalidGeometry`, `BooleanFailed`, `BlendFailed`,
+///   `BudgetExhausted`, `InvalidResult` or `OperationFailed`) when the algorithm gives up, and
 ///   [`KernelError::OpenResult`] when faces didn't close into a solid. An operation never
 ///   returns a body it found invalid: results pass the native kernel's `Body::check`.
 /// - **Tolerance**: exact geometry is within `native::tol::POINT` (1e-6 mm); vertices and edges
