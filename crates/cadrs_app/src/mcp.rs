@@ -188,6 +188,9 @@ fn run(world: &mut World, call: &Call) -> Result<Value, String> {
         Call::CreateDrawing(p) => create_drawing(world, p),
         Call::AddAnnotation(p) => add_annotation(world, p),
         Call::RenameTab(p) => rename_tab(world, p),
+        Call::DeleteTab(p) => delete_tab(world, &p.name),
+        Call::GetAssembly(p) => describe_assembly(doc(world)?, assembly(doc(world)?, p.assembly.as_deref())?),
+        Call::InsertInstance(p) => insert_instance(world, p),
         Call::GetBoard(p) => crate::mcp_board::get_board(world, p),
         Call::GetBoardFit(p) => crate::mcp_board::get_board_fit(world, p),
         Call::DeriveBoard(p) => crate::mcp_board::derive_board(world, p),
@@ -328,6 +331,105 @@ fn rename_tab(world: &mut World, p: &tools::RenameTab) -> Result<Value, String> 
     let id = d.doc.elements.iter().find(|e| e.name == p.name).map(|e| e.id).ok_or_else(|| format!("no tab named {:?}", p.name))?;
     d.execute(&cadrs_core::commands::RenameElement { id, name: p.to.clone() }).map_err(|e| e.to_string())?;
     describe(world)
+}
+
+/// Deletes a tab, unless an assembly has instances of it.
+fn delete_tab(world: &mut World, name: &str) -> Result<Value, String> {
+    let mut d = doc_mut(world)?;
+    let id = d.doc.elements.iter().find(|e| e.name == name).map(|e| e.id).ok_or_else(|| format!("no tab named {name:?}"))?;
+    let users: Vec<&str> = d
+        .doc
+        .elements
+        .iter()
+        .filter(|e| e.assembly_model().is_some_and(|a| a.instances.iter().any(|i| i.source.element() == id)))
+        .map(|e| e.name.as_str())
+        .collect();
+    if !users.is_empty() {
+        return Err(format!("{name:?} has instances in {}: delete them first", users.join(", ")));
+    }
+    d.execute(&cadrs_core::commands::DeleteElement { id }).map_err(|e| e.to_string())?;
+    describe(world)
+}
+
+/// The Assembly tab a call names, or the active tab.
+fn assembly(d: &ActiveDocument, name: Option<&str>) -> Result<ElementId, String> {
+    let e = match name {
+        Some(n) => d.doc.elements.iter().find(|e| e.name == n).ok_or_else(|| format!("no tab named {n:?}"))?,
+        None => d.active_element().ok_or("no tab is active")?,
+    };
+    if !matches!(e.kind, ElementKind::Assembly) {
+        return Err(format!("{:?} is a {}, not an Assembly", e.name, kind_label(&e.kind)));
+    }
+    Ok(e.id)
+}
+
+/// An assembly's instances and mate features.
+fn describe_assembly(d: &ActiveDocument, element: ElementId) -> Result<Value, String> {
+    use cadrs_core::assembly::InstanceSource;
+    let e = d.doc.element(element).ok_or("the Assembly is gone")?;
+    let asm = e.assembly_model().ok_or("not an Assembly")?;
+    let tab = |id: ElementId| d.doc.element(id).map(|e| e.name.clone()).unwrap_or_default();
+    let instances: Vec<Value> = asm
+        .instances
+        .iter()
+        .map(|i| {
+            let build = d.doc.element(i.source.element()).map(|s| cadrs_core::rebuild::build(s.features()));
+            let mut v = json!({
+                "name": i.name(&cadrs_core::assembly::source_part_name(&d.doc, &i.source, build.as_deref())),
+                "id": i.id.to_string(),
+                "source": tab(i.source.element()),
+                "translation_mm": i.pose.translation.map(round),
+            });
+            match i.source {
+                InstanceSource::Part { .. } => v["kind"] = json!("part"),
+                InstanceSource::Studio { board: None, .. } => {
+                    v["kind"] = json!("Part Studio (rigid)");
+                    v["parts"] = json!(i.parts.len());
+                }
+                InstanceSource::Studio { board: Some(_), .. } => v["kind"] = json!("board"),
+                InstanceSource::Assembly { .. } => v["kind"] = json!("subassembly"),
+            }
+            if i.pose.rotation != cadrs_core::assembly::Pose::IDENTITY.rotation {
+                v["rotation"] = json!(i.pose.rotation);
+            }
+            for (k, on) in [("fixed", i.fixed), ("hidden", i.hidden), ("suppressed", i.suppressed)] {
+                if on {
+                    v[k] = json!(true);
+                }
+            }
+            v
+        })
+        .collect();
+    let mates: Vec<Value> = asm.mates.iter().map(|m| json!({ "name": m.name, "suppressed": m.suppressed })).collect();
+    Ok(json!({ "assembly": e.name, "instances": instances, "mates": mates }))
+}
+
+/// Inserts a whole Part Studio (one rigid instance) or one of its parts into an assembly, as the
+/// Insert dialog does.
+fn insert_instance(world: &mut World, p: &tools::InsertInstance) -> Result<Value, String> {
+    use cadrs_core::assembly::{Instance, InstanceId, InstanceSource, Pose, commands::InsertInstance};
+    let element = assembly(doc(world)?, p.assembly.as_deref())?;
+    let studio = part_studio(doc(world)?, Some(&p.part_studio))?;
+    let d = doc(world)?;
+    let parts = cadrs_core::rebuild::build(d.doc.element(studio).ok_or("the Part Studio is gone")?.features()).parts.clone();
+    if parts.is_empty() {
+        return Err(format!("{:?} has no parts", p.part_studio));
+    }
+    let pose = p.translation.map(Pose::translation).unwrap_or(Pose::IDENTITY);
+    let id = InstanceId::new();
+    let mut instance = match &p.part {
+        None => Instance::studio(id, studio, parts.iter().map(|q| q.id).collect(), pose),
+        Some(name) => {
+            let part = parts.iter().find(|q| q.name == *name).ok_or_else(|| {
+                let names: Vec<&str> = parts.iter().map(|q| q.name.as_str()).collect();
+                format!("no part named {name:?} in {:?}; its parts are {}", p.part_studio, names.join(", "))
+            })?;
+            Instance::new(id, InstanceSource::Part { element: studio, part: part.id }, pose)
+        }
+    };
+    instance.fixed = p.fixed;
+    doc_mut(world)?.execute(&InsertInstance { element, instance }).map_err(|e| e.to_string())?;
+    describe_assembly(doc(world)?, element)
 }
 
 /// Turns the 3D view to a standard view and zooms to fit.
@@ -1271,6 +1373,111 @@ mod tests {
         // Base 2232 × 6 + 1872 × 4, upright 1836.9 × 8, boss 690.3 × 5, gusset 418 × 10.
         let volume = part.mass.as_ref().expect("mass").volume;
         assert!((volume - 43206.8).abs() < 5.0, "volume {volume}");
+    }
+
+    /// insert_instance puts a whole Part Studio (rigid) or one part into the assembly, get_assembly
+    /// lists them, and delete_tab refuses a tab an assembly uses.
+    #[test]
+    fn studios_and_parts_go_into_an_assembly() {
+        let mut world = World::new();
+        world.insert_resource(ActiveDocument::new(Document::new("Doc")));
+        fn p<T: serde::de::DeserializeOwned>(v: Value) -> T {
+            serde_json::from_value(v).unwrap()
+        }
+        let sketch = add_sketch(&mut world, &p(json!({ "plane": "Top", "entities": [
+            { "type": "rectangle", "x0": 0, "y0": 0, "x1": 10, "y1": 10 },
+            { "type": "rectangle", "x0": 20, "y0": 0, "x1": 30, "y1": 10 },
+        ] })))
+        .unwrap();
+        super::extrude(&mut world, &p(json!({ "sketch": sketch["sketch"], "depth": 5 }))).unwrap();
+
+        let asm = insert_instance(&mut world, &p(json!({ "assembly": "Assembly 1", "part_studio": "Part Studio 1", "fixed": true }))).unwrap();
+        assert_eq!(asm["instances"][0]["kind"], "Part Studio (rigid)");
+        assert_eq!(asm["instances"][0]["parts"], 2);
+        assert_eq!(asm["instances"][0]["fixed"], true);
+        let asm = insert_instance(&mut world, &p(json!({ "assembly": "Assembly 1", "part_studio": "Part Studio 1", "part": "Part 2", "translation": [0, 0, 50] }))).unwrap();
+        assert_eq!(asm["instances"][1]["name"], "Part 2 <1>");
+        assert_eq!(asm["instances"][1]["translation_mm"], json!([0.0, 0.0, 50.0]));
+        let e = insert_instance(&mut world, &p(json!({ "assembly": "Assembly 1", "part_studio": "Part Studio 1", "part": "Part 9" }))).unwrap_err();
+        assert!(e.contains("Part 1, Part 2"), "{e}");
+        assert!(insert_instance(&mut world, &p(json!({ "assembly": "Part Studio 1", "part_studio": "Part Studio 1" }))).is_err());
+        let listed = run(&mut world, &Call::GetAssembly(p(json!({ "assembly": "Assembly 1" })))).unwrap();
+        assert_eq!(listed["instances"].as_array().unwrap().len(), 2);
+
+        let e = delete_tab(&mut world, "Part Studio 1").unwrap_err();
+        assert!(e.contains("Assembly 1"), "{e}");
+        let doc = delete_tab(&mut world, "Assembly 1").unwrap();
+        assert_eq!(doc["tabs"].as_array().unwrap().len(), 1);
+        assert!(delete_tab(&mut world, "Part Studio 1").is_err(), "the last tab stays");
+    }
+
+    /// Ground sections 5 m apart (three lines and the ground as one spline), lofted pair by pair:
+    /// each loft is the slab between its two sections, its volume their mean area × 5 m.
+    #[test]
+    fn ground_sections_loft_without_twisting() {
+        let sections: &[(f64, &[[f64; 2]])] = &[
+        (15000.0, &[[-16000.0, 600.0], [-14000.0, 250.0], [-12000.0, 448.0], [-10000.0, 255.0], [-8000.0, -44.0], [-6000.0, -362.0], [-4000.0, -730.0], [-2000.0, -1058.0], [0.0, -1353.0], [2000.0, -1604.0], [4000.0, -1899.0], [6000.0, -2231.0], [8000.0, -2751.0], [10000.0, -3196.0], [12000.0, -3643.0], [14000.0, -4108.0], [16000.0, -4490.0], [18000.0, -4859.0], [20000.0, -5271.0], [22000.0, -5696.0], [24000.0, -6048.0], [26000.0, -6390.0], [28000.0, -6732.0], [30000.0, -7090.0], [32000.0, -7453.0], [34000.0, -7841.0], [36000.0, -8318.0], [38000.0, -8674.0], [40000.0, -8500.0]]),
+        (10000.0, &[[-16000.0, 600.0], [-14000.0, 650.0], [-12000.0, 455.0], [-10000.0, 260.0], [-8000.0, 33.0], [-6000.0, -195.0], [-4000.0, -468.0], [-2000.0, -753.0], [0.0, -1027.0], [2000.0, -1277.0], [4000.0, -1494.0], [6000.0, -1711.0], [8000.0, -2038.0], [10000.0, -2518.0], [12000.0, -2970.0], [14000.0, -3489.0], [16000.0, -4029.0], [18000.0, -4486.0], [20000.0, -4925.0], [22000.0, -5371.0], [24000.0, -5808.0], [26000.0, -6177.0], [28000.0, -6561.0], [30000.0, -6913.0], [32000.0, -7273.0], [34000.0, -7661.0], [36000.0, -8121.0], [38000.0, -8499.0], [40000.0, -8500.0]]),
+        (5000.0, &[[-16000.0, 600.0], [-14000.0, 604.0], [-12000.0, 432.0], [-10000.0, 259.0], [-8000.0, 57.0], [-6000.0, -146.0], [-4000.0, -363.0], [-2000.0, -591.0], [0.0, -816.0], [2000.0, -1043.0], [4000.0, -1267.0], [6000.0, -1483.0], [8000.0, -1700.0], [10000.0, -2177.0], [12000.0, -2250.0], [14000.0, -2640.0], [16000.0, -3308.0], [18000.0, -4010.0], [20000.0, -4612.0], [22000.0, -5110.0], [24000.0, -5588.0], [26000.0, -6011.0], [28000.0, -6391.0], [30000.0, -6745.0], [32000.0, -7116.0], [34000.0, -7507.0], [36000.0, -7924.0], [38000.0, -8356.0], [40000.0, -8500.0]]),
+        (0.0, &[[-16000.0, 600.0], [-14000.0, 532.0], [-12000.0, 372.0], [-10000.0, 203.0], [-8000.0, 9.0], [-6000.0, -181.0], [-4000.0, -381.0], [-2000.0, -584.0], [0.0, -797.0], [2000.0, -1027.0], [4000.0, -1239.0], [6000.0, -1451.0], [8000.0, -1663.0], [10000.0, -1881.0], [12000.0, -2084.0], [14000.0, -2232.0], [16000.0, -2958.0], [18000.0, -3510.0], [20000.0, -4021.0], [22000.0, -4737.0], [24000.0, -5167.0], [26000.0, -5370.0], [28000.0, -6156.0], [30000.0, -6571.0], [32000.0, -6977.0], [34000.0, -7389.0], [36000.0, -7819.0], [38000.0, -8231.0], [40000.0, -8500.0]]),
+        (-5000.0, &[[-16000.0, 600.0], [-14000.0, 445.0], [-12000.0, 277.0], [-10000.0, 77.0], [-8000.0, -126.0], [-6000.0, -327.0], [-4000.0, -534.0], [-2000.0, -735.0], [0.0, -960.0], [2000.0, -1169.0], [4000.0, -1378.0], [6000.0, -1586.0], [8000.0, -1795.0], [10000.0, -2004.0], [12000.0, -2213.0], [14000.0, -2423.0], [16000.0, -3209.0], [18000.0, -3439.0], [20000.0, -3640.0], [22000.0, -4057.0], [24000.0, -4827.0], [26000.0, -5345.0], [28000.0, -5853.0], [30000.0, -6303.0], [32000.0, -6745.0], [34000.0, -7208.0], [36000.0, -7661.0], [38000.0, -8083.0], [40000.0, -8500.0]]),
+        (-10000.0, &[[-16000.0, 600.0], [-14000.0, 342.0], [-12000.0, 138.0], [-10000.0, -102.0], [-8000.0, -324.0], [-6000.0, -483.0], [-4000.0, -642.0], [-2000.0, -801.0], [0.0, -1037.0], [2000.0, -1347.0], [4000.0, -1657.0], [6000.0, -1895.0], [8000.0, -2104.0], [10000.0, -2313.0], [12000.0, -2522.0], [14000.0, -2731.0], [16000.0, -2984.0], [18000.0, -3490.0], [20000.0, -3623.0], [22000.0, -3826.0], [24000.0, -4245.0], [26000.0, -4992.0], [28000.0, -5511.0], [30000.0, -6017.0], [32000.0, -6496.0], [34000.0, -6972.0], [36000.0, -7457.0], [38000.0, -7918.0], [40000.0, -8500.0]]),
+        (-15000.0, &[[-16000.0, 600.0], [-14000.0, 92.0], [-12000.0, -135.0], [-10000.0, -357.0], [-8000.0, -470.0], [-6000.0, -549.0], [-4000.0, -708.0], [-2000.0, -867.0], [0.0, -1053.0], [2000.0, -1363.0], [4000.0, -1674.0], [6000.0, -1984.0], [8000.0, -2294.0], [10000.0, -2605.0], [12000.0, -2830.0], [14000.0, -3039.0], [16000.0, -3248.0], [18000.0, -3563.0], [20000.0, -3735.0], [22000.0, -3993.0], [24000.0, -4298.0], [26000.0, -4678.0], [28000.0, -5180.0], [30000.0, -5709.0], [32000.0, -6257.0], [34000.0, -6713.0], [36000.0, -7254.0], [38000.0, -7751.0], [40000.0, -8500.0]]),
+        (-20000.0, &[[-16000.0, 600.0], [-14000.0, -187.0], [-12000.0, -408.0], [-10000.0, -618.0], [-8000.0, -741.0], [-6000.0, -785.0], [-4000.0, -830.0], [-2000.0, -933.0], [0.0, -1092.0], [2000.0, -1380.0], [4000.0, -1690.0], [6000.0, -2000.0], [8000.0, -2310.0], [10000.0, -2621.0], [12000.0, -2931.0], [14000.0, -3241.0], [16000.0, -3552.0], [18000.0, -3767.0], [20000.0, -3999.0], [22000.0, -4234.0], [24000.0, -4550.0], [26000.0, -4846.0], [28000.0, -5193.0], [30000.0, -5574.0], [32000.0, -5950.0], [34000.0, -6501.0], [36000.0, -7078.0], [38000.0, -7601.0], [40000.0, -8500.0]]),
+        (-25000.0, &[[-16000.0, 600.0], [-14000.0, -250.0], [-12000.0, -679.0], [-10000.0, -803.0], [-8000.0, -881.0], [-6000.0, -959.0], [-4000.0, -1037.0], [-2000.0, -1117.0], [0.0, -1190.0], [2000.0, -1396.0], [4000.0, -1722.0], [6000.0, -2086.0], [8000.0, -2454.0], [10000.0, -2822.0], [12000.0, -3191.0], [14000.0, -3560.0], [16000.0, -3859.0], [18000.0, -4086.0], [20000.0, -4331.0], [22000.0, -4633.0], [24000.0, -4899.0], [26000.0, -5144.0], [28000.0, -5390.0], [30000.0, -5653.0], [32000.0, -5976.0], [34000.0, -6361.0], [36000.0, -6877.0], [38000.0, -7406.0], [40000.0, -8500.0]]),
+        ];
+        let mut f = Vec::new();
+        let mut ids = Vec::new();
+        let mut areas = Vec::new();
+        for (y, top) in sections {
+            let plane = if *y == 0.0 { PlaneRef::Front } else { plane_from_front(&mut f, -*y) };
+            let (l, r) = (top[0], top[top.len() - 1]);
+            let mut geometry = Sketch::new();
+            let mut ops = sketch_ops(&[
+                SketchEntity::Line { x0: l[0], y0: l[1], x1: l[0], y1: -16000.0 },
+                SketchEntity::Line { x0: l[0], y0: -16000.0, x1: r[0], y1: -16000.0 },
+                SketchEntity::Line { x0: r[0], y0: -16000.0, x1: r[0], y1: r[1] },
+            ])
+            .unwrap();
+            ops.push(SketchOp::AddSpline { points: top.iter().map(|p| SVec2::new(p[0], p[1])).collect(), periodic: false, start_tangent: None, end_tangent: None, construction: false });
+            for op in ops {
+                op.apply(&mut geometry).unwrap();
+            }
+            let regions = cadrs_sketch::region::regions(&geometry);
+            assert_eq!(regions.len(), 1);
+            areas.push(regions[0].area());
+            let id = FeatureId::new();
+            let kind = FeatureKind::Sketch(cadrs_core::document::SketchFeature { plane: Some(plane), disable_imprinting: false, geometry });
+            f.push(Feature::new(id, "Section", kind));
+            ids.push(id);
+        }
+        let mut bad = Vec::new();
+        for i in 0..ids.len() - 1 {
+            let mut g = f.clone();
+            let loft = cadrs_core::advanced::LoftFeature {
+                profiles: vec![cadrs_core::advanced::LoftProfile::Sketch(ids[i]), cadrs_core::advanced::LoftProfile::Sketch(ids[i + 1])],
+                ..Default::default()
+            };
+            g.push(Feature::new(FeatureId::new(), "Loft", FeatureKind::Loft(loft)));
+            let build = cadrs_core::rebuild::build(&g);
+            let volume = build.parts.first().and_then(|p| p.mass.as_ref()).map(|m| m.volume).unwrap_or(0.0);
+            let want = (areas[i] + areas[i + 1]) / 2.0 * 5000.0;
+            eprintln!("loft {i}->{}: {volume:.4e} want {want:.4e} errors {:?}", i + 1, build.errors);
+            if (volume / want - 1.0).abs() > 0.01 {
+                bad.push(i);
+            }
+        }
+        assert!(bad.is_empty(), "twisted lofts: {bad:?}");
+        // All nine in one loft: the same ground, smooth across the sections.
+        let mut g = f.clone();
+        let loft = cadrs_core::advanced::LoftFeature { profiles: ids.iter().map(|id| cadrs_core::advanced::LoftProfile::Sketch(*id)).collect(), ..Default::default() };
+        g.push(Feature::new(FeatureId::new(), "Loft", FeatureKind::Loft(loft)));
+        let t = std::time::Instant::now();
+        let build = cadrs_core::rebuild::build(&g);
+        let volume = build.parts.first().and_then(|p| p.mass.as_ref()).map(|m| m.volume).unwrap_or(0.0);
+        let want: f64 = (0..ids.len() - 1).map(|i| (areas[i] + areas[i + 1]) / 2.0 * 5000.0).sum();
+        eprintln!("loft all: {volume:.4e} want {want:.4e} in {:?} errors {:?}", t.elapsed(), build.errors);
+        assert!((volume / want - 1.0).abs() < 0.01, "the nine-section loft: {volume} against {want}");
     }
 
     #[test]

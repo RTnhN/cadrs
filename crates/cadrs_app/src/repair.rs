@@ -677,6 +677,7 @@ fn sync_cameras(
             && o.scale != v.scale
         {
             o.scale = v.scale;
+            o.far = crate::camera::camera_far(v.scale);
         }
     }
     for (mut cam, mut t) in &mut q_cube {

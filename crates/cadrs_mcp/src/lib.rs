@@ -60,6 +60,9 @@ pub enum Call {
     CreateDrawing(CreateDrawing),
     AddAnnotation(AddAnnotation),
     RenameTab(RenameTab),
+    DeleteTab(TabName),
+    GetAssembly(AssemblyName),
+    InsertInstance(InsertInstance),
     GetBoard(BoardName),
     GetBoardFit(BoardFit),
     DeriveBoard(DeriveBoard),
@@ -222,6 +225,25 @@ impl Cadrs {
     #[tool(description = "Rename a tab: a Part Studio (the title block of its drawings shows the name) or a drawing.")]
     async fn rename_tab(&self, Parameters(p): Parameters<RenameTab>) -> Result<CallToolResult, ErrorData> {
         self.call(Call::RenameTab(p)).await
+    }
+
+    #[tool(description = "Delete a tab. A Part Studio or Assembly that an assembly still has instances of \
+        is refused (delete those instances first).")]
+    async fn delete_tab(&self, Parameters(p): Parameters<TabName>) -> Result<CallToolResult, ErrorData> {
+        self.call(Call::DeleteTab(p)).await
+    }
+
+    #[tool(description = "Describe an Assembly tab: its instances (name, id, source tab and part, position \
+        in mm, fixed, hidden, suppressed) and its mate features.")]
+    async fn get_assembly(&self, Parameters(p): Parameters<AssemblyName>) -> Result<CallToolResult, ErrorData> {
+        self.call(Call::GetAssembly(p)).await
+    }
+
+    #[tool(description = "Insert into an assembly a whole Part Studio (one rigid instance of all its parts) \
+        or one of its parts, at a position (mm; omitted: the origin, so the parts sit where they are in their \
+        Part Studio), optionally fixed. One undo step. Returns the assembly as get_assembly does.")]
+    async fn insert_instance(&self, Parameters(p): Parameters<InsertInstance>) -> Result<CallToolResult, ErrorData> {
+        self.call(Call::InsertInstance(p)).await
     }
 
     #[tool(description = "Add a Part Studio tab to the open document and make it the active tab.")]
