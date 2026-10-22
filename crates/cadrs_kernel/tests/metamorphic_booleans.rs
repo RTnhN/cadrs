@@ -605,3 +605,81 @@ fn step_round_trip_conic_edge() {
         },
     );
 }
+
+/// Four boxes united in turn (an extrude sequence of the soak, minimised): the first two touch
+/// along an edge only (x = 4.5, z = 5.5), the third bridges them, and the fourth's union leaves
+/// an open shell.
+#[test]
+#[ignore = "known failure: uniting a box into boxes that touch along an edge leaves an open shell"]
+fn boxes_touching_along_an_edge() {
+    let bx = |x: [f64; 2], y: [f64; 2], z: [f64; 2]| Step {
+        op: BoolOp::Union,
+        shape: Shape::Box {
+            min: [x[0], y[0], z[0]],
+            size: [x[1] - x[0], y[1] - y[0], z[1] - z[0]],
+        },
+    };
+    let steps = [
+        bx([2.5, 4.5], [3.0, 5.0], [5.5, 11.0]),
+        bx([4.5, 8.0], [3.0, 5.5], [3.5, 5.5]),
+        bx([4.5, 6.5], [4.5, 6.0], [3.5, 8.0]),
+        bx([4.5, 9.5], [3.0, 7.0], [4.0, 6.0]),
+    ];
+    let mut bad = check_sequence(&steps, &mut 0);
+    // And a cut (seed 955695009267410166 sequence 500), the same boxes as sketches extruded
+    // along y and z (as boxes along z alone it passes): two touching along the edge x = 5.5,
+    // y = 5, a third on both, then a block cut through them all.
+    let prism = |op, axis, o, outer, depth| Step {
+        op,
+        shape: Shape::Prism {
+            axis,
+            o,
+            outer,
+            hole: None,
+            depth,
+        },
+    };
+    let steps = [
+        prism(BoolOp::Union, 1, [0.0, 2.0, 0.0], [1.0, 3.5, 5.0, 5.5], 3.0),
+        prism(BoolOp::Union, 1, [0.0, 5.0, 0.0], [2.5, 5.5, 5.0, 7.5], 2.5),
+        prism(
+            BoolOp::Union,
+            2,
+            [0.0, 0.0, 5.0],
+            [2.0, 5.0, 6.5, 10.5],
+            2.0,
+        ),
+        prism(
+            BoolOp::Subtract,
+            1,
+            [0.0, 2.5, 0.0],
+            [1.0, 1.0, 5.0, 6.0],
+            5.0,
+        ),
+    ];
+    bad.extend(check_sequence(&steps, &mut 0));
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+}
+
+/// Two spheres, one turned (soak seed 16150658447098336548 case 2323): the union and the
+/// difference come back without an error but invalid: a sphere face's intersection loop crosses
+/// its outer loop in (u, v) at the seam near the pole.
+#[test]
+#[ignore = "known failure: two spheres: the union's sphere face has loops crossing at the seam near a pole (invalid, no error)"]
+fn spheres_loops_cross_at_seam() {
+    pinned(
+        Placed {
+            shape: Shape::Sphere {
+                c: [7.0, 6.62966283372091, 0.9659503482469911],
+                r: 4.0,
+            },
+            axis: [0.7765431131320071, 0.5361794883583875, 0.5889070314711073],
+            angle: -0.3773634823933971,
+            about: [5.0; 3],
+        },
+        Placed::fixed(Shape::Sphere {
+            c: [7.0, 4.0, 9.0],
+            r: 4.532638031669147,
+        }),
+    );
+}
