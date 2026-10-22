@@ -1503,6 +1503,7 @@ fn view_shortcuts(
     doc: Option<Res<ActiveDocument>>,
     mut planes: ResMut<PlanesVisible>,
     inset: Res<DialogInset>,
+    mut commands: Commands,
     (cache, asm_parts, pcb_scene, eda2d, layout): (
         Res<crate::parts::PartCache>,
         Res<crate::assembly::AssemblyParts>,
@@ -1562,12 +1563,12 @@ fn view_shortcuts(
             None
         };
         if let Some(s) = standard {
-            let to = if s == StandardView::Isometric {
-                fitted_isometric_for(view.view.perspective, rect.0.size())
+            if s == StandardView::Isometric {
+                commands.queue(isometric_and_fit);
             } else {
-                view.target().oriented(s)
-            };
-            view.animate_to(to);
+                let to = view.target().oriented(s);
+                view.animate_to(to);
+            }
             continue;
         }
         match k.shortcut_code() {
@@ -1625,7 +1626,7 @@ fn view_shortcuts(
                         .iter()
                         .any(|i| matches!(i, cadrs_eda::board_edit::BoardItem::Footprint(_))) => {}
             KeyCode::KeyF if !shift => {
-                let mut pts = scene_points(doc.as_deref(), *kind, planes.0);
+                let mut pts = scene_points(doc.as_deref(), *kind, planes.0, Some(&cache));
                 // In an assembly with a mate dialog's or a drag's preview, the instances as drawn
                 // (Final part 3: `course_asm_variables` 02 was fitted to the pin where it was
                 // before the pick); else the shown occurrences, as before (Final part 4: the
@@ -1674,11 +1675,17 @@ fn view_shortcuts(
     }
 }
 
-/// Zoom to fit (F, and the context menus): frames the planes and the sketches.
-pub fn zoom_to_fit(world: &mut World) {
+/// What zoom to fit frames in the active tab: the planes shown, the parts and the sketches (an
+/// Assembly's instances as drawn, a PCB Studio's board).
+fn fit_points(world: &World) -> Vec<Vec3> {
     let kind = *world.resource::<ActiveKind>();
     let planes = world.resource::<PlanesVisible>().0;
-    let mut pts = scene_points(world.get_resource::<ActiveDocument>(), kind, planes);
+    let mut pts = scene_points(
+        world.get_resource::<ActiveDocument>(),
+        kind,
+        planes,
+        world.get_resource::<crate::parts::PartCache>(),
+    );
     if kind == ActiveKind::Assembly {
         // The instances as drawn: a mate dialog's or a drag's placements included.
         let cache = world.resource::<crate::parts::PartCache>();
@@ -1699,13 +1706,39 @@ pub fn zoom_to_fit(world: &mut World) {
         // P3H.3: the board shown.
         pts = world.resource::<crate::pcb::view::PcbScene>().fit_points();
     }
+    pts
+}
+
+/// Zoom to fit (F, and the context menus): frames the planes and the sketches.
+pub fn zoom_to_fit(world: &mut World) {
+    orient_and_fit(world, |v| v);
+}
+
+/// Turns the view (`orient` from the current one) and zooms to fit, as the view menu's
+/// isometric, dimetric and trimetric views and Shift+7 do. With nothing built in the tab, the
+/// isometric view frames the default planes ([`fitted_isometric_for`]).
+pub fn orient_and_fit(world: &mut World, orient: impl FnOnce(ViewState) -> ViewState) {
+    let kind = *world.resource::<ActiveKind>();
+    let pts = fit_points(world);
     let size = world.resource::<ViewportRect>().0.size();
     let inset = world.resource::<DialogInset>().0;
     let mut view = world.resource_mut::<ViewportView>();
-    let to = view
-        .target()
-        .fitted_beside(&pts, size, fit_fill(kind), inset);
+    let to = orient(view.target()).fitted_beside(&pts, size, fit_fill(kind), inset);
     view.animate_to(to);
+}
+
+/// The isometric view, fitted: to what the tab shows, or (nothing built yet, so the planes
+/// alone would leave it far zoomed in or out) to the default planes as before.
+pub fn isometric_and_fit(world: &mut World) {
+    let built = !world.resource::<crate::parts::PartCache>().parts.is_empty();
+    if built {
+        orient_and_fit(world, |v| v.oriented(StandardView::Isometric));
+    } else {
+        let size = world.resource::<ViewportRect>().0.size();
+        let mut view = world.resource_mut::<ViewportView>();
+        let to = fitted_isometric_for(view.view.perspective, size);
+        view.animate_to(to);
+    }
 }
 
 /// View normal to the sketch plane (the dimension menu; N while sketching).
@@ -1760,20 +1793,37 @@ pub const DRAG_ZOOM_PER_PX: f32 = 1.006;
 
 /// The points zoom to fit frames: the default planes (the ones shown) and every sketch of the
 /// active Part Studio (the origin for an Assembly).
+///
+/// The parts come from `cache` when it holds the active tab's (rebuilt on the rebuild thread);
+/// otherwise they are rebuilt here, which waits for the rebuild thread.
 pub fn scene_points(
     doc: Option<&ActiveDocument>,
     kind: ActiveKind,
     planes: [bool; 3],
+    cache: Option<&crate::parts::PartCache>,
 ) -> Vec<Vec3> {
     let mut pts = Vec::new();
     if kind == ActiveKind::PcbStudio {
         // The board is framed by `crate::pcb::view` (zoom_to_fit uses its box).
         return vec![Vec3::ZERO];
     }
+    let active = doc.and_then(|d| d.active);
+    let to_vec3 = |p: &cadrs_core::Part| -> Vec<Vec3> {
+        p.solid
+            .positions
+            .iter()
+            .map(|q| Vec3::new(q[0] as f32, q[1] as f32, q[2] as f32))
+            .collect()
+    };
     if kind == ActiveKind::Assembly {
         // The shown instances, so they fill the view; the origin only when there are none.
-        if let Some(d) = doc {
-            pts.extend(crate::assembly::shown_points(d));
+        match cache.filter(|c| c.assembly.is_some() && c.assembly == active && !c.rebuilding) {
+            Some(c) => pts.extend(c.shown().flat_map(to_vec3)),
+            None => {
+                if let Some(d) = doc {
+                    pts.extend(crate::assembly::shown_points(d));
+                }
+            }
         }
         if pts.is_empty() {
             pts.push(Vec3::ZERO);
@@ -1790,13 +1840,13 @@ pub fn scene_points(
     let Some(el) = doc.and_then(|d| d.active_element()) else {
         return pts;
     };
-    for part in cadrs_core::parts::parts(el.features()) {
-        pts.extend(
-            part.solid
-                .positions
-                .iter()
-                .map(|p| Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32)),
-        );
+    match cache.filter(|c| !c.rebuilding && c.settled().map(|(id, ..)| id) == Some(el.id)) {
+        Some(c) => pts.extend(c.parts.iter().flat_map(to_vec3)),
+        None => {
+            for part in cadrs_core::parts::parts(el.features()) {
+                pts.extend(to_vec3(&part));
+            }
+        }
     }
     // Only the sketches shown (P3.8: a consumed sketch's far-off arc centre, such as the
     // Reflector's revolve profile 400 mm up, doesn't count).
