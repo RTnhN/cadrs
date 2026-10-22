@@ -777,7 +777,7 @@ impl XBuilder {
                         if (n.point(a) - n.point(b)).norm() >= JOIN {
                             return None;
                         }
-                        let rs = Curve::Nurbs(Arc::new(n.restarted(param_of(&c, &p0))));
+                        let rs = Curve::Nurbs(Arc::new(n.restarted(param_of(&c, &p0)).ok()?));
                         edge_range(&rs, &p0, &p1, closed).map(|r| (rs, r))
                     })?,
                 }

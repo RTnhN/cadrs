@@ -806,19 +806,28 @@ impl NurbsCurve {
     }
 
     /// Splits at `u` into two curves (knot insertion to full multiplicity).
-    pub fn split(&self, u: f64) -> (Self, Self) {
+    ///
+    /// # Errors
+    /// `InvalidParameter` when `u` isn't strictly inside the curve's range (or isn't a number,
+    /// as a corrupt file's curves can give).
+    pub fn split(&self, u: f64) -> crate::Result<(Self, Self)> {
+        let (a, b) = self.range();
+        let outside = || crate::KernelError::InvalidParameter(format!("a B-spline split at {u}, outside its range {a}..{b}"));
+        if !(u > a && u < b) {
+            return Err(outside());
+        }
         let p = self.degree;
         let mut c = self.clone();
         let mult = c.knots.iter().filter(|k| (**k - u).abs() < 1e-14).count();
         for _ in mult..p + 1 {
             c = c.insert_knot(u);
         }
-        let idx = c.knots.iter().position(|k| (*k - u).abs() < 1e-14).unwrap();
+        let idx = c.knots.iter().position(|k| (*k - u).abs() < 1e-14).ok_or_else(outside)?;
         // knots[idx..idx+p+1] == u: the left curve's poles end at idx − 1, the right's start at
         // idx (both the point at u).
         let left = Self { degree: p, knots: c.knots[..idx + p + 1].to_vec(), cps: c.cps[..idx].to_vec() };
         let right = Self { degree: p, knots: c.knots[idx..].to_vec(), cps: c.cps[idx..].to_vec() };
-        (left, right)
+        Ok((left, right))
     }
 
     /// This curve followed by `next` (which starts where this one ends, same degree): a C0
@@ -837,18 +846,24 @@ impl NurbsCurve {
     }
 
     /// A closed curve restarted at `u`: from `u` to its end, then from its start back to `u`.
-    pub fn restarted(&self, u: f64) -> Self {
+    ///
+    /// # Errors
+    /// `InvalidParameter` when `u` isn't a number.
+    pub fn restarted(&self, u: f64) -> crate::Result<Self> {
         let (a, b) = self.range();
+        if !u.is_finite() {
+            return Err(crate::KernelError::InvalidParameter(format!("a closed B-spline restarted at {u}")));
+        }
         // (A start a rounding error from an end is that end: splitting there leaves an empty
         // piece.)
         if u <= a + tol::REL_FINE * (b - a) || u >= b - tol::REL_FINE * (b - a) {
-            return self.clone();
+            return Ok(self.clone());
         }
-        let (l, r) = self.split(u);
+        let (l, r) = self.split(u)?;
         if l.cps.is_empty() || r.cps.is_empty() {
-            return self.clone();
+            return Ok(self.clone());
         }
-        r.joined(&l)
+        Ok(r.joined(&l))
     }
 
     /// Inserts the knot `u` once (A5.1).
@@ -960,11 +975,15 @@ impl NurbsCurve {
         let (lo, hi) = self.range();
         let (a, b) = (a.max(lo), b.min(hi));
         let mut c = self.clone();
-        if a > lo && a < hi {
-            c = c.split(a).1;
+        if a > lo && a < hi
+            && let Ok((_, r)) = c.split(a)
+        {
+            c = r;
         }
-        if b < hi && b > a {
-            c = c.split(b).0;
+        if b < hi && b > a
+            && let Ok((l, _)) = c.split(b)
+        {
+            c = l;
         }
         c
     }
@@ -1445,7 +1464,7 @@ mod tests {
     fn split_halves_are_valid_curves() {
         let c = NurbsCurve::interpolate(&[P3::new(0.0, 0.0, 0.0), P3::new(1.0, 2.0, 0.0), P3::new(3.0, 1.0, 1.0), P3::new(4.0, 3.0, 0.0), P3::new(6.0, 0.0, 2.0)], &[0.0, 0.2, 0.5, 0.7, 1.0], 3, None, None);
         for u in [0.3, 0.5] {
-            let (l, r) = c.split(u);
+            let (l, r) = c.split(u).unwrap();
             for h in [&l, &r] {
                 assert_eq!(h.knots.len(), h.cps.len() + h.degree + 1);
             }
@@ -1547,7 +1566,7 @@ mod tests {
         let r = std::f64::consts::FRAC_1_SQRT_2;
         let pts = [(1.0, 0.0, 1.0), (1.0, 1.0, r), (0.0, 1.0, 1.0), (-1.0, 1.0, r), (-1.0, 0.0, 1.0), (-1.0, -1.0, r), (0.0, -1.0, 1.0), (1.0, -1.0, r), (1.0, 0.0, 1.0)];
         let c = NurbsCurve { degree: 2, knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 4.0], cps: pts.iter().map(|&(x, y, w)| H::new(x * w, y * w, 0.0, w)).collect() };
-        let d = c.restarted(1.3);
+        let d = c.restarted(1.3).unwrap();
         assert_eq!(d.knots.len(), d.cps.len() + d.degree + 1);
         assert_eq!(d.range(), (1.3, 5.3));
         assert!((d.point(1.3) - c.point(1.3)).norm() < 1e-12);
@@ -1563,7 +1582,7 @@ mod tests {
     #[test]
     fn split_keeps_shape() {
         let c = NurbsCurve::bezier(&[P3::new(0.0, 0.0, 0.0), P3::new(0.0, 10.0, 0.0), P3::new(20.0, 10.0, 0.0), P3::new(20.0, 0.0, 0.0)], &[1.0; 4]);
-        let (a, b) = c.split(0.3);
+        let (a, b) = c.split(0.3).unwrap();
         assert!((a.point(0.15) - c.point(0.15)).norm() < 1e-12);
         assert!((b.point(0.8) - c.point(0.8)).norm() < 1e-12);
     }

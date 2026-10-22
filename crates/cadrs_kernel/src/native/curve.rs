@@ -294,11 +294,15 @@ impl Curve {
             Curve::Nurbs(n) => {
                 let (a, b) = n.range();
                 let mut c = (**n).clone();
-                if t0 > a + tol::ROUNDOFF_FINE {
-                    c = c.split(t0).1;
+                if t0 > a + tol::ROUNDOFF_FINE
+                    && let Ok((_, r)) = c.split(t0)
+                {
+                    c = r;
                 }
-                if t1 < b - tol::ROUNDOFF_FINE {
-                    c = c.split(t1).0;
+                if t1 < b - tol::ROUNDOFF_FINE
+                    && let Ok((l, _)) = c.split(t1)
+                {
+                    c = l;
                 }
                 c
             }

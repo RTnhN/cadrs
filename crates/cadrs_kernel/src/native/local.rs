@@ -1229,7 +1229,7 @@ fn closed_arc(c: &Curve, p0: &P3, p1: &P3, closed_edge: bool, dir0: &V3) -> Opti
         return None;
     }
     let t0 = nurbs_passes(c, p0).into_iter().next().unwrap_or_else(|| c.closest(p0, a, b));
-    let r = n.restarted(t0);
+    let r = n.restarted(t0).ok()?;
     let (a, b) = r.range();
     let rc = Curve::Nurbs(std::sync::Arc::new(r));
     let forward = rc.tangent(a).dot(dir0) >= 0.0;
