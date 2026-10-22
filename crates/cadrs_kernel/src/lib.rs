@@ -851,6 +851,17 @@ pub trait Kernel {
     /// `modified`.
     fn replace_faces(&mut self, body: BodyId, faces: &[FaceReplacement]) -> Result<OpResult>;
 
+    /// Move face's Translate and Rotate (Onshape's Move face): the faces moved rigidly by
+    /// `motion` (a translation or a rotation, not a reflection) and the faces round them
+    /// extended or trimmed to meet them where they now are, the topology kept. Moving faces
+    /// along their normals is [`Kernel::offset`] with per-face distances. Faces are `modified`.
+    /// A move that would change the topology (a face shrinking to nothing, or running into a
+    /// face it doesn't border) is an `InvalidParameter` error, never a wrong body.
+    fn move_faces(&mut self, body: BodyId, faces: &[FaceId], motion: &Motion) -> Result<OpResult> {
+        let _ = (body, faces, motion);
+        Err(KernelError::Unsupported("Move face by a translation or rotation"))
+    }
+
     /// A fillet whose radius varies along each edge (P3.10, PS14.6 Variable fillet). Every edge
     /// tangent to a listed edge must be listed too (OCCT continues a fillet along them). With
     /// `allow_overflow` off it is refused where it runs onto another face, as `fillet_with`.

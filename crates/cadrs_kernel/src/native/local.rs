@@ -1101,6 +1101,61 @@ pub fn replace_faces(k: &mut NativeKernel, body: BodyId, faces: &[FaceReplacemen
     Ok(OpResult { bodies: vec![id], history })
 }
 
+/// `Kernel::move_faces`: Move face's Translate and Rotate. The faces' surfaces moved by the
+/// rigid `motion` and the body's edges and vertices recomputed where they meet their
+/// neighbours ([`replace_surfaces_in`]), each moved face keeping the side its material is on.
+/// A move that changes the topology is refused (`InvalidParameter`), as Move face's offset in
+/// [`offset`].
+pub fn move_faces(k: &mut NativeKernel, body: BodyId, faces: &[FaceId], motion: &Motion) -> Result<OpResult> {
+    let b = (**k.get(body)?).clone();
+    if faces.is_empty() {
+        return Err(KernelError::InvalidParameter("Move face needs faces to move".into()));
+    }
+    if let Some(f) = faces.iter().find(|f| f.0 as usize >= b.faces.len()) {
+        return Err(KernelError::InvalidParameter(format!("unknown {f:?}")));
+    }
+    // A rigid motion: orthonormal, no reflection (a reflected face would turn inside out).
+    let lin = motion.linear;
+    let finite = lin.iter().chain(motion.translation.iter()).all(|x| x.is_finite());
+    if !finite || (lin.transpose() * lin - nalgebra::Matrix3::identity()).norm() > tol::ANGULAR.sqrt() || motion.is_reflection() {
+        return Err(KernelError::InvalidParameter("Move face takes a translation or a rotation".into()));
+    }
+    let m = Affine { m: lin, t: motion.translation };
+    let mut surfs: Vec<Surface> = b.faces.iter().map(|f| f.surf.clone()).collect();
+    for f in faces {
+        surfs[f.0 as usize] = b.faces[f.0 as usize].surf.transformed(&m);
+    }
+    let too_far = |why: &str| KernelError::InvalidParameter(format!("The faces can't move that far: {why}"));
+    let mut out = replace_surfaces_in(&b, &surfs, &[]).map_err(|e| match e {
+        KernelError::InvalidGeometry { .. } | KernelError::InvalidResult { .. } => too_far("the faces round them no longer meet them"),
+        e => e,
+    })?;
+    // Each moved face keeps its material on the side it was (its outward normal moved along).
+    for f in faces {
+        let fi = f.0 as usize;
+        let middle = |body: &Body| super::smb::face_centroids(&super::kernel::subset(body, &[fi], false)).first().copied();
+        let (Some(was), Some(now)) = (middle(&b), middle(&out)) else { continue };
+        let outward = |body: &Body, p: &P3| {
+            let face = &body.faces[fi];
+            let (u, v) = face.surf.project(p, None);
+            face.surf.normal(u, v) * if face.sense { 1.0 } else { -1.0 }
+        };
+        if outward(&out, &now).dot(&m.vector(&outward(&b, &was))) < 0.0 {
+            out.faces[fi].sense = !out.faces[fi].sense;
+        }
+    }
+    if !out.check_with(super::topo::CheckLevel::Full).is_empty() {
+        return Err(too_far("a face would run into another face"));
+    }
+    if super::mass::body_mass(&out).volume <= 0.0 {
+        return Err(too_far("the body would turn inside out"));
+    }
+    let nf = out.faces.len();
+    let id = k.insert(out);
+    let history = History { modified: (0..nf).map(|i| (FaceId(i as u64), InputFace { body, face: FaceId(i as u64) })).collect(), ..Default::default() };
+    Ok(OpResult { bodies: vec![id], history })
+}
+
 /// The intersection of two surfaces between the moved ends `p0` and `p1` of the edge `ed`
 /// (whose ends were `old`), traced: points on both surfaces across the old edge's way at its
 /// points carried along with its ends, a cubic through them, their number doubled until the

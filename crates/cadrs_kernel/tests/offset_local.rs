@@ -730,3 +730,62 @@ fn move_face_refuses_topology_changes() {
         assert!(matches!(r, Err(KernelError::InvalidParameter(_))), "{f:?} by {d}: {r:?}");
     }
 }
+
+/// Move face, Translate: a 10 × 10 × 10 cube's top lifted by 3 (the sides follow up) and a side
+/// pushed in by 2 along the x axis; volumes and the moved face's place exact.
+#[test]
+fn move_face_translates_and_neighbours_follow() {
+    let mut k = NativeKernel::new();
+    let cube = prism(&mut k, polygon(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]), vec![], 10.0);
+    let top = face_at(&k, cube, Vector3::z(), 10.0);
+    let up = one(k.move_faces(cube, &[top], &Motion::translation(Vector3::new(0.0, 0.0, 3.0))).unwrap());
+    close(volume(&k, up), 1300.0, 1e-9);
+    assert!(face_at(&k, up, Vector3::z(), 13.0).0 == top.0);
+    // Moved within its own plane, the face (and the body) stays as it was.
+    let slid = one(k.move_faces(cube, &[top], &Motion::translation(Vector3::new(4.0, 0.0, 0.0))).unwrap());
+    close(volume(&k, slid), 1000.0, 1e-9);
+    let side = face_at(&k, cube, Vector3::x(), 10.0);
+    let thin = one(k.move_faces(cube, &[side], &Motion::translation(Vector3::new(-2.0, 0.0, 0.0))).unwrap());
+    close(volume(&k, thin), 800.0, 1e-9);
+    assert!(k.get(thin).unwrap().check_with(cadrs_kernel::native::CheckLevel::Full).is_empty());
+}
+
+/// Move face, Rotate: the cube's top turned 10° about its edge over the y axis: the body is the
+/// cube with a wedge of 10 × 10 × 10·tan 10° (half its box) more.
+#[test]
+fn move_face_rotates_about_an_edge() {
+    let mut k = NativeKernel::new();
+    let cube = prism(&mut k, polygon(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]), vec![], 10.0);
+    let top = face_at(&k, cube, Vector3::z(), 10.0);
+    // About the top's edge x = 0, z = 10 (counter-clockwise seen from +y lowers +x: turn by −10°
+    // to raise it).
+    let axis = Axis { origin: Point3::new(0.0, 0.0, 10.0), dir: nalgebra::Unit::new_normalize(Vector3::y()) };
+    let tilted = one(k.move_faces(cube, &[top], &Motion::rotation(&axis, -10f64.to_radians())).unwrap());
+    close(volume(&k, tilted), 1000.0 + 0.5 * 10.0 * 10.0 * 10.0 * 10f64.to_radians().tan(), 1e-9);
+    assert!(k.get(tilted).unwrap().check_with(cadrs_kernel::native::CheckLevel::Full).is_empty());
+}
+
+/// Move face of a boss: its wall and top translated across its base, the base's hole loop
+/// following; moved off the base's edge (the wall would run into the base's sides) it is
+/// refused with `InvalidParameter`, and a reflection is refused outright.
+#[test]
+fn move_face_moves_a_boss_and_refuses_topology_changes() {
+    let mut k = NativeKernel::new();
+    let base = prism(&mut k, polygon(&[(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)]), vec![], 5.0);
+    let boss = one(k.extrude(&Profile::new(Plane { origin: Point3::new(0.0, 0.0, 5.0), ..Plane::top() }, vec![Region { outer: circle((10.0, 10.0), 3.0), holes: vec![], source: None }]), Extent::Blind(4.0)).unwrap());
+    let part = one(k.boolean(BoolOp::Union, base, &[boss]).unwrap());
+    let v0 = volume(&k, part);
+    let faces: Vec<FaceId> = k.faces(part).unwrap().into_iter().filter(|f| f.center.z > 5.0 + 1e-6).map(|f| f.id).collect();
+    assert_eq!(faces.len(), 2, "the boss's wall and top");
+    let moved = one(k.move_faces(part, &faces, &Motion::translation(Vector3::new(4.0, -2.0, 0.0))).unwrap());
+    close(volume(&k, moved), v0, 1e-7);
+    let top = k.faces(moved).unwrap().into_iter().find(|f| (f.center.z - 9.0).abs() < 1e-9).expect("the boss's top");
+    assert!((top.center - Point3::new(14.0, 8.0, 9.0)).norm() < 1e-6, "{:?}", top.center);
+    assert!(k.get(moved).unwrap().check_with(cadrs_kernel::native::CheckLevel::Full).is_empty());
+    match k.move_faces(part, &faces, &Motion::translation(Vector3::new(9.0, 0.0, 0.0))) {
+        Err(KernelError::InvalidParameter(_)) => {}
+        r => panic!("a boss moved off its base: {r:?}"),
+    }
+    let mirror = Motion::reflection(Point3::new(10.0, 10.0, 0.0), Vector3::x_axis());
+    assert!(matches!(k.move_faces(part, &faces, &mirror), Err(KernelError::InvalidParameter(_))));
+}

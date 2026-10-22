@@ -592,6 +592,11 @@ impl Kernel for NativeKernel {
         self.colored(r)
     }
 
+    fn move_faces(&mut self, body: BodyId, faces: &[FaceId], motion: &Motion) -> Result<OpResult> {
+        let r = super::local::move_faces(self, body, faces, motion);
+        self.colored(r)
+    }
+
     fn shell(&mut self, body: BodyId, remove: &[FaceId], thickness: f64) -> Result<OpResult> {
         dump("shell", self.get(body)?, &format!("remove {remove:?} thickness {thickness}"));
         let r = super::offset_round::shell(self, body, &ShellSpec { remove: remove.to_vec(), thickness, outward: false, hollow: false, sharp: false });
