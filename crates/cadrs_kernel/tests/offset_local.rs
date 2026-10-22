@@ -689,3 +689,22 @@ fn inset_of_a_torus() {
     close(volume(&k, out), 2.0 * PI * PI * 20.0 * 16.0, 1e-9);
     assert_eq!(k.get(out).unwrap().check_with(cadrs_kernel::native::topo::CheckLevel::Full), Vec::<String>::new());
 }
+
+#[test]
+fn sharp_offset_drops_a_slope_its_neighbours_cross_over() {
+    // OCCT offset/shape_type_i_c/V7: a 10 × 6 × 10 box less a notch through x 2..8 whose floor
+    // (z 5, y 0..2) runs down a short slope (to z 3 at y 3) into its back wall (y 3), offset
+    // sharply by 2.5. The moved floor (z 7.5) and wall (y 0.5) meet before the moved slope
+    // reaches them: the slope vanishes (it used to stay, inside out, piercing the moved top),
+    // leaving a 1 × 3 × 5 slot in the 15 × 11 × 15 block: 2460.
+    let mut k = NativeKernel::new();
+    let bx = prism(&mut k, polygon(&[(0.0, 0.0), (10.0, 0.0), (10.0, 6.0), (0.0, 6.0)]), vec![], 10.0);
+    let side = Plane { origin: Point3::new(2.0, 0.0, 0.0), x_dir: Vector3::y_axis(), normal: Vector3::x_axis() };
+    let notch = polygon(&[(0.0, 5.0), (2.0, 5.0), (3.0, 3.0), (3.0, 10.0), (0.0, 10.0)]);
+    let tool = one(k.extrude(&Profile::new(side, vec![Region { outer: notch, holes: vec![], source: None }]), Extent::Blind(6.0)).unwrap());
+    let cut = one(k.boolean(BoolOp::Subtract, bx, &[tool]).unwrap());
+    let off = one(k.offset(cut, &OffsetSpec { distance: 2.5, faces: vec![], sharp: true }).unwrap());
+    let issues = k.get(off).unwrap().check_with(cadrs_kernel::native::topo::CheckLevel::Full);
+    assert!(issues.is_empty(), "{issues:?}");
+    close(volume(&k, off), 2460.0, 1e-9);
+}

@@ -1532,7 +1532,100 @@ pub fn offset_sharp(b: &Body, dist: &[f64]) -> Result<Body> {
     if let Some(r) = prism_offset(b, dist) {
         return r;
     }
-    replace_surfaces(b, &surfs)
+    let out = replace_surfaces(b, &surfs)?;
+    // A face its moved neighbours cross over vanishes, as a prism's side does in
+    // `prism_offset`: they meet instead, and the offset is made again without it (when that
+    // fails, the faces as they moved).
+    match crossed_face(b, &out) {
+        Some((f, k)) if b.faces.len() > 4 => {
+            let (nb, nd) = collapse_face(b, dist, f, k);
+            Ok(offset_sharp(&nb, &nd).unwrap_or(out))
+        }
+        _ => Ok(out),
+    }
+}
+
+/// A face of `b` that its offset `out` (the faces moved, the topology kept) turned inside out:
+/// a four-sided face between two parallel straight edges whose moved lines crossed over each
+/// other (the face's moved neighbours on either side meet before reaching it: a notch's short
+/// slope between its floor and wall, filled by their moves). The face and the index k of its
+/// coedge on one of those edges (the other is coedge k + 2); of several, the one crossed most.
+fn crossed_face(b: &Body, out: &Body) -> Option<(usize, usize)> {
+    let ef = b.edge_faces();
+    let line = |body: &Body, e: usize| match body.edges[e].curve {
+        Curve::Line { o, d } if !body.edges[e].degenerate => d.try_normalize(1e-12).map(|d| (o, d)),
+        _ => None,
+    };
+    // The part of q − o square to d.
+    let across = |o: P3, q: P3, d: V3| {
+        let w = q - o;
+        w - d * w.dot(&d)
+    };
+    let mut worst: Option<(f64, usize, usize)> = None;
+    for (fi, f) in b.faces.iter().enumerate() {
+        let [l] = f.loops.as_slice() else { continue };
+        if l.len() != 4 || l.iter().any(|c| ef[c.edge].len() != 2 || ef[c.edge][0] == ef[c.edge][1]) {
+            continue;
+        }
+        for k in 0..2 {
+            let (ea, eb) = (l[k].edge, l[k + 2].edge);
+            let (Some((oa, da)), Some((ob, db)), Some((na, nda)), Some((nb, _))) = (line(b, ea), line(b, eb), line(out, ea), line(out, eb)) else { continue };
+            if da.cross(&db).norm() > 1e-9 {
+                continue;
+            }
+            let (w0, w1) = (across(oa, ob, da), across(na, nb, nda));
+            // The width across the face after the move, as a share of the width before.
+            let share = w0.dot(&w1) / w0.norm_squared();
+            if share < -1e-9 && worst.is_none_or(|(x, _, _)| share < x) {
+                worst = Some((share, fi, k));
+            }
+        }
+    }
+    worst.map(|(_, f, k)| (f, k))
+}
+
+/// `b` without the four-sided face `f` ([`crossed_face`]; its coedges k and k + 2 on its two
+/// parallel edges), and `dist` without its distance: those two edges made one (the first)
+/// between the faces beyond them, and the other two edges' ends merged, the edges gone from the
+/// faces beyond them. The geometry is the old one: the offset recomputes it.
+fn collapse_face(b: &Body, dist: &[f64], f: usize, k: usize) -> (Body, Vec<f64>) {
+    let l = &b.faces[f].loops[0];
+    let (ca, cs1, cb, cs2) = (&l[k], &l[k + 1], &l[(k + 2) % 4], &l[(k + 3) % 4]);
+    let mut vmap: Vec<usize> = (0..b.verts.len()).collect();
+    vmap[b.co_start(cb)] = b.co_end(ca);
+    vmap[b.co_end(cb)] = b.co_start(ca);
+    let mut nb = b.clone();
+    for e in &mut nb.edges {
+        e.v = [vmap[e.v[0]], vmap[e.v[1]]];
+    }
+    let (ea, eb, gone) = (ca.edge, cb.edge, [cs1.edge, cs2.edge]);
+    for (fi, face) in nb.faces.iter_mut().enumerate() {
+        if fi == f {
+            continue;
+        }
+        let surf = face.surf.clone();
+        for lp in &mut face.loops {
+            lp.retain(|c| !gone.contains(&c.edge));
+            for c in lp.iter_mut().filter(|c| c.edge == eb) {
+                // The face beyond `cb` runs along it the way `ca` runs in `f`.
+                let e = &b.edges[ea];
+                *c = Coedge { edge: ea, fwd: ca.fwd, pc: super::pcurve::pcurve(&surf, &e.curve, e.t[0], e.t[1], None) };
+            }
+        }
+    }
+    nb.faces.remove(f);
+    for sh in &mut nb.shells {
+        sh.faces.retain(|&x| x != f);
+        for x in &mut sh.faces {
+            if *x > f {
+                *x -= 1;
+            }
+        }
+    }
+    super::unify::compact(&mut nb);
+    let mut nd = dist.to_vec();
+    nd.remove(f);
+    (nb, nd)
 }
 
 /// A planar face's outward normal.

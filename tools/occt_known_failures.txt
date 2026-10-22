@@ -392,7 +392,6 @@ offset shape_type_i_c6
 offset shape_type_i_c_i4
 offset shape_type_i_c_i5
 offset shape_type_i_c_v2
-offset shape_type_i_c_v8
 offset shape_type_i_c_w1
 offset shape_type_i_d4
 offset shape_type_i_d5
@@ -773,8 +772,6 @@ boolean bopfuse_complex_h1
 # by cause and owner.
 # Full check: a face's loops cross in (u, v), W1b.
 blend complex_a5
-# Full check: faces of the shell cross (the notch's offset wall pierces the top), W6b.
-offset shape_type_i_c_v7
 # Full check: the input's faces cross (RevolutionFG.rle's panels interpenetrate): the input, not the command (W6b reader).
 heal split_closed_faces_e4
 heal split_closed_faces_e9
