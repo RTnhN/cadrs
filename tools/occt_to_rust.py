@@ -271,6 +271,33 @@ class Case:
         elif c == "polyline" and len(a) >= 7 and (len(a) - 1) % 3 == 0:
             pts = [f"[{L(a[i])}, {L(a[i + 1])}, {L(a[i + 2])}]" for i in range(1, len(a), 3)]
             self.bind(a[0], f"k.polyline(&[{', '.join(pts)}])?")
+        elif c == "bopargcheck" and len(a) == 1:
+            # The boolean's argument check (self-interference, small edges): our full check,
+            # face–face crossings included.
+            self.lines.append(f"k.checkshape({self.shape(a[0])})?;")
+        elif c == "evolved" and len(a) >= 5:
+            # evolved result -s spine -p profile [-a] [-solid] [-v] [-t tol]
+            spine = prof = None
+            flags = {"-a": False, "-solid": False, "-v": False}
+            i = 1
+            while i < len(a):
+                if a[i] in ("-s", "-p") and i + 1 < len(a):
+                    if a[i] == "-s":
+                        spine = self.shape(a[i + 1])
+                    else:
+                        prof = self.shape(a[i + 1])
+                    i += 2
+                elif a[i] == "-t" and i + 1 < len(a):
+                    i += 2  # the tolerance: the kernel's own
+                elif a[i] in flags:
+                    flags[a[i]] = True
+                    i += 1
+                else:
+                    raise Unsupported(f"evolved {a[i]}")
+            if spine is None or prof is None:
+                raise Unsupported("evolved with these arguments")
+            b = lambda x: "true" if x else "false"
+            self.bind(a[0], f"k.evolved({spine}, {prof}, {b(flags['-a'])}, {b(flags['-solid'])}, {b(flags['-v'])})?")
         elif c == "DT_SplitByNumber" and len(a) in (3, 4):
             if len(a) == 3:
                 self.bind(a[0], f"k.split_by_number({self.shape(a[1])}, {int(self.num(a[2]))}, None)?")
@@ -588,7 +615,7 @@ class Case:
             if len(a) != want:
                 raise Unsupported(f"{c} with these arguments")
             nums = [L(x) for x in a[3:-2]] + ["0.0"] * 6
-            self.feat = (kind, self.shape(a[0]), self.shape(a[1]), f"[{', '.join(nums[:6])}]", int(self.num(a[-2])))
+            self.feat = (kind, self.shape(a[0]), self.shape(a[1]), f"[{', '.join(nums[:6])}]", int(self.num(a[-2])), self.shape(a[2]))
         elif c == "featlf" and len(a) == 11:
             if a[2] not in self.planes:
                 raise Unsupported(f"the plane {a[2]}")
@@ -610,7 +637,7 @@ class Case:
         elif c in ("featperform", "featperformval") and len(a) >= 2:
             if self.feat is None or a[0].lower() != self.feat[0]:
                 raise Unsupported(f"{c} {a[0]} without its definition")
-            kind, base, pbase, params, fuse = self.feat
+            kind, base, pbase, params, fuse, skface = self.feat
             if c == "featperformval":
                 if len(a) == 4:
                     self.bind(a[1], f'k.featperformval_until({base}, {pbase}, "{kind}", {params}, {fuse}, {L(a[2])}, {self.shape(a[3])})?')
@@ -623,7 +650,7 @@ class Case:
                 if len(lim) > 2:
                     raise Unsupported("featperform with these arguments")
                 fr, un = ("None", "None") if not lim else (("None", lim[0]) if len(lim) == 1 else (lim[0], lim[1]))
-                self.bind(a[1], f'k.featperform({base}, {pbase}, "{kind}", {params}, {fuse}, {fr}, {un})?')
+                self.bind(a[1], f'k.featperform({base}, {pbase}, {skface}, "{kind}", {params}, {fuse}, {fr}, {un})?')
         elif c == "orientation" and len(a) == 2:
             self.bind(a[0], f"k.orientation({self.shape(a[0])}, \"{a[1].upper()}\")?")
         elif c == "treverse" and len(a) >= 1:
