@@ -513,6 +513,10 @@ impl Kernel for NativeKernel {
         super::surfacing::simplify(self, body)
     }
 
+    fn heal(&mut self, body: BodyId, ops: &[HealOp]) -> Result<OpResult> {
+        super::heal::heal_op(self, body, ops)
+    }
+
     fn delete_faces(&mut self, body: BodyId, faces: &[FaceId]) -> Result<OpResult> {
         super::surfacing::delete_faces(self, body, faces)
     }

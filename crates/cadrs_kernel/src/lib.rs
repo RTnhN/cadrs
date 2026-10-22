@@ -226,6 +226,69 @@ pub struct OpResult {
     pub history: History,
 }
 
+/// One step of [`Kernel::heal`] (shape healing and upgrade, as OCCT's `ShapeFix`,
+/// `ShapeCustom` and `ShapeUpgrade` do them). Lengths are mm, angles radians.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum HealOp {
+    /// Make the body sound: loops closed (edges shorter than `precision` dropped, gaps up to
+    /// `max_tolerance` closed by merging vertices), each face's outer loop first and its sense
+    /// agreeing with its loops, each shell's faces oriented alike and closed shells pointing
+    /// out, p-curves refitted where they stray, tolerances fitted to the gaps (at most
+    /// `max_tolerance`).
+    Fix {
+        /// The working precision.
+        precision: f64,
+        /// The largest tolerance a vertex or edge may be given.
+        max_tolerance: f64,
+    },
+    /// Edges shorter than `tolerance` dropped, their ends merged (seams and poles stay).
+    DropSmallEdges {
+        /// The length below which an edge goes.
+        tolerance: f64,
+    },
+    /// Consecutive edges of a loop whose ends lie within `tolerance` joined at one vertex.
+    FixGaps {
+        /// The largest gap closed.
+        tolerance: f64,
+    },
+    /// p-curves straying from their edges by more than the edge's tolerance (and
+    /// `tolerance`) projected again; tolerances raised to the gaps left.
+    SameParameter {
+        /// The gap a p-curve may leave without being refitted.
+        tolerance: f64,
+    },
+    /// Every tolerance recomputed from the body's actual gaps (lowered as well as raised).
+    UpdateTolerance,
+    /// Surfaces on mirrored frames re-expressed on direct ones (the same faces).
+    DirectFaces,
+    /// Cylinders, cones, spheres and tori as surfaces of revolution.
+    ToRevolution,
+    /// Every curved surface as an exact B-spline.
+    ToBSpline,
+    /// Faces of surfaces of revolution cut so none turns through more than `max_angle`.
+    SplitAngle {
+        /// The largest angle a face may span about its axis.
+        max_angle: f64,
+    },
+    /// Faces that close on themselves (a seam) cut in two across each closed direction.
+    SplitClosed,
+    /// Faces and edges cut where their B-splines are only C0.
+    SplitContinuity,
+    /// Faces and edges cut at their B-splines' knots, each piece's B-spline of one span (a
+    /// Bézier).
+    ToBezier,
+    /// Faces on one surface and edges on one curve merged.
+    Unify,
+    /// Tails of loops (edges running out and back along each other within `max_width`, at
+    /// most `max_angle` apart) removed.
+    Tails {
+        /// The largest angle between the two sides of a tail.
+        max_angle: f64,
+        /// The largest width of a tail.
+        max_width: f64,
+    },
+}
+
 /// A kernel session: it owns bodies and performs modeling operations on them.
 ///
 /// Operations never mutate their inputs; they return new bodies, so a feature list can be
@@ -543,6 +606,12 @@ pub trait Kernel {
     /// Simplify: faces and edges lying on the same surface or curve merged (an imported part's
     /// seams and split faces), the body otherwise unchanged.
     fn simplify(&mut self, body: BodyId) -> Result<OpResult>;
+    /// Heal: the body made sound and its geometry upgraded by `ops`, in order ([`HealOp`]),
+    /// for an imported or damaged body. Each result face is `modified` from the input faces it
+    /// continues (a face split in pieces lists each piece; merged faces list each input);
+    /// input faces left in no result face are `deleted`. The result is a body `Body::check`
+    /// passes, or an `InvalidResult` error.
+    fn heal(&mut self, body: BodyId, ops: &[HealOp]) -> Result<OpResult>;
 
     /// The fillet of Onshape's Edge tab (P3.6, PS14.2–14.6): a radius or a constant width, and
     /// whether it may run over onto neighbouring faces. The edges' tangent chains are filleted

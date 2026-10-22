@@ -34,6 +34,11 @@ IGNORED = {
 }
 
 
+# What OCCT's DT_* commands end with (`ShapeFix::SameParameter`): p-curves made to agree with
+# their edges, tolerances raised to the gaps.
+SAME_PARAMETER = "HealOp::SameParameter { tolerance: 1e-7 }"
+
+
 class Unsupported(Exception):
     pass
 
@@ -75,6 +80,7 @@ class Case:
         self.tools = []
         self.n_tmp = 0
         self.todo = set()  # checks OCCT itself fails (its TODO markers): left out
+        self.stat_checks = []  # what a later `statshape` of a healed shape checks: (shape, count)
         self.offset_join = "i"
         self.offset_load = None
         self.hyperbolas = set()  # names of hyperbolas (an edge of one takes its parameters)
@@ -140,6 +146,10 @@ class Case:
         self.hyperbolas.discard(name)
         self.planes.discard(name)
         self.lines.append(f"let {r} = {expr};")
+
+    def heal(self, out, src, ops):
+        """A healing command: `ops` (HealOp values) run on `src` by `Kernel::heal`."""
+        self.bind(out, f"k.heal({self.shape(src)}, &[{ops}])?")
 
     def surf(self, name):
         """A Rust expression for a DRAW surface (a surface, or a plane's placement)."""
@@ -252,6 +262,39 @@ class Case:
                 self.bind(a[0], f"k.split_by_number({self.shape(a[1])}, 0, Some(({int(self.num(a[2]))}, {int(self.num(a[3]))})))?")
         elif c == "polyvertex" and len(a) >= 3:
             self.bind(a[0], f"k.polyvertex(&[{', '.join(self.shape(x) for x in a[1:])}])?")
+        elif c == "fixshape" and len(a) in (2, 3, 4) and all(re.fullmatch(r"[-0-9.eE+]+", x) for x in a[2:]):
+            # ShapeFix_Shape at a precision (default Precision::Confusion) up to a largest tolerance.
+            prec = self.num(a[2]) if len(a) > 2 else 1e-7
+            maxtol = self.num(a[3]) if len(a) > 3 else 1.0
+            self.heal(a[0], a[1], f"HealOp::Fix {{ precision: {prec!r}, max_tolerance: {maxtol!r} }}")
+        elif c == "fixsmall" and len(a) in (2, 3):
+            self.heal(a[0], a[1], f"HealOp::DropSmallEdges {{ tolerance: {self.num(a[2]) if len(a) > 2 else 1.0!r} }}")
+        elif c == "fixwgaps" and len(a) in (2, 3):
+            self.heal(a[0], a[1], f"HealOp::FixGaps {{ tolerance: {self.num(a[2]) if len(a) > 2 else 0.0!r} }}")
+        elif c == "sameparameter" and len(a) in (2, 3) and re.fullmatch(r"[-0-9.eE+]+", a[-1]):
+            self.heal(a[0], a[1] if len(a) == 3 else a[0], f"HealOp::SameParameter {{ tolerance: {self.num(a[-1])!r} }}")
+        elif c == "updatetolerance" and len(a) in (2, 3):
+            self.heal(a[0], a[1] if len(a) == 3 else a[0], "HealOp::UpdateTolerance")
+        elif c == "directfaces" and len(a) == 2:
+            self.heal(a[0], a[1], "HealOp::DirectFaces")
+            self.stat_checks.append((a[0], "indsur"))
+        elif c == "DT_SplitAngle" and len(a) in (2, 3):
+            ang = self.num(a[2]) if len(a) > 2 else 95.0
+            self.heal(a[0], a[1], f"HealOp::SplitAngle {{ max_angle: {max(ang, 1.0)!r}f64.to_radians() }}, " + SAME_PARAMETER)
+        elif c == "DT_ClosedSplit" and len(a) == 2:
+            self.heal(a[0], a[1], "HealOp::SplitClosed, " + SAME_PARAMETER)
+        elif c == "DT_ShapeDivide" and len(a) in (2, 3):
+            self.heal(a[0], a[1], "HealOp::SplitContinuity, " + SAME_PARAMETER)
+            self.stat_checks.append((a[0], "c0curv"))
+        elif c == "DT_ToBspl" and len(a) == 2:
+            self.heal(a[0], a[1], "HealOp::ToRevolution, HealOp::ToBSpline, " + SAME_PARAMETER)
+        elif c == "DT_ShapeConvert" and len(a) == 4:
+            self.heal(a[0], a[1], "HealOp::ToBezier, " + SAME_PARAMETER)
+            self.stat_checks.append((a[0], "bspsur"))
+        elif c == "statshape" and a:
+            for shape, what in self.stat_checks:
+                if shape == a[0]:
+                    self.lines.append(f'k.statshape_none({self.shape(shape)}, "{what}")?;')
         elif c == "fixshape" and len(a) >= 2:
             ang, wid, i = 0.0, -1.0, 2
             while i < len(a):
@@ -892,7 +935,7 @@ def flatten(files):
     return cmds, tvars
 
 
-def convert(path, consts, begins=()):
+def convert(path, consts, begins=(), ends=()):
     text = open(path, encoding="utf-8", errors="replace").read()
     if re.search(r"stepread|igesread|testreadstep|ReadStep|readstl|brestore", text):
         return None, "needs reading STEP, IGES or STL", text
@@ -924,7 +967,7 @@ def convert(path, consts, begins=()):
     for m in re.finditer(r"eval\s+compound((?:\s*\[explode\s+\w+\s+\w+\])+)\s+(\w+)", text):
         case.eval_compounds[m.group(2)] = re.findall(r"\[explode\s+(\w+)\s+\w+\]", m.group(1))
     try:
-        cmds, tvars = flatten([*begins, path])
+        cmds, tvars = flatten([*begins, path, *ends])
         for words in cmds:
             if not words or words[0] in IGNORED:
                 continue
@@ -968,8 +1011,14 @@ def known_failures():
 
 
 # Groups whose end script's `checkshape result` is a case's check when it measures nothing else
-# (mkface: the faces made are only checked for validity and OCCT's tolerances).
-END_CHECKSHAPE_GROUPS = {"mkface"}
+# (mkface: the faces made are only checked for validity and OCCT's tolerances; heal: the healed
+# shape's validity, the check of its grid's end script).
+END_CHECKSHAPE_GROUPS = {"mkface", "heal"}
+
+# Groups whose grids' end scripts run each case's command (heal: `fixshape result a`,
+# `DT_SplitAngle result a` and their checks on a shape the case only reads): flattened after
+# the case.
+GRID_END_GROUPS = {"heal"}
 
 
 def group_of(path):
@@ -1050,7 +1099,8 @@ def main():
                     name += "_2"
                 seen.add(name)
                 begins = [b for b in (os.path.join(gdir, "begin"), os.path.join(gdir, grid, "begin")) if os.path.isfile(b)]
-                lines, why, text = convert(p, gconsts, begins)
+                ends = [os.path.join(gdir, grid, "end")] if group in GRID_END_GROUPS and os.path.isfile(os.path.join(gdir, grid, "end")) else []
+                lines, why, text = convert(p, gconsts, begins, ends)
                 body.append("")
                 if lines is None:
                     n_ign += 1
@@ -1113,7 +1163,7 @@ def main():
             "#![allow(unused_variables, unused_imports, non_snake_case, clippy::all)]",
             "",
             "use cadrs_kernel::native::{draw, NativeKernel};",
-            "use cadrs_kernel::Result;",
+            "use cadrs_kernel::{HealOp, Result};",
         ]
         if DATA_ROOT[0]:
             crate = os.path.dirname(os.path.abspath(out))

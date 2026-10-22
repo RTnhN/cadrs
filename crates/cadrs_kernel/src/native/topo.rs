@@ -49,6 +49,8 @@ pub enum CheckLevel {
     /// - the first loop of a face its outer loop, counter-clockwise about the outward normal,
     ///   the others holes inside it running the other way, no hole inside another;
     /// - each shell edge-connected, and each face in at most one shell;
+    /// - no two faces of a shell crossing each other away from their shared edges
+    ///   ([`super::check_faces`]);
     /// - each solid's outer shell enclosing a positive volume and each void shell a negative
     ///   one, with no vertex outside the outer shell (touching it is allowed).
     Full,
@@ -597,6 +599,9 @@ impl Body {
             errs.extend(self.check_shells());
             for fi in 0..self.faces.len() {
                 errs.extend(self.check_face_domain(fi));
+            }
+            if errs.is_empty() {
+                errs.extend(super::check_faces::face_crossings(self));
             }
         }
         // Solids enclose a positive volume (their faces point out).

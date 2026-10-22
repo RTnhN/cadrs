@@ -64,7 +64,14 @@ let step = k.export_step(&round.bodies)?;               // and import_step / imp
   on their edges, edge uses, body kinds, positive volume). `Body::check_with(CheckLevel::Full)`
   adds what is too slow for every operation: loops crossing in (u, v) by exact segment tests,
   loop nesting and orientation, shell connectivity and orientation, adaptive edge and vertex
-  consistency, and void shells inside their solid; it is meant for tests.
+  consistency, faces of a shell crossing each other away from their shared edges
+  (`native::check_faces`), and void shells inside their solid; it is meant for tests.
+- **Healing.** `Kernel::heal(body, &[HealOp])` makes an imported or damaged body sound and
+  upgrades its geometry, step by step (`native::heal`, `native::heal_split`): fix (loops
+  reordered and closed, small edges dropped, missing seams added, face senses and shell
+  orientation, p-curves refitted, tolerances fitted), gaps, same-parameter, tolerance update,
+  direct faces, conversion to surfaces of revolution and to B-splines, splits by angle, of
+  closed faces, at C0 breaks and into Bézier patches, unify and wire tails.
 - **Exchange.** `export_step`/`import_step` for plain STEP, `export_model`/`import_model` for
   STEP or IGES with names and assemblies, `mesh_solid` for STL triangles; `write_body` and
   `read_body` are the exact native body format (`native::bodyio`), which keeps every face,

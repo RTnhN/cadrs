@@ -43,6 +43,7 @@ internal! {
     build;
     bvh;
     cells;
+    check_faces;
     classify;
     curve;
     distance;
@@ -54,6 +55,8 @@ internal! {
     features;
     fillet;
     fillet_geom;
+    heal;
+    heal_split;
     hlr;
     iges;
     kernel;

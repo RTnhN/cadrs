@@ -2971,6 +2971,39 @@ impl NativeKernel {
         })
     }
 
+    /// The shape healing commands (`fixshape r s prec maxtol`, `fixsmall`, `fixwgaps`,
+    /// `sameparameter`, `updatetolerance`, `directfaces`, `DT_SplitAngle`, `DT_ClosedSplit`,
+    /// `DT_ShapeDivide`, `DT_ToBspl`, `DT_ShapeConvert`): `ops` run by [`crate::Kernel::heal`]
+    /// (`native::heal`). A face is healed as a sheet of its own.
+    pub fn heal(&mut self, s: &Shape, ops: &[crate::HealOp]) -> Result<Shape> {
+        let b = match s {
+            Shape::Body(b) => *b,
+            Shape::Face { .. } => self.sheet_of_face(s)?,
+            Shape::BodyFace(b, f) => {
+                let sub = super::kernel::subset(self.get(*b)?, &[f.0 as usize], false);
+                self.insert(sub)
+            }
+            _ => return Err(KernelError::Unsupported("healing of this kind of shape")),
+        };
+        let r = crate::Kernel::heal(self, b, ops)?;
+        Ok(Shape::Body(r.bodies[0]))
+    }
+
+    /// The `statshape` counts a healing command's end script checks are zero: `indsur`
+    /// (surfaces on mirrored frames, after `directfaces`), `c0curv` (edge curves only C0, after
+    /// `DT_ShapeDivide`), `bspsur` (B-spline surfaces of more than one span, after
+    /// `DT_ShapeConvert`).
+    pub fn statshape_none(&self, s: &Shape, what: &str) -> Result<()> {
+        let b = self.get(self.body_of(s)?)?;
+        let n = match what {
+            "indsur" => super::heal::count_indirect(b),
+            "c0curv" => super::heal_split::count_c0(b).0,
+            "bspsur" => super::heal_split::count_bspline_surfaces(b),
+            _ => return Err(KernelError::Unsupported("this statshape count")),
+        };
+        if n == 0 { Ok(()) } else { Err(err(&format!("statshape: {n} {what}"))) }
+    }
+
     /// `fixshape result shape -maxtaila degrees -maxtailw width` (ShapeFix with its wire-tail
     /// fix, `native::tails`): the faces' tails removed. A lone face stays a face (no shell).
     pub fn fixshape_tails(&mut self, s: &Shape, max_angle: f64, max_width: f64) -> Result<Shape> {

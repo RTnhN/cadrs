@@ -760,3 +760,48 @@ blend simple_s4
 blend simple_t9
 blend simple_u3
 blend simple_u4
+# W15 heal: the healing commands (fixshape, fixwgaps, directfaces, DT_*) made runnable, failing
+# today (by cause). Most are inputs the reader leaves invalid that the command isn't meant to
+# repair (OCCT's own reading of them is sound).
+# heal: the file's loops lack the edges it gives no 3D curve (the reader drops them), so they can't close.
+heal direct_faces_a2
+heal direct_faces_a6
+heal direct_faces_a7
+heal fix_shape_c6
+heal fix_shape_c7
+heal fix_shape_c9
+heal fix_shape_d2
+heal fix_shape_d4
+heal fix_shape_d5
+heal fix_shape_d6
+heal fix_shape_d7
+heal fix_shape_d8
+heal fix_shape_f4
+heal split_angle_c4
+heal split_angle_c5
+heal split_angle_c7
+heal split_angle_c9
+heal split_angle_d1
+heal split_angle_d2
+heal split_angle_d3
+heal split_angle_d4
+# heal: the file reads no faces (all its edges lack a 3D curve).
+heal fix_shape_d1
+heal fix_shape_d9
+heal split_angle_c8
+heal split_angle_d5
+# heal: the reader leaves a loop's edges out of order (newFS.rle); Fix reorders them, the other commands don't.
+heal split_closed_faces_e6
+heal surface_to_bspline_e7
+# heal: the file's sheet uses an edge in three faces (read as it is: not manifold).
+heal direct_faces_b7
+heal direct_faces_b8
+# heal: the reader flags an open shell closed (an edge used once).
+heal split_continuity_a1
+heal surface_to_bezier_a3
+heal surface_to_bezier_a4
+heal surface_to_bezier_a5
+# heal: fixwgaps leaves p-curve gaps on surfaces of revolution (RevolutionFG.rle).
+heal fix_gaps_b1
+# boolean: fixshape of b136 (an edge used once in its closed shell) can't close the shell.
+boolean bopfuse_complex_h1
