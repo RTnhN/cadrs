@@ -269,48 +269,53 @@ fn breaks(b: &Body, l: &[Coedge]) -> usize {
 /// that leaves fewer joints that don't meet.
 pub fn reorder_loops(b: &mut Body, tolerance: f64) {
     for fi in 0..b.faces.len() {
-        let loops = b.faces[fi].loops.clone();
-        let before: usize = loops.iter().map(|l| breaks(b, l)).sum();
-        if before == 0 {
-            continue;
-        }
-        let mut rest: Vec<Coedge> = loops.into_iter().flatten().collect();
-        let mut out: Vec<Vec<Coedge>> = Vec::new();
-        while !rest.is_empty() {
-            let mut cur = vec![rest.remove(0)];
-            loop {
-                let end = b.co_end(&cur[cur.len() - 1]);
-                if end == b.co_start(&cur[0]) {
-                    break;
-                }
-                if let Some(i) = rest.iter().position(|c| b.co_start(c) == end) {
-                    cur.push(rest.remove(i));
-                    continue;
-                }
-                if let Some(i) = rest.iter().position(|c| b.co_end(c) == end) {
-                    let mut c = rest.remove(i);
-                    c.fwd = !c.fwd;
-                    cur.push(c);
-                    continue;
-                }
-                let p = b.verts[end].p;
-                let near = rest
-                    .iter()
-                    .enumerate()
-                    .map(|(i, c)| (i, (b.verts[b.co_start(c)].p - p).norm()))
-                    .filter(|&(_, d)| d <= tolerance)
-                    .min_by(|x, y| x.1.total_cmp(&y.1));
-                match near {
-                    Some((i, _)) => cur.push(rest.remove(i)),
-                    None => break,
-                }
+        reorder_face_loops(b, fi, tolerance);
+    }
+}
+
+/// [`reorder_loops`] on face `fi` alone.
+pub fn reorder_face_loops(b: &mut Body, fi: usize, tolerance: f64) {
+    let loops = b.faces[fi].loops.clone();
+    let before: usize = loops.iter().map(|l| breaks(b, l)).sum();
+    if before == 0 {
+        return;
+    }
+    let mut rest: Vec<Coedge> = loops.into_iter().flatten().collect();
+    let mut out: Vec<Vec<Coedge>> = Vec::new();
+    while !rest.is_empty() {
+        let mut cur = vec![rest.remove(0)];
+        loop {
+            let end = b.co_end(&cur[cur.len() - 1]);
+            if end == b.co_start(&cur[0]) {
+                break;
             }
-            out.push(cur);
+            if let Some(i) = rest.iter().position(|c| b.co_start(c) == end) {
+                cur.push(rest.remove(i));
+                continue;
+            }
+            if let Some(i) = rest.iter().position(|c| b.co_end(c) == end) {
+                let mut c = rest.remove(i);
+                c.fwd = !c.fwd;
+                cur.push(c);
+                continue;
+            }
+            let p = b.verts[end].p;
+            let near = rest
+                .iter()
+                .enumerate()
+                .map(|(i, c)| (i, (b.verts[b.co_start(c)].p - p).norm()))
+                .filter(|&(_, d)| d <= tolerance)
+                .min_by(|x, y| x.1.total_cmp(&y.1));
+            match near {
+                Some((i, _)) => cur.push(rest.remove(i)),
+                None => break,
+            }
         }
-        let after: usize = out.iter().map(|l| breaks(b, l)).sum();
-        if after < before {
-            b.faces[fi].loops = out;
-        }
+        out.push(cur);
+    }
+    let after: usize = out.iter().map(|l| breaks(b, l)).sum();
+    if after < before {
+        b.faces[fi].loops = out;
     }
 }
 

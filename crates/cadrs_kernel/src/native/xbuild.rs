@@ -938,21 +938,23 @@ impl XBuilder {
             let end = self.co_start(e, !f);
             // The edges that go on from here: as given before turned round, and another edge
             // before going straight back along the same one (a seam's two uses are apart, with
-            // the closed edges at its ends between them).
-            let Some((_, i, flip)) = rest
+            // the closed edges at its ends between them); of those, one that closes on itself
+            // first (taken later, the chain would leave it behind).
+            let Some((_, _, i, flip)) = rest
                 .iter()
                 .enumerate()
                 .filter_map(|(i, &(e2, f2))| {
                     let back = (e2 == e) as u8 * 2;
+                    let open = !self.same_vertex(self.co_start(e2, f2), self.co_start(e2, !f2));
                     if self.same_vertex(end, self.co_start(e2, f2)) {
-                        Some((back, i, false))
+                        Some((back, open, i, false))
                     } else if !self.trust_orientation && self.same_vertex(end, self.co_start(e2, !f2)) {
-                        Some((back + 1, i, true))
+                        Some((back + 1, open, i, true))
                     } else {
                         None
                     }
                 })
-                .min_by_key(|&(score, i, _)| (score, i))
+                .min_by_key(|&(score, open, i, _)| (score, open, i))
             else {
                 return false;
             };

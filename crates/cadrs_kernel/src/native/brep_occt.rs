@@ -20,8 +20,10 @@
 //! the same composed location are one vertex or edge. The body is rebuilt by
 //! [`super::xbuild::XBuilder`] from the 3D geometry (the file's p-curves aren't needed): our own
 //! p-curves, pole edges and seams; the file's degenerate edges are left out (they are put back),
-//! as are internal and external edges. Solids keep their shells; shells and faces outside a
-//! solid become sheets.
+//! as are internal and external edges. An edge the file gives only p-curves gets a 3D curve
+//! lifted from its first (OCCT's `BRepLib::BuildCurves3d`). Solids keep their shells; shells
+//! and faces outside a solid become sheets: a shell whose edges don't close it is open whatever
+//! its flag says, and faces of no shell make a shell per edge-connected piece.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -897,6 +899,29 @@ fn parse(text: &str) -> R<File> {
 // ---------------------------------------------------------------------------------------------
 // Building
 
+/// The 3D curve of an edge the file gives only p-curves (OCCT's `BRepLib::BuildCurves3d`): its
+/// first p-curve carried onto its surface (placed as the edge at `loc` places it), on the
+/// p-curve's range, which becomes the edge's.
+fn lifted(f: &File, pcs: &[PcRep], loc: &Loc) -> R<(Curve, f64, f64)> {
+    let r = pcs.first().ok_or("no 3D curve and no p-curve")?;
+    let (a, b) = r.range;
+    if !(a.is_finite() && b.is_finite() && a < b) {
+        return Err(format!("a p-curve range [{a}, {b}]"));
+    }
+    let (surf, _) = to_surface(&f.surfaces[r.surf], true)?;
+    let surf = surf.transformed(&loc.then(&f.locs[r.loc]).m);
+    let pc = to_curve(&f.curves2d[r.pc], a, b)?;
+    let c = sampled(
+        |t| {
+            let q = pc.point(t);
+            surf.eval(q.x, q.y)
+        },
+        a,
+        b,
+    );
+    Ok((c, a, b))
+}
+
 /// A location's map rounded (to 1e-9), so two uses of a shape placed alike are one shape
 /// whichever products of locations placed them.
 fn loc_key(l: &Loc) -> [i64; 12] {
@@ -943,7 +968,7 @@ impl Builder<'_> {
 
     fn make_edge(&mut self, s: usize, loc: &Loc) -> Option<usize> {
         let sh = &self.f.shapes[s];
-        let Kind::Edge(c3, degenerate, _) = sh.kind else { return None };
+        let Kind::Edge(c3, degenerate, ref pcs) = sh.kind else { return None };
         if degenerate {
             return None;
         }
@@ -956,13 +981,16 @@ impl Builder<'_> {
                 _ => {}
             }
         }
-        let (Some((ci, cl, a, b)), Some(v0), Some(v1)) = (c3, v0, v1) else {
-            self.warnings.push(format!("edge {s}: no curve or vertices"));
+        let (Some(v0), Some(v1)) = (v0, v1) else {
+            self.warnings.push(format!("edge {s}: no vertices"));
             return None;
         };
-        let at = compose(&loc.m, &self.f.locs[cl].m);
-        let curve = match to_curve(&self.f.curves[ci], a, b) {
-            Ok(c) => c.transformed(&at),
+        let curve = match c3 {
+            Some((ci, cl, a, b)) => to_curve(&self.f.curves[ci], a, b).map(|c| c.transformed(&compose(&loc.m, &self.f.locs[cl].m))),
+            None => lifted(self.f, pcs, loc).map(|(c, _, _)| c),
+        };
+        let curve = match curve {
+            Ok(c) => c,
             Err(e) => {
                 self.warnings.push(format!("edge {s}: {e}"));
                 return None;
@@ -1085,9 +1113,11 @@ impl Builder<'_> {
 
 /// Builds the body from the file as it is: its vertices, its edges' 3D curves and ranges, its
 /// faces on surfaces with OCCT's (u, v) (the file's own axes) and their loops with the file's
-/// p-curves (a seam's two). Shared shapes stay shared. Anything the file leaves out (an edge
-/// without a p-curve on a face, a missing curve) makes it give up (the caller rebuilds through
-/// [`XBuilder`] instead).
+/// p-curves (a seam's two). Shared shapes stay shared. An edge with p-curves and no 3D curve
+/// gets one lifted from its first p-curve ([`lifted`]); a wire whose edges don't chain as listed
+/// is put in order. Anything else the file leaves out (an edge without a p-curve on a face, an
+/// edge with no curve at all) makes it give up (the caller rebuilds through [`XBuilder`]
+/// instead).
 struct Direct<'a> {
     f: &'a File,
     body: Body,
@@ -1164,9 +1194,10 @@ impl Direct<'_> {
             let (a, b) = pcs.first().map_or((0.0, 1.0), |r| r.range);
             self.body.add_degenerate(self.body.verts[v0].p, a, b, v0)
         } else {
-            let (ci, cl, a, b) = c3.ok_or_else(|| format!("edge {s} has no 3D curve"))?;
-            let at = compose(&loc.m, &self.f.locs[cl].m);
-            let c = to_curve(&self.f.curves[ci], a, b)?.transformed(&at);
+            let (c, a, b) = match c3 {
+                Some((ci, cl, a, b)) => (to_curve(&self.f.curves[ci], a, b)?.transformed(&compose(&loc.m, &self.f.locs[cl].m)), a, b),
+                None => lifted(self.f, pcs, loc).map_err(|e| format!("edge {s}: {e}"))?,
+            };
             self.body.add_edge(c, a, b, v0, v1)
         };
         self.body.edges[e].tol = self.f.shapes[s].tol.max(TOL_MIN);
@@ -1215,8 +1246,26 @@ impl Direct<'_> {
             }
         }
         let sense = ori == Ori::Fwd;
+        let chained: Option<Vec<Vec<Coedge>>> = loops.iter().map(|l| chain(l.clone(), &self.body)).collect();
+        let mut loops = match chained {
+            Some(ls) => ls,
+            None => {
+                // A wire whose edges don't chain as listed (out of order, run the other way, or
+                // two loops in one wire): put in order as OCCT's `ShapeFix_Wire::FixReorder`
+                // does ([`super::heal::reorder_face_loops`]), when that closes every loop.
+                self.body.faces.push(Face { surf: surf.clone(), sense, loops });
+                let fi = self.body.faces.len() - 1;
+                super::heal::reorder_face_loops(&mut self.body, fi, 0.0);
+                let ls = self.body.faces.pop().map(|f| f.loops).unwrap_or_default();
+                let b = &self.body;
+                let closes = |l: &Vec<Coedge>| (0..l.len()).all(|k| b.co_end(&l[k]) == b.co_start(&l[(k + 1) % l.len()]));
+                if ls.is_empty() || !ls.iter().all(closes) {
+                    return Err(format!("a loop of face {s} doesn't chain"));
+                }
+                ls
+            }
+        };
         for l in &mut loops {
-            *l = chain(std::mem::take(l), &self.body).ok_or_else(|| format!("a loop of face {s} doesn't chain"))?;
             align_periods(&surf, l, &self.body);
         }
         // The outer loop first: the one enclosing the most (counter-clockwise about the outward
@@ -1273,8 +1322,9 @@ impl Direct<'_> {
 }
 
 /// A loop's coedges in order, each starting where the one before ends (files list a wire's
-/// edges in any order); at a fork, another edge before going straight back along the same one
-/// (a seam's two uses). None when they don't close up.
+/// edges in any order); at a fork, an edge that closes on itself first (a circle round a
+/// cylinder: taken later, the chain would leave it behind), and another edge before going
+/// straight back along the same one (a seam's two uses). None when they don't close up.
 fn chain(mut rest: Vec<Coedge>, b: &Body) -> Option<Vec<Coedge>> {
     if rest.is_empty() {
         return None;
@@ -1287,7 +1337,7 @@ fn chain(mut rest: Vec<Coedge>, b: &Body) -> Option<Vec<Coedge>> {
             .iter()
             .enumerate()
             .filter(|(_, c)| b.co_start(c) == end)
-            .min_by_key(|(i, c)| ((c.edge == last.edge) as usize, *i))
+            .min_by_key(|(i, c)| ((c.edge == last.edge) as usize, (b.co_end(c) != end) as usize, *i))
             .map(|(i, _)| i)?;
         out.push(rest.remove(i));
     }
@@ -1333,10 +1383,6 @@ fn build_direct(f: &File) -> R<Body> {
     let mut d = Direct { f, body: Body::default(), verts: HashMap::new(), grid: HashMap::new(), edges: HashMap::new(), shells: Vec::new(), solids: Vec::new(), free_faces: Vec::new() };
     let (o, s, l) = f.root;
     d.visit(s, o, &f.locs[l])?;
-    if !d.free_faces.is_empty() {
-        let ff = std::mem::take(&mut d.free_faces);
-        d.shells.push((ff, false));
-    }
     if d.body.faces.is_empty() {
         return Err("no faces".into());
     }
@@ -1347,7 +1393,45 @@ fn build_direct(f: &File) -> R<Body> {
     for shells in d.solids {
         body.solids.push(Solid { shells });
     }
+    let free = d.free_faces;
+    body.shells.extend(body.face_components(&free).into_iter().map(|faces| Shell { faces, closed: false }));
+    open_unclosed_shells(&mut body);
     Ok(body)
+}
+
+/// Marks open the shells outside solids that the file flags closed but that have an edge only
+/// one of their faces uses (a sheet's boundary): OCCT's closed flag is the writer's word, the
+/// edges are the shell's.
+fn open_unclosed_shells(b: &mut Body) {
+    let in_solid: std::collections::HashSet<usize> = b.solids.iter().flat_map(|s| s.shells.iter().copied()).collect();
+    for si in 0..b.shells.len() {
+        if !b.shells[si].closed || in_solid.contains(&si) {
+            continue;
+        }
+        let mut uses: HashMap<usize, usize> = HashMap::new();
+        for c in b.shells[si].faces.iter().flat_map(|&f| b.faces[f].loops.iter().flatten()) {
+            *uses.entry(c.edge).or_default() += 1;
+        }
+        if uses.iter().any(|(&e, &n)| n == 1 && !b.edges[e].degenerate) {
+            b.shells[si].closed = false;
+        }
+    }
+}
+
+/// Splits each shell of `faces` only (the faces outside any shell of the file, gathered in one)
+/// into a shell per edge-connected piece: OCCT checks a shell's faces connected, and the file
+/// put those faces in no shell.
+fn split_free_shell(b: &mut Body, faces: &[usize]) {
+    let free: std::collections::HashSet<usize> = faces.iter().copied().collect();
+    let shells = std::mem::take(&mut b.shells);
+    for sh in shells {
+        if !sh.closed && !sh.faces.is_empty() && sh.faces.iter().all(|f| free.contains(f)) {
+            let pieces = b.face_components(&sh.faces);
+            b.shells.extend(pieces.into_iter().map(|faces| Shell { faces, closed: false }));
+        } else {
+            b.shells.push(sh);
+        }
+    }
 }
 
 /// What a BRep file holds.
@@ -1378,7 +1462,7 @@ pub fn read_ordered(bytes: &[u8]) -> R<BrepRead> {
     b.visit(s, o, &f.locs[l]);
     let free = std::mem::take(&mut b.free_faces);
     if !free.is_empty() {
-        b.xb.shell(free, false);
+        b.xb.shell(free.clone(), false);
     }
     let mut warnings = std::mem::take(&mut b.warnings);
     let free_edges: Vec<(Curve, f64, f64)> = b.free_edges.iter().map(|&e| {
@@ -1417,8 +1501,13 @@ pub fn read_ordered(bytes: &[u8]) -> R<BrepRead> {
     let body = if let Some(x) = direct {
         Some(x)
     } else if has_faces {
-        let (body, w) = b.xb.finish();
+        let (mut body, w, map) = b.xb.finish_mapped();
         warnings.extend(w);
+        // Solids keep their shells and a shell keeps its faces (in a shell of the file or not);
+        // the faces of no shell make a shell per piece, and an open shell isn't closed.
+        let free: Vec<usize> = free.iter().filter_map(|&f| map.get(f).copied().flatten()).collect();
+        split_free_shell(&mut body, &free);
+        open_unclosed_shells(&mut body);
         Some(body).filter(|x| !x.faces.is_empty())
     } else {
         None
@@ -1506,5 +1595,142 @@ mod tests {
         let m = (c.point(1.0) - P3::new(0.5, 0.5, 0.0)).norm();
         let m2 = (c.point(1.0) - P3::new(-0.5, 0.5, 0.0)).norm();
         assert!(m < 1e-12 || m2 < 1e-12, "{:?}", c.point(1.0));
+    }
+
+    /// A 2 × 2 square face on the plane z = 0 whose four edges have p-curves and no 3D curves
+    /// (as files from older writers have them).
+    const PCURVES_ONLY: &str = "CASCADE Topology V1, (c) Matra-Datavision
+Locations 0
+Curve2ds 4
+1 0 0 1 0
+1 2 0 0 1
+1 2 2 -1 0
+1 0 2 0 -1
+Curves 0
+Polygon3D 0
+PolygonOnTriangulations 0
+Surfaces 1
+1 0 0 0 0 0 1 1 0 0 0 1 0
+Triangulations 0
+
+TShapes 10
+Ve
+1e-07
+0 0 0
+0 0
+
+0101100
+*
+Ve
+1e-07
+2 0 0
+0 0
+
+0101100
+*
+Ve
+1e-07
+2 2 0
+0 0
+
+0101100
+*
+Ve
+1e-07
+0 2 0
+0 0
+
+0101100
+*
+Ed
+ 1e-07 1 1 0
+2  1 1 0 0 2
+0
+
+0101000
++10 0 -9 0 *
+Ed
+ 1e-07 1 1 0
+2  2 1 0 0 2
+0
+
+0101000
++9 0 -8 0 *
+Ed
+ 1e-07 1 1 0
+2  3 1 0 0 2
+0
+
+0101000
++8 0 -7 0 *
+Ed
+ 1e-07 1 1 0
+2  4 1 0 0 2
+0
+
+0101000
++7 0 -10 0 *
+Wi
+
+0101000
++6 0 +5 0 +4 0 +3 0 *
+Fa
+0  1e-07 1 0
+
+0111000
++2 0 *
+
++1 0
+";
+
+    #[test]
+    fn edges_with_only_pcurves_get_3d_curves() {
+        // The edges' curves are their p-curves carried onto the plane: the face reads whole.
+        let (b, w) = read(PCURVES_ONLY.as_bytes()).unwrap();
+        assert_eq!((b.faces.len(), b.edges.len()), (1, 4), "{w:?}");
+        let issues = b.check_with(super::super::topo::CheckLevel::Full);
+        assert!(issues.is_empty(), "{issues:?}");
+        let a = super::super::mass::face_area(&b, 0).0;
+        assert!((a - 4.0).abs() < 1e-9, "{a}");
+        let e = &b.edges[0];
+        assert!((e.point(e.mid_t()) - P3::new(1.0, 0.0, 0.0)).norm() < 1e-9);
+    }
+
+    #[test]
+    fn open_shells_and_loose_faces() {
+        // A box's faces less its top, in a shell the file flags closed: open. Its top and bottom
+        // alone (faces of no shell, sharing no edge): a shell each.
+        let (b, _) = read(BOX.as_bytes()).unwrap();
+        let z = |f: usize| super::super::mass::face_area(&b, f).1.z;
+        let top = (0..6).max_by(|&x, &y| z(x).total_cmp(&z(y))).unwrap();
+        let bottom = (0..6).min_by(|&x, &y| z(x).total_cmp(&z(y))).unwrap();
+        let mut open = b.clone();
+        open.solids.clear();
+        open.shells = vec![Shell { faces: (0..6).filter(|&f| f != top).collect(), closed: true }];
+        open_unclosed_shells(&mut open);
+        assert!(!open.shells[0].closed);
+        let mut loose = b.clone();
+        loose.solids.clear();
+        loose.shells = vec![Shell { faces: vec![top, bottom], closed: false }];
+        split_free_shell(&mut loose, &[top, bottom]);
+        assert_eq!(loose.shells.len(), 2);
+        assert!(loose.check_with(super::super::topo::CheckLevel::Full).is_empty());
+    }
+
+    #[test]
+    fn loops_chain_round_closed_edges() {
+        // newFS.rle's wire: a closed edge at a, a line from b to a, the same way back on another
+        // line, a closed edge at b, listed in that order: from a the second line, then the closed
+        // edge at b before the first line (taken first, the chain was left at a without it).
+        let mut b = Body::default();
+        let (va, vb) = (b.add_vertex(P3::new(0.0, 0.0, 1.0)), b.add_vertex(P3::origin()));
+        let line = Curve::Line { o: P3::origin(), d: V3::z() };
+        let ca = b.add_edge(line.clone(), 0.0, 1.0, va, va);
+        let l1 = b.add_edge(line.clone(), 0.0, 1.0, vb, va);
+        let l2 = b.add_edge(line.clone(), 0.0, 1.0, vb, va);
+        let cb = b.add_edge(line.clone(), 0.0, 1.0, vb, vb);
+        let co = |edge: usize, fwd: bool| Coedge { edge, fwd, pc: line.clone() };
+        let l = chain(vec![co(ca, false), co(l1, true), co(l2, false), co(cb, true)], &b).expect("the loop chains");
+        assert_eq!(l.iter().map(|c| c.edge).collect::<Vec<_>>(), vec![ca, l2, cb, l1]);
     }
 }

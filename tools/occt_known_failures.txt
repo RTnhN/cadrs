@@ -404,7 +404,6 @@ offset shape_type_i_g2
 offset shape_type_i_g4
 offset faces_type_i_k6
 boolean bfuse_complex_k5
-sewing tol_0_01_j6
 sewing tol_0_01_q4
 sewing tol_100_b2
 sewing tol_100_e7
@@ -423,7 +422,6 @@ boolean bsection_i2
 boolean bsection_i3
 boolean bsection_m2
 boolean bsection_n8
-boolean bsection_p1
 boolean bsection_r9
 draft angle_j8
 draft angle_k7
@@ -760,44 +758,13 @@ blend simple_u4
 # W15 heal: the healing commands (fixshape, fixwgaps, directfaces, DT_*) made runnable, failing
 # today (by cause). Most are inputs the reader leaves invalid that the command isn't meant to
 # repair (OCCT's own reading of them is sound).
-# heal: the file's loops lack the edges it gives no 3D curve (the reader drops them), so they can't close.
-heal direct_faces_a2
+# heal: directfaces leaves a p-curve (refitted on the direct frame) 6e-5 off its edge.
 heal direct_faces_a6
-heal direct_faces_a7
-heal fix_shape_c6
-heal fix_shape_c7
-heal fix_shape_c9
-heal fix_shape_d2
-heal fix_shape_d4
-heal fix_shape_d5
-heal fix_shape_d6
-heal fix_shape_d7
-heal fix_shape_d8
-heal fix_shape_f4
-heal split_angle_c4
-heal split_angle_c5
-heal split_angle_c7
-heal split_angle_c9
-heal split_angle_d1
-heal split_angle_d2
-heal split_angle_d3
-heal split_angle_d4
-# heal: the file reads no faces (all its edges lack a 3D curve).
-heal fix_shape_d1
-heal fix_shape_d9
-heal split_angle_c8
-heal split_angle_d5
-# heal: the reader leaves a loop's edges out of order (newFS.rle); Fix reorders them, the other commands don't.
-heal split_closed_faces_e6
+# heal: newFS.rle's B-spline conversion of its rotated plane gives a loop that crosses itself in (u, v).
 heal surface_to_bspline_e7
 # heal: the file's sheet uses an edge in three faces (read as it is: not manifold).
 heal direct_faces_b7
 heal direct_faces_b8
-# heal: the reader flags an open shell closed (an edge used once).
-heal split_continuity_a1
-heal surface_to_bezier_a3
-heal surface_to_bezier_a4
-heal surface_to_bezier_a5
 # heal: fixwgaps leaves p-curve gaps on surfaces of revolution (RevolutionFG.rle).
 heal fix_gaps_b1
 # boolean: fixshape of b136 (an edge used once in its closed shell) can't close the shell.
@@ -813,7 +780,8 @@ heal split_closed_faces_e4
 heal split_closed_faces_e9
 heal surface_to_bspline_e5
 heal surface_to_bspline_f1
-# Full check: the input's shell isn't edge-connected (bowl_noremove.brep, CIN900_buc60204.rle): the input (W6b reader).
-heal split_closed_faces_f6
-heal surface_to_bspline_f8
+# Full check: the input's shell isn't edge-connected: CIN900_buc60204.rle's one shell has 16
+# faces and 72 edges each used once (no two faces share an edge). OCCT's checkshape reports
+# the input itself BRepCheck_NotConnected (BRepCheck_Shell::Minimum); its script checks only
+# statshape (the check here is the generator's).
 heal surface_to_bezier_e1
