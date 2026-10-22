@@ -374,7 +374,6 @@ offset faces_type_i_f2
 offset faces_type_i_f3
 offset faces_type_i_f4
 offset faces_type_i_f5
-offset faces_type_i_g1
 offset faces_type_i_g2
 offset faces_type_i_g4
 offset faces_type_i_g5
@@ -687,7 +686,6 @@ offset faces_type_i_n1
 offset faces_type_i_f9
 offset shape_type_i_c9
 # offset: the operation fails.
-offset faces_type_i_f7
 offset shape_type_i_d1
 # heal: wire tails across faces of a shell (the edges cut are other faces' too; OCCT splits them there).
 heal wire_tails_composed_a19

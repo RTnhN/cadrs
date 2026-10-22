@@ -27,11 +27,8 @@ fn normal_at(s: &Surface, sense: bool, p: &P3) -> V3 {
 
 /// The curve `c` moved by `d` along the face's normal, with the same parameters where that is
 /// exact (lines, circles), else a cubic through samples on [t0, t1].
-fn offset_curve(s: &Surface, sense: bool, c: &Curve, t0: f64, t1: f64, d: f64, fit: f64) -> Curve {
-    let at = |t: f64| {
-        let p = c.point(t);
-        p + normal_at(s, sense, &p) * d
-    };
+fn offset_curve(normal: &dyn Fn(f64) -> V3, c: &Curve, t0: f64, t1: f64, d: f64, fit: f64) -> Curve {
+    let at = |t: f64| c.point(t) + end_normal(normal, t, t0, t1) * d;
     let tol = 1e-9 * (1.0 + d.abs() + (c.point(t0) - c.point(t1)).norm());
     match c {
         Curve::Line { o, d: dir } => {
@@ -46,6 +43,7 @@ fn offset_curve(s: &Surface, sense: bool, c: &Curve, t0: f64, t1: f64, d: f64, f
             // A circle again when three offset points' circle holds the others.
             let (p0, p1, p2) = (at(t0), at(t0 + (t1 - t0) / 3.0), at(t0 + 2.0 * (t1 - t0) / 3.0));
             if let Some((cc, nn, r)) = circle3(&p0, &p1, &p2) {
+                // (The axes from points at 0 and π/2, which may lie off the edge.)
                 let x = (at(0.0) - cc) / r;
                 let y = (at(std::f64::consts::FRAC_PI_2) - cc) / r;
                 let cand = Curve::Circle { c: cc, x, y, r };
@@ -75,13 +73,30 @@ fn offset_curve(s: &Surface, sense: bool, c: &Curve, t0: f64, t1: f64, d: f64, f
     }
 }
 
+/// The normal along a curve at t (`normal(t)`), but at an end where the surface's normals turn
+/// round (a pole of a cone-like apex, where any one is as good as another) the limit along the
+/// curve: the normal a hair inside.
+fn end_normal(normal: &dyn Fn(f64) -> V3, t: f64, t0: f64, t1: f64) -> V3 {
+    let n = normal(t);
+    let step = 1e-9 * (t1 - t0);
+    let inner = if t == t0 {
+        t0 + step
+    } else if t == t1 {
+        t1 - step
+    } else {
+        return n;
+    };
+    let m = normal(inner);
+    if (m - n).norm() > 1e-6 { m } else { n }
+}
+
 /// How closely a fitted offset curve follows the true offset (mm, relative to the distance),
 /// at least: a tenth of the edge's tolerance is close enough.
 const FIT: f64 = 1e-9;
 
 /// How far the curve strays from the surface over [t0, t1] (sampled).
 fn stray(s: &Surface, c: &Curve, t0: f64, t1: f64) -> f64 {
-    (0..=16).map(|i| s.distance(&c.point(t0 + (t1 - t0) * i as f64 / 16.0))).fold(0.0, f64::max)
+    (0..=64).map(|i| s.distance(&c.point(t0 + (t1 - t0) * i as f64 / 64.0))).fold(0.0, f64::max)
 }
 
 /// The circle through three points: centre, normal, radius.
@@ -154,6 +169,17 @@ pub fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
         s => (s.clone(), f.sense),
     };
     let top_surf = super::local::offset_surface(&surf, sense, d).ok_or(unsupported("slabs of this kind of face"))?;
+    // The outward normal along a coedge at t: from its p-curve on the face's own surface (where
+    // a projection near a pole could land on any meridian), else projected on the recognised one.
+    let own = !matches!(f.surf, Surface::Nurbs(_)) || matches!(surf, Surface::Nurbs(_));
+    let normal_on = |c: &super::topo::Coedge, t: f64| -> V3 {
+        if own {
+            let q = c.pc.point(t);
+            f.surf.normal(q.x, q.y).normalize() * if f.sense { 1.0 } else { -1.0 }
+        } else {
+            normal_at(&surf, sense, &b.edges[c.edge].point(t))
+        }
+    };
     let mut xb = XBuilder::new();
     let mut vb: HashMap<usize, usize> = HashMap::new();
     let mut vt: HashMap<usize, usize> = HashMap::new();
@@ -170,10 +196,12 @@ pub fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
         if e.degenerate {
             continue;
         }
-        for v in e.v {
+        for (k, v) in e.v.into_iter().enumerate() {
+            // The normal as the edge's offset has it at this end (see `end_normal`).
+            let n = end_normal(&|t| normal_on(c, t), e.t[k], e.t[0], e.t[1]);
             if let std::collections::hash_map::Entry::Vacant(e) = vb.entry(v) {
                 let p = b.verts[v].p;
-                let q = p + normal_at(&surf, sense, &p) * d;
+                let q = p + n * d;
                 // (A read model's vertex lies up to its tolerance off its edges: the edges'
                 // tolerances, below, cover that.)
                 e.insert(xb.vertex(p));
@@ -189,7 +217,7 @@ pub fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
             continue;
         }
         let (v0, v1) = (e.v[0], e.v[1]);
-        let oc = offset_curve(&surf, sense, &e.curve, e.t[0], e.t[1], d, (FIT * (1.0 + d.abs())).max(0.1 * e.tol));
+        let oc = offset_curve(&|t| normal_on(c, t), &e.curve, e.t[0], e.t[1], d, (FIT * (1.0 + d.abs())).max(0.1 * e.tol));
         let a = xb.edge(e.curve.clone(), vb[&v0], vb[&v1]).ok_or(unsupported("an empty edge in a slab"))?;
         let t = xb.edge(oc.clone(), vt[&v0], vt[&v1]).ok_or(unsupported("an empty offset edge in a slab"))?;
         // The face's own edge keeps its tolerance; its offset strays from the offset surface
@@ -234,8 +262,58 @@ pub fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
         let (r0, r1) = (rail(v0, &mut xb)?, rail(v1, &mut xb)?);
         sides.push(XFace { surf, sense: true, loops: vec![vec![(a, true), (r1, true), (t, false), (r0, false)]] });
     }
+    // A pole where the face's normals turn round (a B-spline closing to a cone-like apex): the
+    // normals there sweep a fan, so the offset of the point is a closed curve, an edge of the
+    // offset face, and the fan a side between the point and it.
+    for c in f.loops.iter().flatten() {
+        let (ei, e) = (c.edge, &b.edges[c.edge]);
+        if !e.degenerate || et.contains_key(&ei) {
+            continue;
+        }
+        let v = e.v[0];
+        let (Some(&apex), Some(&top)) = (vb.get(&v), vt.get(&v)) else { continue };
+        let p = b.verts[v].p;
+        // Along the pole's p-curve, the normal from just inside the face.
+        let at = |t: f64| {
+            let q = c.pc.point(t);
+            p + f.surf.normal(q.x, q.y).normalize() * if f.sense { d } else { -d }
+        };
+        let (t0, t1) = (e.t[0], e.t[1]);
+        let n = 64;
+        let params: Vec<f64> = (0..=n).map(|i| t0 + (t1 - t0) * i as f64 / n as f64).collect();
+        let pts: Vec<P3> = params.iter().map(|&t| at(t)).collect();
+        let q = xb.body.verts[top].p;
+        let size = (pts[n / 2] - q).norm();
+        // A point after all (a smooth pole), or a fan that doesn't start at the offset vertex.
+        let tol = 1e-7 * (1.0 + d.abs());
+        if size < tol || (pts[0] - q).norm() > tol || (pts[n] - q).norm() > tol {
+            continue;
+        }
+        let fan_top = Curve::Nurbs(Arc::new(NurbsCurve::interpolate(&pts, &params, 3, None, None)));
+        let Some(t) = xb.edge(fan_top.clone(), top, top) else { continue };
+        // (The offset surface is a fit, loosest where the normals turn fastest: its distance
+        // from the fan's curve searched finely.)
+        let off = (0..=256).map(|i| top_surf.distance(&fan_top.point(t0 + (t1 - t0) * i as f64 / 256.0))).fold(0.0, f64::max);
+        xb.body.edges[t].tol = b.verts[v].tol.max(2.0 * off);
+        et.insert(ei, t);
+        let r = match rails.get(&v) {
+            Some(r) => *r,
+            None => {
+                let (line, _) = Curve::line(p, q);
+                let r = xb.edge(line, apex, top).ok_or(unsupported("a slab of no thickness"))?;
+                rails.insert(v, r);
+                r
+            }
+        };
+        let surf = side_surface(&e.curve, t0, t1, &fan_top);
+        sides.push(XFace { surf, sense: true, loops: vec![vec![(r, true), (t, false), (r, false)]] });
+    }
     let map_loops = |m: &HashMap<usize, usize>| -> Vec<Vec<(usize, bool)>> {
-        f.loops.iter().map(|l| l.iter().filter(|c| !b.edges[c.edge].degenerate).map(|c| (m[&c.edge], c.fwd)).collect()).filter(|l: &Vec<(usize, bool)>| !l.is_empty()).collect()
+        f.loops
+            .iter()
+            .map(|l| l.iter().filter(|c| m.contains_key(&c.edge)).map(|c| (m[&c.edge], c.fwd)).collect())
+            .filter(|l: &Vec<(usize, bool)>| !l.is_empty())
+            .collect()
     };
     let mut faces = vec![
         XFace { surf: surf.clone(), sense: if d > 0.0 { !sense } else { sense }, loops: map_loops(&eb) },
@@ -282,15 +360,26 @@ pub fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
     }
     shells.sort_by(|a, b| b.0.total_cmp(&a.0));
     let mut ids: Vec<Option<XFace>> = faces.into_iter().map(Some).collect();
+    // The builder's ids of the face itself and its offset.
+    let mut ends = [usize::MAX; 2];
     let shells: Vec<usize> = shells
         .into_iter()
         .map(|(_, members)| {
-            let fs = members.into_iter().filter_map(|i| ids[i].take()).map(|f| xb.face(f)).collect();
+            let mut fs = Vec::new();
+            for i in members {
+                if let Some(f) = ids[i].take() {
+                    let id = xb.face(f);
+                    if i < 2 {
+                        ends[i] = id;
+                    }
+                    fs.push(id);
+                }
+            }
             xb.shell(fs, true)
         })
         .collect();
     xb.solid(shells);
-    let (mut body, warnings) = xb.finish();
+    let (mut body, warnings, map) = xb.finish_mapped();
     if std::env::var_os("CADRS_SLAB_DEBUG").is_some() {
         eprintln!("slab of face {fi} ({:?}) by {d}: {warnings:?}", f.surf.kind());
     }
@@ -304,8 +393,17 @@ pub fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
     if !issues.is_empty() || body.solids.is_empty() {
         return Err(KernelError::OperationFailed(format!("the face's slab isn't valid: {}", issues.first().map_or("no solid", |s| s.as_str()))));
     }
-    if super::mass::body_mass(&body).volume <= 0.0 {
+    let volume = super::mass::body_mass(&body).volume;
+    if volume <= 0.0 {
         return Err(KernelError::OperationFailed("the face's slab has no volume".into()));
+    }
+    // Its volume the prismoid's, d × the mean of its two ends' areas, but for the faces' curving
+    // (exact on a cylinder, 4/3 of it at most on a sphere offset by its radius): far off, the
+    // offset face's loops bound another region than the face's (a wrong body, not an error).
+    let area = |k: usize| map.get(ends[k]).copied().flatten().map_or(0.0, |x| super::mass::face_area(&body, x).0.abs());
+    let prismoid = d.abs() * 0.5 * (area(0) + area(1));
+    if !(volume < 2.0 * prismoid && volume > 0.5 * prismoid) {
+        return Err(KernelError::OperationFailed(format!("the face's slab encloses {volume:.6e}, not about its ends' {prismoid:.6e}")));
     }
     Ok(body)
 }

@@ -981,7 +981,39 @@ pub fn offset_surface(s: &Surface, sense: bool, d: f64) -> Option<Surface> {
                 }
                 s.normal(u + (uc - u) * 1e-6, v + (vc - v) * 1e-6)
             };
-            let at = |u: f64, v: f64| s.eval(u, v) + normal(u, v) * d;
+            // A smooth pole (its normals from all round agree) offsets to a point: every grid
+            // point on it that one point, so the offset surface collapses there too (a loop
+            // round it then goes round a pole, not along a tiny closed edge). A cone-like apex
+            // (normals turning round) offsets to a curve and stays as it is.
+            let pole_point = |k: usize| -> Option<P3> {
+                if !pole(k) {
+                    return None;
+                }
+                // (Just inside the pole: on it the normal is rounding noise.)
+                let (du, dv) = (1e-7 * (a1 - a0), 1e-7 * (b1 - b0));
+                let ns: Vec<V3> = (0..16)
+                    .map(|j| {
+                        let f = j as f64 / 16.0;
+                        match k {
+                            0 => s.normal(a0 + du, b0 + (b1 - b0) * f),
+                            1 => s.normal(a1 - du, b0 + (b1 - b0) * f),
+                            2 => s.normal(a0 + (a1 - a0) * f, b0 + dv),
+                            _ => s.normal(a0 + (a1 - a0) * f, b1 - dv),
+                        }
+                    })
+                    .collect();
+                let mean = ns.iter().fold(V3::zeros(), |m, n| m + n).normalize();
+                ns.iter().all(|n| (n - mean).norm() < 1e-4).then(|| sides[k][0] + mean * d)
+            };
+            let poles: Vec<Option<P3>> = (0..4).map(pole_point).collect();
+            let at = |u: f64, v: f64| {
+                let (eu, ev) = (1e-12 * (a1 - a0), 1e-12 * (b1 - b0));
+                let on = [(u - a0).abs() <= eu, (u - a1).abs() <= eu, (v - b0).abs() <= ev, (v - b1).abs() <= ev];
+                match (0..4).find_map(|k| if on[k] { poles[k] } else { None }) {
+                    Some(q) => q,
+                    None => s.eval(u, v) + normal(u, v) * d,
+                }
+            };
             let mut k = 32;
             loop {
                 let us: Vec<f64> = (0..=k).map(|i| u0 + (u1 - u0) * i as f64 / k as f64).collect();

@@ -318,3 +318,22 @@ fn thickened_sphere_face_has_a_void() {
     assert_eq!(b.check_with(CheckLevel::Full), Vec::<String>::new());
     close(volume(&k, r), 4.0 / 3.0 * PI * (110f64.powi(3) - 100f64.powi(3)), 1e-6);
 }
+
+/// The slab of a B-spline face closing to a cone-like apex (SMLib's boolean_trees_result, face
+/// 11: its normals at the apex turn round a cone about −y): the apex offsets to a closed curve,
+/// the offset face's edge there, with the fan of normals between it and the apex a side. The
+/// slab left the point out, and the offset face's loop didn't close.
+#[test]
+fn slab_of_a_face_with_a_cone_like_apex() {
+    use cadrs_kernel::native::topo::CheckLevel;
+    let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/smlib/offset/boolean_trees_result.smb")).unwrap();
+    let b = cadrs_kernel::native::smb::read_brep(&bytes).unwrap().body;
+    let fi = 11;
+    let apex = cadrs_kernel::native::math::P3::new(12.0, -8.0, 0.0);
+    assert!(b.faces[fi].loops.iter().flatten().any(|c| b.edges[c.edge].degenerate && (b.verts[b.edges[c.edge].v[0]].p - apex).norm() < 1e-9), "face {fi} has no pole at the apex");
+    let slab = cadrs_kernel::native::slab::face_slab(&b, fi, 0.3).unwrap();
+    assert_eq!(slab.check_with(CheckLevel::Full), Vec::<String>::new());
+    // The fan: a closed edge 0.3 from the apex all round.
+    let fan = slab.edges.iter().any(|e| !e.degenerate && e.v[0] == e.v[1] && (0..8).all(|i| ((e.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 8.0) - apex).norm() - 0.3).abs() < 1e-6));
+    assert!(fan, "no offset curve round the apex");
+}
