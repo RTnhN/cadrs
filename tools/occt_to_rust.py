@@ -1113,6 +1113,85 @@ WRONG_REFERENCE = {
     ("offset", "shape_a1"): "the input's volume (ours: 2128159, the kept faces' area × 5 less the corners' overlap)",
 }
 
+# OCCT's 2D booleans of case_9 (tests/boolean/{bcommon,bcut,bfuse,bopcommon,bopcut,bopfuse,
+# boptuc}_2d) whose reference misses an overlap: the rational quadratic B-spline of
+# case_9_edge.brep and case_9_wire_a.brep is straight between its knots 1.5795 and 1.8666 (its
+# poles 2, 3 and 4 lie on the line of case_9_edge3.brep within 5e-13), so it runs along that line
+# for 143.8 mm within the tolerance 1e-7 (79.9 mm along case_9_edge5.brep, the line moved 150 mm
+# along itself; the lines of case_9_wire2/3.brep are the same). OCCT's IntTools_EdgeEdge finds one
+# crossing there. Its result for the same shape made of exact arcs and lines (case_9_wire.brep)
+# has the overlap: bopcommon_2d n5, 143.787 mm, 2 vertices, 1 edge. Each case's length, vertex
+# and edge counts are instead those of tools/occt_case9_model.py, an independent model (the
+# files' curves in double precision, the overlap where the distance is within 1e-7, OCCT's
+# common/cut/fuse of edges and wires): {name: (length, vertices, edges)}.
+WRONG_2D = {
+    "bcommon_2d_o4": (143.8018, 2, 1),  # common edge3 wire_a
+    "bcommon_2d_o6": (79.9102, 2, 1),  # common edge5 wire_a
+    "bcommon_2d_o8": (143.8018, 2, 1),  # common wire2 wire_a
+    "bcommon_2d_o9": (79.9102, 2, 1),  # common wire3 wire_a
+    "bcommon_2d_p3": (143.8018, 2, 1),  # common edge3 edge
+    "bcommon_2d_p5": (79.9102, 2, 1),  # common edge5 edge
+    "bcommon_2d_p7": (143.8018, 2, 1),  # common wire2 edge
+    "bcommon_2d_p8": (79.9102, 2, 1),  # common wire3 edge
+    "bcut_2d_p8": (206.1982, 4, 2),  # cut edge3 wire_a
+    "bcut_2d_p9": (469.8759, 4, 2),  # cut wire_a edge3
+    "bcut_2d_q3": (270.0898, 2, 1),  # cut edge5 wire_a
+    "bcut_2d_q4": (533.7675, 4, 2),  # cut wire_a edge5
+    "bcut_2d_q7": (936.8427, 7, 6),  # cut wire2 wire_a
+    "bcut_2d_q8": (469.8759, 4, 2),  # cut wire_a wire2
+    "bcut_2d_q9": (1000.7343, 6, 5),  # cut wire3 wire_a
+    "bcut_2d_r1": (533.7675, 4, 2),  # cut wire_a wire3
+    "bcut_2d_r6": (206.1982, 4, 2),  # cut edge3 edge
+    "bcut_2d_r7": (469.8759, 4, 2),  # cut edge edge3
+    "bcut_2d_s1": (270.0898, 2, 1),  # cut edge5 edge
+    "bcut_2d_s2": (533.7675, 4, 2),  # cut edge edge5
+    "bcut_2d_s5": (936.8427, 7, 6),  # cut wire2 edge
+    "bcut_2d_s6": (469.8759, 4, 2),  # cut edge wire2
+    "bcut_2d_s7": (1000.7343, 6, 5),  # cut wire3 edge
+    "bcut_2d_s8": (533.7675, 4, 2),  # cut edge wire3
+    "bfuse_2d_b6": (819.8759, 6, 5),  # fuse wire_a edge3
+    "bfuse_2d_b8": (883.7675, 5, 4),  # fuse wire_a edge5
+    "bfuse_2d_c1": (1694.3222, 9, 9),  # fuse wire_a wire2
+    "bfuse_2d_c2": (1694.3222, 8, 8),  # fuse wire_a wire3
+    "bfuse_2d_c5": (819.8759, 6, 5),  # fuse edge edge3
+    "bfuse_2d_c7": (883.7675, 5, 4),  # fuse edge edge5
+    "bfuse_2d_c9": (1550.5204, 9, 9),  # fuse edge wire2
+    "bfuse_2d_d1": (1614.4119, 8, 8),  # fuse edge wire3
+    "bopcommon_2d_o4": (143.8018, 2, 1),  # common wire_a edge3
+    "bopcommon_2d_o6": (79.9102, 2, 1),  # common wire_a edge5
+    "bopcommon_2d_o8": (143.8018, 2, 1),  # common wire_a wire2
+    "bopcommon_2d_o9": (79.9102, 2, 1),  # common wire_a wire3
+    "bopcommon_2d_p3": (143.8018, 2, 1),  # common edge edge3
+    "bopcommon_2d_p5": (79.9102, 2, 1),  # common edge edge5
+    "bopcommon_2d_p7": (143.8018, 2, 1),  # common edge wire2
+    "bopcommon_2d_p8": (79.9102, 2, 1),  # common edge wire3
+    "bopcut_2d_b9": (469.8759, 4, 2),  # cut wire_a edge3
+    "bopcut_2d_c2": (533.7675, 4, 2),  # cut wire_a edge5
+    "bopcut_2d_c4": (469.8759, 4, 2),  # cut wire_a wire2
+    "bopcut_2d_c5": (533.7675, 4, 2),  # cut wire_a wire3
+    "bopcut_2d_d1": (533.7675, 4, 2),  # cut edge edge5
+    "bopcut_2d_d3": (469.8759, 4, 2),  # cut edge wire2
+    "bopcut_2d_d4": (533.7675, 4, 2),  # cut edge wire3
+    "bopfuse_2d_b6": (819.8759, 6, 5),  # fuse wire_a edge3
+    "bopfuse_2d_b8": (883.7675, 5, 4),  # fuse wire_a edge5
+    "bopfuse_2d_c1": (1694.3222, 9, 9),  # fuse wire_a wire2
+    "bopfuse_2d_c2": (1694.3222, 8, 8),  # fuse wire_a wire3
+    "bopfuse_2d_c5": (819.8759, 6, 5),  # fuse edge edge3
+    "bopfuse_2d_c7": (883.7675, 5, 4),  # fuse edge edge5
+    "bopfuse_2d_c9": (1550.5204, 9, 9),  # fuse edge wire2
+    "bopfuse_2d_d1": (1614.4119, 8, 8),  # fuse edge wire3
+    "boptuc_2d_o1": (206.1982, 4, 2),  # cut edge3 wire_a
+    "boptuc_2d_o3": (270.0898, 2, 1),  # cut edge5 wire_a
+    "boptuc_2d_o5": (936.8427, 7, 6),  # cut wire2 wire_a
+    "boptuc_2d_o6": (1000.7343, 6, 5),  # cut wire3 wire_a
+    "boptuc_2d_o9": (206.1982, 4, 2),  # cut edge3 edge
+    "boptuc_2d_p2": (270.0898, 2, 1),  # cut edge5 edge
+    "boptuc_2d_p4": (936.8427, 7, 6),  # cut wire2 edge
+    "boptuc_2d_p5": (1000.7343, 6, 5),  # cut wire3 edge
+    "bopcut_2d_d5": (533.7675, 4, 2),  # cut edge wire3
+}
+
+
 # Cases whose reference area is wrong, checked against a value of ours found another way
 # instead (the case's `checkprops -s` takes it): (why OCCT's is wrong, ours, how ours is known).
 WRONG_AREA = {
@@ -1198,6 +1277,17 @@ def main():
                             if "checkprops_s(" in l:
                                 fixed.append(f"// (OCCT's reference area is {why}; ours is {how}.)")
                                 l = re.sub(r"checkprops_s\((.*), [-0-9.e+]+\)", lambda m: f"checkprops_s({m.group(1)}, {ours})", l)
+                            fixed.append(l)
+                        lines = fixed
+                    if group == "boolean" and name in WRONG_2D:
+                        length, nv, ne = WRONG_2D[name]
+                        fixed = []
+                        for l in lines:
+                            if "checkprops_l(" in l or "checkprops_empty(" in l:
+                                fixed.append(f"// (OCCT's reference misses the overlap of case_9's B-spline and line: ours, as tools/occt_case9_model.py has it.)")
+                                l = f"k.checkprops_l(&result, {length})?;"
+                            elif "draw::check_nb(" in l:
+                                l = re.sub(r"check_nb\(k\.nbshapes\(&result\)\?, Some\(\d+\), Some\(\d+\)", f"check_nb(k.nbshapes(&result)?, Some({nv}), Some({ne})", l)
                             fixed.append(l)
                         lines = fixed
                     if (group, name) in known:

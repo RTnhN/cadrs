@@ -4,7 +4,6 @@
 # inline (`group case  # why`), or the comment lines just above its group of lines (a blank line
 # ends a group's comment); `[panic: text]` in a reason lets the case panic with that text.
 
-# case_9 2d cases: a line and a B-spline coincide within 5e-13 over 143 mm; OCCT finds one crossing, we an overlap.
 
 blend complex_a2  # the loft's surface isn't valid (a weight along v isn't positive)
 blend complex_a3  # the loft's surface isn't valid (a weight along v isn't positive)
@@ -64,32 +63,8 @@ blend tolblend_simple_f6  # the area differs from OCCT's
 blend tolblend_simple_f7  # a boolean leaves an open shell
 blend tolblend_simple_f9  # the area differs from OCCT's
 blend tolblend_simple_g1  # the area differs from OCCT's
-boolean bcommon_2d_o4  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
-boolean bcommon_2d_o6  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
-boolean bcommon_2d_o8  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
-boolean bcommon_2d_o9  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
-boolean bcommon_2d_p3  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
-boolean bcommon_2d_p5  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
-boolean bcommon_2d_p7  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
-boolean bcommon_2d_p8  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
 boolean bcut_2d_a8  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
 boolean bcut_2d_n5  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
-boolean bcut_2d_p8  # the length differs from OCCT's
-boolean bcut_2d_p9  # the length differs from OCCT's
-boolean bcut_2d_q3  # the length differs from OCCT's
-boolean bcut_2d_q4  # the length differs from OCCT's
-boolean bcut_2d_q7  # the length differs from OCCT's
-boolean bcut_2d_q8  # the length differs from OCCT's
-boolean bcut_2d_q9  # the length differs from OCCT's
-boolean bcut_2d_r1  # the length differs from OCCT's
-boolean bcut_2d_r6  # the length differs from OCCT's
-boolean bcut_2d_r7  # the length differs from OCCT's
-boolean bcut_2d_s1  # the length differs from OCCT's
-boolean bcut_2d_s2  # the length differs from OCCT's
-boolean bcut_2d_s5  # the length differs from OCCT's
-boolean bcut_2d_s6  # the length differs from OCCT's
-boolean bcut_2d_s7  # the length differs from OCCT's
-boolean bcut_2d_s8  # the length differs from OCCT's
 boolean bcut_complex_e4  # a boolean builds a face that doesn't close (a p-curve gap)
 boolean bcut_complex_f9  # a boolean leaves an open shell
 boolean bcut_complex_h4  # a boolean builds a face that doesn't close (a p-curve gap)
@@ -97,52 +72,21 @@ boolean bcut_complex_i2  # the area differs from OCCT's
 boolean bcut_complex_k4  # a boolean builds a face that doesn't close (a p-curve gap)
 boolean bcut_complex_l4  # a boolean builds a face that doesn't close (a p-curve gap)
 boolean bcut_complex_o5  # a boolean's result has an edge used by three faces (refused, not manifold)
-boolean bfuse_2d_b6  # the length differs from OCCT's
-boolean bfuse_2d_b8  # the length differs from OCCT's
-boolean bfuse_2d_c1  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
-boolean bfuse_2d_c2  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
-boolean bfuse_2d_c5  # the length differs from OCCT's
-boolean bfuse_2d_c7  # the length differs from OCCT's
-boolean bfuse_2d_c9  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
-boolean bfuse_2d_d1  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
 boolean bfuse_complex_e1  # a boolean leaves an open shell
 boolean bfuse_complex_i3  # a boolean leaves an open shell
 boolean bfuse_complex_q7  # the area differs from OCCT's
-boolean bopcommon_2d_o4  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
-boolean bopcommon_2d_o6  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
-boolean bopcommon_2d_o8  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
-boolean bopcommon_2d_o9  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
-boolean bopcommon_2d_p3  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
-boolean bopcommon_2d_p5  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
-boolean bopcommon_2d_p7  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
-boolean bopcommon_2d_p8  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
 boolean bopcommon_complex_e3  # the area differs from OCCT's
 boolean bopcommon_complex_e4  # the area differs from OCCT's
 boolean bopcommon_complex_g9  # a boolean leaves an open shell
 boolean bopcommon_complex_i2  # a boolean leaves an open shell
 boolean bopcommon_complex_k5  # a boolean leaves an open shell
-boolean bopcut_2d_b9  # the length differs from OCCT's
-boolean bopcut_2d_c2  # the length differs from OCCT's
-boolean bopcut_2d_c4  # the length differs from OCCT's
-boolean bopcut_2d_c5  # the length differs from OCCT's
 boolean bopcut_2d_c8  # the length differs from OCCT's
-boolean bopcut_2d_d1  # the length differs from OCCT's
-boolean bopcut_2d_d3  # the length differs from OCCT's
-boolean bopcut_2d_d4  # the length differs from OCCT's
 boolean bopcut_complex_e6  # the area differs from OCCT's
 boolean bopcut_complex_h8  # the area differs from OCCT's
 boolean bopcut_complex_h9  # a boolean leaves an open shell
 boolean bopcut_complex_i7  # a boolean leaves an open shell
 boolean bopcut_complex_j2  # the area differs from OCCT's
 boolean bopcut_complex_m6  # a boolean leaves an open shell
-boolean bopfuse_2d_b6  # the length differs from OCCT's
-boolean bopfuse_2d_b8  # the length differs from OCCT's
-boolean bopfuse_2d_c1  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
-boolean bopfuse_2d_c2  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
-boolean bopfuse_2d_c5  # the length differs from OCCT's
-boolean bopfuse_2d_c7  # the length differs from OCCT's
-boolean bopfuse_2d_c9  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
-boolean bopfuse_2d_d1  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
 boolean bopfuse_complex_g2  # a boolean leaves an open shell
 boolean bopfuse_complex_h4  # the area differs from OCCT's
 boolean bopfuse_complex_j6  # a boolean's result has an edge used by three faces (refused, not manifold)
@@ -156,14 +100,6 @@ boolean bopfuse_complex_o1  # the area differs from OCCT's
 boolean bopfuse_complex_o4  # the area differs from OCCT's
 boolean boptuc_2d_a8  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
 boolean boptuc_2d_m8  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
-boolean boptuc_2d_o1  # the length differs from OCCT's
-boolean boptuc_2d_o3  # the length differs from OCCT's
-boolean boptuc_2d_o5  # the length differs from OCCT's
-boolean boptuc_2d_o6  # the length differs from OCCT's
-boolean boptuc_2d_o9  # the length differs from OCCT's
-boolean boptuc_2d_p2  # the length differs from OCCT's
-boolean boptuc_2d_p4  # the length differs from OCCT's
-boolean boptuc_2d_p5  # the length differs from OCCT's
 boolean boptuc_complex_c6  # a boolean leaves an open shell
 boolean boptuc_complex_c7  # the area differs from OCCT's
 boolean boptuc_complex_d8  # a boolean leaves an open shell
@@ -187,7 +123,6 @@ blend simple_g5  # unsupported: faces bounded by rational or high-degree B-splin
 blend simple_g6  # unsupported: faces bounded by rational or high-degree B-splines
 blend simple_h3  # a boolean's result has an edge used by three faces (refused, not manifold)
 blend simple_j6  # the area differs from OCCT's
-boolean bopcut_2d_d5  # the length differs from OCCT's
 offset wire_closed_inside_0_005_a4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_inside_0_005_a5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
 offset wire_closed_inside_0_005_b2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
