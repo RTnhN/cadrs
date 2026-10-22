@@ -577,6 +577,15 @@ fn place_drop_line(
             (Some(*id), joined)
         }
     };
+    // Dropped just above a dragged row: before the first feature after it that stays put (the
+    // dragged ones aren't in `order`, so it would otherwise fall to the end of the list).
+    let before = before.and_then(|b| {
+        el.features()
+            .iter()
+            .map(|f| f.id)
+            .skip_while(|x| *x != b)
+            .find(|x| order.contains(x))
+    });
     let mut to = before
         .and_then(|b| order.iter().position(|x| *x == b))
         .unwrap_or(order.len());
