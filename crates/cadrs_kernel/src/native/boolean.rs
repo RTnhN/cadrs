@@ -1286,6 +1286,11 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
                 if ia == InFace::Outside || ib == InFace::Outside {
                     continue;
                 }
+                // A piece no longer than the tolerance is a point (two vertices of the inputs
+                // closer than it, both on the curve): no edge.
+                if (ic.c.point(ta) - ic.c.point(tb)).norm() <= tf && ic.c.length(ta.min(tb), ta.max(tb)) <= tf {
+                    continue;
+                }
                 // Where the faces touch along an edge of one (a blend's spring edge on a wall it
                 // is tangent to), the curve is that edge found again: the edge is already there,
                 // and the curve would cut the faces at every vertex along it.
