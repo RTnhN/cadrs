@@ -76,39 +76,25 @@ let step = k.export_step(&round.bodies)?;               // and import_step / imp
 - About 45 trait methods default to `Unsupported` so a backend can start small; the native
   kernel implements them all.
 
-### Curated API (design note)
-Today all 61 modules of `native` are `pub`, so every internal function is public API. Only the
-crate's own tests reach into it: no other cadrs crate names `cadrs_kernel::native::...` (they
-use `Kernel`, `DefaultKernel` and the types). The tests use about 20 modules:
-`math` (P3, Frame, Affine), `surface::Surface`, `curve::Curve`, `nurbs`, `topo` (Body, Shell),
-`mass` (body_mass, face_area, face_integrals), `bodyio::read`, `tess` (edge_samples,
-mesh_face), `ssi`, `classify`, `smb`, `brep_occt::read`, `step`, `iges`, `exchange::write_body`,
-`features::prism_along`, `unify::merge_edges`, `evolved`, `surfacing`, and the test kit
-`draw` and `oracle`.
+### Curated API
+`native/mod.rs` declares the kernel's modules `pub(crate)` and re-exports a small stable set:
+`NativeKernel`; the B-rep data model (`Body`, `Vertex`, `Edge`, `Coedge`, `Face`, `Shell`,
+`Solid`, `Wire`, `CheckLevel`); its geometry (`Curve`, `Surface`, `NurbsCurve`, `NurbsSurface`)
+and vector types (`P3`, `V3`, `Frame`, `Affine`); and the modules `tol` (the tolerance model)
+and `bodyio` (the body format). That, `Kernel`, `DefaultKernel` and the types are the public
+surface, all documented (`#![warn(missing_docs)]` holds for the whole crate without features).
+No other cadrs crate names anything else.
 
-The plan, in steps that each keep every test building:
-1. **A facade.** `native/mod.rs` declares its modules `pub(crate)` and re-exports a small
-   stable set: `NativeKernel`; the B-rep data model (`topo::{Body, Vertex, Edge, Coedge, Face,
-   Shell, Solid, Wire, CheckLevel}`, `curve::Curve`, `surface::Surface`, `nurbs::{NurbsCurve,
-   NurbsSurface}`, `math::{P3, V3, Frame, Affine}`); `tol` (the tolerance model); `bodyio`
-   (the body format). This is what a user writing a direct-edit or analysis tool needs.
-2. **A `testkit` module** (`cadrs_kernel::testkit`, under the existing `testkit` feature, which
-   the crate's tests already turn on) re-exporting the internals the tests reach: `draw`,
-   `oracle`, `smb`, `brep_occt`, `step`, `iges`, `ssi`, `classify`, `mass`, `tess`, `unify`,
-   `features`, `evolved`, `surfacing`. Under `cfg(feature = "testkit")` the old
-   `native::<module>` paths stay `pub` too, so the tests move to `testkit::` one file at a time
-   and nothing breaks in between; the generators (`tools/occt_to_rust.py`, the SMLib ones)
-   switch their `use` lines in the same change.
-3. **Seal it.** When no test names `native::<internal>` any more, drop the `cfg` re-export:
-   without `testkit` the public surface is `Kernel`, the types, and the facade of step 1.
-   `cargo check -p cadrs_kernel` (no features) and `cargo check -p cadrs_core` are the gate.
-
-Done so far: `#![warn(missing_docs)]` on the crate, with every public item of `lib.rs` and
-`types.rs` documented; `native` and the not-yet-documented `exchange`, `loft`, `naming`,
-`projection` and `query` carry an `allow(missing_docs)` with a TODO in `lib.rs`, so the lint
-holds for everything new outside them. `native::topo` (the data model) turns the lint back on
-for itself and is fully documented; the other `native` modules can do the same one at a time. Steps 1–3 change `native/mod.rs` and the tests, which
-belong to other workstreams.
+The internals are for the crate's own tests and tools: the `testkit` feature (which the crate's
+tests turn on through their dev-dependency) makes every module `pub` again and adds
+`cadrs_kernel::testkit`, which re-exports the modules the tests use (`draw`, `oracle`, `smb`,
+`brep_occt`, `step`, `iges`, `ssi`, `classify`, `mass`, `tess`, `unify`, `features`, `evolved`,
+`surfacing`, ...). The tests still name them as `native::<module>`, which keeps working under
+`testkit`; they move to `testkit::` one file at a time (the generators, `tools/occt_to_rust.py`
+and the SMLib ones, switch their `use` lines in the same change), after which the `native::`
+paths can be sealed. Without `testkit`, what only the DRAW harness reaches (the OCCT BRep and
+SMLib readers, 2D offsets, wire tails, faces from loose edges, area splits) is unused code.
+`cargo check -p cadrs_kernel` (no features) and `cargo check -p cadrs_core` are the gate.
 
 ## Persistent naming
 Every operation returns a `History` (what was generated or modified from which input face, edge
@@ -182,11 +168,13 @@ orientation (`build::fix_senses`). Periodic faces have seams (an edge used twice
 | Module | What it does |
 |---|---|
 | `profile`, `sweep`, `build`, `features` | Sketch regions to profile pieces (merged across shared curves), and one sweep builder for prisms and revolutions (`SweepKind`: the side surface per piece and its p-curves); extrudes and revolves with every end type, thin walls and surfaces. |
-| `sweep_path`, `sweep_general` | Sweeps along paths: lines and arcs exactly (prism and revolve pieces glued at their caps); other curves with rotation-minimizing frames (double reflection), one skinned B-spline surface per profile curve over a tangent run of path curves, whose rails are exactly the surfaces' iso-curves. |
+| `sweep::path`, `sweep::frames`, `sweep::corner`, `sweep::body` | Sweeps along paths: lines and arcs exactly (prism and revolve pieces glued at their caps); other curves with rotation-minimizing frames (double reflection), one skinned B-spline surface per profile curve over a tangent run of path curves, whose rails are exactly the surfaces' iso-curves; mitred and round corner joins; points, wires and sheets swept one kind higher. |
+| `evolved`, `cells` | Evolved solids (`Kernel::evolved`: a profile swept square to a planar spine of lines and arcs, arc joins at its outer corners) and the cells of an arrangement of solids (`Kernel::cells`). |
 | `loft_build` | Lofts: exact skinning of compatible section curves (two sections give ruled surfaces), or sampled interpolation with end conditions. `loft_pieces` skins sections that already correspond. |
 | `ssi` | Surface intersections: analytic cases (planes, quadrics, tori, coaxial surfaces of revolution, plane × extrusion, plane × cone as exact conics), and numeric contouring of one surface's signed distance over the other's uv box, refined onto both and fitted (projections hinted by the neighbouring point). Curve–curve and curve–surface hits. |
 | `boolean`, `boolean_kinds`, `split`, `classify`, `unify` | Booleans: a pool of the inputs' vertices and edges, split at vertex-on-edge, edge–edge, edge–face and face–face intersections; coincident faces imprinted and coincident pieces made one edge; faces split in uv; pieces classified by exact ray parity; the kept faces assembled into shells; coplanar and same-surface faces merged (`unify`). Sheets, wires and points (`boolean_kinds`): sheets split by `imprint` and their pieces kept by a point inside each, solid − sheet a split into solids, wires through `edge_bop`; the result kind per operation is tabled in the module. |
-| `blend` | Fillets and chamfers as tool bodies (an exact prism or revolution of the rolling-ball or chamfer section where the edge allows, a lofted chain tool otherwise) subtracted or added; corner tools where three blended edges meet; variable, partial, asymmetric, conic and curvature sections; overlap and fit checks. |
+| `fillet`, `fillet_geom` | Constant-radius fillets by local trimming (SMLib's fillet executive): the rolling ball's contact curves on both faces, the strip imprinted into its faces in place of the edge (no boolean), three-edge corners a sphere patch; what it doesn't cover falls back to `blend`. |
+| `blend`, `blend_chain`, `blend_corner` | Fillets and chamfers as tool bodies (an exact prism or revolution of the rolling-ball or chamfer section where the edge allows, a lofted chain tool otherwise) subtracted or added; corner tools where three blended edges meet; variable, partial, asymmetric, conic and curvature sections; overlap and fit checks. |
 | `local`, `offset_round`, `slab` | Offsets (sharp: the faces' new surfaces re-intersected; rounded: the body ∪ each face's slab ∪ a tube round each convex edge ∪ a ball at each vertex, a concave cylinder's slab its wedge out to the axis when the distance passes its radius; rounded insets: the body less each face's inward slab, a tube round each concave edge and a ball at each of its vertices), drafts, face replacement (`Kernel::replace_faces`, SMLib's local operation, the new surface's domain picking the crossings), shells (inward and outward, hollow, corners rounded or sharp; the cavity built from its definition: the body less each kept face's slab, tubes and balls). Slabs keep the body's edge and vertex tolerances. |
 | `surfacing` | Thicken (a sewn sheet with flat open ends shelled as the solid it bounds), fill (planar, Coons), sew, simplify, delete faces. |
 | `mass` | Exact mass properties: the divergence theorem on each face, integrated by Green's theorem over the uv domain (nested Gauss–Legendre), along v for ruled faces, and by a tensor rule on knot spans for untrimmed B-spline patches. |
@@ -206,6 +194,12 @@ orientation (`build::fix_senses`). Periodic faces have seams (an edge used twice
 - `SIZE` 1e8: the size box. Beyond it a double no longer resolves `CONFUSION`; the readers refuse
   geometry outside it.
 
+Below these, the code's round-off margins are named by meaning (all 1e-9, so results are what
+they were as literals): `tol::REL` (relative: scaled by a size, a span or `1 + |t|`, or a
+parameter fraction), `tol::ANGULAR` (unit vectors parallel or square, angles in radians),
+`tol::ROUNDOFF` (absolute lengths and parameters of exact geometry), and `tol::TINY` (1e-300, the
+guard of a division or normalisation against zero).
+
 Above these, vertices and edges carry their own tolerance (a read or healed body's gaps,
 `Body::fit_tolerances`, as OCCT), and operations take the larger of their own and the entities'.
 The values an operation runs with are a `tol::Tolerances` carried by the session
@@ -223,8 +217,14 @@ meet: cadrs reads it as "no interference" or "nothing left of the part"), `OpenR
 that don't close into a solid; a boolean retries at larger tolerances on it), `InvalidInput`
 (a file or body that doesn't read, malformed B-splines, non-finite numbers, geometry outside the
 size box), `InvalidParameter` and `InvalidProfile` (the caller's values), `Unsupported`,
-`UnknownBody`, and `OperationFailed` for the rest. `KernelError::message` gives the words without
-the kind's prefix.
+`UnknownBody`. When an algorithm gives up (`KernelError::is_failure`), the variant says where:
+`TooLarge { op }` (a radius, distance or thickness the geometry can't hold: a smaller one may
+work), `InvalidGeometry { op }` (tangent faces at a blended edge, a degenerate section, faces
+that no longer meet), `BooleanFailed { stage }` (`"face closure"`, `"validity"`, `"sheet
+union"`), `BudgetExhausted { stage }` (a boolean's or a blend's deterministic work budget ran
+out), `InvalidResult { op }` (a built body failed its check and was not returned), and
+`OperationFailed` for the rest. The enum is `#[non_exhaustive]`. `KernelError::message` gives
+the words without the kind's prefix; `Display` is "operation failed: ..." for every failure.
 
 **Environment variables.** None is needed in normal use. Every one the kernel reads is listed
 here; `tools/kernel_gate.sh` and CI run with none of the switches set.

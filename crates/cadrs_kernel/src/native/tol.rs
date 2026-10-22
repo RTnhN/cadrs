@@ -25,8 +25,17 @@
 //! (1e-5, then 1e-4), as OCCT grows its tolerances; the result's entities record the tolerance
 //! the run used.
 //!
-//! Dimensionless epsilons (relative to a size, on parameters, for normalising vectors) are not
-//! lengths and stay with the code that uses them.
+//! Below these, the round-off margins of exact computations are named by meaning, so a reader
+//! sees which comparison is relative and which is absolute (all 1e-9 today, which keeps every
+//! result as it was when they were literals):
+//! - [`REL`]: relative, always scaled by what it compares (`REL * size`, `REL * (1.0 + |t|)`,
+//!   a fraction of a span, `r * (1.0 - REL)`, a parameter fraction in [0, 1]);
+//! - [`ANGULAR`]: directions and angles: unit vectors parallel (`1 − cos`, `|sin|`, `|u × v|`) or
+//!   square (`|u · v|`), angles and spans in radians (`TAU - ANGULAR`);
+//! - [`ROUNDOFF`]: absolute, for values of order one: lengths (mm) and parameters of exactly
+//!   built geometry, far below [`CONFUSION`], and floors on sizes;
+//! - [`TINY`]: the guard of a division or a normalisation against an exact zero, far below any
+//!   meaningful value.
 
 /// Exact geometry: points closer than this are one point (mm). See the module docs.
 pub const CONFUSION: f64 = 1e-7;
@@ -36,6 +45,18 @@ pub const POINT: f64 = 1e-6;
 pub const LOOP_GAP: f64 = 1e-5;
 /// The size box: coordinates and radii of a model stay within ±`SIZE` (mm, 100 km).
 pub const SIZE: f64 = 1e8;
+
+/// The relative round-off margin: a fraction of the size, span or value it is multiplied by.
+/// See the module docs.
+pub const REL: f64 = 1e-9;
+/// The angular round-off margin (radians, or the dimensionless amount it makes for unit
+/// vectors: `1 − cos`, `|sin|`). See the module docs.
+pub const ANGULAR: f64 = 1e-9;
+/// The absolute round-off margin for lengths (mm) and parameters of order one. See the module
+/// docs.
+pub const ROUNDOFF: f64 = 1e-9;
+/// The guard against dividing by (or normalising) an exact zero.
+pub const TINY: f64 = 1e-300;
 
 /// The tolerances an operation runs with, carried by the kernel session
 /// ([`super::NativeKernel::tolerances`]) and passed explicitly to the operations that take

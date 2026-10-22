@@ -56,6 +56,7 @@ pub enum DistanceTarget {
 pub enum DistanceLocation {
     /// The query's point.
     Point,
+    /// A vertex.
     Vertex(VertexId),
     /// An edge at its curve's parameter.
     Edge(EdgeId, f64),
@@ -66,10 +67,15 @@ pub enum DistanceLocation {
 /// A minimum or maximum distance and where it is reached on each side.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DistanceResult {
+    /// The distance (mm).
     pub distance: f64,
+    /// The point on the first side.
     pub a: Point3<f64>,
+    /// The point on the second side.
     pub b: Point3<f64>,
+    /// Where `a` lies.
     pub a_at: DistanceLocation,
+    /// Where `b` lies.
     pub b_at: DistanceLocation,
 }
 

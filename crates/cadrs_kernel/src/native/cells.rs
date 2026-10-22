@@ -139,3 +139,35 @@ pub fn split_by(k: &mut NativeKernel, objects: &[BodyId], tools: &[BodyId]) -> R
     }
     Ok(out)
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::*;
+
+    fn block(k: &mut super::NativeKernel, x0: f64, x1: f64) -> BodyId {
+        let c = [nalgebra::Point2::new(x0, 0.0), nalgebra::Point2::new(x1, 0.0), nalgebra::Point2::new(x1, 10.0), nalgebra::Point2::new(x0, 10.0)];
+        let curves = (0..4).map(|i| Curve2::Line { a: c[i], b: c[(i + 1) % 4], source: None }).collect();
+        let profile = Profile::new(Plane::top(), vec![Region { outer: Loop { curves }, holes: vec![], source: None }]);
+        k.extrude(&profile, Extent::Blind(10.0)).unwrap().bodies[0]
+    }
+
+    /// `Kernel::cells`: the three cells of two overlapping blocks, a selection of them, and a
+    /// selection naming a body that isn't there.
+    #[test]
+    fn cells_of_two_blocks() {
+        let mut k = super::NativeKernel::new();
+        let (a, b) = (block(&mut k, 0.0, 10.0), block(&mut k, 4.0, 14.0));
+        let vols = |k: &super::NativeKernel, cells: &[BodyId]| {
+            let mut v: Vec<f64> = cells.iter().map(|&c| k.mass_properties(c).unwrap().volume).collect();
+            v.sort_by(f64::total_cmp);
+            v
+        };
+        let all = k.cells(&[a, b], &[]).unwrap();
+        let v = vols(&k, &all);
+        assert_eq!(v.len(), 3);
+        assert!((v[0] - 400.0).abs() < 1e-9 && (v[1] - 400.0).abs() < 1e-9 && (v[2] - 600.0).abs() < 1e-9, "{v:?}");
+        let both = k.cells(&[a, b], &[(0, true), (1, true)]).unwrap();
+        assert!((vols(&k, &both)[0] - 600.0).abs() < 1e-9);
+        assert!(matches!(k.cells(&[a, b], &[(2, true)]), Err(KernelError::InvalidParameter(_))));
+    }
+}

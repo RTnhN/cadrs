@@ -14,6 +14,7 @@
 use nalgebra::{Point2, Point3, Vector3};
 
 use crate::{Curve2, KernelError, Plane, Profile, Result};
+use crate::native::tol;
 
 /// How close two curve ends must be to join (mm).
 const JOIN: f64 = 1e-6;
@@ -81,7 +82,7 @@ impl Curve2 {
         let (a, b) = ((s - h).max(0.0), (s + h).min(1.0));
         let d = self.point_at(b) - self.point_at(a);
         let l = d.norm();
-        if l < 1e-300 { d } else { d / l }
+        if l < tol::TINY { d } else { d / l }
     }
 }
 
@@ -149,14 +150,18 @@ pub fn section_loop(profile: &Profile) -> Result<Vec<Curve2>> {
     // Chain what is left into loops.
     let mut loops: Vec<Vec<Curve2>> = Vec::new();
     while let Some(first) = left.pop() {
+        let (start, mut end) = (first.start(), first.end());
         let mut lp = vec![first];
         loop {
-            let end = lp.last().expect("one").end();
-            if (end - lp[0].start()).norm() < JOIN {
+            if (end - start).norm() < JOIN {
                 break;
             }
             match left.iter().position(|c| (c.start() - end).norm() < JOIN) {
-                Some(i) => lp.push(left.swap_remove(i)),
+                Some(i) => {
+                    let next = left.swap_remove(i);
+                    end = next.end();
+                    lp.push(next);
+                }
                 None => {
                     return Err(KernelError::InvalidProfile(
                         "a loft profile must be one closed contour".into(),
@@ -181,12 +186,16 @@ pub fn section_loop(profile: &Profile) -> Result<Vec<Curve2>> {
 /// face's polylines may leave `plane`, which then only orients the loop.
 #[derive(Debug, Clone)]
 pub struct SectionCurves {
+    /// The section's plane.
     pub plane: Plane,
+    /// The closed loop of curves in the plane's coordinates.
     pub curves: Vec<Curve2>,
+    /// Or the loop as 3D polylines with their sources.
     pub polylines: Vec<(Vec<Point3<f64>>, Option<u64>)>,
 }
 
 impl SectionCurves {
+    /// A section of curves in a plane.
     pub fn new(plane: Plane, curves: Vec<Curve2>) -> Self {
         Self { plane, curves, polylines: Vec::new() }
     }
@@ -284,6 +293,7 @@ impl Sec {
 /// Sampled sections: `patches[p][i]` holds the samples of patch `p` along section `i`.
 #[derive(Debug, Clone)]
 pub struct Samples {
+    /// The samples, by patch and section.
     pub patches: Vec<Vec<Vec<Point3<f64>>>>,
     /// One smooth closed curve per section: a single periodic patch whose samples don't repeat
     /// the first point.
@@ -320,7 +330,7 @@ pub fn sample_sections(sections: &[SectionCurves]) -> Result<Samples> {
     };
     let raw: Vec<Sec> = sections.iter().map(|s| Sec::oriented(s, true)).collect();
     let axis = centroid(&raw[raw.len() - 1]) - centroid(&raw[0]);
-    if axis.norm() < 1e-9 {
+    if axis.norm() < tol::ROUNDOFF {
         return Err(KernelError::InvalidParameter("the loft's profiles lie on top of each other".into()));
     }
     // Every loop runs counter-clockwise about the loft's axis.

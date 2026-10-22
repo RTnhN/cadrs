@@ -29,6 +29,7 @@ use super::curve::Curve;
 use super::math::*;
 use super::topo::Body;
 use super::uvdomain::FaceDomain;
+use super::tol;
 
 /// Where on an entity an extremum is reached.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -233,7 +234,7 @@ fn where_of(p: &Piece, x: &X) -> Where {
         Piece::Point { at, .. } => *at,
         // At an end: the vertex there.
         Piece::Curve { edge, t, ends, .. } => {
-            let tol = 1e-9 * (t.1 - t.0).abs();
+            let tol = tol::REL * (t.1 - t.0).abs();
             if (x[0] - t.0).abs() <= tol {
                 Where::Vertex(ends[0])
             } else if (x[0] - t.1).abs() <= tol {
@@ -273,7 +274,7 @@ fn polish(pa: &Piece, xa: X, pb: &Piece, xb: X, sense: Sense) -> Option<(f64, X,
         };
         let g = DVector::from_fn(n, |k, _| sg * r.dot(&col(k)));
         let h = DMatrix::from_fn(n, n, |k, l| sg * (col(k).dot(&col(l)) + r.dot(&sec(k, l))));
-        let scale = (0..n).map(|k| h[(k, k)].abs()).fold(0.0, f64::max).max(1e-300);
+        let scale = (0..n).map(|k| h[(k, k)].abs()).fold(0.0, f64::max).max(tol::TINY);
         let mut moved = false;
         for _ in 0..12 {
             let m = &h + DMatrix::identity(n, n) * (lambda * scale);
@@ -351,9 +352,9 @@ pub fn extremum(a: &[Piece], b: &[Piece], sense: Sense) -> Option<Extremum> {
     if all.is_empty() {
         return None;
     }
-    let scale = all.diagonal().max(1e-9);
+    let scale = all.diagonal().max(tol::ROUNDOFF);
     // Two extrema within this are one (relative to the entities' size).
-    let eps = 1e-9 * scale;
+    let eps = tol::REL * scale;
     let mut best: Option<Extremum> = None;
     let better = |d: f64, best: &Option<Extremum>| match (best, sense) {
         (None, _) => true,

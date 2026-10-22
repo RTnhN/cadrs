@@ -19,8 +19,9 @@ use super::math::*;
 use super::nurbs::{NurbsCurve, NurbsSurface};
 use super::surface::Surface;
 use super::sweep::path::{chain, path_segments, Seg};
-use super::topo::{Body, Coedge, Edge, Face, Shell, Solid};
+use super::topo::{Body, Coedge, Edge, Face, Shell};
 use crate::*;
+use super::tol;
 
 fn invalid(why: &str) -> KernelError {
     KernelError::InvalidParameter(why.into())
@@ -93,7 +94,7 @@ pub fn thicken(k: &mut NativeKernel, spec: &ThickenSpec) -> Result<OpResult> {
     let mut acc: Option<Body> = None;
     for s in &sheets {
         for d in [spec.along, -spec.against] {
-            if d.abs() < 1e-9 {
+            if d.abs() < tol::ROUNDOFF {
                 continue;
             }
             let sl = slab(s, d)?;
@@ -171,7 +172,7 @@ fn thicken_sheet(k: &mut NativeKernel, sheets: &[Body], spec: &ThickenSpec) -> O
     let along_out = sheet_out == along_is_sewn;
     let mut parts: Vec<BodyId> = Vec::new();
     for (d, out) in [(spec.along, along_out), (spec.against, !along_out)] {
-        if d < 1e-9 {
+        if d < tol::ROUNDOFF {
             continue;
         }
         let r = super::offset_round::shell(k, tid, &ShellSpec { remove: caps.clone(), thickness: d, outward: out, hollow: false, sharp: false }).ok()?;
@@ -298,8 +299,8 @@ fn coons(path: &[Seg]) -> Result<Body> {
     }
     let surf = NurbsSurface { du: 3, dv: 3, ku: rows[0].knots.clone(), kv, cps: cols };
     // Edges: the surface's boundary iso-curves (exact on the patch).
-    let iso_u = |at_v1: bool| NurbsCurve { degree: 3, knots: surf.ku.clone(), cps: surf.cps.iter().map(|c| if at_v1 { *c.last().unwrap() } else { c[0] }).collect() };
-    let iso_v = |at_u1: bool| NurbsCurve { degree: 3, knots: surf.kv.clone(), cps: if at_u1 { surf.cps.last().unwrap().clone() } else { surf.cps[0].clone() } };
+    let iso_u = |at_v1: bool| NurbsCurve { degree: 3, knots: surf.ku.clone(), cps: surf.cps.iter().map(|c| if at_v1 { c[c.len() - 1] } else { c[0] }).collect() };
+    let iso_v = |at_u1: bool| NurbsCurve { degree: 3, knots: surf.kv.clone(), cps: if at_u1 { surf.cps[surf.cps.len() - 1].clone() } else { surf.cps[0].clone() } };
     let mut b = Body::default();
     let v00 = b.add_vertex(p00);
     let v10 = b.add_vertex(p10);
@@ -346,7 +347,7 @@ pub fn sew(k: &mut NativeKernel, bodies: &[BodyId], tol: f64) -> Result<OpResult
         }
         v = -v;
     }
-    if v < 1e-9 {
+    if v < tol::ROUNDOFF {
         return Err(invalid("The surfaces don't enclose a volume"));
     }
     let n = b.faces.len();
@@ -557,7 +558,7 @@ pub fn simplify(k: &mut NativeKernel, body: BodyId) -> Result<OpResult> {
     super::unify::merge_edges(&mut b);
     super::boolean::assemble_shells(&mut b)?;
     if b.solids.len() != 1 {
-        return Err(KernelError::OperationFailed("the simplified body is not a valid solid".into()));
+        return Err(KernelError::InvalidResult { op: "simplify", why: "the simplified body is not a valid solid".into() });
     }
     let mut history = History::default();
     for (i, srcs) in from.iter().enumerate() {
@@ -569,9 +570,6 @@ pub fn simplify(k: &mut NativeKernel, body: BodyId) -> Result<OpResult> {
     Ok(OpResult { bodies: vec![id], history })
 }
 
-#[allow(dead_code)]
-fn unused(_: Solid) {}
-
 /// Delete face (defeaturing): faces whose whole boundary runs along inner loops of the faces
 /// left (a hole's wall, a boss's sides and top, a pocket) go, and with them those loops: the
 /// surrounding faces close over the gap.
@@ -582,7 +580,7 @@ pub fn delete_faces(k: &mut NativeKernel, body: BodyId, remove: &[FaceId]) -> Re
     let b = (**k.get(body)?).clone();
     let gone: Vec<usize> = remove.iter().map(|f| f.0 as usize).collect();
     if gone.iter().any(|&f| f >= b.faces.len()) {
-        return Err(KernelError::OperationFailed("unknown face".into()));
+        return Err(KernelError::InvalidParameter("unknown face".into()));
     }
     let ef = b.edge_faces();
     // Edges between a deleted face and a kept one.
@@ -614,7 +612,7 @@ pub fn delete_faces(k: &mut NativeKernel, body: BodyId, remove: &[FaceId]) -> Re
     out.solids.clear();
     super::boolean::assemble_shells(&mut out)?;
     if out.solids.len() != 1 {
-        return Err(KernelError::OperationFailed("the faces can't be deleted: the healed body is not a valid solid".into()));
+        return Err(KernelError::InvalidResult { op: "delete face", why: "the faces can't be deleted: the healed body is not a valid solid".into() });
     }
     let mut history = History::default();
     for (i, f) in keep.iter().enumerate() {

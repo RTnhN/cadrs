@@ -41,6 +41,7 @@ use super::step::{canonical, same_sense, ReadModel, ReadOccurrence, ReadPart};
 use super::surface::Surface;
 use super::topo::*;
 use super::xbuild::{XBuilder, XFace};
+use super::tol;
 
 // ---------------------------------------------------------------------------------------------
 // Writing
@@ -105,9 +106,9 @@ impl Writer {
                 let (p, q) = (pts[i].coords - c, pts[(i + 1) % pts.len()].coords - c);
                 nrm += p.cross(&q);
             }
-            if nrm.norm() > 1e-12 && pts.iter().all(|p| (p.coords - c).dot(&nrm.normalize()).abs() < 1e-9) { Some(nrm.normalize()) } else { None }
+            if nrm.norm() > 1e-12 && pts.iter().all(|p| (p.coords - c).dot(&nrm.normalize()).abs() < tol::ROUNDOFF) { Some(nrm.normalize()) } else { None }
         };
-        let closed = (pts[0] - pts[k]).norm() < 1e-9;
+        let closed = (pts[0] - pts[k]).norm() < tol::ROUNDOFF;
         let mut p = vec![k.to_string(), m.to_string(), (planar.is_some() as u8).to_string(), (closed as u8).to_string(), (!n.is_rational() as u8).to_string(), "0".into()];
         p.extend(n.knots.iter().map(|x| real(*x)));
         p.extend(n.cps.iter().map(|h| real(h.w)));
@@ -676,7 +677,7 @@ impl<'a> Reader<'a> {
         }
         let t = self.transform(e.transform, 0)?;
         let v = t.m * V3::new(Self::num(e, 0)?, Self::num(e, 1)?, Self::num(e, 2)?);
-        if v.norm() < 1e-300 {
+        if v.norm() < tol::TINY {
             return Err("a zero direction".into());
         }
         Ok(v.normalize())
@@ -773,7 +774,7 @@ impl<'a> Reader<'a> {
                 let (a, b, c, d) = (n(0)?, n(1)?, n(2)?, n(3)?);
                 let nn = V3::new(a, b, c);
                 let l = nn.norm();
-                if l < 1e-300 {
+                if l < tol::TINY {
                     return Err("a plane with a zero normal".into());
                 }
                 let o = pl.point(&P3::from(nn * (d / (l * l))));
@@ -1101,7 +1102,7 @@ fn read_trimmed(f: &File, out: &mut ReadModel) {
         })
         .fold(0.0, f64::max)
         .max(1e-3);
-    let tol = (f.resolution * 10.0).clamp(1e-9 * size, 1e-4 * size).max(1e-9);
+    let tol = (f.resolution * 10.0).clamp(tol::REL * size, 1e-4 * size).max(tol::ROUNDOFF);
     let mut r = Reader { f, xb: XBuilder::new(), verts: HashMap::new(), edges: HashMap::new() };
     let mut weld: Vec<P3> = Vec::new();
     let mut cells: HashMap<[i64; 3], Vec<usize>> = HashMap::new();
@@ -1271,7 +1272,7 @@ fn read_wires(f: &File, out: &mut ReadModel) {
     if !loose.is_empty() {
         groups.push((String::new(), loose));
     }
-    let tol = (f.resolution * 10.0).max(1e-9);
+    let tol = (f.resolution * 10.0).max(tol::ROUNDOFF);
     for (name, members) in groups {
         let r = Reader { f, xb: XBuilder::new(), verts: HashMap::new(), edges: HashMap::new() };
         let (mut segs, mut pts) = (Vec::new(), Vec::new());

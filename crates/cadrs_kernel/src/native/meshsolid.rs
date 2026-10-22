@@ -18,6 +18,7 @@ use super::math::*;
 use super::pcurve;
 use super::surface::Surface;
 use super::topo::*;
+use super::tol;
 
 /// Welds points within `tol` (looking in neighbouring grid cells).
 struct Weld {
@@ -62,7 +63,7 @@ pub fn mesh_solid(triangles: &[[P3; 3]], tol: f64) -> Result<Body, String> {
             continue;
         }
         let (a, b, c) = (weld.pts[ix[0]], weld.pts[ix[1]], weld.pts[ix[2]]);
-        if (b - a).cross(&(c - a)).norm() <= 1e-300 {
+        if (b - a).cross(&(c - a)).norm() <= tol::TINY {
             continue;
         }
         tris.push(ix);
@@ -189,7 +190,7 @@ pub fn mesh_solid(triangles: &[[P3; 3]], tol: f64) -> Result<Body, String> {
                 n += p.coords.cross(&q.coords);
             }
         }
-        let n = if n.norm() > 1e-300 { n.normalize() } else { normals[regions[ri][0]] };
+        let n = if n.norm() > tol::TINY { n.normalize() } else { normals[regions[ri][0]] };
         let l0 = &loops[0];
         let o = pts[l0[0]];
         let f = Frame::from_xz(o, pts[l0[1]] - o, n);

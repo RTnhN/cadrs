@@ -6,6 +6,7 @@ use super::math::*;
 use super::pcurve;
 use super::surface::Surface;
 use super::topo::{co_range, Body, Coedge, Edge, Face};
+use super::tol;
 
 /// p-curve start point (uv) of a coedge.
 fn co_uv(b: &Body, c: &Coedge, end: bool) -> P2 {
@@ -287,12 +288,12 @@ pub fn drop_slits(b: &mut Body) {
             }
             used[s0] = true;
             let mut ch = vec![rest[s0].clone()];
-            let start = b.co_start(&rest[s0]);
-            while b.co_end(ch.last().unwrap()) != start {
-                let end = b.co_end(ch.last().unwrap());
+            let (start, mut end) = (b.co_start(&rest[s0]), b.co_end(&rest[s0]));
+            while end != start {
                 match (0..rest.len()).find(|&k| !used[k] && b.co_start(&rest[k]) == end) {
                     Some(nx) => {
                         used[nx] = true;
+                        end = b.co_end(&rest[nx]);
                         ch.push(rest[nx].clone());
                     }
                     None => {
@@ -412,7 +413,7 @@ fn merge_group(b: &mut Body, g: &[usize]) -> Option<Face> {
                     let p = e.point(e.t[0]);
                     let (u, v) = surf.project(&p, None);
                     let (_, su, sv) = surf.d1(u, v);
-                    if su.cross(&sv).norm() > 1e-9 * (1.0 + su.norm() * sv.norm()) {
+                    if su.cross(&sv).norm() > tol::REL * (1.0 + su.norm() * sv.norm()) {
                         continue;
                     }
                 }
@@ -444,10 +445,9 @@ fn merge_group(b: &mut Body, g: &[usize]) -> Option<Face> {
         }
         used[s] = true;
         let mut ch = vec![rest[s].clone()];
-        let start = b.co_start(&rest[s]);
+        let (start, mut end) = (b.co_start(&rest[s]), b.co_end(&rest[s]));
         let mut guard = 0;
         loop {
-            let end = b.co_end(ch.last().unwrap());
             // A pole's degenerate edge first: the loop runs along it as soon as it reaches
             // the pole (else it would be left as a loop of its own).
             let at_end = |k: &usize| !used[*k] && b.co_start(&rest[*k]) == end;
@@ -458,6 +458,7 @@ fn merge_group(b: &mut Body, g: &[usize]) -> Option<Face> {
                 None => (0..rest.len()).find(at_end)?,
             };
             used[nx] = true;
+            end = b.co_end(&rest[nx]);
             ch.push(rest[nx].clone());
             guard += 1;
             if guard > rest.len() {
@@ -512,7 +513,8 @@ fn merge_group(b: &mut Body, g: &[usize]) -> Option<Face> {
             ch.retain(|c| !b.edges[c.edge].degenerate || (co_uv(b, c, true) - co_uv(b, c, false)).norm() > 1e-12);
             at = ch.last().map(|c| co_uv(b, c, true));
         }
-        let end = at.unwrap();
+        // (Every edge a pole the face only touches: nothing to merge.)
+        let end = at?;
         windings.push(((end.x - start.x) / TAU).round() as i64);
         if surf.v_periodic() && ((end.y - start.y) / TAU).round() as i64 != 0 {
             return None;
@@ -628,23 +630,16 @@ fn merge_group(b: &mut Body, g: &[usize]) -> Option<Face> {
         let start1 = co_uv(b, &chains[i1][0], false);
         let mut ch1 = chains[i1].clone();
         realign(b, &mut ch1, start1);
-        let end1 = co_uv(b, ch1.last().unwrap(), true);
+        let end1 = co_uv(b, ch1.last()?, true);
         // Seam edge along the iso-u line from s1 to s2.
         let iso = surf.iso_u(us)?;
-        let p1 = b.verts[s1].p;
         let p2 = b.verts[s2v].p;
         let (v1, v2) = (start1.y, {
             let (_, v) = surf.project(&p2, Some((us, start1.y)));
             v
         });
-        let _ = p1;
         let mut ch2 = chains[i2].clone();
         realign(b, &mut ch2, P2::new(end1.x, v2));
-        let end2 = co_uv(b, ch2.last().unwrap(), true);
-        if (end2.x - us).abs() > 1e-6 && (end2.x - (us + 0.0)).abs() > 1e-6 {
-            // chain 2 should come back to u_s
-            let _ = end2;
-        }
         let (lo, hi, vlo, vhi) = if v1 < v2 { (s1, s2v, v1, v2) } else { (s2v, s1, v2, v1) };
         b.edges.push(Edge { curve: iso, t: [vlo, vhi], v: [lo, hi], degenerate: false, tol: super::topo::TOL_MIN });
         let se = b.edges.len() - 1;
@@ -687,8 +682,7 @@ pub fn merge_edges(b: &mut Body) {
         }
         let ef = b.edge_faces();
         let mut done = false;
-        for v in 0..b.verts.len() {
-            let es = &vedges[v];
+        for (v, es) in vedges.iter().enumerate() {
             if es.len() != 2 || es[0] == es[1] || es.contains(&usize::MAX) {
                 continue;
             }
@@ -709,11 +703,11 @@ pub fn merge_edges(b: &mut Body) {
                 (Curve::Line { o: o1, d: d1 }, Curve::Line { o: o2, d: d2 }) => {
                     d1.normalize().cross(&d2.normalize()).norm() < 1e-10 && {
                         let w = o2 - o1;
-                        w.cross(&d1.normalize()).norm() < 1e-9
+                        w.cross(&d1.normalize()).norm() < tol::ANGULAR
                     }
                 }
                 (Curve::Circle { c: c1, x: x1, y: y1, r: r1 }, Curve::Circle { c: c2, x: x2, y: y2, r: r2 }) => {
-                    (c1 - c2).norm() < 1e-9 && (r1 - r2).abs() < 1e-9 && x1.cross(y1).cross(&x2.cross(y2)).norm() < 1e-10
+                    (c1 - c2).norm() < tol::ROUNDOFF && (r1 - r2).abs() < tol::ROUNDOFF && x1.cross(y1).cross(&x2.cross(y2)).norm() < 1e-10
                 }
                 _ => false,
             };
@@ -724,9 +718,7 @@ pub fn merge_edges(b: &mut Body) {
             let far_a = if a.v[0] == v { a.v[1] } else { a.v[0] };
             let far_c = if c.v[0] == v { c.v[1] } else { c.v[0] };
             let curve = a.curve.clone();
-            let pa = b.verts[far_a].p;
             let pc_ = b.verts[far_c].p;
-            let pv = b.verts[v].p;
             // Parameters on a's curve, continuous through v.
             let tv = if a.v[0] == v { a.t[0] } else { a.t[1] };
             let ta = if a.v[0] == v { a.t[1] } else { a.t[0] };
@@ -743,11 +735,10 @@ pub fn merge_edges(b: &mut Body) {
                     t
                 }
             };
-            let _ = (pa, pv);
             let closed = far_a == far_c;
             let (t0, t1, v0, v1) = if ta < tc { (ta, tc, far_a, far_c) } else { (tc, ta, far_c, far_a) };
             // (A circle can't run past a whole turn; a line's parameter is a length.)
-            if matches!(curve, Curve::Circle { .. }) && (t1 - t0) > TAU + 1e-9 {
+            if matches!(curve, Curve::Circle { .. }) && (t1 - t0) > TAU + tol::ANGULAR {
                 continue;
             }
             let ne = Edge { curve: curve.clone(), t: [t0, t1], v: [v0, v1], degenerate: false, tol: super::topo::TOL_MIN };
@@ -925,7 +916,7 @@ pub fn cylindrize(b: &mut Body) -> bool {
         let Some(sol) = a.lu().solve(&rhs) else { continue };
         let (cx, cy) = (sol.x / 2.0, sol.y / 2.0);
         let r = (sol.z + cx * cx + cy * cy).sqrt();
-        if !(r.is_finite() && r > 1e-9) {
+        if !(r.is_finite() && r > tol::ROUNDOFF) {
             continue;
         }
         let axis_o = P3::from(x0.x * cx + x0.y * cy);
@@ -937,7 +928,7 @@ pub fn cylindrize(b: &mut Body) -> bool {
         for i in 0..=40 {
             for j in 0..=40 {
                 let p = s.eval(u0 + (u1 - u0) * i as f64 / 40.0, v0 + (v1 - v0) * j as f64 / 40.0);
-                if (dist(&p) - r).abs() > 1e-9 * (1.0 + r) {
+                if (dist(&p) - r).abs() > tol::REL * (1.0 + r) {
                     ok = false;
                 }
             }

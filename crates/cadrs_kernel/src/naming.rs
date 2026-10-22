@@ -29,6 +29,7 @@ use std::collections::HashMap;
 
 use nalgebra::Point3;
 use serde::{Deserialize, Serialize};
+use crate::native::tol;
 
 use crate::{
     BodyId, EdgeId, EdgeInfo, FaceId, FaceInfo, History, Kernel, Origin, Result, VertexId,
@@ -44,31 +45,40 @@ pub enum FaceOrigin {
     /// A cap of profile region `region` (the region's `source`: `cadrs_core` uses a key of the
     /// region's sketch and boundary curves) (`end`: where the sweep ends, the far end of a
     /// blind extrude; otherwise where it starts).
+    #[allow(missing_docs, reason = "the fields are described with the variant")]
     Cap { region: u64, end: bool },
     /// The face swept by profile curve `curve` (a sketch curve id) of region `region`.
+    #[allow(missing_docs, reason = "the fields are described with the variant")]
     Side { region: u64, curve: u64 },
     /// Made from an input edge (a fillet or chamfer face); `edge` is [`stable_hash`] of the
     /// edge's name.
+    #[allow(missing_docs, reason = "the field is described with the variant")]
     FromEdge { edge: u64 },
     /// Made from an input vertex; `vertex` is [`stable_hash`] of the vertex's name.
+    #[allow(missing_docs, reason = "the field is described with the variant")]
     FromVertex { vertex: u64 },
     /// A face the history says nothing about: the `index`-th such face of the body. Not
     /// stable across rebuilds.
+    #[allow(missing_docs, reason = "the field is described with the variant")]
     Unnamed { index: u32 },
     /// A copy a pattern or mirror made (P3.8): of the face named `face` ([`face_hash`] of its
     /// name) made by the operation `of`, in instance `instance` (1, 2, … in the pattern's
     /// order; a mirror's copy is 1).
+    #[allow(missing_docs, reason = "the fields are described with the variant")]
     Instance { of: OpId, face: u64, instance: u32 },
     /// A face of a body read from a file (the Import feature): face `face` (in the kernel's
     /// face order, which is the same for the same file) of the file's `body`-th body. Stable
     /// across rebuilds of the same file.
+    #[allow(missing_docs, reason = "the fields are described with the variant")]
     Imported { body: u32, face: u32 },
 }
 
 /// A persistent face name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct FaceName {
+    /// The operation that made the face.
     pub op: OpId,
+    /// Where in that operation it came from.
     pub origin: FaceOrigin,
     /// 0, or which piece of a face that a later operation split.
     #[serde(default)]
@@ -76,6 +86,7 @@ pub struct FaceName {
 }
 
 impl FaceName {
+    /// The name of an unsplit face.
     pub fn new(op: OpId, origin: FaceOrigin) -> Self {
         Self {
             op,
@@ -120,6 +131,7 @@ impl FaceName {
 pub struct EdgeName {
     /// Sorted.
     pub faces: [FaceName; 2],
+    /// Which of the edges between the two faces (0 for the first).
     #[serde(default)]
     pub index: u32,
 }
@@ -153,11 +165,13 @@ impl EdgeName {
 pub struct VertexName {
     /// Sorted.
     pub faces: [FaceName; 3],
+    /// Which of the vertices among those faces (0 for the first).
     #[serde(default)]
     pub index: u32,
 }
 
 impl VertexName {
+    /// The name with index 0 and its faces' base names.
     pub fn base(&self) -> Self {
         let mut faces = self.faces.map(|f| f.base());
         faces.sort();
@@ -206,14 +220,17 @@ impl BodyNames {
         canonical_face(&self.aliases, name)
     }
 
+    /// The name of face `id`.
     pub fn face(&self, id: FaceId) -> Option<FaceName> {
         self.faces.get(id.0 as usize).copied()
     }
 
+    /// The name of edge `id`, if it has one.
     pub fn edge(&self, id: EdgeId) -> Option<EdgeName> {
         self.edges.get(id.0 as usize).copied().flatten()
     }
 
+    /// The name of vertex `id`, if it has one.
     pub fn vertex(&self, id: VertexId) -> Option<VertexName> {
         self.vertices.get(id.0 as usize).copied().flatten()
     }
@@ -248,6 +265,7 @@ impl BodyNames {
         }
     }
 
+    /// The vertex with this name (its faces may be named by merged-away names).
     pub fn vertex_named(&self, name: &VertexName) -> Option<VertexId> {
         let find = |name: &VertexName| (0..self.vertices.len()).find(|&i| self.vertices[i] == Some(*name)).map(|i| VertexId(i as u64));
         find(name).or_else(|| (!self.aliases.is_empty()).then(|| find(&canonical_vertex(&self.aliases, name))).flatten())
@@ -578,7 +596,7 @@ pub fn joint_tolerance(edges: &[EdgeInfo]) -> f64 {
         .iter()
         .flat_map(|e| [e.start, e.end])
         .fold(0.0f64, |m, p| m.max(p.x.abs()).max(p.y.abs()).max(p.z.abs()));
-    (size * 1e-7).max(1e-9)
+    (size * 1e-7).max(tol::ROUNDOFF)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -586,6 +604,7 @@ pub fn joint_tolerance(edges: &[EdgeInfo]) -> f64 {
 
 /// A name with a base form (see [`FaceName::base`], [`EdgeName::base`]).
 pub trait Named: Copy + Eq {
+    /// The base form of the name.
     fn base_name(&self) -> Self;
 }
 

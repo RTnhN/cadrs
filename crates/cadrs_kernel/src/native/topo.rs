@@ -60,7 +60,7 @@ pub struct Vertex {
     /// Where it is (mm).
     pub p: P3,
     /// The ball about `p` the vertex stands for: ends of its edges and its position on faces
-    /// lie within it ([`TOL_MIN`] for exact geometry; larger for read or healed shapes).
+    /// lie within it ([`TOL_MIN`](super::tol::CONFUSION) for exact geometry; larger for read or healed shapes).
     pub tol: f64,
 }
 
@@ -76,7 +76,7 @@ pub struct Edge {
     /// A point edge (a cone's apex, a sphere's pole): only its p-curves mean anything.
     pub degenerate: bool,
     /// How far the edge's 3D curve, its p-curves on its faces and the faces may stray from one
-    /// another along it ([`TOL_MIN`] for exact geometry).
+    /// another along it ([`TOL_MIN`](super::tol::CONFUSION) for exact geometry).
     pub tol: f64,
 }
 
@@ -170,14 +170,14 @@ pub fn co_range(e: &Edge, fwd: bool) -> (f64, f64) {
 }
 
 impl Body {
-    /// Adds a vertex of tolerance [`TOL_MIN`]; returns its index.
+    /// Adds a vertex of tolerance [`TOL_MIN`](super::tol::CONFUSION); returns its index.
     pub fn add_vertex(&mut self, p: P3) -> usize {
         self.verts.push(Vertex { p, tol: TOL_MIN });
         self.verts.len() - 1
     }
 
     /// Adds the edge of `curve` from `t0` at vertex `v0` to `t1` at `v1`, of tolerance
-    /// [`TOL_MIN`]; returns its index.
+    /// [`TOL_MIN`](super::tol::CONFUSION); returns its index.
     pub fn add_edge(&mut self, curve: Curve, t0: f64, t1: f64, v0: usize, v1: usize) -> usize {
         self.edges.push(Edge { curve, t: [t0, t1], v: [v0, v1], degenerate: false, tol: TOL_MIN });
         self.edges.len() - 1

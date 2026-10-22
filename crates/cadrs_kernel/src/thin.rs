@@ -18,6 +18,7 @@
 use nalgebra::{Point2, Vector2};
 
 use crate::{Chain, Curve2, KernelError, Loop, Profile, Region, Result};
+use crate::native::tol;
 
 /// Set in the curve id of a thin wall's left-hand offset side.
 pub const THIN_LEFT: u64 = 1 << 61;
@@ -119,7 +120,7 @@ fn band(c: &Curve2, whole: bool, left: f64, right: f64, source: u64) -> Result<R
                 vec![],
             ))
         }
-        Curve2::Arc { center, radius, start_angle, sweep, .. } if !whole && sweep.abs() < std::f64::consts::TAU - 1e-9 => {
+        Curve2::Arc { center, radius, start_angle, sweep, .. } if !whole && sweep.abs() < std::f64::consts::TAU - tol::ANGULAR => {
             // Left of a counter-clockwise arc is toward its centre.
             let ccw = sweep > 0.0;
             let rl = if ccw { radius - left } else { radius + left };
@@ -242,7 +243,7 @@ fn fill(
     source: u64,
 ) -> Option<Region> {
     let cross = ta.x * tb.y - ta.y * tb.x;
-    if cross.abs() < 1e-9 {
+    if cross.abs() < tol::ANGULAR {
         return None;
     }
     // Turning left, the outside of the corner is on the right.

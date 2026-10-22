@@ -147,7 +147,7 @@ fn edge_tube(b: &Body, e: usize, r: f64) -> Result<Body> {
             let body = k.insert(b.clone());
             let spec = SweepSpec { body: BodyKind::Solid, path: vec![PathCurve::Edge { body, edge: EdgeId(e as u64) }], control: SweepControl::None, faces: vec![] };
             let out = k.sweep_with(&prof, &spec)?;
-            let [id] = out.bodies[..] else { return Err(KernelError::OperationFailed("a tube round an edge isn't one body".into())) };
+            let [id] = out.bodies[..] else { return Err(KernelError::InvalidResult { op: "offset", why: "a tube round an edge isn't one body".into() }) };
             Ok((**k.get(id)?).clone())
         }
     }
@@ -330,7 +330,7 @@ fn combine_all(mut acc: Body, mut todo: Vec<(Body, String)>, op: BoolOp) -> Resu
             Some(_) => todo = left,
         }
     }
-    Err(KernelError::OperationFailed("the offset's pieces don't combine".into()))
+    Err(KernelError::InvalidResult { op: "offset", why: "the offset's pieces don't combine".into() })
 }
 
 pub fn shell(k: &mut NativeKernel, body: BodyId, spec: &ShellSpec) -> Result<OpResult> {
@@ -369,7 +369,7 @@ pub fn shell(k: &mut NativeKernel, body: BodyId, spec: &ShellSpec) -> Result<OpR
         // shares that face with the body, which the boolean may not settle).
         let concave = (0..b.edges.len()).any(|e| !b.edges[e].degenerate && convex(&b, e) == Some(false));
         let sharp = |x: &Vec<f64>| super::local::offset_sharp(&b, x).and_then(|c| {
-            if super::mass::body_mass(&c).volume > 0.0 { Ok(c) } else { Err(KernelError::OperationFailed("the inset is empty".into())) }
+            if super::mass::body_mass(&c).volume > 0.0 { Ok(c) } else { Err(KernelError::TooLarge { op: "shell", why: "the inset is empty".into() }) }
         });
         let regions = || cavity_by_regions(&b, &remove, t);
         let ways: Vec<Box<dyn Fn() -> Result<Body>>> = if (concave || crossing) && !spec.sharp {
@@ -385,13 +385,13 @@ pub fn shell(k: &mut NativeKernel, body: BodyId, spec: &ShellSpec) -> Result<OpR
                 if spec.hollow {
                     // A closed void: the body with the cavity as an inner shell.
                     if out.body.solids.len() != 1 {
-                        return Err(KernelError::OperationFailed("the hollow shell isn't one solid".into()));
+                        return Err(KernelError::InvalidResult { op: "shell", why: "the hollow shell isn't one solid".into() });
                     }
                     out.body.solids[0].shells.sort();
                 }
                 let v1 = super::mass::body_mass(&out.body).volume;
                 if v1 <= 1e-9 || v1 > v0 + 1e-9 {
-                    return Err(KernelError::OperationFailed("the shell came out wrong".into()));
+                    return Err(KernelError::InvalidResult { op: "shell", why: "the shell came out wrong".into() });
                 }
                 // Walls that meet everywhere leave no cavity.
                 if crossing && v1 >= v0 * (1.0 - 1e-9) {
@@ -413,7 +413,7 @@ pub fn shell(k: &mut NativeKernel, body: BodyId, spec: &ShellSpec) -> Result<OpR
             (Some(o), _) => o,
             (None, Some(_)) if crossing => return Err(too_thick()),
             (None, Some(e)) => return Err(e),
-            (None, None) => return Err(KernelError::OperationFailed("no cavity".into())),
+            (None, None) => return Err(KernelError::TooLarge { op: "shell", why: "no cavity".into() }),
         }
     } else {
         // Outward: the body grown by a ball, less the body, cut back at the removed faces.
@@ -484,7 +484,7 @@ pub fn shell(k: &mut NativeKernel, body: BodyId, spec: &ShellSpec) -> Result<OpR
         eprintln!("shell: body {v0} result {v1} solids {} faces {}", result.body.solids.len(), result.body.faces.len());
     }
     if v1 <= 1e-9 || (!spec.outward && v1 > v0 + 1e-9) {
-        return Err(KernelError::OperationFailed("the shell came out wrong".into()));
+        return Err(KernelError::InvalidResult { op: "shell", why: "the shell came out wrong".into() });
     }
     Ok(result.into_result(k, body))
 }

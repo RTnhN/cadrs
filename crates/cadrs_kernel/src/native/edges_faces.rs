@@ -11,6 +11,7 @@ use super::curve::Curve;
 use super::math::*;
 use crate::{KernelError, Plane, Result};
 use std::f64::consts::TAU;
+use super::tol;
 
 /// A piece in a plane's (x, y): a segment or an arc (centre, radius, start angle, signed sweep).
 #[derive(Debug, Clone, Copy)]
@@ -78,13 +79,13 @@ pub fn edges_to_faces(edges: &[Edge3]) -> Result<Vec<PlaneFace>> {
             bb.add(&c.point(t0 + (t1 - t0) * i as f64 / 8.0));
         }
     }
-    let size = bb.diagonal().max(1e-9);
+    let size = bb.diagonal().max(tol::ROUNDOFF);
     let tol = 1e-7 * size;
     // The planes: circles', and those of two lines that meet at an angle.
     let mut planes: Vec<(P3, V3)> = Vec::new();
     let mut add_plane = |o: P3, n: V3| {
         let n = n.normalize();
-        if !planes.iter().any(|(po, pn)| pn.cross(&n).norm() < 1e-9 && (o - po).dot(pn).abs() < tol) {
+        if !planes.iter().any(|(po, pn)| pn.cross(&n).norm() < tol::ANGULAR && (o - po).dot(pn).abs() < tol) {
             planes.push((o, n));
         }
     };
@@ -97,7 +98,7 @@ pub fn edges_to_faces(edges: &[Edge3]) -> Result<Vec<PlaneFace>> {
         for j in i + 1..edges.len() {
             let (Curve::Line { o: oa, d: da }, Curve::Line { o: ob, d: db }) = (&edges[i].0, &edges[j].0) else { continue };
             let n = da.cross(db);
-            if n.norm() < 1e-9 * da.norm() * db.norm() {
+            if n.norm() < tol::REL * da.norm() * db.norm() {
                 continue;
             }
             if (ob - oa).dot(&n.normalize()).abs() < tol {
@@ -117,7 +118,7 @@ pub fn edges_to_faces(edges: &[Edge3]) -> Result<Vec<PlaneFace>> {
         for (c, t0, t1) in edges {
             match as_circle(c) {
                 Some((cc, x, y, r)) => {
-                    if x.cross(&y).normalize().cross(&n).norm() > 1e-9 || !on(&cc) {
+                    if x.cross(&y).normalize().cross(&n).norm() > tol::ANGULAR || !on(&cc) {
                         continue;
                     }
                     let c2 = to2(&cc);
@@ -339,7 +340,7 @@ fn faces_in_plane(curves: &[Piece2], tol: f64) -> Vec<Vec<Vec<Piece2>>> {
         v.sort_by(|&x, &y| {
             let (ax, tx) = key(x);
             let (ay, ty) = key(y);
-            if (ax - ay).abs() > 1e-9 { ax.total_cmp(&ay) } else { tx.total_cmp(&ty) }
+            if (ax - ay).abs() > tol::ROUNDOFF { ax.total_cmp(&ay) } else { tx.total_cmp(&ty) }
         });
     }
     // The next half-edge round a region: at the end, the one just clockwise of the way back.

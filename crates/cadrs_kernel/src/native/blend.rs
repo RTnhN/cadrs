@@ -136,7 +136,7 @@ pub fn section_loop(c: &Corner2, kind: SectionKind, src: Src) -> Result<(Vec<Pie
     let cos = c.u1.dot(&c.u2).clamp(-1.0, 1.0);
     let theta = cos.acos();
     if theta < 1e-6 || theta > PI - 1e-6 {
-        return Err(KernelError::OperationFailed("the faces at the edge are tangent: nothing to blend".into()));
+        return Err(KernelError::InvalidGeometry { op: "blend", why: "the faces at the edge are tangent: nothing to blend".into() });
     }
     let bis = (c.u1 + c.u2).normalize();
     let tan_half = (theta / 2.0).tan();
@@ -365,7 +365,7 @@ pub fn edge_tool_range(b: &Body, input: BodyId, e: usize, kind: &dyn Fn(f64) -> 
             let lp = match section {
                 SectionKind::Circle { r } if curved(f1) || curved(f2) => {
                     let (fa, fb) = (&b.faces[s1.0], &b.faces[s2.0]);
-                    let (centre, k1, k2) = ball_in_plane(fa, fb, &q, &t, &w1, &w2, r, convex).ok_or_else(|| KernelError::OperationFailed("the blend is too large for the faces at the edge".into()))?;
+                    let (centre, k1, k2) = ball_in_plane(fa, fb, &q, &t, &w1, &w2, r, convex).ok_or_else(|| KernelError::TooLarge { op: "blend", why: "the blend is too large for the faces at the edge".into() })?;
                     let p2 = |x: &P3| P2::new((x - q).dot(&radial), (x - q).dot(&y));
                     arc_section_loop(&corner, p2(&centre), p2(&k1), p2(&k2), r, src)?
                 }
@@ -892,7 +892,7 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[EdgeBlend], corners: b
         // A tool that didn't close into a solid has no inside to take away (its boolean only
         // spends minutes finding so).
         if !tool.body.is_solid() {
-            return Err(KernelError::OperationFailed("the blend's tool isn't a solid".into()));
+            return Err(KernelError::InvalidResult { op: "blend", why: "the blend's tool isn't a solid".into() });
         }
         let (mut tb, mut ts) = (tool.body, tool.src);
         // Cut the extensions at the end faces as for one edge.
@@ -1110,7 +1110,7 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[EdgeBlend], corners: b
     }
     // A solid must stay a solid (an open result means a tool went wrong).
     if !b.solids.is_empty() && cur.body.solids.is_empty() {
-        return Err(KernelError::OperationFailed("the blend left an open body".into()));
+        return Err(KernelError::InvalidResult { op: "blend", why: "the blend left an open body".into() });
     }
     Ok(cur.into_result(k, body))
 }
@@ -1188,7 +1188,7 @@ fn check_fits(b: &Body, e: usize, kind: &dyn Fn(f64) -> SectionKind) -> Result<(
     }
     }
     if !(fits[0] && fits[1]) {
-        return Err(KernelError::OperationFailed("the blend is too large for the faces at the edge".into()));
+        return Err(KernelError::TooLarge { op: "blend", why: "the blend is too large for the faces at the edge".into() });
     }
     Ok(())
 }
@@ -1233,7 +1233,7 @@ fn check_overlaps(b: &Body, edges: &[EdgeBlend]) -> Result<()> {
                         d = d.min((c.point(t) - p).norm());
                     }
                     if d < ai + aj - 1e-7 {
-                        return Err(KernelError::OperationFailed("the blends of two edges overlap: the size is too large for the face between them".into()));
+                        return Err(KernelError::TooLarge { op: "blend", why: "the blends of two edges overlap: the size is too large for the face between them".into() });
                     }
                 }
             }
@@ -1313,7 +1313,7 @@ pub fn fillet(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], spec: &Fille
             let mut merged = out.clone();
             merge_edges(&mut merged);
             match local_problem(&b, &merged) {
-                Some(e) => Err(KernelError::OperationFailed(format!("the local fillet isn't valid: {e}"))),
+                Some(e) => Err(KernelError::InvalidResult { op: "fillet", why: format!("the local fillet isn't valid: {e}") }),
                 None => Ok((out, src)),
             }
         });
@@ -1378,9 +1378,10 @@ fn check_overflow(k: &NativeKernel, body: BodyId, edges: &[EdgeId], r: &OpResult
                     let from: Vec<usize> = r.history.modified.iter().filter(|(x, _)| x.0 as usize == g).map(|(_, i)| i.face.0 as usize).collect();
                     let fresh = r.history.generated.iter().any(|(x, _)| x.0 as usize == g);
                     if !fresh && !from.is_empty() && !from.iter().any(|x| allowed.contains(x)) {
-                        return Err(KernelError::OperationFailed(
-                            "The fillet runs onto another face; turn on Allow edge overflow to let it".into(),
-                        ));
+                        return Err(KernelError::TooLarge {
+                            op: "fillet",
+                            why: "The fillet runs onto another face; turn on Allow edge overflow to let it".into(),
+                        });
                     }
                 }
             }
@@ -1409,7 +1410,7 @@ pub fn chamfer(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], opts: &Cham
                 let mut merged = out.clone();
                 merge_edges(&mut merged);
                 match local_problem(&b, &merged) {
-                    Some(e) => Err(KernelError::OperationFailed(format!("the local chamfer isn't valid: {e}"))),
+                    Some(e) => Err(KernelError::InvalidResult { op: "chamfer", why: format!("the local chamfer isn't valid: {e}") }),
                     None => Ok((out, src)),
                 }
             });
@@ -1471,7 +1472,7 @@ pub fn chamfer(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], opts: &Cham
                 let mut merged = out.clone();
                 merge_edges(&mut merged);
                 match local_problem(&b, &merged) {
-                    Some(e) => Err(KernelError::OperationFailed(format!("the local chamfer isn't valid: {e}"))),
+                    Some(e) => Err(KernelError::InvalidResult { op: "chamfer", why: format!("the local chamfer isn't valid: {e}") }),
                     None => Ok((out, src)),
                 }
             });
@@ -1696,7 +1697,7 @@ pub fn fillet_variable(k: &mut NativeKernel, body: BodyId, laws: &[FilletLaw], _
             let mut merged = out.clone();
             merge_edges(&mut merged);
             match local_problem(&b, &merged) {
-                Some(e) => Err(KernelError::OperationFailed(format!("the local fillet isn't valid: {e}"))),
+                Some(e) => Err(KernelError::InvalidResult { op: "fillet", why: format!("the local fillet isn't valid: {e}") }),
                 None => Ok((out, src)),
             }
         });
@@ -1785,7 +1786,7 @@ pub fn fillet_variable(k: &mut NativeKernel, body: BodyId, laws: &[FilletLaw], _
         cur = cur.apply(&tool, &src, if convex { BoolOp::Subtract } else { BoolOp::Union })?;
     }
     if !b.solids.is_empty() && cur.body.solids.is_empty() {
-        return Err(KernelError::OperationFailed("the fillet left an open body".into()));
+        return Err(KernelError::InvalidResult { op: "fillet", why: "the fillet left an open body".into() });
     }
     Ok(cur.into_result(k, body))
 }
@@ -1951,7 +1952,7 @@ fn chain_tool_lofted(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dy
         // The section's plane: through the contacts and the corner.
         let nrm = (c1 - p).cross(&(c2 - p));
         if nrm.norm() < 1e-12 {
-            return Err(KernelError::OperationFailed("the blend's section degenerates along the edge".into()));
+            return Err(KernelError::InvalidGeometry { op: "blend", why: "the blend's section degenerates along the edge".into() });
         }
         let nrm = nrm.normalize();
         let xd = (c1 - p).normalize();

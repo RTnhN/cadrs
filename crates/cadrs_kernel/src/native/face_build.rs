@@ -20,6 +20,7 @@ use super::nurbs::{basis_ders, find_span, NurbsCurve, NurbsSurface, H};
 use super::surface::Surface;
 use super::topo::{Body, Coedge, Face, Shell};
 use crate::{KernelError, Result};
+use super::tol;
 
 /// A uv rectangle: ((u0, u1), (v0, v1)).
 pub type UvBox = ((f64, f64), (f64, f64));
@@ -54,20 +55,20 @@ pub fn face_from_surface(s: &Surface, domain: Option<UvBox>) -> Result<Body> {
     let ((pu0, pu1), (pv0, pv1)) = s.param_box();
     // Angular directions: a periodic one, or the v of a revolution of a circle or ellipse.
     let (per_u, per_v) = (s.u_periodic(), s.v_periodic() || matches!(s, Surface::Revolution { m, .. } if m.is_periodic()));
-    let slack = |a: f64, b: f64| 1e-9 * (1.0 + a.abs().max(b.abs()));
+    let slack = |a: f64, b: f64| tol::REL * (1.0 + a.abs().max(b.abs()));
     if !per_u && (u0 < pu0 - slack(pu0, pu1) || u1 > pu1 + slack(pu0, pu1)) {
         return Err(KernelError::InvalidParameter(format!("u [{u0}, {u1}] is outside the surface's [{pu0}, {pu1}]")));
     }
     if !per_v && (v0 < pv0 - slack(pv0, pv1) || v1 > pv1 + slack(pv0, pv1)) {
         return Err(KernelError::InvalidParameter(format!("v [{v0}, {v1}] is outside the surface's [{pv0}, {pv1}]")));
     }
-    if (per_u && u1 - u0 > TAU + 1e-9) || (per_v && v1 - v0 > TAU + 1e-9) {
+    if (per_u && u1 - u0 > TAU + tol::ANGULAR) || (per_v && v1 - v0 > TAU + tol::ANGULAR) {
         return Err(KernelError::InvalidParameter("the uv domain is wider than the surface's period".into()));
     }
     let (u0, u1) = if per_u { (u0, u1) } else { (u0.max(pu0), u1.min(pu1)) };
     let (v0, v1) = if per_v { (v0, v1) } else { (v0.max(pv0), v1.min(pv1)) };
 
-    let size = s.patch_bbox((u0, u1), (v0, v1)).diagonal().max(1e-9);
+    let size = s.patch_bbox((u0, u1), (v0, v1)).diagonal().max(tol::ROUNDOFF);
     // Sides and poles meet within this: approximate poles and seams of B-splines read from
     // other systems are off by more than exact geometry (1e-6 of the face's size).
     let tol = (1e-6 * size).max(super::tol::CONFUSION);
@@ -151,7 +152,7 @@ pub fn face_from_surface(s: &Surface, domain: Option<UvBox>) -> Result<Body> {
         let e = if is_pole(k) {
             b.add_degenerate(b.verts[va].p, t0, t1, va)
         } else {
-            let c = iso_curve(s, !along_u, fixed).ok_or_else(|| KernelError::OperationFailed("no iso-curve of the surface for the face's side".into()))?;
+            let c = iso_curve(s, !along_u, fixed).ok_or_else(|| KernelError::InvalidGeometry { op: "face from surface", why: "no iso-curve of the surface for the face's side".into() })?;
             let e = b.add_edge(c, t0, t1, va, vb);
             // The iso-curve against the surface at the other end of a seam, and the corners.
             let mut dev: f64 = 0.0;
@@ -189,7 +190,7 @@ pub fn face_from_surface(s: &Surface, domain: Option<UvBox>) -> Result<Body> {
 /// inside the range, or reaches past it in a direction that isn't such a span.
 fn bezier_extended(n: &NurbsSurface, u: (f64, f64), v: (f64, f64)) -> Option<NurbsSurface> {
     let ((ru0, ru1), (rv0, rv1)) = n.range();
-    let past = |(a, b): (f64, f64), (r0, r1): (f64, f64)| a < r0 - 1e-9 * (1.0 + r0.abs()) || b > r1 + 1e-9 * (1.0 + r1.abs());
+    let past = |(a, b): (f64, f64), (r0, r1): (f64, f64)| a < r0 - tol::REL * (1.0 + r0.abs()) || b > r1 + tol::REL * (1.0 + r1.abs());
     let (pu, pv) = (past(u, (ru0, ru1)), past(v, (rv0, rv1)));
     if !pu && !pv {
         return None;
@@ -206,7 +207,7 @@ fn bezier_extended(n: &NurbsSurface, u: (f64, f64), v: (f64, f64)) -> Option<Nur
                 let w = ru0 + (ru1 - ru0) * f;
                 (n.point(w, rv0), n.point(w, rv1))
             };
-            (p - q).norm() <= 1e-9 * size
+            (p - q).norm() <= tol::REL * size
         })
     };
     if (pu && (!single(n.du, n.cps.len()) || meets(true))) || (pv && (!single(n.dv, n.cps[0].len()) || meets(false))) {
@@ -241,9 +242,9 @@ pub(crate) fn extended_past(s: &Surface, (u, v): UvBox) -> Option<Surface> {
 /// None when [a, b] is inside it or the curve isn't such a span.
 fn bezier_curve_extended(c: &NurbsCurve, (a, b): (f64, f64)) -> Option<NurbsCurve> {
     let (r0, r1) = c.range();
-    let past = a < r0 - 1e-9 * (1.0 + r0.abs()) || b > r1 + 1e-9 * (1.0 + r1.abs());
+    let past = a < r0 - tol::REL * (1.0 + r0.abs()) || b > r1 + tol::REL * (1.0 + r1.abs());
     let size = c.cps.iter().map(|h| super::nurbs::dehom(h).coords.norm()).fold(1.0, f64::max);
-    if !past || c.cps.len() != c.degree + 1 || (c.point(r0) - c.point(r1)).norm() <= 1e-9 * size {
+    if !past || c.cps.len() != c.degree + 1 || (c.point(r0) - c.point(r1)).norm() <= tol::REL * size {
         return None;
     }
     NurbsCurve::new(c.degree, [vec![a; c.degree + 1], vec![b; c.degree + 1]].concat(), bezier_over(&c.cps, (r0, r1), (a, b))).ok()
@@ -284,7 +285,7 @@ pub fn iso_curve(s: &Surface, fixed_u: bool, at: f64) -> Option<Curve> {
             } else {
                 let l = f.local(&m.point(at));
                 let rho = l.x.hypot(l.y);
-                if rho < 1e-300 {
+                if rho < tol::TINY {
                     return None;
                 }
                 let x = (f.x * l.x + f.y * l.y) / rho;
@@ -330,7 +331,7 @@ pub fn kernel_face_from_surface(k: &mut super::NativeKernel, body: crate::BodyId
 
 impl super::NativeKernel {
     /// A sheet body of one face of a bare surface (one read from a file, say) over its natural
-    /// domain or `domain` ([`face_from_surface`]).
+    /// domain or `domain` ([`crate::Kernel::face_from_surface`]).
     pub fn face_from_bare_surface(&mut self, s: &Surface, domain: Option<UvBox>) -> Result<crate::BodyId> {
         let b = face_from_surface(s, domain)?;
         Ok(self.insert(b))

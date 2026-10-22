@@ -14,6 +14,7 @@ use super::curve::Curve;
 use super::kernel::NativeKernel;
 use super::math::*;
 use crate::*;
+use super::tol;
 
 /// A spine edge in the direction of travel.
 struct SpineEdge {
@@ -58,7 +59,7 @@ pub fn evolved(k: &mut NativeKernel, spine: &[(Curve, f64, f64)], profile: &[Reg
         up = super::axes::ax2_x(&edges[0].dir(0.0));
     }
     let up = up.normalize();
-    let size = pts.iter().map(|p| (p - pts[0]).norm()).fold(0.0, f64::max).max(1e-9);
+    let size = pts.iter().map(|p| (p - pts[0]).norm()).fold(0.0, f64::max).max(tol::ROUNDOFF);
     if pts.iter().any(|p| (p - pts[0]).dot(&up).abs() > 1e-6 * size) {
         return Err(KernelError::InvalidParameter("an evolved solid's spine must be planar".into()));
     }
@@ -72,9 +73,9 @@ pub fn evolved(k: &mut NativeKernel, spine: &[(Curve, f64, f64)], profile: &[Reg
             }
         }
     }
-    let outside = if xs.0 >= -1e-9 {
+    let outside = if xs.0 >= -tol::ROUNDOFF {
         true
-    } else if xs.1 <= 1e-9 {
+    } else if xs.1 <= tol::ROUNDOFF {
         false
     } else {
         return Err(KernelError::Unsupported("evolved solids of profiles on both sides of the spine"));
@@ -106,7 +107,7 @@ pub fn evolved(k: &mut NativeKernel, spine: &[(Curve, f64, f64)], profile: &[Reg
         let next = &edges[(i + 1) % n];
         let (ta, tb) = (e.dir(1.0), next.dir(0.0));
         let turn = ta.cross(&tb).dot(&up).atan2(ta.dot(&tb));
-        if turn.abs() < 1e-9 || (turn > 0.0) != outside {
+        if turn.abs() < tol::ANGULAR || (turn > 0.0) != outside {
             continue;
         }
         let v = e.point(1.0);

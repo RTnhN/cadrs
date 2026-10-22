@@ -14,6 +14,7 @@ use super::surface::Surface;
 use super::tess;
 use super::topo::Body;
 use crate::*;
+use super::tol;
 
 /// A body in the session, with lazily derived data.
 pub struct Entry {
@@ -41,6 +42,7 @@ pub struct NativeKernel {
 }
 
 impl NativeKernel {
+    /// An empty session at the default tolerances.
     pub fn new() -> Self {
         Self::default()
     }
@@ -57,14 +59,17 @@ impl NativeKernel {
         Ok(())
     }
 
-    pub fn entry(&self, id: BodyId) -> Result<&Entry> {
+    /// The session's record of a body.
+    pub(crate) fn entry(&self, id: BodyId) -> Result<&Entry> {
         self.bodies.get(&id.0).ok_or(KernelError::UnknownBody(id))
     }
 
+    /// The B-rep of a body of the session (`UnknownBody` if it has none of that id).
     pub fn get(&self, id: BodyId) -> Result<&Arc<Body>> {
         Ok(&self.entry(id)?.body)
     }
 
+    /// Adds a body to the session as it is (run [`Body::check`] first on one built by hand).
     pub fn insert(&mut self, body: Body) -> BodyId {
         let id = self.next;
         self.next += 1;
@@ -72,7 +77,8 @@ impl NativeKernel {
         BodyId(id)
     }
 
-    pub fn insert_result(&mut self, b: Built) -> OpResult {
+    /// Adds a built body with its faces' origins as the history of a new result.
+    pub(crate) fn insert_result(&mut self, b: Built) -> OpResult {
         let mut history = History::default();
         for (f, o) in &b.origins {
             history.generated.push((FaceId(*f as u64), *o));
@@ -145,7 +151,7 @@ pub fn extent_along(b: &Body, o: &P3, d: &V3) -> (f64, f64) {
                         let (_, d1, d2) = e.curve.d2(t);
                         let f = d1.dot(d);
                         let df = d2.dot(d);
-                        if df.abs() < 1e-300 {
+                        if df.abs() < tol::TINY {
                             break;
                         }
                         t = (t - f / df).clamp(e.t[0], e.t[1]);
@@ -201,8 +207,8 @@ fn face_extremes(b: &Body, fi: usize, d: &V3) -> Vec<P3> {
                     break;
                 }
             }
-            if ok && u >= ub.0 - 1e-9 && u <= ub.1 + 1e-9 && v >= vb.0 - 1e-9 && v <= vb.1 + 1e-9
-                && classify::in_face(&polys, &f.surf, P2::new(u, v), 1e-9) != classify::InFace::Outside {
+            if ok && u >= ub.0 - tol::ROUNDOFF && u <= ub.1 + tol::ROUNDOFF && v >= vb.0 - tol::ROUNDOFF && v <= vb.1 + tol::ROUNDOFF
+                && classify::in_face(&polys, &f.surf, P2::new(u, v), tol::ROUNDOFF) != classify::InFace::Outside {
                     out.push(f.surf.eval(u, v));
                 }
         }
@@ -438,8 +444,26 @@ impl Kernel for NativeKernel {
         super::loft_build::loft_with(self, spec)
     }
 
+    fn evolved(&mut self, spine: &[PathCurve], profile: &[Region]) -> Result<OpResult> {
+        let segs = super::sweep::path::path_segments(self, spine)?;
+        let (segs, _) = super::sweep::path::chain(segs).map_err(|_| KernelError::InvalidParameter("The spine's curves must join end to end in one chain".into()))?;
+        let spine: Vec<(Curve, f64, f64)> = segs.into_iter().map(|s| if s.rev { (s.c, s.t1, s.t0) } else { (s.c, s.t0, s.t1) }).collect();
+        let id = super::evolved::evolved(self, &spine, profile)?;
+        Ok(OpResult { bodies: vec![id], history: History::default() })
+    }
+
     fn sweep_with(&mut self, profile: &Profile, spec: &SweepSpec) -> Result<OpResult> {
         super::sweep::path::sweep_with(self, profile, spec)
+    }
+
+    fn cells(&mut self, bodies: &[BodyId], select: &[(usize, bool)]) -> Result<Vec<BodyId>> {
+        for &b in bodies {
+            self.get(b)?;
+        }
+        if let Some((i, _)) = select.iter().find(|(i, _)| *i >= bodies.len()) {
+            return Err(KernelError::InvalidParameter(format!("The cell selection names body {i} of {}", bodies.len())));
+        }
+        super::cells::select_cells(self, bodies, select)
     }
 
     fn boolean(&mut self, op: BoolOp, target: BodyId, tools: &[BodyId]) -> Result<OpResult> {
@@ -565,7 +589,7 @@ impl Kernel for NativeKernel {
 
     fn transform_motion(&mut self, body: BodyId, motion: &Motion) -> Result<OpResult> {
         let m = motion.linear;
-        if (m.transpose() * m - nalgebra::Matrix3::identity()).norm() > 1e-9 {
+        if (m.transpose() * m - nalgebra::Matrix3::identity()).norm() > tol::ROUNDOFF {
             return Err(KernelError::InvalidParameter("The motion must be a rotation or a reflection (no scaling or shear)".into()));
         }
         let b = self.get(body)?.transformed(&Affine { m, t: motion.translation });
@@ -689,10 +713,10 @@ impl Kernel for NativeKernel {
                 super::sweep::sweep_body(&b, &super::sweep::BodyMove::Straight(v / len), len, false, body.0)?
             }
             BodySweep::Rotate { axis, angle } => {
-                if !angle.is_finite() || angle.abs() < 1e-9 {
+                if !angle.is_finite() || angle.abs() < tol::ANGULAR {
                     return Err(KernelError::InvalidParameter("The sweep's angle must be above zero".into()));
                 }
-                if angle.abs() > TAU + 1e-9 {
+                if angle.abs() > TAU + tol::ANGULAR {
                     return Err(KernelError::InvalidParameter("The sweep turns more than a whole turn".into()));
                 }
                 // Counter-clockwise about the axis: a negative angle turns about the reversed axis.
@@ -705,7 +729,7 @@ impl Kernel for NativeKernel {
             }
         };
         if let Some(why) = built.body.check().into_iter().next() {
-            return Err(KernelError::OperationFailed(format!("the sweep made an invalid body: {why}")));
+            return Err(KernelError::InvalidResult { op: "sweep", why: format!("the sweep made an invalid body: {why}") });
         }
         Ok(self.insert_result(built))
     }

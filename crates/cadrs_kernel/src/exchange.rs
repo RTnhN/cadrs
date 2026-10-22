@@ -27,6 +27,7 @@ pub enum ExchangeFormat {
 }
 
 impl ExchangeFormat {
+    /// The format's name for the user ("STEP", "IGES").
     pub fn label(self) -> &'static str {
         match self {
             ExchangeFormat::Step => "STEP",
@@ -49,7 +50,9 @@ impl ExchangeFormat {
 /// its product name (empty when the file gives none).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportedPart {
+    /// The part's body.
     pub body: BodyId,
+    /// The product name.
     pub name: String,
 }
 
@@ -57,8 +60,11 @@ pub struct ImportedPart {
 /// instance's name (empty when the file gives none).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportedOccurrence {
+    /// The index of the part in [`ImportedModel::parts`].
     pub part: usize,
+    /// Where the part is placed.
     pub placement: Motion,
+    /// The instance's name.
     pub name: String,
 }
 
@@ -67,7 +73,9 @@ pub struct ImportedOccurrence {
 pub struct ImportedModel {
     /// The top-level product's name (empty when the file gives none).
     pub name: String,
+    /// Each distinct part once.
     pub parts: Vec<ImportedPart>,
+    /// Every use of a part.
     pub occurrences: Vec<ImportedOccurrence>,
 }
 
@@ -92,8 +100,11 @@ impl ImportedModel {
 /// An instance to export: which of the exported parts, where, and its name.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExportInstance {
+    /// The index of the part in the exported parts.
     pub part: usize,
+    /// Where the part is placed in the assembly.
     pub placement: Motion,
+    /// The instance's name.
     pub name: String,
 }
 

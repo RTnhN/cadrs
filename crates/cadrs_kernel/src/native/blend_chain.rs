@@ -158,7 +158,7 @@ impl Chain<'_> {
                     }
                 }
                 if !x.coords.iter().all(|c| c.is_finite()) {
-                    return Err(KernelError::OperationFailed("the blend's section degenerates along the edge".into()));
+                    return Err(KernelError::InvalidGeometry { op: "blend", why: "the blend's section degenerates along the edge".into() });
                 }
                 let (_, _, q1) = out_dist(f1, &x);
                 let (_, _, q2) = out_dist(f2, &x);
@@ -176,13 +176,13 @@ impl Chain<'_> {
         // Faces tangent at the edge (or a failed solve) give no section, not a NaN one.
         let finite = |q: &P3| q.coords.iter().all(|x| x.is_finite());
         if !finite(&c1) || !finite(&c2) || (c1 - p).norm() < 1e-12 || (c2 - p).norm() < 1e-12 {
-            return Err(KernelError::OperationFailed("the blend's section degenerates along the edge".into()));
+            return Err(KernelError::InvalidGeometry { op: "blend", why: "the blend's section degenerates along the edge".into() });
         }
         let inside = [self.on(faces[0].0, &c1), self.on(faces[1].0, &c2)];
         // The section's plane: through the contacts and the corner.
         let nrm = (c1 - p).cross(&(c2 - p));
         if nrm.norm() < 1e-12 {
-            return Err(KernelError::OperationFailed("the blend's section degenerates along the edge".into()));
+            return Err(KernelError::InvalidGeometry { op: "blend", why: "the blend's section degenerates along the edge".into() });
         }
         let nrm = nrm.normalize();
         let xd = (c1 - p).normalize();
@@ -247,16 +247,16 @@ pub fn chain_tool(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dyn F
     let convex = {
         let ed = &b.edges[e0];
         let tm = ed.mid_t();
-        let f = |fi: usize, fwd: bool| -> (V3, V3) {
+        let f = |fi: usize, fwd: bool| -> Result<(V3, V3)> {
             let face = &b.faces[fi];
-            let c = face.loops.iter().flatten().find(|c| c.edge == e0 && c.fwd == fwd).unwrap();
+            let c = face.loops.iter().flatten().find(|c| c.edge == e0 && c.fwd == fwd).ok_or_else(|| KernelError::InvalidGeometry { op: "blend", why: "the blended edge isn't on the face beside it".into() })?;
             let uv = c.pc.point(tm);
             let n = face.surf.normal(uv.x, uv.y) * if face.sense { 1.0 } else { -1.0 };
             let d = ed.curve.tangent(tm).normalize() * if fwd { 1.0 } else { -1.0 };
-            (n, n.cross(&d))
+            Ok((n, n.cross(&d)))
         };
-        let (n1, _) = f(sides[0][0].0, sides[0][0].1);
-        let (_, w2) = f(sides[0][1].0, sides[0][1].1);
+        let (n1, _) = f(sides[0][0].0, sides[0][0].1)?;
+        let (_, w2) = f(sides[0][1].0, sides[0][1].1)?;
         w2.dot(&n1) < 0.0
     };
     let ch = Chain { b, chain, starts: starts.clone(), lens: lens.clone(), kind, sides: sides.clone(), convex, polys: Default::default() };
@@ -375,10 +375,10 @@ pub fn chain_tool(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dyn F
     let mut solved = 0usize;
     while stations.last().unwrap().s < total_hi - 1e-9 {
         if solved > MAX_SECTIONS {
-            return Err(KernelError::OperationFailed(format!("the blend's path needs more than {MAX_SECTIONS} sections solved")));
+            return Err(KernelError::BudgetExhausted { stage: "sections", why: format!("the blend's path needs more than {MAX_SECTIONS} sections solved") });
         }
         if stations.len() > MAX_STATIONS {
-            return Err(KernelError::OperationFailed(format!("the blend's path needs more than {MAX_STATIONS} sections (at {:.4} of [{total_lo:.3}, {total_hi:.3}], step {step:.2e})", stations.last().unwrap().s)));
+            return Err(KernelError::BudgetExhausted { stage: "sections", why: format!("the blend's path needs more than {MAX_STATIONS} sections (at {:.4} of [{total_lo:.3}, {total_hi:.3}], step {step:.2e})", stations.last().unwrap().s) });
         }
         let s0 = stations.last().unwrap().s;
         while breaks[bi] <= s0 + 1e-9 {
@@ -492,7 +492,7 @@ pub fn chain_tool(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dyn F
             },
         });
     }
-    let t = acc.ok_or_else(|| KernelError::OperationFailed("the blend's tool is empty".into()))?;
+    let t = acc.ok_or_else(|| KernelError::InvalidGeometry { op: "blend", why: "the blend's tool is empty".into() })?;
     if std::env::var("CADRS_BLEND_DEBUG").is_ok() {
         eprintln!(
             "chain tool: {} pieces {:?}, volume {}, check {:?}",

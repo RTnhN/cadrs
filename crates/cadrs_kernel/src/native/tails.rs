@@ -13,6 +13,7 @@ use super::curve::Curve;
 use super::math::*;
 use super::topo::{co_range, Body, Coedge};
 use crate::{KernelError, Result};
+use super::tol;
 
 /// OCCT's `Precision::Confusion()`.
 const CONFUSION: f64 = 1e-7;
@@ -68,7 +69,7 @@ fn check_tail(sides: &[Side; 2], max_sine: Option<f64>, max_width: f64) -> Optio
                 return None;
             }
             let t = s.curve.tangent(s.near) * if s.far >= s.near { 1.0 } else { -1.0 };
-            d[k] = t.try_normalize(1e-300)?;
+            d[k] = t.try_normalize(tol::TINY)?;
         }
         if d[0].dot(&d[1]) < 0.0 || d[0].cross(&d[1]).norm_squared() > max_sine * max_sine {
             return None;
@@ -130,7 +131,7 @@ fn check_tail(sides: &[Side; 2], max_sine: Option<f64>, max_width: f64) -> Optio
     let mut at = [0.0; 2];
     at[fi] = bound[fi];
     at[1 - fi] = foot[fi];
-    let pconf = 1e-9;
+    let pconf = tol::ROUNDOFF;
     let mut changed = false;
     for k in 0..2 {
         let s = &sides[k];

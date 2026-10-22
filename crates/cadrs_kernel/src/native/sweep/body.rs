@@ -7,6 +7,7 @@ use crate::native::math::*;
 use crate::native::profile::{Piece, Src};
 use crate::native::topo::*;
 use crate::{BodyClass, KernelError, Origin, Result};
+use crate::native::tol;
 
 /// How [`sweep_body`] moves a body: s runs from 0 along `Straight`'s unit direction (mm) or
 /// about a [`Turn`]'s axis (radians).
@@ -224,7 +225,7 @@ fn assemble_solids(o: &mut Body, faces: &[usize]) -> Result<()> {
             crate::native::classify::parity_inside(&sub, &polys, &p)
         });
         let Some(h) = home else {
-            return Err(KernelError::OperationFailed("The sweep makes a cavity outside its solid".into()));
+            return Err(KernelError::InvalidGeometry { op: "sweep", why: "The sweep makes a cavity outside its solid".into() });
         };
         solids[h].push(k);
     }
@@ -241,7 +242,7 @@ fn assemble_solids(o: &mut Body, faces: &[usize]) -> Result<()> {
 /// Refuses a sheet that doesn't cross the sweep the same way everywhere (sampled on its
 /// tessellation): its solid would fold through itself, or (a sheet along the sweep) be flat.
 fn check_transversal(b: &Body, mv: &BodyMove) -> Result<()> {
-    let size = b.bbox().diagonal().max(1e-9);
+    let size = b.bbox().diagonal().max(tol::ROUNDOFF);
     let (meshes, _) = crate::native::tess::mesh_body(b, size * 1e-2, 0.5);
     let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
     for m in &meshes {

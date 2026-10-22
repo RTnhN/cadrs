@@ -71,7 +71,7 @@ pub fn fillet_smooth(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], spec:
                 out += f.surf.normal(u, w) * if f.sense { 1.0 } else { -1.0 };
             }
         }
-        let out = out.try_normalize(1e-12).ok_or_else(|| KernelError::OperationFailed("the corner has no outside".into()))?;
+        let out = out.try_normalize(1e-12).ok_or_else(|| KernelError::InvalidGeometry { op: "smooth corner", why: "the corner has no outside".into() })?;
         // The ball, its poles square to the corner's outward direction (off the hole).
         let ball = super::blend::ball_frame(vp, rho, any_perp(&out), out)?;
         let ball_src = vec![vec![mark.clone()]; ball.faces.len()];
@@ -90,7 +90,7 @@ fn any_perp(v: &V3) -> V3 {
 fn fill_corner(mut t: Tracked, mark: &FaceSrc, vp: P3, out: V3) -> Result<Tracked> {
     let hole: Vec<usize> = (0..t.body.faces.len()).filter(|&f| t.src[f].contains(mark)).collect();
     if hole.is_empty() {
-        return Err(KernelError::OperationFailed("the corner's ball cut nothing".into()));
+        return Err(KernelError::InvalidGeometry { op: "smooth corner", why: "the corner's ball cut nothing".into() });
     }
     let b = &t.body;
     // The rim: edges used once by the hole's faces, in their direction there.
@@ -114,13 +114,13 @@ fn fill_corner(mut t: Tracked, mark: &FaceSrc, vp: P3, out: V3) -> Result<Tracke
     while end_of(chain.last().unwrap()) != start_of(&chain[0]) {
         let e = end_of(chain.last().unwrap());
         let Some(i) = (0..rim.len()).find(|&i| !used[i] && start_of(&rim[i]) == e) else {
-            return Err(KernelError::OperationFailed("the corner's rim is not one loop".into()));
+            return Err(KernelError::InvalidGeometry { op: "smooth corner", why: "the corner's rim is not one loop".into() });
         };
         used[i] = true;
         chain.push(rim[i]);
     }
     if used.iter().any(|u| !u) {
-        return Err(KernelError::OperationFailed("the corner's rim is more than one loop".into()));
+        return Err(KernelError::InvalidGeometry { op: "smooth corner", why: "the corner's rim is more than one loop".into() });
     }
     // The faces beside each rim edge (not of the hole).
     let ef = b.edge_faces();
@@ -181,7 +181,7 @@ fn fill_corner(mut t: Tracked, mark: &FaceSrc, vp: P3, out: V3) -> Result<Tracke
     let d_lean = (lean_pts[1] - lean_pts[n - 1]) / (params[1] + (1.0 - params[n - 1]));
     let row2 = NurbsCurve::interpolate(&lean_pts, &params, 3, Some(d_lean), Some(d_lean));
     if row3.cps.len() != row2.cps.len() || row3.knots != row2.knots {
-        return Err(KernelError::OperationFailed("the corner patch's rows don't match".into()));
+        return Err(KernelError::InvalidGeometry { op: "smooth corner", why: "the corner patch's rows don't match".into() });
     }
     // The pole's rows: the centre, and the next row in the plane through it square to the axis.
     let perp = |p: &P3| {
@@ -277,7 +277,7 @@ fn fill_corner(mut t: Tracked, mark: &FaceSrc, vp: P3, out: V3) -> Result<Tracke
     body.solids.clear();
     super::boolean::assemble_shells(&mut body)?;
     if body.solids.len() != 1 {
-        return Err(KernelError::OperationFailed("the smooth corner left an open body".into()));
+        return Err(KernelError::InvalidResult { op: "smooth corner", why: "the smooth corner left an open body".into() });
     }
     t.body = body;
     t.src = src;

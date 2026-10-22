@@ -28,6 +28,7 @@ use super::math::*;
 use super::surface::{Surface, D2};
 use super::topo::{co_range, Body, Coedge, Face};
 use crate::{BodyId, EdgeId, FaceId, KernelError, Result, Tessellation, TriMesh, VertexId};
+use super::tol;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct FaceMesh {
@@ -205,7 +206,7 @@ fn refine_polyline(c: impl Fn(f64) -> P3, ts: &[f64], p: &TessParams) -> Vec<f64
 fn seg_dist3(q: &P3, a: &P3, b: &P3) -> f64 {
     let ab = b - a;
     let l = ab.norm_squared();
-    let t = if l < 1e-300 { 0.0 } else { ((q - a).dot(&ab) / l).clamp(0.0, 1.0) };
+    let t = if l < tol::TINY { 0.0 } else { ((q - a).dot(&ab) / l).clamp(0.0, 1.0) };
     (a + ab * t - q).norm()
 }
 
@@ -291,11 +292,11 @@ impl<'a> Domain<'a> {
         for d in 0..2 {
             if let Some((a, w)) = self.per[d] {
                 let k = ((q[d] - a) / w).round();
-                if (q[d] - (a + k * w)).abs() <= 1e-9 * w {
+                if (q[d] - (a + k * w)).abs() <= tol::REL * w {
                     q[d] = a + k * w;
                 }
             } else if let Some((a, b)) = range[d] {
-                let eps = 1e-9 * (b - a).abs();
+                let eps = tol::REL * (b - a).abs();
                 for end in [a, b] {
                     if (q[d] - end).abs() <= eps {
                         q[d] = end;
@@ -760,7 +761,7 @@ fn vx(dom: &Domain, uv: P2, p: Option<P3>, (mu, mv): (f64, f64)) -> Vx {
     // 1e-15 long and may point either way, its normal the other nappe's (turned by π against its
     // neighbours', which the angle refinement then splits for ever). Against the face's mean
     // speeds, such a point has no normal of its own.
-    let smooth = l > 1e-10 * su.norm() * sv.norm() && l > 1e-300 && su.norm() > 1e-9 * mu && sv.norm() > 1e-9 * mv;
+    let smooth = l > 1e-10 * su.norm() * sv.norm() && l > tol::TINY && su.norm() > tol::REL * mu && sv.norm() > tol::REL * mv;
     let n = if smooth { n / l } else { dom.normal(uv) };
     Vx { at: SPoint::new(tiny(uv.x * mu), tiny(uv.y * mv)), uv, p: p.unwrap_or(q), n, smooth, fresh: false }
 }
@@ -851,7 +852,7 @@ fn split_point(dom: &Domain, v: &[Vx; 3], cons: [bool; 3], p: &TessParams, min_l
     let (a, b, c) = (v[0].at, v[1].at, v[2].at);
     let area2 = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
     let side2 = [(a, b), (b, c), (c, a)].iter().map(|(x, y)| (x.x - y.x).powi(2) + (x.y - y.y).powi(2)).fold(0.0, f64::max);
-    if !(area2.abs() > 1e-9 * side2) {
+    if !(area2.abs() > tol::REL * side2) {
         return None;
     }
     let mid = |i: usize| P2::from((v[i].uv.coords + v[(i + 1) % 3].uv.coords) * 0.5);
@@ -869,7 +870,7 @@ fn split_point(dom: &Domain, v: &[Vx; 3], cons: [bool; 3], p: &TessParams, min_l
         let (s, su, sv) = dom.d1(q);
         let n = su.cross(&sv);
         let l = n.norm();
-        if l > 1e-300 {
+        if l > tol::TINY {
             (t - s).dot(&n).abs() / l
         } else {
             (t - s).norm()
@@ -1137,7 +1138,7 @@ fn triangulate(s: &Setup, p: &TessParams, refine: bool) -> FaceMesh {
         if adds.is_empty() {
             break;
         }
-        let snap = 1e-9 * extent;
+        let snap = tol::REL * extent;
         // In rows across the face, so each insertion's walk starts next to it.
         let row = (extent * 1e-2).max(1e-12);
         adds.sort_by(|a, b| {

@@ -4,6 +4,7 @@
 
 use nalgebra::{Isometry3, Matrix3, Point2, Point3, Unit, Vector3};
 use serde::{Deserialize, Serialize};
+use crate::native::tol;
 
 /// A body (solid) owned by a kernel session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -221,7 +222,7 @@ impl Curve2 {
         match *self {
             Curve2::Circle { .. } | Curve2::Ellipse { .. } => true,
             Curve2::Arc { sweep, .. } | Curve2::EllipseArc { sweep, .. } | Curve2::OffsetEllipseArc { sweep, .. } => {
-                sweep.abs() >= std::f64::consts::TAU - 1e-9
+                sweep.abs() >= std::f64::consts::TAU - tol::ANGULAR
             }
             Curve2::Line { .. } | Curve2::Bezier { .. } => false,
         }
@@ -241,7 +242,7 @@ pub fn ellipse_point(center: Point2<f64>, major: f64, minor: f64, rotation: f64,
 pub fn offset_ellipse_point(center: Point2<f64>, major: f64, minor: f64, rotation: f64, offset: f64, t: f64) -> Point2<f64> {
     let (x, y) = (major * t.cos(), minor * t.sin());
     let (gx, gy) = (x / (major * major), y / (minor * minor));
-    let l = (gx * gx + gy * gy).sqrt().max(1e-300);
+    let l = (gx * gx + gy * gy).sqrt().max(tol::TINY);
     let (x, y) = (x + offset * gx / l, y + offset * gy / l);
     let (s, c) = rotation.sin_cos();
     Point2::new(center.x + c * x - s * y, center.y + s * x + c * y)
@@ -987,7 +988,7 @@ pub struct EdgeInfo {
 impl EdgeInfo {
     /// True for an edge that ends where it starts (a whole circle).
     pub fn is_closed(&self) -> bool {
-        (self.end - self.start).norm() < 1e-9 && self.length > 1e-9
+        (self.end - self.start).norm() < tol::ROUNDOFF && self.length > tol::ROUNDOFF
     }
 }
 

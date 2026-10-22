@@ -14,6 +14,7 @@ use crate::native::profile::{self, MergedFace, Piece};
 use super::corner::Corner;
 use super::{sweep_full, Frames, Join, Prism, Revolve};
 use crate::*;
+use crate::native::tol;
 
 /// A path segment in the direction the path runs: its curve on [t0, t1], run backwards when
 /// `rev`.
@@ -117,8 +118,7 @@ pub fn chain(mut segs: Vec<Seg>) -> Result<(Vec<Seg>, bool)> {
     let mut used = vec![false; n];
     let mut out = vec![if first.1 { segs[first.0].reversed() } else { segs[first.0].clone() }];
     used[first.0] = true;
-    loop {
-        let at = out.last().unwrap().end();
+    while let Some(at) = out.last().map(Seg::end) {
         let next = (0..n).filter(|&j| !used[j]).find_map(|j| {
             if (segs[j].start() - at).norm() < PATH_JOIN {
                 Some((j, false))
@@ -135,7 +135,7 @@ pub fn chain(mut segs: Vec<Seg>) -> Result<(Vec<Seg>, bool)> {
     if used.iter().any(|u| !u) {
         return Err(KernelError::InvalidParameter("The sweep path must be one chain of connected curves".into()));
     }
-    let closed = (out.last().unwrap().end() - out[0].start()).norm() < PATH_JOIN;
+    let closed = out.last().is_some_and(|s| (s.end() - out[0].start()).norm() < PATH_JOIN);
     Ok((out, closed))
 }
 
@@ -160,7 +160,7 @@ pub(crate) fn spines(path: Vec<Seg>, closed: bool, plane: &Plane, center: &P3) -
     }
     let _ = n;
     let Some((_, i, f)) = best else { return vec![(path, false)] };
-    let tol = 1e-9;
+    let tol = tol::ROUNDOFF;
     if i == 0 && f < tol {
         return vec![(path, false)];
     }
@@ -242,7 +242,7 @@ fn sweep_spine(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, spine:
         let mut i = 0;
         while i < spine.len() {
             let mut j = i + 1;
-            while j < spine.len() && spine[j - 1].dir(1.0).dot(&spine[j].dir(0.0)) >= 1.0 - 1e-9 {
+            while j < spine.len() && spine[j - 1].dir(1.0).dot(&spine[j].dir(0.0)) >= 1.0 - tol::ANGULAR {
                 j += 1;
             }
             if j - i >= 2 {
@@ -271,7 +271,7 @@ fn sweep_spine(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, spine:
         // one direction to the next) and the pieces either side are joined there.
         if joins && si > 0 {
             let (d1, d2) = (spine[si - 1].dir(1.0), seg.dir(0.0));
-            if d1.dot(&d2) < 1.0 - 1e-9 {
+            if d1.dot(&d2) < 1.0 - tol::ANGULAR {
                 flush(&mut run, &mut place, &mut out, &mut corners, &mut pending, run_helix)?;
                 let v = seg.start();
                 let end = place;
@@ -293,7 +293,7 @@ fn sweep_spine(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, spine:
             if let Some(last) = run.last() {
                 // A break in tangent, or a quarter turn gathered: a new piece.
                 let turned: f64 = run.iter().map(|g| g.dir(0.0).angle(&g.dir(1.0))).sum::<f64>() + seg.dir(0.0).angle(&seg.dir(1.0));
-                if last.dir(1.0).dot(&seg.dir(0.0)) < 1.0 - 1e-9 || turned > PI / 2.0 + 1e-9 {
+                if last.dir(1.0).dot(&seg.dir(0.0)) < 1.0 - tol::ANGULAR || turned > PI / 2.0 + tol::ANGULAR {
                     flush(&mut run, &mut place, &mut out, &mut corners, &mut pending, run_helix)?;
                 }
             }
@@ -323,7 +323,7 @@ fn sweep_spine(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, spine:
                 let radial = (start - c).normalize();
                 let f = Frame { o: *c, x: radial, y: axis.cross(&radial), z: axis };
                 let kind = Revolve { plane: place, f };
-                let whole = span >= TAU - 1e-9;
+                let whole = span >= TAU - tol::ANGULAR;
                 let b = sweep_full(faces, chains, &kind, 0.0, if whole { TAU } else { span }, whole, solid)?;
                 out.push(Tagged::from_built(b));
                 corners.push(pending.take());
@@ -626,13 +626,8 @@ pub(crate) fn glue_self(t: &Tagged) -> Option<Tagged> {
     for (fe, ce, ae) in &e {
         for (fs, cs, as_) in &s {
             if (ce - cs).norm() < 1e-6 && (ae - as_).abs() < 1e-6 * (1.0 + ae) {
-                // Split into a body without the two caps and glue through a copy.
-                let _ = (fe, fs);
-                let mut a = t.clone();
-                let mut b = Tagged { body: crate::native::topo::Body::default(), tags: vec![] };
-                std::mem::swap(&mut a, &mut b);
-                let _ = a;
-                return glue_within(&b, *fe, *fs);
+                // A body without the two caps, their edges identified.
+                return glue_within(t, *fe, *fs);
             }
         }
     }
@@ -723,7 +718,7 @@ fn transfer_pcurve(old: &crate::native::topo::Edge, pc: &Curve, new: &crate::nat
     }
     for f in [0.0, 0.125, 0.5, 0.875, 1.0] {
         let t = at(f);
-        if (old.point(a * t + b) - new.point(t)).norm() > 1e-9 {
+        if (old.point(a * t + b) - new.point(t)).norm() > tol::ROUNDOFF {
             return None;
         }
     }

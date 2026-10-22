@@ -17,6 +17,7 @@ use super::profile::{self, MergedFace, Piece, Src};
 use super::sweep::{self, SweepKind};
 use super::topo::{co_range, Body};
 use crate::*;
+use super::tol;
 
 /// A body with the origins of each face.
 #[derive(Debug, Clone)]
@@ -112,7 +113,7 @@ pub fn face_as_profile(k: &NativeKernel, profile: &Profile, input: &FaceInput) -
     };
     let n = fr.x.cross(&fr.y) * if f.sense { 1.0 } else { -1.0 };
     let pn = profile.plane.normal.into_inner();
-    if n.cross(&pn).norm() > 1e-9 {
+    if n.cross(&pn).norm() > tol::ANGULAR {
         return Err(KernelError::InvalidParameter("The face is not parallel to the sketch plane".into()));
     }
     // Model → sketch coordinates.
@@ -227,10 +228,10 @@ fn resolve(k: &NativeKernel, faces: &[MergedFace], m: &Affine, spec: &ExtrudeSpe
             _ => Err(KernelError::InvalidParameter("Through all: no part lies in the extrude direction".into())),
         },
         ExtrudeEnd::UpToFace { body, face, offset } => {
-            let info = k.faces(body)?.into_iter().find(|f| f.id == face).ok_or_else(|| KernelError::OperationFailed(format!("unknown {face:?}")))?;
+            let info = k.faces(body)?.into_iter().find(|f| f.id == face).ok_or_else(|| KernelError::InvalidParameter(format!("unknown {face:?}")))?;
             if let Some(pl) = info.plane {
                 let mn = pl.normal.into_inner();
-                if mn.dot(&dir).abs() > 1.0 - 1e-9 {
+                if mn.dot(&dir).abs() > 1.0 - tol::ANGULAR {
                     return depth("the face", (pl.origin - o).dot(&dir) - offset);
                 }
                 if mn.dot(&dir).abs() < 1e-6 {
@@ -508,7 +509,7 @@ pub fn extrude_with(k: &mut NativeKernel, profile: &Profile, spec: &ExtrudeSpec)
 /// A straight sweep of a profile's regions along any vector (an oblique prism).
 pub fn prism_along(k: &mut NativeKernel, profile: &Profile, v: V3) -> Result<OpResult> {
     let len = v.norm();
-    if len < 1e-12 || v.dot(&profile.plane.normal).abs() < 1e-9 * len {
+    if len < 1e-12 || v.dot(&profile.plane.normal).abs() < tol::REL * len {
         return Err(KernelError::InvalidParameter("A prism needs a direction off the profile's plane".into()));
     }
     let faces = inputs(k, profile, &[])?;
@@ -564,7 +565,7 @@ fn unite_solids(t: Tagged) -> Result<Tagged> {
 pub fn revolve_frame(profile: &Profile, faces: &[MergedFace], chains: &[Vec<Piece>], axis: &Axis) -> Result<Frame> {
     let n = profile.plane.normal.into_inner();
     let z = axis.dir.into_inner();
-    if z.dot(&n).abs() > 1e-9 {
+    if z.dot(&n).abs() > tol::ANGULAR {
         return Err(KernelError::InvalidParameter("The revolve axis must lie in the sketch plane".into()));
     }
     if (axis.origin - profile.plane.origin).dot(&n).abs() > 1e-6 {
@@ -635,9 +636,9 @@ pub fn revolve_with(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec)
             RevolveEnd::Angle(a) => End::Angle(a),
             RevolveEnd::UpToVertex { point, offset } => End::Angle(ang_of(&point) - offset),
             RevolveEnd::UpToFace { body, face, offset } => {
-                let info = k.faces(body)?.into_iter().find(|x| x.id == face).ok_or_else(|| KernelError::OperationFailed(format!("unknown {face:?}")))?;
+                let info = k.faces(body)?.into_iter().find(|x| x.id == face).ok_or_else(|| KernelError::InvalidParameter(format!("unknown {face:?}")))?;
                 match info.plane {
-                    Some(pl) if pl.normal.dot(&f.z).abs() < 1e-9 && (pl.origin - f.o).dot(&pl.normal).abs() < 1e-6 => End::Angle(ang_of(&info.center) - offset),
+                    Some(pl) if pl.normal.dot(&f.z).abs() < tol::ANGULAR && (pl.origin - f.o).dot(&pl.normal).abs() < 1e-6 => End::Angle(ang_of(&info.center) - offset),
                     _ => End::Conform(vec![body], offset),
                 }
             }
@@ -685,7 +686,7 @@ pub fn revolve_with(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec)
             End::Conform(b, off) => (a0, TAU * (1.0 - 1e-4) + a0, false, Some((b, off))),
         }
     };
-    if s1 - s0 > TAU + 1e-9 {
+    if s1 - s0 > TAU + tol::ANGULAR {
         return Err(KernelError::InvalidParameter("The revolve turns more than a whole turn".into()));
     }
     let whole = whole || (s1 - s0) >= TAU - 1e-12;
@@ -757,7 +758,7 @@ pub fn revolve_with(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec)
 /// Whether a revolve axis leaves the sketch plane (or is parallel to it off it).
 fn axis_off_plane(profile: &Profile, axis: &Axis) -> bool {
     let n = profile.plane.normal.into_inner();
-    axis.dir.dot(&n).abs() > 1e-9 || (axis.origin - profile.plane.origin).dot(&n).abs() > 1e-6
+    axis.dir.dot(&n).abs() > tol::ANGULAR || (axis.origin - profile.plane.origin).dot(&n).abs() > 1e-6
 }
 
 /// A revolve about an axis off the sketch plane (SMLib's rotational sweep of a face about any
@@ -768,7 +769,7 @@ fn revolve_off_plane(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec
     let n = profile.plane.normal.into_inner();
     let z = spec.axis.dir.into_inner();
     let o = spec.axis.origin;
-    if z.cross(&n).norm() < 1e-9 {
+    if z.cross(&n).norm() < tol::ANGULAR {
         return Err(KernelError::InvalidParameter("The revolve axis must not be square to the sketch plane".into()));
     }
     let m = super::build::plane_map(&profile.plane, &V3::zeros(), 0.0);
@@ -786,7 +787,7 @@ fn revolve_off_plane(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec
         lo = lo.min(d);
         hi = hi.max(d);
     }
-    let eps = 1e-9 * size;
+    let eps = tol::REL * size;
     if hi > eps && lo < -eps {
         return Err(KernelError::InvalidParameter("The profile lies on both sides of the revolve axis".into()));
     }
@@ -796,7 +797,7 @@ fn revolve_off_plane(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec
     // x towards the profile's middle (any square to the axis when that is on it).
     let mid = pts.iter().fold(V3::zeros(), |s, p| s + (p - o)) / pts.len().max(1) as f64;
     let mut x = mid - z * mid.dot(&z);
-    if x.norm() < 1e-9 * size {
+    if x.norm() < tol::REL * size {
         x = n - z * n.dot(&z);
     }
     let x = x.normalize();
@@ -819,7 +820,7 @@ fn revolve_off_plane(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec
             (a0.min(a1), a0.max(a1))
         }
     };
-    if s1 - s0 > TAU + 1e-9 {
+    if s1 - s0 > TAU + tol::ANGULAR {
         return Err(KernelError::InvalidParameter("The revolve turns more than a whole turn".into()));
     }
     let whole = (s1 - s0) >= TAU - 1e-12;

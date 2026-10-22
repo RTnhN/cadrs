@@ -319,7 +319,7 @@ impl<'a> Rd<'a> {
     }
 }
 
-/// A body from bytes written by [`write`].
+/// A body from bytes written by [`write()`].
 pub fn read(bytes: &[u8]) -> Result<Body, String> {
     if bytes.len() < 28 || (&bytes[..8] != MAGIC && &bytes[..8] != MAGIC2) {
         return Err("not a native kernel body".into());

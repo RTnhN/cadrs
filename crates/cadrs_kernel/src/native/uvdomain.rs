@@ -5,6 +5,7 @@
 use super::classify::{in_face, InFace};
 use super::math::*;
 use super::surface::Surface;
+use super::tol;
 
 /// A face's trimmed domain: its uv polygons and their box.
 pub struct FaceDomain<'a> {
@@ -46,13 +47,13 @@ impl<'a> FaceDomain<'a> {
         if self.whole {
             let inb = |x: f64, (lo, hi): (f64, f64), periodic: bool| {
                 let x = if periodic { lo + (x - lo).rem_euclid(TAU) } else { x };
-                x >= lo - 1e-9 && x <= hi + 1e-9 && !(strict && (x - lo < 1e-9 || hi - x < 1e-9))
+                x >= lo - tol::ROUNDOFF && x <= hi + tol::ROUNDOFF && !(strict && (x - lo < tol::ROUNDOFF || hi - x < tol::ROUNDOFF))
             };
             return inb(u, self.ub, self.surf.u_periodic()) && inb(v, self.vb, self.surf.v_periodic());
         }
         let shifts = |x: f64, (lo, hi): (f64, f64), periodic: bool| -> Vec<f64> {
             let ks: &[f64] = if periodic { &[0.0, -1.0, 1.0, -2.0, 2.0] } else { &[0.0] };
-            ks.iter().map(|k| x + TAU * k).filter(|y| *y >= lo - 1e-9 && *y <= hi + 1e-9).collect()
+            ks.iter().map(|k| x + TAU * k).filter(|y| *y >= lo - tol::ROUNDOFF && *y <= hi + tol::ROUNDOFF).collect()
         };
         for u in shifts(u, self.ub, self.surf.u_periodic()) {
             for v in shifts(v, self.vb, self.surf.v_periodic()) {
@@ -93,7 +94,7 @@ fn segment_meets_box(a: &P2, b: &P2, u0: f64, u1: f64, v0: f64, v1: f64) -> bool
     let d = b - a;
     let (mut t0, mut t1) = (0.0f64, 1.0f64);
     for (p, q) in [(-d.x, a.x - u0), (d.x, u1 - a.x), (-d.y, a.y - v0), (d.y, v1 - a.y)] {
-        if p.abs() < 1e-300 {
+        if p.abs() < tol::TINY {
             if q < 0.0 {
                 return false;
             }

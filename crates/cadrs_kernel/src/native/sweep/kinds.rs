@@ -5,6 +5,7 @@ use crate::native::curve::Curve;
 use crate::native::math::*;
 use crate::native::profile::Piece;
 use crate::native::surface::Surface;
+use crate::native::tol;
 
 /// A straight sweep along the unit `dir`.
 pub struct Prism {
@@ -129,7 +130,7 @@ impl SweepKind for Revolve {
                         }),
                         across: Box::new(move |t| {
                             let r = r0 + k * t;
-                            Curve::Circle { c: P3::origin(), x: V3::x(), y: V3::y(), r: r.abs().max(1e-300) }
+                            Curve::Circle { c: P3::origin(), x: V3::x(), y: V3::y(), r: r.abs().max(tol::TINY) }
                         }),
                     })
                 } else {
@@ -226,7 +227,7 @@ impl Turn {
         let half = Frame { o: f.o, x: f.x * c + f.y * s, y: f.y * c - f.x * s, z: f.z };
         let in_half = pts.iter().all(|l| {
             let (x, y) = (l.x * c + l.y * s, l.y * c - l.x * s);
-            y.abs() <= 1e-9 * scale && x >= -1e-9 * scale
+            y.abs() <= tol::REL * scale && x >= -tol::REL * scale
         });
         let in_half = in_half
             && match c3 {
@@ -252,8 +253,8 @@ impl Turn {
                 across: Box::new(move |t| {
                     let q = q0 + dl * t;
                     let r = q.norm();
-                    let (x, y) = if r > 1e-300 { (V3::new(q.x / r, q.y / r, 0.0), V3::new(-q.y / r, q.x / r, 0.0)) } else { (V3::x(), V3::y()) };
-                    Curve::Circle { c: P3::origin(), x, y, r: r.max(1e-300) }
+                    let (x, y) = if r > tol::TINY { (V3::new(q.x / r, q.y / r, 0.0), V3::new(-q.y / r, q.x / r, 0.0)) } else { (V3::x(), V3::y()) };
+                    Curve::Circle { c: P3::origin(), x, y, r: r.max(tol::TINY) }
                 }),
             });
         }

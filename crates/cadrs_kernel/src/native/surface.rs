@@ -20,16 +20,29 @@ use super::curve::Curve;
 use super::math::*;
 use super::nurbs::{NurbsCurve, NurbsSurface, H};
 use crate::SurfaceKind;
+use super::tol;
 
+/// An exact surface with its parametrization `(u, v) ↦ point`. The analytic ones are placed by
+/// a frame `f` (origin `o`, axes `x`, `y`, `z`); u is the angle about `f.z` for the surfaces of
+/// revolution.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(missing_docs, reason = "the fields are the symbols of each variant's formula")]
 pub enum Surface {
+    /// `o + u·x + v·y`.
     Plane { f: Frame },
+    /// `o + r(cos u·x + sin u·y) + v·z`.
     Cylinder { f: Frame, r: f64 },
+    /// `o + (r + v sin a)(cos u·x + sin u·y) + v cos a·z`: radius `r` at v = 0, half-angle `a`.
     Cone { f: Frame, r: f64, a: f64 },
+    /// `o + r cos v(cos u·x + sin u·y) + r sin v·z`, v the latitude.
     Sphere { f: Frame, r: f64 },
+    /// `o + (rmaj + rmin cos v)(cos u·x + sin u·y) + rmin sin v·z`.
     Torus { f: Frame, rmaj: f64, rmin: f64 },
+    /// The meridian curve `m(v)` turned by u about `f.z`.
     Revolution { f: Frame, m: Curve },
+    /// `c(u) + v·d`: the curve swept along `d`.
     Extrusion { c: Curve, d: V3 },
+    /// A rational B-spline surface.
     Nurbs(Arc<NurbsSurface>),
 }
 
@@ -37,6 +50,7 @@ pub enum Surface {
 pub type D2 = [V3; 6];
 
 impl Surface {
+    /// The kind the API reports ([`SurfaceKind`]).
     pub fn kind(&self) -> SurfaceKind {
         match self {
             Surface::Plane { .. } => SurfaceKind::Plane,
@@ -48,6 +62,7 @@ impl Surface {
         }
     }
 
+    /// The placing frame of an analytic surface or a surface of revolution.
     pub fn frame(&self) -> Option<&Frame> {
         match self {
             Surface::Plane { f } | Surface::Cylinder { f, .. } | Surface::Cone { f, .. } | Surface::Sphere { f, .. } | Surface::Torus { f, .. } | Surface::Revolution { f, .. } => Some(f),
@@ -55,6 +70,7 @@ impl Surface {
         }
     }
 
+    /// Whether u closes with period 2π.
     pub fn u_periodic(&self) -> bool {
         match self {
             Surface::Plane { .. } | Surface::Nurbs(_) => false,
@@ -63,10 +79,12 @@ impl Surface {
         }
     }
 
+    /// Whether v closes with period 2π (a torus).
     pub fn v_periodic(&self) -> bool {
         matches!(self, Surface::Torus { .. })
     }
 
+    /// The point at (u, v).
     pub fn eval(&self, u: f64, v: f64) -> P3 {
         match self {
             Surface::Plane { f } => f.o + f.x * u + f.y * v,
@@ -79,6 +97,7 @@ impl Surface {
         }
     }
 
+    /// The point and the first derivatives along u and v.
     pub fn d1(&self, u: f64, v: f64) -> (P3, V3, V3) {
         if let Surface::Nurbs(n) = self {
             return n.ders1(u, v);
@@ -87,6 +106,7 @@ impl Surface {
         (P3::from(d[0]), d[1], d[2])
     }
 
+    /// The point and the first and second derivatives ([`D2`]).
     pub fn d2(&self, u: f64, v: f64) -> D2 {
         match self {
             Surface::Plane { f } => [(f.o + f.x * u + f.y * v).coords, f.x, f.y, V3::zeros(), V3::zeros(), V3::zeros()],
@@ -175,9 +195,8 @@ impl Surface {
                 let l = f.local(&p);
                 if l.z >= 0.0 { f.z } else { -f.z }
             }
-            Surface::Cone { f, a, .. } => {
+            Surface::Cone { .. } => {
                 // Apex: the average normal is along −z·sin a (outward-ish); use a nearby point.
-                let _ = (f, a);
                 let e = 1e-6;
                 let d = self.d2(u, v + e);
                 d[1].cross(&d[2]).normalize()
@@ -273,7 +292,7 @@ impl Surface {
                         let (c, d1, d2) = m.d2(t);
                         let r = c - q;
                         let df = d1.norm_squared() + r.dot(&d2);
-                        if df <= 1e-300 {
+                        if df <= tol::TINY {
                             return None;
                         }
                         let step = r.dot(&d1) / df;
@@ -359,9 +378,9 @@ impl Surface {
                 let (mut nu, mut nv) = (self.clamp_u(u + du, u0, u1), (v + dv).clamp(v0.min(v1), v1.max(v0)));
                 // Held at a u end (or a v end): the joint step's other half aimed past it, so
                 // step the free direction alone (the closest point along the boundary).
-                if nu != u + du && c > 1e-300 {
+                if nu != u + du && c > tol::TINY {
                     nv = (v - fv / c).clamp(v0.min(v1), v1.max(v0));
-                } else if nv != v + dv && a > 1e-300 {
+                } else if nv != v + dv && a > tol::TINY {
                     nu = self.clamp_u(u - fu / a, u0, u1);
                 }
                 // Only steps that bring the point closer (far from it the distance's Hessian
@@ -381,7 +400,7 @@ impl Surface {
                     tries += 1;
                 }
                 if tries == 30 {
-                    let (su, sv) = (d[1].norm_squared().max(1e-300), d[2].norm_squared().max(1e-300));
+                    let (su, sv) = (d[1].norm_squared().max(tol::TINY), d[2].norm_squared().max(tol::TINY));
                     (nu, nv) = (self.clamp_u(u - fu / su, u0, u1), (v - fv / sv).clamp(v0.min(v1), v1.max(v0)));
                     tries = 0;
                     while !closer(nu, nv) && tries < 30 {
@@ -415,10 +434,10 @@ impl Surface {
         }
         // Stopped on a v end of a surface closed in v (a polar patch's seam): the point may lie
         // just across the seam, so go on from the other end too.
-        if (v == v0 || v == v1) && (self.eval(u, v) - p).norm() > 1e-9 {
+        if (v == v0 || v == v1) && (self.eval(u, v) - p).norm() > tol::ROUNDOFF {
             let closed = (0..3).all(|i| {
                 let a = u0 + (u1 - u0) * (0.2 + 0.3 * i as f64);
-                (self.eval(a, v0) - self.eval(a, v1)).norm() < 1e-9
+                (self.eval(a, v0) - self.eval(a, v1)).norm() < tol::ROUNDOFF
             });
             if closed {
                 let (u2, v2) = newton(u, if v == v0 { v1 } else { v0 });
@@ -429,10 +448,10 @@ impl Surface {
         }
         // The same across a u seam (a B-spline tube closed in u but not periodic: Newton
         // clamped at one end of u where the point lies just past the other).
-        if (u == u0 || u == u1) && !self.u_periodic() && (self.eval(u, v) - p).norm() > 1e-9 {
+        if (u == u0 || u == u1) && !self.u_periodic() && (self.eval(u, v) - p).norm() > tol::ROUNDOFF {
             let closed = (0..3).all(|i| {
                 let b = v0 + (v1 - v0) * (0.2 + 0.3 * i as f64);
-                (self.eval(u0, b) - self.eval(u1, b)).norm() < 1e-9
+                (self.eval(u0, b) - self.eval(u1, b)).norm() < tol::ROUNDOFF
             });
             if closed {
                 let (u2, v2) = newton(if u == u0 { u1 } else { u0 }, v);
@@ -445,7 +464,7 @@ impl Surface {
         // the surface at a seam of a spline closed across it (the grid's basins there lie on
         // both sides): a grid four times as fine, else that grid point.
         let off_at_seam = || {
-            let closed_at = |a: P3, b: P3| (a - b).norm() < 1e-9;
+            let closed_at = |a: P3, b: P3| (a - b).norm() < tol::ROUNDOFF;
             let probe = [0.2, 0.5, 0.8];
             let at_u = (u == u0 || u == u1) && probe.iter().all(|f| closed_at(self.eval(u0, v0 + (v1 - v0) * f), self.eval(u1, v0 + (v1 - v0) * f)));
             let at_v = (v == v0 || v == v1) && probe.iter().all(|f| closed_at(self.eval(u0 + (u1 - u0) * f, v0), self.eval(u0 + (u1 - u0) * f, v1)));
@@ -483,7 +502,7 @@ impl Surface {
                 // A rectangle running past the range (a closed surface's p-curves continue
                 // across its seam) covers the whole range that way.
                 let ((ru0, ru1), (rv0, rv1)) = n.range();
-                let (eu, ev) = ((ru1 - ru0) * 1e-9, (rv1 - rv0) * 1e-9);
+                let (eu, ev) = ((ru1 - ru0) * tol::REL, (rv1 - rv0) * tol::REL);
                 let u = if u.0 < ru0 - eu || u.1 > ru1 + eu { (ru0, ru1) } else { u };
                 let v = if v.0 < rv0 - ev || v.1 > rv1 + ev { (rv0, rv1) } else { v };
                 for h in n.sub_net(u, v).iter().flatten() {
@@ -534,7 +553,7 @@ impl Surface {
             }
         }
         let e = auu * hu * hu / 8.0 + avv * hv * hv / 8.0;
-        bb.grow(e * (1.0 + 1e-9) + 1e-12)
+        bb.grow(e * (1.0 + tol::REL) + 1e-12)
     }
 
     /// The surface over the parameter rectangle u × v as an exact NURBS surface on the same
@@ -649,6 +668,7 @@ impl Surface {
         (self.eval(u, v) - p).norm()
     }
 
+    /// The surface moved by `m`, with the same parametrization.
     pub fn transformed(&self, m: &Affine) -> Surface {
         let s = m.scale();
         let tf = |f: &Frame| {
@@ -723,9 +743,9 @@ impl Surface {
     pub fn same_domain(&self, o: &Surface, tol: f64) -> Option<bool> {
         let par = |a: &V3, b: &V3| -> Option<bool> {
             let d = a.dot(b);
-            if d > 1.0 - 1e-9 {
+            if d > 1.0 - tol::ANGULAR {
                 Some(true)
-            } else if d < -1.0 + 1e-9 {
+            } else if d < -1.0 + tol::ANGULAR {
                 Some(false)
             } else {
                 None
@@ -777,7 +797,7 @@ impl Surface {
                 let _ = da;
                 let open_a = if aa.sin() > 0.0 { a.z } else { -a.z };
                 let open_b = if ab.sin() > 0.0 { b.z } else { -b.z };
-                if open_a.dot(&open_b) < 1.0 - 1e-9 || (aa.sin().abs() - ab.sin().abs()).abs() > 1e-9 {
+                if open_a.dot(&open_b) < 1.0 - tol::ANGULAR || (aa.sin().abs() - ab.sin().abs()).abs() > tol::ANGULAR {
                     return None;
                 }
                 Some(a.right_handed() == b.right_handed())
@@ -792,7 +812,7 @@ impl Surface {
                 let samples = |m: &Curve| -> Vec<f64> {
                     match (m.nurbs_range(), m) {
                         (Some((t0, t1)), _) => (0..=8).map(|i| t0 + (t1 - t0) * i as f64 / 8.0).collect(),
-                        (None, Curve::Line { d, .. }) => [-10.0, -3.0, -1.0, 0.0, 1.0, 3.0, 10.0].iter().map(|x| x / d.norm().max(1e-300)).collect(),
+                        (None, Curve::Line { d, .. }) => [-10.0, -3.0, -1.0, 0.0, 1.0, 3.0, 10.0].iter().map(|x| x / d.norm().max(tol::TINY)).collect(),
                         _ => (0..8).map(|i| TAU * i as f64 / 8.0).collect(),
                     }
                 };
@@ -825,7 +845,7 @@ fn sampled_kind(s: &Surface) -> bool {
 fn curve_samples(c: &Curve, n: usize) -> Vec<f64> {
     let (t0, t1) = match (c.nurbs_range(), c) {
         (Some(r), _) => r,
-        (None, Curve::Line { d, .. }) => (-10.0 / d.norm().max(1e-300), 10.0 / d.norm().max(1e-300)),
+        (None, Curve::Line { d, .. }) => (-10.0 / d.norm().max(tol::TINY), 10.0 / d.norm().max(tol::TINY)),
         _ => (0.0, TAU),
     };
     (0..=n).map(|i| t0 + (t1 - t0) * i as f64 / n as f64).collect()
@@ -855,7 +875,7 @@ fn coincidence_rows(s: &Surface) -> Vec<Vec<(f64, f64)>> {
                 }
                 bb.diagonal().max(1.0)
             };
-            let h = size / d.norm().max(1e-300);
+            let h = size / d.norm().max(tol::TINY);
             [-h, 0.0, h].iter().map(|&v| ts.iter().map(|&u| (u, v)).collect()).collect()
         }
         _ => Vec::new(),
@@ -878,7 +898,7 @@ fn points_on(a: &Surface, b: &Surface, tol: f64) -> Option<(usize, Option<P3>)> 
         let v = if v0.is_finite() { (v0, v1) } else { (-1e4, 1e4) };
         b.patch_bbox((u0, u1), v).grow(tol)
     });
-    let at_edge = |x: f64, lo: f64, hi: f64| lo.is_finite() && ((x - lo).abs() <= (hi - lo).abs() * 1e-9 || (x - hi).abs() <= (hi - lo).abs() * 1e-9);
+    let at_edge = |x: f64, lo: f64, hi: f64| lo.is_finite() && ((x - lo).abs() <= (hi - lo).abs() * tol::REL || (x - hi).abs() <= (hi - lo).abs() * tol::REL);
     let mut on = 0;
     let mut first: Option<P3> = None;
     for row in coincidence_rows(a) {
@@ -918,7 +938,7 @@ fn sampled_same_domain(a: &Surface, b: &Surface, tol: f64) -> Option<bool> {
         return None;
     }
     if let (Surface::Extrusion { d: da, .. }, Surface::Extrusion { d: db, .. }) = (a, b)
-        && da.normalize().cross(&db.normalize()).norm() > 1e-9
+        && da.normalize().cross(&db.normalize()).norm() > tol::ANGULAR
     {
         return None;
     }
@@ -953,7 +973,7 @@ fn sampled_same_domain(a: &Surface, b: &Surface, tol: f64) -> Option<bool> {
 pub fn meridian_off_plane(f: &Frame, m: &Curve) -> bool {
     let off = |p: &P3| {
         let l = f.local(p);
-        l.y.abs() > 1e-9 * (1.0 + l.norm())
+        l.y.abs() > tol::REL * (1.0 + l.norm())
     };
     let off_v = |d: &V3| f.y.dot(d).abs() > 1e-12 * d.norm();
     match m {
@@ -967,7 +987,7 @@ pub fn meridian_off_plane(f: &Frame, m: &Curve) -> bool {
 /// `v`: 0 for a meridian in the xz half plane.
 pub fn meridian_azimuth(f: &Frame, m: &Curve, v: f64) -> f64 {
     let l = f.local(&m.point(v));
-    if l.x.hypot(l.y) < 1e-300 { 0.0 } else { l.y.atan2(l.x) }
+    if l.x.hypot(l.y) < tol::TINY { 0.0 } else { l.y.atan2(l.x) }
 }
 
 /// [`Surface::project`] on a surface of revolution whose meridian is off its frame's xz plane:
@@ -989,7 +1009,7 @@ fn project_off_plane(f: &Frame, m: &Curve, p: &P3, hint: Option<(f64, f64)>) -> 
     let at = |v: f64| {
         let (q, d1, d2) = m.d2(v);
         let (q, d1, d2) = (f.local(&q), V3::new(d1.dot(&f.x), d1.dot(&f.y), d1.dot(&f.z)), V3::new(d2.dot(&f.x), d2.dot(&f.y), d2.dot(&f.z)));
-        let r = q.x.hypot(q.y).max(1e-300);
+        let r = q.x.hypot(q.y).max(tol::TINY);
         let r1 = (q.x * d1.x + q.y * d1.y) / r;
         let r2 = (d1.x * d1.x + d1.y * d1.y + q.x * d2.x + q.y * d2.y) / r - r1 * r1 / r;
         let (dr, dh) = (r - rho, q.z - h);
@@ -999,7 +1019,7 @@ fn project_off_plane(f: &Frame, m: &Curve, p: &P3, hint: Option<(f64, f64)>) -> 
         let mut v = s.clamp(a, b);
         for _ in 0..40 {
             let (_, g, gp) = at(v);
-            if !(gp.abs() > 1e-300) {
+            if !(gp.abs() > tol::TINY) {
                 return (v, false);
             }
             let nv = (v - g / gp).clamp(a, b);
@@ -1036,11 +1056,11 @@ fn project_off_plane(f: &Frame, m: &Curve, p: &P3, hint: Option<(f64, f64)>) -> 
         Curve::Line { o, d } => {
             // Where the line's height is the point's, and where its distance from the axis is.
             let (lo, ld) = (f.local(o), V3::new(d.dot(&f.x), d.dot(&f.y), d.dot(&f.z)));
-            if ld.z.abs() > 1e-300 {
+            if ld.z.abs() > tol::TINY {
                 starts.push((h - lo.z) / ld.z);
             }
             let (qa, qb, qc) = (ld.x * ld.x + ld.y * ld.y, 2.0 * (lo.x * ld.x + lo.y * ld.y), lo.x * lo.x + lo.y * lo.y - rho * rho);
-            if qa > 1e-300 {
+            if qa > tol::TINY {
                 let disc = qb * qb - 4.0 * qa * qc;
                 let sq = disc.max(0.0).sqrt();
                 starts.extend([(-qb - sq) / (2.0 * qa), (-qb + sq) / (2.0 * qa)]);

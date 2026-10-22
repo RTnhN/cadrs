@@ -8,6 +8,7 @@ use super::curve::Curve;
 use super::math::*;
 use super::nurbs::NurbsCurve;
 use crate::{unsourced_curve, Curve2, KernelError, Profile, Result};
+use super::tol;
 
 /// A piece of a loop: the curve (z = 0) between `t0 < t1`, run backwards when `rev`.
 #[derive(Debug, Clone, PartialEq)]
@@ -109,7 +110,7 @@ impl Piece {
         match (&self.c, &o.c) {
             (Curve::Line { o: a, d: da }, Curve::Line { o: b, d: db }) => {
                 let cr = da.x * db.y - da.y * db.x;
-                if cr.abs() > 1e-9 {
+                if cr.abs() > tol::ANGULAR {
                     return false;
                 }
                 let w = b - a;
@@ -246,7 +247,7 @@ pub fn piece_of(c: &Curve2, src: Src) -> Result<Piece> {
         Curve2::OffsetEllipseArc { center, major_radius, minor_radius, rotation, start, sweep, offset, .. } => {
             let (a, b) = (major_radius.abs(), minor_radius.abs());
             let rmin = a.min(b).powi(2) / a.max(b);
-            if offset <= -rmin + 1e-9 {
+            if offset <= -rmin + tol::ROUNDOFF {
                 return Err(KernelError::InvalidParameter(format!(
                     "The offset {:.3} reaches past the ellipse's smallest radius of curvature ({:.3})",
                     -offset, rmin
@@ -361,7 +362,7 @@ pub fn chain_loop(mut pieces: Vec<Piece>) -> Result<Loop2> {
     let mut out = vec![pieces.remove(0)];
     // The first piece's direction: keep it unless its end meets nothing but its start does.
     while !pieces.is_empty() {
-        let end = out.last().unwrap().end();
+        let Some(end) = out.last().map(Piece::end) else { break };
         let mut found = None;
         for (i, p) in pieces.iter().enumerate() {
             if (p.start() - end).norm() < JOIN {
@@ -381,8 +382,7 @@ pub fn chain_loop(mut pieces: Vec<Piece>) -> Result<Loop2> {
             None => {
                 if out.len() == 1 {
                     // Try the first piece the other way round.
-                    let p = out.pop().unwrap().reversed();
-                    out.push(p);
+                    out[0] = out[0].reversed();
                     let end = out[0].end();
                     if !pieces.iter().any(|p| (p.start() - end).norm() < JOIN || (p.end() - end).norm() < JOIN) {
                         return Err(KernelError::InvalidProfile("the loop is not closed".into()));
@@ -437,7 +437,7 @@ pub fn merge_regions(regions: &[Region2]) -> Result<Vec<MergedFace>> {
                     continue;
                 }
                 let t = p.param_of(v);
-                if t > p.t0 + 1e-9 && t < p.t1 - 1e-9 {
+                if t > p.t0 + tol::ROUNDOFF && t < p.t1 - tol::ROUNDOFF {
                     let q = p.c.point(t);
                     if (P2::new(q.x, q.y) - v).norm() < tol {
                         ts.push(t);
@@ -483,8 +483,7 @@ pub fn merge_regions(regions: &[Region2]) -> Result<Vec<MergedFace>> {
         let mut lp = vec![live[s].clone()];
         used[s] = true;
         let start = live[s].start();
-        loop {
-            let cur = lp.last().unwrap();
+        while let Some(cur) = lp.last() {
             let end = cur.end();
             if (end - start).norm() < tol {
                 break;
@@ -577,7 +576,7 @@ fn fuse_pieces(mut lp: Loop2, tol: f64) -> Loop2 {
             if a.src.region() == b.src.region() || !a.same_carrier(b, tol) || a.rev != b.rev {
                 continue;
             }
-            if a.dir(1.0).dot(&b.dir(0.0)) < 1.0 - 1e-9 {
+            if a.dir(1.0).dot(&b.dir(0.0)) < 1.0 - tol::ANGULAR {
                 continue;
             }
             let mut more = a.more.clone();
@@ -593,7 +592,7 @@ fn fuse_pieces(mut lp: Loop2, tol: f64) -> Loop2 {
                 Curve::Circle { .. } => {
                     let span = b.t1 - b.t0;
                     let (t0, t1) = if a.rev { (a.t0 - span, a.t1) } else { (a.t0, a.t1 + span) };
-                    if t1 - t0 > TAU + 1e-9 {
+                    if t1 - t0 > TAU + tol::ANGULAR {
                         continue;
                     }
                     Piece { c: a.c.clone(), t0, t1, rev: a.rev, src: a.src, more }
@@ -635,7 +634,7 @@ pub fn chain_loop_open(mut pieces: Vec<Piece>) -> Result<Loop2> {
     let p = pieces.remove(first);
     let mut out = vec![if flip { p.reversed() } else { p }];
     while !pieces.is_empty() {
-        let end = out.last().unwrap().end();
+        let Some(end) = out.last().map(Piece::end) else { break };
         let Some(i) = pieces.iter().position(|q| (q.start() - end).norm() < JOIN || (q.end() - end).norm() < JOIN) else {
             return Err(KernelError::InvalidProfile("the chain's curves are not connected".into()));
         };

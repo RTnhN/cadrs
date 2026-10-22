@@ -1,8 +1,11 @@
 //! Small numeric helpers for the native kernel: vector aliases, frames, tolerances, quadrature.
 
 use nalgebra::{Matrix3, Point2, Point3, Vector2, Vector3};
+use super::tol;
 
+/// A point in model space (mm).
 pub type P3 = Point3<f64>;
+/// A vector in model space.
 pub type V3 = Vector3<f64>;
 pub type P2 = Point2<f64>;
 pub type V2 = Vector2<f64>;
@@ -20,13 +23,18 @@ pub const TAU: f64 = std::f64::consts::TAU;
 /// (surfaces keep evaluating through them; faces flip their sense instead).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Frame {
+    /// The origin.
     pub o: P3,
+    /// The x axis (a unit vector).
     pub x: V3,
+    /// The y axis.
     pub y: V3,
+    /// The z axis.
     pub z: V3,
 }
 
 impl Frame {
+    /// The world frame: the origin and the coordinate axes.
     pub fn world() -> Self {
         Self { o: P3::origin(), x: V3::x(), y: V3::y(), z: V3::z() }
     }
@@ -43,6 +51,7 @@ impl Frame {
         Self { o, x, y, z }
     }
 
+    /// A right-handed frame with `z` along `z` and any x square to it.
     pub fn from_z(o: P3, z: V3) -> Self {
         Self::from_xz(o, any_perpendicular(&z), z)
     }
@@ -53,14 +62,17 @@ impl Frame {
         V3::new(d.dot(&self.x), d.dot(&self.y), d.dot(&self.z))
     }
 
+    /// Local coordinates → model point.
     pub fn world_point(&self, l: &V3) -> P3 {
         self.o + self.x * l.x + self.y * l.y + self.z * l.z
     }
 
+    /// A local vector in model space.
     pub fn world_vec(&self, l: &V3) -> V3 {
         self.x * l.x + self.y * l.y + self.z * l.z
     }
 
+    /// The frame moved by `m` (its axes scaled with it if `m` scales).
     pub fn transformed(&self, m: &Affine) -> Self {
         Self { o: m.point(&self.o), x: m.vector(&self.x), y: m.vector(&self.y), z: m.vector(&self.z) }
     }
@@ -80,23 +92,30 @@ pub fn any_perpendicular(v: &V3) -> V3 {
 /// An orthonormal (rotation or reflection) map plus a translation, optionally scaled.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Affine {
+    /// The linear part: a scaled rotation or reflection.
     pub m: Matrix3<f64>,
+    /// The translation.
     pub t: V3,
 }
 
 impl Affine {
+    /// The map that moves nothing.
     pub fn identity() -> Self {
         Self { m: Matrix3::identity(), t: V3::zeros() }
     }
+    /// A translation by `t`.
     pub fn translation(t: V3) -> Self {
         Self { m: Matrix3::identity(), t }
     }
+    /// The image of a point.
     pub fn point(&self, p: &P3) -> P3 {
         P3::from(self.m * p.coords + self.t)
     }
+    /// The image of a vector (the linear part only).
     pub fn vector(&self, v: &V3) -> V3 {
         self.m * v
     }
+    /// The determinant of the linear part: negative for a reflection.
     pub fn det(&self) -> f64 {
         self.m.determinant()
     }
@@ -240,14 +259,14 @@ pub fn point_in_polygon(p: &P2, pts: &[P2]) -> bool {
 pub fn seg_dist2(p: &P2, a: &P2, b: &P2) -> f64 {
     let ab = b - a;
     let l = ab.norm_squared();
-    let t = if l < 1e-300 { 0.0 } else { ((p - a).dot(&ab) / l).clamp(0.0, 1.0) };
+    let t = if l < tol::TINY { 0.0 } else { ((p - a).dot(&ab) / l).clamp(0.0, 1.0) };
     (a + ab * t - p).norm()
 }
 
 /// Solves a 2×2 system; None when singular.
 pub fn solve2(a: f64, b: f64, c: f64, d: f64, r0: f64, r1: f64) -> Option<(f64, f64)> {
     let det = a * d - b * c;
-    if det.abs() < 1e-300 {
+    if det.abs() < tol::TINY {
         return None;
     }
     Some(((r0 * d - b * r1) / det, (a * r1 - c * r0) / det))
@@ -255,8 +274,8 @@ pub fn solve2(a: f64, b: f64, c: f64, d: f64, r0: f64, r1: f64) -> Option<(f64, 
 
 /// Real roots of a·x² + b·x + c = 0.
 pub fn quadratic(a: f64, b: f64, c: f64) -> Vec<f64> {
-    if a.abs() < 1e-300 {
-        if b.abs() < 1e-300 {
+    if a.abs() < tol::TINY {
+        if b.abs() < tol::TINY {
             return vec![];
         }
         return vec![-c / b];
@@ -272,7 +291,7 @@ pub fn quadratic(a: f64, b: f64, c: f64) -> Vec<f64> {
     let q = -0.5 * (b + b.signum() * s);
     let q = if q == 0.0 { -0.5 * b } else { q };
     let mut r = vec![q / a];
-    if q.abs() > 1e-300 {
+    if q.abs() > tol::TINY {
         r.push(c / q);
     } else {
         r.push(-b / a - q / a);

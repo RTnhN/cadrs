@@ -17,6 +17,7 @@ use super::{Frames, SideGeo, SweepKind};
 use super::path::Seg;
 use crate::*;
 use std::sync::Arc;
+use crate::native::tol;
 
 /// Rotation-minimizing steps per segment (the frames between them are interpolated).
 const FINE: usize = 256;
@@ -155,7 +156,7 @@ fn fit_helix(pts: &[P3], tans: &[V3], tol: f64) -> Option<Helix> {
     let sol = mm.lu().solve(&rhs)?;
     let (cx, cy) = (sol.x / 2.0, sol.y / 2.0);
     let r = (sol.z + cx * cx + cy * cy).sqrt();
-    if !(r.is_finite() && r > 1e-9) {
+    if !(r.is_finite() && r > tol::ROUNDOFF) {
         return None;
     }
     let o0 = P3::from(fr.x * cx + fr.y * cy);
@@ -208,11 +209,14 @@ impl PathSweep {
         let arc: Vec<ArcTable> = segs.iter().map(ArcTable::new).collect();
         let lens: Vec<f64> = arc.iter().map(ArcTable::total).collect();
         let total: f64 = lens.iter().sum();
-        let mut cum = vec![0.0];
-        for l in &lens {
-            cum.push(cum.last().unwrap() + l / total);
+        let mut at = 0.0;
+        let mut cum: Vec<f64> = std::iter::once(0.0).chain(lens.iter().map(|l| {
+            at += l / total;
+            at
+        })).collect();
+        if let Some(end) = cum.last_mut() {
+            *end = 1.0;
         }
-        *cum.last_mut().unwrap() = 1.0;
         let fine = FINE * segs.len();
         let mut me = Self { plane, segs: segs.to_vec(), cum, arc, pts: vec![], rots: vec![], v: vec![], deg: 3, reach, helix: None, angles: vec![] };
         let pts: Vec<P3> = (0..=fine).map(|i| me.at(i as f64 / fine as f64)).collect();
@@ -228,7 +232,7 @@ impl PathSweep {
                 Some(h) => {
                     let th0 = h.angle_of(&pts[0], h.th0);
                     if std::env::var("CADRS_SWEEP_DEBUG").is_ok() {
-                        let end = pts.last().unwrap();
+                        let end = &pts[fine];
                         eprintln!("run of {} segments: th0 {th0} (end angle {}), start {:?}", segs.len(), h.angle_of(end, th0), pts[0]);
                     }
                     Some(Helix { th0, ..h })
@@ -256,51 +260,52 @@ impl PathSweep {
             }
             None => (pts, tans),
         };
-        match control {
-            SweepControl::None if me.helix.is_some() => {
-                let h = me.helix.unwrap();
+        match (control, me.helix) {
+            (SweepControl::None, Some(h)) => {
                 let mut prev = h.th0;
                 for p in &pts {
                     prev = h.angle(p, prev);
                     frames.push(nalgebra::Rotation3::from_axis_angle(&nalgebra::Unit::new_normalize(h.a), prev - h.th0));
                 }
             }
-            SweepControl::KeepOrientation => {}
-            SweepControl::LockDirection(d) => {
+            (SweepControl::KeepOrientation, _) => {}
+            (SweepControl::LockDirection(d), _) => {
                 for t in &tans {
                     let r = d.into_inner() - t * d.dot(t);
-                    if r.norm() < 1e-9 {
+                    if r.norm() < tol::ANGULAR {
                         return Err(KernelError::InvalidParameter("The sweep path runs along the locked direction".into()));
                     }
                     frames.push(frame_of(t, &r));
                 }
             }
-            SweepControl::None if me.frenet(&tans, any_spread).is_some() => {
+            (SweepControl::None, None) => match me.frenet(&tans, any_spread) {
                 // A path that bends everywhere (a helix): its principal normal, so the profile
                 // keeps its place relative to the curve (a thread stays on its cylinder).
-                for (t, n) in tans.iter().zip(me.frenet(&tans, any_spread).unwrap()) {
-                    frames.push(frame_of(t, &n));
-                }
-            }
-            SweepControl::None => {
-                // Double reflection (Wang, Jüttler, Zheng & Liu 2008).
-                let mut r = square_to(&tans[0]);
-                frames.push(frame_of(&tans[0], &r));
-                for i in 0..fine {
-                    let v1 = pts[i + 1] - pts[i];
-                    let c1 = v1.norm_squared();
-                    if c1 < 1e-24 {
-                        frames.push(frame_of(&tans[i + 1], &r));
-                        continue;
+                Some(normals) => {
+                    for (t, n) in tans.iter().zip(normals) {
+                        frames.push(frame_of(t, &n));
                     }
-                    let rl = r - v1 * (2.0 / c1) * v1.dot(&r);
-                    let tl = tans[i] - v1 * (2.0 / c1) * v1.dot(&tans[i]);
-                    let v2 = tans[i + 1] - tl;
-                    let c2 = v2.norm_squared();
-                    r = if c2 < 1e-24 { rl } else { rl - v2 * (2.0 / c2) * v2.dot(&rl) };
-                    frames.push(frame_of(&tans[i + 1], &r));
                 }
-            }
+                None => {
+                    // Double reflection (Wang, Jüttler, Zheng & Liu 2008).
+                    let mut r = square_to(&tans[0]);
+                    frames.push(frame_of(&tans[0], &r));
+                    for i in 0..fine {
+                        let v1 = pts[i + 1] - pts[i];
+                        let c1 = v1.norm_squared();
+                        if c1 < 1e-24 {
+                            frames.push(frame_of(&tans[i + 1], &r));
+                            continue;
+                        }
+                        let rl = r - v1 * (2.0 / c1) * v1.dot(&r);
+                        let tl = tans[i] - v1 * (2.0 / c1) * v1.dot(&tans[i]);
+                        let v2 = tans[i + 1] - tl;
+                        let c2 = v2.norm_squared();
+                        r = if c2 < 1e-24 { rl } else { rl - v2 * (2.0 / c2) * v2.dot(&rl) };
+                        frames.push(frame_of(&tans[i + 1], &r));
+                    }
+                }
+            },
         }
         let rots: Vec<nalgebra::UnitQuaternion<f64>> = if frames.is_empty() {
             vec![nalgebra::UnitQuaternion::identity(); fine + 1]
@@ -362,7 +367,7 @@ impl PathSweep {
     fn rail_error(&self, n: usize) -> f64 {
         let (x, y) = (self.plane.x_dir.into_inner(), self.plane.y_dir().into_inner());
         let p0 = self.pts[0];
-        let r = self.reach.max(1e-9);
+        let r = self.reach.max(tol::ROUNDOFF);
         let v: Vec<f64> = (0..=n).map(|k| k as f64 / n as f64).collect();
         let deg = self.deg.min(n);
         let mut worst: f64 = 0.0;
@@ -400,11 +405,11 @@ impl PathSweep {
             let g = &self.segs[k];
             let (_, d1, d2) = g.c.d2(travel_t(g, f));
             let l2 = d1.norm_squared();
-            if l2 < 1e-300 {
+            if l2 < tol::TINY {
                 return None;
             }
             let kn = (d2 - d1 * (d1.dot(&d2) / l2)) / l2;
-            if kn.norm() * size.max(1e-9) < 1e-3 {
+            if kn.norm() * size.max(tol::ROUNDOFF) < 1e-3 {
                 return None;
             }
             (kmin, kmax) = (kmin.min(kn.norm()), kmax.max(kn.norm()));
@@ -553,11 +558,11 @@ impl ArcTable {
         let (la, lb) = (self.len[i], self.len[i + 1]);
         let h = lb - la;
         let (fa, fb) = (i as f64 / ARC_STEPS as f64, (i + 1) as f64 / ARC_STEPS as f64);
-        if !(h > 1e-300) {
+        if !(h > tol::TINY) {
             return fa;
         }
         let x = ((len - la) / h).clamp(0.0, 1.0);
-        let slope = |v: f64| if v > 1e-300 { h / v } else { fb - fa };
+        let slope = |v: f64| if v > tol::TINY { h / v } else { fb - fa };
         let (ma, mb) = (slope(self.speed[i]), slope(self.speed[i + 1]));
         let (x2, x3) = (x * x, x * x * x);
         let f = (2.0 * x3 - 3.0 * x2 + 1.0) * fa + (x3 - 2.0 * x2 + x) * ma + (-2.0 * x3 + 3.0 * x2) * fb + (x3 - x2) * mb;
@@ -587,10 +592,8 @@ impl SweepKind for PathSweep {
         let (ua, ub) = if (n0.point(n0.range().0) - piece.c.point(piece.t0)).norm() <= (n0.point(n0.range().0) - piece.c.point(piece.t1)).norm() { (ua, ub) } else { (ub, ua) };
         let linear = n0.degree == 1 && !n0.is_rational() && n0.cps.len() == 2;
         let surf = Surface::Nurbs(Arc::new(sk));
-        let s_a = surf.clone();
         let c = piece.c.clone();
         let (t0, t1) = (piece.t0, piece.t1);
-        let ends: Vec<Affine> = vec![self.place(0.0), self.place(1.0)];
         let n0c = n0.clone();
         Some(SideGeo {
             surf,
@@ -600,7 +603,6 @@ impl SweepKind for PathSweep {
                     let k = (ub - ua) / (t1 - t0);
                     return super::line2(P2::new(ua - t0 * k, v), V2::new(k, 0.0));
                 }
-                let _ = (&s_a, &ends);
                 iso_pcurve(&n0c, &c, t0, t1, ua, ub, v)
             }),
             across: Box::new(move |t| {
@@ -630,7 +632,7 @@ fn iso_pcurve(n0: &NurbsCurve, c: &Curve, t0: f64, t1: f64, ua: f64, ub: f64, v:
             let r = q - p;
             let f = r.dot(&d1);
             let df = d1.norm_squared() + r.dot(&d2);
-            if df.abs() < 1e-300 {
+            if df.abs() < tol::TINY {
                 break;
             }
             let step = f / df;
@@ -696,7 +698,7 @@ pub fn sweep_seg(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, segs
     let t0 = std::time::Instant::now();
     let kind = PathSweep::new(plane, segs, frames, reach, helix)?;
     let t1 = t0.elapsed();
-    if (kind.pts[1] - kind.pts[0]).dot(&plane.normal).abs() < 1e-9 * (kind.pts[1] - kind.pts[0]).norm().max(1e-300) {
+    if (kind.pts[1] - kind.pts[0]).dot(&plane.normal).abs() < tol::REL * (kind.pts[1] - kind.pts[0]).norm().max(tol::TINY) {
         return Err(KernelError::InvalidParameter("The sweep path runs in the profile's plane".into()));
     }
     let mut b = super::sweep_full(faces, chains, &kind, 0.0, 1.0, false, solid)?;

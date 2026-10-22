@@ -71,7 +71,7 @@ pub struct BoolOptions {
     /// Faces on one surface are merged after the run (true by default); OCCT's booleans (the
     /// DRAW harness's) keep them apart.
     pub merge_coplanar: bool,
-    /// The most work a run may do before it fails ([`KernelError::OperationFailed`]): the
+    /// The most work a run may do before it fails ([`KernelError::BudgetExhausted`]): the
     /// surface intersections' cell pairs and traced points, each split face's arcs squared,
     /// and the classified and assembled faces (counts of the inputs, so the same run always
     /// spends the same). [`DEFAULT_WORK_BUDGET`] by default; a caller may pass less.
@@ -107,10 +107,10 @@ struct Work {
 
 impl Work {
     /// Counts `w` more; fails once the budget is spent.
-    fn spend(&mut self, w: u64, stage: &str) -> Result<()> {
+    fn spend(&mut self, w: u64, stage: &'static str) -> Result<()> {
         self.done = self.done.saturating_add(w);
         if self.done > self.budget {
-            return Err(KernelError::OperationFailed(format!("the boolean ran out of its work budget ({} units) in its {stage} stage", self.budget)));
+            return Err(KernelError::BudgetExhausted { stage, why: format!("the boolean ran out of its work budget ({} units) in its {stage} stage", self.budget) });
         }
         Ok(())
     }
@@ -622,9 +622,10 @@ pub fn boolean_bodies_with(a: &Body, b: &Body, op: BoolOp, opts: BoolOptions) ->
     };
     let at = |tol: f64| RunOpts { tol, flush: opts.flush, merge_coplanar: opts.merge_coplanar, work_budget: opts.work_budget };
     let first = run(a, b, Mode::Bool(op), at(opts.tol.point));
-    // (Retried: an open shell, a face that doesn't close, an invalid result.)
+    // (Retried: an open shell, a face that doesn't close, an invalid result: `BooleanFailed`, and
+    // the failures of the steps a run calls that say so.)
     let broken = |m: &str| ["open shell", "left", "doesn't close", "is invalid"].iter().any(|w| m.contains(w));
-    if !matches!(&first, Err(KernelError::OpenResult(_))) && !matches!(&first, Err(KernelError::OperationFailed(m)) if broken(m)) {
+    if !matches!(&first, Err(KernelError::OpenResult(_))) && !matches!(&first, Err(e) if e.is_failure() && broken(&e.message())) {
         return first;
     }
     for t in opts.tol.retries.into_iter().filter(|_| std::env::var_os("CADRS_DEBUG_NO_RETRY").is_none()) {
@@ -1809,7 +1810,7 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
     // A face whose loop's p-curves don't meet in (u, v) can't be closed: an error, never an
     // invalid body.
     if let Some(why) = uv_gap(&out) {
-        return Err(KernelError::OperationFailed(format!("the boolean built a face that doesn't close: {why}")));
+        return Err(KernelError::BooleanFailed { stage: "face closure", why: format!("the boolean built a face that doesn't close: {why}") });
     }
     // Nor any other invalid body ([`Body::check`]; the volumes of the solids that hold faces on
     // one surface known from above, the others' shells oriented by ray parity).
@@ -1819,7 +1820,7 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
             Some(format!("solid {si} encloses a volume of {v:.3e} (its faces point in)"))
         });
         if let Some(why) = why {
-            return Err(KernelError::OperationFailed(format!("the boolean's result is invalid: {why}")));
+            return Err(KernelError::BooleanFailed { stage: "validity", why: format!("the boolean's result is invalid: {why}") });
         }
     }
     // Solids in, faces out but no solid: some piece went missing.

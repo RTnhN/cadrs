@@ -272,36 +272,6 @@ fn read_curve2d(t: &mut Tok) -> R<GCurve> {
     })
 }
 
-/// Reads past a 2D curve.
-#[allow(dead_code)]
-fn skip_curve2d(t: &mut Tok) -> R<()> {
-    match t.i()? {
-        1 => skip(t, 4),
-        2 | 4 => skip(t, 7),
-        3 | 5 => skip(t, 8),
-        6 => {
-            let rational = t.i()? != 0;
-            let degree = degree(t)?;
-            skip(t, (degree + 1) * (2 + rational as usize))
-        }
-        7 => {
-            let rational = t.i()? != 0;
-            let _periodic = t.i()?;
-            let (_degree, np, nk) = (t.u()?, t.u()?, t.u()?);
-            skip(t, np * (2 + rational as usize) + nk * 2)
-        }
-        8 => {
-            skip(t, 2)?;
-            skip_curve2d(t)
-        }
-        9 => {
-            skip(t, 1)?;
-            skip_curve2d(t)
-        }
-        k => Err(format!("unknown 2D curve type {k}")),
-    }
-}
-
 fn skip(t: &mut Tok, n: usize) -> R<()> {
     for _ in 0..n {
         t.next()?;
@@ -1306,9 +1276,12 @@ impl Direct<'_> {
 /// edges in any order); at a fork, another edge before going straight back along the same one
 /// (a seam's two uses). None when they don't close up.
 fn chain(mut rest: Vec<Coedge>, b: &Body) -> Option<Vec<Coedge>> {
+    if rest.is_empty() {
+        return None;
+    }
     let mut out = vec![rest.remove(0)];
     while !rest.is_empty() {
-        let last = out.last().unwrap();
+        let last = out.last()?;
         let end = b.co_end(last);
         let i = rest
             .iter()
@@ -1318,7 +1291,7 @@ fn chain(mut rest: Vec<Coedge>, b: &Body) -> Option<Vec<Coedge>> {
             .map(|(i, _)| i)?;
         out.push(rest.remove(i));
     }
-    (b.co_end(out.last().unwrap()) == b.co_start(&out[0])).then_some(out)
+    (b.co_end(out.last()?) == b.co_start(&out[0])).then_some(out)
 }
 
 /// Shifts each p-curve of a loop by whole periods to start where the one before ended (loops

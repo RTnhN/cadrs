@@ -4,6 +4,7 @@
 //! sewing and classification visit only nearby entities instead of all of them.
 
 use super::math::*;
+use super::tol;
 
 #[derive(Debug, Clone)]
 enum Node {
@@ -158,7 +159,7 @@ impl Bvh {
 pub fn ray_box(bb: &Bbox, o: &P3, d: &V3, t0: f64, t1: f64) -> bool {
     let (mut lo, mut hi) = (t0, t1);
     for k in 0..3 {
-        if d[k].abs() < 1e-300 {
+        if d[k].abs() < tol::TINY {
             if o[k] < bb.min[k] || o[k] > bb.max[k] {
                 return false;
             }

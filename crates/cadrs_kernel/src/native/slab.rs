@@ -433,11 +433,11 @@ pub fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
         issues = body.check();
     }
     if !issues.is_empty() || body.solids.is_empty() {
-        return Err(KernelError::OperationFailed(format!("the face's slab isn't valid: {}", issues.first().map_or("no solid", |s| s.as_str()))));
+        return Err(KernelError::InvalidResult { op: "slab", why: format!("the face's slab isn't valid: {}", issues.first().map_or("no solid", |s| s.as_str())) });
     }
     let volume = super::mass::body_mass(&body).volume;
     if volume <= 0.0 {
-        return Err(KernelError::OperationFailed("the face's slab has no volume".into()));
+        return Err(KernelError::InvalidResult { op: "slab", why: "the face's slab has no volume".into() });
     }
     // Its volume the prismoid's, d × the mean of its two ends' areas, but for the faces' curving
     // (exact on a cylinder, 4/3 of it at most on a sphere offset by its radius): far off, the
@@ -445,7 +445,7 @@ pub fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
     let area = |k: usize| map.get(ends[k]).copied().flatten().map_or(0.0, |x| super::mass::face_area(&body, x).0.abs());
     let prismoid = d.abs() * 0.5 * (area(0) + area(1));
     if !(volume < 2.0 * prismoid && volume > 0.5 * prismoid) {
-        return Err(KernelError::OperationFailed(format!("the face's slab encloses {volume:.6e}, not about its ends' {prismoid:.6e}")));
+        return Err(KernelError::InvalidResult { op: "slab", why: format!("the face's slab encloses {volume:.6e}, not about its ends' {prismoid:.6e}") });
     }
     Ok(body)
 }

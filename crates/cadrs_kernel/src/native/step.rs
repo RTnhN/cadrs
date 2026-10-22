@@ -47,6 +47,7 @@ use super::surface::Surface;
 use super::topo::*;
 use super::xbuild::{expand_knots, knot_mults, XBuilder, XFace};
 use crate::Motion;
+use super::tol;
 
 // ---------------------------------------------------------------------------------------------
 // Parsing
@@ -554,7 +555,7 @@ impl<'a> Geo<'a> {
         let c = self.coords(r.params(), 1)?;
         let v = V3::new(c.first().copied().unwrap_or(0.0), c.get(1).copied().unwrap_or(0.0), c.get(2).copied().unwrap_or(0.0));
         let n = v.norm();
-        if n < 1e-300 {
+        if n < tol::TINY {
             return Err(format!("#{id}: a zero direction"));
         }
         Ok(v / n)
@@ -895,7 +896,7 @@ impl Geo<'_> {
         let r = self.rec(id)?;
         let ps = r.params();
         let ends = |c: &Curve, a: P3, b: P3| {
-            let closed = (a - b).norm() <= 1e-9 * (1.0 + a.coords.norm()) && c.is_periodic();
+            let closed = (a - b).norm() <= tol::REL * (1.0 + a.coords.norm()) && c.is_periodic();
             WireSeg { c: c.clone(), a, b, closed }
         };
         if r.is_complex() {
@@ -903,7 +904,7 @@ impl Geo<'_> {
                 let c = self.curve(id)?;
                 let (t0, t1) = c.nurbs_range().unwrap_or((0.0, 1.0));
                 let (a, b) = (c.point(t0), c.point(t1));
-                segs.push(WireSeg { closed: (a - b).norm() <= 1e-9 * (1.0 + a.coords.norm()), c, a, b });
+                segs.push(WireSeg { closed: (a - b).norm() <= tol::REL * (1.0 + a.coords.norm()), c, a, b });
             }
             return Ok(());
         }
@@ -950,7 +951,7 @@ impl Geo<'_> {
                 let c = self.curve(id)?;
                 let (t0, t1) = c.nurbs_range().ok_or_else(|| format!("#{id}: an unbounded curve in a curve set"))?;
                 let (a, b) = (c.point(t0), c.point(t1));
-                segs.push(WireSeg { closed: (a - b).norm() <= 1e-9 * (1.0 + a.coords.norm()), c, a, b });
+                segs.push(WireSeg { closed: (a - b).norm() <= tol::REL * (1.0 + a.coords.norm()), c, a, b });
             }
         }
         Ok(())
@@ -1517,7 +1518,7 @@ fn build_shapes(m: &mut Model, shapes: &[(u64, u64, Affine)], warnings: &mut Vec
             warnings.push(e);
         }
         let size = segs.iter().flat_map(|s| [s.a, s.b]).chain(pts.iter().copied()).map(|p| p.coords.amax().max(-p.coords.min())).fold(1.0, f64::max);
-        let tol = m.rep_uncertainty(*rep).unwrap_or(1e-7 * size).max(1e-9 * size);
+        let tol = m.rep_uncertainty(*rep).unwrap_or(1e-7 * size).max(tol::REL * size);
         let w = wire_body(&segs, &pts, tol);
         wires.append(&if *at == Affine::identity() { w } else { w.transformed(at) });
     }

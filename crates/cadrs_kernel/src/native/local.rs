@@ -431,7 +431,7 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
             let p = singular_points(&surfs[f]).into_iter().min_by(|x, y| (x - old).norm().total_cmp(&(y - old).norm()))?;
             fs.iter().all(|s| s.distance(&p) < 1e-7).then_some(p)
         };
-        let p = on_pole().or(on_line).or_else(on_seam).or_else(on_kept).or_else(|| meet(&fs, b.verts[v].p)).ok_or_else(|| KernelError::OperationFailed("the moved faces no longer meet at a corner".into()))?;
+        let p = on_pole().or(on_line).or_else(on_seam).or_else(on_kept).or_else(|| meet(&fs, b.verts[v].p)).ok_or_else(|| KernelError::InvalidGeometry { op: "local operation", why: "the moved faces no longer meet at a corner".into() })?;
         out.verts[v].p = p;
     }
     // Edges.
@@ -525,9 +525,9 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
             if std::env::var_os("CADRS_DRAFT_DEBUG").is_some() {
                 eprintln!("edge {e} faces {fs:?} ({:?} × {:?}): {:?}", sa.kind(), sb.kind(), best.as_ref().map(|b| (b.0, format!("{:?}", b.1).chars().take(12).collect::<String>())));
             }
-            let (d, c) = best.ok_or_else(|| KernelError::OperationFailed("moved faces no longer meet along an edge".into()))?;
+            let (d, c) = best.ok_or_else(|| KernelError::InvalidGeometry { op: "local operation", why: "moved faces no longer meet along an edge".into() })?;
             if d > 1e-6 {
-                return Err(KernelError::OperationFailed("moved faces no longer meet along an edge".into()));
+                return Err(KernelError::InvalidGeometry { op: "local operation", why: "moved faces no longer meet along an edge".into() });
             }
             c
         } else {
@@ -768,7 +768,7 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
                 }
             }
         }
-        return Err(KernelError::OperationFailed(format!("the moved faces don't close: {}", errs[0])));
+        return Err(KernelError::InvalidResult { op: "local operation", why: format!("the moved faces don't close: {}", errs[0]) });
     }
     Ok(out)
 }
@@ -805,10 +805,10 @@ pub fn replace_faces(k: &mut NativeKernel, body: BodyId, faces: &[FaceReplacemen
     }
     let errs = out.check();
     if let Some(e) = errs.first() {
-        return Err(KernelError::OperationFailed(format!("the replaced faces don't close: {e}")));
+        return Err(KernelError::InvalidResult { op: "replace faces", why: format!("the replaced faces don't close: {e}") });
     }
     if super::mass::body_mass(&out).volume <= 0.0 {
-        return Err(KernelError::OperationFailed("the replaced faces turn the body inside out".into()));
+        return Err(KernelError::InvalidResult { op: "replace faces", why: "the replaced faces turn the body inside out".into() });
     }
     let nf = out.faces.len();
     let id = k.insert(out);
@@ -1385,7 +1385,7 @@ fn prism_offset(b: &Body, dist: &[f64]) -> Option<Result<Body>> {
     loop {
         let n_live = live.len();
         if n_live < 3 {
-            return Some(Err(KernelError::OperationFailed("the offset profile vanishes".into())));
+            return Some(Err(KernelError::TooLarge { op: "offset", why: "the offset profile vanishes".into() }));
         }
         // Adjacent parallel sides: the one moved past the other vanishes.
         let mut drop: Option<usize> = None;
@@ -1425,7 +1425,7 @@ fn prism_offset(b: &Body, dist: &[f64]) -> Option<Result<Body>> {
     let n_live = live.len();
     let poly: Vec<P2> = (0..n_live).filter_map(|i| meet(&live[(i + n_live - 1) % n_live], &live[i])).collect();
     if poly.len() != n_live {
-        return Some(Err(KernelError::OperationFailed("the offset profile doesn't close".into())));
+        return Some(Err(KernelError::InvalidGeometry { op: "offset", why: "the offset profile doesn't close".into() }));
     }
     // Sides that shrank to nothing exactly (three or more meeting at one point): their
     // corners are one.
@@ -1437,18 +1437,18 @@ fn prism_offset(b: &Body, dist: &[f64]) -> Option<Result<Body>> {
     }
     let n_live = poly.len();
     if n_live < 3 {
-        return Some(Err(KernelError::OperationFailed("the offset profile vanishes".into())));
+        return Some(Err(KernelError::TooLarge { op: "offset", why: "the offset profile vanishes".into() }));
     }
     let (z0, z1) = (-dist[bot], (b.verts[b.edges[b.faces[top].loops[0][0].edge].v[0]].p - o).dot(&n) + dist[top]);
     if z1 - z0 <= 1e-9 {
-        return Some(Err(KernelError::OperationFailed("the offset prism has no height".into())));
+        return Some(Err(KernelError::TooLarge { op: "offset", why: "the offset prism has no height".into() }));
     }
     let plane = Plane { origin: o + n * z0, x_dir: nalgebra::Unit::new_normalize(fr.x), normal: nalgebra::Unit::new_normalize(n) };
     let curves = (0..n_live).map(|i| Curve2::Line { a: poly[i], b: poly[(i + 1) % n_live], source: None }).collect();
     let prof = Profile::new(plane, vec![Region { outer: Loop { curves }, holes: vec![], source: None }]);
     let mut kk = NativeKernel::new();
     Some(crate::Kernel::extrude(&mut kk, &prof, Extent::Blind(z1 - z0)).and_then(|r| {
-        let [id] = r.bodies[..] else { return Err(KernelError::OperationFailed("the offset prism isn't one body".into())) };
+        let [id] = r.bodies[..] else { return Err(KernelError::InvalidResult { op: "offset", why: "the offset prism isn't one body".into() }) };
         Ok((**kk.get(id)?).clone())
     }))
 }
@@ -1473,7 +1473,7 @@ pub fn offset(k: &mut NativeKernel, body: BodyId, spec: &OffsetSpec) -> Result<O
     let grow = dist.iter().any(|d| *d > 0.0);
     let shrink = dist.iter().any(|d| *d < 0.0);
     if (grow && !shrink && v1 < v0 - 1e-9) || (shrink && !grow && v1 > v0 + 1e-9) || v1 <= 0.0 {
-        return Err(KernelError::OperationFailed("the offset turned the body inside out".into()));
+        return Err(KernelError::TooLarge { op: "offset", why: "the offset turned the body inside out".into() });
     }
     // History: each face the offset of input faces (modified) or a round of an edge or vertex
     // (generated); an input face with no offset left (vanished, or inside the rounds) deleted.
@@ -1599,7 +1599,7 @@ pub fn draft(k: &mut NativeKernel, body: BodyId, spec: &DraftSpec) -> Result<OpR
                 let h0 = (spec.neutral - fr.o).dot(&fr.z);
                 let r0 = r + h0 / a0.cos() * a0.sin();
                 if r0 <= 0.0 {
-                    return Err(KernelError::OperationFailed("the cone's apex is on the far side of the neutral plane".into()));
+                    return Err(KernelError::InvalidGeometry { op: "draft", why: "the cone's apex is on the far side of the neutral plane".into() });
                 }
                 let outward = f.sense == fr.right_handed();
                 let s_pull = fr.z.dot(&pull).signum();

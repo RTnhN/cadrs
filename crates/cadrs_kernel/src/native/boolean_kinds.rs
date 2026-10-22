@@ -295,7 +295,7 @@ fn sheet_union(a: &Body, b: &Body) -> Result<BoolOut> {
     }
     let ef = out.edge_faces();
     if (0..out.edges.len()).any(|e| !out.edges[e].degenerate && ef[e].len() > 2) {
-        return Err(KernelError::OperationFailed("a sheet of the union has three or more faces meeting at an edge (not a manifold sheet)".into()));
+        return Err(KernelError::BooleanFailed { stage: "sheet union", why: "a sheet of the union has three or more faces meeting at an edge (not a manifold sheet)".into() });
     }
     // Faces split along a crossing stay split.
     let split: std::collections::HashSet<(usize, usize)> = (0..out.edges.len()).filter(|&e| crossing[e] && ef[e].len() == 2).map(|e| (ef[e][0].min(ef[e][1]), ef[e][0].max(ef[e][1]))).collect();

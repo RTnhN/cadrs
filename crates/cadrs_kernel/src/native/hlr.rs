@@ -44,6 +44,7 @@ use super::topo::Body;
 use super::uvdomain::FaceDomain as Domain;
 use crate::projection::{ProjClass, ProjCurve, ProjEdge, ProjSource, ProjVisibility, Projection, ProjectOptions, ViewFrame};
 use crate::{EdgeId, FaceId};
+use super::tol;
 
 /// A body to project and its faces' uv polygons (`classify::face_polygons`, cached by the
 /// kernel's entry).
@@ -139,8 +140,8 @@ impl Src {
             Geo::Poly(_) => {
                 let mut v = vec![a];
                 let mut k = a.floor() + 1.0;
-                while k < b - 1e-9 {
-                    if k > a + 1e-9 {
+                while k < b - tol::ROUNDOFF {
+                    if k > a + tol::ROUNDOFF {
                         v.push(k);
                     }
                     k += 1.0;
@@ -167,10 +168,10 @@ fn shape_of(frame: &ViewFrame, c: &Curve, t0: f64, t1: f64) -> (Shape, Vec<f64>,
         let mut at_start = false;
         for k in -6..=6 {
             let t = ts + PI * k as f64;
-            if t > t0 + 1e-9 && t < t1 - 1e-9 {
+            if t > t0 + tol::ROUNDOFF && t < t1 - tol::ROUNDOFF {
                 turns.push(t);
             }
-            if (wrap(t - t0 + PI, 0.0, TAU) - PI).abs() < 1e-9 {
+            if (wrap(t - t0 + PI, 0.0, TAU) - PI).abs() < tol::ANGULAR {
                 at_start = true;
             }
         }
@@ -182,9 +183,9 @@ fn shape_of(frame: &ViewFrame, c: &Curve, t0: f64, t1: f64) -> (Shape, Vec<f64>,
         Curve::Circle { c, x, y, r } => {
             let n = x.cross(y).normalize();
             let nd = n.dot(&dir);
-            if nd.abs() > 1.0 - 1e-9 {
+            if nd.abs() > 1.0 - tol::ANGULAR {
                 (Shape::Arc { center: frame.to_2d(c), radius: *r }, vec![], false)
-            } else if nd.abs() < 1e-9 {
+            } else if nd.abs() < tol::ANGULAR {
                 edge_on(n, x * *r, y * *r)
             } else {
                 (Shape::Other, vec![], false)
@@ -192,7 +193,7 @@ fn shape_of(frame: &ViewFrame, c: &Curve, t0: f64, t1: f64) -> (Shape, Vec<f64>,
         }
         Curve::Ellipse { x, y, a, b, .. } => {
             let n = x.cross(y).normalize();
-            if n.dot(&dir).abs() < 1e-9 {
+            if n.dot(&dir).abs() < tol::ANGULAR {
                 edge_on(n, x * *a, y * *b)
             } else {
                 (Shape::Other, vec![], false)
@@ -258,7 +259,7 @@ fn edge_srcs(frame: &ViewFrame, b: &Body, bi: usize, tol: f64) -> Vec<Src> {
                 })
             };
             let class = if smooth { ProjClass::Smooth } else { ProjClass::Sharp };
-            let closed = e.closed() && matches!(e.curve, Curve::Circle { .. } | Curve::Ellipse { .. }) && (e.t[1] - e.t[0] - TAU).abs() < 1e-9;
+            let closed = e.closed() && matches!(e.curve, Curve::Circle { .. } | Curve::Ellipse { .. }) && (e.t[1] - e.t[0] - TAU).abs() < tol::ANGULAR;
             make_src(frame, bi, class, Some(ei), None, faces.clone(), Geo::Exact(e.curve.clone()), (e.t[0], e.t[1]), closed, tol)
         })
         .collect()
@@ -295,9 +296,9 @@ struct Grid {
 
 impl Grid {
     fn new(lo: P2, hi: P2, items: usize) -> Self {
-        let (w, h) = ((hi.x - lo.x).max(1e-9), (hi.y - lo.y).max(1e-9));
+        let (w, h) = ((hi.x - lo.x).max(tol::ROUNDOFF), (hi.y - lo.y).max(tol::ROUNDOFF));
         let k = ((items as f64).sqrt().ceil() as usize).clamp(1, 256);
-        let cell = (w.max(h) / k as f64).max(1e-9);
+        let cell = (w.max(h) / k as f64).max(tol::ROUNDOFF);
         let nx = ((w / cell).ceil() as usize).clamp(1, 512);
         let ny = ((h / cell).ceil() as usize).clamp(1, 512);
         let cell = (w / nx as f64).max(h / ny as f64);
@@ -378,13 +379,13 @@ impl<'a> Occluders<'a> {
                     }
                     let exact = match &f.surf {
                         Surface::Plane { f: fr } => {
-                            if fr.x.cross(&fr.y).normalize().dot(&dir).abs() < 1e-9 {
+                            if fr.x.cross(&fr.y).normalize().dot(&dir).abs() < tol::ANGULAR {
                                 continue;
                             }
                             true
                         }
                         Surface::Cylinder { f: fr, .. } => {
-                            if fr.z.cross(&dir).norm() < 1e-9 {
+                            if fr.z.cross(&dir).norm() < tol::ANGULAR {
                                 continue;
                             }
                             true
@@ -466,12 +467,12 @@ impl<'a> Occluders<'a> {
                     let f = 1.0 / det;
                     let sv = p - t[0];
                     let u = f * sv.dot(&h);
-                    if !(-1e-9..=1.0 + 1e-9).contains(&u) {
+                    if !(-tol::REL..=1.0 + tol::REL).contains(&u) {
                         continue;
                     }
                     let qv = sv.cross(&e1);
                     let v = f * rd.dot(&qv);
-                    if v < -1e-9 || u + v > 1.0 + 1e-9 {
+                    if v < -tol::REL || u + v > 1.0 + tol::REL {
                         continue;
                     }
                     if f * e2.dot(&qv) > skin {
@@ -494,7 +495,7 @@ fn seg_meet(a0: P2, a1: P2, b0: P2, b1: P2) -> Vec<(Option<f64>, Option<f64>, bo
     }
     let den = cross2(&r, &s);
     let w = b0 - a0;
-    if den.abs() > 1e-9 * rl * sl {
+    if den.abs() > tol::REL * rl * sl {
         let fa = cross2(&w, &s) / den;
         let fb = cross2(&w, &r) / den;
         let (ea, eb) = (EPS2 / rl, EPS2 / sl);
@@ -510,13 +511,13 @@ fn seg_meet(a0: P2, a1: P2, b0: P2, b1: P2) -> Vec<(Option<f64>, Option<f64>, bo
     let mut out = Vec::new();
     for p in [b0, b1] {
         let f = (p - a0).dot(&r) / (rl * rl);
-        if f > 1e-9 && f < 1.0 - 1e-9 {
+        if f > tol::REL && f < 1.0 - tol::REL {
             out.push((Some(f), None, false));
         }
     }
     for p in [a0, a1] {
         let f = (p - b0).dot(&s) / (sl * sl);
-        if f > 1e-9 && f < 1.0 - 1e-9 {
+        if f > tol::REL && f < 1.0 - tol::REL {
             out.push((None, Some(f), false));
         }
     }
@@ -537,7 +538,7 @@ fn refine(frame: &ViewFrame, a: &Src, ta: f64, b: &Src, tb: f64) -> Option<(f64,
         tb += db;
     }
     let f = frame.to_2d(&a.point(ta)) - frame.to_2d(&b.point(tb));
-    (f.norm() < 1e-9 && ta >= a.t.0 && ta <= a.t.1 && tb >= b.t.0 && tb <= b.t.1).then_some((ta, tb))
+    (f.norm() < tol::ROUNDOFF && ta >= a.t.0 && ta <= a.t.1 && tb >= b.t.0 && tb <= b.t.1).then_some((ta, tb))
 }
 
 /// The split parameters of every line where it meets another in 2D.
@@ -695,7 +696,7 @@ pub fn project(bodies: &[HlrBody], frame: &ViewFrame, opts: &ProjectOptions) -> 
             let end = p2(s, s.t.1);
             for (t, turn) in cuts {
                 let first = bps.len() == 1;
-                let last = bps.last_mut().unwrap();
+                let Some(last) = bps.last_mut() else { continue };
                 let q = p2(s, t);
                 if t <= last.0 || (q - p2(s, last.0)).norm() < EPS2 {
                     last.1 |= turn && !first;
@@ -773,7 +774,7 @@ pub fn project(bodies: &[HlrBody], frame: &ViewFrame, opts: &ProjectOptions) -> 
                     // Beside the segment, not past its end (a line ending short of `q` leaves
                     // it bare).
                     let f = (q - a).dot(&ab) / (l * l);
-                    if !(-1e-9..=1.0 + 1e-9).contains(&f) {
+                    if !(-tol::REL..=1.0 + tol::REL).contains(&f) {
                         return false;
                     }
                     let f = f.clamp(0.0, 1.0);
@@ -806,10 +807,9 @@ pub fn project(bodies: &[HlrBody], frame: &ViewFrame, opts: &ProjectOptions) -> 
             let pc = &pieces[k];
             if !dropped[k] {
                 let joins = prev.is_some_and(|p| !dropped[p] && pieces[p].visible == pc.visible && !pieces[p].turn_end && k == p + 1);
-                if joins {
-                    runs.last_mut().unwrap().2 = pc.b;
-                } else {
-                    runs.push((si, pc.a, pc.b, pc.visible, false));
+                match runs.last_mut().filter(|_| joins) {
+                    Some(run) => run.2 = pc.b,
+                    None => runs.push((si, pc.a, pc.b, pc.visible, false)),
                 }
             }
             prev = Some(k);

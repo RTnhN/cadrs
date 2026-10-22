@@ -5,29 +5,36 @@ use std::sync::Arc;
 
 use super::math::*;
 use super::nurbs::NurbsCurve;
+use super::tol;
 
+/// An exact curve with its parametrization `t ↦ point`; an edge uses it over `[t0, t1]`.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(missing_docs, reason = "the fields are the symbols of each variant's formula")]
 pub enum Curve {
-    /// `o + t·d`.
+    /// `o + t·d` (`d` a unit vector for an edge's line, so t is a length).
     Line { o: P3, d: V3 },
     /// `c + r(cos t·x + sin t·y)`, x and y orthonormal.
     Circle { c: P3, x: V3, y: V3, r: f64 },
     /// `c + a cos t·x + b sin t·y`.
     Ellipse { c: P3, x: V3, y: V3, a: f64, b: f64 },
+    /// A rational B-spline on its knot range.
     Nurbs(Arc<NurbsCurve>),
 }
 
 impl Curve {
+    /// The line from `a` to `b` (unit direction) and the parameter of `b`, their distance.
     pub fn line(a: P3, b: P3) -> (Curve, f64) {
         let d = b - a;
         let l = d.norm();
         (Curve::Line { o: a, d: d / l }, l)
     }
 
+    /// A B-spline curve.
     pub fn nurbs(c: NurbsCurve) -> Curve {
         Curve::Nurbs(Arc::new(c))
     }
 
+    /// The point at `t`.
     pub fn point(&self, t: f64) -> P3 {
         match self {
             Curve::Line { o, d } => o + d * t,
@@ -53,10 +60,12 @@ impl Curve {
         }
     }
 
+    /// The first derivative at `t` (not normalized).
     pub fn tangent(&self, t: f64) -> V3 {
         self.d2(t).1
     }
 
+    /// Whether the curve closes with period 2π (circles and ellipses).
     pub fn is_periodic(&self) -> bool {
         matches!(self, Curve::Circle { .. } | Curve::Ellipse { .. })
     }
@@ -69,6 +78,7 @@ impl Curve {
         }
     }
 
+    /// The curve moved by `m`, with the same parametrization.
     pub fn transformed(&self, m: &Affine) -> Curve {
         match self {
             Curve::Line { o, d } => {
@@ -155,7 +165,7 @@ impl Curve {
                     let r = q - p;
                     let f = r.dot(&d1);
                     let df = d1.norm_squared() + r.dot(&d2);
-                    if df.abs() < 1e-300 {
+                    if df.abs() < tol::TINY {
                         break;
                     }
                     let nt = (t - f / df).clamp(t0, t1);
@@ -194,7 +204,7 @@ impl Curve {
                         let (_, d1, d2) = self.d2(t);
                         let s = d1.norm();
                         speed = speed.max(s);
-                        if s > 1e-300 {
+                        if s > tol::TINY {
                             kmax = kmax.max(d1.cross(&d2).norm() / (s * s * s));
                         }
                     }
@@ -224,7 +234,7 @@ impl Curve {
             Curve::Ellipse { c, x, y, a, b } => (Curve::Ellipse { c: *c, x: *x, y: -y, a: *a, b: *b }, -t1, -t0),
             Curve::Nurbs(n) => {
                 let k0 = n.knots[0];
-                let k1 = *n.knots.last().unwrap();
+                let k1 = n.knots[n.knots.len() - 1];
                 (Curve::Nurbs(Arc::new(n.reversed())), k0 + k1 - t1, k0 + k1 - t0)
             }
         }
@@ -259,7 +269,7 @@ fn adaptive_len(c: &Curve, a: f64, b: f64, depth: usize) -> f64 {
     // (Below the rounding noise of the curve's coordinates the two rules can't agree better: a
     // short B-spline far from the origin would otherwise subdivide to the depth limit.)
     let noise = 1e3 * f64::EPSILON * c.point(0.5 * (a + b)).coords.norm();
-    if (g8 - g16).abs() < (1e-13 * g16.abs().max(1e-9)).max(noise) || depth > 12 {
+    if (g8 - g16).abs() < (1e-13 * g16.abs().max(tol::ROUNDOFF)).max(noise) || depth > 12 {
         g16
     } else {
         let m = (a + b) * 0.5;

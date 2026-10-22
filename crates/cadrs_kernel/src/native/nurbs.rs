@@ -4,6 +4,7 @@
 
 use super::math::*;
 use nalgebra::{DMatrix, DVector, Vector4};
+use super::tol;
 
 pub type H = Vector4<f64>;
 
@@ -300,10 +301,14 @@ impl Basis {
     }
 }
 
+/// A rational B-spline curve. Build one from outside data with the checked [`NurbsCurve::new`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct NurbsCurve {
+    /// The degree p.
     pub degree: usize,
+    /// The knot vector: non-decreasing, `cps.len() + degree + 1` of them.
     pub knots: Vec<f64>,
+    /// The control points, homogeneous (`[w·x, w·y, w·z, w]`).
     pub cps: Vec<H>,
 }
 
@@ -392,10 +397,12 @@ impl NurbsCurve {
         Self { degree: p, knots, cps: poles.iter().zip(weights).map(|(q, w)| hom(q, *w)).collect() }
     }
 
+    /// The parameter range: the knots `[p]` and `[n]` (n the number of control points).
     pub fn range(&self) -> (f64, f64) {
         (self.knots[self.degree], self.knots[self.cps.len()])
     }
 
+    /// Whether the weights differ (else the curve is polynomial).
     pub fn is_rational(&self) -> bool {
         let w0 = self.cps[0].w;
         self.cps.iter().any(|c| (c.w - w0).abs() > 1e-14)
@@ -455,6 +462,7 @@ impl NurbsCurve {
         ck
     }
 
+    /// The point at `u`.
     pub fn point(&self, u: f64) -> P3 {
         dehom(&self.hders_fixed(u, 0)[0])
     }
@@ -470,6 +478,7 @@ impl NurbsCurve {
         (P3::from(c0), c1, v / h[0].w)
     }
 
+    /// The curve moved by `m`.
     pub fn transformed(&self, m: &Affine) -> Self {
         Self {
             degree: self.degree,
@@ -480,10 +489,7 @@ impl NurbsCurve {
 
     /// The same curve run backwards, on the mirrored parameter range.
     pub fn reversed(&self) -> Self {
-        let (a, b) = self.range();
-        let _ = (a, b);
-        let k0 = self.knots[0];
-        let k1 = *self.knots.last().unwrap();
+        let (k0, k1) = (self.knots[0], self.knots[self.knots.len() - 1]);
         Self {
             degree: self.degree,
             knots: self.knots.iter().rev().map(|k| k0 + k1 - k).collect(),
@@ -495,9 +501,11 @@ impl NurbsCurve {
     pub fn breaks(&self) -> Vec<f64> {
         let (a, b) = self.range();
         let mut v: Vec<f64> = vec![a];
+        let mut prev = a;
         for &k in &self.knots {
-            if k > a + 1e-14 && k < b - 1e-14 && (k - *v.last().unwrap()).abs() > 1e-14 {
+            if k > a + 1e-14 && k < b - 1e-14 && (k - prev).abs() > 1e-14 {
                 v.push(k);
+                prev = k;
             }
         }
         v.push(b);
@@ -516,7 +524,7 @@ impl NurbsCurve {
     /// The closed curve of degree `p` through `pts` (the first not repeated at the end) at
     /// `params`, with `params[m]` (one more than the points) the parameter where it closes: a
     /// periodic B-spline (C^(p-1) at the closure too), returned clamped on
-    /// [params[0], params[m]]. None when the system is singular.
+    /// \[params\[0\], params\[m\]\]. None when the system is singular.
     pub fn interpolate_periodic(pts: &[P3], params: &[f64], p: usize) -> Option<Self> {
         let m = pts.len();
         if m < 2 || params.len() != m + 1 || p == 0 {
@@ -566,6 +574,8 @@ impl NurbsCurve {
         Some(Self { degree: p, knots, cps })
     }
 
+    /// The degree-`p` curve through `pts` at `params` (increasing; repeats are dropped), with the
+    /// end derivatives `d0` and `d1` when given; degree one when that system can't be solved.
     pub fn interpolate(pts: &[P3], params: &[f64], p: usize, d0: Option<V3>, d1: Option<V3>) -> Self {
         // Parameters must increase strictly: drop points whose parameter repeats.
         let mut keep: Vec<usize> = Vec::with_capacity(pts.len());
@@ -900,11 +910,17 @@ impl NurbsCurve {
     }
 }
 
+/// A rational B-spline surface. Build one from outside data with the checked
+/// [`NurbsSurface::new`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct NurbsSurface {
+    /// The degree in u.
     pub du: usize,
+    /// The degree in v.
     pub dv: usize,
+    /// The knots in u.
     pub ku: Vec<f64>,
+    /// The knots in v.
     pub kv: Vec<f64>,
     /// `cps[i][j]`: i along u, j along v.
     pub cps: Vec<Vec<H>>,
@@ -963,6 +979,7 @@ impl NurbsSurface {
         cols
     }
 
+    /// The parameter ranges in u and in v.
     pub fn range(&self) -> ((f64, f64), (f64, f64)) {
         let nu = self.cps.len();
         let nv = self.cps[0].len();
@@ -1048,6 +1065,7 @@ impl NurbsSurface {
         s
     }
 
+    /// The point at (u, v).
     pub fn point(&self, u: f64, v: f64) -> P3 {
         P3::from(self.ders_upto::<0>(u, v)[0][0])
     }
@@ -1076,6 +1094,7 @@ impl NurbsSurface {
         IsoV { s: self, v, lo, q, qv }
     }
 
+    /// The surface moved by `m`.
     pub fn transformed(&self, m: &Affine) -> Self {
         Self {
             du: self.du,
@@ -1090,9 +1109,11 @@ impl NurbsSurface {
     pub fn breaks(&self) -> (Vec<f64>, Vec<f64>) {
         let b = |k: &[f64], lo: f64, hi: f64| {
             let mut v = vec![lo];
+            let mut prev = lo;
             for &x in k {
-                if x > lo + 1e-14 && x < hi - 1e-14 && (x - *v.last().unwrap()).abs() > 1e-14 {
+                if x > lo + 1e-14 && x < hi - 1e-14 && (x - prev).abs() > 1e-14 {
                     v.push(x);
+                    prev = x;
                 }
             }
             v.push(hi);
@@ -1187,7 +1208,7 @@ impl Band {
                 piv = r;
             }
         }
-        if best < 1e-300 {
+        if best < tol::TINY {
             return None;
         }
         if piv != c {

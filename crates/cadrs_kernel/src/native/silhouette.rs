@@ -38,6 +38,7 @@ use super::math::*;
 use super::surface::Surface;
 use super::topo::Body;
 use super::uvdomain::FaceDomain;
+use super::tol;
 
 /// How a face is seen.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -56,7 +57,7 @@ impl View {
             View::Perspective(e) => {
                 let w = p - e;
                 let l = w.norm();
-                if l > 1e-300 { w / l } else { V3::zeros() }
+                if l > tol::TINY { w / l } else { V3::zeros() }
             }
         }
     }
@@ -156,7 +157,7 @@ pub fn face_silhouettes(body: &Body, fi: usize, polys: &[Vec<P2>], view: &View, 
 fn box_sides(dom: &FaceDomain) -> Vec<(SilGeom, bool)> {
     let s = dom.surf;
     let ((u0, u1), (v0, v1)) = (dom.ub, dom.vb);
-    let full = |a: f64, b: f64, periodic: bool| periodic && ((b - a) - TAU).abs() < 1e-9;
+    let full = |a: f64, b: f64, periodic: bool| periodic && ((b - a) - TAU).abs() < tol::ANGULAR;
     let mut out = Vec::new();
     let mut side = |fixed_u: bool, at: f64| {
         let Some(c) = super::face_build::iso_curve(s, fixed_u, at) else { return };
@@ -187,8 +188,8 @@ pub fn domain_silhouettes(dom: &FaceDomain, view: &View, opts: &SilOptions) -> F
         Surface::Plane { f } => {
             let n = f.x.cross(&f.y).normalize();
             let edge_on = match view {
-                View::Parallel(d) => n.dot(&d.normalize()).abs() < 1e-9,
-                View::Perspective(e) => n.dot(&(f.o - e)).abs() < 1e-9 * (1.0 + (f.o - e).norm()),
+                View::Parallel(d) => n.dot(&d.normalize()).abs() < tol::ANGULAR,
+                View::Perspective(e) => n.dot(&(f.o - e)).abs() < tol::REL * (1.0 + (f.o - e).norm()),
             };
             if edge_on { Found::Whole } else { Found::Curves(vec![]) }
         }
@@ -247,8 +248,8 @@ fn generators(dom: &FaceDomain, view: &View) -> Found {
     let c = 0.5 * (g0 + g2);
     let (a, b) = (0.5 * (g0 - g2), g1 - c);
     let r = a.hypot(b);
-    if r < 1e-9 * scale {
-        return if c.abs() < 1e-9 * scale { Found::Whole } else { Found::Curves(vec![]) };
+    if r < tol::REL * scale {
+        return if c.abs() < tol::REL * scale { Found::Whole } else { Found::Curves(vec![]) };
     }
     if c.abs() > r {
         return Found::Curves(vec![]);
@@ -256,7 +257,7 @@ fn generators(dom: &FaceDomain, view: &View) -> Found {
     let phi = b.atan2(a);
     let alpha = (-c / r).clamp(-1.0, 1.0).acos();
     let mut us = vec![phi + alpha];
-    if alpha > 1e-9 && alpha < PI - 1e-9 {
+    if alpha > tol::ANGULAR && alpha < PI - tol::ANGULAR {
         us.push(phi - alpha);
     }
     let mut out = Vec::new();
@@ -395,14 +396,14 @@ impl<'a> Tracer<'a> {
         };
         let lu = along(&|a, c| s.eval(ub.0 + (ub.1 - ub.0) * a, vb.0 + (vb.1 - vb.0) * c));
         let lv = along(&|a, c| s.eval(ub.0 + (ub.1 - ub.0) * c, vb.0 + (vb.1 - vb.0) * a));
-        let lmax = lu.max(lv).max(1e-300);
+        let lmax = lu.max(lv).max(tol::TINY);
         let grid = opts.grid.max(16) as f64;
         let cells = |l: f64| ((grid * l / lmax).ceil() as usize).clamp(16, opts.grid.max(16));
-        let size = s.patch_bbox(ub, vb).diagonal().max(1e-9);
+        let size = s.patch_bbox(ub, vb).diagonal().max(tol::ROUNDOFF);
         let (wu, wv) = closed_dirs(s, ub, vb, size);
         let au = Axis::new(ub.0, ub.1, cells(lu), wu, !wu && s.u_periodic());
         let av = Axis::new(vb.0, vb.1, cells(lv), wv, !wv && s.v_periodic());
-        Self { dom, view: *view, tol: opts.tol.max(1e-9), au, av }
+        Self { dom, view: *view, tol: opts.tol.max(tol::ROUNDOFF), au, av }
     }
 
     /// The point at (u, v), folded into the period.
@@ -418,7 +419,7 @@ impl<'a> Tracer<'a> {
         let n = d[1].cross(&d[2]);
         let l = n.norm();
         let scale = (d[1].norm() * d[2].norm()).max(d[1].norm_squared()).max(d[2].norm_squared());
-        let n = if l > 1e-9 * scale && l > 1e-300 {
+        let n = if l > tol::REL * scale && l > tol::TINY {
             n / l
         } else {
             // A pole or apex (a collapsed row of a B-spline too): the normal just inside the face,
@@ -427,7 +428,7 @@ impl<'a> Tracer<'a> {
             let (qu, qv) = (u + (cu - u) * 1e-6, v + (cv - v) * 1e-6);
             let e = s.d2(qu, qv);
             let m = e[1].cross(&e[2]);
-            if m.norm() > 1e-300 { m.normalize() } else { s.normal(u, v) }
+            if m.norm() > tol::TINY { m.normalize() } else { s.normal(u, v) }
         };
         n.dot(&self.view.sight(&P3::from(d[0])))
     }
@@ -448,7 +449,7 @@ impl<'a> Tracer<'a> {
         let node = |i: usize, j: usize| j * nu + i;
         let uv = |i: usize, j: usize| P2::new(au.at(i), av.at(j));
         let vals: Vec<f64> = (0..nu * nv).into_par_iter().map(|k| self.g(uv(k % nu, k / nu))).collect();
-        if vals.iter().all(|x| x.abs() < 1e-9) {
+        if vals.iter().all(|x| x.abs() < tol::ROUNDOFF) {
             return Found::Whole;
         }
         let pos = |x: f64| x >= 0.0;
@@ -566,7 +567,7 @@ impl<'a> Tracer<'a> {
             let gx = (self.g(P2::new(q.x + hu, q.y)) - self.g(P2::new(q.x - hu, q.y))) / (2.0 * hu);
             let gy = (self.g(P2::new(q.x, q.y + hv)) - self.g(P2::new(q.x, q.y - hv))) / (2.0 * hv);
             let gg = gx * gx + gy * gy;
-            if gg < 1e-300 {
+            if gg < tol::TINY {
                 return None;
             }
             q = P2::new(q.x - g0 * gx / gg, q.y - g0 * gy / gg);
@@ -574,7 +575,7 @@ impl<'a> Tracer<'a> {
                 return None;
             }
         }
-        (self.g(q).abs() < 1e-9).then(|| P2::new(self.au.fold(q.x), self.av.fold(q.y)))
+        (self.g(q).abs() < tol::ROUNDOFF).then(|| P2::new(self.au.fold(q.x), self.av.fold(q.y)))
     }
 
     /// The polyline with points added on the silhouette until its chords are within the
@@ -658,7 +659,7 @@ impl<'a> Tracer<'a> {
 /// Whether the face's box spans the whole of a closed direction of its surface: a periodic one's
 /// period, or a B-spline's range whose ends meet (within 1e-7 of the patch's size).
 fn closed_dirs(s: &Surface, ub: (f64, f64), vb: (f64, f64), size: f64) -> (bool, bool) {
-    let full = |(a, b): (f64, f64), (r0, r1): (f64, f64)| (a - r0).abs() <= 1e-9 * (1.0 + r0.abs()) && (b - r1).abs() <= 1e-9 * (1.0 + r1.abs());
+    let full = |(a, b): (f64, f64), (r0, r1): (f64, f64)| (a - r0).abs() <= tol::REL * (1.0 + r0.abs()) && (b - r1).abs() <= tol::REL * (1.0 + r1.abs());
     let ((u0, u1), (v0, v1)) = s.param_box();
     let meets = |along_u: bool| {
         (0..5).all(|k| {
@@ -673,8 +674,8 @@ fn closed_dirs(s: &Surface, ub: (f64, f64), vb: (f64, f64), size: f64) -> (bool,
             (p - q).norm() <= 1e-7 * size
         })
     };
-    let wu = if s.u_periodic() { ((ub.1 - ub.0) - TAU).abs() < 1e-9 } else { full(ub, (u0, u1)) && meets(true) };
-    let wv = if s.v_periodic() { ((vb.1 - vb.0) - TAU).abs() < 1e-9 } else { full(vb, (v0, v1)) && meets(false) };
+    let wu = if s.u_periodic() { ((ub.1 - ub.0) - TAU).abs() < tol::ANGULAR } else { full(ub, (u0, u1)) && meets(true) };
+    let wv = if s.v_periodic() { ((vb.1 - vb.0) - TAU).abs() < tol::ANGULAR } else { full(vb, (v0, v1)) && meets(false) };
     (wu, wv)
 }
 

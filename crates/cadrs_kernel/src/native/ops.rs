@@ -6,8 +6,9 @@ use super::features::Tagged;
 use super::kernel::{subset, NativeKernel};
 use super::math::*;
 use super::surface::Surface;
-use super::topo::{co_range, Body, Coedge, Face, Shell, Solid};
+use super::topo::{Body, Coedge, Face, Shell, Solid};
 use crate::*;
+use super::tol;
 
 /// A plane as a large square sheet body (one face) through `o` with normal `n`, `size` across.
 pub fn plane_sheet(o: P3, n: V3, size: f64) -> Body {
@@ -161,8 +162,7 @@ pub fn face_tool(k: &mut NativeKernel, body: BodyId, faces: &[FaceId], source: u
         let rev = |(e, f): (usize, bool)| (e, !f);
         let mut lp = vec![rev(free[s])];
         let start = { let (e, f) = lp[0]; if f { b.edges[e].v[0] } else { b.edges[e].v[1] } };
-        loop {
-            let (e, f) = *lp.last().unwrap();
+        while let Some(&(e, f)) = lp.last() {
             let end = if f { b.edges[e].v[1] } else { b.edges[e].v[0] };
             if end == start {
                 break;
@@ -232,7 +232,7 @@ pub fn face_tool(k: &mut NativeKernel, body: BodyId, faces: &[FaceId], source: u
         }
         v = -v;
     }
-    if v < 1e-9 {
+    if v < tol::ROUNDOFF {
         return Err(KernelError::InvalidParameter("The faces enclose no volume".into()));
     }
     let mut t = Tagged { tags: vec![Vec::new(); b.faces.len()], body: b };
@@ -258,7 +258,7 @@ pub fn face_normals_at(k: &NativeKernel, body: BodyId, face: FaceId, points: &[P
             // From the face's interior, and (a polar patch can lead Newton astray) from the
             // nearest point of a coarse grid when that lands closer.
             let mut uv = f.surf.project(p, Some((center.x, center.y)));
-            if (f.surf.eval(uv.0, uv.1) - p).norm() > 1e-9 {
+            if (f.surf.eval(uv.0, uv.1) - p).norm() > tol::ROUNDOFF {
                 let w = f.surf.project(p, None);
                 if (f.surf.eval(w.0, w.1) - p).norm() < (f.surf.eval(uv.0, uv.1) - p).norm() {
                     uv = w;
@@ -268,9 +268,4 @@ pub fn face_normals_at(k: &NativeKernel, body: BodyId, face: FaceId, points: &[P
             f.surf.normal(u, v) * if f.sense { 1.0 } else { -1.0 }
         })
         .collect())
-}
-
-#[allow(dead_code)]
-fn unused(_: &Coedge) -> (f64, f64) {
-    co_range(&super::topo::Edge { curve: Curve::Line { o: P3::origin(), d: V3::x() }, t: [0.0, 1.0], v: [0, 0], degenerate: false, tol: super::topo::TOL_MIN }, true)
 }
