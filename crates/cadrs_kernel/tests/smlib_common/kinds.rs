@@ -19,7 +19,7 @@ use cadrs_kernel::native::NativeKernel;
 use cadrs_kernel::{Axis, BodyId, BoolOp, Curve2, Extent, Kernel, KernelError, Loop, Motion, OpResult, Plane, Profile, Region};
 use nalgebra::{Point2, Unit};
 
-use super::{check_result, edge_count, Expect, REL_TOL};
+use super::{check_result, edge_count, invalid, Expect, REL_TOL};
 
 /// What a result is.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -82,14 +82,14 @@ fn edges_length(b: &Body) -> f64 {
     b.edges.iter().filter(|e| !e.degenerate).map(|e| e.curve.length(e.t[0].min(e.t[1]), e.t[0].max(e.t[1]))).sum()
 }
 
-/// Checks a body against `w`: valid (`check()`), of the kind, and `w`'s values.
+/// Checks a body against `w`: valid (the full check), of the kind, and `w`'s values.
 pub fn check_body(k: &NativeKernel, id: BodyId, w: &Want) -> Result<(), String> {
     let b = k.get(id).map_err(kerr)?;
     match w.kind {
         Kind::Solid => check_result(b, b, &Expect { volume: w.volume, area: w.area, solid: Some(true), ..Expect::default() })?,
         Kind::Sheet => {
-            if let Some(i) = b.check().first() {
-                return Err(format!("invalid: {i}"));
+            if let Some(i) = invalid(b) {
+                return Err(i);
             }
             if !b.solids.is_empty() || b.faces.is_empty() || b.shells.iter().all(|s| s.closed) {
                 return Err(format!("not a sheet ({} solids, {} faces)", b.solids.len(), b.faces.len()));
@@ -97,8 +97,8 @@ pub fn check_body(k: &NativeKernel, id: BodyId, w: &Want) -> Result<(), String> 
             near("area", cadrs_kernel::native::mass::body_mass(b).surface_area, w.area)?;
         }
         Kind::Wire => {
-            if let Some(i) = b.check().first() {
-                return Err(format!("invalid: {i}"));
+            if let Some(i) = invalid(b) {
+                return Err(i);
             }
             if !b.faces.is_empty() {
                 return Err(format!("not a wire: {} faces", b.faces.len()));

@@ -805,3 +805,39 @@ heal surface_to_bezier_a5
 heal fix_gaps_b1
 # boolean: fixshape of b136 (an edge used once in its closed shell) can't close the shell.
 boolean bopfuse_complex_h1
+# W15: cases that pass the fast check and fail the full one (CheckLevel::Full in every suite),
+# by cause and owner.
+# Full check: p-curves off their edge by more than its tolerance (fast check samples 7 points) (boolean results, W2b).
+boolean bcommon_complex_c7
+boolean bcut_complex_l7
+boolean bcut_complex_q1
+boolean bfuse_complex_c4
+boolean bfuse_complex_c5
+boolean bfuse_complex_c8
+boolean boptuc_complex_b7
+feat featprism_n2
+# Full check: a void shell outside its solid's outer shell, W2b.
+boolean boptuc_complex_c5
+# Full check: a face's loops cross in (u, v), W1b.
+blend complex_a5
+# Full check: faces of the shell cross (the notch's offset wall pierces the top), W6b.
+offset shape_type_i_c_v7
+# Full check: sewn models keep the read p-curves' gaps without fitted tolerances, W6b reader/sewing.
+sewing tol_0_01_r6
+sewing tol_0_01_w2
+sewing tol_0_01_w8
+sewing tol_100_a7
+sewing tol_100_b8
+sewing tol_100_b9
+sewing tol_1_g4
+sewing tol_1_j8
+sewing tol_1_n6
+# Full check: the input's faces cross (RevolutionFG.rle's panels interpenetrate): the input, not the command (W6b reader).
+heal split_closed_faces_e4
+heal split_closed_faces_e9
+heal surface_to_bspline_e5
+heal surface_to_bspline_f1
+# Full check: the input's shell isn't edge-connected (bowl_noremove.brep, CIN900_buc60204.rle): the input (W6b reader).
+heal split_closed_faces_f6
+heal surface_to_bspline_f8
+heal surface_to_bezier_e1

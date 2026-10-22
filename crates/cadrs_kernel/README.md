@@ -65,7 +65,8 @@ let step = k.export_step(&round.bodies)?;               // and import_step / imp
   adds what is too slow for every operation: loops crossing in (u, v) by exact segment tests,
   loop nesting and orientation, shell connectivity and orientation, adaptive edge and vertex
   consistency, faces of a shell crossing each other away from their shared edges
-  (`native::check_faces`), and void shells inside their solid; it is meant for tests.
+  (`native::check_faces`), and void shells inside their solid; it is meant for tests, and
+  every generated suite (DRAW's `checkshape`, the SMLib suites' result checks) runs it.
 - **Healing.** `Kernel::heal(body, &[HealOp])` makes an imported or damaged body sound and
   upgrades its geometry, step by step (`native::heal`, `native::heal_split`): fix (loops
   reordered and closed, small edges dropped, missing seams added, face senses and shell

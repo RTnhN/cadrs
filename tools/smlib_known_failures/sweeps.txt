@@ -4,3 +4,10 @@
 # The union of the whole turn's pieces leaves an open shell without W2's uncommitted
 # boolean/SSI work (passes with it): remove when that lands.
 case_32_rotate_whole_brep_block_with_internal_edges_full
+
+# Full check (unowned/sweeps): a full-turn sweep's shell isn't edge-connected (its pieces meet
+# along duplicate seam edges instead of sharing them).
+case_05_translate_edges_higher
+case_22_rotate_1_face_higher_full
+case_23_rotate_1_face_higher_full_ax_through_corner
+case_24_rotate_1_face_higher_full_ax_through_edge

@@ -70,8 +70,8 @@ fn tsurf(k: &mut NativeKernel) -> Result<Body, String> {
 /// The extruded face's volume (the face's area) and area.
 fn tsurf_creation_props(volume: f64, area: f64) -> Result<(), String> {
     let b = tsurf(&mut NativeKernel::new())?;
-    if let Some(i) = b.check().first() {
-        return Err(format!("invalid: {i}"));
+    if let Some(i) = invalid(&b) {
+        return Err(i);
     }
     let m = mass::body_mass(&b);
     close("volume", m.volume, volume)?;

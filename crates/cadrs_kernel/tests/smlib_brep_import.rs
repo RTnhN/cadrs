@@ -51,8 +51,8 @@ fn make_face(file: &str, surfaces: usize, curves: usize, faces: usize, edges: us
     let mut k = NativeKernel::new();
     let id = k.face_from_bare_surface(&p.surfaces[0], None).map_err(|e| format!("{e:?}"))?;
     let b = k.get(id).map_err(|e| format!("{e:?}"))?;
-    if let Some(i) = b.check().first() {
-        return Err(format!("invalid: {i}"));
+    if let Some(i) = invalid(&b) {
+        return Err(i);
     }
     let ne = b.edges.iter().filter(|e| !e.degenerate).count();
     if (b.faces.len(), ne, b.verts.len()) != (faces, edges, verts) {

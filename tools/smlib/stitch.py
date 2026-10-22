@@ -32,8 +32,8 @@ fn lamina(b: &Body) -> usize {
 /// `file`'s faces sewn at `tol` (`StitchFaces`): valid, with at most `max_lamina` lamina edges.
 fn stitch_open(file: &str, tol: f64, max_lamina: usize) -> Result<(), String> {
     let b = surfacing::sew_faces(model(SUITE, file)?.body, tol).map_err(|e| format!("{e:?}"))?;
-    if let Some(i) = b.check().first() {
-        return Err(format!("invalid: {i}"));
+    if let Some(i) = invalid(&b) {
+        return Err(i);
     }
     let n = lamina(&b);
     if n > max_lamina {

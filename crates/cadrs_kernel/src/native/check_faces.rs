@@ -5,10 +5,10 @@
 //! tolerances) overlap, found with a [`Bvh`], that share no edge (neighbours meet along their
 //! edge by construction, and how they meet there is the edges' check). Two tests, each cheap:
 //! - an edge of one face piercing the other face's interior with its middle (crossing its
-//!   surface, not touching it, clear of its boundary by more than the faces' tolerances, not
-//!   at the edge's end): where faces cross,
-//!   their intersection curve runs out through an edge of one of them unless it closes inside
-//!   both;
+//!   surface, not touching it, clear of its boundary by more than the faces' tolerances, not at
+//!   the edge's end; on a B-spline or swept face found by a bounded sampled search, not the full
+//!   curve–surface intersection): where faces cross, their intersection curve runs out through
+//!   an edge of one of them unless it closes inside both;
 //! - for two elementary surfaces (planes, cylinders, cones, spheres, tori), whose intersection
 //!   has a closed form, that curve itself ([`super::ssi`]) sampled: a point inside both faces,
 //!   clear of their boundaries, is a crossing. This also finds closed crossings.
@@ -100,6 +100,73 @@ fn elementary(s: &Surface) -> bool {
     matches!(s, Surface::Plane { .. } | Surface::Cylinder { .. } | Surface::Cone { .. } | Surface::Sphere { .. } | Surface::Torus { .. })
 }
 
+/// The stretch of edge `e` that can meet surface `s` inside `region`, from samples: the
+/// samples in the region (grown by the samples' spacing) with one more each side, or `None`
+/// when there is none, or when the surface has a signed distance and it keeps one sign along
+/// the stretch by more than the curve can travel between samples.
+fn near_stretch(e: &super::topo::Edge, region: &Bbox, s: &Surface) -> Option<(f64, f64)> {
+    const N: usize = 32;
+    let ts: Vec<f64> = (0..=N).map(|k| e.t[0] + (e.t[1] - e.t[0]) * k as f64 / N as f64).collect();
+    let ps: Vec<P3> = ts.iter().map(|&t| e.point(t)).collect();
+    // (A chord under-measures the arc between samples: half as much again covers the curves
+    // of edges sampled this finely.)
+    let step = ps.windows(2).map(|w| (w[1] - w[0]).norm()).fold(0.0, f64::max) * 1.5;
+    let grown = region.grow(step);
+    let inside: Vec<usize> = (0..=N).filter(|&k| grown.contains(&ps[k])).collect();
+    let (&first, &last) = (inside.first()?, inside.last()?);
+    let (k0, k1) = (first.saturating_sub(1), (last + 1).min(N));
+    if let Some(d) = (k0..=k1).map(|k| s.signed_distance(&ps[k])).collect::<Option<Vec<f64>>>()
+        && (d.iter().all(|&x| x > step) || d.iter().all(|&x| x < -step))
+    {
+        return None;
+    }
+    Some((ts[k0], ts[k1]))
+}
+
+/// Where edge `e` passes from one side of surface `s` to the other over [t0, t1]: samples
+/// projected onto the surface (each from the one before), their offsets along its normal, and
+/// a bisection where the offset changes sign close to the surface. A bounded search for the
+/// surfaces without a signed distance, where the full curve–surface intersection costs seconds
+/// a pair: it can miss a crossing between two samples' feet, never invent one.
+fn sided_roots(e: &super::topo::Edge, t0: f64, t1: f64, s: &Surface) -> Vec<f64> {
+    const N: usize = 24;
+    let mut hint: Option<(f64, f64)> = None;
+    let side = |t: f64, hint: &mut Option<(f64, f64)>| -> (f64, f64) {
+        let p = e.point(t);
+        let (u, v) = s.project(&p, *hint);
+        *hint = Some((u, v));
+        let q = s.eval(u, v);
+        let n = s.normal(u, v);
+        let n = n / n.norm().max(1e-300);
+        ((p - q).dot(&n), (p - q).norm())
+    };
+    let ts: Vec<f64> = (0..=N).map(|k| t0 + (t1 - t0) * k as f64 / N as f64).collect();
+    let ds: Vec<(f64, f64)> = ts.iter().map(|&t| side(t, &mut hint)).collect();
+    let mut out = Vec::new();
+    for k in 0..N {
+        let ((da, ga), (db, gb)) = (ds[k], ds[k + 1]);
+        // A sign change of the offset where the feet are true (the point's distance is its
+        // offset along the normal), not a jump between two feet on different sheets.
+        if !(da * db < 0.0) || ga > 1.01 * da.abs() + 1e-9 || gb > 1.01 * db.abs() + 1e-9 {
+            continue;
+        }
+        let (mut lo, mut hi, mut dlo) = (ts[k], ts[k + 1], da);
+        let mut h = hint;
+        for _ in 0..40 {
+            let mid = 0.5 * (lo + hi);
+            let (dm, _) = side(mid, &mut h);
+            if (dm < 0.0) == (dlo < 0.0) {
+                lo = mid;
+                dlo = dm;
+            } else {
+                hi = mid;
+            }
+        }
+        out.push(0.5 * (lo + hi));
+    }
+    out
+}
+
 /// A point where faces `i` and `j` cross (see the module docs), if any.
 fn crossing(b: &Body, polys: &[Vec<Vec<P2>>], (i, j): (usize, usize), ov: &Bbox, margin: f64) -> Option<P3> {
     let region = ov.grow(margin);
@@ -111,7 +178,9 @@ fn crossing(b: &Body, polys: &[Vec<Vec<P2>>], (i, j): (usize, usize), ov: &Bbox,
             if e.degenerate || !super::boolean::curve_bbox(&e.curve, e.t[0], e.t[1]).overlaps(&region) {
                 continue;
             }
-            for t in super::ssi::curve_surface(&e.curve, e.t[0], e.t[1], &fy.surf) {
+            let Some((t0, t1)) = near_stretch(e, &region, &fy.surf) else { continue };
+            let roots = if elementary(&fy.surf) { super::ssi::curve_surface(&e.curve, t0, t1, &fy.surf) } else { sided_roots(e, t0, t1, &fy.surf) };
+            for t in roots {
                 let p = e.point(t);
                 // (An edge ending on the other face touches it there, as where a wall ends
                 // on a face it doesn't split: a crossing pierces the face with the edge's

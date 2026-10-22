@@ -3439,13 +3439,16 @@ impl NativeKernel {
         if n == want { Ok(()) } else { Err(err(&format!("{n} free edges, expected {want}"))) }
     }
 
-    /// `checkshape`: the body is valid.
+    /// `checkshape`: the body is valid at [`super::topo::CheckLevel::Full`]. A problem only the
+    /// full check finds (the operation's own fast check passed) is reported as `Full check:`.
     pub fn checkshape(&self, s: &Shape) -> Result<()> {
         match s {
             Shape::Body(b) => {
-                let issues = self.get(*b)?.check();
+                let body = self.get(*b)?;
+                let issues = body.check_with(super::topo::CheckLevel::Full);
                 if !issues.is_empty() {
-                    return Err(err(&format!("checkshape: {issues:?}")));
+                    let fast = body.check();
+                    return Err(err(&if fast.is_empty() { format!("checkshape: Full check: {issues:?}") } else { format!("checkshape: {fast:?}") }));
                 }
             }
             Shape::Compound(v) => {

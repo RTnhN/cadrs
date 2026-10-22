@@ -7,7 +7,7 @@
 use cadrs_kernel::native::math::P3;
 use cadrs_kernel::native::smb;
 use cadrs_kernel::native::surface::Surface;
-use cadrs_kernel::native::topo::Body;
+use cadrs_kernel::native::topo::{Body, CheckLevel};
 use cadrs_kernel::{EdgeId, FaceId};
 
 /// A model of a suite, with where SMLib's tests point at its pieces (in SMLib's file order).
@@ -138,13 +138,24 @@ pub fn edge_count(b: &Body) -> usize {
     b.edges.iter().filter(|e| !e.degenerate).count()
 }
 
-/// Checks a result: valid (`check()`, which also wants every solid to enclose a positive
-/// volume), its shells closed with an Euler characteristic a closed surface can have, and
-/// `e`'s values. `input` decides whether face and edge counts are compared (a planar input).
+/// The first problem [`CheckLevel::Full`] finds in `b`, as `invalid: …`; one only the full
+/// check finds (the operation's own fast check passed) reads `invalid: Full check: …`.
+pub fn invalid(b: &Body) -> Option<String> {
+    let full = b.check_with(CheckLevel::Full);
+    let first = full.first()?;
+    Some(match b.check().first() {
+        Some(i) => format!("invalid: {i}"),
+        None => format!("invalid: Full check: {first}"),
+    })
+}
+
+/// Checks a result: valid ([`invalid`]: the full check, which also wants every solid to
+/// enclose a positive volume), its shells closed with an Euler characteristic a closed surface
+/// can have, and `e`'s values. `input` decides whether face and edge counts are compared (a
+/// planar input).
 pub fn check_result(input: &Body, out: &Body, e: &Expect) -> Result<(), String> {
-    let issues = out.check();
-    if let Some(i) = issues.first() {
-        return Err(format!("invalid: {i}"));
+    if let Some(i) = invalid(out) {
+        return Err(i);
     }
     let want_solid = e.solid.unwrap_or(true);
     if want_solid {
