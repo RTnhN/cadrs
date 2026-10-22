@@ -1,0 +1,685 @@
+                                          Shelling and Offsetting Bodies
+
+                                                          Mark Forsyth
+                                                           D-Cubed Ltd,
+                                                           68 Castle Street,
+                                                           Cambridge, U.K.
+
+
+
+
+                             Abstract                                     operator cannot be expressed aa the same boolean combina-
+                                                                          tion of offsets of the primitives (see [3, 5, 6, 7]). Rossignac
+        Offsetting is a procedure where a uniform thick-                  and Requicha [5] introduced CSGO (CSG with offsetting) to
+        ness is added or removed from a solid model.                      get round this, where the offsetting is added as an operator
+        Shelling is a procedure closely related to offset-                in the CSG tree. Farouki [3] gives descriptions of the offset
+        ting which turns a solid model into a thin-walled                 of the boundary of solids of extrusion and of planar, convex
+        shell of constant thickness. This “shelled” solid                 polyhedra.
+        may be closed or open (a hollowed out solid).                         The geometry of offset curves and surfaces is well docu-
+        These procedures have important applications in                   mented and has been studied for over 300 years (Kreyszig
+        mould creation, tolerancing, N .C. tool path gen-                 [10] cites a treatise on parallel curves given by Leibniz in
+        eration, clearance checking and so on.                            1692), This paper will give a brief survey (section 2) of off-
+                                                                          set geometry, concentrating on the properties useful for the
+        Geometry useful in offsetting, such as offset curves,
+                                                                          description of offset solid models.
+        offset surfaces, curves offset along surface nor-
+                                                                              In section 3 a general description of the offset of a Bound-
+        mals and rolling ball blend surfaces are reviewed.
+                                                                          ary Representation (Brep) solid will be given. Section 4 will
+        A description of the offsetting operation on bound-
+                                                                          introduce the shelling operators. In section 5, an algorithm
+        ary representation (Brep) solid models is given.
+                                                                          for offsetting all or a subset of the faces of a solid is given.
+        A practical algorithm for offsetting an important
+                                                                          Finally, shelling algorithms are given, which use this offset-
+        sub-class of Brep solids is presented. In this sl-
+                                                                          ting algorithm. The offsetting algorithm presented will work
+        gorithm, face/face re-intersection    and blending
+                                                                          for a sub-claas of Brep solids. The algorithm requires:
+        are used to offset all or a subset of the faces of
+        the solid, An algorithm for shelling is also given                      ●   If a vertex of a solid lies on a number of surfaces then
+        which uses this offsetting algorithm.     If all the                        the offset of these surfaces must intersect in a number
+        faces in a closed solid are included then a closed                          of discrete points which lie on all the offset surfaces.
+        shell results. Some of the faces may be omitted,                            This is guaranteed if there are three surfaces at a ver-
+        in which case an open shell results.                                        tex.
+
+                                                                                ●   The offset solid does not self-intersect.
+
+  1    Introduction                                                          The algorithms presented have been implemented                in the
+                                                                          Hewlett-Packard CAD system, SolidDesigner.
+  Offsetting operations have many industrial applications such
+  ss tool path generation for numerically controlled machines,
+  mould creation, clearance checking and so on. Offsetting                2         Offset Geometry
+  adds or removes a constant thickness to or from a solid
+  model. Shelling is a procedure whereby a solid model is                 First consider offsetting geometric entities.    This involves
+  converted into a thin-walled shell. This shelled solid can be           creating a geometric entity (like a curve or surface) on which
+  open or closed.                                                         every point is a fixed distance from a base geometric entity.
+      Offsetting operations on Constructive Solid Geometry                There are several possibilities and those useful in offsetting
+  (CSG) modellers has been considered by Rossignac and Re-                and shelling are described below.
+  quicha, [5]. The problem for CSG modeliers is that, if a solid
+  is some boolean combination of primitives, then the offset              2.1        Planar     Offset     Curves
+                                                                          Given a planar curve C(t) define the curve offset from this
+   Permission to copy without fee all or part of this material is
+                                                                          in the plane by a constant        (non-zero)   distance   v. The offset
+granted provided that the copies are not made or distributed for
+direct commercial advantaqe, the ACM copyright notice and the             curve, Co(t), lies in the plane and is defined as
+title of the publication and Its date appear, and notice is given
+that copyin is by permission of the Association of Computing                                      co(t)   = C(t)+   @Jc(t)                    (1)
+Machinery. ? o copy otherwise, or to republish, requires
+a fee and/or specific permission.                                         where
+Solid Modelin      ’95, Salt Lake City, Utah USA
+ 0 1995 AC 4 0-89791 -672-7/95/0005.,.$3,50
+
+
+
+
+                                                                    373
+      ●   N.(t) = Z x T(i) is the curve unit normal.                       2.3        The Offset of a Surfiace Singularity
+      ●   Z is the unit normal to the plane                                Let S(u, v) be a surface (defined on [UO,u1] x [UO, u1]) which
+                                                                           haa a geometric singularity (i.e. a singularity which is not
+      ●   T(t) is the curve unit tangent.                                  removable by a reparamet risation). Assume that S has a
+                                                                           degenerate u boundary, i.e. S.(UO, v) = O, Vu. Obviously
+These are also known as pamllel     curves and for a detailed              the analysis is similar for degenerate u boundaries.
+analysis one is referred to [1] and [2].                                       At this boundary N(u, v) is not uniquely defined. How-
+    Note that these offset curves can be very complex even                 ever, a normal can be defined Vv E [VO,vi]. This can be
+for simple curves.    For example, [2] shows that there are                done using, for example, L’Hbpital’s rule, since both the nu-
+algebraic representations   both C(t) + qNc(t) and C(t) -                  merator and denominator tend to O at the singularity in the
+vNc(t) together when C is an polynomial or rational curve,                 formula for N(u, u). Note, in general, N(uo, t) # N(uo, s)
+but that one of the branches on its own is not in general an               for s # t.
+algebraic curve, even for simple curves such as parabola and                   So at the surface singularity there are a range of normal
+ellipses.                                                                  values, therefore the singular point offsets into a curve on
+                                                                           the offset surface. That is, if V = S(UO,v) (Vv), the singular
+2.2        Offset      Surfaces                                            vertex, then the offset of V, E3v is
+
+Given a surface 9(u, u) (in the rest of this paper this shall                               @v(t)    =   ~(uo, t)   = V +qN(uo,   t)           (6)
+be referred to as the base surface), then the offset of S by
+a constant,      non-zero distance, q, is defined as                       which is a curve on e(u, u). For example, it is easy to
+                                                                           demonstrate (and visualise) that if S(U1 u) is rotationally
+                       e(u, v) = S(W u) + qN(u, u)             (2)         symmetric (like a cone, torus or spun surface) then @Iv(t)
+                                                                           is a circle.
+where
+
+
+
+and Su is the first partial derivative with respect to u e.t.c.
+In the literature these are known as pamllel aurjacea.
+      The normal to the offset surface, No, satisfiea the follow-
+ing relation,
+
+                 N“(u, U) = m(u, u) Y2(u, V) N(u, u),          (3)
+
+where
+                           71(u,   u)=l:_:;,                   (4)
+
+
+
+                           7’@’”)
+                              =lL::l                           (5)
+
+and kl (u, v) and kz (u, o) are the principal curvatures of the                         Figure 1: Outward offset of elliptical     cone
+surface S(u, u). For a more detailed analysis see, for examp-
+le, [4, 8, 9, 10]. Note the following :-                                           Consider the offset of a (half) elliptical cone. Outward
+                                                                           (i.e.     q > O) and inward are shown (see figures 1 and 2).
+      ●   Given a position P on the offset surface at parameters
+          (s, t), (i.e. P = @(s, t))then let,
+                                                                           Note the apex offsets into a non-planar            curve.     From the
+
+                                  P’=   P - qN”(s, t)
+
+          then P’ lies on the surface S, and has parameters (s, t)
+          (i.e. P’ = S(s, t)). This is a useful property of our
+          definition (2). We will refer to this as a pammeter
+          preserving    oflset.
+
+      ● Ne    is parallel or anti-parallel    to N.
+
+      ● If either  kl = I/q or kz = I/q then the offset surface
+          normal is not defined. In this situationthere is a cusp
+          or ridge on the offset surface. If both kl and kz are
+          greater than or both kl and kz are less than l/q then
+          Ne is parallel to N. If one is larger and one smaller
+          then No and N are anti-parallel.
+                                                                                         Figure 2: Inward offset of elliptical    cone
+
+                                                                           definition    (2),
+
+                                                                                                N(u, u) =   (e(u,v) - S(U>v))/q
+
+
+                                                                     374
+so at the singular point,                                                             Right Circular Half Cone: Here kQ = O and kl E
+                                                                                          (O, -cm). Thus 72 = 1, and k, = -cos(a)/R(v),   where
+                    N(u,,     t) = (@(uII, t) -V)/~                                       a c (O, %/2) is the cone half angle and R(u) >0 is the
+                                                                                             radius of the cone at a parameters (u, v). So there is a
+or                                                                                           degeneracy when R(v) = -rjcos(a).      So if rj > 0 then
+                        N(uo, t) = (@V(t)      -   V)/q                                      there are no self-intersections. If ~ < 0 then there is
+and so                                                                                       always a self-intersection.
+                            I@V(t) -VI        = Iv/                      (7)          Torus: For a torus, of major radius 4 and minor radius h,
+                                                                                             then
+Therefore C3V(~) lies on the sphere IX – VI = IvI (i.e. a
+sphere centred at V with radius Iof). Also the sphere normal                                           T(u, v) = C(u) + b(Xcos(v)          + Ysin(v))
+is given by
+                     N@ = (X - V)/q                                                          (where     C(u)     is a circle radius,     a, and unit vectors
+                                                                                             X(u),     Y(u))     and can write kl = cos(v)/(a     - bcos(v))
+thus at X = @v(t) = @(uo, t)                                                                 and kz = - I/b.       From these
+
+                 N.p.     = (@V(t) - V)/~ = N(rt,, t)                                            I. If ~ = -b then the offset torus degenerates to a
+                                                                                                    circle. If 9 < -b then the offset torus will be
+Since N is parallel to the offset surface normal, N,P~ is                                           turned inside out.
+paraIlel to the offset surface normal. So there is a tangent                                     2. If q > a - b then the offset torus will self-intersect.
+intersection between the surface @(u, u) and the sphere IX-
+                                                                                                 3. Ifq<–a          - b then the offset torus           will self-
+VI = Iv! and this is namely, @v(t) = V + qN(uo, t).
+                                                                                                    intersect.
+   In figure 3 the example offset elliptical cone and it’s tan-
+gent sphere are viewed from the side.                                                    Self-intersecting surfaces are problematic for boundary
+                                                                                     representation solid modellers, thus these surfaces have to
+                                                                                     trimmed back to the self-intersection             where possible.
+
+
+                                                                                     2.5      Rolling          Ball Surface
+                                                                                     This is the surface which is a constant distance from a curve.
+                                                                                     It is often also called a pipe surface or a conai surface. These
+                                                                                     can be defined as the envelope of spheres centred on the
+                                                                                     curve (thus the name rolling ball surface).
+                                                                                          This surface is commonly used in solid modelling to blend
+                                                                                     two faces. This surface is defined from a (spine) curve, C(t),
+                                                                                     and a radius value, q. It is defined as,
+
+                                                                                             R(U, V) = C(U)+          q (N(ti)cos(u)    + B(u)~in(v))         (8)
+
+                                                                                     where B(u) and N(u) are the unit binormal and normal to
+                                                                                     C(u). Note, a sphere whose centre lies on the spine curve
+      Figure 3: Offset of elliptical        cone with tangent   sphere               and has the same radius as the rolling ball, R(u, v) intersects
+                                                                                     R(u, v) in a tangent circle.
+                                                                                        Also (see [9] pp 251,252),
+2.4       Singularities           on   the     Offset     Surface                          Rux      R v = q(l - qxcos(v))(Ncos(v)+            B.stn(v))        (9)
+
+As stated above, if the offset distance is equsl to one of                           where ~(u) is the curvature of C(u). This implies that q <
+the principal curvatures of the base surface there will be a                         rnin~~(u)’] I to ensure the roiling ball does not self-intersect
+cusp or self-intersection in the offset surface. Since, near                         or kink. The normal is then,
+to a singularity the curvature of the base surface is very
+high, then cusps and self-intersections  in the offset surface                                    NR(u,    v) = TR(U, V)(NCOS(V)+          Bsin(v))          (10)
+are likely.
+     Note from (4) and (5), both yl(u, v) and 72(u, v) are                           where
+                                                                                                                       ~ (1 - q K(u) Coa(v))
+equal to +1. Assume that on the base surface kl becomes                                                 7R(u, v) =                                           (11)
+infinite at a singularity, but kz remains either greater than                                                         IV(I - v~(u)co~(v))l
+or less than l/q such that 72 is constant. If ~ >0 then                              Assuming the condition           on q, the normal to R(u, u) can be
+                                                                                     written simply as,
+     a) If kl < 0, kl ~ —00 as one approaches the singularity,
+        then 1- k] q >0 and N@ is always defined.                                                         NR(U, IJ) = (R(u, v) - C(U))/~                     (12)
+
+     b) If kl > 0, kl -        00 as one approaches       the singularity,
+         then   if at any    stage kl < l/q there         will be a point            2.6      Offset        of Curve       on a Surface
+         where 1 – kl q = 0.
+                                                                                     Given a curve, C(t), on a surface, 9(u, u), the curve is offset
+Examples:-                                                                           along the surface normal by a constant distance, q.
+                                                                                         Since the curve lies on the surface define relations u x
+                                                                                     u(t) and v * v(t) such that
+                                                                                                                 c(t) = S(u(t),u (t))                        (13)
+
+
+
+
+                                                                               375
+and at any point on the curve the surface normal is defined
+as
+              ~(t)   =       Su( u(t), u(t)) x S.( u(t), v(t))     (14)
+                             I S“(u(t), v(t)) x !%(u(t), u(t)) I
+This allows the following oflset curve to be defined as,
+                             Co(t) = C(t)+ nN(t)
+These curves have the following well known properties useful
+in solid modelling, all of which have simple proofs.
+
+Tangent Edge Property If two surfaces intersect
+tangentially along a curve, C(t), then their offset surfaces
+                                                                   (15)
+
+
+                                                                                      Pl                     Original boundary
+                                                                                                             solid
+                                                                                                                                    of
+
+
+
+
+will intersect tangentially along the curve, Co(t).
+
+Blended Edge Property Given two surfaces, S1
+and S2 intersecting along a non-tangent curve, C(t), then
+let R be a rolling ball with spine curve C(t) and C@ be the
+offset curve of C, along the normal of S1. Typically, in a
+solid model, there would be faces on the surfaces and their
+intersection would be an edge. Then
+                                                                                  Pl                         Offset boundary
+                                                                                                             solid
+                                                                                                                               of
+
+
+
+
+                                                                                  m
+      ● Co   lies on R.
+      ● Cois a tangent intersection            between R and the offset
+       by q ofsl.
+                                                                                                             Trimmed offset
+                                                                                                             boundary of solid
+Vertex     property        Given two curves Cl (t)and C2(T)
+on a surface S(u, u) which intersect at a point V = Cl (to) =
+Cz(m ), with offset curves C! and C:. Then define two
+rolling ball surfaces RI and R2 with spine curves Cl and                         \                     J
+C2 (given by (8)), respectively. The circular isoparametric                                        Figure 4: Offset Boundaries
+curves R1 (to,s)  and Rz (ro, c) are
+             E,(s)       =     Rl(to, s)
+                         =     V + q (Nl COS(S)+ B1 sin(s))                     3.1       The Offset of a Face
+and                                                                             A face is a finite region of a surface bounded by loops of
+                                                                                edges. Each face has a sense S = +1 such that the sense
+             E2(u) =           R2(70, u)                                        times the surface normal points away from the solid’s inte-
+                         =     V + q (N2 COS(U)+ Bz sin(u))                     rior. So to offset a face it’s surface must be offset by the
+                                                                                signed dist ante
+where N1 and B1 are the unit normal and blnormal to the
+                                                                                                           q. = S?JI                    (16)
+curve Cl(t) at t = to, Similarly for N2 and Bz.
+    Then the offset of V is V + q N is an intersection of the                        If the face has surface S and is bounded      by a sequence
+offset curves, C: and C!, and is one of the intersections of                    of n edges with curves Ci (i = 1, , . . . n) and m vertices    Vj
+the circles, El and E2.                                                         (j=l     ,. ... m) then the offset face has surface @’, n edges
+                                                                                C:    and m vertices       V$.   Where
+
+3      Offsetting            Solid    Models                                     ~’    is the offset surface of S(u, v) by distance q, given by
+                                                                                        (2),
+The process of offsetting adds or removes a uniform thick-
+ness, q, to or from a solid model. If q > 0 then the offset                      C! is the offset curve of Ci by distance           VS given by (15),
+operation adds material, and removes material if q <0.                           V: = Vj + q,N(u,           u) where N(u, u) is normal to S at V,.
+    In Brep modelling only the boundary of the offset solid
+need be considered. The boundary of the offset solid is a                           It is easy to see that if Vj is a vertex on edges with
+subset of the offset of the boundary of the original solid                      curves C~ and Ci+l then V$ lies on C! and C~+l.
+(see, for example, [5] for more details). For example, when                         Notice that we have described the offsetting of the bound-
+offsetting faces meeting at a concave edge (see figure 4) there                 ary of a face, and these bounding offset curves C! will not,
+are pointo on the faces whose offset is inside the solid and so                 in general, represent the offset of the face edges.
+do not form part of the boundary of the offset solid. Thus
+the offset of the boundary must be trimmed bock to where
+it self-intersects.
+                                                                                3.2      The Offset of an Edge
+    Throughout the rest of this paper, it will be assumed that                  The offset of an edge (not to be confused with the offsetting
+q is less that the smallest radius of curvature of a surface                    of the boundary of a face) is all the points a distance q from
+supporting a face or any curve on an edge in the solid model.                   the edge. All the points a distance q from the edge’s curve
+An exception is made, when the offset of vertices at surface                    is a rolling ball surface of radius q with spine curve as the
+singularities are discussed. It will also be assumed that the                   edge curve. Note this rolling ball surface may not appear in
+body is a manifold solid. Consider what happens to the                          the resulting offset solid.
+offset of faces, edges and vertices.
+
+
+
+                                                                          376
+    First assume we are offsetting outwards i.e. offsetting in             If the singular vertex is “convex” with respect to the
+the positive face normal direction.   If there are two faces,              face normal (i.e. is like a sharp point on the solid) then
+Y1 and %2 (with offset surfaces @I and 02, respectively.)                  the offset is a segment of a sphere. This sphere meets
+meeting at the edge (with curve C(t), say) then the curve                  the face’s surface along the curve given by (6).
+C(t) offsets into two curves C! and C:, as described above.
+                                                                           If the simzular vertex is “concave” with resuect to the
+N.B. C! lies on the offset of 71 and C: lies on the offset
+                                                                           face norm-al (i.e. is like a dimple on the ~olid) then
+of 72. There are three cases, depending on the convexity of                the offset is a point or curve of self-intersection of the
+the edge.                                                                  offset   surface.
+  Tangent    Here C! = C: and the offset of the edge is a          These cases are reversed if q, is less than zero.
+      single edge. The rolling ball surfaces touches @l and
+      @a tangentially   along the curve C!.
+                                                                   3.3.2        Vertex Offsets
+  Convex Here C! # C:. Both C! and C: lie on the rolling
+      ball (see section 2.6). So the offset of the edge gener-     In general, the offset of a multiple edge vertex can be very
+      ates a face bounded by the curves C! and C: (also by         complex indeed. The claasic example which illustrates the
+      where the rolling ball meets the offset of the vertices      situation is a four sided pyramid with a rectangular base.
+      of the edge) which has the rolling ball as it’s surface.     The apex of this pyramid has four convex edges, if we offset
+                                                                   inwards then these edges will offset into four edges (since
+ Concave   Again C! # Cf. But in this case the rolling ball        we are offsetting convex edges inwards, we get no rolling
+     is always “inside” the offset model (see figure 5) and        ball contribution).  However, because the base is rectangular
+     need not be considered. The offset edge is where the          these four offset edges will not intersect in one point. In fact
+     two offset faces intersect.
+                                                                   the offset inwards of a rectangular pyramid is a “wedge”
+                                                                   shape. The vertex splits into an edge and two vertices on
+Figure 5 shows sectioned       views of edge offsets.
+                                                                   offsetting. Note the following:-
+                                                                       ●   The offset of a convex edge is a rolling ball surface
+                                                                           radius Iv[, with spine curve as the edge’s curve.
+                                                                       ●   The offset of a vertex is a sDhere (centred at V. radius
+                                                                           Iql). Since the vertex lie; on the edge’s curve, this
+                                                                           sphere tangentially intersects the rolling ball of the
+                                                                           edge. The intersection is a circle radius Iql, centre V
+                                                                           and the normal to the circle’s plane is the edge curve’s
+                                                                           tangent at V.
+                                                                      If we consider offsetting outwards only. Offsetting in-
+                                                                   wards, is the same if we swap all references to conuez with
+                                                                   concave and vice-versa. Then :-
+                                                                       . Every conuez edge generates      a rolling ball surface.
+                                                                       o Every tangent edge generates      a tangent   edge.
+                 Figure     5: Offset   of an Edge                    ●    Every concave edge generates    a concave edge.
+                                                                      o If there are more than two convex edges or the vertex
+    If we are offsetting inwards then the convex/concave sit-
+                                                                        is at a surface singularity there will be a face with a
+uations are reversed. That is, tangent offsets to tangent,
+                                                                        spherical surface. This will meet the rolling ball sur-
+convex offsets to an edge and concave offsets to rolling ball
+surface.
+                                                                           faces of the convex edges along tangent circular edges
+                                                                           and singular surfaces along the curve given by (6).
+                                                                      ● Where      there are concave edges, further edges may be
+3.3     The Offset of a Vertex
+                                                                           required. These happen when offset faces and rolling
+The offset of a vertex depends on how many edges meet at                   ball surfaces adjacent to the concave edge intersect.
+the vertex and the convexity of those edges.                               Figure 6 shows a complex vertex region with a concave
+    Geometrically, the offset of a vertex is a sphere, that is             edge. Here the two rolling balls (offset convex edges)
+all the points, X, a distance, q, from a single position (the              have intersected creating an edge.
+vertex position, V) is the sphere IX – VI = Iql.
+                                                                   Algorithmic difficulties arise when there are concave edges.
+    However, this sphere may never appear in the resultant
+                                                                   If the vertex has any number of convex or tangent edges
+offset model. Similar to the concave edge case, the sphere
+                                                                   then it can always be offset into a spherical face bounded
+may be entirely inside the offset model.
+                                                                   by circular edges. Offsetting concave edges can require the
+                                                                   addition of many edges between faces which did not intersect
+3.3.1     Isolated        Singular      Vertices                   prior to the offset operation.
+                                                                       The offsetting of edges and vertices into rolling balls and
+If the vertex is at an isolated surface singularity then the       spheres can be viewed as a blending problem. Here instead of
+vertex offsets into either a segment of a sphere or a point        offsetting convex edges their supporting faces are offset and
+or curve of self-intersection. If the face offset distance, q~,    intersected, these intersections can then be blended with a
+(given by (16)) is greater than zero then there are two cases.     constant radius. Offsetting is often seen as a means to blend
+                                                                   or fillet a solid (e.g. [5]), we invert this and use blending to
+                                                                   generate the offset solid model.
+
+
+
+
+                                                             377
+4      Shelling
+Only completely solid bodies (i.e. bodies which have no
+interior voids) make any sense for this operation. The sim-
+plest case is to shell a body, so that we change the body to
+have an interior void a constant distance from the original.
+A more complex form of shelling is to permit faces to be
+opened. Here, some faces are not offset creating an open
+shell. These operations are very useful in mould creation.
+
+4.1      Closed     Shelling
+This is a simple application of the offset operation.      The
+faces of a body form a closed shell. These are then copied,
+ofiset, negated and added to the body. Th~s results in a
+closed, thin-walled shell, If the original solid is M and it’s
+offset is Af then the closed shelling operation is the solid S
+formed by the difference:
+                                                                                  Figure 6: Offset of a Complex Vertex Region
+?<0
+                       S=    M-   Af=Mn      FWAf           (17)
+
+V>o
+                       S=    JV-M=Afn-M                     (18)
+
+where - M is the complement        of M.
+
+
+4.2       Open Shelling
+Again, faces of the body are offset, but the set of faces to
+be offset does not form a closed solid. Opened faces are
+not offset. If a face, ~ shares an edge with a face to be
+opened then it’s offset must also intersect the opened face
+
+
+
+
+                                                                         mm
+(otherwise the operation makes little sense). The effect of
+this is to change the opened face into a number of thin strip-
+like faces (see, for example, figure 7). The edges on a face
+are formed into loops (i.e. a closed, simply-connected      set
+of edges). If an opened face has N{ loops then this will be
+split into at least l@ faces by the open shell operation. The
+sense of the opened face may need changing depending on
+the convexity of the edges of the opened faces. Three cases
+are considered depending on the convexity of all the edges                                      Figure 7: Opened Faces
+of a loop.
+
+    All Convex The opened face’s normal remains in the same
+         direction.
+    All Concave The opened face’s normal is reversed.
+    Differing    Convexity    If there are n, (n > 1) changes of
+
+
+
+
+                                                                              IL?J
+         convexity then the opened face is split into n -1 faces.
+         Each of these faces is supported by the same surface,
+         but those arising from concave edges have the opposite
+                                                                                        Convex
+
+
+
+
+                                                                         ,,/
+                                                                          ,,,
+         face senses.
+
+
+
+
+                                                                            ii
+Figure 8 shows sectioned opened solids. Let M be the orig-
+inal solid, and be bounded by the set of faces {~1, . . . . =n,
+01,... Om } where ~i are faces to be offset and Oj are faces
+to be opened. Let hf be the (partially) offset solid, assuming
+the set of faces {Ff, ,.. , F:, 01, . . . 0~} (where Ff are the
+offsets of 71) forms the boundary of a closed solid. An open
+shelling operation is the solid S formed by the difference:
+                                                                         U If!!!ll
+                                                                         )
+
+
+                                                                             p“
+                                                                                        (have
+
+
+
+
+q<o
+
+
+ ?>0
+                       S=    M-   Af=Mn*~                    (19)        G!z
+                                                                         /’       ‘
+                                                                                        Mixed
+
+                                                                                                    LJ!l
+                                                                                                           i
+
+
+
+                                                                         Figure 8: The Effect of Edge Convexity on Opened Face
+                        S=   N-   M=   NnWM                  (20)
+
+
+
+
+                                                                   378
+5         Offsetting         A Body                                        and so on.
+                                                                               If an edge is non-tangent then it’s offset is computed by
+An algorithm is given to offset a number of faces from a                   re-intersection.  The intersection of a pair of surfaces may
+solid. This can be used to offset a solid body by offsetting               consist of multiple branches. When this happens a curve for
+all the faces of the body.                                                 the edge is chosen by the following criteria,
+                                                                               1. The curve must pass through the offset positions cal-
+5.1         Offset        of a Number        of Faces                             culated for the vertices of the edge.
+The algorithm to offset of a number faces is described by                      2. The curve must not create a self-intersecting    body.
+the nine sequential steps as follows:
+                                                                               3. Choose curves which have the same convexity (with
+    1. Generate offset surfaces of the surfaces of each face.                     respect to the offset faces) as the edge being offset.
+       Offset the surface of each face by the distance Sq where                4. Where the above criteria do not uniquelv       identify a
+                                                                                                                          .-
+       S is the face’s sense.                                                     curve, the closest to the original edge is chosen.
+    2. Generate      offset curves for any tangent edge, where we
+          can (see sec. 5.1, 1). For each edge that haa not had            5.1.2         Computing        Offset   Vertices
+          an offset curve computed:
+                                                                           We consider four cases, where we can simply compute             the
+                ●   Recompute geometry of the edge by surface/sur-         offset vertex.
+                    face intersections.
+                                                                               1.    There are three faces (and three edges) meeting at the
+                o Let N’ be the number of intersection curves found                  vertex. All three edges are non-tangent.
+                  for the edge.
+                                                                               2. There are three faces meeting at the vertex, where one
+    3. Generate      offset positions for any vertex where we can                 of the edges is tangent.
+          (see sees. 5.1.3 to 5.1.6), For each vertex that has not
+          had it’s offset position computed:-                                  3. All faces meet at the vertex tangentially.
+
+                . Recompute geometry of the vertex by curve/sur-               4. The vertex is an isolated surface singularity.
+                  face intersections.                                          If the vertex cannot be computed       by the above methods
+                ● Let    NP be the number of intersection points found     then re-intersection is used.
+                    for the vertex.
+
+    4. Attach offset surfaces to faces.                                    5.1.3         Three Transversal Faces
+
+    5. If for an edge N’ is 1 then attach that geometry to the
+                                                                           If there are three transversal faces meeting at a vertex then
+          edge.                                                            itshould be possible to generate the offset vertex position
+                                                                           by relaxation techniques (such as Newton’s method). We
+    6. If for an vertex Np is 1 then attach that geometry to               have a vertex on three surfaces S1, S2 and Ss at, say, V =
+          the vertex.                                                      Sl(a, L9) = S2(7, 6) = SS(C, c). Then if the offset sur-
+                                                                           faces are @l, Elz and @a, respectively, we can solve for
+    7. If there    are any edges or vertices which have not had            r,s, t,u, v,w      in Ql(r, s) = 02(t, u) = Os(v, w) to give the
+          their new geometry attached (i.e. where N= or Np >               offset vertex position. If the offset surfaces are pam meter
+          1) then the criteria given in 5.1, I are used to select          preserving then the three positions El = @I (a, d), E2 =
+          unique curves and positions for the edge and vertices.           @z(y, 6) and Ea = @s(~, () provide good estimates for re-
+                                                                           laxation. This relaxation will fail if any surface is singular
+    8. Check the solid does not self-intersect.
+                                                                           at the vertex or any pair of surfaces meet tangentially.
+    9. If 0>0     then blend all convex edges with a radius, ~.                 Note also that some of these surfaces may not be being
+          If q < 0 then blend all concave ~dges with a radius,             offset.  In these cases we use the original surface with the
+          –~.
+                                                                           original vertex position as the estimate.
+
+
+5.1.1               Computing      Offset Edges                            5.1.4        Three Faces, One Tangent Edge
+
+As stated above we can compute the curve of an tangent                     If there are three faces at a vertex where two faces are tan-
+edge by computing the offset curve (15). Often these offset                gential (i.e. generating a tangent edge) then we can generate
+curves these are not representable by a modeller but there                 the offset vertex position if we have been able to compute
+are numerous special cases. These csaes are very common                    the offset tangent edge (see 5.1.1). Similar to 5.1.3 we can
+in solid modelling. For example:-                                          generate the offset vertex position by relaxing to the inter-
+                                                                           section of the offset curve and the transversal surface. Again
+    ●     Any isoparameter line offsets into an isoparameter      line     good estimates are available from the model.
+          of the offset surface (see, for example, [10]).
+      0   The offset curve of a planar curve is the translation     of     5.1.5        All    Faces   Tangent
+          that curve along the plane normal.                               This is the simplest case. Here there are a number of faces
+    ● The      offset of a curve on a sphere is a scaling of the           at the vertex, and the surface normals of every face at the
+          curve about the sphere centre.                                   vertex are the parallel. A simple calculation gives the offset
+                                                                           vertex position as V + qN where V is the vertex position
+                                                                           and N the normal direction.
+
+
+
+
+                                                                     379
+5.1.6       Isolated        Surface    Singularities                        2. Offset all the copied faces.  Recompute all geometry
+                                                                               of edges and vertices. The algorithms described in 5.1
+Here the algorithm expects the offset surface also to be sin-                  are used to do this.
+gular. The offset vertex is then at the singular point of the
+offset surface.                                                             3. Check for self-intersection   between faces of the original
+                                                                               solid and the offset faces.
+5,2      Shelling          A Body                                           4. If the offset distance is greater than zero the original
+                                                                               faces of the body (except the faces being opened) must
+5,2.1       Closed         Shelling                                            be negated. If the offset distance is less than zero the
+Closed shelling of a solid can be implemented      in the following            offset faces must be negated.
+three steps.                                                                5. Determine  all the face which share an edge with a face
+                                                                               being opened.
+   1. Copy all the faces of the body. All geometric and topo-
+        logical entities are copied.                                        6. Intersect   these with the opened faces and imprint the
+   2. Offset all the copied faces. Recompute all geometry                      intersections onto the opened faces and adjacent faces,
+      of edges and vertices. The algorithms described in 5.1                   splitting edges and faces where necessary.
+      are used to do this.                                                  7. Delete any faces and edges which are not in the set
+   3. Add the offset faces to the body. If the offset distance                 described in (19) and (2o).
+        is greater than O, these will form the exterior of the
+        shelled solid and the original faces will form an interior
+        void, If the offset distance is less than O, the offset                                                                         o
+        faces will form an interior void and the original faces
+        will remain the exterior of the shelled solid.
+                                                                                                                                         0
+
+
+
+
+                            I
+                       ,
+                       .
+                            I
+
+                                                                                           Figure 10: Part to Be Shelled
+
+
+
+                                                                        6     Conclusion
+                                                                        This paper discussed offsetting and shelling operations on
+                       m
+                                                                        Boundary Representation (Brep) solid modellers. Offset ge-
+                            I                                           ometry useful to offsetting solids was reviewed and a detailed
+                                                                        description of the offset of the boundary of a solid was given.
+                                                                            Practical algorithms for the implementation of these op-
+                                                                        erations in Brep solid modellers were presented. These algo-
+               Figure 9: Sectioned Shelled Bottle                       rithms have been imdernented
+                                                                                              .           in the Hewlett-Packard CAD
+                                                                        system SolidDesigner, Figures 9 to 11 give some examples
+                                                                        of the shelling operation on non-trivial bodies.
+                                                                            These alg~ri~hms are restricted to a subclaas of Brep
+5.2.2       Open       Shelling                                         solids. More work is required to remove these restrictions
+To shell a body with a number of open faces, the algorithm              and Boolean operations may provide the required techniques.
+is very similar to that for a closed shell, but we must be
+careful with the faces being opened.
+   1. Copy all faces which are to be offset.
+
+
+
+                                                                  380
+7    Acknowledgements
+
+The author would like to grateful acknowledge the help and
+support of Dr. John Owen, D-Cubed Ltd, in preparing this
+paper. This work was supported      by the Mechanical      Design
+Division of Hewlett Packard.
+
+
+REFERENCES
+ [1]Farouki,    R.T. and Neff, C.A (1990) AnaJ@ic proper-
+     ties o~ plane oflset curues, Computer Aided Geometric
+     Design 7, 83-99.
+ [2] Farouki, R.T. and Ifeff, CA (1990)        Algebraic proper-
+     ties of plane oflset curues, Computer     Aided Geometric
+     Design 7, 101-127.
+ [3] Farouki, R.T. (1985) Exact Oflset F’roceduresfor Simple
+     Solids, Computer Aided Geometric Design 2, 257-279.
+ [4] Farouki, R.T. (1985) The Approximation of Non-Deg-
+     enerate Ofiset Surfaces, Computer Aided Geometric
+     Design 3, 15-43.
+ [5] Rossignac, J.R. and Requicha, A.A.G (1985) Offset Op-
+     erations in Solid Modelling, Computer Aided Geometric
+     Design 2, 129-148.
+ [6] Saeed,S.E.0, de Pennington,    A, and Dodsworth J.R
+     (1988) Offsetting in Geometric Modelling, Computer-
+     Aided Design 20, 67-74.
+ [7] Pham, B. (1992) Oflset     Curves and surfaces:      A Brief
+     Suruey, Computer-Aided      Design 24, 223-229.
+ [8] van Brunt, B, (1994) Weingarten     Surfaces, Design and
+     Application of Curves and Surface, Mathematics of Sur-
+     faces V, ed by R. B. Fisher, 49-87.
+ [9] Guggenheimer,     H,W. (1963)      Differential    Geometry,
+     Dover Publications Inc.
+[10] Kreyszig, E. (1991) Differential   Geometry,      Dover Pub-
+     lications Inc.
+
+
+
+
+                                                                          k!v5!!J
+                                                                          Figure 11: Shell with Three Open Faces
+
+
+
+
+                                                                    381
+
