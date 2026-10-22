@@ -364,7 +364,6 @@ offset faces_type_i_c2
 offset faces_type_i_c5
 offset faces_type_i_d1
 offset faces_type_i_d7
-offset faces_type_i_e3
 offset faces_type_i_e5
 offset faces_type_i_e7
 offset faces_type_i_e8
@@ -392,8 +391,6 @@ offset shape_type_i_a5
 offset shape_type_i_a9
 offset shape_type_i_b4
 offset shape_type_i_b6
-offset shape_type_i_c2
-offset shape_type_i_c4
 offset shape_type_i_c6
 offset shape_type_i_c_i4
 offset shape_type_i_c_i5
@@ -404,8 +401,6 @@ offset shape_type_i_d4
 offset shape_type_i_d5
 offset shape_type_i_d6
 offset shape_type_i_d7
-offset shape_type_i_e1
-offset shape_type_i_e2
 offset shape_type_i_e3
 offset shape_type_i_e4
 offset shape_type_i_g2
@@ -433,19 +428,9 @@ boolean bsection_m2
 boolean bsection_n8
 boolean bsection_p1
 boolean bsection_r9
-draft angle_b3
-draft angle_d6
-draft angle_e3
-draft angle_e9
-draft angle_f6
-draft angle_f7
-draft angle_g8
 draft angle_j8
-draft angle_k3
 draft angle_k7
-draft angle_k8
 draft angle_m4
-draft angle_g1
 # bsection_k3: with exact (sub-net) B-spline face boxes the finer SSI grid finds a small loop near
 # the open branch and the open curve detours through it (63.5 long between ends 23.3 apart).
 # W10: cases the DRAW commands added for pipes, sweeps, form features, evolutive and
@@ -566,17 +551,9 @@ feat featrevol_h1
 mkface after_extsurf_and_offset_c8
 mkface after_extsurf_and_offset_c9
 # draft: the operation fails.
-draft angle_c4
-draft angle_h3
-draft angle_h4
-draft angle_j9
-draft angle_k5
 draft angle_l4
-draft angle_l5
 # draft: a boolean of the feature fails (open shell).
 draft angle_h5
-# draft: the measured property differs from OCCT's.
-draft angle_k9
 # blend: a boolean of the feature fails (open shell).
 blend bfuseblend_a6
 blend complex_d2

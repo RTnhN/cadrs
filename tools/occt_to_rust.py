@@ -993,6 +993,25 @@ WRONG_REFERENCE = {
     ("offset", "shape_a1"): "the input's volume (ours: 2128159, the kept faces' area × 5 less the corners' overlap)",
 }
 
+# Cases whose reference area is wrong, checked against a value of ours found another way
+# instead (the case's `checkprops -s` takes it): (why OCCT's is wrong, ours, how ours is known).
+WRONG_AREA = {
+    # A 0° draft of the cone of `pcone p 10 2 20`: OCCT leaves a face drafted by nothing as it
+    # is (its reference, 1138.79, is the cone's own area), but the draft angle is the face's
+    # absolute angle to the pull (as for any plane or cone drafted), so 0° makes the cone the
+    # cylinder through its base circle: 2π·10·20 + 2·π·10² = 1884.96.
+    ("draft", "angle_b3"): ("the input's own area: OCCT skips a 0° draft", 1884.96, "the closed form of the cylinder the 0° draft makes"),
+    # OCCT's own result is faulty here (the script's TODO OCC22803 "Faulty shapes"). Ours equals
+    # the union of the drafted pipe alone with the sphere, to 1e-9.
+    ("draft", "angle_k5"): ("that of OCCT's faulty result (TODO OCC22803)", 5837.90, "the drafted pipe alone fused with the sphere, the same to 1e-9"),
+    # Likewise faulty in OCCT; ours equals the drafted prism alone fused with the torus.
+    ("draft", "angle_k8"): ("that of OCCT's faulty result (TODO OCC22803)", 7721.62, "the drafted prism alone fused with the torus, the same to 1e-9"),
+    # Faulty in OCCT too, and under the input's own area (956.49): a 3° draft of the revolved
+    # block's cylinder can't halve the body's. Ours equals the drafted block alone fused with the
+    # revolved bowl.
+    ("draft", "angle_g8"): ("that of OCCT's faulty result (TODO OCC22803), half the input's own", 957.92, "the drafted block alone fused with the bowl, the same to 1e-9"),
+}
+
 # Groups whose known failures are slow to run: they run only with --ignored.
 SLOW_GROUPS = {"blend", "offset"}
 
@@ -1049,6 +1068,15 @@ def main():
                     if (group, name) in WRONG_REFERENCE:
                         note = WRONG_REFERENCE[(group, name)]
                         lines = [f"// (Not checked: OCCT's reference volume is {note}.)" if "checkprops_v(" in l else l for l in lines]
+                    if (group, name) in WRONG_AREA:
+                        why, ours, how = WRONG_AREA[(group, name)]
+                        fixed = []
+                        for l in lines:
+                            if "checkprops_s(" in l:
+                                fixed.append(f"// (OCCT's reference area is {why}; ours is {how}.)")
+                                l = re.sub(r"checkprops_s\((.*), [-0-9.e+]+\)", lambda m: f"checkprops_s({m.group(1)}, {ours})", l)
+                            fixed.append(l)
+                        lines = fixed
                     if (group, name) in known:
                         # Two-sided: a known failure must still fail (and says so when it
                         # passes). Slow groups run them only with --ignored.

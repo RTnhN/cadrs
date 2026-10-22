@@ -500,3 +500,192 @@ fn sharp_offset_that_closes_a_slot() {
         assert_eq!(g.len(), 1);
     }
 }
+
+/// A drafted body: valid under the full check, with every vertex and edge at a tight tolerance
+/// (a vertex the edges miss gets a tolerance that covers the miss, which the check accepts),
+/// and its area OCCT's (or ours, where OCCT's is wrong) to 1e-3.
+fn drafted(k: &mut NativeKernel, r: &cadrs_kernel::native::draw::Shape, area: f64) {
+    drafted_at(k, r, area, cadrs_kernel::native::topo::CheckLevel::Full);
+}
+
+/// [`drafted`] checked at `level`.
+fn drafted_at(k: &mut NativeKernel, r: &cadrs_kernel::native::draw::Shape, area: f64, level: cadrs_kernel::native::topo::CheckLevel) {
+    let cadrs_kernel::native::draw::Shape::Body(id) = r else { panic!("not a body") };
+    let b = k.get(*id).unwrap();
+    assert_eq!(b.check_with(level), Vec::<String>::new());
+    let worst = b.verts.iter().map(|v| v.tol).chain(b.edges.iter().map(|e| e.tol)).fold(0.0, f64::max);
+    assert!(worst < 1e-5, "a tolerance of {worst}");
+    close(k.sprops(r).unwrap(), area, 1e-3);
+}
+
+/// OCCT's draft angle C4: the end plane of a half tube drafted by 1° meets the inner cylinder
+/// in a long thin ellipse; the edge is its short arc (sampled evenly in its parameter, the
+/// ellipse's nearest point to the old edge's lay on the far side).
+#[test]
+fn draft_meets_a_cylinder_in_a_thin_ellipse() {
+    let mut k = NativeKernel::new();
+    let p = k.polyline(&[[2.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 0.0, 20.0], [2.0, 0.0, 20.0], [2.0, 0.0, 0.0]]).unwrap();
+    let p = k.mkplane(&p).unwrap();
+    let p = k.revol(&p, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 180.0).unwrap();
+    let e = k.nexplode_edges(&p).unwrap();
+    let p = k.blend_radii(&p, &[(2.0, &e[11]), (1.0, &e[3])]).unwrap();
+    let f = k.nexplode_faces(&p).unwrap();
+    let r = k.depouille(&p, [0.0, 0.0, 1.0], &[(&f[7], 2.0, [0.0, 0.0, 0.0], [0.0, 0.0, 1.0]), (&f[0], 1.0, [0.0, 0.0, 10.0], [0.0, 0.0, 1.0])]).unwrap();
+    drafted(&mut k, &r, 1273.54);
+}
+
+/// OCCT's draft angle F6: a revolved tube's bore is a cone whose half-angle is past a right
+/// angle (its natural normal points to the axis); drafted by −10°, it widens downwards.
+#[test]
+fn draft_of_a_bore_cone_past_a_right_angle() {
+    let mut k = NativeKernel::new();
+    let p = k.plane_x(0.0, 0.0, 0.0, 0.0, 0.0, 1.0, -1.0, 0.0, 0.0);
+    let p = k.psphere_zone(Some(&p), 20.0, 0.0, 90.0, 360.0).unwrap();
+    let pr = k.profile(None, "O 2.0 0.0 5.0 P 0.0 -1.0 0.0 1.0 0.0 0.0 L 10.0 T 0.0 30.0 T -7.0 0.0").unwrap();
+    let pr = k.revol(&pr, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 360.0).unwrap();
+    let f = k.bfuse(&p, &pr).unwrap();
+    let ff = k.nexplode_faces(&f).unwrap();
+    let r = k.depouille(&f, [0.0, 0.0, 1.0], &[(&ff[4], -10.0, [0.0, 0.0, 35.0], [0.0, 0.0, 1.0])]).unwrap();
+    drafted(&mut k, &r, 5966.54);
+}
+
+/// OCCT's draft angle F7: the drafted wall of a box on a torus moves its corner past the end
+/// of a kept intersection edge (a bounded B-spline), which is recomputed to reach it.
+#[test]
+fn draft_extends_a_kept_spline_edge() {
+    let mut k = NativeKernel::new();
+    let p = k.ptorus_a(None, 25.0, 20.0, 90.0).unwrap();
+    let bx = k.box_at(10.0, 10.0, 10.0, 18.0, 18.0, 30.0).unwrap();
+    let f = k.bfuse(&bx, &p).unwrap();
+    let ff = k.nexplode_faces(&f).unwrap();
+    let r = k.depouille(&f, [0.0, 0.0, 1.0], &[(&ff[2], 5.0, [0.0, 0.0, 40.0], [0.0, 0.0, 1.0])]).unwrap();
+    drafted(&mut k, &r, 9010.79);
+}
+
+/// OCCT's draft angle K8: a drafted wall's foot slides along the torus's equator past the
+/// corner where its seams cross; the corner moves along the equator, the seam with it. OCCT's
+/// own result is faulty; ours is the drafted prism alone fused with the torus.
+#[test]
+fn draft_slides_a_torus_seam_corner() {
+    let mut k = NativeKernel::new();
+    let pt = k.plane(0.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+    let pt = k.ptorus_on(&pt, 15.0, 12.0).unwrap();
+    let pf = k.profile(None, "O -5.0 0.5 15.0 L 10.0 C 2.0 90.0 L 5.0 D -1.0 0.0 L 14.0 D 0.0 -1.0 L 5.0 C 2.0 90.0").unwrap();
+    let pr = k.prism(&pf, 0.0, 0.0, 25.0).unwrap();
+    let f = k.bfuse(&pt, &pr).unwrap();
+    let ff = k.nexplode_faces(&f).unwrap();
+    let r = k.depouille(&f, [0.0, 0.0, 1.0], &[(&ff[3], 5.0, [0.0, 0.0, 40.0], [0.0, 0.0, 1.0])]).unwrap();
+    drafted(&mut k, &r, 7721.62);
+}
+
+/// OCCT's draft angle K5: a pipe on a sphere drafted; its cylinder's foot leaves the sphere's
+/// seam (the seam's meridian no longer meets it), so the seam moves to the iso line through
+/// the corner, the pole's point edge turning with it. OCCT's own result is faulty; ours is the
+/// drafted pipe alone fused with the sphere.
+#[test]
+fn draft_carries_a_sphere_seam_off() {
+    let mut k = NativeKernel::new();
+    let ps = k.plane_x(10.0, -3.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.2, 1.0);
+    let ps = k.psphere_on(&ps, 20.0).unwrap();
+    let pf = k.profile(None, "O 5.0 -0.5 10.0 L 10.0 C 5.0 90.0 L 5.0 D -1.0 0.0 L 14.0 D 0.0 -1.0").unwrap();
+    let pl = k.polyline(&[[0.0, 0.0, 10.0], [0.0, 0.0, 35.0]]).unwrap();
+    let p2 = k.pipe(&pl, &pf).unwrap();
+    let f = k.bfuse(&ps, &p2).unwrap();
+    let ff = k.nexplode_faces(&f).unwrap();
+    let r = k.depouille(&f, [0.0, 0.0, 1.0], &[(&ff[1], -5.0, [0.0, 0.0, 35.0], [0.0, 0.0, 1.0])]).unwrap();
+    drafted(&mut k, &r, 5837.90);
+}
+
+/// OCCT's draft angle J9: a drafted pipe on a cone carries the corner on the cone's seam off
+/// it; the seam's other end slides round the cone's rim to the iso line through it. (Checked
+/// at the fast level: the corner is where the pipe's wall and its round meet tangentially,
+/// at the most u their joined boundary reaches, so the seam through it touches the boundary
+/// there, which the full check's (u, v) crossing test reports.)
+#[test]
+fn draft_slides_a_cone_seam_round_its_rim() {
+    let mut k = NativeKernel::new();
+    let p = k.plane(0.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+    let p = k.pcone_on(&p, 15.0, 14.0, 20.0).unwrap();
+    let pf = k.profile(None, "O 5.0 0.0 5.0 L 10.0 C 2.0 90.0 L 5.0 D -1.0 0.0 L 14.0 D 0.0 -1.0 L 5.0 C 2.0 90.0").unwrap();
+    let pl = k.polyline(&[[0.0, 0.0, 5.0], [0.0, 0.0, 30.0]]).unwrap();
+    let p2 = k.pipe(&pl, &pf).unwrap();
+    let f = k.bfuse(&p, &p2).unwrap();
+    let ff = k.nexplode_faces(&f).unwrap();
+    let r = k.depouille(&f, [0.0, 0.0, 1.0], &[(&ff[4], 5.0, [0.0, 0.0, 29.0], [0.0, 0.0, 1.0])]).unwrap();
+    drafted_at(&mut k, &r, 3814.99, cadrs_kernel::native::topo::CheckLevel::Fast);
+}
+
+/// OCCT's draft angle L5: a cylinder of radius 1200 drafted by 1° meets a plane along its axis
+/// in a sliver of a hyperbola, which the plane–cone intersection's sampling round the turn
+/// steps over; the edge is traced between its moved ends.
+#[test]
+fn draft_traces_an_edge_on_a_huge_cone() {
+    use cadrs_kernel::native::draw::Shape;
+    let mut k = NativeKernel::new();
+    // A block whose −y side is a cylinder of radius 1200 along z (CFE903_pro16ggt has the like).
+    let bx = k.box_at(-75.0, -10.0, 0.0, 100.0, 50.0, 100.0).unwrap();
+    let p = k.plane(-21.0, 1204.0, 0.0, 0.0, 0.0, 1.0);
+    let c = k.pcylinder_on(&p, 1200.0, 100.0).unwrap();
+    let b = k.bcommon(&bx, &c).unwrap();
+    let Shape::Body(id) = b else { panic!("not a body") };
+    let faces = k.nexplode_faces(&b).unwrap();
+    let cyl = faces.iter().find(|f| matches!(f, Shape::BodyFace(_, i) if matches!(k.get(id).unwrap().faces[i.0 as usize].surf, Surface::Cylinder { .. }))).unwrap().clone();
+    let r = k.depouille(&b, [0.0, 0.0, -1.0], &[(&cyl, 1.0, [0.0, 0.0, 100.0], [0.0, 0.0, -1.0])]).unwrap();
+    // The side leans out by tan 1° per unit below z = 100: the block's volume grows by the
+    // wedge under the drafted side, ½·100²·tan 1°·(its width along x, 100).
+    let Shape::Body(out) = r else { panic!("not a body") };
+    let grown = volume(&k, out) - volume(&k, id);
+    let want = 0.5 * 100.0 * 100.0 * (1.0f64).to_radians().tan() * 100.0;
+    close(grown.abs(), want, 2e-3);
+    let area = k.sprops(&r).unwrap();
+    drafted_at(&mut k, &r, area, cadrs_kernel::native::topo::CheckLevel::Full);
+}
+
+/// OCCT's draft angle K9: on a horn torus, a drafted pipe wall's corner slides along the
+/// torus's u-seam past the corner where its v-seam crosses; that corner moves along the u-seam
+/// and the v-seam (an iso-v circle) with it. Ours equals the drafted pipe alone fused with the
+/// torus.
+#[test]
+fn draft_slides_a_torus_v_seam() {
+    let mut k = NativeKernel::new();
+    let pt = k.plane(0.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+    let pt = k.ptorus_on(&pt, 15.0, 15.0).unwrap();
+    let pf = k.profile(None, "O -8.0 -12.0 15.0 L 5.0 C 2.0 90.0 L 20.0 C 2.0 90.0 L 5.0").unwrap();
+    let pl = k.polyline(&[[0.0, 0.0, 15.0], [0.0, 0.0, 45.0]]).unwrap();
+    let p2 = k.pipe(&pl, &pf).unwrap();
+    let f = k.bfuse(&pt, &p2).unwrap();
+    let ff = k.nexplode_faces(&f).unwrap();
+    let r = k.depouille(&f, [0.0, 0.0, 1.0], &[(&ff[5], 5.0, [0.0, 0.0, 44.0], [0.0, 0.0, 1.0])]).unwrap();
+    drafted(&mut k, &r, 9932.99);
+}
+
+/// OCCT's draft angle K3: a cone on a sphere drafted by 12° widens its foot past the sphere's
+/// pole; the pole leaves the sphere's face, whose hole joins its outer loop where the seam
+/// crosses it. Ours equals the drafted cone alone fused with the sphere.
+#[test]
+fn draft_widens_a_hole_over_a_pole() {
+    let mut k = NativeKernel::new();
+    let p = k.plane_x(0.0, 0.0, 0.0, 0.0, 0.5, -1.0, 1.0, 0.0, 0.0);
+    let p = k.psphere_on(&p, 20.0).unwrap();
+    let p2 = k.plane_x(0.0, 0.0, 15.0, 0.0, 0.0, 1.0, 0.0, -1.0, 0.0);
+    let p2 = k.pcone_on(&p2, 9.0, 7.0, 15.0).unwrap();
+    let f = k.bfuse(&p, &p2).unwrap();
+    let ff = k.nexplode_faces(&f).unwrap();
+    let r = k.depouille(&f, [0.0, 0.0, 1.0], &[(&ff[0], 12.0, [0.0, 0.0, 30.0], [0.0, 0.0, 1.0])]).unwrap();
+    drafted(&mut k, &r, 5536.07);
+}
+
+/// OCCT's offset shape_type_i E1: a torus moved in by 1 is the torus of minor radius 4. Its
+/// seam's corner sits on both seam circles; placing it on a seam (a circle's parameter taken
+/// within a turn, not wrapped to the far end of a huge range, where its angle has lost its
+/// digits) keeps it there.
+#[test]
+fn inset_of_a_torus() {
+    use cadrs_kernel::native::draw::Shape;
+    let mut k = NativeKernel::new();
+    let s = k.ptorus(20.0, 5.0).unwrap();
+    let r = k.offsetperform(&s, -1.0, &[], false).unwrap();
+    let Shape::Body(out) = r else { panic!("not a body") };
+    close(volume(&k, out), 2.0 * PI * PI * 20.0 * 16.0, 1e-9);
+    assert_eq!(k.get(out).unwrap().check_with(cadrs_kernel::native::topo::CheckLevel::Full), Vec::<String>::new());
+}
