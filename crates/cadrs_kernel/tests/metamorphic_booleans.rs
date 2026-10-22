@@ -91,12 +91,15 @@ fn check_pair(a: &Placed, b: &Placed) -> Vec<String> {
             bad.push(format!("vol({s:?}) = {v}, closed form {}", exact_volume(s)));
         }
     }
+    // The results' tolerance bands, summed: what the relations may be off by beyond rounding.
+    let mut bands = 0.0;
     let mut run = |op: BoolOp, x: BodyId, y: BodyId, what: &str| -> Option<(Vec<BodyId>, f64)> {
         match boolean(&mut k, op, x, &[y]) {
             Ok(r) => {
                 if let Some(why) = invalid(&k, &r) {
                     bad.push(format!("{what}: invalid: {why}"));
                 }
+                bands += band(&k, &r);
                 match volume(&k, &r) {
                     Ok(v) => Some((r, v)),
                     Err(e) => {
@@ -116,6 +119,7 @@ fn check_pair(a: &Placed, b: &Placed) -> Vec<String> {
     let d = run(BoolOp::Subtract, ia, ib, "A − B");
     let u2 = run(BoolOp::Union, ib, ia, "B ∪ A");
     let i2 = run(BoolOp::Intersect, ib, ia, "B ∩ A");
+    let close = |a: f64, b: f64, scale: f64| (a - b).abs() <= REL * scale.max(1.0) + bands;
     if let (Some(u), Some(i)) = (&u, &i)
         && !close(u.1 + i.1, va + vb, scale)
     {
@@ -404,7 +408,9 @@ fn check_sequence(steps: &[Step], done: &mut usize) -> Vec<String> {
         }
         let want = sequence_volume(&steps[..=i]);
         let v = volume(&k, &model).unwrap_or(f64::NAN);
-        if !((v - want).abs() <= 1e-9 * want.max(1.0)) {
+        // (Within the model's tolerance band: a result of tolerance t stands for any solid
+        // within t of it.)
+        if !((v - want).abs() <= 1e-9 * want.max(1.0) + band(&k, &model)) {
             bad.push(format!("step {i} ({:?}): volume {v}, exact {want}", s.op));
             break;
         }
@@ -548,5 +554,54 @@ fn step_round_trip_seamed_cylinder() {
             r: 1.2504993337665509,
             len: 5.269151724617697,
         }),
+    );
+}
+
+/// A box cut by a cylinder along x that touches the box's bottom face along a line (soak seed
+/// 6060224037237635290 case 49): the difference comes back as a body whose faces cross away from
+/// their edges, with no error.
+#[test]
+#[ignore = "known failure: a box less a cylinder tangent to its face is invalid (faces cross away from their edges)"]
+fn cylinder_tangent_to_box_face() {
+    pinned(
+        Placed::fixed(Shape::Box {
+            min: [4.0, 4.923492988846983, 2.0],
+            size: [4.610421114922351, 4.0648740291358285, 3.0],
+        }),
+        Placed::fixed(Shape::Cyl {
+            axis: 0,
+            base: [8.0, 6.9670406723616765, 4.0],
+            r: 2.0,
+            len: 5.0,
+        }),
+    );
+}
+
+/// A cylinder along x and a tilted box (seed 12345 case 107): the union's STEP file read back
+/// with two planar faces' conic edges 0.2 mm off their p-curves. The edges use part of a
+/// rational arc whose p-curve covers the whole arc, and the reader's gap closing moved the
+/// arc's end control point to the edge's end.
+#[test]
+fn step_round_trip_conic_edge() {
+    pinned(
+        Placed::fixed(Shape::Cyl {
+            axis: 0,
+            base: [6.760270809297007, 2.0, 2.0],
+            r: 3.347707988538065,
+            len: 3.87749651721185,
+        }),
+        Placed {
+            shape: Shape::Box {
+                min: [3.0, 1.0, 4.0],
+                size: [5.0, 4.0, 4.0],
+            },
+            axis: [
+                -0.8011568824086492,
+                0.16992539633470694,
+                -0.6291828619687938,
+            ],
+            angle: -0.09767065517102713,
+            about: [5.0; 3],
+        },
     );
 }

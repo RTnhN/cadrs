@@ -394,6 +394,26 @@ fn replay() {
     eprintln!("body: {:?}", bodyio::read(&bytes).map(|b| b.faces.len()));
 }
 
+/// Inputs the fuzzing found that once panicked, kept as plain cases (OCCT BRep).
+#[test]
+fn brep_reader_regressions() {
+    // Two numbers of the torus made extreme (the build box's soak): a NaN reached
+    // `f64::clamp` as both bounds, which panics.
+    let cases: &[(&str, &[Edit])] = &[(
+        "usd_brep/torus.brep",
+        &[
+            Edit::Number(5696762671758169982, 11),
+            Edit::Number(7047912210092460965, 2),
+        ],
+    )];
+    for (file, edits) in cases {
+        let bytes = apply(data(file), edits);
+        if let Ok((b, _)) = brep_occt::read(&bytes) {
+            use_body(b);
+        }
+    }
+}
+
 /// Inputs the fuzzing found that once panicked, kept as plain cases.
 #[test]
 fn smb_reader_regressions() {

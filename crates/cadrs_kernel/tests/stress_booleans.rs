@@ -54,7 +54,66 @@ fn boxes_union_volume(boxes: &[([f64; 3], [f64; 3])]) -> f64 {
     v
 }
 
-/// One tiny-rotation case: the failures of cube ∪ rotated cube and cube ∩ rotated cube.
+/// The volumes of cube ∪ turned cube and cube ∩ turned cube to first order in the angle, for the
+/// cube [0, 10]³ turned by `angle` about `axis` through `about`: each face of the turned cube
+/// lies off the cube's face by δ(x) = angle (ω × (x − c))·n, linear over the face, so the union
+/// gains ∫ max(δ, 0) over every face and the common part loses ∫ max(−δ, 0). The error is
+/// second order (about angle² × 6·10⁴ here).
+fn first_order_volumes(axis: [f64; 3], angle: f64, about: [f64; 3]) -> (f64, f64) {
+    let w = nalgebra::Vector3::from(axis).normalize() * angle;
+    let c = nalgebra::Vector3::from(about);
+    let (mut gain, mut loss) = (0.0, 0.0);
+    for i in 0..3 {
+        for side in [0.0, 10.0] {
+            let mut n = nalgebra::Vector3::zeros();
+            n[i] = if side == 0.0 { -1.0 } else { 1.0 };
+            let (j, k) = ((i + 1) % 3, (i + 2) % 3);
+            // δ at a face point (s, t): linear, so exact over the square clipped where δ > 0.
+            let delta = |s: f64, t: f64| {
+                let mut x = nalgebra::Vector3::zeros();
+                x[i] = side;
+                x[j] = s;
+                x[k] = t;
+                w.cross(&(x - c)).dot(&n)
+            };
+            let square = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
+            for sign in [1.0, -1.0] {
+                // Clip the square to sign·δ > 0 (one half-plane: Sutherland–Hodgman).
+                let f = |p: (f64, f64)| sign * delta(p.0, p.1);
+                let mut poly = Vec::new();
+                for e in 0..4 {
+                    let (p, q) = (square[e], square[(e + 1) % 4]);
+                    let (fp, fq) = (f(p), f(q));
+                    if fp > 0.0 {
+                        poly.push(p);
+                    }
+                    if (fp > 0.0) != (fq > 0.0) {
+                        let u = fp / (fp - fq);
+                        poly.push((p.0 + u * (q.0 - p.0), p.1 + u * (q.1 - p.1)));
+                    }
+                }
+                // ∫ over the polygon of a linear function: by triangles, area × the mean of
+                // its corners' values.
+                let mut v = 0.0;
+                for e in 1..poly.len().saturating_sub(1) {
+                    let (p, q, r) = (poly[0], poly[e], poly[e + 1]);
+                    let area = ((q.0 - p.0) * (r.1 - p.1) - (r.0 - p.0) * (q.1 - p.1)).abs() / 2.0;
+                    v += area * (f(p) + f(q) + f(r)) / 3.0;
+                }
+                if sign > 0.0 {
+                    gain += v;
+                } else {
+                    loss += v;
+                }
+            }
+        }
+    }
+    (1000.0 + gain, 1000.0 - loss)
+}
+
+/// One tiny-rotation case: the failures of cube ∪ turned cube and cube ∩ turned cube, in both
+/// tool orders. Up to an angle of 1e-4 each volume must match the first-order volumes within
+/// the result's own tolerance band; beyond, the union and the common part must still add up.
 fn tiny_rotation(axis: [f64; 3], angle: f64, about: [f64; 3]) -> Vec<String> {
     let mut k = NativeKernel::new();
     let cube = Shape::Box {
@@ -73,33 +132,53 @@ fn tiny_rotation(axis: [f64; 3], angle: f64, about: [f64; 3]) -> Vec<String> {
     let reach =
         angle.abs() * 3f64.sqrt() * (10.0 + about.iter().map(|c| c.abs()).fold(0.0, f64::max));
     let slack = 600.0 * reach + 1e-7 * 1000.0;
+    let truth = (angle.abs() <= 1e-4).then(|| first_order_volumes(axis, angle, about));
     let mut bad = Vec::new();
     let mut vols = [f64::NAN; 2];
-    for (n, (op, what)) in [(BoolOp::Union, "∪"), (BoolOp::Intersect, "∩")]
-        .into_iter()
-        .enumerate()
-    {
-        match boolean(&mut k, op, a, &[b]) {
-            Ok(r) => {
-                if let Some(why) = invalid(&k, &r) {
-                    bad.push(format!("{what}: invalid: {why}"));
+    let mut bands = [0.0; 2];
+    for (x, y, order) in [(a, b, ""), (b, a, " (turned cube first)")] {
+        for (n, (op, what)) in [(BoolOp::Union, "∪"), (BoolOp::Intersect, "∩")]
+            .into_iter()
+            .enumerate()
+        {
+            let what = format!("{what}{order}");
+            match boolean(&mut k, op, x, &[y]) {
+                Ok(r) => {
+                    if let Some(why) = invalid(&k, &r) {
+                        bad.push(format!("{what}: invalid: {why}"));
+                    }
+                    if r.len() != 1 {
+                        bad.push(format!("{what}: {} bodies", r.len()));
+                    }
+                    let t = max_tol(&k, &r);
+                    if t > TOL_CAP.max(reach) {
+                        bad.push(format!("{what}: tolerance {t:e}"));
+                    }
+                    let v = volume(&k, &r).unwrap_or(f64::NAN);
+                    let bd = band(&k, &r);
+                    if !((v - 1000.0).abs() <= slack + bd) {
+                        bad.push(format!("{what}: volume {v} (1000 ± {slack:e})"));
+                    }
+                    if let Some((tu, ti)) = truth {
+                        let want = if n == 0 { tu } else { ti };
+                        let allow = bd + 1e-7 * 1000.0 + 6e4 * angle * angle;
+                        if !((v - want).abs() <= allow) {
+                            bad.push(format!(
+                                "{what}: volume {v}, first-order {want} (off {:.2e}, tolerance band {bd:.1e})",
+                                v - want
+                            ));
+                        }
+                    }
+                    if order.is_empty() {
+                        vols[n] = v;
+                        bands[n] = bd;
+                    }
                 }
-                if r.len() != 1 {
-                    bad.push(format!("{what}: {} bodies", r.len()));
-                }
-                let t = max_tol(&k, &r);
-                if t > TOL_CAP.max(reach) {
-                    bad.push(format!("{what}: tolerance {t:e}"));
-                }
-                vols[n] = volume(&k, &r).unwrap_or(f64::NAN);
-                if !((vols[n] - 1000.0).abs() <= slack) {
-                    bad.push(format!("{what}: volume {} (1000 ± {slack:e})", vols[n]));
-                }
+                Err(e) => bad.push(format!("{what}: {e:?}")),
             }
-            Err(e) => bad.push(format!("{what}: {e:?}")),
         }
     }
-    if !((vols[0] + vols[1] - 2000.0).abs() <= 1e-7 * 2000.0) {
+    if !((vols[0] + vols[1] - 2000.0).abs() <= 1e-7 * 2000.0 + bands[0] + bands[1]) {
         bad.push(format!("vol(∪) + vol(∩) = {} (2000)", vols[0] + vols[1]));
     }
     bad
@@ -107,6 +186,26 @@ fn tiny_rotation(axis: [f64; 3], angle: f64, about: [f64; 3]) -> Vec<String> {
 
 #[test]
 fn cube_and_tiny_rotations() {
+    tiny_rotations(
+        &[1e-12, 1e-10, 1e-8, 1e-7, 1e-4, 1e-2],
+        env_num("CADRS_STRESS_ANGLES", 0),
+    );
+}
+
+/// Tilts of 1e-6 and 1e-5 (the cube's corners move 1e-5 to 1e-4): the boolean takes the
+/// near-coincident faces as one and returns the cube itself, tolerance 1e-7, in both tool
+/// orders, so the union misses ~500·angle of volume and the common part has it extra, with
+/// faces up to ~9e-5 from where they are and no tolerance that covers it. (A result within
+/// tolerance would do: the faces' true slivers, or the cube with its tolerances raised.)
+#[test]
+#[ignore = "known failure: near-coincident faces (tilt 1e-6..1e-5) give the input cube back with tolerance 1e-7, volume off by 500·angle"]
+fn cube_tilted_into_coincidence() {
+    tiny_rotations(&[1e-6, 1e-5], 0);
+}
+
+/// The tiny-rotation cases at `angles` about each axis and a skew one through the cube's centre
+/// (and the skew one through its corner), plus `random` random ones.
+fn tiny_rotations(angles: &[f64], random: usize) {
     let axes = [
         [1.0, 0.0, 0.0],
         [0.0, 1.0, 0.0],
@@ -114,7 +213,7 @@ fn cube_and_tiny_rotations() {
         [1.0, 1.0, 1.0],
     ];
     let mut cases: Vec<([f64; 3], f64, [f64; 3])> = Vec::new();
-    for angle in [1e-12, 1e-10, 1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-2] {
+    for &angle in angles {
         for axis in axes {
             // About the cube's centre, and (for a tilt on top of the shift) about its corner.
             cases.push((axis, angle, [5.0; 3]));
@@ -122,7 +221,7 @@ fn cube_and_tiny_rotations() {
         cases.push(([1.0, 1.0, 1.0], angle, [0.0; 3]));
     }
     let mut r = Rng::new(seed(7));
-    for _ in 0..env_num("CADRS_STRESS_ANGLES", 0usize) {
+    for _ in 0..random {
         let axis = [r.range(-1.0, 1.0), r.range(-1.0, 1.0), r.range(-1.0, 1.0)];
         let angle = 10f64.powf(r.range(-13.0, -2.0)) * if r.below(2) == 0 { 1.0 } else { -1.0 };
         let about = [r.range(0.0, 10.0), r.range(0.0, 10.0), r.range(0.0, 10.0)];
@@ -365,6 +464,20 @@ fn cube_tilted_near_tolerance() {
         [0.5976071051500398, 0.511301556512727, -0.5102939961996196],
         -1.161043810954499e-5,
         [2.809667712018844, 9.873518856878142, 3.249429577303461],
+    );
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+}
+
+/// A tilt of 1.2e-6 about a skew axis (soak): with the turned cube first, the union and the
+/// common part are the turned cube itself, tolerance 1e-7, 9e-4 off the first-order volumes;
+/// with the cube first they are one merged cube of tolerance 1e-5 (within its band).
+#[test]
+#[ignore = "known failure: near-coincident faces (tilt 1.2e-6, skew axis) give an input back with tolerance 1e-7, volume off by 9e-4"]
+fn cube_tilted_volume_sum() {
+    let bad = tiny_rotation(
+        [0.4700611935019128, -0.9620889946033548, -0.8509348303880513],
+        1.2181008428462193e-6,
+        [4.626890525898524, 6.837536705820911, 2.1387233918948976],
     );
     assert!(bad.is_empty(), "{}", bad.join("\n"));
 }

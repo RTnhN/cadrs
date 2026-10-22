@@ -390,6 +390,17 @@ pub fn max_tol(k: &NativeKernel, bodies: &[BodyId]) -> f64 {
         .fold(0.0, f64::max)
 }
 
+/// How far a result's volume may honestly be off: its area times its largest tolerance (a
+/// result of tolerance t stands for any solid within t of it).
+pub fn band(k: &NativeKernel, bodies: &[BodyId]) -> f64 {
+    let area: f64 = bodies
+        .iter()
+        .filter_map(|&b| k.mass_properties(b).ok())
+        .map(|m| m.surface_area)
+        .sum();
+    area * max_tol(k, bodies)
+}
+
 /// A boolean's bodies, an empty result as no bodies.
 pub fn boolean(k: &mut NativeKernel, op: BoolOp, a: BodyId, b: &[BodyId]) -> Result<Vec<BodyId>> {
     match k.boolean(op, a, b) {

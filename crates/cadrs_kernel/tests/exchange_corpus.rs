@@ -155,10 +155,6 @@ const KNOWN_BAD: &[(&str, &str)] = &[
         "1 check errors (face 6 loop 0 coedge 2 (edge 13): p-curve off the edge by 3.250e1); volume 710635.837392 vs…",
     ),
     (
-        "step/tr9_r1001-ec.stp",
-        "27 check errors (face 1 loop 0: p-curve gap after coedge 8: (-3.657e-1, 1.417e-2))",
-    ),
-    (
         "step/trj3_s1-al-214.stp",
         "24 check errors (face 12 loop 0: coedge 0 doesn't meet the next); 3 faces dropped (face 0: a loop doesn't c…",
     ),
@@ -235,10 +231,6 @@ const KNOWN_BAD: &[(&str, &str)] = &[
     (
         "step/trj6_k1-md-214.stp",
         "1 faces dropped (face 17: loops wrap around the surface and no seam could be added)",
-    ),
-    (
-        "step/trj6_pm4-ec-203.stp",
-        "8 check errors (face 16 loop 0: p-curve gap after coedge 1: (-1.491e0, 1.307e-1))",
     ),
     (
         "step/trj7_k1-al-214.stp",

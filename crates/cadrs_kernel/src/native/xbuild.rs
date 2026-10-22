@@ -806,6 +806,12 @@ impl XBuilder {
                 }
             }
         };
+        // A corrupt file's curve (a 1e308 put into it) whose points aren't numbers: no edge, as
+        // every projection onto the faces would trip on it.
+        let finite = |t: f64| t.is_finite() && curve.point(t).coords.iter().all(|x| x.is_finite());
+        if !(finite(t0) && finite(t1) && finite((t0 + t1) / 2.0)) {
+            return None;
+        }
         // Empty? (A sampled length: exact lengths of long splines cost.)
         let len: f64 = (0..8).map(|i| (curve.point(t0 + (t1 - t0) * (i + 1) as f64 / 8.0) - curve.point(t0 + (t1 - t0) * i as f64 / 8.0)).norm()).sum();
         if len < tol::ROUNDOFF {
@@ -1754,10 +1760,15 @@ fn close_gaps(b: &Body, s: &Surface, l: &mut [Coedge]) {
     // Moves the start (or end) of coedge k's spline p-curve to `to`.
     let moved = |c: &Coedge, start: bool, to: P2| -> Option<Curve> {
         let Curve::Nurbs(nc) = &c.pc else { return None };
-        if !clamped(nc) {
+        // Its control points end where the edge does only over the edge's own range (an edge on
+        // part of a conic's arc has the whole arc's p-curve): cut it to that range first.
+        let [t0, t1] = b.edges[c.edge].t;
+        let mut nc = nc.restricted(t0, t1);
+        let (a, z) = nc.range();
+        let near = |x: f64, y: f64| (x - y).abs() <= 1e-12 * (1.0 + y.abs());
+        if !clamped(&nc) || !near(a, t0) || !near(z, t1) {
             return None;
         }
-        let mut nc = (**nc).clone();
         // The coedge's start is the curve's start when it runs along the edge.
         let i = if start == c.fwd { 0 } else { nc.cps.len() - 1 };
         let w = nc.cps[i].w;
