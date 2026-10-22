@@ -567,15 +567,7 @@ fn fit_pieces(s: &Surface, per: &Periods, c: &Curve, pieces: &[f64], tol: &Tol) 
             fit_span(s, per, tol, c, w[0], w[1], &mut hint, 0, &mut segs);
         }
     }
-    let mut it = segs.into_iter();
-    let mut out = it.next()?;
-    for fit in it {
-        // Join at the shared end: a knot of full multiplicity there.
-        let p = out.degree;
-        out.knots.pop();
-        out.knots.extend_from_slice(&fit.knots[p + 1..]);
-        out.cps.extend_from_slice(&fit.cps[1..]);
-    }
+    let out = join_spans(segs)?;
     let pc = Curve::Nurbs(Arc::new(out));
     if let Some(((u0, u1), (v0, v1))) = per.domain {
         let (a, b) = (pieces[0], *pieces.last().unwrap());
@@ -593,6 +585,28 @@ fn fit_pieces(s: &Surface, per: &Periods, c: &Curve, pieces: &[f64], tol: &Tol) 
         }
     }
     Some(pc)
+}
+
+/// Fitted spans joined end to end into one spline: a knot of full multiplicity at each joint,
+/// the spans first raised to one degree (a span's interpolation falls back to degree one where
+/// cubics fail). None for no spans.
+fn join_spans(segs: Vec<NurbsCurve>) -> Option<NurbsCurve> {
+    let mut it = segs.into_iter();
+    let mut out = it.next()?;
+    for mut fit in it {
+        while fit.degree < out.degree {
+            fit = fit.elevated();
+        }
+        while out.degree < fit.degree {
+            out = out.elevated();
+        }
+        // Join at the shared end: a knot of full multiplicity there.
+        let p = out.degree;
+        out.knots.pop();
+        out.knots.extend_from_slice(&fit.knots[p + 1..]);
+        out.cps.extend_from_slice(&fit.cps[1..]);
+    }
+    Some(out)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1948,5 +1962,19 @@ mod tests {
         assert_eq!(b.faces.len(), 2);
         assert_eq!(b.verts.len(), 4);
         assert!(b.check().is_empty(), "{:?}", b.check());
+    }
+
+    /// Spans of different degrees (a cubic and a linear fallback) join into a valid spline
+    /// through both (r0901_ec's p-curve had 50 control points and 52 knots).
+    #[test]
+    fn spans_of_mixed_degree_join() {
+        let pts: Vec<P3> = (0..5).map(|i| P3::new(i as f64, (i as f64).sin(), 0.0)).collect();
+        let ts: Vec<f64> = (0..5).map(|i| i as f64).collect();
+        let cubic = NurbsCurve::interpolate(&pts, &ts, 3, None, None);
+        let line = NurbsCurve { degree: 1, knots: vec![4.0, 4.0, 6.0, 6.0], cps: vec![super::super::nurbs::hom(&pts[4], 1.0), super::super::nurbs::hom(&P3::new(6.0, 0.0, 0.0), 1.0)] };
+        let j = join_spans(vec![cubic.clone(), line]).unwrap();
+        assert!(j.validate().is_ok());
+        assert!((j.point(2.0) - cubic.point(2.0)).norm() < 1e-9);
+        assert!((j.point(5.0) - P3::new(5.0, (4f64.sin()) / 2.0, 0.0)).norm() < 1e-9);
     }
 }
