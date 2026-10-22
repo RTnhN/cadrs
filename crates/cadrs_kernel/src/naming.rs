@@ -620,6 +620,32 @@ pub trait Named: Copy + Eq {
     /// Whether the name is (or involves) a face named by its place in a result
     /// ([`FaceName::is_positional`]).
     fn positional(&self) -> bool;
+    /// Whether `other` could be this name with its unnamed faces ([`FaceOrigin::Unnamed`]: the
+    /// making kernel's history didn't name them, so another kernel names them its own way)
+    /// standing for any face of the same operation, the rest of its faces the same.
+    fn loosely(&self, _other: &Self) -> bool {
+        false
+    }
+}
+
+/// Whether the faces `cand` match `name`'s one to one, each by base name or, for an unnamed
+/// face of `name`, by operation; at least one by name.
+fn faces_loosely(name: &[FaceName], cand: &[FaceName]) -> bool {
+    if !name.iter().any(|f| !f.is_stable()) || name.len() != cand.len() {
+        return false;
+    }
+    let mut used = vec![false; cand.len()];
+    let mut by_name = 0;
+    // Named faces first, so a wildcard doesn't take a named face's partner.
+    let mut order: Vec<&FaceName> = name.iter().collect();
+    order.sort_by_key(|f| !f.is_stable());
+    for f in order {
+        let hit = (0..cand.len()).find(|&j| !used[j] && if f.is_stable() { cand[j].base() == f.base() } else { cand[j].op == f.op });
+        let Some(j) = hit else { return false };
+        used[j] = true;
+        by_name += usize::from(f.is_stable());
+    }
+    by_name > 0
 }
 
 /// How many of `b`'s faces are among `a`'s, by base name.
@@ -649,6 +675,9 @@ impl Named for EdgeName {
     fn positional(&self) -> bool {
         self.faces.iter().any(FaceName::is_positional)
     }
+    fn loosely(&self, other: &Self) -> bool {
+        faces_loosely(&self.faces, &other.faces)
+    }
 }
 
 impl Named for VertexName {
@@ -660,6 +689,9 @@ impl Named for VertexName {
     }
     fn positional(&self) -> bool {
         self.faces.iter().any(FaceName::is_positional)
+    }
+    fn loosely(&self, other: &Self) -> bool {
+        faces_loosely(&self.faces, &other.faces)
     }
 }
 
@@ -733,9 +765,18 @@ pub fn resolve<N: Named>(
             }
         }
     }
-    match nearest(&all) {
-        Some((i, d)) if d <= tol => Ok((i, Match::Geometric)),
-        _ => Err(Lost),
+    if let Some((i, d)) = nearest(&all)
+        && d <= tol
+    {
+        return Ok((i, Match::Geometric));
+    }
+    // Faces the making kernel left unnamed, which this one names: the entity between the same
+    // named faces and faces of the same operation, nearest where the reference was.
+    let loose: Vec<usize> = (0..candidates.len()).filter(|&i| name.loosely(&candidates[i])).collect();
+    match loose.as_slice() {
+        [] => Err(Lost),
+        [only] => Ok((*only, Match::Renamed)),
+        several => nearest(several).map(|(i, _)| (i, Match::Renamed)).ok_or(Lost),
     }
 }
 
@@ -791,6 +832,28 @@ mod tests {
         // All three meet at the hint.
         let r = resolve(&gone, &candidates, |_| Some(0.0), tol::POINT);
         assert_eq!(r, Ok((1, Match::Geometric)));
+    }
+
+    /// trimmer, Chamfer 1: OCCT's revolve left a disc face unnamed (`Unnamed { index: 1 }`);
+    /// this kernel names it after its profile curve. An edge stored between a named face and
+    /// that unnamed one finds the edge between the named face and a face of the same operation,
+    /// nearest where it was (here 5 mm off: the model was edited since), not a guess elsewhere.
+    #[test]
+    fn an_unnamed_face_stands_for_a_face_of_its_operation() {
+        let o = op(7);
+        let unnamed = FaceName::new(o, FaceOrigin::Unnamed { index: 1 });
+        let gone = EdgeName::new(side(o, 1, 5), unnamed, 0);
+        let candidates = [
+            EdgeName::new(side(o, 1, 4), side(o, 1, 5), 0),
+            EdgeName::new(side(o, 1, 5), side(o, 1, 9), 0),
+            EdgeName::new(side(o, 1, 5), side(op(8), 2, 1), 0),
+            EdgeName::new(side(o, 1, 9), side(o, 1, 11), 0),
+        ];
+        let dist = [10.0, 5.0, 1.0, 0.5];
+        assert_eq!(resolve(&gone, &candidates, |i| Some(dist[i]), tol::POINT), Ok((1, Match::Renamed)));
+        // No edge of the named face: lost.
+        let elsewhere = EdgeName::new(side(o, 1, 6), unnamed, 0);
+        assert_eq!(resolve(&elsewhere, &candidates, |i| Some(dist[i]), tol::POINT), Err(Lost));
     }
 
     /// pibox: a thicken's faces are named by their place in its result, so after another
