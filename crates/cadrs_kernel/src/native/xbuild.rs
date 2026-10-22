@@ -70,6 +70,152 @@ pub struct XBuilder {
     pc_cache: std::cell::RefCell<std::collections::HashMap<(usize, usize), Curve>>,
 }
 
+/// A boundary piece of a face given without topology: a curve from `a` to `b` along it.
+#[derive(Debug, Clone)]
+pub struct LooseSeg {
+    pub c: Curve,
+    pub a: P3,
+    pub b: P3,
+}
+
+/// The boundary of a spline surface's whole parameter range, counter-clockwise in (u, v).
+pub fn natural_boundary(surf: &Surface) -> Result<Vec<LooseSeg>, String> {
+    let Surface::Nurbs(n) = surf else { return Err("an untrimmed surface that is not a spline".into()) };
+    let ((u0, u1), (v0, v1)) = n.range();
+    let (nu, nv) = (n.cps.len(), n.cps[0].len());
+    let row = |j: usize| NurbsCurve { degree: n.du, knots: n.ku.clone(), cps: (0..nu).map(|i| n.cps[i][j]).collect() };
+    let col = |i: usize| NurbsCurve { degree: n.dv, knots: n.kv.clone(), cps: n.cps[i].clone() };
+    let mut out = Vec::new();
+    for (c, (pa, pb)) in [
+        (row(0), ((u0, v0), (u1, v0))),
+        (col(nu - 1), ((u1, v0), (u1, v1))),
+        (row(nv - 1), ((u1, v1), (u0, v1))),
+        (col(0), ((u0, v1), (u0, v0))),
+    ] {
+        let (a, b) = (surf.eval(pa.0, pa.1), surf.eval(pb.0, pb.1));
+        out.push(LooseSeg { c: Curve::Nurbs(Arc::new(c)), a, b });
+    }
+    Ok(out)
+}
+
+/// Faces given without topology (IGES trimmed and bounded surfaces, STEP curve-bounded
+/// surfaces), sewn by their boundary curves: vertices welded within `tol`, segments matched to
+/// the edges other faces already have, each connected group of faces a shell (a solid when
+/// closed). `unoriented`: the file says nothing of the faces' sides (they are then made
+/// consistent and outward). Returns the body and the problems met.
+pub fn sew_loose(faces: Vec<(Surface, Vec<Vec<LooseSeg>>)>, tol: f64, unoriented: bool) -> (Body, Vec<String>) {
+    let mut xb = XBuilder::new();
+    let mut weld: Vec<P3> = Vec::new();
+    let mut cells: std::collections::HashMap<[i64; 3], Vec<usize>> = std::collections::HashMap::new();
+    let mut vertex = |xb: &mut XBuilder, p: P3| -> usize {
+        let k = [p.x, p.y, p.z].map(|c| (c / tol).floor() as i64);
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                for dz in -1..=1 {
+                    if let Some(v) = cells.get(&[k[0] + dx, k[1] + dy, k[2] + dz]) {
+                        for &i in v {
+                            if (weld[i] - p).norm() <= tol {
+                                return i;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        weld.push(p);
+        let i = xb.vertex(p);
+        cells.entry(k).or_default().push(i);
+        i
+    };
+    let mut by_pair: std::collections::HashMap<(usize, usize), Vec<usize>> = std::collections::HashMap::new();
+    let mut fids = Vec::new();
+    for (surf, seg_loops) in faces {
+        let mut loops = Vec::new();
+        for segs in seg_loops {
+            let mut l = Vec::new();
+            for sg in segs {
+                let (va, vb) = (vertex(&mut xb, sg.a), vertex(&mut xb, sg.b));
+                let Some(ne) = xb.edge(sg.c, va, vb) else { continue };
+                // The same edge as one of another face's?
+                let key = (va.min(vb), va.max(vb));
+                let found = by_pair.get(&key).and_then(|cands| {
+                    let new = &xb.body.edges[ne];
+                    let mid = new.point(new.mid_t());
+                    cands.iter().copied().find(|&c| {
+                        let old = &xb.body.edges[c];
+                        (old.point(old.curve.closest(&mid, old.t[0], old.t[1])) - mid).norm() < tol * LOOSE_SHARE
+                    })
+                });
+                match found {
+                    Some(c) => {
+                        let fwd = if va != vb {
+                            xb.body.edges[c].v[0] == va
+                        } else {
+                            let (new, old) = (&xb.body.edges[ne], &xb.body.edges[c]);
+                            new.curve.tangent(new.t[0]).dot(&old.curve.tangent(old.t[0])) > 0.0
+                        };
+                        xb.body.edges.pop();
+                        l.push((c, fwd));
+                    }
+                    None => {
+                        by_pair.entry(key).or_default().push(ne);
+                        l.push((ne, true));
+                    }
+                }
+            }
+            if !l.is_empty() {
+                loops.push(l);
+            }
+        }
+        if !loops.is_empty() {
+            fids.push(xb.face(XFace { surf, sense: true, loops }));
+        }
+    }
+    // Shells: faces connected through shared edges; closed when every edge is used twice.
+    let mut parent: Vec<usize> = (0..fids.len()).collect();
+    fn find(p: &mut [usize], x: usize) -> usize {
+        let mut r = x;
+        while p[r] != r {
+            r = p[r];
+        }
+        p[x] = r;
+        r
+    }
+    let mut users: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
+    for (k, &fi) in fids.iter().enumerate() {
+        for &(e, _) in xb.faces[fi].loops.iter().flatten() {
+            users.entry(e).or_default().push(k);
+        }
+    }
+    for us in users.values() {
+        for w in us.windows(2) {
+            let (a, b) = (find(&mut parent, w[0]), find(&mut parent, w[1]));
+            parent[a.max(b)] = a.min(b);
+        }
+    }
+    let mut groups: Vec<(usize, Vec<usize>)> = Vec::new();
+    for k in 0..fids.len() {
+        let g = find(&mut parent, k);
+        match groups.iter_mut().find(|x| x.0 == g) {
+            Some(x) => x.1.push(k),
+            None => groups.push((g, vec![k])),
+        }
+    }
+    for (_, ks) in groups {
+        let closed = ks.iter().all(|&k| xb.faces[fids[k]].loops.iter().flatten().all(|&(e, _)| users[&e].len() == 2));
+        let sh = xb.shell(ks.iter().map(|&k| fids[k]).collect(), closed);
+        if closed {
+            xb.solid(vec![sh]);
+        }
+    }
+    xb.unoriented = unoriented;
+    xb.finish()
+}
+
+/// How close (in weld distances) a loose face's boundary segment must run to another face's
+/// edge between the same vertices to be that edge.
+const LOOSE_SHARE: f64 = 10.0;
+
 /// The distance under which two points of a file are the same point (files are written to about
 /// 1e-7 of their size; exporters' tolerances are often 1e-6 to 1e-5 mm).
 const JOIN: f64 = 1e-5;

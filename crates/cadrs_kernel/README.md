@@ -464,8 +464,8 @@ which rebuilds the files' faces into valid bodies (p-curves fitted where a file 
 sewn by their edges). `tests/exchange_corpus.rs` reads every STEP and IGES file of OCCT's public
 dataset (389: OCCT's samples and its bug-report files, many broken on purpose) and checks each
 part (valid topology within the file's own tolerance, each solid's volume positive, equal to its
-tessellation's within 1 % and unchanged by a move, no face dropped): 261 read clean, 183 of them
-with solids. The other 128 are listed in the test with the first problem each hits (the commonest:
+tessellation's within 1 % and unchanged by a move, no face dropped): 274 read clean, 188 of them
+with solids. The other 115 are listed in the test with the first problem each hits (the commonest:
 edge ends off their vertices, p-curves off their edges, no shape the readers support), and the
 test fails when a listed file reads clean or an unlisted one doesn't. The gate runs it (it needs
 the dataset, so CI's per-push subset doesn't). An earlier count, 624 of 638 files from OCCT's
