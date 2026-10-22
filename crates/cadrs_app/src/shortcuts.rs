@@ -478,6 +478,8 @@ mod tests {
     /// physical `key_code` (on AZERTY the key labelled Z is `KeyW`).
     #[test]
     fn handlers_match_layout_aware_keys() {
+        // Spelled in two parts so this test does not find itself.
+        const NEEDLE: &str = concat!(".key", "_code");
         fn scan(dir: &std::path::Path, hits: &mut Vec<String>) {
             for entry in std::fs::read_dir(dir).unwrap() {
                 let path = entry.unwrap().path();
@@ -488,7 +490,7 @@ mod tests {
                 {
                     let text = std::fs::read_to_string(&path).unwrap();
                     for (i, line) in text.lines().enumerate() {
-                        if line.contains(".key_code") {
+                        if line.contains(NEEDLE) {
                             hits.push(format!("{}:{}", path.display(), i + 1));
                         }
                     }
@@ -499,7 +501,7 @@ mod tests {
         let mut hits = Vec::new();
         scan(&root.join("src"), &mut hits);
         scan(&root.join("../cadrs_ui/src"), &mut hits);
-        assert!(hits.is_empty(), "use ShortcutKey::shortcut_code() instead of .key_code: {hits:#?}");
+        assert!(hits.is_empty(), "use ShortcutKey::shortcut_code() instead of {NEEDLE}: {hits:#?}");
     }
 
     #[test]
