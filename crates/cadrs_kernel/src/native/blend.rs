@@ -1307,6 +1307,53 @@ fn local_problem(input: &Body, out: &Body) -> Option<String> {
     out.check_with(CheckLevel::Fast).into_iter().next()
 }
 
+/// Flat faces two of `edges` bound on opposite sides, parallel lines exactly two radii `r`
+/// apart (the fillets on them meet across the face and consume it whole: a full round), when
+/// two such faces meet: the width of one. A single full round builds; two meeting at a corner
+/// don't yet.
+fn consumed_face(b: &Body, edges: &[EdgeId], r: f64) -> Option<f64> {
+    let consumed: Vec<(usize, f64)> = (0..b.faces.len()).filter_map(|f| consumed_width(b, f, edges, r).map(|w| (f, w))).collect();
+    let edges_of = |f: usize| -> Vec<usize> { b.faces[f].loops.iter().flatten().map(|c| c.edge).collect() };
+    for (i, &(f, w)) in consumed.iter().enumerate() {
+        let mine = edges_of(f);
+        if consumed[i + 1..].iter().any(|&(g, _)| edges_of(g).iter().any(|e| mine.contains(e))) {
+            return Some(w);
+        }
+    }
+    None
+}
+
+/// The width of face `f` when it is flat and two of `edges` bound it on opposite sides exactly
+/// two radii `r` apart.
+fn consumed_width(b: &Body, f: usize, edges: &[EdgeId], r: f64) -> Option<f64> {
+    let close = tol::POINT.max(tol::REL_POINT * r);
+    let line = |e: usize| -> Option<(P3, V3)> {
+        let ed = &b.edges[e];
+        let Curve::Line { .. } = ed.curve else { return None };
+        let (p, q) = (ed.point(ed.t[0]), ed.point(ed.t[1]));
+        let d = q - p;
+        (d.norm() > tol::POINT).then(|| (p, d / d.norm()))
+    };
+    let face = &b.faces[f];
+    if !matches!(face.surf, Surface::Plane { .. }) {
+        return None;
+    }
+    let on: Vec<(P3, V3)> = face.loops.iter().flatten().filter(|c| edges.contains(&EdgeId(c.edge as u64))).filter_map(|c| line(c.edge)).collect();
+    for (i, (p, d)) in on.iter().enumerate() {
+        for (q, d2) in &on[i + 1..] {
+            if d.cross(d2).norm() > tol::ANGULAR_POINT {
+                continue;
+            }
+            let w = q - p;
+            let width = (w - d * w.dot(d)).norm();
+            if (width - 2.0 * r).abs() <= close {
+                return Some(width);
+            }
+        }
+    }
+    None
+}
+
 pub fn fillet(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], spec: &FilletSpec) -> Result<OpResult> {
     let (FilletSize::Radius(r) | FilletSize::Width(r)) = spec.size;
     if !(r > 0.0) {
@@ -1393,11 +1440,26 @@ pub fn fillet(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], spec: &Fille
         })
         .collect();
     let corners = matches!(spec.profile, FilletProfile::Circular) && matches!(spec.size, FilletSize::Radius(_));
-    let r = blend(k, body, &list, corners)?;
+    let res = match blend(k, body, &list, corners) {
+        Ok(res) => res,
+        // Neither method builds full rounds that meet at a corner: say so (OCCT's fillet does;
+        // a slightly smaller radius leaves a strip of each face here).
+        Err(e) => {
+            let FilletSize::Radius(radius) = spec.size else { return Err(e) };
+            return Err(consumed_face(&b, &all, radius).map_or(e, |width| KernelError::TooLarge {
+                op: "fillet",
+                why: format!(
+                    "the R{radius} fillets make full rounds of two faces that meet (one {width:.3} mm wide, its \
+                     opposite edges' fillets meeting across it): full rounds meeting at a corner aren't \
+                     supported (a radius a little smaller works)"
+                ),
+            }));
+        }
+    };
     if !spec.allow_overflow {
-        check_overflow(k, body, &all, &r)?;
+        check_overflow(k, body, &all, &res)?;
     }
-    Ok(r)
+    Ok(res)
 }
 
 /// With Allow edge overflow off: a fillet face may only touch faces continuing the faces at its
