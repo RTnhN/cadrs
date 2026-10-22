@@ -1,0 +1,341 @@
+Polyhedral Mass Properties (Revisited)
+David Eberly, Geometric Tools, Redmond WA 98052
+https://www.geometrictools.com/
+This work is licensed under the Creative Commons Attribution 4.0 International License. To view a copy
+of this license, visit http://creativecommons.org/licenses/by/4.0/ or send a letter to Creative Commons,
+PO Box 1866, Mountain View, CA 94042, USA.
+Created: December 31, 2002
+Last Modified: November 3, 2009
+
+
+
+Contents
+
+1 Introduction                                                                                             2
+
+2 Reduction of Volume Integrals                                                                            2
+
+3 Computation of Surface Integrals                                                                         3
+
+4 Comparison to Mirtich’s Formulas                                                                         5
+
+5 Pseudocode                                                                                               5
+
+
+
+
+                                                    1
+1     Introduction
+
+This document takes a second look at the article by Brian Mirtich, Fast and accurate computation of poly-
+hedral mass properties, Journal of Graphics Tools, vol. 1, no. 2, pp. 31-50, 1996. The article discusses
+how to compute the mass and inertia tensor for a solid, simple polyhedron of constant mass density. The
+construction uses the Divergence Theorem from calculus for reducing volume integrals to surface integrals, a
+reduction from three-dimensional integrals to two-dimensional integrals. The polyhedron surface is a union
+of planar faces, so the surface integrals are effectively integrals in various planes. Projection of these faces
+onto coordinate planes are used to set up yet another reduction in dimension. Green’s Theorem, the two-
+dimensional analog of the Divergence Theorem, is used to reduce the planar integrals to line integrals around
+the boundary of the projected faces.
+Two important points emphasized in the paper are (1) the projection of the polyhedron faces onto the
+appropriate coordinate planes to avoid numerical problems and (2) the reduction using Green’s Theorem to
+obtain common subexpressions (integrals of polynomials of one variable) to avoid redundant calculations.
+Item (2) occurs to handle polyhedron faces with four or more vertices. Item (1) is necessary in order to
+robustly compute what is required by item (2). When the polyhedron faces are triangles, neither items (1)
+nor (2) are necessary. A simpler construction is provided here when the polyhedron faces are triangles. A
+consequence of the formulas as derived in this document is that they require significantly less computational
+time than does Mirtich’s formulas. I suspect that for nontriangular faces, Mirtich’s formulas are reducible
+to simpler expressions.
+
+
+2     Reduction of Volume Integrals
+
+The mass, center of mass, and inertia tensor require computing volume integrals of the type
+                                              Z
+                                                 p(x, y, z) dV                                                  (1)
+                                                    V
+where V is the volumetric region of integration and dV is an infinitesimal measure of volume. The function
+p(x, y, z) is a polynomial selected from 1, x, y, z, x2 , y 2 , z 2 , xy, xz, and yz. We are interested in computing
+these integrals where V is the region bounded by a simple polyhedron. A volume integral may be converted
+to a surface integral via the Divergence Theorem from calculus:
+                                  Z                  Z                     Z
+                                     p(x, y, z) dV =      ∇ · F dV =          N · F dS                           (2)
+                                   V                     V                     S
+where S is the boundary of the polyhedron, a union of triangular faces, and where dS is an infinitesimal
+measure of surface area. The function F(x, y, z) is chosen so that ∇ · F = p. The vector N denotes
+outward-pointing, unit-length surface normals. The choices for F in the Mirtich paper are
+
+                                       p    F                    p    F
+                                       1    (x, 0, 0)            y2   (0, y 3 /3, 0)
+                                       x    (x2 /2, 0, 0)        z2   (0, 0, z 3 /3)
+                                                                                                                (3)
+                                       y    (0, y 2 /2, 0)       xy   (x2 y/2, 0, 0)
+                                       z    (0, 0, z 2 /2)       xz   (0, 0, z 2 x/2)
+                                       x2   (x3 /3, 0, 0)        yz   (0, y 2 z/2, 0)
+
+
+                                                             2
+                                                                     R
+The computational effort is now devoted to calculating the integrals S N · F dS. The boundary S is just
+the union of polyhedral faces F. An outward-pointing, unit-length normal to face F is denoted by NF . The
+surface integral decomposes to       Z             XZ
+                                        N · F dS =         NF · F dS                                   (4)
+                                                     S                      F ∈S    F
+
+The integrals to be computed are now reduced to
+
+                                                                                                         1                          3
+                                                                                            y 2 dV
+         R                    P                  R                                  R                        P              R
+          V
+              dV        =          F ∈S (NF · ı) F x dS                                 V
+                                                                                                     =   3    F ∈S (NF · ) F y         dS
+                              1                                2                                         1
+                                                                                            z 2 dV                                  3
+         R                      P                    R                              R                      P                R
+          V
+              x dV      =     2     F ∈S (NF · ı) F x              dS                   V
+                                                                                                     =   3    F ∈S (NF · k) F z         dS
+                              1                                2                                         1                          2
+         R                                           R                              R                                       R
+                                                                                                                                                (5)
+                                P                                                                          P
+          V
+              y dV      =     2     F ∈S (NF · ) F y              dS                   V
+                                                                                            xy dV    =   2    F ∈S (NF · ı) F x y dS
+                              1                                2                                         1                     2
+         R                      P                        R                          R                      P                R
+          V
+              z dV      =     2     F ∈S (NF · k) F z              dS                   V
+                                                                                            yz dV    =   2    F ∈S (NF · ) F y z dS
+                              1                                                                          1
+              x2 dV                                            3                                                                    2
+         R                      P                    R                              R                      P                R
+          V
+                        =     3     F ∈S (NF · ı) F x              dS                   V
+                                                                                            xz dV    =   2    F ∈S (NF · k) F z         x dS
+
+
+3     Computation of Surface Integrals
+
+We now need to compute integrals of the form
+                                                                        Z
+                                                             (NF · `)        q(x, y, z) dS                                                      (6)
+                                                                        F
+
+where ` is one of ı, , or k and where q is one of x, x2 , y 2 , z 2 , x3 , y 3 , z 3 , x2 y, y 2 z, or z 2 x. Let the triangular
+face be counterclockwise ordered and have vertices Pi = (xi , yi , zi ), 0 ≤ i ≤ 2. Two edges are
+
+                                    Ei = Pi − P0 = (xi − x0 , yi − y0 , zi − z0 ) = (αi , βi , γi )                                             (7)
+
+for 1 ≤ i ≤ 2. A parameterization of the face is
+
+                              P(u, v)     =    P0 + uE1 + vE2
+                                          =    (x0 + α1 u + α2 v, y0 + β1 u + β2 v, z0 + γ1 u + γ2 v)                                           (8)
+                                          =    (x(u, v), y(u, v), z(u, v))
+
+where u ≥ 0, v ≥ 0, and u + v ≤ 1. The infinitesimal measure of surface area is
+
+                                                     ∂P ∂P
+                                           dS =         ×    du dv = |E1 × E2 | du dv                                                           (9)
+                                                     ∂u   ∂v
+
+and the outer pointing unit-length face normal is
+
+                               E1 × E2     (β1 γ2 − β2 γ1 , α2 γ1 − α1 γ2 , α1 β2 − α2 β1 )   (δ0 , δ1 , δ2 )
+                      NF =               =                                                  =                                                  (10)
+                              |E1 × E2 |                     |E1 × E2 |                       |E1 × E2 |
+
+The integrals in equation (6) reduces to
+                              Z                                              Z 1 Z 1−v
+                   (NF · `)        q(x, y, z) dS = (E1 × E2 · `)                               q(x(u, v), y(u, v), z(u, v)) du dv              (11)
+                               F                                                0       0
+
+
+                                                                            3
+where x(u, v), y(u, v), and z(u, v) are the components of the parameterization in equation (8).
+The integrals on the right-hand side of equation (11) can be computed symbolically, either by hand or by
+a symbolic algebra package. The formulas listed later were computed using Mathematica. The instructions
+are
+    x = x0+u ∗( x1−x0)+v ∗( x2−x0 )
+    y = y0+u ∗( y1−y0)+v ∗( y2−y0 )
+    z = z0+u ∗( z1−z0 )+v ∗( z2−z0 )
+    i n t x = T o g e t h e r [ I n t e g r a t e [ x , { v , 0 , 1 } , { u ,0 ,1 − v } ] ]
+    i n t x x = T o g e t h e r [ I n t e g r a t e [ x ˆ 2 , { v , 0 , 1 } , { u ,0 ,1 − v } ] ]
+    i n t y y = T o g e t h e r [ I n t e g r a t e [ y ˆ 2 , { v , 0 , 1 } , { u ,0 ,1 − v } ] ]
+    i n t z z = T o g e t h e r [ I n t e g r a t e [ z ˆ 2 , { v , 0 , 1 } , { u ,0 ,1 − v } ] ]
+    i n t x x x = T o g e t h e r [ I n t e g r a t e [ x ˆ 3 , { v , 0 , 1 } , { u ,0 ,1 − v } ] ]
+    i n t y y y = T o g e t h e r [ I n t e g r a t e [ y ˆ 3 , { v , 0 , 1 } , { u ,0 ,1 − v } ] ]
+    i n t z z z = T o g e t h e r [ I n t e g r a t e [ z ˆ 3 , { v , 0 , 1 } , { u ,0 ,1 − v } ] ]
+    i n t x x y = T o g e t h e r [ I n t e g r a t e [ x ˆ2∗ y , { v , 0 , 1 } , { u ,0 ,1 − v } ] ]
+    i n t y y z = T o g e t h e r [ I n t e g r a t e [ y ˆ2∗ z , { v , 0 , 1 } , { u ,0 ,1 − v } ] ]
+    i n t z z x = T o g e t h e r [ I n t e g r a t e [ z ˆ2∗ x , { v , 0 , 1 } , { u ,0 ,1 − v } ] ]
+
+
+Common subexpressions may be obtained by some additional factoring. Define
+                                      n
+                                      X
+                      sn (w) =               w0n−i w1i , f0 (w) = 1, and fn (w) = sn (w) + w2 fn−1 (w) for n ≥ 1                                     (12)
+                                       i=0
+
+Think of these as macros where the input argument is a textual replacement wherever w occurs in the
+right-hand sides. Also define the macro
+
+                                                                  gi (w) = f2 (w) + wi f1 (w) + wi2                                                  (13)
+
+The specific expressions required in the surface integrals are listed below in terms of w. Each macro is
+expanded three times, once for each of x, y, and z.
+
+      f1 (w) = w0 + w1 + w2 = [w0 + w1 ] + w2
+      f2 (w) = w02 + w0 w1 + w12 + w2 f1 (w) = [[w02 ] + w1 {w0 + w1 )}] + w2 {f1 (w)}
+                                                                                                                                                     (14)
+      f3 (w) = w03 + w02 w1 + w0 w12 + w13 + w2 f2 (w) = w0 {w02 } + w1 {w02 + w0 w1 + w12 } + w2 {f2 (w)}
+      gi (w) = {f2 (w)} + wi ({f1 (w)} + wi )
+
+The square brackets [·] indicate that the subexpression is computed and saved in temporary variables for
+later use. The curly braces {·} indicate that the subexpression was computed earlier and can be accessed
+from temporary variables. The number of subexpressions that must be stored at any one time is small, so
+cache coherence should not be an issue when enough floating point registers are available for storing the
+subexpressions (see the pseudocode later in this document).
+The integrals are
+                                               δ0                                                           δ1
+                                                                        (NF · ) F y 3 dS
+            R                                                                   R
+    (NF · ı) F x dS                    =       6 f1 (x)                                                 =   20 f3 (y)
+                                               δ0                                                           δ2
+    (NF · ı) F x2 dS                                                    (NF · k) F z 3 dS
+            R                                                                    R
+                                       =       12 f2 (x)                                                =   20 f3 (z)
+                                               δ1                                                           δ0
+    (NF · ) F y 2 dS                                                   (NF · ı) F x2 y dS
+            R                                                                   R
+                                       =       12 f2 (y)                                                =   60 (y0 g0 (x) + y1 g1 (x) + y2 g2 (x))
+                                                                                                                                                     (15)
+                                               δ2                                                           δ1
+    (NF · k) F z 2 dS                                                   (NF · ) F y 2 z dS
+             R                                                                  R
+                                       =       12 f2 (z)                                                =   60 (z0 g0 (y) + z1 g1 (y) + z2 g2 (y))
+                                               δ0                                                           δ2
+    (NF · ı) F x3 dS                                                    (NF · k) F z 2 x dS
+            R                                                                    R
+                                       =       20 f3 (x)                                                =   60 (x0 g0 (z) + x1 g1 (z) + x2 g2 (z))
+
+
+
+                                                                                            4
+4        Comparison to Mirtich’s Formulas
+                                             R
+Let us compare the formulas for Qx = (NF · ı) F x dS. In this document the integral is
+
+                                                                   δ0          δ0
+                                                          Qx =        f1 (x) =    (x0 + x1 + x2 )                                                       (16)
+                                                                   6           6
+In Mirtich’s formulas there are two possibilities for computing Qx . One occurs when the projection variable
+is γ = z. Assembling the pieces of the corresponding formulas in the paper and switching to the notation
+used in this document,
+
+                             Qx      =       NF ·ı π
+                                                       x
+                                            |NF ·k|
+                                             NF ·ı Sign(NF ·k) P2 (y                         2                    2                                     (17)
+                                     =
+                                            |NF ·k|          6           i=0 i+1 − yi )(xi+1 + xi+1 xi + xi )
+                                                          2           2               2         2             2          2
+                                            δ0 (y1 −y0 )(x1 +x0 x1 +x0 )+(y2 −y1 )(x2 +x1 x2 +x1 )+(y0 −y2 )(x0 +x0 x2 +x2 )
+                                     =       6                      (x1 −x0 )(y2 −y0 )−(x2 −x0 )(y1 −y0 )
+
+The final formula requires much more computational time than the one derived in this document. In fact
+the numerator is exactly divisible by the denominator and the fraction reduces to x0 + x1 + x2 , as it should
+to be equivalent to the Qx in equation (16). The reduction was verified using Mathematica. If the projection
+variable is γ = x,
+
+                      −1
+     Qx      =           ı| ((NF · )πy + (NF · k)πz − (NF · P0 )π1 )
+                    |NF ·
+                              P2                                           P2
+             =      − δ10 δ61 i=0 (zi+1 − zi )(yi+1
+                                                2
+                                                    + yi+1 yi + yi2 ) − δ62 i=0 (yi+1 − yi )(zi+1
+                                                                                              2
+                                                                                                  + zi+1 zi + zi2 )−                                    (18)
+                                                                                     
+                     δ0 x0 +δ1 y0 +δ2 z0 P2
+                              2           i=0 (zi+1 − zi )(yi+1 + yi )
+
+The correctness of this formula was verified using Mathematica; in fact it reduces to the one in equation
+(16). The computational requirements for this expression are enormous compared to that of equation (16).
+Comparisons between the formulas for the other integrals is possible, but you will find that the differences
+in computational time become even greater than in the example shown here.
+
+
+
+5        Pseudocode
+
+The pseudocode for computing the integrals is quite simple. The polyhedron vertices are passes as the array
+p[]. The number of triangles is tmax. The array index[] has tmax triples of integers that are indices into
+the vertex array. The return values are the mass, the center of mass, and the inertia tensor relative to the
+center of mass. The code assumes that the rigid body has constant density 1. If your rigid body has constant
+density D, then you need to multiply the output mass by D and the output inertia tensor by D.
+    MACRO S u b e x p r e s s i o n s ( w0 , w1 , w2 , f 1 , f 2 , f 3 , g0 , g1 , g2 )
+    {
+        temp0 = w0+w1 ;               f 1 = temp0+w2 ;             temp1 = w0∗w0 ;         temp2 = temp1+w1∗temp0 ;
+        f 2 = temp2+w2∗ f 1 ;              f 3 = w0∗temp1+w1∗temp2+w2∗ f 2 ;
+        g0 = f 2+w0∗( f 1+w0 ) ;              g1 = f 2+w1∗( f 1+w1 ) ;              g2 = f 2+w2∗( f 1+w2 ) ;
+    }
+
+    v o i d Compute ( P o i n t p [ ] , i n t tmax , i n t i n d e x [ ] , R e a l& mass , P o i n t& cm , M a t r i x& i n e r t i a )
+    {
+           c o n s t a n t Real mult [ 1 0 ] = {1/6 ,1/24 ,1/24 ,1/24 ,1/60 ,1/60 ,1/60 ,1/120 ,1/120 ,1/120};
+           R e a l i n t g [ 1 0 ] = { 0 , 0 , 0 , 0 , 0 , 0 , 0 , 0 , 0 , 0 } ; // o r d e r : 1 , x , y , z , x ˆ 2 , y ˆ 2 , z ˆ 2 , xy , yz , z x
+
+
+
+                                                                                   5
+    f o r ( t = 0 ; t < tmax ; t++)
+    {
+          // g e t v e r t i c e s o f t r i a n g l e t
+          i 0 = index [3∗ t ] ;       i 1 = index [3∗ t +1];        i 2 = index [3∗ t +2];
+          x0 = p [ i 0 ] . x ;    y0 = p [ i 0 ] . y ;   z0 = p [ i 0 ] . z ;
+          x1 = p [ i 1 ] . x ;    y1 = p [ i 1 ] . y ;   z1 = p [ i 1 ] . z ;
+          x2 = p [ i 2 ] . x ;    y2 = p [ i 2 ] . y ;   z2 = p [ i 2 ] . z ;
+
+          // g e t e d g e s and c r o s s p r o d u c t o f e d g e s
+          a1 = x1−x0 ;       b1 = y1−y0 ;        c1 = z1−z0 ;          a2 = x2−x0 ; b2 = y2−y0 ;                 c2 = z2−z0 ;
+          d0 = b1∗c2−b2∗ c1 ;        d1 = a2 ∗c1−a1 ∗ c2 ; d2 = a1 ∗b2−a2 ∗b1 ;
+
+          // compute i n t e g r a l t e r m s
+          S u b e x p r e s s i o n s ( x0 , x1 , x2 , f 1 x , f 2 x , f 3 x , g0x , g1x , g2x ) ;
+          S u b e x p r e s s i o n s ( y0 , y1 , y2 , f 1 y , f 2 y , f 3 y , g0y , g1y , g2y ) ;
+          S u b e x p r e s s i o n s ( z0 , z1 , z2 , f 1 z , f 2 z , f 3 z , g0z , g1z , g2z ) ;
+
+          // u p d a t e i n t e g r a l s
+          i n t g [ 0 ] += d0∗ f 1 x ;
+          i n t g [ 1 ] += d0∗ f 2 x ;     i n t g [ 2 ] += d1∗ f 2 y ;           i n t g [ 3 ] += d2∗ f 2 z ;
+          i n t g [ 4 ] += d0∗ f 3 x ;     i n t g [ 5 ] += d1∗ f 3 y ;           i n t g [ 6 ] += d2∗ f 3 z ;
+          i n t g [ 7 ] += d0 ∗( y0 ∗ g0x+y1 ∗ g1x+y2 ∗ g2x ) ;
+          i n t g [ 8 ] += d1 ∗( z0 ∗ g0y+z1 ∗ g1y+z2 ∗ g2y ) ;
+          i n t g [ 9 ] += d2 ∗( x0 ∗ g0z+x1 ∗ g1z+x2 ∗ g2z ) ;
+    }
+    f o r ( i = 0 ; i < 1 0 ; i ++)
+          i n t g [ i ] ∗= m u l t [ i ] ;
+
+    mass = i n t g [ 0 ] ;
+
+    // c e n t e r o f mass
+    cm . x = i n t g [ 1 ] / mass ;
+    cm . y = i n t g [ 2 ] / mass ;
+    cm . z = i n t g [ 3 ] / mass ;
+
+    // i n e r t i a t e n s o r r e l a t i v e t o c e n t e r o f mass
+    i n e r t i a . xx = i n t g [ 5 ] + i n t g [6] − mass ∗(cm . y∗cm . y+cm . z ∗cm . z ) ;
+    i n e r t i a . yy = i n t g [ 4 ] + i n t g [6] − mass ∗(cm . z ∗cm . z+cm . x ∗cm . x ) ;
+    i n e r t i a . z z = i n t g [ 4 ] + i n t g [5] − mass ∗(cm . x∗cm . x+cm . y∗cm . y ) ;
+    i n e r t i a . xy = −( i n t g [7] − mass ∗cm . x ∗cm . y ) ;
+    i n e r t i a . y z = −( i n t g [8] − mass ∗cm . y ∗cm . z ) ;
+    i n e r t i a . x z = −( i n t g [9] − mass ∗cm . z ∗cm . x ) ;
+}
+
+
+
+
+                                                                                     6
+

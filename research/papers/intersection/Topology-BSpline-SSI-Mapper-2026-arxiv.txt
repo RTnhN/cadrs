@@ -1,0 +1,755 @@
+                                         Topology Understanding of B-Spline Surface/Surface Intersection with
+                                         Mapper
+                                         Chenming Gaoa , Hongwei Linb,∗ and Gengchen Lic
+                                         School of Mathematical Science, Zhejiang University, Hangzhou, 310027, China
+                                         State Key Laboratory of CAD & CG, Zhejiang University, Hangzhou, 310058, China
+
+
+                                         ARTICLE INFO                                       ABSTRACT
+                                         Keywords:                                          In the realm of computer-aided design (CAD) software, the intersection of B-spline surfaces stands as a
+                                         Surface/surface intersection                       fundamental operation. Despite the extensive history of surface intersection algorithms, the challenge
+                                         Topology structure                                 of handling complex intersection topologies persists. While subdivision algorithms have demonstrated
+                                         Topology understanding                             strong robustness in computing surface/surface intersection and are capable of addressing singular
+
+
+
+
+arXiv:2604.12631v1 [cs.CG] 14 Apr 2026
+                                         Mapper                                             cases, determining the topology of the intersection obtained through these methods is a key factor for
+                                         Topological data analysis                          calculating correct intersection, and remains a difficult issue. To address this challenge, we propose a
+                                                                                            Mapper-based method for determining the topology of the intersection between two B-spline surfaces.
+                                                                                            Our algorithm is designed to efficiently handle various common and complex intersection topologies.
+                                                                                            Experimental results verify the robustness and topological correctness of this method.
+
+
+
+                                         1. Introduction                                                                   • Topology structure of Surface/Surface intersection is
+                                                                                                                             understood by Mapper at the first time, showing its
+                                             B-spline surface intersection is one of the fundamental                         robustness and efficiency;
+                                         operations in computer-aided design (CAD) software. En-
+                                         suring that surface intersection operations are robust, effi-                     • A two-step mapper algorithm is developed to extract
+                                         cient, and topologically correct is of paramount importance.                        the structure of Surface/Surface intersection point
+                                         Despite the extensive history of surface intersection algo-                         sets.
+                                         rithms, complex intersection topology remains a persistent
+                                         challenge.                                                                       The rest of the paper is organized as follows. In Section
+                                             Subdivision method is a robust method for calculat-                      2, we review related work on surface intersection algorithms
+                                         ing surface/surface intersections by recursively subdivid-                   and Mapper algorithm. In Section 3, preliminaries on the
+                                         ing the parameter domains fo the two surfaces, leading to                    Mapper algorithm and surface intersection are introduced.
+                                         strip-shaped point cloud in each domain [Lasser, 1986],                      In Section 4, we propose an algorithm for understanding
+                                         [De Figueiredo, 1996], [Lin, Qin, Liao, and Xiong, 2013].                    the topology of the intersection of two B-spline surfaces.
+                                         The key factor for computing the correct intersections is to                 In Section 5, we verify the effectiveness of the algorithm
+                                         understand the topological structure of the strips of point                  experimentally. Finally, we conclude this study in Section 6.
+                                         cloud correctly, i.e., determining the connected components,
+                                         the openness or closeness of each connected component, and
+                                         the bifurcation points. Because the surface/surface intersec-
+                                                                                                                      2. Related work
+                                         tion can be very complicated in some cases, the topology                     2.1. Surface/Surface intersection and
+                                         structure of the strips of point cloud is also complicated, and                   determination of intersection topology
+                                         hard to understand.                                                              In this section, we briefly review related work on Sur-
+                                             To address this challenge, we propose a new method                       face/Surface intersection. Surface intersection is a critical is-
+                                         based on Mapper [Singh, Mémoli, Carlsson, et al., 2007] for                  sue in geometric design and has been the subject of extensive
+                                         understanding the topology of intersection curves between                    research. In general, intersection methods can be categorized
+                                         two B-spline surfaces. Mapper is a significant tool in topo-                 as follows.
+                                         logical data analysis that extracts topological features from                    Algebraic methods typically involve converting one sur-
+                                         high-dimensional data at various scales and projects them                    face into its implicit equation. The parametric form of the
+                                         into 2D or 3D space for visualization. First, we employ a                    other surface is then substituted into this implicit equation
+                                         two-step Mapper algorithm to construct the Mapper graph                      to compute the Surface/Surface intersection using elimina-
+                                         of the intersection points to understand its topological struc-              tion theory [Sarraga, 1983], [Manocha and Canny, 1991],
+                                         ture. Next, we identify two types of characteristic vertices                 [Manocha and Krishnan, 1997]. These methods determine
+                                         within the Mapper graph: singular vertices and boundary                      the topology of the intersection by identifying "characteristic
+                                         vertices. Finally, by removing these characteristic vertices                 points" such as border points, turning points, and singular
+                                         from the Mapper graph, we can partition the intersection re-                 points [Farouki, 1986], [Hass, Farouki, Han, Song, and
+                                         gion into several simple open or closed curves. In summary,                  Sederberg, 2007]. However, determining how these points
+                                         the main contributions of this study are as follows:                         are connected remains a challenge, as incorrect connections
+                                             ∗ E-mail address: hwlin@zju.edu.cn (H. Lin).                             can lead to topological errors.
+
+                                         C. Gao et al.                                                                                                                             Page 1 of 13
+     Tracing methods generate intersections by stepping from          Currently, the Mapper algorithm has been widely applied
+initial points on a curve branch, following the local differ-     in many fields, including computational biology [Jeitziner,
+ential geometry of the curve [Bajaj, Hoffmann, Lynch, and         Carriere, Rougemont, Oudot, Hess, and Brisken, 2019],
+Hopcroft, 1988]. These methods require careful selection          medicine [Li, Cheng, Glicksberg, Gottesman, Tamler, Chen,
+of valid initial points to ensure no branches are missed.         Bottinger, and Dudley, 2015], manufacturing systems [Guo
+Additionally, determining the tracking direction at singular      and Banerjee, 2017], and machine learning [Carrière and
+points of the intersecting curves is challenging.                 Michel, 2022]. However, its application in the CAD field
+     Lattice methods decompose the Surface/Surface inter-         remains scarce.
+section problem by computing the intersection of multiple
+isoparametric lines from one surface to another [Rossignac
+                                                                  3. Preliminaries
+and Requicha, 1987]. However, the choice of mesh resolu-
+tion is crucial, as inappropriate resolutions may result in the      In this section, we introduce key concepts used in this
+omission of important characteristic points.                      paper.
+     Subdivision methods are recursive approaches that sub-
+divide surfaces into smaller facets and perform intersection      3.1. Mapper
+tests between the facets of the two surfaces [Lasser, 1986],           Mapper is a tool in the field of topological data analysis
+[De Figueiredo, 1996], [Lin et al., 2013]. These operations       proposed by Gurjeet Singh et al in 2007 [Singh et al., 2007].
+are repeated until the computed intersection meets accuracy            The Mapper method extracts the topological structure
+requirements. While subdivision methods can achieve high          of a high-dimensional dataset through partial clustering,
+accuracy in intersection curves, they struggle to determine       represented as a simplicial complex. In general, we usually
+the topology of intersections near singular points.               construct a two-dimensional simplex complex form, that is,
+     Widely used methods in practice are hybrids of the           an undirected and unweighted graph 𝐺 = ⟨𝑉 , 𝐸⟩, where 𝑉
+above approaches. One example is the hybrid of subdivision        stands for nodes and 𝐸 stands for edges. Unless otherwise
+and tracing methods, which first identifies all intersecting      stated, this paper defaults to this form of Mapper’s output,
+branches through subdivision and then tracks each inter-          which we call a Mapper graph. The Mapper algorithm is
+secting curve [Barnhill and Kersey, 1990], [Sinha, Klassen,       inspired by the Reeb graph. It can be proven that in the limit,
+and Wang, 1985]. Another hybrid combines algebraic and            the Mapper graph constructed using Mapper is equivalent to
+tracing methods: algebraic methods are used to identify           the Reeb graph [Munch and Wang, 2015].
+characteristic points, and then tracking methods are applied           Given a dataset 𝑋 with known pairwise distances and a
+to obtain intersecting curves [Krishnan and Manocha, 1997].       filter function 𝑓 ∶ 𝑋 → ℝ , the Mapper algorithm on 𝑋
+     For more details on Surface/Surface intersection, please     computed with the filter function 𝑓 contains the following
+refer to [Hoschek and Lasser, 1993], [Patrikalakis, 2002].        steps:
+     In general, current research primarily employs algebraic        1. Cover construction. Cover the range of values 𝑌 =
+methods to compute these characteristic points of intersec-             𝑓 (𝑋) with a set of overlapping intervals {𝐼𝑠 }𝑆1 .
+tion, thereby decomposing the intersection curve into several
+                                                                     2. Preimage clustering. For each interval 𝐼𝑠 , the preim-
+monotonic segments at the characteristic points to determine
+                                                                        age 𝑋𝑠 = 𝑓 −1 (𝐼𝑠 ) is clustered using a chosen cluster-
+the topology of the intersection [Grandine and Klein IV,
+                                                                        ing algorithm, resulting in clusters {𝑋𝑠,𝑘 }.
+1997][Hass et al., 2007]. However, few studies focus on the
+                                                                     3. Graph Construction. A node is created for each clus-
+overall topological structure of the intersection, such as the
+                                                                        ter 𝑋𝑠,𝑘 , and edges are added between nodes⋂ if their
+number of connected branches and cycles.
+                                                                        corresponding clusters intersect (i. e. 𝑋𝑠,𝑘 𝑋𝑡,𝑙 ≠ ∅)
+2.2. Mapper algorithm and its applications                            Fig. 1 illustrates the Mapper algorithm applied to a noisy
+     The Mapper algorithm was first proposed by Singh et al.      circle point set 𝑋. The filter function is 𝑓 (𝑥) = 𝑥1 , where
+in 2007 [Singh et al., 2007]. It aims to perform data visu-       𝑥 = (𝑥1 , 𝑥2 ) is a point in 𝑋. We cover the range of 𝑓 with five
+alization and cluster analysis based on topology, to extract      equal-length intervals, with a 20% overlap of neighboring
+the global topological features of data. The early Mapper         intervals. Then for each interval we find its clustering using
+algorithm had limitations in practical use, such as relying       DBSCAN (Density-Based Spatial Clustering of Applications
+on parameter selections like coverage and overlap ratio. To       with Noise) algorithm[Ester, Kriegel, Sander, Xu, et al.,
+address these issues, some studies have proposed adaptive         1996]. Finally, we treat each cluster as a node in the Mapper
+coverage selection strategies based on statistical analysis       graph and add edges between nodes if their corresponding
+[Carriere, Michel, and Oudot, 2018], [Belchí, Brodzki, Bur-       clusters intersect.
+fitt, and Niranjan, 2020]. In addition, scholars have de-             The choice of filter function, cover parameters, and clus-
+veloped Mapper variants based on different clustering al-         tering algorithm all influence the resulting Mapper graph.
+gorithms— for example, applying classic ones like Fuzzy           These parameters must be carefully selected to ensure that
+Clustering [Bui, Vo, Do, Hung, and Snasel, 2020] and G-           the topological features extracted by the algorithm accu-
+Means [Alvarado, Belton, Fischer, Lee, Palande, Percival,         rately reflect the structure of the point set.
+and Purvine, 2025] to Mapper’s clustering step.
+
+
+C. Gao et al.                                                                                                        Page 2 of 13
+                (a)                              (b)
+
+
+                                                                                         (a)                             (b)
+
+
+
+
+                 (c)                               (d)
+
+
+Fig. 1: An example of the Mapper algorithm. The data is                                 (c)                             (d)
+sampled from a noisy circle, and the filter function is 𝑓 (𝑥) = 𝑥1 ,
+where 𝑥 = (𝑥1 , 𝑥2 ) is a point in 𝑋. (a) The point set 𝑋 colored
+by the value of the filter function 𝑓 . (b)The range of 𝑓 is           Fig. 2: An example of the subdivision method. (a)Initial axis-
+covered with five equal-length intervals, with a 20% overlap           aligned bounding box on the (𝑢, 𝑣) parameter domain. Each
+of neighboring intervals. (c)The DBSCAN algorithm [Ester               surface is initially divided into two surface patches within the
+et al., 1996] is used to cluster the preimage for each interval.       parameter domain. (b)Results after 1 subdivision operation.
+(d)Nodes of the mapper graph are colored by the average filter         (c)Results after 1000 subdivision operation. (d)Results after
+function value.                                                        4000 subdivision operation.
+
+
+
+3.2. Surface intersection by subdivision method                        possibility prediction process is repeated until the bounding
+    In this section, we introduce the general idea of the sub-         boxes of the sub-surface patches do not intersect (and thus
+division method for solving the intersection of B-spline sur-          can be eliminated) or the size of the sub-surface patches
+faces without involving specific implementations. The core             reaches the preset precision threshold. Fig. 2 illustrates the
+idea of the subdivision method in solving the intersection             subdivision process of the (𝑢, 𝑣) parameter domain. Each
+of B-spline surfaces is to narrow down potential intersection          surface is initially divided into two surface patches within
+regions through gradual subdivision of the surface parameter           the parameter domain. Through iterative subdivision and
+domain and the judgment of geometric relationships, and                intersection detection, the remaining rectangular bounding
+finally determine the intersection point sets. Its basic steps         boxes progressively narrow in the actual intersection.
+are as follows.                                                            Extraction of intersection point set. After iterative sub-
+    Construction of initial bounding boxes and predic-                 division, we obtain two strip-shaped intersection regions on
+tion of intersection possibility. For the two B-spline sur-            the parameter domains of two B-spline surfaces 𝐵1 (𝑢, 𝑣) and
+faces 𝐵1 (𝑢, 𝑣) and 𝐵2 (𝑠, 𝑡) involved in the intersection cal-        𝐵2 (𝑠, 𝑡). In fact, they correspond to two sets of rectangles on
+culation, first, initial surface patches are divided within their      the respective parameter domains. We compute the centroid
+respective parameter domains, and an axis-aligned bound-               of each rectangle as a point on the parameter domain where
+ing box is constructed for each surface patch. By judging              the B-spline surfaces intersect. In conclusion. we get two
+whether the bounding boxes of two surface patches inter-               pieces of intersection point sets 𝑃1,𝑢,𝑣 and 𝑃2,𝑠,𝑡 on the param-
+sect, we can quickly eliminate the combinations of surface             eter domains. In order to generate the desirable intersection
+patches that cannot have intersection curves: if the bound-            curves, we should understand the topology structure of the
+ing boxes have no intersection, the corresponding surface              strip-shaped point clouds 𝑃1,𝑢,𝑣 and 𝑃2,𝑠,𝑡 correctly.
+patches must not intersect and can be directly eliminated;
+if the bounding boxes intersect, the surface patches may
+intersect and need to proceed to the next step of processing.
+                                                                       4. Topology understanding of intersecting
+    Subdivision of parameter domain. For surface patches                  curves in parameter domains
+with intersecting bounding boxes, it is necessary to sub-                    In this paper, we use the affine arithmetic-based sub-
+divide the corresponding parameter domain rectangles, di-              division method proposed in [Lin et al., 2013] to obtain
+viding the original rectangles into smaller sub-rectangles,            the intersection point sets 𝑃1,𝑢,𝑣 and 𝑃2,𝑠,𝑡 in the parameter
+each corresponding to a more refined sub-surface patch. At             domains of the two B-spline surfaces 𝐵1 (𝑢, 𝑣) and 𝐵2 (𝑠, 𝑡),
+the same time, a new bounding box is constructed for each              with their parameter ranges being [𝑢𝑠 , 𝑢𝑒 ] × [𝑣𝑠 , 𝑣𝑒 ] and
+sub-surface patch, and the above-mentioned intersection                [𝑠𝑠 , 𝑠𝑒 ] × [𝑡𝑠 , 𝑡𝑒 ]. In this section, we analyze the topological
+
+C. Gao et al.                                                                                                                  Page 3 of 13
+structure of intersecting curves in the parameter domain          extended persistence diagrams of the Mapper graph and the
+based on the Mapper algorithm.                                    Reeb graph does not exceed a parameter-dependent upper
+                                                                  bound. To ensure the topological correctness of the Map-
+4.1. Two-step Mapper algorithm                                    per graph, we adopt the Mapper algorithm and parameter
+    In Section 3.1, we provide an overview of the basic           selection strategy proposed by Carrière et al. The specific
+process of the Mapper algorithm. In this paper, We develop a      implementation details used in this paper are described
+two-step Mapper algorithm to extract the topological struc-       below.
+ture of an input point set 𝑋 ⊆ ℝ2 . This is outlined in Alg. 1        Filter function selection. To obtain general theoretical
+and explained in the following. First, we construct the initial   guarantees, the filter function should be Morse-type. A large
+Mapper graph using a filter function based on principal           class of Morse-type functions commonly used in Mapper
+direction projections. Then, we subdivide the nodes in the        constructions are Lipschitz continuous, i.e., there exists a
+Mapper graph along orthogonal directions to obtain the final      constant 𝑐 > 0 such that the function 𝑓 ∶ 𝑋 → ℝ satisfies
+Mapper graph. Algorithms for higher dimensions can be
+similarly generalized.                                                  |𝑓 (𝑥) − 𝑓 (𝑥′ )| ≤ 𝑐‖𝑥 − 𝑥′ ‖.                      (1)
+
+Algorithm 1 Two-step Mapper algorithm                                 In this paper, we employ linear projections as filter func-
+                                                                  tions, for which the Lipschitz constant satisfies 𝑐 = 1. When
+Input: A point set 𝑋 ⊆ ℝ2 , clustering parameter 𝛿, overlap       constructing the initial Mapper graph, we apply principal
+    ratio 𝜃ov                                                     component analysis (PCA) [Jolliffe, 1990] to compute the
+Output: Mapper graph 𝐺 of 𝑋                                       principal directions of 𝑋, and adopt the projection of the
+ 1: Construct the initial Mapper graph 𝐺                          data onto the first principal direction as the filter function.
+ 2: Set 𝑉𝑠𝑝𝑙𝑖𝑡 = ∅.                                               Specifically, we first compute the centroid 𝑥𝑐 of 𝑋,
+ 3: for each point set 𝑋𝑖 corresponding to the node 𝑣𝑖 in 𝐺
+
+                                                                               1∑
+    do                                                                            𝑚
+ 4:    Compute the number of intervals 𝑆𝑖 corresponding to              𝑥𝑐 =        𝑥.                                       (2)
+                                                                               𝑚 𝑖=1 𝑖
+       𝑋𝑖
+ 5:    if 𝑆𝑖 >= 2 then                                            Next, we compute the covariance matrix Σ = (𝜎𝑖,𝑗 ) of the
+ 6:       Add the node 𝑣𝑖 to 𝑉𝑠𝑝𝑙𝑖𝑡                               centralized point set 𝑋,
+ 7:    end if
+ 8: end for                                                             𝜎𝑖,𝑗 = ⟨𝑥𝑖 − 𝑥𝑐 , 𝑥𝑗 − 𝑥𝑐 ⟩, where 𝑥𝑖 , 𝑥𝑗 ∈ 𝑋.      (3)
+ 9: Merge nodes in 𝑉𝑠𝑝𝑙𝑖𝑡 that belong to the same connected
+    component in 𝐺 into a single node.                            The eigenvector corresponding to the largest eigenvalue of
+10: for each point set 𝑋𝑖 corresponding to the node 𝑣𝑖 in         Σ is denoted by 𝑤𝑝 and defines the principal direction. The
+    𝑉𝑠𝑝𝑙𝑖𝑡 do                                                     filter function 𝑓 is then defined as the projection of a data
+11:    Construct the Mapper subgraph 𝐺𝑖 corresponding to          point 𝑥 onto 𝑤𝑝 :
+       𝑋𝑖 using 𝑓⟂ .
+12:    for each point set 𝑋𝑛𝑒𝑖 corresponding to neighboring             𝑓 (𝑥) = ⟨𝑥 − 𝑥𝑐 , 𝑤𝑝 ⟩.                              (4)
+       node 𝑣𝑛𝑒𝑖 of 𝑣𝑖 in 𝐺 do
+13:       Merge all nodes in 𝐺𝑖 where their corresponding             Clustering method and parameter calculation. To
+          point sets intersect with 𝑋𝑛𝑒𝑖 into a single node.      guarantee the topological correctness of the Mapper graph,
+14:    end for                                                    the parameters used to construct the cover are intrinsically
+15:    Replace 𝑣𝑖 with all nodes from 𝐺𝑖 .                        related to the clustering parameters. Therefore, we first in-
+16: end for                                                       troduce the clustering method and parameter computation
+17: Add new edges to 𝐺 according to the edge addition rule        before describing the cover construction.
+    of the Mapper algorithm.                                          In the clustering step, we construct a 𝛿-neighborhood
+18: return 𝐺                                                      graph based on 𝑋, where an edge is drawn between two
+                                                                  distinct points if their Euclidean distance is less than 𝛿. The
+                                                                  connected components of the preimage of the filter function
+4.1.1. Generation of the Mapper graph                             𝑓 induced by this 𝛿-neighborhood graph are then taken as
+    This section follows the work of Carrière et al. [Car-        the clustering results.
+riere et al., 2018], who investigated the convergence of              The parameter 𝛿 should satisfy the following conditions:
+the Mapper graph to its continuous analogue, namely the
+Reeb graph. They employed extended persistence and its
+                                                                        4𝑑H (, 𝑋) ≤ 𝛿,                                      (5)
+associated metric, the bottleneck distance [Edelsbrunner and
+Harer, 2010], to quantitatively characterize the topological
+similarity between the Mapper graph and the corresponding
+Reeb graph. Their analysis provides parameter selection                 𝛿≤
+                                                                             1
+                                                                               min{𝑟𝑐ℎ, 𝜌},                                  (6)
+criteria that guarantee the bottleneck distance between the                  4
+
+C. Gao et al.                                                                                                      Page 4 of 13
+                      (a)                                         (b)
+                                                                                                                   (c)
+
+
+
+
+                      (d)                                         (e)                                                (f)
+
+Fig. 3: Generation of the initial Mapper graph, 𝜃ov = 0.2. (a)Input point set 𝑋. (b)𝑋 is colored according to the values of the filter
+function 𝑓 . The black dashed line passes through the center of 𝑋, indicating the principal direction of 𝑋. (c)Cover construction.
+Only a subset of intervals is visualized for clarity. Points corresponding to the same interval are enclosed between dashed lines,
+and the preimages of different intervals are translated for better visual separation (d)Initial Mapper graph. (e)The result of the
+node merging operation. (f)The final Mapper graph.
+
+
+
+where 𝑟𝑐ℎ and 𝜌 denote the reach and convexity radius of                to excessive connectivity among nodes in the Mapper graph
+, respectively, and 𝑑H denotes the Hausdorff distance.                 in the vicinity of these singular points. We will address this
+Here,the reach 𝑟𝑐ℎ is defined as the supremum of all 𝑟 >                issue later.
+0 such that every point 𝑥 with the Euclidean distance                       Cover construction. Given the filter function 𝑓 ∶ 𝑋 →
+dist(𝑥, ) < 𝑟 admits a unique nearest point in . The                  ℝ, we construct a uniform cover of 𝑓 (𝑋) such that no more
+convexity radius 𝜌 is the largest 𝑟 > 0 such that for every 𝑝 ∈         than two intervals overlap at any point. Specifically, we use
+, the geodesic ball 𝐵 (𝑝, 𝑟) = {𝑞 ∈  ∶ 𝑑 (𝑝, 𝑞) < 𝑟}                𝑆 open intervals {𝐼𝑠 }𝑆𝑠=1 of equal length 𝑙. The overlap ratio
+is geodesically convex.                                                 𝜃ov between adjacent intervals is defined as
+    Regarding condition (5), since each intersection point is
+taken as the center of its corresponding bounding box, an                                  𝓁(𝐼𝑠 ∩ 𝐼𝑠+1 ) 1
+                                                                              0 < 𝜃ov =                 < ,                                    (7)
+upper bound for 𝑑H (, 𝑋) is given by half the length of                                        𝑙        2
+the bounding box diagonal. Accordingly, we select twice the
+                                                                        where 𝓁(⋅) denotes the Lebesgue measure on ℝ.
+diagonal length of the bounding box as the value of 𝛿.
+                                                                            The interval length 𝑙 should satisfy the following con-
+    For condition (6), if the intersection does not contain
+                                                                        dition related to the clustering parameter 𝛿 and the filter
+singular points (i.e., points of tangential discontinuity), the
+                                                                        function 𝑓 :
+numerical accuracy of standard surface/surface intersection
+algorithms is generally sufficient, and the above choice of                                        𝑠𝑢𝑝               |𝑓 (𝑥𝑖 ) − 𝑓 (𝑥𝑗 )|
+𝛿 naturally satisfies this constraint. However, if the inter-                            ‖𝑥𝑖 −𝑥𝑗 ‖<𝛿, 𝑥𝑖 ∈𝑋, 𝑥𝑗 ∈𝑋
+                                                                              𝑙 > 𝑙0 =                                                     .   (8)
+section contains singular points, the manifold induced by                                                    𝜃ov
+the corresponding bounding box set may fail to possess a
+positive reach radius 𝑟𝑐ℎ and convexity radius 𝜌. This leads
+
+
+C. Gao et al.                                                                                                                     Page 5 of 13
+                                                                 their corresponding filter function values. The black dashed
+                                                                 line indicates the line segment passing through the centroid
+                                                                 of 𝑋 and aligned with its principal direction. In Fig. 3(c), we
+                                                                 employ 46 intervals to uniformly cover the range of the filter
+                                                                 function 𝑓 . Finally, Fig. 3(d) presents the resulting initial
+                                                                 Mapper graph constructed from these settings.
+
+                                                                 4.1.2. Subdivision in the orthogonal direction
+                                                                      In Fig. 3(c), the points sampled from the middle curve
+                                                                 segment in the example exhibit a very narrow range of values
+                                                                 under the filter function 𝑓 . As a result, these points are
+                                                                 assigned to the same interval, and are consequently aggre-
+                                                                 gated into a single node in the Mapper graph, as indicated
+                                                                 by the dashed box. Such aggregation weakens the ability of
+Fig. 4: An illustration of additional cross-graph edges intro-   the Mapper graph to capture the geometric structure of the
+duced by independent subdivision of adjacent Mapper nodes.       underlying data.
+Top: data elements corresponding to two adjacent nodes,               To handle this issue, we analyze the initial Mapper graph
+where node-specific elements are shown in red and blue, and      𝐺 in the direction orthogonal to the principal direction vector
+their shared elements are shown in green. Middle: the cor-       𝑤𝑝 in Eq. (4). The core idea is to use the Mapper algorithm
+responding two adjacent Mapper nodes and their connecting        to split nodes with excessively large projection spans in the
+edge. Bottom: Mapper subgraphs generated independently           orthogonal direction into smaller nodes.
+from the two nodes. Due to inconsistent partitioning of               Let 𝑤⟂ be the unit vector orthogonal to the principal
+shared elements, the edge addition rule based on whether
+                                                                 direction vector 𝑤𝑝 , i.e. ⟨𝑤⟂ , 𝑤𝑝 ⟩ = 0. We define a new
+corresponding element sets intersect introduced additional
+cross-graph edges (green dashed lines).
+                                                                 filter function 𝑓⟂ as the projection of the data point 𝑥 onto
+                                                                 𝑤⟂ as follows:
+
+                                                                       𝑓⟂ (𝑥) = ⟨𝑥𝑖 − 𝑥𝑐 , 𝑤⟂ ⟩                            (11)
+    Since the number of intervals 𝑆 and the interval length 𝑙
+satisfy,                                                         where 𝑥𝑐 is the center of 𝑋 calculated by Eq. (2).
+                                                                     Let 𝑋𝑖 denote the set of points corresponding to each
+      𝑆𝑙 − (𝑆 − 1)𝜃ov 𝑙 = 𝑠𝑢𝑝 𝑓 (𝑥𝑖 ) − 𝑖𝑛𝑓 𝑓 (𝑥𝑖 ),      (9)    node 𝑣𝑖 in 𝐺. In Eq. (8) and (10) , we substitute 𝑓⟂ for 𝑓 and
+                           𝑥𝑖 ∈𝑋         𝑥𝑖 ∈𝑋
+                                                                 𝑋𝑖 for 𝑋 to compute the number of intervals 𝑆𝑖 that 𝑋𝑖 can
+To ensure condition (8), we compute the number of intervals      partition in the orthogonal direction.
+𝑆 as                                                                 We denote the set of nodes awaiting splitting as 𝑉𝑠𝑝𝑙𝑖𝑡 =
+                                                                 {𝑣 ∈ 𝐺, 𝑆𝑖 ≥ 2}. The straightforward idea is to use
+                                                                 𝑓⟂ instead of 𝑓 in the Mapper algorithm for each node 𝑣
+        ⎢ 𝑠𝑢𝑝 𝑓 (𝑥𝑖 ) − 𝑖𝑛𝑓 𝑓 (𝑥𝑖 ) − 𝜃ov 𝑙′ ⎥                   in 𝑉𝑠𝑝𝑙𝑖𝑡 , obtaining the subgraph 𝐺𝑖 and replace each such
+        ⎢ 𝑥𝑖 ∈𝑋         𝑥𝑖 ∈𝑋                ⎥                   𝑣𝑖 with all nodes in 𝐺𝑖 and add edges between different
+      𝑆=⎢                          ′         ⎥,          (10)
+        ⎢            (1 −  𝜃 ov )𝑙           ⎥                   subgraph nodes based on the intersection relationships of
+        ⎣                                    ⎦                   corresponding clusters to achieve subdivision.
+                                                                     However, if two adjacent nodes both require to be subdi-
+where ⌊⋅⌋ denotes the floor operator and 𝑙′ = (1 + 𝛼)𝑙0 . In
+                                                                 vided, this method may introduce additional edges because
+this paper, we set 𝛼 = 0.001 to ensure 𝑙′ > 𝑙0 .
+                                                                 the classification results for elements in their overlapping
+    Fig. 3 illustrates an example of constructing the initial
+                                                                 region might differ across their subgraphs. However, when
+Mapper graph 𝐺. To better reflect the practical setting con-
+                                                                 two adjacent nodes in the Mapper graph are both subject
+sidered in this paper, we uniformly sample points from sev-
+                                                                 to subdivision, this strategy may introduce additional edges.
+eral planar curves using a fixed arc-length step size 𝑠𝑎𝑚𝑝𝑙𝑒 =
+                                                                 The reason is that elements lying in the overlapping region of
+0.02 and add random offset noise with magnitude in the
+                                                                 the two nodes may be classified differently in their respective
+range [0, 0.01] to each sampled point, yielding the point
+                                                                 subdivided subgraphs.
+cloud 𝑋. According to the parameter selection criterion in
+                                                                     Fig. 4 provides an illustrative example. The two original
+Eq. (6), we therefore set
+                                                                 nodes share a common subset of 𝑋. However,these elements
+             (              )                                    is separated into different clusters during the generation of
+                    𝑠𝑎𝑚𝑝𝑙𝑒
+       𝛿=4 𝜖+
+                       2                                         the Mapper subgraph. Consequently, additional cross-graph
+                                                                 edges are introduced.
+in this example.                                                     Therefore, to achieve effective subdivision while avoid-
+    We then compute the centroid and the principal direction     ing the generation of additional edges, we designed the
+of 𝑋 using PCA, and evaluate the filter function 𝑓 accord-       following process for handling 𝑉𝑠𝑝𝑙𝑖𝑡 .
+ingly. In Fig. 3(b), the points in 𝑋 are colored according to
+
+C. Gao et al.                                                                                                     Page 6 of 13
+    First, we merge all adjacent nodes in 𝑉𝑠𝑝𝑙𝑖𝑡 into a single           A singular point is a point where the curve does not
+node. If multiple nodes in 𝑉𝑠𝑝𝑙𝑖𝑡 are mutually adjacent, we          have a unique tangent. For the intersection of two B-spline
+simultaneously merge them into a single node in 𝐺. For               surfaces, such points are typically located within the cross-
+brevity, we continue to denote the modified graph and the            type regions of the intersection point set. These cross-type
+set of nodes to be split as 𝐺 and 𝑉𝑠𝑝𝑙𝑖𝑡 , respectively.             regions correspond to nodes with a degree greater than 2
+    Next, for each node 𝑣𝑖 in 𝑉𝑠𝑝𝑙𝑖𝑡 , we use 𝑓⟂ instead of 𝑓 in     in graph 𝐺. Therefore, we define a node 𝑣𝑠𝑖𝑛 in the Mapper
+the Mapper algorithm in section 4.1.1 to obtain the Mapper           graph 𝐺 with a degree greater than 2 as a singular node.
+graph 𝐺𝑖 for 𝑋𝑖 .                                                        Then, we remove all boundary nodes and singular nodes
+    It should be noted that the set of common points between         from the Mapper graph 𝐺. Finally, we partition 𝑃1,𝑢,𝑣 based
+node 𝑣𝑖 and one of its neighboring nodes 𝑣𝑗 may be assigned          on the connection relationships between nodes in 𝐺. Specif-
+to multiple nodes in 𝐺𝑖 . In such cases, directly replacing 𝑣𝑖       ically, we group all nodes in 𝐺 that are connected by a
+with all nodes from 𝐺𝑖 may introduce redundant edges in              walk—i.e., nodes forming a connected component of 𝐺—
+the modified graph,as shown in Fig. 4. Therefore, we iterate         into one group. The point sets corresponding to these nodes
+through each neighboring node 𝑣𝑗 of 𝑣𝑖 and merge all nodes           form a subset of 𝑃1,𝑢,𝑣 . In this way, we partition 𝑃1,𝑢,𝑣 into
+in graph 𝐺𝑖 that share common points with 𝑣𝑗 into a single           several subsets. Since each connected component of the
+node. Subsequently, we modify 𝐺 by replacing 𝑣𝑖 with all             modified graph 𝐺 is either a path, a cycle, or an isolated
+nodes in 𝐺𝑖 .                                                        node, where,
+    Finally, we add new edges to modified graph 𝐺 between
+nodes following the Mapper edge addition rule , i. e. edges             • Each path corresponds to a simple open curve segment
+exist if the intersection of the point sets corresponding to two          in the intersection set;
+nodes is non-empty.                                                     • Each cycle corresponds to a simple closed curve seg-
+    Fig. 3(e) illustrates the result of the node merging oper-            ment;
+ation. Specifically, the nodes in the lowest connected sub-
+graph of 𝐺 are merged into a single node. Fig. 3(f) shows               • Each isolated node corresponds to an isolated inter-
+the final modified Mapper graph. Compared to the initial                  section point.
+Mapper graph in Fig. 3(d), the modified Mapper graph
+contains more nodes in the orthogonal direction, thereby             Thus, through such grouping, we can partition 𝑃1,𝑢,𝑣 into
+better reflecting the structure of the input point set 𝑋.            several simple segments.
+                                                                         Fig. 5 illustrates the process of intersection set partition
+4.2. Partition of intersection set based on the                      based on the Mapper graph. In Fig. 5(c), yellow and blue cir-
+     Mapper graph                                                    cles mark boundary nodes and singular nodes, respectively.
+     Using the two-step Mapper algorithm, we can generate            After removing these two types of characteristic nodes, the
+the Mapper graph 𝐺 of the intersection point set 𝑃1,𝑢,𝑣 . Next,      Mapper graph shown in Fig. 5(d) contains four connected
+we partition 𝑃1,𝑢,𝑣 based on the characteristic nodes of the         components. Based on this, we can partition the intersection
+Mapper graph.                                                        set 𝑃1,𝑢,𝑣 into four mutually exclusive subsets and visualize
+     We define two types of characteristic nodes in the Map-         each subset using distinct colors in Fig. 5(e).
+per graph: boundary nodes and singular nodes. They cor-
+respond respectively to the boundary points and singular             4.3. Correspondence between different parameter
+points of the intersection point set.                                     domains.
+     Let the parameter range of the surface 𝐵1 (𝑢, 𝑣) be                 Unlike algebraic methods, subdivision methods inher-
+[𝑢𝑠 , 𝑢𝑒 ] × [𝑣𝑠 , 𝑣𝑒 ]. A boundary point is an intersection point   ently preserve correspondence between intersection results
+on the boundary lines:                                               across different surface parameter domains. Specifically,
+                                                                     the subdivision method obtains intersection point sets by
+           {                                                    }
+     𝑙 = (𝑢, 𝑣) ∈ ℝ2 ∣ 𝑢 = 𝑢𝑠 or 𝑢 = 𝑢𝑒 or 𝑣 = 𝑣𝑠 or 𝑣 = 𝑣𝑒          recursively detecting bounding box intersections in different
+                                                                     parameter domains. In the resulting set 𝑃1,𝑢,𝑣 , each point’s
+Due to the overestimation property of the subdivision method,        correspondence to points in 𝑃2,𝑠,𝑡 is determined by the in-
+we need to perform dilation on the boundary point set.               tersection relationships between their respective bounding
+Specifically, we regard the points with a distance less than         boxes.
+the clustering parameter 𝛿 to the boundary lines as the                  Fig. 5(f) illustrates the corresponding result for 𝑃2,𝑠,𝑡 ,
+approximate boundary point set:                                      where matching partitioned subsets between 𝑃1,𝑢,𝑣 and 𝑃2,𝑠,𝑡
+                                                                     are colored identically.
+
+      𝑃𝑏 = {(𝑢, 𝑣) ∈ 𝑃1,𝑢,𝑣 ∣ 𝑢 < 𝑢𝑠 + 𝛿, or 𝑢 > 𝑠𝑒 − 𝛿,
+                                                                     5. Experiments and discussions
+                       or 𝑣 < 𝑣𝑠 + 𝛿, or 𝑣 > 𝑣𝑒 − 𝛿} (12)
+                                                                        All experiments in this paper were implemented on a
+Then we define a node 𝑣𝑏𝑜𝑢 as a boundary node if its corre-          PC with a Intel Core Ultra 7 155H 3.80GHz CPU and
+sponding point set intersects with the approximate boundary          32GB RAM. We use python’s Giotto-tda library [Tauzin,
+point set 𝑃𝑏 .                                                       Lupo, Tunstall, Pérez, Caorsi, Medina-Mardones, Dassatti,
+
+C. Gao et al.                                                                                                          Page 7 of 13
+      (a) Two intersecting cylindrical surfaces
+                                                            (b) The intersection point set 𝑃1,𝑢,𝑣                  (c) The Mapper graph of 𝑃1,𝑢,𝑣
+
+
+
+
+   (d) Mapper graph after removing characteristic          (e) The partitioning result of 𝑃1,𝑢,𝑣               (f) Corresponding results of 𝑃2,𝑠,𝑡
+   nodes
+
+                             Fig. 5: An example of intersecting set partition based on the Mapper graph.
+
+
+
+
+           (a) The intersection            (b) 𝜃ov = 0.1              (c) 𝜃ov = 0.2                (d) 𝜃ov = 0.3            (e) 𝜃ov = 0.4
+           point set 𝑃1,𝑢,𝑣
+
+                            Fig. 6: An example of the impact of changing the overlap ratio parameter 𝜃ov .
+
+
+
+and Hess, 2021] to compute the Mapper graph. In our ex-                             Figure 6 illustrates the effect of varying 𝜃ov . When
+periments, we will show that the algorithm can successfully                     𝜃ov = 0.1, the graph is sparsely connected due to the large
+understand the topology of intersection.                                        interval length. When 𝜃ov = 0.2, the node distribution
+                                                                                becomes significantly denser and more informative. When
+5.1. Parameter selection for the Two-step Mapper                                𝜃ov is further increased to 0.4, the graph continues to become
+     algorithm                                                                  denser; however, the growth trend becomes less pronounced.
+    The overlap ratio 𝜃ov is a key parameter in the Mapper al-                  This behavior is consistent with the relationship between 𝑙
+gorithm. This section analyzes its influence on the resulting                   and 𝜃ov . To balance the expressive capability of the Mapper
+graph structure.                                                                representation and computational efficiency, we set 𝜃ov =
+    The overlap ratio 𝜃ov controls the degree of overlap                        0.2 in the following experiments.
+between two adjacent intervals when constructing the cover.
+According to Eq. 8, the interval length 𝑙 is proportional to                    5.2. Experimental results
+1∕𝜃ov . Consequently, increasing 𝜃ov leads to shorter intervals                     In this section, we apply the proposed algorithm to a se-
+and a larger number of nodes in the resulting Mapper graph.                     ries of surface/surface intersections with complex topology
+This produces a more compact and detailed graph represen-                       to validate its effectiveness.
+tation, but at the expense of increased computational cost.
+
+
+C. Gao et al.                                                                                                                                Page 8 of 13
+Table 1                                                           3, the intersection of these two surfaces contain multiple
+Runtime for constructing the Mapper graph , where “Initial”       connected components. The results in Table 3 show that
+is the time for constructing the initial Mapper graph, “Refine-   our algorithm can correctly identify and distinguish all con-
+ment” is the time for graph subdivision, and “Total” is the       nected branches of the intersection, and obtain a one-to-one
+overall runtime.                                                  correspondence between the parametric domains of the two
+                Number of                                         surfaces.
+  Example                 Initial(s) Subdivision (s) Total (s)         Singular points. We also investigated the performance
+                 Points
+                                                                  of the algorithm when dealing with intersections containing
+ Example 1        3214      0.1340       0.1573       0.2913
+ Example 2        2176      0.0945       0.4427       0.5372
+                                                                  singular points. In the example 3 in Table 3 , the intersection
+ Example 3        1851      0.1278       0.1242       0.2519      of two B-spline surfaces contains two singular points. Our
+ Example 4        1902      0.0901       0.0661       0.1562      algorithm can detect the location of the two singular points
+ Example 5        3318      0.1238       0.1677       0.2915      and split the intersection point sets into some simple subsets
+ Example 6        2650      0.1262       0.0830       0.2092      at the singular points and keep the topology consistent across
+ Example 7        5352      0.1551       0.1800       0.3350      different parameter domains.
+ Example 8        4772      0.1125       0.3022       0.4148           Different topology in different parameter domains.
+ Example 9        6284      0.1673       0.3527       0.5200      Even when the topology of the intersection of different pa-
+                                                                  rameter domains is different, our method can still obtain the
+Table 2                                                           correct correspondence. Example 4 in Table 3 and Example
+The intersection of two B-spline surfaces is divided into         5 in Table 4 show the cases that two periodic B-spline
+segments within the (𝑢, 𝑣) parameter domain. OCCT refers to       surfaces intersecting. Due to periodicity, we need to partition
+the intersection algorithm in the Open Cascade Technology.        the intersection set into different subsets at the boundary
+Different segments are distinguished by different colors.         points in the parameter domain. Since the two surfaces
+                                                                  𝐵1 (𝑢, 𝑣) and 𝐵2 (𝑠, 𝑡) are unfolded at different positions in
+                          OCCT                 Ours
+                                                                  the parameter domain, the topology of the intersection point
+                                                                  sets 𝑃1,𝑢,𝑣 and 𝑃2,𝑠,𝑡 of the parameter domain is different.
+                                                                  However, we can still obtain the correct correspondence.
+     Example                                                           Intersection with isolated points. Our method can also
+        3                                                         precisely identify isolated intersection points. Example 6 in
+                                                                  Table 4 demonstrates a case where two surfaces intersect at
+                                                                  isolated tangent points. By locating nodes with degree 0 in
+                                                                  the Mapper graph, our method can distinguish isolated tan-
+                                                                  gent contact points and establish the correct correspondence
+                                                                  between the parameter domains of the two surfaces.
+     Example
+                                                                       Combinations of multiple situations. Even when inter-
+        8
+                                                                  sections involve combinations of the aforementioned com-
+                                                                  plex cases, our method achieves reliable topological under-
+                                                                  standing. In Example 7 in Table 4, the intersection of the two
+                                                                  surfaces contains both singular points and periodic boundary
+                                                                  points. In Example 8 in Table 4, the intersection of the
+     Example                                                      two surfaces contains singular points and periodic boundary
+        9                                                         points, and multiple connected components. In Example 9
+                                                                  in Table 4, the intersection of the two surfaces contains
+                                                                  multiple singular points and periodic boundary points. Our
+                                                                  method can effectively identifies their topological structures,
+                                                                  correctly partition intersection point sets, and establishes
+    Table 1 reports the runtime statistics for constructing       accurate correspondences between the parameter domains of
+the initial Mapper graph, performing Mapper graph subdi-          two intersecting surfaces. This validates the effectiveness of
+vision, and the total runtime. It can be observed that the        our method in handling complex topology.
+graph subdivision stage dominates the overall computational
+cost. Moreover, the refinement time is closely related to the     5.3. Comparison
+number of connected components in the intersection point              To evaluate the effectiveness of the proposed method,
+set, as well as the number of singular points. Therefore,         we compare it with the intersection-processing module in
+Examples 2, 8, and 9 exhibit the largest runtimes among all       the open-source software Open CASCADE Technology
+test examples.                                                    (OCCT). The version of OCCT employed in this work is
+    Multiple connected branches. We first consider the            7.8.1. Table 2 summarizes the results for examples contain-
+case where two intersecting surfaces contain multiple con-        ing multiple singular points, with the ordering consistent
+nected components. In Example 1 and Example 2 in Table            with Tables 4 and 3.
+
+
+C. Gao et al.                                                                                                      Page 9 of 13
+Table 3
+Topology understanding of different surface/surface intersections(𝜃ov = 0.2). Corresponding results in different parameter domains
+are drawn for clarity. The first row shows the intersecting B-spline surfaces; the second and third rows are the intersection point
+sets 𝑃1,𝑢,𝑣 and 𝑃2,𝑠,𝑡 ; the fourth row is the Mapper graph of point set 𝑃1,𝑢,𝑣 ; the fifth and sixth rows are the results corresponding
+to 𝑃1,𝑢,𝑣 and 𝑃2,𝑠,𝑡 . Different intersection segments are represented in different colors.
+
+                                   Example 1              Example 2              Example 3              Example 4
+
+
+
+
+                 Surfaces
+
+
+
+
+                   𝑃1,𝑢,𝑣
+
+
+
+
+                   𝑃2,𝑠,𝑡
+
+
+
+
+                 Mapper
+                 graph of
+                   𝑃1,𝑢,𝑣
+
+
+
+
+                 Result of
+                   𝑃1,𝑢,𝑣
+
+
+
+
+                 Result of
+                   𝑃2,𝑠,𝑡
+
+
+
+
+    In example 3, both methods produce seven segments.                the intersection. Although OCCT can partition the intersec-
+In Example 8, OCCT generates only four segments because               tion into non-self-intersecting segments, it does not explic-
+surface periodicity is not considered, whereas the proposed           itly address topological transitions or geometric continuity
+method produces eight segments. In Example 9, OCCT                    at singular points. As a result, the intersection may not be
+partitions the intersection into four segments, resulting in          fully separated at singularities, leading to discontinuities in
+tangential discontinuities. In contrast, the proposed method          tangent direction. By incorporating global topological infor-
+separates the curve at all singular points and produces eight         mation, the proposed method produces a finer partition in
+geometrically continuous segments.                                    which each segment is free of self-intersection and maintains
+    Overall, compared with OCCT, the proposed method                  tangential continuity.
+achieves a finer and topologically consistent segmentation of
+
+C. Gao et al.                                                                                                            Page 10 of 13
+Table 4
+More results of different surface/surface intersections(𝜃ov = 0.2). The arrangement of content in each row and column remains
+consistent with Table 3
+                       example 5             Example 6            Example 7           Example 8             Example 9
+
+
+
+     Surfaces
+
+
+
+
+       𝑃1,𝑢,𝑣
+
+
+
+
+       𝑃2,𝑠,𝑡
+
+
+
+
+     Mapper
+     graph of
+       𝑃1,𝑢,𝑣
+
+
+
+
+     Result of
+       𝑃1,𝑢,𝑣
+
+
+
+
+     Result of
+       𝑃2,𝑠,𝑡
+
+
+
+
+5.4. Discussion and limitations                                   6. Conclusion
+    Despite the promising results, the proposed algorithm
+                                                                      In this paper, we present a new algorithm for understand-
+has several limitations. One of the main limitations is related
+                                                                  ing the topology of intersections between B-spline surfaces
+to the handling of clustered singular points. When multiple
+                                                                  with Mapper. The algorithm first constructs a Mapper graph
+singular points are in close proximity, the current approach
+                                                                  using a Two-step Mapper algorithm. Next, the algorithm
+of constructing interval coverages for the filter function in
+                                                                  identifies characteristic nodes in the Mapper graph. Finally,
+the Mapper graph may assign these points to the same inter-
+                                                                  by partitioning the Mapper graph at these characteristic
+val. As a result, they are clustered together as a single node
+                                                                  nodes, we divide the intersections into simpler segments,
+in the Mapper graph, causing the algorithm to incorrectly
+                                                                  enabling a more desirable understanding of the topological
+identify them as a single singular point.
+                                                                  structure of the intersections.
+                                                                      The significance of our method lies in its ability to
+                                                                  determine the overall topology of the intersection, which is
+
+
+C. Gao et al.                                                                                                    Page 11 of 13
+fundamental to subsequent processes of surface/surface in-
+tersection calculation. The accurate topology understanding
+provided by our algorithm can enhance the robustness and
+efficiency of workflows in surface/surface intersection.
+
+
+Declaration of competing interest
+    The authors declare that they have no known competing
+financial interests or personal relationships that could have
+appeared to influence the work reported in this paper.
+
+
+
+
+C. Gao et al.                                                   Page 12 of 13
+References                                                                          analysis. Bioinformatics, 35(18):3339–3347, 2019.
+                                                                                 Li Li, Wei-Yi Cheng, Benjamin S Glicksberg, Omri Gottesman, Ronald
+Dieter Lasser. Intersection of parametric surfaces in the bernstein-bezier          Tamler, Rong Chen, Erwin P Bottinger, and Joel T Dudley. Identification
+   representation. Computer-Aided Design, 18(4):186–192, 1986.                      of type 2 diabetes subgroups through topological analysis of patient
+Luiz Henrique De Figueiredo. Surface intersection using a ne arithmetic. In         similarity. Science translational medicine, 7(311):311ra174–311ra174,
+   Proceedings of graphics interface, volume 96, pages 168–175. Citeseer,           2015.
+   1996.                                                                         Wei Guo and Ashis G Banerjee. Identification of key features using topo-
+Hongwei Lin, Yang Qin, Hongwei Liao, and Yunyang Xiong. Affine                      logical data analysis for accurate prediction of manufacturing system
+   arithmetic-based b-spline surface intersection with gpu acceleration.            outputs. Journal of Manufacturing Systems, 43:225–234, 2017.
+   IEEE transactions on visualization and computer graphics, 20(2):172–          Mathieu Carrière and Bertrand Michel. Statistical analysis of mapper for
+   181, 2013.                                                                       stochastic and multivariate filters. Journal of Applied and Computa-
+Gurjeet Singh, Facundo Mémoli, Gunnar E Carlsson, et al. Topological                tional Topology, 6(3):331–369, 2022.
+   methods for the analysis of high dimensional data sets and 3d object          Elizabeth Munch and Bei Wang. Convergence between categorical repre-
+   recognition. PBG@ Eurographics, 2:091–100, 2007.                                 sentations of reeb space and mapper. arXiv preprint arXiv:1512.04108,
+Ramon F Sarraga. Algebraic methods for intersections of quadric surfaces            2015.
+   in gmsolid. Computer Vision, Graphics, and Image Processing, 22(2):           Martin Ester, Hans-Peter Kriegel, Jörg Sander, Xiaowei Xu, et al. A density-
+   222–238, 1983.                                                                   based algorithm for discovering clusters in large spatial databases with
+Dinesh Manocha and John Canny. A new approach for surface intersection.             noise. In kdd, volume 96, pages 226–231, 1996.
+   In Proceedings of the first ACM symposium on Solid modeling founda-           Herbert Edelsbrunner and John Harer. Computational topology: an intro-
+   tions and CAD/CAM applications, pages 209–219, 1991.                             duction. American Mathematical Soc., 2010.
+Dinesh Manocha and Shankar Krishnan. Algebraic pruning: a fast tech-             Ian T Jolliffe. Principal component analysis: a beginner’s guide—i. intro-
+   nique for curve and surface intersection. Computer Aided Geometric               duction and application. Weather, 45(10):375–382, 1990.
+   Design, 14(9):823–845, 1997.                                                  Guillaume Tauzin, Umberto Lupo, Lewis Tunstall, Julian Burella Pérez,
+Rida T Farouki. The characterization of parametric surface sections.                Matteo Caorsi, Anibal M Medina-Mardones, Alberto Dassatti, and
+   Computer Vision, Graphics, and Image Processing, 33(2):209–236,                  Kathryn Hess. giotto-tda:: A topological data analysis toolkit for
+   1986.                                                                            machine learning and data exploration. Journal of Machine Learning
+Joel Hass, Rida T Farouki, Chang Yong Han, Xiaowen Song, and                        Research, 22(39):1–6, 2021.
+   Thomas W Sederberg. Guaranteed consistency of surface intersections
+   and trimmed surfaces using a coupled topology resolution and domain
+   decomposition scheme. Advances in Computational Mathematics, 27:
+   1–26, 2007.
+Chandrajit L Bajaj, Christoph M Hoffmann, Robert E Lynch, and JEH
+   Hopcroft. Tracing surface intersections. Computer aided geometric
+   design, 5(4):285–307, 1988.
+Jaroslaw R Rossignac and Aristides AG Requicha. Piecewise-circular
+   curves for geometric modeling. IBM Journal of Research and Devel-
+   opment, 31(3):296–313, 1987.
+Robert E Barnhill and Scott N Kersey. A marching method for parametric
+   surface/surface intersection. Computer aided geometric design, 7(1-4):
+   257–280, 1990.
+Pradeep Sinha, Eric Klassen, and KK Wang. Exploiting topological and
+   geometric properties for selective subdivision. In Proceedings of the first
+   annual symposium on Computational geometry, pages 39–45, 1985.
+Shankar Krishnan and Dinesh Manocha. An efficient surface intersection
+   algorithm based on lower-dimensional formulation. ACM Transactions
+   on Graphics (TOG), 16(1):74–106, 1997.
+Josef Hoschek and Dieter Lasser. Fundamentals of computer aided geomet-
+   ric design. AK Peters, Ltd., 1993.
+Nicholas M Patrikalakis. Surface-to-surface intersections. IEEE Computer
+   Graphics and Applications, 13(1):89–95, 2002.
+Thomas A Grandine and Frederick W Klein IV. A new approach to the
+   surface intersection problem. Computer Aided Geometric Design, 14
+   (2):111–134, 1997.
+Mathieu Carriere, Bertrand Michel, and Steve Oudot. Statistical analysis
+   and parameter selection for mapper. Journal of Machine Learning
+   Research, 19(12):1–39, 2018.
+Francisco Belchí, Jacek Brodzki, Matthew Burfitt, and Mahesan Niranjan.
+   A numerical measure of the instability of mapper-type algorithms.
+   Journal of Machine Learning Research, 21(202):1–45, 2020.
+Quang-Thinh Bui, Bay Vo, Hoang-Anh Nguyen Do, Nguyen Quoc Viet
+   Hung, and Vaclav Snasel. F-mapper: A fuzzy mapper clustering algo-
+   rithm. Knowledge-based systems, 189:105107, 2020.
+Enrique Alvarado, Robin Belton, Emily Fischer, Kang-Ju Lee, Sourabh
+   Palande, Sarah Percival, and Emilie Purvine. g-mapper: Learning a
+   cover in the mapper construction. SIAM Journal on Mathematics of
+   Data Science, 7(2):572–596, 2025.
+Rachel Jeitziner, Mathieu Carriere, Jacques Rougemont, Steve Oudot,
+   Kathryn Hess, and Cathrin Brisken. Two-tier mapper, an unbiased
+   topology-based clustering method for enhanced global gene expression
+
+
+C. Gao et al.                                                                                                                              Page 13 of 13
+

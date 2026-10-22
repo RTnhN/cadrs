@@ -1,0 +1,595 @@
+             ABC: A Big CAD Model Dataset For Geometric Deep Learning
+
+
+           Sebastian Koch                             Albert Matveev                         Zhongshi Jiang
+             TU Berlin                                Skoltech, IITP                       New York University
+        s.koch@tu-berlin.de                   albert.matveev@skoltech.ru                      jiangzs@nyu.edu
+         Francis Williams                            Alexey Artemov                           Evgeny Burnaev
+        New York University                             Skoltech                                 Skoltech
+    francis.williams@nyu.edu                     a.artemov@skoltech.ru                    e.burnaev@skoltech.ru
+
+              Marc Alexa                             Denis Zorin                            Daniele Panozzo
+              TU Berlin                           New York University                      New York University
+     marc.alexa@tu-berlin.de                        dzorin@cs.nyu.edu                         panozzo@nyu.edu
+
+
+
+                        Abstract                                1. Introduction
+
+   We introduce ABC-Dataset, a collection of one million           The combination of large data collections and deep
+Computer-Aided Design (CAD) models for research of ge-          learning algorithms is transforming many areas of computer
+ometric deep learning methods and applications. Each            science. Large data collections are an essential part of this
+model is a collection of explicitly parametrized curves and     transformation. Creating these collections for many types
+surfaces, providing ground truth for differential quantities,   of data (image, video, and audio) has been boosted by the
+patch segmentation, geometric feature detection, and shape      ubiquity of acquisition devices and mass sharing of these
+reconstruction. Sampling the parametric descriptions of         types of data on social media. In all these cases, the data
+surfaces and curves allows generating data in different for-    representation is based on regular discretization in space
+mats and resolutions, enabling fair comparisons for a wide      and time providing structured and uniform input for deep
+range of geometric learning algorithms. As a use case for       learning algorithms.
+our dataset, we perform a large-scale benchmark for esti-          The situation is different for three-dimensional geomet-
+mation of surface normals, comparing existing data driven       ric models. Acquiring or creating high-quality models of
+methods and evaluating their performance against both the       this type is still difficult, despite growing availability of 3D
+ground truth and traditional normal estimation methods.         sensors, and improvements in 3D design tools. Inherent ir-
+
+
+
+
+ Figure 1: Random CAD models from the ABC-Dataset: https://deep-geometry.github.io/abc-dataset
+                                                                                                      CAD Files                      Semantics   Categories
+regularity of the surface data, and still-significant level of
+                                                                                                                  Curves   Patches
+skill needed for creating high-quality 3D shapes contributes        Dataset            #Models
+to the limited availability of geometric datasets. Irregularity
+of geometric data is reflected in commonly used geometric
+formats, which differ in fundamental ways from formats for          ABC                1,000,000+     X           X        X         –           –
+images, video, and audio. Existing datasets often lack reli-        ShapeNet* [22]     3,000,000+     –           –        –         X           X
+able ground truth annotations. We further discuss currently         ShapeNetCore       51,300         –           –        –         X           X
+available geometric datasets in Section 2.                          ShapeNetSem        12,000         –           –        –         X           X
+    Common shape analysis and geometry processing tasks             ModelNet [58]      151,128        –           –        –         X           X
+that can benefit from geometric deep learning include esti-         Thingi10K [62]     10,000         –           –        –         –           X
+mation of differential surface properties (Section 5.1), fea-       PrincetonSB[9]     6670           –           –        –         –           X
+ture detection, and shape reconstruction. Ground truth for          NIST [4]           ≤ 30           X           X        X         –           –
+some of these tasks is hard to generate, as marking features
+by hand is a laborious task and differential properties can
+only be approximated for sampled surfaces.                        Table 1: Overview of existing datasets and their capabili-
+    In this work, we make the following contributions:            ties. *: The full ShapeNet dataset is not yet publicly avail-
+                                                                  able, only the subsets ShapeNetCore and ShapeNetSem.
+Dataset. We introduce a dataset for geometric deep learn-
+ing consisting of over 1 million individual (and high quality)
+geometric models, each defined by parametric surfaces and         2. Related Work
+associated with accurate ground truth information on the de-         We review existing datasets for data-driven processing
+composition into patches, sharp feature annotations, and an-      of geometrical data, and then review both data-driven and
+alytic differential properties. We gather the models through      analytical approaches to estimate differential qualities on
+a publicly available interface hosted by Onshape [5]. Simi-       smooth surfaces.
+lar to vector graphics for images, this representation allows
+resampling the surface data at arbitrary resolutions, with or     3D Deep Learning Datasets. The community has seen
+without connectivity information (i.e. into a point cloud or      a growth in the availability of 3D models and datasets.
+a mesh).                                                          Segmentation and classification algorithms have benefited
+                                                                  greatly from the most prominent ones [22, 58, 62, 9]. Fur-
+Benchmark. We demonstrate the use of the dataset by               ther datasets are available for large scenes [51, 23], mesh
+building a benchmark for the estimation of surface normals.       registration [14] and 2D/3D alignment [12]. The dataset
+This benchmark is targeting methods that compute normals          proposed in this paper has the unique property of containing
+(1) locally on small regions of a surface, and (2) globally       the analytic representation of surfaces and curves, which is
+over the entire surface simultaneously. We have chosen            ideal for a quantitative evaluation of data-driven methods.
+this problem for two reasons: most existing geometric deep        Table 1 gives an overview of the most comparable datasets
+learning methods were tested on this task, and very precise       and their characteristics and capabilities.
+ground truth can be readily obtained for shapes in our data
+set. We run the benchmark on 7 existing deep learning algo-       Point Cloud Networks. Neural networks for point clouds
+rithms, studying how they scale as the dataset size increases,    are particularly popular, as they make minimal assumptions
+and comparing them with 5 traditional geometry processing         on input data. One of the earliest examples is PointNet [46]
+algorithms to establish an objective baseline for future al-      and its extension PointNet++ [47], which ensure that the
+gorithms. Results are presented in Section 5.1.                   network output is invariant with respect to point permuta-
+                                                                  tions. PCPNet [29] is a variation of PointNet tailored for
+Processing Pipeline. We develop an open-source geom-              estimating local shape properties: it extracts local patches
+etry processing pipeline that processes the CAD models to         from the point cloud, and estimates local shape properties at
+directly feed deep learning algorithms. Details are provided      the central points of these patches. PointCNN [38] explores
+in Section 3. We will continually update the dataset and          the idea of learning a transformation from the initial point
+benchmark as more models are added to the public collec-          cloud, which provides the weights for input points and as-
+tion of models by Onshape. Our contribution adds a new            sociated features, and produces a permutation of the points
+resource for the development of geometric deep learning,          into a latent order.
+targeting applications focusing on human-created, mechan-            Point Convolutional Neural Networks by Extension Op-
+ical shapes. It will allow researchers to compare against         erators [11] is a fundamentally different way to process
+existing techniques on a large and realistic dataset of man-      point clouds through mapping point cloud functions to vol-
+made objects.                                                     umetric functions and vice versa through extension and re-
+striction operators. A similar volumetric approach has been       and osculating jets we use the functions in CGAL [45, 10].
+proposed in Pointwise Convolutional Neural Networks [32]          For the robust estimation the authors have provided source
+for learning pointwise features from point clouds.                code. There are many other techniques for estimating sur-
+    PointNet-based techniques, however, do not attempt to         face normals (e.g. [43]), however we only focus on a se-
+use local neighborhood information explicitly. Dynamic            lected subset in the current work.
+Graph CNNs [55] uses an operation called EdgeConv,                   One important generalization is the detection of sharp
+which exploits local geometric structures of the point set        edges and corners, where more than one normal can be as-
+by generating a local neighborhood graph based on proxim-         signed to a point [44, 17]. However, as we only train the ma-
+ity in the feature space and applying convolution-like op-        chine learning methods to report a single normal per point,
+eration on the edges of this graph. In a similar fashion,         we leave an analysis of these extensions for future work.
+FeaStNet [54] proposes a convolution operator for general
+graphs, which applies filter kernels in a data-driven manner      3. Dataset
+to the local irregular neighborhoods.
+                                                                      We identify six crucial properties that are desirable for
+Networks on Graphs and Manifolds. Neural networks                 an ”ideal” dataset for geometric deep learning: (1) large
+for graphs have been introduced in [48], and extended in          size: since deep networks require large amounts of data,
+[39, 52]. A wide class of convolutional neural networks           we want to have enough models to find statistically signifi-
+with spectral filters on graphs was introduced in [20] and        cant patterns; (2) ground truth signals: in this way, we can
+developed further in [30, 24, 36]. Graph convolutional neu-       quantitatively evaluate the performance of learning on dif-
+ral networks were applied to non-rigid shape analysis in          ferent tasks; (3) parametric representation: so that we can
+[15, 60]. Surface Networks [37] further proposes the use          resample the signal at the desired resolution without intro-
+of the differential geometry operators to extend GNNs to          ducing errors; (4) expandable: it should be easy to make the
+exploit properties of the surface. For a number of problems       collection grow over time, to keep the dataset challenging
+where quantities of interest are localized, spatial filters are   as progress in learning algorithms is made; (5) variation:
+more suitable than spectral filters. A special CNN model for      containing a good sampling of diverse shapes in different
+meshes which uses intrinsic patch representations was pre-        categories; (6) balanced: each type of objects should have a
+sented in [41], and further generalized in [16, 42]. In con-      sufficient number of samples.
+trast to these intrinsic models, Euclidean models [59, 57]            Since existing datasets are composed of acquired or syn-
+need to learn the underlying invariance of the surface em-        thesized point clouds or meshes, they do not satisfy prop-
+bedding, hence they have higher sample complexity. More           erty 2 or 3. We thus propose a new dataset of CAD models,
+recently, [40] presented a surface CNN based on the canon-        which is complementary: it satisfies properties 1-4; it is re-
+ical representation of planar flat-torus. We refer to [19] for    stricted to a specific type of models (property 6), but has
+an extensive overview of geometric deep learning methods.         a considerable variation inside this class. While restriction
+                                                                  to CAD models can be viewed as a downside, it strikes a
+Analytic Normal Estimation Approaches. The simplest
+                                                                  good balance between having a sufficient number of similar
+methods are based on fitting tangent planes. For a point set,
+                                                                  samples and diversity of represented shapes, in addition to
+these methods estimate normals in the points as directions
+                                                                  having high-quality ground truth for a number of quantities.
+of smallest co-variance (i.e., the tangent plane is the total
+least squares fit to the points in the neighborhood). For a       Acquisition. Onshape has a massive online collection of
+triangle mesh, normals of the triangles adjacent to a vertex      CAD models, which are freely usable for research purposes.
+can be used to compute a vertex normal as a weighted aver-        By collecting them over a period of 4 months we obtained
+age. We consider uniform, area, and angle weighting [34].         a collection of over 1 million models (see Figure 2).
+    One can also fit higher order surfaces to the discrete sur-
+face data. These methods first estimate a tangent plane, and      Ground Truth Signals and Vector Representation. The
+then fit a polynomial over the tangent plane that interpo-        data is encoded in a vectorial format that enables to resam-
+lates the point for which we want to estimate the normal          ple it at arbitrary resolution and to compute analytically a
+(a so-called osculating jet [21]). A more accurate normal         large set of signals of interest (Section 4), which can be used
+can then be recomputed from the tangents of the polyno-           as a ground truth.
+mial surface approximation at the point. The difference for
+triangle meshes and point sets is only in collecting the sam-     Challenge. However, the data representation is not suit-
+ples in the neighborhood. In addition, one can use robust         able for most learning methods, and the conversion of CAD
+statistics to weight the points in the neighborhood [35].         models to discrete formats is a difficult task. This paper
+    For the weighted triangle normals we use the implemen-        presents a robust pipeline to process, and use CAD models
+tation of libigl [33], for computation of co-variance normals     as an ideal data source for geometry processing algorithms.
+Figure 2: Random examples from the dataset. Most models are mechanical parts with sharp edges and well defined surfaces.
+
+
+3.1. CAD Models and Boundary Representations                    box or cylinder, probably created by novice users that were
+                                                                learning how to use Onshape.
+   In the following, we will use the term CAD model to re-
+                                                                   Given the massive size of the dataset, we developed a set
+fer to a geometric shape defined by a boundary representa-
+                                                                of geometric and topological criteria to filter low quality of
+tion (B-Rep). The boundary representation describes mod-
+                                                                defective models, which we describe in the supplementary
+els by their topology (faces, edges, and vertices) as well as
+                                                                material, and we leave a semantic, crowd-sourced filtering
+their geometry (surfaces, curves, and points). The topol-
+                                                                and annotation as a direction for future work.
+ogy description is organized in a hierarchical way: Solids
+are bound by a set of oriented faces which are called shells;    Step 1: B-Rep Loading and Translation. The STEP files
+Faces are bound by wires which are ordered lists of edges        [8] we obtain from Onshape contain the boundary repre-
+(the order defines the face orientation); Edges are the ori-     sentation of the CAD model, which we load and query
+ented connections between 2 vertices; Vertices are the basic     using the open-source software Open Cascade [6]. The
+entities, corresponding to points in space.                      translation process generates for each surface patch and
+   Each of these entities has a geometric description, which     curve segment an explicit parameterization, which can be
+allows us to embed the model in 3D space. In our dataset,        sampled at arbitrary resolution.
+each surface can represent a plane, cone, cylinder, sphere,
+torus, surface of revolution or extrusion or NURBS patch         Step 2: Meshing/Discretization. The parameterizations
+[26]. Similarly, curves can be lines, circles, ellipses,         of the patches are then sampled and triangulated using
+parabolas, hyperbolas or NURBS curves [26]. Each vertex          the open-source software Gmsh [28]. We offer an option
+has coordinates in 3D space. An additional complexity is         here to select between uniform (respecting a maximal edge
+added by trimmed patches (see [26] for a full description).      length) and curvature adaptive sampling.
+
+3.2. Processing Pipeline                                         Step 3: Topology Tree Traversal/Data Extraction. The
+                                                                 sampling of B-Rep allows to track correspondences be-
+   Assembling a dataset of such a large size is a time-          tween the continuous and discrete representations. As they
+consuming task where many design decisions have to be            can be differentiated at arbitrary locations, it is possible to
+made beforehand: as an example, it requires around 2 CPU         calculate ground truth differential quantities for all sam-
+years to extract triangle meshes for 1 million CAD models.       ples of the discrete model. Another advantage is the ex-
+   To encourage active community participation and easy          plicit topology representation in B-Rep models, which can
+adoption, we use accessible, well-supported open-source          be transferred to the mesh in the form of labels. These la-
+tools, instead of relying on commercial CAD software. It         bels define for each triangle of the discrete mesh to which
+allows the community to use and expand our dataset in the        surface patch it belongs. The same applies also for the
+future. Our pipeline is designed to run in parallel on large     curves, we can label edges in the discrete mesh as sharp
+computing clusters.                                              feature edges. While CAD kernels provide this informa-
+   The Onshape public collection is not curated. It con-         tion, it is difficult to extract it in a format suitable for learn-
+tains all the public models created by their users, without      ing tasks. Our pipeline exports this information in yaml
+any additional filtering. Despite the fact that all models       files with a simple structure (see supplementary material).
+have been manually created, there is a small percentage of
+imperfect models with broken boundaries, self-intersecting       Step 4: Post-processing. We provide tools to filter our
+faces or edges, as well as duplicate vertices. In addition to    meshes depending on quality or number of patches, to
+that, there are many duplicate models, and especially mod-       compute mesh statistics, and to resample the generated
+els that are just made of single primitives such as a plane,     surfaces to match a desired number of vertices [27].
+                                                                  Surface Vectorization. The B-rep of a CAD models is
+                                                                  the counterpart of a vector representation for images, that
+                                                                  can be resampled at any desired resolution. The conversion
+                                                                  of a surface triangle mesh into a B-rep is an interesting and
+                                                                  challenging research direction, for which data driven meth-
+                                                                  ods are still at their infancy [49, 50, 25].
+
+                                                                  Estimation of Differential Quantities. Our models have
+                                                                  ground truth normals and curvature values making them an
+                                                                  ideal, objective benchmark for evaluating algorithms to pre-
+                                                                  dict these quantities on point clouds or triangle meshes of
+Figure 3: Each model in our dataset is composed of mul-           artificial origin.
+tiple patches and feature curves. The two images show the
+distribution of types of patches (left) and curves (right) over
+                                                                  Sharp Feature Detection. Sharp features are explicitly
+the current dataset (≈ 1M models).
+                                                                  encoded in the topological description of our models, and
+                                                                  it is thus possible to obtain ground truth data for predicting
+                                                                  sharp features on point clouds [56] and meshes.
+
+                                                                  Shape Reconstruction. Since the ground truth geometry
+                                                                  is known for B-rep models, they can be used to simulate a
+                                                                  scanning setup and quantitatively evaluate the reconstruc-
+                                                                  tion errors of both reconstruction [13, 53] and point cloud
+                                                                  upsampling [61] techniques.
+
+                                                                  Image Based Learning Tasks. Together with the dataset,
+Figure 4: Histograms over the number of patches and curves        we provide a rendering module (based on Blender [2]) to
+per CAD model. This shows that there are many simpler             generate image datasets. It supports rendering of models
+models which consist of less than 30 patches/100 curves as        posed in physically static orientations on a flat plane, differ-
+well as more complex ones. Both histograms are truncated          ent lighting situations, materials, camera placements (half-
+at the right side.                                                dome, random) as well as different rendering modes (depth,
+                                                                  color, contour). Note that all these images can be consid-
+                                                                  ered ground truth, since there is no geometric approxima-
+3.3. Analysis and Statistics                                      tion error.
+
+    We show an overview of the models in the dataset in Fig-      Robustness of Geometry Processing Algorithms. Be-
+ures 1 and 2. In Figure 3 and 4 we show the distribution of       sides data-driven tasks, the dataset can also be employed
+surface and edge types and the histogram of patch and edge        for evaluating the robustness of geometry processing algo-
+numbers, to give an impression of the complexity and va-          rithms. Even a simple task like normal estimation is prob-
+riety of the dataset. Updated statistics about the growing        lematic on such a large dataset. Most of the methods we
+dataset are available on our dataset website [1].                 evaluated in Section 5.1 fail (i.e. produce invalid normals
+                                                                  with length zero or which contain NANs) on at least one
+4. Supported Applications                                         model: our dataset is ideal for studying and solving these
+   We briefly overview a set of applications that may benefit     challenging robustness issues.
+from our dataset, that can be used as either training data or
+as a benchmark.                                                   5. Normal Estimation Benchmarks
+Patch Decomposition. Each object in our collection is                 We now introduce a set of large scale benchmarks to
+naturally divided into surface regions, separated by feature      evaluate algorithms to compute surface normals, exploiting
+lines. The decomposition is defined by the author when a          the availability of ground truth normals on the B-rep mod-
+shape is constructed, and is likely to be semantically mean-      els. To the best of our knowledge, this is the first large scale
+ingful. It is also constrained by a strong geometric criteria:    study of this kind, and the insights that it will provide will
+each region should be representable by a (possibly trimmed)       be useful for the development of both data-driven and ana-
+NURBS patch.                                                      lytic methods.
+Figure 5: Samples from the different categories in our normal estimation benchmark. From left to right: local patches of
+growing size and complexity (512, 1024, 2048 vertices), and full models at different densities (512, 1024, 2048 vertices).
+
+
+Construction. To fairly compare a large variety of both           (or a reimplementation in popular libraries); (2) we used the
+data-driven and analytic methods, some targeting local esti-      recommended or default values for all (hyper-)parameters
+mation and some one-shot prediction of all normals of a 3D        of the learning approaches (if these were not provided, we
+model, we build a series of datasets by randomly sampling         fine-tuned them on a case by case basis); (3) if the imple-
+points on our meshed B-reps, and growing patches of dif-          mentation does not directly support normal estimation, we
+ferent sizes, ranging from 512 vertices to the entire model       modified their code following the corresponding descrip-
+(Figure 5). For each patch size, we generate 4 benchmarks         tion in the original paper (4) we used the same loss func-
+                                                                                 2
+with an increasing number of patches, from 10k to 250k, to        tion 1 − nT n̂ , with n as the estimated normal and n̂ as
+study how the data-driven algorithms behave when they are         the ground truth normal, for all methods. Note that this loss
+trained on a larger input set.                                    function does not penalize normals that are inverted (flipped
+Split. All benchmark datasets are randomly split into             by 180◦ ), which is an orthogonal problem usually fixed as
+training and test set with a distribution of 80% training data    in a postprocessing step [31].
+and 20% test data. The split will be provided to make the         Results. A listing of the statistical results for all meth-
+results reproducible.                                             ods is given in Table 2. Our experiments show that neu-
+5.1. Evaluation                                                   ral networks for normal estimation are stable across several
+                                                                  runs; standard deviation of the losses is of the order of 10−3 .
+Algorithms. We select 12 representative algorithms from           For the 10k dataset, most of the networks converge within
+the literature, and 5 of them are traditional ones, Robust Sta-   24 hours on a NVIDIA GeForce GTX 1080 Ti GPU. We
+tistical Estimation on Discrete Surfaces (RoSt) [35] operat-      capped the training time of all methods to 72 hours.
+ing on point clouds (PC), and meshes (M), Osculating Jets
+                                                                  Comparison of Data-Driven Methods. We observe, as
+(Jets) [21], also on point clouds and meshes, and Uniform
+                                                                  expected, that the error is reduced as we increase the num-
+weighting of adjacent face normals (Uniform) [34]. No-
+                                                                  ber of samples in the training set, this is consistent for all
+tice that we replace K-ring neighborhoods with K-nearest
+                                                                  methods on both patches and full models. However, the im-
+neighbors for RoSt and Jets to support point cloud input.
+                                                                  provement is modest (Figures 6 and 7).
+Also, 7 machine learning methods are selected, including
+PointNet++ (PN++) [47], Dynamic Graph CNN (DGCNN)                 Sampling Resolution on Full Models. We also explore
+[55], Pointwise CNN (PwCNN) [32], PointCNN (PCNN)                 how data-driven methods behave when sampling resolution
+[38], Laplacian Surface Network (Laplace) [37], PCP-Net           is growing. DGCNN, PCNN, and PwCNN clearly benefit
+(PCPN) [29] and Point Convolutional Neural Networks               from sampling resolution, while PN++ does not show clear
+by Extension Operators (ExtOp) [11]. Of these methods,            improvements. This phenomenon is likely linked to the spa-
+Laplace operates on triangle mesh input and the rest on           tial subsampling mechanism that is used to ensure sublinear
+point cloud input. Most of their output is one normal per         time in training, but prevents this method from leveraging
+vertex, except for PCPN and ExtOp the output is one nor-          the extra resolution. In case of Laplace surface network, it
+mal for the center of the patch. We provide a detailed ex-        is difficult to understand the effect since it did not converge
+planation of the (hyper-)parameters and modifications we          after 3 days of training on the highest resolution.
+did for each method in the supplementary material. For the        Comparison of Analytic Methods. Analytic methods are
+statistics, we used only the valid normals reported by each       remarkably consistent across dataset sizes and improve as
+method, and we filtered out all the degenerate ones.              the mesh sampling resolution is increased. The methods
+Protocol. We compare the methods above on the bench-              based on surface connectivity heavily outperform those re-
+marks, using the following protocol: (1) for each method,         lying on K-nearest neighbour estimation, demonstrating
+we obtained the original implementation from the authors          that connectivity is a valuable information for this task.
+       PN++         PwCNN         Laplace        Jets PC    Jets M    6. Conclusion
+       DGCNN        PCNN          RoSt PC        RoSt M     Uniform
+                                                                         We introduced a new large dataset of CAD models, and
+                                                                      a set of tools to convert them into the representations used
+                                                                      by deep learning algorithms. The dataset will continue to
+                                                                      grow as more models are added to the Onshape public col-
+                                                                      lection. Large scale learning benchmarks can be created us-
+                                                                      ing the ground truth signals that we extract from the CAD
+                                                                      data, as we demonstrate for the estimation of differential
+                                                                      surface quantities.
+                                                                         The result of our comparison will be of guidance to the
+                                                                      development of new geometric deep learning methods. Our
+                                                                      surprising conclusion is that, while deep learning meth-
+                                                                      ods which use only 3D points are superior to analytical
+                                                                      methods, this is not the case when connectivity informa-
+                                                                      tion is available. This suggests that existing graph architec-
+   0           20           40              60             80         tures struggle at exploiting the connectivity efficiently and
+                                                                      are considerably worse than the simplest analytical method
+Figure 6: Plot of angle deviation error for the lower resolu-         (uniform), which simply averages the normals of neigh-
+tion patches (512 points) benchmark, using different sample           bouring faces. It would be interesting to run a similar study
+size (top to bottom: 10k, 50k, and 100k).                             by extending these algorithms to correctly identify and pre-
+                                                                      dict multiple normals on sharp features and compare them
+       PN++         PwCNN         Laplace        Jets PC    Jets M    with specialized methods for this task [18].
+       DGCNN        PCNN          RoSt PC        RoSt M     Uniform
+                                                                         Another surprising discovery is that even the uniform al-
+                                                                      gorithm fails to produce valid normals on roughly 100 mod-
+                                                                      els in our dataset due to floating point errors. These kinds
+                                                                      of problems are extremely challenging to identify, and we
+                                                                      believe that the size and complexity of our dataset are an
+                                                                      ideal stress test for robust geometry processing algorithms.
+
+                                                                      7. Distribution
+                                                                         The dataset and all information is available at:
+                                                                      https://deep-geometry.github.io/abc-dataset
+                                                                      It is distributed under the MIT license and split into chunks
+                                                                      of 10k models for each data type. The copyright owners
+                                                                      of the models are the respective creators (listed in the meta
+                                                                      information). The geometry processing pipeline is made
+   0           20            40                  60             80    available under the GPL license in form of a containerized
+                                                                      software solution (Docker [3] and Singularity [7]) that can
+Figure 7: Plot of angle deviation error for the high-                 be run on every suitable machine.
+resolution (2048 points) full model benchmark, using dif-
+ferent sample size (top to bottom: 10k, 50k, and 100k).
+                                                                      Acknowledgements
+Data-Driven vs. Analytic Methods. Almost all data-                       We are grateful to Onshape for providing the CAD models
+driven methods perform well against analytic methods for              and support. This work was supported in part through the NYU
+point clouds, especially if the model resolution is low. How-         IT High Performance Computing resources, services, and staff
+ever, if the analytic methods are allowed to use connectiv-           expertise. Funding provided by NSF award MRI-1229185. We
+ity information, they outperform all learning methods by a            thank the Skoltech CDISE HPC Zhores cluster staff for comput-
+large margin, even those also using connectivity informa-             ing cluster provision. This work was supported in part by NSF
+tion. To further support this conclusion, we run a similar            CAREER award 1652515, the NSF grants IIS-1320635, DMS-
+experiment on a simpler, synthetic dataset composed of 10k            1436591, and 1835712, the Russian Science Foundation under
+and 50k random NURBS patches and observe similar re-                  Grant 19-41-04109, and gifts from Adobe Research, nTopology
+sults, which are available in the supplementary material.             Inc, and NVIDIA.
+ Method/                                   Full Models                                                Patches
+ Vertices                       Loss                 Angle Deviation [◦ ]                 Loss                   Angle Deviation [◦ ]
+                        10k      50k     100k        10k      50k     100k        10k      50k     100k          10k      50k     100k
+                 512   0.168    0.155    0.142      7.83     7.32      6.43     0.034     0.032    0.025         1.70     1.42     1.10
+  PN++          1024   0.180    0.163    0.160      7.49     6.06      6.17     0.056     0.052    0.048         2.11     1.57     1.51
+                2048   0.171    0.156    0.149      6.75     5.47      5.08     0.081     0.071    0.063         2.48     1.77     1.44
+
+
+
+
+  PwCNN DGCNN
+                 512   0.177    0.167    0.144      9.61     8.32      7.13     0.054     0.049    0.025         3.20     3.00     1.12
+                1024   0.126    0.104    0.099      5.91     4.59      4.34     0.048     0.036    0.024         2.98     2.15     1.13
+                2048   0.090    0.070    0.068      4.54     2.80      2.77     0.045     0.035    0.023         2.66     1.95     0.98
+                 512   0.273    0.260    0.252     18.73    17.27    16.36      0.092     0.069    0.067         4.71    3.45      3.43
+                1024   0.217    0.218    0.198     12.78    13.10    11.38      0.107     0.110    0.089         5.50    6.11      4.58
+                2048   0.188   0.176*   0.168*     11.34   10.54*   10.05*      0.107    0.120*    0.094         5.98   6.36*      4.83
+                 512   0.146    0.153    0.139      6.47     6.96      6.15     0.037     0.043    0.028         1.84     1.84    1.42
+  PCNN          1024   0.104    0.099    0.103      3.56     3.46      3.69     0.025     0.030    0.025         0.94     1.37    0.92
+                2048   0.065    0.070    0.067      2.05     2.44      2.22     0.023     0.025   0.023*         0.88     1.01   0.83*
+                 512   0.282    0.203    0.133     20.01    11.94     8.47      0.041     0.047    0.022         1.93     3.13    1.12
+ Laplace
+                1024   0.211    0.138   0.146*     34.24     9.43    9.85*      0.030     0.027   0.029*         1.65     1.36   1.46*
+                2048   0.197   0.148*   0.158*      9.99    9.95*   10.57*      0.031     0.040   0.040*         1.60     1.67   1.81*
+
+                 512      –        –        –          –        –           –   0.098†   0.081†       –      9.95†       9.28†          –
+  PCPNet
+                1024      –        –        –          –        –           –   0.123†   0.097†       –     13.89†       9.55†          –
+                2048      –        –        –          –        –           –   0.142†   0.200†       –     16.24†      16.45†          –
+                 512      –        –        –          –        –           –   0.074†   0.073†       –         2.42†    2.05†          –
+ ExtOp          1024      –        –        –          –        –           –   0.095†   0.096†       –         3.32†    2.50†          –
+                2048      –        –        –          –        –           –   0.091†        –       –         3.00†        –          –
+
+
+  RoSt PC
+                 512   0.298    0.300       –      21.32    21.36           –   0.083     0.082       –          0.82     0.79          –
+                1024   0.220    0.223       –      14.47    14.63           –   0.078     0.077       –          0.74     0.72          –
+                2048   0.164    0.166       –       9.96    10.18           –   0.073     0.072       –          0.59     0.62          –
+                 512   0.260    0.261       –      17.84    17.97           –   0.050     0.050       –          0.05     0.05          –
+  Jets PC
+                1024   0.183    0.186       –      12.19    12.39           –   0.048     0.048       –          0.05     0.05          –
+                2048   0.129    0.132       –       8.41     8.63           –   0.045     0.044       –          0.04     0.04          –
+                 512   0.082    0.084    0.084      2.15     2.17      2.18     0.108     0.103    0.102         0.06     0.06     0.06
+  RoSt M
+                1024   0.053    0.055    0.056      0.25     0.29      0.29     0.107     0.105    0.105         0.06     0.06     0.06
+                2048   0.047    0.048    0.050      0.08     0.08      0.08     0.112     0.108    0.107         0.06     0.06     0.06
+                 512   0.175    0.176    0.175      7.26     7.29      7.29     0.036     0.036    0.036         0.00     0.00     0.00
+  Jets M        1024   0.118    0.118    0.117      0.10     0.10      0.11     0.033     0.033    0.033         0.00     0.00     0.00
+                2048   0.078    0.079    0.079      0.01     0.02      0.02     0.029     0.031    0.031         0.00     0.00     0.00
+
+
+  Uniform
+                 512   0.024    0.025    0.024      0.26     0.29      0.28     0.007     0.007    0.007         0.00     0.00     0.00
+                1024   0.013    0.013    0.013      0.00     0.00      0.00     0.005     0.005    0.005         0.00     0.00     0.00
+                2048   0.009    0.010    0.009      0.00     0.00      0.00     0.004     0.005    0.004         0.00     0.00     0.00
+
+Table 2: Statistical results for all evaluated methods for the full model and patch benchmarks. The loss is calculated as
+          2
+1 − nT n̂ and the angle deviation is calculated as the angle in degrees ∠(n, n̂) between ground truth normal and estimated
+normal. For the loss we report the mean over all models, for the angle deviation we report the median of all models in the
+according datasets. Osculating Jets and Robust Statistical Estimation are evaluated both on point cloud inputs (PC suffix;
+comparable to the learning methods) as well as mesh inputs (M suffix). †: PCPNet and ExtOp were not run on full models
+since they compute only 1 normal per patch (and their loss, differently from all other rows, is computed only on the vertex in
+the center of the patch). *: the training was not completed before the time limit is reached, and the partial result is used for
+inference.
+References                                                       Graphics Forum, volume 34, pages 13–23. Wiley On-
+                                                                 line Library, 2015.
+ [1] ABC-Dataset.         https://deep-geometry.
+     github.io/abc-dataset. Accessed: 2019-03-              [16] D. Boscaini, J. Masci, E. Rodolà, and M. Bronstein.
+     20.                                                         Learning shape correspondence with anisotropic con-
+                                                                 volutional neural networks. In Advances in Neural
+ [2] Blender. https://www.blender.org/. Ac-
+                                                                 Information Processing Systems, pages 3189–3197,
+     cessed: 2018-11-14.
+                                                                 2016.
+ [3] Docker. https://www.docker.com/. Ac-
+     cessed: 2018-11-11.                                    [17] A. Boulch and R. Marlet. Fast and robust normal esti-
+                                                                 mation for point clouds with sharp features. Comput.
+ [4] NIST CAD Models and STEP Files with PMI.                    Graph. Forum, 31(5):1765–1774, Aug. 2012.
+     https://catalog.data.gov/dataset/
+     nist-cad-models-and-step-files-                        [18] A. Boulch and R. Marlet. Deep learning for robust
+     with-pmi. Accessed: 2018-11-11.                             normal estimation in unstructured point clouds. In
+                                                                 Proceedings of the Symposium on Geometry Process-
+ [5] Onshape. https://www.onshape.com/. Ac-
+                                                                 ing, SGP ’16, pages 281–290, Goslar Germany, Ger-
+     cessed: 2018-11-14.
+                                                                 many, 2016. Eurographics Association.
+ [6] Open CASCADE Technology OCCT. https://
+                                                            [19] M. M. Bronstein, J. Bruna, Y. LeCun, A. Szlam, and
+     www.opencascade.com/. Accessed: 2018-11-
+                                                                 P. Vandergheynst. Geometric deep learning: going be-
+     11.
+                                                                 yond euclidean data. IEEE Signal Processing Maga-
+ [7] Singularity.       https://singularity.lbl.                 zine, 34(4):18–42, 2017.
+     gov/. Accessed: 2018-11-11.
+                                                            [20] J. Bruna, W. Zaremba, A. Szlam, and Y. LeCun.
+ [8] STEP File Format. https://en.wikipedia.                     Spectral networks and locally connected networks on
+     org/wiki/ISO_10303-21. Accessed: 2018-11-                   graphs. arXiv preprint arXiv:1312.6203, 2013.
+     11.
+                                                            [21] F. Cazals and M. Pouget. Estimating differential quan-
+ [9] The princeton shape benchmark. In Proceedings of the
+                                                                 tities using polynomial fitting of osculating jets. Com-
+     Shape Modeling International 2004, SMI ’04, pages
+                                                                 puter Aided Geometric Design, 22(2):121 – 146, 2005.
+     167–178, Washington, DC, USA, 2004. IEEE Com-
+     puter Society.                                         [22] A. X. Chang, T. Funkhouser, L. Guibas, P. Hanrahan,
+                                                                 Q. Huang, Z. Li, S. Savarese, M. Savva, S. Song,
+[10] P. Alliez, S. Giraudot, C. Jamin, F. Lafarge,
+                                                                 H. Su, J. Xiao, L. Yi, and F. Yu. ShapeNet: An
+     Q. Mérigot, J. Meyron, L. Saboret, N. Salman, and
+                                                                 Information-Rich 3D Model Repository. Technical
+     S. Wu. Point set processing. In CGAL User and Ref-
+                                                                 Report arXiv:1512.03012 [cs.GR], Stanford Univer-
+     erence Manual. CGAL Editorial Board, 4.13 edition,
+                                                                 sity — Princeton University — Toyota Technological
+     2018.
+                                                                 Institute at Chicago, 2015.
+[11] M. Atzmon, H. Maron, and Y. Lipman. Point convo-
+     lutional neural networks by extension operators. ACM   [23] A. Dai, A. X. Chang, M. Savva, M. Halber,
+     Trans. Graph., 37(4):71:1–71:12, July 2018.                 T. Funkhouser, and M. Nießner. Scannet: Richly-
+                                                                 annotated 3d reconstructions of indoor scenes. In
+[12] M. Aubry, D. Maturana, A. Efros, B. Russell, and
+                                                                 Proc. Computer Vision and Pattern Recognition
+     J. Sivic. Seeing 3d chairs: exemplar part-based 2d-
+                                                                 (CVPR), IEEE, 2017.
+     3d alignment using a large dataset of cad models. In
+     CVPR, 2014.                                            [24] M. Defferrard, X. Bresson, and P. Vandergheynst.
+                                                                 Convolutional neural networks on graphs with fast lo-
+[13] M. Berger, J. A. Levine, L. G. Nonato, G. Taubin,
+                                                                 calized spectral filtering. In Advances in Neural Infor-
+     and C. T. Silva. A benchmark for surface reconstruc-
+                                                                 mation Processing Systems, pages 3844–3852, 2016.
+     tion. ACM Transactions on Graphics (TOG), 32(2):20,
+     2013.                                                  [25] T. Du, J. P. Inala, Y. Pu, A. Spielberg, A. Schulz,
+[14] F. Bogo, J. Romero, G. Pons-Moll, and M. J. Black.          D. Rus, A. Solar-Lezama, and W. Matusik. Inver-
+     Dynamic FAUST: Registering human bodies in mo-              secsg: Automatic conversion of 3d models to csg
+     tion. In IEEE Conf. on Computer Vision and Pattern          trees. ACM Trans. Graph, 37(6):213, 2018.
+     Recognition (CVPR), July 2017.                         [26] G. Farin. Curves and Surfaces for CAGD: A Practical
+[15] D. Boscaini, J. Masci, S. Melzi, M. M. Bronstein,           Guide. Morgan Kaufmann Publishers Inc., San Fran-
+     U. Castellani, and P. Vandergheynst. Learning class-        cisco, CA, USA, 5th edition, 2002.
+     specific descriptors for deformable shapes using lo-   [27] M. Garland and P. S. Heckbert. Surface simplification
+     calized spectral convolutional networks. In Computer        using quadric error metrics. In Proceedings of the 24th
+     Annual Conference on Computer Graphics and Inter-         [41] J. Masci, D. Boscaini, M. Bronstein, and P. Van-
+     active Techniques, SIGGRAPH ’97, pages 209–216,                dergheynst. Geodesic convolutional neural networks
+     New York, NY, USA, 1997. ACM Press/Addison-                    on riemannian manifolds. In Proceedings of the IEEE
+     Wesley Publishing Co.                                          international conference on computer vision work-
+[28] C. Geuzaine and J. F. Remacle. Gmsh: a three-                  shops, pages 37–45, 2015.
+     dimensional finite element mesh generator with built-     [42] F. Monti, D. Boscaini, J. Masci, E. Rodola, J. Svo-
+     in pre- and post-processing facilities. International          boda, and M. M. Bronstein. Geometric deep learning
+     Journal for Numerical Methods in Engineering, 2009.            on graphs and manifolds using mixture model cnns. In
+[29] P. Guerrero, Y. Kleiman, M. Ovsjanikov, and N. J. Mi-          Proc. CVPR, volume 1, page 3, 2017.
+     tra. PCPNet: Learning local shape properties from raw     [43] C. Mura, G. Wyss, and R. Pajarola. Robust normal
+     point clouds. Computer Graphics Forum, 37(2):75–               estimation in unstructured 3d point clouds by selective
+     85, 2018.                                                      normal space exploration. Vis. Comput., 34(6-8):961–
+[30] M. Henaff, J. Bruna, and Y. LeCun. Deep convo-                 971, June 2018.
+     lutional networks on graph-structured data. arXiv         [44] Y. Ohtake, A. Belyaev, M. Alexa, G. Turk, and H.-P.
+     preprint arXiv:1506.05163, 2015.                               Seidel. Multi-level partition of unity implicits. ACM
+[31] H. Hoppe, T. DeRose, T. Duchamp, J. McDonald, and              Trans. Graph., 22(3):463–470, July 2003.
+     W. Stuetzle. Surface reconstruction from unorganized      [45] M. Pouget and F. Cazals. Estimation of local differ-
+     points, volume 26. ACM, 1992.                                  ential properties of point-sampled surfaces. In CGAL
+[32] B.-S. Hua, M.-K. Tran, and S.-K. Yeung. Point-                 User and Reference Manual. CGAL Editorial Board,
+     wise convolutional neural networks, 2017.    cite              4.13 edition, 2018.
+     arxiv:1712.05245Comment: 10 pages, 6 figures, 10          [46] C. R. Qi, H. Su, K. Mo, and L. J. Guibas. Point-
+     tables. Paper accepted to CVPR 2018.                           net: Deep learning on point sets for 3d classification
+[33] A. Jacobson, D. Panozzo, et al.    libigl: A                   and segmentation. Proc. Computer Vision and Pattern
+     simple C++ geometry processing library, 2018.                  Recognition (CVPR), IEEE, 1(2):4, 2017.
+     http://libigl.github.io/libigl/.                          [47] C. R. Qi, L. Yi, H. Su, and L. J. Guibas. Pointnet++:
+[34] S. Jin, R. R. Lewis, and D. West. A comparison of              Deep hierarchical feature learning on point sets in a
+     algorithms for vertex normal computation. Vis. Com-            metric space. In I. Guyon, U. V. Luxburg, S. Bengio,
+     put., 21(1-2):71–82, Feb. 2005.                                H. Wallach, R. Fergus, S. Vishwanathan, and R. Gar-
+[35] E. Kalogerakis, P. Simari, D. Nowrouzezahrai, and              nett, editors, Advances in Neural Information Process-
+     K. Singh. Robust statistical estimation of curvature on        ing Systems 30, pages 5099–5108. Curran Associates,
+     discretized surfaces. In Proceedings of the Fifth Eu-          Inc., 2017.
+     rographics Symposium on Geometry Processing, SGP          [48] F. Scarselli, M. Gori, A. C. Tsoi, M. Hagenbuchner,
+     ’07, pages 13–22, Aire-la-Ville, Switzerland, Switzer-         and G. Monfardini. The graph neural network model.
+     land, 2007. Eurographics Association.                          IEEE Transactions on Neural Networks, 20(1):61–80,
+[36] T. N. Kipf and M. Welling. Semi-supervised clas-               2009.
+     sification with graph convolutional networks. arXiv       [49] V. Shapiro and D. L. Vossler. Construction and opti-
+     preprint arXiv:1609.02907, 2016.                               mization of csg representations. Comput. Aided Des.,
+[37] I. Kostrikov, Z. Jiang, D. Panozzo, D. Zorin, and              23(1):4–20, Feb. 1991.
+     B. Joan. Surface networks. In IEEE Conference             [50] G. Sharma, R. Goyal, D. Liu, E. Kalogerakis, and
+     on Computer Vision and Pattern Recognition, CVPR,              S. Maji. Csgnet: Neural shape parser for constructive
+     2018.                                                          solid geometry. In The IEEE Conference on Computer
+[38] Y. Li, R. Bu, M. Sun, and B. Chen. Pointcnn. CoRR,             Vision and Pattern Recognition (CVPR), June 2018.
+     abs/1801.07791, 2018.                                     [51] S. Song, S. P. Lichtenberg, and J. Xiao. Sun rgb-d:
+[39] Y. Li, D. Tarlow, M. Brockschmidt, and R. Zemel.               A rgb-d scene understanding benchmark suite. 2015
+     Gated graph sequence neural networks. arXiv preprint           IEEE Conference on Computer Vision and Pattern
+     arXiv:1511.05493, 2015.                                        Recognition (CVPR), pages 567–576, 2015.
+[40] H. Maron, M. Galun, N. Aigerman, M. Trope,                [52] S. Sukhbaatar, R. Fergus, et al. Learning multiagent
+     N. Dym, E. Yumer, V. G. Kim, and Y. Lipman. Convo-             communication with backpropagation. In Advances in
+     lutional neural networks on surfaces via seamless toric        Neural Information Processing Systems, pages 2244–
+     covers. ACM Trans. Graph, 36(4):71, 2017.                      2252, 2016.
+[53] X. Sun, P. L. Rosin, R. R. Martin, and F. C. Langbein.
+     Noise analysis and synthesis for 3d laser depth scan-
+     ners. Graphical Models, 71(2):34 – 48, 2009. IEEE
+     International Conference on Shape Modeling and Ap-
+     plications 2008.
+[54] N. Verma, E. Boyer, and J. J. Verbeek. Feastnet:
+     Feature-steered graph convolutions for 3d shape anal-
+     ysis. 2018 IEEE/CVF Conference on Computer Vision
+     and Pattern Recognition, pages 2598–2606, 2018.
+[55] Y. Wang, Y. Sun, Z. Liu, S. E. Sarma, M. M. Bron-
+     stein, and J. M. Solomon. Dynamic graph cnn for
+     learning on point clouds. CoRR, abs/1801.07829,
+     2018.
+[56] C. Weber, S. Hahmann, and H. Hagen. Sharp feature
+     detection in point clouds. In Proceedings of the 2010
+     Shape Modeling International Conference, SMI ’10,
+     pages 175–186, Washington, DC, USA, 2010. IEEE
+     Computer Society.
+[57] L. Wei, Q. Huang, D. Ceylan, E. Vouga, and H. Li.
+     Dense human body correspondences using convolu-
+     tional networks. In Proceedings of the IEEE Con-
+     ference on Computer Vision and Pattern Recognition,
+     pages 1544–1553, 2016.
+[58] Z. Wu, S. Song, A. Khosla, F. Yu, L. Zhang, X. Tang,
+     and J. Xiao. 3d shapenets: A deep representation for
+     volumetric shapes. In 2015 IEEE Conference on Com-
+     puter Vision and Pattern Recognition (CVPR), pages
+     1912–1920, June 2015.
+[59] Z. Wu, S. Song, A. Khosla, F. Yu, L. Zhang, X. Tang,
+     and J. Xiao. 3d shapenets: A deep representation for
+     volumetric shapes. In Proceedings of the IEEE con-
+     ference on computer vision and pattern recognition,
+     pages 1912–1920, 2015.
+[60] L. Yi, H. Su, X. Guo, and L. J. Guibas. Syncspeccnn:
+     Synchronized spectral cnn for 3d shape segmentation.
+     In CVPR, pages 6584–6592, 2017.
+[61] L. Yu, X. Li, C.-W. Fu, D. Cohen-Or, and P.-A. Heng.
+     Pu-net: Point cloud upsampling network. In Proceed-
+     ings of IEEE Conference on Computer Vision and Pat-
+     tern Recognition (CVPR), 2018.
+[62] Q. Zhou and A. Jacobson. Thingi10k: A dataset
+     of 10,000 3d-printing models.   arXiv preprint
+     arXiv:1605.04797, 2016.
+

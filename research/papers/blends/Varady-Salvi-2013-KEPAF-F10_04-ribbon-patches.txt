@@ -1,0 +1,642 @@
+KÉPAF 2013 – a Képfeldolgozók és Alakfelismerők Társaságának 9. országos konferenciája
+
+
+
+
+                           New multi-sided patches
+                       for curve network-based design
+
+                                   Tamás Várady, Péter Salvi
+
+                        Budapest University of Technology and Economics
+
+
+
+              Abstract. An important problem in Computer Aided Design is to cre-
+              ate digital representations for complex free-form objects that produce
+              nice, predictable shapes and facilitate real-time editing in 3D. Curve
+              network-based design is such an approach; the clue to this technology is
+              the construction of smoothly connected multi-sided patches. A new type
+              of transfinite surface, called Composite Ribbon (CR) patch, has been
+              proposed recently in [12], that combines curved ribbon surfaces over a
+              non-regular, convex polygonal domain. This paper explores important
+              aspects of this formulation by introducing an enhanced ribbon construc-
+              tion with a new parameterization scheme using Wachspress coordinates.
+              The new scheme will be demonstrated and evaluated through a few sim-
+              ple examples.
+
+
+       1    Introduction
+
+       Creating general topology free-form objects, composed of smoothly connected
+       surface patches, is a fundamental problem in Computer Aided Geometric Design.
+       Aesthetic appearance is crucial for a wide variety of models including cars, house-
+       hold appliances, office furniture, containers and many others. While the majority
+       of such patches are four-sided, almost all industrial objects contain general n-
+       sided patches that need to be inserted into some arrangement of quadrilaterals.
+       Two examples are shown in Figures 1a and 1b.
+           General topology surfacing is a tough problem, and the most widely used
+       techniques expose certain deficiencies for designers and CAD users. First we
+       compare the “pros and cons” of these with the multi-sided approach. A very
+       simple example is shown in Figure 2a, where a 3D curve network of adjacent 5-
+       and 6-sided patches is given to be directly edited and then interpolated.
+           The standard approach is to combine a collection of bi-parametric (generally
+       NURBS) surfaces, then create trimmed patches through a sequence of surface in-
+       tersections, finally stitch these into a single model, providing tolerance-controlled
+       numerical continuity. The fundamental problem is that the original boundaries
+       of the four-sided patch and the trimming curves have different representational
+       form and design flexibility. For example, creating a truly symmetric three-sided
+       patch is not possible in the four-sided domain. Or take the example in Figure
+       2b: it is not obvious at all, how to obtain four boundaries by extending the
+       given curve segments. There is no known technique to smoothly connect two
+
+
+
+
+                                             566
+KÉPAF 2013 – a Képfeldolgozók és Alakfelismerők Társaságának 9. országos konferenciája
+
+
+
+
+         (a) Design by 2D and 3D curves     (b) Concept car defined by orthogonal sketches
+
+                      Fig. 1: Models containing general n-sided patches.
+
+
+       parametric surfaces along their “common” trimming curve. Shape editing of the
+       common trimming curves is practically impossible, as that would modify the
+       whole surface representation with their related cross-continuity constraints.
+           Another approach is splitting n-sided regions into smaller quadrilateral tiles,
+       as shown in Figure 2c. Here the main difficulty is to find an appropriate cen-
+       ter point in 3D, adding suitable subdividing curves and producing smoothness
+       between the tiles. The figure shows the uneven curvature distribution of this ap-
+       proach. It is an advantage that the network can be edited and the n-patches can
+       be connected, but the price is that surface quality is likely to be disappointing.
+           A third, well-known and popular surfacing approach, widely used in the an-
+       imation industry, is based on recursively subdividing general topology control
+       polyhedra [3]. This yields a set of smoothly connected quadrilaterals combined
+       with n-sided surface patches, however, difficulties here include the “ab initio”
+       creation of a good control polyhedra and directly interpolating and editing pre-
+       scribed free-form curves with tangential constraints.
+           In this paper we explore a fourth approach, where the network automati-
+       cally spans a collection of multi-sided transfinite patches. Feature curves may
+       come from 2D sketches or images, or may be directly defined in 3D. These
+       can be edited in a straightforward manner without topological limitations. Any
+       boundary adjustment naturally modifies the adjacent patches, which are auto-
+       matically connected in a watertight manner by the ribbon construction (see a
+       trivial example in 2f). In this way, users can focus on shape concepts and aes-
+       thetic requirements, and do not need to fiddle with representational difficulties.
+       The main advantage of the transfinite approach is that the interior of the shape
+       is solely defined by boundary ribbons, i.e., there is no need to deal with a grid
+       of interior control points. At the same time, transfinite patches also have their
+       deficiencies — the generated ribbons may not always meet user expectations,
+       and surface portions on extruded or rotational surfaces can only be reproduced
+       in approximate sense.
+
+
+
+
+                                            567
+KÉPAF 2013 – a Képfeldolgozók és Alakfelismerők Társaságának 9. országos konferenciája
+
+
+
+
+            (a) Curve network          (b) Trimmed surfaces        (c) Quadrilateral tiling
+
+
+
+
+            (d) Ribbon surfaces       (e) Transfinite surfaces      (f) Modified network
+
+                    Fig. 2: Comparison of different modelling approaches.
+
+
+
+          Figure 2e illustrates the simplicity of the curve network-based paradigm.
+       From a given curve network, ribbon surfaces are derived for each curve (Fig. 2d),
+       and from these, transfinite patches are computed. The two previous examples
+       (Figures 1a and 1b) have also been defined over general topology 3D networks.
+       When needed, these curves can be modified or their topology redesigned, and
+       the surface geometry will adjust accordingly.
+           Transfinite surface interpolation is a classical area of CAGD. Its origin goes
+       back to the late 60’s, when Coons formulated his Boolean sum surface [2]. In the
+       next two decades, several papers were published, first on triangular patches (see
+       summary in [3]), and later on genuine n-sided patches, including the pioneering
+       work of Charrot and Gregory [1,6], Sabin [11], and Kato [9]. The alternatives
+       of creating n-sided transfinite patches with different blending functions and pa-
+       rameterizations have been recently reviewed by the current authors [13]. New
+       transfinite representations that truly generalize Coons’ approach for n-sides have
+       been recently proposed in [12].
+           In this paper we present enhancements concerning one of these new represen-
+       tations, called Composite Ribbon or CR patches. In Section 2 we briefly revisit
+       the classical Coons patch formula, as this will be the starting point of our n-
+       sided surface construction. In Section 3 we introduce the basic constituents of
+       the scheme with emphasis on the construction of curved ribbons and preferred
+       ribbon parameterizations. In Section 4 a few examples demonstrate the natural
+       behavior of CR patches. Suggestions for future work conclude the paper.
+
+
+
+
+                                           568
+KÉPAF 2013 – a Képfeldolgozók és Alakfelismerők Társaságának 9. országos konferenciája
+
+
+
+
+                  (a) Hermite curve                               (b) Coons patch
+
+                                 Fig. 3: Boundary constraints.
+
+
+       2     Revisiting Coons patches
+       First we revisit and reformulate basic curve and surface equations in order to
+       introduce our new n-sided surface scheme.
+
+       2.1   Hermite curves reformulated
+       A cubic Hermite curve interpolates four discrete quantities: two endpoints P1 ,
+       P2 , and two tangent vectors T1 , T2 , multiplied by the Hermite blending functions
+
+                   α0 (u) = 2u3 − 3u2 + 1,                   α1 (u) = −2u3 + 3u2 ,
+                   β0 (u) = u3 − 2u2 + u,                     β1 (u) = u3 − u2 ,
+
+       so
+                       r(u) = P1 α0 (u) + P2 α1 (u) + T1 β0 (u) + T2 β1 (u),
+       see Figure 3a.
+           A similar curve equation can be formulated by combining two continuous,
+       parametric straight line segments, which we will call linear ribbons. A ribbon has
+       its own parameter di , and represents a segment with endpoint Pi and tangent
+       Ti as follows:
+                                Ri (di ) = Pi + di Ti , di ∈ [0, 1],
+       then the curve can be written as
+                                             X
+                                   r(u) =           Ri (di )α0 (di ),
+                                            i=1,2
+
+       using local ribbon parameters computed from the parameter of the curve by
+       d1 (u) = u, d2 (u) = 1 − u. Note, that only the first Hermite blending function
+       needs to be used and T2 has been reversed. The above curve is a quartic vector
+       polynomial, that satisfies the end constraints and looks “similar” to the Hermite
+       curve.
+           Here we propose an enhanced ribbon with non-linear parametrization, as
+       follows:
+                              Ri (di ) = Pi + γ(di )Ti , di ∈ [0, 1],
+
+
+
+
+                                             569
+KÉPAF 2013 – a Képfeldolgozók és Alakfelismerők Társaságának 9. országos konferenciája
+
+
+
+
+       where γ(di ) is a scalar function. To retain the interpolation properties it is
+       necessary that γ(0) = 0 and γ 0 (0) = 1. If we choose γ as the rational function
+       γ(di ) = β0 (di )/α0 (di ) = 2ddi i+1 , then r(u) reproduces the original Hermite curve.
+       This property will be exploited later, as it can be shown that the four-sided CR
+       patch runs very close to the original Coons patch.
+
+       2.2   Coons patches reformulated
+       It is known that the C 1 Coons patch [2] is a four-sided surface S, parameterized in
+       the (u, v) plane (u, v ∈ [0, 1]). It interpolates four boundaries P1 (u), P3 (u), P2 (v),
+       P4 (v) and four cross-derivative functions T1 (u), T3 (u), T2 (v), T4 (v), see Figure
+       3b. In Coons’ original Boolean sum formulation there are three constituents: an
+       interpolant connecting side 1 and 3, another interpolant connecting side 2 and 4,
+       and a term that corrects unwanted artifacts of the two side-to-side interpolants.
+       The correction surface contains a combination of constant vectors at the corners,
+       such as Pi (0), Pi0 (0), Ti (0) and Ti0 (0). In the C 1 Coons patch cubic Hermite
+       blending functions are used.
+            In order to reformulate the equation based on the sides of the surface, we
+       introduce cyclic indices (with 1 coming after 4), and so-called side parameters
+       si = si (u, v). The si -s are associated with the i-th side of the domain (i =
+       1, . . . , 4) and take the values of u, v, 1 − u and 1 − v, respectively. For symmetry
+       reasons, the parameterization of the boundaries are reversed along sides 3 and
+       4. Grouping the positional and tangential constraints of Pi (si ) and Ti (si ), and
+       splitting the correction surface into four parts (each one corresponding to one
+       corner), we can rewrite the Coons patch as the composition of four side-based
+       terms minus four corner-based correction terms, as follows:
+                   4
+                   X                 T              4X  α0 (si+1 ) T  Pi (0) P 0 (0)   α0 (si ) 
+                         α0 (si+1 )          Pi (si )                                i
+       S(u, v) =                                       −                                                   .
+                         β0 (si+1 )          Ti (si )        β0 (si+1 )      Ti (0) Ti0 (0)     β0 (si )
+                   i=1                                  i=1
+
+       The derivative of Ti (0) is the twist vector, which is a corner-specific quantity,
+       also denoted by Wi,i−1 . We assume that the twist vectors related to the (i−1)-th
+       and i-th cross-derivative functions are compatible, i.e.,
+                                                 ∂               ∂
+                                Wi,i−1 =            Ti (0) = −       Ti−1 (1).
+                                                ∂si            ∂si−1
+       If the twist vectors are not compatible, Gregory’s rational twists need to be
+       used [5,3].
+           Now let us construct a Coons patch using enhanced linear ribbons (as in
+       Section 2.1), i.e., instead of blending eight one-dimensional vector functions,
+       let us combine four biparametric surfaces similarly to the cubic curves in the
+       previous section:
+                                Ri (si , di ) = Pi (si ) + γ(di )Ti (si ).
+       Here we introduce another local parameter, the so-called distance parameter
+       di = di (u, v), that measures a distance from the i-th boundary; for di = 0
+
+
+
+
+                                                     570
+KÉPAF 2013 – a Képfeldolgozók és Alakfelismerők Társaságának 9. országos konferenciája
+
+
+
+
+       the positional and tangential constraints are satisfied. In the four-sided case
+       di = 1 − si−1 = si+1 is an obvious choice. The resulting patch equation is
+
+                          4
+                          X                               4
+                                                          X
+              S(u, v) =         Ri (si , di )α0 (di ) −         Qi,i−1 (si , si−1 )α0 (si )α1 (si−1 ),   (1)
+                          i=1                             i=1
+
+       where the corner correction patches Qi,i−1 are given as
+
+       Qi,i−1 (si , si−1 ) = Pi (0)+γ(1−si−1 )Ti (0)+γ(si )Ti−1 (1)+γ(si )γ(1−si−1 )Wi,i−1 .
+
+           The ribbons are ruled surfaces, and the correction patches are bilinear sur-
+       faces. This formula is identical to the original C 1 Coons patch.
+
+
+       3     Composite ribbon patches
+
+       The CR patch is a transfinite surface interpolating n ≥ 3 three-dimensional
+       boundaries Pi (si ), 1 ≤ i ≤ n, and related cross-derivative functions Ti (si ). We
+       define the CR patch as a combination of special curved ribbons, which, in turn,
+       are composed of the previously introduced linear ribbons. (For the construction
+       of curved ribbons, see Section 3.3.)
+           Let Γ be a convex polygonal domain in the (u, v) parameter plane, and map
+       the sides of the polygon, Γi , onto the boundaries of the patch (see Figure 4).
+       The local side and distance parameters of the ribbons can be computed from
+       (u, v), i.e., si = si (u, v), di = di (u, v), and we associate a blending function
+       Bi (u, v) = Bi (d1 , . . . , dn ) to each side. The CR patch is given as
+                                                     n
+                                                 1X
+                                    S(u, v) =          Ci (u, v)Bi (u, v),                               (2)
+                                                 2 i=1
+
+       where Ci (u, v) = Ci (si , di ) denote the curved ribbons. The patch formulation
+       will be explained in Section 3.5.
+           In order to create this surface, the following constituents must be provided:
+       (i) an n-sided domain polygon, (ii) blending functions, (iii) n ribbon surfaces and
+       (iv) appropriate methods to parameterize the ribbons. The following sections will
+       treat these one by one.
+
+
+       3.1   Domain polygon
+
+       Our experience shows that it is preferable to use non-regular convex domains to
+       avoid undesirable shape artifacts in extreme geometric configurations. The 2D
+       polygon is supposed to mimic the 3D boundary configuration by arc lengths and
+       angles at the corners. The specifics of domain creation does not concern us here;
+       the reader can find details on different methods in [13].
+
+
+
+
+                                                   571
+KÉPAF 2013 – a Képfeldolgozók és Alakfelismerők Társaságának 9. országos konferenciája
+
+
+
+
+                           Fig. 4: CR patch: domain — ribbon mapping.
+
+
+       3.2    Generalized blending functions
+       Assume that we have a polygonal domain, and we need blending functions that
+       reproduce the ribbons along their boundaries. These need to satisfy special inter-
+       polating properties as will be shown below. For each (u, v) point we determine
+       an n-tuplet of distance values. Each di is associated with the i-th side: di is
+       equal to 0 on side Γi , and it increases monotonically as we move away from Γi .
+       In our patch formulations distance-based rational blending functions are used to
+       combine ribbons.
+           The basic requirement is that the blending function Bi is equal to 1 on Γi ,
+       and vanishes on all non-adjacent sides Γj , where j ∈
+                                                           / {i − 1, i, i + 1}, see Figure 5.
+       We propose the rational function
+                                                             Di,i−1 + Di+1,i
+                                   Bi (d1 , . . . , dn ) =     P             ,
+                                                                  j Dj,j−1
+
+       where Di1 ...ik = j /∈{i1 ...ik } d2j . Due to the squared terms, the related partial
+                           Q
+
+       derivatives of the blending functions vanish, i.e., ∂d∂ k Bi (d1 , . . . , dj = 0, . . . , dn ) =
+       0 for j ∈
+               / {i − 1, i + 1}, k ∈ [1 . . . n].
+
+       3.3    Ribbon surfaces
+       Let us assume that the tangential boundary information has already been spec-
+       ified by the user, or computed automatically based on the given curve network,
+       i.e., in addition to Pi , the Ti functions are also given. We have already seen
+       how these can constitute linear ribbons. Nevertheless, it can be observed that
+
+
+
+
+                                                    572
+KÉPAF 2013 – a Képfeldolgozók és Alakfelismerők Társaságának 9. országos konferenciája
+
+
+
+
+                      Fig. 5: A blending function over a six-sided domain.
+
+
+       linear ribbons may largely deviate from the expected surface, which spoils the
+       predictability of the shape interior, and in unfortunate cases may bring in unex-
+       pected surface artifacts. This motivated us to apply curved interpolants in the
+       CR scheme, as these are supposed to run much closer to the final n-sided patch,
+       and their combination produces better shapes in strongly asymmetric boundary
+       configurations.
+           A curved ribbon is defined as the combination of three consecutive linear
+       ribbons, and it is actually a Coons patch with three of its four sides given, defined
+       over a local rectangular domain. Let Ci (si , di ) denote the curved ribbon for the
+       i-th side. We simplify the notation and drop the indices of s and d, as it does
+       not cause any ambiguity. The definition of Ci is as follows (see Fig. 6):
+
+                    Ci (s, d) = Ril (s, d)α0 (s) + Ri (s, d)α0 (d) + Rir (s, d)α1 (s)
+                              − Qli (s, d)α0 (s)α0 (d) + Qri (s, d)α1 (s)α0 (d)
+                                                                               
+
+
+       where Ril (s, d), Rir (s, d), Qli (s, d) and Qri (s, d) denote the ribbons and the cor-
+       rection patches on the left and right sides, respectively. We parameterize these
+       by the local coordinates of the i-th side as follows:
+
+            Ril (s, d) = Ri−1 (1 − d, s) = Pi−1 (1 − d) + γ(s)Ti−1 (1 − d),
+           Rir (s, d) = Ri+1 (d, 1 − s) = Pi+1 (d) + γ(1 − s)Ti+1 (d),
+            Qli (s, d) = Qi,i−1 (s, 1 − d)
+                     = Pi (0) + γ(s)Ti−1 (1) + γ(d)Ti (0) + γ(s)γ(d)Wi,i−1 ,
+           Qri (s, d) = Qi+1,i (d, s)
+                     = Pi+1 (0) + γ(d)Ti (1) + γ(1 − s)Ti+1 (0) + γ(d)γ(1 − s)Wi+1,i .
+
+           Note that due to the above construction, d is constrained to lie in [0, 1].
+
+
+
+
+                                               573
+KÉPAF 2013 – a Képfeldolgozók és Alakfelismerők Társaságának 9. országos konferenciája
+
+
+
+
+                               Fig. 6: Construction of a curved ribbon.
+
+
+       Controlling the fourth side. The above equation shows that the fourth side
+       of the curved ribbons is “floating” — it is a by-product of the three interpolating
+       linear ribbons. While this is satisfactory in the majority of cases, it may be
+       advantegeous to explicitly constrain the fourth side, as it offers further degrees of
+       freedom to adjust the shape. A possible solution is to indirectly define the fourth
+       side by an appropriate parametric cubic curve Piaux (s). This can be implemented
+       by adding a correction term to the curved ribbon equation:
+
+                  Ci∗ (s, d) = C(s, d) + (Piaux (s) − C(s, 1)) 4α0 (s)α1 (s)α1 (d).
+
+       Piaux (s) has the same endpoints as the default fourth boundary C(s, 1) and
+       shares common slopes at the distant corners of the ribbon.
+
+       3.4   Ribbon parameterization overview
+       The most crucial issue in all transfinite surface schemes is ribbon parameteriza-
+       tion, i.e., how to compute the local side and distance parameters (si , di ) from a
+       given (u, v) domain point, see Figure 4. This determines the associated points
+       of the ribbons and thus has an essential effect on the shape.
+           We have seen the requirement that dj ∈ [0, 1] (j ∈ [1 . . . n]); it is also natural
+       to require that each side parameter sj is linear, and for a point on Γi
+
+                si ∈ [0, 1],           di = 0,         si−1 = 1,            si+1 = 0.     (3)
+
+       The distance parameters dj (j ∈ [1 . . . n]) also change linearly along the sides,
+       so on the i-th side
+
+                           di−1 = si ,                    di+1 = 1 − si .                 (4)
+
+
+
+
+                                                 574
+KÉPAF 2013 – a Képfeldolgozók és Alakfelismerők Társaságának 9. országos konferenciája
+
+
+
+
+       In the evaluation of parameterization methods there are two main issues: (i) the
+       constant si , di parameter lines must have an even distribution in the domain, and
+       (ii) the (u, v) → (si , di ) mappings must be simple and computationally efficient.
+       Let us deal with the si and di parameters separately.
+            In the so-called linear sweep parameterizations the si = const. isolines are
+       straight lines in the domain space; as si varies from 0 to 1 these lines sweep from
+       side Γi−1 to side Γi+1 , for example using a linear mapping between them.
+            As for the di = const. isolines, applying Wachspress coordinates [14,4] turned
+       out to be a good solution. Originally these assign weights to the corners of a
+       polygon, but it is possible to compute distance isolines by them, as follows. The
+       barycentric coordinates λi are defined as
+                                                           X
+                                    λi (u, v) = wi (u, v)/   wk (u, v),
+                                                         k
+       where the individual weights are computed by
+                               wi (u, v) = Ci /(Ai−1 (u, v) · Ai (u, v)).
+       Here Ai−1 = 4(pi−1 , (u, v), pi ), Ai = 4(pi , (u, v), pi+1 ) and Ci = 4(pi−1 , pi , pi+1 )
+       represent triangle areas [8], see Figure 7.
+          Then the distance di is computed as
+                               di (u, v) = 1 − (λi−1 (u, v) + λi (u, v)),
+       which satisfies equations (3) and (4) and edge linearity, due to the properties of
+       Wachspress coordinates.
+
+
+
+
+                Fig. 7: Triangle-based construction of Wachspress coordinates.
+
+
+          An example using the above construction of si and di is shown in Figure 8a.
+       As a side note, the distribution of the di isolines can be improved, if we force
+       the di = 21 isolines to go through the center point of the domain. This can be
+       done by a quadratic reparameterization, as follows (see Figure 8b):
+                       dˆi = di · (1 − si )2 + 2(1 − si )si · (2µi − 1) + s2i ,
+                                                                            
+
+       where the µi -s are scaling weights assigned to each side. These can be precom-
+       puted using a binary search, such that di equals to 21 at the center of the domain
+       polygon.
+
+
+
+
+                                               575
+KÉPAF 2013 – a Képfeldolgozók és Alakfelismerők Társaságának 9. országos konferenciája
+
+
+
+
+                (a) Wachspress coordinates            (b) Scaled Wachspress coordinates
+
+         Fig. 8: A five-sided domain with linear si and barycentric di parameter lines.
+
+
+       3.5   Assembling the composite ribbon patch
+       The CR patch has the simple formula already shown in (2):
+                                                n
+                                             1X
+                               S(u, v) =           Ci (u, v)Bi (u, v).
+                                             2 i=1
+
+           According to the characteristics of the Bi blend functions, for any point on
+       the i-th boundary all addends of the sum vanish except Ci−1 , Ci and Ci+1 . Since
+       each of these ribbons also interpolates the corresponding three boundaries, the
+       related three points on these ribbons are the same. Their cumulative blend is
+
+                    Bi−1 + Bi + Bi+1 = (Bi−1 + Bi+1 ) + Bi = 1 + 1 = 2,
+
+       which explains the division by two in the surface equation.
+           This patch does not satisfy the boundary derivative constraints in strict para-
+       metric sense (C 1 ), i.e., the multi-sided patch and the ribbon may have different
+       tangent vectors at a given boundary point. However, it does share a common
+       tangent plane with the ribbon along the boundary, so G1 continuity remains
+       valid (see proof in [12]), which is sufficient for surface generation.
+
+
+       4     Examples
+       Former side-based transfinite schemes combined linear ribbons and applied dif-
+       ferent blending functions, see for example [10]. While these patches are compu-
+       tationally simple, they could produce uneven curvatures in the vicinity of the
+       boundaries. In fact, the main motivation to develop our new schemes — such as
+       the CR patch — was to avoid these artifacts, see Figure 9.
+           Figure 10 shows two patches wih the same boundary constraints, where linear
+       and curved ribbons were combined to obtain multi-sided patches, respectively.
+
+
+
+
+                                              576
+KÉPAF 2013 – a Képfeldolgozók és Alakfelismerők Társaságának 9. országos konferenciája
+
+
+
+
+                 (a) Conventional patch             (b) Composite ribbon patch
+
+            Fig. 9: Mean map comparison of a surface using different patch types.
+
+
+
+
+                                 (a) Generalized Coons patch
+
+
+
+
+                                  (b) Composite ribbon patch
+
+           Fig. 10: Ribbons and slicing map of a five-sided boundary configuration.
+
+
+
+
+                                          577
+KÉPAF 2013 – a Képfeldolgozók és Alakfelismerők Társaságának 9. országos konferenciája
+
+
+
+
+       The first figure shows an alternative scheme (directly generalized Coons patches,
+       see [12]), while the second shows CR patches with curved ribbons.
+           The curve network in the third example comes from a 3D drafting system
+       (courtesy of Cindy Grimm [7]). The network was interpolated by our CR patches,
+       yielding the model in Figure 11.
+
+
+
+
+            (a) Curve network              (b) Shading               (c) Contouring
+
+                                  Fig. 11: Dolphin test model.
+
+
+
+
+       Conclusion
+       In this paper we have focused on the most crucial part of curve network-based
+       design, i.e., how to represent collections of multi-sided transfinite surface patches
+       that naturally fit onto general topology networks, and — at the same time —
+       make shape editing easy and naturally predictable. In the CR approach curved
+       ribbons comprising positional and tangential constraints are combined. We have
+       presented an enhanced ribbon construction together with a simple and efficient
+       parameterization using barycentric coordinates. Challenging future research top-
+       ics include fairing operations for curve network-based models and polygonal mesh
+       approximation by means of transfinite patches, exploiting the free parameters of
+       the ribbon interpolants.
+
+
+       Acknowledgments
+       This work was partially supported by the scientific program “Development of
+       quality-oriented and harmonized R+D+I strategy and functional model at the
+       Budapest University of Technology and Economics” (UMFT-TÁMOP-4.2.1/B-
+       09/1/KMR-2010-0002) and a grant by the Hungarian Scientific Research Fund
+
+
+
+
+                                            578
+KÉPAF 2013 – a Képfeldolgozók és Alakfelismerők Társaságának 9. országos konferenciája
+
+
+
+
+       (OTKA, No. 101845). The pictures in this paper were generated by the Sketches
+       system developed by ShapEx Ltd, Budapest; the contribution of György Karikó
+       is highly appreciated.
+
+
+       References
+        1. Peter Charrot and John A. Gregory. A pentagonal surface patch for computer
+           aided geometric design. Computer Aided Geometric Design, 1(1):87–94, 1984.
+        2. S. A. Coons. Surfaces for computer-aided design of space forms. Technical report,
+           Massachusetts Institute of Technology, Cambridge, MA, USA, 1967.
+        3. Gerald Farin. Curves and surfaces for CAGD: a practical guide. Morgan Kaufmann
+           Publishers Inc., San Francisco, CA, USA, 5th edition, 2002.
+        4. Michael S. Floater and Kai Hormann. personal communication, 2012.
+        5. J. A. Gregory. Smooth interpolation without twist constraints. In Robert E.
+           Barnhill and Richard F. Riesenfeld, editors, Computer Aided Geometric Design,
+           pages 71–88. Academic Press, Inc., 1974.
+        6. J. A. Gregory. N-sided surface patches. In The Mathematics of Surfaces, pages
+           217–232, USA, 1986. Oxford University Press.
+        7. Cindy Grimm and Pushkar Joshi. Just drawit: a 3d sketching system. In Proceed-
+           ings of the International Symposium on Sketch-Based Interfaces and Modeling,
+           SBIM ’12, pages 121–130, Aire-la-Ville, Switzerland, 2012. Eurographics Associa-
+           tion.
+        8. Kai Hormann and Michael S. Floater. Mean value coordinates for arbitrary planar
+           polygons. ACM Trans. Graph., 25:1424–1441, 2006.
+        9. K. Kato. Generation of n-sided surface patches with holes. Computer-Aided Design,
+           23(10):676–683, 1991.
+       10. K. Kato. n-sided surface generation from arbitrary boundary edges. In P.-J.
+           Laurent, P. Sablonnière, and L. L. Schumaker, editors, Curve and Surface Design:
+           Saint-Malo 1999, Innovations in Applied Mathematics, pages 173–181. Vanderbilt
+           University Press, Nashville, TN, 2000.
+       11. Malcolm Sabin. Transfinite surface interpolation. In Proceedings of the 6th IMA
+           Conference on the Mathematics of Surfaces, pages 517–534, New York, NY, USA,
+           1996. Clarendon Press.
+       12. Péter Salvi. Fair Curves and Surfaces. PhD thesis, Eötvös Loránd University,
+           Budapest, 2012.
+       13. Tamás Várady, Alyn Rockwood, and Péter Salvi. Transfinite surface interpolation
+           over irregular n-sided domains. Computer Aided Design, 43:1330–1340, 2011.
+       14. Eugene L. Wachspress. A rational finite element basis. Academic Press, New York,
+           1975.
+
+
+
+
+                                            579
+

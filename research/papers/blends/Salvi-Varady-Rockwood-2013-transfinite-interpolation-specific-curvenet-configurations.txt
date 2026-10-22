@@ -1,0 +1,685 @@
+                                                                                             1
+
+
+
+
+  Transnite surface interpolation over specic
+            curvenet congurations
+                                    †
+            By Péter Salvi , Tamás Várady , Alyn Rockwood
+                                                         †                       ‡
+                     †
+                         Budapest University of Technology and Economics
+                              ‡
+                                InterNext Graphics Institute, Utah
+
+
+                                            Abstract
+
+
+
+  In curve network-based design, objects consist of a collection of smoothly connected
+multi-sided patches. Transnite surface interpolation is a favorable representation; these
+patches are determined exclusively by means of n boundary ribbon surfaces carrying
+positional and cross-derivative constraints to be interpolated. Interest in transnite in-
+terpolation has been recently revitalized by new schemes to generalize Coons' four-sided
+patch to arbitrary n sides. While the majority of multi-sided surfaces are dened over
+convex domains combining linear ribbons, there are design situations, where applying
+convex domains is insucient or impossible. The goal of our paper is to process curve
+networks with concave angles and internal holes. In the proposed scheme, subdividing
+                                                                           2
+curves are supplemented and parabolic ribbons are used to provide G            continuity. Gre-
+gory's generalized correction terms are applied to handle ribbons that are not compatible
+at the vertices. A simple construction to create parabolic ribbons is also discussed. A few
+examples illustrate the diculties and the solutions.
+
+
+
+1. Introduction
+
+In curve network-based design, objects are directly dened by a collection of curves, ar-
+ranged into a single 3D network with general topology. Curves may come from (i) sketch
+input, (ii) feature curves extracted from orthogonal views, (iii) curves traced on triangular
+meshes or (iv) direct 3D editing. It is assumed that the network automatically determines
+so-called ribbon surfaces that carry positional and cross-derivative constraints to be in-
+terpolated. The key to curve network-based design is transnite surface interpolation,
+where no grid of control points is needed to dene the shape interior, and all n bound-
+aries are handled uniformly, unlike in the case of trimmed quadrilateral surfaces. The
+ability to naturally edit prescribed boundaries and cross-derivatives is also an advantage
+in contrast to recursive subdivision schemes.
+  The majority of multi-sided transnite surfaces are dened over convex domains, com-
+                                                 1
+bining linear ribbon surfaces and enabling G         continuity between the adjacent patches.
+At the same time, there are many practical design situations, where this approach may
+not work. In these cases additional curves need to be supplemented, which must be
+compatible with the already existing ribbons, and thus the extended network becomes
+suitable for applying convex methods. Typical examples include cases when two curves
+span a concave angle at a common vertex, or when disjoint loops with prescribed slopes
+need to be interpolated. It is particularly important to produce seamless connections
+within this sort of composite surfaces; this motivated our work to introduce parabolic
+                          2
+ribbons for ensuring G        continuity.
+  The roots of transnite surface interpolation go back to Coons' classical work [3], that
+         Transnite surface interpolation over specic curvenet congurations                     2
+                       2
+generalizes for C , as well. Potential incompatibilities of adjacent ribbons meeting at
+a corner were also investigated. This problem can be resolved using Gregory's rational
+                                                        2
+terms [6], which was later generalized to handle C          incompatible corners [1, 25]. Research
+related to non-four-sided transnite schemes intensied in the eighties and the early
+nineties including various important publications [2, 17, 9, 16, 18, 11]. Multi-sided patches
+         2
+with G       continuity were also published, see [7, 8, 5] amongst others. Serious eorts were
+directed towards avoiding rational terms, when quadrilateral polynomial surfaces must
+satisfy compatibility constraints at n-valent vertices [14, 15]. As it will be discussed in
+Section 3, this question is also related to transnite surface interpolation, as it determines
+whether ribbons are entirely unconstrained, or need to be made compatible through a set
+of algebraic equations. In the unconstrained case it is necessary to use rational correction
+terms.
+  An early paper on curvenet-based surfaces was published by [12]. A global fairness func-
+tional using the variation of curvature was proposed, yielding a surface model comprised
+of quadrilaterals (biquintic Bézier patches). Subdivision-based interpolation approaches
+have also been proposed, using extensions of the Catmull-Clark scheme [10, 21]. Recent
+advances include Coons patches bounded by geodesic curves [4].
+  Interest in transnite surface interpolation has been revitalized recently by the current
+authors, proposing two new, multi-sided patch schemes [23, 19, 20]. This paper describes
+one of them, the so-called Generalized Coons (GC) surface, which expands the classical
+Boolean sum logic for n sides. In Section 2, three examples of specic curvenet cong-
+urations are presented, where ordinary transnite interpolation would fail. In Section
+                                                                                                  2
+3, we show how new interior curves can be added, and discuss the construction of G -
+continuous parabolic ribbons. In Section 4, we present the basic principle of the n-sided
+Coons approach, and discuss methods for constructing non-regular domains, blending
+functions, and ribbon parameterization. The computation of Gregory-style correction
+terms to blend independent linear and parabolic ribbons will also be described. Finally,
+we analyze the constructed composite transnite patches, and discuss open problems for
+future research.
+
+
+
+
+2. Motivation
+
+We assume that there is a given network of free-form curves, represented by markers
+interpolated by B-splines. Based on the network, common tangent planes (and possibly
+best-t surface curvatures, see [22]) are computed at the vertices, and bi-parametric rib-
+bon interpolants are dened, that carry positional and cross-derivative information. A
+                                                                                          1
+pair of linear ribbons, being on the opposite sides of a boundary, will satisfy G             conti-
+nuity, if they share a common normal at each point of the boundary (e.g. using rotation
+minimizing frame, see [24]). A pair of parabolic ribbons with the same curvature will
+              2
+provide G         continuity across adjacent patches. Finally, multi-sided patches interpolating
+the given ribbons will be constructed.
+
+
+
+
+                                         2.1. Three examples
+
+Our rst case shows a loop of curves, where two consecutive edges span a concave angle
+(see Figure 1). Using a convex domain would yield a twisted patch, most likely with self-
+intersections, due to the distorted parameterization of the ribbons in the domain space.
+This case can be better modeled, if we insert a new edge, that connects the concave
+corner with a marker on the opposite boundary, as shown in the gure. This connecting
+                                   MOTIVATION                                            3
+
+
+
+
+                 Figure 1: Subdividing a patch due to a concave angle.
+
+
+
+
+                                  (a) Connection curve.
+
+
+
+
+         (b) Original mean map.                    (c) Mean map with interior ribbons.
+
+            Figure 2: Subdividing a patch due to poorly distorted domain.
+
+
+
+
+curve is tangential to the plane of the concave corner and tangentially meets the ribbon
+at the marker.
+  The second example is a single patch, where all angles are convex, but the 3D boundary
+conguration signicantly deviates from the shape of the 2D domain (see Figure 2). As
+a result, the interior of the patch does not produce a shape that meets our expectations.
+To overcome this problem, an articial connecting curve is inserted in the middle, that
+tangentially connects the two opposite ribbons of the patch.
+  The third example shows two disjoint curve loops (see Figure 3) with already dened
+ribbons, but no appropriate domain exists for surface construction. As before, we insert
+       Transnite surface interpolation over specic curvenet congurations                   4
+
+
+
+
+         Figure 3: Adding connection curves to connect separate loops of edges.
+
+
+
+three connection curves that provide three adjacent loops that now can be interpolated
+by multi-sided patches with convex domains.
+
+
+
+3. Basic algorithms
+
+This section deals with the heuristics of creating connection curves, as well as the de-
+nition of linear and parabolic ribbons with or without corner compatibility.
+
+
+                                   3.1. Connection curves
+
+The applied connection curve algorithm can be briey described as follows. Assume
+that we have two opposite curves from the network, P1 (s1 ) and P2 (s2 ), and their rst
+derivatives and prescribed normal vectors are denoted by Di (si ) and Ni (si ), respectively,
+i ∈ {1, 2}. Let us dene a sequence of orthogonal sweeping planes πi (si ) for each curve,
+which contain the points Pi (si ) and whose normal vectors are Di (si ). The requested
+connection curve K12 (t) connects two opposite curve points, and its tangent vectors are
+                                             ∂                                   ∂
+set perpendicular to the given curves, i.e.,
+                                             ∂t K12 (0) = ±D1 (s1 )×N1 (s1 ) and ∂t K12 (1) =
+±D2 (s2 ) × N2 (s2 ), where the signs are determined by the direction of the curves.
+  The connection curve may connect two xed markers, i.e., two of the points dening
+the B-splines curves; then s1 and s2 are uniquely dened. Alternatively, the two end
+positions of the connecting curve are only loosely dened by user-dened sliding markers
+on the curves. In this case, the best end positions can be computed by a simple iterative
+algorithm. Substituting point P2 (s2 ) into the plane π1 (s1 ) gives a signed distance, that
+indicates the direction in which the rst sliding marker and its plane should move on the
+                                                                                             (1)
+rst curve to contain the second point on the other side; this produces an enhanced s1
+value. Similarly, substituting point P1 (s1 ) into the plane π2 (s2 ) enhances the position
+of the sliding marker on the second curve. So we set point P2 (s2 ) to lie in π1 (s1 ), and
+vice versa. This iteration may not converge; in this case, we keep the initial positions. A
+simple example in Figure 4 shows how the sliding markers move to their nal position
+after a few steps.
+
+
+                                         3.2. Ribbons
+
+Linear ribbons are dened as R(s, d) = P (s) + dT (s), where T (s) is the cross-derivative;
+                                                                                              1
+we assume that the functions P (s) and T (s) are given. Two linear ribbons enable G
+continuity between two transnite patches, if their normal vectors are parallel, i.e.,
+ ∂                         ∂
+∂s1 P1 (s1 ) × T1 (s1 ) k ∂s2 P2 (s2 ) × T2 (s2 ) for each P1 (s1 ) = P2 (s2 ) point of the com-
+mon boundary curve.
+                                   BASIC ALGORITHMS                                                5
+
+
+
+
+      Figure 4: Sliding markers of a connection curve from initial to nal positions.
+
+
+
+  Parabolic ribbons need a smooth second derivative function C(s), as well:
+
+                                                     1
+                           R(s, d) = P (s) + dT (s) + d2 C(s),                    (3.1)
+                                                     2
+where we assume that both the position P (s) and the derivative vectors T (s) and C(s)
+                                                               2
+lie in the sweeping plane π(s). Two parabolic ribbons enable G continuity between two
+transnite patches, if the corresponding parabolic arcs are contained in the same sweeping
+plane, and their normal curvature match for each point of the common boundary curve
+(due to the well-known Linkage Curve Theorem [13]), i.e., κ1 (s1 ) = κ2 (s2 ) holds for all
+s1 , s2 , where P1 (s1 ) = P2 (s2 ), and
+                                                kTi (si ) × Ci (si )k
+                                   κi (si ) =                 3         .
+                                                    kTi (si )k
+  To compute common normal vector functions along a curve is relatively easy by in-
+terpolating the constrained normal vectors at the vertices of the network, however, to
+prescribe a common cross-curvature sweep along a curve is a dicult problem; poor val-
+ues may destroy surface quality in the interior of the patches. In order to be on the safe
+                                                                            1
+side, we propose to compute parabolic ribbons by rst creating G                transnite patches,
+then computing local curvatures along the common boundary in given sweeping planes,
+and set a common target curvature as the average of the two opposite curvature values.
+  We can transform the parabolic arc into a local coordinate system, where the rst point
+is the origin, and the tangent of the arc is the local x-axis. Then at a given boundary
+                                                                                            ∗
+point the equation of a parabola can be written as a quadratic Bézier curve R                   (d) =
+2(1 − d)d(αl, 0) + d (l, h), yielding κ = 2αh2 l2 (see Figure 5). Assuming that the width
+                      2
+
+of the parabolic ribbon is the same as the corresponding linear one, l is already dened.
+Then the prescribed curvature κ can be set by means of α and h, which dene the second
+and third control points of the parabolic arc. Transforming these points back into the 3D
+space denes the parabolic ribbon R(s, d) at those positions.
+
+
+                            3.3. Ribbon compatibility at the corners
+
+In the previous paragraphs we have dealt with opposite ribbons sharing a common curve,
+now we look at two adjacent ribbons sharing a common vertex. As noted earlier, in order
+to obtain a valid transnite patch, the ribbons must satisfy certain constraints, or must
+be made compatible. Let us denote the transnite patch by S(u, v), where (u, v) are the
+local parameters of the patch, and S(0, 0) is a corner point. Let us assume that we have
+two parabolic ribbons here, denoted by U (u, v) and V (u, v), parameterized in accordance
+         Transnite surface interpolation over specic curvenet congurations                       6
+                                                                (l,h)
+
+
+
+
+                               (0,0)      (αl,0)
+
+                 Figure 5: Setting the control points of a parabolic ribbon.
+
+
+
+with S(u, v). Let us assign U (u, 0) to S(u, 0), and V (0, v) to S(0, v). There are three basic
+cases:
+  (a) The ribbons are compatible, thus the transnite patch equation is well-dened, all
+                                            ∂   ∂     ∂2     ∂2   ∂2      ∂3       ∂3        ∂4
+derivatives and mixed partial derivatives
+                                           ∂u , ∂v , ∂u∂v , ∂u2 , ∂v 2 , ∂u2 ∂v , ∂u∂v 2 , ∂u2 ∂v 2 of
+U and V    are equal at (0, 0). This means that the ribbons must satisfy a set of algebraic
+constraints [15]. To produce such compatible ribbons automatically from a given curve
+network is a hard task.
+  (b) Another case is when the ribbons are totally independent, and the only constraint
+is that the corner point at S(0, 0) is common. In this case we may have two dierent
+values for all the above derivatives, and in order to create a valid transnite patch,
+                                                               ∂ i+j
+we need to apply the Gregory-style correction terms
+                                                             ∂ui ∂v j S(0, 0) = Wi,j (u, v), where
+                                                       i+j              i+j
+Wi,j (u, v) is a rational function combining ∂u∂ i ∂vj U (0, 0) and ∂u∂ i ∂vj V (0, 0). (For details,
+see Section 4.4.)
+  (c) There exists a third case, which we call a hybrid solution. It is well-known, that
+if all curves match an associated surface curvature computed at a given vertex, this
+provides a sucient condition to set compatible twists by means of a relatively easy local
+                            ∂   ∂     ∂2      ∂2    ∂2
+                           ∂u , ∂v , ∂u∂v , ∂u2 , ∂v 2 derivatives of U and V are identical,
+constraint. In this case the
+                                                 3
+                                      ∂ 3
+                                               ∂         ∂4
+and only the remaining three terms
+                                     ∂u2 ∂v , ∂u∂v 2 , ∂u2 ∂v 2 must be computed by Gregory's
+correction.
+In the next section we will describe how generalized Coons patches work. We will assume
+that the parabolic ribbons are independent. This helps optimizing ribbons without a
+highly complex algebraic system of equations, and it also facilitates interactive editing
+of transnite patches.
+
+
+
+4. Generalized Coons patches
+
+The basic idea of Generalized Coons (GC) patches were rst introduced in [23]. The neces-
+                        1
+sary conditions for C       continuity, together with new, ecient parameterization schemes
+were elaborated in [19]. In this section, we recall important elements from the former
+publication, and also discuss some of the new enhancements. The original GC surfaces
+interpolated linear ribbons only; the scheme presented here further generalizes it to han-
+dling parabolic ribbons, as well.
+  Let Pi (si ), Ti (si ), Ci (si ), 1 ≤ i ≤ n (n ≥ 3) denote the position, rst cross-derivative,
+and second cross-derivative of the boundaries, respectively. A quadrilateral ribbon surface
+can be written as
+
+                        Ri (si , di ) = Pi (si ) + γ(di )Ti (si ) + δ(di )Ci (si ),
+where γ and δ are rational reparameterization functions, and di is the distance parameter
+(as opposed to si , the side parameter ). This is a more complex equation than the previous
+                              GENERALIZED COONS PATCHES                                                                  7
+
+
+
+
+     Figure 6: Schematic representation of two ribbon, and two corner interpolants.
+
+
+
+one given in Equation (3.1). We were motivated to use these terms to obtain a multi-sided
+                                               2
+surface that matches the 4-sided C                 Coons patch with the same ribbons; without these
+functions, the shape of the 4-sided GC would be a dierent patch with a much stronger
+fullness. The functions γ(d) and δ(d) can be derived in a straightforward manner from
+the quintic Hermite functions:
+
+                       H15 (d)    3d2 + d                                 H25 (d)        d2
+             γ(d) =      5     = 2          ,                   δ(d) =      5     =    2
+                                                                                                 ,
+                       H0 (d)   6d + 3d + 1                               H0 (d)    12d + 6d + 2
+         5
+where H0 (d) = 1 − 10d
+                       3
+                         + 15d4 − 6d5 , H15 (d) = d − 6d3 + 8d4 − 3d5 , and H25 (d) = 12 d2 −
+3 3    3 4    1 5
+2 d + 2 d − 2 d are the quintic Hermite blending functions. These reparameterization
+                                                          00                0
+functions satisfy the following requirements: γ(0) = γ (0) = δ(0) = δ (0) = 0, and
+ 0       00
+γ (0) = δ (0) = 1.
+  We assume that the patch is dened over a convex polygonal domain Γ in the (u, v)
+parameter plane, and the sides of the polygon Γi are mapped to the boundaries of the
+patch. The local side and distance parameters of the ribbons are computed from (u, v),
+i.e., si = si (u, v), and di = di (u, v).
+  Following the idea of the Coons patch, the GC patch is also a Boolean sum of ribbons
+and correction surfaces, weighted by appropriate blending functions Bi (for sides) and
+Bi,i−1 (for corners):
+                n
+                X                                               n
+                                                                X
+    S(u, v) =         Ri (si , di ) · Bi (d1 , . . . , dn ) −         Qi,i−1 (si , si−1 ) · Bi,i−1 (d1 , . . . , dn ),
+                i=1                                             i=1
+
+where Qi,i−1 (si , si−1 ), 1 ≤ i ≤ n are correction patches. The basic idea is illustrated
+in Figure 6. Loosely speaking, the                 i-th ribbon interpolant, multiplied with its blend
+function, reproduces the prescribed boundary data (black area), and creates superuous
+components (grey areas) along its adjacent sides i − 1 and i + 1. A corner interpolant,
+multiplied by its blend function, is to compensate the superuous components (the grey
+areas) coming from the (i − 1)-th and i-th ribbons, therefore in the end the patch will
+interpolate the boundary functions, as expected.
+  For creating a GC patch, the following constituents must be provided: (i) n ribbon sur-
+faces, (ii) an n-sided domain polygon, (iii) blending functions, (iv) appropriate methods
+to parameterize the ribbons, and (v) n correction patches. We have already dealt with
+the creation of parabolic ribbons; all the other constituents will be explained briey in
+the rest of this section.
+
+                                             4.1. Domain polygon
+
+It is a widely accepted principle in CAGD, that the parameterization of the domain and
+the mapped 3D objects should have a similar shape. In other words, the domain should
+be mapped into 3D with minimal distortion. For example, non-uniform B-splines are
+dened in this fashion, thus avoiding undesirable overshoots.
+          Transnite surface interpolation over specic curvenet congurations                                     8
+  Denote the arc lengths of the given three-dimensional boundary curves by Li , and the
+angles between the end tangents of the (i − 1)-th and i-th boundaries by φi . Denote
+the side lengths and the angles of the domain by li and αi , respectively, then we seek
+                                                                                                            P
+to minimize the squared deviation of the chord lengths and the angles, i.e.,                 i (li −
+            2                              2
+                   P
+clength Li ) +        i (αi − c     φ
+                               angle i ) , where c length and cangle are properly chosen constants.
+This is a non-linear expression, but practice shows that simple heuristic methods 
+such as circular polygonal domains or edge tweaking  can yield reasonable solutions,
+see details in [23]. The above minimization error characterizes the extent of domain
+distortion, thus it gives a hint about whether splitting the domain is likely to improve
+the shape (see the second example in Section 2).
+
+
+                                               4.2. Blending functions
+
+The blending functions need to satisfy special interpolating properties. For each (u, v)
+point we determine n distance values di (1 ≤ i ≤ n). Each di is associated with the
+i-th side: di is equal to 0 on side Γi , and it increases monotonically as we move away
+from Γi . In our patch formulations, distance-based rational blending functions are used
+to combine ribbons:
+
+                                                 Di,i−1                               Y
+                    Bi,i−1 (d1 , . . . , dn ) = P         ,          Di,i−1 =                 d3j ,
+                                                 j Dj,j−1                          ∈{i,i−1}
+                                                                                  j/
+
+                          Bi (d1 , . . . , dn ) = Bi,i−1 (d1 , . . . , dn ) + Bi+1,i (d1 , . . . , dn ).
+                     1
+The original G           patch contained quadratic distance terms, here cubic terms are needed
+      2
+for G     interpolation. It is easy to see, that Bi is equal to 1 on Γi , and vanishes on all
+non-adjacent sides Γj , where j ∈
+                                / {i − 1, i, i + 1}. Due to the cubic terms, the related rst
+and second partial derivatives of the blending functions vanish, i.e.,
+
+               ∂
+                  Bi (d1 , . . . , dj = 0, . . . , dn ) = 0,          j∈
+                                                                       / {i − 1, i + 1}, k, l ∈ [1 . . . n]
+             ∂dk
+            ∂2
+                  Bi (d1 , . . . , dj = 0, . . . , dn ) = 0.
+          ∂dk ∂dl
+
+                                               4.3. Parameterization
+
+The most crucial issue in transnite surface generation is ribbon parameterization, i.e.,
+how to compute the local side and distance parameters (si , di ) from a given (u, v) domain
+point. It is natural to require that each side parameter sj (j ∈ [1 . . . n]) is linear, and for
+a point on Γi :
+
+                si ∈ [0, 1],                di = 0,                  si−1 = 1,                  si+1 = 0.       (4.1)
+
+The distance parameters dj (j ∈ [1 . . . n]) also change linearly along the sides, so on the
+i-th side
+                               di−1 = si ,                                di+1 = 1 − si .                       (4.2)
+
+The following properties must also be satised for a point on Γi :
+
+     ∂di−1   ∂si                  ∂di+1    ∂si                 ∂di−1   ∂si               ∂di+1    ∂si
+           =     ,                      =−     ,                     =     ,                   =−     .         (4.3)
+      ∂u     ∂u                    ∂u      ∂u                   ∂v     ∂v                 ∂v      ∂v
+  Roughly speaking, this means that the adjacent ribbon parameterizatons are identical
+in a dierential sense, see Figure 8.
+  The following is a brief review of the so-called interconnected parameterization, which
+                         GENERALIZED COONS PATCHES                                                          9
+
+
+
+
+      Figure 7: Constant parameter lines of the interconnected parameterization.
+
+
+
+
+was found superior with respect to computational eciency amongst the various ribbon
+mapping methods [19].
+  Take arbitrary functions si (u, v) that give 0 for every point on side Γi−1 , and 1 ev-
+erywhere on Γi+1 . For all other points inside the convex domain they return a value in
+[0, 1]. For example, the s coordinates of the bilinear, radial or central line sweeps [23] are
+such functions. These naturally satisfy si ∈ [0, 1], si−1 = 1 and si+1 = 0. Let us dene
+                                                                                   0               0
+a blending function α(t) : [0, 1] → [0, 1] with α(0) = 1 and α(1) = α (0) = α (1) = 0.
+Examples include the cubic Hermite blending function, or a rational blend function:
+              2
+α(t) = t2(1−t)
+         +(1−t)2 . Now we can dene di by means of si−1 and si+1 , as follows:
+
+           di (u, v) = (1 − si−1 (u, v)) · α(si (u, v)) + si+1 (u, v) · α(1 − si (u, v)).
+
+If we are on the i-th side, si−1 = 1 and si+1 = 0, so di = 0, satisfying (4.1). Straightfor-
+ward algebra shows that the requirements (4.2) and (4.3) are also satised. A simplied
+view of this construction is that taking a (u, v) point, we determine three consecutive
+sweep lines that go through (u, v), and determine di as the weighted combination of
+di = si−1 on Γi−1 , and di = si+1 on Γi+1 , according to the middle coordinate si .
+
+  Figure 7 shows constant s and d lines for this parameteriza-
+tion using the central line sweep parameterization [23] for s. This                                Γi-1
+                        1
+method forces the si =
+                        2 lines to go through the center of the
+domain. The rst image is based on the right side of the polygon;                di-1
+the second on the small side at the top-right; and the third on the              =
+                                                                                 si
+top side. Observe that all lines of the second image start in the                        Γi
+same way (in a dierential sense) as their counterparts in the rst              (u,v)
+and third images.                                                                di+1
+  The above gures show that the d constant parameter lines may
+                                                                                              Γi
+have inections. To avoid this, an enhanced parameterization is                                 +1
+
+suggested, using the quartic blend functions
+
+
+          β0 (t) = (1 − t)4 + 4(1 − t)3 t + c · 6(1 − t)2 t2 ,
+                                                                                Figure         8:         Con-
+          β1 (t) = c · 6(1 − t)2 t2 + 4(1 − t)t3 + t4 ,                         strained parameter-
+                                                                                ization.
+where c is an appropriate shape parameter. Then we obtain
+
+
+                        di (u, v) = (1 − si−1 ) · β0 (si ) + si+1 · β1 (si ),
+
+that results in smooth d constant parameter lines, see Figure 9.
+      Transnite surface interpolation over specic curvenet congurations                  10
+
+
+
+
+ Figure 9: Constant parameter lines of the enhanced interconnected parameterization.
+
+
+
+
+                                          4.4. Correction terms
+      1             1
+For G       and C       transnite interpolation surfaces, it is customary to assume that the
+                                       ∂
+boundary curves are compatible, i.e.,
+                                      ∂si P (0) = Ti−1 (1), etc., and only the twist vectors
+dier. This is resolved by Gregory's rational twists. In our research, we assume that the
+boundary curves match only in position, and for all other terms rational expressions are
+used. This creates another layer of exibility for shape optimization.
+                                          2
+  The correction term for the G               patch is somewhat complex, comprising nine terms.
+For ease of notation, let ti denote 1 − si−1 . Then
+
+
+                Qi,i−1 (si , ti ) = Pi (0) + γ(si )W1,0 + γ(ti )W0,1 + γ(si )γ(ti )W1,1
+                                  + δ(si )W2,0 + δ(ti )W0,2 + δ(si )γ(ti )W2,1
+                                  + γ(si )δ(ti )W1,2 + δ(si )δ(ti )W2,2 ,
+
+where each W is a rational function of si and ti . The computation of these is fairly
+straightforward, see [25]. As an illustration, we show two such terms, the remaining ones
+are similar:
+
+                                                                      ∂
+                                                  s2i Ti−1 (1) + t3i ∂s i
+                                                                          Pi (0)
+                              W1,0 (si , ti ) =                                    ,
+                                                            s2i + t3i
+                                                       2
+                                                      ∂                   ∂
+                                                  s2i ∂t 2 Ti−1 (1) + ti ∂s Ci (0)
+                                                                            i
+                                                       i
+                              W1,2 (si , ti ) =                                        .
+                                                              s2i + ti
+
+Conclusion
+
+In this paper we have dealt with constructions for curve network-based design, where
+the initial ribbon information associated with the network is not sucient to create
+transnite patches with convex domains. To resolve this problem, additional connection
+curves are inserted, that are constrained to be compatible with the existing ribbons.
+For transnite interpolation, we use a generalization of Coons' Boolean sum patches. In
+order to make seamlines practically invisible, parabolic ribbons have been introduced,
+        2
+thus G      continuity can be ensured across the boundaries. Figure 10a shows two patches
+with linear ribbons; this is the basis of computing an average curvature function along
+the boundary (Fig. 10b), which will be converted into parabolic ribbons (Fig. 10c) for
+the nal patch interpolation  see the isophotes in Fig. 10d.
+  Quality improvement can also be assessed in Figure 11 by analyzing isophote lines.
+                              1
+The rst one shows a G            boundary with tangentially discontinuous isophotes, while the
+                                                                         2
+second one shows smooth isophote stripes indicating G                        continuity.
+                        GENERALIZED COONS PATCHES                                           11
+
+
+
+
+             (a) Linear ribbons.                            (b) Common curvature.
+
+
+
+
+           (c) Parabolic ribbons.                                      (d) Isophotes
+
+                                    Figure 10: Test example.
+
+
+
+
+                                                       1           2
+                Figure 11: Adjacent patches with G         vs. G       continuity.
+
+
+
+
+  As it was noted earlier, to prescribe a curvature function based on the curve network
+or by user interaction is a delicate issue, and a poor choice may lead to nice connections
+along the boundaries, but poor shapes in the interior. There are several open issues in
+                                                               1
+this area, and averaging the curvatures of the existing G          patches is only one possible
+solution. It was also pointed out, that even when the curvature is well-dened, there is
+some degree of freedom to construct the parabolic ribbons (see shape parameter α in
+Section 3.2); this is also a tool for further shape optimization to be explored.
+
+
+
+Acknowledgements
+
+This work was partially supported by the Budapest University of Technology and Eco-
+nomics (UMFT-TÁMOP-4.2.2.B-10/1-2010-0009), and a grant by the Hungarian Scien-
+      Transnite surface interpolation over specic curvenet congurations                 12
+tic Research Fund (OTKA, No. 101845). The pictures in this paper were generated by
+the Sketches system developed by ShapEx Ltd., Budapest; the contribution of György
+Karikó is highly appreciated.
+
+
+
+
+                                     REFERENCES
+
+[1] R. Barnhill and W. Boehm, Computer aided surface representation and design, in Sur-
+     faces in Computer Aided Geometric Design, North-Holland, 1983, pp. 124.
+[2] P. Charrot and J. A. Gregory, A pentagonal surface patch for computer aided geometric
+     design, Computer Aided Geometric Design, 1 (1984), pp. 8794.
+[3] S. A. Coons, Surfaces for computer-aided design of space forms, Tech. Rep. MIT/LCS/TR-
+     41, Massachusetts Institute of Technology, 1967.
+[4] R. Farouki, N. Szafran, and L. Biard, Existence conditions for coons patches interpolat-
+     ing geodesic boundary curves, Computer Aided Geometric Design, 26 (2009), pp. 599614.
+[5] K. Gao and A. Rockwood, Multi-sided attribute based modeling, in Mathematics of Sur-
+     faces XI, Lecture Notes in Computer Science, Springer, 2005, pp. 219232.
+[6] J. A. Gregory, Smooth interpolation without twist constraints, in Computer Aided Ge-
+     ometric Design, R. E. Barnhill and R. F. Riesenfeld, eds., Academic Press, Inc., 1974,
+     pp. 7188.
+[7] J. A. Gregory and J. M. Hahn, A C 2 polygonal surface patch, Computer Aided Geo-
+     metric Design, 6 (1989), pp. 6975.
+[8] J. A. Gregory, V. K. H. Lau, and J. Zhou, Smooth parametric surfaces and n-sided
+     patches, in Computation of Curves and Surfaces, W. Dahmen, M. Gasca, and C. A. Mic-
+     chelli, eds., Kluwer Academic Publishers, 1990, pp. 499528.
+[9] K. Kato, Generation of n-sided surface patches with holes, Computer-Aided Design, 23
+     (1991), pp. 676683.
+[10] A. Levin, Interpolating nets of curves by smooth subdivision surfaces, in 26th Conference
+     on Computer Graphics and Interactive Techniques, ACM, 1999, pp. 5764.
+[11] P. Malraison, A bibliography for n-sided surfaces, in Mathematics of Surfaces VIII, In-
+     formation Geometers, 1998, pp. 419430.
+[12] H. P. Moreton and C. H. Séquin, Functional optimization for fair surface design, in
+     19th Conference on Computer Graphics and Interactive Techniques, SIGGRAPH, ACM,
+     1992, pp. 167176.
+[13] J. Pegna and F.-E. Wolter, Geometrical criteria to guarantee curvature continuity of
+     blend surfaces, Journal of Mechanical Design, 114 (1992), pp. 201210.
+[14] J. Peters, Local smooth surface interpolation: a classication, Computer Aided Geometric
+     Design, 7 (1990), pp. 191195.
+[15]        , Smooth interpolation of a mesh of curves, Constructive Approximation, 7 (1991),
+     pp. 221246.
+[16] D. Plowman and P. Charrot, A practical implementation of vertex blend surfaces using
+     an n-sided patch, in Mathematics of Surfaces VI, Clarendon Press, 1996, pp. 6778.
+[17] M. Sabin, Some negative results in n-sided patches, Computer-Aided Design, 18 (1986),
+     pp. 3844.
+[18] M. Sabin, Transnite surface interpolation, in Mathematics of Surfaces VI, Clarendon
+     Press, 1996, pp. 517534.
+[19] P. Salvi, Fair Curves and Surfaces, PhD thesis, Eötvös Loránd University, Budapest,
+     2012.
+[20] P. Salvi, T. Várady, and A. Rockwood, Ribbon-based transnite surfaces, Computer
+     Aided Geometric Design (submitted), (2013).
+[21] S. Schaefer, J. Warren, and D. Zorin, Lofting curve networks using subdivision
+     surfaces, in Symposium on Geometry Processing, ACM, Eurographics Association, 2004,
+     pp. 103114.
+[22] T. Várady and T. Hermann, Best t surface curvature at vertices of topologically irreg-
+     ular curve networks, in Mathematics of Surfaces VI, Clarendon Press, 1996, pp. 411427.
+[23] T. Várady, A. Rockwood, and P. Salvi, Transnite surface interpolation over irregular
+     n-sided domains, Computer Aided Design, 43 (2011), pp. 13301340.
+                      GENERALIZED COONS PATCHES                                   13
+[24] W. Wang, B. Jüttler, D. Zheng, and Y. Liu, Computation of rotation minimizing
+     frames, Transactions on Graphics, 27 (2008), p. 2.
+[25] A. Worsey, A modied C2 Coons' patch, Computer Aided Geometric Design, 1 (1984),
+     pp. 357360.
+

@@ -1,0 +1,141 @@
+   Parasolid with
+   Convergent Modeling                                                                The proliferation of facet data
+                                                                                      Facet meshes are becoming more com-
+                                                                                      mon in engineering workflows that
+                                                                                      were designed to work with B-rep data.
+                                                                                      The proliferation of facet data is being
+                                                                                      driven on several fronts:
+Unleash the power of Parasolid B-rep modeling                                         • 3D scanning – More digital models
+on facetted models                                                                      are being created from the real world
+                                                                                        using optical/laser scanners. Applica-
+                                                                                        tions include industrial reverse
+                                                                                        engineering, as well as medical imag-
+Benefits                                 Summary                                        ing to create artificial implants and
+• Incorporate facet data from 3D         Two distinct technologies are com-             orthopedic structures that are a per-
+  scanning, topology optimization        monly applied in the definition of digital     fect fit for the recipient. 3D scanners
+  and other sources into your            3D models. Boundary representation             typically sample the physical object as
+  Parasolid application                  (B-rep) modeling is the preferred solu-        a cloud of points which forms the
+                                         tion for engineering. Most applications        basis of a facet mesh.
+• Use a single set of Parasolid model-
+                                         in design, simulation and manufactur-
+  ing tools to create and edit models                                                 • 3D printing – the manufacture of cus-
+                                         ing use this technique, where the shape
+  based on facet data or classic                                                        tom, complex shapes that are difficult
+                                         of the model is defined by mathemati-
+  boundary representations                                                              or costly to manufacture using tradi-
+                                         cal curves and surfaces.
+• Eliminate errors and delays when                                                      tional methods typically uses facet
+                                         Facet modeling is the preferred                data formats, for example 3D
+  converting between facet and
+                                         approach for applications such as gam-         Manufacturing Format (3MF) and ste-
+  B-rep data formats
+                                         ing and animation, where optimal per-          reolithography (STL).
+• Accelerate reverse engineering         formance can be achieved using less
+  processes by enabling design mod-      precise model representations. Facet         • Topology optimization – during prod-
+  ifications on facetted models          models use a mesh of connected planar          uct design, the shape of a 3D part can
+  derived from scan data                 polygons to define the surface of a 3D         be automatically optimized for mass,
+                                         model.                                         strength and other parameters based
+• Directly edit facetted 3D models                                                      on user-defined constraints, such as a
+  for additive manufacturing             Convergent Modeling™ technology is             bounding region for the part, the
+                                         the breakthrough in 3D modeling that           location of its attachment points and
+                                         seamlessly brings these two techniques         the forces acting through them. The
+                                         together in Parasolid® software. The           result is often a highly organic shape
+                                         Parasolid B-rep model representation is        that has a facet representation.
+                                         extended to include facet mesh as a
+                                         new surface type that can be operated        Importing facet meshes in the design
+                                         on by all existing functionality. As such,   process
+                                         facet meshes are fully integrated into       Facet meshes associated with the above
+                                         the core model and not a parallel            processes are often brought into engi-
+                                         representation.                              neering design environments that oper-
+                                                                                      ate on B-rep models. For example, it
+                                                                                      may be necessary to modify the facet
+
+
+                                                                                              siemens.com/plmcomponents
+                                                                                                                               PLM COMPONENTS
+
+
+Parasolid with Convergent Modeling
+
+
+Features                                     model using more sophisticated B-rep          • Repairing imported meshes; correct-
+• Advanced modeling operations on            modeling tools, or to integrate facet           ing folds and slits, filling holes, etc.
+  facet models, including full               data sources with B-rep components in
+                                                                                           • Knitting meshes together
+  Boolean functionality, extrusion,          a single model. In such cases, it is nec-
+  offsetting, hollowing, thickening          essary to convert the facet data into the     • Creating facet B-reps directly from
+  and blending                               B-rep format. This translation process          classic B-reps with user-defined
+                                             can be complex, time consuming, and             precision
+• Facet modeling support functions
+                                             prone to errors, especially when con-
+  include unite, subtract and inter-                                                       • Creating classic trimmed surfaces
+                                             verting complex shapes.
+  sect operators, imprinting, sheet                                                          directly from a mesh
+  trimming and extension, profile            Parasolid with Convergent Modeling
+  sweeping and spinning and patch-           enables 3D product modeling on both           Openness and design freedom
+  ing of holes in 3D models                  data sources in a single environment,         Siemens Digital Industries Software has
+                                             while eliminating the complexity, error       a well-established culture of vendor
+• Facet model interrogation and
+                                             and delay of converting on-the-fly            openness. A key characteristic of open-
+  computation functions, including
+                                             between the two formats.                      ness is support for data interoperability.
+  geometric evaluations, mass prop-
+                                                                                           This enables end-users to share, edit
+  erties, minimum/maximum
+                                             Facet modeling with Parasolid                 and re-use 3D models created using dif-
+  distance and clash detection
+                                             Over the last 30 years, a vast set of clas-   ferent formats across different work-
+• Selected operations can be applied         sic B-rep modeling tools has evolved in       flows and applications.
+  to facetted surfaces and classic sur-      Parasolid and enhancements to these
+                                                                                           Integrating facet and B-rep modeling in
+  faces that co-exist in the same            functions continue in parallel with new
+                                                                                           a single modeling engine opens work-
+  model                                      developments in facet modeling.
+                                                                                           flow barriers for such end-users.
+                                             Almost all B-rep modeling functions
+• Facet mesh import tools including                                                        Parasolid is openly licensed to all soft-
+                                             have been redeveloped for use on facet-
+  data repair and optimization                                                             ware vendors so that more end-users
+                                             ted models.
+                                                                                           can seamlessly access facet and B-rep
+• Create facet models from classic
+                                             Furthermore, Convergent Modeling sup-         model representations, regardless of
+  B-rep bodies
+                                             ports an increasing range of operations       their choice of application.
+• Create classic trimmed surfaces            that can be applied to facetted surfaces
+                                                                                           Making Parasolid openly available, even
+  directly from a mesh                       and classic surfaces that co-exist in the
+                                                                                           to competitors, demonstrates our genu-
+                                             same model, including operations
+                                                                                           ine commitment to openness. Parasolid
+                                             where the two formats interact. For
+                                                                                           with Convergent Modeling is used in
+                                             example, a fully facetted model can be
+                                                                                           our own applications, such as NX™ soft-
+                                             sectioned with a plane, or Booleaned
+                                                                                           ware and Solid Edge® software.
+                                             with a cylinder to create a through hole
+                                                                                           Software vendors who license Parasolid
+                                             that creates a model with a mixture of
+                                                                                           receive exactly the same software at the
+                                             classic and facet surfaces in each case.
+                                                                                           same time with the same support.
+                                             With each new Parasolid development
+                                             cycle, facet modeling capabilities are
+                                             extended and tested to ensure the high
+                                             quality and performance our customers
+                                             demand.                                           Siemens Digital Industries Software
+                                                                                               siemens.com/software
+                                             The end goal is to enable all Parasolid
+                                             functions to be used on arbitrary combi-          Americas +1 314 264 8499
+                                             nations of classic B-rep and facet geom-          Europe       +44 (0) 1276 413200
+                                             etry in the same model.                           Asia-Pacific +852 2230 3333
+                                             To support the integration of facet data
+                                             in the Parasolid modeling environment,
+                                             numerous utilities are provided for
+                                                                                           © 2020 Siemens. A list of relevant Siemens trademarks can
+                                             working with facet meshes, including:         be found here. Other trademarks belong to their respective
+                                                                                           owners.
+Using Convergent Modeling to blend a mixed   • Adding imported mesh data to facet
+model.                                         B-rep bodies                                81104-C3 2/20 H
+

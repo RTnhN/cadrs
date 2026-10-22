@@ -1,0 +1,704 @@
+                                                        Illustrating smooth surfaces
+                                                         Aaron Hertzmann                    Denis Zorin
+
+                                                                       New York University
+
+Abstract
+We present a new set of algorithms for line-art rendering of smooth
+surfaces. We introduce an efficient, deterministic algorithm for
+finding silhouettes based on geometric duality, and an algorithm
+for segmenting the silhouette curves into smooth parts with con-
+stant visibility. These methods can be used to find all silhouettes in
+real time in software. We present an automatic method for generat-
+ing hatch marks in order to convey surface shape. We demonstrate
+these algorithms with a drawing style inspired by A Topological
+Picturebook by G. Francis.
+CR Categories and Subject Descriptors:        I.3.3 [Computer Graphics]:      Pic-
+ture/Image Generation– Display algorithms.
+Additional Keywords: Non-photorealistic rendering, silhouettes, pen-and-ink illus-
+tration, hatching, direction fields.
+
+
+1     Introduction
+Line art is one of the most common illustration styles. Line drawing
+styles can be found in many contexts, such as cartoons, technical il-
+lustration, architectural design and medical atlases. These drawings
+often communicate information more efficiently and precisely than
+photographs. Line art is easy to reproduce, compresses well and, if
+represented in vector form, is resolution-independent.
+                                                                                                 Figure 1: Illustrations of the Cupid mesh.
+   Many different styles of line art exist; the unifying feature of
+these styles is that the images are constructed from uniformly col-
+                                                                                     one can typically replace a smooth surface with a polygonal approx-
+ored lines. The simplest is the style of silhouette drawing, which
+                                                                                     imation, and thus reduce the problem to that of rendering polygo-
+consists only of silhouettes and images of sharp creases and object
+                                                                                     nal meshes. This no longer true when our goal is to generate line
+boundaries. This style is often sufficient in engineering and archi-
+                                                                                     drawings. Some differential quantities associated with the smooth
+tectural contexts, where most shapes are constructed out of simple
+                                                                                     surface must be recovered in order to generate visually pleasing
+geometric components, such as boxes, spheres and cylinders. This
+                                                                                     hatch directions and topologically correct silhouette lines. Some
+style of rendering captures only geometry and completely ignores
+                                                                                     of the problems that occur when a smooth surface is replaced by
+texture, lighting and shadows. On the other end of the spectrum
+                                                                                     its polygonal approximation are discussed in greater detail in Sec-
+is the pen-and-ink illustration style. In pen-and-ink illustrations,
+                                                                                     tion 4.
+variable-density hatching and complex hatch patterns convey infor-
+mation about shape, texture and lighting. While silhouette drawing                       In this paper we address two general problems: computing sil-
+is sufficient to convey information about simple objects, it is of-                  houette curves of smooth surfaces, and generating smooth direction
+ten insufficient for depicting objects that are complex or free-form.                fields on surfaces that are suitable for hatching. The algorithms
+From many points of view, a smooth object may have no visible                        that we have developed can be used to implement a number of
+silhouette lines, aside from the outer silhouette (Figure 8), and all                non-photorealistic rendering techniques. Our main focus is on a
+the information inside the silhouette is lost. In these cases, can be                particular rendering style, which aims to communicate all essential
+added to indicate the shape of the surface.                                          information about the shape of the surface with a limited amount of
+                                                                                     hatching.
+   The primary goal of our work was to develop rendering
+techniques for automatic generation of line-art illustrations of                     Contributions. Algorithms. To support rendering of smooth sur-
+piecewise-smooth free-form surfaces. When using conventional                         faces, we have developed a number of novel algorithms including:
+photorealistic rendering techniques (e.g. Z-buffer or ray tracing)                   • An efficient, deterministic algorithm for detecting silhouettes;
+                                                                                     (Section 4.3). In addition to non-photorealistic applications, this
+                                                                                     method can be used to accelerate computation of shadow volumes.
+                                                                                     • An algorithm for cusp detection and segmentation of silhouette
+                                                                                     curves into smooth parts with constant visibility (Section 4.2).
+                                                                                     • An algorithm for computing smooth direction fields on surfaces,
+                                                                                     suitable for use in hatching (Section 5). These fields have a wide
+                                                                                     range of uses, ranging from high-quality pen-and-ink rendering to
+                                                                                     interactive illustration and hatching.
+                                                                                        An important feature of our approach is that any polygonal mesh
+                                                                                     can serve as input; the smooth surface that we render is inferred
+                                                                                     from the mesh. We do not assume an explicitly specified parame-
+terization, which make our approach more general than previously
+developed techniques.
+Rendering style. We have developed a new non-photorealistic ren-
+dering style based on the techniques of Francis [15], and influenced
+by the cartoons of Thomas Nast [34] and others.
+   The rules for drawing in this style are described in Section 6.
+
+2    Previous Work
+The methods used in nonphotorealistic rendering can be separated
+into two groups: image-space and object-space. The image-based
+approach is general and simple; however, it is not particularly suit-
+able for generating concise line drawings of untextured smooth sur-
+faces. Image-based techniques are presented in [5, 30, 7, 18, 6, 28];
+these algorithms exploit graphics hardware to produce image preci-
+sion silhouette images. Our technique is an object space method; it
+directly uses the 3D representation of objects, rather than their im-     Figure 2: Klein bottle. Lighting and hatch directions are chosen to
+ages. Winkenbach and Salesin [36] describe a method for produc-           convey surface shape. Undercuts and Mach bands near the hole and
+ing appealing pen-and-ink renderings of smooth surfaces. Paramet-         the self-intersection enhance contrast.
+ric lines on NURBS patches were used to determine the hatch direc-
+tions and silhouette lines were computed using polyhedral approx-         done if we choose a method that allows us to construct a smooth
+imation to the surface. Their main technical focus is on using the        surface from an approximating arbitrary polygonal mesh, and easily
+hatch density to render complex texture and lighting effects. Their       compute the associated differential quantities (normals, curvatures,
+system relied on a surface parameterization to produce hatch di-          etc.).
+rections; however, such a parameterization does not exist for many            We use piecewise-smooth subdivision, similar to the algorithms
+types of surfaces, and can often be a poor indicator of shape when        presented in [20], with an important modification (Appendix A) to
+it does exist. Elber [12, 13] and Interrante [21] used principal cur-     make the curvature well-defined and nonzero at extraordinary ver-
+vature directions for hatching. Curvatures generally provide good         tices. However, other ways of defining smooth surfaces based on
+hatch directions, but cannot be reliably or uniquely computed at          polygonal meshes can be used, provided that all the necessary quan-
+many points on a surface. Our system makes use of the principle           tities can be computed.
+curvature directions, and uses an optimization technique to “fill in”     Algorithms. Our rendering technique has three main stages: com-
+the hatching field where it is poorly-defined. Deussen et al. [9] use     putation of a direction field on the surface, computation of the sil-
+intersections of the surfaces with planes; while being quite flexible,    houette lines and generation of hatch lines.
+this approach requires segmentation of the surface into parts, where
+                                                                          Hatch direction field. This stage defines a view-independent field
+different groups of planes are used; the plane orientations computed
+                                                                          on the surface that can be used later to generate hatches. Rather than
+using skeletons relate only indirectly to the local surface properties.
+                                                                          defining two separate directional fields, we define a single cross
+    Our work also draws on techniques developed for vector field vi-      field (Section 5) for hatches and cross-hatches. The main steps of
+sualization [8, 22]. It should be noted that relatively little work has   our algorithm are: smooth the surface if necessary; compute an
+been done on generating fields on surfaces as opposed to visualiza-       initial approximation to the field in areas of the surface where it is
+tion of existing fields. Elber [12, 13] discuses the relative merits      well defined, initialize the directions arbitrarily elsewhere; optimize
+of some commonly-used hatching fields (principle curvature direc-         the directions in places where the cross field was not well defined.
+tions, field of tangents to the isoparametric lines, the gradient field
+                                                                          Silhouette curve computation. We compute the curves in several
+of the brightness).
+                                                                          steps (Section 4): compute boundary, self-intersection and crease
+    Silhouette detection is an important component of many non-           curves, as well as boundaries of flat areas; compute silhouette
+photorealistic rendering systems. Markosian et al. [25] presented         curves as zero-crossings of the dot product of the normal with the
+a randomized algorithm for locating silhouettes; this system is fast      view direction; find cusps, determine visibility, and segment the sil-
+but does not guarantee that all silhouettes will be found. Gooch et       houette curves into smooth pieces.
+al. [18] and Benichou and Elber [3] proposed the use of a Gauss
+                                                                          Hatch generation. Our hatch generation algorithms follow some
+map to efficiently locate all object silhouettes under orthographic
+                                                                          of the rules described by Francis [15] (Section 6). The surface is
+projection. In this paper, we present a new method for silhouette
+                                                                          divided into four levels of brightness with corresponding levels of
+detection that is fast, deterministic, and applicable to both ortho-
+                                                                          hatching: highlights and Mach bands (no hatching), midtones (sin-
+graphic and perspective projection.
+                                                                          gle hatching), shadowed regions (cross-hatching), and undercuts
+    Our method for computing the silhouette lines of free-form sur-       (dense cross-hatching). Line thickness varies within each region
+faces is closely related to the work of [14, 17] in computing silhou-     according to the lighting. Undercuts and Mach bands are used to
+ettes for NURBS surfaces.                                                 increase contrast where objects overlap. Lights are placed at the
+                                                                          view position or to the side of the object. The hatching algorithm
+3     Overview                                                            covers all hatch regions with cross-hatches, then removes hatches
+                                                                          from the single hatch regions as necessary.
+In this section we present a general overview of our algorithms.
+Surface representation. The input data for our system is a polyg-         4    Computing Silhouette Drawings
+onal mesh that approximates a smooth surface. Polygonal meshes
+remain the most common and flexible form for approximating sur-           In this section we describe algorithms for generating the simplest
+faces. However, information about differential quantities (normals,       line drawings of smooth surfaces, which we call silhouette draw-
+curvatures, etc.) associated with the original surface is lost. We        ings. A silhouette drawing includes only the images of the most
+need a way to estimate these quantities and compute, if necessary,        visually important curves on the surface: boundaries, creases, sil-
+finer approximations to the original smooth surface. This can be          houette lines and self-intersection lines. Finding intersections of
+smooth surfaces is a complex problem, which we do not address in                in considerable detail (see a recent paper [2] for pointers); a simple
+the paper. We find self-intersections of a mesh approximating the               classification in the two-dimensional case, which does not appear to
+surface and assume that self-intersection lines of the mesh approx-             be explicitly described elsewhere, can be found in [1]. For smooth
+imate the self-intersection curves of the surface sufficiently well.            surfaces, the only type of stable singularity is a simple cusp, as it
+Boundary curves and creases are explicitly represented in the sur-              was shown in the classic paper by Whitney [35]. As a consequence,
+face; thus, we focus our attention on the problem of computing the              silhouette curves on smooth surfaces are either closed loops, or start
+silhouette lines. We will refer to the creases, boundaries and self-            and end on feature lines, while on polygonal surfaces they may in-
+intersection curves as feature curves.                                          tersect, and their topology is more complex. Moreover, we observe
+   Before proceeding, we recall several definitions1 . First, we de-
+fine more precisely what we mean by a piecewise-smooth surface.
+A piecewise-smooth surface can be thought of as a finite union of
+a number of smooth surfaces with boundaries. A smooth embed-
+ded surface is a subset M of R3 such that for any point p of this
+subset there is a neighborhood U (p) = Ball (p) ∩ M and a C 1 -
+continuous nondegenerate one-to-one map F(u, v) from a domain
+D in R2 onto U (p). The domain D can be taken to be an open                                 complex polygonal            simple smooth
+disk for interior points, and a half-disk (including the diameter, but                            cusp                       cusp
+excluding the circular boundary) for smooth boundary points. It
+follows from the definition that the normal Fu × Fv is defined and              Figure 3: Left: Complex cusps are stable on polygonal meshes.
+is nonzero everywhere on the surface. The direction of Fu × Fv                  Right: Only simple cusps are stable on smooth surfaces.
+at any point of the surface is independent, up to a sign, of the local
+parameterization F and is denoted n(p).                                         that no matter how fine the triangulation is, the topology of the sil-
+   The silhouette set for the smooth surface is the set of points p of          houette of a polygonal approximation to the surface is likely to be
+the surface such that (n(p) · (p − c)) = 0, where c is the view-                significantly different from that of the smooth surface itself. This
+point. The silhouette is in general a union of flat areas on the sur-           does not present a problem for fixed-resolution images: if the dis-
+face, curves and points. We isolate flat areas and consider them                tance between the projected silhouette of the mesh and the projected
+separately. Isolated silhouette points are unstable, and are not rele-          silhouette of the smooth surface is less than a pixel, the topological
+vant for our purposes. For a surface that does not contain flat areas           details cannot be distinguished. However, if we do want to generate
+and is C 2 , the silhouette for a general position of the viewpoint             resolution-independent images capturing the essential features of
+can be shown to consist of C 1 non-intersecting curves (silhouette              the silhouette of the smooth surface correctly, or apply line styles to
+curves).                                                                        the silhouette curves, the polygonal approximation cannot be used.
+   An important role in our constructions is played by the curvature            (Figure 4). Similar observations were made in [5].
+of the surface. More specifically, we are interested in principal cur-             To preserve the essential topological properties of silhouettes, we
+vatures and principal curvature directions. The two principal curva-            compute the silhouette curves using an approach similar to the one
+tures at a point p are maximal and minimal curvatures of the curves             used in [14, 17] for spline surfaces. Recall that the silhouette set of
+obtained by intersecting the surface with a plane passing through p             a surface is the zero set of the function g(p) = (n(p) · (p − c))
+and containing the normal to the surface. The principal curvature               defined on the surface. The idea is to compute an approximation to
+directions are the tangents to the curves for which the maximum                 this function and find its zero set. For each vertex p of the polyg-
+and minimum are obtained; these directions are always orthogonal                onal approximation, we compute the true surface normal and g(p)
+and lie in the tangent plane to the surface. The formulas expressing            at the vertex. Then the approximation to the function g(p) is de-
+these quantities in terms of the derivatives of F are standard and              fined by linear interpolation of the values of the function. As the
+can be found, for example, in [4]. The most important property of               resulting function is piecewise-linear, the zero set will consist of
+the principal curvatures that we use can be formulated as follows: if           line segments inside each triangle of the polygonal approximation.
+a surface has principal curvatures κ1 and κ2 , and the unit vectors             Moreover, we can easily enforce the general position assumption by
+along principal directions and the normal are used to define an or-             picking arbitrarily the sign of the function g(p) at vertices where it
+thonormal coordinate system (r, s, t), with r and s parameterizing              happens to be exactly zero. As a result, the line segments of the
+the tangent plane then locally the surface is the graph of a function           zero set connect points in the interior of the edges of the mesh,
+over the tangent plane                                                          and form either closed loops or non-intersecting chains connecting
+                                                                                points on the feature lines (Figure 4), similar in structure to the ac-
+                    t = κ1 r2 + κ2 s2 + o(r2 + s2 )                      (1)    tual silhouette curves. We may miss narrow areas on the surface
+                                                                                where the sign is different from surrounding areas. It is easy to see,
+It follows that principal curvatures and principal curvature direc-             however, that the silhouette curves we obtain by our method will
+tions locally define the best approximating quadratic surface.                  have the same topology as the silhouette curves of some surface
+                                                                                obtained by a small perturbation of the original. This means that
+4.1    Silhouettes of Meshes and Smooth Surfaces                                we are guaranteed to have a plausible image of a surface, but it may
+                                                                                not accurately reflect features of size on the order of the size of a
+The simplest approach to computing the silhouette curves would
+                                                                                triangle of the approximating mesh in some cases. The silhouette
+be to replace the smooth surface with its triangulation and find the
+                                                                                algorithm is described in greater detail in [19].
+silhouette edges of the triangular mesh. However, there are sig-
+nificant differences between the silhouettes of smooth surfaces and
+their approximating polygonal meshes (Figure 4). For polygonal                  4.2   Cusp Detection
+meshes, complex cusps (Figure 3), where several silhouette chains
+                                                                                While the silhouette curves on the surface do not have singularities
+meet, are stable, that is, do not disappear when the viewpoint is
+                                                                                in a general position, the projected silhouette curves in the image
+perturbed. Singularities of projections of polyhedra were studied
+                                                                                plane do; there is a single stable singularity type, aside from termi-
+   1 We do not state rigorous mathematical definitions in complete detail; an   nating points at feature lines: a simple cusp (Figure 3). The most
+interested reader can find them in most standard differential geometry texts.   straightforward way to detect these singularities is to examine the
+     (a)                (b)                   (c)                         Figure 5: Left: Cusps are found as intersections of zero sets of
+                                                                          two functions defined on the surface, the dot product of the normal
+                                                                          with the viewing direction and the cusp function. The silhouette
+                                                                          curve is shown in blue, the cusp zero set in red. Right: The same
+                                                                          curves; view from a viewpoint different from the one that was used
+                                                                          to compute the curves.
+
+                                                                          4.3   Fast Silhouette Detection
+     (d)                 (e)
+                                                                          In the previous section, we have presented an algorithm for con-
+Figure 4: (a) Silhouette edges of a polygonal approximation pro-          structing approximations to the silhouette curves which, when im-
+duce jagged silhouette curves. (b) Our method produces smooth             plemented in the simplest way, requires complete traversal of the
+silhouette curves by inferring information about the smooth surface       mesh. Such a traversal is unnecessary; typically, only a small per-
+from the polygonal mesh. (c) The same curves shown from another           centage of mesh faces contain silhouettes [25, 23]. For polygo-
+viewpoint and overlayed. (d) A complex cusp occurs in the polyg-          nal meshes, a number of fast techniques were developed that allow
+onal approximation when the surface is nearly parallel to the view        one to avoid complete traversal. A stochastic algorithm was pro-
+direction. This does not occur in the smooth silhouette curve. (e)        posed in [25]. A deterministic algorithm based on the Gauss map
+Smooth line drawing of the “smiling torus.” The red box shows the         was proposed in [3, 18], but is restricted to orthographic projection.
+location of the curves in (a)-(c).                                        We present a new deterministic algorithm for accelerated location
+                                                                          of silhouettes, which works for both orthographic and perspective
+tangents of the silhouette curves; cusps are the points where the tan-    projection. This algorithm is equally suitable for finding silhouettes
+gent is parallel to the view direction. However, this approach is not     defined as zero sets, and for finding silhouette edges of polygonal
+numerically reliable, especially if the silhouette curves are approx-     meshes.
+imated by polylines. We propose a new, numerically more robust                Our algorithm is based on the concept of dual surfaces. The
+way to find the cusps, using the following geometric observations.        points of the dual surface M 0 are the images of the tangent planes
+   Consider a silhouette point p with principal curvature directions      to a surface M under a duality map, which maps each plane
+w1 and w2 and principal curvatures κ1 and κ2 . Let c be the               Ax + By + Cz + D = 0 to the homogeneous point [A, B, C, D].
+viewpoint; since p is the silhouette point, the viewing direction         More explicitly, M 0 can be obtained by mapping each point of
+v = c − p is in the tangent plane. Let [c1 , c2 , 0] be the compo-        M to a homogeneous point N = [n1 , n2 , n3 , −(p · n)], where
+nents of c with respect to the coordinates (r, s, t) associated with      n = [n1 , n2 , n3 , 0] is the unit normal at p. Note that the inverse
+the principal curvature directions, computed by c1 = (v · w1 ) and        is also true: each plane in the dual space corresponds to a point in
+c2 = (v·w2 ). As we have observed, p is a cusp when the tangent to        the primal space. Let C = [c1 , c2 , c3 , c4 ] be our viewpoint in the
+the silhouette at p is parallel to the viewing direction v. The tangent   homogeneous form. Then the silhouette of the surface consists of
+to the silhouette can easily be expressed in terms of curvature. Ap-      all points p for which C is in the tangent plane at that point. For
+proximation (1) yields the following approximation to the normals         perspective projection, this means that (C · N) = (c − p) · n = 0.
+in a small neighborhood near p: n(r, s) = [−2κ1 r, −2κ2 s, 1].            For orthographic projection, the homogeneous formula is the same:
+The equation of the 2nd order approximation to the silhouette curve       (C · N) = (c · n) = 0, where c is interpreted as the view direction.
+is an implicit quadratic equation, g(r, s) = (n(r, s) · v(r, s)) = 0,     Our algorithm is based on the following observation: the image of
+where v(r, s) is the viewing direction c − p(r, s) = [c1 − r, c2 −        the silhouette set of the surface with respect to the viewpoint C un-
+s, −κ1 r2 − κ2 s2 ]. We calculate the vector perpendicular to the         der the duality map is the intersection of the plane (C · x) = 0,
+silhouette at p as ∇g(0, 0) = [−2κ1 c1 , −2κ2 c2 ]. The resulting         with the dual surface. This fact allows us to reduce the problem of
+condition for the viewing direction to be parallel to the silhouette      finding the silhouette to the problem of intersecting a plane with a
+tangent (or, equivalently, perpendicular to ∇g(0, 0)) to the view-        surface (Figure 7), for which many space-partition-based accelera-
+ing direction is κ1 c21 + κ2 c22 = 0. Therefore, we can define a          tion techniques are available. However, an additional complication
+parameterization-independent scalar function on the surface which         is introduced by the fact that some points of the dual surface may be
+we call the cusp function:                                                at infinity. This does not allow us to consider only the finite part of
+                                                                          the projective space, which can be identified with R3 . However we
+               C(p) = κ1 (v · w1 )2 + κ2 (v · w2 )2                       can identify the whole 3D projective space with points of the unit
+                                                                          hypersphere S 3 , or, equivalently, of the boundary of a hypercube,
+where all quantities are evaluated at point p. This function has the      in four-dimensional space. As four-dimensional space is somewhat
+following important property: cusps are contained in the intersec-        difficult to visualize, we show the idea of the algorithm on a 2D
+tion set of the two families of curves: one obtained as the zero set      example in Figure 6. In the 2D case, the problem is to compute all
+of the function g(p), the other as the zero set of the cusp function      silhouette points on a curve, that is, the points for which the tangent
+C(p) (Figure 5). The zero set of C(p) can be approximated in              line contains the viewpoint.
+the same way as the zero set of g(p); each triangle of the polygo-            While the geometric background is somewhat abstract, the actual
+nal mesh may contain a single line segment approximating the zero         algorithm is quite simple. The input to the algorithm is a polygonal
+set of C(p) and another approximating the zero set of g(p). This          mesh, with normals specified at vertices, if we are computing sil-
+allows us to compute approximate cusp locations robustly, without         houettes using zero-crossings. The normals are not necessary if we
+introducing many spurious cusps, and at the same time using rela-         are locating the silhouette edges of the polygonal mesh. There are
+tively coarse polygonal approximations to the smooth surface.             two parts to the algorithm: initialization of the spatial partition and
+                  viewpoint                                       1       on twice as many triangles as there were actual triangles contain-
+                              silhouette                  2               ing silhouettes, suggesting that performance is roughly linear in
+                               point
+                                                                          the number of silhouette triangles. This represents a substantial
+                                                              3
+          dual                                  project                   speedup over traversing the entire mesh. Silhouette edge detec-
+          curve                     curve
+                                            1             2           3
+                                                                          tion and visibility calculations on the three-times subdivided Venus
+                                                                          model (∼90,000 triangles) can be performed at approximately 17
+                                                                          frames per second on a 225 MHz SGI Octane, without using graph-
+                                                                          ics hardware, which is similar to the performance of the nondeter-
+Figure 6: Left: Using a dual curve to find silhouette points. The         ministic algorithm of [25].
+figure shows a curve in the plane z = 1 and its dual on a sphere.
+The blue arrow is the vector c from the origin in 3D to the viewpoint     4.4   Visibility
+in the plane, the blue circle is the intersection of the plane passing
+through the origin perpendicular to c with the unit sphere. The red       Before computing visibility, we separate the silhouette curves into
+points are a silhouette point and its dual. The silhouette point can be   segments. Visibility is determined for each segment. The follow-
+found by intersecting the blue circle with the dual curve and retriev-    ing points are used to separate segments: cusps, silhouette-feature
+ing corresponding point on the original curve. Right: Reducing the        joints, and inverse images of silhouette-feature and silhouette-
+intersection problem to planar subproblems. The upper hemisphere          silhouette intersections in image space. Visibility can change only
+containing the dual curve is projected on the surface of cube and at      at these points, thus each segment is either completely visible or
+most 5 (in this case 3) planar curve-line intersection problems are       invisible.
+solved on the faces.                                                         Determining visibility is fundamentally difficult for smooth sur-
+                                                                          faces, because it cannot be inferred precisely from visibility of the
+                                                                          approximating mesh. Our algorithm can only guarantee that the
+                                                                          correct visibility will be produced if the mesh is sufficiently fine, us-
+                                                                          ing a theoretically-estimated required degree of refinement. How-
+                                                                          ever, the estimate is too conservative and difficult to compute to
+                                                                          be practical; in our implementation, we refine the mesh to a fixed
+                                                                          subdivision level.
+                                                                             Our visibility algorithm is based on the following observation: at
+                                                                          any area on the surface, the rate of change of the normal is bounded
+                                                                          by the maximal directional curvature. For a sufficiently fine triangu-
+                                                                          lation, one can guarantee that for any triangle for which (n·(p−c))
+                                                                          changes sign, there is a silhouette edge of the polygonal approxi-
+                                                                          mation adjacent to a vertex of the triangle. We use the visibility
+                                                                          of these edges to compute visibility of the silhouette curves. The
+                                                                          visibility of the silhouette edges can be determined using known
+                                                                          techniques (e.g. [25]).
+                                                                             For each curve we find visibility of all nearby silhouette edges
+Figure 7: Silhouette lines under the duality map correspond to the
+                                                                          (which is not necessarily consistent) and use the visibility of the
+intersection curve of a plane with the dual surface. Top: Torus
+                                                                          majority of the edges to determine visibility of the chain. It is pos-
+shown from camera and side views. Bottom: The eight 3D faces of
+                                                                          sible to show that this method will produce correct visibility for
+the hypercube, seven of which contain portions of the dual surface.
+                                                                          sufficiently fine meshes in the following sense: there is a smooth
+The viewpoint dual is shown as a blue plane. Silhouettes occur at
+                                                                          surface for which the precise projection has the same topology as
+the intersection of the dual plane with the dual surface.
+                                                                          the one computed by our method.
+                                                                             In practice, we have found that the algorithm performs well even
+intersection of the dual surface with the plane corresponding to the
+                                                                          without extra refinement near the silhouettes, provided that the orig-
+viewpoint. The second part is fairly standard, so we focus on the
+                                                                          inal mesh is sufficiently close to the surface. An efficient algorithm
+first part.
+                                                                          with better-defined properties would be useful.
+Step 1: For each vertex p with normal n, we compute the dual
+position N = [n1 , n2 , n3 , −(p · n)]. The dual positions define         5     Direction Fields on Surfaces
+the dual mesh which has different vertex positions but the same
+connectivity.                                                              Fields on surfaces. To generate hatches, we need to choose sev-
+Step 2: Normalize each dual position N using l∞ -norm, that is,           eral direction fields on visible parts of the surface. The direction
+divide by max(|N1 |, |N2 |, |N3 |, |N4 |). After division, at least one   fields are different from the more commonly used vector fields: un-
+of the components Ni , i = 1..4, becomes 1 or -1. The resulting           like a vector field, a direction field does not have a magnitude and
+four-dimensional point is on the surface of the unit hypercube. The       does not distinguish between the two possible orientations.
+three-dimensional face of the cube on which the vertex is located is         The fields can either be defined directly in the image plane as
+determined by the index and sign of the maximal component.                in [31], or defined on the surface and then projected. The advan-
+Step 3: Each triangle of the dual mesh is assigned to a list for every    tage of the former method is that the field needs to be defined and
+three-dimensional face in which it has a vertex.                          continuous only in each separate area of the image. However, it is
+Step 4: An octtree is constructed for each three-dimensional face,        somewhat more difficult to use the information about the shape of
+and the triangles assigned to this face are placed into the octtree.      the objects when constructing the field, and the field must be re-
+    The second step of the algorithm, which is repeated for each          computed for each image. We choose to generate the field on the
+frame, uses the octtree to find the silhouette edges for a given cam-     surface first.
+era position by intersecting the dual plane with the dual surface.           A number of different fields on surfaces have been used to define
+    We have implemented an interactive silhouette viewer based on         hatching directions. The most commonly-used field is probably the
+the dual space method. In our tests, silhouette tests were performed      field of isoparametric lines; this method has obvious limitations,
+   (a)                        (b)                         (c)                      (d)                    (e)                      (f)
+
+Figure 8: Direction fields on the Venus. (a) Silhouettes alone do not convey the interior shape of the surface. (b) Raw principle curvature
+directions produce an overly-complex hatching pattern. (c) Smooth cross field produced by optimization. Reliable principal curvature
+directions are left unchanged. Optimization is initialized by the principal curvatures. (d) Hatching with the smooth cross field. (e) Very
+smooth cross field produced by optimizing all directions. (f) Hatching from the very smooth field.
+
+as the parameterization may be very far from isometric, and is not                  to isometric, i.e. minimizes the metric distortion as described in,
+appropriate for surfaces lacking a good natural parameterization,                   for example, [10, 27]. In this case, parametric lines are close to
+such as subdivision surfaces and implicit surfaces. The successes                   geodesics. Isoparametric lines were used by [36, 11].
+and failures of this approach provide valuable clues for construction               • Artistic examples. We observe that artists tend to use relatively
+of fields for hatching.                                                             straight hatch lines, even when the surface has wrinkles. Smaller
+    The most natural geometric candidate is the pair of principal cur-              details are conveyed by varying the density and the number of hatch
+vature direction fields [13, 21]. corresponding to the minimal and                  directions (Figure 9).
+maximal curvatures2 . We will refer to the integral lines of these
+fields as curvature lines. These fields do not depend on param-
+eterization, capture important geometric features, and are consis-
+tent with the most common two-directional hatching pattern. How-
+ever, they suffer from a number of disadvantages. All umbilical
+points (points with coinciding principal curvatures) are singular-
+ities, which means that the fields are not defined anywhere on a
+sphere and have arbitrarily complex structure on surfaces obtained
+by small perturbations of a sphere. On flat areas (when both cur-
+vatures are very small) the fields are likely to result in a far more
+complex pattern than the one that would be used by a human.
+    Other candidates include isophotes (lines of constant brightness)
+and the gradient field of the distance to silhouette or feature lines
+[25, 12]. Both are suitable for hatching in a narrow band near                      Figure 9: Almost all hatches in this cartoon by Thomas Nast curve
+silhouettes or feature lines, but typically do not adequately cap-                  only slightly, while capturing the overall shape of the surface. Note
+ture shape further from silhouettes, nor are they suitable for cross-               that the hatches often appear to follow a cylinder approximating the
+hatching.                                                                           surface. Small details of the geometry are rendered using variations
+    Our approach is based on several observations about successes                   in hatch density.
+and failures of existing methods, as well as hatching techniques
+used by artists.                                                                        These observations lead to the following simple requirements for
+• Cylindric surfaces. Surface geometry is rendered best by princi-                  hatching fields: in areas where the surface is close to parabolic, the
+pal curvature directions on cylindrical surfaces, that is, surfaces for             field should be close to principal curvature directions; on the whole
+which one of the principal curvatures is zero (all points of the sur-               surface, the integral curves of the field should be close to geodesic.
+face are parabolic). This fact is quite remarkable: psychophysical                  In addition, if the surface has small details, the field should be gen-
+studies confirm that even a few parallel curves can create a strong                 erated using a smoothed version of the surface.
+impression of a cylindrical surface with curves interpreted as prin-
+cipal curvature lines [32, 24]. Another important observation is that               Cross fields. While it is usually possible to generate two global
+for cylinders the principal curvature lines are also geodesics, which               direction fields for the two main hatch directions, we have ob-
+is not necessarily true in general. Hatching following the principal                served that this is undesirable in general. There are two reasons
+curvature directions fails when the ratio of principal curvatures is                for this: first, if we would like to illustrate nonorientable surfaces,
+close to one.                                                                       such fields may not exist. Second, and more importantly, there are
+Deussen et al. [9] uses intersections of the surface with planes to                 natural cross-hatching patterns that cannot be decomposed into two
+obtain hatch directions; the resulting curves are likely to be locally              smooth fields even locally (Figure 10). Thus, we consider cross
+close to geodesics on slowly varying surfaces.                                      fields, that is, maps defined on the surface, assigning an unordered
+• Isometric parameterizations. Isoparameteric lines work well as                    pair of perpendicular directions to each point.
+curvature directions when a parameterization exists and is close
+   2 It is possible to show that for a surface in general position, these fields    Constructing Hatching Fields. Our algorithm is based on the
+are always globally defined, excluding a set of isolated singularities.             considerations above and proceeds in steps.
+                                                                          vector u1 in the tangent plane at p1 to a unit vector u2 in the tan-
+                                                                          gent plane at p2 , such that the angle between u1 and the tangent to
+                                                                          the geodesic γ 0 (0) is the same as the angle between u2 and γ 0 (1).
+                                                                          In discrete case, for adjacent vertices of the approximating mesh vi
+                                                                          and vj , we approximate the tangents to the geodesic by the projec-
+                                                                          tions of the edge (vi , vj ) into the tangent planes at the vertices. Let
+                                                                          the directions of these projections be tij and tji . Then a rigid trans-
+                                                                          formation Tij between the tangent planes is uniquely defined if we
+                                                                          require that tij maps to tji and that the transformation preserves
+                                                                          orientation. Then for any pair of tangent unit vectors wi and wj at
+Figure 10: A cross-hatching pattern produced by our system on             vi and vj respectively, we can use kTij wi − wj k to measure the
+a smooth corner. This pattern cannot be decomposed into two               difference between directions. One can show that the value of this
+orthogonal smooth fields near the corner singularity. The ana-            expression is the same as kTji wj −wi k. To measure the difference
+lytic expression for a similar field in the plane is v1 (r, θ) =          between the values of the cross field at two points, we choose a unit
+[cos(θ/4), sin(θ/4)]; v2 (r, θ) = [− sin(θ/4), cos(θ/4)]. This            tangent vector for each point. The vectors are chosen along the di-
+field is continuous and smooth only if we do not distinguish be-          rections of the cross field. There are four possible choices at each
+tween v1 and v2 .                                                         point. We choose a pair of unit vectors for which the difference is
+                                                                          minimal.
+Step 1. Optionally, create a smoothed copy of the original mesh.             We now explicitly specify the energy functional. The cross
+The copy is used to compute the field. The amount of smoothing            field is described by a single angle θi for each vertex vi , which
+is chosen by the user, with regard to the smoothness of the original      is the angle between a fixed tangent direction ti , and one of
+mesh, and the scale of geometric detail the user wishes to capture        the directions of the cross field; we do not impose any limita-
+in the image. For example, no smoothing might be necessary for a          tions on the value of θi , and there are infinitely many choices
+close-up view of a small part of a surface, while substantial smooth-     for θi differing by nπ/2 that result in the same cross field.
+ing may be necessary to produce good images from a general view;          Let ϕij be the direction of the projection of the edge (vi , vj )
+in practice we seldom found this to be necessary.                         into the tangent plane at vi . Using this choice of coordi-
+Step 2. Identify areas of the surface which are sufficiently close to     nates, pone can show that the quantity kTij wi − wj k is equal to
+parabolic, that is, the ratio of minimal to maximal curvature is high,    mink 2 − 2 cos ((θi − ϕij ) − (θj − ϕji ) + kπ/2). Minimiza-
+and at least one curvature is large enough to be computed reliably.       tion of this quantity is equivalent to minimization of E(i, j) =
+Additionally, we mark as unreliable any vertex for which the aver-        mink (− cos ((θi − ϕij ) − (θj − ϕji ) + kπ/2)), which is not dif-
+age cross field energy of its incident edges exceeds a threshold, in      ferentiable. We observe, however, that E0 (i, j) = −8E(i, j)4 +
+order to allow optimization of vertices that begin singular.              8E(i, j)2 − 1 is just − cos 4 ((θi −√ϕij ) − (θj − ϕji )), and is a
+Step 3. Initialize the field over the whole surface by computing          monotonic function of E(i, j) on [ 2/2..1], the range of possi-
+principal curvature directions. If there are no quasi-parabolic areas,    ble values of E(i, j). Thus, instead of minimizing E(i, j), we can
+user input is required to initialize the field.                           minimize E0 (i, j). We arrive at the following simple energy:
+Step 4. Fix the field in quasi-parabolic areas and optimize the field
+on the rest of the vertices, which were marked as unreliable. This                                X
+step is of primary importance and we describe it in greater detail.           Efield = −                          cos 4 ((θi − ϕij ) − (θj − ϕji ))
+   Our optimization procedure is based on the observation that we
+would like the integral lines of our field to be close to geodesics.                       all edges (vi , vj )
+We use a similar, but not identical, requirement that the field is as
+                                                                          which does not require any constraints on the variables θi . Note
+close to constant as possible. Minimizing the angles between the
+                                                                          that the values ϕij are constant. Due to the simple form of the
+world-space directions at adjacent vertices of the mesh is possible,
+                                                                          functional, it can be minimized quite quickly. We use a variant of
+but requires constrained optimization to keep the directions in the
+                                                                          the BFGS conjugate gradient algorithm described in [37] to per-
+tangent planes. We use a different idea, based on establishing a
+                                                                          form minimization. For irregularly-sampled meshes, the energy
+correspondence between the tangent planes at different points of the
+                                                                          may also be weighted in inverse proportion to edge length. We have
+surface, which, in some sense, corresponds to the minimal possible
+                                                                          not found this to be necessary for the meshes used in this paper.
+motion of the tangent plane as we move from one point to another.
+                                                                          The result of the optimization depends on the threshold chosen to
+Then we only need to minimize the change of the field with respect
+                                                                          determine which vertices are considered unreliable; in the extreme
+to the corresponding directions in the tangent planes.
+                                                                          cases, all vertices are marked as unreliable and the whole field is op-
+                                                                          timized, or all vertices are marked as reliable and the field remains
+                                                                          unoptimized. Figure 8 shows the results for several thresholds.
+                          geodesic           vi
+                     vj                                                   6     Rendering Style
+                                     i- ij
+
+                  j- ji                                                   6.1    Style Rules
+                                                                          Our rendering style is based to some extent on the rules described
+                                                                          by G. Francis in A Topological picturebook [15], which are in turn
+           Figure 11: Moving vectors along geodesics.                     based on Nikolaı̈des’ rules for drawing drapes [26]. We have also
+                                                                          used our own observations of various illustrations in similar styles.
+   Given two sufficiently close points p1 and p2 on a smooth sur-         We begin our style description by defining undercuts and folds. A
+face, a natural way to map the tangent plane at p1 to the tan-            visible projected silhouette curve separates two areas of the image:
+gent plane at p2 is to transport vectors along the geodesics (Fig-        one containing the image of the part of the surface on which the
+ure 11); for sufficiently close points there is a unique geodesic γ(t),   curve is located, the other empty or containing the image of a dif-
+t = 0..1, connecting these points. This is done by mapping a unit         ferent part of the surface. We call the former area a fold. If the
+                                                                          cell within a small distance of the fold on the near side of the surface
+                                                                          as a Mach band, and by marking grid cells on the far side of the
+                                                                          surface within a larger distance as undercuts. (This is the same 2D
+                                                                          grid as used for hatching in the next section.)
+
+                                                                          6.4   Cross-hatching
+      (a)                (b)                  (c)                         We begin by creating evenly-spaced cross-hatches on a surface. We
+                                                                          adapt Jobard and Lefers’ method for creating evenly-spaced stream-
+Figure 12: Hatching rules shown on drapes. (a) There are 3 main           lines of a 2D vector field [22]. The hatching algorithm allows us to
+discrete hatch densities: highlights, midtones, and shadows, corre-       place evenly-spaced hatches on the surface in a single pass over the
+sponding to 0, 1, and 2 directions of hatches. (b) Undercuts. (c)         surface.
+“Mach bands.” Undercuts and Mach bands increase contrast where
+surfaces overlap.                                                            Our algorithm takes two parameters: a desired hatch separation
+                                                                          distance dsep , and a test factor dtest . The separation distance in-
+                                                                          dicates the desired image-space hatch density; a smaller separation
+latter area contains the image of a part of the surface, we call it an
+                                                                          distance is used for undercuts. The algorithm creates a queue of
+undercut.
+                                                                          surface curves, initially containing the critical curves (silhouettes,
+   We use the following rules, illustrated in Figure 12.                  boundaries, creases, and self-intersections). While the queue is not
+• The surface is separated into four levels of hatching: high-            empty, we remove the front curve from the queue and seed new
+lights and Mach bands (no hatching), midtones (single hatching),          hatches along it at points evenly-spaced in the image. Seeding cre-
+shadowed regions (cross-hatching), and undercuts (dense cross-            ates a new hatch on the surface by tracing the directions of the
+hatching). Inside each area, the hatch density stays approximately        cross-hatching field. Since the cross field is invariant to 90 degree
+uniform. The choice of the number of hatch directions used at a           rotations, at each step the hatch follows the one of four possible
+particular area of the surface is guided by the lighting and the fol-     directions which has the smallest angle with the previous direction.
+lowing rules:                                                             Hatches are seeded perpendicular to all curves. Hatches are also
+• If there is an undercut, on the other side of the silhouette from a     seeded parallel to other hatches, at a distance dsep from the curve.
+fold, a thin area along the silhouette on the fold side is not hatched    A hatch continues along the surface until it terminates in a critical
+(“Mach band effect”).                                                     curve, until the world-space hatch direction deviates from the ini-
+• Undercuts are densely hatched.                                          tial hatch direction by more than a constant, or until it comes near a
+• Hatches are approximately straight; a hatch is terminated if its        parallel hatch. This latter condition occurs when the endpoint of the
+length exceeds a maximum, or if its direction deviates from the           hatch p1 is near a point p2 on another hatch, such that the following
+original by more than a fixed angle.                                      conditions are met:
+• Optionally, hatch thickness within each density level can be made       • ||p1 − p2 || < dtest dsep , measured in image space.
+inversely proportional to lighting; the resulting effect is rather sub-   • A straight line drawn between the two points in image space does
+tle, and is visible only when the hatches are relatively thick.           not intersect the projection of any visible critical curves. In other
+                                                                          words, hatches do not “interfere” when they are not nearby on the
+6.2    Hatch Placement                                                    surface.
+                                                                          • The world space tangents of the two hatch curves are parallel, i.e.
+The hatching procedure has several user-tunable parameters: basic         the angle between them is less than 45 degrees, after projection to
+hatch density specified in image space; the hatch density for under-      the tangent plane at p1 .
+cuts; the threshold for highlights (the areas which receive no hatch-
+ing); the threshold that separates single hatch regions from cross           The search for nearby hatches is performed by placing all
+hatch regions; the maximum hatch length; the maximum deviation            hatches in a 2D grid with grid spacing equal to dsep . This ensures
+of hatches from the initial direction in world space. Varying these       that at most nine grid cells must be searched to detect if there are
+parameters has a considerable effect both on the appearance of the        hatches nearby the one being traced.
+images and on the time required by the algorithm. Threshold values
+are usually chosen to divide the object more or less evenly between       6.5   Hatch Reduction
+different hatching levels.
+                                                                          Once we have cross-hatched all hatch regions, we remove hatches
+   Once we have a hatching field, we can illustrate the surface by        from the single hatch regions until they contain no cross-hatches.
+placing hatches along the field. We first define three intensity re-      By removing hatches instead of directly placing single a hatch di-
+gions over the surface: no hatching (highlights and Mach bands),          rection, we avoid the difficulty inherent in producing a consistent
+single hatching (midtones), and cross hatching (shadowed regions).        vector field on the surface. Our algorithm implicitly segments the
+Furthermore, some highlight and hatch regions may be marked as            visible single-hatch regions into locally-consistent single hatching
+undercut regions. The hatching algorithm is as follows:                   fields. This allows us to take advantage of the known view direction
+                                                                          and the limited extent of these regions.
+1. Identify Mach bands and undercuts.
+2. Cover the single and cross hatch regions with cross hatches, and          The reduction algorithm examines every hatch on the surface and
+add extra hatches to undercut regions.                                    deletes any hatch that is perpendicular to another hatch. In particu-
+3. Remove cross-hatches in the single hatch regions, leaving only         lar, a hatch is deleted if it contains a point p1 nearby a point p2 on
+one direction of hatches.                                                 another hatch such that:
+                                                                          • p1 and p2 lie within the single hatch region.
+6.3    Identifying Mach Bands and Undercuts                               • ||p1 − p2 || < 2dsep , measured in image space.
+                                                                          • A straight line drawn between the two points in image space does
+In order to identify Mach bands and undercuts, we step along each         not intersect any visible critical curve.
+silhouette and boundary curve. A ray test near each curve point is        • The world space tangents of the two hatch curves are perpendic-
+used to determine if the fold overlaps another surface. Undercuts         ular, i.e. the angle between them is greater than 45 degrees after
+and Mach bands are indicated in a 2D grid, by marking every grid          projection to the tangent plane at p1 .
+                                                                                   (a)                                   (b)
+
+
+
+
+   Deleting a hatch entails clipping it to the cross-hatch region; the
+part of the hatch that lies within the cross-hatch region is left un-              (c)                                   (d)
+touched.
+   The order in which hatches are traversed is important; a naı̈ve
+                                                                                  Figure 13: Several surfaces generated using G. Francis’ generaliza-
+traversal order will usually leave the single hatch region uneven
+                                                                                  tion of Apéry’s Romboy homotopy [16]. (a) Boy surface; (b) “Ida”;
+and inconsistent. We perform a breadth-first traversal to prevent
+                                                                                  (c) Roman surface; (d) Etruscan Venus.
+this. A queue is initialized with a hatch curve. While the queue
+is not empty, the front curve is removed from the queue. If it is                 Acknowledgments
+perpendicular to another curve in the single hatch region, then the
+curve is deleted, and all parallel neighbors of the hatch that have               Our special thanks go to Jianbo Peng who implemented the dual
+not been visited are added to the queue. When the queue is empty,                 surface silhouette detection algorithm. We are grateful to Pat Han-
+a hatch that has not yet been visited is added to the queue, if any               rahan, who suggested this research topic to us. We thank the anony-
+remain. The tests for perpendicular is as described above; the angle              mous reviewers for their comments. Chris Stolte participated in the
+condition is reversed for the parallel test.                                      project in its early stages.
+                                                                                     This research was supported in part by the NSF grant DGE-
+7     Results and Conclusions                                                     9454173 and the NYU Center for Advanced Technology.
+Most of the illustrations in this paper were created using our system.            A      C 2 -surfaces based on subdivision
+Figures 1, 8 demonstrate the results for relatively fine meshes that
+define surfaces with complex geometry. Figures 2 and 13 show                      Commonly used subdivision surfaces, such as variants of Loop sub-
+the results of using our system to illustrate several mathematical                division, produce either surfaces with curvatures that do not con-
+surfaces.                                                                         verge or have zero curvature at extraordinary vertices. There are
+                                                                                  fundamental reasons for this [29]. This property is rather undesir-
+   The time required to create an illustration varies greatly; while              able, if we would like to compute silhouette curves, as it means
+silhouette drawings can be computed interactively, and the field op-              either flat points or singular behavior near extraordinary points. We
+timization takes very little time, hatching is still time-consuming,              have developed a surface representation based on subdivision that
+and can take from seconds to minutes, depending on hatch density                  produces surfaces that are everywhere C 2 , do not have zero cur-
+and complexity of the model. Also, for each model the parame-                     vature at extraordinary vertices, and agree arbitrarily well with the
+ters of the algorithms (thresholds for hatching, position of the light            limit surfaces produced by subdivision. This representation is de-
+sources, hatch density) have to be carefully chosen;                              scribed elsewhere [38]. However, for our purposes it is sufficient to
+                                                                                  have a way to compute curvatures for the surface associated with a
+Future work. As we have already mentioned, improvements                           mesh, and it is not necessary to have a complete surface evaluation
+should be made to the silhouette visibility algorithm. Performance                algorithm.
+was not our goal for the hatching algorithm. It is clear that sub-                   The curvature computation that we propose is based on ideas
+stantial speedups are possible. While the quality of fields generated             from subdivision and is compatible with the curvature computations
+by our algorithms is quite good, it would be desirable to reduce the              for subdivision surfaces in the regular case.
+number of parameters that may be tuned.                                              Consider a vertex v of the initial mesh of valence k. We
+   A more fundamental problem is the lack of control over the the                 will regard a part of the smooth surface corresponding to the 1-
+number, type and placement of singularities of the generated field.               neighborhood of v as parameterized over a regular k-gon in the
+As most surfaces of interest have low genus, the number of singu-                 plane. Introduce the polar coordinates (r, ϕ) in the plane, with
+larities can be very small for most surfaces.3 However, the user                  u = r cos ϕ and v = r sin ϕ. then the second-order approxima-
+currently has little control over their placement and additional sup-             tion to the surface can be written as
+port must be provided. Furthermore, the hatch reduction algorithm
+could be made more robust to irregular cross-hatching patterns, and
+                                                                                  a0 + (a11 sin ϕ + a12 cos ϕ)r + (a20 + a21 sin 2ϕ + a22 cos 2ϕ)r2
+the hatching could be improved reduce hatching artifacts, perhaps
+by employing the optimization technique of Turk and Banks [33].                      A simple calculation shows that the least squares fit to k + 1
+    3 The relation between the numbers of singularities of different types is     points of the 1-neighborhood p0 . . . pk assumed to be values at
+determined by the analogs of Euler formula; such formulas are known for           (sin(2πi/k), cos(2πi/k)), i = 0..k. with p0 in the center, leads to
+                                                                                                                               1X
+vector and tensor fields; obtaining classification of singularities and a for-
+mula of this type for the cross fields described in the paper is an interesting                   a0 = p0 ;   a20 = −p0 +         pi
+mathematical problem.                                                                                                          k
+                                                                                                                                 i
+                 2X        2πi                       2X        2πi
+        a11 =       pi sin     ;            a12 =       pi cos                          [12] Gershon Elber. Line Art Illustrations of Parametric and Implicit Forms. IEEE
+                 k          k                        k          k                            Transactions on Visualization and Computer Graphics, 4(1), January – March
+                      i                                   i
+                                                                                             1998.
+                                                                                        [13] Gershon Elber. Interactive line art rendering of freeform surfaces. Computer
+              2X        4πi                       2X        4πi                              Graphics Forum, 18(3):1–12, September 1999.
+        a21 =    pi sin     ;               a22 =    pi cos                             [14] Gershon Elber and Elaine Cohen. Hidden Curve Removal for Free Form Sur-
+              k          k                        k          k
+                      i                                   i                                  faces. In Computer Graphics (SIGGRAPH ’90 Proceedings), volume 24, pages
+                                                                                             95–104, August 1990.
+   Note that the formulas for a11 and a21 coincide with the stan-                       [15] George K. Francis. A Topological Picturebook. Springer-Verlag, New York,
+dard formulas for the tangents to the Loop subdivision surface, and                          1987.
+a20 , a21 , a22 , with appropriate variable changes, produce second                     [16] George K. Francis. The Etruscan Venus. In P. Concus, R. Finn, and D. A.
+derivatives in the regular case. To make our calculations compati-                           Hoffman, editors, Geometric Analysis and Computer Graphics, pages 67–77.
+ble with the Loop surface, we replace a0 = p0 with a0 = plimit 0    ,                        1991.
+the limit position of the control point p0 . As a result, we obtain a                   [17] Amy Gooch. Interactive Non-Photorealistic Technical Illustration. Master’s the-
+set of simple rules for computing the coefficients of an approximat-                         sis, University of Utah, December 1998.
+ing quadratic surface, which, after appropriate change of variables                     [18] Bruce Gooch, Peter-Pike J. Sloan, Amy Gooch, Peter Shirley, and Richard
+can be used to compute curvatures and is compatible with the Loop                            Riesenfeld. Interactive Technical Illustration. In Proc. 1999 ACM Symposium on
+subdivision rules. In [38], we show that one can construct a C 2 sur-                        Interactive 3D Graphics, April 1999.
+
+face which has precisely these curvatures at the vertices. A similar                    [19] Aaron Hertzmann. Introduction to 3D Non-Photorealistic Rendering: Silhou-
+                                                                                             ettes and Outlines. In Stuart Green, editor, Non-Photorealistic Rendering, SIG-
+construction works for the boundary case. We should note that for
+                                                                                             GRAPH Course Notes. 1999.
+valences k = 3, 4, the coefficients of the quadric are not indepen-
+                                                                                        [20] Hugues Hoppe, Tony DeRose, Tom Duchamp, Mark Halstead, Huber Jin, John
+dent, and thus not all possible local behaviors can be approximated
+                                                                                             McDonald, Jean Schweitzer, and Werner Stuetzle. Piecewise smooth surface
+well.                                                                                        reconstruction. In Computer Graphics Proceedings, Annual Conference Series,
+   Given known partial derivatives Fu , Fv , Fuu , Fuv , Fvv of the                          pages 295–302. ACM Siggraph, 1994.
+local parameterization of the surface, the principal curvature direc-                   [21] Victoria L. Interrante. Illustrating Surface Shape in Volume Data via Principal
+tions and magnitudes can be computed as eigenvalues and eigen-                               Direction-Driven 3D Line Integral Convolution. In SIGGRAPH 97 Conference
+vectors of the following matrix:                                                             Proceedings, pages 109–116, August 1997.
+
+                                                                                    [22] Bruno Jobard and Wilfrid Lefer. Creating evenly-spaced streamlines of arbitrary
+                                                                                             density. In Proc. of 8th Eurographics Workshop on Visualization in Scientific
+                            E     F           L      M
+                                                                                 (2)         Computing, pages 45–55, 1997.
+                            F     G           M      N
+                                                                                        [23] Lutz Kettner and Emo Welzl. Contour Edge Analysis for Polyhedron Projections.
+                                                                                             In W. Strasser, R. Klein, and R. Rau, editors, Geometric Modeling: Theory and
+where E = (Fu · Fu ), F = (Fv · Fu ), G = (Fv · Fv ), L =                                    Practice, pages 379–394. Springer Verlag, 1997.
+(Fuu · n), M = (Fuv · n), N = (Fvv · n).
+                                                                                        [24] Pascal Mamassian and Michael S. Landy. Observer biases in the 3D interpreta-
+                                                                                             tion of line drawings. Vision Research, (38):2817—2832, 1998.
+References                                                                              [25] Lee Markosian, Michael A. Kowalski, Samuel J. Trychin, Lubomir D. Bourdev,
+ [1] I. A. Babenko. Singularities of the projection of piecewise-linear surfaces in          Daniel Goldstein, and John F. Hughes. Real-Time Nonphotorealistic Rendering.
+     rspan3. Vestnik Moskov. Univ. Ser. I Mat. Mekh., 1991(2):72–75.                         In SIGGRAPH 97 Conference Proceedings, pages 415–420, August 1997.
+                                                                                        [26] Kimon Nikolaı̈des. The Natural Way to Draw. Houghton Miffin, Boston, 1975.
+ [2] Thomas F. Banchoff and Ockle Johnson. The normal Euler class and singulari-
+     ties of projections for polyhedral surfaces in 4-space. Topology, 37(2):419–439,   [27] Hans Køhling Pedersen. A Framework for Interactive Texturing on Curved Sur-
+     1998.                                                                                   faces. Proceedings of SIGGRAPH 96, pages 295–302, August 1996.
+                                                                                        [28] Ramesh Raskar and Michael Cohen. Image Precision Silhouette Edges. In Proc.
+ [3] Fabien Benichou and Gershon Elber. Output sensitive extraction of silhouettes
+                                                                                             1999 ACM Symposium on Interactive 3D Graphics, April 1999.
+     from polygonal geometry. Pacific Graphics ’99, October 1999. Held in Seoul,
+     Korea.                                                                             [29] Ulrich Reif. A degree estimate for polynomial subdivision surfaces of higher
+                                                                                             regularity. Proc. Amer. Math. Soc., 124:2167–2174, 1996.
+ [4] William M. Boothby. An Introduction to Differentiable Manifolds and Rieman-
+                                                                                        [30] Takafumi Saito and Tokiichiro Takahashi. Comprehensible Rendering of 3-D
+     nian Geometry. Academic Press, 1986.
+                                                                                             Shapes. In Forest Baskett, editor, Computer Graphics (SIGGRAPH ’90 Pro-
+ [5] Wagner Toledo Corrêa, Robert J. Jensen, Craig E. Thayer, and Adam Finkelstein.         ceedings), volume 24, pages 197–206, August 1990.
+     Texture Mapping for Cel Animation. In SIGGRAPH 98 Conference Proceedings,          [31] Michael P. Salisbury, Michael T. Wong, John F. Hughes, and David H. Salesin.
+     pages 435–446, July 1998.                                                               Orientable Textures for Image-Based Pen-and-Ink Illustration. In SIGGRAPH
+ [6] Cassidy Curtis. Loose and Sketchy Animation. In SIGGRAPH 98: Conference                 97 Conference Proceedings, pages 401–406, August 1997.
+     Abstracts and Applications, page 317, 1998.                                        [32] Kent A. Stevens. Inferring shape from contours across surfaces. In Alex P.
+                                                                                             Pentland, editor, From Pixels to Predicates, pages 93–110. 1986.
+ [7] Philippe Decaudin. Cartoon-Looking Rendering of 3D-Scenes. Technical Report
+                                                                                        [33] Greg Turk and David Banks. Image-Guided Streamline Placement. In SIG-
+     2919, INRIA, June 1996.
+                                                                                             GRAPH 96 Conference Proceedings, pages 453–460, August 1996.
+ [8] Thierry Delmarcelle and Lambertus Hesselink. The topology of symmetric,            [34] J. Chal Vinson. Thomas Nast: Political Cartoonist. University of Georgia Press,
+     second-order tensor fields. In Visualization ’94, pages 140–147, October 1994.          Atlanta, 1967.
+ [9] Oliver Deussen, Jörg Harnel, Andreas Raab, Stefan Schlechtweg, and Thomas         [35] Hassler Whitney. On singularities of mappings of euclidean spaces. I. Mappings
+     Strothotte. An Illustration Technique Using Hardware-Based Intersections.               of the plane into the plane. Ann. of Math. (2), 62:374–410, 1955.
+     Graphics Interface ’99, pages 175–182, June 1999.                                  [36] Georges Winkenbach and David H. Salesin. Rendering Parametric Surfaces in
+[10] Matthias Eck, Tony DeRose, Tom Duchamp, Hugues Hoppe, Michael Louns-                    Pen and Ink. In SIGGRAPH 96 Conference Proceedings, pages 469–476, August
+     bery, and Werner Stuetzle. Multiresolution Analysis of Arbitrary Meshes. In             1996.
+     Computer Graphics Proceedings, Annual Conference Series, pages 173–182.            [37] Ciyou Zhu, Richard H. Byrd, Peihuang Lu, and Jorge Nocedal. Algorithm 778:
+     ACM Siggraph, 1995.                                                                     L-BFGS-B: Fortran subroutines for large-scale bound-constrained optimization.
+                                                                                             ACM Trans. Math. Software, 23(4):550–560, 1997.
+[11] Gershon Elber. Line art rendering via a coverage of isoparametric curves. IEEE
+     Transactions on Visualization and Computer Graphics, 1(3):231–239, Septem-         [38] D. Zorin. Constructing curvature-continuous surfaces by blending. in prepara-
+     ber 1995.                                                                               tion.
+

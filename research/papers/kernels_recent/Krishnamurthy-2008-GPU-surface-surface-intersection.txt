@@ -1,0 +1,955 @@
+                 Performing Efficient NURBS Modeling Operations on the GPU
+          Adarsh Krishnamurthy∗, Rahul Khardekar, Sara McMains                                Kirk Haller†                             Gershon Elber‡
+                    University of California, Berkeley                                  SolidWorks Corporation                           Technion
+                          Berkeley, CA, USA                                               Boston, MA, USA                               Haifa, Israel
+
+
+
+
+        Figure 1: Modeling operations like sketching, ray intersection and trimming performed directly on trimmed NURBS models.
+
+
+Abstract                                                                       1     Introduction
+                                                                               Industrial design of products has shifted from using boxy shapes
+                                                                               with straight edges to incorporate curved freeform surfaces. Non
+We present algorithms for evaluating and performing modeling op-               Uniform Rational B-Spline (NURBS) surfaces provide a conve-
+erations on NURBS surfaces using the programmable fragment                     nient and compact representation of such curved surfaces that has
+processor on the Graphics Processing Unit (GPU). We extend our                 become the representation of choice in mechanical CAD systems.
+GPU-based NURBS evaluator that evaluates NURBS surfaces to                     Hence, real time interaction with NURBS surfaces is essential for
+compute exact normals for either standard or rational B-spline sur-            any CAD package. However, since evaluation of a NURBS surface
+faces for use in rendering and geometric modeling. We build on                 is inherently a compute-intensive process, commercial CAD pack-
+these calculations in our new GPU algorithms to perform standard               ages deal with it by preprocessing NURBS surfaces. They usually
+modeling operations such as inverse evaluations, ray intersections,            tessellate NURBS surfaces and use the triangulated model for dis-
+and surface-surface intersections on the GPU. Our modeling algo-               play as well as certain modeling operations like selection. With the
+rithms run in real time, enabling the user to sketch on the actual             advent of programmable graphics hardware, the need for tessellat-
+surface to create new features. In addition, the designer can edit             ing the NURBS surface in the CPU for display was obviated, since
+the surface by interactively trimming it without the need for re-              the GPU can be used for the evaluation and direct display of the sur-
+tessellation. We also present a GPU-accelerated algorithm to per-              faces [Krishnamurthy et al. 2007; Kanai 2007; Guthe et al. 2005].
+form surface-surface intersection operations with NURBS surfaces               However, CAD packages still perform modeling operations using
+that can output intersection curves in the model space as well as in           the CPU with either the tessellated NURBS surfaces or analytically
+the parametric spaces of both the intersecting surfaces at interactive         using NURBS definitions. This reduces the interactivity for the
+rates.                                                                         user when designing these free form surfaces, since operations like
+                                                                               sketching on the NURBS surface or fast evaluation of intersection
+                                                                               curves are not possible. Leading commercial CAD packages do
+                                                                               not allow the designer to sketch directly on the NURBS surface; in-
+CR Categories:        I.3.3 [Computer Graphics]: Hardware                      stead, they restrict the user to sketching on a tangent plane. Because
+Architecture—Graphics Processors; I.3.3 [Computer Graphics]:                   of this, the designer has to wait until the operation is completed to
+Picture/Image Generation—Display Algorithms; I.3.5 [Computer                   get visual feedback.
+Graphics]: Computational Geometry and Object Modeling—
+                                                                               The process of finding the surface coordinates (x, y, z) for given
+Splines.
+                                                                               parameter values (u, v) is called evaluation. Inverse evaluation is
+                                                                               the process of finding the parameter values (u, v) given any point
+                                                                               on the surface. We have developed a parallel algorithm for fast
+                                                                               inverse evaluations of NURBS surfaces on the GPU. This algo-
+Keywords: NURBS, GPU, Inverse Evaluation, Sketching, Inter-                    rithm forms the basis of many modeling operations like selection
+active Trimming, Intersection Curves, Prefix Sum
+                                                                               Copyright © 2008 by the Association for Computing Machinery, Inc.
+                                                                               Permission to make digital or hard copies of part or all of this work for personal or
+                                                                               classroom use is granted without fee provided that copies are not made or distributed
+                                                                               for commercial advantage and that copies bear this notice and the full citation on the
+                                                                               first page. Copyrights for components of this work owned by others than ACM must be
+  ∗ e-mail:{adarsh—rahul—mcmains}@me.berkeley.edu                              honored. Abstracting with credit is permitted. To copy otherwise, to republish, to post on
+   † e-mail:khaller@solidworks.com                                             servers, or to redistribute to lists, requires prior specific permission and/or a fee.
+                                                                               Request permissions from Permissions Dept, ACM Inc., fax +1 (212) 869-0481 or e-mail
+   ‡ e-mail:gershon@cs.technion.ac.il
+                                                                               permissions@acm.org.
+                                                                               SPM 2008, Stony Brook, New York, June 02–04, 2008.
+                                                                               © 2008 ACM 978-1-60558-106-4/08/0006 $5.00
+
+                                                                         257
+(ray-surface intersection), sketching on the surface, and interactive
+                                                                                                                 Surface Point                       Rendering
+trimming. Moreover, since these algorithms exploit the parallelism                    Basis Function
+                                                                                                                 C oordinates
+                                                                                                                      di                           (see Section 2)
+of the GPU, these operations can now be performed at interactive
+speeds, making immediate visual feedback to the designer possi-
+                                                                                       Knot Vector               Control Points
+ble for the first time. We demonstrate the use of our fast inverse                                                                                    Normals
+evaluation algorithm to directly sketch on the surface, which makes
+certain operations like interactive trimming intuitive to the designer.               Basis Function          Surface Derivatives            Second Derivatives
+                                                                                        Derivatives             (see Section 3)               (see Section 4.1)
+
+Designers are usually trained to work with curves on surfaces, such
+                                                                                                                    Points on
+as silhouette curves and intersection curves of free-form surfaces.                                           Intersection Curves
+                                                                                                                                               Bounding Boxes
+                                                                                                                                                (see Section 4)
+Thus, they would like to see real-time changes in these curves as                                                (see Section 6)
+
+the underlying surfaces are edited, which requires an efficient al-
+                                                                                         Input                 CPU Intersection
+gorithm to compute intersection curves of surfaces. Finding the                                                                               Inverse Evaluation
+                                                                                                                 Curve Fitting
+intersection curve is in general a very complex operation, since two                     Output                (see Section 6.1)                (see Section 5)
+NURBS surface equations of arbitrary degree have to be solved                                 valuation
+                                                                                         CPU E l
+                                                                                                                                    Intersection
+simultaneously. Many commercial CAD packages use marching                                GPU Evaluation to Textures                    Curves
+methods, where the algorithm uses a numerical root-finding tech-
+nique to first find a single intersection point. The algorithm then
+finds another point along the intersection curve that is close to the           Figure 2: Graphic showing the links between different parts of our
+first intersection point. This process is repeated and ultimately a             modeling algorithms. The results of the GPU evaluations are stored
+complete piecewise linear approximation of the intersection curve               in separate textures.
+is calculated. However, since this technique is inherently serial it
+cannot be parallelized for efficient evaluation on the GPU. We have
+developed a GPU-accelerated parallel algorithm to evaluate the in-              2    Previous Work
+tersection curves using bounds on the evaluated surface points. This
+algorithm is both fast and guaranteed to find the intersection curves           One of the main prerequisites for performing fast modeling opera-
+within a user-defined tolerance.                                                tions on NURBS is to have a fast NURBS evaluator. We present a
+                                                                                short outline of our algorithm to evaluate NURBS surfaces on the
+In this paper, we present GPU-based algorithms to perform model-                GPU that was explained in detail in [Krishnamurthy et al. 2007].
+ing operations efficiently on NURBS surfaces. Our main contribu-                The main idea of our algorithm was to use a fragment program
+tions include                                                                   to evaluate a NURBS surface in several passes. This was differ-
+                                                                                ent from previous approaches like [Guthe et al. 2005] that approx-
+   • A new unified method to calculate exact derivatives and ex-                imated and decomposed a NURBS surface into a set of bicubic ra-
+     act normals of arbitrary-degree NURBS surfaces on the GPU.                 tional Bezier patches and used a vertex program to evaluate them.
+     Our method is designed so as to not require separate fragment              One advantage of our approach is that we have two corresponding
+     programs for evaluating surfaces of different degrees.                     representations of the NURBS surface as 4-component vectors—
+                                                                                (x, y, z, w) coordinates—in space as well as their corresponding
+   • An efficient algorithm to perform inverse evaluation of                    parametric values—(u, v) coordinates. We exploit this correspon-
+     NURBS surfaces on the GPU. This algorithm finds the para-                  dence during modeling operations like inverse evaluation and eval-
+     metric (u, v) coordinate given any (x, y, z) coordinate on the             uation of intersection curves.
+     NURBS surface within an arbitrary user-defined tolerance.
+                                                                                In our evaluation algorithm, we first evaluate the basis function val-
+   • A novel method to interactively trim and sketch on a NURBS                 ues on the GPU in parallel for all the parameter positions where
+     surface in real time. This is possible because our fast in-                we want to evaluate the surface coordinates. The parameter posi-
+     verse evaluation algorithm enables us to sketch in the model               tions can be chosen arbitrarily by the user; we chose an equally
+     space, not just in the parametric space, with the correspon-               spaced grid of points to make the implementation simpler. We par-
+     dence tracked simultaneously.                                              allelize the de Boor evaluation algorithm ([de Boor 1978]) so that it
+                                                                                runs efficiently on the GPU. We use the de Boor evaluation method
+   • A GPU-accelerated algorithm to perform fast and robust                     because B-spline basis functions of any degree can be evaluated us-
+     NURBS surface-surface intersections. The intersection curve,               ing the same fragment program. Other NURBS evaluations on the
+     like the sketch curve above, is simultaneously output in the               GPU either require different fragment programs for different de-
+     model space as well as in the parametric spaces of the two                 grees ([Kanai 2007]) or are restricted to cubic polynomials ([Guthe
+     NURBS surfaces. The GPU is used to accelerate the oper-                    et al. 2005]). We perform the basis function evaluation separately
+     ation by finding points on the intersection curves and the ac-             for the u and v parametric directions on the GPU and store these
+     tual intersection curves are calculated from these points on the           values as textures. We multiply these basis function values with
+     CPU.                                                                       the corresponding control points to obtain the surface point coor-
+                                                                                dinates. We can restrict the multiplication to the sub-mesh of the
+We summarize our approach to evaluating and rendering NURBS                     control points that affect a particular surface point because of the
+surfaces on the GPU in Section 2; for more details please refer to              local support property of NURBS (Figure 3). We perform the mul-
+[Krishnamurthy et al. 2007]. We then discuss the evaluation of first            tiplication operation in parallel for all the surface coordinates using
+and second derivatives of the NURBS surfaces (Section 3) and then               another fragment program. The surface point coordinates thus cal-
+use these to compute bounding-boxes for NURBS surfaces (Sec-                    culated are stored directly in a texture on the GPU using the RGBA
+tion 4). Then, we describe how these bounds are used to perform                 channels. While rendering, we interpret these values stored in the
+inverse evaluations (Section 5) and to compute intersection curves              texture as vertex coordinates using a Vertex Buffer Object (VBO).
+(Section 6). Figure 2 shows these connections between the differ-               We thus avoid the slow operation of reading back the computed data
+ent parts of our algorithms; each of these operations are described             from the GPU to the CPU, directly rendering the NURBS surface
+in detail in the sections indicated.                                            on the screen.
+
+
+                                                                          258
+     ku         kv
+                                                                                tionality. We propose a similar O(n) stream-reduction algorithm
+                                                                                based on computing a parallel prefix sum, but implement it using
+                            kv                                                  the standard GPGPU framework so that it is both compatible with
+          v                                 v                                   older hardware and not limited to a single brand of GPU.
+                        n
+u                                ku
+                                                                                Collision detection has always been an important problem with
+                                                                                many applications in CAD and graphics. [Govindaraju et al. 2003]
+                                                                                used occlusion queries on graphics hardware to detect collisions of
+                                                              u
+                                 m                                              polygonal meshes in large environments. [Kipfer et al. 2004; Kolb
+                                                                                et al. 2004] calculate collisions between particles to simulate large
+      Basis Functions       Control Mesh         Evaluation Mesh
+                                                                                scale particle systems on the GPU. Recently, [Greß et al. 2006]
+                                                                                detect collisions between deformable parameterized surfaces using
+Figure 3: Graphic showing our NURBS evaluation algorithm on
+                                                                                GPUs. They solve the collision detection problem by generating a
+the GPU. The control mesh of size m × n and the evaluation mesh
+                                                                                bounding-box hierarchy for the surface and then detect collisions
+are made of four component vectors stored as RGBA textures. The
+                                                                                by checking overlap between the bounding-boxes.
+surface patch is of order ku in the u direction and kv in the v direc-
+tion. The multiplication is restricted to the sub-mesh of size ku ×kv .         Evaluation of intersection curves is a fundamental operation in
+                                                                                computer aided geometric design and solid modeling ([Requicha
+                                                                                and Rossignac 1992; Hoffmann 1989]). There have been several
+Previous work that used GPUs to render NURBS curves or sur-                     attempts to solve the problem, since it is hard to achieve all the
+faces focused only on efficient evaluation of the surface coordi-               desired characteristics of robustness, accuracy, and efficiency. [Pa-
+nates and/or normals ([Guthe et al. 2005; Loop and Blinn 2005;                  trikalakis 1993] presented a comprehensive survey of the different
+Guthe et al. 2006; Kanai 2007]). They did not use GPUs to perform               surface-surface intersection algorithms that have been developed.
+modeling operations like inverse evaluations and intersection curve             [Krishnan and Manocha 1997] presented a new algebraic algorithm
+evaluations. Previous work on inverse evaluation of NURBS sur-                  for efficient surface intersection using lower dimensional formula-
+faces mainly focused on ray tracing NURBS surfaces. [Toth 1985;                 tions. They also classified the conventional methods for evaluating
+Nishita et al. 1990; Martin et al. 2000] perform ray tracing on para-           the intersection curves as analytical methods, lattice evaluations,
+metric and rational surfaces by solving for the ray-surface intersec-           subdivision methods, and marching methods. Many commercial
+tion point using numerical methods. There has also been previous                CAD software packages use the numerical marching method out-
+work on ray tracing using the GPU, which include [Purcell et al.                lined by [Barnhill and Kersey 1990; Kriezis et al. 1990] to evaluate
+2002; Purcell et al. 2003; Carr et al. 2006]. Another application of            intersection curves.
+inverse evaluation of NURBS is solving for geometric constraints.
+[Elber and Kim 2001] gave a method to solve geometric constraints               3     Derivatives of NURBS Surfaces
+by using multivariate splines, which can be used to solve several
+related problems like ray traps and sweep envelopes. Inverse eval-
+                                                                                To perform geometric operations on NURBS surfaces, we not only
+uation has also been used for haptic rendering by [Thompson and
+                                                                                require the surface point coordinates themselves but also the first
+Cohen 1999] to find the parametric (u, v) coordinates of a given
+                                                                                and second partial derivatives with respect to the two parameter di-
+point on a NURBS surface. They use inverse evaluation to solve
+                                                                                rections u and v at the surface points. As a very fast first-degree
+for the contact point of a haptic probe with trimmed NURBS sur-
+                                                                                approximation, we can use the evaluated point coordinates to es-
+faces in a virtual environment.
+                                                                                timate the first derivatives using central differencing. However,
+                                                                                this approach gives rise to artificial discontinuities at patch bound-
+The paper by [Carr et al. 2006] on ray tracing geometry images                  aries and at rational parts of the surface. Moreover, second deriva-
+also presented a GPU algorithm to find the indices of the rendered              tives estimated from these first derivatives in the same manner have
+texels in a texture, a sub-problem for our GPU algorithm for in-                larger errors associated with them. One way to overcome this is-
+tersection calculations. This sub-problem falls under the class of              sue is to evaluate the normals of the surface exactly at each surface
+stream-reduction, the process of removing unwanted elements from                point, similar to the evaluation of the surface coordinates. Since
+a stream of values and reducing it to a smaller list containing the re-         we already evaluate the higher order basis functions from lower or-
+quired output. General Purpose computing on the GPU (GPGPU)                     der basis-functions, we can directly calculate the derivatives of the
+uses stream reduction to remove defunct elements from the out-                  basis-functions within the same framework as our basis-function
+put of a previous pass before sending it as input for the next pass.            evaluation algorithm, and then use the basis function derivatives to
+Since the positions of the output elements do not have any fixed cor-           evaluate the derivatives of the NURBS surface precisely, to within
+respondence with the positions of the input, the stream-reduction               machine precision.
+process is considered non-uniform. A parallel O(k + log n) algo-
+rithm, where k is the output size, for non-uniform stream reduc-
+tion based on prefix sums was given by [Blelloch 1990]. How-                    3.1   Differential Geometry for B-Spline Surfaces
+ever, standard graphics cards do not have the capability to per-
+form a scatter operation (random writes to different memory loca-               In this section, we present a concise version of the equations that
+tions), which was an essential step in [Blelloch 1990]’s algorithm.             are required for computing derivatives of NURBS surfaces, adapted
+[Horn 2005] presented another algorithm for non-uniform stream-                 from [Piegl and Tiller 1997]. We present the exact equations for
+reduction on the GPU which runs in O(n log n), not as efficient                 a Non-Uniform B-Spline (NUBS) surface first and then extend
+due to workarounds required because of lack of scatter. [Greß et al.            the derivation to include rational surfaces. For a NUBS surface,
+2006] proposed a stream reduction algorithm specifically for 2D                 S(u, v), given by Equation (1), the derivatives can be computed by
+textures on the GPU that used the fragment processor to perform                 multiplying the control points (Pij s) with the derivatives of the ba-
+other operations while performing the scatter operation, thereby                sis functions. The Nip s and Njq s are the B-spline basis functions of
+hiding the latency. Recently [Sengupta et al. 2007] proposed an                 degree p and q respectively, defined by Equations (2) and (3); the
+O(n) GPU stream-reduction algorithm, also using prefix sums, that               Pij s are the NUBS control points defined as a quadrilateral mesh;
+relies on the latest nVIDIA CUDA architecture for its scatter func-             and the ui s are the knots (similarly to vi s).
+
+
+                                                                          259
+                                                                                 3.2    Rational Derivatives
+                             n X
+                             X m
+
+               S(u, v) =               Nip (u)Njq (v)Pij            (1)          The derivatives of NURBS surfaces are not as straightforward to
+                             i=0 j=0                                             evaluate as in the NUBS case ([Abi-Ezzi and Wozny 1990]). This
+                                                                                 is because the derivatives have to be evaluated using the chain rule
+                                                                                 due of the existence of the rational component. The NURBS sur-
+                                                                                 face coordinates are evaluated as the 4-component vector shown in
+               u − ui               ui+p+1 − u
+ Nip (u) =             N p−1 (u) +              N p−1 (u) (2)                    Equations (8) and (9). Since we evaluate the 4-component vectors
+              ui+p − ui i          ui+p+1 − ui+1 i+1                             without performing the rational division on the GPU, we can effec-
+                                                                                 tively use this data to evaluate the surface derivatives.
+                            
+                                1 if ui ≤ u < ui+1                                                                                  !
+                Ni0 (u) =                                           (3)                                      X̄                 x
+                                0 otherwise                                                         S(u, v) = , X̄ =            y                  (8)
+                                                                                                             w                  z
+The derivative of the basis function of degree p with respect to u is                                                                       
+given by Equation (4). To evaluate the derivative of a basis function                     x 
+                                                                                                          Pn Pm
+                                                                                                                         Nip (u)Njq (v)xij
+of degree p, the basis function of degree p−1 needs to be computed.
+                                                                                                   i=0              j=0          
+                                                                                                                                 
+We use the indicial notation N,u to denote the derivative with re-                               Pn    Pm      p      q
+                                                                                                                                  
+                                                                                                               Ni (u)Nj (v)yij 
+                                                                                         
+spect to u. Note that the p − 1 in the numerator of Equation (4)                          y   
+                                                                                                    i=0   j=0                     
+                                                                                              =                                                   (9)
+                                                                                             
+arises due to the fact that the B-spline basis function of degree p                                                              
+                                                                                          z     Pn Pm         p      q         
+that we are differentiating is a piecewise polynomial of degree p in                             i=0   j=0
+                                                                                                               Ni  (u)Nj  (v)z ij 
+                                                                                                                                  
+u.                                                                                                P P                            
+                                                                                           w        n     m     p      q
+                                                                                                              N (u)N (v)wij 
+                                                                                                             i=0    j=0     i       j
+
+
+
+  p             p−1                    p−1
+ Ni,u (u) =            N p−1 (u) −              N p−1 (u) (4)                                                      X̄,u w − X̄w,u
+              ui+p − ui i          ui+p+1 − ui+1 i+1                                                S,u (u, v) =                                  (10)
+                                                                                                                         w2
+                                                                                                                                            
+The derivatives of the B-spline basis functions, N,u and N,v , are                      x      
+                                                                                                   Pn Pm      p
+                                                                                                            Ni,u (u)Njq (v)xij 
+                                                                                           ,u       i=0 j=0
+then multiplied by the control points Pij to get the derivative along
+                                                                                                 
+                                                                                                                               
+the u or v parametric direction on the surface as given by Equa-                                 Pn Pm      p       q
+                                                                                                                                
+                                                                                                            Ni,u (u)Nj (v)yij 
+                                                                                       
+tions (5) and (6) respectively. We can then calculate the surface
+                                                                                        y,u   
+                                                                                                    i=0 j=0                     
+                                                                                              =                                                  (11)
+                                                                                             
+normal N (u, v) of the NUBS surface (Figure 4) by taking the cross                                                             
+                                                                                        z,u     Pn Pm      p       q         
+product of the u and v partial derivatives (Equation (7)). It should                            i=0 j=0
+                                                                                                            Ni,u (u)Nj  (v)z ij 
+                                                                                                                                
+be noted that N (u, v) is not a unit vector field but it is well defined                          P P
+                                                                                                    n   m    p       q
+                                                                                                                                
+as long as S is a regular surface.                                                       w,u               N (u)N (v)wij 
+                                                                                                           i=0     j=0    i,u       j
+
+
+                             n X
+                               m
+                                                                                 The partial derivative with respect to u, derived using the chain rule
+                             X          p
+              S,u (u, v) =             Ni,u (u)Njq (v)Pij           (5)
+                                                                                 (Equation (10)), can be calculated by first evaluating the product of
+                             i=0 j=0
+                                                                                 the derivatives of the basis functions and the corresponding control
+                             n m                                                 points as a 4-component vector (Equation (11)) and then perform-
+                                                                                 ing the required rational division operations. The partial derivative
+                             X X
+              S,v (u, v) =             Nip (u)Nj,v
+                                               q
+                                                   (v)Pij           (6)
+                                                                                 of the surface with respect to v can also be evaluated in a similar
+                             i=0 j=0
+                                                                                 manner. In this work, we assume all the weights (w) are positive
+                                                                                 and hence no poles can occur in S or its partial derivatives.
+                 N (u, v) = S,u (u, v) × S,v (u, v)                 (7)
+                                                                                 3.3    GPU Implementation
+
+                                                                                 The GPU implementation of the evaluation of surface derivatives
+                                                                                 is a direct extension of the evaluation of the surface coordinates
+                                                                                 as explained in Section 2. The GPU evaluation consists of four
+                                         v derivative                            steps as given below. The first three steps are similar to the method
+                                                                                 for evaluation of the surface coordinates. We give the steps for
+                                            Normal
+                                                                                 evaluating the surface derivatives with respect to u; the steps for
+                                            u derivative                         finding the derivative with respect to v are similar, exchanging u
+                                                                                 and v in step 2:
+                                                                                   1. Locate the sub-mesh of control points that influence the eval-
+                                                                                      uation point coordinates.
+                                                                                   2. Compute the basis functions and the derivatives of the basis
+                                                                                      functions along the two-parameter directions respectively.
+Figure 4: Calculation of surface normal from the u and v partial
+derivatives.                                                                             (a) Compute the non-zero basis function derivatives with
+                                                                                             respect to u.
+
+
+                                                                           260
+         (b) Compute the non-zero basis functions with respect to v.
+                                                                                                     1       1        1      1
+                                                                                                                                       
+    3. Multiply the non-zero basis functions and the basis function                          K=                 M1 +    M2 + 2 M3                  (12)
+                                                                                                     8       n2      nm     m
+       derivatives with their corresponding control points from the                                                                       
+       sub-mesh and sum the results.                                                                                   ∂2x   ∂2y   ∂2z
+                                                                                         M1 = max max                      ,     ,                 (13)
+                                                                                                 ∀(u,v)                ∂u2   ∂u2   ∂u2
+    4. Evaluate the rational derivatives as given by Equation (10) us-
+       ing the evaluated surface coordinates and surface derivatives                                                                      
+                                                                                                                   ∂2x    ∂2y    ∂2z
+       from the previous step.                                                        M2 = max max                     ,      ,                    (14)
+                                                                                            ∀(u,v)                ∂u∂v   ∂u∂v   ∂u∂v
+One notable feature of this algorithm is that step 1 and step 2(b)                                                                        
+are already performed while evaluating the surface coordinates us-                                                     ∂2x    ∂2y    ∂2z
+ing our NURBS evaluation algorithm. Moreover, computing the u                            M3 = max max                       ,      ,               (15)
+                                                                                                 ∀(u,v)                ∂v 2   ∂v 2   ∂v 2
+derivative in step 2(a) is different from evaluating the B-spline basis
+function only in the final step of the evaluation. Since we are us-
+ing the de Boor evaluation algorithm, evaluating the B-spline basis             To compute the bounding-boxes for a NURBS surfaces, we first
+function of order k as well as its derivative require the evaluation            evaluate the surface S(u, v) in a grid of points using our NURBS
+of the B-spline basis function of order k − 1. In practice, since we            evaluator on the GPU. We also evaluate the precise first derivatives
+are already computing the B-spline basis function of order k − 1,               of the surface, ∂S/∂u and ∂S/∂v, at these points as explained in
+we store this intermediate result as a texture on the GPU. We then              Section 3. We approximate the second partial derivatives of the sur-
+use this as input for evaluating both the B-spline basis function of            face by central differencing (explained below in Section 4.1). We
+order k as well as its derivative.                                              then find the value of K for the surface using Equation (12). The
+                                                                                bounding-boxes themselves are constructed by constructing boxes
+We evaluate separately the derivatives of the basis functions with              that enclose sets of four adjacent surface points and then expanding
+respect to each parameter direction and store them in separate tex-             this box by K, which ensures that no part of the surface penetrates
+tures on the GPU. Once the derivatives with respect to the u and v              out of the bounding-box (Figure 5).
+directions are calculated as 4-component vectors, the surface nor-
+mals are calculated. This is performed using a separate fragment
+program that takes the rational surface derivatives as input and then
+evaluates their cross product to calculate the surface normal (Equa-
+tion (7)). Thus, the process of evaluating the NURBS surfaces as
+well as their normals can be performed efficiently within a single
+framework using our method.
+
+4     Bounding-Boxes for NURBS Surfaces
+                                                                                       (a) NURBS Surface                      (b) Bounding-Boxes
+Our parallel algorithms to perform modeling operations with
+NURBS surfaces require the calculation of axis-aligned bounding-
+boxes (AABB) for the surfaces. With the help of such bounding-
+boxes, several queries such as ray-surface intersections and surface-
+surface intersections can be efficiently answered, which then form
+the building blocks for more complex operations like sketching on
+the surface and intersection curve calculations. There are differ-
+ent methods to construct bounding-boxes for free-form surfaces.
+One method is to fit bounding-boxes that enclose the control-points
+that define the surface. This method however does not produce
+very tight bounding-boxes and makes the bounding-boxes indepen-                                  (c) Bounding-Boxes of the same sur-
+dent of the user-defined tolerance values. Another approximate                                   face at a higher resolution
+method is to construct bounding-boxes enclosing sets of four ad-
+jacent points evaluated on the surface. [Greß et al. 2006] construct            Figure 5: NURBS surface with bounding-boxes evaluated at two
+bounding-boxes with sets of four adjacent points on a parameter-                different resolutions.
+ized surface for use in collision detection, but make sure their ap-
+proximation of the surface is within the given tolerance by very
+finely subdividing the surface. However, this method does not guar-             4.1   Curvature Evaluation
+antee that the surface will be completely enclosed by the bounding-
+box and it can potentially miss some intersections. We overcome                 Evaluating the exact curvature of the surfaces along the two para-
+these problems by evaluating the NURBS surface in a regular grid                meter directions can be performed in a similar manner to evaluating
+and then expand the bounding-boxes based on the curvature of the                the first derivatives. However, the number of additional calculation
+surface so that they are guaranteed to enclose the surface. Another             steps (16 passes for a bi-cubic surface) required for this operation is
+advantage of this method is that the bounding-boxes automatically               prohibitively many and therefore cannot be completed in a real-time
+become tighter when we evaluate the surface at a finer resolution.              setting. Nevertheless, since we have exact derivatives along the two
+                                                                                parameter directions, we can approximate the second derivatives to
+[Filip et al. 1987] give the analytical expression for the factor that          a reasonable accuracy (error < O(1/n2 ) for n evaluation points)
+can be used to expand the bounding-boxes based on the surface                   by evaluating them using central differencing.
+curvature. They show that if a parametric C 2 surface is evaluated
+at (n + 1) × (m + 1) grid of points, the deviation of the surface               The central differencing formula for evaluating the second deriva-
+from the piecewise linear approximation cannot exceed a constant                tives is given in Equation (16). The value of h is 1/n for the u direc-
+K defined by Equations (12)-(15).                                               tion and 1/m in the v direction since the surface is evaluated on a
+
+
+                                                                          261
+(n+1)×(m+1) grid of evaluation points. Three second-derivative                              The standard numerical approaches based on solving the NURBS
+values have to be calculated for each surface point: the second                             equations for inverse evaluation are not easily parallelizable to
+derivatives with respect to each parameter direction (∂ 2 S/∂u2 and                         be performed efficiently on the GPU. Therefore, we chose a
+∂ 2 S/∂v 2 ) and one mixed second derivative (∂ 2 S/∂u∂v). How-                             method based on axis-aligned bounding-boxes. The AABBs for
+ever, we can use our same fragment program written to perform                               the NURBS surface are constructed using the method outlined in
+the central differencing operation to evaluate the second derivatives                       Section 4. In the case of ray-tracing applications for selection and
+with different first derivative textures as input. For example, Equa-                       directly drawing on the surface, the AABBs are aligned parallel
+tion (17) shows how to calculate the second derivative with respect                         to the ray direction, which is perpendicular to the viewing plane.
+to u using the first derivative as input using central differencing.                        We then check for intersection between the ray and all the AABBs
+                                                                                            simultaneously using a fragment program written to perform this
+                       ∂F (x)   F (x + h) − F (x − h)                                       intersection test. The output of this program is a two-dimensional
+                              =                                                (16)         array of binary values with the value 1 corresponding to the inter-
+                        ∂x               2h                                                 section of the ray with any AABB (Figure 7). In addition, the inter-
+                                                                                            secting AABB also contains information about the minimum and
+                     ∂S(u,v)
+                                                                                           maximum parameter values of the surface sub-patch enclosed by
+                                       ∂S(u+h,v)
+    ∂2S   ∂            ∂u                 ∂u
+                                                 − ∂S(u−h,v)
+                                                      ∂u                   1                the AABB. Using this correspondence, we can efficiently find the
+        =                          =                             ,h =          (17)         parametric (u, v) value corresponding to the ray intersection point
+    ∂u2                ∂u                         2h                       n
+                                                                                            on the surface.
+
+
+                                    ∂S/∂u                    ∂S/∂v
+
+       Central
+      Differencing
+
+                             ∂2S/∂u2          ∂2S/∂u∂v           ∂2S/∂v2
+     GPU Reduction
+     to find maximum
+                                                                                                       Min texture
+                               M1                 M2                 M3                                                  Fragment
+                                                                                                         Ray
+                                                                                                                         Program
+
+
+                            Surface Coordinates        Expansion Factor K
+                                                                                                                                              Binary texture
+
+
+                                        Surface Bounding Box
+
+
+Figure 6: Algorithm to evaluate bounding-boxes of a NURBS sur-                                         Max texture
+face on the GPU.
+                                                                                            Figure 7: Bounding-boxes stored as min and max textures are
+To perform this operation on the GPU, we first evaluate the con-                            tested with the ray using a fragment program; its output is a bi-
+stants M1 , M2 , and M3 on the GPU (Figure 6). We calculate                                 nary texture indicating the intersection.
+these constants by first evaluating the three second-derivatives as
+explained above for each point on the grid in parallel using a frag-                        Since the NURBS surfaces are usually curved, there can be many
+ment program written to evaluate the second derivatives. We then                            surface sub-patches intersecting the given ray. We find the ad-
+find the maximum value of each derivative; unfortunately such a                             dresses of all the intersecting bounding-boxes (locations with the
+“reduction” operation cannot be performed in a single pass on cur-                          value 1 in the binary texture) by using the GPU stream reduction
+rent GPUs but require log n passes for an n × n texture. We use                             operation explained in Section 5.1. We use this address to access in-
+these constants M1 , M2 , and M3 to find the expansion factor K                             formation about the intersecting bounding-box as well as the para-
+for the surface, which is constant for a given surface patch. Finally,                      metric ranges of the surface sub-patch enclosed by the bounding-
+we construct the bounding-boxes by first using sets of four adjacent                        box. Using the bounding-box information, we get bounds on the
+surface points to get an AABB and then expand this box in all three                         location of the intersection point of the ray with the surface in both
+directions by K. The bounding-boxes themselves are stored as two                            the model space as well as in the parametric space simultaneously.
+textures, one each for the two extreme corners of the AABB, on the                          If the bounding-boxes are smaller than the required tolerance, we
+GPU. We evaluate all the bounding-boxes for a surface in a single                           can take the midpoint of the bounding-box as the intersection point
+pass using a fragment program written to evaluate the bounding-                             of the ray with the surface. Once all the ray intersection points on
+boxes, which then outputs the values to the two different textures                          the surface are found, we output only the point that is closest to
+using multiple render targets.                                                              the view-plane by evaluating the distance of all the ray intersection
+                                                                                            points from the view-plane on the CPU and choosing the point with
+5    Inverse Evaluation of NURBS Surfaces                                                   the smallest distance value.
+
+Given a point that lies on the NURBS surface, inverse evaluation                            5.1   GPU Stream Reduction
+is the process of finding the parameter values corresponding to that
+point. Since the B-spline basis functions are non-linear, theoretical                       An essential operation in our inverse evaluation algorithm is to find
+expressions for the inverse evaluation are very complex and differ                          the address of all the bounding-boxes that intersect with a particular
+based on the degree of the surfaces. Therefore, inverse evaluations                         ray so that we can use this address to access information about the
+are usually performed numerically to find a solution within a de-                           intersecting bounding-box. In this operation, we find the indices
+sired tolerance.                                                                            (location) of the texels in the texture that have the given value (in
+
+
+                                                                                      262
+this case, 1). This corresponds to a class of problems known as
+non-uniform stream reduction. Stream reduction is usually consid-                x[n − 1] ←− 0
+ered a serial operation since the number of elements in the output               for d = log2 n − 1 down to 0 do
+is not known and hence the whole input has to be operated upon to                    forall k = 0 to n − 1 by 2d+1 in parallel do
+output the correct result. There has been some previous work on                          t ←− x[k + 2d − 1]
+developing parallel algorithms based on parallel prefix sum for this                     x[k + 2d − 1] ←− x[k + 2d+1 − 1]
+operation which we summarized in Section 2. Implementing this                            x[k + 2d+1 − 1] ←− t + x[k + 2d+1 − 1]
+parallel prefix sum on standard graphics hardware is not straightfor-                end
+ward however, due to the lack of scatter functionality on standard               end
+programmable GPUs.
+                                                                               Algorithm 2: The down-sweep algorithm to construct the in-
+We first explain briefly the parallel stream reduction operation de-           clusive prefix sum.
+scribed by [Blelloch 1990]. It consists of three main steps: up-
+sweep, down-sweep, and scatter. The up-sweep operation computes
+a hierarchy of log n levels where each element at a higher-level is
+                                                                                          After
+                                                                                        up-sweep       0 0 1 1 1 1 0 2
+obtained as a sum of two elements in the lower-level (Algorithm 1).
+An example of the up-sweep operation is shown using an 8-element                          Replace
+1D array (Figure 8). The last element at the end of the operation                       last element   0 0 1 1 1 1 0 0
+gives the total number of elements with the value 1 in the input ar-
+ray. After performing this operation, we obtain a binary tree with
+the last element as the root node and the original array as the leaf                        d=2        0 0 1 0 1 1 0 1
+nodes; each node of this tree represents the sum of all the values in
+the sub-tree of that node.
+                                                                                            d=1        0 0 1 0 1 1 0 2
+  for d = 0 to log2 n − 1 do
+      forall k = 0 to n − 1 by 2d+1 in parallel do                                          d=0        0 0 0 1 1 2 2 2
+          x[k + 2d+1 − 1] ←− x[k + 2d − 1] + x[k + 2d+1 − 1]
+      end
+  end                                                                          Figure 9: Example of the down-sweep operation performed on the
+                                                                               original 1D array given in Figure 8. The elements corresponding
+Algorithm 1: The up-sweep algorithm to construct a hierar-                     to the values of 1 in the original input are highlighted in the result;
+chy of the input.                                                              these are the addresses where those values are to be scattered.
+
+
+         Original                                                              The value of the exclusive prefix sum at the positions where the
+          array     0 0 1 0 1 0 0 0                                            value of the input array is 1 gives the address to which that particu-
+                                                                               lar input value has to be scattered to perform the stream reduction.
+                                                                               The final step is the scatter operation in which this address is used
+            d=0
+                    0 0 1 1 1 1 0 0                                            to reduce the input stream such that the elements with value 1 are
+                                                                               collected at the front of the array.
+            d=1     0 0 1 1 1 1 0 1                                            However, we cannot directly use this stream reduction algorithm on
+                                                                               the GPU due to three main reasons. The first reason is that the orig-
+                                                                               inal algorithm was developed for 1-dimensional arrays and hence
+            d=2
+                    0 0 1 1 1 1 0 2                                            has to be adapted to operate on a 2-dimensional texture. The sec-
+                                                                               ond reason is that the traditional GPGPU model does not allow the
+                                                                               scatter operation, which is the last step of the stream reduction al-
+Figure 8: Example of the up-sweep operation performed on an 1D                 gorithm. Finally, the original formulation by [Blelloch 1990] com-
+array given in the first row. The inputs indicated are summed at               puted the prefix sum in situ by modifying the input array. This is
+each step.                                                                     not possible using the standard GPGPU framework since we cannot
+                                                                               read and write to the same location simultaneously.
+The down sweep operation given by Algorithm 2 computes the ex-                 We solve the first problem by first assuming that each row of the
+clusive prefix sum of the original input array. The exclusive prefix           texture is a separate array and compute the first part of the up-sweep
+sum of an array is defined as the sum of all the values preceding a            operation until each row array is reduced to a single element. Now
+particular position in the array not including the value in the posi-          we again perform the up-sweep operation on the array formed by
+tion itself. Figure 9 gives an example of the down-sweep operation             concatenating all the single elements in a column along the column
+performed on the output shown in Figure 8 in order to calculate the            direction. In the example shown in Figure 10(b), we perform the
+exclusive prefix sum for the original input given in Figure 8. The             up-sweep operation on each row until we end up with the values in
+first step of the down-sweep operation is to replace the last element          column 7. Then we perform the up-sweep operation on column 7
+(root element) in the array obtained after the up-sweep operation              and output the results to column 8. As shown in the example, to
+with the value 0. Then in the consecutive steps, the parent element            overcome the restriction of reading and writing to the same mem-
+at each array is copied to the left element of the child array and the         ory location, we maintain a hierarchy of the input texture. This
+right element of the child array is calculated as the sum of the old           method uses only twice the storage as the original texture and a
+left element and the parent element. In effect, every element now              single fragment program written to perform the summation can be
+contains the sum of all the elements to the left of itself in the tree         repeatedly used. We compute the up-sweep operation in O(log n)
+structure.                                                                     passes.
+
+
+                                                                         263
+                                                              Original Data         Up-sweep for rows
+
+
+               1     0     0    0                     1         0        0    0      1     0       1 1
+                                                                                                            Up-sweep
+               0     0     0    0                     0         0        0    0      0     0       0 3         for
+                                                                                                            Column 7
+               1     0     1    0                     1         0        1    0      1     1       2 4
+               0     0     0    1                     0         0        0    1      0     1       1
+                                            Column 1             2       3    4      5      6      7    8
+
+                   (a) Input                                             (b) Up sweep                                               Surface evaluation      Calculate bounding-boxes        Find intersecting
+                                                                                                                                                                                            bounding-boxes
+              Exclusive prefix sums
+                                              x=0         1          2   3
+      0   1    1     1     0    1     0 0   y=0   0                                                     0 0                                  List of new parametric ranges           No    Parametric range and
+                                                                                                            x coord                                                                         bounding-box size
+      1   1    1     1     1    1     1 1     1                                                         2 3                                        to be re-evaluated
+                                                                                       VBO                                                                                                   within tolerance
+                                                                                  Vertex Program
+      1   2    2     3     1    2     1 0     2   1                  2                                  0 2
+                                                                                                              y coord                                                                           Yes
+      3   3    3     3     3    3     3
+                                              3
+                                                                         3                              2 3
+                                                                                                                                                                                              Midpoint of the
+                                                                                                                                                                                             parametric range
+          (c) Down sweep                                      (d) Scatter using VBO
+
+                                                                                                                               Figure 11: Algorithm for inverse evaluation of NURBS surfaces.
+Figure 10: Different steps of the GPU stream reduction algorithm.
+
+
+We then perform the down-sweep operation in a similar manner but
+                                                                                                                              One of the most important advantages of a real-time algorithm to
+in reverse order, by first performing the operation along the columns
+                                                                                                                              perform inverse evaluation is the ability to sketch directly on the
+and then extending it to the rows to obtain the exclusive prefix sum
+                                                                                                                              NURBS surface. The advantage comes from the fact that the curve
+of the input. In the example shown in Figure 10(c), each bold box
+                                                                                                                              is simultaneously sketched both in the 3-dimensional model space
+contains the exclusive prefix sum of the corresponding bold box in
+                                                                                                                              as well as in the 2-dimensional parameter space. This helps in per-
+Figure 10(b).
+                                                                                                                              forming modeling operations like extrusions and trimming, where
+Once we have the output from the down sweep operation we extract                                                              the parameter space sketches are typically used for defining these
+the address of only those texels which have the value 1 in the input                                                          operations. Figure 12(b) shows a curve sketched on a NURBS
+texture (Figure 10(d)). We reinterpret this texture as a VBO and use                                                          model and the curve in the parametric domain is shown in the inset.
+a vertex program written to output the addresses of the input values
+with value 1 as (x, y) coordinates, to write to two separate channels
+of the output texture. The size of the output texture varies based on
+the number of elements with value 1 in the input texture; it is equal
+to the first square number larger than the number of elements with
+value 1 in the input. This output texture is then directly used by the
+inverse evaluation and the surface-surface intersection applications
+for further processing.
+
+5.2   GPU Implementation of Inverse Evaluation
+
+The algorithm used for performing the full inverse evaluation is
+given pictorially in Figure 11. The three steps in the top row of Fig-                                                               (a) Ray intersection                    (b) Sketching directly on the surface
+ure 11—evaluating the surface, constructing bounding-boxes, and
+finding intersecting boxes—are performed on the GPU. The data
+corresponding to the selected bounding-box is read back from the
+GPU. We then check on the CPU whether the ranges in the paramet-
+ric domain of the surface as well as the size of the bounding-box are
+within the required tolerance; for example, we can use an absolute
+tolerance of 10−6 in the parametric space and a relative tolerance
+of 10−3 in the model space. If the tolerance conditions are met,
+we output the midpoint of the parametric range as the output of the
+inverse evaluation. If not, we re-evaluate the NURBS surface at
+a finer resolution within the previously output parametric range(s).
+The required tolerance conditions are usually met within two or
+three iterations since we evaluate the surface at a high resolution                                                                              (c) Interactive trimming: the eyes of
+(1024 × 1024) during each iteration.                                                                                                             the model were trimmed interactively
+
+
+5.3   Applications of Inverse Evaluation                                                                                      Figure 12: Different NURBS modeling applications using inverse
+                                                                                                                              evaluation.
+We can build different modeling operations using the inverse eval-
+uation algorithm as the basic module. These operations include ray
+intersections, direct sketching on NURBS surfaces, and interactive                                                            By combining our sketching interface with the algorithm that ren-
+trimming. Figure 12(a) shows an example where we compute all the                                                              ders trimmed NURBS surfaces in real-time, we can perform inter-
+intersection points (two in this case, marked in red) of a particular                                                         active trimming operations (Figure 12(c)). Using our interactive
+ray with the surfaces of a toy model. By aligning the ray direction                                                           trimming application, the designer gets immediate feedback on the
+perpendicular to the view plane, we can use the same algorithm for                                                            result of the trimming operation, unlike current commercial CAD
+selecting a particular surface from a given set of NURBS surfaces.                                                            systems.
+
+
+                                                                                                                        264
+6    NURBS Intersection Curve Evaluation                                                        the address texture (Level 2) corresponds to bounding-boxes from
+                                                                                                S1 and the columns correspond to bounding-boxes from S2 . The
+Calculating the intersection curve of a surface-surface intersection                            address texture is a 4-component texture consisting of the address
+is a frequently encountered operation in CAD systems. It forms an                               corresponding to bounding-boxes of S1 and S2 in the bounding-box
+essential part of important CAD operations like trimming, filleting,                            hierarchy textures ((u1 , v1 , u2 , v2 ) stored using RGBA channels).
+and b-rep generation from Boolean operations. However, since it is                              The intersection test is performed on the GPU using a fragment
+a slow operation, it is usually performed in the background and thus                            program, which uses the address information to retrieve the data
+the user does not get real-time feedback except in the simplest of                              for the bounding-boxes from the bounding-box hierarchy and sub-
+cases. We present a GPU-accelerated surface-surface intersection                                sequently tests them for intersection. The output of the fragment
+algorithm to calculate intersection curves both in the model space                              program is a binary texture with a value of 1 indicating an inter-
+as well as in the parametric spaces of both the surfaces.                                       section. We use the stream reduction algorithm explained in Sec-
+                                                                                                tion 5.1 to find the address of the intersecting bounding-boxes. In
+We now give a broad overview of our surface-surface intersection                                the example shown, we find that bounding-box 3 of S1 intersects
+algorithm. Our algorithm makes use of bounding-box hierarchies                                  with bounding-boxes 1 and 3 of S2 at level 2.
+to accelerate the intersection operation. We evaluate both intersect-
+ing surfaces using the GPU and then use the method described in                                 In the next level (pass), we test for the intersection of the children
+Section 4 to construct the AABBs for the surfaces, using the same                               of the intersecting bounding-box pairs of the previous level simul-
+coordinate frame. We construct a hierarchy of bounding-boxes by                                 taneously on the GPU. Thus, the size of the address texture varies
+combining four bounding-boxes at one level to construct a single                                dynamically based on the number of intersections in the previous
+bounding-box in the next level. To find the intersection curve, we                              levels. The size of the address texture is always a multiple of 4
+then traverse along the hierarchy simultaneously for both the sur-                              since we test for intersection between S1 and S2 in blocks of 4 × 4
+faces and find the intersecting bounding-boxes in the lowest level                              intersection tests. However, we make sure that this is a square tex-
+using the GPU. At the same time, we also get the ranges in the para-                            ture and its size is a power-of-2 to optimize the stream reduction
+metric domain corresponding to the intersecting surface patches.                                algorithm. The parallelism of the GPU is exploited in checking for
+We then check if the size of the bounding-boxes as well the para-                               intersection of all the intersecting bounding-box pairs at any given
+metric ranges are within a user-defined tolerance. Once the toler-                              level and this helps in accelerating the intersection algorithm as the
+ance conditions are met, we get a better estimate of the point on                               address texture grows in size. Once we reach the base level of the
+the intersection curve by intersecting the linearized surface patch                             bounding-box hierarchy, we get a list of the bounding-boxes that
+within the intersecting bounding-boxes.                                                         intersect at this level (Figure 14). This list can then be used for
+                                                                                                further processing on the CPU to get the actual intersection curve.
+                                                                 Level 2
+
+                                          0   1             00   01   02   03
+                        0         1       2   3
+                                                            10   11   12   13
+                              0       1
+                        2     2
+                                  33                        20   21   22   23
+
+                                                            30   31   32   33
+
+                                                                            GPU Stream
+                                                                             Reduction
+                        Bounding Box
+                         Hierarchy 1
+                                                                                31   33
+
+
+                              0    1      0   1
+                        0     2
+                                  13      2   3
+                                                                 Level 3
+
+                              0    1              00   01   02   03   00   01   02   03
+
+                        2     2
+                                  33              10   11   12   13   10   11   12   13
+
+                                                  20   21   22   23   20   21   22   23
+                                                                                                Figure 14: Intersecting bounding-boxes of two NURBS surfaces.
+                                                  30   31   32   33   30   31   32   33
+
+
+                        Bounding Box
+                         Hierarchy 2                        Address Textures                    In addition, we use this list to render the points on the intersection
+                                                                                                curve of each surface to a dynamic texture in the parametric do-
+Figure 13: Example hierarchical bounding-box comparison in the                                  main. We map this texture back onto each surface, providing real-
+surface-surface intersection algorithm.                                                         time feedback to the designer about the shape of the intersection
+                                                                                                curve (Figure 15).
+We will explain the details of our surface-surface intersection algo-
+rithm with an example (Figure 13). Given two surfaces, S1 and S2 ,                              6.1   Fitting an Intersection Curve
+we evaluate them and construct their bounding-boxes as explained
+in previous sections. We also construct the bounding-box hierar-                                To get a better estimate of the intersection point lying on the inter-
+chies for both the surfaces and store them on the GPU as textures.                              section curve of two surfaces, we intersect the surface sub-patches
+Once we have the hierarchies, we use the CPU to test whether the                                enclosed by the intersecting bounding-boxes on the CPU. We ap-
+bounding-boxes of the surfaces intersect at the top-most level, level                           proximate each surface sub-patch inside the bounding-box with two
+1. If so, we then test the bounding-boxes from the next level on-                               triangles that share an edge. We intersect these two triangles con-
+wards on the GPU, using one pass per level. We perform the inter-                               tained inside the bounding-box of the first surface with the two
+section tests for all the bounding-boxes in a level in parallel using                           other triangles contained in the bounding-box of the second surface.
+a fragment program written to perform the bounding-box intersec-                                This gives rise to four pairs of intersection tests between the trian-
+tion test. The input to the fragment program is a texture called the                            gles of the two surfaces; each intersection test can be true or false,
+address texture that contains the address of the bounding-boxes in                              generating 16 different cases. We show one particular case in Fig-
+the hierarchy (also stored as textures). For example, to test for inter-                        ure 16, where one triangle of surface S1 intersects with another tri-
+section in the second level, we make use of a 4 × 4 address texture                             angle of surface S2. The four triangles are denoted as A0 A1 A2 and
+on the GPU, where we test for intersection of a bounding-box of S1                              A1 A2 A3 for surface S1 , and B0 B1 B2 and B1 B2 B3 for surface S2
+with all the four bounding-boxes of S2 . In Figure 13, the rows of                              in the figure. We find the midpoint of the intersection line-segment
+
+
+                                                                                          265
+                                                                                                      Input : List of points on the intersection curves in <7 .
+                                                                                                      Output : Polyline list L, corresponding to the intersection
+                                                                                                               curves (an ordered list of connected edges).
+                                                                                                      1. Make all points into a polyline of length 0 and add to L.
+                                                                                                      2. For all polylines in L, find the pair, P1 and P2 ∈ L, that is
+                                                                                                      the closest (between two end points of P1/P2 in <7 ).
+                                                                                                      3. If distance is larger than the maximal distance to merge
+                                                                                                         Quit;
+                                                                                                         Otherwise,
+                                                                                                            (a) Merge P1 and P2 into a new polyline P .
+                                                                                                            (b) Replace P1 and P2 by P in L.
+                                                                                                            (c) Goto 2
+
+Figure 15: Intersection curves of two NURBS surfaces plotted both                                   Algorithm 3: Algorithm to fit polylines to the points on the
+in the model space as well as in their corresponding parametric                                     intersection curves.
+spaces.
+
+                                                                                                    Since our input list of points on the intersection curve is sufficiently
+and use this midpoint as a point on the intersection curve if it lies                               dense, we fit a polyline that passes through these points. If a more
+within the intersecting region of the bounding-boxes. The intersect-                                compact representation is required, we can fit a NURBS curve of
+ing region of the bounding-boxes is denoted by (xmin , ymin , zmin )                                any required order that approximates the points on the intersection
+and (xmax , ymax , zmax ) in the figure. In the case of multiple in-                                curve using standard curve fitting techniques. Since the intersec-
+tersections, we take the centroid of the midpoints of the intersec-                                 tion points obtained from our algorithm are enclosed within their
+tion line-segments computed for each intersecting triangle pair as a                                corresponding bounding boxes both in the model space and in the
+point on the intersection curve. Only if this centroid lies inside the                              parametric space, we can guarantee a required bound on the results.
+intersecting region of the bounding-boxes do we use this point for                                  In addition, if the arbitrary user-defined bounds are small enough,
+fitting a curve.                                                                                    we are guaranteed not to miss any portion of the intersection curve.
+                                                                                                    Since we also give instantaneous visual feedback to the user, the
+                                                                                                    user can immediately know if there are any features missing and
+                                               B2                                                   can reduce the tolerance to obtain the correct result.
+                                                               B3
+                                                                                                    The time taken to fit a polyline depends on an efficient closest
+                                          S2
+                                                                                                    neighbor query. Currently, we perform this operation through an
+                                                                         (xmax, ymax, zmax)         exhaustive search that takes O(n2 ) time, which could be optimized
+                                                                                                    by using more efficient search techniques. For the example shown
+                                                A3
+ (xmin, ymin, zmin)                                          B1                                     in Figure 15, the polyline fitting for over 7000 points takes about
+                                                                                                    0.1 seconds on a 2GHz PC for a tolerance value of 2 × 10−3 .
+                           A2
+                                     B0
+                                                          Midpoint of                               6.2   Intersection Points Computation Timing
+                                                          intersection
+                                                         line-segment
+                                                                                                    We timed our GPU-accelerated algorithm for evaluating the points
+                                                    A1                                              on the intersection curves on a 3GHz CPU with 2GB of RAM
+                                                                                                    equipped with a nVIDIA Quadro FX4500 graphics card with
+                                S1                                                                  512MB graphics memory. We performed a surface-surface inter-
+                      A0
+                                                                                                    section of the two NURBS surfaces shown in Figure 17. The sur-
+                                                                                                    faces were bi-cubic NURBS with 403 × 199 and 298 × 313 control
+Figure 16: Intersecting triangles inside overlapping bounding-box                                   points respectively. We compare our timings to evaluate the inter-
+pairs to get a better estimate of the point on the intersection curve.                              section curves to the required user-defined tolerance with those of
+                                                                                                    the commercial solid modeling kernel ACIS.
+We then extract the 7-tuple (x, y, z, u1 , v1 , u2 , v2 ) for each point
+found on the intersection curve using the above method, where
+(x, y, z) is the point on the intersection curve in 3D space, (u1 , v1 )
+and (u2 , v2 ) are the corresponding points in the parametric space
+of surface S1 and surface S2 respectively. The parametric points
+are found by computing the barycentric coordinate of the (x, y, z)
+intersection point in each of the corresponding intersecting trian-
+gles and then interpolating the parametric coordinates at the three
+vertices of the triangle linearly using the barycentric coordinates.
+Finally, to compute the actual intersection curves themselves from
+the list of points, we make use of a greedy algorithm (Algorithm 3)
+that computes the intersection curves by successively merging poly-
+lines that are close to each other. We work in the 7-dimensional
+space <7 , integrating the data from both the model space as well as                                Figure 17: NURBS surfaces used for timing the evaluation of in-
+the two parametric spaces.                                                                          tersection curves.
+
+
+                                                                                              266
+                                                                                         Operation                                Time(s)
+                                                                                         Evaluate NURBS surfaces                  0.27
+                                                                                         Perform intersection tests               0.05
+                                                                                         Calculate dense intersection points      0.02
+                                                                                         Total                                    0.34
+
+                                                                               Table 1: Breakdown of the timing to perform different operations of
+                                                                               our intersection algorithm. The values are for the example shown
+                                                                               in Figure 15 for a tolerance value of 10−3 .
+
+
+                                                                               7   Conclusions
+                                                                               We present fast algorithms to perform interactive modeling opera-
+                                                                               tions on NURBS surfaces. Our algorithms do not require the latest
+Figure 18: Time taken for evaluating the intersection curves of the            graphics cards and are backward compatible with any graphics card
+two NURBS surfaces shown in Figure 17 with different resolutions.              that has basic programming capabilities. This is essential for the ac-
+Note that we are evaluating many more points on the intersection               tual adoption of our algorithms in commercial CAD systems. We
+curve for a given resolution (Figure 19).                                      expect the performance of our algorithms to only improve with the
+                                                                               advent of new and faster graphics cards.
+
+Figure 18 compares the time for evaluating the points on the inter-            Both our GPU algorithm to sketch on NURBS surfaces as well as
+section curves by varying the tolerance values. In the case of of              our GPU-accelerated algorithm to calculate intersection curves give
+our algorithm, these times do not include the time to fit the polyline         real-time feedback to the designer about the shape of the curves in
+as described above. Our GPU-accelerated evaluation is about 40                 the parametric space. This gives a direct handle for the designer
+times faster than ACIS in computing the intersection curves to the             to check for inconsistency if models fail during rebuilds in a CAD
+standard tolerance of 10−3 used in ACIS. The output from ACIS is               system. Our interactive trimming tool helps the designer to easily
+an interpolated polyline where the points on the polyline are within           interact with and edit the NURBS models. Moreover, the applica-
+the user-defined tolerance value from the exact intersection curve.            tions that we have outlined in our paper form only a small part of the
+ACIS does not guarantee any tolerance on the piecewise linear line             different kinds of applications that can be developed with the help
+segments that make up the polyline [Corney and Lim 2001]. On the               of GPU-accelerated basic modeling operations. There is large po-
+other hand, we evaluate dense intersection points with their spacing           tential for developing diverse applications that use these operations
+adjusted based on the tolerance to achieve a guaranteed tolerance on           as building blocks.
+the piecewise linear segments of the polyline as well. We compute
+almost 50 times as many points on the intersection curve as ACIS               Acknowledgments
+does for the standard ACIS tolerance value of 10−3 (Figure 19).
+                                                                               We would like to thank Wei Li for helping us in the background
+                                                                               research for parallel stream reduction. We would also like to thank
+                                                                               nVIDIA and AMD for providing us with their hardware. This ma-
+                                                                               terial is based upon work supported in part by SolidWorks Cor-
+                                                                               poration, UC Discovery under Grant No. DIG05-10190, and the
+                                                                               National Science Foundation under Grant No. 0547675.
+
+                                                                               References
+                                                                               A BI -E ZZI , S. S., AND W OZNY, M. J. 1990. Factoring a homo-
+                                                                                  geneous transformation for a more efficient graphics pipeline.
+                                                                                  Computer Graphics Forum 9, 3, 245–255.
+                                                                               BARNHILL , R. E., AND K ERSEY, S. N. 1990. A marching method
+                                                                                 for parametric surface surface intersection. Computer Aided
+                                                                                 Geometric Design 7, 1-4, 257–280.
+                                                                               B LELLOCH , G. E., Ed. 1990. Vector Models for Data-Parallel
+Figure 19: Number of points evaluated on the intersection curve                   Computing. MIT Press.
+for different resolutions.                                                     C ARR , N. A., H OBEROCK , J., C RANE , K., AND H ART, J. C.
+                                                                                  2006. Fast GPU ray tracing of dynamic meshes using geometry
+                                                                                  images. In GI 2006: Proceedings of Graphics Interface 2006,
+Table 1 gives the breakdown of the timing of our intersection algo-
+                                                                                  Canadian Information Processing Society, 203–209.
+rithm for evaluating the intersection curves shown in Figure 15 for
+a tolerance value of 10−3 . The evaluation of the NURBS surfaces               C ORNEY, J., AND L IM , T. 2001. 3D Modeling with ACIS. Saxe-
+is a large fraction of the total time. Note that we do not require                Coburg.
+such high tolerance values for giving visual feedback; hence, it can
+be performed at interactive rates.                                             DE B OOR , C. 1978. A practical guide to splines. Springer-Verlag.
+
+
+
+                                                                         267
+E LBER , G., AND K IM , M.-S. 2001. Geometric constraint solver             N ISHITA , T., S EDERBERG , T. W., AND K AKIMOTO , M. 1990.
+   using multivariate rational spline functions. In SMA 2001: Pro-             Ray tracing trimmed rational surface patches. In ACM SIG-
+   ceedings of the sixth ACM symposium on Solid Modeling and                   GRAPH 90, 337–345.
+   Applications, ACM, 1–10.
+                                                                            PATRIKALAKIS , N. M. 1993. Surface-to-surface intersections.
+F ILIP, D., M AGEDSON , R., AND M ARKOT, R. 1987. Surface                     IEEE Comput. Graph. Appl. 13, 1, 89–95.
+   algorithms using bounds on derivatives. Computer Aided Geo-
+                                                                            P IEGL , L. A., AND T ILLER , W. 1997. The NURBS Book, Version
+   metric Design 3, 4, 295–311.
+                                                                               1.2, second ed. Springer.
+G OVINDARAJU , N. K., R EDON , S., L IN , M. C., AND                        P URCELL , T. J., B UCK , I., M ARK , W. R., AND H ANRAHAN , P.
+   M ANOCHA , D. 2003. CULLIDE: Interactive collision detection                2002. Ray tracing on programmable graphics hardware. ACM
+   between complex models in large environments using graph-                   Transactions on Graphics 21, 3, 703–712.
+   ics hardware. In HWWS ’03: Proceedings of the ACM SIG-
+   GRAPH/EUROGRAPHICS conference on Graphics hardware,                      P URCELL , T. J., D ONNER , C., C AMMARANO , M., J ENSEN ,
+   Eurographics Association, 25–32.                                            H. W., AND H ANRAHAN , P. 2003. Photon mapping on pro-
+                                                                               grammable graphics hardware. In HWWS 2003: Proceedings of
+G RESS , A., G UTHE , M., AND K LEIN , R. 2006. GPU-based colli-               the ACM SIGGRAPH/EUROGRAPHICS conference on Graph-
+   sion detection for deformable parameterized surfaces. Computer              ics hardware, Eurographics Association, 41–50.
+   Graphics Forum 25, 3, 497–506.
+                                                                            R EQUICHA , A. A. G., AND ROSSIGNAC , J. R. 1992. Solid mod-
+G UTHE , M., BAL ÁZS , A., AND K LEIN , R. 2005. GPU-based                    eling and beyond. IEEE Comput. Graph. Appl. 12, 5, 31–44.
+   trimming and tessellation of NURBS and T-spline surfaces.
+   ACM Transactions on Graphics 24, 3, 1016–1023.                           S ENGUPTA , S., H ARRIS , M., Z HANG , Y., AND OWENS , J. D.
+                                                                               2007. Scan primitives for GPU computing. In GH ’07: Pro-
+G UTHE , M., BAL ÁZS , A., AND K LEIN , R. 2006. GPU-based                    ceedings of the 22nd ACM SIGGRAPH/EUROGRAPHICS sym-
+   appearance preserving trimmed NURBS rendering. Journal of                   posium on Graphics Hardware, Eurographics Association, 97–
+   WSCG 14.                                                                    106.
+H OFFMANN , C. M. 1989. Geometric and Solid Modeling. Morgan                T HOMPSON , T., AND C OHEN , E. 1999. Direct haptic rendering of
+   Kaufmann Publishers Inc.                                                    complex trimmed NURBS models. In 8th Annual Symp. Haptic
+                                                                               Interfaces for Virtual Environment and Teleoperator Systems.
+H ORN , D. 2005. GPU Gems 2 : Programming Techniques
+   for High-Performance Graphics and General-Purpose Compu-                 T OTH , D. L. 1985. On ray tracing parametric surfaces. In ACM
+   tation. Addison-Wesley, ch. Stream Reduction Operations for                 SIGGRAPH 85, 171–179.
+   GPGPU Applications, 573–590.
+K ANAI , T. 2007. Fragment-based evaluation of Non-Uniform B-
+   spline surfaces on GPUs. Computer-Aided Design and Applica-
+   tions 4, 3, 287–294.
+K IPFER , P., S EGAL , M., AND W ESTERMANN , R. 2004. Uber-
+   Flow: a GPU-based particle engine. In HWWS ’04: Proceed-
+   ings of the ACM SIGGRAPH/EUROGRAPHICS conference on
+   Graphics hardware, ACM, New York, NY, USA, 115–122.
+KOLB , A., L ATTA , L., AND R EZK -S ALAMA , C. 2004. Hardware-
+  based simulation and collision detection for large particle sys-
+  tems. In HWWS 2004: Proceedings of the ACM SIGGRAPH/EU-
+  ROGRAPHICS conference on Graphics hardware, ACM, New
+  York, NY, USA, 123–131.
+K RIEZIS , G. A., P RAKASH , P. V., AND PATRIKALAKIS , N. M.
+   1990. A method for intersecting algebraic surfaces with rational
+   polynomial patches. Computer Aided Design 22, 10, 645–654.
+K RISHNAMURTHY, A., K HARDEKAR , R., AND M C M AINS , S.
+   2007. Direct evaluation of NURBS curves and surfaces on the
+   GPU. In SPM ’07: Proceedings of the 2007 ACM symposium on
+   Solid and Physical Modeling, 329–334.
+K RISHNAN , S., AND M ANOCHA , D. 1997. An efficient surface
+   intersection algorithm based on lower-dimensional formulation.
+   ACM Transactions on Graphics 16, 1, 74–106.
+L OOP, C., AND B LINN , J. 2005. Resolution independent curve
+   rendering using programmable graphics hardware. In ACM SIG-
+   GRAPH 2005, ACM, 1000–1009.
+M ARTIN , W., C OHEN , E., F ISH , R., AND S HIRLEY, P. 2000.
+  Practical ray tracing of trimmed NURBS surfaces. Journal of
+  Graphics Tools: JGT 5, 1, 27–52.
+
+
+                                                                      268
+

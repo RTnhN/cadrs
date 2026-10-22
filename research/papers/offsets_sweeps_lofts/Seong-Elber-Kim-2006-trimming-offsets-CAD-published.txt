@@ -1,0 +1,554 @@
+                                                          Computer-Aided Design 38 (2006) 183–193
+                                                                                                                                www.elsevier.com/locate/cad
+
+
+
+
+                       Trimming local and global self-intersections in offset
+                              curves/surfaces using distance maps
+                                Joon-Kyung Seong a, Gershon Elber b,*, Myung-Soo Kim c
+                                             a
+                                               School of Computing, University of Utah, Salt Lake City, UT, USA
+                                    b
+                                     Computer Science Dept., Technion–Israel Institute of Technology, Haifa 32000, Israel
+                                c
+                                  School of Computer Science and Engineering, Seoul National University, Seoul, South Korea
+                                                      Received 24 March 2005; accepted 7 August 2005
+
+
+
+Abstract
+  A robust and efﬁcient algorithm for trimming both local and global self-intersections in offset curves and surfaces is presented. Our scheme is
+based on the derivation of a rational distance map between the original curve or surface and its offset. By solving a bivariate polynomial equation
+for an offset curve or a system of three polynomial equations for an offset surface, all local and global self-intersection regions in offset curves or
+surfaces can be detected. The zero-set of polynomial equation(s) corresponds to the self-intersection regions. These regions are trimmed by
+projecting the zero-set into an appropriate parameter space. The projection operation simpliﬁes the analysis of the zero-set, which makes the
+proposed algorithm numerically stable and efﬁcient. Furthermore, in a post-processing step, a numerical marching method is employed, which
+provides a highly precise scheme for self-intersection elimination in both offset curves and surfaces. The effectiveness of our approach is
+demonstrated using several experimental results.
+q 2005 Elsevier Ltd. All rights reserved.
+
+Keywords: Local self-intersection; Global self-intersection; Offset curve; Offset surface; Distance map; Zero-set computation
+
+
+
+1. Introduction                                                                    Od(t) is non-rational. Thus, the offset curve is usually
+                                                                                   approximated by a rational curve, denoted as O3d ðtÞ, within a
+   Offsetting of curves and surfaces is one of the most                            tolerance 3. An offset approximation within a tolerance 3 means
+important geometric operations in CAD/CAM due to its                               that O3d ðtÞ lies inbetween two nearby offset curves, OdC3 ðtÞ and
+immediate applications in geometric modeling, NC machining,                        OdK3 ðtÞ. More precisely, O3d ðtÞ is contained in the region swept
+and robot navigation [10]. Exact offset curves and surfaces                        by a disk of radius 3 moving along the exact offset curve Od(t).
+usually have algebraic degrees considerably higher than their                      In this paper, the offset approximation is denoted as O3d ðrÞ;
+original curves and surfaces. Furthermore, the offsets of                          namely, it is parameterized independently of the original curve
+rational curves or surfaces are non-rational in general. Hence,                    C(t). Given a rational surface S(u,v), its offset approximation
+offset curves or surfaces are often approximated using rational                    surface is also represented as O3d ðr; tÞ.
+curves or surfaces of relatively lower degree [4,9,14,15,17].                         Even after an offset curve or surface is approximated by a
+   When C(t) is given as a rational freeform curve, the exact                      rational curve or surface, the detection and elimination of self-
+offset curve Od(t) (with respect to an offset distance d)                          intersections is a difﬁcult problem. Fig. 1 shows that the offset
+is deﬁned by                                                                       approximation may have self-intersections even though the
+Od ðtÞ Z CðtÞ C NðtÞd;                                                             original curve or surface has no self-intersection—an offset
+                                                                                   curve or surface has self-intersections locally due to regions of
+where N(t) is the unit normal of C(t). Since the unit normal                       high curvature in the original curve or surface and the global
+vector N(t) is non-rational in general, the exact offset curve                     self-intersection results from two different points of the curve
+                                                                                   or surface that are offset to the same location. These self-
+  * Corresponding author. Tel.: C972 4 829 4338; fax: C972 4 829 3900.             intersections must be detected and trimmed away to obtain a
+    E-mail addresses: seong@cs.utah.edu (J.-K. Seong), gershon@cs.technion.        proper offset.
+ac.il (G. Elber), mskim@cse.snu.ac.kr (M.-S. Kim).                                    Even for offset curves [3,14], it is a non-trivial task to detect
+0010-4485//$ - see front matter q 2005 Elsevier Ltd. All rights reserved.          and trim all local and global self-intersections. Lee et al. [14]
+doi:10.1016/j.cad.2005.08.002                                                      applied a plane sweep algorithm to detect all self-intersections
+184                                              J.-K. Seong et al. / Computer-Aided Design 38 (2006) 183–193
+
+
+
+
+Fig. 1. A freeform curve (a) and a freeform surface (b) in gray and their offset approximations. Both local and global self-intersections occur in the offset curve
+and the offset surface.
+
+
+of planar offset curves. Elber and Cohen [3] detected local self-                   intersecting region (Fig. 2(a)). This geometric concept holds
+intersections of offset curves by checking whether the tangent                      for both local and global self-intersections and it can be
+ﬁeld of C(t) and Od(t) have opposite directions. Whereas the                        formulated algebraically as a rational distance map between the
+plane sweep approach is difﬁcult to implement, the tangent                          original curve or surface and its offset. If there is a curve point
+ﬁeld approach of [3] is limited to detecting local self-                            C(t) within a distance d from the offset curve Od(r), the offset
+intersections only. In a recent work, Elber [7] proposed an                         point Od(r) belongs to a self-intersecting region. In Fig. 2(b), an
+algorithm for trimming both local and global self-intersections                     offset curve segment, which is inside the circle, belongs to a
+of offset curves. In the current paper, the result of Elber [7] is                  self-intersecting region since the distance between the circle
+extended to the general case of trimming local and global self-                     center p and the offset curve segment is less than d. Thus, it is
+intersections of offset surfaces.                                                   necessary to trim away such an offset curve segment Od(r).
+   The problem of trimming self-intersections in offset                             The same relation also holds for a surface point S(u,v) and an
+surfaces is considerably more difﬁcult to solve [1,2,13,16,21,                      offset surface Od(r,t).
+22]. Cohen and Ho [2] introduced a trimming algorithm that is                          Let Dðr; tÞ be the distance function between the original
+based on a necessary condition for a freeform surface to have                       curve C(t) and its offset curve Od(r). Then, the solution set for
+self-intersections. This approach works for general surfaces.                       the inequality condition Dðr; tÞKd! 0 corresponds to the self-
+However, it is not an optimal solution for offset surfaces since                    intersection regions in the offset curve. By projecting the
+no special consideration is taken into account for the                              solution set onto the r-axis, i.e. the parameter space of the offset
+relationship between the original surface and its offset. Wang                      curve Od(r), all self-intersections in the offset curve Od(r) can
+[22] proposed an algorithm to compute the intersection curve                        be detected. The projected region of the solution set is a union
+between two offset surfaces, but his algorithm can deal with                        of open intervals on the r-axis; when end points to these open
+global self-intersections only. Aomura and Uehara [1]                               intervals are added, the resulting union of closed intervals is
+presented a similar approach based on the numerical                                 exactly the same as the projection of the zero-set of
+integration starting from random initial points. Nevertheless,                      Dðr; tÞKdZ 0. Therefore, the problem of trimming offset
+this method does not guarantee the detection of all the                             self-intersections can be reduced to that of ﬁnding the zero-set
+components of self-intersections. Maekawa et al. [16]                               of a single polynomial equation in an rt parameter space.
+presented a method for tracing self-intersection loops in the                       A variety of geometric problems involving freeform curves
+parameter domain. In their method, starting points are
+computed by solving a system of non-linear polynomial
+equations; but they are solving ﬁve equations in ﬁve variables
+and their algorithm requires special treatment for trivial
+solutions. Wallner et al. [21] considered the problem of
+computing the maximum offset distance that guarantees no
+local or global self-intersections. Elber and Cohen [3] detected
+local self-intersections of offset surfaces by considering the
+normal ﬁelds of a rational surface S(u,v) and its offset surface
+Od(u,v) with respect to an offset distance d.
+   In this paper, a new method is proposed that simpliﬁes the                       Fig. 2. (a) The self-intersecting region in an offset curve is contained in a swept
+detection and trimming of offset self-intersections. Consider a                     region of a circle. (b) It can be represented by using the distance between an
+                                                                                    original curve (shown in gray color) and its offset curve (shown in bold lines).
+disk (of radius d) moving along the original curve C(t). If an                      An offset curve segment, which is inside the circle, belongs to a self-
+offset curve point Od(r) is contained in an instance of the                         intersecting region since the distance between the circle center p and the offset
+moving disk’s interior, the point Od(r) belongs to a self-                          curve segment is less than the offset distance or the radius of the circle.
+                                          J.-K. Seong et al. / Computer-Aided Design 38 (2006) 183–193                                    185
+
+or surfaces can be reduced to the single question of ﬁnding the            † A highly precise self-intersection trimming is achieved by
+zero-set of a system of non-linear polynomial equations in the               applying a post-process based on the numeric marching
+parameter space of the original curves or surfaces. In other                 steps.
+work, we presented several algorithms that are based on the
+similar reduction schemes to parameter space [8,18,19]. These                 The rest of this paper is organized as follows. In Section 2,
+include computing the convex hull of freeform curves or                   the trimming algorithm is discussed for the self-intersection of
+surfaces [8,18], computing bisector curves or surfaces [5],               an offset curve, an approach that is based on a distance function
+constructing sweep envelopes, and intersecting a freeform                 computation. Section 3 presents its extension to the offset
+surface with a sweep surface [19]. The trimming algorithm                 surface. In Section 4, the topological issue of the proposed
+employed in this paper also operates on the same premise as               trimming approach based on the characteristics of the zero-set
+taken in [12].                                                            of the constraint equations is considered. In Section 5, a
+     The trimming algorithm can easily be extended to offset              method for numerical improvement is addressed. Some
+surfaces. Similar to the curve case, the distance function Dðu            examples are presented in Section 6, and ﬁnally, in Section
+; v; r; tÞ between a freeform surface S(u,v) and its offset surface       7, this paper is concluded.
+Od(r,t) can be derived as a four-variate rational function. In
+this case, the solution set for Dðu; v; r; tÞKd! 0 corresponds            2. Trimming self-intersections in offset curves
+to the self-intersection of an offset surface. Let R denote the
+projected region of the solution set onto the rt-plane. Then, the            In this section, the process of trimming self-intersections in
+offset surface patches Od(r,t) corresponding to the parameter             the offset approximation of a freeform rational curve in the
+domain R are self-intersecting regions. The boundary of this              plane is considered. The algorithm of Elber [7] is brieﬂy
+region R can be determined by solving three polynomial                    summarized and is supplemented with some new results.
+equations:       Dðu; v; r; tÞKdZ 0,     Du ðu; v; r; tÞZ 0     and          Given a rational offset approximation of a rational curve
+Dv ðu; v; r; tÞZ 0, where Du and Dv are the u- and v-partial              C(t) by a distance d, O3d ðrÞ, where 3O0 denotes the accuracy of
+derivatives of D.                                                         approximation, consider a squared distance function,
+     The topological conﬁguration of the zero-set may be
+arbitrarily complex depending on the shape of the original                D3d ðr; tÞ Z!CðtÞKO3d ðrÞ; CðtÞKO3d ðrÞO :
+curve or surface and the offset distance. However, the
+                                                                             If no self-intersection occurs in O3d ðrÞ, then D3d ðr; tÞR
+projection operation of the trimming algorithm considerably
+                                                                          ðdK3Þ2 ; cðr; tÞ. In contrast, if O3d ðrÞ is self-intersecting, then
+simpliﬁes the topological analysis of the zero-set since it
+                                                                          there exist points in O3d ðrÞ that are closer than dK3 to C(t).
+reduces the dimensionality of the problem. Consider the curve
+                                                                          Therefore, any pair of points O3d ðrÞ and C(t) such that D2d ðr; tÞ!
+case with a parameter interval I in the r-axis, which is the
+                                                                          ðdK3Þ2 implies that there is a self-intersection.
+projection of the zero-set of Dðr; tÞKdZ 0. Viewed along the
+                                                                             Let rO0 be another small positive real value and let
+t-direction, there may be multiple zero-set curve segments
+appearing over the interval I. Nevertheless, no matter how                Fðr; tÞ Z D3d ðr; tÞKðdK3KrÞ2 :                                 (1)
+complex the zero-set curves are, the interval I is characterized
+by its end points. Moreover, the algorithm for trimming offset               Any point (r0,t0) in the zero-set of F(r,t)Z0 represents two
+surfaces reduces a four-dimensional problem into that of                  points, C(t0) and O3d ðr0 Þ, that are (dK3Kr) apart. Every such
+contouring curves in the rt-plane. This step greatly simpliﬁes            point O3d ðr0 Þ must be purged away as a self-intersecting point.
+the trimming procedure. Hence, it is easy to implement our                Therefore, the set of offset curve points that are free from self-
+algorithm in a numerically stable and efﬁcient way. Further-              intersections is contained in
+more, to get highly precise self-intersection points and curves,          K Z fO3d ðrÞjFðr; tÞO 0;ctg:
+a post-processing step is applied, where numeric marching
+                                                                              In other words, if a point r on the r-axis is on the projection
+methods are employed. A few steps of the Newton–Raphson
+                                                                          of the zero-set of F(r,t)Z0, then the corresponding offset curve
+iterations are sufﬁcient to achieve precise self-intersections
+                                                                          point O3d ðrÞ belongs to the self-intersecting region. This
+both in offset curves and surfaces. Several experimental results
+                                                                          trimming process is denoted (using a small positive trimming
+show the effectiveness of this approach.
+                                                                          distance r below the offset approximation) a r-accurate
+     The main contribution of our work can be summarized as
+                                                                          trimming or r-trimming, for short. Below, the algorithm is
+follows:
+                                                                          presented that detects and eliminates the self-intersection
+† The problem of trimming self-intersections is simpliﬁed by              regions:
+  using a rational distance function and a projection                     Algorithm 1.
+  operation;
+† The difﬁcult problem of trimming self-intersections in                      Input:
+  offset curves and surfaces is reduced to the relatively easier                C(t), a rational curve;
+  problem of ﬁnding the zero-set of a single polynomial                         O3d ðrÞ, a rational approximation offset of C(t) by distance
+  equation or a system of three polynomial equations,                           d and tolerance 3;
+  respectively;                                                                 r, a trimming distance for self-intersections.
+186                                                   J.-K. Seong et al. / Computer-Aided Design 38 (2006) 183–193
+
+      Output
+        A piecewise rational approximation offset of C(t) by
+        distance d, tolerance 3, and r-trimming;
+      Begin
+        D3d ðr; tÞ*!CðtÞKO3d ðrÞ; CðtÞKO3d ðrÞO;
+        Fðr; tÞ* D3d ðr; tÞKðdK3KrÞ2 ;
+        Z*the zero-set of F(r,t)Z0;
+        Zr * the projection of Z onto the r-axis;
+        return the r domain(s) of O3d ðrÞ not included in Zr ;
+      End.
+    Since F(r,t) is a piecewise rational bivariate function, the
+zero-set, Z, could be constructed by exploiting the convex hull
+and subdivision properties of NURBS, yielding a highly robust
+divide-and-conquer zero-set computation that is reasonably
+efﬁcient [6]. The parameter value r0, such that C(t) is closer to
+O3d ðr0 Þ than the distance (dK3Kr), for some t, implies that the
+curve offset point O3d ðr0 Þ belongs to a self-intersecting region.
+Hence, Z is projected onto the r-axis, as Zr . The domain of the                          Fig. 4. The distance function, D3d ðr; tÞ, of the curve in Fig. 3, on a logarithmic
+                                                                                          scale. Also shown, in bold lines, are the zero-set, Z of Fðr; tÞZ D3d ðr; tÞK
+r-axis covered by this projection prescribes the regions of O3d ðrÞ                       ðdK3KrÞ2 as well as the projection of Z on the r-axis, Zr .
+that present self-intersections and thus must be purged away.
+    Fig. 3 presents the example from Fig. 1(a) again. In Fig. 4,
+                                                                                          within the distance (dK3Kr) from a point C(t). Fig. 5 shows
+the log of the squared distance function, D3d ðr; tÞ, is presented
+                                                                                          such an example. After the offset operation, there are two valid
+for the curve of Fig. 3. Also shown in Fig. 4 is the zero-set, Z,
+                                                                                          curve segments in O3d ðrÞ (Fig. 5(b)). Fig. 6 presents the distance
+of Fðr; tÞZ D3d ðr; tÞKðdK3KrÞ2 and its projection, Zr , on the
+                                                                                          function, D3d ðr; tÞ in gray, and the zero-set, Z, in bold lines. The
+r-axis. In this case, the r-axis is divided into four valid
+                                                                                          projection of Z onto the t-axis generates only a single valid
+intervals, which characterize three sub-regions of the offset
+                                                                                          interval, which means that one of the valid regions of C(t) is
+curve that are self-intersecting. The ﬁrst and third bold
+intervals along the r-axis are due to the global self-intersection                        trimmed away. On the other hand, the projection of the zero-set
+of the curve in Fig. 3, whereas the middle large thick interval                           onto the r-axis produces three valid intervals. Two of them are
+corresponds to the local self-intersection in the curve. Fig. 3(b)                        connected since the curve is a closed one, and thus, the valid
+shows the r-trimmed curve segments that are computed by                                   intervals under this projection yield two curve segments as
+extracting four valid intervals.                                                          shown in Fig. 5(b).
+    The projection of the zero-set, Z, should be onto the r-axis.                             A point O3d ðr0 Þ is called a match to a point C(t0) if it is the
+If the zero-set is projected onto the t-axis, which is the                                point offset from C(t0). If we use rZ0 in the deﬁnition of the
+parameter space of the original curve C(t), then invalid                                  function F(r,t), then the trimming process becomes numeri-
+trimming of a valid parameter interval may occur on the                                   cally unstable as the matched point can be a trivial solution of
+curve C(t). Considering the trimming process as a continuous                              the equation F(r,t)Z0. Thus, a positive value of r needs to be
+sweeping of a disk (see Fig. 2(a)), it is necessary to sweep the                          exploited to compute the self-intersections somewhat con-
+disk along the original curve. Moving a disk along the offset                             servatively. For numerical stability, r should be as large as
+curve O3d ðrÞ may cut away some original curve regions that                               possible, reducing the chance of detecting the matched points
+present no self-intersections. A projection of the zero-set onto                          as self-intersections. Nonetheless, and while r should always
+the t-axis will ﬁnd all locations in C(t) that are at a distance                          be positive, as r approaches zero, it is going to be more difﬁcult
+(dK3Kr) from a point O3d ðrÞ. In symmetry, however, the                                   to robustly evaluate the zero-set of F(r, t)Z0. While describing
+projection onto the r-axis ﬁnds all locations in O3d ðrÞ that are                         the details of a zero-set ﬁnding is beyond the scope of this
+                                                                                          work, it is clear that, the better the zero-set funding is, the
+                                                                                          higher the quality of the offset trimming will be. In contrast, the
+
+
+
+
+Fig. 3. (a) The simple curve and its offset, from Fig. 1(a). The curve and its
+offset are presented in (a). (b) is the result of r-trimming the curve using D3d ðr; tÞ
+whereas, in (c), the result is improved using numerical marching.                         Fig. 5. An example that justiﬁes the projection of the zero-set onto the r-axis.
+                                                   J.-K. Seong et al. / Computer-Aided Design 38 (2006) 183–193                                                   187
+
+
+
+
+                                                                                      Fig. 7. A zero-set of Eq. (2) in the uvrt-space and its projected uv-silhouettes
+                                                                                      onto the rt-space. The zero-set components overlap along the uv-direction and
+                                                                                      cause the intersection of its projected silhouettes.
+
+Fig. 6. The distance function, D3d ðr; tÞ, of the curve in Fig. 5, on a logarithmic
+scale. Also shown, in bold lines, are the zero-set, Z of Fðr; tÞZ D3d ðr; tÞK         considering two more constraints. The same thing can be done
+ðdK3KrÞ2 Z 0, as well as the projection of Z on the r-axis and t-axis.                in the curve case as well.
+                                                                                         Consider the squared distance function:
+larger r is, the higher the likelihood that small self-
+intersections will be missed. In practice, r was selected to be                       D3d ðu; v; r; tÞ Z!Sðu; vÞKO3d ðr; tÞ; Sðu; vÞKO3d ðr; tÞO :
+between 1% and 5% of the offset distance d. Another crucial
+characteristic of r is that using the function F(r,t) all self-                          Assume that r represents a trimming distance and let
+intersections at distance greater than r from the trimmed offset
+                                                                                      Fðu; v; r; tÞ Z D3d ðu; v; r; tÞKðdK3KrÞ2 :
+curve can be detected, where the function F(r,t) yields negative
+values. The self-intersecting offset curve segments are                                  An offset surface point O3d ðr0 ; t0 Þ belongs to a self-
+extracted by the zero-set ﬁnding routine.                                             intersecting region if there exists another point S(u1,v1)
+   The outcome of Algorithm 1 is a subset of O3d ðrÞ. The latter                      satisfying the following inequality condition:
+comprises curve segments that have no point closer than (dK
+3Kr) to C(t). By selecting rO0, the curve segments that result                        Fðu1 ; v1 ; r0 ; t0 Þ% 0:
+from Algorithm 1 are not exactly connected but slightly cross                            Similar to the curve case, the set of offset surface points that
+each other. A sequence of numeric Newton–Raphson marching                             are free of self-intersections is contained in
+steps at each such pair of trimmed end points could very
+quickly converge to the exact self-intersection location. Only a                      T Z fO3d ðr; tÞjFðu; v; r; tÞO 0;cðu; vÞg:
+few steps are required to converge to the highly precise self-
+intersection location. Fig. 3(c) shows the result of the                                  As mentioned above, the solution set of the condition F(u,v,
+numerical improving step. In Section 6, several other examples                        r,t)%0 in the uvrt-domain is involved in the self-intersections
+are presented that demonstrate this entire procedure, including                       and thus, the corresponding offset points O3d ðr; tÞ should be
+the aforementioned numerical marching step.                                           trimmed away. In other words, if the point (r,t) in the parameter
+                                                                                      domain falls into the projection of this solution set, then the
+                                                                                      corresponding offset surface point O3d ðr; tÞ belongs to the self-
+3. Trimming self-intersections in offset surfaces                                     intersecting region. The boundary of the ‘uncovered’ region of
+                                                                                      the rt-plane (under this projection) is characterized as the
+    The trimming algorithm for offset curves is now extended to                       projection of the uv-silhouette curves (along the uv-direction)
+the case of offset surfaces. A squared distance function                              of the zero-set of the equation F(u,v,r,t)Z0. This means that
+between a freeform surface S(u,v) and its offset approximation,                       the u-partial derivative and v-partial derivative must simul-
+O3d ðr; tÞ, is derived. The function becomes a four-variate one                       taneously vanish along the silhouette curve, which can be
+and hence, it ends up dealing with a three-dimensional zero-set                       characterized as the simultaneous satisfaction of the following
+in a four-dimensional parameter space. The projection of the                          three constraints in the uvrt-space:
+zero-set onto the rt-space prescribes the self-intersection
+                                                                                      Fðu; v; r; tÞ Z 0;                                                          (2)
+regions in the offset surfaces. The main difference of this
+extension from r-trimming of a planar curve is that the
+boundary of the projected zero-set is now directly extracted by                       Fu ðu; v; r; tÞ Z 0;                                                        (3)
+188                                               J.-K. Seong et al. / Computer-Aided Design 38 (2006) 183–193
+
+
+
+
+                                                                                                                                   t
+
+
+
+
+                                                                                                                                                               r
+                                                                                                          (a)                                    (b)
+
+                                                                                   Fig. 9. (a) A rational freeform surface (shown in bold lines) and its untrimmed
+                                                                                   offset surface (shown in light lines). (b) The corresponding rt-projection of the
+                                                                                   zero-set of distance square function is shown as a set of curve segments. One
+                                                                                   can see the overlapping trimming curve segments in local self-intersections.
+
+                                                                                        return offset approximation trimmed by Z;
+Fig. 8. The same example as in Fig. 4. The zero-set Z is shown in thick gray and      End.
+the t-silhouette points of the zero-set curves are presented as thick dots.
+                                                                                      Step (1) in Algorithm 2 can also employ the original
+Fv ðu; v; r; tÞ Z 0:                                                        (4)    trimming curves of S(u,v), if to begin with, S(u,v) is a trimmed
+                                                                                   surface. The outcome of Algorithm 2 is a trimmed offset
+    Having three equations (2)–(4) in four variables, the                          surface approximation O3d ðr; tÞ. It comprises surface patches
+solution is a univariate curve that is a simultaneous solution                     that have no point closer than (dK3Kr) to S(u,v).
+in the uvrt-space. In this work, we exploit a spline subdivision-
+based method for solving the set of equations represented as
+scalar spline functions [6]. The zero-set in arbitrary dimension                   4. Topology of trimming curves in offset surfaces
+could be computed by extending the Dual Contouring method
+into an arbitrary dimension [20].                                                     In Section 3, we presented an algorithm for determining a
+    The univariate solution curve can be parameterized by some                     boundary of the projected zero-set of Eq. (2) in the rt-plane by
+variable a:                                                                        computing uv-silhouette curves (along the uv-direction) of the
+                                                                                   zero-set. The uv-silhouette curves in the rt-plane may intersect
+ðuðaÞ; vðaÞ; rðaÞ; tðaÞÞ:                                                          each other; namely, a connected component of the zero-set of
+                                                                                   Eq. (2) is partially blocked (along the uv-direction) by another
+   Then, this set of curves forms the trimming curves for the                      one in the uvrt-space in the projection along the uv-direction
+offset surfaces that are self-intersection-free up to 3 and r.                     (see Fig. 7). The intersections among uv-silhouette curves
+Algorithm 2 summarizes the overall procedure:                                      should be detected and resolved for a proper trimming. In the
+                                                                                   current problem, it is necessary to extract only the outmost
+Algorithm 2.                                                                       boundary of the projected region, which makes the overall
+                                                                                   procedure numerically stable.
+      Input:
+                                                                                      For the clarity of presentation, we ﬁrst consider the possible
+        S(u,v), a rational freeform surface;
+                                                                                   topological problem using a simple low-dimensional case of
+        O3d ðr; tÞ, a rational approximation offset of S(u,v) by
+        distance d and tolerance 3;
+        r, a trimming distance for the self-intersections.
+      Output:
+        A piecewise rational approximation offset of S(u,v) by
+        distance d, tolerance 3, and r-trimming;
+      Begin
+
+        D3d ðu; v; r; tÞ*!Sðu; vÞKO3d ðr; tÞ; Sðu; vÞKO3d ðr; tÞO;
+
+        Fðu; v; r; tÞ* D3d ðu; v; r; tÞKðdK3KrÞ2 ;
+
+        Gðu; v; r; tÞ* Fu ðu; v; r; tÞ; Hðu; v; r; tÞ* Fv ðu; v; r; tÞ;
+                                                                                   Fig. 10. Overlapping in local self-intersections is resolved in (a) and the
+  (1) Z*the simultaneous zero-set of F, G, and H;                                  resulting trimmed offset surface is shown in (b). Compare with Fig. 9.
+                                                     J.-K. Seong et al. / Computer-Aided Design 38 (2006) 183–193                                                        189
+
+
+
+
+Fig. 11. (a) A zoom-in in Fig. 10 that shows the trimmed self-intersection
+curves in detail. (b) shows the three trimming curves in the rt-plane. (c) The
+trimmed self-intersection curves (upper ones) can be improved to the highly
+precise intersection curves (lower ones) after a post-process of numerical
+marching step.
+
+trimming offset curves. Fig. 8 shows the same squared distance                           Fig. 13. (a) presents the original curve (in gray) and its untrimmed offsets, while
+function of Fig. 4; the zero-set of Eq. (1) is drawn in gray. The                        (b) is the result of r-trimming the self-intersections with the aid of the D3d ðr; tÞ
+projection of the zero-set onto the r-axis is determined by the                          function. (b) and (c) are the results of r-trimming of the offset with two different
+t-silhouette points at which the t-partial derivatives of F(r,t)                         r-trimming percentages of 5% and 1%, respectively. (d) is the result after the
+                                                                                         post-process of numerical marching steps.
+vanish. The t-silhouette points are represented in bold dots in
+Fig. 8. Viewed along the t-direction, the two zero-set                                   which are boundary curves of the projected region of the zero-
+components overlap. They are located in the middle part of                               set, are intersecting each other when they correspond to the
+the rt-space. The intervals resulting from these two zero-set                            local self-intersection region. Fig. 9(a) shows a freeform
+components correspond to local self-intersections in the offset                          rational surface and its offset approximation. Fig. 9(b) shows
+curve. Since local self-intersections are due to the regions of                          the projection of uv-silhouette curves of the zero-set of Eq. (2)
+high curvature in C(t), there always exists an offset curve point                        onto the rt-space. In the middle part, there are two intersecting
+O3d ðrÞ in the local self-intersection region that has more than                         loops that correspond to the local self-intersection. For a proper
+two points of C(t) that are closer than (dK3Kr) to O3d ðrÞ. This                         trimming, we should form a union of the domains bounded by
+means that sub-regions made from the zero-sets of Eq. (1)
+                                                                                         two overlapping loops into a single loop by applying a planar
+always overlap in the local self-intersection region (see two
+                                                                                         Boolean union operation in the rt-parameter domain. Fig. 10(a)
+intervals that are the projections of two zero-set curves in the
+                                                                                         shows the resulting trimming loop.
+middle part of Fig. 8).
+                                                                                            In summary, since our approach to trimming self-
+    In contrast to the local self-intersections, global self-
+                                                                                         intersections is based on the distance function, the topological
+intersections do not always introduce overlaps in the zero-
+set. Two zero-set components that correspond to the same
+global self-intersection region in O3d ðrÞ come as a pair. They are
+called a matching pair. In Fig. 8, two zero-set components that
+are located in the corner parts of the rt-space correspond to the
+global self-intersection. Two intervals resulting from the
+matching pair do not overlap in this case.
+    In the case of offset surfaces, the situation is far more
+complex since the overlapping of the zero-set components in
+four-dimensional space needs to be considered. The topologi-
+cal structure of the problem, however, is almost identical to the
+case of offset curves. The uv-silhouette curves in the rt-space,
+
+
+
+
+                                                                                         Fig. 14. (a) presents the original curve (in gray) and its offsets, while (b) is the
+                                                                                         result of r-trimming the self-intersections using the function F(r,t) of Eq. (1).
+Fig. 12. An example of a curve (in gray) and its untrimmed offsets are shown in          (b) and (c) are the result of r-trimming of the offset with two different
+(a). (b) is the result of r-trimming the offset curves using D3d ðr; tÞ and (c) is the   r-trimming percentages of 5 and 1%, respectively. (d) is the result after the
+result of applying the post-process numerical marching steps.                            post-process of numerical marching steps.
+190                                               J.-K. Seong et al. / Computer-Aided Design 38 (2006) 183–193
+
+
+
+
+Fig. 15. The topology of trimming curves can change as an offset distance changes. Here, the global and local self-intersections of Fig. 10 are merged to form a
+single component.
+
+complexity can be handled in a simpler and more ﬂexible way.                         numerical tracing algorithm. A r-trimming, however, resolves
+Although the structure of the zero-set in two-dimensional space                      both tasks and leads to a highly precise self-intersection curve.
+(offset curves) or four-dimensional space (offset surfaces) may                      Two matching trimming curves are ﬁrst found, which are close
+be arbitrarily complex, the presented scheme only requires                           to each other in the Euclidean space after evaluation. In the
+forming a union of the projected regions of the zero-set if they                     example of Fig. 10, there exist three trimming curves, l1, l2, l3
+overlap. The topological problem is far more complex in offset                       (see also Fig. 11(b)). Since l1 and l3 correspond to the global
+surfaces than in offset curves. Nevertheless, it can be efﬁciently                   self-intersection, they produce a single connected component
+resolved using a Boolean union operation in the rt-parameter                         of the self-intersection curves. l2 is matched to itself since it
+space. Furthermore, the main strength of our approach is that                        corresponds to the local self-intersection. Consequently, there
+the topological complexity in both local and global self-                            are two connected components of the intersection curves.
+intersections is handled in a uniﬁed procedure. The local and                        Starting from these matchings, a few steps of the standard
+global self-intersections are resolved simultaneously using the                      Newton–Raphson technique produce a highly precise self-
+same union procedure. Fig. 15 shows such a case. Even in this                        intersection curve. Fig. 11(c) shows two self-intersection
+situation, our method can deal with self-intersections properly                      curves. The upper one presents self-intersection curves before
+by performing a planar Boolean operation.                                            the numerical improvement stage and the lower one is the
+                                                                                     result of numerical marching step.
+5. Post-process of numerical improvement
+                                                                                     6. Experimental results
+   A r-trimming of offset surfaces is computed rather
+conservatively by selecting rO0. The surface patches resulting                          Several examples of trimming both local and global self-
+from Algorithm 2 are not exactly connected but cross each                            intersections in offset curves and surfaces are now presented.
+other slightly (see Fig. 11(a)). Therefore, a postprocess of                         First, some examples for trimming offset curves are shown.
+numeric marching steps needs to be applied to get a highly                           Fig. 12 presents an example of a curve with several offsets in
+precise self-intersection curve of the offset surface. A numeric                     both directions. In Fig. 12(a), the original curve is shown (in
+marching between two offset surface patches is essentially a                         gray) with the untrimmed offset approximations. With the aid
+Surface–Surface Intersection (SSI) problem.                                          of the distance square function, the self-intersections are
+   In our implementation, a standard numerical marching SSI                          r-trimmed in Fig. 12(b), and the result of applying the
+technique is adapted exploiting the Newton–Raphson method.                           numerical marching step is shown in Fig. 12(c).
+Finding a good initial solution and analyzing the topology of                           Figs. 13 and 14 present two more complex examples of
+the intersection curves are the most difﬁcult parts in such a                        offset trimming for curves. Here, (a) shows the original curve
+
+
+
+
+Fig. 16. (a) presents a sweep surface with scale change of cross-sections (bold lines) and its untrimmed 3-offset approximation (light lines). (b) shows the result of
+r-trimming of the 3-offset surface. The trimming curves are shown in (c), in the rt-parameter domain.
+                                                  J.-K. Seong et al. / Computer-Aided Design 38 (2006) 183–193                                                    191
+
+
+
+
+Fig. 17. (a) presents a sweep of a circular section (bold lines) following a helix trajectory and its untrimmed 3-offset approximation (light lines) and (b) shows the
+result of r-trimming of the 3-offset surface. The trimming curves are shown in (c), in the tr-parameter domain.
+
+(in gray) and its untrimmed offset approximations, and (b) is                        complex after a rational approximation, it takes about 4–5 min
+the result of r-trimming the self-intersections using the                            for r-trimming the offset surface approximations on a 2 GHz
+function F(r,t) of Eq. (1). In all the examples presented in                         Pentium IV machine. The original surfaces presented in these
+this work, the trimming distance r was taken from 1% to 5% of                        experimental examples are represented by bicubic NURBS
+the offset distance d, while an offset tolerance, 3, was 0.1%–1%                     having about 50–70 control points. Their rational bicubic
+of the offset distance. Figs. 13(b) and (c) and 14(b) and (c)                        NURBS offset approximation with a tolerance of 3Z0.02
+present the results of trimming with r at 5% and 1% of the                           (original objects’ dimensions span about a unit length) turned
+offset distance, respectively. Small local self-intersections                        out to have about 5000–6000 control points.
+escape the r-trimming step at 5% and are trimmed better at 1%.                          Fig. 18 shows one interesting result of the r-trimming. The
+Figs. 13(d) and 14(d) show the results after the post-process of                     offset surface of a simple concave surface is shown in
+numerical marching steps. The computation time for these                             Fig. 18(a). Fig. 18(b) presents the simultaneous zero-set of
+results are about the same, all within 1 or 2 seconds on a 2 GHz                     Eqs. (2)–(4) in the rt-domain. There exist self-intersections in
+Pentium IV machine.                                                                  two loops, with one curve segment completely contained in the
+   These small local self-intersections could clearly appear at                      other one. According to the topological structure of the zero-set
+any percentage of the r-trimming distance, when rO0. In                              components as in Section 4, the self-intersections in the
+many applications, such as robotics and CNC machining, local                         trimming curves need to be resolved. Furthermore, the inner
+and arbitrarily small self-intersections will induce large                           loop should be removed since its corresponding zero-set
+accelerations along the derived path, and hence are highly                           component is totally blocked by the other one. The result of
+undesirable. If both S(u,v) and its offset surface Od(u,v) are                       r-trimming by using the resolved trimming curves in Fig. 18(c)
+parameterized so that Od(u0,v0) is along the normal of S at S(u0,                    is shown in Fig. 18(d). Although the r-trimming can be
+v0), a typical result in many offset approximation schemes, one                      accomplished robustly, a numerical improvement step in this
+could employ the local self-intersection test presented in [3] as                    kind of singular example is still difﬁcult.
+another ﬁltering step that could completely resolve these small
+local self-intersections.                                                            7. Conclusions
+   Continuing to examples of trimming offset surfaces, Fig. 15
+shows the same example as in Fig. 10 but with a different offset                        A robust and efﬁcient scheme for trimming both local and
+distance. The local self-intersection and global self-intersec-                      global self-intersections in offset curves and surfaces have been
+tion now merge to form a single component. Even in this case,                        presented. The presented approach is based on the derivation of
+our approach works well and Fig. 15(b) presents the result of                        a rational distance map between the original curve or surface
+trimming. Fig. 15(c) shows the trimming curve in the                                 and its offset. By simultaneously solving one polynomial
+rt-parameter space.                                                                  equation for an offset curve or three polynomial equations for
+   Figs. 16 and 17 present two more complex examples. Here,                          an offset surface in the parameter space, all the local and global
+(a) is the original surface and its untrimmed 3-offset                               self-intersection regions in offset curves or surfaces can be
+approximation, and (b) is the result of r-trimming of the self-                      detected. The zero-set of the polynomial equation(s) prescribes
+intersections using the function F(u,v,r,t) and the numerical                        the self-intersection regions and these regions are trimmed by
+marching step. The trimming curves in the parameter space are                        projecting the zero-set into an appropriate parameter space.
+shown in Fig. 16(c) and 17(c). In all the examples presented in                      The projection operation simpliﬁes the topological complexity
+this work, the trimming distance r was taken from 1% to 5% of                        of the zero-set and makes the algorithm numerically stable and
+the offset distance. Since the offset surface becomes quite                          efﬁcient. Furthermore, numerical marching post-processing
+192                                              J.-K. Seong et al. / Computer-Aided Design 38 (2006) 183–193
+
+
+
+
+Fig. 18. A simple concave surface and its untrimmed 3-offset surface approximation is presented in (a) and the simultaneous zero-set of Eqs. (2)–(4) in the tr-domain
+is shown in (b). After considering the topological structure of the zero-set, self-intersections are resolved in (c). Also, the inner trimming curve has been removed
+since its corresponding zero-set component is totally blocked by the outer component. (d) shows the result of r-trimming of the 3-offset surface. The numeric
+marching technique of SSI encounters some difﬁculties in such a highly singular case.
+
+steps provide highly precise self-intersection elimination in                        This work was supported in part by European FP6 NoE grant
+both offset curves and surfaces.                                                     506766 (AIM@SHAPE), in part by the Israel Science
+    A limitation of the current r-trimming approach is that some                     Foundation (grant No. 857/04), in part by the Korean Ministry
+tiny self-intersection loops may not be detected in the trimming                     of Information and Communication (MIC) under the Program
+procedure. Better ways of preventing all small self-intersections                    of IT Research Center on CGVR and in part by grant No. R01-
+in the offset curves and surfaces should be sought. In cases where                   2002-000-00512-0 from the Basic Research Program of the
+the offset is differently parameterized, by reparameterizing of the                  Korea Science and Engineering Foundation (KOSEF).
+offset curves and surfaces so that they match the original curves
+and surfaces, the local self-intersection scheme of Elber and
+                                                                                     References
+Cohen [3] can possibly be applied. Self-distance maps and
+discontinuities in the derivative of the maps near the offset curves                  [1] Aomura S, Uehara T. Self-intersection of an offset surface. Comput-
+and surfaces can also be useful in detecting tiny loops and global                        Aided Des 1990;22(7):417–21.
+self-intersections.                                                                   [2] Cohen E, Ho CC. Surface self-intersection. In: Lyche T, Schumaker LL,
+                                                                                          editors. Mathematical methods for curves and surfaces, 2000. p. 183–94.
+Acknowledgements                                                                      [3] Elber G, Cohen E. Error bounded variable distance offset operator for
+                                                                                          freeform curves and surfaces. Int J Comput Geometry Appl 1991;1(1):
+                                                                                          67–78.
+   We would like to thank the anonymous reviewers for their                           [4] Elber G, Lee IK, Kim MS. Comparing offset curve approximation
+invaluable comments. All the algorithms and ﬁgures presented                              methods. IEEE CG A 1997;17(3):62–71.
+in this paper were implemented and generated using the IRIT                           [5] Elber G, Kim MS. Computing rational bisectors. IEEE CG A 1999;19(6):
+solid modeling system [11] developed at the Technion, Israel.                             76–81.
+                                                 J.-K. Seong et al. / Computer-Aided Design 38 (2006) 183–193                                              193
+
+ [6] Elber G, Kim MS. Geometric constraint solver using multivariate rational     [14] Lee IK, Kim MS, Elber G. Planar curve offset based on circle
+     spline functions. Proc. of ACM symposium on solid modeling and                    approximation. Comput-Aided Des 1996;28(8):617–30.
+     applications, Ann Arbor, MI, June 2001;1–10.                                 [15] Li YM, Hsu VY. Curve offsetting based on legendre series. Comput
+ [7] Elber G. Trimming local and global self-intersections in offset curves            Aided Geometric Des 1998;15(7):711–20.
+     using distance maps. Proc. of the 10th IMA conference on the                 [16] Maekawa T, Cho W, Patrikalakis NM. Computation of self-intersections
+     mathematics of surfaces, Leeds, UK, pp. 213–222; September 2003.                  of offsets of bezier surface patches. J Mechanical Des: ASME Trans 1997;
+ [8] Elber G, Kim MS, Heo HS. The convex hull of rational plane curves.                119(2):275–83.
+     Graph Models 2001;63:151–62.                                                 [17] Peternell M, Pottmann H. A Laguerre geometric approach to rational
+ [9] Farouki RT, Tsai YF, Yuan GF. Contour machining of freeform surfaces              offsets. Comput Aided Geometric Des 1998;15(3):223–49.
+     with real-time PH curve CNC interpolators. Comput Aided Geometric            [18] Seong JK, Elber G, Johnstone JK, Kim MS. The convex hull of freeform
+     Des 1999;16:61–76.                                                                surfaces. Computing 2004;72(1):171–83.
+[10] Hoschek J, Lasser D. Fundamentals of computer aided geometric design.        [19] Seong JK, Kim KJ, Kim MS, Elber G, Martin R. Intersecting a freeform
+     Wellesley, MA: AK Peters; 1993.                                                   surface with a general swept surface. Comput-Aided Des 2005;37(5):
+[11] IRIT 9.0 User’s Manual, October (2000), Technion. http://www.cs.                  473–83.
+     technion.ac.il/wirit.                                                        [20] Seong JK, Elber G, Kim MS. Contouring 1- and 2-manifolds in arbitrary
+[12] Kim MS, Elber G. Problem reduction to parameter space. The mathematics            dimensions. Int Conference Shape Model Appl 2005;216–25.
+     of surface IX (Proc. of the ninth IMA conference), London; 2000. p. 82-98.   [21] Wallner J, Sakkalis T, Maekawa T, Pottmann H, Yu G. Self-intersections
+[13] Ravi Kumar CVV, Shastry KG, Prakash BG. Computing non-self-                       of offset curves and surfaces. Int J Shape Model 2001;7(1):1–21.
+     intersecting offsets of NURBS surfaces. Comput-Aided Des 2002;34(3):         [22] Wang Y. Intersection of offsets of parametric surfaces. Comput Aided
+     209–28.                                                                           Geometric Des 1996;13(5):453–65.
+

@@ -1,0 +1,800 @@
+Fast Winding Numbers for Soups and Clouds
+GAVIN BARILL, University of Toronto, Canada
+NEIL G. DICKSON, Side Effects Software Inc., Canada
+RYAN SCHMIDT, Gradientspace, Canada
+DAVID I.W. LEVIN∗ and ALEC JACOBSON∗ , University of Toronto, Canada
+                clean mesh                                  triangle soup                       regular point cloud                      irregular point cloud
+
+
+
+
+            3D printer path                                      voxelization                        watertight isosurface                            signed distance
+
+Fig. 1. In this paper, we further generalize the winding number to point clouds and propose a hierarchical algorithm for fast evaluation (up to 1000× speedup).
+This enables efficient answers to inside-outside queries for a wider class of shape representations (top) during a variety of tasks (bottom).
+
+Inside-outside determination is a basic building block for higher-level geom-                    slow for completely disconnected surfaces, such as triangle soups or–in the
+etry processing operations. Generalized winding numbers provide a robust                         extreme case– point clouds. We propose a tree-based algorithm to reduce the
+answer for triangle meshes, regardless of defects such as self-intersections,                    asymptotic complexity of generalized winding number computation, while
+holes or degeneracies. In this paper, we further generalize the winding num-                     closely approximating the exact value. Armed with a fast evaluation, we
+ber to point clouds. Previous methods for evaluating the winding number are                      demonstrate the winding number in a variety of new applications: voxeliza-
+∗ Joint last authors
+                                                                                                 tion, signing distances, generating 3D printer paths, defect-tolerant mesh
+                                                                                                 booleans and point set surfaces.
+Authors’ addresses: Gavin Barill, David I.W. Levin, Alec Jacobson, UofT, 40 St George            CCS Concepts: • Computing methodologies → Mesh models; Point-
+St, Toronto, M5S 2E4, Canada, gavin.barill@mail.utoronto.ca.
+                                                                                                 based models; Volumetric models; Shape modeling;
+Permission to make digital or hard copies of all or part of this work for personal or
+classroom use is granted without fee provided that copies are not made or distributed            Additional Key Words and Phrases: generalized winding number, inside-
+for profit or commercial advantage and that copies bear this notice and the full citation        outside segmentation, tree-based algorithm, robust geometry processing
+on the first page. Copyrights for components of this work owned by others than ACM
+must be honored. Abstracting with credit is permitted. To copy otherwise, or republish,          ACM Reference Format:
+to post on servers or to redistribute to lists, requires prior specific permission and/or a      Gavin Barill, Neil G. Dickson, Ryan Schmidt, David I.W. Levin, and Alec
+fee. Request permissions from permissions@acm.org.
+                                                                                                 Jacobson. 2018. Fast Winding Numbers for Soups and Clouds. ACM Trans.
+© 2018 Association for Computing Machinery.
+0730-0301/2018/8-ART43 $15.00                                                                    Graph. 37, 4, Article 43 (August 2018), 12 pages. https://doi.org/10.1145/
+https://doi.org/10.1145/3197517.3201337                                                          3197517.3201337
+
+
+                                                                                              ACM Transactions on Graphics, Vol. 37, No. 4, Article 43. Publication date: August 2018.
+43:2    • Gavin Barill, Neil G. Dickson, Ryan Schmidt, David I.W. Levin, and Alec Jacobson
+
+
+1      INTRODUCTION                                                                                input point cloud            3D printed point cloud
+        “Well, are you in or are you out?”
+                    — Jodi Kramer, Dazed and Confused (1993)
+
+   Determining whether a point is inside or outside of a given shape
+is one of the most basic geometric questions. Inside-outside seg-
+mentation is crucial for: signing distance fields, tetrahedralizing
+or voxelizing volumes, representing smooth surfaces from point
+clouds, generating 3D printer path instructions, and surface repair.
+For analytic shapes and sufficiently clean discrete surface meshes,                        Fig. 3. To 3D print the shape represented by the winding field, we convert
+we can answer the question confidently and quickly. Unfortunately,                         it to a stack of 2D polygons, which are then filled with toolpaths by the
+most surface representations found in the wild are either completely                       3D printer software. We extract the polygons using "marching squares"
+unstructured (e.g., point clouds) or riddled with defects such as open                     [Lorensen and Cline 1987]) again with a continuation approach. The 3D
+boundaries, duplicated or degenerate geometry, self-intersections                          winding number is used for field evaluations – the 2D winding number
+and non-manifold combinatorics.                                                            along the slice is not the same for open geometry.
+   The classic winding number determines how many times a planar
+curve encircles a query point (see, e.g., [Meister 1769]). Generalized
+winding numbers [Jacobson et al. 2013] extend this concept to ori-                         “soups” often encountered during scanning or modeling, existing
+ented triangle meshes suffering from the aforementioned defects.                           methods are too slow.
+For oriented triangle meshes, this is computed as a sum of signed                             Meanwhile, determining the smooth surface interpolating ori-
+solid angles Ωt (q) of each triangle t subtended at a query point q:                       ented point clouds is equivalent to extracting the boundary between
+                                                                                           what the points classify as inside or outside. Most existing point
+                                    1       Õ                                              set surface methods are based on grid-dependent discretizations
+                       w S (q) =                       Ωt (q).                   (1)
+                                   4π                                                      or custom tailored radial basis functions. These methods focus on
+                                        t ∈triangles
+                                                                                           level-set extraction, but knowing the answer to the inside-outside
+For closed watertight meshes, this perfectly reproduces the indicator                      question has important applications away from the level-set (e.g.,
+function (1 inside, 0 outside). For overlapping regions, the winding                       for signed distances, voxelization, solid 3D printing, etc.).
+number measures how many times the region is inside the surface.                              In this paper, we propose a fast method for computing generalized
+For holey or non-manifold surfaces, the winding number produces                            winding numbers on arbitrary triangle soups and point clouds. We
+a smoothly varying function revealing a fractional measure of insid-                       begin by deriving a definition of the winding number for oriented
+eness. While simple and robust, a direct evaluation of this sum: 1) is                     point clouds. This directly enables a novel point set surface repre-
+slow, requiring O(nm) computation for n queries and an m-triangle                          sentation from the sum of winding number contributions from each
+mesh; and 2) only applies to triangle meshes.                                              point. Our function exactly interpolates a cloud of oriented points
+   For large geometries and interactive applications, inside-outside                       — in contrast to smooth surface approximation functions for noisy
+queries need to be efficient. Existing optimizations for winding num-                      points. We then asymptotically improve the performance of this
+ber computation either merely use parallelization or make heavy                            sum with a tree-based algorithm for computing error-controlled
+assumptions about mesh connectivity. For large, incoherent triangle                        approximations of far away points.
+                                                                                              Analytically integrating our definition for points leads to the
+    Triangle soup from partial scan                Our reconstruction                      familiar generalized winding number for triangles. By applying
+                                                                                           the same integration to our approximations, we generalize our fast
+                                                                                           evaluation algorithm to triangle soups as well.
+                                                                                              We show evidence of the performance and approximation accu-
+                                                                                           racy of our method on a large benchmark, where we achieve up to
+                                                                                           1000× speed-up for large triangle soups. We test our method in a
+                                                                                           variety of applications including: point set surfaces, voxelization,
+                                                                                           boolean operations on triangle soups, signing distance fields, and
+                                                                                           mesh cleanup. For an example of mesh cleanup see Fig. 2.
+                                                                                              Quickly and robustly answering the inside-outside question al-
+                                                                                           lows raw point clouds and triangle soups to travel deeper into the
+                                                                                           geometry processing pipeline, avoiding lossy representation con-
+                                                                                           versions. As a prototypical example, we show direct 3D printing of
+                                                                                           point clouds (see Fig. 3).
+Fig. 2. This soupy scan of an amputee’s leg has a veritable archipelago
+of dangling components, a major challenge for automatic mesh clean up                      2   BACKGROUND
+methods. Details of the scan are maintained, while missing regions are filled              The generalized winding number in Equation (2) was introduced
+in with smooth minimal surfaces.                                                           by Jacobson et al. [2013] to robustly segment inside from outside
+
+ACM Transactions on Graphics, Vol. 37, No. 4, Article 43. Publication date: August 2018.
+                                                                                           Fast Winding Numbers for Soups and Clouds                    •   43:3
+
+
+for triangle meshes. Acknowledging that a direct summation is too               mesh with boundaries             ray stabbing         fast winding number
+slow, they propose a divide and conquer algorithm based on cutting
+the mesh into connected components and computing a direct sum
+on the scale of the component boundaries. Though this method
+achieves sub-linear performance for most meshes, the precompu-
+tation is involved and overhead during evaluation is much higher
+than our method: we show up to 1000× speed-ups over this method.
+Meanwhile, in the worst case, triangle soups can have so many
+boundaries that their divide and conquer method degenerates into
+the slow, direct sum. Our approximation ignores mesh connectivity,           Fig. 4. A common approximation of the winding number is to shoot a
+which enables it to achieve O(log m) amortized performance. The              random ray and count signed intersections (middle). For triangle soups
+winding number for triangle meshes has been used in many contexts            (left), this leads to floating misclassified voxels. Our fast evaluation of the
+since its introduction, all of which benefit from improved efficiency.       winding number is also an approximation, but with controlled error: no
+                                                                             voxels are misclassified (right).
+   Applications of the winding number. In this paper, we highlight
+a number of novel applications of the winding number since its
+introduction. Others in the literature have also found winding num-          integrating double layer potentials with constant density) [Evans
+bers useful. Dionne et al. [2014] use winding numbers to create              1997]. Orzan et al. [2008] diffusion curves also solve a Laplace equa-
+voxelizations of triangle meshes; they use a ray stabbing heuristic          tion, where boundary element method can be employed [Ilbery et al.
+as an initial guess and resort to direct winding number computation          2013; Sun et al. 2014, 2012; van de Gronde 2010]. Diffusion curve
+for low confidence voxels, citing poor performance as prohibiting            boundary conditions differ from the winding number’s, making it
+its use everywhere (see Fig. 4). Autodesk’s Maya software uses this          useful for blending colors, but not for inside-outside segmentation.
+winding number-based voxelization for computing automatic skin-              Wang et al. [2013] parameterize the space exterior to a given solid us-
+ning weights, where faster computation would be “extremely useful”           ing the same boundary element method formulation of the Laplace
+[de Lasa 2018]. The direct sum in Equation (2) is straightforward            equation as our method, though again with different boundary con-
+to parallelize (e.g., using the GPU [Dionne and de Lasa 2013]) but           ditions producing a different solution with different appropriate
+doing so does not change the asymptotic performance. Our fast and            applications. Da et al. [2016] employ boundary element method for
+equally parallelizeable approximation does.                                  liquid simulation. Zhang et al. [2014] use fast summation over parti-
+   Enormous datasets of 3D shapes such as ShapeNet [Chang et al.             cle potentials for fluid simulation, and briefly mention using their
+2015] or Thingi10k [Zhou and Jacobson 2016] present tantalizing              formulation for Poisson surface reconstruction. Da et al. use direct
+opportunities for machine learning. Generalized winding numbers              summation and Zhang et al. introduce a fast summation similar to
+are already used to convert between triangle soup representations            ours, both forgoing “full Fast Multipole Method” (FMM) [Greengard
+to signed voxel grids for generalized adversarial network training           and Rokhlin 1997] due to overhead and complexity. Our experiments
+and shape generation [Jian and Marcus 2017]. Our method provides             with FMM lead to a similar conclusion (common in the literature
+faster winding number computation, potentially unlocking training            [Blelloch and Narlikar 1994]). We opt for a more straightforward
+on larger datasets at higher resolutions. With our unified definition,       tree-algorithm and show applications to inside-outside problems
+triangle soups and point clouds could possibly be homogenized for            for triangle soups and point clouds.
+training purposes. Andrews [2013] advocates for the use of winding              Point Set Surfaces. There are compelling reasons to represent
+numbers to post-process meshes during user-guided inverse 3D                 shapes as point clouds [Alexa et al. 2001; Amenta and Kil 2004].
+modeling. Similarly, Le & Deng [2017] use winding numbers for                Our method can be used to compute the winding number for point
+mesh repair on automatically generated coarse cages for animation            clouds as easily as it can for triangle surfaces. This frees up practi-
+and simulation. Ichim et al. [2017] use winding numbers to compute           tioners to use the best surface representation for a given application,
+tetrahedral meshes robustly for anatomical simulations of faces.             or even mix triangles and points. Just as the introduction of the
+                                                                             winding number function in [Jacobson et al. 2013] did not seek to
+2.1   Related Works                                                          smooth or change input triangle meshes, we do not change the sur-
+The work of Jacobson et al. [2013] includes a rich review of literature      face: instead, we simply answer whether a query point is inside or
+related to inside-outside segmentation for triangle meshes (e.g.,            outside. The winding number represents a surface as a discontinuity,
+[Murali and Funkhouser 1997; Nooruddin and Turk 2003; Zhou                   the definition for triangle soups maintains this property and so does
+et al. 2008]). We refer to them for a more comprehensive review.             our definition for points. Calderon et al. [2014] define morphological
+Here we focus on contemporary works as well as those related to              operations for Moving Least Squares point set surfaces, citing gener-
+our methodology for fast approximation and our point set surface             alized winding numbers as a possible way to improve inside-outside
+representation.                                                              classification. We show signed distance fields and offset surfaces
+                                                                             for point sets, indicating that this is indeed possible. Sanchez et al.
+   Boundary Element Method. The generalized winding number def-              [2012] losslessly convert triangle meshes to a distance field that
+inition is equivalent to solving the Laplace equation (∆u = 0) using         is signed using angle-weighted pseudonormals [Baerentzen and
+the boundary element method with jump boundary conditions (i.e.,             Aanaes 2005]. This requires not just a closed, watertight mesh but
+
+                                                                          ACM Transactions on Graphics, Vol. 37, No. 4, Article 43. Publication date: August 2018.
+43:4    • Gavin Barill, Neil G. Dickson, Ryan Schmidt, David I.W. Levin, and Alec Jacobson
+
+
+also good mesh-quality for numerically trustworthy normal com-                                   Point cloud     Our method’s Ground truth             Uniform
+putation. Fryazinov et al. 2011 [2011] convert triangle meshes to                                                    areas       areas                  areas
+signed distance fields using BSP-trees. In contrast, we unify triangle
+meshes and implicits for point sets through a consistent definition
+of their winding numbers.
+   Point set surfaces are closely related to noisy point cloud surface
+reconstruction, though with a different objective. State-of-the-art
+methods [Boltcheva and Lévy 2017; Fuhrmann and Goesele 2014;
+Kazhdan and Hoppe 2013; Mostegel et al. 2017] are robust to noise,                         Fig. 5. The area term is crucial to our method. We show the results from
+scale, sampling density diversity, and missing data. While our dipole                      point set surfaces (left) using our estimated areas (center-left) the ground-
+function is similar in shape to the directional derivative of a Gaussian                   truth area (center-right) and an evenly-distributed area (right).
+used by others [Fuhrmann and Goesele 2014; Zagorchev and Gosh-
+tasby 2012], that function is non-singular and thus non-interpolating.
+Seversky and Yin [2012] use an inside-outside segmentation for their                       function [Calakli and Taubin 2011; Lu et al. 2017]. Lu et al. formu-
+surface reconstruction. They create a coarse approximation to the                          late a regularized kernel similar to ours and use the fast multipole
+surface, then apply ray stabbing to approximate both a parity map                          method for fast summation. However, the regularization introduces
+for inside-outside, as well as a confidence map using unsigned solid                       a parameter and unnecessary blurring. Our winding number also has
+angle. Our method avoids ray stabbing, and thresholds the wind-                            a sharp gradient near the extracted surface, but using root finding
+ing number for surface extraction, rather than using space carving.                        during polygonization alleviates mesh extraction concerns.
+Employing a tree-algorithm similar to ours, Carr et al. [2001] ex-
+tract a surface from a point cloud by using radial basis functions to                      3     METHOD
+approximate a signed distance function. To break symmetry, this                            The input to our method is either: a set of m oriented points in
+and other methods create extra “offset points” near input points                           R3 , represented as a list of positions {p1 , p2 , . . . , pm } with corre-
+along their normal directions [Ohtake et al. 2003, 2004]. Points and                       sponding unit normal vectors {n̂1 , n̂2 , . . . , n̂m } or a set of m ori-
+their normal offsets are sometimes referred to as “dipoles” in the                         ented triangles, e.g., represented as a list of vertex position triplets
+surface reconstruction literature [Shalom et al. 2010] In our paper,                       {{v11 , v12 , v13 }, . . . , {vm1 , vm2 , vm3 }}, from which triangle normals
+we use “dipole” to refer to a single oriented point: we do not use                         may be readily computed. The output of our method is a function
+offset points, nor inherit their ambiguities and difficulties (see [Shen                   w̃ : R3 → R that quickly approximates the winding number func-
+et al. 2004]).                                                                             tion w : R3 → R of the input set. While the winding number for
+                                                                                           oriented triangles was defined by Jacobson et al. [2013], we first
+   Connection to Poisson Surface Reconstruction. Kazhdan et al. [2006]                     must define what we mean by the winding number function for a
+propose solving a Laplace equation with jump boundary conditions                           set of oriented points.
+enforced with a soft constraint, effectively blurring the boundary
+conditions during discretization, resulting in a discrete Poisson                          3.1   Point Clouds
+equation (∆u = f ). Stepping away from the particular discretiza-                          Intuitively, the winding number of a continuous surface S evaluated
+tion, solver employed, or soft constraints, the Poisson surface re-                        at a query point q ∈ R3 is the sum of signed solid angles subtended
+construction problem is equivalent to the winding number. Both                             by small surface patches. For meshes, patches correspond to trian-
+seek solutions to the Laplace equation with a jump of ±1 across                            gles and the signed solid angle formula is easily computed via the
+the surface, reproducing the indicator function for solid shapes and                       inverse tangent function (atan2) [van Oosterom and Strackee 1983].
+more generally the winding number function for overlapping or                              For a smooth surface, patches will be curved. Considering the limit
+surfaces with boundaries. We do not blur our input data or bound-                          of shrinking patches to points, we arrive at the definition of the
+ary conditions and formulate our point-based winding number in                             winding number as an integral of the differential solid angle d Ω(q)
+the smooth setting. Consequently, we do not need to solve a sys-                           subtended at q:
+tem of linear equations to recover the reconstructed surface, just                                                             ∫
+                                                                                                                             1
+a simple summation which we then accelerate. The linear system                                                    w S (q) =       d Ω(q).                   (2)
+solution of [Kazhdan et al. 2006] is only known up to a constant                                                            4π S
+shift; later, Kazhdan et al. [2013] pull this isovalue toward zero by                      As angles and solid angles are translation invariant, so is the winding
+adding additional soft constraints, incurring another parameter. The                       number function. We can shift our coordinate system so that the
+winding number has an exact value of one inside a solid shape and                          query point q lies at the origin, where the differential solid angle
+zero outside (e.g., in the limit of point sampling) and the surface                        d Ω is the differential signed surface area of the surface projected
+neatly follows the 1/2-isovalue. Our definition of the winding num-                        onto the unit sphere:
+ber for points is consistent with this and – armed with local area                                                   ∫
+                                                                                                                            x · n̂
+                                                                                                                                          ∫
+                                                                                                                                              (x − q) · n̂
+estimations per point – extracting along the 1/2-isovalue accurately                          w S (q) = w S −q (0) =                 dx =                  dx, (3)
+                                                                                                                      S −q 4π kxk  3
+                                                                                                                                           S 4π kx − qk 3
+identifies the surface.
+   Contemporary methods to Poisson surface reconstruction have                             where x is a point on the surface with outward facing unit normal
+focused on the difficulties of extracting the isosurface of an indicator                   vector n̂.
+
+ACM Transactions on Graphics, Vol. 37, No. 4, Article 43. Publication date: August 2018.
+                                                                                            Fast Winding Numbers for Soups and Clouds                     •   43:5
+
+
+  The integrand (x − q) · n̂/(4π kx − qk 3 ) is commonly found in             Winding number of 20 points                              Single representative
+boundary element method and partial differential equation litera-
+ture, as it is the normal derivative of the Green’s function G(q, x) =
+−1/(4π kx − qk) of the Laplace equation in R3 [Evans 1997, pp. 37]:
+                                           
+              (x − q) · n̂           −1
+                           = ∇                · n̂ C G n̂ (q, x)    (4)
+             4π kx − qk 3        4π kx − qk
+This function is harmonic (∆G n̂ (q, x) = 0) away from q. Because har-
+monic functions are closed under summation, the winding number                Log of absolute value
+function of a surface is harmonic away from the surface, whether
+the surface is triangulated [Jacobson et al. 2013] or smooth [Narain
+2013]. In electrostatics, G n̂ (q, x) appears as the electric potential
+induced by a dipole (two oppositely charged points close together).
+   If the input oriented points lie on a – perhaps unknown – surface,
+then we can use them to approximate the integral in Equation (3)
+as a discrete summation akin to single-point quadrature:
+              ∫                        m
+                  (x − q) · n̂        Õ (pi − q) · n̂i
+                                                                              Fig. 6. A cluster of 20 dipoles has an intricate winding number field nearby
+    w S (q) =                  dx  ≈      ai               C w(q), (5)
+               S 4π kx − qk
+                             3               4π kpi − qk 3                    (left), but far away their function is quite tame (middle) and well approxi-
+                                      i=1
+                                                                              mated by a single, stronger dipole (right).
+   where ai is the geodesic Voronoi area of the point pi on the
+surface S. We have thus arrived at a definition of the winding num-
+ber function w : R3 → R for a cloud of m oriented points as the
+area-weighted sum of dipole contributions located at each point
+                                                                              like a single, more heavily weighted, dipole. For a far away query
+in the cloud. At first glance, the ai coefficients appear to be tun-
+                                                                              point, rather than computing the contribution of all dipoles (O(m)
+able “weighting parameters”, however they actually have definitive
+                                                                              computation), we can compute the contribution of a single pre-
+meaning and physical units of surface area. They are not arbitrary
+                                                                              constructed representative dipole with appropriate orientation and
+parameters that might need tuning (in contrast to parameters of
+                                                                              area (O(1) computation).
+[Carr et al. 2001; Fuhrmann and Goesele 2014; Kazhdan et al. 2006;
+Kazhdan and Hoppe 2013; Shen et al. 2004]). Assuming sufficient                                   m
+                                                                                                  Õ          (pi − q) · n̂i       (p̃ − q) · ñ
+regularity during refinement, this approximation will converge to                       w(q) =          ai                  ≈                   C w̃(q)        (6)
+the exact winding number for the smooth surface.                                                  i=1
+                                                                                                             4π kpi − qk 3      4π k p̃ − qk 3
+   The area ai associated to each point at pi may be known due                                                         Õm                    Ím
+                                                                                                                                                  ai pi
+to the particular point-cloud acquisition process [Fuhrmann and                                                   ñ =      ai n̂i , p̃ = Íi=1  m a ,          (7)
+Goesele 2014]. Otherwise, they can be approximated using any num-                                                      i=1                      i=1 i
+ber of methods in the literature (e.g., [Belkin et al. 2009]). In our
+examples, we project each point and its k-nearest neighbors (filter-          where ñ, and p̃ are the (non-unit) total area-weighted normal and
+ing out those with opposite normals) onto the best-fit plane, and             area-weighted average position, respectively. The formula for ap-
+compute that point’s associated 2D Voronoi area using Triangle                proximation function w̃ for the entire cluster mimics the formula for
+[Shewchuk 1996]. Our results are insensitive to the exact value of            a single dipole. The only modification is that length of the normal
+k. We use k = 20, matching the general range used in point cloud              vector ñ acts as the collective area or strength.
+Laplace/mass matrix literature. Accounting for Gaussian curvature                This works for query points far from all of the input points, but,
+using a quadratic fit [Cazals and Pouget 2003] should improve ac-             presumably, most query points will lie near some part of the input
+curacy, but we leave this as an incremental improvement as our                point cloud.
+method is not too sensitive to area accuracy (see Fig. 5).                       We can apply this approximation in a divide and conquer fash-
+   For unoriented point clouds we can also use the plane to define            ion using a tree data structure to separate points into smaller and
+normals ni (up to sign, [Berger et al. 2017]).                                smaller clusters with more and more accurate single-dipole approxi-
+                                                                              mations [Barnes and Hut 1986] (see Fig. 7). We provide a pseudocode
+3.2   Fast approximation                                                      implementation in Algorithm 1.
+Most applications require evaluating the winding number at a large               To achieve O(log m) complexity for a single evaluation, we build
+number of query points. Evaluating w via direct summation over the            a bounding volume hierarchy (e.g., using an octree or axis-aligned
+m dipoles for n queries would result in O(nm) complexity. We now              bounding-boxes).
+describe a fast approximation based on the observation that while                In Algorithm 1, we assume that each node of the tree contains an
+dipoles have large local influence they flatten out quickly (1/r 2 ) far      approximation of the winding number w̃ for all dipoles contained
+away.                                                                         in the node’s bounding cell. We now turn to the construction of
+   Consider the winding number field of a cluster of m points (see            this approximation, known in the n-body literature as the “far field
+Fig. 6). The field is locally complex, but zooming out the field looks        expansion.”
+
+                                                                           ACM Transactions on Graphics, Vol. 37, No. 4, Article 43. Publication date: August 2018.
+43:6    • Gavin Barill, Neil G. Dickson, Ryan Schmidt, David I.W. Levin, and Alec Jacobson
+
+
+                                                                                             We start by considering the Taylor expansion for a single unit-
+                                   βr                                                      area dipole function, taking the expansion with respect to the dipole
+                                                                                           position x at what will be the center point p̃:
+
+                    r                 Near                  Far                                     G n̂ (q, x) = n̂ · ∇G(q, x)                                      (8)
+                                      Field                 Field                                               = n̂ · ∇G(q, p̃)                                     (9)
+                                    Recurse                   Use
+            p~                    or use direct            expansion
+                                                                                                                   + ((x − p̃) ⊗ n̂) · ∇ G(q, p̃)
+                                                                                                                                         2
+                                                                                                                                                                    (10)
+                                   evaulation                                                                      + 12 ((x − p̃) ⊗ (x − p̃) ⊗ n̂) · ∇3G(q, p̃)     (11)
+                                                                                                                   + higher order terms,                            (12)
+                                                                                           where ∇G, ∇2G, and ∇3G are the gradient, the Hessian and the three-
+                                                                                           tensor of third derivatives of the Green’s function for the Laplace
+Fig. 7. Our spatial partitioning separates near and far fields, recursively.
+                                                                                           equation. Formulae for each derivative are located in Appendix A,
+                                                                                           for reference.
+ Algorithm 1: Fast Approximation of Winding Number                                            The derivatives themselves do not depend on the dipole’s actual
+ fastwn(q,tree)                                                                            center x, so we can apply the Taylor expansion to the sum of m area-
+  Inputs:                                                                                  weighted dipoles to get an approximation of their collective winding
+    q        Query point in R3                                                             number. We replace x and n in Equations (8-12) with summations
+    tree Root of bounding volume hierarchy for points/triangles                            over each point pi and its normal n̂i to obtain our fast winding
+    β        accuracy parameter                                                            number approximation w̃(q):
+  Outputs: scalar winding number of all elements in tree at q                                             m
+                                                                                                                  !
+  // tree.p: center of tree’s winding number approximation, tree.w̃
+                                                                                                         Õ
+                                                                                               w(q) ≈       ai n̂i · ∇G(q, p̃)                              (13)
+  // tree.r : maximum distance from tree.p to any of its elements                                        i=1
+  if kq − tree.pk > β ∗ tree.r then                                                                         m
+                                                                                                                                    !
+                                                                                                           Õ
+       // q is sufficiently far from all elements in tree                                               +        ai (pi − p̃) ⊗ n̂i · ∇2G(q, p̃)                    (14)
+       return tree.w̃(q)                                                                                       i=1
+                                                                                                                  m
+                                                                                                                                                   !
+  else                                                                                                           Õ
+       val ← 0                                                                                          + 12          ai (pi − p̃) ⊗ (pi − p̃) ⊗ n̂i · ∇3G(q, p̃)   (15)
+                                                                                                                i=1
+       if tree has no children then
+                                                                                                        C w̃(q).                                                    (16)
+            // q is nearby; use direct sum for tree’s elements
+             for each point/triangle e in tree do                                          The coefficients in front of ∇G, ∇2G and ∇3G terms are vectors,
+                 // w e : area-weighted dipole or solid angle                              two-tensors, and three-tensors respectively. These are precomputed
+                 val += w e (q)                                                            during bounding volume tree construction and stored for each non-
+       else                                                                                empty node of the tree. The expansion could continue with higher
+             for each child of tree do                                                     order terms indefinitely, in practice we saw diminishing returns
+                 // Recursive call                                                         beyond the second-order expansion above.
+                 val +=fastwn(q, child)                                                       If we use pth order expansion, we add O(3p ) complexity to our
+       return val                                                                          evaluation. The overall, amortized complexity – assuming a well
+                                                                                           formed tree – for pre-computation and evaluation at n queries is
+                                                                                           O(3p m log m + 3p n log m).
+   3.2.1 Higher-order approximation. The accuracy of our approxi-
+                                                                                              Our method falls into the Barnes-Hut, tree-algorithm family. The
+mation for a cluster of dipoles can be further improved, allowing an
+                                                                                           Fast Multipole Method (FMM) is closely related and achieves O(n)
+even tighter definition of “nearby” in the algorithm.
+                                                                                           performance, but precomputation is significantly more involved
+  The representation of a sum of dipoles as a single representative
+                                                                                           and complexity results rely on very strict assumptions about the
+dipole in Equation (6) can be understood as the first term in a Taylor
+                                                                                           input point distribution and the query distribution. We implemented
+series expansion about the center of mass p̃. We can improve the
+                                                                                           FMM and found overhead to be excessively costly and that the
+accuracy by adding more terms to the sum.
+                                                                                           typical point set surface extraction does not appear to meet the
+  Recall: The Taylor expansion for a function f (x) : R3 → R at a                          input assumptions for good performance.
+point p̃ is given as                                                                          In comparison to many Fast Multiple Method (FMM) libraries
+                                                                                           (e.g., fmmlib3d [Greengard and Gimbutas 2017]), we must (and do)
+f (x) ≈ f (p̃) + (x − p) · ∇f (p̃) + 12 ((x − p) ⊗ (x − p)) · ∇2 f (p̃) + . . . ,
+                                                                                           separate precomputation from evaluation for applications such as
+where ∇f : R3 → R3 and ∇2 f : R3 → R3×3 are the gradient                                   iso-surface polygonization using a continuation method [Wyvill
+and the Hessian of f , producing vectors and symmetric two-tensors                         et al. 1986] (see Fig. 9). This is in contrast to the prototypical applica-
+respectively. We use ⊗ and · to mean tensor outer and inner products,                      tion of FMM to n-body gravitational systems, where the evaluation
+respectively.                                                                              points are the same as the sources and evaluation is done only once.
+
+ACM Transactions on Graphics, Vol. 37, No. 4, Article 43. Publication date: August 2018.
+                                                                                                  Fast Winding Numbers for Soups and Clouds                    •   43:7
+
+       Input point cloud                          0.75 isosurface                      0.25 isosurface                         0.5 isosurface (correct)
+
+
+
+
+Fig. 8. Input point cloud (left), wrong isovalues produce close surfaces (middle). The correct isovalue from the smooth theory is 1/2 and the polygonized
+isosurface of our fast approximation agrees (right).
+
+
+               linear        interpolation-based                  bisection
+           interpolation         root ﬁnding                  (recommended)
+                                                                                                  m
+                                                                                                                  !
+                                                                                                  Õ∫
+                                                                                      w(q) ≈              n̂t dA · ∇G(q, p̃)                                        (18)
+                                                                                                  t =1 t
+                                                                                                      m ∫
+                                                                                                                                !
+                                                                                                     Õ
+                                                                                                +          (x − p̃) ⊗ n̂t dA · ∇2G(q, p̃)                           (19)
+                                                                                                  t =1   t
+                                                                                                      m ∫
+                                                                                                                                            !
+Fig. 9. Many implicit surface polygonizers use linear interpolation or linear-
+                                                                                                     Õ
+                                                                                                +2
+                                                                                                 1           (x − p̃) ⊗ ((x − p̃) ⊗ n̂t ) dA · ∇3G(q, p̃)           (20)
+interpolation based root-finding. However, the winding number for points
+                                                                                                     t =1 t
+has asymptotic shape near each dipole, leading to poor surface quality.
+Iterative bisection, instead, extracts clean isosurfaces.                                        C w̃(q).                                                           (21)
+
+                                                                                    The first coefficient m
+                                                                                                          t =1 t n̂t dA is simply the total area-weighted
+                                                                                                         Í ∫
+                                                                                    normal over the triangles, mimicking the intuition that a cluster of
+                                                                                    triangles are being replaced with a single, larger triangle. All terms
+                                                                                    have closed form expressions found in Appendix B.
+3.3   Triangle Soups
+Along with the introduction of the generalized winding number                          Implementation details. The broad implementation of our alo-
+for triangle meshes, Jacobson et al. [2013] propose a divide and                    girthm is agnostic to the bounding volume hierarcy used. In prac-
+conquer algorithm for efficient evaluation. Their method is also                    tice, we use an octree as a bounding volume for point clouds and an
+based on a bounding volume hierarchy, but differs from our design                   axis-aligned bounding box tree for triangle soups. The axis-aligned
+in two major ways: 1) it is exact while ours is approximate, and 2)                 bounding box tree allows us to avoid clipping triangles. In the case
+its computational complexity strongly coupled to the connectivity                   of points, our algorithm was fastest when we set no limit to the
+of the input mesh. In the worst case, for m triangles and n query                   depth of our octree – any cell containing more than two points has
+points their method reduces to the direct sum and performs with                     children.
+O(nm) complexity. Instead, we now describe how to leverage our                         For point clouds, we use a continuation method [Wyvill et al.
+fast winding number approximation for triangle soups.                               1986] for voxelization and isosurface extraction. The winding num-
+   Elevating our fast approximation algorithm to input triangle                     ber function is smooth and very flat away from the input points,
+soups turns out to be straightforward. Referring to Algorithm 1, we                 but each point introduces a dipole singularity. Computing values
+will use a triangle’s solid angle (à la [Jacobson et al. 2013]) for evalua-         at each grid corner and relying on linear interpolation to find the
+tions of w e in the direct sum, but need to define our approximations               surface (as many “marching cubes” [Lorensen and Cline 1987]) will
+w̃ for a cluster of triangles.                                                      produce visible pockmarks, isolated small dents and bumps like the
+   Like any surface, the solid angle of a single flat triangle t is the             eyes on a potato (see Fig. 9). Root finding [Wyvill et al. 1986] avoids
+integral of the dipole over its area:                                               this and finds a more accurate surface. This method begins with a
+                                                                                    series of “seed cubes” on the surface then incrementally expands
+                                ∫                                                   to neighbouring cubes which contain the isosurface. A standard
+                     Ωt (q) =        ∇G n̂t (q, x) · n̂ dA,              (17)       problem in continuation polygonizers is finding initial seed cubes.
+                                 t                                                  However, since our surface is defined by point samples which lie
+                                                                                    on the surface, we use them as the set of seed points.
+thus, the contribution of a triangle can be interpreted as a sum of                    For closed surfaces in the smooth setting, the winding number
+point contributions.                                                                of the interior is exactly one and the exterior is zero: the value of
+                                                                                    1 neatly follows the surface. For an area-weighted point set, the
+   Differentiation and integration associate, so the summations over                2
+points in the coefficients of the Taylor expansion in Equation (13) are             1 -level-set converges to the underlying surface in the limit. As such,
+                                                                                    2
+replaced with summations over triangles, each summand expanding                     we use an isovalue of 12 for point set surface polygonizations in our
+into an integral over the corresponding triangle:                                   examples (see Fig. 8).
+
+                                                                                 ACM Transactions on Graphics, Vol. 37, No. 4, Article 43. Publication date: August 2018.
+43:8    • Gavin Barill, Neil G. Dickson, Ryan Schmidt, David I.W. Levin, and Alec Jacobson
+
+        Thingi10k dataset                Precomputation time, speedup                                            Average evaluation time,                         speedup
+                                         Seconds              factor                                             Seconds                                          factor
+                                          10²        1.25     100×                                               10⁻²                                             1000×
+                                                    n                                                                                             n1
+                                               Jacobson
+                                           10⁰ et al. 2013         n0.8
+                                                                                                                              Jacobson                   n0.5     100×
+                                                                                                                 10⁻⁴         et al. 2013
+                                                                             10×                                                                                   10×
+                                          10⁻²                                                                                                         log(n)
+                                                             ours
+                                                                                                                 10⁻⁶                                               1×
+                                          10⁻⁴
+                                                                             1×                                                      ours                          0.1×
+                                                                                                                 10⁻⁸
+                                                 10¹   10³   10⁵       10⁷         10¹     10³       10⁵   10⁷          10¹        10³       10⁵            10⁷           10¹ 10³ 10⁵ 10⁷
+                                          n = number of triangles                                n                                       n                                        n
+
+Fig. 10. We exhaustively test the performance of our method on ten thousand models [Zhou and Jacobson 2016]. Compared to the divide and conquer method
+introduced by Jacobson et al. [2013] our method is significantly faster in both precomputation time (up to 100× faster) and average evaluation time (up to
+1000× faster). Both stages empirically demonstrate asymptotically better performance.
+
+
+4      EXPERIMENTS & RESULTS                                                                               Input triangle soup                Fast and robust voxelization
+We implemented our area estimation and fast evaluation in C++
+using std::thread and Intel TBB for parallelization, utilizing li-                                      open
+                                                                                                      boundary
+bigl [Jacobson et al. 2017] and Eigen [Guennebaud et al. 2010]
+for geometry processing and linear algebra routines, respectively.
+Performance timings are conducted on a Intel i7-6950X CPU with
+128GB of DDR4 memory.
+   In Fig. 1, we demonstrate the versatility of our method both
+                                                                                                                                conﬂicting edge
+in terms of output and inputs. We use our fast winding number                                                                     orientation
+                                                                                                 self-intersection
+evaluation on clean meshes, triangle soups and point clouds of
+varying regularity. Using this evaluation to determine what is inside
+or outside the given shape regardless of representation, we may
+output a clean isosurface, a voxelization, 3D printer path instructions
+or signed distance fields.                                                                       Fig. 11. Voxelization requires robust inside-outside segmentation; our fast
+   We demonstrate simply signing an unsigned distance field with                                 evaluation takes 0.021 secs for precomputation and 0.184 secs to evaluate
+the winding number, as a drop-in robust replacement for pseudonor-                               the winding number at 1003 voxel centers. In contrast, the divide and con-
+mal testing or ray stabbing (see Fig. 4). This preserves the absolute                            quer method of Jacobson et al. [2013] takes 0.129 secs of precomputation
+value of the distance at the cost of creating a discontinuity along                              and 9.13 secs for the million queries.
+the winding number threshold level-set. In contrast, Xu et al. [Xu
+and Barbič 2014] create a continuous (discretized) signed distance
+field by effectively morphologically closing the input. This comes                                  For our timings and all other experiments (unless specified), we
+at the cost of introducing a parameter. We view our methods as                                   set our accuracy parameter to β = 2 for triangles and β = 2.3 for
+complementary.                                                                                   points. We chose these values to achieve 10−3 and 10−2 root mean
+   In Fig. 10, we compute winding number values for each of the                                  squared error for triangles and points respectively. These values
+ten thousand models in the Thingi10k dataset [Zhou and Jacobson                                  provide a good trade-off between accuracy (see Fig. 4) and speed
+2016]. We record precomputation and average evaluation time (over                                (see Fig. 10). Even a small value of β = 2 produces the identical vox-
+a 503 lattice of queries in the bounding box of the shape) for our                               elization as the exact winding number (i.e., when thresholding at 1/2).
+fast approximation and the divide and conquer method of Jacobson
+                                                                                                                                   Approximation error on hotdog
+                                                                                                 In Fig. 11, we compute a
+et al. [2013]. Their method has a considerably more involved pre-                                voxelization of a typical tri-
+computation stage; consequently, their method is up to 100× slower                               angle soup from virtual 3D        10 -1
+
+for precomputation alone. While our method’s precomputation em-                                  modeling. The surface is          10-2
+pirically follows a slightly sublinear trend, the precomputation of                              composed of multiple con-         10-3
+                                                                                                                                                        Max Error
+Jacobson et al. [2013] is superlinear. This is explainable because                               nected components that in-
+their performance is bound by the number of “boundaries” created                                 tersect each other with spu-      10-4
+while slicing up the input model into a bounding volume hierarchy                                rious inconsistent orienta-       10 -5
+
+(under regularity assumptions, curve boundaries on a surface should                              tions and open boundaries.        10-6       Root Mean
+             1
+have O(m 2 ) complexity). While their method appears to achieve                                  In the inset figure we show                  Squared Error
+                                                                                                                                        1     2       4      8
+                                                                                                                                          β = accuracy parameter
+sublinear average evaluation for a subset of the dataset, there is also                          how the max and average
+a consistent linear O(n) subset. In constrast, our average evaluation                            error follow the β parame-
+time more neatly follows a logarithmic trend, as expected.                                       ter on this hotdog. As β is
+
+ACM Transactions on Graphics, Vol. 37, No. 4, Article 43. Publication date: August 2018.
+                                                                                                Fast Winding Numbers for Soups and Clouds                    •   43:9
+
+                                                                                  input soup         harness                   body                  solid harness
+
+
+
+
+Fig. 12. Holey, non-manifold triangle meshes A and B each induce a
+generalized winding number function on the other’s faces, useful for boolean
+operations such as A \ B.
+                                                                                                                  \                         =
+                                                                                  Fig. 14. The harness and accessories of this army man were modeled as
+                                                                                  mere façades: all have missing backs and are simply placed atop the man’s
+                                                                                  body (backfaces shown with red stripes). The body itself also has mesh
+                                                                                  defects, but despite these problems, we subtract it from the harness to
+                                                                                  create effectively solid pieces.
+
+
+                                                                                             soup           overlay               union              3D print
+
+
+
+                                                                                   cloud
+
+
+       Fig. 13. A holey cylinder is subtracted from a holey bunny.                Fig. 15. A point cloud of St. John the Baptist’s severed head and a “pedestal”
+                                                                                  created out of a soup of ribbons are unioned each induce a continuous
+                                                                                  winding number field. We quickly approximate this during their Boolean
+increased, more and more of the computation moves from far field                  union and send the result to be 3D printed. Credit for the head model goes
+expansions to near field recursion and direct summation, increasing               to Geoffrey Marchal [2015].
+runtime. However, increasing β rapidly decreases the error. For ex-
+ample, if we choose β so large that our runtimes are equivalent to
+the divide and conquer method of Jacobson et al. [2013], then our                 Design (CAD) tools, where B-Rep “solids” are formed from trimmed
+approximation error is already below machine epsilon for single-                  NURBS patches. In the general case it is mathematically impossible
+precision floats (10−7 ).                                                         for two adjacent trimmed patches to exactly meet along a 3D curve.
+   For a measure of quality, we evaluated our fast winding number                 Despite these gaps, the geometry can be rendered, simulated, and
+on the Thingi10K dataset, using a 1003 voxel grid. Over 50% of shapes             manufactured.
+had exactly zero misclassified voxels using our approximation. The                   Fig. 14 illustrates another example representative of the kinds of
+median number of misclassifications is therefore also zero, and the               models commonly found in the film and games industries, where
+average is 363 (or, 0.0363%). The average root mean squared error                 many shape details are open shells that simply intersect. Visually
+of the fast winding number value is 8e−3.                                         this assembly forms an apparent solid suitable for display, but ge-
+   Boolean composition operations are a standard tool in the shape                ometrically it is a disaster for many downstream applications. We
+modeling toolbox, and widely used with mesh representations. Geo-                 can close off the large open regions of the equipment harness by
+metric mesh Boolean techniques generally operate by computing                     subtracting the body of the underlying character. The geometry in
+intersections of the mesh elements. If there are holes in the mesh in             areas away from the intersections remains unmodified. We can now,
+the intersection regions, then the Boolean operation is mathemati-                for example, render this harness independently in an equipment-
+cally ill-posed. However, given two “holey” surfaces such as those                selection screen, apply deformable-body simulation while colliding
+in Fig. 12, one can easily imagine what the Boolean result might                  it with the character’s clothing, or 3D-print a separate removable
+be. Our fast winding numbers provide a way to implement such an                   plastic harness during a figurine-design workflow.
+operation. Rather than intersect the triangles, we trim each mesh                    The examples above illustrate an interesting approach to mesh
+against the winding field of the other [Jacobson 2016]. The result                modeling, where we no longer depend on having closed, well-
+follows our intuition – where triangles exist, the cut lines follow               defined volumes. Each mesh “part” has an associated winding field
+them, and where they do not, something sensible happens.                          that interpolates the existing geometry, while doing something
+   In Fig. 13, we take the difference of two very holey meshes. Tri-              sensible in any soupy areas. Operations can be formulated using
+angle edges are not stitched in the few areas where they do touch.                whichever of these representations is most relevant. We can also
+While this is possible, it is insignificant given the large number of             incorporate our point-based winding field into this framework, al-
+adjacent holes. This notion of surfaces being closed “within a toler-             lowing for hybrid operations between point-set surfaces and meshes
+ance” is widely accepted in all industry-standard Computer-Aided                  (see Fig. 15).
+
+                                                                               ACM Transactions on Graphics, Vol. 37, No. 4, Article 43. Publication date: August 2018.
+43:10    •   Gavin Barill, Neil G. Dickson, Ryan Schmidt, David I.W. Levin, and Alec Jacobson
+
+
+          Winding Number                     Log₁₀ of absolute error                       5    LIMITATIONS & CONCLUSION
+                                            -1
+    1                                                                                      The classic and generalized winding numbers require orientation.
+                                                                                           This applies to the soups and clouds we consider, too. For unoriented
+                                            -2                                             soups, automatic methods for determining a consistent orientation
+  0.5                                                                                      exist (e.g., [Borodin et al. 2004; Takayama et al. 2014]). For unori-
+                                                                                           ented point clouds, off-the-shelf normal estimation methods (e.g.,
+                                            -3
+                                                                                           MeshLab [Cignoni et al. 2008]) complement our method well: a few
+   0                                                                                       incorrectly oriented points will only degrade the overall winding
+                                            -4                                             number field locally.
+                                                                                               As mentioned in the introduction, our method does not directly
+Fig. 16. Here we take a 2D slice through the 3D winding number field of                    fit the requirements for surface reconstruction of noisy points. Our
+the octopus model found in Fig. 8
+                                                                                           point set surfaces are interpolating: dipoles are ±∞ on either side, so
+                                                                                           any isovalue will pass through them (see Fig. 8). Early experiments
+                                                                                           show that treating noisy points as random variables drawn from
+             Input cloud                    Oﬀset surface                                  Gaussian distributions is a promising approach (e.g., using Monte
+                                                                                           Carlo sampling to generate more points creates a smoothed winding
+                                                                                           number). Similarly, we show results for point samplings of complete
+                                                                                           surfaces without boundaries. For “partial surfaces”, the level-set iso-
+                                                                                           value should be adjusted according to total Gaussian curvature
+                                                                                           (analog of a 2D curve’s turning number). Fortunately, curvature
+                                                                                           estimation for point clouds is well studied [Belkin et al. 2009; Cazals
+                                                                                           and Pouget 2003]. It would also be interesting to consider using
+                                                                                           interval trees to improve isosurface extraction [Cignoni et al. 1997].
+                                                                                               Our fast evaluation for triangle soups and point clouds will not
+Fig. 17. By signing the distance field, we can take an offset surface that                 only improve the performance of all applications already relying
+strictly contains the point cloud.                                                         on generalized winding numbers, but opens the door to new op-
+                                                                                           portunities. We foresee a rich topic of research exploring how to
+                                                                                           push raw, unstructured geometric data like soups and clouds farther
+                                                                                           along the geometry processing pipeline.
+   In Fig. 5 we compare our point-based definition of the winding
+                                                                                           ACKNOWLEDGMENTS
+number using approximated areas and ground truth, demonstrating
+robustness. From our area estimation we are able to extract the point
+surface from a fixed isovalue of 12 .                                                      This work is funded in part by NSERC Discovery Grants (RGPIN2017-
+   For point cloud timings on a laptop, refer to the example in Fig. 16.                   05235 & RGPAS-2017-507938 & RGPIN-2017-05524), NSERC DAS
+On a point cloud of 300,000 dipoles, with 250,000 queries, the fast                        (RGPAS-2017-507909), Connaught Funds (NR2016-17), the Canada
+winding number took 0.578 seconds for the precomputation and an                            Research Chairs Program, and a gift by Adobe Systems Inc. We
+average evaluation of 3.01 micoseconds per query. In contrast, the                         thank Michael Tao for the derivations found in Appendix A and B,
+direct evaluation took an average of 4,080 microseconds per query.                         as well as Sarah Kushner for help with figure creation.
+The maximum approximation error was less than 0.1, with a root
+mean squared error of 0.0191, which was sufficient to produce the                          REFERENCES
+isosurface in Fig. 8.                                                                      M Alexa, Johannes Behr, D Cohen-Or, Shachar Fleishman, David Levin, and Cláudio T
+                                                                                               Silva. 2001. Point Set Surfaces. IEEE Visualization (2001), 21–537.
+   Using the inside-outside testing of the winding number, we are                          Nina Amenta and Yong Joo Kil. 2004. Defining point-set surfaces. ACM Trans. Graph.
+able to bestow sign upon an unsigned distance field. This can be                               (2004).
+                                                                                           James L. Andrews. 2013. User-Guided Inverse 3D Modeling. Ph.D. Dissertation. UC
+done for both triangles and points. In Fig. 1 we sign a distance field                         Berkeley.
+of a soupy triangle mesh, and in Fig. 17 we use signed distance to                         J. Andreas Baerentzen and Henrik Aanaes. 2005. Signed Distance Computation Using
+create an offest surface for a point cloud.                                                    the Angle Weighted Pseudonormal. IEEE TVCG (2005).
+                                                                                           J. Barnes and P. Hut. 1986. A hierarchical O(N log N) force-calculation algorithm.
+   With our fast winding numbers for points, we are able to 3D                                 Nature (1986).
+print directly from point clouds and soupy meshes – no meshing                             Mikhail Belkin, Jian Sun, and Yusu Wang. 2009. Constructing Laplace Operator from
+or remeshing required (see Fig. 3). This allows us to save on both                             Point Clouds in Rd. In Proceedings of the Twentieth Annual ACM-SIAM Symposium
+                                                                                               on Discrete Algorithms (SODA ’09). Society for Industrial and Applied Mathemat-
+memory and computation. We note that this slicing step is a small                              ics, Philadelphia, PA, USA, 1031–1040. http://dl.acm.org/citation.cfm?id=1496770.
+fraction – less than 10% – of the print preparation time. These slices                         1496882
+                                                                                           Matthew Berger, Andrea Tagliasacchi, Lee M. Seversky, Pierre Alliez, Gaël Guennebaud,
+are then passed to the toolpathing software. At the level of accuracy                          Joshua A. Levine, Andrei Sharf, and Claudio T. Silva. 2017. A Survey of Surface
+of 3D print heads, determining the print paths from both mesh                                  Reconstruction from Point Clouds. Comput. Graph. Forum (2017).
+and point cloud winding number fields is essentially lossless – the                        Guy E Blelloch and Girija J Narlikar. 1994. A practical comparison of N-body algorithms.
+                                                                                               Parallel Algorithms (1994).
+printing of sharp corners and small features will be indistinguishable                     Dobrina Boltcheva and Bruno Lévy. 2017. Surface reconstruction by computing re-
+from those generated by slicing triangles.                                                     stricted Voronoi cells in parallel. Computer-Aided Design (2017).
+
+
+ACM Transactions on Graphics, Vol. 37, No. 4, Article 43. Publication date: August 2018.
+                                                                                                           Fast Winding Numbers for Soups and Clouds                      • 43:11
+
+
+Pavel Borodin, Gabriel Zachmann, and Reinhard Klein. 2004. Consistent Normal                   Rahul Narain. 2013. The harmonicity of the generalized winding number. (2013).
+    Orientation for Polygonal Meshes. In Computer Graphics International 2004 (CGI                http://r-to-the-n.tumblr.com/post/52752267384/
+    2004). 18–25.                                                                              Fakir S. Nooruddin and Greg Turk. 2003. Simplification and Repair of Polygonal Models
+Fatih Calakli and Gabriel Taubin. 2011. SSD - Smooth Signed Distance Surface Recon-               Using Volumetric Techniques. IEEE Transactions on Visualization and Computer
+    struction. Comput. Graph. Forum 30, 7 (2011), 1993–2002.                                      Graphics 9, 2 (April 2003), 191–205. https://doi.org/10.1109/TVCG.2003.1196006
+Stéphane Calderon and Tamy Boubekeur. 2014. Point morphology. ACM Transactions                 Yutaka Ohtake, Alexander Belyaev, Marc Alexa, Greg Turk, and Hans-Peter Seidel. 2003.
+    on Graphics (2014).                                                                           Multi-Level Partition of Unity Implicits. ACM Trans. Graph. (2003).
+Jonathan C Carr, Richard K Beatson, Jon B Cherrie, Tim J Mitchell, W Richard Fright,           Yutaka Ohtake, Alexander Belyaev, and Hans-Peter Seidel. 2004. Ridge-Valley Lines on
+    Bruce C McCallum, and Tim R Evans. 2001. Reconstruction and representation of                 Meshes via Implicit Surface Fitting. ACM Trans. Graph. (2004).
+    3D objects with radial basis functions. Siggraph (2001), 67–76.                            Alexandrina Orzan, Adrien Bousseau, Holger Winnemöller, Pascal Barla, Joëlle Thollot,
+F. Cazals and M. Pouget. 2003. Estimating differential quantities using polynomial                and David Salesin. 2008. Diffusion curves - a vector representation for smooth-
+    fitting of osculating jets. In Proc. SGP. 177–187.                                            shaded images. ACM Trans. Graph. (2008).
+Angel X. Chang, Thomas A. Funkhouser, Leonidas J. Guibas, Pat Hanrahan, Qi-Xing                Mathieu Sanchez, Oleg Fryazinov, and Alexander Pasko. 2012. Efficient Evaluation of
+    Huang, Zimo Li, Silvio Savarese, Manolis Savva, Shuran Song, Hao Su, Jianxiong                Continuous Signed Distance to a Polygonal Mesh. In Proc. SCCG.
+    Xiao, Li Yi, and Fisher Yu. 2015. ShapeNet: An Information-Rich 3D Model Repository.       L. M. Seversky and L. Yin. 2012. A Global Parity Measure for Incomplete Point Cloud
+    CoRR (2015). arXiv:1512.03012                                                                 Data. Comput. Graph. Forum 31, 7pt1 (Sept. 2012), 2097–2106. https://doi.org/10.
+Paolo Cignoni, Massimiliano Corsini, and Guido Ranzuglia. 2008. MeshLab: an Open-                 1111/j.1467-8659.2012.03202.x
+    Source 3D Mesh Processing System. ERCIM News 73 (April 2008), 45–46. http:                 Shy Shalom, Ariel Shamir, Hao Zhang 0002, and D Cohen-Or. 2010. Cone carving for
+    //vcg.isti.cnr.it/Publications/2008/CCR08                                                     surface reconstruction. ACM Trans. Graph. (2010).
+Paolo Cignoni, Paola Marino, Claudio Montani, Enrico Puppo, and Roberto Scopigno.              C Shen, J.F. O’Brien, and J.R. Shewchuk. 2004. Interpolating and approximating implicit
+    1997. Speeding Up Isosurface Extraction Using Interval Trees. IEEE Trans. Vis.                surfaces from polygon soup. 23, 3 (2004), 896–904.
+    Comput. Graph. (1997).                                                                     Jonathan Richard Shewchuk. 1996. Triangle: Engineering a 2D Quality Mesh Generator
+Fang Da, David Hahn, Christopher Batty, Chris Wojtan, and Eitan Grinspun. 2016.                   and Delaunay Triangulator. In Applied Computational Geometry: Towards Geometric
+    Surface-only liquids. ACM Transactions on Graphics (2016).                                    Engineering. Lecture Notes in Computer Science, Vol. 1148. Springer-Verlag, 203–
+Martin de Lasa. 2018. Autodesk. personal communication. (2018).                                   222.
+Olivier Dionne and Martin de Lasa. 2013. Voxelization using generalized winding                Timothy Sun, Papoj Thamjaroenporn, and Changxi Zheng. 2014. Fast multipole repre-
+    numbers. (2013). https://vimeo.com/72468198                                                   sentation of diffusion curves and points. ACM Transactions on Graphics (2014).
+Olivier Dionne and Martin de Lasa. 2014. Geodesic Binding for Degenerate Character             Xin Sun, Guofu Xie, Yue Dong, Stephen Lin, W Xu, Wencheng Wang, Xin Tong, and
+    Geometry Using Sparse Voxelization. IEEE Trans. Vis. Comput. Graph. (2014).                   Baining Guo. 2012. Diffusion curve textures for resolution independent texture
+Lawrence C. Evans. 1997. Partial Differential Equations (1 ed.). 37 pages.                        mapping. ACM Transactions on Graphics (TOG) (2012).
+Oleg Fryazinov, Alexander A Pasko, and Valery Adzhiev. 2011. BSP-fields - An exact             Kenshi Takayama, Alec Jacobson, Ladislav Kavan, and Olga Sorkine-Hornung. 2014. A
+    representation of polygonal objects by differentiable scalar fields based on binary           Simple Method for Correcting Facet Orientations in Polygon Meshes Based on Ray
+    space partitioning. Computer-Aided Design (2011).                                             Casting. Journal of Computer Graphics Techniques (2014).
+Simon Fuhrmann and Michael Goesele. 2014. Floating Scale Surface Reconstruction.               Jasper van de Gronde. 2010. A High Quality Solver for Diffusion Curves. Ph.D. Disserta-
+    ACM Trans. Graph. 33, 4, Article 46 (July 2014), 11 pages. https://doi.org/10.1145/           tion. University of Groningen.
+    2601097.2601163                                                                            A van Oosterom and J Strackee. 1983. The Solid Angle of a Plane Triangle. IEEE Trans.
+Leslie Greengard and Zydrunas Gimbutas. 2017. fmmlib3d: Fast Multipole Method                     Biomedical Engineering 30, 2 (1983).
+    (FMM) library in R3 . (2017). https://github.com/zgimbutas/fmmlib3d Version 1.2.1.         He Wang, Kirill A. Sidorov, Peter Sandilands, and Taku Komura. 2013. Harmonic
+L. Greengard and V. Rokhlin. 1997. A Fast Algorithm for Particle Simulations. J. Comput.          Parameterization by Electrostatics. ACM Trans. Graph. (2013).
+    Phys. 135, 2 (1997), 280 – 292. https://doi.org/10.1006/jcph.1997.5706                     G Wyvill, C McPheeters, and B Wyvill. 1986. Data structure for soft objects. The Visual
+Gaël Guennebaud, Benoît Jacob, et al. 2010. Eigen v3. (2010). http://eigen.tuxfamily.org.         Computer (1986).
+A Ichim, P Kadlecek, L Kavan, and M Pauly. 2017. Phace: Physics-based Face Modeling            Hongyi Xu and Jernej Barbič. 2014. Signed Distance Fields for Polygon Soup Meshes.
+    and Animation. ACM Trans. Graph. (2017).                                                      Graphics Interface 2014 (2014).
+Peter Ilbery, Luke Kendall, Cyril Concolato, and Michael McCosker. 2013. Biharmonic            Lyubomir Zagorchev and A Ardeshir Goshtasby. 2012. A Curvature-Adaptive Implicit
+    Diffusion Curve Images from Boundary Elements. ACM Trans. Graph. (2013).                      Surface Reconstruction for Irregularly Spaced Points. IEEE Trans. Vis. Comput.
+Alec Jacobson. 2016. Boolean Operations using Generalized Winding Numbers. CoRR                   Graph. (2012).
+    abs/1601.07953 (2016). arXiv:1601.07953 http://arxiv.org/abs/1601.07953                    Xinxin Zhang and Robert Bridson. 2014. A PPPM fast summation method for fluids
+Alec Jacobson, Ladislav Kavan, and Olga Sorkine-Hornung. 2013. Robust Inside-Outside              and beyond. ACM Transactions on Graphics (2014).
+    Segmentation using Generalized Winding Numbers. ACM Transactions on Graphics               Kaichi Zhou, Eugene Zhang, Jirí Bittner, and Peter Wonka. 2008. Visibility-driven Mesh
+   (proceedings of ACM SIGGRAPH) 32, 4 (2013), 33:1–33:12.                                        Analysis and Visualization through Graph Cuts. IEEE Transactions on Visualization
+Alec Jacobson, Daniele Panozzo, et al. 2017. libigl: A simple C++ geometry processing             and Computer Graphics 14 (2008).
+    library. (2017). http://libigl.github.io/libigl/.                                          Qingnan Zhou and Alec Jacobson. 2016. Thingi10K: A Dataset of 10, 000 3D-Printing
+Chiyu Jian and Philip Marcus. 2017. Hierarchical Detail Enhancing Mesh-Based Shape                Models. CoRR abs/1605.04797 (2016). arXiv:1605.04797 http://arxiv.org/abs/1605.
+    Generation with 3D Generative Adversarial Network. CoRR (2017). arXiv:1709.07581              04797
+Michael Kazhdan, Matthew Bolitho, and Hugues Hoppe. 2006. Poisson surface recon-
+    struction. In Proc. SGP. 61–70.
+Michael Kazhdan and Hugues Hoppe. 2013. Screened poisson surface reconstruction.               A     DIPOLE DERIVATIVES
+    ACM Transactions on Graphics (TOG) 32, 3 (2013), 29.
+Binh Huy Le and Zhigang Deng. 2017. Interactive cage generation for mesh deformation.          For convenience, we list the gradient and Hessian of a dipole with
+    I3D (2017).                                                                                center position x ∈ R3 and normal vector n̂ ∈ R3 at a query point
+William E Lorensen and Harvey E Cline. 1987. Marching cubes - A high resolution 3D
+    surface construction algorithm. Siggraph (1987), 163–169.
+                                                                                               q ∈ R3 . Let I ∈ R3×3 be the identity matrix, ei be its ith column,
+Wenjia Lu, Zuoqiang Shi, Bin Wang, and Jian Sun. 2017. Gauss Surface Reconstruction.           and r = x − q. Then
+    In Geometric Modeling and Processing.
+Geoffrey Marchal. 2015. Head St Batist-decimated. (May 2015). https://sketchfab.com/
+                                                                                                                  r
+    models/3d3115c7db08466abbbb0dcaac2c962e
+                                                                                                    ∇G(q, x) =          ,                                                       (22)
+A.L.F Meister. 1769. Generalia de genesi figurarum planarum et inde pendentibus earum                          4π krk 3
+    ajfectionibus. Novi Comm. Soc. Reg. Scient. Gotting. (1769), 144–180+9 plates.
+                                                                                                                  I          3r ⊗ r
+Christian Mostegel, Rudolf Prettenthaler, Friedrich Fraundorfer, and Horst Bischof.
+                                                                                                   ∇2G(q, x) =           −          ,                                           (23)
+    2017. Scalable Surface Reconstruction from Point Clouds with Extreme Scale and                             4π krk 3 4π krk 5
+    Density Diversity. CVPR (2017).
+                                                                                                                          r ⊗ ei ⊗ ei + ei ⊗ r ⊗ ei + ei ⊗ ei ⊗ r
+                                                                                                                  Í3
+T. M. Murali and Thomas A. Funkhouser. 1997. Consistent Solid and Boundary
+    Representations from Arbitrary Polygonal Data. In Proceedings of the 1997 Sym-                 ∇3G(q, x) = − i=1                                                            (24)
+    posium on Interactive 3D Graphics (I3D ’97). ACM, New York, NY, USA, 155–ff.                                                       4π krk 5
+    https://doi.org/10.1145/253284.253326                                                                         15r ⊗ r ⊗ r
+                                                                                                               +                .
+                                                                                                                    4π krk 7
+
+                                                                                            ACM Transactions on Graphics, Vol. 37, No. 4, Article 43. Publication date: August 2018.
+43:12    •       Gavin Barill, Neil G. Dickson, Ryan Schmidt, David I.W. Levin, and Alec Jacobson
+
+
+B    TRIANGLE INTEGRALS
+We also list the closed form expressions for the coefficients of our
+dipole integrated over a triangle t with corner positions xi , xj , xk
+and area at expanded about a cluster center p̃. These functions are
+constant, linear and quadratic with respect to the position in the
+triangle. Consequently, we use single point quadrature for the first
+two integrals and edge-midpoint quadrature for that last. All are
+exact.
+                          ∫
+                             n̂t dA = at n̂t                      (25)
+                                     t
+          ∫                                                         
+                                               1
+                 (x − p̃) ⊗ n̂t dA = at          (xi + xj + xk ) − p̃ ⊗ n̂t     (26)
+             t                                 3
+                   ∫
+                        (x − p̃) ⊗ (x − p̃) ⊗ n̂t dA = at Ct ⊗ n̂t ,            (27)
+                    t
+                                                                                (28)
+where
+                                                        
+                      1 1                    1
+                 Ct =     (xi + xj ) − p̃ ⊗ (xi + xj ) − p̃ +
+                      3 2                    2
+                                                         
+                      1 1                    1
+                          (xj + xk ) − p̃ ⊗ (xj + xk ) − p̃ +
+                      3 2                    2
+                                                         
+                      1 1                    1
+                          (xk + xi ) − p̃ ⊗ (xk + xi ) − p̃ .                   (29)
+                      3 2                    2
+
+
+
+
+ACM Transactions on Graphics, Vol. 37, No. 4, Article 43. Publication date: August 2018.
+

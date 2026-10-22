@@ -1,0 +1,375 @@
+               Bound Coherence for Minimum Distance Computations
+                                       David E. Johnson and Elaine Cohen
+                                        Department of Computer Science
+                                               University of Utah
+                                          Salt Lake City, Utah 84112
+
+                                                           coherence on the distance bounds rather than
+                      Abstract                             coherence based on geometric properties. This
+Minimum distance computations on complex geometry          approach is thus also independent of the model and
+commonly employ hierarchies of bounding volumes            bounding volume representations.
+that are pruned through establishment of upper and         In interactive applications, the scene must be updated
+lower bounds. In this paper we describe a novel time       at interactive rates. In haptic applications, the contact
+coherence scheme which utilizes coherence on these         algorithm must run in the kHz range. These types of
+bounds, rather than coherence derived from the             applications provide a great deal of temporal
+geometry of the bounding volumes or from the               coherence and are well suited for this approach.
+geometry of the underlying model. This method is thus
+independent of the bounding volume and model
+representations. In tests, we find using this approach     2    Background
+can more than double the speed of a non-coherent           There is considerable literature on minimum distance
+approach.                                                  computations for convex objects. The temporal
+                                                           coherence in tracking the closest points between two
+1    Introduction                                          convex objects derives from the geometric coherence
+                                                           of convex objects. These closest point tracking
+In this paper we describe a novel time coherence           methods are competitive with pure collision detection
+scheme for minimum distance computations which             schemes for efficiency.
+provides a several time speed-up over a previous non-
+coherent approach [9]. We are interested in minimum        Lin showed how the closest points on a convex object
+distance as a predictor of contact in a haptic assembly    could be tracked in constant time [11]. This was later
+project [8]. Others have used minimum distance             extended into the I-COLLIDE system [5]. Gilbert’s
+computations for robotic path planning [2], collision      algorithm for computing distance between convex
+avoidance [10], and collision detection [5][1].            objects [6] was later shown to have a similar constant
+                                                           time complexity with minor modification [3]. Turnbull
+For complex concave geometries a useful approach to        has extended this approach to convex spline patches
+compute the minimum distance between models has            [17].
+been to surround the models in the scene with
+hierarchies of bounding volumes [14][9]. These             Rather than explicitly tracking closest points, an
+volumes can be pruned by establishing and refining an      additional way to exploit time coherence for convex
+upper bound on the minimum distance between two            objects is through witness planes. A plane that
+models, then removing bounding volumes that have           separates two objects can be efficiently computed and
+lower bounds on their distance greater than the current    offers quick testing of separation on following time
+upper bound. As the algorithm descends the bounding        steps. Baraff [1] and Chung [4] used this concept in
+volume hierarchies, the lower bounds tighten to the        collision algorithms.
+underlying geometry. In the best case, we compute the      Two main approaches exist to compute collision and
+minimum distance between just a few leaf node              distance for general concave objects. The first
+geometries.                                                approach draws upon the work done for convex
+In a scene composed of moving models, the minimum          objects by attempting to decompose the concave
+distance between objects will not change significantly     object into convex partitions [5]. These methods do
+after a small time step. For convex objects the            not usually provide the minimum distance, only the
+geometric location of the closest points between two       collision status. The second approach is to prune
+models will also not change rapidly. On concave            portions of the geometry using hierarchies of bounding
+models though, the closest points may jump                 volumes. Quinlan introduced this approach using a
+discontinuously, even if the distance between models       depth-first search of the bounding hierarchy [14].
+changes smoothly. Our approach avoids the problems         Johnson generalized it to other surface representations,
+associated with these discontinuities by using             including NURBS, by using a breadth-first search [9].
+Sato combined convex tracking at a distance with
+Quinlan’s concave algorithm for near contact to create
+a general collision detection system [15]. He stored the
+closest pair of triangles for a number of time steps and
+used the distance between that pair as a way to quickly
+approximate the minimum distance.
+Snyder used time coherence to track penetration depth
+on spline models in a modeling system [16].
+Numerical methods quickly updated previous points to
+find new penetration depths. In [12] Lin used local
+updates on global numerical methods to exploit the
+temporal coherence of moving curved surfaces. These
+methods depend on the coherence of the underlying
+geometry for success.
+
+3    The LUB-Tree Framework
+                                                           Figure 2: The hierarchies are pruned using bounds on
+In [9], we discussed using a lower-upper bound (LUB)       the distance. Surviving portions of the sphere
+tree for minimum distance computations. We can             hierarchy are shown at selected levels as well as the
+compute the minimum distance to any surface                active pair lines.
+representation that implements a set of operations:
+bounding volume generation, lower bound on distance        The pruning method starts by invoking the bounding
+computation, upper bound on model minimum                  volume generation operation on each of the two
+distance computation, bounding volume refinement,          models. In our example, we use the top sphere of each
+and computation termination. These bounding                pre-computed bounding hierarchy (see Figure 2B). We
+volumes and bound computations are then used to            treat these bounding volumes as the top nodes of
+efficiently prune portions of the geometry and to          hierarchical bounding trees and connect them as an
+converge to the minimum distance.                          active pair of nodes. Active pairs point between nodes
+                                                           that still may be part of the minimum distance
+                                                           solution. The lines between the spheres in Figure 2C
+                                                           represent the active pairs at the second level in the
+                                                           minimum distance computation. We then search and
+                                                           prune the bounding hierarchies using the following
+                                                           procedure.
+                                                              1. For each active pair, compute lower bounds on
+                                                              the distance between nodes using the nodes’
+                                                              bounding volumes and lower bound operations.
+                                                              2. Establish an upper bound on the minimum
+                                                              distance between the models using the upper
+                                                              bound computation operation.
+                                                              3. Prune the active pair list by comparing each
+                                                              lower bound distance to the current upper bound.
+Figure 1: For polygonal models, we pre-compute a
+                                                              (A lower bound greater than the upper bound
+bounding hierarchy. Only the spheres of some levels
+                                                              implies that the contained geometry must be
+are shown.
+                                                              further away than the minimum distance.)
+We illustrate the action of the LUB-tree framework on         4. Split remaining active pairs into new active
+general triangular models. We first pre-compute a             pairs by invoking the refinement operation.
+hierarchy of sphere and oriented bounding box (OBB)
+                                                              5. Repeat until the termination of computation
+bounding volumes for each model using the publicly
+                                                              operation returns true.
+available OBBTree package [7]. Portions of the sphere
+hierarchy for an example model are shown in Figure 1.      Essentially, we wish to show that portions of the
+The leaf nodes of the hierarchy surround a single          model cannot be part of the minimum distance
+triangle.                                                  solution. Hierarchical bounds allow us to efficiently
+                                                           test portions of the model and potentially remove large
+portions of the model from consideration without high
+computational cost.
+In Figure 2, the bounding spheres are pruned away
+until only one sphere remains on one model and a few
+remain on the other. There were twelve levels in the
+hierarchical computation; five are shown. The closest
+points between the models must be on the triangles
+contained by these surviving nodes at the lowest level.
+
+4      Using Bound Coherence to Speed
+       Minimum Distance Computations                      Figure 4: The tops of these images show two different
+                                                          levels of pruning when using upper bound coherence.
+These pruning computations change relatively slowly
+                                                          The bottoms of the images show the same levels with
+as objects in the scene move. Portions of a model close
+                                                          no coherence used. Saving the previous solution
+to portions of another other model will remain roughly
+                                                          allows additional active pairs to be pruned.
+in the same configuration from one instant in time to
+the next. We have identified two areas in which to        Figure 4 shows two levels of the pruning process,
+exploit this coherence: coherence in the upper bound      comparing pruning with upper bound coherence used
+on the minimum distance and coherence in the lower        (upper images) to pruning with no coherence (lower
+bounds on distance between the bounding volumes.          images). In Figure 4A, the fourth level of pruning,
+                                                          there were 14 sphere nodes and 27 active pairs in the
+4.1      Upper Bound Coherence                            non-coherent version. The upper bound coherent
+                                                          version reduced that to 10 spheres and 16 active pairs.
+     Saved leaf
+     node
+                                                          This upper bound coherence has the greatest impact at
+                       Previous                           the middle of the computation. Initially, the bounding
+                                                          boxes tend to be so large that even an improved upper
+    Estimated                                             bound cannot prune them. At the end of the
+    closest          Current
+    point                                                 computation, even the non-coherent version would
+                                                          have converged to a reasonable upper bound by then.
+                      Actual closest point
+
+Figure 3: The minimum distance changes smoothly           4.2    Lower Bound Coherence
+even when the closest point jumps.
+The minimum distance between two objects changes
+smoothly as the objects move, even if the closest
+points between the models change discontinuously. In
+Figure 3, the distance from the space point to the
+concave model changes slowly, but the closest point
+on the model jumps from the left wall to the bottom.
+We save the leaf nodes that produced the closest          Figure 5: A. We can estimate how far an object has
+points from the previous time step and compute the        moved. B. The lower bound can expand by that
+distance between these nodes at the start of the          amount and still contain the object (B).
+computation at the new time step (the "Estimated
+closest point" in Figure 3). This distance provides a     The key to the pruning algorithm is that we may throw
+tight initial upper bound on the minimum distance         away active pairs that have lower bounds on distance
+between the two models. By having a good estimate of      greater than the current upper bound on the minimum
+the minimum distance, the pruning algorithm may be        distance. If the models do not move far during a time
+able to remove some active pairs earlier in the           step these lower bounds should not change much
+hierarchy than if it were using a loose upper bound       either.
+estimate.                                                 We can think of this problem as one model being
+                                                          stationary and the other moving without loss of
+                                                          generality. As one model moves, there is a point on
+                                                          the model that moves a maximum distance during the
+                                                          transformation (Figure 5A). Since the purpose of the
+lower bounds is to show that the contained geometry        removed from consideration by the quick lower bound
+must be at least the lower bound distance away, if the     coherence test.
+surface moves, then the bounds become that much
+more uncertain. The new bound is just the old minus        5      Testing
+the length of the maximum movement (Figure 5B).
+                                                           We tested the efficacy of using bound coherence in
+We estimate the maximum movement of a general              two ways. First, we looked in detail at the pruning
+model by surrounding the model with a bounding box.        costs using the different coherence methods. Second,
+The maximum movement of the box will be at its             we made a simple path for one model to follow and
+vertices. We measure the movement of each correlated       tested average computation times for different
+vertex from one time to the next and use the largest       amounts of movement.
+movement as an overestimate of the model movement
+and thus, of the possible change in the lower bound
+distance.
+                                                           5.1     Pruning Costs
+
+If we have stored the lower bounds for the active pairs                  Non-leaf      Leaf      box      Quick
+from the previous time we can loosen these bounds by       None          1382          315       371      0
+the movement distance and still be sure the geometry
+is contained. Using this concept, we can prune saved       Upper         1167          315       340      0
+active pairs by retrieving their saved lower bound and     Lower         521           10        112      1242
+subtracting the movement amount, then comparing
+this value to the upper bound. So we may potentially       Both          458           10        105      1089
+prune an active pair for the cost of retrieval, a
+subtraction, and a comparison.                             Table 1: This table shows the number of pruning tests
+                                                           vs. the type of coherence used in the ideal case (no
+Storing the lower bounds for each active pair used in a    movement). The table shows the number of non-leaf
+minimum distance computation may require                   distance tests, leaf distance tests, OBB tests, and quick
+significant storage. Luckily, not every active pair        tests used in lower bound coherence pruning.
+holds useful information. If a pair survives a level and
+is refined, then loosening its lower bound the next        We first measured the number of pruning tests needed
+time is not likely to prune it. So we only save the        while using the different coherence speedups. This test
+active pairs that result in pruning. The saved active      was done under ideal conditions, with no model
+pair distances are stored in a hash table, keyed by the    movement, so these numbers were the best that could
+ID of the active pair. This allows efficient storing and   occur.
+retrieval.                                                 With upper bound coherence turned on, we found that
+                                                           there were moderate gains in efficiency in the number
+                                                           of non-leaf tests. There were no gains in the leaf case.
+                                                           This is to be expected, since the upper bound has
+                                                           typically converged close to the solution by the time
+                                                           the leaf nodes are reached, even with no coherence
+                                                           used.
+                                                           Using lower bound coherence produced dramatic
+                                                           reductions in the number of both the leaf and non-leaf
+                                                           tests. Since this is the ideal case, we expect that every
+                                                           pruned active pair can be pruned the following time
+                                                           using the quick lower bound coherence test. If the
+                                                           model were moving, we would not expect to see such
+Figure 6: Using lower bound coherence allows us to         high gains in efficiency.
+quickly remove active pairs without having to compute
+distances. The top halves of the figures show the active   Using both types of coherence simultaneously added a
+pairs computed using coherence; the bottom halves          modest benefit over the lower bound coherence test.
+show the active pairs without coherence.
+                                                           5.2     Moving Test
+The example in Figure 6 shows many fewer active
+pair lines in the lower bound coherent version than in     This testing under ideal conditions showed the
+the non-coherent version. The missing lines were           potential value of the coherence methods. We tested
+                                                           the different coherence speedups under more typical
+conditions by moving one model a number of steps                    5.3                                           Scalability
+along a space curve and performing a minimum
+distance computation at each step. The distance                                                             3.5
+traveled at each step is roughly inversely proportional
+
+
+
+
+                                                                        non−coherent time / coherent time
+to the number of samples taken along the curve. We                                                           3
+
+hope to show more efficiency with more samples ---
+                                                                                                            2.5
+and thus more coherence --- along the curve.
+                                                                                                             2
+                    0.045
+                                              No coherence
+                     0.04                                                                                   1.5
+
+                    0.035                                                                                    1
+                                                       Upper
+                     0.03
+
+
+
+
+  avg. time (sec)
+                                                                                                            0.5
+                    0.025
+
+                                                       Lower                                                 0
+                     0.02                                                                                     0       2000      4000    6000     8000   10000   12000
+                                                                                                                                 triangles per model
+                    0.015
+                                                      Both
+                     0.01                                           Figure 8: The gain in efficiency increases as the model
+                    0.005
+                                                                    gets larger. Shown is the ratio non-coherent time vs.
+                                                                    upper and lower coherency time for the path sampled
+                       0 1
+                       10
+                              2
+                             10              10
+                                                  3             4
+                                                               10   1000 times. Models with 575 to 10793 triangles were
+                             samples along path                     tested.
+
+Figure 7: Average time per computation versus                       We tested a range of 575 to 10793 triangles per model
+number of samples along the space curve. Data was                   on the same path. As the models grew larger, the gain
+taken with no coherence, with upper bound coherence,                in efficiency from using coherency grew as well.
+with lower bound coherence, and with both upper and                 Figure 8 graphs the ratio of the non-coherent to
+lower coherence used simultaneously.                                coherent times for the path test. With the largest
+                                                                    model, the coherent method gained over a three-fold
+Figure 7 shows the results of moving a 1000 triangle                improvement in speed. This demonstrates excellent
+bunny model at different step sizes and with different              scalability for using coherency in minimum distance
+types of coherence used. The tests were run on an SGI               computations.
+Indigo2 workstation with a 195 MHz MIPS R10000
+processor. With no coherence, the average time was
+essentially constant, at about 0.04 seconds. Using the              6                                       Discussion
+upper bound coherence gave an almost constant                       Exploiting the bound coherence over time yields
+improvement of 0.005 seconds, for an average of                     significant efficiencies. Additionally, the non-coherent
+0.035 seconds. We suspect that the constant                         minimum distance computation is easily extended to
+improvement is related to the way the upper coherence               take advantage of bound coherence.
+method works. Since we store the leaf nodes that held
+                                                                    For the upper bound coherence, we simply had to
+the minimum distance from the previous time and re-
+                                                                    statically allocate an active pair that stored the leaf
+compute their distance at the new time step, the
+                                                                    nodes containing the closest points. An additional
+method somewhat adjusts for the size of step taken.
+                                                                    function parameter specified whether to use this stored
+The efficiency of the lower bound method was                        pair the following time, requiring an additional call to
+strongly tied to the size of the step. Initially, the lower         the leaf node distance procedure. In all, this added six
+bound method was slightly worse than the upper                      lines of C++ code.
+bound method, but improved to be over two times
+                                                                    The lower bound coherence method used already
+faster than the upper bound method alone. The
+                                                                    existing hash table code for storage of the pruned
+combination of the two methods added additional
+                                                                    active pairs. We had to add a function parameter for
+benefit.
+                                                                    distance moved, check for saved active pairs during
+We repeated the test for a bounding hierarchy made up               the refinement stage, perform the quick prune test
+only of spheres, instead of the sphere and oriented-                based on distance moved, and prep and clean the saved
+bounding box combination used in the other tests. The               list for a total of ten lines of C++ code plus the hash
+sphere-only hierarchy was slower, almost twice as                   table.
+slow under all conditions, but showed improvement
+with coherence used.
+Using the bound coherence over time opens the           [7] Gottschalk, S., Lin, M.C., and Manocha, D.,
+possibility of experimenting with tighter, more              "OBBTree: A Hierarchical Structure for Rapid
+expensive bounding volumes. If a distance                    Interference Detection," Computer Graphics
+computation is amortized over several time steps with        Proceedings, Annual Conference Series, 1996,
+lower bound coherence, then a tighter bounding               pp.171-180.
+volume may stay useful longer than a less-expensive,    [8] Hollerbach, J.M., Cohen, E.C., Thompson, W.B.,
+looser bounding volume for an overall gain in                and Jacobsen, S.C. "Rapid Prototyping of
+efficiency.                                                  Mechanical Assemblies," NSF Design and
+                                                             Manufacturing         Grantees         Conference,
+7    Conclusion                                              Albuquerque, Jan. 3-5, 1996.
+We have shown that temporal coherence can be            [9] Johnson, David E. and Cohen, Elaine, "A
+efficiently exploited in current minimum distance            framework for efficient minimum distance
+computations. By utilizing coherence in the bound            computations,’’ Proc. IEEE Intl. Conf. Robotics &
+computations, we can maintain a distance framework           Automation, Leuven, Belgium, May 16-21, 1998,
+suitable for different surface and bounding volume           pp. 3678-3684.
+representations.                                        [10] Khatib, O., "Real-Time Obstacle Avoidance for
+                                                             Manipulators and Mobile Robots," The
+                                                             International Journal of Robotics Research, 5(1),
+8    Acknowledgements
+                                                             pp. 90-98, Spring 1986.
+We would like to thank the members of Utah’s Virtual    [11] Lin, Ming, Efficient Collision Detection For
+Prototyping work for inspiring this work. Support for        Animation and Robotics, Ph.D. thesis, University
+this research was provided by NSF Grant MIP-                 of California, Berkeley.
+9420352, by DARPA grant F33615-96-C-5621, and
+by the NSF and DARPA Science and Technology             [12] Lin, Ming and Manocha, Dinesh, "Fast Contact
+Center for Computer Graphics and Scientific                  Determination in Dynamic Environments", to
+Visualization (ASC-89-20219).                                appear in International Journal of Computational
+                                                             Geometry and Applications.
+                                                        [13] Lin, Ming and Manocha, Dinesh. "Fast
+9    References                                              Interference Detection Between Geometric
+[1] Baraff, David. "Curved Surfaces and Coherence            Models," The Visual Computer, pp. 542-561,
+    for Non-penetrating Rigid Body Simulation,"              1995.
+    Computer Graphics, Vol. 24, No. 4, pp.19-28,        [14] Quinlan, Sean. "Efficient Distance Computation
+    1990                                                     between Non-Convex Objects," IEEE Int.
+[2] Bobrow, J.E., "Optimal robot path planning using         Conference on Robotics and Automation, pp.
+    the minimum-time criterion", IEEE Journal of             3324-3329, 1994.
+    Robotics and Automation, 4(4), pp. 443-450, Aug.    [15] Sato, Yuichi et al. "Efficient Collision Detection
+    1988.                                                    Using Fast Distance-Calculation Algorithms For
+[3] Cameron, Stephen. "Enhancing GJK: Computing              Convex And Non-Convex Objects", in
+    Minimum and Penetration Distances Between                Proceedings of the 1996 IEEE International
+    Convex Polyhedra", Int. Conf. Robotics and               Conference on Robotics And Automation.
+    Automation, April, 1997.                                 Minneapolis, Minn. April, 1996. pp. 771-778.
+[4] Chung Tat Leung, Kelvin. An Efficient Collision     [16] Snyder, John M. "An Interactive Tool for Placing
+    Detection Algorithm for Polytopes in Virtual             Curved Surfaces without Interpenetration,"
+    Environments. M. Phil Thesis, The University of          Proceedings of Computer Graphics, pp. 209-218,
+    Hong Kong, 1996.                                         1995.
+[5] Cohen, J. et al, "I-COLLIDE: An Interactive and     [17] Turnbull, Colin and Cameron, Stephen,
+    exact Collision Detection System For Large-              "Computing Distances Between NURBS-defined
+    Scaled Environments", Proceedings of ACM Int.            Convex Objects", Proc. IEEE Intl. Conf. Robotics
+    3D Graphics Conference, pp. 189-196, 1995.               & Automation, Leuven, Belgium, May 16-21,
+[6] Gilbert, Elmer, Johnson, Daniel, Keerthi, S. "A          1998.
+    Fast Procedure for Computing the Distance
+    Between Complex Objects in Three-Dimensional
+    Space," IEEE Journal of Robotics and
+    Automation, pp. 193-203, April 1988.
+

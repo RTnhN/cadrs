@@ -1,0 +1,240 @@
+                                                                                                        387
+
+
+
+
+Title:
+Persistent Naming Based on Graph Transformation Rules to Reevaluate Parametric Spec-
+ication
+Authors:
+Anaïs Cardot, anais.cardot@univ-poitiers.fr, University of Poitiers
+David Marcheix, david.marcheix@ensma.fr, ENSMA
+Xavier Skapin, xavier.skapin@univ-poitiers.fr, University of Poitiers
+Keywords:
+Persistent Naming, Parametric Specication, Rule-based Language, Topological Model
+DOI: 10.14733/cadconfP.2018.387-391
+Introduction:
+CAD softwares are widely based on parametric specications, which record operations used during the
+modeling process. Any specication edition results in new models after reevaluation. We address the
+issue known as persistent naming problem : the ability to nd the right parameters and to reavaluate
+correctly each operation, despite the modeling object modications. As an example, let a specication
+made of three operations be described in Fig. 1a: a cube is created, then a slot is applied (slicing face
+f into f1 and f2 ), followed by a slot inside f2 . Then, we shorten the rst slot width then triggers the
+reevaluation (Fig. 1b): after the cube creation, its front face has not been sliced anymore, so face f2 does
+not exist. The issue boils down to assign a name to each entity used in the initial evaluation in order to
+match it with another entity during reevaluation (fx in this example). Most earlier works [2][3][4] separate
+
+
+
+
+                              (a)                                        (b)
+
+
+             Fig. 1: Persistent Naming Problem; (a) Initial specication; (b) Reevaluation
+
+2D from 3D processes and persistent naming solutions are entity dimension-specic. Some approach also
+record the history of every model entity, instead of keeping track of the ones used as operations parameter
+only. Finally, no solution has been presented to deal with every kind of specication edition.
+Main idea:
+We propose a persistent naming system independent of the model dimension, the dimension of entities
+(vertices, edges and so on) and withstanding the edition of the parametric specication (i.e. adding,
+deleting or moving operations). Our work relies on the modeling library Jerboa [2], based on the G-Map
+topological model [5]. This software describes any modeling operation as a transformation rule applied
+
+                                          Proceedings of CAD'18, Paris, France, July 9-11, 2018, 387-391
+                                        © 2018 CAD Solutions, LLC, http://www.cad-conference.net
+                                                                                                                     388
+
+
+on a graph and prevents from any topological inconsistency. We detail how we have the mechanisms of
+parametric systems inside Jerboa.
+G-Maps:
+The d-dimensional G-Map model represents an object as a graph: nodes are called darts and each entity
+is dened as a specic set of darts linked by relationships denoted as αi (0 ≤ i ≤ d). Constraints are
+dened on αi to ensure that objects represented as G-Maps are quasi-manifolds. An example is shown in
+Fig. 2: (a) Geometric representation of a 2D object made of two faces; (b) Faces are separated from each
+other and are connected by an α2 arc (blue line); (c) Face edges are separated and α1 arcs (red lines) link
+their common vertices; (d) Edges are split and their ends are connected by α0 ; (e) those ends form the
+graph nodes (darts), labeled a,. . . n. This graph representation extends seamlessly in any dimension. An
+entity is represented by a single dart and a specic combination of αi : for example, the face (resp. edge,
+vertex) related to dart e is made of all darts starting with a and reachable using α0 and α1 (resp. α0 and
+α2 , α1 and α2 ) to produce the set of darts {a, . . . , f } (resp. {e, d, h, g}, {e, f, g, n}). In the following, the
+list of αi ,. . . αj (0 ≤ i, j ≤ n) used to form an entity is called orbit type and is represented as hi . . . ji.
+For instance, the orbit type dening a 2D face is h01i. More generally, for any d-dim, topological model,
+there are (d + 1)2 dierent orbit types, including the one designing a single dart and denoted as hi; in
+2D, those orbit types are hi, h0i, h1i, h2i, h01i, h02i, h12i, h012i.
+
+
+
+
+                   (a)               (b)                (c)               (d)                   (e)
+
+
+Fig. 2: G-Map representation of 2D objects; Only αi relationships connecting pairs of dierent darts are
+represented
+
+Graph Transformation Rules:
+A graph transformation rule takes a G-Map as input and produces another G-map as output. Rules
+dened in Jerboa are graphically described as two patterns made of nodes separated by a left-to-right
+arrow (see Fig. 3a-b). The pattern on the left is to be ltered in the input G-Map, to identify every part
+which matches this pattern. The pattern on the right describes the transformation to apply on each of
+those matching parts, in order to produce the output G-Map. Fig. 3a shows the rule creates a triangular
+face from scratch: nodes m0 to m5 are generated from scratch and are linked using α0 and α1 to create a
+face as the one shown in Fig. 3c. In Fig. 3b, the left pattern is made of node n0 associated with the orbit
+type h01i. Filtering any G-Map using this pattern returns all sets of darts linked by α0 or α1 . The right
+pattern is made of three pairs (node, orbit type): n0 is copied in triplicate to produces nodes m0 , m1 and
+m2 (in Fig. 3d, each dart a0 ,. . . ,f0 has been triplicated in (a0 , a1 , a2 ). . . , (f0 , f1 , f2 )), forming the darts
+of the output G-Map. Regarding m0 , its orbit type h0_i means that m0 keeps the same relationship α0
+as n0 , but α1 is deleted. Regarding m1 , h_2i means that the initial α0 is deleted and the initial α1 is
+replaced with α2 . We proceed the same regarding m2 , Fig. 3e shows the state of the output G-Map at
+
+                                               Proceedings of CAD'18, Paris, France, July 9-11, 2018, 387-391
+                                             © 2018 CAD Solutions, LLC, http://www.cad-conference.net
+                                                                                                       389
+
+
+this stage. Next, relationships α0 and α1 between m0 , m2 and m2 are mirrored in the output G-Map
+(Fig. 3f): the initial face has been subdivided in three sub-faces in a consistent way. Note that this rule
+can be applied on any 2D polygonal face.
+
+
+
+
+                           (a)                                           (b)
+
+
+
+
+           (c)                        (d)                         (e)                       (f)
+
+
+Fig. 3: Graph transformation rule; (a) TriangleCreation rule; (b) FaceTriangulation rule; (c) Input G-
+Map; (d) Darts of the output face; (e) First phase of αi setup; (f) Second phase and output G-Map
+
+
+Persistent Naming System:
+Persistent naming focuses on assigning an identier to entities used as parameters of modeling operations,
+during the initial evaluation. This identier should allow the matching between those entities and the
+right ones available in the reevaluation. Our naming system is based on darts: each dart of the entity
+upon which a rule is applied is assigned a Persistent Id (or PId ). Each PId is composed of one or
+several pairs RuleNum-NodeNum, where RuleNum is the number of the rule in the initial evaluation and
+NodeNum is the node instance in the right part of the rule. As an example, a specication composed of
+two rules is shown in Fig. 3a-b: {1-TriangleCreation ; 2-FaceTriangulation }. First rule generates nodes
+m0 to m5 , so after applying it, the output G-Map contains darts a0 to f0 (Fig. 3c); their resp. PId are
+1-m0 ,. . . ,1-m5 . Second rule is then applied on the face, resulting in the G-Map shown in Fig. 3f. Each
+dart of this G-Map is associated with one node among m0 , m1 or m2 and its PId is extended accordingly.
+As an example, darts a0 , a1 and a2 in Fig. 3f are derived from dart a0 in Fig.3 b: they share the same
+PId prex 1-m0 . Then, their PId is extended with specic information related to m0 , m1 or m2 : the
+complete PId of a0 (resp. a1 , a2 ) is therefore {1-m0 ; 2-m0 } (resp. {1-m0 ; 2-m1 }, {1-m0 ; 2-m2 }). We
+proceed the same way for each dart of the output G-Map (as an example, PId of darts f0 , f1 and f2
+are resp. 1-m5 ; 2-m0 , 1-m5 ; 2-m1 and 1-m5 ; 2-m2 ). Next, we dene the Persistent Name (or PN ) of
+entities which are used as parameters of operations, as the concatenation of the PId of one of its darts
+and the orbit type which represents this entity. For instance, the PN of the face related to dart a0 in
+Fig. 3e is dened as {1-m0 ; 2-m0 }.h01i. Assume dart a1 has been designated as the representative dart
+related to the face upon which 1-TriangleCreation has been applied. Then the specication's contents
+are {1-TriangleCreation() ; 2-FaceTriangulation ({1 − m0 ; 2 − m1 }.h01i}).
+Bulletin Boards and History Records:
+
+                                            Proceedings of CAD'18, Paris, France, July 9-11, 2018, 387-391
+                                       © 2018 CAD Solutions, LLC, http://www.cad-conference.net
+                                                                                                            390
+
+
+It is necessary to trace the evolution of orbit types between successive operations. Dierent kinds of
+evolutions are: Creation, Deletion, Merge, Modication, No Change and Split. To trace the evolution
+after a single operation, each rule is associated with a table called Bulletin Board (BB ), and indexed by
+orbit types. Each table entry contains at least one tree graph with one or several leaves. The tree roots
+contain nodes of the rule's left part, combined with a specic orbit type. The tree leaves contain nodes
+of the rule's right part, which share the same leaf if they belong to the same orbit type as the entry
+index. The tree arcs are labeled with the kind of evolution undergone by orbit types. Fig. 4a describes
+the Bulletin Board entry indexed by h01i (2D face orbit) related to the Triangulation rule (Fig. 3b).
+The tree leaf regroups m0 , m1 and m2 , meaning that darts related to these nodes belong to the same
+2D face in the output G-Map. Let (a0 , a1 , a2 ) be those related darts: as shown in Fig. 3f, the face also
+contains f0 , f1 , f2 . It follows that all those darts have been generated using darts a0 and f0 of the input
+G-Map (Fig. 3c). a0 and f0 are related to node n0 ; moreover, since they are linked by α0 , the tree root
+is dened as n0 .h0i. The tree arc is labeled Split, meaning that the initial face has been split into several
+three sub-faces resp. generated by initial darts (a0 , f0 ), (a1 , a2 ) and (f1 , f2 ). Every entry of the BB is
+lled in the same way.
+
+
+
+
+          (a)                 (b)                                        (c)
+
+
+Fig. 4: (a) Entry h01i of the FaceTriangulation rule's Bulletin Board ; (b) Result of applying Coloration
+rule on the face (orbit type h01i) related to a1 ; (c) History Record (HR ) of this face; Left: h01i-indexed
+entry of FaceTriangulation rule; Right: h0i-indexed entry of TriangleCreation rule
+
+
+    To trace evolutions along several operations, we used additional structures called History Records,
+dened for every PN. Let us add a third operation to the specication: 3-Coloration, which is applied on
+orbit type h01i related to dart a1 (see Fig. 4b). As a reminder, a1 's PId is {1 − m0 ; 2 − m1 }. Therefore,
+the PN used as parameter of 3-Coloration is {1 − m0 ; 2 − m1 }.h01i. The creation of the HR is achieved
+backwards, as shown in Fig. 4c, following red arrows: (1) Coloration is applied on h01i (related to a1 ),
+which is used as an index in the BB related to 2-FaceTriangulation : the BB 's entry is shown in Fig. 4a.
+(2) Using the last part of a1 's PId ({2 − m1 }), we select in this entry the tree which contains m1 and (3)
+we use the orbit type h0i dened in the tree root as an index for the BB related to 1-TriangleCreation.
+The matching entry is shown on the right side of Fig. 4c: nodes m0 to m5 shown in Fig. 3a are partitioned
+in three pairs of nodes linked by α0. The common root of these pair is ∅, meaning that have been created
+from scratch. (4) The rst part of a1 's PId ({1 − m0 }) is used to select the tree which contains m0 . The
+orbit type related to the tree root is ∅, meaning that there is no previous operation.
+Reevaluation:
+To handle any edition of the initial specication, we create a matching graph for every parameter of inter-
+est, and we rely on its HR to determine how it is aected by the edition. As an example, we insert inside
+the specication the operation 1.1-VertexInsertion, between 1-TriangleCreation and 2-FaceTriangulation.
+Fig. 5a-d show the successive steps of the reevaluation. The PN build from a1 's PId and used as pa-
+
+                                           Proceedings of CAD'18, Paris, France, July 9-11, 2018, 387-391
+                                         © 2018 CAD Solutions, LLC, http://www.cad-conference.net
+                                                                                                           391
+
+
+rameter for 3-Coloration is {1 − m0 ; 2 − m1 }.h01i; we use its HR and complete the matching graph at
+each step of the reevaluation to take into account 1.1-VertexInsertion. The matching graph is shown in
+Fig. 5e; note that although the HR has been created in reverse order, we follow it now in the correct
+order. (1) 1-TriangleCreation is reevaluated and a triangle identical to the initial one is created (Fig. 5a).
+The beginning of the HR (the h0i-indexed entry of TriangleCreation rule in Fig. 4c) indicates 1 − m0 , so
+we consider p0 .h0i (Fig. 5e), the orbit based on the dart generated from node m0 of the TriangleCreation
+rule. (2) 1.1-VertexInsertion is applied (Fig. 5b). The BB related to (not shown here) VertexInsertion
+rule indicates that there is a split for orbit type h0i: indeed, the edge composed of (p0 , u0 ) has been split
+into distinct edges made of (p0 , w0 ) and (u0 , v0 ). Therefore, in the matching graph, two arcs labeled Split
+start from p0 .h0i and point to one representative dart of each edge: we choose p0 and u0 , still combined
+with h0i. (3) 2-FaceTriangulation is reevaluated (Fig. 5c). This time, similarly to rst step, the entry
+related to 2 − m1 in the BB 's indexed h01i (left part of Fig. 4c), leads to darts p1 and u1 generated by
+node m1 of the FaceTriangulation rule: the matching graph is updated with an arc labeled Split, starting
+from p0 (resp. u0 ) and ending on p1 (resp. u1 ). (4) 3-Coloration is applied on each matching graph 's
+leaf, leading to the coloration of faces containing p1 and u1 , as intended.
+
+
+
+
+          (a)                (b)                   (c)                     (d)                   (e)
+
+
+                Fig. 5: Specication reevaluation; (a-d) Successive steps; (e) matching graph
+
+
+Conclusion:
+Our approach allows to reevaluate parametric specications, regardless of the model dimension. The only
+kind of edition described is adding operation into specications, but our method manages removing or
+changing operation order as well. Some development work on the Jerboa library is still required to test
+more complex specications.
+References:
+[1] Baba-Ali, M.; Marcheix, D.; Skapin, X.: A Method To Improve Matching Process by Shape Char-
+    acteristics in Parametric Systems. Computer-Aided Design and Applications, 3(16), 2009, 341-350.
+   https://doi.org/10.3722/cadaps.2009.341-350
+[2] Belhaouari, H.; Arnould, A.; Le Gall, P.; Bellet, T.: Jerboa, A Graph Tranformation Library for
+    Topology-Based Geometric Modeling, Int. Conf. on Graph Transformation, 2014.
+[3] Chen, X.; Homan, C-M.: Towards feature attachment, Computer-Aided Design, 27(9), 1995, 695-
+    702. https://doi.org/10.1016/0010-4485(94)00027-B
+[4] Kripac, J.:      A mechanism for persistently naming topological entities in history-
+    based parametric solid models, Computer-Aided Design, 29(2), 1997, 113-122.
+   https://doi.org/10.1016/S0010-4485(96)00040-1
+[5] Lienhardt, P.:    N-dimensional generalized combinatorial maps and cellular quasimani-
+    folds, Int. Journal of Computational Geometry and Applications, 4(3), 1994, 275?324.
+   https://doi.org/10.1142/S0218195994000173
+
+                                           Proceedings of CAD'18, Paris, France, July 9-11, 2018, 387-391
+                                         © 2018 CAD Solutions, LLC, http://www.cad-conference.net
+

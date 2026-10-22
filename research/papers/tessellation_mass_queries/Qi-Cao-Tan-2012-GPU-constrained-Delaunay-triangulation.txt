@@ -1,0 +1,618 @@
+    Computing 2D Constrained Delaunay Triangulation Using Graphics Hardware
+                                               Meng Qi, Thanh-Tung Cao and Tiow-Seng Tan∗
+                                                    National University of Singapore
+
+
+
+
+          (a) point set S             (b) Digital VD              (c) DT of S                (d) PSLG G                   (e) CDT of G
+
+                            Figure 1: Delaunay triangulation (DT) and constrained Delaunay triangulation (CDT).
+
+
+Abstract                                                                  forced before hand [Chew 1989]; these edges are referred to as con-
+                                                                          straints; see Figure 1. Given a set S of n points (or sites) in the 2D
+This paper presents a novel approach, termed GPU-CDT, to com-             plane and a set of non-crossing constraints, collectively called a
+pute the constrained Delaunay triangulation (CDT) for a planar            planar straight line graph (PSLG), the CDT is a triangulation of S
+straight line graph (PSLG), consisting of points and edges, using         having all the constraints included, while being as close to the DT
+the graphics processing unit (GPU). Although there are many algo-         of S as possible. Constraints occur naturally in many applications.
+rithms for constructing the 2D CDT using the CPU, there has been          For example, in path planning, they are obstacles; in GIS, bound-
+no known prior approach using the parallel computing power of             aries between cities; in surface reconstruction, contours in the slices
+the GPU efﬁciently. For the special case of the CDT problem with          of the body’s skull; in modeling, characteristic curves [Boissonnat
+PSLGs consisting of just points, which is the normal Delaunay tri-        1988; Treinish 1995; Kallmann et al. 2003].
+angulation problem, a hybrid approach has recently been proposed
+that uses the GPU together with the CPU to partially speed up the
+                                                                          Recently, the Graphics processing unit (GPU) with its enormous
+computation. Our GPU-CDT works for such special case too, but
+                                                                          parallel computation power has been used for general computa-
+the whole computation is fully accelerated by the GPU. Our imple-
+                                                                          tion in many disciplines, including computational geometry. Early
+mentation using the CUDA programming model on nVidia GPUs
+                                                                          works include computing the digital Voronoi diagram, a structure
+is numerically robust and runs several times faster than any existing
+                                                                          that is closely related to the DT [Hoff et al. 1999; Fischer and Gots-
+CPU algorithms as well as the prior GPU-CPU hybrid approach.
+                                                                          man 2006]. These works also mention the possibility of obtaining
+This result is reﬂected in our experiment with both randomly gen-
+                                                                          the latter from the former straightforwardly. However, we note that
+erated PSLGs and real world GIS data, with millions of points and
+                                                                          the Voronoi diagram in a digital space (of a texture) is not exactly
+edges.
+                                                                          the dual of the DT in a continuous space, and only until recently
+                                                                          Rong et al. [2008] presented a serious attempt in realizing such ap-
+CR Categories:     I.3.5 [Computer Graphics]: Computational               proach on GPUs. Their approach, however is a hybrid one, where
+Geometry and Object Modeling—[Geometric algorithms]; I.3.1                parallel computation is only used in ﬁrst part of the computation,
+[Computer Graphics]: Hardware Architecture—[Graphics proces-              leaving the rest to a sequential CPU algorithm. As for the CDT
+sors]                                                                     problem, there is no known efﬁcient GPU algorithm as far as we
+                                                                          know. In another view, the DT problem, as well as the CDT prob-
+Keywords: GPGPU, Computational Geometry, Voronoi Diagram                  lem, does not present itself readily to parallel computation. Specif-
+                                                                          ically, it is not clear how to adapt traditional complex parallel al-
+1     Introduction                                                        gorithms, such as the divide-and-conquer approach, to best use the
+                                                                          computing power of the GPU.
+Delaunay triangulation (DT) is one of the most important geomet-
+ric structures in computational geometry. Due to its nice property        Our main contribution here is a novel algorithm, termed GPU-CDT,
+of avoiding long, skinny triangles, the DT has many practical ap-         to compute the CDT for a given PSLG, fully parallelized for the
+plications in different ﬁelds. In Geographical Information System         GPU. Our experiment shows that our implementation of GPU-CDT
+(GIS), one way to model terrain at the sampled points is to interpo-      using the CUDA programming model [NVI 2010] is robust and efﬁ-
+late the data based on the DT [Gold 1994a; Gold 1994b]. In path           cient. Comparing to Triangle [Shewchuk 1996], the fastest sequen-
+planning, the DT can be used to compute the Euclidean minimum             tial mesh generation software, as well as to the hybrid approach of
+spanning tree of a set of points, because every geometric minimum         Rong et al. [2008], GPU-CDT runs up to an order of magnitude
+spanning tree must be a subgraph of the DT [Preparata and Shamos          faster.
+1985]. DT is also often used to build quality meshes for the ﬁnite
+element analysis [Huebner et al. 2001].
+                                                                          The paper is organized as follows. Section 2 introduces some basic
+Constrained Delaunay triangulation (CDT) is a direct extension of         deﬁnitions and reviews the previous works on both DT and CDT.
+the Delaunay triangulation where some edges in the output are en-         Section 3 presents our GPU approach to the DT problem, and Sec-
+                                                                          tion 4 then extends it to handle constraints. Section 5 describes our
+    ∗ {qimeng | caothanh | tants}@comp.nus.edu.sg                         experimental results, and Section 6 concludes the paper.
+
+National University of Singapore, School of Computing, Technical Report # TRB3/11, March 2011.
+2    Preliminaries                                                        3     Computing DT on GPU
+
+In this section we ﬁrst introduce some important deﬁnitions and           The basic idea of our GPU algorithm is to derive from the digital
+properties before stating some related works on computing the DT          Voronoi diagram D(S) of the input set of points S an approxima-
+and CDT. Let S = {p1 , p2 , . . . , pn } be a set of n points in the      tion of the DT for transforming into the needed DT. Speciﬁcally,
+Euclidean space 2 .                                                      the algorithm consists of the following phases:
+
+Deﬁnition 1 (Voronoi diagram) For each point p ∈ S, the                   Phase 1. Digital Voronoi diagram construction Map the input
+Voronoi region R(p) of p is the set of points in 2 that are closer           points into a texture and compute the digital Voronoi diagram.
+(in Euclidean metric) to p than to any other points in S. The                 If more than one point is mapped to a same pixel, keep just
+Voronoi diagram V(S) of S is the space partition induced by the               one and treat the others as missing points.
+Voronoi regions of the points in S. The line segments shared by
+the boundaries of two Voronoi regions are called Voronoi edges,           Phase 2. Triangulation construction Find all the digital Voronoi
+and the points shared by the boundaries of three or more Voronoi              vertices to construct triangles for a triangulation. This trian-
+regions are called Voronoi vertices.                                          gulation is an approximation of the DT.
+                                                                          Phase 3. Shifting Points have been moved due to the mapping in
+Deﬁnition 2 (Digital Voronoi diagram) In the digital space, we                Phase 1. Shift points back to their original coordinates and
+only consider the set of integer grid points. Consider a 2D grid              modify the triangulation if necessary.
+of size m × m. We say that a grid point x is colored by the point
+p ∈ S if x ∈ R(p). In case x is of equal distance from two points         Phase 4. Missing points insertion Insert all missing points to be
+pi and pj with i < j, we color x by pi . The set of all colored               a part of the triangulation.
+grid points forms the digital Voronoi diagram D(S) of S (see Fig-
+ure 1(b)). This coloring procedure is referred to as the Euclidean        Phase 5. Edge ﬂipping Verify the empty circle property for each
+coloring.                                                                     edge in the triangulation, and perform edge ﬂipping if neces-
+                                                                              sary.
+Deﬁnition 3 (Planar straight line graph) A planar straight line
+graph (PSLG) G = (S, E) is a plane graph with vertex set S and            We adopt the triangulation data structure used by Shewchuk [1996]
+edge set E; see Figure 1(d).                                              in our computation. A list of triangles is stored in a pre-allocated
+                                                                          array of size no more than 2|S|, each one has the indices of three
+Deﬁnition 4 (Delaunay triangulation) A triangulation of S is a            other triangles edge adjacent to it. Each vertex in S also has a linked
+PSLG T = (S, E) such that |E| is maximal. An edge ab ∈ E                  list of triangles incident to it.
+is said to satisfy the empty circle property with respect to S if there
+exists a circle passing through a and b such that points in S are not     3.1   Phase 1: Digital Voronoi diagram construction
+inside the circle. A triangulation T of S is a Delaunay triangula-
+tion (DT) if each edge of T satisﬁes the empty circle property with       In this step, we ﬁrst translate and then scale the point set such that
+respect to S. When points in S are in general positions, i.e. no four     its bounding box ﬁts inside our texture of size m×m. Then we map
+or more points are co-circular, the DT of S is unique. Figure 1(c)        each input point p to the grid point (or pixel) closest to p in a texture.
+shows an example of the DT.                                               In case several input points are mapped to a same grid point, only
+                                                                          one among them is recorded. Those that are not recorded become
+Deﬁnition 5 (Constrained Delaunay triangulation) Two points               missing points and will be inserted into the triangulation in a later
+a and b of a PSLG G = (S, E) are visible from each other if the           phase. With the texture containing the points or seeds, we use the
+(open) line segment ab does not intersect any other edge in E. A          Parallel banding algorithm (PBA) of Cao et al. [2010a] to compute
+triangulation T = (S, E  ) is a constrained Delaunay triangulation       the digital Voronoi diagram of these seeds. Each Voronoi region of
+(CDT) of G if E ⊆ E  and each edge ab ∈ E  is either in E or it         a seed is represented by the color of the seed.
+satisﬁes the empty circle property with respect to those points of S
+visible from both a and b. If E = ∅, then the CDT is exactly the          Cao et al. [2010b] shows that by dualizing the output obtained by
+same as the DT. Figure 1(e) shows an example of the CDT.                  the Standard ﬂooding, one gets a valid geometrical triangulation.
+                                                                          The output of Standard ﬂooding is very close to that of PBA except
+There are many algorithms developed for the CPU to efﬁciently             that each region of a color is connected. We adopt PBA as it is a
+compute the DT [Aurenhammer 1991; Fortune 1997; Su and                    much faster process than the Standard ﬂooding, but the dual of its
+Scot Drysdale 1997]. All these algorithms in general follow               output is not a valid geometrical triangulation. In particular, a dig-
+one of the three well-known algorithmic paradigms: divide-and-            ital Voronoi region obtained by PBA can be disconnected and its
+conquer [Shamos and Hoey 1975; Dwyer 1987], sweep-line [For-              dual thus can have duplicated and intersecting triangles (see Fig-
+tune 1987] and incremental insertion [Guibas et al. 1992].                ure 2). Pixels in a disconnected Voronoi region is classiﬁed as: bulk
+                                                                          (pixels) which are path-connected to its seed, and debris (pixels)
+The algorithms for constructing the CDT can be grouped into two           otherwise. We want to get the same output as the Standard ﬂood-
+categories: (a) Processing points and constraints simultaneously:         ing to use the theory in [Cao et al. 2010b]. First, we amend the
+Chew [1989] shows that the CDT can be built in optimal O(n log n)         output from PBA by removing all the debris. This is carried out
+time using a divide and conquer approach to partition the prob-           by identifying (in parallel) all pixels whose adjacent pixels closer
+lem into smaller CDT problems within vertical strips. (b) Pro-            to their seeds do not have the same color. This process may need
+cessing points and constraints separately: Since CDT is a gener-          a few passes as each pass may remove just some of the debris of a
+alization of DT with the notion of constraints [Lee and Lin 1986;         Voronoi region. After that, we can use a ﬂooding algorithm to re-
+Kallmann et al. 2003; Bernal 1995; Shewchuk 1996], we can ﬁrst            color the debris. The detailed algorithm and its proof of correctness
+construct DT of the given point set, then insert each constraint one      is discussed in Appendix A. The number of debris is usually very
+by one to remove triangles pierced through by the constraint, and         small, so the cost of this correction step is insigniﬁcant and our ap-
+re-triangulate regions due to the removal of triangles to include the     proach with PBA is thus a much better one than directly using the
+constraint and to maintain the empty circle property.                     Standard ﬂooding.
+
+
+Technical Report # TRB3/11, March 2011                                                                                                            2
+                                                                         be shifted as a good case if the orientation of all triangles incident
+                                                                         to p remain the same after moving p to its original location. This
+                                                                         implies that we cannot shift two points sharing the same edge con-
+                                                                         currently. We use multiple passes in which no two adjacent points
+                                                                         are shifted in the same pass. This can be ensured by giving priority
+        (a) duplicated triangles      (b) intersecting triangles         to points with smaller index; see Algorithm 1. In this algorithm, ini-
+                                                                         tially all points are unchecked. To guarantee the robustness of the
+                                                                         computation, all the orientation tests are done using Shewchuk’s
+Figure 2: Portions of digital Voronoi digrams showing (a) corners
+                                                                         robust orientation predicate [Shewchuk 1996].
+u and v that generate the same triangle; and (b) corners u and v
+generate two intersecting triangles.
+                                                                         Algorithm 1 Shifting good cases and recording bad cases
+                                                                           repeat
+3.2   Phase 2: Triangulation construction                                    for each unchecked point pi do in parallel
+                                                                                if all neighbors pj of pi , j < i, has been checked then
+In this phase, we want to dualize the result from the previous phase.              mark pi as checked
+A corner shared by up to 4 pixels is incident to 1 to 4 different                  if shifting pi is a good case then
+colors. For a corner with 3 colors, we add one triangle, and for                       update the coordinate of pi to its original one
+one with 4 colors, we add two (non-intersecting) triangles into the                else
+triangulation. This phase can be done in parallel by processing each                   mark pi as a bad case
+row of the texture independently. A thread handling one row of the                 end if
+texture ﬁrst counts the number of triangles to be generated for that            end if
+row. Then we use the parallel preﬁx sum primitive to identify the            end for
+offset in the triangle list from which each thread can start adding        until all points have been checked
+triangles.
+                                                                         After all points have been checked and most of them shifted, we
+As the digital Voronoi diagram is truncated within the texture, its
+                                                                         have also marked the other points not shifted as bad cases (though
+dual does not always produce a complete triangulation with a con-
+                                                                         they are not necessary so due to possibly new locations of points in
+vex boundary. We need an additional step of traversing along the
+                                                                         its triangle fan). We handle these points by simply deleting them
+boundary of the texture, using the idea similar to the Graham’s scan
+                                                                         from the triangulation, and mark them as missing points, just as
+algorithm [1972], to identify triangles whose Voronoi vertices fall
+                                                                         in Phase 1, for later processing. Notice we also need the above-
+outside the texture to add into the end of the triangle list. This ad-
+                                                                         mentioned tie breaker to avoid deleting in parallel two points inci-
+ditional step is performed in the CPU as it is a simple task and can
+                                                                         dent to a same edge. To delete one point, we mark all triangles in
+be done concurrently while the GPU is populating the triangle list.
+                                                                         its fan as deleted. We then use the ear-cutting method [Highnam
+                                                                         1982] to re-triangulate the resulting star-shape hole. Notice that the
+3.3   Phase 3: Shifting                                                  number of new triangles is no more than the number of deleted tri-
+                                                                         angles, thus we can use the deleted slots in the triangle list to store
+Points are shifted away from their original positions in Phase 1.        new triangles, without any racing memory access during parallel
+We now work on moving them back to their original positions in           computation.
+two stages: ﬁrst, we scale and translate the computed triangulation
+to near the original coordinates; second, we then shift the points       3.4   Phase 4: Missing points insertion
+to their original coordinates. The ﬁrst stage is done with careful
+numerical accuracy consideration so that the triangulation remains       This phase starts with a triangulation T , and we want to insert into
+valid after scaling and translation; see Apendix B. The second stage     T in parallel, points of S that are not yet part of T . These points
+is described next.                                                       are those missing points identiﬁed in Phase 1 and Phase 3. The in-
+In shifting a point, we assume all its neighboring points remain         sertion for each missing point pi starts by efﬁciently identifying the
+static. A point to be shifted falls in one of the two categories: good   triangle(s) in T that contains pi , or has an edge passing through pi .
+case and bad case. The former is the case when a point can be            For a missing point obtained from Phase 1, we can start searching
+shifted to its original position without causing any intersection of     from a triangle incident to the point of S mapped to the same grid
+triangles (of its fan) with other triangles. Otherwise, it is the lat-   point as pi ; as for one from Phase 3, we can start searching from a
+ter case; see Figure 3. As expected due to the very small shifting       triangle incident to a point pj of S sharing an edge with pi before
+distance, majority of the cases in practice are good cases.              pi was deleted. During the processing of pi , if pj is not yet inserted,
+                                                                         we delay the insertion of pi to a later iteration.
+To achieve uniform computation while shifting points in parallel,
+we handle the two mentioned categories separately. A point p can         With the triangle(s) containing pi found, the insertion of pi splits
+                                                                         the single triangle enclosing pi into three, or the two triangles pass-
+                                                                         ing through pi into four. As the insertion of points is to be carried
+                                                                         out in parallel, we need to prevent modiﬁcation done to some same
+                                                                         triangles by the insertions of different points. This can be achieved
+                                                                         by ﬁrst marking the triangles to be modiﬁed by pi with the vertex
+                                                                         index i using atomicMin operation of CUDA: when a triangle is to
+                                                                         be modiﬁed by different missing points, only the one with the small-
+               (a) Good case             (b) Bad case                    est index should be allowed. The insertion of pi is carried out only
+                                                                         when it managed to retain its marks on the triangle(s) it wants to
+                                                                         modiﬁed. It is clear that the missing point with smallest index can
+Figure 3: Shifting of point from p to p in (a) good and (b) bad         always be inserted, so the algorithm terminates. This also means
+case. Dashed lines indicate the new triangulation after shifting.        that many rounds as shown in the repeat-until loop of Algorithm 2
+
+
+Technical Report # TRB3/11, March 2011                                                                                                        3
+may potentially be needed to complete all the insertions. In prac-            Step 1 Compute a triangulation T for all points (Phases 1 to 4);
+tice, the worst does not happen; for the case where many points fall
+into a same triangle, after the ﬁrst few insertions, we have missing          Step 2 Insert constraints into T in parallel;
+points quickly distributed across many newly created triangles.               Step 3 Flip edges (non-constraint) if necessary (Phase 5).
+
+Algorithm 2 Inserting missing points                                          Step 1 and Step 3 are as discussed, but Step 2 needs consideration to
+    repeat                                                                    achieve good parallelism. The naı̈ve approach of having one thread
+      for each not yet inserted missing point pi do in parallel               to handle one constraint is not ideal: each constraint can intersect
+         mark the triangle(s) containing pi with i using atomicMin            many triangles in T , and each insertion thus has many smaller tasks
+      end for                                                                 that can possibly be done in parallel but not explored. Also, the
+      for each not yet inserted missing point pi do in parallel               difference in the number of triangles intersected by different con-
+         if it successfully marked the triangles for modiﬁcation then         straints results in unbalanced work loads. Worst still, two different
+             insert pi into the triangulation                                 threads handling two constraints may intersect some common trian-
+         else                                                                 gles and the threads cannot proceed independently. Our proposed
+             record the triangle found for pi for its latter point location   Step 2 is given in Algorithm 3 with the outer loop and the inner
+         end if                                                               loop. The idea is to identify constraint-triangle intersections with
+      end for                                                                 the outer loop, and uses edge ﬂipping to remove these intersections
+    until all missing points have been inserted                               in the inner loop, all in parallel using multiple passes.
+
+Note ﬁrst that the simple way of marking without using atomicMin              Algorithm 3 Inserting constraints into the triangulation
+does not work as there can be a live lock situation when vari-                  repeat /* outer loop */
+ous modiﬁcations each needs the locking of two adjacent triangles                 for each constraint ci do in parallel
+while these triangles together form a cycle. Note second that there                  mark all triangles intersected by ci with i using atomicMin
+is one caveat in the above algorithm. A point pi to be inserted can               end for
+fall outside T , and many new triangles are to be created to include              repeat /* inner loop : details in Algorithm 4 */
+pi into the new T . We adapt the standard trick of enclosing all                     do edge ﬂipping to remove intersections to constraints
+points of S by a pre-deﬁned polygonal boundary, that will be re-                  until no edge that is ﬂippable
+moved at the end of the computation.                                            until all constraints are inserted
+
+3.5    Phase 5: Edge ﬂipping
+                                                                              4.1   Outer loop: Find constraint-triangle intersections
+In this phase we verify the empty circle property for each edge T in
+parallel. For an edge ab of the triangle abc, we only have to check           The goal here is to ﬁnd out, for each triangle in T , the index of a
+if the opposite point of the other triangle, say adb, adjacent to ab,         constraint intersecting it, if any. Let ci = ab be the ith constraint,
+if any, is inside the circumcircle of abc. If so, an edge ﬂipping is          we go through the triangle fan of a to identify the triangle A inter-
+performed to replace the two triangles abc and adb by triangles acd           sected by ci . If ci is an edge of A, no further processing is needed.
+and cbd. As in the insertion of missing points in parallel, one thread        Otherwise, from A we start walking along the constraint towards b,
+performing an edge ﬂip needs to modify two triangles and can thus             visiting all triangles intersected by ci . For each triangle T found,
+conﬂict with other threads. We use the same multiple passes strat-            we record in T the result of the orientation test of each vertex of
+egy: each thread ﬁrst marks the two triangles it needs to modify              T against ab, and the index i with atomicMin operation. The for-
+with its index using the atomicMin operation, and only if the thread          mer information is used to move to the next triangle along the path,
+successfully marks both triangles needed for modiﬁcation can pro-             while the later’s usage is explained in our proof of correctness.
+ceed with the edge ﬂipping. After the completion of this phase, the
+result is indeed the Delaunay triangulation of the input point set S.         We note that the issue of unbalanced work loads still remains here.
+                                                                              However, this is the less time consuming part, while the computa-
+A few notes are in order. First, it is possible for an edge to be             tion in the more time consuming part, the inner loop, is much more
+ﬂipped several times if its neighbors are changed. Second, in each            uniform.
+pass, we only need to check an edge if it was never checked before,
+or it needed to be ﬂipped but could not in the previous pass due to
+                                                                              4.2   Inner loop: Remove intersections
+conﬂict with other edge ﬂipping, or its neighboring triangles were
+modiﬁed. Third, to perform the in-circle test robustly, we use the
+                                                                              The inner loop of Algorithm 3 is to perform ﬂipping of edges to
+robust predicate introduced by Shewchuk [1996]. We perform only
+                                                                              reduce eventually the number of intersections between constraints
+the fast check of the predicate in the GPU, while making down
+                                                                              and triangles to zero. A triangle pair is a pair of triangles incident
+the edges with numerically inaccurate in-circle tests (the almost co-
+                                                                              to a common edge. See Figure 4. With respect to a constraint, the
+circular cases). After all possible ﬂipping are performed and the
+                                                                              triangle pair is a double intersection, single intersection, or zero
+result is transferred back to the CPU memory, we perform another
+                                                                              intersection, respectively, if ﬂipping their common edge results in
+pass of in-circle test on the very few marked edges in CPU using
+                                                                              two, one, or zero, respectively, intersections between the new trian-
+the robust predicate. After all ﬂipping are done, if any, the result
+                                                                              gle pair and the constraint. A triangle pair is concave if ﬂipping is
+we obtain is the desired Delaunay triangulation.
+                                                                              not allowed as its underlying space is a concave quadrilateral.
+
+4     Computing CDT on GPU                                                    The difﬁculty of performing the ﬂipping in parallel is that ﬂipping
+                                                                              a triangle pair might not reduce the number of intersections, and
+To compute the CDT with the GPU, our algorithm processes points               restricting to only ﬂipping triangle pairs that are zero and single
+and constraints separately as follows:                                        intersection will reduce the number ﬂippings in parallel. It might
+                                                                              also be possible that there are no zero or single intersection that
+                                                                              such an approach would be stuck with triangle pairs that are double
+
+
+Technical Report # TRB3/11, March 2011                                                                                                            4
+        (a) double      (b) single       (c) zero      (d) concave
+
+                                                                                                            (a) Case 1
+  Figure 4: Conﬁgurations of triangle pair intersecting constraint
+  (drawn in red dashed line).
+
+
+  intersection or concave. Our approach overcomes all these by “one-
+  step look-ahead”. Consider a triangle A in the chain of triangles                      (b) Case 2                             (c) Case 3
+  intersected by a constraint from one end point to the other, and let
+  B and C be the previous and the next triangle of A in that chain. See    Figure 5: Flipping consideration of triangle pairs involving A.
+  Figure5; the triangle pair (A, C) is ﬂippable in one of the following    Constraint is drawn in red dashed line intersecting triangles from
+  cases:                                                                   left to right, i.e. triangle B comes before A, and C after A.
+Case 1 (A, C) is a single intersection or zero intersection.
+Case 2 (A, C) and (B, A) are both double intersections, and ﬂipping        4.3    Proof of correctness and complexity analysis
+       (A, C) would result in B with B’s new next triangle form-
+       ing a single intersection. The later condition is equivalent to     We show here that Algorithm 3 indeed terminates with all con-
+       having the union of B, A and C as a convex polygon.                 straints inserted into the triangulation. Consider one iteration of the
+Case 3 (A, C) is a double intersection and (B, A) is concave, and          outer loop, and let ci = ab be the constraint with the smallest index
+       ﬂipping (A, C) would result in B with B’s new next triangle         i that still intersects some triangles in our triangulation. By using
+       no longer concave.                                                  the atomicMin operation, we ensure that all triangles intersecting ci
+                                                                           are marked with i. It thus sufﬁces to prove the following:
+  The detail of the inner loop of Algorithm 3 is given in three parallel
+  for loop in Algorithm 4.                                                 Lemma 1 The inner loop can always successfully inserts a con-
+                                                                           straint into the triangulation.
+  Algorithm 4 Parallel processing of triangle-constraint intersections     Proof. Consider the chain of triangles intersecting ci from a to b.
+     repeat                                                                Among these triangles, if there is one or more triangle pairs that
+       for each triangle A intersecting a constraint do in parallel        are single or zero intersection, then the claim is true as the marking
+          if C is also marked by the same constraint then                  favor each of these cases and ﬂipping is indeed carried out to reduce
+             determine the conﬁguration of (A, C)                          one intersection with ci .
+          end if                                                           Otherwise, we consider the chain of triangles intersecting ci are
+       end for                                                             only double intersection or concave. We argue in the following that
+       for each triangle A intersecting a constraint do in parallel        there still exists a triangle pair (A, C) mong them that is ﬂippable,
+          if (A, C) is ﬂippable then                                       and each ﬂipping is a step closer to removing intersection of trian-
+             label A, C (and B for Case 2) using atomicMin                 gles with ci .
+          end if
+       end for                                                             If we would remove all triangles intersecting ci , a polygonal hole
+       for each triangle A intersecting a constraint do in parallel        is created with vertices p1 , p2 , . . . as its upper part and q1 , q2 , . . .
+          if A, C (and B for Case 2) are labeled the same then             as its lower part, excluding a and b; see Figure 6. Any polygon
+             ﬂip (A, C) and update the links between the new               has an ear, so let qk−1 qk qk+1 be the ear such that the triangle C =
+             triangles and their neighbors                                 qk qk+1 pj incident to qk qk+1 and intersected by ab is the earliest
+          end if                                                           in the chain. We exclude a and b themselves to be qk . Let A be
+       end for                                                             the previous triangle of C, B be the previous of A. We have A =
+     until no more edge is ﬂippable                                        qk pj pj−1 since if it would be qk pj qk−1 , then (A, C) should have
+                                                                           been a single intersection pair. The triangle pair (A, C) is a double
+
+  The labeling with atomicMin in the second for loop is to prevent
+  conﬂict in the actual ﬂipping during the third for loop. In the label-
+  ing, we favor Case 1. Also, when (A, C) is Case 2 or Case 3, B is
+  also labeled in the second for loop, and the label is checked in the
+  the third for loop so that the “one-step look-ahead” is achieved.
+  In practice, the repeat-until loop of the Algorithm 4 should just
+  repeats the inner loop a few times per each outer loop instead of
+  repeating until no more edge is ﬂippable. This is because as the
+  algorithm progresses, there are drastic reduction of the number of
+  ﬂippable cases, and the parallelizm thus reduces. So, by switching
+  to the outer loop after a few (say 5 to 10) rounds of inner loop, the
+  algorithm can discover more ﬂippable cases to improve the paral-
+  lelizm and performance of the inner loop without compromising on         Figure 6: Consideration when triangle pairs intersecting con-
+  the correctness of the algorithm as proven in the next subsection.       straint ci = ab are either double intersection or concave.
+
+
+    Technical Report # TRB3/11, March 2011                                                                                                            5
+intersection, since the two angles pj−1 pj qk+1 and pj−1 qk qk+1 are    5.1.1   Varying the number of points
+both less than π. We claim (A, C) is ﬂippable: If B = qk pj−1 qk−1
+then (B, A) is a double intersection; the union of triangles B, A, C
+is a convex polygon as needed in Case 2. If B = qk pj−1 pj−2 then
+(B, A) is a concave pair; because pj−2 pj−1 qk+1 qk is convex by
+the choice of qk , triangles B, A, C fulﬁls Case 3. As long as there
+are one triangle pair that is ﬂippable, the marking in the second for
+loop will successfully mark one triangle pair for ﬂipping (using the
+index of A while also favoring ﬂipping of Case 1), and ﬂipping is
+indeed performed for each pass of the inner loop.
+We next show that ﬂipping does not continue forever. Let us as-
+sign to each triangle pair the value of 0, 1 and 2 according to its
+being zero/single intersection, double intersection and concave, re-
+spectively. Then, we have a base 3 number, N , to record the con-                                  (a) running time
+ﬁgurations of the chain of triangles intersecting ci . A ﬂipping due
+to Case 1 deletes a digit in N , Case 2 turns digits 11 into 01, and
+Case 3 turns digits 21 into 11. In other words, each ﬂipping de-
+creases the value of N . Since N is ﬁnite, our algorithm clearly
+terminates by inserting a constraint as needed by the claim.      
+The above concludes that our proposed algorithm computes cor-
+rectly the CDT of an input PSLG. It also indirectly shows that no
+ﬂip is wasteful with the following bound on the number of ﬂips per
+constraint:
+Lemma 2 The total number of ﬂips performed by the inner loop
+to add a constraint is O(n2 ) where n is the number of triangles
+intersecting the constraint.                                                                         (b) speed up
+Proof. Flipping due to Case 1 cannot be done more than n times
+since each ﬂip reduces an intersection. Flipping due to Case 2 im-      Figure 7: Performance comparisons between GPU-CDT and Tri-
+mediately gives raise to a ﬂipping of Case 1 (with highest priority),   angle with no constraints and varying the total number of points
+and thus cannot be done more than n times too.                          from 2 millions to 10 millions: running time (top) and speed up of
+                                                                        GPU-CDT over Triangle (bottom).
+Flipping due to Case 3 either eliminates a concave conﬁguration, or
+pushes the concave conﬁguration towards one end of the constraint.
+There are initially O(n) concave conﬁgurations, and ﬂipping due to      Figure 7 shows the running time and speed up of GPU-CDT com-
+Case 1 (or Case 2) can introduce at most two (or one) concave con-      pared to that of the Triangle with no constraints and varying the
+ﬁgurations, thus the number of ﬂips in total is O(n2 ), as required.    number of points in the range of 2 to 10 millions. In general, GPU-
+                                                                       CDT can run faster than Triangle by a few order of magnitude. We
+                                                                        note that GPU-CDT is superior to the prior work reported by Rong
+                                                                        et al. [2008] which is better than Triangle by no more than 50%.
+5     Experiment Result                                                 Also, Figure 8 (top) shows the running time of GPU-CDT com-
+                                                                        pared to that of the Triangle when ﬁxing the number of constraints
+We have developed and tested our algorithm on a PC with an Intel        to 1 million and varying the number of points in the range of 2 to 10
+i7 930 2.8Ghz, 6GB DDR3 memory and a single NVIDIA GTX                  millions. Figure 8 (bottom) shows the speed up of up to 31 times of
+460 Fermi graphics card with 2GB of video memory. Our pro-              GPU-CDT compared to Triangle. We notice that in increasing the
+gram called GPU-CDT is built under Microsoft Visual C++.NET             number of points, the percentage of triangles intersected by con-
+2008, and complied with all optimization options enabled, while         straints decreases (though the total increases), GPU-CDT thus has
+using CUDA 3.1 toolkit [NVI 2010]. The input to the program             less ﬂippings to perform in parallel which results in smaller speed
+is a PSLG containing possibly no edges but just points. All input       up.
+numbers and computations are done in single precision mode, while
+double precision mode is also supported. To access the efﬁciency        5.1.2   Varying the number of constraints
+of our program, we compare its performance, on both synthetic and
+real contour data, with that of the best software available for CPU,
+                                                                        Figure 9 (top) shows the comparison of GPU-CDT with Triangle
+called Triangle [Shewchuk 1996] in our following discussion. As
+                                                                        when ﬁxing the number of points at 10 millions while varying the
+indicated by Shewchuk, the performance of the divide-and-conquer
+                                                                        number of constraints from 0 to 1 million. We notice that Trian-
+algorithm of Triangle is among the best, and we thus use it to com-
+                                                                        gle shows an obvious time increasing when more constraints are
+pute DT. To compute CDT, both Triangle and GPU-CDT insert con-
+                                                                        added, while GPU-CDT shows a steady and slower growth in com-
+straints one by one based on their results of DT.
+                                                                        putational time. For Triangle, it inserts constraints one by one, and
+                                                                        thus needs more time when there are more constraints: it takes, for
+5.1   Synthetic Dataset                                                 example, 32 seconds to construct a DT but 85 seconds (70% of total
+                                                                        time) to insert 1 million constraints into the DT. As for GPU-CDT,
+To generate synthetic data, we ﬁrst generate randomly constraints       the time for generating constrained Delaunay triangulation with 1
+which do not intersect with each other, then generate randomly          million constraints using 8192×8192 texture size is 8.5 seconds
+points which do not lay on any constraints. There are 2 to 10 mil-      with 2.45 seconds (less than 30% of total time) to insert constraints.
+lions points with up to 1 million constraints in our test cases.        Figure 9 (bottom) shows the speed up of GPU-CDT over Triangle
+
+
+Technical Report # TRB3/11, March 2011                                                                                                      6
+                          (a) running time                                                       (a) running time
+
+
+
+
+                            (b) speed up                                                           (b) speed up
+
+Figure 8: Performance comparisons between GPU-CDT and Tri-             Figure 9: Performance comparisons between GPU-CDT and Tri-
+angle while ﬁxing the number of constraints to 1 million edges and     angle while ﬁxing the number of points at 10 millions and varying
+varying the total number of points from 2 millions to 10 millions:     the number of constraints from 0 to 1 million: running time (top)
+running time (top) and speed up of GPU-CDT over Triangle (bot-         and speed up of GPU-CDT over Triangle (bottom).
+tom).
+
+                                                                       and do not intersect many common triangles with other constraints.
+when varying the number of constraints. For the number of con-         As such, GPU-CDT can handle these test cases very well by in-
+straints from 0 to 100,000 edges, the speed up decreases due to the    serting all constraints in a few rounds of the outer loop. On the
+overhead of GPU computation in GPU-CDT. However, when the              other hand, within each inner loop, the amount of parallelism is
+number of constraints increases further, the speed up of GPU-CDT       low due to fewer triangles intersecting constraints (typically below
+to Triangle is obvious due to the increase in the percentage of tri-   35%, well below the norm for synthetic data). On the whole, the
+angles in DT intersecting constraints and more parallelism can be      average speed up to Triangle is up to four times in our tests.
+achieved.
+
+5.1.3   Varying the texture sizes
+
+We test GPU-CDT with different texture sizes varying from
+512×512 to 8192×8192 (as in Figure 8 and Figure 9). Basically,
+when using larger texture size, the total running time is faster and
+the speed up to Triangle is larger. There are two main reasons for
+this trend. Firstly, the running time for Phase 4 decreases as there
+are less number of missing points to handle, which also offsets the
+increase in the running time for Phase 1 and Phase 2. Secondly, with
+larger texture on a ﬁxed number of points and constraints, the per-
+centage of triangles intersected by constraints decreases, and thus    Figure 10: An example contour dataset with a part of its CDT.
+less work to do and thus faster running time.                          Constraints are drawn in thick line segments.
+
+5.2     Contour Dataset
+
+We downloaded contour maps from https://www.ga.gov.au/ for our         6   Concluding Remarks
+experiments. Edges of the contour maps are divided into shorter
+edges as constraints. These cases have up to 5 millions points and     This paper presents a new efﬁcient and robust parallel approach to
+constraints. Figure 10 shows one such example. When there are          construct the 2D constrained Delaunay triangulation on the GPU.
+few points (less than 100,000), GPU-CDT runs slower than Trian-        We have developed and tested the algorithm on both synthetic and
+gle due to overhead in working with a large texture of 4096×4096       contour map data. In both cases, we have shown that our approach
+resolution. For other examples, GPU-CDT runs generally faster          runs up to 31 times faster than the best, robust constrained Delaunay
+than Triangle. In these real-world data, all points are connected      triangulation algorithm on the CPU. In another perspective, possi-
+to at least one constraint. Most of these constraints are very short   bly of independent interest, our contribution here is a framework
+
+
+Technical Report # TRB3/11, March 2011                                                                                                    7
+of utilizing the GPU in a non-conventional way to capitalize on the     H OFF , III, K. E., K EYSER , J., L IN , M., M ANOCHA , D., AND
+computing power of many cores: instead of solving a problem com-           C ULVER , T. 1999. Fast computation of generalized Voronoi di-
+pletely in the continuous space, we ﬁrst transform it to a problem         agrams using graphics hardware. In SIGGRAPH ’99: Proceed-
+in the digital space, solving the latter to obtain an approximate so-      ings of the 26th annual conference on Computer graphics and
+lution, and then augmenting it into the required solution in the con-      interactive techniques, ACM Press/Addison-Wesley Publishing
+tinuous space. With this work, we look forward to developing more          Co., New York, NY, USA, 277–286.
+efﬁcient computational geometric algorithms running on GPUs in
+the near future.
+
+                                                                        H UEBNER , K. H., D EWHIRST, D. L., S MITH , D. E., AND B Y-
+References                                                                 ROM , T. G. 2001. The Finite Element Method for Engineers.
+                                                                           Wiley, New York, NY, USA.
+AURENHAMMER , F. 1991. Voronoi diagrams—a survey of a fun-
+  damental geometric data structure. ACM Computing Surveys 23,
+  3, 345–405.
+                                                                        K ALLMANN , M., B IERI , H., AND T HALMANN , D. 2003. Fully
+B ERNAL , J. 1995. Inserting line segments into triangulations and         dynamic constrained Delaunay triangulations. In Geometric
+   tetrahedralizations. Tech. Rep. 5596, National Institute of Stan-       Modelling for Scientiﬁc Visualization, G. Brunnett, B. Hamann,
+   dards and Technology.                                                   and H. Mueller, Eds. Springer-Verlag.
+B OISSONNAT, J.-D. 1988. Shape reconstruction from planar cross
+   sections. Computer Vision, Graphics, and Image Processing 44,
+   1, 1–29.
+                                                                        L EE , D., AND L IN , A. 1986. Generalized Delaunay triangula-
+C AO , T.-T., E DELSBRUNNER , H., AND TAN , T.-S. 2010.                    tion for planar graphs. Discrete and Computational Geometry 1,
+   Proof of correctness of the digital Delaunay triangulation algo-        201–217.
+   rithm. manuscript, available at http://www.comp.nus.
+   edu.sg/˜tants/delaunay2DDownload_files/
+   notes-25-01-2010.pdf.
+                                                                        NVIDIA. 2010. CUDA C Programming Guide.
+C AO , T.-T., TANG , K., M OHAMED , A., AND TAN , T.-S. 2010.
+   Parallel banding algorithm to compute exact distance transform
+   with the GPU. In I3D ’10: Proceedings of the 2010 ACM
+   SIGGRAPH symposium on Interactive 3D Graphics and Games,             P REPARATA , F. P., AND S HAMOS , M. I. 1985. Computational ge-
+   ACM, New York, NY, USA, 83–90.                                          ometry: an introduction. Springer-Verlag New York, Inc., New
+                                                                           York, NY, USA.
+C HEW, L. P. 1989. Constrained Delaunay triangulations. Algorith-
+   mica 4, 97–108.
+DWYER , R. 1987. A faster divide-and-conquer algorithm for con-         RONG , G., TAN , T.-S., C AO , T.-T., AND S TEPHANUS.
+ structing delaunay triangulations. Algorithmica 2, 137–151.              2008. Computing two-dimensional Delaunay triangulation us-
+                                                                          ing graphics hardware. In I3D ’08: Proceedings of the 2008
+F ISCHER , I., AND G OTSMAN , C. 2006. Fast approximation of              symposium on Interactive 3D graphics and games, ACM, New
+   high-order voronoi diagrams and distance transforms on the gpu.        York, NY, USA, 89–97.
+   J. Graphics Tools 11, 4, 39–60.
+F ORTUNE , S. 1987. A sweepline algorithm for voronoi diagrams.
+   Algorithmica 2, 153–174.
+                                                                        S HAMOS , M. I., AND H OEY, D. 1975. Closest-point problems.
+F ORTUNE , S. 1997. Handbook of discrete and computational ge-             FOCS ’75: the 16th Annual Symposium on Foundations of Com-
+   ometry. CRC Press, Inc., Boca Raton, FL, USA, ch. Voronoi               puter Science, 151–162.
+   diagrams and Delaunay triangulations, 377–388.
+G OLD , C. M. 1994. A review of potential applications of voronoi
+   methods in geomatics. In Proceedings of the Canadian Confer-         S HEWCHUK , J. 1996. Triangle: Engineering a 2D quality mesh
+   ence on GIS, 1647–1656.                                                 generator and Delaunay triangulator. In Applied Computa-
+                                                                           tional Geometry Towards Geometric Engineering, M. Lin and
+G OLD , C. M. 1994. Review: Spatial tesselations - concepts and            D. Manocha, Eds., vol. 1148 of Lecture Notes in Computer Sci-
+   applications of Voronoi diagrams. International Journal of Ge-          ence. Springer Berlin / Heidelberg, 203–222.
+   ographical Information System 8, 237–238.
+G RAHAM , R. L. 1972. An efﬁcient algorith for determining the
+   convex hull of a ﬁnite planar set. Information Processing Letters    S U , P., AND S COT D RYSDALE , R. L. 1997. A comparison of se-
+   1, 4, 132 – 133.                                                        quential Delaunay triangulation algorithms. Computational Ge-
+G UIBAS , L., K NUTH , D., AND S HARIR , M. 1992. Randomized               ometry: Theory and Applications 7 (April), 361–385.
+   incremental construction of Delaunay and Voronoi diagrams. Al-
+   gorithmica 7, 381–413.
+H IGHNAM , P. T. 1982. The ears of a polygon. In Information            T REINISH , L. A. 1995. Visualization of scattered meteorological
+   Processing Letters, 196–198.                                            data. IEEE Computer Graphics and Applications 15, 20–26.
+
+
+Technical Report # TRB3/11, March 2011                                                                                                 8
+A     Our Flooding Algorithm                                              B    Transforming the point set
+Phase 1 of our proposed algorithm is to compute a digital Voronoi         To work on seeds with ﬂoating point coordinates, Phase 1 needs to
+diagram of a collection of points, or called seeds, in a texture. Tech-   map them to a m × m texture. We want precise computation so that
+nically, we want and will prove in the following that the output of       the triangulation computed with respect to seeds mapped to the tex-
+this phase is the same as that of the Standard ﬂooding mentioned in       ture remains a triangulation when we do a part of the inverse map-
+[Cao et al. 2010a]. Then, we can apply their result to conclude that      ping to the original coordinates of seeds. We discuss below precise
+Phase 2 of our algorithm indeed produces a triangulation.                 computation can be achieved by representing scale and translate
+                                                                          used in the mapping with a certain number of bits.
+In our algorithm, we use the efﬁcient Parallel Banding Algorithm
+(PBA) [Cao et al. 2010b] running on the GPU to start the color-           We just consider the 1D coordinate in x-axis; the discussion can
+ing, which results in a Euclidean coloring. Each of the Voronoi           be generalized to 2D with scale be the larger one calculated from
+region resulted has a connected component called bulk which is            both dimensions, while translate is simply a vector of two com-
+path-connected to its seed, and debris (if any) which are discon-         ponents. Let the seeds be such that their minimum and maximum
+nected from the seed. Cao et al. show that bulks are subsets of the       x-coordinates are xmin and xmax , respectively. Let x be the origi-
+result of the Standard ﬂooding. So, our challenge is to identify and      nal coordinate of a seed. The coordinate of the seed mapped to the
+recolor the debris to be the same as in the Standard ﬂooding. Since       texture is thus x̄ = (x−translate)/scale where translate = xmin
+there are very few debris in general, the recoloring is done using        and scale = (xmax −xmin )/m. The computation of a triangulation
+the CPU and then the result is sent back to the GPU to complete           in Phase 2 is then performed using these integer coordinates.
+the coloring. Algorithm 5 is our proposed approach. We use Q to           Then, Phase 3 is to eventually shift all points in the texture back
+mean a priortiy queue, N (A) the set of pixels neigboring pixel A,        to their positions given in the input. To maintain as many good
+and pi a seed with color i. The operation min(Q) on Q is to re-           cases of shifting as possible, we ﬁrst perform the inverse scaling and
+move and return the pair with minimum distance between the pixel          shifting for the whole bounding box with all the points. Speciﬁcally,
+center and the seed of the color; A − pi  ≺ B − pj  means             we have x = (x̄ × scale + translate) as our new coordinate of
+A − pi  < B − pj , or A − pi  = B − pj  with consistent           a seed before shifting it (to negate the effect of the truncation to
+tie breaker (using, for example, the coordinates of pair of points).      integer coordinate) to the original coordinate x. To ensure we still
+                                                                          have a same triangulation with x in place of x̄, we must compute
+Algorithm 5 Flooding Algorithm
+                                                                          ﬂoating point number x with no rounding error.
+    Compute coloring with PBA, and identify all debris as uncolor.
+    Q=∅                                                                   Let (pMax + 1) be the maximum number of bits available for
+    for each debris A do                                                  the mantissa in our ﬂoating point numbers. Note that the explicit
+      Q = Q ∪ {(A, i) | B ∈ N (A) having been colored i, and              mentioned of “+1” here is a provision for possible overﬂow of
+                    B − pi  ≺ A − pi }                                (x̄ × scale + translate). Let the number of bits used to represent the
+    while Q = ∅ do                                                        mantissas of the two constants scale and translate be pS and pT ,
+       (A, i) = min(Q)                                                    respectively. Note that x̄ is a non-negative integer with maximum
+       if A is not colored then                                           value of (m − 1) and thus needs pM = (log m) bit to represent.
+          Color A with color i                                            We keep pT = pMax.
+          Q = Q ∪ {(B, i) | B ∈ N (A) and A − pi  ≺ B − pi }          We are ready to discuss how to set scale and translate before doing
+       end if                                                             the actual mapping to texture. First, the result of the (x̄ × scale) is
+    end while                                                             accurately represented using no more than pMax bits, as long as
+                                                                          we keep scale by doing the necessary round up of its value to use
+We next show Algorithm 5 indeed produces the same output as that          pS = (pMax − pM ) bits. The round up can increase scale by just
+by the Standard ﬂooding. We just need to argue for those pixels           the little bit at the least signiﬁcant bit of scale and thus we still be
+that are identiﬁed as debris. Consider the very ﬁrst instance when        able to spread out the mapping of seeds on the texture. Second, the
+Algorithm 5 colors a debris A with color r (inside the while-loop)        addition of (x̄ × scale) with translate can result in rounding error
+whereas the Standard ﬂooding produced pixel A with color s = r.           as translate can be much smaller or much larger than (x̄ × scale).
+There are two situations to consider :                                    Let range = (xmax − xmin ) = (m × scale). We consider two
+                                                                          cases to guarantee that the computation of x is accurate:
+C ASE 1: A − pr  ≺ A − ps . From Algorithm 5, there exists a
+neighbor B of A colored by r earlier, and B − pr  ≺ A − pr .          C ASE 1: translate ≤ range. Let 2t be the largest term in
+It follows that B − pr  ≺ A − pr  ≺ A − ps . According to           the binary representation of range. We reduce translate by
+our choice of A, pixel B is colored by r in the Standard ﬂooding.         removing all terms in its binary representation that are smaller than
+By the Ordered Coloring Lemma [Cao et al. 2010b], (A, r) must
+have been considered in the Standard ﬂooding before (A, s) and A          2t−(pMax−1) .
+should thus have been colored by r then, a contradiction.
+                                                                          C ASE 2: translate > range.              Let 2r be the largest
+C ASE 2: A − ps  ≺ A − pr . In the result of the Stan-                term in the binary representation of translate = xmin .
+dard ﬂooding, there is a monotonic path from ps to A. Part of this        We round up all terms in the binary representation of
+path has been colored the same (with s) in Algorithm 5 when we            scale that are smaller than 2r−(pMax−1)+pM .              Because
+are about to color A. Let C be the pixel closest to ps in that path       range = xmax − xmin ≥ 2r−(pMax−1) , we have scale rep-
+not yet colored by Algorithm 5. With the previous pixel before            resented by pS bits is larger than 2r−(pMax−1)+pM for any
+C has been colored with s, (C, s) must have been added to Q in            meaningful input and is thus non-zero. Also, the round up does not
+Algorithm 5. Since C − ps  ≤ A − ps  ≺ A − pr , we must             increase more than double the value of scale, and we thus still be
+have (C, s) inside Q to be extracted before (A, r), a contradiction.      able to spread out the mapping of seeds on the texture.
+The argument in Case 2 also implies the algorithm colors all pixels.
+This concludes our claim of correctness of our ﬂooding algorithm.
+
+Technical Report # TRB3/11, March 2011                                                                                                         9
+

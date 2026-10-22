@@ -1,0 +1,1516 @@
+                                         Fusion 360 Gallery: A Dataset and Environment for Programmatic CAD
+                                         Construction from Human Design Sequences
+                                         KARL D.D. WILLIS, Autodesk Research, USA
+                                         YEWEN PU, Autodesk Research, USA
+                                         JIELIANG LUO, Autodesk Research, USA
+                                         HANG CHU, Autodesk Research, Canada
+                                         TAO DU, Massachusetts Institute of Technology, USA
+                                         JOSEPH G. LAMBOURNE, Autodesk Research, United Kingdom
+
+
+
+
+arXiv:2010.02392v2 [cs.LG] 17 May 2021
+                                         ARMANDO SOLAR-LEZAMA, Massachusetts Institute of Technology, USA
+                                         WOJCIECH MATUSIK, Massachusetts Institute of Technology, USA
+
+
+
+
+                                                      Sketch 1                        Extrude 1                         Sketch 2               Extrude 2                                                  Extrude 9
+
+                                         Fig. 1. Top: A subset of designs containing ground-truth CAD programs represented as construction sequences from the Fusion 360 Gallery reconstruction
+                                         dataset. Bottom: An example construction sequence using the sketch and extrude modeling operations with built-in Boolean operations.
+
+                                         Parametric computer-aided design (CAD) is a standard paradigm used to                           language with just the sketch and extrude modeling operations, and a dataset
+                                         design manufactured objects, where a 3D shape is represented as a program                       of 8,625 human design sequences expressed in this language. We also present
+                                         supported by the CAD software. Despite the pervasiveness of parametric                          an interactive environment called the Fusion 360 Gym, which exposes the
+                                         CAD and a growing interest from the research community, currently there                         sequential construction of a CAD program as a Markov decision process,
+                                         does not exist a dataset of realistic CAD models in a concise programmatic                      making it amendable to machine learning approaches. As a use case for
+                                         form. In this paper we present the Fusion 360 Gallery, consisting of a simple                   our dataset and environment, we define the CAD reconstruction task of
+                                                                                                                                         recovering a CAD program from a target geometry. We report results of
+                                         Authors’ addresses: Karl D.D. Willis, Autodesk Research, San Francisco, California,             applying state-of-the-art methods of program synthesis with neurally guided
+                                         USA, karl.willis@autodesk.com; Yewen Pu, Autodesk Research, San Francisco, Califor-
+                                                                                                                                         search on this task.
+                                         nia, USA; Jieliang Luo, Autodesk Research, San Francisco, California, USA; Hang Chu,
+                                         Autodesk Research, Toronto, Ontario, Canada; Tao Du, Massachusetts Institute of Tech-
+                                         nology, Cambridge, Massachusetts, USA; Joseph G. Lambourne, Autodesk Research,                  CCS Concepts: • Computing methodologies → Parametric curve and
+                                         Soho, London, United Kingdom; Armando Solar-Lezama, Massachusetts Institute of                  surface models.
+                                         Technology, Cambridge, Massachusetts, USA; Wojciech Matusik, Massachusetts Insti-
+                                         tute of Technology, Cambridge, Massachusetts, USA.
+                                                                                                                                         Additional Key Words and Phrases: Computer aided design, CAD, dataset,
+                                         Permission to make digital or hard copies of all or part of this work for personal or           construction, geometry synthesis, reconstruction
+                                         classroom use is granted without fee provided that copies are not made or distributed
+                                         for profit or commercial advantage and that copies bear this notice and the full citation
+                                         on the first page. Copyrights for components of this work owned by others than the              ACM Reference Format:
+                                         author(s) must be honored. Abstracting with credit is permitted. To copy otherwise, or          Karl D.D. Willis, Yewen Pu, Jieliang Luo, Hang Chu, Tao Du, Joseph G.
+                                         republish, to post on servers or to redistribute to lists, requires prior specific permission   Lambourne, Armando Solar-Lezama, and Wojciech Matusik. 2021. Fusion
+                                         and/or a fee. Request permissions from permissions@acm.org.
+                                         © 2021 Copyright held by the owner/author(s). Publication rights licensed to ACM.
+                                                                                                                                         360 Gallery: A Dataset and Environment for Programmatic CAD Construc-
+                                         0730-0301/2021/8-ART54 $15.00                                                                   tion from Human Design Sequences. ACM Trans. Graph. 40, 4, Article 54
+                                         https://doi.org/10.1145/3450626.3459818                                                         (August 2021), 24 pages. https://doi.org/10.1145/3450626.3459818
+
+
+                                                                                                                                                ACM Trans. Graph., Vol. 40, No. 4, Article 54. Publication date: August 2021.
+54:2 •   Karl D.D. Willis, Yewen Pu, Jieliang Luo, Hang Chu, Tao Du, Joseph G. Lambourne, Armando Solar-Lezama, and Wojciech Matusik
+
+
+1    INTRODUCTION                                                                           • We present the Fusion 360 Gallery reconstruction dataset,
+The manufactured objects that surround us in everyday life are                                containing 8,625 human designed CAD programs, expressed
+represented programmatically in computer-aided design (CAD) soft-                             in a simple yet expressive language of sketch and extrude.
+ware as a sequence of 2D and 3D modeling operations. Parametric                             • We introduce an environment called the Fusion 360 Gym,
+CAD files contain programmatic information that is critical for doc-                          capable of executing the language of sketch and extrude and
+umenting design intent, maintaining editablity, and compatibility                             providing a geometric data structure as feedback after each
+with downstream simulation and manufacturing. Embedded within                                 operation.
+these designs is the knowledge of domain experts who precisely                              • We standardize the task of CAD reconstruction from input
+define a sequence of modeling operations to form 3D shapes. We                                geometry and use a learning-based approach with neurally
+believe having access to a real-world collection of human design                              guided search to produce results on real world data for the
+sequences, and the ability to execute them, is critical for future                            first time.
+advances in CAD that leverage learning-based approaches.
+   Learning-based approaches show great potential, both for solving
+existing problems such as reverse engineering [Buonamici et al.
+2018], and for providing entirely new kinds of functionality which
+would be unimaginable using traditional techniques. Recent ad-
+                                                                                       2    RELATED WORK
+vances in neural networks have spurred new interest in data driven
+approaches to generating CAD programs, tackling both the forward                           CAD Datasets. Existing 3D CAD datasets have largely focused on
+problem of 3D shape generation [Jones et al. 2020; Li et al. 2020b;                    providing mesh geometry [Chang et al. 2015; Kim et al. 2020; Mo
+Mo et al. 2019a] and the inverse problem of recovering CAD pro-                        et al. 2019b; Wu et al. 2015; Zhou and Jacobson 2016]. However, the
+grams from a target geometry [Ellis et al. 2019; Kania et al. 2020;                    de facto standard for parametric CAD is the boundary representa-
+Sharma et al. 2017; Tian et al. 2019]. However, progress has been                      tion (B-Rep) format, containing valuable analytic representations
+inhibited by the lack of a human designed dataset of ground-truth                      of surfaces and curves suitable for high level control of 3D shapes.
+CAD programs, written in a simple yet expressive Domain Specific                       B-Reps are collections of trimmed parametric surfaces along with
+Language (DSL) and an environment to execute them.                                     topological information which describes adjacency relationships
+   We take a step towards this goal by introducing the first dataset                   between them [Weiler 1986]. B-Rep datasets have recently been
+of human designed CAD geometries, paired with their ground-truth                       made available with both human designed [Koch et al. 2019] and
+CAD programs represented as construction sequences, along with                         synthetic data [Jayaraman et al. 2020; Starly 2020; Zhang et al. 2018].
+a supporting execution environment to make learning-based ap-                          Missing from these datasets is programmatic construction sequence
+proaches amendable to real CAD construction tasks. Our dataset                         information containing the knowledge of how each shape is defined
+contains 8,625 CAD programs represented entirely in a simple lan-                      and created. Although the ABC dataset includes some additional
+guage allowing sketches to be created and then extruded. With just                     construction information in a proprietary format provided by the
+the sketch and extrude modeling operations, that also incorporate                      Onshape CAD software, missing information can only be retrieved
+Boolean operations, a highly expressive range of 3D designs can be                     by querying the OnShape API. Combined with sparse documenta-
+created (Figure 1). We provide an interactive environment called                       tion, this makes it difficult to interpret the construction information.
+the Fusion 360 Gym, which can interpret the language of sketch and                     We are unaware of any method that can be used to rebuild designs
+extrude, providing a geometric data structure as feedback after each                   in the ABC dataset from the provided construction information, a
+operation, simulating the iterative construction process of a human                    key requirement for tasks related to CAD construction. We believe
+designer.                                                                              it is critical to understand not only what is designed, but how that
+   As a use case for our dataset and environment, we standardize                       design came about.
+the problem of programmatic CAD reconstruction from a target                               Parametric CAD programs contain valuable information on the
+geometry using a learning-based approach. We provide a bench-                          construction history of a design. Schulz et al. [2014] provide a stan-
+mark, consisting of a training set of 6,900 designs and a test set                     dard collection of human designs with full parametric history, albeit
+of 1,725 designs, and a set of evaluation criteria. We then develop                    a limited set of 67 designs in a proprietary format. SketchGraphs
+neurally guided search approaches for the CAD reconstruction task                      [Seff et al. 2020] narrows the broad area of parametric CAD by fo-
+on this benchmark. Our algorithm consists of first training a policy,                  cusing on the underlying 2D engineering sketches, including sketch
+a message passing network (MPN) with a novel encoding of state                         construction sequences. Freehand 2D sketch datasets also tackle
+and action, using imitation learning on ground truth construction                      the challenge of understanding design by looking at the sequence
+sequences. At inference time the algorithm employs search, leverag-                    of user actions [Eitz et al. 2012; Gryaditskaya et al. 2019; Sangkloy
+ing the learned neural policy to repeatedly interact with the Fusion                   et al. 2016]. In the absence of human designed sequential 3D data,
+360 Gym environment until a correct CAD program is discovered.                         learning-based approaches have instead leveraged synthetic CAD
+This approach is able to recover a correct CAD program for 67.5%                       construction sequences [Ellis et al. 2019; Li et al. 2020b; Sharma et al.
+of designs in the test set with a budget of 100 interactions between                   2017; Tian et al. 2019]. The dataset presented in this paper is the
+the agent and the Fusion 360 Gym, averaging < 20 sec solve time per                    first to provide human designed 3D CAD construction sequence
+design. This paper makes the following contributions:                                  information suitable for use with machine learning. Table 1 provides
+                                                                                       a feature comparison of related CAD datasets.
+
+ACM Trans. Graph., Vol. 40, No. 4, Article 54. Publication date: August 2021.
+                                                   Fusion 360 Gallery: A Dataset and Environment for Programmatic CAD Construction from Human Design Sequences •                    54:3
+
+
+
+
+          Sketch 1                             Extrude 1                               Extrude 2                             Sketch 2                          Extrude 3
+    s1 = add_sketch('XZ')                   add_extrude(                            add_extrude(                      s2 = add_sketch('YZ')                 add_extrude(
+    add_line(.6, .8, .6, 2.4)                    sketch=s1,                              sketch=s1,                   add_line(.8, 2.8, 5.8, 2.8)                sketch=s2,
+    add_arc(.6, 2.4, .8, 2.4, 90)                profile=p1[1],                          profile=p1[0::2],            add_line(5.8, 2.8, 5.8, -2.8)              profile=p2[0],
+    add_line(.8, 2.6, 1, 2.6)                    distance=.8,                            distance=5,                  add_line(5.8, -2.8, .8, -2.8)              distance=14,
+    ...                                          operation='NewBody')                    operation='Join')            ...                                        operation='Cut')
+    p1 = add_line(-1, 2, -1, .8)                                                                                      p2 = add_line(2, .2, 2.8, .2)
+
+
+Fig. 2. An example design sequence from the dataset with associated CAD program. Sketch elements form profiles that are sequentially extruded to join
+(Extrude 1, Extrude 2) or cut (Extrude 3) geometry using Boolean operations. The colored areas show the sketch profiles that partake in each extrusion.
+
+
+Table 1. Comparison of related CAD datasets. For each dataset, we report                       and Fayolle and Pasko [2016]) with heuristic rules to prune the
+the number of designs (#), the design representation (B-Rep, Mesh, or                          search space [Buchele 2000; Buchele and Crawford 2003; Buchele
+Sketch), whether it includes a construction sequence capable of rebuilding
+                                                                                               and Roles 2001; Shapiro and Vossler 1993]. Heuristic approaches are
+the final design (Seq.), and whether it contains human annotated labels for
+tasks such as shape classification (Label). The F360 Gallery row indicates                     also available in a number of commercial software tools, often as a
+our dataset.                                                                                   user-guided semi-automatic system [Autodesk 2012; Dassault 2019]
+                                                                                               to aid with file conversion between CAD systems. These traditional
+  Dataset                #          B-Rep    Mesh       Sketch      Seq.    Label              algorithms operate by removing faces from the B-rep body and reap-
+                                                                                               plying them as parametric modeling operations. This strategy can
+  ShapeNet             3M+                     ✓                             ✓
+                                                                                               recover the later modeling operations, but fail to completely rebuild
+  ABC                  1M+           ✓         ✓
+  Thingi10k           10,000                   ✓                             ✓                 the construction sequence from the first step. We instead tackle the
+  SketchGraphs        15M+                                 ✓            ✓                      task of recovering the entire construction sequence from the first
+  F360 Gallery        8,625          ✓         ✓           ✓            ✓                      extrusion. Another approach is using program synthesis [Du et al.
+                                                                                               2018; Nandi et al. 2017, 2018, 2020] to infer CAD programs written
+                                                                                               in DSLs from given shapes. CAD reconstruction is also related to
+                                                                                               the inverse procedural modeling problem [Stava et al. 2014; Talton
+   3D Shape Generation. The forward problem of 3D shape genera-
+                                                                                               et al. 2011; Vanegas et al. 2012], which attempts to reverse-engineer
+tion has been explored extensively in recent years using learning-
+                                                                                               procedures that can faithfully match a given target.
+based approaches. Neural network based generative models are
+                                                                                                  Compared to the rule-based or grammar-based methods above,
+often used to enable previously challenging functionality such as
+                                                                                               learning-based approaches can potentially learn the rules that are
+shape interpolation and synthesis. Notable approaches to this prob-
+                                                                                               typically hard-coded, automate scenarios that require user-input,
+lem include leveraging knowledge of object structure [Gao et al.
+                                                                                               and generalize when confronted with unfamiliar geometry. One
+2019; Li et al. 2020a; Mo et al. 2019a; Schor et al. 2019] or learning
+                                                                                               early work is CSGNet [Sharma et al. 2017], which trains a neural
+from a sequence of events to generate 3D shapes [Jones et al. 2020;
+                                                                                               network to infer the sequence of Constructive Solid Geometry (CSG)
+Li et al. 2020b; Nash et al. 2020; Sung et al. 2017; Wu et al. 2020;
+                                                                                               operations based on visual input. More recent works along this line
+Zou et al. 2017]. Unique to our work is the challenge of learning
+                                                                                               of research include [Chen et al. 2020; Ellis et al. 2019; Kania et al.
+from real sequential human design data, requiring a state and action
+                                                                                               2020; Tian et al. 2019]. Typically associated with these methods are
+representation suitable for the language of sketch and extrude.
+                                                                                               a customized DSL, such as CSG, that parameterizes the space of ge-
+   CAD Reconstruction. The inverse task of CAD reconstruction in-                              ometry, some heuristic rules that limit the search space, and a neural
+volves recovering a CAD program, represented as a sequence of                                  network generative model. Lin et al. [2020] reconstruct input shapes
+modeling operations, from input such as B-Reps, triangle meshes, or                            with a dual action representation that first positions cuboids and
+point clouds. Despite extensive prior work [Shah et al. 2001], CAD                             then edits edge-loops for refinement. Although editing edge-loops
+reconstruction remains a challenging problem as it requires deduc-                             of cuboids may be a suitable modeling operation in artistic design, it
+tions on both continuous parameters (e.g., extracting the dimensions                           is not as expressive or precise as the sketch and extrude operations
+of primitives) and discrete operations (e.g., choosing a proper op-                            used in real mechanical components. Additionally, Lin et al. [2020]
+eration for the next step), leading to a mixed combinatorial search                            choose to train and evaluate their network on synthetic data due to
+space. To recover the sequence of operations, traditional methods                              the lack of a benchmark dataset of CAD construction sequences, a
+typically run global search methods (e.g., evolutionary algorithms                             space that our work aims to fill. Our approach is the first to apply a
+as in Hamza and Saitou [2004], Weiss [2009], Friedrich et al. [2019],
+
+                                                                                                        ACM Trans. Graph., Vol. 40, No. 4, Article 54. Publication date: August 2021.
+54:4 •   Karl D.D. Willis, Yewen Pu, Jieliang Luo, Hang Chu, Tao Du, Joseph G. Lambourne, Armando Solar-Lezama, and Wojciech Matusik
+
+
+                                                                                                            Number of Extrude Operations
+                                                                                               1               2              5        10          15+
+
+
+
+
+Fig. 3. Modeling operations other than sketch and extrude are suppressed to
+expand the data quantity. An example design before (left) and after (right)
+the fillet modeling operation is suppressed.
+
+
+
+learning-based method to reconstruction using common sketch and
+extrude CAD modeling operations from real human designs.
+
+3    FUSION 360 GALLERY DSL AND RECONSTRUCTION
+     DATASET
+The Fusion 360 Gallery reconstruction dataset consists of 8,625 de-
+signs produced by users of the CAD software Autodesk Fusion 360
+and submitted to the publicly available Autodesk Online Gallery [Au-
+todesk 2015]. The data and supporting code is publicly available via
+GitHub1 with a license allowing non-commercial research similar
+to the ImageNet [Deng et al. 2009] license. We created the dataset
+from approximately 20,000 designs in the native Fusion 360 CAD file
+format. We focus on the sketch and extrude modeling operations for
+two main reasons: 1) sketch and extrude are the two most common
+CAD modeling operations used in 84% and 79% of designs in the
+original dataset respectively; >3x more common than operations
+such as fillet and chamfer, and 2) we seek to balance design ex-
+pressivity with a tractable problem for learning-based approaches;
+restricting the modeling operations to sketch and extrude greatly
+simplifies the descriptive complexity compared to the full range of
+CAD modeling operations. We generate the as-designed sequence
+of sketch and extrude modeling operations by parsing the parametric
+history of the Fusion 360 CAD files. Multi-component assemblies
+are divided into separate designs representing the constituent parts,
+e.g. the blade of a pocket knife. Modeling operations other than
+sketch and extrude are suppressed to expand the data quantity. Fig-
+ure 3 shows an example of suppressing a fillet operation, allowing
+the resulting design to be included in the dataset. Figure 4 shows
+a random sampling of the designs in the dataset grouped by the
+number of extrude operations used.
+   Each design is represented as a program expressed in a DSL,
+forming a simplified wrapper around the underlying Fusion 360
+Python API [Autodesk 2014]. Each design consists of a sequence                         Fig. 4. A random sampling of designs from the Fusion 360 Gallery recon-
+                                                                                       struction dataset, grouped by the number of extrude operations.
+1 Dataset website: https://github.com/AutodeskAILab/Fusion360GalleryDataset
+
+
+
+ACM Trans. Graph., Vol. 40, No. 4, Article 54. Publication date: August 2021.
+                                           Fusion 360 Gallery: A Dataset and Environment for Programmatic CAD Construction from Human Design Sequences •           54:5
+
+
+Table 2. The grammar for the Fusion 360 Gallery domain-specific language.        N1,2
+A program consists of a sequence of sketch and extrude operations that
+iteratively modify the current geometry.                                                                                                                    N1,2
+                                                                                                                       N5
+              𝑃    :=   𝐺; [𝑋 ]                                                                                                                             N3
+              𝑋    :=   𝑆 |𝐸                                                           N3,4               N3,4                 N1,2
+              𝑆    :=   add_sketch(𝐼 ); [𝐷]
+                                                                                    Line L                           Arc A                            Circle C
+              𝐷    :=   𝐿 |𝐴 |𝐶
+              𝐿    :=   add_line(𝑁 , 𝑁 , 𝑁 , 𝑁 )                                   Fig. 5. Sketch commands used to create a Line 𝐿, Arc 𝐴, and Circle 𝐶.
+              𝐴    :=   add_arc(𝑁 , 𝑁 , 𝑁 , 𝑁 , 𝑁 )
+              𝐶    :=   add_circle(𝑁 , 𝑁 , 𝑁 )
+              𝐸    :=   add_extrude([𝐼 ], 𝑁 , 𝑂)
+               𝐼   :=   identifier
+              𝑁    :=   number
+              𝑂    :=   new body | join | cut | intersect
+
+                                                                                                            Join                       Cut
+
+of sketch and extrude operations that iteratively modifies the cur-
+rent geometry (Figure 2). We specify the core language here, and
+provide information on additional constructs, such as sketching of
+splines and double-sided extrudes, in Section A.1 of the appendix.
+The Fusion 360 Gallery DSL is a stateful language consisting of a
+single global variable 𝐺, representing the current geometry under
+                                                                                              New Body           Start Body + Sketch         Intersect
+construction, and a sequence of commands [𝑋 ] that iteratively mod-
+ifies the current geometry 𝐺. Each command can be either a sketch
+𝑆 or an extrude 𝐸 operation. A grammar describing the core DSL is                Fig. 6. Extrude operations include the ability to Boolean with other geome-
+shown in Table 2.                                                                try. From the start body shown in the center, a sketch is extruded to form a
+                                                                                 new body overlapping the start body, join with the start body, cut out of
+3.1   Current Geometry                                                           the start body, or intersect with the start body.
+
+The current geometry 𝐺 is the single global state that is updated with
+the sequence of commands [𝑋 ]. It is a data structure representing all
+geometric information that would be available to a designer in the               group of triangles in the .obj file with the B-Rep face identifier as the
+construction process using Fusion 360: such as inspecting different              group name. This allows the triangles to be traced back to the B-Rep
+aspects of the geometry, and referencing its components for further              face and associated extrude operation. Any intermediate geometry
+modifications.                                                                   𝐺 can also be exported in these file formats with the API.
+   Boundary Representation. B-Rep is the primary geometry format
+provided in the dataset and the native format in which designs were              3.2     Sketch
+created, making it a natural representation for the current geometry.            A sketch operation, 𝑆, is stated by specifying the plane on which
+𝐺 represents a collection of sketch or B-Rep entities, which can                 the sketch will be created using the add_sketch(𝐼 ) command. 𝐼
+be referenced from the construction sequence through identifier 𝐼 .              is a plane identifier, which allows for identification of the three
+B-Rep bodies can be expressed as a face adjacency graph, as later                canonical planes 𝑋𝑌, 𝑌𝑍, 𝑋𝑍 along with other planar faces present
+described in Section 4.1.                                                        in the current geometry 𝐺. Following the identification of a sketch
+   Execution. Crucially, the current geometry 𝐺 is iteratively up-               plane, one can add a sequence of sketch commands [𝐷], where each
+dated through the sequence of commands [𝑋 ]. After each command                  command is either a line 𝐿, arc 𝐴, or circle 𝐶 (Figure 5). Line, arc, and
+𝑋 , the interpreter uses the underlying Fusion 360 Python API to                 circle represent 95% of curves in the dataset. A line command 𝐿 is
+generate an updated geometry. After all the commands [𝑋 ] are                    specified by four numbers, representing the coordinates for the start
+executed, we obtain the final geometry, 𝐺𝑡 .                                     and end points. A circle command 𝐶 is specified by three numbers,
+                                                                                 two representing the circle’s center and one representing its radius.
+   Storage. In addition to the program 𝑃, Fusion 360 Gym stores the              An arc command 𝐴 is specified by five numbers, representing the
+final geometry 𝐺𝑡 as a .smt file, the native B-Rep format used by                start point, the arc’s center point, and the angle which the arc
+Fusion 360, and neutral .step files that can be used with other CAD              subtends. The coordinates for the line 𝐿, arc 𝐴, and circle 𝐶 are
+systems. B-Rep entities, such as bodies and faces, can be referenced             specified with respect to the coordinate system of the chosen sketch
+from the construction sequence back to entities in the .smt file. A              plane 𝐼 in 𝐺. Executing a sketch 𝑆 command creates a list of new
+mesh representation of 𝐺𝑡 is stored in .obj format representing a                profiles in the current geometry 𝐺, consisting of enclosed regions
+triangulated version of the B-Rep. Each B-Rep face is labeled as a               resulting from the sketch.
+
+                                                                                          ACM Trans. Graph., Vol. 40, No. 4, Article 54. Publication date: August 2021.
+54:6 •      Karl D.D. Willis, Yewen Pu, Jieliang Luo, Hang Chu, Tao Du, Joseph G. Lambourne, Armando Solar-Lezama, and Wojciech Matusik
+
+
+
+           REWARD
+
+
+
+                  STATE
+
+
+    ENVIRONMENT                                                            AGENT
+      Fusion 360 Gym
+
+                          Current Geometry         Target Geometry
+
+
+
+
+                                                            ACTION
+                                      Modeling Operation
+
+
+
+Fig. 7. The Fusion 360 Gym environment interacts with an agent in a se-                   Fig. 8. For state representation we use a face adjacency graph with B-Rep
+quential decision making scenario. The state contains the current and target              faces as graph vertices and B-Rep edges as graph edges.
+geometries. The agent outputs an action, in the form of a modeling operation,
+that advances the current geometry towards the target.
+                                                                                                • transition: Fusion 360 Gym implements the transition func-
+                                                                                                  tion that applies the modeling operation to update the current
+                                                                                                  geometry.
+3.3      Extrude                                                                                • reward: The user can define custom reward functions de-
+An extrude operation 𝐸 takes a list of identifiers, [𝐼 ], referencing a                           pending on the task. For instance, the agent might receive a
+list of profiles in the current geometry 𝐺, and extrudes them from 2D                             reward of 1 if the current geometry exactly matches the target
+into 3D. A signed distance parameter 𝑁 defines how far the profile                                geometry.
+is extruded along the normal direction. The Boolean operation 𝑂
+specifies whether the extruded 3D volume is added to, subtracted                          4.1     State Representation
+from, or intersected with other 3D bodies in the design. Figure 6                         In order for an agent to successfully reconstruct the target geometry,
+shows a start body and sketch (center) that is extruded to form                           it is important that we have a suitable state representation. In the
+two separate overlapping bodies, joined to form a single body, cut                        Fusion 360 Gym, we use a similar encoding scheme to Jayaraman
+through the start body to split it in two, or intersected with the start                  et al. [2020] and represent the current and target geometry with a
+body. Additional extrude options are available such as two-sided                          B-Rep face-adjacency graph [Ansaldi et al. 1985], which contains
+extrude, symmetrical extrude, and tapered extrude (See Section A.1.6                      additional information amenable to a learning agent not present
+of the appendix). Executing an extrude operation 𝐸 results in an                          in the language of the Fusion 360 Gallery DSL (Figure 8). Crucial
+updated list of bodies in the current geometry 𝐺. The combination                         to this encoding are the geometric features of the elements, such
+of expressive sketches and extrude operations with built in Boolean                       as point-locations, and topological features specifying how these
+capability enables a wide variety of designs to be constructed from                       elements are connected to each other. Specifically, the vertices of the
+only two modeling operations (Figure 1).                                                  face-adjacency graph represent B-Rep faces (trimmed parametric
+                                                                                          surfaces) in the design, with graph vertex features representing
+4     FUSION 360 GYM                                                                      the size, orientation, and curvature of the faces. The edges of the
+                                                                                          face-adjacency graph represent B-Rep edges in the design, that
+Together with the dataset we provide an open source environment,
+                                                                                          connect the adjacent B-Rep faces to each other. Additional details
+called the Fusion 360 Gym, for standardizing the CAD reconstruction
+                                                                                          are provided in Section A.3.2 of the appendix.
+task for learning-based approaches. The Fusion 360 Gym further
+simplifies the Fusion 360 Gallery DSL and serves as the environment
+                                                                                          4.2     Action Representation
+that interacts with an intelligent agent for the task of CAD recon-
+struction (Figure 7). Just as a designer can iteratively interact with a                  In the Fusion 360 Gym we support two action representations en-
+CAD software system in a step-by-step fashion, comparing at each                          compassing different modeling operations: sketch extrusion and face
+step the target geometry to be recovered and the current geometry                         extrusion.
+they have created so-far, the Fusion 360 Gym provides the intelligent                     4.2.1 Sketch Extrusion. Sketch extrusion mirrors the Fusion 360
+agent with the same kind of interaction. Specifically, the Fusion 360                     Gallery DSL closely. In this scheme, the agent must first select a
+Gym formalizes the following Markov Decision Process:                                     sketch plane, draw on this plane using a sequence of curve primi-
+                                                                                          tives, such as lines and arcs, to form closed loop profiles. The agent
+      • state: Contains the current geometry, and optionally, the                         then selects a profile to extrude a given distance and direction (Fig-
+        target geometry to be reconstructed. We use a B-Rep face-                         ure 9, top). Using this representation it is possible to construct novel
+        adjacency graph as our state representation.                                      geometries by generating the underlying sketch primitives and ex-
+      • action: A modeling operation that allows the agent to modify                      truding them by an arbitrary amount. Although all designs in the
+        the current geometry. We consider two action representations:                     Fusion 360 Gallery reconstruction dataset can be constructed using
+        sketch extrusion and face extrusion.                                              sketch extrusion, in practice this is challenging. Benko et al. [2002]
+
+ACM Trans. Graph., Vol. 40, No. 4, Article 54. Publication date: August 2021.
+                                                        Fusion 360 Gallery: A Dataset and Environment for Programmatic CAD Construction from Human Design Sequences •          54:7
+
+
+
+
+SKETCH EXTRUSION
+                       Sketch 1                Sketch Extrude 1                                             Sketch 2                   Sketch Extrude 2
+
+
+
+
+FACE EXTRUSION
+
+
+                                                Face Extrude 1                                                                      Face Extrude 2
+
+                   Fig. 9. Action representations supported by the Fusion 360 Gym include low-level sketch extrusion (top) and simplified face extrusion (bottom).
+
+
+   show that to generate sketches suitable for mechanical engineering                         dataset. In Section 6.2 we evaluate the performance of synthetic and
+   parts, the curve primitives often need to be constructed alongside                         semi-synthetic data for the CAD reconstruction task. We provide
+   a set of constraints which enforce regularities and symmetries in                          examples of synthetic data in Figure 15 and commands for the Fusion
+   the design. Although the construction of constraint graphs is fea-                         360 Gym in Section A.2 of the appendix.
+   sible using techniques like the one shown by Liao et al. [2019],
+   enforcing the constraints requires a complex interaction between                           5 CAD RECONSTRUCTION TASK
+   the machine learning algorithm and a suitable geometric constraint
+                                                                                              5.1 Task Definition
+   solver, greatly increasing the algorithm complexity. We alleviate this
+   problem by introducing a simplified action representation, called                          The goal of CAD reconstruction is to recover a program, represented
+   face extrusion, that is well suited to learning-based approaches.                          as a sequence of modeling operations used to construct a CAD model
+                                                                                              with only the geometry as input. This task can be specified using
+   4.2.2 Face Extrusion. In face extrusion, a face from the target design                     different input geometry representations, including B-Rep, mesh, or
+   is used as the extrusion profile rather than a sketch profile (Figure 9,                   point cloud, with progressively lower fidelity. Each representation
+   bottom). This is possible because the target design is known in                            presents a realistic scenario where parametric CAD information is
+   advance during reconstruction. An action 𝑎 in this scheme is a triple                      absent and needs to be recovered. Given a target geometry 𝐺𝑡 , we
+   {face𝑠𝑡𝑎𝑟𝑡 , face𝑒𝑛𝑑 , op} where the start and end faces are parallel                      wish to find a sequence of CAD modeling operations (actions) A =
+   faces referenced from the target geometry, and the operation type                          {𝑎 0, 𝑎 1, · · · } such that, once executed in a CAD software system,
+   is one of the following: new body, join, cut, intersect. The start face                    results in a geometry 𝐺 where every point in space is in its interior,
+   defines the extrusion profile and the end face defines the distance                        if and only if, it is also in the interior of 𝐺𝑡 .
+   to be extruded and does not need to match the shape of the start
+   face. Target constrained reconstruction using face extrusion has the                       5.2    Evaluation Metrics
+   benefit of narrowly scoping the prediction problem with shorter                            We prescribe three evaluation metrics, IoU, exact reconstruction,
+   action sequences and simpler actions. Conversely, not all geometries                       and conciseness. IoU measures the intersection over union of 𝐺 and
+   can be reconstructed with this simplified strategy due to insufficient                     𝐺𝑡 : iou(𝐺, 𝐺𝑡 ) = |𝐺 ∩ 𝐺𝑡 |/|𝐺 ∪ 𝐺𝑡 |. Exact reconstruction measures
+   information in the target, e.g., Extrude 3 in Figure 2 cuts across the                     whether iou(𝐺, 𝐺𝑡 ) = 1. As multiple correct sequences of CAD
+   entire design without leaving a start or end face.                                         modeling operations exist, a proposed reconstruction sequence A
+                                                                                              need not match the ground truth sequence Â𝑡 provided an exact
+   4.3             Synthetic Data Generation                                                  reconstruction is found. To measure the quality of exact reconstruc-
+   The Fusion 360 Gym supports generation of synthetic designs for                            tions we consider the conciseness of the construction sequence. Let
+   data augmentation. In addition to procedurally generated synthetic                         conciseness(A, Â𝑡 ) = |A|/| Â𝑡 |, where a score ≤ 1 indicates the
+   data, semi-synthetic data can be generated by taking existing designs                      agent found an exact reconstruction with equal or fewer steps than
+   and modifying or recombining them. For instance, we can randomly                           the ground truth, and a score > 1 indicates more inefficient exact
+   perturb the sketches and the extrusion distances, and even ‘graft’                         reconstructions.
+   sketches from one design onto another. We also support distribution
+   matching of parameters, such as the number of faces, to ensure that                        5.3    Neurally Guided Search
+   synthetic designs match a human designed dataset distribution.                             We now present a method for CAD reconstruction using neurally-
+   Learning-based systems can leverage semi-synthetic data to expand                          guided search [Devlin et al. 2017; Ellis et al. 2019; Kalyan et al. 2018;
+   the number of samples in the Fusion 360 Gallery reconstruction                             Tang et al. 2019] from B-Rep input using face extrusion modeling
+
+                                                                                                      ACM Trans. Graph., Vol. 40, No. 4, Article 54. Publication date: August 2021.
+54:8 •   Karl D.D. Willis, Yewen Pu, Jieliang Luo, Hang Chu, Tao Du, Joseph G. Lambourne, Armando Solar-Lezama, and Wojciech Matusik
+
+
+                 STATE                                                          AGENT                                                  ACTION
+                     v 4
+                       t
+                                         v
+                                         3
+                                         t                            h 0
+                                                                        t
+                                                                                                                                                     new body
+                             vt5                                       .
+                                         vt2                           .                                                                             join
+                                                                       .
+                                                    MPN                                               MLP                                            cut
+  Gt                vt0
+                                   vt1                                h 5
+                                                                        t                                                                            intersect
+                           vc3                                                                                          { facestart , faceend , op }
+                                         vc2                         hc0
+                                                                      .
+                                                    MPN               .           Σ        hc
+                    vc0                                               .
+  Gc                               v 1
+                                     c                               hc3
+
+Fig. 10. Given a state comprising the target geometry 𝐺𝑡 and current geometry 𝐺𝑐 , both of which are represented as a graph, the agent uses message passing
+networks (MPNs) to predict an action as a face extrusion modeling operation. The first MPN in the bottom branch produces a set of node embedding vectors
+h𝑐0 · · · h𝑐3 , which are summed over to produce the hidden vector for the current geometry h𝑐 . Another MPN in the top branch produces a set of node embedding
+vectors h𝑡0 · · · h𝑡5 , which are concatenated with h𝑐 to predict the action. We condition the end face prediction on the predicted start face. Colors in the figure
+correspond to different graph nodes.
+
+
+operations. The training phase consists of imitation learning, where                    the action using a multi-layer perceptron (MLP), with the end face
+a policy is trained to imitate a known construction sequence from                       conditioned on the vertex embedding of the predicted start face.
+a given geometry. The testing / inference phase leverages search,                          We denote the learned vertex embedding vectors produced by
+where the search algorithm repeatedly samples the trained policy                                                               𝑗
+                                                                                        the two MPN branches as {h𝑐𝑖 } and {h𝑡 } for the current output and
+for actions and applies these actions in the environment to generate                    target graphs, respectively. We estimate the probability of the 𝑘-th
+a set of candidate reconstruction sequences.                                            operation type, and the 𝑗-th face being the start face or end face as:
+                                                                                                                                  ∑︁
+5.3.1 Imitation Learning. To perform imitation learning, we lever-                                           𝑘            
+                                                                                                            𝑃𝑜𝑝 = 𝐹𝑜𝑝 h𝑐 , h𝑐 =       h𝑐𝑖                  (2)
+age the fact that we have the ground truth sequence of modeling                                                                         𝑖
+operations (actions) Â𝑡 = {𝑎ˆ𝑡,0 · · · 𝑎ˆ𝑡,𝑛−1 } for each design 𝐺𝑡 in                                 𝑗
+                                                                                                                          
+                                                                                                                                    𝑗    
+                                                                                                       𝑃𝑠𝑡𝑎𝑟𝑡 = softmax 𝐹𝑠𝑡𝑎𝑟𝑡 h𝑡 , h𝑐                           (3)
+the dataset. We feed the ground truth action sequence Â𝑡 into the                                                  𝑗
+Fusion 360 Gym, starting from the empty geometry 𝐺 0 , and out-                                           
+                                                                                                                  𝑗 𝑗˜      
+                                                                                           𝑃𝑒𝑛𝑑 = softmax 𝐹𝑒𝑛𝑑 h𝑡 , h𝑡 , h𝑐 , 𝑠.𝑡 . 𝑗˜ = argmax𝑃𝑠𝑡𝑎𝑟𝑡
+                                                                                            𝑗                                                   𝑗
+                                                                                                                                                                 (4)
+put a sequence of partial constructions 𝐺𝑡,1 · · · 𝐺𝑡,𝑛 where 𝐺𝑡,𝑛 =                                     𝑗                                       𝑗
+𝐺𝑡 . We then collect the supervised dataset D = {(𝐺 0, 𝐺𝑡 ) →
+𝑎ˆ𝑡,0, (𝐺𝑡,1, 𝐺𝑡 ) → 𝑎ˆ𝑡,1 · · · } and train a supervised agent 𝜋𝜃 that                 where 𝐹𝑜𝑝 , 𝐹𝑠𝑡𝑎𝑟𝑡 , and 𝐹𝑒𝑛𝑑 denote linear layers that take the con-
+takes the pair of current-target constructions (𝐺𝑐 , 𝐺𝑡 ) to a mod-                     catenated vectors as input.
+eling operation action 𝑎𝑐 , which would transform the current ge-
+                                                                                        5.3.3 Search. Given a neural agent 𝜋𝜃 (𝑎|(𝐺𝑐 , 𝐺𝑡 )) capable of fur-
+ometry closer to the target. Formally, we optimize the expected
+                                                                                        thering a current geometry toward the target geometry, we can
+log-likelihood of correct actions under the data distribution:
+                                                                                        amplify its performance at test time using search. This allows us to
+                                                     
+                                                                                       explore multiple different reconstruction sequences at once, at the
+                    𝐸 (𝐺𝑐 ,𝐺𝑡 )∼D log 𝜋𝜃 𝑎ˆ𝑐 | 𝐺𝑐 , 𝐺𝑡               (1)                expense of extended interactions with the environment. By lever-
+                                                                                        aging search, one gets the benefit of scaling: the larger budget we
+5.3.2 Agent. The agent (Figure 10) takes a pair of geometries (𝐺𝑐 , 𝐺𝑡 )                have to interact with the environment, the more likely we are going
+as state, and outputs the corresponding face-extrusion action 𝑎 =                       to succeed in recovering a working reconstruction sequence. The
+{face𝑠𝑡𝑎𝑟𝑡 , face𝑒𝑛𝑑 , op}. The two geometries 𝐺𝑐 , 𝐺𝑡 are given using                  effectiveness of search is measured against a search budget, which in
+a face-adjacency graph similar to Jayaraman et al. [2020], where                        our case, is the number of environment steps executed in the Fusion
+the graph vertexes represent the faces of the geometry, with vertex                     360 Gym. We consider the following standard search procedures
+features calculated from each face: 10×10 grid of 3D points, normals,                   from the neurally guided search literature:
+and trimming mask, in addition to the face surface type. The 3D
+points are global xyz values sampled in UV parameter space of the                          • random rollouts: This search procedure uses the learned pol-
+face. The edges define connectivity of adjacent faces. Inputs are                            icy to sample a sequence of steps in the environment. Every
+encoded using two separate message passing networks [Gilmer et al.                           rollout consists of 𝑁 iterations; at each iteration an action is
+2017; Kipf et al. 2018; Kipf and Welling 2016] aggregating messages                          chosen according to 𝜋𝜃 . This action is executed in the environ-
+along the edges of the graph. The encoded vectors representing                               ment by taking an environment step and the updated current
+the current geometry are summed together (h𝑐 in Figure 10), and                              geometry is presented back to the policy to sample the next
+                                                                                                                                                             𝑓
+concatenated with the encoded vertexes of the target geometry                                 action. 𝑁 is capped to a fixed rollout length of max( 2𝑝 , 2),
+(h𝑡0 · · · h𝑡5 in Figure 10). The concatenated vectors are used to output                     where 𝑓𝑝 is the number of planar faces in 𝐺𝑡 . If the agent
+
+ACM Trans. Graph., Vol. 40, No. 4, Article 54. Publication date: August 2021.
+                                                    Fusion 360 Gallery: A Dataset and Environment for Programmatic CAD Construction from Human Design Sequences •                                 54:9
+
+
+Table 3. Reconstruction results for IoU and exact reconstruction at 20 and                                                                         Reconstruction IoU
+100 environment steps using random rollouts with different agents trained                                          1.0
+on human designed data. The best result in each column is shown in bold.
+                                                                                                                   0.9
+Lower values are better for conciseness.
+                                                                                                                   0.8
+    Agent            IoU                    Exact Recon. %           Concise.
+                                                                                                                   0.7
+             20 Steps 100 Steps           20 Steps 100 Steps                              IoU
+                                                                                                                   0.6
+    gat       0.8742       0.9128          0.6191         0.6742      1.0206
+    gcn       0.8644       0.9042          0.6232         0.6754      1.0168                                       0.5
+    gin       0.8346       0.8761          0.5901         0.6301      1.0042
+    mlp       0.8274       0.8596          0.5658         0.5965      0.9763                                       0.4
+    rand      0.6840       0.8386          0.4157         0.5380      1.2824                                       0.3
+                                                                                                                          0            20               40          60            80           100
+                                                                                                                                                       Environment Step
+                                                                                                                                      gat        gcn         gin         mlp        rand
+      fails to recover the target geometry in the current roll-out, we
+      restart with a new roll-out and repeat the process.                                   Fig. 11. Reconstruction IoU over 100 environment steps using random roll-
+                                                                                            outs with different agents trained on human designed data.
+    • beam search: We rollout in parallel the top-k (where k is the
+      beam width) candidate construction sequences for 𝑁 itera-
+      tions. Each sequence is ranked by the generation probability
+      under 𝜋𝜃 , 𝑃𝜃 (𝑎 1 . . . 𝑎𝑟 ):                                                                                                        Cumulative Exact Reconstructions
+                                                                                                                   1.0
+                                                                                                                   0.9
+                                         Ö
+
+
+
+
+                                                                                          Exact Reconstruction %
+                 𝑃𝜃 (𝑎 1 . . . 𝑎𝑟 ) =             𝜋𝜃 (𝑎𝑖 |𝐺𝑖 , 𝐺𝑡)
+                                                                                                                                                             Estimated Representation Upper Limit
+                                        𝑖=1...𝑟                                                                    0.8
+      At each iteration, we consider all possible extensions to the                                                0.7
+      top-k candidates by one action under 𝜋𝜃 , and re-rank the
+                                                                                                                   0.6
+      extended candidate sequences under 𝑃𝜃 , keeping the top-k ex-
+      tended candidates. Then, for each of the 𝑘 extended sequences,                                               0.5
+      we execute a step in the environment to obtain the updated                                                   0.4
+      current geometries. Each run of the beam search results in
+      𝑘𝑁 environment steps. If the current 𝑘 sequences reaches the                                                 0.3
+                                                                                                                           0            20              40          60            80           100
+      rollout length without recovering the target geometry, the                                                                                       Environment Step
+      beam search restarts with the beam width doubled, allowing                                                           Ground Truth          gat         gcn         gin       mlp         rand
+      it to search a wider range of candidates.
+                                                                                            Fig. 12. Cumulative exact reconstructions over 100 environment steps using
+    • best first search: This search procedure explores the search
+                                                                                            random rollouts with different agents trained on human designed data. The
+      space by maintaining a priority queue of candidate sequences,                         estimated upper limit of the face extrusion action representation is shown
+      where the priority is ordered by 𝑃𝜃 . At each iteration, we                           at 0.8.
+      dequeue the top candidate sequence and extend it by one
+      action under 𝜋𝜃 , and these extended sequences are added back
+      to the queue. An environment step is taken in a lazy fashion
+      when the top candidate sequence is dequeued, and not when
+                                                                                                                   • How does training a neural policy under human designed,
+      the extended sequences are added back to the queue. This
+                                                                                                                     synthetic, and augmented data affect CAD reconstruction
+      process continues until the dequeued top candidate recovers
+                                                                                                                     performance?
+      the target geometry.
+                                                                                                                   • How do different neurally guided search procedures from the
+6   EVALUATION                                                                                                       literature perform on the CAD reconstruction task?
+We proposed a general strategy consisting of neurally guided search,
+powered by a neural-network trained via imitation on human de-                                 For evaluation, we track the best IoU the agent has discovered so
+signed, synthetic, and augmented data. To justify this strategy, we                         far, and whether exact reconstruction is achieved as a function of
+perform ablation studies, comparing our approach against a set of                           environment steps. We cap the total search budget to 100 steps to
+baselines on the Fusion 360 Gallery reconstruction dataset. We seek                         reflect a real world scenario. For experiments using human design
+to answer the following:                                                                    data we train on the 59.2% of the training set that can be directly
+                                                                                            converted to a face extrusion sequence. We evaluate on the full test
+    • How do different neural representations, when used to repre-                          set in all cases. We estimate that approximately 80% of designs in our
+      sent the agent’s policy 𝜋𝜃 , perform on the CAD reconstruction                        dataset can be reconstructed by finding alternative face extrusion
+      task?                                                                                 sequences and note this when reporting exact reconstruction results.
+
+                                                                                                                         ACM Trans. Graph., Vol. 40, No. 4, Article 54. Publication date: August 2021.
+54:10 •   Karl D.D. Willis, Yewen Pu, Jieliang Luo, Hang Chu, Tao Du, Joseph G. Lambourne, Armando Solar-Lezama, and Wojciech Matusik
+
+
+6.1    Comparing Different Neural Representations                                        Table 4. Reconstruction results for IoU and exact reconstruction at 20 and
+                                                                                         100 environment steps using random rollouts and gcn agents trained on hu-
+We evaluate five different kinds of neural network representations                       man designed data (real), a mixture of human designed and semi-synthetic
+for 𝜋𝜃 to understand how different networks perform on the CAD                           data (aug), semi-synthetic data (semi-syn), and synthetic data (syn). The
+reconstruction task. The rand agent uniformly samples from the                           best result in each column is shown in bold. Lower values are better for
+available actions to serve as a naive baseline without any learning.                     conciseness.
+mlp is a simple agent using a MLP that does not take advantage
+of message passing via graph topology. gcn, gin, and gat are MPN                                                Agent                IoU                    Exact Recon. %             Concise.
+agents that use a Graph Convolution Network [Kipf and Welling                                                             20 Steps     100 Steps          20 Steps 100 Steps
+2016], Graph Isomorphism Network [Xu et al. 2018], and Graph                                                 real          0.8644        0.9042           0.6232       0.6754             1.0168
+Attention Network [Veličković et al. 2017] respectively. We use two                                          aug           0.8707        0.8928           0.6452       0.6701             0.9706
+MPN layers for all comparisons, with standard layer settings as                                            semi-syn        0.8154        0.8473           0.5780       0.6104             1.0070
+described in Section A.3.2 of the appendix.                                                                  syn           0.6646        0.7211           0.4383       0.4835             1.0519
+   We report the reconstruction IoU and exact reconstructions using
+random rollout search for each agent as a function of the number
+of environment steps in Figure 11 and 12 respectively. We detail the
+                                                                                                                                             Reconstruction IoU
+                                                                                                                1.0
+exact results at step 20 and 100 in Table 3. Step 20 represents the
+point where it is possible to perform exact reconstructions for all de-                                         0.9
+signs in the test set. We also detail the conciseness of the recovered                                          0.8
+sequence for exact reconstructions. We note that all neurally guided
+                                                                                                                0.7
+agents outperform the random agent baseline. The topology infor-                       IoU
+mation available with a MPN is found to improve reconstruction                                                  0.6
+performance. The gat and gcn agents show the best performance                                                   0.5
+but fall well short of exact reconstruction on all designs in the test
+set, demonstrating that the CAD reconstruction task is non-trivial                                              0.4
+and an open problem for future research.                                                                        0.3
+                                                                                                                      0         20             40               60             80             100
+                                                                                                                                             Environment Step
+6.2    Comparing Human and Synthetic Data Performance                                                                                 real          aug          semi-syn           syn
+We evaluate four gcn agents trained on different data sources to
+                                                                                         Fig. 13. Reconstruction IoU over 100 environment steps using random roll-
+understand how synthetic data performs compared to human design
+                                                                                         outs and gcn agents trained on human designed data (real), a mixture of
+data. real is trained on the standard human design training set. syn                     human designed and semi-synthetic data (aug), semi-synthetic data (semi-
+is trained on synthetic data from procedurally generated sketches of                     syn), and synthetic data (syn).
+rectangles and circles extruded randomly (Figure 15, top). Leverag-
+ing basic primitives is a common method to generate synthetic data
+for program synthesis [Ellis et al. 2019; Li et al. 2020b; Sharma et al.                                                             Cumulative Exact Reconstructions
+                                                                                                                1.0
+2017], that typically results in less sophisticated designs compared
+to human design data. semi-syn is trained on semi-synthetic de-                                                 0.9
+
+
+
+
+                                                                                       Exact Reconstruction %
+signs that use existing sketches in the training set with two or more                                                                                     Estimated Representation Upper Limit
+                                                                                                                0.8
+extrude operations to match the distribution of the number of faces
+in the training set (Figure 15, bottom). This approach results in more                                          0.7
+complex designs than the pure synthetic designs. We deliberately                                                0.6
+use these two approaches for data generation to better compare
+                                                                                                                0.5
+human design data to synthetic data in different distributions. aug
+is trained on the human design training set mixed with additional                                               0.4
+semi-synthetic data. We hold the training data quantity constant                                                0.3
+across agents, with the exception of the aug agent that contains a                                                    0         20             40               60             80             100
+                                                                                                                                             Environment Step
+larger quantity from two sources. All agents are evaluated on the
+                                                                                                                          Ground Truth         real            aug          semi-syn          syn
+standard human design test set.
+   Figure 13 and 14 show that training on human design data offers
+                                                                                         Fig. 14. Cumulative exact reconstructions over 100 environment steps using
+a significant advantage over synthetic and semi-synthetic data for                       random rollouts and gcn agents trained on human designed data (real), a
+reconstruction IoU and exact reconstructions respectively. For the                       mixture of human designed and semi-synthetic data (aug), semi-synthetic
+aug agent reconstruction performance is aided early on by data                           data (semi-syn), and synthetic data (syn). The estimated upper limit of the
+augmentation. We attribute this early performance improvement                            face extrusion action representation is shown at 0.8.
+to semi-synthetic designs with 1 or 2 extrusions appearing similar
+to human designs. Conversely, we observe that semi-synthetic de-
+signs with multiple randomly applied extrusions appear less and                          less similar to human design due to the random composition of
+
+ACM Trans. Graph., Vol. 40, No. 4, Article 54. Publication date: August 2021.
+                                            Fusion 360 Gallery: A Dataset and Environment for Programmatic CAD Construction from Human Design Sequences •                                54:11
+
+
+                                                                                                                                            Reconstruction IoU
+                                                                                                            1.0
+                                                                                                            0.9
+                                                                                                            0.8
+                                                                                                            0.7
+                                                                                   IoU
+                                                                                                            0.6
+                                                                                                            0.5
+                                                                                                            0.4
+                                                                                                            0.3
+                                                                                                                   0            20              40            60            80          100
+                                                                                                                                             Environment Step
+                                                                                                                                         best          rand          beam
+
+                                                                                    Fig. 16. Reconstruction IoU over 100 environment steps using the gcn agent
+                                                                                    with best first search (best), random rollout search (rand) and beam search
+                                                                                    (beam).
+
+
+
+                                                                                                                                     Cumulative Exact Reconstructions
+Fig. 15. Top: example synthetic data created by extruding circles and rect-                                 1.0
+angles. Bottom: example semi-synthetic data created by extruding human
+designed sketches.                                                                                          0.9
+
+
+
+
+                                                                                   Exact Reconstruction %
+                                                                                                                                                       Estimated Representation Upper Limit
+                                                                                                            0.8
+Table 5. Reconstruction results for IoU and exact reconstruction at 20 and
+                                                                                                            0.7
+100 environment steps using gcn agents with best first search (best), random
+rollout search (rand) and beam search (beam). The best result in each column                                0.6
+is shown in bold. Lower values are better for conciseness.
+                                                                                                            0.5
+      Agent              IoU             Exact Recon. %       Concise.                                      0.4
+              20 Steps     100 Steps   20 Steps 100 Steps
+                                                                                                            0.3
+                                                                                                                    0            20             40            60            80          100
+       best   0.8831        0.9186     0.5971     0.6348       0.9215                                                                        Environment Step
+      rand    0.8644        0.9042     0.6232     0.6754       1.0168
+                                                                                                                             Ground Truth            best          rand      beam
+      beam    0.8640        0.8982     0.5739     0.6122       0.9275
+                                                                                     Fig. 17. Cumulative exact reconstructions over 100 environment steps using
+                                                                                     the gcn agent with best first search (best), random rollout search (rand) and
+extrusions. This difference in distribution between human and syn-                   beam search (beam). The estimated upper limit of the face extrusion action
+thetic designs becomes more prevalent as search progressess. Table 4                 representation is shown at 0.8.
+provides exact results at environment step 20 and 100.
+
+6.3    Qualitative Results
+Figure 18 shows a visualization of ground truth construction se-                    The performance of rand for exact reconstruction can be explained
+quences compared with the reconstruction results from other agents                  by the limited search budget of 100 environment steps: the rand algo-
+using random search. The rollout with the highest IoU is shown with                 rithm is more likely to sample distinct sequences for a small number
+the IoU score and total environment steps taken. Steps that don’t                   of samples, whereas beam will sample half its sequences identical
+change the geometry or occur after the highest IoU are omitted                      to the previous rounds before the doubling, and best might not be
+from the visualization.                                                             sampled enough to explore a sequence long enough to contain the
+                                                                                    correct program.
+6.4    Comparing Search Procedures                                                     We expect beam and best to outperform rand as the number
+We compare the effects of three different search procedures from                    of search budget increases, similar to Ellis et al. [2019]. However,
+the neurally guided search literature. Here, rand is random rollout,                the limitation of the search budget is important, as each design in
+beam is beam search, and best is best-first search. For each search                 our test set takes between 5-35 seconds to reconstruct on average.
+algorithm we use the gcn agent described in Section 6.1 trained on                  The majority of evaluation time is spent inside the Fusion 360 Gym
+the standard human design training set. Figure 16, 17, and Table 5                  executing modeling operations and graph generation, both com-
+show that all three search algorithms perform similarly for recon-                  putationally expensive yet crucial operations that must be taken
+struction IoU, while rand performs best for exact reconstruction.                   during reconstruction.
+
+                                                                                                                  ACM Trans. Graph., Vol. 40, No. 4, Article 54. Publication date: August 2021.
+54:12 •   Karl D.D. Willis, Yewen Pu, Jieliang Luo, Hang Chu, Tao Du, Joseph G. Lambourne, Armando Solar-Lezama, and Wojciech Matusik
+
+
+
+   gt                                                                IoU Steps         gt                                                      IoU Steps
+
+
+ aug                                                                1.00        2    aug                                                        0.95   2
+
+
+ gcn                                                                1.00        5    gcn                                                       0.99    8
+
+
+ mlp                                                                0.93        30   mlp                                                        0.91   74
+
+
+rand                                                                 0.61       99   rand                                                      0.90    7
+
+
+
+
+   gt                                                                IoU Steps         gt                                                      IoU Steps
+
+
+ aug                                                                1.00        2    aug                                                        0.37   3
+
+
+ gcn                                                                1.00        26   gcn                                                        0.49   8
+
+
+ mlp                                                                0.93        1    mlp                                                        0.31   31
+
+
+rand                                                                0.93        5    rand                                                       0.37   38
+
+
+
+
+   gt                                                                IoU Steps         gt                                                      IoU Steps
+
+
+ aug                                                                0.84        3    aug                                                        0.79   79
+
+
+ gcn                                                                0.84        90   gcn                                                        0.71   96
+
+
+ mlp                                                                0.85        9    mlp                                                       0.00 100
+
+
+rand                                                                0.84        53   rand                                                       0.50   9
+
+
+ Fig. 18. Qualitative construction sequence results comparing the ground truth (gt) to reconstructions using different agents with random rollout search.
+
+
+6.5     Discussion                                                                      Conciseness should always be considered alongside exact recon-
+For practical application of CAD reconstruction it is necessary to                      struction performance as naive approaches that only reconstruct
+have an exact reconstruction where all details of a design are recon-                   short sequences can achieve good conciseness scores.
+structed in a concise way. It is notable that incorrect reconstructions
+can score well with the IoU metric, but omit important design details.
+For example, the small holes in the USB connector in Figure 18b are                     7   CONCLUSION AND FUTURE DIRECTIONS
+omitted from the gcn reconstruction. We suggest IoU should be a                         In this paper we presented the Fusion 360 Gallery reconstruction
+secondary metric, with future work focusing on improving exact                          dataset and environment for learning CAD reconstruction from se-
+reconstruction performance with concise construction sequences.                         quential 3D CAD data. We outlined a standard CAD reconstruction
+                                                                                        task, together with evaluation metrics, and presented results from a
+                                                                                        neurally guided search approach.
+
+ACM Trans. Graph., Vol. 40, No. 4, Article 54. Publication date: August 2021.
+                                               Fusion 360 Gallery: A Dataset and Environment for Programmatic CAD Construction from Human Design Sequences •            54:13
+
+
+7.1    Limitations                                                                    Autodesk. 2015. Autodesk Online Gallery. https://gallery.autodesk.com
+                                                                                      Pal Benko, Geza Kos, Pál Benkő, Laszlo Andor, Géza Kós, Tamas Varady, László Andor,
+Our dataset contains only designs created using sketch and extrude                        and Ralph Martin. 2002. Constrained Fitting in Reverse Engineering.
+rather than the full array of CAD modeling operations. Short con-                     Suzanne Fox Buchele. 2000. Three-dimensional binary space partitioning tree and con-
+                                                                                          structive solid geometry tree construction from algebraic boundary representations.
+struction sequences make up a sizable portion of the data: 3267/8625                      (2000).
+(38%) of designs have only a single extrude operation. From the                       Suzanne F Buchele and Richard H Crawford. 2003. Three-dimensional halfspace con-
+single extrude designs, some exhibit more complexity: 347 have >1                         structive solid geometry tree construction from implicit boundary representations.
+                                                                                          In Proceedings of the eighth ACM symposium on Solid modeling and applications.
+sketch profile resulting in ≥1 bodies from a single extrude opera-                        135–144.
+tion, and 998 have ≥8 sketch curves. Other designs are washers,                       Suzanne F Buchele and Angela C Roles. 2001. Binary space partitioning tree and
+pegs, and plates, common in mechanical CAD assemblies. We avoid                           constructive solid geometry representations for objects bounded by curved surfaces..
+                                                                                          In CCCG. Citeseer, 49–52.
+filtering simple designs to ensure the dataset is representative of                   Francesco Buonamici, Monica Carfagni, Rocco Furferi, Lapo Governi, Alessandro Lapini,
+user-designed CAD. Spline curves represent 4% of curves in the                            and Yary Volpe. 2018. Reverse engineering modeling methods and tools: a survey.
+                                                                                          Computer-Aided Design and Applications 15, 3 (2018), 443–464. https://doi.org/10.
+dataset and are not currently supported by our high-level DSL,                            1080/16864360.2017.1397894 arXiv:https://doi.org/10.1080/16864360.2017.1397894
+however they can be reconstructed via the reconstruct_curve()                         Angel X Chang, Thomas Funkhouser, Leonidas Guibas, Pat Hanrahan, Qixing Huang,
+command (Section A.2.1).                                                                  Zimo Li, Silvio Savarese, Manolis Savva, Shuran Song, Hao Su, et al. 2015. Shapenet:
+                                                                                          An information-rich 3d model repository. arXiv preprint arXiv:1512.03012 (2015).
+   The success of the rand agent demonstrates that short construc-                    Zhiqin Chen, Andrea Tagliasacchi, and Hao Zhang. 2020. Bsp-net: Generating compact
+tion sequences can be solved by a naive approach. This is due to                          meshes via binary space partitioning. In Proceedings of the IEEE/CVF Conference on
+several factors: 1) our action representation that uses B-Rep faces,                      Computer Vision and Pattern Recognition. 45–54.
+                                                                                      Dassault. 2019. Solidworks FeatureWorks. https://help.solidworks.com/2019/english/
+2) our search procedure discarding invalid actions, and 3) designs                        SolidWorks/fworks/c_Overview_of_FeatureWorks.htm
+in the dataset with a low number of planar faces and extrude steps.                   Jia Deng, Wei Dong, Richard Socher, Li-Jia Li, Kai Li, and Li Fei-Fei. 2009. Imagenet: A
+                                                                                          large-scale hierarchical image database. In 2009 IEEE conference on computer vision
+For example, a washer has four B-Rep faces (planar-top, cylinder-                         and pattern recognition. Ieee, 248–255.
+inside, cylinder-outside, planar-bottom), giving the random agent                     Jacob Devlin, Jonathan Uesato, Surya Bhupatiraju, Rishabh Singh, Abdel-rahman Mo-
+a 2/2 chance of success as either planar-top → planar-bottom, or                          hamed, and Pushmeet Kohli. 2017. Robustfill: Neural program learning under noisy
+                                                                                          i/o. arXiv preprint arXiv:1703.07469 (2017).
+vice versa, are considered correct and extrusions from non-planar                     Tao Du, Jeevana Priya Inala, Yewen Pu, Andrew Spielberg, Adriana Schulz, Daniela
+faces are invalid. Although the random agent can achieve moderate                         Rus, Armando Solar-Lezama, and Wojciech Matusik. 2018. Inversecsg: Automatic
+success with simple designs, the problem quickly becomes challeng-                        conversion of 3d models to csg trees. ACM Transactions on Graphics (TOG) 37, 6
+                                                                                          (2018), 1–16.
+ing for more complex designs. All agents struggle to achieve exact                    Mathias Eitz, James Hays, and Marc Alexa. 2012. How do humans sketch objects? ACM
+reconstructions within the search budget for construction sequence                        Transactions on graphics (TOG) 31, 4 (2012), 1–10.
+                                                                                      Kevin Ellis, Maxwell Nye, Yewen Pu, Felix Sosa, Josh Tenenbaum, and Armando Solar-
+lengths ≥4.                                                                               Lezama. 2019. Write, execute, assess: Program synthesis with a repl. In Advances in
+                                                                                          Neural Information Processing Systems. 9169–9178.
+7.2    Future Work                                                                    Kevin Ellis, Daniel Ritchie, Armando Solar-Lezama, and Josh Tenenbaum. 2018.
+                                                                                          Learning to Infer Graphics Programs from Hand-Drawn Images. In Advances
+Future extensions of this work include sample efficient search strate-                    in Neural Information Processing Systems, S. Bengio, H. Wallach, H. Larochelle,
+gies to ensure successful recovery of construction sequences with                         K. Grauman, N. Cesa-Bianchi, and R. Garnett (Eds.), Vol. 31. Curran As-
+                                                                                          sociates, Inc., 6059–6068.          https://proceedings.neurips.cc/paper/2018/file/
+fewer interactions with the environment and leveraging constraints                        6788076842014c83cedadbe6b0ba0314-Paper.pdf
+present in the dataset to guide CAD program synthesis. More broadly                   Pierre-Alain Fayolle and Alexander Pasko. 2016. An evolutionary approach to the
+                                                                                          extraction of object construction trees from 3D point clouds. Computer-Aided
+we envision the dataset can aid the creation of 3D geometry using                         Design 74 (2016), 1–17.
+the same CAD modeling operations as human designers, exploiting                       Markus Friedrich, Pierre-Alain Fayolle, Thomas Gabor, and Claudia Linnhoff-Popien.
+the knowledge of domain experts on how shapes are defined and                             2019. Optimizing evolutionary CSG tree extraction. In Proceedings of the Genetic
+                                                                                          and Evolutionary Computation Conference. 1183–1191.
+leveraging the strengths of industrial CAD modeling software. By                      Lin Gao, Jie Yang, Tong Wu, Yu-Jie Yuan, Hongbo Fu, Yu-Kun Lai, and Hao Zhang.
+learning to translate point cloud, image, or mesh data into a se-                         2019. SDM-NET: Deep generative network for structured deformable mesh. ACM
+quence of high level modeling operations [Ellis et al. 2018; Tian et al.                  Transactions on Graphics (TOG) 38, 6 (2019), 1–15.
+                                                                                      Justin Gilmer, Samuel S Schoenholz, Patrick F Riley, Oriol Vinyals, and George E Dahl.
+2019], watertight CAD models may be synthesized, providing an al-                         2017. Neural message passing for quantum chemistry. In International Conference
+ternative approach to the reverse engineering problem [Buonamici                          on Machine Learning. PMLR, 1263–1272.
+                                                                                      Yulia Gryaditskaya, Mark Sypesteyn, Jan Willem Hoftijzer, Sylvia Pont, Fredo Durand,
+et al. 2018]. A remaining challenge is to develop representations that                    and Adrien Bousseau. 2019. Opensketch: A richly-annotated dataset of product
+can be conditioned on the design geometry and topology created so                         design sketches. ACM Transactions on Graphics (TOG) 38, 6 (2019), 232.
+far, leveraging the sequential nature of the data for self-attention                  Karim Hamza and Kazuhiro Saitou. 2004. Optimization of constructive solid geometry
+                                                                                          via a tree-based multi-objective genetic algorithm. In Genetic and Evolutionary
+[Vaswani et al. 2017]. Finally, beyond the simplified design space                        Computation Conference. Springer, 981–992.
+of sketch and extrude lies the full breadth of rich sequential CAD                    Pradeep Kumar Jayaraman, Aditya Sanghi, Joseph Lambourne, Thomas Davies, Hooman
+modeling operations.                                                                      Shayani, and Nigel Morris. 2020. UV-Net: Learning from Curve-Networks and Solids.
+                                                                                          arXiv preprint arXiv:2006.10211 (2020).
+                                                                                      R. Kenny Jones, Theresa Barton, Xianghao Xu, Kai Wang, Ellen Jiang, Paul Guerrero,
+REFERENCES                                                                                Niloy Mitra, and Daniel Ritchie. 2020. ShapeAssembly: Learning to Generate Pro-
+                                                                                          grams for 3D Shape Structure Synthesis. ACM Transactions on Graphics (TOG),
+Silvia Ansaldi, Leila De Floriani, and Bianca Falcidieno. 1985. Geometric modeling        Siggraph Asia 2020 39, 6 (2020), Article 234.
+    of solid objects by using a face adjacency graph representation. ACM SIGGRAPH     Ashwin Kalyan, Abhishek Mohta, Oleksandr Polozov, Dhruv Batra, Prateek Jain, and
+    Computer Graphics 19, 3 (1985), 131–139.                                              Sumit Gulwani. 2018. Neural-guided deductive search for real-time program syn-
+Autodesk. 2012. Inventor Feature Recognition. https://apps.autodesk.com/INVNTOR/          thesis from examples. arXiv preprint arXiv:1804.01186 (2018).
+    en/Detail/Index?id=9172877436288348979                                            Kacper Kania, Maciej Zięba, and Tomasz Kajdanowicz. 2020. UCSG-Net–Unsupervised
+Autodesk. 2014. Fusion 360 API. http://help.autodesk.com/view/fusion360/ENU/?guid=        Discovering of Constructive Solid Geometry Tree. arXiv preprint arXiv:2006.09102
+    GUID-7B5A90C8-E94C-48DA-B16B-430729B734DC
+
+
+                                                                                              ACM Trans. Graph., Vol. 40, No. 4, Article 54. Publication date: August 2021.
+54:14 •    Karl D.D. Willis, Yewen Pu, Jieliang Luo, Hang Chu, Tao Du, Joseph G. Lambourne, Armando Solar-Lezama, and Wojciech Matusik
+
+
+   (2020).                                                                                 Minhyuk Sung, Hao Su, Vladimir G Kim, Siddhartha Chaudhuri, and Leonidas Guibas.
+Sangpil Kim, Hyung-gun Chi, Xiao Hu, Qixing Huang, and Karthik Ramani. 2020.                   2017. ComplementMe: Weakly-supervised component suggestions for 3D modeling.
+   A Large-scale Annotated Mechanical Components Benchmark for Classification                  ACM Transactions on Graphics (TOG) 36, 6 (2017), 1–12.
+   and Retrieval Tasks with Deep Neural Networks. In Proceedings of 16th European          Jerry O. Talton, Yu Lou, Steve Lesser, Jared Duke, Radomír Měch, and Vladlen Koltun.
+   Conference on Computer Vision (ECCV).                                                       2011. Metropolis Procedural Modeling. ACM Trans. Graph. 30, 2, Article 11 (April
+Thomas Kipf, Ethan Fetaya, Kuan-Chieh Wang, Max Welling, and Richard Zemel. 2018.              2011), 14 pages. https://doi.org/10.1145/1944846.1944851
+   Neural relational inference for interacting systems. In International Conference on     Yunhao Tang, Shipra Agrawal, and Yuri Faenza. 2019. Reinforcement learning for
+   Machine Learning. PMLR, 2688–2697.                                                          integer programming: Learning to cut. arXiv preprint arXiv:1906.04859 (2019).
+Thomas N Kipf and Max Welling. 2016. Semi-supervised classification with graph             Yonglong Tian, Andrew Luo, Xingyuan Sun, Kevin Ellis, William T. Freeman, Joshua B.
+   convolutional networks. arXiv preprint arXiv:1609.02907 (2016).                             Tenenbaum, and Jiajun Wu. 2019. Learning to Infer and Execute 3D Shape Programs.
+Sebastian Koch, Albert Matveev, Zhongshi Jiang, Francis Williams, Alexey Artemov,              In International Conference on Learning Representations.
+   Evgeny Burnaev, Marc Alexa, Denis Zorin, and Daniele Panozzo. 2019. ABC: A              Carlos A. Vanegas, Ignacio Garcia-Dorado, Daniel G. Aliaga, Bedrich Benes, and Paul
+   big CAD model dataset for geometric deep learning. In Proceedings of the IEEE              Waddell. 2012. Inverse Design of Urban Procedural Models. ACM Trans. Graph. 31,
+   Conference on Computer Vision and Pattern Recognition. 9601–9611.                           6, Article 168 (Nov. 2012), 11 pages. https://doi.org/10.1145/2366145.2366187
+Changjian Li, Hao Pan, Adrien Bousseau, and Niloy J. Mitra. 2020b. Sketch2CAD:             Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N
+   Sequential CAD Modeling by Sketching in Context. ACM Trans. Graph. (Proceedings             Gomez, Ł ukasz Kaiser, and Illia Polosukhin. 2017. Attention is All you Need.
+   of SIGGRAPH Asia 2020) 39, 6 (2020), 164:1–164:14. https://doi.org/10.1145/3414685.         In Advances in Neural Information Processing Systems, I. Guyon, U. V. Luxburg,
+   3417807                                                                                     S. Bengio, H. Wallach, R. Fergus, S. Vishwanathan, and R. Garnett (Eds.), Vol. 30.
+Jun Li, Chengjie Niu, and Kai Xu. 2020a. Learning part generation and assembly for             Curran Associates, Inc., 5998–6008. https://proceedings.neurips.cc/paper/2017/file/
+   structure-aware shape synthesis. In Proceedings of the AAAI Conference on Artificial        3f5ee243547dee91fbd053c1c4a845aa-Paper.pdf
+   Intelligence, Vol. 34. 11362–11369.                                                     Petar Veličković, Guillem Cucurull, Arantxa Casanova, Adriana Romero, Pietro Lio, and
+Renjie Liao, Yujia Li, Yang Song, Shenlong Wang, Will Hamilton, David K Duvenaud,              Yoshua Bengio. 2017. Graph attention networks. arXiv preprint arXiv:1710.10903
+   Raquel Urtasun, and Richard Zemel. 2019. Efficient graph generation with graph              (2017).
+   recurrent attention networks. In Advances in Neural Information Processing Systems.     K.J. Weiler. 1986. Topological structures for geometric modeling. University Microfilms.
+   4255–4265.                                                                              Daniel Weiss. 2009. Geometry-based structural optimization on CAD specification trees.
+Cheng Lin, Tingxiang Fan, Wenping Wang, and Matthias Nießner. 2020. Modeling 3D                Ph.D. Dissertation. ETH Zurich.
+   Shapes by Reinforcement Learning. ECCV (2020).                                          Rundi Wu, Yixin Zhuang, Kai Xu, Hao Zhang, and Baoquan Chen. 2020. Pq-net: A
+Kaichun Mo, Paul Guerrero, Li Yi, Hao Su, Peter Wonka, Niloy J. Mitra, and Leonidas J.         generative part seq2seq network for 3d shapes. In Proceedings of the IEEE/CVF
+   Guibas. 2019a. StructureNet: Hierarchical Graph Networks for 3D Shape Generation.           Conference on Computer Vision and Pattern Recognition. 829–838.
+   ACM Trans. Graph. 38, 6, Article 242 (Nov. 2019), 19 pages. https://doi.org/10.1145/    Zhirong Wu, Shuran Song, Aditya Khosla, Fisher Yu, Linguang Zhang, Xiaoou Tang, and
+   3355089.3356527                                                                             Jianxiong Xiao. 2015. 3d shapenets: A deep representation for volumetric shapes.
+Kaichun Mo, Shilin Zhu, Angel X Chang, Li Yi, Subarna Tripathi, Leonidas J Guibas, and         In Proceedings of the IEEE conference on computer vision and pattern recognition.
+   Hao Su. 2019b. Partnet: A large-scale benchmark for fine-grained and hierarchical           1912–1920.
+   part-level 3d object understanding. In Proceedings of the IEEE Conference on Computer   Keyulu Xu, Weihua Hu, Jure Leskovec, and Stefanie Jegelka. 2018. How powerful are
+   Vision and Pattern Recognition. 909–918.                                                    graph neural networks? arXiv preprint arXiv:1810.00826 (2018).
+Chandrakana Nandi, Anat Caspi, Dan Grossman, and Zachary Tatlock. 2017. Program-           Zhibo Zhang, Prakhar Jaiswal, and Rahul Rai. 2018. FeatureNet: machining feature
+   ming language tools and techniques for 3D printing. In 2nd Summit on Advances               recognition based on 3D convolution neural network. Computer-Aided Design 101
+   in Programming Languages (SNAPL 2017). Schloss Dagstuhl-Leibniz-Zentrum fuer                (2018), 12–22.
+   Informatik.                                                                             Qingnan Zhou and Alec Jacobson. 2016. Thingi10K: A Dataset of 10,000 3D-Printing
+Chandrakana Nandi, James R Wilcox, Pavel Panchekha, Taylor Blau, Dan Grossman,                 Models. arXiv preprint arXiv:1605.04797 (2016).
+   and Zachary Tatlock. 2018. Functional programming for compiling and decompiling         Chuhang Zou, Ersin Yumer, Jimei Yang, Duygu Ceylan, and Derek Hoiem. 2017. 3d-
+   computer-aided design. Proceedings of the ACM on Programming Languages 2, ICFP              prnn: Generating shape primitives with recurrent neural networks. In Proceedings
+   (2018), 1–31.                                                                               of the IEEE International Conference on Computer Vision. 900–909.
+Chandrakana Nandi, Max Willsey, Adam Anderson, James R. Wilcox, Eva Darulova,
+   Dan Grossman, and Zachary Tatlock. 2020. Synthesizing Structured CAD Models
+   with Equality Saturation and Inverse Transformations. In Proceedings of the 41st
+   ACM SIGPLAN Conference on Programming Language Design and Implementation.
+   31–44.
+Charlie Nash, Yaroslav Ganin, SM Ali Eslami, and Peter Battaglia. 2020. Polygen:
+   An autoregressive generative model of 3d meshes. In International Conference on
+   Machine Learning. PMLR, 7220–7229.
+Patsorn Sangkloy, Nathan Burnell, Cusuh Ham, and James Hays. 2016. The sketchy
+   database: learning to retrieve badly drawn bunnies. ACM Transactions on Graphics
+   (TOG) 35, 4 (2016), 1–12.
+Nadav Schor, Oren Katzir, Hao Zhang, and Daniel Cohen-Or. 2019. CompoNet: Learning
+   to generate the unseen by part synthesis and composition. In Proceedings of the
+   IEEE/CVF International Conference on Computer Vision. 8759–8768.
+Adriana Schulz, Ariel Shamir, David I. W. Levin, Pitchaya Sitthi-Amorn, and Wojciech
+   Matusik. 2014. Design and Fabrication by Example. ACM Transactions on Graphics
+   (Proceedings SIGGRAPH 2014) 33, 4 (2014).
+Ari Seff, Yaniv Ovadia, Wenda Zhou, and Ryan P. Adams. 2020. SketchGraphs: A
+   Large-Scale Dataset for Modeling Relational Geometry in Computer-Aided Design.
+   In ICML 2020 Workshop on Object-Oriented Learning.
+Jami J Shah, David Anderson, Yong Se Kim, and Sanjay Joshi. 2001. A discourse on
+   geometric feature recognition from CAD models. J. Comput. Inf. Sci. Eng. 1, 1 (2001),
+   41–51.
+Vadim Shapiro and Donald L Vossler. 1993. Separation for boundary to CSG conversion.
+   ACM Transactions on Graphics (TOG) 12, 1 (1993), 35–55.
+Gopal Sharma, Rishabh Goyal, Difan Liu, Evangelos Kalogerakis, and Subhransu
+   Maji. 2017. CSGNet: Neural Shape Parser for Constructive Solid Geometry. CoRR
+   abs/1712.08290 (2017). arXiv preprint arXiv:1712.08290 (2017).
+Binil Starly. 2020. FabWave - 3D Part Repository. https://www.dimelab.org/fabwave
+O. Stava, S. Pirk, J. Kratt, B. Chen, R. Mundefinedch, O. Deussen, and B. Benes. 2014.
+   Inverse Procedural Modelling of Trees. Comput. Graph. Forum 33, 6 (Sept. 2014),
+   118–131. https://doi.org/10.1111/cgf.12282
+
+
+
+
+ACM Trans. Graph., Vol. 40, No. 4, Article 54. Publication date: August 2021.
+                                           Fusion 360 Gallery: A Dataset and Environment for Programmatic CAD Construction from Human Design Sequences •         54:15
+
+
+A APPENDIX                                                                           Mesh. Mesh data is provided in .obj format representing a tri-
+A.1 Fusion 360 Gallery Reconstruction Dataset                                     angulated version of the B-Rep. Each B-Rep face is triangulated
+                                                                                  separately and is therefore not manifold.
+In this section we provide additional details on the Fusion 360 Gallery              Other representations, such as point clouds or voxels, can be gen-
+reconstruction dataset.                                                           erated using existing data conversion routines and are not included
+A.1.1 Data Processing. To process the data we use the Fusion 360                  in the dataset. For convenience we include a thumbnail .png image
+Python API to parse the native Fusion 360 .f3d files. Figure 19 shows             file together with each geometry.
+an example assembly that is split up to produce multiple designs                     Files are provided in a single directory, with a naming conven-
+with independent construction sequences. The rounded edges are                    tion as follows: XXXXX_YYYYYYYY_ZZZZ[_1234].ext. Here XXXXX
+removed by suppressing fillets in the parametric CAD file. During                 represents the project, YYYYYYYY the file, ZZZZ the component, and
+processing color and material information is also removed.                        _1234 the extrude index. If _1234 is absent the file represents the
+   After each construction sequence has been extracted we perform                 final design.
+reconstruction and compare the reconstructed design to the original
+to ensure data validity. Failure cases and any duplicate designs, are             A.1.3 Design Complexity. A key goal of the reconstruction dataset
+not included in the dataset. We consider a design a duplicate when                is to provide a suitably scoped baseline for learning-based approaches
+there is an exact match in all of the following: body count, face                 to CAD reconstruction. Restricting the modeling operations to
+count, surface area to one decimal point, volume to one decimal                   sketch and extrude vastly narrows the design space and enables
+point, and for each extrude in the construction sequence: extrude                 simpler shape grammars for reconstruction. Each design represents
+profile count, extrude body count, extrude face count, extrude side               a component in Fusion 360 that can have multiple geometric bodies.
+face count, extrude end face count, and extrude start face count.                 Figure 21 (left) illustrates that the vast majority of designs have a
+This process allows us to match designs that have been translated                 single body. The number of B-Rep faces in each design gives a good
+or rotated, while considering designs unique if they have matching                indication of the complexity of the dataset. Figure 21 (right) shows
+geometry but different construction sequences. Duplicates account                 the number of faces per design as a distribution, with the peak be-
+for approximately 5,000 designs. Figure 20 shows a random sampling                ing between 5-10 faces per design. As we do not filter any of the
+of designs from the reconstruction dataset.                                       designs based on complexity, this distribution reflects real designs
+A.1.2 Geometry Data Format. As described in Section 3.1, we pro-                  where simple washers and flat plates are common components in
+vide geometry in several data formats that we provided additional                 mechanical assemblies.
+details on in this section.
+   Boundary Representation. A B-Rep consists of faces, edges, loops,              A.1.4 Construction Sequence. The construction sequence is the
+coedges and vertices [Weiler 1986]. A face is a connected region                  series of sketch and extrude operations that are executed to pro-
+of the model’s surface. An edge defines the curve where two faces                 duce the final geometry. We provide the construction sequence in a
+meet and a vertex defines the point where edges meet. Faces have                  JSON format text file. Each step in the construction sequence has
+an underlying parametric surface which is divided into visible and                associated parameters that are stored in that entity. For example,
+hidden regions by a series of boundary loops. A set of connected                  sketch entities will store the curves that make up the sketch. Each
+faces forms a body.                                                               construction sequence must have at least one sketch and one extrude
+   B-Rep data is provided as .smt files representing the ground truth             step, for a minimum of two steps. The average number of steps
+geometry and .step as an alternate neutral B-Rep file format. The                 is 4.74, the median 4, the mode 2, and the maximum 61. Figure 22
+.smt file format is the native format used by Autodesk Shape Man-                 illustrates the distribution of construction sequence length and the
+ager, the CAD kernel within Fusion 360, and has the advantage of                  most frequent construction sequence combinations.
+minimizing conversion errors.                                                        With access to the full parametric history, it is possible to ex-
+                                                                                  tract numerous relationships from the dataset that can be used for
+                                                                                  learning. Starting at a high level, we know the order of modeling
+                                                                                  operations in the construction sequence. The sketch geometry, B-
+                                                                                  Rep faces, and triangles derived from them, can be traced back to a
+                                                                                  position in the construction sequence. The type of geometry created
+                                                                                  by each modeling operation is also known. For example, sketches
+                                                                                  create trimmed profiles where the curves intersect to form closed
+                                                                                  loops; extrude operations produce B-Rep faces with information
+                                                                                  such as which faces were on the side or ends of an extrusion. In
+                                                                                  addition, the sequence of B-Rep models themselves contain valuable
+                                                                                  topology information that can be leveraged, such as the connectivity
+                                                                                  of B-Rep faces and edges. Finally geometric information like points
+Fig. 19. An example multi-component assembly that is broken up into sepa-         and normal vectors can be sampled from the parametric surfaces.
+rate designs (highlighted with color), each with an independent construction      Feature diversity enables many different learning representations
+sequence.                                                                         and architectures to be leveraged and compared.
+
+                                                                                          ACM Trans. Graph., Vol. 40, No. 4, Article 54. Publication date: August 2021.
+54:16 •   Karl D.D. Willis, Yewen Pu, Jieliang Luo, Hang Chu, Tao Du, Joseph G. Lambourne, Armando Solar-Lezama, and Wojciech Matusik
+
+
+
+
+                                     Fig. 20. A random sampling of designs from the Fusion 360 Gallery reconstruction dataset.
+
+
+ACM Trans. Graph., Vol. 40, No. 4, Article 54. Publication date: August 2021.
+                                                                           Fusion 360 Gallery: A Dataset and Environment for Programmatic CAD Construction from Human Design Sequences •                             54:17
+
+
+
+          90%
+                                                        Body Count Per Design                                                           35%
+                                                                                                                                                                     Face Count Per Design
+          80%                                                                                                                           30%
+          70%
+                                                                                                                                        25%
+          60%
+          50%                                                                                                                           20%
+Total %   40%                                                                                                                 Total %   15%
+          30%
+                                                                                                                                        10%
+          20%
+          10%                                                                                                                           5%
+           0%                                                                                                                           0%
+                            1         2          3        4       5         6         7        8          9         10+                        0 5 10 15 20 25 30 35 40 45 50 55 60 65 70 75 80 85 9095+
+                                                           Number of Bodies                                                                                              Number of Faces
+            Fig. 21. Left: The number of bodies per design shown as a distribution. Right: The number of B-Rep faces per design shown as a distribution.
+
+
+          40%
+                                                Construction Sequence Length                                                                                Construction Sequence Frequency
+                                                                                                                                 SE
+          35%
+                                                                                                                              SESE
+          30%
+                                                                                                                            SESESE
+          25%                                                                                                                  SES
+Total %   20%                                                                                                                  SEE
+          15%                                                                                                             SESESESE
+                                                                                                                             SESES
+          10%
+                                                                                                                              SESS
+          5%
+                                                                                                                               Other
+          0%
+                  1             3           5        7        9       11        13        15       17         19+                        0%        5%       10%       15%      20%       25%      30%       35%      40%
+                                                           Sequence Length                                                                                                   Total %
+Fig. 22. Left: The distribution of construction sequence length. Right: The distribution of common construction sequences. S indicates a Sketch and E indicates
+an Extrude operation.
+
+
+                pt2                 pt4                                                                                          A.1.5 Sketch. In this section we describe the sketch data in fur-
+                                                                                                              c3
+                                                                                                                                 ther detail and present statistics illustrating the data distribution.
+                                                                                                   c1                            Figure 23 illustrates the geometric 2D primitives, described in sec-
+                                    pt1                                              c2
+                                                                                          c5
+                                                                                                                                 tion 3.2, that make up a sketch. Sketches are represented as a series
+                                                  pt6
+                                                                                                                                 of points (𝑝𝑡1...𝑝𝑡6), that create curves (𝑐1...𝑐5), that in turn cre-
+                                                                                                   c4
+   pt5
+                      pt3
+                                                                                                                                 ate profiles (𝑝𝑟 1...𝑝𝑟 3), illustrated with separate colors. Profiles can
+                            Points                                                             Curves
+                                                                                                                                 have inner loops to create holes, 𝑐1 is the inner loop of 𝑝𝑟 2 and
+                                                                                                                                 the outer loop of 𝑝𝑟 3. Profiles also have a trimmed representation
+                                                                                                                                 that contains only closed loops without open curves. The trimmed
+                                                                                                                                 representation is shown in the lower right of Figure 23 where the
+                                                                                                                                 𝑐5 is trimmed and incorporated into 𝑝𝑟 1 and 𝑝𝑟 2.
+                                pr2                                                            pr2
+                                                                                                                                    Points. Each point is provided with a universally unique identifier
+                                      pr3                                                               pr3
+                                                                                                                                 (UUID) key and a Point3D data structure with 𝑥, 𝑦, and 𝑧. Sketch
+                pr1                                                                   pr1                                        primitives are drawn in a local 2D coordinate system and later
+                                                                                                                                 transformed into world coordinates. As such all sketch points have
+                                                                                                                                 a 𝑧 value of 0.
+                        Profiles                                                      Trimmed Profiles
+                                                                                                                                    Curves. Each curve has a UUID key and a SketchCurve that can
+                                                Fig. 23. Sketch primitives.
+                                                                                                                                 represent the curve types listed below. The parameters for each
+                                                                                                                                 curve type can be referenced via the Fusion 360 API documentation
+                                                                                                                                 linked below.
+
+                                                                                                                                              ACM Trans. Graph., Vol. 40, No. 4, Article 54. Publication date: August 2021.
+54:18 •         Karl D.D. Willis, Yewen Pu, Jieliang Luo, Hang Chu, Tao Du, Joseph G. Lambourne, Armando Solar-Lezama, and Wojciech Matusik
+
+
+
+          50%
+                                      Curve Count Per Design                                                     Curve Type Combination Frequency
+                                                                                                 C
+          40%                                                                                ACL
+                                                                                               CL
+          30%                                                                                    L
+Total %                                                                                        AL
+          20%                                                                               ACSL
+                                                                                               SL
+          10%                                                                                CSL
+                                                                                             Other
+          0%
+                 0        10   20     30     40     50       60   70    80     90+                0%            5%           10%              15%   20%     25%
+                                           Number of Curves                                                                        Total %
+Fig. 24. Left: The number of curves in each design, shown as a distribution. Right: Common curve combinations in each design, shown as a distribution. Each
+curve type is abbreviated as follows: C - SketchCircle, A - SketchArc, L - SketchLine, S - SketchFittedSpline.
+
+
+                                             Curve Type Distribution                         profile loop (Figure 23, bottom right). Loops within profiles have a
+            SketchLine                                                                       flag that can be set to specify holes.
+           SketchCircle
+                                                                                                Dimensions. User specified sketch dimensions are used to define
+             SketchArc                                                                       set angles, diameters, distances etc. between sketch geometry to
+  SketchFittedSpline                                                                         constraint the sketch as it is edited. Each dimension has a UUID key
+          SketchEllipse                                                                      and a SketchDimension that can represent the dimension types
+   SketchFixedSpline                                                                         listed below. Each dimension references one or more curves by
+  SketchEllipticalArc                                                                        UUID. The parameters for each dimension type can be referenced
+   SketchConicCurve                                                                          via the Fusion 360 API documentation linked below.
+                      0%       10%     20%        30%       40%   50%        60%     70%         • SketchAngularDimension
+                                                        Total %
+                                                                                                 • SketchConcentricCircleDimension
+                           Fig. 25. The distribution of curve types.                             • SketchDiameterDimension
+                                                                                                 • SketchEllipseMajorRadiusDimension
+                                                                                                 • SketchEllipseMinorRadiusDimension
+          • SketchArc
+                                                                                                 • SketchLinearDimension
+          • SketchCircle
+                                                                                                 • SketchOffsetCurvesDimension
+          • SketchConicCurve
+                                                                                                 • SketchOffsetDimension
+          • SketchEllipse
+                                                                                                 • SketchRadialDimension
+          • SketchEllipticalArc
+          • SketchFittedSpline                                                                  Constraints. Constraints define geometric relationships between
+          • SketchFixedSpline                                                                sketch geometry. For example, a symmetry constraint enables the
+          • SketchLine                                                                       user to have geometry mirrored, or a parallel constraint ensures
+                                                                                             two lines are always parallel. Each constraint has a UUID key and
+   Figure 24 illustrates the distribution of curve count per design and                      a GeometricConstraint that can represent the constraint types
+the frequency that different curve combinations are used together in                         listed below. Each constraint references one or more curves by
+a design. Figure 25 shows the overall distribution of curve types in                         UUID. The parameters for each constraint type can be referenced
+the dataset. It is notable that mechanical CAD sketches rely heavily                         via the Fusion 360 API documentation linked below.
+on lines, circles, and arcs rather than spline curves.
+                                                                                                 • CircularPatternConstraint
+   Profiles. Profiles represent a collection of curves that join together                        • CoincidentConstraint
+to make a closed loop. In Fusion 360 profiles are automatically gener-                           • CollinearConstraint
+ated from arbitrary curves that don’t necessarily connect at the end
+                                                                                                 • ConcentricConstraint
+points. In Figure 23 two profiles (𝑝𝑟 1 and 𝑝𝑟 2) are generated when
+the line crosses the triangle. We provide both the original curves                               • EqualConstraint
+(Figure 23, top right) used to generate the profiles (Figure 23, bottom                          • HorizontalConstraint
+left) and the trimmed profile information containing just the closed                             • HorizontalPointsConstraint
+
+
+ACM Trans. Graph., Vol. 40, No. 4, Article 54. Publication date: August 2021.
+                                           Fusion 360 Gallery: A Dataset and Environment for Programmatic CAD Construction from Human Design Sequences •            54:19
+
+
+                               Dimension Type Distribution                                                            Constraint Type Distribution
+             Linear                                                                    Coincident
+                                                                                        Horizontal
+          Diameter                                                                  Perpendicular
+                                                                                          Tangent
+              Offset                                                                      Vertical
+             Radial                                                                       Parallel
+                                                                                        Concentric
+            Angular                                                                     Symmetry
+                                                                                         MidPoint
+       OffsetCurves                                                                         Equal
+    ConcentricCircle                                                                     Collinear
+                                                                                            Offset
+EllipseMinorRadius                                                                        Polygon
+                                                                                    VerticalPoints
+EllipseMajorRadius                                                                HorizontalPoints
+                   0%   5%   10%    15%      20%       25%   30%    35%     40%                  0%          5%          10%         15%       20%         25%
+                                             Total %                                                                             Total %
+                                          Fig. 26. The distribution of constraint (left) and dimension (right) types.
+
+
+      • MidPointConstraint
+      • OffsetConstraint
+      • ParallelConstraint
+      • PerpendicularConstraint
+                                                                                                           One Side                         Taper
+      • PolygonConstraint
+      • RectangularPatternConstraint
+      • SmoothConstraint
+      • SymmetryConstraint
+      • TangentConstraint
+      • VerticalConstraint                                                                                                  Sketch
+
+      • VerticalPointsConstraint
+                                                                                                Symmetric                                             Two Side
+
+  Figure 26 illustrates the distribution of dimension and constraint                Fig. 27. An extrude can be expressed in several different ways: perpendicular
+types in the dataset.                                                               from a sketch for a set distance along one side, a symmetrical distance along
+                                                                                    both sides, or separate distances along two sides. Additionally the extrude
+A.1.6 Extrude. In this section we describe the extrude data in fur-                 can be tapered at an angle.
+ther detail and present statistics illustrating the data distribution.
+Extrude operations have a number of parameters that are set by the
+user while designing. Figure 27 shows how a sketch (left) can be ex-
+truded a set distance on one side, symmetrically on two sides, with                 Gym server can be run in parallel. The remainder of this section
+different distances on each side, as well as tapered. The first extrude             introduces the available commands from the client.
+operation of a construction sequence always creates a new body,
+with subsequent extrudes interacting with that body via Boolean                     A.2.1 Reconstruction Commands. Reconstruction commands can
+operations.                                                                         reconstruct the existing designs at different granularity levels from
+   Figure 28 outlines the distribution of different extrude types and               json files provided with the Fusion 360 Gallery reconstruction dataset.
+operations. Note that tapers can be applied in addition to any extrude
+                                                                                         • reconstruct(file): reconstruct an entire design from the provided
+type, so the overall frequency of each is shown rather than a relative
+                                                                                           json file.
+percentage.
+                                                                                         • reconstruct_sketch(sketch_data, sketch_plane, scale,
+                                                                                           translate, rotate): reconstruct a sketch from the provided sketch
+A.2     Fusion 360 Gym                                                                     data. A sketch_plane can be either: (1) a string value representing a
+In this section we provide additional information about the function-                      construction plane: XY, XZ, or YZ; (2) a B-Rep planar face id; or (3) a
+ality available in the Fusion 360 Gym. The Fusion 360 Gym requires                         point3d on a planar face of a B-Rep.
+the Autodesk Fusion 360 desktop CAD application, available on both                       • reconstruct_profile(sketch_data, sketch_name, profile_id,
+macOS and Windows for free to the academic community. Although                             scale, translate, rotate): reconstruct a single profile from the
+Fusion 360 is a cloud connected desktop application, the Fusion 360                        provide sketch data, a sketch name, and a profile id.
+Gym does all processing locally. The Fusion 360 Gym consists of a                        • reconstruct_curve(sketch_data, sketch_name, curve_id,
+server that runs inside of Fusion 360 and receives commands from                           scale, translate, rotate): reconstruct a single curve from the
+a client running externally. Multiple instances of the Fusion 360                          provide sketch data, a sketch name, and a curve id.
+
+
+                                                                                             ACM Trans. Graph., Vol. 40, No. 4, Article 54. Publication date: August 2021.
+54:20 •             Karl D.D. Willis, Yewen Pu, Jieliang Luo, Hang Chu, Tao Du, Joseph G. Lambourne, Armando Solar-Lezama, and Wojciech Matusik
+
+
+
+                                        Extrude Type Distribution                                                               Extrude Operation Distribution
+            16000                                                                                         50%
+            14000
+                                                                                                          40%
+            12000
+
+
+Frequency
+            10000
+                                                                                                Total %
+                                                                                                          30%
+             8000
+             6000                                                                                         20%
+             4000
+                                                                                                          10%
+             2000
+                0                                                                                         0%
+                          OneSide         Symmetric         TwoSides          Taper                                   NewBody           Join            Cut           Intersect
+
+                                                        Fig. 28. The distribution of extrude types (left) and operations (right).
+
+
+            • reconstruct_curves(sketch_data, sketch_name, scale,                                               – CutFeatureOperation
+              translate, rotate): reconstruct all curves from the provide sketch                                – IntersectFeatureOperation
+              data and a sketch name.
+                                                                                                                – NewBodyFeatureOperation
+A.2.2 Target Reconstruction Commands. Target reconstruction com-
+                                                                                                             It returns a data structure with:
+mands set the target design to be used with reconstruction.
+            • set_target(file): set the target to be reconstructed with a .step                                 – extrude: B-Rep face information, including vertices, generated
+              or .smt file. The call returns a face adjacency graph representing the                              from the extrusion.
+              B-Rep geometry/topology and a bounding_box of the target that can                                 – graph: face adjacency graph of the current design in "PerFace"
+              be used for normalization.                                                                          format.
+            • revert_to_target(): revert to the target design, removing all re-                                 – bounding_box: bounding box of the current design that can be
+              construction geometry.                                                                              used for normalization.
+                                                                                                                – iou: intersection over union result if a target design has been set
+A.2.3 Sketch Extrusion Commands. Sketch extrusion commands
+                                                                                                                  with set_target().
+allows users to incrementally create new designs by generating the
+underlying sketch primitives and extruding them by an arbitrary                                   A.2.4 Face Extrusion Commands. Face extrusion commands enable
+amount.                                                                                           a target design to be reconstructed using extrude operations from
+            • add_sketch(sketch_plane): add a sketch to the design.                               face to face.
+              A sketch_plane can be either: (1) a string value representing a con-                         • add_extrude_by_target_face(start_face, end_face,
+              struction plane: XY, XZ, or YZ; (2) a B-Rep planar face id; or (3) a point3d                   operation): add an extrude between two faces of the target. Four
+              on a planar face of a B-Rep.                                                                   operations are supported:
+            • add_point(sketch_name, p, transform): add a point to create
+              a new sequential line in the given sketch. p is either a point in                                 – JoinFeatureOperation
+              the 2D sketch space or a point in the 3D world coordinate space                                   – CutFeatureOperation
+              if transform="world" is specified.                                                                – IntersectFeatureOperation
+            • add_line(sketch_name, p1, p2, transform): add a line to the                                       – NewBodyFeatureOperation
+              given sketch. p1 and p2 are the same as defined in add_point().
+                                                                                                           • add_extrudes_by_target_face(actions, revert): execute mul-
+            • add_arc(sketch_name, p1, p2, angle, transform): add an arc
+                                                                                                             tiple extrude operations, between two faces of the target, in sequence.
+              to the given sketch. p1 is the start point of the arc and p2 is the center
+              point of the arc. Other properties of p1 and p2 are the same as defined
+              in add_point(). angle is the arc’s angle, measured in degrees.                      A.2.5 Randomized Reconstruction Commands. Randomized reon-
+            • add_circle(sketch_name, p, radius, transform): add a circle
+                                                                                                  struction commands allow users to sample designs, sketches, and
+              to the given sketch. p is the center point of the circle. Other properties          profiles from existing designs in the Fusion 360 Gallery and support
+              of p are the same as defined in add_point(). radius is the radius of                distribution matching of parameters, in support of generations of
+              the circle.                                                                         semi-synthetic data. Figure 29 shows example designs created using
+            • close_profile(sketch_name): close the current set of lines to cre-                  randomized reconstruction commands.
+              ate one or more profiles by joining the first point to the last point.                       • get_distributions_from_dataset(data_dir, filter,
+            • add_extrude(sketch_name, profile_id, distance, operation):                                     split_file): get a list of distributions from the provided dataset.
+              add an extrude to the design. Four operations are supported:                                   The command currently supports the following distributions:
+
+              – JoinFeatureOperation                                                                            – the starting sketch place
+
+
+ACM Trans. Graph., Vol. 40, No. 4, Article 54. Publication date: August 2021.
+    Fusion 360 Gallery: A Dataset and Environment for Programmatic CAD Construction from Human Design Sequences •         54:21
+
+
+
+
+Fig. 29. Example designs created using randomized reconstruction commands.
+
+
+
+
+                                                   ACM Trans. Graph., Vol. 40, No. 4, Article 54. Publication date: August 2021.
+54:22 •    Karl D.D. Willis, Yewen Pu, Jieliang Luo, Hang Chu, Tao Du, Joseph G. Lambourne, Armando Solar-Lezama, and Wojciech Matusik
+
+
+        – the number of faces
+        – the number of extrusions                                                      A
+        – the length of sequences
+        – the number of curves
+        – the number of bodies
+                                                                                        B
+        – the sketch areas
+        – the profile areas.
+
+      • get_distribution_from_json(json_file): return a list of distri-
+                                                                                        C
+        butions saved in the given json file.
+      • distribution_sampling(distributions, parameters): sample
+        distribution matching parameters for one design from the distribu-                   Sketch Profile 1       Extrude 1       Sketch Profile 2    Extrude 2
+
+        tions.
+                                                                                        Fig. 30. Different construction sequences (A-C) for the same geometry. Dur-
+      • sample_design(data_dir, filter, split_file): randomly sam-                      ing conversion to a face extrusion sequence, the necessary face information
+        ple a json file from the given dataset.                                         (highlighted in red) does not exist in the target, meaning B and C can not be
+      • sample_sketch(json_file, sampling_type,                                         converted. Green arrows indicate new body/join extrude operations, while
+        area_distribution): sample one sketch from the provided design.                 red arrows indicate cut extrude operations.
+        Three sampling types are provided:
+
+        – random, return a sketch randomly sampled from the provided de-
+                                                                                        where necessary face information (highlighted in red) is not present
+          sign.
+                                                                                        in the target geometry. The intermediate top face in Figure 30 B
+        – deterministic, return the largest sketch in the design.                       disappears when merged with the top face of Extrude 2. In Figure 30
+        – distributive, return a sketch that its area is in the distribution            C a hole cut through the geometry means the intermediate top face
+          of the provided dataset.                                                      of Extrude 1 is absent and there is no start or end face in the target
+      • sample_profiles(sketch_name, max_number_profiles,                               geometry to perform the cut operation used in Extrude 2. Although
+        sampling_type, area_distribution): sample profiles from the                     it is possible to find alternate face extrusion sequences with heuristic
+        provided sketch. Three sampling types are provided:                             rules, we instead try to maintain the user designed sequence with
+                                                                                        the exception of reversing the direction of the extrusion in some
+        – random, return profiles randomly sampled from the provided sketch.
+                                                                                        scenarios, e.g. the end face becomes the start face.
+        – deterministic, return profiles that are larger than the average
+          area of the profiles in the sketch.                                           A.3.2 Agent. All MPN agents employ a network architecture able
+        – distributive, return profiles that the areas are in the distribution          to exploit the graph structure of the data, consisting of two layers
+          of the provided dataset.                                                      passing messages along the edges of the graph. The vertex features
+                                                                                        in the face-adjacency graph are as follows:
+A.2.6 Export Commands. Export commands enable the existing
+designs to be exported in the following formats:                                            • Points: A 10×10 grid of 3D points sampled from the UV coordi-
+      • mesh(file): retrieve a mesh in .obj or .stl format and write it to the
+                                                                                              nate space of the B-Rep face and normalized to the bounding
+        local file provided.                                                                  box of the target geometry.
+      • brep(file): retrieve a brep in .step, .smt, or .f3d format and write it             • Normals: A 10×10 grid of 3D normal vectors sampled from
+        to a local file provided.                                                             the UV coordinate space of the B-Rep face.
+      • sketches(dir, format): retrieve each sketch in .png or .dxf format                  • Trimming Mask: A 10×10 grid of binary values represent-
+        and write them to a local directory provided.                                         ing samples that are inside/outside the B-Rep face trimming
+      • screenshot(file, width, height): retrieve a screenshot of the                         boundary.
+        current design as a png image and write it to a local file provided.                • Surface Type: A one-hot encoded flag indicating the type
+      • graph(file, dir, format): retrieve a face adjacency graph in a                        of surface represented by the B-Rep face: Cone, Cylinder,
+        given format and write it in a local directory provided.                              Elliptical, EllipticalCylinder, Nurbs, Plane, Sphere,
+                                                                                              Torus.
+A.3      CAD Reconstruction
+                                                                                           Using the face extrusion sequence data, we train the agents in
+In this section we provide additional details of the experiments
+                                                                                        an offline manner without interacting with the Fusion 360 Gym.
+performed on the CAD reconstruction task described in Section 5.
+                                                                                        The mlp and gcn agents have a hidden dimension of 256 across
+A.3.1 Data Preparation. The agents are trained on a subset of the                       all layers. The gin agent has two 256-dimensional linear layers
+reconstruction dataset that has been converted into a face extrusion                    within its graph convolution layer. The gat has 8 heads of 64 hidden
+sequence. Due to the simplified face extrusion representation, not                      dimensions each. The agents are trained with a dropout rate of
+all designs from the dataset can be converted to a face extrusion                       0.1 and a learning rate of 0.0001 for 100 epochs with the model
+sequence. Figure 30 shows several common conversion limitations                         saved at the lowest training loss. The learning rate is decreased by a
+
+ACM Trans. Graph., Vol. 40, No. 4, Article 54. Publication date: August 2021.
+                                       Fusion 360 Gallery: A Dataset and Environment for Programmatic CAD Construction from Human Design Sequences •         54:23
+
+
+factor of 0.1 upon plateau within 10 most recent epochs. Training is          the best seen IoU, or 0 if no IoU score is available, and consider the
+performed on an NVIDIA Tesla V100 with an Adam optimizer and                  design to fail at exact reconstruction.
+takes approximately 6-8 hours.
+                                                                              A.3.5 Results. Table 6 details the full set of results for all agents and
+A.3.3 Search. In all search algorithms we mask out the following              search strategies in the extended baseline comparison experiment
+invalid actions so they are never taken:                                      from Section 6.1. We also include the number of parameters used
+   • Start faces surface types that are non-planar                            by each agent.
+   • End faces surface types that are non-planar                              A.4    Tasks
+   • Operation types other than new body when the current geom-               The ground-truth sequence of the dataset, along with the gym envi-
+     etry is empty                                                            ronment, can be used to automatically derive a range of labels for
+Other invalid actions that require geometric checks, such as spec-            tasks other than CAD reconstruction, such as, program synthesis,
+ifying a start face and end face that are co-planar, are returned             sequence modeling, generative models, and geometric deep learning.
+as invalid from the Fusion 360 Gym and count against the search               Example tasks include:
+budget.                                                                           • Classification of designs by construction sequence length.
+A.3.4 Evaluation. We perform evaluation using the official test                   • Segmentation of B-Rep faces by extrude operation order or by
+set containing 1725 designs. Evaluation is performed in an online                   start/side/end face of an extrude operation.
+manner using the Fusion 360 Gym. Figure 31 shows the average                      • Modeling operation order prediction to recover the correct order
+reconstruction time for each design with combinations of agents                     of construction from raw geometry.
+and search strategies. We set a hard time limit of 10 minutes per
+                                                                                  • Sketch synthesis to recover the original sketch, including con-
+design, after which we halt search, affecting between 0-14 designs
+                                                                                    straints and dimensions, from the 3D geometry.
+depending on the agent and search strategy. Between 0-15 designs
+cause software crashes. 17 designs in the test set cannot be repre-               • Predicting next action in the design sequence for ‘CAD auto-
+sented as graphs due to our data pipeline currently not supporting                  complete’.
+edges with more than two adjacent faces. In all failure cases we use              • Generative models that are aware of the design sequence and
+                                                                                    constraints.
+
+
+
+
+                                                                                      ACM Trans. Graph., Vol. 40, No. 4, Article 54. Publication date: August 2021.
+54:24 •        Karl D.D. Willis, Yewen Pu, Jieliang Luo, Hang Chu, Tao Du, Joseph G. Lambourne, Armando Solar-Lezama, and Wojciech Matusik
+
+
+
+                                                                Average Reconstruction Time Per Design
+          30
+          25
+          20
+Seconds   15
+          10
+           5
+          0
+                   gin-beam gat-beam gin-best gcn-beam mlp-best gcn-best mlp-beam gat-rand gat-best gin-rand gcn-rand mlp-randrand-beamrand-best rand-rand
+                                                                                    Agent-Search
+                                    Fig. 31. Average reconstruction time per design for combinations of agents and search strategies.
+
+Table 6. Reconstruction results for multiple agent and search combinations trained on human designed data. IoU and exact reconstruction are shown at
+20 and 100 search steps. The best result in each column is shown in bold. Lower values are better for conciseness. # Parameters indicated the number of
+parameters used by each agent.
+
+                          Agent      Search              IoU                    Exact Reconstruction. %         Conciseness         # Parameters.
+                                                 20 Steps 100 Steps             20 Steps   100 Steps
+                            gcn       rand        0.8644        0.9042          0.6232         0.6754               1.0168               3.02M
+                            gcn       beam        0.8640        0.8982          0.5739         0.6122               0.9275               3.02M
+                            gcn        best       0.8831        0.9186          0.5971         0.6348               0.9215               3.02M
+                           mlp        rand        0.8274        0.8596          0.5658         0.5965               0.9763               2.24M
+                           mlp        beam        0.8619        0.8995          0.5525         0.5884               0.9271               2.24M
+                           mlp         best       0.8712        0.8991          0.5675         0.5977               0.9305               2.24M
+                            gat       rand        0.8742        0.9128          0.6191         0.6742               1.0206               3.03M
+                            gat       beam        0.8691        0.9016          0.5791         0.6133               0.9261               3.03M
+                            gat        best       0.8895        0.9139          0.5994         0.6354               0.9290               3.03M
+                            gin       rand        0.8346        0.8761          0.5901         0.6301               1.0042               3.62M
+                            gin       beam        0.8500        0.8913          0.5594         0.5983               0.9299               3.62M
+                            gin        best       0.8693        0.9007          0.5803         0.6122               0.9340               3.62M
+                           rand       rand        0.6840        0.8386          0.4157         0.5380               1.2824                  -
+                           rand       beam        0.4785        0.6277          0.2812         0.3896               0.9118                  -
+                           rand        best       0.6334        0.7994          0.3693         0.4887               0.8979                  -
+
+
+
+
+ACM Trans. Graph., Vol. 40, No. 4, Article 54. Publication date: August 2021.
+

@@ -1,0 +1,819 @@
+                  Accurate Moment Computation Using the GPU
+
+                                                   Adarsh Krishnamurthy∗, Sara McMains
+                                                     University of California, Berkeley
+                                                           Berkeley, CA, USA
+
+
+
+
+ABSTRACT                                                                                  on the fixturing system. The moments of inertia can be used to
+We present algorithms for computing accurate moments of solid                             compute the loads that might be transferred to the fixturing sys-
+models that are represented using multiple trimmed NURBS sur-                             tem. Although designers have an intuitive sense of the location
+faces. Our algorithms make use of programmable Graphics Pro-                              of the center of mass and principle moments of inertia, accurate
+cessing Units (GPUs) to accelerate the computations. We evalu-                            feedback about these properties can be a valuable asset while de-
+ate the surface coordinates and normals accurately, with theoretical                      signing. The zeroth-order moment measures the volume enclosed
+bounds, using our GPU NURBS evaluator. We have developed a                                by the solid body. Computing accurate volumes is essential since it
+framework that makes use of this data to evaluate surface integrals                       helps the designer estimate the amount of raw material that might
+of trimmed NURBS surfaces in real time. With our framework, we                            be required to manufacture a particular part. This is essential espe-
+can compute volume and moments of solid models with theoretical                           cially in the case of molding, where the volume computation is es-
+guarantees. The framework also supports local geometry changes,                           sential to maintain quality while manufacturing. If a mold is filled
+which is useful for providing interactive feedback to the designer                        incompletely, it leads to voids in the final part; conversely, filling a
+while the solid model is being designed. We can compute the cen-                          mold with excess material leads to flash that needs to be trimmed
+ter of mass and check for stability of the solid model interactively.                     later. Thus, accurate interactive feedback about moments can aid
+Applications of such real-time moment computation include defor-                          the designers in spotting any inconsistencies and make corrections
+mation modeling, animation, and physically based simulations.                             early in the design process, keeping costs low.
+                                                                                             Computing accurate moments of modern CAD models interac-
+                                                                                          tively is not straightforward due to the presence of curved freeform
+Categories and Subject Descriptors                                                        surfaces. Trimmed Non-Uniform Rational B-Spline (NURBS) sur-
+I.3.3 [Computer Graphics]: Hardware ArchitectureGraphics Pro-                             faces are the de facto representation for curved surfaces in modern
+cessors;; I.3.5 [Computer Graphics]: Computational Geometry                               CAD systems. Moments of objects made of such freeform surfaces
+and Object ModelingGeometric Algorithms, Languages, and Sys-                              are currently being computed by commercial solid modeling soft-
+tems; G.1.4 [Numerical Analysis]: Quadrature and Numerical Dif-                           ware by first evaluating and tessellating the surfaces and then com-
+ferentiationGaussian Quadrature                                                           puting the moments of the tessellated object by projecting them to
+                                                                                          a common plane that passes through the middle of the object [28].
+Keywords                                                                                  This approach, in addition to being extremely slow and computa-
+                                                                                          tionally intensive, is dependent on the tessellation resolution for the
+Geometric Algorithms, Moments, Volume, NURBS, GPU, Hybrid                                 accuracy of the solution; the surface has to be very finely tessellated
+CPU/GPU Algorithms                                                                        to get the required accuracy. Recent advances in programmable
+                                                                                          GPUs provide an alternative to accelerate the computations. We
+1.      INTRODUCTION                                                                      have developed a GPU-accelerated algorithm to compute moments
+  Geometric moments of solid bodies are intrinsic properties of                           of solid objects made of trimmed NURBS surfaces in real time.
+their underlying shape that can provide important design cues to                          These algorithms exploit the parallelism of the GPU to provide im-
+aid in Computer-aided Design (CAD). Computing moments is also                             mediate visual feedback to the designer. The algorithm updates the
+essential for physically based simulations that help in improving                         moment values interactively while the designer changes the design
+realism in animations. In addition, many Computer-Aided Manu-                             of the part.
+facturing (CAM) analyses depend on computing accurate volume,                                In our method, we calculate moments by first converting the vol-
+center of mass, and moments of inertia. For example, a part that is                       ume integrals for moments to surface integrals using the divergence
+fixtured using its center of mass will prevent any unbalanced loads                       theorem. We then use the GPU to compute these surface integrals.
+∗
+                                                                                          Thus, our algorithm is not restricted to computing moments but can
+    e-mail:{adarsh|mcmains}@me.berkeley.edu                                               be used to compute general case surface integrals of NURBS sur-
+                                                                                          faces. Computing surface integrals of free-form surfaces form an
+Permission to make digital or hard copies of all or part of this work for                 important part of several physical simulation algorithms, includ-
+personal or classroom use is granted without fee provided that copies are                 ing finite element analysis. In such cases, our algorithm provides a
+not made or distributed for profit or commercial advantage and that copies                framework to compute surface integrals of NURBS surfaces rapidly
+bear this notice and the full citation on the first page. To copy otherwise, to           and accurately. We have developed different GPU-based numerical
+republish, to post on servers or to redistribute to lists, requires prior specific
+permission and/or a fee.
+                                                                                          integration techniques that can be used to evaluate surface integrals
+2010 ACM Symposium of Solid and Physical Modeling (SPM ’10), Haifa,                       of NURBS.
+Israel
+Copyright 2010 ACM 978-1-60558-984-8/10/09 ...$10.00.
+
+                                                                                     81
+                 (a) Race Car                             (b) V8 Engine                          (c) Engine                 (d) Freeform
+
+
+
+
+                         (e) Trefoil        (f) Hammer       (g) Scooby        (h) Quarter Cylinder (i) Slanted Cylinder Block
+
+Figure 1: Computing the volume and center of mass of complex objects made of multiple trimmed-NURBS surfaces. The center of
+mass is marked with a green dot; the objects are rendered partially transparent.
+
+  In this paper, we provide a hybrid CPU/GPU algorithm that can                 marize the methods for computing volume and moments of solid
+be used to compute moments. Our main contributions include:                     bodies represented using Boundary Representation (B-rep), primi-
+    • A GPU accelerated moment computation algorithm that can                   tive instancing, etc. In their subsequent paper [20], they focus on
+       be used to calculate the volume, center of mass, moment of               Constructive Solid Geometry (CSG) and propose a new algorithm
+       inertia, etc. of solid models that are represented using mul-            based on cellular approximation using octrees. They also predict
+       tiple trimmed NURBS surfaces. Our computations are inde-                 the accuracy of their algorithm in approximating the integral prop-
+       pendent of the tessellation of the solid models. They allow              erties.
+       for interactive updates of moments while the model is being                 Boundary Representations (b-reps) are the de facto standard for
+       edited.                                                                  representation of solid models in current CAD systems. Lee and
+    • A GPU algorithm for performing numerical surface integra-                 Requicha classified the different algorithms for computing geomet-
+       tion on trimmed NURBS surfaces for moment computations.                  ric moments of b-reps as either direct integration methods or diver-
+       We provide details of using the GPU to perform midpoint, 2-              gence theorem methods. For polyhedral models, direct integration
+       point Gaussian quadrature, or 3-point Gaussian quadrature                methods can be easily applied since the integration is performed
+       integration schemes. We compare the accuracy of our algo-                over planes. Cattani and Paoluzzi [3] developed a finite integra-
+       rithm to theoretical results.                                            tion method for the computation of various-order monomial inte-
+    • Error estimates for our moment computations. They allow                   grals over polyhedral solids and surfaces. This method can be used
+       for user-defined tolerance values that are essential for inte-           for exact evaluation of inertial properties of homogeneous polyhe-
+       grating our algorithms in a CAD system.                                  dral objects. Mirtich [22] developed a fast algorithm to compute
+                                                                                moments of polyhedral objects by successively applying the diver-
+                                                                                gence theorem. Timmer and Stern [29] developed a computational
+2.    RELATED AND PREVIOUS WORK                                                 scheme that operates directly on parametric bi-cubic spline patches
+  Volume and geometric moment computations have been funda-                     to compute the inertial properties of solids. Their method relied
+mental to many geometric applications and the literature covering               on computing the intersection curves of adjacent surfaces of the
+them is vast. We provide a brief summary of some key papers that                solid accurately to compute the integral properties. For interac-
+are close to our work in Section 2.1. We then provide a brief sum-              tive applications, Ochoa et al. [5] developed a method to compute
+mary of our previous GPU NURBS contributions in Section 2.2.                    moments of piecewise polynomial surfaces that is based on the di-
+We make use of some of the concepts that we outline in this section             vergence theorem. They outline several applications in animation
+in our current work.                                                            where the models can be solved to match the moments. However,
+                                                                                their method relies on modeling the objects using a particular type
+2.1    Related Work                                                             of cubic spline surfaces known as C 1 -surface splines to maintain
+  Properties such as volume, moment of inertia, etc. can be clas-               interactivity. For graphical animation applications that use subdivi-
+sified as integral properties that are defined by triple (volumetric)           sion surfaces, Peters and Nasri [23] developed a method to compute
+integrals over subsets of three-dimensional Euclidean space. Initial            the volume of a solid enclosed by subdivision surfaces by estimat-
+work on computing volume of curved objects by approximating                     ing the volume of the local convex hull near extraordinary points.
+them with polyhedral facets was performed by Messner et al. [21].               Soldea et al. [27] developed an analytical method for computing
+However, the errors introduced due to the approximation were not                moments of free-form objects that use either parametric surfaces or
+analyzed. Lee and Requicha published a two-part paper that dis-                 a constant set of trivariate functions as boundary. In their method,
+cussed the methods that were known up to that time for computing                they compute integrals of b-spline blending functions to compute
+the integral properties of solids. In their first paper [19], they sum-         the moments of free-form objects.
+
+
+                                                                          82
+   GPU geometric algorithms are currently gaining popularity due                              A3
+to the performance gains achievable by using GPUs. However, al-
+gorithms to compute geometric moments were limited to volume
+computations since many of them calculated the volume by render-
+ing to the screen. Kim et al. [11] use the depth buffer while ren-
+dering to the screen to compute the volume of general shapes and
+use it for buoyancy simulation. Khardekar et al. [10, 9] have devel-
+                                                                                                                                               A2
+oped a GPU algorithm to compute the undercut volumes in molds
+that can then be used to choose an optimal parting direction while
+using multi-part molds. GPUs were also used for solving standard
+geometric problems such as surface-surface intersections [2] and                                                              Curved Surface
+collision detection [6, 12, 14, 7]. However, there has been lim-                        A1
+                                                                                                                              Linear Approximation
+ited use of GPUs to compute integral properties for 3-dimensional                                                             Maximum Deviation
+solid bodies since algorithms that render to the screen are limited
+to image-space precision.
+   One of the advantages of developing a GPU algorithm that uses            Figure 2: The maximum possible deviation of the actual surface
+the divergence theorem is that the integration method can also be           from a linear approximation is K. In this case, the surface is
+used for the evaluation of surface integrals of polynomial forms.           bounded by two parallel triangles that are at a distance K from
+These forms commonly arise in physical simulations that use Fi-             the linear approximation.
+nite Element Analysis (FEA). Scalar valued functionals, such as
+energy functionals, are usually evaluated as surface integrals; they
+                                                                                                    2
+can be used to measure the quality of surfaces [13]. Recently, re-                                        ∂2y   ∂2z
+                                                                                                                   
+                                                                                                    ∂ x
+searchers at the University of Wisconsin have developed a method                     K1 = max max       ,     ,                                      (1)
+                                                                                          ∀(u,v)    ∂u2   ∂u2   ∂u2
+of analyzing 3-D beams by performing surface integration over the
+boundary of the beam [26, 8].                                                                    2
+                                                                                                   ∂ x    ∂2y    ∂2z
+                                                                                                                     
+   On analyzing the related work in the field, we find that even                   K2 = max max        ,      ,                                      (2)
+                                                                                        ∀(u,v)    ∂u∂v   ∂u∂v   ∂u∂v
+though numerous methods for computing moments and surface in-
+tegrals exist, there has been only limited analysis on the accuracy                                  2
+                                                                                                            ∂2y    ∂2z
+                                                                                                                       
+                                                                                                     ∂ x
+of the computations. In addition, there has been limited work on                      K3 = max max        ,      ,                                   (3)
+parallelizing the computations to improve their performance. We                            ∀(u,v)    ∂v 2   ∂v 2   ∂v 2
+will try to address both these issues in this paper.                                                                                   
+                                                                                               1       1        2      1
+                                                                                         K=               K1 +    K2 + 2 K3                          (4)
+2.2    Previous Work                                                                           8       n2      nm     m
+  Our moment computation algorithms build on our previous pa-                  Given any three nearby points evaluated on the surface using the
+pers on GPU NURBS evaluation and modeling. We present a short               uniform grid of size n×m, we can approximate the surface linearly
+outline of our GPU algorithms that were explained in detail in              using the triangle formed using these points (Figure 2). We can
+[15, 17]. In our NURBS evaluation paper, we developed a method              also bound the coordinates of the curved surface with two parallel
+to evaluate a mesh of points on a NURBS surface directly using              triangles that are at a distance K from the linear approximation,
+the GPU. Our algorithm used a fragment program to evaluate a                since the maximum possible deviation of the surface is K.
+NURBS surface of arbitrary degree in several passes. After eval-
+uation we have samples on the NURBS surface as 4-component                  3.   MATHEMATICAL FORMULATION
+vectors—(x, y, z, w) coordinates—in space stored as a texture on               In this section, we briefly explain the mathematical formulations
+the GPU. While rendering, we interpret these values stored in the           required for moment computations; for a more detailed explanation
+texture as vertex coordinates using a Vertex Buffer Object (VBO)            please refer to [25]. We make use of Gauss’s divergence theorem
+and display the mesh directly on the screen. However, this previ-           to convert volume integrals to an integral over the boundary surface
+ous work used uniform parametric grid spacing in our evaluations            of the volume. The divergence theorem is a special case of the gen-
+for display and modeling operations; in this paper, we adapt this to        eralized n-dimensional Stokes’ theorem that is restricted to three
+perform evaluations with non-uniform grid spacing.                          dimensions.
+  Using the NURBS evaluator, we were able to build a GPU frame-                 T HEOREM 1. (Divergence Theorem) Given a vector field f de-
+work to perform geometric operations such as surface-surface inter-         fined over a closed bounded region, V ⊂ <3 , whose boundary is
+sections, sketching [16, 17], silhouette curve evaluation, and mini-        a piecewise smooth orientable surface S, the volume integral of the
+mum distance computations [18]. These geometric algorithms were             divergence of f over V equals the surface integral of the normal
+still based on uniform parametric evaluation of NURBS surfaces              component of f over S.
+and made use of surface Axis-Aligned Bounding-Boxes (AABBs)
+to accelerate the computations.                                                                                 X ∂fi
+  In our NURBS modeling work, in order to bound the errors,                                             ∇·f =                                        (5)
+we find the maximum possible deviation K of a curved surface                                                            ∂xi
+from the linearized approximation. The analytical expression for                               Z                    Z
+the deviation based on the surface curvature is given by Filip et                                      ∇ · f dV =       f · n̂ dS                    (6)
+al. [4]. They show that if a parametric C 2 surface is evaluated at                                V                S
+
+(n + 1) × (m + 1) grid of points, the deviation of the surface from           Equations (6) formalizes the statement of the divergence theo-
+the piecewise linear approximation cannot exceed the constant K             rem. However, as noted by the theorem statement, the theorem is
+defined by Equations (1) – (4).                                             applicable only if both the vector field f and the region V satisfy
+
+
+                                                                       83
+some basic conditions. The vector field must be continuous and                  3.2    Surface Integrals of Parametric Surfaces
+have continuous first partial derivatives in the region containing                Surface integrals of parametric surfaces are straightforward to
+V . In addition, V itself should be closed and its boundary sur-                compute due to the presence of an underlying 2-dimensional pa-
+faces must be orientable and piecewise continuous. The piecewise                rameterization. We can convert the surface integrals to integrals
+continuous surface condition expands the applicability of the the-              over the parametric domain by changing the variables. In Equa-
+orem to many practical 3-dimensional objects, since it overcomes                tion (12), P represents the parametric (u, v) domain and J is the
+the limitation of having undefined normals at sharp edges of ob-                Jacobian for the transformation. It can be shown that the Jacobian
+jects. The divergence theorem is applicable to any 3-dimensional                can be computed to be numerically equal to the length of the nor-
+object as long as it is 2-manifold. Using the divergence theorem,               mal of the parametric surface (Equation (13)).
+we can convert volume integrals, which are difficult to evaluate for
+complex solid objects made of multiple trimmed NURBS surfaces,                                              Z              Z
+to surface integrals that can be easily evaluated over the NURBS                                                    dS =           |J| dP             (12)
+surfaces.                                                                                                       S              P
+  The evaluations of surface integrals require the calculation of sur-
+face normals. We will briefly present the equations for evaluat-                                                     |J| = |n|                        (13)
+ing NURBS derivatives and normals in Section 3.1; please refer                    The volume integrals simplify with the application of the diver-
+to [24, 17] for more details.                                                   gence theorem as given by Equation (14). In particular, for NURBS
+3.1       Evaluation of NURBS Normals                                           surfaces, the parametric domain is a square domain with the (u, v)
+                                                                                range [0, 1] × [0, 1] and dP can be replaced with the product du dv.
+  Recall that the parameterized NURBS surface can be represented
+as a 3-component vector (Equation (7)) which is evaluated as the
+4-component vector shown in Equations (8). The Nip s and Njq s                                   Z                         Z
+are the B-spline basis functions of degree p and q respectively;                                           ∇ · f dV =              f · n̂ dS
+(xij , yij , zij , wij )s are the NURBS control points defined as a quad                               V
+                                                                                                                           ZS
+mesh.                                                                                                                 =            f · n̂ |n| dP
+                                                                                                                         ZP                         (14)
+                                          x
+                                 X                                                                                    =            f · n dP
+                        S(u, v) = , X =  y                        (7)
+                                 w        z                                                                                ZP
+                                                                                                                    =            f · n du dv
+                                                                                                                               P
+                   Pn Pm       p      q
+                x       j=0 Ni (u)Nj (v)xij 
+                                             
+                   i=0
+               
+                  Pn Pm       p      q
+                                                
+                                                                               3.3    Moments of Solid Bodies
+           y 
+                         N i  (u)N j (v)y ij 
+                   i=0 j=0                                                      By choosing appropriate vector functions for f , we can compute
+               =                                                  (8)
+                                              
+          
+           z    Pn Pm       p      q                                        the moments of solid bodies with uniform densities. By applying
+               
+                   i=0 j=0 N i  (u)N j (v)z ij 
+                                                                               the divergence theorem to the solid body, we can compute the mo-
+             
+                                                                                ments by computing the contribution of each surface and sum the
+                                               
+                  Pn Pm      p      q
+                                                
+            w      i=0 j=0 N i (u)N j  (v)w ij 
+                                                                                results. In Equation (15), Pi represents the parametric surfaces that
+                                                                                make up the solid body.
+  Given a NURBS surface, we can evaluate the partial derivatives
+and normals; Equation (9) gives the partial u-derivative for the
+                                                                                               Z                       XZ
+NURBS surface that is evaluated from the derivatives of the basis                                      ∇ · f dV =                       f · n du dv   (15)
+                                                          p                                        V                       i       Pi
+function of degree p with respect to u, represented as Ni,u (u). The
+partial derivative of the surface with respect to v can also be eval-             By setting ∇ · f = 1, we get the zeroth-order moment, M0 ,
+uated in a similar manner. In this work, we assume all the weights              the volume of the solid body. However, there are many different
+(w) are positive and hence no poles can occur in S or its partial               choices for f that satisfy this condition. One option is to choose f
+derivatives. Finally, the normal to the surface is evaluated as the             as shown in Equation (16).
+cross-product of the u and v partial dervatives (Equation (11)).
+
+                                       X,u w − Xw,u                                                 0
+                                                                                                      
+                        S,u (u, v) =                                (9)                   XZ                        XZ
+                                            w2                                    M0 =             0  · n du dv =       z nz du dv                  (16)
+                                                                                         i   Pi   z               i  Pi
+                 Pn Pm      p        q
+          x,u         j=0 Ni,u (u)Nj (v)xij 
+                                            
+                 i=0
+             
+                Pn Pm
+                                                                                  The first-order moments, defined by Equations (17)–(20), can
+                            p        q         
+       y,u          j=0 Ni,u (u)Nj (v)yij                                    also be computed by carefully choosing f . For example, in order to
+                                            
+                 i=0
+      
+            =
+            
+                Pn Pm
+                                                                  (10)         compute the first-order moment Mx , we need to set ∇·f = x. Sim-
+                            p        q         
+       z,u 
+             
+                 i=0 j=0 N i,u (u)N j (v)zij  
+                                                                               ilar to the volume computation case, there are several choices for f
+                                                                            that satisfy this requirement; we choose the x and y components to
+                Pn Pm      p       q                                           be both 0, and the function xz for the z component. The other first-
+                                               
+        w,u      i=0 j=0 Ni,u (u)N j  (v)w ij 
+                                                                                order moments can be computed in a similar manner. The center
+                                                                                of mass CM of the object is computed by dividing the first-order
+                    n(u, v) = S,u (u, v) × S,v (u, v)              (11)         moments by the volume of the object (Equation (21)).
+
+
+                                                                           84
+                                                                                              4.    MOMENT COMPUTATION
+                                                       R                                        We first give a broad overview of our algorithm that makes use
+                                      x dV
+                                                                      
+                                 V
+                         Mx      R                                                          of the theoretical formulation explained in Section 3. Given a solid
+                  M1 =  My  =  V y dV
+                                                                     
+                                                                                 (17)        object that is made of multiple trimmed NURBS surfaces, we com-
+                         Mz                                                                 pute the total moment by summing the moment contribution from
+                                  R
+                                      z dV                                                    each surface. If the surface is a flat plane, we directly compute its
+                                    V
+                                                                                              moment contribution by using the triangulation of the plane. If it is
+                                   XZ                                                         a NURBS or a trimmed NURBS surface, we compute its moment
+                       Mx =                          x z nz du dv                 (18)        contribution by performing surface integration using our GPU algo-
+                                                Pi
+                                       i                                                      rithm. It must be noted that the object must be 2-manifold for the
+                                                                                              computed moments to be valid. However, the main advantage of
+                                   XZ                                                         computing the moments from surface integrals is that the algorithm
+                       My =                          y z nz du dv                 (19)
+                                       i        Pi                                            is robust in handling the small gaps between trimmed surfaces that
+                                                                                              exist in a tolerant solid model, since we do not evaluate points on
+                             XZ                2                                            the edges. Tolerant solid modeling provides a method for handling
+                                               z
+                      Mz =                         nz du dv                       (20)        these small gaps; any two points that lie within a user-defined tol-
+                               i           Pi   2                                             erance is taken to represent the same point. This is essential to cre-
+                                                                                              ate a watertight object when the model has many trimmed-NURBS
+                                                                                              surfaces that vary in parameterization along their common edges.
+                                         
+                            Cx       Mx /M0
+                     Cm =  Cy  =  My /M0                                      (21)           In our algorithm, we divide each NURBS surface into sub-patches
+                            Cz       Mz /M0                                                   equal to the number of knot-intervals in each parametric direction;
+                                                                                              we call this the base number of sub-patches. Based on the number
+  The second-order moments form the components of the inertia                                 of sub-patches and the type of integration scheme used, we create
+tensor, I, given by Equation (22). The components of the inertia                              a vector of u and v parametric positions where we want to evaluate
+tensor can be computed using Equations (23)–(28).                                             the surface. If it is a trimmed NURBS surface, we also generate
+                                                                                              a trim-texture [15] based on the number of sub-patches. We then
+                                                                                            compute the moment contribution from each patch by multiply-
+   Myy + Mzz                      −Mxy                     −Mxz                             ing the corresponding functions for moments with the integration
+  
+  
+                                                                          
+                                                                                             weights. Finally, we compute the sum of all the sub-patch moment
+I=
+  
+     −Mxy                    Mxx + Mzz                      −Myz
+                                                                          
+                                                                                             contributions to get the moment contribution of the surface.
+                                                                         
+                                                                         
+    −Mxz                          −Myz                  Mxx + Myy                           4.1    GPU Implementation
+                                                                                                Once we have evaluated the surface coordinates and normals at
+                                                                                            the integration points using our GPU NURBS evaluator, we com-
+        R        2     2
+                (y + z ) dV
+                                                R
+                                           − V xy dV
+                                                                       R
+                                                                      − V xz dV               pute the moment contribution of each surface sub-patch in parallel
+           V                                                                   
+  
+  
+                                                                                
+                                                                                             using the GPU. We compute four moment values simultaneously,
+ =
+            R
+            − V xy dV
+                                       R
+                                               (x2 + z 2 ) dV
+                                                                      R
+                                                                   − V yz dV
+                                                                                             since GPUs are optimized for simultaneously computing values us-
+                                           V                                    
+  
+  
+                                                                                
+                                                                                             ing the four RGBA channels. For example, we compute the volume
+            R
+            − V xz dV
+                                            R
+                                           − V yz dV
+                                                                 R     2  2
+                                                                    (x + y ) dV              and the three first moments simultaneously in a single pass. We
+                                                                  V
+                                                                                              compute the moment contribution for each sub-patch by multiply-
+                                                                                              ing the moment functions with the integration weights. The mo-
+                                                                                  (22)
+                                                                                              ment functions are polynomial functions of the surface coordinates
+                                                                                              that correspond to the moment being computed; they are given by
+                                   XZ
+                      Mxx =                          x2 z nz du dv                (23)        the corresponding equations in Section 3.3. The integration weights
+                                       i        Pi                                            are based on the type of integration used (Section 5).
+                                                                                                Once we have computed the individual contributions of each the
+                                   XZ                                                         sub-patches, we sum the values to get the surface moments by us-
+                      Myy =                          y 2 z nz du dv               (24)        ing GPU reduction. This operation is one of the fundamental op-
+                                       i        Pi
+                                                                                              erations used for GPU CAD in our GPU framework [18]. GPU
+                                                   3                                        reductions include reducing the given input to a single value such
+                               XZ                  z                                          as computing the sum, min, max, etc. If the given input is a square
+                     Mzz =                             nz du dv                   (25)
+                                               Pi   3                                         texture with a size that is a power of two, then we reduce four adja-
+                                   i
+                                                                                              cent values (the sum in this case) to a single value in a given pass.
+                                   XZ                                                         Thus the total reduction operation can be performed in O(log n)
+                      Mxy =                          x y z nz du dv               (26)        passes and hence, it is very efficient. On the other hand, if the in-
+                                       i        Pi                                            put is not a square texture, then we perform the reduction in three
+                                                      2                                     stages. In the first stage, we reduce only two values along the height
+                             XZ                       z                                       or the width direction until we reach a power-of-two texture. In the
+                     Myz =                      y         nz du dv                (27)        second stage, we reduce along the larger dimension until we reach a
+                               i           Pi          2
+                                                                                              square texture. Finally, we perform the normal reduction for square
+                                                      2                                     power-of-two textures in the third stage.
+                             XZ                       z
+                     Mxz =                      x         nz du dv                (28)          We make use of Cg shader programs to implement the GPU op-
+                               i           Pi          2                                      erations to perform the moment computations and reductions. This
+
+
+                                                                                         85
+is because we found in our preliminary testing that our shader pro-                5.2    2-point Gaussian Quadrature Scheme
+grams provide better performance for NURBS evaluations com-                           Most solid models that are created using popular CAD systems
+pared to our optimized CUDA implementation of the same algo-                       such as SolidWorks are usually composed of bi-cubic NURBS sur-
+rithm. In addition, making use of shader programs to perform these                 faces. In order to compute the volume accurately for such solid
+operations makes our implementation cross-platform; our imple-                     models, we need to use the 2-point quadrature scheme. Implement-
+mentation can run on both NVIDIA and AMD GPUs.                                     ing the 2-point quadrature scheme is slightly more involved than the
+                                                                                   mid-point scheme since the spacing between the evaluation points
+5.    NUMERICAL SURFACE INTEGRATION                                                is not uniform. However, the weights used are constant and they are
+  We compute the surface integrals of NURBS surfaces numeri-                       equal to 1.0; the sum of the weights of the four evaluation points
+cally using the Gaussian quadrature rule. In numerical analysis, a                 is 4.0.
+                                                                                        √ The evaluation
+                                                                                                    √     points in the normalized [−1, 1] domain are
+quadrature rule approximates the definite integral of a function us-               −1/ 3 and 1/ 3. Equation (33) expands the integration terms
+ing a weighted sum of function values at specified points within                   for the 2-dimensional case.
+the domain of integration. An n-point Gaussian quadrature rule
+yields an exact result for the integration of polynomials up to de-                         Z 1
+                                                                                                              −1 −1
+                                                                                                                      
+                                                                                                                          −1 1
+                                                                                                                                 
+gree 2n − 1 with suitable choice of points ti and weights wi (Equa-                             f (t) dt ≈ f √ , √    +f √ , √
+                                                                                             −1                 3 3         3  3
+tion (29)). The domain of integration for such a rule is convention-                                                                                 (33)
+ally taken as [−1, 1]; however, the domain can be easily changed                                               1 −1        1  1
+                                                                                                          +f √ , √    +f √ , √
+to any value by using a dummy variable for integration (Equa-                                                   3 3         3  3
+tion (30)).
+                                                                                                         0.211            0.577          0.211
+
+                         Z 1                n
+                                            X
+                               f (t) dt ≈         wi f (ti )           (29)
+                          −1                                                                                                                     0.211
+                                            i=1
+
+      Z b                         n                               
+                         b−a X                  b−a      b+a
+            f (t) dt ≈          wi f                ti +               (30)
+       a                  2 i=1                  2        2
+                                                                                                                                                 0.577
+  We can extend the quadrature rules to compute 2-dimensional in-
+tegrals by having two weights; one for each direction. The integra-
+tion rule can then be modified as given by Equation (31). As in the
+                                                                                                  tj
+1-dimensional case, the domain of integration is [−1, 1] × [−1, 1];
+this can be converted to any rectangular domain by changing the                                                                                  0.211
+
+integration variables.                                                                                           ti
+                 Z 1                  n X
+                                        n                                                              Evaluation Point           Surface sub-patch
+                                      X
+                         f (t) dt ≈               wi wj f (tij )       (31)
+                   −1                 i=1 j=1                                      Figure 3: Distribution of evaluation points in the 2-point Gaus-
+  In the following sections, we provide details of the weights and                 sian quadrature integration scheme. All the four integration
+evaluation points for performing 1-point, 2-point, and 3-point Gaus-               points have a uniform weight of 1.0.
+sian quadrature integration of NURBS surfaces.                                       Figure 3 gives the fraction of the intervals between the evaluation
+                                                                                   points in a single sub-patch of the NURBS surface. The evaluation
+5.1    1-point Gaussian Quadrature Scheme                                          points are positioned symmetrically with respect to both the u and
+  The 1-point quadrature or the mid-point scheme is the simplest                   v directions inside the sub-patch. Figure 4 gives an example of
+of the numerical integration schemes. It approximates the integral                 the position of the evaluation points in a complete NURBS surface.
+value with a single point that is evaluated at the center of the inte-
+gration domain. The standard weight used for the point is 4.0 for
+the 2-dimensional case (Equation (32)). This being the simplest
+rule for integration, it can only integrate accurately up to degree 1
+or linear polynomials.
+                          Z 1
+                                f (t) dt ≈ 4 f (0, 0)                  (32)
+                           −1
+  For integrating over the surface of a NURBS patch, we divide the
+parametric domain into sub-patches along the u and v parametric
+directions. For each sub-patch, we evaluate the function at its mid-
+point; we perform the required change of variable implicitly. The
+mid-point scheme is not accurate enough in computing the surface
+integrals in many practical cases; however, it can be used to get a                                Evaluation Point               Surface sub-patch
+rough approximation for the solution since it is easy to evaluate.
+Another important advantage is that the mid-point scheme can be
+implemented on the GPU using uniform grid spacing; the evalua-                     Figure 4: Example of the evaluation points’ location in the
+tion points are separated uniformly along the u and v directions in                parametric domain for computing the surface integrals using
+the parametric domain.                                                             the 2-point Gaussian quadrature integration scheme.
+
+
+                                                                              86
+In this example, the NURBS surface is divided into 4 × 5 sub-                          methods explained in Section 5. We classify the sub-patches into
+patches in the u and v directions respectively. The marked points’                     three different cases: inside, outside or on the boundary of the trim
+parametric positions are sent as a vector to the GPU evaluator and                     curves. If the sub-patch lies inside a trimmed region, its contri-
+are then used to evaluate the surface coordinates and normals.                         bution to the total surface integral is taken to be 0. Similarly, if
+                                                                                       the sub-patch lies outside the trimmed region, its contribution to
+5.3    3-point Gaussian Quadrature Scheme                                              the surface integral is taken as 1. The contribution for all the sub-
+  Computing the higher order moments accurately in a solid model                       patches that lie on the boundary of the trim-curves is weighted by
+consisting of bi-cubic NURBS patches requires the 3-point quadra-                      the fraction of the sub-patch that lies outside the trimmed region.
+ture scheme. Computing using the 3-point scheme requires the cal-                                          0.211              0.577          0.211
+
+culation of different weights for the different evaluation points. The
+parametric positions, ti s, of the evaluation points and their corre-
+                                                                                                                                                     0.211
+sponding weights, wi s, are given by Equation (35). The definite
+integral in the canonical domain is approximated by the double-
+sum of the product of the weights and the integrand evaluated at
+the corresponding points. It can be noted that there are nine eval-
+uation points in the 2-dimensional case; the sum of the product of                                                                                   0.577
+the weights is 4.0.
+
+              Z 1                         3
+                                        3 X
+                                        X                                                           tj
+                       f (t) dt ≈                 wi wj f (ti , tj )       (34)                                                                      0.211
+                  −1                    i=1 j=1
+                                                                                                                   ti
+                                                                                                         Evaluation Point
+                                                                                                                                      Surface sub-patch
+                                 s 
+                                   3         5                                                           Trim-texture Point
+                          t1 = −      , w1 =
+                                   5         9
+                                               8                                       Figure 6: Example of the distribution of the trim-texture points
+                                  t2 = 0, w2 =                                         for a case with 4 points in each parametric direction. The
+                                               9                           (35)
+                                 s                                                   2-point Gaussian quadrature integration scheme evaluation
+                                     3         5                                       points are also shown for comparison.
+                            t3 =        , w3 =
+                                     5         9                                          In order to perform the weighting operation, we generate a trim-
+                                                                                       texture on the GPU by using a method we developed in our previ-
+                                                                                       ous work [15]. In this method, we create a binary texture that has
+                  0.113         0.387         0.387        0.113
+                                                                                       the value 0 in the trimmed regions of the surface in the parametric
+                                                                                       domain. In order to obtain an accurate value for the moments, we
+                                                                   0.113
+                                                                                       set the height and width of the trim texture to be three or four times
+                                                                                       the number of sub-patches in the u and v direction. We find the
+                                                                                       fraction of the number of points that lie outside the trimmed region
+                                                                   0.387
+                                                                                       in a given sub-patch and multiply the moment contribution of the
+                                                                                       sub-patch with this fraction. Figure 6 shows an example where the
+                                                                                       trim texture is evaluated 4 times more densely than the number of
+                                                                                       sub-patches in each of the u and v parametric direction. This leads
+                                                                                       to a total of 16 positions inside the sub-patch where the trim is eval-
+                                                                   0.387
+                                                                                       uated. The moment contribution of the patch is multiplied with the
+             tj                                                                        fraction of the number of points that lie outside the trimmed region.
+                                                                   0.113
+
+                           ti
+                                                                                       6.    ERROR ANALYSIS
+                  Evaluation Point                Surface sub-patch                       In this section, we derive estimates for the error in computing the
+                                                                                       volume of a solid body; this analysis can be extended in a similar
+                                                                                       manner to compute the error in higher-order moments. Computing
+Figure 5: Distribution of evaluation points in the 3-point Gaus-                       the errors in a Gaussian integration scheme directly is difficult since
+sian quadrature integration scheme. The size of the integration                        it involves computing the 2n-order derivative for an n-point inte-
+point indicates its relative weight; the sum of all the weights                        gration scheme. A known simpler method is to compute the error as
+equals 4.0.                                                                            the difference between two different Gaussian integration schemes.
+  Figure 5 gives the location of the 9 evaluation points as a fraction                 It can be shown that this is a good estimate for the error since the
+of the sub-patch size. The size of the evaluation point indicates its                  integration value converges to the theoretical value as the order of
+relative weight. The center point has the maximum weight followed                      Gaussian integration is increased. However, the surface integrals
+by the 4 points near the edge midpoints; the 4 corner points have                      have to be evaluated twice using different orders of integration in
+the least weight.                                                                      this method. In our case, we estimate the error in the integration by
+                                                                                       computing the bounds for the coordinates used for the integration;
+5.4    Surface Integrals of Trimmed NURBS                                              the bounds are compued from the maximum possible deviation of
+  We compute the surface integrals of trimmed NURBS in two                             the surface from a linear approximation. Using this method, we
+stages. In the first stage, we treat them as un-trimmed surfaces                       compute the error in the volume of several practical CAD models
+and compute the moment contribution of each sub-patch using the                        in Section 7.
+
+
+                                                                                  87
+                           1.01                                                                                                            1.001
+
+
+
+
+                           1.00                                                                                                            1.000
+
+
+
+
+       Normalized Volume                                                                                               Normalized Volume
+                           0.99                                                                                                            0.999
+
+
+
+
+                           0.98                                                                                                            0.998
+
+
+
+
+                           0.97                                                                                                            0.997
+                                   2                   2                  2                2                  2                                        2          2            2               2               2             2
+                                  0               50                100              150                200                                        0          2            4               6               8            10
+                                                           Number of sub-patches                                                                              Multiple of base number of sub-patches
+                                  1-Point Quadrature       2-Point Quadrature      3-Point Quadrature                                          1-Point Quadrature     2-Point Quadrature           3-Point Quadrature
+
+                                                   (a) Quarter Cylinder                                                                                     (b) Slanted Cylinder Block
+
+Figure 7: Graphs showing the accuracy of our volume computation algorithm for two cases whose volume can be theoretically
+computed. The volume is normalized with respect to the theoretical volume. The x-axis for the right graph shows the number of
+sub-patches used for integration of each NURBS surface as a multiple of their base number of sub-patches. It can be noted that the
+2 and 3-point quadrature schemes give exact results with very few sub-patches.
+
+  In our method, for each surface sub-patch, we find the second                                                                 the number of sub-patches used for the integration and check for
+partial derivatives of the surface as explained in Section 2.2. We                                                              the convergence of the solution. Finally, we compare the actual
+then compute the maximum deviation K for each surface sub-patch                                                                 values of volume and center of mass of complex CAD models with
+based on the maximum second partial derivative. This gives the                                                                  the moment values obtained using ACIS; we also compare the time
+maximum deviation in the coordinates used for the surface inte-                                                                 for the computations.
+gration. By neglecting higher order error terms, we can show that
+the error in volume computation can be calculated approximately                                                                 Accuracy of the Integration
+using Equation (36). Intuitively, this error estimate measures the                                                              Since the exact value for the moments are very difficult to obtain
+maximum possible deviation of the volume from the polyhedral                                                                    for practical models, we tested the accuracy of our integration on
+approximation of the NURBS surface. It can be shown from Fig-                                                                   a single NURBS patch of a quarter cylinder. We chose a cylinder
+ure 2 that this error estimate measures the volume between the two                                                              since we can accurately compute its theoretical volume and cen-
+parallel planes that are located at a distance K from the linear ap-                                                            ter of mass for comparison, yet it is non-trivial for our GPU al-
+proximation.                                                                                                                    gorithm to evaluate since it is a rational surface. In addition, the
+                                                                                                                                cylinder was placed horizontally in the coordinate system to make
+                                                  XZ                                                                            sure the moment contributions from the cylindrical surfaces are not
+                                       ∆M0 ≈                    | ∆z nz | du dv                                                 zero. As expected, the higher order quadrature schemes provide a
+                                                   i       Pi
+                                                                                                   (36)                         more accurate answer, particularly with smaller numbers of sub-
+                                                  XZ
+                                              ≤                 | 2 K nz | du dv                                                patches (Figure 7(a)).
+                                                   i       Pi                                                                     In order to assess the accuracy of our algorithm with the pres-
+                                                                                                                                ence of trimmed NURBS surfaces, we constructed a solid object
+  We calculate this error simultaneously while computing the mo-                                                                consisting of a block with a slanted cylindrical section cut from it
+ment values. For each sub-patch in the surface, we compute the                                                                  (Figure 1(i)). We can theoretically calculate the volume and center
+value of K and store it in a separate texture. While computing the                                                              of mass of this object since the slanted cylinder is still a prism with
+moments, we compute the error terms for each sub-patch. We then                                                                 a circular base. Figure 7(b) shows the accuracy as a function of
+perform the multiplication and reduction operations similar to the                                                              the base number of patches used for evaluating each NURBS sur-
+moment computations explained in Section 4.1. Finally, after sum-                                                               face. We set the base number of sub-patches equal to the number
+ming all the error contributions from each sub-patch, we get the                                                                of knot intervals in the respective u and v parametric direction of
+total error for the surface. We perform the same operations on all                                                              the NURBS surface, the total base number of sub-patches for this
+the surfaces to get the total error in the volume of the solid object.                                                          model being 128.
+In case of trimmed-NURBS surfaces, we consider only the error
+contributions from those sub-patches that lie outside the trimmed                                                               Volume and Error Analysis of CAD Objects
+region.                                                                                                                         In order to test the applicability of our algorithm to realistic solid
+                                                                                                                                models, we computed the volume of several CAD models with mul-
+7.    RESULTS                                                                                                                   tiple trimmed NURBS surfaces. For comparison, we calculated the
+  We timed our GPU-accelerated queries on a 2.40GHz CPU (dual                                                                   volume of the models using ACIS with accuracy 0.001 measured
+core) running Windows XP with 3GB of RAM and an NVIDIA                                                                          as a fraction of the computed moment; calculating to a higher accu-
+GeForce 9600M GT GPU with 256MB graphics memory. First,                                                                         racy using ACIS took too long to be practically applicable. In ad-
+we discuss the accuracy of our algorithm by using it to compute                                                                 dition, the ACIS algorithm does not have a bound on the precision
+moments of trimmed-NURBS solid models whose volume can be                                                                       of the mass properties because of hard-coded convergence criteria
+calculated theoretically. Next, we vary our integration schemes and                                                             in their functions [28]. If the accuracy does not meet the requested
+
+
+                                                                                                                  88
+                              1.010                                                                                                              0.1
+
+
+
+                                                                                                                                                0.01
+                              1.000
+
+
+
+
+          Normalized Volume                                                                                              Estimated Error
+                                                                                                                                               0.001
+
+                              0.990
+
+                                                                                                                                              0.0001
+
+
+                              0.980
+                                                                                                                                             0.00001
+
+
+
+                              0.970                                                                                                         0.000001
+                                          2          2            2               2               2             2                                          2              2             2               2            2        2
+                                      0          2            4               6               8            10                                          0              2             4               6            8       10
+                                                 Multiple of base number of sub-patches                                                                              Multiple of base number of sub-patches
+                                  1-Point Quadrature     2-Point Quadrature           3-Point Quadrature                                                       2-Point Quadrature           3-Point Quadrature
+
+
+
+Figure 8: Graphs showing the convergence of our volume computation algorithm for the “Hammer” model. The volume is shown
+as a fraction of the volume computed by ACIS. The x-axis shows the number of sub-patches used for integration as a multiple of
+the base number of sub-patches of the model, the base number of sub-patches being 3859 in this case. Note logarithmic scale in the
+y-axis of the error graph.
+
+value, they tighten the convergence criteria and repeat the calcula-                                                                       of actual surface data and not just the tessellation, which make
+tion. However, if the mass properties remain unchanged, they are                                                                           them independent of tessellation errors. We also show tremendous
+as close as can be achieved by their algorithm. In our algorithm,                                                                          performance and accuracy improvements over existing commercial
+we estimate the error in the volume while using 2-point or 3-point                                                                         CPU-based systems.
+quadrature integration as explained in Section 6.                                                                                            Our GPU-based surface integration algorithms can be extended
+  We computed the volume of these objects using 1-point, 2-point,                                                                          for use in analysis tools such as FEA. Accurate and fast surface in-
+and 3-point quadrature by varying the number of sub-patches that                                                                           tegration will aid in interactive analysis of complex objects that will
+are used for the integration of each NURBS surface. As before, we                                                                          provide functional feedback to the designer. Such functional feed-
+set the base number of sub-patches equal to the number of knot in-                                                                         back will reduce the design lead time of a component, ultimately
+tervals in the respective u and v parametric direction of the NURBS                                                                        resulting in significant cost savings.
+surface. Figure 7 shows the convergence in the volume computa-
+tion for the “Hammer” model shown in Figure 1(f).                                                                                          Acknowledgments
+Moment Computation Results                                                                                                                 We would like to thank NVIDIA and AMD for providing us with their hard-
+                                                                                                                                           ware. The models used in the paper were downloaded from 3D Content
+We compared the results for evaluating the volume and center of                                                                            Central [1]. We would also like to thank the reviewers for their valuable
+mass of different CAD objects that were made of multiple trimmed-                                                                          comments and suggestions. This material is based upon work supported in
+NURBS surfaces using both our GPU algorithm and ACIS. Table 1                                                                              part by SolidWorks Corporation, UC Discovery under Grant No. DIG07-
+                                                                                                                                           10224, and the National Science Foundation under CAREER Award No.
+summarizes the results of the computations. However, it should be
+                                                                                                                                           0547675.
+noted that neither the ACIS mass properties function nor our GPU
+algorithm have been optimized for performance. In addition, the
+time taken by our GPU algorithm includes the time for evaluating                                                                           References
+all the NURBS surfaces, which takes the largest percentage of the                                                                           [1] 3D Content Central. http://www.3dcontentcentral.com, 2009.
+total time (≈ 90%). The values were computed using the 2-point                                                                              [2] S. Briseid, T. Dokken, T. R. Hagen, and J. O. Nygaard. Computational
+quadrature scheme with the number of sub-patches equal to twice                                                                                 Science - Lecture Notes in Computer Science, volume 3994/2006,
+the base number of sub-patches for each surface in both paramet-                                                                                chapter Spline Surface Intersections Optimized for GPUs, pages 204–
+ric directions. It can be noted that our GPU algorithm computes                                                                                 211. Springer, 2006.
+accurate moments with low estimated errors.                                                                                                 [3] C. Cattani and A. Paoluzzi. Boundary integration over linear polyhe-
+  An advantage of our GPU algorithm is that the updates to the                                                                                  dra. Computer Aided Design, 22(2):130–135, 1990.
+volume and center of mass due to changes in a single surface can
+                                                                                                                                            [4] D. Filip, R. Magedson, and R. Markot. Surface algorithms using
+be performed interactively. For example, the GPU algorithm com-                                                                                 bounds on derivatives. Computer Aided Geometric Design, 3(4):295–
+putes the volume and the center of mass for the “Freeform” model                                                                                311, 1987.
+in less than 0.02s. This means that even though the initial mo-
+ment computation for complex models takes more than a second,                                                                               [5] C. Gonzalez-Ochoa, S. McCammon, and J. Peters. Computing mo-
+                                                                                                                                                ments of objects enclosed by piecewise polynomial surfaces. ACM
+the moment values can be updated up to 50 times per second while                                                                                Transactions on Graphics, 17(3):143–157, 1998.
+interactively editing the solid model.
+                                                                                                                                            [6] N. K. Govindaraju, S. Redon, M. C. Lin, and D. Manocha. CULLIDE:
+                                                                                                                                                Interactive collision detection between complex models in large en-
+8.   CONCLUSIONS                                                                                                                                vironments using graphics hardware. In ACM SIGGRAPH/EURO-
+  We have developed a hybrid framework that uses GPUs to ac-                                                                                    GRAPHICS Conference on Graphics Hardware, pages 25–32. Euro-
+celerate moment computations. Our moment computations can be                                                                                    graphics Association, 2003.
+performed interactively, while the model is being edited. Our al-                                                                           [7] A. Greß, M. Guthe, and R. Klein. GPU-based collision detection
+gorithms have error estimates and they are based on object-space                                                                                for deformable parameterized surfaces. Computer Graphics Forum,
+resolution instead of just image-space resolution. They make use                                                                                25(3):497–506, 2006.
+
+
+                                                                                                                    89
+                                                        GPU                                                                  ACIS
+     Object
+                        Volume          Estimated Volume           Center of Mass        Time (s)         Volume          Center of Mass        Time(s)
+                                         Error Fraction
+     Scooby         1.99516×108             6.248×10−2                          0.438        1.516     1.99601×108                   0.330       15.547
+                                                                              654.325                                              653.821
+                                                                               92.532                                               92.381
+     Trefoil        8.57171×106             4.658×10−3                         -0.225        0.063     8.57174×106                   -0.225        0.175
+                                                                                0.251                                                 0.251
+                                                                                0.112                                                 0.112
+     Freeform       9.79816×105             1.251×10−3                         -0.002        0.015     9.82948×105                    0.001        0.718
+                                                                               57.366                                                57.433
+                                                                               -2.883                                                -2.876
+     V8 Engine      9.97957×106             1.933×10−6                         -1.011        1.188     9.99160×106                  -0.626         5.078
+                                                                               93.136                                               93.535
+                                                                              261.283                                              260.435
+     Engine         1.29932×105             1.000×10−5                         -0.741        0.235     1.30284×105                   -0.748        0.922
+                                                                               20.112                                                20.003
+                                                                               12.640                                                12.726
+     Race Car       1.83031×109             5.534×10−5                      -1.005           0.703     1.83799×109                   0.021         4.140
+                                                                           356.936                                                 356.846
+                                                                          1362.790                                                1364.280
+
+Table 1: Moment and center of mass values computed by our GPU algorithm and ACIS for different CAD models. Our values were
+computed using the 2-point quadrature scheme with 22 times the base number of sub-patches for each surface. The errors were
+estimated using our method explained in Section 6.
+
+ [8] K. Jorabchi, J. Danczyk, and K. Suresh. Efficient and automated anal-         [18] A. Krishnamurthy, S. McMains, and K. Haller. Accelerating geo-
+     ysis of potentially slender structures. Journal of Computing and In-               metric queries using the GPU. In SIAM/ACM Joint Conference on
+     formation Science in Engineering, 9(4), 2009.                                      Geometric and Physical Modeling, pages 199–210. ACM, 2009.
+ [9] R. Khardekar. Real-time manufacturability feedback. PhD thesis, Uni-          [19] Y. T. Lee and A. A. G. Requicha. Algorithms for computing the vol-
+     versity of California, Berkeley, Mechanical Engineering Department,                ume and other integral properties of solids. I. Known methods and
+     2008.                                                                              open issues. Communications of the ACM, 25(9):635–641, 1982.
+[10] R. Khardekar and S. McMains. Fast layered manufacturing support               [20] Y. T. Lee and A. A. G. Requicha. Algorithms for computing the vol-
+     volume computation on GPUs. In Proceedings of the ASME Design                      ume and other integral properties of solids. II. A family of algorithms
+     Engineering Technical Conferences. ASME, 2006.                                     based on representation conversion and cellular approximation. Com-
+                                                                                        munications of the ACM, 25(9):642–650, 1982.
+[11] J. Kim, S. Kim, H. Ko, and D. Terzopoulos. Fast GPU computation of
+     the mass properties of a general shape and its application to buoyancy        [21] A. M. Messner and G. Q. Taylor. Algorithm 550: Solid polyhe-
+     simulation. Visual Computer, 22(9):856–864, 2006.                                  dron measures [z]. ACM Transactions on Mathematical Software,
+                                                                                        6(1):121–130, 1980.
+[12] P. Kipfer, M. Segal, and R. Westermann. UberFlow: a GPU-based par-
+     ticle engine. In Proceedings of the ACM SIGGRAPH/EUROGRAPH-                   [22] B. Mirtich. Fast and accurate computation of polyhedral mass prop-
+     ICS Conference on Graphics Hardware, pages 115–122. ACM, 2004.                     erties. Journal of Graphics Tools, 1(2):31–50, 1996.
+
+[13] L. Kobbelt. Robust and efficient evaluation of functionals on para-           [23] J. Peters and A. Nasri. Computing volumes of solids enclosed by
+     metric surfaces. In SCG ’97: Proceedings of the thirteenth annual                  recursive subdivision surfaces. Computer Graphics Forum, 16:89–94,
+     symposium on computational geometry, pages 376–378. ACM, 1997.                     1997.
+
+[14] A. Kolb, L. Latta, and C. Rezk-Salama. Hardware-based simulation              [24] L. A. Piegl and W. Tiller. The NURBS Book. Springer, second edition,
+     and collision detection for large particle systems. In Proceedings                 1997.
+     of the ACM SIGGRAPH/EUROGRAPHICS Conference on Graphics                       [25] W. Rudin. Principles of Mathematical Analysis, chapter Integration
+     Hardware, pages 123–131. ACM, 2004.                                                of Differential Forms, pages 253–275. McGraw-Hill, 3 edition, 1976.
+[15] A. Krishnamurthy, R. Khardekar, and S. McMains. Optimized GPU                 [26] W. A. Samad and K. Suresh. CAD-integrated analysis of 3-D beams:
+     evaluation of arbitrary degree NURBS curves and surfaces. Computer                 A surface-integration approach. Engineering with Computers, Sub-
+     Aided Design, 41(12):971–980, 2009.                                                mitted Aug 2009.
+[16] A. Krishnamurthy, R. Khardekar, S. McMains, K. Haller, and G. El-             [27] O. Soldea, G. Elber, and E. Rivlin. Exact and efficient computa-
+     ber. Performing efficient NURBS modeling operations on the GPU.                    tion of moments of free-form surface and trivariate based geometry.
+     In ACM Symposium on Solid and Physical Modeling, pages 257–268.                    Computer-Aided Design, 34(7):529–539, 2002.
+     ACM, 2008.
+                                                                                   [28] Spatial Corporation. ACIS Geometric Modeler: User Guide, 2009.
+[17] A. Krishnamurthy, R. Khardekar, S. McMains, K. Haller, and G. El-                  Version 20.0.
+     ber. Performing efficient NURBS modeling operations on the
+     GPU. IEEE Transactions on Visualization and Computer Graphics,                [29] H. Timmer and J. Stern. Computation of global geometric properties
+     15(4):530–543, 2009.                                                               of solid objects. Computer-Aided Design, 12(6):301–304, 1980.
+
+
+                                                                              90
+
