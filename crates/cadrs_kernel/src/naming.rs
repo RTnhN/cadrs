@@ -120,6 +120,14 @@ impl FaceName {
         what
     }
 
+    /// True for a face named by its place in its operation's result (a thicken's or a sewn
+    /// solid's faces: [`FaceOrigin::Side`] of the operation's own region, its `source`, or of
+    /// region `u64::MAX`): another kernel, or another build, can put a different face at that
+    /// place, so [`resolve`] checks such a name against where the reference was.
+    pub fn is_positional(&self) -> bool {
+        matches!(self.origin, FaceOrigin::Side { region, .. } if region == self.op.as_u128() as u64 || region == u64::MAX)
+    }
+
     /// False for [`FaceOrigin::Unnamed`] faces, whose names don't survive a rebuild.
     pub fn is_stable(&self) -> bool {
         !matches!(self.origin, FaceOrigin::Unnamed { .. })
@@ -606,11 +614,28 @@ pub fn joint_tolerance(edges: &[EdgeInfo]) -> f64 {
 pub trait Named: Copy + Eq {
     /// The base form of the name.
     fn base_name(&self) -> Self;
+    /// How much of `other` this name shares (the faces they have in common by base name):
+    /// [`resolve`] prefers the candidate sharing most among several equally near ones.
+    fn shared(&self, other: &Self) -> usize;
+    /// Whether the name is (or involves) a face named by its place in a result
+    /// ([`FaceName::is_positional`]).
+    fn positional(&self) -> bool;
+}
+
+/// How many of `b`'s faces are among `a`'s, by base name.
+fn shared_faces(a: &[FaceName], b: &[FaceName]) -> usize {
+    b.iter().filter(|f| a.iter().any(|g| g.base() == f.base())).count()
 }
 
 impl Named for FaceName {
     fn base_name(&self) -> Self {
         self.base()
+    }
+    fn shared(&self, other: &Self) -> usize {
+        usize::from(self.op == other.op) + usize::from(self.origin == other.origin)
+    }
+    fn positional(&self) -> bool {
+        self.is_positional()
     }
 }
 
@@ -618,11 +643,23 @@ impl Named for EdgeName {
     fn base_name(&self) -> Self {
         self.base()
     }
+    fn shared(&self, other: &Self) -> usize {
+        shared_faces(&self.faces, &other.faces)
+    }
+    fn positional(&self) -> bool {
+        self.faces.iter().any(FaceName::is_positional)
+    }
 }
 
 impl Named for VertexName {
     fn base_name(&self) -> Self {
         self.base()
+    }
+    fn shared(&self, other: &Self) -> usize {
+        shared_faces(&self.faces, &other.faces)
+    }
+    fn positional(&self) -> bool {
+        self.faces.iter().any(FaceName::is_positional)
     }
 }
 
@@ -658,21 +695,30 @@ pub fn resolve<N: Named>(
     distance: impl Fn(usize) -> Option<f64>,
     tol: f64,
 ) -> std::result::Result<(usize, Match), Lost> {
-    if let Some(i) = candidates.iter().position(|c| c == name) {
+    let exact = candidates.iter().position(|c| c == name);
+    let base = name.base_name();
+    // The candidate nearest the hint, if the hint tells them apart; among candidates equally
+    // near (within `tol`: a hint at a corner is on every edge there), the one sharing most of
+    // the name (an edge between the same faces).
+    let nearest = |pool: &[usize]| -> Option<(usize, f64)> {
+        let near: Vec<(usize, f64)> = pool.iter().filter_map(|&i| distance(i).map(|d| (i, d))).collect();
+        let least = near.iter().map(|&(_, d)| d).fold(f64::INFINITY, f64::min);
+        near.into_iter()
+            .filter(|&(_, d)| d <= least + tol)
+            .max_by_key(|&(i, _)| (name.shared(&candidates[i]), std::cmp::Reverse(i)))
+    };
+    let all: Vec<usize> = (0..candidates.len()).collect();
+    if let Some(i) = exact {
+        // A positional name off where the reference was, with another entity there: the
+        // result's order changed (another kernel's thicken), so the place wins.
+        if name.positional() && !distance(i).is_some_and(|d| d <= tol)
+            && let Some((j, d)) = nearest(&all)
+            && d <= tol
+        {
+            return Ok((j, Match::Geometric));
+        }
         return Ok((i, Match::Exact));
     }
-    let base = name.base_name();
-    // The candidate nearest the hint, if the hint tells them apart.
-    let nearest = |pool: &[usize]| -> Option<(usize, f64)> {
-        let mut best: Option<(usize, f64)> = None;
-        for &i in pool {
-            let Some(d) = distance(i) else { continue };
-            if best.is_none_or(|(_, b)| d < b) {
-                best = Some((i, d));
-            }
-        }
-        best
-    };
     let same_base: Vec<usize> = (0..candidates.len())
         .filter(|&i| candidates[i].base_name() == base)
         .collect();
@@ -687,7 +733,6 @@ pub fn resolve<N: Named>(
             }
         }
     }
-    let all: Vec<usize> = (0..candidates.len()).collect();
     match nearest(&all) {
         Some((i, d)) if d <= tol => Ok((i, Match::Geometric)),
         _ => Err(Lost),
@@ -729,6 +774,42 @@ mod tests {
             end_tangent: Vector3::x(),
             circle: None,
         }
+    }
+
+    fn side(o: OpId, region: u64, curve: u64) -> FaceName {
+        FaceName::new(o, FaceOrigin::Side { region, curve })
+    }
+
+    /// alu_extrusion_parts: a mate connector on an edge between faces another kernel named
+    /// differently, its stored point at a corner three edges share: the edge sharing a face
+    /// with the stored name wins, not the first at that point.
+    #[test]
+    fn a_hint_at_a_corner_prefers_the_edge_sharing_a_face() {
+        let (a, b, c, d) = (side(op(1), 7, 1), side(op(1), 7, 2), side(op(1), 7, 3), side(op(1), 7, 4));
+        let gone = EdgeName::new(a, d, 0);
+        let candidates = [EdgeName::new(b, c, 0), EdgeName::new(b, d, 0), EdgeName::new(c, d, 0)];
+        // All three meet at the hint.
+        let r = resolve(&gone, &candidates, |_| Some(0.0), tol::POINT);
+        assert_eq!(r, Ok((1, Match::Geometric)));
+    }
+
+    /// pibox: a thicken's faces are named by their place in its result, so after another
+    /// kernel's thicken the name can be on a different face: the face where the reference was
+    /// wins. Other names keep their face wherever the reference was (a moved face).
+    #[test]
+    fn a_positional_name_off_its_place_resolves_by_place() {
+        let o = op(0x11);
+        let positional = side(o, o.as_u128() as u64, 1);
+        assert!(positional.is_positional());
+        let candidates = [side(o, o.as_u128() as u64, 0), positional];
+        let at_first = |i: usize| (i == 0).then_some(0.0);
+        assert_eq!(resolve(&positional, &candidates, at_first, tol::POINT), Ok((0, Match::Geometric)));
+        // Nothing at the place: the name.
+        assert_eq!(resolve(&positional, &candidates, |_| None, tol::POINT), Ok((1, Match::Exact)));
+        // A sketch curve's side is not positional.
+        let named = side(o, 99, 1);
+        assert!(!named.is_positional());
+        assert_eq!(resolve(&named, &[side(o, 99, 0), named], at_first, tol::POINT), Ok((1, Match::Exact)));
     }
 
     /// Generated faces are named after their origin; faces the history doesn't mention are
