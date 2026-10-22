@@ -54,13 +54,13 @@ pub fn evolved(k: &mut NativeKernel, spine: &[(Curve, f64, f64)], profile: &[Reg
         let (a, b) = (pts[i], pts[(i + 1) % pts.len()]);
         up += (a - pts[0]).cross(&(b - pts[0]));
     }
-    if up.norm() < 1e-12 {
+    if up.norm() < tol::DEGENERATE {
         // An open straight spine: any normal square to it.
         up = super::axes::ax2_x(&edges[0].dir(0.0));
     }
     let up = up.normalize();
     let size = pts.iter().map(|p| (p - pts[0]).norm()).fold(0.0, f64::max).max(tol::ROUNDOFF);
-    if pts.iter().any(|p| (p - pts[0]).dot(&up).abs() > 1e-6 * size) {
+    if pts.iter().any(|p| (p - pts[0]).dot(&up).abs() > tol::REL_POINT * size) {
         return Err(KernelError::InvalidParameter("an evolved solid's spine must be planar".into()));
     }
     // Which side of the spine the profile lies on.

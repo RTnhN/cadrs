@@ -247,7 +247,7 @@ fn cylinder_outline(frame: &ViewFrame, f: &FaceInfo, start: Point2<f64>, end: Po
     }
     let dn = d.normalize();
     let a2 = frame.dir_2d(&axis.dir);
-    if a2.norm() < 1e-6 {
+    if a2.norm() < tol::POINT {
         return false;
     }
     let a2 = a2.normalize();
@@ -463,7 +463,7 @@ pub fn reveal_unoccluded(
         .filter(|t| {
             let n = (t[1] - t[0]).cross(&(t[2] - t[0]));
             let len = n.norm();
-            len > 1e-12 && n.dot(&dir).abs() > 1e-6 * len
+            len > tol::DEGENERATE && n.dot(&dir).abs() > tol::REL_POINT * len
         })
         .map(|t| {
             let q = t.map(|p| frame.to_2d(&p));
@@ -515,7 +515,7 @@ pub fn reveal_unoccluded(
                 let sd = w[1] - w[0];
                 let sl = sd.norm();
                 // Parallel to within about 17°: a mesh's chords of a small circle turn that much.
-                if d > tol || sl < 1e-12 || (sd.x * along.y - sd.y * along.x).abs() > 0.3 * sl {
+                if d > tol || sl < tol::DEGENERATE || (sd.x * along.y - sd.y * along.x).abs() > 0.3 * sl {
                     continue;
                 }
                 if clear(c.p3[i] + (c.p3[i + 1] - c.p3[i]) * t) {
@@ -534,8 +534,8 @@ pub fn reveal_unoccluded(
                 let sl = sd.norm();
                 let (d, t) = segment_distance(q, w[0], w[1]);
                 // Beside the segment, not past its end: a line ending short of `q` leaves it bare.
-                let beside = (t > tol::REL && t < 1.0 - tol::REL) || d < 1e-6;
-                sl > 1e-12 && d <= tol && beside && (sd.x * along.y - sd.y * along.x).abs() <= 0.3 * sl
+                let beside = (t > tol::REL && t < 1.0 - tol::REL) || d < tol::POINT;
+                sl > tol::DEGENERATE && d <= tol && beside && (sd.x * along.y - sd.y * along.x).abs() <= 0.3 * sl
             })
         })
     };
@@ -561,7 +561,7 @@ pub fn reveal_unoccluded(
             let q = e.point_at(t);
             let dt = (0.25 / len).min(0.01);
             let along = e.point_at((t + dt).min(1.0)) - e.point_at((t - dt).max(0.0));
-            if along.norm() <= 1e-12 {
+            if along.norm() <= tol::DEGENERATE {
                 At::Hidden
             } else if on(q, along.normalize(), &visible) {
                 At::Covered

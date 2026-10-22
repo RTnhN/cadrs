@@ -108,7 +108,7 @@ pub fn ray_surface(s: &Surface, o: &P3, d: &V3, tmin: f64, tmax: f64) -> Vec<(f6
             // The plane through the ray parallel to the extrusion cuts it in rulings where the
             // base curve crosses that plane; each ruling meets the ray at one point.
             let m = d.cross(dir);
-            if m.norm() < 1e-12 {
+            if m.norm() < tol::DEGENERATE {
                 return Vec::new();
             }
             let fr = Frame::from_z(*o, m.normalize());
@@ -165,7 +165,7 @@ pub fn ray_surface(s: &Surface, o: &P3, d: &V3, tmin: f64, tmax: f64) -> Vec<(f6
                     let m = 0.5 * (a + b);
                     // Reject sign flips across the far side of a projection jump.
                     let p = o + d * m;
-                    if s.distance(&p) < 1e-6 {
+                    if s.distance(&p) < tol::POINT {
                         ts.push(m);
                     }
                 }
@@ -233,7 +233,7 @@ fn ray_parametric(s: &Surface, o: &P3, d: &V3) -> Vec<(f64, f64, f64)> {
                 for _ in 0..30 {
                     let (q, su, sv) = s.d1(u, v);
                     let r = q - (o + d * tt);
-                    if r.norm() < 1e-12 {
+                    if r.norm() < tol::DEGENERATE {
                         ok = true;
                         break;
                     }
@@ -441,12 +441,12 @@ impl<'a> Classifier<'a> {
                     continue;
                 }
                 for (t, u, v) in ray_surface(&f.surf, p, &d, -span, span) {
-                    if t <= 1e-12 {
+                    if t <= tol::ROUNDOFF_FINE {
                         continue;
                     }
                     // Grazing: the ray nearly tangent to the surface.
                     let n = f.surf.normal(u, v);
-                    if n.dot(&d).abs() < 1e-6 {
+                    if n.dot(&d).abs() < tol::ANGULAR_POINT {
                         bad = true;
                         break 'faces;
                     }

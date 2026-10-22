@@ -140,7 +140,7 @@ impl Piece {
     pub fn split_at(&self, mut ts: Vec<f64>) -> Vec<Piece> {
         ts.retain(|t| *t > self.t0 && *t < self.t1);
         ts.sort_by(f64::total_cmp);
-        ts.dedup_by(|a, b| (*a - *b).abs() < 1e-12);
+        ts.dedup_by(|a, b| (*a - *b).abs() < tol::ROUNDOFF_FINE);
         let mut bounds = vec![self.t0];
         bounds.extend(ts);
         bounds.push(self.t1);
@@ -239,7 +239,7 @@ pub fn piece_of(c: &Curve2, src: Src) -> Result<Piece> {
             Piece { c: ellipse(center, major_radius, minor_radius, rotation), t0: 0.0, t1: TAU, rev: false, src, more: vec![] }
         }
         Curve2::EllipseArc { center, major_radius, minor_radius, rotation, start, sweep, .. } => {
-            if major_radius.abs() < TOL || minor_radius.abs() < TOL || sweep.abs() < 1e-12 {
+            if major_radius.abs() < TOL || minor_radius.abs() < TOL || sweep.abs() < tol::ROUNDOFF_FINE {
                 return Err(KernelError::InvalidProfile("a degenerate ellipse arc".into()));
             }
             arc(ellipse(center, major_radius, minor_radius, rotation), start, sweep)
@@ -282,7 +282,7 @@ fn offset_ellipse_nurbs(center: P2, major: f64, minor: f64, rotation: f64, start
         })
         .collect();
     // End derivatives by central differences of the exact curve.
-    let h = 1e-6;
+    let h = tol::DIFF_STEP;
     let d = |t: f64| {
         let a = crate::offset_ellipse_point(center, major, minor, rotation, offset, t - h);
         let b = crate::offset_ellipse_point(center, major, minor, rotation, offset, t + h);

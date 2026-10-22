@@ -115,7 +115,7 @@ fn boundary_on(b: &Body, f: usize, s: &Surface) -> bool {
         (0..=4).all(|i| {
             let p = e.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 4.0);
             let (u, v) = s.project(&p, None);
-            (s.eval(u, v) - p).norm() <= 1e-6 * (1.0 + p.coords.norm())
+            (s.eval(u, v) - p).norm() <= tol::REL_POINT * (1.0 + p.coords.norm())
         })
     })
 }
@@ -140,7 +140,7 @@ pub fn unify_faces(b: &mut Body, from: Vec<Vec<(usize, usize)>>, can_merge: &dyn
         // parametrization, so two different ones (coinciding by a sampled test, perhaps over
         // part of their extents) merge only when each one's boundary lies on the other.
         let sampled = |s: &Surface| matches!(s, Surface::Nurbs(_) | Surface::Extrusion { .. });
-        let same = if a.surf == c.surf { Some(true) } else { a.surf.same_domain(&c.surf, 1e-6) };
+        let same = if a.surf == c.surf { Some(true) } else { a.surf.same_domain(&c.surf, tol::POINT) };
         if let Some(same) = same
             && same == (a.sense == c.sense)
             && (!(sampled(&a.surf) || sampled(&c.surf)) || a.surf == c.surf || (boundary_on(b, f, &c.surf) && boundary_on(b, g, &a.surf)))
@@ -510,7 +510,7 @@ fn merge_group(b: &mut Body, g: &[usize]) -> Option<Face> {
                 let o = from - d * t0;
                 ch[k].pc = Curve::Line { o: P3::new(o.x, o.y, 0.0), d: V3::new(d.x, d.y, 0.0) };
             }
-            ch.retain(|c| !b.edges[c.edge].degenerate || (co_uv(b, c, true) - co_uv(b, c, false)).norm() > 1e-12);
+            ch.retain(|c| !b.edges[c.edge].degenerate || (co_uv(b, c, true) - co_uv(b, c, false)).norm() > tol::DEGENERATE);
             at = ch.last().map(|c| co_uv(b, c, true));
         }
         // (Every edge a pole the face only touches: nothing to merge.)
@@ -582,7 +582,7 @@ fn merge_group(b: &mut Body, g: &[usize]) -> Option<Face> {
                 let (a0, a1) = (co_uv(b, c, false).x, co_uv(b, c, true).x);
                 let (lo, hi) = if a0 < a1 { (a0, a1) } else { (a1, a0) };
                 let target = unwrap_near(us, (lo + hi) * 0.5, TAU);
-                if target > lo + 1e-12 && target < hi - 1e-12 {
+                if target > lo + tol::ROUNDOFF_FINE && target < hi - tol::ROUNDOFF_FINE {
                     hit = Some((k, target));
                     break;
                 }
@@ -824,7 +824,7 @@ pub fn planarize(b: &mut Body) -> bool {
         let s = &b.faces[fi].surf;
         let (o, su, sv) = s.d1(um, vm);
         let n = su.cross(&sv);
-        if n.norm() < 1e-12 * (1.0 + size * size) {
+        if n.norm() < tol::REL_FINE * (1.0 + size * size) {
             continue;
         }
         let n = n.normalize();
@@ -900,7 +900,7 @@ pub fn cylindrize(b: &mut Body) -> bool {
         }
         // Not a plane: the normals must turn.
         let spread = nrm.iter().map(|q| q.dot(&nrm[0])).fold(1.0, f64::min);
-        if spread > 1.0 - 1e-6 {
+        if spread > 1.0 - tol::ANGULAR_POINT {
             continue;
         }
         // The circle in the plane square to z (algebraic fit), then the check.
@@ -953,7 +953,7 @@ pub fn cylindrize(b: &mut Body) -> bool {
                 ang = (ang.0.min(u), ang.1.max(u));
             }
         }
-        if !(ang.1 - ang.0 < TAU - 1e-6) {
+        if !(ang.1 - ang.0 < TAU - tol::ANGULAR_POINT) {
             continue;
         }
         let mid_uv = cyl.project(&mid, Some((PI, 0.0)));

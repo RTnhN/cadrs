@@ -207,7 +207,13 @@ Below these, the code's round-off margins are named by meaning (all 1e-9, so res
 they were as literals): `tol::REL` (relative: scaled by a size, a span or `1 + |t|`, or a
 parameter fraction), `tol::ANGULAR` (unit vectors parallel or square, angles in radians),
 `tol::ROUNDOFF` (absolute lengths and parameters of exact geometry), and `tol::TINY` (1e-300, the
-guard of a division or normalisation against zero).
+guard of a division or normalisation against zero). A thousandth of them (1e-12) for values
+computed exactly: `tol::REL_FINE`, `ANGULAR_FINE`, `ROUNDOFF_FINE`, and `tol::DEGENERATE` (a
+computed length, norm or denominator taken as zero: no direction, nothing to divide by). At the
+merge level (1e-6): `tol::POINT` (absolute), `REL_POINT` (a fraction of a size or span),
+`ANGULAR_POINT` (directions or angles taken as the same) and `DIFF_STEP` (the step of a finite
+difference or of a nudge off a point). Bare literals of these values are left only in tests and
+where a constant names them already.
 
 Above these, vertices and edges carry their own tolerance (a read or healed body's gaps,
 `Body::fit_tolerances`, as OCCT), and operations take the larger of their own and the entities'.

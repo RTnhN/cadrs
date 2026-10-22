@@ -197,7 +197,7 @@ impl Surface {
             }
             Surface::Cone { .. } => {
                 // Apex: the average normal is along −z·sin a (outward-ish); use a nearby point.
-                let e = 1e-6;
+                let e = tol::DIFF_STEP;
                 let d = self.d2(u, v + e);
                 d[1].cross(&d[2]).normalize()
             }
@@ -242,7 +242,7 @@ impl Surface {
                 // generator and much nearer that one: a point near this side, or inside the cone
                 // by its axis, keeps this side's foot, as faces expect.)
                 let (d_here, d_across) = (((rho - r) * ca - l.z * sa).abs(), ((-rho - r) * ca - l.z * sa).abs());
-                if d_here > 1e-6 * (1.0 + p.coords.norm()) && d_across < 0.5 * d_here {
+                if d_here > tol::REL_POINT * (1.0 + p.coords.norm()) && d_across < 0.5 * d_here {
                     let u = ang(f) + PI;
                     let u = match hint {
                         Some((hu, _)) => unwrap_near(u, hu, TAU),
@@ -257,7 +257,7 @@ impl Surface {
                 let l = f.local(p);
                 let rho = (l.x * l.x + l.y * l.y).sqrt();
                 let v = l.z.atan2(rho);
-                let u = if rho < 1e-12 { hint.map(|h| h.0).unwrap_or(0.0) } else { ang(f) };
+                let u = if rho < tol::ROUNDOFF_FINE { hint.map(|h| h.0).unwrap_or(0.0) } else { ang(f) };
                 (u, v)
             }
             Surface::Torus { f, rmaj, .. } => {
@@ -298,7 +298,7 @@ impl Surface {
                         let step = r.dot(&d1) / df;
                         let next = (t - step).clamp(a, b);
                         // Converged, or held at an end of the meridian.
-                        if (next - t).abs() <= 1e-12 * (1.0 + t.abs()) {
+                        if (next - t).abs() <= tol::REL_FINE * (1.0 + t.abs()) {
                             return Some(next);
                         }
                         t = next;
@@ -388,7 +388,7 @@ impl Surface {
                 // down the gradient (scaled per direction), halved the same way.
                 // (A step down to rounding noise has converged: no point checking it, as the
                 // distance it changes is noise too.)
-                if (nu - u).abs() + (nv - v).abs() < 1e-12 * (1.0 + u.abs() + v.abs()) {
+                if (nu - u).abs() + (nv - v).abs() < tol::REL_FINE * (1.0 + u.abs() + v.abs()) {
                     (u, v) = (nu, nv);
                     break;
                 }
@@ -553,7 +553,7 @@ impl Surface {
             }
         }
         let e = auu * hu * hu / 8.0 + avv * hv * hv / 8.0;
-        bb.grow(e * (1.0 + tol::REL) + 1e-12)
+        bb.grow(e * (1.0 + tol::REL) + tol::ROUNDOFF_FINE)
     }
 
     /// The surface over the parameter rectangle u × v as an exact NURBS surface on the same
@@ -975,7 +975,7 @@ pub fn meridian_off_plane(f: &Frame, m: &Curve) -> bool {
         let l = f.local(p);
         l.y.abs() > tol::REL * (1.0 + l.norm())
     };
-    let off_v = |d: &V3| f.y.dot(d).abs() > 1e-12 * d.norm();
+    let off_v = |d: &V3| f.y.dot(d).abs() > tol::REL_FINE * d.norm();
     match m {
         Curve::Line { o, d } => off(o) || off_v(d),
         Curve::Circle { c, x, y, .. } | Curve::Ellipse { c, x, y, .. } => off(c) || off_v(x) || off_v(y),

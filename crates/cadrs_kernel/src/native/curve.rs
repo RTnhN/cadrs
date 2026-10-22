@@ -111,7 +111,7 @@ impl Curve {
             }
             Curve::Nurbs(c) => {
                 for b in c.breaks() {
-                    if b > t0 + 1e-12 && b < t1 - 1e-12 {
+                    if b > t0 + tol::ROUNDOFF_FINE && b < t1 - tol::ROUNDOFF_FINE {
                         out.push(b);
                     }
                 }
@@ -209,7 +209,7 @@ impl Curve {
                         }
                     }
                     let len = self.length(a, b);
-                    let n = if kmax < 1e-12 {
+                    let n = if kmax < tol::ROUNDOFF_FINE {
                         1
                     } else {
                         let step = arc_step(1.0 / kmax, defl, ang);
@@ -250,10 +250,10 @@ impl Curve {
             Curve::Nurbs(n) => {
                 let (a, b) = n.range();
                 let mut c = (**n).clone();
-                if t0 > a + 1e-12 {
+                if t0 > a + tol::ROUNDOFF_FINE {
                     c = c.split(t0).1;
                 }
-                if t1 < b - 1e-12 {
+                if t1 < b - tol::ROUNDOFF_FINE {
                     c = c.split(t1).0;
                 }
                 c
@@ -288,7 +288,7 @@ pub fn arc_step(r: f64, defl: f64, ang: f64) -> f64 {
 /// Puts an angle into the range [t0, t1] modulo 2π when it fits, else the nearer end.
 pub fn clamp_periodic(a: f64, t0: f64, t1: f64) -> f64 {
     let a = wrap(a, t0, TAU);
-    if a <= t1 + 1e-12 {
+    if a <= t1 + tol::ROUNDOFF_FINE {
         return a.min(t1);
     }
     // Outside: nearest end (angularly).

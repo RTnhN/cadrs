@@ -234,7 +234,7 @@ fn resolve(k: &NativeKernel, faces: &[MergedFace], m: &Affine, spec: &ExtrudeSpe
                 if mn.dot(&dir).abs() > 1.0 - tol::ANGULAR {
                     return depth("the face", (pl.origin - o).dot(&dir) - offset);
                 }
-                if mn.dot(&dir).abs() < 1e-6 {
+                if mn.dot(&dir).abs() < tol::ANGULAR_POINT {
                     return Err(KernelError::InvalidParameter("the face is parallel to the extrude direction".into()));
                 }
                 let point = pl.origin - dir * offset;
@@ -396,7 +396,7 @@ fn piece(k: &NativeKernel, faces: &[MergedFace], plane: &Plane, o: P3, dir: V3, 
             };
             // A piece still at the far end: part of the profile met nothing.
             let (_, hi) = super::kernel::extent_along(&kept.body, &o, &dir);
-            if hi > far - 1e-6 * far.max(1.0) || kept.tags.iter().any(|ts| ts.iter().any(|o| matches!(o, Origin::EndCap { .. }))) {
+            if hi > far - tol::REL_POINT * far.max(1.0) || kept.tags.iter().any(|ts| ts.iter().any(|o| matches!(o, Origin::EndCap { .. }))) {
                 return Err(KernelError::InvalidParameter("part of the profile doesn't meet the target".into()));
             }
             kept
@@ -431,7 +431,7 @@ fn piece(k: &NativeKernel, faces: &[MergedFace], plane: &Plane, o: P3, dir: V3, 
 pub fn extrude_with(k: &mut NativeKernel, profile: &Profile, spec: &ExtrudeSpec) -> Result<OpResult> {
     let d = spec.direction.into_inner();
     let n = profile.plane.normal.into_inner();
-    if d.dot(&n).abs() < 1e-6 {
+    if d.dot(&n).abs() < tol::ANGULAR_POINT {
         return Err(KernelError::InvalidParameter("the extrude direction lies in the sketch plane".into()));
     }
     if profile.regions.is_empty() && spec.faces.is_empty() && profile.chains.is_empty() {
@@ -509,7 +509,7 @@ pub fn extrude_with(k: &mut NativeKernel, profile: &Profile, spec: &ExtrudeSpec)
 /// A straight sweep of a profile's regions along any vector (an oblique prism).
 pub fn prism_along(k: &mut NativeKernel, profile: &Profile, v: V3) -> Result<OpResult> {
     let len = v.norm();
-    if len < 1e-12 || v.dot(&profile.plane.normal).abs() < tol::REL * len {
+    if len < tol::DEGENERATE || v.dot(&profile.plane.normal).abs() < tol::REL * len {
         return Err(KernelError::InvalidParameter("A prism needs a direction off the profile's plane".into()));
     }
     let faces = inputs(k, profile, &[])?;
@@ -536,7 +536,7 @@ fn sweep_united(faces: &[MergedFace], kind: &dyn SweepKind, s0: f64, s1: f64, wh
     for i in 0..boxes.len() {
         for j in i + 1..boxes.len() {
             let (a, b) = (&boxes[i], &boxes[j]);
-            if a.min.x < b.max.x - 1e-6 && b.min.x < a.max.x - 1e-6 && a.min.y < b.max.y - 1e-6 && b.min.y < a.max.y - 1e-6 {
+            if a.min.x < b.max.x - tol::POINT && b.min.x < a.max.x - tol::POINT && a.min.y < b.max.y - tol::POINT && b.min.y < a.max.y - tol::POINT {
                 overlap = true;
             }
         }
@@ -568,7 +568,7 @@ pub fn revolve_frame(profile: &Profile, faces: &[MergedFace], chains: &[Vec<Piec
     if z.dot(&n).abs() > tol::ANGULAR {
         return Err(KernelError::InvalidParameter("The revolve axis must lie in the sketch plane".into()));
     }
-    if (axis.origin - profile.plane.origin).dot(&n).abs() > 1e-6 {
+    if (axis.origin - profile.plane.origin).dot(&n).abs() > tol::POINT {
         return Err(KernelError::InvalidParameter("The revolve axis must lie in the sketch plane".into()));
     }
     let x = z.cross(&n).normalize();
@@ -593,9 +593,9 @@ pub fn revolve_frame(profile: &Profile, faces: &[MergedFace], chains: &[Vec<Piec
     for c in chains {
         add(c);
     }
-    let x = if hi > 1e-6 && lo < -1e-6 {
+    let x = if hi > tol::POINT && lo < -tol::POINT {
         return Err(KernelError::InvalidParameter("The profile crosses the revolve axis".into()));
-    } else if hi > 1e-6 {
+    } else if hi > tol::POINT {
         x
     } else {
         -x
@@ -638,7 +638,7 @@ pub fn revolve_with(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec)
             RevolveEnd::UpToFace { body, face, offset } => {
                 let info = k.faces(body)?.into_iter().find(|x| x.id == face).ok_or_else(|| KernelError::InvalidParameter(format!("unknown {face:?}")))?;
                 match info.plane {
-                    Some(pl) if pl.normal.dot(&f.z).abs() < tol::ANGULAR && (pl.origin - f.o).dot(&pl.normal).abs() < 1e-6 => End::Angle(ang_of(&info.center) - offset),
+                    Some(pl) if pl.normal.dot(&f.z).abs() < tol::ANGULAR && (pl.origin - f.o).dot(&pl.normal).abs() < tol::POINT => End::Angle(ang_of(&info.center) - offset),
                     _ => End::Conform(vec![body], offset),
                 }
             }
@@ -689,7 +689,7 @@ pub fn revolve_with(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec)
     if s1 - s0 > TAU + tol::ANGULAR {
         return Err(KernelError::InvalidParameter("The revolve turns more than a whole turn".into()));
     }
-    let whole = whole || (s1 - s0) >= TAU - 1e-12;
+    let whole = whole || (s1 - s0) >= TAU - tol::ANGULAR_FINE;
     let mut t = if solid {
         sweep_united(&faces, &kind, s0, if whole { s0 + TAU } else { s1 }, whole)?
     } else {
@@ -758,7 +758,7 @@ pub fn revolve_with(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec)
 /// Whether a revolve axis leaves the sketch plane (or is parallel to it off it).
 fn axis_off_plane(profile: &Profile, axis: &Axis) -> bool {
     let n = profile.plane.normal.into_inner();
-    axis.dir.dot(&n).abs() > tol::ANGULAR || (axis.origin - profile.plane.origin).dot(&n).abs() > 1e-6
+    axis.dir.dot(&n).abs() > tol::ANGULAR || (axis.origin - profile.plane.origin).dot(&n).abs() > tol::POINT
 }
 
 /// A revolve about an axis off the sketch plane (SMLib's rotational sweep of a face about any
@@ -823,7 +823,7 @@ fn revolve_off_plane(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec
     if s1 - s0 > TAU + tol::ANGULAR {
         return Err(KernelError::InvalidParameter("The revolve turns more than a whole turn".into()));
     }
-    let whole = (s1 - s0) >= TAU - 1e-12;
+    let whole = (s1 - s0) >= TAU - tol::ANGULAR_FINE;
     let s1 = if whole { s0 + TAU } else { s1 };
     let mut t = if spec.body != BodyKind::Surface {
         sweep_united(faces, &kind, s0, s1, whole)?

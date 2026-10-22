@@ -166,10 +166,10 @@ fn compatible(curves: &mut [NurbsCurve]) -> bool {
         let (mut i, mut j) = (0, 0);
         ks.sort_by(f64::total_cmp);
         while i < all.len() || j < ks.len() {
-            if j >= ks.len() || (i < all.len() && all[i] < ks[j] - 1e-12) {
+            if j >= ks.len() || (i < all.len() && all[i] < ks[j] - tol::ROUNDOFF_FINE) {
                 merged.push(all[i]);
                 i += 1;
-            } else if i >= all.len() || ks[j] < all[i] - 1e-12 {
+            } else if i >= all.len() || ks[j] < all[i] - tol::ROUNDOFF_FINE {
                 merged.push(ks[j]);
                 j += 1;
             } else {
@@ -183,8 +183,8 @@ fn compatible(curves: &mut [NurbsCurve]) -> bool {
     for c in curves.iter_mut() {
         let mut have: Vec<f64> = c.knots[deg + 1..c.knots.len() - deg - 1].to_vec();
         for &k in &all {
-            let count_all = all.iter().filter(|x| (*x - k).abs() < 1e-12).count();
-            let count_have = have.iter().filter(|x| (*x - k).abs() < 1e-12).count();
+            let count_all = all.iter().filter(|x| (*x - k).abs() < tol::ROUNDOFF_FINE).count();
+            let count_have = have.iter().filter(|x| (*x - k).abs() < tol::ROUNDOFF_FINE).count();
             if count_have < count_all {
                 *c = c.insert_knot(k);
                 have.push(k);
@@ -283,7 +283,7 @@ fn field(k: &NativeKernel, end: &LoftEnd, sec: &LoftSection, g: &SecGeo, i: usiz
         Box::new(move |p: &P3| {
             let d = p - c;
             let r = d - nn * d.dot(&nn);
-            if r.norm() < 1e-12 { V3::zeros() } else { r.normalize() * length }
+            if r.norm() < tol::DEGENERATE { V3::zeros() } else { r.normalize() * length }
         })
     };
     Ok(Some(match end.condition {
@@ -292,7 +292,7 @@ fn field(k: &NativeKernel, end: &LoftEnd, sec: &LoftSection, g: &SecGeo, i: usiz
         LoftCondition::TangentToProfile => (radial(n, sign * len), None),
         LoftCondition::NormalDirection(d) | LoftCondition::TangentDirection(d) => {
             let d = V3::new(d[0], d[1], d[2]);
-            if d.norm() < 1e-12 || !d.iter().all(|x| x.is_finite()) {
+            if d.norm() < tol::DEGENERATE || !d.iter().all(|x| x.is_finite()) {
                 return Err(invalid("A loft direction needs a non-zero vector"));
             }
             let along = if n.dot(&d).abs() > tol::ROUNDOFF {
@@ -407,7 +407,7 @@ fn fit_poles(c: &NurbsCurve, f: &dyn Fn(&P3) -> V3) -> Vec<V3> {
         rhs[(j, 2)] = v.z;
     }
     let svd = rows.svd(true, true);
-    let sol = svd.solve(&rhs, 1e-12).unwrap_or_else(|_| nalgebra::DMatrix::zeros(n, 3));
+    let sol = svd.solve(&rhs, tol::ROUNDOFF_FINE).unwrap_or_else(|_| nalgebra::DMatrix::zeros(n, 3));
     (0..n).map(|i| V3::new(sol[(i, 0)], sol[(i, 1)], sol[(i, 2)])).collect()
 }
 
@@ -523,8 +523,8 @@ fn assemble_rows(rows: Vec<Vec<NurbsSurface>>, closed_u: bool, closed_v: bool, s
         let pts: Vec<P3> = rows[r][i].cps.iter().flatten().map(dehom).collect();
         let o = pts[0];
         let far = pts.iter().max_by(|a, b| (*a - o).norm().total_cmp(&(*b - o).norm()))?;
-        let x = (far - o).try_normalize(1e-12)?;
-        let nrm = pts.iter().map(|p| x.cross(&(p - o))).max_by(|a, b| a.norm().total_cmp(&b.norm()))?.try_normalize(1e-12)?;
+        let x = (far - o).try_normalize(tol::DEGENERATE)?;
+        let nrm = pts.iter().map(|p| x.cross(&(p - o))).max_by(|a, b| a.norm().total_cmp(&b.norm()))?.try_normalize(tol::DEGENERATE)?;
         let size = (far - o).norm();
         if pts.iter().any(|p| (p - o).dot(&nrm).abs() > tol::REL * size.max(1.0)) {
             return None;
@@ -706,7 +706,7 @@ pub fn loft_wires(k: &NativeKernel, sections: &[WireSection], solid: bool, ruled
     }
     let spec = LoftSpec { body: BodyKind::Solid, sections: vec![], start: LoftEnd::default(), end: LoftEnd::default(), source: 0 };
     let closed = secs.iter().all(|s| match s {
-        Sec::Loop { parts, .. } => (parts[0].start() - parts[parts.len() - 1].end()).norm() < 1e-6,
+        Sec::Loop { parts, .. } => (parts[0].start() - parts[parts.len() - 1].end()).norm() < tol::POINT,
         Sec::Point(_) => true,
     });
     let solid = solid && closed && secs.iter().all(|s| matches!(s, Sec::Point(_) | Sec::Loop { plane: Some(_), .. }));
@@ -890,14 +890,14 @@ fn wire_plane(parts: &[Part]) -> Option<Plane> {
         let (a, b) = (pts[i], pts[(i + 1) % n]);
         nrm += a.coords.cross(&b.coords);
     }
-    let nrm = nrm.try_normalize(1e-12)?;
+    let nrm = nrm.try_normalize(tol::DEGENERATE)?;
     let o = pts[0];
     let size = pts.iter().map(|p| (p - o).norm()).fold(0.0, f64::max);
     if pts.iter().any(|p| (p - o).dot(&nrm).abs() > 1e-7 * size.max(1.0)) {
         return None;
     }
     let x = (pts[n / 3] - o) - nrm * (pts[n / 3] - o).dot(&nrm);
-    Some(Plane { origin: o, x_dir: nalgebra::Unit::try_new(x, 1e-12)?, normal: nalgebra::Unit::new_normalize(nrm) })
+    Some(Plane { origin: o, x_dir: nalgebra::Unit::try_new(x, tol::DEGENERATE)?, normal: nalgebra::Unit::new_normalize(nrm) })
 }
 
 fn loft_exact_with(k: &NativeKernel, spec: &LoftSpec, secs: &mut [Sec], solid: bool, align: bool, ruled: bool) -> Result<Option<Built>> {
@@ -918,7 +918,7 @@ fn loft_exact_with(k: &NativeKernel, spec: &LoftSpec, secs: &mut [Sec], solid: b
     }
     // Open sections (sheets): each the way round that starts nearest the previous one's start.
     let closed_u = secs.iter().all(|s| match s {
-        Sec::Loop { parts, .. } => (parts[0].start() - parts[parts.len() - 1].end()).norm() < 1e-6,
+        Sec::Loop { parts, .. } => (parts[0].start() - parts[parts.len() - 1].end()).norm() < tol::POINT,
         Sec::Point(_) => true,
     });
     if !closed_u {
@@ -1083,7 +1083,7 @@ fn end_derivative(k: &NativeKernel, end: &LoftEnd, sec: &LoftSection, samples: &
         move |p: &P3| {
             let d = p - c;
             let r = d - nn * d.dot(&nn);
-            if r.norm() < 1e-12 { V3::zeros() } else { r.normalize() * length }
+            if r.norm() < tol::DEGENERATE { V3::zeros() } else { r.normalize() * length }
         }
     };
     let sign_toward = if radius(toward) < radius(i) { -1.0 } else { 1.0 };
@@ -1095,7 +1095,7 @@ fn end_derivative(k: &NativeKernel, end: &LoftEnd, sec: &LoftSection, samples: &
         LoftCondition::TangentToProfile => Some((per_sample(&radial(n, sign_toward * len * end_flip)), None)),
         LoftCondition::NormalDirection(d) | LoftCondition::TangentDirection(d) => {
             let d = V3::new(d[0], d[1], d[2]);
-            if d.norm() < 1e-12 || !d.iter().all(|x| x.is_finite()) {
+            if d.norm() < tol::DEGENERATE || !d.iter().all(|x| x.is_finite()) {
                 return Err(invalid("A loft direction needs a non-zero vector"));
             }
             let along = if n.dot(&d).abs() > tol::ROUNDOFF {
@@ -1286,7 +1286,7 @@ fn face_section(k: &NativeKernel, fi: &FaceInput) -> Result<SectionCurves> {
     for i in 0..pts.len() {
         nn += (pts[i].coords - c).cross(&(pts[(i + 1) % pts.len()].coords - c));
     }
-    let nn = if nn.norm() > 1e-12 { nn.normalize() } else { V3::z() };
+    let nn = if nn.norm() > tol::DEGENERATE { nn.normalize() } else { V3::z() };
     let fr = Frame::from_z(P3::from(c), nn);
     let plane = Plane { origin: P3::from(c), x_dir: nalgebra::Unit::new_normalize(fr.x), normal: nalgebra::Unit::new_normalize(nn) };
     Ok(SectionCurves::sampled(plane, polys))

@@ -88,7 +88,7 @@ fn end_normal(normal: &dyn Fn(f64) -> V3, t: f64, t0: f64, t1: f64) -> V3 {
         return n;
     };
     let m = normal(inner);
-    if (m - n).norm() > 1e-6 { m } else { n }
+    if (m - n).norm() > tol::POINT { m } else { n }
 }
 
 /// How closely a fitted offset curve follows the true offset (mm, relative to the distance),
@@ -120,8 +120,8 @@ fn side_surface(c: &Curve, t0: f64, t1: f64, o: &Curve) -> Surface {
     }).collect();
     let p0 = pts[0];
     let far = pts.iter().max_by(|a, b| (*a - p0).norm().total_cmp(&(*b - p0).norm())).copied().unwrap_or(p0);
-    if let Some(x) = (far - p0).try_normalize(1e-12)
-        && let Some(n) = pts.iter().map(|p| x.cross(&(p - p0))).max_by(|a, b| a.norm().total_cmp(&b.norm())).and_then(|n| n.try_normalize(1e-12)) {
+    if let Some(x) = (far - p0).try_normalize(tol::DEGENERATE)
+        && let Some(n) = pts.iter().map(|p| x.cross(&(p - p0))).max_by(|a, b| a.norm().total_cmp(&b.norm())).and_then(|n| n.try_normalize(tol::DEGENERATE)) {
             let size = (far - p0).norm();
             if pts.iter().all(|p| (p - p0).dot(&n).abs() < tol::REL * (1.0 + size)) {
                 return Surface::Plane { f: Frame { o: p0, x, y: n.cross(&x), z: n } };
@@ -233,7 +233,7 @@ pub fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
         let seam_iso = match &top_surf {
             Surface::Nurbs(tn) if own && uses[&ei] > 1 && matches!(f.surf, Surface::Nurbs(_)) => {
                 let (q0, q1) = (c.pc.point(e.t[0]), c.pc.point(e.t[1]));
-                let tol = 1e-12 * (1.0 + q0.coords.norm() + q1.coords.norm());
+                let tol = tol::REL_FINE * (1.0 + q0.coords.norm() + q1.coords.norm());
                 let iso = |along_v: bool, at: f64| Curve::Nurbs(Arc::new(super::local::nurbs_iso(tn, at, along_v)));
                 if (q0.y - q1.y).abs() < tol && (0..=8).all(|i| (c.pc.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 8.0).y - q0.y).abs() < tol) {
                     Some(iso(false, q0.y))

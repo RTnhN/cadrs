@@ -106,7 +106,7 @@ impl Writer {
                 let (p, q) = (pts[i].coords - c, pts[(i + 1) % pts.len()].coords - c);
                 nrm += p.cross(&q);
             }
-            if nrm.norm() > 1e-12 && pts.iter().all(|p| (p.coords - c).dot(&nrm.normalize()).abs() < tol::ROUNDOFF) { Some(nrm.normalize()) } else { None }
+            if nrm.norm() > tol::DEGENERATE && pts.iter().all(|p| (p.coords - c).dot(&nrm.normalize()).abs() < tol::ROUNDOFF) { Some(nrm.normalize()) } else { None }
         };
         let closed = (pts[0] - pts[k]).norm() < tol::ROUNDOFF;
         let mut p = vec![k.to_string(), m.to_string(), (planar.is_some() as u8).to_string(), (closed as u8).to_string(), (!n.is_rational() as u8).to_string(), "0".into()];
@@ -132,7 +132,7 @@ impl Writer {
                 let z = x.cross(y);
                 let tm = self.matrix(cc, x, y, &z);
                 let (s, e) = ((t0.cos() * r, t0.sin() * r), (t1.cos() * r, t1.sin() * r));
-                let full = (t1 - t0 - TAU).abs() < 1e-12;
+                let full = (t1 - t0 - TAU).abs() < tol::ANGULAR_FINE;
                 let e = if full { s } else { e };
                 let de = self.add(100, 0, vec!["0.".into(), "0.".into(), "0.".into(), real(s.0), real(s.1), real(e.0), real(e.1)]);
                 self.ent(de).transform = tm;
@@ -607,7 +607,7 @@ fn parse(bytes: &[u8]) -> R<File> {
         let params = if params.is_empty() { params } else { params[1..].to_vec() };
         ents.insert(de, DirEnt { kind, form, transform, label, params, independent });
     }
-    let resolution = gt.get(18).and_then(|t| t.f()).filter(|r| *r > 0.0).unwrap_or(1e-6) * scale;
+    let resolution = gt.get(18).and_then(|t| t.f()).filter(|r| *r > 0.0).unwrap_or(tol::POINT) * scale;
     Ok(File { ents, scale, resolution })
 }
 
@@ -968,7 +968,7 @@ impl<'a> Reader<'a> {
             }
             110 => {
                 let (a, b) = (pl.point(&P3::new(n(0)?, n(1)?, n(2)?)), pl.point(&P3::new(n(3)?, n(4)?, n(5)?)));
-                if (b - a).norm() > 1e-12 {
+                if (b - a).norm() > tol::DEGENERATE {
                     out.push(Seg { c: Curve::line(a, b).0, a, b });
                 }
             }
@@ -991,7 +991,7 @@ impl<'a> Reader<'a> {
                 let (v0, v1) = (n(vb).unwrap_or(r0).clamp(r0, r1), n(vb + 1).unwrap_or(r1).clamp(r0, r1));
                 let c = match &c {
                     // A sub-range of the spline: trim it, so its ends are the segment's.
-                    Curve::Nurbs(nc) if v0 > r0 + 1e-12 || v1 < r1 - 1e-12 => Curve::Nurbs(Arc::new(Curve::Nurbs(nc.clone()).to_nurbs(v0.min(v1), v0.max(v1)))),
+                    Curve::Nurbs(nc) if v0 > r0 + tol::ROUNDOFF_FINE || v1 < r1 - tol::ROUNDOFF_FINE => Curve::Nurbs(Arc::new(Curve::Nurbs(nc.clone()).to_nurbs(v0.min(v1), v0.max(v1)))),
                     _ => c,
                 };
                 let (a, b) = (c.point(v0), c.point(v1));
@@ -1022,7 +1022,7 @@ impl<'a> Reader<'a> {
                         let unscale = |p: &P3| P3::new(p.x / s, p.y / s, 0.0);
                         let (pa, pb) = (unscale(&sg.a), unscale(&sg.b));
                         let c2 = sg.c.transformed(&Affine { m: nalgebra::Matrix3::identity() / s, t: V3::zeros() });
-                        let (t0, t1) = super::xbuild::edge_range(&c2, &pa, &pb, (pa - pb).norm() < 1e-12).unwrap_or((0.0, 1.0));
+                        let (t0, t1) = super::xbuild::edge_range(&c2, &pa, &pb, (pa - pb).norm() < tol::DEGENERATE).unwrap_or((0.0, 1.0));
                         let ts: Vec<f64> = (0..=32).map(|i| t0 + (t1 - t0) * i as f64 / 32.0).collect();
                         let pts: Vec<P3> = ts.iter().map(|&t| {
                             let q = c2.point(t);

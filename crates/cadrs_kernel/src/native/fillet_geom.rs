@@ -57,7 +57,7 @@ impl Ball {
         let b = self.q[1].p - self.c;
         let r = a.norm();
         let th = a.normalize().dot(&b.normalize()).clamp(-1.0, 1.0).acos();
-        if th < 1e-12 {
+        if th < tol::ANGULAR_FINE {
             return self.q[0].p;
         }
         // Slerp.
@@ -70,14 +70,14 @@ impl Ball {
     pub fn arc(&self) -> Option<(Curve, f64, f64)> {
         if self.flat {
             let (c, l) = Curve::line(self.q[0].p, self.q[1].p);
-            return (l > 1e-12).then_some((c, 0.0, l));
+            return (l > tol::DEGENERATE).then_some((c, 0.0, l));
         }
         let a = self.q[0].p - self.c;
         let b = self.q[1].p - self.c;
         let r = a.norm();
         let x = a.normalize();
         let yv = b - x * b.dot(&x);
-        if yv.norm() < 1e-12 * (1.0 + r) || r < 1e-12 {
+        if yv.norm() < tol::REL_FINE * (1.0 + r) || r < tol::DEGENERATE {
             return None;
         }
         let y = yv.normalize();
@@ -106,7 +106,7 @@ impl Ball {
         }
         let (a, o) = (a - self.c, o - self.c);
         let whole = a.angle(&o);
-        if whole < 1e-12 { 0.0 } else { a.angle(&(x - self.c)) / whole }
+        if whole < tol::ANGULAR_FINE { 0.0 } else { a.angle(&(x - self.c)) / whole }
     }
 }
 
@@ -551,7 +551,7 @@ fn exact_flat(kind: Exact, b: &Ball, spine: &Spine) -> Option<Strip> {
             let ((h0, r0), (h1, r1)) = (ring(&q0), ring(&q1));
             let rail = |h: f64, rr: f64| Curve::Circle { c: c + z * h, x: *x, y: yy, r: rr };
             let rails = [rail(h0, r0), rail(h1, r1)];
-            let tol = 1e-12 * (1.0 + r0.max(r1));
+            let tol = tol::REL_FINE * (1.0 + r0.max(r1));
             let surf = if (h1 - h0).abs() < tol {
                 Surface::Plane { f: Frame { o: c + z * h0, x: *x, y: yy, z } }
             } else if (r1 - r0).abs() < tol {
@@ -576,7 +576,7 @@ fn section_cps(b: &Ball) -> Option<[H; 3]> {
     let e = b.q[1].p - b.c;
     let r = 0.5 * (a.norm() + e.norm());
     // A ball of no size (a radius law reaching 0): the section is a point.
-    if r < 1e-12 * (1.0 + b.c.coords.abs().max()) {
+    if r < tol::REL_FINE * (1.0 + b.c.coords.abs().max()) {
         return Some([hom(&b.c, 1.0); 3]);
     }
     let half = 0.5 * a.normalize().dot(&e.normalize()).clamp(-1.0, 1.0).acos();

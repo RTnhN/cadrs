@@ -88,7 +88,7 @@ pub fn split(k: &mut NativeKernel, body: BodyId, tool: &SplitTool, source: u64) 
                     let e = &r.body.edges[c.edge];
                     for q in [e.point(e.t[0]), e.point(e.mid_t())] {
                         let (u, v) = tf.surf.project(&q, None);
-                        if super::classify::in_face(&polys, &tf.surf, P2::new(u, v), 1e-6) == super::classify::InFace::Outside {
+                        if super::classify::in_face(&polys, &tf.surf, P2::new(u, v), tol::POINT) == super::classify::InFace::Outside {
                             return Err(KernelError::InvalidParameter("The split face doesn't reach across the part".into()));
                         }
                     }
@@ -200,11 +200,11 @@ pub fn face_tool(k: &mut NativeKernel, body: BodyId, faces: &[FaceId], source: u
             let (p, q) = (pts[i].coords - c, pts[(i + 1) % pts.len()].coords - c);
             n += p.cross(&q);
         }
-        if n.norm() < 1e-12 {
+        if n.norm() < tol::DEGENERATE {
             return Err(KernelError::InvalidParameter("An open loop of the faces isn't planar".into()));
         }
         let n = n.normalize();
-        if pts.iter().any(|p| (p.coords - c).dot(&n).abs() > 1e-6) {
+        if pts.iter().any(|p| (p.coords - c).dot(&n).abs() > tol::POINT) {
             return Err(KernelError::InvalidParameter("An open loop of the faces isn't planar".into()));
         }
         let fr = Frame::from_z(P3::from(c), n);

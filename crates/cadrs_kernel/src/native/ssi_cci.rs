@@ -86,7 +86,7 @@ pub fn curve_curve(a: &Curve, a0: f64, a1: f64, b: &Curve, b0: f64, b1: f64, tol
     for p in pa.iter().chain(&pb) {
         size = size.max(p.size);
     }
-    let small = (1e-6 * size).max(tol * 0.1);
+    let small = (tol::REL_POINT * size).max(tol * 0.1);
     let mut stack: Vec<(Piece, Piece)> = Vec::new();
     for x in &pa {
         for y in &pb {

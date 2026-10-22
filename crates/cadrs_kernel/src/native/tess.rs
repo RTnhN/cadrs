@@ -244,7 +244,7 @@ impl<'a> Domain<'a> {
         }
         // A period must be a real length.
         for p in &mut per {
-            if p.is_some_and(|(_, w)| !(w.is_finite() && w > 1e-12)) {
+            if p.is_some_and(|(_, w)| !(w.is_finite() && w > tol::ROUNDOFF_FINE)) {
                 *p = None;
             }
         }
@@ -453,7 +453,7 @@ fn chain_loop(mut parts: Vec<Vec<BPt>>, dom: &Domain, tol: f64, ang: f64) -> Vec
         let (a, b) = (last(c), parts[(k + 1) % n][0]);
         // A jump between coedges at one point in space: along a pole.
         let gap = b.uv - a.uv;
-        if gap.norm() > 1e-12 * (1.0 + a.uv.coords.norm()) && (a.p - b.p).norm() <= tol {
+        if gap.norm() > tol::REL_FINE * (1.0 + a.uv.coords.norm()) && (a.p - b.p).norm() <= tol {
             let turns: f64 = (0..2).filter_map(|d| dom.per[d].map(|(_, per)| (gap[d] / per).abs())).fold(0.0, f64::max);
             let m = pole_points(turns, turns * TAU / ang.max(0.05));
             out.extend((1..m).map(|i| BPt { uv: a.uv + gap * (i as f64 / m as f64), p: a.p }));
@@ -510,7 +510,7 @@ fn surface_loops(body: &Body, f: &Face, loops: &[Vec<BPt>], dom: &Domain) -> Vec
         .map(|(l, pts)| {
             let n = pts.len();
             let area = 0.5 * (0..n).map(|i| pts[i].uv.x * pts[(i + 1) % n].uv.y - pts[i].uv.y * pts[(i + 1) % n].uv.x).sum::<f64>().abs();
-            (dom.per[0].is_some() || dom.per[1].is_some()) && l.iter().all(|c| body.edges[c.edge].degenerate || uses[&c.edge] == 2) && area <= 1e-6 * full
+            (dom.per[0].is_some() || dom.per[1].is_some()) && l.iter().all(|c| body.edges[c.edge].degenerate || uses[&c.edge] == 2) && area <= tol::REL_POINT * full
         })
         .collect()
 }
@@ -568,7 +568,7 @@ fn steps(dom: &Domain, ub: (f64, f64), vb: (f64, f64), defl: f64, ang: f64) -> (
             let v = vb.0 + (vb.1 - vb.0) * j as f64 / n as f64;
             let d = dom.d2(u, v);
             let nn = d[1].cross(&d[2]);
-            if nn.norm() < 1e-12 {
+            if nn.norm() < tol::DEGENERATE {
                 continue;
             }
             let nn = nn.normalize();
@@ -576,19 +576,19 @@ fn steps(dom: &Domain, ub: (f64, f64), vb: (f64, f64), defl: f64, ang: f64) -> (
             let svv = d[5].dot(&nn).abs();
             cu = cu.max(suu);
             cv = cv.max(svv);
-            let lu = d[1].norm().max(1e-12);
-            let lv = d[2].norm().max(1e-12);
+            let lu = d[1].norm().max(tol::DEGENERATE);
+            let lv = d[2].norm().max(tol::DEGENERATE);
             ku = ku.max(suu / lu);
             kv = kv.max(svv / lv);
         }
     }
     let step = |c: f64, k: f64| -> f64 {
-        if c < 1e-12 {
+        if c < tol::DEGENERATE {
             return f64::INFINITY;
         }
         let by_defl = (8.0 * defl / c).sqrt();
         // The same angular step as the edges (`curve::arc_step`): half of `ang`.
-        let by_ang = if k > 1e-12 { 0.5 * ang / k } else { f64::INFINITY };
+        let by_ang = if k > tol::DEGENERATE { 0.5 * ang / k } else { f64::INFINITY };
         by_defl.min(by_ang)
     };
     (step(cu, ku), step(cv, kv))
@@ -608,7 +608,7 @@ fn mean_speeds(dom: &Domain, ub: (f64, f64), vb: (f64, f64)) -> Option<(f64, f64
         }
     }
     let (su, sv) = (su / k as f64, sv / k as f64);
-    (su > 1e-12 && sv > 1e-12 && su.is_finite() && sv.is_finite()).then_some((su, sv))
+    (su > tol::DEGENERATE && sv > tol::DEGENERATE && su.is_finite() && sv.is_finite()).then_some((su, sv))
 }
 
 /// Interior points on a grid stepped by the surface's curvature, inside the loops and clear of
@@ -922,7 +922,7 @@ pub fn mesh_face_with(body: &Body, f: &Face, es: &[(Vec<f64>, Vec<P3>)], p: &Tes
     if !extent.is_finite() {
         return FaceMesh::default();
     }
-    let tol = (1e-6 * extent).max(1e-10);
+    let tol = (tol::REL_POINT * extent).max(1e-10);
     let dom = Domain::new(&f.surf, tol);
     let mut bloops = boundary(body, f, es, &dom, p, tol);
     let whole = surface_loops(body, f, &bloops, &dom);
@@ -1140,7 +1140,7 @@ fn triangulate(s: &Setup, p: &TessParams, refine: bool) -> FaceMesh {
         }
         let snap = tol::REL * extent;
         // In rows across the face, so each insertion's walk starts next to it.
-        let row = (extent * 1e-2).max(1e-12);
+        let row = (extent * 1e-2).max(tol::DEGENERATE);
         adds.sort_by(|a, b| {
             let (ra, rb) = ((a.at.y / row).floor(), (b.at.y / row).floor());
             ra.total_cmp(&rb).then(if ra as i64 % 2 == 0 { a.at.x.total_cmp(&b.at.x) } else { b.at.x.total_cmp(&a.at.x) })

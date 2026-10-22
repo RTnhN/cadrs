@@ -37,7 +37,7 @@ fn meet(surfs: &[&Surface], p: P3) -> Option<P3> {
         let mut r = nalgebra::DVector::<f64>::zeros(surfs.len());
         for (i, s) in surfs.iter().enumerate() {
             let d = super::ssi::sdist(s, &x);
-            let e = 1e-6;
+            let e = tol::DIFF_STEP;
             let g = V3::new(
                 (super::ssi::sdist(s, &(x + V3::x() * e)) - super::ssi::sdist(s, &(x - V3::x() * e))) / (2.0 * e),
                 (super::ssi::sdist(s, &(x + V3::y() * e)) - super::ssi::sdist(s, &(x - V3::y() * e))) / (2.0 * e),
@@ -50,7 +50,7 @@ fn meet(surfs: &[&Surface], p: P3) -> Option<P3> {
         }
         // Minimum-norm least-squares step.
         let svd = jt.clone().svd(true, true);
-        let dx = svd.solve(&r, 1e-12).ok()?;
+        let dx = svd.solve(&r, tol::ROUNDOFF_FINE).ok()?;
         let step = V3::new(dx[0], dx[1], dx[2]);
         x += step;
         if step.norm() < 1e-14 * (1.0 + x.coords.norm()) {
@@ -91,9 +91,9 @@ fn tangent_lines(b: &Body, surfs: &[Surface], ef: &[Vec<usize>]) -> Vec<(usize, 
             let mut s = 0.0;
             for _ in 0..30 {
                 let f = super::ssi::sdist(&surfs[fs[0]], &(q + na * s));
-                let h = 1e-6 * (1.0 + len);
+                let h = tol::DIFF_STEP * (1.0 + len);
                 let g = (super::ssi::sdist(&surfs[fs[0]], &(q + na * (s + h))) - super::ssi::sdist(&surfs[fs[0]], &(q + na * (s - h)))) / (2.0 * h);
-                if g.abs() < 1e-12 {
+                if g.abs() < tol::DEGENERATE {
                     break;
                 }
                 let ds = f / g;
@@ -107,7 +107,7 @@ fn tangent_lines(b: &Body, surfs: &[Surface], ef: &[Vec<usize>]) -> Vec<(usize, 
         if moved.len() != 3 {
             continue;
         }
-        let Some(dir) = (moved[2] - moved[0]).try_normalize(1e-12) else { continue };
+        let Some(dir) = (moved[2] - moved[0]).try_normalize(tol::DEGENERATE) else { continue };
         let dir = if dir.dot(&d) < 0.0 { -dir } else { dir };
         let line = Curve::Line { o: moved[0], d: dir };
         // Still a line on both new surfaces, and still tangent there.
@@ -130,7 +130,7 @@ fn line_meet(c: &Curve, surfs: &[&Surface], p: P3) -> Option<P3> {
     if surfs.is_empty() {
         return None;
     }
-    let h = 1e-6 * (1.0 + p.coords.norm());
+    let h = tol::DIFF_STEP * (1.0 + p.coords.norm());
     let newton = |mut t: f64| -> Option<f64> {
         for _ in 0..50 {
             let (mut num, mut den) = (0.0, 0.0);
@@ -229,7 +229,7 @@ pub(super) fn nurbs_iso(n: &super::nurbs::NurbsSurface, t: f64, along_v: bool) -
 /// The points where a surface collapses: a cone's apex, a sphere's poles.
 fn singular_points(s: &Surface) -> Vec<P3> {
     match s {
-        Surface::Cone { f, r, a } if a.sin().abs() > 1e-12 => vec![f.o + f.z * (-r / a.tan())],
+        Surface::Cone { f, r, a } if a.sin().abs() > tol::ANGULAR_FINE => vec![f.o + f.z * (-r / a.tan())],
         Surface::Sphere { f, r } => vec![f.o + f.z * *r, f.o - f.z * *r],
         _ => vec![],
     }
@@ -248,11 +248,11 @@ pub fn replace_surfaces(b: &Body, surfs: &[Surface]) -> Result<Body> {
 /// two parallel sweeps finds nothing to follow when their profiles cross at a point).
 fn swept_line(surfs: &[Surface], fs: &[usize], old: &Curve, p0: &P3, p1: &P3) -> Option<Curve> {
     let Curve::Line { d, .. } = old else { return None };
-    let d = d.try_normalize(1e-12)?;
+    let d = d.try_normalize(tol::DEGENERATE)?;
     let along = |s: &Surface| match s {
-        Surface::Extrusion { d: e, .. } => e.normalize().cross(&d).norm() < 1e-12,
-        Surface::Cylinder { f, .. } => f.z.cross(&d).norm() < 1e-12,
-        Surface::Plane { f } => f.x.cross(&f.y).dot(&d).abs() < 1e-12,
+        Surface::Extrusion { d: e, .. } => e.normalize().cross(&d).norm() < tol::ANGULAR_FINE,
+        Surface::Cylinder { f, .. } => f.z.cross(&d).norm() < tol::ANGULAR_FINE,
+        Surface::Plane { f } => f.x.cross(&f.y).dot(&d).abs() < tol::ANGULAR_FINE,
         _ => false,
     };
     if fs.len() != 2 || fs[0] == fs[1] || !fs.iter().all(|&f| along(&surfs[f])) || fs.iter().all(|&f| matches!(surfs[f], Surface::Plane { .. })) {
@@ -427,7 +427,7 @@ fn slide_seam_ends(b: &Body, out: &mut Body, surfs: &[Surface], ef: &[Vec<usize>
         let surf = &b.faces[f].surf;
         let size = 1.0 + se.point(se.t[0]).coords.norm();
         let poles = singular_points(surf);
-        let at_pole = |p: &P3| poles.iter().any(|q| (q - p).norm() < 1e-9 * size);
+        let at_pole = |p: &P3| poles.iter().any(|q| (q - p).norm() < tol::REL * size);
         // An iso-u line round u, or an iso-v line round v (a torus's other seam).
         let uv: Vec<(f64, f64)> = (0..=4).map(|i| surf.project(&se.point(se.t[0] + (se.t[1] - se.t[0]) * i as f64 / 4.0), None)).collect();
         let flat = |x: &dyn Fn(&(f64, f64)) -> f64| uv.iter().all(|q| { let d = (x(q) - x(&uv[0])).rem_euclid(TAU); d.min(TAU - d) <= 1e-7 });
@@ -478,7 +478,7 @@ fn slide_seam_ends(b: &Body, out: &mut Body, surfs: &[Surface], ef: &[Vec<usize>
             let t0 = unwrap_near(c.closest(&out.verts[ea.v[0]].p, -PI, PI), ea.t[0], TAU);
             let t1 = t0 + (c.closest(&out.verts[ez.v[1]].p, -PI, PI) - t0).rem_euclid(TAU);
             let rel = (ea.t[1] - t0).rem_euclid(TAU);
-            if rel > 1e-9 && rel < t1 - t0 - 1e-9 {
+            if rel > tol::ROUNDOFF && rel < t1 - t0 - tol::ROUNDOFF {
                 continue;
             }
             let q = c.point(0.5 * (t0 + t1));
@@ -684,7 +684,7 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
         let (p0, p1) = (out.verts[ed.v[0]].p, out.verts[ed.v[1]].p);
         if !moved {
             // Same curve; the ends may have moved along it.
-            if ed.degenerate || ((p0 - b.verts[ed.v[0]].p).norm() <= 1e-12 && (p1 - b.verts[ed.v[1]].p).norm() <= 1e-12) {
+            if ed.degenerate || ((p0 - b.verts[ed.v[0]].p).norm() <= tol::DEGENERATE && (p1 - b.verts[ed.v[1]].p).norm() <= tol::DEGENERATE) {
                 continue;
             }
             if let Some(t) = slide_range(ed, &p0, &p1) {
@@ -697,7 +697,7 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
             // curve gets.
             if fs.len() != 2 {
                 let q = ed.point(ed.t[0] + (ed.t[1] - ed.t[0]) * 0.25);
-                let dir0 = ed.curve.tangent(ed.t[0]).try_normalize(1e-12).unwrap_or_else(V3::zeros);
+                let dir0 = ed.curve.tangent(ed.t[0]).try_normalize(tol::DEGENERATE).unwrap_or_else(V3::zeros);
                 let (t0, t1) = param_range(&ed.curve, &p0, &p1, ed.v[0] == ed.v[1], &q, &dir0);
                 out.edges[e].t = if t0 <= t1 { [t0, t1] } else { [t1, t0] };
                 continue;
@@ -724,7 +724,7 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
                     let along_v = (ua - ub).abs() <= (va - vb).abs();
                     let (u, v) = s.project(&p0, None);
                     let ((u0, u1), (v0, v1)) = n.range();
-                    let snap = |x: f64, a: f64, b: f64| if (x - a).abs() < 1e-6 * (b - a) { a } else if (x - b).abs() < 1e-6 * (b - a) { b } else { x };
+                    let snap = |x: f64, a: f64, b: f64| if (x - a).abs() < tol::REL_POINT * (b - a) { a } else if (x - b).abs() < tol::REL_POINT * (b - a) { b } else { x };
                     let iso = if along_v { nurbs_iso(n, snap(u, u0, u1), true) } else { nurbs_iso(n, snap(v, v0, v1), false) };
                     Curve::Nurbs(std::sync::Arc::new(iso))
                 }
@@ -732,7 +732,7 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
                     // (Through the end that isn't a pole: every iso line passes a pole. An
                     // iso-v line where the old seam ran round u: a torus's other seam.)
                     let size = 1.0 + p0.coords.norm();
-                    let p = if singular_points(s).iter().any(|q| (q - p0).norm() < 1e-9 * size) { p1 } else { p0 };
+                    let p = if singular_points(s).iter().any(|q| (q - p0).norm() < tol::REL * size) { p1 } else { p0 };
                     let old = &b.faces[fs[0]].surf;
                     let (ua, va) = old.project(&ed.point(ed.t[0]), None);
                     let (ub, vb) = old.project(&ed.point(ed.mid_t()), None);
@@ -795,7 +795,7 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
                 eprintln!("edge {e} faces {fs:?} ({:?} × {:?}): {:?}", sa.kind(), sb.kind(), best.as_ref().map(|b| (b.0, format!("{:?}", b.1).chars().take(12).collect::<String>())));
             }
             match best {
-                Some((d, c)) if d <= 1e-6 => c,
+                Some((d, c)) if d <= tol::POINT => c,
                 // None through both ends (the general intersection's sampling stepped over a
                 // sliver of it: a huge drafted cylinder's arc): traced between them.
                 _ => trace_between(sa, sb, ed, (b.verts[ed.v[0]].p, b.verts[ed.v[1]].p), p0, p1).ok_or_else(|| KernelError::InvalidGeometry { op: "local operation", why: "moved faces no longer meet along an edge".into() })?,
@@ -807,7 +807,7 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
         let quarter = ed.point(ed.t[0] + (ed.t[1] - ed.t[0]) * 0.25);
         // The way the old edge left its start (its direction survives the move better than
         // any of its points).
-        let dir0 = ed.curve.tangent(ed.t[0]).try_normalize(1e-12).unwrap_or_else(V3::zeros);
+        let dir0 = ed.curve.tangent(ed.t[0]).try_normalize(tol::DEGENERATE).unwrap_or_else(V3::zeros);
         let (curve, (t0, t1)) = match closed_arc(&curve, &p0, &p1, ed.v[0] == ed.v[1], &dir0) {
             Some((c, t0, t1)) => (c, (t0, t1)),
             None => {
@@ -1118,7 +1118,7 @@ fn trace_between(sa: &Surface, sb: &Surface, ed: &super::topo::Edge, old: (P3, P
             let f = i as f64 / n as f64;
             let t = ed.t[0] + (ed.t[1] - ed.t[0]) * f;
             let q = ed.point(t) + (p0 - old.0) * (1.0 - f) + (p1 - old.1) * f;
-            let cut = Surface::Plane { f: Frame::from_z(q, ed.curve.tangent(t).try_normalize(1e-12)?) };
+            let cut = Surface::Plane { f: Frame::from_z(q, ed.curve.tangent(t).try_normalize(tol::DEGENERATE)?) };
             pts.push(meet(&[sa, sb, &cut], q)?);
         }
         pts.push(p1);
@@ -1126,7 +1126,7 @@ fn trace_between(sa: &Surface, sb: &Surface, ed: &super::topo::Edge, old: (P3, P
         for w in pts.windows(2) {
             ts.push(ts[ts.len() - 1] + (w[1] - w[0]).norm());
         }
-        if ts[n] < 1e-9 * size {
+        if ts[n] < tol::REL * size {
             return None;
         }
         let c = Curve::Nurbs(std::sync::Arc::new(NurbsCurve::interpolate(&pts, &ts, 3, None, None)));
@@ -1189,11 +1189,11 @@ fn slide_range(ed: &super::topo::Edge, p0: &P3, p1: &P3) -> Option<[f64; 2]> {
         }
         Curve::Nurbs(n) => {
             let (a, z) = n.range();
-            let loop_ = (c.point(a) - c.point(z)).norm() < 1e-9 * size;
+            let loop_ = (c.point(a) - c.point(z)).norm() < tol::REL * size;
             let passes = |p: &P3| {
                 let mut ts = nurbs_passes(c, p);
                 if loop_ {
-                    let ends: Vec<f64> = ts.iter().filter_map(|&x| if (x - a).abs() < 1e-9 * (z - a) { Some(z) } else if (z - x).abs() < 1e-9 * (z - a) { Some(a) } else { None }).collect();
+                    let ends: Vec<f64> = ts.iter().filter_map(|&x| if (x - a).abs() < tol::REL * (z - a) { Some(z) } else if (z - x).abs() < tol::REL * (z - a) { Some(a) } else { None }).collect();
                     ts.extend(ends);
                 }
                 ts
@@ -1274,7 +1274,7 @@ fn nurbs_passes(c: &Curve, p: &P3) -> Vec<f64> {
         let right = if i == N { f64::MAX } else { d[i + 1] };
         if d[i] <= left && d[i] <= right {
             let t = c.closest(p, ts[i.saturating_sub(1)], ts[(i + 1).min(N)]);
-            if (c.point(t) - p).norm() < 1e-6 * scale && !out.iter().any(|x| (x - t).abs() < (b - a) * 1e-6) {
+            if (c.point(t) - p).norm() < tol::REL_POINT * scale && !out.iter().any(|x| (x - t).abs() < (b - a) * tol::REL_POINT) {
                 out.push(t);
             }
         }
@@ -1387,7 +1387,7 @@ pub fn offset_surface(s: &Surface, sense: bool, d: f64) -> Option<Surface> {
             let pole = |k: usize| sides[k].iter().all(|p| same(p, &sides[k][0]));
             // (Nor a rational one: past its domain its weights can reach zero.)
             let w0 = n.cps[0][0].w;
-            let rational = n.cps.iter().flatten().any(|h| (h.w - w0).abs() > 1e-12 * w0.abs());
+            let rational = n.cps.iter().flatten().any(|h| (h.w - w0).abs() > tol::REL_FINE * w0.abs());
             let grow = |(a, b): (f64, f64), k: usize| {
                 if rational {
                     return (a, b);
@@ -1400,10 +1400,10 @@ pub fn offset_surface(s: &Surface, sense: bool, d: f64) -> Option<Surface> {
             let (uc, vc) = ((a0 + a1) / 2.0, (b0 + b1) / 2.0);
             let normal = |u: f64, v: f64| {
                 let dd = s.d2(u, v);
-                if dd[1].cross(&dd[2]).norm() > 1e-12 * (dd[1].norm_squared() + dd[2].norm_squared()) {
+                if dd[1].cross(&dd[2]).norm() > tol::REL_FINE * (dd[1].norm_squared() + dd[2].norm_squared()) {
                     return s.normal(u, v);
                 }
-                s.normal(u + (uc - u) * 1e-6, v + (vc - v) * 1e-6)
+                s.normal(u + (uc - u) * tol::DIFF_STEP, v + (vc - v) * tol::DIFF_STEP)
             };
             // A smooth pole (its normals from all round agree) offsets to a point: every grid
             // point on it that one point, so the offset surface collapses there too (a loop
@@ -1431,7 +1431,7 @@ pub fn offset_surface(s: &Surface, sense: bool, d: f64) -> Option<Surface> {
             };
             let poles: Vec<Option<P3>> = (0..4).map(pole_point).collect();
             let at = |u: f64, v: f64| {
-                let (eu, ev) = (1e-12 * (a1 - a0), 1e-12 * (b1 - b0));
+                let (eu, ev) = (tol::REL_FINE * (a1 - a0), tol::REL_FINE * (b1 - b0));
                 let on = [(u - a0).abs() <= eu, (u - a1).abs() <= eu, (v - b0).abs() <= ev, (v - b1).abs() <= ev];
                 match (0..4).find_map(|k| if on[k] { poles[k] } else { None }) {
                     Some(q) => q,
@@ -1554,7 +1554,7 @@ pub fn offset_sharp(b: &Body, dist: &[f64]) -> Result<Body> {
 fn crossed_face(b: &Body, out: &Body) -> Option<(usize, usize)> {
     let ef = b.edge_faces();
     let line = |body: &Body, e: usize| match body.edges[e].curve {
-        Curve::Line { o, d } if !body.edges[e].degenerate => d.try_normalize(1e-12).map(|d| (o, d)),
+        Curve::Line { o, d } if !body.edges[e].degenerate => d.try_normalize(tol::DEGENERATE).map(|d| (o, d)),
         _ => None,
     };
     // The part of q − o square to d.
@@ -1571,13 +1571,13 @@ fn crossed_face(b: &Body, out: &Body) -> Option<(usize, usize)> {
         for k in 0..2 {
             let (ea, eb) = (l[k].edge, l[k + 2].edge);
             let (Some((oa, da)), Some((ob, db)), Some((na, nda)), Some((nb, _))) = (line(b, ea), line(b, eb), line(out, ea), line(out, eb)) else { continue };
-            if da.cross(&db).norm() > 1e-9 {
+            if da.cross(&db).norm() > tol::ANGULAR {
                 continue;
             }
             let (w0, w1) = (across(oa, ob, da), across(na, nb, nda));
             // The width across the face after the move, as a share of the width before.
             let share = w0.dot(&w1) / w0.norm_squared();
-            if share < -1e-9 && worst.is_none_or(|(x, _, _)| share < x) {
+            if share < -tol::ROUNDOFF && worst.is_none_or(|(x, _, _)| share < x) {
                 worst = Some((share, fi, k));
             }
         }
@@ -1651,7 +1651,7 @@ fn union_offset(b: &Body, dist: &[f64], bot: usize, top: usize, sides: &[(V2, f6
     let mut raw: Vec<P2> = Vec::new();
     for i in 0..k {
         let (a, c) = (sides[i], sides[(i + 1) % k]);
-        if a.0.perp(&c.0).abs() > 1e-12 {
+        if a.0.perp(&c.0).abs() > tol::ANGULAR_FINE {
             raw.push(meet(&a, &c));
         } else {
             raw.push(corners[i] + a.0 * a.2);
@@ -1659,7 +1659,7 @@ fn union_offset(b: &Body, dist: &[f64], bot: usize, top: usize, sides: &[(V2, f6
         }
     }
     let scale = 1.0 + raw.iter().map(|p| p.coords.norm()).fold(0.0, f64::max);
-    let tol = 1e-9 * scale;
+    let tol = tol::REL * scale;
     raw.dedup_by(|x, y| (*x - *y).norm() < tol);
     while raw.len() > 1 && (raw[0] - raw[raw.len() - 1]).norm() < tol {
         raw.pop();
@@ -1731,7 +1731,7 @@ fn positive_region(raw: &[P2], tol: f64) -> Vec<Vec<P2>> {
             if den.abs() > 1e-15 * len2.sqrt() * e.norm().max(1e-300) {
                 let t = (p - a).perp(&e) / den;
                 let s = (p - a).perp(&d) / den;
-                if t > 0.0 && t < 1.0 && (-1e-12..=1.0 + 1e-12).contains(&s) {
+                if t > 0.0 && t < 1.0 && (-tol::ROUNDOFF_FINE..=1.0 + tol::ROUNDOFF_FINE).contains(&s) {
                     ts.push(t);
                 }
             } else {
@@ -1811,7 +1811,7 @@ fn prism_offset(b: &Body, dist: &[f64]) -> Option<Result<Body>> {
     }
     let normals: Vec<V3> = normals.into_iter().flatten().collect();
     let (bot, top) = (0..b.faces.len()).flat_map(|i| (0..b.faces.len()).map(move |j| (i, j))).find(|&(i, j)| {
-        i != j && normals[i].dot(&normals[j]) < -1.0 + 1e-12 && (0..b.faces.len()).all(|k| k == i || k == j || normals[k].dot(&normals[i]).abs() < 1e-12)
+        i != j && normals[i].dot(&normals[j]) < -1.0 + tol::ANGULAR_FINE && (0..b.faces.len()).all(|k| k == i || k == j || normals[k].dot(&normals[i]).abs() < tol::ANGULAR_FINE)
     })?;
     if b.faces[bot].loops.len() != 1 || b.faces[top].loops.len() != 1 {
         return None;
@@ -1849,7 +1849,7 @@ fn prism_offset(b: &Body, dist: &[f64]) -> Option<Result<Body>> {
     // is the union of what it encloses.
     let steps = (0..k).any(|i| {
         let (a, c) = (sides[i], sides[(i + 1) % k]);
-        a.0.perp(&c.0).abs() < 1e-12 && (a.2 - c.2).abs() > 1e-12
+        a.0.perp(&c.0).abs() < tol::ANGULAR_FINE && (a.2 - c.2).abs() > tol::ROUNDOFF_FINE
     });
     if steps {
         return Some(union_offset(b, dist, bot, top, &sides, &corners, o, &fr, n));
@@ -1858,7 +1858,7 @@ fn prism_offset(b: &Body, dist: &[f64]) -> Option<Result<Body>> {
     let dir = |m: &V2| V2::new(-m.y, m.x);
     let meet = |a: &(V2, f64, f64), b: &(V2, f64, f64)| -> Option<P2> {
         let det = a.0.perp(&b.0);
-        if det.abs() < 1e-12 {
+        if det.abs() < tol::DEGENERATE {
             return None;
         }
         let (ca, cb) = (a.1 + a.2, b.1 + b.2);
@@ -1875,7 +1875,7 @@ fn prism_offset(b: &Body, dist: &[f64]) -> Option<Result<Body>> {
         let mut drop: Option<usize> = None;
         for i in 0..n_live {
             let (a, c) = (live[i], live[(i + 1) % n_live]);
-            if a.0.perp(&c.0).abs() < 1e-12 {
+            if a.0.perp(&c.0).abs() < tol::ANGULAR_FINE {
                 if a.0.dot(&c.0) < 0.0 {
                     return Some(union_offset(b, dist, bot, top, &sides, &corners, o, &fr, n));
                 }
@@ -2012,7 +2012,7 @@ pub fn tangent_closure(b: &Body, mut seed: Vec<usize>) -> Vec<usize> {
         }
         let ok = [0.25, 0.5, 0.75].iter().all(|&s| {
             let p = ed.point(ed.t[0] + (ed.t[1] - ed.t[0]) * s);
-            normal(fs[0], &p).dot(&normal(fs[1], &p)) > 1.0 - 1e-6
+            normal(fs[0], &p).dot(&normal(fs[1], &p)) > 1.0 - tol::ANGULAR_POINT
         });
         ok.then_some((fs[0], fs[1]))
     };
@@ -2069,7 +2069,7 @@ pub fn draft(k: &mut NativeKernel, body: BodyId, spec: &DraftSpec) -> Result<OpR
                 // along the pull is sin a; of the two turns, the smaller.
                 let (ca, cb) = (n.dot(&pull), m.dot(&pull));
                 let r = (ca * ca + cb * cb).sqrt();
-                if r < spec.angle.sin().abs() - 1e-12 {
+                if r < spec.angle.sin().abs() - tol::ANGULAR_FINE {
                     return Err(KernelError::InvalidParameter("the face can't reach that angle turning about its hinge".into()));
                 }
                 let phi = cb.atan2(ca);

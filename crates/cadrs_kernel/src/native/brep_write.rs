@@ -32,6 +32,7 @@ use super::nurbs::{dehom, NurbsCurve};
 use super::surface::Surface;
 use super::topo::{Body, Coedge, TOL_MIN};
 use super::xbuild::knot_mults;
+use super::tol;
 
 /// A real as the file holds it: the shortest digits that read back to the same value.
 fn num(x: f64) -> String {
@@ -51,7 +52,7 @@ fn v3(v: &V3) -> String {
 }
 
 fn unit(v: &V3) -> bool {
-    (v.norm() - 1.0).abs() <= 1e-12
+    (v.norm() - 1.0).abs() <= tol::ROUNDOFF_FINE
 }
 
 /// A B-spline curve's record (type 7): 2D (x, y) or 3D poles, weights when rational.

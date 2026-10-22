@@ -53,7 +53,7 @@ impl Chain<'_> {
     fn on(&self, fi: usize, q: &P3) -> bool {
         let f = &self.b.faces[fi];
         let (u, v) = f.surf.project(q, None);
-        if (f.surf.eval(u, v) - q).norm() > 1e-6 {
+        if (f.surf.eval(u, v) - q).norm() > tol::POINT {
             return false;
         }
         let ps = self.polys(fi);
@@ -81,7 +81,7 @@ impl Chain<'_> {
             }
             x
         };
-        while left > 1e-12 {
+        while left > tol::ROUNDOFF_FINE {
             let step = h.min(left);
             let x = onto(cur, q + dir * step);
             let (x, used) = if cur == own && !self.on(own, &x) {
@@ -176,13 +176,13 @@ impl Chain<'_> {
         };
         // Faces tangent at the edge (or a failed solve) give no section, not a NaN one.
         let finite = |q: &P3| q.coords.iter().all(|x| x.is_finite());
-        if !finite(&c1) || !finite(&c2) || (c1 - p).norm() < 1e-12 || (c2 - p).norm() < 1e-12 {
+        if !finite(&c1) || !finite(&c2) || (c1 - p).norm() < tol::DEGENERATE || (c2 - p).norm() < tol::DEGENERATE {
             return Err(KernelError::InvalidGeometry { op: "blend", why: "the blend's section degenerates along the edge".into() });
         }
         let inside = [self.on(faces[0].0, &c1), self.on(faces[1].0, &c2)];
         // The section's plane: through the contacts and the corner.
         let nrm = (c1 - p).cross(&(c2 - p));
-        if nrm.norm() < 1e-12 {
+        if nrm.norm() < tol::DEGENERATE {
             return Err(KernelError::InvalidGeometry { op: "blend", why: "the blend's section degenerates along the edge".into() });
         }
         let nrm = nrm.normalize();
@@ -342,7 +342,7 @@ pub fn chain_tool(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dyn F
     const RAIL_TOL: f64 = 1e-7;
     let (max_step, min_step): (f64, f64) = (1.5, 1e-3);
     // The chain's vertices and its two ends (where the extensions start) are stations.
-    let mut breaks: Vec<f64> = starts.iter().skip(1).copied().chain([0.0, len]).filter(|&sj| sj > total_lo + 1e-6 && sj < total_hi - 1e-6).collect();
+    let mut breaks: Vec<f64> = starts.iter().skip(1).copied().chain([0.0, len]).filter(|&sj| sj > total_lo + tol::POINT && sj < total_hi - tol::POINT).collect();
     breaks.push(total_hi);
     breaks.sort_by(f64::total_cmp);
     let contacts = |st: &Station| -> [P3; 3] {
@@ -357,7 +357,7 @@ pub fn chain_tool(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dyn F
             .map(|i| {
                 let (d0, d1) = (b[i] - a[i], c[i] - b[i]);
                 let (l0, l1) = (d0.norm(), d1.norm());
-                if l0 < 1e-12 || l1 < 1e-12 {
+                if l0 < tol::DEGENERATE || l1 < tol::DEGENERATE {
                     return 0.0;
                 }
                 let th = (d0.dot(&d1) / (l0 * l1)).clamp(-1.0, 1.0).acos();
@@ -474,7 +474,7 @@ pub fn chain_tool(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dyn F
         let mut secs: Vec<(Vec<Piece>, Plane)> = Vec::new();
         let mut last_s = f64::NEG_INFINITY;
         for st in g {
-            if st.s - last_s < 1e-6 {
+            if st.s - last_s < tol::POINT {
                 continue;
             }
             last_s = st.s;

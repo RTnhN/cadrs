@@ -54,7 +54,7 @@ impl Weld {
 }
 
 pub fn mesh_solid(triangles: &[[P3; 3]], tol: f64) -> Result<Body, String> {
-    let tol = if tol.is_finite() && tol > 0.0 { tol } else { 1e-6 };
+    let tol = if tol.is_finite() && tol > 0.0 { tol } else { tol::POINT };
     let mut weld = Weld { tol, cells: HashMap::new(), pts: Vec::new() };
     let mut tris: Vec<[usize; 3]> = Vec::with_capacity(triangles.len());
     for t in triangles {

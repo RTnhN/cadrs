@@ -230,7 +230,7 @@ fn frac_on(a: &Piece2, p: &P2, tol: f64) -> Option<f64> {
             let ang = w.y.atan2(w.x);
             let mut rel = (ang - a0) * sw.signum();
             rel = rel.rem_euclid(TAU);
-            if sw.abs() >= TAU - 1e-12 {
+            if sw.abs() >= TAU - tol::ANGULAR_FINE {
                 rel / TAU
             } else {
                 let s = rel / sw.abs();
@@ -260,7 +260,7 @@ fn faces_in_plane(curves: &[Piece2], tol: f64) -> Vec<Vec<Vec<Piece2>>> {
     for (i, a) in curves.iter().enumerate() {
         let mut ss: Vec<f64> = vec![0.0, 1.0];
         if let Piece2::Arc(_, _, _, sw) = a
-            && sw.abs() >= TAU - 1e-12
+            && sw.abs() >= TAU - tol::ANGULAR_FINE
         {
             ss.push(0.5);
         }

@@ -30,6 +30,7 @@ use super::math::*;
 use super::surface::Surface;
 use super::topo::{co_range, Body, Coedge, TOL_MIN};
 use crate::{BodyId, FaceId, HealOp, History, InputFace, KernelError, OpResult, Result};
+use super::tol;
 
 /// A body being healed, with the input faces each of its faces continues.
 pub struct Healing {
@@ -349,7 +350,7 @@ pub fn fit_edge_ends(b: &mut Body) {
                     if off(k, &p) <= allowed {
                         continue;
                     }
-                    if (e.t[k] - at).abs() > 1e-12 * (hi - lo) {
+                    if (e.t[k] - at).abs() > tol::REL_FINE * (hi - lo) {
                         ok = false;
                         continue;
                     }
@@ -455,7 +456,7 @@ pub fn fix_missing_seams(b: &mut Body) {
                 .sum()
         };
         let (ta, tb) = (travel(&f.loops[0]), travel(&f.loops[1]));
-        if !((ta.abs() - per).abs() < 1e-6 * per && (tb.abs() - per).abs() < 1e-6 * per && ta * tb < 0.0) {
+        if !((ta.abs() - per).abs() < tol::REL_POINT * per && (tb.abs() - per).abs() < tol::REL_POINT * per && ta * tb < 0.0) {
             continue;
         }
         let start = |l: &[Coedge]| {
@@ -464,7 +465,7 @@ pub fn fix_missing_seams(b: &mut Body) {
         };
         let ((va, pa), (vb, pb)) = (start(&f.loops[0]), start(&f.loops[1]));
         let k = ((pa.x - pb.x) / per).round();
-        if (pa.x - pb.x - k * per).abs() > 1e-9 * per || va == vb {
+        if (pa.x - pb.x - k * per).abs() > tol::REL * per || va == vb {
             continue;
         }
         let u = pa.x;
@@ -472,7 +473,7 @@ pub fn fix_missing_seams(b: &mut Body) {
         // Loop a runs in u by ta; the seam goes from a's start (after a's run, at u + ta) to
         // b's start on that side, and back down at u.
         let (lo, hi) = (pa.y.min(pb.y), pa.y.max(pb.y));
-        if hi - lo < 1e-12 {
+        if hi - lo < tol::ROUNDOFF_FINE {
             continue;
         }
         let (v0, v1) = if pa.y < pb.y { (va, vb) } else { (vb, va) };
@@ -714,7 +715,7 @@ pub fn to_bspline(b: &mut Body) {
 /// part in 10⁶ of the face's size.
 fn reproject(b: &Body, fi: usize, s: &Surface) -> Option<Vec<Vec<Coedge>>> {
     let f = &b.faces[fi];
-    let size = b.face_bbox(fi).diagonal().max(1e-9);
+    let size = b.face_bbox(fi).diagonal().max(tol::ROUNDOFF);
     let mut loops = Vec::new();
     for l in &f.loops {
         let mut out: Vec<Coedge> = Vec::new();
@@ -727,7 +728,7 @@ fn reproject(b: &Body, fi: usize, s: &Surface) -> Option<Vec<Vec<Coedge>>> {
             let near = c.pc.point(e.mid_t());
             let pc = super::pcurve::pcurve(s, &e.curve, e.t[0], e.t[1], Some(P2::new(near.x, near.y)));
             let nc = Coedge { pc, ..c.clone() };
-            if !(pc_gap(b, s, &nc) <= e.tol.max(1e-6 * size)) {
+            if !(pc_gap(b, s, &nc) <= e.tol.max(tol::REL_POINT * size)) {
                 return None;
             }
             out.push(nc);

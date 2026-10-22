@@ -672,7 +672,7 @@ impl<'a> Geo<'a> {
             }
             _ => return Ok(None),
         };
-        if t1 - t0 < 1e-12 {
+        if t1 - t0 < tol::ROUNDOFF_FINE {
             return Ok(None);
         }
         // The middle control point: where the end tangents meet (the weight makes it exact).
@@ -979,7 +979,7 @@ pub fn wire_body(segs: &[WireSeg], pts: &[P3], tol: f64) -> Body {
     for p in pts {
         b.add_point(*p);
     }
-    b.fit_tolerances(tol.max(1e-6));
+    b.fit_tolerances(tol.max(tol::POINT));
     b
 }
 
@@ -1058,7 +1058,7 @@ impl<'a> TopoReader<'a> {
                 None => {
                     let (va, vb) = (self.vertex(key.0)?, self.vertex(key.1)?);
                     let (pa, pb) = (self.xb.body.verts[va].p, self.xb.body.verts[vb].p);
-                    let e = if (pb - pa).norm() > 1e-12 { self.xb.edge(Curve::Line { o: pa, d: (pb - pa).normalize() }, va, vb) } else { None };
+                    let e = if (pb - pa).norm() > tol::DEGENERATE { self.xb.edge(Curve::Line { o: pa, d: (pb - pa).normalize() }, va, vb) } else { None };
                     self.segs.insert(key, e);
                     e
                 }

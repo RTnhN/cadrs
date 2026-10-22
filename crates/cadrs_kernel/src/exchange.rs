@@ -16,6 +16,7 @@ use std::fmt::Write as _;
 use nalgebra::{Point3, Vector3};
 
 use crate::{BodyId, Motion, TriMesh};
+use crate::native::tol;
 
 /// A neutral B-rep file format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -90,7 +91,7 @@ impl ImportedModel {
             if let Some(n) = seen.get_mut(o.part) {
                 *n += 1;
             }
-            let moved = (o.placement.linear - nalgebra::Matrix3::identity()).norm() > 1e-12 || o.placement.translation.norm() > 1e-12;
+            let moved = (o.placement.linear - nalgebra::Matrix3::identity()).norm() > tol::ROUNDOFF_FINE || o.placement.translation.norm() > tol::ROUNDOFF_FINE;
             if moved {
                 return true;
             }

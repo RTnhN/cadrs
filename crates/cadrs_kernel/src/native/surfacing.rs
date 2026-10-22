@@ -51,7 +51,7 @@ fn slab(face: &Body, d: f64) -> Result<Body> {
 }
 
 pub fn thicken(k: &mut NativeKernel, spec: &ThickenSpec) -> Result<OpResult> {
-    if !(spec.along >= 0.0 && spec.against >= 0.0 && spec.along + spec.against > 1e-6) {
+    if !(spec.along >= 0.0 && spec.against >= 0.0 && spec.along + spec.against > tol::POINT) {
         return Err(invalid("The thickness must be greater than zero"));
     }
     let mut sheets: Vec<Body> = Vec::new();
@@ -129,7 +129,7 @@ fn thicken_sheet(k: &mut NativeKernel, sheets: &[Body], spec: &ThickenSpec) -> O
         all.append(s);
         normals.push(face_normal(s, 0)?);
     }
-    let sewn = sew_faces(all, 1e-6).ok()?;
+    let sewn = sew_faces(all, tol::POINT).ok()?;
     if sewn.faces.len() != sheets.len() {
         return None;
     }
@@ -166,7 +166,7 @@ fn thicken_sheet(k: &mut NativeKernel, sheets: &[Body], spec: &ThickenSpec) -> O
     let solid = k.get(tid).ok()?.clone();
     let sewn_b = k.get(id).ok()?.clone();
     let (p, nsheet) = face_normal(&sewn_b, 0)?;
-    let fi = (0..solid.faces.len()).find(|&f| !caps.contains(&FaceId(f as u64)) && face_normal(&solid, f).is_some_and(|(q, _)| (q - p).norm() < 1e-6)).unwrap_or(0);
+    let fi = (0..solid.faces.len()).find(|&f| !caps.contains(&FaceId(f as u64)) && face_normal(&solid, f).is_some_and(|(q, _)| (q - p).norm() < tol::POINT)).unwrap_or(0);
     let (_, nsolid) = face_normal(&solid, fi)?;
     let sheet_out = nsheet.dot(&nsolid) > 0.0;
     let along_out = sheet_out == along_is_sewn;
@@ -198,12 +198,12 @@ fn best_plane(pts: &[P3]) -> Option<(P3, V3)> {
     for i in 0..pts.len() {
         n += (pts[i] - c).cross(&(pts[(i + 1) % pts.len()] - c));
     }
-    if n.norm() < 1e-12 {
+    if n.norm() < tol::DEGENERATE {
         return None;
     }
     let n = n.normalize();
     let size = pts.iter().map(|p| (p - c).norm()).fold(0.0, f64::max);
-    pts.iter().all(|p| (p - c).dot(&n).abs() < 1e-6 * (1.0 + size)).then_some((c, n))
+    pts.iter().all(|p| (p - c).dot(&n).abs() < tol::REL_POINT * (1.0 + size)).then_some((c, n))
 }
 
 pub fn fill(k: &mut NativeKernel, spec: &FillSpec) -> Result<OpResult> {

@@ -75,6 +75,7 @@ pub use native::NativeKernel as DefaultKernel;
 use std::fmt;
 
 use nalgebra::{Point3, Vector3};
+use crate::native::tol;
 
 /// Why an operation failed. Each variant carries a message in words for the user; the variant
 /// says what a caller can do about it (e.g. read `EmptyResult` of an Intersect as "no
@@ -372,7 +373,7 @@ pub trait Kernel {
     /// plane normal, from the plane, regions only) and refuses the rest.
     fn extrude_with(&mut self, profile: &Profile, spec: &ExtrudeSpec) -> Result<OpResult> {
         let along = spec.direction.dot(&profile.plane.normal);
-        let normal = (along.abs() - 1.0).abs() < 1e-12;
+        let normal = (along.abs() - 1.0).abs() < tol::ANGULAR_FINE;
         let simple = spec.body == BodyKind::Solid
             && spec.start_offset == 0.0
             && spec.faces.is_empty()
@@ -869,7 +870,7 @@ pub trait Kernel {
         let r = self.boolean(BoolOp::Intersect, a, &[b])?;
         let v = self.mass_properties(r.bodies[0]).map(|m| m.volume).unwrap_or(0.0);
         self.release(r.bodies[0]);
-        Ok(v > 1e-9)
+        Ok(v > tol::ROUNDOFF)
     }
 
     /// A tight axis-aligned bounding box of the body's exact geometry.

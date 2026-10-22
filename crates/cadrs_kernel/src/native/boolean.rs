@@ -227,7 +227,7 @@ impl Pool {
             return;
         }
         let span = (ed.t[1] - ed.t[0]).abs();
-        if t <= ed.t[0] + span * 1e-12 || t >= ed.t[1] - span * 1e-12 {
+        if t <= ed.t[0] + span * tol::REL_FINE || t >= ed.t[1] - span * tol::REL_FINE {
             return;
         }
         if v == ed.v[0] || v == ed.v[1] {
@@ -465,7 +465,7 @@ fn tangent_along_shared_edge(pool: &Pool, fa: &WFace, fb: &WFace, ea: &[usize], 
                 let p = e.curve.point(e.t[0] + (e.t[1] - e.t[0]) * f);
                 let (ua, va) = fa.surf.project(&p, None);
                 let (ub, vb) = fb.surf.project(&p, None);
-                fa.surf.normal(ua, va).dot(&fb.surf.normal(ub, vb)).abs() > 1.0 - 1e-6
+                fa.surf.normal(ua, va).dot(&fb.surf.normal(ub, vb)).abs() > 1.0 - tol::ANGULAR_POINT
             });
             if tangent {
                 return true;
@@ -1253,8 +1253,8 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
                         t = if (t - ic.t0).abs() <= (t - ic.t1).abs() { ic.t0 } else { ic.t1 };
                     }
                     ps.push((t, v));
-                    if ic.closed && ((t - ic.t0).abs() < 1e-12 || (t - ic.t1).abs() < 1e-12) {
-                        ps.push((if (t - ic.t0).abs() < 1e-12 { ic.t1 } else { ic.t0 }, v));
+                    if ic.closed && ((t - ic.t0).abs() < tol::ROUNDOFF_FINE || (t - ic.t1).abs() < tol::ROUNDOFF_FINE) {
+                        ps.push((if (t - ic.t0).abs() < tol::ROUNDOFF_FINE { ic.t1 } else { ic.t0 }, v));
                     }
                 }
             }
@@ -1296,14 +1296,14 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
             }
             if sectioning && !ic.closed {
                 for t in [ic.t0, ic.t1] {
-                    if !ps.iter().any(|(pt, _)| (pt - t).abs() < 1e-12 * (1.0 + t.abs())) {
+                    if !ps.iter().any(|(pt, _)| (pt - t).abs() < tol::REL_FINE * (1.0 + t.abs())) {
                         let v = pool.vertex_tol(ic.c.point(t), ft);
                         ps.push((t, v));
                     }
                 }
             }
             ps.sort_by(|a, b| a.0.total_cmp(&b.0));
-            ps.dedup_by(|a, b| (a.0 - b.0).abs() < 1e-12 && a.1 == b.1);
+            ps.dedup_by(|a, b| (a.0 - b.0).abs() < tol::ROUNDOFF_FINE && a.1 == b.1);
             // Intervals.
             let mut ivs: Vec<(f64, f64, Option<usize>, Option<usize>)> = Vec::new();
             if ic.closed {
@@ -1331,13 +1331,13 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
                 let period = ic.t1 - ic.t0;
                 let mut split: Vec<(f64, f64, Option<usize>, Option<usize>)> = Vec::new();
                 for (ta, tb, va, vb) in ivs {
-                    if tb > ic.t1 + 1e-12 && ta < ic.t1 - 1e-12 {
+                    if tb > ic.t1 + tol::ROUNDOFF_FINE && ta < ic.t1 - tol::ROUNDOFF_FINE {
                         let vend = pool.vertex_tol(ic.c.point(ic.t1), ft);
                         split.push((ta, ic.t1, va, Some(vend)));
-                        if tb - period > ic.t0 + 1e-12 {
+                        if tb - period > ic.t0 + tol::ROUNDOFF_FINE {
                             split.push((ic.t0, tb - period, Some(vend), vb));
                         }
-                    } else if ta >= ic.t1 - 1e-12 {
+                    } else if ta >= ic.t1 - tol::ROUNDOFF_FINE {
                         split.push((ta - period, tb - period, va, vb));
                     } else {
                         split.push((ta, tb, va, vb));
@@ -1621,7 +1621,7 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
                         let q = pc.point(*t);
                         let d = (f.surf.eval(q.x, q.y) - pool.verts[ed.v[k]]).norm();
                         let dc = (ed.curve.point(*t) - pool.verts[ed.v[k]]).norm();
-                        if d > 1e-6 || dc > 1e-6 {
+                        if d > tol::POINT || dc > tol::POINT {
                             eprintln!("cut {c} end {k}: p-curve off by {d:e}, curve off by {dc:e}; {:?} t {:?} surf {:?}", ed.curve, ed.t, f.surf);
                         }
                     }
@@ -2106,7 +2106,7 @@ pub fn split_nonmanifold(b: &mut Body) {
             let w = {
                 let r = q - pu;
                 let r = r - t * r.dot(&t);
-                if r.norm() > 1e-12 { r.normalize() } else { w0 }
+                if r.norm() > tol::DEGENERATE { r.normalize() } else { w0 }
             };
             let ang = w.dot(&bb).atan2(w.dot(&a));
             let ccw = t.cross(&w0);

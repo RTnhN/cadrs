@@ -481,7 +481,7 @@ impl Kernel for NativeKernel {
     }
 
     fn revolve(&mut self, profile: &Profile, axis: Axis, angle: f64) -> Result<OpResult> {
-        let spec = RevolveSpec { full: angle.abs() >= TAU - 1e-12, ..RevolveSpec::solid(axis, Some(angle)) };
+        let spec = RevolveSpec { full: angle.abs() >= TAU - tol::ANGULAR_FINE, ..RevolveSpec::solid(axis, Some(angle)) };
         self.revolve_with(profile, &spec)
     }
 
@@ -799,7 +799,7 @@ impl Kernel for NativeKernel {
                 let x = if z.x.abs() < 0.9 { V3::x() } else { V3::y() };
                 let x = (x - z * x.dot(&z)).normalize();
                 let turn = super::sweep::Turn { plane: Plane::top(), f: Frame { o: axis.origin, x, y: z.cross(&x), z }, up: true };
-                let whole = angle.abs() >= TAU - 1e-12;
+                let whole = angle.abs() >= TAU - tol::ANGULAR_FINE;
                 super::sweep::sweep_body(&b, &super::sweep::BodyMove::Turn(&turn), if whole { TAU } else { angle.abs() }, whole, body.0)?
             }
         };
@@ -824,7 +824,7 @@ impl Kernel for NativeKernel {
         if !(0.0..TAU).contains(&a0) {
             return bad("A cylindrical box's start angle must lie in [0°, 360°)");
         }
-        if !(a1 > a0) || a1 - a0 > TAU + 1e-12 {
+        if !(a1 > a0) || a1 - a0 > TAU + tol::ANGULAR_FINE {
             return bad("A cylindrical box's end angle must come after its start angle, at most a turn past it");
         }
         let z = frame.normal.into_inner();

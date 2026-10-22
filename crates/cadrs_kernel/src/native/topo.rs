@@ -94,7 +94,7 @@ fn parity_orientation(shell: &Body) -> Option<bool> {
         let out = normal.normalize() * twice.signum();
         let p = f.surf.eval(uv.x, uv.y);
         let eps = (1e-4 * size).min(0.1 * room);
-        if !(eps > 1e-9 * size) {
+        if !(eps > tol::REL * size) {
             continue;
         }
         let (behind, front) = (cls.parity_inside(&(p - out * eps)), cls.parity_inside(&(p + out * eps)));

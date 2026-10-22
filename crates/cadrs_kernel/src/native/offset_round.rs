@@ -140,7 +140,7 @@ fn edge_tube(b: &Body, e: usize, r: f64) -> Result<Body> {
                 return Err(KernelError::Unsupported("a tube round an edge curved tighter than its radius"));
             }
             let p0 = ed.point(ed.t[0]);
-            let t = ed.curve.tangent(ed.t[0]).try_normalize(1e-12).ok_or(KernelError::Unsupported("a tube round an edge with no direction"))?;
+            let t = ed.curve.tangent(ed.t[0]).try_normalize(tol::DEGENERATE).ok_or(KernelError::Unsupported("a tube round an edge with no direction"))?;
             let fr = Frame::from_z(p0, t);
             let plane = Plane { origin: p0, x_dir: nalgebra::Unit::new_normalize(fr.x), normal: nalgebra::Unit::new_normalize(t) };
             let prof = Profile::new(plane, vec![Region { outer: Loop { curves: vec![Curve2::Circle { center: nalgebra::Point2::origin(), radius: r, source: None }] }, holes: vec![], source: None }]);
@@ -218,7 +218,7 @@ fn merged(b: &Body) -> Body {
 /// The body grown by a ball of radius d (all faces moved out by d, edges and corners rounded).
 pub fn offset_rounded(b: &Body, dist: &[f64]) -> Result<Body> {
     let d = dist[0];
-    if dist.iter().any(|x| (x - d).abs() > 1e-12) || d <= 0.0 {
+    if dist.iter().any(|x| (x - d).abs() > tol::ROUNDOFF_FINE) || d <= 0.0 {
         return Err(KernelError::Unsupported("rounded offsets with different distances per face"));
     }
     grown_except(b, d, &[])
@@ -556,7 +556,7 @@ pub fn offset_sources(b: &Body, input: BodyId, out: &Body, dist: &[f64], rounded
             }
             // A round: the edge it lies the distance from (nearest within the edge, not at an
             // end: a corner's ball is that far from its edges' ends too), else the vertex.
-            let tol = 1e-6 * size;
+            let tol = tol::REL_POINT * size;
             let off = |d: f64| (d - reach).abs();
             let edge = (0..b.edges.len())
                 .filter(|&e| !b.edges[e].degenerate)
@@ -635,7 +635,7 @@ fn walls_cross(b: &Body, remove: &[usize], t: f64) -> bool {
 /// shrinks to its sharp inset.
 pub fn inset_rounded(b: &Body, dist: &[f64]) -> Result<Body> {
     let t = -dist.iter().copied().fold(0.0, f64::min);
-    if dist.iter().any(|x| *x != 0.0 && (x + t).abs() > 1e-12) || !(t > 0.0) {
+    if dist.iter().any(|x| *x != 0.0 && (x + t).abs() > tol::ROUNDOFF_FINE) || !(t > 0.0) {
         return Err(KernelError::Unsupported("rounded insets with different distances per face"));
     }
     let concave = (0..b.edges.len()).any(|e| !b.edges[e].degenerate && convex(b, e) == Some(false));
@@ -711,7 +711,7 @@ fn face_band(b: &Body, fi: usize, t: f64) -> Result<Body> {
     let f = &b.faces[fi];
     let convex = f.surf.frame().is_some_and(|fr| f.sense == fr.right_handed());
     match &f.surf {
-        Surface::Cylinder { r, .. } | Surface::Sphere { r, .. } if convex && t >= r * (1.0 - 1e-9) => {
+        Surface::Cylinder { r, .. } | Surface::Sphere { r, .. } if convex && t >= r * (1.0 - tol::REL) => {
             return collapsed_round(b, fi, t)?.ok_or(KernelError::Unsupported("a shell thicker than a round's radius"));
         }
         _ => {}
@@ -747,7 +747,7 @@ fn collapsed_round(b: &Body, fi: usize, t: f64) -> Result<Option<Body>> {
                 // α e0 + β e1 with α + β g = a0, α g + β = a1.
                 let g = e0.dot(e1);
                 let det = 1.0 - g * g;
-                (det > 1e-9).then(|| e0 * ((a[0] - g * a[1]) / det) + e1 * ((a[1] - g * a[0]) / det))
+                (det > tol::ROUNDOFF).then(|| e0 * ((a[0] - g * a[1]) / det) + e1 * ((a[1] - g * a[0]) / det))
             }
             [e0, e1, e2] => Some(e0 * a[0] + e1 * a[1] + e2 * a[2]),
             _ => None,
@@ -757,7 +757,7 @@ fn collapsed_round(b: &Body, fi: usize, t: f64) -> Result<Option<Body>> {
     match &f.surf {
         Surface::Cylinder { f: fr, r } => {
             let Some((lo, hi, u0, u1)) = cylinder_domain(b, fi) else { return Ok(None) };
-            if u1 - u0 >= PI - 1e-9 {
+            if u1 - u0 >= PI - tol::ANGULAR {
                 return Ok(None);
             }
             let radial = |u: f64| fr.x * u.cos() + fr.y * u.sin();
@@ -785,13 +785,13 @@ fn collapsed_round(b: &Body, fi: usize, t: f64) -> Result<Option<Body>> {
                     return Ok(None);
                 }
                 let n = x.cross(y).normalize();
-                if !normals.iter().any(|m| m.cross(&n).norm() < 1e-9) {
+                if !normals.iter().any(|m| m.cross(&n).norm() < tol::ANGULAR) {
                     normals.push(n);
                 }
                 mid += (e.point(e.mid_t()) - o).normalize();
             }
             let [n1, n2, n3] = normals[..] else { return Ok(None) };
-            if n1.dot(&n2).abs() > 1e-9 || n2.dot(&n3).abs() > 1e-9 || n3.dot(&n1).abs() > 1e-9 {
+            if n1.dot(&n2).abs() > tol::ANGULAR || n2.dot(&n3).abs() > tol::ANGULAR || n3.dot(&n1).abs() > tol::ANGULAR {
                 return Ok(None);
             }
             // The octant's axes: each plane's normal towards the face.

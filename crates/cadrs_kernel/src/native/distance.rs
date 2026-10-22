@@ -166,7 +166,7 @@ fn cell_box(p: &Piece, c: &Cell) -> Bbox {
                 k2 = k2.max(d2.norm());
             }
             let h = (b - a) / 4.0;
-            bb = bb.grow(1.5 * h * h / 8.0 * k2 + 1e-12);
+            bb = bb.grow(1.5 * h * h / 8.0 * k2 + tol::ROUNDOFF_FINE);
         }
         (Piece::Face { dom, .. }, Cell::Face(u0, u1, v0, v1)) => bb = dom.surf.patch_bbox((*u0, *u1), (*v0, *v1)),
         _ => {}
@@ -298,7 +298,7 @@ fn polish(pa: &Piece, xa: X, pb: &Piece, xb: X, sense: Sense) -> Option<(f64, X,
                 xa = na;
                 xb = nb;
                 fx = fn_;
-                lambda = (lambda / 4.0).max(1e-12);
+                lambda = (lambda / 4.0).max(tol::DEGENERATE);
                 moved = !tiny;
                 break;
             }

@@ -227,7 +227,7 @@ fn make_src(frame: &ViewFrame, body: usize, class: ProjClass, edge: Option<usize
         lo = lo.inf(p);
         hi = hi.sup(p);
     }
-    if (hi - lo).norm() < 1e-6 {
+    if (hi - lo).norm() < tol::POINT {
         return None;
     }
     Some(s)
@@ -402,7 +402,7 @@ impl<'a> Occluders<'a> {
                             let tri = t.map(|i| m.positions[i as usize]);
                             let n = (tri[1] - tri[0]).cross(&(tri[2] - tri[0]));
                             let l = n.norm();
-                            if l < 1e-14 || n.dot(&dir).abs() < 1e-6 * l {
+                            if l < 1e-14 || n.dot(&dir).abs() < tol::REL_POINT * l {
                                 continue;
                             }
                             let (lo, hi) = bounds(tri.iter().map(|p| frame.to_2d(p)));
@@ -445,7 +445,7 @@ impl<'a> Occluders<'a> {
                         if t > 1e-5 && dom.contains(u, v, false) {
                             // Through an edge of two faces, having crossed material on the way
                             // (a hole's wall grazed lengthwise is not material).
-                            if rim.iter().any(|&(t2, b2, f2)| (t2 - t).abs() < 1e-6 && (b2, f2) != (*bi, *fi)) {
+                            if rim.iter().any(|&(t2, b2, f2)| (t2 - t).abs() < tol::POINT && (b2, f2) != (*bi, *fi)) {
                                 let hb = &self.bodies[*bi];
                                 let mid = p + rd * (0.5 * t);
                                 if super::classify::classify_point(hb.body, hb.polys, &mid, 1e-7) == crate::PointClass::Inside {
@@ -529,7 +529,7 @@ fn refine(frame: &ViewFrame, a: &Src, ta: f64, b: &Src, tb: f64) -> Option<(f64,
     let (mut ta, mut tb) = (ta, tb);
     for _ in 0..8 {
         let f = frame.to_2d(&a.point(ta)) - frame.to_2d(&b.point(tb));
-        if f.norm() < 1e-12 {
+        if f.norm() < tol::DEGENERATE {
             break;
         }
         let (ja, jb) = (frame.dir_2d(&a.deriv(ta)), frame.dir_2d(&b.deriv(tb)));
@@ -729,7 +729,7 @@ pub fn project(bodies: &[HlrBody], frame: &ViewFrame, opts: &ProjectOptions) -> 
             (pts.iter().map(|p| frame.to_2d(p)).collect(), pts.iter().map(|p| frame.depth(p)).collect())
         })
         .collect();
-    let cov = 2.0 * tol + 1e-6;
+    let cov = 2.0 * tol + tol::POINT;
     let segs: Vec<(u32, u32)> = polys.iter().enumerate().flat_map(|(i, (p, _))| (0..p.len() - 1).map(move |k| (i as u32, k as u32))).collect();
     let (lo, hi) = bounds(polys.iter().flat_map(|(p, _)| p.iter().copied()));
     let mut grid = Grid::new(lo - V2::repeat(cov), hi + V2::repeat(cov), segs.len());
@@ -750,7 +750,7 @@ pub fn project(bodies: &[HlrBody], frame: &ViewFrame, opts: &ProjectOptions) -> 
                 let p = s.point(t);
                 let (q, d) = (frame.to_2d(&p), frame.depth(&p));
                 let tg = frame.dir_2d(&s.deriv(t));
-                if tg.norm() < 1e-12 {
+                if tg.norm() < tol::DEGENERATE {
                     return false;
                 }
                 let tg = tg.normalize();
@@ -768,7 +768,7 @@ pub fn project(bodies: &[HlrBody], frame: &ViewFrame, opts: &ProjectOptions) -> 
                     let (a, b) = (pts[j], pts[j + 1]);
                     let ab = b - a;
                     let l = ab.norm();
-                    if l < 1e-12 || cross2(&ab, &tg).abs() > PARALLEL * l {
+                    if l < tol::DEGENERATE || cross2(&ab, &tg).abs() > PARALLEL * l {
                         return false;
                     }
                     // Beside the segment, not past its end (a line ending short of `q` leaves
@@ -787,7 +787,7 @@ pub fn project(bodies: &[HlrBody], frame: &ViewFrame, opts: &ProjectOptions) -> 
                         return s.class != ProjClass::Outline;
                     }
                     let od = dep[j] + (dep[j + 1] - dep[j]) * f;
-                    if (od - d).abs() > 1e-6 {
+                    if (od - d).abs() > tol::POINT {
                         return od < d;
                     }
                     (rank(srcs[o.src].class), oi) < (rank(s.class), pi)

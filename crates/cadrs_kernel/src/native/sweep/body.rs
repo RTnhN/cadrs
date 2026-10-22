@@ -34,7 +34,7 @@ impl BodyMove<'_> {
             BodyMove::Straight(d) => {
                 // A line along the sweep sweeps no area.
                 if let Curve::Line { d: ld, .. } = c3
-                    && ld.cross(d).norm() <= 1e-12 * ld.norm()
+                    && ld.cross(d).norm() <= tol::REL_FINE * ld.norm()
                 {
                     return None;
                 }
@@ -248,7 +248,7 @@ fn check_transversal(b: &Body, mv: &BodyMove) -> Result<()> {
     for m in &meshes {
         for (p, n) in m.positions.iter().zip(&m.normals) {
             let v = mv.velocity(p);
-            if v.norm() < 1e-12 * size {
+            if v.norm() < tol::REL_FINE * size {
                 continue;
             }
             let d = v.normalize().dot(&n.normalize());

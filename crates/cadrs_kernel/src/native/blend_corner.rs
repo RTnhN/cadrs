@@ -19,6 +19,7 @@ use super::nurbs::{NurbsCurve, NurbsSurface, H};
 use super::surface::Surface;
 use super::topo::*;
 use crate::*;
+use super::tol;
 
 pub fn fillet_smooth(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], spec: &FilletSpec, setback: f64) -> Result<OpResult> {
     let FilletSize::Radius(r) = spec.size else {
@@ -71,7 +72,7 @@ pub fn fillet_smooth(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], spec:
                 out += f.surf.normal(u, w) * if f.sense { 1.0 } else { -1.0 };
             }
         }
-        let out = out.try_normalize(1e-12).ok_or_else(|| KernelError::InvalidGeometry { op: "smooth corner", why: "the corner has no outside".into() })?;
+        let out = out.try_normalize(tol::DEGENERATE).ok_or_else(|| KernelError::InvalidGeometry { op: "smooth corner", why: "the corner has no outside".into() })?;
         // The ball, its poles square to the corner's outward direction (off the hole).
         let ball = super::blend::ball_frame(vp, rho, any_perp(&out), out)?;
         let ball_src = vec![vec![mark.clone()]; ball.faces.len()];
@@ -158,7 +159,7 @@ fn fill_corner(mut t: Tracked, mark: &FaceSrc, vp: P3, out: V3) -> Result<Tracke
     let g = P3::from(smp.iter().fold(V3::zeros(), |a, x| a + x.p.coords) / smp.len() as f64);
     let to_v = vp - g;
     let c = g + to_v * 0.45;
-    let axis = to_v.try_normalize(1e-12).unwrap_or(out);
+    let axis = to_v.try_normalize(tol::DEGENERATE).unwrap_or(out);
     // Rows by length v ∈ [0, 1): the rim and the row leaning along the neighbours.
     let n = smp.len();
     let params: Vec<f64> = (0..=n).map(|i| if i < n { smp[i].s / total } else { 1.0 }).collect();

@@ -34,6 +34,7 @@ use super::nurbs::{hom, NurbsCurve, NurbsSurface, H};
 use super::surface::Surface;
 use super::topo::{co_range, Body, Coedge, Face, Shell, Solid, TOL_MIN};
 use super::xbuild::{XBuilder, XFace};
+use super::tol;
 
 type R<T> = Result<T, String>;
 
@@ -471,8 +472,8 @@ fn to_curve(g: &GCurve, t0: f64, t1: f64) -> R<Curve> {
             let v = v.normalize();
             match &c {
                 // The offset direction is T × V.
-                Curve::Line { o, d: dir } if dir.cross(&v).norm() > 1e-12 => Curve::Line { o: o + dir.cross(&v).normalize() * *d, d: *dir },
-                Curve::Circle { c: o, x, y, r } if x.cross(y).normalize().cross(&v).norm() < 1e-12 => {
+                Curve::Line { o, d: dir } if dir.cross(&v).norm() > tol::ANGULAR_FINE => Curve::Line { o: o + dir.cross(&v).normalize() * *d, d: *dir },
+                Curve::Circle { c: o, x, y, r } if x.cross(y).normalize().cross(&v).norm() < tol::ANGULAR_FINE => {
                     let r2 = r + d * x.cross(y).normalize().dot(&v);
                     if r2 <= 0.0 {
                         return Err("an offset circle of no radius".into());
@@ -534,7 +535,7 @@ fn offset_surface(d: f64, g: &GSurf, exact: bool) -> R<(Surface, bool)> {
     let (base, same) = to_surface(g, exact)?;
     // Along OCCT's normal: ours, or ours turned round.
     let d = if same { d } else { -d };
-    let pos = |r: f64| if r > 1e-12 { Ok(r) } else { Err("an offset surface of no radius".to_string()) };
+    let pos = |r: f64| if r > tol::ROUNDOFF_FINE { Ok(r) } else { Err("an offset surface of no radius".to_string()) };
     Ok((
         match &base {
             Surface::Plane { f } => Surface::Plane { f: Frame { o: f.o + f.z * d, ..*f } },

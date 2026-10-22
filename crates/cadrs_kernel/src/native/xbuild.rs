@@ -106,7 +106,7 @@ pub fn edge_range(c: &Curve, p0: &P3, p1: &P3, closed: bool) -> Option<(f64, f64
                 return Some((t0, t0 + TAU));
             }
             let mut t1 = param_of(c, p1);
-            while t1 <= t0 + 1e-12 {
+            while t1 <= t0 + tol::ROUNDOFF_FINE {
                 t1 += TAU;
             }
             while t1 > t0 + TAU {
@@ -117,7 +117,7 @@ pub fn edge_range(c: &Curve, p0: &P3, p1: &P3, closed: bool) -> Option<(f64, f64
         Curve::Nurbs(n) if closed => Some(n.range()),
         _ => {
             let (t0, t1) = (param_of(c, p0), param_of(c, p1));
-            if t1 > t0 + 1e-12 { Some((t0, t1)) } else { None }
+            if t1 > t0 + tol::ROUNDOFF_FINE { Some((t0, t1)) } else { None }
         }
     }
 }
@@ -366,7 +366,7 @@ fn pcurve_unsnapped(s: &Surface, c: &Curve, t0: f64, t1: f64, etol: f64) -> Curv
         // An exact p-curve must put the surface on the curve.
         let on = |pc: &Curve| samples(pc).iter().all(|&t| {
             let q = pc.point(t);
-            (s.eval(q.x, q.y) - c.point(t)).norm() < 1e-6
+            (s.eval(q.x, q.y) - c.point(t)).norm() < tol::POINT
         });
         if on(&pc) {
             return pc;
@@ -612,7 +612,7 @@ impl XBuilder {
             return None;
         }
         // Rounding residue (atan2(1e-49, 1)) would reach the triangulator, which rejects it.
-        let small = 1e-12 * (1.0 + (t1 - t0).abs());
+        let small = tol::REL_FINE * (1.0 + (t1 - t0).abs());
         let z = |t: f64| if t.abs() < small { 0.0 } else { t };
         let (t0, t1) = (z(t0), z(t1));
         Some(self.body.add_edge(curve, t0, t1, v0, v1))
@@ -877,7 +877,7 @@ impl XBuilder {
             }
             let sh = shifts(&m);
             let a = area(&sh);
-            if a.abs() < 1e-12 {
+            if a.abs() < tol::DEGENERATE {
                 continue;
             }
             let matches = (a > 0.0) == hint;
@@ -1026,7 +1026,7 @@ impl XBuilder {
                 let s1 = i as f64 / m as f64;
                 let cur = f(s1);
                 if prev.abs() < PI / 2.0 && cur.abs() < PI / 2.0 && prev * cur <= 0.0 {
-                    if cur.abs() < 1e-12 && i == m {
+                    if cur.abs() < tol::ROUNDOFF_FINE && i == m {
                         break; // the next coedge's start
                     }
                     let (mut lo, mut hi) = ((i - 1) as f64 / m as f64, s1);
@@ -1631,7 +1631,7 @@ pub fn orient_shells(b: &mut Body, always: bool) -> usize {
             // The sign of the enclosed volume from a coarse tessellation (exact integration of
             // spline faces would cost far more).
             let shift = bb.center().coords;
-            let defl = (bb.diagonal() * 1e-2).max(1e-6);
+            let defl = (bb.diagonal() * 1e-2).max(tol::POINT);
             let es = super::tess::edge_samples(b, defl, 0.5);
             let vol: f64 = faces
                 .iter()

@@ -136,7 +136,7 @@ pub struct Corner2 {
 pub fn section_loop(c: &Corner2, kind: SectionKind, src: Src) -> Result<(Vec<Piece>, P2, P2)> {
     let cos = c.u1.dot(&c.u2).clamp(-1.0, 1.0);
     let theta = cos.acos();
-    if theta < 1e-6 || theta > PI - 1e-6 {
+    if theta < tol::ANGULAR_POINT || theta > PI - tol::ANGULAR_POINT {
         return Err(KernelError::InvalidGeometry { op: "blend", why: "the faces at the edge are tangent: nothing to blend".into() });
     }
     let bis = (c.u1 + c.u2).normalize();
@@ -209,7 +209,7 @@ fn arc_section_loop(c: &Corner2, centre: P2, c1: P2, c2: P2, r: f64, src: Src) -
 pub(crate) fn ball_in_plane(f1: &Face, f2: &Face, p: &P3, tan: &V3, w1: &V3, w2: &V3, r: f64, convex: bool) -> Option<(P3, P3, P3)> {
     let s = if convex { -1.0 } else { 1.0 };
     let theta = w1.dot(w2).clamp(-1.0, 1.0).acos();
-    if theta < 1e-6 {
+    if theta < tol::ANGULAR_POINT {
         return None;
     }
     let bis = (w1 + w2).normalize();
@@ -612,7 +612,7 @@ fn corner_triangle(b: &Body, e: usize, ca: usize, cb: usize, v: usize, d1: f64, 
     let p_b = meet3(pb, fill, wb)?;
     let q = meet3(pa, pb, top)?;
     let mut n = (p_b - p_a).cross(&(q - p_a));
-    if n.norm() < 1e-12 {
+    if n.norm() < tol::DEGENERATE {
         return None;
     }
     n = n.normalize();
@@ -684,7 +684,7 @@ fn continues_smoothly(b: &Body, v: usize, out: V3, except: &[usize]) -> bool {
             return false;
         }
         let d = if o.v[0] == v { o.curve.tangent(o.t[0]) } else { -o.curve.tangent(o.t[1]) };
-        d.norm() > 0.0 && d.normalize().dot(&out) > 1.0 - 1e-6
+        d.norm() > 0.0 && d.normalize().dot(&out) > 1.0 - tol::ANGULAR_POINT
     })
 }
 
@@ -703,9 +703,9 @@ fn end_cut(b: &Body, v: usize, out: V3, sides: &[usize], convex: bool) -> Option
         }
         if let Surface::Plane { f: fr } = &f.surf {
             let n = fr.x.cross(&fr.y) * if f.sense { 1.0 } else { -1.0 };
-            if convex && n.dot(&out) < -1e-6 {
+            if convex && n.dot(&out) < -tol::ANGULAR_POINT {
                 plane = Some((p, -n));
-            } else if !convex && n.dot(&out) > 1e-6 {
+            } else if !convex && n.dot(&out) > tol::ANGULAR_POINT {
                 plane = Some((p, n));
             }
         }
@@ -806,7 +806,7 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[EdgeBlend], corners: b
         }
         let o = others[0];
         // Tangent: this edge's direction out of v equals the other's direction into it.
-        (tangent_out(e, v).dot(&-tangent_out(o, v)) > 1.0 - 1e-6).then_some(o)
+        (tangent_out(e, v).dot(&-tangent_out(o, v)) > 1.0 - tol::ANGULAR_POINT).then_some(o)
     };
     let mut in_chain = vec![false; b.edges.len()];
     let mut chain_tools: Vec<(Vec<(usize, bool)>, usize)> = Vec::new(); // (chain, index of the spec)
@@ -957,7 +957,7 @@ pub fn blend(k: &mut NativeKernel, body: BodyId, edges: &[EdgeBlend], corners: b
             let mine = edge_convex(&b, e);
             let others: Vec<usize> = at_vertex.get(v).map(|x| x.iter().copied().filter(|&o| o != e && edge_convex(&b, o) == mine).collect()).unwrap_or_default();
             // A tangent-continuing neighbour: no extension; the tools meet square to the edges.
-            if others.len() == 1 && tangent_at(end).dot(&other_dir(others[0], *v)) > 1.0 - 1e-12 {
+            if others.len() == 1 && tangent_at(end).dot(&other_dir(others[0], *v)) > 1.0 - tol::ANGULAR_FINE {
                 if end == 0 {
                     extend.0 = false;
                 } else {
@@ -1174,7 +1174,7 @@ fn check_fits(b: &Body, e: usize, kind: &dyn Fn(f64) -> SectionKind) -> Result<(
         let f = &b.faces[s.0];
         let polys = super::classify::face_polygons(b, f);
         let (u, v) = f.surf.project(&q, None);
-        if (f.surf.eval(u, v) - q).norm() > 1e-6 * (1.0 + a) {
+        if (f.surf.eval(u, v) - q).norm() > tol::REL_POINT * (1.0 + a) {
             // Curved across the edge: the contact point isn't on the face's surface; leave the
             // check to the boolean.
             fits[side] = true;
@@ -1659,7 +1659,7 @@ pub fn fillet_partial(k: &mut NativeKernel, body: BodyId, edge: EdgeId, spec: &F
             && let Surface::Plane { f: fr } = &f.surf {
                 let n = fr.x.cross(&fr.y);
                 let t = ed.curve.tangent(ed.mid_t()).normalize();
-                if n.cross(&t).norm() < 1e-6 || matches!(ed.curve, Curve::Circle { .. }) {
+                if n.cross(&t).norm() < tol::ANGULAR_POINT || matches!(ed.curve, Curve::Circle { .. }) {
                     caps.push(fi);
                 }
             }
@@ -1904,7 +1904,7 @@ fn chain_tool_lofted(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dy
         }
     }
     stations.sort_by(|a, c| (starts[a.0] + a.1 * lens[a.0]).total_cmp(&(starts[c.0] + c.1 * lens[c.0])));
-    stations.dedup_by(|a, c| ((starts[a.0] + a.1 * lens[a.0]) - (starts[c.0] + c.1 * lens[c.0])).abs() < 1e-6);
+    stations.dedup_by(|a, c| ((starts[a.0] + a.1 * lens[a.0]) - (starts[c.0] + c.1 * lens[c.0])).abs() < tol::POINT);
     let mut sections = Vec::new();
     for &(k, fr) in &stations {
     let (e, fwd) = chain[k];
@@ -1957,7 +1957,7 @@ fn chain_tool_lofted(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dy
         };
         // The section's plane: through the contacts and the corner.
         let nrm = (c1 - p).cross(&(c2 - p));
-        if nrm.norm() < 1e-12 {
+        if nrm.norm() < tol::DEGENERATE {
             return Err(KernelError::InvalidGeometry { op: "blend", why: "the blend's section degenerates along the edge".into() });
         }
         let nrm = nrm.normalize();

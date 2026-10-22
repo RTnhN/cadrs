@@ -159,13 +159,13 @@ fn flattened(c: &Curve, t0: f64, t1: f64) -> (Curve, f64, f64) {
             let (l, len) = Curve::line(P3::new(a.x, a.y, 0.0), P3::new(b.x, b.y, 0.0));
             if t1 >= t0 { (l, 0.0, len) } else { (l, len, 0.0) }
         }
-        Curve::Circle { c: o, x, y, r } if x.z.abs() < 1e-12 && y.z.abs() < 1e-12 && o.z != 0.0 => {
+        Curve::Circle { c: o, x, y, r } if x.z.abs() < tol::ROUNDOFF_FINE && y.z.abs() < tol::ROUNDOFF_FINE && o.z != 0.0 => {
             (Curve::Circle { c: P3::new(o.x, o.y, 0.0), x: *x, y: *y, r: *r }, t0, t1)
         }
-        Curve::Ellipse { c: o, x, y, a, b } if x.z.abs() < 1e-12 && y.z.abs() < 1e-12 && o.z != 0.0 => {
+        Curve::Ellipse { c: o, x, y, a, b } if x.z.abs() < tol::ROUNDOFF_FINE && y.z.abs() < tol::ROUNDOFF_FINE && o.z != 0.0 => {
             (Curve::Ellipse { c: P3::new(o.x, o.y, 0.0), x: *x, y: *y, a: *a, b: *b }, t0, t1)
         }
-        Curve::Circle { x, y, .. } | Curve::Ellipse { x, y, .. } if x.z.abs() >= 1e-12 || y.z.abs() >= 1e-12 => {
+        Curve::Circle { x, y, .. } | Curve::Ellipse { x, y, .. } if x.z.abs() >= tol::ROUNDOFF_FINE || y.z.abs() >= tol::ROUNDOFF_FINE => {
             let (lo, hi) = (t0.min(t1), t0.max(t1));
             let n = flat(&c.to_nurbs(lo, hi));
             if t1 >= t0 { (Curve::Nurbs(std::sync::Arc::new(n)), lo, hi) } else { (Curve::Nurbs(std::sync::Arc::new(n)), hi, lo) }
@@ -217,7 +217,7 @@ fn curvature_points(c: &Curve, t0: f64, t1: f64) -> Vec<f64> {
             };
             for w in breaks.windows(2) {
                 let (a, b) = (w[0], w[1]);
-                if b - a < 1e-12 {
+                if b - a < tol::ROUNDOFF_FINE {
                     continue;
                 }
                 let ns = 100;
@@ -268,7 +268,7 @@ fn curvature_points(c: &Curve, t0: f64, t1: f64) -> Vec<f64> {
 /// `e` cut at `ts` as OCCT's `MAT2d_CutCurve` does: in order, skipping cuts within 1e-8 in
 /// parameter or 1e-6 in space of the last cut or of the end. Empty when nothing is cut.
 fn cut_at(e: &Piece2, ts: &[f64]) -> Vec<Piece2> {
-    let (ptol, tol) = (1e-8, 1e-6);
+    let (ptol, tol) = (1e-8, tol::POINT);
     let (mut uf, ul) = (e.t0, e.t1);
     let (mut pf, pl) = (e.start(), e.end());
     let mut out = Vec::new();
@@ -359,7 +359,7 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
         lens.push(pts.windows(2).map(|w| (w[1] - w[0]).norm()).sum::<f64>());
         pts.iter().for_each(|p| bb.add(p));
     }
-    if lens.iter().any(|l| *l <= bb.diagonal() * 1e-12) {
+    if lens.iter().any(|l| *l <= bb.diagonal() * tol::REL_FINE) {
         return Err(KernelError::InvalidParameter("an offset of a wire with an edge of no length in its plane".into()));
     }
     let size = bb.diagonal().max(d.abs());
@@ -393,7 +393,7 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
         }));
         (s, d.abs())
     };
-    let chain_tol = (size * 1e-6).max(l.abs() * 1e-6).max(gap * 3.0).max(if closed { closing * 3.0 } else { 0.0 });
+    let chain_tol = (size * tol::REL_POINT).max(l.abs() * tol::REL_POINT).max(gap * 3.0).max(if closed { closing * 3.0 } else { 0.0 });
     let n = seq.len();
     let tick = |what: &str| {
         if std::env::var_os("CADRS_OFFSET_DEBUG").is_some() {
@@ -528,7 +528,7 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
         ts.push(r.p.t0);
         ts.push(r.p.t1);
         ts.sort_by(f64::total_cmp);
-        ts.dedup_by(|a, b| (*a - *b).abs() < 1e-12 * (1.0 + b.abs()));
+        ts.dedup_by(|a, b| (*a - *b).abs() < tol::REL_FINE * (1.0 + b.abs()));
         // Cuts closer together than the tolerance are one (the ends stay). Not the two cuts of
         // a self-crossing, which meet at one point with a loop between (a swallowtail).
         let mut merged: Vec<f64> = Vec::new();
@@ -620,7 +620,7 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
             let els: Vec<usize> = lp.iter().map(|&j| kept[j].0).collect();
             if pieces.len() > 1 && els[0] == *els.last().unwrap() && (pieces.last().unwrap().t1 - pieces[0].t0).abs() > 0.0 {
                 let (a, b) = (&pieces[pieces.len() - 1], &pieces[0]);
-                if (a.t1 - b.t0).abs() < 1e-12 * (1.0 + a.t1.abs()) {
+                if (a.t1 - b.t0).abs() < tol::REL_FINE * (1.0 + a.t1.abs()) {
                     let merged = Piece2 { c: a.c.clone(), t0: a.t0, t1: b.t1 };
                     pieces.pop();
                     pieces[0] = merged;
@@ -672,7 +672,7 @@ fn chained(mut rest: Vec<Piece2>) -> Vec<Piece2> {
     for (i, e) in rest.iter().enumerate() {
         for (flip, p) in [(false, e.start()), (true, e.end())] {
             let d = free(p, i, &rest);
-            if d > start.2 * 10.0 + 1e-12 && d > tol::ROUNDOFF {
+            if d > start.2 * 10.0 + tol::ROUNDOFF_FINE && d > tol::ROUNDOFF {
                 start = (i, flip, d);
             }
         }

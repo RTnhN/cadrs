@@ -557,7 +557,7 @@ impl NurbsCurve {
         let mut c = Self { degree: p, knots, cps };
         // Clamp: knots of multiplicity p at both ends of the period, then cut.
         let (lo, hi) = (params[0], params[m]);
-        let eps = 1e-12 * (1.0 + period.abs());
+        let eps = tol::REL_FINE * (1.0 + period.abs());
         let mult = |c: &Self, u: f64| c.knots.iter().filter(|k| (*k - u).abs() <= eps).count();
         while mult(&c, lo) < p {
             c = c.insert_knot(lo);
@@ -771,7 +771,7 @@ impl NurbsCurve {
         let mut t = vec![0.0];
         let mut s = 0.0;
         for w in pts.windows(2) {
-            s += (w[1] - w[0]).norm().sqrt().max(1e-12);
+            s += (w[1] - w[0]).norm().sqrt().max(tol::DEGENERATE);
             t.push(s);
         }
         t.iter().map(|x| x / s).collect()
@@ -813,7 +813,7 @@ impl NurbsCurve {
         let (a, b) = self.range();
         // (A start a rounding error from an end is that end: splitting there leaves an empty
         // piece.)
-        if u <= a + 1e-12 * (b - a) || u >= b - 1e-12 * (b - a) {
+        if u <= a + tol::REL_FINE * (b - a) || u >= b - tol::REL_FINE * (b - a) {
             return self.clone();
         }
         let (l, r) = self.split(u);
@@ -850,7 +850,7 @@ impl NurbsCurve {
     pub fn elevated(&self) -> Self {
         let p = self.degree;
         let (a, b) = self.range();
-        let eps = 1e-12 * (1.0 + a.abs().max(b.abs()));
+        let eps = tol::REL_FINE * (1.0 + a.abs().max(b.abs()));
         let mut c = self.clone();
         let inner: Vec<f64> = {
             let mut v: Vec<f64> = Vec::new();

@@ -36,7 +36,7 @@ impl SweepKind for Prism {
                     across: Box::new(move |t| line2(P2::origin() + a * t, b)),
                 }
             }
-            Curve::Circle { c, x, y, r } if x.cross(y).cross(&dir).norm() < 1e-12 => {
+            Curve::Circle { c, x, y, r } if x.cross(y).cross(&dir).norm() < tol::ANGULAR_FINE => {
                 let z = x.cross(y);
                 let k = z.dot(&dir);
                 SideGeo {
@@ -110,7 +110,7 @@ impl SweepKind for Revolve {
                 if ra.abs() < TOL && rb.abs() < TOL {
                     return None;
                 }
-                if dr.abs() < 1e-12 {
+                if dr.abs() < tol::DEGENERATE {
                     // Cylinder: u = s, v = h0 + dh·len·t.
                     let k = dh * len;
                     Some(SideGeo {
@@ -118,7 +118,7 @@ impl SweepKind for Revolve {
                         along: Box::new(move |s| line2(P2::new(s, h0), V2::new(0.0, k))),
                         across: Box::new(move |t| line2(P2::new(0.0, h0 + k * t), V2::new(1.0, 0.0))),
                     })
-                } else if dh.abs() < 1e-12 {
+                } else if dh.abs() < tol::DEGENERATE {
                     // Plane square to the axis at h0: uv = ρ(t)(cos s, sin s).
                     let fr = Frame { o: f.o + f.z * h0, x: f.x, y: f.y, z: f.z };
                     let k = dr * len;
@@ -231,15 +231,15 @@ impl Turn {
         });
         let in_half = in_half
             && match c3 {
-                Curve::Line { d, .. } => half.y.dot(d).abs() <= 1e-12 * d.norm(),
-                Curve::Circle { x, y, .. } | Curve::Ellipse { x, y, .. } => half.y.dot(x).abs() <= 1e-12 * x.norm() && half.y.dot(y).abs() <= 1e-12 * y.norm(),
+                Curve::Line { d, .. } => half.y.dot(d).abs() <= tol::REL_FINE * d.norm(),
+                Curve::Circle { x, y, .. } | Curve::Ellipse { x, y, .. } => half.y.dot(x).abs() <= tol::REL_FINE * x.norm() && half.y.dot(y).abs() <= tol::REL_FINE * y.norm(),
                 Curve::Nurbs(_) => true,
             };
         if in_half {
             return Revolve { plane: self.plane, f: half }.side(piece, c3);
         }
         if let Curve::Line { o, d } = c3
-            && f.z.dot(d).abs() <= 1e-12 * d.norm()
+            && f.z.dot(d).abs() <= tol::REL_FINE * d.norm()
         {
             // A line square to the axis, off every half plane through it: it turns in the plane
             // at its height; uv = its point's local (x, y) turned by s.

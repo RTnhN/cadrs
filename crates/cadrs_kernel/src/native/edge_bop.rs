@@ -235,7 +235,7 @@ fn handovers(e: &Piece, ts: &[f64], edges: &[Piece], tol: f64, size: f64) -> Vec
         let cluster = &events[i..j];
         let (enters, leaves) = (cluster.iter().filter(|x| x.1).count(), cluster.iter().filter(|x| !x.1).count());
         let (a, b) = (cluster[0].0, cluster[cluster.len() - 1].0);
-        let d = 1e-6 * (e.t1 - e.t0);
+        let d = tol::DIFF_STEP * (e.t1 - e.t0);
         if any(a - d) != any(b + d) || (enters > 0 && leaves > 0) {
             out.push((a + b) / 2.0);
         }
@@ -297,7 +297,7 @@ fn face_meets(cx: &Ctx, b: &Body, fi: usize, e: &Piece, ts: &[f64], out: &mut Ve
             continue;
         }
         let t = argmin(ts[i - 1], ts[i + 1], |t| gd(t).abs());
-        if gd(t).abs() <= cx.tol * 10.0 && on(t) && !on(t - 1e-6 * (ts[i + 1] - ts[i - 1])) && !on(t + 1e-6 * (ts[i + 1] - ts[i - 1])) {
+        if gd(t).abs() <= cx.tol * 10.0 && on(t) && !on(t - tol::DIFF_STEP * (ts[i + 1] - ts[i - 1])) && !on(t + tol::DIFF_STEP * (ts[i + 1] - ts[i - 1])) {
             out.push(t);
         }
     }
@@ -352,7 +352,7 @@ fn joined_edges(b: &Body, tol: f64) -> Vec<Piece> {
     let mut out: Vec<Piece> = Vec::new();
     for ed in b.edges.iter().filter(|x| !x.degenerate) {
         let (t0, t1) = (ed.t[0].min(ed.t[1]), ed.t[0].max(ed.t[1]));
-        if let Some(p) = out.iter_mut().find(|p| p.curve == ed.curve && ((p.t1 - t0).abs() < 1e-12 || (t1 - p.t0).abs() < 1e-12)) {
+        if let Some(p) = out.iter_mut().find(|p| p.curve == ed.curve && ((p.t1 - t0).abs() < tol::ROUNDOFF_FINE || (t1 - p.t0).abs() < tol::ROUNDOFF_FINE)) {
             p.t0 = p.t0.min(t0);
             p.t1 = p.t1.max(t1);
             continue;

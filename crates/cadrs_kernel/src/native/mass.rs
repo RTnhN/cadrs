@@ -250,7 +250,7 @@ fn iso_rectangle(body: &Body, f: &Face) -> Option<([f64; 4], f64)> {
             Curve::Line { d, .. } if d.x == 0.0 || d.y == 0.0 => {}
             Curve::Nurbs(_) => {
                 // A fitted iso-line.
-                let tol = 1e-12 * (1.0 + a.x.abs().max(a.y.abs()));
+                let tol = tol::REL_FINE * (1.0 + a.x.abs().max(a.y.abs()));
                 let (same_u, same_v) = ((a.x - b.x).abs() < tol, (a.y - b.y).abs() < tol);
                 if same_u == same_v {
                     return None;
@@ -454,7 +454,7 @@ fn split_at_knots(pc: &Curve, ts: &[f64], ku: &[f64], kv: &[f64]) -> Vec<f64> {
         for (knots, coord) in [(&iu, 0usize), (&iv, 1usize)] {
             let (ca, cb) = (pa[coord], pb[coord]);
             let (lo, hi) = (ca.min(cb), ca.max(cb));
-            for &kn in knots.iter().filter(|&&kn| kn > lo + 1e-12 && kn < hi - 1e-12) {
+            for &kn in knots.iter().filter(|&&kn| kn > lo + tol::ROUNDOFF_FINE && kn < hi - tol::ROUNDOFF_FINE) {
                 let (mut x0, mut x1) = (a, b);
                 for _ in 0..60 {
                     let m = 0.5 * (x0 + x1);
@@ -469,7 +469,7 @@ fn split_at_knots(pc: &Curve, ts: &[f64], ku: &[f64], kv: &[f64]) -> Vec<f64> {
         }
         cuts.sort_by(f64::total_cmp);
         for t in cuts {
-            if t - out.last().unwrap() > 1e-12 * (1.0 + t.abs()) && b - t > 1e-12 * (1.0 + t.abs()) {
+            if t - out.last().unwrap() > tol::REL_FINE * (1.0 + t.abs()) && b - t > tol::REL_FINE * (1.0 + t.abs()) {
                 out.push(t);
             }
         }

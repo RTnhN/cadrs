@@ -12,6 +12,7 @@ use super::face_build::face_from_surface;
 use super::math::*;
 use super::topo::Body;
 use crate::{KernelError, Result};
+use super::tol;
 
 /// The cell counts along u and v for `parts` parts of a face of `area` over the uv box
 /// (`ShapeUpgrade_SplitSurfaceArea::Compute`).
@@ -73,7 +74,7 @@ pub fn cells(b: &Body, fi: usize, parts: usize, fixed: Option<(usize, usize)>) -
         }
         a
     };
-    let filled = face.loops.len() == 1 && (box_area - area).abs() <= 1e-3 * area.max(1e-12);
+    let filled = face.loops.len() == 1 && (box_area - area).abs() <= 1e-3 * area.max(tol::DEGENERATE);
     // OCCT widens a bounded direction by 1% within the surface before measuring and cutting.
     let ((su0, su1), (sv0, sv1)) = surf.param_box();
     let widen = |lo: f64, hi: f64, s0: f64, s1: f64, periodic: bool| {
@@ -96,7 +97,7 @@ pub fn cells(b: &Body, fi: usize, parts: usize, fixed: Option<(usize, usize)>) -
             let (b0, b1) = (cv0 + (cv1 - cv0) * j as f64 / nv as f64, cv0 + (cv1 - cv0) * (j + 1) as f64 / nv as f64);
             // The cell within the face.
             let (a0, a1, b0, b1) = (a0.max(ulo), a1.min(uhi), b0.max(vlo), b1.min(vhi));
-            if a1 - a0 <= 1e-12 || b1 - b0 <= 1e-12 {
+            if a1 - a0 <= tol::ROUNDOFF_FINE || b1 - b0 <= tol::ROUNDOFF_FINE {
                 continue;
             }
             out.push(((a0, a1), (b0, b1)));

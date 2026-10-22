@@ -78,7 +78,7 @@ impl Curve2 {
 
     /// The unit tangent at `s` in 0..=1, in the direction the curve runs (numerically).
     pub fn tangent_at(&self, s: f64) -> nalgebra::Vector2<f64> {
-        let h = 1e-6;
+        let h = tol::DIFF_STEP;
         let (a, b) = ((s - h).max(0.0), (s + h).min(1.0));
         let d = self.point_at(b) - self.point_at(a);
         let l = d.norm();
@@ -220,7 +220,7 @@ impl Piece {
             acc.push(acc[acc.len() - 1] + (w[1] - w[0]).norm());
         }
         let total = acc[acc.len() - 1];
-        let closed = pts.len() > 2 && (pts[0] - pts[pts.len() - 1]).norm() < 1e-6 * total.max(1.0);
+        let closed = pts.len() > 2 && (pts[0] - pts[pts.len() - 1]).norm() < tol::REL_POINT * total.max(1.0);
         Piece::Dense { pts, acc, closed, source }
     }
 
@@ -258,10 +258,10 @@ impl Sec {
         match &self.curves[curve] {
             Piece::Exact(c) => self.plane.to_model(c.point_at(s)),
             Piece::Dense { pts, acc, .. } => {
-                let total = acc[acc.len() - 1].max(1e-12);
+                let total = acc[acc.len() - 1].max(tol::DEGENERATE);
                 let t = total * s.clamp(0.0, 1.0);
                 let k = acc.partition_point(|a| *a < t).clamp(1, pts.len() - 1);
-                let f = ((t - acc[k - 1]) / (acc[k] - acc[k - 1]).max(1e-12)).clamp(0.0, 1.0);
+                let f = ((t - acc[k - 1]) / (acc[k] - acc[k - 1]).max(tol::DEGENERATE)).clamp(0.0, 1.0);
                 pts[k - 1] + (pts[k] - pts[k - 1]) * f
             }
         }
@@ -370,12 +370,12 @@ pub fn sample_sections(sections: &[SectionCurves]) -> Result<Samples> {
             for w in pts.windows(2) {
                 acc.push(acc[acc.len() - 1] + (w[1] - w[0]).norm());
             }
-            let total = acc[acc.len() - 1].max(1e-12);
+            let total = acc[acc.len() - 1].max(tol::DEGENERATE);
             (0..SAMPLES)
                 .map(|j| {
                     let t = total * j as f64 / (SAMPLES - 1) as f64;
                     let k = acc.partition_point(|a| *a < t).clamp(1, pts.len() - 1);
-                    let f = ((t - acc[k - 1]) / (acc[k] - acc[k - 1]).max(1e-12)).clamp(0.0, 1.0);
+                    let f = ((t - acc[k - 1]) / (acc[k] - acc[k - 1]).max(tol::DEGENERATE)).clamp(0.0, 1.0);
                     pts[k - 1] + (pts[k] - pts[k - 1]) * f
                 })
                 .collect()
