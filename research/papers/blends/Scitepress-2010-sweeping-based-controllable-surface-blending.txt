@@ -1,0 +1,478 @@
+     SWEEPING BASED CONTROLLABLE SURFACE BLENDING
+
+                         L. H. You1, H. Ugail2, B. P. Tang3, X. Y. You4 and Jian J. Zhang1
+                             1
+                               National Centre for Computer Animation, Bournemouth University, U.K.
+                            2
+                             School of Computing, Informatics and Media, University of Bradford, U.K.
+                       3
+                         College of Mechanical Engineering, Chongqing University, Chongqing City, China
+                                 4
+                                   Faculty of Engineering and Computing, Coventry University, U.K.
+
+
+
+
+Keywords:        Surface Blending, Controllable Shapes, Vector-valued Fourth Order Ordinary Differential Equation.
+
+Abstract:        In this paper, we propose a novel sweeping surface based blending method. A generator defined by the
+                 solution of a vector-valued fourth order ordinary differential equation is swept along the two trimlines,
+                 which meets the boundary tangent constraints of the primary surfaces at the trimlines. The blending surface
+                 generated therefore satisfies both the positional and tangential continuity constraints at the interfaces
+                 between the primary surfaces and the blending surface. Since the vector-valued shape control parameters are
+                 embedded in the blending surface, its shape can be effectively controlled and manipulated by adjusting
+                 these vector-valued shape control parameters. Several surface blending examples are given to demonstrate
+                 the applications of the proposed method.
+
+
+
+1    INTRODUCTION                                                                 whether the radius of the rolling ball varies or not.
+                                                                                  One is the constant-radius rolling-ball blend method,
+In computer-aided design and geometric modeling,                                  and the other is variable-radius rolling-ball blend
+often it requires to smoothly connect two separate                                method. The constant-radius rolling-ball blend
+surfaces together. This operation is called surface                               method is studied by Choi and Ju (1989), Harada et
+blending. The surfaces to be connected are called the                             al. (1990), Sanglikar et al. (1990), Ying et al. (1991),
+primary surfaces. The surface which forms a smooth                                Barnhill et al. (1993), and Farouki and Sverrisson
+transition between the primary surfaces is called a                               (1996). The variable-radius rolling-ball blend
+blending surface. The interfaces between the                                      method is addressed by Harada et al. (1991), Chuang
+primary surfaces and the blending surface are called                              et al. (1995), Chuang and Hwang (1997), Chuang
+trimlins. The geometric properties at the trimlines                               and Lien (1998), and Hartmann (2000).
+form the boundary conditions, which need to be                                         Cyclides are also useful in some simple blending
+satisfied when a blending surface is generated.                                   tasks such as a cylinder obliquely meeting a plane.
+    Surface blending has been a research topic for                                In general, implicit quartic equations or parametric
+decades especially in computer-aided design.                                      representations in the form of trigonometrical
+Recently, it has found its way to character modeling                              parameterisation or rational biquadratic Bézier
+in 3D animation. Several surface blending methods                                 equations are used to describe cyclides. Cyclides
+have been proposed in the existing literature.                                    were investigated by Allen and Dutta (1997a,
+    The rolling-ball method is the most popular. It                               1997b), and Shene (1998).
+was pioneered by Rossignac and Requicha (1984).                                        Partial differential equations (PDEs) based
+According to different surface representations, the                               surface blending was pioneered by Bloor and Wilson
+rolling-ball blending method can be classified into                               (1989). In the work, a biharmonic-like fourth order
+those of implicit surfaces and parametric surfaces.                               PDE with one vector-valued parameter was used to
+Lukács (1998) discussed how to blend implicit                                     solve blending problems. The perturbation method
+surfaces using the rolling-ball method. Kós et al.                                developed by Bloor and Wilson (2000) is suitable
+(2000) investigated how to recover constant radius                                for solving more complicated surface blending
+rolling ball blends used in reverse engineering. For                              problems than their previously proposed analytical
+the rolling-ball blending of parametric surfaces, two                             solution. In order to improve the capability of PDE
+different blends can be identified depending on                                   based surface blending, numerical methods were
+                                                                                  introduced to solve partial differential equations and
+
+
+
+
+78   H. You L., Ugail H., P. Tang B., Y. You X. and J. Zhang J. (2010).
+     SWEEPING BASED CONTROLLABLE SURFACE BLENDING.
+     In Proceedings of the International Conference on Computer Graphics Theory and Applications, pages 78-83
+     DOI: 10.5220/0002823000780083
+     Copyright c SciTePress
+                                                    SWEEPING BASED CONTROLLABLE SURFACE BLENDING
+
+
+
+
+created blending surfaces. Following their analytical                                                      X
+                                                                   u0               X  C 0 (v )               C0 (v)
+work, Bloor and Wilson (1990) developed a                                                                  u
+                                                                                                                          (1)
+collocation method based on B-spline representation                                                       X
+of blending surfaces. Finite difference method was                 u 1              X  C1 (v)                C1 (v)
+                                                                                                          u
+proposed by Cheng et al. (1990) to solve a vector-
+valued fourth order partial differential equation for    where subscript 0 indicates the boundary u  0 and
+generation of blending surfaces between two              subscript 1 indicates the boundary u  1 , those
+cylinders and between a cone and a cylinder. At the      without an overbar denote boundary curves, and
+same year, a B-spline finite element method was          those with an overbar stand for boundary tangents.
+presented by Brown et al. (1990). Later on, a                In equation (1), all the vector-valued functions
+boundary penalty finite element method was                C0 (v) , C0 (v) , C1 (v ) and C1 (v) have three
+investigated by Li (1998, 1999) and Li and Chang         components.       Taking       the     vector-valued
+(1999). By studying an efficient semi-analytical and     function C0 (v) to be an example, the three
+semi-numerical method, You et al. (2004a, 2004b)
+used a vector-valued fourth order partial differential   components can be written as C0 x (v) , C0 y (v) and
+equation to generate blending surfaces with              C0 z (v ) and C0 (v)  (C0 x (v), C0 y (v), C0 z (v)) .
+tangential continuity and a vector-valued sixth order        A blending surface can be created by sweeping a
+partial differential equation to create blending         generator along two trimlines and satisfying the
+surfaces with curvature continuity.                      tangential continuity at the trimlines. If the
+    In contrast to the applications of partial           mathematical representation of a blending surface is
+differential equations in geometric modelling, little     S(u , v) , the mathematical representation of the
+work exists where ordinary differential equations        generator at the position vi is G (u )  S(u , vi ) .
+were used for geometric modelling and computer
+animation. Surface creation and manipulation with            In order to control the shape of a blending
+time-independent ordinary differential equations was     surface, we must deform the generator. Through the
+investigated by You et al. (2007). By introducing a      following fourth order ordinary differential equation,
+time variable and considering the dynamic effect,        the generator is related to vector-valued shape
+time-dependent ordinary differential equations were      control parameters which will be used to manipulate
+applied in animating skin shapes in character            the generator.
+animation (You et al. 2008).
+                                                                          d 4 G (u )        d 2 G (u )
+    Up to now, we have not found any publications                     b          4
+                                                                                       c                 dG (u )  0    (2)
+investigating ordinary differential equation based                          du                du 2
+surface blending. This paper will address this issue.    where b , c and d are vector-valued shape control
+It uses the solutions to a vector-valued fourth order    parameters, and G (u ) has three components Gx (u ) ,
+ordinary differential equation together with the
+                                                         G y (u ) and G z (u ) .
+boundary conditions to create a blending surface;
+and to control the shape of the blending surface            The analytical solution of equation (2) can be
+through the manipulation of the shape control            taken to be
+parameters involved in the equation.
+                                                                                      G (u )  e ru                       (3)
+                                                             Substituting equation (3) into (2), the ordinary
+2    MATHEMATICAL MODEL AND                              differential equation is changed into an algebra
+     SOLUTION                                            equation below
+
+                                                                                      br 4  cr 2  d  0                 (4)
+Surface blending with tangential continuity is most
+frequently met in computer-aided design and                  Depending on combinations of the vector-valued
+geometric modelling. In this paper, we concentrate       shape control parameters, equation (4) has different
+on such surface blending tasks.                          solutions. Here, we only consider the situation of
+    The boundary conditions for surface blending         c 2  4bd and c / b  0 .
+with tangential continuity consist of the positional         For this situation, the roots of equation (4) are
+and tangential information of the primary surfaces at
+the trimlines, i.e., boundary curves and boundary                                     r1, 2,3, 4   q1                   (5)
+tangents. They can be represented with the equation
+below.                                                   where
+
+
+
+
+                                                                                                                          79
+GRAPP 2010 - International Conference on Computer Graphics Theory and Applications
+
+
+
+
+                           q1   c /( 2b)                      (6)    c to -15, the blending surface depicted in Figure 1b
+                                                                      was generated. Finally, we further changed the shape
+    With the roots given in equation (5), the solution                control parameter to -30, the blending surface in
+of equation (2) is                                                    Figure 1b was changed into that in Figure 1c.
+                                                                      Comparing these figures, we can conclude that the
+       G (u )  c1e q1u  c 2ue q1u  c3e  q1u  c 4ue  q1u   (7)   vector-valued shape control parameters can be used
+                                                                      to change the shape of a blending surface but still
+where c1 , c 2 , c 3 , c 4 are unknown constants which will
+                                                                      maintain the original boundary conditions of the
+be determined below.                                                  blending task.
+   The unknown constants in equation (7) can be
+determined by substituting it into boundary
+conditions (1).
+   With the obtained solution, we can generate
+blending surfaces constrained by boundary
+conditions (1).
+
+
+3    SHAPE CONTROL OF
+     BLENDING SURFACES                                                         a                     b                      c
+
+                                                                      Figure 1: Different shapes of the blending surface created
+In this section, we investigate how the vector-valued                 by different vector-valued shape control parameters.
+shape control parameters are used to control the
+shape of blending surfaces through a surface
+blending example below.                                               4    APPLICATION EXAMPLES
+    This blending task is to find a transition surface
+which smoothly connects an open surface and a                         In this section, we give a number of examples to
+cylinder together. The boundary conditions for this                   demonstrate the applications of the proposed method
+blending task can be written as                                       in surface blending.
+                                             x                           The first example is to generate a blending
+       u0        x  d 0  d1v  d 2 e v        0                   surface between the frustum of an irregular conical
+                                             u
+                                              y                      surface and an elliptic cylinder. The boundary
+                  y  d3  d 4v                  0                   conditions for this blending task are
+                                             u
+                                             z                                                         x
+                  z  h0                          h1                        u0     x  Ru0 cos v           R cos v
+                                             u                                                         u
+                                                                (8)
+                                             x                                                         y
+       u 1      x   r cos v                   0                                   y  Ru0 v sin v        Rv sin v
+                                             u                                                         u
+                                             y                                                         z
+                  y  r sin v                    0                                   z  h0u0               h0
+                                             u                                                         u
+                                             z                              u 1    x  x0  a cos α cos v  h1u01 sin α
+                  z0                             h2
+                                             u                                                                                  (9)
+                                                                                                        x
+                                                                                                             h1 sin 
+where d i (i=0,1,2,3,4), hi (i=0,1,2), and r are                                                        u
+known constants.                                                                                        y
+                                                                                     y  b sin v            0
+     For the blending surface given in Figure 1,                                                        u
+ d 0  0.5001 , d1  0.1584 , d 2  1.02  10 4 , d 3  1.5 ,                      z  z0  a sin  cos v  h1u01 cos 
+                                                                                                         z
+ d 4  0.4775 , h  2.0 , h1  h2  2.0 , and r  1.0 .                                                    h1 cos 
+                                                                                                         u
+     By solving Eq. (2) subjected to boundary
+conditions (8), we obtained the analytical solution.                  where R , R , u 0 , u 01 , h0 , h0 , h1 , h1 , x0 , z0 , a ,
+     Initially, we set the vector-valued shape control                b , and  are known constants.
+parameters b  1 , and c  3 . The blending surface                      Using the same method, we obtained the
+indicated in Figure 1a was created. Then, we                          analytical solution of equation (2).
+changed the vector-valued shape control parameter
+
+
+
+
+80
+                                                                 SWEEPING BASED CONTROLLABLE SURFACE BLENDING
+
+
+
+
+   Taking the geometric parameters in the above                          The third example is to investigate the blending
+equation to be: R   R  1.2 , h0  h0  2 , u0  0.3 ,           between an elliptic paraboloid and a sphere. The
+                                                                      boundary conditions for this blending task have the
+x0  u01  1 , a  0.8 , b  0.6 ,   40 o , h1  1.5 ,
+                                                                      form of
+h1  2 , and z0  1.9 , and setting the vector-valued
+                                                                                                                         x
+                                                                           u0            x  au0 cosv                        a cos v
+parameters a and c to 1, and b to -5, the blending                                                                       u
+                                                                                                                         y
+surface created from the analytical solution is shown                                    y  bu0 sin v
+                                                                                                                         u
+                                                                                                                              b sin v              (11)
+in Figure 2.                                                                                                              z
+                                                                                         z  h0  h1u02                        2h1u0
+                                                                                                                          u
+                                                                                                                          x
+                                                                           u 1          x  R sin u 01 cos v                  R cos u01 cos v
+                                                                                                                          u
+                                                                                                                           y
+                                                                                         y  R sin u 01 sin v                  R cos u01 sin v
+                                                                                                                           u
+                                                                                                                          z
+                                                                                         z  R cos u01                          R sin u 01
+                                                                                                                          u
+
+                                                                      where a , a , b , b , h0 , h1 , h1 , R , R , u 0 , and u 01
+                                                                      are known constants.
+                                                                          With the method discussed above, the blending
+                                                                      surface was obtained from equation (2) and the
+                                                                      above boundary conditions. It was depicted in
+Figure 2: Blending between the frustum of an irregular
+conical surface and an elliptic cylinder.                             Figure 4.
+
+    The second example is to blend an ellipsoid to an
+elliptic paraboloid. The boundary conditions for this
+blending task are
+                                    x1
+     u0      x1  cu0 cos v              c cos v
+                                    u
+                                     x2
+              x2  du0 sin v               d  sin v
+                                      u
+                                     x3
+                                                               (10)
+              x3  h0  h1u02              h1u0
+                                     u
+                                     x1
+     u 1     x1  a sin u1cosv            a cos u1 cos v
+                                     u
+                                     x2
+              x2  b sin u1sinv             b cos u1 sin v
+                                      u                              Figure 4: Blending between an elliptic paraboloid and a
+                                     x3
+              x3  h2  h3 cos u1          h3 sin u1                sphere.
+                                     u
+
+                                                                          The fourth example is to blend an open surface
+where c , d , d  , h0 , h1 , h1 , a , a , b , b , h2 , h3 ,
+                                                                      to a plane at a specified pedal-like curve. The
+h3 , u 0 , and u1 are known constants.                               boundary conditions for this surface blending take
+     Using the same treatment, we obtained the                        the form of
+analytical solution of this blending task which was                               u 0          x1  a1 sinh( a2 v  a3 )  a4 sin v
+used to produce the blending surface shown in                                                   x1
+                                                                                                     a5 sin v
+Figure 3.                                                                                       u
+                                                                                                x2  a6 cosh(a7 v )  a4 cos v
+                                                                                                x2                                                  (12)
+                                                                                                     a5 cos v
+                                                                                                u
+                                                                                                                                   x3
+                                                                                                x3  h0  e 0.2                         e 0.2
+                                                                                                                                   u
+                                                                                                                                   x1
+                                                                                  u 1          x1  a sin v  b sin( a8v)              a sin v
+                                                                                                                                   u
+                                                                                                                                   x2
+                                                                                                x2  a cos v  b cos(a8v)                a cos v
+                                                                                                                                    u
+                                                                                                                                   x3
+                                                                                                x3  h1                                 0
+                                                                                                                                    u
+
+                                                                      where ai (i=1,2,…, 8), h0 , and h1 are known
+Figure 3: Blending between an ellipsoid and an elliptic               constants.
+paraboloid.
+
+
+
+
+                                                                                                                                                      81
+GRAPP 2010 - International Conference on Computer Graphics Theory and Applications
+
+
+
+
+   Using the analytical solution obtained from                  The last example is to smoothly connect two
+equation (2) and the above boundary conditions, the         intersecting cylinders together. The boundary
+blending surface was created and indicated in Figure        conditions for this blending task can be written as
+5.                                                                                                       x
+                                                                  u  0 x  s cos v                         0
+                                                                                                         u
+                                                                                                         y
+                                                                          y  s sin v                       0
+                                                                                                         u                               (14)
+                                                                                                         z
+                                                                          z = h0                             h1
+                                                                                                         u
+                                                                                                         x
+                                                                  u  1 x  s  l1  cos v                  t cos v
+                                                                                                         u
+                                                                                                        y
+                                                                          y  s  l1 sin v                 t sin v
+                                                                                                        u
+                                                                                                        z            t cos 2 v
+                                                                         z = r 2  s  l1 2 cos 2 v       
+                                                                                                        u        r  s  l 2 cos 2 v
+                                                                                                                    2
+                                                                                                                            1
+
+
+
+Figure 5: Blending between an open surface and a plane at   where s , h0 , h1 , l1 , t , and r are known constants.
+a specified pedal-like curve.                                   Using the same treatment, analytical solution of
+                                                            equation (2) under boundary conditions (14) was
+    The fifth example is to generate a blending             obtained which was used to generate the blending
+surface between a circular cylinder and an elliptic         surface indicated in Figure 7.
+hyperboloid of two sheets. The boundary conditions
+for this blending task are given below.
+          u0
+                              x
+          x  R cos v            0
+                              u
+                              y
+          y  R sin v            0
+                              u
+                              z
+          z  h0                   h0
+                              u
+                                                    (13)
+          u 1
+                              x
+          x  a sinh 1cos v       a cosh 1cos v               Figure 7: Blending between two intersecting cylinders.
+                              u
+                              y
+          y  b sinh 1sin v       b cosh 1sin v
+                              u
+                              z                            5      CONCLUSIONS
+          z   h1cosh1            h1 sinh 1
+                              u
+                                                            With our new surface blending method, a sweeping
+where R , a , a , b , b , h0 , h0 , h1 and h1 are       surface is generated along two trimlines. The key
+known constants.                                            task is to ensure that this sweeping surface satisfies
+   The blending surface produced from the solution          the tangential continuity constraints at the trimlines.
+to equation (2) subjected to the above boundary             The shape of the generator is controlled by the
+conditions was given in Figure 6.                           vector-valued shape parameters associated with the
+                                                            fourth order ordinary differential equation. This
+                                                            makes the blending surfaces controllable and
+                                                            applicable for different conditions and applications.
+                                                            The validity of the proposed method is demonstrated
+                                                            with application examples given in this paper.
+                                                                Since our proposed blending method is based on
+                                                            the closed form solution to a vector-valued fourth
+                                                            order ordinary differential equation, it is simple and
+                                                            efficient in creating blending surfaces. We intend to
+                                                            implement it into a user-friendly interface for
+                                                            interactive shape manipulation of blending surfaces
+Figure 6: Blending between a circular cylinder and an
+                                                            and apply this method to tackle more surface blen-
+elliptic hyperboloid of two sheets.
+
+
+
+
+82
+                                                          SWEEPING BASED CONTROLLABLE SURFACE BLENDING
+
+
+
+
+ding problems in our future work.                                  the finite element method, in Ravani, B. (Ed.),
+                                                                   Advances in Design Automation, Vol. 1, Computer
+                                                                   Aided and Computational Design, ASME, 265-272.
+                                                               Li, Z.C., 1998. Boundary penalty finite element methods
+REFERENCES                                                         for blending surfaces, I. Basic theory, Journal of
+                                                                   Computational Mathematics 16, 457-480.
+Rossignac, J.R., Requicha, A.A.G., 1984. Constant-radius       Li, Z.C., 1999. Boundary penalty finite element methods
+   blending in solid modeling, Computers in Mechanical             for blending surfaces, II. Biharmonic equations,
+   Engineering, 65-73.                                             Journal of Computational and Applied Mathematics
+Lukács, G., 1998. Differential geometry of G1 variable             110, 155-176.
+                                                               Li, Z.C., Chang, C.-S., 1999. Boundary penalty finite
+    radius rolling ball blend surfaces, Computer Aided
+                                                                   element methods for blending surfaces, III,
+    Geometric Design 15, 585-613.
+                                                                   Superconvergence and stability and examples, Journal
+Kós, G., Martin, R.R., Várady, T., 2000. Methods to
+                                                                   of Computational and Applied Mathematics 110, 241-
+    recover constant radius rolling ball blends in reverse
+                                                                   270.
+    engineering, Computer Aided Geometric Design 17,
+                                                               Bloor M.I.G., Wilson, M.J., 2000. Generating blend
+    127-160.
+                                                                   surfaces using a perturbation method, Mathematical
+Barnhill, R.E., Farin, G.E., Chen, Q., 1993. Constant-
+                                                                   and Computer Modelling 31(1), 1-13.
+    radius blending of parametric surfaces, Computing
+                                                               You, L.H., Zhang J.J., Comninos, P., 2004a. Blending
+    Supple 8, 1-20.
+                                                                   surface generation using a fast and accurate analytical
+Choi, B.K., Ju, S.Y., 1989. Constant-radius blending in
+                                                                   solution of a fourth order PDE with three shape
+    surface modeling, Computer Aided Design 21(4), 213-
+                                                                   control parameters, The Visual Computer20, 199-214.
+    220.
+                                                               You, L.H., Comninos, P., Zhang, J.J., 2004b. PDE
+Harada, T., Toriya, H., Chiyokura, H., 1990. An enhanced
+                                                                                              2
+    rounding operation between curved surfaces in solid           blending surfaces with C continuity, Computers &
+    modelling, In Proceedings of CG International '90.            Graphics28(6), 895-906.
+    Computer Graphics Around the World, Singapore, 25-         You, L.H. Yang, X.S., Pachulski, M. and Zhang, J.J.,
+    29 June, pp. 563-588.                                         2007. Boundary Constrained Swept Surfaces for
+Sanglikar, M.A., Koparkar, P., Joshi, V.N., 1990.                 Modelling and Animation, EUROGRAPHICS 2007
+    Modelling rolling ball blends for computer aided              and Computer Graphics Forum 26(3), 313-322.
+    geometric design, Computer Aided Geometric Design          You, L.H., Yang, X.S., Zhang, J.J., 2008. Dynamic skin
+    7, 399-414.                                                   deformation with characteristic curves, Computer
+D.-N. Ying, E.-J. Wang and K. Xue. Blending in solid              Animation and Virtual Worlds 19(3-4), 433-444.
+    modelling. Proceedings of First International
+    Conference on Computational Graphics and
+    Visualization Techniques, Sesimbra, Portugal, 16-20
+    Sept. 1991, Vol. 2, pp. 239-247.
+Farouki, R.A.M.T., Sverrisson, R., 1996. Approximation
+    of rolling-ball blends for free-form parametric
+    surfaces, Computer Aided Design 28(11), 871-878.
+Allen, S., Dutta, D., 1997a. Cyclides in pure blending I,
+    Computer Aided Geometric Design 14, 51-75.
+Allen, S., Dutta, D., 1997b. Supercyclides and blending,
+    Computer Aided Geometric Design 14, 637-651.
+Shene, C.-K., 1998. Blending two cones with Dupin
+    cyclides, Computer Aided Geometric Design 15, 643-
+    673.
+Bloor, M.I.G., Wilson, M.J., 1989. Generating blend
+    surfaces using partial differential equations,
+    Computer-Aided Design 21(3), 165-171.
+Bloor, M.I.G., Wilson, M.J., 1990. Representing PDE
+    surfaces in terms of B-splines, Computer-Aided
+    Design 22(6), 324-331.
+Cheng, S.Y., Bloor, M.I.G., Saia, A., Wilson, M.J., 1990.
+    Blending between quadric surfaces using partial
+    differential equations, in Ravani, B. (Ed.), Advances in
+    Design Automation, vol. 1, Computer and
+    Computational Design, ASME, 257-263.
+Brown, J.M., Bloor, M.I.G., Susan, M., Wilson, M.J.,
+    1990. Generation and modification of non-uniform B-
+    spline surface approximations to PDE surfaces using
+
+
+
+
+                                                                                                                       83
+

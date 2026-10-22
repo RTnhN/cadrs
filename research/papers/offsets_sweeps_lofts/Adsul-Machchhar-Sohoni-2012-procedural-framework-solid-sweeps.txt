@@ -1,0 +1,771 @@
+                                           A procedural framework and mathematical analysis for solid sweeps
+                                                                        Bharat Adsul, Jinesh Machchhar, Milind Sohoni
+
+
+
+
+arXiv:1204.0908v1 [cs.OH] 4 Apr 2012
+                                               Department of Computer Science and Engineering, Indian Institute of Technology Bombay, Mumbai-400076, India
+
+
+
+
+                                   Abstract
+
+                                   Sweeping is a powerful and versatile method of designing objects. Boundary of volumes (henceforth envelope) obtained by sweeping
+                                   solids have been extensively investigated in the past, though, obtaining an accurate parametrization of the envelope remained
+                                   computationally hard. The present work reports our approach to this problem as well as the important problem of identifying
+                                   self-intersections within the envelope. Parametrization of the envelope is, of course, necessary for its use in most current CAD
+                                   systems. We take the more interesting case when the solid is composed of several faces meeting smoothly. We show that the face
+                                   structure of the envelope mimics locally that of the solid. We adopt the procedural approach at defining the geometry in this work
+                                   which has the advantage of being accurate as well as computationally efficient. The problem of detecting local self-intersections
+                                   is central to a robust implementation of the solid sweep. This has been addressed by computing a subtle mathematical invariant
+                                   which detects self-intersections, and which is computationally benign and requires only point queries.
+
+
+                                   Key words: Sweeping, swept surface, self-intersections, procedural surfaces
+
+
+
+                                   1. Introduction                                                         metric surface is just a map from R2 to R3 and hence can
+                                                                                                           be represented in a computer by a procedure which takes
+                                      In this paper we focus on the problem of computing an                as input (u, v) ∈ R2 and returns (x, y, z) ∈ R3 . Higher or-
+                                   accurate parametrization of the boundary of the volume ob-              der derivatives of the surface can be returned similarly. The
+                                   tained by sweeping a solid in R3 along a trajectory and that            definition of splines through the De Casteljau’s algorithm
+                                   of detecting local self-intersections in the envelope. Sweep-           is an example of procedural parametrization. The authors
+                                   ing is an operation of fundamental importance in geomet-                in [14] compute the intersection curve of two parametric
+                                   ric design. It has applications like numerically controlled             surfaces by procedural approach.
+                                   machining verification [3,4,17] and robot motion planning                  The second problem that we tackle in this paper is that
+                                   [23,24]. There have been several approaches to computing                of detecting local self-intersections. Self-intersections cause
+                                   the boundary of swept volumes in the past. The works [6,21]             anomalies in the envelope. There have been rather few at-
+                                   formulate the problem using the rank deficiency of the Ja-              tempts at solving this problem in the past. The paper [2]
+                                   cobian, [3–5] compute the envelope by solving sweep differ-             proposes an efficient and robust method of detecting global
+                                   ential equations, [20] uses inverse-trajectories for deriving           and local self-intersections by checking whether the inverse-
+                                   a point membership test for a point to belong to the enve-              trajectory of a point intersects the solid. In the paper [7]
+                                   lope. In [22] the authors give a close approximation of the             global and local self-intersections are detected by comput-
+                                   envelope by restricting the trajectories to piecewise screw             ing intersection of curves of contact at discrete time steps.
+                                   motions.                                                                This has the disadvantage of being computationally expen-
+                                      Despite the extensive research done in the past in this              sive. In the paper [18] self-intersections are accurately quan-
+                                   area, computing an accurate parametrization of the en-                  tified and detected but their method is limited to sweep-
+                                   velope has remained an unsolved problem due to known                    ing tools for NC machining verification. The method em-
+                                   mathematical and computational difficulties [15]. In this               ployed by [25] for detecting local self-intersections is based
+                                   work we attempt to arrive at an accurate parametrization                on point set data and could be computationally expensive.
+                                   of the envelope through the procedural approach, which is               In [9] the author solves the problem of detecting local self-
+                                   an abstract way of defining surfaces and curves when closed             intersections for sweeping planar profiles. In this paper we
+                                   form formulae are not available. The procedural paradigm                propose a novel test for detecting local self-intersections
+                                   exploits the fact that from the users point of view, a para-            which is based on a subtle mathematical invariant of the
+envelope. It has the advantage of being computationally
+efficient and requires only point queries.
+   The paper is organized as follows. In Section 2 we de-
+scribe the input to the sweeping algorithm, in Section 3
+we discuss the overall framework for the computation of
+the envelope, in Sections 4 and 5 we study the mathe-
+matical structure of the envelope and quantify local self-
+intersections, giving a test for detecting them, in Section 6
+we analyse the case when the envelope is free from self-
+intersections. In Section 7 we describe the algorithm for
+computing the procedural parametrization of the envelope.
+We conclude the paper in Section 8.
+                                                                                            Fig. 1. A Brep of a solid
+
+2. Preliminaries
+                                                                       Topological information: The topological/combinatorial
+                                                                       information consists of spatial relationships between dif-
+  This section outlines the basic representational struc-              ferent geometric entities, i.e., the adjacency between faces,
+tures associated with the problem. Subsection 2.1 describes            the incidence relationships between faces and edges and
+the boundary representation of a solid which is typical to             so on. In figure 1, for example, the orange and the green
+many CAD systems and subsequent sections, the basic in-                face are adjacent. Another important component is the
+puts and outputs of the sweep algorithm. In Subsection 2.2             orientation for each face, that is, a consistent choice of
+we define the trajectory in R3 along which the solid is swept.         outward-normal for that face. The orientation of a regular
+Next, in subsection 2.3 we define the various mathematical             face is a choice of a unit normal from amongst kSSuu ×S
+                                                                                                                            ×Sv k and
+                                                                                                                              v
+
+sub-entities which make up the envelope.                                       ×Sv
+                                                                       − kSSuu ×S vk
+                                                                                     where S is the underlying parametric surface.
+                                                                       All the faces bounding the solid are oriented so that the
+2.1. Boundary representation of a solid                                unit normal at each point on each face is pointing towards
+                                                                       the exterior of the solid.
+   Boundary representation, also known as Brep, is a popu-                Conceptually, a Brep through its ‘global’ topological in-
+lar and standard method of representing a ‘closed’ solid M             formation glues the ‘local’ geometric entities which come
+by its boundary ∂M . The boundary ∂M separates the inte-               equipped with associated mathematical parametrizations.
+rior of M from the exterior of M . ∂M is represented using             Note that, the regularity assumptions on the geometric en-
+a set of faces, edges and vertices. See figure 1 for a Brep of         tities guarantee that the tangent space at every point on an
+a solid where different faces are coloured differently. Faces          edge or a face is of the right dimension. Typically, one also
+meet in edges and edges meet in vertices. The Brep of a                imposes higher-order ‘parametric’ continuity requirements
+solid consists of two interconnected pieces of information,            which are denoted by C k where k refers to the order of con-
+viz. the geometric and the topological.                                tinuity. For the sake of simplicity, throughout this paper,
+Geometric information: This consists of geometric enti-                we will assume that the edges and faces bounding the solid
+ties, namely, vertices, edges and faces. A vertex is simply a          are regular of class C k for some k ≥ 2, i.e. the underlying
+point in R3 . An edge is obtained by restricting the under-            parametrizations are twice differentiable with continuous
+lying parametric curve by a pair of vertices. A parametric             second order derivatives. Note that, however, these do not
+curve in R3 is a continuous map γ : R → R3 . The curve γ is            rule out, e.g., adjacent faces meeting along sharp edges.
+called regular at s0 ∈ R if γ is differentiable and dγ ds |s0 6= 0̄.
+Here s is the parameter of the curve. An edge is derived
+from the underlying curve by suitably restricting the pa-              2.2. A trajectory in R3
+rameter s to an interval [a, b]. Further, it is required that the
+edge (more precisely, the underlying curve) is regular at all             A trajectory in R3 is a 1-parameter family of rigid mo-
+points in the interval [a, b] and devoid of self-intersections.        tions in R3 defined as follows.
+   Similarly, a face is obtained by restricting the underly-           Definition 2.1 A trajectory in R3 is specified by a map
+ing parametric surface by a set of edges. A parametric sur-            h : [0, 1] → (SO(3), R3 ), h(t) = (A(t), b(t)) where A(t) ∈
+face is a continuous map S : R2 → R3 . The surface S is                SO(3) 1 , b(t) ∈ R3 , A(0) = I, b(0) = 0. The parameter t in
+said to be regular at (u0 , v0 ) ∈ R2 if S is differentiable and       this definition represents time.
+∂S                3    ∂S               3
+ ∂u |(u0 ,v0 ) ∈ R and ∂v |(u0 ,v0 ) ∈ R are linearly indepen-         For technical convenience, we assume that h is of class C k ,
+dent. Here u and v are the parameters of S. A face is de-              for some k ≥ 2.
+rived from a surface by suitably restricting the parameters
+u and v inside a ‘domain’. As expected, it is required that
+the face is regular at all points in the domain and devoid             1 SO(3) = {X is a 3 ×3 real matrix|X t X = I, det(X) = 1} is the
+of self-intersection.                                                  special orthogonal group, i.e. the group of rotational transforms.
+2.3. Boundary of the swept volume                                     choice of T which compounds problem (i) above. There are
+                                                                      other options, but problems remain.
+  We begin by giving an intuitive description of the bound-              In this work, we propose a novel approach based on the
+ary of the swept volume. We will formalize these notions              procedural paradigm (cf [11,14]) which has gained ascen-
+in Section 4. Let M be a solid being swept along a given              dance in many numerical kernels, e.g., ACIS (cf [12]).
+trajectory h. By abuse of notation, a point in M will mean               We now describe the basic architecture for our algorithm.
+a point in the interior of M or on the boundary ∂M of M .             For this, we use a running example referred to in figure 1
+We denote by Mt the position of M at time t ∈ [0, 1], i.e.            and figure 2. The object to be swept is M as in figure 1,
+Mt = {A(t)x +[b(t)|x ∈ M }, and by ∂Mt , the boundary                 and the output contact-set is C as shown in figure 2. The
+of Mt . Then         Mt is the volume swept by M during               trajectory is roughly helical with a compounded rotation.
+               t∈[0,1]
+                                                                         (i) A natural correspondence between the entities of M
+this operation. Our goal is to compute the boundary of this                  and the entities of C.
+swept volume as a Brep, which we will refer to as the en-                       Every point p of the envelope comes from a curve
+velope. For a fixed point x ∈ M , consider the trajectory of                 of contact on Mt , for some t, and therefore belongs
+x as the map y : [0, 1] → R3 given by y(t) = A(t)x + b(t).                   to some entity of M , i.e., a vertex, edge or face. This
+The trajectory of x describes the motion x in R3 under the                   sets up the correspondence between entities of M and
+given trajectory h. Clearly, if x is in the interior of M , no               those of C. The procedural approach attaches a com-
+point in the image of the trajectory of x can be on the en-                  mon evaluation method to each such entity. Fig2 il-
+velope. Further, at a particular time instant t0 , only a sub-               lustrates this correspondence. Faces of C which are
+set of points on ∂Mt0 will lie on the envelope. The union of                 generated by a particular face of M are shown in same
+such points for all t0 ∈ [0, 1] gives the final envelope.                    colour. Curve-of-contact at time t = 0 is shown im-
+   It is clear that, at a given time instant t0 , only a part of             printed on the solid in red.
+∂Mt0 is in ‘contact’ with the envelope. To make this more                       Along with the geometric definition of each entity,
+clear, fix a point x ∈ ∂M and the trajectory y of x. The                     we must also construct the topological data to go with
+derivative of the trajectory of x at a given time instant t0 ,               it. This data is constructed by observing that there
+that is, dy                                                                  is a local homeomorphism between a point on C and
+          dt |t0 gives the velocity of x at t0 . It is easy to show
+that (cf, Section 4) x (more precisely, y(t0 )) is in contact                a suitable point on M .
+with the envelope at time t0 only if the velocity of x at t0 is in      (ii) Accurate parametrizations of the geometric entities of
+the ‘tangent-space’ of ∂Mt0 at y(t0 ). In a generic situation,               C with ‘time’ as one of the central parameters.
+the set of points of ∂Mt0 which are in contact with the                         This is achieved through the procedural paradigm
+envelope will be the curve-of-contact. The union of these                    in which all key attributes/features of the geometric
+curves-of-contact is called the contact-set or the running                   entities are made available through a set of associated
+envelope. Clearly, the total envelope and the contact-set                    procedures (cf [11,14]). In our case, these procedures
+are closely related. If all goes well, the envelope is obtained              are based on Newton-Raphson solvers. This is the
+from the contact-set by ‘capping’ it by appropriate parts                    focus of Section 7.
+of M0 and M1 , the object at times t = 0 and t = 1. But all            (iii) Topological and regularity analysis of C.
+may not go well. The detection of anomalies is central to                       It is quite common to have a sweeping operation
+the use of the algorithm in industrial situations and is an                  in which the resulting envelope/contact-set C self-
+important objective of this paper.                                           intersects. These self-intersections can be broadly
+                                                                             classified into global and local self-intersections (see
+                                                                             figure 6). Once an accurate ‘local’ parametrization
+3. Our Approach/Framework                                                    (as in step 2) of the faces of C is obtained, in prin-
+                                                                             ciple, global self-intersections can be detected and
+    In this section we briefly describe the overall framework                dealt with by well-known (cf [14]) surface-surface
+for computing the sweep surface i.e. the envelope as a Brep.                 intersection solvers. A more subtle mathematical
+We continue using the notation from the previous section                     issue is that of detecting singularities and local self-
+where M denotes the Brep/solid and h denotes the trajec-                     intersections. This is addressed in Sections 4 and 5.
+tory along which M is swept.                                             We are now in a position to define the scope of this pa-
+    The naive approach to computing the envelope would be             per. In this work we describe in detail tasks (ii) and (iii)
+to discretize time, i.e, to construct a sequence T = {0 =             described above, namely, detecting local self-intersections
+t1 , . . . , tk = 1} and constructing the approximate envelope        and obtaining a procedural parameterization of faces. The
+as E 0 = ∪i Mti , the union of the translates. The next step          focus of Section 6 is task (i) in the interesting case when
+would be to construct a smooth version E 00 of E 0 above, by          M is composed of faces meeting smoothly. Other architec-
+some fitting operation. However, this approach has several            tural aspects and solid-modelling implementation will be
+issues–(i) computation of E 0 leads to unstable booleans of           addressed in a later work.
+two very close-by objects, leading to sliver-faces, and (ii)
+the fit of E 00 to the actual E depends on a dense enough
+                                             Fig. 2. A solid is swept along a helical trajectory
+
+4. Mathematical structure of the contact-set                             (σ(u, v, t), t).
+                                                                            Thus, the sweep σ is clearly the extended sweep σ̂ com-
+   In this section we will study in detail the mathemati-                posed with the projection map along the t-dimension. De-
+cal structure of the boundary of the volume obtained by                  noting partial derivatives using a subscript, we note that
+sweeping the solid M along the trajectory. For simplicity,               σ̂u , σ̂v and σ̂t are linearly independent for all (u, v, t) ∈
+we work with a single parametric surface patch S and anal-               R2 × [0, 1] and σ̂ is injective. Hence the image of σ̂ is a 3-
+yse the sweep of S under the trajectory h. As explained                  dimensional manifold. We now define the contact-set.
+before, we assume that both S and h are regular of class                 Definition 4.3 Given S and h, the contact-set is the set
+C k for k ≥ 2, and are devoid of self-intersections. In sec-             of points σ(u0 , v0 , t0 ) such that the line {(x0 , y0 , z0 , t) ∈
+tion 6, we lift the results of this section to the interesting           R4 |σ(u0 , v0 , t0 ) = (x0 , y0 , z0 ), t ∈ [0, 1]} is tangent to (the
+case when M is composed of several faces/surfaces meeting                image of ) σ̂ at σ̂(u0 , v0 , t0 ) = (x0 , y0 , z0 , t0 ). We will denote
+smoothly. For later use, we introduce the following nota-                the contact-set by C.
+tion: the tanget space to a manifold X at a point p ∈ X                     We will refer to the domain of the map σ as the parameter
+will be denoted by TX (p).                                               space and the co-domain as the object space. Consider now
+   We begin with the formal definition of the sweep map.                 the following function f : R2 × [0, 1] → R given by
+Definition 4.1 Given S and h, the sweep is defined as a                                                 D                           E
+map σ : R2 × [0, 1] → R3 given by σ(u, v, t) = A(t)S(u, v) +                             f (u, v, t) = V (u, v, t), N̂ (u, v, t)               (1)
+b(t).
+                                                                         Recalling that V (u, v, t) is the velocity of the point S(u, v)
+Here u, v are the parameters of S. The position of a
+                                                                         at time t and N̂ (u, v, t) is the normal to St at (u, v), we look
+point S(u0 , v0 ) on surface S at time t0 will be given by
+                                                                         at the zero-set of this function in the parameter space.
+σ(u0 , v0 , t0 ) = A(t0 )S(u0 , v0 )+b(t0 ) and the velocity of the
+                                                                         Definition 4.4 The funnel F is defined as the zero-set of
+point S(u0 , v0 ) at time t0 will be given by V (u0 , v0 , t0 ) =
+∂σ                    0                    0             0               the function f specified in Eq. 1, i.e., F = {(u, v, t) ∈ R2 ×
+ ∂t |(u0 ,v0 ,t0 ) = A (t0 )S(u0 , v0 ) + b (t0 ), where   denotes
+                                                                         [0, 1]|f (u, v, t) = 0}.
+derivative with respect to t. If N (u0 , v0 ) is the unit (out-
+                                                                            In other words, if a point p = (u0 , v0 , t0 ) ∈ F, then the
+ward) normal to S at (u0 , v0 ), then the unit normal to
+                                                                         velocity at the point σ(p) lies in the tangent space of St0
+St0 at (u0 , v0 ) is given by N̂ = A(t0 )N (u0 , v0 ) where,
+                                                                         at σ(p). The following lemma shows that the contact-set is
+St0 = {A(t0 )S(u, v) + b(t0 )|(u, v) ∈ R2 } is the position of
+                                                                         precisely the image of the funnel through the sweep map.
+the surface at time instant t0 . In order to formally define
+                                                                         Lemma 4.1 σ(F) = C
+the contact-set, we look at the extended sweep in R4 in
+                                                                         Proof. Skipped here.                                            
+which the fourth dimension is time [2].
+                                                                            Hence S(u, v) ‘contributes’ a point (namely, A(t)S(u, v)+
+Definition 4.2 Given S and h, the extended sweep is de-
+                                                                         b(t)) to the contact-set at time t iff the triplet (u, v, t)
+fined as a map σ̂ : R2 × [0, 1] → R4 given by σ̂(u, v, t) =
+                                                                         satisfies the following condition.
+                                                                          sis can be easily extended to situations where these further
+            t                                       z                     assumptions do not hold.
+                                                                             An important consequence of the assumption 4 is that
+                                                                          F is a 2-dimensional manifold and, hence, TF (p) is 2-
+                                                                          dimensional at all points p ∈ F. Observe that F is also ori-
+                                                                          entable as ∇f provides a continuous non-vanishing normal.
+                                                                             Thus, F is topologically nice and regular, However,
+                            u                                     x       quite often, C has ‘anomalies’ which arise due to self-
+                                                                          intersections. One of the main contributions of this paper
+    v                                      y Contact-set                  is a subtle, efficiently computable mathematical function
+          Funnel                                                          on F which allows to identify points on F which give rise
+                                                                          to anomalies in C.
+                   Fig. 3. Funnel and contact-set                            The key to our analysis ahead, is the restriction of the
+                                                                          sweep map σ to F. We will abuse the notation, denote this
+                         D                         E
+            f (u, v, t) = V (u, v, t), N̂ (u, v, t) = 0            (2)
+                                                                          restriction, again by σ. So, σ : F → C. Now, fix a point
+For a fixed t, Eq. 2 is a system of one equation in two                   p = (u, v, t) ∈ F and let q = σ(p) ∈ C. Since det(Jσ (p)) =
+variables u and v, hence, in a generic situation, the solution            0, {σu (p), σv (p), σt (p)} are linearly dependent. As S is reg-
+will be a curve.                                                          ular, the set {σu (p), σv (p)} forms a basis for the tangent
+  Eq. 2 can also be looked upon as the rank deficiency                    space to St . Therefore, we must have σt = lσu +mσv where
+condition [6] of the Jacobian Jσ of the map σ defined in 4.1.             l and m are well-defined (unique) and are themselves con-
+To make this precise, let                                                 tinuous functions of u, v and t.
+                          h          i                                       Clearly, (σu (p), σv (p)) is a natural (ordered) 2-frame in
+                     Jσ = σu σv σt                         (3)            the object space at point q (recall that, q = σ(p)). Fur-
+                                           3×3
+                                                                          ther, let X (p) be any ordered continuous 2-frame (basis)
+where σu |(u,v,t) = A(t) ∂S                               ∂S
+                         ∂u (u, v) and σv |(u,v,t) = A(t) ∂v (u, v)       of the tangent space TF (p). Note that, this 2-frame is in
+and σt |(u,v,t) = V (u, v, t). Observe that regularity of S               the parameter space and is associated to the point p. Now,
+ensures that Jσ has rank at least 2. Further, it is easy to               through σ, more precisely, Jσ (p), the frame X (p) can be
+show that f (u, v, t) is a non-zero scalar multiple of the                transported to another natural 2-frame σ(X (p)) in the ob-
+determinant of Jσ . Therefore, Eq. 2 is precisely the rank                ject space at the point q. The determinant of the linear
+deficiency condition of the Jacobian of σ.                                transformation connecting these two natural frames at q,
+   Note that, for a point (u0 , v0 , t0 ) ∈ R3 , the Jacobian             namely (i) (σu (p), σv (p)) and (ii) σ(X (p)) is the key to the
+Jσ |(u0 ,v0 ,t0 ) is a map from the tangent space to the ambient          subsequent analysis. As we show later, this determinant is a
+parameter-space at (u0 , v0 , t0 ) to the tangent space to the            positive scalar multiple of the continuous function θ : F →
+ambient object space at σ(u0 , v0 , t0 ). As already noted, if            R defined as follows.
+(u0 , v0 , t0 ) ∈ F, then Jσ |(u0 ,v0 ,t0 ) is rank-deficient and maps
+the 3-dimensional ambient tangent space at (u0 , v0 , t0 ),                                   θ(p) = lfu + mfv − ft                    (5)
+(surjectively) onto, a 2-dimensional subspace of the ambi-                Here p = (u, v, t) and fu , fv and ft denote partial deriva-
+ent tangent space at σ(u0 , v0 , t0 ).                                    tives of the function f w.r.t. u, v and t respectively at p,
+   The subset of F for a fixed value of t will in general be              and l and m are as defined before. Note that θ is easily and
+a curve and will be referred to as the pcurve-of-contact at               robustly computed.
+time t and its image through σ will be a subset of C which                   We state an important result which we will prove in the
+will be referred to as the curve-of-contact since it is essen-            coming sections:
+tially the set of points on the surface S where S makes tan-              Theorem 4.1 The function θ is such that (i) θ(p) < 0
+gential contact with C at time t. The union of such curves-               indicates that p is a point of local self intersection as defined
+of-contact for all t gives the contact-set C. The curve-of-               by most authors, (see [2,7]) and (ii) θ(p) = 0 is where the
+contact at t will be denoted by Ct and the pcurve-of-contact              rank of Jσ (TF (p)) < 2, and finally (iii) excision of the region
+will be denoted by ct . Fig. 3 schematically illustrates the              {p|θ(p) ≤ 0} from the funnel F simplifies the construction
+funnel and the contact-set.                                               of the envelope.
+   Before proceeding further, we make the following the
+non-degeneracy assumption 2 that:                                         4.1. A particular frame for TF
+                     ∀p ∈ F, ∇f |p 6= (0, 0, 0)                    (4)
+                                                                             Let p = (u, v, t) ∈ F. In this section, we compute a
+Further, for ease of discussion, we assume that (i) F is con-
+                                                                          natural 2-frame X (p) in TF (p). Note that, F being the zero
+nected, and (ii) ∀(u, v, t) ∈ F, (fu , fv ) 6= (0, 0) Our analy-
+                                                                          level-set of the function f defined in Eq. 1, ∇f |p ⊥TF (p).
+2 Examples where this does not hold are (i) a cylinder being swept        We set β = (−fv , fu , 0) 6= 0 and note that β⊥∇f . It is
+along its axis (ii) a planar face being swept in a direction orthogonal   easy to see that β is tangent to the pcurve-of-contact ct .
+to its normal. Such cases can be separately and easily handled.           Let α = ∇f × β = (−fu ft , −fv ft , fu2 + fv2 ). Here × is the
+                                                                                   Fig. 6. Global and local self-intersection
+
+Fig. 4. A sphere rotating about an axis which is tangent to itself.   Proof. By equation 7, we have det(D(r)) = 0 iff θ(r) = 0.
+There is type-1 L.S.I. but no type-2 L.S.I.
+                                                                      Recall that, as shown earlier, {α(r), β(r)} is a basis of
+cross-product in R3 . Clearly, the set {α, β} forms a basis of        TF (r), and {σu (r), σv (r)} is also a basis of the 2-frame
+TF (p).                                                               associated at σ(r). As D(r) is the matrix expressing
+  Figure 3 illustrates the basis {α, β} schematically. Ob-            X = {Jσ (r)(α(r)), Jσ (r)(α(r)) in terms of {σu (r), σv (r)},
+serve that β is tangent to the pcurve-of-contact at time t            det(D(r)) = 0 iff rank of Jσ (r)(TF (r)) is less than 2. Thus,
+and α points towards the ‘next’ pcurve-of-contact.                    r is a critical point iff θ(r) = 0 iff the rank of Jσ (r)(TF (r))
+                                                                      is less than 2.                                                
+4.2. The determinant connecting the two frames                           Note that the above lemma proves part (ii) of theo-
+                                                                      rem 4.1.
+                                                                      Lemma 4.3 A sweep causes a singularity if there exists
+  We continue with the notation developed earlier. We have
+                                                                      points p and q on F such that θ(p) ≤ 0 and θ(q) ≥ 0.
+α = (−ft fu , −ft fv , fu2 + fv2 ) and β = (−fv , fu , 0). Hence,
+                                                                      Proof. As θ is a continuous function on F, the existence of
+Jσ α = −ft fu σu − ft fv σv + (fu2 + fv2 )σt                          p and q on F with the required properties implies existence
+     = (−ft fu + l(fu2 + fv2 ))σu + (−ft fv + m(fu2 + fv2 ))σv        of another point r ∈ F such that θ(r) = 0. By the previous
+Jσ β = −fv σu + fu σv                                                 lemma, this implies that the sweep causes a singularity. 
+                                                                         The above lemma leads to a computationally efficient test
+So, {Jσ α, Jσ β} can be expressed in terms of {σu , σv } as           for detecting singularities: namely, evaluating θ at sampled
+follows                                                               points on F and checking if it changes sign on F.
+                                                     
+    h          i h       i −ft fu + l(f 2 + f 2 ) −fv                    The analysis done so far helps us detect singularities on
+                                        u    v
+      Jσ α Jσ β = σu σv                                             the contact-set. In the next section we will perform a de-
+                            −ft fv + m(fu + fv2 ) fu
+                                         2
+                                                                      tailed analysis of local self-intersections which is topologi-
+                          |            {z             }               cal in nature. Towards this, note that all points in the non-
+                                            D(p)
+                                                                      critical set may not lead to points on the envelope of the
+Note that,                                                            swept volume. For some p = (u0 , v0 , t0 ) ∈ F, σ(p) may lie
+           det(D(p)) = (fu2 + fv2 )(lfu + mfv − ft )           (6)    in the interior of the solid Mt of which the surface patch St
+                      = (fu2 + fv2 )θ(p)                       (7)    is a part of, for some t in neighbourhood of t0 . In that case
+                                                                      σ(p) will not be on the envelope. Fig. 5 shows two sweep-
+                                                                      ing examples with self-intersections. Curves-of-contact at a
+4.3. Singularities of C
+                                                                      few time instances are shown. In the next section we focus
+                                                                      on identifying such points.
+    In this subsection, we propose an efficient test for detect-
+ing singularities on the contact-set. See Fig. 4 for an exam-
+ple. Clearly, the detection of singularities is important in          5. Topological and regularity analysis of C
+practice.
+    We start with the following definition.                              Quite often, the anomalies on C arise due to self-
+Definition 4.5 We say that the sweep causes a singularity             intersections. If C has self-intersections, it needs to be
+                          σ
+if the composite map F → C ,→ R3 fails to be an immersion.            trimmed to obtain the envelope of the swept volume [2].
+In other words, the sweep causes a singularity if ∃p ∈ F              Self-intersections can be broadly be classified into global
+such that the rank of Jσ (p)(TF (p)) is less than 2. Following        and local. Fig. 6 illustrates the difference between global
+the standard usage [8], in this case we say that the point p          and local self-intersections schematically.
+is a critical point.                                                     If there are only global self-intersections occurring on C,
+                                                                                               σ
+Lemma 4.2 A point r ∈ F is a critical point iff θ(r) = 0              the composite map F → C ,→ R3 fails to be an injection.
+iff the rank of Jσ (r)(TF (r)) is less than 2.                        However, it is an immersion (see [8]), i.e. ∀p ∈ F, the rank
+                           0.4
+                                 0.3
+                                                                               0.95        0.85
+                                  0.2                                                             0.8
+                                                                                                            0.7
+                                  0.1
+
+
+
+
+                                                                               Y
+         Y
+                 X          (a)                                                        X                    (b)
+                                                                                Z
+             Z
+
+Fig. 5. Examples of local self-intersection showing curves-of-contact at few time instances: (a) A cylinder with blended edges undergoing
+translation and rotation about x-axis (b) An ellipsoid undergoing translation along a curvilinear path
+
+
+of Jσ (p)(TF (p)) is 2. In principle, global self-intersections       Definition 5.2 Given a trajectory h, the inverse trajec-
+can be detected by surface-surface intersection. (see [14])           tory h̄ is defined as the map h̄ : [0, 1] → (SO(3), R3 ) given
+   The case of local self-intersection is more subtle as it           by h̄(t) = (At (t), −At (t)b(t)).
+leads to singularities on C. Clearly, the detection of local             Thus, for a fixed point x ∈ R3 , the inverse trajectory of
+self-intersections is also central to a robust implementation         x is the map ȳ : [0, 1] → R3 given by ȳ(t) = At (t)(x −
+of the solid sweep in CAD systems.                                    b(t)). The range of ȳ is {At (t)x − At (t)b(t)|t ∈ [0, 1]} =
+   In literature [2,7], local self-intersections have been quan-      {z ∈ R3 |∃t ∈ [0, 1], A(t)z + b(t) = x}. We will denote the
+tified by looking at points in the contact-set which lie in the       trajectory of x by y : [0, 1] → R3 , y(t) = A(t)x + b(t). We
+interior of the solid Mt for some time instant t. Clearly, such       now note a few useful facts about inverse trajectory of x.
+a point cannot be on the envelope of the swept volume. This           We assume without loss of generality that A(t0 ) = I and
+approach was used in [2] for detecting local and global self-         b(t0 ) = 0. Denoting the derivative with respect to t by ˙, we
+intersections, where the authors used implicit representa-            have
+tion of the surface bounding the solid which is being swept.                          ˙ȳ(t) = Ȧt (t)(x − b(t)) − At (t)ḃ(t)           (8)
+We adapt this concept to when the surface of the solid is
+represented parametrically. We will refer to this type of lo-         Since A ∈ SO(3) we have,
+cal self-intersection as type-2 L.S.I.. It turns out that type-                                   At (t)A(t) = I, ∀t                     (9)
+2 L.S.I. is intimately related to the analysis carried out in
+the previous section. To make this connection precise, we             Differentiating Eq. 9 w.r.t. t we get
+first introduce another type of local self-intersection. For                               Ȧt (t)A(t) + At (t)Ȧ(t) = 0, ∀t           (10)
+lack of a better name, this is called as type-1 L.S.I.                                                  t
+                                                                                                    Ȧ (t0 ) + Ȧ(t0 ) = 0             (11)
+
+5.1. Type-1 local self-intersections                                  Differentiating Eq. 10 w.r.t. t we get
+                                                                               Ät (t)A(t) + 2Ȧt (t)Ȧ(t) + At (t)Ä(t) = 0, ∀t
+Definition 5.1 A type-1 L.S.I. is said to occur at a point                             Ät (t0 ) + 2Ȧt (t0 )Ȧ(t0 ) + Ä(t0 ) = 0     (12)
+p ∈ F if θ(p) ≤ 0.
+   Thus, Type-1 L.S.I is our classification of a local self           Using Eq. 8 and Eq. 11 we get
+intersection. We will see in subsection 5.3 that a for a Type-                        ˙ȳ(t0 ) = −Ȧ(t0 )x − ḃ(t0 ) = −ẏ(t0 )        (13)
+1 L.S.I point p, the image σ(p) does not lie on the envelope
+of the swept volume.                                                  Differentiating Eq. 8 w.r.t. time we get
+                                                                           ȳ¨(t) = Ät (t)(x − b(t)) − 2Ȧt (t)ḃ(t) − At (t)b̈(t)    (14)
+5.2. Type-2 local self-intersection                                   Using Equations 14, 11 and 12 we get
+                                                                                           ȳ¨(t0 ) = −ÿ(t0 ) + 2Ȧ(t0 )ẏ(t0 )       (15)
+   In order to define type-2 L.S.I. we first describe the in-
+verse trajectory corresponding to a given trajectory [2,20].          We now define type-2 L.S.I. The surface S is the boundary
+   Given a trajectory as in definition 2.1 and a fixed point x        of the solid M being swept. We will refer to the interior of
+in object-space, we would like to compute the set of points           M by Int(M ) and exterior of M by Ext(M ).
+in the object-space which get mapped to x at some time                Definition 5.3 A type-2 L.S.I is said to occur at a point
+instant. This set can be computed through the inverse tra-            (u0 , v0 , t0 ) if the inverse trajectory of the point σ(u0 , v0 , t0 )
+jectory defined as follows.                                           intersects Int(Mt0 ).(see [2])
+                                                                        D                 E
+                                                                         π̇(t0 ), Ṅ (t0 ) = hπ̇(t0 ), G ∗ (π̇(t0 ))i = hẏ(t0 ), G ∗ (ẏ(t0 ))i =
+                                                                        hV (p), G ∗ (V (p))i = κv 2 . Here G ∗ (ẏ) is the differential of
+                                                                        the Gauss map, i.e. the curvature tensor of St0 at point
+                                                                        x. Using this in Eq. 20 and the fact that ẏ(t0 ) = σ̇(p),
+                                                                        ÿ(t0 ) = σ̈(p) we get
+                                                                                        D                               E
+                                                                               λ̈(t0 ) = −σ̈(p) + 2Ȧ(t0 )V (p), N (t0 ) + κv 2      (21)
+
+                                                                        From Eq. 19 and Eq. 21 we conclude that if λ̈(t0 ) < 0 the
+                                                                        point x = ȳ(t0 ) = σ(u0 , v0 , t0 ) is a local maxima of the
+                Fig. 7. Type-2 local self-intersection                  function λ and the inverse trajectory of x intersects with
+                                                                        interior of the solid Mt0 causing type-2 L.S.I. Similarly, if
+   Fig. 7 illustrates type-2 L.S.I. schematically where ȳ is           λ̈(t0 ) > 0 we conclude that x is a local minima of λ and the
+the inverse trajectory of the point x ∈ St0 and π is the                inverse trajectory of x does not intersect with the interior
+projection of ȳ on St0 . Suppose the point x = σ(u0 , v0 , t0 ) ∈      of Mt0 and there is no L.S.I. occurring at x.
+C. Let λ(t) be the signed distance of ȳ(t) from surface St0 .             However, if λ̈(t0 ) is zero, one needs to inspect a small
+If the point ȳ(t) is in Int(Mt0 ), Ext(Mt0 ) or on the surface         neighbourhood of t0 to see if ∃t such that λ(t) < 0 in order
+St0 , then λ(t) is negative, positive or zero respectively. Then        to check for type-2 L.S.I.                                  
+we have ȳ(t)−π(t) = λ(t)N (t), where π(t) is the projection               If λ̈ = 0 at a point, the structure of the contact-set C is
+of ȳ(t) on St0 along the unit outward pointing normal N (t)            unknown at that point. We will see in the next subsection
+to St0 at π(t). Then, the following relation holds for λ.               that at such a point, C has singularity.
+                   λ(t) = hȳ(t) − π(t), N (t)i                 (16)
+                                                                        5.3. Relation between type-1 L.S.I. and type-2 L.S.I.
+  We now give a necessary and sufficient condition for type-
+2 L.S.I. to occur.
+Lemma 5.1 Type-2 L.S.I. occurs at a point p = (u0 , v0 , t0 ) ∈            In this subsection we will see that type-2 L.S.I. implies
+F if and only ifDeither of the following conditions hold                type-1 L.S.I. at any point p = (u0 , v0 , t0 ) ∈ F
+                                E                                       Lemma 5.2 θ(p) = λ̈(t0 ).
+  (i) λ̈(t0 ) = −σ̈ + 2ȦV, N + κv 2 < 0 where κ is the
+                                                                        Proof. Recalling definition of θ(p) from Eq. 5
+       normal curvature of St0 at (u0 , v0 ) along velocity V (p),                           D                E D               E
+       N is the unit length outward pointing normal to St0                lfu + mfv − ft = lN̂u + mN̂v , V + N̂ , lVu + mVv
+       at (u0 , v0 ) and v 2 = hV (p), V (p)i.                                              D      E D           E
+ (ii) λ(t) is negative for some t in some nbd of t0 .                                     − N̂t , V − N̂ , Vt
+Remark: The statement of the above lemma (except for
+                                                                        Here N̂u = G ∗ (σu ) and N̂v = G ∗ (σv ) where G ∗ is the shape
+the insightful expression of λ̈(t0 )) is similar in spirit to the
+                                                                        operator (differential of the Gauss map) of St0 at (u0 , v0 ).
+key Theorem-2 in [2] in the context of implicitly defined
+                                                                        Also, Vu = At Su and Vv = At Sv . Assume without loss of
+solids.
+                                                                        generality that A(t0 ) = I and b(t0 ) = 0. Using Eq.11 and
+Proof. Differentiating Eq. 16 with respect to time and de-
+                                                                        the fact that σt = lσu + mσv we get
+noting derivative w.r.t. t by ˙, we get
+                                      D                     E                lfu + mfv − ft = hG ∗ V, V i + 2 hAt V, N i − hVt , N i
+    λ̇(t) = h ˙ȳ(t) − π̇(t), N (t)i + ȳ(t) − π(t), Ṅ (t)      (17)
+                                        D                      E                                 = κv 2 + h2At V − Vt , N i                 (22)
+    λ̈(t) = hȳ¨(t) − π̈(t), N (t)i + 2 ˙ȳ(t) − π̇(t), Ṅ (t)          From Eqs. 21 and 22 and the fact that               ∂σ
+                                                                                                                        = Vt we get
+            D                      E                                                                                        ∂t2
+          + ȳ(t) − π(t), N̈ (t)                                 (18)   θ(p) = lfu + mfv − ft = λ̈                                
+                                                                           Let p be such that θ(p) < 0. By lemma 5.2, λ̈(t0 ) < 0.
+At t = t0 , ȳ(t0 ) = π(t0 ). Since ẏ(t0 ) = V (p)⊥N (p), it           Further, by lemma 5.1 a type-2 L.S.I. occurs at p. This
+follows from Eq. 13 that ȳ(t  ˙ 0 )⊥N (p). It is easy to verify        proves parts (i) and (iii), and hence completes the proof of
+                ˙
+that π̇(t0 ) = ȳ(t0 ). Hence,                                          theorem 4.1.
+                        λ(t0 ) = λ̇(t0 ) = 0                    (19)       Fig. 8 schematically illustrates the region on the funnel
+                                                                        where local self-intersection occurs and the corresponding
+From Eq. 18 and Eq. 15 it follows that                                  region on the contact-set. A curve-of-contact and the cor-
+    λ̈(t0 ) = hȳ¨(t0 ) − π̈(t0 ), N (t0 )i                             responding pcurve-of-contact is shown in red colour at a
+              D                                             E           time instant t0 when a local self-intersection occurs. The
+            = −ÿ(t0 ) + 2Ȧ(t0 )ẏ(t0 ) − π̈(t0 ), N (t0 )     (20)    shaded region there corresponds to θ < 0. Thus sign(θ)
+                                                                        changes(from −ve to +ve) as one moves from the interior
+Since π(t) ∈ St0 ∀t in some neighbourhood U of t0 , we
+                                                                        to the exterior of the shaded region. Of course θ = λ̈ = 0
+have   that hEπ̇(t), N (t)i = 0, ∀t ∈ U . Hence hπ̈(t), N (t)i +
+D                                                                       on the boundary of the shaded region where C has a singu-
+  π̇(t), Ṅ (t) = 0, ∀t ∈ U . Hence − hπ̈(t0 ), N (t0 )i =              larity.
+   boundary of LSI region                                            6. Mathematical structure of the smooth case
+                      interior of LSI region
+                                                                        In this section, we consider the smooth case where the
+             t                                   z                   solid M is composed of faces meeting smoothly. As usual,
+                                                                     each face (or the associated surface patch) is smooth (of
+                                                                     class C k for k ≥ 2). Further, adjacent faces meet smoothly
+                                                                     at the common edge. This is referred to as G1 continuity [13]
+                                                                     which formally means that the unit outward normals to the
+                           u                               x         adjacent faces match on the common edge. Similarly, at a
+                                                                     vertex, all the unit outward normals to faces incident on
+                                                                     this vertex are identical. The solid shown in figure 1 is such
+     v                                    y Contact-set              a solid.
+           Funnel
+                                                                        Consider a sweep of M along a trajectory h which causes
+              Fig. 8. Region of local self-intersection              no self-intersections/anomalies on the contact-set C. As de-
+                                                                     scribed in Section 3, every point p on C comes from a curve
+   Fig. 4 shows an example of sweeping which clearly                 of contact on M and therefore is associated to a point q
+demonstrates the subtle difference between type-1 L.S.I.             of M . Let π : C → M (p 7→ π(p) = q) denote this natu-
+and type-2 L.S.I. In Fig. 4 a sphere is rotated about an             ral map. For every p ∈ C, π(p) belongs to some geometric
+axis which is tangent to itself. The contact-set is shown            entity of M , i.e., a vertex, edge or face. This sets up the
+in green and the curve-of-contacts on the contact-set at             natural correspondence between geometric entities of C and
+initial position (t = 0) and final position (t = 1) are also         that of M . For a face F of M , let CF denote the part of C
+shown in blue. In Fig. 4 there is type-1 L.S.I. but no type-2        which corresponds to the face F under this correspondence.
+L.S.I. since no point of the contact-set intersects with the         For example, in figure 2, the green face on the solid M cor-
+interior of solid at any time.                                       responds to multiple green faces of C. Clearly, the map π
+   We now present two examples of sweeping which result in           restricts naturally from CF → F .
+local self-intersections. We apply the test for type-1 L.S.I.           There are situations in which, for example, an edge (or
+on these examples to demonstrate its effectiveness.                  a part of it) on M remains on the boundary for a while
+Example 5.1 Consider a solid cylinder along the y-axis               and thus, ‘sweeps’ a face on C. For simplicity, we assume
+with height 2.5 and radius 2, parameterized as S(u, v) =             that such situations are ruled out. In other words, no lower
+(2 cos v, u, −2 sin v), u ∈ [−1.25, 1.25], v ∈ [−π, π] being         dimensional geometric entity of M gives rise to a higher
+swept along the trajectory given by h(t) = (A(t), b(t))            dimensional geometric entity on C. This is the case for the
+                    1       0              0                         sweep operation illustrated in figure 2.
+                                                  
+where A(t) = 0 cos(0.1πt) − sin(0.1πt) and b(t) =
+                                                  
+                                                                   6.1. Local similarity within a face
+                    0 sin(0.1πt) cos(0.1πt)
+       π       
+  3 cos     t −3                                                        Firstly, recall that each face F of M is derived from an
+          2                                                       underlying surface SF by restricting the parameters of SF
+            π
+
+                   t ∈ [0, 1]. The resulting envelope has lo-
+                 
+ 3 sin       t                                                      to a suitable domain DF . Now, by applying the ‘local’ anal-
+           2     
+          0                                                          ysis of Section 4 to the surface SF , we have
+                                                                     Lemma 6.1 The set CF has no self-intersections and is a
+cal self-intersections as illustrated in Fig. 5(a) which shows
+                                                                     smooth manifold. Further, let p ∈ CF correspond to q ∈ F
+the cylinder with blended edges and curves-of-contact at
+                                                                     at time t. Then, the unit normal N (p) to CF at p is simply
+few time instances. Type-1 L.S.I is detected at time t = 0.1
+                                                                     A(t)N (q) where N (q) is the unit normal to F at q.
+by the test given in lemma 5.1 at point p = (u = 0.18, v =
+                                                                        Further, we would like to show that ‘locally’, CF has the
+1.53, t = 0.1). θ(p) = −2.378.
+                                                                     same topology as that of F . More precisely, the natural
+Example 5.2 Consider an ellipsoid with axes lengths 3, 1,
+                                                                     map π : CF → F is a local homeomorphism onto its image.
+and 1 parameterized as S(u, v) = (−3 cos(u) cos(v), sin(u),
+                                                                     Thanks to the ‘local’ nature, we may analyse this via the
+cos(u) sin(v)), u ∈ [− π2 , π2 ], v ∈ [−π, π] being swept along
+                                                                     underlying surface SF . For ease of notation, we sometimes
+the curvilinear trajectory given by h(t) = (A(t), b(t))
+                                            π                      omit the reference to F and freely use notations from Sec-
+                                     3 cos     t −3                  tion 4. As the sweep σ is free of self-intersections, the key
+                                             2  
+                                               π
+                                    
+where A(t) = I∀t and b(t) =  3 sin
+                                    
+                                                 t    t ∈ [0, 1].
+                                                                    map σ : F → CF is a bijective immersion (recall that, in
+                                              2                    Section 4, F is the funnel defined via the function f = 0).
+                                             0                       Thus, by the inverse function theorem, it is invertible via
+The curves-of-contact are shown in Fig. 5(b). Type-1                 a continuous inverse. Therefore, in order to show that π :
+L.S.I. is detected at time t = 0.8. θ(p) = −11.864 at                CF → F is a local homeomorphism onto its image it suffices
+(−0.791, −0.157, 0.8).                                               to prove the following lemma.
+Lemma 6.2 The natural map π 0 : F → F defined as: for              and we get a local parameterization of C in N by ψ(u, v) =
+p = (u, v, t) ∈ F, π 0 (p) = S(u, v), is a local homeomor-         σ(u, v, t(u, v)). TC (p) is spanned by ψu = σu + σt tu and
+phism.                                                             ψv = σv + σt tv . Since p ∈ F by lemma 4.1, σt is in the
+Remark The map π 0 is simply the composition of σ and π.           space spanned by σu and σv . Let σt = lσu + mσv . Hence we
+Proof. Let p = (u0 , v0 , t0 ) ∈ F. Here, the assumption that      express basis for TC (p) in terms of basis of TS (q) as follows
+ft 6= 0 at p is very crucial. Firstly, by the implicit function                        h        i h       i
+theorem, there exists a neighbourhood O of (u0 , v0 ) and                                ψu ψv = σu σv M                      (23)
+a continuous function t = g(u, v) defined on O such that                                           
+∀(u, v) ∈ O, f (u, v, g(u, v)) = 0. Further, the set O(p) =                         1 + ltu     ltv
+                                                                   where M =                       . The unit normal to C is
+{(u, v, g(u, v)) | (u, v) ∈ O} is a neighbourhood of p in F.                         mtu 1 + mtv
+On this neighbourhood of p, the function π 0 is a bijection
+and invertible. This easily follows from the fact that, for        given by N̂ (u, v) = A(t(u, v))N (u, v) = N (u, v) where N
+every (u, v) ∈ O, there is a unique time t, namely, t =            is the unit normal to St . Hence, N̂u = Nu and N̂v = Nv .
+g(u, v), such that (u, v, g(u, v)) ∈ O(p).                        Further,
+                                                                                      h       i h        i
+                                                                                       Nu Nv   =  σu σv W                 (24)
+6.2. Local similarity across faces
+                                                                   where W is the Weingarten matrix of S at point q whose
+   We begin by studying the variation of the unit normal           determinant gives the Gaussian curvature of S at q(see [1]).
+across faces of C. Let Ct denote the curve of contact of C at      From Eq. 23 and Eq. 24 we have
+                                                                                 h        i h        i
+time t. Let p ∈ Ct be such that p is common to (only) CF1                          N̂u N̂v = ψu ψv M W
+                                                                                                        −1
+                                                                                                                          (25)
+and CF2 where F1 and F2 are two distinct faces of M .
+Lemma 6.3 The faces F1 and F2 are adjacent in M . Fur-               So the Weingarten matrix of C with respect to parame-
+ther, the normal to CF1 at p is identical to the normal to CF2     terization ψ is given by M−1 W and the Gaussian curva-
+at p.                                                              ture is given by det(M−1 W). From Eq. 2 and the fact that
+Proof. Suppose p corresponds to q. Clearly, q is common            Nt = Vu = Vv = 0 we note that f = hN, V i, fu = hNu , V i,
+to (only) F1 and F2 . Thus F1 and F2 are adjacent in M .           fv = hNv , V i and ft = hN, Vt i. So,
+Further, by G1 continuity, the normal to F1 at q is identical                                 1                   ft
+to the normal to F2 at q. By lemma 6.1, it is clear that, the            det(M−1 ) =                    =
+                                                                                       1 + ltu + mtv       ft − lfu − mfv
+normals to CF1 , and to CF2 , at p are identical.            
+                                                                                                  hN, Vt i
+   Thus, the adjacencies on C are the ‘same’ as the ad-                              =
+jacencies on M . See figure 2, which effectively illustrates                           hN, Vt i − hlNu + mNv , V i
+this through colours. Further, the adjacent entities of C                                      hN, Vt i
+                                                                                     =
+meet smoothly across common lower-dimensional entities.                                hN, Vt i − hW(V ), V i
+In other words, C is also of class G1 . Recall that the overall    The Gaussian curvature of C is computed as
+envelope may be obtained from the contact-set C by sim-
+                                                                                                 hN, Vt i
+ply capping the appropriate parts of the solid M at the ini-           det(M−1 W) =                             det(W)       (26)
+tial and final position. Therefore, the topological structure                            hN, Vt i − hW(V ), V i
+of the contact-set and hence, that of the envelope, mimics         where, hN, Vt i is the curvature of the trajectory scaled by
+that of the solid.                                                 kVt k, hW(V ), V i is the normal curvature of S at p in di-
+   The following theorem summarizes the analysis so far.           rection V scaled by kV k2 and det(W) is the Gaussian cur-
+Theorem 6.1 The map π from the contact-set/envelope to             vature of S at p.
+the solid is an adjacency-respecting local homeomorphism
+onto its image.                                                    7. Envelope computation
+
+6.3. Curvature of C                                                   In this section we describe the construction of the enve-
+                                                                   lope E assuming that it is free from self-intersections and
+    In the special case when the trajectory h consists only of     hence regular. We obtain a procedural parametrization of
+translations, i.e. A(t) = I ∀t, the Gaussian curvature of C        E. The procedural paradigm is an abstract way of defin-
+can be expressed in terms of the Gaussian curvature of S           ing curves and surfaces. It relies on the fact that from the
+and the curvature of h. Since A(t) = I ∀t, σu = Su and σv =        user’s point of view, a parametric surface(curve) in R3 is
+Sv . Also, Vu = Vv = 0. Consider a point p = (u0 , v0 , t0 ) ∈     a map from R2 (R) to R3 and hence is merely a set of pro-
+F. By definition of F, we have that f (u0 , v0 , t0 ) = 0. Given   grams which allow the user to query the key attributes
+that ∇f |p 6= 0 suppose without loss of generality that            of the surface(curve), e.g. its domain and to evaluate the
+ft |p 6= 0. Then by the implicit function theorem there ex-        surface(curve) and its derivatives at the given parameter
+ists a neighbourhood N of q = (u0 , v0 ) such that ∀(u, v) ∈       value. The procedural approach to defining geometry is es-
+N , f (u, v, t(u, v)) = 0. Hence, tu = − ffut and tv = − ffvt      pecially useful when closed form formulae are not available
+for the parametrization map and one must resort to itera-                    So, given (p0 , t0 ), we have one equation in two unknowns,
+tive numerical methods. We use the Newton-Raphson(NR)                        viz. u(p0 , t0 ) and v(p0 , t0 ). E(p0 , t0 ) is defined as the in-
+method for this purpose. As an example, the parametriza-                     tersection of the plane normal to the iso-t(for t = t0 )
+tion of the intersection curve of two surfaces is computed                   curve of Ē at Ē(p0 , t0 ) with the iso-t(for t = t0 ) curve of
+procedurally in [14]. As we will see, this approach has the                  E which is nothing but Ct0 . Recall that Ct0 is given by
+advantage of being computationally efficient as well as ac-                  σ(u(p, t0 ), v(p, t0 ), t0 ) where u, v, t obey Eq. 27. Henceforth,
+curate. For a detailed discussion on the procedural frame-                   we will suppress the notation that u, v, ū and v̄ are func-
+work, see [11].                                                              tions of p and t. Also, all the evaluations will be understood
+   The computational framework is as follows. For the in-                    to be done at parameter values (p0 , t0 ). The tangent to iso-t
+put parametric surface S and trajectory h, an approximate                    curve of Ē at (p0 , t0 ) is given by
+envelope is first computed, which we will refer to as the seed
+                                                                                                  ∂ Ē   ∂σ ∂ ū ∂σ ∂v̄
+surface. Now, when the user wishes to evaluate the actual                                              =        +                           (28)
+envelope or its derivative at some parameter value, a NR                                          ∂p     ∂u ∂p    ∂v ∂p
+method will be started with seed obtained from the seed                      Hence, E(p0 , t0 ) is the solution of simultaneous system of
+surface. The NR method will converge, upto the required                      equations 27 and 29
+tolerance, to the required point on the envelope, or to its                                                                    
+                                                                                                                           ∂ Ē
+derivative, as required. Here, the precision of the evalua-                                 σ(u, v, t0 ) − σ(ū, v̄, t0 ),        =0 (29)
+tion is only restricted by the finite precision of the com-                                                                ∂p
+puter and hence is accurate. It has the advantage that if a                  Eq. 27 and Eq. 29 give us a system of two equations in two
+tighter degree of tolerance is required while evaluation of                  unknowns, u and v and hence can be put into NR framework
+the surface or its derivative, the seed surface does not need                by computing their first order derivatives w.r.t u and v. For
+to be recomputed. Thus, for the procedural definition of                     any given parameter value (p0 , t0 ), we seed the NR method
+the envelope we need the following:                                          with the point (ū(p0 , t0 ), v̄(p0 , t0 )) and solve Eq. 27 and
+   (i) a NR formulation for computing points on E and its                    Eq. 29 for (u(p0 , t0 ), v(p0 , t0 )) and compute E(p0 , t0 ).
+       derivatives, which we describe in subsection 7.1                        Having computed E(p, t) we now compute first order
+  (ii) Seed surface for seeding the NR procedure, which we                   derivatives of E assuming that they exist. In order to com-
+       describe in subsection 7.2                                            pute ∂E
+                                                                                   ∂p , we differentiate Eq. 27 and Eq. 29 w.r.t. p to ob-
+   Recall that by the non-degeneracy assumption, E is the                    tain
+union of Ct , ∀t. This suggests a natural parametrization                      *                         +                            
+                                                                                  ∂ N̂ ∂u ∂ N̂ ∂v                      ∂V ∂u ∂V ∂v
+of E in which one of the surface parameters is time t. We                                 +           , V + N̂ ,             +             =0
+will call the other parameter p and denote the seed surface                       ∂u ∂p      ∂v ∂p                     ∂u ∂p     ∂v ∂p
+by γ which is a map from the parameter space of E to                                                                                        (30)
+the parameter space of σ, i.e. γ(p, t) = (ū(p, t), v̄(p, t), t)
+                                                                                                                             
+                                                                                ∂σ ∂u ∂σ ∂v ∂σ ∂ ū ∂σ ∂v̄ ∂ Ē
+and while the point σ(γ(p, t)) may not belong to E, it is                             +          −             +        ,
+                                                                                ∂u ∂p     ∂v ∂p ∂u ∂p              ∂v ∂p ∂p
+close to E. In other words, γ(p, t) is close to F. We call
+                                                                                                               ∂ 2 Ē
+                                                                                                                     
+the image of the seed surface through the sweep map σ as                       + σ(u, v, t0 ) − σ(ū, v̄, t0 ), 2 = 0                       (31)
+the approximate envelope and denote it by Ē, i.e. Ē(p, t) =                                                  ∂p
+σ(γ(p, t)). We make the following assumption about Ē.                       Eq. 30 and Eq. 31 give a system of two equations in two un-
+                                                                                                  ∂v
+Assumption 1 At every point on the iso-t curve of Ē, the                    knowns, viz., ∂u
+                                                                                           ∂p and ∂p and can be put into NR framework
+normal plane to the iso-t curve intersects the iso-t curve of                by computing first order derivatives w.r.t. ∂u     ∂v
+                                                                                                                         ∂p and ∂p . Note
+E in exactly one point.                                                      that Eq. 30 and Eq. 31 also involve u and v whose compu-
+Note that this is not a very strong assumption and holds                     tation we have already described. After computing ∂u ∂p and
+true in practice even with rather sparse sampling of points                  ∂v ∂E                        ∂σ ∂u   ∂σ ∂v ∂E
+                                                                                ,
+                                                                             ∂p ∂p  can be  computed   as ∂u ∂p +      .
+                                                                                                                  ∂v ∂p ∂t  can similarly
+for the seed surface. We now describe the Newton-Raphson
+                                                                             be computed by differentiating Eq. 27 and Eq. 29 w.r.t. t.
+formulation for evaluating points on E and its derivatives
+                                                                               Higher order derivatives can be computed in a similar
+at a given parameter value.
+                                                                             manner.
+
+7.1. NR formulation for faces of E
+                                                                             7.2. Computation of seed surface
+
+  Recall that the points on E were characterized by the
+                                                                                The seed surface is constructed by sampling a few points
+tangency condition given in Eq. 2. Introducing the param-
+                                                                             on the envelope and fitting a tensor product B-spline sur-
+eters (p, t) of E, we rewrite Eq. 2 ∀(p0 , t0 ):
+                                     D                                       face through these points. For this, we first sample a few
+  f (u(p0 , t0 ), v(p0 , t0 ), t0 ) = N̂ (u(p0 , t0 ), v(p0 , t0 ), t0 ),    time instants, say, T = {t1 , t2 , . . . , tn } from the time inter-
+                                                                             val of the sweep. For each ti ∈ T , we sample a few points on
+                                 V (u(p0 , t0 ), v(p0 , t0 ), t0 )i = 0      the curve-of-contact Cti . For this, we begin with one point
+                                                                      (27)   p on Cti and compute the tangent to Cti at p, call it TCi (p).
+p + TCi (p) is used as a seed in Newton-Raphson method to             [5] Wang L, Leu MC, Blackmore D. Generating swept solids for
+obtain the next point on Cti and this process is repeated.                 NC verification using the SEDE method. ACM symposium on
+   While we do not know of any structured way of choosing                  solid modeling and applications, proceedings of the fourth ACM
+                                                                           symposium on solid modeling and applications 1997;364-375
+the number of sampled points, in practice even a small                [6] Abdel-Malek K, Yeh HJ. Geometric representation of the swept
+number of points suffice to ensure that the Assumption 1                   volume using Jacobian rank-deficiency conditions. Computer-
+is valid.                                                                  Aided Design 1997;29(6):457-468.
+                                                                      [7] Xu Z-Q, Ye X-Z, Chen Z-Y, Zhang Y, Zhang S-Y. Trimming
+                                                                           self-intersections in swept volume solid modelling. Journal of
+7.3. NR formulation for edges and vertices of E                            Zhejiang University Science A 2008;9(4):470-480.
+                                                                      [8] Guillemin V, Pollack A. Differential Topology. Prentice-Hall,
+  An NR formulation for edges and vertices of E can be                     1974.
+                                                                      [9] Elber G. Global error bounds and amelioration of sweep surfaces.
+obtained in a manner similar to that for faces of E which we
+                                                                           Computer-Aided Design 1997;29(6):441-447.
+described in subsection 7.1. In order to obtain a procedural          [10] Martin R, Stephenson P. Sweeping of three-dimensional objects.
+parametrization for edges of E, again seed curves need to                  Computer-Aided Design 1990;22(4):223-234.
+be computed.                                                          [11] Milind Sohoni. Computer aided geometric design course notes.
+                                                                           www.cse.iitb.ac.in/~sohoni/336/main.ps
+                                                                      [12] Spatial       Corp.      ACIS      3D      modeling       kernel
+8. Discussion                                                              www.spatial.com/products/3d-acis-modeling
+                                                                      [13] Gerald Farin. Curves and surfaces for CAGD: A practical guide.
+   In this work, we have proposed a novel computation-                     Morgan Kaufmann Publishers. 2002
+                                                                      [14] Markot R, Magedson R. Procedural method for evaluating the
+ally efficient test for detecting anomalies on the envelope.               intersection curves of two parametric surfaces. Computer-Aided
+This has been achieved through a delicate mathematical                     Design 1990;23(6);395-404
+analysis of an ‘invariant’. We have provided a rich proce-            [15] Abdel-Malek K, Harn-Jou Yeh, Saeb Othman. Swept volumes:
+dural framework for computing the Brep of the envelope                     void and boundary identification. Computer-Aided Design
+along with its accurate parametrization. Another contri-                   1998;30(13);1009-1018
+                                                                      [16] Huseyin Erdim, Horea T. Ilies. Detecting and quantifying
+bution is a natural correspondence between the geomet-                     envelope singularities in the plane. Computer-Aided Design
+ric/topological entities of the Brep envelope and that of                  2007;39(10);829-840
+the Brep solid. This framework has been implemented us-               [17] Seok Won Lee, Andreas Nestler. Complete swept volume
+ing the ACIS kernel [12] and has been used to produce the                  generation, Part I: Swept volume of a piecewise C1-continuous
+running examples of this paper.                                            cutter at five-axis milling via Gauss map. Computer-Aided
+                                                                           Design 2011;43(4);427-441
+   Ongoing work includes, for example, extending the pro-             [18] Seok Won Lee, Andreas Nestler. Complete swept volume
+posed procedural framework to handle (i) deeper topolog-                   generation, Part II: NC simulation of self-penetration via
+ical information of the Brep envelope, (ii) swept edges (an                comprehensive analysis of envelope profiles. Computer-Aided
+edge on the solid sweeping a face on the envelope) and so on               Design 2011;43(4);427-441
+(iii) faces meeting with G0 continuity (i.e. sharp edges). We         [19] Horea T. Ilies, Vadim Shapiro, The dual of sweep. Computer-
+                                                                           Aided Design 1999;31(3);179-182
+also to plan to extend the detection of anomalies to above            [20] Huseyin Erdim, Horea T. Ilies. Classifying points for sweeping
+settings and further, trim the appropriate part to obtain                  solids. Computer-Aided Design 2008;40(9);987-998
+the final envelope.                                                   [21] Wang W.P., Wang K.K. Geometric Modeling for Swept Volume
+   Another exciting future direction would be to analyse                   of Moving Solids . Computer Graphics and Applications, IEEE
+sweeps in which some numerical invariant associated with                   1986;6(12);8-17
+                                                                      [22] Rossignac J, Kim J.J, Song S. C, Sub K.C, Joung C.B. Boundary
+a a curve of contact, varies over time. For example, one                   of the volume swept by a free-form solid in screw motion.
+may imagine sweeping a torus along a trajectory where the                  Computer-Aided Design 2007;39(9);745-755
+number of components of the curve of contact changes over             [23] Abdel-Malek K, Yeh, H.J. Analytical Boundary of the
+time. In such a case, one would like to efficiently compute                Workspace for General 3-DOF mechanisms. International
+deeper topological invariants, say genus, of the envelope.                 Journal of Robotics Research 1997;16(2);1-12
+                                                                      [24] Abdel-Malek K, Adkins F., Yeh, H.J., Haug E.J. On the
+Our mathematical analysis coupled with a Morse-theoretic                   Determination of Boundaries to Manipulator Workspaces.
+analysis appears promising.                                                Robotics and Computer-Integrated Manufacturing 1997;13(1);1-
+                                                                           15
+                                                                      [25] Peternell M, Pottmann H, Steiner T, Zhao H. Swept volumes.
+References                                                                 Computer-Aided Design and Applications 2005;2;599-608
+
+[1] Pressley A. N. Elementary Differential Geometry. Springer, 2000
+[2] Blackmore D, Samulyak R, Leu MC. Trimming swept volumes.
+    Computer-Aided Design 1999;31(3):215-223.
+[3] Blackmore D, Leu MC, Wang L. Sweep-envelope differential
+    equation algorithm and its application to NC machining
+    verification. Computer-Aided Design 1997;29(9):629-637.
+[4] Blackmore D, Leu MC. A differential equation approach to swept
+    volumes. Proc. of rensselaers 2nd international conference on
+    computer integrated manufacturing 1990:143-149
+

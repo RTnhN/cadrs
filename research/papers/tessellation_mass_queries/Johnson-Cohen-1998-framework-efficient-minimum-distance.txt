@@ -1,0 +1,503 @@
+               A Framework For Efficient Minimum Distance Computations
+                                         By David E. Johnson and Elaine Cohen
+                                            Department of Computer Science,
+                                                  University of Utah,
+                                               Salt Lake City, UT 84112
+                        Abstract                               2    Background
+                                                               Much of the early work in this area comes from the robot-
+In this paper we present a framework for minimum dis-
+                                                               ics and computational geometry communities, although
+tance computations that allows efficient solution of mini-
+                                                               their work has often been focused on convex, polygonal
+mum distance queries on a variety of surface
+                                                               models. In the computer graphics community, the demand
+representations, including sculptured surfaces. The frame-
+                                                               for realistic, 3D environments has driven contributions in
+work depends on geometric reasoning rather than numeri-
+                                                               collision detection and minimum distance computations.
+cal methods and can be implemented straightforwardly.
+                                                               We summarize approaches from both groups below.
+We demonstrate performance that compares favorably to
+other polygonal methods and is faster than reported            2.1 Minimum Distance for Polygonal Models
+results for other methods on sculptured surfaces.
+                                                               Chin [4] and Edelsbrunner [10] both report on O(logN)
+1    Introduction                                              algorithms for finding the minimum separation between
+                                                               two convex polygons. Dobkin [8] uses a different
+                                                               approach to get the same result and extends his work to
+                                                               arbitrary polyhedra. However, these theoretical algorithms
+                                                               all have unknown and presumably large time coefficients.
+                                                               2.1.1 Convex Polygonal Models
+
+                                                               Lin [17] uses the Voronoi regions of convex polyhedra so
+                                                               that local search methods for minimum distance will
+                                                               always converge. The Voronoi regions structure space so
+                                                               that the closest point can be updated in a constant time
+                                                               step for small movements. The I-COLLIDE system [7]
+                                                               follows this approach and adds a spatial sorting method to
+                                                               reduce the number of object interactions. This method has
+                                                               been extended to handle collisions between concave poly-
+                                                               hedral objects by decomposing the object into hierarchies
+                                                               of convex objects [23].
+     FIGURE 1. The minimum distance between models.
+                                                               Gilbert [11] employs the Minkowski difference of two
+We introduce a framework for minimum distance calcula-         convex objects to determine their minimum separation.
+tions that applies well to both polygonal and parametric       With slight modification [3] this method can also provide
+model representations (Figure 1). The resulting methods        constant time updates for slowly moving polyhedra.
+scale well with problem size, have time-critical properties,   Chung [5] added an efficient means of updating the
+and are interactive for large polygonal models and sculp-      Minkowski difference to create a collision detection
+tured surfaces.                                                method for convex polyhedra.
+
+In robotics, minimum distance queries have been used in        2.1.2 General Polygonal Models
+path planning [2], path modification [25], and collision       Quinlan [24] produced an efficient method of finding the
+avoidance [15]. In computer graphics, minimum distance         minimum separation between general concave polyhedra
+computations have played roles in physical simulation          by exploiting hierarchical, spherical bounds to prune por-
+[1][20] and model prototyping [32]. A haptic prototyping       tions of the model. The method prunes by establishing
+project [13] which uses minimum distance computations          upper bounds on the minimum distance with depth-first
+to maintain local geometry on the haptic controller [30]       descent to the leaf nodes of the models. Allowing approxi-
+motivates our own interest.                                    mate results (“relative error”) speeds convergence and
+                                                               demonstrates log(N) scalability, where N is the number of
+
+
+
+                                                                                                                        1
+polygons in the scene. When exact distance is required,         Snyder has developed a global minimum distance method
+however, the log(N) complexity no longer holds. Sato et al      for parametric surfaces that avoids examining all extrema
+[26] created a collision detection method for arbitrary         of the distance and instead finds the global minimum by
+polyhedra by combining Quinlan’s sphere-tree method             using interval methods. His method determined the global
+and Gilbert’s convex method.                                    minimum for an example problem in five seconds on an
+                                                                HP9000 series 835 workstation [28].
+2.2 Minimum Distance for Parametric Models
+Existing methods for solving minimum distance queries           2.4 Collision Detection
+for sculptured models lose much of the geometric flavor of      We relate the collision detection problem to the minimum
+methods for polygonal models. Instead, root-finding or          distance problem by observing that a collision can be
+minimization methods solve systems of equations that            detected by when the minimum distance is zero. Below,
+describe conditions for the minimum distance.                   we describe some collision detection methods that are
+                                                                related to this paper’s contribution.
+2.3 Minimum Distance to a Surface
+Mortenson [21] derives equations for different types of         2.4.1 Collision Detection for Polygonal Models
+surface distance measures. For a point P, the closest point     OBBtrees [12] apply to general polygonal models, as does
+on a surface S is the nearest root of                           Hubbard’s work with sphere trees [14]. Both methods
+                                                                build bounding hierarchies around the original models.
+                              ∂S ∂S
+                ( S – P ) ×  ×  = 0.                (EQ 1)    The OBBtree work is based on an efficient overlap test for
+                             ∂ u ∂ v
+                                                                oriented bounding-boxes. Hubbard’s work used spheres as
+This high order equation is difficult to solve; a slightly      bounding primitives and concentrated on generating effi-
+easier approach is to simultaneously satisfy[22]                cient hierarchies using a medial-axis construction method.
+
+                     ∂S                    ∂S                   2.4.2 Collision Detection for Parametric Models
+         (S – P) ⋅      = 0 and ( S – P ) ⋅ = 0.      (EQ 2)
+                     ∂u                    ∂v                   Von Herzen [33] developed a collision detection method
+                                                                for time-dependent parametric surfaces which prunes por-
+Our research group has found this approach to be slow (on
+                                                                tions of the surface using Lipschitz bounds. Snyder [29]
+the order of one second on an SGI Indigo2) and to exhibit
+                                                                extended the method to better handle manifold contacts
+numerical problems in practice.
+                                                                and used interval methods for efficiency.
+2.3.1 Minimum Distance between Convex Surfaces
+                                                                2.5 Summary
+Limaiem [16] has presented methods for finding the mini-
+                                                                Approaches for convex regions typically depend on guar-
+mum distance to convex parametric curves and surfaces as
+                                                                anteed convergence of local methods for efficiency. In the
+well as the minimum distance between them. His algo-
+                                                                concave case, methods for concave polygonal models
+rithm converges to a local minimum distance by repeat-
+                                                                have emphasized hierarchical geometric processes, while
+edly finding the closest point on alternating surfaces.
+                                                                methods for concave sculptured models treat the problem
+Baraff [1] uses the closest points between strictly convex      as root-finding of some distance equation. We would like
+surfaces to create “witnesses” --- simpler geometry that        to find some common ground for polygonal and paramet-
+captures the disjointedness of two models. Local numeri-        ric models.
+cal methods update the closest points. Snyder [27] tracks
+the closest points between parametric surfaces with local       3    A Minimum Distance Framework
+numerical methods initiated by polygonal collision detec-
+tion.                                                           We have developed algorithms to compute the minimum
+                                                                distance to an object and the minimum separation between
+2.3.2 Minimum Distance between Concave Surfaces                 objects for polygonal and parametric surface representa-
+Lin [18][19] also uses a polygonal first pass to initiate       tions. These algorithms are based on a common set of geo-
+numerical methods for concave surface-surface minimum           metric operations, allowing us to describe methods for
+distance finding. Once a bounding polyhedron indicates a        finding minimum distance as part of a general framework.
+potential for collision, resultant methods solve for the min-
+imum distance to the underlying surface. Local methods
+                                                                3.1 An Overview of the LUB-Tree Framework
+quickly update the solution in the case of movement.            We refer to our minimum distance framework as a lower-
+Times range from one second to several minutes for find-        upper bound tree (LUB-tree) framework. Each surface
+ing the global solutions using an IBM RS/6000.                  representation that is part of the framework must provide a
+                                                                set of common operations, including bounding volume
+                                                                generation, lower bound on distance computation, upper
+
+
+
+                                                                                                                         2
+bound on model minimum distance computation, bounding             refinement by splitting in half the polyline contained
+volume refinement, and a method of determining computa-           within a node. Computation termination occurs when the
+tion termination. A pruning method based on lower and             nodes contain single line segments and we cannot refine
+upper bounds uses these operations to converge to the             the AABBs any further.
+minimum distance.
+                                                                  The pruning method starts by creating an active pair that
+The pruning method starts by invoking the bounding vol-           points to P and to the top-level node. The algorithm
+ume generation operation on each of the two models. We            descends the bounding hierarchy around the polyline seg-
+treat these bounding volumes as the top nodes of hierarchi-       ments in a breadth-first manner, while computing lower
+cal bounding trees and connect them as an active pair of          bounds for each active pair and an upper bound at each
+nodes. Active pairs point between nodes that still may be         level in the hierarchy. These bounds determine which
+part of the minimum distance solution. We then search and         active pairs refine into new active pairs and which are
+prune the bounding hierarchies using the following proce-         pruned. When an active pair points to a box surrounding a
+dure.                                                             single line segment that segment is accepted for exact dis-
+                                                                  tance computation. That exact distance is both a lower
+  1. For each active pair, compute lower bounds on the
+                                                                  bound to that node and a potential upper bound on the
+  distance between nodes using the nodes’ bounding
+                                                                  minimum distance to the model. The pruning method
+  volumes and lower bound operations.
+                                                                  stops when there are no more active pairs. The upper
+  2. Establish an upper bound on the minimum                      bound returns as the exact minimum distance.
+  distance between the models using the upper bound
+  computation operation.                                          3.3 Best and Worst-Case Performance
+                                                                  In a pathological case, for a polyline with N segments,
+  3. Prune the active pair list by comparing each lower
+                                                                  there could be 2N lower bound and log2N upper bound
+  bound distance to the current upper bound. (A lower
+  bound greater than the upper bound implies that the             distance computations, which would make the perfor-
+  contained geometry must be farther away than the                mance worse than the N distance calculations needed
+  minimum distance.)                                              using a simple linear algorithm. In the best case, one of the
+                                                                  bounding boxes would always be removed at each level
+  4. Split remaining active pairs into new active pairs
+                                                                  and there would be log2N lower and upper bound calcula-
+  by invoking the refinement operation.
+                                                                  tions, which is a significant advantage over the linear algo-
+  5. Repeat until the termination of computation                  rithm.
+  method returns true.
+Essentially, we wish to show that portions of the model           Now, imagine the case of finding the minimum distance
+cannot be part of the minimum distance solution. Hierar-          between two models, each with N segments. In the best
+chical bounds allow us to efficiently test portions of the        case, only one active pair survives the pruning at each
+model and potentially remove large portions from consid-          level, so there would be log2N lower and upper bound cal-
+eration without high computational cost.                          culations. This compares favorably with the N 2 distance
+                                                                  calculations a naive algorithm would require. In the worst
+3.2 Illustrating the Algorithm
+                                                                  case, where each segment is within every bounding box
+       P                              P                                                                            N
+                                           Upper bound
+                                                                                                                ∑i = 1 2 2 ( i – 1 )
+             Lower bound
+                                                                  and no pruning occurs, there would be
+
+ A                               B                                lower bound and log2N upper bound distance computa-
+        P
+     Lower      Lower bound
+                                      P                           tions. This exponential lower bound result is fortunately
+     bound                                               Pruned   very difficult to produce in anything resembling a useful
+                                                                  model. In a more typical bad case of the models being par-
+ C                               D                                allel flat surfaces, or concentric spherical regions, the
+     FIGURE 2. A. We compute a lower bound on the active pair.    algorithm uses 2N lower bound and log2N upper bound
+     B. An upper bound is found using cached vertices.
+     C. The active pair refines. D. One active pair is pruned.    distance computations, still better than a naive algorithm.
+We illustrate this approach in Figure 2 for the simple case       3.4 Minimum Distance for Concave Polyhedra
+of finding the minimum distance from a point P to a               The LUB-tree framework applies to arbitrary polygonal
+polyline. Just as an example, we use an axis-aligned              models (Figure 1). In order to ask minimum distance que-
+bounding box (AABB) as the bounding volume, assume the            ries for this surface representation, we must define the
+existence of a method that returns the distance to a nearby       LUB-tree framework operations. For a bounding volume,
+polyline vertex as the upper bound operation, and perform
+
+
+
+                                                                                                                                   3
+we precompute a hierarchy of oriented bounding boxes                   We will quickly review some terminology used for B-
+(OBBs) using the publicly available OBBTree package[12]                spline sculptured surfaces. These surfaces are piecewise-
+(Section 2.4.1). Gilbert’s convex algorithm (from Section              polynomial functions of two parametric variables, com-
+2.1.1) measures the distance between the OBBs to find the              monly u and v, which form the domain of the surface. The
+lower bound on distance. Greater efficiency results from               control mesh of the surface provides the vector coeffi-
+using a two-pass approach to pruning --- a quick sphere-               cients, or control points, for the basis functions. A local set
+sphere test can compute a rough lower bound on distance                of control points influences each polynomial piece of the
+and if that distance is less than the current upper bound we           surface and completely contains the piece within its con-
+compute the more expensive, but more precise, OBB dis-                 vex hull (Figure 3.A). The parametric nodes of the surface
+tance.                                                                 are an easily computable first-order approximation of the
+                                                                       closest points on the surface to the control points [6].
+Each node points to a small set of vertices from the bound-
+                                                                       Refinement algorithms embed the surface into a new
+ary of the contained geometry. These vertices allow us to
+                                                                       parameter space with more degrees of freedom and com-
+compute an upper bound on the minimum distance. Since
+                                                                       pute appropriate additions to the control mesh
+the vertices are part of the model, the distance to a vertex
+                                                                       (Figure 3.B).
+is an upper bound on minimum distance for the model. At
+each level of the model hierarchy, we save the active pair             We can apply the LUB-tree framework to sculptured mod-
+with the smallest lower bound. We find the smallest dis-               els by defining the needed operations. A B-spline sur-
+tance between each set of cached vertices from the nodes               face’s local convex hull and refinement properties provide
+of the saved active pair to establish an upper bound on the            the basis for the needed operations.
+minimum distance between the models.
+                                                                       We form the initial nodes of the bounding hierarchy from
+Active pairs that remain after pruning split into new active           the polynomial pieces of the surface. Thus, the active pair
+pairs by applying the refinement operator. In the case of a            list is initialized by pairing up the local convex hulls of
+precomputed bounding hierarchy, descent to children                    each surface. Similar to the way we computed lower
+nodes accomplishes refinement.                                         bounds on polygonal models using OBBs, we compute
+                                                                       lower bounds for parametric spline models by applying
+The method terminates when all the processed active pairs
+                                                                       Gilbert’s algorithm to the local convex hulls of each active
+point to leaf nodes, which contain single triangles. Gil-
+                                                                       pair. Just as performance improved in the polygonal case
+bert’s convex algorithm computes the distances to and
+                                                                       with the addition of an initial sphere-sphere test, we first
+between leaf node triangles.
+                                                                       prune the active pairs by checking the distance between
+3.5 Minimum Distance for Sculptured Models                             their dynamically updated AABBs.
+Sculptured models, particularly NURBS, are the surface
+representation of choice in many CAD/CAM packages.
+We would like to be able to perform minimum distance
+computations directly on these models without having to
+resort to conversion to polygonal forms. Since the mini-
+mum distance problem can be phrased succinctly for
+sculptured models [9] (Eq. 2) researchers have focused on
+methods of solving these high-order equations. A geomet-
+ric approach, such as the LUB-tree, avoids many of the
+                                                                       A.                                       B.
+numerical issues that complicate those methods.
+                                                                            FIGURE 4. A. We find the closest points on the convex hulls
+                                                                            of the active pair with the smallest lower bound. B. Bilinear
+                                                                            interpolation between nodes maps the point onto the surface.
+
+
+                                                                       An upper bound on the minimum distance allows us to
+                                                                       prune active pairs. During each pass through the active
+                                                                       pair list, we save the active pair with the smallest lower
+                                                                       bound. We map the closest points between each convex
+  A.                                        B.                         hull from the saved active pair onto the underlying sur-
+                                                                       faces using bilinear interpolation between the parametric
+    FIGURE 3. A. Each polynomial piece of the surface is               nodes associated with the vertices of the control mesh
+    contained within its local convex hull of control points. B. The   (Figure 4)[27][30]. The distance between the points on the
+    control mesh collapses towards the surface after refinement.
+                                                                       surface forms an upper bound on the minimum distance
+
+
+
+                                                                                                                                            4
+                                                                            A.                               B.
+          v
+    A.         u                   B.                         C.
+                                                                                 FIGURE 7. A. In this degenerate case, unnecessary
+         FIGURE 5. A. Polynomial pieces in the parametric domain                 refinement occurs. B. Convergence is improved with the
+         that remain after pruning are grouped into regions. B. Each             notion of granularity of regions.
+         region is extracted as a separate surface and refined. C. New
+         pruning and grouping continues the process.                     diagonally in parameter space (Figure 7.A). We introduce
+.                                                                        the notion of granularity of regions to reduce unnecessary
+The algorithm removes the active pairs that have lower                   refinement in these situations. By extracting active regions
+bounds greater than the upper bound distance. We wish to                 containing only a limited number of polynomial pieces per
+refine the remaining polynomial pieces; however, refine-                 region we improve convergence. Using granularity of
+ment applied repeatedly to the initial surface may produce               regions, a long diagonal in parameter space is broken into
+extraneous refinement in areas that have been already                    many small surfaces which quickly approximate the solu-
+pruned. We group polynomial pieces into active regions                   tion and avoid refinement in unwanted regions
+formed from contiguous polynomial pieces and extract                     (Figure 7.B).
+each active region through refinement at the region’s para-              3.5.2 Performance
+metric boundaries (Figure 5). We can now refine the                      Even though the refinement only doubles the number of
+extracted surface without extra refinement in the original               polynomial pieces at each iteration, for B-splines, the con-
+surface. New active pairs form from the refined surfaces.                trol mesh converges quadratically[6] to the surface. Thus,
+                                                                         the upper bound converges in only a few iterations through
+                         Active
+                                                                         the active pair list.
+                         regions                                         When running the closest point to surface algorithm we
+                                                                         obtain a parametric precision of 10-6 at speeds of 10-50Hz.
+                                                                         This compares well to the times of around one second we
+                                                                         found using a numerical method (Section 2.3). The mini-
+                                                                         mum distance between the cup and spiral (Figure 1) con-
+                                                                         verged at 2-20Hz depending on the distance and their
+                                                                         orientations. We contrast these rates to times from one
+                                                                         second to several minutes reported in the literature (Sec-
+                                                                         tion 2.3.2). Our times were measured on an SGI Indigo2.
+    FIGURE 6. Extraction of active regions and surface
+    refinement during pt-surface minimum distance.                       3.5.3 High-order Surfaces
+                                                                         Earlier, we mentioned our belief that a geometric approach
+Figure 6 demonstrates how the algorithm initially extracts               avoids many difficulties associated with more numerical
+and refines three separate regions on the goblet. As refine-             methods. One difficulty that numerical methods have is a
+ment occurs the lower and upper bounds become more                       lack of stability on high-order surfaces[18]. Using the
+accurate and the algorithm prunes the top and bottom por-                LUB-tree approach we tested a B-spline patch with orders
+tions of the goblet. Finally, the upper bound distance con-              ranging from two to seven in each parametric direction.
+verges to the exact minimum distance on the stem of the                  The algorithm remained stable even for the high-degree
+goblet, stopping the computation.                                        surfaces and time to convergence appeared directly pro-
+3.5.1 Improving Worst-case Convergence                                   portional to the order in each direction.
+In a tensor-product surface preferred parametric directions              3.6 Breadth-first vs. Depth-first Search
+exist, namely along isoparametric lines, and active regions              We have chosen to search the LUB-tree hierarchy in a
+that fall along these directions refine most efficiently. Cer-           breadth-first manner, as opposed to a depth-first search as
+tain spatial configurations of models can produce contigu-               in Quinlan [24]. In Section 3.6.1, we show that breadth-
+ous active pairs that group into an active region that falls             first search appears to be more efficient than depth-first
+
+
+
+                                                                                                                                          5
+search. Then we conclude by demonstrating how breadth-                                                                  per iteration is fairly constant, while the error in the dis-
+first search allows time-critical behavior by establishing                                                              tance measure is halved each iteration.
+upper and lower bounds early in the computation.
+                                                                                                                        3.6.3 Scheduled Cost
+3.6.1 Efficiency and Scalability                                                                                                         0.04
+                                                                                                                                                                      Time and error vs. allowed computation cost
+
+                                                        Model size vs. time to converge
+
+
+                                                                                                                            time (sec)
+                 0.3
+                                                                                                                                         0.02
+
+                0.25
+                                                                                                                                                        0
+                                                                                                                                                       1000   2000   3000     4000      5000       6000      7000   8000   9000
+                                                                                       Depth−first search                                              10
+
+
+
+
+                                                                                                                                     Upper error (%)
+                 0.2
+
+
+
+
+  time (secs)
+                                                                                                                                                       5
+                0.15
+
+                                                                                                                                                        0
+                                                                                                                                                       1000   2000   3000     4000      5000       6000      7000   8000   9000
+                                                                                       Breadth−first search
+                 0.1                                                                                                                                   60
+
+
+
+
+                                                                                                                                     Lower error (%)
+                                                                                                                                                       40
+                0.05
+                                                                                                                                                       20
+
+                                                                                                                                                        0
+                   0                                                                                                                                   1000   2000   3000     4000     5000       6000       7000   8000   9000
+                    0                         0.5              1               1.5                2              2.5                                                          Allowed cost (operations)
+                                                              model size (polygons)                                 4
+                                                                                                              x 10
+                                                                                                                                                        FIGURE 10. LUB-trees allow for scheduled costs with
+                  FIGURE 8. Time to convergence for breadth-first                                                                                       reasonable bounds returned.
+                  and depth-first searches for a range of model sizes.
+                                                                                                                        We have measured the average time cost for many of the
+We tested the time to solution for a range of polygonal                                                                 LUB-tree operations, such as the time for computing the
+model sizes using both the LUB-tree approach and a                                                                      distance between spheres or the distance between OBBs.
+depth-first search similar to Quinlan’s. The LUB-tree                                                                   Using these times, we can schedule an allowed cost for the
+search was approximately twice as fast as the depth-first                                                               algorithm and have it return upper and lower bounds on
+search and showed sub-linear cost with increases in model                                                               the minimum distance. Figure 10 demonstrates this behav-
+complexity. Times for minimum distance between models                                                                   ior on a 2000 triangle model. The upper bound distance
+ranged from 20 ms to 150 ms for models with 575 to                                                                      quickly converges to the correct distance. This suggests
+23581 triangles (Figure 8) when running on an SGI                                                                       that we can use cheaper, approximate solutions with low
+Indigo2.                                                                                                                error. The lower bound distance also converges to within
+3.6.2 Time-critical Properties                                                                                          15% of the correct distance fairly quickly. The error pla-
+                               0.035                                                                                    teaus at the final level of the bounding hierarchy because a
+                               0.034                                                                                    lower bound cannot be extracted until the level finishes.
+                  Distance
+                               0.033
+
+                               0.032                                                                                    4                               Future Work
+                               0.031
+
+                                0.03
+                                    1   1.5         2   2.5       3       3.5      4     4.5     5      5.5     6
+                                                                                                                        We have implemented methods for the minimum distance
+                  A.                                                  Iterations
+                                                                                                                        between a point and surface, between surface and surface,
+                                0.04                                                                                    and between polyhedral model and polyhedral model, as
+                               0.035
+                                                                                                                        well for the 2D equivalents. Currently, we are adding
+                                0.03
+
+                  Time (sec)
+                               0.025
+                                                                                                                        operations for finding the distance between models of dif-
+                                0.02                                                                                    ferent surface representations, such as between polygonal
+                               0.015                                                                                    and parametric models. In addition, the framework notion
+                                0.01
+                  B.                1   1.5         2   2.5       3       3.5      4     4.5     5      5.5     6       supports adding specialized objects with simple distance
+                                                                      Iterations
+                                                                                                                        computations, such as holes made of cylinders. We hope
+            FIGURE 9. A. Minimum distance vs. iterations.
+            B. Total time vs. number of iterations                                                                      we can improve efficiency for certain classes of models by
+                                                                                                                        adding specialized types that occur frequently.
+Our LUB-tree methodology has time-critical properties, a
+useful characteristic in interactive systems. Our method
+can begin converging immediately to the solution since no
+                                                                                                                        5                               Conclusion
+large pre-processing step exists and upper and lower                                                                    We have demonstrated practical computation of distances
+bounds get established early in the computation. Figure 9                                                               for non-convex polyhedra and sculptured surfaces within a
+illustrates this behavior for a parametric surface. The time                                                            common framework. The LUB-tree method is straightfor-
+
+
+
+                                                                                                                                                                                                                                  6
+ward to implement and has useful properties such as time-     [15]Khatib, O., “Real-Time Obstacle Avoidance for
+critical behavior and scheduled computation cost.             Manipulators and Mobile Robots,” The International Jour-
+                                                              nal of Robotics Research, 5(1), pp. 90-98, Spring 1986.
+Acknowledgments                                               [16]Limaiem, Anis and Trochu, Francois. “Geometric
+                                                              Algorithms for the Intersection of Curves and Surfaces”,
+Thanks go to the Alpha_1 group for providing much of the      Computer & Graphics, Vol. 19, No. 3, pp.391-403, 1995.
+underlying code for this work. Susan Anderson added lots      [17]Lin, M.C., Efficient Collision Detection For Anima-
+of red ink to preliminary drafts of this paper. Support for   tion and Robotics, Ph.D. thesis, University of California,
+this research was provided by NSF Grant MIP-9420352,          Berkeley.
+by DARPA grant F33615-96-C-5621, and by the NSF and           [18]Lin, Ming and Manocha, Dinesh, “Fast Contact Deter-
+                                                              mination in Dynamic Environments”, to appear in Interna-
+DARPA Science and Technology Center for Computer              tional Journal of Computational Geometry and
+Graphics and Scientific Visualization (ASC-89-20219).         Applications.
+                                                              [19]Lin, Ming and Manocha, Dinesh. “Fast Interference
+References                                                    Detection Between Geometric Models,” The Visual Com-
+                                                              puter, pp. 542-561, 1995.
+[1]Baraff, David. “Curved Surfaces and Coherence for
+Non-penetrating Rigid Body Simulation,” Computer              [20]Mirtich, Brian, Impulse-based Dynamic Simulation of
+Graphics, Vol. 24, No. 4, pp.19-28, 1990                      Rigid Body Systems, Ph.D. Thesis, University of Califor-
+                                                              nia, Berkeley, December, 1996.
+[2]Bobrow, J.E., “Optimal robot path planning using the
+minimum-time criterion”, IEEE Journal of Robotics and         [21]Mortenson, Michael. Geometric Modeling, John
+Automation, 4(4), pp. 443-450, Aug. 1988.                     Wiley & Sons, New York pp. 305-317, 1985.
+[3]Cameron, Stephen. “Enhancing GJK: Computing Mini-          [22]Piegl, Les and Tiller, Wayne. The NURBS book.
+mum and Penetration Distances Between Convex Polyhe-          Springer-Verlag, Berlin. p. 230, 1995.
+dra”, Int. Conf. Robotics and Automation, April, 1997.        [23]Ponamgi, M., Manocha, D., and Lin, M., “Incremental
+[4]Chin, Francis and Wang, Cao An. “Optimal Algorithms        algorithms for collision detection between solid models”,
+for the Intersection and the Minimum Distance Problems        Proceedings of ACM/SIGGRAPH Symposium on Solid
+Between Planar Polygons”, IEEE Transactions on Com-           Modeling, pp. 293-304, 1995.
+puters, Vol. C-32, No. 12, Dec. 1983, pp. 1203-1207.          [24]Quinlan, Sean. “Efficient Distance Computation
+[5]Chung Tat Leung, Kelvin. An Efficient Collision Detec-     between Non-Convex Objects,” IEEE Int. Conference on
+tion Algorithm for Polytopes in Virtual Environments. M.      Robotics and Automation, pp. 3324-3329, 1994.
+Phil Thesis, The University of Hong Kong, 1996.               [25]Quinlan, S., The Real-Time Modification of Collision-
+[6]Cohen, E. and Schumaker, L., “Rates Of Convergence         Free Paths, Ph.D. Thesis, Stanford University, 1994.
+Of Control Polygons”, in Computer Aided Geometric             [26]Sato, Yuichi et al. “Efficient Collision Detection
+Design 2 (1985), pp. 229-235.                                 Using Fast Distance-Calculation Algorithms For Convex
+[7]Cohen, J. et al, “I-COLLIDE: An Interactive and exact      And Non-Convex Objects”, in Proceedings of the 1996
+Collision Detection System For Large-Scaled Environ-          IEEE International Conference on Robotics And Automa-
+ments”, Proceedings of ACM Int. 3D Graphics Confer-           tion. Minneapolis, Minn, April, 1996. pp. 771-778.
+ence, pp. 189-196, 1995.                                      [27]Snyder, John M. “An Interactive Tool for Placing
+[8]Dobkin, David and Kirkpatrick, David. “Determining         Curved Surfaces without Interpenetration,” Proceedings
+the Separation of Preprocessed Polyhedra - A Unified          of Computer Graphics, pp. 209-218, 1995.
+Approach”, in Proc. 17th International Colloq. Automata       [28]Snyder, John, “Interval Analysis for Computer Graph-
+Lang. Program., in Lecture Notes in Computer Science,         ics,” Computer Graphics, 26(2), pp.121-130, July 1992.
+Vol. 443, Springer-Verlag, pp.400-413, 1990                   [29]Snyder, John et al, “Interval Methods For Multi-Point
+[9]Dokken, Tor, “Finding Intersections of B-spline Repre-     Collisions Between Time-Dependent Curved Surfaces”,
+sented Geometries Using Recursive Subdivision Tech-           Computer Graphics, 27(2). pp. 321-334, Aug. 1993
+niques”, CAGD 2 (1985) pp. 189-195.                           [30]Thompson II, T.V., Johnson, D.E., and Cohen, E.C.
+[10]Edelsbrunner, H. “On Computing the extreme dis-           “Direct Haptic Rendering Of Sculptured Models”, in Proc.
+tances between two convex polygons”, Tu Graz, Tech.           1997 Symposium on Interactive 3D Graphics, (Provi-
+Rep. F96, Aug. 1982.                                          dence, RI), April 1997, pp. 167-176.
+[11]Gilbert, Elmer, Johnson, Daniel, Keerthi, S. “A Fast      [31]Tornero, J., Hamlin, J., and Kelley, R., “Spherical-
+Procedure for Computing the Distance Between Complex          Object Representation and Fast Distance Computation For
+Objects in Three-Dimensional Space,” IEEE Journal of          Robotic Applications”, Proceedings of the 1991 IEEE Int.
+Robotics and Automation, pp. 193-203, April 1988.             Conf. on Robotics and Automation, April 1991. pp. 1602-
+[12]Gottschalk, S.,Lin, M.C., and Manocha, D.,                1608.
+“OBBTree: A Hierarchical Structure for Rapid Interfer-        [32]Stewart, Paul, et al, “CAD Data Representations For
+ence Detection,” Computer Graphics Proceedings,               Haptic Virtual Prototyping”, Proceedings of DETC’97,
+Annual Conference Series, 1996, pp.171-180.                   1997 ASME Design Engineering Technical Conferences,
+[13]Hollerbach, J.M., Cohen, E.C., Thompson, W.B., and        Sept. 14-17, 1997, Sacramento, California.
+Jacobsen, S.C. “Rapid Prototyping of Mechanical Assem-        [33]Von Herzen, Brian, Barr, Alan, and Zatz, Harold.
+blies,” NSF Design and Manufacturing Grantees Confer-         “Geometric Collisions For Time-Dependent Parametric
+ence, Albuquerque, Jan. 3-5, 1996.                            Surfaces”, in Computer Graphics, Vol. 24, Number. 4,
+[14]Hubbard, P.M., “Interactive collision detection,” Pro-    August 1990 (Proceedings SIGGRAPH 1990), pp. 39-48.
+ceedings of the IEEE Symposium on Research Frontiers in
+Virtual Reality, October 25-26, 1993, pp. 24-31.
+
+
+
+                                                                                                                      7
+

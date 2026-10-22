@@ -1,0 +1,637 @@
+한국 CAD/CAM 학회 논문집
+                                                                                                              학술논문
+제 5권 제 4 호 2000년 /2월 pp. 336-346
+
+
+
+
+        두 토러스의 교차곡선에서 이차곡선의 발견믈 위한 절차적 방법
+
+                                                김구진
+                                                ,*            김명수
+                                                              **
+
+
+    Procedural Method for Detecting Conic Sections in the Intersection of Two Tbri
+                                                    J. and Kim, M. S.
+                                            Kim, K. *              **
+
+
+
+                                                     ABSTRACT
+
+
+          This paper presents a geometric method that can detect and compute all conic sections in the inter­
+       section of two tori. Conic sections contained in a torus must be circles. Thus, when two tori intersect
+       in a conic section, the intersection curve must be a circle as well. Circles in a torus are classified into
+       profile circles, cross-sectional circles, and Yvone-Villarceau circles. Based on a geometric classification
+       of these circles, we present a procedural method that can detect and construct all intersection circles
+       between two tori. All computations can be carried out using simple geometric operations only: e.g., cir­
+       cle-circle intersections, circle-line intersections, vector additions, and inner products. Consequently, this
+       simple structure makes our algorithm robust and efficient, which is an important advantage of our geo­
+       metric approach over other conventional methods of surface intersection.
+
+       Key words : Torus, Intersection curve, Conics, Profile circle, Cross-sectional circle, Yvone-Villarceau
+                    circle
+
+
+
+
+                    1. 서         론                              존재하는 2차 곡선을 계산하는 방법에 대해서도독립
+                                                                적인 연구들이 많이 수행되어 왔다"보통 교
+
+    CAD 및 기호卜 모델링 시스템에서 평면 (plane), 구                           차곡선은 주어진 시작점으로부터 전체 곡선을 따라
+(sphere), 원기둥(cylinder), 원뿔(cone)과 같은 2차                        추적하는 marching 기법, 또는 곡면들을 분할하며
+곡면과 토러스(torus)는 매우 빈번히 사용되는 기본                                  bounding box test를 통해 교차곡선에 속하는 점들을
+입체이다. 사용자는 이들 기본입체에 여러 가지 연                                     찾아내고 이 점들을 연결하여 교차곡선을 구하는 소
+산을 적용하여 자신이 원하는 입체를 구성하는데, 연                                    위 곡면 분할기법 등에 의해서 구해진다.
+산 중에서도 합집합, 교집합, 차집합 등과 같은 Boolean                                일반적으로 두개의 2차 곡면은 4차 교차곡선에서
+연산은 가장 기본적으로 사용되는 연산이다. 기본입체                                    만나고, NURBS와 같은 스플라인 곡선으로 표현하
+에 대한 Boolean 연산을 수행한 결과가 정확하고 빠르                                는 것이 불가능하다. 따라서, 많은 선분들이나 3차
+게    계산되는지의         여부는 시스템             자체의       성능과           곡선들을 이용하여 주어진 오차 범위 내에서 근사
+
+robustness를 좌우하는 중요한 문제이다. 곡면에 대한                               계산을 하여야 한다. 결과적으로 교차곡선을 정밀하
+
+교차곡선 계산은 이러한 Boolean 연산을 구현하기 위                                 게 계산하기 위해서는 많은 양의 데이터가 필요하다.
+하여 반드시 필요한 과정이므로 대단히 중요하다.                                      그러나, 직선(line)이나 원(circle), 포물선(parabola),
+    현재까지 2차 곡면 간의 교차곡선 계산에 대해 수                                 쌍곡선 (hyperbola) 등과 같은 2차 곡선이 교차곡선에
+많은 연구가 수행되었고, 이중에서도 특히 교차곡선에                                    포함되는 경우에는 간단한 기하학적 정보만으로 2차
+                                                                교차곡선을 정확하게 표현할 수 있다. 예를 들어, 원
+ *정회원, 아주대학교 정보통신전문대학원                                          의 경우에는 원의 중점과 원을 포함하는 평면의 법
+**서울대학교 컴퓨터공학부
+                                                                선 벡터(normal vector), 그리고 원의 반경의 정보만
+- 심사투고일: 2000. 7. 25
+-심사완료일: 2000. 8. 29                                             으로도 정확한 표현이 가능하다. 이와 같이 기하정
+
+
+
+                                                          336
+                  두 토러스의 교차곡선에서 이차곡선의 발견을 위한 절차적 방법                                  337
+
+
+보만으로 곡선을 표시함으로써 곡선을 더 정확하고             하게 정확한 판정을 보장하기 힘들다. 토러스와 토
+간략하게 표현할 수 있으므로, 교차곡선에 존재하는            러스의 경우는 그 기하학적인 상관관계가 대단히 복
+
+2차 곡선을 발견하고 기하정보를 계산해내는 것은             잡하여 2차 교차곡선의 유무를 판정하는 대수적 관
+중요한 문제 이다.                             계식을 찾는 것이 대단히 어렵다. 따라서, 본 논문에
+
+    토러스(torus)는 CAD 및 모델링 시스템에서 자주     서는 비교적 쉬운 절차적인 접근방법을 제시한다. 그
+
+사용되는 기본입체 중의 하나이다. 현재까지 2차 곡           리고, 대수적인 방법을 찾는 문제는 추후 연구에서
+
+면 간의    교차곡선이나 여기에 존재하는 2차 교차          계속 시도할 계획이다.
+곡선을 찾는 문제에 대한 수많은 연구가 수행된 반              이 논문의 구성은 다음과 같다. 제 2절에서는 토러
+면토러스와 2차 곡면, 또는 토러스와 토                 스 상에 존재하는 유일한 2차 곡선이 원임을 언급하고
+러스 간의 교차곡선에 대한 연구는 상대적으로 그             , 기하학적 정보에 따라 원들을 분류한다. 제 3절에서
+수가 적다그 이유는 교차곡선의 차수에 있다. 2             는 토러스 상에 존재하는 원들의 기하정보를 이용하여
+
+차 곡면 간의 교차곡선의 차수는 4차인 데 비해 토           두 개의 토러스 사이에 존재하는 교차원들을 발견하는
+
+러스와 2차 곡면, 또는 토러스와 토러스 사이의 교           방법과 교차원을 구체적으로 계산하는 알고리즘을 제
+
+차곡선은 일반적으로 8차로서 차수가 높으며 이에             시한다. 제 4절에서는 교차원의 발견 및 계산 알고리즘
+따라 교차곡선 자체의 위상(topology)도 훨씬 더 복       을 두 개의 토러스 사이의 교차곡선 계산 알고리즘의
+잡해지므로 교차곡선을 계산하기가 대단히 어려운              일부로서 사용하는 방법에 대해 설명한다. 마지막으로
+것으로 간주되어 왔다.                           제 5절에서는 본 논문에 대한 결론을 내린다.
+    주어진 토러스와 구, 원기둥, 원뿔, 토러스 사이에
+
+존재하는 8차 교차곡선을 모두 구하는 일반적인 방                       2. 토러스 곡면 상의 원
+법은 본 논문의 저자들이 이전연구에서 제시한 바
+있다［財. 또한, 기하학적 방법을 이용함으로써 토러            토러스 곡면 상에 포함되는 유일한 2차 곡선은 원
+스와 2차 곡면(구, 원기둥, 원뿔) 간의 교차곡선에서         이며, 이 원은 profile circle, cross-sectional circle,
+2차 곡선의 포함 유무를 간단하게 판정하는 알고리            그리고 Yvone-Villarceau circle의 세 가지로 분류된
+즘을 제시한 바 있다卩1. 본 논문에서는 이보다 어려          다. 이 사실은 고전기하(classical geometry)에서 이
+운 문제인 토러스와 토러스 사이의 2차 교차곡선을            미 잘 알려진 결과이며冋, 초보적인 수학적 지식만
+간단하게 발견하고 이를 구체적으로 계산하는 방법             을 사용한 증명은 참고문헌匚将에도 나와 있다. 서로
+을 다룬다. 두 토러스 사이의 교차곡선은 일반적으            다른 종류의 원은 이 원이 가진 기하학적 성질에 의
+
+로 8차 곡선이 되므로, 2차 교차곡선이 하나나 두 개         해 분류되며, 이러한 기하학적 성질을 이용하여 두
+가 포함하는 경우 나머지의 교차곡선은 6차나 4차            토러스 사이의 교차원을 쉽게 발견할 수 있다.
+곡선이 된다. 이 나머지 교차곡선은 본 저자들의 이             이   절에서는 3차원          공간에서 표준위치 (standard
+전 연구결과에 의하여 구할 수 있다艰.                  position)에 놓인 minor 반경 r, major 반경 R인 토
+    Kim and KinE에서는 주어진 곡면들을 나타내는      러스를 예로 들어 설명한다. 그러면, 토러스는 xy-평
+기하정보들을 간단한 수식들에 대입하여 이 수식들             면상에서 (R, 0, 0)을 중심으로 하고 반경이 r인 원
+이 만족되는 지의 여부를 따지는 대수적 접근방법이
+
+이용되었다. Miller and Goldman"긔에서도 이러한
+대수적 접근방법을 이용하여 두개의 2차 곡면사이에
+존재하는 2차 교차곡선의 유무를 판정하였다. 대수
+적   접근방법에서는 수식을 대수적으로 전개하여
+
+symbolic하게 처리하면 수치오차가 전혀 없이 수식
+의 만족여부를 판정할 수 있다는 장점이 있다. 이에
+
+비하여 Shene and Johnstone"，에서 사용된 절차적
+방법은 주어진 입력 데이터로부터 중간과정의 기하
+학적 데이터를 구하고 이들이 주어진 제한조건들을
+만족하는 지의 여부를 판정하는 것이다. 중간과정에
+서 계산되는 데이터에 수치오차가 포함되므로 완벽                       Fig. 1. Minor circle on xz-plane.
+
+
+                                      한국CAD/CAM학회 논문집 제 5 권 제 4 호 2000년 12월
+338                                                김구진, 김명수
+
+
+
+
+                           ▲
+
+
+
+
+                                                                    Fig. 4. Constructoion of profile circles.
+
+       Fig. 2. Tbrus as a surface of revolution.
+                                                          는 하나의 profile tjircle이 , -r < z0<                경우에는 두
+                                                          개의 profile circle이 생긴다. Profile circle의 법선
+을 Z축을 중심으로 회전하여 얻어지는 회전곡면으로                               벡터는 항상 z축과 평행이다. Profile circle의 중심점
+볼 수 있다(그림 1과 2참조). 이 때 토러스의 중심점은                          은 房 위에 존재하는데 , 이 중심점의 궤적은 다음과
+
+원점이고, 점 (R, 0, 0)을 z축을 중심으로 회전하여 구해                       같은 선분 屋 표시된다:
+
+지는 원이 주원(main circle)이며, 주원이 존재하는 평
+                                                              I = {(0, 0, z0)l - r < zM r).
+면을 토러스의 주평면(main plane)이라 한다. 임의의 위
+치와 방향을 가진 토러스가 주어질 때 , 이 곡면상에 포                               중점이 (0, 0, 跖)인 profile circle의 반경은 R 土
+함된 원들은 표준위치의 토러스 곡면 상의 원들에 회                              (I고 -z°泸이다.
+전변환과 이동변환을 적용하여 구할 수 있다.
+  하나의 원을 나타내는 기하정보는 원의 중점, 반                                  2.2 Cross-Sectional Circle
+경, 그리고, 원이 포함된 평면의 법선벡터이다. 이 논                                z축을 포함하는 평면으로 토러스를 자를 때 생기
+문에서는 설명을 간결하고 명확하게 하기 위해 원을                               는 두개의 원이 cross-sectional circle이다. 그림 5는
+포함하는 평면의 법선벡터라는 표현 대신 원의 법선                               토러스에 포함된 여러 개의 cross-sectional circle들
+벡터라는 표현을 사용한다.                                            을 보여준다, 그림 6은 cross-sectional circle들의 위
+                                                          치와 방향을 구하는 과정을 xy-단면을 이용하여 보
+ 2.1 Profile Circle                                       여준다. 이 그림에서 P는 z축을 포함하는 평면이며,
+ Profile circle은 토러스의 주평면 (main plane)과                   토러스와 P가 교차할 때, 두 개의 cross-sectional circle
+평행한 평면이 토러스와 교차할 때 생기는 원이다.                               이 생긴다. Cross-sectional circle의 반경은 토러스의
+그림 3은 표준위치에 있는 토러스를 주평면(xy-평면)                            minor 반경 ［과 같다. 각 cross-sectional circle의 중
+과 평행한 평면으로 잘랐을 때 생기는 profile circle                       점은 토러스의 주원 위에 존재하는데, 점 q가 토러
+두개를 보여준다. 그림 4는 이 두개의 profile circle                      스 주원 상의 한 점이라고 할 때, q를 중점으로 궁}는
+들의 반지름을 계산하는 과정을 xz-단면을 이용하여                              cross-sectional circle의 법선 벡터는 점 q에서 주원
+보여주고 있다. 점(0, 0, Z。)를 지나고 xy-평면에 평                        의 접선 벡터(tangent vector)와 같다. 일반적으로 표
+행한 평면으로 토러스를 자를 때, z护 土 r일 경우에                            준위치에 있지 않는 토러스의 중심점이 p이고 법선
+
+
+
+
+                Fig. 3. Profile circles.                                Fig. 5. Cross-sectional circles.
+
+
+한국CAD/CAM학회 논문집 제 5 권 제4 호 2000년 12월
+                             두토러스의 교차곡선에서 이차곡선의 발견을 위한 절차적 방법                                                         339
+
+
+
+
+                                                                  Fig. 8. Construction of yvone-villarceau circles.
+
+      Fig. 6. Construction of cross-sectional circles.
+                                                            면에 투영시킨 결과를 보여주고 있다. 이                               Yvone-
+                                                            Villarceau circle은 (0, -r, 0)에 중심을 가지고 반경
+벡터가 N이라 할 때, q를 중점으로 하는 cross-sect­                         이 1
+                                                              *      원이다. 이 원은 xy-평면과는 평행하지 않으
+ional circle의 법선 벡터는 NX(q-p)旧로 주어진다.                        므로, 투영된 결과가 타원으로 나타난다. 하지만, y-
+                                                            축 방향으로는 투영과정에서도 길이가 보존되므로
+
+ 2.3 Yvone-Villarceau Circle                                이 원의 반지름이 R이라는 사실을 쉽게 알 수 있다.
+ 토러스의 중심점을 지나면서 토러스와 두 점에서                                   평면 P가 z축을 중심으로 회전하며 토러스를 자를
+접하는 평면          P가 존재함을 쉽게 보일 수 있다.                         때, 토러스 상의 모든 Yvone-Villarceau circle들을
+Yvone-Villarceau circle은 이러한 평면 P로 토러스                      구할 수 있다. 따라서 Yvone-Villarceau circle의 반
+를 자를 때 생긴다. 그림 7은 y-축을 포함하는 평면                              경은 항상 토러스 주원의 반경 (R)과 동일하다는 것
+R로 토러스를 자른 xz-단면을 보여 준다. 토러스를 xz-                           을 알 수 있다. 토러스의 중심점을 중점으로 하고 토
+평면으로 자르는 경우 반경 r, 중심점 (土R, 0, 0)인                           러스의 주평면 위에 놓인 반경 r인 원을 C라고 할
+두 개의 원이 생기고, y-축을 포함하며 이 원들과 두                              때, Yvone-Villarceau circle의 중점은 항상 원 C 위
+점에서 접하는 평면은 두 개가 존재한다. 이 평면들                                에 존재한다.
+은 원래의       토러스와도 이             두점에서         접하며, 각각         일반적인 위치와 방향을 가진 토러스의 경우, 즉
+(土r/R, 0, (1<2-『)”派)을 법선벡터로 갖는다.                            토러스의 중심점 이 p, 법선벡터가 N인 경우, 점 q를
+ 그림     8은 y-축을 포함하고 법선벡터가 (+r/R, 0,                        중점으로 갖는 Yvone-Villarceau circle의 법선벡터
+(R2-F)”2/r)인 평면으로 토러스를 자를 때                          생기는    N는 다음과 같다.
+두개의 Yvone-Villarceau circle들 중의 하나를 xy-평
+                                                             Nq=(±(q-p)X(N + (R2-r2)'/2N)/R.
+
+                                                            그림 9는 같은 평면에 포함되는 두개의 Yvone-Vil-
+                                                            larceau circle들을 보여준다.
+
+
+
+
+   Fig. 7. Sectional view of torus and P on xz-plane.                    Fig. 9. Yvone-viHarcmu circles.
+
+
+                                                           한국CAD/CAM학회 논문집 제 5 권 제4 호 2000년 12월
+340                                        김구진, 김명수
+
+
+
+      3. 두 토러스 사이의 교차원 계산과 발견                       방향인 경우도 평행한 졍우에 속하는 것으로 간주한
+
+                                                    다.) PF(Ti)에 속하는 모든 원의 법선벡터는 (0, 0,
+  토러스 丁의 profile circle의 집합을 PF(T)로, cross-         1) 이고, PF(Tz)에 속하는 모든 원의 법선벡터는 N2
+sectional circle의 집합을 CS(T)로, Yvone-Villarceau      이다. 따라서 N；는 z축과 평행해야 하며, 이 때 G과
+circle의 집합을 YV(T)로 나타내면, 두 토러스 T>,                  G가 동일한 중점을 갖기 위해서는 pi가 z축 위에 존
+E에 공유되는 교차원의 집합은 다음과 같은 9개의                         재해야딴 한다.
+교집합들예 대한 합집합으로 구해진다.                                  토러스 T?의 법선벡터 Nr가 z축과 평행하■고 중심
+                                                    점 R가 1축 위에 있을 때，P가 xz-평면이라 하자.
+  1. PF(T)) H PF(T2)
+                                                    그러뗜, 평면 P는 토러스 R와 L를 각각 Z-축에 대
+  2. pf"\)n cs(t2)
+                                                    칭인 두 개의 원에서 자른다. 좌우 대칭이므로 z-축
+  3. PF(T,) n VV(T2)
+                                                    의 오른쪽만 고려하면 된다. 이 xz-절단면의 우측에
+  4. CS(T() D PF(T2)
+                                                    나타난 원들의 교점을 이용하여 우리가 구하고자 하
+  5. CS(T)) n CS(Tz)
+                                                    는 profile circle의 교차원들을 모두 구할 수 있다.
+  6. CS(T)) n YV(T2)
+                                                    二림   10은 평면 P로 T;, 卩를 자른 단면을 보이고,
+  7. YV(T() n PF(T2)
+                                                    그릴 汀은 이러한 과정을 통하여 구해진 PF(T\) Q
+  8. YV(D n CS(Ta)
+                                                    PF(TJ의 예를 보인다.
+  9. YVCTi) n YV(T2)
+                                                      표 2는 위의 과정을 알고뢰즘으로 제시한다.
+  이 절에서는 PF(Tj) n PF(T,), PF(TJ n CS(T2),
+
+pf(t,)n yv(t2), cs(Tt)n        cs(t2), cs(t))n        3.2 PF0) 0 CS(Tj)
+YV(T2), 그리고, YV(T,) n YV(T»의 졔산 방법을                   이 절은 "「闰 profile circie과 T：의 cross-sectional
+설명하며, 설명 되지 않은 교집합은 이 절에서 설명                        circle이 일치하여 교차원을 이루는 경우를 설명한다.
+된 내용에 의해 쉽게 추론할 수 있다.                               PF(TJ의 중심점의 궤적은 선분 /= ((0, 0, z0)i
+  표. 1에서는 이 논문에서 사용하는 토러스의 표기                            이고, PF(TJ의        법선벡터는 z축과 평행이다.
+방법을 설명한다. 토러스 T产(p„ N|)과 토러                         CSCR)의 경우 중심점 q의 궤적은 Tz의 주원(main
+스 T2 = Tr3. R2 (p2> 州>를 가정하여 꾜차원의 발견과               circle)과 같고, q를 충점으星 하는 cross-sectional
+계산방법을 설명한다. :N리고, 설명을 단순화 시키기
+
+위하여 일반성을 잃지 않고 P! = (0, 0, 0)이며 N,=
+(0, 0, 1)이라고 가정한다.
+
+
+  3.1 PF(T,) n PF(T2)
+  이 절은        의 profile circle과 &의 profile circie
+간의 교집합을 발견하는 방법을 설명하고 이를 계산
+
+하는 알고리즘을 제시한다. PF(TJ과 PF(T2) 간의 교
+집합이 존재하기 위한 조건은 다음과 같다.
+
+  C>, Cz가 각각 PF(T,), PF(T，H 속하는 임의의
+                                                          Fig. 10. Computation of PF(T>) 0 PF(T2).
+원이라 하자. G과 G가 일치하기 위해서는 동일한
+중점과 반경, 서로 평행한 법선벡터를 가져야 한다.
+(설명을 간단하게 하기 위해서, 법선벡터가 정반대
+
+
+
+Table   Notation
+
+ Tj n              minor 반경 昧址 반경 Rif
+ 하心」(Pb N)         중심점 饥, 법선벡터 M인 生러스
+
+                   minor 반경 r2s major 반경 Rj,
+ 丫曷以板              중심召 所 법선벡터 1电인 旦러스                        Fig. 11. Circles in PF(T,) 0 PF(T,)
+
+
+한국CAD/CAM학회 논문집 제 5 권 저｝ 4호 2000년 J2월
+                             주 토터수鸟 교차곡선에서 이차곡선의 발껸을 위한 절차적 방법
+
+
+
+      2,   Aigoriihm for conipuiing PF(T( ) 0 PF(T2)    Table 3. Algorithm for Computing PF(T;) A CS(T2)
+
+「瓦顽顽诙就                  0顽顽［亍订再司                        j Algorithm： Profrte„CrossSection„in_TTl (TSr Tg)
+  Begin                                                 I Begin
+  If N2 is 타to the j-axis Th玲當                          I C * main circle of T2-
+I    If pg ts located «n the 2~axis then                j /드 個, 0, 为); -ri
+        Begin                                           j         For ^ach         爲” 하J 底 C 广" do
+
+           P 느 {(x, y, z)l x > 0 and y * 아;                       Begin
+           G 그 幻 c P:                                               If Nx k (q -皿)// b * thsa
+          C2 - T3 n P;                                                 If R 土(等 ％ a； )tZ2~f2 then
+          QWcC2；                                                          Output Circle with center q, radius 珪，
+          For each 아qj e Qdo                                                      and normal vector 而
+                Output Cir시巴 with center (0(0,q2),      \         End
+'                   radius (q? + 仍吃                         End
+                    and normal vector Nj
+         End
+  End
+                                                            그림       技는 위 세 가지 조건들을 모두 만족하는 경
+
+                                                        우의 예를 토러스의                   단면으로 보이며, 그림                  13은
+血의 법선벡터는 NwX(q~pJ이다.                                    profile circle과 cross-sectional circle이 일치하여 교
+  PF(TQ과 CS(T2) 간의 교집합이 존재할 필요충분                        차원을 이루는 예를 보인다. 이 ：3■림에서 교차원은
+조건은 다음과 깉，다.                                            2개의 교차곡선 중 위쪽에 있는 밝은 색의 곡선이다.
+                                                        아래쪽의 어두운 색의 교차곡선은 6차 곡선이다' 표
+  1. Tj의 주원 (main cir以e)이 선분 /과 교차한다.                   3은 위의 조건들을 검증하는 과정을 얄고리즘으로
+  2. 조건 1에서 구한 교점을 q라 할 때, N,X(q-                       제시한다.
+P2)가 Z축과 평행이다.
+  3. 점 q를 중심으로 하는 匸의 profile circle의 반                      33 PF(Tt) 0 YV(T2)
+경 이 T；으］ minor 반경 r와 같다.                                    이     절에서는 T,의          profile circle과 T?의 Yvone-
+                                                        Vilhrceau circle 간의 교집합의 발견에 대해 설명한
+                                                        다. PF(T「)의 중심점의 궤적은• 선분 /= {(0, 0, 动
+                                                        -rlS%Mr,}이고, PF(T洲 법선벡터는 z축과 평행하
+                                                        다. 제 2.3절에서 설명된 바와 같이 YV(L)의 중심
+                                                        점의 궤적을 V라 하면, "는 중점 p,, 법선벡터
+                                                        Na 반경         玲인 원이다. 토러스 L상의 모든 Yvone-
+                                                        Vaillarceau circled 반경은 fj이며, T；：상의 임의의
+                                                        Yvone-Villarceau circle의 중점이 q일 때, 법선벡터
+                                                        는 (士(q - p2)XN,+ (R,2- 舟时細이다叫
+                                                            PF(T»과 YV(T,) 간의 교집합이 존재하기 위한 필
+                                                        요충분조건은 다음과 같다.
+       Fig. 12. Computation of PF(T,) A CS(T2).
+                                                            1. M。丫»가 교차한다.
+                                                            2. 조건 1에서 구한 교점을 q라고 할 때 q를 중점
+                                                        으로 하는 A의 profile circle 반경이 店이다
+                                                            3. 점 q를 중점으로 하는 Tj의 Yvone-Villarceau
+                                                        circle의 법선벡터가 z축 방향과 평행이다
+
+                                                            ：!림 M는 이 조건이 만족되는 경우의 토러스 T,.
+                                                        孔를 xy-평면에 투영하여 보이며, 이 •그림에서 구은
+                                                        선으로 표시된 원이 교차원이다. 二림 !5는 두 개의
+                                                        토러스에서 profile circle과 Yvone-Villarceau circle
+           Fig. 13. Circle in PR.T,) 0 CS(T2).          이 일치하여 생기는 교차원을 갖는 경우를 보여준다.
+
+
+
+                                                       한국CAD/CAM학회 논운집 제 5 권 저］ 4호 2000년 12월
+342                                                김구진, 김명수
+
+
+
+
+             PF(Ti)C YV(T,
+
+       Fig. 14. Computation of PF(T|) Pl YV(T2).
+
+
+
+
+                                                                           Fig. 17. Circle in CS(T)) Cl CS(T2).
+
+          Fig. 15. Circle in PF(「)Cl YV(T2).
+                                                          Ti의 주원 (main circle)과 같다. CS(T2H 속하는 원의
+Table 4. Algorithm for computing PF(T,) Cl YV(T2)         반경은 耳이며, 중심점의 궤적은 T?의 주원과 같다.
+
+ Algorithm：Profile_YvoneVillarceau_in_TTI(Ti, T2)             CS(T,)과 CS(T2) 간의 교집합이 존재하기 위한 필
+ Begin                                                    요충분조건은 다음과 같다.
+   CYV = Circle with center p2, normal vector N?,
+        and radius 此；                                         1- ri = r2
+   I- {(0, 0, z0)l -ri < zo < rj；
+                                                              2. Tr의 주원과 T?의 주원이 교차한다.
+   For each q=(qx, q” qz) g Cyv n / do
+   Begin                                                      3. 조건 2에서 구한 교점이 q일 때, N]X(q-p])와
+    If Ri ± (r^ - qz2 )1/2 = R2 then                      N2X(q-p2)가 평행이다.
+     If (±(q - p2) x N2 + (R22 - r22)1/2 N2) // Ni then
+          Output Circle with center qf radius R2,             그림     16은 이 조건이 만족되는 경우의 주원들의
+               and normal vector Ni；
+   End
+ End                                                      lb미e 5. Algorithm for Computing CS(T,) Cl CS(T2)
+
+                                                           Algorithm-
+                                                           CrossSection_CrossSection_in_TTI (Ti, T2)
+이 그림에는 밝은 색과 어두운 색의 두 개의 교차곡                               Begin
+                                                             Ci = main circle of Tp
+선이 있는데, 교차원은 밝은 색의 곡선으로서 토러
+                                                             C2 = main circle of T2；
+스 T2를 바깥쪽에서 둘러싸고 있다. 어두운 색의 교                                If ri = “ then
+차곡선은 6차 곡선이다. 표 4는 위의 조건에 따라 교                               Begin
+                                                                For each q e Ci n C2 do
+차원을 구하는 알고리즘을 보인다.
+                                                                Begin
+                                                                  If (q - Pi) x Ni // (q - p2) x N2 then
+                                                                    Output Circle with center q, radius 覚，
+ 3.4 CS(Tj) n CS(T2)
+                                                                         and normal vector (q - pi) x Ni；
+  이 절에서는 Tr의 cross-sectional circle과 T?의 cross-                  End
+sectional circle 간의 교집합의 발견에 대해 설명한다.                         End
+                                                           End
+CS(T)에 속하는 원의 반경은 折이며 중심점의 궤적은
+
+
+한국CAD/CAM학회 논문집 제 5 권 제4 호 2000년 12월
+                          두 토러스阻 교차곡선에서 이차곡선의 발견을 위한 절차적 방법
+                                                                                                       343
+
+
+상호관계를 보인다、K                17은 이 조전이 만족되어
+교차원이 생기는 예를 제시하는데, ri림에서 밝은 색
+과 어두운 색의 두 개의 교차곡선을 발견할 수 있다.
+이중 밝은 색의 교차곡선이 교차원이며, 어두운 색
+
+의 교차곡선은 4차 곡선이다. 표 5는 위의 조건을 만
+족하는 원을 계 산하는 알고리즘을 보인다.
+
+
+ 3.5 CS(T() D YV(T2)
+ 이    절에서는 丁의          cross-sectional circle과 T：의
+                                                                Fig. 19.CircIe in C&TJ 0 YV(T2}.
+Yvone-Villarceau circle이 일치하는 경우를 발견하는
+과정을 설명한다. CS(T>H 속하는 원의 반경은 ,•!
+                                                      Table 6, A坦应血m fw Computing CS(T)) Ci YV(T2)
+이며. 중심점의 궤적은 T,의 주원과 같다. YVCC)의
+중심점의 궤적은 6를 중심으로 하고 법선벡터                              (Algorithm：         —
+반경이 凡인 원이며' 이 원을 C"v라고 하자. CS(T>)
+                                                       [CrossSectioruYvoneVillarceauJn^TTI (Tb Tg)
+                                                        Begin
+과 YV｛E) 간의 교집합이 존재하기 위한 필요충분                              Ci = main circle of T)；
+조전은 다음과 같다.                                               C 2YV = Circle with center 以，radius r2.
+                                                                  and normal vector N?:
+ l m그 Rt                                                  If = Rz then
+                                                      ,     For each q g C4 n C?" do
+ 2. T)의 주원과 C仰가 교차한다.                                       Begin
+ 3、 조건 2에서 구한 교점이 q라고 할 매, 理를 중점                              If <q - Pi) x Ni
+으로 하는 L의 Yvone-Villarceau circle의 법선벡터                                (q - P以 x q 十(&2 -厂2 2) ”2 N2) then
+                                                                    Output Circle with center q, radius w
+가 NX(q-pp와 평행이다.
+                                                                       and norma] vector (q - p；) x N】；
+                                                             End
+ 그림    18(a)는 이 조건을 만족하는 두 토러스의 xz-                   j End     '
+단면도를 소이고, 그림            18(b)는 동일한 예를 토러스
+
+
+                                                      Tt의 주평면인 xy-평면에 투영하여 보인다. 각각의
+                                                      그哥에서 굵은 선분은 투영된 교차원을 나타낸다. 二L
+                                                      림 19는 실제 두 개의 토러스邛 교차원을 갖는 예를
+                                                      보여주는데, 그림에서 밝은 색과 어두운 색의 무 개
+                                                      의 교차곡선을 발견할 수 있다. 밝은 색의 교차곡선
+
+                                                      이 교차원이뗘, 어두운 색의 교차곡선은 6차곡선이
+                                                      다 표 6은 위의 조건을 만족하는 교차원을 구하는
+                                                      알고리즘을 제시한다.
+
+
+
+                                                       3.6 YV(T1) D YV(T2)
+                                                       이 절에서는 TV의 Yvone-Vtllarceau circle과             의
+                                                      Yvone-Villarceau circle이 일치하는 경우의 발견에
+                                                      대해 설명한다. YV(T0에 속한 원들의 중심점이 이
+                                                      루는 궤적을 G"이라 하면. c,"은 중점 Pl. 법선
+                                                      벡터   N,. 그리고 반경이 r,인 원이다. 마찬가지로.
+                                                      YV(T»에 속한 원들의 중심점이 이루는 궤적을 c2yv
+                                                      라 하면,    는 중점 p,, 법선 벡터 卜&, 그리고 반
+                                                      경이 *인 원이다.
+
+                                                       YV('｝과 YV(T2) 사이에 者유되는 원이 존재하기
+     Fig. 18. Construction of CS(Tj)「1 YV(T3).        위한 필요충분조건은 다음과 같다.
+
+
+
+                                                     한국CAD/CAM학회 논문집 제 S 권 저｝ 4 호 20艙년 技월
+344                                                김구진, 김명수
+
+
+
+  1. Ri = R,                                                  그림    20은 이 조건이 만족되는 경우에 있어서
+  2. C］YV과 c2yv7} 교차한다.                                    G 과 c2yv 사이의 상호관계를 보여준다. 그림 21
+                                                           *
+  3. 조건 쎄서 구한 교점이 q라고 할 때,(를 중점으                           은 실제 두 토러스가 교차원을 가지는 경우의 예를
+로 하는 Ti의 Yvone-Villarceau circle과 T의 Yvone-                제시하는데, 이 그림에서는 밝은 색과 어두운 색의
+Villarceau circle의 법선벡터가 평행이다.                             교차곡선이 각각 두 개씩 존재한다. 두 개의 밝은 색
+                                                           의 교차곡선은 교차원들이며, 두 개의 어두운 색의
+
+                                                           교차곡선은 하나의 4차 평면곡선이다. 표 7은 위의
+                                                           조건을 만족하는 교차원을 구하는 알고리즘을 제시
+                                                           한다.
+
+
+
+                                                                 4. 두 토러스 사이의 교차곡선 계산
+
+                                                              이 절에서는 두 토러스 사이의 교차곡선을 구하는
+                                                           전체 알고리즘 안에서 교차원을 발견하고 이를 구체
+                                                           적으로 계산하는 각각의 부분적인 알고리즘을 사용
+
+                                                           하는 방법을 표 8에서 간단한 의사코드를 이용하여
+                                                           설명한다. 전체 교차곡선을 계산하기 위해서는 우선
+
+                                                           교차곡선에 존재하는 모든 2차 곡선, 즉 원을 발견
+                                                           하고 계산한 두］, 원 이외의 곡선이 교차곡선에 포함
+                                                           되어 있으면 이들을 이전의 연구결과［財에서 개발된
+                                                           방법을 이용하여 마저 계산한다.
+
+
+
+                                                                                5.결         론
+
+                                                              본 논문에서는 기하학적 접근방법을 이용하여 두
+
+                                                           토러스 간의 교차곡선 상에 존재하는 2차 곡선을 발
+           Fig. 21. Circles in YV(T|) Cl YV(T2).           견하는 방법과 발견된 2차 곡선을 구체적으로 계산
+                                                           하는 알고리즘을 제시하였다. 토러스 곡면 상에 존재
+  비   e 7. Algorithm for Computing YV(T|) Cl YV(T2)        하는 유일한 2차 곡선은 원이며 이들은 profile circle,
+
+ Algorithm；                                                cross-sectional circle, Yvone-Villarceau circle의 세
+ YvoneVillarceau_YvoneVillarceau_in_TTI (Ti, T2)
+ Begin                                                     Table 8. Algorithm for computing intersection curves bet­
+   CiVV 그 Circle with center pb normal vector Nb                    ween two tori
+          and radius 1、；
+   C；" = Circle with center P2, normal vector N2,           Algorithm： Torus_Toms_Intersection (T), T?)
+          and radius r£                                     Begin
+   If Rt = R2 나】en                                            Profile_Profiie_in_TTI (Ti, T2)；
+      For each 아 w        c C2VV do begin                     Profile„CrossSection_in_TTI (Tb T＞；
+        If ((q - Pi) x Ni + (Ri2-n2)1/2 NO                    Profile_CrossSection_in_TTI (T2, Ti)；
+           // (± (q - P2)x N2 十(Rg2 - ra2)1/2 N2) then        Profile_YvoneVillarceau_in_TTI (Ti, T2)；
+           Output Circle with center q,                       Profile„YvoneVillarceau_in_TTI ⑴，T。；
+              normal vector (q-pi)xNi+ (Ri2-ri2)1/2 Ni ,      CrossSection_CrossSection_in_TTI (Ti, T2)；
+              and radius R2；                                  CrossSection_YvoneVillarceau_in_TTI (Ti, T2)；
+        !f(—(q — Pi)xNi+ (&2-门沪2卜眼                            CrossSection_YvoneVillarceau_in_TTI (T2, Ti)；
+           // (± (q - p2)xN2 + (R22 - r22)1/2 N2) then        YvoneVillarceau^YvoneVillarceauJn_TTKTi, T2)；
+           Output Circle with center q,                       If Ti c T2 contains some curves other than conic
+              normal vector -(q-p))xNi+ (Ri2-ri2)1/2 N】，      sections then
+              and radius R2；                                     Comp나te_non_ConicSection (Ti, Ta)；
+      End                                                   End
+ End
+
+
+
+한국CAD/CAM학회 논문집 제 5 권 제4 호 2000년 12월
+                           두 토러스의 교차곡선에서 이차곡선의 발견을 위한 절차적 방법                                                        345
+
+
+가지로 분류된다. 세 종류의 원이 갖는 기하학적 정                                     pp. 146-153.
+보를 바탕으로 두 개의 토러스 사이의 교차곡선에                                    4. Johnstone, J. and Shene, C. K., "Computing the inter­
+존재하는 모든 원을 발견하고 이를 구체적으로 계산
+                                                                 section of a plane and a natural quadric", Computers
+                                                                 and Graphics, Vol. 16, No. 2. pp. 179-186, 1992.
+하는 알고리즘을 제시하였다.
+                                                              5. Kim, K.-J., Kim, M.-S. and K. Oh., "Torus/Sphere
+ 교차원이 존재하기 위한 조건을 따지는 과정에서                                       Intersection Based on a Configuration Space Ap-
+는 원과 선분의 교차점 겨〕산, 그리고 원과 원의 교차                                   proach,\ Graphical Models and Image Processing,
+점의 계산, 그리고 벡터 연산(vector operation) 등과                            Vol. 60, No. 1, pp, 77-92, January, 1998.
+같은 비교적 간단한 계산들만이 이용되었다. 따라서,
+                                                              6. Kim, K.-J., Torus and Simple Surface Intersection
+                                                                 Based on a Configuration Space Approach, Ph.D.
+본 논문에서 제시된 알고리즘은 대단히 효율적이고
+                                                                 Thesis, Dept, of Comp니ter Science and Engineering,
+수치계산에 수반되는 오차가 적다. Heo et M.uk에                                  POSTEC니, February, 1998.
+서는 공간상에서 주어지는 반지름이 서로 다른 두                                    7. Kim, K.-J. and Kim, M.-S., "Comp니ting All Conic
+원의 교차점 계산을 세 평면 사이의 교차점을 계산                                      Sections in Torus and Natural Quadric Intersections".
+                                                                 Proc, of Israel-Korea Bi-National Conference on New
+하는 문제로 변환하는 기법을 소개하고 있다. 유리
+                                                                 Themes in C아nputerized Geometrical Modeling, Tel-
+수 연산을 이용하면 세 평면의 교점을 오차가 없이
+                                                                 Aviv, Israel. February 18-19, 1998, pp. 11-20.
+계산할 수 있으므로, 두 원의 교점을 아주 정밀하게                                  8. Levin, J., "A parametric algorithm for drawing pictures
+계 산할 수 있다. 공간상에서 주어진 선분과 원의 교                                    of solid objects composed of quadric surfaces'： Com-
+점 또한 비슷한 방법으로 정밀하게 계산할 수 있다.                                     mun. ACM, Vol. 19, No. 10, pp. 555-563, 1976.
+                                                              9. Levin, J., ''Mathematical models for determining the
+                                                                 intersections of quadric surfaces'', Comput. Graphics
+                     감사의 글                                       Image Process, Vol. 11, pp. 73-87, 1979.
+                                                             10. Miller, J., "Geometric approaches to nonplanar quadric
+ 본 연구는 과학기술부 국가지정연구실 과제에 의                                       surface intersection curves". ACM Trans, on Graphics,
+                                                                 Vol. 6, No. 4. pp. 274-307, 1987.
+하여 지원되었고, 정보통신부 대학S/W연구센터 지
+                                                             11. Miller. J. and Goldman, R.、"Using Tangent Balls to
+원사업과 정보통신부 대학기초연구 지원사업에 의해                                       Find Plane Sections of Natural Quadrics", IEEE Com­
+지원되었습니다. 논문을 위한 도움 말씀을 주신 오                                      puter Graphics and Applications, pp. 68-82, March,
+스트리 아 비 엔나공과대 학                기 하학연구소 Helmut                     1992.
+                                                             12. Miller, J. and Goldman, R„ "Geometric Algorithms
+Pottmann 교수님과 공동연구에 참여해 주신 미국 미
+                                                                 for Detecting and Calculating All Conic Sections in
+주리대학교 수학과 오경호 교수님께 감사 드립니다.
+                                                                 the Intersection of Any Two Natural Quadric Surfaces",
+그리고, 본 논문의 수정을 위하여 많은 조언을 해주                                     Graphical Models and Image Processing. Vol. 57,
+신 심사위원 두 분께도 깊이 감사 드립니다.                                         No. 1. pp. 55-66, 1995.
+                                                             13. Piegl, L., ''Geometric method of intersecting natural
+                                                                 quadrics represented in trimmed surface form''. Com­
+                      참고문헌                                       puter Aided Design、Vol. 21, No. 4, pp. 201-212, 1989.
+                                                             14. Pottmann, H., Private Communications.
+1. Farouki. R., Neff, C. and O'Connor, M.. “A니omaiic         15. Sarraga, R., "'Algebraic methods for intersections of
+   parsing of degenerate quadric-surface intersections",         quadric surfaces in GMSO니D”, Comput. Vision Gra­
+   ACM Trans, on Graphics, Vol. 8, No. 3, pp. 174-               phics Image Process, Vol. 22, No. 2, pp. 222-238. 1983.
+   203, 1989.                                                16. Shene, C.-K. and Johnstone, J.. "On the Lower Degree
+2. Heo, H. S., The Intersection of Ruled and Ringed              Intersections of Two Natural Quadrics", ACM Trans,
+   Surfaces, Ph.D. Thesis, Dept, of Computer Science,            on Graphics. Vol. 13, No. 4, pp. 400-424. 1994.
+   POSTECH, February. 200().                                 17. Wilf, I. and Manor. Y., "Quadric-surface intersection
+3. Heo, H. S., Hong, S.J., Kim, M.-S. and Elber. G.,             curves: Shape and structure'', Computer Aided Design,
+   "The Intersection of Two Ringed Surfaces". Proc, of           Vol. 25, No. 10, pp. 633-643, 1993.
+   Pacific Graphics 2000, Hong Kong, October 3-5, 20()(),
+
+
+
+
+                                                            한국CAD/CAM학회 논문집 제 5 권 저I 4호 2000년 12월
+346                                       김구진, 김명수
+
+
+
+
+             김    구     진                            김    명     수
+             1990년 이화여자대학교 전산학 학사                    1980 서울대학교 수학교육학 학사
+             1992년 한국과학기술원 전산학 석 사                   1982 서울대학교 수학 석사
+             1998년 포항공과대학교 컴퓨터공학 박사                  1985 Purdue University 응용수학 석사
+             1998.3~1998.11 포항공과대학교 컴퓨터공학            1987 Purdue University 전산학 석사
+                   과 박사후 연수과정                        1988 Purdue University 전산학 박사
+             1998.12-2000.5 Purdue University 전산학    1988〜199응 : 포항공과대학교 전산학과 조교
+                   과 박사후 연수과정                              수, 부교수
+             2000.6-2000.8 서울대학교 컴퓨터공학부 방            1995 : Purdue University 전산학과 객 원부
+                   문연구원                                    교수
+             20009••현재 아주대학교 정보통신전문대학                1999~현재 : 서울대학교 컴퓨터공학부 부교
+                   원 조교수 대우                                수
+
+                                                     국제학술지 편집위원 : Computer-Aided De­
+                                                           sign, Computer Graphics Forum,
+                                                           Int'l J. of Shape Modeling
+
+
+
+
+한국CAD/CAM학회 논문집 제 5 권 제4호 2000년 12월
+

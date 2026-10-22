@@ -1,0 +1,888 @@
+                                         Robust Containment Queries over Collections of Rational Parametric
+                                         Curves via Generalized Winding Numbers
+                                         JACOB SPAINHOUR, University of Colorado Boulder, USA
+                                         DAVID GUNDERMAN, Indiana University School of Medicine, USA
+                                         KENNETH WEISS, Lawrence Livermore National Laboratory, USA
+
+
+
+
+arXiv:2403.17371v2 [cs.CG] 20 Jun 2024
+                                         Fig. 1. The point containment query is an important predicate in many applications, yet their evaluation is limited by undesirable, but often unavoidable
+                                         features of the bounding geometry such as non-manifold or non-watertight edges (left). This causes catastrophic errors for traditional approaches to deciding
+                                         containment, in particular those that use ray casting (middle left). Because the field of generalized winding numbers degrades smoothly around geometric
+                                         errors, they are well-suited for use in robust containment queries (middle right). In this paper, we present a framework for evaluating exact generalized winding
+                                         numbers for arbitrary collections of curved objects, as well as a novel point-in-curved-polygon algorithm that facilitates their efficient calculation (right).
+
+                                         Point containment queries for regions bound by watertight geometric sur-            in computational performance granted by this method over conventional
+                                         faces, i.e., closed and without self-intersections, can be evaluated straightfor-   techniques as well as the robustness induced by its application.
+                                         wardly with a number of well-studied algorithms. When this assumption on
+                                         domain geometry is not met, such methods are either unusable, or prone to           CCS Concepts: • Computing methodologies → Shape analysis; Para-
+                                         misclassifications that can lead to cascading errors in downstream applica-         metric curve and surface models.
+                                         tions. More robust point classification schemes based on generalized winding
+                                         numbers have been proposed, as they are indifferent to these imperfections.         Additional Key Words and Phrases: Winding number, point containment
+                                         However, existing algorithms are limited to point clouds and collections of         query, rational Bézier curves, robust geometry processing
+                                         linear elements. We extend this methodology to encompass more general
+                                         curved shapes with an algorithm that evaluates the winding number scalar
+                                         field over unstructured collections of rational parametric curves. In particu-
+                                         lar, we evaluate the winding number for each curve independently, making            1   INTRODUCTION
+                                         the derived containment query robust to how the curves are arranged. We             In the fields of computer graphics, Computer Aided Geometric De-
+                                         ensure geometric fidelity in our queries by treating each curve as equivalent       sign (CAGD) and Computer Aided Engineering (CAE), it is common
+                                         to an adaptively constructed polyline that provably has the same general-           for geometric objects to be expressed using a boundary represen-
+                                         ized winding number at the point of interest. Our algorithm is numerically
+                                                                                                                             tation (B-Rep). Often, these B-Reps are defined via non-uniform
+                                         stable for points that are arbitrarily close to the model, and explicitly treats
+                                                                                                                             rational B-spline (NURBS) curves in 2D and surfaces in 3D. Such
+                                         points that are coincident with curves. We demonstrate the improvements
+                                                                                                                             objects are invaluable in the design of CAD models, as they allow
+                                                                                                                             for precise geometric control of the object’s boundary [Piegl and
+                                         Authors’ addresses: Jacob Spainhour, University of Colorado Boulder, USA, Jacob.    Tiller 1996]. However, it can still be desirable in many contexts, such
+                                         Spainhour@colorado.edu; David Gunderman, Indiana University School of Medicine,
+                                         USA, dgunderm@purdue.edu; Kenneth Weiss, Lawrence Livermore National Labora-        as in animation or simulation, to treat the interior volume of these
+                                         tory, USA, kweiss@llnl.gov.                                                         objects explicitly [McAdams et al. 2011].
+2 •   J. Spainhour, D. Gunderman and K. Weiss
+
+
+                                                                                or outside the volume bounded by the corresponding shape [Weiss
+                                                                                et al. 2016]. It is critical that this identification takes into account
+                                                                                the full curvature of the bounding geometry, as piecewise linear
+                                                                                approximations can cause quadrature points near material bound-
+                                                                                aries to be misclassified, unpredictably compounding the error in
+                                                                                the calculation.
+                                                                                   Such geometric errors can be resolved with techniques in surface
+Fig. 2. Geometric errors can be visually imperceptible, but can still cause a   repair [Bischoff et al. 2005; Mezentsev and Woehler 1999; Park et al.
+shape to have no topological interior.                                          2021], which alter the B-Rep itself to an approximated surface that
+                                                                                lacks these imperfections. However, doing so by hand can be im-
+                                                                                practical for the typical number of imperfections in such a model,
+   Such a task motivates development of the containment query, a                and automated procedures during geometry pre-processing can in-
+geometric predicate that returns whether an arbitrary spatial loca-             advertently remove important model features. Instead, we require
+tion is contained within an arbitrary shape. The rapid evaluation of            a containment query that is robust to such artifacts, in the sense
+containment queries is quite well understood for many classes of                that an appropriate inside/outside classification is always returned,
+shapes, such as polygons and regions bounded by Bézier curves [Car-             independent of size and frequency of these boundary errors.
+valho and Cavalcanti 1995; Nishita et al. 1990; Patrikalakis and                   To address these concerns, we present in this work three principal
+Maekawa 2010]. However, such methods assume the boundary is                     contributions:
+watertight, having no gaps between connected components. In re-
+ality, the vast majority of B-Reps are created by hand within some                   • We extend the theoretical framework of generalized wind-
+form of CAD software, leading to so-called “messy” CAD geometry.                       ing numbers [Jacobson et al. 2013] to the context of an un-
+   A straightforward source of these problems is human error during                    structured collection of 2D rational parametric curves, from
+design or construction, but more subtle issues can be introduced                       which one can derive a robust containment query that in-
+through varying tolerances within and between different software                       dicates whether an arbitrary point should be considered
+tools. This results in boundary models with human-imperceptible,                       interior to non-watertight geometry.
+but numerically significant gaps and overlaps between individual                     • We address the issue of defining and evaluating generalized
+components of the boundary [Marussig and Hughes 2017] (see Fig-                        winding numbers for points that are coincident with the
+ure 2). Even in situations prioritizing visibility over strict geometric               boundary. This discussion lies outside the scope of much of
+fidelity, such as in computer graphics and animation, care must be                     the existing literature, as such points require unique consid-
+taken to ensure that these errors are properly accounted for. For ex-                  eration in the context of curved geometry.
+ample, the dynamic planar map heuristic used by Adobe Illustrator’s                  • We provide a novel algorithm for evaluating integer winding
+Live Paint Bucket tool allows users to set fills for closed regions                    numbers with respect to curved geometry, which is the prin-
+bounded by intersecting collections of Bézier curves and exposes a                     cipal component of our technique for evaluating generalized
+global threshold parameter to connect gaps between curves in the                       winding numbers on such shapes. We demonstrate that this
+collection [Asente et al. 2007].                                                       calculation is robust to non-watertight geometry and con-
+   As an additional class of motivating examples, we consider appli-                   siderably more performant than state-of-the-art techniques.
+cations in multiphysics simulation, for which containment classifica-           Altogether, these contributions allow for robust containment queries
+tion errors can lead to cascading problems and incorrect results. The           of objects implied by messy 2D CAD geometry, composed of col-
+mathematical underpinnings of containment within non-watertight                 lections of parametric curves (see Figure 1). Our algorithm has
+shapes is dubious, which leads to a tenuous theoretical foundation              been implemented in Axom, a BSD-licensed open-source library of
+for established methods that assume geometric continuity. This                  Computer Science infrastructure for HPC applications [Capps et al.
+is problematic, as errors are frequently inconsistent within local              2024].
+regions, with even arbitrarily close points receiving different classi-
+fications. More practically, these errors can result in unexpected and
+fatal errors in simulation software, wasting computational resources            2   BACKGROUND AND RELATED WORK
+and developer time [Sederberg et al. 2008].                                     Even in the ideal and watertight setting, methods of evaluating
+   At the same time, physical applications often prevent approximat-            containment vary wildly depending on the numerical representation
+ing curved geometry with piecewise linear segments. Although this               of the bounding geometry. As simple examples, the operation can
+would allow for treatment of the messy—but now linear—geometry                  be performed trivially for axis-aligned quadrilaterals through the
+with established methods, such an approximation can produce siz-                evaluation of inequalities, for spheres by computing a distance to
+able errors in the relevant numerical method [Sevilla et al. 2008]. As          the center, and for triangles using Barycentric coordinates. More
+a concrete example, multimaterial Arbitrary Lagrangian-Eulerian                 complicated procedures are necessary for point containment in
+(ALE) methods require additional preprocessing to initialize the                arbitrary polygons [Haines 1994]. These algorithms can generally
+volume fraction of each material in a computational cell [Barlow                be broken down into two categories (see Figure 3).
+et al. 2016; Hirt et al. 1974]. This, in turn, necessitates classifying            Ray Casting algorithms determine containment by extending a
+each point in a quadrature rule along the background grid as inside             ray from the specified query point out to infinity, and counting the
+                                                   Robust Containment Queries over Collections of Rational Parametric Curves via Generalized Winding Numbers   • 3
+
+
+                                                                                   analysis [Sevilla et al. 2008]. This is a particular problem in the case
+                                              0        +1
+                                                                                   where points of interest are allowed to be placed arbitrarily close
+                         +1                                                        to the curve, as then no guarantee can be made as to how many
+                    -1                                                             refinements in the approximation are necessary to achieve perfect
+                                                            0
+               +1                                                                  geometric fidelity. In place of such a linearization, the use of NURBS
+                                                                                   to represent boundaries in a finite element analysis has been quite
+                                                                                   successful in reducing or even eliminating geometric error [Sevilla
+                                                                                   et al. 2008, 2011]. As a result of this, we consider operating directly
+                                                                                   on curves without any approximation to be a necessary component
+Fig. 3. Given an arbitrary query point, containment can be determined              of our proposed algorithm so as to preserve the accuracy of an
+with a ray casting algorithm that counts (signed) intersections between the        underlying numerical method.
+polygon and a ray extending from the query (left), or a winding number                We similarly desire an algorithm that can reach this level of
+algorithm that counts revolutions of the curve around the query (right).           geometric fidelity for a very general class of curves. For example,
+                                                                                   cubic Bézier curves are the highest order required by postscript and
+                                                                                   SVG formats, as the level of detail they afford is typically sufficient
+number of times the ray intersects the domain boundary to pro-                     for design applications. However, applications in computational
+duce a crossing number [Shimrat 1962]. As a point moves along this                 multiphysics can necessitate an algorithm that works for rational
+ray, it will alternate between interior and exterior, and therefore                Bézier curves of arbitrary order. This is because the NURBS shapes
+an odd (even) crossing number indicates the point is interior (exte-               that are used by more sophisticated modeling software can always be
+rior). Computing intersections between the given ray and the linear                decomposed into a collection of (in principle arbitrary order) rational
+edges of a polygon can be done very efficiently, with many graphics                Bézier primitives through the process of Bézier extraction [Piegl
+processing units (GPUs) having dedicated ray-tracing cores that can                and Tiller 1996; Thomas et al. 2015]. However as we will see, the
+perform the operation massively in parallel [Zellmann et al. 2022].                proposed algorithm is ultimately indifferent to the order and/or
+However, these methods are sensitive to the specific ray that is ex-               rationality of the curve in question.
+tended, needing to account for special cases when the ray intersects                  Containment within regions defined by Bézier curves has also
+a polygon vertex or entire edge, which can be unnecessarily more                   been studied in the context of 2D parametric trimming curves for 3D
+costly [Edelsbrunner and Mücke 1990; Sommariva and Vianello                        NURBS surface patches. In this sub-problem, it must be determined
+2022]. Winding number algorithms are a class of algorithms that                    if a point in the 2D parameter space of the 3D surface is contained
+are more indifferent to these issues, and, as such, are the type from              within the (often, but not necessarily watertight) trimming curves.
+which we derive our proposed method. In a winding number al-                       Because this and other contemporary 2D containment problems
+gorithm, we instead count the number of revolutions around the                     are frequently solved with ray casting algorithms [Marussig and
+query point made by a particle traveling on the domain bound-                      Hughes 2017], we note that they can largely be divided into two
+ary [Hormann and Agathos 2001]. This value can be considered a                     categories. In the algebraic approach, intersections between rays
+generalization of the crossing number, and can be used to determine                and arbitrary curves can be computed using typical root-finding
+containment with the same even-odd rule. By virtue of not being de-                techniques in parameter space [Patrikalakis and Maekawa 2010],
+pendent on any particular extended ray, these algorithms implicitly                although standard bisection and gradient descent methods can only
+handle edge-cases that are problematic for ray casting. This means                 identify at most a single point of intersection. In contrast, geometric
+even in the context of simple, watertight geometry, such algorithms                approaches take place in physical space, decomposing the curve into
+can be considered a more robust approach to containment queries.                   subcurves until intersections with the ray can be identified [Farin
+   Containment of arbitrary points in more general curved shapes                   2001]. The current state-of-the art method, Bézier clipping [Nishita
+is a much more difficult problem, and has been studied extensively                 et al. 1990; Sederberg and Nishita 1990], lies at the intersection
+in the context of 2D vector graphics. As an example, we refer to                   of these two approaches, where recursive algebraic subdivision
+the process of linearization, in which a curve is approximated by                  is accelerated using the convex hull property of a Bézier curve.
+connected linear segments, an approach that is fairly common in                    However, such methods are known to possibly report incorrect
+both modern graphics engines and physics codes. In the former,                     intersections and suffer from inefficiency in the presence of multiple
+information about the targeted display can be leveraged to ensure                  spatially equivalent intersection points [Efremov et al. 2005].
+that the approximating polyline is constructed with sufficiently high                 These issues are worsened by geometric errors present in the
+resolution such that it is indistinguishable to a viewer [Kilgard 2020].           shape. As an example, if the arbitrary ray is by chance extended
+Combined with the fact that the polyline must be rendered with                     through a very small gap in the model, then the point must be
+some predetermined thickness, it is therefore theoretically possible               classified as “exterior” despite this being unintuitive and contrary to
+(although rarely enforced) for containment queries on linearized                   the intentions of the mesh designer. Non-manifold edges in a shape
+watertight geometries on a rendered display to have no observable                  are similarly problematic for ray casting methods. These issues
+misclassifications.                                                                can be somewhat mitigated by extending several rays and taking a
+   On the other hand, this type of polyline approximation of curved                consensus, but such approaches impose an additional computational
+geometry is known to cause severe and often unexpected errors in                   burden while still producing noisy and potentially inconsistent
+the modeling of physical systems through PDEs and finite element                   classifications for nearby points [Nooruddin and Turk 2003]. We
+4   •   J. Spainhour, D. Gunderman and K. Weiss
+
+
+now show that, in addition to being indifferent to the specific edge
+cases introduced by ray casting, winding number algorithms can
+be extended such that they are also robust to more general issues
+introduced by non-watertight, non-manifold, curved geometry.
+
+
+
+3       GENERALIZED WINDING NUMBERS
+The generalized winding number is an extension of the standard
+integer-valued winding number to (potentially) non-watertight re-
+gions. While integer winding numbers partition the enclosed regions
+of a domain, the generalized winding number generates a harmonic           Fig. 4. (left) The winding number for a piecewise linear shape can be com-
+scalar field that smoothly degrades in the presence of discontinuities     puted by summing angles subtended by each segment. (right) Winding
+and self-intersections. This allows for the calculation of robust con-     numbers for linear segments can be computed at arbitrary points indepen-
+tainment queries in the presence of messy geometry. As an example,         dently of the remaining shape.
+a simple rule for handling the fractional values that result from
+imperfections in the bounding geometry is to round them to their
+nearest integer.
+   Such generalizations of winding numbers have recently shown             with a constant density function. However, such algorithms are typ-
+great utility in geometry processing applications. In the context          ically applied to closed domains with simpler (although still curved)
+of both (linear) triangle meshes [Jacobson et al. 2013] and point          types of geometry, precluding general use on arbitrary, messy CAD
+clouds [Barill et al. 2018], the resulting inside/outside classification   models [Klinteberg and Barnett 2020]. Furthermore, our proposed
+can be used to generate volumetric triangle/tetrahedral meshes out         algorithm relies exclusively on geometric principles, eliminating the
+of completely unstructured geometric data. Additionally, the smooth        need to use costly and potentially inaccurate quadrature schemes.
+degradation of the winding number field naturally introduces de-              We begin by reviewing the formal description of a generalized
+sirable locality properties, which in turn lead to more robust and         winding number in R2 . Given an oriented curve Γ ⊂ R2 and query
+performant algorithms in, for example, exact mesh booleans [Tret-          point 𝑞 ∈ R2 \ Γ, the winding number 𝑤 describes the (potentially
+tner et al. 2022]. More recently, these particular winding number          incomplete) number of times the curve travels counterclockwise
+algorithms have been used in the context of immersogeometric               around the point. In the case where Γ is a closed curve, the scalar
+analysis to simulate fluid flow around geometric objects defined by        field 𝑤 Γ (𝑞) is integer-valued, and induces a partition of R2 that can
+unstructured point clouds [Balu et al. 2023]. It is speculated in Gun-     be interpreted as containment in the region bounded by Γ. In the
+derman [2021] that one could extend the calculation of generalized         following discussion, it is notationally convenient to assume that
+winding numbers by utilizing their own novel quadrature schemes            the query point is located at the origin, and that the curve Γ has been
+for such objects [Gunderman et al. 2020], but preliminary tests of         appropriately translated by 𝑞. The scalar field is invariant to such
+this approach are limited by the accuracy of numerical integration.        global translations, and so the winding number of Γ at 𝑞, 𝑤 Γ (𝑞), is
+Despite this recent surge in use, methods that compute exact gener-        identical to the winding number at the origin after translating the
+alized winding numbers for more general curved geometric objects           curve, 𝑤 Γ−𝑞 (0).
+are, to our knowledge, currently absent from the literature.                  When the curve is piecewise linear with Γ = ∪𝑖 𝐿𝑖 , the wind-
+   Nevertheless, the problem of computing generalized winding              ing number at 𝑞 can be computed as the sum of signed angles 𝜃𝑖
+numbers for curved shapes has close analogues in the fields of both        subtended by each linear component 𝐿𝑖 , given by
+computer graphics and boundary integral equations. In the former,
+a connection can be drawn to diffusion curves, a primitive in vector                                               1 ∑︁
+graphics that also produces a scalar field defined by the solution of                              𝑤 Γ−𝑞 (0) :=         𝜃𝑖 .                     (1)
+                                                                                                                  2𝜋 𝑖
+a differential equation with respect to boundary curves (albeit with
+different data prescribed on the curve) [Jacobson et al. 2013]. These
+                                                                              Furthermore, the winding number of each individual component
+applications have the advantage of being solved on a grid gener-
+                                                                           of the piecewise linear shape (and of straight lines in general) is
+ated by a rasterized domain, meaning that a global solution can be
+                                                                           given by
+obtained efficiently using a geometric multi-grid method [Orzan
+et al. 2008]. Sawhney and Crane [2020] recently introduced a grid-                                                    1
+free approach in which random walks and projections onto curved                                      𝑤 𝐿𝑖 −𝑞 (0) =      𝜃𝑖 ,                     (2)
+                                                                                                                     2𝜋
+geometry are used to solve certain classes of PDEs, including that
+which implicitly defines the generalized winding number, focus-            again where 𝜃𝑖 is the angle subtended by 𝐿𝑖 at 𝑞 (see Figure 4).
+ing on improving speed and locality at the cost of some degree               We can consider the case for a more general collection of arbitrary
+of accuracy and consistency. Within the context of boundary in-            curves analogously. Let Γ = ∪𝑖 Γ𝑖 be a collection of rational Bézier
+tegral equations, calculating winding numbers is a special case of         curves that constitute the (likely not watertight) boundary of a 2D
+the more general problem of integrating double layer potentials            CAD model. In this case, the winding number of a point 𝑞 with
+                                                   Robust Containment Queries over Collections of Rational Parametric Curves via Generalized Winding Numbers   • 5
+
+
+
+
+Fig. 5. The winding number with respect to closed shapes (left) is always
+an integer. However, by independently summing contributions from each
+curved component (center), the generalized winding number can be com-
+puted over collections of curves containing gaps and overlaps (right).
+
+
+respect to a single curve Γ𝑖 is given by
+                             ∫                 ∫
+                          1               1 ∑︁
+            𝑤 Γ−𝑞 (0) :=           𝑑𝜃 =             𝑑𝜃                  (3)
+                         2𝜋 Γ−𝑞          2𝜋 𝑖 Γ𝑖 −𝑞
+by the properties of the integration. This is notable, as it describes
+how the winding number for each individual component Γ𝑖 can be
+computed completely independently of every other curve, with                       Fig. 6. (top) The absolute error (log scale) in Gaussian quadrature used
+                                                                                   to compute the generalized winding number on a cubic Bézier curve with
+                                       ∫
+                                     1
+                     𝑤 Γ𝑖 −𝑞 (0) :=          𝑑𝜃 .                   (4)            Equation 5, evaluated with 15-, 30- and 50-nodes. (middle) Using Guassian
+                                    2𝜋 Γ𝑖 −𝑞
+                                                                                   quadrature to compute generalized winding numbers over a shape leads to
+It is from this property of the generalized winding number that                    unacceptable errors. (bottom) Close-up of highlighted region.
+we derive both the robustness of our winding number calculation,
+and the robustness of the derived containment query. While the
+collection of Bézier curves may be messy in the sense that pairs of                that the value returned by the method is accurate. We can see how
+endpoints may not perfectly align, generalized winding numbers                     this would affect a containment query on a closed shape in Figure 6.
+on each individual curve are well-defined and can be computed                      In this example, the only correct values for the rounded winding
+stably. At the same time, the sum of these values at a given point is              number are 0, 1, and 2. However, even the most accurate quadrature
+exactly the generalized winding number of the entire shape, which                  scheme shown produces values in the vicinity of the quadrature
+can be used to produce intuitive and robust containment queries for                nodes that are completely meaningless.
+non-watertight shapes (see Figure 5). Most commonly, this is done
+by rounding this value to the nearest integer, and applying to it a                4   GENERALIZED WINDING NUMBERS FOR CURVED
+conventional even-odd or non-zero rule to make the classification.                     GEOMETRY
+Importantly, each of these conventions treat points with a zero                    While these integration formulae are useful from a theoretical per-
+winding number as exterior.                                                        spective, their inherent instability necessitates an approach that
+   Framed in this way, the remaining task is to evaluate general-                  avoids evaluating them directly. In their place, we develop a frame-
+ized winding numbers for a single, arbitrary rational Bézier curve.                work that computes winding numbers based only on geometric prop-
+As an initial approach, one could consider direct evaluation of the                erties of the curve. To this end, we make heavy use of a particular
+integral through numerical quadrature. When the curve is given                     kind of closing curve for each shape. Given an (in principle arbitrary)
+parametrically as (𝑥 (𝑡), 𝑦 (𝑡)) ∈ R2 , 𝑡 ∈ [0, 1], as is the case for (ra-        parametric curve Γ, we define the linear segment 𝐶 : [0, 1] → R2
+tional) Bézier curves, we can evaluate this formula more practically               by 𝐶 (𝑡) = Γ(1)(1 − 𝑡) + Γ(0)𝑡 as the linear closure of our curve.
+in terms of Cartesian coordinates, as                                                 As the name suggests, the union of this closure 𝐶 and Γ will
+                                                                                   always be a properly oriented, closed curve, and thus partitions
+                        1
+                           ∫ 1
+                                𝑥 (𝑡)𝑦 ′ (𝑡) − 𝑥 ′ (𝑡)𝑦 (𝑡)                        R2 into discrete enclosing regions. Thus, winding numbers with
+             𝑤 Γ (𝑞) :=                                     𝑑𝑡 .   (5)             respect to the total curve Γ ∪ 𝐶 are integers, such that
+                       2𝜋 0          𝑥 2 (𝑡) + 𝑦 2 (𝑡)
+   Direct evaluation of this integral through standard techniques                                      𝑤 Γ (𝑎) + 𝑤𝐶 (𝑎) = 𝑤 Γ∪𝐶 (𝑎) ∈ Z.                       (6)
+is notoriously difficult. In particular, when Γ is close to the query              Most importantly, the winding number of such a closure can always
+point (or rather the origin under this translated notation) then the               be computed exactly without the need to appeal to quadrature by
+near-singular behavior of the integrand causes Gaussian quadrature                 Equation 4, as the angle subtended by the introduced linear segment
+to become unstable, as seen in Figure 6. Although some error is to                 can be evaluated through a (relatively) inexpensive arccosine. In this
+be expected for this type of numerical integration, this error rapidly             way, we can always solve the problem of the generalized winding
+becomes unacceptable as the query point approaches the curve.                      number using a solution to the integer winding number problem on
+Perhaps more concerningly, there is no immediate way to verify                     the closed curve, as subtracting away the contribution of this linear
+6 •   J. Spainhour, D. Gunderman and K. Weiss
+
+
+                                                                                   It is from these observations that we derive an algorithm for
+                                                                                computing exact generalized winding numbers over a collection of
+                                                                                curves. For both far and near query points, we construct appropriate
+                                                                                linearizations of our curves that are guaranteed to have the same
+                                                                                generalized winding number at the point of interest as their curved
+                                                                                counterparts. For a given point, the vast majority of curves in the
+                                                                                model will be considered far, and their contribution to the gener-
+                                                                                alized winding number can be computed with a single arccosine
+                                                                                evaluation. For the few curves that are close enough such that the
+Fig. 7. The unknown winding number with respect to a curved shape (left)        linear closure itself is an insufficient approximation, we construct an
+can be computed by finding the integer winding number of the closed figure      approximating polyline that provably generates the same winding
+(center) and subtracting away the contribution of its closure (right).          number. In such cases, we evaluate the integer winding number
+                                                                                for the closed polygon, which can be done without reference to
+                                                                                any trigonometric functions using the point-in-polygon algorithm
+                                                                                in Hormann and Agathos [2001] and subtract away the contribution
+                                                                                of the linear closure.
+                                                                                   In either case, we are able to compute the exact generalized wind-
+                                                                                ing number for an arbitrary point using only a single evaluation of
+                                                                                arccosine for each curve in the shape. All that remains is to ensure
+                                                                                that this polyline is adaptively constructed such that evaluating the
+                                                                                integer winding number of the polyline is efficient.
+
+
+                                                                                5   WINDING NUMBER ALGORITHMS
+                                                                                We now describe our complete algorithm for solving the generalized
+Fig. 8. (left) All three curves are closed by the same dashed line, and the     winding number problem for a rational Bézier curve at a given
+shaded region is exterior to all three closed shapes. (right) This means that   query point (Algorithm 1). The core of this algorithm is described
+the winding number field generated by each curve (and the closure, up to        in Algorithm 2, which computes the integer winding number for a
+orientation) is identical in the shaded region.
+                                                                                closed rational Bézier curve without reference to ray casting.
+                                                                                   In brief, given such a curve Γ, we adaptively construct a polyline
+                                                                                approximate e   Γ which has the same winding number at the point
+closure can be done independently of the original curve geometry.               of interest. We then apply a standard point-in-polygon algorithm
+While we present our own algorithm to compute this integer wind-                to this closed polyline to compute their shared integer winding
+ing number in Section 5 that outperforms known alternatives, we                 number and subtract the contribution of their shared closure.
+note that this strategy is fully compatible with more conventional                                                                          Γ satisfies
+                                                                                   For this procedure to work, we require that our polyline e
+techniques for computing containment queries in closed regions                  𝑤 Γ∪𝐶 (𝑞) = 𝑤eΓ∪𝐶 (𝑞). The simplest way to ensure this is for 𝑞 to
+bounded by curves, e.g., Bézier clipping [Nishita et al. 1990].                 be located outside both closed shapes Γ ∪ 𝐶 and e     Γ ∪ 𝐶, as then
+   This principle is particularly useful in the case when 𝑤 Γ∪𝐶 (𝑞) = 0,        this shared integer winding number is equal to 0. Because this
+i.e., the query point is located outside the closed shape Γ ∪ 𝐶, or             cannot be guaranteed in general, we recursively bisect the curve
+outside the convex hull of Γ itself, where we have 𝑤 Γ (𝑞) = −𝑤𝐶 (𝑞).           into components {Γ𝑖 }𝑖 until 𝑞 is located outside the closed shape
+This usage is introduced in Jacobson et al. [2013], where it is used            for each.
+in a hierarchical evaluation of the winding number for collections                 There are a number of ways to ensure that for each component,
+of linear triangular facets. An important consequence of this for               𝑤 Γ𝑖 ∪𝐶𝑖 (𝑞) = 0. For example the convex hull property of a Bézier
+curved geometry is that for query points that are far enough away,              curve states that the curve Γ𝑖 is completely contained within the
+we can reverse the orientation of 𝐶 and treat the shape as equivalent           convex hull of its control nodes. Given a description of this convex
+to its straight line closure, and compute the winding number of the             hull, classic point-in-polygon algorithms such as Hormann and
+entire curved segment immediately and exactly.                                  Agathos [2001] can be applied to test for containment. This leads to
+   We further extend this principle to evaluate generalized wind-               the following outline for our algorithm:
+ing numbers for points that are arbitrarily close to the curve with
+the same assurances of exact accuracy. In such cases, Γ can be re-                   • If the query point is located outside this convex hull, then
+placed with a piecewise linear approximation Γ   e so long as the integer              it is guaranteed to be outside the closed shape Γ𝑖 ∪ 𝐶𝑖 and
+winding number at 𝑞 remains unchanged between Γ ∪ 𝐶 and Γ          e∪𝐶                 we replace the component Γ𝑖 with the reversal of its linear
+(see Figure 8). Doing so necessarily leaves the generalized winding                    closure 𝐶𝑖 , as they now provably have the same generalized
+number at 𝑞 unchanged as well, as we have                                              winding number.
+                                                                                     • Otherwise, we bisect the Bézier curve and repeat the algo-
+      𝑤 Γ (𝑞) = 𝑤 Γ∪𝐶 (𝑞) − 𝑤𝐶 (𝑞) = 𝑤eΓ∪𝐶 (𝑞) − 𝑤𝐶 (𝑞) = 𝑤 Γe (𝑞).                    rithm on each half. As a base case, we check whether the
+                                                     Robust Containment Queries over Collections of Rational Parametric Curves via Generalized Winding Numbers   • 7
+
+
+                                                                                     ALGORITHM 1: WindingNumberCurve: Evaluate the generalized
+                                                                                     winding number for an arbitrary rational parametric Bézier curve
+                                                                                         Input: Γ: Rational parametric Bézier curve Γ
+                                                                                                𝑞: Query point
+                                                                                         Output: 𝑤Γ : The winding number evaluated at 𝑞
+
+                                                                                         /* Store the linear closure of Γ */
+                                                                                         𝐶 (𝑡 ) ← (1 − 𝑡 )Γ (1) + 𝑡 Γ (0)
+                                                                                                                                 −−−−→      −−−−→
+                                                                                         𝑤𝐶 ← (1/2𝜋 ) × Signed angle subtended by 𝑞𝐶 (0) and 𝑞𝐶 (1)
+                                                                                         if 𝑞 ∉ BoundingBox(Γ) then
+                                                                                              return −𝑤𝐶
+                                                                                         else
+                                                                                              return IntegerWindingNumberCurve(Γ ∪ 𝐶, 𝑞) − 𝑤𝐶 (𝑞)
+                                                                                         end
+
+
+Fig. 9. Three iterations of the approximating polyline algorithm. In (a), one
+point is outside the bounding box, and its winding number can be computed            an axis-aligned bounding box that encompasses the convex hull.
+from the dashed closure. In (b), after a bisection we can compute the winding        Although this can have a much larger area, the bounding box con-
+number for an additional point. We repeat the process in (c) to compute the          tainment query is inexpensive and most points will be exterior to
+winding number for the remaining point.                                              it. If it is not, we use a test from Ma and Hewitt [2003] to check if
+                                                                                     the control polygon (defined by a Bézier curve’s control nodes) is
+                                                                                     already simple and convex (see Algorithm 4). If so, we perform the
+        curve is approximately linear (Algorithm 3) as such segments                 point-in-polygon test to determine if the query lies outside the con-
+        can be added directly to the polyline.                                       vex hull of the control polygon. For efficiency, our implementation
+Once this approximating polyline is fully constructed, we close it and               notes that when a curve is simple and convex, its subcomponent
+use the same point-in-polygon algorithm, PolygonWindingNumber,                       curves will be as well.
+to compute the integer winding number for the closed polygon.                            Altogether, the proposed algorithm is given by Algorithm 1. We
+The contribution of this closure is then subtracted, and we are left                 note that this procedure is not meaningfully restricted to ratio-
+with the exact generalized winding number for the curve. Figure 9                    nal Bézier curves. Their focus throughout this work reflects their
+illustrates this algorithm for three successively closer query points                simplicity during calculation through manipulation of their con-
+to a Bézier curve.                                                                   trol nodes, which itself justifies their ubiquity in application. More
+   To improve computational efficiency in the case where subdivi-                    generally, the algorithm is applicable to any curve for which it is pos-
+sion is expensive and exact geometric accuracy is not needed, we                     sible to construct a bounding box and a linear closure. In particular,
+optionally provide in Algorithm 3 an early stopping criterion. We                    extension to collections of NURBS curves is straightforward.
+choose this particular heuristic because it is easier to evaluate than
+the distance between the query point and the curve, and has a more                   6    GENERALIZED WINDING NUMBERS FOR
+intuitive spatial interpretation than a simple bound on the maxi-                         COINCIDENT POINTS
+mum number of curve subdivisions. In practice, Bézier curves are                     The generalized winding number is, in a strict mathematical sense,
+smooth nearly everywhere on their interior, and so the recursive                     undefined for points located directly on the curve. This poses a prac-
+bisection step needs to be done relatively few times before the query                tical problem during the implementation of a containment query,
+point is found to be outside the convex hulls of each component,                     as they are often executed massively in parallel for large clusters of
+even for points very close to the curve. Importantly, this causes the                points without any a priori knowledge of their position relative to
+accuracy of Algorithm 1 and runtime of the procedure to both be                      the boundary. Furthermore, our desire for exact geometric fidelity
+reasonably insensitive to this numerical tolerance, as the algorithm                 precludes us from applying the standard trick of perturbing such
+is likely to terminate for these smooth curves well before there has                 points randomly to place them definitively on one side of the singu-
+been sufficient refinement for subdivisions to be considered linear.                 lar boundary. In spite of this, it is necessary for compatibility with
+Indeed, in the numerical examples we provide, we set this value to                   respect to downstream applications that the algorithm definitively
+machine epsilon and find no significant loss in performance (See                     return a value that adheres to a convention that is mathematically
+Section 7.2).                                                                        justified and intuitive to the caller of WindingNumberCurve.
+   We note that it can be problematic if the query point is located                     An important aspect of the winding number scalar field is that it
+directly on the curve, as in such cases the winding number is not                    is harmonic, being the unique solution of a Laplacian operator with
+formally defined. Since we need our algorithm to be compatible to                    boundary data prescribed by each side of our curves, enforcing a
+such input points, we discuss this case extensively in Section 6.                    jump discontinuity across them. Therefore, the simplest convention
+   Despite the simplicity of the above procedure, directly computing                 for the winding number of coincident points is to take it as the av-
+containment within a Bézier curve’s convex hull can be prohibitively                 erage value across this jump discontinuity. For linear segments, this
+expensive. Instead, we first determine if the query is contained in                  boundary data enforces that the winding number approaches +1/2
+8 •   J. Spainhour, D. Gunderman and K. Weiss
+
+
+ALGORITHM 2: IntegerWindingNumberCurve Evaluate the inte-                ALGORITHM 4: isSimpleConvex: Return true if the polygon of
+ger winding number for a rational parametric Bézier curve closed by      control points of a rational parametric Bézier curve is simple and
+a linear segment. We use an algorithm from [Hormann and Agathos          convex (Adapted from [Ma and Hewitt 2003])
+2001] for PolygonWindingNumber.                                            Input: Γ: Rational parametric Bézier curve with control nodes
+    Input: Γ ∪ 𝐶: Closed rational parametric Bézier curve                         𝑃0 , · · · , 𝑃𝑛
+           𝑞: Query point
+    Output: 𝑤Γ∪𝐶 The integer winding number evaluated at 𝑞                 for 𝑖 = 1, . . . , (𝑛 − 1) do
+                                                                               /* Store the linear segment connecting the nodes */
+  Γ
+  e ← {}              // Initialize the polyline approximation                 𝑆 (𝑡 ) ← (1 − 𝑡 )𝑃𝑖 −1 + 𝑡𝑃𝑖+1
+  𝑤Γ∪𝐶 = 0                    // Initialize the winding number                 if 𝑖 ≤ 𝑛/2 then
+                                                                                     if 𝑃𝑖 and 𝑃𝑛 are on the same side of 𝑆 then
+  Push Γ onto an empty stack.                                                             return false
+  while the stack is not empty do                                                    end
+      Γ0 ← StackPop                                                            else
+     𝐶 0 (𝑡 ) ← (1 − 𝑡 ) Γ0 (0) + 𝑡 Γ0 (1)                                           if 𝑃𝑖 and 𝑃 0 are on the same side of 𝑆 then
+                                                                                          return false
+        /* Check for coincidence at the endpoints                   */               end
+        if isSimpleConvex(Γ0 ) and (𝑞 = Γ0 (0) or 𝑞 = Γ0 (1) ) then            end
+            /* Track the contribution of coincident points */              end
+             𝑤Γ∪𝐶 += ConvexEndpointWindingNumber(Γ0 , 𝑞)                   return true
+            e← Γ
+             Γ     e ∪ {𝐶 0 }              // Add to the polyline
+        else
+             if {isSimpleConvex(Γ0 ) and 𝑞 ∉ ControlPolygon(Γ0 ) }
+             or isApproximatelyLinear(𝐶 0 )                              the winding number is no longer constant along the length of the
+              then                                                       curve. This underscores the importance of a single convention for
+                 e← Γ
+                  Γ      e ∪ {𝐶 0 }        // Add to the polyline        coincident points, as the winding number for individual curves must
+             else                                                        be computed without any knowledge of the other components that
+                  Γ1 , Γ2 ← Bisection(Γ0 )                               make up the shape, which can be unintuitive if that shape is itself
+                  StackPush(Γ1 , Γ2 )                                    closed. Nevertheless, we can evaluate the winding number at a co-
+             end                                                         incident point for a single curve just as before, by computing the
+        end                                                              half-integer winding number of the closed shape and subtracting
+  end                                                                    the contribution of the closing line.
+                                                                            This convention for a coincident winding number is well-justified
+  𝑃←Γ  e ∪ {𝐶 }   // Close the polyline, forming a polygon               in a mathematical context as well. As explained by Jacobson et al.
+  return PolygonWindingNumber(𝑃, 𝑞) + 𝑤Γ∪𝐶                               [2013], the generalized winding number can be understood in the
+                                                                         context of ray casting as the average number of intersections from
+                                                                         rays cast in all directions from 𝑞. When 𝑞 is on a straight line, only
+ALGORITHM 3: isApproximatelyLinear: Return true if each con-
+                                                                         two of the uncountably infinite possible directions will intersect the
+trol point of a rational parametric Bézier curve is within a given
+tolerance of the closure.                                                line, resulting in an average of zero intersections. Furthermore, the
+   Input: Γ: Rational parametric Bézier curve                            discontinuity in Equation 5 is, in fact, removable, and evaluating the
+          𝜖: User tolerance                                              remaining integrand agrees with this interpretation of coincident
+                                                                         winding numbers.
+  𝐶 0 (𝑡 ) ← (1 − 𝑡 )Γ0 (0) + 𝑡 Γ1 (1)                                      Despite this conceptual clarity, evaluating coincident winding
+  for each control node 𝑃𝑖 of Γ do                                       numbers is complicated in practice, as it is computationally expen-
+        if SquaredDistance(𝐶 0 , 𝑃𝑖 ) ≥ 𝜖 then                           sive to perform the projection necessary to identify when a point
+            return false                                                 is located exactly on a Bézier curve [Ma and Hewitt 2003]. The
+        end                                                              exception to this is the endpoints, which are interpolated exactly
+  end                                                                    by the first and last control points of the curve. At such points, the
+  return true                                                            coincident winding number is equal to the signed angle spanned
+                                                                         by the non-coincident endpoint, and a tangent vector at the coin-
+                                                                         cident endpoint (see Figure 10). Furthermore, computing such a
+from one side and −1/2 on the other. This means that the winding         tangent is trivial at the endpoint of a Bézier curve, as it is defined
+number should be exactly 0 at every coincident point along linear        by the endpoint and the adjacent control node. Interior points be-
+segments. Similarly, this convention would ensure that the winding       come endpoints in linear time by the repeated bisections of our
+number along a more general closed shape is a fixed half-integer         algorithm. As this spanned angle must account for full revolutions
+value along its length, changing only across self-intersections. How-    of this span around the tangent vector, our algorithm only applies
+ever, this presents a unique problem for open, curved shapes, as         this edge-case to curves with simple and convex control polygons
+                                                       Robust Containment Queries over Collections of Rational Parametric Curves via Generalized Winding Numbers   • 9
+
+
+
+
+Fig. 10. For points located outside the closed curve (left, center), the winding
+number is proportional to the angle subtended by the endpoints. For points
+located directly on an endpoint (right), we define the winding number as
+proportional to the angle subtended between the non-coincident endpoint
+and a tangent vector.
+                                                                                       Fig. 11. (left) A watertight geometric shape, with the exception of the curve
+                                                                                       in red that is removed during calculation. (right) Ray casting classifies points
+ALGORITHM 5: ConvexEndpointWindingNumber: Return the con-                              as interior (pink) and exterior (green). As expected, the geometric error leads
+vention for “coincident winding numbers” as outlined in Section 6                      to numerous errors in containment queries.
+  Input: Γ: Rational parametric Bézier curve
+         𝑞: Query point
+  Output: 𝑤Γ : The winding number evaluated at the endpoint of the
+           curve
+
+  if 𝑞 = Γ (0) then 
+                                               −−−−→      −−−→
+                 1
+         return 2𝜋 × Signed angle subtended by 𝑞Γ (1) and Γ ′ (0) .
+  else                                        −−−−→        −−−→
+                 1
+         return 2𝜋 × Signed angle subtended by 𝑞Γ (0) and − Γ ′ (1) .
+  end
+                                                                                       Fig. 12. (left) The generalized winding number computed using Algorithm 1.
+                                                                                       (center) The winding number in the region around the deleted curve de-
+(see Algorithm 5). This particular criterion is typically met after                    grades smoothly. (right) Rounding the winding number produces an approx-
+very few bisections, and ensures that no full revolutions can occur                    imation that better conforms to the designer’s intuition.
+on the local subcurve.
+
+7 NUMERICAL EXPERIMENTS AND RESULTS
+                                                                                      the geometric error. In some sense, the locality of this degradation
+7.1 Robustness of Containment Queries on Curved                                       is unintuitive, as containment is necessarily a global property of
+    Geometry                                                                          points relative to bounding geometry, i.e., the winding number at
+We first show the utility of a generalized winding number approach                    every point is dependent on every curve. Importantly, however,
+to containment queries in the context of messy CAD geometry. We                       the influence of distant curves becomes rapidly negligible. While
+compare our approach to conventional ray casting for containment,                     the exact value of the winding number now a non-integer value
+which remains the de-facto standard for exact containment in curved                   (nearly) everywhere in the domain, away from the deleted curve
+watertight geometry. Consider the geometry of Figure 11, which is                     the difference from the nearest integer is nowhere large enough to
+composed of 87 linear segments and 477 cubic Bézier curves. We                        have an adverse effect on the actual determination of containment.
+remove the marked curve in Figure 11 and determine containment                           A natural mapping of winding numbers to containment classi-
+at each pixel in the image using a simple ray casting algorithm that                  fications is to round each value to the nearest integer and apply a
+extends the ray to the right of the pixel and counts the number of                    non-zero rule. For example, in Figure 12 we see that the rounded
+intersections with the shape. As expected, the use of a ray casting                   winding number produces a clear boundary between regions along
+algorithm causes catastrophic issues, in the sense that the contain-                  the 1/2 isocurve. While this implied boundary lacks the curvature of
+ment errors are located at a great distance from the actual geometric                 the deleted curve, it is a reasonable approximation and nevertheless
+error. This makes the model unusable in the applications of inter-                    allows for the surface to be used immediately in applications. This
+est without specific oversight and (often user-driven) correction of                  behavior is especially desirable when geometric errors arise from
+these errors.                                                                         small gaps between components of the mesh, as the resulting con-
+   We then apply our generalized winding number algorithm to the                      tainment query reflects the simplest closure of the shape permitted
+same geometry in Figure 12, evaluating at each pixel the winding                      by the provided geometric data.
+number field generated by the bounding geometry. In this example,                        Through Figure 13, we reiterate the two important kinds of ro-
+points which we expect to be interior to this shape have winding                      bustness in this work. The shape in this example is intentionally
+numbers close to 1, while the value for points we expect to be                        deformed such that no pairs of adjacent edges are connected. From
+exterior is close to 0. We see that deleting the curve does degrade                   a distance, i.e., the scale at which the model geometry is visually
+the field, but that the most severe effects are localized to the site of              “good enough,” there are functionally no irregularities in the shape’s
+10   •   J. Spainhour, D. Gunderman and K. Weiss
+
+
+appearance. This mirrors the realistic setting, in which such im-
+perceptible tolerances are unexpected and remain catastrophic for
+conventional containment algorithms. As before we apply our algo-
+rithm to each pixel in the bounding region, and plot the winding
+number field alongside its difference from the nearest integer.
+   The first type of robustness is derived from our specific compu-
+tation of the generalized winding number through Algorithm 1,
+which is completely robust to non-watertight geometry. Because
+we only ever consider individual curves without any reference to
+their overall arrangement, both the computational performance and
+accuracy of our calculation is completely unaffected by the non-
+watertightness of the shape. Furthermore, our adaptive algorithm
+ensures that the winding number is computed stably at arbitrary
+distances from individual curves. On the other hand, any contain-
+ment query derived from generalized winding numbers is robust
+to geometric artifacts in the boundary. This is because although            Fig. 13. (top) Generalized winding number for a shape that is intentionally
+even small errors have far-reaching influence on the scalar field of        deformed to slightly separate adjacent curves. (bottom) Absolute difference
+winding numbers, this influence degrades rapidly and gracefully             (log scale) between computed winding number and rounded winding num-
+away from the sources of these errors. Even at this frequency of            ber. Points for which the difference is greater than 0.25 are highlighted, as
+topological errors in this example, the resulting values of the field       this indicates some degree of uncertainty in the classification. As we see,
+                                                                            such points are very sparsely distributed throughout the domain.
+still very clearly partition the shape into the expected interior and
+exterior.
+   It is noted in Jacobson et al. [2013] that a useful perspective on the
+fractional value of the winding number is as a measure of confidence        7.2   Algorithm Performance
+for the derived containment query. For example, points for which            We now consider the computational performance of Algorithms 1
+the winding number is close to an integer can be considered “more           and 2. In each of the following examples, we evaluate our algorithm
+likely” to be classified accurately according to the unknown, but           in the context where exact geometric fidelity is prioritized, and
+presumably watertight shape that lacks any of the present boundary          set all numerical tolerances to zero. For comparison, we consider
+artifacts. On the other hand, points with winding numbers near              state-of-the-art techniques that have been adapted to collections
+half-integer values are often close to the boundaries that are only         of parametric curves. Perhaps the most common winding number-
+implied by the rounding heuristic, and correlate with containment           based approach for watertight geometry would be to discretize the
+classifications that are less informed by existing surface elements.        shape into approximating polygons with linear edges and to apply
+In Figure 13, we specifically identify each point in the image with a       a standard point-in-polygon algorithm to the polygonal shapes to
+winding number in the range [0.25, 0.75], which are the only points         determine containment. If watertightness cannot be guaranteed, the
+that we can therefore consider to have an “uncertain” classification        generalized winding number approaches of Jacobson et al. [2013];
+according to our rounding heuristic. From this, we can see that             Trettner et al. [2022] admit a straightforward adaptation to a lin-
+the vast majority of points in this image are classified with high          earized shape.
+confidence.                                                                    In demonstration of this fact, consider Figure 14, where we com-
+   Of course, the rounding heuristic is not the only way one can            pare the performance of our serial implementation of the proposed
+determine containment from a fractional winding number, as access           adaptive strategy to such a linearized method. Specifically, we con-
+to the full winding number field through our algorithm permits              sider refinements of each curves in the shape into a fixed num-
+treatment of containment through standard segmentation strategies.          ber of linear segments. We note that the shape considered is non-
+For example, Jacobson et al. [2013] meshes the interior of the shape,       watertight and non-manifold, making it a particularly challenging
+utilizing an energy minimization technique to enforce additional            case for conventional containment queries. Nevertheless, the frac-
+smoothness in the resulting segmentation. Additionally, the above           tional winding number field clearly partitions the space according
+usage of the winding numbers as a measure of confidence can be              to an intuitive understanding of its interior.
+made more rigorous through further statistical analysis. In Sellán             By comparing wall-clock runtime, we see that the use of a fixed
+and Jacobson [2022], the generalized winding number field is used as        level of refinement of the curve leads to a more efficient calculation
+a prior for a number of statistical distributions, including likelihood     of the generalized winding number as expected, as curve subdi-
+of containment. This rigor is desirable for certain applications, as the    visions can be computed during a preprocessing step and reused.
+fractional value of the winding number alone cannot be interpreted          While the analogous overhead in the adaptive algorithm can be sim-
+as a probability for the accuracy of the derived containment query.         ilarly mitigated through hash maps that cache the results of curve
+Because we are ultimately concerned with efficient evaluation of the        subdivisions, we consider further implementation optimizations
+winding number in this work, we use only the rounding heuristic             for collections of curves to be future work, and instead focus here
+to determine containment in our examples.                                   on efficient and accurate calculation for individual curves. Indeed,
+                                                                            when geometric fidelity is not a concern, using a fixed linearization
+                                                      Robust Containment Queries over Collections of Rational Parametric Curves via Generalized Winding Numbers   •   11
+
+
+                                                                                       for any open, curved object requires applying an arbitrary integer
+                                                                                       winding number algorithm on the closed shape and subsequently
+                                                                                       subtracting out the contribution of the closure of the curve. It is in
+                                                                                       this context that we demonstrate the performance of Algorithm 2,
+                                                                                       which is one such algorithm that computes the integer winding
+                                                                                       number of a closed, curved object. We show that Algorithm 2 is
+                                                                                       considerably more performant than alternatives utilizing crossing
+                                                                                       numbers for containment queries on closed, curved geometry, as
+                                                                                       such methods necessarily introduce inefficiencies through a reliance
+                                                                                       on ray casting.
+                                                                                          We first consider a common procedure for ray casting that applies
+                                                                                       a geometric binary search to compute ray-Bézier curve intersec-
+                                                                                       tions [Farin 2001]. In this algorithm, we extend from the query a
+                                                                                       ray in the direction of the closest edge of a bounding box, and recur-
+                                                                                       sively bisect the curve until guarantees for potential intersections
+                                                                                       can be made. If a subcurve is sufficiently linear (see Algorithm 3)
+                                                                                       such that an intersection is guaranteed, then the signed intersec-
+                                                                                       tion can be recorded. If the ray does not intersect the subcurve’s
+                                                                                       bounding box, then it can be discarded. This procedure converges to
+                                                                                       points of intersection linearly, and is capable of identifying multiple
+                                                                                       intersections with the same curve.
+Fig. 14. Given a non-watertight, non-manifold shape, we observe the prac-
+tical effect of curve linearization on geometric accuracy and runtime. We                 Bézier clipping [Nishita et al. 1990; Sederberg and Nishita 1990]
+compare our adaptive strategy to those that uses a uniform, piecewise lin-             is a similar procedure, discarding sections of the curve that are
+earization of the curve at fixed levels of refinement. We record the total time        guaranteed to have no intersections with the ray. However, the
+spent to evaluate the generalized winding number for 105 points randomly               convergence of this approach to points of intersection is quadratic,
+sampled from a uniform distribution, and the number of these points which              as the curve is instead split into three subcurves at each iteration.
+are ultimately misclassified. We see that a fixed linearization can offer better          To make the appropriate comparison to Algorithm 2 in the context
+computational performance, as subdivisions of the curve can be efficiently             of exact winding numbers for non-watertight geometry, we utilize
+precomputed. However, we note that even at high levels of refinement there             each within the framework described in Algorithm 1. That is to say,
+are still a considerable number of misclassifications, which is unacceptable
+                                                                                       we iterate over each open curve in the model and close it, compute
+in many downstream applications of interest.
+                                                                                       the integer winding number with Algorithm 2 or one of the above
+                                                                                       alternate techniques, and subtract out the contribution of the closure.
+                                                                                       We note that, while these alternate techniques themselves are well-
+to compute generalized winding numbers with Algorithm 1 is a rea-                      known in the context of ray-tracing and containment of closed
+sonable approach, although it may involve a considerable memory                        shapes, computing generalized winding numbers in this way is, to
+footprint for larger models.                                                           our knowledge, itself a novel application of their use.
+   Importantly, such a linearized method offers no guarantees for                         In comparing these three algorithms, there are a number of spe-
+geometric fidelity. By comparing the level of refinement against                       cific implementation details that govern the wall-time of their eval-
+an approximate likelihood that points are ultimately misclassified,                    uation, in particular the use of a spatial index to efficiently handle
+we see that although the rate of misclassification decreases with                      far away points. However, we are concerned with their efficiency
+increased linear refinement, it does so at a rate that we consider                     in the near-curve regime, where the number of curve evaluations
+to be far too slow to be practical for many applications of interest,                  (most commonly occurring as a result of a curve bisection) is an
+especially for downstream applications that are sensitive to any                       effective proxy for computational efficiency between the methods.
+misclassifications. This is also an issue for methods that sample the                  Furthermore, the computation of the exact fractional value for the
+bounding geometry non-deterministically, such as those of Barill                       generalized winding number only involves the evaluation of a single
+et al. [2018]; Nooruddin and Turk [2003]; Sawhney and Crane [2020].                    arccosine for each curve in the model, and this cost is equivalent
+In contrast, the proposed method is able to achieve perfect geometric                  across all three methods.
+fidelity for points that are arbitrarily close to the boundary. In place                  Our first example in Figure 15 uses a relatively simple shape
+of these fixed linearization methods, we turn our attention to those                   featuring at most polynomial, cubic Bézier curves. To compare the
+that operate directly on curved geometry without approximation.                        three algorithms (binary search, Bézier clipping, and the proposed
+   There remains the issue that the methods known to the au-                           approach presented in Algorithm 2), we randomly sample 250,000
+thors that operate directly on curved geometry à la Bézier clip-                       points from a bounding box around the shape using a uniform
+ping [Nishita et al. 1990] can do so only in the watertight case. This                 distribution, and count the number of curve evaluations on each that
+regrettably means that no direct comparison for the performance                        needs to be made to determine containment with perfect geometric
+Algorithm 1 can be made at this time. In its place, we note that our                   fidelity. Again, we emphasize that all three methods are being used
+procedure for computing the exact generalized winding number                           here to compute the generalized winding number, which they do
+12                                                   •   J. Spainhour, D. Gunderman and K. Weiss
+
+
+                                                               Binary Search               Bézier Clipping          Proposed Algorithm
+                                                     6
+
+
+
+
+                       Number of Curve Evaluations
+                                                     5
+
+                                                     4
+
+                                                     3
+
+                                                     2
+
+                                                     1
+
+                                                     0
+
+                                                                                              Binary Search
+                                105                                                           Bézier Clipping
+
+
+
+
+Number of Sampled Points
+                                                                                              Proposed Algorithm
+                                104
+
+
+                                103
+
+
+                                102
+
+
+                                101
+                                                                                                                    SVG Shape Model
+                                                         1        4           7           10          13      15+
+                                                                      Number of Curve Evaluations
+
+
+
+
+Fig. 15. We compare the cost of a conventional geometric bisection method,                                                               Fig. 16. For higher-order curves, additional curve subdivisions are necessary
+Bézier clipping, and our proposed method on a watertight model. We uni-                                                                  to reach perfect geometric fidelity. The proposed algorithm still has superior
+formly sample 250,000 points from a bounding box and measure the number                                                                  performance in such cases, as the location of the various intersections need
+CAD model evaluations, i.e., curve subdivisions, that are necessary to eval-                                                             not be computed directly.
+uate the winding number at each point to full geometric precision. In the
+histogram, we omit the number of sampled points that require zero func-
+tion evaluations, as this occurs whenever the point is outside each curve’s                                                              contain multiple overlapping components, self-intersections, or re-
+bounding box, occurring at the same frequency for each method.                                                                           gions of significant curvature, the latter of these cases being tested
+                                                                                                                                         directly on a rational curve in Figure 16. In these examples, the ray
+                                                                                                                                         casting algorithms perform particularly poorly, as any ray extended
+                                                                                                                                         will intersect the curve multiple times, incurring additional cost
+by computing the integer winding number of the closed shape for                                                                          with each.
+each curve in the model.                                                                                                                    Finally, we consider the sensitivity of our procedure for com-
+   As expected, the binary search ray casting algorithm performs the                                                                     puting generalized winding numbers to the numerical tolerance
+poorest, with a considerable number of points requiring more than                                                                        introduced in Algorithm 3. We do this by considering performance
+15 curve subdivisions to make an evaluation. This is because the                                                                         and accuracy as a function of this tolerance, respectively measured
+terminating condition of the naive algorithm is linearity of the curve                                                                   in terms of the number of curve evaluations required to determine
+component near the intersection, for which the number of bisections                                                                      containment and the number of misclassifications caused by the
+increases with curvature. This behavior is improved considerably                                                                         final layer of implied linearization. These metrics are evaluated over
+with Bézier clipping, which performs more sophisticated subdivision                                                                      105 points sampled from a bounding box for the closed shape in
+(at greater computational expense) by considering the convex hull                                                                        Figure 17, which for demonstration purposes depicts a 9th order,
+of the curve. However, the proposed algorithm improves on this                                                                           rational curve that far exceeds the complexity of those typically
+further, with no points requiring more than 8 function evaluations,                                                                      used in practice. We see that invoking Algorithm 3 to prematurely
+and most requiring only one or two.                                                                                                      terminate the procedure does marginally reduce the overall com-
+   Furthermore, we recognize that for the vast majority of points,                                                                       putational cost, but that this performance improvement is closely
+zero function evaluations are required for each algorithm. This is                                                                       correlated with losses in classification accuracy. This effect is am-
+because the first containment check performed in each is one to an                                                                       plified on shapes with such complex curvature, as it becomes more
+axis-aligned bounding box for the entire curve, and most points lie                                                                      likely that the implied linearization imposed by the tolerance will
+outside the bounding box for most curves. For this reason, integer                                                                       produce misclassifications. At the same time, we observe that even
+winding numbers for most combinations of points and curves are                                                                           for very intricate shapes, the performance of Algorithm 2 rapidly
+known to be zero without any curve evaluations.                                                                                          stabilizes along both metrics. As a result, our practical preference is
+   One explanation for the relatively poor performance of the two                                                                        to set this tolerance to zero even in cases where geometric accuracy
+ray casting algorithms is that such procedures are unnecessarily                                                                         is not a priority.
+informative. Not only do ray casting algorithms identify potential                                                                          As is always the case when generalized winding numbers are
+intersections, but they also inherently locate the intersections, in-                                                                    used to determine containment, there is still an assumption that the
+formation which is rarely needed when the ray itself is chosen                                                                           collection of curves are reasonably oriented. Because the scalar field
+arbitrarily. In contrast, by not needing to compute the location of                                                                      generated by a single curve is computed completely independently
+these intersections, the proposed algorithm is able to converge with                                                                     of every other curve by design, a single reversed curve interferes
+considerably fewer curve evaluations, despite only doing so linearly.                                                                    with the contribution of surrounding curves, functionally reversing
+This is particularly relevant in the case where the curves of interest                                                                   nearby containment queries, as can be observed in Figure 18. While
+                                                    Robust Containment Queries over Collections of Rational Parametric Curves via Generalized Winding Numbers           •   13
+
+
+                                                                                     as a single segment connecting its endpoints. For all other points,
+                                                                                     we demonstrated that our recursive algorithm outperforms existing
+                                                                                     ray casting algorithms adapted for this context. Finally, we formal-
+                                                                                     ize a procedure for handling winding numbers of points that are
+                                                                                     coincident with the curve, further increasing the practicality of our
+                                                                                     algorithm. In each case, this algorithm makes minimal reference
+                                                                                     to the often near-singular integrals from which the winding num-
+                                                                                     ber is theoretically derived, instead operating strictly according
+                                                                                     to geometric and trigonometric principles. Nevertheless, we are
+                                                                                     able to exactly compute generalized numbers for curved shapes
+                                                                                     in two dimensions. Whereas the focus of this work has been on
+                                                                                     efficiently and robustly computing winding numbers for individual
+                                                                                     curves within a collection, follow-up work will consider accelerating
+                                                                                     the overall query workflow using a spatial index, as in Barill et al.
+                                                                                     [2018]; Jacobson et al. [2013]; Weiss et al. [2016] and exploiting the
+                                                                                     inherent parallelism within Algorithm 1 via threaded and/or GPU
+                                                                                     implementation.
+                                                                                        In future work, we are interested in developing a generalized
+                                                                                     winding number for curved surfaces in R3 , but anticipate consider-
+                                                                                     able challenges in developing an efficient numerical implementation.
+                                                                                     While much of the mathematical underpinnings remains the same,
+                                                                                     we cannot merely replace polar angles with their solid angle ana-
+                                                                                     logues. For example, while a line can close any curve in 2D, there are
+                                                                                     no simple geometric primitives that can close an arbitrary surface
+Fig. 17. Beyond a certain threshold, the adaptive nature of the proposed al-
+                                                                                     in 3D, or at the very least none that have direct formulas for their
+gorithm causes it to be insensitive to the numerical tolerance in Algorithm 3.       winding numbers. Nevertheless, the potential impacts of such a tech-
+In practice, we set this tolerance to zero, as this ensures exact geometric          nique is highly motivating in spite of the challenges, and its pursuit
+fidelity while not incurring a large additional computational burden.                will likely have theoretical foundations in the work presented here.
+
+
+                                                                                     ACKNOWLEDGMENTS
+                                                                                     We would like to thank the anonymous reviewers for their thought-
+                                                                                     ful consideration and insightful feedback. This work performed un-
+                                                                                     der the auspices of the U.S. Department of Energy by Lawrence Liv-
+                                                                                     ermore National Laboratory under Contract DE-AC52-07NA27344.
+                                                                                     LLNL-TR-828702.
+
+
+                                                                                     REFERENCES
+Fig. 18. Generalized winding numbers generated by the shape in Figure 12,            P. Asente, M. Schuster, and T. Pettit. 2007. Dynamic planar map illustration. ACM
+but with the orientation of the highlighted curve reversed rather than                   Transactions on Graphics 26, 3 (July 2007), 30:1–10. https://doi.org/10.1145/1276377.
+                                                                                         1276415
+removed entirely. The reversal of this curve causes surrounding containment          A. Balu, M. R. Rajanna, J. Khristy, F. Xu, A. Krishnamurthy, and M.-C. Hsu. 2023. Direct
+classifications to be swapped within a local region.                                     immersogeometric fluid flow and heat transfer analysis of objects represented by
+                                                                                         point clouds. Computer Methods in Applied Mechanics and Engineering 404 (Feb.
+                                                                                         2023), 115742. https://doi.org/10.1016/j.cma.2022.115742
+                                                                                     G. Barill, N. Dickson, R. Schmidt, D. I. W. Levin, and A. Jacobson. 2018. Fast Winding
+the induced classification errors are still local to the geometric error,                Numbers for Soups and Clouds. ACM Transactions on Graphics 37, 4, Article 43 (July
+and would no doubt cause catastrophic errors without the use of                          2018), 12 pages. https://doi.org/10.1145/3197517.3201337
+generalized winding numbers, they nevertheless represent a type                      A. J. Barlow, P.-H. Maire, W. J. Rider, R. N. Rieben, and M. J. Shashkov. 2016. Arbitrary
+                                                                                         Lagrangian–Eulerian methods for modeling high-speed compressible multimaterial
+of geometric error unaccounted for by the current method.                                flows. J. Comput. Phys. 322 (2016), 603–665. https://doi.org/10.1016/j.jcp.2016.07.001
+                                                                                     S. Bischoff, D. Pavic, and L. Kobbelt. 2005. Automatic restoration of polygon models.
+8   CONCLUDING REMARKS                                                                   ACM Transactions on Graphics 24, 4 (Oct. 2005), 1332–1352. https://doi.org/10.1145/
+                                                                                         1095878.1095883
+In this paper, we proposed a generalized winding number algo-                        A. Capps, R. Carson, B. Corbett, N. Elliott, J. Essman, B. Gunney, B. Han, C. Harrison,
+                                                                                         R. Hornung, M. Larsen, A. Moody, E. Pauli, R. Settgast, L. Taylor, K. Weiss, C.
+rithm for collections of parametric curves, addressing the inherent                      White, B. Whitlock, M. Yang, and G. Zagaris. 2017–2024. Axom: CS infrastructure
+challenges for curved geometry that are not shared by their linear                       components for HPC applications. https://doi.org/10.11578/dc.20210915.2 https:
+counterparts. For the vast majority of points that are considered                        //github.com/llnl/axom.
+                                                                                     P. C. P. Carvalho and P. R. Cavalcanti. 1995. II.2 - Point in Polyhedron Testing Using
+“sufficiently far” from a given curve, we circumvent the need for                        Spherical Polygons. In Graphics Gems V, A. W. Paeth (Ed.). Academic Press, Boston,
+expensive linearization of the shape by treating the curve directly                      42–49. https://doi.org/10.1016/B978-0-12-543457-7.50015-2
+14   •   J. Spainhour, D. Gunderman and K. Weiss
+
+
+H. Edelsbrunner and E. P. Mücke. 1990. Simulation of simplicity: A technique to cope             https://doi.org/10.1002/nme.3164
+    with degenerate cases in geometric algorithms. ACM Trans. Graph. 9, 1 (Jan. 1990),       M. Shimrat. 1962. Algorithm 112: Position of Point Relative to Polygon. Commun. ACM
+    66–104. https://doi.org/10.1145/77635.77639                                                  5, 8 (Aug. 1962), 434. https://doi.org/10.1145/368637.368653
+A. Efremov, V. Havran, and H.-P. Seidel. 2005. Robust and Numerically Stable Bézier          A. Sommariva and M. Vianello. 2022. inRS: Implementing the indicator function of
+    Clipping Method for Ray Tracing NURBS Surfaces. In Proceedings of the 21st Spring            NURBS-shaped planar domains. Applied Mathematics Letters 130 (2022), 108026.
+    Conference on Computer Graphics (Budmerice, Slovakia) (SCCG ’05). Association                https://doi.org/10.1016/j.aml.2022.108026
+    for Computing Machinery, New York, NY, USA, 127–135. https://doi.org/10.1145/            D. C. Thomas, M. A. Scott, J. A. Evans, K. Tew, and E. J. Evans. 2015. Bézier projection: A
+    1090122.1090144                                                                              unified approach for local projection and quadrature-free refinement and coarsening
+G. E. Farin. 2001. Curves and surfaces for CAGD: A practical guide. Morgan Kaufmann.             of NURBS and T-splines with particular application to isogeometric design and
+D. Gunderman. 2021. High-Order Spatial Discretization and Numerical Integration                  analysis. Computer Methods in Applied Mechanics and Engineering 284 (2015), 55–105.
+    Schemes for Curved Geometries. Ph.D. Dissertation. Department of Applied Mathe-              https://doi.org/10.1016/j.cma.2014.07.014 Isogeometric Analysis Special Issue.
+    matics, University of Colorado Boulder.                                                  P. Trettner, J. Nehring-Wirxel, and L. Kobbelt. 2022. EMBER: Exact Mesh Booleans via
+D. Gunderman, K. Weiss, and J. A. Evans. 2020. Spectral mesh-free quadrature for                 Efficient & Robust Local Arrangements. ACM Trans. Graph. 41, 4, Article 39 (July
+    planar regions bounded by rational parametric curves. Computer-Aided Design 130              2022), 15 pages. https://doi.org/10.1145/3528223.3530181
+    (2020). https://doi.org/10.1016/j.cad.2020.102944                                        K. Weiss, G. Zagaris, R. Rieben, and A. Cook. 2016. Spatially accelerated shape em-
+E. Haines. 1994. I.4. - Point in Polygon Strategies. In Graphics Gems, P. S. Heckbert            bedding in multimaterial simulations. In Proceedings 25𝑡ℎ International Meshing
+    (Ed.). Academic Press, 24–46. https://doi.org/10.1016/B978-0-12-336156-1.50013-6             Roundtable (IMR ’16), S. Canann (Ed.). Washington, D.C.
+C.W. Hirt, A. A. Amsden, and J. L. Cook. 1974. An Arbitrary Lagrangian-Eulerian              S. Zellmann, D. Seifried, N. Morrical, I. Wald, W. Usher, J. P. Law-Smith, S. Walch-
+    computing method for all flow speeds. J. Comput. Phys. 14, 3 (1974), 227–253.                Gassner, and A. Hinkenjann. 2022. Point Containment Queries on Ray-Tracing
+    https://doi.org/10.1016/0021-9991(74)90051-5                                                 Cores for AMR Flow Visualization. Computing in Science & Engineering 24, 02
+K. Hormann and A. Agathos. 2001. The point in polygon problem for arbitrary poly-                (March 2022), 40–51. https://doi.org/10.1109/MCSE.2022.3153677
+    gons. Computational Geometry 20, 3 (2001), 131–144. https://doi.org/10.1016/S0925-
+    7721(01)00012-8
+A. Jacobson, L. Kavan, and O. Sorkine. 2013. Robust Inside-Outside Segmentation
+    using Generalized Winding Numbers. ACM Trans. Graph. 32, 4 (2013), 1–12. https:
+    //doi.org/10.1145/2461912.2461916
+M. J. Kilgard. 2020. Polar stroking: New theory and methods for stroking paths. ACM
+    Transactions on Graphics 39, 4 (Aug. 2020), 145:1–15. https://doi.org/10.1145/3386569.
+    3392458
+L. Klinteberg and A. H. Barnett. 2020. Accurate quadrature of nearly singular line
+    integrals in two and three dimensions by singularity swapping. BIT Numerical
+    Mathematics 61 (07 2020), 1–36. https://doi.org/10.1007/s10543-020-00820-5
+Y. L. Ma and W. T. Hewitt. 2003. Point inversion and projection for NURBS curve and
+    surface: Control polygon approach. Computer Aided Geometric Design 20, 2 (2003),
+    79–99. https://doi.org/10.1016/S0167-8396(03)00021-9
+B. Marussig and T. Hughes. 2017. A Review of Trimming in Isogeometric Analysis:
+    Challenges, Data Exchange and Simulation Aspects. Archives of Computational
+    Methods in Engineering 25 (06 2017), 1–69. https://doi.org/10.1007/s11831-017-9220-
+    9
+A. McAdams, Y. Zhu, A. Selle, M. Empey, R. Tamstorf, J. Teran, and E. Sifakis. 2011.
+    Efficient Elasticity for Character Skinning with Contact and Collisions. ACM Trans.
+    Graph. 30, 4, Article 37 (July 2011), 12 pages. https://doi.org/10.1145/2010324.
+    1964932
+A. A. Mezentsev and T. Woehler. 1999. Methods and Algorithms of Automated CAD
+    Repair for Incremental Surface Meshing. In IMR. Citeseer, 299–309.
+T. Nishita, T. W. Sederberg, and M. Kakimoto. 1990. Ray Tracing Trimmed Rational
+    Surface Patches. SIGGRAPH Comput. Graph. 24, 4 (sep 1990), 337–345. https:
+    //doi.org/10.1145/97880.97916
+F. S. Nooruddin and G. Turk. 2003. Simplification and repair of polygonal models using
+    volumetric techniques. IEEE Transactions on Visualization and Computer Graphics 9,
+    2 (2003), 191–205. https://doi.org/10.1109/TVCG.2003.1196006
+A. Orzan, A. Bousseau, H. Winnemöller, P. Barla, J. Thollot, and D. Salesin. 2008. Diffu-
+    sion Curves: A Vector Representation for Smooth-Shaded Images. ACM Transactions
+    on Graphics 27, 3 (Aug. 2008), 92:1–8. https://doi.org/10.1145/1399504.1360691
+M. A. Park, R. Haimes, N. J. Wyman, P. A. Baker, and A. Loseille. 2021. Boundary
+    Representation Tolerance Impacts on Mesh Generation and Adaptation. In AIAA
+    AVIATION 2021 FORUM. https://doi.org/10.2514/6.2021-2992
+N. Patrikalakis and T. Maekawa. 2010. Shape Interrogation for Computer Aided Design
+    and Manufacturing. https://doi.org/10.1007/978-3-642-04074-0
+L. Piegl and W. Tiller. 1996. The NURBS book. Springer Science & Business Media.
+R. Sawhney and K. Crane. 2020. Monte Carlo Geometry Processing: A Grid-Free
+    Approach to PDE-Based Methods on Volumetric Domains. ACM Transactions on
+    Graphics 39, 4 (2020).
+T. W. Sederberg, G. T. Finnigan, X. Li, H. Lin, and H. Ipson. 2008. Watertight trimmed
+    NURBS. ACM Transactions on Graphics 27, 3 (Aug. 2008), 1–8. https://doi.org/10.
+    1145/1360612.1360678
+T. W. Sederberg and T. Nishita. 1990. Curve intersection using Bézier clipping. Computer-
+    Aided Design 22, 9 (1990), 538–549. https://doi.org/10.1016/0010-4485(90)90039-F
+S. Sellán and A. Jacobson. 2022. Stochastic Poisson Surface Reconstruction. ACM
+    Transactions on Graphics 41, 6, Article 227 (Nov. 2022), 12 pages. https://doi.org/10.
+    1145/3550454.3555441
+R. Sevilla, S. Fernández-Méndez, and A. Huerta. 2008. NURBS-enhanced finite element
+    method for Euler equations. International Journal for Numerical Methods in Fluids
+    57, 9 (2008), 1051–1069. https://doi.org/10.1002/fld.1711
+R. Sevilla, S. Fernández-Méndez, and A. Huerta. 2011. 3D NURBS-enhanced finite
+    element method (NEFEM). Internat. J. Numer. Methods Engrg. 88, 2 (2011), 103–125.
+

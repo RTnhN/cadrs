@@ -1,0 +1,505 @@
+Sixth Hungarian Conference on Computer Graphics and Geometry, Budapest, 2012
+
+
+
+
+             New Schemes for Multi-sided Transfinite Surface
+                             Interpolation
+
+                                        Péter Salvi† , Tamás Várady† , Alyn Rockwood‡
+
+                                        † Budapest University of Technology and Economics
+                                       ‡ King Abdullah University of Science and Technology
+
+
+
+
+      Abstract
+      One of the major problems in CAGD is to create mathematical representations for complex free-form objects
+      composed of several smoothly connected surfaces. An intuitive solution is curvenet-based design, where designers
+      directly define feature curves of the object, which are interpolated by multi-sided surfaces. A convenient repre-
+      sentation for these models is based on transfinite surface interpolation. This paper introduces two new schemes
+      for transfinite surfaces: a true multi-sided generalization of the Coons patch, and another based on a natural
+      combination of curved side interpolants. The two formulations are supported by new parameterizations that need
+      to satisfy strict tangential constraints along the boundaries. A few examples comparing the two patches illustrate
+      the results.
+      Categories and Subject Descriptors (according to ACM CCS): I.3.5 [Computer Graphics]: Computational Geometry
+      and Object Modeling
+
+
+
+
+1. Introduction                                                     interpolants and corner correction patches; the second is a
+                                                                    surface combining curved side interpolants by a natural ap-
+Curvenet-based design9 is an intuitive approach to create           plication of blend functions.
+complex free-form CAD models in three dimensions. The
+process begins with creating a curve network representing               In Section 2 we will examine the Coons patch and rewrite
+the edges and feature lines of the object. These curves may         it in an easily extensible formulation. Then in Section 3 we
+come from several sources, like traditional blueprints, 2D          will review the most important traditional n-sided surface
+sketches, or directly by some 3D graphical user interface.          formulations. The generalized Coons patch will be presented
+Then surfaces are stretched over the curve loops interpolat-        in Section 4, along with two new parameterization methods.
+ing these boundaries. Transfinite interpolation surfaces are        It is followed by the definition of the curved interpolant-
+particularly suitable for this purpose, since they are defined      based surface in Section 5, and some examples in Section 6.
+solely by the boundary curves and their cross-derivatives.
+                                                                       This paper is a condensed version of a more-detailed jour-
+   The Coons patch is a well-known example for four-sided           nal paper6 , where all mathematical details and the related
+(biparametric) configurations, widely used due to its natural       proofs are also presented. At the same time, we hope that
+curvature distribution. Multi-sided patches, however, cannot        the basic concept of these new representational forms can be
+be defined by two parameters, and the known solutions —             understood based on the current paper, as well.
+including the patches of Gregory1 and Kato4 — differ from
+the original Boolean sum logic proposed by Coons. These
+may also exhibit shape artifacts in certain situations with         2. Coons patch reformulation
+highly curved boundaries and uneven lengths.
+                                                                    Let us assume that we have a four-sided surface patch S pa-
+   In this paper we introduce two new surface representa-           rameterized in the (u, v) plane (u, v ∈ [0, 1]). Given positional
+tions that are “close” to Coons’ original idea. The first is        side constraints S(u, 0), S(u, 1), S(0, v), S(1, v) and tangen-
+a true generalization of the Coons patch, consisting of side        tial (cross-derivative) constraints Sv (u, 0), Sv (u, 1), Su (0, v),
+                       P. Salvi, T. Várady, A. Rockwood / New Schemes for Multi-sided Transfinite Surface Interpolation
+
+                                                                          the tangential blending with linear interpolants or ribbons:
+                                                                                            Ri (si , di ) = Pi (si ) + di Ti (si ).
+                                                                          Here we introduced another local parameter, the so-called
+                                                                          distance parameter di = di (u, v), that measures some kind of
+                                                                          distance from the i-th side. In this four-sided case di (u, v) =
+                                                                          si+1 (u, v) is a simple choice. The resulting patch becomes
+                                                                                                  4
+                                                                                   S(u, v) = ∑ Ri (si , di )α0 (di )
+Figure 1: Domain of a Coons patch using side-based param-                                        i=1
+eterization                                                                                       4
+                                                                                            − ∑ Qi,i−1 (si , si−1 )α0 (di )α0 (si ),        (1)
+                                                                                                 i=1
+
+Su (1, v), the patch equation suggested by Coons can be writ-             where Qi,i−1 is a corner correction patch given by
+ten as
+                                                                           Qi,i−1 (si , si−1 ) = Pi (0) + (1 − si−1 )Ti (0) + si Ti−1 (1)
+     U =        α0 (u) β0 (u) α1 (u) β1 (u) ,                                                   + si (1 − si−1 )Wi,i−1 .
+                                               
+     V =        α0 (v) β0 (v) α1 (v) β1 (v) ,
+                                                                          This will not be identical to the Coons patch, but it is a very
+     Su =
+                                                     
+                S(u, 0) Sv (u, 0) S(u, 1) Sv (u, 1) ,                     similar construction that trivially satisfies all the boundary
+     Sv =
+                                                     
+                S(0, v) Su (0, v) S(1, v) Su (1, v) ,                     constraints. This formulation will be the basis of the gener-
+              
+                 S(0, 0) Su (0, 0) S(1, 0) Su (1, 0)
+                                                                         alization presented in Section 4.
+               Sv (0, 0) Suv (0, 0) Sv (1, 0) Suv (1, 0) 
+    Suv =     S(0, 1) Su (0, 1) S(1, 1) Su (1, 1)  ,
+                                                           
+
+                 Sv (0, 1) Suv (0, 1) Sv (1, 1) Suv (1, 1)                3. Multi-sided patches
+
+S(u, v) = V (Su )T + SvU T −V SuvU T .                                    We can interpret the same problem for an arbitrary number
+                                                                          of boundary curves. Given n three-dimensional curves Pi (si ),
+This is the well-known Boolean sum formulation2 , where                   1 ≤ i ≤ n, and cross-derivative functions Ti (si ) along these
+α0 , α1 , β0 , β1 are the cubic Hermite blending functions,               curves, we want to construct an n-sided patch that interpo-
+needed to satisfy G1 continuity:                                          lates these boundary curves and derivatives. For this, we will
+      α0 (t) = 2t 3 − 3t 2 + 1,       α1 (t) = −2t 3 + 3t 2 ,             need a domain polygon in the parameter plane. The simplest
+                                                                          choice is a regular polygon; for enhanced, non-regular do-
+      β0 (t) = t 3 − 2t 2 + t,        β1 (t) = t 3 − t 2 .                main alternatives, see Várady et al.8
+
+   In order to reformulate the above definition on a per-side                We will also need a parameterization scheme that trans-
+basis, we will use cyclic indices (with 1 coming after 4), and            forms the (u, v) coordinates of the parameter plane into local
+introduce the so-called side parameters, si = si (u, v), associ-          parameters of the individual boundary curves. Two possible
+ated with the i-th side of the domain, taking the values u, v,            constructions are presented in Section 4.3. For a more com-
+1 − u and 1 − v, as appropriate (see Fig. 1). Then, denoting              plete overview, see Salvi5 .
+the positional and tangential constraints by Pi (si ) and Ti (si ),          The rest of this section concentrates on how these curves
+respectively, as well as using Wi,i−1 for the twist vector, the           and cross-derivative functions can be combined to create an
+Coons patch can be formally rewritten as                                  interpolating patch, and what kind of blending functions can
+                 4               T                                    be used. As a reminder, Figure 2 presents a bird’s-eye view
+                      α0 (si+1 )       Pi (si )
+     S(u, v) = ∑                                  −                       of the steps needed to evaluate a transfinite surface.
+               i=1
+                      β0 (si+1 )       Ti (si )
+      4              T                                                Charrot and Gregory1 proposed an n-sided patch based on
+           α0 (si+1 )        Pi (0) Ti−1 (1)        α0 (si )              corner interpolants, i.e., surfaces that interpolate two con-
+     ∑ β0 (si+1 )                                              .
+     i=1
+                             Ti (0) Wi,i−1          β0 (si )              secutive boundary curves, defined as
+We assume that twist vector compatibility is ensured, i.e.,                  Rcorner
+                                                                              i,i−1 (si , si−1 ) =
+
+           Wi,i−1 :=
+                        ∂
+                           Ti (0) = −
+                                        ∂
+                                            Ti−1 (1).                        Pi (si ) + (1 − si−1 )Ti (si ) + Pi−1 (si−1 ) + si Ti−1 (si−1 ) −
+                       ∂si            ∂si−1                                  Pi (0) − (1 − si−1 )Ti (0) − si Ti−1 (1) − (1 − si−1 )siWi,i−1 .
+For contradicting boundary constraints, this can be resolved
+                                                                          It is easy to see that these surfaces interpolate the i-th and
+by Gregory’s rational twists (see Gregory3 or Farin2 ).
+                                                                          (i − 1)-th sides, and their cross-derivatives. A similar tech-
+  This formulation can be further simplified, if we replace               nique will be introduced in Section 5 for interpolating three
+                          P. Salvi, T. Várady, A. Rockwood / New Schemes for Multi-sided Transfinite Surface Interpolation
+
+                                                                                4. Generalized Coons patch
+                                                                                The next few sections deal with the generalization of Coons
+                                                                                patches to n sides. The proposed interpolating surface uses
+                                                                                the same principles as the original Coons patch, i.e., com-
+                                                                                bines linear side interpolants and corner correction patches,
+                                                                                and thus can be regarded as a natural generalization, even
+                                                                                though the surface presented here will not revert to a Coons
+                                                                                patch for quadrilateral configurations.
+                                                                                   In Section 4.1 a new patch construction is introduced, and
+                                                                                in Sections 4.2 and 4.3 we show suitable functions for blend-
+                                                                                ing and parameterization, respectively.
+
+
+                                                                                4.1. Coons Patch Generalization
+Figure 2: Evaluation of a transfinite surface: (i) point in the                 With appropriate parameterization functions si (u, v) and
+polygonal domain (ii) mapping into the domain of each bi-                       di (u, v), Equation (1) can be generalized as
+parametric ribbon (iii) evaluating each ribbon (iv) blending                                         n
+the evaluated points                                                                 S(u, v) = ∑ Ri (si , di ) · Bi (d1 , . . . , dn )
+                                                                                                    i=1
+                                                                                                     n
+                                                                                               − ∑ Qi,i−1 (si , si−1 ) · Bi,i−1 (d1 , . . . , dn ),
+sides. The Gregory patch is constructed in the following                                            i=1
+way:                                                                            where Bi = Bi,i−1 +Bi+1,i is a side blend, and Bi,i−1 is a cor-
+                           n                                                    ner blend function. Bi,i−1 is required to have the following
+         S(u, v) = ∑ Rcorner
+                      i,i−1 (si (u, v), si−1 (u, v)) ·                          properties:
+                         i=1
+                               Bi,i−1 (d1 (u, v), . . . , dn (u, v)).                    Bi,i−1 (d1 , . . . , d j = 0, . . . dn ) = 0, j ∈
+                                                                                                                                         / {i − 1, i}(2)
+
+Note, that we continue to use cyclic indices (e.g. i − 1 for                            Bi,i−1 (d1 , . . . , di = 0, . . . , dn ) +
+i = 1 is n, and conversely, i + 1 for i = n is 1). Here a more                            Bi+1,i (d1 , . . . , di = 0, . . . dn ) = 1,                 (3)
+complex blending function needs to be used, that is a rational                      ∂
+polynomial function of the distance terms di :                                          Bi,i−1 (d1 , . . . , d j = 0, . . . , dn ) = 0, ∀ j.           (4)
+                                                                                   ∂d j
+                                               2
+                                     ∈{i,i−1} dk
+                                   ∏k /                        D2i,i−1          Section 4.2 will show a possible construction. Equation (2)
+    Bi,i−1 (d1 , . . . , dn ) =                       2
+                                                        =                 ,     means that the blend function vanishes on all sides not con-
+                                       ∈{l,l−1} dk
+                                  ∑l ∏k /                    ∑l D2l,l−1
+                                                                                nected to the corner. Boundary interpolation is satisfied due
+                                                e
+with the notation Dei1 ...ik = ∏ j /
+                                  ∈{i1 ...ik } d j . This blending              to Eq. (3), and finally Eq. (4) is needed for tangential inter-
+function will be used in Sec. 4.2 for the generalized Coons                     polation.
+patch. The di parameters in an n-sided polygon are generally
+                                                                                   Note that this patch, similarly to the Coons patch, com-
+not equal to si+1 (as we have seen for rectangles in the previ-
+                                                                                bines five surfaces to evaluate a point on the boundary: three
+ous section), but can be independent “distance” parameters.
+                                                                                linear ribbons and two corner correction patches. This im-
+For details, see Section 4.3.
+                                                                                poses several requirements for the (si , di ) parameterization.
+  Kato4 also used the linear side interpolants Ri introduced                    First, for si we need
+above to define a patch as
+                                                                                                              si ∈ [0, 1],                             (5)
+            n
+S(u, v) = ∑      Ri (si (u, v), di (u, v))·Bside
+                                            i (d1 (u, v), . . . , dn (u, v)).   and for a point on the i-th side, the parameterization has to
+           i=1                                                                  satisfy that
+There are several variations on the blending function, one                                      di = 0,                                                (6)
+popular choice8 being
+                                                                                             si−1 = 1,                         si+1 = 0,               (7)
+                                          1/di2       D2i                                                                      di+1 = 1 − si ,
+             Bside
+              i (d1 , . . . , dn ) =            2
+                                                   =         .                               di−1 = si ,                                               (8)
+                                         ∑ j 1/d j   ∑ j D2j                               ∂di−1  ∂s                        ∂di−1  ∂s
+                                                                                                 = i,                             = i,                 (9)
+Note, that the blending function is singular at the corners;                                ∂u    ∂u                         ∂v    ∂v
+fortunately, the corner points are uniquely defined by the                                 ∂di+1    ∂s                      ∂di+1    ∂s
+                                                                                                 =− i,                            =− i.               (10)
+boundary constraints.                                                                       ∂u      ∂u                        ∂v      ∂v
+                          P. Salvi, T. Várady, A. Rockwood / New Schemes for Multi-sided Transfinite Surface Interpolation
+
+                                                                             If we are on the i-th side, si−1 = 1 and si+1 = 0, so di = 0,
+                                                                             satisfying (6).
+                                                                                Still on the i-th side, di−1 and its derivative are the same
+                                                                             as si :
+                                                                                 di−1 = (1 − si−2 ) · α(si−1 ) + si · α(1 − si−1 ) = si ,
+                                                                                ∂di−1      ∂                           ∂
+                                                                                       =      (1 − si−2 ) · α(si−1 ) + si · α(1 − si−1 )
+                                                                                 ∂u       ∂u                          ∂u
+                                                                                          ∂si
+                                                                                       =      ,
+                                                                                          ∂u
+                                                                             because the derivatives of the blend function vanish. The
+                                                                             same reasoning works for the derivative by v. Similarly
+Figure 3: Blending functions Bi,i−1 and Bi over a six-sided
+domain.                                                                          di+1 = (1 − si ) · α(si+1 ) + si+2 · α(1 − si+1 ) = 1 − si ,
+                                                                               ∂di+1       ∂                        ∂
+                                                                                       =     (1 − si ) · α(si+1 ) + si+2 · α(1 − si+1 )
+                                                                                 ∂u       ∂u                       ∂u
+                                                                                           ∂                 ∂s
+The patches reviewed in Section 3 only require (5)–(7), so                             =     (1 − si ) = − i ,
+                                                                                          ∂u                 ∂u
+we need to satisfy more strict restrictions here, but in Section
+                                                                             so the requirements (8), (9) and (10) are all satisfied.
+4.3 two techniques will be presented for creating eligible pa-
+rameterizations.                                                                Fig. 4 shows constant s and d lines for this parameter-
+                                                                             ization (using the central line sweep parameterization10 as
+                                                                             a basis). The first image is based on the right side of the
+4.2. Blending functions                                                      polygon; the second image is based on the small side at the
+Recall the blending function Bi,i−1 described in Charrot and                 top-right; and the third image is based on the top side. Note
+Gregory1 :                                                                   that all lines of the second image start the same way (in a
+                                                                             differential sense) as their counterparts in the first and third
+                                               2
+                                     ∈{i,i−1} dk
+                                   ∏k /                   D2i,i−1            images.
+    Bi,i−1 (d1 , . . . , dn ) =                    2
+                                                     =                .
+                                       ∈{l,l−1} dk
+                                  ∑l ∏k /                ∑l D2l,l−1
+                                                                             4.3.2. Biquadratic Parameterization
+   Assumptions (2) and (3) are trivially true. A closer exam-                The patch defined in Section 4.1 is using side-based linear
+ination of the difference quotient leads to a straightforward                interpolants, but also corner-based correction patches. In the
+proof of (4), thus this blend function adheres to all require-               following, two parameterizations will be used, one for the
+ments. Fig. 3 shows a graphical representation of Bi,i−1 , as                ribbons (side-based parameterization), and one for the cor-
+well as the side blend Bi = Bi,i−1 + Bi+1,i .                                rection patches (corner-based parameterization). The idea is
+                                                                             that a linear side interpolant should have the same param-
+                                                                             eterization near the side adjacent to its base as the correc-
+4.3. Parameterizations                                                       tion patch of the corresponding corner, enabling the correc-
+                                                                             tion patch to cancel out the extra terms generated by the rib-
+In the following we will propose two parameterizations that
+                                                                             bons. This will be achieved by biquadratic maps similar to
+satisfy all the requirements (5)–(10).
+                                                                             the overlap patch parameterization7 .
+
+4.3.1. Interconnected Parameterizations                                         We place a three-by-three control net on the domain,
+                                                                             and the resulting planar surface defines a parameterization
+Take functions si (u, v) that give 0 for every point on the                  (see Fig. 5). We need the inverse of this biquadratic map,
+(i − 1)-th side and 1 for those on the (i + 1)-th side; for all              which can be computed by numerical methods, such as the
+other points inside the convex domain, they return a value in                Newton–Raphson algorithm. Note that the control points on
+[0, 1]. For example, the s coordinates of the bilinear or radial             the left-hand side are the same in both the side-based and the
+line sweeps1, 5 are such functions. These naturally satisfy (5)              corner-based variants, so the two parameterizations behave
+and (7). Define a blending function α(t) ∈ [0, 1] → [0, 1]                   identically near the left boundary. In the following we will
+with α(0) = 1 and α(1) = α0 (0) = α0 (1) = 0. Examples are                   examine the construction of these biquadratic control nets.
+the Hermite function α0 (t) from Section 2, or a variation of
+                                                                                Imagine a domain with its i-th side on the u axis. For the
+the rational blend function presented in the previous section:
+                                                                             side-based case, the control points are defined as
+           (1−t)2
+α(t) = t 2 +(1−t)2 . Now we can define di by means of si−1
+                                                                                                    pli   pm     pri
+                                                                                                                     
+and si+1 as follows:                                                                                       i
+                                                                                                    m             m
+                                                                                                pi−1      c    pi+1  ,
+  di (u, v) = (1 − si−1 (u, v)) · α(si ) + si+1 (u, v) · α(1 − si ).                              pli−1 poi     pri+1
+                     P. Salvi, T. Várady, A. Rockwood / New Schemes for Multi-sided Transfinite Surface Interpolation
+
+
+
+
+                            Figure 4: Constant parameter lines of the interconnected parameterization.
+
+
+                                                                        where poi,i−1 is the vertex opposite to the vertex defined as
+                                                                        the intersection of the i-th and (i − 1)-th sides (for odd-sided
+                                                                        polygons poi,i−1 is the midpoint of the opposite side).
+                                                                           Note that the first two columns are the same as in the side-
+                                                                        based case. Also the first two rows have their counterparts in
+                                                                        the (i − 1)-th side-based biquadratic as well. These relation-
+                                                                        ships tell us that the parameterization based on the i, i − 1
+                                                                        corner behaves the same way for a point on the (i − 1)-th
+                                                                        side as the parameterization based on the i-th side; and for
+                                                                        a point on the i-th side as the parameterization based on the
+                                                                        (i − 1)-th side. This is important, because it means that all
+                   (a) Side-based construction
+                                                                        superfluous data that comes into the equations from the rib-
+                                                                        bon interpolation can be eliminated by corner-parameterized
+                                                                        correction patches.
+                                                                          There is one special case: three-sided segments have a
+                                                                        very intuitive, singular parameterization (depicted in Fig-
+                                                                        ure 6).
+                                                                           So in our transfinite surface scheme, side-based param-
+                                                                        eterizations are used for ribbons (Ri ) and blends (Bi,i−1 ),
+                                                                        but corner-based parametrizations are used for the correction
+                                                                        patches (Qi,i−1 ). We will use the convention of referring to
+                                                                        corner-based parameters by (s∗i , di∗ ), while retaining (si , di )
+                                                                        for side-based ones.
+                                                                           The parametrization requirements (5)–(7) are trivially sat-
+                 (b) Corner-based construction                          isfied for side-based schemes. Linearity on the sides also
+                                                                        guarantees (8), even between a side-based and a corner-
+Figure 5: Control net and constant parameter lines of the bi-           based patch. The remaining constraints do not hold for ei-
+quadratic parameterization.                                             ther type, but are valid in-between: the di−1 side-parameters
+                                                                        are equal to the s∗i corner-parameters in derivative sense
+                                                                        (a corner-parameter with index i is associated with the bi-
+                                                                        quadratic patch based on the i-th and (i − 1)-th edges, using
+where plj , prj and pmj are the left and right endpoints and the        the i-th edge as constant di∗ = 0). Similarly all requirements
+midpoint of the j-th side, respectively; c is the center of the         are satisfied in this way.
+domain and poj is the domain vertex opposite to the j-th side
+(for even-sided polygons poj is the midpoint of the opposite               Using this new double parameterization system, we have
+side).                                                                  to alter the original definition of the surface, substituting
+                                                                        Qi (s∗i , di∗ ) = Qi,i−1 (s∗i , 1 − di∗ ) for Qi,i−1 (si , si−1 ):
+  When the basis is the corner at pli , the control points are
+                                                                                 S(u, v) = ∑ Ri (si , di ) · Bi (d1 , . . . , dn )
+                     pli   pm       pri
+                                          
+                            i                                                                   i
+                     m              o
+                pi−1       c     pi−1  ,                                                 − ∑ Qi (s∗i , di∗ ) · Bi,i−1 (d1 , . . . , dn ).
+                   pli−1 poi     poi,i−1                                                        i
+                      P. Salvi, T. Várady, A. Rockwood / New Schemes for Multi-sided Transfinite Surface Interpolation
+
+
+
+
+Figure 6: Control nets for triangular domains, based on the bottom side (left image), the right side (right image) and both
+(middle image).
+
+
+                                                                         where
+                                                                           Rli (s, d) = Ri−1 (1 − d, s) = Pi−1 (1 − d) + sTi−1 (1 − d)
+                                                                           Rri (s, d) = Ri+1 (d, 1 − s) = Pi+1 (d) + (1 − s)Ti+1 (d)
+                                                                           Qli (s, d) = Qi,i−1 (s, 1 − d)
+                                                                                       = Pi (0) + sTi−1 (1) + dTi (0) + sdWi,i−1
+                                                                          Qri (s, d)   = Qi+1,i (d, s)
+                                                                                       = Pi+1 (0) + dTi (1) + (1 − s)Ti+1 (0) +
+                                                                                           d(1 − s)Wi+1,i
+                                                                         and H(t) is a blend function, for example the Hermite blend
+                                                                         function α0 (t).
+                                                                            It is interesting to note that the curved corner interpolants
+                                                                         of the Gregory patch1 can be defined in terms of ribbons and
+                                                                         correction patches, as well:
+                                                                              Gregory
+                                                                             Ri,i−1 (si , si−1 ) = Ri−1 (si−1 , si ) + Ri (si , 1 − si−1 )
+          Figure 7: Constituents of a curved ribbon.
+                                                                                                     − Qi,i−1 (si , si−1 ).
+
+                                                                           The curved ribbon defined above interpolates three con-
+                                                                         secutive boundary curves using blends, which makes it es-
+5. Curved ribbons                                                        sentially a three-sided Coons patch. These ribbons can be
+                                                                         used as side interpolants for conventional transfinite inter-
+The patch defined in the previous section is based on lin-
+                                                                         polation patches, but there is also a more natural blending
+ear ribbons. These have the advantage of being very sim-
+                                                                         scheme, as proposed in the next section.
+ple and can be computed efficiently. On the other hand,
+highly curved surfaces may deviate far from their lin-
+ear interpolants, thereby decreasing stability. Unintuitive              5.1. Composite ribbon patch
+bulges, coming from contradicting cross-derivatives, pose a              The generalization of Coons patches, as introduced in Sec-
+common problem. Recall, however, that conventional side                  tion 4, does not work with curved side interpolants. How-
+interpolant-based transfinite interpolation surfaces do not              ever, we propose a new representation that combines curved
+depend on the linearity of the ribbons. We can thus define               ribbons in a different way, and renders the elimination of cor-
+curved ribbons that follow the shape of the surface more                 rection patches possible, yielding a much simpler formula:
+closely.
+                                                                                       1 n
+   Let Ci (si , di ) denote the curved ribbon for the i-th side. In      S(u, v) =       ∑ Ci (si (u, v), di (u, v))Bi (d1 (u, v), . . . , dn (u, v)),
+                                                                                       2 i=1
+order to simplify the notation, we will drop the indices of
+s and d when talking about only a single curved ribbon, as               where the parameterization satisfies the requirements listed
+it does not cause any ambiguity. The definition of Ci is as              in (5)–(10).
+follows (see Fig. 7):                                                       According to the characteristics of the Bi blend function,
+                                                                         for any point on the i-th boundary all addends of the sum
+Ci (s, d) =   Rli (s, d)H(s) + Ri (s, d)H(d) + Rri (s, d)H(1 − s)        vanish except for Ci−1 , Ci and Ci+1 . Since each of these rib-
+          −   Qli (s, d)H(s)H(d) − Qri (s, d)H(1 − s)H(d),               bons also interpolates the adjacent curves, the three ribbon
+                     P. Salvi, T. Várady, A. Rockwood / New Schemes for Multi-sided Transfinite Surface Interpolation
+
+
+
+
+                                                                                        (a) Conventional linear ribbon patch
+         (a) Conventional linear interpolant-based patch
+
+
+
+
+                                                                                           (b) Generalized Coons patch
+                  (b) Composite ribbon patch
+
+Figure 8: Mean map comparison of a model with four sur-
+faces.
+
+
+points are the same. Their cumulative blend is
+        Bi−1 + Bi + Bi+1 = Bi,i−1 + Bi + Bi+1,i
+                             = (Bi,i−1 + Bi+1,i ) + Bi
+                             = 1 + 1 = 2,                                                   (c) Composite ribbon patch
+
+hence the division by two in the surface equation.                      Figure 9: Mean map comparison of a surface using different
+   It can be proven that the parameterization constraints can           patch types.
+be loosened. If we leave out the last two requirements (9 and
+10), the patch remains valid, i.e., it will have the same tan-
+gent plane for every boundary point as the respective Coons
+ribbon, but it won’t have the exact same tangent vector. This              In Fig. 9 three schemes are contrasted using a single sur-
+enables the use of many other parameterizations, such as the            face. The low-curvature areas at the right-hand corners are
+bilinear or the central line sweep parameterizations.                   smoothed out in both of the new patches. The generalized
+                                                                        Coons patch and the composite ribbon patch are very simi-
+   In other words, we have created a new transfinite surface
+                                                                        lar, but the latter has even more smooth curvature transitions.
+representation that (i) has the same computational complex-
+ity as other conventional methods, (ii) uses curved side in-               In order to understand the essential difference between
+terpolants, and (iii) employs non-singular blend functions.             the two new patches, we should examine their ribbons. Fig-
+                                                                        ure 10 depicts them over the constant parameter lines of the
+                                                                        patches. In the linear ribbon case, the interpolants start to de-
+6. Examples
+                                                                        viate from the surface at a very “early phase”, thus points in
+The first example in Fig. 8 shows the mean map of a model               the interior are actually computed as the affine combination
+containing three-, four- and five-sided surfaces. The first im-         of relatively distant positions. On the other hand, the curved
+age was created by a conventional linear interpolant-based              interpolants on the right-hand side image are going close to
+patch. Note the blue areas near the sides — these are artifacts         the predictable surface position, and in this way, points in the
+of the blending function, which abruptly drops as we move               interior are combinations of ribbon points that are relatively
+away from the boundaries. The composite ribbon patch be-                close, keeping curvature variation at a low level. The slicing
+low is free of these unwanted curvature changes.                        maps show that both surfaces have sufficiently good quality.
+                     P. Salvi, T. Várady, A. Rockwood / New Schemes for Multi-sided Transfinite Surface Interpolation
+
+                                                                        special blend functions and parameterizations have been ap-
+                                                                        plied. Future research work is going to be directed towards
+                                                                        G2 ribbons and using non-convex parametric domains.
+
+                                                                        Acknowledgements
+                                                                        This work was partially supported by the scientific program
+                                                                        “Development of quality-oriented and harmonized R+D+I
+                                                                        strategy and functional model at the Budapest University
+                                                                        of Technology and Economics” (UMFT-TÁMOP-4.2.1/B-
+             (a) Generalized Coons patch                                09/1/KMR-2010-0002) and a grant by the Hungarian Scien-
+                                                                        tific Research Fund (No. 101845). The pictures in this pa-
+                                                                        per were generated by the Sketches system developed by
+                                                                        ShapEx Ltd, Budapest; the contribution of György Karikó
+                                                                        is highly appreciated. The authors also acknowledge support
+                                                                        from the Geometric Modeling and Scientific Visualization
+                                                                        Research Center of KAUST, Saudi-Arabia.
+
+                                                                        References
+                                                                        1.   P. Charrot, J. A. Gregory, A pentagonal surface patch
+                                                                             for computer aided geometric design, Computer Aided
+                                                                             Geometric Design 1 (1) (1984) 87–94.
+              (b) Composite ribbon patch
+                                                                        2.   G. Farin, Curves and surfaces for CAGD: a practical
+Figure 10: Ribbons and slicing map of a five-sided boundary                  guide, 5th ed., Morgan Kaufmann Publishers Inc., San
+configuration.                                                               Francisco, CA, USA, 2002.
+                                                                        3.   J. A. Gregory, Smooth interpolation without twist con-
+                                                                             straints, in: R. E. Barnhill, R. F. Riesenfeld (eds.), Com-
+                                                                             puter Aided Geometric Design, Academic Press, Inc.,
+                                                                             1974, pp. 71–88.
+                                                                        4.   K. Kato, n-sided surface generation from arbitrary
+                                                                             boundary edges, in: P.-J. Laurent, P. Sablonnière, L. L.
+                                                                             Schumaker (eds.), Curve and Surface Design: Saint-
+                                                                             Malo 1999, Innovations in Applied Mathematics, Van-
+                                                                             derbilt University Press, Nashville, TN, 2000, pp. 173–
+                                                                             181.
+                                                                        5.   P. Salvi, Fair curves and surfaces, Ph.D. thesis, Eötvös
+Figure 11: A G1 model with two composite ribbon patches,
+                                                                             Loránd University, Budapest (2012).
+using isophote line visualization.
+                                                                        6.   P. Salvi, T. Várady, A. Rockwood, New multi-sided
+                                                                             transfinite surfaces, Computer Aided Geometric Design
+   Finally, Fig. 11 shows isophote lines on two composite                    (submitted).
+ribbon patches connected by a smooth edge. The ends of the
+                                                                        7.   T. Várady, Overlap patches: a new scheme for interpo-
+lines match along the boundary, confirming G1 continuity,
+                                                                             lating curve networks with n-sided regions, Computer
+and in most points they are also unbroken, exhibiting ap-
+                                                                             Aided Geometric Design 8 (1) (1991) 7–27.
+proximately G2 behavior.
+                                                                        8.   T. Várady, A. Rockwood, P. Salvi, Transfinite surface
+                                                                             interpolation over irregular n-sided domains, Computer
+Conclusion
+                                                                             Aided Design 43 (2011) 1330–1340.
+Two new surface representations for transfinite surface inter-          9.   T. Várady, P. Salvi, A. Rockwood, 3d shape design us-
+polation have been presented. The first scheme can be con-                   ing curve networks with ribbons, in: this proceedings.
+sidered as the true generalization of the Coons patch, us-
+ing classical Boolean sum logic. The second is a transfinite            10. T. Várady, P. Salvi, A. Rockwood, Transfinite surface
+surface combining curved side-interpolants. In order to sat-                interpolation with interior control, Graphical Models
+isfy the boundary constraints (positions, cross-derivatives),               (under revision).
+

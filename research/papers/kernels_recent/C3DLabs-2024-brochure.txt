@@ -1,0 +1,366 @@
+The geometric kernel has been developed by an
+experienced team of Russian mathematicians since
+1995. C3D Labs as a company was founded in 2012.
+
+Its role was to convert the 3D kernel into a so ware
+development kit (SDK); to turn it into a standalone
+product; and to market it internationally. The result is
+the "C3D Toolkit", built on renowned Russian mathe-
+matics and with nearly thirty years' experience in
+working with advanced CAD components.
+                                            API
+
+
+                FairCurve   B-Shaper
+
+
+API   Vision                       Solver
+                       Modeler
+      Web Vision                   Collision
+                                   Detection
+                                                  API
+                Converter   PolyShaper
+
+               API
+In addition to B-reps, polygonal representation is
+also available. Polygonal models consist of approxi-
+mated faces and polygons. They are convenient for
+analysis and visualizations.
+                                     Direct modeling operations:
+                                     remove faces;
+                                     change the fillet radius;
+                                     replace face;
+                                     move/rotate face;
+                                     resize face;
+                                     merge smoothly jointed faces;
+                                     resize holes.
+
+                                     Sheet modeling operations:
+                                     bend/unbend;
+                                     convert solid to sheet metal;
+                                     stamp;
+C3D Modeler Functionality
+                                     rolled sheet metal;
+                                     bend relief;
+Solid modeling operations:
+                                     louvers;
+Boolean;
+                                     reinforcement rib.
+extrude, revolve, sweep;
+thin-walled bodies;
+                                     C3D Modeler suppo s the following geometric
+fillets and chamfers;
+                                     calculations:
+face tapering;
+                                     su ace areas, volumes,
+ribs.
+                                     and properties of mass inertia;
+                                     building planar projections;
+Wireframe modeling operations:
+                                     generating su ace triangulations.
+curves;
+intersection of curves;
+                                     C3D Modeler supports much more operations.
+extend;
+                                     For the full list please visit the Developers section
+trim;
+                                     at c3dlabs.ru
+unwrapping;
+equidistant curves;
+outline curves.
+
+Su ace modeling operations:
+extrude; revolute, sweep;
+lo , su ace based on a curve grid;
+equidistant su ace;
+trim/extend;
+fillets;
+patch, stitch.
+Functionality:
+
+
+
+
+by dimension type: linear, radial, diametral, angular,
+curve length;
+by dimension calculation type: driving, interval and
+variable dimensions.
+Rapid collision/gap detection for solid
+models, support for both exact B-rep
+geometry and approximate polygonal
+meshes
+
+Integrity of Assemblies Guaranteed                      Suppo for B-Rep and Polygonal Geometry
+All assemblies should be free of collisions between     Representations
+their components.                                       Collision Detector works accurately with B-rep geo-
+                                                        metry. If necessary, polygonal representation can be
+With our Collision Detector, your CAD and BIM           used to speed up the analysis.
+applications check assemblies for collisions at early
+stages, prevent assembly or kinematics errors. Early
+detection of collisions reduces manufacturing costs.
+
+The distance measurement function checks user-
+specified gaps between parts and sub-assemblies.
+Collision Detector can be configured to limit the
+scope of detection.
+
+For example, you may need to detect all faces where
+the bodies intersect. or you may just want to know
+whether bodies or subassemblies collide without
+going into the details. You can also exclude some
+pairs from the detection and select from a range of
+collision detection strategoes. The detection results
+can be tangents or in-volume intersections.
+C3D Vision capabilities:
+render any polygonal representation;
+user interaction with the model;
+camera control to display the scene;
+adding annotation objects;
+SW/HW accelerated visualization;
+integration with C3D Modeler objects;
+support for a ranger of video adapters.
+Designed for engineering visualization                 Integrated Environment
+in CAD/CAM/CAE/BIM applications                        C3D Vision is closely integrated with the C3D Modeler
+                                                       geometric kernel. To automatically generate scene
+The visualization module is intended for CAD and       graphs based on mathematical models, it is su i-
+similar applications. C3D Vision provides a range of   cient to call just one function. There is the option to
+tools for quick so ware development:                   calculate polygonal models for visualization objects
+                                                       (based on math representation of the geometry) in
+object search, filtering by type and primitives;       synchronous or multithreading mode.
+search for model objects under the cursor;
+handles and manipulators                               Pe ormance optimization
+to interact with the model;                            For high pe ormance with scenes and large models:
+measurements: linear, radial                           hardware acceleration estimating the visibility of the
+and angular dimensions.                                scene objects by specifying object sizes in screen
+                                                       pixels estimating the visibility of the o -screen
+                                                       objects adjustable LOD (levels of detail).
+Suppo for Exchange Formats
+C3D Converter can export and import geometry
+from/to most commonly used exchange formats
+available under a common license. The choice of an
+exchange format depends on the specific model
+representation or end user demands. The supported
+formats are carefully selected for your better
+experience.
+                                             Additional
+         Format               Read   Write     licence
+                                              required
+C3D                            ь      ь
+STEP (AP203, AP214 и AP242)    ь      ь
+IGES 5.3                       ь      ь
+ACIS (SAT)                     ь      ь
+ACIS (SAB)                     ь
+Parasolid (X_T, X_B)           ь      ь
+JT                             ь      ь
+VRML 2.0                       ь      ь
+STL                            ь      ь
+3MF                                   ь
+OBJ                            ь
+NX v2017-2021                  ь                 ь
+SolidWorks v2015-2023          ь                 ь
+IFC                            ь                 ь
+C3D PolyShaper
+
+
+
+
+The Stanford bunny
+Computer Graphics Laboratory
+Stanford University
+
+
+
+
+The polygonal representation uses                        Simplification, Refinement, and Remeshing
+                                                         of the Triangulation Mesh
+vertices, edges, and flat facets to build                Reducing the number of triangles improves the per-
+faceted 3D bodies. You can use C3D                       formance. C3D PolyShaper has two mesh simplifi-
+Converter to read/write such models,                     cation options: to a given number of triangles or
+                                                         a given accuracy. One can obtain a set of simplified
+and C3D Vision to visualize them. C3D                    meshes with di erent levels of detail. The simplifica-
+PolyShaper is a toolbox designed to edit,                tion algorithm guarantees the preservation of the
+analyse and heal polygonal objects.                      topological properties of the polygonal object.
+
+
+Diagno ics and Healing                                   The reverse local mesh refinement tool is used for
+Polygonal meshes may have geometric and topo-            computer-aided analysis to enhance the local
+logical issues. The list of geometric model errors can   simulation accuracy. It preserves a smooth transition
+be extensive, including such issues as gaps and          from larger to smaller triangles.
+openings, duplicated vertices, degenerate triangles,
+and non-manifold geometry. and so on. Such errors        Remeshing improves the mesh quality by making the
+can cause most algorithms to fail. Diagnostics and       triangles as equilateral as possible. Better mesh
+healing are essential stages in polygonal modeling.      contributes to the reliability of many algorithms and
+                                                         simulation processes.
+C3D PolyShaper o ers:
+mesh diagnostics;
+fixing degenerated triangles;
+mesh stitching;
+fixing inconsistent normals;
+checking for non-manifold geometry.
+
+
+
+14
+                                                                                    C3D Labs/C3D PolyShaper
+
+
+
+
+Fertility
+AIM@SHAPE-VISIONAIR Shape Repository
+
+
+
+
+Editing                                                  to noise can be adjusted to meet various criteria.
+C3D PolyShaper o ers the following polygonal mesh        The shape control tool aims to prevent the creation
+editing tools:                                           of su aces that are close to degenerate, such as
+deleting triangles;                                      nearly flat or nearly cylindrical cones. The inputs are
+Boolean operations;                                      a set of triangles and the desired accuracy.
+plane sections;
+mesh trimming by a cube of a specified size.             Another area involves the automatic conversion of
+                                                         mostly free-form models into a shell composed of
+Polygonal Model Analysis                                 NURBS patches.
+C3D PolyShaper can validate meshes generated by 3D
+scanning, topology optimization, and other methods.      As a rule, what we require is not just the mesh itself,
+                                                         but rather the mesh with its facets logically divided
+When it is known in advance that objects should          into some groups. The segmentation builds the
+match (for example, when comparing a CAD model           topology of the polygonal model similar to conven-
+to a 3D scanned model), we can apply automatic or        tional B-Rep models. The di erence is that the faces
+semi-automatic object matching for subsequent            consist of connected groups of facets, while the
+comparison.                                              edges are composed of sequences of mesh edges.
+                                                         Each topology segment may have an attribute.
+Another approach is reverse engineering when a po-       The attribute can be a number, vector, su ace, or
+lygonal model is converted into a solid. For this,       arbitrary data structure.
+analytic su aces are approximated with the least
+squares method. The su ace type is either auto-
+detected or selected by the user, such as plane,
+cylinder, cone, sphere, or torus. The mesh sensitivity
+
+
+
+
+                                                                                                             15
+                                                       B-Shaper capabilities:
+
+                                                       control the su ace recognition accuracy;
+                                                       segmentation of polygonal meshes;
+reverse engineering parts from 3D scanner files;       segmentation editing: merge, split, etc.;
+converting models from online component/typical        reconstruction of a predefined su ace on a segment;
+catalogs for manufacturing and construction sectors;   generate B-rep models.
+topology optimization post-processing in CAE
+applications.
+
+Through its API, C3D B-Shaper operates in two modes:
+
+automatic: generates acceptable results for high-
+quality polygon meshes, which are usually triangula-
+tions of CAD models that mostly contain elementary
+su aces;
+interactive: when a polygon mesh is constructed
+from 3D object scans and contains arbitrary su aces.
+C3D Modeler can model top-quality curves
+and su aces. It works with Class F curves
+that meet the following requirements:
+
+
+
+
+18
+                                                         C3D Web Vision o ers:
+
+                                                         3D model visualization, view management;
+                                                         interactive geometry control.
+Benefits:
+C3D Web Vision consists of a microservice and a GUI
+                                                         Integrated Environment
+client. Such as architecture gives a boost to web
+                                                         C3D Web Vision is closely integrated with our other
+developers: they can accelerate the product deve-
+                                                         C3D components:
+lopment, control visualization capabilities, and load
+large assemblies without expert skills in 3D graphics.
+                                                         C3D Converter: to read third-party formats;
+                                                         C3D Modeler: to generate triangulation meshes,
+With C3D Web Vision, you can build BIM, AEC, PLM,
+                                                         optimize and fix geometry.
+CAM, and EDA web applications with stunning 3D
+graphics. The module creates interactive 3D scenes,
+                                                         Interactive Model Features
+uses the 3D model tree, o ers interactive scene
+manipulation, and more.
+                                                         C3D Web Vision can:
+                                                         select geometry under the cursor or in a fence;
+                                                         build cross sections using multiple planes;
+                                                         add annotations, measurements;
+                                                         adjust transparency, visibility, color,
+                                                         hide/show elements.
+
+
+
+
+                                                                                                               19
+                                                         Asphalt roller
+
+
+
+
+C3D Viewer is an easy-to-use applica-                    Model tools:
+                                                         screenshots;
+tion for 3D geometry visualization.                      exploded views;
+It can read models in standard CAD                       animation (if available);
+formats and save them in the C3D                         view of multiple model configurations (if available);
+                                                         dynamic cross-sections;
+format. It uses C3D Modeler, C3D Solver,                 geometric measurements;
+C3D Vision and C3D Converter modules                     mass, moments of inertia
+of the C3D Toolkit                                       and other physical properties.
+
+
+Geometry Impo and Expo :
+reading C3D, JT, STEP, X_T, X_B, SAT, IGES, STL, VRML,
+OBJ formats;
+loading multiple models into one scene;
+saving models to C3D and as JPEG, TIFF, BMP, PNG
+images.
+
+Navigation Functions:
+pan;
+rotate the model;
+rotate the camera;
+orbit rotate;
+zoom;
+standard views.
+
+
+
+
+20
+                                                      Marriage Palace
+
+
+
+
+                                                      Enterprise edition
+
+                                                      C3D Viewer is available as an embedded visualiza-
+                                                      tion tool with a simple API. Developers can quickly
+                                                      add C3D Viewer to their products. A license key is
+                                                      required.
+Pe ormance options for better experience
+with complicated models:                              C3D Viewer Enterprise Edition o ers additional
+hiding edges in the shaded view mode;                 functionality:
+anti-aliasing;                                        saving 3D models to JT, STEP, X_T, X_B, SAT, IGES, STL,
+pixel/frustum culling.                                VRML formats;
+                                                      adding annotations to 3D models;
+C3D Viewer Standard Edition is a and-alone            proprietary ActiveX-based API for integration with
+desktop application:                                  corporate IT systems.
+free and unlimited;
+installation packages for Windows 32/64-bit, Linux;
+inte ace languages: English, Russian.
+
+
+
+
+                                                                                                            21
+© C3D Labs 2024
+

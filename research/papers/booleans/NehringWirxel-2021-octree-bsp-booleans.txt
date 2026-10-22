@@ -1,0 +1,1094 @@
+                                             Fast Exact Booleans for Iterated CSG using Octree-Embedded BSPs
+
+                                                                   Julius Nehring-Wirxela , Philip Trettnera , Leif Kobbelta
+                                                         a RWTH Aachen, Lehrstuhl für Informatik 8, Ahornstraße 55, 52074 Aachen, Germany
+
+
+
+
+                                        Abstract
+                                        We present octree-embedded BSPs, a volumetric mesh data structure suited for performing a sequence
+                                        of Boolean operations (iterated CSG) efficiently. At its core, our data structure leverages a plane-based
+
+
+
+
+arXiv:2103.02486v1 [cs.CG] 3 Mar 2021
+                                        geometry representation and integer arithmetics to guarantee unconditionally robust operations. These
+                                        typically present considerable performance challenges which we overcome by using custom-tailored fixed-
+                                        precision operations and an efficient algorithm for cutting a convex mesh against a plane. Consequently,
+                                        BSP Booleans and mesh extraction are formulated in terms of mesh cutting. The octree is used as a global
+                                        acceleration structure to keep modifications local and bound the BSP complexity. With our optimizations,
+                                        we can perform up to 2.5 million mesh-plane cuts per second on a single core, which creates roughly 40–50
+                                        million output BSP nodes for CSG. We demonstrate our system in two iterated CSG settings: sweep volumes
+                                        and a milling simulation.
+                                        Keywords: Plane-based Geometry, CSG, Mesh Booleans, BSP, Octree, Integer Arithmetic
+
+
+                                        1. Introduction                                             two problems are especially severe in the aforemen-
+                                                                                                    tioned manufacturing simulations as many small,
+                                           Mesh Booleans or Constructive Solid Geometry             potentially aligned or almost aligned operations are
+                                        (CSG) are popular and intuitive ways to model and           performed.
+                                        design objects. Iterated CSG is the task of apply-
+                                                                                                       While there is extensive literature on how to
+                                        ing a sequence of CSG operations on some initial
+                                                                                                    quickly perform exact Booleans on large input
+                                        object. For typical use-cases such as carving or
+                                                                                                    meshes [1, 2, 3, 4, 5, 6], the work on iterated CSG is
+                                        sculpting each operation is simple but the result-
+                                                                                                    mostly limited to inexact voxel or dexel based meth-
+                                        ing object turns more complex the more operations
+                                                                                                    ods with their own set of scaling and discretization
+                                        are applied. This setting is also common for sim-
+                                                                                                    issues [7, 8]. In fact, we found that all modern
+                                        ulations of manufacturing processes such as CNC
+                                                                                                    exact approaches are not well suited for iterated
+                                        milling or 3D printing.
+                                                                                                    CSG tasks (cf. Section 5). To overcome the sta-
+                                           Iterated CSG is typically quite challenging since
+                                                                                                    bility issues, many exact approaches use arbitrary
+                                        the result of each iteration is used as input for the
+                                                                                                    precision computations [3, 9, 4]. However, these
+                                        next operation. Therefore the algorithm is required
+                                                                                                    methods produce meshes with rounded vertex posi-
+                                        to be unconditionally robust. Otherwise the simu-
+                                                                                                    tions after an operation has finished. Extending the
+                                        lation degenerates quickly. When the intermedi-
+                                                                                                    lifetime of the arbitrary precision numbers across
+                                        ate result grows more complex and is subject to
+                                                                                                    many iterations is usually not feasible as the quan-
+                                        many local modifications, it is unacceptable to use
+                                                                                                    tization complexity increases rapidly after each it-
+                                        methods where the computation time scales with
+                                                                                                    eration. Consequently, current solutions suffer from
+                                        the complexity of the workpiece. Instead, the run-
+                                                                                                    either stability issues or poor performance.
+                                        time of each operation should only depend on the
+                                        complexity of the actually modified region. These              Our proposed solution is based on Binary Space
+                                                                                                    Partition (BSP) trees. BSPs have already been
+                                                                                                    used to perform robust CSG operations with a
+                                            Email addresses: nehring-wirxel@cs.rwth-aachen.de
+                                        (Julius Nehring-Wirxel), trettner@cs.rwth-aachen.de
+                                                                                                    plane-based geometry representation [1, 2]. How-
+                                        (Philip Trettner), kobbelt@cs.rwth-aachen.de (Leif          ever, they require conversion from mesh to BSP
+                                        Kobbelt)                                                    (import) and BSP to mesh (extraction), both with
+                                        Preprint submitted to Computer-Aided Design                                                          March 4, 2021
+their own robustness issues. While fast for small            embedded BSPs can be seen as a single gigantic
+trees, BSP-based Booleans, in the worst-case, scale          BSP where the upper levels follow an octree struc-
+at least with O(n2 ) for n nodes, even if the output         ture to provide spatial partitioning and only the
+complexity is only O(n) [10]. Extracting a polygo-           lower levels adapt to the geometry.
+nal mesh from a BSP is conceptually simple: start               Finally, we added various improvements to the
+with a cube large enough to contain the result and           classical mesh import, BSP Booleans, and mesh
+recursively perform mesh-plane cuts until the leaves         extraction algorithms. Importing a mesh into our
+of the BSP are reached. This results in a set of             data structure is fast with our exact computations
+convex meshes from which those belonging to out              as we can first build the octree and then locally con-
+nodes are discarded. With infinite precision, each           struct BSPs using a small number of triangles for
+intermediate mesh is perfectly convex. However,              each octree cell. With floating point computation
+rounding caused by fixed-precision floating point            this tends to produce cracks at octree cell borders.
+arithmetics often leads to small non-convexities.
+This greatly complicates further cutting steps with          1.1. Contribution
+epsilon tolerances and topology-repair steps [11].             In summary, we present
+These problems are basically guaranteed to hap-
+pen if the BSP is constructed from a triangle mesh:            • octree-embedded BSPs as a data structure for
+normally, three planes intersect in a single point               performing high-performance iterated CSG op-
+and it is unlikely that a fourth plane contains the              erations.
+same point. In a triangle mesh, the average num-
+ber of faces around a vertex is six, meaning that,             • exact and efficient CSG based on BSP
+by construction, six planes should intersect in a sin-           Booleans using custom-tailored 256 bit integer
+gle point, something extraordinarily unlikely when               arithmetic.
+working with floating point values. A stable ex-
+traction can still be achieved by either accepting             • a BSP to mesh conversion using an efficient
+these inaccuracies and formulate a topologically ro-             algorithm to cut planes against convex half-
+bust cutting [11] or by using plane-based geometry               edge meshes.
+and exact predicates [1, 2]. We use fixed-precision
+integer arithmetic (Section 3.2) to provide a fast           2. Related Work
+and reliable numerical foundation which enables us
+to formulate a simple, yet exact and efficient algo-            There is extensive literature for Booleans on
+rithm for extracting the mesh surface of a BSP tree          meshes [12, 13, 14, 1, 2, 15, 9]. The trilemma for dif-
+(Section 3.3 and 3.4).                                       ferent approaches are essentially performance, ac-
+   Even if the numerical substrate is fast, BSP-             curacy, and algorithmic stability. Usually, only two
+based CSG still suffers from scaling problems.               of these can be fulfilled in a satisfying manner. The
+Therefore, we superimpose a global octree structure          main causes for these problems are rounding issues
+and store a BSP in each octree cell. These octree-           with fixed size floating point numbers, poor perfor-
+embedded BSPs should not be seen as a temporary              mance of exact calculation schemes, and high algo-
+constructs such as in [2] but instead as a volumetric        rithmic complexity due to an immense number of
+data structure that persists through the entire se-          topological configurations.
+quence of CSG operations. While the octree intro-               Binary Space Partition based approaches were
+duces some overhead as the cell borders split trian-         kick-started by Naylor et al. [12]. They introduced
+gles, it imposes strict limits on the BSP complexity         a procedure to merge two BSPs into a single one
+and thus mitigates the scaling issues. Additionally,         that represents a Boolean of the two inputs. To
+it provides localization of operations and a set of          prune empty nodes from the resulting BSP, a poly-
+efficient culling operations to limit the CSG com-           gon cutting algorithm is part of the merge pro-
+putation to the affected regions. An octree can be           cedure. Additionally, the conversion from and to
+seen as a special BSP tree, a fact that we exploit           a mesh requires the same polygon cutting algo-
+to formulate efficient merge and split operations.           rithm. Unfortunately, polygon cutting tends to be
+Still, the special structure of an octree guarantees         highly unstable when using fixed length floating
+good worst-case behavior that cannot be provided             point arithmetics [10]. Lysenko et al. [10] present
+by more general BSPs. Conceptually, our octree-              an improved BSP CSG algorithm by eliminating
+                                                         2
+the polygon cutting from the merge procedure and               tex, edge, and face representations similar to [1].
+replacing it by a satisfiability check for a linear pro-       Magalhães et al. [6] perform exact calculations on
+gram. The constraints of the program are the same              volume meshes and additionally use symbolic per-
+as the half-spaces from the current subtree to the             turbation to avoid many special cases. Using ac-
+root of the BSP. If there is no solution to the linear         tual vertex perturbation, Douze et al. [5] introduce
+program, the subtree is empty.                                 a very fast but unstable algorithm that executes
+   Bernstein and Fussell [1] go a different route to           successfully on a large number of meshes.
+deal with instability. They propose using exact fil-              Besides the purely mesh or plane-based meth-
+tered predicates [16] in the domain of BSP merg-               ods, Hachenberger et al. [13] introduced a Nef-
+ing. To avoid having to increase the resolution                polyhedral-based approach that is implemented in
+when creating new intersection vertices they use a             the CGAL library. It is both exact and has good
+purely plane-based representation for convex poly-             stability, but is quite slow and its internal data-
+gons which is a subset of the class of Nef polygons            structures are very memory consuming.
+[17]. Plane-based modelling itself was already pro-               In addition, there are a few alternative ap-
+posed by [18]. Vertices are defined as the intersec-           proaches: Zhou et al. [3] combine exact calculations
+tion of three non-coplanar planes, convex polygons             with a winding number based approach. They de-
+consist of a supporting plane and a list of planes             rive the winding number of vertices from one mesh
+determining the boundary of the polygon. Unfor-                in respect to another input mesh topologically and
+tunately the BSP merging procedure scales poorly               use that information to determine which parts of
+with the size of the input BSP [10]. To mitigate the           the mesh to keep. Notably, they provide a good
+scaling problems Campen and Kobbelt [2] embed                  implementation of their method in libigl [23].
+Bernstein’s BSP merging algorithm into an octree               Recently, Cherchi et al. [24] improved the perfor-
+that localizes CSG operations. Only small, over-               mance of this approach by deriving lazy floating-
+lapping parts of the input meshes are converted to             point predicates to replace the exact rational arith-
+BSPs, limiting the complexity of each single BSP               metic used by [3]. Similarly, Barill et al. [25] in-
+merge. The result is converted back to the original            troduce a general approach to determine winding
+mesh. They also give guarantees for exactness of               numbers as a measurement of insideness which can
+the operations as well as the conversion from and              be used to perform Boolean operations.
+to mesh representation. However, these guarantees                 Beside the mesh or plane based approaches,
+force them to limit the precision of the input mesh.           voxel-based approaches are also often used for CSG
+   Since the conversion between BSP and mesh is                operations [26, 27, 7, 28]. By principle they suffer
+not trivial, Wang and Manocha [11] propose an effi-            from aliasing effects and limited resolution. Addi-
+cient algorithm to extract a mesh from a BSP. They             tionally, the machining industry often uses a dexel -
+do not use exact calculations but instead achieve              based representation [29, 8]. Dexel, also called
+stability by making sure that their mesh data struc-           multi-layer-z-map are essentially a 2-dimensional
+ture is always in a sound state topologically.                 regular grid with a list of height values that de-
+   To avoid conversions to and from plane-based                scribe a transition from inside to outside or vice
+representations, many approaches perform CSG op-               versa. While this representation is often extended
+erations directly on the mesh. Some avoid floating             into three dimensions, it still suffers from aliasing
+point issues by approximating a seam where the two             problems similar to voxel-based approaches.
+input meshes intersect [14, 19, 20]. Others present               Our proposed method builds upon Bernstein and
+methods that perform well on many meshes but rely              Fussell [1] and Campen and Kobbelt [2]. Instead of
+on careful tuning of epsilon values and may still fail         using filtered floating-point numbers, we show how
+[21, 22]. Barki et al. [9] first compute the inter-            the required geometric predicates can be formulated
+sections of all triangles of the input meshes using            and implemented using fixed-width integers. By
+exact rational number representations. They then               limiting the largest intermediate value to 128, 192,
+determine which triangles belong to the result of              or 256 bit, we present a set of extremely practical
+the Boolean using an ordering of triangles around              speed-precision tradeoffs. Furthermore, we show
+their shared edges. Sheng et al. [4] pursue a similar          that instead of storing vertices as the intersection of
+approach: they first cut intersecting input trian-             three planes, a representation as 4D homogeneous
+gles, but instead of using exact rationals to repre-           coordinates has several advantages. In particular,
+sent the new primitives, they use plane based ver-             the most expensive predicate does not involve a 4×4
+                                                           3
+determinant anymore but rather a cheaper 4D dot                        Boolean
+product. Algorithmically, we present a fast plane-
+against-convex-mesh cutting algorithm that allows            Other BSP
+us to implement exact BSP booleans efficiently us-                                     Extract          Import
+ing mesh extraction. To the best of our knowledge,                           Suboptimal          Mesh            Final BSP
+this results in the fastest exact BSP booleans to                               BSP
+date and simultaneously provides high quality sur-           Octree Cell
+face meshes and a method for reducing BSP re-
+dundancies. Finally, our octree and the one from              Figure 1: Performing Booleans on an octree-embedded BSP
+                                                              data structure and another BSP can lead to suboptimal re-
+Campen and Kobbelt [2] serve subtly different pur-            sulting BSPs. Extracting and reimporting the BSP’s bound-
+poses: Theirs is a temporary acceleration structure           ary usually improves the BSP quality.
+used to find and localize the intersecting surface.
+Our octree-embedded BSPs are a persistent data
+structure that are kept across iterations and could           the state of the art such as [30, 13, 3, 5] while stay-
+be considered an “imposed structure” on the upper             ing completely exact.
+levels of a global BSP.                                          Boundary extraction is typically a slow, error-
+                                                              prone, and often overlooked step. However, based
+3. Method                                                     on our fast and exact extraction scheme, other es-
+                                                              sential BSP operations can be implemented. Sec-
+3.1. Overview                                                 tion 3.5 describes how performing CSG on BSPs is
+   Our method builds on the ideas of [12, 1, 2]. Ge-          straightforward and faster than the state of the art
+ometry is represented as a BSP tree where each                when using our boundary extraction as a building
+leaf node has a label (in and out for simplicity but          block. Removing redundancy from BSPs can be
+the algorithms are trivially extended to a multi-             implemented by extracting the represented surface
+material setting). Each non-leaf BSP-node con-                and converting it back to a BSP without any loss
+tains a plane that splits the domain into a positive          (Section 3.7). A typical workflow of our method is
+and a negative half-space. Thus, BSP trees repre-             depicted in Figure 1.
+sent a hierarchy of convex polyhedral cells and the              Section 3.8 presents our octree-embedded BSPs,
+object geometry is the union of all in-labeled leaf           a global octree that stores a BSP in each cell and lo-
+cells. Instead of using floating point numbers, we            cally adapts to the BSP complexity. When perform-
+base our entire system on integers and guarantee              ing iterated CSG, we maintain the octree across
+exactness of all results by analyzing and bounding            iterations and perform octree-BSP merges in each
+the required number of bits (Section 3.2). By using           step.
+fixed-precision instead of arbitrary-precision arith-            The final module of the system is a pair of algo-
+metic we can cater to all practical scenarios with            rithms to import triangular meshes into our data
+minimal performance overhead. Our system uses                 structure: from polygon soup to BSP and from tri-
+a plane-based geometry representation where each              angle soup to octree-embedded BSP.
+plane equation has integer coefficients. While all in-
+put points must be integer, the resulting vertices are        3.2. Arithmetic Foundation
+represented by the intersection of three planes (as
+4D homogeneous coordinates) and can thus lie at                  Floating point computation often introduces
+fractional positions. Because CSG operations can-             round-off errors that tend to violate geometric in-
+not introduce new planes, all possible positions are          variants and threaten algorithmic stability. Using
+representable using combinations of input planes.             arbitrary-precision libraries such as gmp [31] typi-
+   Equipped with fast and exact predicates, we                cally incur prohibitive performance overhead. In-
+present a practical and efficient algorithm for con-          stead, we base our computation on fixed-precision
+verting BSP trees into meshes (Section 3.4). In-              integer arithmetic and exact representations. We
+stead of using convex Nef polyhedra [17, 1], our              start by introducing our required operations. Then,
+boundary extraction algorithm operates on convex              given a maximum number of bits that we are willing
+polyhedra stored in a half-edge data structure with           to use for intermediate results, we work backwards
+a fast plane-mesh cutting procedure as its core op-           to determine the largest range of input values that
+eration. This algorithm significantly outperforms             guarantees overflow-free computation.
+                                                         4
+   Input meshes are given with integer vertex po-            or equivalently
+sitions and (non-normalized) integer normals. In-                                       
+ner BSP nodes store planes p in plane equation                                        x1    e1     e2    e3e4
+form with integer coefficients ap , bp , cp , dp where                              x2    ap     bp    cpdp
+                                                                                    x3  = aq
+                                                               intersect(p, q, r) =                          ,
+(ap , bp , cp ) = np is the plane normal and dp =                                                  bq    cqdq
+−v T np is the offset from the origin (for any point v                                x4    ar     br    crdr
+that lies on the plane). While input vertices are in-                                                          (5)
+teger, the result of CSG operations can contain ver-         where ei are the canonical unit vectors. We classify
+tices at fractional positions. Thus, in a plane-based        points x relative to plane s by computing the sign of
+geometry representation, we do not actually com-             the distance to the plane nTs x + ds . When given in
+pute vertex positions but treat each vertex as the           homogeneous coordinates, we can avoid fractional
+intersection of three planes. Bernstein and Fussell          results by multiplying with x4 and accounting for
+[1] describe working with planes and intersection of         its sign:
+planes in the context of BSP booleans: Given two
+planes p and q,                                                      classify(x, s) = sign(xT s) · sign(x4 )   (6)
+
+                     np × nq = ~0                 (1)        In contrast to Bernstein and Fussell [1], we store
+                                                             vertex positions as easily interpretable homoge-
+tests if two planes are coplanar. Three planes p, q,         neous 4D integer coordinates. The costly 4 × 4
+r intersect in a unique point if the determinant             determinant for classifying vertices is split into
+                                                             the construction of the intersection points (pre-
+                   |np nq nr | 6= 0.              (2)        compute four 3 × 3 determinants) and the actual
+                                                             classification (a 4D dot product). In our mesh cut-
+BSP extraction and mesh cutting requires another
+                                                             ting algorithm, classification is performed more fre-
+operation: given a point (as the intersection of
+                                                             quently than intersection construction, thus result-
+planes p, q, r) and a plane s, classify if the point
+                                                             ing in a significant overall performance gain. (See
+lies on the positive side, on the negative side, or
+                                                             Table 1 in the Evaluation for benchmarks.)
+exactly on s. This can be computed using the sign
+                                                                When exact computation is required, typical
+of a 4 × 4 times a 3 × 3 determinant:
+                                                             approaches use either arbitrary-precision libraries
+           sign |p q r s| · sign |np nq nr | .    (3)        (like gmp) or filtered floating-point predicates (like
+                                                             Shewchuk [16]). We found these either too slow or
+Note that these tests can be performed with integer          having insufficient resolution. Instead, we use fixed-
+arithmetic exclusively.                                      precision integers and analyze the operand bounds
+   In this formulation, vertex classification requires       of each operation to choose appropriate bit widths.
+computing an expensive 4 × 4 determinant. We de-             Modern x64 CPUs allow highly efficient implemen-
+rive a different but equivalent way to classify ver-         tation of wide integer addition and multiplication.
+tices based on homogeneous coordinates. While our            Chaining the adc instruction (add with carry) k
+version basically results in the same formula, we of-        times implements 64 · k bit integer addition. Mul-
+fer an interpretation that immediately clarifies why         tiplication is efficient because the mul instruction
+a large part of the computation does not depend              multiplies two 64 bit integers and stores the 128 bit
+on s and can therefore be precomputed and reused.            result in two registers. This can be used as a build-
+Given three planes p, q, and r, their intersection           ing block for a simple long multiplication scheme.
+point can be found by solving                                For very large numbers, this scheme is inefficient as
+      T                                                it scales with O(n · m) (given n and m bit inputs)
+       np          ap bp cp             −dp                  but we found it well suited for integers consisting
+     nTq  x = aq bq cq  x = −dq  .           (4)       of only a few 64 bit blocks.
+       nTr         ar br cr             −dr                     Given a budget of up to b bits per operation, we
+                                                             can determine the input precision tradeoffs for nor-
+Using Cramer’s rule, x = (|A1 |, |A2 |, |A3 |) /|A|,         mals and vertex positions of our method. Let the
+                         T
+where A = (np , nq , nr ) and Ai is A with the i-th          biggest absolute coordinate value of any input ver-
+column replaced by (dp , dq , dr ). Written in 4D ho-        tex be v + and similarly that of any input normal
+mogeneous coordinates, x = (|A1 |, |A2 |, |A3 |, |A|),       be n+ . Similarly, d+ is the bound for the plane
+                                                         5
+distance coefficient. The largest intermediate re-                                                                                               8.73 · 107
+
+
+
+
+                                                               maximal normal coordinate
+sult is xT s and must not exceed ±2b−1 (ignoring                                           1017
+
+−2b−1 −1 for simplicity). xT s is the same as |p q r s|                                                                            6.31 · 105
+                                                                                           1013
+where p, q, r are the planes that x was created
+from. Hadamard [32] showed that a 4 × 4 deter-                                             109                       4.57 · 103
+                                                                                                                                                       256 bit
+minant with matrix entries ∈ [−1, 1] cannot exceed                                                                                                     192 bit
+16. |p q r s| has three columns bounded by n+ and                                          10 5                 1
+                                                                                                        3.30 · 10                                      128 bit
+one by d+ . Thus, linearity of the determinant im-                                                                                                     64 bit
+                                          3                                                101
+plies that |p q r s| cannot exceed 16 · n+ · d+ . For
+                                                                                                  101          103         105          107          109
+our planes, d = −v T n for some input vertex v, so                                                                   maximal vertex coordinate
+we can conservatively estimate d+ as 3 · v + · n+ .
+In summary, given b bit integer operations, we can
+                                                              Figure 2: Given fixed-precision integer arithmetic, different
+guarantee overflow-free exact predicates if the fol-
+                                                              tradeoffs between maximal vertex and normal coordinates
+lowing is satisfied:                                          exist. Below these curves, all our computations are guar-
+                                                              anteed exact and overflow-free. The annotated points mark
+                    4           1                             the maximal vertex coordinate that can be safely used when
+                  n+ · v + ≤      · 2b−1           (7)
+                               48                             computing normals from vertex positions via edge cross-
+                                                              products. While these points are useful when importing a
+Choosing n+ and v + independently is beneficial               triangle meshes, choosing a higher vertex resolution and thus
+for applications that construct planes directly, but          a lower normal resolution can e.g. be advantageous in milling
+                                                              simulations where there is some freedom to discretize input
+when importing a triangle mesh, normals are com-              normals.
+puted from vertex positions via e12 × e13 where
+eij = vj − vi are the triangle edge vectors. A (very)
+conservative estimate of e+ would be 2·v + and thus
+           2        2                                         given plane. With our numerical foundation, all re-
+n+ = 2·e+ = 8v + due to the cross product. Thus,
+                                                              sults are exact and no epsilon tolerance is required.
+if normals are computed from vertex positions, the
+                                                              By modifying the mesh in-place and trying to min-
+condition simplifies to
+                                                              imize how many geometric primitives need to be
+                    9       1                                 processed we obtain a highly efficient cutting pro-
+                  v+ ≤           · 2b−1            (8)        cedure.
+                         84 · 48
+                                                                 This operation serves as the basis for bound-
+or equivalently
+                                                              ary extraction (Section 3.4), BSP Booleans (Sec-
+             v + ≤ 0.239 · 2b/9 ≈ 2b/9−2 .         (9)        tion 3.5), and BSP simplification (Section 3.7). Pre-
+                                                              vious methods use cutting for these as well but
+Therefore, our b = 256 bit arithmetics can exactly            suffered from stability issues and overall quadratic
+import all integer meshes with positions smaller              scaling [12, 10, 1].
+than 8.73 · 107 , or slightly above 26 bit. For com-             Figure 3 illustrates our algorithm. Given a start-
+parison, single precision floating point has 23 bit           ing halfedge and the cutting plane, we traverse from
+mantissa and most ASCII meshes we tested do not               vertex to vertex, always choosing the neighbor ver-
+exceed 7 significant decimal digits. Figure 2 shows           tex with smallest distance to the plane, a process
+different tradeoffs for varying bit widths b.                 we call edge descent. We stop when reaching a ver-
+   For a simulation with a bounding volume of 1 m3 ,          tex on the opposite side of the plane. If no such
+we get a resolution of 0.22 mm for 128 bit, 1.58 µm           vertex can be found, the edge descent terminates
+for 192 bit, and 11.5 nm for 256 bit, assuming we             in a global minimum (all submeshes are convex)
+want to guarantee that any input normal can be                and we know that the plane does not properly in-
+exactly represented. In Section 4.1 we evaluate the           tersect the mesh. In our case, a proper intersection
+performance of operations described in this section           means that both resulting meshes from the cut have
+and compare 128 bit, 192 bit, 256 bit, and gmp ver-           non-zero volume. For example, a non-proper inter-
+sions.                                                        section would be a cut plane that is coplanar with
+                                                              a mesh face. In case of a proper intersection, we
+3.3. Mesh Cutting                                             always find an edge that intersects with or a ver-
+  The core of our method is the following oper-               tex that lies on the cutting plane. From there we
+ation: cut a convex mesh into two parts along a               follow the faces-to-cut around until we reach the
+                                                          6
+               (a) edge descent                           (b) marching                                (c) result
+
+Figure 3: (a) In the edge descent step, our mesh cutting algorithm first finds an edge intersecting the cut plane (red edge) by
+following vertices with shorter distance-to-plane (blue edges). Only vertices along the way are tested (red). (b) In the marching
+step, we cut each affected face and insert cut edges (green) until reaching the starting point again. Again, only the red vertices
+need to be classified. (c) The result is the mesh cut in-place into lower and upper part (explosion view).
+
+
+a)                    b)
+                                                                    mesh is traversed and the modification is performed
+                                                                    in-place. Our experiments in Figure 9 demonstrate
+                                                                    superior results compared with the naive, classify-
+                                                                    all-vertices method. Empirically, we observe that
+                                                                    the per-cut costs grow sub-linear with the mesh
+Figure 4: During the marching there are only two distinct           size.
+cases when splitting a single face: a) The face is traversed           It is important to note that the resulting mesh
+until an edge with vertices on opposite sides of the cutting
+plane are found. The edge is then split and we are now
+                                                                    has neither integer nor floating-point coordinates.
+in case b) A vertex lies exactly on the cutting plane. The          Instead, all vertices are represented as the homo-
+vertex is duplicated and two new edges on the cutting plane         geneous 4D integer coordinates introduced in Sec-
+are inserted.                                                       tion 3.2, especially Equation 5. This makes the cut-
+                                                                    ting operation exact and fully robust, allowing us to
+                                                                    use it as a basis for the boundary mesh extraction
+initial edge again. Along the way, we add the new                   and even the BSP booleans.
+faces and edges produced by the cut and locally ap-                    There is a certain similarity with the GJK algo-
+ply the necessary changes to the mesh topology. We                  rithm [33] for collision detection between two con-
+call this step marching. The decision which edge or                 vex objects. While our plane-mesh cutting tra-
+vertex lies on the cutting plane uses the classifica-               verses from edge to edge, choosing those that re-
+tion function from the previous section. With exact                 duce the distance to the cutting plane the most,
+computations, the meshes stay perfectly convex af-                  the GJK algorithm traverses from simplex to sim-
+ter cutting. During marching, only two different                    plex, choosing the simplex closest to the origin. On
+cases can occur: we find the next edge intersecting                 a meta level, both algorithms exploit that, on a con-
+the plane or we find a vertex lying on the plane (see               vex polyhedron, we can minimize certain distance
+Figure 4). If an edge lies within the cutting plane,                functions by greedily follow edges or sub-simplices
+no neighboring face needs to be split.                              without running into local minima.
+   At the end, the single convex mesh is split into
+two parts, one belonging to the positive half-space                 3.4. Boundary Extraction
+defined by the plane and the other to the negative                    Based on mesh-plane cutting, we can formulate
+half-space. Two new planar faces are inserted. In                   an efficient boundary extraction algorithm. The
+case one of the parts has zero volume, the plane                    task is, given a BSP tree and a bounding box, to
+does not have a proper intersection and the mesh is                 compute a mesh of the represented surface inside
+not changed. The main reason why this algorithm                     the bounding box. Our algorithm works in two
+is fast is that most of the time only a fraction of the             steps.
+                                                                7
+                                                                        First, we compute convex meshes for each BSP
+                                                                     leaf node labelled in. This is done recursively by
+                                                                     starting with a mesh for the bounding box and ap-
+                                                                     plying our cutting operation for each inner node of
+                                                                     the BSP. During cutting we annotate each face with
+                                                                     the index of the opposite BSP node. All out leaves
+                                                                     are discarded.
+                                                                        While these convex meshes can be used for ren-
+                                                                     dering, they contain many interior (double) faces.
+                                                                     Thus, in a second step, we remove all parts of the
+                                                                     faces that are not in-out transitions. For each face
+                                                                     we know the opposite BSP subtree and cut the
+                                                                     face recursively against this tree. This procedure
+              (a)                            (b)                     is shown in Figure 6. This is a simple convex face
+                                                                     against plane cutting, equivalent to polygon clip-
+                                                                     ping. When the leaf nodes are reached we can clas-
+                                                                     sify the face pieces as in-out or in-in, discarding
+                                                                     the latter. Figure 5 shows the result of this step.
+                                                                        Note that only clipping faces against the oppo-
+                                                                     site BSP will produce T-junctions that might pro-
+                                                                     duce problems with rendering and further process-
+                                                                     ing. However, during clipping we can again store
+                                                                     the opposite BSP and afterwards subdivide polygon
+                                                                     edges according to this opposite BSP, introducing
+                                                                     valence-2 vertices. Take for example the upwards
+              (c)                            (d)
+                                                                     pointing face in the middle of Figure 5 (c). After
+Figure 5: Exact mesh boundary extraction. Given an input             the polygon clipping, this is a rectangle, resulting
+BSP (a), we use our mesh cutting to extract convex poly-             in a non-conforming mesh with a T-junction. After
+hedra for each BSP leaf, discarding out-cells (b, explosion          introducing the valence-2 vertices, it topologically
+view). The in-cells can contain overlapping interior surfaces
+which are removed by a 2D face-plane clipping (c, explosion          becomes a pentagon. Thus, in our 3D use case, the
+view). The resulting mesh (d) exactly describes the surface          procedure in Figure 6 is actually applied two times:
+represented by the BSP (light blue are octree cell boundaries,       First, to clip the boundary polygons to get rid of
+darker blue result from BSP planes).
+                                                                     inner faces. Second, to subdivide boundary edges
+                                                                     to prevent one-sided T-junctions.
+
+                                                                     3.5. Booleans on BSPs
+                                                                        Given two BSPs representing geometry, Naylor
+                                                                     et al. [12] describe how to merge these. The merge
+                                                                     procedure takes two BSPs and a merge function
+                                                                     fm (sa , sb ) → s, where sa , sb , s ∈ {in, out} are leaf
+                                                                     node labels. The choice of fm determines which
+                                                                     Boolean operation is performed. For example, the
+                                                                     union is defined by the function that only returns
+                                                                     out when both sa and sb are out.
+Figure 6: Every time a polyhedron is cut during boundary
+                                                                        We formulate the BSP merge based on our effi-
+extraction the two new faces inside the cutting plane are
+assigned the BSP node on the opposite side of the cutting            cient mesh cutting. Starting with a cube represent-
+plane (left and center). To extract the exact boundary, faces        ing the bounding volume and root nodes A and B of
+not pointing to leaf nodes are cut again according to their          two BSPs, we define the following merge operation
+opposite sub-BSP (right). Boundary faces (orange) belong
+to BSP nodes marked as in with opposite nodes out.
+                                                                     that recurses on A:
+                                                                      1. Terminate if either A or B is a leaf node (based
+                                                                         on the merge function, either in, out, A, B, or
+                                                                 8
+    leaf-inverted versions of A or B are inserted at             To avoid stability issues caused by float-
+    the current node)                                         ing point inaccuracies, the face-splitting algo-
+ 2. Cut A’s plane against the current mesh                    rithm must be performed in an exact man-
+     (a) if A’s plane produces a proper intersection          ner. Therefore we use the same plane-based ver-
+          with the current mesh, recursively call             tex representation as presented in Section 3.2.
+          merge(A.left, B) and merge(A.right, B)              Even if the input faces consist
+     (b) otherwise recursively call merge(A0 , B)             only of triangles, intermediate
+          where A0 is the child of A that contains            faces are generally arbitrary
+          B                                                   convex polygons with corners
+                                                              defined by plane intersections.
+This algorithm produces a BSP that corresponds                Re-triangulation is not possi-
+to the chosen Boolean operation applied to the two            ble because it requires con-
+input BSPs as well as a polygonal mesh. The mesh              struction of new planes (red in
+consists of a set of convex polyhedra that can each           the inset) from points that are not original input
+be mapped to one BSP node of the output BSP.                  vertices and thus may lie on fractional coordinates.
+Note that they may not always correspond to a                 Such new planes might then require more precision
+leaf node: The merge procedure never recurses B               than we have available and therefore cannot be con-
+but instead may copy B or its leaf-inverse directly           structed in the general case.
+into the output BSP. In that case the correspond-                A crucial step for creating well balanced BSPs is
+ing polyhedron belongs to B which may be an inner             the choice of the next face that is inserted into the
+node. In the resulting BSP some nodes that be-                BSP. Heuristics that aim to improve the balanced-
+long to B may not produce any volume because the              ness of the BSP are often expensive and scale
+planes of B are not guaranteed to intersect with its          poorly [10], as they often require global knowledge.
+corresponding polyhedron. In our implementation               As our BSPs are naturally limited by their enclosing
+we circumvent this by also fully cutting the cor-             octree and their number of inner nodes is bounded,
+responding polyhedron according to B. This fits               we found that choosing the faces in a random order
+nicely with our pipeline since each Boolean oper-             is sufficient in our case.
+ation is followed by a Redundancy Removal step
+(see Section 3.7) where the cut mesh is required
+anyways.                                                      3.7. BSP Redundancy Removal
+                                                                 The result of CSG operations on BSP trees often
+3.6. BSP Import                                               produces suboptimal BSPs that contain redundant
+   For converting a mesh into BSP representation              or unnecessary nodes. Figure 1 shows a simple ex-
+we apply a commonly used algorithm [12] that it-              ample. Although we are unaware of methods that
+eratively builds a BSP from the given input faces.            produce optimal trees, a common way to improve
+At first, the BSP is initialized as a single leaf node.       the BSP structure is to extract the corresponding
+During each iteration, an input face is chosen and            mesh and rebuild a new BSP from scratch. This
+inserted into the BSP. Traversal starts at the root           quickly becomes infeasible in an inexact setting as
+node. Traversed leaf nodes are replaced by inner              rounding errors accumulate and prevent the rebuilt
+nodes with the plane equal to the supporting plane            BSP from representing the exact same volume as
+of the inserted face and traversal stops. The plane’s         the original BSP. However, our boundary extrac-
+normal direction determines which children of the             tion from Section 3.4 is fast and exact, making
+new node are marked in or out. When an inner                  the simplification-through-rebuilding approach ef-
+node is encountered there are three different cases:          fective. In practice, we perform the simplification
+Either the face intersects with the node’s plane. It          after each BSP merge. This means little additional
+is then split along the plane resulting in two faces,         computation is required to perform the boundary
+each traversing its corresponding subtree. If the             extraction: The merge procedure already produces
+face lies completely on one side of the node’s plane,         a convex cell for each leaf node. What remains
+it traverses only that subtree. Finally, if the face is       is the removal of interior overlapping surfaces (cf.
+coplanar to the node’s plane, the face is discarded.          Section 3.4).
+This step is important for the merging of split faces            Other exact methods, like [1, 2, 3], could apply
+in the redundancy removal step (Section 3.7).                 this approach as well. However, this incurs a signif-
+                                                          9
+                                                                                                                                      X
+
+
+                                                                                                                             Y                Y
+
+
+                                                                                                                         1       2        3       4
+
+                                                                       redundancy removal                                                 create axis-BSP
+
+
+
+                                                                              C������ B                                              C������ A
+
+
+
+
+                                                                                                                             1                        2
+
+
+
+                                                                                            intersection with child bounds
+                                                                                                                             3                        4
+                                                                                                       S��������
+
+
+
+
+                                                                   Figure 8: Subdividing an octree cell is equivalent to inter-
+                                                                   secting the cells BSP with the bounding box of each of its
+                                                                   child cells. For combining the children of a cell, their BSPs
+                                                                   are inserted into the leaf nodes of a BSP that contains the
+                                                                   axis-aligned planes separating the children (Combine A).
+                                                                   This is followed by a step (Combine B) of redundancy re-
+                                                                   moval (cf. Section 3.7) which eliminates the planes from the
+                                                                   axis-BSP.
+
+
+
+                                                                   BSP nodes. In that case, some higher complexity
+                                                                   nodes have to be accepted.
+                                                                      It may be necessary to perform multiple splits
+                                                                   until the BSP size has dropped under the given
+                                                                   threshold. Since the complexity of the merge pro-
+Figure 7: Each leaf of the octree contains a BSP. The BSP          cedure can result in quadratic runtime and output
+size is the subdivision criterion for each octree cell. The        size, smaller BSP-trees perform better. However,
+surface is color-coded by octree cell.
+                                                                   reducing the maximal BSP size causes an increase
+                                                                   in octree refinement. Experimentally, we found a
+icant performance penalty when used without our                    good compromise for the BSP threshold between
+fast mesh cutting from Section 3.3.                                100 to 200 (cf. Section 4.5). To assure the octree
+                                                                   complexity stays low, octree leaf nodes that have
+                                                                   a combined complexity small enough to fit into a
+3.8. Octree-Embedded BSPs                                          single octree cell are merged together.
+   BSPs offer a well defined method to perform CSG                    As octrees are a special form of BSP trees, cell
+operations. However, these methods scale super-                    subdivision and merge can be implemented effi-
+linearly with the size of the BSP (see Figure 10).                 ciently using our BSP algorithms. A 2 dimensional
+To circumvent this, we embed BSPs with a limited                   version of the process is shown in Figure 8. Sub-
+number of nodes into a global octree. An example of                dividing an octree cell is equivalent to computing
+this is shown in Figure 7. Changes to the geometry                 the intersection of its BSP with the boundary of
+may cause a BSP to exceed the maximal number of                    each of its children. The opposite – combining eight
+nodes. In that case its corresponding octree cell is               leaf cells into one – is technically the union of the
+subdivided into eight equally sized child cells. The               eight child BSPs. However, this requires the inclu-
+smaller child bounding boxes paired with a redun-                  sion of their boundaries, as BSPs are in general un-
+dancy removal step cause a decrease in BSP sizes                   bounded. The outer boundary is already implicitly
+per octree cell, with the exception of a few patho-                given by the parent octree cell. To represent the in-
+logical cases. For example, consider a valence 250                 ner boundaries that separate the eight children from
+vertex without coplanar adjacent faces that lies at a              each other, we build an axis-BSP. The first three of
+fractional coordinate. The cell containing this ver-               its levels each contain planes that separate the child
+tex cannot be subdivided to contain less than 250                  cells along one axis. The eight leaf nodes are then
+                                                              10
+replaced with the BSP from their corresponding oc-             arithmetic was implemented with the help of the
+tree cell. This technically concludes the combing               addcarry u64 and mulx u64 intrinsics. For com-
+step. However, the additional planes introduced by             paring with arbitrary-precision arithmetic we use
+the axis-BSP are rarely part of the solid boundary             the gmp [31] library which uses platform-specific op-
+and the combined child BSPs often share duplicate              timized assembly code.
+planes. Therefore the combine step is always fol-
+lowed by a redundancy removal (cf. Section 3.7).               4.1. Mathematical Foundation
+                                                                  Table 1 shows the performance of the opera-
+3.9. Octree Import                                             tions presented in Section 3.2. plane from points
+                                                               is used when converting a mesh into BSP form
+   We have already described how to convert a
+                                                               and it is expensive because we compute the great-
+mesh into a BSP. After the input mesh has been
+                                                               est common divisor (gcd) of the normal compo-
+rounded once to integer coordinates (according to
+                                                               nents to have them in canonical form. Note that
+Section 3.2) further operations make use of exact
+                                                               the gcd version is only needed when the nor-
+calculations.
+                                                               mals might otherwise exceed the precision lim-
+   Converting a mesh into the octree could be
+                                                               its (see Figure 2) which is not the case when
+achieved by creating a single BSP in the octree
+                                                               the quantization bounds of Section 3.2 are ob-
+root and then subdividing until the threshold for
+                                                               served. The two important functions during the
+each octree cell is reached. However, the subdivi-
+                                                               mesh cutting (and thus the Boolean operations)
+sion scales poorly with the large BSP size. Instead,
+                                                               are intersect 3 planes and classify vertex.
+we first create a triangle octree. The splitting crite-
+                                                               intersect 3 planes constructs the exact intersec-
+rion of an octree cell is first based on the number of
+                                                               tion position of three planes in homogeneous 4D in-
+triangles. The result is an octree with triangles in
+                                                               teger coordinates by computing four 3 × 3 determi-
+some leaf cells. Next, triangles are clipped to their
+                                                               nants. classify vertex takes such a 4D position
+octree node boundary and are then used to create
+                                                               and a plane and computes via dot product if the
+a BSP for the given cell. The clipping is necessary
+                                                               position is on the positive side, the negative side,
+to ensure the correct creation of BSPs. After cre-
+                                                               or exactly on the plane.
+ating the BSP, the octree cell complexity bound is
+enforced by another round of subdivisions, which is            4.2. Mesh Cutting
+now based on the actual BSP sizes. At this point,
+                                                                  For evaluating the performance of our mesh cut-
+all octree cells that contain parts of the input ge-
+                                                               ting and extraction, we measured time, number of
+ometry store a valid BSP. To correctly classify the
+                                                               vertex constructions, and number of vertex classifi-
+remaining octree cells we perform a flood-fill (on
+                                                               cations. The results are shown in Figure 9. Because
+octree cells) to propagate the correct in and out
+                                                               BSP mesh extraction scales especially poorly with
+labels.
+                                                               depth, we evaluated on a particularly challenging
+   Note that the triangle clipping must be exact and
+                                                               scenario: a convex object with many faces, corre-
+result in polygons. The newly created vertices on
+                                                               sponding to a purely linear, degenerated BSP tree.
+the clipping plane may not necessary lie on integer
+                                                               Classical mesh cutting (classify all vertices, add cut
+coordinates. Instead, they use the same 4D ho-
+                                                               geometry) scales quadratically with the number of
+mogeneous representation that we describe in Sec-
+                                                               nodes here because the mesh to cut grows linearly
+tion 3.2. It is also not possible to re-triangulate the
+                                                               more complex and for each cut, all vertices have
+clipped polygons, as that would require construct-
+                                                               to be classified (cf. Figure 9 (e)). Our cutting al-
+ing new planes which in general need more bits than
+                                                               gorithm with edge descent described in Section 3.3
+the input planes.
+                                                               usually traverses only a fraction of the mesh, mak-
+                                                               ing the method efficient even for deep BSPs. Note
+4. Evaluation                                                  that the BSP-merging algorithms shown in [12, 1, 2]
+                                                               work slightly different but use a subroutine to de-
+  Our test system has a 4.20 GHz Intel Core i7-                termine how a newly added plane lies in relation
+7700K with 16 GB RAM. All tests were performed                 to a BSP node’s plane and its subhalfspaces. Dur-
+on a single thread. All algorithms were imple-                 ing this procedure the new plane is cut with the
+mented in C++, compiled with Clang 7 using the                 bounds of the BSP node’s region, which scales lin-
+optimization level -O2. Our custom fixed-precision             early with the depth of the node and is equivalent
+                                                          11
+                           operation                   128b      192b    256b    CGAL      gmp
+                           plane from points            226       512     761    2770     9100
+                           are planes parallel            5        15      15     910     1840
+                           signed distance                4         5      11     530     1360
+                           to double position             5        62      88      31      120
+                           intersect 3 planes            23       160     402    4200     6380
+                           classify vertex               13       103     142     710     1540
+
+Table 1: Performance of the elementary operations used in our method in CPU cycles. We compare our custom 128bit, 192bit,
+and 256bit arithmetic against arbitrary-precision arithmetic provided by gmp [31] and a lazy exact implementation from CGAL
+[34], Lazy exact nt<Quotient<MP Float>>. gmp and CGAL were tested with the same numbers as the 256bit arithmetic. Due to
+their internal allocations, the timings of gmp and CGAL showed non-negligible variance of about 5–10%.
+
+
+
+to the complexity of the node’s cut-mesh in our ap-              on random BSPs and against output complexity,
+proach. This means that [12, 1, 2] scale like the                our method can create around 40–50 million BSP
+”naive” baseline in Figure 9 while our method, at                nodes per second per CPU core via CSG. This again
+least empirically, scales sub-linear with BSP-depth.             does not yet use the octree and only tests raw BSP
+   The other significant performance improvement                 boolean performance.
+is caused by the custom-tailored fixed-precision in-
+teger arithmetic described in Section 3.2 and con-
+sists of two aspects. Firstly, by storing vertex posi-           4.4. Memory Consumption
+tions as homogeneous 4D integer coordinates, clas-
+sification can be performed by a simple dot product.
+Vertex construction requires computing four 3 × 3                   Our octree-embedded BSPs are a persistent data
+determinants and is more expensive but also needed               structure. Each Octree node stores some metadata
+less often. Secondly, instead of using arbitrary-                and a BSP. The BSP consists of a flat array of nodes
+precision arithmetic (e.g. gmp), we derived the re-              where each node stores index of left and right child
+quired precision of all operations and intermediary              and an index into a palette of planes with special
+results and use fixed-precision arithmetic instead.              indices for leaf nodes. Planes (a, b, c, d) are either
+   In total, we sped up exact mesh extraction by al-             4+4+4+8 = 20 B or 8+8+8+16 = 40 B depending
+most two orders of magnitude, allowing us to com-                on 128 bit or 256 bit arithmetic (plane coefficients
+pute a few million mesh-plane-intersections per sec-             are significantly smaller than the largest intermedi-
+ond on a single core, even for challenging BSP trees.            ate result). These planes dominate the persistent
+Note that none of these tests exploit the octree,                memory consumption. The palette can reuse some
+they only test the underlying BSP algorithms.                    planes as input triangles might have been split dur-
+                                                                 ing BSP import, leading to several inner BSP nodes
+4.3. BSP Booleans                                                having the same splitting plane.
+   Figure 10 shows the performance of Booleans on                   During mesh extraction and BSP merging, we
+random BSPs. The BSPs are generated by sam-                      temporarily build a half-edge mesh with homoge-
+pling random points in a cube, looking up the leaf               neous 4D integer positions. In our experiments, this
+node at that position, and splitting it along a ran-             mesh requires around 600–850 B per BSP node on
+dom direction. Leaf nodes are randomly classified                average. In pathological cases it is possible for the
+as in or out. We generate two of these BSPs with                 mesh to grow quadratically with the BSP size.
+a size of 1–200 nodes and randomly perform either                   When importing a mesh into our data structure
+union, intersection, or difference. As complete sub-             we perform polygon clipping where we use a plane
+BSPs can be culled during merging, performance                   palette again. Each input face corresponds to a
+is more robustly characterized in terms of output                plane. Our polygons reference a supporting plane
+complexity. For random BSPs, output complex-                     and a list of edge planes that define edges and ver-
+ity is roughly quadratic in input complexity. Real               tices. The clipping process rewrites these refer-
+BSPs often only exhibit this quadratic growth close              ences but never creates new planes. Thus, the total
+to where the surfaces of the two BSPs meet and oth-              temporary space overhead when importing a mesh
+erwise retain their original complexity. Measured                amounts to less than 50 B per input face.
+                                                            12
+                                                                                                                                        (a) two random BSPs and their intersection
+
+                       (a) 50 planes                                (b) 250 planes
+                                                                                                                                  100
+               101               naive
+                                 edge descent
+
+
+
+                                                                                                           time (ms)
+                                                                                                                          10−1
+               100
+
+
+
+  time (ms)
+                                                                                                                                                                                                            128 bit
+                                                                                                                                                                                                            192 bit
+              10−1                                                                                                        10      −2                                                                        256 bit
+                                                                                        128 bit                                                                                                             gmp
+                                                                                        192 bit                                                                                                             CGAL
+                                                                                        256 bit
+              10−2                                                                      gmp                                             0              2000         4000          6000         8000         10000
+                                                                                        CGAL                                                                               output nodes
+
+                       0              50          100               150      200           250
+                                                                                                                                                (b) timings for BSP merging (log scale)
+                                                  planes (= bsp depth)
+
+                                  (c) timings for mesh extraction                                                                 10000
+
+
+
+
+                                                                                                                   output nodes
+                −1
+              10
+                                 128 bit
+                                 192 bit
+                                                                                                                                   5000
+                                 256 bit
+                                 gmp
+              10−2
+                                 CGAL                                                                                                       0
+
+  ms/plane
+                                                                                                                                                  0            50                 100           150             200
+                                                                                                                                                                            input nodes
+              10−3                                                                                                                                        (c) complexity growth
+
+                                                                                   naive               Figure 10: Timings for merging two random BSPs with 1–
+                                                                                   edge descent        200 nodes. (a) shows a sample in explosion view (blue is in,
+              10−4
+                       0              50          100               150      200           250
+                                                                                                       white is out). Performance mostly depends on the output
+                                                            depth                                      BSP size. See Table 1 for the exact CGAL type.
+                               (d) timings for single mesh-plane cuts
+
+              500
+                                  vertex constructions
+              400                 classifications (naive)
+                                  classifications (descent)
+
+  per cut
+              300
+                                                                                                                           500
+              200
+
+              100                                                                                                          400
+
+
+
+
+                                                                                                         Time (seconds)
+                   0                                                                                                       300
+                           0               50      100              150      200           250
+                                                            depth                                                          200
+                                     (e) mesh-plane cut metrics
+                                                                                                                           100
+Figure 9: Timings and key metrics for our highly efficient
+BSP mesh extraction ((c), (d), (e)). The tested BSP is the                                                                         0
+natural worst-case: a linear tree representing a convex ob-                                                                                      100     200    300         400         500   600     700      800
+ject (see (a) and (b) for an explosion view). The performance                                                                                                        Maximal BSP size
+is achieved using algorithmic innovation (in-place mesh cut-
+ting using edge descent for sublinear scaling) and code-level                                          Figure 11: Time to compute the sweep shown in Figure 12
+optimizations (custom-tailored fixed-precision integer arith-                                          with different maximal BSP sizes.
+metic). Note the logarithmic scales for the charts. See Ta-
+ble 1 for the exact CGAL type.
+
+                                                                                                  13
+4.5. Octree                                                    a BSP corresponding to this mesh within 10−8 rel-
+  The octree has only a single parameter: the maxi-            ative Hausdorff distance.
+mal BSP size. To determine which values offer good               We ran extensive fuzz tests on random BSPs to
+performance we created the sweep volume shown in               test stability and correctness. While we ran out of
+Figure 12 with varying maximal BSP size. The re-               memory eventually, we were not able to make our
+sults are shown in Figure 11. Good choices for the             algorithm fail.
+maximal BSP size can clearly be observed in the
+range of 100 to 200 BSP nodes.                                 5. Applications
+4.6. Stability and Correctness                                    Our approach excels at iteratively performing
+   Our core algorithms, BSP mesh extraction and                a sequence of CSG operations in an asymmetri-
+BSP merging, are unconditionally stable and cor-               cal setting: Highly complex geometry (the “work-
+rect. Any BSP with integer planes that satisfy our             piece”) in the Octree-BSP is subject to many it-
+mild precision limits (see Section 3.2) will work.             erative Booleans with a low-complexity Tool -BSP.
+The reason is that our mesh cutting can provide                With that in mind, we implemented applications for
+strong guarantees: Given a strictly convex polyhe-             sweep-volume calculations (Figure 12) and a milling
+dral input, the cutting always produces two strictly           simulation (Figure 13 and Figure 14), as well as re-
+convex polyhedra corresponding to the positive and             produced the bunny carving experiment from [1]
+negative side of the cutting plane (or the unchanged           and the David milling experiment from [3] (Fig-
+mesh if the cutting plane does not properly intersect          ure 15).
+the input). Here, strictly convex means that there                For the sweep-volume we took a series of discreet
+are no coplanar faces, i.e. each inner dihedral angle          time-steps. Each step, the sweep prism (the tool ) of
+is strictly less than 180◦ . Construction and classifi-        each individual triangle of the input shape is added
+cation of vertex positions are exact due their homo-           to the resulting output sweep (the workpiece). A
+geneous 4D integer representation. These guaran-               single triangle sweep is computed as the convex hull
+tees also extend to the octree which is, in principle,         of the triangles vertices at the current step and the
+just a union of BSPs.                                          next one.
+   The only situations where correctness might                    The milling simulation was performed in a simi-
+get compromised is when importing or exporting                 lar manner. A rotating drill-bit is moved through
+floating-point meshes. When our homogeneous 4D                 material with a 30 degree skew. There are 90 four
+integer coordinates are converted into 3D positions            degree steps to achieve a full 360 degree rotation.
+of float or double, rounding must occur. While                 For each step, the sweep volume is precalculated.
+we can provide a result that is correctly rounded              After a full rotation, the sweeps can be translated
+to the nearest representable number, this could—               according to the feed rate. In this case, the tool
+in theory—still lead to self-intersecting meshes. In           consists of one of the 90, possibly translated, sweep
+particular, [35] showed that finding a topology-               volumes. Then, each of the 90 sweep-volumes are it-
+preserving non-intersecting rounding is NP-hard.               eratively subtracted from the workpice, which starts
+   Extra care has to be taken when importing                   as a cube. This was done for three full rotations,
+meshes. When the input triangles do not form a                 resulting in a total of 270 tool subtractions. We
+closed watertight mesh, the resulting BSP can con-             also implemented this simulation with other state-
+tain superfluous microgeometry and misclassified               of-the-art methods. Besides our approach, only
+cells. The usual workflow is to scale and round the            CGAL with Nef-complexes [13] using exact con-
+input vertices to half the normal bits to guarantee            struction and exact kernel successfully finished the
+that all normals can be represented exactly when               simulation. The results are shown in Figure 13, the
+computing them via cross product. Our most per-                timings and number of resulting faces in Figure 14.
+missive setting uses 256 bit arithmetic with 27 bit            Note that we used the per-step outputs from [3] as
+positions and 55 bit normals which should be suf-              inputs for [24] because at the time of writing this,
+ficient for any practical purposes, though patho-              the published source code from [24] only allows the
+logical cases can be constructed. In particular,               computation of mesh-arrangements but not the re-
+this guarantees that if a watertight mesh stays self-          sulting Boolean. In order to compute Booleans a
+intersection free under any perturbation with rela-            classification to determine whether a cell is part of
+tive magnitude 10−8 or less then our import finds              the output is missing. Therefore the computation
+                                                          14
+Figure 12: Sweep of a gear along a Bezier curve with 100
+sample positions. This is the result of 764 501 union opera-
+tions and took 281 seconds to create at a maximal BSP size
+of 300 nodes per octree cell.
+
+
+                                                                        (a) The drill bit.    (b) Union of the 90 sweep volumes.
+of the arrangement gives a lower bound to the com-                                            Each shade of red is one sweep.
+putation effort.
+
+
+6. Limitations and Future Work
+
+   Input meshes in floating point formats have to be
+rounded to suitable integer coordinates before they
+can be used in our system. While our 256 bit arith-
+metic presented in Section 3.2 provides nanometer
+resolution and works for all practical meshes we
+tested, this is technically a limitation. Replacing
+our custom-tailored fixed-precision arithmetic with
+gmp is always possible but causes at least a 10×
+slowdown. A potential future avenue is to track
+the precision requirements not per elementary op-
+eration (as arbitrary-precision libraries do) but per
+BSP plane and branch into different fixed-precision                               (c) Result of the milling simulation.
+routines when constructing or classifying vertices.
+This will not only remove any precision limitation
+but might also provide a further speedup when op-
+erations can be performed with less bit depth.
+   Currently, input meshes are required to be water-
+tight and self-intersection free. While not needed
+for our use cases, this limitation is easy to lift.
+Campen and Kobbelt [2] showed how to treat self-
+intersections as BSP merges and Zhou et al. [3] use
+winding numbers to correctly classify cells.
+   The focus of this work is iterated CSG where a
+complex object is repeatedly merged with small,                     (d) Wireframe of step 71 of our approach (left) and mesh-
+                                                                    arrangements [3] (right).
+relatively simple objects. In such a setting, keep-
+ing the octree-embedded BSP as a persistent data                    Figure 13: Subtracting the sweep volumes (b) of a rotating
+structure is essential to achieve high performance:                 drill bit (a). The sweeps were precomputed in 4 degree steps,
+                                                                    simulation took 29 seconds with our approach and performed
+In each step, we only have to compute a series of                   a total of 58 472 individual BSP subtractions. Note the large
+BSP-BSP booleans where both BSPs have limited                       amount of poor-quality triangles in the result of the last
+complexity. The first is limited due to the subdivi-                successful subtraction using mesh-arrangements [3] (d).
+sion criterion of the octree, the second due to the
+assumption that the “tool BSP” is simple. Even
+with our optimizations, large BSP-BSP booleans
+                                                               15
+                                                                                   are still expensive, exhibiting superlinear time com-
+                                                                                   plexity. If the task is just to merge two complex
+              104                                                                  objects once, an architecture closer to [2] might be
+                                                                                   more appropriate: Build an octree containing trian-
+
+  time (ms)
+                                                                                   gles of the two meshes and only perform the BSP
+              102
+                                                             CK10
+                                                                                   conversion and merging in octree cells containing
+                                                             Cherchi et al.        geometry from both meshes. This would still ben-
+                                                             Zhou et al.
+              100                                            cgal-nef              efit significantly from our integer computation and
+                                                             cork
+                                                             ours
+                                                                                   BSP merging.
+                                                                                      Finally, our current implementation is single-
+                    0   50         100           150   200     250
+                                               step                                threaded. Especially the octree is perfectly suited
+                             (a) Per-step timings
+                                                                                   for parallelization where each octree cell can be
+                5
+                                                                                   merged in parallel with only minimal synchroniza-
+              10
+                                                                                   tion for the occasional octree subdivision and com-
+              104
+                                                                                   bination. We expect an almost linear speedup in
+                                                                                   number of cores.
+    faces
+              103
+                                                              CK10
+              102                                             Zhou et al.
+                                                                                   7. Conclusion
+                                                              cgal-nef
+                                                              cork
+              101                                             ours
+                                                                                      In many applications, such as simulations of man-
+                    0   50         100           150   200     250
+                                               step                                ufacturing processes, Boolean operations are not
+                        (b) Per-step face count
+                                                                                   only performed once, but repeatedly on a progres-
+                                                                                   sively more complex object. For these use cases,
+Figure 14: Milling simulation per-step timings are given in                        we designed a new persistent data structure that
+(a), comparing different methods. Cork [30] crashes after 17                       we call octree-embedded BSPs. In each cell of a
+steps, both mesh-arrangement approaches [3, 24] after 71,
+and CK10 [2] after 12. Per-step number of faces of the work-
+                                                                                   global octree we embed BSP trees with leaves la-
+piece (b). Our approach produces more faces than cgal-nef                          belled in and out, representing piecewise linear ge-
+[13] due to faces being split across octree cell boundaries.                       ometry. Inner nodes of the BSP are defined by
+                                                                                   planes with homogeneous integer coordinates.
+                                                                                      We present an exact algorithm for cutting a con-
+                                                                                   vex mesh against a plane that remains efficient even
+                                                                                   for cells in a deep BSP due to traversing only a frac-
+                                                                                   tion of the mesh and cutting it in-place. Instead
+                                                                                   of floating point coordinates we use a plane-based
+                                                                                   geometry representation and homogeneous 4D inte-
+                                         (a)
+                                                                                   ger coordinates with custom-tailored fixed-precision
+                                                                                   arithmetic to achieve up to 2.5 million mesh-plane
+                                                                                   cuts per second on a single CPU core. This is used
+                                                                                   to implement equally exact and efficient CSG and
+                                                                                   mesh extraction. While the BSPs are used to repre-
+                                                                                   sent the geometry, the octree is used as an acceler-
+                                                                                   ation structure to keep the impact of modifications
+                                                                                   local and bound the BSP complexity.
+                                         (b)                                          In combination, this results in an unconditionally
+                                                                                   stable high-performance system for performing it-
+Figure 15: The replication of experiments from [1] and [3]                         erated CSG of a complex object against many small
+using our approach: (a) Subtraction of 10 000 dodecahedra
+from a block to create the bunny. (b) Subtraction of the
+                                                                                   objects. We demonstrate this by computing sweep
+sweep volumes of a tool along a path to mill David from a                          volumes and simulating milling where our method
+solid block.                                                                       outperforms the state of the art both in terms of
+                                                                                   robustness and performance.
+                                                                              16
+Funding                                                                   iments, Computational Geometry 38 (2007) 64 – 99.
+                                                                          Special Issue on CGAL.
+  This work was supported by the Gottfried-                          [14] D. Pavić, M. Campen, L. Kobbelt, Hybrid booleans,
+                                                                          Computer Graphics Forum 29 (2010) 75–87.
+Wilhelm-Leibniz Programme of the Deutsche                            [15] G. Mei, J. C. Tipper,             Simple and robust
+Forschungsgemeinschaft DFG, by the Excellence                             boolean operations for triangulated surfaces, CoRR
+Initiative of the German federal and state govern-                        abs/1308.4434 (2013). URL: http://arxiv.org/abs/
+                                                                          1308.4434. arXiv:1308.4434.
+ment and by the European Regional Development
+                                                                     [16] J. R. Shewchuk, Adaptive Precision Floating-Point
+Fund within the HDV-Mess project under the fund-                          Arithmetic and Fast Robust Geometric Predicates, Dis-
+ing code EFRE-0500038.                                                    crete & Computational Geometry 18 (1997) 305–363.
+                                                                     [17] W. Nef, Beiträge zur Theorie der Polyeder: Mit An-
+                                                                          wendungen in der Computergraphik (1978).
+References                                                           [18] K. Sugihara, M. Iri, A solid modelling system free from
+                                                                          topological inconsistency, Journal of Information Pro-
+ [1] G. Bernstein, D. Fussell, Fast, exact, linear booleans,              cessing 12 (1990) 380–393.
+     in: Proceedings of the Symposium on Geometry Pro-               [19] C. C. L. Wang, Approximate boolean operations on
+     cessing, SGP ’09, Eurographics Association, Aire-la-                 large polyhedral solids with partial mesh reconstruc-
+     Ville, Switzerland, Switzerland, 2009, pp. 1269–1278.                tion, IEEE Transactions on Visualization and Com-
+ [2] M. Campen, L. Kobbelt, Exact and robust (self-                       puter Graphics 17 (2011) 836–849.
+     )intersections for polygonal meshes, Computer Graph-            [20] R. Schmidt, T. Brochu, Adaptive mesh booleans, CoRR
+     ics Forum 29 (2010) 397–406.                                         abs/1605.01760 (2016). URL: http://arxiv.org/abs/
+ [3] Q. Zhou, E. Grinspun, D. Zorin, A. Jacobson, Mesh                    1605.01760. arXiv:1605.01760.
+     arrangements for solid geometry, ACM Trans. Graph.              [21] F. Feito, C. Ogayar, R. Segura, M. Rivero, Fast and ac-
+     35 (2016) 39:1–39:15.                                                curate evaluation of regularized boolean operations on
+ [4] B. Sheng, B. Liu, P. Li, H. Fu, L. Ma, E. Wu, Ac-                    triangulated solids, Computer-Aided Design 45 (2013)
+     celerated robust boolean operations based on hybrid                  705 – 716.
+     representations, Computer Aided Geometric Design 62             [22] C. Ogayar-Anguita, A. Garcı́a-Fernández, F. Feito-
+     (2018) 133 – 153.                                                    Higueruela, R. Segura-Sánchez, Deferred boundary
+ [5] M. Douze, J.-S. Franco, B. Raffin, Quickcsg: Arbitrary               evaluation of complex csg models, Advances in Engi-
+     and faster boolean combinations of n solids (2015).                  neering Software 85 (2015) 51 – 60.
+                                                                     [23] A. Jacobson, D. Panozzo, et al., libigl:               A
+ [6] S. V. G. Magalhães, W. R. Franklin, M. V. A. Andrade,
+     Fast exact parallel 3d mesh intersection algorithm us-               simple C++ geometry processing library, 2018.
+                                                                          Https://libigl.github.io/.
+     ing only orientation predicates, in: Proceedings of the
+     25th ACM SIGSPATIAL International Conference on                 [24] G. Cherchi, M. Livesu, R. Scateni, M. Attene, Fast and
+                                                                          robust mesh arrangements using floating-point arith-
+     Advances in Geographic Information Systems, SIGSPA-
+     TIAL ’17, ACM, New York, NY, USA, 2017, pp. 44:1–                    metic, ACM Transactions on Graphics (SIGGRAPH
+                                                                          Asia 2020) 39 (2020).
+     44:10.
+ [7] R. Lynn, D. Contis, M. Hossain, N. Huang, T. Tucker,            [25] G. Barill, N. G. Dickson, R. Schmidt, D. I. Levin, A. Ja-
+                                                                          cobson, Fast winding numbers for soups and clouds,
+     T. Kurfess,       Voxel model surface offsetting for
+     computer-aided manufacturing using virtualized high-                 ACM Transactions on Graphics (TOG) 37 (2018) 43.
+     performance computing, Journal of Manufacturing Sys-            [26] G. Jense, Voxel-based methods for cad, Computer-
+     tems 43 (2017) 296–304.                                              aided design 21 (1989) 528–533.
+ [8] Y.-J. Sun, C. Yan, S.-W. Wu, H. Gong, C.-H. Lee, Ge-            [27] D. Jang, K. Kim, J. Jung, Voxel-based virtual multi-
+     ometric simulation of 5-axis hybrid additive-subtractive             axis machining, The International Journal of Advanced
+     manufacturing based on tri-dexel model, The Interna-                 Manufacturing Technology 16 (2000) 709–713.
+     tional Journal of Advanced Manufacturing Technology             [28] A. Hattab, G. Taubin, Interactive fabrication of csg
+     99 (2018) 2597–2610.                                                 models with assisted carving, in: Proceedings of the
+ [9] H. Barki, G. Guennebaud, S. Foufou, Exact, robust,                   Thirteenth International Conference on Tangible, Em-
+     and efficient regularized booleans on general 3d meshes,             bedded, and Embodied Interaction, 2019, pp. 677–682.
+     Computers & Mathematics with Applications 70 (2015)             [29] M. O. Benouamer, D. Michelucci, Bridging the gap
+     1235–1254.                                                           between csg and brep via a triple ray representation,
+[10] M. Lysenko, R. D’Souza, C.-K. Shene, Improved binary                 in: Proceedings of the fourth ACM symposium on Solid
+     space partition merging, Computer-Aided Design 40                    modeling and applications, 1997, pp. 68–79.
+     (2008) 1113–1120.                                               [30] G. Bernstein, Cork Boolean Library, https://github.
+[11] C. C. L. Wang, D. Manocha, Efficient boundary extrac-                com/gilbo/cork, 2013.
+     tion of bsp solids based on clipping operations, IEEE           [31] T. Granlund, the GMP development team, GNU MP:
+     Transactions on Visualization and Computer Graphics                  The GNU Multiple Precision Arithmetic Library, 6.1.2
+     19 (2013) 16–29.                                                     ed., 2016. http://gmplib.org/.
+[12] B. Naylor, J. Amanatides, W. Thibault, Merging bsp              [32] J. Hadamard, Résolution d’une question relative aux
+     trees yields polyhedral set operations, ACM Siggraph                 déterminants, Bulletin des Sciences Mathématiques 17
+     Computer Graphics 24 (1990) 115–124.                                 (1893) 240–246.
+[13] P. Hachenberger, L. Kettner, K. Mehlhorn, Boolean               [33] E. G. Gilbert, D. W. Johnson, S. S. Keerthi, A fast
+     operations on 3d selective nef complexes: Data struc-                procedure for computing the distance between complex
+     ture, algorithms, optimized implementation and exper-                objects in three-dimensional space, IEEE Journal on
+
+                                                                17
+     Robotics and Automation 4 (1988) 193–203.
+[34] The CGAL Project, CGAL User and Reference Manual,
+     5.1 ed., CGAL Editorial Board, 2020. URL: https://
+     doc.cgal.org/5.1/Manual/packages.html.
+[35] V. Milenkovic, L. R. Nackman, Finding compact co-
+     ordinate representations for polygons and polyhedra,
+     in: Proceedings of the Sixth Annual Symposium on
+     Computational Geometry, SCG ’90, Association for
+     Computing Machinery, New York, NY, USA, 1990, p.
+     244–252.
+
+
+
+
+                                                            18
+

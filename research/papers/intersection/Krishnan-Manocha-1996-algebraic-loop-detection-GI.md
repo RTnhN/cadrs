@@ -1,0 +1,265 @@
+CB #3175, Sitterson Hall, Chapel Hill, NC 27599-3175 USA krishnas@cs.unc.edu Dinesh Manocha
+
+Univ. of North Carolina CB #3175, Sitterson Hall, Chapel Hill, NC 27599-3175 USA manocha@cs.unc.edu Abstract
+
+Evaluating curves on surfaces is a frequently occurring operation in a number of applications involving surface interrogations. For example, evaluating the intersection curve of two surfaces is critical to boundary (B-rep) computation, and in applications involving visibility and rendering, the ability to evaluate the silhouette curve of surfaces is important. While dealing with high degree surfaces, these curves usually consist of a number of components, including loops. We present a new algebraic loop characterization algorithm that can be applied in a number of applications. In particular, we discuss its application to the intersection curve of two surfaces and the silhouette curve of a surface. Unlike some other loop detection algorithms, our method can be applied even when the curve contain(s) singularities.  Supported in part by a Alfred P. Sloan Foundation Fellowship, ARO Contract P-34982-MA, NSF Grant CCR9319957, ONR Contract N00014-94-1-0738, ARPA Contract DABT63-93-C-0048 and NSF/ARPA Center for Computer Graphics and Scientic Visualization i of surfaces for boundary evaluation, silhouette curve on a surface for visibility computations and rendering, and oset curves for toolpath generation. The resulting curves typically correspond to high degree algebraic degrees 1 with multiple components. These components can be classied into open components and loops. The open components intersect with the boundary of one of the surfaces or the end-point of a curve and a point on such components can be computed using algorithms for evaluating zero-dimensional algebraic sets. The rest of the curve components that do not intersect the boundary of the surface or the curve end-points are called loops. For example, the intersection of two B ezier surfaces in Figure 1 has one component corresponding to a loop. In general it is hard to come up with a tight bound on the number of components and development of general purpose algorithms for robust, ecient and accurate evaluation of these curves continues to be a major challenge. In this paper, we present ecient and accurate algorithms to evaluate the loops using a combination of algebraic and numeric methods. The problem of evaluating all the curve components has been extensively studied in the literature. In the last decade, a number of algorithms have been proposed to test for closed loops for intersection curve of two surfaces [SKW85, SM88, THS89, Che89, Hoh91, KPP90, KPW90, ZS93, FS90] and oset curves and surfaces [FN90, Hof90, MP93]. These techniques are based on symbolic methods, evaluation of Gauss maps, subdivision techniques, dierential methods and vector eld approaches. In practice, they can be slow or restrictive. For example, none of these techniques are ecient for evaluating all the loops of a silhouette of a bicubic tensor product B ezier patch from a given viewpoint.
+
+Main result: We present a new algebraic loop detection and evaluation algorithm for curve and surface interrogations. The algorithm uses the analytic equation and lower dimensional formulation of the curve and performs tracing in real and complex space to identify at least one turning point on each loop component. Unlike some of the previous loop detection algorithms, our method can 1 There are a few exceptions with respect to oset curves. 1
+
+<!-- image -->
+
+Figure 1: Two surfaces intersecting in a loop be applied even when the curve contain(s) singularities. In practice, it can be applied to evaluate any one-dimensional algebraic set. We use methods from classical elimination theory (in particular, resultants) to project the curve onto a plane (say, onto the domain of the parametric patch). The equation of this curve is represented as the singular set of a bivariate matrix polynomial. We use curve tracing methods (based on eigenvalue methods and inverse power iterations) to follow the curve from the boundary of the domain to a turning point of any loop in complex space. The resulting algorithm has been implemented and we discuss its performance on evaluating the intersection of two surfaces, boundary computation and evaluating the silhouettes of a B ezier patch from a given viewpoint. We compare its performance with the earlier approaches as well. 1.1 Previous Work The problem of evaluating all the curve components has been extensively studied in the literature and a number of techniques based on subdivision methods, marching methods, algebraic and symbolic techniques and lattice evaluations [Hof89, RR92]. In particular, the problem of determining all the loops of an algebraic curve can be solved robustly using symbolic methods. One such method is the cylindrical algebraic decomposition [ACM84], which can determine the topological type of a curve. 2
+
+uate the curves accordingly [Gei83, LR80, MP93]. In general, the two components of a curve can be very close and no good methods are known for computing a good tolerance value. As a result, most implementations use a conservative value for the tolerance. The resulting methods can be slow and lead to data proliferation. Some of the other approaches are based on lattice evaluation where the surface-surface intersection problem is simplied to a set of curve-surface intersection problems. The curves were obtained by evaluating the surface patch at a number of constant parameter values. The biggest drawback in this approach is the lack of robustness. Small loops could easily be missed depending on the frequency with which the curves are evaluated. In the last decade, techniques based on curve tracing have been widely used to evaluate high degree curves [BFJP87, BHHL88, KPP90, MC91]. The main idea is to compute at least one point on every component of the curve and use the local geometry of the curve to evaluate successive points. In these class of methods, identifying a point on every loop is signicantly harder than that on open components. As a result, simultaneously with the development of new ideas for evaluating
+
+such curves, number of techniques for loop detection have been proposed [SKW85, SM88, THS89, Che89, Hoh91, KPP90, KPW90]. However, most of these eorts were targeted towards developing loop detection methods for a special type of curve, the intersection curve of two surfaces. All the loop detection criteria are based on bounds on the Gauss map of the surfaces being intersected. Sinha et. al. [SKW85] had shown that if two (at least C 1 ) surfaces intersect in a closed loop, there exists a normal vector on one surface that is parallel to a normal vector of the other surface. Sederberg et. al. [THS89, SM88] strengthened the above work by proving that if two (at least C 1 ) surfaces intersect in a closed loop, there exists a line which is perpendicular to both surfaces (collinear normal vectors), provided the inner product between any normal on one surface and any other normal on the other surface is never zero. Patriakalakis et. al. [KPP90] precomputed the most signicant points of the intersection curve between an algebraic surface and a parametric patch to identify the main 3
+
+on the surfaces in Fig. 1 takes 8 levels of subdivision. Furthermore, these algorithms may not work well if the intersection curve is self-intersecting. The algorithms based on Gauss maps are generic. However, they become quite inecient when applied to other surface interrogations. Consider, for example, the application of algorithms based on Gauss maps to detect loops on the silhouette curve of a rational parametric patch of degree m - n. Let's assume that the viewing direction is along the positive z-axis. Hohmeyer uses a pseudo-normal patch to bound the Gauss map of the patch [Hoh91]. The parametric degree of the pseudo-normal
+
+patch can be as high as 3m - 3n. We can pose the silhouette curve as the intersection curve of the Gauss map with the plane z = 0 for orthographic projections. While applying the loop detection criterion, we have to compute the Gauss map of the pseudo-normal patch which would be a 9m - 9n rational parametric patch. Manipulating and subdividing such high degree parametric patches can be inecient and inaccurate in practice. As a result, there is a need to develop general-purpose and ecient loop detection and evaluation algorithms. Organization: The rest of the paper is organized in the following manner. Section 2 describes our formulation of the intersection curve between two parametric surfaces and the silhouette curve of a parametric surface. Section 3 discusses the loop detection algorithm. The implementation of the algorithm and its performance on various applications are highlighted in section 4, and we conclude in section 5. 2 Algebraic Formulation of the curve In the most general setting, a curve in R n can be expressed as a solution of (n ? 1) polynomial equations in n unknowns. F1(u1; u 2 ; : : : ; u n ) = 0 4
+
+parametric surface intersection. Given two B ezier surfaces, F(s; t) = (X(s; t); Y (s; t); Z(s; t); W (s; t)) and G(u; v) = (X(u; v); Y (u; v); Z(u; v); W(u; v)) represented in homogeneous coordinates, their intersection curve is dened as the set of common points in 3-space and is given by the vector equation F(s; t) = G(u; v). This results in the following set of three equations in four unknowns: F1(s; t; u; v) = X(s; t)W(u; v) ? X(u; v)W(s; t) = 0 F2(s; t; u; v) = Y (s; t)W(u; v) ? Y (u; v)W(s; t) = 0 (1) F3(s; t; u; v) = Z(s; t)W(u; v) ? Z(u; v)W(s; t) = 0; and the domain of the intersection curve is (s; t; u; v) 2 [0; 1] - [0; 1] - [0; 1] - [0; 1]. Existing numerical methods for curve evaluation perform tracing in these dimensions using techniques such as quasi-Newton's iteration. However, the convergence of these methods may not be good in higher dimensions [FF92]. Our approach is based on a classical result in algebraic geometry that states that any algebraic space curve has a one-to-one correspondence with an algebraic plane curve, after suitable linear transformations. The plane curves with one-to-one correspondence with the intersection curve in space are shown in Fig.2. Essentially, our evaluation algorithm is now restricted to the plane curve. Another advantage of this approach is that applications (like solid modelers), that use curve evaluation methods, need to provide simpler supporting algorithms. We represent the plane curve as the singular set of a bivariate matrix polynomial. 2.1 Intersection curve between parametric surfaces In this section, we present our method of formulating the intersection curve. Particularly, we apply it to the intersection of two rational B ezier surfaces. However, our method can be easily applied to 5
+
+<!-- image -->
+
+F(s; t) = (
+
+m X
+
+i=0
+
+n X
+
+j=0
+
+Vij B i;m (s)B j;n (t));
+
+Preimage of Intersection Curve Figure 2: Intersection curve and its planar preimages implicit algebraic surfaces as well. We represent the plane curve as an unevaluated matrix determinant [MC91]. Matrix Formulation: In this paper, we shall assume that the parametric surface is given in the form of a tensor product B ezier patch. A tensor product patch is of the form where Vij = (x ij ; y ij ; z ij ; w ij ) are the control point coordinates and B i;m (s) = 0 @ m i 1 A s i (1 ? s) m?i is the Bernstein polynomial. Given two B ezier surfaces, F(s; t) = (X(s; t); Y (s; t); Z(s; t); W (s; t)) and G(u; v) = (X(u; v); Y (u; v); Z(u; v); W(u; v)) in homogeneous coordinates, implicitize F(s; t) to the form f(x; y; z; w) = 0 [Sed83, Hof89] and substitute the parameterization of G(u; v) into f to get an algebraic plane curve of the form f(X(u; v); Y (u; v); Z(u; v); W(u; v)) = 0: The implicit representation of the patch is obtained by eliminating s and t from the equations xW(s;t) ? X(s; t) = 0 6
+
+<!-- image -->
+
+Figure 3: A pair of intersecting surfaces yW(s;t) ? Y (s; t) = 0 zW(s;t) ? Z(s; t) = 0 using resultants [Sed83]. There are dierent formulations of resultants for tensor product surfaces and triangular surfaces. It turns out that the resultant of these three equations can always be expressed as the determinant of a matrix [Dix08]. Let us denote that matrix as M(x; y; z; w). Furthermore, each entry of the matrix is of the form a ij x+b ij y+c ij z +d ij w. The order of M(x; y; z; w) is a function of the degrees of the equations. For tensor product surfaces of the form s m t n , the order of the matrix is 2mn. The determinant of the resulting matrix corresponds to the implicit representation of the parametric surface. We substitute the parameterization of G(u; v) into this matrix and obtain a representation of the form M(u; v), where each entry is a polynomial in u and v. This substitution is very simple because every entry of the matrix is just a linear term. The degree of each polynomial corresponds to the degree of G(u; v). Base Points: The base points of a parameterization are the common solutions of the equations: X(s; t) = 0; Y (s; t) = 0; Z(s; t) = 0; W(s;t) = 0. Typically, a generic parameterization does not have base points. However, in the presence of base points the resultant of the parametric equations is identically zero. The implicit representation in such cases is a factor of the determinant of the 7
+
+1v =
+
+2v =
+
+(WXv ? WvX)
+
+W 2
+
+the surface into front and back facing regions. In this section, we describe our formulation of the silhouette curve on a parametric (represented as a tensor product B ezier [Far93]) patch. We assume for the sake of simplicity that the viewpoint is located at (0; 0; ?1). It is easy to see that even if this is not the case, one can always achieve it by applying an appropriate perspective transformation to the parametric surface F(u; v). We also require that all the surfaces are at least C 1 everywhere. We formulate the silhouette curve as an algebraic plane curve in the domain of F(u; v). 2.3 Formulation of the Silhouette Curve Let F(u; v) denote the parametric (dierentiable) surface and let  1 (u; v);  2 (u; v) and  3 (u; v) denote the mappings from the parametric space to (x; y; z) space. F(u; v) = hX(u; v); Y (u; v); Z(u; v); W(u; v)i 1(u; v) = X(u;v) W(u;v ; 2(u; v) = Y (u; v) W(u;v ; 3(u; v) = Z(u; v) W(u;v In the rest of this section, we shall drop the (u; v) suxes from all the functions for more concise notation. The z?component of the normal at an arbitrary point on the surface is given by the determinant Nz = 1u 1v 2u 2v (2) where iu and iv denote the partial derivatives of the appropriate function  i with respect to u and v. 1u = (WXu ? WuX) W 2 2u = (WYu ? WuY ) W 2 8
+
+(WYv ? WvY )
+
+W 2
+
+matrix M(u; v)
+
+<!-- image -->
+
+<!-- image -->
+
+Figure 4:
+
+On the silhouette curve, N z = 0.
+
+silhouette as the determinant
+
+Nz =
+
+<!-- image -->
+
+<!-- image -->
+
+Loop as part of a silhouette curve
+
+Since W(u; v) 6= 0, we can express the plane curve representing the
+
+(WXv ? WvX)
+
+(WYv ? WvY )
+
+= 0
+
+Expanding the determinant and rearranging the terms, we can express it as the singular set of the
+
+(WXu ? WuX)
+
+(WYu ? WuY )
+
+9
+
+(3)
+
+We apply our loop detection algorithm to nd all the loops of an algebraic plane curve. We use a matrix determinant representation to deal with high degree curves, but any general form (like power or Bernstein basis) is sucient for our algorithm. In this section, we shall describe our loop detection algorithm. The curve we are interested in is an algebraic plane curve in the complex projective plane dened by u and v. We are, however, interested only in nding the part that lies in the portion of the real plane dened by (u; v) 2 [0; 1] - [0; 1]. If we relax this restriction so that one of the variables, say v, can take complex values, this curve is dened as a continuous set consisting of real and complex components. Before we give our algorithm, some basic notational denitions have to be introduced. Denition 1 Turning points are points on the curve where the tangent vector, as projected in the (u; v) space, is parallel to the u or v parameter axes. In other words, one of the partial derivatives (with respect to u or v) of the intersection curve is 0. We classify u-turning points into left u-turning points and right u-turning points. A point (u 1 ; v 1 ) is a left u-turning point if the curve goes into the complex domain in the left neighborhood of u1 (u = u1 ? , where  is a small positive value). A point (u 1 ; v 1 ) is a right u-turning point if the curve goes into the complex domain in the right neighborhood of u 1 (u = u 1 + ). Denition 2 Isoparametric curves are curves lying on a parametric patch (surface) where one of
+
+the parameters of the patch (u or v) remains constant. The main idea behind our loop detection algorithm is based on the following lemma. Lemma 1 If the curve in the real domain [0; 1] - [0; 1] consists of a closed component, then two arbitrary complex conjugate paths meet at one of the real points (corresponding to a turning point) on the loop. 10
+
+<!-- image -->
+
+u 0 1 1 A1 A2 A L1 L2 L3 Figure 5: Characterization of loops based on complex tracing Proof: The proof is based on Bezout's theorem which states that if f and g are two algebraic curves of degree m and n respectively, then f and g intersect in exactly mn points in the complex domain counted properly, or they have a common component. We use Bezout's theorem and the fact that the curve forms a continuous set in the complex domain to prove the result. Let us consider an algebraic curve that forms a loop in the real domain, like the one shown in g.1. All isoparametric curves on a surface have the same degree, namely the degree of the other parameter dening the surface. Therefore, the number of intersections of the algebraic curve with any isoparametric curve equals equals the Bezout bound in complex space. Fig.5 (left) illustrates the argument. The line L1 intersects the curve at two dierent real points. As we move the line continuously from L1 to L2, the two intersection points come closer, and at line L2, both of them coincide to form a double root maintaining the intersection count constant. This double root also corresponds to a u-turning point. As L2 approaches L3, all the real intersections vanish. Since the algebraic curve is continuous in complex domain, the double root must now take complex values and occur in conjugate pairs (real algebraic curve). Now if the sweep is started from L3 towards L2, the complex conjugate components come closer together, and at line L2, their imaginary part vanishes to yield a double root. This argument shows 11
+
+u-turning points. Henceforth, we shall use turning points to denote u-turning points. Our domain has changed from the real plane to a three dimensional space formed by u, v r and v i , where v r and v i are the real and imaginary values of v. To compute the turning points on the curve, we combine boundary computations with complex tracing. Boundary intersections: Boundary intersections refer to the portions of the curve that lie along the boundary of the surface (in our case, when u = 0, u = 1, v = 0 or v = 1). This corresponds to substituting one of these values into the equation M(u; v) = 0. Let us assume without loss of generality that we substitute u = 0. This results in a matrix polynomial M(v) of the form M(v) = v d Md + v d?1 Md?1 + : : : + vM 1 + M 0 = 0: (5) where Mi's are numeric matrices (of order 2mn for the intersection curve and 3 for the silhouette curve). The solution of this matrix equation can be reduced to the eigenvalues of an associated companion matrix. C = 2 6 6 6 6 6 6 4 0 I n 0 : : : 0 . . . . . . . . . . . . . . . 0 0 0 : : : I n ?M0 ?M1 ?M2 : : : ?Md?1 3 7 7 7 7 7 7 5 (6) where Mi = M ?1 d Mi. In case Md is singular or ill-conditioned, the intersection problem is reduced to a generalized eigenvalue problem [Man94a]. Algorithms to compute all the eigenvalues are based on QR orthogonal transformations [GL89]. They compute all the real and complex eigenvalues. Tracing: Given the starting complex on the boundary of the surface, we use tracing in the complex domain to reach the turning points on every loop. The general tracing step proceeds as follows. Given a point on the curve, an approximate value of the next point is obtained by taking a small step size in a direction determined by the local geometry of the curve (tangent or curvature information). This 12
+
+to the largest eigenvalue of (C ? v2 I) ?1 . Instead of computing the inverse explicitly (which can be numerically unstable), we use inverse power iterations. Given an initial unit vector q 0 , we generate a sequence of vectors q k as Solve (C ? v 2 I)z k = q k?1 ; qk = zk = k z k k 1 ; s k = q T k Cqk ; To solve the matrix system eciently, we use LU decomposition of the matrix (C ? v2 I) using Gaussian elimination. We also make use of the structure of the matrix to reduce the complexity of LU decomposition. Given s, let B = C ? v2 I. B is of the form: B = 0 B B B B B B @ 1In I n 0 : : : 0 . . . : : : 0 0 : : : 1In I n P1 P2 P3 : : : Pm 1 C C C C C C A where 1 is a function of s, and P i 's are n - n matrices which are functions of M i 's and v 2 . The LU decomposition of B has the form: B = 0 B B B B B B @ 1In 0 : : : 0 0 1In : : : 0 . . . : : : R1 R2 : : : Lm 1 C C C C C C A 0 B B B B B B @ I n 1 1 I n : : : 0 0 I n : : : 0 . . . : : : 0 0 : : : Um 1 C C C C C C A where Lm and Um correspond to the LU decomposition of Rm . Ri 's can be easily computed from the Pi's. The structure of the matrices are used in performing the triangular decomposition eciently. LU decomposition can be inaccurate when the matrix B is ill-conditioned. In such cases, we perform an LQ factorization (lower triangular and orthonormal matrix decomposition) to improve the stability. 13
+
+following strategy to complete a sweep of the complex paths from u = 0 to u = 1. Since complex solutions occur in conjugate pairs for real algebraic equations, we restrict ourselves to complex paths whose imaginary parts are strictly positive. When a complex path touches the real plane the imaginary part (of v) must reach some small constant value  before reducing to zero. These are precisely the common points of the curve with the plane vi = . In other words, we are trying to nd all the real solutions to the equation det M(u; v r + i) = 0 (i = p ?1). Expanding out the expression and collecting the real and imaginary terms we can write det(Mr(u; vr ) + iM i (u; v r )) = 0 (7) It is easy to show that the solutions (u; v r ) satisfying equation (7) also satisfy the solution of det P(u; v r ) = 0, where P(u; v r ) = 2 4 Mr(u;vr) ?Mi(u;vr) Mi (u; v r ) Mr(u;vr) 3 5 (8) As before, the solutions to (8) can be posed as the singular set of matrix P(u; v r ). The singular set of P(u; v r ) is a discrete point set. The order of the matrix P(u; v r ) is twice that of M(u; v). Therefore, there are twice as many paths to trace in general. For an intersection curve, if the patches are of degree m - n and p - q, then at most 2mn min(p; q) paths have to be traced, and for the silhouette curve of a patch of degree m - n, at most 3(m + n) paths have to be traced. Initially we form the companion matrix of P(u; v r ), C p , similar to the one in Eq.(6). We compute all the eigenvalues of Cp at u = 0 (we expect all of them to be complex). We use them as starting points and trace all the paths in increasing u direction until it either crosses the u = 1 plane or become real. All the real values of v r are points lying very close to the turning points of the intersection curve. The corresponding point on the real plane is (u r ; v r ). This is used as an initial guess to converge to the turning point using inverse power iterations. 14
+
+<!-- image -->
+
+quadratic in the degree of the curve. However, the maximum number of complex paths that need to be traced in our loop detection algorithm is linearly related to the degree of the curve. The performance of the tracing algorithm is directly dependent on how eciency of linear systems (Ax = b) solvers. While methods like LU and LQ decomposition take O(n 3 ) operations, our use of the special structure of the matrix has almost quadratic complexity. Our implementation of the algorithm consists of 15
+
+Figure 6: Two tori intersecting in a small loop 4 Implementation, Performance and Applications The loop detection algorithm has been implemented and its performance was measured on a number of models. The algorithm uses existing EISPACK [GBDM77] and LAPACK [ABB + 92] routines for some of the matrix computations. At each stage of the algorithm, we can compute bounds on the accuracy of the results obtained based on the accuracy, condition numbers and convergence of numerical methods used like eigenvalue computation, power iterations and Gaussian elimination. We report the results of our implementation on an SGI Onyx workstation with 128MB of main memory and a specFP rating of 97.1. Tracing in the complex space is a guided form of search for all the turning points of the loops. In a purely algebraic form, all the turning points of a curve f(u; v) = 0 can be posed as the common solutions of f(u; v) = f u (u; v) = 0. Using the Bezout bound, the number of possible turning points is been applied to a number of intersecting surfaces and has worked well consistently. Our algorithm evaluated the intersection curve of the surfaces in Fig. 1 in about 4 seconds. A total of 54 complex paths were traced which consumed about 70% of the time. For eciency considerations, it may not be necessary to trace all the complex paths. Typically, very few complex paths meet the real plane inside the domain of the patch. It is very dicult to give exact algorithms to prune out paths that cannot touch the real plane because of the high degree nature of the curve. However, through repeated application of our algorithm we found that paths that start very high in the complex axis rarely hit the real plane. This strategy could be used to speed up the tracing step depending on the robustness requirements of the application. In order to compare our algebraic method with the Gauss map based approaches to loop detection, we implemented Hohmeyer's algorithm (in the context of surface intersection) using pseudo-normal patches [Hoh91]. His algorithm performed slightly slower than our algorithm on the example in Fig. 1. Eight levels of subdivision were performed, and most of the time was consumed in the repeated computation of the Gauss map and application of linear programming. We observed that his algorithm works very well when the patches are relatively at and do not intersect in loops. However, these methods perform a number of subdivisions (to achieve the no loop criterion) when the patches have high curvature and intersect in small loops or singularities. Hybrid approach: We suggest the following hybrid approach when dealing with intersection curves. Initially, we test for the possible absence of loops using the Gauss map approach. In the event that Gauss maps are not separated, we apply our algorithm to identify turning points on loops. This method has been applied to compute intersections of high degree surfaces. On an average, our algorithm takes less than one second to compute one patch-pair intersection. For the intersecting surfaces in Fig. 1 and Fig. 6, our method performs better than Hohmeyer's algorithm. His method, however, performed better when applied to the surfaces in Fig. 3. 16
+
+<!-- image -->
+
+Figure 7: Loop detection used in B-rep computation The surface intersection algorithm is part of a solid modeling system which computes the B-rep (boundary representation) of CSG solids. Fig. 7 shows two of the solids generated by the system. The solid on the left is composed of 69 B ezier patches using a 10 level CSG tree. Our system computed the entire B-rep in 66 secs. The B-rep of the solid on the right (consisting of 116 B ezier patches using a 5 level CSG tree) was computed in 41 secs. We have also applied the loop detection algorithm to compute the silhouettes of surfaces. Fig. 4 shows a patch that has a loop as part of its silhouette. 4.2 Silhouette Computation For other curves like silhouettes, the Gauss map approach is not very practical. In order to apply their loop detection criteria on a bicubic patch (like that in Fig. 4(b)), one would have to perform repeated subdivisions on rational patches of degree 27 - 27. This makes the algorithm very slow because each subdivision step takes cubic time (in terms of the degree). We were able to determine all the 17
+
+Using plane vector elds to obtain all the intersection curves of two general surfaces.
+
+We have presented a general algorithm based on numeric and symbolic methods for loop detection of algebraic curves. It performs boundary intersections followed by complex tracing to locate the turning points on every loop. The resulting algorithm is based on numerical matrix computations and algebraic characterization of the curve. It has been used to accurately compute intersection and silhouettes of high degree surfaces. References [ABB + 92] E. Anderson, Z. Bai, C. Bischof, J. Demmel, J. Dongarra, J. Du Croz, A. Greenbaum, S. Hammarling, and D. Sorensen. LAPACK User's Guide, Release 1.0. SIAM, Philadelphia, 1992. [ACM84] D. S. Arnon, G.E. Collins, and S. McCallum. Cylindrical algebraic decomposition. SIAM J. on Computing, 13:878{889, 1984. [BFJP87] R. Barnhill, G. Farin, M. Jordan, and B. Piper. Surface/surface intersection. Computer Aided Geometric Design, 4(3):3{16, 1987. [BHHL88] C.L. Bajaj, C.M. Homann, J.E.H. Hopcroft, and R.E. Lynch. Tracing surface intersections. Computer Aided Geometric Design, 5:285{307, 1988. [Buc85] B. Buchberger. Groebner bases: An algorithmic method in ideal theory. In N.K. Bose, editor, Multidimensional Systems Theory, pages 184{232. D. Reidel Publishing Co., 1985. [Che89] K.P Cheng. In Theory and Practice of Geometric Modeling, pages 187{204, 1989. [Dix08] A.L. Dixon. Mathematical Society, 6:49{69, 209{236, 1908. [EC94] G. Elber and E. Cohen. Exact computation of gauss maps and visibility sets for freefrom surfaces. Technical report CIS #9414, Computer Science Department, Technion, 1994.
+
+The eliminant of three quantics in two independent variables.
+
+18
+
+Proceedings of London
+
+[GBDM77] B.S. Garbow, J.M. Boyle, J. Dongarra, and C.B. Moler. Matrix Eigensystem Routines { EISPACK
+
+[Man94a]
+
+[Gei83]
+
+[Man94b]
+
+[GL89]
+
+[MC91]
+
+Guide Extension, volume 51. Springer-Verlag, Berlin, 1977.
+
+Symposium on Symbolic and Algebraic Computation, pages 1{8, Oxford, England, 1994. ACM Press.
+
+A. Geisow.
+
+Surface Interrogations.
+
+PhD thesis, School of Computing Studies and Accountancy,
+
+D. Manocha. Solving systems of polynomial equations. IEEE Computer Graphics and Applications,
+
+University of East Anglia, 1983.
+
+pages 46{55, March 1994. Special Issue on Solid Modeling.
+
+G.H. Golub and C.F. Van Loan. Matrix Computations. John Hopkins Press, Baltimore, 1989.
+
+D. Manocha and J.F. Canny.
+
+A new approach for surface intersection.
+
+International Journal of
+
+[Hof89]
+
+C.M. Homann. Geometric and Solid Modeling. Morgan Kaufmann, San Mateo, California, 1989.
+
+Computational Geometry and Applications, 1(4):491{516, 1991. Special issue on Solid Modeling.
+
+C.M. Homann. A dimensionality paradigm for surface interrogations. Computer Aided Geometric
+
+19
+
+D. Manocha. Computing selected solutions of polynomial equations. In Proceedings of International
+
+[Hof90]
+
+[Hoh91]
+
+[KPP90]
+
+[KPW90]
+
+[LR80]
+
+for surface intersections.
+
+Design, 7:517{532, 1990.
+
+M.E. Hohmeyer.
+
+A surface intersection algorithm based on loop detection.
+
+Computer-Aided Design, 24(1):41{55, 1990.
+
+International Journal
+
+of Computational Geometry and Applications, 1(4):473{490, 1991. Special issue on Solid Modeling.
+
+G.A. Kriezis, P.V. Prakash, and N.M. Patrikalakis. Method for intersecting algebraic surfaces with
+
+rational polynomial patches. Computer-Aided Design, 22(10):645{654, 1990.
+
+G.A. Kriezis, N.M. Patrikalakis, and F.E. Wolter.
+
+2(1):150{159, 1980.
+
+Topological and dierential equation methods
+
+J.M. Lane and R.F. Riesenfeld. A theoretical development for the computer generation and display
+
+of piecewise polynomial surfaces. IEEE Transactions on Pattern Analysis and Machine Intelligence,
+
+[Sed83]
+
+[Sei90]
+
+[SKW85]
+
+[SM88]
+
+[THS89]
+
+[ZS93]
+
+T.W. Sederberg.
+
+1983.
+
+R. Seidel.
+
+Implicit and Parametric Curves and Surfaces.
+
+Linear programming and convex hulls made easy.
+
+P. Sinha, E. Klassen, and K.K. Wang. Exploiting topological and geometric properties for selective
+
+subdivision. In ACM Symposium on Computationl Geometry, pages 39{45, 1985.
+
+Loop detection in surface patch intersections.
+
+20
+
+Comput. Geom., pages 211{215, 1990.
+
+T.W. Sederberg and R.J. Meyers.
+
+A. Zundel and T. Sederberg.
+
+PhD thesis, Purdue University,
+
+In Proc. 6th Annu. ACM Sympos.
+
+Geometric Design, 5:161{171, 1988.
+
+sections. Computer-Aided Design, 21(8):505{508, 1989.
+
+sections. In SIAM Conference on Geometric Design, Tempe, AZ, 1993.
+
+Computer Aided
+
+Sederberg T.W, Christiansen H.N, and Katz S. An improved test for closed loops in surface inter-
+
+Using pyramidal surfaces to detect and isolate surface/surface inter-

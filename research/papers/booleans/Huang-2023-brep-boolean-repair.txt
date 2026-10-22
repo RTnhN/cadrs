@@ -1,0 +1,958 @@
+                                         B- REP B OOLEAN R ESULTING M ODEL R EPAIR BY C ORRECTING
+                                           I NTERSECTION E DGES BASED ON I NFERENCE P ROCEDURE
+
+
+                                                                       Haomian Huang*, Li Chen, Enya Shen, Jianmin Wang
+                                                                                      School of Software
+                                                                                     Tsinghua University
+
+
+
+
+arXiv:2310.10351v1 [cs.GR] 16 Oct 2023
+                                                                                        Beijing, China
+
+
+
+
+                                                                                              A BSTRACT
+                                                  As the most essential part of CAD modeling operations, boolean operations on B-rep CAD models
+                                                  often suffer from errors. Errors caused by geometric precision or numerical uncertainty are hard
+                                                  to eliminate. They will reduce the reliability of boolean operations and damage the integrity of the
+                                                  resulting models. And it is difficult to repair false boolean resulting models damaged by errors. In
+                                                  practice, we find that the illegal boolean resulting models stem from the false intersection edges
+                                                  caused by errors. Therefore, this paper proposes an automatic method based on set reasoning to
+                                                  repair flawed structures of the boolean resulting models by correcting their topological intersection
+                                                  edges. We provide a local adaptive tolerance estimation method for each intersection edge based on
+                                                  its geometric features as well as its origin. Then, we propose a set of inference mechanisms based on
+                                                  set operations to infer whether a repair is needed based on the tolerance value and how to correct the
+                                                  inaccurate intersection edge. Our inference strategies are strictly proven, ensuring the reliability and
+                                                  robustness of the repair process. The inference process will transform the problem into a geometric
+                                                  equivalent form less susceptible to errors to get a more accurate intersection edge. Since our inference
+                                                  procedure focuses on topological features, our method can repair the flawed boolean resulting models,
+                                                  no matter what source of errors causes the problem.
+
+                                         Keywords B-rep, Boolean operations, Topological repair, Inference procedure
+
+                                         1   Introduction                                              to implement, but it cannot find all solutions and always
+                                                                                                       gets stuck in local optimums. There are some methods
+                                         Model problems caused by errors are common in the pro-        for solving the global optimization problem in polyno-
+                                         cess of boolean operations in CAD kernels. Based on their     mial systems[3], but these methods lack accuracy and ro-
+                                         sources, there are four main kinds of errors[1]: inaccurate   bustness. To overcome these disadvantages, researchers
+                                         input data, approximation errors, floating-point arithmetic   proposed subdivision methods to properly divide the in-
+                                         errors, and inherent accuracy limitations of the geomet-      tersection areas into multiple regions and then use differ-
+                                         ric intersection algorithms. If the CAD kernels cannot        ent strategies to find the solutions based on each region’s
+                                         correctly deal with these errors, then the topology of the    conditions[4]. However, all these improved intersection
+                                         resulting models may be corrupted. It will generate some      algorithms only reduce the latter two kinds of errors. Be-
+                                         flawed structures that users do not expect. Furthermore,      sides, they do not enhance CAD kernels’ ability to deal
+                                         models with topology errors may cause the corruption of       with the accumulating errors, which will break models
+                                         the program when users do some subsequent operations          after a sequence of operations. Another way to deal with
+                                         on them. Therefore, without a solution to error problems,     error problems is tolerant modeling, which enables CAD
+                                         CAD software cannot be applied in practice.                   software to accept less precise data as input. It allows every
+                                                                                                       vertex and edge to have its tolerance value. These local
+                                         To tackle these error problems, many researchers have         tolerance values can heal the flawed structures caused by
+                                         done a lot of work. One solution is to implement a more       errors like leaky and disconnection while maintaining the
+                                         accurate geometric intersection algorithm. There are many     accuracy and integrity of the geometric shapes. But setting
+                                         numerical methods to solve polynomial systems that arise      appropriate tolerance values can be a difficult task. And im-
+                                         in geometric intersections. Newton’s method[2] is simple
+                                         email:huanghm21@mails.tsinghua.edu.cn
+proper local tolerance values will cause inconsistencies at          preserve the tiny features of the resulting models very well
+touch areas between two different models when assembling             in the repair process.
+or self-intersection inside the topological entity, corrupting
+                                                                     •Valid inference procedures which use topological features
+the whole model. What is worse, the tolerance values will
+                                                                     to detect and correct inaccurate intersection edges. Our in-
+bring uncertainty and inconsistency to the boolean oper-
+                                                                     ference process will locate the problem intersection edges
+ations, which generate flawed structures in the resulting
+                                                                     and fix them with more accurate results. This process is di-
+models.
+                                                                     rected by the feature-based tolerance values of intersection
+With the development of artificial intelligence, neural net-         edges, which are calculated automatically. Therefore, it is
+works have been used to process CAD models. However,                 very friendly for users. Besides, Our inference strategies
+due to the complexity and ambiguity of B-rep models,                 are proved by set reasoning, which promises the soundness
+neural networks nowadays can only handle some elemen-                of our algorithms.
+tary tasks like segmentation and classification, and even
+then, there is still a high chance of misjudgment, which
+is unacceptable in practice. CAD kernels require that the            2   Related Work
+algorithms must be highly accurate and stable. Otherwise,
+a small error will lead to unexpected wrong results.
+                                                                     Robust boolean operations on plane-based models A
+Consequently, the solution to error problems must ensure
+                                                                     considerable part of boolean operation errors come from
+the correctness of the resulting models regardless of the
+                                                                     the process of intersection calculation. In plane-based mod-
+source of errors. Moreover, the method must be highly
+                                                                     els like mesh, there are several methods to reduce the errors.
+accurate and stable. Only then can this method be em-
+                                                                     An implicit plane-based boundary representation[6] is pro-
+bedded into the CAD kernel and actually used in practice.
+                                                                     posed to solve this problem. In this method, each point is
+According to our hundreds of thousands of tests on the
+                                                                     implicitly represented as the intersection of three planes,
+common shapes of industrial parts, we find that the main
+                                                                     and each straight line is implicitly represented as the inter-
+reason why boolean operations fail is the intersection in-
+                                                                     section of two planes. Besides, a technology called filtered
+consistency caused by errors. Therefore, in this paper, we
+                                                                     floating point predicate[7] is introduced to reduce float
+focus on repairing boolean resulting models with flawed
+                                                                     errors. However, this method will hurt the efficiency of the
+structures by correcting the inaccurate intersection edges.
+                                                                     whole process. Therefore, homogeneous coordinates[8]
+Based on the topology level of the intersection inconsis-
+                                                                     are used to totally avoid float errors. By this method, all
+tency, we classify it into three types: face-face, edge-face,
+                                                                     float point operations are converted into integer operations,
+and edge-edge. For each type of scenario, a well-designed
+                                                                     but using homogeneous coordinates will make some algo-
+inference procedure is proposed to detect and repair this
+                                                                     rithms difficult to implement, such as the triangulation of
+kind of inconsistency. All inference procedures are strictly
+                                                                     mesh grids. That is why this method cannot be widely used.
+proven and will help us avoid misjudgment, which will sig-
+                                                                     And in previous work, researchers had noticed that the in-
+nificantly enhance the accuracy and stability of the repair
+                                                                     tersection inconsistency between two models was the main
+method. Our method first calculates appropriate tolerance
+                                                                     reason why boolean operations failed. Therefore, they pro-
+values for every intersection edge. Then, we combine
+                                                                     posed robust boolean operations on polyhedral solids based
+the intersection edges into the structure of the intersec-
+                                                                     on cross-section graphs and implicit representation[5]. A
+tion graph, introduced in section 4.2. Then, we use the
+                                                                     cross-section graph comprises the intersection of a solid
+tolerance values of each edge and the intersection graph
+                                                                     with a face. Edges in the graph are well-oriented to par-
+to direct the inference procedures, which will only cor-
+                                                                     tition the areas of the face as being inside, on, or outside
+rect inaccurate intersection edges that will cause flawed
+                                                                     the solid. Besides, they perform robust incidence tests to
+structures in the resulting models. This method has the
+                                                                     help classify the areas. By using the implicit representation
+following contributions:
+                                                                     of points and lines, an incidence test can be transformed
+•Proposing a framework for repairing boolean resulting               into multiple point-on-plane problems, which will enhance
+models by correcting intersection edges. In previous work,           the accuracy. However, these above methods can only be
+some researchers have noticed the intersection inconsis-             applied on straight lines and planes. In industrial design,
+tency in polyhedral models[5], but to the best of our knowl-         B-rep models based on parametric curves and surfaces are
+edge, we are the first to improve the boolean results of             more widely used than polyhedral models. Unlike mesh
+parametric B-rep models based on their intersection edges.           or polyhedral models, whose errors mainly come from
+                                                                     float errors, parametric B-rep models’ error composition is
+•Organizing intersection edges into an intersection graph,
+                                                                     more complex. Complex curves and surfaces need to be
+which carries much geometric and topological informa-
+                                                                     fitted with splines, which bring approximation errors after
+tion about intersection edges and the resulting model, to
+                                                                     the formation of B-rep models. Moreover, the intersection
+help make a reasonable repair. Compared with extracting
+                                                                     of curves and surfaces is more complicated than that of
+information from resulting models, information from in-
+                                                                     straight lines and planes in mesh models. The intersection
+tersection edges is more intuitive, and the process is more
+                                                                     algorithms have calculation errors except for float errors,
+efficient due to the simple topological structure of intersec-
+                                                                     which will continue accumulating during the modeling
+tion graphs. With the help of intersection graphs, we can
+                                                                     process. Therefore, tolerant modeling technology[9] is
+
+
+                                                                 2
+proposed to solve the problem of model illegality caused      how this model is constructed. Consequently, even if the
+by errors.                                                    resulting model collapses due to some errors, the program
+                                                              can still reconstruct the model partly and detect where
+Tolerant modeling Generally, precise models are best for
+                                                              the errors occur. However, this method depends on the
+users. But for the above reasons, it is hard to get accu-
+                                                              definitions of error types, which may falsely modify the
+rate data in some situations. Tolerant modeling allows
+                                                              flawless models. Besides, analyzing design history data is
+the program to accept less accurate data while keeping
+                                                              time-consuming, and some CAD systems do not have such
+the validity of topology structures[10]. Mainstream CAD
+                                                              information for each model.
+kernels have multiple kinds of global tolerance variables.
+For example, the positional tolerance value is the smallest Deep learning Recently, neural networks have been used
+distance between two different topological vertices, and to process CAD B-rep models. Compared with mesh
+the fitting tolerance value is used to guide the accuracy of and point cloud data, B-rep models formed by paramet-
+fitting algorithms for complex curves and surfaces. The ric curves and surfaces are much more complex, and few
+global tolerance method is efficient, and it can handle most neural networks can consume such B-rep data directly. To
+situations. But more is needed to solve some exceptional overcome the difficulty, UV-Net[21] extracts geometric
+cases. And it will be difficult to transfer models’ data features from the parameter domain as regular grids(UV-
+from one CAD kernel to another with different tolerance grids) and uses a face-adjacency graph representing the
+settings. To avoid these disadvantages, local tolerant mod- topological connection to form the structure of the graph
+eling is proposed[9]. It allows basic topology structures neural network. Then, image convolutions on the curve
+such as edges and vertices to have their own tolerance val- and surface UV-grids are performed to get their hidden
+ues, which does not impact the robustness and reliability of features. The hidden features, which are the output of the
+the precise modeling while strongly enhancing the ability CNNs, are then treated as input edge and node features
+to accept less accurate data to the model.                    to the graph neural network. BRepNet[22], however, uses
+                                                              convolution networks only. The input of the convolution
+Tolerant analysis Determining suitable tolerance values
+                                                              networks is the feature vectors that encode the geometric
+for topology structures and whether present tolerance val-
+                                                              information of the faces, edges, and coedges. Compared
+ues can satisfy following operations become a crucial topic
+                                                              with UV-grids, feature vectors are much simpler and only
+in tolerant modeling[11]. Tolerance-map(T-map)[12] is
+                                                              include some basic information like the geometric types,
+a hypothetical Euclidean-Space point set representing all
+                                                              the area of a face, and the length of an edge. Therefore,
+probabilities of a feature in its tolerance zone. When as-
+                                                              these features can be extracted very efficiently. And the
+sembling two components with the same features, the tol-
+                                                              convolutional kernels are well-designed based on the index
+erance propagates by calculating the Minkowski sum of
+                                                              array of topological entities and their topological connec-
+two T-maps. After this method was proposed, T-maps
+                                                              tions, which enables the hidden features to transfer from
+were developed for other features quickly[13]. However,
+                                                              one entity to its neighbor entity. The output of the above
+the T-maps of some kinds of features are high dimen-
+                                                              networks can achieve satisfactory results in several down-
+sional, which makes the calculation of the Minkowski sum
+                                                              stream applications like segmentation and classification.
+inefficient[14]. The matrix model[15] uses a displacement
+                                                              However, due to the complexity and ambiguity of B-rep
+matrix to describe the small displacements of a feature in
+                                                              models, no neural network currently can detect the flawed
+its tolerance zone[16]. Therefore, all points of this feature
+                                                              structures of boolean resulting models, let alone repair
+can be bounded by the inequality resulting from the com-
+                                                              them.
+bination of displacement matrix and tolerance values. The
+calculation can be very efficient, but different choices of In our method, we detect errors before forming resulting
+the point may lead to different results[17], which will cause models in boolean operations by analyzing the intersection
+some ambiguities when tolerance propagates between dif- edges, and we only use the topological and geometric infor-
+ferent models.                                                mation of the models that every CAD kernel will provide
+                                                              for users. Besides, our method does not need to improve
+Repair directly on resulting models Repairing flawed
+                                                              the geometric intersection algorithm, which will make the
+structures caused by errors in resulting models is another
+                                                              algorithm easy to apply in other CAD kernels. Moreover,
+way to handle error problems. In the exact B-rep repairing
+                                                              the strict inference process ensures our method does not
+method, models are checked and corrected by analyzing
+                                                              modify any flawless structures of models.
+their topological and geometric elements[18]. And in the
+faceted B-rep repairing method, original models are ap-
+proximated as polyhedrons, making the check and repair 3 Background Knowledge
+process more efficient[19]. However, errors during the
+previous process may make the resulting models totally 3.1 Boolean operations
+collapse, which means these methods can only correct
+limited kinds of errors. Therefore, a repair method based As the most essential part of the CAD kernel, boolean
+on design history is proposed[20]. In some CAD kernels, operations greatly suffer from error problems. Boolean
+model data includes not only its topological and geometric operations are used to construct complex models based on
+elements but also its design history, which tells the users basic models like cubes, cones, and torus. Each boolean
+                                                              operation of two models can be divided into four stages:
+
+
+                                                           3
+① Intersection. Calculate the face-face intersection of each 3.3 Topology Set Computation and Inference Method
+face of the two models separately, and get all the intersec-
+tion edges.                                                    We introduce the inference method based on the already
+                                                               known topological information to determine whether in-
+② Imprint. Imprint all these intersection edges onto both tersection results need to be fixed. In order to describe the
+models and split each face of the two bodies. After this inference process better, we specify the following topolog-
+step, all faces of the two models fit the following property– ical set notation:
+the face of a model either lies totally inside the body of the
+other model, or totally outside, or totally on the boundary                  Set containing the topological entity a
+of the other model.                                                    a     itself and all its sub topological structu
+                                                                             -res
+③ Classification. Determine whether each face should be
+                                                                             Set containing the topological intersect
+kept or discarded based on the input boolean operator.               a∩b
+                                                                             -ion result of entity a and entity b
+④ Merge. Merge all the remaining faces into one body                         Entity a is a sub topological structure of
+                                                                     a∈b
+as the final result of the boolean operations, and correctly                 entity b
+maintain its topology tree to ensure the resulting model’s
+topology is legal.                                             For example, face f represents not only the face itself but
+                                                               contains all sub-topological structures, including all its
+                                                               boundary edges and all vertices of these edges. e ∩ f is the
+                                                               topological entity set containing the topological intersec-
+                                                               tion result of edge e and face f . If e is a boundary edge of
+3.2 Geometric Intersection and Topological                     f , then e ∈ f .
+      Intersection                                             Obviously, topology set computation satisfies commutative
+                                                               and associative laws, that is:
+In the boundary representation(B-rep) model, the shape
+of an entity is decided by its geometric element, and its                                  a∩b=b∩a
+boundary is composed of lower-dimension entities. For ex-                             a ∩ b ∩ c = a ∩ (b ∩ c)
+ample, faces are bounded by edges, and edges are bounded
+by vertices. Faces, edges, and vertices are direct composi-         Besides, there are two extra inference rules based on the
+tions of a model, and we call them topological structures           feature of topological entities and topological intersections:
+because they will connect with other topological structures         Rule 3.1. e ∈ f ⇒ e ∩ f = e
+to form a model. And the geometric element of a face, an
+edge, or a vertex, we call it geometric structure. A geo-           That is, if edge e is a boundary edge of face f , then the
+metric structure will not connect with any other geometric          intersection result of e and f is e itself.
+structure. It is a mathematical description of a shape. To          Rule 3.2. v ∈ e ∩ f ⇒ v = e ∩ f , in a sufficiently small
+distinguish them, we call the geometric structure of a face         neighborhood of v.
+a surface, the geometric structure of an edge a curve, and
+the geometric structure of a vertex a point(position). There-       That is, if vertex v is one of the intersection resulting enti-
+fore, there are two kinds of intersection ways: geometric           ties of e and f , then v is the only intersection result of e
+and topological.                                                    and f within a sufficiently small neighborhood of v.
+Geometric intersections will not consider any boundary in- Using these two rules, we can have the following lemma:
+formation of its corresponding topological entity. It is the Lemma 3.1. e ∈ f , e ∈ f , e ∩ e = v ⇒ f ∩ e =
+                                                                                1      1 2       2 1     2     0    1   2
+computation that happens between geometry structures.            v0 , e1 ∩ f2 = v0 , in a sufficiently small neighborhood of
+Topological intersections, as the name indicates, will con- v0
+sider the boundary of the topological entity. It will filter the
+results of geometric intersections and leave the valid parts The proof process is shown as follows:
+inside the boundary of the corresponding topological enti- Proof 3.1. Using Rule 3.1, we know that
+ties. The process of topological intersection runs following                      e1 ∈ f1 ⇒ e1 ∩ f1 = e1
+the order from high dimensions to low dimensions. Gen-
+erally, a face-face intersection process will run multiple
+times edge-face intersection processes to get boundary in- Therefore,
+formation of each face. So will the edge-face intersection
+                                                                      v0 = e1 ∩ e2 = e1 ∩ f1 ∩ f2 ⇒ v0 ∈ e1 ∩ f2
+process run multiple times edge-edge intersection. Be-
+cause high-dimension topological intersections will use
+the information returned from lower-dimension topolog- Using Rule 3.2, in a sufficiently small neighborhood of v0 ,
+ical intersections, in this process, errors will accumulate. we know that
+Therefore, the accuracy of higher dimension topological
+intersection will be lower.                                                    v0 ∈ e1 ∩ f2 ⇒ v0 = e1 ∩ f2
+
+
+                                                                4
+Similarly, we can get v0 = f1 ∩ e2 in a sufficiently small spline has its inherent numerical inaccuracy. Therefore, k
+neighborhood of v0 .                                       is defined by the following formula:
+
+This lemma will help us to simplify problems in some
+situations.
+
+4     Method                                                                                          tf1 tf2 te0
+                                                                                  k = maximum(1,         ,   ,    )
+                                                                                                       t0 t0 t0
+4.1   Feature-based Tolerance Value for Intersection
+      Edges
+
+To use Lemma 3.1, we should run our inference procedure             In the above formula, tf1 , tf2 and te0 are separately the
+in a local area. Therefore, we should calculate a proper            fitting errors of f1 , f2 and e0 . Because fitting errors are
+tolerance value for each intersection edge to direct the            always much larger than the global positional tolerance
+inference process. Global tolerance can handle many sit-            value, their ratios can reach a value of more than 1000.
+uations. However, in our experiments, we find that using            Consequently, considering only the largest ratio is enough
+a global tolerance value will ignore fixing some flawed             for us to achieve a large enough k value.
+cases, especially when the shape of an intersection edge is
+complex. Consequently, we need to examine the features
+of each intersection edge and calculate an appropriate local
+tolerance value for it.
+                                                                    4.2   Intersection Graph
+Intersection edges with different geometry have different
+accuracy. For instance, the error of a straight line is al-
+ways much smaller than that of a high-degree spline curve.    The intersection graph is a topological structure consisting
+Therefore, the higher the degree of the mathematical ex-      of intersection edges and their vertices, which describes
+pression of the geometry curve of an intersection edge, the   the intersection result of two models. The intersection
+larger its tolerance value should be.                         edges with vertices in the same position will be connected,
+                                                              and these vertices in the same position will be merged into
+Besides an intersection edge’s geometry, the shapes of two one.
+faces that generate the intersection edge are also important
+factors. A straight line generated by two planes is more pre-
+cise than two spline surfaces. Consequently, intersection
+edges coming from two faces with higher-order surfaces
+should have larger tolerance values.
+Because different geometric intersection algorithms have                    (a)                 (b)                   (c)
+different accuracy when dealing with different situations,
+it will take much work to determine an accurate tolerance           Figure 1: (a) two edges are connected head to tail, e1 is
+value for an intersection edge in different situations. In          e2 ’s successor and e2 is e1 ’s predecessor. (b) two edges
+practice, we find the tolerance values that can be used to          are connected tail to tail, e1 is e2 ’s predecessor and e2 is
+direct inference procedure are positively correlated with           e1 ’s predecessor. (c)two edges are connected head to head,
+several factors, so we have the following simple empirical          e1 is e2 ’s successor and e2 is e1 ’s successor.
+formula to calculate a feature-based tolerance value t for
+an intersection edge e0 generated by the intersection of
+face f1 and f2 :
+           t = k × d(f1 ) × d(f2 ) × d(e0 ) × t0                    In the intersection graph, each edge has a predecessor and
+                                                                    a successor based on its own direction, pointing from its
+In the above formula, d means the maximum degree of                 start vertex to its end vertex. However, two neighbor edges
+the mathematical expression of the edge or face’s geome-            in the graph do not need to be connected head to tail, which
+try. t0 means the default global positional tolerance value.        means their relative orientation can be arbitrary. Shown
+Since errors may accumulate during the calculation pro-             in Fig.1, the predecessor and successor of an edge must
+cess, we connect these coefficients using multiplication            follow the rule that the predecessor is one of the neighbor
+signs. Therefore, in the most straightforward situation,            edges that is connected to its start vertex, and the succes-
+two intersecting planes making a straight line, the default         sor is one of the neighbor edges that connected to its end
+tolerance value is significant enough to direct the inference       vertex. This design allows the intersection graph to have
+process when k equals 1. And the coefficient k describes            branches, shown in Fig.2. When branching at a vertex, all
+the level of the model’s geometry deviating from the actual         edges sharing this vertex will be organized like a circular
+position. In some situations, the geometry of the faces or          linked list, and the order of the edges in this list is not
+edges may be represented by fitting spline. And the fitting         unique.
+
+
+                                                                5
+                                                                  the intermediate result in computation will further reduce
+                                                                  accuracy.
+                                                                  As mentioned earlier in this paper, the main reason why
+                                                                  boolean operations fail is intersection inconsistencies
+                                                                  caused by errors. And there are three types of intersection
+                                                                  inconsistency classified by their topology level: face-face,
+                                                                  edge-face, and edge-edge. In the following part, we will
+                                                                  separately discuss three topological manifestations of the
+                                                                  three types of inconsistency and how our inference algo-
+                                                                  rithms detect and repair them.
+Figure 2: Four edges share one vertex and make a branch
+at this vertex. Based on their directions, there is a legal
+connection ways that e1 ’s successor is e2 , e2 ’s successor
+is e3 , e3 ’s successor is e4 , and e4 ’s predecessor is e1 . The 4.3.1 Disconnection of two Intersection Edges that
+legal ways to connect these edges are not unique. There is                Should Be Connected
+another way that e1 ’s successor is e3 , e3 ’s successor is e4 ,
+e4 ’s predecessor is e2 , and e2 ’s successor is e1 .
+                                                                  When computing the intersection result of two models face
+                                                                  by face, the geometric intersection algorithm does not use
+Specially, the predecessor of an edge will be itself when the information of neighbor faces, which may cause some
+its start vertex does not connect to other edges. And simi- disconnections on the boundary of faces, shown in Fig.3.
+larly, if the end vertex of an edge does not connect to other Because of the accumulating errors, two intersection edges
+edges, the successor will be itself. This feature will make on two separate faces, which should be connected, break
+adding or deleting an edge in the intersection graph more up on the common boundary of the two faces. e01 is the
+convenient since we do not need to distinguish whether intersection edge of face f0 (not showing in this map) and
+this edge connects to other edges.                                face f1 , while e02 is the intersection edge of face f0 and
+                                                                  face f2 . e12 is the common edge of f1 and f2 . v1 is the
+Although intersection graphs’ topological structures are intersection vertex of e1 and e2 , while v1 is the intersection
+quite simple, they carry much geometric and topological vertex of e01 and e2 . As f0 crosses through e12 , v1 and v2
+information about the resulting models. Compared with should be at the same position in theory. However, because
+extracting features from the resulting models, the informa- the intersection algorithm calculates the intersections of
+tion from intersection graphs is more intuitive and accurate f0 and f1 , f0 and f2 separately, the results of the two in-
+since the extracting steps may bring ambiguity or ignore tersections can be inconsistent due to the accumulation of
+some small but important features. With the information multiple kinds of errors. This inconsistency is manifested
+given by intersection graphs, our inference procedures can by the dislocation of v1 and v2 , which makes two inter-
+be more robust and valid.                                         section edges on the same face f0 disconnected. Usually,
+                                                                  the inaccuracy of the shape of intersection edges will not
+                                                                  make the following boolean steps fail. However, in this
+4.3 Inference Algorithms
+                                                                  situation, not only will this disconnection make the result-
+                                                                  ing models inaccurate, but more seriously, it will make the
+In the repair process, we must ensure that we will not mod-
+                                                                  area that should be bounded by intersection edges open,
+ify any accurate edges while calculating a more precise
+                                                                  which will result in an illegal topological structure and
+result for the flawed intersection edges. And our inference
+                                                                  make the following boolean operations crash. Therefore,
+algorithms can satisfy this by using the following three
+                                                                  this disconnection must be fixed to ensure the resulting
+strategies in different situations:
+                                                                  model is legal and right.
+① Transform a high-dimension intersection problem into a
+                                                                  There are three criteria we used to judge whether this sit-
+low-dimension intersection problem to get a more accurate
+                                                                  uation occurs on two intersection edges e01 and e02 , and
+intersection result since high-dimension topological inter-
+                                                                  these criteria should be satisfied simultaneously:
+sections are more affected by accumulating errors than
+low-dimension topological intersections.                          ① e01 and e02 have a pair of vertices v1 and v2 belonging
+                                                                  separately to these two intersection edges that are very
+② Use the intersection graph to get more information from
+                                                                  closed judged by the feature-based tolerance values of the
+other parts of the model, which can help avoid misjudg-
+                                                                  edges.
+ing. Intersection graphs can help us identify some small
+features that are easily mistaken for flawed structures gen- ② e01 and e02 have a common face f0 which generates
+erated by errors.                                                 them from the intersection between itself and other two
+                                                                  separate faces f1 and f2 .
+③ Use the information we already know to substitute the
+intermediate result, which can help get a more accurate ③ f1 and f2 share common edges, and v1 and v2 are both
+final result. Because of the accumulation of errors, using on one of the common edges e12 .
+
+
+                                                              6
+                                                                    Algorithm 1: Judge Whether the Disconnection of
+                                                                    Two Intersection Edges Occurs
+                                                                    input :e1 , e2
+                                                                    output :Whether two intersection edges meet all three
+                                                                              criteria
+                                                                    v11 , v12 ← getStartAndEndVertex(e1 );
+                                                                    v21 , v22 ← getStartAndEndVertex(e1 );
+                                                                    t ← getFeatureBasedTolerance(e1 ) +
+                                                                      getFeatureBasedTolerance(e2 );
+                                                                    v1 , v2 ← findNearestPair({v11 , v12 }, {v21 , v22 });
+                                                                    if distanceBetween(v1 , v2 ) > t then
+                                                                         return false;
+                                                                    end
+                                                                    f11 , f12 ← getSourceFaces(e1 );
+Figure 3: Sketch map of the disconnection of two inter-             f21 , f22 ← getSourceFaces(e2 );
+section edges.                                                      if haveCommonFace({f11 , f12 }, {f21 , f22 }) is false
+                                                                      then
+                                                                         return false;
+                                                                    end
+The proof of why the three criteria satisfy this situation is       f0 ← getCommonFace({f11 , f12 }, {f21 , f22 });
+shown as follows:                                                   f1 , f2 ←
+                                                                      getDifferentFace({f11 , f12 }, {f21 , f22 });
+Proof 4.1. from criterion ②, we know that:                          e_array ← getSharedEdges(f1 , f2 );
+                                                                    f lag ←false;
+                                                                    pos1 ← getPos(v1 );
+                       e01 = f0 ∩ f1                      (1)       pos2 ← getPos(v2 );
+                       e02 = f0 ∩ f2                      (2)       for edge ∈ e_array do
+                                                                         if posOnEdge(pos1 , edge) and
+                                                                           posOnEdge(pos2 , edge) then
+from criterion ① and criterion ③, we know that:                              f lag ←true;
+                                                                             e0 ← edge;
+                      v1 = e01 ∩ e12                      (3)                break;
+                                                                         end
+                      v2 = e02 ∩ e12                      (4)
+                                                                    end
+                                                                    if f lag is false then
+from criterion ③, we know that:                                          return false;
+                                                                    end
+                                                                    return true;
+                       e12 = f1 ∩ f2                      (5)
+                                                                    Therefore, when all three above conditions meet, it means
+Therefore, from (3), (1), and (5), we know that:                    this disconnection situation exists. v1 and v2 should be at
+                                                                    the same position. Another crucial thing from the proof is
+                                                                    that a proper position to merge these two misplaced ver-
+                v1 = e01 ∩ e12                                      tices is the position of the intersection vertex generated by
+                   = (f0 ∩ f1 ) ∩ (f1 ∩ f2 )                        the intersection of the common edge e12 and face f0 . The
+                                                                    algorithm that detects this situation is shown as Algorithm
+                   = f0 ∩ (f1 ∩ f2 )                                1.
+                   = f0 ∩ e12                             (6)
+                                                                    Since the dimension of the edge-face intersection is lower
+                                                                    than that of the face-face intersection, which means lower
+Similarly, we can get that                                          errors, the new position will be more precise than the old
+                                                                    one. The repair process is shown as Algorithm 2.
+                       v2 = f0 ∩ e12                      (7)
+
+From criterion ①, we know that v1 and v2 are very close.
+Therefore, from (6) and (7), we know that v1 and v2 should
+be at the same position, and the position is the position of
+the intersection vertex of f0 and e12
+
+
+                                                                7
+Algorithm 2: Fix the Disconnection of two Intersec-                  edge e0 . And the pretty short edges will bind a sliver face
+tion Edges                                                           and falsely break up the boundary edge of faces, which
+                                                                     will cause topological problems in the resulting model.
+input :e1 , e2
+v_array ← edgeFaceIntersection(e0 , f0 );                            We have four criteria to judge whether a pretty short edge
+min_dist ← maximum;                                                  e0 in an intersection graph g should be an intersection
+for v ∈ v_array do                                                   vertex and need to be fixed, and these criteria should be
+    dist ← distanceBetween(v, v1 ) +                                 satisfied in full:
+      distanceBetween(v, v2 );
+                                                                     ①e0 is an intersection edge of face f1 and f2 while the
+    if dist < min_dist then
+                                                                     length of e0 is shorter than its feature based tolerance.
+        pos ← getPos(v);
+        min_dist ← dist;                                             ② e0 in g does not connect with any other edges or only
+    end                                                              connects to other edges in one end.
+end                                                                  ③ e1 is a boundary edge of f1 . e2 is a boundary edge of
+setPos(v1 , pos);                                                    f2 . e0 intersects with e1 at the position of v1 . e0 intersects
+setPos(v2 , pos);                                                    with e2 at the position of v2 .
+return;
+                                                                     ④ e1 intersects with e2 at the position of v0 . Both the
+                                                                     distances between v0 and v1 , v0 , and v2 are smaller than
+4.3.2     Pretty Short Edges which Should Not Exist                  the sum of feature-based tolerance of e1 and e2 .
+It is not rare that the intersection result of two models has        The proof of why the four criteria satisfy this situation is
+some very short edges. Their length is pretty small com-             shown as follows:
+pared with the size of the models, and we should deal with           Proof 4.2. from criterion ①, we know that:
+them very carefully. Sometimes a pretty short edge is the
+remnant of a normal-length curve cut by faces’ borders.                                      e0 = f1 ∩ f2                        (1)
+But in some situations, this short edge comes from the
+                                                                     from criterion ③, we know that:
+intersection result of two slightly contacting faces, like two
+faces sharing a common vertex, or two tangent faces. And                                        e1 ∈ f1
+when these situations occur, the intersection edge should                                       e2 ∈ f2
+collapse into an intersection vertex based on the edge-face
+topological intersection results. However, the errors may            Therefore, based on Rule 3.1, we know that
+disturb the process of topological edge-face intersection
+and make a small part of the intersection edge left.                                         e1 = e1 ∩ f1                        (2)
+                                                                                             e2 = e2 ∩ f2                        (3)
+                                                                     from criterion ④ and (2), we know that
+                                                                                         v0 = e 1 ∩ e 2
+                                                                                            = e1 ∩ f1 ∩ e2
+                                                                                            = e1 ∩ (f1 ∩ e2 )                    (4)
+                                                                     Therefore, from (4), we know that
+                                                                                             v0 ∈ f1 ∩ e2                        (5)
+                                                                     Based on (5) and Lemma 3.1, in a sufficiently small neigh-
+                                                                     borhood of v0 , we can get that
+                                                                                             v0 = f 1 ∩ e 2                      (6)
+        Figure 4: Sketch map of the pretty short edge.
+                                                                     from criterion ③, we know that
+
+When two faces only intersect at certain positions, their                            v2 = e2 ∩ e0                                (7)
+overlapping areas are so small that the influence of accu- Then, from (7), (1), and (2), we know that:
+mulating errors will be obvious. As shown in Fig.4, e1 is a
+boundary edge of face f1 , while e2 is a boundary edge of                     v2 = (e2 ∩ f2 ) ∩ (f1 ∩ f2 )
+face f2 . e0 is the valid part of intersection curve of f1 and                   = e2 ∩ f1 ∩ f2
+f2 (The invalid parts which are outside f1 or f2 are shown
+                                                                                 = f2 ∩ (f1 ∩ e2 )                               (8)
+by dashed lines). This intersection curve should pass to the
+v0 , the intersection vertex of e1 and e2 . But due to accumu- Therefore, from (8), we know that
+lating errors, the intersection curve intersects e1 at v1 and
+intersects e2 at v2 , which causes a pretty short intersection                       v2 ∈ f1 ∩ e2                                (9)
+
+
+                                                                 8
+Based on (8) and Lemma 3.1, in a sufficiently small neigh- Algorithm 3: Judge Whether the Short Edge Should
+borhood of v2 , we can get that                                 Exist
+                                                                input :intersection edge e0 , intersection graph g
+                                                                output :Whether this edge needs to be repaired. If so,
+                                                                          return v0 , whose position is that the pretty
+                                                                          short edges should collapse into.
+                         v2 = f 1 ∩ e 2                   (10) t ← getFeatureBasedTolerance(e0 );
+                                                                if getLength(e0 ) > t then
+                                                                     return false;
+                                                                end
+                                                                if getNext(g, e0 ) is exist and getPrevious(g, e0 )
+From criterion ④, we know that v0 and v2 are very close. is exist then
+Therefore, based on (7) and (10), we can get that                    return false;
+                                                                end
+                                                                v1 , v2 ← getStartAndEndVertex(e0 );
+                                                                f1 , f2 ← getSourceFaces(e0 );
+                                                                pos1 ← getPos(v1 );
+                     v2 = v0 = f1 ∩ e2                    (11) pos2 ← getPos(v2 );
+                                                                if posOnBoundary(pos1 , f1 )is true then
+                                                                     e1 ← GetposOnFaceBoundary(pos1 , f1 );
+                                                                end
+                                                                if posOnBoundary(pos1 , f2 )is true then
+                                                                     e2 ← GetposOnFaceBoundary(pos1 , f2 );
+Similarly, we can get that                                      end
+                                                                if posOnBoundary(pos2 , f1 )is true then
+                                                                     e1 ← GetposOnFaceBoundary(pos2 , f1 );
+                                                                end
+                                                                if posOnBoundary(pos2 , f2 )is true then
+                            v1 = v0                       (12)       e2 ← GetposOnFaceBoundary(pos2 , f2 );
+                                                                end
+                                                                if e1 is not exist or e2 is not exist then
+                                                                     return false;
+                                                                end
+                                                                v_array ← edgeEdgeIntersection(e1 , e2 );
+From criterion ②, we know that removing e0 from the in-
+                                                                sum ← getFeatureBasedTolerance(e1 ) +
+tersection graph will not break the graph apart. From (10),
+                                                                  getFeatureBasedTolerance(e2 );
+(11) and the information that e0 is very short, we know
+                                                                for v ∈ v_array do
+that the intersection edge should collapse into a vertex at
+                                                                     dist1 ← distanceBetween(v1 , v);
+the same position of v0 .
+                                                                     dist2 ← distanceBetween(v2 , v);
+                                                                     if dist1 < sum and dist2 < sum then
+                                                                         v0 ← v;
+Length is an important criterion, but we need more than                  return true, v0 ;
+just considering this factor to identify flawed edges. In our        end
+practice, we find some edges very short but valid. These end
+edges have such a feature that they are at a crucial po- return false;
+sition in the intersection graph. If we remove them, the
+intersection graph will be split up, and the areas that in- To fix this wrong edge, we should make these pretty short
+tersection edges should bound will be open, which will edges collapse into an isolated vertex, so it will no longer
+cause an incomplete topological structure in the resulting harm the existing topological structure. Moreover, we
+model. Therefore, the second criterion can avoid this mis- should find a proper position for this isolated vertex. In
+take. Besides, if this situation happens totally inside a face, Algorithm 3, we have found the position should be the
+it will not affect any existing topological structure. It will position of v0 . Therefore, we should change the position
+add an isolated loop inside the face, which will be easily of v1 and v2 into the position of v0 . Then we should merge
+detected and removed in the final resulting model, so we v1 and v2 into one single vertex and remove the geometric
+do not need to do extra work here to fix it. That is why we element of e0 since e0 has already collapsed into a vertex.
+need the third criterion. And the fourth condition restricts The process is shown as Algorithm 4.
+all steps to a small area. We repair the short edge only
+when the intersection edge meets all four requirements.
+The judge algorithm is shown as Algorithm 3.
+
+
+                                                           9
+Algorithm 4: Fix the Pretty Short Edge by Collapsing               ing with e0 intersects with e2 , which generates v2 and v02 .
+It into Vertex                                                     And v2 is the topological intersection result. This situation
+input :intersection edge e0 , intersection vertex v0               is like the disconnection of two intersection edges we have
+v1 , v2 ← getStartAndEndVertex(e0 );                               discussed in section 4.3.1. However, unlike happening at
+pos0 ← getPos(v0 );                                                a common edge of two neighbor faces, it exists on two
+setPos(v1 , pos0 );                                                neighbor edges sharing a common vertex.
+setPos(v2 , pos0 );                                                To detect this situation, we have four criteria to judge
+mergeVertex(v1 , v2 );                                             whether an intersection edge e0 needs to be repaired, and
+setCurve(e0 , null);                                               these criteria should be satisfied in full:
+                                                                   ① e0 generated by the intersection of f0 and f1 intersects
+4.3.3   Deviation of Intersection Vertices                         with at least two boundary edges of f0 .
+In the process of face-face intersection, the initial intersec-    ② e1 and e2 are boundary edges of f0 . e0 on f0 intersects
+tion edge of these two faces will be constructed first based       with e1 at v1 , e2 at v2 , while e1 and e2 share common
+on the geometrical intersection curve. Then this edge will         vertex v0 .
+intersect with each boundary edge of the two faces to find         ③ The distances between v1 and v0 , v2 and v0 are both
+valid parts inside both faces. However, as the process of          shorter than the feature based tolerance of e0 .
+edge-edge intersection runs edge by edge separately, some
+inconsistency between two neighbor edges may exist.                ④ v0 is on f1 .
+                                                                   The proof of why the four criteria satisfy this situation is
+                                                                   shown as follows:
+                                                                   Proof 4.3. from criterion ①, we know that:
+                                                                                          e0 = f0 ∩ f1                      (1)
+                                                                   from criterion ②, we know that:
+                                                                                             e1 ∈ f0
+                                                                                             e2 ∈ f0
+                                                                   Therefore, based on Rule 3.1, we know that
+                                                                                          e1 = e1 ∩ f0                      (2)
+                                                                                          e2 = e2 ∩ f0                      (3)
+                                                                   from criterion ②, we know that
+                                                                                          e0 ∩ e1 = v1                      (4)
+Figure 5: Sketch map of the deviation of intersection ver-                                e0 ∩ e2 = v2                      (5)
+tices
+                                                                   Therefore, from (4), (2) and (1), we know that
+
+Shown in Fig.5, e0 is the initial intersection edge of f0 and                      v1 = e0 ∩ e1
+f1 (not showing in this figure), e1 and e2 are two boundary                           = (f0 ∩ f1 ) ∩ e1
+edges of f0 , and they meet at a common vertex v0 . In                                = f1 ∩ (f0 ∩ e1 )
+theory, e0 should have intersected with e1 and e2 at v0 .                             = f1 ∩ e1                     (6)
+However, due to the calculation errors, when we intersect
+e0 with e1 and e2 separately, we find that e0 intersects with from criterion ②, we know that
+e1 at v1 , and intersects with e2 at v2 . This slight difference
+will cut e0 and generate a short edge bounded by v1 and                                v0 = e1 ∩ e2                 (7)
+v2 , which may damage the topological integrity.                 from criterion ④ and (7), we know that
+When dealing with e0 intersects with e1 , the geometric                             v0 = e1 ∩ e2 ∩ f1
+intersection algorithm gives the intersection position of v01
+on e1 . Use the position of v01 to find the corresponding Therefore, we know that
+parameter inversely on e0 . However, when applying the
+                                                                                       v0 ∈ e1 ∩ f1                 (8)
+parameter on e0 , we get the position of v1 . The position
+of v1 and v01 is slightly different due to errors. The topo- Based on (8) and Lemma 3.1, in a sufficiently small neigh-
+logical algorithm uses the parameter to get the position of borhood of v0 , we can get that
+the intersection vertex. Therefore, v1 is the topological
+intersection result. And similar things happen when deal-                              v0 = e 1 ∩ f 1               (9)
+
+
+                                                              10
+From criterion ③, we know that v0 and v1 are very close,         5   Experiment
+therefore, based on (6) and (9), we can get that
+                                                             In this part, we will show our repair method in different
+                    v1 = v0 = e1 ∩ f1                   (10) situations. Our method can detect and fix flawed structures
+                                                             while keeping the flawless parts of models from being
+Similarly, we can get that                                   modified.
+                                                                 Example 5.1. As shown in Fig.6, the torus’s center po-
+                          v2 = v0                       (11)
+                                                                 sition is the same as the center position of the regular
+                                                                 hexagonal prism, and the torus’s axis of rotation coincides
+Therefore, v1 and v2 should be removed and we use v0 to
+                                                                 with the center axis of the regular hexagonal prism. The
+replace them.
+                                                                 minor diameter of the torus, which is the diameter of the
+                                                                 circle being rotated, is the same as the height of the prism.
+Because we have found that v0 is on f1 , and v0 originally       The major radius of the torus, which is the distance from
+belongs to f0 , we can assert that v0 must be on the inter-      the center of the circle to its rotation axis, is the same as
+section edge of f0 and f1 . Therefore, the process to fix e0     the radius of the circumscribed circle of the bottom plane
+is simple. We just need to remove v1 and v2 and then use         of the prism. Therefore, all vertices of the prism are on
+v0 to substitute them.                                           the face of the torus. And there should be 12 intersection
+Unlike other scenes, in this situation, the flawed intersec-     edges between these two bodies.
+tion edge should be fixed during the process of face-face
+intersection. Otherwise, some intersection information that
+can help fix the inconsistency will be lost. In the face-face
+intersection, e0 , the initial intersection edge of f0 and f1
+will be used to intersect with all boundary edges of f0 and
+f1 to find its valid parts, which are both inside f0 and f1 .
+If e0 intersects with e1 at the position of v1 and intersects
+with e2 at the position of v2 , while e1 and e2 belong to the
+same face, for example, f0 . Then it has fit the criterion ①,                 (a)                           (b)
+and the algorithm shown in Algorithm 5 will be called.
+                                                                 Figure 6: (a) Relative position of the regular hexagonal
+                                                                 prism and the torus. (b) An abnormal short edge appears
+Algorithm 5: Judge and Fix the Deviation of Intersec-
+                                                                 in the boolean union resulting model of the prism and the
+tion Vertices on an Intersection Edge
+                                                                 torus.
+input :intersection edge e0 , f0 and f1 which
+         generate intersection edge e0 , vertex v1 and
+         v2 generated by the intersection between e0             However, in practice, the number of intersection edges is
+         and the boundary edge of f0 .                           more than 12 because of the intersection errors. And there
+pos1 ← getPos(v1 );                                              are some pretty short edges appearing near the position of
+pos2 ← getPos(v2 );                                              the prism’s vertices. This situation is described in section
+t ← getFeatureBasedTolerance(e0 );                               4.3.3. Fortunately, these short edges will not fail the follow-
+e1 ← GetPosOnFaceBoundary(pos1 , f0 );                           ing boolean operations, but they are still unexpected and
+e2 ← GetPosOnFaceBoundary(pos2 , f0 );                           will make the resulting model’s structures more complex,
+if getCommonVertex(e1 , e2 ) is not exist then                   which may cause potential problems.
+    return false;
+end                                                              Using the algorithm described in section 4.3.3, we can
+for v ∈ getCommonVertex(e1 , e2 ) do                             easily detect the short edges and prolong its neighbor in-
+    dist1 ← distanceBetween(v1 , v);                             tersection edge to meet the vertex of the prism. After
+    dist2 ← distanceBetween(v2 , v);                             repairing, all tiny intersection edges are removed. And
+    if dist1 < t and dist2 < t then                              so will the short edges left in the resulting model. The
+        v0 ← v;                                                  boolean result will be more concise than that before.
+        pos0 ← getPos(v0 );                                      Although there are some pretty short intersection edges, it
+        if posOnFace(pos, f1 )is true then                       should be noted that this case is different from the situation
+            remove(varray , v1 );                                described in section 4.3.2. These short edges, which are
+            remove(varray , v2 );                                generated by the inconsistency of intersections between
+            add(varray , v0 );                                   intersection edges and boundary edges, are connected in
+            return true;                                         the intersection graph at both ends.
+        end
+                                                                 Example 5.2. As shown in Fig.7(a), the prism and torus
+    end
+                                                                 change their relative position. in this situation, the prism
+end                                                              translates a certain distance horizontally outward from the
+return false;                                                    torus. Fig.7(b) shows these two bodies’ intersection graph.
+
+
+                                                            11
+However, this intersection graph is split into three parts for
+the reason discussed in section 4.3.1.
+
+
+
+
+                                                                                   (a)                    (b)
+                                                                  Figure 9: (a) Right imprint result. (b) False imprint result
+                                                                  due to the disconnection.
+
+
+                  (a)                         (b)
+Figure 7: (a) Relative position of the prism and torus. (b)
+Intersection graph of the prism and torus. Because of the         By using the algorithm discussed in section 4.3.1, we can
+disconnection, the graph has been split into three parts.         reunite the disconnecting vertex. After repairing, the split
+Each part in different dashed boxes is dyed different col-        intersection graph reunites, and boolean results are right
+ors.                                                              now, shown in Fig.10 (b).
+
+
+
+As shown in Fig.8, intersection edges that should have
+shared one of their vertices break apart. Theoretically,
+these two vertices should be combined to make the inter-
+section graph valid. And our inference procedure can find
+this flawed structure and fix it.
+
+
+
+
+                                                                                 (a)                        (b)
+                                                                  Figure 10: Boolean subtraction result of the prism and
+                                                                  torus(prism minus torus)(a) False boolean subtraction re-
+                                                                  sult, we can see the faces in the hole of the prism are
+                                                                  missing due to the false classification result and the inter-
+                                                                  section edges on both bottom faces of prism disappear. (b)
+                                                                  Right boolean subtraction result.
+Figure 8: A pair of disconnected vertices in the intersec-
+tion graph
+
+
+                                                                  Example 5.3. Considering the cylinder and cone shown
+Without repairing, the area that intersection edges should
+                                                                  in Fig.11, initially, the cylinder’s bottom face coincides
+have bounded is open now. In the following steps, after
+                                                                  with the bottom face of the cone, and then the cylinder is
+imprinting intersection edges on these two bodies, there
+                                                                  rotated by a slight angle around a diameter of the bottom
+will be some faces falsely being segmented, shown in Fig.9.
+                                                                  face.
+There should be three faces on the surface of the torus after
+imprinting, shown in Fig.9 (a). However, due to the discon-       Since the bottom face of the cone now touches the side
+nection, one area which should be bounded by intersection         face of the cylinder only at the two ends of the rotation
+edges is open now. Therefore, the false result only has two       diameter axis, the intersection entities between the side
+faces after imprinting, shown in Fig.9 (b). Consequently,         face of the cylinder and the bottom face of the cone should
+this will affect the following classification of faces, making    be two vertices. However, because of the calculation errors,
+some faces deleted by mistake and generating incorrect            the results are two very short edges. One of them is shown
+boolean operations, as shown in Fig.10 (a).                       in Fig.12.
+
+
+                                                             12
+Figure 11: Relative position of the cylinder and cone.
+Most part of the cone is inside the cylinder.
+                                                                Figure 13: Boolean subtraction result of the cylinder and
+                                                                the cone(cylinder minus cone). Both of the short edges
+                                                                become the boundary edges of all dyed faces. Since the
+                                                                short edges simultaneously lie on four faces (One of the
+                                                                faces is totally blocked by the red one.), the whole model
+These two pretty short edges will not cause noticeable          becomes non-manifold.
+problems in the following boolean steps. However, they
+will be kept in the final boolean result. In the boolean
+subtraction result, shown in Fig.13, both short edges are
+non-manifold edges, an edge associated with more than           Example 5.4. Our method can well preserve the small
+two faces. The reason is that these short edges are so close    features in boolean resulting models. Shown in Fig.14 (a),
+to where the faces join that they are falsely regarded as on    a straight ball valve is modeled by uniting several simple
+these faces, which causes significant topological flaws in      shapes together. In the dotted box shown in Fig.14 (b),
+the resulting body.                                             the position of the green column’s bottom face is slightly
+                                                                lower than that of the red cylinder’s top face, which makes
+                                                                the green column shallowly embedded in the red cylinder.
+
+
+
+
+                                                                              (a)                         (b)
+                                                           Figure 14: (a) The outlook of the straight ball valve. (b)
+                                                           The colorful part in the dotted box contains a long green
+Figure 12: One pretty short intersection edge between the column and a red cylinder.
+bottom face of the cone and the side face of the cylinder.
+
+
+                                                                Therefore, in the process of manufacturing this part, there
+                                                                will be a shallow groove on the top of the red cylinder,
+                                                                which is an important feature. However, other repair al-
+Because these two intersection edges are short enough and       gorithms which extract features directly from the result-
+isolated in the intersection graph while both ends are on       ing model or its design history may consider the shallow
+the boundary of faces, they will be detected and removed        groove as a result of modeling errors and will remove this
+by the algorithm in section 4.3.2. Then the intersection        small feature by resetting the position of the long column
+vertices between the cone’s bottom face and the cylinder’s      on the top. Without the shallow groove, the column will
+side face will be added to the intersection graph to replace    only slightly touch the top face of the cylinder and can-
+these two pretty short edges. After repairing, the non-         not be fixed. Since the constraint is weak, its degrees of
+manifold edges in boolean subtraction resulting models are      freedom are still high, which will cause a lot of trouble in
+removed, and the whole model becomes 2-manifold again.          following operations.
+
+
+                                                           13
+                                                                  For future work, we hope to find a way to calculate a
+                                                                  more accurate tolerance value for each intersection edge.
+                                                                  And we want to extend our inference algorithms to label a
+                                                                  dataset consisting of models with flawed structures, which
+                                                                  will facilitate the use of neural networks to help detect
+                                                                  defective models.
+
+                                                                  References
+Figure 15: The shallow groove on the top of the cylinder.
+                                                                   [1] S. Fang, B. Brüderlin, Robustness in geometric
+                                                                       modeling—tolerance-based methods, in: Workshop
+By taking the intersection graph into consideration, our               on Computational Geometry, Springer, 1991, pp. 85–
+method can well preserve such small features and prevent               101.
+them from being modified. Shown in Fig.16 (b), two very            [2] J. Nocedal, S. J. Wright, Numerical optimization,
+short intersection edges in the intersection graph represent           Springer, 1999.
+the feature of the shallow groove in the resulting model.          [3] J. B. Lasserre, Global optimization with polynomi-
+Although these two edges are pretty short compared with                als and the problem of moments, SIAM Journal on
+the size of the whole model, removing them will break                  optimization 11 (3) (2001) 796–817.
+the intersection graph, making the area bounded by in-             [4] W. Shao, F. Chen, X. Liu, Robust algebraic curve
+tersection edges open, which leads to flawed topological               intersections with tolerance control, Computer-Aided
+structures in resulting models. Therefore, these two edges             Design 147 (2022) 103236.
+will be preserved, and so will the shallow groove in the
+resulting model. With the help of the intersection graph,          [5] C. M. Hoffmann, J. E. Hopcroft, M. Karasick, Robust
+our method can get more valid topological and geometric                set operations on polyhedral solids, IEEE Computer
+information about the model, which directs the inference               Graphics and Applications 9 (6) (1989) 50–59.
+procedure to make a more reasonable decision and better            [6] G. Bernstein, D. Fussell, Fast, exact, linear booleans,
+preserve tiny features in resulting models.                            Computer Graphics Forum 28 (5) (2009) 1269–1278.
+                                                                   [7] J. Richard Shewchuk, Adaptive precision floating-
+                                                                       point arithmetic and fast robust geometric predicates,
+                                                                       Discrete & Computational Geometry 18 (1997) 305–
+                                                                       363.
+                                                                   [8] J. Nehring-Wirxel, P. Trettner, L. Kobbelt, Fast ex-
+                                                                       act booleans for iterated csg using octree-embedded
+                                                                       bsps, Computer-Aided Design 135 (2021) 103015.
+                                                                   [9] D. J. Jackson, Boundary representation modelling
+                                                                       with local tolerances, in: Proceedings of the third
+                  (a)                (b)                               ACM symposium on Solid modeling and applica-
+                                                                       tions, 1995, pp. 247–254.
+Figure 16: (a) The outlook of the intersection graph of
+the column and the cylinder. (b) Parts of two dotted boxes        [10] S. C. Dassault Systèmes, Tolerant Modeling,
+after zooming in.                                                      https://doc.spatial.com/get_doc_page/
+                                                                       articles/t/o/l/Tolerant_Modeling_670c.
+                                                                       html (2023).
+                                                                  [11] H. Chen, S. Jin, Z. Li, X. Lai, A comprehensive
+6   Conclusion                                                         study of three dimensional tolerance analysis meth-
+                                                                       ods, Computer-Aided Design 53 (2014) 1–13.
+This paper is motivated by the illegal topological structures     [12] J. Davidson, A. Mujezinovic, J. Shah, A new mathe-
+in the resulting models of boolean operations. We found                matical model for geometric tolerances as applied to
+that the illegal topological structures resulted from the in-          round faces, J. Mech. Des. 124 (4) (2002) 609–622.
+accurate intersection edges caused by errors. Therefore,
+we propose a method to detect and repair the flawed inter-        [13] A. Mujezinovic, J. Davidson, J. Shah, A new mathe-
+section edges. Our method uses feature-based tolerance                 matical model for geometric tolerances as applied to
+values to direct the inference algorithms to locate flawed in-         polygonal faces, J. Mech. Des. 126 (3) (2004) 504–
+tersection edges in a small area. Our inference procedures             518.
+ensure the repair process will not do unnecessary modifi-         [14] V. Delos, D. Teissandier, A. Malyshev, G. Nuel, S. C.
+cations while correcting the inaccurate intersection edges.            García, Polyhedral-based modeling and algorithms
+And we show the repair effects in different situations in              for tolerancing analysis, Computer-Aided Design 141
+the experiment part.                                                   (2021) 103071.
+
+
+                                                             14
+[15] A. Desrochers, A. Rivière, A matrix approach to the          ing 4 (4) (1997) 22–28.
+     representation of tolerance zones and clearances, The
+     International Journal of Advanced Manufacturing [20] J. Yang, S. Han, Repairing cad model errors based
+     Technology 13 (1997) 630–636.                                on the design history, Computer-Aided Design 38 (6)
+                                                                  (2006) 627–640.
+[16] J. M. Hervé, Analyse structurelle des mécanismes par
+     groupe des déplacements, Mechanism and Machine [21] P. K. Jayaraman, A. Sanghi, J. G. Lambourne, K. D.
+     Theory 13 (4) (1978) 437–450.                                Willis, T. Davies, H. Shayani, N. Morris, Uv-net:
+[17] D. E. Whitney, O. L. Gilbert, M. Jastrzebski, Repre-         Learning from boundary representations, in: Proceed-
+     sentation of geometric variations using matrix trans-        ings of the IEEE/CVF conference on computer vision
+     forms for statistical tolerance analysis in assemblies,      and pattern recognition, 2021, pp. 11703–11712.
+     Research in engineering design 6 (1994) 191–210.
+                                                             [22] J. G. Lambourne, K. D. Willis, P. K. Jayaraman,
+[18] C. M. Hoffman, R. Joan-Arinyo, Cad and the prod-             A. Sanghi, P. Meltzer, H. Shayani, Brepnet: A topo-
+     uct master model, Computer-Aided Design 30 (11)              logical message passing system for solid models, in:
+     (1998) 905–918.                                              Proceedings of the IEEE/CVF conference on com-
+[19] G. Barequet, Using geometric hashing to repair cad           puter vision and pattern recognition, 2021, pp. 12773–
+     objects, IEEE Computational Science and Engineer-            12782.
+
+
+
+
+                                                          15
+

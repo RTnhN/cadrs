@@ -1,0 +1,833 @@
+                                                           
+                                  ESOLID – A System for Exact Boundary Evaluation
+                                                                                                                           
+                                                                           
+                         J. Keyser             T. Culver                 M. Foskey                         S. Krishnan
+                   Texas A&M University         Think3          University of North Carolina            AT&T Research Labs
+                                                               D. Manocha
+                                                       University of North Carolina
+
+
+
+
+Abstract                                                                graphics and CAD/CAM applications remains a major challenge.
+                                                                           The difficulties in developing a reliable or consistent solid mod-
+We present a system, ESOLID, that performs exact boundary eval-         eler using only fixed-precision arithmetic are well known [17, 21,
+uation of low-degree curved solids in reasonable amounts of time.       22, 24, 25, 30, 42, 48, 49]. Beyond the reliability of individual solid
+ESOLID performs accurate Boolean operations using exact repre-          modeling systems, numerical inaccuracy plays a significant role in
+sentations and exact computations throughout. The demands of            problems of data transfer. This leads to an estimated loss of more
+exact computation require a different set of algorithms and effi-       than $1 billion annually in the U.S. automobile industry alone [6].
+ciency improvements than those found in a traditional inexact float-    Many solutions, based on symbolic relationships, tolerances, inter-
+ing point based modeler. We describe the system architecture, rep-      val arithmetic, perturbation techniques, etc. have been proposed to
+resentations, and issues in implementing the algorithms. We also        increase the accuracy and robustness of boundary evaluation sys-
+describe a number of techniques that increase the efficiency of the     tems. One such approach to this problem is the exact computation
+system based on lazy evaluation, use of floating point filters, arbi-   paradigm [47], which eliminates numerical error in geometric com-
+trary floating point arithmetic with error bounds, and lower dimen-     putations entirely.
+sional formulation of subproblems.                                         In practice, most approaches have been applied to polyhedral
+   ESOLID has been used for boundary evaluation of many com-            models only. In particular, techniques based on exact arithmetic or
+plex solids. These include both synthetic datasets and parts of a       representations are regarded as extremely slow and impractical for
+Bradley Fighting Vehicle designed using the BRL-CAD solid mod-          non-linear (curved) models. Worst-case analysis of exact computa-
+eling system. It is shown that ESOLID can correctly evaluate the        tion for curved objects (e.g. [49]) has further fueled the perception
+boundary of solids that are very hard to compute using a fixed-         that exact computation on curved solids is completely impractical.
+precision floating point modeler. In terms of performance, it is        Our work addresses this by demonstrating, for the first time, that
+about an order of magnitude slower as compared to a floating point      an exact computation-based approach can achieve reasonable effi-
+boundary evaluation system on most cases.                               ciency on curved solids while eliminating numerical error.
+Keywords: Exact Computation, Boundary Evaluation, Robust-
+ness, System Implementation                                             1.1 Main Results
+                                                                        We present a system, ESOLID, that performs exact boundary eval-
+1          Introduction                                                 uation of low-degree algebraic curved solids in reasonable amounts
+                                                                        of time. ESOLID computes accurate Boolean combinations, main-
+A key operation in solid modeling systems is boundary evalua-           taining exact representations throughout. We describe a number
+tion, or computing the boundary of Boolean combinations of two          of techniques that improve the efficiency of the system. These
+or more solids. A number of algorithms have been proposed in the        include lazy representations and evaluation, floating point filters,
+literature for boundary evaluation, however these are hard to imple-    use of arbitrary precision floating-point arithmetic with tight er-
+ment because of accuracy and robustness problems. These prob-           ror bounds, low-dimensional formulation of subproblems, etc. ES-
+lems are particularly significant when dealing with curved primi-       OLID has been applied to a number of complex solid models, in-
+tives. In general, geometric computations on non-linear primitives      cluding both synthetic models and models designed using the BRL-
+are more susceptible to inaccuracies in representation and compu-       CAD solid modeling system. We have compared its performance
+
+    
+tation. As a result, designing a reliable solid modeling system for     with a boundary evaluation system based on floating-point compu-
+                                                                        tation. In terms of performance, ESOLID is less than one order of
+
+         keyser@cs.tamu.edu                                           magnitude slower in most cases and no more than two orders of
+           culver@acm.org                                               magnitude slower in the worst case. However, ESOLID can easily
+           foskey@cs.unc.edu                                            handle cases that are very hard to handle by fixed precision bound-
+           krishnas@research.att.com                                    ary evaluation systems. To the best of our knowledge, there are no
+           dm@cs.unc.edu                                                previous exact implementations of boundary evaluation that achieve
+                                                                        comparable speeds on real-world examples.
+
+                                                                        1.2 Exact Computation
+                                                                        The primary reason for using exact computation has been to ensure
+                                                                        consistency in operations by eliminating numerical error accumu-
+                                                                        lation in intermediate computations. Although input data might not
+                                                                        be exact (e.g. positions may be inaccurate or “noisy,” and certain
+                                                                        desirable rotations can not be represented exactly by rational num-
+                                                                        bers), exact computation is still very useful. Without exact com-
+                                                                        putation, errors build up in intermediate computation, resulting in
+inconsistent intermediate data that can cause program crashes and       are not sufficient for general boundary evaluation problems. While
+incorrect or invalid output. ESOLID makes a particular interpre-        some exact methods have been applied to polyhedral solids, we
+tation of the given data, then uses exact computation for all oper-     are not aware of any previous practical implementations for curved
+ations on the data and exact representations for intermediate data.     solids.
+This eliminates problems due to intermediate error buildup.
+                                                                        2.3 Exact Boundary Evaluation on Non-linear Primi-
+1.3 Paper Outline                                                           tives
+We present here the issues and challenges involved in implement-        Keyser et al. previously presented [30, 31, 32] the outline of an
+ing an efficient exact solid modeling system for curved solids. In      approach for exact boundary evaluation. While this approach has
+section 2 we describe previous work that has led to the development     guided our later work, the work presented here builds on this previ-
+of ESOLID. In section 3 we give an overview of ESOLID, break-           ous work and significantly extends the results presented in those
+ing it into its major components. In section 4, we describe some of     papers. Other relevant previous work by Keyser et al. includes
+the major challenges encountered in implementing ESOLID, along          the MAPC library [33]. MAPC provides data structures and rou-
+with the solutions that we used. We discuss the various techniques      tines for polynomials, algebraic plane curves, and two-dimensional
+used to increase efficiency in section 5. Section 6 presents the re-    points with algebraic coordinates. The MAPC data structures and
+sults of ESOLID applied to both synthetic datasets and “real world”     routines, which were developed in the process of implementing ES-
+examples. Finally, section 7 concludes with a summary of impor-         OLID, form a primary building block for ESOLID.
+tant lessons learned in the process of implementing ESOLID.
+
+
+2   Previous Work                                                       3 ESOLID Overview
+                                                                        ESOLID is a system for performing exact boundary evaluation. In-
+2.1 Boundary Evaluation                                                 put is supported for several primitives (including the “CSG stan-
+Boundary evaluation is a well-studied problem in solid modeling.        dard primitives” [23]), stored in a CSG tree that allows union, in-
+Braid [4] provided one of the earliest treatments, and Requicha         tersection, and difference operations, as well as transformations by
+and Voelcker [41] provided a comprehensive description of basic         a 4 4 matrix (see section 3.3 for a more detailed discussion of
+boundary evaluation. Casale and Bobrow presented one of the             input). The internal representation supports manifold objects made
+first detailed descriptions for boundary evaluation for curved solids   up of trimmed patches with surfaces expressed as rational functions
+[7]. Today, the basic approaches for boundary evaluation are well-      of polynomials with rational coefficients.
+understood, and have been incorporated into textbooks [23, 38].            Note that ESOLID is designed to work correctly for surfaces
+    More recently, robustness in boundary evaluation has gained         of arbitrary degree and complexity. For efficiency reasons, how-
+greater attention. Some researchers have focused on the use of ex-      ever, only low-degree (algebraic degree four or less) surfaces
+act computation for polyhedral solids. This work includes that of       are practical—higher degree surfaces tend to take unreasonable
+Sugihara and Iri [45], Yu [49], Benouamer et al. [2], Sugihara [44],    amounts of time and memory. With each operation, ESOLID deter-
+and Fortune [17]. Others have proposed methods for increasing           mines the boundary of the result, updating all geometry and topol-
+robustness that do not rely on exact computation. For eliminating       ogy to store the resulting object. Boolean operations are not sup-
+numerical errors in boundary evaluation on curved solids, the work      ported for degenerate configurations of objects. Thus input, inter-
+has been much more limited. Yu has explored some theoretical            mediate representations, and output must all be manifold solids,
+bounds of exact computation [49], Fang et al. have explored toler-      intersection curves may not have singularities, surfaces of differ-
+ance methods for boundary evaluation [16], Hu et al. have explored      ent objects should not overlap, etc. Currently, output is provided
+interval computations and representations [24, 25], and Desaulniers     in one of two forms: either a human-readable exact output suit-
+and Stewart have given limited results on the interpretation of (pos-   able mainly for testing and debugging, or an approximate output
+sibly inconsistent) output [12].                                        of trimmed Bezier patches, useful mainly for visualization (e.g. the
+    Requicha and Voelcker have listed and summarized many of the        pictures shown here).
+earliest solid modeling systems [40]. Solid modeling systems have          Below, we briefly discuss the architecture and representations of
+continued to be developed in recent years, such as the CSG-based        ESOLID, the process of boundary evaluation, and input considera-
+BRL-CAD system from the Army Research Lab [14, 13] and the              tions.
+IRIT system [15], and research systems created to demonstrate new
+robustness techniques. Examples of those systems are ones by For-
+                                                                        3.1 Architecture
+tune [17], Jackson [26], Benouamer et al. [2], Fang et al. [16], and
+Hu et al. [24, 25].                                                     ESOLID consists of approximately 45,000 lines of C++ code, im-
+                                                                        plemented on top of the LiDIA library [3]. LiDIA provides data
+2.2 Exact Computation                                                   structures and routines for exact arithmetic on rational numbers.
+                                                                        Other libraries (such as LEDA [39]) for exact rational arithmetic
+A significant amount of work has been done on exact computation         could easily be used instead.
+in computational geometry, solid modeling, and symbolic compu-             Solids in ESOLID are represented as B-reps broken up into
+tation. Among the methods used to increase the efficiency of ex-        trimmed parametric patches. A surface with both a parametric and
+act computations are those based on interval arithmetic [29, 27],       implicit form defined is associated with each patch. The intersec-
+floating-point filters [18, 19], lazy arithmetic [2], tuned computa-    tions of such surfaces are stored as algebraic plane curves in the
+tions [18, 19], precision-driven computation [47], minimized inter-     parametric patch domain. These intersection curves (which become
+mediate computation [8, 5], fast hardware computation [43], and         trimming curves in a final solid after boundary evaluation) are typ-
+modular arithmetic [18, 5]. Libraries supporting basic exact com-       ically not parameterizable. So, intersection curves (and trimming
+putation have been developed, with LEDA [39] and CORE [28]              curves) are stored in implicit form with endpoints. These endpoints,
+being notable examples. These libraries, however, support only lin-     since they can be the intersection of two algebraic plane curves,
+ear computations and a limited set of algebraic computations, and       can have irrational algebraic coordinates. ESOLID uses the MAPC
+representation for points, which involves representing points as 2D         Boundary Evaluation                        BRL-CAD Converters
+intervals that are guaranteed to contain a unique intersection of two
+algebraic plane curves. The interval endpoints are rational numbers,
+and the interval size can be reduced on demand.
+                                                                                         K_SOLID
+   A diagram showing the organizational structure of ESOLID is
+given in figure 1. The portions of ESOLID that are incorporated in
+MAPC are represented as an external library in the figure.
+
+     MAPC provides routines for handling polynomials                        K_PATCH               K_PARTITION       K_GRAPH
+     (K_POLYs), algebraic plane curves (K_CURVEs), and both
+     1D points (K_POINT1Ds) and 2D points (K_POINT2Ds)                      K_SURF
+     with algebraic coordinates [33]. It includes routines for
+     determining the topology of algebraic plane curves over a
+     limited domain and intersecting two algebraic plane curves.              MAPC
+     MAPC, which was developed in the process of implementing
+     ESOLID, provides a fundamental building block for the other
+     ESOLID classes.
+                                                                                         LiDIA                            Graph Algorithms
+     A K_SURF is the ESOLID representation for a surface. It
+     includes K_POLYs that describe the rational parametric form        Figure 1: The major parts of ESOLID. Shaded boxes indicate exter-
+     of the surface, as well as a K_POLY giving the implicit form.      nal libraries used in ESOLID (including MAPC). A solid arrow in-
+                                                                        dicates that one library or structure is a necessary part of another. A
+     A K_PATCH describes a single patch in the B-rep. A
+                                                                        dashed arrow from one structure to another indicates that the source
+     K_PATCH includes a K_SURF defining the surface, LiDIA
+                                                                        structure can be used to create the destination structure.
+     bigrationals defining the domain boundaries, and arrays of
+     K_CURVEs defining trimming and intersection curves. Trim-
+     ming curves define the boundary of the patch, and intersection
+     curves indicate where the patch intersects patches of another
+     solid. Each curve, of either type, is associated with a K_SURF     3.2 Boundary Evaluation
+     that intersects the patch. The associated K_SURFs are kept in      Boundary evaluation is defined within the K_SOLID class. The tra-
+     an array parallel to the array of K_CURVEs. In some cases,         ditional two-stage approach to boundary evaluation is followed in
+     the associated K_SURF is the K_SURF of a different patch.          ESOLID. In the first stage, the patches are intersected pairwise, par-
+     In other cases it only exists to determine a boundary between      titioning them into separate components. In the second stage, the
+     adjacent patches, so that, e.g., a sphere may be parameterized     partitions are identified and selectively stitched together to form the
+     using multiple patches.                                            final solid. Although this traditional approach is well-understood
+                                                                        and straightforward, a number of individual steps must be modified
+     A K_PARTITION describes one subpatch formed during                 considerably in order to allow it to be used in an exact computation
+     boundary evaluation. It includes data denoting the particu-        scheme. Previous papers have described some of these issues in de-
+     lar curves in an associated K_PATCH structure that define the      tail [31, 32], but actual implementation highlighted the importance
+     K_PARTITION.                                                       of other issues (e.g. curve correspondence) that had not been con-
+     A K_SOLID describes the overall solid, and is made from a          sidered. Only a brief overview will be given here, although some
+     group of K_PATCHs. K_SOLIDs are the input and output for           steps are treated in more detail in section 4.
+     boundary evaluation. They can also be formed from collec-              The procedure is as follows:
+     tions of K_PATCHs, groups of K_PARTITIONs coupled with
+     topological information, and conversion of input CSG data               For each pair of patches:
+     (from BRL-CAD).
+                                                                                 – Generate an intersection curve in the domains of the
+     Topological connectivity information is kept in the individual                patches by substituting the parametric representation of
+     classes. Each face stores the list of trimming curves and the                 each patch into the implicit representation of the other
+     adjacent face along each curve. Each curve (edge) stores the                  patch. Each intersection curve is represented as the zero
+     adjacent vertices. The same 3D curve or point is often stored                 set of a bivariate polynomial.
+     in more than one 2D patch domain. These “associations”                      – Resolve the topology of the intersection curves (i.e. de-
+     (pointers to an equivalent point or curve in another domain)                  termine their structure in the patch domain).
+     are also stored and are important in boundary evaluation. An
+     overall topological graph (K_GRAPH) is constructed as nec-                  – Intersect the intersection curve with the trimming
+     essary during later stages of boundary evaluation. Details of                 boundary, determining the position of each intersec-
+     the topological information stored and proof of its sufficiency               tion point in the domain of both patches (point inver-
+     are given by Keyser [34]. Note that because of the use of exact               sion).
+     computation, storing redundant topological information does                 – Determine the curve correspondence, that is, how the
+     not lead to robustness problems.                                              individual portions of the algebraic plane curve in one
+                                                                                   patch domain relate to those in the other domain.
+     Not shown in the figure, the PRECISE library [37] can be
+     optionally included as a part of MAPC to speed up calcula-                  – Clip the intersection curves in each domain so that only
+     tions involving algebraic numbers. PRECISE is an extension                    the portions inside the trimmed regions of both patches
+     of the range arithmetic techniques developed by Aberth and                    are maintained.
+     Schaefer, and implemented in their range library [1].
+                                                                             For each patch:
+     Generate                         Intersect With       Determine          Clip to
+     Intersection     Resolve         Trimming             Curve              Trimming             Merge            Partition        Classify            Build
+     Curves           Topology        Boundary             Correspondence     Boundary             Curves           Patches          Partitions          Solid
+
+
+
+
+                                                       Point                Implicit                                                 Point           Implicit
+       Curve-Curve         Curve                       Location/            Surface                Curve-Curve       Curve           Location/       Surface
+       Intersection        Topology                    Generation           Generation             Intersection      Topology        Generation      Generation
+
+
+
+
+      Patch                Curve                          Point               Topological         Patch              Curve              Point          Topological
+      Data                 Data                           Data                Data                Data               Data               Data           Data
+
+
+
+Figure 2: A summary of the five main steps in the first stage of the                        Figure 3: A summary of the four main steps in the second stage of
+boundary evaluation algorithm.Arrows show how the basic data and                            the boundary evaluation algorithm. Arrows show how the basic data
+kernel operations are used in the various steps. At top are the steps                       and kernel operations are used in the various steps. At top are the
+in boundary evaluation, in the middle are the kernel operations, and                        steps in boundary evaluation, in the middle are kernel operations,
+at bottom are the data structures for the input solids.                                     and at bottom are the data structures for the input solids.
+
+
+
+           – Merge intersection curves from the patch/patch inter-                          Research Lab and used for a variety of defense applications. Specif-
+             sections to form patch/solid intersection curves.                              ically, we focused on the Bradley Fighting Vehicle model provided
+           – Partition the patch into different components based on                         to us courtesy of the Army Research Lab. It provided a large, com-
+             the trimming curves.                                                           plex, real-world example on which previous boundary evaluation
+           – Classify partitions as to whether they are inside or out-                      attempts had proven difficult. While BRL-CAD supports a number
+             side of the other solid by classifying a point contained                       of primitive CSG solids, most of them, including all those prim-
+             in each partition.                                                             itives used in the Bradley, contain only low degree (surfaces no
+                                                                                            more than degree four), so we focused our efforts on handling such
+           – Based on the Boolean operation, choose the correct                             low-degree cases efficiently.
+             components from each solid to build the final solid,
+                                                                                                BRL-CAD represents all transformations as transformation ma-
+             updating all topological information.
+                                                                                            trices. Transformation matrices are the only method currently sup-
+   These operations are built on a set of “kernel operations” in-                           ported by ESOLID for specifying translations, rotations, etc. Note
+cluding curve-curve intersection, curve topology, point genera-                             that transformation matrices can be input exactly, while other trans-
+tion/location, and implicit surface generation. Curve-curve inter-                          formation descriptions, such as “rotation by X degrees,” might not
+section and curve topology are a part of MAPC, and the new al-                              have an exact representation using rational numbers.
+gorithms developed for them have been highlighted elsewhere [33].                               Although routines have been developed to convert BRL-CAD
+Point generation refers to quickly generating a point with ratio-                           data files into the ESOLID input format, ESOLID is not limited
+nal coordinates that lies on the surface of an object. Point loca-                          to BRL-CAD data. Any data that can be expressed by the struc-
+tion refers to classifying whether a 2D point lies inside or outside                        tures given in section 3.1 can be used in ESOLID. Note, however,
+the trimmed region of a patch, or whether a 3D point lies inside                            that only low-degree surfaces will yield reasonable running times.
+or outside of another solid. Implicit surface generation refers to                          There are some other minor restrictions (e.g. the surfaces must be
+creating an implicit surface given information about a specific para-                       one-to-one mappings over the patch domain), however these are not
+metric curve and/or patch. The efficiency of these kernel operations                        significant for the most common CSG primitives. See [34] for con-
+has a tremendous effect on the efficiency of the entire system. Fig-                        version of several common CSG primitives to the ESOLID format.
+ures 2 and 3 show the relationships between the kernel operations                               By default, ESOLID will treat input as exact. However, as men-
+and the steps in boundary evaluation. Also shown in the figures                             tioned in section 1.2, the purpose of exactness is mainly just to en-
+is the way that the point (K_POINT), curve (K_CURVE), patch                                 sure consistency. Routines are included in ESOLID that allow a
+(K_PATCH), and topological data are used in the various kernel                              user the option of perturbing input data to achieve a particular inter-
+routines and steps of boundary evaluation.                                                  pretation. For example, the four vertices of a face of an input rect-
+                                                                                            angular parallelepiped might not be coplanar, due to roundoff error
+                                                                                            in the input file. Options are provided to either treat the face as a bi-
+3.3 Input Considerations
+                                                                                            linear patch (an “exact” interpretation), or to fit planes to each face
+From the beginning, ESOLID was intended to handle data from                                 then form new vertices at the intersections of the faces (the “per-
+real-world examples, meaning data not developed specifically to                             turbed” interpretation). As long as such interpretation is made only
+test exact boundary evaluation. The BRL-CAD [14, 13] data for-                              at the original input stage, and not in intermediate computations,
+mat was used as the model for the input accepted by ESOLID. BRL-                            the consistency provided by exact computation is maintained.
+CAD is a CSG-based solid modeling system developed at the Army                                  Finally, ESOLID input is restricted to non-degenerate configura-
+tions. Although certain degeneracies are accounted for and han-
+dled within ESOLID, other degeneracies can cause ESOLID to
+                                                                                                     
+                                                                                                  Fy s t
+                                                                                                  Fz s t             
+                                                                                                                  Gy u v
+                                                                                                                  Gz u v
+                                                                                                                           
+                                                                                                                  
+fail. Many real-world examples (including several from the Bradley
+Fighting Vehicle) contain numerous degeneracies. ESOLID cannot           where one wants to find a particular u v interval (the inverted
+be considered a robust system, in terms of handling all possible in-     point) corresponding to a given s t interval. This four dimen-
+put configurations. However, ESOLID’s elimination of numerical           sional operation is still too time-consuming to yield an efficient
+error increases robustness (over an inexact system), and since treat-    implementation. Fortunately, we can reduce the computation to a
+ing numerical error is an important prerequisite to fully handling       series of 2D and simple 3D calculations, as presented here:
+
+                                                                                                        
+degeneracies, ESOLID supports future treatment of degeneracies.              In the domain of P1 , is described as a particular intersection
+                                                                         of two curves, f s t      0 and g s t    0. In boundary evaluation, f
+
+
+                                                                                                               
+                                                                         and g will always be either intersection or trimming curves. Thus,
+4   Challenges                                                            f is the intersection of a surface, S1 x y z      0 with P1 , and g is
+A number of challenges were faced in the development of ESOLID.          the intersection of a surface, S2 x y z       0 with P1 . In all cases
+Among these were creating the necessary data structures and algo-        where point inversion is necessary, either S1 or S2 (say S1 , for this
+                                                                         example) is the surface corresponding to the patch P2 .
+
+                                                                           
+rithms for exact computation and propagating information between
+                                                                             The intersection of P1 with P2 is already computed as a curve,
+
+                                                                                                    
+the patches. A primary concern was efficiency, and this is discussed
+                                                                          f˜ u v     0 in P2 ’s domain. The intersection of S2 with P2 is now
+
+                                                                                                                                
+further in section 5.
+                                                                         computed in the form g̃ u v        0. Next, the intersections of f˜ and
+                                                                         g̃ are computed. This yields a set of points, p1 p2          pn , one of
+4.1 Exact Data Structures and Algorithms                                 which must be the inverted point.
+One major obstacle encountered in implementing ESOLID was the                Note that if S1 or S2 is self-intersecting (i.e. it does not have a
+lack of existing library support for exact computation. While li-        one-to-one correspondence between the domain and the surface),
+braries exist for exact rational number computation, none were           then there may be more than one possible inverted point. We avoid
+found for algebraic number computation, except general computer          such cases by always dividing primitive input solids into patches
+algebra systems. Because of their generality, these computer alge-       such that each patch has a one-to-one mapping over the patch do-
+bra systems do not provide the level of efficiency needed for bound-     main. By decomposing solids appropriately, this is always possible
+ary evaluation. Also, libraries providing geometric data structures      for the patches of the common CSG primitives [34].
+tend to focus on linear structures (and occasionally circles). A more        To this point, only 2D operations have been required. Very ba-
+general library for representing curves exactly was not found.           sic 3D operations are now used to determine which of the pi is the
+   We developed the MAPC library to meet this need. Although             inverted point. We find a 3D interval (in x y z space) bounding
+geared specifically to the boundary evaluation problem, the data         each pi . This can be done by substituting the 2D interval bounding
+structures and routines for polynomials, points, and 2D curves           pi into the parametric form of the P2 ’s surface, S1 . Interval arith-
+that MAPC provides have been applied to other problems, as well          metic operations determine the bounds for a 3D interval guaranteed
+[10, 46, 20]. As libraries are developed that support exact compu-       to bound pi . These intervals are compared to an interval bound-
+tation, one of the major hurdles to exact implementations (lack of       ing (generated from the 2D interval in P1 ’s domain). Typically,
+library/compiler/hardware support) will gradually be lowered.            only one pi has an overlapping interval and this will be the inverted
+                                                                         point. If two or more intervals overlap ’s interval, the involved
+                                                                         intervals can be reduced. This is done by reducing the 2D interval
+4.2 Transferring Data Between Patches                                    surrounding each point (a function provided in MAPC), construct-
+                                                                         ing a new 3D interval from that 2D interval, and iterating until the
+Many sub-algorithms used in boundary evaluation involve transfer-
+                                                                         ambiguity is resolved.
+ring the data from the patch of one solid to the other. Two major
+                                                                             In this way, point inversion has been converted from a higher-
+examples of this are point inversion (part of the intersecting curve
+                                                                         dimensional problem into a series of 2D computations (curve-curve
+step) and the curve correspondence step (see section 3.2).
+                                                                         intersections), along with some simple 3D interval matching com-
+   In these cases, the most obvious and direct approach would be to
+                                                                         putations.
+treat the problem in 3 or more dimensions. This proves to be prob-
+lematic, however. First, exact operations in higher dimensions are
+generally extremely slow. Second, and perhaps more fundamental,          4.2.2 Curve Correspondence
+new data structures might be necessary to perform such compu-
+tations. For example, the intersection curve between two patches         Curve correspondence refers to finding the orientation of a curve in
+is represented as a 2D curve in each patch domain—the algebraic          one patch domain relative to the same curve represented in the do-
+space curve is not explicitly represented. We present algorithms         main of another patch. Each algebraic plane curve has a direction
+for point inversion and curve correspondence based on the lower-         induced on it in the domain of the patch. The algebraic plane curve
+dimensional representation.                                              (in the parameter space) is part of a curve in three spatial dimen-
+                                                                         sions. This 3D curve (or a portion of it), represented in the domain
+                                                                         of a different patch, may have either the same or an opposite orien-
+4.2.1   Point Inversion
+                                                                         tation from the original algebraic plane curve. A common way to
+A point in the domain of a patch P1 determines, via the parameter-       compute curve correspondence is to trace the curve in three dimen-
+ization, a point in 3-space. If is in the intersection of P1 with        sions. However, most tracing methods are approximate, and subject
+another patch P2 , it may be necessary to find the inverse image of      to numerical error. Furthermore, it is preferable to rely on only 2D
+   under the parameterization of P2 . This process is point inversion.   operations, for efficiency reasons.
+Point inversion can be viewed as a problem in as many as seven di-          Before curve correspondence is calculated, the points at which
+mensions (the two dimensions, s and t of P1 , the two dimensions, u      a curve intersects the trimming curves of a patch are determined.
+and v, of P2 , and the three spatial dimensions (x y z)). The problem    By point inversion, the locations of these points are found in both
+                                                                         relevant patch domains. If a connected curve intersects trimming
+
+                                      
+is easily reduced to four dimensions:
+                                                                         curves in 3 places, then the three resulting points can be used to
+                       Fx s t         Gx u v                             determine a direction for the curve in both patches, and to verify
+that a particular portion of the curve in one patch domain (bounded           are found to be horizontal or vertical. Algorithms developed
+by two of the points) corresponds to a given portion in the other.            for MAPC [33] use knowledge about the limited domain to
+If there are only two intersections, an additional point can be gen-          perform more efficient curve-curve intersection tests and to
+erated to determine this information. Thus, inverted point informa-           determine curve topology. A third example of simplified com-
+tion is used instead of curve tracing to transmit orientation from one        putation in ESOLID is interval reduction for intervals sur-
+patch domain to the other. More details on this algorithm and some            rounding algebraic numbers. If an algebraic number is a sim-
+related assumptions are described by Keyser [34].                             ple root, its defining polynomial will be negative on one side
+                                                                              of the root and positive on the other (and which side is which
+                                                                              is already known), thus allowing a simple polynomial sign
+5   Efficiency Considerations                                                 test (rather than a full Sturm sequence evaluation) to reduce
+                                                                              the width of the interval.
+A major concern in the implementation of ESOLID was to make it
+as efficient as possible. The goal was to create an implementation            Lower-dimensional formulation of several parts of the com-
+that was one to two orders of magnitude slower than an inexact                putation also leads to great efficiency improvements. With
+implementation (i.e. taking no more than 10–100 times as long) on             exact computation especially, the higher the dimension of
+real-world examples. In order to achieve this, a number of different          the problem, the longer the computation takes. It is often
+speedup techniques had to be combined.                                        much faster to replace a single higher-dimensional computa-
+   In order to understand certain speedups, mention must be made              tion by one or more lower-dimensional computations. Exam-
+of Sturm sequences. Sturm sequences are a technique used to count             ples of this in ESOLID are point inversion and curve corre-
+the number of real roots of a polynomial in an interval. Sturm                spondence (see section 4.2), the overall boundary evaluation
+sequence operations involve generating and evaluating a series of             algorithm (all points, curves, and computations are in only
+polynomials (see elsewhere for a more complete description [11]).             two dimensions), and curve-curve intersection (2D computa-
+Sturm sequences, along with resultant calculations, form the basis            tion replaced by a resultant and a series of 1D computations
+for the curve-curve intersection tests implemented in MAPC, and               [33]).
+play a major role in ESOLID’s efficiency.
+                                                                              Floating-point evaluations are still very useful as a speedup
+5.1 Speedups                                                                  technique, even though they might not be exact. Floating-
+                                                                              point filters [18, 19] are a way of avoiding certain expensive
+Numerous speedup techniques were employed in ESOLID, and                      exact computations by computing in floating-point hardware,
+space permits only a brief mention of each type here. References              but maintaining an error bound. If the error is small enough,
+are provided to prior uses of the techniques, though not necessarily          a decision is made based on the result of the computation,
+in the way used in ESOLID.                                                    but without exact arithmetic. This is used to avoid certain
+                                                                              Sturm sequence calculations in ESOLID. Another technique,
+     Lazy evaluation attempts to postpone high-precision (i.e.                floating-point guided computation has proven even more use-
+     time-consuming) computations as long as possible in hope                 ful for dealing with algebraic numbers. This refers to mak-
+     that they will not be necessary [2]. Lazy evaluation is applied          ing a “guess” of a root using floating-point techniques (with
+     to both point representations (intervals surrounding algebraic           no error bound), then using exact methods to verify that the
+     coordinates are reduced only as needed) and curve representa-            guess was close enough to the real answer. For example,
+     tions (curves are subdivided into segments as needed) in ES-             roots of a polynomial can be approximated using an imprecise
+     OLID.                                                                    method (e.g. Newton’s method), then Sturm sequences can be
+                                                                              used to verify that the right number of roots was found, and
+     Quick rejection techniques involve quickly identifying cases             that a small interval around each approximate root contains
+     where computation can be avoided entirely. Interval arith-               the true root. Thus a tight, guaranteed, exact bound is gen-
+     metic [29, 27] is sometimes used to avoid more complicated               erated faster than by standard interval bisection techniques.
+     algebraic calculations involving curves and patches (e.g. de-            Arbitrary-precision floating-point computations can also be
+     termining whether a curve can intersect a particular patch               used. This means that floating-point numbers are represented
+     boundary). Affine arithmetic [9], closely related to interval            using any number of bits. Although slower than standard,
+     arithmetic, can be used to speed up polynomial sign tests                hardware supported, IEEE floating-point computations, such
+     by providing tight error bounds and an efficient implemen-               floating-point numbers can provide precision from the IEEE
+     tation when evaluating an interval in a polynomial. Interval             level (53 bits) all the way up to exact floating-point calcula-
+     arithmetic based on both exact rational interval bounds and              tions. This allows floating-point filters with varying levels of
+     on IEEE floating-point interval bounds has been used in ES-              accuracy. The PRECISE library [37] implements arbitrary-
+     OLID. The use of bounding boxes is another well-known tech-              precision floating-point computation. It is an extension of the
+     nique for quick rejection, and is part of the point, curve, and          range arithmetic presented by Aberth and Schaefer and im-
+     patch representations in ESOLID. For example, patch bound-               plemented in their range library [1]. ESOLID optionally in-
+     ing boxes are compared to eliminate cases where patches                  cludes PRECISE within MAPC as part of a filter for speeding
+     clearly do not intersect.                                                up Sturm sequence computations.
+     Simplified computation refers to substituting fast, simple
+     computations for more complex ones. As an example in ES-            5.2 Layering Speedups
+     OLID, qualitative information can be maintained with points
+     to allow nearly instantaneous equality checking in certain          ESOLID applies all of the speedups listed above into a multilayered
+     cases, as opposed to the rather time-consuming exact alge-          approach. As an example, the process for reducing the size of an
+     braic number comparisons used otherwise. Algorithms can             interval surrounding an algebraic root (in one dimension) will be
+     make use of problem-specific information to avoid more gen-         described. This interval reduction computation is in turn part of
+     eral, and thus more time-consuming, computation. For exam-          more complex computations that incorporate more of the speedups
+     ple, curve-curve intersection is greatly simplified if the curves   listed above.
+     The midpoint of the interval is determined (or another point is     Sturm sequences, a key part of curve-curve intersection calculations
+     provided).                                                          as well as other calculations involving algebraic numbers. Except
+                                                                         where noted, timings below do not include PRECISE.
+     If the root is simple, the defining polynomial will be positive        All timings presented in this chapter are in seconds on a 300
+     on one side, negative on the other. The signs at the upper and      MHz R12000 processor.
+     lower interval bounds are known beforehand. Thus, only the
+     sign at the midpoint needs to be determined:
+        1. Apply a floating-point filter to try to determine the sign    6.1 Synthetic Data
+           of the polynomial at the point.
+                                                                         Figure 4 shows examples of simple Boolean combinations on ba-
+        2. If that fails, evaluate the polynomial using exact com-
+                                                                         sic primitives supported in ESOLID. This demonstrates some of
+           putation.
+                                                                         the objects that ESOLID allows. Note that ESOLID can handle
+     Otherwise, a Sturm sequence calculation at the midpoint must        cases where objects have multiple components and genus greater
+     be performed:                                                       than one. Table 1 gives performance data for these basic cases. As
+                                                                         can be seen, even for these basic examples, several curve-curve in-
+        1. Use floating-point filtered computation to attempt to         tersection tests may be performed, and the results may need to be
+           evaluate the Sturm sequence.                                  found to high precisions.
+        2. If that is unsuccessful, use arbitrary-precision floating-
+           point computation (PRECISE library) to determine and
+           evaluate an approximate Sturm sequence.                       6.2 Real-World Data
+        3. Determine polynomials for Sturm sequence exactly, and
+                                                                         Real-world sample input was taken from the Bradley Fighting Ve-
+           evaluate signs using a multilevel approach as described
+                                                                         hicle model, provided courtesy of the Army Research Lab. This is a
+           above.
+                                                                         model created in the BRL-CAD system [14, 13], a CSG-based solid
+                                                                         modeling system. The Bradley is composed of over 5000 solids.
+5.3 Effectiveness of Different Techniques                                Primitives used are polyhedra (53%), generalized cones including
+                                                                         cylinders (44%), ellipsoids including spheres (2%), and tori (1%).
+Many of the speedup techniques we use have been used individually        Although these primitives are low-degree, they have been combined
+in previous applications with good success. Combining techniques,        to create a complex model.
+however, does not necessarily combine the effectiveness of the in-
+dividual techniques. There are two reasons for this.                        ESOLID was applied to several parts of the Bradley, some of
+   First, certain techniques tend to speed up the same cases. For        which are shown in figure 5. Timing data was taken both with and
+example, the cases where exact affine arithmetic [9] is most effec-      without inclusion of the PRECISE library. The same parts were
+tive are often the same cases where floating-point filters are most      also processed by the BOOLE system [36, 35]. The BOOLE sys-
+effective. In most cases we have found, there is still a benefit to be   tem performs (inexact) boundary evaluation based on IEEE double-
+realized by using both techniques, but in other cases, the increased     precision floating-point arithmetic. BOOLE uses tolerances to at-
+overhead from applying a second method can actually reduce over-         tempt to reduce the problems associated with numerical error. Ta-
+all efficiency.                                                          ble 2 gives the number of Booleans involved in each part, along
+   Second, some speedup techniques tend to conflict with each            with timing data for each system. Note that these parts sometimes
+other, in that they have different goals. For example, lazy evalua-      include a grouping operation, which may appear as a union opera-
+tion of point coordinates encourages intervals surrounding the point     tion but does not require any arithmetic computation (i.e. solids are
+to be maintained as large as possible, shrinking them only as neces-     merged without concern for potential intersections). As is shown,
+sary. Floating-point guided computation, on the other hand, encour-      for cases that BOOLE also worked on, ESOLID performs within
+ages intervals surrounding points to be reduced to the precision of      two orders of magnitude in time. With the inclusion of PRECISE,
+the floating-point estimate. In practice, a balance is struck between    these times are within about one order of magnitude, although some
+them—intervals are reduced farther than lazy evaluation would dic-       of the faster cases are slowed down slightly by PRECISE. Note also
+tate, but less than floating-point guided computation would recom-       that BOOLE is unable to handle several cases (see section 6.3 for
+mend. Although the optimum balance would be difficult to find,           more details).
+this combination still has resulted in speeds that are greater than         A breakdown of the individual timings under ESOLID (with-
+either technique employed alone.                                         out PRECISE) are shown in table 3. Notice that curve-curve in-
+   Even though techniques offset each other, in total these speedups     tersection computations are the dominant factor in the overall time.
+provide several orders of magnitude improvement in speed over the        The two major parts of curve-curve intersection (as implemented in
+straightforward exact approach.                                          MAPC) are resultant computations and (univariate) Sturm sequence
+                                                                         computations. As the table shows, the portion of the curve-curve in-
+                                                                         tersection time spent in each of these varies greatly. In general, it
+6   Results                                                              appears that for longer-running cases, the curve-curve intersections
+                                                                         (specifically Sturm sequence calculations), take a higher percent-
+ESOLID has been applied to several test cases, both “synthetic”          age of the overall time. The range arithmetic (following Aberth and
+and “real-world.” Synthetic cases were created specifically to test      Schaefer’s development [1]) included in the PRECISE library is in-
+or demonstrate the capabilities of ESOLID. Real-world cases were         corporated primarily to speed up Sturm sequence calculations, and
+taken from a model developed in another solid modeling system            achieves its best effects on cases where Sturm computations domi-
+(BRL-CAD [14, 13]) in order to determine the effectiveness of ES-        nate the running time. Also notice that all cases use a high level of
+OLID on cases not specifically designed for ESOLID.                      precision to isolate algebraic numbers. Due to the lazy evaluation
+   ESOLID provides the option of including the PRECISE library           procedures used in ESOLID, it is likely that levels of precision close
+[37]. PRECISE is an extension of Aberth and Schaefer’s range             to this would be required in order to guarantee accuracy. While a
+arithmetic [1], based on arbitrary precision floating-point compu-       system that does not provide this level of precision may still work
+tation. It is used in ESOLID as a filter to speed up calculation of      (e.g. BOOLE on cases a–d), it will be prone to failure.
+                                            Example           a       b       c        d         e          f      g           h           i
+                                            Object 1        box     box    cyl.      ell.   torus       twist    cyl.        ell.       ell.
+                                            Object 2        box   twist    box      box       box        cyl.    cyl.       cyl.      twist
+                           Degree of Object Surfaces        1,1     1,2     2,1      2,1       4,1        2,2    2,2         2,2        2,2
+                     Number of Intersecting Patches           6      12       6        8         8          8      4           8          9
+            Maximum Degree of Intersection Curves             1       2       3        2         4          6      6           6          4
+              Number of Curve-Curve Intersections            90    551    394       990       447        562    407         881        744
+                 Number of Univariate Roots Found             0     240    353     1268       900       2004    607        2248      1753
+             Bits of Precision in Algebraic Numbers           -      10     13        59        87        52      31          87         25
+                                          Total Time       0.39    1.35   0.90     4.62      8.25      22.05    5.50      49.41      28.83
+
+
+Table 1: Details of the difference operations illustrated in Figure 4. Object 1 describes the base primitive, while Object 2 describes the
+primitive being subtracted. The primitives shown are a box (polyhedron), twist (a box twisted so that some faces are bilinear patches),
+cylinder, ellipsoid, and torus. The degree of the surfaces in the two objects is given, followed by the number of pairs of patches that actually
+intersect. The maximum degree (in the parametric domain) of the intersection curves is also shown. The total number of curve-curve
+intersection operations performed is given, along with the total number of univariate roots found (i.e. the number of algebraic numbers found
+as a root of a univariate polynomial). The maximum number of bits of precision used to represent these algebraic numbers is given, followed
+by the total time taken to perform the Boolean operation.
+
+
+
+                   Example      Name                        Number of        ESOLID Time             ESOLID Time         BOOLE
+                   Number                                    Booleans     without PRECISE            with PRECISE          Time
+                      a         Tow Hook                            2                10.23                   10.95          2.23
+                      b         Wheel Assembly                      4                12.57                   12.69          2.81
+                      c         M16 Rifle                           6               633.42                   42.99          6.68
+                      d         Track Link                         11               132.48                  137.64         27.74
+                      e         Relay Mechanism                     1               250.74                   73.86             -
+                      f         Crew Member 3                       2                26.37                   28.14             -
+                      g         Launcher Mount Part                 3                63.15                   61.26             -
+                      h         Support Assembly Part               6               213.72                  105.99             -
+                      i         Rear Hatch Hinge                    7                58.92                   63.48             -
+                      j         Engine Access Hatch                16                54.78                   58.44             -
+
+
+Table 2: Overall timings for the examples in figure 5. The number of Boolean operations performed is shown, along with the times taken
+in ESOLID (both with and without the PRECISE library for arbitrary-precision floating-point filters of Sturm sequences) and in BOOLE (a
+boundary evaluation system based on double precision IEEE floating-point arithmetic and tolerances). A ‘-’ indicates that boundary evaluation
+failed on that object.
+
+
+
+                                 Number       Number of      Maximum                  % of Time        % of Total       % of Total
+                   Example      of Curve-     Univariate      Bits of      Total       in Curve-         Time in          Time in
+                   Number           Curve         Roots      Precision     Time            Curve        Resultant           Sturm
+                      a               425          1831         42         10.23            68.0             54.3              5.0
+                      b               637          1106         59         12.57            54.2             46.8              1.9
+                      c              1003          3834         57        633.42            98.2              3.6             94.3
+                      d              4444        13511          75        132.48            74.9             64.6              3.7
+                      e               320          6311         41        250.74            95.1             15.6             76.0
+                      f               315          2259         45         26.37            81.6             71.1              4.9
+                      g               974          5227         65         63.15            81.7             63.6             13.2
+                      h              1162          7116         66        213.72            92.5             35.8             54.7
+                      i              1266          8191         87         58.92            69.1             57.4              5.3
+                      j              1799          5334         69         54.78            64.2             55.0              3.8
+
+
+Table 3: Timing breakdown under ESOLID, without PRECISE, for the examples in figure 5. The number of curve-curve intersections is given.
+The number of algebraic numbers found as roots of univariate polynomials is shown, along with the maximum number of bits of precision
+used to represent these algebraic numbers. The total time is shown, along with the percentage of time spent in curve-curve intersection, the
+major component of the boundary evaluation algorithm. The percentage of total time spent in the two major components of curve-curve
+intersection, resultant computations and Sturm computations (generation and evaluation of Sturm sequences), is also shown.
+                 a                               b                                     a                             b
+
+
+
+
+                 c                               d                                     c                             d
+
+
+
+
+                 e                               f                                     e                             f
+
+
+
+
+                 g                               h                                     g                             h
+
+
+
+
+                 i                               j                                     i                             j
+Figure 4: The result of Boolean operations on pairs of primitives in   Figure 5: Example parts from the Bradley Fighting Vehicle model.
+ESOLID. Details of the various operations are given in table 1.        Details of the models and timings are given in tables 2 and 3.
+      Depth of      Precision     Total         Sturm     Resultant
+
+             
+    Penetration
+        (10 x )
+              3
+                    Required
+                        (bits)
+                           20
+                                  Time
+                                     (s)
+                                   8.64
+                                                 Time
+                                                    (s)
+                                                  2.19
+                                                             Time
+                                                                (s)
+                                                              4.17
+              6            20     12.45           4.14        5.61
+              9            25     17.25           7.23        7.47
+             12            30     22.98         11.13         9.15
+             15            40     33.21         17.07        11.88
+             18            52     47.46         24.66        14.46
+             21            58     60.15         32.64        18.15
+             24            62     86.76         47.64        22.80                        a                                b
+             27            68    147.66         99.75        26.37                                            1
+
+
+             30            71    120.36         74.79        29.64
+                                                                                                             0.8
+             33            77    164.01        108.03        34.41
+             36           117    205.17        143.40        38.34                                           0.6
+
+             39            88    446.28        357.63        46.89
+             42           141    317.55        237.15        49.11                                           0.4
+
+             45            96    385.80        296.19        55.80
+                                                                                                             0.2
+
+
+
+
+Table 4: Timing results for example j from Figure 4. The depth of                                                  0.2   0.4   0.6   0.8   1
+
+
+penetration of the two cylinders is given in the first column. Follow-                    c                                d
+ing that is the maximum precision required in the boundary evalua-
+tion algorithm to represent the algebraic numbers exactly. n bits of     Figure 6: Close-up views of Boolean operations where BOOLE
+
+                                           
+precision required means that algebraic numbers were determined
+to an interval of width no smaller than 2 n . The total time to per-
+form boundary evaluation is listed, followed by the time spent in
+                                                                         fails.
+
+
+Sturm computations (both generation and evaluation of Sturm se-
+quences), and in resultant computations.                                 7 Conclusion
+                                                                         We have presented a description of the ESOLID system for per-
+                                                                         forming exact boundary evaluation of curved solids. ESOLID
+6.3 Importance of Precision                                              has been applied to real-world examples, achieving times that are
+                                                                         within one order of magnitude of the time spent by an inexact sys-
+Consider example j in figure 4. Two cylinders barely interpene-          tem on these cases. We have also demonstrated that ESOLID can
+trate. Table 4 gives performance data for this case at varying levels    accurately evaluate a boundary in cases that are prone to numerical
+of interpenetration. As can be seen there, depending on the depth        error in inexact systems. To our knowledge, no other exact system
+of penetration, high levels of accuracy may be required in order         has achieved such results.
+to achieve guaranteed correctness. For some of these cases, it is
+impossible for standard floating-point data to provide the appropri-
+ate level of precision, since IEEE double-precision arithmetic can       7.1 Implications for Further Development
+provide at most 53 bits of precision, under the most ideal circum-
+                                                                         ESOLID has demonstrated that exact boundary evaluation is pos-
+stances. While it is unlikely that any real-world example would be
+                                                                         sible with reasonable efficiency for low-degree curved solids. ES-
+arranged like this, this case illustrates that ESOLID can correctly
+                                                                         OLID was designed both as a proof-of-concept and as a system to
+operate at these high levels of accuracy.
+                                                                         allow various speedups and algorithms to be compared. We hope
+   Figure 6 shows two real-world examples where a fixed precision        that showing that such an implementation is possible will spark fur-
+arithmetic based modeler can have problems. Example 6(a) shows           ther work in exact computation with curved solids, and that knowl-
+one Boolean operation from the Crew Member 3 example (5(f)). A           edge gained from the implementation of ESOLID can be transferred
+difference operation is performed, resulting in the solid shown in       to aid future systems. Although exact computation may still be too
+figure 6(b). BOOLE’s failure in this case is reported as a “curves       slow for many applications, it is reasonable to expect that with fur-
+did not close” error, indicating a significant problem with the in-      ther research and development, the efficiency of exact computations
+tersection curve computation. Although there are many possible           can far exceed the level presented here.
+reasons this could occur, it is clear that the two solids meet nearly
+tangentially. Near-tangential intersections are highly prone to nu-
+merical error, since a slight modification in either solid can have a    7.2 Lessons Learned
+major impact on the intersection curves between them. It can be          Implementation of ESOLID was a considerable amount of work,
+surmised that such a problem led to BOOLE’s failure.                     and several lessons were learned in the process. Among these were
+   A more direct example is shown in figure 6(c). This close-up          the following:
+view of the Relay Mechanism (5(e)) shows two cylinders meet-
+ing in a nearly degenerate configuration. The intersection curve,             Designing Algorithms for Exact Computation: Substitut-
+shown in the domain of one patch in figure 6(d), even appears sin-            ing exact algorithms for inexact ones is likely to be far too
+gular. In fact, this curve is not singular (it has two separate com-          inefficient for practical application. For example, point equal-
+ponents) and ESOLID correctly resolves the topology of the curve.             ity is very efficient in floating-point, but may be extremely
+BOOLE, however, exits with an error that a singularity has been               slow in exact computation. In order to build an (efficient)
+found. Clearly the exact computation of ESOLID allows an opera-               exact system, exactness must be considered at all levels of
+tion to be easily performed that would otherwise cause problems.              algorithm design.
+     Layering Speedups: As mentioned in section 5, a wide vari-           [2] M. O. Benouamer, D. Michelucci, and B. Peroche. Error-free
+     ety of layered speedups must be used in order to achieve the             boundary evaluation based on a lazy rational arithmetic: A de-
+     overall efficiency desired.                                              tailed implementation. Computer Aided Design, 26(6):403–
+                                                                              416, June 1994.
+     Testing: Although exact computation is meant to eliminate
+     numerical errors, exact computations are just as prone (if not       [3] I. Biehl, J. Buchmann, and T. Papanikolaou. LiDIA: A li-
+     more so) to programming errors as inexact ones. Since each               brary for computational number theory. Technical Report SFB
+     exact routine is assumed to be reliable and no tolerances will           124-C1, Fachbereich Informatik, Universität des Saarlandes,
+     be used at later stages, thorough testing for accuracy is impor-         1995.
+     tant.
+                                                                          [4] I. C. Braid. The synthesis of solids bounded by many faces.
+     Space Requirements: Exact computations and representa-                   Communications of the ACM, 18(4), April 1975.
+     tions tend to use tremendous amounts of memory. Although
+     not a focus of the work on ESOLID, the importance of mem-            [5] H. Bronnimann, I. Emiris, V. Pan, and S. Pion. Computing ex-
+     ory management became very apparent at later stages of de-               act geometric predicates using modular arithmetic w ith single
+     velopment.                                                               precision. In Proc. 13th Annu. ACM Sympos. Comput. Geom.,
+                                                                              pages 174–182, 1997.
+     Redundant Information: In a non-exact system, redundant
+     topological or geometric information is a potential source for       [6] Smita Brunnermeier and Sheila Martin. Interoperability cost
+     serious robustness problems. One source of computation (us-              analysis of the u.s. automotive supply chain. Technical Re-
+     ing or modifying one set of data) can cause inconsistencies              port RTI Project Number 7007-03, Research Triangle Insti-
+     which eventually yield serious robustness problems. For ex-              tute, 1999. http://www.rti.org/publications.
+     ample, storing both vertex positions and plane equations for
+     polyhedra can yield inconsistencies (since the vertex might          [7] M. S. Casale and J. E. Bobrow. A set operation algorithm for
+     not lie exactly on the plane of an adjacent face). Avoid-                sculptured solids modeled with trimmed patches. Computer
+     ing redundant information often requires careful construc-               Aided Geometric Design, 6:235–247, 1989.
+     tion of operators, and may result in non-optimal code (e.g.
+                                                                          [8] Kenneth L. Clarkson. Safe and effective determinant evalua-
+     vertices specified only implicitly as the intersection of three
+                                                                              tion. Manuscript, February 1995.
+     planes). With exact computation, however, no inconsistencies
+     will arise, so it is not necessary to constantly ensure that only    [9] Joao Luiz Dibl Comba and Jorge Stolfi. Affine arithmetic and
+     a consistent set of data is used. This leads to easier program-          its applications to computer graphics. Anais do VII Sibgraphi,
+     ming and allows operations to be specified more efficiently.             1993.
+                                                                         [10] T. Culver, J. Keyser, and D. Manocha. Accurate computation
+7.3 Future Work
+                                                                              of the medial axis of a polyhedron. In Proceedings of the
+There are several avenues open for future work extending from ES-             Symposium on Solid Modeling and Applications, pages 179–
+OLID. Among these are:                                                        190, 1999.
+     Higher-degree Surfaces: Although ESOLID does not limit              [11] J. H. Davenport, Y. Siret, and E. Tournier. Computer Algebra.
+     the degrees of input surfaces, higher-degree surfaces are still          Academic Press, London, 1993. 2nd edition.
+     far too slow (more than a 1–2 orders of magnitude difference).
+     While low-degree solids are sufficient to handle the standard       [12] Helene Desaulniers and Neil F. Stewart. Semantic interpreta-
+     CSG primitives, handling higher-degree surfaces would cer-               tion of inconsistent curve and surface data for the definition
+     tainly be useful.                                                        of solids. In Joe Warren, editor, Curves and Surfaces in Com-
+                                                                              puter Vision and Graphics III, volume 1830 of SPIE Proceed-
+     Degeneracies: ESOLID is restricted in that it assumes that               ings, pages 81–90. SPIE, Bellingham, WA, 1992.
+     input will not be degenerate, preventing ESOLID from be-
+     ing considered fully robust. Degeneracies are a part of many        [13] Paul H. Dietz, Jr. William H. Mermagen, and Paul R. Stay.
+     real-world examples, and it would be useful to address them              An integrated environment for army, navy and air force target
+     directly. Exact computation is an important prerequisite to              description support. Technical Report Memorandum Report
+     truly handling degeneracies, however, so ESOLID can serve                BRL-MR-3754, Ballistics Research Laboratory, Aberdeen
+     as a base for exploring new approaches to degeneracies.                  Proving Ground, MD, 1989.
+
+     Speedups: Besides those listed, numerous other speedup              [14] Phillip C. Dykstra and Michael John Muuss. The BRL-CAD
+     techniques may be applied.                                               package an overview. Technical report, Advanced Computer
+                                                                              Systesms Team, Ballistics Research Laboratory, Aberdeen
+     Memory Issues: Besides time-efficiency, memory-efficient                 Proving Ground, MD, 1989.
+
+
+                                                                                                           
+     exact computations are a worthwhile subject for further study.
+                                                                         [15] Gershon Elber.           IRIT solid modeling          system.
+     Extended I/O and Integration: The current input and output               http://www.cs.technion.ac.il/ gershon/irit/.
+     capabilities of ESOLID, while useful for research purposes,
+     could be expanded significantly.                                    [16] Shiaofen Fang, Beat Bruderlin, and Xiaohong Zhu. Robust-
+                                                                              ness in solid modeling: A tolerance-based intuitionistic ap-
+                                                                              proach. Computer Aided Design, 25(9):567–576, September
+References                                                                    1993.
+ [1] O. Aberth and M. J. Schaefer. Precise computation using             [17] Steven Fortune. Polyhedral modelling with multiprecision
+     range arithmetic, via c++. ACM Transactions on Mathemati-                integer arithmetic. Computer-Aided Design, 29(2):123–133,
+     cal Software, 18(4):481–491, December 1992.                              1997.
+[18] Steven Fortune and Christopher J. van Wyk. Efficient ex-          [34] John C. Keyser. Exact Boundary Evaluation for Curved
+     act arithmetic for computational geometry. In Proceedings of           Solids. Ph.D. thesis, Department of Computer Science, Uni-
+     the 9th ACM Conference on Computational Geometry, pages                versity of North Carolina, Chapel Hill, North Carolina, 2000.
+     163–171, 1993.
+                                                                       [35] S. Krishnan, D. Manocha, M. Gopi, T. Culver, and J. Keyser.
+[19] Steven Fortune and Christopher J. van Wyk. Static analysis             BOOLE: A boundary evaluation system for boolean combi-
+     yields efficient exact integer arithmetic for computational ge-        nations of sculptured solids. International Journal of Compu-
+     ometry. ACM Transactions on Graphics, 15(3):223–248, July              tational Geometry and Applications, 2000. To appear.
+     1996.
+                                                                       [36] Shankar Krishnan. Efficient and Accurate Boundary Eval-
+[20] Nicola Geismann, Michael Hemmer, and Elmar Schömer.                    uation Algorithms for Boolean Combinations of Sculptured
+     Computing a 3-dimensional cell in an arrangement of                    Solids. PhD thesis, University of North Carolina, 1997.
+     quadrics exactly and actually! In Proceedings of the 17th         [37] Shankar Krishnan, Mark Foskey, Tim Culver, John Keyser,
+     ACM Conference on Computational Geometry, pages 264–                   and Dinesh Manocha. PRECISE: Efficient multiprecision
+     273, 2001.                                                             evaluation of algebraic roots and predicates for reliable
+[21] C. M. Hoffmann. The problems of accuracy and robustness in             geometric computation. UNC-CH technical report, De-
+     geometric computation. IEEE Computer, 22(3):31–41, March               partment of Computer Science, University of North Car-
+     1989.                                                                  olina, Chapel Hill, NC. A version of this paper has
+                                                                            appeared in the 2001 Proceedings of the Symposium on
+[22] C. M. Hoffmann, J. E. Hopcroft, and M. S. Karasick. Towards            Computational Geometry. The technical report has more
+     implementing robust geometric computations. In Proc. 4th
+     Annu. ACM Sympos. Comput. Geom., pages 106–117, 1988.                                         
+                                                                            complete citation, however, and can be downloaded from
+                                                                            http://www.cs.unc.edu/ geom/papers/techreport.shtml.
+[23] Christoph M. Hoffmann. Geometric and Solid Modeling.              [38] M. Mäntylä. An Introduction to Solid Modeling. Computer
+     Morgan Kaufmann Publishers, Inc., San Mateo, California,               Science Press, Rockville, Maryland, 1988.
+     1989.
+                                                                       [39] K. Mehlhorn and S. Näher. LEDA: A Platform for Combinato-
+[24] C.-Y. Hu, N. M. Patrikalakis, and X. Ye. Robust interval solid         rial and Geometric Computing. Cambridge University Press,
+     modeling, Part I: representations. CAD, 28:807–818, 1996.              Cambridge, UK, 1999.
+
+[25] C.-Y. Hu, N. M. Patrikalakis, and X. Ye. Robust interval solid    [40] Aristides A. G. Requicha and Herbert B. Voelcker. Solid
+     modeling, Part II: boundary evaluation. CAD, 28:819–830,               modeling: A historical summary and contemporary assess-
+     1996.                                                                  ment. IEEE Computer Graphics and Applications, 2(2):9–24,
+                                                                            March 1982.
+[26] David J. Jackson. Boundary representation modelling with
+                                                                       [41] Aristides A. G. Requicha and Herbert B. Voelcker. Boolean
+     local tolerancing. In Proceedings of the Symposium on Solid
+                                                                            operations in solid modeling: Boundary evaluation and merg-
+     Modeling and Applications, pages 247–253, 1995.
+                                                                            ing algorithms. Proceedings of the IEEE, 73(1):30–44, Jan-
+[27] J. R. Johnson. Real algebraic number computation using inter-          uary 1985.
+     val arithmetic. In Proceedings of ISSAC ’92, pages 195–205,       [42] M. Segal. Using tolerances to guarantee valid polyhedral
+     1992.                                                                  modeling results. Comput. Graph., 24(4):105–114, August
+[28] V. Karamcheti, C. Li, I. Pechtchanski, and C. Yap. A core li-          1990.
+     brary for robust numeric and geometric computation. In Pro-       [43] Jonathan Richard Shewchuk. Robust adaptive floating-point
+     ceedings of the 15th ACM Conference on Computational Ge-               geometric predicates. In Proceedings of the 12th ACM Con-
+     ometry, pages 351–359, 1999.                                           ference on Computational Geometry, pages 141–150, 1996.
+[29] M. Karasick, D. Lieber, and L. R. Nackman. Efficient Delau-       [44] Kokichi Sugihara. A robust and consistent algorithm for in-
+     nay triangulations using rational arithmetic. ACM Transac-             tersecting convex polyhedra. In M. Dæhlen and L. Kjelldahl,
+     tions on Graphics, 10:71–91, 1991.                                     editors, Proceedings of EUROGRAPHICS ’94, volume 13,
+                                                                            pages C–45–C–54. Blackwell Association, 1994.
+[30] J. Keyser, S. Krishnan, and D. Manocha. Efficient and ac-
+     curate B-rep generation of low degree sculptured solids using     [45] Kokichi Sugihara and Masao Iri. A solid modeling system
+     exact arithmetic. In Proceedings of the Symposium on Solid             free from topological inconsistency. Journal of Information
+     Modeling and Applications, pages 42–55, 1997.                          Processing, 12(4):380–393, 1989.
+[31] J. Keyser, S. Krishnan, and D. Manocha. Efficient and ac-         [46] Irina Voiculescu. Personal Communication, 1999.
+     curate B-rep generation of low degree sculptured solids using
+     exact arithmetic I: Representations. Computer Aided Geomet-       [47] Chee Yap and Thomas Dube.        The exact computation
+     ric Design, 16(9):841–859, October 1999.                               paradigm. In D. Z. Du and F. Hwang, editors, Computing in
+                                                                            Euclidean Geometry, pages 452–492. World Scientific Press,
+[32] J. Keyser, S. Krishnan, and D. Manocha. Efficient and ac-              Singapore, 1995.
+     curate B-rep generation of low degree sculptured solids using
+                                                                       [48] Norimasa Yoshida, Masato Shyokawa, and Fujio Yamaguchi.
+     exact arithmetic II: Computation. Computer Aided Geometric
+                                                                            Solid modeling based on a new paradigm. Comput. Graph.
+     Design, 16(9):861–882, October 1999.
+                                                                            Forum, 13(3):55–64, 1994. Proc. EUROGRAPHICS ’94.
+[33] John Keyser, Tim Culver, Dinesh Manocha, and Shankar Kr-          [49] J. Yu. Exact Arithmetic Solid Modeling. PhD thesis, Purdue
+     ishnan. Efficient and exact manipulation of algebraic points           University, CS Dept., West Lafayette, IN 47907, USA, De-
+     and curves. Computer Aided Design, 32(12):649–662, 2000.               cember 1991.
+     Special Issue on Robustness.
+

@@ -1,0 +1,1156 @@
+                                         Implicit Conversion of Manifold B-Rep Solids by Neural Halfspace
+                                         Representation
+                                         HAO-XIANG GUO, Tsinghua University, P .R .China
+                                         YANG LIU, Microsoft Research Asia, P. R. China
+                                         HAO PAN, Microsoft Research Asia, P. R. China
+                                         BAINING GUO, Microsoft Research Asia, P. R. China
+
+
+
+
+arXiv:2209.10191v1 [cs.GR] 21 Sep 2022
+                                                                                                                                                             ℎ(x) = 0
+
+                                                                                                                                                                                                    sharp offset
+                                                                              NH-Rep
+                                                                                                                                      ℎ(x)
+                                                                             conversion
+
+
+
+                                                                                                                                                                                                  feature blending
+                                                      S
+
+
+
+
+                                                                                                                                                                                                      CSG
+
+
+                                         Fig. 1. Left: Conversion of a manifold B-Rep solid model S to the neural halfspace representation. NH-Rep is a function Boolean tree, in which each leaf
+                                         node corresponds to a B-Rep (sub)patch and associates with a neural implicit function 𝑓𝑖 . The zero isosurface of the Boolean expression ℎ (x) at the tree root
+                                         separates the interior and the exterior space of S and represents the boundary surface of S and its sharp features faithfully. ℎ (x) also approximates the
+                                         signed distance field of S, as seen from the sliced images of ℎ (x). Right: Sample applications supported by NH-Rep: sharp shape offsetting using different
+                                         offset distances (top); feature blending using different blending radii (middle); CSG operation on two NH-Reps (bottom).
+
+                                         We present a novel implicit representation — neural halfspace representa-                    ACM Reference Format:
+                                         tion (NH-Rep), to convert manifold B-Rep solids to implicit representations.                 Hao-Xiang Guo, Yang Liu, Hao Pan, and Baining Guo. 2022. Implicit Con-
+                                         NH-Rep is a Boolean tree built on a set of implicit functions represented                    version of Manifold B-Rep Solids by Neural Halfspace Representation. ACM
+                                         by the neural network, and the composite Boolean function is capable of                      Trans. Graph. 41, 6, Article 276 (December 2022), 16 pages. https://doi.org/
+                                         representing solid geometry while preserving sharp features. We propose an                   10.1145/3550454.3555502
+                                         efficient algorithm to extract the Boolean tree from a manifold B-Rep solid
+                                         and devise a neural network-based optimization approach to compute the
+                                         implicit functions. We demonstrate the high quality offered by our conver-
+                                         sion algorithm on ten thousand manifold B-Rep CAD models that contain                        1      INTRODUCTION
+                                         various curved patches including NURBS, and the superiority of our learning                  Implicit solid representations such as constructive solid geome-
+                                         approach over other representative implicit conversion algorithms in terms                   try (CSG) and halfspace representations have gained popularity in
+                                         of surface reconstruction, sharp feature preservation, signed distance field                 computer graphics and CAD/CAM due to many desirable character-
+                                         approximation, and robustness to various surface geometry, as well as a set
+                                                                                                                                      istics: it is easy to perform inside/outside queries; it is unbreakable
+                                         of applications supported by NH-Rep.
+                                                                                                                                      in the sense that challenging operations (e.g. , Boolean, round, offset)
+                                         CCS Concepts: • Computing methodologies → Volumetric models;                                 can be applied without numerical failure; they support field-driven
+                                         Parametric curve and surface models; Neural networks; Represen-                              design that integrates simulation and manufacturing conditions
+                                         tation of Boolean functions.                                                                 into shape optimization, thus significantly improving the design
+                                         Additional Key Words and Phrases: B-Rep solid, neural halfspace represen-                    to manufacturing cycle consistency [Allen 2021]; and it is suitable
+                                         tation, Boolean tree, implicit conversion                                                    for leveraging fast-growing multicore CPU and GPU architectures
+                                                                                                                                      for parallelizable computation. Their ability to model signed dis-
+                                         Hao-Xiang Guo (work done during internship at Microsoft Research Asia),                      tance fields is also demanded by many applications [Chen et al.
+                                         ghx17@mails.tsinghua.edu.cn; Yang Liu (corresponding author), Hao Pan, Baining
+                                         Guo, {yangliu,haopan,bainguo}@microsoft.com.
+                                                                                                                                      2022a]. However, existing CAD solid models are often in the form
+                                                                                                                                      of boundary representations (B-Reps), in which the solid bound-
+                                         © 2022 Association for Computing Machinery.                                                  ary is composed of a set of parameterized surface patches, such as
+                                         This is the author’s version of the work. It is posted here for your personal use. Not for   NURBS. To benefit from the aforementioned merits of implicit solid
+                                         redistribution. The definitive Version of Record was published in ACM Transactions on
+                                         Graphics, https://doi.org/10.1145/3550454.3555502.                                           representations, it is necessary to convert B-Reps to usable implicit
+                                                                                                                                      representations with high fidelity.
+
+                                                                                                                                          ACM Trans. Graph., Vol. 41, No. 6, Article 276. Publication date: December 2022.
+276:2 •   Guo, et al.
+
+
+   An early attempt to convert B-Rep solids to halfspace CSG mod-                  general R-functions [Shapiro 2007] based on halfspace functions
+els is limited to convex solids and B-Reps composed of linear and                  for modeling and is also suitable for modeling complex shapes in a
+quadratic patches with linear boundary edges [Shapiro and Vossler                  procedural manner. Our NH-Rep belongs to the category of F-Rep.
+1993]. High-order solid patches and nonlinear boundary edges are
+not supported due to their complexity. Inverse CSG approaches,
+                                                                                      Representation conversion. To take advantage of both B-Rep and
+such as Du et al. ’s work [2018], are restricted by the limited types
+                                                                                   implicit representations, various applications require conversion
+of solid primitives; thus, it is not easy to represent free-form geom-
+                                                                                   between these two representations. The study of converting im-
+etry and sharp features. Classic implicit reconstruction methods,
+                                                                                   plicit representations to B-Reps is mature and many techniques are
+such as Poisson reconstruction [Kazhdan et al. 2006] and recent
+                                                                                   available, such as polygonalization [Lorensen and Cline 1987] and
+neural implicit methods, such as DeepSDF [Park et al. 2019], lack
+                                                                                   parameterization of algebraic surfaces. However, the opposite con-
+the ability to faithfully represent sharp features. The requirements
+                                                                                   version is challenging. The difficulties of converting a B-Rep to a half-
+of supporting freeform geometry, preserving sharp features, and
+                                                                                   space representation were explored by [Buchele and Crawford 2003;
+modeling SDFs, are still challenges for the implicit conversion of
+                                                                                   Shapiro and Vossler 1991a,b, 1993]: additional separating halfspaces
+B-Reps.
+                                                                                   are required in many circumstances. Shapiro et al. convert B-Reps
+   To address the above challenges, we propose a novel halfspace
+                                                                                   bounded with linear and quadratic patches by using linear separators,
+representation — Neural Halfspace Representation, abbreviated to
+                                                                                   but cannot handle high-order patches and nonlinear patch edges. For
+NH-Rep, is defined by a Boolean tree-based hierarchy of implicit
+                                                                                   B-Rep models consisting of simple primitives such as cubes, spheres,
+functions, where the implicit function at a leaf node corresponds
+                                                                                   and cylinders, a series of CSG inversion works are proposed: binary
+to a B-rep (sub)patch, and all implicit functions are modeled via
+                                                                                   optimization [Wu et al. 2018], program synthesizer [Du et al. 2018;
+a multilayer perceptron (MLP) network. The composite function
+                                                                                   Xu et al. 2021], evolutionary algorithm [Friedrich et al. 2019], and
+ℎ(x) : x ∈ R3 ↦−→ R by NH-Rep is an implicit representation of a
+                                                                                   learning from data [Kania et al. 2020; Ren et al. 2021; Sharma et al.
+manifold B-Rep solid. Here, the specific construction of the Boolean
+                                                                                   2018; Yu et al. 2022]; but they cannot accurately represent freeform
+tree offers the ability to model sharp features in an implicit form,
+                                                                                   geometry due to their restricted primitive types. Boundary-sampled
+and the use of MLP to represent implicit functions provides a great
+                                                                                   halfspace (BSH) [Du et al. 2021] defines the shape as sparsely placed
+fitting capability to various surface geometry. NH-Rep has nice
+                                                                                   samples on the halfspace boundaries and provides greater agility and
+properties: (1) the zero isosurface ℎ(x) = 0 separates the interior
+                                                                                   expressiveness than CSG for shape modeling, and it also simplifies
+and exterior of the input B-Rep solid; (2) ℎ(x) = 0 fits the freeform
+                                                                                   the conversion process but has challenges in handling tangentially
+geometry of the input B-Rep solid tightly with normal agreement
+                                                                                   contacted surface patches, which are common in CAD models. A
+and sharp feature preservation; (3) the SDF of the B-Rep solid can be
+                                                                                   simple failure case is provided in Appendix A.
+approximated by ℎ(x) with good quality, by imposing the eikonal
+equation on ℎ(x). An example is illustrated in Fig. 1-left.
+   Based on the theoretical proof of the existence of NH-Rep for a                    Reconstruction-based implicit conversion. By treating a B-Rep model
+given manifold B-Rep solid, we develop a method for computing NH-                  as a collection of densely sampled points, many implicit-based re-
+Reps, including an efficient Boolean tree construction algorithm and               construction techniques [Berger et al. 2017; Carr et al. 2001; Ohtake
+a learning approach to compute implicit functions. We performed a                  et al. 2003] can be used to convert point clouds into implicit repre-
+large-scale benchmark on 10,000 manifold B-Rep CAD models to                       sentations. For recovering shape features, Kazhdan et al. [2013] use
+validate the efficacy and robustness of our method. We verified the                an indicator field to represent a 3D shape and approximate features
+superiority of NH-Rep over other representative implicit conversion                by penalizing the difference between the surface gradients and the
+and reconstruction methods in terms of solid approximation fidelity,               oriented point normals. Oztireli et al. [2009] uses implicit moving
+sharp feature preservation, and robustness to various solid geome-                 least squares (MLS) to represent 3D shapes while estimating adap-
+tries. Our code is available at https://github.com/guohaoxiang/NH-                 tive functional weights to handle features and outliers. However,
+Rep for facilitating future research and applications.                             these methods cannot model 𝐶 1 discontinuous features accurately,
+                                                                                   as the underlying surface representation is globally smooth, not
+                                                                                   piecewise smooth. Recent neural implicit approaches [Chabra et al.
+2    RELATED WORK                                                                  2020; Chen and Zhang 2019; Chibane et al. 2020; Jiang et al. 2020;
+   Solid representation. Boundary representation (B-Rep) and im-                   Liu et al. 2021; Park et al. 2019; Peng et al. 2020; Yang et al. 2021]
+plicit representation (Imp-Rep) are two common solid representa-                   represent the shape geometry as a signed distance field or an oc-
+tions [Shapiro 2002]. B-Rep represents a solid as a collection of                  cupancy field, and some works [Gropp et al. 2020; Sitzmann et al.
+surface, curve, and point elements. The surface and curve elements                 2020; Williams et al. 2021] overfit the input point cloud to achieve
+can be in parametric forms like NURBS, or polygonal forms like tri-                high accuracy, but the learned function is either piecewise linear
+angle facets and polylines. It is easy to model and edit B-Rep models              when using MLPs with ReLU [Lei and Jia 2020] or globally smooth;
+due to their explicit formulation. Imp-Reps such as Constructive                   therefore, it cannot model (curved) sharp features faithfully. The
+Solid Geometry (CSG) [Ricci 1973] and Function Representation (F-                  works of BSP-Net [Chen et al. 2020] and CVXNet [Deng et al. 2020]
+Rep) [Pasko et al. 1995] provide a constructive modeling scheme and                infer a Boolean CSG tree of a set of planes to represent a 3D shape in
+possess the advantages mentioned in Section 1. The former applies                  a simple and compact form. However, their approximation quality
+Boolean operations to primitive solids; the latter can employ more                 to the input is restricted by the plane geometry and the number of
+
+ACM Trans. Graph., Vol. 41, No. 6, Article 276. Publication date: December 2022.
+                                                                     Implicit Conversion of Manifold B-Rep Solids by Neural Halfspace Representation    •   276:3
+
+
+planes. By utilizing the B-Rep patch information explicitly and com-        superiority of our approach. In Section 8, we demonstrate a series
+posing the learned neural implicit functions with a Boolean tree, we        of applications supported by NH-Rep.
+obtain faithful implicit conversion with sharp feature preservation.
+                                                                            4 NEURAL HALFSPACE REPRESENTATION
+   Neural B-Rep representation. The complex data structure of B-Rep
+                                                                            4.1 Boundary representation and halfspace representation
+representations poses a challenge in integrating B-Rep with mod-
+ern machine learning techniques. Several approaches have been                  Boundary representation. A B-Rep solid is a 3D volume surrounded
+developed to address this challenge. UV-Net [Jayaraman et al. 2021]         by a collection of non-overlapped manifold surface patches. For a
+converts B-Rep to a face-adjacency graph in which the face and              solid S with 𝐿 patches, we denote these patches as P1, . . . , P𝐿 , and
+                                                                                                                             Ð
+edge correspond to a parametric surface and curve, respectively. 2D         the boundary of S as 𝜕S which satisfies 𝜕S = 𝑖 P𝑖 . Any surface
+CNN and 1D CNN are performed in the UV domain of each face and              patch of a B-Rep solid can be in the form of a parametric surface or
+edge, and the learned features are aggregated by graph convolution.         a set of polygonal facets. Without loss of generality, we assume that
+BRepNet [Lambourne et al. 2021] learns the features on B-Rep faces,         all surface patches have a consistent normal orientation, pointing
+edges, loops, coedges, and vertices by graph convolution. These             outside of the volume. For a B-Rep solid S, 𝜕S, I (S) and E (S) de-
+works are mainly designed for shape analysis tasks, such as classifi-       note the boundary surface, the interior space and the exterior space
+                                                                                                                                            Ð
+cation and segmentation. Recently Willis et al. [2022] associate the        of S, respectively. For convenience, we define I (S) = I (S) 𝜕S.
+one-hot feature (element type) for B-Rep faces and edges, and pass          In our paper, we assume that 𝜕S is manifold and the solid volume
+messages through the B-Rep graph to predict the joint information           is not empty.
+for part assembly. Wu et al. [2021] proposes a generative network to           Feature curves of B-Rep. The boundary
+infer a series of CAD commands to create or reconstruct CAD mod-            of a B-Rep patch is formed by a set of 3D
+els. However, its CAD reconstruction capability from point clouds           curves, each of which is shared by two ad-
+is limited by the model complexity and the predefined commands.             jacent B-Rep patches. We call these curves
+Our approach utilizes the patch adjacency of B-Rep to deduce the            feature curves. The endpoints of a feature
+Boolean tree for converting B-Rep to implicit representation and            curve are called feature corners and the
+has good scalability to deal with complex models.                           other points on the feature curve are called
+                                                                            feature points. We call a feature point p con-
+   Feature-sensitive distance fields. Storing distance field values in
+                                                                            vex, if the interior dihedral angle at p, denoted by 𝛾 p , is smaller than
+discrete grids [Jones et al. 2006] is a popular way to convert ex-
+                                                                            180°; concave if 𝛾 p > 180°; and smooth if 𝛾 p = 180°. “Convex” or
+plicit models to implicit representation. Adaptive octree [Frisken
+et al. 2000] and hp-refinement [Koschier et al. 2016] are common            “concave” means that 𝜕S is only 𝐶 0 smooth at p. Here 𝛾 p is called
+techniques to make storage compact while maintaining sufficient             feature angle at p. We call a feature curve C convex if all feature
+accuracy. To preserve sharp corners and sharp features, additional          points on C are not concave; concave if all feature points on C are
+information and operations are required to store, such as directed          not convex; smooth if all feature points on C are smooth; hybrid if C
+distances in the 𝑥-, 𝑦- and 𝑧-direction [Kobbelt et al. 2001], exact        contains both convex and concave feature points. We say a feature
+intersection points and normals [Ju et al. 2002], the nearest triangle      curve C sharp if maxp ∈ C |180°−𝛾 p | ≥ 𝛿𝑠 , 𝛿𝑠 > 0 is the user-defined
+information of the grid points to the input mesh [Huang et al. 2001],       sharp angle threshold. The right inset illustrates a B-Rep solid with
+offset distance fields [Qu et al. 2004], and density gradient [Novotný      different types of feature curves: convex in black, concave in red,
+and Srámek 2005]. To represent high-quality surface details and             and smooth in blue.
+curved sharp features, high-resolution (adaptive) grids are needed             Halfspace representation. An implicit function 𝑓 : x ∈ R3 ↦→ R
+in all these approaches and take up large storage spaces. In contrast,      defines a halfspace: {x ∈ R3 : 𝑓 (x) ≤ 0}. For simplicity, we abbre-
+the neural implicit representation can approximate the signed dis-          viate the notation as 𝑓 ≤ 0. Boolean operations (union, intersection,
+tance field and achieves a good balance between storage efficiency          subtraction) can be defined over halfspaces using max and min
+and approximation accuracy; furthermore, the Boolean operations             functions as follows. The union of a set of halfspaces {𝑓𝑖 ≤ 0}𝑚  𝑖=1
+of NH-Rep ensure faithful feature preservation.                             is {x ∈ R3 : min 𝑓1 (x), · · · , 𝑓𝑚 (x) ≤ 0}; their intersection is
+                                                                                                                    
+
+                                                                            {x ∈ R3 : max 𝑓1 (x), · · · , 𝑓𝑚 (x) ≤ 0}; the difference of two half-
+                                                                                                                
+3   OVERVIEW                                                                spaces 𝑓 ≤ 0 and 𝑔 ≤ 0 is {x ∈ R3 : max 𝑓 (x), −𝑔(x) ≤ 0}. By
+                                                                                                                                       
+Our paper is organized as follows. In Section 4.2, we first intro-          compositing some Boolean operations on halfspaces, a Boolean ex-
+duce the terminologies of boundary representation and halfspace             pression, or called CSG expression, is obtained. A Boolean expression
+representation, then present our solution for converting manifold           can be rewritten in Boolean tree format: (1) each leaf node stores an
+B-Rep solids to halfspace representation — Neural Halfspace Rep-            implicit function; (2) each non-leaf node stores a Boolean operation:
+resentation (NH-Rep), which is built on a special Boolean tree of a         max or min, which is applied to its child nodes; (3) the composite
+set of implicit functions. We develop a Boolean tree construction           function at the root node, denoted by ℎ(x), is the Boolean expression.
+algorithm (Section 5) and a neural network-based optimization al-           For convenience, we denote the Boolean operation on the non-leaf
+gorithm to determine the implicit functions associated with the             tree node r as op(𝑟 ), and use op+ (r) to denote the opposite opera-
+Boolean tree (Section 6). In Section 7, we provide extensive exper-         tion of op(r), i.e. , op+ (r) := max, if op(r) = min; op+ (r) := min
+imental analysis and ablation studies to verify the efficiency and          if op(r) = max.
+
+                                                                                 ACM Trans. Graph., Vol. 41, No. 6, Article 276. Publication date: December 2022.
+276:4 •      Guo, et al.
+
+      𝑐2         𝑐8        𝑐6
+
+𝑐1                                                                    ℎ
+           P1                                   𝑔2
+                 P8                   𝑐7                    max                        𝑔1 ( x) = 0                       𝑔 2 ( x) = 0                         ℎ ( x) = 0
+       P2             P7
+                           P6                        min    𝑓1   𝑓2   𝑓3       𝑓4
+                                           𝑐5
+                                P5
+                                                                          𝑔1
+                                                           max
+                                     P4         𝑓5    𝑓8
+𝑐3          P3
+                                                           𝑓6 𝑓7
+                                𝑐4
+                (a)                             (b)                                  (c)                               (d)                                 (e)
+Fig. 2. (a): A 2D B-Rep solid (shaded region) surrounded by eight curve segments { P𝑖 }𝑖=      8 . P corresponds to an implicit function 𝑓 whose zero isocurve 𝑐 is
+                                                                                                 1  𝑖                                         𝑖                      𝑖
+depicted as a dash line. (b): The Boolean tree of (a). ℎ = max 𝑓1 , 𝑓2 , 𝑓3 , 𝑓4 , min 𝑓5 , 𝑓8 , max(𝑓6 , 𝑓7 ) . The red curves in (c), (d), and (e) are the isocurves of
+                                                                                                              
+
+the Boolean expression 𝑔1 , 𝑔2 and ℎ, respectively. ℎ (x) = 0 recovers the boundary of the B-Rep solid exactly.
+
+   A Boolean tree is a halfspace representation of a B-Rep solid                        decomposed patch set {s1, . . . , s𝑛 } of S such that s𝑖 lies on the zero
+if its composite function at the tree root can classify the point                       surface of 𝑓𝑖 , i.e. , s𝑖 ⊆ {x ∈ R3 : 𝑓𝑖 (x) = 0}, ∀𝑖.
+membership of S correctly, i.e. , holding the following properties:
+                                                                                          The following theorem guarantees that any manifold B-Rep solid
+                      
+                      
+                      
+                      ℎ(x) < 0, ∀x ∈ I (S);                                            can be converted to a halfspace representation.
+                      
+                      
+                       ℎ(x) > 0, ∀x ∈ E (S);                        (1)                   Theorem 4.3. For a B-Rep solid S, there exists a patch-based
+                      
+                      ℎ(x) = 0, ∀x ∈ 𝜕S.
+                      
+                                                                                       Boolean tree T to represent S in half-space representation, i.e. , the
+                                                                                       Boolean expression of T satisfies Eq. (1).
+Fig. 2-(b) provides a Boolean tree example that can represent a 2D
+B-Rep solid shown in Fig. 2-(a). In Fig. 2-(c,d,e), the zero isocurves                     The proof of the above theorem includes two parts, sketched as
+of the Boolean expressions on the tree nodes are also illustrated.                      follows. We first provide an explicit way to build the tree structure
+                                                                                        of T and determine the decomposed patch set explicitly, then prove
+   B-Rep to halfspace representation. Any surface patch of a B-Rep                      that there exists a set of implicit functions of T whose composition
+solid can be represented as a subset of the zero isosurface of an im-                   function at the root node fulfills Eq. (1). We detail the first part in
+plicit function. All implicit functions associated with B-Rep patches                   Section 5 and leave the proof to Appendix B.
+define a set of halfspaces. For a solid S with 𝐿 patches, all half-                        With the guarantee provided by the above theorem and the built
+spaces partition R3 into 2𝐿 cells (some are possibly empty). The                        patch-based Boolean tree structure, the computation of implicit
+describability theorem [Shapiro and Vossler 1993] states that there                     functions of T is formulated as an optimization problem. To maxi-
+exists a Boolean expression on these halfspaces that can represent                      mize the fitting ability of implicit functions to various and complex
+S if and only if for each nonempty cell, all points in the cell have                    B-Rep patch geometry, we represent all implicit functions by a neu-
+the same point membership classification with respect to the solid                      ral network, which maps a 3D point to an 𝑛-dimensional vector in
+volume. This condition implies Eq. (1), but is not easy to satisfy                      which each entry is the value of an implicit function evaluated at
+in general, except for convex solids. Shapiro and Vossler [1993]                        the given point. The optimization details are presented in Section 6.
+proposed adding separators, i.e. , additional halfspaces, to partition                     As we use neural networks to represent implicit functions of the
+those cells violating the condition until the mixed regions are sep-                    patch-based Boolean tree, we name the halfspace representation
+arated. Linear separators for B-Rep solids composed of linear and                       under this setup by neural halfspace representation.
+quadratic patches were studied in their work. Nonlinear separators
+are essential for complicated B-Rep solids but their constructions                      5 BOOLEAN TREE STRUCTURE CONSTRUCTION
+                                                                                        5.1 Algorithm overview
+are unknown. Our work provides an explicit way to compute the
+Boolean expression and the halfspace functions for general B-Rep
+solids and introduces nonlinear separators via patch decomposition                      The design of Boolean tree structures is based on the following
+(Section 5.2) when necessary.                                                           intuitive idea. Notice that the Boolean operations on halfspaces
+                                                                                        have clear geometry meaning: union, intersection, and subtraction;
+4.2        Neural halfspace representation                                              we propose to partition the space via these operations defined over
+We present a special halfspace representation — neural halfspace                        halfspaces progressively, until one of the partition cells matches
+representation to convert an arbitrary B-Rep solid to an implicit                       the volume of the input B-Rep, i.e. , satisfying the describability
+presentation. To facilitate the definition of neural halfspace repre-                   theorem [Shapiro and Vossler 1993].
+sentation, we first introduce the following useful terminologies.                          We sketch the above idea as follows, using a 2D example shown
+                                                                                        in Fig. 3. The initial partition space, denoted by 𝑆𝑝 , is the full space.
+     Definition 4.1. For a B-Rep solid S with 𝐿 patches, a set of sub-                  We first select a maximal group of patches, each of which shares con-
+patches {s1, . . . , s𝑛 } is called a decomposed patch set of S if (1)                  vex feature curves with its neighbor patches, i.e. , 𝑐 1, 𝑐 2, 𝑐 3, 𝑐 4 . We
+Ð𝑛
+    𝑖=1 s𝑖 = 𝜕S; (2) ∀𝑖, ∅ ≠ s𝑖 ⊆ P𝑘 , ∃𝑘 ∈ {1, · · · , 𝐿}; (3) area(s𝑖 ∩               assume that by defining the appropriate implicit functions for these
+s 𝑗 ) = 0, ∀𝑖 ≠ 𝑗.                                                                      selected patches, the intersection of their halfspaces can contain
+  Definition 4.2. A Boolean tree T built on a set of implicit functions                 I (S). We update 𝑆𝑝 with this intersected region. We then select a
+{𝑓1, · · · , 𝑓𝑛 } is called a patch-based Boolean tree, if there exists a               maximal group of patches from the rest of the unprocessed patches,
+
+ACM Trans. Graph., Vol. 41, No. 6, Article 276. Publication date: December 2022.
+                                                                                 Implicit Conversion of Manifold B-Rep Solids by Neural Halfspace Representation    •   276:5
+
+
+                                                                                        edgetype(min) := concave. As the graph vertex is dual to a surface
+                                                                                        patch, this selection does the following job: (1) when op(r) = min,
+                                                                                        Q collects those surface patches in G ′ that have no adjacent patches
+                                                                                        in G ′ or only share convex or smooth feature curves with other
+                                                                                        adjacent patches in G ′ ; (2) when op(r) = max, Q collects those
+                                                                                        surface patches in G ′ that have no adjacent patches in G ′ or only
+         (a)                  (b)                  (c)                (d)
+                                                                                        share concave or smooth feature curves with other adjacent patches
+Fig. 3. 2D illustration of Boolean tree construction. (a): An input B-Rep               in G ′ . The formed Q is processed as follows.
+solid. The zero isocurves of the implicit functions are illustrated, same as                 Case 1: Q = ∅. There are two subcases that Q can be empty.
+Fig. 2-(a). (b)-(d) are the intermediate partition results. (b): The intersec-          The first subcase occurs when r is the root node associated with
+tion of {𝑓1 ≤ 0, 𝑓2 ≤ 0, 𝑓3 ≤ 0, 𝑓4 ≤ 0}. The corresponding Boolean
+                                                                                        op(r) = max operation, but S does not contain any convex feature
+expression is max(𝑓1 , 𝑓2 , 𝑓3 , 𝑓4 ). (c): The union of 𝑓5 ≥ 0 and 𝑓8 ≤ 0
+is intersected with the space defined in (b). The corresponding Boolean
+                                                                                        edges. For this special subcase (depicted in Fig. 5), we only need to
+expression is max 𝑓1 , 𝑓2 , 𝑓3 , 𝑓4 , min(𝑓5 , 𝑓8 ) . (d): The region surrounded        set op(r) = min and construct the Boolean tree directly. The second
+by 𝑐 6 , 𝑐 7 is added to the partition. The corresponding       Boolean expression      subcase occurs when any patch in G ′ has both convex and concave
+is max 𝑓1 , 𝑓2 , 𝑓3 , 𝑓4 , min 𝑓5 , 𝑓8 , max(𝑓6 , 𝑓7 ) , yielding the Boolean tree
+                                                      
+                                                                                        features shared with adjacent patches. Fig. 6-(b) depicts such an
+shown in Fig. 2-(b).                                                                    MC-subgraph in this situation. For this subcase, we randomly select
+                                                                                        one patch from G ′ , denoted by P, and decompose it into a set of
+each of which shares concave feature curves with its unprocessed                        subpatches, such that the boundary curves of any subpatch do not
+neighbor patches, i.e. , 𝑐 5, 𝑐 8 . We also assume that, by defining the                contain convex and concave feature curve segments of P simulta-
+appropriate implicit functions on 𝑐 5, 𝑐 8 , the union of their corre-                  neously. We call this step patch decomposition. Fig. 6-(c) illustrates
+sponding halfspaces can be intersected with 𝑆𝑝 , and these patches                      the patch decomposition step. We replace P with these subpatches
+become part of the boundary of the intersected region. 𝑆𝑝 is then                       and update G ′ accordingly. Here, any graph edge connecting with
+updated by this new intersected region. Union and intersection                          two adjacent subpatches is labeled smooth. We then recompute Q
+operations can be executed alternatively until all surface patches                      from the updated G ′ and execute the tree node creation algorithm.
+are processed. Finally, 𝑆𝑝 matches the volume of the input B-Rep                             Case 2: Q ≠ ∅. A child node r ′ is created under r, and the Boolean
+solid, as 𝑆𝑝 is tightly surrounded by all B-Rep patches. Fig. 3-(b-d)                   operator at r ′ is set to the opposite operation of r, i.e. , op(r ′ ) :=
+illustrates each step. In the next subsection, we turn the above idea                   op+ (r). For each graph vertex 𝑣 ∈ Q, a child node is created under
+into a rigorous and executable algorithm.                                               r ′ . These added child nodes are tree leaf nodes because each of them
+                                                                                        corresponds to a surface (sub)patch. G ′ is updated by removing the
+5.2    Tree structure construction                                                      vertices of Q and their connected edges from G ′ . Then we process
+For a B-Rep solid S, we provide a recursive approach to construct a                     every MC-subgraph in the updated G ′ by feeding it and r to our
+patch-based Boolean tree. It includes two steps: tree initialization                    tree node creation algorithm.
+and tree node creation, and it relies on the following graph structure.                      The pseudocode of the above recursive node creation algorithm
+                                                                                        is provided in Algorithm 1. Fig. 4 illustrates how the Boolean tree is
+   Patch graph. We define an undirected multigraph according to the
+                                                                                        created for a 2D B-Rep solid, step by step.
+adjacency of all surface patches of S. Each graph vertex corresponds
+to a surface patch; each graph edge corresponds to a feature curve                         Termination of tree construction. Since G has finite graph ver-
+shared by two adjacent patches, and each graph edge e is labeled                        tices and patch decomposition always reduces the number of graph
+with its corresponding feature curve type, denoted by type(e). This                     nodes that connect with convex and concave edges, the recursive
+multigraph is called patch graph, denoted by G. Fig. 4-(b) depicts                      algorithm ends in finite steps. The subpatches from patch decom-
+the patch graph of the B-Rep model shown in Fig. 4-(a).                                 position and the original non-decomposed patches form the final
+   Tree initialization. If G contains multiple maximal connected sub-                   decomposed patch set, and each leaf node corresponds to one of
+graphs (in short, MC subgraph), i.e. , the volume of S contains multi-                  the (sub)patches. The tree node creation step ensures that max and
+ple disconnected components, a tree root node r is created, and each                    min appear alternately in different layers of tree nodes. Thus, the
+MC subgraph will be used to create child nodes under the root. The                      Boolean tree created is a patch-based Boolean tree.
+Boolean operation on r is set to min, to combine all components.
+                                                                                           Implementation of patch decomposition. We implement patch de-
+If G contains only one MC subgraph, we set r as a virtual node:
+                                                                                        composition as follows. For a surface patch in polygonal mesh for-
+r = ∅ and op(r) = min. The virtual node does not appear in the
+                                                                                        mat, we first employ face-splitting to ensure that no triangle con-
+final Boolean tree structure.
+                                                                                        tains feature edge segments with different feature types. Then, on
+   We take each MC-subgraph and the tree root as input to the
+                                                                                        the dual graph of the mesh, we formulate a facet labeling problem
+following recursive tree node creation algorithm.
+                                                                                        such that the facets with the same label do not contain convex and
+  Tree node creation. This step takes an MC-subgraph G ′ and a                          concave feature edges simultaneously. The problem is solved using
+parent tree node r as input. From G ′ , we select graph vertices that                   the Min-Cut algorithm. The labeling result induces different sub-
+have no connected graph edges with label edgetype(op+ (r)), to                          patches. For a patch in parametric surface format such as NURBS,
+form a vertex set Q. Here, we define edgetype(max) := convex,                           we need to discrete it first as a triangular mesh and then compute
+
+                                                                                             ACM Trans. Graph., Vol. 41, No. 6, Article 276. Publication date: December 2022.
+276:6 •       Guo, et al.
+
+
+
+         P1
+              P8
+                   P7
+                    P6
+                         P5
+    P2
+                              P4
+
+
+                P3
+
+
+
+
+Fig. 4. Illustration of Boolean tree construction for a 2D B-Rep solid. (a): An input 2D B-Rep solid with eight curve patches. A patch graph is created first as
+shown in (b). Graph vertex 𝑣𝑖 corresponds to patch P𝑖 , and the color of graph edges encodes the edge types: red (convex), blue (concave). (c)-(g) illustrate
+the tree node creation step by step. (c), (e), (g) are the 𝑄 set in each step; (d) and (f) are the updated patch graph by removing vertices of 𝑄 created from
+previous step. (h), (i) and (j) are the Boolean tree during construction. 𝑓𝑖 corresponds to 𝑣𝑖 and P𝑖 .
+
+                               P1                                                         Algorithm 1: ConstructTreeNode
+                                                     min
+                         P2         P4                                                     Input : patch graph G ′ , parent tree node r
+                                               f1   f2    f3   f4                          Result: updated Boolean tree structure
+                               P3                                                          Create Q ;
+Fig. 5. A 2D B-Rep solid formed by four patches contains concave features
+                                                                                           if Q ≠ ∅ then
+only (left). The operation at the root node should be set to min.                              create child node r ′ under r and set op(r ′ ) := op+ (r);
+                                                                                               ∀v ∈ Q, create a leaf node under r ′ ;
+                                                                                               graph update: 𝐺 ′ := 𝐺 ′ \Q;
+                                                                                               for each MC-subgraph G ′′ ⊆ G ′ do
+                                                                                                   ConstructTreeNode(G ′′ , r ′ );
+                                                                                               end
+                                                                                           end
+Fig. 6. Illustration of patch decomposition. Left: A star-shape B-Rep that                 else
+contains 12 patches (in different colors). Middle: 10 vertical patches form a                  if No convex edges in G ′ then
+graph vertex set, triggering the occurrence of the second subcase of Q = ∅.                        set op(r ′ ) = min;
+The yellow patch is chosen for decomposition. Right: Subpatches obtained
+                                                                                                   ∀v ∈ Q, create a leaf node under r ′ ;
+by patch decomposition.
+                                                                                               end
+the subpatches. Here, we record the parametric coordinates of each                             else
+mesh vertex, so that we can access surface points on the parametric                                Pick v ∈ G ′ , decompose its corresponding patch P;
+surfaces exactly in the later NH-Rep computation stage, without suf-                               Update G ′ based on the updated patch layout;
+fering discretization artifacts. Fig. 6 illustrates patch decomposition                            ConstructTreeNode(G ′ , r);
+on a simple example.                                                                           end
+                                                                                           end
+6    NH-REP COMPUTATION
+With a built patch-based Boolean tree structure, our objective is
+to compute a set of implicit functions {𝑓𝑖 }𝑛𝑖=1 such that the condi-
+tions of Eq. (1) can be met. We rewrite Eq. (1) with respect to the                      Here, n(x) is the oriented surface normal at x. We impose Eqs. (5)
+decomposition patch set {s1, . . . , s𝑛 } as follows.                                    and (6) to ensure that the zero surface of 𝑓𝑖 contains s𝑖 and is the
+                                                                                         first-order approximation of s𝑖 .
+                         ℎ(x) = 0,                    ∀x ∈ s𝑖 , ∀𝑖;                (2)      We design a learning approach to compute the implicit functions
+                         ℎ(x) > 0,                   ∀x ∈ E (S);                   (3)   that satisfy the above conditions. We use a multilayer perceptron
+                         ℎ(x) < 0,                   ∀x ∈ I (S);                   (4)   (MLP) with three hidden layers of size 256 as our network, shown
+                         𝑓𝑖 (x) = 0,                  ∀x ∈ s𝑖 , ∀𝑖;                (5)   in Fig. 7. It takes a 3D point coordinate x as the input and output 𝑛
+                                                                                         values, each of which is the value of 𝑓𝑖 at x. These 𝑛 values are passed
+                     ∇x 𝑓𝑖 (x) = n(x),                ∀x ∈ s𝑖 , ∀𝑖.                (6)   to the Boolean tree to obtain the composite function value ℎ(x; 𝜃 )
+
+ACM Trans. Graph., Vol. 41, No. 6, Article 276. Publication date: December 2022.
+                                                                              Implicit Conversion of Manifold B-Rep Solids by Neural Halfspace Representation     •   276:7
+
+         3              256              256              256
+                                                                   𝑓1
+                                                                   𝑓2
+             SoftPlus         SoftPlus         SoftPlus
+                                                                   𝑓3
+
+
+         x                                                         𝑓𝐿
+                        MLP              MLP              MLP
+
+                    Fig. 7. Our network architecture.
+
+(𝜃 denotes the network parameters). Here, we use SoftPlus as the
+activation function to ensure that MLPs have sufficient smoothness                         Fig. 8. B-Rep solid samples in the ABC dataset [Koch et al. 2019].
+to represent smooth patches. The weight of the network is initialized
+with geometric initialization [Atzmon and Lipman 2020].
+   Our loss function consists of the following terms.
+                                                                                     with imperfections such as unwanted seams caused by exchanging
+  Position loss. The position loss 𝐸𝑝 is derived from Eqs. (2) and (5):
+                                                                                     B-Rep data between different software, and extendable to segmented
+                               𝑛
+                         1 ∑︁ ∑︁                                                     point clouds where accurate interior and exterior information are
+                𝐸𝑝 :=               |𝑓𝑖 (x; 𝜃 )| + |ℎ(x; 𝜃 )|.          (7)          not available (see Section 7.4 and Section 8).
+                         𝑁 𝑖=1 x ∈s
+                                     𝑖
+
+Here, 𝑁 is the total number of sample points.                                           Patch grouping. A B-Rep solid may contain many but small sur-
+                                                                                     face patches, which results in a large number of Boolean tree leaf
+  Normal loss. The normal loss 𝐸𝑛 is derived from Eq. (6), penalizing
+                                                                                     nodes and implicit functions. We run a standard graph coloring
+the deviation of ∇𝑓𝑖 at the sample points from their ground-truth
+                                                                                     algorithm on the patch graph of the decomposed patch set to group
+normals.
+                         𝑛
+                     1 ∑︁ ∑︁                                                         some disjointed patches and set their corresponding neural func-
+              𝐸𝑛 :=             ∥∇x 𝑓𝑖 (x; 𝜃 ) − n(x)∥.            (8)               tions to be the same. Due to the universal approximation ability
+                     𝑁 𝑖=1 x ∈s
+                                     𝑖                                               of MLP, this strategy is practically useful without compromising
+  Eikonal equation loss. We introduce the eikonal equation to ap-                    conversion quality. To limit the complexity of the group geometry,
+proximate the signed distance field of S. The loss 𝐸𝑒𝑖𝑘 [Gropp et al.                we set the maximum patch number in a group as 6. This grouping
+2020] encourages ℎ to satisfy the eikonal equation almost every-                     strategy reduces the number of implicit functions to around 50% on
+where.                                                                               average in our experiments and results in a smaller network (fewer
+                  𝐸𝑒𝑖𝑘 := Ex (∥∇xℎ(x, 𝜃 )∥ − 1) 2 .              (9)                 neurons in the last layer) and a shorter training time (10% faster).
+
+  Off-surface loss. 𝐸𝑜 is defined to penalize off-surface points whose
+                                                                                     7     EXPERIMENTS AND ANALYSIS
+function values are close to 0 [Sitzmann et al. 2020].
+                                                                                    We conducted a series of experiments and ablation studies to evalu-
+                𝐸𝑜 := Ex exp(−𝛼 |ℎ(x; 𝜃 )|) , 𝛼 ≫ 1.               (10)              ate the efficacy and robustness of our approach and its superiority
+   Consistency loss. To ensure that 𝑓𝑖 (x; 𝜃 ) is activated in the Boolean           over other alternative methods.
+tree when evaluating ℎ(x; 𝜃 ) on s𝑖 , we introduce the following term
+to improve this consistency.                                                         7.1      Experiment setup
+                            𝑛                                                           Dataset. We choose the ABC dataset [Koch et al. 2019] as our
+                         1 ∑︁ ∑︁
+              𝐸𝑐𝑜𝑛𝑠 :=               |𝑓𝑖 (x; 𝜃 ) − ℎ(x; 𝜃 )|.          (11)          testbed dataset, in which each B-Rep model is a collection of pa-
+                         𝑁 𝑖=1 x ∈s
+                                         𝑖
+                                                                                     rameterized curve segments and surface patches, including NURBS
+  Correction loss. During training, some sample points may still                     patches. We choose the first chunk of the ABC dataset that contains
+severely disobey the consistency loss. We define a correction loss                   10,000 B-Rep models as our testbed. Some models are illustrated in
+𝐸𝑐 to suppress this inconsistency with a high penalty.                               Fig. 8. We filter out non-manifold and non-closed models, and very
+                1 ∑︁ ∑︁                                                              simple models like boxes and cylinders. For models with multiple
+        𝐸𝑐 :=                  𝛽 |ℎ(x; 𝜃 ) − 𝑓𝑖 (x; 𝜃 )|, 𝛽 ≫ 1. (12)                disconnected components, we treat each component as a model
+              |D | 𝑖
+                          x ∈s𝑖 ∩D                                                   instance for conversion, and the resulting NH-Reps can be easily
+Here, D is the point set in which any point violates the constraint:                 combined via union. The total number of model instances is 10,935.
+|𝑓𝑖 (x; 𝜃 ) − ℎ(x; 𝜃 )| < 10−5 .                                                     10 % models contain NURBS patches. Among them, 24 models re-
+    The total loss is the sum of the above loss terms, and we set                    quire patch decomposition during tree construction. We utilized
+𝛼 = 𝛽 = 100 empirically. We found that there is no need to add                       the discretized mesh provided in the ABC dataset for patch decom-
+the constraints of Eqs. (3) and (4) as loss terms to avoid spurious                  position, where the mesh contains u-v coordinates of the paramet-
+zero isosurfaces when the off-surface loss and geometric initializa-                 ric patch. The average and maximal surface patch numbers for a
+tion [Atzmon and Lipman 2020] are used. In this way, we can avoid                    model instance are 24.07 and 199, respectively. They are reduced to
+sampling the ground-truth occupancy field for training. This strat-                  10.69 and 144 by our patch grouping algorithm. Fig. 9 illustrate the
+egy makes our conversion algorithm friendly to the B-Rep models                      Boolean trees of two models computed by our method.
+
+                                                                                           ACM Trans. Graph., Vol. 41, No. 6, Article 276. Publication date: December 2022.
+276:8 •   Guo, et al.
+
+
+
+
+                                                                                                                                    max
+                                min                    max
+
+                                                                                                              min
+                                min
+                                                                                                   𝑠𝑖
+                  𝑠𝑖
+Fig. 9. Boolean trees of two B-Rep solids. B-Rep patches are rendered in different colors. The zero isosurfaces of the Boolean functions at tree nodes are also
+illustrated (truncated by the bounding box).
+
+   Training data preparation. We randomly sample 50,000 points                     For models with very sharp features, we found that the dual con-
+uniformly from each B-Rep model for training, and the correspond-                  tour algorithm [Ju et al. 2002] is more stable and accurate than the
+ing surface normals are assigned to the sampled points. The set                    algorithm of [Kobbelt et al. 2001]. In our implementation, we used
+of these sample points is denoted as 𝑃𝑆. On average, we sample                     an octree structure to speed up isosurface extraction. Here, we note
+⌈50000/𝐿⌉ points on each patch, where 𝐿 is the number of patches                   that recent learning-based isosurfacing works [Chen et al. 2022b;
+in the decomposed patch set. We also ensure that each patch con-                   Chen and Zhang 2021] are different from our work. These methods
+tains at least 50 sampled points, to avoid extremely insufficient                  take discrete signals as input without access to surface gradients,
+sampling. The sampled point cloud is normalized to fit inside a                    such as a distance field grid, and predict mesh vertex location and
+[−0.9, 0.9] 3 box.                                                                 edge crossing in cube cells for robustly reconstructing mesh facets
+                                                                                   and sharp edges. They are designed for mesh reconstruction and do
+   Training details. We train the network to convert a single B-Rep                not have access to ground-truth isosurfaces during the test phase.
+solid to NH-Rep, on an Nvidia GTX 1080 Ti GPU with the PyTorch                     In our work, any isosurface of NH-Rep can be accurately evaluated,
+framework [Paszke et al. 2017]. We use Adam Optimizer for 15 000                   and thus the isosurface extraction step is just a conversion from
+iterations with an initial learning rate of 0.005 scheduled to drop                implicit surfaces to mesh format.
+by a factor of 2 every 2000 iterations. The correction loss term is
+enabled after 10,000 iterations. We randomly select 16,384 points
+from 𝑃𝑆 in each iteration to calculate 𝐸𝑝 , 𝐸𝑛 , 𝐸𝑜 , and 𝐸𝑐𝑜𝑛𝑠 , where              Evaluation metrics. We measure the quality of implicit conversion
+16384/𝐿 points are sampled on each patch. To calculate 𝐸𝑒𝑖𝑘 and                    with respect to the following metrics.
+𝐸𝑜 , we randomly sample a set of points within [−1, 1] 3 in each                   - Chamfer distance (CD) and two-side Hausdorff Distance (HD)
+iteration. These points fall into two categories: local samples and                  between the extracted zero surface and the corresponding B-Rep
+global samples. Local samples are points perturbed from the sam-                     surface. 50,000 points are randomly sampled on both surfaces for
+pled points with a normal distribution (mean: 0, stdev: 𝜎) along a                   computation.
+random direction, where 𝜎 is the shortest distance from the given                  - Average normal error (NAE): Chamfer distance with respect to
+sample point to the densely sampled point cloud. In total, the local                 surface normals, using the same sample points as used for CD.
+samples contain 16,384 points. Global samples contain 2048 points
+                                                                                   - Feature Chamfer distance (FCD) and feature angle error (FAE).
+randomly sampled in [−1, 1] 3 according to a normal distribution
+                                                                                     We first detect sharp feature edges on M with the dirhedral angle
+(mean: 0, stdev: 1.8). 𝐸𝑒𝑖𝑘 uses all local and global sample points,
+                                                                                     threshold: 𝛿𝑠 = 30°, then uniformly sample points on the detected
+and 𝐸𝑜 uses global samples only. The average training time for a
+                                                                                     feature edges where the point distance interval is 0.004. We also
+single model is about 10 minutes.
+                                                                                     record the dihedral angle for each edge sample point. A similar
+                                                                                     sampling is also done on 𝜕S. The Chamfer distance between these
+   Isosurface extraction. For evaluating the approximation quality of
+                                                                                     sample points defines FCD, and the sum of the absolution error
+NH-Rep to the input B-Rep boundary, we extracted the isosurface
+                                                                                     of the dihedral angles between any nearest paired points in the
+of NH-Rep as a polygon mesh with feature preservation by the ad-
+                                                                                     FCD computation defines FAE.
+vanced isosurfacing algorithms [Ju et al. 2002; Kobbelt et al. 2001] as
+follows. On each edge of the cube, we compute its intersection point               - Occupancy IoU (IoU) with respect to the ground-truth mesh model
+with ℎ = 0, and also record the functional gradient as the point nor-                provided in the ABC data set, calculated on a set of random sample
+mal. All intersection computations are performed in parallel in GPU.                 points in [−1, 1] 3 .
+The intersection points with normals are fed to the feature-aware                  - The sum of the relative error of the predicted SDF with the real
+marching cube algorithm to extract a mesh surface. The default grid                  SDF (DE), calculated on a set of random sample points in [−1, 1] 3 .
+resolution is 2563 and we increase the resolution to 5123 automati-                  The real SDF is calculated on the ground-truth mesh model.
+cally if the isosurfacing algorithm generates very long mesh edges,                Here, CD and HD measure the overall quality of the zero surfaces;
+indicating that the model may contain extremely narrow geometry.                   FCD and FAE measure the sharp feature quality of the zero surfaces;
+
+ACM Trans. Graph., Vol. 41, No. 6, Article 276. Publication date: December 2022.
+                                                                       Implicit Conversion of Manifold B-Rep Solids by Neural Halfspace Representation    •   276:9
+
+
+      #patches: 65
+
+
+
+
+      #patches: 52
+
+
+
+
+      #patches: 184
+
+
+
+
+         Input               SPR              RIMLS             SIREN                 IGR            Neural Spline     Ours        Ground truth
+Fig. 10. Visual comparison of different approaches for implicit conversion. We render the input B-Rep models as point clouds that are the inputs to the
+compared methods, different B-Rep patches in random colors. The detected feature edges are illustrated in black. Only our method can reproduce correct
+sharp features after implicit conversion. The zoom-in views highlight the artifacts of the results from other methods.
+
+DE and IoU measure the implicit field quality. The exact metric
+formulas are provided in Appendix C.
+
+7.2     Experiment analysis
+   Benchmark and comparison. We applied our method to convert
+10,935 B-Rep models to implicit representations. For comparison, we
+choose two classic feature-aware reconstruction methods: Screened
+Poisson Reconstruction (SPR) [Kazhdan and Hoppe 2013] and Ro-
+bust Implicit Moving Least Squares (RIMLS) [Oztireli et al. 2009], and
+three representative learning-based implicit approaches: IGR [Gropp
+et al. 2020], SIREN [Sitzmann et al. 2020], Neural Spline (NS) [Williams
+et al. 2021]. The input to these competitive methods is the same
+sample points from the B-Rep model as we described in Section 7.1.
+Note that these methods cannot leverage patch adjacency infor-
+mation as ours. The SPR and RIMLS implementations are from
+MeshLab [Cignoni et al. 2008] with default settings. For SPR, its                       input                          two rendered views of ℎ (x) = 0
+interpolation weight is set to 50 for better feature preservation. For        Fig. 11. NH-Rep conversion of three complicated B-Rep models. The patch
+IGR, SIREN, and NS, we use their default network and the suggested            numbers (from top to bottom) are: 121, 178, 191. The zero isosurfaces of
+optimal parameter settings. The average training time for a single            ℎ (x) are rendered from two different views for better visualization.
+model is 40 minutes for IGR, 20 minutes for SIREN, and 1 minute for
+NS. Our network parameter size is 137k on average, which is smaller           NAE, while RIMLS, SIREN, and NS perform worse. Our approach
+than SIREN (198k), IGR (1837k) and NS (250k). For IGR and SIREN,              achieves the best performance on the sharp-feature-related metrics
+we apply our surface extraction algorithm to recover sharp features,          (FCD, FAE) and IoU. The DE of ours is worse than IGR, as NH-Rep
+as their implicit functions are easy to access. For SPR, RIMLS, and           does not recover the exact signed distance function due to the use
+NS, we use the marching cube algorithm supplied by their original             of Boolean operations. The visual comparison shown in Fig. 10
+implementation. For SIREN, we also remove unwanted small com-                 further confirms the superiority of our method in preserving sharp
+ponents and pick the largest component for evaluation. The failure            features and recovering surface geometry. The robustness of our
+cases of RIMLS (126 models) and SPR (3 models) are not counted in             conversion method to B-Rep inputs with many surface patches is
+the performance report.                                                       also illustrated in Fig. 10-bottom and Fig. 11 where the inputs have
+   The performance of all methods is reported in Table 1. SPR, IGR,           more than 100 patches. In our supplemental material, we provide
+and our approach have comparable quality in terms of CD, HD and               metric histograms and more conversion results for further analysis.
+
+                                                                                   ACM Trans. Graph., Vol. 41, No. 6, Article 276. Publication date: December 2022.
+276:10 •     Guo, et al.
+
+
+Table 1. Quantitative evaluation of implicit conversion of different methods       Table 3. Qualitative evaluation of implicit conversion of different methods
+on 10,935 B-Rep models. CD, HD and FCD are scaled by 103 .                         using additional sharp feature points on 100 B-Rep models. Fea. indicates
+                                                                                   whether these additional points are used.
+    Method        CD ↓     HD ↓   NAE ↓     FCD ↓     FAE ↓     DE ↓     IoU ↑                                         .
+      SPR          5.07    21.5     4.14°      14.5     43.3°     n/a    0.979      Method     Fea.   CD ↓   HD ↓   NAE ↓    FCD ↓   FAE ↓    DE ↓      IoU ↑
+     RIMLS         6.17    32.6     4.07°      20.7     31.1°     n/a    0.325        IGR       ✓     7.21   42.6    3.11°    5.16    9.94°    0.0444   0.981
+     SIREN         14.3    87.3     4.57°      25.6     28.4°   0.657    0.889       SIREN      ✓     7.07   29.5    4.17°    8.49    29.4°    0.4570   0.968
+      IGR          7.10    41.0     2.92°      13.5     9.61°   0.039    0.965        ours      ×     5.49   22.7    2.67°    3.80    3.75°    0.0583   0.989
+       NS          16.7    95.7     6.97°      30.3     48.4°     n/a    0.762        ours      ✓     5.42   21.7    2.57°    3.45    3.43°   0.0526    0.992
+      ours         5.31    24.3     2.42°      7.07     3.69°   0.064    0.979
+
+
+Table 2. Quantitative evaluation of implicit conversion of different methods
+on Fig. 10-bottom model under equal-time setting.
+
+
+    Method       CD ↓      HD ↓   NAE ↓     FCD ↓     FAE ↓     DE ↓      IoU ↑
+      SPR         7.86     28.2     6.00°     2.28     42.9°       n/a    0.997
+       NS         8.89      154     7.45°     5.50     45.3°       n/a    0.326
+      ours        7.93     30.6     6.30°     2.07     7.59°    0.0668    0.987
+
+
+
+                     NS                               SPR
+
+
+
+
+                                                                                       BSP-Net      CSG-Stump CAPRI-Net            Ours     Ground truth
+                                                                                   Fig. 13. Comparison with BSP-Net, CSG-Stump and CAPRI-Net on implicit
+                                                                                   conversion. Inputs are selected from ShapeNet. We illustrate the bound-
+                                                                                   ary surfaces extracted from different methods. BSP-Net, CSG-Stump and
+                    Ours                         Ground truth                      CAPRI-Net fail to approximate CAD models accurately due to the limited
+                                                                                   representation power and inaccurate prediction.
+Fig. 12. Visual comparison of different approaches for implicit conversion
+under equal-time setting. Our method reproduces features more accurately           and added 10k points sampled at feature edges for each model, with
+than other methods.                                                                the original sampled points. As seen in the qualitative evaluation
+                                                                                   (Table 3), IGR and SIREN with these additional inputs cannot yet
+   Equal-time comparison with SPR and NS. As both NS and SPR with                  compete with our method which does not utilize sharp feature
+their default settings have less running time than our approach, we                points, while these additional inputs slightly improve our method.
+feed more sample points (5M points) and enable longer iterations
+                                                                                      Comparison with CSG-based methods. We also compared our method
+(SPR: 800 iterations, NS: 200 iterations) and higher resolution for
+                                                                                   with BSP-Net [Chen et al. 2020], CSG-Stump [Ren et al. 2021], and
+mesh extraction (NS: depth = 9, SPR: depth = 10), to maximize their
+                                                                                   CAPRI-Net [Yu et al. 2022], which predict the CSG tree and a set of
+conversion capacity. We used the complex model shown at the bot-
+                                                                                   primitives to approximate the input solid. As these methods were
+tom of Fig. 10 as a test example. NS and SPR took 40 and 10 minutes
+                                                                                   trained on ShapeNet [Chang et al. 2015], we selected five typical
+to compute, respectively. The results of the comparison are reported
+                                                                                   models from their test sets and used their trained networks and
+in Table 2 and Fig. 12. NS produces bumpy geometry and spurious
+                                                                                   prepared input data for comparison. The inputs are voxel cells (res-
+zero surface, and SPR achieves comparable accuracy (CD&HD) to
+                                                                                   olution 643 ) for BSP-Net, 2048 points for CSG-Stump, and 8192
+our result trained with 50K points, but still has larger feature errors
+                                                                                   points with normal vectors for CAPRI-Net. For our method, we
+and contains tiny fluctuation in the flat region; furthermore, its
+                                                                                   detect sharp features of the input mesh models and segment each
+implicit field storage is huge, exceeding 1.8 GB memory.
+                                                                                   mesh into a set of patches to construct a B-Rep for implicit conver-
+   Training with sharp feature samples. Our default point sampling                 sion. We extracted the zero isosurfaces of these methods for visual
+strategy does not include many sharp feature points for training. We               comparison. As seen in Fig. 13, BSP-Net, CSG-Stump and CAPRI-Net
+design an additional test to check whether IGR and SIREN training                  approximate the inputs roughly with compact and simple elements
+with more sharp feature points can outperform our method. We                       but cannot accurately represent the input solids; while our method
+selected 100 B-Rep models randomly from our benchmark dataset                      achieves more accurate implicit conversion results.
+
+ACM Trans. Graph., Vol. 41, No. 6, Article 276. Publication date: December 2022.
+                                                                             Implicit Conversion of Manifold B-Rep Solids by Neural Halfspace Representation          •   276:11
+
+
+
+
+         (a): w/o 𝐸𝑛                      (b): w/o 𝐸𝑜                 (c): w/o 𝐸𝑐𝑜𝑛𝑠 &𝐸𝑐                   (d) Default                                 Ground truth
+                                         Fig. 14. Ablation study of loss terms. Artifacts are highlighted by red boxes.
+
+           Table 4. Ablation study of loss terms on 100 models.                       Table 5. Network performance with different network configurations on
+                                                                                      100 models. 256 × 3 is our default setting.
+      Config.     CD ↓   HD ↓   NAE ↓    FCD ↓    FAE ↓    DE ↓      IoU ↑
+     w/o 𝐸𝑛       26.0    207    12.7°     39.7    24.3°    0.3440   0.625                 Config.     CD ↓    HD ↓     NAE ↓       FCD ↓     FAE ↓      DE ↓     IoU ↑
+     w/o 𝐸𝑜       6.07   41.3    2.75°     4.88    4.10°    0.0612   0.986                  64 × 3      5.79    34.7      3.06°       4.33     4.28°     0.0839     0.981
+  w/o 𝐸𝑐 &𝐸𝑐𝑜𝑛𝑠   5.50   24.7    2.69°     3.82    3.85°    0.0868   0.989                 128 × 3      5.66    27.9      2.81°       3.98     3.89°     0.0669     0.981
+     default      5.49   22.7    2.67°     3.80    3.75°   0.0583    0.989
+                                                                                           256 × 3      5.49    22.7      2.67°       3.80     3.75°     0.0583     0.989
+                                                                                           256 × 7      5.44    21.3      2.63°       3.81     5.02°     0.0569     0.990
+                                                                                           512 × 7      5.46    23.4      2.70°       3.61     6.18°    0.0477      0.988
+7.3    Ablation study
+We validate our loss design and network design through a set of
+ablation studies, performed on 100 B-Rep models randomly selected
+from the benchmark dataset.
+                                                                                      A
+  Efficacy of loss terms. We validate the efficacy of each loss term
+by dropping one of them during training. The performance of these
+ablations is reported in Table 4. We have the following observations.
+• The missing of 𝐸𝑛 produces the highest errors in all metrics,
+  since the normal orientation of ℎ on the surface points could
+  be very different from the ground truth. Fig. 14-(a) illustrates
+  typical artifacts such as distorted and non-smooth geometry, even
+                                                                                      B
+  additional parts, and missing sharp features.
+                                                                                            Input          Separated MLPs      Shared MLPs    Ground truth
+• Without 𝐸𝑜 , the network has less ability to constrain ℎ = 0 on
+                                                                                      Fig. 15. Ablation study of shared MLPs and separated MLPs on two models.
+  the input patches; thus, it may produce additional components as
+  shown in Fig. 14-(b), and lead to a higher HD error.
+                                                                                      Table 6. Qualitative evaluation of implicit conversion of models in Fig. 15.
+• Without 𝐸𝑐𝑜𝑛𝑠 and 𝐸𝑐 , 𝑓𝑖 may be inactivated when evaluating
+  ℎ on patch s𝑖 , resulting in a higher HD error than our default
+                                                                                          Model   Config.      CD ↓    HD ↓    NAE ↓      FCD ↓     FAE ↓    DE ↓         IoU ↑
+  setting, as shown in Fig. 14-(c).
+                                                                                           A          sep.     4.26     17.4      2.98°      1.31   0.522°   0.0742       0.989
+• Our default setting achieves the lowest error in all metrics, being                      A         shared    4.23     16.3      3.06°      1.34   0.625°   0.0712       0.990
+  more faithful to the input.                                                              B          sep.     7.90     28.3      1.61°      6.97    7.67°   0.0590       0.996
+                                                                                           B         shared    7.86     29.6      1.58°      7.22    7.45°   0.0303       0.997
+   Impact of network size. We tested our network performance with
+different numbers of MLP layers and neurons. The network config-                        Separated MLPs for individual patches. In our network architec-
+uration is indicated as 𝑁 × 𝑀, 𝑁 is the number of neurons in each                    ture, the MLP layers are shared to predict individual 𝑓𝑖 s. We con-
+MLP layer, and 𝑀 is the number of MLP layers. Table 5 reports the                    ducted an ablation study on two models (see Fig. 15) to verify
+average performance. With a fixed 𝑀 (𝑀 = 3), a larger 𝑁 helps to                     whether the use of separated MLPs for individual patches could
+improve all metrics; when 𝑀 = 7, the improvement brought by a                        improve the accuracy of implicit conversion. We find that the im-
+larger 𝑁 is less significant and worse on some metrics such as HD                    plicit conversion qualities of both versions are comparable (see
+and FAE possibly due to overfitting. Our default setting 256 × 3                     Table 6). However, the network size of using separated MLPs is
+balances network performance and network size. It obtains the best                   much larger, as it is proportional to the number of patches. Our
+performance on feature preservation and is slightly worse than the                   shared MLP strategy provides a great balance between model size
+configuration of 256 × 7 in other metrics.                                           and implicit conversion quality.
+
+                                                                                           ACM Trans. Graph., Vol. 41, No. 6, Article 276. Publication date: December 2022.
+276:12 •    Guo, et al.
+
+
+
+
+      Noisy input     SIREN        IGR          Ours      Ground truth
+            Fig. 16. NH-Rep conversion from Noisy B-Rep inputs.                            (a)               (b)                  (c)                    (d)
+
+                                                                                   Fig. 18. NH-Rep generated from different patch decompositions. (a): Input
+                                                                                   patches of the input model. (b): Two different decomposed patches due
+                                                                                   to random initialization. (c): Zero surfaces of the generated NH-Reps; (d):
+                                                                                   Ground truth. Patches are rendered in different colors.
+
+
+                                                                                   Table 7. Qualitative evaluation of implicit conversion of the model in Fig. 18.
+
+
+           Input          Segmentation           Ours            Ground truth          Model     CD ↓    HD ↓      NAE ↓    FCD ↓       FAE ↓   DE ↓       IoU ↑
+                                                                                        Top      5.87     22.7      5.20°     3.11      11.7°   0.0531         0.991
+Fig. 17. Conversion from segmented point clouds to NH-Reps. Some sharp                 Bottom    5.85     24.9      5.19°     2.88      11.4°   0.0619         0.993
+features (bottom) are missed due to incorrect segmentation by [Sharma
+et al. 2020]: the green points occupy two different surface regions. Each              #patches: 868      #patches: 11
+model has 10000 sample points.
+
+
+7.4     Robustness test
+   Data noise. To test the robustness of our algorithm to noise, we
+                                                                                        Before merging     After merging          NH-Rep         Ground truth
+add random noise in the range of [−0.018, 0.018] to point positions
+along normal directions and perturb normal directions within the                   Fig. 19. Patch merging for NH-Rep. From left to right: Patches of the input
+                                                                                   model before and after merging, the zero surface of NH-Rep after patch
+angle interval [−3°, 3°]. Here, for our method, we assume that the
+                                                                                   merging, and the ground truth.
+patch information and feature convexity are correct, and we also
+drop the correction loss in our training because this loss function is
+sensitive to noise. Fig. 16 shows the reconstruction results generated             patch composition to evaluate the impact of different decompo-
+by our method, as well as SIREN and IGR, on two noisy inputs. The                  sitions. Two different decomposed patch sets are generated (see
+results show that our approach and IGR are less affected by noise,                 Fig. 18-b top and bottom). Both the zero isosurfaces of the resulting
+whereas our approach achieves the best result possibly because we                  NH-Reps (Fig. 18-c) are close to ground truth, and the quality of
+have fewer MLP layers than IGR that avoid the overfitting problem,                 two different NH-Reps is comparable (see Table 7).
+and our CSG operations are good for recovering sharp features.                        Scalability. For CAD models with a large number of patches in the
+   Segmented point clouds. In practice, CAD models are obtained by                 ABC dataset, we find that many patches are very small and narrow,
+scanning, in point cloud format, without B-Rep information. It is                  and many of the shared feature curves are not sharp. If we naively
+possible to segment the point cloud first, then use our method to                  apply our implicit conversion algorithm, dense sample points on and
+convert it to NH-Rep. In Fig. 17, we utilize ParseNet [Sharma et al.               around small patches are needed to keep the approximation error
+2020] to obtain the segmentation and recognize the type of feature                 low. A practical way is to merge small patches with its neighbors to
+curves (convexity or concavity) between two adjacent patches ac-                   reduce the patch number if their shared edges are smooth. We tested
+cording to the majority of normal variations at the boundary points.               this strategy on a model with 868 patches. Fig. 19 shows that the
+The input models are selected from the ParseNet test set. The zero                 total number of patches can be reduced to 11, and our conversion
+isosurfaces in the figure show that our method recovers the CAD                    algorithm can perform well.
+mesh in good quality if the segmentation is reliable. For the im-
+perfect segmentation shown in the bottom row, our approach still                   8     APPLICATIONS
+approximates the input but fails to model some sharp features due                  NH-Rep representation can be incorporated with many applications,
+to the wrong segmentation (dark green region), which consists of                   such as inside / outside query, surface offset, Boolean operations,
+two disjoint parts that cross the feature region.                                  feature edge blending, and mesh repair.
+   Sensitivity to patch decomposition. In our patch decomposition                     Fast inside/outside query. Due to the implicit representation of
+algorithm, random patch selection can introduce different decom-                   NH-Rep and parallel computation on GPU, it is easy to perform
+posed patch sets, but has a minor impact on the quality of converted               inside/outside queries efficiently. We selected five models from our
+NH-Reps. We select a complicated model (Fig. 18-a) that requires                   benchmark dataset, and query the functional values on 217 points
+
+ACM Trans. Graph., Vol. 41, No. 6, Article 276. Publication date: December 2022.
+                                                                        Implicit Conversion of Manifold B-Rep Solids by Neural Halfspace Representation         •   276:13
+
+
+   SIREN
+
+
+
+
+   IGR
+
+
+
+
+   Ours
+
+
+
+
+     −0.1             0                0.1              0.2                               Input B-Rep                  NH-Rep                  Feature Blending
+Fig. 20. Level sets of SIREN (top), IGR (middle), and our method (bottom)        Fig. 22. Feature edge blending of NH-Rep using R-functions. 𝜌 is set to
+with different isovalues: -0.1, 0, 0.1, 0.2, (from left to right).               0.05.
+
+
+
+
+            𝐴                      𝐵                    𝐴∩𝐵
+
+
+
+
+           𝐴∪𝐵                   𝐴−𝐵                    𝐵 −𝐴
+Fig. 21. Zero surfaces of applying boolean operations on two shapes 𝐴 and
+𝐵 represented by NH-Rep.
+
+
+
+randomly sampled inside [−1, 1] 3 . The average query time on a
+single model is 33 ms, which is faster than IGR (93 ms), and slightly                   Input mesh             Sample points           Repaired mesh
+slower than SIREN (30 ms).                                                       Fig. 23. Mesh repairing. The input meshes are not watertight and contains
+                                                                                 many small seams (mismatched edges), highlighted with different colors.
+   Offset surfaces. The implicit nature of NH-Rep enables us to per-             By sampling dense points on the input mesh (middle) and convert them
+form sharp offsets via changing the level sets of ℎ(x). Fig. 20 il-              to NH-Rep by our algorithm, a watertight mesh with feature preserving
+lustrates the offset surfaces at iso values: −0.1, 0, 0.1, 0.2. NH-Rep           can be extracted from the zero isosurface of NH-Rep. The zoom-in views
+maintains sharp features in all offset results. In contrast, IGR can-            highlight the gap before repairing and the seamless results after repairing.
+not model sharp offsets and its offset surfaces are also bumpy with
+larger iso values; SIREN does not produce plausible offset results.
+                                                                                which is defined as follows:
+   Boolean operations. NH-Rep supports fast and robust Boolean                                                       √︄
+operations, as no explicit surface intersection is needed. The inter-                                                                  𝑠 𝜌 (𝑠 𝜌 − |𝑠 𝜌 |)
+                                                                                              𝐵(𝑓 , 𝑔) = 𝑓 + 𝑔 + 𝑠        𝑓 2 + 𝑔2 +                        ,        (13)
+section, union, and complement operated on shapes correspond                                                                                 8𝜌 2
+to max, min, − operated on implicit functions. Fig. 21 shows the
+results of applying Boolean operations on two complicated surfaces              where 𝑓 , 𝑔 are the input functions for max or min, 𝜌 controls the
+represented by NH-Rep.                                                          blend radius and 𝑠 𝜌 = 𝑓 2 + 𝑔2 − 𝜌 2 . 𝑠 = 1 for operation max and
+                                                                                𝑠 = −1 for min. Here, since the 𝜌-blending function is bivariable, we
+  Feature blending. NH-Rep can be combined with R-functions                     rewrite the multivariate Boolean operation of NH-Rep as bivariable
+[Shapiro 2007] to blend feature edges of solids so that two adjacent            operations first, such as max{𝑓1, 𝑓2, 𝑓3 } = max{max{𝑓1, 𝑓2 }, 𝑓3 },
+patches with sharp features can be joined smoothly. We achieve this             then replace the operator by the 𝜌-blending function. Fig. 22 shows
+goal by replacing the operation max, min with 𝜌-blending function,              the two examples of feature blending.
+
+                                                                                     ACM Trans. Graph., Vol. 41, No. 6, Article 276. Publication date: December 2022.
+276:14 •   Guo, et al.
+
+
+   Mesh repairing. Solid models in B-Rep format are often converted                         In Proceedings of the eighth ACM symposium on Solid modeling and applications.
+to triangle meshes for different purposes such as file exchange                             135–144.
+                                                                                        J. C. Carr, R. K. Beatson, J. B. Cherrie, T. J. Mitchell, W. R. Fright, B. C. McCallum, and
+between different 3D software. The conversion may discretize B-Rep                          T. R. Evans. 2001. Reconstruction and representation of 3D objects with radial basis
+patches individually, resulting in mismatching patch edges between                          functions. In SIGGRAPH. 67–76.
+                                                                                        Rohan Chabra, Jan Eric Lenssen, Eddy Ilg, Tanner Schmidt, Julian Straub, Steven
+adjacent patches, as shown in Fig. 23-left. Thus, the converted mesh                        Lovegrove, and Richard Newcombe. 2020. Deep local shapes: Learning local SDF
+is not watertight and exhibits many visible seams which are not                             priors for detailed 3D reconstruction. In ECCV.
+good for downstream tasks such as 3D printing. These problems can                       Angel X. Chang, Thomas Funkhouser, Leonidas Guibas, Pat Hanrahan, Qixing Huang,
+                                                                                            Zimo Li, Silvio Savarese, Manolis Savva, Shuran Song, Hao Su, Jianxiong Xiao,
+be repaired using NH-Rep. We first segment the mesh based on the                            Li Yi, and Fisher Yu. 2015. ShapeNet: An information-rich 3D model repository.
+existing seams and sharp features and build the adjacent graph on                           arXiv:1512.03012 [cs.GR].
+the segmented patches. Here, we regard two disconnected patches                         Falai Chen, Tor Dokken, and Géraldine Morin. 2022a. Geometric Modeling: Interop-
+                                                                                            erability and New Challenges (Dagstuhl Seminar 21471). Dagstuhl Reports 11, 10
+with small seams as connected when constructing the Boolean tree.                           (2022), 111–150.
+We then sample dense points on the mesh and fit the NH-Rep to                           Zhiqin Chen, Andrea Tagliasacchi, Thomas Funkhouser, and Hao Zhang. 2022b. Neural
+                                                                                            dual contouring. ACM Trans. Graph. (2022).
+them. The formulation of NH-Rep guarantees that a closed mesh                           Zhiqin Chen, Andrea Tagliasacchi, and Hao Zhang. 2020. BSP-Net: Generating compact
+with sharp feature preservation can be extracted. Fig. 23 shows the                         meshes via binary space partitioning. In CVPR.
+repaired results of two models. Here, we note that our approach is                      Zhiqin Chen and Hao Zhang. 2019. Learning implicit fields for generative shape
+                                                                                            modeling. In CVPR.
+not designed to fix other kinds of mesh imperfections, such as big                      Zhiqin Chen and Hao Zhang. 2021. Neural marching cubes. ACM Trans. Graph 40, 6
+holes, non-manifold connectivity, and self-intersection.                                    (2021), 1–15.
+                                                                                        Julian Chibane, Thiemo Alldieck, and Gerard Pons-Moll. 2020. Implicit functions in
+                                                                                            feature space for 3D shape reconstruction and completion. In CVPR.
+9    CONCLUSION                                                                         Paolo Cignoni, Marco Callieri, Massimiliano Corsini, Matteo Dellepiane, Fabio Ganov-
+                                                                                            elli, and Guido Ranzuglia. 2008. MeshLab: an Open-Source Mesh Processing Tool.
+We present neural halfspace representations to convert B-Rep solid
+                                                                                            In Eurographics Italian Chapter Conference, Vittorio Scarano, Rosario De Chiara, and
+models to implicit solids. The efficacy and robustness of our ap-                           Ugo Erra (Eds.). The Eurographics Association.
+proach are validated through extensive experiments on a large CAD                       Boyang Deng, Kyle Genova, Soroosh Yazdani, Sofien Bouaziz, Geoffrey Hinton, and
+                                                                                            Andrea Tagliasacchi. 2020. CvxNets: Learnable convex decomposition. In CVPR.
+dataset. Compared to other implicit conversion/reconstruction al-                       Tao Du, Jeevana Priya Inala, Yewen Pu, Andrew Spielberg, Adriana Schulz, Daniela
+gorithms, our approach offers superior approximation quality and                            Rus, Armando Solar-Lezama, and Wojciech Matusik. 2018. InverseCSG: Automatic
+preserves sharp features more faithfully. As demonstrated in Sec-                           conversion of 3D models to CSG trees. ACM Trans. Graph (2018).
+                                                                                        Xingyi Du, Qingnan Zhou, Nathan Carr, and Tao Ju. 2021. Boundary-sampled halfspaces:
+tion 8, NH-Rep is useful for various applications and it is promising                       A new representation for constructive solid modeling. ACM Trans. Graph. 40, 4,
+to integrate it with advanced operations applied to function repre-                         Article 53 (2021), 15 pages.
+                                                                                        Markus Friedrich, Pierre-Alain Fayolle, Thomas Gabor, and Claudia Linnhoff-Popien.
+sentations [Pasko et al. 1995; Shapiro 2007], to obtain more shape                          2019. Optimizing evolutionary CSG tree extraction. In Proceedings of the Genetic
+modeling and optimization capabilities.                                                     and Evolutionary Computation Conference. 1183–1191.
+   Some limitations remain in our work and deserve future devel-                        Sarah F. Frisken, Ronald N. Perry, Alyn P. Rockwood, and Thouis R. Jones. 2000. Adap-
+                                                                                            tively sampled distance fields: A general representation of shape for computer
+opment. First, unlike the traditional CSG representation and the                            graphics. In SIGGRAPH. 249–254.
+boundary-sampled halfspace representation [Du et al. 2021] that are                     Amos Gropp, Lior Yariv, Niv Haim, Matan Atzmon, and Yaron Lipman. 2020. Implicit
+easy to edit by manipulating their primitives via moving, scaling,                          geometric regularization for learning shapes. In ICML.
+                                                                                        Jian Huang, Yan Li, Roger Crawfis, Shao-Chiung Lu, and Shuh-Yuan Liou. 2001. A
+rotating, and other simple geometry operations, it is not intuitive                         complete distance field representation. In IEEE VIS. IEEE, 247–561.
+to manipulate the halfspace functions of NH-Rep for shape edit-                         Pradeep Kumar Jayaraman, Aditya Sanghi, Joseph G Lambourne, Karl DD Willis,
+                                                                                            Thomas Davies, Hooman Shayani, and Nigel Morris. 2021. UV-Net: Learning from
+ing, as its halfspace functions usually do not correspond to simple                         boundary representations. In CVPR. 11703–11712.
+solids. Second, the time-consuming learning step hinders interactive                    Chiyu Max Jiang, Avneesh Sud, Ameesh Makadia, Jingwei Huang, Matthias Nießner,
+shape modeling and implicit conversion. The recent exploration                              and Thomas Funkhouser. 2020. Local implicit grid representations for 3D scenes .
+                                                                                            In CVPR.
+of multilevel and adaptive feature volumes for computing neural                         Mark W Jones, J Andreas Baerentzen, and Milos Sramek. 2006. 3D distance fields: A
+implicits [Müller et al. 2022; Takikawa et al. 2021] is promising for                       survey of techniques and applications. IEEE Trans. Vis. Comput. Graphics 12, 4 (2006),
+accelerating our algorithm. Third, conversion from unsegmented                              581–599.
+                                                                                        Tao Ju, Frank Losasso, Scott Schaefer, and Joe Warren. 2002. Dual contouring of Hermite
+3D scans to NH-Rep requires reliable segmentation, which is chal-                           data. ACM Trans. Graph. 21, 3 (2002), 339–346.
+lenging when the input contains large noise, outliers, or insufficient                  Kacper Kania, Maciej Ziȩba, and Tomasz Kajdanowicz. 2020. UCSG-Net – Unsupervised
+                                                                                            discovering of constructive solid geometry tree. In NeurIPS.
+sampling. Lastly, NH-Rep does not support non-manifold B-Rep                            Michael Kazhdan, Matthew Bolitho, and Hugues Hoppe. 2006. Poisson surface recon-
+models. Integrating other representations such as multiphase im-                            struction. In Symp. Geom. Proc. 61–70.
+plicit functions [Yuan et al. 2012] into our formulation could be an                    Michael Kazhdan and Hugues Hoppe. 2013. Screened Poisson surface reconstruction.
+                                                                                            ACM Trans. Graph. 32, 3 (2013), 29:1–29:13.
+interesting research direction.                                                         Leif P. Kobbelt, Mario Botsch, Ulrich Schwanecke, and Hans-Peter Seidel. 2001. Feature
+                                                                                            sensitive surface extraction from volume data. In SIGGRAPH. 57–66.
+REFERENCES                                                                              Sebastian Koch, Albert Matveev, Zhongshi Jiang, Francis Williams, Alexey Artemov,
+                                                                                            Evgeny Burnaev, Marc Alexa, Denis Zorin, and Daniele Panozzo. 2019. ABC: A big
+George Allen. 2021. nTopology’s Implicit Modeling Technology. https://ntopology.com/        CAD model dataset for geometric deep learning. In CVPR.
+   resources/whitepaper-implicit-modeling-technology/. Last accessed 2021-12-1.         Dan Koschier, Crispin Deul, and Jan Bender. 2016. Hierarchical hp-adaptive signed
+Matan Atzmon and Yaron Lipman. 2020. SAL: Sign agnostic learning of shapes from             distance fields. In Symposium on Computer Animation. 189–198.
+   raw data. In CVPR.                                                                   Joseph G. Lambourne, Karl D.D. Willis, Pradeep Kumar Jayaraman, Aditya Sanghi,
+Matthew Berger, Andrea Tagliasacchi, Lee M. Seversky, Pierre Alliez, Gaël Guennebaud,       Peter Meltzer, and Hooman Shayani. 2021. BRepNet: A topological message passing
+   Joshua A. Levine, Andrei Sharf, and Claudio T. Silva. 2017. A survey of surface          system for solid models. In CVPR. 12773–12782.
+   reconstruction from point clouds. Comput. Graph. Forum 36, 1 (2017), 301–329.        Jiabao Lei and Kui Jia. 2020. Analytic marching: An analytic meshing solution from
+Suzanne F Buchele and Richard H Crawford. 2003. Three-dimensional halfspace con-            deep implicit surface networks. In ICML. PMLR, 5789–5798.
+   structive solid geometry tree construction from implicit boundary representations.
+
+
+ACM Trans. Graph., Vol. 41, No. 6, Article 276. Publication date: December 2022.
+                                                                                    Implicit Conversion of Manifold B-Rep Solids by Neural Halfspace Representation    •   276:15
+
+
+Shi-Lin Liu, Hao-Xiang Guo, Hao Pan, Peng-Shuai Wang, Xin Tong, and Yang Liu.
+   2021. Deep implicit moving least-squares functions for 3D reconstruction. In CVPR.
+   1788–1797.
+William E. Lorensen and Harvey E. Cline. 1987. Marching cubes: A high resolution 3D
+   surface construction algorithm. In SIGGRAPH. Association for Computing Machin-
+   ery, 163–169.
+Thomas Müller, Alex Evans, Christoph Schied, and Alexander Keller. 2022. Instant             Fig. 24. Left: The input B-Rep. Middle: The reconstruction result by BSH [Du
+   neural graphics primitives with a multiresolution hash encoding. ACM Trans. Graph.        et al. 2021]. Right: The zero isosurface of our NH-Rep.
+   41, 4, Article 102 (2022), 102:1–102:15 pages.
+Pavol Novotný and Milos Srámek. 2005. Representation of objects with sharp details in
+   truncated distance fields. In Volume Graphics 2005.                                       A    A FAILURE CASE OF BOUNDARY-SAMPLED
+Yutaka Ohtake, Alexander Belyaev, Marc Alexa, Greg Turk, and Hans-Peter Seidel. 2003.
+   Multi-level partition of unity implicits. ACM Trans. Graph. 22, 3 (2003), 463–470.             HALFSPACE
+Cengiz Oztireli, Gaël Guennebaud, and Markus Gross. 2009. Feature preserving point
+   set surfaces based on non-linear kernel regression. Comput. Graph. Forum 28, 2
+                                                                                            The limitation of BSH [Du et al. 2021] in handling patches tangen-
+   (2009), 493–501.                                                                         tially contacted occurs often in CAD B-Rep models. Fig. 24 illustrates
+Jeong Joon Park, Peter Florence, Julian Straub, Richard Newcombe, and Steven Love-          a simple failure case. The input B-Rep model consists of two cylin-
+   grove. 2019. DeepSDF: learning continuous signed distance functions for shape
+   representation. In CVPR.                                                                 drical halfspaces and four planar halfspaces. Each cylindrical patch
+Alexander Pasko, Valery Adzhiev, Alexei Sourin, and Vladimir Savchenko. 1995. Func-         and its adjacent planar patch are contacted tangentially. The BSH
+   tion representation in geometric modeling: concepts, implementation and applica-         algorithm cannot produce the correct result, while our approach
+   tions. The visual computer 11, 8 (1995), 429–446.
+Adam Paszke, Sam Gross, Soumith Chintala, Gregory Chanan, Edward Yang, Zachary              works well.
+   DeVito, Zeming Lin, Alban Desmaison, Luca Antiga, and Adam Lerer. 2017. Auto-
+   matic differentiation in pytorch. (2017).
+Songyou Peng, Michael Niemeyer, Lars Mescheder, Marc Pollefeys, and Andreas Geiger.
+                                                                                             B    EXISTENCE OF IMPLICIT FUNCTIONS
+   2020. Convolutional occupancy networks. In ECCV.                                         In this section, we prove that for a decomposed patch set {s1, . . . , s𝑛 }
+Huamin Qu, Nan Zhang, Ran Shao, Arie Kaufman, and Klaus Mueller. 2004. Feature
+   preserving distance fields. In 2004 IEEE Symposium on Volume Visualization and
+                                                                                            of a B-Rep solid S, there exist a series of implicit functions {𝑓1, . . . , 𝑓𝑛 }
+   Graphics. IEEE, 39–46.                                                                   such that their composite function ℎ satisfies Eq. (1).
+Daxuan Ren, Jianmin Zheng, Jianfei Cai, Jiatong Li, Haiyong Jiang, Zhongang Cai,               It is known that an implicit function 𝐹 can be induced from an ori-
+   Junzhe Zhang, Liang Pan, Mingyuan Zhang, Haiyu Zhao, et al. 2021. CSG-Stump: A
+   learning friendly CSG-Like representation for interpretable shape parsing. In ICCV.      ented manifold surface Z (open or closed without self-intersection),
+   12478–12487.                                                                             with the condition that Z belongs to the zero isosurface of 𝐹 . To
+Antonio Ricci. 1973. A constructive geometry for computer graphics. Comput. J. 16, 2        prove the existence of {𝑓𝑖 }𝑛𝑖=1 , it is equivalent to proving that there
+   (1973), 157–160.
+Vadim Shapiro. 2002. Solid Modeling. Handbook of computer aided geometric design 20         exists a set of orientable manifold surfaces: {Z𝑖 }𝑛𝑖=1 which can in-
+   (2002), 473–518.                                                                         duce {𝑓𝑖 }𝑛𝑖=1 to satisfy Eq. (1).
+Vadim Shapiro. 2007. Semi-analytic geometry with R-functions. ACTA numerica 16
+   (2007), 239–303.
+                                                                                               We prove the existence of {Z𝑖 }𝑛𝑖=1 in a constructive way by creat-
+Vadim Shapiro and Donald L Vossler. 1991a. Efficient CSG representations of two-            ing Z𝑖 from top to bottom along the Boolean tree, as follows. With-
+   dimensional solids. J. Mech. Des. 113 (1991), 292–305. Issue 3.                          out loss of generality, we show how to create relevant Z𝑖 s on an
+Vadim Shapiro and Donald L. Vossler. 1991b. Construction and optimization of CSG
+   representations. Computer-Aided Design 23, 1 (1991), 4–20.                               arbitrary Boolean tree node. We assume that a tree node 𝑟 has child
+Vadim Shapiro and Donald L. Vossler. 1993. Separation for boundary to CSG conversion.       patches Q1, . . . , Q𝑚 , child nodes 𝑟 1, . . . , 𝑟𝑑 . Here Q𝑖 , 𝑖 = 1, . . . , 𝑚
+   ACM Trans. Graph. 12, 1 (1993), 35–55.                                                   are a subset of {s𝑘 }𝑛𝑘=1 . We denote Q𝑚+𝑖 as the union of patches
+Gopal Sharma, Rishabh Goyal, Difan Liu, Evangelos Kalogerakis, and Subhransu Maji.
+   2018. CSGNet: Neural shape parser for constructive solid geometry. In CVPR.              contained in 𝑟𝑖 and its descendants. In the following construction
+Gopal Sharma, Difan Liu, Subhransu Maji, Evangelos Kalogerakis, Siddhartha Chaud-           process, we assume op(𝑟 ) = max. When op(𝑟 ) = min, the process
+   huri, and Radomír Měch. 2020. ParseNet: A parametric surface fitting network for
+   3D point clouds. In ECCV. 261–276.
+                                                                                            is symmetric.
+Vincent Sitzmann, Julien NP Martel, Alexander W Bergman, David B Lindell, and                  We process Q𝑠 , 𝑠 = 1, . . . , 𝑚 + 𝑑 in sequence as follows. If Q𝑠 lies
+   Gordon Wetzstein. 2020. Implicit neural representations with periodic activation         on the outer boundary of the shape (e.g. , Q1 in Fig. 25), we can
+   functions. In NeurIPS.
+Towaki Takikawa, Joey Litalien, Kangxue Yin, Karsten Kreis, Charles Loop, Derek             extend Q𝑠 from the boundary of Q𝑠 to form an open orientable
+   Nowrouzezahrai, Alec Jacobson, Morgan McGuire, and Sanja Fidler. 2021. Neural            and non-self-intersecting surface ZQ𝑠 . The extension of Z𝑠 should
+   geometric level of detail: Real-time rendering with implicit 3D shapes. (2021).          also avoid intersecting with other Q𝑖 ’s except at the boundary of
+Francis Williams, Matthew Trager, Joan Bruna, and Denis Zorin. 2021. Neural splines:
+   Fitting 3D surfaces with infinitely-wide neural networks. In CVPR. 9949–9958.            Q𝑠 . This can be achieved because Q𝑠 lies on the boundary of a
+Karl DD Willis, Pradeep Kumar Jayaraman, Hang Chu, Yunsheng Tian, Yifei Li, Daniele         connected region and the boundary feature curves of Q𝑠 are all
+   Grandi, Aditya Sanghi, Linh Tran, Joseph G Lambourne, Armando Solar-Lezama,
+   et al. 2022. JoinABLe: Learning bottom-up assembly of parametric CAD joints. In
+                                                                                            convex. All constructed zero surfaces have no intersection with
+   CVPR.                                                                                    the boundary surface of S except on feature curves (or corners in
+Q. Wu, K. Xu, and J. Wang. 2018. Constructing 3D CSG models from 3D raw point               2D). Next, we need to remove all the other intersections of Z𝑖 ’s
+   clouds. Comput. Graph. Forum 37, 5 (2018), 221–232.
+Rundi Wu, Chang Xiao, and Changxi Zheng. 2021. DeepCAD: A deep generative                   outside S, otherwise, the composited halfspace will have outlier
+   network for computer-aided design models. In ICCV. 6772–6782.                            regions. Unwanted intersections can be removed by exchanging and
+Xianghao Xu, Wenzhe Peng, Chin-Yi Cheng, Karl DD Willis, and Daniel Ritchie. 2021.          smoothing the intersected parts, as shown in Fig. 26.
+   Inferring CAD modeling sequences using zone graphs. In CVPR. 6062–6070.
+Guandao Yang, Serge Belongie, Bharath Hariharan, and Vladlen Koltun. 2021. Geometry            If Q𝑠 lies on the boundary of a cavity region of the solid (e.g. ,
+   processing with neural fields. NeurIPS 34 (2021).                                        Q2 in Fig. 27), the zero surface can be constructed in a similar way,
+Fenggen Yu, Zhiqin Chen, Manyi Li, Aditya Sanghi, Hooman Shayani, Ali Mahdavi-
+   Amiri, and Hao Zhang. 2022. CAPRI-Net: Learning compact CAD shapes with
+                                                                                            but the resulting surface would be a closed one. If the composited
+   adaptive primitive assembly. In CVPR.                                                    halfspace has an interior outlier region within the cavity, the zero
+Zhan Yuan, Yizhou Yu, and Wenping Wang. 2012. Object-space multiphase implicit              surfaces should be expanded to cover the outlier region, as shown
+   functions. ACM Trans. Graph. 31, 4 (2012), 1–10.
+                                                                                            in Fig. 27(c).
+
+                                                                                                 ACM Trans. Graph., Vol. 41, No. 6, Article 276. Publication date: December 2022.
+276:16 •    Guo, et al.
+
+
+                                                   ℎ                                                unwanted
+                s6                                                                                 intersection
+                     s1
+                                                  max
+           s5              s2
+                                s3    min 𝑓3 𝑓4 𝑓5 𝑓6
+                     s4
+                                     𝑓1 𝑓2
+                     (a)                          (b)
+                                                                                        Fig. 26. Removal of unwanted intersection by exchanging and smoothing
+                Q1                           𝑧1                    𝑧1                   when constructing 2D zero curves.
+                           Q5                                                 𝑧5
+           Q4                         𝑧4                      𝑧4
+                                Q2                       𝑧2                        𝑧2
+                                                                                                  Q1                            𝑧1                       𝑧1
+                     Q3                           𝑧3                    𝑧3                                  Q3                             𝑧3                        𝑧3
+                     (c)                          (d)                   (e)                            Q2                            𝑧2                       𝑧2
+                                                                                                              Q4                                𝑧4                        𝑧4
+
+                     Q1′                           ′
+                                                  𝑧1                                                                       Interior outlier
+                                                         ′                                              (a)                               (b)                      (c)
+                           Q2′                          𝑧2
+                                                                                        Fig. 27. Construction of extended curves on a 2D model with genus 1. (a):
+                                                                                        Input model with 4 patches. (b): Improper zero surfaces lead to interior
+                                                                                        outliers. (c): After expanding the zero surfaces, interior outliers can be
+                     (f)                          (g)                   (h)             removed.
+Fig. 25. Construction of extended curves on a 2D model. The extended
+curves are trimmed by the bounding box for better illustration.                         𝑄 (x, H ) = arg miny ∈H ∥x − y∥ that returns the nearest point to x
+   After constructing zero surfaces for all Q𝑖 ’s, the subpatches of                    in H , the operator n(x) that returns the surface normal at x, and
+Q𝑚+𝑖 , 𝑖 = 1, . . . , 𝑑 should also be replaced with their extended ver-                the operator 𝜃 (x) that returns the dihedral angle at a feature point
+sions. Suppose that R 𝑗 ’s are the subpatches of Q𝑚+𝑖 , then R 𝑗 should                 x. The evaluation metrics Section 7.1 are listed below.
+be extended along 𝜕R 𝑗 ∩ 𝜕Q𝑚+𝑖 , so that the union of all extended
+R 𝑗 ’s is ZQ𝑚+𝑖 . In this way, the generated zero surfaces in the child                                       1    ∑︁                      1    ∑︁
+                                                                                         CD(𝑀𝑒 , 𝑀𝑔 ) =               ∥p − 𝑄 (p, P𝑔 )∥ +           ∥p − 𝑄 (p, P𝑒 ) ∥;
+nodes of 𝑟 follow that of 𝑟 .                                                                               2|P𝑒 |                       2|P𝑔 |
+                                                                                                                     p ∈ P𝑒                                        p ∈ P𝑔
+   The above procedure is executed from top to bottom; we can
+obtain a series of {Z𝑖 }𝑛𝑖=1 at each leaf node. From {Z𝑖 }𝑛𝑖=1 , we can                  HD(𝑀𝑒 , 𝑀𝑔 ) = max{max ∥p − 𝑄 (p, P𝑔 )∥, max ∥p − 𝑄 (p, P𝑒 ) ∥};
+                                                                                                                     p ∈ P𝑒                          p ∈ P𝑔
+induce a set of implicit functions: {𝑓𝑖 }𝑛𝑖=1 . Due to the construction
+                                                                                                         180° ∑︁                             
+process and the above properties, it is easy to verify that Eq. (1) can                 NAE(𝑀𝑒 , 𝑀𝑔 ) =          arccos n(p) · n(𝑄 (p, P𝑔 ))
+                                                                                                        2|P𝑒 |𝜋
+be fulfilled.                                                                                                          p ∈ P𝑒
+   In Fig. 25 and Fig. 27, we illustrate the concept of surface extension                                      180° ∑︁                            
+in two 2D examples. Fig. 25-(a) presents an input shape with six                                            +          arccos n(p) · n(𝑄 (p, P𝑒 )) ;
+                                                                                                              2|P𝑔 |𝜋
+decomposed patches s1, . . . , s6 . Its Boolean tree is illustrated in                                                     p ∈ P𝑔
+
+Fig. 25-(b), 𝑓𝑖 corresponds to s𝑖 . Fig. 25-(c) is the grouped patches at                                     1       ∑︁                                1 ∑︁
+                                                                                        FCD(𝑀𝑒 , 𝑀𝑔 ) =                       ∥p − 𝑄 (p, F𝑔 )∥ +             ∥p − 𝑄 (p, F𝑒 ) ∥;
+the second layer of the Boolean tree, where Q5 is the union of s1 and                                       2|F𝑒 |                                    2|F𝑔 |
+                                                                                                                     p ∈ F𝑒                                    p ∈ F𝑔
+s2 . The extended curves ZQ1 , . . . , ZQ4 are illustrated in Fig. 25-(c),
+denoted by 𝑧 1, . . . , 𝑧 4 . Q5 is processed at the child node (Fig. 25-(f))                             1 ∑︁
+                                                                                        FAE(𝑀𝑒 , 𝑀𝑔 ) =        ∥𝜃 (p) − 𝜃 (𝑄 (p, F𝑔 ))∥
+and the corresponding extended curves are 𝑧 1′ and 𝑧 2′ shown in                                        2|F𝑒 |
+                                                                                                                     p ∈ F𝑒
+Fig. 25-(g). By applying the union operation (corresponding to min                                              1 ∑︁
+operation), 𝑧 5 is constructed as shown in Fig. 25-(e). In Fig. 25-(h),                                     +        ∥𝜃 (p) − 𝜃 (𝑄 (p, F𝑒 ))∥.
+                                                                                                              2|F𝑔 |
+all extended curves are plotted. Fig. 27(a) shows another example                                                       p ∈ F𝑔
+whose input is with genus 1. The extended curves of Q1, Q2 , Q3                            For a B-Rep solid, we compute its “ground-truth” signed distance
+and Q4 are closed curves as depicted in Fig. 27-(c).                                    field F𝑔 based on the accompanied triangle mesh in the ABC dataset,
+   Here, note that a dedicated and complicated algorithm is needed                      we measure the approximation error between the learned function
+to implement the above surface extension procedure, and we turn to                      F𝑒 to F𝑔 as follows:
+train a neural network to compute the appropriate implicit functions
+                                                                                                                       1 ∑︁ |F𝑔 (p) − 𝑓 (p)|
+directly.                                                                                              DE(F𝑒 , F𝑔 ) =                        .
+                                                                                                                      |𝐺 |     |F𝑔 (p)| + 𝛿
+                                                                                                                                      p ∈𝐺
+C    EVALUATION METRICS
+                                                                                        Here 𝐺 is a set of points randomly sampled in [−1, 1] 3 , |𝐺 | = 217
+We denote 𝑀𝑒 as the extracted zero isosurface from any method,                          and 𝛿 > 0 is a tiny value to avoid zero division and is set to 10−9 .
+and 𝑀𝑔 as the boundary surface of B-Rep. P𝑒 and P𝑔 are randomly                           IoU is the volumetric intersection of 𝑀𝑔 and 𝑀𝑒 divided by their
+sampled points on 𝑀𝑒 and 𝑀𝑔 , and F𝑒 and F𝑔 are randomly sam-                           volume union. 217 points are randomly sampled in [−1, 1] 3 and
+pled points on the feature edges of 𝑀𝑒 and 𝑀𝑔 , respectively. For                       their occupancy values are evaluated for computing IoU.
+a point set H and a query point x ∈ R3 , we define the operation
+
+ACM Trans. Graph., Vol. 41, No. 6, Article 276. Publication date: December 2022.
+

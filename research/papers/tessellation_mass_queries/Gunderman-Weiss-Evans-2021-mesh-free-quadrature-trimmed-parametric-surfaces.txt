@@ -1,0 +1,922 @@
+                                                  High-accuracy mesh-free quadrature for trimmed parametric surfaces and volumes
+
+                                                                                       David Gundermana,b,∗, Kenneth Weissb , John A. Evansc
+                                                                           a Department of Applied Mathematics, University of Colorado Boulder, Boulder, CO 80309, USA
+                                                                             b Lawrence Livermore National Laboratory, 7000 East Avenue, Livermore, CA 94550, USA
+                                                            c Ann and H.J. Smead Department of Aerospace Engineering Sciences, University of Colorado Boulder, Boulder, CO 80309, USA
+
+
+
+
+                                          Abstract
+                                          This work presents a high-accuracy, mesh-free, generalized Stokes theorem-based numerical quadrature scheme for integrating func-
+                                          tions over trimmed parametric surfaces and volumes. The algorithm relies on two fundamental steps: (1) We iteratively reduce the
+                                          dimensionality of integration using the generalized Stokes theorem to line integrals over trimming curves, and (2) we employ numerical
+                                          antidifferentiation in the generalized Stokes theorem using high-order quadrature rules. The scheme achieves exponential convergence
+                                          up to trimming curve approximation error and has applications to computation of geometric moments, immersogeometric analysis,
+
+
+
+
+arXiv:2101.06497v2 [math.NA] 2 Jan 2022
+                                          conservative field transfer between high-order curvilinear meshes, and initialization of multi-material simulations. We compare the
+                                          quadrature scheme to commonly-used quadrature schemes in the literature and show that our scheme is much more efficient in terms
+                                          of number of quadrature points used. We provide an open-source implementation of the scheme in MATLAB as part of QuaHOG, a
+                                          software package for Quadrature of High-Order Geometries.
+                                          Keywords: Quadrature, High-order, Trimmed, Immersed
+
+
+                                          1. Introduction
+                                              Quadrature over trimmed parametric surfaces and over regions
+                                          bounded by trimmed parametric surfaces is important in a variety
+                                          of applications. For example, in computer-aided geometric design
+                                          (CAGD), three-dimensional geometric objects are typically given
+                                          in terms of boundary representations (BREPs), often as tensor-
+                                          product non-uniform rational B-spline (NURBS) surfaces or T-
+                                          spline surfaces. In many CAGD programs, trimmed NURBS
+                                          patches or T-spline patches– formed by discarding portions of the
+                                          patch – are also allowed (c.f. Figure 1) [1, 2, 3, 4, 5, 6].
+                                              Some of a trimmed patch’s edge curves are formed as inter-
+                                          sections of two parametric patches. These edge curves are called
+                                          trimming curves and can be represented either as physical space
+                                          curves in R3 or as parametric space curves in the parametric                     Figure 1: An example of a region formed by trimmed surface patches. a) The
+                                                                                                                           region is bounded by five tensor-product parametric patches with trimming curves
+                                          spaces of either trimmed patch [7]. Efficient and accurate in-                   shown in red. b) The trimmed object is shown.
+                                          tegration of material properties over volumes bounded by sets
+                                          of trimmed patches, or over the surfaces formed as unions of
+                                          trimmed patches themselves, is often an important operation in
+                                          the design process, and can be used, for example, to compute an                  mesh is allowed to move with the fluid flow until it becomes too
+                                          object’s volume or surface area [8].                                             distorted for analysis. Then, field variables defined on the dis-
+                                              In addition to its application to geometric design, integration              torted source mesh are projected onto an analysis-ready target
+                                          over regions bounded by trimmed parametric surfaces is impor-                    mesh. Conservation of integrated material quantities, such as to-
+                                          tant in the context of computer-aided engineering (CAE), where                   tal energy, is ensured only with highly accurate integration over
+                                          it is common to use high-order polynomials and/or rational func-                 the intersections between source mesh elements and target mesh
+                                          tions as a basis for analysis in the finite element method (FEM).                elements [11, 13, 14].
+                                          Integration over surfaces and/or volumes formed by trimming                         As another example, in immersed finite element methods,
+                                          typical finite element shapes (such as high-order quadrilateral                  an object of geometric interest is immersed in a simpler non-
+                                          patches or hexahedral cells) is a fundamental operation in anal-                 boundary-fitted background mesh. Boundary conditions, domain
+                                          ysis paradigms such as moment-fitting methods [9], immersed                      restrictions, and interface conditions are then taken into account
+                                          finite element methods [10], Lagrangian remap methods [11],                      through accurate integration over (1) the volume enclosed by cut
+                                          and multi-mesh methods [12].                                                     cells and (2) the surface of the cut cells [15, 16, 17]. See Figure 2
+                                              For example, in high-order Lagrangian remap methods for                      for an example of a cut cell formed by a background Cartesian
+                                          computational fluid dynamics (CFD), a curvilinear finite element                 mesh and a geometric object shaped like the Utah teapot.
+                                                                                                                              Efficient high-order integration over typical FEM volume ele-
+                                             ∗ Corresponding author                                                        ments and surface elements has been studied extensively for sim-
+                                             Email address: david.gunderman@colorado.edu (David                            ple cell shapes, such as hexahedral cells and quadrilateral surface
+                                          Gunderman)                                                                       patches. Highly optimized rules have been developed in these
+                                          Preprint submitted to Elsevier                                                                                                                  January 4, 2022
+Figure 2: a) In immersed methods, a shape like the Utah teapot is immersed into a background grid of Cartesian cells on which a finite element space is defined. b) The
+boundary is then incorporated by considering where it intersects each cell. In this case, the boundary intersects one of the cells as pictured. Efficient integration must be
+performed on these types of surfaces, as well as on the volume left after cutting away everything outside the given surface.
+
+
+cases by taking advantage of the existence of a parametric map-                          curvilinear elements, such as curved tetrahedra or triangles, and
+ping from a simple reference element such as the unit cube or unit                       can be thought of as high-order meshing. These methods can at-
+square. These methods typically rely on mapping a high order                             tain high-order convergence to the correct integral as the number
+quadrature rule designed for the parametric space into the consid-                       of subelements increases. However, due to the inherent difficulty
+ered physical space [18, 19]. However, developing high-accuracy                          of high-order meshing, the pre-processing step of finding a high-
+quadrature rules for arbitrary cell geometries and topologies, as                        order domain decomposition is known to be costly, difficult, and
+occur for trimmed surfaces and volumes, is more difficult and is                         nonrobust [26, 27, 28, 29, 30, 31].
+an active area of research.                                                                 A common method for simplifying quadrature over compli-
+   Accurate integration over arbitrary surfaces and volumes has                          cated geometries avoids decomposing the interior by transform-
+been approached from multiple standpoints, which can be broadly                          ing d-dimensional integrals over a domain’s interior into a sum of
+categorized into (1) domain decomposition methods, such as                               d − 1-dimensional integrals over its boundaries, typically using
+octree decomposition or body-fitted meshing of the trimmed                               the generalized Stokes theorem or the implicit function theorem.
+geometry and (2) dimension-reduction techniques, in which d-                             These methods have been employed extensively for linear polyhe-
+dimensional integrals are transformed into d − 1-dimensional in-                         dral regions and implicitly-defined regions [20, 32, 33, 34], par-
+tegrals. We provide a brief review of these types of methods                             ticularly when the integrand is symbolically antidifferentiable. To
+below. For more complete short surveys of quadrature strategies                          the best of our knowledge, the use of a dimension reduction tech-
+for arbitrary geometries, see [20, 21, 22].                                              nique for high-accuracy integration of arbitrary functions over
+   In domain decomposition-based integration methods, the inte-                          regions bounded by trimmed parametric surfaces or over the sur-
+gration region is decomposed into simpler subregions and then                            faces themselves has not been described in the literature, though
+integration is performed over each of the simpler subregions. Do-                        similar methods have been hinted at for untrimmed surfaces [9].
+main decomposition can be split into two general categories: low-                           Additionally, a popular belief about Stokes theorem-based
+order domain decomposition and high-order domain decompo-                                methods is that they can only be used on integrands for which
+sition. In low-order domain decomposition integration methods,                           symbolic antiderivatives are available, and these methods have
+the geometry of interest is decomposed into a set of simple planar-                      been used in this case for decades [35, 36]. However, recently
+faceted tetrahedra/triangles or hexahedra/quadrilaterals which ap-                       it has become more common to use Stokes theorem-based meth-
+proximate the original geometry, then standard quadrature rules                          ods for arbitrary integrands [37, 38] since numerical antideriva-
+for these shapes are used to integrate functions [23, 24]. Be-                           tives can be efficiently computed to high precision using a high-
+cause the boundary is approximated by straight-sided geometry,                           accuracy quadrature rule, such as Gaussian quadrature. These
+these methods can only achieve low-order convergence to the cor-                         methods have, to the best of our knowledge, only recently been
+rect integral with respect to total number of quadrature points.                         used in 2D or surface cases [39]. In this paper, we extend them
+Much work has been done on optimizing these low-order meth-                              to the 3D case.
+ods [22, 25]. However, the fundamentally low convergence pre-                               Another interesting approach which has been described for
+cludes the possibility of high accuracy integration.                                     trimmed volumetric domains whose trimming surfaces can be
+   Higher-order domain decomposition integration methods rely                            described as implicit functions is that of the error correction term-
+on a decomposition of the geometric domain into high-order                               type schemes, which initially approximates the trimming function
+                                                                                     2
+Table 1: A table of convergence rates under geometric refinement of the approximation of the trimming curves and under integration refinement of the underlying
+Gaussian quadrature rules using our technique. The refinement strategies are explained further in Section 3.3.
+                                                untrimmed/exact trimming curves                  approximating trimming curves
+                 geometric refinement                           N/A                       high-order convergence to integration error
+                integration refinement                exponential convergence             exponential convergence to geometric error
+
+
+with a linear function, then applies a Taylor series correction to                   The algorithms for producing our proposed quadrature scheme
+obtain higher order convergence [40, 41, 21]. These methods can                   for surface and volume integration rely on two fundamental com-
+only be applied to parametric surfaces if they can be implicitized,               ponents:
+which can be prohibitively expensive for even quite simple shapes.                 (1) We iteratively reduce the dimensionality of integration using
+For example, the intersection of two bicubic surfaces is, in the                        the generalized Stokes theorem to line integrals over trim-
+general case, a 324th degree implicit curve in physical space [42].                     ming curves, and
+    If surfaces are given as polynomial or rational parametric in-                 (2) We employ numerical antidifferentiation in the generalized
+puts (as is the case for NURBS objects), extra information in                           Stokes theorem using exponentially-convergent quadrature
+the form of a high-order parametrization is available without any                       rules.
+extra approximation (e.g., by polyhedra), and this information                    We note that the presented algorithm can be easily adapted to the
+can be fully exploited to attain the most efficient quadrature rules              case of trimmed and untrimmed simplicial patches, if desired.
+possible. Similarly, if trimming curves are given as high-order                      The algorithm produces quadrature rules which, for smooth
+curves, reverting to straight-edged approximations of the trim-                   integrands, converge to the correct integral exponentially (i.e.,
+ming curves loses information, which reduces accuracy.                            faster than any algebraic order) to machine precision with re-
+    It is important here to mention the moment-fitting method, a                  spect to the number of quadrature points for untrimmed patches
+common tool in numerical quadrature. Given accurate moments                       and patches with polynomial or rational trimming curves. For
+up to degree p for the geometry, the moment-fitting method pro-                   trimmed patches with general (e.g. algebraic) trimming curves,
+duces a quadrature scheme which is 1) exact for polynomials up                    the algorithm converges exponentially with respect to the num-
+to degree p and 2) such that quadrature points are at pre-specified               ber of quadrature points until the error in the geometric approx-
+locations. Moreover, the quadrature weights of the moment-                        imation of the trimming curvs dominates the total error. Under
+fitting quadrature rule can be enforced to be positive. Importantly,              geometric refinement of the trimming curve approximations, the
+the moment-fitting method can be combined with any integration                    integrals converge with a high order which is determined by the
+procedure and the resulting quadrature rule’s accuracy depends                    trimming curve approximations and the order of the surfaces. See
+on the accuracy of the original integration procedure used for cal-               Table 1 for a summary of these convergence rates. In addition to
+culation of the moments [9, 43, 44]. Our quadrature schemes can                   its convergence properties, our algorithm are computationally effi-
+be used to accurately calculate the moments which are required                    cient. The cost for producing the quadrature rules scales linearly
+as inputs into the moment-fitting algorithm.                                      with the number of points in each of the underlying Gaussian
+    In [37, 39], quadrature schemes with spectral (i.e., faster than              quadrature rules, assuming trimming curves or points along the
+any algebraic order) or high-order convergence are developed for                  trimming curve are given a priori, as is common in computer-
+area integration over planar domains bounded by polynomial or                     aided design (CAD) systems.
+rational parametric curves, respectively, using an application of                    Here we would like to note that the convergence of the strategy
+Green’s theorem combined with numerical antidifferentiation. In                   is limited if the integrand is not smooth within the bounding box
+this text, we extend that work to consider two problems. First,                   of the domain of integration. If the integrand is p-th order con-
+we consider the problem of evaluating the surface integral of an                  tinuous, then the algorithm presented will attain p + 1-th order
+arbitrary function over a trimmed parametric surface, S. Second,                  convergence. Since this strategy is targeted at applications such
+we consider the problem of evaluating the volume integral of an                   as immersed boundary methods, where the integrand is smooth
+arbitrary function over a region, V , bounded by a closed set of                  within the cut cell, the scheme will converge spectrally.
+trimmed parametric surfaces. In both of these cases, we focus
+on regions that may be difficult to efficiently mesh. Formally,
+                                                                                  Contributions. Among this paper’s contributions:
+we develop numerical algorithms for computing high-accuracy
+                                                                                    • We present algorithms that compute the locations and
+quadrature schemes for integrals of the forms
+                                                                                      weights of high-accuracy quadrature rules for integration
+                                                                                      of arbitrary smooth integrands over trimmed parametric sur-
+                               ZZ
+                                      f (x, y, z)dS                                   faces and over volumes bounded by such surfaces.
+                            ZZZ S                                                   • A claimed difficulty of our type of approach in the liter-
+                                     f (x, y, z)dV.                                   ature is that it requires the computation of antiderivatives.
+                                 V
+                                                                                      We show that these are available to high accuracy numeri-
+We assume V is bounded by a set of ns trimmed tensor product                          cally, easy to calculate for a broad class of useful integrands,
+surfaces patches {Si0 }ni=1
+                         s
+                            that are subsets of untrimmed patches                     and far more efficient than symbolic antiderivatives (see Ap-
+     ns
+{Si }i=1 ,                                                                            pendix B).
+                                                                                    • We compare our proposed quadrature schemes to three other
+              ∂V = ∪ni=1
+                      s
+                         Si0 :                                                        commonly-used quadrature schemes in the literature that
+          Si0 ⊂ Si = {xi (s,t), yi (s,t), zi (s,t) : 0 ≤ s,t ≤ 1}                     represent the state of the art for integrating over trimmed sur-
+                                                                                      faces or regions bounded by trimmed surface patches. We
+We assume S is simply the surface defined by a union of some                          demonstrate that the proposed algorithms produce quadra-
+subset of the trimmed patches Si0 .                                                   ture rules which are significantly more efficient in terms of
+                                                                              3
+Figure 3: A graphical outline of our algorithm. See Section 2 for an explanation of the notation. a) The integration region is given in terms of its boundaries, which
+are composed of trimmed surface patches. b) In the case of volume integration, Stokes theorem transforms the integral onto each of the surface patches. In the case
+of surface integration, the integral is already over the surface patches. c) Each of the surface integrals are then transformed into integrals over the parametric space of
+the patches, where trimming curves are given (either approximately or exactly) parametrically. d) Green’s theorem is applied to transform the parametric area integral
+onto the trimming curves. e) Integration points are scattered along each trimming curve. f) Numerical Green’s theorem is used to scatter quadrature points within the
+parametric area of interest. g) The parametric quadrature points are mapped back onto the surface. h) Finally, in the case of volume integration, numerical Stokes
+theorem is used to scatter quadrature points within the original volume.
+
+
+      the number of quadrature points needed to achieve a given                         Each trimmed surface patch Si0 is a subset Si0 ⊆ Si of a corre-
+      integration accuracy.                                                             sponding untrimmed tensor-product rational surface patch Si of
+                                                                                        bi-degree (m, n):
+Outline. The remainder of the paper is organized as follows. In
+Section 2, we introduce the new algorithms for producing high-                                    Si := {(xi (u, v), yi (u, v), zi (u, v)) : 0 ≤ u, v ≤ 1}, where
+accuracy quadrature rules for trimmed parametric surfaces and                                             m   n
+regions bounded by such surfaces. In Section 3, we present nu-                                           ∑ ∑ wij,k xij,k Bmj (u)Bnk (v)
+merical results for integrating two integrands over four regions                                         j=0 k=0
+                                                                                           xi (u, v) =     m n
+and compare to three other methods used in the literature. In
+the supplement, we present comparisons for four additional inte-                                           ∑ ∑ wij,k Bmj (u)Bnk (v)
+                                                                                                           j=0 k=0
+grands. We conclude in Section 4 with a discussion of the results
+                                                                                                          m n
+and ideas for future work.
+                                                                                                         ∑ ∑ wij,k yij,k Bmj (u)Bnk (v)
+                                                                                                         j=0 k=0
+                                                                                           yi (u, v) =     m n
+2. Novel Quadrature Scheme
+                                                                                                           ∑ ∑ wij,k Bmj (u)Bnk (v)
+                                                                                                           j=0 k=0
+   In this section, we describe our scheme for producing quadra-                                          m n
+ture rules over trimmed/untrimmed surfaces and volumes. We
+first show how to compute surface integrals over a set of trimmed
+                                                                                                         ∑ ∑ wij,k zij,k Bmj (u)Bnk (v)
+                                                                                                         j=0 k=0
+surface patches using our scheme. Then, we show how numeri-                                zi (u, v) =     m n                            ,
+cal antidiffentiation can be used to produce quadrature rules for                                          ∑ ∑ wij,k Bmj (u)Bnk (v)
+computing volume integrals over a region bounded by a closed                                               j=0 k=0
+union of trimmed/untrimmed surface patches. An example of our
+                                                                                                                     (m,n)
+algorithm for producing a quadrature rule is shown in Figure 3.                         where {xij,k , yij,k , zij,k }( j=0,k=0) are the control points and
+                                                                                                (m,n)
+                                                                                        {wij,k }( j=0,k=0) are the control weights of the i-th boundary patch.
+2.1. Surface Integral Case
+                                                                                        In this work, the surface patches are defined in terms of the
+   Formally, we consider the problem of finding an appropriate                          Bernstein-Bézier basis,
+high-accuracy quadrature rule for approximating the surface in-                                                          
+tegral of an arbitrary function f (x, y, z) over a surface S ∈ R3                                                        m
+                                                                                                              Bmi (u) =      (1 − u)m−i ui .
+defined as the union of ns trimmed parametric surface patches,                                                            i
+S = ∪ni=1
+       s
+          Si0 :          ZZ                                                             Note that another basis or triangular patches could also be
+                                      f (x, y, z)dS.                                    used with minimal modifications, but we focus for clarity on
+                                  S
+                                                                                    4
+the Bernstein-Bézier tensor-product patch case. Note also that                       patch to transform each surface integral over Si0 into a sum of line
+NURBS surfaces can be easily decomposed into rational tensor-                                                                                           j
+                                                                                      integrals along each approximating boundary curve segment ci,k      .
+product Bernstein-Bézier patches using Bézier-extraction [45], so
+the algorithm could also be used with minimal modifications for                       2.1.1. Change of Variables to Parent Coordinates
+NURBS and related bases (T-splines [46], U-splines [47], hierar-                        The algorithm for surface integrals proceeds by considering
+chical B-splines [48], etc.).                                                         the integral over each component surface patch individually:
+   For each component surface patch, Si , there is a set of associ-
+                                                                                                                                        ns ZZ
+ated (possibly disconnected) implicitly-defined trimming curves
+                                                                                                          ZZ
+{ci,k }m i                                                                                                          f (x, y, z)dS = ∑                 f (x, y, z)dS.
+       k=1 in the surface patch’s parent parametric space, R =                                                  S                        i      Si0
+[0, 1] × [0, 1], such that ci,k ⊂ R. These trimming curves can be
+formed by removing the part of Si on one side of a set of trim-                       Then, we perform a change of variables to rewrite each of the
+ming surface patches {Sik }m      i
+                                 k=1 , or they may be given a priori.                 surface integrals as area integrals in the parametric space of Si :
+Typically included within the set {ci,k }m     i
+                                             k=1 are some sections of
+                                                                                      ZZ                             ZZ
+the original boundary of R. In the parametric space of Si , the set                            f (x, y, z)dS =                f (xi (u, v), yi (u, v), zi (u, v))|~ni (u, v)|dudv
+of trimming curves {ci,k }m    i                                                         Si0                            R0i
+                             k=1 splits R into an “interior” (possibly
+                          0
+disconnected) region Ri and another (possibly disconnected) re-                                                                                       (2)
+gion R \ R0i . The boundary of the interior region R0i is composed                    where ~ni (u, v) is the normal vector to Si at the parametric coor-
+of the trimming curves {ci,k }m      i                         0                      dinates (u, v). Note that this can be calculated accurately and
+                                    k=1 . The interior region Ri maps                 efficiently for Bernstein-Bézier surface patches using de Castel-
+through the parametric mapping to Si0 ,
+                                                                                      jau’s algorithm [49].
+           Si0 = {(xi (u, v), yi (u, v), zi (u, v)) : (u, v) ∈ R0i }.       (1)       2.1.2. Application of Green’s Theorem
+                                                                                         Once we have moved the problem into the parametric space
+See Figure 3 for an example with notation labeled.
+                                                                                      of Si , we need a highly accurate quadrature rule for integrating
+   In many cases of interest, the trimming curves ci,k can be rep-
+                                                                                      an arbitrary function g(u, v) over the region R0i . See [39] for a
+resented exactly as a set of parametric curves in the parametric
+                                                                                      more detailed derivation of the method we use and a brief survey
+space of Si . In particular, if ci,k is formed by intersecting a pla-
+                                                                                      of other methods. For an arbitrary function g(u, v), by Green’s
+nar surface patch Si and a polynomial (resp. rational) surface
+                                                                                      theorem, we have
+patch of bi-degree (m, n), then the trimming curve ci,k will be
+a polynomial (resp. rational) parametric curve of maximum de-                                        ZZ                                mi ni,k Z
+gree mn. In the case that the curves ci,k can not be represented                                                g(u, v)dudv ≈ ∑ ∑                     j
+                                                                                                                                                          Ag (u, v)du,       (3)
+                                                                                                          R0i                          k=1 j=1 ci,k
+exactly as parametric curves in the space of Si , we assume that
+the trimming curves ci,k are well-approximated by some set of                         where we take the v antiderivative,
+ni,k pre-computed degree di,k approximate polynomial or rational                                                                       Z v
+                       j ni,k
+parametric curves {ci,k  } j=1 given in the Bernstein-Bézier basis                                                  Ag (u, v) =             g(u, ξ )dξ ,                    (4)
+                                        i,k   j     n                                                                                   Pv
+and defined in the space R such that ∪ j=1  ci,k ≈ ci,k :
+                                                                                      for some appropriately chosen constant Pv . Note that the an-
+              j
+            ci,k       j
+                 = {(ui,k         j
+                          (ξ ), vi,k (ξ )) : 0 ≤ ξ ≤ 1}, where,                       tiderivative can be taken in an arbitrary direction, but we choose
+                                                                                      the v direction for simplicity of exposition. See Section 2.3.1
+                      di,k                                                            for a discussion of the choice of antiderivative direction and con-
+                          j      j          d
+                      ∑ wi,k,` ui,k,` B` i,k (ξ )                                     stant Pv . The choice of antiderivative direction is also discussed
+          j           `=0                                                             briefly in [37]. From this point forward through the rest of Sec-
+        ui,k (ξ ) =     di,k
+                             j          d                                             tion 2.1, we leave off subscript i, k and superscript j for clarity
+                         ∑ wi,k,` B` i,k (ξ )                                         of exposition. The remaining steps are applied to each of the ap-
+                         `=0                                                          proximating curves which contribute to the sum in Equation (3).
+                      di,k                                                               Since the approximated trimming curves segments are given
+                          j      j          d
+                      ∑ wi,k,` vi,k,` B` i,k (ξ )                                     parametrically, each of the integrals in the sum on the right hand
+          j
+        vi,k (ξ ) =
+                      `=0
+                                                    ,                                 side of Equation (3) can be evaluated in its respective parametric
+                        di,k                                                          space:
+                                 j     d
+                         ∑     wi,k,` B` i,k (ξ )                                                                                Z 1
+                                                                                                                                                            du(s)
+                                                                                                     Z
+                         `=0
+                                                                                                          Ag (u, v)du =                Ag (u(s), v(s))            ds.        (5)
+                                                                                                      c                            0                         ds
+           j       j     di,k                               j      i,k  d
+where {(ui,k,` , vi,k,` }`=0  are the control points and {wi,k,` }`=0  are            We again remind the reader that we have suppressed the subscripts
+the control weights of the j-th approximation curve segment. Our                      and superscripts on the c, u(s), and v(s). The first term in the
+strategy for approximating the trimming curves is given in Ap-                        product can be evaluated with numerical antidifferentiation using
+pendix A and a review of strategies for forming this approxima-                       a 1D quadrature rule, such as Gaussian quadrature:
+tion can be found in [7]. If the ci,k curves can be represented ex-                                                       Z v
+actly using parametric rational curves, then we simply set ni,k = 1                                  Ag (u, v) =                g(u, ξ )dξ ≈ ∑ wη g(u, ξη ).
+and use the exact description c1i,k = ci,k . The boundary of the inte-                                                     Pv                         η
+rior region ∂ R0i is then represented, exactly or approximately, by                   Since we take the parametric mapping (u(s), v(s)) to be defined
+               j ni,k
+the curves {ci,k  } j=1 .                                                             in terms of the Bernstein-Bézier basis, the second term in the
+   Our algorithm for surface integrals relies on applying numeri-                     product can be evaluated stably to machine precision using de
+cal Green’s theorem in the parametric space R0i of each trimmed                       Casteljau’s algorithm.
+                                                                                  5
+2.1.3. Final Quadrature Rule for Single Surface Patch                         included again for clarity:
+   Using a quadrature rule for Equation (5) yields                                 ZZ
+                                                                                              f (x, y, z)dS
+                                                                                        Si0
+                            Z 1
+                                              du(s)
+         Z
+            Ag (u, v)du =     Ag (u(s), v(s))       ds                                            mi ni,k mq     nq
+          c                0                   ds                                                         j           j          j          j
+                           mq                                                                 ≈ ∑ ∑ ∑ ∑ wi,k,µ,η f (xi,k,µ,η , yi,k,µ,η , zi,k,µ,η ),
+                                                    du(sµ )
+                        ≈ ∑ ωµ Ag (u(sµ ), v(sµ ))          ,                                    k=1 j=1 µ=1 η=1
+                          µ=1                          ds
+                                                                                        j          j          j
+                                                                              where {(xi,k,µ,η , yi,k,µ,η , zi,k,µ,η )} are the quadrature points and
+           mq           mq                                                       j
+where {sµ }µ=1 and {ωµ }µ=1 are the abcissae and weights of a                 {wi,k,µ,η } are the quadrature weights.
+1D quadrature rule, respectively, with locations on the interval
+[0, 1]. Once these quadrature points and weights have been deter-             2.1.4. Final Quadrature Rule for Full Surface
+mined, the antiderivative can also be evaluated using a quadrature               Finally, in order to produce a quadrature rule for the entire
+rule:                                                                         surface S, each of the individual quadrature rules is combined
+                                       Z v(sµ )                               into a full quadrature rule for the original surface:
+             Ag (u(sµ ), v(sµ )) =                g(u(sµ ), ξ )dξ                ZZ
+                                        Pv
+                                                                                        f (x, y, z)dS
+                                        nq                                          S
+                                  ≈ ∑ wη g(u(sµ ), ξη ),                                       ns mi ni,k mq      nq
+                                                                                                      j           j          j          j
+                                       η=1                                              ≈ ∑ ∑ ∑ ∑ ∑ wi,k,µ,η f (xi,k,µ,η , yi,k,µ,η , zi,k,µ,η ),
+                                                                                               i=1 k=1 j=1 µ=1 η=1
+                   n
+                   q               q   n
+where the {ξη }η=1    and {wη }η=1     are again the abcissae and
+weights of a 1D quadrature rule, respectively, with the locations             where we remind the reader that ns is the number of surface
+ξη here spread between Pv and v(sµ ), where v(sµ ) will be differ-            patches, mi is the number of trimming curves on patch Si ,
+                                            j                                 ni,k is the number of trimming curve approximations for trim-
+ent for each approximate trimming curve ci,k   and for each quadra-           ming curve ci,k , and mq and nq are the number of quadra-
+ture point v(sµ ). Note also that the number of quadrature points             ture points used for each trimming curve approximation. Here
+may be different for each of these antiderivative quadrature rules,           {xi,k,µ,ν , yi,k,µ,ν , zi,k,µ,ν } are the quadrature points and {wi,k,µ,ν }
+but for clarity we use nq quadrature points for all of them. Plug-            are the quadrature weights.
+ging these quadrature points back in and back-propagating, the
+approximate form of Equation (5) becomes                                      2.2. Volume Integral Case
+                       mq       nq
+                                                    !                            With an accurate quadrature scheme for surface integrals in
+                                                      du(sµ )
+     Z
+        Ag (u, v)du ≈ ∑ ωµ ∑ wη g(u(sµ ), ξη )                .               hand, a quadrature scheme for volume integration can be found by
+      c               µ=1      η=1                       ds                   applying an additional iteration of the generalized Stokes theorem
+                                                                              and numerical antidifferentiation.
+The quadrature rule for each component of Green’s theorem in                     Formally, in this section we consider the problem of finding an
+Equation (3) (again noting that we have suppressed subscripts                 appropriate quadrature rule for approximating the volume integral
+and superscripts referring to i, j, k) therefore has formula                  of an arbitrary function f (x, y, z) over a region V ∈ R3 bounded by
+                                                                              ∂V = S, where S is defined as the union of ns trimmed parametric
+             Z                    mq   nq                                     surface patches, S = ∪ni=1 Si0 as in the previous section. However,
+                 Ag (u, v)du ≈ ∑ ∑ w0µ,η g(u(sµ ), ξη ),                      in this section we make the additional assumption that S satisfies
+             c                  µ=1 η=1                                       the Jordan-Brouwer Separation theorem. In other words, the sur-
+                                                                              face S divides R3 into an inside region V bounded by S and an
+                                                              du(s )
+where the quadrature weights are w0µ,η = ωµ wη dsµ and the                    unbounded outside region R3 \ V . We note that in applications,
+quadrature points are (u(sµ ), ξη ). In our implementation we use             the separation condition is never formally satisfied, since machine
+an equal number of quadrature points for each component quadra-               precision causes non-water-tightness [7]. However, our method
+ture rule nq = mq , but in general they need not be equal.                    is robust to small gaps in models, since we transform integrals
+   For each surface patch, we must then multiply the quadrature               onto trimming curves on each surface patch. We wish to compute
+weights by the normal vector and plug in the quadrature points to             the integral              ZZZ
+the defining parametric equations to convert the area quadrature                                                           f (x, y, z)dV,
+rule for into a surface quadrature rule,                                                                               V
+                                                                            for arbitrary functions f (x, y, z). We first use the generalized
+   xµ,η , yµ,η , zµ,η = x(u(sµ ), ξη ), y(u(sµ ), ξη ), z(u(sµ ), ξη )        Stokes theorem to transform this volume integral into a sum of
+                 wµ,η = w0µ,η |~n(u(sµ ), ξη )|.                              surface integrals. For an arbitrary function f (x, y, z), we have
+                                                                                                ZZZ                           ns ZZ
+The quadrature points {(u(sµ ), ξη )} and weights {w0µ,η } cor-                                          f (x, y, z)dV = ∑                    A~ f (x, y, z) · ~
+                                                                                                                                                               dS,   (6)
+respond to evaluating an area integral corresponding to the                                          V                       i=1        Si0
+right hand side of Eq. (2), whereas the quadrature points
+{(xµ,η , yµ,η , zµ,η )} and weights {wµ,η } correspond to evaluating          where                                             Z z
+surface integrals corresponding to the left hand side of Eq. (2).                                     A~ f (x, y, z) = h0, 0,           f (x, y, ξ )dξ i             (7)
+   The quadrature rules for all of the approximated trimming                                                                       Pz
+curves are then combined to produce a rule for the trimmed sur-               for some appropriately chosen constant Pz . We discuss the choice
+face patch. Here the explicit dependence on i, k, and j has been              of Pz in Section 2.3.1. Note that the antiderivative can be taken in
+                                                                          6
+any direction, but we choose the z-direction for simplicity of ex-                             2.3.2. Simplification for Untrimmed Surface Patches
+position. Because we evaluate the antiderivative in the z-direction,                              If the surface patch of interest is untrimmed, then the algo-
+the components of ~ dS in the x- and y-directions are zeroed out                               rithm in Section 2.1 can be simplified by using a tensor-product
+in the dot product. Equation (6) simplifies to the integral of a                               quadrature rule for the whole surface patch instead of transform-
+scalar-valued function,                                                                        ing the surface integral into line integrals and using a quadrature
+                     ZZZ                           ns ZZ                                       rule on each line integral. If there are n quadrature points in the
+                              f (x, y, z)dV = ∑                   A f (x, y, z)dS,   (8)       chosen 1D quadrature rule, a tensor-product quadrature has n2
+                          V                       i=1       Si0                                points, whereas a naive implementation of our strategy produces
+                                                                                               a quadrature with 4n2 quadrature points and the same accuracy,
+where                                           Z z                                            including n2 for each of the boundary curves of the surface patch.
+                              A f (x, y, z) =            f (x, y, ξ )dξ              (9)       We note that the left and right curves have geometric correction
+                                                  Pz
+                                                                                               factors of du
+                                                                                                           ds = 0 and the bottom quadrature rule has weights
+and the normal vector factor ~ni in the change of variables to par-                            wµ = 0, since the length of the interval in the antiderivative (cf.
+ent coordinates in Eq. (2) can be replaced with the z-coordinate                               Eq. (4)) is v(sµ ) − Cv = 0. Thus, if we remove the quadrature
+of the normal vector ~ni z . Each of the integrals in the sum in Equa-                         rules for the left, right, and bottom boundary curves (which con-
+tion (8) can be evaluated to high-precision using a quadrature rule                            tribute nothing to the sum), then our method is equivalent to the
+generated with the procedure given in Section 2.1, with the above                              tensor-product quadrature rule. In our implementation, we simply
+caveat:                                                                                        use a tensor-product quadrature rule on the untrimmed surface
+                ZZ                           nσ                                                patches and which is equivalent to using our method with the
+                        A f (x, y, z)dS ≈ ∑ wi,σ A f (xi,σ , yi,σ , zi,σ ).                    above simplification.
+                  Si0                      σ =1
+
+Here we have combined the indices k, j, µ, η into one index σ ,
+                                                                                               3. Results
+where nσ = mi ni,k mq nq . By evaluating the antiderivative numeri-
+cally using a quadrature rule, we obtain a quadrature rule for each                               In this section, we test the algorithms presented in Section 2
+surface patch’s contribution to Stokes theorem:                                                to calculate surface integrals and volume integrals of some repre-
+   ZZ                               nσ            np                                           sentative functions over various domains defined by trimmed or
+            A f (x, y, z)dS ≈ ∑ wi,σ ∑ wψ f (xi,σ ,ψ , yi,σ ,ψ , zi,σ ,ψ ).                    untrimmed rational or polynomial parametric surface boundaries
+      Si0                          σ =1         ψ=1                                            and their interiors. We first describe the test cases, test integrands,
+                                                                                               comparison methods, and refinement strategy. Then, we report
+The final quadrature rule for the volume case is simply a sum of
+                                                                                               results for surface and volume integrals. Finally, we consider how
+the contributions from each surface patch:
+                                                                                               our algorithm performs when the trimming curve approximation
+    ZZZ                              ns nσ                np                                   is refined.
+                f (x, y, z)dV ≈ ∑ ∑ wi,σ ∑ wψ f (xi,σ , yi,σ , zi,σ ,ψ ),
+            V                       i=1 η=1              ψ=1
+                                                                                               3.1. Test Domains
+where {xi,σ , yi,σ , zi,σ ,ψ } are the quadrature points and {wi,σ wψ }                           We investigate the method on four datasets:
+are the quadrature weights in the final quadrature rule.                                       (1) A closed propeller shape with no trimming curves, given by
+                                                                                                    5,136 rational bicubic Bernstein-Bézier surface patches (see
+2.3. Implementation Details                                                                         Figure 4),
+   Some of the steps of the algorithms above require some choices                              (2) A closed bike frame shape given by 2,460 rational bicu-
+about implementation which affect the final quadrature scheme,                                      bic Bernstein-Bézier surface patches and 7 planar trimming
+including the choice of antidifferentiation constants. In addition,                                 patches, creating a total of 64 trimming curves (see Figure 5),
+the quadrature scheme can be simplified if the surface patch of                                (3) A non-closed trimmed subset of a sphere shape given as 3
+interest is untrimmed. We discuss such implementation details                                       rational biquintic Bernstein-Bézier surface patches with 4
+below.                                                                                              trimming surfaces that remove a cookie-cutter pattern out of
+                                                                                                    the shape, creating a total of 6 trimming curves on the original
+2.3.1. Choice of Antidifferentiation Constants                                                      surface (see Figure 6), and
+   In Sections 2.2 and 2.1.2 of the algorithm given above, the                                 (4) The closed Utah teapot, a classic example from the computer
+antidifferentiation constants Pz and Pv must be chosen. These                                       graphics community composed of 32 polynomial bicubic sur-
+antidifferentiation constants should be chosen to be close to the                                   face patches and one planar patch, creating a total of 18 trim-
+region of integration to ensure that the quadrature points lie close                                ming curves (see Figure 7).
+to the domain of integration. In our implementation of the algo-                                  In the case of the propeller, there are no trimming curves, so
+rithm we choose Pz to be equal to the smallest z-value of all of                               for surface integration we use the simplification given in Sec-
+the control points of the surface patches,                                                     tion 2.3.1, while for volume integrals, the primary addition is the
+                                                                                               numerical Stokes step of the volume integration algorithm given
+                                       Pz = min zij,k .                                        in Section 2.2. It is important to note that for this text case, the
+                                                i, j,k
+                                                                                               surface quadrature rule for each patch therefore reduces to clas-
+This ensures that all of the final quadrature points will lie in the                           sical tensor-product Gaussian quadrature, and shows equivalent
+bounding box of the object of interest.                                                        errors. Since there is no geometric approximation error, we ex-
+   For the constant Pv , we choose to use Pv = 0, since we know                                pect exponential convergence under quadrature rule refinement.
+a priori that all of the trimming curves lie within the original                               We discuss our approach to quadrature rule refinement below.
+parametric surface patch, whose domain is [0, 1] × [0, 1], and this                               In the case of the bike frame, the trimming curves can be
+will ensure that all of the surface quadrature points will lie on the                          expressed as polynomial parametric curves in the parametric
+original untrimmed parametric surface patch.                                                   space of the planar patches, and none of the higher-order surface
+                                                                                           7
+patches are trimmed. Therefore, no trimming curve approxima-                    trimming curve approximations until the difference between sub-
+tion is necessary. We again expect exponential convergence as                   sequent integration values with sufficient quadrature points per
+there is no geometric approximation error.                                      trimming curve approximation is on the order of machine preci-
+   In the case of the trimmed sphere shape, the trimming curves                 sion. We perform geometric refinement by increasing the number
+are approximated in parameter space using cubic polynomial para-                of cubic trimming curve approximation segments.
+metric curves according to the procedure given in Appendix A,
+since the trimming curves can not be expressed exactly using                    3.4. Comparison Methods
+polynomial or rational parametric curves. Only surface integrals
+are computed for this example, since it is non-closed.                             To show the relative benefit of our methods, we compare with
+   Finally, in the case of the Utah teapot, the trimming curves are             three domain decomposition-based quadrature schemes currently
+also approximated in parameter space using cubic polynomial                     used in the literature. These three strategies represent the state of
+parametric trimming curves according to the procedure given                     the art for integrating over trimmed and untrimmed polynomial
+in Appendix A, but in this case the shape is closed, so volume in-              or rational parametric surfaces and volumes.
+tegrals are also computed. For the Utah teapot test case, we also               O CTREE. Our implementation of octree integration adaptively
+investigate the effect of geometric refinement of the trimming                        refines a Cartesian grid wherever the boundary intersects the
+curve approximation on the accuracy of the computed integrals.                        background grid and then uses 3rd -order Gaussian quadra-
+   All experiments and comparisons were implemented in MAT-                           ture (8 points) on each leaf of the octree. Refinement is per-
+LAB and are provided as part of the QuaHOG library [50].                              formed by increasing the maximum levels of refinement [17].
+                                                                                      Note that the octree integration approach is only used for vol-
+                                                                                      ume integrals, since it is a volumetric approach.
+3.2. Test Integrands                                                            L INEAR MESH. We generate a non-adaptive linear simplicial
+   For the three closed shapes, we calculate both surface integrals                   mesh of the geometry using Gmsh [51] which discretizes
+over the boundary and volume integrals over the interior. For the                     the geometry by meshing with a specified maximum ele-
+non-closed trimmed sphere, we calculate only surface integrals.                       ment size. We then use 3rd -order tensor-product Gaussian
+As test integrands, we used three polynomials of degrees 2, 4, and                    quadrature (8 points for tetrahedra and 4 points for triangles)
+6:                                                                                    on each element. The various refinement levels represent
+                                             z                                        independently-generated meshes with different maximum
+               p1 (x, y, z) = x2 − 3xy +                                              element size [52].
+                                             3
+                                                                                Q UADRATIC MESH. Similarly to the linear meshing case, we
+                              x3                                                      generate a non-adaptive quadratic polynomial simplicial
+               p2 (x, y, z) =    + x2 yz − 3y2 z + z + 3
+                               3                                                      mesh of the geometry using Gmsh [51] with a specified
+               p3 (x, y, z) = y5 + z6 − x2 yz + xz + 2                                maximum element size. We then again use 3rd -order tensor-
+                                                                                      product Gaussian quadrature (8 points for tetrahedra and 4
+and three representative nonpolynomial functions                                      points for triangles) on each element. The various refine-
+                                 p                                                    ment levels represent independently-generated meshes with
+                   f1 (x, y, z) = x2 + y2 + z2                                        different maximum element size [52].
+                                                                                We have not optimized any of the implementations of these al-
+                     f2 (x, y, z) = ex+y+z                                      gorithms nor have we optimized implementations of our own
+                                      x2 − y + z2                               algorithms, but we expect the broad trends, particularly with re-
+                     f3 (x, y, z) =                .                            spect to differences in convergence rates with respect to number
+                                      x2 + y2 + z2
+                                                                                of quadrature points, to hold true in any implementation. In our
+These integrands were chosen because they represent classes of                  experiments, using higher-order Gaussian quadrature rules for the
+functions which might typically be integrated in applications:                  comparison strategies did not improve the error much, but yielded
+polynomials of various degrees, algebraic functions with square                 a much higher number of quadrature points, whereas using lower-
+roots, smooth algebraic functions, and functions with poles. Each               order rules increased error. This implies that the geometric ap-
+of these integrands is smooth within the domains of interest and                proximation itself is the primary source of error. We also note that
+within the bounding boxes of the domains of interest.                           for the comparison methods, we generate completely new meshes
+   In the interest of space, we only include comparison plots for               and octrees for each data point, a comparison which favors these
+p3 (x, y, z) and f3 (x, y, z) in the main text of this paper; results for       methods, since typically a complete remeshing isn’t performed to
+the other four integrands with comparisons are provided in the                  refine the geometry.
+paper’s supplementary material.
+                                                                                3.5. Results for Surface Integration
+3.3. Quadrature Rule Refinement                                                    For each of the domains, our method significantly outperforms
+   For refinement of our quadrature rules, we use simple, non-                  the two meshing comparison methods in terms of number of
+adaptive strategies. We use Gaussian quadrature for each of the                 quadrature points needed to attain a given error, while avoiding
+component 1D quadrature rules and set the number of quadra-                     the complicated decomposition of the ambient space necessary in
+ture points described in Section 2 equal to each other (i.e.,                   these comparison methods. Note that we do not compare to the
+mq = nq = n p for volumes and mq = nq for surfaces) and then in-                Octree strategy, since it is a volumetric approach. The results for
+crease them to refine the quadrature order, thereby increasing ac-              surface integration of functions p3 (x, y, z) and f3 (x, y, z) over the
+curacy. We calculate the “ground truth” value of the integral by in-            four test cases are shown in Figure 8 and results for the other four
+creasing the number of quadrature points per trimming curve until               test integrands are included in the supplement.
+the difference between subsequent integration values is smaller                    For the propeller model, our method far outperforms the other
+than machine precision and, in the case of the trimmed sphere                   three methods, because our method retains geometric exactness,
+and Utah teapot test cases, by increasing the refinement of the                 allowing for spectral convergence to the correct integral. When
+                                                                            8
+our method attains machine precision, the two meshing methods               what is the behavior of the error under more refined geometric
+still have errors of at least 10-5 or higher, which is a difference         approximations of the trimming curves?
+in accuracy of more than 10 orders of magnitude. For the bike                  After some experimentation, we found that the convergence of
+model, our method also far outperforms the other three methods.             the integration error with respect to geometric refinement is very
+Our method is again able to retain geometric exactness, because             fast. When cubic trimming curve approximations are used (as is
+the trimming curves in this case are expressed exactly in terms of          the case in this study), the convergence rate is nearly 4th order for
+polynomial parametric curves, which need not be approximated.               volume integration over the Utah teapot test case with respect to
+This again allows our method to attain spectral convergence to              total number of trimming curve segments, as shown in Figure 10.
+the correct integral. In this case, our method at the best point            The order of convergence is, in general, (di,k +1), where di,k is the
+on the plot attains accuracy improvements of 12 orders of magni-            order of the trimming curve approximations. If a fixed number of
+tude. Our method also significantly outperforms the comparison              quadrature points is used for each trimming curve segment under
+methods at lower levels of accuracy for both of these test cases.           geometric refinement, the convergence rate is also (r + 1)-th or-
+   The trimmed sphere and Utah teapot models are more nuanced,              der with respect to the total number of quadrature points for r −th
+because they contain trimming curves which must be approxi-                 degree polynomial trimming curve approximations. Because this
+mated. Our trimming curve approximation strategy is described               is a volume integral in three-dimensional space, the order of con-
+in Appendix A. When computing surface integrals over the                    vergence with cubic trimming curves could be considered to be
+trimmed sphere model, our method is able to outperform the                  12th order with respect to the number of quadrature points per
+meshing strategies without requiring any meshing. In this case              dimension. This leads us to conclude that if high-precision is
+our method quickly converges to machine precision. For the Utah             needed and the accuracy attained by increasing integration or-
+teapot test case our method still far outperforms the comparison            der is not enough, one step of geometric refinement only on the
+methods, and converges to the geometric approximation error as              curves (without complicated mesh-refinement) can improve error
+expected, which is about 10−8 for this case.                                drastically.
+                                                                               Moreover, for any particular geometric approximation, con-
+3.6. Results for Volume Integration                                         vergence up to the geometric approximation error is spectral, as
+                                                                            shown in Figure 10. An optimal scheme would switch between
+   Our method also significantly outperforms the two comparison             using a coarser geometric approximation when lower accuracy
+methods in terms of number of quadrature points needed to attain            is required and finer geometric approximations when higher ac-
+a given error for volume integration. The results for volume                curacy is required (i.e., use the bottom-left-most point in each
+integration of functions p3 (x, y, z) and f3 (x, y, z) over the three       convergence curve of Figure 10). For the trimmed sphere and
+closed test cases are shown in Figure 9 and results for the other           Utah teapot test cases in Figures 8 and 9, we have simply used
+four test integrands are again included in the supplement.                  a preset geometric approximation and increased the integration
+   As in the surface integration case, our method far outperforms           order to refine the rule. We leave exploration of the combined
+all three comparison methods for the propeller and bike frame               geometric and integration order refinement to a future work.
+models, because no geometric approximation is necessary, al-                   The Utah teapot example shows that the method in question is
+lowing for spectral convergence to the correct integral. For the            robust to gaps inherent in B-rep models. Many of the patches are
+propeller model our method outperforms the comparison methods               trimmed and these patches do not coincide exactly. However, ad-
+by nearly 10−12 at the best point on the plot and is more accu-             jacency information is irrelevant to our algorithm, so the presence
+rate than the comparison methods with any number of quadrature              of gaps between patches is effectively ignored. These gaps intro-
+points. For the bike frame model our method also far outperforms            duce error only in the form of the geometric approximation error
+the other three methods at high levels of accuracy and is only out-         already mentioned. Regardless of how large these gaps are, the
+performed by adaptive octree integration at very low accuracies.            algorithm itself will function robustly, unlike algorithms based
+For the Utah teapot test case we observe similar behavior. Our              on 3D meshing, octree decomposition, or in/out queries.
+method outperforms the other methods when high accuracy is
+needed.
+   We expect that our method would perform much better at lower             4. Discussion
+accuracies if we implemented it adaptively. However, because we
+have not implemented adaptivity, the adaptive octree strategy is               In this work, we have presented a high-order, mesh-free quadra-
+able to outperform it at very low numbers of quadrature points.             ture scheme for integrating over trimmed and untrimmed paramet-
+We defer investigation of an adaptive version of algorithm to               ric surfaces and volumes. We demonstrated on four shapes and
+another study. Regardless, at high numbers of quadrature points,            six integrands (three polynomial, three nonpolynomial) that the
+our method far outperforms the other methods on all of the test             integration scheme converges spectrally when the surfaces are
+cases for high accuracies.                                                  untrimmed or when the trimming curves can be expressed as low-
+                                                                            order polynomial or rational parametric curves. On trimmed sur-
+                                                                            faces without exact parametric polynomial or rational trimming
+3.7. Effect of Trimming Curve Approximation                                 curves, we showed that the integration scheme attains spectral
+   It is important to note that in the trimmed sphere and Utah              convergence up to geometric approximation error and high-order
+teapot test cases, our method achieves spectral convergence only            convergence when the geometric approximation is refined.
+up to the point when geometric approximation error dominates                   We compared to three different integration schemes: (1) adap-
+total error. In the case of surface integration over the trimmed            tive octree integration, (2) linear meshing of the geometry, and
+sphere case, the chosen trimming curve approximation gives a                (3) quadratic meshing of the geometry, and showed that in com-
+geometric approximation error less than machine precision, so               parison to these methods, our method achieves higher accuracy
+increasing the integration order reduces the integration error to           with less quadrature points. We observed the same behavior of
+below machine precision. For surface integration over the Utah              our method on simpler shapes that may more commonly appear
+teapot test case, the convergence curve flatlines near 10-6 . For           in applications such as fictitious domain methods, such as the
+volume integration, it flatlines near 10-9 . This begs the question,        shape in Figure 1.
+                                                                        9
+Figure 4: A depiction of the propeller model, which has no trimming curves and 5,136 rational bicubic Bernstein-Bézier patches. (Left) An opaque depiction. Colors
+represent different surface patches of the object. (Right) A partially translucent depiction.
+
+
+
+
+Figure 5: A depiction of the bike frame model, which has seven trimming curves, including 2,460 rational bicubic Bernstein-Bézier patches and seven bilinear Bernstein-
+Bézier planar patches. (Left) An opaque depiction. Colors represent different surface patches of the object. (Right) A partially translucent depiction with trimming
+curves highlighted in black.
+
+
+
+
+Figure 6: A depiction of the trimmed sphere model, which has six trimming curves, including three rational biquintic Bernstein-Bézier patches. (Left) An opaque
+depiction. Colors represent different surface patches of the object. (Right) A partially translucent depiction with trimming curves highlighted in black.
+
+
+
+
+Figure 7: A depiction of the Utah teapot frame model, which has four trimming curves, including 32 polynomial bicubic Bernstein-Bézier patches and one planar patch.
+(Left) An opaque depiction. Colors represent different surface patches of the object. (Right) A partially translucent depiction with trimming curves highlighted in black.
+
+
+                                                                                   10
+Figure 8: Results of using the algorithm given in Section 2 to calculate the surface integral of various functions over each of the models defined in Section 3.1. For
+definitions of the test integrands, see Section 3.2. Note that all plots are on a loglog scale.
+
+
+
+
+                                                                                 11
+                                                                                                100                                                      100
+
+                                                                                                10-5                                                     10-5
+                                                Octree
+                                                Linear meshing
+                                                Quadratic meshing                               10-10                                                    10-10
+                                                Our method
+                                                                                                10-15                                                    10-15
+                                                      100 102 104 106 108                                     100 102 104 106 108
+
+                                                                                                100                                                      100
+
+                                                                                                10-5                                                     10-5
+
+
+
+
+                                                                                                                                                                  Relative Integration Error
+                                                                                                10-10                                                    10-10
+
+                                                                                                10-15                                                    10-15
+                                                      100 102 104 106 108                                     100 102 104 106 108
+
+                                                                                                100                                                      100
+
+                                                                                                10-5                                                     10-5
+
+                                                                                                10-10                                                    10-10
+
+                                                                                                10-15                                                    10-15
+                                                      100 102 104 106 108                                     100 102 104 106 108
+                                                  Number of Quadrature Points
+
+
+Figure 9: Results of using the algorithm given in Section 2 to calculate the volume integral of various functions over the interior of each of the closed models defined in
+Section 3.1. For definitions of the test integrands, see Section 3.2. Note that all plots are on a loglog scale.
+
+
+
+
+                                                                                   12
+                                               100                                                 100                                                100
+
+
+                                               10-5                                                10-5                                               10-5
+
+
+                                               10-10                                               10-10                                              10-10
+
+
+
+
+                                                                                                                                                              Relative Integration Error
+                                               10-15                                               10-15                                              10-15
+          100      102     104      106     108              100      102     104      106     108               100     102      104     106      108
+
+
+                                               100                                                 100                                                100
+
+
+                                               10-5                                                10-5                                               10-5
+
+
+                                               10-10                                               10-10                                              10-10
+
+
+                                               10-15                                               10-15                                              10-15
+          100      102     104      106     108              100      102     104      106     108               100     102      104     106      108
+                                                              Number of Quadrature Points
+
+Figure 10: Comparing errors due to trimming curve approximation for volume integrals over the interior of the Utah teapot model. Geometric refinement is performed
+by increasing the number of cubic approximation curve segments ni,k per trimming curve. In each chart, successive data points within a series (colored lines) correspond
+to increasing quadrature order. The set of constants ni,k,init is the initial number of trimming curve segments used to approximate each of the trimming curves ci,k . We
+note that ni,k,init in this plot is less than the number of trimming curves used in Figure 9. The N inside of the O notation refers to the total number of quadrature points.
+For definitions of the test integrands, see Section 3. Note that all plots are on a loglog scale.
+
+
+   We would like to briefly note that the high levels of accuracy                        accuracy quadrature methods to the aforementioned applications.
+seen here may seem unnecessary in practice. This may be true,
+for instance, for certain geometric processing applications such
+as computation of geometric moments. However, in applications                            Acknowledgments
+where many integrations must be performed, such as in the solu-
+tion of time-dependent partial differential equations or in iterative                      This work was performed under the auspices of the U.S. De-
+methods, small errors in integration can quickly dominate overall                        partment of Energy by Lawrence Livermore National Laboratory
+error. High levels of accuracy are also required in applications                         under Contract DE-AC52-07NA27344.
+such as Lagrangian remap, where conservation error is directly
+proportional to integration error. In addition, we note that while                       Appendix A. Trimming curve approximation
+we have focused on high-accuracy integration for our application,
+the above methods are generally able to achieve lower accuracy                              For surfaces with trimming curves that can not be represented
+with far fewer quadrature points than comparison methods, so                             exactly using parametric or rational parametric curves, such as
+these methods could also be applicable in situations where only                          the model in Figure 1, the trimmed sphere example in Figure 6,
+lower accuracy is necessary. We posit that one of the primary                            and the Utah teapot example in Figure 7, the trimming curves
+advantages of the methods presented in this paper are that no                            must be approximated. For untrimmed surfaces or surfaces with
+surface or volume decomposition is necessary for integration,                            trimming curves which can be represented exactly, such as the
+thereby increasing the robustness and decreasing the complexity                          propeller or bike frame models in Figures 4 and 5, this step is
+of the overall integration procedure.                                                    not required. In many computer-aided design models and engi-
+                                                                                         neering applications, the trimming curves are approximated in a
+    The quadrature schemes presented here can improve accuracy                           pre-processing step before the analysis is started. In these cases,
+and efficiency in a variety of analysis paradigms, including im-                         those approximations can be used as the ci,k   j
+                                                                                                                                          in Section 2.1. In
+mersed boundary methods, Lagrangian remap methods, moment-
+fitting methods, and multi-mesh methods commonly seen in                                 the case that the trimming curves are not given a priori, we must
+multi-physics applications. Our plans for future work include                            approximate them.
+three primary thrusts: 1) we plan to explore adaptivity of our                              For each Si , we must approximate each of the mi trimming
+quadrature scheme by informing the order of quadrature on each                           curves {ci,k }m i
+                                                                                                        k=1 using some set of ni,k polynomial parametric
+                                                                                                              j ni,k
+trimming curve based on the arc length and curvature of trimming                         curve segments, {ci,k  } j=1 . There is a wide body of literature on
+curves, thereby exploring the geometric refinement/integration re-                       producing ordered point sets which lie on trimming curves deter-
+finement trade-offs, 2) we plan to investigate spectrally-accurate                       mined as the intersection of two parametric surfaces and a survey
+meshless quadrature schemes which do not have geometric ap-                              can be found in [7]. Once a point set is found, a high-order curve
+proximation errors, and 3) we also plan to apply these novel high-                       can be fit to the ordered point set, a problem which has also been
+                                                                                    13
+                                                                                      References
+Table B.2: A comparison of the average pre-processing and evaluation time for
+computing the 1D antiderivative of 10,000 polynomials of random degree between
+                                                                                       [1] M. Majeed, F. Cirak, Isogeometric analysis using manifold-based smooth
+1 and 20 with random standard normal coefficients over 10, 000 intervals with
+                                                                                           basis functions, Computer Methods in Applied Mechanics and Engineering
+random standard normal boundaries. The strategies are described in Appendix B.
+                                                                                           316 (2017) 547–567.
+Timing is performed in MATLAB.
+                                                                                       [2] X. Wei, Y. J. Zhang, T. J. Hughes, Truncated hierarchical tricubic c0 spline
+                                                                                           construction on unstructured hexahedral meshes for isogeometric analysis
+                                 (1)          (2)           (3)                            applications, Computers & Mathematics with Applications 74 (9) (2017)
+        Pre-processing        2 · 10−1     2 · 10−4          0                             2203–2220.
+                                                                                       [3] X. Wei, Y. J. Zhang, D. Toshniwal, H. Speleers, X. Li, C. Manni, J. A. Evans,
+          Evaluation          1.7 · 100    8 · 10−7     2.4 · 10−6                         T. J. Hughes, Blended B-spline construction on unstructured quadrilateral
+                                                                                           and hexahedral meshes with optimal convergence rates in isogeometric anal-
+studied extensively. In this work, we have used the IRIT polyno-                           ysis, Computer Methods in Applied Mechanics and Engineering 341 (2018)
+                                                                                           609–639.
+mial solver [53] to find an ordered, well-spaced point set on an                       [4] H. Casquero, X. Wei, D. Toshniwal, A. Li, T. J. Hughes, J. Kiendl, Y. J.
+algebraic curve formed as the intersection between two polyno-                             Zhang, Seamless integration of design and Kirchhoff–Love shell analysis
+mial or rational surfaces. It uses a variety of strategies to achieve                      using analysis-suitable unstructured T-splines, Computer Methods in Ap-
+this goal, including subdivision strategies and stepping along the                         plied Mechanics and Engineering 360 (2020) 112765.
+curve. Once the ordered point set has been found, we use cu-                           [5] X. Wei, X. Li, Y. J. Zhang, T. J. Hughes, Tuned hybrid nonuniform sub-
+bic Lagrange interpolation, with parametric interpolation points                           division surfaces with optimal convergence rates, International Journal for
+                                                                                           Numerical Methods in Engineering 122 (9) (2021) 2117–2144.
+spaced based on the physical distance between consecutive points.                      [6] X. Wei, X. Li, K. Qian, T. J. Hughes, Y. J. Zhang, H. Casquero, Analysis-
+We also tried using quintic and septic Lagrange interpolation and                          suitable unstructured T-splines: Multiple extraordinary points per face,
+achieved reasonable results, although the interpolation begins to                          arXiv preprint arXiv:2103.05726 (2021).
+suffer from the Runge phenomenon as the interpolation order in-                        [7] B. Marussig, T. J. R. Hughes, A review of trimming in isogeometric analy-
+creases, which causes oscillations in high-order polynomial fits                           sis: Challenges, data exchange and simulation aspects, Archives of compu-
+to evenly-spaced data.                                                                     tational methods in engineering 25 (4) (2018) 1059–1127.
+                                                                                       [8] C. Hafner, C. Schumacher, E. Knoop, T. Auzinger, B. Bickel, M. Bächer, X-
+                                                                                           CAD: Optimizing CAD models with extended finite elements, ACM Trans.
+                                                                                           Graph. 38 (6) (Nov. 2019).
+                                                                                       [9] S. Mousavi, H. Xiao, N. Sukumar, Generalized Gaussian quadrature rules
+Appendix B. Symbolic vs Numeric Antidifferentiation                                        on arbitrary polygons, International Journal for Numerical Methods in En-
+                                                                                           gineering 82 (1) (2010) 99–113.
+                                                                                      [10] E. Burman, P. Hansbo, Fictitious domain finite element methods using cut
+   In the case of nonpolynomial functions, it is often impossible                          elements: I. A stabilized Lagrange multiplier method, Computer Methods
+                                                                                           in Applied Mechanics and Engineering 199 (41-44) (2010) 2680–2686.
+or very difficult to find symbolic antiderivatives ofpfunctions, as                   [11] R. W. Anderson, V. A. Dobrev, T. V. Kolev, R. N. Rieben, V. Z. Tomov,
+evidenced for example by the function f (x, y, z) = x2 + y2 + z2 .                         High-order multi-material ALE hydrodynamics, SIAM Journal on Scientific
+However, for some classes of functions, such as polynomials, it is                         Computing 40 (1) (2018) B32–B58.
+relatively easy to find symbolic antiderivatives. In some applica-                    [12] A. Johansson, B. Kehlet, M. G. Larson, A. Logg, Multimesh finite element
+tions where the integrands of interest are polynomials with known                          methods: Solving PDEs on multiple intersecting meshes, Computer Meth-
+                                                                                           ods in Applied Mechanics and Engineering 343 (2019) 672–689.
+coefficients and are integrated many times, it may be more compu-                     [13] J. Grandy, Conservative remapping and region overlays by intersecting arbi-
+tationally efficient to simply find antiderivatives symbolically as a                      trary polyhedra, Journal of Computational Physics 148 (2) (1999) 433–466.
+pre-processing step. However, numeric antidifferentiation can be                      [14] L. Margolin, M. Shashkov, Second-order sign-preserving conservative in-
+preferable even if the integrand is known to be polynomial when                            terpolation (remapping) on general grids, Journal of Computational Physics
+the coefficients and/or degree of the polynomial are unknown.                              184 (1) (2003) 266–298.
+This is because symbolically integrating such a polynomial can                        [15] C. S. Peskin, The immersed boundary method, Acta numerica 11 (2002)
+                                                                                           479–517.
+be cumbersome. In fact, even if the coefficients and degree are                       [16] D. Kamensky, M.-C. Hsu, D. Schillinger, J. A. Evans, A. Aggarwal,
+known, the symbolic antidifferentiation can still be inefficient                           Y. Bazilevs, M. S. Sacks, T. J. R. Hughes, An immersogeometric varia-
+because of the relative inefficiency of symbolic operations.                               tional framework for fluid–structure interaction: Application to biopros-
+   To further explore this dichotomy, we produced 10, 000 poly-                            thetic heart valves, Computer Methods in Applied Mechanics and Engineer-
+nomials with standard normal distribution of random degrees be-                            ing 284 (2015) 1005–1053.
+                                                                                      [17] L. Kudela, N. Zander, T. Bog, S. Kollmannsberger, E. Rank, Efficient and
+tween 1 and 20. We use three strategies to compute the antideriva-
+                                                                                           accurate numerical quadrature for immersed boundary methods, Advanced
+tives of these functions: (1) symbolic antidifferentiation using                           Modeling and Simulation in Engineering Sciences 2 (1) (2015) 10.
+MATLAB’s built-in int function, (2) antidifferentiation using a                       [18] T. J. R. Hughes, A. Reali, G. Sangalli, Efficient quadrature for NURBS-
+simple numerical implementation of the power rule, and (3) nu-                             based isogeometric analysis, Computer Methods in Applied Mechanics and
+merical antidifferentiation using 10th order Gaussian quadrature.                          Engineering 199 (5-8) (2010) 301–313.
+A table with results for pre-processing (i.e., antidifferentiation)                   [19] T. J. R. Hughes, The finite element method: Linear static and dynamic finite
+of the function along with evaluation (i.e., evaluating at the inte-                       element analysis, Courier Corporation, 2012.
+                                                                                      [20] Y. Sudhakar, W. A. Wall, Quadrature schemes for arbitrary convex/concave
+gration bounds) averaged over 10, 000 random polynomials and                               volumes and integration of weak form in enriched partition of unity methods,
+10, 000 random bounds is shown in Table B.2. As can be seen,                               Computer Methods in Applied Mechanics and Engineering 258 (2013) 39–
+symbolic antidifferentiation is far less efficient than a numerical                        54.
+antidifferentiation strategy. The numerical power rule implemen-                      [21] V. Thiagarajan, V. Shapiro, Adaptively weighted numerical integration over
+tation is slightly faster in terms of evaluation time than numerical                       arbitrary domains, Computers & Mathematics with Applications 67 (9)
+antidifferentiation using high-order quadrature, but it is far less ef-                    (2014) 1682–1702.
+                                                                                      [22] S. C. Divi, C. V. Verhoosel, F. Auricchio, A. Reali, E. H. van Brumme-
+ficient than Gaussian quadrature in terms of pre-processing time.                          len, Error-estimate-based adaptive integration for immersed isogeometric
+Importantly, the power rule strategy can only be used in a very                            analysis, Computers & Mathematics with Applications (2020).
+specific set of circumstances–on polynomials in the power basis                       [23] G. H. Golub, J. H. Welsch, Calculation of Gauss quadrature rules, Mathe-
+with known coefficients and exponents.                                                     matics of computation 23 (106) (1969) 221–230.
+
+                                                                                 14
+[24] P. Keast, Moderate-degree tetrahedral quadrature formulas, Computer meth-                [49] G. Farin, J. Hoschek, M.-S. Kim, Handbook of Computer Aided Geometric
+     ods in applied mechanics and engineering 55 (3) (1986) 339–348.                               Design, Elsevier, 2002.
+[25] A. Krishnamurthy, S. McMains, Accurate moment computation using the                      [50] D. Gunderman, QuaHOG: Quadrature for High-Order Geometries (2020).
+     GPU, in: Proceedings of the 14th ACM Symposium on Solid and Physical                          URL https://github.com/davidgunderman/QuaHOG
+     Modeling, ACM, 2010, pp. 81–90.                                                          [51] C. Geuzaine, J.-F. Remacle, Gmsh: A 3-d finite element mesh generator
+[26] X. Roca, A. Gargallo-Peiró, J. Sarrate, Defining quality measures for high-                  with built-in pre-and post-processing facilities, International Journal for
+     order planar triangles and curved mesh generation, in: Proceedings of the                     Numerical Methods in Engineering 79 (11) (2009) 1309–1331.
+     20th International Meshing Roundtable, Springer, 2011, pp. 365–383.                      [52] D. Engwirda, Locally optimal Delaunay-refinement and optimisation-based
+[27] S. Sherwin, J. Peiró, Mesh generation in curvilinear domains using high-                     mesh generation (2014).
+     order elements, International Journal for Numerical Methods in Engineering               [53] G. Elber, M.-S. Kim, Geometric constraint solver using multivariate rational
+     53 (1) (2002) 207–223.                                                                        spline functions, in: Proceedings of the sixth ACM symposium on Solid
+[28] L. Engvall, J. A. Evans, Isogeometric triangular Bernstein–Bézier discretiza-                modeling and applications, 2001, pp. 1–10.
+     tions: Automatic mesh generation and geometrically exact finite element
+     analysis, Computer Methods in Applied Mechanics and Engineering 304
+     (2016) 378–407.
+[29] L. Engvall, J. A. Evans, Isogeometric unstructured tetrahedral and mixed-
+     element Bernstein–Bézier discretizations, Computer Methods in Applied
+     Mechanics and Engineering 319 (2017) 83–123.
+[30] L. Engvall, J. A. Evans, Mesh quality metrics for isogeometric Bernstein–
+     Bézier discretizations, Computer Methods in Applied Mechanics and Engi-
+     neering 371 (2020) 113305.
+[31] P. Antolin, A. Buffa, M. Martinelli, Isogeometric analysis on V-reps: First
+     results, Computer Methods in Applied Mechanics and Engineering 355
+     (2019) 976–1002.
+[32] E. B. Chin, J. B. Lasserre, N. Sukumar, Numerical integration of homoge-
+     neous functions on convex and nonconvex polygons and polyhedra, Com-
+     putational Mechanics 56 (6) (2015) 967–981.
+[33] R. Saye, High-order quadrature methods for implicitly defined surfaces and
+     volumes in hyperrectangles, SIAM Journal on Scientific Computing 37 (2)
+     (2015) A993–A1019.
+[34] M. A. Olshanskii, D. Safin, Numerical integration over implicitly defined
+     domains for higher order unfitted finite element methods, Lobachevskii
+     Journal of Mathematics 37 (5) (2016) 582–596.
+[35] S. Sheynin, A. Tuzikov, Moment computation for objects with spline curve
+     boundary, IEEE Transactions on Pattern Analysis and Machine Intelligence
+     25 (10) (2003) 1317–1322.
+[36] B. Li, The moment calculation of polyhedra, Pattern Recognition 26 (8)
+     (1993) 1229–1233.
+[37] A. Sommariva, M. Vianello, Gauss–Green cubature and moment compu-
+     tation over arbitrary geometries, Journal of Computational and Applied
+     Mathematics 231 (2) (2009) 886–896.
+[38] T. Jonsson, M. G. Larson, K. Larsson, Cut finite element methods for elliptic
+     problems on multipatch parametric surfaces, Computer Methods in Applied
+     Mechanics and Engineering 324 (2017) 366–394.
+[39] D. Gunderman, K. Weiss, J. A. Evans, Spectral mesh-free quadrature for
+     planar regions bounded by rational parametric curves, Computer Aided
+     Design 130 (102944) (2021).
+[40] F. Scholz, A. Mantzaflaris, B. Jüttler, First order error correction for trimmed
+     quadrature in isogeometric analysis, in: Chemnitz Fine Element Sympo-
+     sium, Springer, 2017, pp. 297–321.
+[41] F. Scholz, B. Jüttler, Numerical integration on trimmed three-dimensional
+     domains (2019).
+[42] T. W. Sederberg, D. C. Anderson, R. N. Goldman, Implicit representation
+     of parametric curves and surfaces, Computer Vision, Graphics, and Image
+     Processing 28 (1) (1984) 72–84.
+[43] M. Joulaian, S. Hubrich, A. Düster, Numerical integration of discontinuities
+     on arbitrary domains based on moment fitting, Computational Mechanics
+     57 (6) (2016) 979–999.
+[44] S. Hubrich, P. Di Stolfo, L. Kudela, S. Kollmannsberger, E. Rank,
+     A. Schröder, A. Düster, Numerical integration of discontinuous functions:
+     Moment fitting and smart octree, Computational Mechanics 60 (5) (2017)
+     863–881.
+[45] M. J. Borden, M. A. Scott, J. A. Evans, T. J. R. Hughes, Isogeometric finite
+     element data structures based on Bézier extraction of NURBS, International
+     Journal for Numerical Methods in Engineering 87 (1-5) (2011) 15–47.
+[46] Y. Bazilevs, V. M. Calo, J. A. Cottrell, J. A. Evans, T. J. R. Hughes, S. Lip-
+     ton, M. A. Scott, T. W. Sederberg, Isogeometric analysis using T-splines,
+     Computer Methods in Applied Mechanics and Engineering 199 (5-8) (2010)
+     229–263.
+[47] D. Thomas, L. Engvall, S. Schmidt, K. Tew, M. Scott, U-splines: Splines
+     over unstructured meshes, Preprint, https://coreform. com/usplines (2018).
+[48] C. Giannelli, B. Jüttler, H. Speleers, Thb-splines: The truncated basis for
+     hierarchical splines, Computer Aided Geometric Design 29 (7) (2012) 485–
+     498.
+
+                                                                                         15
+

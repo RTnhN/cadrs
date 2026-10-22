@@ -1,0 +1,677 @@
+                                                                                    ~     ComputerGraphics,Volume24, Number4, August1990
+
+
+
+
+                                                 Using Tolerances to Guarantee
+                                                Valid Polyhedral Modeling Results
+
+                                                                         Mark Segal
+                                                              Silicon GraphicsComputerSystems*
+
+Abstract
+                                                                                                                                A
+A polyhedral solid modeler that operates on boundary representa-
+tions of objects must infer topological information from numerical
+data. Unavoidable errors (due to limited precision) affect these
+calculations so that their use may produce ambiguous or contra-
+dictory results. These effects cause existing polyhedral modelers
+to fail when presented with objects that nearly align or barely
+intersect[ 101171.
+   An object description associating a tolerance with each of its
+topological features (vertices, edges, and faces) is introduced. The                           Figure 1. An example in the plane that may lead to inconsistencies.
+use of tolerances leads to a definition of topological consistency that
+is readily applied to boundary representations. The implications of
+using tolerances to aid in making consistent topological determina-
+tions from imprecise geometric data are explored and applied to the                           A computed intersection may be inexact either because of the
+calculations of a polyhedral solid modeler. The resulting modeler                          accumulated effects of round-off error in floating-point computa-
+produces a consistent polyhedral boundary when given consistent                            tions or because of uncertainty in the coordinates on which the
+boundaries as input.                                                                       calculation is based. Because computed intersections must be used
+                                                                                           to derive topology in the result, such topology may be ambiguous or
+  C R C a t e g o r i e s a n d Subject D e s c r i p t o r s : 1.3.5 ] C o m p u t e r    inconsistent. These effects sometimes cause previously published
+Graphics]:       Computational Geometry and Object Modeling -                              algorithms to fail.
+curve, sulface, solid and object representations; geometric al-                               For instance, consider deciding whether a vertex of one polyhe-
+gorithms, languages, and systems; G.4 [ M a t h e m a t i c a l S o f t w a r e ] :        dral boundary lies in a face of the other[4]. If a vertex lies in a face,
+Reliability and Robustness                                                                 then the vertex's coordinates produce zero when substituted into
+    A d d i t i o n a l K e y W o r d s a n d Phrases: solid modeling, boundary            the face's plane equation. However, if the face is not triangular, its
+representation, numerical uncertainty                                                      plane equation may not be defined exactly, because the edges that
+                                                                                           define the face may not lie precisely in a single plane. The vertex's
+                                                                                           coordinates may similarly be uncertain.
+1      Introduction                                                                           The test may be modified by deeming the vertex to lie in the
+                                                                                           face's plane if it lies within some small specified distance of an
+Constructive solid geometry (CSG) is a well-established technique                          approximate plane, but this decision is still arbitrary (based on the
+for specifying solid objects. Finding an object's boundary given its                       small value chosen) and care must be taken that it is not contradicted
+CSG description entails computing the boundary of an intersection,                         by some later decision. The problem is exacerbated by making
+union, or difference of solids given by their boundaries. Several                          other related decisions based on numerical data, such as whether
+methods have been used successfully to carry out these "boolean"                           or not two faces are coplanar, and by deriving the locations of new
+operations on polyhedra[ l 0][ 1 1]119]. All these methods compute                         vertices and edges from inexact, previously computed coordinates.
+intersections between the input boundaries and use this information                        Any inconsistency may lead to a result which does not represent the
+to produce a resulting boundary.                                                           boundary of a solid; it may even cause the modeler to fail without
+    "2011 N. ShorelineBlvd., MountainView,CA 94043                                         producing any output.
+                                                                                              Figure 1 shows an example that may pose difficulties in two
+                                                                                           dimensions. An algorithm for finding polygon intersections might
+Permission to copy without fee all or part of this materialis granted                      compute intersections among edges, break edges into segments at
+provided that the copies are not made or distributed for direct                            intersection points, and output those segments that lie inside of
+commercial advantage, the ACM copyright notice and the title of the
+publicationand its date appear, and notice is given that copyingis by                      one polygon or the other (for two coincident segments, one of the
+permission of the Association for ComputingMachinery.To copy                               two would be output). Suppose this algorithm were applied to the
+otherwise, or to republish,requiresa fee and/or specific permission.                       polygons in Figure 1, and suppose the intersection of an edge of the
+
+@1990                 ACM-0-89791-344-2/90/008/0105                        $00.75                                                                                    105
+ Q            SIGGRAPH '90, Dallas, August 6-10, 1990
+
+
+   triangle and all edge of the trapezoid is found at X. Now suppose          tainty in its topological decisions. Then we describe the basic solid
+   point Y is considered, and is found to lie close enough to A that          modeler and how it is modified to incorporate tolerance handling.
+   it is deemed coincident with it (for clarity, the distance between A       We conclude with some examples and a discussion of the prospects
+   and Y is exagerated in the figure). But this is impossible since an        of improving and extending the current implementation.
+   intersection has already been found at X. Unless steps are taken to
+   handle this situation, the algorithm's result may be missing an edge
+   or contain an extra edge between X and A or X and Y.                       3     Geometry, Topology, and Consistency
+      A more concrete example is given in [10] and later cited by other
+   authors[7][ 19]. Two congruent cubes are placed with their centers         We distinguish three topological features in three dimensions:
+  coincident but with one rotated relative to the other about some axis       vertices, edges, and faces. A vertex is essentially a point. An
+  by a small angle. A polyhedral modeler that accomodates coplanar            edge is a connected subset of a line bounded by vertices. A face
+  faces can handle either an angle of zero degrees or large angles,           is a connected subset of a plane bounded by non-self-intersecting
+  but most modelers fail for a range of angles near zero. The size of         polygonal curves made up of edges lying in that plane. The affine
+  this critical interval can be made very small by careful attention to       subset of three-space corresponding to each feature (a point for a
+  numerical issues in the calculation of intersections, but there is still    vertex, a line for an edge, and a plane for a face) is called aflat
+  a range of angles, however tiny, for which a modeler may fail.              of dimension 0, 1 or 2. A particular fiat is specified by giving
+      Several methods have been proposed to address these issues.             coordinates that specify its position with respect to a fixed origin
+ One method, exact rational arithmetic, attempts to represent all             and basis.
+ coordinates exactly as rational numbers[5], because intersections               A geometric object consists of an arbitrary set of particular topo-
+ among features with rational coordinates have rational coordinates.         logical features described in two parts. The first part, called metric
+ More sophisticated techniques allow an arbitrary symbolic formula           data, are the coordinates that locate each feature in space. The
+ for each coordinate[2][ 1]. However, at some point the formula must         second part is a list ofconnectivities. Each connectivity comprises
+ be evaluated. If the coefficients and arguments (which are derived          a set of geometric features that intersect (called the connectivity
+ from the input objects' coordinates) are inexact, topological data          set), together with a distinguishing feature that represents the inter-
+ derived from the formula may still be ambiguous.                            section. For instance, several edges may meet at a vertex, or several
+     If the input coordinates are exact[ 16], then an arbitrary precision    faces may intersect in an edge.
+ calculation can achieve any accuracy. Unfortunately, the output is             An object's representation is consistent if every intersection
+ still of limited accuracy, so the results from one calculation cannot       among an arbitrary set of features is represented explicitly in the
+ be used as input to the next. A grid may be placed over the                 connectivities, and conversely, every connectivity represents an
+ computed object and features snapped to it[18], but this process            intersection computable from the metric data.
+ may incorporate large portions of the grid into the object, creating           Consistency is desirable because connectivities encode most of
+ a myriad of tiny "staircase" features.                                      an object's topology (a solid's genus, for example, can be found
+     Another method is to back up and increase the precision of an           directly from its connectivities). Further, a solid modeler relies
+ earlier calculation if it is later found that its accuracy is not great     on connectivities to derive information about an object, such as
+enough to resolve a topological determination[3]. Instead of recom-          determining which faces lie on either side of an edge or which
+ puting previous calculations, their results may instead be perturbed        edges emanate from a vertex. Inconsistency between connectivities
+as necessary so that they do not introduce ambiguity[8][21]. Other           and metric data may invalidate assumptions made in the modeler's
+methods that yield robust algorithms in limited domains include              algorithms, leading to the modeler's failure.
+ones for computing intersections in the plane[12H13] and finding
+intersections between convex polyhedra[9].                                   3.1 NumericalUncertainty
+     We concede that input coordinates may be inexact and that
+numerical errors may accumulate during computation. We give                  In practice consistency may be difficult to achieve because a
+methods that have their roots in interval arithmetic[20][6]114], to          polyhedron's metric data are represented with limited precision
+measure that accumulation. Each vertex, edge, and face is assigned           quantities. Computing an intersection from these inexact quantities
+its own tolerance. These tolerances are updated during algorithm             (even if carried out to arbitrary precision) may lead to ambiguous
+                                                                             results.
+operation, allowing a modeler to locate regions in which numerical
+uncertainty may lead to topological ambiguity. Using maintained                 To account for inaccuracy, and to quantify its effects during
+tolerances instead of arbitrarily selected"epsilons" makes it possible       geometric computation, we introduce a tolerance[17] e for each
+to decide these cases consistently, guaranteeing that a solid modeling       topological feature f describing the positional uncertainty of its
+result is always the boundary of a solid.                                    corresponding flat a. A tolerance specifies a tolerance region about
+                                                                             a flat. To define this region, let q be any point and a be a flat, and let
+
+                                                                                             dist(q,a) = min{llq - q~ll l qa c a}.
+2     Overview
+                                                                             The region
+We begin by reviewing the essential means by which polyhedral
+                                                                                                    r = { q l d i s t ( q , a ) < e}
+boundaries in three dimensions are specified. Next we present a
+system of tolerances applied to these specifications and introduce a         is the tolerance region about the flat a (Figure 2).
+notion of consistency for inexact geometric objects. We describe                A tolerance also specifies a tolerance region tot(f) about a
+modifications to the standard geometric notions of intersection,             feature f. Because a feature's boundary may not lie exactly in
+coincidence and containment that can be applied to objects incorpo-          its corresponding flat, the definition of a feature's tolerance region
+rating tolerances. These concepts provide the framework necessary            requires some notation. Consider the projection operator .Pa(y) that
+to build a polyhedral modeler that accomodates numerical uncer-              computes the perpendicular projection of the point or points of y
+106
+                                                                           ~   ComputerGraphics, Volume24, Number4, August1990
+
+
+
+                 ....,...........,...                     ......""                             r-"
+                                                                                              I
+                                                                                               i .....................................                                   -'""-Ii
+                                                                                                                                                                         .~t
+                                                                                              ii .-'"'"'"'""%                                                             "','"1
+                                                                                              ~!
+                                                                                              i:     •       i                                                                J
+                                                                                              ~k            L. . . . . . . . . . . . . . . . . . . . . . . . . . . . .        :
+
+            .....~,                                                  """                                                               (a)
+
+
+                             .....,'""
+                      ...-
+
+      Figure 2. A point and a line and their tolerance regions.
+
+
+
+
+onto the flat a. We also write .Pf (y) if f is a feature, in which case
+the projection is onto f ' s corresponding fiat. Let B ( f ) be the set of
+boundary features of f , and let a be f ' s corresponding flat. A point
+q lies in a feature f ' s tolerance region, denoted tol(f), if either of
+two conditions hold:
+
+  1. q lies within some tolerance region of B ( f ) .
+
+  2. dist(q,a) < e and P~(q) lies in the interior of the planar                                                                        (b)
+     polygon or linear segment defined by P~(B(f)).
+                                                                                      Figure 3. (a) An edge and its tolerance region. (b) The tolerance
+The tolerance region of a vertex is the same as that of its point.                    region of a face.
+Figure 3 shows the tolerance regions of an edge and a face.
+
+
+3.2      Approximate Intersection
+                                                                                fl is approximately contained in f2 if it is approximately aligned
+Consider the distance d between two flats al and a2                             with f~ and if P~[~ol(fl)] C_ P~2[tol(f2)]. fl and f2 are approx-
+                                                                                imately coincident if B ( f l ) approximately coincides with B ( f 2 ) .
+                 d = min{llXl - x2[[ I =l E O,l,X 2 C O,z}                      Two vertices are approximately coincident if they approximately
+                                                                                intersect. See Figure 4.
+where xi E ai means a~ is a point of flat al. Two flats intersect
+within E if the distance between them does not exceed c. Two flats ai
+and aj approximately intersect if they intersect within e : ¢i + ej.            3.4      Restrictions on Feature Alignments
+That is, if the tolerance regions of two flats intersect, then the
+flats approximately intersect. Similarly, approximate intersection              The use of inexact metric data requires some restrictions on the
+of two features is defined as intersection of the corresponding                 allowable positions of object features if an object is to make sense
+tolerance regions. Consistency for inexact objects is the same                  under the familiar rules of exact geometry. These restrictions
+as consistency for exact objects with intersection replaced by                  exclude certain feature constellations whose topology would be
+approximate intersection.                                                       unclear. We assume that individual objects presented to the modeler
+   We require that polyhedral boundaries presented to the solid                 as input follow the restrictions. One of the main concerns in the
+modeler be approximately consistent. The algorithm is designed                  design of the modeler is ensuring that it detects and eliminates any
+so that given two approximately consistent polyhedral boundaries,               violations of these restrictions in its result.
+the output will also be an approximately consistent polyhedral                     Consider alignment of features of equal dimension in the exact
+boundary. This ensures that the algorithm's output can be fed back              case, denoted by fl ~ f2 if fl aligns with f2. Such alignment is
+into the algorithm as input.                                                    symmetric and transitive: if fl, f2, and f3 are all features of the
+                                                                                same dimension, and if f] ~ f2, then f2 ~ ffl; further, if f2 ~ f3,
+                                                                                then ffj ~ f3. This is not automatically true for approximate
+3.3      Coincidence, Containment, and Alignment
+                                                                                alignment as Figure 4 shows.
+In the exact case, a feature of lower dimension may be contained                   However, for correspondence with the exact case, we also de-
+in a feature or flat of higher dimension. Two features or flats of              mand symmetry and transitivity of alignment of equal-dimensional
+the same dimension may coincide if the two sets of points that they             features in the approximate case. Furthermore, to simplify data
+define are equal. We say that a feature fl aligns with feature f2 if            structures, we require that equal-dimensional features never ap-
+fx is contained in f2's flat. Any feature contained in or coincident            proximately coincide; such coincidence is represented with a single
+with another must also be aligned with it.                                      feature.
+   A feature fj approximately aligns with f2 (with corresponding                   Similarly, we declare illegal any intersecting feature tolerance
+flats aj and a 2 ) i f dist(q, a2) < el + e2 for every q E Pat[tol(fl)].        regions if the associated boundary tolerance regions intersect in
+
+                                                                                                                                                                                   107
+O                        SIGGRAPH '90, Dallas, August 6-10, 1990
+
+
+
+
+                                                                                                                                                                                                                                                     ..--.,
+                                                                                         -_;.--'-.                                                        .   ---..,
+                                                                                                           ,.'".....                                               .,
+                                                                                                           ',            "   i         I    °    ', I         "         i
+         -*'"                                                               "                                            A   ',," B               ', ,'       C    ,i
+                                                                                                                                                                                                 ..................................         ~" "~ ""7 ...........
+                                                                                                                                                                                                                                            ,,..*"
+         ...---
+
+                                                  (a)                                                                                      (b)                                                                                        (a)
+
+      Figure 4. (a) non-symmetry of approximate alignment. B aligns
+      with A, but not vice versa. (b) non-transitivity of approximate
+      coincidence. A & B coincide, as do B & C, but A & C do not.
+
+
+
+
+                  1......................................................                                                                           '
+
+
+
+                  I
+                                                                                                                                                                                                                                      (b)
+                  I                          r- .........................                            ::=        ......           -',                I ',
+                           . . . . . :.: . . . . . . . . . . . . . . . . . . . .
+                                                                                                                                                                                  Figure 6. (a) An illegal constellation of vertices about an edge.
+                       I
+                                                                                                                                                                                  The ordering of the vertices along this edge is not well defined. (b)
+                                                                                                                                                                                  An illegal constellation of edges contained in a face. It is not clear
+                        i .....................                                    - .................                                                                            whether or not the edges should intersect.
+
+      Figure 5. An illegal constellation of edges. Each pair of corre-
+      sponding vertices approximately coincide, but it is unclear that the
+      edges themselves do.                                                                                                                                                  then sliced apart between these points to partition the faces into
+                                                                                                                                                                            parts that intersect only along shared edges, if at all. Information
+                                                                                                                                                                            gathered during cutting operations is used after all faces have been
+                                                                                                                                                                            partitioned to select the contours appropriate to the desired CSG
+more than one connected component. Figure 5 shows an example                                                                                                                result.
+of the situation that this restriction is designed to exclude.                                                                                                                 There is nothing that makes this algorithm especially amenable
+   Finally, if two distinct features are approximately aligned with and                                                                                                     to using tolerances to assure reliable behavior in the presence of nu-
+intersect some higher dimensional feature, and if their projections                                                                                                         merical uncertainty. Other algorithms could be similarly equipped,
+onto the higher dimensional feature's ideal fiat also approximately                                                                                                         although the exact measures taken depend on the particular form
+align and intersect (Figure 6), then we require the two features to                                                                                                         of the algorithm and the stages that it goes through to achieve a
+be approximately aligned.                                                                                                                                                   modeling result. The essence of achieving reliability is to ensure
+                                                                                                                                                                            that every stage of the algorithm leaves the geometric object on
+                                                                                                                                                                            which it is working consistent and free from any violations of the
+4      A Reliable Solid Modeler                                                                                                                                             restrictions presented in the last section.
+
+The techniques for achieving consistent object descriptions in the
+presence of numerical uncertainty form the basis for a reliable poly-                                                                                                       4.2      Data Structures
+hedral modeler. By reliable we mean that, given the descriptions of                                                                                                         The algorithm encodes a geometric object in a data structure
+two consistent boundary representations, the modeler always runs
+                                                                                                                                                                            consisting of four items. These data structure items completely
+to completion and that its result is always the consistent description
+                                                                                                                                                                            encode both the metric data and connectivities of a geometric
+of a boundary representation. In most cases, the connectivities of
+                                                                                                                                                                            object. The first three items correspond to features of dimension 0,
+this result precisely correspond to the connectivities that would be                                                                                                        1, and 2, respectively.
+obtained using exact inputs with infinite precision arithmetic. In
+some cases, when numerical uncertainties lead to arbitrary deci-
+sions, the exact result may have topologically complex regions of                                                                                                           Vertices
+small size that are collapsed into simpler regions in the modeler's                                                                                                         A vertex's position is described by three coordinates giving its
+output.                                                                                                                                                                     location relative to a fixed origin and basis. In addition, each vertex
+                                                                                                                                                                            has a list that indicates which edges emanate from it.
+4.1       Algorithm Overview
+                                                                                                                                                                            Edges
+The basic algorithmI 19] operates by detecting and removing inter-
+sections among pairs of candidate faces. It does this by tracing                                                                                                            An edge's flat is described by a parametric line equation given by a
+around the edges of one face and finding their intersections with                                                                                                           point and a unit direction. Its boundary is described by pointers to
+the other face's plane; the procedure is repeated with the faces                                                                                                            its two bounding vertices. Each edge also has a list that describes
+roles reversed. The intersection points are collected and sorted                                                                                                            which faces are incident on it (more precisely, each item in the list
+into order along the intersection line. Each face's contours are                                                                                                            is a pointer to the use of the edge within a face's contour). Edges
+108
+                                                                     ~     ComputerGraphics, Volume24, Number4, August1990
+
+
+
+                                                                            passes through its two endpoints. The tolerance assigned to such
+                                                                            a computed edge equation is zero, because the line must intersect
+                                                                            the vertices' tolerance regions. The extent for the edge is the larger
+                                                                            of the two endpoints' tolerances. A face's equation is computed by
+                                                                            applying Newell's algorithm[ 15] to each of the faces contours and
+                                                                            averaging the results. The tolerance is found by substituting the
+                                                                            coordinates of each vertex in the face's boundary into the computed
+                                                                            equation and recording the maximum deviation from zero. The
+                                                                            extent is this deviation added to the maximum of the vertices
+                                                                            tolerances.
+
+
+                                                                            4.3    Topological Modifications
+                  (a)                               (b)                     As the algorithm proceeds, it modifies the topology of the input to
+                                                                            incorporate computed intersections. These modifications are:
+   Figure 7. (a) Illegal spikes in contours. (b) Legal notches.
+                                                                              1. Breaking an edge into two edges at a new vertex where the
+                                                                                 edge crosses a face.
+
+are unique; there can be no more than one edge between any pair of            2. Inserting new edges into a face along an intersection line.
+vertices.
+                                                                              3. Merging coplanar faces, coincident edges, and coincident
+                                                                                 vertices.
+Faces
+A face's flat is described by an implicit plane equation given by a         Of these operations, (1) and (2) are purely topological in that they do
+point on and a unit normal to the plane. Its boundary is described by       not require alteration of metric data or tolerances. The operations
+one or more pairwise disjoint contours, some of which may be holes.         in (3), however, require the selection of new coordinates and a new
+Each contour is a list of edges that form a non-self-intersectingloop.      tolerance for the merged feature. Further, merging a pair of features
+   A contour must bound an open planar set so that the local                may require topological changes beyond the merge itself.
+orientation of the contour is defined at each vertex (Figure 7).
+This restriction ensures that a contour does not contain zero-width
+                                                                            Vertex Merging
+"spikes," although zero-width notches are allowed (the algorithm
+may insert such notches into faces as partitioning proceeds).               If there is an edge between two merged vertices, it must be
+                                                                            eliminated. This means excising the corresponding pointer from
+Solid Boundaries                                                            every contour that uses the edge. Further, there may be an edge
+                                                                            from each of the merged vertices to a third vertex; such edges must
+The boundary of a solid is simply a list of faces that make it up.
+                                                                            be merged into a single edge.
+
+Tolerances and Related Quantities
+                                                                            Edge Merging and Edge Breaking
+Three quantities are kept with each feature f in addition to the
+coordinates that specify its fiat's position. The first of these is         If two distinct edges are bounded by the same two vertices (as may
+a tolerance describing the accuracy of these coordinates. The               happen after a vertex merge), then the edges must be merged. Every
+second, kept for edges and faces only, is an extent, denoted emt(f).        reference to the either of the original edges must be replaced with a
+This value gives the maximum deviation of the feature's tolerance           reference to a single new edge. If the two merged edges belong to a
+region from its specified flat. The third quantity is called the near       contour with three edges that is not a hole (Figure 8a), then merging
+value, denoted near(f). This value is initialized to a large positive       the edges would create an illegal two-edged contour. In this case the
+number when the modeler starts. Whenever the distance between a             vertices at the ends of this illegal contour are merged, eliminating
+feature and some other feature is computed, and the pair of features        the contour. Further, merging edges may create a spike in a contour
+are deemed not to intersect, the near value is updated so that it is the    that has more than three edges (Figure 8b). This possibility is
+minimum distance to all features found to not intersect the feature         detected by checking if the angle made by the unmerged edges in
+so far. The use of the extent and near values will become apparent          the contour is less than 180 ° . If so, the spike is removed from the
+as the algorithm is described.                                              contour.
+   If objects are presented to the algorithm without edge or plane             Two edges that have no boundary vertices in common overlap
+equations or feature tolerances, the equations and tolerances are           if one approximately aligns with the other and they approximately
+computed. Each vertex in the input is assigned an arbitrary small           intersect. They also overlap if they violate the restrietion illustrated
+tolerance, typically 10-1° for an object centered about the origin          in Figure 6b. Two overlapping edges el and e2 must be broken into
+whose longest edges have approximate length 1. This makes                   a series of two or three non-overlappingones. This breaking creates
+the ratio of the tolerance to the vertex coordinates a few times            two edges with identical bounding vertices that must be merged.
+the machine precision when using IEEE double-precision floating-            Figure 8c shows how a merged edge resulting from an edge break
+point, guaranteeing that round-off error will generally not affect          can create a spike. This spike is eliminated when the edges are
+tolerances. An edge's equation is found by finding the line that            merged.
+                                                                                                                                                 109
+ @            SIGGRAPH '90, Dallas, August 6-10, 1990
+
+
+
+
+                                                                                                            , - -....-...-"....... <.-._- . . .
+
+                                                                                                       ,'          i         a.                ~                    ", ................
+                                                                                           I                            '...-"       "..   /                                     ;
+                                                                                                                                                                                            \
+                                                                                           l
+                                                                                               l              ,:
+                                                                                                                   :"                          ",,
+                                                                                                                                                     '.
+                                                                                                                                                              '.
+                                                                                                                                                                   ",,           ;
+                                                                                                                                                                                  J
+                                                                                                                                                                                          /."i
+                                                                                                   '          ~                  B                        !              '-,'.
+             (a)               (b)                      (c)
+
+   Figure 8. (a) A triangular non-hole must be merged when two of
+   its vertices are. (b) A spike can be created when two vertices are
+   merged. (c) Breaking an edge may create a spike.                            Figure 9. Revision of a coincidence determination. Vertex C
+                                                                               becomes coincident with vertices A and B only after A and B are
+                                                                               found coincident.
+
+
+Coplanar Faces
+
+                                                                         Backtracking
+Two faces that approximately align and intersect must be merged
+into a set of non-overlapping contours just as edges are. In general,    A merged feature f may be assigned a tolerance that is larger than
+this would require using an algorithm to partition intersecting          either of the tolerances of the original features fl and f2. This
+polygons in the plane, bat no such action is taken. Instead, we          may create an inconsistency, because a third feature f3 may have
+rely on there being two contours on either side of an edge. For          previously been determined not to intersect f] or f2 individually,
+an edge that lies in the plane of the coplanar faces, one of these       but f, with its larger tolerance region, may now approximately
+contours belongs to one of the coplanar faces. The other contour         intersect f3. Figure 9 shows the situation with vertices. If vertex C
+belongs to a face that does not lie in the coplanar faces' plane.        is considered against vertices A and B individually, vertex C will
+This third face will induce partitions in each of the coplanar faces.    be found not coincident with either one. However, if vertex A is
+Eventaully (after all such edge-sharing faces have been considered),     then considered against vertex B, these will be deemed coincident.
+the coplanar contours will be partitioned into non-overlapping parts.    A new tolerance region will be constructed that encloses those of A
+                                                                         and B, contradicting the previous conclusion that C did not coincide
+                                                                         with either A or B.
+Perturbation of Merged Features                                             This situation is accomodated by maintaining the near value
+                                                                         for each feature. If a feature f ' s tolerance is increased (i.e. by
+                                                                         merging two features) and the new tolerance exceeds near(f), an
+Merging two features f~ and f2 into a single new feature f requires
+finding coordinates and a tolerance for that feature. To maintain        inconsistency may have been created. If this occurs, near(f) is
+                                                                         reset to a large positive value, and the algorithm is rerun from the
+consistency, we must have tol(fl) U tot(f2) C_ tot(f). As much as
+                                                                         beginning. While this backtracking is certainly expensive, it is
+possible, the coordinates of f ' s flat are selected so as to minimize
+                                                                         essential to ensure that no inconsistencies are introduced. The cost
+f ' s tolerance subject to this inclusion condition, For a pair of
+vertices, this amounts to finding the sphere of minimum radius that      of backtracking could be reduced by employing a spatial subdivision
+encloses two intersecting spheres. For a pair of edges, an attempt       to limit those features that are reconsidered, but this has not been
+                                                                         implemented.
+is made to find the bounded cylinder that encloses two intersecting
+bounded cylinders. For a pair of faces, a less than optimal approach        Backtracking may lead to further backtracking, but any recursion
+is taken for the sake of simplicity. Newell's algorithm is applied to    must eventually terminate. The reason is that when backtracking
+each of the contours in the coplanar pair and the results are averaged   occurs, all intersections between features considered so far will
+to find a new plane equation. The coordinates of each of the vertices    have been accounted for. Thus, any modifications made during
+of the edges in .B(f) are substituted into the new plane equation        a backtracking phase can only reduce the number of features (by
+and the maximum deviation recorded. Then for each e E B(f)               merging them). At worst the process ends when all features that
+with vertices vl and V2, the coordinates of P~(v]) and Pe(v2) are        had been considered when backtracking started are merged into a
+substituted into the plane equation and the maximum deviation            single feature with a large tolerance.
+found. The largest of these two maximum deviations becomes f ' s
+tolerance. The procedure ensures that f approximately contains its
+                                                                         4.4      Algorithm                   Operation
+boundary.
+   Both caNt(f) and near(f) must also be assigned a value, cult(f)       The first step in partitioning a pair of faces fl and f2 is to compute
+must be recomputed from f ' s boundary features (this is done            the line of intersection between their planes a~ and az. The direction
+during the computation of its new coordinates and tolerance), while      of this line is given by u = n~ × n2 where ni is the normal to ai. A
+n e a r ( f ) = min{near(fl),near(f2)}. If fl and f2 are vertices or     third plane is introduced with normal u and passing through a point
+edges, they may be contained in a feature of higher dimension. The       in one of the faces boundaries. The intersection point of the three
+extent of this feature may be affected when fl and f2 are merged,        planes gives a point v on the intersection line. The intersection
+so every feature that includes fl or fz must be located and a test       line tolerance is made large enough so that the tolerance region
+made to see if its extent needs updating.                                about the intersection line encloses tol(az ) n tol(a2). If the face's
+110
+                                                                         ' ~ ' Computer Graphics, Volume 24, Number 4, August 1990
+
+
+ tolerances are ¢1 and E2, respectively, the tolerance turns out to be
+
+                         (4 + 4 L7 ,2 cos
+                    e=             sin 2 a        ]
+
+ where s i n s = [Inl × n2ll.
+
+
+ 4.5    Coplanarity                                                                 Figure 10. One face completely contained in another's tolerance
+ If max{t1,,2 } > n, where n is a user-specifiable coplanarity factor,              region. Some vertices must be merged and some edges broken
+                                                                                    because they violate the constraint illustrated in Figure 6.
+ the faces are tested for coplanarity, n is typically between 100 and
+  1000. Small values force the algorithm to deem pairs of faces that
+ intersect in a relatively large dihedral angle to be coplanar.
+    If the ratio exceeds n, the faces are deemed coplanar if two
+                                                                                  If it turns out that all the edges of one face lie in the other's
+ vertices in one face's boundary lie on opposite sides of the other's
+                                                                               plane, the faces are deemed coplanar. This may happen in spite
+ plane, or if any vertex of one face lies within a distance equal to
+                                                                              of the intersection line having a relatively small tolerance if one
+ the extent of the other. This second condition ensures that two
+                                                                              face's edges are all about the same length as the other face's
+ faces whose tolerance regions intersect in more than one connected
+                                                                              tolerance. Even if this is the case, the vertices are still recorded
+ component are found to be coplanar (see Figure 5).
+                                                                              in the intersection point list. Some of the vertices may have to be
+                                                                              merged (Figure 10); such merging is done after sorting the points.
+4.6     Finding Edge-Face Intersections                                          Finally, it may happen that one or both of an edges' endpoints
+If the ratio of the edge tolerance to the maximum of the two face             lie off of the other face's plane, but the edge itself is approximately
+tolerances is not too large, then the intersections of one of the face's      contained in the plane. This can occur if an edge e's tolerance is
+edges with the other face's plane are found. For each edge, there             large compared to those of its endpoints. This situation is detected
+are four possibilities: (1) the edge does not intersect the plane, (2)        by determining if P,(Vl) and P,(v2) (vl and v2 are e's vertices)
+the edge intersects the plane in one boundary vertex, (3) the edge            are both approximately contained in the other face's plane. If
+lies entirely in the plane, or (4) the edge crosses the plane.                so, then the plane's tolerance is made large enough so that both
+   These possibilities are distinguished by computing the signed              of the original vertices approximately intersect the plane. If the
+distance of each of the edge's endpoints to the plane. The signed             new tolerance exceeds the face's near value, backtracking occurs.
+distance is deemed to be zero if the vertex lies within tolerance of          Otherwise, the current face pair is rerun with the increased face
+the computed intersection line. If the lirte's equation is v + t u and        tolerance.
+the vertex's coordinates are p, then the vertex lies on the intersection
+line if                                                                       4.7     Feature Merging
+                lip - vii 2 - [ u - ( p - v)] 2 _< (e + ep) 2
+                                                                              After finding the intersection points of each face's edges with the
+ where e is the intersection line tolerance and ep is the vertex's
+                                                                              other's plane, the points are sorted into order along the intersection
+ tolerance.
+                                                                               line. This is accomplished by computing the value t = (x - v) • u
+    If the vertex v does not lie on the intersection line its signed
+                                                                              for each intersection point x (this effectively projects the point onto
+distance d~ to the plane is obtained by substituting its coordinates
+                                                                              the calculated intersection line), and sorting in order of increasing
+ into the plane equation d = n . (p - o) where n is the plane unit
+                                                                              t. Points that appear more than once are sorted secondarily using
+normal and o is the point in the plane. Id,~l is compared with both
+                                                                              orientation information.
+the vertex's and other face's near value; each value, if less than Id,, I,
+                                                                                  With the points ordered, a search is made for points that lie close
+is replaced with [d, [.
+                                                                              enough together that they must be merged. Each point in the sorted
+    Even if the vertex does not lie on the intersection line, it may
+                                                                              list is checked against the next point. If they approximately intersect,
+still intersect one of the other face f ' s boundary features. If
+                                                                              the vertices defining the points are merged into a single vertex. This
+ Idol < eat(f), then each of the other face's boundary features is
+                                                                              process may be repeated, eventually coalescing several vertices.
+checked to see if it intersects the v. If so, the v's distance from the
+                                                                              In addition to vertex merging, edges that lie on the intersection
+plane is zero.
+                                                                              line must be broken at intersection points that fall between their
+    If sign(d,,, ) = sign(d,,~) for the edge e's vertices v~ and v2, then
+                                                                              endpoints. Performing this operation ensures that pairs of edges that
+e does not cross the other face's plane. If one sign is positive
+                                                                              overlap are broken into a sequence of non-overlapping segments.
+and the other is negative, e crosses the plane and the intersection
+point x between e and the plane is computed. The tolerance                        Vertex and edge merging may invalidate some of the data about
+for x is e. This guarantees that x approximately intersects both              orientation and incident edges stored with the intersection points.
+faces' planes as well as the computed intersection line. n e a r ( z ) is     Sometimes it is difficult to determine how to update these data. In
+min{near( e ), dist( x, vl ), dist( x, v2)}. The computed intersection        these cases the current face pair is simply rerun.
+point, along with auxilliary information indicating the edge and
+contour from which it came, are added to the list of intersection             4.8     Cutting
+points.
+   If one of an edges' vertices lies in the other face's plane, the           The list of sorted and merged intersection points is used to determine
+vertex is entered into the list of intersection points. Information           where to slice contours to partition the pair of faces. Figure 11
+about edge adjacency and local orientation of the contour at the              shows some examples of cuts that are inserted into pairs of simple
+vertex is also recorded.                                                      faces.
+                                                                                                                                                      111
+O               SIGGRAPH '90, Dallas, August 6-10, 1990
+
+
+                                                                           factor and with the final tolerances displayed.
+                                                                              Figure 16 shows that the modeler can be used to generate complex
+                                                                           objects without the tolerances causing any feature merging. This
+                                                                           object was generated by starting with two congruent cubes in
+                                                                           different orientations and computing their intersection. Then the
+                                                                           resulting objects were rotated with respect to one another and the
+                                                                           union taken and so on until, after eight iterations, the final result
+                                                                           was obtained. In this object tolerances remain imperceptibly small
+                                                                           because features are not merged (with the default tolerances and a
+                                                                           coplanarity factor of 1000). If the process is carried out for another
+      Figure 11. Different ways in which a pair of faces may be cut.
+                                                                           iteration, however, some features are near enough to one another
+                                                                           that they are merged, and tolerances increase. Continued iteration
+                                                                           causes tolerances to grow; features are rapidly collapsed so that
+                                                                           after 11 iterations, the object is reduced to a single vertex.
+   Either or both endpoints of a cut may correspond to newly
+calculated intersection points. Therefore an edge giving rise to such
+a point must be broken at that point before the cut is made. The           6    Conclusions
+edge is not broken when the intersection is computed because it is
+not known at that time whether or not the point lies in the interior of    We have presented a tolerance scheme that accounts for the con-
+the face that the edge intersects. The point at which the edge is to       sistent definition of boundary representations whose specification
+be broken may approximately intersect one of the edges endpoints.          may be numerically uncertain. This scheme has been applied to a
+If this is the case, the cut is made, after which the vertices are         polyhedral modeler computing CSG operations on boundary rep-
+merged.                                                                    resentations. The modeler always succeeds in producing a result
+                                                                           that is a consistent polyhedral boundary. Doing so may entail the
+                                                                           localized collapse of several features into a single feature with a
+5      Results                                                             large tolerance.
+                                                                              Achieving this behavior has its costs; the algorithm runs 5-10
+Figure 12 shows the results of a union of two cubes centered               times slower, even when backtracking is not required, than an
+at the origin where one cube is rotated through a small angle              earlier version that performed only cursory tolerance checking.
+about a line through the origin with direction ( 1 , 2 , 3 ) T and the     If n is the number of faces, the algorithm runs in time O ( n 2)
+other is aligned with the coordinate axes. All computations were           without backtracking, although the average time can be made O(n)
+carried out in double-precision IEEE floating-point on a Silicon           by employing a spatial subdivision. Careful attention to making
+Graphics IRIS 4D/210VGX workstation. To make the results of                certain checks only when absolutely necessary, and replacing often
+this test easier to see, the face eoplanarity factor was set to the        called functions (such as the distance of a vertex to a plane) with
+rather low value of 20. The figure on the left was obtained with           in-line code would certainly reduce the required time. Even so, the
+an angle of 9.59863838340879299 ° while that on the right was              resulting algorithm would likely be at least a factor of two slower
+produced with an angle of 9.59863838340879300 ° . The entries in           than a similar algorithm that is not guaranteed to work in all cases.
+the corresponding rotation matrices differed by no more than one              With backtracking, the worst case behavior is O(eI) where f is
+significant bit in their mantissas. The algorithm was also tested for      the number of features. In practice, it is difficult to construct a case
+many values of the rotation angle slightly above and below these           that achieves this behavior, although if backtracking occurs once it
+two values. For all higher values, the object produced was similar         typically occurs several times. For most object constellations no
+to the one at right; for all lower values, the object was similar to the   backtracking occurs; it is only necessary when features approxi-
+one at left. Further transitions occur as the angle is decreased even      mately coincide and then only if there are other features near the
+more until the object finally becomes a cube (but with non-planar          coincident ones.
+faces) at an angle of about 1.5 ° . Figure 13 shows the object in             If the input to the algorithm has numerical uncertainties, there
+Figure 12 in terms of its feature's tolerance regions.                     may be no other solution than to occasionally collapse features. In
+   If the coplanarity factor is increased to a more reasonable factor      normal situations, such as computing the union of two imperfectly
+of 500, the angle at which the transition occurs is approximately          abutting objects, this collapsing leads to modest tolerance increases
+0.2 °. In this example, even high coplanarity factors (105) with tiny      that have only local effect. Only in unusual situations, such as
+angles (about 0,001 o) produce a boundary of something other than          those designed to stress the algorithm shown in Figures 12-16, are
+a cube (but with some very short edges). This is because starting          the tolerance increases compounded enough to be objectionable. In
+face and edge tolerances are zero, so computed vertex tolerances are       any case, it makes sense to report large tolerances so that a user
+set to the minimum value (10-10). If face tolerances are initialized       or higher-level program equipped with heuristics can be alerted to
+to about 10 -6, however, such high coplanarity factors and small           regions where unexpected behavior may occur. Perhaps tolerances
+angles cause computed vertex tolerances to become so large as to           can be decreased or features slightly perturbed to remove such
+engulf the original vertices, eventually collapsing the cubes into a       behavior. In some cases the algorithm is too conservative in
+single vertex. Higher coplanarity factors can be used to achieve           assigning tolerances to computed features because it has no access
+reasonable results if the input tolerances are reduced, but a vertex's     to global relationships among these features. It may be possible to
+tolerance may not be reduced so far that its ratio to the coordinates      design a post-processor that decreases tolerances while maintaining
+whose inaccuracy it quantifies approaches the machine precision.           consistency. One possibility is to use a relaxation algorithm that
+   Figure 14 shows the union of a pair of more complex objects, and        perturbs feature coordinates in an attempt to reduce an objective
+Figure 15 shows the same union computed with a small coplanarity           function made up of a weighted sum of all the features' tolerances.
+
+112
+                                                             ~     ComputerGraphics,Volume24, Number4, August1990
+
+
+
+
+                                                   Figure 12. Union of two cubes.
+
+
+
+
+Figure 13. Union of two cubes with tolerance regions.                                   Figure 14. Union of two objects
+
+
+
+
+Figure 15. Union of two objects with tolerance regions.                  Figure 16. A complex object formed by a series of CSG operations
+
+
+                                                                                                                                            113
+ G,          SIGGRAPH '90, Dallas, August 6-10, 1990
+
+
+
+   The tolerance scheme can, in principle, be applied to other           [91 John E. Hopcroft and Peter J. Kahn. A paradigm for robust
+algorithms in geometric modeling. As already noted, polyhe-                  geometric algorithms. Technical Report TR 89-1044, De-
+dral modelers other than the one described here can be modified              partment of Computer Science, Cornell University, October
+to incorporate tolerances. Further, there is nothing inherently              1989.
+three-dimensional about a system of tolerances, so that the same
+techniques can be applied to geometric algorithms that operate in       [10] David H. Laidlaw, W. Benjamin Trumbore, and John E
+higher dimensions. Finally, it should be possible to extend the              Hughes. Constructive solid geometry for polyhedral objects.
+tolerance scheme to accomodate curved objects. The topological               Proceedings of SIGGRAPH'86 (Dallas, Texas, August 18-22,
+features of such objects are the same: vertices, edges, and faces.           1986). In Computer Graphics 20,4 (August 1986), 161-170.
+In this case the tolerances would not only reflect how accurately a     [11] Martti M~intyl/i. Boolean operations of 2-manifolds through
+feature is specified but also the accuracy of the computation used to        vertex neighborhood classification. ACM Transactions on
+evaluate points that lie on it. The challenge for this application is        Graphics5,1 (January 1986), 1-29.
+to extend the notions of approximate containment and coincidence
+to features that may intersect in several connected components or       [12] Victor Milenkovic. Verifiable implementations of geometric
+in isolated regions of tangency.                                             algorithms using finite precision arithmetic. Artificial Intelli-
+                                                                             gence 37 (1988), 377-401.
+
+Acknowledgements                                                        [131 Victor Milenkovic. Calculating approximate curve arrange-
+                                                                             ments using rounded arithmetic. In Proceedings of the Fifth
+Many thanks to Carlo Srquin for his continued encouragement and              ACM Symposium on Computational Geometry, pages 197-
+support. Thanks also to Dan Baum, Derrick Burns, and Bob Drebin              207, 1989.
+for helpful comments and criticisms.
+                                                                        [14] S.P. Mudur and P.A. Koparkar. Interval methods for processing
+                                                                             geometric objects. IEEE CG & A 4,2 (February 1984), 7-17.
+References                                                              [15] I.E. Sutherland, R.F. Sproull, and R.A. Schumacker. A Charac-
+                                                                             terization of Ten Hidden-Surface Removal Algorithms. Com-
+ [1] Dennis S. Arnon. Topologically reliable display of algebraic
+                                                                             puting Surveys 6,1 (March 1974), 1-55.
+     curves. Proceedings of SIGGRAPH'83 (Detroit, Michigan,
+     July 25-29, 1983). In Computer Graphics 17,3 (July 1983),          [16] Thomas Ottmann, Gerald Thiemt, and Christian Ullrich. Nu-
+     219-227.                                                                merical stability of geometric algorithms. In Proceedings
+                                                                             of the Third ACM Symposium on Computational Geometry,
+ [2] John Francis Canny. The Complexity of Robot Motion Plan-                pages 119-125, Waterloo, Ontario, 1987.
+     ning. PhD thesis, MIT, 1987.
+                                                                        [17] Aristides A. G. Requicha. Toward a theory of geometric
+ [3] David Dobkin and Deborah Silver. Recipes for geometry                   tolerancing. International Journal of Robotics Research 2,4
+     & numerical analysis--part I: An empirical study. In Pro-               (Winter 1983), 45-60.
+     ceedings of the Fourth ACM Symposium on Computational
+     Geometry, pages 93-105, Urbana, Illinois, 1988.
+                                                                        [18] Mark Segal and Carlo H. Srquin. Consistent calculations for
+                                                                             solid modeling. In Proceedings of the First ACM Symposium
+ [4] A. Robin Forrest. Computational geometry and software                   on Computational Geometry, pages 29-38, 1985.
+      engineering: Towards a geometric computing environment.           [19] Mark Segal and Carlo H. SEquin. Partitioning polyhedral
+      In David E Rogers and Rae A. Earnshaw, editors, Techniques             objects into non-intersecting parts. IEEE CG & A 8,1 (January
+     for Computer Graphics, pages 23-37. Springer-Verlag, New                1988), 53--67.
+      York, 1987.
+                                                                        [20] J. Stoer and R. Bulirsch. Introduction to Numerical Analysis.
+ [5] W. Randolph Franklin, Peter Y.E Wu, and Sumitro Samaddar.               Springer-Verlag, New York, 1980.
+     Prolog and geometry projects. IEEE CG & A 6,11 (November
+     1986), 46--55.                                                     [21] Chee-Keng Yap. A geometric consistency theorem for a
+                                                                             symbolic perturbation scheme. In Proceedings of the Fourth
+ [6] Leonidas Guibas, David Salesin, and Jorge Stolfi. Epsilon               ACM Symposium on Computational Geometry, pages 134---
+     geometry: Building robust algorithms from imprecise com-                142, Urbana, Illinois, 1988.
+     putations. In Proceedings of the Fifth ACM Symposium on
+     Computational Geometry, pages 208-217, 1989.
+
+ [7] Cristoph M. Hoffmann, John E. Hopcroft, and Michael E.
+     Karasick. Robust set operations on polyhedral solids. IEEE
+     CG & A 9,6 (November 1989), 50-.-59.
+
+ [81 Cristoph M. Hoffmann, John E. Hopcrofl, and Michael S.
+      Karasick. Towards implementing robust geometric compu-
+      tations. In Proceedings of the Fourth ACM Symposium on
+      Computational Geometry, pages 106---117, Urbana, Illinois,
+       1988.
+114
+

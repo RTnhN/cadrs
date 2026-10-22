@@ -1,0 +1,1151 @@
+SMAI-JCM
+SMAI Journal of
+Computational Mathematics
+
+
+
+
+ Refinement for a Hybrid Boundary
+   Representation and its Hybrid
+        Volume Completion
+
+Yang Song & Elaine Cohen
+Volume S5 (2019), p. 3-25.
+<http://smai-jcm.centre-mersenne.org/item?id=SMAI-JCM_2019__S5__3_0>
+© Société de Mathématiques Appliquées et Industrielles, 2019
+              Certains droits réservés.
+
+
+
+
+                             Publication membre du
+                Centre Mersenne pour l’édition scientifique ouverte
+                       http://www.centre-mersenne.org/
+       Sousmission sur https://smai-jcm.math.cnrs.fr/index.php/SMAI-JCM
+                    SMAI Journal of Computational Mathematics
+          Vol. S5, 3-25 (2019)
+
+
+
+
+ Refinement for a Hybrid Boundary Representation and its Hybrid
+                       Volume Completion
+                                                   Yang Song 1
+                                                  Elaine Cohen 2
+
+     1
+       School of Computing, University of Utah, Salt Lake City, UT, USA
+     E-mail address: yangsong@cs.utah.edu
+     2
+       School of Computing, University of Utah, Salt Lake City, UT, USA
+     E-mail address: cohen@cs.utah.edu.
+
+  Abstract. With the increasing need for volumetric B-spline representations and the lack of methodologies for
+  creating semi-structured volumetric B-spline representations from B-spline Boundary Representations (B-Rep),
+  hybrid approaches combining semi-structured volumetric B-splines and unstructured Bézier tetrahedra have been
+  introduced, including one that transforms a trimmed B-spline B-Rep first to an untrimmed Hybrid B-Rep (HB-
+  Rep) and then to a Hybrid Volume Representation (HV-Rep). Generally, the effect of h-refinement has not been
+  considered over B-spline hybrid representations. Standard refinement approches to tensor product B-splines and
+  subdivision of Bézier triangles and tetrahedra must be adapted to this representation. In this paper, we analyze
+  possible types of h-refinement of the HV-Rep. The revised and trim basis functions for HB- and HV-rep depend on
+  a partition of knot intervals. Therefore, a naive h-refinement can change basis functions in unexpected ways. This
+  paper analyzes the the effect of h-refinement in reducing error as well. Different h-refinement strategies are discussed.
+  We demonstrate their differences and compare their respective consequential trade-offs. Recommendations are also
+  made for different use cases.
+     2010 Mathematics Subject Classification. 65D17.
+     Keywords. h-refinement, Trimmed model, Volume completion.
+
+
+1. Introduction
+The most common representation in CAD is the Boundary Representation (B-rep), which typically
+uses parametric Non-Uniform B-Splines (NURBS) for each surface in the model. Trimming, a common
+technique in constructing complex geometries results when Boolean operations are applied to models.
+In those models, only restricted parts of the original surfaces visibly appear in the final models. With
+the recent development of Isogeometric Analysis (IGA), there is an increasing need for both watertight
+and volumetric representations of B-reps, including those with trimmed surfaces.
+   In general, trimmed models cannot be represented exactly as tensor product B-splines, and so are
+not watertight. In commercial CAD systems, trimming curves exist in the parametric domains of
+intersecting B-spline surfaces and in model (or Euclidean) space, usually approximated as linear or
+cubic B-spline curves. The three trimming curve representations do not lead to the exact same model
+space curves, so there are gaps or overlaps between trimmed surfaces. The Euclidean trimming curve
+is typically not in either surface. However, models for analysis must be watertight. Models to be
+realized with additive fabrication are typically triangulated. If the triangles generated from the two
+surfaces across a trimming curve are not close enough the model is not suitable for fabrication. Post
+design industries have grown around repairing inconsistent geometric models for both fabrication and
+analysis. Typically, for analysis, that has been done through mesh creating and mesh mending. If the
+original geometric model representation is a watertight representation, there are no gaps to mend and
+the post modeling repair process is eliminated.
+   Another difficulty is that, while multiple methods have been proposed to generate a representation
+for volumetric completion from an untrimmed NURBS B-rep, in general, there is no method that
+
+
+                                                             3
+                                        Y. Song & E. Cohen
+
+works for all untrimmed models, not to mention addressing trimmed ones. One principle of IGA is to
+use the CAD model basis as the parametric basis for the simulation representation [6], so maintaining
+the CAD representation on the boundary as closely as possible supports that goal. If the B-rep is
+semi-structured B-splines/NURBS, higher order continuity improves the quality of the simulation.
+   Hybrid representations have been proposed in [17, 18] to address these problems. This paper inves-
+tigates ways in which refinement can affect both the hybrid boundary representation and the hybrid
+volume completion representation in these schemes that preserve the original surface parameterization.
+   In Section 2, we present related work. In Section 3 and 4, we briefly go through the steps to generate
+such watertight B-rep and volumetric representation. In Section 5, we categorize errors that exist in
+the HB-rep. In Section 6, we analyze different approaches to refinement and examine their effects on
+representation and computation.
+
+
+2. Related Work
+
+In order to create watertight representations from the intrinsic inexactness associated with the trimmed
+model, surface representations are necessarily modified, and frequently reparameterized in regions
+around the trimming curves, then remodeled to approximate the original surface with regular patches.
+   One approach changes the representation to T-splines [14] and modifies the surface parameteriza-
+tion near the trim while approximating the trimming curve according to a precision determined by the
+number of knot insertion T-levels. To merge two surfaces across their trimming curve further modifica-
+tions are made using their proposed NU-NURBS. Another approach uses subdivision surfaces [15, 16],
+although the parameterization is modified and the geometry is approximated in at least a region of
+adjacent patches near the trim. These methods take advantage of the topological flexibility of these
+respective techniques and generate a unified control mesh/surface representation of the output model.
+Both are applicable when usage of those representations are desirable. However, as surveyed in [12],
+the trimmed B-spline still is the predominant technology in modeling.
+   Research into volumetric model completion from general boundaries has focused significant effort on
+starting with triangle mesh boundaries and generating semi-structures trivariate B-spline representa-
+tions, for examples see [1, 2, 8, 9, 10, 25]. Efforts to complete and optimize a volumetric representation
+from a B-spline boundary mainly focused on a bounding hexahedron [23], or more general regions al-
+ready partitioned into hexahedra [22]. Because there is no general approach to semi-structured trivari-
+ate B-spline volume completion while preserving the B-spline B-rep boundary, several approaches have
+been proposed that involve using tetrahedra.
+   Some approaches to volume completion preserve the B-spline boundary representation, yielding
+trivariate B-splines from the boundary to some depth depending on a user-provided mid-structure,
+and then transition to Bézier tetrahedra in the complex central region of the interior. [11] fills the
+rest of the interior with linear tetrahedral elements, although it allows gaps and overlaps between the
+trivariate B-splines and the linear tets. However, spline properties and the construction technique used
+ensure that as the B-splines are refined, the tetrahedra boundaries converge to the interior boundary of
+the trivariate B-spline. In [24], the interior is filled with high degree Bézier tetrahedra that reproduce
+the interior bounding surface of the trivariate B-spline. These hybrid approaches exploit the advantage
+of high accuracy of B-spline elements near the boundary. They also take advantage of the topological
+flexibility of the tetrahedra to complete the representations. However, the effects of h-refinement on
+the representation were not investigated.
+   [7] also describes an interior unstructured region filled with Bézier tetrahedra. They report on
+several different representations. All have unstructured tetrahedral regions. First, the tensor product
+Bézier patches are extracted from the boundary B-spline surfaces. Then one approach transforms
+each rectangular patch into 2 triangular Bézier patches along one diagonal, after which the interior
+
+
+                                                    4
+                                        Hybrid Refinement
+
+
+
+
+       Figure 3.1. A mechanical part generated with multiple Boolean operations is shown
+       in its HB-rep. Ωbanded , consisting of the red regions, is the transition region that ap-
+       proximates the surface while reproducing the trimming curves. It contains both tensor
+       product and curvilinear triangle representations that touch the trimming curve. Be-
+       cause they represent the trimming curve exactly, even though the surface approximation
+       is highly accurate, Ωbanded differs from the original surfaces in both parameterization
+       and geometry.
+
+is tetrahedralized. A different approach uses each Bézier patch as the base of a Bézier pyramid, then
+fills the remaining volume with tetrahedra. The last method creates a trivariate tensor product Bézier
+patch over each bivariate patch, and then uses either of the other two methods on its interior surface
+patches. [7] includes h-refinement schemes for the multiple element types.
+    [19] deals with completing trimmed B-spline representations into Bézier tetrahedra. It first decom-
+poses the surfaces into Bézier patches. The work assumes that the three trimming curves representing
+the same intersection are not compatible; that is, they have independent knot vectors and independent
+parameterizations. The first effort makes them compatible by modifying parameterizations and knot
+vectors to ensure that the images of each knot value in model space all represent the same point.
+Then, after making the curves compatible, it refines all curves until they all can be approximated by
+piecewise linear curves within a user-specified accuracy in parametric space. A trimmed knot interval
+is a parametric knot interval that at least one trimming curve intersects. The interior of the trimmed
+knot interval is partitioned into multiple triangles. The surfaces are represented as degree 6 Bézier
+triangles, exactly representing the piecewise linear parametric trimming curves and the original sur-
+face in model space. Then coefficients of the Bézier triangles from different surfaces are modified along
+trimming curves to make them match and seal the representation.
+    The hybrid boundary and volumetric representation proposed for trimmed NURBS B-reps in [18]
+and [17], which is analyzed here, uses the ideas in [24] of both forming a trivariate spline and having
+an unstructured interior region that meets the structured region with C 0 continuity. However, this
+approach[17, 18] deals with the lack of a watertight boundary, and trimming curves, that cut parametric
+knot intervals into irregular pieces. The result largely keeps both the original parameterization and
+geometry except around the trimming curve where the geometry is modified to seal the representation.
+It does so by introducing revised basis functions wherever the supports of the B-spline basis functions
+overlap a trimming curve. It further introduces basis functions along the trimming curves whose
+support extends into a region around the trimming curve called Ωbanded . For model completion, the
+approach in [24] is generalized so the approach is suitable for a trimmed model. In this paper, we
+investigate and analyze h-refinement on the resulting HB-rep and HV-rep models.
+
+3. HB-rep B
+In this section, we review the Hybrid Boundary Representation (HB-rep). A mechanical model repre-
+sentation produced from a trimmed NURBS B-rep is shown in Figure 3.1.
+   Let G be the representation for a trimmed B-spline B-rep model, and let R designate the collection
+of all control mesh points and control mesh adjacencies for all trimmed surfaces in G. The HB-rep is
+
+
+                                                   5
+                                                      Y. Song & E. Cohen
+
+defined using refinement (and subdivision) properties of NURBS and B-splines. Let a B-spline surface
+in G, say s, be defined in its untrimmed state as a degree bi-d B-spline surface,
+                                                             X
+                                              s(ξ, η) =            ri,j Bi,d,µ (ξ)Bj,d,ν (η),
+                                                             i,j
+where µ and ν are knot vectors. For µi , µi+1 ∈ µ and νj νj+1 ∈ ν, the rectangular parametric region
+[µi , µi+1 ] × [νj , νj+1 ] is called a knot interval, whenever it is non-degenerate. Given values ξa < ξb
+and ηc < ηd where there are no knot lines interior to the region (ξa , ξb ) × (ηc , ηd ), then s can be
+written in terms of tensor products of Bézier functions {θk1 ,d,[ξa ,ξb ] (ξ)}dk1 =0 and {θk2 ,d,[ηc ,ηd ] (η)}dk2 =0 .
+This transformation to Bézier is easily accomplished by augmenting µ with multiple values of ξa , ξb
+to form µ̃, and augmenting ν with multiples values of ηc , ηd , to form ν̃ and computing coefficients
+αi,k1 ,µ,µ̃ and αj,k2 ,ν,ν̃ such that for J rect = [ξa , ξb ] × [ηc , ηd ]. We call J rect a sub-knot interval when it is
+not a full knot interval of s,
+                                                X
+                              Bi,d,µ (ξ) =            αi,k1 ,ξ θk1 ,d,[ξa ,ξb ] (ξ)      for ξ ∈ [ξa , ξb ),                   (3.1)
+                                                 k1
+                                                X
+                              Bj,d,ν (η) =            αj,k2 ,η θk2 ,d,[ηc ,ηd ] (η)       for η ∈ [ηc , ηd )                   (3.2)
+                                                 k2
+                         X X
+             s(ξ, η) =        (       αi,k1 ,ξ ri,j αj,k2 ,η )θk1 ,d,[ξa ,ξb ] (ξ)θk2 ,d,[ηc ,ηd ] (η)   for (ξ, η) ∈ J rect   (3.3)
+                         k1 ,k2 i,j
+
+See [5]. Using Bézier extraction notation [3], and letting Ni,j (ξ, η) = Bi,d,µ (ξ)Bj,d,ν (η), Equation 3.3
+becomes
+                            s(ξ, η) = r| N(ξ, η) = r| Aθ J rect (ξ, η),                      ∀(ξ, η) ∈ J rect ,                (3.4)
+where r is the vectorization of the coefficient matrix used to define the surface over J rect , N(ξ, η) and
+θ J rect (ξ, η) are the corresponding vectors, respectively, of tensor product B-spline and tensor product
+Bézier basis functions in J rect , and A = Aξ ⊗ Aη the Kronecker tensor product of Bézier extraction
+operators in ξ and η directions for J rect of size (d + 1)2 × (d + 1)2 [3]. Thus each B-spline can be
+evaluated over the whole surface or any rectangular patch in terms of related Bézier functions. This
+property is used repeatedly.
+    For each surface in G, the methodology for the HB-rep consists of,
+
+    (1) For each trimmed knot interval K, construct a rectilinear approximation to the trimming curve
+        that does not touch it and is completely interior to the trimmed surface. The region Ωbanded
+        is bounded by the rectilinear approximation and the trimming curve illustrated by the orange
+        polyline in Fig. 3.2d, and is created using the subknot intervals that touch trimming curves,
+        as shown. Changes from the original surface to seal the representation can occur only inside
+        Ωbanded .
+
+    (2) Create basis functions for the new representation.
+            • The revised basis functions are identical to B-splines outside Ωbanded and continuously
+              decrease to evaluate to 0 on the trimming curve inside Ωbanded .
+            • Define trim functions with support in Ωbanded that form a partition of unity on the
+              trimming curve and are linearly independent.
+
+    (3) Determine coefficients for the new trim basis functions, merging the pieces of the trim basis
+        functions over multiple intervals in Ωbanded , to complete the watertight representation and
+        match the model space trimming curve. In Figure 3.1, the image of Ωbanded in model space is
+        colored red. The representation is called a Hybrid Boundary Representation (HB-rep).
+
+
+                                                                       6
+                                          Hybrid Refinement
+
+   (4) The region in each trimmed knot interval minus Ωbanded , K−Ωbanded , is a rectilinear region,
+       see Fig. 3.2d It is represented by the original surface. However, when the hybrid volume
+       representation is created [17], the innermost unstructured tetrahedral region uses sub-knot
+       intervals from which to derive the tetrahedralization on the interface between the regions.
+       Hence, we also supporrt partitioning K−Ωbanded into interior sub-knot intervals with locally
+       optimal shape properties. See Fig. 3.2e and Fig. 3.3. Call the partition K.
+
+The resulting HB-rep consists of the coefficients and revised basis functions, the trim basis functions
+and their coefficients, and the partitionings derived in step 4. Also, the information defining the original
+trimmed B-rep is embedded.
+   Steps 1 and 4 are illustrated in Figure 3.2. Recall the term knot interval is used herein to denote a
+tensor product of the intervals between knots, one interval in each parametric direction of an original
+surface. A knot interval in G is classified into 3 groups as interior, trimmed, and exterior, based on
+its relative position with respect to the trimming curves. Each trimmed knot interval is crossed by or
+touches a trimming curve along a boundary, so it has regions that are interior and either exterior or on
+the trimming curve. Each trimmed knot interval is further partitioned into a set of sub-knot intervals.
+The sub-knot intervals are divided into 2 collections: those that are interior defining K, and those that
+define a region called Ωbanded that is adjacent to the trimming curves. New functions, called revised
+basis functions, are defined, one for each B-spline in the original representation. Each new function is
+defined to be identical to its corresponding original B-spline except in Ωbanded . Hence, over interior
+knot intervals and interior sub-knot intervals, the new representation remains unchanged. Additional
+functions called trim basis functions are defined in Ωbanded that carry trimming curve and Ωbanded
+geometry and parametric information, and serve to seal the gaps and retract the overlaps.
+
+
+
+
+         (a)                   (b)                  (c)                  (d)                   (e)
+
+        Figure 3.2. Parametric domain process to generate Ωbanded and a partition is shown
+        of a trimmed knot interval. The retained portion of the interval is in gray. (a) shows a
+        trimming curve with 5 Bézier segments passing through the trimmed knot interval. (b)
+        shows the rectilinear approximation and curvilinear triangle for one trimming Bézier
+        segment. Similarly, this is repeated for each Bézier trimming curve segment with results
+        shown in (c). In (d) rectangular sub-knot intervals are created that have one corner
+        point on the trimming curve. Ωbanded is the region between the orange rectilinear curve
+        and the trimming curve. Finally, in (e), the remainder of the parametric trimmed knot
+        interval is recursively partitioned into internal rectangular sub-knot intervals. In this
+        particular example, the large purple rectangle is chosen first, having the best ratio of
+        the lengths of the sides. This leaves two rectangles to form the other elements of the
+        partition.
+
+
+Define Ωbanded . Given a trimming curve across two surfaces, each of the two parametric trimming
+curves and the model space trimming curve need to be compatible. That is, they need to have the
+
+
+                                                     7
+                                            Y. Song & E. Cohen
+
+same knot values and parameterizations, and the model space values of the same knot values need to
+represent the same points on the model space curves. If the output of the CAD system does not produce
+this, then the method in Xia [19] is adopted to produce this result. Knots are added to the trimming
+curves each time either of the parametric curves crosses a knot line in either parametric domain. Then
+the curves are subdivided to Bézier segments. Each Bézier segment is further subdivided at interior
+local extremal points of either parametric curve so each final Bézier curve segment is monotonic.
+
+
+
+
+        Figure 3.3. A valid partitioning example. The inset shows a trimmed knot interval
+        (bounded by magenta isoparametric lines). It is further decomposed into regions by
+        the yellow and cyan line, namely, (i) Ωbanded consists of curvilinear triangular and
+        rectangular sub-knot intervals that are adjacent to the trimming curve; and region (ii),
+        the rectilinear region (cyan dots in interior sub-knot intervals).
+
+   At this stage, the trimming curve defining a trimmed knot interval may have multiple segments.
+(See Figure 3.2a.) A rectilinear approximation is built for each segment. Given a Bézier segment with
+endpoints at (ξ0 , η0 ), and (ξ1 , η1 ), assume without loss of generality that (ξ0 , η1 ) is in the interior of
+the trimmed domain. The rectilinear approximation to the Bézier segment is found by connecting
+the two endpoints to (ξ0 , η1 ), see Figure 3.2b. The region between the Bézier segment and its recti-
+linear approximation defines a curvilinear triangular sub-knot interval. In Figure 3.2c, the rectilinear
+approximations, and their corresponding curvilinear triangular sub-knot intervals to all the Bézier
+segments in the trimmed knot interval are indicated. Every trimming curve endpoint that is not a
+local extremum corresponds to a rectangular sub-knot interval that has a corner at the endpoint and
+shares edges with its two adjacent curvilinear triangular sub-knot intervals. In Figure 3.2d, these are
+the rectangles with orange and blue sides. The shared edges must have exactly the same two endpoints
+on its two sides, or an inconsistency occurs [17].
+   If instead, a Bézier segment is isoparametric with endpoints (ξ0 , η0 ) and (ξ0 , η1 ), a suitable rectilinear
+approximation is found, with corners (ξ0 , η0 ), (ξ1 , η0 ), (ξ1 , η1 ), (ξ0 , η1 ) where ξ1 is obtained by extending
+ξ0 into the interior for a predetermined minimum feature size. In this case, the region between the
+Bézier curve and its rectilinear approximation is a rectangular sub-knot interval.
+   At this stage, each sub-knot interval generated should have at least one corner on the trimming
+curve. The set of all sub-knot intervals is denoted Ωbanded . Examples of Ωbanded are illustrated in
+Figure 3.2d in the parametric domain and in Figure 3.3 in model space.
+
+Revised and Trim Basis Functions. Each original B-spline basis function Ni,j that has support
+in Ωbanded is modified into a revised basis function Ñi,j over its support in Ωbanded such that it
+continuously decreases and is 0 along any of its trimming curve intersections. (See Figure 3.4a.) Trim
+basis functions are introduced to compensate for the modification and glue together surfaces across
+the trimming curve. Also, in [17, 18] it is shown that the important partition of unity property obtains
+for the combined set of new basis functions.
+
+
+                                                         8
+                                             Hybrid Refinement
+
+   As a result of the preceding process, a sub-knot interval in Ωbanded is either an isoparametric
+rectangular sub-knot interval, denoted J rect , or a curvilinear triangular sub-knot interval, denoted
+J tri . The sub-knot interval has been trimmed by the trimming curve according to one of the following
+three configurations: (i) at least one isoparametric edge of J rect resides on a trimming curve, (ii) a
+corner of J rect is on the trimming curve, or (iii) the curvilinear edge of J tri is part of trimming curve.
+   For J rect , the tensor product Bézier functions defining its surface mapping are partitioned into two
+sets: those that vanish on the trimming curve and those that are nonzero. Let the identity matrix
+be I = (ei,j ) where ei,j = δi,j , the Kronecker δ. A masking matrix M rect is formed by modifying the
+identity matrix I so that if the k-th basis function in θ rect is nonzero on the trimming curve, then
+ek,k = 0. This results in M rect having a zero vector for column k. M rect differs for each J rect . The
+surface is
+                 s(ξ, η) = r| N(ξ, η) = r| AM rect θ J rect (ξ, η) + r| A(I − M rect )θ J rect (ξ, η)
+                                       = r| Ñ|J rect (ξ, η) + r| AT̃|J rect (ξ, η), ∀(ξ, η) ∈ J rect ,
+where Ñ|J rect = AM rect θ J rect and T̃|J rect = (I − M rect )θ J rect are the vectors of revised and trim basis
+functions, respectively, in J rect . To reproduce the trimmed surface, the coefficients for T̃ are r| A.
+However, when the representation is coerced to become watertight, the coefficients for T̃ are modified
+to be coefficient(s) of its defining Bézier trimming curve segment.
+   Without loss of generality, suppose the curvilinear triangle has 3 corners at (ξ0 , η0 ), (ξ1 , η0 ), and
+(ξ0 , η1 ) with 2 isoparametric edges and 1 Bézier trimming curve edge, as in Figure 3.2b. The geometry
+is approximated with a degree d polynomial that matches the trimming curve exactly. Let M be
+the triangle with the same corners as J tri . Define φ : M → J tri to be a degree d triangular Bézier
+mapping that is the identity on the isoparametric edges and reproduces the degree d parametric Bézier
+trimming curve boundary exactly and has no folds or degeneracies. For simplicity of presentation,
+suppose that d = 3, and let ψ be a cubic Bézier triangle mapping from triangle M to model space
+with geometry approximating s and that matches s on the two isoparametric boundaries of J tri .
+Coefficient computations for both φ and ψ are detailed in [17, 18] that make the coefficients of ψ
+dependent on r. With the help of a selection matrix S tri and Bézier extraction operator A in (ξ0 , ξ1 ) ×
+(η0 , η1 ), ψ’s coefficient row vector is written in form of r| AS tri . The mapping ψ ◦ φ−1 (ξ, η) is then
+used to approximate the original B-spline surface mapping from J tri . The control points for the non-
+isoparametric edge, including the corner vertices will be modified to be control points of a trimming
+segment.
+   Again, using Bézier extraction notation, where θ J tri is the vector of triangular Bézier basis functions
+over J tri , the curvilinear triangle basis functions used to define ψ ◦ φ−1 are θ J tri ◦ φ−1 . While the
+ψ ◦ φ−1 is C 0 across adjacent sub-knot interval boundaries, it is no longer polynomial. Analogous to
+the rectangular case, a 12 (d + 1)(d + 2) × 12 (d + 1)(d + 2) masking matrix M tri is used to segregate the
+functions in θ J tri ◦ φ−1 into those that vanish along the trimming curve and those that are nonzero.
+Specifically, θ J tri ◦ φ−1 is used to replace the tensor product Bézier basis functions θ J rect , and so realize
+a curvilinear (non-polynomial) triangular approximation of the original B-spline surface in J tri . Thus,
+          r| N(ξ, η) ≈ ψ ◦ φ−1 (ξ, η) = r| AS tri (I − M tri )θ J tri ◦ φ−1 (ξ, η)
+                                        = r| Ñ|J tri (ξ, η) + r| AS tri T̃|J tri ◦ φ−1 (ξ, η), ∀(ξ, η) ∈ J tri ,
+where Ñ|J tri = AS tri M tri θ J tri ◦ φ−1 and T̃|J tri = (I − M tri )θ J tri ◦ φ−1 are the revised and trim basis
+functions, respectively, in J tri .
+  Figure 3.4 illustrates a simple example. Figure 3.4a shows a particular trimmed B-spline and its
+revised counterpart. Although both have trimmed domains, the B-spline is nonzero along its trimming
+curve, but the revised function has continuously diminished to 0 over Ωbanded . Figure 3.4b shows
+the partition of a trimmed knot interval [0, 1] × [0, 1]. Originally, 16 B-spline basis functions Ni,j for
+
+
+                                                           9
+                                         Y. Song & E. Cohen
+
+
+
+
+                             (a)                                               (b)
+
+
+
+
+                                                   (c)
+       Figure 3.4. A trimmed B-spline basis function (a) top N0,0 and its revised counterpart
+       (a) bottom. Ñ0,0 . In (b), the partition of knot interval [0, 1] × [−1, 0] consists of 4 sub-
+       knot intervals: 3 rectangular and 1 curvilinear triangular. Ωbanded is represented by the
+       hatched region, and the 4 black dots represent the control points of the trimming curve.
+       (c) shows all of the 16 revised B-spline basis functions Ñi,j and 4 trim basis functions
+       T̃i corresponding to the 4 dots.
+
+
+i ∈ {−1, 0, 1, 2}, j ∈ {−1, 0, 1, 2} existed over this domain corresponding to their 16 original control
+points. Two types of new basis functions now exist: (i) 16 revised B-spline basis functions Ñi,j that
+are different from original ones only in Ωbanded , and forced to be identically 0 on the trimming curve;
+(ii) 4 trim basis functions T̃i for i ∈ {0, 1, 2, 3} with coefficients that correspond to 4 control points
+
+
+                                                    10
+                                         Hybrid Refinement
+
+of the Euclidean cubic trimming curve (Figure 3.4c). Outside of Ωbanded , all T̃i ≡ 0, and Ñi,j ≡ Ni,j .
+The extraction relationship between the original surface and the sub-knot interval is maintained.
+
+
+Seal the Trim. During the construction of the new basis functions, each trim basis function is
+initially associated with a control point from r| A. The control points corresponding to basis functions
+that are nonzero on the trimming curve are replaced with control points from the model space trimming
+curve cm . The set of all control points that are coefficients of trim basis functions is denoted Υ. By
+combining trim basis functions corresponding to the same control point in different sub-knot intervals
+across trimming curves, C 0 basis functions are constructed, and the new representation B is watertight,
+as illustrated in Figure 3.5. With R correspond to revised basis functions and Υ correspond to trim
+basis, no extra degrees of freedom are added to B. The total degrees of freedom is |R| + |Υ|.
+
+
+
+
+       Figure 3.5. Making the representation watertight. Two trimmed surfaces that inter-
+       sect at cm (green) in model space. Representations of each surface over its J rect and
+       J tri in Ωbanded are shown to not actually coincide. Then the appropriate coefficients of
+       the trim basis functions are modified so that the model space trimming curve bounds
+       on both the red and blue surfaces.
+
+
+
+
+The remainder partition. After Ωbanded is created in a trimmed knot interval, the residual part
+of the trimmed knot interval is a rectilinear region. All evaluations and properties can be computed
+over this region using the B-splines that define the original surface, but if that choice is made, it
+would have to be verified for each evaluation that the point is not in Ωbanded . Instead, the residual is
+partitioned into interior rectangular sub-knot intervals whose local surface representations are defined
+as in Equations 3.1, 3.2, and 3.3. One construction goal is to make the resulting sub-knot intervals as
+square as possible. However, according to [13], finding an optimal solution to this problem is considered
+NP-hard. Therefore, a greedy divide-and-conquer approach was introduced in [17, 18] to resolve the
+problem recursively (see Figures 3.2e and 3.3). Let K be the resulting collection of interior axis aligned
+sub-knot intervals. Note that B-splines with support in any element of K can be written in terms of
+the corresponding Bézier functions over that rectangular region.
+
+
+Example. In Figure 3.1, a mechanical part with multiple trimming curves has been converted to an
+HB-rep. The size of the curvilinear triangles on the flat surfaces is constrained only by the trimming
+curves since the geometry can be represented exactly. In this image, Ωbanded has been reduced in order
+to maintain the original representation everywhere except in the red regions. In those regions, the new
+representation, a perturbation of the original, is exact, up to trimming curve error.
+
+
+                                                   11
+                                         Y. Song & E. Cohen
+
+4. HV-rep V
+In previously related work [11, 24] completed untrimmed B-spline B-rep models to form hybrid vol-
+umes. The approach forms trivariate splines by extending meshes inward from the exterior towards
+a mid-structure to some depth. The remaining interior is then filled with unstructured compatible
+Bézier tetrahedra. In [17] the volume completion problem is addressed in the more general and more
+challenging context of trimmed B-spline B-rep models. In particular, control meshes of trimmed B-
+splines do not form manifolds, an attribute that was critical to previous hybrid approaches to volume
+completion on untrimmed models.
+   The methodology in creating the Hybrid Volume Representation (HV-rep) goes according to the
+following steps:
+   (1) Input an HB-rep B and a mid-structure M, as well as several parameters, where one of them
+       is the number of control levels in the final trivariate spline, say n. Note that the information
+       in G is contained in B.
+
+   (2) Create a vector field for tracing the control points in R from the given boundary surface to
+       the mid-structure M. Set R0 = R.
+
+   (3) Proceed through the following process, for i from 1 to n,
+        (a) Trace each control point in Ri−1 from its current location to the mid-structure and com-
+             pute its length.
+        (b) Normalize the newly computed length to n−i+1    n , and move along the trace a scaled distance
+                1
+             of n . These new points form the initial i control mesh layer Ritr . Since it is likely that
+                                                         th
+
+             when the trimming curves are applied, the surfaces do not match along their trims, they
+             must be adjusted.
+        (c) Apply a least squares process to adjust the surfaces so the trimmed surfaces edges are
+             close to each other, forming Rilstsq .
+        (d) Move the surfaces apart so that there is a small separation gap around each trimming
+             curve (i.e., the surfaces do not overlap), forming Risep
+        (e) Form Ri by applying mesh smoothing (as in [11, 24]) so the spacing of the tracings is
+             more uniform.
+         (f) Using Ωbanded , the revised and trim basis functions, seal the layer and create B i .
+In a 2-D scenario, Figure 4.1 illustrates some of the issues while describing our solution approach.
+   The input is the HB-rep B, a mid-structure M, and parameters, including n, the number of inward
+trajectory layers, along with depth factor ω, scalar for separating , relaxation factor β and θ that
+defines pyramid layer thickness. In the naming convention, the superscript designates the corresponding
+layer, and the subscript refers to the stage in each layer such as Ritr and G i , for example.
+
+4.1. Trace R
+In order to create a suitable field that can serve to guide us in constructing the control point trace
+paths, it is first necessary to create an appropriate polyhedron. To do so, a triangle mesh is created from
+each trimmed surface by dividing each control mesh quadrilateral into two triangles. Then the Boolean
+operations used to create G are applied to the corresponding triangle meshes to generate a polyhedron
+P. The control meshes input as part of B should have been previously refined sufficiently so P has the
+same topology as B. In Figure 4.1a the intersected control polygon for the curves serves as the polygon.
+Then the points of R are separated into 2 disjoint covering subsets: E contains those control points
+that are on P and R − E contains those that are not. In Figure 4.1, Pi+2 , Pi+3 , Qj , Qj+1 ∈ (R − E).
+
+
+                                                    12
+                                        Hybrid Refinement
+
+
+
+
+                             (a)                                        (b)
+
+
+
+
+                             (c)                                        (d)
+
+       Figure 4.1. A 2D example of our approach. (a) An intersection of two curves with
+       associated control polygons (Pi . . . Pi+3 and Qi . . . Qi+3 ) uses only part of the curves
+       (thick strokes). Control points are separated into two groups: E (colored dots in black
+       circles) and R − E. In (b) paths for control points in E are traced appropriately being
+       guided by a harmonic gradient vector field while inward trajectories for R − E are
+       generated using the trajectories from their mesh neighbors (Section 4.1). Resulting
+       curves might intersect with each other, so this is resolved in Section 4.2 (c). In (d),
+       endpoints of traced trimmed curve are adjusted to their midpoint, thus sealing the gap.
+
+
+
+
+Further, let OE = {r ∈ E : there is an edge in R joining r to a point in R − E} and define OR−E
+analogously. Define O = OE ∪ OR−E . In Figure 4.1, Pi+1 , Qj+2 ∈ OE . Geometrically, the control points
+in O are close to the trimming curves.
+   The control points of E are traced inward towards M by following a vector field. A discrete harmonic
+function h is created with increasing values from boundary P to mid-structure M. The vector field
+f used is a blend of the gradient of the harmonic function h and the gradient of a signed distance
+                   ∇h
+function g: f = h k∇hk  + (1 − h)∇g.
+                                                         i+1
+   For each vertex in E i , the tracing curve to find Etr     terminates at harmonic value 1 (on M).
+Normalized arc length parameterizations of the tracing curve are reparameterized to the parametric
+                                                                          i+1
+domain [ ni ω, 1]; and the point at parametric value i+1
+                                                      n ω is assigned to Etr . As control points in R − E
+are not on P, they cannot be traced. Instead, for p ∈ R − E, a breadth-first search is applied to the
+control mesh to find the q ∈ E closest to p in Euclidean distance. A translated copy of the tracing of
+q is used.
+   Control mesh Ritr , along with the original basis functions of G and parametric trimming curves
+                                              i .
+result in an initial trimmed surfaces layer Gtr
+
+
+                                                   13
+                                           Y. Song & E. Cohen
+
+
+
+
+            (a)                         (b)                             (c)                      (d)
+
+        Figure 4.2. HB-rep models are shown in (a) and (c). When only tracing is applied,
+        self-intersections are typically found in models that involve either Boolean intersection
+        or subtractions (b). Tracing on model that only has union operations leads to gaps
+        around trimming curves (d).
+
+
+4.2. Adjust Ritr
+By following the tracing, the resulting Gtr          i is not a manifold as illustrated in Figures 4.2b and 4.2d.
+   i
+Rtr are adjusted so that the resulting trimmed surfaces do not intersect and corresponding trimming
+curve pairs on different surface pieces are close to each other. This section discusses Step 3c through
+Step 3e in Section 4.
+    The least squares fit adjusts the control points in Oi . Along a trimming curve, associated curves
+c1 , c2 exist in the parametric domains of two trimmed surfaces si1,tr , si2,tr , respectively. We start by
+sampling over the trimming curve with parameter t. For each sample t on the parametric trimming
+curves, the reference position of the Euclidean trimming curve is computed from both sides as their
+midpoint, cie,tr (t) = 21 (si1,tr c1 (t) + si2,tr c2 (t)). To simplify the explanation, we adopt subscript k to
+designate the ordering of each tensor product B-spline basis function and its corresponding control
+point. Let sitr be one of the surfaces resulting from tracing with parametric trimming curve c, sitr (ξ, η) =
+               i             i          i
+   k Nk (ξ, η)rk,tr , where rk,tr ∈ Rtr , and its basis function is Nk . The least squares system is formulated
+P
+
+as,
+                                                                                         2
+                                       X X
+                                                             i        i
+                            minimize              Nk (c(t))(rk,tr + ∆rk,tr ) − cie (t)       ,
+                               ∆rki    u      k
+
+where ∆rk,tri   is the unknown displacement vector of control points rk,tr   i . Denote the set of updated
+
+control points as Rilstsq = {rk,lstsq
+                               i         i
+                                      = rk,tr     i }.
+                                              + ∆rk,tr
+   Next, the control points in Rilstsq are separated from each other across the trimming curves to avoid
+extra intersections in the surfaces. For that purpose, we create meshes of direction vectors in parametric
+space for Rilstsq . Each mesh of parametric direction vectors is initialized to the 0 vector. Then the
+parametric trimming curve is sampled and for each sample, the curve normal direction pointing towards
+the interior of the trimmed parametric domain is computed. The basis function for each control point
+     i
+in Olstsq is evaluated at the parametric samples. The normal direction of the sample(s) with the largest
+basis function value is assigned and denoted vk,sepi     . The direction vectors associated with Olstsq i   are
+then propagated to all direction vectors in each mesh by applying 50 iterations of Laplacian smoothing
+over the meshes of parametric direction vectors. Finally, we update the control mesh by moving the
+surface layer using these vectors assigned to each control point for a short distance to leave a gap
+around the trimming curve to create Risep = {rk,lstsq  i         i
+                                                            + v̂k,sep           i
+                                                                       } where v̂k,sep     i
+                                                                                       is vk,sep projected into
+                                           i
+model space using the fitted plane of rk,lstsq ’s local control mesh.
+
+
+                                                          14
+                                          Hybrid Refinement
+
+   Then, a relaxation step is necessary because both the signed distance function and the harmonic
+field non-uniformly shrink distances between control points as they move inward. We apply Laplacian
+smoothing to the control mesh to get a target position p̃ for each control point p and move p to
+(1 − β)p + β p̃ where β is a blending input parameter in [0, 1], used to create Ri .
+   Coefficients for the trim basis functions are obtained from curve fitting the midpoints of the sampled
+trim curves using the knot vectors from the parametric trimming curves. The set of coefficients is called
+Υi and is used with the appropriate trim basis functions. The trimmed surface layer G i (corresponding
+to control meshes Ri ) is transformed into B i , which is topologically identical to B. Control points in
+Ri are paired with corresponding revised basis functions; and control points in Υi are paired with
+appropriate trim basis functions. The resulting control lattice over all layers B i , along with the same
+degree d as the surface and uniform open knot vector (0 on B and 1 on B n ), defines a hybrid trivariate
+B-spline region T .
+
+4.3. Construction of Pyramid Elements
+The interior boundary surface of T must serve as a boundary for the unstructured remaining interior
+volume. The representation for the interior boundary surface of T can use the dependent represen-
+tations over each rectangular sub-knot interval to represent the base of a Bézier pyramid of degree d.
+The Bézier pyramid [4] has been shown to have the boundary geometry of Bézier triangles on each of
+the 4 faces, and a tensor product degree bi-d Bézier on its base surface. The collection of them then
+leaves only an unstructured volume U bounded by degree d Bézier triangles that must be determined.
+Alternatively, if the interior boundary surface of T were to directly interface with the unstructured
+region, there would need to be two tetrahedra over each rectangular sub-knot interval surface, each
+one of degree 2d as in [24, 20].
+                                      T                      S
+
+                          T2
+
+
+                          T1
+
+                                      B                      B
+
+       Figure 4.3. T is converted to S . Left: inward (upward direction) extensions of rect-
+       angular (blue) and triangular (red) sub-knot intervals. T is divided into T1 and T2 .
+       Right: The wedges in T2 are removed, and the tensor product Béziers in T2 are con-
+       verted to pyramids (yellow). The semi-structured region S is the union of three types
+       of elements depicted in 3 colors. The inner boundary of S consists only of Bézier
+       triangles.
+
+   In creating the pyramid interface, care must be taken so that pyramids do not intersect each other.
+Since T is constructed to have no self-intersections, it is subdivided in the inward direction into
+two trivariate splines, and the resulting innermost single knot interval trivariate is used to generate
+pyramids. T2 is the trivariate with a single knot interval in the inward direction that is transformed
+to the pyramid interface layer. The other multi-interior inward knot trivariate spline is called T1 .
+   The interior knot intervals and the sub-knot intervals from trimmed knot intervals and 3.4 are used
+to transform the representation in T2 to dependent trivariate Bézier representations. Each tensor-
+product Bézier volume from T2 is transformed to a Bézier pyramid whose coefficients are linear
+
+
+                                                   15
+                                           Y. Song & E. Cohen
+
+combinations of those of its tensor-product Bézier volume (Figure 4.3). See [17] for details of the
+algorithm for the coefficients of pyramids. The control points with corresponding rational pyramid
+basis functions [4] define a pyramid element.
+   The semi-structured region consists of T1 and the pyramids, whose coefficients are linear combina-
+tions of coefficients from T2 . Thus, the only degrees of freedom are the ones from B i for i ∈ {0, 1, . . . , n}.
+The region is denoted S . The degrees of freedom of S is (n + 1)(|R| + |Υ|).
+   U is an unstructured region with Bézier tetrahedral elements. Its boundary coincides with the inner
+surface of S . It is constructed following [24]. The HV-rep is complete as V = (S , U).
+   If instead, the user prefers to use unstructured Bézier hexahedra (trivariate patches), each element
+of U can be transformed into an unstructured Bézier trivariate using reparameterization technique
+described in [21].
+
+
+5. HB-Rep Error
+
+Because Ωbanded is the only perturbed region that differs from the original B-spline surface, several
+attributes can be identified that affect the error in the HB-rep. Since this representation maintains
+parameterization, the error between G and B is measured by the Euclidean distance between the
+corresponding model space points evaluated at the same parametric value. The error has two attributes
+that matter in the effort to preserve the original representation: the area of Ωbanded and the error
+distance values. If a surface is flat, the curvilinear triangles in Ωbanded can represent the surface
+geometry exactly and distort the original parameterization minimally, but the HB-rep does not preserve
+the original B-spline representation. Consequently, it is preferred to keep Ωbanded narrow. On the other
+hand, a narrow Ωbanded also requires that the sub-knot intervals be small which results in shorter cubic
+trimming curve segments, and more trim functions.
+   Error in Ωbanded derives from two sources: the distance and curve parametrization error between
+Euclidean cubic trimming curve and the trimmed surfaces, and error of the approximated surfaces
+in curvilinear triangular sub-knot intervals. The former error comes from the input and is inherited
+from the imprecise nature of trimming curves themselves. In the HB-rep, it follows from the difference
+between the Euclidean trimming curve cm and the parametric trimming curve composed with the
+surface mapping, given that it is required to exactly reproduce the Euclidean trimming curve to
+achieve watertightness. Since, for any given Bézier segment of a trimming curve, corresponding Bézier
+segments are all intended to represent the same curve, for any given value of t, s1 (c1 (t)), s2 (c2 (t)), and
+cm (t) represent the identical intersection point in model space. However, when si is a bicubic spline
+surface and ci is piecewise cubic, si (ci ) is a degree 18 curve, but cm is only cubic, so there will be a
+shape distortion as well in a region of the surface near the trimming curve. The error in the trimming
+curve cm provides a lower bound that can be achieved for the error in Ωbanded .
+   The other source of error is related to curvilinear triangular sub-knot intervals within Ωbanded . As
+discussed earlier, the surface mapping for curvilinear triangular sub-knot intervals in HB-rep is ψ ◦φ−1 ,
+which is different from the original B-spline surface mapping. To reduce the error, one choice would
+be to use the ψ ◦ φ−1 combination but to optimize the location of the single interior control points
+for each of ψ and φ (for d = 3). Another is to use a degree 2d Bézier representation for ψ. Before
+matching cm , the curvilinear geometry can be matched exactly to the image of the trimmed surface.
+Once cm is matched, that mapping is still an approximation. Hence, one might optimize the interior
+control point locations based on both the surface and trimming curve. However, for d = 3, using 2d
+leads to 10 interior control points to optimize for each curvilinear triangle in the domain. The third
+alternative, the one we have adopted, is to reduce the error in Ωbanded by reducing its size, typically
+by subdividing Bézier segments where the error in the approximation is too large. Such a subdivision
+usually leads to two triangles, each about 1/4 the parent’s size, and a rectangle that touches the
+
+
+                                                       16
+                                        Hybrid Refinement
+
+
+
+
+       Figure 5.1. The trimming curve segment corresponding to the center curvilinear tri-
+       angular sub-knot interval is subdivided into two pieces. The triangle is repartitioned
+       into two curvilinear triangular and one rectangular sub-knot intervals. The two adjacent
+       rectangular sub-knot intervals also change their shapes under the subdivision.
+
+trimming curve at a corner. As the size of a curvilinear triangular sub-knot interval is reduced, ψ and
+its control mesh converge to the original B-spline surface because of the way the control points of ψ
+are defined. Furthermore, rectangular sub-knot intervals that were in Ωbanded typically become part of
+K and represent the surface exactly so the error profile is reduced. Therefore, the HB-rep can converge
+to an exact trimmed representation under trimming curve refinement, subject to the error in cm . This
+is illustrated in Figure 5.1 for subdivision of one curvilinear triangle.
+
+                                             Quality of trimming curve approximation
+                                               0      1      2       3          4
+          trimming curve refinement level: 0 0.035 0.021 0.017 0.015          0.010
+                                           1 0.029 0.018 0.010 0.0063        0.0035
+                                           2 0.029 0.018 0.010 0.0063        0.0035
+       Table 5.1. Effects of trimming curve approximation and triangle refinement on sur-
+       face max error
+
+
+   Shown in Table 5.1 is a demonstration of the effect of two ways to reduce surface max error for the
+model in Figure 4.2a. The columns correspond to different quality trimming curve approximations.
+Given discrete trimming data, the levels are simulated by creating cubic trimming curve approxima-
+tions to the trimming curve data at multiple accuracy levels, with the 0 level being the least accurate.
+The rows correspond to subdividing that column’s trimming curve at its previous row’s midpoint to
+effectively create curvilinear triangles that are approximately one-fourth the previous rows size and
+approximating the surface over that triangle. For each column, a lower row always shrinks the area of
+the approximated surface. However, it does not reduce the maximum error of the approximated sur-
+face on the second trimming curve refinement level. That is because after first refinement the greatest
+error occurs on the trimming curve and, therefore, cannot be further reduced. Note that each level of
+subdivision reduces the area that is approximated in HB-rep
+
+6. h-refinement
+Refinement is used to add design degrees of freedom to a model and to discretize the model. By
+augmenting the original knot vectors with additional knot values, the original spline space is embedded
+
+
+                                                  17
+                                         Y. Song & E. Cohen
+
+in a larger spline space with more degrees of freedom. The original model can be represented in terms
+of the basis of this larger space, but the added knots lower the derivative smoothness of the basis
+functions at those values. So changing coefficients in the new basis changes the model. In IGA, the
+term h-refinement refers to a similar concept that embeds a model in a larger spline space having
+new additional knots in each knot vector at the midpoints of every knot interval of the original knot
+vectors. Each knot interval, therefore, spawns 4 child knot intervals after refinement. Since IGA uses
+the same bases for simulation that are used to design the geometry models, refinement provides a way
+to maintain exact geometry while increasing the degrees of freedom for simulation under a process
+that makes elements uniformly smaller. Convergence estimates are frequently formulated in terms of
+multiple levels of h-refinement.
+   h-refinement is not straightforward for the HB-rep because of its complicated structure. Knot in-
+sertion in trimmed knot intervals can change the classification of resulting child sub-knot intervals.
+We investigate whether it would be preferable to apply h-refinement to an existing HB-rep B, or to
+apply the h-refinement to the trimmed B-rep G and then convert it to an HB-rep.
+   First, for a B-spline surface s ∈ G, consider its untrimmed representation. Let µ and ν be the
+knot vectors, and let µ̃ and ν̃ be the refined knot vectors, with new knots added at the midpoints of
+each internal knot interval for each knot vector. Let Ni,j be as before, and let Qk,l be B-spline basis
+functions resulting from the refinement. Then,
+                                          s(ξ, η) = r| N(ξ, η)                                        (6.1)
+                                                     |
+                                                 = r AQ(ξ, η),
+where r is the vectorization of the coefficient matrix used to define the surface, N(ξ, η) and Q(ξ, η) are
+the corresponding vectors of original tensor product B-splines and refined tensor product B-splines,
+respectively, and A = Aµ,µ̃ ⊗ Aν,ν̃ the Kronecker tensor product of B-spline refinement operators in
+ξ and η directions. r̃| = r| A forms the refined control mesh with basis functions Q.
+   Let µ × ν denote the knot intervals for the original B-spline representation and µ̃ × ν̃ denote the
+knot intervals after h-refinement. An interior knot interval µ × ν leads to 4 interior knot intervals in
+µ̃ × ν̃, as is usually the case. If µ × ν is exterior to the trimmed surface, its h-refinement children
+are also external, and none is used or referenced. For a trimmed knot interval, the case for which the
+trimming curves cross µ × ν is the more interesting one.
+
+
+
+
+         (a)                  (b)                  (c)                  (d)                   (e)
+
+                          Figure 6.1. Partitions of a trimmed knot interval
+
+   With a partition K already computed, the information can be reused to further divide sub-knot
+intervals in the partition that intersect new knot lines into smaller ones so that the resulting partition
+is valid. Figure 6.1 illustrates the effect of h-refinement on a single trimmed knot interval and Ωbanded .
+Note that Ωbanded must be recomputed locally since the trimming curve has been subdivided two
+times. In Figures 6.1a and 6.1b, it can be seen that some curvilinear triangular sub-knot intervals in
+Ωbanded at the top and the bottom of the figures remain unchanged because they do not cross any
+knot lines introduced by h-refinement.
+
+
+                                                    18
+                                         Hybrid Refinement
+
+   In Figure 6.1a the gray rectangular regions bounded by the black lines form K. Ωbanded consists
+of the curvilinear triangles in dark blue, with an edge on the trimming curve, and the light blue
+rectangular regions touch the trimming curve at one point. In Figure 6.1b red lines show the knot
+interval refined into 4 child knot intervals. The knot lines cross the trimming curve in two places
+so there will need to be at least two more subdivisions of the trimming curve, with changes to the
+curvilinear triangular and rectangular sub-knot intervals. Figure 6.1c shows a refined classification.
+Note that the dark blue triangle with the cyan dot in Figure 6.1a has been partitioned into (i) three
+curvilinear triangle sub-knot intervals with cyan dots, (ii) two light red rectangles with cyan dots,
+each touching the trimming curve at a single point, and (iii) one gray rectangle that no longer belongs
+in Ωbanded . The light blue rectangle with the magenta dot has been subdivided into three rectangular
+knot intervals, only one of which should remain in Ωbanded . The light blue rectangular region with
+the yellow dot sustains partitioning in two from the refinement, with only the top rectangle properly
+surviving in Ωbanded . But requirements for it being adjacent to curvilinear triangles indicate its further
+subdivision. In Figure 6.1d boundaries of Ωbanded of the original and refined partitions are rendered
+with thick blue and red lines (with shared segments in magenta). Ωbanded gets narrower as h-refinement
+is applied to the surface.
+   Revised basis functions over the original dark blue triangle with the cyan dot functions are defined
+using appropriate ψ◦φ−1 , which includes cubic Bézier triangle functions composed with an inverse map,
+as are the trim basis functions. After refinement, a child of the curvilinear triangle can be a rectangular
+sub-knot interval that is no longer in Ωbanded (grey rectangle with a cyan dot in Figure 6.1c). This
+region in the unrefined watertight HB-rep cannot be reproduced by the refined HB-rep maintaining
+the same parameterization as well as geometry. This is because the unrefined representation has a
+surface mapping ψ ◦ φ−1 which is not polynomial over the curvilinear triangle. But in the refined
+representation, it becomes a bivariate tensor product Bézier. A closer inspection of the introduced
+knot line going through the original curvilinear triangle in Figure 6.1b reveals that the straight line is
+mapped by φ−1 into a curved line in the canonical triangular domain. Therefore, the surface over an
+ostensibly simple rectangular domain cannot be expressed as a tensor product Bézier.
+   This approach also can lead to unnecessarily partitioned sub-regions of the trimmed knot interval.
+In Figure 6.1c, the lower right knot interval becomes an interior knot interval after h-refinement, and
+its partition within is unnecessary. However, because the partition after refinement is based on the
+partition of the original, the segmentations that existed for the unrefined case are kept, and refined, as
+necessary. Many rectangular sub-knot intervals in Ωbanded are not in the refined Ωbanded , or their child
+rectangles are not. Since they had one or more control points in the unrefined Υ that were modified
+to match the trimming curve, the children representations are also changed from the original surface.
+Such an example appears in the comparisons of Figure 6.1a and Figure 6.1c, where the light blue
+rectangle with the magenta dot is subdivided into one rectangle in refined Ωbanded and 2 rectangles
+that should be in K. Thus, elements of K can remain unchanged or be subdivided, depending on if
+refining knot lines cross them. But Ωbanded must be recomputed. Because a goal is to retain the original
+representation as much as possible, the child rectangular sub-knot intervals that become internal must
+have their representations reset to have coefficients obtained through Bézier extraction. The child
+rectangular sub-knot intervals and the child curvilinear triangles that are part of the refined Ωbanded
+are computed similarly, with control points partitioned into those that go with the refined revised
+basis functions and those that go with the refined trim basis functions. Because the trimmed knot
+interval was refined, the refined Ωbanded is of narrower extent, the size of the union of the children
+partitions continues to converge toward the trimming curve with each level of refinement. While the
+number and size of the sub-knot intervals in the union of the children refined K are less optimal than
+if they were recomputed each time, they do not affect the refined revised basis functions, since, over
+those sub-knot intervals, the refined revised basis functions are identical to the refined B-splines. Their
+shapes are more relevant during integration and when they serve as the bases for the pyramid layer.
+
+
+                                                    19
+                                        Y. Song & E. Cohen
+
+   Consider instead the case for which the effect of h-refinement is considered initially only on the
+trimming curves. First, discuss a single trimmed surface. A later discussion presents the effect in a
+model. Each parametric trimming curve is refined wherever a new knot line crosses it. The Ωbanded
+constructed is the same one as results from constructing the Ωbanded for the unrefined trimmed knot
+intervals and then deriving the refined Ωbanded . Now there are four child knot intervals, some of whom
+may now be interior knot intervals, as in the lower right sub-knot interval of Figure 6.1e. The resulting
+union of the partitions of the child knot intervals has fewer elements than that obtained by refining
+the existing partition. Compare Figures 6.1c and 6.1e. The method differs from the one with partition
+already computed in that its K usually has a better partition because the partitioning algorithm
+puts a priority on resulting partition quality over which integration has better characteristics and the
+pyramid base layer is better proportioned. Because the surface over the rectangular regions in K is the
+same as the original B-spline surface, with its degrees of freedom totally dependent on those of the
+B-spline, the two methods differ neither in parameterization nor in geometry. However, while Ωbanded
+for the refined model is computed to be the same, this approach recomputes the representations for
+the surfaces over Ωbanded , as in the first case. So computing this type of h-refinement, while creating
+different sub-partitions K, has exactly the same degrees of freedom as the first case’s h-refinement.
+   The difference between the two approaches to h-refinement is apparent only when the HV-rep is
+considered. In both, the approximation in the Ωbanded region is recomputed attaining better accuracy
+while converging towards the trimming curves.
+
+
+
+
+       Figure 6.2. h-refinement is applied to a trimmed surface. (a) shows error on the
+       original surface. The boundaries of sub-knot intervals in Ωbanded and surface knot lines
+       are rendered in black. The result of h-refinement is shown in (b). An inset of the red
+       rectangle is shown in (c). The max error after h-refinement occurs on the trimming
+       curve.
+
+   An example of h-refinement on a trimmed surface is considered in Figure 6.2. A surface with 16 knot
+intervals is considered (6.2a). An L-shape hole is trimmed off from the surface creating 12 trimmed
+knot intervals and 4 interior ones. Initially, the greatest error occurs in the middle of curvilinear
+triangular sub-knot intervals. h-refinement is applied by uniformly inserting knots in each of the knot
+intervals in both directions. Partitions are recomputed, as is the HB-rep. The operation decreases
+both max error and the region where the error occurs (6.2b). Figure 6.2c shows an inset of the lower
+trimmed boundary of the L-shape. The greatest error occurs on the trimming curve. Therefore, it
+cannot be further reduced without a better trimming curve. Degrees of freedom in Figure 6.2a is
+|R| + |Υ| = 49 + 204 = 253. Degrees of freedom in Figure 6.2b is 121 + 237 = 358.
+   The example above presents the effects when the single trimmed knot interval refinement is con-
+sidered. Across the trimming curve in a trimmed B-rep, there might be different knot intervals that
+
+
+                                                   20
+                                        Hybrid Refinement
+
+reside in adjacent trimmed surfaces sharing one trimming curve corresponding to each curvilinear
+triangular sub-region this can lead to multiple recomputations of Ωbanded . A more efficient approach
+is to determine the effect of surface refinement on each surface across all trimming curves, and the
+new knots that should be added to each trimming curve. Then the new knots should be merged, so
+there is a refined trimming curve each of whose Bézier segments is a post h-refinement result. In this
+way, the refined Ωbanded may become significantly narrower with just a few levels of refinement.
+
+6.1. h-refinement in S
+
+
+
+
+           (a)                       (b)                       (c)                       (d)
+
+       Figure 6.3. Given the HB-rep in Figure 4.2a, an HV-rep is generated with a trivariate
+       representation to ω = 0.75 (3/4 of the modified tracing distance toward the mid-
+       structure). Several isolayers are shown in (a). T is computed separately for each of 3
+       levels of h-refinement with the layers shown for ω = 0.75 in (b) (the coarsest) through
+       (d) (the finest).
+
+   When transforming an HB-rep into an HV-rep, other issues related to h-refinement can arise. Again
+we investigate several different approaches to refinement.
+   One approach is to perform h-refinement on the trimmed B-rep G, then generate the corresponding
+HB-rep and HV-rep. If this is the chosen direction, then each control mesh is finer and moves closer
+to the surface than the control mesh that spawned it at the previous level. It is unclear if a different
+mid-structure would be appropriate for each of the refinements. Our experiment chose to use the same
+mid-structure, ensuring it was internal to all levels of refinements. In Figure 6.3, results from tracing
+and adjusting are shown by surface layers that have the same topology as B. The model used in this
+example is the same one used in Figure 4.2a. It is constructed by subtracting one curved box from
+another. In Figure 6.3a, a planar cutaway shows several internal layers of both gold and gray surfaces.
+The innermost layer shown corresponds to ω = 0.75 is shown in Figure 6.3b. Figure 6.3c and 6.3d
+show the same layer computed separately for each of 2 levels of h-refinement. Each control lattice
+was computed from an HB-rep that started from unrefined (Figure 6.3b), one level of h-refinement
+(Figure 6.3c), and two levels of h-refinement (Figure 6.3d). There is an artifact visible towards the
+right side of Figure 6.3d that does not exist in Figure 6.3b and is only slightly visible in Figure 6.3c.
+The most refined inner surfaces seem to have a wrinkle near O. We deduce that it is caused in the
+adjustment phase. During the adjustment phase, in order to modify intersecting trimmed surface
+(Figure 4.2b), control points around trimming curves are moved towards the interior direction of the
+respective surface. Since the control mesh is denser after refinement, when the same moving parameter
+( as used in [17]) is used, as in this experiment, control points in O are more likely to overshoot a
+
+
+                                                   21
+                                        Y. Song & E. Cohen
+
+reasonable location, thus forming a wrinkle. Adjusting  to be related to refinement level can alleviate
+the problem.
+   This type of artifact is observed only near trimming curves with acute dihedral angles, usually
+formed by Boolean subtraction or intersection. A union, on the contrary, does not cause this artifact.
+For example, in Figure 4.2d, the inner layer of a tetrapod is shown. The tetrapod is a union of four
+capsule shapes. The adjustment phase is not included in this example to demonstrate more clearly the
+gaps between trimmed surfaces as the tracing paths increase in depth. Because the adjustment phase
+moves control points towards the trimming curves and brings them closer, wrinkles are not formed.
+   Alternatively, refinement can occur after the control lattices of the trivariates are computed. After
+tracing and adjustment are applied, a control lattice of the coarse control mesh without h-refinement is
+generated. Corresponding control points Ri and trimmed surface layers G i are computed, to generate
+h-refinement of the control lattice. After h-refinement, at each layer, appropriate knots due to h-
+refinement are inserted into the trimming curves, they are made compatible and Ωbanded is formed for
+each surface in B, and percolated into each layer. The resulting interior isolayers are modified only
+slightly by the trimming surface with that recomputation, while, as previously discussed, the boundary
+layer, the refined B more accurately approximates the original surfaces near the trimming curves.
+   So far, there has been no discussion of the effects of trivariate refinement on the inner boundary
+surface (of T1 ) that serves as the base layer for the pyramid interface and the unstructured region.
+In general, the knot interval behavior of innermost surface in T1 is the same as that for B, and
+corresponds to interior knot intervals, interior sub-knot intervals in the K, and sub-knot interval
+behavior in Ωbanded . The B-spline representation is used over the knot intervals and partitions of the
+K, so a particular partitioning into elements does not affect the refined representation. However, the
+pyramids are defined in using the innermost surface partitioned according to the knot intervals and
+sub-knot intervals in the partition K as their bases. Therefore, the partition affects the pyramids,
+as its refinements cause the pyramid and unstructured region to also be refined or modified. After
+h-refinement, all interior knot intervals used to create the pyramids of the unrefined HV-rep can be
+directly refined in a standard manner. Those elements form the bases of refined pyramids, using the
+approach in [7]. So refined interior intervals and refined pyramids over them follow directly. Adjacent
+tetrahedra can be refined in a compatible manner [7].
+   The refined pyramid region above refined trimmed knot intervals, including K, is more complex to
+define. For a simpler presentation, assume that given a parent trimmed interval, there is the parent
+Ωbanded and the refined Ωbanded that is the union of the Ωbanded for all the child trimmed sub-knot
+intervals. Further, Let K be the residual rectilinear region in the trimmed knot interval after Ωbanded
+is extracted. Then K is a partitioning of K. Suppose there are four child knot intervals, each either
+an interior knot interval or a trimmed knot interval of the refined HB-rep surface. The child trimmed
+knot intervals each have their own child partition, Kc . Intersections of elements in Kc with those in K
+can lead to a need to subdivide existing pyramids above elements in K in irregular, complicated, ways
+that do not preserve the idea of uniform refinement in h-refinement, and lead to poorly shaped Bézier
+pyramids. Instead, the trivariate spline layer T2 is used to define new child pyramids with heights
+related to the dimensions of their bases. An interior child knot interval and its new pyramid have
+a standard representation for further refinements. For a child trimmed knot interval, the pyramid is
+again recomputed adapted to the size of base. This is also done for the rectangular elements in Ωbanded .
+These elements over the child Ωbanded and the child K need to be recomputed with each subsequent
+refinement until they can be removed as interior child knot intervals. Then they would be standard
+elements. In addition to recomputing the pyramids, tetrahedra that are neighbors (face, edge, vertex)
+of the parent pyramids adjacent to the pyramids that need recomputation must be removed. Then
+the empty region bounded by refined pyramids, recomputed pyramids, and refined tetrahedra must
+be re-tetrahedralized.
+
+
+
+                                                   22
+                                       Hybrid Refinement
+
+   Convergence properties of B-splines with each level of refinement guarantee that child trimmed
+knot intervals may increase in number, but they will decrease in area, and converge towards the
+trimming surface in the trivariate lattice. Thus the regions requiring re-pyramidalization and re-
+tetrahedralization get progressively smaller.
+
+
+
+
+7. Conclusion
+
+Volumetric model completion from trimmed B-reps is a nascent focus of recent research. Simulations
+frequently require volumetric representations that are not native to CAD systems. Trimmed B-reps
+are integral to design yet their inexactness causes significant problems for analysis. The discussed
+HB-rep and HV-rep can be recomputed if the trimmed B-rep changes, when, for example, surfaces are
+modified relative to each other.
+   Hybrid representations have the drawbacks of requiring multiple refinement and subdivision schemes
+that are compatible. While h-refinement has one standard meaning for B-splines and NURBS curves,
+surfaces, and volumes, there are multiple refinement schemes for triangles and tetrahedra, any one of
+which can be used in a simulation.
+   Revised basis functions and trim basis functions cannot be exactly refined, since they are not
+polynomial near the trimming curves. The partitions near the trimming curve that are used in defining
+them are not refined uniformly when h-refinement is performed on the trimmed B-spline B-rep model.
+This causes significant complexity in formulating appropriate definitions for h-refinement.
+   We discuss strategies to apply h-refinement on HB-rep along with corresponding consequences. In
+general, the HB-rep cannot maintain its parameterization and geometry during h-refinement within
+Ωbanded . However, as an HB-rep is refined, the region preserving the original parameterization and
+geometry increases. The error introduced by triangular curvilinear sub-knot interval approximation
+is reduced. As that error reduces, error inherited from the trimming curve eventually dominates,
+and cannot be further reduced without a better-fitted trimming curve. The user has the option to
+keep the partition information from the unrefined partition for K in each trimmed knot interval. By
+keeping the partition from the unrefined K, the region that requires computation of new pyramids and
+tetrahedra is reduced with each refinement. However, if the shape and size of the pyramids become an
+issue, computing new partitions over each refined trimmed knot interval can lead to better pyramids,
+also of reduced size. Then tetrahedralization is required only over the region bounded by the refined
+tetrahedra and pyramids over internal knot intervals from the previous level. These regions requiring
+recomputation are also reduced since refinement of trimmed knot intervals eventually leads to interior
+child intervals, except adjacent to trimming curves.
+   The hybrid representation with no trimming curves can be refined using B-spline h-refinement in
+the tensor product trivariate region, with compatible refinements as proposed in [7] for pyramids and
+Bézier tetrahedra. We have demonstrated that a straightforward approach cannot be directly applied
+to the HB-rep and the HV-rep. Although one approach might be to create new HB-reps and HV-reps
+for each refinement, we have demonstrated that the HB-rep on the refined representation is the same as
+refining the HB-rep of the unrefined representation. However, we have also demonstrated that unless
+parameters are carefully adjusted, HV-reps computed after several levels of refinement can have a
+reduced quality in the interior, compared to applying modified refinement to the original HV-rep.
+   We have presented two new approaches to refinement that support an h-refinement convergent
+approach (in a B-spline manner) that simultaneously refine the representation and ensure that the
+representation converges to the original surfaces, while still maintaining a consistent HV-rep.
+
+
+                                                 23
+                                          Y. Song & E. Cohen
+
+References
+ [1] H. Al Akhras, T. Elguedj, A. Gravouil, and M. Rochette. Isogeometric analysis-suitable trivariate NURBS
+     models from standard B-Rep models. Computer Methods in Applied Mechanics and Engineering, 307:256–
+     274, 2016.
+ [2] H. Al Akhras, T. Elguedj, A. Gravouil, and M. Rochette. Towards an automatic isogeometric analysis
+     suitable trivariate models generation-Application to geometric parametric analysis. Computer Methods in
+     Applied Mechanics and Engineering, 316:623–645, 2017.
+ [3] M. J. Borden, M. A. Scott, J. A. Evans, and T. J. R. Hughes. Isogeometric finite element data structures
+     based on Bézier extraction of NURBS. International Journal for Numerical Methods in Engineering, 87(1-
+     5):15–47, 2011.
+ [4] J. Chan and T. Warburton. A Short Note on a Bernstein–Bézier Basis for the Pyramid. SIAM J. Sci.
+     Comput., 38(4):A2162–A2172, 2016.
+ [5] E. Cohen, R. F. Riesenfeld, and G. Elber. Geometric modeling with splines : an introduction. A. K. Peters,
+     2001.
+ [6] J. A. Cottrell, T. J. R. Hughes, and Y. Bazilevs. Isogeometric Analysis: Toward Integration of CAD and
+     FEA. Wiley Publishing, 1st edition, 2009.
+ [7] L. Engvall and J. A. Evans. Isogeometric unstructured tetrahedral and mixed-element Bernstein-Bézier
+     discretizations. Computer Methods in Applied Mechanics and Engineering, 319:83–123, 2017.
+ [8] X. Gao, T. Martin, S. Deng, E. Cohen, Z. Deng, and G. Chen. Structured Volume Decomposition via
+     Generalized Sweeping. Visualization and Computer Graphics, IEEE Transactions on, PP(99):1–1, 2015.
+ [9] L. Liu, Y. Zhang, T. J. R. Hughes, M. A. Scott, and T. W. Sederberg. Volumetric T-spline construction
+     using Boolean operations. Engineering with Computers, 30(4):425–439, 2014.
+[10] T. Martin and E. Cohen. Volumetric parameterization of complex objects by respecting multiple materials.
+     Computers & Graphics, 34(3):187–197, 2010. Shape Modelling International (SMI) Conference 2010.
+[11] T. Martin, E. Cohen, and R. M. Kirby. Mixed-element volume completion from NURBS surfaces. Computers
+     & Graphics, 36(5):548–554, 2012. Shape Modeling International (SMI) Conference 2012.
+[12] B. Marussig and T. J. R. Hughes. A Review of Trimming in Isogeometric Analysis: Challenges, Data
+     Exchange and Simulation Aspects. Archives of Computational Methods in Engineering, 25(4):1059–1127,
+     2018.
+[13] J. O’Rourke and G. Tewari. The structure of optimal partitions of orthogonal polygons into fat rectan-
+     gles. Computational Geometry, 28(1):49–71, 2004. 14th Canadian Conference on Computational Geometry-
+     CCCG02.
+[14] T. W. Sederberg, G. T. Finnigan, X. Li, H. Lin, and H. Ipson. Watertight Trimmed NURBS. In ACM
+     SIGGRAPH 2008 Papers, pages 79:1–79:8. ACM, 2008.
+[15] J. Shen, J. Kosinka, M. A. Sabin, and N. A. Dodgson. Conversion of trimmed NURBS surfaces to Catmull-
+     Clark subdivision surfaces. Computer Aided Geometric Design, 31:486–498, 2014. Recent Trends in Theo-
+     retical and Applied Geometry.
+[16] J. Shen, J. Kosinka, M. A. Sabin, and N. A. Dodgson. Converting a CAD model into a non-uniform
+     subdivision surface. Computer Aided Geometric Design, 48:17–35, 2016.
+[17] Y. Song and E. Cohen. Creating Hybrid B-Reps and Hybrid Volume Completions from Trimmed B-Spline
+     B-Reps. Technical report, School of Computing, University of Utah, 2019.
+[18] Y. Song and E. Cohen. Making Trimmed B-Spline B-Reps Watertight With a Hybrid Representation. In
+     International Design Engineering Technical Conferences and Computers and Information in Engineering
+     Conference, 2019. to appear.
+
+
+                                                      24
+                                          Hybrid Refinement
+
+[19] S. Xia and X. Qian. Isogeometric analysis with Bézier tetrahedra. Computer Methods in Applied Mechanics
+     and Engineering, 316:782–816, 2017. Special Issue on Isogeometric Analysis: Progress and Challenges.
+[20] S. Xia, X. Wang, and X. Qian. Continuity and convergence in rational triangular Bézier spline based
+     isogeometric analysis. Computer Methods in Applied Mechanics and Engineering, 297:292–324, 2015.
+[21] G. Xu, Y. Jin, Z. Xiao, Q. Wu, B. Mourrain, and T. Rabczuk. Exact conversion from Bézier tetrahedra to
+     Bézier hexahedra. Computer Aided Geometric Design, 62:154–165, 2018.
+[22] G. Xu, B. Mourrain, R. Duvigneau, and A. Galligo. Analysis-suitable volume parameterization of multi-
+     block computational domain in isogeometric applications. Computer-Aided Design, pages 395–404, 2013.
+[23] G. Xu, B. Mourrain, R. Duvigneau, and A. Galligo. Constructing analysis-suitable parameterization of
+     computational domain from CAD boundary by variational harmonic method. J. Comput. Phys., 252:275–
+     289, 2013.
+[24] S. Zeng and E. Cohen. Hybrid Volume Completion with Higher-order BéZier Elements. Comput. Aided
+     Geom. Des., 35(C):180–191, 2015.
+[25] Y. Zhang, W. Wang, and T. J. R. Hughes. Solid T-spline construction from boundary representations for
+     genus-zero geometry. Computer Methods in Applied Mechanics and Engineering, 249-252:185–197, 2012.
+     Higher Order Finite Element and Isogeometric Methods.
+
+
+
+
+                                                    25
+

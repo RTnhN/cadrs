@@ -1,0 +1,809 @@
+                              A Topological Entity Matching Technique
+                                  for Geometric Parametric Models
+     Dago Agbodan                   David Marcheix                  Guy Pierra                Christophe Thabaud
+                              Laboratoire d'Informatique Scientifique et Industrielle (LISI)
+                         Ecole Nationale Supérieure de Mécanique et d'aérotechnique (ENSMA)
+          Téléport 2 — 1 avenue Clément Ader — BP 40109 — 86961 Futuroscope Chasseneuil cedex — France
+                                                 (+33/0) 5 49 49 80 63
+                               {agbodan | marcheix | pierra | thabaud}@ensma.fr
+
+
+
+
+                       Abstract                               as history-based, constraint-based and feature-based
+                                                              modelers) which allow both to express and to record
+Nowadays, many commercial CAD systems support
+                                                              conceptual designs and “design intents”. These dynamic
+history-based, constraint-based and feature-based
+                                                              modeling systems are often gathered under the term of
+modeling. Unfortunately, most systems fail during the
+                                                              parametric modeling systems. A parametric model is
+reevaluation phase when various kind of topological
+                                                              composed of a representation of an object, of a set of
+changes occur. This issue is known as “persistent
+                                                              parameters (characterizing the object) and of a list of
+naming” which refers to the problem of identifying
+                                                              constraints (equations or functions) applied to the object.
+entities in an initial parametric model and matching them
+                                                              By extension, a parametric modeler is a system for
+in the reevaluated model.
+                                                              geometric design which preserves not only the explicit
+We propose in this paper a complete framework for             geometry of the designed object (called parametric object
+identifying and matching any kind of entities based on        or current instance), but also the set of constructive
+their underlying topology. The identifying method is based    gestures used to design it (called design process or
+on the invariant structure of each class of form features     parametric specification).
+and on its topological evolution. The matching method
+                                                              This two-fold data structure enables rapid modifying by
+compares the initial and the reevaluated topological
+                                                              reevaluation. However, when reevaluation leads to
+histories. For each construction step, the matching
+                                                              topological modifications, references (between entities)
+consists of two phases. In the local phase, two measures of
+                                                              used in the constructive gestures are difficult to match in
+topological similarity are computed between any couple
+                                                              the new context, giving results different from those
+of entities occurring respectively in the reevaluated model
+                                                              expected. A persistent naming system, robust regarding
+and in the initial model. In the global phase, the final
+                                                              some topological modification, proves useful to preserve,
+matching is defined as a binary relation that maximizes
+                                                              from a reevaluation to another, references between
+the topological similarity between the matched entities of
+                                                              topological entities. It is the problem known as “persistent
+both models.
+                                                              naming” or “topological naming” [8, 4].
+The naming and matching method has been implemented
+                                                              This paper is structured as follows. In section two, we
+using the 3D modeling application development platform
+                                                              give a detailed account of the major issues about naming
+Open Cascade.
+                                                              in parametric modeling. The third section discusses some
+Keywords                                                      pre-existing works, essentially two of the main works
+CAD, Parametric design, Persistent naming.                    about topological naming. Each of these works only
+                                                              partially addresses these issues. We introduce, in section
+                                                              four, an alternative approach.
+1. Introduction
+                                                              2. Issues
+Static solid modeling systems (B-rep, CSG, etc.) largely
+used in the Computer Aided Design (CAD) area are more
+and more replaced by dynamic modeling systems (known          The main problem for parametric reevaluation is to
+                                                              characterize geometric and topological entities of a
+parametric model. Characterizing entities consists in                                          some editable representations [6, 10, 14, 11, 9], discussing
+giving them a name at design time and “finding them”                                           their underlying mathematical structures [10, 12],
+again at reevaluation time (i.e. matching entities of the                                      describing the problems, either of the semantic of
+initial model with entities of the reevaluated model.)                                         modeling operations [6, 5, 1] or of constraint management
+Let us take the example of Figure 1 to illustrate this                                         [3]. Most of them discussed parametric modeling in terms
+problem. In the example below, the initial model is                                            of creation (but not reevaluation). Several naming scheme
+designed by means of a parametric specification                                                and persistent naming mechanisms have also been
+containing four successive constructive gestures. The                                          proposed. In particular Kripac [8] and Chen [5] proposed
+fourth one consists of rounding edge e. If the initial model                                   solutions to address some of the problems mentioned in
+is saved after this fourth step, the current instance no                                       the previous section. The first essentially developed a
+longer contains edge e: it was removed by the rounding                                         matching algorithm whereas the second focused rather on
+function. Thus, the rounding function, which has edge e as                                     the unambiguous entity naming.
+input parameter, cannot any longer be represented in the
+parametric specification part of the model. Therefore,
+                                                                                               3.1 Chen’s approach
+“names” are needed to represent entities referenced in the
+parametric specification whether or not they exist in the
+current instance.                                                                              Chen [5] proposes a model that is composed of two
+                                                                                               representations. For the first one, he uses an editable
+Moreover each constructive gesture creates a number of                                         representation, called Erep [6], which is an unevaluated,
+entities which have to be distinguished and therefore                                          high-level, generative, textual representation, independent
+named, to be referenced by further constructive gestures,                                      of any underlying core modeler. It abstracts the design
+even if the same number of entities exist in all possible                                      operations, contains the parametric specification and
+reevaluation (no topological change). Therefore, each                                          stores all entities by name. The second representation,
+entity should be named in a non-ambiguous and unique                                           evaluated and modeler dependent, contains the geometry
+way at design time. The problem is even more complex                                           (the current instance). The link between these two
+for parametric models of which the entities and the                                            representations is obtained by a name schema that
+number of entities change from one evaluation to another.                                      establishes the link between the geometric entities of the
+ Initial                                                                                       geometric model and the generic names (persistent) of the
+ model
+                                                                                               unevaluated model.
+                          1                      2                    3                   4    Chen defines a precise structure for naming entities
+            swept block        horizontal slot        vertical slot        round edge e        generated by extrusion and revolution operations. Every
+ Re-evaluated                                                                                  entity generated by extrusion is named by reference to the
+                                     e                e1      e2
+ model
+                                                                                               corresponding source entity of the extruded 2D contour
+                                                                                               and the constructive gesture. He also proposes an
+                          1’                     2’                   3’                  4’   identification technique for collision-generated entities
+                      Figure 1: Naming problem                                                 based on compositions of topological contexts (more or
+                                                                                               less extended topological neighborhoods) and on feature
+Let us return to the example above, but this time in the
+                                                                                               orientations. Each one of these entities is described by its
+reevaluated model. We notice that, at step 3’, the edge e
+                                                                                               origin, either a source entity or an intersection of source
+has been split into edges e1 and e2. Thus at step 4’ the
+                                                                                               faces, its smallest unambiguous topological context and its
+problem is to determine which edge(s) has(ve) to be
+                                                                                               local orientation in the Brep model [4] [5]. To also ensure
+rounded. The problem is to identify, i.e. to match, edge e
+                                                                                               uniqueness of names in curved domains, one additional
+with edges e1 and e2 despite topology changes. Thus,
+                                                                                               information based on geometry is added to the previous
+when reevaluation leads to topology changes a new issue
+                                                                                               topological information : the orientation of any edge
+is to match two different structures. The naming
+                                                                                               against the extrusion direction of the feature(s) it belongs
+mechanism should be powerful enough to perform a
+                                                                                               to. The matching of an entity is realized through a local
+robust matching during reevaluation.
+                                                                                               comparison of topological neighborhoods. For example, in
+                                                                                               case of faces, the face which must be matched is
+3. Related work                                                                                compared with the whole set of faces issued from the
+                                                                                               same invariant face (preliminary set). At each stage of the
+                                                                                               construction, the contingent faces inherit the same name
+Following the pioneer work of Hoffmann and Juan [6],                                           of their parent face which makes it possible to construct
+over the last few years several authors have analyzed the                                      the preliminary set. A grade is associated to each face of
+internal structure of parametric data models, proposing                                        this preliminary set. The grade for each candidate face is
+the number of matched boundary edges. The face is kept if        complexity (more entities to compare). Kripac's model
+this number exceeds a threshold.                                 does not allow to record that a selected mapping was only
+In his study, Chen restricted to three kinds of features:        approximated as it uses a discrete metrics. That strongly
+sweep (extrusion and revolution), blend and fillet. For          induces the later mappings and would deserve to be taken
+these features, he showed the feasibility to identify            into account. Moreover, no explanation is given on the
+unambiguously any topological entities of models defined         manner of representing and of using this relation in the
+by successive attachment of such features, even when             graphs for the following operations.
+faces are curved, in most practical case, i.e., when there       His matching algorithm is very sensitive to the
+are not too many symmetries in the model. A matching             subdivision of the topological neighborhood. For example,
+algorithm is also proposed that support some level of            as illustrated Figure 2, if we call γFi the topological
+topological changes in the re-evaluated model. However,          neighborhood of face Fi, then the topological
+it is not clear how the reduced context is used in this          neighborhoods of faces Fa et Fb during the model’s
+algorithm. Moreover this algorithm uses some thresholds,         construction are: γFa={F1,F2,F3,F4,F5,F6,F15,F14} and
+and no precision is given on the choice of these thresholds
+and the rational for the choices. Finally, the matching          γFb={F7,F8,F9,F10,F11,F12,F13,F16}. During reevaluation,
+algorithm is local to the entity to be retrieved (see 4.2). In   the split leads to new faces Fx and Fy which topological
+case of Figure 4 for instance, and depending on the              neighborhoods are: γFx={F1,F15,F10,F11,F12,F13,F14} and
+threshold used, F2 would probably be mapped onto Fx.             γFy={F2,F3,F4,F5,F6,F7,F8,F9,F16}. The algorithm proposed
+The suggested model represents two major contributions           by Kripac tries to match these new faces with the old ones
+in this domain : on the one hand, two main concepts for          by analyzing the topological neighborhoods. The analyze
+topological identification of entities, i.e. topological         consists of finding the longest common face cycle (here
+context and feature orientations which will be used              {F2,F3,F4,F5,F6} and {F10,F11,F12,F13}) in the topological
+thereafter by many of other approaches, and on the other         neighborhoods.
+hand a very precise study of cases of ambiguity.
+                                                                 Unfortunately, as we can take note on this example, faces
+                                                                 Fa and Fb are respectively matched with faces Fy and Fx
+3.2 Kripac’s approach                                            and not with faces Fx and Fy. A later operation with Fa as
+                                                                 input parameter, would have Fy as parameter during
+                                                                 reevaluation.
+Kripac [8] focuses on the name matching. He proposes an
+API (Application Programming Interface) encapsulating                 F14     F13 F12 F11 F10   F9             F14   F13 F12 F11 F10   F9
+its topological identification system and guaranteeing the
+name persistence using a table of correspondence between         F1
+                                                                                    F0
+                                                                                                          F1
+                                                                                                                Fa               F16   Fb
+
+an entity of the initial model and one or more entities of                                           F8
+                                                                                                                           F15
+                                                                                                                                            F8
+
+the reevaluated model. He proposes an interesting graph               F2      F3 F4 F5 F6       F7             F2     F3 F4 F5 F6      F7
+structure for identification of any topological entities              F14     F13 F12 F11 F10   F9             F14   F13 F12 F11 F10   F9
+based on face history (creations, splits, merges and
+deletions of faces) and a complex name matching                  F1
+                                                                                    F0
+                                                                                                          F1
+                                                                                                               Fx
+                                                                                                                     F15
+                                                                                                                                       Fy
+algorithm. During each reevaluation, all the faces, as well                                          F8
+                                                                                                                      F16
+                                                                                                                                            F8
+
+as every referenced entity in the parametric specification,           F2      F3 F4 F5 F6       F7             F2     F3 F4 F5 F6      F7
+are matched with the new ones. In addition to the used
+face graph structure, Kripac's approach is innovative                       Figure 2 : Top view of slot in a block:
+because the proposed matching mechanism is global. The                         construction and reevaluation
+robustness and reliability induced by the global character
+of the matching method imply an overcost both in spatial
+(maintaining of two parallel structures) and temporal
+Another important problem of this approach is the “piece                     1                           1                                    1                               1                                 1                      1
+                                                                                                                                                                                                                                                         J
+                                                                                                                                                                                                                                                                         1
+
+loss” during reevaluation. The matching algorithm
+                                                                                                                                                                                                                                               28         25 26
+                                                                                                                                                                                                                                               27                        K
+                                                                                      12                          12                                        12                                   25                  12                                               28
+                                                                                                                                                                                                                G                                                    27
+
+
+consists on a backward-forward search in the graph and a                                                 B                                  B                             F                            26                          I                      25
+
+                                                                                                                                                                                                                                                                26
+                                                                                                                                                                                                                                                                     L
+
+cross-analyzis. More precisely, starting from a given face,             10
+                                                                                 11
+                                                                                           2        10
+                                                                                                             11
+                                                                                                                       2            10
+                                                                                                                                                   11
+                                                                                                                                                                 2            10
+                                                                                                                                                                                11                              11
+                                                                                                                                                                                                                          2            10
+                                                                                                                                                                                                                                         11                           11
+
+
+a backward search is done in the reevaluated graph, until                        9                           9                                     9                               9                            9                          9                             9
+
+reaching a face matched with a face of the old graph.               A                 8                           8                                         8                                                   H 8
+                                                                                                                                                                                                 25                                                       25
+                                                                                                                                                                                                                                                                         H
+                                                                                                                                                                                                       26                                                       26
+
+
+                                                                                 7                  6        7                      6              7                               7                            7                          7                             7
+Then, starting from this common face, a forward search is               6                      21
+                                                                                               22
+                                                                                                                           21
+                                                                                                                           22
+                                                                                                                                                                     21
+                                                                                                                                                                     22
+                                                                                                                                                                              6
+                                                                                                                                                                                                                              21
+                                                                                                                                                                                                                              22
+                                                                                                                                                                                                                                       6
+                                                                                                                                    6                                         6                                                        6
+done in the old and new graph, processing all branches                           5                  6        5                          5          5                              5               5                                        5                 5
+                                                                                           2                           2                                         2                                                        2
+and retrieving all leaves (faces). A cross-analyzis is done                           4
+                                                                                                         C
+                                                                                                                  4
+                                                                                                                                D
+                                                                                                                                         23
+
+                                                                                                                                              24        E
+                                                                                                                                                            4
+                                                                                                                                                                          D
+                                                                                                                                                                                       23
+
+                                                                                                                                                                                            24              E
+                                                                                                                                                                                                                     4
+                                                                                                                                                                                                                                   D
+                                                                                                                                                                                                                                               23
+
+                                                                                                                                                                                                                                                     24              E
+on the faces. The matching between the two faces is done                     3                           3                      3                       3                 3                                 3                      3                                 3
+approximately. Therefore, it is possible not to analyze all                  1                           1                                    1                               1                                 1                      1                                 1
+                                                                                                                                                                                                                                                                         X
+faces that should be analyzed. Figure 3 illustrates this                              12                          12                                        12                    25
+                                                                                                                                                                                                            U
+                                                                                                                                                                                                                     12                                               28
+                                                                                                                                                                                                                                                                     27
+                                                                                                         P                                  P                                                                                      T
+problem. Matching faces F with T and G with U is done at
+                                                                                                                                                                                       26
+                                                                                                                                                                      T                                                                    25
+                                                                                                                                                                                                                                                                     Y
+                                                                                                                                                                                                                                                    26
+
+
+                                                                                 11                          11                                    11                          11                               11                      11                            11
+the reevaluation’s fourth step. The cross-analyzis is done              10                 2        10                 2            10                           2            10                                          2            10
+
+only between faces coming from G and faces coming from                           9                           9                                     9                               9                            9                          9                             9
+                                                                    A                 8                           8                                         8                               25
+                                                                                                                                                                                                            V 8
+                                                                                                                                                                                                                                                     25
+                                                                                                                                                                                                                                                                         V
+U. In particular, in this example, only faces K and L will                       7                  6        7                      6              7                               7
+                                                                                                                                                                                                      26
+
+
+                                                                                                                                                                                                                7                          7
+                                                                                                                                                                                                                                                               26
+
+
+                                                                                                                                                                                                                                                                         7
+                                                                                                                                                                              6                                                        6
+be crossed with faces X and Y. The algorithm “looses” the               6                      21                          21                                        21                                                        21
+
+
+
+                                                                                 5                           5                      5              5                              5               5                                        5                 5
+face J which can be considered part of face X
+                                                                                               22                          22                                        22                                                        22
+
+
+
+
+                                                                                           2                           2                                         2                                                        2
+                                                                                                                                         23                                            23                                                      23
+                                                                                      4                           4                                         4                                                        4
+Finally, in its approach, Kripac preserves a copy of the                                                 Q                      R             24        S                 R                 24              S                      R                 24              S
+
+geometric models at each step of the construction process.                   3                           3                      3                       3                 3                                 3                      3                                 3
+
+This speeds up the reevaluation but it would require a
+memory space which is not compatible with the size of the      Figure 3: Loss of faces during matching (Is J matched
+real models used in CAD.                                                              with X ?)
+                                                                        initial model (step 3) and in the reevaluated model
+4. Principles of our approach                                           (step 3’) are not identical. A naming mechanism is
+                                                                        also required to define how to name these contingent
+                                                                        entities.
+4.1 Naming model
+                                                                 The method we have developed here is based on the
+                                                                 model proposed in [1]. This model enables to identify, in a
+To define robust names allowing solving the precedent            single and non-ambiguous way, firstly invariant entities,
+issues we have proposed to distinguish two types of              then contingent entities according to the invariant entities.
+geometric and topological entities [1]:
+•   Invariant entities. An invariant entity is a geometric
+    or topological entity that can be, completely and            4.1.1 Face graph
+    unambiguously, characterized by the structure of a           The goal is to be able to follow the face evolution in order
+    constructive gesture and its input parameters,               to be able, during model design, to identify the involved
+    independently of involved values. In Figure 1,               faces, then, during reevaluation, to identify the effective
+    invariant entities include the end face of the swept         faces (in the current instance) corresponding to the
+    block, the lateral shell of the horizontal slot with its     referenced faces.
+    begin and end faces (that may, or not exist), the face       Figure 4 illustrates a construction example and the
+    resulting from the rounding gesture, etc.. To                associated face graph. Each constructive gesture can be
+    characterize, i.e. to “name”, such entities, information     broken up into two steps. The first step is the specification
+    models are to be defined that relate these entities to       of rough feature. It corresponds to the invariant structure
+    constructive gestures and to their input parameters.         (six faces of the first block). This initial invariant structure
+•   Contingent entities. Beside those invariant entities,        represents the inputs of the face graph. The second step is
+    there exist entities that depend on the context of a         the interaction with the object that produces contingent
+    constructive gesture. We call contingent entity a            entities. Those entities result from the evolution of the
+    geometric or topological entity that results from an         initial structure. The face evolution is described by
+    interaction between the pre-existing geometric model         historical links. In Figure 4 we can see the partial graph
+    and invariant entities resulting from a particular           structure associated with two slots on a block. In this
+    constructive gesture. For example, in Figure 1, the          example, the top face of block is split into two faces by
+    number of lateral faces of the horizontal slot in the        the first slot, then into four faces by the second slot. The
+                                                                 face graph represents the history (creation, split, deletion)
+of the top face. Notice that the initial graph and the                                                   in a unique way. The problem is to define this identifier
+reevaluated graph are not the same.                                                                      which characterizes them in a unique way within each
+                                                                                                         construction step.
+                                                                                                         For each construction step, we consider that there are two
+                                                                                                         phases. Firstly, the creation of the feature where all faces
+                                                                                                         must be named. Secondly, the feature positioning within
+                                                                                                         the existing geometry. This interaction with the existing
+                                                                                                         geometry leads to modification and deletion of existing
+                                                                                                         faces and to creation of new (contingent) faces. These
+                                                                                                         contingent faces must also be named. Therefore, there are
+                                                                                                         two types of naming to implement: one for invariant faces
+                                                                                                         and another for contingent faces.
+                                                                                                         4.1.2.1 Invariant faces
+    Figure 4 Face graph example. Initial and
+                                                                                                         According to the feature taxonomies proposed in [7, 2],
+reevaluated objects and their corresponding face
+                                                                                                         invariant faces present in the graph are generated by four
+            graph (only the top face).
+                                                                                                         type of features (primitive, transition, extrusion and
+Each face is identified by a unique name which is defined                                                revolution). For the two first cases, the invariant naming
+either by a unique topological entities traversal (invariant                                             of the generated faces are ensured by a unique topological
+entities), or by an iterative number (contingent entities)                                               traversal of the object (see [2]).
+(see [2]). Each node represents a face, which exists or has
+                                                                                                         In an extrusion case, the generator contour is swept along
+existed in the model. All the faces without outgoing
+                                                                                                         a director path. Each resulting topological entity
+historical links exist in the geometry.
+                                                                                                         corresponds to the cartesian product between a topological
+                                                                                                         entity of the profile and a topological entity of the path.
+4.1.2 Entity naming.                                                                                     For example in Figure 5, face e1e4 from the extruded
+The entity (vertices, edges, paths etc.) identification is                                               object corresponds to the cartesian product between the
+done by reference to faces. It is thus necessary to be able                                              director edge e1 of the director path and the generator
+to name these faces in a unique and deterministic way.                                                   edge e4 of the generator contour. In a similar way, the
+Generally, the identification of an entity is based on                                                   internal face v2f1 comes from v2 (director path) and f1
+unchanging elements that characterize it in a unique way.                                                (generator contour). Robust naming of each contour entity
+In a parametric model, what never changes is the                                                         and of each path entity is fundamental to enable robust
+construction process (we consider the modification of the                                                naming of faces in the graph. Therefore a matching is
+construction process as a model edition and not as a model                                               done, between contour and path of the initial model and
+reevaluation). Therefore, face naming is done by means of                                                contour and path of the reevaluated model, to ensure name
+the construction step number (creation order) and by                                                     persistence. Each face name is build as follows: <step
+means of another identifier which characterizes each face
+                                                   v0                             e3e1
+                                                                       e2e4              e3e4
+                                                                                                             v0f1
+                                   v2             e3                                           e3e3
+             e4                              v3                     e1e4
+                                        e2         e1e1                               e2e3                                 v1f1 v0f1 e3e4         …        e1e3   …
+                         v1   e1                                       e1e3
+        e1          e3                                                                                e3e2
+             f1                                             v1f1
+                                                                                        e2e2
+             e2
+                                                                           e1e2
+
+
+                                                       v0                         e2e4
+                                                                     e5e4                         e3e4              v0f1
+                                                                                                      e3e6
+                                v2                 e3                             e5e6                                     v1f1 v0f1 e3e4   … e4e6 e5e6 e4e5 e5e5
+                           v4                           e4e1         e4e4                    e2e6
+             e4                     v3                                      e4e6 e5e5
+                              e5 e2                                                          e2e5
+                     e6 v1 e4                                      v1f1                                  e3e5
+        e1    f1
+                     e5                                                                      e2e2
+             e2                                                                e4e5
+
+
+
+                               Reevaluation            e1      e2         e5      e6         e4                            Reevaluation      e4       e5     e2   e3
+                   Contour                                                                                          Path
+                               Construction            e1      e2         e3      e3         e4                            Construction      e1       e1     e2   e3
+
+                                                            Figure 5: Invariant face naming
+number, generator entity, director entity>.                     Matching quality is very relative and depends generally on
+To simplify writing, the step numbers have been omitted         operations on the one hand and on semantic the designer
+in Figure 5. In this example, during reevaluation, the vertex   wants to express on the other hand. For instance, Face J in
+between edge e1 and e4 (of the contour) has been moved.         Figure 3 may be matched onto two different ways
+This modification, as every geometric modification, has         according to the semantic given to the operation:
+no influence on topological naming of the generator             •   Either one considers that face J is a “part of” face X
+contour, nor the director path, and therefore has no                because it has a topological similarity and a common
+influence on invariant entity naming. However topological           invariant ancestor (face A).
+modification of the contour (e.g. split of edge e3) or the
+                                                                •   Or one considers that face J comes from split of face
+path (e.g. split of edge e1) should be traced to ensure
+                                                                    F by the fourth slot. Face F is matched onto face T,
+robust naming. The matching table shown in Figure 5
+                                                                    thus J can only be matched onto one face of the faces
+permit to store relation between the contour and path of
+                                                                    resulting from split of T. Consequently, in this
+the initial model and the contour and path of the
+                                                                    example, J would not be matched onto any face.
+reevaluated model. So, despite geometric deformations
+and topological subdivisions (edges e3 and e1) of the
+contour and the path, face e3e4 is uniquely identified as       Our approach consists in using the first semantic that turns
+well in construction as in reevaluation. In a similar way       out to be more general and allows to avoid the tracability
+faces e4e6, e5e6, e4e5 and e5e5 would be identified as a        loss of a face such as J. As we will see it, this tracability
+subdivision of face e1e3. We obtain an identification           loss is highly linked with the type of matching which can
+relation between invariant faces of the face graph              be represented in a model. Thus, choosing a too restrictive
+generated during construction (called AG) and those of          representation may turn out to be restraining. Indeed, the
+the face graph generated during reevaluation (called NG)        second semantic is more restrictive. Since it does not take
+(see the end of section 4.2.1.1 for more details).              into account the fact that to match an entity with another
+4.1.2.2 Contingent faces                                        means that both entities are geometrically and
+Contingent face names consist of a step number and an           topologically similar but not necessarily identical.
+iterative number (an arbitrary but unique number for each
+construction step). For contingent faces this names is not
+                                                                Our approach consists in calculating a matching value for
+sufficient to allow an ulterior matching. Therefore, each
+                                                                faces present in the graph. Others entities (edge, vertices)
+contingent face in the graph is associated with information
+                                                                are named according to this matching (see section 4.2.2).
+about his topological neighborhood. Thus, contingent face
+names consisting in a step number and an iterative number       Our face matching method breaks up into two main steps:
+is sufficient to allow an ulterior matching (see section        the generic cover calculation which allows to evaluate
+4.2).                                                           topological covers between faces of AG and faces of NG
+                                                                (see section 4.2.1.1), and the real matching calculation
+                                                                allowing to calculate a specific matching according to the
+4.2 Contingent entity matching method                           semantic of operation (see section 0). This partition seems
+                                                                to be basic because it allows to distinguish the generic and
+Matching entities consists in associating n entities of the     specific part of matching methods. Such an approach
+initial model with m entities of the reevaluated model in       offers numerous interests as for instance the possibility to
+order to decide if each of n entities corresponds to one or     define a system which proposes a default matching the
+several entities of the reevaluated model, and conversely if    user will be able to specialize if it doesn’t suit him.
+each of m entities corresponds to one or several entities of    Moreover, the cover calculation method is a global
+the initial model. The matching may be realized by using        method of topological matching between two sets of faces,
+the geometry and/or the topological neighborhood of             which may be used in other fields using “pattern
+entities to be referenced. Topology use allows to get a         matching” as shape recognition, feature recognition and
+robust matching method in relation to important geometric       extraction, etc.
+variations and small topological variations. However, in
+some particular cases, when the model contains non-linear
+                                                                4.2.1 Contingent face matching
+entities, topological neighborhood, even extensive [8], are
+                                                                4.2.1.1 Generic cover calculation
+ambiguous and do not allow characterizing in a unique
+                                                                At the reevaluation step, we calculate a cover that consists
+way an entity of this model. Thus, it would be proper to
+                                                                in evaluating topological matching between p faces of AG
+use an additional geometric mechanism (feature
+                                                                and q faces of NG. Thus, we speak about “crossing” based
+orientation, etc.) allowing to raise this ambiguity [5].
+                                                                on each face topological neighborhood. For each face F,
+                Table 2: Inter-graphs relations                               Therefore, we can define, ΓF∩G the set of elements of ΓF
+                                                                              that are equivalent to an element of ΓG according to our
+Topological                                                                   relation. This way, ΓF∩G contains all partial sub-paths of γF
+                                 δ0       δ1            Graph
+neighborhoods
+                                                                              such as there is at least an element of γG of which circular
+γFag is equal to γFng                                                         list of adjacent faces, in terms of invariant faces, is
+                                 1         1                     B
+                                                  Fag                         identical. Then, to solve the problem of subdivisions of
+γFng is included in γFag         1       ]0,1[                                topological neighborhood illustrated on Figure 2, we
+                                                                 C
+γFag is included in γFng        ]0,1[      1                                  propose to introduce a coefficient allowing to weight each
+                                                                              edge influence in the topological neighborhood according
+γFag and γFng partially overlaps ]0,1[ ]0,1[                       Y          to the edge length. Thus, we introduce three functions:
+                                                   Fng
+γFag and γFng doesn’t overlap    0         0                                  •       π such that for each edge e, π(e) is the length of e,
+                                                                   Z
+                                                                              •      Π such that for each circuit γ={ο0, ο1,.. οn},
+we note γF={ο0,ο1,..οn} the circuit of oriented edges
+                                                                                     Π(γ)=Σi=0..nπ(οi),
+(οi)i=0..n of the boundary of F. The crossing result is a set
+of inter-graphs relationships that may exist between faces                    •      Θ, such that for each element γ of ΓF∩G , Θ(γ)=max{
+of AG and faces of NG.                                                               Σi=0..n min(π(οi), π(οi’)) with (οi)i=0..n and (οi’)i=0..n /
+Let γFag={ο0, ο1,.. οn} and γFng={ο0’, ο1’,.. οm’} be the                            γ=ο0.. οn and ο0.. οn~Adjο0’.. οn’}.
+circuits associated with faces Fag of AG and Fng of NG.                       Θ(γ) can be interpreted as the maximum common weight
+We define ΓFag and ΓFng the sets of the partial sub-paths of                  between γ and an equivalent element in ΓG.
+γFag and γFng; a partial sub-path of a circuit is a sub-path of               Finally, we define σ=max{Θ(γ),γ∈ΓF∩G}.
+the circuit where some oriented edges have been deleted.                      σ is the maximum sum of edge lengths that we can extract
+First, one could notice that actually an oriented edge                        from the boundaries of Fag and Fng such as the edges
+cannot appear in two distinct face circuits in an oriented                    appear in the same order in the boundaries of Fag and Fng.
+model. If an oriented edge appears in the circuit of face F                   We calculate two ratios: δ0=σ/Π(γG) and δ1=σ/Π(γF). δ0 is
+and the circuit of face G then it means that F and G have                     the ratio of inclusion of γFag in γFng and δ1 is the ratio of
+opposite orientation: the model is not oriented. So, for                      inclusion of γFng in γFag. As shown in Table 2, δ0 and δ1
+each oriented edge ο, there is a unique face of which
+                                                                              range in interval [0,1] according to the similarity of both
+circuit uses ο and we call neighbor adjacent face of ο, the
+                                                                              weighted topological neighborhoods.
+adjacent face of the edge associated with o that does not
+use o in its circuit.                                                         Let us observe example of Figure 2. We have to cross two
+                                                                              faces of AG (Fa, Fb) with two faces of NG (Fx, Fy). Table
+In order to quantify topological matching, we define the
+                                                                              1 illustrates one calculation step of δ0 and δ1.
+equivalence relation ~Adj between face circuits γ and γ’,
+defined by: γ~Adjγ’ ⇔ ∃(οi)i=0..n and (οi’)i=0..n / γ=ο0.. οn,                Previous calculations allow evaluating in an individual
+γ’=ο0’.. οn’ and ∀i∈{0..n}, the invariant ancestor face of                    way probabilities δ0 and δ1 with mutual inclusion of Fng
+the neighbor adjacent face of οi is also the invariant                        and Fag faces and so topological matching between both
+ancestor face of the neighbor adjacent face of οi’. In other                  faces. This very local approach does not take into account
+words, when you come along γ and γ’ and you consider                          topological matching of adjacent faces. Once δ0 and δ1 are
+only the invariant ancestor of neighbor adjacent faces, you                   calculated, we have to define a method allowing to
+get the same circular list of invariant faces around the                      evaluate in a global way covers between crossed faces.
+faces of which circuits are γ and γ’.                                         This method consists in handling, in an iterative way, the
+
+                                                               Table 1: Crossing
+                                                        Initial graph faces               Fa                                    Fb
+                                                                              F1 F2 F3 F4 F5 F6 F15 F14           F7 F8 F9 F10 F11 F12 F13 F16
+   Partial sub-path of                Reevaluated graph faces                 10 8 2 2 2 2 14.1 6                 8 10 10 2 2 2 2 14.1
+   circuits of faces Fa                              Fx                       F1 F15 F14                          F10 F11 F12 F13
+   and Fy maximizing                  F1 F15 F10 F11 F12 F13 F14              10 14.1 6                           2 2 2 2
+   σ                                  10 18.9 2 2 2 2 8                       δ 0 = 30.1 44.9 , δ 1 = 30.1 46.1         δ 0 = 8 44.9 , δ 1 = 8 50.1
+
+
+                                                     Fy                           F2 F3 F4 F5 F6                  F7 F8 F9 F16
+   Weighted                           F16 F2 F3 F4 F5 F6 F7 F8 F9                 6 2 2 2 2                       8 10 8 14.1
+   topological                        18.9 6 2 2 2 2 10 10 8                   δ 0 = 14 60.9 , δ 1 = 14 46.1         δ 0 = 40.1 60.9 , δ 1 = 40.150.1
+whole table cells in decreasing order of matching             leaves are necessary to know faces it is advisable to cross.
+possibilities. For that, we apply the following process:      The threshold named ε∈[0,1] defines the precision of
+•   Find a cell which is not already “handled” of which       covers. At least one coefficient δ0 or δ1 has to be greater
+    sum δ0+δ1 is maximum (if there exist several cells        than ε in order to represent the inter-graph covering link.
+    giving this maximum sum, we take any cell of them).       A threshold ε = 0 means that all covers are represented
+    Let us suppose that this cell corresponds to the          and therefore avoid any “piece loss” during the matching.
+    crossing of faces Fng and Fag.                            Conversely, a threshold close to ε = 1 means that only
+                                                              covers close to equality will be represented.
+•   Decrement edge weights for edges in γFag and γFng
+                                                              Let us observe the evolution of different reevaluation
+    according to the weight of corresponding oriented
+                                                              steps in Figure 3. We choose in this example ε = 0.15,
+    edges in the element o∈ΓF∩G that lead to the
+                                                              which allows eliminating covers which, are not enough
+    maximum σ; actually, a temporary weight function
+                                                              significant. The choice of this coefficient depends on the
+    replaces π that makes edges appear ‘shortened’ since      topological matching process accuracy that we want to
+    some length is no more available for further cell         implement. Initially, at the first reevaluation step, an
+    computing.                                                identification between invariant entities (see section
+•   For cells which are not already handled, calculate        4.1.2.1) exists and is symbolized by the dotted link
+    numerators σ of δ0 and δ1 with remaining weights.         between face A of AG and of NG (see Figure 6).
+•   Mark this cell as handled                                               C
+                                                                                           D
+                                                                                           E
+•   Iterate the process until all cells are marked.           A
+                                                                            B              H
+                                                                                                                                   L
+                                                                                           G                                       K
+Note that handling a cell of which coefficients δ0 and δ1                                  F
+                                                                                                                                   I
+are equal to zero does not change anything for the table.                                                                          J
+                                                                                                1            0.8
+Thus, when a cell has both coefficients equal to zero, it                       0.96 1
+                                                                                 1 0.93
+                                                                                               0.89           1
+                                                                                                                   0.94
+                                                                                                                    1
+                                                                                                                          1 1
+                                                                                                                          1 0.94
+                                                                                                                                                      0.3
+                                                                                                                                                             0.71 0.62
+                                                                                                                                                             0.86  1
+                                                                                                      0.2                          0.03
+can be considered as handled.                                                                         0.09                         0.24   0.96
+                                                                                                                                          0.87
+                                                                                                                                                 0.25 0.11
+                                                                                                                                                 0.76
+
+
+Note also that during the handling, coefficients δ0 and δ1                                 T
+                                                                                           U                                       X
+only decrease.                                                              P              V                                       Y
+                                                              A
+Observe the result of this method on example of Figure 3.                   Q              S
+
+We can see, on the second step table, that the grayed cell                                 R
+
+is selected because it is the maximum coefficient sum.              Figure 6: Cover links after reevaluation
+Edge coefficients (through a temporary weight function)       At the second reevaluation step, face A is split into two
+of γX and γA are zero because every edge length has been      new faces P and Q. Face A of NG, father of both faces, is
+totally used. Coefficients of the row and the column are      connected by a cover link (identification link in this
+recalculated. The result is zero because there is no faces    particular case because it is an invariant face) to face A of
+which can be used on X or A to identify other faces.          AG of which leaves, appeared up to the second step, are
+Coefficients being equal to zero, cells are considered as     faces B and C. Both faces P and Q have to be crossed with
+already handled (dashed cells). At third process step, only   faces B and C. The crossing of both faces gives the
+one cell has to be handled. No computing of coefficients      following result.
+δ0 and δ1 is needed because all cells of row and column
+are handled.                                                  Coefficients δ0 and δ1 which correspond to the cover
+                                                              calculation of faces P and C are less than the threshold ε =
+At each construction step, how to know which faces            0.15. As result, the cover link between P and C is not
+should be used for the crossing. This problem is              represented. Only covers which appeared in NG leaves
+fundamental because the matching of AG face set with          will be necessary to know which faces will be advisable to
+NG one is too expensive on the one hand and rough             cross at next step. The link between faces A of AG and
+matching may generate “piece loss” one the other hand, as     NG is thus eliminated. Cover link obtained after second
+shown in Figure 3.                                            reevaluation step are represented in Figure 6 by tagged
+Covers allow to know at step i of reevaluation, which face    links between nodes B, C and P, Q containing values δ0
+of AG and NG have to be crossed. These last ones are          and δ1.
+defined according to covers obtained at the previous step.
+                                                              At the third reevaluation step, face Q is split into two new
+At step i, faces to be use in a same crossing are leaves of
+                                                              faces R and S. Face Q, father of both faces is connected by
+AG and NG appeared up to step i. Leave or father faces
+                                                              a cover link to face C of AG of which leaves, appeared up
+are connected by cover links higher than a given
+                                                              to the third step are faces D and E. Both faces R and S
+threshold. For that, only covers which appears in NG
+have to be crossed with faces D and E.                                            4.2.1.2 Specific matching calculation
+Finally, the whole graph, obtained after the fifth                                The previous calculation of topological covers is generic
+reevaluation is shown in Figure 6.                                                in so far as it is only evaluating and quantizing different
+                                                                                  possible matching while leaving to a method more specific
+                                     B                           C
+                                                                                  the choice of a particular matching according to some
+         Step 1           6 7 8 9 10 11 12 1 2 2 3 4 5 6 22
+                          21                   57451 2                            application needs.
+                          1 5 2 5 3 5 4 7 10 2
+                                                                                  Both methods presented in this section are examples of
+           P
+                               δ 0 = 44 45.7               δ 0 = 6 45.7           specific matching calculation methods, based on generic
+6 7 8 9 10 11 12 1   2
+21
+                               δ 1 = 44 44                 δ 1 = 6 24             covers.
+2 5 2 5 3 5 4 7 10.7 2
+                                                                                  At each reevaluation step, we calculate, according to
+ 2 3 4 5 22
+            Q
+                              δ 0 = 4.3 22.3             δ 0 = 22.3 22.3          obtained cover links, the matching of entities generated at
+4.3 7 4 5 2
+                              δ 1 = 4.3 44               δ 1 = 22.3 24            this step. If we consider the set of tagged cover links
+                                                                                  between the old and the new graph present at this step, we
+                                                                                  get a bipartite graph G={AG, NG, E}. A specific
+                                                                                  matching corresponds thus to the reconstruction of a
+                                                                                  bipartite graph G'={AG, NG, E'} where E’ is a subset of E
+                                     B                           C
+                                                       2 3 4 5 6 22               and each link (arcs) of E represents a matching
+                          6 7 8 9 10 11 12 1       2
+         Step 2
+                          21
+                                                       57451 2                    relationship between the two nodes.
+                          0000 0 0         0 0 0 0                                The method that enables to calculate the links of G which
+           P
+                              δ 0 = 44                    δ 0 = 1.7               should be kept in G' consists in maximizing the sum of the
+6 7 8 9 10 11 12 1  2                     45.7                         45.7       coefficients δ0 and δ1 of the tagged links of E'. Indeed, the
+21
+1 0 0 0 0 0 0 0 0.7 0         δ 1 = 44 44                 δ 1 = 1.7 24            more this sum is high, the more whole matching
+                                                                                  corresponds to exact topological identifications. For that,
+            Q
+                               δ 0 = 0 22.3              δ 0 = 22.3 22.3          we assign to each node i of G' a coefficient
+                                                                                               ∑
+ 2 3 4 5 22
+4.3 7 4 5 2
+                                                         δ 1 = 22.3 24
+                                                                                  δi =           δ 0j + δ 1j . For the node i, this coefficient
+                               δ 1 = 0 44                                                   j= all links
+                                                                                        connected to node i
+
+                                                                                  represents the matching quality of its topological
+                                     B                         C                  neighborhood. Then, the graph G' giving the maximum
+                                                                                                     ∑
+                                                      2 3 4 5 6 22
+         Step 3           6 7 8 9 10 11 12 1
+                          21
+                                                   2
+                                                     0.7 0 0 0 1 0                sum Φ =         δ i corresponds to best realizable
+                                                                                                  i = nodes of
+                          0000 0 0         0 0 0 0                                               the graph G'
+           P                   δ 0 = 44 45.7              δ 0 = 1.7 45.7          matching.
+6 7 8 9 10 11 12 1  2
+21                             δ 1 = 44 44                δ 1 = 1.7               An example of characteristic specific matching is the one
+1 0 0 0 0 0 0 0 0.7 0                                                  24
+                                                                                  where G' is built so that each path length is less or equal
+                                                                                  one. That means that each entity will be matched with at
+             Q                 δ 0 = 0 22 .3              δ 0 = 22.3 22.3
+2 3 4 5 22                                                                        most one entity.
+0000 0                         δ 1 = 0 44                 δ1 = 22.3 24
+                                                                                                                      1.94
+                                                                                                                 D
+                                                                                                    C                   2
+                                     B                        C                                                   E
+                                                                              A                                                        1.62
+                                                     2 3 4 5 6 22                                   B                 1.94
+         Step 4           6 7 8 9 10 11 12 1       2                                                             H                 L
+                                                     0 0000 0                                                                          1.57
+                          21
+                                                                                                                 G                 K
+                          0000 0 0         0 0 0 0                                                                                     1.83
+                                                                                                                 F                 I
+            P                  δ 0 = 44                   δ 0 = 1 .7   45.7
+                                                                                                                                       1.01
+6 7 8 9 10 11 12 1 2 21                   45.7                                                                                     J
+0000 0 0 0 00 0                δ 1 = 44                   δ 1 = 1 .7   24
+                                          44
+             Q                 δ0   = 0
+                                          22 . 3
+                                                          δ 0 = 22.3   22.3
+                                                                                                                      1.83
+2 3 4 5 22                                                                                                       T                     2.58
+0000 0                         δ 1 = 0 44                 δ1 = 22.3 24                                                             X
+                                                                                                                 U
+                                                                                                                                       1.62
+                                                                                                    P                 1.94         Y
+                                                                                                                 V
+                                                                              A
+                                                                                                                        2
+                                                                                                    Q            S
+                                                                                                                      1.94
+                                                                                                                 R
+
+                                                                                      Figure 7: Matching links after reevaluation
+Another example of characteristic specific matching is the
+one where G' is built so that each path length is less than
+or equal two. From a semantic point of view, that means
+                                                                6. References
+that one face of AG can either be matched on several faces
+of the NG, or merged with others faces of AG and                [1] Agbodan D., Marcheix D., Pierra G., “A Data Model
+matched on a single face of NG. This choice is mutually              Architecture For Parametrics”; Journal for Geometry
+exclusive. Let us use such a matching on the example of              and Graphics, 1999, Vol.3, N°.1, pp.17-38.
+                                                                [2] Agbodan D., Marcheix D., Pierra G., “Persistent
+Figure 3. For the nodes appeared in the graph at the last
+                                                                     Naming for Parametric Models”, WSCG’2000, 2000,
+revaluation step, the maximization of Φ enables us to                pp.17-38.
+obtain the following G' graph, where the δi coefficients of     [3] Bouma W., Fudos I., Hoffmann C.M., Cai J., Paige
+each nodes are represented and where the links in dotted             R., “Geometric constraint solver”, Computer-Aided
+lines represent a matching relationship (see Figure 7).              Design, June 1995, vol. 27, n° 6, pp 487-501.
+These matching relations are stored in the graph at each        [4] Capolylas V., Chen X., Hoffman C.M. “Generic
+revaluation step. We can note that faces K and J are                 naming in generative, constraint-based design”,
+matched with one same face X in the NG.                              Computer-Aided Design, Vol. 28 pp. 17-26.
+                                                                [5] Chen X., “Representation, Evaluation and Editing of
+                                                                     Feature-Based and Constraint-Based design.”, Ph.D.
+4.2.2 Other entity matching                                          thesis, Department of Computer Sciences, Purdue
+The matching of faces being robust, other entities (loops,           University, West Lafayette, Indiana, 1995.
+edges, vertices, etc.) can then be named in term of faces or    [6] Hoffmann C.M., Juan R., “EREP: an editable high-
+                                                                     level representation for geometric design and
+sets of faces. The characterization of these entities can be
+                                                                     analysis”, Technical Report CER-92-24, Department
+carried out in a way similar to the one introduced by Chen           of Computer Sciences, Purdue University, West
+[5]. For example, an edge will be characterized by its two           Lafayette, Indiana, 1993.
+adjacent faces, the ordered list of the adjacent faces at its   [7] ISO 10303-224: 1999, “Industrial Automation
+ends, as well as an orientation according to the feature             Systems and Integration - Product Data
+orientation making it possible to raise some topological             Representation and Exchange - Part 224: Application
+ambiguities.                                                         protocol: Mechanical product definition for process
+                                                                     planing using machining features”, ISO, Geneva,
+                                                                     1994.
+5. Conclusion                                                   [8] Kripac J., “A mechanism for persistently naming
+                                                                     topological entities in history-based parametric solid
+We proposed a new mechanism of persistent naming                     models (Topological ID System)”, Proceedings of
+associated with a hierarchical structure allowing to trace           Solid Modeling’95, Salt Lake City, Utah USA, 1995,
+                                                                     pp.21-30.
+the historical evolution of easily identifiable invariants in
+                                                                [9] Laakko T., Mäntylä M., “Incremental constraint
+each constructive gesture. The proposed matching method              modeling in a feature modeling system”, Computer
+uses weighted topological neighborhoods to characterize              Graphics forum, Vol.15, N°3, EUROGRAPHICS’96,
+in a precise way each entity. It breaks up into two main             Poitiers, France, 1996, pp.366-376.
+steps: first the calculation of the generic covers allowing     [10] Pierra G., Potier J.C., Girard P., “The EBP system:
+to evaluate the topological covers between faces of the old          Example Based Programming for parametric design,
+graph (AG) and faces of the new graph (NG), and second,              Workshop on Graphic and Modeling”, Science and
+the effective matching calculation, allowing to calculate,           Technology, Coimbra, Springer Verlag. 27-28, June
+according to the operation semantics, a specific matching.           1994.
+We think that this subdivision is fundamental because it        [11] Pierra G., Ait-Ameur Y., Besnard F., Girard P., Potier
+                                                                     J.C., “A general framework for parametric product
+makes it possible to distinguish between the generic and
+                                                                     model within STEP and Part Library”, European
+the specific part of matching methods. The calculation               Conference Product Data Technology, London, 18-19
+method of generic covers offers various advantages. First            April 1996.
+of all, it is a global method of topological matching in the    [12] Raghothama        S.,    Shapiro    V.,    “Boundary
+sense that it involves two sets of faces in order to find the        Representation Variance in Parametric Solid
+best possible matching for all faces. Then, this method              Modeling”, Report SAL 1997-1, Spatial Automation
+makes it possible at each step to know which faces have to           Laboratory, University of Wisconsin-Madison, 1997.
+be crossed. Finally, it addresses the tracability loss          [13] Shah J.J., Mäntylä M., “Parametric and feature-based
+problems which are strongly related to the use of a                  CAD/CAM : Concepts, Techniques, Applications”,
+specific matching.                                                   John Wiley and Sons Inc., july 1995
+                                                                [14] Solano L., Brunet P., “Constructive Constraint-based
+model for parametric CAD systems”, Computer-   Aided Design, 1994, Vol.26, N°8, pp.614-621.
+
