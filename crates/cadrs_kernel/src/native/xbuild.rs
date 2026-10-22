@@ -767,8 +767,20 @@ impl XBuilder {
                     return None;
                 }
                 let (rc, _, _) = curve.reversed(0.0, 1.0);
-                let r = edge_range(&rc, &p0, &p1, closed)?;
-                (rc, r)
+                match edge_range(&rc, &p0, &p1, closed) {
+                    Some(r) => (rc, r),
+                    // A closed spline the edge runs across its start: restarted at the edge's
+                    // first vertex (either way round).
+                    None => [curve, rc].into_iter().find_map(|c| {
+                        let Curve::Nurbs(n) = &c else { return None };
+                        let (a, b) = n.range();
+                        if (n.point(a) - n.point(b)).norm() >= JOIN {
+                            return None;
+                        }
+                        let rs = Curve::Nurbs(Arc::new(n.restarted(param_of(&c, &p0))));
+                        edge_range(&rs, &p0, &p1, closed).map(|r| (rs, r))
+                    })?,
+                }
             }
         };
         // Empty? (A sampled length: exact lengths of long splines cost.)
@@ -1976,5 +1988,23 @@ mod tests {
         assert!(j.validate().is_ok());
         assert!((j.point(2.0) - cubic.point(2.0)).norm() < 1e-9);
         assert!((j.point(5.0) - P3::new(5.0, (4f64.sin()) / 2.0, 0.0)).norm() < 1e-9);
+    }
+
+    /// An edge along a closed spline ending at the spline's start (its vertex projects to the
+    /// start's parameter, before the edge's first): read along the spline from its first
+    /// vertex, not dropped (as1_motor's, r0901_ec's and trj*-ec's loops lost such edges).
+    #[test]
+    fn edges_ending_at_a_closed_splines_start() {
+        let pts = [P3::origin(), P3::new(1.0, 0.0, 0.0), P3::new(1.0, 1.0, 0.0), P3::new(0.0, 1.0, 0.0), P3::origin()];
+        let knots = vec![0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 4.0];
+        let sq = NurbsCurve { degree: 1, knots, cps: pts.iter().map(|p| super::super::nurbs::hom(p, 1.0)).collect() };
+        let mut xb = XBuilder::new();
+        let (a, b) = (xb.vertex(P3::new(0.0, 1.0, 0.0)), xb.vertex(P3::origin()));
+        let e = xb.edge(Curve::Nurbs(Arc::new(sq)), a, b).expect("the edge");
+        let ed = &xb.body.edges[e];
+        assert!((ed.point(ed.t[0]) - P3::new(0.0, 1.0, 0.0)).norm() < 1e-9);
+        assert!((ed.point(ed.t[1]) - P3::origin()).norm() < 1e-9);
+        // The last side, not the other three.
+        assert!((ed.point(0.5 * (ed.t[0] + ed.t[1])) - P3::new(0.0, 0.5, 0.0)).norm() < 1e-9);
     }
 }
