@@ -77,16 +77,22 @@ fn parity_orientation(shell: &Body) -> Option<bool> {
                 if !inside {
                     continue;
                 }
-                let d = ps
-                    .iter()
-                    .flat_map(|l| (0..l.len()).map(move |k| (l[k], l[(k + 1) % l.len()])))
-                    .map(|(a, b)| {
+                // Its distance from the loops, given up as soon as it can't beat the best so
+                // far (the same choice as the full minimum).
+                let floor = best.map_or(f64::NEG_INFINITY, |b| b.0);
+                let mut d = f64::INFINITY;
+                'segs: for l in ps {
+                    for k in 0..l.len() {
+                        let (a, b) = (l[k], l[(k + 1) % l.len()]);
                         let (a, b, x) = (P2::new(a.x * mu, a.y * mv), P2::new(b.x * mu, b.y * mv), P2::new(uv.x * mu, uv.y * mv));
                         let ab = b - a;
                         let s = ((x - a).dot(&ab) / ab.norm_squared().max(1e-300)).clamp(0.0, 1.0);
-                        (a + ab * s - x).norm()
-                    })
-                    .fold(f64::INFINITY, f64::min);
+                        d = d.min((a + ab * s - x).norm());
+                        if d <= floor {
+                            break 'segs;
+                        }
+                    }
+                }
                 if best.is_none_or(|b| d > b.0) {
                     best = Some((d, uv));
                 }
@@ -1283,7 +1289,7 @@ impl Body {
     /// other way, and no hole lies inside another.
     fn check_face_domain(&self, fi: usize) -> Vec<String> {
         let f = &self.faces[fi];
-        let mut errs = Vec::new();
+        let errs = Vec::new();
         // The loops as polylines in (u, v) scaled to lengths on the surface, each point with its
         // edge's tolerance plus how far its segment strays from the p-curve.
         let mut ubox = (f64::INFINITY, f64::NEG_INFINITY);
@@ -1315,7 +1321,34 @@ impl Body {
                 r
             })
             .collect();
-        let crossings = loop_crossings(&rings);
+        let errs = self.domain_errors(fi, &rings, (su, sv));
+        if check_compare() {
+            let old: Vec<Ring> = f
+                .loops
+                .iter()
+                .map(|l| {
+                    let mut r = Ring::default();
+                    for c in l {
+                        let e = &self.edges[c.edge];
+                        let (t0, t1) = co_range(e, c.fwd);
+                        flatten_ref(&c.pc, t0, t1, (su, sv), flat, e.tol.max(super::tol::LOOP_GAP), &mut r);
+                    }
+                    r
+                })
+                .collect();
+            // (The verdicts, not the points they name, which may differ in their last digits.)
+            let gist = |x: &[String]| -> Vec<String> { x.iter().map(|m| m.split(" near ").next().unwrap_or(m).to_string()).collect() };
+            assert_eq!(gist(&errs), gist(&self.domain_errors(fi, &old, (su, sv))), "face {fi}: the domain check differs from the reference flattening's");
+        }
+        errs
+    }
+
+    /// The domain check's problems with face `fi`'s loops flattened into `rings` (in the scaled
+    /// (u, v) `scale`).
+    fn domain_errors(&self, fi: usize, rings: &[Ring], (su, sv): (f64, f64)) -> Vec<String> {
+        let f = &self.faces[fi];
+        let mut errs = Vec::new();
+        let crossings = loop_crossings(rings);
         for &(a, b, p) in &crossings {
             let (u, v) = (p.x / su, p.y / sv);
             if a == b {
@@ -1537,6 +1570,49 @@ impl Ring {
 /// start): scaled by `scale`, split until each segment lies within `flat` of the curve (lines
 /// whole; at most 4 · 2¹⁰ segments, a segment left coarser carrying how far it strays).
 fn flatten(pc: &Curve, t0: f64, t1: f64, scale: (f64, f64), flat: f64, tol: f64, r: &mut Ring) {
+    let at = |t: f64| {
+        let q = pc.point(t);
+        P2::new(q.x * scale.0, q.y * scale.1)
+    };
+    if matches!(pc, Curve::Line { .. }) {
+        r.pts.push(at(t0));
+        r.tol.push(tol);
+        return;
+    }
+    // Each span's three samples (at a quarter, the middle and three quarters) are its halves'
+    // middles and its split point, so a split evaluates the curve four times, not eight.
+    #[allow(clippy::too_many_arguments, reason = "a recursion's state")]
+    fn split(at: &dyn Fn(f64) -> P2, ta: f64, tb: f64, pa: P2, pb: P2, s: [P2; 3], depth: u32, flat: f64, tol: f64, r: &mut Ring) {
+        let stray = s.iter().map(|q| seg_dist2(q, &pa, &pb)).fold(0.0, f64::max);
+        if stray > flat && depth < 10 {
+            let tm = 0.5 * (ta + tb);
+            let pm = s[1];
+            let quarters = |a: f64, b: f64, mid: P2| [at(a + (b - a) * 0.25), mid, at(a + (b - a) * 0.75)];
+            split(at, ta, tm, pa, pm, quarters(ta, tm, s[0]), depth + 1, flat, tol, r);
+            split(at, tm, tb, pm, pb, quarters(tm, tb, s[2]), depth + 1, flat, tol, r);
+        } else {
+            r.pts.push(pa);
+            r.tol.push(tol + stray.max(flat));
+        }
+    }
+    const N0: usize = 4;
+    for i in 0..N0 {
+        let (ta, tb) = (t0 + (t1 - t0) * i as f64 / N0 as f64, t0 + (t1 - t0) * (i + 1) as f64 / N0 as f64);
+        let s = [at(ta + (tb - ta) * 0.25), at(0.5 * (ta + tb)), at(ta + (tb - ta) * 0.75)];
+        split(&at, ta, tb, at(ta), at(tb), s, 0, flat, tol, r);
+    }
+}
+
+/// Whether `CADRS_CHECK_COMPARE` is set: the full check also runs its reference versions
+/// and panics where they disagree (for the gate, to show a faster check is as strict).
+pub(crate) fn check_compare() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("CADRS_CHECK_COMPARE").is_some())
+}
+
+/// [`flatten`] as it was (each span sampled afresh), for `CADRS_CHECK_COMPARE`: the domain
+/// check run both ways must give the same verdicts.
+fn flatten_ref(pc: &Curve, t0: f64, t1: f64, scale: (f64, f64), flat: f64, tol: f64, r: &mut Ring) {
     let at = |t: f64| {
         let q = pc.point(t);
         P2::new(q.x * scale.0, q.y * scale.1)

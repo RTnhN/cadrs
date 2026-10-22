@@ -7,9 +7,9 @@ Measured 2026-10-21 on AMD Ryzen 5 7600X 6-Core Processor (12 threads), native k
 plus the working tree, OCCT 7.8.0 (static, `-O2`). Load average while measuring: native kernel
 15–38, OCCT 11–17 (other jobs share the machine; hence CPU time).
 
-The `occt_blend` and `smlib_fillet` rows were measured again on 2026-10-22 on the same machine
-(load average 4–7) at kernel-perf `eff4843` with the fillet work through fa17; the other rows
-are the run above's.
+The `occt_blend` and `smlib_fillet` rows were measured again on 2026-10-23 on the same machine
+(load average 3–6) at kernel-perf with the fillet work through fa21; the other rows are the run
+above's.
 
 **How.** A case is a DRAW-like script both sides read: `kernel_bench` (an example of the
 crate) for the native kernel, `tools/occt_bench` for OCCT, each command mapped onto the
@@ -29,18 +29,18 @@ Only cases both kernels complete enter the means; the others are listed with the
 | conformance | 83 | 0.36 | 0.28 | 70 |
 | mass | 10 | 11.05 | 16.37 | 1 |
 | mass_eps9 | 10 | 0.52 | 0.38 | 8 |
-| occt_blend | 59 | 1.89 | 1.68 | 15 |
+| occt_blend | 59 | 1.55 | 1.69 | 18 |
 | occt_boolean | 214 | 0.48 | 0.29 | 170 |
 | occt_draft | 14 | 1.88 | 1.00 | 7 |
 | occt_offset | 101 | 0.17 | 0.11 | 90 |
 | occt_pipe | 62 | 2.35 | 1.21 | 4 |
 | smlib_boolean | 52 | 0.17 | 0.19 | 52 |
-| smlib_fillet | 23 | 2.10 | 2.02 | 5 |
+| smlib_fillet | 24 | 1.94 | 2.53 | 6 |
 | smlib_offset | 1 | 141.99 | 141.99 | 0 |
 | step_read | 10 | 1.92 | 5.31 | 4 |
 | step_write | 10 | 0.16 | 0.10 | 9 |
 | tess | 10 | 0.97 | 0.88 | 6 |
-| **all** | 659 | **0.56** | 0.38 | 441 |
+| **all** | 660 | **0.55** | 0.37 | 445 |
 
 **The categories.**
 - `occt_<group>`: OCCT's own DRAW cases (`tests/<group>`) that pass on the native kernel, as the
@@ -98,11 +98,11 @@ failure here is a difference between the suite and the bench, e.g. a time-out).
 | `step_write/r0901_ec` | stepread: InvalidInput("STEP import: part 'the product name': face 83 loop 0: p- | 72.41 ms |
 | `step_read/nist_ftc_08_asme1_ap242_2` | stepread: InvalidInput("STEP import: the file holds no shapes") | 59.57 ms |
 | `step_write/nist_ftc_08_asme1_ap242_2` | stepread: InvalidInput("STEP import: the file holds no shapes") | 6.41 ms |
-| `fillets/case_004_brick` | 3.08 ms | fillet failed |
-| `fillets/case_232_box_w_slot` | 42.37 ms | fillet failed |
-| `fillets/case_414_cliff_4` | 28.62 ms | fillet failed |
-| `fillets/case_417_cyl_on_box_w_tan_hole` | 10.96 ms | fillet failed |
-| `fillets/case_419_box_diff_3cyls` | 37.91 ms | fillet failed |
+| `fillets/case_004_brick` | 2.08 ms | fillet failed |
+| `fillets/case_232_box_w_slot` | 61.15 ms | fillet failed |
+| `fillets/case_414_cliff_4` | 22.50 ms | fillet failed |
+| `fillets/case_417_cyl_on_box_w_tan_hole` | 19.76 ms | fillet failed |
+| `fillets/case_419_box_diff_3cyls` | 42.45 ms | fillet failed |
 
 ## All cases
 
@@ -130,16 +130,16 @@ CPU ms on one thread; `mt` wall ms on the default pool.
 | `mass_eps9/test8` | mass_eps9 | 344.69 | 200.34 | 355.99 | 0.97 |
 | `mass_eps9/vase1` | mass_eps9 | 1346.87 | 482.62 | 828.58 | 1.63 |
 | `mass_eps9/vase3` | mass_eps9 | 1437.50 | 648.80 | 859.48 | 1.67 |
-| `blend/simple_o3` | occt_blend | 8.72 | 14.04 | 12.24 | 0.71 |
-| `blend/simple_o5` | occt_blend | 16.85 | 22.03 | 36.27 | 0.46 |
-| `blend/simple_o7` | occt_blend | 19.02 | 21.73 | 18.53 | 1.03 |
-| `blend/simple_o9` | occt_blend | 18.45 | 22.36 | 31.41 | 0.59 |
-| `blend/simple_p2` | occt_blend | 14.77 | 18.35 | 10.19 | 1.45 |
-| `blend/simple_q1` | occt_blend | 15.28 | 11.53 | 2.29 | 6.68 |
-| `blend/simple_s3` | occt_blend | 5.27 | 5.51 | 1.78 | 2.95 |
-| `blend/simple_t3` | occt_blend | 7.15 | 7.69 | 1.77 | 4.03 |
-| `blend/simple_t5` | occt_blend | 22.67 | 25.09 | 2.97 | 7.64 |
-| `blend/simple_t7` | occt_blend | 9.56 | 10.19 | 2.76 | 3.46 |
+| `blend/simple_o3` | occt_blend | 8.47 | 8.70 | 15.79 | 0.54 |
+| `blend/simple_o5` | occt_blend | 16.66 | 14.60 | 44.14 | 0.38 |
+| `blend/simple_o7` | occt_blend | 17.62 | 14.85 | 22.59 | 0.78 |
+| `blend/simple_o9` | occt_blend | 16.05 | 14.60 | 34.49 | 0.47 |
+| `blend/simple_p2` | occt_blend | 11.98 | 11.35 | 11.49 | 1.04 |
+| `blend/simple_q1` | occt_blend | 11.80 | 7.71 | 3.13 | 3.77 |
+| `blend/simple_s3` | occt_blend | 3.07 | 3.39 | 1.69 | 1.82 |
+| `blend/simple_t3` | occt_blend | 6.37 | 4.32 | 1.88 | 3.40 |
+| `blend/simple_t5` | occt_blend | 21.66 | 14.23 | 3.50 | 6.19 |
+| `blend/simple_t7` | occt_blend | 9.09 | 6.40 | 2.81 | 3.24 |
 | `boolean/bcommon_2d_a8` | occt_boolean | 0.07 | 0.08 | 0.27 | 0.27 |
 | `boolean/bcommon_2d_c2` | occt_boolean | 43.96 | 55.22 | 90.68 | 0.48 |
 | `boolean/bcommon_2d_d5` | occt_boolean | 61.31 | 79.13 | 13.07 | 4.69 |
@@ -584,31 +584,31 @@ CPU ms on one thread; `mt` wall ms on the default pool.
 | `booleans/box_cyl_grid_23` | smlib_boolean | 0.40 | 0.73 | 3.76 | 0.11 |
 | `booleans/box_cyl_grid_24` | smlib_boolean | 0.84 | 1.14 | 0.89 | 0.95 |
 | `booleans/stress_boxucyltan_union` | smlib_boolean | 0.64 | 1.07 | 6.93 | 0.09 |
-| `fillets/case_001_cyl_cyl_219` | smlib_fillet | 20.47 | 17.15 | 16.03 | 1.28 |
-| `fillets/case_003_box_on_box` | smlib_fillet | 0.65 | 1.11 | 1.31 | 0.49 |
-| `fillets/case_004_brick` | smlib_fillet | 3.08 | 3.16 | fail |  |
-| `fillets/case_005_l_shaped_box` | smlib_fillet | 0.54 | 1.08 | 1.10 | 0.49 |
-| `fillets/case_006_l_shaped_box` | smlib_fillet | 0.69 | 1.13 | 1.07 | 0.65 |
-| `fillets/case_007_cyl_on_box` | smlib_fillet | 1.84 | 2.71 | 0.42 | 4.34 |
-| `fillets/case_010_tilt_cyl_on_box` | smlib_fillet | 9.15 | 12.95 | 10.57 | 0.87 |
-| `fillets/case_114_cone_34` | smlib_fillet | 27.71 | 35.60 | 18.00 | 1.54 |
-| `fillets/case_117_ext_w_hole` | smlib_fillet | 75.76 | 106.49 | 25.05 | 3.02 |
-| `fillets/case_123_corner_box` | smlib_fillet | 36.79 | 40.30 | 35.01 | 1.05 |
-| `fillets/case_124_box` | smlib_fillet | 8.76 | 11.20 | 7.46 | 1.17 |
-| `fillets/case_126_torii_fillet` | smlib_fillet | 22.58 | 31.07 | 11.18 | 2.02 |
-| `fillets/case_209_test9` | smlib_fillet | 2.36 | 3.54 | 2.46 | 0.96 |
-| `fillets/case_222_vase2` | smlib_fillet | 161.92 | 212.61 | 101.35 | 1.60 |
-| `fillets/case_232_box_w_slot` | smlib_fillet | 42.37 | 60.73 | fail |  |
-| `fillets/case_236_heart` | smlib_fillet | 45.64 | 55.90 | 9.25 | 4.94 |
-| `fillets/case_406_2cyls_on_box` | smlib_fillet | 12.27 | 13.05 | 2.91 | 4.22 |
-| `fillets/case_409_cyl_on_box_w_fillet2` | smlib_fillet | 15.13 | 12.09 | 2.89 | 5.23 |
-| `fillets/case_413_cliff_3` | smlib_fillet | 24.27 | 17.16 | 2.07 | 11.71 |
-| `fillets/case_414_cliff_4` | smlib_fillet | 28.62 | 19.88 | fail |  |
-| `fillets/case_415_cyl_on_box_w_hole` | smlib_fillet | 12.54 | 9.29 | 2.14 | 5.86 |
-| `fillets/case_417_cyl_on_box_w_tan_hole` | smlib_fillet | 10.96 | 7.06 | fail |  |
-| `fillets/case_418_box_diff_cyl_big_rad` | smlib_fillet | 6.37 | 4.55 | 1.40 | 4.56 |
-| `fillets/case_419_box_diff_3cyls` | smlib_fillet | 37.91 | 18.66 | fail |  |
-| `fillets/case_420_cyl_on_box_w_hole` | smlib_fillet | 13.68 | 10.08 | 3.39 | 4.03 |
+| `fillets/case_001_cyl_cyl_219` | smlib_fillet | 15.45 | 11.62 | 16.12 | 0.96 |
+| `fillets/case_003_box_on_box` | smlib_fillet | 0.50 | 0.73 | 1.25 | 0.40 |
+| `fillets/case_004_brick` | smlib_fillet | 2.08 | 1.89 | fail |  |
+| `fillets/case_005_l_shaped_box` | smlib_fillet | 0.35 | 0.63 | 1.08 | 0.32 |
+| `fillets/case_006_l_shaped_box` | smlib_fillet | 0.44 | 0.72 | 1.12 | 0.39 |
+| `fillets/case_007_cyl_on_box` | smlib_fillet | 1.25 | 1.63 | 0.43 | 2.88 |
+| `fillets/case_010_tilt_cyl_on_box` | smlib_fillet | 6.23 | 6.59 | 10.69 | 0.58 |
+| `fillets/case_114_cone_34` | smlib_fillet | 27.41 | 25.24 | 18.31 | 1.50 |
+| `fillets/case_117_ext_w_hole` | smlib_fillet | 74.97 | 70.37 | 25.67 | 2.92 |
+| `fillets/case_123_corner_box` | smlib_fillet | 36.19 | 32.75 | 35.64 | 1.02 |
+| `fillets/case_124_box` | smlib_fillet | 8.76 | 7.39 | 7.91 | 1.11 |
+| `fillets/case_126_torii_fillet` | smlib_fillet | 21.79 | 19.52 | 11.36 | 1.92 |
+| `fillets/case_209_test9` | smlib_fillet | 2.23 | 2.31 | 2.58 | 0.86 |
+| `fillets/case_222_vase2` | smlib_fillet | 239.01 | 131.29 | 102.78 | 2.33 |
+| `fillets/case_232_box_w_slot` | smlib_fillet | 61.15 | 43.10 | fail |  |
+| `fillets/case_236_heart` | smlib_fillet | 60.72 | 35.44 | 9.55 | 6.35 |
+| `fillets/case_406_2cyls_on_box` | smlib_fillet | 10.27 | 7.50 | 2.68 | 3.83 |
+| `fillets/case_409_cyl_on_box_w_fillet2` | smlib_fillet | 13.80 | 8.59 | 2.82 | 4.89 |
+| `fillets/case_413_cliff_3` | smlib_fillet | 20.60 | 15.32 | 2.09 | 9.86 |
+| `fillets/case_414_cliff_4` | smlib_fillet | 22.50 | 16.57 | fail |  |
+| `fillets/case_415_cyl_on_box_w_hole` | smlib_fillet | 9.74 | 7.07 | 2.03 | 4.80 |
+| `fillets/case_417_cyl_on_box_w_tan_hole` | smlib_fillet | 19.76 | 13.46 | fail |  |
+| `fillets/case_418_box_diff_cyl_big_rad` | smlib_fillet | 4.99 | 3.81 | 1.30 | 3.83 |
+| `fillets/case_419_box_diff_3cyls` | smlib_fillet | 42.45 | 21.84 | fail |  |
+| `fillets/case_420_cyl_on_box_w_hole` | smlib_fillet | 9.95 | 7.62 | 3.21 | 3.10 |
 | `offset/offset_10_offset_bracket2` | smlib_offset | fail | fail | 66.80 |  |
 | `offset/offset_11_offset_bracket2` | smlib_offset | 7398.26 | 15762.69 | 52.10 | 141.99 |
 | `step_read/as1_motor` | step_read | 2022.20 | 2349.81 | 142.16 | 14.22 |
@@ -728,55 +728,56 @@ CPU ms on one thread; `mt` wall ms on the default pool.
 | `union_merges_coplanar_faces` | conformance | 0.92 | 27.07 | 10.00 | 0.09 |
 | `union_merges_cylinders_across_sketches` | conformance | 14.85 | 124.70 | 81.00 | 0.18 |
 | `union_merges_flush_cylinders` | conformance | 6.44 | 12.68 | 36.00 | 0.18 |
-| `blend/complex_b9` | occt_blend | 1.17 | 1.32 | 2.81 | 0.42 |
-| `blend/complex_d6` | occt_blend | 17.10 | 17.49 | 2.27 | 7.55 |
-| `blend/complex_e8` | occt_blend | 93.68 | 87.91 | 17.30 | 5.42 |
-| `blend/complex_f4` | occt_blend | 26.43 | 26.64 | 22.94 | 1.15 |
-| `blend/complex_g1` | occt_blend | 58.50 | 54.03 | 40.95 | 1.43 |
-| `blend/simple_a1` | occt_blend | 1.29 | 0.99 | 0.44 | 2.95 |
-| `blend/simple_a3` | occt_blend | 1.53 | 1.02 | 0.39 | 3.88 |
-| `blend/simple_h7` | occt_blend | 14.17 | 11.08 | 8.45 | 1.68 |
-| `blend/simple_j1` | occt_blend | 1.76 | 1.66 | 0.23 | 7.67 |
-| `blend/simple_k2` | occt_blend | 31.65 | 27.80 | 22.59 | 1.40 |
-| `blend/simple_k5` | occt_blend | 0.59 | 1.01 | 1.18 | 0.50 |
-| `blend/simple_k7` | occt_blend | 23.71 | 23.74 | 4.45 | 5.33 |
-| `blend/simple_k9` | occt_blend | 3.90 | 3.98 | 3.41 | 1.14 |
-| `blend/simple_l2` | occt_blend | 0.69 | 1.16 | 1.49 | 0.46 |
-| `blend/simple_l4` | occt_blend | 3.24 | 3.64 | 3.30 | 0.98 |
-| `blend/simple_l6` | occt_blend | 4.38 | 4.34 | 3.91 | 1.12 |
-| `blend/simple_l8` | occt_blend | 7.80 | 7.56 | 4.97 | 1.57 |
-| `blend/simple_m1` | occt_blend | 1.29 | 1.82 | 1.46 | 0.88 |
-| `blend/simple_m3` | occt_blend | 18.45 | 18.73 | 12.13 | 1.52 |
-| `blend/simple_m5` | occt_blend | 7.31 | 6.95 | 5.15 | 1.42 |
-| `blend/simple_m7` | occt_blend | 2.68 | 3.24 | 1.19 | 2.25 |
-| `blend/simple_m9` | occt_blend | 18.84 | 19.05 | 17.35 | 1.09 |
-| `blend/simple_n2` | occt_blend | 8.91 | 9.32 | 21.30 | 0.42 |
-| `blend/simple_n4` | occt_blend | 6.48 | 6.42 | 11.32 | 0.57 |
-| `blend/simple_n6` | occt_blend | 4.76 | 4.43 | 3.35 | 1.42 |
-| `blend/simple_n8` | occt_blend | 12.32 | 11.80 | 24.18 | 0.51 |
-| `blend/simple_o1` | occt_blend | 6.59 | 5.97 | 4.51 | 1.46 |
-| `blend/simple_p4` | occt_blend | 4.43 | 7.03 | 5.84 | 0.76 |
-| `blend/simple_p7` | occt_blend | 21.80 | 19.02 | 8.77 | 2.49 |
-| `blend/simple_q4` | occt_blend | 2.96 | 3.00 | 3.19 | 0.93 |
-| `blend/simple_q6` | occt_blend | 44.64 | 46.78 | 10.83 | 4.12 |
-| `blend/simple_r8` | occt_blend | 6.34 | 8.02 | 3.15 | 2.02 |
-| `blend/simple_s1` | occt_blend | 6.93 | 8.89 | 2.93 | 2.37 |
-| `blend/simple_s6` | occt_blend | 4.77 | 5.25 | 1.62 | 2.95 |
-| `blend/simple_s8` | occt_blend | 10.54 | 12.14 | 4.50 | 2.34 |
-| `blend/simple_t1` | occt_blend | 8.86 | 10.19 | 2.70 | 3.28 |
-| `blend/simple_u3` | occt_blend | 6.70 | 9.03 | 1.94 | 3.45 |
-| `blend/simple_u6` | occt_blend | 41.50 | 47.50 | 2.50 | 16.59 |
-| `blend/simple_w1` | occt_blend | 1.92 | 2.83 | 0.95 | 2.01 |
-| `blend/simple_w4` | occt_blend | 8.81 | 12.00 | 10.90 | 0.81 |
-| `blend/simple_w6` | occt_blend | 1.92 | 2.79 | 0.26 | 7.41 |
-| `blend/simple_w9` | occt_blend | 5.20 | 6.54 | 1.49 | 3.50 |
-| `blend/simple_x5` | occt_blend | 20.06 | 27.32 | 15.89 | 1.26 |
-| `blend/simple_x7` | occt_blend | 2.25 | 3.83 | 0.57 | 3.94 |
-| `blend/simple_x9` | occt_blend | 3.45 | 4.39 | 1.64 | 2.10 |
-| `blend/simple_y2` | occt_blend | 3.69 | 3.96 | 0.77 | 4.79 |
-| `blend/simple_y4` | occt_blend | 5.88 | 5.78 | 0.85 | 6.95 |
-| `blend/simple_y9` | occt_blend | 6.13 | 6.52 | 0.73 | 8.40 |
-| `blend/tolblend_simple_f9` | occt_blend | 8.89 | 8.90 | 21.72 | 0.41 |
-| `fillets/case_220_vase` | smlib_fillet | 508.95 | 587.89 | 103.38 | 4.92 |
-| `fillets/case_225_box_diff_cyl` | smlib_fillet | 7.58 | 10.58 | 6.13 | 1.24 |
-| `fillets/case_404_cyl_on_box1` | smlib_fillet | 6.96 | 10.06 | 2.89 | 2.41 |
+| `blend/complex_b9` | occt_blend | 1.67 | 1.23 | 2.60 | 0.64 |
+| `blend/complex_d6` | occt_blend | 23.12 | 15.80 | 2.65 | 8.72 |
+| `blend/complex_e8` | occt_blend | 7.99 | 5.57 | 14.59 | 0.55 |
+| `blend/complex_f4` | occt_blend | 36.63 | 25.58 | 20.63 | 1.78 |
+| `blend/complex_g1` | occt_blend | 81.90 | 54.87 | 44.98 | 1.82 |
+| `blend/simple_a1` | occt_blend | 1.47 | 0.92 | 0.51 | 2.92 |
+| `blend/simple_a3` | occt_blend | 1.52 | 0.93 | 0.55 | 2.79 |
+| `blend/simple_h7` | occt_blend | 18.67 | 10.79 | 10.80 | 1.73 |
+| `blend/simple_j1` | occt_blend | 1.84 | 1.49 | 0.27 | 6.80 |
+| `blend/simple_k2` | occt_blend | 35.98 | 24.49 | 31.90 | 1.13 |
+| `blend/simple_k5` | occt_blend | 0.60 | 0.98 | 1.67 | 0.36 |
+| `blend/simple_k7` | occt_blend | 22.73 | 22.76 | 7.28 | 3.12 |
+| `blend/simple_k9` | occt_blend | 4.88 | 3.76 | 5.67 | 0.86 |
+| `blend/simple_l2` | occt_blend | 0.77 | 1.03 | 2.38 | 0.32 |
+| `blend/simple_l4` | occt_blend | 3.03 | 3.15 | 5.20 | 0.58 |
+| `blend/simple_l6` | occt_blend | 4.47 | 4.22 | 6.08 | 0.74 |
+| `blend/simple_l8` | occt_blend | 8.57 | 7.37 | 7.64 | 1.12 |
+| `blend/simple_m1` | occt_blend | 1.50 | 1.48 | 2.24 | 0.67 |
+| `blend/simple_m3` | occt_blend | 23.76 | 17.81 | 19.02 | 1.25 |
+| `blend/simple_m5` | occt_blend | 10.49 | 6.64 | 8.10 | 1.29 |
+| `blend/simple_m7` | occt_blend | 3.47 | 2.61 | 1.36 | 2.55 |
+| `blend/simple_m9` | occt_blend | 23.42 | 19.14 | 22.38 | 1.05 |
+| `blend/simple_n2` | occt_blend | 13.48 | 9.91 | 35.62 | 0.38 |
+| `blend/simple_n4` | occt_blend | 8.93 | 5.86 | 17.09 | 0.52 |
+| `blend/simple_n6` | occt_blend | 6.97 | 4.58 | 5.07 | 1.38 |
+| `blend/simple_n8` | occt_blend | 16.41 | 11.70 | 36.56 | 0.45 |
+| `blend/simple_o1` | occt_blend | 8.70 | 5.21 | 5.99 | 1.45 |
+| `blend/simple_p4` | occt_blend | 3.51 | 3.84 | 9.63 | 0.36 |
+| `blend/simple_p7` | occt_blend | 15.69 | 11.43 | 12.80 | 1.23 |
+| `blend/simple_q4` | occt_blend | 2.14 | 1.97 | 4.22 | 0.51 |
+| `blend/simple_q6` | occt_blend | 29.96 | 28.96 | 14.62 | 2.05 |
+| `blend/simple_r8` | occt_blend | 4.75 | 5.05 | 3.60 | 1.32 |
+| `blend/simple_s1` | occt_blend | 5.37 | 5.54 | 2.82 | 1.90 |
+| `blend/simple_s6` | occt_blend | 2.65 | 3.07 | 1.57 | 1.69 |
+| `blend/simple_s8` | occt_blend | 9.91 | 7.68 | 4.39 | 2.26 |
+| `blend/simple_t1` | occt_blend | 7.97 | 5.97 | 2.79 | 2.86 |
+| `blend/simple_u3` | occt_blend | 7.96 | 5.50 | 2.02 | 3.95 |
+| `blend/simple_u6` | occt_blend | 42.47 | 27.45 | 2.38 | 17.82 |
+| `blend/simple_w1` | occt_blend | 2.62 | 1.85 | 0.84 | 3.10 |
+| `blend/simple_w4` | occt_blend | 11.74 | 8.15 | 10.61 | 1.11 |
+| `blend/simple_w6` | occt_blend | 1.22 | 1.56 | 0.26 | 4.78 |
+| `blend/simple_w9` | occt_blend | 5.54 | 5.13 | 1.49 | 3.71 |
+| `blend/simple_x5` | occt_blend | 29.03 | 16.89 | 15.65 | 1.85 |
+| `blend/simple_x7` | occt_blend | 3.25 | 2.34 | 0.51 | 6.38 |
+| `blend/simple_x9` | occt_blend | 3.81 | 2.74 | 1.58 | 2.41 |
+| `blend/simple_y2` | occt_blend | 3.61 | 2.69 | 0.73 | 4.96 |
+| `blend/simple_y4` | occt_blend | 4.35 | 3.95 | 0.79 | 5.48 |
+| `blend/simple_y9` | occt_blend | 3.83 | 3.89 | 0.69 | 5.57 |
+| `blend/tolblend_simple_f9` | occt_blend | 5.23 | 5.06 | 21.16 | 0.25 |
+| `fillets/case_220_vase` | smlib_fillet | 617.80 | 356.81 | 104.77 | 5.90 |
+| `fillets/case_225_box_diff_cyl` | smlib_fillet | 10.50 | 7.12 | 6.35 | 1.66 |
+| `fillets/case_404_cyl_on_box1` | smlib_fillet | 8.10 | 6.11 | 2.95 | 2.74 |
+| `fillets/case_408_cyl_on_box_w_fillet1` | smlib_fillet | 6.68 | 4.54 | 2.23 | 3.00 |

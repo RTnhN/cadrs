@@ -1961,24 +1961,21 @@ fn case_407_cyl_on_box_w_fillet() {
 /// SMLib fillet test 408: `cyl_on_box_w_fillet1.smb`, radius 1.0, edges [(2, 2)].
 #[test]
 fn case_408_cyl_on_box_w_fillet1() {
-    known_failure(
-        blend(
-            "cyl_on_box_w_fillet1.smb",
-            &[(2, 2)],
-            true,
-            Op::Fillet(1.0),
-            &Expect {
-                volume: Some(135.462142787),
-                area: Some(162.49465434),
-                faces: Some(12),
-                edges: Some(27),
-                solid: Some(true),
-                ..Expect::default()
-            },
-        ),
-        "fillets",
-        "case_408_cyl_on_box_w_fillet1",
-    );
+    blend(
+        "cyl_on_box_w_fillet1.smb",
+        &[(2, 2)],
+        true,
+        Op::Fillet(1.0),
+        &Expect {
+            volume: Some(135.462142787),
+            area: Some(162.49465434),
+            faces: Some(12),
+            edges: Some(27),
+            solid: Some(true),
+            ..Expect::default()
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib fillet test 409: `cyl_on_box_w_fillet2.smb`, radius 2.0, edges [(6, 7)].

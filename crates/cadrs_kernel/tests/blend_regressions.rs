@@ -544,42 +544,8 @@ fn local_fillet_matches(
 /// grows there).
 #[test]
 fn fillet_convex_meets_concave() {
-    use nalgebra::{Point2, Point3, Vector3};
-    use std::f64::consts::PI;
     let mut k = NativeKernel::new();
-    // The two circles' outline: round the first from the upper crossing to the lower, then
-    // round the second back.
-    let a = (35.0_f64 / 50.0).acos();
-    let curves = vec![
-        Curve2::Arc {
-            center: Point2::new(50.0, 50.0),
-            radius: 50.0,
-            start_angle: a,
-            sweep: 2.0 * (PI - a),
-            source: None,
-        },
-        Curve2::Arc {
-            center: Point2::new(120.0, 50.0),
-            radius: 50.0,
-            start_angle: PI + a,
-            sweep: 2.0 * (PI - a),
-            source: None,
-        },
-    ];
-    let xy = Plane {
-        origin: Point3::origin(),
-        x_dir: Vector3::x_axis(),
-        normal: Vector3::z_axis(),
-    };
-    let profile = Profile::new(
-        xy,
-        vec![Region {
-            outer: Loop { curves },
-            holes: vec![],
-            source: None,
-        }],
-    );
-    let b = k.extrude(&profile, Extent::Blind(150.0)).unwrap().bodies[0];
+    let b = two_cylinders(&mut k);
     let pick = |es: &[EdgeInfo]| -> Vec<EdgeId> {
         // The valley's edge at y < 50, and the first cylinder's top arc.
         let valley = es
@@ -1089,5 +1055,373 @@ fn fillet_all_convex_edges_is_an_opening() {
         "fillet area {} vs opening {}",
         a.surface_area,
         b.surface_area
+    );
+}
+
+/// The edges of body `b` nearest the points `at` (their middles).
+fn edges_near(k: &NativeKernel, b: BodyId, at: &[[f64; 3]]) -> Vec<EdgeId> {
+    let es = k.edges(b).unwrap();
+    at.iter()
+        .map(|p| {
+            let p = nalgebra::Point3::new(p[0], p[1], p[2]);
+            es.iter()
+                .min_by(|x, y| (x.mid - p).norm().total_cmp(&(y.mid - p).norm()))
+                .expect("no edges")
+                .id
+        })
+        .collect()
+}
+
+/// `got` (volume, area) within `rel` of OCCT's.
+fn near_occt(got: (f64, f64), volume: f64, area: f64, rel: f64) {
+    let (v, a) = got;
+    assert!(
+        (v - volume).abs() < rel * volume,
+        "volume {v} (OCCT {volume})"
+    );
+    assert!((a - area).abs() < rel * area, "area {a} (OCCT {area})");
+}
+
+/// The outline of two circles of radius 50 whose centres are 70 apart, extruded 150 (two fused
+/// cylinders, OCCT blend simple P2 and P3's model).
+fn two_cylinders(k: &mut NativeKernel) -> BodyId {
+    use nalgebra::{Point2, Point3, Vector3};
+    use std::f64::consts::PI;
+    let a = (35.0_f64 / 50.0).acos();
+    let curves = vec![
+        Curve2::Arc {
+            center: Point2::new(50.0, 50.0),
+            radius: 50.0,
+            start_angle: a,
+            sweep: 2.0 * (PI - a),
+            source: None,
+        },
+        Curve2::Arc {
+            center: Point2::new(120.0, 50.0),
+            radius: 50.0,
+            start_angle: PI + a,
+            sweep: 2.0 * (PI - a),
+            source: None,
+        },
+    ];
+    let xy = Plane {
+        origin: Point3::origin(),
+        x_dir: Vector3::x_axis(),
+        normal: Vector3::z_axis(),
+    };
+    let profile = Profile::new(
+        xy,
+        vec![Region {
+            outer: Loop { curves },
+            holes: vec![],
+            source: None,
+        }],
+    );
+    k.extrude(&profile, Extent::Blind(150.0)).unwrap().bodies[0]
+}
+
+/// Two fused cylinders rounded 5 mm along both valleys between them and round both tops (OCCT
+/// blend simple P3): at each valley's top the two convex fillets meet the concave one in a
+/// patched corner. The two tops' fillets cross there at an angle, tangent to the top they
+/// share: each one's curve across its strip must leave the rails' crossing on its own side of
+/// the mitre between them, or the strips cross.
+#[test]
+fn fillet_two_tops_meeting_a_valley() {
+    let mut k = NativeKernel::new();
+    let b = two_cylinders(&mut k);
+    let pick = |es: &[EdgeInfo]| -> Vec<EdgeId> {
+        es.iter()
+            .filter(|e| {
+                (e.curve == CurveKind::Line && (e.mid.x - 85.0).abs() < 1e-6)
+                    || ((e.mid.z - 150.0).abs() < 1e-6 && e.circle.is_some())
+            })
+            .map(|e| e.id)
+            .collect()
+    };
+    let got = local_fillet_law(&mut k, b, &pick, &[(0.0, 5.0), (1.0, 5.0)]);
+    near_occt(got, 2133270.476235686, 97351.925992673, 1e-4);
+}
+
+/// A keyhole boss (circles of radius 22.5 and 10, their centres 25 apart, 32 high) on a disc,
+/// its small circle's wall split in two faces at the circle's quadrant point just past one
+/// valley, filleted 10 mm along both valleys (OCCT blend complex E8). The ball touches the
+/// small circle's wall past the split: the narrow face beside the valley goes whole under the
+/// strip, which runs on the face beyond.
+#[test]
+fn fillet_valley_past_a_split_wall() {
+    use nalgebra::{Point2, Point3, Vector3};
+    use std::f64::consts::PI;
+    let mut k = NativeKernel::new();
+    // The circles cross at (±x, y); round the big one the long way from (−x, y) to (x, y), then
+    // round the small one back, split at its quadrant point (10, 25).
+    let (x, y) = (8.99218410621135_f64, 20.625_f64);
+    let (big, small) = (y.atan2(-x), (y - 25.0).atan2(x));
+    let curves = vec![
+        Curve2::Arc {
+            center: Point2::new(0.0, 0.0),
+            radius: 22.5,
+            start_angle: big,
+            sweep: 2.0 * PI - (2.0 * big - PI),
+            source: None,
+        },
+        Curve2::Arc {
+            center: Point2::new(0.0, 25.0),
+            radius: 10.0,
+            start_angle: small,
+            sweep: -small,
+            source: None,
+        },
+        Curve2::Arc {
+            center: Point2::new(0.0, 25.0),
+            radius: 10.0,
+            start_angle: 0.0,
+            sweep: PI - small,
+            source: None,
+        },
+    ];
+    let top = Plane {
+        origin: Point3::new(0.0, 0.0, 8.0),
+        x_dir: Vector3::x_axis(),
+        normal: Vector3::z_axis(),
+    };
+    let profile = Profile::new(
+        top,
+        vec![Region {
+            outer: Loop { curves },
+            holes: vec![],
+            source: None,
+        }],
+    );
+    let boss = k.extrude(&profile, Extent::Blind(32.0)).unwrap().bodies[0];
+    let disc = k.pcylinder(55.0, 8.0).unwrap();
+    let boss = draw::Shape::Body(boss);
+    let draw::Shape::Body(b) = k.bfuse(&disc, &boss).unwrap() else {
+        panic!("not a body")
+    };
+    let edges = edges_near(&k, b, &[[x, y, 24.0], [-x, y, 24.0]]);
+    let pick = |_: &[EdgeInfo]| edges.clone();
+    let got = local_fillet_law(&mut k, b, &pick, &[(0.0, 10.0), (1.0, 10.0)]);
+    near_occt(got, 134300.125321031, 26887.758736863, 1e-4);
+}
+
+/// A block with a wall along one side and a rib 5 high across its top from the wall (OCCT
+/// blend complex F3: the rib's cross-section at the wall is lower than the fillet), the
+/// valley between the wall and the top filleted 10 mm up to the rib. The rail on the wall
+/// runs on above the rib: it stops where the rib's side's plane meets it, past the top of the
+/// rib's edge up the wall; the rib's side is cut by the end curve up to the rib's top, and a
+/// face in its plane closes the strip's end above the rib.
+#[test]
+fn fillet_end_against_a_low_rib() {
+    use nalgebra::{Point2, Point3, Vector3};
+    let mut k = NativeKernel::new();
+    let (x0, h, y1, y2) = (
+        39.570556640625,
+        40.644775390625,
+        70.0884127089926,
+        133.783823524844,
+    );
+    // The block and rib's section across y (u) and z (v), extruded along x from the wall.
+    let pts = [
+        (0.0, 0.0),
+        (200.0, 0.0),
+        (200.0, h),
+        (y2, h),
+        (y2, h + 5.0),
+        (y1, h + 5.0),
+        (y1, h),
+        (0.0, h),
+    ];
+    let curves = (0..pts.len())
+        .map(|i| {
+            let (a, b) = (pts[i], pts[(i + 1) % pts.len()]);
+            Curve2::Line {
+                a: Point2::new(a.0, a.1),
+                b: Point2::new(b.0, b.1),
+                source: None,
+            }
+        })
+        .collect();
+    let side = Plane {
+        origin: Point3::new(x0, 0.0, 0.0),
+        x_dir: Vector3::y_axis(),
+        normal: Vector3::x_axis(),
+    };
+    let profile = Profile::new(
+        side,
+        vec![Region {
+            outer: Loop { curves },
+            holes: vec![],
+            source: None,
+        }],
+    );
+    let block = k
+        .extrude(&profile, Extent::Blind(200.0 - x0))
+        .unwrap()
+        .bodies[0];
+    let wall = k.box_at(0.0, 0.0, 0.0, x0, 200.0, 200.0).unwrap();
+    let draw::Shape::Body(b) = k.bfuse(&draw::Shape::Body(block), &wall).unwrap() else {
+        panic!("not a body")
+    };
+    let edges = edges_near(&k, b, &[[x0, 0.5 * y1, h]]);
+    let pick = |_: &[EdgeInfo]| edges.clone();
+    let got = local_fillet_law(&mut k, b, &pick, &[(0.0, 10.0), (1.0, 10.0)]);
+    // As the tool-and-boolean blend builds it; OCCT's differs by 0.05% in volume and 0.2% in
+    // area (its test allows 1%).
+    near_occt(got, 2941102.404416552, 189822.764688955, 2e-3);
+    let (v, a) = got;
+    assert!((v - 2939543.2106198).abs() < 1e-6 * v, "volume {v}");
+    assert!((a - 190177.27128303).abs() < 1e-6 * a, "area {a}");
+}
+
+/// A box's top edge rounded 10 mm and a boss of radius 30 standing on its top, the boss's foot
+/// filleted 15 mm (OCCT blend simple W9): the fillet's rail on the top runs over the round's
+/// tangent edge, and its ball rolls onto the round and back. The closed edge opens at its
+/// vertex, its strips rolling as an open edge's do and meeting there in a section.
+#[test]
+fn fillet_round_a_boss_rolling_over_a_round() {
+    let mut k = NativeKernel::new();
+    let bx = k.box_at(-50.0, -50.0, 0.0, 100.0, 100.0, 100.0).unwrap();
+    let draw::Shape::Body(bx) = bx else {
+        panic!("not a body")
+    };
+    let edge = edge_at(&k, bx, [50.0, 0.0, 100.0]);
+    let rounded = local_fillet(&mut k, bx, edge, 10.0);
+    let boss = k.pcylinder(30.0, 30.0).unwrap();
+    let boss = k.ttranslate(&boss, 0.0, 0.0, 100.0).unwrap();
+    let draw::Shape::Body(b) = k.bfuse(&draw::Shape::Body(rounded), &boss).unwrap() else {
+        panic!("not a body")
+    };
+    let got = local_fillet_law(
+        &mut k,
+        b,
+        &|es: &[EdgeInfo]| foot_circle(es, 30.0, 100.0),
+        &[(0.0, 15.0), (1.0, 15.0)],
+    );
+    near_occt(got, 1092675.152814246, 64076.597602439, 1e-4);
+}
+
+/// A quarter ellipse (150 by 100) over a cone's profile revolved 270° (OCCT blend simple H4),
+/// the revolution's end edge along the cone filleted 10 mm. At its top end the rail on the end
+/// plane meets the ellipse's edge only 110 mm on, but meets the ellipsoid's surface just below
+/// the vertex, on the ellipse run on past it: it stops there, and the strip's end curve on the
+/// ellipsoid runs between the two rails' ends there.
+#[test]
+fn fillet_end_on_a_curved_face_past_its_edge() {
+    let mut k = NativeKernel::new();
+    let w1 = k.ellipse([0.0, 0.0, 0.0], None, None, 15.0, 10.0);
+    let w1 = k.mkedge(&w1, 0.0, std::f64::consts::FRAC_PI_2);
+    let w1 = k.trotate(&w1, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 90.0).unwrap();
+    let w2 = k
+        .polyline(&[
+            [0.0, 0.0, 10.0],
+            [0.0, 0.0, -10.0],
+            [25.0, 0.0, -10.0],
+            [15.0, 0.0, 0.0],
+        ])
+        .unwrap();
+    let w = k.wire(&[&w1, &w2]).unwrap();
+    let w = k.mkplane(&w).unwrap();
+    let s = k.revol(&w, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 270.0).unwrap();
+    let draw::Shape::Body(b) = k.tscale(&s, 0.0, 0.0, 0.0, 10.0).unwrap() else {
+        panic!("not a body")
+    };
+    let edges = edges_near(&k, b, &[[0.0, -200.0, -50.0]]);
+    let pick = |_: &[EdgeInfo]| edges.clone();
+    let (_, a) = local_fillet_law(&mut k, b, &pick, &[(0.0, 10.0), (1.0, 10.0)]);
+    // (OCCT's area to its test's six figures.)
+    let area = 426548.0;
+    assert!((a - area).abs() < 1e-3 * area, "area {a} (OCCT {area})");
+}
+
+/// A half cylinder (radius 50, 20 high) under a ruled flare up to a half ellipse (50 by 60,
+/// 20 higher): the concave edge between them, the half circle, has its faces turn tangent at
+/// its ends (both are the plane x = ±50 there; OCCT blend tolblend_simple B9's
+/// configuration). Filleted R7.5, the strip narrows to nothing and ends at each vertex (a
+/// pinch) instead of losing its ball where the sections grow ill-conditioned. OCCT fails at
+/// this radius (and adds ten times the material at R2); checked against the material the
+/// fillet adds, integrated over the sections in the planes through the axis (12.1534 mm³; the
+/// ball's contacts on the flare lie a little off those planes).
+#[test]
+fn fillet_pinches_to_its_vertices() {
+    use std::f64::consts::{FRAC_PI_2, PI};
+    let mut k = NativeKernel::new();
+    let (r, h) = (50.0, 20.0);
+    let c = k.circle(0.0, 0.0, 0.0, r);
+    let arc = k.mkedge(&c, 0.0, PI);
+    let d0 = k.polyline(&[[-r, 0.0, 0.0], [r, 0.0, 0.0]]).unwrap();
+    let w0 = k.wire(&[&arc, &d0]).unwrap();
+    let e = k.ellipse(
+        [0.0, 0.0, h],
+        Some([0.0, 0.0, 1.0]),
+        Some([0.0, 1.0, 0.0]),
+        r + 10.0,
+        r,
+    );
+    let top = k.mkedge(&e, -FRAC_PI_2, FRAC_PI_2);
+    let d1 = k.polyline(&[[-r, 0.0, h], [r, 0.0, h]]).unwrap();
+    let w1 = k.wire(&[&top, &d1]).unwrap();
+    let flare = k.thrusections(true, true, &[&w0, &w1]).unwrap();
+    let wall = k.pcylinder_a(None, r, h, 180.0).unwrap();
+    let wall = k.ttranslate(&wall, 0.0, 0.0, -h).unwrap();
+    let draw::Shape::Body(b) = k.bfuse(&flare, &wall).unwrap() else {
+        panic!("not a body")
+    };
+    let v0 = k.mass_properties(b).unwrap().volume;
+    let e = edge_at(&k, b, [0.0, r, 0.0]);
+    let out = local_fillet(&mut k, b, e, 7.5);
+    let added = k.mass_properties(out).unwrap().volume - v0;
+    assert!((added - 12.1534).abs() < 1e-3 * 12.1534, "added {added}");
+}
+
+/// A block's top edge (x = 0, z = 15) filleted R7 over the foot of a boss on its side: a
+/// ruled B-spline surface from a circle of radius 10 round the x axis at x = 0 to one at
+/// x = 20 shifted 10 in y (OCCT blend buildevol K1's configuration). The fillet's rail on the
+/// side runs over the boss's foot, so the boss grows back to the fillet along the
+/// continuation of its surface past its range. Exact volume (the fillet's section along the
+/// edge, less the part of it inside the boss's continuation); OCCT's area (its volume is
+/// 10 mm³ more).
+#[test]
+fn fillet_over_a_bosss_foot_grows_the_boss() {
+    use std::f64::consts::PI;
+    let mut k = NativeKernel::new();
+    let bx = k.box_at(-40.0, -20.0, -20.0, 40.0, 40.0, 35.0).unwrap();
+    let c0 = k.circle_n(0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 10.0);
+    let c1 = k.circle_n(20.0, 10.0, 0.0, 1.0, 0.0, 0.0, 10.0);
+    let (e0, e1) = (k.mkedge_full(&c0), k.mkedge_full(&c1));
+    let (w0, w1) = (k.wire(&[&e0]).unwrap(), k.wire(&[&e1]).unwrap());
+    let boss = k.thrusections(true, true, &[&w0, &w1]).unwrap();
+    let draw::Shape::Body(b) = k.bfuse(&bx, &boss).unwrap() else {
+        panic!("not a body")
+    };
+    let v0 = k.mass_properties(b).unwrap().volume;
+    let e = edge_at(&k, b, [0.0, 0.0, 15.0]);
+    let out = local_fillet(&mut k, b, e, 7.0);
+    let m = k.mass_properties(out).unwrap();
+    // The fillet's section: the corner x ∈ [−7, 0], z ∈ [8, 15] outside the circle of radius
+    // 7 about (−7, 8); the boss's continuation keeps its chord 2√(100 − z²) of it below z = 10.
+    let kept = integral(
+        &|x| {
+            let z0 = 8.0 + (49.0 - (x + 7.0).powi(2)).max(0.0).sqrt();
+            if z0 >= 10.0 {
+                0.0
+            } else {
+                integral(&|z| 2.0 * (100.0 - z * z).sqrt(), z0, 10.0, 400)
+            }
+        },
+        -7.0,
+        0.0,
+        4000,
+    );
+    let volume = v0 - 40.0 * 49.0 * (1.0 - PI / 4.0) + kept;
+    assert!(
+        (m.volume - volume).abs() < 1e-8 * volume,
+        "volume {} (exact {volume})",
+        m.volume
+    );
+    let area = 9992.454253841;
+    assert!(
+        (m.surface_area - area).abs() < 1e-6 * area,
+        "area {} (OCCT {area})",
+        m.surface_area
     );
 }

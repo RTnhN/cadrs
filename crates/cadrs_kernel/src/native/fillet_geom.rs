@@ -724,7 +724,9 @@ pub fn nurbs_strip(balls: &[Ball], ts: &[f64], closed: bool, kinks: &[usize]) ->
     let rails = [rail(&r0)?, rail(&r2)?];
     let surf = NurbsSurface::new(du, 2, ku, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], rows).ok()?;
     // The rails on their faces, where the faces' curvature doesn't jump along them.
-    let on_faces = (kinks.is_empty() && !closed && balls.len() >= 4).then(|| -> Option<[Curve; 2]> {
+    // (A closed strip's too: its last station is its first a period on, the contacts' (u, v)
+    // there wherever the march round brought them.)
+    let on_faces = (kinks.is_empty() && balls.len() >= 4).then(|| -> Option<[Curve; 2]> {
         let on = |k: usize| -> Option<Curve> {
             let pts: Vec<P3> = balls.iter().map(|b| P3::new(b.q[k].uv.x, b.q[k].uv.y, 0.0)).collect();
             Some(Curve::nurbs(NurbsCurve::interpolate(&pts, ts, 3, None, None)))

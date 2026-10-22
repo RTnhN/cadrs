@@ -40,12 +40,8 @@ blend simple_x4  # a boolean leaves an open shell
 blend simple_y6  # the blends of two edges overlap: the size is too large for the face between them (OCCT builds it)
 blend simple_y7  # the blend is too large for the faces at the edge (OCCT builds it)
 blend simple_z1  # the edges blended aren't the shape's (the script's edges come from another shape)
-blend tolblend_simple_b4  # the blend's section degenerates along the edge
-blend tolblend_simple_b5  # the blend's section degenerates along the edge
 blend tolblend_simple_b6  # the blend's section degenerates along the edge
 blend tolblend_simple_b7  # the profile is refused: a degenerate arc
-blend tolblend_simple_b8  # the blend's section degenerates along the edge
-blend tolblend_simple_c1  # the blend's section degenerates along the edge
 blend tolblend_simple_c2  # the blend's section degenerates along the edge
 blend tolblend_simple_c3  # the blend's section degenerates along the edge
 blend tolblend_simple_c5  # the blend's section degenerates along the edge
@@ -363,7 +359,6 @@ blend buildevol_c8
 blend buildevol_f1
 blend buildevol_f2
 blend buildevol_f5
-blend buildevol_f9
 blend buildevol_g1
 blend buildevol_k3
 blend buildevol_k6
@@ -371,7 +366,6 @@ blend buildevol_k8
 # blend: the operation fails.
 blend bfuseblend_b6
 blend buildevol_b3  # the area differs from OCCT's (by 1.02 %)
-blend buildevol_d6  # unsupported: variable fillets between curved faces (the local fillet's result doesn't close)
 blend complex_h4
 blend encoderegularity_a5  # the loft's surface isn't valid (a weight along v isn't positive)
 blend tolblend_simple_a6
