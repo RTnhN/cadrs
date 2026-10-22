@@ -1976,6 +1976,17 @@ fn build_shapes(m: &mut Model, shapes: &[(u64, u64, Affine)], warnings: &mut Vec
         // model's size (a larger gap is a defect, left to the check).
         let cap = (b.bbox().diagonal() * FIT_REL).max(u.unwrap_or(0.0) * FIT_UNCERTAINTY);
         b.fit_tolerances_searched(cap);
+        // A solid whose faces all point in (a sphere or cylinder band whose loops are only
+        // seams and circles, read against the file's own sense): turned round.
+        for si in 0..b.solids.len() {
+            let faces = b.solid_faces(si);
+            let sub = super::kernel::subset(&b, &faces, true);
+            if super::mass::body_mass(&sub).volume < 0.0 {
+                for f in faces {
+                    Body::reverse_face(&mut b.faces[f]);
+                }
+            }
+        }
         let b = if at == Affine::identity() { b } else { b.transformed(&at) };
         body.append(&b);
         colors.extend(cols);

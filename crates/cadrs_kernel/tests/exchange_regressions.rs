@@ -32,3 +32,23 @@ fn step_vertex_off_its_edges_reads_clean() {
     let errs = m.parts[0].body.check();
     assert!(errs.is_empty(), "{errs:?}");
 }
+
+/// A STEP sphere whose one face says it points in (`ADVANCED_FACE` same_sense .F., as
+/// PRO7071.stp's spheres and cylinders): its loops alone (a seam) can't tell which side the
+/// material is, so the solid would enclose a negative volume; it is turned round instead.
+#[test]
+fn step_solid_facing_in_is_turned_round() {
+    let mut k = NativeKernel::new();
+    let half = Loop { curves: vec![Curve2::Arc { center: Point2::origin(), radius: 10.0, start_angle: -std::f64::consts::FRAC_PI_2, sweep: std::f64::consts::PI, source: None }, Curve2::Line { a: Point2::new(0.0, 10.0), b: Point2::new(0.0, -10.0), source: None }] };
+    let front = Plane { origin: nalgebra::Point3::origin(), x_dir: nalgebra::Vector3::x_axis(), normal: -nalgebra::Vector3::y_axis() };
+    let axis = Axis { origin: nalgebra::Point3::origin(), dir: nalgebra::Vector3::z_axis() };
+    let s = k.revolve_with(&Profile::new(front, vec![Region { outer: half, holes: vec![], source: None }]), &RevolveSpec::solid(axis, None)).unwrap().bodies[0];
+    let body = k.get(s).unwrap().as_ref().clone();
+    let text = String::from_utf8(step::write("ball", &[(&body, "ball")], &[])).unwrap();
+    let flipped = text.lines().map(|l| if l.contains("=ADVANCED_FACE(") { l.replace(",.T.);", ",.F.);") } else { l.to_string() }).collect::<Vec<_>>().join("\n");
+    assert_ne!(flipped, text);
+    let m = step::read(flipped.as_bytes()).unwrap();
+    let v = cadrs_kernel::native::mass::body_mass(&m.parts[0].body).volume;
+    let want = 4.0 / 3.0 * std::f64::consts::PI * 1000.0;
+    assert!((v - want).abs() < 1e-6 * want, "{v}");
+}
