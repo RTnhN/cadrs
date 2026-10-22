@@ -1152,6 +1152,165 @@ fn plane_normal(b: &Body, f: usize) -> Option<V3> {
     Some(fr.x.cross(&fr.y).normalize() * if face.sense { 1.0 } else { -1.0 })
 }
 
+/// The prism's sharp offset as the union of what its moved profile encloses: each side on its
+/// moved line, neighbours along one line joined by a step square to it at their corner, and
+/// the loop (which may cross itself where the moves close a slot or make a side vanish) taken
+/// as the region it winds round at least once; extruded between the moved caps.
+#[allow(clippy::too_many_arguments)]
+fn union_offset(b: &Body, dist: &[f64], bot: usize, top: usize, sides: &[(V2, f64, f64)], corners: &[P2], o: P3, fr: &Frame, n: V3) -> Result<Body> {
+    let k = sides.len();
+    let meet = |a: &(V2, f64, f64), c: &(V2, f64, f64)| -> P2 {
+        let det = a.0.perp(&c.0);
+        let (ca, cc) = (a.1 + a.2, c.1 + c.2);
+        P2::new((ca * c.0.y - cc * a.0.y) / det, (a.0.x * cc - c.0.x * ca) / det)
+    };
+    let mut raw: Vec<P2> = Vec::new();
+    for i in 0..k {
+        let (a, c) = (sides[i], sides[(i + 1) % k]);
+        if a.0.perp(&c.0).abs() > 1e-12 {
+            raw.push(meet(&a, &c));
+        } else {
+            raw.push(corners[i] + a.0 * a.2);
+            raw.push(corners[i] + c.0 * c.2);
+        }
+    }
+    let scale = 1.0 + raw.iter().map(|p| p.coords.norm()).fold(0.0, f64::max);
+    let tol = 1e-9 * scale;
+    raw.dedup_by(|x, y| (*x - *y).norm() < tol);
+    while raw.len() > 1 && (raw[0] - raw[raw.len() - 1]).norm() < tol {
+        raw.pop();
+    }
+    let loops = positive_region(&raw, tol);
+    if loops.is_empty() {
+        return Err(KernelError::OperationFailed("the offset profile vanishes".into()));
+    }
+    // Outer loops (counter-clockwise) with the holes (clockwise) inside them.
+    let signed = |l: &[P2]| (0..l.len()).map(|i| l[i].coords.perp(&l[(i + 1) % l.len()].coords)).sum::<f64>() * 0.5;
+    let inside = |q: &P2, l: &[P2]| winding(l, q) != 0;
+    let to_loop = |l: &[P2]| Loop { curves: (0..l.len()).map(|i| Curve2::Line { a: l[i], b: l[(i + 1) % l.len()], source: None }).collect() };
+    let (outers, holes): (Vec<&Vec<P2>>, Vec<&Vec<P2>>) = loops.iter().partition(|l| signed(l) > 0.0);
+    let regions: Vec<Region> = outers
+        .iter()
+        .map(|ol| Region { outer: to_loop(ol), holes: holes.iter().filter(|h| inside(&h[0], ol)).map(|h| to_loop(h)).collect(), source: None })
+        .collect();
+    let (z0, z1) = (-dist[bot], (b.verts[b.edges[b.faces[top].loops[0][0].edge].v[0]].p - o).dot(&n) + dist[top]);
+    if z1 - z0 <= 1e-9 {
+        return Err(KernelError::OperationFailed("the offset prism has no height".into()));
+    }
+    let plane = Plane { origin: o + n * z0, x_dir: nalgebra::Unit::new_normalize(fr.x), normal: nalgebra::Unit::new_normalize(n) };
+    let prof = Profile::new(plane, regions);
+    let mut kk = NativeKernel::new();
+    let r = crate::Kernel::extrude(&mut kk, &prof, Extent::Blind(z1 - z0))?;
+    let [id] = r.bodies[..] else { return Err(KernelError::Unsupported("an offset that splits the profile in pieces")) };
+    Ok((**kk.get(id)?).clone())
+}
+
+/// The winding number of the closed polygon `l` about `q`.
+fn winding(l: &[P2], q: &P2) -> i32 {
+    let mut w = 0;
+    for i in 0..l.len() {
+        let (a, c) = (l[i], l[(i + 1) % l.len()]);
+        let side = (c - a).perp(&(q - a));
+        if a.y <= q.y {
+            if c.y > q.y && side > 0.0 {
+                w += 1;
+            }
+        } else if c.y <= q.y && side < 0.0 {
+            w -= 1;
+        }
+    }
+    w
+}
+
+/// The boundary of the region a closed polygon winds round at least once, as loops (outer ones
+/// counter-clockwise, holes clockwise; straight runs one side each): its edges cut where they
+/// cross, the pieces with the region on their left and none on their right, chained.
+fn positive_region(raw: &[P2], tol: f64) -> Vec<Vec<P2>> {
+    let m = raw.len();
+    let seg = |i: usize| (raw[i], raw[(i + 1) % m]);
+    let mut pieces: Vec<(P2, P2)> = Vec::new();
+    for i in 0..m {
+        let (a, c) = seg(i);
+        let d = c - a;
+        let len2 = d.norm_squared();
+        if len2 < tol * tol {
+            continue;
+        }
+        let mut ts = vec![0.0, 1.0];
+        for j in 0..m {
+            if j == i {
+                continue;
+            }
+            let (p, q) = seg(j);
+            let e = q - p;
+            let den = d.perp(&e);
+            if den.abs() > 1e-15 * len2.sqrt() * e.norm().max(1e-300) {
+                let t = (p - a).perp(&e) / den;
+                let s = (p - a).perp(&d) / den;
+                if t > 0.0 && t < 1.0 && (-1e-12..=1.0 + 1e-12).contains(&s) {
+                    ts.push(t);
+                }
+            } else {
+                // Collinear overlaps: cut at the other's ends.
+                for r in [p, q] {
+                    if (r - a).perp(&d).abs() < tol * len2.sqrt() {
+                        let t = (r - a).dot(&d) / len2;
+                        if t > 0.0 && t < 1.0 {
+                            ts.push(t);
+                        }
+                    }
+                }
+            }
+        }
+        ts.sort_by(f64::total_cmp);
+        ts.dedup_by(|x, y| (*x - *y).abs() * len2.sqrt() < tol);
+        for w in ts.windows(2) {
+            let (p, q) = (a + d * w[0], a + d * w[1]);
+            if (q - p).norm() < tol {
+                continue;
+            }
+            let mid = p + (q - p) * 0.5;
+            let side = V2::new(-(q - p).y, (q - p).x).normalize() * (tol * 100.0);
+            if winding(raw, &(mid - side)) <= 0 && winding(raw, &(mid + side)) >= 1 {
+                pieces.push((p, q));
+            }
+        }
+    }
+    // Chained end to start.
+    let mut used = vec![false; pieces.len()];
+    let mut loops: Vec<Vec<P2>> = Vec::new();
+    for s in 0..pieces.len() {
+        if used[s] {
+            continue;
+        }
+        used[s] = true;
+        let mut lp = vec![pieces[s].0];
+        let mut end = pieces[s].1;
+        while (end - lp[0]).norm() > tol * 10.0 {
+            let Some(j) = (0..pieces.len()).filter(|&j| !used[j]).min_by(|&x, &y| (pieces[x].0 - end).norm().total_cmp(&(pieces[y].0 - end).norm())) else { break };
+            if (pieces[j].0 - end).norm() > tol * 10.0 {
+                break;
+            }
+            used[j] = true;
+            lp.push(pieces[j].0);
+            end = pieces[j].1;
+        }
+        // Straight runs as one side.
+        let mut simple: Vec<P2> = Vec::new();
+        let n = lp.len();
+        for i in 0..n {
+            let (p, q, r) = (lp[(i + n - 1) % n], lp[i], lp[(i + 1) % n]);
+            if (q - p).perp(&(r - q)).abs() > tol * ((q - p).norm() + (r - q).norm()) {
+                simple.push(q);
+            }
+        }
+        if simple.len() >= 3 {
+            loops.push(simple);
+        }
+    }
+    loops
+}
+
 /// The sharp offset of a prism (a polygon's extrusion: two parallel planar caps, flat sides
 /// along the extrusion) when its faces' moves change its topology: the profile's sides moved by
 /// their distances as a wavefront (OCCT's intersection offset and SMLib's offset executive trim
@@ -1193,12 +1352,24 @@ fn prism_offset(b: &Body, dist: &[f64]) -> Option<Result<Body>> {
         sides.push((m, m.dot(&p.coords), dist[side]));
         pts.push(p);
     }
-    // Counter-clockwise about n.
+    // Counter-clockwise about n. Each side's end corner (the start of the next).
     let area: f64 = (0..pts.len()).map(|i| pts[i].coords.perp(&pts[(i + 1) % pts.len()].coords)).sum();
+    let k = sides.len();
+    let mut corners: Vec<P2> = (0..k).map(|i| pts[(i + 1) % k]).collect();
     if area < 0.0 {
         sides.reverse();
+        corners = (0..k).map(|j| pts[k - 1 - j]).collect();
     }
-    let k = sides.len();
+    // Neighbours along one line moved apart (coplanar faces offset differently): a step between
+    // them, and the moved profile, which may then close over itself (a slot whose walls cross),
+    // is the union of what it encloses.
+    let steps = (0..k).any(|i| {
+        let (a, c) = (sides[i], sides[(i + 1) % k]);
+        a.0.perp(&c.0).abs() < 1e-12 && (a.2 - c.2).abs() > 1e-12
+    });
+    if steps {
+        return Some(union_offset(b, dist, bot, top, &sides, &corners, o, &fr, n));
+    }
     // Each side's direction (along the loop, its outward normal on the right).
     let dir = |m: &V2| V2::new(-m.y, m.x);
     let meet = |a: &(V2, f64, f64), b: &(V2, f64, f64)| -> Option<P2> {
@@ -1209,7 +1380,7 @@ fn prism_offset(b: &Body, dist: &[f64]) -> Option<Result<Body>> {
         let (ca, cb) = (a.1 + a.2, b.1 + b.2);
         Some(P2::new((ca * b.0.y - cb * a.0.y) / det, (a.0.x * cb - b.0.x * ca) / det))
     };
-    let mut live: Vec<(V2, f64, f64)> = sides;
+    let mut live: Vec<(V2, f64, f64)> = sides.clone();
     let mut removed = false;
     loop {
         let n_live = live.len();
@@ -1222,7 +1393,7 @@ fn prism_offset(b: &Body, dist: &[f64]) -> Option<Result<Body>> {
             let (a, c) = (live[i], live[(i + 1) % n_live]);
             if a.0.perp(&c.0).abs() < 1e-12 {
                 if a.0.dot(&c.0) < 0.0 {
-                    return Some(Err(KernelError::Unsupported("an offset that splits the profile")));
+                    return Some(union_offset(b, dist, bot, top, &sides, &corners, o, &fr, n));
                 }
                 drop = Some(if a.1 + a.2 < c.1 + c.2 { i } else { (i + 1) % n_live });
                 break;
@@ -1306,7 +1477,7 @@ pub fn offset(k: &mut NativeKernel, body: BodyId, spec: &OffsetSpec) -> Result<O
     }
     // History: each face the offset of input faces (modified) or a round of an edge or vertex
     // (generated); an input face with no offset left (vanished, or inside the rounds) deleted.
-    let srcs = super::offset_round::offset_sources(&b, body, &out, &dist);
+    let srcs = super::offset_round::offset_sources(&b, body, &out, &dist, !(spec.sharp || dist.iter().all(|d| *d == 0.0)));
     let id = k.insert(out);
     let mut history = History::default();
     let mut kept = vec![false; b.faces.len()];

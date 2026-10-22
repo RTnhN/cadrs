@@ -397,11 +397,9 @@ offset shape_type_i_c4
 offset shape_type_i_c6
 offset shape_type_i_c_i4
 offset shape_type_i_c_i5
-offset shape_type_i_c_v1
 offset shape_type_i_c_v2
 offset shape_type_i_c_v8
 offset shape_type_i_c_w1
-offset shape_type_i_c_w6
 offset shape_type_i_d4
 offset shape_type_i_d5
 offset shape_type_i_d6
@@ -725,6 +723,10 @@ feat featrevol_i9
 feat featrf_b2
 # feat: unsupported: revolved features up to a face and an angle.
 feat featrevol_a8
+# offset with history: the fins' inner faces moved 3 close the slot between them (built: they
+# are deleted, the bridge's underside generated from both step edges); OCCT splits that underside
+# at the moved faces' planes, two faces from each step edge, three in all (shape_type_i_c_multi c5).
+offset shape_type_i_c_multi_c5
 # offsetcompshape: a thick solid whose booleans fail (compshape a2). (Those whose reference volume
 # is the input's own run without it: WRONG_REFERENCE in tools/occt_to_rust.py.)
 offset compshape_a2

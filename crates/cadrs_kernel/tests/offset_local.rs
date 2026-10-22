@@ -460,3 +460,43 @@ fn rounded_inset_of_an_extrusion_is_its_eroded_profile() {
     let out = one(k.offset(id, &OffsetSpec { distance: -0.3, faces: vec![(FaceId(0), 0.0)], sharp: false }).unwrap());
     close(volume(&k, out), section * 9.7, 1e-5);
 }
+
+/// OCCT's offset multi C5: a 10 × 1 plate with two fins (x 2–3 and 7–8, up to z = 7, their
+/// sides split at z = 4), 10 deep; the upper halves of the fins' inner faces offset by 3, the
+/// rest kept. They cross over (the slot is 4 wide), so the slot's upper half fills: a bridge
+/// over a 4 × 3 hole, section 10 + 12 + 12 = 34, volume 340. The moved faces are deleted, and the
+/// bridge's underside is generated from the two edges where the moved halves met the kept ones.
+/// (Neighbours along one plane moved apart, and walls that cross, were refused: "an offset that
+/// splits the profile".)
+#[test]
+fn sharp_offset_that_closes_a_slot() {
+    use cadrs_kernel::native::draw::Shape;
+    let mut k = NativeKernel::new();
+    let pts: Vec<[f64; 3]> = [(0, 0), (10, 0), (10, 1), (8, 1), (8, 4), (8, 7), (7, 7), (7, 4), (7, 1), (3, 1), (3, 4), (3, 7), (2, 7), (2, 4), (2, 1), (0, 1), (0, 0)]
+        .iter()
+        .map(|&(x, z)| [x as f64, 0.0, z as f64])
+        .collect();
+    let p = k.polyline(&pts).unwrap();
+    let f = k.mkplane(&p).unwrap();
+    let s = k.prism(&f, 0.0, 10.0, 0.0).unwrap();
+    let faces = k.explode_faces(&s).unwrap();
+    let Shape::Body(input) = s else { panic!("not a body") };
+    let inner = |k: &NativeKernel, x: f64| {
+        faces.iter().position(|f| matches!(f, Shape::BodyFace(_, id) if { let c = k.faces(input).unwrap()[id.0 as usize].center; (c.x - x).abs() < 1e-9 && c.z > 5.0 })).unwrap()
+    };
+    let (right, left) = (inner(&k, 7.0), inner(&k, 3.0));
+    let r = k.offsetperform_on(&s, 0.0, &[(&faces[right], 3.0), (&faces[left], 3.0)], false).unwrap();
+    let Shape::Body(out) = r else { panic!("not a body") };
+    close(volume(&k, out), 340.0, 1e-9);
+    let h = k.savehistory().unwrap();
+    k.isdeleted(&h, &faces[right], true).unwrap();
+    k.isdeleted(&h, &faces[left], true).unwrap();
+    // The step edges: the moved faces' edges at z = 4 along y.
+    let step = |k: &NativeKernel, fi: usize| {
+        k.explode_edges(&faces[fi]).unwrap().into_iter().find(|e| matches!(e, Shape::BodyEdge(b, id) if { let ed = &k.get(*b).unwrap().edges[id.0 as usize]; (ed.point(ed.t[0]).z - 4.0).abs() < 1e-9 && (ed.point(ed.t[1]).z - 4.0).abs() < 1e-9 })).unwrap()
+    };
+    for fi in [right, left] {
+        let Shape::Compound(g) = k.generated(&h, &step(&k, fi)).unwrap() else { panic!("not a compound") };
+        assert_eq!(g.len(), 1);
+    }
+}

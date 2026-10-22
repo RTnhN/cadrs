@@ -29,7 +29,7 @@ IGNORED = {
     "isos", "triangles", "dchrono", "chrono", "xwd", "vdump", "dmode", "disp", "view", "2dfit", "repaint", "settolerance",
     "checktrinfo", "dtyp", "whatis", "tolerance", "checkcontinuity", "bfillds", "setflags",
     "brunparallel", "bnondestructive", "bfuzzyvalue", "bglue", "bcheckinverted", "buseobb", "bdrawwarnshapes", "bsimplify",
-    "setfillhistory", "savehistory", "tclean", "incmesh", "tolblend", "checkfaults", "dversion", "dsetsignal", "testgrid", "datadir", "locate_data_file",
+    "setfillhistory", "tclean", "incmesh", "tolblend", "checkfaults", "dversion", "dsetsignal", "testgrid", "datadir", "locate_data_file",
     "fsameparameter", "encoderegularity", "bopcheck", "don",
 }
 
@@ -90,6 +90,9 @@ class Case:
         self.cells_result = None  # the name bcadd builds the result under
         self.face_surfs = {}  # faces of whole surfaces (mkface without bounds): name -> surface
         self.surfaces = {}  # mksurface's surfaces of faces: name -> the face
+        self.offset_history = False  # an offset ran (its history is what savehistory saves)
+        self.history_queries = False  # the script asks the history (isdeleted, generated)
+        self.isdeleted_wants = {}  # isdeleted's shapes: name -> whether the script wants it deleted
 
     def num(self, tok):
         try:
@@ -316,6 +319,7 @@ class Case:
                 raise Unsupported("offsetonface without offsetload")
             self.offset_on += [(a[i], a[i + 1]) for i in range(0, len(a), 2)]
         elif c == "offsetperform" and len(a) == 1:
+            self.offset_history = True
             if self.offset_load is None:
                 raise Unsupported("offsetperform without offsetload")
             s_, d_, fs = self.offset_load
@@ -328,6 +332,18 @@ class Case:
                 self.bind(a[0], f"k.offsetperform_on({self.shape(s_)}, {L(d_)}, &[{own}], {arc})?")
             else:
                 self.bind(a[0], f"k.offsetperform({self.shape(s_)}, {L(d_)}, &[{', '.join(self.shape(f) for f in fs)}], {arc})?")
+        elif c == "savehistory" and len(a) == 1:
+            # An offset's history, when the script asks it something (else nothing to do).
+            if self.offset_history and self.history_queries:
+                self.bind(a[0], "k.savehistory()?")
+        elif c == "isdeleted" and len(a) == 2:
+            if not (self.offset_history and a[1] in self.isdeleted_wants):
+                raise Unsupported("isdeleted")
+            self.lines.append(f"k.isdeleted({self.shape(a[0])}, {self.shape(a[1])}, {'true' if self.isdeleted_wants[a[1]] else 'false'})?;")
+        elif c == "generated" and len(a) == 3:
+            if not self.offset_history:
+                raise Unsupported("generated")
+            self.bind(a[0], f"k.generated({self.shape(a[1])}, {self.shape(a[2])})?")
         elif c == "offsetshape" and len(a) >= 3:
             # `offsetshape r s d [tol] [face ...]`: as offsetcompshape (OCCT runs both through one
             # function, arc joins), its optional tolerance skipped.
@@ -339,6 +355,7 @@ class Case:
                 pass
             self.bind(a[0], f"k.offsetcompshape({self.shape(a[1])}, {L(a[2])}, &[{', '.join(self.shape(f) for f in rest)}], false)?")
         elif c == "offsetcompshape" and len(a) >= 3:
+            self.offset_history = True
             opts = [x for x in a[3:] if x.startswith("-")]
             if any(x not in ("-i", "-t") for x in opts):
                 raise Unsupported("offsetcompshape options")
@@ -899,6 +916,11 @@ def convert(path, consts, begins=()):
             case.todo.add("free")
     if re.search(r'^\s*puts\s+"TODO\s+\S+\s+(?:ALL|All|all|Linux)\s*:.*(cannot be built|is not done)', text, re.M):
         return None, "OCCT can't build it either (its TODO)", text
+    # History queries: `if {[regexp "Not deleted" [isdeleted h s]]} {puts "Error…"}` wants s
+    # deleted, `regexp "Deleted"` wants it kept.
+    case.history_queries = bool(re.search(r"\b(isdeleted|generated)\b", text))
+    for m in re.finditer(r'regexp\s+"(Not deleted|Deleted)"\s+\[isdeleted\s+\w+\s+(\w+)\]', text):
+        case.isdeleted_wants[m.group(2)] = m.group(1) == "Not deleted"
     for m in re.finditer(r"eval\s+compound((?:\s*\[explode\s+\w+\s+\w+\])+)\s+(\w+)", text):
         case.eval_compounds[m.group(2)] = re.findall(r"\[explode\s+(\w+)\s+\w+\]", m.group(1))
     try:

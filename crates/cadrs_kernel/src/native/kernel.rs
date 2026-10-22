@@ -36,6 +36,8 @@ pub struct NativeKernel {
     bodies: HashMap<u64, Entry>,
     next: u64,
     tol: super::tol::Tolerances,
+    /// The DRAW layer's last offset: its input body, result and history (`savehistory`).
+    pub(crate) draw_history: Option<(BodyId, BodyId, crate::History)>,
 }
 
 impl NativeKernel {

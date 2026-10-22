@@ -62,6 +62,15 @@ pub enum Shape {
     Empty,
 }
 
+/// What an operation made of its input (DRAW's `savehistory`): the input and result bodies and
+/// the history.
+#[derive(Debug, Clone)]
+pub struct DrawHistory {
+    input: BodyId,
+    output: BodyId,
+    history: crate::History,
+}
+
 /// A placement (DRAW's `plane`): origin, normal and x direction.
 #[derive(Debug, Clone, Copy)]
 pub struct Ax3 {
@@ -1141,6 +1150,7 @@ impl NativeKernel {
         let b = self.body_of(s)?;
         if faces.is_empty() {
             let r = crate::Kernel::offset(self, b, &OffsetSpec { distance: d, faces: vec![], sharp: !arc })?;
+            self.draw_history = Some((b, r.bodies[0], r.history));
             return Ok(Shape::Body(r.bodies[0]));
         }
         let remove = faces
@@ -1151,6 +1161,7 @@ impl NativeKernel {
             })
             .collect::<Result<Vec<_>>>()?;
         let r = crate::Kernel::shell_with(self, b, &ShellSpec { remove, thickness: d.abs(), outward: d > 0.0, hollow: false, sharp: !arc })?;
+        self.draw_history = Some((b, r.bodies[0], r.history));
         Ok(Shape::Body(r.bodies[0]))
     }
 
@@ -1167,7 +1178,39 @@ impl NativeKernel {
             })
             .collect::<Result<Vec<_>>>()?;
         let r = crate::Kernel::offset(self, b, &OffsetSpec { distance: d, faces, sharp: !arc })?;
+        self.draw_history = Some((b, r.bodies[0], r.history));
         Ok(Shape::Body(r.bodies[0]))
+    }
+
+    /// `savehistory h` after an offset: what it made of its input's faces and edges.
+    pub fn savehistory(&self) -> Result<DrawHistory> {
+        let (input, output, history) = self.draw_history.clone().ok_or_else(|| err("savehistory: no offset's history to save"))?;
+        Ok(DrawHistory { input, output, history })
+    }
+
+    /// `isdeleted h shape`: whether the offset left nothing of a face of its input (checked
+    /// against `deleted`, what the script's test of the answer wants).
+    pub fn isdeleted(&self, h: &DrawHistory, s: &Shape, deleted: bool) -> Result<()> {
+        let Shape::BodyFace(b, f) = s else { return Err(err("isdeleted: a face of the offset's input")) };
+        if *b != h.input {
+            return Err(err("isdeleted: a face of the offset's input"));
+        }
+        let gone = h.history.deleted.iter().any(|x| x.body == *b && x.face == *f);
+        if gone != deleted {
+            return Err(err(&format!("History information is wrong: face {} is{} deleted", f.0, if gone { "" } else { " not" })));
+        }
+        Ok(())
+    }
+
+    /// `generated r h shape`: the faces the offset made from an edge of its input (a step
+    /// between neighbours moved apart, a round), as a compound.
+    pub fn generated(&self, h: &DrawHistory, s: &Shape) -> Result<Shape> {
+        let Shape::BodyEdge(b, e) = s else { return Err(err("generated: an edge of the offset's input")) };
+        if *b != h.input {
+            return Err(err("generated: an edge of the offset's input"));
+        }
+        let faces = h.history.generated.iter().filter(|(_, o)| matches!(o, Origin::FromEdge { body, edge } if body == b && edge == e)).map(|(f, _)| Shape::BodyFace(h.output, *f)).collect::<Vec<_>>();
+        Ok(Shape::Compound(faces))
     }
 
     /// `offsetcompshape result s d [face …] [-i]`: a thick solid (OCCT's `MakeThickSolid`): the
@@ -2538,6 +2581,20 @@ impl NativeKernel {
 
     /// `explode shape e`: the body's edges (in the kernel's order, not OCCT's).
     pub fn explode_edges(&self, s: &Shape) -> Result<Vec<Shape>> {
+        // A face's: its loops' edges in their order (OCCT's for a prism's side: the profile
+        // edge, the side edge at its end, the far copy, the side edge at its start).
+        if let Shape::BodyFace(b, f) = s {
+            let (b, body) = (*b, self.get(*b)?);
+            let face = body.faces.get(f.0 as usize).ok_or_else(|| err("explode: no such face"))?;
+            let mut out: Vec<Shape> = Vec::new();
+            for c in face.loops.iter().flatten() {
+                let e = Shape::BodyEdge(b, EdgeId(c.edge as u64));
+                if !body.edges[c.edge].degenerate && !out.iter().any(|x| matches!((x, &e), (Shape::BodyEdge(_, a), Shape::BodyEdge(_, z)) if a == z)) {
+                    out.push(e);
+                }
+            }
+            return Ok(out);
+        }
         let b = self.body_of(s)?;
         let body = self.get(b)?;
         let mut ids: Vec<usize> = (0..body.edges.len()).filter(|&i| !body.edges[i].degenerate).collect();

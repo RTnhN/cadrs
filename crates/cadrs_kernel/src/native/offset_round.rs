@@ -473,7 +473,7 @@ pub fn shell(k: &mut NativeKernel, body: BodyId, spec: &ShellSpec) -> Result<OpR
     // faces' offsets (modified) and the rounds (generated), from where they lie.
     let mut result = result;
     let dist: Vec<f64> = (0..b.faces.len()).map(|f| if remove.contains(&f) { f64::NAN } else if spec.outward { t } else { -t }).collect();
-    let found = offset_sources(&b, body, &result.body, &dist);
+    let found = offset_sources(&b, body, &result.body, &dist, !spec.sharp);
     for (s, f) in result.src.iter_mut().zip(found) {
         if s.is_empty() {
             *s = f;
@@ -494,7 +494,7 @@ pub fn shell(k: &mut NativeKernel, body: BodyId, spec: &ShellSpec) -> Result<OpR
 /// ([`FaceSrc::Input`], the face moved: modified), else the edge or vertex its round is about
 /// ([`FaceSrc::New`], generated: it lies the distance from that edge or vertex). Names survive
 /// an offset however its pieces were united. Empty for a face that is neither.
-pub fn offset_sources(b: &Body, input: BodyId, out: &Body, dist: &[f64]) -> Vec<Vec<super::blend::FaceSrc>> {
+pub fn offset_sources(b: &Body, input: BodyId, out: &Body, dist: &[f64], rounded: bool) -> Vec<Vec<super::blend::FaceSrc>> {
     use super::blend::FaceSrc;
     let size = 1.0 + b.bbox().diagonal();
     let moved: Vec<Option<Surface>> = b
@@ -504,6 +504,28 @@ pub fn offset_sources(b: &Body, input: BodyId, out: &Body, dist: &[f64]) -> Vec<
         .map(|(f, d)| if d.is_nan() { None } else if *d == 0.0 { Some(f.surf.clone()) } else { super::local::offset_surface(&f.surf, f.sense, *d) })
         .collect();
     let reach = dist.iter().filter(|d| !d.is_nan()).fold(0.0f64, |m, d| m.max(d.abs()));
+    // A sharp offset's step between neighbours moved apart (or a face that closes over a slot
+    // their moves filled): from the input edges it holds, on its plane and within it.
+    let steps = |f: &super::topo::Face| -> Vec<FaceSrc> {
+        if !matches!(f.surf, Surface::Plane { .. }) {
+            return Vec::new();
+        }
+        let tol = 1e-7 * size;
+        let polys = super::classify::face_polygons(out, f);
+        (0..b.edges.len())
+            .filter(|&e| !b.edges[e].degenerate)
+            .filter(|&e| {
+                let ed = &b.edges[e];
+                let m = ed.point(ed.mid_t());
+                if f.surf.distance(&m) > tol {
+                    return false;
+                }
+                let (u, v) = f.surf.project(&m, None);
+                !matches!(super::classify::in_face(&polys, &f.surf, P2::new(u, v), tol), super::classify::InFace::Outside)
+            })
+            .map(|e| FaceSrc::New(Origin::FromEdge { body: input, edge: EdgeId(e as u64) }))
+            .collect()
+    };
     out.faces
         .iter()
         .map(|f| {
@@ -528,6 +550,9 @@ pub fn offset_sources(b: &Body, input: BodyId, out: &Body, dist: &[f64]) -> Vec<
             if !faces.is_empty() || reach == 0.0 {
                 return faces;
             }
+            if !rounded {
+                return steps(f);
+            }
             // A round: the edge it lies the distance from (nearest within the edge, not at an
             // end: a corner's ball is that far from its edges' ends too), else the vertex.
             let tol = 1e-6 * size;
@@ -545,10 +570,10 @@ pub fn offset_sources(b: &Body, input: BodyId, out: &Body, dist: &[f64]) -> Vec<
             if let Some((e, _)) = edge {
                 return vec![FaceSrc::New(Origin::FromEdge { body: input, edge: EdgeId(e as u64) })];
             }
-            (0..b.verts.len())
-                .find(|&v| off((b.verts[v].p - p).norm()) < tol)
-                .map(|v| vec![FaceSrc::New(Origin::FromVertex { body: input, vertex: VertexId(v as u64) })])
-                .unwrap_or_default()
+            if let Some(v) = (0..b.verts.len()).find(|&v| off((b.verts[v].p - p).norm()) < tol) {
+                return vec![FaceSrc::New(Origin::FromVertex { body: input, vertex: VertexId(v as u64) })];
+            }
+            steps(f)
         })
         .collect()
 }
