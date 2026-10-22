@@ -80,7 +80,7 @@ INPUT_IGNORES = ("replays ", "needs a usd-brep checkout", "needs the data file")
 NEEDS_ENV = {"smlib_oracle": "CADRS_SMLIB_ORACLE"}
 # SLOW-REGRESSION: more than RATIO times and more than MARGIN seconds over the scaled baseline.
 SLOW_RATIO, SLOW_MARGIN = 3.0, 5.0
-CURRENT = []  # the running test binary, killed with the gate
+CURRENT = []  # the running test binaries, killed with the gate
 
 
 def stop(signum, _frame):
@@ -243,7 +243,7 @@ class Runner:
         killed for a hang, ("died", tests that were running) when it died."""
         cmd = [self.exe, "-Z", "unstable-options", "--format", "json", "--report-time", "--include-ignored", "--exact", "--test-threads", str(threads)] + names
         p = subprocess.Popen(cmd, cwd=self.cwd, env=self.env, stdout=subprocess.PIPE, stderr=self.errlog, text=True, start_new_session=True)
-        CURRENT[:] = [p]
+        CURRENT.append(p)
         lines = queue.Queue()
 
         def pump():
@@ -284,7 +284,7 @@ class Runner:
                 os.killpg(p.pid, signal.SIGKILL)
                 killed = True
         p.wait()
-        CURRENT.clear()
+        CURRENT.remove(p)
         if killed:
             return "killed", []
         if done_suite:
@@ -465,6 +465,9 @@ def main():
     ap.add_argument("--known-only", action="store_true", help="of the ignored tests, run only the known failures")
     ap.add_argument("--baseline", default="", help="durations of an earlier run (default <out>/baseline.json)")
     ap.add_argument("--write-baseline", default="", help="write this run's durations here when the gate passes")
+    ap.add_argument("--jobs", type=int, default=int(os.environ.get("GATE_JOBS", "1")), help="test binaries run at once, longest first by the baseline (each with $RUST_TEST_THREADS threads)")
+    ap.add_argument("--quick", action="store_true", help="the fast tier: no checks; only cases expected to pass that took at most --quick-max s in the baseline (known failures, ignored and slow cases are listed, not run)")
+    ap.add_argument("--quick-max", type=float, default=2.0, help="with --quick: the longest baseline time of a case that runs")
     ap.add_argument("--make-baseline", nargs=2, metavar=("RESULTS", "FILE"), help="write a baseline from a results.json and exit")
     a = ap.parse_args()
     if a.make_baseline:
@@ -484,7 +487,12 @@ def main():
     crate = os.path.join(tree, "crates/cadrs_kernel")
     os.makedirs(a.out, exist_ok=True)
     threads = int(os.environ.get("RUST_TEST_THREADS", "3"))
-    checked = [] if a.no_checks else checks(tree)
+    base_path = a.baseline or os.path.join(a.out, "baseline.json")
+    base = json.load(open(base_path)) if os.path.exists(base_path) else None
+    if a.quick and base is None:
+        ap.error("--quick needs a baseline (--baseline FILE): it picks the cases by their times there")
+    durations = base["durations"] if base else {}
+    checked = [] if (a.no_checks or a.quick) else checks(tree)
     only = set(filter(None, a.only.split(",")))
     skip = set(filter(None, a.skip.split(",")))
     sample = {b: int(n) for b, n in (x.split("=") for x in filter(None, a.sample.split(",")))}
@@ -503,6 +511,7 @@ def main():
         "schema": 1,
         "commit": a.commit,
         "sample": sample,
+        "quick": a.quick and a.quick_max,
         "tree": tree,
         "started": datetime.datetime.now().isoformat(timespec="seconds"),
         "finished": "",
@@ -515,15 +524,18 @@ def main():
     }
     path = os.path.join(a.out, "results.json")
     errlog = open(os.path.join(a.out, "stderr.log"), "w")
-    for b in names:
+    lock = threading.Lock()
+
+    def one(b):
         t0 = time.time()
         log("%s ..." % b)
         try:
             listed = discover(exes[b], crate, env)
         except (RuntimeError, subprocess.TimeoutExpired) as e:
-            res["binaries"][b] = {"wall": 0.0, "error": str(e)}
+            with lock:
+                res["binaries"][b] = {"wall": 0.0, "error": str(e)}
             log("  %s" % e)
-            continue
+            return
         kn = known.get(b, set())
         kinds = {n: ignored_kind(b, why, a.known_only) for n, ign, why in listed if ign}
         run = [n for n, ign, why in listed if not ign or kinds[n]]
@@ -531,9 +543,19 @@ def main():
             keep = set(sorted(run)[::sample[b]])
             listed = [(n, ign or n not in keep, why if n in keep else "not in the sample (--sample)") for n, ign, why in listed]
             run = sorted(keep)
-        errlog.write("==== %s\n" % b)
-        errlog.flush()
+        if a.quick:
+            # The fast tier: what is expected to pass, and fast. Known failures (STALE), ignored
+            # tests and slow cases wait for the full gate.
+            def fast(n, ign):
+                return not ign and n.split("::")[-1] not in kn and durations.get("%s %s" % (b, n), a.quick_max + 1) <= a.quick_max
+            keep = {n for n, ign, why in listed if n in run and fast(n, ign)}
+            listed = [(n, ign or n not in keep, why if n in keep or ign else "not in the quick tier (--quick)") for n, ign, why in listed]
+            run = sorted(keep)
+        with lock:
+            errlog.write("==== %s\n" % b)
+            errlog.flush()
         got = Runner(exes[b], crate, env, threads, a.hang, a.binary_timeout, errlog).run(run) if run else {}
+        recs = []
         for n, ign, why in listed:
             r = got.get(n)
             if r is None:
@@ -546,16 +568,28 @@ def main():
             rec["class"] = classify(dict(r), listed_known, kinds.get(n))
             if rec["class"] in ("REGRESSION", "PANIC", "HANG", "CRASH", "known") and r["outcome"] != "ok":
                 rec["message"] = short_message(r.get("stdout", ""))
-            res["tests"].append(rec)
+            recs.append(rec)
         wall = time.time() - t0
-        res["binaries"][b] = {"wall": round(wall, 1), "executable": exes[b]}
-        bad = [t for t in res["tests"] if t["binary"] == b and t["class"] in BAD]
-        log("  %d listed, %d run, %d bad, %.0f s" % (len(listed), len(run), len(bad), wall))
-        json.dump(res, open(path, "w"), indent=0)
+        bad = [t for t in recs if t["class"] in BAD]
+        log("%s: %d listed, %d run, %d bad, %.0f s" % (b, len(listed), len(run), len(bad), wall))
+        with lock:
+            res["tests"].extend(recs)
+            res["binaries"][b] = {"wall": round(wall, 1), "executable": exes[b]}
+            json.dump(res, open(path, "w"), indent=0)
+
+    # Longest first (by the baseline), so the slow binaries don't start last.
+    order = sorted(names, key=lambda b: -sum(d for k, d in durations.items() if k.split(" ", 1)[0] == b))
+    if a.jobs > 1:
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=a.jobs) as pool:
+            for f in [pool.submit(one, b) for b in order]:
+                f.result()
+    else:
+        for b in order:
+            one(b)
+    res["tests"].sort(key=lambda t: (t["binary"], t["name"]))
     res["finished"] = datetime.datetime.now().isoformat(timespec="seconds")
-    base_path = a.baseline or os.path.join(a.out, "baseline.json")
-    if os.path.exists(base_path):
-        base = json.load(open(base_path))
+    if base is not None:
         res["baseline"] = "%s (%s)" % (base_path, base.get("commit") or "?")
         res["load_ratio"] = round(slow_regressions(res["tests"], base["durations"]), 3)
         confirm_slow(res["tests"], exes, crate, env)
