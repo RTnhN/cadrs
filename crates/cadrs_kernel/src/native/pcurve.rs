@@ -380,7 +380,7 @@ fn flatten(c: Curve) -> Curve {
 
 /// A curve that runs along an iso-line of a B-spline or general surface with its parameter an
 /// affine function of the iso-line's (a sweep's rails, a loft's rails): a straight p-curve.
-fn iso_line(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve> {
+pub(super) fn iso_line(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve> {
     if !matches!(s, Surface::Nurbs(_) | Surface::Extrusion { .. } | Surface::Revolution { .. }) {
         return None;
     }

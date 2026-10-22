@@ -327,6 +327,13 @@ fn pcurve_unsnapped(s: &Surface, c: &Curve, t0: f64, t1: f64, etol: f64) -> Curv
         bb.diagonal().max(bb.max.coords.amax()).max(-bb.min.coords.min())
     };
     let tol = Tol { fit: TOL.max(1e-11 * size), off: 5e-4f64.max(1e-5 * size).max(2.0 * etol) };
+    // An iso line of a spline surface (its seam, an offset's): the straight p-curve, exact where
+    // a fit's ends at a pole would land anywhere along it.
+    if matches!(s, Surface::Nurbs(_))
+        && let Some(pc) = pcurve::iso_line(s, c, t0, t1)
+    {
+        return pc;
+    }
     // A spline on a curved surface, or anything on a spline surface, has no exact p-curve: fit
     // it directly.
     if ((matches!(c, Curve::Nurbs(_)) && !matches!(s, Surface::Plane { .. })) || matches!(s, Surface::Nurbs(_)))

@@ -337,3 +337,28 @@ fn slab_of_a_face_with_a_cone_like_apex() {
     let fan = slab.edges.iter().any(|e| !e.degenerate && e.v[0] == e.v[1] && (0..8).all(|i| ((e.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 8.0) - apex).norm() - 0.3).abs() < 1e-6));
     assert!(fan, "no offset curve round the apex");
 }
+
+/// The inward slab of OffsetBoxSphOnCorner's corner spline (a sphere of radius about 37.3 as a
+/// B-spline closed in v, poles at u = 0 and 1, its loop running round the pole at u = 1 along
+/// its seam): the seam's offset is the offset surface's own seam, so the offset face's loop goes
+/// round that pole too, and its area is the face's scaled by ((R − t)/R)². A fitted seam strayed
+/// off the offset surface's seam near the pole, and the offset face left out the ring round it.
+#[test]
+fn slab_of_a_face_round_a_pole_along_its_seam() {
+    use cadrs_kernel::native::mass;
+    use cadrs_kernel::native::topo::CheckLevel;
+    let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/smlib/offset/OffsetBoxSphOnCorner.smb")).unwrap();
+    let b = cadrs_kernel::native::smb::read_brep(&bytes).unwrap().body;
+    let fi = 10;
+    let s = &b.faces[fi].surf;
+    // The sphere: its two poles (u = 0, 1) a diameter apart, the centre between them.
+    let (p0, p1) = (s.eval(0.0, 0.3), s.eval(1.0, 0.3));
+    let (c, r) = (p0 + (p1 - p0) * 0.5, (p1 - p0).norm() * 0.5);
+    assert!((0..=8).all(|i| ((s.eval(0.1 * i as f64 + 0.05, 0.37) - c).norm() - r).abs() < 1e-6 * r), "not a sphere");
+    let t = 2.54;
+    let slab = cadrs_kernel::native::slab::face_slab(&b, fi, -t).unwrap();
+    assert_eq!(slab.check_with(CheckLevel::Full), Vec::<String>::new());
+    let want = mass::face_area(&b, fi).0 * ((r - t) / r).powi(2);
+    let got = (0..slab.faces.len()).map(|f| mass::face_area(&slab, f).0).fold(f64::NAN, |best, a| if (a - want).abs() < (best - want).abs() || best.is_nan() { a } else { best });
+    assert!((got - want).abs() < 1e-4 * want, "offset face {got}, want {want}");
+}

@@ -219,11 +219,42 @@ pub fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
         let (v0, v1) = (e.v[0], e.v[1]);
         let oc = offset_curve(&|t| normal_on(c, t), &e.curve, e.t[0], e.t[1], d, (FIT * (1.0 + d.abs())).max(0.1 * e.tol));
         let a = xb.edge(e.curve.clone(), vb[&v0], vb[&v1]).ok_or(unsupported("an empty edge in a slab"))?;
-        let t = xb.edge(oc.clone(), vt[&v0], vt[&v1]).ok_or(unsupported("an empty offset edge in a slab"))?;
-        // The face's own edge keeps its tolerance; its offset strays from the offset surface
-        // by as much, or by the offset surface's fit where that is approximate.
+        // A seam of a B-spline face (used twice, along an iso line) offsets onto the offset
+        // surface's seam: that iso line itself, so its two uses lie on the seam's two sides
+        // (a fit strays off it, most near a pole, where its p-curve can't say which side).
+        let seam_iso = match &top_surf {
+            Surface::Nurbs(tn) if own && uses[&ei] > 1 && matches!(f.surf, Surface::Nurbs(_)) => {
+                let (q0, q1) = (c.pc.point(e.t[0]), c.pc.point(e.t[1]));
+                let tol = 1e-12 * (1.0 + q0.coords.norm() + q1.coords.norm());
+                let iso = |along_v: bool, at: f64| Curve::Nurbs(Arc::new(super::local::nurbs_iso(tn, at, along_v)));
+                if (q0.y - q1.y).abs() < tol && (0..=8).all(|i| (c.pc.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 8.0).y - q0.y).abs() < tol) {
+                    Some(iso(false, q0.y))
+                } else if (q0.x - q1.x).abs() < tol && (0..=8).all(|i| (c.pc.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 8.0).x - q0.x).abs() < tol) {
+                    Some(iso(true, q0.x))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+        let (t, oc) = match seam_iso.and_then(|iso| xb.edge(iso.clone(), vt[&v0], vt[&v1]).map(|t| (t, iso))) {
+            Some((t, iso)) => {
+                // Its ends off the slab's offset vertices by the offset surface's fit.
+                let ed = &xb.body.edges[t];
+                let gap = (ed.point(ed.t[0]) - xb.body.verts[ed.v[0]].p).norm().max((ed.point(ed.t[1]) - xb.body.verts[ed.v[1]].p).norm());
+                xb.body.edges[t].tol = e.tol.max(1.5 * gap);
+                (t, iso)
+            }
+            None => {
+                let t = xb.edge(oc.clone(), vt[&v0], vt[&v1]).ok_or(unsupported("an empty offset edge in a slab"))?;
+                // Its offset strays from the offset surface by as much as the face's edge, or by
+                // the offset surface's fit where that is approximate.
+                xb.body.edges[t].tol = e.tol.max(1.5 * stray(&top_surf, &oc, e.t[0], e.t[1]));
+                (t, oc)
+            }
+        };
+        // The face's own edge keeps its tolerance.
         xb.body.edges[a].tol = e.tol;
-        xb.body.edges[t].tol = e.tol.max(1.5 * stray(&top_surf, &oc, e.t[0], e.t[1]));
         eb.insert(ei, a);
         et.insert(ei, t);
         // A seam (used twice) bounds no side.
@@ -380,6 +411,10 @@ pub fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
         .collect();
     xb.solid(shells);
     let (mut body, warnings, map) = xb.finish_mapped();
+    // Tolerances to the gaps the fits leave (an offset surface's fit against the offset
+    // vertices and curves), as a full check measures them.
+    let size = body.bbox().diagonal();
+    body.fit_tolerances_searched(1e-5 * (1.0 + size));
     if std::env::var_os("CADRS_SLAB_DEBUG").is_some() {
         eprintln!("slab of face {fi} ({:?}) by {d}: {warnings:?}", f.surf.kind());
     }

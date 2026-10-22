@@ -179,7 +179,7 @@ fn closed_spline_shift(s: &Surface, pc: &Curve, t0: f64, t1: f64, at: [f64; 2]) 
 /// The exact iso curve of a B-spline surface: u = `t` (running along v) when `along_v`, else
 /// v = `t` (along u). Its poles are the surface's rows blended by the other direction's basis
 /// at `t`, in homogeneous coordinates.
-fn nurbs_iso(n: &super::nurbs::NurbsSurface, t: f64, along_v: bool) -> NurbsCurve {
+pub(super) fn nurbs_iso(n: &super::nurbs::NurbsSurface, t: f64, along_v: bool) -> NurbsCurve {
     let (deg, knots, count) = if along_v { (n.du, &n.ku, n.cps.len()) } else { (n.dv, &n.kv, n.cps[0].len()) };
     let span = super::nurbs::find_span(count - 1, deg, t, knots);
     let basis = &super::nurbs::basis_ders(span, t, deg, 0, knots)[0];
