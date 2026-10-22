@@ -156,9 +156,26 @@ impl SweepKind for Revolve {
                 let phim = wrap(sig * tm + ax, -PI, TAU);
                 let phi0 = phim - sig * tm;
                 let fr = Frame { o: f.o + f.z * hc, x: f.x, y: f.y, z: f.z };
-                let surf = if rc < TOL { Surface::Sphere { f: fr, r: *r } } else { Surface::Torus { f: fr, rmaj: rc, rmin: *r } };
+                if rc < TOL {
+                    return Some(SideGeo {
+                        surf: Surface::Sphere { f: fr, r: *r },
+                        along: Box::new(move |s| line2(P2::new(s, phi0), V2::new(0.0, sig))),
+                        across: Box::new(move |t| line2(P2::new(0.0, sig * t + phi0), V2::new(1.0, 0.0))),
+                    });
+                }
+                // An arc whose centre lies behind the axis (ρ = −rc + r cos φ: a spindle torus's
+                // part past its axis) is on the torus of the frame turned half round, whose
+                // meridian at u = s has that centre: along its x, ρ' = rc − r cos φ, so v = π − φ.
+                if f.local(c).x < 0.0 {
+                    let fr = Frame { x: -f.x, y: -f.y, ..fr };
+                    return Some(SideGeo {
+                        surf: Surface::Torus { f: fr, rmaj: rc, rmin: *r },
+                        along: Box::new(move |s| line2(P2::new(s, PI - phi0), V2::new(0.0, -sig))),
+                        across: Box::new(move |t| line2(P2::new(0.0, PI - (sig * t + phi0)), V2::new(1.0, 0.0))),
+                    });
+                }
                 Some(SideGeo {
-                    surf,
+                    surf: Surface::Torus { f: fr, rmaj: rc, rmin: *r },
                     along: Box::new(move |s| line2(P2::new(s, phi0), V2::new(0.0, sig))),
                     across: Box::new(move |t| line2(P2::new(0.0, sig * t + phi0), V2::new(1.0, 0.0))),
                 })

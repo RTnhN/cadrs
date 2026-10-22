@@ -155,7 +155,8 @@ impl<'a> Dom<'a> {
             wrap_v: pv && !full(bx.dv()),
             free_u: pu && full(bx.du()),
             free_v: pv && full(bx.dv()),
-            exact: matches!(s, Surface::Plane { .. } | Surface::Cylinder { .. } | Surface::Sphere { .. } | Surface::Torus { .. }),
+            // (Not a spindle torus's: its distance is to the nearer of two meridians.)
+            exact: matches!(s, Surface::Plane { .. } | Surface::Cylinder { .. } | Surface::Sphere { .. }) || matches!(s, Surface::Torus { rmaj, rmin, .. } if rmin <= rmaj),
         }
     }
 

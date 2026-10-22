@@ -153,7 +153,9 @@ pub fn unify_faces(b: &mut Body, from: Vec<Vec<(usize, usize)>>, can_merge: &dyn
         let r = dsu.find(f);
         groups.entry(r).or_default().push(f);
     }
-    let mut replace: Vec<Option<Face>> = vec![None; nf];
+    // Merged faces go into place at once (a later group's re-seaming splits edges in every face
+    // of `b`, these included).
+    let mut replace = vec![false; nf];
     let mut drop = vec![false; nf];
     // Each face's group's first face (where a merged face goes).
     let mut first = vec![usize::MAX; nf];
@@ -167,7 +169,8 @@ pub fn unify_faces(b: &mut Body, from: Vec<Vec<(usize, usize)>>, can_merge: &dyn
             continue;
         }
         if let Some(face) = merge_group(b, &g) {
-            replace[g[0]] = Some(face);
+            b.faces[g[0]] = face;
+            replace[g[0]] = true;
             for &f in &g[1..] {
                 drop[f] = true;
             }
@@ -181,7 +184,7 @@ pub fn unify_faces(b: &mut Body, from: Vec<Vec<(usize, usize)>>, can_merge: &dyn
     // merged face is: the union-find root needn't be that face).
     for f in 0..nf {
         let g0 = first[f];
-        if replace[g0].is_some() {
+        if replace[g0] {
             gfrom.entry(g0).or_default().extend(from[f].iter().copied());
         }
     }
@@ -189,16 +192,8 @@ pub fn unify_faces(b: &mut Body, from: Vec<Vec<(usize, usize)>>, can_merge: &dyn
         if drop[f] {
             continue;
         }
-        match replace[f].take() {
-            Some(face) => {
-                faces.push(face);
-                new_from.push(gfrom.remove(&f).unwrap_or_else(|| from[f].clone()));
-            }
-            None => {
-                faces.push(b.faces[f].clone());
-                new_from.push(from[f].clone());
-            }
-        }
+        faces.push(b.faces[f].clone());
+        new_from.push(if replace[f] { gfrom.remove(&f).unwrap_or_else(|| from[f].clone()) } else { from[f].clone() });
     }
     b.faces = faces;
     compact(b);
@@ -467,6 +462,17 @@ fn merge_group(b: &mut Body, g: &[usize]) -> Option<Face> {
         }
         chains.push(ch);
     }
+    // A chain that runs along an edge and straight back (a seam of one face that is another's
+    // boundary, cancelled where the faces join): a slit bounding nothing, dropped.
+    for ch in &mut chains {
+        while ch.len() > 2 {
+            let n = ch.len();
+            let Some(k) = (0..n).find(|&k| ch[k].edge == ch[(k + 1) % n].edge && ch[k].fwd != ch[(k + 1) % n].fwd) else { break };
+            let k2 = (k + 1) % n;
+            ch.remove(k.max(k2));
+            ch.remove(k.min(k2));
+        }
+    }
     // p-curves on the base surface, continuous along each chain.
     let center = {
         let mut bb = Bbox::empty();
@@ -559,20 +565,38 @@ fn merge_group(b: &mut Body, g: &[usize]) -> Option<Face> {
         if wrapping.len() != 2 || !surf.u_periodic() {
             return None;
         }
-        let (i1, i2) = (wrapping[0], wrapping[1]);
+        let (mut i1, mut i2) = (wrapping[0], wrapping[1]);
         if windings[i1] + windings[i2] != 0 || windings[i1].abs() != 1 {
             return None;
         }
-        // Seam at the start vertex of chain 1.
+        // Seam at a vertex of chain 1 where neither of its edges there runs along the iso-u
+        // line (a seam there would lie on that edge: the face's own boundary).
+        let along_iso = |c: &Coedge| {
+            let e = &b.edges[c.edge];
+            let (a, z) = (co_uv(b, c, false).x, co_uv(b, c, true).x);
+            let m = c.pc.point(0.5 * (e.t[0] + e.t[1])).x;
+            !e.degenerate && (a - z).abs() * mu < tol::POINT && (a - m).abs() * mu < tol::POINT
+        };
+        let good = |ch: &[Coedge]| (0..ch.len()).find(|&k| !along_iso(&ch[k]) && !along_iso(&ch[(k + ch.len() - 1) % ch.len()]));
+        // (From the other chain when every vertex of the first has such an edge.)
+        if good(&chains[i1]).is_none() && good(&chains[i2]).is_some() {
+            std::mem::swap(&mut i1, &mut i2);
+        }
+        if let Some(k) = good(&chains[i1]) {
+            chains[i1].rotate_left(k);
+        }
         let s1 = b.co_start(&chains[i1][0]);
         let us = co_uv(b, &chains[i1][0], false).x;
-        // A vertex of chain 2 at the same u (mod 2π), else split an edge there.
+        // A vertex of chain 2 at the same u (mod 2π), the nearest along it (a farther one would
+        // run the seam over the nearer and the edges between), else split an edge there.
+        let v1 = co_uv(b, &chains[i1][0], false).y;
         let mut s2: Option<(usize, usize)> = None; // (coedge index in chain 2 starting there, vertex)
+        let mut best = f64::INFINITY;
         for (k, c) in chains[i2].iter().enumerate() {
-            let u = co_uv(b, c, false).x;
-            if ((u - us) / TAU - ((u - us) / TAU).round()).abs() * TAU * mu < 1e-7 {
+            let q = co_uv(b, c, false);
+            if ((q.x - us) / TAU - ((q.x - us) / TAU).round()).abs() * TAU * mu < tol::CONFUSION && (q.y - v1).abs() < best {
+                best = (q.y - v1).abs();
                 s2 = Some((k, b.co_start(c)));
-                break;
             }
         }
         if s2.is_none() {

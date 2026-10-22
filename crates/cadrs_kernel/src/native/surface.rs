@@ -262,15 +262,30 @@ impl Surface {
                 let u = if rho < tol::ROUNDOFF_FINE { hint.map(|h| h.0).unwrap_or(0.0) } else { ang(f) };
                 (u, v)
             }
-            Surface::Torus { f, rmaj, .. } => {
+            Surface::Torus { f, rmaj, rmin } => {
                 let l = f.local(p);
                 let rho = (l.x * l.x + l.y * l.y).sqrt();
-                let v = l.z.atan2(rho - rmaj);
+                // A spindle torus (minor radius past the major: a revolved arc crossing its
+                // axis) reaches each side of the axis from both meridians: the point is on the
+                // far one (u + π, at radius −ρ) when that circle runs nearer it.
+                let (mut u, mut v) = (ang(f), l.z.atan2(rho - rmaj));
+                if rmin > rmaj {
+                    let near = ((rho - rmaj).hypot(l.z) - rmin).abs();
+                    let far = ((-rho - rmaj).hypot(l.z) - rmin).abs();
+                    let hint_far = hint.is_some_and(|(hu, _)| (unwrap_near(u + PI, hu, TAU) - hu).abs() < (u - hu).abs());
+                    if far < near - tol::CONFUSION || (far <= near + tol::CONFUSION && hint_far) {
+                        u = match hint {
+                            Some((hu, _)) => unwrap_near(u + PI, hu, TAU),
+                            None => wrap(u + PI, 0.0, TAU),
+                        };
+                        v = l.z.atan2(-rho - rmaj);
+                    }
+                }
                 let v = match hint {
                     Some((_, hv)) => unwrap_near(v, hv, TAU),
                     None => wrap(v, -PI, TAU),
                 };
-                (ang(f), v)
+                (u, v)
             }
             Surface::Revolution { f, m } if meridian_off_plane(f, m) => project_off_plane(f, m, p, hint),
             Surface::Revolution { f, m } => {
@@ -686,7 +701,11 @@ impl Surface {
             Surface::Torus { f, rmaj, rmin } => {
                 let l = f.local(p);
                 let rho = (l.x * l.x + l.y * l.y).sqrt();
-                ((rho - rmaj).powi(2) + l.z * l.z).sqrt() - rmin
+                let near = (rho - rmaj).hypot(l.z) - rmin;
+                // A spindle torus (minor radius past the major) is also the far meridian's
+                // turn, at radius −ρ: the nearer of the two.
+                let far = (rho + rmaj).hypot(l.z) - rmin;
+                if rmin > rmaj && far.abs() < near.abs() { far } else { near }
             }
             _ => return None,
         })

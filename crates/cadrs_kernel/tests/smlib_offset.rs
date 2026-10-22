@@ -158,16 +158,14 @@ fn offset_12_offset_bracket2() {
 
 /// SMLib offset demo 13 (smOffsetTest.cpp:940, `my_test_offset`): `offset_bracket2.smb` offset by 5.1.
 #[test]
-#[ignore = "known failure, slow (tools/smlib_known_failures/offset.txt)"]
 fn offset_13_offset_bracket2() {
-    known_failure(offset("offset_bracket2.smb", 5.1, None, None, &Expect { volume: Some(34918.3962093), area: Some(7371.42331838), faces: Some(130), edges: Some(305), solid: Some(true), ..Expect::default() }), "offset", "offset_13_offset_bracket2");
+    offset("offset_bracket2.smb", 5.1, None, None, &Expect { volume: Some(34918.3962093), area: Some(7371.42331838), faces: Some(130), edges: Some(305), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib offset demo 14 (smOffsetTest.cpp:951, `my_test_offset`): `offset_bracket2.smb` offset by 7.1.
 #[test]
-#[ignore = "known failure, slow (tools/smlib_known_failures/offset.txt)"]
 fn offset_14_offset_bracket2() {
-    known_failure(offset("offset_bracket2.smb", 7.1, None, None, &Expect { volume: Some(50857.1378497), area: Some(8579.3431904), faces: Some(124), edges: Some(292), solid: Some(true), ..Expect::default() }), "offset", "offset_14_offset_bracket2");
+    offset("offset_bracket2.smb", 7.1, None, None, &Expect { volume: Some(50857.1378497), area: Some(8579.3431904), faces: Some(124), edges: Some(292), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib offset demo 15 (smOffsetTest.cpp:963, `my_test_offset`): `offset_bracket2.smb` offset by 1.5, less `offset_bracket_box.smb`.

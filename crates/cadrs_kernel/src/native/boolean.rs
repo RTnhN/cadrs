@@ -310,7 +310,8 @@ fn import(pool: &mut Pool, faces: &mut Vec<WFace>, b: &Body, owner: usize, merge
         pool.edges.push(WEdge { curve: e.curve.clone(), t: e.t, v: [vmap[e.v[0]], vmap[e.v[1]]], degenerate: e.degenerate, tol: own(e.tol), splits: Vec::new() });
     }
     for (fi, f) in b.faces.iter().enumerate() {
-        let loops: Vec<Vec<(usize, bool, Curve)>> = f.loops.iter().map(|l| l.iter().map(|c| (c.edge + e0, c.fwd, c.pc.clone())).collect()).collect();
+        let mut loops: Vec<Vec<(usize, bool, Curve)>> = f.loops.iter().map(|l| l.iter().map(|c| (c.edge + e0, c.fwd, c.pc.clone())).collect()).collect();
+        loops.iter_mut().for_each(drop_slits);
         let polys = classify::face_polygons(b, f);
         let mut bb = Bbox::empty();
         let mut uvb = Bbox::empty();
@@ -350,6 +351,19 @@ fn import(pool: &mut Pool, faces: &mut Vec<WFace>, b: &Body, owner: usize, merge
             uv_center: P2::new(center.x, center.y),
             tol: ftol,
         });
+    }
+}
+
+/// Drops from a loop each run along an edge and straight back along it (two uses of one edge
+/// in a row, opposite ways: a slit, which bounds nothing; a merge of a seamed face with one it
+/// borders can leave one).
+fn drop_slits(l: &mut Vec<(usize, bool, Curve)>) {
+    while l.len() > 2 {
+        let n = l.len();
+        let Some(k) = (0..n).find(|&k| l[k].0 == l[(k + 1) % n].0 && l[k].1 != l[(k + 1) % n].1) else { break };
+        let k2 = (k + 1) % n;
+        l.remove(k.max(k2));
+        l.remove(k.min(k2));
     }
 }
 
@@ -637,12 +651,101 @@ pub fn boolean_bodies_with(a: &Body, b: &Body, op: BoolOp, opts: BoolOptions) ->
     if !matches!(&first, Err(KernelError::OpenResult(_))) && !matches!(&first, Err(e) if e.is_failure() && broken(&e.message())) {
         return first;
     }
+    // Inputs of several solids (an extrude of regions that share an edge, solids touching face
+    // to face or along an edge): one solid at a time.
+    if let Some(Ok(r)) = per_target_solid(a, b, op, opts).or_else(|| per_tool_solid(a, b, op, opts)) {
+        return Ok(r);
+    }
     for t in opts.tol.retries.into_iter().filter(|_| std::env::var_os("CADRS_DEBUG_NO_RETRY").is_none()) {
         if let Ok(r) = run(a, b, Mode::Bool(op), at(t)) {
             return Ok(r);
         }
     }
     first
+}
+
+/// `a op b` with `a` taken one solid at a time: `b` united with each in turn; each one's
+/// intersection with `b` or the part of it outside `b`, side by side. None when `a` isn't
+/// several solids (and nothing else).
+fn per_target_solid(a: &Body, b: &Body, op: BoolOp, opts: BoolOptions) -> Option<Result<BoolOut>> {
+    let pieces = super::exchange::split_into_solids_mapped(a);
+    if pieces.len() < 2 || pieces.iter().any(|(p, _)| p.solids.is_empty()) {
+        return None;
+    }
+    let run_all = || -> Result<BoolOut> {
+        if op == BoolOp::Union {
+            let mut cur = BoolOut { body: b.clone(), from: (0..b.faces.len()).map(|f| vec![(1, f)]).collect() };
+            for (p, map) in &pieces {
+                let r = boolean_bodies_with(&cur.body, p, op, opts)?;
+                let from = r.from.iter().map(|srcs| srcs.iter().flat_map(|&(o, f)| if o == 0 { cur.from[f].clone() } else { vec![(0, map[f])] }).collect()).collect();
+                cur = BoolOut { body: r.body, from };
+            }
+            return Ok(cur);
+        }
+        let mut out = BoolOut { body: Body::default(), from: Vec::new() };
+        for (p, map) in &pieces {
+            let r = match boolean_bodies_with(p, b, op, opts) {
+                Err(KernelError::EmptyResult(_)) => continue,
+                r => r?,
+            };
+            out.body.append(&r.body);
+            out.from.extend(r.from.iter().map(|srcs| srcs.iter().map(|&(o, f)| if o == 0 { (0, map[f]) } else { (1, f) }).collect::<Vec<_>>()));
+        }
+        if out.body.faces.is_empty() {
+            return Err(KernelError::EmptyResult("the result is empty".into()));
+        }
+        Ok(out)
+    };
+    Some(run_all())
+}
+
+/// `a op b` with `b` taken one solid at a time: a union or subtraction of each in turn, an
+/// intersection the union of `a`'s intersections with each. None when `b` isn't several solids
+/// (and nothing else).
+fn per_tool_solid(a: &Body, b: &Body, op: BoolOp, opts: BoolOptions) -> Option<Result<BoolOut>> {
+    let pieces = super::exchange::split_into_solids_mapped(b);
+    if pieces.len() < 2 || pieces.iter().any(|(p, _)| p.solids.is_empty()) {
+        return None;
+    }
+    // A result's faces traced through `from` (owner 0: `prior`'s faces; 1: the piece's, mapped
+    // to `b`'s through `map`).
+    let compose = |from: &[Vec<(usize, usize)>], prior: &[Vec<(usize, usize)>], map: &dyn Fn(usize) -> Vec<(usize, usize)>| -> Vec<Vec<(usize, usize)>> {
+        from.iter().map(|srcs| srcs.iter().flat_map(|&(o, f)| if o == 0 { prior[f].clone() } else { map(f) }).collect()).collect()
+    };
+    let run_all = || -> Result<BoolOut> {
+        match op {
+            BoolOp::Union | BoolOp::Subtract => {
+                let mut cur = BoolOut { body: a.clone(), from: (0..a.faces.len()).map(|f| vec![(0, f)]).collect() };
+                for (p, map) in &pieces {
+                    let r = boolean_bodies_with(&cur.body, p, op, opts)?;
+                    let from = compose(&r.from, &cur.from, &|f| vec![(1, map[f])]);
+                    cur = BoolOut { body: r.body, from };
+                }
+                Ok(cur)
+            }
+            BoolOp::Intersect => {
+                let mut acc: Option<BoolOut> = None;
+                for (p, map) in &pieces {
+                    let r = match boolean_bodies_with(a, p, op, opts) {
+                        Err(KernelError::EmptyResult(_)) => continue,
+                        r => r?,
+                    };
+                    let from: Vec<Vec<(usize, usize)>> = r.from.iter().map(|srcs| srcs.iter().map(|&(o, f)| if o == 0 { (0, f) } else { (1, map[f]) }).collect()).collect();
+                    let piece = BoolOut { body: r.body, from };
+                    acc = Some(match acc {
+                        None => piece,
+                        Some(prev) => {
+                            let u = boolean_bodies_with(&prev.body, &piece.body, BoolOp::Union, opts)?;
+                            let from = compose(&u.from, &prev.from, &|f| piece.from[f].clone());
+                            BoolOut { body: u.body, from }
+                        }
+                    });
+                }
+                acc.ok_or_else(|| KernelError::EmptyResult("the result is empty".into()))
+            }
+        }
+    };
+    Some(run_all())
 }
 
 /// The faces of `a` and `b` that lie on one surface only within 1e-7 of their size (beyond the
@@ -1029,6 +1132,31 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
                 if point_in_face(&faces[fi], &p, run_tol.max(et)) == InFace::Outside {
                     continue;
                 }
+                // A point of touch found again a hair from a vertex the edge already has there
+                // (an edge resting on the surface touches it along a zone where the distance is
+                // rounding noise): that vertex.
+                let surf = &faces[fi].surf;
+                let pe = &pool.edges[e];
+                // (A touch, not a crossing: the edge keeps to one side of the surface either
+                // side of the root.)
+                let (lo, hi) = (pe.t[0].min(pe.t[1]), pe.t[0].max(pe.t[1]));
+                let side = |x: f64| {
+                    let q = ed.curve.point(x.clamp(lo, hi));
+                    let (u, v) = surf.project(&q, None);
+                    (q - surf.eval(u, v)).dot(&surf.normal(u, v))
+                };
+                let near_vertex = pe.splits.iter().copied().chain([(pe.t[0], pe.v[0]), (pe.t[1], pe.v[1])]).find(|&(s, w)| {
+                    let h = 0.25 * (s - t);
+                    (pool.verts[w] - p).norm() <= et.max(run_tol) * 1e5
+                        && side(t - h) * side(t + h) >= 0.0
+                        && (0..=8).all(|k| surf.distance(&ed.curve.point(t + (s - t) * k as f64 / 8.0)) <= et.max(run_tol))
+                });
+                if let Some((_, w)) = near_vertex {
+                    if !face_pts[fi].contains(&w) {
+                        face_pts[fi].push(w);
+                    }
+                    continue;
+                }
                 let v = pool.vertex_tol(p, et);
                 let t = refine_param(&ed.curve, ed.t[0], ed.t[1], &pool.verts[v], t);
                 pool.split(e, t, v);
@@ -1376,6 +1504,18 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
                 // (Also where they cross along it, the edge lying on the other surface: the edge
                 // stages imprint it.)
                 if ((ia == InFace::Boundary && along_edge(fa)) || (ib == InFace::Boundary && along_edge(fb))) && (edge_on_other || tangent_at(&pm)) {
+                    continue;
+                }
+                // Where a traced curve (of surfaces with no closed-form intersection) runs along
+                // an edge of one face that lies on the other surface within the tolerance all
+                // along (two swept faces meeting at a seam of one, the curve traced 1e-7 off it),
+                // it is that edge again: the edge–face stage imprints the edge, and the copy would
+                // cut the faces along it. (An exact curve near an edge is other geometry.)
+                let elementary = |s: &Surface| matches!(s, Surface::Plane { .. } | Surface::Cylinder { .. } | Surface::Cone { .. } | Surface::Sphere { .. } | Surface::Torus { .. });
+                // (A section reports the stretch: only an edge lying on the other surface all
+                // along is imprinted there.)
+                let traced = !(elementary(&faces[fa].surf) && elementary(&faces[fb].surf)) && !matches!(mode, Mode::Section);
+                if traced && ((ia == InFace::Boundary && along_edge(fa) && duplicates_edge(&pool, &face_edges[fa], &faces[fb], &ic.c, ta, tb, tf, run_tol)) || (ib == InFace::Boundary && along_edge(fb) && duplicates_edge(&pool, &face_edges[fb], &faces[fa], &ic.c, ta, tb, tf, run_tol))) {
                     continue;
                 }
                 let va = va.unwrap_or_else(|| pool.vertex_tol(ic.c.point(ta), ft));
@@ -1955,6 +2095,29 @@ fn touch_voids(b: &mut Body, tol: f64) {
     for (v, t) in raise {
         b.verts[v].tol = b.verts[v].tol.max(t);
     }
+}
+
+/// Whether `c` on [ta, tb] runs within `tol` of one of `edges` all along, where that edge lies on
+/// the surface of `other` (within the run's tolerance `run_tol`, the edge's, the face's or
+/// `tol`): `c` duplicates the edge there.
+#[allow(clippy::too_many_arguments)]
+fn duplicates_edge(pool: &Pool, edges: &[usize], other: &WFace, c: &Curve, ta: f64, tb: f64, tol: f64, run_tol: f64) -> bool {
+    let pm = c.point(0.5 * (ta + tb));
+    let dist = |e: usize, p: &P3| {
+        let ed = &pool.edges[e];
+        let (a, b) = (ed.t[0].min(ed.t[1]), ed.t[0].max(ed.t[1]));
+        (ed.curve.point(ed.curve.closest(p, a, b)) - p).norm()
+    };
+    let Some(e) = edges.iter().copied().filter(|&e| !pool.edges[e].degenerate).min_by(|&x, &y| dist(x, &pm).total_cmp(&dist(y, &pm))) else { return false };
+    let ed = &pool.edges[e];
+    let (a, b) = (ed.t[0].min(ed.t[1]), ed.t[0].max(ed.t[1]));
+    let on = run_tol.max(ed.tol).max(other.tol).max(tol);
+    let n = 16;
+    (0..=n).all(|k| {
+        let p = c.point(ta + (tb - ta) * k as f64 / n as f64);
+        let q = ed.curve.point(ed.curve.closest(&p, a, b));
+        (q - p).norm() <= tol && other.surf.distance(&q) <= on
+    })
 }
 
 /// The points where two curves meet (`hits`: (t on `a`, t on `b`), as [`ssi::curve_curve`]

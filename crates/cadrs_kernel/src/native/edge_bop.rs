@@ -178,16 +178,52 @@ fn argmin(mut a: f64, mut b: f64, f: impl Fn(f64) -> f64) -> f64 {
     (a + b) / 2.0
 }
 
+/// How much tighter than the tolerance a stretch where two edges run within it is measured
+/// again, to tell edges that coincide from edges that only touch tangentially.
+pub(crate) const TIGHT: f64 = 1e-2;
+
+/// Whether the stretch [ra, rb] of `e` within `tol` of an edge (distance `df`) is only a
+/// tangential touch, and where it touches: two curves that coincide stay together at any
+/// tolerance, but two that touch tangentially (an arc ending on a line it is tangent to) part
+/// quadratically, so their stretch within the tolerance shrinks with its square root: at
+/// [`TIGHT`] times it, to a tenth. A stretch that shrinks to less than half is a touch.
+fn tangent_touch(e: &Piece, ra: f64, rb: f64, tol: f64, df: impl Fn(f64) -> f64) -> Option<f64> {
+    let tm = argmin(ra.min(rb), ra.max(rb), &df);
+    let tight = tol * TIGHT;
+    if df(tm) > tight {
+        return Some(tm);
+    }
+    let on = |t: f64| df(t) <= tight;
+    let a2 = if on(ra) { ra } else { bisect(ra, tm, false, on) };
+    let b2 = if on(rb) { rb } else { bisect(tm, rb, true, on) };
+    let (l1, l2) = ((e.point(rb) - e.point(ra)).norm(), (e.point(b2) - e.point(a2)).norm());
+    (l2 < 0.5 * l1).then_some(tm)
+}
+
 /// Where `e` meets one edge `o`: where it starts and stops running along it, and the points
-/// where it only touches it (crossings, `o`'s ends on it).
+/// where it only touches it (crossings, `o`'s ends on it, tangential touches).
 fn edge_meets(e: &Piece, ts: &[f64], o: &Piece, tol: f64, size: f64, touches: bool, out: &mut Vec<f64>) {
     let df = |t: f64| dist_to(o, &e.point(t));
     let d: Vec<f64> = ts.iter().map(|&t| df(t)).collect();
-    for i in 1..ts.len() {
-        let (a, b) = (d[i - 1] <= tol, d[i] <= tol);
-        if a != b {
-            out.push(bisect(ts[i - 1], ts[i], a, |t| df(t) <= tol));
+    // Each run of samples within the tolerance: where it starts and stops (bisected), or, for
+    // a tangential touch, the one point of touch.
+    let mut i = 0;
+    while i < ts.len() {
+        if d[i] > tol {
+            i += 1;
+            continue;
         }
+        let mut j = i;
+        while j + 1 < ts.len() && d[j + 1] <= tol {
+            j += 1;
+        }
+        let lo = (i > 0).then(|| bisect(ts[i - 1], ts[i], false, |t| df(t) <= tol));
+        let hi = (j + 1 < ts.len()).then(|| bisect(ts[j], ts[j + 1], true, |t| df(t) <= tol));
+        match tangent_touch(e, lo.unwrap_or(ts[i]), hi.unwrap_or(ts[j]), tol, df) {
+            Some(t) => out.push(t),
+            None => out.extend(lo.into_iter().chain(hi)),
+        }
+        i = j + 1;
     }
     if !touches {
         return;
@@ -447,3 +483,27 @@ pub fn vertex_count(edges: &[(P3, P3)], tol: f64) -> usize {
     pts.len()
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An arc ending on a line it is tangent to stays within the tolerance of the line for a
+    /// stretch beyond its end (√(2·r·tol)): a touch at the end, not an overlap, so neither edge
+    /// is split there but at the point of touch.
+    #[test]
+    fn tangent_arc_touches_a_line() {
+        let line = Piece { curve: Curve::Line { o: P3::new(-10.0, 0.0, 0.0), d: V3::x() }, t0: 0.0, t1: 20.0 };
+        let arc = Piece { curve: Curve::Circle { c: P3::new(0.0, 500.0, 0.0), x: V3::x(), y: V3::y(), r: 500.0 }, t0: -PI / 2.0, t1: -PI / 2.0 + 0.17 };
+        let r = edge_boolean(BoolOp::Union, std::slice::from_ref(&line), &Other::Edges(std::slice::from_ref(&arc)), false).unwrap();
+        // The line in two at the touch, the arc whole.
+        assert_eq!(r.len(), 3, "{r:?}");
+        let on_line = r.iter().filter(|p| matches!(p.curve, Curve::Line { .. })).count();
+        assert_eq!(on_line, 2);
+        // Two lines running together still overlap end to end.
+        let half = Piece { curve: Curve::Line { o: P3::new(-10.0, 0.0, 0.0), d: V3::x() }, t0: 5.0, t1: 30.0 };
+        let common = edge_boolean(BoolOp::Intersect, std::slice::from_ref(&line), &Other::Edges(std::slice::from_ref(&half)), false).unwrap();
+        assert_eq!(common.len(), 1);
+        assert!((common[0].length() - 15.0).abs() < 1e-6, "{common:?}");
+    }
+}

@@ -304,12 +304,16 @@ fn exact(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve> {
             }
             _ => None,
         },
-        Surface::Torus { f, rmaj, .. } => match c {
+        Surface::Torus { f, rmaj, rmin } => match c {
             Curve::Circle { c: cc, x, y, .. } if coaxial_circle(f, cc, x, y) => {
                 let sgn = x.cross(y).dot(&f.x.cross(&f.y)).signum();
                 let l = f.local(&c.point(0.0));
-                let v = l.z.atan2((l.x * l.x + l.y * l.y).sqrt() - rmaj);
-                Some(line2(P2::new(ang(f, x), v), V2::new(sgn, 0.0)))
+                let rho = (l.x * l.x + l.y * l.y).sqrt();
+                // On a spindle torus (minor radius past the major) a circle of the part past
+                // the axis lies on the far meridian: u + π, at radius −ρ.
+                let far = rmin > rmaj && ((-rho - rmaj).hypot(l.z) - rmin).abs() < ((rho - rmaj).hypot(l.z) - rmin).abs();
+                let (u, v) = if far { (ang(f, x) + PI, l.z.atan2(-rho - rmaj)) } else { (ang(f, x), l.z.atan2(rho - rmaj)) };
+                Some(line2(P2::new(u, v), V2::new(sgn, 0.0)))
             }
             Curve::Circle { c: cc, x, y, .. } if x.cross(y).dot(&f.z).abs() < tol::ANGULAR_FINE => {
                 let l = f.local(cc);

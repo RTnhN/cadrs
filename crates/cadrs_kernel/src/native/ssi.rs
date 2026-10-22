@@ -170,12 +170,45 @@ fn plane_cone(fp: &Frame, fc: &Frame, r: f64, ang: f64, bb: &Bbox) -> Option<Vec
         }
         let v = (c - r * g) / d;
         let rho = r + s * v;
+        // The cone's own sheet only (radius r + v sin a ≥ 0): the other nappe of the double
+        // cone the conic lies on is no part of the surface (a cone past 90°, nearly flat,
+        // has it a hair away).
+        if rho < -tol::ROUNDOFF * (1.0 + r.abs()) {
+            return None;
+        }
         Some(fc.o + (fc.x * u.cos() + fc.y * u.sin()) * rho + fc.z * (k * v))
     };
     let inside = |u: f64| local_point(u).is_some_and(|p| bb.contains(&p));
-    // Runs of u inside the box.
+    // Runs of u inside the box: an even sampling, and the u where the conic passes each box
+    // corner's height along the axis (a conic of a plane nearly along the axis is huge, its
+    // part in the box a sliver of u between even samples).
     let m = 360;
-    let us: Vec<f64> = (0..m).map(|i| TAU * i as f64 / m as f64).collect();
+    let mut us: Vec<f64> = (0..m).map(|i| TAU * i as f64 / m as f64).collect();
+    let (gr, phi) = (nl.x.hypot(nl.y), nl.y.atan2(nl.x));
+    if k.abs() > tol::ANGULAR_FINE && gr > tol::ANGULAR_FINE {
+        for kx in 0..8 {
+            let corner = P3::new(if kx & 1 == 0 { bb.min.x } else { bb.max.x }, if kx & 2 == 0 { bb.min.y } else { bb.max.y }, if kx & 4 == 0 { bb.min.z } else { bb.max.z });
+            let v = (corner - fc.o).dot(&fc.z) / k;
+            // v(u) = (c − r g) / (s g + q) at that v: g = (c − v q) / (v s + r), g = gr cos(u − φ).
+            let den = v * s + r;
+            if den.abs() < tol::TINY {
+                continue;
+            }
+            let g = (c - v * q) / den;
+            if g.abs() <= gr {
+                let w = (g / gr).acos();
+                for u in [phi + w, phi - w] {
+                    let u = u.rem_euclid(TAU);
+                    // Either side of it too (the conic's part in the box may be thinner than
+                    // the even step).
+                    us.extend([u, (u - tol::REL_POINT).rem_euclid(TAU), (u + tol::REL_POINT).rem_euclid(TAU)]);
+                }
+            }
+        }
+    }
+    us.sort_by(f64::total_cmp);
+    us.dedup_by(|a, b| (*a - *b).abs() < tol::REL_FINE);
+    let m = us.len();
     let ins: Vec<bool> = us.iter().map(|&u| inside(u)).collect();
     if !ins.iter().any(|x| *x) {
         return Some(vec![]);
@@ -189,29 +222,28 @@ fn plane_cone(fp: &Frame, fc: &Frame, r: f64, ang: f64, bb: &Bbox) -> Option<Vec
         }
         lo
     };
+    // The sample `i` steps on from `start`, unwrapped past 2π.
+    let at = |start: usize, i: usize| us[(start + i) % m] + if start + i >= m { TAU } else { 0.0 };
     let mut runs: Vec<(f64, f64, bool)> = Vec::new();
-    if ins.iter().all(|x| *x) {
-        runs.push((0.0, TAU, true));
-    } else {
-        let start = (0..m).find(|&i| !ins[i]).unwrap();
-        let mut i = 0;
-        while i < m {
-            let j = (start + i) % m;
-            if ins[j] {
-                let mut e = i;
-                while e + 1 < m && ins[(start + e + 1) % m] {
-                    e += 1;
+    match (0..m).find(|&i| !ins[i]) {
+        None => runs.push((0.0, TAU, true)),
+        Some(start) => {
+            let mut i = 0;
+            while i < m {
+                if ins[(start + i) % m] {
+                    let mut e = i;
+                    while e + 1 < m && ins[(start + e + 1) % m] {
+                        e += 1;
+                    }
+                    // Samples before and after the run are outside (the run starts after the
+                    // outside sample `start`, and ends before one).
+                    let ua = edge_of(at(start, i), at(start, i - 1));
+                    let ub = edge_of(at(start, e), at(start, e + 1));
+                    runs.push((ua, ub, false));
+                    i = e + 1;
+                } else {
+                    i += 1;
                 }
-                let u_in0 = us[j] + if (start + i) >= m { TAU } else { 0.0 };
-                let first = (start + i) as f64 * TAU / m as f64;
-                let last = (start + e) as f64 * TAU / m as f64;
-                let _ = u_in0;
-                let ua = edge_of(first, first - TAU / m as f64);
-                let ub = edge_of(last, last + TAU / m as f64);
-                runs.push((ua, ub, false));
-                i = e + 1;
-            } else {
-                i += 1;
             }
         }
     }
@@ -449,7 +481,10 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox, run_tol: f64) -> Option<Vec<Int
             let apex = fc.o - fc.z * (r / ang.tan());
             if cz.abs() < tol::ANGULAR_FINE && (apex - fp.o).dot(&n).abs() < tol::ROUNDOFF {
                 let w = fc.z.cross(&n).normalize();
-                let open = if ang.tan() * ang.cos().signum() > 0.0 { fc.z } else { -fc.z };
+                // The sheet opens the way its radius grows (r + z tan a): up the axis when
+                // tan a > 0, down it otherwise (a negative half angle, or one past 90°: a nearly
+                // flat cone).
+                let open = if ang.tan() > 0.0 { fc.z } else { -fc.z };
                 let k = ang.tan().abs();
                 let mut out = Vec::new();
                 for s in [1.0, -1.0] {
@@ -1168,11 +1203,16 @@ pub fn curve_surface(c: &Curve, t0: f64, t1: f64, s: &Surface) -> Vec<f64> {
         return out;
     }
     // Exact cases.
-    if let (Curve::Line { o, d }, true) = (c, s.signed_distance(&P3::origin()).is_some()) {
+    let mut searched: Vec<f64> = Vec::new();
+    if let Curve::Line { o, d } = c {
         let ts: Vec<f64> = super::classify::ray_surface(s, o, d, t0 - 1.0, t1 + 1.0).into_iter().map(|(t, _, _)| t).collect();
-        if !matches!(s, Surface::Torus { .. } | Surface::Revolution { .. } | Surface::Extrusion { .. } | Surface::Nurbs(_)) {
+        if s.signed_distance(&P3::origin()).is_some() && !matches!(s, Surface::Torus { .. } | Surface::Revolution { .. } | Surface::Extrusion { .. } | Surface::Nurbs(_)) {
             return ts.into_iter().map(|t| touching_root(c, s, t)).filter(|t| *t >= t0 - tol::ROUNDOFF && *t <= t1 + tol::ROUNDOFF).map(|t| t.clamp(t0, t1)).collect();
         }
+        // On these the line's hits come from a search over the surface (refined by Newton):
+        // they join the sampled sign changes below, which a few samples along a line can step
+        // over (two crossings of a revolved arc's patch between two samples).
+        searched = ts.into_iter().filter(|t| *t >= t0 - tol::ROUNDOFF && *t <= t1 + tol::ROUNDOFF && s.distance(&c.point(*t)) <= tol::CONFUSION).map(|t| t.clamp(t0, t1)).collect();
     }
     let n = match c {
         Curve::Line { .. } => 8,
@@ -1203,7 +1243,11 @@ pub fn curve_surface(c: &Curve, t0: f64, t1: f64, s: &Surface) -> Vec<f64> {
     };
     for i in 0..vals.len() {
         let (t, ft) = vals[i];
-        if ft.abs() < 1e-10 {
+        // A sample on the surface, unless it is inside the zone round a point of touch (the
+        // samples either side off it on one side): the touch's minimum is found below, and the
+        // sample would be a second vertex a hair from it.
+        let touch_zone = i > 0 && i + 1 < vals.len() && vals[i - 1].1.abs() >= 1e-10 && vals[i + 1].1.abs() >= 1e-10 && vals[i - 1].1.signum() == vals[i + 1].1.signum();
+        if ft.abs() < 1e-10 && !touch_zone {
             out.push(t);
         }
         if i > 0 {
@@ -1251,6 +1295,12 @@ pub fn curve_surface(c: &Curve, t0: f64, t1: f64, s: &Surface) -> Vec<f64> {
                     out.push(m);
                 }
             }
+        }
+    }
+    for t in searched {
+        let p = c.point(t);
+        if !out.iter().any(|&x| (c.point(x) - p).norm() <= tol::CONFUSION) {
+            out.push(t);
         }
     }
     // Stretches where the curve lies on the surface (three samples or more in a row within a
@@ -1469,6 +1519,23 @@ fn curve_curve_closed(a: &Curve, a0: f64, a1: f64, b: &Curve, b0: f64, b1: f64, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A line through a patch of a surface of revolution (no implicit distance) between two of
+    /// its samples: both crossings, from the search over the surface.
+    #[test]
+    fn line_crosses_a_revolved_patch_twice_close_together() {
+        let m = Curve::Circle { c: P3::new(5.0, 0.0, 0.0), x: V3::x(), y: V3::z(), r: 1.0 };
+        let s = Surface::Revolution { f: Frame::world(), m };
+        let line = Curve::Line { o: P3::new(0.0, 0.0, 0.99), d: V3::x() };
+        let ts = curve_surface(&line, 0.0, 4.9, &s);
+        assert_eq!(ts.len(), 1, "{ts:?}");
+        let ts = curve_surface(&line, 0.0, 10.0, &s);
+        let near: Vec<f64> = ts.iter().copied().filter(|t| (t - 5.0).abs() < 1.0).collect();
+        assert_eq!(near.len(), 2, "{ts:?}");
+        for t in near {
+            assert!(s.distance(&line.point(t)) < 1e-9);
+        }
+    }
 
     /// Plane sections of a cone (ellipse, parabola, hyperbola): every point of the exact conic
     /// lies on both surfaces.

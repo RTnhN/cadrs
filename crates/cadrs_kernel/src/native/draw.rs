@@ -2836,6 +2836,30 @@ impl NativeKernel {
         }
     }
 
+    /// The edges of a shape that isn't a body's (an edge, a wire, a planar face's loops, a
+    /// compound of them), each once.
+    fn loose_edges_of(s: &Shape) -> Option<Vec<DEdge>> {
+        let mut out: Vec<DEdge> = Vec::new();
+        let mut add = |e: &DEdge| {
+            let m = e.curve.point(0.5 * (e.t0 + e.t1));
+            if !out.iter().any(|o| (o.curve.point(0.5 * (o.t0 + o.t1)) - m).norm() <= super::tol::CONFUSION) {
+                out.push(e.clone());
+            }
+        };
+        match s {
+            Shape::Edge(e) => add(e),
+            Shape::Wire(w) => w.iter().for_each(add),
+            Shape::Face { loops, .. } => loops.iter().flatten().for_each(add),
+            Shape::Compound(v) => {
+                for x in v {
+                    Self::loose_edges_of(x)?.iter().for_each(&mut add);
+                }
+            }
+            _ => return None,
+        }
+        Some(out)
+    }
+
     /// A shape's edges, when it is edges (a wire, an edge).
     fn edges_of(s: &Shape) -> Option<Vec<super::edge_bop::Piece>> {
         let p = |e: &DEdge| super::edge_bop::Piece { curve: e.curve.clone(), t0: e.t0, t1: e.t1 };
@@ -2876,9 +2900,10 @@ impl NativeKernel {
                 _ => return Err(KernelError::Unsupported("booleans of edges with this shape")),
             },
         };
-        // A fuse keeps a wire's pieces where the other argument runs along them too; a loose
-        // edge's only where it doesn't (OCCT's compound holds the wire as rebuilt).
-        let wire_b = matches!(b, Shape::Wire(_));
+        // A fuse keeps a wire's pieces where the other argument, a wire too, runs along them;
+        // else only where it doesn't (OCCT's compound holds each wire as rebuilt, so a stretch
+        // two wires share is in both; a loose edge's shared stretch is the wire's).
+        let wire_b = matches!(a, Shape::Wire(_)) && matches!(b, Shape::Wire(_));
         let r = edge_boolean(op, &edges, &other, wire_b).ok_or(KernelError::Unsupported("a fuse of arguments of different dimensions"))?;
         if r.is_empty() {
             return Ok(Shape::Empty);
@@ -3088,6 +3113,9 @@ impl NativeKernel {
             }
             return Ok(out);
         }
+        if let Some(es) = Self::loose_edges_of(s) {
+            return Ok(es.into_iter().map(Shape::Edge).collect());
+        }
         let b = self.body_of(s)?;
         let body = self.get(b)?;
         let mut ids: Vec<usize> = (0..body.edges.len()).filter(|&i| !body.edges[i].degenerate).collect();
@@ -3131,6 +3159,15 @@ impl NativeKernel {
     /// `nexplode shape e`: the edges sorted by their centres of mass (DRAW's key
     /// x·999 + y·99 + z·0.9; a stable order, the same as OCCT's for the same shape).
     pub fn nexplode_edges(&self, s: &Shape) -> Result<Vec<Shape>> {
+        if let Some(es) = Self::loose_edges_of(s) {
+            let key = |e: &DEdge| {
+                let ed = super::topo::Edge { curve: e.curve.clone(), t: [e.t0, e.t1], v: [0, 0], tol: 0.0, degenerate: false };
+                linear_centre(&[&ed]).map_or(0.0, |c| nexplode_key(&c))
+            };
+            let mut keyed: Vec<(f64, DEdge)> = es.into_iter().map(|e| (key(&e), e)).collect();
+            keyed.sort_by(|x, y| x.0.total_cmp(&y.0));
+            return Ok(keyed.into_iter().map(|(_, e)| Shape::Edge(e)).collect());
+        }
         let b = self.body_of(s)?;
         let body = self.get(b)?;
         let mut ids: Vec<(f64, usize)> = Vec::new();
