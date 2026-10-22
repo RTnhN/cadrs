@@ -411,13 +411,21 @@ fn tangent_along_shared_edge(pool: &Pool, fa: &WFace, fb: &WFace, ea: &[usize], 
     // (Also a boundary edge lying on the other surface where the face leaves it: a blend
     // tool's strip meeting the face it blends along its contact curve. The edge is imprinted
     // exactly; contouring would only find it again, inexactly.)
-    let tangent_on = |edges: &[usize], _f: &WFace, g: &WFace| -> bool {
+    // (Tangent there: an edge of a face lying on a surface the face crosses, as a tube's top
+    // line on a wall through its axis, is no contact; the face–face stage drops the curve the
+    // intersection finds along such an edge again.)
+    let tangent_at = |f: &WFace, g: &WFace, p: &P3| {
+        let ((fu, fv), (gu, gv)) = (f.surf.project(p, None), g.surf.project(p, None));
+        f.surf.normal(fu, fv).cross(&g.surf.normal(gu, gv)).norm() < 1e-3
+    };
+    let tangent_on = |edges: &[usize], f: &WFace, g: &WFace| -> bool {
         edges.iter().any(|&x| {
             let e = &pool.edges[x];
-            !e.degenerate && (e.t[1] - e.t[0]).abs() > 0.0 && edge_on_surface(e, &g.surf, pool.tol) && {
-                let l = e.curve.length(e.t[0], e.t[1]);
-                l > 1e-3
-            }
+            !e.degenerate
+                && (e.t[1] - e.t[0]).abs() > 0.0
+                && edge_on_surface(e, &g.surf, pool.tol)
+                && e.curve.length(e.t[0], e.t[1]) > 1e-3
+                && [0.25, 0.5, 0.75].iter().all(|k| tangent_at(f, g, &e.curve.point(e.t[0] + (e.t[1] - e.t[0]) * k)))
         })
     };
     if tangent_on(eb, fb, fa) || tangent_on(ea, fa, fb) {
@@ -1135,6 +1143,49 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
             curves.extend(shared);
         }
         let ob = overlap(fa, fb);
+        // A boundary edge of one face lying on the other's surface, the faces crossing there (a
+        // blend tool's strip ending on the face it blends, a wall through a tube's axis), is
+        // imprinted exactly by the edge stages: the curve the intersection finds along it
+        // again, inexactly, goes.
+        let near = (run_tol * 10.0).max(1e-7 * ob.diagonal());
+        let along = |ic: &ssi::IntCurve| {
+            let pts: Vec<P3> = (0..=4).map(|k| ic.c.point(ic.t0 + (ic.t1 - ic.t0) * k as f64 / 4.0)).collect();
+            let runs_on = |x: usize| {
+                let e = &pool.edges[x];
+                !e.degenerate && ebox[x].grow(near).contains(&pts[2]) && pts.iter().all(|p| on_curve(&e.curve, e.t[0], e.t[1], p, near).is_some())
+            };
+            face_edges[fa].iter().any(|&x| runs_on(x) && edge_on_surface(&pool.edges[x], &faces[fb].surf, run_tol))
+                || face_edges[fb].iter().any(|&x| runs_on(x) && edge_on_surface(&pool.edges[x], &faces[fa].surf, run_tol))
+        };
+        let curves: Vec<ssi::IntCurve> = curves.into_iter().filter(|ic| !along(ic)).collect();
+        // Whether a boundary edge of either face lies on the other's surface.
+        let edge_on_other = {
+            let lies = |edges: &[usize], g: &WFace| {
+                edges.iter().any(|&x| {
+                    let e = &pool.edges[x];
+                    !e.degenerate && e.curve.length(e.t[0].min(e.t[1]), e.t[0].max(e.t[1])) > 1e-3 && edge_on_surface(e, &g.surf, pool.tol)
+                })
+            };
+            lies(&face_edges[fa], &faces[fb]) || lies(&face_edges[fb], &faces[fa])
+        };
+        // A curve running within the tolerance of another all along (branches of a near
+        // tangent contact traced twice) is that curve again: the copy goes, else every point
+        // where the two come within the tolerance would cut both.
+        let curves: Vec<ssi::IntCurve> = {
+            let near_c = (run_tol * 10.0).max(faces[fa].tol).max(faces[fb].tol);
+            let mut kept: Vec<ssi::IntCurve> = Vec::new();
+            for ic in curves {
+                let bb = curve_bbox(&ic.c, ic.t0, ic.t1);
+                let copy = kept.iter().any(|k| {
+                    curve_bbox(&k.c, k.t0, k.t1).grow(near_c).overlaps(&bb)
+                        && (0..=8).all(|q| on_curve(&k.c, k.t0.min(k.t1), k.t0.max(k.t1), &ic.c.point(ic.t0 + (ic.t1 - ic.t0) * q as f64 / 8.0), near_c).is_some())
+                });
+                if !copy {
+                    kept.push(ic);
+                }
+            }
+            kept
+        };
         if std::env::var("CADRS_BOOL_DEBUG").is_ok() {
             eprintln!("ssi {fa}×{fb} {:?}×{:?}: {} curves in {el:?}", faces[fa].surf.kind(), faces[fb].surf.kind(), curves.len());
             for ic in &curves {
@@ -1165,8 +1216,13 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
                 }
             }
         }
+        // (Curves whose boxes are apart can't meet.)
+        let cboxes: Vec<Bbox> = curves.iter().map(|ic| curve_bbox(&ic.c, ic.t0, ic.t1).grow(tf)).collect();
         for i in 0..curves.len() {
             for j in i + 1..curves.len() {
+                if !cboxes[i].overlaps(&cboxes[j]) {
+                    continue;
+                }
                 let (ci, cj) = (&curves[i], &curves[j]);
                 for t in overlap_runs(&ci.c, &cj.c, ssi::curve_curve(&ci.c, ci.t0, ci.t1, &cj.c, cj.t0, cj.t1, tf), tf) {
                     let p = ci.c.point(t);
@@ -1316,7 +1372,9 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
                     let ((ua, va_), (ub, vb_)) = (sa.project(p, None), sb.project(p, None));
                     sa.normal(ua, va_).cross(&sb.normal(ub, vb_)).norm() < 1e-3
                 };
-                if ((ia == InFace::Boundary && along_edge(fa)) || (ib == InFace::Boundary && along_edge(fb))) && tangent_at(&pm) {
+                // (Also where they cross along it, the edge lying on the other surface: the edge
+                // stages imprint it.)
+                if ((ia == InFace::Boundary && along_edge(fa)) || (ib == InFace::Boundary && along_edge(fb))) && (edge_on_other || tangent_at(&pm)) {
                     continue;
                 }
                 let va = va.unwrap_or_else(|| pool.vertex_tol(ic.c.point(ta), ft));

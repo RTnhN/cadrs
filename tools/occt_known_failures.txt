@@ -144,7 +144,6 @@ boolean bopcommon_2d_p8
 boolean bopcommon_complex_e3
 boolean bopcommon_complex_e4
 boolean bopcommon_complex_g9
-boolean bopcommon_complex_h7
 boolean bopcommon_complex_i2
 boolean bopcommon_complex_k2
 boolean bopcommon_complex_k3
@@ -178,7 +177,6 @@ boolean bopfuse_2d_c8
 boolean bopfuse_2d_c9
 boolean bopfuse_2d_d1
 boolean bopfuse_complex_g2
-boolean bopfuse_complex_g9
 boolean bopfuse_complex_h4
 boolean bopfuse_complex_j6
 boolean bopfuse_complex_k8
@@ -202,7 +200,6 @@ boolean boptuc_2d_p4
 boolean boptuc_2d_p5
 boolean boptuc_complex_c6
 boolean boptuc_complex_c7
-boolean boptuc_complex_d4
 boolean boptuc_complex_d8
 sewing tol_0_01_e5
 sewing tol_0_01_e7
