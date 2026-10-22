@@ -6,26 +6,54 @@
 //! `PROPTEST_CASES=<n>` runs more cases (the default keeps the suite to a few seconds);
 //! `FUZZ_TRACE=1` prints each case before it runs.
 
-use cadrs_kernel::native::math::P3;
-use cadrs_kernel::native::nurbs::{NurbsCurve, NurbsSurface, H};
-use cadrs_kernel::native::{bodyio, brep_occt, iges, smb, step, NativeKernel};
 use cadrs_kernel::exchange::ExchangeFormat;
+use cadrs_kernel::native::math::P3;
+use cadrs_kernel::native::nurbs::{H, NurbsCurve, NurbsSurface};
+use cadrs_kernel::native::{NativeKernel, bodyio, brep_occt, iges, smb, step};
 use cadrs_kernel::*;
 use proptest::prelude::*;
 
 fn data(rel: &str) -> Vec<u8> {
-    std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data").join(rel)).unwrap()
+    std::fs::read(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/data")
+            .join(rel),
+    )
+    .unwrap()
 }
 
 /// An SMLib B-rep to edit (its fixtures moved into per-suite folders).
 fn smb_seed() -> Vec<u8> {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/smlib");
-    ["fillets/shell_fillet.smb", "shell_fillet.smb"].iter().find_map(|f| std::fs::read(dir.join(f)).ok()).expect("an SMLib fixture")
+    ["fillets/shell_fillet.smb", "shell_fillet.smb"]
+        .iter()
+        .find_map(|f| std::fs::read(dir.join(f)).ok())
+        .expect("an SMLib fixture")
 }
 
 /// Numbers that break careless parsers: huge counts, negatives where counts go, non-finite.
-const NASTY: &[&str] =
-    &["0", "-1", "1e308", "-1e308", "1e-320", "NaN", "inf", "-inf", "4294967296", "18446744073709551615", "99999999", "0.", "1.5", "-0.", "", "#0", "#999999", "''", "$", "*"];
+const NASTY: &[&str] = &[
+    "0",
+    "-1",
+    "1e308",
+    "-1e308",
+    "1e-320",
+    "NaN",
+    "inf",
+    "-inf",
+    "4294967296",
+    "18446744073709551615",
+    "99999999",
+    "0.",
+    "1.5",
+    "-0.",
+    "",
+    "#0",
+    "#999999",
+    "''",
+    "$",
+    "*",
+];
 
 /// One edit of a file.
 #[derive(Debug, Clone)]
@@ -60,9 +88,13 @@ fn apply(mut b: Vec<u8>, edits: &[Edit]) -> Vec<u8> {
         match *e {
             Edit::Number(k, n) => {
                 // The starts of the digit runs.
-                let starts: Vec<usize> = (0..b.len()).filter(|&i| b[i].is_ascii_digit() && (i == 0 || !b[i - 1].is_ascii_digit())).collect();
+                let starts: Vec<usize> = (0..b.len())
+                    .filter(|&i| b[i].is_ascii_digit() && (i == 0 || !b[i - 1].is_ascii_digit()))
+                    .collect();
                 if let Some(&s) = starts.get(k % starts.len().max(1)) {
-                    let end = (s..b.len()).find(|&i| !b[i].is_ascii_digit()).unwrap_or(b.len());
+                    let end = (s..b.len())
+                        .find(|&i| !b[i].is_ascii_digit())
+                        .unwrap_or(b.len());
                     b.splice(s..end, NASTY[n].bytes());
                 }
             }
@@ -89,7 +121,13 @@ fn edits() -> impl Strategy<Value = Vec<Edit>> {
 }
 
 fn config(cases: u32) -> ProptestConfig {
-    ProptestConfig { cases: std::env::var("PROPTEST_CASES").ok().and_then(|s| s.parse().ok()).unwrap_or(cases), ..ProptestConfig::default() }
+    ProptestConfig {
+        cases: std::env::var("PROPTEST_CASES")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(cases),
+        ..ProptestConfig::default()
+    }
 }
 
 /// A plate with a hole (planes, a cylinder, lines and circles), to be written by our own
@@ -99,20 +137,49 @@ fn model() -> (NativeKernel, Vec<(BodyId, String)>) {
     let mut k = NativeKernel::new();
     let p = |x: f64, y: f64| Point2::new(x, y);
     let c = [p(0.0, 0.0), p(20.0, 0.0), p(20.0, 10.0), p(0.0, 10.0)];
-    let outer = Loop { curves: (0..4).map(|i| Curve2::Line { a: c[i], b: c[(i + 1) % 4], source: None }).collect() };
-    let hole = Loop { curves: vec![Curve2::Circle { center: p(5.0, 5.0), radius: 2.0, source: None }] };
-    let body = k.extrude(&Profile::new(Plane::top(), vec![Region { outer, holes: vec![hole], source: None }]), Extent::Blind(4.0)).unwrap().bodies[0];
+    let outer = Loop {
+        curves: (0..4)
+            .map(|i| Curve2::Line {
+                a: c[i],
+                b: c[(i + 1) % 4],
+                source: None,
+            })
+            .collect(),
+    };
+    let hole = Loop {
+        curves: vec![Curve2::Circle {
+            center: p(5.0, 5.0),
+            radius: 2.0,
+            source: None,
+        }],
+    };
+    let body = k
+        .extrude(
+            &Profile::new(
+                Plane::top(),
+                vec![Region {
+                    outer,
+                    holes: vec![hole],
+                    source: None,
+                }],
+            ),
+            Extent::Blind(4.0),
+        )
+        .unwrap()
+        .bodies[0];
     (k, vec![(body, "plate".into())])
 }
 
 fn step_file() -> Vec<u8> {
     let (k, parts) = model();
-    k.export_model(ExchangeFormat::Step, "fuzz", &parts, &[]).unwrap()
+    k.export_model(ExchangeFormat::Step, "fuzz", &parts, &[])
+        .unwrap()
 }
 
 fn iges_file() -> Vec<u8> {
     let (k, parts) = model();
-    k.export_model(ExchangeFormat::Iges, "fuzz", &parts, &[]).unwrap()
+    k.export_model(ExchangeFormat::Iges, "fuzz", &parts, &[])
+        .unwrap()
 }
 
 fn body_file() -> Vec<u8> {
@@ -131,7 +198,11 @@ fn seeds_read() {
     assert!(!step::read(&step_file()).unwrap().parts.is_empty());
     assert!(!iges::read(&iges_file()).unwrap().parts.is_empty());
     bodyio::read(&body_file()).unwrap();
-    for f in ["occt_box.brep", "usd_brep/bspline_surface.brep", "usd_brep/torus.brep"] {
+    for f in [
+        "occt_box.brep",
+        "usd_brep/bspline_surface.brep",
+        "usd_brep/torus.brep",
+    ] {
         brep_occt::read(&data(f)).unwrap();
     }
     smb::read(&smb_seed()).unwrap();
@@ -225,7 +296,13 @@ fn knots() -> impl Strategy<Value = Vec<f64>> {
 }
 
 fn pole() -> impl Strategy<Value = H> {
-    (num(), num(), num(), prop_oneof![4 => 0.1f64..4.0, 1 => num()]).prop_map(|(x, y, z, w)| H::new(x * w, y * w, z * w, w))
+    (
+        num(),
+        num(),
+        num(),
+        prop_oneof![4 => 0.1f64..4.0, 1 => num()],
+    )
+        .prop_map(|(x, y, z, w)| H::new(x * w, y * w, z * w, w))
 }
 
 /// Everything a valid curve offers must work on it.
@@ -300,12 +377,20 @@ proptest! {
 #[test]
 #[ignore = "replays FUZZ_REPRO"]
 fn replay() {
-    let Some(path) = std::env::var_os("FUZZ_REPRO") else { return };
+    let Some(path) = std::env::var_os("FUZZ_REPRO") else {
+        return;
+    };
     let bytes = std::fs::read(path).unwrap();
-    eprintln!("brep: {:?}", brep_occt::read(&bytes).map(|(b, w)| (b.faces.len(), w)));
+    eprintln!(
+        "brep: {:?}",
+        brep_occt::read(&bytes).map(|(b, w)| (b.faces.len(), w))
+    );
     eprintln!("step: {:?}", step::read(&bytes).map(|m| m.parts.len()));
     eprintln!("iges: {:?}", iges::read(&bytes).map(|m| m.parts.len()));
-    eprintln!("smb: {:?}", smb::read(&bytes).map(|(b, w)| (b.faces.len(), w)));
+    eprintln!(
+        "smb: {:?}",
+        smb::read(&bytes).map(|(b, w)| (b.faces.len(), w))
+    );
     eprintln!("body: {:?}", bodyio::read(&bytes).map(|b| b.faces.len()));
 }
 

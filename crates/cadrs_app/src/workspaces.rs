@@ -35,7 +35,10 @@ impl Plugin for WorkspacesPlugin {
         app.init_resource::<WorkspaceUndos>()
             .add_observer(on_button)
             .add_observer(on_switcher_menu)
-            .add_systems(OnExit(AppState::Document), |mut u: ResMut<WorkspaceUndos>| u.0.clear());
+            .add_systems(
+                OnExit(AppState::Document),
+                |mut u: ResMut<WorkspaceUndos>| u.0.clear(),
+            );
     }
 }
 
@@ -50,7 +53,10 @@ fn log(world: &World) -> Option<&HistoryLog> {
 
 /// The current workspace's name ("Main" without a log).
 pub fn current_name(world: &World) -> String {
-    log(world).map_or_else(|| cadrs_core::history_log::MAIN_NAME.to_string(), |l| l.current_name())
+    log(world).map_or_else(
+        || cadrs_core::history_log::MAIN_NAME.to_string(),
+        |l| l.current_name(),
+    )
 }
 
 fn store(world: &World) -> Option<cadrs_core::Store> {
@@ -61,11 +67,18 @@ fn store(world: &World) -> Option<cadrs_core::Store> {
 /// and the document file are written (the file holds the open workspace, TD3.7). Nothing while
 /// a dialog or a sketch is open, or the document is read-only.
 pub fn switch_workspace(world: &mut World, ws: WorkspaceId) {
-    if editing(world) || world.get_resource::<ActiveDocument>().is_none_or(|d| d.read_only.is_some()) {
+    if editing(world)
+        || world
+            .get_resource::<ActiveDocument>()
+            .is_none_or(|d| d.read_only.is_some())
+    {
         return;
     }
     let now = world.get_resource::<AppClock>().map_or(0, |c| c.now());
-    let user = world.get_resource::<UserProfile>().map(|u| u.id.clone()).unwrap_or_default();
+    let user = world
+        .get_resource::<UserProfile>()
+        .map(|u| u.id.clone())
+        .unwrap_or_default();
     let store = store(world);
     let (doc, doc_id, stored) = {
         let d = world.resource::<ActiveDocument>();
@@ -82,13 +95,19 @@ pub fn switch_workspace(world: &mut World, ws: WorkspaceId) {
         if log.head() != &doc {
             log.catch_up(&doc, now, &user);
         }
-        let Some(state) = log.switch_to(ws) else { return };
+        let Some(state) = log.switch_to(ws) else {
+            return;
+        };
         if let Some(s) = store.as_ref().filter(|_| stored) {
             let _ = log.save(s);
         }
         (from, state, log.current_name())
     };
-    let undo = world.resource_mut::<WorkspaceUndos>().0.remove(&(doc_id, ws)).unwrap_or_default();
+    let undo = world
+        .resource_mut::<WorkspaceUndos>()
+        .0
+        .remove(&(doc_id, ws))
+        .unwrap_or_default();
     let mut active = world.resource_mut::<ActiveDocument>();
     let old = active.switch_workspace(state, undo);
     if let Some(meta) = active.meta.as_mut() {
@@ -100,7 +119,10 @@ pub fn switch_workspace(world: &mut World, ws: WorkspaceId) {
         warn!("switch workspace: {e}");
     }
     let stacks = (active.history.undo_len(), active.history.redo_len());
-    world.resource_mut::<WorkspaceUndos>().0.insert((doc_id, from), old);
+    world
+        .resource_mut::<WorkspaceUndos>()
+        .0
+        .insert((doc_id, from), old);
     world.resource_mut::<DocLog>().workspace_switched(stacks);
     let mut panel = world.resource_mut::<HistoryPanel>();
     panel.selected = None;
@@ -116,9 +138,15 @@ pub fn switch_workspace(world: &mut World, ws: WorkspaceId) {
 pub fn open_switcher(world: &mut World, anchor: Entity) {
     let Some(l) = log(world) else { return };
     let current = l.current_workspace();
-    let mut menu = Menu::new("workspace-menu").min_width(200.0).item_height(24.0);
+    let mut menu = Menu::new("workspace-menu")
+        .min_width(200.0)
+        .item_height(24.0);
     for (i, ws) in l.workspace_ids().into_iter().enumerate() {
-        menu = menu.item(MenuItem::new(format!("workspace-item-{i}"), l.workspace_name(ws)).icon(if ws.is_main() { "location" } else { "branches" }).checked(ws == current));
+        menu = menu.item(
+            MenuItem::new(format!("workspace-item-{i}"), l.workspace_name(ws))
+                .icon(if ws.is_main() { "location" } else { "branches" })
+                .checked(ws == current),
+        );
     }
     // Under the header bar (not over the name it was opened from), lined up with the name.
     let at = (|| {
@@ -126,7 +154,10 @@ pub fn open_switcher(world: &mut World, anchor: Entity) {
             let n = world.get::<ComputedNode>(e)?;
             let tf = world.get::<UiGlobalTransform>(e)?;
             let s = n.inverse_scale_factor();
-            Some(((tf.translation - n.size() / 2.0) * s, (tf.translation + n.size() / 2.0) * s))
+            Some((
+                (tf.translation - n.size() / 2.0) * s,
+                (tf.translation + n.size() / 2.0) * s,
+            ))
         };
         let (lo, _) = node(anchor)?;
         let bar = world.get::<ChildOf>(anchor)?.parent();
@@ -144,7 +175,11 @@ pub fn open_switcher(world: &mut World, anchor: Entity) {
 }
 
 fn on_switcher_menu(ev: On<MenuAction>, mut commands: Commands) {
-    let Some(i) = ev.item.strip_prefix("workspace-item-").and_then(|n| n.parse::<usize>().ok()) else {
+    let Some(i) = ev
+        .item
+        .strip_prefix("workspace-item-")
+        .and_then(|n| n.parse::<usize>().ok())
+    else {
         return;
     };
     commands.queue(cadrs_ui::menu::close_all_menus);
@@ -167,7 +202,11 @@ pub fn open_branch_dialog(world: &mut World, i: usize) {
     if editing(world) {
         return;
     }
-    let Some((v, vname, next)) = log(world).and_then(|l| l.versions().get(i).map(|v| (v.id(), v.name().to_string(), l.next_branch_name()))) else {
+    let Some((v, vname, next)) = log(world).and_then(|l| {
+        l.versions()
+            .get(i)
+            .map(|v| (v.id(), v.name().to_string(), l.next_branch_name()))
+    }) else {
         return;
     };
     let theme = world.resource::<Theme>().clone();
@@ -182,7 +221,13 @@ pub fn open_branch_dialog(world: &mut World, i: usize) {
             .title_font(theme.font_lg, FontWeight::NORMAL)
             .body(move |b| {
                 let t = &tb;
-                b.spawn(Node { align_items: AlignItems::Center, column_gap: Val::Px(8.0), margin: UiRect::bottom(Val::Px(8.0)), ..default() }).with_children(|r| {
+                b.spawn(Node {
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(8.0),
+                    margin: UiRect::bottom(Val::Px(8.0)),
+                    ..default()
+                })
+                .with_children(|r| {
                     r.spawn(t.text("From version:", t.font_base, FontWeight::BOLD, t.foreground));
                     r.spawn((
                         Name::new("branch-from-version"),
@@ -191,14 +236,46 @@ pub fn open_branch_dialog(world: &mut World, i: usize) {
                         cadrs_ui::ellipsis::Ellipsis::node(),
                     ));
                 });
-                b.spawn(Node { align_items: AlignItems::Center, column_gap: Val::Px(8.0), ..default() }).with_children(|r| {
+                b.spawn(Node {
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(8.0),
+                    ..default()
+                })
+                .with_children(|r| {
                     r.spawn(t.text("Name:", t.font_base, FontWeight::BOLD, t.foreground));
-                    r.spawn(TextInput::new("branch-name").value(next).select_all_on_focus().autofocus().width(Val::Px(320.0)).height(30.0).build(t));
+                    r.spawn(
+                        TextInput::new("branch-name")
+                            .value(next)
+                            .select_all_on_focus()
+                            .autofocus()
+                            .width(Val::Px(320.0))
+                            .height(30.0)
+                            .build(t),
+                    );
                 });
-                b.spawn(Node { margin: UiRect::top(Val::Px(10.0)), ..default() })
-                    .with_child(t.text("Description:", t.font_base, FontWeight::BOLD, t.foreground));
-                b.spawn(TextInput::new("branch-description").placeholder("Description").max_characters(10_000).width(Val::Percent(100.0)).height(54.0).build(t));
-                b.spawn(Node { margin: UiRect::top(Val::Px(8.0)), ..default() }).with_child(t.text(
+                b.spawn(Node {
+                    margin: UiRect::top(Val::Px(10.0)),
+                    ..default()
+                })
+                .with_child(t.text(
+                    "Description:",
+                    t.font_base,
+                    FontWeight::BOLD,
+                    t.foreground,
+                ));
+                b.spawn(
+                    TextInput::new("branch-description")
+                        .placeholder("Description")
+                        .max_characters(10_000)
+                        .width(Val::Percent(100.0))
+                        .height(54.0)
+                        .build(t),
+                );
+                b.spawn(Node {
+                    margin: UiRect::top(Val::Px(8.0)),
+                    ..default()
+                })
+                .with_child(t.text(
                     "The new workspace starts as a copy of the version. Main is not changed.",
                     t.font_sm,
                     FontWeight::NORMAL,
@@ -207,8 +284,17 @@ pub fn open_branch_dialog(world: &mut World, i: usize) {
             })
             .footer(move |f| {
                 let t = &tf;
-                f.spawn(cadrs_ui::Button::new("branch-create").label("Create").primary().build(t));
-                f.spawn(cadrs_ui::Button::new("branch-cancel").label("Cancel").build(t));
+                f.spawn(
+                    cadrs_ui::Button::new("branch-create")
+                        .label("Create")
+                        .primary()
+                        .build(t),
+                );
+                f.spawn(
+                    cadrs_ui::Button::new("branch-cancel")
+                        .label("Cancel")
+                        .build(t),
+                );
             })
             .build(&theme),
         BranchFrom(v),
@@ -219,7 +305,10 @@ pub fn open_branch_dialog(world: &mut World, i: usize) {
 
 fn field(world: &mut World, name: &str) -> String {
     let mut q = world.query::<(&Name, &bevy::text::EditableText)>();
-    q.iter(world).find(|(n, _)| n.as_str() == name).map(|(_, t)| t.value().to_string()).unwrap_or_default()
+    q.iter(world)
+        .find(|(n, _)| n.as_str() == name)
+        .map(|(_, t)| t.value().to_string())
+        .unwrap_or_default()
 }
 
 fn close<C: Component>(world: &mut World) {
@@ -233,18 +322,27 @@ fn close<C: Component>(world: &mut World) {
 /// Create: the branch is made, stored and opened.
 fn commit_branch(world: &mut World) {
     let mut q = world.query::<&BranchFrom>();
-    let Some(BranchFrom(v)) = q.iter(world).next().copied() else { return };
+    let Some(BranchFrom(v)) = q.iter(world).next().copied() else {
+        return;
+    };
     let name = field(world, "branch-name-field");
     let description = field(world, "branch-description-field");
     close::<BranchFrom>(world);
     let now = world.get_resource::<AppClock>().map_or(0, |c| c.now());
-    let user = world.get_resource::<UserProfile>().map(|u| u.id.clone()).unwrap_or_default();
+    let user = world
+        .get_resource::<UserProfile>()
+        .map(|u| u.id.clone())
+        .unwrap_or_default();
     let store = store(world);
-    let stored = world.get_resource::<ActiveDocument>().is_some_and(|d| d.meta.is_some());
+    let stored = world
+        .get_resource::<ActiveDocument>()
+        .is_some_and(|d| d.meta.is_some());
     let ws = {
         let mut l = world.resource_mut::<DocLog>();
         let Some(log) = l.log.as_mut() else { return };
-        let Some(ws) = log.branch(v, &name, &description, now, &user) else { return };
+        let Some(ws) = log.branch(v, &name, &description, now, &user) else {
+            return;
+        };
         if let Some(s) = store.as_ref().filter(|_| stored) {
             let _ = log.save(s);
         }
@@ -267,14 +365,23 @@ struct MergeFrom {
 /// **Merge into current workspace** (TD12.6): the dialog for merging workspace `source` into
 /// the current one, listing the changed tabs.
 pub fn open_merge_dialog(world: &mut World, source: WorkspaceId) {
-    if editing(world) || world.get_resource::<ActiveDocument>().is_none_or(|d| d.read_only.is_some()) {
+    if editing(world)
+        || world
+            .get_resource::<ActiveDocument>()
+            .is_none_or(|d| d.read_only.is_some())
+    {
         return;
     }
     let dest_doc = world.resource::<ActiveDocument>().doc.clone();
     let Some((src_doc, base, sname, dname)) = log(world).and_then(|l| {
         let dest = l.current_workspace();
         (source != dest).then_some(())?;
-        Some((l.workspace_head(source)?, l.merge_base(source, dest), l.workspace_name(source), l.current_name()))
+        Some((
+            l.workspace_head(source)?,
+            l.merge_base(source, dest),
+            l.workspace_name(source),
+            l.current_name(),
+        ))
     }) else {
         return;
     };
@@ -282,7 +389,11 @@ pub fn open_merge_dialog(world: &mut World, source: WorkspaceId) {
     let theme = world.resource::<Theme>().clone();
     if changed.is_empty() {
         let mut commands = world.commands();
-        show_toast(&mut commands, &theme, format!("Nothing to merge: {sname} has no changed tabs."));
+        show_toast(
+            &mut commands,
+            &theme,
+            format!("Nothing to merge: {sname} has no changed tabs."),
+        );
         world.flush();
         return;
     }
@@ -298,8 +409,17 @@ pub fn open_merge_dialog(world: &mut World, source: WorkspaceId) {
             .body(move |b| merge_body(b, &tb, &changed, &s2, &d2))
             .footer(move |f| {
                 let t = &tf;
-                f.spawn(cadrs_ui::Button::new("merge-accept").label("Merge").primary().build(t));
-                f.spawn(cadrs_ui::Button::new("merge-cancel").label("Cancel").build(t));
+                f.spawn(
+                    cadrs_ui::Button::new("merge-accept")
+                        .label("Merge")
+                        .primary()
+                        .build(t),
+                );
+                f.spawn(
+                    cadrs_ui::Button::new("merge-cancel")
+                        .label("Cancel")
+                        .build(t),
+                );
             })
             .build(&theme),
         MergeFrom { source, tabs },
@@ -309,27 +429,63 @@ pub fn open_merge_dialog(world: &mut World, source: WorkspaceId) {
 }
 
 fn merge_body(b: &mut ChildSpawner, t: &Theme, changed: &[ChangedTab], source: &str, dest: &str) {
-    let intro = format!("{source} changed these tabs. For each, replace it with the branch's version or keep {dest}'s.");
-    b.spawn(Node { margin: UiRect::bottom(Val::Px(10.0)), max_width: Val::Px(620.0), ..default() }).with_children(|p| {
-        p.spawn(t.text(intro, t.font_base, FontWeight::NORMAL, t.foreground)).insert(TextLayout::default());
+    let intro = format!(
+        "{source} changed these tabs. For each, replace it with the branch's version or keep {dest}'s."
+    );
+    b.spawn(Node {
+        margin: UiRect::bottom(Val::Px(10.0)),
+        max_width: Val::Px(620.0),
+        ..default()
+    })
+    .with_children(|p| {
+        p.spawn(t.text(intro, t.font_base, FontWeight::NORMAL, t.foreground))
+            .insert(TextLayout::default());
     });
     let line = Color::srgb_u8(0xdd, 0xdd, 0xdd);
     // The table: Tab | Change | Action.
     b.spawn((
         Name::new("merge-tabs"),
-        Node { flex_direction: FlexDirection::Column, border: UiRect::all(Val::Px(1.0)), ..default() },
+        Node {
+            flex_direction: FlexDirection::Column,
+            border: UiRect::all(Val::Px(1.0)),
+            ..default()
+        },
         BorderColor::all(line),
     ))
     .with_children(|tbl| {
         tbl.spawn((
-            Node { height: Val::Px(26.0), align_items: AlignItems::Center, padding: UiRect::horizontal(Val::Px(8.0)), border: UiRect::bottom(Val::Px(1.0)), ..default() },
+            Node {
+                height: Val::Px(26.0),
+                align_items: AlignItems::Center,
+                padding: UiRect::horizontal(Val::Px(8.0)),
+                border: UiRect::bottom(Val::Px(1.0)),
+                ..default()
+            },
             BackgroundColor(Color::srgb_u8(0xf5, 0xf5, 0xf5)),
             BorderColor::all(line),
         ))
         .with_children(|h| {
-            h.spawn((t.text("Tab", t.font_sm, FontWeight::BOLD, t.muted_foreground), Node { flex_grow: 1.0, ..default() }));
-            h.spawn((t.text("Change", t.font_sm, FontWeight::BOLD, t.muted_foreground), Node { width: Val::Px(80.0), ..default() }));
-            h.spawn((t.text("Action", t.font_sm, FontWeight::BOLD, t.muted_foreground), Node { width: Val::Px(300.0), ..default() }));
+            h.spawn((
+                t.text("Tab", t.font_sm, FontWeight::BOLD, t.muted_foreground),
+                Node {
+                    flex_grow: 1.0,
+                    ..default()
+                },
+            ));
+            h.spawn((
+                t.text("Change", t.font_sm, FontWeight::BOLD, t.muted_foreground),
+                Node {
+                    width: Val::Px(80.0),
+                    ..default()
+                },
+            ));
+            h.spawn((
+                t.text("Action", t.font_sm, FontWeight::BOLD, t.muted_foreground),
+                Node {
+                    width: Val::Px(300.0),
+                    ..default()
+                },
+            ));
         });
         for (i, c) in changed.iter().enumerate() {
             let last = i + 1 == changed.len();
@@ -346,15 +502,44 @@ fn merge_body(b: &mut ChildSpawner, t: &Theme, changed: &[ChangedTab], source: &
                 BorderColor::all(line),
             ))
             .with_children(|r| {
-                r.spawn(cadrs_ui::icon(if c.assembly { "assembly" } else { "part-studio" }, 16.0, t.tool_foreground));
-                r.spawn((t.text(c.name.clone(), t.font_base, FontWeight::MEDIUM, t.foreground), Node { flex_grow: 1.0, ..default() }));
+                r.spawn(cadrs_ui::icon(
+                    if c.assembly {
+                        "assembly"
+                    } else {
+                        "part-studio"
+                    },
+                    16.0,
+                    t.tool_foreground,
+                ));
+                r.spawn((
+                    t.text(
+                        c.name.clone(),
+                        t.font_base,
+                        FontWeight::MEDIUM,
+                        t.foreground,
+                    ),
+                    Node {
+                        flex_grow: 1.0,
+                        ..default()
+                    },
+                ));
                 let change = match c.change {
                     TabChange::Changed => "Modified",
                     TabChange::Added => "Added",
                     TabChange::Deleted => "Deleted",
                 };
-                r.spawn((t.text(change, t.font_sm, FontWeight::NORMAL, t.muted_foreground), Node { width: Val::Px(80.0), ..default() }));
-                r.spawn(Node { width: Val::Px(300.0), ..default() }).with_child(
+                r.spawn((
+                    t.text(change, t.font_sm, FontWeight::NORMAL, t.muted_foreground),
+                    Node {
+                        width: Val::Px(80.0),
+                        ..default()
+                    },
+                ));
+                r.spawn(Node {
+                    width: Val::Px(300.0),
+                    ..default()
+                })
+                .with_child(
                     Select::new(format!("merge-tab-{i}"))
                         .bordered()
                         .option(format!("Replace with {source}"), true)
@@ -373,13 +558,23 @@ fn merge_body(b: &mut ChildSpawner, t: &Theme, changed: &[ChangedTab], source: &
 /// Merge: the chosen tabs replaced, as one step; the dialog closes.
 fn commit_merge(world: &mut World) {
     let mut q = world.query::<&MergeFrom>();
-    let Some(from) = q.iter(world).next().cloned() else { return };
+    let Some(from) = q.iter(world).next().cloned() else {
+        return;
+    };
     let choices: HashMap<String, usize> = {
         let mut q = world.query::<(&Name, &SelectState)>();
-        q.iter(world).map(|(n, s)| (n.to_string(), s.selected)).collect()
+        q.iter(world)
+            .map(|(n, s)| (n.to_string(), s.selected))
+            .collect()
     };
     close::<MergeFrom>(world);
-    let replace: Vec<ElementId> = from.tabs.iter().enumerate().filter(|(i, _)| choices.get(&format!("merge-tab-{i}")).copied().unwrap_or(0) == 0).map(|(_, id)| *id).collect();
+    let replace: Vec<ElementId> = from
+        .tabs
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| choices.get(&format!("merge-tab-{i}")).copied().unwrap_or(0) == 0)
+        .map(|(_, id)| *id)
+        .collect();
     // Keep for every tab: there is nothing to merge, so no (empty) "Merge from …" entry.
     if replace.is_empty() {
         let theme = world.resource::<Theme>().clone();
@@ -388,12 +583,20 @@ fn commit_merge(world: &mut World) {
         world.flush();
         return;
     }
-    let Some((source, name)) = log(world).and_then(|l| Some((l.workspace_head(from.source)?, l.workspace_name(from.source)))) else {
+    let Some((source, name)) = log(world).and_then(|l| {
+        Some((
+            l.workspace_head(from.source)?,
+            l.workspace_name(from.source),
+        ))
+    }) else {
         return;
     };
     let mut active = world.resource_mut::<ActiveDocument>();
     let merged = wm::merge(&active.doc, &source, &replace);
-    if let Err(e) = active.execute(&MergeWorkspace { state: Box::new(merged), source: name }) {
+    if let Err(e) = active.execute(&MergeWorkspace {
+        state: Box::new(merged),
+        source: name,
+    }) {
         warn!("merge: {e}");
     }
 }
@@ -419,7 +622,14 @@ mod tests {
     use cadrs_core::samples::gasket as g;
 
     fn depth(world: &World, el: ElementId, f: cadrs_core::FeatureId) -> f64 {
-        world.resource::<ActiveDocument>().doc.element(el).and_then(|e| e.feature(f)).and_then(|f| f.extrude()).map(|e| e.depth).unwrap()
+        world
+            .resource::<ActiveDocument>()
+            .doc
+            .element(el)
+            .and_then(|e| e.feature(f))
+            .and_then(|f| f.extrude())
+            .map(|e| e.depth)
+            .unwrap()
     }
 
     /// P3E.4 judge: each workspace keeps its own undo across switches: back in Main, an undo
@@ -430,7 +640,9 @@ mod tests {
         let doc = g::document().unwrap();
         let mut log = HistoryLog::start(&doc, 1_000, "me");
         let v1 = log.create_version("V1", "", 1_010, "me");
-        let branch = log.branch(v1, "Alternate Gasket Thickness", "", 1_020, "me").unwrap();
+        let branch = log
+            .branch(v1, "Alternate Gasket Thickness", "", 1_020, "me")
+            .unwrap();
         world.insert_resource(ActiveDocument::new(doc));
         let mut doc_log = DocLog::default();
         doc_log.log = Some(log);
@@ -438,23 +650,50 @@ mod tests {
         world.init_resource::<WorkspaceUndos>();
         world.init_resource::<HistoryPanel>();
         // Main: the Manifold 20 → 25 mm.
-        g::set_depth(world.resource_mut::<ActiveDocument>().as_mut(), g::MANIFOLD, g::MANIFOLD_EXTRUDE, 25.0).unwrap();
+        g::set_depth(
+            world.resource_mut::<ActiveDocument>().as_mut(),
+            g::MANIFOLD,
+            g::MANIFOLD_EXTRUDE,
+            25.0,
+        )
+        .unwrap();
         // The branch: the gasket 2 → 1 mm.
         switch_workspace(&mut world, branch);
         assert_eq!(current_name(&world), "Alternate Gasket Thickness");
-        assert_eq!(depth(&world, g::MANIFOLD, g::MANIFOLD_EXTRUDE), g::MANIFOLD_T, "the branch starts at V1");
-        assert_eq!(world.resource::<ActiveDocument>().history.undo_len(), 0, "the branch has no undo of Main's");
-        g::set_depth(world.resource_mut::<ActiveDocument>().as_mut(), g::GASKET, g::GASKET_EXTRUDE, g::THIN_GASKET_T).unwrap();
+        assert_eq!(
+            depth(&world, g::MANIFOLD, g::MANIFOLD_EXTRUDE),
+            g::MANIFOLD_T,
+            "the branch starts at V1"
+        );
+        assert_eq!(
+            world.resource::<ActiveDocument>().history.undo_len(),
+            0,
+            "the branch has no undo of Main's"
+        );
+        g::set_depth(
+            world.resource_mut::<ActiveDocument>().as_mut(),
+            g::GASKET,
+            g::GASKET_EXTRUDE,
+            g::THIN_GASKET_T,
+        )
+        .unwrap();
         // Back to Main: its undo undoes the Manifold's edit; the gasket is Main's 2 mm.
         switch_workspace(&mut world, WorkspaceId::MAIN);
         assert_eq!(depth(&world, g::MANIFOLD, g::MANIFOLD_EXTRUDE), 25.0);
         assert_eq!(depth(&world, g::GASKET, g::GASKET_EXTRUDE), g::GASKET_T);
         assert!(world.resource_mut::<ActiveDocument>().undo().is_some());
-        assert_eq!(depth(&world, g::MANIFOLD, g::MANIFOLD_EXTRUDE), g::MANIFOLD_T, "Main's last edit undone");
+        assert_eq!(
+            depth(&world, g::MANIFOLD, g::MANIFOLD_EXTRUDE),
+            g::MANIFOLD_T,
+            "Main's last edit undone"
+        );
         assert_eq!(depth(&world, g::GASKET, g::GASKET_EXTRUDE), g::GASKET_T);
         // And the branch kept its own: switching to it and undoing takes its gasket back to 2.
         switch_workspace(&mut world, branch);
-        assert_eq!(depth(&world, g::GASKET, g::GASKET_EXTRUDE), g::THIN_GASKET_T);
+        assert_eq!(
+            depth(&world, g::GASKET, g::GASKET_EXTRUDE),
+            g::THIN_GASKET_T
+        );
         assert!(world.resource_mut::<ActiveDocument>().undo().is_some());
         assert_eq!(depth(&world, g::GASKET, g::GASKET_EXTRUDE), g::GASKET_T);
     }

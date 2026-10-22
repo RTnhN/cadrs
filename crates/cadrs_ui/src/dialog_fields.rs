@@ -202,9 +202,14 @@ impl Select {
             background: if bordered {
                 StateColors::new(t.background, t.list_hover, t.list_active, t.background)
             } else {
-                StateColors::new(Color::NONE, t.ghost_hover, t.ghost_active, Color::NONE).with_selected(t.ghost_hover)
+                StateColors::new(Color::NONE, t.ghost_hover, t.ghost_active, Color::NONE)
+                    .with_selected(t.ghost_hover)
             },
-            border: StateColors::all(if bordered { Color::srgb_u8(0xc8, 0xc8, 0xc8) } else { underline() }),
+            border: StateColors::all(if bordered {
+                Color::srgb_u8(0xc8, 0xc8, 0xc8)
+            } else {
+                underline()
+            }),
             foreground: StateColors::new(
                 t.tool_foreground,
                 t.tool_foreground,
@@ -249,7 +254,11 @@ impl Select {
             visuals,
             Children::spawn(SpawnWith(move |p: &mut ChildSpawner| {
                 let select = p.target_entity();
-                let (size, weight) = if bordered { (12.5, FontWeight::NORMAL) } else { (t.font_base, FontWeight::MEDIUM) };
+                let (size, weight) = if bordered {
+                    (12.5, FontWeight::NORMAL)
+                } else {
+                    (t.font_base, FontWeight::MEDIUM)
+                };
                 // A long value ("Start from selected plane") is cut with "…" before the caret
                 // (P3.10 judge: it ran under it).
                 p.spawn((
@@ -268,7 +277,10 @@ impl Select {
                 if bordered {
                     p.spawn((icon("caret-down", 12.0, t.foreground), Pickable::IGNORE));
                 } else {
-                    p.spawn((icon("caret-down-filled", 10.0, t.tool_foreground), Pickable::IGNORE));
+                    p.spawn((
+                        icon("caret-down-filled", 10.0, t.tool_foreground),
+                        Pickable::IGNORE,
+                    ));
                 }
             })),
         )
@@ -296,7 +308,11 @@ fn on_select_activate(
     for (i, (label, enabled)) in state.options.iter().enumerate() {
         // The current choice is marked (P3I.2 judge: nothing showed which was chosen; P3I.6's
         // export dialogs' lists, `Select::mark_selected`, mark it too).
-        menu = menu.item(MenuItem::new(format!("{name}-option-{i}"), label.clone()).disabled(!enabled).checked(i == state.selected));
+        menu = menu.item(
+            MenuItem::new(format!("{name}-option-{i}"), label.clone())
+                .disabled(!enabled)
+                .checked(i == state.selected),
+        );
     }
     open_menu(&mut commands, a.entity, menu.build(&theme));
 }
@@ -310,7 +326,11 @@ fn on_select_menu_action(
         return;
     };
     let prefix = format!("{name}-option-");
-    let Some(i) = ev.item.strip_prefix(&prefix).and_then(|n| n.parse::<usize>().ok()) else {
+    let Some(i) = ev
+        .item
+        .strip_prefix(&prefix)
+        .and_then(|n| n.parse::<usize>().ok())
+    else {
         return;
     };
     commands.queue(crate::menu::close_all_menus);
@@ -328,7 +348,11 @@ fn sync_selects(
     mut q_value: Query<(&SelectValue, &mut Text)>,
 ) {
     for (e, s) in &q {
-        let want = s.options.get(s.selected).map(|o| o.0.as_str()).unwrap_or("");
+        let want = s
+            .options
+            .get(s.selected)
+            .map(|o| o.0.as_str())
+            .unwrap_or("");
         for (v, mut text) in &mut q_value {
             if v.0 == e && text.0 != want {
                 text.0 = want.to_string();
@@ -438,7 +462,11 @@ impl NumberField {
     }
 
     /// An icon after the value (named `<name>-icon`), with a tooltip.
-    pub fn trailing_icon(mut self, icon: impl Into<Cow<'static, str>>, tip: impl Into<String>) -> Self {
+    pub fn trailing_icon(
+        mut self,
+        icon: impl Into<Cow<'static, str>>,
+        tip: impl Into<String>,
+    ) -> Self {
         self.trailing = Some((icon.into(), tip.into()));
         self
     }
@@ -482,7 +510,11 @@ impl NumberField {
                     ),
                     Pickable::IGNORE,
                 ));
-                let label_color = if disabled { t.disabled_foreground } else { label_grey() };
+                let label_color = if disabled {
+                    t.disabled_foreground
+                } else {
+                    label_grey()
+                };
                 p.spawn((
                     Node {
                         width: Val::Px(label_width),
@@ -501,7 +533,11 @@ impl NumberField {
                     } else {
                         label_icon.as_ref().map(|(_, c)| *c).unwrap_or(label_color)
                     };
-                    let weight = if label_icon.is_some() { FontWeight::MEDIUM } else { FontWeight::NORMAL };
+                    let weight = if label_icon.is_some() {
+                        FontWeight::MEDIUM
+                    } else {
+                        FontWeight::NORMAL
+                    };
                     l.spawn((t.text(label, label_size, weight, fg), Pickable::IGNORE));
                     if let Some((i, color)) = label_icon {
                         l.spawn((icon(i, 11.0, color), Pickable::IGNORE));
@@ -521,31 +557,32 @@ impl NumberField {
                     BorderColor::all(underline()),
                 ))
                 .with_children(|l| {
-                let mut edit = l.spawn((
-                    Name::new(edit_name),
-                    NumberFieldEdit(root),
-                    TextInputField,
-                    EditableText::new(&text),
-                    EditableTextFilter::new(|c: char| !c.is_control()),
-                    t.font(12.0, FontWeight::MEDIUM),
-                    TextColor(t.tool_foreground),
-                    TextLayout::new(Justify::Right, LineBreak::NoWrap),
-                    TextCursorStyle {
-                        color: t.caret,
-                        selection_color: t.selection,
-                        unfocused_selection_color: Color::NONE,
-                        selected_text_color: Some(t.selection_foreground),
-                    },
-                    TabIndex(0),
-                    Node {
-                        flex_grow: 1.0,
-                        height: Val::Px(16.0),
-                        ..default()
-                    },
-                ));
-                if disabled {
-                    edit.insert((InteractionDisabled, Pickable::IGNORE)).remove::<TabIndex>();
-                }
+                    let mut edit = l.spawn((
+                        Name::new(edit_name),
+                        NumberFieldEdit(root),
+                        TextInputField,
+                        EditableText::new(&text),
+                        EditableTextFilter::new(|c: char| !c.is_control()),
+                        t.font(12.0, FontWeight::MEDIUM),
+                        TextColor(t.tool_foreground),
+                        TextLayout::new(Justify::Right, LineBreak::NoWrap),
+                        TextCursorStyle {
+                            color: t.caret,
+                            selection_color: t.selection,
+                            unfocused_selection_color: Color::NONE,
+                            selected_text_color: Some(t.selection_foreground),
+                        },
+                        TabIndex(0),
+                        Node {
+                            flex_grow: 1.0,
+                            height: Val::Px(16.0),
+                            ..default()
+                        },
+                    ));
+                    if disabled {
+                        edit.insert((InteractionDisabled, Pickable::IGNORE))
+                            .remove::<TabIndex>();
+                    }
                 });
                 if let Some((i, tip)) = trailing {
                     p.spawn((
@@ -653,7 +690,9 @@ fn commit_on_blur(
             enter: false,
         });
     }
-    *at_focus = now.and_then(|e| q_edit.get(e).ok()).map(|(t, _)| t.value().to_string());
+    *at_focus = now
+        .and_then(|e| q_edit.get(e).ok())
+        .map(|(t, _)| t.value().to_string());
     *last = now;
 }
 
@@ -663,7 +702,13 @@ fn sync_number_fields(
     theme: Res<Theme>,
     focus: Res<InputFocus>,
     q_state: Query<&NumberFieldState>,
-    mut q_edit: Query<(Entity, &NumberFieldEdit, &mut EditableText, &mut TextColor, Has<InteractionDisabled>)>,
+    mut q_edit: Query<(
+        Entity,
+        &NumberFieldEdit,
+        &mut EditableText,
+        &mut TextColor,
+        Has<InteractionDisabled>,
+    )>,
     mut q_line: Query<(&NumberFieldLine, &mut BorderColor, &mut Node)>,
     mut focused_before: Local<Option<Entity>>,
 ) {
@@ -771,7 +816,8 @@ impl OptionRow {
         let name = self.name.into_owned();
         let check_name = format!("{name}-checkbox");
         let label = self.label;
-        let (chevron, checked, disabled, glyph) = (self.chevron, self.checked, self.disabled, self.icon);
+        let (chevron, checked, disabled, glyph) =
+            (self.chevron, self.checked, self.disabled, self.icon);
         (
             Name::new(name),
             Node {
@@ -788,7 +834,12 @@ impl OptionRow {
                             10.0,
                             chevron_grey(),
                             Node {
-                                margin: UiRect::new(Val::Px(3.0), Val::Px(5.0), Val::ZERO, Val::ZERO),
+                                margin: UiRect::new(
+                                    Val::Px(3.0),
+                                    Val::Px(5.0),
+                                    Val::ZERO,
+                                    Val::ZERO,
+                                ),
                                 ..default()
                             },
                         ),
@@ -797,15 +848,39 @@ impl OptionRow {
                 }
                 match glyph {
                     None => {
-                        p.spawn(crate::Checkbox::new(check_name).label(label).checked(checked).disabled(disabled).build(&t));
+                        p.spawn(
+                            crate::Checkbox::new(check_name)
+                                .label(label)
+                                .checked(checked)
+                                .disabled(disabled)
+                                .build(&t),
+                        );
                     }
                     Some(g) => {
-                        p.spawn(crate::Checkbox::new(check_name).checked(checked).disabled(disabled).build(&t));
+                        p.spawn(
+                            crate::Checkbox::new(check_name)
+                                .checked(checked)
+                                .disabled(disabled)
+                                .build(&t),
+                        );
                         p.spawn((
-                            icon_in(g, 14.0, t.muted_foreground, Node { margin: UiRect::horizontal(Val::Px(5.0)), flex_shrink: 0.0, ..default() }),
+                            icon_in(
+                                g,
+                                14.0,
+                                t.muted_foreground,
+                                Node {
+                                    margin: UiRect::horizontal(Val::Px(5.0)),
+                                    flex_shrink: 0.0,
+                                    ..default()
+                                },
+                            ),
                             Pickable::IGNORE,
                         ));
-                        p.spawn((t.text(label, t.font_sm, FontWeight::NORMAL, t.foreground), Pickable::IGNORE)).insert(TextLayout::no_wrap());
+                        p.spawn((
+                            t.text(label, t.font_sm, FontWeight::NORMAL, t.foreground),
+                            Pickable::IGNORE,
+                        ))
+                        .insert(TextLayout::no_wrap());
                     }
                 }
             })),
@@ -916,27 +991,52 @@ impl Slider {
 
 fn on_slider_drag(
     ev: On<Pointer<Drag>>,
-    mut q: Query<(&mut SliderState, &ComputedNode, &bevy::ui::UiGlobalTransform, Has<InteractionDisabled>)>,
+    mut q: Query<(
+        &mut SliderState,
+        &ComputedNode,
+        &bevy::ui::UiGlobalTransform,
+        Has<InteractionDisabled>,
+    )>,
     mut commands: Commands,
 ) {
-    slide_to(ev.entity, ev.pointer_location.position.x, &mut q, &mut commands);
+    slide_to(
+        ev.entity,
+        ev.pointer_location.position.x,
+        &mut q,
+        &mut commands,
+    );
 }
 
 /// Pressing on the track moves the knob there (P3.5: the opacity slider).
 fn on_slider_press(
     ev: On<Pointer<Press>>,
-    mut q: Query<(&mut SliderState, &ComputedNode, &bevy::ui::UiGlobalTransform, Has<InteractionDisabled>)>,
+    mut q: Query<(
+        &mut SliderState,
+        &ComputedNode,
+        &bevy::ui::UiGlobalTransform,
+        Has<InteractionDisabled>,
+    )>,
     mut commands: Commands,
 ) {
     if ev.button == PointerButton::Primary {
-        slide_to(ev.entity, ev.pointer_location.position.x, &mut q, &mut commands);
+        slide_to(
+            ev.entity,
+            ev.pointer_location.position.x,
+            &mut q,
+            &mut commands,
+        );
     }
 }
 
 fn slide_to(
     entity: Entity,
     x: f32,
-    q: &mut Query<(&mut SliderState, &ComputedNode, &bevy::ui::UiGlobalTransform, Has<InteractionDisabled>)>,
+    q: &mut Query<(
+        &mut SliderState,
+        &ComputedNode,
+        &bevy::ui::UiGlobalTransform,
+        Has<InteractionDisabled>,
+    )>,
     commands: &mut Commands,
 ) {
     let Ok((mut s, node, t, disabled)) = q.get_mut(entity) else {
@@ -1000,21 +1100,44 @@ mod tests {
                 .init_resource::<Theme>()
                 .init_resource::<Committed>()
                 .add_plugins(DialogFieldsPlugin)
-                .add_observer(|ev: On<NumberFieldCommit>, mut c: ResMut<Committed>| c.0.push(ev.text.clone()));
-            let root = app.world_mut().spawn(NumberFieldState { text: "10 mm".into(), error: false }).id();
+                .add_observer(|ev: On<NumberFieldCommit>, mut c: ResMut<Committed>| {
+                    c.0.push(ev.text.clone())
+                });
+            let root = app
+                .world_mut()
+                .spawn(NumberFieldState {
+                    text: "10 mm".into(),
+                    error: false,
+                })
+                .id();
             let edit = app
                 .world_mut()
-                .spawn((NumberFieldEdit(root), EditableText::new("10 mm"), TextColor::WHITE))
+                .spawn((
+                    NumberFieldEdit(root),
+                    EditableText::new("10 mm"),
+                    TextColor::WHITE,
+                ))
                 .id();
             let next = app.world_mut().spawn_empty().id();
-            app.world_mut().resource_mut::<InputFocus>().set(edit, FocusCause::Pressed);
+            app.world_mut()
+                .resource_mut::<InputFocus>()
+                .set(edit, FocusCause::Pressed);
             app.update();
-            app.world_mut().get_mut::<EditableText>(edit).unwrap().editor_mut().set_text("10.02");
+            app.world_mut()
+                .get_mut::<EditableText>(edit)
+                .unwrap()
+                .editor_mut()
+                .set_text("10.02");
             app.update();
             // Tab to the next field.
-            app.world_mut().resource_mut::<InputFocus>().set(next, FocusCause::Navigated);
+            app.world_mut()
+                .resource_mut::<InputFocus>()
+                .set(next, FocusCause::Navigated);
             app.update();
-            assert_eq!(app.world().resource::<Committed>().0, vec!["10.02".to_string()]);
+            assert_eq!(
+                app.world().resource::<Committed>().0,
+                vec!["10.02".to_string()]
+            );
         }
     }
 
@@ -1029,20 +1152,44 @@ mod tests {
             .init_resource::<Theme>()
             .init_resource::<Committed>()
             .add_plugins(DialogFieldsPlugin)
-            .add_observer(|ev: On<NumberFieldCommit>, mut c: ResMut<Committed>| c.0.push(ev.text.clone()));
-        let root = app.world_mut().spawn(NumberFieldState { text: "6.667".into(), error: false }).id();
+            .add_observer(|ev: On<NumberFieldCommit>, mut c: ResMut<Committed>| {
+                c.0.push(ev.text.clone())
+            });
+        let root = app
+            .world_mut()
+            .spawn(NumberFieldState {
+                text: "6.667".into(),
+                error: false,
+            })
+            .id();
         let edit = app
             .world_mut()
-            .spawn((NumberFieldEdit(root), EditableText::new("6.667"), TextColor::WHITE))
+            .spawn((
+                NumberFieldEdit(root),
+                EditableText::new("6.667"),
+                TextColor::WHITE,
+            ))
             .id();
-        app.world_mut().resource_mut::<InputFocus>().set(edit, FocusCause::Navigated);
+        app.world_mut()
+            .resource_mut::<InputFocus>()
+            .set(edit, FocusCause::Navigated);
         app.update();
         app.update();
         // A click elsewhere clears the focus, and the owner updates the state in that frame.
         app.world_mut().resource_mut::<InputFocus>().clear();
-        app.world_mut().get_mut::<NumberFieldState>(root).unwrap().text = "6.653".into();
+        app.world_mut()
+            .get_mut::<NumberFieldState>(root)
+            .unwrap()
+            .text = "6.653".into();
         app.update();
         assert!(app.world().resource::<Committed>().0.is_empty());
-        assert_eq!(app.world().get::<EditableText>(edit).unwrap().value().to_string(), "6.653");
+        assert_eq!(
+            app.world()
+                .get::<EditableText>(edit)
+                .unwrap()
+                .value()
+                .to_string(),
+            "6.653"
+        );
     }
 }

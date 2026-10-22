@@ -77,11 +77,20 @@ impl SheetMetalFeature {
             add(e.part().feature);
         }
         if let SheetMetalFeature::Flange(x) = self {
-            for t in [x.up_to, x.bound.up_to, x.second.as_ref().and_then(|s| s.up_to)].into_iter().flatten() {
+            for t in [
+                x.up_to,
+                x.bound.up_to,
+                x.second.as_ref().and_then(|s| s.up_to),
+            ]
+            .into_iter()
+            .flatten()
+            {
                 t.parent().into_iter().for_each(&mut add);
             }
             for d in [&x.parallel_to, &x.direction].into_iter().flatten() {
-                crate::document::direction_parent(d).into_iter().for_each(&mut add);
+                crate::document::direction_parent(d)
+                    .into_iter()
+                    .for_each(&mut add);
             }
         }
         out
@@ -95,10 +104,25 @@ impl SheetMetalFeature {
                 v.push(("Distance", &mut x.distance_expr, &mut x.distance, false));
                 v.push(("Offset", &mut x.offset_expr, &mut x.offset, false));
                 v.push(("Bend angle", &mut x.angle_expr, &mut x.angle, true));
-                v.push(("Angle", &mut x.direction_angle_expr, &mut x.direction_angle, true));
-                v.push(("Miter angle", &mut x.miter_angle_expr, &mut x.miter_angle, true));
+                v.push((
+                    "Angle",
+                    &mut x.direction_angle_expr,
+                    &mut x.direction_angle,
+                    true,
+                ));
+                v.push((
+                    "Miter angle",
+                    &mut x.miter_angle_expr,
+                    &mut x.miter_angle,
+                    true,
+                ));
                 v.push(("Bend radius", &mut x.radius_expr, &mut x.radius, false));
-                v.push(("First bound", &mut x.bound.distance_expr, &mut x.bound.distance, false));
+                v.push((
+                    "First bound",
+                    &mut x.bound.distance_expr,
+                    &mut x.bound.distance,
+                    false,
+                ));
                 if let Some(s) = &mut x.second {
                     v.push(("Second bound", &mut s.distance_expr, &mut s.distance, false));
                 }
@@ -148,7 +172,11 @@ pub enum FlangeEnd {
 }
 
 impl FlangeEnd {
-    pub const ALL: [FlangeEnd; 3] = [FlangeEnd::Blind, FlangeEnd::UpToEntity, FlangeEnd::UpToEntityOffset];
+    pub const ALL: [FlangeEnd; 3] = [
+        FlangeEnd::Blind,
+        FlangeEnd::UpToEntity,
+        FlangeEnd::UpToEntityOffset,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -169,7 +197,11 @@ pub enum AngleControl {
 }
 
 impl AngleControl {
-    pub const ALL: [AngleControl; 3] = [AngleControl::BendAngle, AngleControl::AlignToGeometry, AngleControl::AngleFromDirection];
+    pub const ALL: [AngleControl; 3] = [
+        AngleControl::BendAngle,
+        AngleControl::AlignToGeometry,
+        AngleControl::AngleFromDirection,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -215,7 +247,14 @@ pub struct Bound {
 
 impl Default for Bound {
     fn default() -> Self {
-        Bound { kind: FlangeEnd::Blind, distance: 25.0, distance_expr: "25 mm".into(), up_to: None, offset: 0.0, offset_expr: zero_mm() }
+        Bound {
+            kind: FlangeEnd::Blind,
+            distance: 25.0,
+            distance_expr: "25 mm".into(),
+            up_to: None,
+            offset: 0.0,
+            offset_expr: zero_mm(),
+        }
     }
 }
 
@@ -350,15 +389,27 @@ impl FlangeFeature {
             return Some("Select edges or side faces to flange");
         }
         match self.end {
-            FlangeEnd::Blind if !(self.distance > 0.0) => return Some("The distance must be greater than zero"),
-            FlangeEnd::UpToEntity | FlangeEnd::UpToEntityOffset if self.up_to.is_none() => return Some("Select what the flange goes up to"),
+            FlangeEnd::Blind if !(self.distance > 0.0) => {
+                return Some("The distance must be greater than zero");
+            }
+            FlangeEnd::UpToEntity | FlangeEnd::UpToEntityOffset if self.up_to.is_none() => {
+                return Some("Select what the flange goes up to");
+            }
             _ => {}
         }
         match self.angle_control {
-            AngleControl::BendAngle if !(self.angle > 0.0 && self.angle < 180.0) => return Some("The bend angle must be between 0 and 180 degrees"),
-            AngleControl::AlignToGeometry if self.parallel_to.is_none() => return Some("Select what the flange is parallel to"),
-            AngleControl::AngleFromDirection if self.direction.is_none() => return Some("Select the direction the angle is measured from"),
-            AngleControl::AngleFromDirection if !(self.direction_angle >= 1.0 && self.direction_angle <= 359.0) => {
+            AngleControl::BendAngle if !(self.angle > 0.0 && self.angle < 180.0) => {
+                return Some("The bend angle must be between 0 and 180 degrees");
+            }
+            AngleControl::AlignToGeometry if self.parallel_to.is_none() => {
+                return Some("Select what the flange is parallel to");
+            }
+            AngleControl::AngleFromDirection if self.direction.is_none() => {
+                return Some("Select the direction the angle is measured from");
+            }
+            AngleControl::AngleFromDirection
+                if !(self.direction_angle >= 1.0 && self.direction_angle <= 359.0) =>
+            {
                 return Some("The angle must be between 1 and 359 degrees");
             }
             _ => {}
@@ -497,7 +548,14 @@ pub struct MakeJointFeature {
 
 impl Default for MakeJointFeature {
     fn default() -> Self {
-        MakeJointFeature { edges: Vec::new(), kind: MakeJointType::Rip, style: RipStyle::EdgeJoint, use_model_radius: true, radius: 1.0, radius_expr: one_mm() }
+        MakeJointFeature {
+            edges: Vec::new(),
+            kind: MakeJointType::Rip,
+            style: RipStyle::EdgeJoint,
+            use_model_radius: true,
+            radius: 1.0,
+            radius_expr: one_mm(),
+        }
     }
 }
 
@@ -505,7 +563,10 @@ impl MakeJointFeature {
     pub fn problem(&self) -> Option<&'static str> {
         match self.edges.len() {
             0 | 1 => Some("Select two edges or side faces to join"),
-            2 => (self.kind == MakeJointType::Bend && !self.use_model_radius && !(self.radius >= 0.0)).then_some("The bend radius must be at least 0"),
+            2 => (self.kind == MakeJointType::Bend
+                && !self.use_model_radius
+                && !(self.radius >= 0.0))
+                .then_some("The bend radius must be at least 0"),
             _ => Some("Select exactly two edges or side faces"),
         }
     }
@@ -518,12 +579,40 @@ mod tests {
     #[test]
     fn defaults_follow_onshape_and_round_trip() {
         let f = FlangeFeature::default();
-        assert_eq!((f.alignment, f.end, f.angle_control, f.angle, f.auto_miter, f.use_model_radius, f.partial, f.hold_adjacent), (FlangeAlignment::Inner, FlangeEnd::Blind, AngleControl::BendAngle, 90.0, true, true, false, true));
+        assert_eq!(
+            (
+                f.alignment,
+                f.end,
+                f.angle_control,
+                f.angle,
+                f.auto_miter,
+                f.use_model_radius,
+                f.partial,
+                f.hold_adjacent
+            ),
+            (
+                FlangeAlignment::Inner,
+                FlangeEnd::Blind,
+                AngleControl::BendAngle,
+                90.0,
+                true,
+                true,
+                false,
+                true
+            )
+        );
         let h = HemFeature::default();
-        assert_eq!((h.kind, h.flattened, h.total, h.alignment, h.closed), (HemKind::Straight, true, 12.5, HemAlignment::Outer, false));
+        assert_eq!(
+            (h.kind, h.flattened, h.total, h.alignment, h.closed),
+            (HemKind::Straight, true, 12.5, HemAlignment::Outer, false)
+        );
         let j = MakeJointFeature::default();
         assert_eq!((j.kind, j.style), (MakeJointType::Rip, RipStyle::EdgeJoint));
-        for x in [SheetMetalFeature::Flange(f), SheetMetalFeature::Hem(h), SheetMetalFeature::MakeJoint(j)] {
+        for x in [
+            SheetMetalFeature::Flange(f),
+            SheetMetalFeature::Hem(h),
+            SheetMetalFeature::MakeJoint(j),
+        ] {
             assert!(x.problem().is_some(), "nothing picked");
             let s = ron::to_string(&x).unwrap();
             assert_eq!(ron::from_str::<SheetMetalFeature>(&s).unwrap(), x);

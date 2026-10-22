@@ -86,7 +86,11 @@ impl RawElement {
 pub fn derived_sources(doc: &RawDocument) -> Vec<String> {
     let mut out = Vec::new();
     for el in doc.elements() {
-        for f in el.features().and_then(|f| f["features"].as_array().cloned()).unwrap_or_default() {
+        for f in el
+            .features()
+            .and_then(|f| f["features"].as_array().cloned())
+            .unwrap_or_default()
+        {
             if f["featureType"].as_str() != Some("importDerived") {
                 continue;
             }
@@ -115,7 +119,11 @@ pub fn derive_order(docs: Vec<RawDocument>) -> Vec<RawDocument> {
     let mut left: Vec<usize> = (0..docs.len()).collect();
     let mut order = Vec::new();
     while !left.is_empty() {
-        let ready = left.iter().position(|&i| deps[i].iter().all(|d| !left.iter().any(|&j| docs[j].id == *d)));
+        let ready = left.iter().position(|&i| {
+            deps[i]
+                .iter()
+                .all(|d| !left.iter().any(|&j| docs[j].id == *d))
+        });
         order.push(left.remove(ready.unwrap_or(0)));
     }
     let mut slots: Vec<Option<RawDocument>> = docs.into_iter().map(Some).collect();

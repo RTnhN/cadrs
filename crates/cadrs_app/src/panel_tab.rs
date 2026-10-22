@@ -23,7 +23,10 @@ const GAP: f32 = 8.0;
 
 #[allow(clippy::type_complexity)]
 fn keep_tab_clear(
-    q_named: Query<(&Name, &ComputedNode, &UiGlobalTransform, Option<&ChildOf>), Without<cadrs_ui::FeatureDialogState>>,
+    q_named: Query<
+        (&Name, &ComputedNode, &UiGlobalTransform, Option<&ChildOf>),
+        Without<cadrs_ui::FeatureDialogState>,
+    >,
     q_dialogs: Query<(&ComputedNode, &UiGlobalTransform), With<cadrs_ui::FeatureDialogState>>,
     mut q_node: Query<(&Name, &mut Node), Without<cadrs_ui::FeatureDialogState>>,
 ) {
@@ -31,7 +34,10 @@ fn keep_tab_clear(
         let s = c.inverse_scale_factor();
         Rect::from_center_size(t.translation * s, c.size() * s)
     };
-    let Some((_, tab_c, tab_t, Some(parent))) = q_named.iter().find(|(n, ..)| n.as_str() == "feature-panel-toggle") else {
+    let Some((_, tab_c, tab_t, Some(parent))) = q_named
+        .iter()
+        .find(|(n, ..)| n.as_str() == "feature-panel-toggle")
+    else {
         return;
     };
     let Ok((_, panel_c, panel_t, _)) = q_named.get(parent.parent()) else {
@@ -44,7 +50,12 @@ fn keep_tab_clear(
     let below = q_dialogs
         .iter()
         .map(|(c, t)| rect(c, t))
-        .filter(|d| d.min.x < tab.max.x && d.max.x > tab.min.x && d.min.y < default_top + TAB_H && d.max.y > default_top)
+        .filter(|d| {
+            d.min.x < tab.max.x
+                && d.max.x > tab.min.x
+                && d.min.y < default_top + TAB_H
+                && d.max.y > default_top
+        })
         .map(|d| d.max.y + GAP)
         .fold(None, |a: Option<f32>, y| Some(a.map_or(y, |a| a.max(y))));
     let (top, margin) = match below {

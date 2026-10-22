@@ -67,7 +67,12 @@ impl TagFormFeature {
     }
 
     pub fn parents(&self) -> Vec<FeatureId> {
-        let mut v: Vec<FeatureId> = self.add.iter().chain(&self.remove).map(|p| p.feature).collect();
+        let mut v: Vec<FeatureId> = self
+            .add
+            .iter()
+            .chain(&self.remove)
+            .map(|p| p.feature)
+            .collect();
         v.extend(self.sketch);
         v.extend(self.origin.and_then(|c| c.parent()));
         v.sort();
@@ -88,7 +93,13 @@ pub enum LibraryForm {
 }
 
 impl LibraryForm {
-    pub const ALL: [LibraryForm; 5] = [LibraryForm::Louver, LibraryForm::Lance, LibraryForm::Dimple, LibraryForm::Emboss, LibraryForm::ExtrudedHole];
+    pub const ALL: [LibraryForm; 5] = [
+        LibraryForm::Louver,
+        LibraryForm::Lance,
+        LibraryForm::Dimple,
+        LibraryForm::Emboss,
+        LibraryForm::ExtrudedHole,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -115,8 +126,18 @@ impl LibraryForm {
         let a = |n: &str, v: f64| FormVariable::angle(n, v);
         match self {
             // Angle: the slope of the louver's end walls; the lance's ramps.
-            LibraryForm::Louver => vec![l("Length", 40.0), l("Width", 8.0), l("Height", 4.0), a("Angle", 35.0)],
-            LibraryForm::Lance => vec![l("Length", 30.0), l("Width", 6.0), l("Height", 3.0), a("Angle", 45.0)],
+            LibraryForm::Louver => vec![
+                l("Length", 40.0),
+                l("Width", 8.0),
+                l("Height", 4.0),
+                a("Angle", 35.0),
+            ],
+            LibraryForm::Lance => vec![
+                l("Length", 30.0),
+                l("Width", 6.0),
+                l("Height", 3.0),
+                a("Angle", 45.0),
+            ],
             LibraryForm::Dimple => vec![l("Diameter", 16.0), l("Height", 3.0)],
             LibraryForm::Emboss => vec![l("Length", 30.0), l("Width", 20.0), l("Height", 2.5)],
             LibraryForm::ExtrudedHole => vec![l("Diameter", 8.0), l("Height", 4.0)],
@@ -141,11 +162,21 @@ pub struct FormVariable {
 
 impl FormVariable {
     pub fn length(name: &str, mm: f64) -> Self {
-        FormVariable { name: name.into(), expr: format!("{} mm", crate::sheetmetal::plain(mm)), value: mm, angle: false }
+        FormVariable {
+            name: name.into(),
+            expr: format!("{} mm", crate::sheetmetal::plain(mm)),
+            value: mm,
+            angle: false,
+        }
     }
 
     pub fn angle(name: &str, deg: f64) -> Self {
-        FormVariable { name: name.into(), expr: format!("{} deg", crate::sheetmetal::plain(deg)), value: deg, angle: true }
+        FormVariable {
+            name: name.into(),
+            expr: format!("{} deg", crate::sheetmetal::plain(deg)),
+            value: deg,
+            angle: true,
+        }
     }
 }
 
@@ -155,7 +186,10 @@ pub enum FormSource {
     /// A Part Studio of this document (its features copied in when picked).
     Current { element: ElementId },
     /// A Part Studio of another document.
-    Other { document: DocumentId, element: ElementId },
+    Other {
+        document: DocumentId,
+        element: ElementId,
+    },
     /// cadrs's forms library.
     Library(LibraryForm),
 }
@@ -221,7 +255,11 @@ impl FormFeature {
         if self.targets.is_empty() {
             return Some("Select the target faces");
         }
-        if self.variables.iter().any(|v| v.value.is_nan() || (!v.angle && v.value <= 0.0)) {
+        if self
+            .variables
+            .iter()
+            .any(|v| v.value.is_nan() || (!v.angle && v.value <= 0.0))
+        {
             return Some("A form variable is out of range");
         }
         None
@@ -232,7 +270,11 @@ impl FormFeature {
     }
 
     pub fn parents(&self) -> Vec<FeatureId> {
-        let mut v: Vec<FeatureId> = self.locations.iter().filter_map(FormLocation::parent).collect();
+        let mut v: Vec<FeatureId> = self
+            .locations
+            .iter()
+            .filter_map(FormLocation::parent)
+            .collect();
         v.extend(self.targets.iter().map(|f| FeatureId(f.face.op)));
         v.sort();
         v.dedup();
@@ -245,7 +287,9 @@ impl FormFeature {
             .iter()
             .filter_map(|l| match l {
                 FormLocation::SketchPoints(s) => Some(*s),
-                FormLocation::Connector(ConnectorRef::Implicit(crate::mate::ConnectorOrigin::SketchPoint { sketch, .. })) => Some(*sketch),
+                FormLocation::Connector(ConnectorRef::Implicit(
+                    crate::mate::ConnectorOrigin::SketchPoint { sketch, .. },
+                )) => Some(*sketch),
                 _ => None,
             })
             .collect()
@@ -258,12 +302,14 @@ pub fn studio_variables(studio: &[Feature]) -> Vec<FormVariable> {
     studio
         .iter()
         .filter_map(|f| match &f.kind {
-            FeatureKind::Variable(v) if !v.name.eq_ignore_ascii_case("thickness") => Some(FormVariable {
-                name: v.name.clone(),
-                expr: v.expr.clone(),
-                value: v.value,
-                angle: v.kind == crate::variables::VariableKind::Angle,
-            }),
+            FeatureKind::Variable(v) if !v.name.eq_ignore_ascii_case("thickness") => {
+                Some(FormVariable {
+                    name: v.name.clone(),
+                    expr: v.expr.clone(),
+                    value: v.value,
+                    angle: v.kind == crate::variables::VariableKind::Angle,
+                })
+            }
             _ => None,
         })
         .collect()
@@ -290,13 +336,23 @@ pub fn refresh(doc: &mut crate::document::Document) {
     let mut updates: Vec<(usize, usize, Vec<Feature>, String)> = Vec::new();
     for (i, el) in doc.elements.iter().enumerate() {
         for (j, f) in el.features().iter().enumerate() {
-            let FeatureKind::Form(x) = &f.kind else { continue };
+            let FeatureKind::Form(x) = &f.kind else {
+                continue;
+            };
             let Some(pick) = &x.form else { continue };
-            let FormSource::Current { element } = pick.source else { continue };
+            let FormSource::Current { element } = pick.source else {
+                continue;
+            };
             if element == el.id {
                 continue;
             }
-            let Some(src) = doc.elements.iter().find(|e| e.id == element && matches!(e.kind, ElementKind::PartStudio { .. })) else { continue };
+            let Some(src) = doc
+                .elements
+                .iter()
+                .find(|e| e.id == element && matches!(e.kind, ElementKind::PartStudio { .. }))
+            else {
+                continue;
+            };
             let features = src.active_features();
             if pick.studio != features || pick.name != src.name {
                 updates.push((i, j, features, src.name.clone()));
@@ -331,9 +387,16 @@ pub fn tag_of(studio: &[Feature]) -> Option<&TagFormFeature> {
 /// The studio a form's copy is built from: a library form made from its variables, or the
 /// document form's features with its variables (and `thickness`) set and the expressions that
 /// use them refreshed.
-pub fn form_studio(pick: &FormPick, variables: &[FormVariable], thickness: f64) -> Result<Vec<Feature>, String> {
+pub fn form_studio(
+    pick: &FormPick,
+    variables: &[FormVariable],
+    thickness: f64,
+) -> Result<Vec<Feature>, String> {
     match &pick.source {
-        FormSource::Library(form) => crate::samples::sheetmetal_forms::studio(*form, variables, thickness).map_err(|e| e.to_string()),
+        FormSource::Library(form) => {
+            crate::samples::sheetmetal_forms::studio(*form, variables, thickness)
+                .map_err(|e| e.to_string())
+        }
         _ => {
             let mut fs = pick.studio.clone();
             if let Some(why) = studio_problem(&pick.name, &fs) {
@@ -363,11 +426,19 @@ mod tests {
     fn problems_in_dialog_order() {
         let mut f = FormFeature::default();
         assert_eq!(f.problem(), Some("Select a form Part Studio"));
-        f.form = Some(FormPick { source: FormSource::Library(LibraryForm::Louver), name: "Louver".into(), document_name: LIBRARY_NAME.into(), studio: vec![] });
+        f.form = Some(FormPick {
+            source: FormSource::Library(LibraryForm::Louver),
+            name: "Louver".into(),
+            document_name: LIBRARY_NAME.into(),
+            studio: vec![],
+        });
         f.variables = LibraryForm::Louver.variables();
         assert_eq!(f.problem(), Some("Select the form locations"));
         let t = TagFormFeature::default();
-        assert_eq!(t.problem(), Some("Select a part to add or a part to remove"));
+        assert_eq!(
+            t.problem(),
+            Some("Select a part to add or a part to remove")
+        );
         let s = ron::to_string(&f).unwrap();
         assert_eq!(ron::from_str::<FormFeature>(&s).unwrap(), f);
     }

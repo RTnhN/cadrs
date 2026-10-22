@@ -9,7 +9,12 @@ use crate::grid::Grid;
 use crate::negotiate::{Job, NetRoute};
 
 /// A net's route as tracks and vias (a via once where several connections change layer).
-pub fn copper(grid: &Grid, job: &Job, route: &NetRoute, drill: cadrs_eda::units::Nm) -> (Vec<Track>, Vec<Via>) {
+pub fn copper(
+    grid: &Grid,
+    job: &Job,
+    route: &NetRoute,
+    drill: cadrs_eda::units::Nm,
+) -> (Vec<Track>, Vec<Via>) {
     let p = &grid.params;
     let net = grid.net_name(job.net).to_string();
     let mut tracks = vec![];
@@ -36,7 +41,16 @@ pub fn copper(grid: &Grid, job: &Job, route: &NetRoute, drill: cadrs_eda::units:
             for w in corners.windows(2) {
                 let (a, b) = (grid.center(w[0].0, w[0].1), grid.center(w[1].0, w[1].1));
                 if a != b {
-                    tracks.push(Track { id: Uuid::new_v4(), a, mid: None, b, width: job.width, layer: grid.layers[l as usize], net: net.clone(), locked: false });
+                    tracks.push(Track {
+                        id: Uuid::new_v4(),
+                        a,
+                        mid: None,
+                        b,
+                        width: job.width,
+                        layer: grid.layers[l as usize],
+                        net: net.clone(),
+                        locked: false,
+                    });
                 }
             }
             run.clear();
@@ -47,7 +61,18 @@ pub fn copper(grid: &Grid, job: &Job, route: &NetRoute, drill: cadrs_eda::units:
                 flush(&mut run, layer, &mut tracks);
                 let at: Pt = grid.center(x, y);
                 if !vias.iter().any(|v| v.at == at) {
-                    vias.push(Via { id: Uuid::new_v4(), at, diameter: job.via, drill, kind: ViaKind::Through, from: top, to: bottom, net: net.clone(), locked: false, tented: None });
+                    vias.push(Via {
+                        id: Uuid::new_v4(),
+                        at,
+                        diameter: job.via,
+                        drill,
+                        kind: ViaKind::Through,
+                        from: top,
+                        to: bottom,
+                        net: net.clone(),
+                        locked: false,
+                        tented: None,
+                    });
                 }
             }
             layer = Some(l);

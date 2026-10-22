@@ -6,13 +6,13 @@
 //! listed struck through, like Onshape's disabled ones. [`SHORTCUTS`] is also what the tests
 //! check the key handlers against.
 
-use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontWeight, Strikethrough, StrikethroughColor};
 use bevy::ui_widgets::ScrollArea;
+use cadrs_ui::ShortcutKey;
 use cadrs_ui::input::TextInputField;
 use cadrs_ui::prelude::*;
 use cadrs_ui::{DialogRoot, TabStrip, TabStripState};
@@ -26,7 +26,14 @@ impl Plugin for ShortcutsPlugin {
 }
 
 /// The dialog's tabs.
-pub const TABS: [&str; 6] = ["General", "Part Studio", "Assembly", "3D view", "Sketch", "Drawing"];
+pub const TABS: [&str; 6] = [
+    "General",
+    "Part Studio",
+    "Assembly",
+    "3D view",
+    "Sketch",
+    "Drawing",
+];
 
 /// Cannot be rebound (shown with a lock, like Onshape's "Onshape controlled").
 pub const LOCKED: u8 = 1;
@@ -186,7 +193,12 @@ pub fn open_shortcuts(world: &mut World) {
                 let t = &th;
                 h.spawn((
                     Name::new("shortcuts-customize"),
-                    t.text("Customize keyboard shortcuts", 12.0, FontWeight::SEMIBOLD, t.link),
+                    t.text(
+                        "Customize keyboard shortcuts",
+                        12.0,
+                        FontWeight::SEMIBOLD,
+                        t.link,
+                    ),
                     Node {
                         position_type: PositionType::Absolute,
                         left: Val::Px(200.0),
@@ -367,7 +379,12 @@ fn sync_rows(
         if rows.is_empty() {
             c.spawn((
                 Name::new("shortcuts-empty"),
-                t.text("No shortcuts found", t.font_base, FontWeight::NORMAL, t.muted_foreground),
+                t.text(
+                    "No shortcuts found",
+                    t.font_base,
+                    FontWeight::NORMAL,
+                    t.muted_foreground,
+                ),
                 Node {
                     align_self: AlignSelf::Center,
                     margin: UiRect::vertical(Val::Px(24.0)),
@@ -502,7 +519,10 @@ mod tests {
         let mut hits = Vec::new();
         scan(&root.join("src"), &mut hits);
         scan(&root.join("../cadrs_ui/src"), &mut hits);
-        assert!(hits.is_empty(), "use ShortcutKey::shortcut_code() instead of {NEEDLE}: {hits:#?}");
+        assert!(
+            hits.is_empty(),
+            "use ShortcutKey::shortcut_code() instead of {NEEDLE}: {hits:#?}"
+        );
     }
 
     #[test]

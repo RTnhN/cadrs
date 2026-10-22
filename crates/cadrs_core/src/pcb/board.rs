@@ -44,11 +44,17 @@ impl KeepKind {
 
     /// Keep-outs, as opposed to keep-ins and other outlines.
     pub fn is_keepout(self) -> bool {
-        matches!(self, KeepKind::PlaceKeepout | KeepKind::RouteKeepout | KeepKind::ViaKeepout)
+        matches!(
+            self,
+            KeepKind::PlaceKeepout | KeepKind::RouteKeepout | KeepKind::ViaKeepout
+        )
     }
 
     pub fn is_keepin(self) -> bool {
-        matches!(self, KeepKind::PlaceRegion | KeepKind::RouteOutline | KeepKind::PlaceOutline)
+        matches!(
+            self,
+            KeepKind::PlaceRegion | KeepKind::RouteOutline | KeepKind::PlaceOutline
+        )
     }
 
     /// The name of its body ("Keep-out 1", "Route keep-out 2", ...).
@@ -157,8 +163,16 @@ impl PcbBoard {
         for p in &mut library.packages {
             *p = p.converted(Units::Mm);
         }
-        let mut b = PcbBoard { board, library, component_ids: vec![], keep_ids: KeepIds::default(), next_id: 1 };
-        b.component_ids = (0..b.board.placements.len()).map(|_| b.fresh_id()).collect();
+        let mut b = PcbBoard {
+            board,
+            library,
+            component_ids: vec![],
+            keep_ids: KeepIds::default(),
+            next_id: 1,
+        };
+        b.component_ids = (0..b.board.placements.len())
+            .map(|_| b.fresh_id())
+            .collect();
         b.fill_ids();
         b
     }
@@ -203,7 +217,13 @@ impl PcbBoard {
 
     /// Where a keep area is: its section and its place in it.
     pub fn keep_position(&self, id: ItemId) -> Option<(KeepKind, usize)> {
-        KeepKind::ALL.into_iter().find_map(|k| self.keep_ids.of(k).iter().position(|i| *i == id).map(|i| (k, i)))
+        KeepKind::ALL.into_iter().find_map(|k| {
+            self.keep_ids
+                .of(k)
+                .iter()
+                .position(|i| *i == id)
+                .map(|i| (k, i))
+        })
     }
 
     /// Removes a keep area (its IDF entry and its id); the other areas keep their ids.
@@ -253,7 +273,13 @@ impl PcbBoard {
     /// id counter: each keep area gets the id `keep` gives for its section and place (else a new
     /// one), each component the id `component` gives for its place (else a new one). An id is
     /// used once; a repeat gets a new one.
-    pub fn resync(&mut self, board: &Board, library: &Library, keep: &dyn Fn(KeepKind, usize) -> Option<ItemId>, component: &dyn Fn(usize) -> Option<ItemId>) {
+    pub fn resync(
+        &mut self,
+        board: &Board,
+        library: &Library,
+        keep: &dyn Fn(KeepKind, usize) -> Option<ItemId>,
+        component: &dyn Fn(usize) -> Option<ItemId>,
+    ) {
         let fresh = PcbBoard::new(board, library);
         let name = std::mem::take(&mut self.board.name);
         self.board = fresh.board;
@@ -263,13 +289,19 @@ impl PcbBoard {
         let mut ids = KeepIds::default();
         for kind in KeepKind::ALL {
             for i in 0..self.keep_count_of(kind) {
-                let id = keep(kind, i).filter(|id| used.insert(*id)).unwrap_or_else(|| self.fresh_id());
+                let id = keep(kind, i)
+                    .filter(|id| used.insert(*id))
+                    .unwrap_or_else(|| self.fresh_id());
                 ids.of_mut(kind).push(id);
             }
         }
         self.keep_ids = ids;
         self.component_ids = (0..self.board.placements.len())
-            .map(|i| component(i).filter(|id| used.insert(*id)).unwrap_or_else(|| self.fresh_id()))
+            .map(|i| {
+                component(i)
+                    .filter(|id| used.insert(*id))
+                    .unwrap_or_else(|| self.fresh_id())
+            })
             .collect();
     }
 
@@ -301,42 +333,103 @@ impl PcbBoard {
         let b = &self.board;
         let mut out: Vec<KeepArea> = Vec::new();
         let ids = &self.keep_ids;
-        let mut push = |kind: KeepKind, side, height, loops: &Vec<Loop>, label: String, index: usize| {
-            let id = ids.of(kind).get(index).copied().unwrap_or(ItemId(0));
-            out.push(KeepArea { id, kind, side, height, loops: loops.clone(), label, index })
-        };
+        let mut push =
+            |kind: KeepKind, side, height, loops: &Vec<Loop>, label: String, index: usize| {
+                let id = ids.of(kind).get(index).copied().unwrap_or(ItemId(0));
+                out.push(KeepArea {
+                    id,
+                    kind,
+                    side,
+                    height,
+                    loops: loops.clone(),
+                    label,
+                    index,
+                })
+            };
         for (i, k) in b.place_keepouts.iter().enumerate() {
-            push(KeepKind::PlaceKeepout, k.side, positive(k.height), &k.loops, String::new(), i);
+            push(
+                KeepKind::PlaceKeepout,
+                k.side,
+                positive(k.height),
+                &k.loops,
+                String::new(),
+                i,
+            );
         }
         for (i, k) in b.place_regions.iter().enumerate() {
-            push(KeepKind::PlaceRegion, k.side, None, &k.loops, k.group.clone(), i);
+            push(
+                KeepKind::PlaceRegion,
+                k.side,
+                None,
+                &k.loops,
+                k.group.clone(),
+                i,
+            );
         }
         for (i, k) in b.route_keepouts.iter().enumerate() {
-            push(KeepKind::RouteKeepout, layers_side(k.layers), None, &k.loops, String::new(), i);
+            push(
+                KeepKind::RouteKeepout,
+                layers_side(k.layers),
+                None,
+                &k.loops,
+                String::new(),
+                i,
+            );
         }
         for (i, k) in b.via_keepouts.iter().enumerate() {
-            push(KeepKind::ViaKeepout, Side::Both, None, &k.loops, String::new(), i);
+            push(
+                KeepKind::ViaKeepout,
+                Side::Both,
+                None,
+                &k.loops,
+                String::new(),
+                i,
+            );
         }
         for (i, k) in b.route_outlines.iter().enumerate() {
             let side = k.layers.map_or(Side::Both, layers_side);
-            push(KeepKind::RouteOutline, side, None, &k.loops, String::new(), i);
+            push(
+                KeepKind::RouteOutline,
+                side,
+                None,
+                &k.loops,
+                String::new(),
+                i,
+            );
         }
         for (i, k) in b.place_outlines.iter().enumerate() {
-            push(KeepKind::PlaceOutline, k.side.unwrap_or(Side::Both), positive(k.height), &k.loops, String::new(), i);
+            push(
+                KeepKind::PlaceOutline,
+                k.side.unwrap_or(Side::Both),
+                positive(k.height),
+                &k.loops,
+                String::new(),
+                i,
+            );
         }
         for (i, k) in b.other_outlines.iter().enumerate() {
             let side = match k.side {
                 Some(MountSide::Bottom) => Side::Bottom,
                 _ => Side::Top,
             };
-            push(KeepKind::OtherOutline, side, positive(Some(k.thickness)), &k.loops, k.id.clone(), i);
+            push(
+                KeepKind::OtherOutline,
+                side,
+                positive(Some(k.thickness)),
+                &k.loops,
+                k.id.clone(),
+                i,
+            );
         }
         out
     }
 
     /// The component placements with their ids.
     pub fn components(&self) -> impl Iterator<Item = (ItemId, &Placement)> {
-        self.component_ids.iter().copied().zip(&self.board.placements)
+        self.component_ids
+            .iter()
+            .copied()
+            .zip(&self.board.placements)
     }
 
     pub fn component(&self, id: ItemId) -> Option<&Placement> {

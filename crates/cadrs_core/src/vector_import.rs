@@ -36,7 +36,8 @@ pub enum VectorFormat {
 
 impl VectorFormat {
     /// Every extension read (lower case).
-    pub const EXTENSIONS: [&'static str; 8] = ["dxf", "dwg", "svg", "svgz", "eps", "ps", "pdf", "ai"];
+    pub const EXTENSIONS: [&'static str; 8] =
+        ["dxf", "dwg", "svg", "svgz", "eps", "ps", "pdf", "ai"];
 
     pub fn of_path(path: &Path) -> Option<Self> {
         let ext = path.extension()?.to_str()?.to_ascii_lowercase();
@@ -56,8 +57,13 @@ pub const CONVERTER_HINT: &str = "reading EPS, PostScript, PDF and Illustrator f
 
 /// A vector file's curves as sketch geometry (mm): at the file's own origin, or (`file_origin`
 /// false) centred on the sketch origin. `units` overrides what a DXF or DWG says it is in.
-pub fn read_sketch(path: &Path, units: Option<DxfUnits>, file_origin: bool) -> Result<(Sketch, ImportReport), String> {
-    let format = VectorFormat::of_path(path).ok_or_else(|| format!("{}: not a vector drawing", path.display()))?;
+pub fn read_sketch(
+    path: &Path,
+    units: Option<DxfUnits>,
+    file_origin: bool,
+) -> Result<(Sketch, ImportReport), String> {
+    let format = VectorFormat::of_path(path)
+        .ok_or_else(|| format!("{}: not a vector drawing", path.display()))?;
     let (mut s, r) = match format {
         VectorFormat::Dxf | VectorFormat::Dwg => {
             let d = crate::dxf_import::read_file(path)?;
@@ -68,7 +74,9 @@ pub fn read_sketch(path: &Path, units: Option<DxfUnits>, file_origin: bool) -> R
             let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
             sketch_of_svg(&bytes)?
         }
-        VectorFormat::PostScript | VectorFormat::Pdf => sketch_of_svg(converted_svg(path, format)?.as_bytes())?,
+        VectorFormat::PostScript | VectorFormat::Pdf => {
+            sketch_of_svg(converted_svg(path, format)?.as_bytes())?
+        }
     };
     if !file_origin {
         centre(&mut s);
@@ -100,8 +108,12 @@ pub fn centre(s: &mut Sketch) {
 /// An SVG drawing's paths as sketch geometry (see the module docs), at the drawing's top-left
 /// corner, Y up.
 pub fn sketch_of_svg(data: &[u8]) -> Result<(Sketch, ImportReport), String> {
-    let tree = usvg::Tree::from_data(data, &usvg::Options::default()).map_err(|e| format!("not an SVG drawing: {e}"))?;
-    let mut r = Reader { b: Builder::default(), seen: std::collections::HashSet::new() };
+    let tree = usvg::Tree::from_data(data, &usvg::Options::default())
+        .map_err(|e| format!("not an SVG drawing: {e}"))?;
+    let mut r = Reader {
+        b: Builder::default(),
+        seen: std::collections::HashSet::new(),
+    };
     r.group(tree.root());
     Ok((r.b.s, r.b.r))
 }
@@ -235,7 +247,13 @@ impl Reader {
             return;
         }
         self.flush(run);
-        *run = Some(ArcRun { c, r, from: a, to: b, sweep });
+        *run = Some(ArcRun {
+            c,
+            r,
+            from: a,
+            to: b,
+            sweep,
+        });
     }
 
     /// Adds a run of circular pieces: a circle if it goes all the way round, else one arc.
@@ -244,7 +262,11 @@ impl Reader {
         if arc.sweep.abs() > std::f64::consts::TAU - 1e-3 && arc.from.distance(arc.to) <= JOIN {
             return self.b.circle(arc.c, arc.r);
         }
-        if arc.sweep > 0.0 { self.b.arc(arc.c, arc.from, arc.to) } else { self.b.arc(arc.c, arc.to, arc.from) }
+        if arc.sweep > 0.0 {
+            self.b.arc(arc.c, arc.from, arc.to)
+        } else {
+            self.b.arc(arc.c, arc.to, arc.from)
+        }
     }
 }
 
@@ -252,7 +274,11 @@ impl Reader {
 fn off_line(a: Vec2, b: Vec2, p: Vec2) -> f64 {
     let d = b - a;
     let len = d.length();
-    if len <= JOIN { p.distance(a) } else { (p - a).cross(d).abs() / len }
+    if len <= JOIN {
+        p.distance(a)
+    } else {
+        (p - a).cross(d).abs() / len
+    }
 }
 
 fn bezier_at(a: Vec2, c1: Vec2, c2: Vec2, b: Vec2, u: f64) -> Vec2 {
@@ -272,7 +298,10 @@ fn circular(a: Vec2, c1: Vec2, c2: Vec2, b: Vec2) -> Option<(Vec2, f64)> {
         return None;
     }
     let on = |u: f64| (bezier_at(a, c1, c2, b, u).distance(c) - r).abs() <= FIT.max(r * FIT_RADIUS);
-    [0.125, 0.25, 0.375, 0.625, 0.75, 0.875].into_iter().all(on).then_some((c, r))
+    [0.125, 0.25, 0.375, 0.625, 0.75, 0.875]
+        .into_iter()
+        .all(on)
+        .then_some((c, r))
 }
 
 fn circle_through(a: Vec2, b: Vec2, c: Vec2) -> Option<(Vec2, f64)> {
@@ -281,14 +310,19 @@ fn circle_through(a: Vec2, b: Vec2, c: Vec2) -> Option<(Vec2, f64)> {
         return None;
     }
     let (a2, b2, c2) = (a.dot(a), b.dot(b), c.dot(c));
-    let o = Vec2::new((a2 * (b.y - c.y) + b2 * (c.y - a.y) + c2 * (a.y - b.y)) / d, (a2 * (c.x - b.x) + b2 * (a.x - c.x) + c2 * (b.x - a.x)) / d);
+    let o = Vec2::new(
+        (a2 * (b.y - c.y) + b2 * (c.y - a.y) + c2 * (a.y - b.y)) / d,
+        (a2 * (c.x - b.x) + b2 * (a.x - c.x) + c2 * (b.x - a.x)) / d,
+    );
     Some((o, o.distance(a)))
 }
 
 /// A program on this machine (`PATH`), also as `name.exe`.
 fn which(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path).flat_map(|d| [d.join(name), d.join(format!("{name}.exe"))]).find(|f| f.is_file())
+    std::env::split_paths(&path)
+        .flat_map(|d| [d.join(name), d.join(format!("{name}.exe"))])
+        .find(|f| f.is_file())
 }
 
 fn run(mut c: std::process::Command, what: &str) -> Result<(), String> {
@@ -297,7 +331,14 @@ fn run(mut c: std::process::Command, what: &str) -> Result<(), String> {
         return Ok(());
     }
     let err = String::from_utf8_lossy(&out.stderr);
-    Err(format!("{what} failed: {}", err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").trim()))
+    Err(format!(
+        "{what} failed: {}",
+        err.lines()
+            .rev()
+            .find(|l| !l.trim().is_empty())
+            .unwrap_or("")
+            .trim()
+    ))
 }
 
 /// An EPS, PostScript, PDF or Illustrator file as SVG text, through Ghostscript and Poppler.
@@ -308,10 +349,22 @@ fn converted_svg(path: &Path, format: VectorFormat) -> Result<String, String> {
     let result = (|| {
         let pdf = match format {
             VectorFormat::PostScript => {
-                let gs = ["gs", "gswin64c", "gswin32c"].into_iter().find_map(which).ok_or(CONVERTER_HINT)?;
+                let gs = ["gs", "gswin64c", "gswin32c"]
+                    .into_iter()
+                    .find_map(which)
+                    .ok_or(CONVERTER_HINT)?;
                 let pdf = dir.join("drawing.pdf");
                 let mut c = std::process::Command::new(gs);
-                c.args(["-q", "-dNOPAUSE", "-dBATCH", "-dSAFER", "-dEPSCrop", "-sDEVICE=pdfwrite"]).arg(format!("-sOutputFile={}", pdf.display())).arg(path);
+                c.args([
+                    "-q",
+                    "-dNOPAUSE",
+                    "-dBATCH",
+                    "-dSAFER",
+                    "-dEPSCrop",
+                    "-sDEVICE=pdfwrite",
+                ])
+                .arg(format!("-sOutputFile={}", pdf.display()))
+                .arg(path);
                 run(c, "Ghostscript")?;
                 pdf
             }
@@ -346,9 +399,24 @@ impl crate::command::Command for AddVectorSketch {
     fn scope(&self) -> crate::command::Scope {
         crate::command::Scope::Element(self.element)
     }
-    fn apply(&self, doc: &mut crate::document::Document) -> Result<(), crate::command::CommandError> {
-        crate::commands::AddSketch { element: self.element, feature: self.feature, plane: Some(self.plane) }.apply(doc)?;
-        InsertVector { element: self.element, feature: self.feature, file_name: self.file_name.clone(), geometry: self.geometry.clone(), offset: self.offset }.apply(doc)
+    fn apply(
+        &self,
+        doc: &mut crate::document::Document,
+    ) -> Result<(), crate::command::CommandError> {
+        crate::commands::AddSketch {
+            element: self.element,
+            feature: self.feature,
+            plane: Some(self.plane),
+        }
+        .apply(doc)?;
+        InsertVector {
+            element: self.element,
+            feature: self.feature,
+            file_name: self.file_name.clone(),
+            geometry: self.geometry.clone(),
+            offset: self.offset,
+        }
+        .apply(doc)
     }
 }
 
@@ -370,9 +438,20 @@ impl crate::command::Command for InsertVector {
     fn scope(&self) -> crate::command::Scope {
         crate::command::Scope::Element(self.element)
     }
-    fn apply(&self, doc: &mut crate::document::Document) -> Result<(), crate::command::CommandError> {
-        let op = cadrs_sketch::SketchOp::Paste { sketch: Box::new(self.geometry.clone()), offset: self.offset };
-        crate::commands::EditSketch { element: self.element, feature: self.feature, op }.apply(doc)
+    fn apply(
+        &self,
+        doc: &mut crate::document::Document,
+    ) -> Result<(), crate::command::CommandError> {
+        let op = cadrs_sketch::SketchOp::Paste {
+            sketch: Box::new(self.geometry.clone()),
+            offset: self.offset,
+        };
+        crate::commands::EditSketch {
+            element: self.element,
+            feature: self.feature,
+            op,
+        }
+        .apply(doc)
     }
 }
 
@@ -394,14 +473,29 @@ mod tests {
             <circle cx="20" cy="10" r="3" fill="white"/>
         </svg>"#;
         let (s, r) = read(svg);
-        assert_eq!((r.lines, r.arcs, r.circles, r.beziers), (4, 1, 1, 0), "{r:?}");
+        assert_eq!(
+            (r.lines, r.arcs, r.circles, r.beziers),
+            (4, 1, 1, 0),
+            "{r:?}"
+        );
         let regions = cadrs_sketch::region::regions(&s);
-        let plate = regions.iter().find(|g| !g.holes.is_empty()).expect("the plate closes round its hole");
+        let plate = regions
+            .iter()
+            .find(|g| !g.holes.is_empty())
+            .expect("the plate closes round its hole");
         let corner = 25.0 - std::f64::consts::PI * 25.0 / 4.0;
         let want = 40.0 * 20.0 - corner - std::f64::consts::PI * 9.0;
-        assert!((plate.area() - want).abs() < 0.01, "{} vs {want}", plate.area());
+        assert!(
+            (plate.area() - want).abs() < 0.01,
+            "{} vs {want}",
+            plate.area()
+        );
         // Y up: the drawing lies below its top-left corner.
-        assert!(s.points.values().all(|p| p.pos.y <= 1e-4 && p.pos.y >= -20.0 - 1e-4));
+        assert!(
+            s.points
+                .values()
+                .all(|p| p.pos.y <= 1e-4 && p.pos.y >= -20.0 - 1e-4)
+        );
     }
 
     #[test]
@@ -420,8 +514,13 @@ mod tests {
         let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="40mm" height="20mm" viewBox="0 0 40 20"><rect x="10" y="0" width="30" height="20" fill="black"/></svg>"#;
         let (mut s, _) = read(svg);
         centre(&mut s);
-        let (lo, hi) = s.points.values().fold((f64::MAX, f64::MIN), |(lo, hi), p| (lo.min(p.pos.x), hi.max(p.pos.x)));
-        assert!((lo + 15.0).abs() < 1e-6 && (hi - 15.0).abs() < 1e-6, "{lo} {hi}");
+        let (lo, hi) = s.points.values().fold((f64::MAX, f64::MIN), |(lo, hi), p| {
+            (lo.min(p.pos.x), hi.max(p.pos.x))
+        });
+        assert!(
+            (lo + 15.0).abs() < 1e-6 && (hi - 15.0).abs() < 1e-6,
+            "{lo} {hi}"
+        );
     }
 }
 
@@ -432,7 +531,9 @@ mod converter_tests {
     // Through Ghostscript and pdftocairo; skipped where they aren't installed.
     #[test]
     fn an_eps_plate() {
-        if which("pdftocairo").is_none() || ["gs", "gswin64c"].into_iter().all(|g| which(g).is_none()) {
+        if which("pdftocairo").is_none()
+            || ["gs", "gswin64c"].into_iter().all(|g| which(g).is_none())
+        {
             eprintln!("skipped: {CONVERTER_HINT}");
             return;
         }
@@ -440,10 +541,16 @@ mod converter_tests {
         let (s, r) = read_sketch(&path, None, true).unwrap();
         assert_eq!((r.arcs, r.circles), (1, 1), "{r:?}");
         let regions = cadrs_sketch::region::regions(&s);
-        let plate = regions.iter().find(|g| !g.holes.is_empty()).expect("the plate closes round its hole");
+        let plate = regions
+            .iter()
+            .find(|g| !g.holes.is_empty())
+            .expect("the plate closes round its hole");
         let corner = 25.0 - std::f64::consts::PI * 25.0 / 4.0;
         let want = 40.0 * 20.0 - corner - std::f64::consts::PI * 9.0;
-        assert!((plate.area() - want).abs() < 0.5, "{} vs {want}", plate.area());
+        assert!(
+            (plate.area() - want).abs() < 0.5,
+            "{} vs {want}",
+            plate.area()
+        );
     }
 }
-

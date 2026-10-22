@@ -108,9 +108,15 @@ fn circle_of(l: &[P2]) -> Option<(P2, f64)> {
     if l.len() < 12 {
         return None;
     }
-    let c = P2::from(l.iter().fold(nalgebra::Vector2::zeros(), |a, p| a + p.coords) / l.len() as f64);
+    let c = P2::from(
+        l.iter()
+            .fold(nalgebra::Vector2::zeros(), |a, p| a + p.coords)
+            / l.len() as f64,
+    );
     let r = l.iter().map(|p| (p - c).norm()).sum::<f64>() / l.len() as f64;
-    let even = l.iter().all(|p| ((p - c).norm() - r).abs() <= 1e-6 * r.max(1.0));
+    let even = l
+        .iter()
+        .all(|p| ((p - c).norm() - r).abs() <= 1e-6 * r.max(1.0));
     let step = std::f64::consts::TAU / l.len() as f64;
     let spread = (0..l.len()).all(|i| {
         let (a, b) = (l[i] - c, l[(i + 1) % l.len()] - c);
@@ -126,7 +132,11 @@ fn circle3(a: P2, b: P2, c: P2) -> Option<(P2, f64)> {
     if d.abs() < 1e-12 {
         return None;
     }
-    let (a2, b2, c2) = (a.coords.norm_squared(), b.coords.norm_squared(), c.coords.norm_squared());
+    let (a2, b2, c2) = (
+        a.coords.norm_squared(),
+        b.coords.norm_squared(),
+        c.coords.norm_squared(),
+    );
     let ux = (a2 * (b.y - c.y) + b2 * (c.y - a.y) + c2 * (a.y - b.y)) / d;
     let uy = (a2 * (c.x - b.x) + b2 * (a.x - c.x) + c2 * (b.x - a.x)) / d;
     let o = P2::new(ux, uy);
@@ -167,7 +177,10 @@ fn arc_run(l: &[P2], i: usize, j: usize) -> Option<(P2, f64)> {
 /// its runs of points on an arc as ARCs (counter-clockwise, as DXF has them).
 fn loop_shapes(l: &[P2]) -> Vec<Shape> {
     if let Some((c, r)) = circle_of(l) {
-        return vec![Shape::Circle { center: [c.x, c.y], radius: r }];
+        return vec![Shape::Circle {
+            center: [c.x, c.y],
+            radius: r,
+        }];
     }
     // Points in the middle of straight runs (where a cut crossed a piece's edge) dropped.
     let mut l: Vec<P2> = l.to_vec();
@@ -194,7 +207,9 @@ fn loop_shapes(l: &[P2]) -> Vec<Shape> {
         let (u, v) = (b - a, c - b);
         u.perp(&v).atan2(u.dot(&v)).abs() + (u.norm().max(1e-12) / v.norm().max(1e-12)).ln().abs()
     };
-    let start = (0..n).max_by(|a, b| turn(*a).total_cmp(&turn(*b))).unwrap_or(0);
+    let start = (0..n)
+        .max_by(|a, b| turn(*a).total_cmp(&turn(*b)))
+        .unwrap_or(0);
     let at = |k: usize| l[(start + k) % n];
     let pts: Vec<P2> = (0..=n).map(at).collect();
     let mut out = Vec::new();
@@ -219,15 +234,27 @@ fn loop_shapes(l: &[P2]) -> Vec<Shape> {
                 let ang = |p: P2| (p.y - o.y).atan2(p.x - o.x).to_degrees();
                 let (p, q) = (pts[i] - o, pts[i + 1] - o);
                 let ccw = p.perp(&q) > 0.0;
-                let (s, mut e) = if ccw { (ang(pts[i]), ang(pts[j])) } else { (ang(pts[j]), ang(pts[i])) };
+                let (s, mut e) = if ccw {
+                    (ang(pts[i]), ang(pts[j]))
+                } else {
+                    (ang(pts[j]), ang(pts[i]))
+                };
                 while e <= s {
                     e += 360.0;
                 }
-                out.push(Shape::Arc { center: [o.x, o.y], radius: r, start: s, end: e });
+                out.push(Shape::Arc {
+                    center: [o.x, o.y],
+                    radius: r,
+                    start: s,
+                    end: e,
+                });
                 i = j;
             }
             None => {
-                out.push(Shape::Line { a: [pts[i].x, pts[i].y], b: [pts[i + 1].x, pts[i + 1].y] });
+                out.push(Shape::Line {
+                    a: [pts[i].x, pts[i].y],
+                    b: [pts[i + 1].x, pts[i + 1].y],
+                });
                 i += 1;
             }
         }
@@ -238,14 +265,25 @@ fn loop_shapes(l: &[P2]) -> Vec<Shape> {
 /// A form's centermark: a cross on its centre along the flat's axes, a fifth of the outline's
 /// reach each way (1 to 6 mm).
 pub fn centermark(f: &cadrs_sheetmetal::forms::FlatForm) -> (Seg2, Seg2) {
-    let reach = f.lines.iter().flat_map(|l| l.points.iter()).map(|p| (p - f.center).norm()).fold(0.0, f64::max);
+    let reach = f
+        .lines
+        .iter()
+        .flat_map(|l| l.points.iter())
+        .map(|p| (p - f.center).norm())
+        .fold(0.0, f64::max);
     let h = (0.2 * reach).clamp(1.0, 6.0);
     let c = f.center;
-    (Seg2::new(P2::new(c.x - h, c.y), P2::new(c.x + h, c.y)), Seg2::new(P2::new(c.x, c.y - h), P2::new(c.x, c.y + h)))
+    (
+        Seg2::new(P2::new(c.x - h, c.y), P2::new(c.x + h, c.y)),
+        Seg2::new(P2::new(c.x, c.y - h), P2::new(c.x, c.y + h)),
+    )
 }
 
 fn line(s: &Seg2) -> Shape {
-    Shape::Line { a: [s.a.x, s.a.y], b: [s.b.x, s.b.y] }
+    Shape::Line {
+        a: [s.a.x, s.a.y],
+        b: [s.b.x, s.b.y],
+    }
 }
 
 /// One flat-pattern part as a page, in the flat's coordinates, with `sketches` (on its flat
@@ -275,14 +313,31 @@ fn spline_shape(sketch: &Sketch, id: cadrs_sketch::CurveId) -> Option<Shape> {
         let q = sketch.pos(*p);
         [q.x, q.y]
     });
-    let points = cadrs_sketch::spline::tessellate(&spans, 16).into_iter().map(|q| [q.x, q.y]).collect();
-    Some(Shape::Spline { knots, control, fit: fit.collect(), points })
+    let points = cadrs_sketch::spline::tessellate(&spans, 16)
+        .into_iter()
+        .map(|q| [q.x, q.y])
+        .collect();
+    Some(Shape::Spline {
+        knots,
+        control,
+        fit: fit.collect(),
+        points,
+    })
 }
 
 /// [`flat_page`] with the outer circles (centre, radius) of counterbored and countersunk
 /// holes, written when the options include them ([`cbore_marks`]).
-pub fn flat_page_with(part: &FlatPart, sketches: &[&Sketch], cbores: &[(P2, f64)], o: &FlatExportOptions, name: &str) -> Page {
-    let mut page = Page { name: name.to_string(), ..Page::default() };
+pub fn flat_page_with(
+    part: &FlatPart,
+    sketches: &[&Sketch],
+    cbores: &[(P2, f64)],
+    o: &FlatExportOptions,
+    name: &str,
+) -> Page {
+    let mut page = Page {
+        name: name.to_string(),
+        ..Page::default()
+    };
     let mut push = |s: Shape, l: Layer| page.items.push(Item::Stroke(s, pen(l)));
     for poly in &part.outline {
         for sh in loop_shapes(&poly.outer) {
@@ -331,7 +386,13 @@ pub fn flat_page_with(part: &FlatPart, sketches: &[&Sketch], cbores: &[(P2, f64)
     }
     if o.cbore_lines {
         for (c, r) in cbores {
-            push(Shape::Circle { center: [c.x, c.y], radius: *r }, Layer::FlatCbore);
+            push(
+                Shape::Circle {
+                    center: [c.x, c.y],
+                    radius: *r,
+                },
+                Layer::FlatCbore,
+            );
         }
     }
     if o.sketches {
@@ -341,7 +402,13 @@ pub fn flat_page_with(part: &FlatPart, sketches: &[&Sketch], cbores: &[(P2, f64)
             let splines: Vec<cadrs_sketch::CurveId> = if o.splines_as_polylines {
                 Vec::new()
             } else {
-                sk.curves.iter().filter(|(_, c)| !c.construction && matches!(c.kind, cadrs_sketch::CurveKind::Spline { .. })).map(|(k, _)| k).collect()
+                sk.curves
+                    .iter()
+                    .filter(|(_, c)| {
+                        !c.construction && matches!(c.kind, cadrs_sketch::CurveKind::Spline { .. })
+                    })
+                    .map(|(k, _)| k)
+                    .collect()
             };
             let sp = if splines.is_empty() {
                 crate::dxf_export::sketch_page(sk, name)
@@ -372,10 +439,31 @@ fn shift(s: &Shape, d: [f64; 2]) -> Shape {
     let m = |p: [f64; 2]| [p[0] + d[0], p[1] + d[1]];
     match s {
         Shape::Line { a, b } => Shape::Line { a: m(*a), b: m(*b) },
-        Shape::Polyline { points, closed } => Shape::Polyline { points: points.iter().map(|p| m(*p)).collect(), closed: *closed },
-        Shape::Arc { center, radius, start, end } => Shape::Arc { center: m(*center), radius: *radius, start: *start, end: *end },
-        Shape::Circle { center, radius } => Shape::Circle { center: m(*center), radius: *radius },
-        Shape::Spline { knots, control, fit, points } => Shape::Spline {
+        Shape::Polyline { points, closed } => Shape::Polyline {
+            points: points.iter().map(|p| m(*p)).collect(),
+            closed: *closed,
+        },
+        Shape::Arc {
+            center,
+            radius,
+            start,
+            end,
+        } => Shape::Arc {
+            center: m(*center),
+            radius: *radius,
+            start: *start,
+            end: *end,
+        },
+        Shape::Circle { center, radius } => Shape::Circle {
+            center: m(*center),
+            radius: *radius,
+        },
+        Shape::Spline {
+            knots,
+            control,
+            fit,
+            points,
+        } => Shape::Spline {
             knots: knots.clone(),
             control: control.iter().map(|p| m(*p)).collect(),
             fit: fit.iter().map(|p| m(*p)).collect(),
@@ -387,7 +475,10 @@ fn shift(s: &Shape, d: [f64; 2]) -> Shape {
 /// Pages laid out side by side in one: the first where it is, each next one to its right,
 /// [`GAP`] apart, their bottoms in line.
 pub fn side_by_side(pages: &[Page], name: &str) -> Page {
-    let mut out = Page { name: name.to_string(), ..Page::default() };
+    let mut out = Page {
+        name: name.to_string(),
+        ..Page::default()
+    };
     let mut x = None;
     let mut y0 = 0.0;
     for p in pages {
@@ -425,7 +516,11 @@ pub struct FlatPartRef {
 pub fn flat_parts_named(build: &Build, props: &[PartProps]) -> Vec<FlatPartRef> {
     let mut out = flat_parts(build);
     for r in &mut out {
-        if let Some(n) = props.iter().find(|p| p.part == r.part).and_then(|p| p.name.clone()) {
+        if let Some(n) = props
+            .iter()
+            .find(|p| p.part == r.part)
+            .and_then(|p| p.name.clone())
+        {
             r.name = n;
         }
     }
@@ -438,9 +533,22 @@ pub fn flat_parts(build: &Build) -> Vec<FlatPartRef> {
     let mut out = Vec::new();
     for ctx in &build.sheet_metal {
         for (k, flat) in ctx.flat.parts.iter().enumerate() {
-            let Some((pid, _)) = ctx.parts.iter().find(|(_, ws)| ws.first() == flat.walls.first()) else { continue };
-            let Some(p) = build.parts.iter().find(|p| p.id == *pid) else { continue };
-            out.push(FlatPartRef { model: ctx.feature, index: k, part: *pid, name: p.name.clone() });
+            let Some((pid, _)) = ctx
+                .parts
+                .iter()
+                .find(|(_, ws)| ws.first() == flat.walls.first())
+            else {
+                continue;
+            };
+            let Some(p) = build.parts.iter().find(|p| p.id == *pid) else {
+                continue;
+            };
+            out.push(FlatPartRef {
+                model: ctx.feature,
+                index: k,
+                part: *pid,
+                name: p.name.clone(),
+            });
         }
     }
     out
@@ -448,9 +556,16 @@ pub fn flat_parts(build: &Build) -> Vec<FlatPartRef> {
 
 /// The parts a scope exports, starting from `part` (a flat-pattern part of the build), named
 /// as the Parts list names them.
-pub fn scope_parts(build: &Build, props: &[PartProps], part: PartId, scope: FlatScope) -> Vec<FlatPartRef> {
+pub fn scope_parts(
+    build: &Build,
+    props: &[PartProps],
+    part: PartId,
+    scope: FlatScope,
+) -> Vec<FlatPartRef> {
     let all = flat_parts_named(build, props);
-    let Some(me) = all.iter().find(|r| r.part == part).cloned() else { return Vec::new() };
+    let Some(me) = all.iter().find(|r| r.part == part).cloned() else {
+        return Vec::new();
+    };
     match scope {
         FlatScope::Single => vec![me],
         FlatScope::Model => all.into_iter().filter(|r| r.model == me.model).collect(),
@@ -460,19 +575,35 @@ pub fn scope_parts(build: &Build, props: &[PartProps], part: PartId, scope: Flat
 
 /// The page of one flat-pattern part, with the sketches on its flat pattern plane that `shown`
 /// says are visible.
-pub fn part_page(build: &Build, features: &[Feature], r: &FlatPartRef, o: &FlatExportOptions, shown: &dyn Fn(FeatureId) -> bool) -> Option<Page> {
-    let ctx = build.sheet_metal.iter().rev().find(|c| c.feature == r.model)?;
+pub fn part_page(
+    build: &Build,
+    features: &[Feature],
+    r: &FlatPartRef,
+    o: &FlatExportOptions,
+    shown: &dyn Fn(FeatureId) -> bool,
+) -> Option<Page> {
+    let ctx = build
+        .sheet_metal
+        .iter()
+        .rev()
+        .find(|c| c.feature == r.model)?;
     let flat = ctx.flat.parts.get(r.index)?;
     let sketches: Vec<&Sketch> = features
         .iter()
         .filter(|f| shown(f.id))
         .filter_map(|f| {
             let sk = f.sketch()?;
-            let PlaneRef::Feature(fp) = sk.plane? else { return None };
+            let PlaneRef::Feature(fp) = sk.plane? else {
+                return None;
+            };
             (flat_target(features, fp.feature) == Some((r.model, r.index))).then_some(&sk.geometry)
         })
         .collect();
-    let cbores = if o.cbore_lines { cbore_marks(build, features, r) } else { Vec::new() };
+    let cbores = if o.cbore_lines {
+        cbore_marks(build, features, r)
+    } else {
+        Vec::new()
+    };
     Some(flat_page_with(flat, &sketches, &cbores, o, &r.name))
 }
 
@@ -492,15 +623,29 @@ pub fn cbore_marks(build: &Build, features: &[Feature], r: &FlatPartRef) -> Vec<
         .filter(|r| *r > 0.0)
         .collect();
     let mut out: Vec<(P2, f64)> = Vec::new();
-    let Some(ctx) = build.sheet_metal.iter().rev().find(|c| c.feature == r.model) else { return out };
-    let Some(flat) = ctx.flat.parts.get(r.index) else { return out };
+    let Some(ctx) = build
+        .sheet_metal
+        .iter()
+        .rev()
+        .find(|c| c.feature == r.model)
+    else {
+        return out;
+    };
+    let Some(flat) = ctx.flat.parts.get(r.index) else {
+        return out;
+    };
     // A Hole on active sheet metal cuts the flat at its own diameter and keeps its outer circle as
     // a mark: where each hole goes through a wall, in the wall's own 2D.
     for m in ctx.hole_marks.iter().filter(|m| m.outer > 0.0) {
         for (w, q) in m.at.iter().filter(|(w, _)| flat.walls.contains(w)) {
-            let Some(place) = flat.placement(*w) else { continue };
+            let Some(place) = flat.placement(*w) else {
+                continue;
+            };
             let at = place.apply(*q);
-            if !out.iter().any(|(o, rr)| (*o - at).norm() < 1e-6 && (rr - m.outer).abs() < 1e-9) {
+            if !out
+                .iter()
+                .any(|(o, rr)| (*o - at).norm() < 1e-6 && (rr - m.outer).abs() < 1e-9)
+            {
                 out.push((at, m.outer));
             }
         }
@@ -509,20 +654,32 @@ pub fn cbore_marks(build: &Build, features: &[Feature], r: &FlatPartRef) -> Vec<
         return out;
     }
     // Otherwise (a hole made before the model, or on a finished one) the part's circular edges.
-    let Some(part) = build.parts.iter().find(|p| p.id == r.part) else { return out };
+    let Some(part) = build.parts.iter().find(|p| p.id == r.part) else {
+        return out;
+    };
     let t = ctx.model.params.thickness;
     for e in &part.solid.edges {
         let Some(c) = e.circle.as_ref() else { continue };
-        if !radii.iter().any(|q| (q - c.radius).abs() <= 1e-6 * q.max(1.0)) {
+        if !radii
+            .iter()
+            .any(|q| (q - c.radius).abs() <= 1e-6 * q.max(1.0))
+        {
             continue;
         }
         let p = nalgebra::Point3::new(c.center[0], c.center[1], c.center[2]);
         let axis = nalgebra::Vector3::new(c.normal[0], c.normal[1], c.normal[2]);
         for w in &flat.walls {
-            let Some(wall) = ctx.model.wall(*w) else { continue };
-            let cadrs_sheetmetal::model::Surface::Planar { origin, u, v } = wall.surface else { continue };
+            let Some(wall) = ctx.model.wall(*w) else {
+                continue;
+            };
+            let cadrs_sheetmetal::model::Surface::Planar { origin, u, v } = wall.surface else {
+                continue;
+            };
             let n = u.cross(&v);
-            if n.norm() < 1e-12 || axis.norm() < 1e-12 || n.normalize().cross(&axis.normalize()).norm() > 1e-6 {
+            if n.norm() < 1e-12
+                || axis.norm() < 1e-12
+                || n.normalize().cross(&axis.normalize()).norm() > 1e-6
+            {
                 continue;
             }
             let n = n.normalize();
@@ -532,13 +689,21 @@ pub fn cbore_marks(build: &Build, features: &[Feature], r: &FlatPartRef) -> Vec<
                 continue;
             }
             // Local 2D: origin + u·x + v·y (u, v square to each other).
-            let q = P2::new((p - origin).dot(&u) / u.norm_squared(), (p - origin).dot(&v) / v.norm_squared());
+            let q = P2::new(
+                (p - origin).dot(&u) / u.norm_squared(),
+                (p - origin).dot(&v) / v.norm_squared(),
+            );
             if !wall.outline.contains(q) {
                 continue;
             }
-            let Some(m) = flat.placement(*w) else { continue };
+            let Some(m) = flat.placement(*w) else {
+                continue;
+            };
             let at = m.apply(q);
-            if !out.iter().any(|(o, rr)| (*o - at).norm() < 1e-6 && (rr - c.radius).abs() < 1e-9) {
+            if !out
+                .iter()
+                .any(|(o, rr)| (*o - at).norm() < 1e-6 && (rr - c.radius).abs() < 1e-9)
+            {
                 out.push((at, c.radius));
             }
             break;
@@ -555,7 +720,9 @@ mod tests {
     use cadrs_sheetmetal::poly::{Polygon, circle};
     use cadrs_sheetmetal::{Params, flatten, samples};
 
-    fn layer_counts(d: &cadrs_drawing::dxf::DxfDrawing) -> std::collections::BTreeMap<String, usize> {
+    fn layer_counts(
+        d: &cadrs_drawing::dxf::DxfDrawing,
+    ) -> std::collections::BTreeMap<String, usize> {
         let mut m = std::collections::BTreeMap::new();
         for l in &d.layers {
             *m.entry(l.clone()).or_insert(0) += 1;
@@ -574,12 +741,21 @@ mod tests {
         let mid = P2::from((lo.coords + hi.coords) / 2.0);
         let d = b.center.dir();
         let n = cadrs_sheetmetal::poly::perp(d);
-        let slot = Polygon::new(vec![c - d * 2.0 - n * 8.0, c + d * 2.0 - n * 8.0, c + d * 2.0 + n * 8.0, c - d * 2.0 + n * 8.0]);
-        cadrs_sheetmetal::flat_edit::remove(&mut m, &flat, 0, &[circle(mid, 5.0, 64), slot]).unwrap();
+        let slot = Polygon::new(vec![
+            c - d * 2.0 - n * 8.0,
+            c + d * 2.0 - n * 8.0,
+            c + d * 2.0 + n * 8.0,
+            c - d * 2.0 + n * 8.0,
+        ]);
+        cadrs_sheetmetal::flat_edit::remove(&mut m, &flat, 0, &[circle(mid, 5.0, 64), slot])
+            .unwrap();
         let flat = flatten(&m);
         assert!(flat.is_ok(), "{:?}", flat.errors);
         let part = &flat.parts[0];
-        let o = FlatExportOptions { tangent_lines: true, ..Default::default() };
+        let o = FlatExportOptions {
+            tangent_lines: true,
+            ..Default::default()
+        };
         let page = flat_page(part, &[], &o, "Box");
         for v in DxfVersion::ALL {
             let text = cadrs_drawing::dxf::write_dxf_version(&page, v);
@@ -587,8 +763,18 @@ mod tests {
             assert_eq!(back.unit_mm, 1.0);
             let counts = layer_counts(&back);
             let holes: usize = part.outline.iter().map(|p| p.holes.len()).sum();
-            let up: usize = part.bends.iter().filter(|b| b.up).map(|b| b.center_visible.len()).sum();
-            let down: usize = part.bends.iter().filter(|b| !b.up).map(|b| b.center_visible.len()).sum();
+            let up: usize = part
+                .bends
+                .iter()
+                .filter(|b| b.up)
+                .map(|b| b.center_visible.len())
+                .sum();
+            let down: usize = part
+                .bends
+                .iter()
+                .filter(|b| !b.up)
+                .map(|b| b.center_visible.len())
+                .sum();
             let tangent: usize = part.bends.iter().map(|b| b.tangent_visible.len()).sum();
             // One outline of lines (and arcs), two cut-outs: the round hole a CIRCLE, the slot
             // four LINEs.
@@ -611,7 +797,12 @@ mod tests {
                 }
                 let points = match e {
                     Entity::Line { a, b } => vec![*a, *b],
-                    Entity::Arc { center, radius, start, end } => cadrs_drawing::sheet_sketch::arc_polyline(*center, *radius, *start, *end),
+                    Entity::Arc {
+                        center,
+                        radius,
+                        start,
+                        end,
+                    } => cadrs_drawing::sheet_sketch::arc_polyline(*center, *radius, *start, *end),
                     e => panic!("{e:?}"),
                 };
                 for p in &points {
@@ -621,10 +812,24 @@ mod tests {
                     }
                 }
             }
-            assert!((elo[0] - lo.x).abs() < 1e-9 && (elo[1] - lo.y).abs() < 1e-9 && (ehi[0] - hi.x).abs() < 1e-9 && (ehi[1] - hi.y).abs() < 1e-9, "{elo:?} {ehi:?} vs {lo:?} {hi:?}");
+            assert!(
+                (elo[0] - lo.x).abs() < 1e-9
+                    && (elo[1] - lo.y).abs() < 1e-9
+                    && (ehi[0] - hi.x).abs() < 1e-9
+                    && (ehi[1] - hi.y).abs() < 1e-9,
+                "{elo:?} {ehi:?} vs {lo:?} {hi:?}"
+            );
         }
         // Options off: no bend lines.
-        let bare = flat_page(part, &[], &FlatExportOptions { centerlines: false, ..Default::default() }, "Box");
+        let bare = flat_page(
+            part,
+            &[],
+            &FlatExportOptions {
+                centerlines: false,
+                ..Default::default()
+            },
+            "Box",
+        );
         let back = read_dxf(&cadrs_drawing::dxf::write_dxf(&bare)).unwrap();
         assert!(!back.layers.iter().any(|l| l.starts_with("BEND")));
     }
@@ -632,8 +837,18 @@ mod tests {
     #[test]
     fn parts_lay_out_side_by_side_gap_apart() {
         let p = Params::default();
-        let a = flat_page(&flatten(&samples::l_bracket(p, true).unwrap()).parts[0], &[], &Default::default(), "A");
-        let b = flat_page(&flatten(&samples::u_channel(p).unwrap()).parts[0], &[], &Default::default(), "B");
+        let a = flat_page(
+            &flatten(&samples::l_bracket(p, true).unwrap()).parts[0],
+            &[],
+            &Default::default(),
+            "A",
+        );
+        let b = flat_page(
+            &flatten(&samples::u_channel(p).unwrap()).parts[0],
+            &[],
+            &Default::default(),
+            "B",
+        );
         let (alo, ahi) = cadrs_drawing::dxf::extents(&a);
         let (blo, bhi) = cadrs_drawing::dxf::extents(&b);
         let both = side_by_side(&[a.clone(), b.clone()], "Both");
@@ -641,34 +856,63 @@ mod tests {
         let (lo, hi) = cadrs_drawing::dxf::extents(&both);
         assert!((lo[0] - alo[0]).abs() < 1e-9 && (lo[1] - alo[1]).abs() < 1e-9);
         let width = (ahi[0] - alo[0]) + GAP + (bhi[0] - blo[0]);
-        assert!((hi[0] - lo[0] - width).abs() < 1e-9, "{} vs {width}", hi[0] - lo[0]);
+        assert!(
+            (hi[0] - lo[0] - width).abs() < 1e-9,
+            "{} vs {width}",
+            hi[0] - lo[0]
+        );
     }
 
     #[test]
     fn arcs_in_loops_come_back_as_arcs() {
         // A 20 × 6 slot: two half circles of 16 steps joined by lines.
         let mut l = Vec::new();
-        for (cx, a0) in [(7.0, -std::f64::consts::FRAC_PI_2), (-7.0, std::f64::consts::FRAC_PI_2)] {
+        for (cx, a0) in [
+            (7.0, -std::f64::consts::FRAC_PI_2),
+            (-7.0, std::f64::consts::FRAC_PI_2),
+        ] {
             for k in 0..=16 {
                 let a: f64 = a0 + std::f64::consts::PI * k as f64 / 16.0;
                 l.push(P2::new(cx + 3.0 * a.cos(), 3.0 * a.sin()));
             }
         }
         let shapes = loop_shapes(&l);
-        let arcs: Vec<&Shape> = shapes.iter().filter(|s| matches!(s, Shape::Arc { .. })).collect();
-        let lines = shapes.iter().filter(|s| matches!(s, Shape::Line { .. })).count();
+        let arcs: Vec<&Shape> = shapes
+            .iter()
+            .filter(|s| matches!(s, Shape::Arc { .. }))
+            .collect();
+        let lines = shapes
+            .iter()
+            .filter(|s| matches!(s, Shape::Line { .. }))
+            .count();
         assert_eq!((arcs.len(), lines), (2, 2), "{shapes:?}");
         for a in arcs {
-            let Shape::Arc { radius, start, end, .. } = a else { unreachable!() };
-            assert!((radius - 3.0).abs() < 1e-9 && ((end - start) - 180.0).abs() < 1e-6, "{a:?}");
+            let Shape::Arc {
+                radius, start, end, ..
+            } = a
+            else {
+                unreachable!()
+            };
+            assert!(
+                (radius - 3.0).abs() < 1e-9 && ((end - start) - 180.0).abs() < 1e-6,
+                "{a:?}"
+            );
         }
         // A rectangle stays four lines.
-        let r = [P2::new(0.0, 0.0), P2::new(4.0, 0.0), P2::new(4.0, 2.0), P2::new(0.0, 2.0)];
+        let r = [
+            P2::new(0.0, 0.0),
+            P2::new(4.0, 0.0),
+            P2::new(4.0, 2.0),
+            P2::new(0.0, 2.0),
+        ];
         assert_eq!(loop_shapes(&r).len(), 4);
     }
 
     #[test]
     fn the_file_name_follows_onshape() {
-        assert_eq!(default_file_name("Louver-n sheet metal", "Part 1"), "Louver-n sheet metal - Flat pattern of Part 1");
+        assert_eq!(
+            default_file_name("Louver-n sheet metal", "Part 1"),
+            "Louver-n sheet metal - Flat pattern of Part 1"
+        );
     }
 }

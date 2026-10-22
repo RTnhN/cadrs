@@ -31,7 +31,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::bend::BendValue;
 use crate::flat::FlatPattern;
-use crate::model::{Bend, BendEnd, Joint, JointId, JointKind, JointNamer, Model, P3, Surface, V3, Wall, WallId};
+use crate::model::{
+    Bend, BendEnd, Joint, JointId, JointKind, JointNamer, Model, P3, Surface, V3, Wall, WallId,
+};
 use crate::poly::{self, P2, Polygon, Seg2, V2, perp};
 
 /// Why an edit can't be made (the feature's error).
@@ -76,7 +78,9 @@ impl EditError {
         match self {
             EditError::NoWall => "The selected face isn't a sheet metal wall",
             EditError::NotPlanar => "Only flat sheet metal faces can be used",
-            EditError::BadLine => "The bend line must be a line that isn't perpendicular to the face",
+            EditError::BadLine => {
+                "The bend line must be a line that isn't perpendicular to the face"
+            }
             EditError::LineMissesWall => "The bend line doesn't cross the face",
             EditError::NoRoom => "The bend doesn't fit on the face",
             EditError::TooManyPieces => "The bend line splits the face into more than two pieces",
@@ -154,17 +158,26 @@ pub struct Rigid {
 
 impl Rigid {
     pub fn identity() -> Rigid {
-        Rigid { rot: Rotation3::identity(), t: V3::zeros() }
+        Rigid {
+            rot: Rotation3::identity(),
+            t: V3::zeros(),
+        }
     }
 
     pub fn translation(t: V3) -> Rigid {
-        Rigid { rot: Rotation3::identity(), t }
+        Rigid {
+            rot: Rotation3::identity(),
+            t,
+        }
     }
 
     /// A turn by `angle` about the axis through `at` along `axis`.
     pub fn about(at: P3, axis: V3, angle: f64) -> Rigid {
         let rot = Rotation3::from_axis_angle(&Unit::new_normalize(axis), angle);
-        Rigid { rot, t: at.coords - rot * at.coords }
+        Rigid {
+            rot,
+            t: at.coords - rot * at.coords,
+        }
     }
 
     pub fn point(&self, p: P3) -> P3 {
@@ -177,7 +190,10 @@ impl Rigid {
 
     /// This map after `first`.
     pub fn after(&self, first: &Rigid) -> Rigid {
-        Rigid { rot: self.rot * first.rot, t: self.rot * first.t + self.t }
+        Rigid {
+            rot: self.rot * first.rot,
+            t: self.rot * first.t + self.t,
+        }
     }
 }
 
@@ -185,7 +201,10 @@ impl Rigid {
 /// outlines and the joints on them (in the walls' own coordinates) stay. (P3I.8: a Derived copy
 /// of a sheet metal part placed elsewhere.)
 pub fn moved_model(m: &Model, rot: nalgebra::Matrix3<f64>, t: V3) -> Model {
-    let r = Rigid { rot: Rotation3::from_matrix_unchecked(rot), t };
+    let r = Rigid {
+        rot: Rotation3::from_matrix_unchecked(rot),
+        t,
+    };
     let mut out = m.clone();
     for w in &mut out.walls {
         w.surface = map_surface(w.surface, &r);
@@ -195,8 +214,18 @@ pub fn moved_model(m: &Model, rot: nalgebra::Matrix3<f64>, t: V3) -> Model {
 
 fn map_surface(s: Surface, f: &Rigid) -> Surface {
     match s {
-        Surface::Planar { origin, u, v } => Surface::Planar { origin: f.point(origin), u: f.vec(u), v: f.vec(v) },
-        Surface::Rolled { axis_origin, axis, start, radius, material_outside } => Surface::Rolled {
+        Surface::Planar { origin, u, v } => Surface::Planar {
+            origin: f.point(origin),
+            u: f.vec(u),
+            v: f.vec(v),
+        },
+        Surface::Rolled {
+            axis_origin,
+            axis,
+            start,
+            radius,
+            material_outside,
+        } => Surface::Rolled {
             axis_origin: f.point(axis_origin),
             axis: f.vec(axis),
             start: f.vec(start),
@@ -210,7 +239,10 @@ fn map_surface(s: Surface, f: &Rigid) -> Surface {
 // Small geometry
 
 fn size_of(p: &Polygon) -> f64 {
-    p.bounds().map(|(lo, hi)| (hi - lo).norm()).unwrap_or(1.0).max(1.0)
+    p.bounds()
+        .map(|(lo, hi)| (hi - lo).norm())
+        .unwrap_or(1.0)
+        .max(1.0)
 }
 
 /// The half plane `(x − p)·n ≥ 0` as a big square (for the polygon booleans).
@@ -218,14 +250,22 @@ fn half_plane(p: P2, n: V2, size: f64) -> Polygon {
     let n = n.normalize();
     let d = perp(n);
     let r = 4.0 * size;
-    Polygon::new(vec![p - d * r, p + d * r, p + d * r + n * r, p - d * r + n * r])
+    Polygon::new(vec![
+        p - d * r,
+        p + d * r,
+        p + d * r + n * r,
+        p - d * r + n * r,
+    ])
 }
 
 /// The pieces of `poly` where `(x − p)·n ≥ 0`.
 fn half(poly: &Polygon, p: P2, n: V2) -> Vec<Polygon> {
     let size = size_of(poly) + (p.coords.norm());
     let hp = half_plane(p, n, size);
-    let out: Vec<Polygon> = poly::intersection(poly, &hp).into_iter().filter(|q| q.area() > 1e-9).collect();
+    let out: Vec<Polygon> = poly::intersection(poly, &hp)
+        .into_iter()
+        .filter(|q| q.area() > 1e-9)
+        .collect();
     exact(out, &[poly, &hp])
 }
 
@@ -234,9 +274,15 @@ fn half(poly: &Polygon, p: P2, n: V2) -> Vec<Polygon> {
 /// tangent line would leave the folded wall and bend apart.)
 fn exact(result: Vec<Polygon>, inputs: &[&Polygon]) -> Vec<Polygon> {
     let edges = |q: &Polygon| -> Vec<(P2, P2)> {
-        std::iter::once(&q.outer).chain(q.holes.iter()).flat_map(|l| (0..l.len()).map(move |i| (l[i], l[(i + 1) % l.len()]))).collect()
+        std::iter::once(&q.outer)
+            .chain(q.holes.iter())
+            .flat_map(|l| (0..l.len()).map(move |i| (l[i], l[(i + 1) % l.len()])))
+            .collect()
     };
-    let mut pts: Vec<P2> = inputs.iter().flat_map(|q| q.outer.iter().chain(q.holes.iter().flatten()).copied()).collect();
+    let mut pts: Vec<P2> = inputs
+        .iter()
+        .flat_map(|q| q.outer.iter().chain(q.holes.iter().flatten()).copied())
+        .collect();
     let all: Vec<Vec<(P2, P2)>> = inputs.iter().map(|q| edges(q)).collect();
     for i in 0..all.len() {
         for k in i + 1..all.len() {
@@ -256,17 +302,23 @@ fn exact(result: Vec<Polygon>, inputs: &[&Polygon]) -> Vec<Polygon> {
             }
         }
     }
-    result.iter().map(|q| poly::snap_to(q, &pts, 10.0 * poly::GRID)).collect()
+    result
+        .iter()
+        .map(|q| poly::snap_to(q, &pts, 10.0 * poly::GRID))
+        .collect()
 }
 
 /// Parameter intervals (along `d` from `o`) of the line `o + d·s` inside `poly`.
 fn line_intervals(poly: &Polygon, o: P2, d: V2) -> Vec<(f64, f64)> {
     let big = 4.0 * (size_of(poly) + o.coords.norm());
-    poly::clip_segment(Seg2::new(o - d * big, o + d * big), std::slice::from_ref(poly))
-        .into_iter()
-        .map(|s| ((s.a - o).dot(&d), (s.b - o).dot(&d)))
-        .map(|(a, b)| (a.min(b), a.max(b)))
-        .collect()
+    poly::clip_segment(
+        Seg2::new(o - d * big, o + d * big),
+        std::slice::from_ref(poly),
+    )
+    .into_iter()
+    .map(|s| ((s.a - o).dot(&d), (s.b - o).dot(&d)))
+    .map(|(a, b)| (a.min(b), a.max(b)))
+    .collect()
 }
 
 fn overlap(a: &[(f64, f64)], b: &[(f64, f64)]) -> Vec<(f64, f64)> {
@@ -306,12 +358,21 @@ fn segment_on_mut(j: &mut Joint, w: WallId) -> Option<&mut Seg2> {
 
 /// The walls joined (through any joint) to `starts`, without passing through the walls in
 /// `stop`. `Err` if a stop wall is reached through a joint other than those in `skip`.
-fn reachable(m: &Model, starts: &[WallId], stop: &[WallId], skip: &[JointId]) -> Result<Vec<WallId>, EditError> {
+fn reachable(
+    m: &Model,
+    starts: &[WallId],
+    stop: &[WallId],
+    skip: &[JointId],
+) -> Result<Vec<WallId>, EditError> {
     let mut seen: HashSet<WallId> = starts.iter().copied().collect();
     let mut out: Vec<WallId> = starts.to_vec();
     let mut queue: VecDeque<WallId> = starts.iter().copied().collect();
     while let Some(w) = queue.pop_front() {
-        for j in m.joints.iter().filter(|j| (j.a == w || j.b == w) && !skip.contains(&j.id)) {
+        for j in m
+            .joints
+            .iter()
+            .filter(|j| (j.a == w || j.b == w) && !skip.contains(&j.id))
+        {
             let o = j.other(w);
             if stop.contains(&o) {
                 return Err(EditError::BendLoop);
@@ -448,7 +509,13 @@ fn fold_maps(w: &Wall, f: &Fold, t: f64, allowance: f64) -> (Rigid, Rigid) {
 
 /// Splits wall `wall` along a resolved fold: the held side keeps the wall, the moving side becomes
 /// wall `new_wall`, turned with everything joined to it.
-fn fold_wall(m: &mut Model, wall: WallId, f: &Fold, new_wall: WallId, joint_seed: (u64, u32)) -> Result<BendMade, EditError> {
+fn fold_wall(
+    m: &mut Model,
+    wall: WallId,
+    f: &Fold,
+    new_wall: WallId,
+    joint_seed: (u64, u32),
+) -> Result<BendMade, EditError> {
     let t = m.params.thickness;
     let w = m.wall(wall).ok_or(EditError::NoWall)?.clone();
     if !matches!(w.surface, Surface::Planar { .. }) {
@@ -476,7 +543,10 @@ fn fold_wall(m: &mut Model, wall: WallId, f: &Fold, new_wall: WallId, joint_seed
         return Err(EditError::TooManyPieces);
     }
     // The bend's stretches: where both tangent lines cross material.
-    let spans = overlap(&line_intervals(&w.outline, p0, d), &line_intervals(&w.outline, p1, d));
+    let spans = overlap(
+        &line_intervals(&w.outline, p0, d),
+        &line_intervals(&w.outline, p1, d),
+    );
     if spans.is_empty() {
         return Err(EditError::NoRoom);
     }
@@ -487,7 +557,9 @@ fn fold_wall(m: &mut Model, wall: WallId, f: &Fold, new_wall: WallId, joint_seed
     let mut starts: Vec<WallId> = Vec::new();
     let mut moved_joints: Vec<JointId> = Vec::new();
     for j in &m.joints {
-        let Some(seg) = j.segment_on(wall) else { continue };
+        let Some(seg) = j.segment_on(wall) else {
+            continue;
+        };
         let s = |p: P2| (p - f.a).dot(&f.nn);
         let (sa, sb) = (s(seg.a), s(seg.b));
         if sa.max(sb) <= f.d1 + tol {
@@ -520,7 +592,11 @@ fn fold_wall(m: &mut Model, wall: WallId, f: &Fold, new_wall: WallId, joint_seed
     m.walls.push(Wall {
         id: new_wall,
         surface: map_surface(w.surface, &turn),
-        outline: moving.into_iter().next().expect("one").map(|p| p - f.nn * ba),
+        outline: moving
+            .into_iter()
+            .next()
+            .expect("one")
+            .map(|p| p - f.nn * ba),
     });
     let mut names = namer(m);
     let mut joints = Vec::new();
@@ -528,13 +604,28 @@ fn fold_wall(m: &mut Model, wall: WallId, f: &Fold, new_wall: WallId, joint_seed
     for (lo, hi) in spans {
         let seg = Seg2::new(p0 + d * lo, p0 + d * hi);
         let id = free_joint(m, joint_seed.0, &mut k);
-        let bend = Bend { on_a: seg, on_b: seg, ..bend_of(f) };
+        let bend = Bend {
+            on_a: seg,
+            on_b: seg,
+            ..bend_of(f)
+        };
         let kind = JointKind::Bend(bend);
         let name = names.name(&kind);
-        m.joints.push(Joint { id, name, a: wall, b: new_wall, kind });
+        m.joints.push(Joint {
+            id,
+            name,
+            a: wall,
+            b: new_wall,
+            kind,
+        });
         joints.push(id);
     }
-    Ok(BendMade { wall: new_wall, joints, moved: carried, allowance: ba })
+    Ok(BendMade {
+        wall: new_wall,
+        joints,
+        moved: carried,
+        allowance: ba,
+    })
 }
 
 /// The line through `spec.line` on the wall (local point and unit direction).
@@ -583,7 +674,9 @@ fn resolve(m: &Model, spec: &BendSpec) -> Result<Fold, EditError> {
         model_radius: spec.radius.is_none(),
         value: spec.k_factor.map(BendValue::KFactor),
     };
-    let ba = bend_of(&f).allowance(&m.params).ok_or(EditError::BadAngle)?;
+    let ba = bend_of(&f)
+        .allowance(&m.params)
+        .ok_or(EditError::BadAngle)?;
     f.d1 = match spec.alignment {
         BendAlignment::BendLine => -ba / 2.0,
         BendAlignment::HoldLine => 0.0,
@@ -630,10 +723,20 @@ fn resolve(m: &Model, spec: &BendSpec) -> Result<Fold, EditError> {
 /// direction the moving side runs in, in the wall's plane away from the line, and the unit
 /// direction it turns towards. Bent by θ, the wall runs along `cos θ·c + sin θ·side`.
 pub fn bend_frame(m: &Model, spec: &BendSpec) -> Result<(V3, V3), EditError> {
-    let f = resolve(m, &BendSpec { angle: std::f64::consts::FRAC_PI_2, alignment: BendAlignment::HoldLine, ..*spec })?;
+    let f = resolve(
+        m,
+        &BendSpec {
+            angle: std::f64::consts::FRAC_PI_2,
+            alignment: BendAlignment::HoldLine,
+            ..*spec
+        },
+    )?;
     let w = m.wall(spec.wall).ok_or(EditError::NoWall)?;
     let n = w.surface.normal().ok_or(EditError::NotPlanar)?;
-    Ok((w.surface.direction_at(f.a, f.nn), if f.toward { n } else { -n }))
+    Ok((
+        w.surface.direction_at(f.a, f.nn),
+        if f.toward { n } else { -n },
+    ))
 }
 
 /// **Bend** (SM9): folds wall `spec.wall` along the line. The new wall gets an id from `seed`,
@@ -642,7 +745,13 @@ pub fn bend_wall(m: &mut Model, spec: &BendSpec, seed: u64) -> Result<BendMade, 
     let f = resolve(m, spec)?;
     let mut k = 0;
     let new_wall = free_wall(m, seed, &mut k);
-    fold_wall(m, spec.wall, &f, new_wall, (seed ^ 0x4a4f_494e_5400_0000, 0))
+    fold_wall(
+        m,
+        spec.wall,
+        &f,
+        new_wall,
+        (seed ^ 0x4a4f_494e_5400_0000, 0),
+    )
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -698,7 +807,14 @@ pub struct JogMade {
 
 /// Stretches wall `wall` by `by` across the line through `a` with normal `nn` at `s0`: the part
 /// beyond moves out by `by` (and the walls joined to it with it), the gap filled.
-fn stretch_wall(m: &mut Model, wall: WallId, a: P2, nn: V2, s0: f64, by: f64) -> Result<(), EditError> {
+fn stretch_wall(
+    m: &mut Model,
+    wall: WallId,
+    a: P2,
+    nn: V2,
+    s0: f64,
+    by: f64,
+) -> Result<(), EditError> {
     if by.abs() < 1e-12 {
         return Ok(());
     }
@@ -708,7 +824,9 @@ fn stretch_wall(m: &mut Model, wall: WallId, a: P2, nn: V2, s0: f64, by: f64) ->
     let mut starts = Vec::new();
     let mut moved_joints = Vec::new();
     for j in &m.joints {
-        let Some(seg) = j.segment_on(wall) else { continue };
+        let Some(seg) = j.segment_on(wall) else {
+            continue;
+        };
         let (sa, sb) = (s(seg.a), s(seg.b));
         if sa.max(sb) <= tol {
             continue;
@@ -781,7 +899,11 @@ fn stretch_wall(m: &mut Model, wall: WallId, a: P2, nn: V2, s0: f64, by: f64) ->
     };
     let wi = m.walls.iter().position(|x| x.id == wall).expect("wall");
     let o = &w.outline;
-    m.walls[wi].outline = Polygon::with_holes(stretch_loop(&o.outer), o.holes.iter().map(|h| stretch_loop(h)).collect()).normalized();
+    m.walls[wi].outline = Polygon::with_holes(
+        stretch_loop(&o.outer),
+        o.holes.iter().map(|h| stretch_loop(h)).collect(),
+    )
+    .normalized();
     Ok(())
 }
 
@@ -805,14 +927,19 @@ pub fn jog_wall(m: &mut Model, spec: &JogSpec, seed: u64) -> Result<JogMade, Edi
     };
     let mut ids = 0;
     let (mid_id, far_id) = (free_wall(m, seed, &mut ids), free_wall(m, seed, &mut ids));
-    let build = |m: &Model, middle: f64, stretch: f64| -> Result<(Model, BendMade, BendMade), EditError> {
-        let mut mm = m.clone();
-        stretch_wall(&mut mm, wall, f1.a, f1.nn, f1.d1, stretch)?;
-        let b1 = fold_wall(&mut mm, wall, &f1, mid_id, (seed ^ 0x4a4f_4731, 0))?;
-        let f2 = Fold { d1: f1.d1 + middle, toward: !f1.toward, ..f1 };
-        let b2 = fold_wall(&mut mm, mid_id, &f2, far_id, (seed ^ 0x4a4f_4732, 0))?;
-        Ok((mm, b1, b2))
-    };
+    let build =
+        |m: &Model, middle: f64, stretch: f64| -> Result<(Model, BendMade, BendMade), EditError> {
+            let mut mm = m.clone();
+            stretch_wall(&mut mm, wall, f1.a, f1.nn, f1.d1, stretch)?;
+            let b1 = fold_wall(&mut mm, wall, &f1, mid_id, (seed ^ 0x4a4f_4731, 0))?;
+            let f2 = Fold {
+                d1: f1.d1 + middle,
+                toward: !f1.toward,
+                ..f1
+            };
+            let b2 = fold_wall(&mut mm, mid_id, &f2, far_id, (seed ^ 0x4a4f_4732, 0))?;
+            Ok((mm, b1, b2))
+        };
     let over = |mm: &Model| -> f64 {
         let far = mm.wall(far_id).expect("far wall");
         (far.surface.point(P2::origin()) - w0.surface.point(P2::origin())).dot(&side)
@@ -848,7 +975,12 @@ pub fn jog_wall(m: &mut Model, spec: &JogSpec, seed: u64) -> Result<JogMade, Edi
     };
     let (mm, first, second) = result;
     *m = mm;
-    Ok(JogMade { first, second, middle, added })
+    Ok(JogMade {
+        first,
+        second,
+        middle,
+        added,
+    })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -880,7 +1012,9 @@ impl Region3 {
 }
 
 fn parallel(w: &Wall, n: V3) -> bool {
-    w.surface.normal().is_some_and(|wn| wn.dot(&n).abs() > 1.0 - 1e-6)
+    w.surface
+        .normal()
+        .is_some_and(|wn| wn.dot(&n).abs() > 1.0 - 1e-6)
 }
 
 /// A polygon grown by `by` all round, its corners mitred as an offset of the outline (so a
@@ -925,7 +1059,10 @@ pub fn grow(p: &Polygon, by: f64) -> Polygon {
         }
     }
     let refs: Vec<&Polygon> = parts.iter().collect();
-    exact(poly::union(&parts), &refs).into_iter().max_by(|a, b| a.area().total_cmp(&b.area())).unwrap_or_else(|| p.clone())
+    exact(poly::union(&parts), &refs)
+        .into_iter()
+        .max_by(|a, b| a.area().total_cmp(&b.area()))
+        .unwrap_or_else(|| p.clone())
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -933,24 +1070,34 @@ pub fn grow(p: &Polygon, by: f64) -> Polygon {
 
 /// **Tab** (SM5): each region added to the walls in `walls` it is parallel to and touches. Walls
 /// of one plane that the tab bridges become one wall. Returns the walls that took it.
-pub fn add_tab(m: &mut Model, regions: &[Region3], walls: &[WallId]) -> Result<Vec<WallId>, EditError> {
+pub fn add_tab(
+    m: &mut Model,
+    regions: &[Region3],
+    walls: &[WallId],
+) -> Result<Vec<WallId>, EditError> {
     let mut took: Vec<WallId> = Vec::new();
     for r in regions {
         let n = r.normal();
         let mut hit: Vec<WallId> = Vec::new();
         for wid in walls {
-            let Some(wi) = m.walls.iter().position(|w| w.id == *wid) else { continue };
+            let Some(wi) = m.walls.iter().position(|w| w.id == *wid) else {
+                continue;
+            };
             if !parallel(&m.walls[wi], n) {
                 continue;
             }
             // The profile must lie in (or on a face of) the wall's sheet.
             let w = &m.walls[wi];
-            let off = (r.origin - w.surface.point(P2::origin())).dot(&w.surface.normal().expect("planar"));
+            let off = (r.origin - w.surface.point(P2::origin()))
+                .dot(&w.surface.normal().expect("planar"));
             if off.abs() > m.params.thickness + 1e-6 {
                 continue;
             }
             let tab = r.on_wall(w);
-            let u = exact(poly::union(&[w.outline.clone(), tab.clone()]), &[&w.outline, &tab]);
+            let u = exact(
+                poly::union(&[w.outline.clone(), tab.clone()]),
+                &[&w.outline, &tab],
+            );
             if u.len() != 1 {
                 continue;
             }
@@ -962,9 +1109,18 @@ pub fn add_tab(m: &mut Model, regions: &[Region3], walls: &[WallId]) -> Result<V
         while i < hit.len() {
             let mut k = i + 1;
             while k < hit.len() {
-                let (a, b) = (m.wall(hit[i]).expect("a").clone(), m.wall(hit[k]).expect("b").clone());
-                let (na, nb) = (a.surface.normal().expect("planar"), b.surface.normal().expect("planar"));
-                let coplanar = (b.surface.point(P2::origin()) - a.surface.point(P2::origin())).dot(&na).abs() < 1e-6;
+                let (a, b) = (
+                    m.wall(hit[i]).expect("a").clone(),
+                    m.wall(hit[k]).expect("b").clone(),
+                );
+                let (na, nb) = (
+                    a.surface.normal().expect("planar"),
+                    b.surface.normal().expect("planar"),
+                );
+                let coplanar = (b.surface.point(P2::origin()) - a.surface.point(P2::origin()))
+                    .dot(&na)
+                    .abs()
+                    < 1e-6;
                 let b_on_a = b.outline.map(|p| a.surface.local(b.surface.point(p)));
                 if coplanar && poly::overlap_area(&a.outline, &b_on_a) > 1e-9 {
                     if na.dot(&nb) < 0.0 {
@@ -998,7 +1154,9 @@ pub fn tab_sheet(m: &Model, r: &Region3, walls: &[WallId]) -> Option<(f64, f64)>
     let t = m.params.thickness;
     let mut best: Option<((f64, f64), f64)> = None;
     for w in m.walls.iter().filter(|w| walls.contains(&w.id)) {
-        let Some(wn) = w.surface.normal() else { continue };
+        let Some(wn) = w.surface.normal() else {
+            continue;
+        };
         if wn.dot(&n).abs() < 1.0 - 1e-6 {
             continue;
         }
@@ -1021,7 +1179,10 @@ fn merge_walls(m: &mut Model, a: WallId, b: WallId) {
     let wb = m.wall(b).expect("b").clone();
     let to_a = |p: P2| wa.surface.local(wb.surface.point(p));
     let bb = wb.outline.map(to_a);
-    let u = exact(poly::union(&[wa.outline.clone(), bb.clone()]), &[&wa.outline, &bb]);
+    let u = exact(
+        poly::union(&[wa.outline.clone(), bb.clone()]),
+        &[&wa.outline, &bb],
+    );
     if let Some(big) = u.into_iter().max_by(|x, y| x.area().total_cmp(&y.area())) {
         m.walls.iter_mut().find(|w| w.id == a).expect("a").outline = big;
     }
@@ -1058,7 +1219,9 @@ pub struct CutTool {
 
 /// The tool's cross-section on a planar wall, in its local 2D (at the sheet's mid plane).
 fn section(tool: &CutTool, w: &Wall, t: f64) -> Vec<Polygon> {
-    let Some(nw) = w.surface.normal() else { return Vec::new() };
+    let Some(nw) = w.surface.normal() else {
+        return Vec::new();
+    };
     let dn = tool.dir.dot(&nw);
     if dn.abs() < 1e-6 {
         return Vec::new();
@@ -1074,7 +1237,8 @@ fn section(tool: &CutTool, w: &Wall, t: f64) -> Vec<Polygon> {
         let nr = tool.region.normal();
         let k = tool.dir.dot(&nr);
         if k.abs() > 1e-9 {
-            let at = |p: P2| (w.surface.point(p) + nw * (t / 2.0) - tool.region.origin).dot(&nr) / k;
+            let at =
+                |p: P2| (w.surface.point(p) + nw * (t / 2.0) - tool.region.origin).dot(&nr) / k;
             let o = at(P2::origin());
             let g = V2::new(at(P2::new(1.0, 0.0)) - o, at(P2::new(0.0, 1.0)) - o);
             if g.norm() < 1e-9 {
@@ -1117,7 +1281,11 @@ impl CutMade {
 /// the flat and the folded bend both lose it. A wall the cut splits keeps every piece: the
 /// biggest keeps its id, each other piece becomes a wall (with the joints along its edges), and
 /// pieces no joint holds become parts of their own.
-pub fn cut_walls(m: &mut Model, tools: &[CutTool], only: Option<&[WallId]>) -> Result<CutMade, EditError> {
+pub fn cut_walls(
+    m: &mut Model,
+    tools: &[CutTool],
+    only: Option<&[WallId]>,
+) -> Result<CutMade, EditError> {
     let t = m.params.thickness;
     let mut made = CutMade::default();
     // The bends first, on the model as it is.
@@ -1135,9 +1303,16 @@ pub fn cut_walls(m: &mut Model, tools: &[CutTool], only: Option<&[WallId]>) -> R
                 let e = b.tangent_a.dir();
                 let n = {
                     let n = perp(e);
-                    if (b.tangent_b.a - b.tangent_a.a).dot(&n) >= 0.0 { n } else { -n }
+                    if (b.tangent_b.a - b.tangent_a.a).dot(&n) >= 0.0 {
+                        n
+                    } else {
+                        -n
+                    }
                 };
-                shapes.extend(su.iter().map(|p| p.map(|q| b.tangent_a.a + e * q.x + n * q.y)));
+                shapes.extend(
+                    su.iter()
+                        .map(|p| p.map(|q| b.tangent_a.a + e * q.x + n * q.y)),
+                );
                 if !made.bends.contains(j) {
                     made.bends.push(*j);
                 }
@@ -1149,7 +1324,10 @@ pub fn cut_walls(m: &mut Model, tools: &[CutTool], only: Option<&[WallId]>) -> R
     }
     let via_flat = |w: WallId| -> Option<usize> {
         let flat = flat.as_ref()?;
-        in_flat.iter().find(|(pi, _)| flat.parts[*pi].walls.contains(&w)).map(|(pi, _)| *pi)
+        in_flat
+            .iter()
+            .find(|(pi, _)| flat.parts[*pi].walls.contains(&w))
+            .map(|(pi, _)| *pi)
     };
     let mut flat_walls: Vec<(usize, Polygon)> = Vec::new();
     let mut new_walls: Vec<Wall> = Vec::new();
@@ -1159,15 +1337,24 @@ pub fn cut_walls(m: &mut Model, tools: &[CutTool], only: Option<&[WallId]>) -> R
             continue;
         }
         let shapes: Vec<Polygon> = tools.iter().flat_map(|tool| section(tool, w, t)).collect();
-        if shapes.is_empty() || shapes.iter().all(|s| poly::overlap_area(&w.outline, s) < 1e-9) {
+        if shapes.is_empty()
+            || shapes
+                .iter()
+                .all(|s| poly::overlap_area(&w.outline, s) < 1e-9)
+        {
             continue;
         }
         if let (Some(pi), Some(flat)) = (via_flat(w.id), flat.as_ref()) {
             // Into the flat: the wall's own flat 2D placed in the part.
-            let Some(pm) = flat.parts[pi].placement(w.id) else { continue };
+            let Some(pm) = flat.parts[pi].placement(w.id) else {
+                continue;
+            };
             let params = m.params;
             // Only what lies on the wall (past its edges, the flat holds other pieces).
-            for sh in shapes.iter().flat_map(|sh| poly::intersection(sh, &w.outline)) {
+            for sh in shapes
+                .iter()
+                .flat_map(|sh| poly::intersection(sh, &w.outline))
+            {
                 flat_walls.push((pi, sh.map(|q| pm.apply(w.flat_local(&params, q)))));
             }
             made.walls.push(w.id);
@@ -1175,7 +1362,13 @@ pub fn cut_walls(m: &mut Model, tools: &[CutTool], only: Option<&[WallId]>) -> R
         }
         let mut inputs: Vec<&Polygon> = vec![&w.outline];
         inputs.extend(shapes.iter());
-        let mut left: Vec<Polygon> = exact(poly::difference(std::slice::from_ref(&w.outline), &shapes), &inputs).into_iter().filter(|p| p.area() > 1e-9).collect();
+        let mut left: Vec<Polygon> = exact(
+            poly::difference(std::slice::from_ref(&w.outline), &shapes),
+            &inputs,
+        )
+        .into_iter()
+        .filter(|p| p.area() > 1e-9)
+        .collect();
         if left.is_empty() {
             return Err(EditError::WallCutAway);
         }
@@ -1199,7 +1392,9 @@ pub fn cut_walls(m: &mut Model, tools: &[CutTool], only: Option<&[WallId]>) -> R
             // The joints along this piece's edges go with it.
             let tol = 1e-6 * size + 1e-9;
             for j in m.joints.iter_mut() {
-                let Some(seg) = j.segment_on(id) else { continue };
+                let Some(seg) = j.segment_on(id) else {
+                    continue;
+                };
                 let mid = P2::from((seg.a.coords + seg.b.coords) / 2.0);
                 if distance_to_outline(&piece, mid) <= tol {
                     if j.a == id {
@@ -1209,16 +1404,28 @@ pub fn cut_walls(m: &mut Model, tools: &[CutTool], only: Option<&[WallId]>) -> R
                     }
                 }
             }
-            new_walls.push(Wall { id: nid, surface, outline: piece });
+            new_walls.push(Wall {
+                id: nid,
+                surface,
+                outline: piece,
+            });
             made.split.push(nid);
         }
     }
     m.walls.extend(new_walls);
     if let Some(flat) = &flat {
         for (pi, mut shapes) in in_flat {
-            shapes.extend(flat_walls.iter().filter(|(p, _)| *p == pi).map(|(_, s)| s.clone()));
+            shapes.extend(
+                flat_walls
+                    .iter()
+                    .filter(|(p, _)| *p == pi)
+                    .map(|(_, s)| s.clone()),
+            );
             // One region: the pieces of the cut meet along the tangent lines.
-            let shapes: Vec<Polygon> = poly::union(&shapes).into_iter().filter(|p| p.area() > 1e-9).collect();
+            let shapes: Vec<Polygon> = poly::union(&shapes)
+                .into_iter()
+                .filter(|p| p.area() > 1e-9)
+                .collect();
             crate::flat_edit::remove(m, flat, pi, &shapes).map_err(|_| EditError::WallCutAway)?;
         }
     }
@@ -1232,7 +1439,11 @@ const BEND_CUT_SLICES: usize = 24;
 /// What the tools take out of each bend region (both of whose walls are in `only`), in the bend's
 /// `(s, u)`: `s` along the bend from its tangent lines' `a` end, `u` across from wall `a`'s
 /// tangent line. Measured on the bend's mid surface, slice by slice across it.
-fn bend_sections(m: &Model, tools: &[CutTool], only: Option<&[WallId]>) -> Vec<(JointId, Vec<Polygon>)> {
+fn bend_sections(
+    m: &Model,
+    tools: &[CutTool],
+    only: Option<&[WallId]>,
+) -> Vec<(JointId, Vec<Polygon>)> {
     let t = m.params.thickness;
     let mut out = Vec::new();
     for j in &m.joints {
@@ -1240,7 +1451,9 @@ fn bend_sections(m: &Model, tools: &[CutTool], only: Option<&[WallId]>) -> Vec<(
         if b.hem || only.is_some_and(|o| !o.contains(&j.a) || !o.contains(&j.b)) {
             continue;
         }
-        let (Some(g), Some(ba)) = (m.bend_geometry(j.id), b.allowance(&m.params)) else { continue };
+        let (Some(g), Some(ba)) = (m.bend_geometry(j.id), b.allowance(&m.params)) else {
+            continue;
+        };
         if ba <= 1e-9 {
             continue;
         }
@@ -1253,7 +1466,10 @@ fn bend_sections(m: &Model, tools: &[CutTool], only: Option<&[WallId]>) -> Vec<(
         let rm = g.inner_radius + t / 2.0;
         let mut rects: Vec<Polygon> = Vec::new();
         for k in 0..BEND_CUT_SLICES {
-            let (u0, u1) = (ba * k as f64 / BEND_CUT_SLICES as f64, ba * (k + 1) as f64 / BEND_CUT_SLICES as f64);
+            let (u0, u1) = (
+                ba * k as f64 / BEND_CUT_SLICES as f64,
+                ba * (k + 1) as f64 / BEND_CUT_SLICES as f64,
+            );
             let a = (u0 + u1) / 2.0 / ba * g.sweep;
             let p0 = g.ends.0 + g.rotate_vec(g.start, a) * rm;
             for tool in tools {
@@ -1267,7 +1483,10 @@ fn bend_sections(m: &Model, tools: &[CutTool], only: Option<&[WallId]>) -> Vec<(
         if rects.is_empty() {
             continue;
         }
-        let shapes: Vec<Polygon> = poly::union(&rects).into_iter().filter(|p| p.area() > 1e-9).collect();
+        let shapes: Vec<Polygon> = poly::union(&rects)
+            .into_iter()
+            .filter(|p| p.area() > 1e-9)
+            .collect();
         if !shapes.is_empty() {
             out.push((j.id, shapes));
         }
@@ -1292,12 +1511,21 @@ fn tool_intervals(tool: &CutTool, p0: P3, es: V3, len: f64, t: f64) -> Vec<(f64,
     };
     let (q0, q1) = (onto(p0), onto(p0 + es * len));
     let mut ivs: Vec<(f64, f64)> = if (q1 - q0).norm() < 1e-9 * len.max(1.0) {
-        if r.polygon.contains(q0) { vec![(0.0, len)] } else { Vec::new() }
+        if r.polygon.contains(q0) {
+            vec![(0.0, len)]
+        } else {
+            Vec::new()
+        }
     } else {
         let d = q1 - q0;
         poly::clip_segment(Seg2::new(q0, q1), std::slice::from_ref(&r.polygon))
             .into_iter()
-            .map(|s| ((s.a - q0).dot(&d) / d.norm_squared() * len, (s.b - q0).dot(&d) / d.norm_squared() * len))
+            .map(|s| {
+                (
+                    (s.a - q0).dot(&d) / d.norm_squared() * len,
+                    (s.b - q0).dot(&d) / d.norm_squared() * len,
+                )
+            })
             .map(|(a, b)| (a.min(b).max(0.0), a.max(b).min(len)))
             .collect()
     };
@@ -1345,9 +1573,16 @@ const ARC_SAG: f64 = 0.002;
 /// Segments for an arc of radius `r` turning by `turn` (radians).
 fn arc_steps(r: f64, turn: f64) -> usize {
     let r = r.abs().max(1e-9);
-    let step = if ARC_SAG >= r { std::f64::consts::FRAC_PI_4 } else { 2.0 * (1.0 - ARC_SAG / r).acos() };
+    let step = if ARC_SAG >= r {
+        std::f64::consts::FRAC_PI_4
+    } else {
+        2.0 * (1.0 - ARC_SAG / r).acos()
+    };
     // At least 12 a quarter turn, at most 128.
-    let step = step.clamp(std::f64::consts::FRAC_PI_2 / 128.0, std::f64::consts::FRAC_PI_2 / 12.0);
+    let step = step.clamp(
+        std::f64::consts::FRAC_PI_2 / 128.0,
+        std::f64::consts::FRAC_PI_2 / 12.0,
+    );
     (turn.abs() / step).ceil().max(2.0) as usize
 }
 
@@ -1389,7 +1624,9 @@ pub fn chamfer_second(d: f64, angle: f64, beta: f64) -> f64 {
 /// The vertex of wall `wall`'s outline nearest `at` (local 2D), as (loop, index): 0 the outer
 /// loop, k the k-th hole.
 fn vertex_index(w: &Wall, at: P2, tol: f64) -> Option<(usize, usize)> {
-    let loops: Vec<&Vec<P2>> = std::iter::once(&w.outline.outer).chain(w.outline.holes.iter()).collect();
+    let loops: Vec<&Vec<P2>> = std::iter::once(&w.outline.outer)
+        .chain(w.outline.holes.iter())
+        .collect();
     let mut best: Option<((usize, usize), f64)> = None;
     for (li, l) in loops.iter().enumerate() {
         for (i, p) in l.iter().enumerate() {
@@ -1406,7 +1643,11 @@ fn vertex_index(w: &Wall, at: P2, tol: f64) -> Option<(usize, usize)> {
 pub fn corner_beta(m: &Model, wall: WallId, at: P2) -> Option<f64> {
     let w = m.wall(wall)?;
     let (li, i) = vertex_index(w, at, 1e-6 * size_of(&w.outline).max(1.0))?;
-    let l = if li == 0 { &w.outline.outer } else { &w.outline.holes[li - 1] };
+    let l = if li == 0 {
+        &w.outline.outer
+    } else {
+        &w.outline.holes[li - 1]
+    };
     corner_angle(l, i).map(|(b, _, _)| b)
 }
 
@@ -1414,7 +1655,17 @@ pub fn corner_beta(m: &Model, wall: WallId, at: P2) -> Option<f64> {
 /// `beta`), from its end on the edge in to its end on the edge out. Fails if it is longer than
 /// either edge (unless `overflow`).
 #[allow(clippy::too_many_arguments)]
-fn round_points(v: P2, e1: V2, e2: V2, beta: f64, r1: f64, r2: f64, len_in: f64, len_out: f64, overflow: bool) -> Result<Vec<P2>, EditError> {
+fn round_points(
+    v: P2,
+    e1: V2,
+    e2: V2,
+    beta: f64,
+    r1: f64,
+    r2: f64,
+    len_in: f64,
+    len_out: f64,
+    overflow: bool,
+) -> Result<Vec<P2>, EditError> {
     if !(r1 > 0.0 && r2 > 0.0) {
         return Err(EditError::CornerTooBig);
     }
@@ -1439,7 +1690,14 @@ fn round_points(v: P2, e1: V2, e2: V2, beta: f64, r1: f64, r2: f64, len_in: f64,
             sweep += std::f64::consts::TAU;
         }
         let steps = arc_steps(radius, turn);
-        let mut pts: Vec<P2> = (0..=steps).map(|k| c + V2::new((a0 + sweep * k as f64 / steps as f64).cos(), (a0 + sweep * k as f64 / steps as f64).sin()) * radius).collect();
+        let mut pts: Vec<P2> = (0..=steps)
+            .map(|k| {
+                c + V2::new(
+                    (a0 + sweep * k as f64 / steps as f64).cos(),
+                    (a0 + sweep * k as f64 / steps as f64).sin(),
+                ) * radius
+            })
+            .collect();
         // The ends exactly on the edges.
         pts[0] = a;
         pts[steps] = b;
@@ -1457,11 +1715,25 @@ fn round_points(v: P2, e1: V2, e2: V2, beta: f64, r1: f64, r2: f64, len_in: f64,
 }
 
 /// **Corner break** (SM11): wall `wall`'s outline corner at `at` (local 2D) rounded or cut.
-pub fn break_corner(m: &mut Model, wall: WallId, at: P2, kind: CornerBreakKind) -> Result<(), EditError> {
-    let wi = m.walls.iter().position(|w| w.id == wall).ok_or(EditError::NoWall)?;
+pub fn break_corner(
+    m: &mut Model,
+    wall: WallId,
+    at: P2,
+    kind: CornerBreakKind,
+) -> Result<(), EditError> {
+    let wi = m
+        .walls
+        .iter()
+        .position(|w| w.id == wall)
+        .ok_or(EditError::NoWall)?;
     let w = &m.walls[wi];
-    let (li, i) = vertex_index(w, at, 1e-6 * size_of(&w.outline).max(1.0)).ok_or(EditError::NoCorner)?;
-    let mut l = if li == 0 { w.outline.outer.clone() } else { w.outline.holes[li - 1].clone() };
+    let (li, i) =
+        vertex_index(w, at, 1e-6 * size_of(&w.outline).max(1.0)).ok_or(EditError::NoCorner)?;
+    let mut l = if li == 0 {
+        w.outline.outer.clone()
+    } else {
+        w.outline.holes[li - 1].clone()
+    };
     let n = l.len();
     let (beta, e1, e2) = corner_angle(&l, i).ok_or(EditError::NoCorner)?;
     let (p, v, q) = (l[(i + n - 1) % n], l[i], l[(i + 1) % n]);
@@ -1476,7 +1748,9 @@ pub fn break_corner(m: &mut Model, wall: WallId, at: P2, kind: CornerBreakKind) 
             }
             vec![v - e1 * d1, v + e2 * d2]
         }
-        CornerBreakKind::Fillet { radius } => round_points(v, e1, e2, beta, radius, radius, len_in, len_out, false)?,
+        CornerBreakKind::Fillet { radius } => {
+            round_points(v, e1, e2, beta, radius, radius, len_in, len_out, false)?
+        }
         CornerBreakKind::Round { r1, r2, overflow } => {
             let pts = round_points(v, e1, e2, beta, r1, r2, len_in, len_out, overflow)?;
             let (s1, s2) = ((pts[0] - v).norm(), (pts[pts.len() - 1] - v).norm());
@@ -1486,8 +1760,15 @@ pub fn break_corner(m: &mut Model, wall: WallId, at: P2, kind: CornerBreakKind) 
                 cut.extend(pts);
                 let cut = Polygon::new(cut);
                 let w = &m.walls[wi];
-                let left = exact(poly::difference(std::slice::from_ref(&w.outline), std::slice::from_ref(&cut)), &[&w.outline, &cut]);
-                let big = left.into_iter().filter(|p| p.area() > 1e-9).max_by(|a, b| a.area().total_cmp(&b.area())).ok_or(EditError::CornerTooBig)?;
+                let left = exact(
+                    poly::difference(std::slice::from_ref(&w.outline), std::slice::from_ref(&cut)),
+                    &[&w.outline, &cut],
+                );
+                let big = left
+                    .into_iter()
+                    .filter(|p| p.area() > 1e-9)
+                    .max_by(|a, b| a.area().total_cmp(&b.area()))
+                    .ok_or(EditError::CornerTooBig)?;
                 m.walls[wi].outline = big;
                 return Ok(());
             }
@@ -1515,8 +1796,15 @@ pub fn corner_vertex_at(m: &Model, p: P3, tol: f64) -> Option<(WallId, P2)> {
     let t = m.params.thickness;
     let mut best: Option<((WallId, P2), f64)> = None;
     for w in &m.walls {
-        let Some(n) = w.surface.normal() else { continue };
-        for v in w.outline.outer.iter().chain(w.outline.holes.iter().flatten()) {
+        let Some(n) = w.surface.normal() else {
+            continue;
+        };
+        for v in w
+            .outline
+            .outer
+            .iter()
+            .chain(w.outline.holes.iter().flatten())
+        {
             let a = w.surface.point(*v);
             let s = (p - a).dot(&n).clamp(0.0, t);
             let d = (p - (a + n * s)).norm();
@@ -1537,14 +1825,23 @@ pub fn wall_at(m: &Model, p: P3, tol: f64) -> Option<(WallId, bool)> {
     let t = m.params.thickness;
     let mut best: Option<((WallId, bool), f64)> = None;
     for w in &m.walls {
-        let Some(n) = w.surface.normal() else { continue };
+        let Some(n) = w.surface.normal() else {
+            continue;
+        };
         let z = (p - w.surface.point(P2::origin())).dot(&n);
-        let (d, other) = if (z - t).abs() < z.abs() { ((z - t).abs(), true) } else { (z.abs(), false) };
+        let (d, other) = if (z - t).abs() < z.abs() {
+            ((z - t).abs(), true)
+        } else {
+            (z.abs(), false)
+        };
         if d > tol {
             continue;
         }
         let local = w.surface.local(p);
-        let inside = w.outline.contains(local) || w.outline.bounds().is_some_and(|_| distance_to_outline(&w.outline, local) <= tol);
+        let inside = w.outline.contains(local)
+            || w.outline
+                .bounds()
+                .is_some_and(|_| distance_to_outline(&w.outline, local) <= tol);
         if inside && best.is_none_or(|(_, b)| d < b) {
             best = Some(((w.id, other), d));
         }
@@ -1569,17 +1866,31 @@ fn bend_end_points(m: &Model, j: &Joint, end: BendEnd) -> Option<[P3; 2]> {
     let b = j.bend()?;
     let (wa, wb) = (m.wall(j.a)?, m.wall(j.b)?);
     let pick = |s: &Seg2| if end == BendEnd::Start { s.a } else { s.b };
-    Some([wa.surface.point(pick(&b.on_a)), wb.surface.point(pick(&b.on_b))])
+    Some([
+        wa.surface.point(pick(&b.on_a)),
+        wb.surface.point(pick(&b.on_b)),
+    ])
 }
 
 /// The corner (two bends meeting, SM7) nearest `p`, and how far it is.
 pub fn corner_near(m: &Model, flat: &FlatPattern, p: P3) -> Option<((JointId, JointId), f64)> {
     let mut best: Option<((JointId, JointId), f64)> = None;
     for c in flat.parts.iter().flat_map(|part| part.corners.iter()) {
-        let (Some(j0), Some(j1)) = (m.joint(c.bends.0), m.joint(c.bends.1)) else { continue };
-        let (Some(a), Some(b)) = (bend_end_points(m, j0, c.ends.0), bend_end_points(m, j1, c.ends.1)) else { continue };
+        let (Some(j0), Some(j1)) = (m.joint(c.bends.0), m.joint(c.bends.1)) else {
+            continue;
+        };
+        let (Some(a), Some(b)) = (
+            bend_end_points(m, j0, c.ends.0),
+            bend_end_points(m, j1, c.ends.1),
+        ) else {
+            continue;
+        };
         let centre = P3::from((a[0].coords + a[1].coords + b[0].coords + b[1].coords) / 4.0);
-        let d = a.iter().chain(b.iter()).map(|q| (q - p).norm()).fold((centre - p).norm(), f64::min);
+        let d = a
+            .iter()
+            .chain(b.iter())
+            .map(|q| (q - p).norm())
+            .fold((centre - p).norm(), f64::min);
         if best.is_none_or(|(_, x)| d < x) {
             best = Some((c.bends, d));
         }
@@ -1592,9 +1903,14 @@ pub fn bend_end_near(m: &Model, p: P3) -> Option<((JointId, BendEnd), f64)> {
     let mut best: Option<((JointId, BendEnd), f64)> = None;
     for j in m.joints.iter().filter(|j| j.bend().is_some_and(|b| !b.hem)) {
         for end in [BendEnd::Start, BendEnd::End] {
-            let Some(pts) = bend_end_points(m, j, end) else { continue };
+            let Some(pts) = bend_end_points(m, j, end) else {
+                continue;
+            };
             let mid = P3::from((pts[0].coords + pts[1].coords) / 2.0);
-            let d = pts.iter().map(|q| (q - p).norm()).fold((mid - p).norm(), f64::min);
+            let d = pts
+                .iter()
+                .map(|q| (q - p).norm())
+                .fold((mid - p).norm(), f64::min);
             if best.is_none_or(|(_, x)| d < x) {
                 best = Some(((j.id, end), d));
             }
@@ -1611,9 +1927,15 @@ pub fn bend_end_near(m: &Model, p: P3) -> Option<((JointId, BendEnd), f64)> {
 pub enum Placement {
     Rigid(Rigid),
     /// Mirrored in the plane through `point` with unit normal `normal`.
-    Mirror { point: P3, normal: V3 },
+    Mirror {
+        point: P3,
+        normal: V3,
+    },
     /// Any rigid motion or reflection: `p ↦ linear·p + t` (`linear` orthogonal).
-    Affine { linear: nalgebra::Matrix3<f64>, t: V3 },
+    Affine {
+        linear: nalgebra::Matrix3<f64>,
+        t: V3,
+    },
 }
 
 impl Placement {
@@ -1657,7 +1979,11 @@ fn depths(m: &Model) -> Vec<(WallId, usize)> {
         out.push((root, 0));
         let mut q = VecDeque::from([(root, 0)]);
         while let Some((w, d)) = q.pop_front() {
-            for j in m.joints.iter().filter(|j| j.connects() && (j.a == w || j.b == w)) {
+            for j in m
+                .joints
+                .iter()
+                .filter(|j| j.connects() && (j.a == w || j.b == w))
+            {
                 let o = j.other(w);
                 if !out.iter().any(|(x, _)| *x == o) {
                     out.push((o, d + 1));
@@ -1672,14 +1998,27 @@ fn depths(m: &Model) -> Vec<(WallId, usize)> {
 /// **Face pattern / Face mirror** of walls (SM12.2): each wall in `seeds`, with everything
 /// beyond it (away from the flat's root), copied by `place` and joined to the same wall its
 /// bend joins (the copy's bend lands where `place` puts it). Returns the new walls.
-pub fn copy_walls(m: &mut Model, seeds: &[WallId], place: &Placement, seed: u64) -> Result<Vec<WallId>, EditError> {
+pub fn copy_walls(
+    m: &mut Model,
+    seeds: &[WallId],
+    place: &Placement,
+    seed: u64,
+) -> Result<Vec<WallId>, EditError> {
     let depth = depths(m);
-    let depth_of = |w: WallId| depth.iter().find(|(x, _)| *x == w).map(|(_, d)| *d).unwrap_or(usize::MAX);
+    let depth_of = |w: WallId| {
+        depth
+            .iter()
+            .find(|(x, _)| *x == w)
+            .map(|(_, d)| *d)
+            .unwrap_or(usize::MAX)
+    };
     let mut made = Vec::new();
     let mut kw = 0;
     let mut kj = 0;
     for s in seeds {
-        let Some(sw) = m.wall(*s) else { return Err(EditError::NoWall) };
+        let Some(sw) = m.wall(*s) else {
+            return Err(EditError::NoWall);
+        };
         if !matches!(sw.surface, Surface::Planar { .. }) {
             return Err(EditError::CantCopy);
         }
@@ -1695,29 +2034,54 @@ pub fn copy_walls(m: &mut Model, seeds: &[WallId], place: &Placement, seed: u64)
         if depth_of(base) >= depth_of(*s) {
             return Err(EditError::CantCopy);
         }
-        let subtree = reachable(m, &[*s], &[base], &[parent.id]).map_err(|_| EditError::CantCopy)?;
+        let subtree =
+            reachable(m, &[*s], &[base], &[parent.id]).map_err(|_| EditError::CantCopy)?;
         let mut ids: Vec<(WallId, WallId)> = Vec::new();
         for w in &subtree {
             ids.push((*w, free_wall(m, seed, &mut kw)));
         }
         let new_id = |w: WallId| ids.iter().find(|(o, _)| *o == w).map(|(_, n)| *n);
-        let swap = |p: P2| if place.mirrors() { P2::new(p.y, p.x) } else { p };
+        let swap = |p: P2| {
+            if place.mirrors() {
+                P2::new(p.y, p.x)
+            } else {
+                p
+            }
+        };
         let mut walls = Vec::new();
         for w in &subtree {
             let ow = m.wall(*w).expect("wall");
-            let Surface::Planar { origin, u, v } = ow.surface else { return Err(EditError::CantCopy) };
-            let surface = if place.mirrors() {
-                Surface::Planar { origin: place.point(origin), u: place.vec(v), v: place.vec(u) }
-            } else {
-                Surface::Planar { origin: place.point(origin), u: place.vec(u), v: place.vec(v) }
+            let Surface::Planar { origin, u, v } = ow.surface else {
+                return Err(EditError::CantCopy);
             };
-            walls.push(Wall { id: new_id(*w).expect("id"), surface, outline: ow.outline.map(swap) });
+            let surface = if place.mirrors() {
+                Surface::Planar {
+                    origin: place.point(origin),
+                    u: place.vec(v),
+                    v: place.vec(u),
+                }
+            } else {
+                Surface::Planar {
+                    origin: place.point(origin),
+                    u: place.vec(u),
+                    v: place.vec(v),
+                }
+            };
+            walls.push(Wall {
+                id: new_id(*w).expect("id"),
+                surface,
+                outline: ow.outline.map(swap),
+            });
         }
         let mut joints = Vec::new();
         let mut trims: Vec<(Seg2, Seg2, Bend)> = Vec::new();
         let mut names = namer(m);
         let base_wall = m.wall(base).expect("base").clone();
-        for j in m.joints.iter().filter(|j| subtree.contains(&j.a) || subtree.contains(&j.b)) {
+        for j in m
+            .joints
+            .iter()
+            .filter(|j| subtree.contains(&j.a) || subtree.contains(&j.b))
+        {
             let mut c = j.clone();
             let onto_base = |p: P2| {
                 let s = m.wall(base).expect("base").surface;
@@ -1729,26 +2093,42 @@ pub fn copy_walls(m: &mut Model, seeds: &[WallId], place: &Placement, seed: u64)
                 continue;
             }
             let (sa, sb) = segments_mut(&mut c);
-            *sa = if a_in { Seg2::new(swap(sa.a), swap(sa.b)) } else { Seg2::new(onto_base(sa.a), onto_base(sa.b)) };
-            *sb = if b_in { Seg2::new(swap(sb.a), swap(sb.b)) } else { Seg2::new(onto_base(sb.a), onto_base(sb.b)) };
+            *sa = if a_in {
+                Seg2::new(swap(sa.a), swap(sa.b))
+            } else {
+                Seg2::new(onto_base(sa.a), onto_base(sa.b))
+            };
+            *sb = if b_in {
+                Seg2::new(swap(sb.a), swap(sb.b))
+            } else {
+                Seg2::new(onto_base(sb.a), onto_base(sb.b))
+            };
             c.a = if a_in { new_id(j.a).expect("id") } else { j.a };
             c.b = if b_in { new_id(j.b).expect("id") } else { j.b };
             c.id = free_joint(m, seed ^ 0x434f_5059, &mut kj);
             c.name = names.name(&c.kind);
             if j.id == parent.id {
-                trims.push((c.segment_on(base).expect("on the base"), j.segment_on(base).expect("on the base"), *j.bend().expect("a bend")));
+                trims.push((
+                    c.segment_on(base).expect("on the base"),
+                    j.segment_on(base).expect("on the base"),
+                    *j.bend().expect("a bend"),
+                ));
             }
             joints.push(c);
         }
         // The base gives up what lies past the copy's tangent line, as it did for the original
         // bend.
         for (seg, orig, _) in trims {
-            let Some(into) = poly::inward_normal(&base_wall.outline, orig) else { continue };
+            let Some(into) = poly::inward_normal(&base_wall.outline, orig) else {
+                continue;
+            };
             let s0 = m.wall(base).expect("base").surface;
             let into3 = s0.direction_at(orig.a, into);
             let new_into3 = place.vec(into3);
             let into_new = {
-                let q = base_wall.surface.local(base_wall.surface.point(seg.a) + new_into3);
+                let q = base_wall
+                    .surface
+                    .local(base_wall.surface.point(seg.a) + new_into3);
                 (q - seg.a).normalize()
             };
             if poly::inward_normal(&base_wall.outline, seg).is_some() {
@@ -1756,10 +2136,24 @@ pub fn copy_walls(m: &mut Model, seeds: &[WallId], place: &Placement, seed: u64)
             }
             // Everything of the base past the copy's tangent line, along its span, goes.
             let back = 4.0 * size_of(&base_wall.outline);
-            let band = Polygon::new(vec![seg.a, seg.b, seg.b - into_new * back, seg.a - into_new * back]);
+            let band = Polygon::new(vec![
+                seg.a,
+                seg.b,
+                seg.b - into_new * back,
+                seg.a - into_new * back,
+            ]);
             let bw = m.walls.iter_mut().find(|w| w.id == base).expect("base");
-            let left = exact(poly::difference(std::slice::from_ref(&bw.outline), std::slice::from_ref(&band)), &[&bw.outline, &band]);
-            if let Some(big) = left.into_iter().max_by(|a, b| a.area().total_cmp(&b.area())) {
+            let left = exact(
+                poly::difference(
+                    std::slice::from_ref(&bw.outline),
+                    std::slice::from_ref(&band),
+                ),
+                &[&bw.outline, &band],
+            );
+            if let Some(big) = left
+                .into_iter()
+                .max_by(|a, b| a.area().total_cmp(&b.area()))
+            {
                 bw.outline = big;
             }
         }
@@ -1775,7 +2169,12 @@ pub fn copy_walls(m: &mut Model, seeds: &[WallId], place: &Placement, seed: u64)
 /// `place` as a part of their own in the same model (no joint joins it to the original), so the
 /// copy is sheet metal too: it has its own flat pattern and takes later sheet metal features.
 /// Returns the new walls.
-pub fn copy_part(m: &mut Model, walls: &[WallId], place: &Placement, seed: u64) -> Result<Vec<WallId>, EditError> {
+pub fn copy_part(
+    m: &mut Model,
+    walls: &[WallId],
+    place: &Placement,
+    seed: u64,
+) -> Result<Vec<WallId>, EditError> {
     let mut kw = 0;
     let mut kj = 0;
     let mut ids: Vec<(WallId, WallId)> = Vec::new();
@@ -1790,15 +2189,35 @@ pub fn copy_part(m: &mut Model, walls: &[WallId], place: &Placement, seed: u64) 
         ids.push((*w, id));
     }
     let new_id = |w: WallId| ids.iter().find(|(o, _)| *o == w).map(|(_, n)| *n);
-    let swap = |p: P2| if place.mirrors() { P2::new(p.y, p.x) } else { p };
+    let swap = |p: P2| {
+        if place.mirrors() {
+            P2::new(p.y, p.x)
+        } else {
+            p
+        }
+    };
     let mut new_walls = Vec::new();
     for (old, nid) in &ids {
         let ow = m.wall(*old).expect("checked");
         let surface = match ow.surface {
-            Surface::Planar { origin, u, v } if place.mirrors() => Surface::Planar { origin: place.point(origin), u: place.vec(v), v: place.vec(u) },
-            Surface::Planar { origin, u, v } => Surface::Planar { origin: place.point(origin), u: place.vec(u), v: place.vec(v) },
+            Surface::Planar { origin, u, v } if place.mirrors() => Surface::Planar {
+                origin: place.point(origin),
+                u: place.vec(v),
+                v: place.vec(u),
+            },
+            Surface::Planar { origin, u, v } => Surface::Planar {
+                origin: place.point(origin),
+                u: place.vec(u),
+                v: place.vec(v),
+            },
             Surface::Rolled { .. } if place.mirrors() => return Err(EditError::CantCopy),
-            Surface::Rolled { axis_origin, axis, start, radius, material_outside } => Surface::Rolled {
+            Surface::Rolled {
+                axis_origin,
+                axis,
+                start,
+                radius,
+                material_outside,
+            } => Surface::Rolled {
                 axis_origin: place.point(axis_origin),
                 axis: place.vec(axis),
                 start: place.vec(start),
@@ -1806,12 +2225,20 @@ pub fn copy_part(m: &mut Model, walls: &[WallId], place: &Placement, seed: u64) 
                 material_outside,
             },
         };
-        new_walls.push(Wall { id: *nid, surface, outline: ow.outline.map(swap) });
+        new_walls.push(Wall {
+            id: *nid,
+            surface,
+            outline: ow.outline.map(swap),
+        });
     }
     let mut names = namer(m);
     let mut new_joints: Vec<Joint> = Vec::new();
     let mut joint_ids: Vec<(JointId, JointId)> = Vec::new();
-    for j in m.joints.iter().filter(|j| walls.contains(&j.a) && walls.contains(&j.b)) {
+    for j in m
+        .joints
+        .iter()
+        .filter(|j| walls.contains(&j.a) && walls.contains(&j.b))
+    {
         let mut c = j.clone();
         let (sa, sb) = segments_mut(&mut c);
         *sa = Seg2::new(swap(sa.a), swap(sa.b));
@@ -1831,10 +2258,33 @@ pub fn copy_part(m: &mut Model, walls: &[WallId], place: &Placement, seed: u64) 
     let cuts: Vec<crate::flat_edit::FlatCut> = m
         .flat_cuts
         .iter()
-        .filter_map(|c| Some(crate::flat_edit::FlatCut { anchor: new_id(c.anchor)?, shapes: c.shapes.iter().map(|s| s.map(swap)).collect() }))
+        .filter_map(|c| {
+            Some(crate::flat_edit::FlatCut {
+                anchor: new_id(c.anchor)?,
+                shapes: c.shapes.iter().map(|s| s.map(swap)).collect(),
+            })
+        })
         .collect();
-    let corners: Vec<crate::model::CornerOverride> = m.corner_overrides.iter().filter_map(|o| Some(crate::model::CornerOverride { bends: (nj(o.bends.0)?, nj(o.bends.1)?), ..*o })).collect();
-    let ends: Vec<crate::model::BendReliefOverride> = m.bend_relief_overrides.iter().filter_map(|o| Some(crate::model::BendReliefOverride { bend: nj(o.bend)?, ..*o })).collect();
+    let corners: Vec<crate::model::CornerOverride> = m
+        .corner_overrides
+        .iter()
+        .filter_map(|o| {
+            Some(crate::model::CornerOverride {
+                bends: (nj(o.bends.0)?, nj(o.bends.1)?),
+                ..*o
+            })
+        })
+        .collect();
+    let ends: Vec<crate::model::BendReliefOverride> = m
+        .bend_relief_overrides
+        .iter()
+        .filter_map(|o| {
+            Some(crate::model::BendReliefOverride {
+                bend: nj(o.bend)?,
+                ..*o
+            })
+        })
+        .collect();
     m.walls.extend(new_walls);
     m.joints.extend(new_joints);
     m.flat_cuts.extend(cuts);
@@ -1851,7 +2301,12 @@ mod tests {
     use std::f64::consts::{FRAC_PI_2, PI};
 
     fn params() -> Params {
-        Params { thickness: 2.0, bend_radius: 3.0, k_factor: 0.45, ..Params::default() }
+        Params {
+            thickness: 2.0,
+            bend_radius: 3.0,
+            k_factor: 0.45,
+            ..Params::default()
+        }
     }
 
     /// A 100 × 60 plate in the XY plane, material above.
@@ -1860,7 +2315,11 @@ mod tests {
             params: params(),
             walls: vec![Wall {
                 id: WallId(0),
-                surface: Surface::Planar { origin: P3::origin(), u: V3::x(), v: V3::y() },
+                surface: Surface::Planar {
+                    origin: P3::origin(),
+                    u: V3::x(),
+                    v: V3::y(),
+                },
                 outline: Polygon::rect(P2::new(0.0, 0.0), P2::new(100.0, 60.0)),
             }],
             ..Default::default()
@@ -1895,13 +2354,25 @@ mod tests {
             assert!(m.validate().is_empty(), "{al:?}: {:?}", m.validate());
             assert_eq!(made.joints.len(), 1);
             let (lo, hi) = flat_bounds(&m);
-            assert!((hi.x - lo.x - 100.0).abs() < 1e-5 && (hi.y - lo.y - 60.0).abs() < 1e-5, "{al:?}: {lo:?} {hi:?}");
+            assert!(
+                (hi.x - lo.x - 100.0).abs() < 1e-5 && (hi.y - lo.y - 60.0).abs() < 1e-5,
+                "{al:?}: {lo:?} {hi:?}"
+            );
             let area = flatten(&m).parts[0].area();
             assert!((area - 6000.0).abs() < 1e-3, "{al:?}: {area}");
         }
         // A custom K factor changes the folded lengths, not the flat.
         let mut m = plate();
-        bend_wall(&mut m, &BendSpec { k_factor: Some(0.3), radius: Some(5.0), ..spec(70.0, BendAlignment::BendLine) }, 7).unwrap();
+        bend_wall(
+            &mut m,
+            &BendSpec {
+                k_factor: Some(0.3),
+                radius: Some(5.0),
+                ..spec(70.0, BendAlignment::BendLine)
+            },
+            7,
+        )
+        .unwrap();
         let (lo, hi) = flat_bounds(&m);
         assert!((hi.x - lo.x - 100.0).abs() < 1e-5, "{lo:?} {hi:?}");
     }
@@ -1916,7 +2387,15 @@ mod tests {
         assert!(w.surface.point(hi).z > 10.0);
         assert!(m.wall(WallId(0)).unwrap().outline.bounds().unwrap().1.x <= 70.0 + 1e-9);
         let mut m = plate();
-        let made = bend_wall(&mut m, &BendSpec { hold_opposite: true, ..spec(70.0, BendAlignment::HoldLine) }, 1).unwrap();
+        let made = bend_wall(
+            &mut m,
+            &BendSpec {
+                hold_opposite: true,
+                ..spec(70.0, BendAlignment::HoldLine)
+            },
+            1,
+        )
+        .unwrap();
         assert!(m.wall(WallId(0)).unwrap().outline.bounds().unwrap().0.x >= 70.0 - 1e-9);
         assert!(m.wall(made.wall).is_some());
     }
@@ -1924,7 +2403,11 @@ mod tests {
     #[test]
     fn folded_alignments_put_the_bent_wall_on_the_line() {
         let t = 2.0;
-        for (al, face) in [(BendAlignment::Inner, t), (BendAlignment::Outer, 0.0), (BendAlignment::Middle, t / 2.0)] {
+        for (al, face) in [
+            (BendAlignment::Inner, t),
+            (BendAlignment::Outer, 0.0),
+            (BendAlignment::Middle, t / 2.0),
+        ] {
             let mut m = plate();
             let made = bend_wall(&mut m, &spec(70.0, al), 3).unwrap();
             assert!(m.validate().is_empty());
@@ -1946,20 +2429,43 @@ mod tests {
         // moves) carries the flange round.
         let mut m = crate::samples::l_bracket(params(), true).unwrap();
         let base = m.walls[0].id;
-        let s = BendSpec { wall: base, line: (P3::new(20.0, 0.0, 0.0), P3::new(20.0, 40.0, 0.0)), line_height: 0.0, ..spec(0.0, BendAlignment::BendLine) };
+        let s = BendSpec {
+            wall: base,
+            line: (P3::new(20.0, 0.0, 0.0), P3::new(20.0, 40.0, 0.0)),
+            line_height: 0.0,
+            ..spec(0.0, BendAlignment::BendLine)
+        };
         let before = flatten(&m).parts[0].area();
-        let made = bend_wall(&mut m, &BendSpec { toward_material: false, hold_opposite: true, ..s }, 9).unwrap();
+        let made = bend_wall(
+            &mut m,
+            &BendSpec {
+                toward_material: false,
+                hold_opposite: true,
+                ..s
+            },
+            9,
+        )
+        .unwrap();
         assert_eq!(made.moved.len(), 1);
         assert!(m.validate().is_empty(), "{:?}", m.validate());
         let f = flatten(&m);
         assert!(f.errors.is_empty());
-        assert!((f.parts[0].area() - before).abs() < 1e-3, "{} {before}", f.parts[0].area());
+        assert!(
+            (f.parts[0].area() - before).abs() < 1e-3,
+            "{} {before}",
+            f.parts[0].area()
+        );
     }
 
     #[test]
     fn a_bend_line_across_a_slot_makes_two_bends() {
         let mut m = plate();
-        m.walls[0].outline.holes.push(vec![P2::new(65.0, 20.0), P2::new(65.0, 40.0), P2::new(75.0, 40.0), P2::new(75.0, 20.0)]);
+        m.walls[0].outline.holes.push(vec![
+            P2::new(65.0, 20.0),
+            P2::new(65.0, 40.0),
+            P2::new(75.0, 40.0),
+            P2::new(75.0, 20.0),
+        ]);
         let made = bend_wall(&mut m, &spec(70.0, BendAlignment::BendLine), 4).unwrap();
         assert_eq!(made.joints.len(), 2);
         assert!(m.validate().is_empty());
@@ -1970,9 +2476,18 @@ mod tests {
     #[test]
     fn a_jog_offsets_the_far_wall() {
         let t = 2.0;
-        for (anchor, want) in [(JogAnchor::Inside, 20.0 + t), (JogAnchor::Outside, 20.0), (JogAnchor::Nominal, 20.0 - t)] {
+        for (anchor, want) in [
+            (JogAnchor::Inside, 20.0 + t),
+            (JogAnchor::Outside, 20.0),
+            (JogAnchor::Nominal, 20.0 - t),
+        ] {
             let mut m = plate();
-            let s = JogSpec { bend: spec(60.0, BendAlignment::BendLine), offset: 20.0, anchor, preserve_material: true };
+            let s = JogSpec {
+                bend: spec(60.0, BendAlignment::BendLine),
+                offset: 20.0,
+                anchor,
+                preserve_material: true,
+            };
             let j = jog_wall(&mut m, &s, 5).unwrap();
             assert!(m.validate().is_empty(), "{:?}", m.validate());
             let far = m.wall(j.second.wall).unwrap();
@@ -1980,21 +2495,39 @@ mod tests {
             let dz = far.surface.point(P2::origin()).z;
             assert!((dz - want).abs() < 1e-6, "{anchor:?}: {dz}");
             let (lo, hi) = flat_bounds(&m);
-            assert!((hi.x - lo.x - 100.0).abs() < 1e-5, "preserved: the flat keeps its size");
+            assert!(
+                (hi.x - lo.x - 100.0).abs() < 1e-5,
+                "preserved: the flat keeps its size"
+            );
         }
         // Without Preserve material the far end stays where it was and the flat grows.
         let mut m = plate();
-        let s = JogSpec { bend: spec(60.0, BendAlignment::BendLine), offset: 10.0, anchor: JogAnchor::Inside, preserve_material: false };
+        let s = JogSpec {
+            bend: spec(60.0, BendAlignment::BendLine),
+            offset: 10.0,
+            anchor: JogAnchor::Inside,
+            preserve_material: false,
+        };
         let j = jog_wall(&mut m, &s, 5).unwrap();
         assert!(m.validate().is_empty());
         let far = m.wall(j.second.wall).unwrap();
-        let x_max = far.outline.outer.iter().map(|p| far.surface.point(*p).x).fold(f64::MIN, f64::max);
+        let x_max = far
+            .outline
+            .outer
+            .iter()
+            .map(|p| far.surface.point(*p).x)
+            .fold(f64::MIN, f64::max);
         assert!((x_max - 100.0).abs() < 1e-6, "{x_max}");
         let (lo, hi) = flat_bounds(&m);
         assert!((hi.x - lo.x - 100.0 - j.added).abs() < 1e-5 && j.added > 1.0);
         // Too small an offset for the bends.
         let mut m = plate();
-        let s = JogSpec { bend: spec(60.0, BendAlignment::BendLine), offset: 0.5, anchor: JogAnchor::Outside, preserve_material: true };
+        let s = JogSpec {
+            bend: spec(60.0, BendAlignment::BendLine),
+            offset: 0.5,
+            anchor: JogAnchor::Outside,
+            preserve_material: true,
+        };
         assert_eq!(jog_wall(&mut m, &s, 5).unwrap_err(), EditError::JogTooSmall);
     }
 
@@ -2003,7 +2536,12 @@ mod tests {
         let mut m = crate::samples::l_bracket(params(), true).unwrap();
         let base = m.walls[0].id;
         let before = m.wall(base).unwrap().outline.area();
-        let tab = Region3 { origin: P3::new(0.0, 0.0, 2.0), x: V3::x(), y: V3::y(), polygon: Polygon::rect(P2::new(10.0, -15.0), P2::new(30.0, 5.0)) };
+        let tab = Region3 {
+            origin: P3::new(0.0, 0.0, 2.0),
+            x: V3::x(),
+            y: V3::y(),
+            polygon: Polygon::rect(P2::new(10.0, -15.0), P2::new(30.0, 5.0)),
+        };
         let flange = m.walls[1].id;
         let took = add_tab(&mut m, std::slice::from_ref(&tab), &[base, flange]).unwrap();
         assert_eq!(took, vec![base]);
@@ -2011,41 +2549,108 @@ mod tests {
         assert!(m.validate().is_empty());
         // Two coplanar plates bridged by a tab become one wall.
         let mut m = plate();
-        m.walls.push(Wall { id: WallId(1), surface: Surface::Planar { origin: P3::new(120.0, 0.0, 0.0), u: V3::x(), v: V3::y() }, outline: Polygon::rect(P2::new(0.0, 0.0), P2::new(30.0, 60.0)) });
-        let bridge = Region3 { origin: P3::origin(), x: V3::x(), y: V3::y(), polygon: Polygon::rect(P2::new(90.0, 20.0), P2::new(130.0, 40.0)) };
+        m.walls.push(Wall {
+            id: WallId(1),
+            surface: Surface::Planar {
+                origin: P3::new(120.0, 0.0, 0.0),
+                u: V3::x(),
+                v: V3::y(),
+            },
+            outline: Polygon::rect(P2::new(0.0, 0.0), P2::new(30.0, 60.0)),
+        });
+        let bridge = Region3 {
+            origin: P3::origin(),
+            x: V3::x(),
+            y: V3::y(),
+            polygon: Polygon::rect(P2::new(90.0, 20.0), P2::new(130.0, 40.0)),
+        };
         add_tab(&mut m, &[bridge], &[WallId(0), WallId(1)]).unwrap();
         assert_eq!(m.walls.len(), 1);
         assert!((m.walls[0].outline.area() - (6000.0 + 1800.0 + 400.0)).abs() < 1e-6);
         // Not touching: no tab.
         let mut m = plate();
-        let far = Region3 { origin: P3::origin(), x: V3::x(), y: V3::y(), polygon: Polygon::rect(P2::new(200.0, 0.0), P2::new(210.0, 10.0)) };
-        assert_eq!(add_tab(&mut m, &[far], &[WallId(0)]).unwrap_err(), EditError::NoTab);
+        let far = Region3 {
+            origin: P3::origin(),
+            x: V3::x(),
+            y: V3::y(),
+            polygon: Polygon::rect(P2::new(200.0, 0.0), P2::new(210.0, 10.0)),
+        };
+        assert_eq!(
+            add_tab(&mut m, &[far], &[WallId(0)]).unwrap_err(),
+            EditError::NoTab
+        );
     }
 
     #[test]
     fn a_slanted_cut_goes_through_perpendicular() {
         let mut m = plate();
         // A 10 × 10 square sketched 50 above the plate, cut straight down: a 10 × 10 hole.
-        let sq = Region3 { origin: P3::new(0.0, 0.0, 50.0), x: V3::x(), y: V3::y(), polygon: Polygon::rect(P2::new(40.0, 20.0), P2::new(50.0, 30.0)) };
-        cut_walls(&mut m, &[CutTool { region: sq.clone(), dir: -V3::z(), z: None }], None).unwrap();
+        let sq = Region3 {
+            origin: P3::new(0.0, 0.0, 50.0),
+            x: V3::x(),
+            y: V3::y(),
+            polygon: Polygon::rect(P2::new(40.0, 20.0), P2::new(50.0, 30.0)),
+        };
+        cut_walls(
+            &mut m,
+            &[CutTool {
+                region: sq.clone(),
+                dir: -V3::z(),
+                z: None,
+            }],
+            None,
+        )
+        .unwrap();
         assert!((m.walls[0].outline.area() - 5900.0).abs() < 1e-6);
         assert_eq!(m.walls[0].outline.holes.len(), 1);
         // A blind cut that stops short of the plate cuts nothing.
         let mut m = plate();
-        assert!(cut_walls(&mut m, &[CutTool { region: sq, dir: -V3::z(), z: Some((0.0, 20.0)) }], None).unwrap().is_empty());
+        assert!(
+            cut_walls(
+                &mut m,
+                &[CutTool {
+                    region: sq,
+                    dir: -V3::z(),
+                    z: Some((0.0, 20.0))
+                }],
+                None
+            )
+            .unwrap()
+            .is_empty()
+        );
     }
 
     #[test]
     fn corner_breaks_round_or_cut_a_corner() {
         let mut m = plate();
-        break_corner(&mut m, WallId(0), P2::new(100.0, 60.0), CornerBreakKind::Fillet { radius: 10.0 }).unwrap();
+        break_corner(
+            &mut m,
+            WallId(0),
+            P2::new(100.0, 60.0),
+            CornerBreakKind::Fillet { radius: 10.0 },
+        )
+        .unwrap();
         let a = m.walls[0].outline.area();
         let want = 6000.0 - (1.0 - PI / 4.0) * 100.0;
         // (The arc is a polyline within 0.002 of the circle.)
         assert!((a - want).abs() < 0.05, "{a} vs {want}");
-        break_corner(&mut m, WallId(0), P2::new(0.0, 0.0), CornerBreakKind::Chamfer { d1: 5.0, d2: 8.0 }).unwrap();
+        break_corner(
+            &mut m,
+            WallId(0),
+            P2::new(0.0, 0.0),
+            CornerBreakKind::Chamfer { d1: 5.0, d2: 8.0 },
+        )
+        .unwrap();
         assert!((m.walls[0].outline.area() - a + 20.0).abs() < 1e-6);
-        assert_eq!(break_corner(&mut m, WallId(0), P2::new(100.0, 0.0), CornerBreakKind::Fillet { radius: 70.0 }), Err(EditError::CornerTooBig));
+        assert_eq!(
+            break_corner(
+                &mut m,
+                WallId(0),
+                P2::new(100.0, 0.0),
+                CornerBreakKind::Fillet { radius: 70.0 }
+            ),
+            Err(EditError::CornerTooBig)
+        );
         assert!(corner_vertex_at(&m, P3::new(100.0, 0.0, 1.0), 0.5).is_some());
         assert!((radius_for_width(10.0 * 2f64.sqrt(), FRAC_PI_2) - 10.0).abs() < 1e-9);
         assert!((chamfer_second(5.0, PI / 4.0, FRAC_PI_2) - 5.0).abs() < 1e-9);
@@ -2055,22 +2660,61 @@ mod tests {
     fn asymmetric_rounds_overflow_and_offset_chamfers() {
         // Asymmetric at a square corner: a quarter ellipse with semi-axes 10 and 6.
         let mut m = plate();
-        break_corner(&mut m, WallId(0), P2::new(100.0, 60.0), CornerBreakKind::Round { r1: 10.0, r2: 6.0, overflow: false }).unwrap();
+        break_corner(
+            &mut m,
+            WallId(0),
+            P2::new(100.0, 60.0),
+            CornerBreakKind::Round {
+                r1: 10.0,
+                r2: 6.0,
+                overflow: false,
+            },
+        )
+        .unwrap();
         let want = 6000.0 - 10.0 * 6.0 * (1.0 - PI / 4.0);
         let a = m.walls[0].outline.area();
         assert!((a - want).abs() < 0.02, "{a} vs {want}");
         // The 10 is on the edge into the corner (the right edge, going up), the 6 on the top edge.
         let (_, hi) = m.walls[0].outline.bounds().unwrap();
         assert!((hi.x - 100.0).abs() < 1e-9 && (hi.y - 60.0).abs() < 1e-9);
-        assert!(m.walls[0].outline.outer.iter().any(|p| (p - P2::new(100.0, 50.0)).norm() < 1e-9));
-        assert!(m.walls[0].outline.outer.iter().any(|p| (p - P2::new(94.0, 60.0)).norm() < 1e-9));
+        assert!(
+            m.walls[0]
+                .outline
+                .outer
+                .iter()
+                .any(|p| (p - P2::new(100.0, 50.0)).norm() < 1e-9)
+        );
+        assert!(
+            m.walls[0]
+                .outline
+                .outer
+                .iter()
+                .any(|p| (p - P2::new(94.0, 60.0)).norm() < 1e-9)
+        );
         // A round longer than an edge fails without overflow...
         let mut m = plate();
-        let big = CornerBreakKind::Round { r1: 70.0, r2: 70.0, overflow: false };
-        assert_eq!(break_corner(&mut m, WallId(0), P2::new(100.0, 60.0), big), Err(EditError::CornerTooBig));
+        let big = CornerBreakKind::Round {
+            r1: 70.0,
+            r2: 70.0,
+            overflow: false,
+        };
+        assert_eq!(
+            break_corner(&mut m, WallId(0), P2::new(100.0, 60.0), big),
+            Err(EditError::CornerTooBig)
+        );
         // ...and with it runs over the next corner: the circle about (30, −10), radius 70, trims
         // the plate's corner. Removed: the quarter round's corner less the part below y = 0.
-        break_corner(&mut m, WallId(0), P2::new(100.0, 60.0), CornerBreakKind::Round { r1: 70.0, r2: 70.0, overflow: true }).unwrap();
+        break_corner(
+            &mut m,
+            WallId(0),
+            P2::new(100.0, 60.0),
+            CornerBreakKind::Round {
+                r1: 70.0,
+                r2: 70.0,
+                overflow: true,
+            },
+        )
+        .unwrap();
         let below = 700.0 - (5.0 * 4800f64.sqrt() + 2450.0 * (1.0f64 / 7.0).asin());
         let want = 6000.0 - (4900.0 * (1.0 - PI / 4.0) - below);
         let a = m.walls[0].outline.area();
@@ -2083,25 +2727,56 @@ mod tests {
         let (s1, s2) = chamfer_offset_setbacks(5.0, 8.0, FRAC_PI_2);
         assert!((s1 - 8.0).abs() < 1e-9 && (s2 - 5.0).abs() < 1e-9);
         let mut tri = plate();
-        tri.walls[0].outline = Polygon::new(vec![P2::new(0.0, 0.0), P2::new(100.0, 0.0), P2::new(50.0, 50.0 * 3f64.sqrt())]);
+        tri.walls[0].outline = Polygon::new(vec![
+            P2::new(0.0, 0.0),
+            P2::new(100.0, 0.0),
+            P2::new(50.0, 50.0 * 3f64.sqrt()),
+        ]);
         let before = tri.walls[0].outline.area();
         let (s1, s2) = chamfer_offset_setbacks(5.0, 5.0, PI / 3.0);
-        break_corner(&mut tri, WallId(0), P2::new(0.0, 0.0), CornerBreakKind::Chamfer { d1: s1, d2: s2 }).unwrap();
+        break_corner(
+            &mut tri,
+            WallId(0),
+            P2::new(0.0, 0.0),
+            CornerBreakKind::Chamfer { d1: s1, d2: s2 },
+        )
+        .unwrap();
         let cut = before - tri.walls[0].outline.area();
-        assert!((cut - 0.5 * s1 * s2 * (PI / 3.0).sin()).abs() < 1e-6, "{cut}");
+        assert!(
+            (cut - 0.5 * s1 * s2 * (PI / 3.0).sin()).abs() < 1e-6,
+            "{cut}"
+        );
     }
 
     #[test]
     fn a_cut_that_splits_a_wall_keeps_both_pieces() {
         let mut m = plate();
         // A 4 wide slot right across the plate.
-        let slot = Region3 { origin: P3::new(0.0, 0.0, 10.0), x: V3::x(), y: V3::y(), polygon: Polygon::rect(P2::new(48.0, -10.0), P2::new(52.0, 70.0)) };
-        let made = cut_walls(&mut m, &[CutTool { region: slot, dir: -V3::z(), z: None }], None).unwrap();
+        let slot = Region3 {
+            origin: P3::new(0.0, 0.0, 10.0),
+            x: V3::x(),
+            y: V3::y(),
+            polygon: Polygon::rect(P2::new(48.0, -10.0), P2::new(52.0, 70.0)),
+        };
+        let made = cut_walls(
+            &mut m,
+            &[CutTool {
+                region: slot,
+                dir: -V3::z(),
+                z: None,
+            }],
+            None,
+        )
+        .unwrap();
         assert_eq!(made.walls, vec![WallId(0)]);
         assert_eq!(made.split.len(), 1);
         assert_eq!(m.walls.len(), 2);
         for w in &m.walls {
-            assert!((w.outline.area() - 48.0 * 60.0).abs() < 1e-6, "{}", w.outline.area());
+            assert!(
+                (w.outline.area() - 48.0 * 60.0).abs() < 1e-6,
+                "{}",
+                w.outline.area()
+            );
         }
         let f = flatten(&m);
         assert!(f.errors.is_empty());
@@ -2109,13 +2784,30 @@ mod tests {
         // On a bent plate, the piece beyond the slot keeps its bend.
         let mut m = plate();
         bend_wall(&mut m, &spec(80.0, BendAlignment::HoldLine), 3).unwrap();
-        let slot = Region3 { origin: P3::new(0.0, 0.0, 10.0), x: V3::x(), y: V3::y(), polygon: Polygon::rect(P2::new(38.0, -10.0), P2::new(42.0, 70.0)) };
-        cut_walls(&mut m, &[CutTool { region: slot, dir: -V3::z(), z: None }], None).unwrap();
+        let slot = Region3 {
+            origin: P3::new(0.0, 0.0, 10.0),
+            x: V3::x(),
+            y: V3::y(),
+            polygon: Polygon::rect(P2::new(38.0, -10.0), P2::new(42.0, 70.0)),
+        };
+        cut_walls(
+            &mut m,
+            &[CutTool {
+                region: slot,
+                dir: -V3::z(),
+                z: None,
+            }],
+            None,
+        )
+        .unwrap();
         assert!(m.validate().is_empty(), "{:?}", m.validate());
         let f = flatten(&m);
         assert!(f.errors.is_empty());
         assert_eq!(f.parts.len(), 2);
-        assert!(f.parts.iter().any(|p| p.bends.len() == 1), "the bend went with its piece");
+        assert!(
+            f.parts.iter().any(|p| p.bends.len() == 1),
+            "the bend went with its piece"
+        );
     }
 
     #[test]
@@ -2126,8 +2818,22 @@ mod tests {
         let mut m = plate();
         bend_wall(&mut m, &spec(70.0, BendAlignment::HoldLine), 3).unwrap();
         let before = flatten(&m).parts[0].area();
-        let slot = Region3 { origin: P3::new(0.0, 0.0, 50.0), x: V3::x(), y: V3::y(), polygon: Polygon::rect(P2::new(60.0, 25.0), P2::new(72.0, 35.0)) };
-        let made = cut_walls(&mut m, &[CutTool { region: slot, dir: -V3::z(), z: None }], None).unwrap();
+        let slot = Region3 {
+            origin: P3::new(0.0, 0.0, 50.0),
+            x: V3::x(),
+            y: V3::y(),
+            polygon: Polygon::rect(P2::new(60.0, 25.0), P2::new(72.0, 35.0)),
+        };
+        let made = cut_walls(
+            &mut m,
+            &[CutTool {
+                region: slot,
+                dir: -V3::z(),
+                z: None,
+            }],
+            None,
+        )
+        .unwrap();
         assert_eq!(made.bends.len(), 1);
         let ba = m.joints[0].bend().unwrap().allowance(&m.params).unwrap();
         let f = flatten(&m);
@@ -2143,7 +2849,10 @@ mod tests {
         let (lo, hi) = Polygon::new(holes[0].clone()).bounds().unwrap();
         let (w, h) = (hi.x - lo.x, hi.y - lo.y);
         let (long, short) = (w.max(h), w.min(h));
-        assert!((short - 10.0).abs() < 1e-6 && (long - (10.0 + ba / 3.0)).abs() < 1e-5, "{w} × {h}");
+        assert!(
+            (short - 10.0).abs() < 1e-6 && (long - (10.0 + ba / 3.0)).abs() < 1e-5,
+            "{w} × {h}"
+        );
     }
 
     #[test]
@@ -2151,7 +2860,13 @@ mod tests {
         let mut m = crate::samples::l_bracket(params(), true).unwrap();
         let walls: Vec<WallId> = m.walls.iter().map(|w| w.id).collect();
         let one = flatten(&m).parts[0].area();
-        let made = copy_part(&mut m, &walls, &Placement::Rigid(Rigid::translation(V3::new(0.0, 100.0, 0.0))), 21).unwrap();
+        let made = copy_part(
+            &mut m,
+            &walls,
+            &Placement::Rigid(Rigid::translation(V3::new(0.0, 100.0, 0.0))),
+            21,
+        )
+        .unwrap();
         assert_eq!(made.len(), walls.len());
         assert!(m.validate().is_empty(), "{:?}", m.validate());
         let f = flatten(&m);
@@ -2159,7 +2874,16 @@ mod tests {
         assert!(f.parts.iter().all(|p| (p.area() - one).abs() < 1e-6));
         // Mirrored too.
         let mut m = crate::samples::l_bracket(params(), true).unwrap();
-        copy_part(&mut m, &walls, &Placement::Mirror { point: P3::new(-10.0, 0.0, 0.0), normal: V3::x() }, 22).unwrap();
+        copy_part(
+            &mut m,
+            &walls,
+            &Placement::Mirror {
+                point: P3::new(-10.0, 0.0, 0.0),
+                normal: V3::x(),
+            },
+            22,
+        )
+        .unwrap();
         assert!(m.validate().is_empty(), "{:?}", m.validate());
         let f = flatten(&m);
         assert_eq!(f.parts.len(), 2);
@@ -2171,9 +2895,24 @@ mod tests {
         let g = grow(&Polygon::rect(P2::new(0.0, 0.0), P2::new(20.0, 10.0)), 0.5);
         assert!((g.area() - 21.0 * 11.0).abs() < 1e-9, "{}", g.area());
         // A concave L grows by its offset, its inner corner staying square.
-        let l = Polygon::new(vec![P2::new(0.0, 0.0), P2::new(10.0, 0.0), P2::new(10.0, 4.0), P2::new(4.0, 4.0), P2::new(4.0, 10.0), P2::new(0.0, 10.0)]);
+        let l = Polygon::new(vec![
+            P2::new(0.0, 0.0),
+            P2::new(10.0, 0.0),
+            P2::new(10.0, 4.0),
+            P2::new(4.0, 4.0),
+            P2::new(4.0, 10.0),
+            P2::new(0.0, 10.0),
+        ]);
         let g = grow(&l, 1.0);
-        let want = Polygon::new(vec![P2::new(-1.0, -1.0), P2::new(11.0, -1.0), P2::new(11.0, 5.0), P2::new(5.0, 5.0), P2::new(5.0, 11.0), P2::new(-1.0, 11.0)]).area();
+        let want = Polygon::new(vec![
+            P2::new(-1.0, -1.0),
+            P2::new(11.0, -1.0),
+            P2::new(11.0, 5.0),
+            P2::new(5.0, 5.0),
+            P2::new(5.0, 11.0),
+            P2::new(-1.0, 11.0),
+        ])
+        .area();
         assert!((g.area() - want).abs() < 1e-9, "{} vs {want}", g.area());
     }
 
@@ -2182,7 +2921,16 @@ mod tests {
         // A flange on x = 50 of a 50 × 40 base, mirrored in x = 25: a flange on x = 0 too.
         let mut m = crate::samples::l_bracket(params(), true).unwrap();
         let flange = m.walls[1].id;
-        let made = copy_walls(&mut m, &[flange], &Placement::Mirror { point: P3::new(25.0, 0.0, 0.0), normal: V3::x() }, 11).unwrap();
+        let made = copy_walls(
+            &mut m,
+            &[flange],
+            &Placement::Mirror {
+                point: P3::new(25.0, 0.0, 0.0),
+                normal: V3::x(),
+            },
+            11,
+        )
+        .unwrap();
         assert_eq!(made.len(), 1);
         assert!(m.validate().is_empty(), "{:?}", m.validate());
         let f = flatten(&m);
@@ -2191,19 +2939,33 @@ mod tests {
         // A U-channel's flat: twice the flange.
         let one = flatten(&crate::samples::l_bracket(params(), true).unwrap()).parts[0].area();
         let base = 50.0 * 40.0;
-        assert!((f.parts[0].area() - (2.0 * one - base)).abs() < 1e-3, "{}", f.parts[0].area());
+        assert!(
+            (f.parts[0].area() - (2.0 * one - base)).abs() < 1e-3,
+            "{}",
+            f.parts[0].area()
+        );
     }
 
     #[test]
     fn picks_find_walls_corners_and_bend_ends() {
         let m = crate::samples::partial_flange(params()).unwrap();
-        assert_eq!(wall_at(&m, P3::new(10.0, 10.0, 2.0), 1e-6).map(|x| x.1), Some(true));
-        assert_eq!(wall_at(&m, P3::new(10.0, 10.0, 0.0), 1e-6).map(|x| x.1), Some(false));
+        assert_eq!(
+            wall_at(&m, P3::new(10.0, 10.0, 2.0), 1e-6).map(|x| x.1),
+            Some(true)
+        );
+        assert_eq!(
+            wall_at(&m, P3::new(10.0, 10.0, 0.0), 1e-6).map(|x| x.1),
+            Some(false)
+        );
         let j = m.joints[0].id;
         let ((jj, end), _) = bend_end_near(&m, P3::new(50.0, 30.0, 0.0)).unwrap();
         assert_eq!(jj, j);
         let b = m.joints[0].bend().unwrap();
-        let near = if (b.on_a.b.y - 30.0).abs() < 5.0 { BendEnd::End } else { BendEnd::Start };
+        let near = if (b.on_a.b.y - 30.0).abs() < 5.0 {
+            BendEnd::End
+        } else {
+            BendEnd::Start
+        };
         assert_eq!(end, near);
         let bx = crate::samples::open_box(params(), crate::model::RipStyle::EdgeJoint).unwrap();
         let f = flatten(&bx);

@@ -31,7 +31,11 @@ impl Doc {
     fn new() -> Self {
         let d = Document::new("P3E.3 measure");
         let el = d.elements[0].id;
-        Self { d, h: History::default(), el }
+        Self {
+            d,
+            h: History::default(),
+            el,
+        }
     }
 
     fn parts(&self) -> Vec<Part> {
@@ -42,22 +46,76 @@ impl Doc {
 
     fn extrude(&mut self, ops: Vec<SketchOp>, seed: Vec2, depth: f64) -> FeatureId {
         let s = FeatureId::new();
-        self.h.execute(&mut self.d, &AddSketch { element: self.el, feature: s, plane: Some(PlaneRef::Top) }).unwrap();
+        self.h
+            .execute(
+                &mut self.d,
+                &AddSketch {
+                    element: self.el,
+                    feature: s,
+                    plane: Some(PlaneRef::Top),
+                },
+            )
+            .unwrap();
         for op in ops {
-            self.h.execute(&mut self.d, &EditSketch { element: self.el, feature: s, op }).unwrap();
+            self.h
+                .execute(
+                    &mut self.d,
+                    &EditSketch {
+                        element: self.el,
+                        feature: s,
+                        op,
+                    },
+                )
+                .unwrap();
         }
-        let g = self.d.element(self.el).unwrap().feature(s).unwrap().sketch().unwrap().geometry.clone();
+        let g = self
+            .d
+            .element(self.el)
+            .unwrap()
+            .feature(s)
+            .unwrap()
+            .sketch()
+            .unwrap()
+            .geometry
+            .clone();
         let regions = samples::region_refs(s, &g, &[seed]);
-        let e = ExtrudeFeature { op: BooleanOp::New, ..samples::extrude_of(regions, depth) };
+        let e = ExtrudeFeature {
+            op: BooleanOp::New,
+            ..samples::extrude_of(regions, depth)
+        };
         let id = FeatureId::new();
-        self.h.execute(&mut self.d, &AddExtrude { element: self.el, feature: id, extrude: ExtrudeFeature::default() }).unwrap();
-        self.h.execute(&mut self.d, &SetExtrude { element: self.el, feature: id, extrude: e, label: "Extrude".into() }).unwrap();
+        self.h
+            .execute(
+                &mut self.d,
+                &AddExtrude {
+                    element: self.el,
+                    feature: id,
+                    extrude: ExtrudeFeature::default(),
+                },
+            )
+            .unwrap();
+        self.h
+            .execute(
+                &mut self.d,
+                &SetExtrude {
+                    element: self.el,
+                    feature: id,
+                    extrude: e,
+                    label: "Extrude".into(),
+                },
+            )
+            .unwrap();
         id
     }
 
     fn block(&mut self, x0: f64, y0: f64, x1: f64, y1: f64, h: f64) -> FeatureId {
         let v = Vec2::new;
-        let rect = SketchOp::AddPolyline { points: vec![v(x0, y0), v(x1, y0), v(x1, y1), v(x0, y1)], closed: true, construction: false, label: "Add rectangle" };
+        let rect = SketchOp::AddPolyline {
+            points: vec![v(x0, y0), v(x1, y0), v(x1, y1), v(x0, y1)],
+            closed: true,
+            construction: false,
+            label: "Add rectangle",
+        };
         self.extrude(vec![rect], v((x0 + x1) / 2.0, (y0 + y1) / 2.0), h)
     }
 }
@@ -66,7 +124,11 @@ impl Doc {
 fn face_index(part: &Part, n: [f64; 3], p: [f64; 3]) -> usize {
     let s = &part.solid;
     (0..s.faces.len())
-        .find(|&i| s.face_normal(i).is_some_and(|m| m[0] * n[0] + m[1] * n[1] + m[2] * n[2] > 0.999) && s.face_contains(i, p))
+        .find(|&i| {
+            s.face_normal(i)
+                .is_some_and(|m| m[0] * n[0] + m[1] * n[1] + m[2] * n[2] > 0.999)
+                && s.face_contains(i, p)
+        })
         .expect("a face there")
 }
 
@@ -95,16 +157,45 @@ fn a_100_by_60_by_25_box() {
     let mut d = Doc::new();
     d.block(0.0, 0.0, 100.0, 60.0, 25.0);
     let p = &d.parts()[0];
-    for (a, b, l) in [([0.0, 0.0, 0.0], [100.0, 0.0, 0.0], 100.0), ([0.0, 0.0, 0.0], [0.0, 60.0, 0.0], 60.0), ([0.0, 0.0, 0.0], [0.0, 0.0, 25.0], 25.0)] {
-        close(measure::measure(&[edge(p, a, b)], Mode::Minimum).length.unwrap(), l, 1e-6);
+    for (a, b, l) in [
+        ([0.0, 0.0, 0.0], [100.0, 0.0, 0.0], 100.0),
+        ([0.0, 0.0, 0.0], [0.0, 60.0, 0.0], 60.0),
+        ([0.0, 0.0, 0.0], [0.0, 0.0, 25.0], 25.0),
+    ] {
+        close(
+            measure::measure(&[edge(p, a, b)], Mode::Minimum)
+                .length
+                .unwrap(),
+            l,
+            1e-6,
+        );
     }
     let top = face(p, [0.0, 0.0, 1.0], [50.0, 30.0, 25.0]);
-    close(measure::measure(std::slice::from_ref(&top), Mode::Minimum).area.unwrap(), 6000.0, 1e-6);
+    close(
+        measure::measure(std::slice::from_ref(&top), Mode::Minimum)
+            .area
+            .unwrap(),
+        6000.0,
+        1e-6,
+    );
     // Top and front meet at 90°; top to bottom is the 25 height.
     let front = face(p, [0.0, -1.0, 0.0], [50.0, 0.0, 12.0]);
-    close(measure::measure(&[top.clone(), front], Mode::Minimum).angle.unwrap(), 90.0, 1e-6);
+    close(
+        measure::measure(&[top.clone(), front], Mode::Minimum)
+            .angle
+            .unwrap(),
+        90.0,
+        1e-6,
+    );
     let bottom = face(p, [0.0, 0.0, -1.0], [50.0, 30.0, 0.0]);
-    close(measure::measure(&[top, bottom], Mode::Minimum).distance.unwrap().value, 25.0, 1e-6);
+    close(
+        measure::measure(&[top, bottom], Mode::Minimum)
+            .distance
+            .unwrap()
+            .value,
+        25.0,
+        1e-6,
+    );
 }
 
 #[test]
@@ -123,10 +214,16 @@ fn two_boxes_15_apart() {
 #[test]
 fn a_40_diameter_cylinder() {
     let mut d = Doc::new();
-    let circle = SketchOp::AddCircle { center: Vec2::new(0.0, 0.0), radius: 20.0, construction: false };
+    let circle = SketchOp::AddCircle {
+        center: Vec2::new(0.0, 0.0),
+        radius: 20.0,
+        construction: false,
+    };
     d.extrude(vec![circle], Vec2::new(0.0, 0.0), 30.0);
     let p = &d.parts()[0];
-    let i = (0..p.solid.faces.len()).find(|&i| p.solid.faces[i].plane.is_none()).expect("the cylinder's side");
+    let i = (0..p.solid.faces.len())
+        .find(|&i| p.solid.faces[i].plane.is_none())
+        .expect("the cylinder's side");
     let m = measure::measure(&[Entity::face(&p.solid, &p.solid.faces[i])], Mode::Minimum);
     close(m.radius.unwrap(), 20.0, 1e-6);
 }
@@ -139,11 +236,24 @@ fn a_5_degree_drafted_face_falls_in_the_3_to_6_band() {
     d.block(0.0, 0.0, 100.0, 100.0, 100.0);
     let cube = d.parts()[0].clone();
     let i = face_index(&cube, [1.0, 0.0, 0.0], [100.0, 50.0, 50.0]);
-    let side = FaceRef { part: cube.id, face: cube.solid.faces[i].name, seed: [100.0, 50.0, 50.0] };
-    let x = DraftFeature { neutral: Some(MirrorPlane::Plane(PlaneRef::Top)), faces: vec![side], angle: 5.0, angle_expr: "5 deg".into(), ..DraftFeature::default() };
-    d.h.execute(&mut d.d, &AddFeature::draft(d.el, FeatureId::new(), x)).unwrap();
+    let side = FaceRef {
+        part: cube.id,
+        face: cube.solid.faces[i].name,
+        seed: [100.0, 50.0, 50.0],
+    };
+    let x = DraftFeature {
+        neutral: Some(MirrorPlane::Plane(PlaneRef::Top)),
+        faces: vec![side],
+        angle: 5.0,
+        angle_expr: "5 deg".into(),
+        ..DraftFeature::default()
+    };
+    d.h.execute(&mut d.d, &AddFeature::draft(d.el, FeatureId::new(), x))
+        .unwrap();
     let drafted = d.parts()[0].clone();
-    let f = (0..drafted.solid.faces.len()).find(|&k| drafted.solid.faces[k].name == side.face).expect("the drafted face keeps its name");
+    let f = (0..drafted.solid.faces.len())
+        .find(|&k| drafted.solid.faces[k].name == side.face)
+        .expect("the drafted face keeps its name");
     let n = drafted.solid.face_normal(f).unwrap();
     let a = draft_angle(n, [0.0, 0.0, 1.0]);
     close(a, 5.0, 1e-6);
@@ -168,19 +278,34 @@ fn placed_instances_measure_in_assembly_coordinates() {
     let mut d = Doc::new();
     d.block(0.0, 0.0, 100.0, 60.0, 25.0);
     let part = d.parts()[0].clone();
-    let place = |pose: &Pose| Part { solid: Arc::new(transform_solid(&part.solid, pose)), ..part.clone() };
+    let place = |pose: &Pose| Part {
+        solid: Arc::new(transform_solid(&part.solid, pose)),
+        ..part.clone()
+    };
     let a = place(&Pose::IDENTITY);
-    let pose_b = Pose::rotation_about([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], std::f64::consts::FRAC_PI_2).then(&Pose::translation([200.0, 0.0, 0.0]));
+    let pose_b = Pose::rotation_about(
+        [0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0],
+        std::f64::consts::FRAC_PI_2,
+    )
+    .then(&Pose::translation([200.0, 0.0, 0.0]));
     let b = place(&pose_b);
     // The hand-worked corners are where the pose puts them.
-    for (from, to) in [([0.0, 0.0, 0.0], [200.0, 0.0, 0.0]), ([100.0, 0.0, 0.0], [200.0, 100.0, 0.0]), ([100.0, 60.0, 25.0], [140.0, 100.0, 25.0])] {
+    for (from, to) in [
+        ([0.0, 0.0, 0.0], [200.0, 0.0, 0.0]),
+        ([100.0, 0.0, 0.0], [200.0, 100.0, 0.0]),
+        ([100.0, 60.0, 25.0], [140.0, 100.0, 25.0]),
+    ] {
         let p = pose_b.apply(from);
         for k in 0..3 {
             close(p[k], to[k], 1e-9);
         }
     }
     // The minimum distance between the placed parts: 40 along X, nothing in Y or Z.
-    let m = measure::measure(&[Entity::part(&a.solid), Entity::part(&b.solid)], Mode::Minimum);
+    let m = measure::measure(
+        &[Entity::part(&a.solid), Entity::part(&b.solid)],
+        Mode::Minimum,
+    );
     let dist = m.distance.unwrap();
     close(dist.value, 40.0, 1e-6);
     let c = dist.components();
@@ -191,21 +316,53 @@ fn placed_instances_measure_in_assembly_coordinates() {
     close(dist.to[0], 140.0, 1e-6);
     // B's 100 mm edge, now along Y at x = 200: its length and where it is.
     let e = edge(&b, [200.0, 0.0, 0.0], [200.0, 100.0, 0.0]);
-    close(measure::measure(std::slice::from_ref(&e), Mode::Minimum).length.unwrap(), 100.0, 1e-6);
+    close(
+        measure::measure(std::slice::from_ref(&e), Mode::Minimum)
+            .length
+            .unwrap(),
+        100.0,
+        1e-6,
+    );
     // B's vertex that was (100, 60, 25) reads (140, 100, 25), as the Measure readout shows it.
-    let src = part.solid.vertices.iter().position(|v| (0..3).all(|k| (v.point[k] - [100.0, 60.0, 25.0][k]).abs() < 1e-6)).expect("the corner");
-    let v = measure::measure(&[Entity::point(b.solid.vertices[src].point)], Mode::Minimum).point.unwrap();
+    let src = part
+        .solid
+        .vertices
+        .iter()
+        .position(|v| (0..3).all(|k| (v.point[k] - [100.0, 60.0, 25.0][k]).abs() < 1e-6))
+        .expect("the corner");
+    let v = measure::measure(&[Entity::point(b.solid.vertices[src].point)], Mode::Minimum)
+        .point
+        .unwrap();
     for k in 0..3 {
         close(v[k], [140.0, 100.0, 25.0][k], 1e-9);
     }
     // The distance from A's +X end face to that edge is the 100 mm gap from x 100 to x 200.
     let a_end = face(&a, [1.0, 0.0, 0.0], [100.0, 30.0, 12.5]);
-    close(measure::measure(&[a_end, e], Mode::Minimum).distance.unwrap().value, 100.0, 1e-6);
+    close(
+        measure::measure(&[a_end, e], Mode::Minimum)
+            .distance
+            .unwrap()
+            .value,
+        100.0,
+        1e-6,
+    );
     // B's top face is still +Z, 6000 mm², at its placed centre; A's top too.
     let top_b = face(&b, [0.0, 0.0, 1.0], [170.0, 50.0, 25.0]);
-    close(measure::measure(std::slice::from_ref(&top_b), Mode::Minimum).area.unwrap(), 6000.0, 1e-6);
+    close(
+        measure::measure(std::slice::from_ref(&top_b), Mode::Minimum)
+            .area
+            .unwrap(),
+        6000.0,
+        1e-6,
+    );
     let top_a = face(&a, [0.0, 0.0, 1.0], [50.0, 30.0, 25.0]);
-    close(measure::measure(std::slice::from_ref(&top_a), Mode::Minimum).area.unwrap(), 6000.0, 1e-6);
+    close(
+        measure::measure(std::slice::from_ref(&top_a), Mode::Minimum)
+            .area
+            .unwrap(),
+        6000.0,
+        1e-6,
+    );
     // The two tops are coplanar: 0° apart and 40 mm apart at their nearest.
     let both = measure::measure(&[top_a, top_b], Mode::Minimum);
     close(both.angle.unwrap(), 0.0, 1e-6);
@@ -223,13 +380,31 @@ fn a_rotated_instance_carries_its_pull_direction_and_normals() {
     d.block(0.0, 0.0, 100.0, 100.0, 100.0);
     let cube = d.parts()[0].clone();
     let i = face_index(&cube, [1.0, 0.0, 0.0], [100.0, 50.0, 50.0]);
-    let side = FaceRef { part: cube.id, face: cube.solid.faces[i].name, seed: [100.0, 50.0, 50.0] };
-    let x = DraftFeature { neutral: Some(MirrorPlane::Plane(PlaneRef::Top)), faces: vec![side], angle: 5.0, angle_expr: "5 deg".into(), ..DraftFeature::default() };
-    d.h.execute(&mut d.d, &AddFeature::draft(d.el, FeatureId::new(), x)).unwrap();
+    let side = FaceRef {
+        part: cube.id,
+        face: cube.solid.faces[i].name,
+        seed: [100.0, 50.0, 50.0],
+    };
+    let x = DraftFeature {
+        neutral: Some(MirrorPlane::Plane(PlaneRef::Top)),
+        faces: vec![side],
+        angle: 5.0,
+        angle_expr: "5 deg".into(),
+        ..DraftFeature::default()
+    };
+    d.h.execute(&mut d.d, &AddFeature::draft(d.el, FeatureId::new(), x))
+        .unwrap();
     let drafted = d.parts()[0].clone();
     let top = face_index(&drafted, [0.0, 0.0, 1.0], [50.0, 50.0, 100.0]);
-    let f = (0..drafted.solid.faces.len()).find(|&k| drafted.solid.faces[k].name == side.face).unwrap();
-    let pose = Pose::rotation_about([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], std::f64::consts::FRAC_PI_2).then(&Pose::translation([40.0, 10.0, 5.0]));
+    let f = (0..drafted.solid.faces.len())
+        .find(|&k| drafted.solid.faces[k].name == side.face)
+        .unwrap();
+    let pose = Pose::rotation_about(
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        std::f64::consts::FRAC_PI_2,
+    )
+    .then(&Pose::translation([40.0, 10.0, 5.0]));
     let placed = transform_solid(&drafted.solid, &pose);
     // The pull from the placed top face: the rotated +Z.
     let pull = placed.face_normal(top).unwrap();

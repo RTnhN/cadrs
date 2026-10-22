@@ -77,7 +77,13 @@ pub fn sides_for(base: u32, steps: i32) -> u32 {
 /// A polygon's corners: `n` of them round `center`. `angle` is the direction of the size
 /// point: a corner for a circumscribed polygon (corners on the circle of radius `radius`), the
 /// middle of a side for an inscribed one (the circle touches its sides).
-pub fn polygon_corners(center: Vec2, radius: f64, angle: f64, n: u32, inscribed: bool) -> Vec<Vec2> {
+pub fn polygon_corners(
+    center: Vec2,
+    radius: f64,
+    angle: f64,
+    n: u32,
+    inscribed: bool,
+) -> Vec<Vec2> {
     let n = n.max(MIN_SIDES);
     let step = TAU / n as f64;
     let (r, a0) = if inscribed {
@@ -194,23 +200,21 @@ pub fn hidden_touch_points(s: &Sketch) -> Vec<PointId> {
         else {
             continue;
         };
-        let Some(parts) = polygon_parts(s, circle, true) else { continue };
+        let Some(parts) = polygon_parts(s, circle, true) else {
+            continue;
+        };
         let Some(CurveKind::Circle { center, .. }) = s.curves.get(circle).map(|c| c.kind) else {
             continue;
         };
         let c = s.pos(center);
         let u = Vec2::from_angle(d.offset);
         // The side the leader points at (as `dimension::layout` picks it).
-        let shown = parts
-            .touch
-            .iter()
-            .copied()
-            .max_by(|a, b| {
-                (s.pos(*a) - c)
-                    .normalize()
-                    .dot(u)
-                    .total_cmp(&(s.pos(*b) - c).normalize().dot(u))
-            });
+        let shown = parts.touch.iter().copied().max_by(|a, b| {
+            (s.pos(*a) - c)
+                .normalize()
+                .dot(u)
+                .total_cmp(&(s.pos(*b) - c).normalize().dot(u))
+        });
         out.extend(parts.touch.iter().copied().filter(|p| Some(*p) != shown));
     }
     out
@@ -295,7 +299,11 @@ fn build_polygon(
         // Equal sides with their middles on a circle still leave an even polygon free to
         // shear (a square into a rhombus): two neighbouring corners equally far from the
         // center settle it.
-        s.add_quiet_constraint(ConstraintOf::EqualDistance(pr(c), pr(corners[0]), pr(corners[1])));
+        s.add_quiet_constraint(ConstraintOf::EqualDistance(
+            pr(c),
+            pr(corners[0]),
+            pr(corners[1]),
+        ));
     } else {
         for p in &corners {
             s.add_quiet_constraint(ConstraintOf::PointOnCurve(pr(*p), cref));
@@ -311,7 +319,10 @@ pub fn set_polygon_sides(s: &mut Sketch, circle: CurveId, n: u32) -> Result<(), 
         .dimensions
         .values()
         .find_map(|d| match d.kind {
-            DimensionKind::Sides { circle: c, inscribed } if c == circle => Some(inscribed),
+            DimensionKind::Sides {
+                circle: c,
+                inscribed,
+            } if c == circle => Some(inscribed),
             _ => None,
         })
         .ok_or("no polygon on that circle")?;
@@ -372,7 +383,10 @@ pub fn slot(
         })
     };
     let tangent = |s: &mut Sketch, a: CurveId, b: CurveId| {
-        s.add_quiet_constraint(ConstraintOf::Tangent(CurveRef::Curve(a), CurveRef::Curve(b)));
+        s.add_quiet_constraint(ConstraintOf::Tangent(
+            CurveRef::Curve(a),
+            CurveRef::Curve(b),
+        ));
     };
     let (cap0, cap1) = match kind {
         CurveKind::Line { a, b } => {
@@ -400,7 +414,10 @@ pub fn slot(
                 tangent(s, cap, side1);
                 tangent(s, cap, side2);
             }
-            s.add_quiet_constraint(ConstraintOf::Equal(CurveRef::Curve(cap0), CurveRef::Curve(cap1)));
+            s.add_quiet_constraint(ConstraintOf::Equal(
+                CurveRef::Curve(cap0),
+                CurveRef::Curve(cap1),
+            ));
             (cap0, cap1)
         }
         CurveKind::Arc { center, start, end } => {
@@ -428,7 +445,10 @@ pub fn slot(
     };
     match equal_to.filter(|e| s.curves.contains_key(*e)) {
         Some(e) => {
-            s.add_constraint(ConstraintOf::Equal(CurveRef::Curve(e), CurveRef::Curve(cap0)));
+            s.add_constraint(ConstraintOf::Equal(
+                CurveRef::Curve(e),
+                CurveRef::Curve(cap0),
+            ));
         }
         None => {
             // "Ø…" over the higher end, its leader coming straight down onto it
@@ -470,8 +490,14 @@ pub fn fillet_corner(s: &Sketch, corner: PointId) -> Option<[(CurveId, PointId);
     let at: Vec<CurveId> = s.curves_at(corner).collect();
     let [l1, l2] = at[..] else { return None };
     let other = |l: CurveId| match s.curves.get(l)?.kind {
-        CurveKind::Line { a, b } | CurveKind::Arc { start: a, end: b, .. } if a == corner => Some(b),
-        CurveKind::Line { a, b } | CurveKind::Arc { start: a, end: b, .. } if b == corner => Some(a),
+        CurveKind::Line { a, b }
+        | CurveKind::Arc {
+            start: a, end: b, ..
+        } if a == corner => Some(b),
+        CurveKind::Line { a, b }
+        | CurveKind::Arc {
+            start: a, end: b, ..
+        } if b == corner => Some(a),
         _ => None,
     };
     Some([(l1, other(l1)?), (l2, other(l2)?)])
@@ -501,7 +527,10 @@ impl Carrier {
     /// nothing).
     fn offsets(self, r: f64) -> Vec<Carrier> {
         match self {
-            Carrier::Line(p, u) => vec![Carrier::Line(p + u.perp() * r, u), Carrier::Line(p - u.perp() * r, u)],
+            Carrier::Line(p, u) => vec![
+                Carrier::Line(p + u.perp() * r, u),
+                Carrier::Line(p - u.perp() * r, u),
+            ],
             Carrier::Circle(c, q) => {
                 let mut v = vec![Carrier::Circle(c, q + r)];
                 if q - r > 1e-9 {
@@ -530,7 +559,8 @@ impl Carrier {
                 }
                 vec![p + u * ((q - p).cross(v) / den)]
             }
-            (Carrier::Line(p, u), Carrier::Circle(c, r)) | (Carrier::Circle(c, r), Carrier::Line(p, u)) => {
+            (Carrier::Line(p, u), Carrier::Circle(c, r))
+            | (Carrier::Circle(c, r), Carrier::Line(p, u)) => {
                 let f = p + u * (c - p).dot(u);
                 let h2 = r * r - f.distance(c).powi(2);
                 if h2 < 0.0 {
@@ -657,7 +687,11 @@ pub fn max_fillet(s: &Sketch, corner: PointId) -> Option<f64> {
         }
         for _ in 0..50 {
             let mid = (lo + hi) / 2.0;
-            if fillet_geometry(s, corner, mid).is_some() { lo = mid } else { hi = mid }
+            if fillet_geometry(s, corner, mid).is_some() {
+                lo = mid
+            } else {
+                hi = mid
+            }
         }
         return Some(lo);
     };
@@ -671,7 +705,10 @@ pub fn max_fillet(s: &Sketch, corner: PointId) -> Option<f64> {
 /// Replaces `corner` with `with` in `line` (or an arc).
 fn move_end(s: &mut Sketch, line: CurveId, corner: PointId, with: PointId) {
     if let Some(c) = s.curves.get_mut(line)
-        && let CurveKind::Line { a, b } | CurveKind::Arc { start: a, end: b, .. } = &mut c.kind
+        && let CurveKind::Line { a, b }
+        | CurveKind::Arc {
+            start: a, end: b, ..
+        } = &mut c.kind
     {
         if *a == corner {
             *a = with;
@@ -690,8 +727,7 @@ pub fn fillet(
     equal_to: Option<CurveId>,
 ) -> Result<CurveId, String> {
     let [(l1, _), (l2, _)] = fillet_corner(s, corner).ok_or("not a corner of two lines or arcs")?;
-    let (t1, t2, center) =
-        fillet_geometry(s, corner, radius).ok_or("the fillet does not fit")?;
+    let (t1, t2, center) = fillet_geometry(s, corner, radius).ok_or("the fillet does not fit")?;
     let construction = s.curves[l1].construction && s.curves[l2].construction;
     let (p1, p2, pc) = (s.add_point(t1), s.add_point(t2), s.add_point(center));
     s.quiet.points.extend([p1, p2]);
@@ -701,18 +737,31 @@ pub fn fillet(
     let g = crate::ArcGeom::ccw(center, t1, t2);
     let (start, end) = if g.sweep <= PI { (p1, p2) } else { (p2, p1) };
     let arc = s.curves.insert(Curve {
-        kind: CurveKind::Arc { center: pc, start, end },
+        kind: CurveKind::Arc {
+            center: pc,
+            start,
+            end,
+        },
         construction,
     });
     let pr = PointRef::Point;
     // The virtual sharp: the old corner, still on both lines.
     s.add_quiet_constraint(ConstraintOf::PointOnCurve(pr(corner), CurveRef::Curve(l1)));
     s.add_quiet_constraint(ConstraintOf::PointOnCurve(pr(corner), CurveRef::Curve(l2)));
-    s.add_quiet_constraint(ConstraintOf::Tangent(CurveRef::Curve(arc), CurveRef::Curve(l1)));
-    s.add_quiet_constraint(ConstraintOf::Tangent(CurveRef::Curve(arc), CurveRef::Curve(l2)));
+    s.add_quiet_constraint(ConstraintOf::Tangent(
+        CurveRef::Curve(arc),
+        CurveRef::Curve(l1),
+    ));
+    s.add_quiet_constraint(ConstraintOf::Tangent(
+        CurveRef::Curve(arc),
+        CurveRef::Curve(l2),
+    ));
     match equal_to.filter(|e| s.curves.contains_key(*e)) {
         Some(e) => {
-            s.add_quiet_constraint(ConstraintOf::Equal(CurveRef::Curve(e), CurveRef::Curve(arc)));
+            s.add_quiet_constraint(ConstraintOf::Equal(
+                CurveRef::Curve(e),
+                CurveRef::Curve(arc),
+            ));
         }
         None => {
             // "R…" outside the corner, along the bisector (`sketchfilletvertexexample.png`).
@@ -799,12 +848,18 @@ pub fn chamfer(
             kind: CurveKind::Line { a: corner, b: p },
             construction: true,
         }));
-        s.add_quiet_constraint(ConstraintOf::PointOnCurve(PointRef::Point(corner), CurveRef::Curve(l)));
+        s.add_quiet_constraint(ConstraintOf::PointOnCurve(
+            PointRef::Point(corner),
+            CurveRef::Curve(l),
+        ));
     }
     let ext = [ext[0], ext[1]];
     if let Some(e) = equal_to.filter(|e| e.iter().all(|k| s.curves.contains_key(*k))) {
         for i in 0..2 {
-            s.add_quiet_constraint(ConstraintOf::Equal(CurveRef::Curve(e[i]), CurveRef::Curve(ext[i])));
+            s.add_quiet_constraint(ConstraintOf::Equal(
+                CurveRef::Curve(e[i]),
+                CurveRef::Curve(ext[i]),
+            ));
         }
         return Ok(ChamferParts {
             line,
@@ -859,7 +914,11 @@ mod tests {
     }
 
     fn side_lengths(s: &Sketch, parts: &PolygonParts) -> Vec<f64> {
-        parts.sides.iter().map(|l| s.line_length(*l).unwrap()).collect()
+        parts
+            .sides
+            .iter()
+            .map(|l| s.line_length(*l).unwrap())
+            .collect()
     }
 
     fn circle_of(s: &Sketch) -> CurveId {
@@ -883,7 +942,9 @@ mod tests {
         let c = aligned_corners(v(0.0, 0.0), v(30.0, 40.0), v(-8.0, 20.0));
         // The width is square to the first side.
         assert!((c[1] - c[0]).dot(c[2] - c[1]).abs() < 1e-9);
-        assert!((c[0].distance(c[3]) - (v(-8.0, 20.0) - v(0.0, 0.0)).dot(v(-0.8, 0.6))).abs() < 1e-9);
+        assert!(
+            (c[0].distance(c[3]) - (v(-8.0, 20.0) - v(0.0, 0.0)).dot(v(-0.8, 0.6))).abs() < 1e-9
+        );
         let mut s = Sketch::new();
         SketchOp::Batch(vec![
             SketchOp::AddPolyline {
@@ -904,7 +965,8 @@ mod tests {
 
     #[test]
     fn three_point_circle() {
-        let (c, r) = crate::geom::circle_through(v(10.0, 0.0), v(0.0, 10.0), v(-10.0, 0.0)).unwrap();
+        let (c, r) =
+            crate::geom::circle_through(v(10.0, 0.0), v(0.0, 10.0), v(-10.0, 0.0)).unwrap();
         assert!(c.distance(v(0.0, 0.0)) < 1e-9 && (r - 10.0).abs() < 1e-9);
         assert!(crate::geom::circle_through(v(0.0, 0.0), v(1.0, 1.0), v(2.0, 2.0)).is_none());
     }
@@ -933,14 +995,25 @@ mod tests {
                 let a = solve::analyze(&s);
                 assert_eq!(a.dof, 4, "n={n} inscribed={inscribed}");
                 assert!(a.conflicting.is_empty());
-                let far = parts.corners.iter().map(|p| s.pos(*p).distance(v(5.0, 5.0)));
-                let r = if inscribed { 20.0 / (PI / n as f64).cos() } else { 20.0 };
+                let far = parts
+                    .corners
+                    .iter()
+                    .map(|p| s.pos(*p).distance(v(5.0, 5.0)));
+                let r = if inscribed {
+                    20.0 / (PI / n as f64).cos()
+                } else {
+                    20.0
+                };
                 for d in far {
                     assert!((d - r).abs() < 1e-6, "n={n}");
                 }
                 // The side count is a value on the polygon.
-                assert!(s.dimensions.values().any(|d| matches!(d.kind, DimensionKind::Sides { .. })
-                    && d.value == n as f64));
+                assert!(
+                    s.dimensions
+                        .values()
+                        .any(|d| matches!(d.kind, DimensionKind::Sides { .. })
+                            && d.value == n as f64)
+                );
             }
         }
     }
@@ -994,20 +1067,34 @@ mod tests {
                 .find(|(_, d)| matches!(d.kind, DimensionKind::Sides { .. }))
                 .unwrap()
                 .0;
-            SketchOp::SetDimensionValue { id, value: 8.0 }.apply(&mut s).unwrap();
+            SketchOp::SetDimensionValue { id, value: 8.0 }
+                .apply(&mut s)
+                .unwrap();
             let circle = circle_of(&s);
             let parts = polygon_parts(&s, circle, inscribed).unwrap();
             assert_eq!(parts.sides.len(), 8);
             assert_eq!(s.dimensions[id].value, 8.0);
             assert_eq!(solve::analyze(&s).dof, 4);
             // Only the circle and the octagon are left (plus touch points).
-            let lines = s.curves.values().filter(|c| matches!(c.kind, CurveKind::Line { .. })).count();
+            let lines = s
+                .curves
+                .values()
+                .filter(|c| matches!(c.kind, CurveKind::Line { .. }))
+                .count();
             assert_eq!(lines, 8);
             let expect_points = 1 + 8 + if inscribed { 8 } else { 0 };
             assert_eq!(s.points.len(), expect_points);
             // Out of range is refused.
-            assert!(SketchOp::SetDimensionValue { id, value: 2.0 }.apply(&mut s.clone()).is_err());
-            assert!(SketchOp::SetDimensionValue { id, value: 51.0 }.apply(&mut s.clone()).is_err());
+            assert!(
+                SketchOp::SetDimensionValue { id, value: 2.0 }
+                    .apply(&mut s.clone())
+                    .is_err()
+            );
+            assert!(
+                SketchOp::SetDimensionValue { id, value: 51.0 }
+                    .apply(&mut s.clone())
+                    .is_err()
+            );
         }
     }
 
@@ -1044,7 +1131,8 @@ mod tests {
         assert_eq!(solve::analyze(&s).dof, 0);
         // S6.3: moving the source's end moves the slot.
         let (a, b) = s.curve_ends(src).unwrap();
-        s.constraints.retain(|_, c| !matches!(c, ConstraintOf::FixCurve(_)));
+        s.constraints
+            .retain(|_, c| !matches!(c, ConstraintOf::FixCurve(_)));
         assert!(solve::drag(
             &mut s,
             &solve::Drag::Points(vec![(a, v(0.0, 0.0)), (b, v(60.0, 0.0))]),
@@ -1054,7 +1142,12 @@ mod tests {
         assert!((r[0].area() - (60.0 * 10.0 + PI * 25.0)).abs() < 1e-6);
         // S6.2: the width edits.
         let wid = s.dimensions.keys().next().unwrap();
-        SketchOp::SetDimensionValue { id: wid, value: 16.0 }.apply(&mut s).unwrap();
+        SketchOp::SetDimensionValue {
+            id: wid,
+            value: 16.0,
+        }
+        .apply(&mut s)
+        .unwrap();
         let r = region::regions(&s);
         assert!((r[0].area() - (60.0 * 16.0 + PI * 64.0)).abs() < 1e-6);
     }
@@ -1081,7 +1174,12 @@ mod tests {
         crate::solve::solve(&mut s);
         assert_eq!(s.dimensions.len(), 1);
         let wid = s.dimensions.keys().next().unwrap();
-        SketchOp::SetDimensionValue { id: wid, value: 6.0 }.apply(&mut s).unwrap();
+        SketchOp::SetDimensionValue {
+            id: wid,
+            value: 6.0,
+        }
+        .apply(&mut s)
+        .unwrap();
         let areas: Vec<f64> = region::regions(&s).iter().map(|r| r.area()).collect();
         assert_eq!(areas.len(), 2);
         for a in areas {
@@ -1141,13 +1239,22 @@ mod tests {
         assert!((r[0].area() - (1500.0 - 25.0 + PI * 25.0 / 4.0)).abs() < 1e-6);
         // Tangent + coincident (shared) + radius dimension.
         assert_eq!(
-            s.constraints.values().filter(|c| matches!(c, ConstraintOf::Tangent(..))).count(),
+            s.constraints
+                .values()
+                .filter(|c| matches!(c, ConstraintOf::Tangent(..)))
+                .count(),
             2
         );
-        assert!(s.dimensions.values().any(|d| d.kind == DimensionKind::Radius { curve: arc }));
+        assert!(
+            s.dimensions
+                .values()
+                .any(|d| d.kind == DimensionKind::Radius { curve: arc })
+        );
         // The radius drives it.
         let id = s.dimensions.keys().next().unwrap();
-        SketchOp::SetDimensionValue { id, value: 8.0 }.apply(&mut s).unwrap();
+        SketchOp::SetDimensionValue { id, value: 8.0 }
+            .apply(&mut s)
+            .unwrap();
         let g = s.arc_geom(arc).unwrap();
         assert!((g.radius - 8.0).abs() < 1e-6);
         assert!(g.center.distance(v(42.0, 22.0)) < 1e-6, "{:?}", g.center);
@@ -1156,7 +1263,9 @@ mod tests {
         let arc2 = fillet(&mut s, c2, 8.0, Some(arc)).unwrap();
         crate::solve::solve(&mut s);
         assert_eq!(s.dimensions.len(), 1);
-        SketchOp::SetDimensionValue { id, value: 4.0 }.apply(&mut s).unwrap();
+        SketchOp::SetDimensionValue { id, value: 4.0 }
+            .apply(&mut s)
+            .unwrap();
         assert!((s.arc_geom(arc2).unwrap().radius - 4.0).abs() < 1e-6);
         // Too big does not fit.
         let c3 = s.point_at(v(50.0, 0.0), 1e-9).unwrap();
@@ -1171,31 +1280,56 @@ mod tests {
         // (60 − √600, 5); it touches the line at (60 − √600, 0) and the arc at
         // (60 − 0.8·√600, 4).
         let mut s = Sketch::new();
-        let (a, p, e) = (s.add_point(v(0.0, 0.0)), s.add_point(v(40.0, 0.0)), s.add_point(v(60.0, 20.0)));
+        let (a, p, e) = (
+            s.add_point(v(0.0, 0.0)),
+            s.add_point(v(40.0, 0.0)),
+            s.add_point(v(60.0, 20.0)),
+        );
         let c = s.add_point(v(60.0, 0.0));
-        let line = s.curves.insert(Curve { kind: CurveKind::Line { a, b: p }, construction: false });
-        let arc = s.curves.insert(Curve { kind: CurveKind::Arc { center: c, start: e, end: p }, construction: false });
+        let line = s.curves.insert(Curve {
+            kind: CurveKind::Line { a, b: p },
+            construction: false,
+        });
+        let arc = s.curves.insert(Curve {
+            kind: CurveKind::Arc {
+                center: c,
+                start: e,
+                end: p,
+            },
+            construction: false,
+        });
         assert!(corner_lines(&s, p).is_none());
         assert!(fillet_corner(&s, p).is_some());
         let k = 600f64.sqrt();
         let (t1, t2, o) = fillet_geometry(&s, p, 5.0).unwrap();
         assert!(o.distance(v(60.0 - k, 5.0)) < 1e-9, "{o:?}");
-        assert!(t1.distance(v(60.0 - k, 0.0)) < 1e-9 && t2.distance(v(60.0 - 0.8 * k, 4.0)) < 1e-9, "{t1:?} {t2:?}");
+        assert!(
+            t1.distance(v(60.0 - k, 0.0)) < 1e-9 && t2.distance(v(60.0 - 0.8 * k, 4.0)) < 1e-9,
+            "{t1:?} {t2:?}"
+        );
         let f = fillet(&mut s, p, 5.0, None).unwrap();
         crate::solve::solve(&mut s);
         assert!(crate::solve::conflicts(&s).is_empty());
         let g = s.arc_geom(f).unwrap();
         assert!((g.radius - 5.0).abs() < 1e-9 && g.center.distance(v(60.0 - k, 5.0)) < 1e-9);
         // The line and the arc end where the fillet starts; the arc keeps its circle.
-        assert!(s.pos(s.curve_ends(line).unwrap().1).distance(v(60.0 - k, 0.0)) < 1e-9);
+        assert!(
+            s.pos(s.curve_ends(line).unwrap().1)
+                .distance(v(60.0 - k, 0.0))
+                < 1e-9
+        );
         let ga = s.arc_geom(arc).unwrap();
-        assert!((ga.radius - 20.0).abs() < 1e-9 && ga.end().distance(v(60.0 - 0.8 * k, 4.0)) < 1e-9);
+        assert!(
+            (ga.radius - 20.0).abs() < 1e-9 && ga.end().distance(v(60.0 - 0.8 * k, 4.0)) < 1e-9
+        );
         // The corner stays as a hollow virtual sharp on both.
         assert!(s.hollow_point(p));
         // The radius drives it, still tangent to both: 8 from the line, 20 + 8 from the arc's
         // centre (the free geometry may move to make room).
         let id = s.dimensions.keys().next().unwrap();
-        SketchOp::SetDimensionValue { id, value: 8.0 }.apply(&mut s).unwrap();
+        SketchOp::SetDimensionValue { id, value: 8.0 }
+            .apply(&mut s)
+            .unwrap();
         let g = s.arc_geom(f).unwrap();
         assert!((g.radius - 8.0).abs() < 1e-6);
         let (la, lb) = s.curve_ends(line).unwrap();
@@ -1205,12 +1339,29 @@ mod tests {
         assert!((g.center.distance(ga.center) - (ga.radius + 8.0)).abs() < 1e-6);
         // The largest that fits is found, and a bigger one is refused.
         let mut t = Sketch::new();
-        let (a, p, e) = (t.add_point(v(0.0, 0.0)), t.add_point(v(40.0, 0.0)), t.add_point(v(60.0, 20.0)));
+        let (a, p, e) = (
+            t.add_point(v(0.0, 0.0)),
+            t.add_point(v(40.0, 0.0)),
+            t.add_point(v(60.0, 20.0)),
+        );
         let c = t.add_point(v(60.0, 0.0));
-        t.curves.insert(Curve { kind: CurveKind::Line { a, b: p }, construction: false });
-        t.curves.insert(Curve { kind: CurveKind::Arc { center: c, start: e, end: p }, construction: false });
+        t.curves.insert(Curve {
+            kind: CurveKind::Line { a, b: p },
+            construction: false,
+        });
+        t.curves.insert(Curve {
+            kind: CurveKind::Arc {
+                center: c,
+                start: e,
+                end: p,
+            },
+            construction: false,
+        });
         let max = max_fillet(&t, p).unwrap();
-        assert!(max > 5.0 && fillet_geometry(&t, p, max * 1.01).is_none(), "{max}");
+        assert!(
+            max > 5.0 && fillet_geometry(&t, p, max * 1.01).is_none(),
+            "{max}"
+        );
     }
 
     #[test]
@@ -1218,15 +1369,23 @@ mod tests {
         let mut s = Sketch::new();
         rect(&mut s, 50.0, 30.0);
         let o = s.point_at(v(0.0, 0.0), 1e-9).unwrap();
-        s.add_constraint(ConstraintOf::Coincident(PointRef::Point(o), PointRef::Origin));
+        s.add_constraint(ConstraintOf::Coincident(
+            PointRef::Point(o),
+            PointRef::Origin,
+        ));
         let (a, b, c) = (
             s.point_at(v(50.0, 0.0), 1e-9).unwrap(),
             s.point_at(v(50.0, 30.0), 1e-9).unwrap(),
             s.point_at(v(0.0, 30.0), 1e-9).unwrap(),
         );
         let _ = c;
-        s.dimensions.insert(Dimension::new(DimensionKind::Horizontal { a: o, b: a }, 50.0, -5.0));
-        s.dimensions.insert(Dimension::new(DimensionKind::Vertical { a, b }, 30.0, 5.0));
+        s.dimensions.insert(Dimension::new(
+            DimensionKind::Horizontal { a: o, b: a },
+            50.0,
+            -5.0,
+        ));
+        s.dimensions
+            .insert(Dimension::new(DimensionKind::Vertical { a, b }, 30.0, 5.0));
         assert_eq!(solve::analyze(&s).dof, 0);
         SketchOp::Fillet {
             corner: b,
@@ -1253,10 +1412,21 @@ mod tests {
         assert_eq!(r.len(), 1);
         assert!((r[0].area() - (1500.0 - 12.5)).abs() < 1e-6);
         // Typed distances (Enter, then the second).
-        SketchOp::SetDimensionValue { id: d1, value: 10.0 }.apply(&mut s).unwrap();
-        SketchOp::SetDimensionValue { id: d2, value: 6.0 }.apply(&mut s).unwrap();
+        SketchOp::SetDimensionValue {
+            id: d1,
+            value: 10.0,
+        }
+        .apply(&mut s)
+        .unwrap();
+        SketchOp::SetDimensionValue { id: d2, value: 6.0 }
+            .apply(&mut s)
+            .unwrap();
         let r = region::regions(&s);
-        assert!((r[0].area() - (1500.0 - 30.0)).abs() < 1e-6, "{}", r[0].area());
+        assert!(
+            (r[0].area() - (1500.0 - 30.0)).abs() < 1e-6,
+            "{}",
+            r[0].area()
+        );
         // The corner is still where it was, with construction extensions to it.
         assert!(s.pos(corner).distance(v(50.0, 30.0)) < 1e-6);
         assert_eq!(s.curves.values().filter(|c| c.construction).count(), 2);
@@ -1267,7 +1437,9 @@ mod tests {
         let second = chamfer(&mut s, c2, 10.0, 6.0, Some(parts.ext)).unwrap();
         crate::solve::solve(&mut s);
         assert!(second.dims.is_empty());
-        SketchOp::SetDimensionValue { id: d1, value: 4.0 }.apply(&mut s).unwrap();
+        SketchOp::SetDimensionValue { id: d1, value: 4.0 }
+            .apply(&mut s)
+            .unwrap();
         let len = |k: CurveId| s.line_length(k).unwrap();
         // Each distance goes along the edge running the same way as the first's (the
         // horizontal distance along a horizontal edge).
@@ -1276,7 +1448,11 @@ mod tests {
             (s.pos(a).y - s.pos(b).y).abs() < 1e-6
         };
         for e in second.ext {
-            let twin = parts.ext.into_iter().find(|f| horizontal(*f) == horizontal(e)).unwrap();
+            let twin = parts
+                .ext
+                .into_iter()
+                .find(|f| horizontal(*f) == horizontal(e))
+                .unwrap();
             assert!((len(e) - len(twin)).abs() < 1e-6);
         }
         assert!((len(parts.ext[0]) - 4.0).abs() < 1e-6);
@@ -1288,9 +1464,15 @@ mod tests {
     #[test]
     fn points_are_dimensionable_and_saved() {
         let mut s = Sketch::new();
-        SketchOp::AddPoint { pos: v(12.0, 7.0) }.apply(&mut s).unwrap();
+        SketchOp::AddPoint { pos: v(12.0, 7.0) }
+            .apply(&mut s)
+            .unwrap();
         // A second point in the same place is refused.
-        assert!(SketchOp::AddPoint { pos: v(12.0, 7.0) }.apply(&mut s.clone()).is_err());
+        assert!(
+            SketchOp::AddPoint { pos: v(12.0, 7.0) }
+                .apply(&mut s.clone())
+                .is_err()
+        );
         let p = s.points.keys().next().unwrap();
         let d = crate::dimension::propose(
             &s,
@@ -1327,10 +1509,15 @@ mod tests {
         // Center (2), major point (2), minor radius.
         assert_eq!(solve::analyze(&s).dof, 5);
         // A point placed on it stays on it as the minor radius changes.
-        SketchOp::AddPoint { pos: v(10.0, 17.0) }.apply(&mut s).unwrap();
+        SketchOp::AddPoint { pos: v(10.0, 17.0) }
+            .apply(&mut s)
+            .unwrap();
         let p = s.point_at(v(10.0, 17.0), 1e-9).unwrap();
         SketchOp::AddConstraint {
-            constraints: vec![ConstraintOf::PointOnCurve(PointRef::Point(p), CurveRef::Curve(e))],
+            constraints: vec![ConstraintOf::PointOnCurve(
+                PointRef::Point(p),
+                CurveRef::Curve(e),
+            )],
             label: "Add coincident",
         }
         .apply(&mut s)
@@ -1338,7 +1525,11 @@ mod tests {
         // The dimensions are whole axes: 50 and 16 make semi-axes of 25 and 8.
         for (major, value) in [(true, 50.0), (false, 16.0)] {
             SketchOp::SetDimension {
-                dimension: Dimension::new(DimensionKind::EllipseRadius { curve: e, major }, value, 0.0),
+                dimension: Dimension::new(
+                    DimensionKind::EllipseRadius { curve: e, major },
+                    value,
+                    0.0,
+                ),
                 moves: vec![],
                 radii: vec![],
             }

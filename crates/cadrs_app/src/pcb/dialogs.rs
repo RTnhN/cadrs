@@ -23,15 +23,19 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontWeight, TextEdit};
 use bevy::ui_widgets::{Activate, observe};
-use cadrs_core::pcb::import::{chosen_label, import_files};
 use cadrs_core::ElementId;
 use cadrs_core::history_log::VersionId;
+use cadrs_core::pcb::import::{chosen_label, import_files};
 use cadrs_core::pcb::{
-    BUILD_STRING, CustomPart, DEFAULT_LIBRARY_FILE, FolderRef, ImportBoard, LibraryRef, PartSource, PartTransform, PcbSettings, Representation, SetPcbSettings, SetRepresentation,
+    BUILD_STRING, CustomPart, DEFAULT_LIBRARY_FILE, FolderRef, ImportBoard, LibraryRef, PartSource,
+    PartTransform, PcbSettings, Representation, SetPcbSettings, SetRepresentation,
 };
 use cadrs_ui::file_picker::{FilePicked, FilesPicked, open_files_picker};
 use cadrs_ui::input::TextInputField;
-use cadrs_ui::{Button, Dialog, DialogClose, ListItem, Notification, PathField, PathFieldBrowse, Select, SelectChange, Theme, set_path_field_display, show_notification};
+use cadrs_ui::{
+    Button, Dialog, DialogClose, ListItem, Notification, PathField, PathFieldBrowse, Select,
+    SelectChange, Theme, set_path_field_display, show_notification,
+};
 
 use crate::{ActiveDocument, AppClock, AppState, DocumentStore, UserProfile};
 
@@ -91,7 +95,16 @@ fn wrapped(t: &Theme, name: &str, text: &str, italic: bool, color: Color) -> imp
     if italic {
         font.style = bevy::text::FontStyle::Italic;
     }
-    (Name::new(name.to_string()), Text::new(text), font, TextColor(color), Node { max_width: Val::Percent(100.0), ..default() })
+    (
+        Name::new(name.to_string()),
+        Text::new(text),
+        font,
+        TextColor(color),
+        Node {
+            max_width: Val::Percent(100.0),
+            ..default()
+        },
+    )
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -152,7 +165,12 @@ pub fn open_import_dialog(world: &mut World) {
 
 /// Where the Choose Files picker opens: the last folder, else the working folder.
 fn import_dir(world: &World) -> PathBuf {
-    world.resource::<PcbDialogs>().import_dir.clone().or_else(|| std::env::current_dir().ok()).unwrap_or_else(|| PathBuf::from("."))
+    world
+        .resource::<PcbDialogs>()
+        .import_dir
+        .clone()
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 fn open_import_picker(world: &mut World) {
@@ -162,7 +180,15 @@ fn open_import_picker(world: &mut World) {
     let mut exts = vec!["emn", "emp"];
     #[cfg(feature = "kicad")]
     exts.extend(super::kicad::EXTENSIONS);
-    open_files_picker(&mut commands, &theme, "pcb-import-picker", "Choose ECAD files", "pcb-import", dir, &exts);
+    open_files_picker(
+        &mut commands,
+        &theme,
+        "pcb-import-picker",
+        "Choose ECAD files",
+        "pcb-import",
+        dir,
+        &exts,
+    );
     world.flush();
 }
 
@@ -193,7 +219,12 @@ fn accept_import(world: &mut World) {
     if paths.is_empty() {
         let theme = world.resource::<Theme>().clone();
         let mut commands = world.commands();
-        show_notification(&mut commands, &theme, Notification::warning("Choose the board (.emn) and library (.emp) files first.").name("pcb-import-toast"));
+        show_notification(
+            &mut commands,
+            &theme,
+            Notification::warning("Choose the board (.emn) and library (.emp) files first.")
+                .name("pcb-import-toast"),
+        );
         world.flush();
         return;
     }
@@ -208,25 +239,50 @@ pub fn import_paths(world: &mut World, paths: &[PathBuf]) {
     #[cfg(feature = "kicad")]
     let (kicad_names, kicad_warnings, kicad_errors) = super::kicad::import(world, paths);
     #[cfg(not(feature = "kicad"))]
-    let (kicad_names, kicad_warnings, kicad_errors) = (Vec::<String>::new(), Vec::<String>::new(), Vec::<String>::new());
-    let idf: Vec<PathBuf> = paths.iter().filter(|p| p.extension().is_some_and(|x| x == "emn" || x == "emp")).cloned().collect();
+    let (kicad_names, kicad_warnings, kicad_errors) = (
+        Vec::<String>::new(),
+        Vec::<String>::new(),
+        Vec::<String>::new(),
+    );
+    let idf: Vec<PathBuf> = paths
+        .iter()
+        .filter(|p| p.extension().is_some_and(|x| x == "emn" || x == "emp"))
+        .cloned()
+        .collect();
     // Only KiCad files picked: nothing for the IDF pairing to complain about.
     let only_kicad = idf.is_empty() && (!kicad_names.is_empty() || !kicad_errors.is_empty());
-    let mut report = if only_kicad { Default::default() } else { import_files(&idf) };
+    let mut report = if only_kicad {
+        Default::default()
+    } else {
+        import_files(&idf)
+    };
     report.warnings.extend(kicad_warnings);
     let theme = world.resource::<Theme>().clone();
     let mut names = kicad_names;
     let mut errors = report.errors.clone();
     errors.extend(kicad_errors);
     if let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() {
-        match doc.active_element().filter(|e| e.pcb().is_some()).map(|e| e.id) {
+        match doc
+            .active_element()
+            .filter(|e| e.pcb().is_some())
+            .map(|e| e.id)
+        {
             Some(element) => {
                 for b in report.boards {
                     let n = b.board.board.placements.len();
-                    let cmd = ImportBoard { element, board: Box::new(b.board), source: b.source };
+                    let cmd = ImportBoard {
+                        element,
+                        board: Box::new(b.board),
+                        source: b.source,
+                    };
                     match doc.execute(&cmd) {
                         Ok(()) => {
-                            let name = doc.active_element().and_then(|e| e.pcb()).and_then(|s| s.active_board()).map(|b| b.name().to_string()).unwrap_or_default();
+                            let name = doc
+                                .active_element()
+                                .and_then(|e| e.pcb())
+                                .and_then(|s| s.active_board())
+                                .map(|b| b.name().to_string())
+                                .unwrap_or_default();
                             names.push(format!("{name} ({n} components)"));
                         }
                         Err(e) => errors.push(e.to_string()),
@@ -244,8 +300,17 @@ pub fn import_paths(world: &mut World, paths: &[PathBuf]) {
         }
         Notification::warning(msg).max_width(640.0)
     } else if !report.warnings.is_empty() {
-        let more = if report.warnings.len() > 1 { format!(" (and {} more)", report.warnings.len() - 1) } else { String::new() };
-        Notification::warning(format!("Imported {}. {}{more}", names.join(", "), report.warnings[0])).max_width(640.0)
+        let more = if report.warnings.len() > 1 {
+            format!(" (and {} more)", report.warnings.len() - 1)
+        } else {
+            String::new()
+        };
+        Notification::warning(format!(
+            "Imported {}. {}{more}",
+            names.join(", "),
+            report.warnings[0]
+        ))
+        .max_width(640.0)
     } else {
         Notification::info(format!("Imported {}", names.join(", "))).seconds(3.0)
     };
@@ -258,7 +323,12 @@ pub fn import_paths(world: &mut World, paths: &[PathBuf]) {
 
 /// The default component library file: in the documents folder.
 pub fn default_library(world: &World) -> PathBuf {
-    clean_path(&world.get_resource::<DocumentStore>().map(|s| s.0.root().join(DEFAULT_LIBRARY_FILE)).unwrap_or_else(|| PathBuf::from(DEFAULT_LIBRARY_FILE)))
+    clean_path(
+        &world
+            .get_resource::<DocumentStore>()
+            .map(|s| s.0.root().join(DEFAULT_LIBRARY_FILE))
+            .unwrap_or_else(|| PathBuf::from(DEFAULT_LIBRARY_FILE)),
+    )
 }
 
 /// `p` made absolute, with `.` and `..` resolved without touching the disk (the documents
@@ -282,10 +352,20 @@ pub fn clean_path(p: &Path) -> PathBuf {
 fn library_display(world: &World, s: &PcbSettings) -> (String, String) {
     match &s.library {
         Some(l) => {
-            let path = world.get_resource::<DocumentStore>().map(|st| clean_path(&st.0.document_path(l.document)).display().to_string()).unwrap_or_default();
+            let path = world
+                .get_resource::<DocumentStore>()
+                .map(|st| {
+                    clean_path(&st.0.document_path(l.document))
+                        .display()
+                        .to_string()
+                })
+                .unwrap_or_default();
             (l.name.clone(), path)
         }
-        None => (s.library_name(), default_library(world).display().to_string()),
+        None => (
+            s.library_name(),
+            default_library(world).display().to_string(),
+        ),
     }
 }
 
@@ -300,7 +380,14 @@ fn folder_display(s: &PcbSettings) -> (String, String) {
 /// Opens the settings dialog (the toolbar's gear) with the workspace settings, as the active
 /// PCB Studio has them.
 pub fn open_settings_dialog(world: &mut World) {
-    let settings = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element().and_then(|e| e.pcb()).map(|s| s.settings.clone())).unwrap_or_default();
+    let settings = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| {
+            d.active_element()
+                .and_then(|e| e.pcb())
+                .map(|s| s.settings.clone())
+        })
+        .unwrap_or_default();
     let (library, library_tip) = library_display(world, &settings);
     let (folder, folder_tip) = folder_display(&settings);
     world.resource_mut::<PcbDialogs>().settings = Some(settings);
@@ -360,7 +447,9 @@ fn update_settings(world: &mut World) {
     let settings = world.resource_mut::<PcbDialogs>().settings.take();
     if let Some(settings) = settings
         && let Some(mut doc) = world.get_resource_mut::<ActiveDocument>()
-        && let Some((element, current)) = doc.active_element().and_then(|e| Some((e.id, e.pcb()?.settings.clone())))
+        && let Some((element, current)) = doc
+            .active_element()
+            .and_then(|e| Some((e.id, e.pcb()?.settings.clone())))
         && current != settings
         && let Err(e) = doc.execute(&SetPcbSettings { element, settings })
     {
@@ -422,18 +511,29 @@ struct PickerRow(String);
 
 /// The rows of a picker from the store.
 fn picker_rows(world: &World, kind: PickerKind) -> Vec<(String, String)> {
-    let Some(store) = world.get_resource::<DocumentStore>() else { return vec![] };
+    let Some(store) = world.get_resource::<DocumentStore>() else {
+        return vec![];
+    };
     let (lib, _) = store.0.list();
     match kind {
         PickerKind::Library => {
-            let mut docs: Vec<(String, String)> = lib.entries.iter().filter(|e| e.meta.trashed.is_none()).map(|e| (e.id.to_string(), e.name.clone())).collect();
+            let mut docs: Vec<(String, String)> = lib
+                .entries
+                .iter()
+                .filter(|e| e.meta.trashed.is_none())
+                .map(|e| (e.id.to_string(), e.name.clone()))
+                .collect();
             docs.sort_by(|a, b| cadrs_core::library::natural_cmp(&a.1, &b.1));
             let mut rows = vec![("default".to_string(), "Default library".to_string())];
             rows.extend(docs);
             rows
         }
         PickerKind::Folder => {
-            let mut f: Vec<(String, String)> = lib.folders.iter().map(|f| (f.id.to_string(), f.name.clone())).collect();
+            let mut f: Vec<(String, String)> = lib
+                .folders
+                .iter()
+                .map(|f| (f.id.to_string(), f.name.clone()))
+                .collect();
             f.sort_by(|a, b| cadrs_core::library::natural_cmp(&a.1, &b.1));
             f
         }
@@ -444,7 +544,11 @@ fn picker_rows(world: &World, kind: PickerKind) -> Vec<(String, String)> {
 fn current_key(world: &World, kind: PickerKind) -> Option<String> {
     let s = world.resource::<PcbDialogs>().settings.clone()?;
     match kind {
-        PickerKind::Library => Some(s.library.map(|l| l.document.to_string()).unwrap_or_else(|| "default".into())),
+        PickerKind::Library => Some(
+            s.library
+                .map(|l| l.document.to_string())
+                .unwrap_or_else(|| "default".into()),
+        ),
         PickerKind::Folder => s.component_folder.map(|f| f.id.to_string()),
     }
 }
@@ -453,14 +557,32 @@ fn current_key(world: &World, kind: PickerKind) -> Option<String> {
 pub fn open_picker(world: &mut World, kind: PickerKind, select: Option<String>) {
     close::<PickerDialog>(world);
     let rows = picker_rows(world, kind);
-    let selected = select.or_else(|| current_key(world, kind)).filter(|k| rows.iter().any(|r| r.0 == *k));
-    world.resource_mut::<PcbDialogs>().picker = Some(Picker { kind, rows: rows.clone(), selected: selected.clone() });
+    let selected = select
+        .or_else(|| current_key(world, kind))
+        .filter(|k| rows.iter().any(|r| r.0 == *k));
+    world.resource_mut::<PcbDialogs>().picker = Some(Picker {
+        kind,
+        rows: rows.clone(),
+        selected: selected.clone(),
+    });
     let theme = world.resource::<Theme>().clone();
     let (tb, tf) = (theme.clone(), theme.clone());
     let prefix = kind.prefix();
     let (title, root, icon, new_label, empty) = match kind {
-        PickerKind::Library => ("Select a library document", "My documents", "file", "New library document", "No documents yet."),
-        PickerKind::Folder => ("Select a folder", "My documents", "folder", "New folder", "No folders yet: New folder makes one."),
+        PickerKind::Library => (
+            "Select a library document",
+            "My documents",
+            "file",
+            "New library document",
+            "No documents yet.",
+        ),
+        PickerKind::Folder => (
+            "Select a folder",
+            "My documents",
+            "folder",
+            "New folder",
+            "No folders yet: New folder makes one.",
+        ),
     };
     world.spawn((
         Dialog::new(prefix)
@@ -470,31 +592,62 @@ pub fn open_picker(world: &mut World, kind: PickerKind, select: Option<String>) 
                 let t = &tb;
                 b.spawn((
                     Name::new(format!("{prefix}-list")),
-                    Node { flex_direction: FlexDirection::Column, width: Val::Percent(100.0), max_height: Val::Px(300.0), overflow: Overflow::scroll_y(), ..default() },
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        width: Val::Percent(100.0),
+                        max_height: Val::Px(300.0),
+                        overflow: Overflow::scroll_y(),
+                        ..default()
+                    },
                 ))
                 .with_children(|l| {
-                    l.spawn(ListItem::new(format!("{prefix}-root")).icon("user").label(root).height(28.0).build(t)).insert(Pickable::IGNORE);
+                    l.spawn(
+                        ListItem::new(format!("{prefix}-root"))
+                            .icon("user")
+                            .label(root)
+                            .height(28.0)
+                            .build(t),
+                    )
+                    .insert(Pickable::IGNORE);
                     if rows.is_empty() {
-                        l.spawn(wrapped(t, &format!("{prefix}-empty"), empty, true, t.muted_foreground));
+                        l.spawn(wrapped(
+                            t,
+                            &format!("{prefix}-empty"),
+                            empty,
+                            true,
+                            t.muted_foreground,
+                        ));
                     }
                     for (key, label) in &rows {
                         let row_icon = if key == "default" { "books" } else { icon };
                         l.spawn((
-                            ListItem::new(format!("{prefix}-row-{}", super::slug(label))).icon(row_icon).label(label.clone()).padding_left(28.0).height(28.0).selected(selected.as_deref() == Some(key.as_str())).build(t),
+                            ListItem::new(format!("{prefix}-row-{}", super::slug(label)))
+                                .icon(row_icon)
+                                .label(label.clone())
+                                .padding_left(28.0)
+                                .height(28.0)
+                                .selected(selected.as_deref() == Some(key.as_str()))
+                                .build(t),
                             PickerRow(key.clone()),
-                            observe(|a: On<Activate>, q: Query<&PickerRow>, mut d: ResMut<PcbDialogs>, q_rows: Query<(Entity, &PickerRow)>, mut commands: Commands| {
-                                let Ok(r) = q.get(a.entity) else { return };
-                                if let Some(p) = d.picker.as_mut() {
-                                    p.selected = Some(r.0.clone());
-                                }
-                                for (e, x) in &q_rows {
-                                    if x.0 == r.0 {
-                                        commands.entity(e).try_insert(cadrs_ui::Selected);
-                                    } else {
-                                        commands.entity(e).try_remove::<cadrs_ui::Selected>();
+                            observe(
+                                |a: On<Activate>,
+                                 q: Query<&PickerRow>,
+                                 mut d: ResMut<PcbDialogs>,
+                                 q_rows: Query<(Entity, &PickerRow)>,
+                                 mut commands: Commands| {
+                                    let Ok(r) = q.get(a.entity) else { return };
+                                    if let Some(p) = d.picker.as_mut() {
+                                        p.selected = Some(r.0.clone());
                                     }
-                                }
-                            }),
+                                    for (e, x) in &q_rows {
+                                        if x.0 == r.0 {
+                                            commands.entity(e).try_insert(cadrs_ui::Selected);
+                                        } else {
+                                            commands.entity(e).try_remove::<cadrs_ui::Selected>();
+                                        }
+                                    }
+                                },
+                            ),
                         ));
                     }
                 });
@@ -502,20 +655,36 @@ pub fn open_picker(world: &mut World, kind: PickerKind, select: Option<String>) 
             .footer(move |f| {
                 let t = &tf;
                 f.spawn((
-                    Button::new(format!("{prefix}-new")).icon(if kind == PickerKind::Folder { "folder-new" } else { "file-new" }).label(new_label).ghost().build(t),
+                    Button::new(format!("{prefix}-new"))
+                        .icon(if kind == PickerKind::Folder {
+                            "folder-new"
+                        } else {
+                            "file-new"
+                        })
+                        .label(new_label)
+                        .ghost()
+                        .build(t),
                     observe(move |_: On<Activate>, mut commands: Commands| {
                         commands.queue(move |w: &mut World| picker_new(w, kind));
                     }),
                 ));
-                f.spawn(Node { flex_grow: 1.0, ..default() });
+                f.spawn(Node {
+                    flex_grow: 1.0,
+                    ..default()
+                });
                 f.spawn((
-                    Button::new(format!("{prefix}-select")).label("Select").primary().build(t),
+                    Button::new(format!("{prefix}-select"))
+                        .label("Select")
+                        .primary()
+                        .build(t),
                     observe(|_: On<Activate>, mut commands: Commands| {
                         commands.queue(picker_select);
                     }),
                 ));
                 f.spawn((
-                    Button::new(format!("{prefix}-cancel")).label("Cancel").build(t),
+                    Button::new(format!("{prefix}-cancel"))
+                        .label("Cancel")
+                        .build(t),
                     observe(|_: On<Activate>, mut commands: Commands| {
                         commands.queue(|w: &mut World| {
                             w.resource_mut::<PcbDialogs>().picker = None;
@@ -535,7 +704,10 @@ fn free_name(base: &str, taken: &[String]) -> String {
     if !taken.iter().any(|t| t == base) {
         return base.to_string();
     }
-    (2..).map(|n| format!("{base} ({n})")).find(|c| !taken.contains(c)).unwrap()
+    (2..)
+        .map(|n| format!("{base} ({n})"))
+        .find(|c| !taken.contains(c))
+        .unwrap()
 }
 
 /// Adds a folder to the documents page (as its New folder does) and returns it.
@@ -545,7 +717,12 @@ pub fn create_folder(world: &mut World, name: &str) -> Option<cadrs_core::Folder
     let user = world.resource::<UserProfile>().id.clone();
     let (before, _) = store.list();
     let taken: Vec<String> = before.folders.iter().map(|f| f.name.clone()).collect();
-    let entry = cadrs_core::FolderEntry { id: cadrs_core::FolderId::new(), name: free_name(name, &taken), created: now, owned_by: user };
+    let entry = cadrs_core::FolderEntry {
+        id: cadrs_core::FolderId::new(),
+        name: free_name(name, &taken),
+        created: now,
+        owned_by: user,
+    };
     let mut after = before.clone();
     after.folders.push(entry.clone());
     match store.sync(&before, &after) {
@@ -562,14 +739,27 @@ fn picker_new(world: &mut World, kind: PickerKind) {
     let key = match kind {
         PickerKind::Folder => create_folder(world, "PCB Components").map(|f| f.id.to_string()),
         PickerKind::Library => {
-            let Some(store) = world.get_resource::<DocumentStore>().map(|s| s.0.clone()) else { return };
+            let Some(store) = world.get_resource::<DocumentStore>().map(|s| s.0.clone()) else {
+                return;
+            };
             let now = world.resource::<AppClock>().now();
             let user = world.resource::<UserProfile>().id.clone();
-            let taken: Vec<String> = store.list().0.entries.iter().map(|e| e.name.clone()).collect();
+            let taken: Vec<String> = store
+                .list()
+                .0
+                .entries
+                .iter()
+                .map(|e| e.name.clone())
+                .collect();
             let name = free_name(cadrs_core::pcb::library::LIBRARY_DOCUMENT_NAME, &taken);
             match cadrs_core::pcb::library::create_library_document(&store, &name, &user, now) {
                 Ok(e) => {
-                    let _ = store.write_thumbnail(e.id, &cadrs_core::thumbnail::placeholder(cadrs_core::store::thumbnail_seed(&e.name, now)));
+                    let _ = store.write_thumbnail(
+                        e.id,
+                        &cadrs_core::thumbnail::placeholder(cadrs_core::store::thumbnail_seed(
+                            &e.name, now,
+                        )),
+                    );
                     Some(e.id.to_string())
                 }
                 Err(e) => {
@@ -584,20 +774,37 @@ fn picker_new(world: &mut World, kind: PickerKind) {
 
 /// Select: the chosen row into the settings dialog's field.
 fn picker_select(world: &mut World) {
-    let Some(p) = world.resource_mut::<PcbDialogs>().picker.take() else { return };
+    let Some(p) = world.resource_mut::<PcbDialogs>().picker.take() else {
+        return;
+    };
     close::<PickerDialog>(world);
-    let Some(key) = p.selected.clone() else { return };
-    let label = p.rows.iter().find(|r| r.0 == key).map(|r| r.1.clone()).unwrap_or_default();
-    let Some(mut s) = world.resource::<PcbDialogs>().settings.clone() else { return };
+    let Some(key) = p.selected.clone() else {
+        return;
+    };
+    let label = p
+        .rows
+        .iter()
+        .find(|r| r.0 == key)
+        .map(|r| r.1.clone())
+        .unwrap_or_default();
+    let Some(mut s) = world.resource::<PcbDialogs>().settings.clone() else {
+        return;
+    };
     let uuid = |k: &str| uuid::Uuid::parse_str(k).ok();
     match p.kind {
         PickerKind::Library => {
-            s.library = uuid(&key).map(|u| LibraryRef { document: cadrs_core::DocumentId(u), name: label });
+            s.library = uuid(&key).map(|u| LibraryRef {
+                document: cadrs_core::DocumentId(u),
+                name: label,
+            });
             let (text, tip) = library_display(world, &s);
             set_path_field_display(world, "pcb-settings-library", &text, &tip);
         }
         PickerKind::Folder => {
-            s.component_folder = uuid(&key).map(|u| FolderRef { id: cadrs_core::FolderId(u), name: label });
+            s.component_folder = uuid(&key).map(|u| FolderRef {
+                id: cadrs_core::FolderId(u),
+                name: label,
+            });
             let (text, tip) = folder_display(&s);
             set_path_field_display(world, "pcb-settings-folder", &text, &tip);
         }
@@ -632,14 +839,27 @@ struct CustomPartRow(usize);
 
 /// The versions and parts of the chosen document.
 fn load_pick(world: &World, pick: &mut CustomPick) {
-    let Some((id, _)) = pick.documents.get(pick.document).cloned() else { return };
+    let Some((id, _)) = pick.documents.get(pick.document).cloned() else {
+        return;
+    };
     let store = world.get_resource::<DocumentStore>();
-    let log = store.and_then(|s| cadrs_core::history_log::HistoryLog::load(&s.0, id).ok().flatten());
+    let log = store.and_then(|s| {
+        cadrs_core::history_log::HistoryLog::load(&s.0, id)
+            .ok()
+            .flatten()
+    });
     let mut versions = vec![(None, "Current (latest changes)".to_string())];
     if let Some(l) = &log {
-        versions.extend(l.versions().iter().rev().map(|v| (Some(v.id()), v.name().to_string())));
+        versions.extend(
+            l.versions()
+                .iter()
+                .rev()
+                .map(|v| (Some(v.id()), v.name().to_string())),
+        );
     }
-    if pick.versions.len() != versions.len() || pick.versions.iter().zip(&versions).any(|(a, b)| a.0 != b.0) {
+    if pick.versions.len() != versions.len()
+        || pick.versions.iter().zip(&versions).any(|(a, b)| a.0 != b.0)
+    {
         pick.version = 0;
     }
     pick.versions = versions;
@@ -647,7 +867,11 @@ fn load_pick(world: &World, pick: &mut CustomPick) {
     pick.parts.clear();
     pick.part = None;
     if let Some(doc) = super::view::source_document(world, id, version) {
-        for el in doc.elements.iter().filter(|e| matches!(e.kind, cadrs_core::ElementKind::PartStudio { .. })) {
+        for el in doc
+            .elements
+            .iter()
+            .filter(|e| matches!(e.kind, cadrs_core::ElementKind::PartStudio { .. }))
+        {
             for (part, name, _, _) in super::view::studio_parts(&doc, el.id) {
                 pick.parts.push((el.id, el.name.clone(), part, name));
             }
@@ -660,10 +884,20 @@ fn load_pick(world: &World, pick: &mut CustomPick) {
 
 /// Opens Select custom part for `package` (the Component pane's Custom part).
 pub fn open_custom_part_dialog(world: &mut World, element: ElementId, package: &str) {
-    let open = world.get_resource::<ActiveDocument>().map(|d| (d.doc.id, d.doc.name.clone()));
+    let open = world
+        .get_resource::<ActiveDocument>()
+        .map(|d| (d.doc.id, d.doc.name.clone()));
     let mut documents: Vec<(cadrs_core::DocumentId, String)> = world
         .get_resource::<DocumentStore>()
-        .map(|s| s.0.list().0.entries.iter().filter(|e| e.meta.trashed.is_none() && Some(e.id) != open.as_ref().map(|o| o.0)).map(|e| (e.id, e.name.clone())).collect())
+        .map(|s| {
+            s.0.list()
+                .0
+                .entries
+                .iter()
+                .filter(|e| e.meta.trashed.is_none() && Some(e.id) != open.as_ref().map(|o| o.0))
+                .map(|e| (e.id, e.name.clone()))
+                .collect()
+        })
         .unwrap_or_default();
     documents.sort_by(|a, b| cadrs_core::library::natural_cmp(&a.1, &b.1));
     if let Some((id, name)) = open {
@@ -675,8 +909,19 @@ pub fn open_custom_part_dialog(world: &mut World, element: ElementId, package: &
         .and_then(|d| d.doc.element(element))
         .and_then(|e| e.pcb())
         .and_then(|s| s.library.get(package).custom().map(|c| c.source.document));
-    let document = current.and_then(|c| documents.iter().position(|d| d.0 == c)).unwrap_or(0);
-    let mut pick = CustomPick { element, package: package.to_string(), documents, document, versions: vec![], version: 0, parts: vec![], part: None };
+    let document = current
+        .and_then(|c| documents.iter().position(|d| d.0 == c))
+        .unwrap_or(0);
+    let mut pick = CustomPick {
+        element,
+        package: package.to_string(),
+        documents,
+        document,
+        versions: vec![],
+        version: 0,
+        parts: vec![],
+        part: None,
+    };
     load_pick(world, &mut pick);
     world.resource_mut::<PcbDialogs>().custom = Some(pick);
     spawn_custom_dialog(world);
@@ -684,7 +929,9 @@ pub fn open_custom_part_dialog(world: &mut World, element: ElementId, package: &
 
 fn spawn_custom_dialog(world: &mut World) {
     close::<CustomPartDialog>(world);
-    let Some(pick) = world.resource::<PcbDialogs>().custom.clone() else { return };
+    let Some(pick) = world.resource::<PcbDialogs>().custom.clone() else {
+        return;
+    };
     let theme = world.resource::<Theme>().clone();
     let (tb, tf) = (theme.clone(), theme.clone());
     world.spawn((
@@ -779,7 +1026,9 @@ fn on_custom_select(ev: On<SelectChange>, q: Query<&Name>, mut commands: Command
         _ => return,
     };
     commands.queue(move |w: &mut World| {
-        let Some(mut pick) = w.resource::<PcbDialogs>().custom.clone() else { return };
+        let Some(mut pick) = w.resource::<PcbDialogs>().custom.clone() else {
+            return;
+        };
         if doc {
             pick.document = index;
             pick.version = 0;
@@ -796,20 +1045,49 @@ fn on_custom_select(ev: On<SelectChange>, q: Query<&Name>, mut commands: Command
 /// ✓: the part becomes the package's representation (one undo step), placed as modelled; the
 /// Component pane then offers Translate, Rotate and Center.
 fn accept_custom_part(world: &mut World) {
-    let Some(pick) = world.resource::<PcbDialogs>().custom.clone() else { return };
-    let (Some(i), Some((doc_id, doc_name))) = (pick.part, pick.documents.get(pick.document).cloned()) else {
+    let Some(pick) = world.resource::<PcbDialogs>().custom.clone() else {
+        return;
+    };
+    let (Some(i), Some((doc_id, doc_name))) =
+        (pick.part, pick.documents.get(pick.document).cloned())
+    else {
         let theme = world.resource::<Theme>().clone();
         let mut commands = world.commands();
-        show_notification(&mut commands, &theme, Notification::warning("Choose a part first.").name("pcb-custom-toast"));
+        show_notification(
+            &mut commands,
+            &theme,
+            Notification::warning("Choose a part first.").name("pcb-custom-toast"),
+        );
         world.flush();
         return;
     };
     let (el, el_name, part, part_name) = pick.parts[i].clone();
-    let (version, version_name) = pick.versions.get(pick.version).cloned().unwrap_or((None, String::new()));
+    let (version, version_name) = pick
+        .versions
+        .get(pick.version)
+        .cloned()
+        .unwrap_or((None, String::new()));
     let doc_name = doc_name.trim_end_matches(" (this document)").to_string();
-    let source = PartSource { document: doc_id, document_name: doc_name, element: el, element_name: el_name, part, part_name, version, version_name: version.map(|_| version_name) };
-    let rep = Representation::Custom(Box::new(CustomPart { source, transform: PartTransform::default() }));
-    let cmd = SetRepresentation { element: pick.element, package: pick.package.clone(), representation: rep, label: format!("Custom part for {}", pick.package) };
+    let source = PartSource {
+        document: doc_id,
+        document_name: doc_name,
+        element: el,
+        element_name: el_name,
+        part,
+        part_name,
+        version,
+        version_name: version.map(|_| version_name),
+    };
+    let rep = Representation::Custom(Box::new(CustomPart {
+        source,
+        transform: PartTransform::default(),
+    }));
+    let cmd = SetRepresentation {
+        element: pick.element,
+        package: pick.package.clone(),
+        representation: rep,
+        label: format!("Custom part for {}", pick.package),
+    };
     if let Some(mut doc) = world.get_resource_mut::<ActiveDocument>()
         && let Err(e) = doc.execute(&cmd)
     {
@@ -835,7 +1113,9 @@ pub fn register(app: &mut App) {
 /// `pcb-sample-part-document` (scenarios): stores [`cadrs_pcb::sample::custom_part_document`]
 /// with a version "V1".
 pub fn store_sample_part_document(world: &mut World) {
-    let Some(store) = world.get_resource::<DocumentStore>().map(|s| s.0.clone()) else { return };
+    let Some(store) = world.get_resource::<DocumentStore>().map(|s| s.0.clone()) else {
+        return;
+    };
     let now = world.resource::<AppClock>().now();
     let user = world.resource::<UserProfile>().id.clone();
     let (doc, _, _) = match cadrs_pcb::sample::custom_part_document() {
@@ -849,7 +1129,10 @@ pub fn store_sample_part_document(world: &mut World) {
         warn!("sample part document: {e}");
         return;
     }
-    let _ = store.write_thumbnail(doc.id, &cadrs_core::thumbnail::placeholder(cadrs_core::store::thumbnail_seed(&doc.name, now)));
+    let _ = store.write_thumbnail(
+        doc.id,
+        &cadrs_core::thumbnail::placeholder(cadrs_core::store::thumbnail_seed(&doc.name, now)),
+    );
     let mut log = cadrs_core::history_log::HistoryLog::start(&doc, now, &user);
     log.create_version("V1", "Heatsink model for QFP100", now, &user);
     if let Err(e) = log.save(&store) {
@@ -860,14 +1143,38 @@ pub fn store_sample_part_document(world: &mut World) {
 // Help
 
 const HELP: &[(&str, &str)] = &[
-    ("Boards", "A PCB Studio holds any number of boards. + creates a new board (a 100 × 80 mm outline) and lets you type its name; double-click a board to rename it. Click a board under Boards to show it; the board shown is bold and blue. Right-click a board to delete it (Undo brings it back)."),
-    ("Import ECAD files", "Click the Import ECAD files button, choose a board's .emn file and its .emp library (Ctrl+click picks both), then Import. Each import adds a board."),
-    ("Viewport", "The board is green and components are coloured by package. Orbit with the right mouse button, pan with the middle button, zoom with the wheel; F fits the board. Click a component to select it."),
-    ("Components", "+ creates a component and lets you type its name; double-click it to rename it. Click a board under Components to list its packages; click a package for its component view (the part alone on a grid). Click the board again to go back."),
-    ("Component properties", "The right edge's first button shows the selected component's part name, part number and representation: None, From ECAD data (a box from the outline and height) or Custom part (a part from a Part Studio, moved with Translate, Center and Rotate, then Accept). The choice is kept in the component library, so every PCB Studio follows."),
-    ("Bill of materials", "The right edge's second button lists the board's components grouped by part number. Click a row to select its components; double-click a designator to rename it."),
-    ("Search", "Type in Search and press Enter (or the magnifier): matching designators, packages, part numbers and boards light up. The arrows step through them; the cross clears."),
-    ("Settings", "The gear sets the component library document and the folder for component documents, for every PCB Studio in this workspace."),
+    (
+        "Boards",
+        "A PCB Studio holds any number of boards. + creates a new board (a 100 × 80 mm outline) and lets you type its name; double-click a board to rename it. Click a board under Boards to show it; the board shown is bold and blue. Right-click a board to delete it (Undo brings it back).",
+    ),
+    (
+        "Import ECAD files",
+        "Click the Import ECAD files button, choose a board's .emn file and its .emp library (Ctrl+click picks both), then Import. Each import adds a board.",
+    ),
+    (
+        "Viewport",
+        "The board is green and components are coloured by package. Orbit with the right mouse button, pan with the middle button, zoom with the wheel; F fits the board. Click a component to select it.",
+    ),
+    (
+        "Components",
+        "+ creates a component and lets you type its name; double-click it to rename it. Click a board under Components to list its packages; click a package for its component view (the part alone on a grid). Click the board again to go back.",
+    ),
+    (
+        "Component properties",
+        "The right edge's first button shows the selected component's part name, part number and representation: None, From ECAD data (a box from the outline and height) or Custom part (a part from a Part Studio, moved with Translate, Center and Rotate, then Accept). The choice is kept in the component library, so every PCB Studio follows.",
+    ),
+    (
+        "Bill of materials",
+        "The right edge's second button lists the board's components grouped by part number. Click a row to select its components; double-click a designator to rename it.",
+    ),
+    (
+        "Search",
+        "Type in Search and press Enter (or the magnifier): matching designators, packages, part numbers and boards light up. The arrows step through them; the cross clears.",
+    ),
+    (
+        "Settings",
+        "The gear sets the component library document and the folder for component documents, for every PCB Studio in this workspace.",
+    ),
 ];
 
 /// Opens the help dialog (the toolbar's ?).
@@ -884,10 +1191,25 @@ pub fn open_help_dialog(world: &mut World) {
             .width(480.0)
             .body(move |b| {
                 let t = &tb;
-                b.spawn(Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(8.0), width: Val::Percent(100.0), ..default() }).with_children(|c| {
+                b.spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(8.0),
+                    width: Val::Percent(100.0),
+                    ..default()
+                })
+                .with_children(|c| {
                     for (i, (head, text)) in HELP.iter().enumerate() {
-                        c.spawn((Name::new(format!("pcb-help-{i}-title")), t.text(*head, t.font_base, FontWeight::BOLD, t.foreground)));
-                        c.spawn(wrapped(t, &format!("pcb-help-{i}"), text, false, t.foreground));
+                        c.spawn((
+                            Name::new(format!("pcb-help-{i}-title")),
+                            t.text(*head, t.font_base, FontWeight::BOLD, t.foreground),
+                        ));
+                        c.spawn(wrapped(
+                            t,
+                            &format!("pcb-help-{i}"),
+                            text,
+                            false,
+                            t.foreground,
+                        ));
                     }
                 });
             })

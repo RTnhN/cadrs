@@ -19,8 +19,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use cadrs_core::assembly::commands::{AddMateFeature, InsertInstance, SetLocalConnector};
+use cadrs_core::assembly::connector::{
+    ConnectorFrame, LocalConnector, LocalConnectorId, MateConnector,
+};
 use cadrs_core::assembly::folders::{CreateAssemblyFolder, FolderList};
-use cadrs_core::assembly::connector::{ConnectorFrame, LocalConnector, LocalConnectorId, MateConnector};
 use cadrs_core::assembly::mate::{Mate, MateFeature, MateId, MateKind, MateType};
 use cadrs_core::assembly::structure::derive;
 use cadrs_core::assembly::{Instance, InstanceId, InstanceSource, Pose};
@@ -46,7 +48,10 @@ pub fn pose_of(t: &Value) -> Option<Pose> {
     if a.len() < 12 {
         return None;
     }
-    Some(Pose { rotation: [[a[0], a[1], a[2]], [a[4], a[5], a[6]], [a[8], a[9], a[10]]], translation: [a[3] * 1000.0, a[7] * 1000.0, a[11] * 1000.0] })
+    Some(Pose {
+        rotation: [[a[0], a[1], a[2]], [a[4], a[5], a[6]], [a[8], a[9], a[10]]],
+        translation: [a[3] * 1000.0, a[7] * 1000.0, a[11] * 1000.0],
+    })
 }
 
 /// An Onshape coordinate system (`origin` in metres, unit axes) as a connector frame.
@@ -55,12 +60,20 @@ fn frame_of(cs: &Value) -> Option<ConnectorFrame> {
         let a: Vec<f64> = cs[k].as_array()?.iter().filter_map(Value::as_f64).collect();
         (a.len() == 3).then(|| [a[0] * s, a[1] * s, a[2] * s])
     };
-    Some(ConnectorFrame { origin: v("origin", 1000.0)?, z: v("zAxis", 1.0)?, x: v("xAxis", 1.0)? })
+    Some(ConnectorFrame {
+        origin: v("origin", 1000.0)?,
+        z: v("zAxis", 1.0)?,
+        x: v("xAxis", 1.0)?,
+    })
 }
 
 /// A frame moved by a pose.
 fn moved(p: &Pose, f: &ConnectorFrame) -> ConnectorFrame {
-    ConnectorFrame { origin: p.apply(f.origin), z: p.rotate(f.z), x: p.rotate(f.x) }
+    ConnectorFrame {
+        origin: p.apply(f.origin),
+        z: p.rotate(f.z),
+        x: p.rotate(f.x),
+    }
 }
 
 fn close(a: &Pose, b: &Pose) -> bool {
@@ -72,7 +85,8 @@ fn close(a: &Pose, b: &Pose) -> bool {
 type Imported = Option<Arc<Document>>;
 
 fn externals() -> &'static std::sync::Mutex<HashMap<String, Imported>> {
-    static S: std::sync::OnceLock<std::sync::Mutex<HashMap<String, Imported>>> = std::sync::OnceLock::new();
+    static S: std::sync::OnceLock<std::sync::Mutex<HashMap<String, Imported>>> =
+        std::sync::OnceLock::new();
     S.get_or_init(Default::default)
 }
 
@@ -83,8 +97,12 @@ fn external(root: &std::path::Path, doc: &str) -> Imported {
         return d.clone();
     }
     externals().lock().ok()?.insert(doc.to_string(), None);
-    let raw = crate::raw::documents(root).into_iter().find(|d| d.id == doc)?;
-    let imported = crate::import::nested_import(|| crate::import::import_document(&raw, "import", &crate::import::Options::nested(None)));
+    let raw = crate::raw::documents(root)
+        .into_iter()
+        .find(|d| d.id == doc)?;
+    let imported = crate::import::nested_import(|| {
+        crate::import::import_document(&raw, "import", &crate::import::Options::nested(None))
+    });
     let d = Some(Arc::new(imported.doc));
     externals().lock().ok()?.insert(doc.to_string(), d.clone());
     d
@@ -123,33 +141,67 @@ fn corrected(pose: Pose, offset: [f64; 3]) -> Pose {
 
 /// How far (mm) the cadrs part of Onshape part instance `inst` sits from Onshape's.
 fn part_offset(inst: &Value) -> [f64; 3] {
-    let (Some(d), Some(e), Some(p)) = (inst["documentId"].as_str(), inst["elementId"].as_str(), inst["partId"].as_str()) else { return [0.0; 3] };
-    crate::eval::part_map(d, e).and_then(|m| m.get(p).map(|x| x.1)).unwrap_or([0.0; 3])
+    let (Some(d), Some(e), Some(p)) = (
+        inst["documentId"].as_str(),
+        inst["elementId"].as_str(),
+        inst["partId"].as_str(),
+    ) else {
+        return [0.0; 3];
+    };
+    crate::eval::part_map(d, e)
+        .and_then(|m| m.get(p).map(|x| x.1))
+        .unwrap_or([0.0; 3])
 }
 
 /// Imports every assembly of `raw`, subassembly tabs before the tabs that use them.
 /// Where an assembly of this document holds an instance of the Part Studio `studio` (an Onshape
 /// element id) at its top level: the cadrs assembly, the instance's cadrs id and its pose
 /// (Onshape's occurrence transform). The anchor of the studio's assembly context.
-pub fn context_anchor(raw: &RawDocument, elements: &[RawElement], studio: &str) -> Option<(ElementId, InstanceId, Pose)> {
+pub fn context_anchor(
+    raw: &RawDocument,
+    elements: &[RawElement],
+    studio: &str,
+) -> Option<(ElementId, InstanceId, Pose)> {
     for el in elements.iter().filter(|e| e.kind == "ASSEMBLY") {
         let def = read_json(&el.dir.join("definition.json"))?;
         let root = &def["rootAssembly"];
         for inst in root["instances"].as_array().into_iter().flatten() {
-            if inst["elementId"].as_str() != Some(studio) || inst["documentId"].as_str() != Some(raw.id.as_str()) || inst["suppressed"].as_bool() == Some(true) {
+            if inst["elementId"].as_str() != Some(studio)
+                || inst["documentId"].as_str() != Some(raw.id.as_str())
+                || inst["suppressed"].as_bool() == Some(true)
+            {
                 continue;
             }
             let oid = inst["id"].as_str()?;
-            let occ = root["occurrences"].as_array().into_iter().flatten().find(|o| o["path"].as_array().is_some_and(|p| p.len() == 1 && p[0].as_str() == Some(oid)))?;
+            let occ = root["occurrences"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|o| {
+                    o["path"]
+                        .as_array()
+                        .is_some_and(|p| p.len() == 1 && p[0].as_str() == Some(oid))
+                })?;
             let pose = pose_of(&occ["transform"])?;
-            return Some((ElementId::from_u128(stable_u128(&[&raw.id, &el.id])), instance_id(&raw.id, &el.id, oid), pose));
+            return Some((
+                ElementId::from_u128(stable_u128(&[&raw.id, &el.id])),
+                instance_id(&raw.id, &el.id, oid),
+                pose,
+            ));
         }
     }
     None
 }
 
-pub fn import_assemblies(s: &mut DocStudio, raw: &RawDocument, elements: &[RawElement], reports: &mut [Option<ElementReport>]) {
-    let asms: Vec<usize> = (0..elements.len()).filter(|&i| elements[i].kind == "ASSEMBLY").collect();
+pub fn import_assemblies(
+    s: &mut DocStudio,
+    raw: &RawDocument,
+    elements: &[RawElement],
+    reports: &mut [Option<ElementReport>],
+) {
+    let asms: Vec<usize> = (0..elements.len())
+        .filter(|&i| elements[i].kind == "ASSEMBLY")
+        .collect();
     // Same-document subassemblies first.
     let uses = |i: usize| -> Vec<String> {
         let def = read_json(&elements[i].dir.join("definition.json")).unwrap_or(Value::Null);
@@ -157,15 +209,27 @@ pub fn import_assemblies(s: &mut DocStudio, raw: &RawDocument, elements: &[RawEl
             .as_array()
             .into_iter()
             .flatten()
-            .filter(|x| x["type"].as_str() == Some("Assembly") && x["documentId"].as_str() == Some(raw.id.as_str()))
+            .filter(|x| {
+                x["type"].as_str() == Some("Assembly")
+                    && x["documentId"].as_str() == Some(raw.id.as_str())
+            })
             .filter_map(|x| x["elementId"].as_str().map(String::from))
             .collect()
     };
     let mut left = asms.clone();
     while !left.is_empty() {
-        let k = left.iter().position(|&i| uses(i).iter().all(|e| !left.iter().any(|&j| elements[j].id == *e))).unwrap_or(0);
+        let k = left
+            .iter()
+            .position(|&i| {
+                uses(i)
+                    .iter()
+                    .all(|e| !left.iter().any(|&j| elements[j].id == *e))
+            })
+            .unwrap_or(0);
         let i = left.remove(k);
-        let Some(er) = reports.get_mut(i).and_then(Option::as_mut) else { continue };
+        let Some(er) = reports.get_mut(i).and_then(Option::as_mut) else {
+            continue;
+        };
         import_assembly(s, raw, &elements[i], er);
     }
 }
@@ -180,14 +244,30 @@ fn import_assembly(s: &mut DocStudio, raw: &RawDocument, el: &RawElement, er: &m
     if instances.is_empty() {
         return;
     }
-    let raw_root = raw.dir.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+    let raw_root = raw
+        .dir
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_default();
     let asm = ElementId::from_u128(stable_u128(&[&raw.id, &el.id]));
     // Occurrences: path → (pose, fixed, hidden).
     let mut occ: HashMap<Vec<String>, (Pose, bool, bool)> = HashMap::new();
     for o in root["occurrences"].as_array().into_iter().flatten() {
-        let path: Vec<String> = o["path"].as_array().into_iter().flatten().filter_map(|p| p.as_str().map(String::from)).collect();
+        let path: Vec<String> = o["path"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|p| p.as_str().map(String::from))
+            .collect();
         if let Some(p) = pose_of(&o["transform"]) {
-            occ.insert(path, (p, o["fixed"].as_bool() == Some(true), o["hidden"].as_bool() == Some(true)));
+            occ.insert(
+                path,
+                (
+                    p,
+                    o["fixed"].as_bool() == Some(true),
+                    o["hidden"].as_bool() == Some(true),
+                ),
+            );
         }
     }
     // The subassembly definitions (their instances), by Onshape document and element.
@@ -195,7 +275,15 @@ fn import_assembly(s: &mut DocStudio, raw: &RawDocument, el: &RawElement, er: &m
         .as_array()
         .into_iter()
         .flatten()
-        .filter_map(|x| Some(((x["documentId"].as_str()?.to_string(), x["elementId"].as_str()?.to_string()), x["instances"].as_array().cloned().unwrap_or_default())))
+        .filter_map(|x| {
+            Some((
+                (
+                    x["documentId"].as_str()?.to_string(),
+                    x["elementId"].as_str()?.to_string(),
+                ),
+                x["instances"].as_array().cloned().unwrap_or_default(),
+            ))
+        })
         .collect();
     let mut placed = 0;
     let mut problems: HashMap<String, usize> = HashMap::new();
@@ -212,7 +300,10 @@ fn import_assembly(s: &mut DocStudio, raw: &RawDocument, el: &RawElement, er: &m
                 continue;
             }
         };
-        let (pose, fixed, hidden) = occ.get(&vec![oid.clone()]).copied().unwrap_or((Pose::IDENTITY, false, false));
+        let (pose, fixed, hidden) =
+            occ.get(&vec![oid.clone()])
+                .copied()
+                .unwrap_or((Pose::IDENTITY, false, false));
         let pose = corrected(pose, src.offset);
         let mut instance = Instance::new(id, src.source, pose);
         instance.fixed = fixed;
@@ -224,13 +315,21 @@ fn import_assembly(s: &mut DocStudio, raw: &RawDocument, el: &RawElement, er: &m
                 Some((_, snap)) => snap.element().cloned(),
                 None => s.doc.element(src.source.element()).cloned(),
             };
-            let children = tab.map(|t| t.assembly.instances.clone()).unwrap_or_default();
+            let children = tab
+                .map(|t| t.assembly.instances.clone())
+                .unwrap_or_default();
             let mut overrides = Vec::new();
             for child in subs.get(&(d.clone(), e.clone())).into_iter().flatten() {
-                let Some(cid) = child["id"].as_str() else { continue };
-                let Some((world, ..)) = occ.get(&vec![oid.clone(), cid.to_string()]) else { continue };
+                let Some(cid) = child["id"].as_str() else {
+                    continue;
+                };
+                let Some((world, ..)) = occ.get(&vec![oid.clone(), cid.to_string()]) else {
+                    continue;
+                };
                 let tab_id = instance_id(d, e, cid);
-                let Some(c) = children.iter().find(|c| c.id == tab_id) else { continue };
+                let Some(c) = children.iter().find(|c| c.id == tab_id) else {
+                    continue;
+                };
                 let local = corrected(world.then(&pose.inverse()), part_offset(child));
                 if !close(&local, &c.pose) {
                     overrides.push((tab_id, local));
@@ -249,11 +348,27 @@ fn import_assembly(s: &mut DocStudio, raw: &RawDocument, el: &RawElement, er: &m
                 let mut snap = snap.clone();
                 if let Some((d, e)) = &src.sub {
                     let root = snap.root;
-                    place_nested(&mut snap, root, (d, e), std::slice::from_ref(&oid), &occ, &subs, 0);
+                    place_nested(
+                        &mut snap,
+                        root,
+                        (d, e),
+                        std::slice::from_ref(&oid),
+                        &occ,
+                        &subs,
+                        0,
+                    );
                 }
-                s.run(&InsertLinked { element: asm, snapshot: snap, instances: vec![instance], reference: *r })
+                s.run(&InsertLinked {
+                    element: asm,
+                    snapshot: snap,
+                    instances: vec![instance],
+                    reference: *r,
+                })
             }
-            None => s.run(&InsertInstance { element: asm, instance }),
+            None => s.run(&InsertInstance {
+                element: asm,
+                instance,
+            }),
         };
         match result {
             Ok(()) => {
@@ -275,9 +390,19 @@ fn import_assembly(s: &mut DocStudio, raw: &RawDocument, el: &RawElement, er: &m
             let (d, e) = sub?;
             inner.push(instance_id(&d, &e, p));
             // Deeper: that child's own subassembly (its definition lists it by document and element).
-            sub = subs.get(&(d, e)).and_then(|xs| xs.iter().find(|x| x["id"].as_str() == Some(p.as_str()))).and_then(|x| {
-                if x["type"].as_str() == Some("Assembly") { Some((x["documentId"].as_str()?.to_string(), x["elementId"].as_str()?.to_string())) } else { None }
-            });
+            sub = subs
+                .get(&(d, e))
+                .and_then(|xs| xs.iter().find(|x| x["id"].as_str() == Some(p.as_str())))
+                .and_then(|x| {
+                    if x["type"].as_str() == Some("Assembly") {
+                        Some((
+                            x["documentId"].as_str()?.to_string(),
+                            x["elementId"].as_str()?.to_string(),
+                        ))
+                    } else {
+                        None
+                    }
+                });
         }
         // derive(A, derive(B, C)): each level names its occurrence in its own tab.
         if let Some(last) = inner.pop() {
@@ -292,16 +417,35 @@ fn import_assembly(s: &mut DocStudio, raw: &RawDocument, el: &RawElement, er: &m
     // The Onshape instance a path ends at (a part's, for its offset).
     let leaf = |path: &[String]| -> Option<&Value> {
         let top = path.first()?;
-        let mut cur = instances.iter().find(|x| x["id"].as_str() == Some(top.as_str()))?;
+        let mut cur = instances
+            .iter()
+            .find(|x| x["id"].as_str() == Some(top.as_str()))?;
         for p in &path[1..] {
-            let key = (cur["documentId"].as_str()?.to_string(), cur["elementId"].as_str()?.to_string());
-            cur = subs.get(&key)?.iter().find(|x| x["id"].as_str() == Some(p.as_str()))?;
+            let key = (
+                cur["documentId"].as_str()?.to_string(),
+                cur["elementId"].as_str()?.to_string(),
+            );
+            cur = subs
+                .get(&key)?
+                .iter()
+                .find(|x| x["id"].as_str() == Some(p.as_str()))?;
         }
         Some(cur)
     };
     // A frame in Onshape's part coordinates, in the cadrs part's.
-    let local = |path: &[String], f: ConnectorFrame| -> ConnectorFrame { moved(&Pose::translation(leaf(path).map(part_offset).unwrap_or([0.0; 3])), &f) };
-    let path_of = |v: &Value| -> Vec<String> { v.as_array().into_iter().flatten().filter_map(|p| p.as_str().map(String::from)).collect() };
+    let local = |path: &[String], f: ConnectorFrame| -> ConnectorFrame {
+        moved(
+            &Pose::translation(leaf(path).map(part_offset).unwrap_or([0.0; 3])),
+            &f,
+        )
+    };
+    let path_of = |v: &Value| -> Vec<String> {
+        v.as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|p| p.as_str().map(String::from))
+            .collect()
+    };
     let world = |path: &[String]| occ.get(path).map(|x| x.0);
     let (mut mates, mut mates_done) = (0, 0);
     for f in root["features"].as_array().into_iter().flatten() {
@@ -309,32 +453,58 @@ fn import_assembly(s: &mut DocStudio, raw: &RawDocument, el: &RawElement, er: &m
         let name = data["name"].as_str().unwrap_or("Mate").to_string();
         let kind = f["featureType"].as_str().unwrap_or_default();
         let fid = f["id"].as_str().unwrap_or_default();
-        let mut fr = FeatureReport { name: name.clone(), kind: kind.to_string(), outcome: Outcome::Full, notes: Vec::new() };
+        let mut fr = FeatureReport {
+            name: name.clone(),
+            kind: kind.to_string(),
+            outcome: Outcome::Full,
+            notes: Vec::new(),
+        };
         if f["suppressed"].as_bool() == Some(true) {
             fr.outcome = Outcome::Suppressed;
             er.features.push(fr);
             continue;
         }
-        let mid = MateId(uuid::Uuid::from_u128(stable_u128(&[&raw.id, &el.id, "mate", fid])));
+        let mid = MateId(uuid::Uuid::from_u128(stable_u128(&[
+            &raw.id, &el.id, "mate", fid,
+        ])));
         let result: Result<(), String> = match kind {
             "mateConnector" => (|| {
                 let path = path_of(&data["occurrence"]);
                 let owner = occurrence(&path).ok_or("its instance was not imported")?;
                 let frame = local(&path, frame_of(&data["mateConnectorCS"]).ok_or("no frame")?);
-                let c = LocalConnector { id: LocalConnectorId(mid.0), name: name.clone(), connector: MateConnector::at(owner, frame), listed_after: None };
-                s.run(&SetLocalConnector { element: asm, connector: c }).map_err(|e| e.to_string())
+                let c = LocalConnector {
+                    id: LocalConnectorId(mid.0),
+                    name: name.clone(),
+                    connector: MateConnector::at(owner, frame),
+                    listed_after: None,
+                };
+                s.run(&SetLocalConnector {
+                    element: asm,
+                    connector: c,
+                })
+                .map_err(|e| e.to_string())
             })(),
             "mateGroup" => (|| {
                 let mut members: Vec<InstanceId> = Vec::new();
                 for o in data["occurrences"].as_array().into_iter().flatten() {
                     let path = path_of(&o["occurrence"]);
-                    let top = path.first().and_then(|p| ids.get(p)).map(|x| x.0).ok_or("an instance of it was not imported")?;
+                    let top = path
+                        .first()
+                        .and_then(|p| ids.get(p))
+                        .map(|x| x.0)
+                        .ok_or("an instance of it was not imported")?;
                     if !members.contains(&top) {
                         members.push(top);
                     }
                 }
-                let feature = MateFeature::new(mid, name.clone(), MateKind::Group { instances: members });
-                s.run(&AddMateFeature { element: asm, feature, poses: Vec::new() }).map_err(|e| e.to_string())
+                let feature =
+                    MateFeature::new(mid, name.clone(), MateKind::Group { instances: members });
+                s.run(&AddMateFeature {
+                    element: asm,
+                    feature,
+                    poses: Vec::new(),
+                })
+                .map_err(|e| e.to_string())
             })(),
             "mate" => {
                 mates += 1;
@@ -348,9 +518,17 @@ fn import_assembly(s: &mut DocStudio, raw: &RawDocument, el: &RawElement, er: &m
                         "PLANAR" => MateType::Planar,
                         "BALL" => MateType::Ball,
                         "PARALLEL" => MateType::Parallel,
-                        other => return Err(format!("{} mates are not imported yet", other.to_lowercase())),
+                        other => {
+                            return Err(format!(
+                                "{} mates are not imported yet",
+                                other.to_lowercase()
+                            ));
+                        }
                     };
-                    let ents = data["matedEntities"].as_array().cloned().unwrap_or_default();
+                    let ents = data["matedEntities"]
+                        .as_array()
+                        .cloned()
+                        .unwrap_or_default();
                     if ents.len() != 2 {
                         return Err("it doesn't join two entities".into());
                     }
@@ -359,20 +537,42 @@ fn import_assembly(s: &mut DocStudio, raw: &RawDocument, el: &RawElement, er: &m
                     for e in &ents {
                         let path = path_of(&e["matedOccurrence"]);
                         let frame = frame_of(&e["matedCS"]).ok_or("no frame")?;
-                        let conn = if path.is_empty() { MateConnector::at(InstanceId::ORIGIN, frame) } else { MateConnector::at(occurrence(&path).ok_or("an instance of it was not imported")?, local(&path, frame)) };
-                        worlds.push(if path.is_empty() { Some(frame) } else { world(&path).map(|p| moved(&p, &frame)) });
+                        let conn = if path.is_empty() {
+                            MateConnector::at(InstanceId::ORIGIN, frame)
+                        } else {
+                            MateConnector::at(
+                                occurrence(&path).ok_or("an instance of it was not imported")?,
+                                local(&path, frame),
+                            )
+                        };
+                        worlds.push(if path.is_empty() {
+                            Some(frame)
+                        } else {
+                            world(&path).map(|p| moved(&p, &frame))
+                        });
                         cs.push(conn);
                     }
                     let m = Mate::new(t, cs[0], cs[1]);
                     let feature = MateFeature::new(mid, name.clone(), MateKind::Mate(m));
-                    s.run(&AddMateFeature { element: asm, feature, poses: Vec::new() }).map_err(|e| e.to_string())?;
+                    s.run(&AddMateFeature {
+                        element: asm,
+                        feature,
+                        poses: Vec::new(),
+                    })
+                    .map_err(|e| e.to_string())?;
                     // Onshape's positions are kept; a fastened mate they don't satisfy (an offset
                     // Onshape's featureData doesn't list) is noted.
                     if t == MateType::Fastened
                         && let (Some(a), Some(b)) = (worlds[0], worlds[1])
-                        && a.origin.iter().zip(b.origin).any(|(x, y)| (x - y).abs() > 1e-3)
+                        && a.origin
+                            .iter()
+                            .zip(b.origin)
+                            .any(|(x, y)| (x - y).abs() > 1e-3)
                     {
-                        return Err("imported, but Onshape's positions don't satisfy it (an offset?)".into());
+                        return Err(
+                            "imported, but Onshape's positions don't satisfy it (an offset?)"
+                                .into(),
+                        );
                     }
                     Ok(())
                 })()
@@ -399,13 +599,21 @@ fn import_assembly(s: &mut DocStudio, raw: &RawDocument, el: &RawElement, er: &m
         }
         er.features.push(fr);
     }
-    er.notes.retain(|n| !n.starts_with("assembly contents are not imported"));
+    er.notes
+        .retain(|n| !n.starts_with("assembly contents are not imported"));
     let mut problems: Vec<(String, usize)> = problems.into_iter().collect();
     problems.sort();
     for (why, n) in problems {
-        er.notes.push(if n > 1 { format!("{n} instances: {why}") } else { format!("an instance: {why}") });
+        er.notes.push(if n > 1 {
+            format!("{n} instances: {why}")
+        } else {
+            format!("an instance: {why}")
+        });
     }
-    er.assembly = Some(crate::report::AssemblyCounts { instances: (placed, instances.len()), mates: (mates_done, mates) });
+    er.assembly = Some(crate::report::AssemblyCounts {
+        instances: (placed, instances.len()),
+        mates: (mates_done, mates),
+    });
 }
 
 /// Places the instances of the nested subassembly tabs of linked copy `tab` (the copy of Onshape
@@ -421,24 +629,46 @@ fn place_nested(
     subs: &HashMap<(String, String), Vec<Value>>,
     depth: usize,
 ) {
-    let Some(parent) = occ.get(path).map(|x| x.0) else { return };
+    let Some(parent) = occ.get(path).map(|x| x.0) else {
+        return;
+    };
     let (d, e) = sub;
-    for child in subs.get(&(d.to_string(), e.to_string())).into_iter().flatten() {
-        let Some(cid) = child["id"].as_str() else { continue };
+    for child in subs
+        .get(&(d.to_string(), e.to_string()))
+        .into_iter()
+        .flatten()
+    {
+        let Some(cid) = child["id"].as_str() else {
+            continue;
+        };
         let mut cpath = path.to_vec();
         cpath.push(cid.to_string());
         let id = instance_id(d, e, cid);
-        let Some(model) = snap.links.iter_mut().find(|l| l.id() == tab).and_then(|l| l.element.assembly_model_mut()) else { return };
-        let Some(inst) = model.instance_mut(id) else { continue };
+        let Some(model) = snap
+            .links
+            .iter_mut()
+            .find(|l| l.id() == tab)
+            .and_then(|l| l.element.assembly_model_mut())
+        else {
+            return;
+        };
+        let Some(inst) = model.instance_mut(id) else {
+            continue;
+        };
         if depth > 0
             && let Some((world, ..)) = occ.get(&cpath)
         {
             let local = world.then(&parent.inverse());
-            inst.pose = if child["type"].as_str() == Some("Assembly") { local } else { corrected(local, part_offset(child)) };
+            inst.pose = if child["type"].as_str() == Some("Assembly") {
+                local
+            } else {
+                corrected(local, part_offset(child))
+            };
         }
         if child["type"].as_str() == Some("Assembly")
             && let InstanceSource::Assembly { element } = inst.source
-            && let (Some(cd), Some(ce)) = (child["documentId"].as_str(), child["elementId"].as_str())
+            && let (Some(cd), Some(ce)) =
+                (child["documentId"].as_str(), child["elementId"].as_str())
         {
             place_nested(snap, element, (cd, ce), &cpath, occ, subs, depth + 1);
         }
@@ -448,13 +678,34 @@ fn place_nested(
 /// The instance folders (`folders.json`, read from Onshape's instance list by
 /// `tools/onshape/folders.js`: the REST API doesn't return them). cadrs folders don't nest, so a
 /// folder in a folder is merged into the outer one.
-fn folders(s: &mut DocStudio, asm: ElementId, el: &RawElement, ids: &Placed, er: &mut ElementReport) {
-    let Some(v) = read_json(&el.dir.join("folders.json")) else { return };
+fn folders(
+    s: &mut DocStudio,
+    asm: ElementId,
+    el: &RawElement,
+    ids: &Placed,
+    er: &mut ElementReport,
+) {
+    let Some(v) = read_json(&el.dir.join("folders.json")) else {
+        return;
+    };
     let all = v["folders"].as_array().cloned().unwrap_or_default();
-    let by_id: HashMap<&str, &Value> = all.iter().filter_map(|f| Some((f["id"].as_str()?, f))).collect();
+    let by_id: HashMap<&str, &Value> = all
+        .iter()
+        .filter_map(|f| Some((f["id"].as_str()?, f)))
+        .collect();
     // A folder's instances, its subfolders' too (in list order).
-    fn gather<'a>(f: &'a Value, by_id: &HashMap<&str, &'a Value>, out: &mut Vec<&'a str>, nested: &mut usize) {
-        for m in f["members"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+    fn gather<'a>(
+        f: &'a Value,
+        by_id: &HashMap<&str, &'a Value>,
+        out: &mut Vec<&'a str>,
+        nested: &mut usize,
+    ) {
+        for m in f["members"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+        {
             match by_id.get(m) {
                 Some(sub) => {
                     *nested += 1;
@@ -465,22 +716,41 @@ fn folders(s: &mut DocStudio, asm: ElementId, el: &RawElement, ids: &Placed, er:
         }
     }
     for f in all.iter().filter(|f| f["parent"].is_null()) {
-        let (Some(fid), Some(name)) = (f["id"].as_str(), f["name"].as_str()) else { continue };
+        let (Some(fid), Some(name)) = (f["id"].as_str(), f["name"].as_str()) else {
+            continue;
+        };
         let (mut members, mut nested) = (Vec::new(), 0);
         gather(f, &by_id, &mut members, &mut nested);
-        let items: Vec<FeatureId> = members.iter().filter_map(|m| ids.get(*m)).map(|x| cadrs_core::assembly::folders::item(x.0)).collect();
+        let items: Vec<FeatureId> = members
+            .iter()
+            .filter_map(|m| ids.get(*m))
+            .map(|x| cadrs_core::assembly::folders::item(x.0))
+            .collect();
         let folder = FeatureId(uuid::Uuid::from_u128(stable_u128(&[&el.id, "folder", fid])));
-        let cmd = CreateAssemblyFolder { element: asm, list: FolderList::Instances, folder, name: Some(name.to_string()), items };
+        let cmd = CreateAssemblyFolder {
+            element: asm,
+            list: FolderList::Instances,
+            folder,
+            name: Some(name.to_string()),
+            items,
+        };
         if let Err(e) = s.run(&cmd) {
             er.notes.push(format!("folder {name}: {e}"));
         } else if nested > 0 {
-            er.notes.push(format!("folder {name}: its {nested} subfolder(s) merged into it (cadrs folders don't nest)"));
+            er.notes.push(format!(
+                "folder {name}: its {nested} subfolder(s) merged into it (cadrs folders don't nest)"
+            ));
         }
     }
 }
 
 /// The cadrs source of an Onshape instance.
-fn resolve(s: &DocStudio, raw: &RawDocument, root: &std::path::Path, inst: &Value) -> Result<Source, String> {
+fn resolve(
+    s: &DocStudio,
+    raw: &RawDocument,
+    root: &std::path::Path,
+    inst: &Value,
+) -> Result<Source, String> {
     if inst["isStandardContent"].as_bool() == Some(true) {
         return Err("standard content is not imported yet".into());
     }
@@ -492,7 +762,9 @@ fn resolve(s: &DocStudio, raw: &RawDocument, root: &std::path::Path, inst: &Valu
     let part = || -> Result<(cadrs_core::ids::PartId, [f64; 3]), String> {
         let pid = inst["partId"].as_str().unwrap_or_default();
         let map = crate::eval::part_map(&doc, &el).ok_or("its Part Studio was not imported")?;
-        map.get(pid).copied().ok_or_else(|| "its part didn't come across (not matched in its Part Studio)".to_string())
+        map.get(pid).copied().ok_or_else(|| {
+            "its part didn't come across (not matched in its Part Studio)".to_string()
+        })
     };
     if here {
         return match ty {
@@ -501,26 +773,53 @@ fn resolve(s: &DocStudio, raw: &RawDocument, root: &std::path::Path, inst: &Valu
                     return Err("its Part Studio was not imported".into());
                 }
                 let (part, offset) = part()?;
-                Ok(Source { source: InstanceSource::Part { element, part }, link: None, sub: None, offset })
+                Ok(Source {
+                    source: InstanceSource::Part { element, part },
+                    link: None,
+                    sub: None,
+                    offset,
+                })
             }
-            "Assembly" => Ok(Source { source: InstanceSource::Assembly { element }, link: None, sub: Some((doc, el)), offset: [0.0; 3] }),
+            "Assembly" => Ok(Source {
+                source: InstanceSource::Assembly { element },
+                link: None,
+                sub: Some((doc, el)),
+                offset: [0.0; 3],
+            }),
             other => Err(format!("{other} instances are not imported yet")),
         };
     }
     // Another document: import it, and link its element at Onshape's version.
     let ext = external(root, &doc).ok_or("its document was not scraped (or links back here)")?;
     let version = inst["documentVersion"].as_str().unwrap_or_default();
-    let vid = VersionId(uuid::Uuid::from_u128(stable_u128(&[&doc, "version", version])));
-    let r = SourceRef::version(Some(DocumentId::from_u128(stable_u128(&[&doc]))), element, vid);
+    let vid = VersionId(uuid::Uuid::from_u128(stable_u128(&[
+        &doc, "version", version,
+    ])));
+    let r = SourceRef::version(
+        Some(DocumentId::from_u128(stable_u128(&[&doc]))),
+        element,
+        vid,
+    );
     let snap = snapshot(&ext, r, &version_name(root, &doc, version)).map_err(|e| e.to_string())?;
     let (source, offset) = match ty {
         "Part" => {
             let (part, offset) = part()?;
-            (InstanceSource::Part { element: snap.root, part }, offset)
+            (
+                InstanceSource::Part {
+                    element: snap.root,
+                    part,
+                },
+                offset,
+            )
         }
         "Assembly" => (InstanceSource::Assembly { element: snap.root }, [0.0; 3]),
         other => return Err(format!("{other} instances are not imported yet")),
     };
     let sub = (ty == "Assembly").then(|| (doc.clone(), el.clone()));
-    Ok(Source { source, link: Some((r, snap)), sub, offset })
+    Ok(Source {
+        source,
+        link: Some((r, snap)),
+        sub,
+        offset,
+    })
 }

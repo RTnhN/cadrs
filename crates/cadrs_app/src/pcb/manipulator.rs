@@ -103,7 +103,12 @@ fn v3(v: Vector3<f64>) -> Vec3 {
 }
 
 fn rot(axis: usize, deg: f64) -> Matrix3<f64> {
-    PartTransform { translate: [0.0; 3], rotate: std::array::from_fn(|i| if i == axis { deg } else { 0.0 }) }.motion().linear
+    PartTransform {
+        translate: [0.0; 3],
+        rotate: std::array::from_fn(|i| if i == axis { deg } else { 0.0 }),
+    }
+    .motion()
+    .linear
 }
 
 /// The frame of the custom part the Component pane edits, if it is shown (see the module docs).
@@ -125,7 +130,9 @@ fn frame_of(world: &mut World) -> Option<ManipFrame> {
     // Package frame → world: the component view shows the package in its own frame; on the
     // board, the selected component's placement.
     let to_world = match &view {
-        PcbView::Component { package, .. } if *package == edit.package => cadrs_kernel::Motion::default(),
+        PcbView::Component { package, .. } if *package == edit.package => {
+            cadrs_kernel::Motion::default()
+        }
         PcbView::Board => {
             let p = board.component(selected?)?;
             if p.package != edit.package {
@@ -135,10 +142,22 @@ fn frame_of(world: &mut World) -> Option<ManipFrame> {
         }
         _ => return None,
     };
-    let src = world.resource::<ActiveDocument>().doc.element(el)?.pcb()?.library.get(&edit.package).custom()?.source.clone();
+    let src = world
+        .resource::<ActiveDocument>()
+        .doc
+        .element(el)?
+        .pcb()?
+        .library
+        .get(&edit.package)
+        .custom()?
+        .source
+        .clone();
     let (solid, _) = super::view::custom_solid(world, &src)?;
     let m = edit.transform.motion();
-    let (mut lo, mut hi) = (Vector3::repeat(f64::INFINITY), Vector3::repeat(f64::NEG_INFINITY));
+    let (mut lo, mut hi) = (
+        Vector3::repeat(f64::INFINITY),
+        Vector3::repeat(f64::NEG_INFINITY),
+    );
     for p in &solid.positions {
         let q = m.point(&Point3::new(p[0], p[1], p[2])).coords;
         lo = lo.inf(&q);
@@ -152,8 +171,17 @@ fn frame_of(world: &mut World) -> Option<ManipFrame> {
     let dir = |v: Vector3<f64>| v3(to_world.linear * v).normalize_or_zero();
     let [_, ry, rz] = edit.transform.rotate;
     let arrows = [dir(Vector3::x()), dir(Vector3::y()), dir(Vector3::z())];
-    let rings = [dir(rot(2, rz) * rot(1, ry) * Vector3::x()), dir(rot(2, rz) * Vector3::y()), dir(Vector3::z())];
-    Some(ManipFrame { origin, arrows, rings, points: solid })
+    let rings = [
+        dir(rot(2, rz) * rot(1, ry) * Vector3::x()),
+        dir(rot(2, rz) * Vector3::y()),
+        dir(Vector3::z()),
+    ];
+    Some(ManipFrame {
+        origin,
+        arrows,
+        rings,
+        points: solid,
+    })
 }
 
 fn update_frame(world: &mut World) {
@@ -199,7 +227,11 @@ fn segment_distance(p: Vec2, a: Vec2, b: Vec2) -> f32 {
 }
 
 fn hit(sc: &Screen, p: Vec2) -> Option<ManipHandle> {
-    if let Some(i) = sc.rings.iter().position(|r| r.distance(p) <= RING_R + GRAB * 0.6) {
+    if let Some(i) = sc
+        .rings
+        .iter()
+        .position(|r| r.distance(p) <= RING_R + GRAB * 0.6)
+    {
         return Some(ManipHandle::Ring(i));
     }
     (0..3)
@@ -226,7 +258,11 @@ fn manip_pointer(
         return;
     };
     let sc = screen(&view.view, &rect, &f);
-    let hover = manip.drag.as_ref().map(|d| d.handle).or_else(|| hit(&sc, vdrag.pointer()));
+    let hover = manip
+        .drag
+        .as_ref()
+        .map(|d| d.handle)
+        .or_else(|| hit(&sc, vdrag.pointer()));
     if manip.hover != hover {
         manip.hover = hover;
     }
@@ -242,20 +278,38 @@ fn manip_pointer(
                     continue;
                 }
                 let Some(h) = hit(&sc, pos) else { continue };
-                let Some(from) = ui.edit.as_ref().map(|e| e.transform) else { continue };
+                let Some(from) = ui.edit.as_ref().map(|e| e.transform) else {
+                    continue;
+                };
                 let (dir_px, facing) = match h {
                     ManipHandle::Arrow(i) => (view.view.project_vector(f.arrows[i]), 1.0),
-                    ManipHandle::Ring(i) => (Vec2::ZERO, if f.rings[i].dot(view.view.back()) >= 0.0 { 1.0 } else { -1.0 }),
+                    ManipHandle::Ring(i) => (
+                        Vec2::ZERO,
+                        if f.rings[i].dot(view.view.back()) >= 0.0 {
+                            1.0
+                        } else {
+                            -1.0
+                        },
+                    ),
                 };
                 if matches!(h, ManipHandle::Arrow(_)) && dir_px.length() < 0.05 {
                     continue;
                 }
-                manip.drag = Some(ManipDrag { handle: h, start: pos, from, dir_px, centre: sc.origin, facing });
+                manip.drag = Some(ManipDrag {
+                    handle: h,
+                    start: pos,
+                    from,
+                    dir_px,
+                    centre: sc.origin,
+                    facing,
+                });
                 // Not a click that picks a component.
                 grab.0 = true;
             }
             PointerAction::Move { .. } => {
-                let Some(d) = manip.drag.as_ref() else { continue };
+                let Some(d) = manip.drag.as_ref() else {
+                    continue;
+                };
                 let Some(e) = ui.edit.as_mut() else { continue };
                 let mut t = d.from;
                 match d.handle {
@@ -300,8 +354,15 @@ const HALO: Color = Color::srgba(0.12, 0.13, 0.15, 0.85);
 const HOVER: Color = Color::srgb(1.0, 0.62, 0.1);
 const ACTIVE: Color = Color::srgb(0.27, 0.55, 0.95);
 
-fn draw_manip(manip: Res<PcbManip>, view: Res<ViewportView>, mut halo: Gizmos<TriadHaloGizmos>, mut line: Gizmos<TriadGizmos>) {
-    let Some(f) = manip.frame.as_ref() else { return };
+fn draw_manip(
+    manip: Res<PcbManip>,
+    view: Res<ViewportView>,
+    mut halo: Gizmos<TriadHaloGizmos>,
+    mut line: Gizmos<TriadGizmos>,
+) {
+    let Some(f) = manip.frame.as_ref() else {
+        return;
+    };
     let v = view.view;
     let s = v.scale;
     let back = v.back();
@@ -380,7 +441,10 @@ fn place_markers(
     let sc = screen(&view.view, &rect, f);
     let mut spots: Vec<(String, Vec2)> = vec![("pcb-manip-origin".into(), sc.origin)];
     for (i, axis) in ["x", "y", "z"].iter().enumerate() {
-        spots.push((format!("pcb-manip-arrow-{axis}"), sc.bases[i].lerp(sc.tips[i], 0.55)));
+        spots.push((
+            format!("pcb-manip-arrow-{axis}"),
+            sc.bases[i].lerp(sc.tips[i], 0.55),
+        ));
         spots.push((format!("pcb-manip-ring-{axis}"), sc.rings[i]));
     }
     let size = 6.0;
@@ -393,7 +457,9 @@ fn place_markers(
             have.push(name.to_string());
         }
     }
-    let Some(area) = q_area.iter().next() else { return };
+    let Some(area) = q_area.iter().next() else {
+        return;
+    };
     for (name, p) in spots {
         if have.contains(&name) {
             continue;
@@ -403,7 +469,14 @@ fn place_markers(
             .spawn((
                 Name::new(name),
                 ManipMarker,
-                Node { position_type: PositionType::Absolute, left: Val::Px(at.x), top: Val::Px(at.y), width: Val::Px(size), height: Val::Px(size), ..default() },
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(at.x),
+                    top: Val::Px(at.y),
+                    width: Val::Px(size),
+                    height: Val::Px(size),
+                    ..default()
+                },
                 Pickable::IGNORE,
                 DespawnOnExit(AppState::Document),
             ))

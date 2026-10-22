@@ -30,9 +30,18 @@ fn projected(shape: ImprintShape) -> Projected {
     match shape {
         ImprintShape::Line(a, b) => Projected::Line(a, b),
         ImprintShape::Circle(c, r) => Projected::Circle(c, r),
-        ImprintShape::Arc { center, radius, start_angle, sweep } => {
+        ImprintShape::Arc {
+            center,
+            radius,
+            start_angle,
+            sweep,
+        } => {
             let at = |t: f64| center + Vec2::new(t.cos(), t.sin()) * radius;
-            Projected::Arc { center, start: at(start_angle), end: at(start_angle + sweep) }
+            Projected::Arc {
+                center,
+                start: at(start_angle),
+                end: at(start_angle + sweep),
+            }
         }
     }
 }
@@ -51,15 +60,23 @@ impl External {
         let mut sketch = s.clone();
         let mut curves = HashMap::new();
         for im in &s.imprint {
-            let Some(link) = im.link.filter(|l| !used.contains(l)) else { continue };
+            let Some(link) = im.link.filter(|l| !used.contains(l)) else {
+                continue;
+            };
             let shape = projected(im.shape);
             if shape.degenerate() {
                 continue;
             }
             // Edges meeting at a vertex share its point (one snap target there).
             let kind = match shape {
-                Projected::Line(a, b) => CurveKind::Line { a: sketch.ensure_point(a), b: sketch.ensure_point(b) },
-                Projected::Circle(c, radius) => CurveKind::Circle { center: sketch.ensure_point(c), radius },
+                Projected::Line(a, b) => CurveKind::Line {
+                    a: sketch.ensure_point(a),
+                    b: sketch.ensure_point(b),
+                },
+                Projected::Circle(c, radius) => CurveKind::Circle {
+                    center: sketch.ensure_point(c),
+                    radius,
+                },
                 Projected::Arc { center, start, end } => CurveKind::Arc {
                     center: sketch.ensure_point(center),
                     start: sketch.ensure_point(start),
@@ -67,7 +84,10 @@ impl External {
                 },
                 _ => continue,
             };
-            let id = sketch.curves.insert(crate::Curve { kind, construction: true });
+            let id = sketch.curves.insert(crate::Curve {
+                kind,
+                construction: true,
+            });
             curves.insert(id, (shape, link));
         }
         (!curves.is_empty()).then_some(Self { sketch, curves })
@@ -80,7 +100,10 @@ impl External {
 
     /// The part edges through a point of the copy.
     fn edges_at(&self, p: PointId) -> impl Iterator<Item = CurveId> + '_ {
-        self.curves.keys().copied().filter(move |k| self.sketch.curve_points(*k).contains(&p))
+        self.curves
+            .keys()
+            .copied()
+            .filter(move |k| self.sketch.curve_points(*k).contains(&p))
     }
 
     /// A point of the copy that only part edges use (not one of the sketch's).
@@ -123,7 +146,11 @@ impl External {
                 }
             }
         });
-        let op = if on_edge_points.is_empty() { op } else { without_points(op, &on_edge_points) };
+        let op = if on_edge_points.is_empty() {
+            op
+        } else {
+            without_points(op, &on_edge_points)
+        };
         if op.apply_raw(&mut trial).is_ok() {
             for k in trial.curves.keys() {
                 if self.sketch.curves.contains_key(k) {
@@ -161,7 +188,10 @@ impl External {
         if needed.is_empty() {
             return op;
         }
-        let items: Vec<(Projected, Link)> = needed.iter().filter_map(|c| self.curves.get(c).cloned()).collect();
+        let items: Vec<(Projected, Link)> = needed
+            .iter()
+            .filter_map(|c| self.curves.get(c).cloned())
+            .collect();
         let op = self.rewrite(op);
         match op {
             SketchOp::Batch(ops) if ops.is_empty() => SketchOp::UseConstruction { items },
@@ -176,8 +206,16 @@ impl External {
     /// The part edges a dimension made against [`Self::sketch`] measures, or whose ends it
     /// measures from, to use (construction, linked) before it goes into `base`, the sketch the
     /// copy was made from. Empty when it measures only the sketch's own geometry.
-    pub fn dimension_uses(&self, base: &Sketch, d: &crate::DimensionKind) -> Vec<(Projected, Link)> {
-        let mut edges: Vec<CurveId> = d.curves().into_iter().filter(|c| self.is_edge(*c)).collect();
+    pub fn dimension_uses(
+        &self,
+        base: &Sketch,
+        d: &crate::DimensionKind,
+    ) -> Vec<(Projected, Link)> {
+        let mut edges: Vec<CurveId> = d
+            .curves()
+            .into_iter()
+            .filter(|c| self.is_edge(*c))
+            .collect();
         for p in d.points() {
             if self.edge_point(base, p)
                 && let Some(c) = self.edges_at(p).next()
@@ -200,7 +238,12 @@ impl External {
     /// made from) after the edges of [`Self::dimension_uses`] were used. Part edges become the
     /// used curves linked to them, and their ends the used curves' points there. `None` if an
     /// edge it measures wasn't used.
-    pub fn relinked_dimension(&self, base: &Sketch, used: &Sketch, d: crate::DimensionKind) -> Option<crate::DimensionKind> {
+    pub fn relinked_dimension(
+        &self,
+        base: &Sketch,
+        used: &Sketch,
+        d: crate::DimensionKind,
+    ) -> Option<crate::DimensionKind> {
         let used_curve = |link: Link| {
             used.constraints.values().find_map(|c| match *c {
                 ConstraintOf::Use(crate::CurveRef::Curve(k), l) if l == link => Some(k),
@@ -220,7 +263,9 @@ impl External {
             let at = self.sketch.pos(p);
             self.edges_at(p).find_map(|e| {
                 let k = used_curve(self.curves.get(&e)?.1)?;
-                used.curve_points(k).into_iter().find(|q| used.pos(*q).distance(at) <= crate::MERGE_EPS)
+                used.curve_points(k)
+                    .into_iter()
+                    .find(|q| used.pos(*q).distance(at) <= crate::MERGE_EPS)
             })
         };
         d.map_ids(pt, cv)
@@ -229,7 +274,9 @@ impl External {
     /// `op` with its constraints' references to part edges by position.
     fn rewrite(&self, op: SketchOp) -> SketchOp {
         match op {
-            SketchOp::Batch(ops) => SketchOp::Batch(ops.into_iter().map(|o| self.rewrite(o)).collect()),
+            SketchOp::Batch(ops) => {
+                SketchOp::Batch(ops.into_iter().map(|o| self.rewrite(o)).collect())
+            }
             SketchOp::AddConstraints(specs) => SketchOp::AddConstraints(
                 specs
                     .into_iter()
@@ -279,14 +326,28 @@ mod tests {
     use crate::{EdgeName, FaceName, Imprint, synthetic_curve};
 
     fn link(i: u32) -> Link {
-        let f = FaceName::new(uuid::Uuid::nil(), crate::FaceOrigin::Cap { region: 0, end: false });
-        Link::Edge { feature: uuid::Uuid::nil(), edge: EdgeName::new(f, f, i) }
+        let f = FaceName::new(
+            uuid::Uuid::nil(),
+            crate::FaceOrigin::Cap {
+                region: 0,
+                end: false,
+            },
+        );
+        Link::Edge {
+            feature: uuid::Uuid::nil(),
+            edge: EdgeName::new(f, f, i),
+        }
     }
 
     /// A sketch on a 40 × 40 face with a hole of radius 5 at (20, 20).
     fn face() -> Sketch {
         let mut s = Sketch::new();
-        let c = [Vec2::new(0.0, 0.0), Vec2::new(40.0, 0.0), Vec2::new(40.0, 40.0), Vec2::new(0.0, 40.0)];
+        let c = [
+            Vec2::new(0.0, 0.0),
+            Vec2::new(40.0, 0.0),
+            Vec2::new(40.0, 40.0),
+            Vec2::new(0.0, 40.0),
+        ];
         s.imprint = (0..4)
             .map(|i| Imprint {
                 id: synthetic_curve(1, i as u32),
@@ -303,7 +364,10 @@ mod tests {
     }
 
     fn uses(s: &Sketch) -> usize {
-        s.constraints.values().filter(|c| matches!(c, ConstraintOf::Use(..))).count()
+        s.constraints
+            .values()
+            .filter(|c| matches!(c, ConstraintOf::Use(..)))
+            .count()
     }
 
     #[test]
@@ -328,7 +392,9 @@ mod tests {
         assert_eq!(uses(&s), 2);
         assert_eq!(s.curves.values().filter(|c| c.construction).count(), 2);
         let line = s.curves.values().find(|c| !c.construction).unwrap();
-        let CurveKind::Line { a, b } = line.kind else { panic!() };
+        let CurveKind::Line { a, b } = line.kind else {
+            panic!()
+        };
         assert_eq!(s.curves_at(a).count(), 2);
         assert_eq!(s.curves_at(b).count(), 2);
         // Used edges are no longer offered.
@@ -339,15 +405,29 @@ mod tests {
     fn a_point_on_an_edge_refers_to_the_used_edge() {
         let base = face();
         let ext = External::of(&base).unwrap();
-        let circle = ext.curves.iter().find(|(_, (p, _))| matches!(p, Projected::Circle(..))).map(|(k, _)| *k).unwrap();
+        let circle = ext
+            .curves
+            .iter()
+            .find(|(_, (p, _))| matches!(p, Projected::Circle(..)))
+            .map(|(k, _)| *k)
+            .unwrap();
         let op = SketchOp::Batch(vec![
-            SketchOp::AddPoint { pos: Vec2::new(25.0, 20.0) },
-            SketchOp::AddConstraints(vec![ConstraintOf::PointOnCurve(PointSpec::At(Vec2::new(25.0, 20.0)), CurveSpec::Id(circle))]),
+            SketchOp::AddPoint {
+                pos: Vec2::new(25.0, 20.0),
+            },
+            SketchOp::AddConstraints(vec![ConstraintOf::PointOnCurve(
+                PointSpec::At(Vec2::new(25.0, 20.0)),
+                CurveSpec::Id(circle),
+            )]),
         ]);
         let mut s = base.clone();
         ext.commit(&base, op).apply(&mut s).unwrap();
         assert_eq!(uses(&s), 1);
-        assert!(s.constraints.values().any(|c| matches!(c, ConstraintOf::PointOnCurve(..))));
+        assert!(
+            s.constraints
+                .values()
+                .any(|c| matches!(c, ConstraintOf::PointOnCurve(..)))
+        );
     }
 
     #[test]
@@ -355,7 +435,14 @@ mod tests {
         let base = face();
         let ext = External::of(&base).unwrap();
         let mut s = base.clone();
-        ext.commit(&base, SketchOp::AddPoint { pos: Vec2::new(20.0, 20.0) }).apply(&mut s).unwrap();
+        ext.commit(
+            &base,
+            SketchOp::AddPoint {
+                pos: Vec2::new(20.0, 20.0),
+            },
+        )
+        .apply(&mut s)
+        .unwrap();
         assert_eq!(uses(&s), 1);
         assert_eq!(s.points.len(), 1);
     }
@@ -367,19 +454,30 @@ mod tests {
         let (here, corner) = (Vec2::new(60.0, 40.0), Vec2::new(40.0, 40.0));
         let op = SketchOp::Batch(vec![
             SketchOp::AddPoint { pos: here },
-            SketchOp::AddConstraints(vec![ConstraintOf::Horizontal(crate::Orient::Points(PointSpec::At(here), PointSpec::At(corner)))]),
+            SketchOp::AddConstraints(vec![ConstraintOf::Horizontal(crate::Orient::Points(
+                PointSpec::At(here),
+                PointSpec::At(corner),
+            ))]),
         ]);
         let mut s = base.clone();
         ext.commit(&base, op).apply(&mut s).unwrap();
         assert_eq!(uses(&s), 1);
-        assert!(s.constraints.values().any(|c| matches!(c, ConstraintOf::Horizontal(_))));
+        assert!(
+            s.constraints
+                .values()
+                .any(|c| matches!(c, ConstraintOf::Horizontal(_)))
+        );
     }
 
     #[test]
     fn geometry_away_from_the_edges_is_left_alone() {
         let base = face();
         let ext = External::of(&base).unwrap();
-        let op = SketchOp::AddCircle { center: Vec2::new(10.0, 10.0), radius: 2.0, construction: false };
+        let op = SketchOp::AddCircle {
+            center: Vec2::new(10.0, 10.0),
+            radius: 2.0,
+            construction: false,
+        };
         assert_eq!(ext.commit(&base, op.clone()), op);
     }
 
@@ -397,32 +495,67 @@ mod tests {
             .sketch
             .curves
             .keys()
-            .find(|k| ext.is_edge(*k) && ext.sketch.curve_ends(*k).is_some_and(|(a, b)| ext.sketch.pos(a).y == 40.0 && ext.sketch.pos(b).y == 40.0))
+            .find(|k| {
+                ext.is_edge(*k)
+                    && ext.sketch.curve_ends(*k).is_some_and(|(a, b)| {
+                        ext.sketch.pos(a).y == 40.0 && ext.sketch.pos(b).y == 40.0
+                    })
+            })
             .unwrap();
-        let Some(CurveKind::Line { a, .. }) = base.curves.get(line).map(|c| c.kind) else { unreachable!() };
-        let d = DimensionKind::PointLine { p: PointRef::Point(a), line: CurveRef::Curve(top) };
+        let Some(CurveKind::Line { a, .. }) = base.curves.get(line).map(|c| c.kind) else {
+            unreachable!()
+        };
+        let d = DimensionKind::PointLine {
+            p: PointRef::Point(a),
+            line: CurveRef::Curve(top),
+        };
         let items = ext.dimension_uses(&base, &d);
         assert_eq!(items.len(), 1);
         let mut s = base.clone();
         SketchOp::UseConstruction { items }.apply(&mut s).unwrap();
-        let kind = ext.relinked_dimension(&base, &s, d).expect("the edge was used");
-        let DimensionKind::PointLine { p, line: CurveRef::Curve(k) } = kind else { panic!("{kind:?}") };
+        let kind = ext
+            .relinked_dimension(&base, &s, d)
+            .expect("the edge was used");
+        let DimensionKind::PointLine {
+            p,
+            line: CurveRef::Curve(k),
+        } = kind
+        else {
+            panic!("{kind:?}")
+        };
         assert_eq!(p, PointRef::Point(a));
         assert!(s.is_projected(k) && s.curves[k].construction);
         // Setting it moves the sketch line (the edge is fixed): 4 below the top.
-        SketchOp::SetDimension { dimension: Dimension::new(kind, 4.0, 3.0), moves: vec![], radii: vec![] }.apply(&mut s).unwrap();
+        SketchOp::SetDimension {
+            dimension: Dimension::new(kind, 4.0, 3.0),
+            moves: vec![],
+            radii: vec![],
+        }
+        .apply(&mut s)
+        .unwrap();
         assert!((s.pos(a).y - 36.0).abs() < 1e-6, "{:?}", s.pos(a));
         // Between the sketch's own points: nothing to use.
-        let Some(CurveKind::Line { a, b }) = base.curves.get(line).map(|c| c.kind) else { unreachable!() };
-        assert!(ext.dimension_uses(&base, &DimensionKind::Aligned { a, b }).is_empty());
+        let Some(CurveKind::Line { a, b }) = base.curves.get(line).map(|c| c.kind) else {
+            unreachable!()
+        };
+        assert!(
+            ext.dimension_uses(&base, &DimensionKind::Aligned { a, b })
+                .is_empty()
+        );
         // From a face corner (an edge's end): that edge is used and the corner is its point.
-        let corner = ext.sketch.point_at(Vec2::new(0.0, 40.0), crate::MERGE_EPS).unwrap();
+        let corner = ext
+            .sketch
+            .point_at(Vec2::new(0.0, 40.0), crate::MERGE_EPS)
+            .unwrap();
         let d = DimensionKind::Horizontal { a: corner, b: a };
         let items = ext.dimension_uses(&base, &d);
         assert_eq!(items.len(), 1);
         let mut s = base.clone();
         SketchOp::UseConstruction { items }.apply(&mut s).unwrap();
-        let DimensionKind::Horizontal { a: c, .. } = ext.relinked_dimension(&base, &s, d).unwrap() else { unreachable!() };
+        let DimensionKind::Horizontal { a: c, .. } = ext.relinked_dimension(&base, &s, d).unwrap()
+        else {
+            unreachable!()
+        };
         assert!(s.point_is_linked(c) && s.pos(c).distance(Vec2::new(0.0, 40.0)) < 1e-9);
     }
 }

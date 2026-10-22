@@ -24,7 +24,10 @@ impl Plugin for ThreadsPlugin {
             .add_systems(Startup, configure)
             .add_systems(
                 Update,
-                (update_threads, draw_threads).chain().after(crate::parts::PartsSet).run_if(in_state(AppState::Document)),
+                (update_threads, draw_threads)
+                    .chain()
+                    .after(crate::parts::PartsSet)
+                    .run_if(in_state(AppState::Document)),
             );
     }
 }
@@ -63,7 +66,9 @@ pub fn thread_lines(t: &cadrs_drawing::annotation::ThreadInfo, pitch: f64) -> Ve
     let major = t.major as f32 / 2.0;
     // The entry arc: three quarters, a hair out of the entry face so it isn't buried in it.
     let lift = -axis * 0.02;
-    let arc: Vec<Vec3> = (0..=54).map(|i| c + lift + ring(major, i as f32 / 54.0 * 1.5 * std::f32::consts::PI)).collect();
+    let arc: Vec<Vec3> = (0..=54)
+        .map(|i| c + lift + ring(major, i as f32 / 54.0 * 1.5 * std::f32::consts::PI))
+        .collect();
     // The helix just inside the wall (the hole is empty there, so it shows looking in).
     let r = t.minor as f32 / 2.0 * 0.985;
     let len = t.length as f32;
@@ -80,7 +85,10 @@ pub fn thread_lines(t: &cadrs_drawing::annotation::ThreadInfo, pitch: f64) -> Ve
 }
 
 /// Each tapped hole's threads with its pitch (mm).
-pub fn threads_of(parts: &[&Part], features: &[Feature]) -> Vec<(cadrs_drawing::annotation::ThreadInfo, f64)> {
+pub fn threads_of(
+    parts: &[&Part],
+    features: &[Feature],
+) -> Vec<(cadrs_drawing::annotation::ThreadInfo, f64)> {
     let mut out = Vec::new();
     for f in features {
         let Some(h) = f.hole() else { continue };
@@ -89,7 +97,11 @@ pub fn threads_of(parts: &[&Part], features: &[Feature]) -> Vec<(cadrs_drawing::
         }
         let pitch = h.spec.pitch_mm().unwrap_or(1.0);
         // This hole alone, with the sketches its points are on.
-        let only: Vec<Feature> = features.iter().filter(|g| g.hole().is_none() || g.id == f.id).cloned().collect();
+        let only: Vec<Feature> = features
+            .iter()
+            .filter(|g| g.hole().is_none() || g.id == f.id)
+            .cloned()
+            .collect();
         for t in cadrs_core::views::threads(parts, &only) {
             out.push((t, pitch));
         }
@@ -97,8 +109,14 @@ pub fn threads_of(parts: &[&Part], features: &[Feature]) -> Vec<(cadrs_drawing::
     out
 }
 
-fn update_threads(doc: Option<Res<ActiveDocument>>, cache: Res<PartCache>, mut threads: ResMut<CosmeticThreads>) {
-    let Some(el) = doc.as_ref().and_then(|d| d.active_element()) else { return };
+fn update_threads(
+    doc: Option<Res<ActiveDocument>>,
+    cache: Res<PartCache>,
+    mut threads: ResMut<CosmeticThreads>,
+) {
+    let Some(el) = doc.as_ref().and_then(|d| d.active_element()) else {
+        return;
+    };
     if !matches!(el.kind, ElementKind::PartStudio { .. }) {
         if !threads.lines.is_empty() {
             threads.lines.clear();
@@ -113,10 +131,17 @@ fn update_threads(doc: Option<Res<ActiveDocument>>, cache: Res<PartCache>, mut t
     threads.key = Some(key);
     let features = el.active_features();
     let parts: Vec<&Part> = cache.parts.iter().collect();
-    threads.lines = threads_of(&parts, &features).iter().flat_map(|(t, p)| thread_lines(t, *p)).collect();
+    threads.lines = threads_of(&parts, &features)
+        .iter()
+        .flat_map(|(t, p)| thread_lines(t, *p))
+        .collect();
 }
 
-fn draw_threads(threads: Res<CosmeticThreads>, cache: Res<PartCache>, mut gizmos: Gizmos<ThreadGizmos>) {
+fn draw_threads(
+    threads: Res<CosmeticThreads>,
+    cache: Res<PartCache>,
+    mut gizmos: Gizmos<ThreadGizmos>,
+) {
     if cache.parts.is_empty() {
         return;
     }
@@ -133,14 +158,27 @@ mod tests {
     #[test]
     fn a_thread_is_an_arc_and_a_helix_at_its_pitch() {
         // M10×1.5, 15 long, entering at the origin going down −Z.
-        let t = cadrs_drawing::annotation::ThreadInfo { center: [0.0; 3], axis: [0.0, 0.0, -1.0], major: 10.0, minor: 8.5, length: 15.0, through: false };
+        let t = cadrs_drawing::annotation::ThreadInfo {
+            center: [0.0; 3],
+            axis: [0.0, 0.0, -1.0],
+            major: 10.0,
+            minor: 8.5,
+            length: 15.0,
+            through: false,
+        };
         let l = thread_lines(&t, 1.5);
         assert_eq!(l.len(), 2);
         // The arc: the major radius, three quarters round.
-        assert!(l[0].iter().all(|p| ((p.x * p.x + p.y * p.y).sqrt() - 5.0).abs() < 1e-4));
+        assert!(
+            l[0].iter()
+                .all(|p| ((p.x * p.x + p.y * p.y).sqrt() - 5.0).abs() < 1e-4)
+        );
         // The helix: 10 turns down 15 mm on the wall.
         let (first, last) = (l[1][0], *l[1].last().unwrap());
-        assert!((first.z - 0.0).abs() < 1e-5 && (last.z + 15.0).abs() < 1e-4, "{first} {last}");
+        assert!(
+            (first.z - 0.0).abs() < 1e-5 && (last.z + 15.0).abs() < 1e-4,
+            "{first} {last}"
+        );
         assert!(l[1].iter().all(|p| (p.x * p.x + p.y * p.y).sqrt() < 4.25));
         assert_eq!(l[1].len(), 241);
     }

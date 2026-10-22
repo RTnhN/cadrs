@@ -17,7 +17,6 @@
 //!   Properties dialog open it on property owners ([`open_material_for`]): ✓ sets their
 //!   Material property ([`cadrs_core::properties::SetProperties`]), wherever the part lives.
 
-use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
@@ -26,10 +25,11 @@ use cadrs_core::commands::{SetMaterialLibraries, SetPartMaterial};
 use cadrs_core::material::{self, LIBRARY_NAME, Material, MaterialLibrary};
 use cadrs_core::{ElementId, PartId};
 use cadrs_sketch::units::{LengthUnit, Units};
+use cadrs_ui::ShortcutKey;
 use cadrs_ui::prelude::*;
 use cadrs_ui::{
-    FeatureDialogAccept, FeatureDialogCancel, FeatureDialogState, NumberField, NumberFieldCommit, NumberFieldState,
-    Select, TabStrip, TabStripSelect, TabStripState,
+    FeatureDialogAccept, FeatureDialogCancel, FeatureDialogState, NumberField, NumberFieldCommit,
+    NumberFieldState, Select, TabStrip, TabStripSelect, TabStripState,
 };
 
 use crate::parts::PartCache;
@@ -92,28 +92,46 @@ pub struct MaterialSession {
 /// Opens the dialog for `parts` of the active Part Studio, on the material they have.
 pub fn open_material_dialog(world: &mut World, parts: Vec<PartId>) {
     let props = world.resource::<PartCache>().props.clone();
-    let now = parts.iter().find_map(|p| cadrs_core::parts::material(*p, &props)).cloned();
+    let now = parts
+        .iter()
+        .find_map(|p| cadrs_core::parts::material(*p, &props))
+        .cloned();
     open_with(world, parts, Vec::new(), now);
 }
 
 /// Opens the dialog for property owners (the BOM's material picker, P3B.6), on the material the
 /// first has.
 pub fn open_material_for(world: &mut World, owners: Vec<cadrs_core::properties::PropertyOwner>) {
-    let Some(doc) = world.get_resource::<ActiveDocument>() else { return };
-    let now = owners.iter().find_map(|o| cadrs_core::properties::material(&doc.doc, *o));
+    let Some(doc) = world.get_resource::<ActiveDocument>() else {
+        return;
+    };
+    let now = owners
+        .iter()
+        .find_map(|o| cadrs_core::properties::material(&doc.doc, *o));
     if owners.is_empty() {
         return;
     }
     open_with(world, Vec::new(), owners, now);
 }
 
-fn open_with(world: &mut World, parts: Vec<PartId>, owners: Vec<cadrs_core::properties::PropertyOwner>, now: Option<Material>) {
-    let Some(element) = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element().map(|e| e.id)) else {
+fn open_with(
+    world: &mut World,
+    parts: Vec<PartId>,
+    owners: Vec<cadrs_core::properties::PropertyOwner>,
+    now: Option<Material>,
+) {
+    let Some(element) = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.active_element().map(|e| e.id))
+    else {
         return;
     };
     crate::appearance::close_dialogs(world);
     world.remove_resource::<crate::mass_props::MassPanel>();
-    let libraries = world.get_resource::<ActiveDocument>().map(|d| d.doc.material_libraries.clone()).unwrap_or_default();
+    let libraries = world
+        .get_resource::<ActiveDocument>()
+        .map(|d| d.doc.material_libraries.clone())
+        .unwrap_or_default();
     // A material from one of the document's libraries opens that library.
     let library = now
         .as_ref()
@@ -121,7 +139,11 @@ fn open_with(world: &mut World, parts: Vec<PartId>, owners: Vec<cadrs_core::prop
         .and_then(|l| libraries.iter().position(|x| x.name == l))
         .map_or(0, |i| i + 1);
     let (tab, chosen, custom) = match &now {
-        Some(m) if m.library.is_some() => (0, Some(m.name.clone()), Material::custom("Custom material", m.density)),
+        Some(m) if m.library.is_some() => (
+            0,
+            Some(m.name.clone()),
+            Material::custom("Custom material", m.density),
+        ),
         Some(m) => (1, None, m.clone()),
         None => (0, None, Material::custom("Custom material", 1000.0)),
     };
@@ -170,7 +192,9 @@ struct MaterialPopup;
 
 /// What the closed dropdown shows.
 fn choose_label(s: &MaterialSession) -> String {
-    s.chosen.clone().unwrap_or_else(|| "Select a material".into())
+    s.chosen
+        .clone()
+        .unwrap_or_else(|| "Select a material".into())
 }
 
 #[derive(Component)]
@@ -214,19 +238,38 @@ pub fn property_rows(m: &Material, units: &Units) -> Vec<(String, String)> {
     vec![
         ("Name".into(), m.name.clone()),
         (format!("Density ({du})"), trim(density, 3)),
-        ("Poisson's ratio".into(), m.poisson.map(|v| trim(v, 3)).unwrap_or_default()),
+        (
+            "Poisson's ratio".into(),
+            m.poisson.map(|v| trim(v, 3)).unwrap_or_default(),
+        ),
         (format!("Young's modulus ({su})"), stress(m.youngs_modulus)),
-        (format!("Tensile yield strength ({su})"), stress(m.tensile_yield)),
-        (format!("Ultimate tensile strength ({su})"), stress(m.ultimate_tensile)),
-        (format!("Compressive yield strength ({su})"), stress(m.compressive_yield)),
-        (format!("Ultimate compressive strength ({su})"), stress(m.ultimate_compressive)),
+        (
+            format!("Tensile yield strength ({su})"),
+            stress(m.tensile_yield),
+        ),
+        (
+            format!("Ultimate tensile strength ({su})"),
+            stress(m.ultimate_tensile),
+        ),
+        (
+            format!("Compressive yield strength ({su})"),
+            stress(m.compressive_yield),
+        ),
+        (
+            format!("Ultimate compressive strength ({su})"),
+            stress(m.ultimate_compressive),
+        ),
     ]
 }
 
 /// `v` with at most `d` decimals, trailing zeros dropped ("0.033", "213205.474", "0").
 fn trim(v: f64, d: usize) -> String {
     let s = format!("{v:.d$}");
-    let s = if s.contains('.') { s.trim_end_matches('0').trim_end_matches('.').to_string() } else { s };
+    let s = if s.contains('.') {
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    } else {
+        s
+    };
     if s == "-0" { "0".into() } else { s }
 }
 
@@ -249,12 +292,21 @@ fn find(s: &MaterialSession, name: &str) -> Option<Material> {
 /// The names of the library shown's materials matching the search.
 fn search(s: &MaterialSession) -> Vec<String> {
     match s.library {
-        0 => material::search(&s.query).iter().map(|m| m.name.to_string()).collect(),
+        0 => material::search(&s.query)
+            .iter()
+            .map(|m| m.name.to_string())
+            .collect(),
         i => {
             let q = s.query.to_lowercase();
             s.libraries
                 .get(i - 1)
-                .map(|l| l.materials.iter().filter(|m| m.name.to_lowercase().contains(&q)).map(|m| m.name.clone()).collect())
+                .map(|l| {
+                    l.materials
+                        .iter()
+                        .filter(|m| m.name.to_lowercase().contains(&q))
+                        .map(|m| m.name.clone())
+                        .collect()
+                })
                 .unwrap_or_default()
         }
     }
@@ -262,7 +314,10 @@ fn search(s: &MaterialSession) -> Vec<String> {
 
 /// The library dropdown chose a library.
 fn on_library(ev: On<cadrs_ui::SelectChange>, q: Query<&Name>, mut commands: Commands) {
-    if !q.get(ev.entity).is_ok_and(|n| n.as_str() == "material-library") {
+    if !q
+        .get(ev.entity)
+        .is_ok_and(|n| n.as_str() == "material-library")
+    {
         return;
     }
     let i = ev.index;
@@ -281,7 +336,10 @@ fn save_libraries(world: &mut World, libraries: Vec<MaterialLibrary>, label: &st
     let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
         return false;
     };
-    if let Err(e) = doc.execute(&SetMaterialLibraries { libraries: libraries.clone(), label: label.into() }) {
+    if let Err(e) = doc.execute(&SetMaterialLibraries {
+        libraries: libraries.clone(),
+        label: label.into(),
+    }) {
         warn!("material library: {e}");
         return false;
     }
@@ -299,14 +357,22 @@ fn save_libraries(world: &mut World, libraries: Vec<MaterialLibrary>, label: &st
 
 /// The library's **+**: a new, empty library, shown.
 fn on_add_library(a: On<Activate>, q: Query<&Name>, mut commands: Commands) {
-    if !q.get(a.entity).is_ok_and(|n| n.as_str() == "material-add-library") {
+    if !q
+        .get(a.entity)
+        .is_ok_and(|n| n.as_str() == "material-add-library")
+    {
         return;
     }
     commands.queue(|world: &mut World| {
-        let Some(s) = world.get_resource::<MaterialSession>().cloned() else { return };
+        let Some(s) = world.get_resource::<MaterialSession>().cloned() else {
+            return;
+        };
         let mut libraries = s.libraries.clone();
         let name = material::next_library_name(&libraries);
-        libraries.push(MaterialLibrary { name: name.clone(), materials: Vec::new() });
+        libraries.push(MaterialLibrary {
+            name: name.clone(),
+            materials: Vec::new(),
+        });
         let n = libraries.len();
         if save_libraries(world, libraries, &format!("Create material library {name}"))
             && let Some(mut s) = world.get_resource_mut::<MaterialSession>()
@@ -319,17 +385,27 @@ fn on_add_library(a: On<Activate>, q: Query<&Name>, mut commands: Commands) {
 
 /// The Custom tab's **Add to library**: the material saved in the library shown, and chosen.
 fn on_add_to_library(a: On<Activate>, q: Query<&Name>, mut commands: Commands) {
-    if !q.get(a.entity).is_ok_and(|n| n.as_str() == "material-add-to-library") {
+    if !q
+        .get(a.entity)
+        .is_ok_and(|n| n.as_str() == "material-add-to-library")
+    {
         return;
     }
     commands.queue(|world: &mut World| {
-        let Some(s) = world.get_resource::<MaterialSession>().cloned() else { return };
+        let Some(s) = world.get_resource::<MaterialSession>().cloned() else {
+            return;
+        };
         if s.library == 0 || s.custom.name.trim().is_empty() || s.custom.density <= 0.0 {
             return;
         }
         let mut libraries = s.libraries.clone();
-        let Some(lib) = libraries.get_mut(s.library - 1) else { return };
-        let m = Material { library: None, ..s.custom.clone() };
+        let Some(lib) = libraries.get_mut(s.library - 1) else {
+            return;
+        };
+        let m = Material {
+            library: None,
+            ..s.custom.clone()
+        };
         match lib.materials.iter_mut().find(|x| x.name == m.name) {
             Some(x) => *x = m.clone(),
             None => lib.materials.push(m.clone()),
@@ -356,7 +432,9 @@ fn slug(name: &str) -> String {
 }
 
 fn on_tab(ev: On<TabStripSelect>, q: Query<&Name>, mut commands: Commands) {
-    if q.get(ev.entity).is_ok_and(|n| n.as_str() == "material-tabs") {
+    if q.get(ev.entity)
+        .is_ok_and(|n| n.as_str() == "material-tabs")
+    {
         let i = ev.index;
         commands.queue(move |world: &mut World| {
             if let Some(mut s) = world.get_resource_mut::<MaterialSession>() {
@@ -388,7 +466,11 @@ fn on_choose(a: On<Activate>, q: Query<(), With<MaterialChoose>>, mut commands: 
         if let Some(mut s) = world.get_resource_mut::<MaterialSession>() {
             s.query.clear();
         }
-        if let (true, Some(e), Some(mut f)) = (open, field, world.get_resource_mut::<bevy::input_focus::InputFocus>()) {
+        if let (true, Some(e), Some(mut f)) = (
+            open,
+            field,
+            world.get_resource_mut::<bevy::input_focus::InputFocus>(),
+        ) {
             f.set(e, bevy::input_focus::FocusCause::Pressed);
         }
     });
@@ -417,7 +499,10 @@ fn on_custom_commit(ev: On<NumberFieldCommit>, q: Query<&CustomField>, mut comma
             return;
         };
         let (_, pa) = stress_unit(&units);
-        let num = text.split_whitespace().next().and_then(|t| t.parse::<f64>().ok());
+        let num = text
+            .split_whitespace()
+            .next()
+            .and_then(|t| t.parse::<f64>().ok());
         let m = &mut s.custom;
         match f {
             CustomField::Name => {
@@ -441,14 +526,20 @@ fn on_custom_commit(ev: On<NumberFieldCommit>, q: Query<&CustomField>, mut comma
     });
 }
 
-fn on_accept(ev: On<FeatureDialogAccept>, q: Query<(), With<MaterialDialog>>, mut commands: Commands) {
+fn on_accept(
+    ev: On<FeatureDialogAccept>,
+    q: Query<(), With<MaterialDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(|world: &mut World| assign(world, false));
     }
 }
 
 fn on_remove(a: On<Activate>, q: Query<&Name>, mut commands: Commands) {
-    if q.get(a.entity).is_ok_and(|n| n.as_str() == "material-remove") {
+    if q.get(a.entity)
+        .is_ok_and(|n| n.as_str() == "material-remove")
+    {
         commands.queue(|world: &mut World| assign(world, true));
     }
 }
@@ -467,19 +558,33 @@ pub fn assign(world: &mut World, remove: bool) {
         }
     };
     world.remove_resource::<MaterialSession>();
-    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return };
+    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+        return;
+    };
     let result = if s.owners.is_empty() {
-        doc.execute(&SetPartMaterial { element: s.element, parts: s.parts, material })
+        doc.execute(&SetPartMaterial {
+            element: s.element,
+            parts: s.parts,
+            material,
+        })
     } else {
         use cadrs_core::properties::{PropertyKey, PropertyValue, SetProperties};
-        doc.execute(&SetProperties { owners: s.owners, values: vec![(PropertyKey::Material, PropertyValue::Material(material))], label: "Assign material".into() })
+        doc.execute(&SetProperties {
+            owners: s.owners,
+            values: vec![(PropertyKey::Material, PropertyValue::Material(material))],
+            label: "Assign material".into(),
+        })
     };
     if let Err(e) = result {
         warn!("material: {e}");
     }
 }
 
-fn on_cancel(ev: On<FeatureDialogCancel>, q: Query<(), With<MaterialDialog>>, mut commands: Commands) {
+fn on_cancel(
+    ev: On<FeatureDialogCancel>,
+    q: Query<(), With<MaterialDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(close);
     }
@@ -501,12 +606,12 @@ fn material_keys(
     }
     for k in keys.read() {
         if k.state == ButtonState::Pressed && k.shortcut_code() == KeyCode::Escape {
-            commands.queue(|world: &mut World| {
-                match world.get_resource_mut::<MaterialSession>() {
+            commands.queue(
+                |world: &mut World| match world.get_resource_mut::<MaterialSession>() {
                     Some(mut s) if s.open => s.open = false,
                     _ => close(world),
-                }
-            });
+                },
+            );
         }
     }
 }
@@ -516,7 +621,10 @@ fn read_search(q: Query<(&Name, &EditableText)>, session: Option<ResMut<Material
     let Some(mut s) = session else {
         return;
     };
-    if let Some((_, t)) = q.iter().find(|(n, _)| n.as_str() == "material-search-field") {
+    if let Some((_, t)) = q
+        .iter()
+        .find(|(n, _)| n.as_str() == "material-search-field")
+    {
         let v = t.value().to_string();
         if s.query != v {
             s.query = v;
@@ -538,7 +646,12 @@ fn prop_row(p: &mut ChildSpawner, t: &Theme, i: usize, label: String, value: Str
         BorderColor::all(Color::srgb_u8(0xe4, 0xe4, 0xe4)),
     ))
     .with_children(|r| {
-        r.spawn(t.text(label, 11.0, FontWeight::NORMAL, Color::srgb_u8(0x6b, 0x6b, 0x6b)));
+        r.spawn(t.text(
+            label,
+            11.0,
+            FontWeight::NORMAL,
+            Color::srgb_u8(0x6b, 0x6b, 0x6b),
+        ));
         r.spawn(t.text(value, 12.0, FontWeight::MEDIUM, t.tool_foreground));
     });
 }
@@ -574,7 +687,10 @@ const ROW: f32 = 22.0;
 
 /// The list scrolled so the chosen material shows (two rows above it).
 fn list_scroll(s: &MaterialSession) -> ScrollPosition {
-    let i = search(s).iter().position(|m| s.chosen.as_deref() == Some(m.as_str())).unwrap_or(0);
+    let i = search(s)
+        .iter()
+        .position(|m| s.chosen.as_deref() == Some(m.as_str()))
+        .unwrap_or(0);
     ScrollPosition(Vec2::new(0.0, (i as f32 - 2.0).max(0.0) * ROW))
 }
 
@@ -586,7 +702,12 @@ fn spawn_props(p: &mut ChildSpawner, t: &Theme, s: &MaterialSession, units: &Uni
             }
         }
         None => {
-            p.spawn(t.text("Choose a material", 11.5, FontWeight::NORMAL, t.muted_foreground));
+            p.spawn(t.text(
+                "Choose a material",
+                11.5,
+                FontWeight::NORMAL,
+                t.muted_foreground,
+            ));
         }
     }
 }
@@ -611,15 +732,27 @@ const CUSTOM_FIELDS: [(CustomField, &str); 8] = [
     (CustomField::Poisson, "material-custom-poisson"),
     (CustomField::Youngs, "material-custom-youngs"),
     (CustomField::TensileYield, "material-custom-tensile-yield"),
-    (CustomField::UltimateTensile, "material-custom-ultimate-tensile"),
-    (CustomField::CompressiveYield, "material-custom-compressive-yield"),
-    (CustomField::UltimateCompressive, "material-custom-ultimate-compressive"),
+    (
+        CustomField::UltimateTensile,
+        "material-custom-ultimate-tensile",
+    ),
+    (
+        CustomField::CompressiveYield,
+        "material-custom-compressive-yield",
+    ),
+    (
+        CustomField::UltimateCompressive,
+        "material-custom-ultimate-compressive",
+    ),
 ];
 
 fn material_dialog(t: &Theme, s: &MaterialSession, units: Units) -> impl Bundle {
     let tb = t.clone();
     let s = s.clone();
-    let labels: Vec<String> = property_rows(&s.custom, &units).into_iter().map(|(l, _)| l).collect();
+    let labels: Vec<String> = property_rows(&s.custom, &units)
+        .into_iter()
+        .map(|(l, _)| l)
+        .collect();
     (
         MaterialDialog,
         DespawnOnExit(AppState::Document),
@@ -631,7 +764,14 @@ fn material_dialog(t: &Theme, s: &MaterialSession, units: Units) -> impl Bundle 
             .body_padding(UiRect::ZERO)
             .body(move |b| {
                 let t = &tb;
-                b.spawn(TabStrip::new("material-tabs").compact().tab("Library").tab("Custom").selected(s.tab).build(t));
+                b.spawn(
+                    TabStrip::new("material-tabs")
+                        .compact()
+                        .tab("Library")
+                        .tab("Custom")
+                        .selected(s.tab)
+                        .build(t),
+                );
                 b.spawn((
                     Name::new("material-library-body"),
                     LibraryBody,
@@ -639,7 +779,11 @@ fn material_dialog(t: &Theme, s: &MaterialSession, units: Units) -> impl Bundle 
                         flex_direction: FlexDirection::Column,
                         padding: UiRect::all(Val::Px(8.0)),
                         row_gap: Val::Px(6.0),
-                        display: if s.tab == 0 { Display::Flex } else { Display::None },
+                        display: if s.tab == 0 {
+                            Display::Flex
+                        } else {
+                            Display::None
+                        },
                         ..default()
                     },
                 ))
@@ -650,16 +794,26 @@ fn material_dialog(t: &Theme, s: &MaterialSession, units: Units) -> impl Bundle 
                         ..default()
                     })
                     .with_children(|r| {
-                        let mut select = Select::new("material-library").width(Val::Px(250.0)).bordered().option(LIBRARY_NAME, true);
+                        let mut select = Select::new("material-library")
+                            .width(Val::Px(250.0))
+                            .bordered()
+                            .option(LIBRARY_NAME, true);
                         for l in &s.libraries {
                             select = select.option(l.name.clone(), true);
                         }
                         r.spawn(select.selected(s.library).build(t));
-                        r.spawn(IconButton::new("material-add-library", "plus").tooltip("Create a material library").build(t));
+                        r.spawn(
+                            IconButton::new("material-add-library", "plus")
+                                .tooltip("Create a material library")
+                                .build(t),
+                        );
                     });
                     // The material dropdown (closed: the chosen material and a ▾, as
                     // `ex4-step17`); open, a search box and the list over the properties.
-                    c.spawn((MaterialChoose, cadrs_ui::ListItem::new("material-choose").build(t)))
+                    c.spawn((
+                        MaterialChoose,
+                        cadrs_ui::ListItem::new("material-choose").build(t),
+                    ))
                     .insert(Node {
                         height: Val::Px(26.0),
                         padding: UiRect::horizontal(Val::Px(6.0)),
@@ -670,7 +824,12 @@ fn material_dialog(t: &Theme, s: &MaterialSession, units: Units) -> impl Bundle 
                         ..default()
                     })
                     .insert(cadrs_ui::Visuals {
-                        background: cadrs_ui::StateColors::new(t.background, t.list_hover, t.list_active, t.background),
+                        background: cadrs_ui::StateColors::new(
+                            t.background,
+                            t.list_hover,
+                            t.list_active,
+                            t.background,
+                        ),
                         border: cadrs_ui::StateColors::all(Color::srgb_u8(0xc8, 0xc8, 0xc8)),
                         foreground: cadrs_ui::StateColors::all(t.foreground),
                         focus_ring: t.focus_ring,
@@ -682,7 +841,10 @@ fn material_dialog(t: &Theme, s: &MaterialSession, units: Units) -> impl Bundle 
                             t.text(choose_label(&s), 12.5, FontWeight::NORMAL, t.foreground),
                             Pickable::IGNORE,
                         ));
-                        r.spawn((cadrs_ui::icon("caret-down", 12.0, t.foreground), Pickable::IGNORE));
+                        r.spawn((
+                            cadrs_ui::icon("caret-down", 12.0, t.foreground),
+                            Pickable::IGNORE,
+                        ));
                     });
                     c.spawn((
                         Name::new("material-popup"),
@@ -743,7 +905,11 @@ fn material_dialog(t: &Theme, s: &MaterialSession, units: Units) -> impl Bundle 
                         flex_direction: FlexDirection::Column,
                         padding: UiRect::all(Val::Px(8.0)),
                         row_gap: Val::Px(2.0),
-                        display: if s.tab == 1 { Display::Flex } else { Display::None },
+                        display: if s.tab == 1 {
+                            Display::Flex
+                        } else {
+                            Display::None
+                        },
                         ..default()
                     },
                 ))
@@ -800,8 +966,21 @@ fn sync_material_dialog(
     q_area: Query<Entity, With<ViewportArea>>,
     q_dialog: Query<Entity, With<MaterialDialog>>,
     mut q_state: Query<&mut FeatureDialogState, With<MaterialDialog>>,
-    mut q_bodies: Query<(&mut Node, Has<LibraryBody>), (Or<(With<LibraryBody>, With<CustomBody>)>, Without<MaterialPopup>)>,
-    mut q_popup: Query<(&mut Node, Has<MaterialPopup>), (With<MaterialPopup>, Without<LibraryBody>, Without<CustomBody>)>,
+    mut q_bodies: Query<
+        (&mut Node, Has<LibraryBody>),
+        (
+            Or<(With<LibraryBody>, With<CustomBody>)>,
+            Without<MaterialPopup>,
+        ),
+    >,
+    mut q_popup: Query<
+        (&mut Node, Has<MaterialPopup>),
+        (
+            With<MaterialPopup>,
+            Without<LibraryBody>,
+            Without<CustomBody>,
+        ),
+    >,
     mut q_choose_label: Query<&mut Text, With<ChooseLabel>>,
     mut q_tabs: Query<(&Name, &mut TabStripState)>,
     q_list: Query<Entity, With<MaterialList>>,
@@ -848,7 +1027,11 @@ fn sync_material_dialog(
         }
     }
     for (mut n, library) in &mut q_bodies {
-        let want = if (s.tab == 0) == library { Display::Flex } else { Display::None };
+        let want = if (s.tab == 0) == library {
+            Display::Flex
+        } else {
+            Display::None
+        };
         if n.display != want {
             n.display = want;
         }
@@ -860,8 +1043,12 @@ fn sync_material_dialog(
     }
     let key = (s.tab, s.chosen.clone(), s.query.clone(), units.0, s.library);
     let changed = last.as_ref() != Some(&key);
-    let list_changed = last.as_ref().is_none_or(|l| l.1 != key.1 || l.2 != key.2 || l.4 != key.4);
-    let props_changed = last.as_ref().is_none_or(|l| l.1 != key.1 || l.3 != key.3 || l.4 != key.4);
+    let list_changed = last
+        .as_ref()
+        .is_none_or(|l| l.1 != key.1 || l.2 != key.2 || l.4 != key.4);
+    let props_changed = last
+        .as_ref()
+        .is_none_or(|l| l.1 != key.1 || l.3 != key.3 || l.4 != key.4);
     *last = Some(key);
     if changed {
         let t = theme.clone();
@@ -872,7 +1059,11 @@ fn sync_material_dialog(
                 commands.queue(move |world: &mut World| {
                     if let Ok(mut x) = world.get_entity_mut(e) {
                         x.with_children(|l| spawn_list(l, &t, &s));
-                        if s.query != x.get::<LastQuery>().map(|q| q.0.clone()).unwrap_or_default() {
+                        if s.query
+                            != x.get::<LastQuery>()
+                                .map(|q| q.0.clone())
+                                .unwrap_or_default()
+                        {
                             x.insert((list_scroll(&s), LastQuery(s.query.clone())));
                         }
                     }
@@ -920,8 +1111,14 @@ mod tests {
         assert_eq!(rows[6].1, "1450.377");
         assert_eq!(rows[7].1, "0");
         let mm = Units::default();
-        assert_eq!(property_rows(&pp, &mm)[1], ("Density (kg/m\u{b3})".into(), "913.437".into()));
-        assert_eq!(property_rows(&pp, &mm)[3], ("Young's modulus (MPa)".into(), "1470".into()));
+        assert_eq!(
+            property_rows(&pp, &mm)[1],
+            ("Density (kg/m\u{b3})".into(), "913.437".into())
+        );
+        assert_eq!(
+            property_rows(&pp, &mm)[3],
+            ("Young's modulus (MPa)".into(), "1470".into())
+        );
     }
 
     #[test]

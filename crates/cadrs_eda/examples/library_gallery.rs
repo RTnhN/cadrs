@@ -15,26 +15,67 @@ fn save(out: &std::path::Path, name: &str, d: &DrawList, px_per_mm: f32) {
     let tree = usvg::Tree::from_str(&svg, &usvg::Options::default()).unwrap();
     let size = tree.size();
     let k = px_per_mm / 3.7795;
-    let mut pix = tiny_skia::Pixmap::new((size.width() * k) as u32, (size.height() * k) as u32).unwrap();
-    resvg::render(&tree, tiny_skia::Transform::from_scale(k, k), &mut pix.as_mut());
+    let mut pix =
+        tiny_skia::Pixmap::new((size.width() * k) as u32, (size.height() * k) as u32).unwrap();
+    resvg::render(
+        &tree,
+        tiny_skia::Transform::from_scale(k, k),
+        &mut pix.as_mut(),
+    );
     pix.save_png(out.join(format!("{name}.png"))).unwrap();
 }
 
 fn main() {
-    let out = std::path::PathBuf::from(std::env::args().nth(1).unwrap_or_else(|| "target/library_gallery".into()));
+    let out = std::path::PathBuf::from(
+        std::env::args()
+            .nth(1)
+            .unwrap_or_else(|| "target/library_gallery".into()),
+    );
     std::fs::create_dir_all(&out).unwrap();
     let t = LibraryTable::builtin();
 
     // Symbols on a grid, 25.4 mm apart.
     let mut d = cadrs_eda::Design::new();
-    d.schematic.sheets[0].paper = Paper { name: "User".into(), size: Size::mm(330.0, 230.0) };
-    let shown = |id: &str| !id.starts_with("Connector:Conn_") || id.ends_with("01x04") || id.ends_with("02x05_Odd_Even");
-    let ids: Vec<_> = t.libraries.iter().flat_map(|l| l.symbols.iter()).filter(|s| shown(&s.id) && !s.id.starts_with("Connector:Screw_Terminal_01x0") || s.id.ends_with("Terminal_01x03")).cloned().collect();
+    d.schematic.sheets[0].paper = Paper {
+        name: "User".into(),
+        size: Size::mm(330.0, 230.0),
+    };
+    let shown = |id: &str| {
+        !id.starts_with("Connector:Conn_")
+            || id.ends_with("01x04")
+            || id.ends_with("02x05_Odd_Even")
+    };
+    let ids: Vec<_> = t
+        .libraries
+        .iter()
+        .flat_map(|l| l.symbols.iter())
+        .filter(|s| {
+            shown(&s.id) && !s.id.starts_with("Connector:Screw_Terminal_01x0")
+                || s.id.ends_with("Terminal_01x03")
+        })
+        .cloned()
+        .collect();
     for (i, s) in ids.iter().enumerate() {
         let (c, r) = ((i % 12) as f64, (i / 12) as f64);
-        cadrs_eda::sch_edit::place_symbol(&mut d.schematic, 0, s, Pt::mm(20.32 + c * 25.4, 210.82 - r * 27.94), uuid::Uuid::new_v4());
+        cadrs_eda::sch_edit::place_symbol(
+            &mut d.schematic,
+            0,
+            s,
+            Pt::mm(20.32 + c * 25.4, 210.82 - r * 27.94),
+            uuid::Uuid::new_v4(),
+        );
     }
-    save(&out, "symbols", &schematic(&d.schematic, 0, &SchematicTheme::default(), &Highlight::default()), 5.0);
+    save(
+        &out,
+        "symbols",
+        &schematic(
+            &d.schematic,
+            0,
+            &SchematicTheme::default(),
+            &Highlight::default(),
+        ),
+        5.0,
+    );
 
     // One footprint of each family on a board, 14 mm apart (wider ones get more room).
     let picks = [
@@ -70,11 +111,19 @@ fn main() {
         b.footprints.push(PlacedFootprint {
             id: uuid::Uuid::new_v4(),
             footprint: f.clone(),
-            placement: FootprintPlacement { at: Pt::mm(8.0 + c * 16.0, -8.0 - r * 18.0), ..Default::default() },
+            placement: FootprintPlacement {
+                at: Pt::mm(8.0 + c * 16.0, -8.0 - r * 18.0),
+                ..Default::default()
+            },
             locked: false,
             symbol: None,
         });
     }
-    save(&out, "footprints", &board(&b, &BoardTheme::default(), &BoardView::all(&b)), 12.0);
+    save(
+        &out,
+        "footprints",
+        &board(&b, &BoardTheme::default(), &BoardView::all(&b)),
+        12.0,
+    );
     println!("{}", out.display());
 }

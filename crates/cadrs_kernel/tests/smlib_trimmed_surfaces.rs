@@ -13,14 +13,14 @@ mod smlib_common;
 #[allow(unused_imports)]
 use smlib_common::*;
 
+use cadrs_kernel::native::NativeKernel;
 use cadrs_kernel::native::classify;
 use cadrs_kernel::native::draw::Shape;
 use cadrs_kernel::native::mass;
 use cadrs_kernel::native::math::P3;
+use cadrs_kernel::native::smb;
 use cadrs_kernel::native::surface::Surface;
 use cadrs_kernel::native::topo::Body;
-use cadrs_kernel::native::smb;
-use cadrs_kernel::native::NativeKernel;
 use cadrs_kernel::{DistanceTarget, FaceId, Kernel, PointClass};
 
 const SUITE: &str = "trimmed_surfaces";
@@ -30,7 +30,9 @@ fn e(x: impl std::fmt::Debug) -> String {
 }
 
 fn body(k: &NativeKernel, s: &Shape) -> Result<Body, String> {
-    let Shape::Body(id) = s else { return Err(format!("not a body: {s:?}")) };
+    let Shape::Body(id) = s else {
+        return Err(format!("not a body: {s:?}"));
+    };
     Ok((**k.get(*id).map_err(e)?).clone())
 }
 
@@ -48,15 +50,35 @@ fn cone_patch_area(want: f64) -> Result<(), String> {
     let ax = k.plane(-2.0, 0.0, 0.0, 0.0, 0.0, 1.0);
     let cyl = k.pcylinder_on(&ax, 1.0, 1.0).map_err(e)?;
     let b = body(&k, &cyl)?;
-    let lateral: f64 = (0..b.faces.len()).filter(|&f| matches!(b.faces[f].surf, Surface::Cylinder { .. })).map(|f| mass::face_area(&b, f).0).sum();
+    let lateral: f64 = (0..b.faces.len())
+        .filter(|&f| matches!(b.faces[f].surf, Surface::Cylinder { .. }))
+        .map(|f| mass::face_area(&b, f).0)
+        .sum();
     close("lateral area", lateral, want)
 }
 
 /// `my_test_tsurf_creation`'s face (the L-shaped plane with a triangular and a circular hole),
 /// extruded by 1.
 fn tsurf(k: &mut NativeKernel) -> Result<Body, String> {
-    let outer = k.polyline(&[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 5.0, 0.0], [5.0, 5.0, 0.0], [5.0, 10.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 0.0]]).map_err(e)?;
-    let tri = k.polyline(&[[1.0, 5.0, 0.0], [1.0, 8.0, 0.0], [4.0, 5.0, 0.0], [1.0, 5.0, 0.0]]).map_err(e)?;
+    let outer = k
+        .polyline(&[
+            [0.0, 0.0, 0.0],
+            [10.0, 0.0, 0.0],
+            [10.0, 5.0, 0.0],
+            [5.0, 5.0, 0.0],
+            [5.0, 10.0, 0.0],
+            [0.0, 10.0, 0.0],
+            [0.0, 0.0, 0.0],
+        ])
+        .map_err(e)?;
+    let tri = k
+        .polyline(&[
+            [1.0, 5.0, 0.0],
+            [1.0, 8.0, 0.0],
+            [4.0, 5.0, 0.0],
+            [1.0, 5.0, 0.0],
+        ])
+        .map_err(e)?;
     let c = k.circle(6.0, 2.5, 0.0, 1.5);
     let circ = k.mkedge_full(&c);
     let circ = k.wire(&[&circ]).map_err(e)?;
@@ -81,7 +103,11 @@ fn tsurf_creation_props(volume: f64, area: f64) -> Result<(), String> {
 /// Points of the extruded face at mid height, classified.
 fn tsurf_creation_classify(points: &[([f64; 2], PointClass)]) -> Result<(), String> {
     let b = tsurf(&mut NativeKernel::new())?;
-    let polys: Vec<_> = b.faces.iter().map(|f| classify::face_polygons(&b, f)).collect();
+    let polys: Vec<_> = b
+        .faces
+        .iter()
+        .map(|f| classify::face_polygons(&b, f))
+        .collect();
     let mut errs = Vec::new();
     for (q, want) in points {
         let p = P3::new(q[0], q[1], 0.5);
@@ -90,7 +116,11 @@ fn tsurf_creation_classify(points: &[([f64; 2], PointClass)]) -> Result<(), Stri
             errs.push(format!("({}, {}): {got:?}, want {want:?}", q[0], q[1]));
         }
     }
-    if errs.is_empty() { Ok(()) } else { Err(errs.join("; ")) }
+    if errs.is_empty() {
+        Ok(())
+    } else {
+        Err(errs.join("; "))
+    }
 }
 
 /// `my_test_analytic_tsurf_creation`: the plane z = 0 (20 × 20) through a quarter of a cylinder
@@ -129,17 +159,35 @@ fn solve(file: &str, max: bool, want: f64, tol: f64) -> Result<(), String> {
     let mut k = NativeKernel::new();
     let a = k.insert(p.breps[0].body.clone());
     let b = k.insert(p.breps[1].body.clone());
-    let (ta, tb) = (DistanceTarget::Face(a, FaceId(0)), DistanceTarget::Face(b, FaceId(0)));
-    let r = if max { k.max_distance(&ta, &tb) } else { k.min_distance(&ta, &tb) }.map_err(e)?;
+    let (ta, tb) = (
+        DistanceTarget::Face(a, FaceId(0)),
+        DistanceTarget::Face(b, FaceId(0)),
+    );
+    let r = if max {
+        k.max_distance(&ta, &tb)
+    } else {
+        k.min_distance(&ta, &tb)
+    }
+    .map_err(e)?;
     if (r.distance - want).abs() > tol {
-        return Err(format!("{} {:.9}, the closed form gives {want:.9}", if max { "maximum distance" } else { "minimum distance" }, r.distance));
+        return Err(format!(
+            "{} {:.9}, the closed form gives {want:.9}",
+            if max {
+                "maximum distance"
+            } else {
+                "minimum distance"
+            },
+            r.distance
+        ));
     }
     close("the points' distance", (r.a - r.b).norm(), r.distance)?;
     for (side, pt) in [(0, r.a), (1, r.b)] {
         let s = &p.breps[side].body.faces[0].surf;
         let d = s.distance(&pt);
         if d > 1e-7 {
-            return Err(format!("point {side} {pt:?} is {d:.1e} off its face's surface"));
+            return Err(format!(
+                "point {side} {pt:?} is {d:.1e} off its face's surface"
+            ));
         }
     }
     Ok(())
@@ -160,7 +208,18 @@ fn tsurf_creation_volume_area() {
 /// SMLib trimmed surfaces: `my_test_tsurf_creation`'s face extruded by 1, points in the material, the holes, the missing quarter and on the boundary.
 #[test]
 fn tsurf_creation_point_classes() {
-    tsurf_creation_classify(&[([2.0, 2.0], PointClass::Inside), ([9.0, 1.0], PointClass::Inside), ([3.0, 9.0], PointClass::Inside), ([2.0, 6.0], PointClass::Outside), ([6.0, 2.5], PointClass::Outside), ([7.5, 7.5], PointClass::Outside), ([11.0, 1.0], PointClass::Outside), ([0.0, 5.0], PointClass::OnBoundary), ([7.5, 2.5], PointClass::OnBoundary)]).unwrap();
+    tsurf_creation_classify(&[
+        ([2.0, 2.0], PointClass::Inside),
+        ([9.0, 1.0], PointClass::Inside),
+        ([3.0, 9.0], PointClass::Inside),
+        ([2.0, 6.0], PointClass::Outside),
+        ([6.0, 2.5], PointClass::Outside),
+        ([7.5, 7.5], PointClass::Outside),
+        ([11.0, 1.0], PointClass::Outside),
+        ([0.0, 5.0], PointClass::OnBoundary),
+        ([7.5, 2.5], PointClass::OnBoundary),
+    ])
+    .unwrap();
 }
 
 /// SMLib trimmed surfaces: `ss_plane_sph1` minimize: the sphere band's point (8, 2, 2) is 3 from the square x = 5.

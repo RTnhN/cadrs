@@ -7,7 +7,8 @@ use std::f64::consts::PI;
 
 use cadrs_core::commands::{AddExtrude, AddRevolve, AddSketch, EditSketch, SetExtrude, SetRevolve};
 use cadrs_core::document::{
-    AxisRef, BooleanOp, Document, EndCondition, EndType, ExtrudeFeature, Offset, RevolveFeature, RevolveType,
+    AxisRef, BooleanOp, Document, EndCondition, EndType, ExtrudeFeature, Offset, RevolveFeature,
+    RevolveType,
 };
 use cadrs_core::rebuild;
 use cadrs_core::samples;
@@ -27,7 +28,11 @@ impl Doc {
     fn new() -> Self {
         let d = Document::new("P3.4");
         let el = d.elements[0].id;
-        Self { d, h: History::default(), el }
+        Self {
+            d,
+            h: History::default(),
+            el,
+        }
     }
 
     fn features(&self) -> Vec<Feature> {
@@ -35,14 +40,40 @@ impl Doc {
     }
 
     fn g(&self, f: FeatureId) -> Sketch {
-        self.d.element(self.el).unwrap().feature(f).unwrap().sketch().unwrap().geometry.clone()
+        self.d
+            .element(self.el)
+            .unwrap()
+            .feature(f)
+            .unwrap()
+            .sketch()
+            .unwrap()
+            .geometry
+            .clone()
     }
 
     fn sketch(&mut self, plane: PlaneRef, ops: Vec<SketchOp>) -> FeatureId {
         let f = FeatureId::new();
-        self.h.execute(&mut self.d, &AddSketch { element: self.el, feature: f, plane: Some(plane) }).unwrap();
+        self.h
+            .execute(
+                &mut self.d,
+                &AddSketch {
+                    element: self.el,
+                    feature: f,
+                    plane: Some(plane),
+                },
+            )
+            .unwrap();
         for op in ops {
-            self.h.execute(&mut self.d, &EditSketch { element: self.el, feature: f, op }).unwrap();
+            self.h
+                .execute(
+                    &mut self.d,
+                    &EditSketch {
+                        element: self.el,
+                        feature: f,
+                        op,
+                    },
+                )
+                .unwrap();
         }
         f
     }
@@ -60,10 +91,25 @@ impl Doc {
     fn revolve(&mut self, r: RevolveFeature) -> FeatureId {
         let f = FeatureId::new();
         self.h
-            .execute(&mut self.d, &AddRevolve { element: self.el, feature: f, revolve: RevolveFeature::default() })
+            .execute(
+                &mut self.d,
+                &AddRevolve {
+                    element: self.el,
+                    feature: f,
+                    revolve: RevolveFeature::default(),
+                },
+            )
             .unwrap();
         self.h
-            .execute(&mut self.d, &SetRevolve { element: self.el, feature: f, revolve: r, label: "Revolve".into() })
+            .execute(
+                &mut self.d,
+                &SetRevolve {
+                    element: self.el,
+                    feature: f,
+                    revolve: r,
+                    label: "Revolve".into(),
+                },
+            )
             .unwrap();
         f
     }
@@ -71,10 +117,25 @@ impl Doc {
     fn extrude(&mut self, e: ExtrudeFeature) -> FeatureId {
         let f = FeatureId::new();
         self.h
-            .execute(&mut self.d, &AddExtrude { element: self.el, feature: f, extrude: ExtrudeFeature::default() })
+            .execute(
+                &mut self.d,
+                &AddExtrude {
+                    element: self.el,
+                    feature: f,
+                    extrude: ExtrudeFeature::default(),
+                },
+            )
             .unwrap();
         self.h
-            .execute(&mut self.d, &SetExtrude { element: self.el, feature: f, extrude: e, label: "Extrude".into() })
+            .execute(
+                &mut self.d,
+                &SetExtrude {
+                    element: self.el,
+                    feature: f,
+                    extrude: e,
+                    label: "Extrude".into(),
+                },
+            )
             .unwrap();
         f
     }
@@ -100,7 +161,11 @@ fn polygon(points: &[Vec2], construction: bool) -> SketchOp {
 }
 
 fn circle(x: f64, y: f64, r: f64, construction: bool) -> SketchOp {
-    SketchOp::AddCircle { center: v(x, y), radius: r, construction }
+    SketchOp::AddCircle {
+        center: v(x, y),
+        radius: r,
+        construction,
+    }
 }
 
 #[track_caller]
@@ -113,12 +178,21 @@ fn volume(p: &Part) -> f64 {
 }
 
 /// A revolve of the regions of `sketch` under `seeds` about its centreline.
-fn revolve_of(doc: &Doc, sketch: FeatureId, seeds: &[Vec2], kind: RevolveType, angle: f64) -> RevolveFeature {
+fn revolve_of(
+    doc: &Doc,
+    sketch: FeatureId,
+    seeds: &[Vec2],
+    kind: RevolveType,
+    angle: f64,
+) -> RevolveFeature {
     let regions = samples::region_refs(sketch, &doc.g(sketch), seeds);
     assert_eq!(regions.len(), seeds.len());
     RevolveFeature {
         regions,
-        axis: Some(AxisRef::SketchCurve { sketch, curve: doc.centreline(sketch) }),
+        axis: Some(AxisRef::SketchCurve {
+            sketch,
+            curve: doc.centreline(sketch),
+        }),
         kind,
         angle,
         angle_expr: format!("{angle} deg"),
@@ -135,9 +209,21 @@ fn revolve_types_and_torus() {
     let mut doc = Doc::new();
     let s = doc.sketch(
         PlaneRef::Front,
-        vec![polygon(&[v(0.0, -5.0), v(0.0, 40.0)], true), polygon(&[v(5.0, 0.0), v(10.0, 0.0), v(10.0, 20.0), v(5.0, 20.0)], false)],
+        vec![
+            polygon(&[v(0.0, -5.0), v(0.0, 40.0)], true),
+            polygon(
+                &[v(5.0, 0.0), v(10.0, 0.0), v(10.0, 20.0), v(5.0, 20.0)],
+                false,
+            ),
+        ],
     );
-    let full = doc.revolve(revolve_of(&doc, s, &[v(7.5, 10.0)], RevolveType::Full, 90.0));
+    let full = doc.revolve(revolve_of(
+        &doc,
+        s,
+        &[v(7.5, 10.0)],
+        RevolveType::Full,
+        90.0,
+    ));
     let tube = 1500.0 * PI;
     let parts = doc.parts();
     assert_eq!(parts.len(), 1);
@@ -147,8 +233,14 @@ fn revolve_types_and_torus() {
     assert!(cadrs_core::parts::sketch_consumed(&doc.features(), s));
     // Blind 90° and Symmetric 90°, each its own part.
     let b = revolve_of(&doc, s, &[v(7.5, 10.0)], RevolveType::Blind, 90.0);
-    let blind = doc.revolve(RevolveFeature { op: BooleanOp::New, ..b.clone() });
-    let sym = doc.revolve(RevolveFeature { kind: RevolveType::Symmetric, ..b.clone() });
+    let blind = doc.revolve(RevolveFeature {
+        op: BooleanOp::New,
+        ..b.clone()
+    });
+    let sym = doc.revolve(RevolveFeature {
+        kind: RevolveType::Symmetric,
+        ..b.clone()
+    });
     let parts = doc.parts();
     let of = |f: FeatureId| parts.iter().find(|p| p.feature == f).unwrap();
     close(volume(of(blind)), tube / 4.0, 1e-6);
@@ -158,22 +250,47 @@ fn revolve_types_and_torus() {
     let c = |f: FeatureId| of(f).mass.unwrap().center_of_mass;
     assert!(c(blind).y > 1.0, "{:?}", c(blind));
     close(c(sym).y, 0.0, 1e-9);
-    let flipped = doc.revolve(RevolveFeature { flip: true, ..b.clone() });
+    let flipped = doc.revolve(RevolveFeature {
+        flip: true,
+        ..b.clone()
+    });
     let parts = doc.parts();
     let of = |f: FeatureId| parts.iter().find(|p| p.feature == f).unwrap();
     assert!(of(flipped).mass.unwrap().center_of_mass.y < -1.0);
     // A second end: 90° + 45°, three eighths.
     let two = doc.revolve(RevolveFeature {
-        second: Some(EndCondition { end: EndType::Blind, depth: 45.0, depth_expr: "45 deg".into(), up_to: None, offset: None }),
+        second: Some(EndCondition {
+            end: EndType::Blind,
+            depth: 45.0,
+            depth_expr: "45 deg".into(),
+            up_to: None,
+            offset: None,
+        }),
         ..b
     });
     let parts = doc.parts();
-    close(volume(parts.iter().find(|p| p.feature == two).unwrap()), tube * 3.0 / 8.0, 1e-6);
+    close(
+        volume(parts.iter().find(|p| p.feature == two).unwrap()),
+        tube * 3.0 / 8.0,
+        1e-6,
+    );
 
     // The torus.
     let mut doc = Doc::new();
-    let s = doc.sketch(PlaneRef::Front, vec![polygon(&[v(0.0, 0.0), v(0.0, 30.0)], true), circle(20.0, 10.0, 5.0, false)]);
-    doc.revolve(revolve_of(&doc, s, &[v(20.0, 10.0)], RevolveType::Full, 90.0));
+    let s = doc.sketch(
+        PlaneRef::Front,
+        vec![
+            polygon(&[v(0.0, 0.0), v(0.0, 30.0)], true),
+            circle(20.0, 10.0, 5.0, false),
+        ],
+    );
+    doc.revolve(revolve_of(
+        &doc,
+        s,
+        &[v(20.0, 10.0)],
+        RevolveType::Full,
+        90.0,
+    ));
     let parts = doc.parts();
     close(volume(&parts[0]), 2.0 * PI * PI * 20.0 * 25.0, 1e-6);
     // One toroidal face, sampled as a grid of meridians for its silhouettes: seen from above,
@@ -232,7 +349,10 @@ fn revolve_remove_surface_thin_up_to() {
         PlaneRef::Front,
         vec![
             polygon(&[v(0.0, -5.0), v(0.0, 60.0)], true),
-            polygon(&[v(18.0, 18.0), v(22.0, 18.0), v(22.0, 22.0), v(18.0, 22.0)], false),
+            polygon(
+                &[v(18.0, 18.0), v(22.0, 18.0), v(22.0, 22.0), v(18.0, 22.0)],
+                false,
+            ),
         ],
     );
     let groove = doc.revolve(RevolveFeature {
@@ -251,13 +371,17 @@ fn revolve_remove_surface_thin_up_to() {
         ..revolve_of(&doc, s2, &[v(20.0, 20.0)], RevolveType::Full, 90.0)
     });
     let parts = doc.parts();
-    let sp = parts.iter().find(|p| p.feature == surf).expect("a surface part");
+    let sp = parts
+        .iter()
+        .find(|p| p.feature == surf)
+        .expect("a surface part");
     assert_eq!(sp.kind, cadrs_core::parts::PartKind::Surface);
     assert!(sp.name.starts_with("Surface"));
     let m = sp.mass.unwrap();
     close(m.volume, 0.0, 1e-9);
     // Sides r 18 and r 22 (2πr·4) and the annular top and bottom (π(22² − 18²) each).
-    let area = 2.0 * PI * 18.0 * 4.0 + 2.0 * PI * 22.0 * 4.0 + 2.0 * PI * (22.0 * 22.0 - 18.0 * 18.0);
+    let area =
+        2.0 * PI * 18.0 * 4.0 + 2.0 * PI * 22.0 * 4.0 + 2.0 * PI * (22.0 * 22.0 - 18.0 * 18.0);
     close(m.surface_area, area, 1e-6);
     // Thin, 1 mm inside the square's loop: the band's area 16 − 4 = 12 at mean radius 20.
     let thin = doc.revolve(RevolveFeature {
@@ -271,12 +395,21 @@ fn revolve_remove_surface_thin_up_to() {
         ..revolve_of(&doc, s2, &[v(20.0, 20.0)], RevolveType::Full, 90.0)
     });
     let parts = doc.parts();
-    let tp = parts.iter().find(|p| p.feature == thin).expect("a thin part");
+    let tp = parts
+        .iter()
+        .find(|p| p.feature == thin)
+        .expect("a thin part");
     close(volume(tp), 12.0 * 2.0 * PI * 20.0, 1e-6);
 
     // Up to part.
     let mut doc = Doc::new();
-    let s1 = doc.sketch(PlaneRef::Top, vec![polygon(&[v(-30.0, 10.0), v(0.0, 10.0), v(0.0, 60.0), v(-30.0, 60.0)], false)]);
+    let s1 = doc.sketch(
+        PlaneRef::Top,
+        vec![polygon(
+            &[v(-30.0, 10.0), v(0.0, 10.0), v(0.0, 60.0), v(-30.0, 60.0)],
+            false,
+        )],
+    );
     let block = doc.extrude(ExtrudeFeature {
         sketches: vec![s1],
         depth: 40.0,
@@ -287,7 +420,10 @@ fn revolve_remove_surface_thin_up_to() {
         PlaneRef::Front,
         vec![
             polygon(&[v(0.0, -5.0), v(0.0, 60.0)], true),
-            polygon(&[v(18.0, 18.0), v(22.0, 18.0), v(22.0, 22.0), v(18.0, 22.0)], false),
+            polygon(
+                &[v(18.0, 18.0), v(22.0, 18.0), v(22.0, 22.0), v(18.0, 22.0)],
+                false,
+            ),
         ],
     );
     let block_part = doc.parts().iter().find(|p| p.feature == block).unwrap().id;
@@ -298,7 +434,10 @@ fn revolve_remove_surface_thin_up_to() {
         ..revolve_of(&doc, s2, &[v(20.0, 20.0)], RevolveType::Full, 90.0)
     });
     let parts = doc.parts();
-    let q = parts.iter().find(|p| p.feature == up).expect("the revolved piece");
+    let q = parts
+        .iter()
+        .find(|p| p.feature == up)
+        .expect("the revolved piece");
     close(volume(q), 16.0 * 2.0 * PI * 20.0 / 4.0, 1e-5);
 }
 
@@ -318,8 +457,19 @@ fn revolve_about_part_geometry_and_of_a_face() {
     use cadrs_core::document::{EdgeRef, FaceRef};
     let mut doc = Doc::new();
     let s1 = doc.sketch(PlaneRef::Top, vec![circle(0.0, 0.0, 10.0, false)]);
-    let cyl = doc.extrude(ExtrudeFeature { sketches: vec![s1], depth: 30.0, depth_expr: "30 mm".into(), ..ExtrudeFeature::default() });
-    let s2 = doc.sketch(PlaneRef::Front, vec![polygon(&[v(15.0, 0.0), v(20.0, 0.0), v(20.0, 10.0), v(15.0, 10.0)], false)]);
+    let cyl = doc.extrude(ExtrudeFeature {
+        sketches: vec![s1],
+        depth: 30.0,
+        depth_expr: "30 mm".into(),
+        ..ExtrudeFeature::default()
+    });
+    let s2 = doc.sketch(
+        PlaneRef::Front,
+        vec![polygon(
+            &[v(15.0, 0.0), v(20.0, 0.0), v(20.0, 10.0), v(15.0, 10.0)],
+            false,
+        )],
+    );
     let regions = samples::region_refs(s2, &doc.g(s2), &[v(17.5, 5.0)]);
     let parts = doc.parts();
     let part = parts.iter().find(|p| p.feature == cyl).unwrap();
@@ -330,17 +480,33 @@ fn revolve_about_part_geometry_and_of_a_face() {
         .enumerate()
         .find(|(_, f)| f.plane.is_none())
         .expect("the cylindrical face");
-    let face_ref = FaceRef { part: part.id, face: side.name, seed: part.solid.face_point(fi).unwrap() };
+    let face_ref = FaceRef {
+        part: part.id,
+        face: side.name,
+        seed: part.solid.face_point(fi).unwrap(),
+    };
     let top_edge = part
         .solid
         .edges
         .iter()
         .find(|e| e.circle.is_some_and(|c| (c.center[2] - 30.0).abs() < 1e-9))
         .expect("the top circular edge");
-    let edge_ref = EdgeRef { part: part.id, edge: top_edge.name, seed: top_edge.midpoint() };
+    let edge_ref = EdgeRef {
+        part: part.id,
+        edge: top_edge.name,
+        seed: top_edge.midpoint(),
+    };
     let ring = 1750.0 * PI;
-    let by_face = doc.revolve(RevolveFeature { regions: regions.clone(), axis: Some(AxisRef::Face(face_ref)), ..RevolveFeature::default() });
-    let by_edge = doc.revolve(RevolveFeature { regions: regions.clone(), axis: Some(AxisRef::Edge(edge_ref)), ..RevolveFeature::default() });
+    let by_face = doc.revolve(RevolveFeature {
+        regions: regions.clone(),
+        axis: Some(AxisRef::Face(face_ref)),
+        ..RevolveFeature::default()
+    });
+    let by_edge = doc.revolve(RevolveFeature {
+        regions: regions.clone(),
+        axis: Some(AxisRef::Edge(edge_ref)),
+        ..RevolveFeature::default()
+    });
     let parts = doc.parts();
     let of = |f: FeatureId| parts.iter().find(|p| p.feature == f).expect("a part");
     close(volume(of(by_face)), ring, 1e-6);
@@ -348,9 +514,26 @@ fn revolve_about_part_geometry_and_of_a_face() {
 
     // A straight edge, and a face as the input.
     let mut doc = Doc::new();
-    let s1 = doc.sketch(PlaneRef::Top, vec![polygon(&[v(0.0, 0.0), v(4.0, 0.0), v(4.0, 4.0), v(0.0, 4.0)], false)]);
-    let bar = doc.extrude(ExtrudeFeature { sketches: vec![s1], depth: 30.0, depth_expr: "30 mm".into(), ..ExtrudeFeature::default() });
-    let s2 = doc.sketch(PlaneRef::Front, vec![polygon(&[v(15.0, 0.0), v(20.0, 0.0), v(20.0, 10.0), v(15.0, 10.0)], false)]);
+    let s1 = doc.sketch(
+        PlaneRef::Top,
+        vec![polygon(
+            &[v(0.0, 0.0), v(4.0, 0.0), v(4.0, 4.0), v(0.0, 4.0)],
+            false,
+        )],
+    );
+    let bar = doc.extrude(ExtrudeFeature {
+        sketches: vec![s1],
+        depth: 30.0,
+        depth_expr: "30 mm".into(),
+        ..ExtrudeFeature::default()
+    });
+    let s2 = doc.sketch(
+        PlaneRef::Front,
+        vec![polygon(
+            &[v(15.0, 0.0), v(20.0, 0.0), v(20.0, 10.0), v(15.0, 10.0)],
+            false,
+        )],
+    );
     let regions = samples::region_refs(s2, &doc.g(s2), &[v(17.5, 5.0)]);
     let parts = doc.parts();
     let part = parts.iter().find(|p| p.feature == bar).unwrap();
@@ -358,9 +541,17 @@ fn revolve_about_part_geometry_and_of_a_face() {
         .solid
         .edges
         .iter()
-        .find(|e| e.points.iter().all(|p| p[0].abs() < 1e-9 && p[1].abs() < 1e-9))
+        .find(|e| {
+            e.points
+                .iter()
+                .all(|p| p[0].abs() < 1e-9 && p[1].abs() < 1e-9)
+        })
         .expect("the edge along Z at the origin");
-    let edge_ref = EdgeRef { part: part.id, edge: z_edge.name, seed: z_edge.midpoint() };
+    let edge_ref = EdgeRef {
+        part: part.id,
+        edge: z_edge.name,
+        seed: z_edge.midpoint(),
+    };
     let (fi, front) = part
         .solid
         .faces
@@ -368,9 +559,21 @@ fn revolve_about_part_geometry_and_of_a_face() {
         .enumerate()
         .find(|(_, f)| f.plane.is_some_and(|p| p.normal()[1] < -0.999))
         .expect("the face y = 0");
-    let face_ref = FaceRef { part: part.id, face: front.name, seed: part.solid.face_point(fi).unwrap() };
-    let by_line = doc.revolve(RevolveFeature { regions, axis: Some(AxisRef::Edge(edge_ref)), ..RevolveFeature::default() });
-    let of_face = doc.revolve(RevolveFeature { faces: vec![face_ref], axis: Some(AxisRef::Edge(edge_ref)), ..RevolveFeature::default() });
+    let face_ref = FaceRef {
+        part: part.id,
+        face: front.name,
+        seed: part.solid.face_point(fi).unwrap(),
+    };
+    let by_line = doc.revolve(RevolveFeature {
+        regions,
+        axis: Some(AxisRef::Edge(edge_ref)),
+        ..RevolveFeature::default()
+    });
+    let of_face = doc.revolve(RevolveFeature {
+        faces: vec![face_ref],
+        axis: Some(AxisRef::Edge(edge_ref)),
+        ..RevolveFeature::default()
+    });
     let parts = doc.parts();
     let of = |f: FeatureId| parts.iter().find(|p| p.feature == f).expect("a part");
     close(volume(of(by_line)), ring, 1e-6);
@@ -386,7 +589,10 @@ fn revolves_and_diametral_dimensions_persist_and_undo() {
         PlaneRef::Front,
         vec![
             polygon(&[v(0.0, 0.0), v(0.0, 40.0)], true),
-            polygon(&[v(5.0, 0.0), v(10.0, 0.0), v(10.0, 20.0), v(5.0, 20.0)], false),
+            polygon(
+                &[v(5.0, 0.0), v(10.0, 0.0), v(10.0, 20.0), v(5.0, 20.0)],
+                false,
+            ),
         ],
     );
     // Ø20 from the corner (10, 20) to the centreline: the corner moves to x = ±10… it is there.
@@ -402,10 +608,27 @@ fn revolves_and_diametral_dimensions_persist_and_undo() {
         0.0,
     );
     doc.h
-        .execute(&mut doc.d, &EditSketch { element: doc.el, feature: s, op: SketchOp::SetDimension { dimension: dia, moves: vec![], radii: vec![] } })
+        .execute(
+            &mut doc.d,
+            &EditSketch {
+                element: doc.el,
+                feature: s,
+                op: SketchOp::SetDimension {
+                    dimension: dia,
+                    moves: vec![],
+                    radii: vec![],
+                },
+            },
+        )
         .unwrap();
     doc.revolve(RevolveFeature {
-        second: Some(EndCondition { end: EndType::Blind, depth: 30.0, depth_expr: "30 deg".into(), up_to: None, offset: None }),
+        second: Some(EndCondition {
+            end: EndType::Blind,
+            depth: 30.0,
+            depth_expr: "30 deg".into(),
+            up_to: None,
+            offset: None,
+        }),
         ..revolve_of(&doc, s, &[v(7.5, 10.0)], RevolveType::Blind, 120.0)
     });
     close(volume(&doc.parts()[0]), 1500.0 * PI * 150.0 / 360.0, 1e-6);
@@ -478,14 +701,16 @@ fn reducer_expected() -> (f64, f64) {
         + 2.0 * PI * 1.0 * 0.62
         + 4.0 * 2.0 * PI * 0.3125 * 0.62
         + face1
-        + face1 - PI * (1.3125f64.powi(2) - 1.0)
+        + face1
+        - PI * (1.3125f64.powi(2) - 1.0)
         + PI * (1.3125 + 1.875) * l
         + PI * (1.0 + 1.5625) * l
         + 2.0 * PI * 3.75 * 0.75
         + 2.0 * PI * 1.5625 * 0.75
         + 4.0 * 2.0 * PI * 0.375 * 0.75
         + face2
-        + face2 - PI * (1.875f64.powi(2) - 1.5625f64.powi(2));
+        + face2
+        - PI * (1.875f64.powi(2) - 1.5625f64.powi(2));
     (f1 + tr + f2, area)
 }
 
@@ -516,7 +741,12 @@ fn reducer_coupling() {
         vec![
             polygon(&[v(0.0, 0.0), v(6.0 * IN, 0.0)], true),
             polygon(
-                &[v(0.62 * IN, 1.0 * IN), v(0.62 * IN, 1.3125 * IN), v(5.245 * IN, 1.875 * IN), v(5.245 * IN, 1.5625 * IN)],
+                &[
+                    v(0.62 * IN, 1.0 * IN),
+                    v(0.62 * IN, 1.3125 * IN),
+                    v(5.245 * IN, 1.875 * IN),
+                    v(5.245 * IN, 1.5625 * IN),
+                ],
                 false,
             ),
         ],
@@ -542,7 +772,8 @@ fn reducer_coupling() {
         })
         .expect("the revolve's end face")
         .name;
-    let plane = cadrs_core::parts::face_plane(&doc.features(), rev, end_face).expect("a sketch plane");
+    let plane =
+        cadrs_core::parts::face_plane(&doc.features(), rev, end_face).expect("a sketch plane");
     // The face's frame is centred on the axis (the annulus's centroid).
     let frame = plane.frame();
     close(frame.origin[1], 0.0, 1e-6);
@@ -553,11 +784,21 @@ fn reducer_coupling() {
     let inner = solid
         .edges
         .iter()
-        .find(|e| e.circle.is_some_and(|c| (c.radius - 1.5625 * IN).abs() < 1e-9 && (c.center[0] - 5.245 * IN).abs() < 1e-9))
+        .find(|e| {
+            e.circle.is_some_and(|c| {
+                (c.radius - 1.5625 * IN).abs() < 1e-9 && (c.center[0] - 5.245 * IN).abs() < 1e-9
+            })
+        })
         .expect("the Ø3.125 edge");
     let features = doc.features();
-    let ctx = cadrs_core::links::LinkContext { solids: vec![(parts[0].feature, solid)], features: &features };
-    let link = cadrs_sketch::Link::Edge { feature: rev.0, edge: inner.name };
+    let ctx = cadrs_core::links::LinkContext {
+        solids: vec![(parts[0].feature, solid)],
+        features: &features,
+    };
+    let link = cadrs_sketch::Link::Edge {
+        feature: rev.0,
+        edge: inner.name,
+    };
     match ctx.shape(link, &frame) {
         Some(cadrs_sketch::projection::Projected::Circle(c, r)) => {
             close(r, 1.5625 * IN, 1e-9);
@@ -571,7 +812,18 @@ fn reducer_coupling() {
     let cone = solid
         .faces
         .iter()
-        .find(|f| f.name.op == rev.0 && f.plane.is_none() && solid.face_contains(solid.faces.iter().position(|g| g.name == f.name).unwrap(), [3.0 * IN, 0.0, (1.3125 + (1.875 - 1.3125) * (3.0 - 0.62) / 4.625) * IN]))
+        .find(|f| {
+            f.name.op == rev.0
+                && f.plane.is_none()
+                && solid.face_contains(
+                    solid.faces.iter().position(|g| g.name == f.name).unwrap(),
+                    [
+                        3.0 * IN,
+                        0.0,
+                        (1.3125 + (1.875 - 1.3125) * (3.0 - 0.62) / 4.625) * IN,
+                    ],
+                )
+        })
         .expect("the outer cone");
     let front = PlaneRef::Front.frame();
     let lines = cadrs_core::links::silhouettes(solid, &cone.name, front.normal());
@@ -620,8 +872,20 @@ fn reducer_coupling() {
     .iter()
     .map(|(x, y)| v(x * IN, y * IN))
     .collect();
-    let s = doc.sketch(PlaneRef::Front, vec![polygon(&[v(0.0, 0.0), v(7.0 * IN, 0.0)], true), polygon(&pts, false)]);
-    doc.revolve(revolve_of(&doc, s, &[v(0.3 * IN, 2.0 * IN)], RevolveType::Full, 90.0));
+    let s = doc.sketch(
+        PlaneRef::Front,
+        vec![
+            polygon(&[v(0.0, 0.0), v(7.0 * IN, 0.0)], true),
+            polygon(&pts, false),
+        ],
+    );
+    doc.revolve(revolve_of(
+        &doc,
+        s,
+        &[v(0.3 * IN, 2.0 * IN)],
+        RevolveType::Full,
+        90.0,
+    ));
     let holes = |d: &mut Doc, bolt: f64, hole: f64, start: f64, depth: f64| {
         let r = bolt / 2.0 * IN;
         let ops: Vec<SketchOp> = [(r, 0.0), (0.0, r), (-r, 0.0), (0.0, -r)]
@@ -632,7 +896,11 @@ fn reducer_coupling() {
         d.extrude(ExtrudeFeature {
             sketches: vec![sk],
             op: BooleanOp::Remove,
-            start_offset: (start > 0.0).then(|| Offset { value: start * IN, expr: format!("{start} in"), flip: false }),
+            start_offset: (start > 0.0).then(|| Offset {
+                value: start * IN,
+                expr: format!("{start} in"),
+                flip: false,
+            }),
             depth: depth * IN,
             depth_expr: format!("{depth} in"),
             ..ExtrudeFeature::default()

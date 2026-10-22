@@ -32,7 +32,11 @@ pub fn read(text: &str) -> Result<Vec<Mesh>, String> {
                         // `Kd` is linear light; the meshes carry sRGB.
                         let b = |v: f32| {
                             let v = v.clamp(0.0, 1.0);
-                            let s = if v <= 0.003_130_8 { v * 12.92 } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 };
+                            let s = if v <= 0.003_130_8 {
+                                v * 12.92
+                            } else {
+                                1.055 * v.powf(1.0 / 2.4) - 0.055
+                            };
                             (s * 255.0).round() as u8
                         };
                         colors.insert(m.clone(), [b(c[0]), b(c[1]), b(c[2])]);
@@ -45,7 +49,15 @@ pub fn read(text: &str) -> Result<Vec<Mesh>, String> {
                 // `i`, `i/t`, `i//n`, `i/t/n`; 1-based, or negative from the end.
                 let idx: Vec<usize> = it
                     .filter_map(|v| v.split('/').next()?.parse::<i64>().ok())
-                    .filter_map(|i| if i > 0 { Some(i as usize - 1) } else if i < 0 { points.len().checked_sub((-i) as usize) } else { None })
+                    .filter_map(|i| {
+                        if i > 0 {
+                            Some(i as usize - 1)
+                        } else if i < 0 {
+                            points.len().checked_sub((-i) as usize)
+                        } else {
+                            None
+                        }
+                    })
                     .collect();
                 if idx.len() >= 3 {
                     match faces.iter_mut().find(|(m, _)| *m == current_mtl) {
@@ -62,8 +74,15 @@ pub fn read(text: &str) -> Result<Vec<Mesh>, String> {
     }
     let mut out = vec![];
     for (mtl, polys) in faces {
-        let color = mtl.as_ref().and_then(|m| colors.get(m)).copied().unwrap_or([180, 180, 180]);
-        let mut m = Mesh { color, ..Default::default() };
+        let color = mtl
+            .as_ref()
+            .and_then(|m| colors.get(m))
+            .copied()
+            .unwrap_or([180, 180, 180]);
+        let mut m = Mesh {
+            color,
+            ..Default::default()
+        };
         for poly in polys {
             if poly.iter().any(|&i| i >= points.len()) {
                 continue;
@@ -74,7 +93,11 @@ pub fn read(text: &str) -> Result<Vec<Mesh>, String> {
                 let (a, b, c) = (tri[0], tri[1], tri[2]);
                 let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
                 let v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
-                let n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+                let n = [
+                    u[1] * v[2] - u[2] * v[1],
+                    u[2] * v[0] - u[0] * v[2],
+                    u[0] * v[1] - u[1] * v[0],
+                ];
                 let l = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt().max(1e-12);
                 let base = m.positions.len() as u32;
                 for p in tri {

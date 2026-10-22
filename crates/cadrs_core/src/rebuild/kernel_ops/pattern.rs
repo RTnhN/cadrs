@@ -25,7 +25,9 @@ use nalgebra::{Point3, Unit, Vector3};
 
 use crate::applied::EdgeOrFace;
 use crate::document::{AxisRef, DirectionRef, EdgeRef, FaceRef, UpTo, VertexRef};
-use crate::pattern::{InstanceDot, MirrorFeature, MirrorPlane, PatternFeature, PatternKind, PatternType};
+use crate::pattern::{
+    InstanceDot, MirrorFeature, MirrorPlane, PatternFeature, PatternKind, PatternType,
+};
 
 /// One copy: its grid index, its instance number (1, 2, …; the names use it) and its motion.
 #[derive(Debug, Clone)]
@@ -53,12 +55,21 @@ fn instance_id(pattern: FeatureId, f: FeatureId, k: u32) -> FeatureId {
     let hi = naming::stable_hash(&bytes);
     bytes.push(0x5a);
     let lo = naming::stable_hash(&bytes);
-    FeatureId(uuid::Uuid::from_u128((u128::from(hi) << 64) | u128::from(lo)))
+    FeatureId(uuid::Uuid::from_u128(
+        (u128::from(hi) << 64) | u128::from(lo),
+    ))
 }
 
 /// The name a copy gives the face named `n`.
 fn instance_face(op: cadrs_kernel::OpId, n: &FaceName, k: u32) -> FaceName {
-    FaceName::new(op, FaceOrigin::Instance { of: n.op, face: naming::face_hash(n), instance: k })
+    FaceName::new(
+        op,
+        FaceOrigin::Instance {
+            of: n.op,
+            face: naming::face_hash(n),
+            instance: k,
+        },
+    )
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -69,7 +80,13 @@ fn instance_face(op: cadrs_kernel::OpId, n: &FaceName, k: u32) -> FaceName {
 enum Seg {
     Line(Vector3<f64>, Vector3<f64>),
     /// Round `n` from the point `c + r·from`, through `sweep` radians (signed about `n`).
-    Arc { c: Vector3<f64>, n: Vector3<f64>, r: f64, from: Vector3<f64>, sweep: f64 },
+    Arc {
+        c: Vector3<f64>,
+        n: Vector3<f64>,
+        r: f64,
+        from: Vector3<f64>,
+        sweep: f64,
+    },
 }
 
 impl Seg {
@@ -86,7 +103,13 @@ impl Seg {
                 let d = (b - a).normalize();
                 (a + d * s, d)
             }
-            Seg::Arc { c, n, r, from, sweep } => {
+            Seg::Arc {
+                c,
+                n,
+                r,
+                from,
+                sweep,
+            } => {
                 let t = if sweep >= 0.0 { s / r } else { -s / r };
                 let side = n.cross(&from);
                 let radial = from * t.cos() + side * t.sin();
@@ -109,7 +132,13 @@ impl Seg {
             Seg::Line(a, b) => Seg::Line(b, a),
             Seg::Arc { c, n, r, sweep, .. } => {
                 let e = self.end();
-                Seg::Arc { c, n, r, from: (e - c) / r, sweep: -sweep }
+                Seg::Arc {
+                    c,
+                    n,
+                    r,
+                    from: (e - c) / r,
+                    sweep: -sweep,
+                }
             }
         }
     }
@@ -125,8 +154,14 @@ fn chain_path(mut segs: Vec<Seg>, start: Vector3<f64>) -> Result<Vec<Seg>, Strin
     let ends: Vec<(usize, bool)> = (0..segs.len())
         .flat_map(|i| [(i, false), (i, true)])
         .filter(|&(i, at_end)| {
-            let p = if at_end { segs[i].end() } else { segs[i].start() };
-            !segs.iter().enumerate().any(|(j, s)| j != i && ((s.start() - p).norm() < tol || (s.end() - p).norm() < tol))
+            let p = if at_end {
+                segs[i].end()
+            } else {
+                segs[i].start()
+            };
+            !segs.iter().enumerate().any(|(j, s)| {
+                j != i && ((s.start() - p).norm() < tol || (s.end() - p).norm() < tol)
+            })
         })
         .collect();
     let pick = if ends.is_empty() {
@@ -137,7 +172,9 @@ fn chain_path(mut segs: Vec<Seg>, start: Vector3<f64>) -> Result<Vec<Seg>, Strin
     let (first, at_end) = pick
         .into_iter()
         .min_by(|a, b| {
-            let d = |(i, e): (usize, bool)| (if e { segs[i].end() } else { segs[i].start() } - start).norm();
+            let d = |(i, e): (usize, bool)| {
+                (if e { segs[i].end() } else { segs[i].start() } - start).norm()
+            };
             d(*a).total_cmp(&d(*b))
         })
         .expect("a piece");
@@ -145,11 +182,18 @@ fn chain_path(mut segs: Vec<Seg>, start: Vector3<f64>) -> Result<Vec<Seg>, Strin
     let mut out = vec![if at_end { s0.reversed() } else { s0 }];
     while !segs.is_empty() {
         let tail = out.last().expect("one").end();
-        let Some(i) = segs.iter().position(|s| (s.start() - tail).norm() < tol || (s.end() - tail).norm() < tol) else {
+        let Some(i) = segs
+            .iter()
+            .position(|s| (s.start() - tail).norm() < tol || (s.end() - tail).norm() < tol)
+        else {
             return Err("The path's pieces must join end to end".into());
         };
         let s = segs.remove(i);
-        out.push(if (s.start() - tail).norm() < tol { s } else { s.reversed() });
+        out.push(if (s.start() - tail).norm() < tol {
+            s
+        } else {
+            s.reversed()
+        });
     }
     Ok(out)
 }
@@ -184,26 +228,47 @@ fn path_plane(path: &[Seg]) -> Option<Vector3<f64>> {
         }
     }
     let a = pts[0];
-    let far = pts.iter().copied().max_by(|p, q| (p - a).norm().total_cmp(&(q - a).norm()))?;
+    let far = pts
+        .iter()
+        .copied()
+        .max_by(|p, q| (p - a).norm().total_cmp(&(q - a).norm()))?;
     let d = far - a;
-    let off = pts.iter().copied().max_by(|p, q| d.cross(&(p - a)).norm().total_cmp(&d.cross(&(q - a)).norm()))?;
+    let off = pts.iter().copied().max_by(|p, q| {
+        d.cross(&(p - a))
+            .norm()
+            .total_cmp(&d.cross(&(q - a)).norm())
+    })?;
     let n = d.cross(&(off - a));
     if n.norm() < 1e-9 {
         return None;
     }
     let n = n.normalize();
-    pts.iter().all(|p| (p - a).dot(&n).abs() < 1e-6).then_some(n)
+    pts.iter()
+        .all(|p| (p - a).dot(&n).abs() < 1e-6)
+        .then_some(n)
 }
 
 impl Rebuilder {
     /// The pieces of a curve pattern's path (sketch curves exactly; part edges by their exact
     /// circle, else their polyline).
-    fn path_segments(&self, before: &[Feature], state: &State, path: &[crate::advanced::PathRef]) -> Result<Vec<Seg>, String> {
+    fn path_segments(
+        &self,
+        before: &[Feature],
+        state: &State,
+        path: &[crate::advanced::PathRef],
+    ) -> Result<Vec<Seg>, String> {
         use crate::advanced::PathRef;
         let lost = || "The path no longer exists".to_string();
         let mut out = Vec::new();
-        let sketch_curve = |sketch: FeatureId, curve: cadrs_sketch::CurveId, out: &mut Vec<Seg>| -> Result<(), String> {
-            let sk = before.iter().find(|f| f.id == sketch).and_then(|f| f.sketch()).ok_or_else(lost)?;
+        let sketch_curve = |sketch: FeatureId,
+                            curve: cadrs_sketch::CurveId,
+                            out: &mut Vec<Seg>|
+         -> Result<(), String> {
+            let sk = before
+                .iter()
+                .find(|f| f.id == sketch)
+                .and_then(|f| f.sketch())
+                .ok_or_else(lost)?;
             let frame = sk.plane.ok_or_else(lost)?.frame();
             let g = &sk.geometry;
             let w = |p: cadrs_sketch::Vec2| v3(frame.to_world(p));
@@ -211,13 +276,26 @@ impl Rebuilder {
                 CurveKind::Line { a, b } => out.push(Seg::Line(w(g.pos(a)), w(g.pos(b)))),
                 CurveKind::Arc { .. } => {
                     let a = g.arc_geom(curve).ok_or_else(lost)?;
-                    let from = v3(frame.u) * a.start_angle.cos() + v3(frame.v) * a.start_angle.sin();
-                    out.push(Seg::Arc { c: w(a.center), n: v3(frame.normal()), r: a.radius, from, sweep: a.sweep });
+                    let from =
+                        v3(frame.u) * a.start_angle.cos() + v3(frame.v) * a.start_angle.sin();
+                    out.push(Seg::Arc {
+                        c: w(a.center),
+                        n: v3(frame.normal()),
+                        r: a.radius,
+                        from,
+                        sweep: a.sweep,
+                    });
                 }
-                CurveKind::Circle { center, radius } => {
-                    out.push(Seg::Arc { c: w(g.pos(center)), n: v3(frame.normal()), r: radius, from: v3(frame.u), sweep: std::f64::consts::TAU })
-                }
-                CurveKind::Ellipse { .. } | CurveKind::EllipseOffset { .. } | CurveKind::EllipseArc { .. } => {
+                CurveKind::Circle { center, radius } => out.push(Seg::Arc {
+                    c: w(g.pos(center)),
+                    n: v3(frame.normal()),
+                    r: radius,
+                    from: v3(frame.u),
+                    sweep: std::f64::consts::TAU,
+                }),
+                CurveKind::Ellipse { .. }
+                | CurveKind::EllipseOffset { .. }
+                | CurveKind::EllipseArc { .. } => {
                     return Err("A curve pattern can't follow an ellipse yet".into());
                 }
                 CurveKind::Spline { .. } | CurveKind::Bezier { .. } => {
@@ -239,9 +317,18 @@ impl Rebuilder {
                     }
                 }
                 PathRef::Sketch(s) => {
-                    let sk = before.iter().find(|f| f.id == *s).and_then(|f| f.sketch()).ok_or_else(lost)?;
-                    let ids: Vec<cadrs_sketch::CurveId> =
-                        sk.geometry.curves.iter().filter(|(_, c)| !c.construction).map(|(id, _)| id).collect();
+                    let sk = before
+                        .iter()
+                        .find(|f| f.id == *s)
+                        .and_then(|f| f.sketch())
+                        .ok_or_else(lost)?;
+                    let ids: Vec<cadrs_sketch::CurveId> = sk
+                        .geometry
+                        .curves
+                        .iter()
+                        .filter(|(_, c)| !c.construction)
+                        .map(|(id, _)| id)
+                        .collect();
                     for c in ids {
                         sketch_curve(*s, c, &mut out)?;
                     }
@@ -249,7 +336,10 @@ impl Rebuilder {
                 PathRef::Edge(e) => {
                     let (part, _) = super::applied::edge_ids(state, e).ok_or_else(lost)?;
                     let edge = part.part.solid.edge(&e.edge).ok_or_else(lost)?;
-                    let (a, b) = (v3(edge.points[0]), v3(*edge.points.last().ok_or_else(lost)?));
+                    let (a, b) = (
+                        v3(edge.points[0]),
+                        v3(*edge.points.last().ok_or_else(lost)?),
+                    );
                     match edge.circle {
                         Some(c) => {
                             let (cc, n) = (v3(c.center), v3(c.normal).normalize());
@@ -261,11 +351,26 @@ impl Rebuilder {
                                 let to = (b - cc).normalize();
                                 // The way the polyline goes round.
                                 let mid = v3(edge.midpoint()) - cc;
-                                let ang = |v: Vector3<f64>| n.cross(&from).dot(&v).atan2(from.dot(&v)).rem_euclid(std::f64::consts::TAU);
+                                let ang = |v: Vector3<f64>| {
+                                    n.cross(&from)
+                                        .dot(&v)
+                                        .atan2(from.dot(&v))
+                                        .rem_euclid(std::f64::consts::TAU)
+                                };
                                 let (am, ab) = (ang(mid), ang(to));
-                                if am < ab { ab } else { ab - std::f64::consts::TAU }
+                                if am < ab {
+                                    ab
+                                } else {
+                                    ab - std::f64::consts::TAU
+                                }
                             };
-                            out.push(Seg::Arc { c: cc, n, r: c.radius, from, sweep });
+                            out.push(Seg::Arc {
+                                c: cc,
+                                n,
+                                r: c.radius,
+                                from,
+                                sweep,
+                            });
                         }
                         None => {
                             for w in edge.points.windows(2) {
@@ -280,7 +385,13 @@ impl Rebuilder {
     }
 
     /// Every instance of a pattern but the seed (skipped ones too), with its motion.
-    pub(super) fn pattern_instances(&self, before: &[Feature], x: &PatternFeature, state: &State, reference: Vector3<f64>) -> Result<Vec<Instance>, String> {
+    pub(super) fn pattern_instances(
+        &self,
+        before: &[Feature],
+        x: &PatternFeature,
+        state: &State,
+        reference: Vector3<f64>,
+    ) -> Result<Vec<Instance>, String> {
         let grid = x.grid();
         let n1 = x.first.count.max(1);
         let number = |i: [u32; 2]| i[1] * n1 + i[0] + 1;
@@ -293,16 +404,28 @@ impl Rebuilder {
                     Ok(if d.flip { -u } else { u } * d.distance)
                 };
                 let d1 = dir(&x.first)?;
-                let d2 = if x.second_on { dir(&x.second)? } else { Vector3::zeros() };
+                let d2 = if x.second_on {
+                    dir(&x.second)?
+                } else {
+                    Vector3::zeros()
+                };
                 for (i, o) in grid.into_iter().skip(1) {
-                    out.push(Instance { index: i, number: number(i), motion: Motion::translation(d1 * o[0] + d2 * o[1]) });
+                    out.push(Instance {
+                        index: i,
+                        number: number(i),
+                        motion: Motion::translation(d1 * o[0] + d2 * o[1]),
+                    });
                 }
             }
             PatternKind::Circular => {
                 let axis = self.axis(before, state, &x.axis.ok_or("Select an axis of pattern")?)?;
                 let step = x.angle_step().to_radians();
                 for (i, o) in grid.into_iter().skip(1) {
-                    out.push(Instance { index: i, number: number(i), motion: Motion::rotation(&axis, step * o[0]) });
+                    out.push(Instance {
+                        index: i,
+                        number: number(i),
+                        motion: Motion::rotation(&axis, step * o[0]),
+                    });
                 }
             }
             PatternKind::Curve => {
@@ -311,7 +434,13 @@ impl Rebuilder {
                 let closed = (path[0].start() - path.last().expect("one").end()).norm() < 1e-6;
                 let n = f64::from(x.first.count.max(1));
                 let spacing = if x.equal_spacing {
-                    if closed { total / n } else if n > 1.0 { total / (n - 1.0) } else { 0.0 }
+                    if closed {
+                        total / n
+                    } else if n > 1.0 {
+                        total / (n - 1.0)
+                    } else {
+                        0.0
+                    }
                 } else {
                     x.first.distance
                 };
@@ -336,10 +465,20 @@ impl Rebuilder {
                                 }
                             }
                         };
-                        let turn = Motion::rotation(&Axis { origin: Point3::from(p0), dir: Unit::new_normalize(axis_dir) }, angle);
+                        let turn = Motion::rotation(
+                            &Axis {
+                                origin: Point3::from(p0),
+                                dir: Unit::new_normalize(axis_dir),
+                            },
+                            angle,
+                        );
                         motion = turn.then(&motion);
                     }
-                    out.push(Instance { index: i, number: number(i), motion });
+                    out.push(Instance {
+                        index: i,
+                        number: number(i),
+                        motion,
+                    });
                 }
             }
         }
@@ -347,7 +486,14 @@ impl Rebuilder {
     }
 
     /// The point a pattern's Skip dots are copies of: the seeds' centre.
-    fn seed_reference(&self, state: &State, pattern_type: PatternType, parts: &[PartId], features: &[FeatureId], faces: &[FaceRef]) -> Vector3<f64> {
+    fn seed_reference(
+        &self,
+        state: &State,
+        pattern_type: PatternType,
+        parts: &[PartId],
+        features: &[FeatureId],
+        faces: &[FaceRef],
+    ) -> Vector3<f64> {
         let mut pts: Vec<Vector3<f64>> = Vec::new();
         match pattern_type {
             PatternType::Part => {
@@ -406,7 +552,10 @@ impl Rebuilder {
                 skipped: x.is_skipped(i.index[0], i.index[1]),
             })
             .collect();
-        let make: Vec<Instance> = all.into_iter().filter(|i| !x.is_skipped(i.index[0], i.index[1])).collect();
+        let make: Vec<Instance> = all
+            .into_iter()
+            .filter(|i| !x.is_skipped(i.index[0], i.index[1]))
+            .collect();
         let out = if make.is_empty() {
             // Every instance skipped (or a count of 1): nothing changes.
             Ok(Output {
@@ -422,11 +571,20 @@ impl Rebuilder {
                 uses: Vec::new(),
             })
         } else {
-            let merge = Merge { op: x.op, merge_all: x.merge_all, scope: &x.merge_scope, surface: false };
+            let merge = Merge {
+                op: x.op,
+                merge_all: x.merge_all,
+                scope: &x.merge_scope,
+                surface: false,
+            };
             match x.pattern_type {
                 PatternType::Part => self.copy_parts(id, &x.parts, &make, &merge, state),
-                PatternType::Feature if x.reapply => self.reapply(before, id, &x.features, &make, state),
-                PatternType::Feature => self.copy_feature_effect(before, id, &x.features, &make, state),
+                PatternType::Feature if x.reapply => {
+                    self.reapply(before, id, &x.features, &make, state)
+                }
+                PatternType::Feature => {
+                    self.copy_feature_effect(before, id, &x.features, &make, state)
+                }
                 PatternType::Face => self.copy_faces(id, &x.faces, &make, state),
             }
         };
@@ -456,12 +614,26 @@ impl Rebuilder {
             }
             MirrorPlane::Connector(c) => super::super::connector_frame(before, state, &c)?,
         };
-        let motion = Motion::reflection(Point3::from(frame.origin), Unit::new_normalize(v3(frame.normal())));
-        let make = vec![Instance { index: [1, 0], number: 1, motion }];
-        let merge = Merge { op: x.op, merge_all: x.merge_all, scope: &x.merge_scope, surface: false };
+        let motion = Motion::reflection(
+            Point3::from(frame.origin),
+            Unit::new_normalize(v3(frame.normal())),
+        );
+        let make = vec![Instance {
+            index: [1, 0],
+            number: 1,
+            motion,
+        }];
+        let merge = Merge {
+            op: x.op,
+            merge_all: x.merge_all,
+            scope: &x.merge_scope,
+            surface: false,
+        };
         match x.mirror_type {
             PatternType::Part => self.copy_parts(id, &x.parts, &make, &merge, state),
-            PatternType::Feature if x.reapply => self.reapply(before, id, &x.features, &make, state),
+            PatternType::Feature if x.reapply => {
+                self.reapply(before, id, &x.features, &make, state)
+            }
             PatternType::Feature => self.copy_feature_effect(before, id, &x.features, &make, state),
             PatternType::Face => self.copy_faces(id, &x.faces, &make, state),
         }
@@ -472,7 +644,14 @@ impl Rebuilder {
 
     /// Names for a moved copy of a body named `source` (by the copy's history): every face an
     /// instance of its original.
-    pub(super) fn instance_names(&self, body: BodyId, history: &cadrs_kernel::History, source: &BodyNames, op: cadrs_kernel::OpId, k: u32) -> Result<BodyNames, String> {
+    pub(super) fn instance_names(
+        &self,
+        body: BodyId,
+        history: &cadrs_kernel::History,
+        source: &BodyNames,
+        op: cadrs_kernel::OpId,
+        k: u32,
+    ) -> Result<BodyNames, String> {
         let n = self.kernel.faces(body).map_err(|e| e.to_string())?.len();
         let mut faces: Vec<Option<FaceName>> = vec![None; n];
         for (f, input) in &history.modified {
@@ -483,17 +662,27 @@ impl Rebuilder {
         let faces: Vec<FaceName> = faces
             .into_iter()
             .enumerate()
-            .map(|(i, f)| f.unwrap_or_else(|| FaceName::new(op, FaceOrigin::Unnamed { index: i as u32 })))
+            .map(|(i, f)| {
+                f.unwrap_or_else(|| FaceName::new(op, FaceOrigin::Unnamed { index: i as u32 }))
+            })
             .collect();
         let mut names = self.names_from_faces(body, faces)?;
         // The source's merged-away names carry over: a reference to the copy of a face the
         // kernel merged into another finds the copy of that face.
-        names.aliases = source.aliases.iter().map(|(a, b)| (instance_face(op, a, k), instance_face(op, b, k))).collect();
+        names.aliases = source
+            .aliases
+            .iter()
+            .map(|(a, b)| (instance_face(op, a, k), instance_face(op, b, k)))
+            .collect();
         Ok(names)
     }
 
     /// Edge and vertex names for a body whose faces are named `faces`.
-    pub(super) fn names_from_faces(&self, body: BodyId, faces: Vec<FaceName>) -> Result<BodyNames, String> {
+    pub(super) fn names_from_faces(
+        &self,
+        body: BodyId,
+        faces: Vec<FaceName>,
+    ) -> Result<BodyNames, String> {
         let edges = self.kernel.edges(body).map_err(|e| e.to_string())?;
         let vertices = self.kernel.vertices(body).map_err(|e| e.to_string())?;
         Ok(BodyNames {
@@ -505,10 +694,19 @@ impl Rebuilder {
     }
 
     /// `body` (named `names`) moved by each instance's motion, the copies renamed.
-    fn copies_of(&mut self, id: FeatureId, body: BodyId, names: &BodyNames, make: &[Instance]) -> Result<Vec<(BodyId, BodyNames)>, String> {
+    fn copies_of(
+        &mut self,
+        id: FeatureId,
+        body: BodyId,
+        names: &BodyNames,
+        make: &[Instance],
+    ) -> Result<Vec<(BodyId, BodyNames)>, String> {
         let mut out: Vec<(BodyId, BodyNames)> = Vec::new();
         for inst in make {
-            let copy = self.kernel.transform_motion(body, &inst.motion).map(|r| (r.bodies[0], r.history));
+            let copy = self
+                .kernel
+                .transform_motion(body, &inst.motion)
+                .map(|r| (r.bodies[0], r.history));
             match copy {
                 Ok((b, h)) => match self.instance_names(b, &h, names, id.0, inst.number) {
                     Ok(n) => out.push((b, n)),
@@ -534,23 +732,41 @@ impl Rebuilder {
     }
 
     /// Several copies as one body (their union; they may lie apart). The copies are released.
-    fn join(&mut self, id: FeatureId, mut copies: Vec<(BodyId, BodyNames)>) -> Result<(BodyId, BodyNames), String> {
+    fn join(
+        &mut self,
+        id: FeatureId,
+        mut copies: Vec<(BodyId, BodyNames)>,
+    ) -> Result<(BodyId, BodyNames), String> {
         if copies.len() == 1 {
             return Ok(copies.pop().expect("one"));
         }
         let first = copies[0].0;
         let rest: Vec<BodyId> = copies[1..].iter().map(|(b, _)| *b).collect();
-        let joined = self.kernel.boolean(BoolOp::Union, first, &rest).and_then(|r| {
-            let body = r.bodies[0];
-            let inputs: Vec<(BodyId, &BodyNames)> = copies.iter().map(|(b, n)| (*b, n)).collect();
-            Ok((body, naming::name_body(&self.kernel, body, id.0, &r.history, &inputs)?))
-        });
+        let joined = self
+            .kernel
+            .boolean(BoolOp::Union, first, &rest)
+            .and_then(|r| {
+                let body = r.bodies[0];
+                let inputs: Vec<(BodyId, &BodyNames)> =
+                    copies.iter().map(|(b, n)| (*b, n)).collect();
+                Ok((
+                    body,
+                    naming::name_body(&self.kernel, body, id.0, &r.history, &inputs)?,
+                ))
+            });
         self.release_all(&copies);
         joined.map_err(|e| format!("Joining the copies failed: {e}"))
     }
 
     /// Part pattern or mirror: copies of the parts, New or combined with the merge scope.
-    fn copy_parts(&mut self, id: FeatureId, seeds: &[PartId], make: &[Instance], merge: &Merge, state: &Arc<State>) -> Result<Output, String> {
+    fn copy_parts(
+        &mut self,
+        id: FeatureId,
+        seeds: &[PartId],
+        make: &[Instance],
+        merge: &Merge,
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
         let op = id.0;
         let mut copies: Vec<(BodyId, BodyNames, PartId, u32)> = Vec::new();
         for seed in seeds {
@@ -560,7 +776,9 @@ impl Rebuilder {
                 }
                 return Err("A selected part no longer exists".into());
             };
-            let (Some(body), names, palette) = (p.body, p.names.clone(), p.part.palette) else { continue };
+            let (Some(body), names, palette) = (p.body, p.names.clone(), p.part.palette) else {
+                continue;
+            };
             match self.copies_of(id, body, &names, make) {
                 Ok(c) => copies.extend(c.into_iter().map(|(b, n)| (b, n, *seed, palette))),
                 Err(e) => {
@@ -589,7 +807,8 @@ impl Rebuilder {
                 }
             }
             next.geoms = state.geoms.clone();
-            let mut out = self.finish(id, placed, next, op, state.geoms.clone(), PartKind::Solid)?;
+            let mut out =
+                self.finish(id, placed, next, op, state.geoms.clone(), PartKind::Solid)?;
             // PS9.6: a copy looks like its seed.
             if let Some(st) = Arc::get_mut(&mut out.state) {
                 for (pid, seed, palette) in sources {
@@ -609,14 +828,37 @@ impl Rebuilder {
         let narrowed;
         let merge = if merge.op == BooleanOp::Add && !merge.merge_all && merge.scope.is_empty() {
             let touches = self.contacts(joined.0, state, false).touches;
-            own = seeds.iter().copied().filter(|s| touches.contains(s)).collect();
-            narrowed = Merge { op: if own.is_empty() { BooleanOp::New } else { BooleanOp::Add }, merge_all: false, scope: &own, surface: merge.surface };
+            own = seeds
+                .iter()
+                .copied()
+                .filter(|s| touches.contains(s))
+                .collect();
+            narrowed = Merge {
+                op: if own.is_empty() {
+                    BooleanOp::New
+                } else {
+                    BooleanOp::Add
+                },
+                merge_all: false,
+                scope: &own,
+                surface: merge.surface,
+            };
             &narrowed
         } else if merge.op == BooleanOp::Add && !merge.merge_all {
             // Add with a merge scope: the seeds merge too, with the scope and their copies (as
             // Onshape's do); a seed touching none of them stays a part of its own.
-            own = merge.scope.iter().copied().chain(seeds.iter().copied().filter(|s| !merge.scope.contains(s))).collect();
-            narrowed = Merge { op: BooleanOp::Add, merge_all: false, scope: &own, surface: merge.surface };
+            own = merge
+                .scope
+                .iter()
+                .copied()
+                .chain(seeds.iter().copied().filter(|s| !merge.scope.contains(s)))
+                .collect();
+            narrowed = Merge {
+                op: BooleanOp::Add,
+                merge_all: false,
+                scope: &own,
+                surface: merge.surface,
+            };
             &narrowed
         } else {
             merge
@@ -626,13 +868,21 @@ impl Rebuilder {
 
     /// Face pattern or mirror: the pocket or boss each part's faces bound, copied and cut from
     /// or added to the part.
-    fn copy_faces(&mut self, id: FeatureId, faces: &[FaceRef], make: &[Instance], state: &Arc<State>) -> Result<Output, String> {
+    fn copy_faces(
+        &mut self,
+        id: FeatureId,
+        faces: &[FaceRef],
+        make: &[Instance],
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
         let op = id.0;
         // The faces by part.
         let mut groups: Vec<(PartId, BodyId, Arc<BodyNames>, Vec<FaceId>)> = Vec::new();
         for f in faces {
             let (part, ids) = face_ids(state, f).ok_or("A selected face no longer exists")?;
-            let Some(body) = self.body_or_skip(part) else { continue };
+            let Some(body) = self.body_or_skip(part) else {
+                continue;
+            };
             match groups.iter_mut().find(|g| g.0 == part.part.id) {
                 Some(g) => {
                     for i in ids {
@@ -648,7 +898,10 @@ impl Rebuilder {
         let mut placed: Vec<Placed> = Vec::new();
         for (pid, body, names, ids) in groups {
             let source = naming::stable_hash(format!("{op} face tool {pid:?}").as_bytes());
-            let r = self.kernel.face_tool(body, &ids, source).map_err(|e| format!("The faces can't be copied: {e}"))?;
+            let r = self
+                .kernel
+                .face_tool(body, &ids, source)
+                .map_err(|e| format!("The faces can't be copied: {e}"))?;
             let tool = r.bodies[0];
             let named = naming::name_body(&self.kernel, tool, op, &r.history, &[(body, &names)]);
             let class = self
@@ -679,7 +932,14 @@ impl Rebuilder {
 
     /// Feature pattern without Reapply, or Feature mirror: the material the features removed
     /// and added, copied.
-    fn copy_feature_effect(&mut self, before: &[Feature], id: FeatureId, features: &[FeatureId], make: &[Instance], state: &Arc<State>) -> Result<Output, String> {
+    fn copy_feature_effect(
+        &mut self,
+        before: &[Feature],
+        id: FeatureId,
+        features: &[FeatureId],
+        make: &[Instance],
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
         let op = id.0;
         let first = before
             .iter()
@@ -698,9 +958,16 @@ impl Rebuilder {
         // Bodies made here that a later step replaced.
         let mut spare: Vec<BodyId> = Vec::new();
         let result = (|| -> Result<(), String> {
-            let parts: Vec<PartState> = state.parts.iter().filter(|p| p.part.kind == PartKind::Solid).cloned().collect();
+            let parts: Vec<PartState> = state
+                .parts
+                .iter()
+                .filter(|p| p.part.kind == PartKind::Solid)
+                .cloned()
+                .collect();
             for after in &parts {
-                let Some(after_body) = after.body else { continue };
+                let Some(after_body) = after.body else {
+                    continue;
+                };
                 let prior_part = prior.part(after.part.id);
                 if prior_part.is_some_and(|p| p.body == Some(after_body)) {
                     continue;
@@ -720,24 +987,38 @@ impl Rebuilder {
                             part.name = format!("Part {}", next.next_part);
                             part.features = vec![id];
                             part.source = Some(after.part.id);
-                            next.parts.push(PartState { part, body: Some(piece.body), names: Arc::new(piece.names) });
+                            next.parts.push(PartState {
+                                part,
+                                body: Some(piece.body),
+                                names: Arc::new(piece.names),
+                            });
                             changed.push(pid);
                         }
                     }
                     continue;
                 };
                 let prior_names = prior_part.map(|p| p.names.clone()).unwrap_or_default();
-                let inputs: Vec<(BodyId, &BodyNames)> = vec![(prior_body, &prior_names), (after_body, &after.names)];
-                let difference = |this: &mut Self, a: BodyId, b: BodyId| -> Result<Option<(BodyId, BodyNames)>, String> {
+                let inputs: Vec<(BodyId, &BodyNames)> =
+                    vec![(prior_body, &prior_names), (after_body, &after.names)];
+                let difference = |this: &mut Self,
+                                  a: BodyId,
+                                  b: BodyId|
+                 -> Result<Option<(BodyId, BodyNames)>, String> {
                     match this.kernel.boolean(BoolOp::Subtract, a, &[b]) {
                         Ok(r) => {
                             let body = r.bodies[0];
-                            let v = this.kernel.mass_properties(body).map(|m| m.volume).unwrap_or(0.0);
+                            let v = this
+                                .kernel
+                                .mass_properties(body)
+                                .map(|m| m.volume)
+                                .unwrap_or(0.0);
                             if v < 1e-9 {
                                 this.kernel.release(body);
                                 return Ok(None);
                             }
-                            let names = naming::name_body(&this.kernel, body, op, &r.history, &inputs).map_err(|e| e.to_string())?;
+                            let names =
+                                naming::name_body(&this.kernel, body, op, &r.history, &inputs)
+                                    .map_err(|e| e.to_string())?;
                             Ok(Some((body, names)))
                         }
                         Err(cadrs_kernel::KernelError::EmptyResult(_)) => Ok(None),
@@ -782,7 +1063,15 @@ impl Rebuilder {
             .iter()
             .filter_map(|pid| {
                 let p = next.part(*pid)?;
-                Some((*pid, Piece { body: p.body?, names: (*p.names).clone(), from: HashSet::new(), volume: 0.0 }))
+                Some((
+                    *pid,
+                    Piece {
+                        body: p.body?,
+                        names: (*p.names).clone(),
+                        from: HashSet::new(),
+                        volume: 0.0,
+                    },
+                ))
             })
             .collect();
         let geoms = state.geoms.clone();
@@ -791,7 +1080,13 @@ impl Rebuilder {
 
     /// Puts pieces a cut or join made into `next` right away (the next step works on them):
     /// the body a piece replaces goes to `spare` if this feature made it.
-    fn place_now(&mut self, next: &mut State, placed: Vec<Placed>, changed: &mut Vec<PartId>, spare: &mut Vec<BodyId>) {
+    fn place_now(
+        &mut self,
+        next: &mut State,
+        placed: Vec<Placed>,
+        changed: &mut Vec<PartId>,
+        spare: &mut Vec<BodyId>,
+    ) {
         for (pid, piece) in placed {
             match next.parts.iter_mut().find(|p| p.part.id == pid) {
                 Some(p) => {
@@ -815,7 +1110,11 @@ impl Rebuilder {
                     part.name = format!("Part {}", next.next_part);
                     part.features = vec![pid.feature];
                     part.source = None;
-                    next.parts.push(PartState { part, body: Some(piece.body), names: Arc::new(piece.names) });
+                    next.parts.push(PartState {
+                        part,
+                        body: Some(piece.body),
+                        names: Arc::new(piece.names),
+                    });
                 }
             }
             if !changed.contains(&pid) {
@@ -829,8 +1128,19 @@ impl Rebuilder {
 
     /// Feature pattern with Reapply features (PS22.3): each instance rebuilds the features with
     /// their sketches moved.
-    fn reapply(&mut self, before: &[Feature], id: FeatureId, seeds: &[FeatureId], make: &[Instance], state: &Arc<State>) -> Result<Output, String> {
-        let feats: Vec<Feature> = before.iter().filter(|f| seeds.contains(&f.id)).cloned().collect();
+    fn reapply(
+        &mut self,
+        before: &[Feature],
+        id: FeatureId,
+        seeds: &[FeatureId],
+        make: &[Instance],
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
+        let feats: Vec<Feature> = before
+            .iter()
+            .filter(|f| seeds.contains(&f.id))
+            .cloned()
+            .collect();
         if feats.len() != seeds.len() {
             return Err("A feature to pattern no longer exists".into());
         }
@@ -854,11 +1164,19 @@ impl Rebuilder {
         let mut synthetic: HashMap<uuid::Uuid, (uuid::Uuid, u32)> = HashMap::new();
         let mut failure: Option<String> = None;
         'instances: for inst in make {
-            let ops: HashMap<uuid::Uuid, uuid::Uuid> =
-                feats.iter().map(|f| (f.id.0, instance_id(id, f.id, inst.number).0)).collect();
+            let ops: HashMap<uuid::Uuid, uuid::Uuid> = feats
+                .iter()
+                .map(|f| (f.id.0, instance_id(id, f.id, inst.number).0))
+                .collect();
             let moved: Vec<Feature> = before
                 .iter()
-                .map(|f| if sketches.contains(&f.id) { moved_sketch(f, &inst.motion) } else { f.clone() })
+                .map(|f| {
+                    if sketches.contains(&f.id) {
+                        moved_sketch(f, &inst.motion)
+                    } else {
+                        f.clone()
+                    }
+                })
                 .collect();
             for f in &feats {
                 let fk = match remap_feature(f, &ops, &inst.motion) {
@@ -871,7 +1189,11 @@ impl Rebuilder {
                 let out = self.compute(&moved, &fk, &cur);
                 made.extend(out.owned.iter().copied());
                 if let Some(e) = out.error {
-                    failure = Some(format!("Instance {} of {}: {e}", crate::pattern::index_label(inst.index), f.name));
+                    failure = Some(format!(
+                        "Instance {} of {}: {e}",
+                        crate::pattern::index_label(inst.index),
+                        f.name
+                    ));
                     break 'instances;
                 }
                 synthetic.insert(fk.id.0, (f.id.0, inst.number));
@@ -953,7 +1275,12 @@ fn moved_sketch(f: &Feature, m: &Motion) -> Feature {
             v = -v;
             flip_v(&mut s.geometry);
         }
-        s.plane = Some(PlaneRef::Feature(FeaturePlane { feature: f.id.0, origin: arr(o.coords), u: arr(u), v: arr(v) }));
+        s.plane = Some(PlaneRef::Feature(FeaturePlane {
+            feature: f.id.0,
+            origin: arr(o.coords),
+            u: arr(u),
+            v: arr(v),
+        }));
     }
     g
 }
@@ -979,9 +1306,17 @@ fn flip_v(g: &mut cadrs_sketch::Sketch) {
         i.shape = match i.shape {
             ImprintShape::Line(a, b) => ImprintShape::Line(flip(a), flip(b)),
             ImprintShape::Circle(c, r) => ImprintShape::Circle(flip(c), r),
-            ImprintShape::Arc { center, radius, start_angle, sweep } => {
-                ImprintShape::Arc { center: flip(center), radius, start_angle: -(start_angle + sweep), sweep }
-            }
+            ImprintShape::Arc {
+                center,
+                radius,
+                start_angle,
+                sweep,
+            } => ImprintShape::Arc {
+                center: flip(center),
+                radius,
+                start_angle: -(start_angle + sweep),
+                sweep,
+            },
         };
     }
 }
@@ -989,7 +1324,11 @@ fn flip_v(g: &mut cadrs_sketch::Sketch) {
 /// A feature of a Reapply pattern's instance: its own id, and its references to faces, edges
 /// and vertices of the patterned features mapped to the instance's (`ops`: seed → instance)
 /// with their stored points moved. References to anything else stay.
-fn remap_feature(f: &Feature, ops: &HashMap<uuid::Uuid, uuid::Uuid>, m: &Motion) -> Result<Feature, String> {
+fn remap_feature(
+    f: &Feature,
+    ops: &HashMap<uuid::Uuid, uuid::Uuid>,
+    m: &Motion,
+) -> Result<Feature, String> {
     let face_name = |n: FaceName| match ops.get(&n.op) {
         Some(o) => FaceName { op: *o, ..n },
         None => n,
@@ -998,15 +1337,27 @@ fn remap_feature(f: &Feature, ops: &HashMap<uuid::Uuid, uuid::Uuid>, m: &Motion)
     let pt = |p: [f64; 3]| arr(m.point(&Point3::from(p)).coords);
     let face = |r: FaceRef| {
         if moves(&r.face) {
-            FaceRef { face: face_name(r.face), seed: pt(r.seed), ..r }
+            FaceRef {
+                face: face_name(r.face),
+                seed: pt(r.seed),
+                ..r
+            }
         } else {
             r
         }
     };
     let edge = |r: EdgeRef| {
         if r.edge.faces.iter().any(&moves) {
-            let e = cadrs_sketch::EdgeName::new(face_name(r.edge.faces[0]), face_name(r.edge.faces[1]), r.edge.index);
-            EdgeRef { edge: e, seed: pt(r.seed), ..r }
+            let e = cadrs_sketch::EdgeName::new(
+                face_name(r.edge.faces[0]),
+                face_name(r.edge.faces[1]),
+                r.edge.index,
+            );
+            EdgeRef {
+                edge: e,
+                seed: pt(r.seed),
+                ..r
+            }
         } else {
             r
         }
@@ -1015,7 +1366,14 @@ fn remap_feature(f: &Feature, ops: &HashMap<uuid::Uuid, uuid::Uuid>, m: &Motion)
         if r.vertex.faces.iter().any(&moves) {
             let mut faces = r.vertex.faces.map(face_name);
             faces.sort();
-            VertexRef { vertex: cadrs_sketch::VertexName { faces, index: r.vertex.index }, point: pt(r.point), ..r }
+            VertexRef {
+                vertex: cadrs_sketch::VertexName {
+                    faces,
+                    index: r.vertex.index,
+                },
+                point: pt(r.point),
+                ..r
+            }
         } else {
             r
         }
@@ -1037,7 +1395,14 @@ fn remap_feature(f: &Feature, ops: &HashMap<uuid::Uuid, uuid::Uuid>, m: &Motion)
     // A mirror flips its sketches' geometry (`moved_sketch`): the regions' inside points too.
     let flipped = m.is_reflection();
     let region = |r: crate::document::RegionRef| {
-        if flipped { crate::document::RegionRef { seed: cadrs_sketch::Vec2::new(r.seed.x, -r.seed.y), ..r } } else { r }
+        if flipped {
+            crate::document::RegionRef {
+                seed: cadrs_sketch::Vec2::new(r.seed.x, -r.seed.y),
+                ..r
+            }
+        } else {
+            r
+        }
     };
     let id = FeatureId(*ops.get(&f.id.0).ok_or("not a patterned feature")?);
     let kind = match &f.kind {
@@ -1088,10 +1453,14 @@ fn remap_feature(f: &Feature, ops: &HashMap<uuid::Uuid, uuid::Uuid>, m: &Motion)
                 .into_iter()
                 .map(|c| match c {
                     crate::mate::ConnectorRef::Implicit(crate::mate::ConnectorOrigin::Face(r)) => {
-                        crate::mate::ConnectorRef::Implicit(crate::mate::ConnectorOrigin::Face(face(r)))
+                        crate::mate::ConnectorRef::Implicit(crate::mate::ConnectorOrigin::Face(
+                            face(r),
+                        ))
                     }
                     crate::mate::ConnectorRef::Implicit(crate::mate::ConnectorOrigin::Edge(r)) => {
-                        crate::mate::ConnectorRef::Implicit(crate::mate::ConnectorOrigin::Edge(edge(r)))
+                        crate::mate::ConnectorRef::Implicit(crate::mate::ConnectorOrigin::Edge(
+                            edge(r),
+                        ))
                     }
                     c => c,
                 })
@@ -1115,7 +1484,17 @@ fn remap_feature(f: &Feature, ops: &HashMap<uuid::Uuid, uuid::Uuid>, m: &Motion)
             FeatureKind::Sweep(x)
         }
         FeatureKind::Sketch(_) => f.kind.clone(),
-        _ => return Err(format!("{} can't be reapplied; turn Reapply features off", f.name)),
+        _ => {
+            return Err(format!(
+                "{} can't be reapplied; turn Reapply features off",
+                f.name
+            ));
+        }
     };
-    Ok(Feature { id, name: f.name.clone(), kind, suppress_by: None })
+    Ok(Feature {
+        id,
+        name: f.name.clone(),
+        kind,
+        suppress_by: None,
+    })
 }

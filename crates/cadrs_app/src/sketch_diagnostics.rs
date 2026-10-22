@@ -25,12 +25,14 @@ use bevy::prelude::*;
 use bevy::text::FontWeight;
 use bevy::ui_widgets::{Activate, observe};
 use cadrs_core::FeatureId;
-use cadrs_sketch::diagnostics::{self, EntityNames, EntityRef, Filter, Item, ItemId, ItemType, LooseEndGroup, Mode, Status};
+use cadrs_sketch::diagnostics::{
+    self, EntityNames, EntityRef, Filter, Item, ItemId, ItemType, LooseEndGroup, Mode, Status,
+};
 use cadrs_sketch::{CurveKind, PlaneFrame, Sketch, SketchEntity, SketchOp, Vec2 as SVec2};
 use cadrs_ui::menu::{Menu, MenuAction, MenuItem};
 use cadrs_ui::{
-    ActionRow, ActionRowAction, FloatingPanel, FloatingPanelBody, FloatingPanelClose, IconButton, Switch, SwitchChange,
-    TabStrip, TabStripSelect, Theme, Tooltip, icon, open_menu, panel_caption,
+    ActionRow, ActionRowAction, FloatingPanel, FloatingPanelBody, FloatingPanelClose, IconButton,
+    Switch, SwitchChange, TabStrip, TabStripSelect, Theme, Tooltip, icon, open_menu, panel_caption,
 };
 
 use crate::sketch::SketchSession;
@@ -199,11 +201,18 @@ fn on_diagnostics_button(
         .item_height(22.0)
         .text_only()
         .item(MenuItem::new("sketch-diag-profile", "Profile inspector…"))
-        .item(MenuItem::new("sketch-diag-constraints", "Constraint manager…"));
+        .item(MenuItem::new(
+            "sketch-diag-constraints",
+            "Constraint manager…",
+        ));
     open_menu(&mut commands, ev.entity, menu.build(&theme));
 }
 
-fn on_menu_action(ev: On<MenuAction>, mut state: ResMut<DiagnosticsState>, session: Option<Res<SketchSession>>) {
+fn on_menu_action(
+    ev: On<MenuAction>,
+    mut state: ResMut<DiagnosticsState>,
+    session: Option<Res<SketchSession>>,
+) {
     let which = match ev.item.as_str() {
         "sketch-diag-profile" => true,
         "sketch-diag-constraints" => false,
@@ -211,7 +220,10 @@ fn on_menu_action(ev: On<MenuAction>, mut state: ResMut<DiagnosticsState>, sessi
     };
     let Some(s) = session else { return };
     if state.sketch != Some(s.feature) {
-        *state = DiagnosticsState { sketch: Some(s.feature), ..DiagnosticsState::default() };
+        *state = DiagnosticsState {
+            sketch: Some(s.feature),
+            ..DiagnosticsState::default()
+        };
     }
     if which {
         state.profile = true;
@@ -240,7 +252,12 @@ fn on_panel_close(
 
 /// The Constraint manager's rows as shown: the items the filters let through (minus the ones
 /// dropped with ×).
-fn shown_items(sketch: &Sketch, conflicting: &[cadrs_sketch::solve::Source], state: &DiagnosticsState, selection: &SketchSelection) -> Vec<Item> {
+fn shown_items(
+    sketch: &Sketch,
+    conflicting: &[cadrs_sketch::solve::Source],
+    state: &DiagnosticsState,
+    selection: &SketchSelection,
+) -> Vec<Item> {
     let filter = state.filter(selection);
     diagnostics::items(sketch, conflicting)
         .into_iter()
@@ -280,8 +297,12 @@ fn sync_panels(
             commands.entity(entity).try_despawn();
         }
     }
-    let (Some(sketch), Some(doc), Some(session)) = (sketch, doc.as_ref(), session.as_ref()) else { return };
-    let Some(area) = q_area.iter().next() else { return };
+    let (Some(sketch), Some(doc), Some(session)) = (sketch, doc.as_ref(), session.as_ref()) else {
+        return;
+    };
+    let Some(area) = q_area.iter().next() else {
+        return;
+    };
     // Under the sketch dialog.
     let dialog_bottom = q_dialog
         .iter()
@@ -294,7 +315,9 @@ fn sync_panels(
             continue;
         }
         // Both open: the second beside the first.
-        let left = if (is_profile && state.manager) || (!is_profile && state.profile && q_panels.iter().next().is_some()) {
+        let left = if (is_profile && state.manager)
+            || (!is_profile && state.profile && q_panels.iter().next().is_some())
+        {
             PANEL_LEFT + PANEL_WIDTH + 8.0
         } else {
             PANEL_LEFT
@@ -322,7 +345,11 @@ fn sync_panels(
         commands.entity(area).add_child(id);
     }
     // The contents, rebuilt when what they show changes.
-    let features = doc.doc.element(session.element).map(|el| el.features().to_vec()).unwrap_or_default();
+    let features = doc
+        .doc
+        .element(session.element)
+        .map(|el| el.features().to_vec())
+        .unwrap_or_default();
     let conflicting: Vec<cadrs_sketch::solve::Source> = analysis.analysis.conflict_set.clone();
     for (panel, built, is_profile) in &mut q_panels {
         // A panel closing this frame is left alone.
@@ -330,7 +357,9 @@ fn sync_panels(
             continue;
         }
         let Some(mut built) = built else { continue };
-        let Some(body) = q_body.iter().find(|(_, b)| b.0 == panel).map(|(e, _)| e) else { continue };
+        let Some(body) = q_body.iter().find(|(_, b)| b.0 == panel).map(|(e, _)| e) else {
+            continue;
+        };
         let t = theme.clone();
         if is_profile {
             let groups = diagnostics::loose_ends(sketch);
@@ -345,7 +374,9 @@ fn sync_panels(
             built.0 = key;
             let index = state.loose_index;
             commands.entity(body).despawn_children();
-            commands.entity(body).with_children(|b| profile_body(b, &t, &groups, index));
+            commands
+                .entity(body)
+                .with_children(|b| profile_body(b, &t, &groups, index));
         } else {
             let items = shown_items(sketch, &conflicting, &state, &selection);
             let names = EntityNames::new(sketch);
@@ -361,13 +392,20 @@ fn sync_panels(
                 .map(|e| (*e, entity_icon(sketch, *e)))
                 .collect();
             commands.entity(body).despawn_children();
-            commands.entity(body).with_children(|b| manager_body(b, &t, &st, &items, &names, &icons, &features));
+            commands
+                .entity(body)
+                .with_children(|b| manager_body(b, &t, &st, &items, &names, &icons, &features));
         }
     }
 }
 
 /// The Profile inspector: the "Loose ends" list, Previous / Next and the help icon.
-fn profile_body(b: &mut ChildSpawnerCommands, t: &Theme, groups: &[LooseEndGroup], index: Option<usize>) {
+fn profile_body(
+    b: &mut ChildSpawnerCommands,
+    t: &Theme,
+    groups: &[LooseEndGroup],
+    index: Option<usize>,
+) {
     b.spawn((
         Name::new("profile-inspector-list"),
         Node {
@@ -384,13 +422,21 @@ fn profile_body(b: &mut ChildSpawnerCommands, t: &Theme, groups: &[LooseEndGroup
         l.spawn(panel_caption(t, "Loose ends"));
         if groups.is_empty() {
             l.spawn((
-                t.text("No loose ends", 11.0, FontWeight::NORMAL, t.muted_foreground),
+                t.text(
+                    "No loose ends",
+                    11.0,
+                    FontWeight::NORMAL,
+                    t.muted_foreground,
+                ),
                 Pickable::IGNORE,
             ));
         }
         for (i, g) in groups.iter().enumerate() {
             l.spawn((
-                ActionRow::new(format!("loose-end-{i}"), g.label()).height(19.0).selected(index == Some(i)).build(t),
+                ActionRow::new(format!("loose-end-{i}"), g.label())
+                    .height(19.0)
+                    .selected(index == Some(i))
+                    .build(t),
                 LooseRow(i),
             ));
         }
@@ -402,16 +448,29 @@ fn profile_body(b: &mut ChildSpawnerCommands, t: &Theme, groups: &[LooseEndGroup
         ..default()
     })
     .with_children(|r| {
-        for (name, label, step) in [("profile-inspector-previous", "Previous", -1i32), ("profile-inspector-next", "Next", 1)] {
+        for (name, label, step) in [
+            ("profile-inspector-previous", "Previous", -1i32),
+            ("profile-inspector-next", "Next", 1),
+        ] {
             r.spawn((
-                cadrs_ui::Button::new(name).label(label).primary().small().disabled(groups.is_empty()).build(t),
+                cadrs_ui::Button::new(name)
+                    .label(label)
+                    .primary()
+                    .small()
+                    .disabled(groups.is_empty())
+                    .build(t),
                 observe(move |_: On<Activate>, mut commands: Commands| {
                     commands.queue(move |world: &mut World| step_loose_end(world, step));
                 }),
             ));
         }
     });
-    help_row(b, t, "profile-inspector-help", "Profile inspector: lists the ends of regular geometry that join nothing");
+    help_row(
+        b,
+        t,
+        "profile-inspector-help",
+        "Profile inspector: lists the ends of regular geometry that join nothing",
+    );
 }
 
 /// The "?" at the bottom right of a panel.
@@ -481,7 +540,10 @@ fn slug(s: &str) -> String {
 fn item_label(item: &Item, features: &[cadrs_core::Feature]) -> String {
     match item.source {
         Some(src) => {
-            let name = features.iter().find(|f| f.id.0 == src).map_or("external".to_string(), |f| f.name.clone());
+            let name = features
+                .iter()
+                .find(|f| f.id.0 == src)
+                .map_or("external".to_string(), |f| f.name.clone());
             format!("{} [{name}]", item.name)
         }
         None => item.name.clone(),
@@ -490,29 +552,45 @@ fn item_label(item: &Item, features: &[cadrs_core::Feature]) -> String {
 
 /// An icon toggle of the filter grids (selected: the filter is on).
 #[allow(clippy::too_many_arguments)]
-fn toggle(r: &mut ChildSpawnerCommands, t: &Theme, name: String, icon_name: &'static str, tip: String, on: bool, color: Option<Color>, role: FilterToggle) {
+fn toggle(
+    r: &mut ChildSpawnerCommands,
+    t: &Theme,
+    name: String,
+    icon_name: &'static str,
+    tip: String,
+    on: bool,
+    color: Option<Color>,
+    role: FilterToggle,
+) {
     let mut e = r.spawn((
-        IconButton::new(name, icon_name).icon_size(16.0).tooltip(tip).selected(on).build(t),
+        IconButton::new(name, icon_name)
+            .icon_size(16.0)
+            .tooltip(tip)
+            .selected(on)
+            .build(t),
         role,
-        observe(|a: On<Activate>, q: Query<&FilterToggle>, mut state: ResMut<DiagnosticsState>| {
-            let Ok(role) = q.get(a.entity) else { return };
-            fn flip<T: std::hash::Hash + Eq + Copy>(set: &mut HashSet<T>, v: T) {
-                if !set.remove(&v) {
-                    set.insert(v);
+        observe(
+            |a: On<Activate>, q: Query<&FilterToggle>, mut state: ResMut<DiagnosticsState>| {
+                let Ok(role) = q.get(a.entity) else { return };
+                fn flip<T: std::hash::Hash + Eq + Copy>(set: &mut HashSet<T>, v: T) {
+                    if !set.remove(&v) {
+                        set.insert(v);
+                    }
                 }
-            }
-            match *role {
-                FilterToggle::Type(x) => flip(&mut state.types, x),
-                FilterToggle::Mode(x) => flip(&mut state.modes, x),
-                FilterToggle::Status(x) => flip(&mut state.statuses, x),
-            }
-        }),
+                match *role {
+                    FilterToggle::Type(x) => flip(&mut state.types, x),
+                    FilterToggle::Mode(x) => flip(&mut state.modes, x),
+                    FilterToggle::Status(x) => flip(&mut state.statuses, x),
+                }
+            },
+        ),
     ));
     if let Some(c) = color {
         let mut v = cadrs_ui::button::visuals_for(t, cadrs_ui::ButtonVariant::Ghost);
         v.foreground = cadrs_ui::StateColors::all(c);
         v.background = v.background.with_selected(Color::srgb_u8(0xf6, 0xd4, 0xd4));
-        v.border = cadrs_ui::StateColors::all(Color::NONE).with_selected(Color::srgb_u8(0xd0, 0x3a, 0x3a));
+        v.border =
+            cadrs_ui::StateColors::all(Color::NONE).with_selected(Color::srgb_u8(0xd0, 0x3a, 0x3a));
         e.insert(v);
     }
     e.entry::<Node>().and_modify(|mut n| {
@@ -549,9 +627,20 @@ fn manager_body(
         ..default()
     })
     .with_children(|h| {
-        h.spawn((t.text("Filters", 11.0, FontWeight::SEMIBOLD, t.foreground), Pickable::IGNORE));
         h.spawn((
-            icon(if state.filters_open { "caret-down-filled" } else { "caret-right-filled" }, 12.0, t.foreground),
+            t.text("Filters", 11.0, FontWeight::SEMIBOLD, t.foreground),
+            Pickable::IGNORE,
+        ));
+        h.spawn((
+            icon(
+                if state.filters_open {
+                    "caret-down-filled"
+                } else {
+                    "caret-right-filled"
+                },
+                12.0,
+                t.foreground,
+            ),
             Pickable::IGNORE,
         ));
     });
@@ -565,32 +654,78 @@ fn manager_body(
             AutoSelectSwitch,
         ));
         b.spawn(panel_caption(t, "Type"));
-        b.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(7.0), row_gap: Val::Px(2.0), ..default() })
-            .with_children(|g| {
-                for ty in ItemType::ALL {
-                    let on = state.types.contains(&ty);
-                    toggle(g, t, format!("cm-type-{}", slug(ty.label())), type_icon(ty), ty.label().to_string(), on, None, FilterToggle::Type(ty));
-                }
-            });
+        b.spawn(Node {
+            flex_wrap: FlexWrap::Wrap,
+            column_gap: Val::Px(7.0),
+            row_gap: Val::Px(2.0),
+            ..default()
+        })
+        .with_children(|g| {
+            for ty in ItemType::ALL {
+                let on = state.types.contains(&ty);
+                toggle(
+                    g,
+                    t,
+                    format!("cm-type-{}", slug(ty.label())),
+                    type_icon(ty),
+                    ty.label().to_string(),
+                    on,
+                    None,
+                    FilterToggle::Type(ty),
+                );
+            }
+        });
         b.spawn(panel_caption(t, "Mode"));
-        b.spawn(Node { column_gap: Val::Px(6.0), ..default() }).with_children(|g| {
+        b.spawn(Node {
+            column_gap: Val::Px(6.0),
+            ..default()
+        })
+        .with_children(|g| {
             // Closest icon-rs icons (no dedicated internal / external / in-context glyphs).
             for (m, name, ic, tip) in [
                 (Mode::Internal, "internal", "sketch", "Internal"),
                 (Mode::External, "external", "use", "External"),
                 (Mode::InContext, "in-context", "link", "In context"),
             ] {
-                toggle(g, t, format!("cm-mode-{name}"), ic, tip.into(), state.modes.contains(&m), None, FilterToggle::Mode(m));
+                toggle(
+                    g,
+                    t,
+                    format!("cm-mode-{name}"),
+                    ic,
+                    tip.into(),
+                    state.modes.contains(&m),
+                    None,
+                    FilterToggle::Mode(m),
+                );
             }
         });
         b.spawn(panel_caption(t, "Status"));
-        b.spawn(Node { column_gap: Val::Px(6.0), ..default() }).with_children(|g| {
+        b.spawn(Node {
+            column_gap: Val::Px(6.0),
+            ..default()
+        })
+        .with_children(|g| {
             for (st, name, ic, tip, color) in [
                 (Status::Driven, "driven", "ruler", "Driven", None),
                 (Status::Solved, "solved", "check", "Solved", None),
-                (Status::Error, "errors", "error-filled", "Errors", Some(t.feature_error)),
+                (
+                    Status::Error,
+                    "errors",
+                    "error-filled",
+                    "Errors",
+                    Some(t.feature_error),
+                ),
             ] {
-                toggle(g, t, format!("cm-status-{name}"), ic, tip.into(), state.statuses.contains(&st), color, FilterToggle::Status(st));
+                toggle(
+                    g,
+                    t,
+                    format!("cm-status-{name}"),
+                    ic,
+                    tip.into(),
+                    state.statuses.contains(&st),
+                    color,
+                    FilterToggle::Status(st),
+                );
             }
         });
     }
@@ -606,9 +741,17 @@ fn manager_body(
         Pickable::IGNORE,
     ))
     .with_children(|r| {
-        r.spawn((t.text("Sort by", 11.0, FontWeight::NORMAL, t.muted_foreground), Pickable::IGNORE));
         r.spawn((
-            TabStrip::new("cm-sort").compact().tab("Constraint").tab("Entity").selected(usize::from(state.by_entity)).build(t),
+            t.text("Sort by", 11.0, FontWeight::NORMAL, t.muted_foreground),
+            Pickable::IGNORE,
+        ));
+        r.spawn((
+            TabStrip::new("cm-sort")
+                .compact()
+                .tab("Constraint")
+                .tab("Entity")
+                .selected(usize::from(state.by_entity))
+                .build(t),
             SortTabs,
         ))
         .entry::<Node>()
@@ -631,13 +774,29 @@ fn manager_body(
             border_radius: BorderRadius::all(Val::Px(2.0)),
             ..default()
         },
-        BackgroundColor(if filled { t.selection_field_active } else { t.background }),
-        BorderColor::all(if filled { t.selection_field_active_border } else { Color::srgb_u8(0xd0, 0xd4, 0xd8) }),
+        BackgroundColor(if filled {
+            t.selection_field_active
+        } else {
+            t.background
+        }),
+        BorderColor::all(if filled {
+            t.selection_field_active_border
+        } else {
+            Color::srgb_u8(0xd0, 0xd4, 0xd8)
+        }),
     ))
     .with_children(|l| {
         l.spawn((
-            t.text("Entities and constraints", 10.0, FontWeight::NORMAL, Color::srgb_u8(0x3d, 0x4b, 0x52)),
-            Node { margin: UiRect::new(Val::Px(3.0), Val::ZERO, Val::ZERO, Val::Px(2.0)), ..default() },
+            t.text(
+                "Entities and constraints",
+                10.0,
+                FontWeight::NORMAL,
+                Color::srgb_u8(0x3d, 0x4b, 0x52),
+            ),
+            Node {
+                margin: UiRect::new(Val::Px(3.0), Val::ZERO, Val::ZERO, Val::Px(2.0)),
+                ..default()
+            },
             Pickable::IGNORE,
         ));
         if state.by_entity {
@@ -653,14 +812,24 @@ fn manager_body(
             for e in entities {
                 let ename = names.name(e);
                 let row = format!("cm-entity-{}", slug(&ename));
-                let error = items.iter().any(|i| i.entities.contains(&e) && i.status == Status::Error);
+                let error = items
+                    .iter()
+                    .any(|i| i.entities.contains(&e) && i.status == Status::Error);
                 l.spawn((
                     ActionRow::new(row.clone(), ename)
-                        .icon(icons.iter().find(|(x, _)| *x == e).map_or("line", |(_, i)| *i))
+                        .icon(
+                            icons
+                                .iter()
+                                .find(|(x, _)| *x == e)
+                                .map_or("line", |(_, i)| *i),
+                        )
                         .header(true)
                         .error(error)
                         .build(t),
-                    ManagerRow { item: None, entities: vec![e] },
+                    ManagerRow {
+                        item: None,
+                        entities: vec![e],
+                    },
                 ));
                 for i in items.iter().filter(|i| i.entities.contains(&e)) {
                     l.spawn((
@@ -670,7 +839,10 @@ fn manager_body(
                             .error(i.status == Status::Error)
                             .action("delete", "delete", "Delete", i.deletable())
                             .build(t),
-                        ManagerRow { item: Some(i.id), entities: i.entities.clone() },
+                        ManagerRow {
+                            item: Some(i.id),
+                            entities: i.entities.clone(),
+                        },
                     ));
                 }
             }
@@ -682,16 +854,34 @@ fn manager_body(
                         .icon(type_icon(i.ty))
                         .header(true)
                         .error(i.status == Status::Error)
-                        .action("delete", "delete", if i.deletable() { "Delete" } else { "Shared end: drag the ends apart to separate them" }, i.deletable())
+                        .action(
+                            "delete",
+                            "delete",
+                            if i.deletable() {
+                                "Delete"
+                            } else {
+                                "Shared end: drag the ends apart to separate them"
+                            },
+                            i.deletable(),
+                        )
                         .action("dismiss", "close", "Remove from the list", true)
                         .build(t),
-                    ManagerRow { item: Some(i.id), entities: i.entities.clone() },
+                    ManagerRow {
+                        item: Some(i.id),
+                        entities: i.entities.clone(),
+                    },
                 ));
                 for e in &i.entities {
                     let ename = names.name(*e);
                     l.spawn((
-                        ActionRow::new(format!("{row}-{}", slug(&ename)), ename).indent(14.0).height(17.0).build(t),
-                        ManagerRow { item: None, entities: vec![*e] },
+                        ActionRow::new(format!("{row}-{}", slug(&ename)), ename)
+                            .indent(14.0)
+                            .height(17.0)
+                            .build(t),
+                        ManagerRow {
+                            item: None,
+                            entities: vec![*e],
+                        },
                     ));
                 }
             }
@@ -699,33 +889,60 @@ fn manager_body(
     });
     // Delete all: red, centred (pale while there is nothing to delete, `ex1-step4.png`).
     let any = items.iter().any(Item::deletable);
-    b.spawn(Node { justify_content: JustifyContent::Center, margin: UiRect::top(Val::Px(8.0)), ..default() })
-        .with_children(|r| {
-            let mut v = cadrs_ui::button::visuals_for(t, cadrs_ui::ButtonVariant::Primary);
-            let red = Color::srgb_u8(0xc6, 0x28, 0x28);
-            v.background = cadrs_ui::StateColors::new(red, red.darker(0.05), red.darker(0.1), Color::srgb_u8(0xe8, 0xa9, 0xa9));
-            v.border = v.background;
-            r.spawn((
-                cadrs_ui::Button::new("cm-delete-all").label("Delete all").small().disabled(!any).tooltip("Delete every constraint listed").build(t),
-                observe(|_: On<Activate>, mut commands: Commands| {
-                    commands.queue(delete_all_shown);
-                }),
-            ))
-            .insert(v);
-        });
-    help_row(b, t, "constraint-manager-help", "Constraint manager: lists the sketch's constraints and dimensions");
+    b.spawn(Node {
+        justify_content: JustifyContent::Center,
+        margin: UiRect::top(Val::Px(8.0)),
+        ..default()
+    })
+    .with_children(|r| {
+        let mut v = cadrs_ui::button::visuals_for(t, cadrs_ui::ButtonVariant::Primary);
+        let red = Color::srgb_u8(0xc6, 0x28, 0x28);
+        v.background = cadrs_ui::StateColors::new(
+            red,
+            red.darker(0.05),
+            red.darker(0.1),
+            Color::srgb_u8(0xe8, 0xa9, 0xa9),
+        );
+        v.border = v.background;
+        r.spawn((
+            cadrs_ui::Button::new("cm-delete-all")
+                .label("Delete all")
+                .small()
+                .disabled(!any)
+                .tooltip("Delete every constraint listed")
+                .build(t),
+            observe(|_: On<Activate>, mut commands: Commands| {
+                commands.queue(delete_all_shown);
+            }),
+        ))
+        .insert(v);
+    });
+    help_row(
+        b,
+        t,
+        "constraint-manager-help",
+        "Constraint manager: lists the sketch's constraints and dimensions",
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
 // Interaction
 
-fn on_switch(ev: On<SwitchChange>, q: Query<(), With<AutoSelectSwitch>>, mut state: ResMut<DiagnosticsState>) {
+fn on_switch(
+    ev: On<SwitchChange>,
+    q: Query<(), With<AutoSelectSwitch>>,
+    mut state: ResMut<DiagnosticsState>,
+) {
     if q.contains(ev.entity) {
         state.auto_select = ev.on;
     }
 }
 
-fn on_sort_tab(ev: On<TabStripSelect>, q: Query<(), With<SortTabs>>, mut state: ResMut<DiagnosticsState>) {
+fn on_sort_tab(
+    ev: On<TabStripSelect>,
+    q: Query<(), With<SortTabs>>,
+    mut state: ResMut<DiagnosticsState>,
+) {
     if q.contains(ev.entity) {
         state.by_entity = ev.index == 1;
     }
@@ -767,7 +984,12 @@ fn on_row_activate(
 }
 
 /// A row's trash (delete it: one undo step) or × (drop it from the list).
-fn on_row_action(ev: On<ActionRowAction>, q_row: Query<&ManagerRow>, mut state: ResMut<DiagnosticsState>, mut commands: Commands) {
+fn on_row_action(
+    ev: On<ActionRowAction>,
+    q_row: Query<&ManagerRow>,
+    mut state: ResMut<DiagnosticsState>,
+    mut commands: Commands,
+) {
     let Ok(r) = q_row.get(ev.entity) else { return };
     let Some(id) = r.item else { return };
     match ev.action.as_str() {
@@ -787,21 +1009,39 @@ fn on_row_action(ev: On<ActionRowAction>, q_row: Query<&ManagerRow>, mut state: 
 }
 
 /// Deletes constraints and dimensions of the sketch being edited as one undoable step.
-fn delete_records(world: &mut World, constraints: Vec<cadrs_sketch::ConstraintId>, dimensions: Vec<cadrs_sketch::DimensionId>) {
+fn delete_records(
+    world: &mut World,
+    constraints: Vec<cadrs_sketch::ConstraintId>,
+    dimensions: Vec<cadrs_sketch::DimensionId>,
+) {
     if constraints.is_empty() && dimensions.is_empty() {
         return;
     }
-    let Some(s) = world.get_resource::<SketchSession>() else { return };
+    let Some(s) = world.get_resource::<SketchSession>() else {
+        return;
+    };
     let (element, feature) = (s.element, s.feature);
-    world.resource_mut::<SketchSelection>().0.retain(|e| match e {
-        SketchEntity::Constraint(k) => !constraints.contains(k),
-        SketchEntity::Dimension(k) => !dimensions.contains(k),
-        _ => true,
-    });
+    world
+        .resource_mut::<SketchSelection>()
+        .0
+        .retain(|e| match e {
+            SketchEntity::Constraint(k) => !constraints.contains(k),
+            SketchEntity::Dimension(k) => !dimensions.contains(k),
+            _ => true,
+        });
     let label_n = constraints.len() + dimensions.len();
     if let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() {
-        let op = SketchOp::Delete { curves: vec![], points: vec![], dimensions, constraints };
-        if let Err(e) = doc.execute(&cadrs_core::commands::EditSketch { element, feature, op }) {
+        let op = SketchOp::Delete {
+            curves: vec![],
+            points: vec![],
+            dimensions,
+            constraints,
+        };
+        if let Err(e) = doc.execute(&cadrs_core::commands::EditSketch {
+            element,
+            feature,
+            op,
+        }) {
             warn!("cannot delete {label_n} constraints: {e}");
         }
     }
@@ -811,9 +1051,14 @@ fn delete_records(world: &mut World, constraints: Vec<cadrs_sketch::ConstraintId
 fn delete_all_shown(world: &mut World) {
     let state = world.resource::<DiagnosticsState>().clone();
     let selection = world.resource::<SketchSelection>().clone();
-    let conflicting: Vec<cadrs_sketch::solve::Source> =
-        world.resource::<crate::sketch_constrain::SketchAnalysis>().analysis.conflict_set.clone();
-    let Some(sketch) = crate::sketch_tools::world_sketch(world).cloned() else { return };
+    let conflicting: Vec<cadrs_sketch::solve::Source> = world
+        .resource::<crate::sketch_constrain::SketchAnalysis>()
+        .analysis
+        .conflict_set
+        .clone();
+    let Some(sketch) = crate::sketch_tools::world_sketch(world).cloned() else {
+        return;
+    };
     let items = shown_items(&sketch, &conflicting, &state, &selection);
     let refs: Vec<&Item> = items.iter().collect();
     let (constraints, dimensions) = diagnostics::deletion(&refs);
@@ -821,7 +1066,9 @@ fn delete_all_shown(world: &mut World) {
 }
 
 fn step_loose_end(world: &mut World, step: i32) {
-    let Some(sketch) = crate::sketch_tools::world_sketch(world) else { return };
+    let Some(sketch) = crate::sketch_tools::world_sketch(world) else {
+        return;
+    };
     let n = diagnostics::loose_ends(sketch).len();
     if n == 0 {
         return;
@@ -839,14 +1086,25 @@ fn step_loose_end(world: &mut World, step: i32) {
 /// Zooms the view to loose-end group `i`: centred right of the panels, a 5 mm box (or the
 /// group, if larger) filling half the view.
 fn zoom_to_loose_end(world: &mut World, i: usize) {
-    let Some(sketch) = crate::sketch_tools::world_sketch(world) else { return };
-    let Some(g) = diagnostics::loose_ends(sketch).get(i).cloned() else { return };
-    let Some(plane) = crate::sketch_tools::session_plane(world.get_resource::<SketchSession>(), world.get_resource::<ActiveDocument>()) else {
+    let Some(sketch) = crate::sketch_tools::world_sketch(world) else {
+        return;
+    };
+    let Some(g) = diagnostics::loose_ends(sketch).get(i).cloned() else {
+        return;
+    };
+    let Some(plane) = crate::sketch_tools::session_plane(
+        world.get_resource::<SketchSession>(),
+        world.get_resource::<ActiveDocument>(),
+    ) else {
         return;
     };
     let frame = plane.frame();
     let c = g.center();
-    let extent = g.ends.iter().map(|e| e.pos.distance(c)).fold(0.0_f64, f64::max);
+    let extent = g
+        .ends
+        .iter()
+        .map(|e| e.pos.distance(c))
+        .fold(0.0_f64, f64::max);
     let half = extent.max(2.5);
     let pts: Vec<Vec3> = [(-half, -half), (half, half), (-half, half), (half, -half)]
         .into_iter()
@@ -854,7 +1112,9 @@ fn zoom_to_loose_end(world: &mut World, i: usize) {
         .collect();
     let size = world.resource::<crate::viewport::ViewportRect>().0.size();
     let mut view = world.resource_mut::<crate::viewport::ViewportView>();
-    let to = view.target().fitted_beside(&pts, size, 0.5, PANEL_WIDTH + 12.0);
+    let to = view
+        .target()
+        .fitted_beside(&pts, size, 0.5, PANEL_WIDTH + 12.0);
     view.animate_to(to);
 }
 
@@ -904,7 +1164,8 @@ fn configure_diagnostic_gizmos(mut store: ResMut<bevy::gizmos::config::GizmoConf
     config.line.width = 4.0;
     config.line.joints = bevy::gizmos::config::GizmoLineJoint::Round(4);
     config.depth_bias = -1.0;
-    config.render_layers = bevy::camera::visibility::RenderLayers::layer(crate::viewport::OVERLAY_LAYER);
+    config.render_layers =
+        bevy::camera::visibility::RenderLayers::layer(crate::viewport::OVERLAY_LAYER);
 }
 
 /// Red dots on the loose ends while the Profile inspector is open (`ex1-step7.png`), and the
@@ -918,7 +1179,12 @@ fn draw_diagnostics(
     mut dots: Gizmos<crate::sketch_draw::SketchDotGizmos>,
     mut band: Gizmos<DiagnosticGizmos>,
 ) {
-    let (Some(map), Some(sketch)) = (screen.active, session_sketch(session.as_deref(), doc.as_deref())) else { return };
+    let (Some(map), Some(sketch)) = (
+        screen.active,
+        session_sketch(session.as_deref(), doc.as_deref()),
+    ) else {
+        return;
+    };
     let frame = map.plane.frame();
     let ppm = map.px_per_mm();
     let n = frame.normal();
@@ -927,12 +1193,17 @@ fn draw_diagnostics(
         let red = Color::srgb_u8(0xe0, 0x1b, 0x1b);
         for (gi, g) in diagnostics::loose_ends(sketch).iter().enumerate() {
             // Bubbles about 13 px across (`ex1-step7.png`), the selected group's larger.
-            let r = if state.loose_index == Some(gi) { 7.5 } else { 6.5 };
+            let r = if state.loose_index == Some(gi) {
+                7.5
+            } else {
+                6.5
+            };
             for e in &g.ends {
                 // A filled red disc: rings from the centre out.
                 let mut k = 0.8;
                 while k <= r {
-                    dots.circle(Isometry3d::new(world_of(&frame, e.pos), rot), k / ppm, red).resolution(18);
+                    dots.circle(Isometry3d::new(world_of(&frame, e.pos), rot), k / ppm, red)
+                        .resolution(18);
                     k += 1.2;
                 }
             }
@@ -946,7 +1217,12 @@ fn draw_diagnostics(
                 band.linestrip(pts.iter().map(|p| world_of(&frame, *p)), orange);
             }
             EntityRef::Point(p) if sketch.points.contains_key(p) => {
-                band.circle(Isometry3d::new(world_of(&frame, sketch.pos(p)), rot), 5.0 / ppm, orange).resolution(16);
+                band.circle(
+                    Isometry3d::new(world_of(&frame, sketch.pos(p)), rot),
+                    5.0 / ppm,
+                    orange,
+                )
+                .resolution(16);
             }
             _ => {}
         }

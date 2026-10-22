@@ -62,7 +62,9 @@ impl DiskStore {
     /// Removes the blobs not used for `max_age`, then the least recently used ones while the
     /// folder holds more than `max_bytes`; and writes interrupted long ago.
     pub fn prune(&self, max_age: Duration, max_bytes: u64) {
-        let Ok(entries) = std::fs::read_dir(&self.dir) else { return };
+        let Ok(entries) = std::fs::read_dir(&self.dir) else {
+            return;
+        };
         let now = SystemTime::now();
         let mut kept: Vec<(SystemTime, u64, PathBuf)> = Vec::new();
         for e in entries.flatten() {
@@ -71,7 +73,12 @@ impl DiskStore {
             let used = meta.modified().unwrap_or(now);
             let old = now.duration_since(used).is_ok_and(|age| age > max_age);
             let blob = path.extension().is_some_and(|x| x == "blob");
-            if old || (!blob && now.duration_since(used).is_ok_and(|age| age > Duration::from_secs(3600))) {
+            if old
+                || (!blob
+                    && now
+                        .duration_since(used)
+                        .is_ok_and(|age| age > Duration::from_secs(3600)))
+            {
                 let _ = std::fs::remove_file(&path);
             } else if blob {
                 kept.push((used, meta.len(), path));
@@ -94,7 +101,10 @@ impl BlobStore for DiskStore {
     fn get(&self, key: &BlobKey) -> Option<Vec<u8>> {
         let path = self.path(key);
         let bytes = std::fs::read(&path).ok()?;
-        let _ = std::fs::File::options().write(true).open(&path).and_then(|f| f.set_modified(SystemTime::now()));
+        let _ = std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .and_then(|f| f.set_modified(SystemTime::now()));
         Some(bytes)
     }
 
@@ -130,11 +140,17 @@ mod tests {
         s.put(&b, b"second, longer");
         assert_eq!(s.get(&a).as_deref(), Some(&b"first"[..]));
         // Over the size limit: the least recently used goes first.
-        let _ = std::fs::File::options().write(true).open(s.path(&b)).and_then(|f| f.set_modified(SystemTime::now() - Duration::from_secs(60)));
+        let _ = std::fs::File::options()
+            .write(true)
+            .open(s.path(&b))
+            .and_then(|f| f.set_modified(SystemTime::now() - Duration::from_secs(60)));
         s.prune(Duration::from_secs(3600), 10);
         assert!(s.get(&a).is_some() && s.get(&b).is_none());
         // Unused for longer than the age limit: gone.
-        let _ = std::fs::File::options().write(true).open(s.path(&a)).and_then(|f| f.set_modified(SystemTime::now() - Duration::from_secs(7200)));
+        let _ = std::fs::File::options()
+            .write(true)
+            .open(s.path(&a))
+            .and_then(|f| f.set_modified(SystemTime::now() - Duration::from_secs(7200)));
         s.prune(Duration::from_secs(3600), u64::MAX);
         assert!(s.get(&a).is_none());
         let _ = std::fs::remove_dir_all(&dir);

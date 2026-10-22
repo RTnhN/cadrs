@@ -14,19 +14,41 @@ pub enum Projected {
     Line(Vec2, Vec2),
     Circle(Vec2, f64),
     /// Counter-clockwise from `start` to `end` around `center`.
-    Arc { center: Vec2, start: Vec2, end: Vec2 },
+    Arc {
+        center: Vec2,
+        start: Vec2,
+        end: Vec2,
+    },
     /// An ellipse: center, the end of its major semi-axis, its minor radius (a circle seen at
     /// an angle).
-    Ellipse { center: Vec2, major: Vec2, minor: f64 },
+    Ellipse {
+        center: Vec2,
+        major: Vec2,
+        minor: f64,
+    },
     /// The curve `distance` outside such an ellipse (P3.7: a part edge made from an offset
     /// ellipse).
-    EllipseOffset { center: Vec2, major: Vec2, minor: f64, distance: f64 },
+    EllipseOffset {
+        center: Vec2,
+        major: Vec2,
+        minor: f64,
+        distance: f64,
+    },
     /// Part of such an ellipse (an arc seen at an angle), from `start` counter-clockwise to
     /// `end`; `minor` is positive.
-    EllipseArc { center: Vec2, major: Vec2, minor: f64, start: Vec2, end: Vec2 },
+    EllipseArc {
+        center: Vec2,
+        major: Vec2,
+        minor: f64,
+        start: Vec2,
+        end: Vec2,
+    },
     /// Any other curve (a spline edge, a cylinder's edge cut at a slant): the spline through
     /// these points on it, in order (a closed curve lists each once).
-    Spline { points: Vec<Vec2>, closed: bool },
+    Spline {
+        points: Vec<Vec2>,
+        closed: bool,
+    },
     /// A point (a pierce).
     Point(Vec2),
 }
@@ -51,12 +73,24 @@ impl Projected {
             Projected::Arc { center, start, end } => {
                 center.distance(start) < 1e-6 || start.distance(end) < 1e-6
             }
-            Projected::Ellipse { center, major, minor } | Projected::EllipseOffset { center, major, minor, .. } => {
-                center.distance(major) < 1e-6 || minor.abs() < 1e-6
+            Projected::Ellipse {
+                center,
+                major,
+                minor,
             }
-            Projected::EllipseArc { center, major, minor, start, end } => {
-                center.distance(major) < 1e-6 || minor.abs() < 1e-6 || start.distance(end) < 1e-6
-            }
+            | Projected::EllipseOffset {
+                center,
+                major,
+                minor,
+                ..
+            } => center.distance(major) < 1e-6 || minor.abs() < 1e-6,
+            Projected::EllipseArc {
+                center,
+                major,
+                minor,
+                start,
+                end,
+            } => center.distance(major) < 1e-6 || minor.abs() < 1e-6 || start.distance(end) < 1e-6,
             Projected::Spline { ref points, closed } => {
                 points.len() < if closed { 3 } else { 2 }
                     || points.windows(2).map(|w| w[0].distance(w[1])).sum::<f64>() < 1e-6
@@ -72,7 +106,11 @@ impl Sketch {
     /// curve). Returns the new curve, or `None` if the link is used already or the shape is a
     /// point.
     pub fn add_projected(&mut self, shape: Projected, link: Link) -> Option<CurveId> {
-        if self.constraints.values().any(|c| matches!(c, ConstraintOf::Use(_, l) if *l == link)) {
+        if self
+            .constraints
+            .values()
+            .any(|c| matches!(c, ConstraintOf::Use(_, l) if *l == link))
+        {
             return None;
         }
         if shape.degenerate() {
@@ -81,13 +119,26 @@ impl Sketch {
         if let Projected::Spline { points, closed } = &shape {
             let ids: Vec<PointId> = points.iter().map(|p| self.add_point(*p)).collect();
             let (start, end) = (ids[0], if *closed { ids[0] } else { ids[ids.len() - 1] });
-            let id = self.curves.insert(Curve { kind: CurveKind::Spline { start, end }, construction: false });
-            let (t0, t1) = if *closed { (None, None) } else { crate::spline::end_derivatives(points) };
+            let id = self.curves.insert(Curve {
+                kind: CurveKind::Spline { start, end },
+                construction: false,
+            });
+            let (t0, t1) = if *closed {
+                (None, None)
+            } else {
+                crate::spline::end_derivatives(points)
+            };
             self.splines.insert(
                 id,
-                crate::spline::SplineData { points: ids, periodic: *closed, start_tangent: t0, end_tangent: t1 },
+                crate::spline::SplineData {
+                    points: ids,
+                    periodic: *closed,
+                    start_tangent: t0,
+                    end_tangent: t1,
+                },
             );
-            self.constraints.insert(ConstraintOf::Use(CurveRef::Curve(id), link));
+            self.constraints
+                .insert(ConstraintOf::Use(CurveRef::Curve(id), link));
             return Some(id);
         }
         let kind = match shape {
@@ -105,18 +156,33 @@ impl Sketch {
                 start: self.add_point(start),
                 end: self.add_point(end),
             },
-            Projected::Ellipse { center, major, minor } => CurveKind::Ellipse {
+            Projected::Ellipse {
+                center,
+                major,
+                minor,
+            } => CurveKind::Ellipse {
                 center: self.add_point(center),
                 major: self.add_point(major),
                 minor,
             },
-            Projected::EllipseOffset { center, major, minor, distance } => CurveKind::EllipseOffset {
+            Projected::EllipseOffset {
+                center,
+                major,
+                minor,
+                distance,
+            } => CurveKind::EllipseOffset {
                 center: self.add_point(center),
                 major: self.add_point(major),
                 minor,
                 distance,
             },
-            Projected::EllipseArc { center, major, minor, start, end } => CurveKind::EllipseArc {
+            Projected::EllipseArc {
+                center,
+                major,
+                minor,
+                start,
+                end,
+            } => CurveKind::EllipseArc {
                 center: self.add_point(center),
                 major: self.add_point(major),
                 minor,
@@ -129,7 +195,8 @@ impl Sketch {
             kind,
             construction: false,
         });
-        self.constraints.insert(ConstraintOf::Use(CurveRef::Curve(id), link));
+        self.constraints
+            .insert(ConstraintOf::Use(CurveRef::Curve(id), link));
         Some(id)
     }
 
@@ -140,7 +207,8 @@ impl Sketch {
             return None;
         }
         let p = self.add_point(at);
-        self.constraints.insert(ConstraintOf::Pierce(PointRef::Point(p), link));
+        self.constraints
+            .insert(ConstraintOf::Pierce(PointRef::Point(p), link));
         Some(p)
     }
 
@@ -184,27 +252,63 @@ impl Sketch {
                 moves = vec![(center, p)];
                 scalar = Some(r);
             }
-            (CurveKind::Arc { center, start, end }, Projected::Arc { center: c0, start: s0, end: e0 }) => {
+            (
+                CurveKind::Arc { center, start, end },
+                Projected::Arc {
+                    center: c0,
+                    start: s0,
+                    end: e0,
+                },
+            ) => {
                 moves = vec![(center, c0), (start, s0), (end, e0)];
             }
-            (CurveKind::Ellipse { center, major, .. }, Projected::Ellipse { center: c0, major: m0, minor }) => {
+            (
+                CurveKind::Ellipse { center, major, .. },
+                Projected::Ellipse {
+                    center: c0,
+                    major: m0,
+                    minor,
+                },
+            ) => {
                 moves = vec![(center, c0), (major, m0)];
                 scalar = Some(minor);
             }
             (
-                CurveKind::EllipseArc { center, major, start, end, .. },
-                Projected::EllipseArc { center: c0, major: m0, minor, start: s0, end: e0 },
+                CurveKind::EllipseArc {
+                    center,
+                    major,
+                    start,
+                    end,
+                    ..
+                },
+                Projected::EllipseArc {
+                    center: c0,
+                    major: m0,
+                    minor,
+                    start: s0,
+                    end: e0,
+                },
             ) => {
                 moves = vec![(center, c0), (major, m0), (start, s0), (end, e0)];
                 scalar = Some(minor);
             }
             (
                 CurveKind::EllipseOffset { center, major, .. },
-                Projected::EllipseOffset { center: c0, major: m0, minor, distance },
+                Projected::EllipseOffset {
+                    center: c0,
+                    major: m0,
+                    minor,
+                    distance,
+                },
             ) => {
                 moves = vec![(center, c0), (major, m0)];
                 if let Some(k) = self.curves.get_mut(curve) {
-                    k.kind = CurveKind::EllipseOffset { center, major, minor, distance };
+                    k.kind = CurveKind::EllipseOffset {
+                        center,
+                        major,
+                        minor,
+                        distance,
+                    };
                 }
             }
             _ => return false,
@@ -225,7 +329,9 @@ impl Sketch {
     /// Moves a projected spline through its source's points as they are now: its points move
     /// (the ends stay the ends), and points are added or dropped if there are more or fewer.
     fn set_projected_spline(&mut self, curve: CurveId, points: &[Vec2], closed: bool) -> bool {
-        let Some(old) = self.splines.get(curve).cloned() else { return false };
+        let Some(old) = self.splines.get(curve).cloned() else {
+            return false;
+        };
         if old.periodic != closed || points.len() < 2 {
             return false;
         }
@@ -255,13 +361,22 @@ impl Sketch {
             ids.push(id);
         }
         let (start, end) = (ids[0], if closed { ids[0] } else { ids[n - 1] });
-        let (t0, t1) = if closed { (None, None) } else { crate::spline::end_derivatives(points) };
+        let (t0, t1) = if closed {
+            (None, None)
+        } else {
+            crate::spline::end_derivatives(points)
+        };
         if let Some(k) = self.curves.get_mut(curve) {
             k.kind = CurveKind::Spline { start, end };
         }
         self.splines.insert(
             curve,
-            crate::spline::SplineData { points: ids.clone(), periodic: closed, start_tangent: t0, end_tangent: t1 },
+            crate::spline::SplineData {
+                points: ids.clone(),
+                periodic: closed,
+                start_tangent: t0,
+                end_tangent: t1,
+            },
         );
         for p in old.points {
             if !ids.contains(&p) && !self.point_in_use(p) {
@@ -281,7 +396,9 @@ impl Sketch {
     /// Replaces the link of a Use or Pierce constraint (a reference repaired after a rebuild
     /// renamed its source). Other constraints are left alone.
     pub fn set_link(&mut self, k: ConstraintId, link: Link) {
-        if let Some(ConstraintOf::Use(_, l) | ConstraintOf::Pierce(_, l)) = self.constraints.get_mut(k) {
+        if let Some(ConstraintOf::Use(_, l) | ConstraintOf::Pierce(_, l)) =
+            self.constraints.get_mut(k)
+        {
             *l = link;
         }
     }
@@ -291,7 +408,9 @@ impl Sketch {
         self.constraints
             .iter()
             .filter_map(|(k, c)| match *c {
-                ConstraintOf::Use(CurveRef::Curve(curve), l) => Some((k, LinkTarget::Curve(curve), l)),
+                ConstraintOf::Use(CurveRef::Curve(curve), l) => {
+                    Some((k, LinkTarget::Curve(curve), l))
+                }
                 ConstraintOf::Pierce(PointRef::Point(p), l) => Some((k, LinkTarget::Point(p), l)),
                 _ => None,
             })
@@ -393,8 +512,13 @@ mod tests {
             .add_projected(Projected::Line(Vec2::ZERO, Vec2::new(10.0, 0.0)), link(1))
             .unwrap();
         // The same link twice is one curve.
-        assert!(s.add_projected(Projected::Line(Vec2::ZERO, Vec2::new(10.0, 0.0)), link(1)).is_none());
-        let c = s.add_projected(Projected::Circle(Vec2::new(5.0, 5.0), 2.0), link(2)).unwrap();
+        assert!(
+            s.add_projected(Projected::Line(Vec2::ZERO, Vec2::new(10.0, 0.0)), link(1))
+                .is_none()
+        );
+        let c = s
+            .add_projected(Projected::Circle(Vec2::new(5.0, 5.0), 2.0), link(2))
+            .unwrap();
         let a = solve::analyze(&s);
         assert!(a.fully_constrained(), "{a:?}");
         // The source moves: the projection follows.
@@ -403,7 +527,12 @@ mod tests {
         assert_eq!(s.line_length(l), Some(20.0));
         assert!(!s.set_projected(c, Projected::Line(Vec2::ZERO, Vec2::new(1.0, 0.0))));
         // Deleting the link constraint frees the geometry.
-        let k = s.links().into_iter().find(|(_, t, _)| *t == LinkTarget::Curve(l)).unwrap().0;
+        let k = s
+            .links()
+            .into_iter()
+            .find(|(_, t, _)| *t == LinkTarget::Curve(l))
+            .unwrap()
+            .0;
         s.constraints.remove(k);
         assert!(!s.is_projected(l));
         assert!(solve::analyze(&s).dof > 0);
@@ -411,11 +540,19 @@ mod tests {
 
     #[test]
     fn arcs_through_three_points_turn_counter_clockwise() {
-        let p = Projected::arc_through(Vec2::new(1.0, 0.0), Vec2::new(0.0, -1.0), Vec2::new(-1.0, 0.0))
-            .unwrap();
-        let Projected::Arc { center, start, end } = p else { panic!() };
+        let p = Projected::arc_through(
+            Vec2::new(1.0, 0.0),
+            Vec2::new(0.0, -1.0),
+            Vec2::new(-1.0, 0.0),
+        )
+        .unwrap();
+        let Projected::Arc { center, start, end } = p else {
+            panic!()
+        };
         assert!(center.distance(Vec2::ZERO) < 1e-9);
         // Clockwise through the bottom: stored counter-clockwise from (-1, 0) to (1, 0).
-        assert!(start.distance(Vec2::new(-1.0, 0.0)) < 1e-9 && end.distance(Vec2::new(1.0, 0.0)) < 1e-9);
+        assert!(
+            start.distance(Vec2::new(-1.0, 0.0)) < 1e-9 && end.distance(Vec2::new(1.0, 0.0)) < 1e-9
+        );
     }
 }

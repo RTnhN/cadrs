@@ -260,8 +260,12 @@ fn host_anchor(s: &Sketch, map: &ScreenMap, host: Host) -> Option<Vec2> {
         Host::Point(PointRef::Origin) => Some(map.to_screen(SVec2::ZERO)),
         Host::Curve(c) => {
             let pts = curve_polyline(s, c);
-            let lo = pts.iter().fold(SVec2::new(f64::MAX, f64::MAX), |a, p| a.min(*p));
-            let hi = pts.iter().fold(SVec2::new(f64::MIN, f64::MIN), |a, p| a.max(*p));
+            let lo = pts
+                .iter()
+                .fold(SVec2::new(f64::MAX, f64::MAX), |a, p| a.min(*p));
+            let hi = pts
+                .iter()
+                .fold(SVec2::new(f64::MIN, f64::MIN), |a, p| a.max(*p));
             (!pts.is_empty()).then(|| map.to_screen((lo + hi) * 0.5))
         }
     }
@@ -372,7 +376,8 @@ pub fn glyph_groups(s: &Sketch) -> Vec<(Host, Vec<GroupGlyph>)> {
             // corner.
             Some((Host::Point(_), v))
                 if icon == GlyphIcon::Coincident
-                    && v.iter().any(|(i, e, _)| *i == GlyphIcon::Coincident && *e == external) =>
+                    && v.iter()
+                        .any(|(i, e, _)| *i == GlyphIcon::Coincident && *e == external) =>
             {
                 if let Some(g) = v
                     .iter_mut()
@@ -394,8 +399,12 @@ pub fn glyph_groups(s: &Sketch) -> Vec<(Host, Vec<GroupGlyph>)> {
         _ => None,
     };
     let is_line = |c: CurveRef| matches!(kind(c), Some(CurveKind::Line { .. }));
-    let is_round =
-        |c: CurveRef| matches!(kind(c), Some(CurveKind::Circle { .. } | CurveKind::Arc { .. }));
+    let is_round = |c: CurveRef| {
+        matches!(
+            kind(c),
+            Some(CurveKind::Circle { .. } | CurveKind::Arc { .. })
+        )
+    };
     let center = |c: CurveRef| match kind(c) {
         Some(CurveKind::Circle { center, .. } | CurveKind::Arc { center, .. }) => Some(center),
         _ => None,
@@ -463,7 +472,12 @@ pub fn glyph_groups(s: &Sketch) -> Vec<(Host, Vec<GroupGlyph>)> {
                     && let (Some((a0, a1)), Some((b0, b1))) = (s.curve_ends(a), s.curve_ends(b))
                     && let Some(p) = [a0, a1].into_iter().find(|p| *p == b0 || *p == b1)
                 {
-                    add(Host::Point(PointRef::Point(p)), GlyphIcon::Curvature, false, id);
+                    add(
+                        Host::Point(PointRef::Point(p)),
+                        GlyphIcon::Curvature,
+                        false,
+                        id,
+                    );
                 }
             }
             ConstraintOf::Tangent(a, b) => {
@@ -475,11 +489,21 @@ pub fn glyph_groups(s: &Sketch) -> Vec<(Host, Vec<GroupGlyph>)> {
                     _ => None,
                 };
                 match shared {
-                    Some(p) => add(Host::Point(PointRef::Point(p)), GlyphIcon::Tangent, false, id),
+                    Some(p) => add(
+                        Host::Point(PointRef::Point(p)),
+                        GlyphIcon::Tangent,
+                        false,
+                        id,
+                    ),
                     None => {
                         // Not touching at an end: on the circle or arc (on the line, near
                         // where it touches, for an ellipse: Final re-audit, S8).
-                        let ellipse = |c: CurveRef| matches!(kind(c), Some(CurveKind::Ellipse { .. } | CurveKind::EllipseOffset { .. }));
+                        let ellipse = |c: CurveRef| {
+                            matches!(
+                                kind(c),
+                                Some(CurveKind::Ellipse { .. } | CurveKind::EllipseOffset { .. })
+                            )
+                        };
                         let round = if ellipse(a) || ellipse(b) {
                             if is_line(a) { a } else { b }
                         } else if is_round(a) {
@@ -512,7 +536,12 @@ pub fn glyph_groups(s: &Sketch) -> Vec<(Host, Vec<GroupGlyph>)> {
             }
             ConstraintOf::Concentric(a, _) => {
                 if let Some(p) = center(a) {
-                    add(Host::Point(PointRef::Point(p)), GlyphIcon::Concentric, false, id);
+                    add(
+                        Host::Point(PointRef::Point(p)),
+                        GlyphIcon::Concentric,
+                        false,
+                        id,
+                    );
                 }
             }
             ConstraintOf::FixPoint(p) => add(Host::Point(p), GlyphIcon::Fix, false, id),
@@ -534,9 +563,13 @@ pub fn glyph_groups(s: &Sketch) -> Vec<(Host, Vec<GroupGlyph>)> {
                 }
             }
             // The link of a projected curve sits on it (S20.2: it can be deleted).
-            ConstraintOf::Use(CurveRef::Curve(k), _) => add(Host::Curve(k), GlyphIcon::Use, true, id),
+            ConstraintOf::Use(CurveRef::Curve(k), _) => {
+                add(Host::Curve(k), GlyphIcon::Use, true, id)
+            }
             // A used part vertex is a projected point: the Use link.
-            ConstraintOf::Pierce(p, cadrs_sketch::Link::Vertex { .. }) => add(Host::Point(p), GlyphIcon::Use, true, id),
+            ConstraintOf::Pierce(p, cadrs_sketch::Link::Vertex { .. }) => {
+                add(Host::Point(p), GlyphIcon::Use, true, id)
+            }
             ConstraintOf::Pierce(p, _) => add(Host::Point(p), GlyphIcon::Pierce, true, id),
             // The offset chain's shared distance and a rectangle's center are not drawn.
             ConstraintOf::EqualOffset(..)
@@ -562,14 +595,19 @@ pub fn glyph_groups(s: &Sketch) -> Vec<(Host, Vec<GroupGlyph>)> {
 
 /// The corner a line's glyph group belongs near: when the group is only ⊥ glyphs, each to a
 /// line that meets this one at the same end, that end.
-fn perpendicular_corner(s: &Sketch, line: CurveId, icons: &[GroupGlyph]) -> Option<cadrs_sketch::PointId> {
+fn perpendicular_corner(
+    s: &Sketch,
+    line: CurveId,
+    icons: &[GroupGlyph],
+) -> Option<cadrs_sketch::PointId> {
     let (a, b) = s.curve_ends(line)?;
     let mut corner = None;
     for (icon, _, id) in icons {
         if *icon != GlyphIcon::Perpendicular {
             return None;
         }
-        let ConstraintOf::Perpendicular(CurveRef::Curve(x), CurveRef::Curve(y)) = *s.constraints.get((*id)?)?
+        let ConstraintOf::Perpendicular(CurveRef::Curve(x), CurveRef::Curve(y)) =
+            *s.constraints.get((*id)?)?
         else {
             return None;
         };
@@ -599,8 +637,16 @@ fn row_boxes(first_center: Vec2, n: usize) -> Vec<(Vec2, Vec2)> {
 /// (the center itself if `from` is inside).
 fn clip_to_box(from: Vec2, center: Vec2, half: Vec2) -> Vec2 {
     let d = center - from;
-    let sx = if d.x.abs() > 1e-6 { half.x / d.x.abs() } else { f32::INFINITY };
-    let sy = if d.y.abs() > 1e-6 { half.y / d.y.abs() } else { f32::INFINITY };
+    let sx = if d.x.abs() > 1e-6 {
+        half.x / d.x.abs()
+    } else {
+        f32::INFINITY
+    };
+    let sy = if d.y.abs() > 1e-6 {
+        half.y / d.y.abs()
+    } else {
+        f32::INFINITY
+    };
     let s = sx.min(sy);
     if !s.is_finite() || s >= 1.0 {
         return center;
@@ -748,7 +794,10 @@ pub fn layout_glyphs(
                 (at, v)
             }
             Host::Curve(c)
-                if !matches!(s.curves.get(c).map(|c| c.kind), Some(CurveKind::Line { .. })) =>
+                if !matches!(
+                    s.curves.get(c).map(|c| c.kind),
+                    Some(CurveKind::Line { .. })
+                ) =>
             {
                 // A circle or arc: outside its rim, at 45° up-right (a circle) or the arc's
                 // middle.
@@ -765,7 +814,18 @@ pub fn layout_glyphs(
                 };
                 let half_row = (n - 1) as f32 * PITCH / 2.0;
                 let mut v = Vec::new();
-                for da in [0.0, 0.5, -0.5, 1.0, -1.0, 1.6, -1.6, 2.4, -2.4, std::f64::consts::PI] {
+                for da in [
+                    0.0,
+                    0.5,
+                    -0.5,
+                    1.0,
+                    -1.0,
+                    1.6,
+                    -1.6,
+                    2.4,
+                    -2.4,
+                    std::f64::consts::PI,
+                ] {
                     let a = angle + da;
                     let rim = map.to_screen(center + SVec2::from_angle(a) * r);
                     let out = (rim - map.to_screen(center)).normalize_or_zero();
@@ -936,9 +996,9 @@ pub fn layout_glyphs(
         let boxes = row_boxes(first, n);
         taken.extend(boxes.iter().copied());
         let style = |external: bool, constraint: Option<ConstraintId>| {
-            let link = constraint.and_then(|k| s.constraints.get(k)).is_some_and(|c| {
-                matches!(c, ConstraintOf::Use(..) | ConstraintOf::Pierce(..))
-            });
+            let link = constraint
+                .and_then(|k| s.constraints.get(k))
+                .is_some_and(|c| matches!(c, ConstraintOf::Use(..) | ConstraintOf::Pierce(..)));
             if link {
                 GlyphStyle::Link
             } else if external {
@@ -952,7 +1012,8 @@ pub fn layout_glyphs(
             Host::Point(_) => {
                 // Leaders end at the box's edge.
                 for c in &centers {
-                    out.leaders.push((from, clip_to_box(from, *c, Vec2::splat(BOX / 2.0))));
+                    out.leaders
+                        .push((from, clip_to_box(from, *c, Vec2::splat(BOX / 2.0))));
                 }
             }
             Host::Curve(_) => {
@@ -967,18 +1028,21 @@ pub fn layout_glyphs(
                         ) =>
                     {
                         s.curve_ends(c)
-                        .map(|(a, b)| {
-                            let (sa, sb) = (map.to_screen(s.pos(a)), map.to_screen(s.pos(b)));
-                            let d = sb - sa;
-                            let t = ((row_mid - sa).dot(d) / d.length_squared().max(1e-6))
-                                .clamp(0.0, 1.0);
-                            sa + d * t
-                        })
-                        .unwrap_or(from)
+                            .map(|(a, b)| {
+                                let (sa, sb) = (map.to_screen(s.pos(a)), map.to_screen(s.pos(b)));
+                                let d = sb - sa;
+                                let t = ((row_mid - sa).dot(d) / d.length_squared().max(1e-6))
+                                    .clamp(0.0, 1.0);
+                                sa + d * t
+                            })
+                            .unwrap_or(from)
                     }
                     _ => from,
                 };
-                let half = Vec2::new((centers[n - 1].x - centers[0].x) / 2.0 + BOX / 2.0, BOX / 2.0);
+                let half = Vec2::new(
+                    (centers[n - 1].x - centers[0].x) / 2.0 + BOX / 2.0,
+                    BOX / 2.0,
+                );
                 out.leaders.push((start, clip_to_box(start, row_mid, half)));
             }
         }
@@ -1270,7 +1334,13 @@ mod tests {
             y: Vec2::new(0.0, -4.0),
             w: Vec2::ZERO,
         };
-        let l = layout_glyphs(&s, &map, GlyphObstacles::default(), &GlyphOffsets::default(), |_| true);
+        let l = layout_glyphs(
+            &s,
+            &map,
+            GlyphObstacles::default(),
+            &GlyphOffsets::default(),
+            |_| true,
+        );
         // The top edge's row is centered below its midpoint (500, 280).
         assert_eq!(l.glyphs[0].center, Vec2::new(489.0, 301.0).round());
         assert_eq!(l.glyphs[1].center.x - l.glyphs[0].center.x, PITCH);

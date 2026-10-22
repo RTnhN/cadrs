@@ -87,14 +87,24 @@ pub struct DerivedSelection {
 
 impl Default for DerivedSelection {
     fn default() -> Self {
-        Self { all: true, parts: Vec::new(), sketches: Vec::new(), planes: Vec::new(), connectors: Vec::new() }
+        Self {
+            all: true,
+            parts: Vec::new(),
+            sketches: Vec::new(),
+            planes: Vec::new(),
+            connectors: Vec::new(),
+        }
     }
 }
 
 impl DerivedSelection {
     /// Nothing picked.
     pub fn is_empty(&self) -> bool {
-        !self.all && self.parts.is_empty() && self.sketches.is_empty() && self.planes.is_empty() && self.connectors.is_empty()
+        !self.all
+            && self.parts.is_empty()
+            && self.sketches.is_empty()
+            && self.planes.is_empty()
+            && self.connectors.is_empty()
     }
 }
 
@@ -145,7 +155,16 @@ pub struct DerivedBoard {
 
 impl DerivedBoard {
     pub fn new(board: crate::pcb::BoardId, name: &str, layout: cadrs_eda::board::Board) -> Self {
-        let mut d = DerivedBoard { board, board_name: name.to_string(), layout: Default::default(), hash: 0, options: Default::default(), on_sketch: None, outline_problem: None, source_problem: None };
+        let mut d = DerivedBoard {
+            board,
+            board_name: name.to_string(),
+            layout: Default::default(),
+            hash: 0,
+            options: Default::default(),
+            on_sketch: None,
+            outline_problem: None,
+            source_problem: None,
+        };
         d.set_layout(layout);
         d
     }
@@ -311,10 +330,26 @@ impl From<DerivedRepr> for DerivedFeature {
                 b
             }),
         };
-        let is_legacy = r.document.is_some() || r.element.is_some() || !r.parts.is_empty() || r.include_mate_connectors.is_some();
+        let is_legacy = r.document.is_some()
+            || r.element.is_some()
+            || !r.parts.is_empty()
+            || r.include_mate_connectors.is_some();
         if d.source.is_none() && is_legacy {
-            d.source = r.element.map(|element| SourceRef { document: r.document, at: RefAt::Workspace, element, pinned: false });
-            d.selection = if r.parts.is_empty() { DerivedSelection::default() } else { DerivedSelection { all: false, parts: r.parts, ..DerivedSelection::default() } };
+            d.source = r.element.map(|element| SourceRef {
+                document: r.document,
+                at: RefAt::Workspace,
+                element,
+                pinned: false,
+            });
+            d.selection = if r.parts.is_empty() {
+                DerivedSelection::default()
+            } else {
+                DerivedSelection {
+                    all: false,
+                    parts: r.parts,
+                    ..DerivedSelection::default()
+                }
+            };
             d.include_connectors = r.include_mate_connectors.unwrap_or(true);
             d.legacy_names = true;
         }
@@ -372,23 +407,44 @@ impl DerivedFeature {
         match (self.document_name.is_empty(), self.version_name.is_empty()) {
             (true, _) => source,
             (false, true) => format!("{} › {}", self.document_name, source),
-            (false, false) => format!("{} › {} ({})", self.document_name, source, self.version_name),
+            (false, false) => format!(
+                "{} › {} ({})",
+                self.document_name, source, self.version_name
+            ),
         }
     }
 
     /// Takes the board's layout and names from the PCB Studio `el` (the source tab, or its
     /// copy): the board [`DerivedBoard::board`] names, else the studio's shown one. `Err` when
     /// the studio has no such board, or it isn't designed in cadrs.
-    pub fn fill_board_from(&mut self, el: &Element, document: &str, version: &str) -> Result<(), String> {
-        let studio = el.pcb().ok_or_else(|| format!("The tab {} is not a PCB Studio", el.name))?;
-        let want = self.board.as_ref().map(|b| b.board).or(studio.active).or(studio.boards.first().map(|b| b.id));
-        let b = want.and_then(|id| studio.board(id)).ok_or_else(|| format!("{} has no such board", el.name))?;
+    pub fn fill_board_from(
+        &mut self,
+        el: &Element,
+        document: &str,
+        version: &str,
+    ) -> Result<(), String> {
+        let studio = el
+            .pcb()
+            .ok_or_else(|| format!("The tab {} is not a PCB Studio", el.name))?;
+        let want = self
+            .board
+            .as_ref()
+            .map(|b| b.board)
+            .or(studio.active)
+            .or(studio.boards.first().map(|b| b.id));
+        let b = want
+            .and_then(|id| studio.board(id))
+            .ok_or_else(|| format!("{} has no such board", el.name))?;
         // (An IDF board: its outline, holes and package boxes.)
         let (layout, hash) = b.derived_layout();
         // A board taken for the first time (or another board) comes in with its outline's centre
         // where it is now on the location (fixed: later outline edits don't move it); one
         // already derived keeps its options.
-        let mut options = self.board.as_ref().map(|x| x.options.clone()).unwrap_or_default();
+        let mut options = self
+            .board
+            .as_ref()
+            .map(|x| x.options.clone())
+            .unwrap_or_default();
         if self.board.as_ref().is_some_and(|x| x.board != b.id) {
             options.anchor = crate::pcb::board3d::BoardAnchor::Pending;
         }
@@ -423,7 +479,9 @@ impl DerivedFeature {
 
     /// Whether the source's mate connector `c` (owned by the part `owner`, if any) comes over.
     pub fn includes_connector(&self, c: FeatureId, owner: Option<PartId>) -> bool {
-        self.selection.connectors.contains(&c) || (self.include_connectors && (self.selection.all || owner.is_some_and(|o| self.includes_part(o))))
+        self.selection.connectors.contains(&c)
+            || (self.include_connectors
+                && (self.selection.all || owner.is_some_and(|o| self.includes_part(o))))
     }
 
     /// The features of this Part Studio it refers to (its locations' connectors).
@@ -454,18 +512,33 @@ impl DerivedFeature {
     /// The id copy `k` of the source part `source` gets from this feature (`feature`):
     /// [`derived_part`], or [`legacy_part_id`] for the one copy of a legacy one.
     pub fn part_of(&self, feature: FeatureId, source: PartId, k: usize) -> PartId {
-        if self.legacy_names && k == 0 { legacy_part_id(feature, source) } else { derived_part(feature, source, k) }
+        if self.legacy_names && k == 0 {
+            legacy_part_id(feature, source)
+        } else {
+            derived_part(feature, source, k)
+        }
     }
 
     /// The instance number copy `k`'s faces get ([`derived_face`]: `k + 1`; a legacy feature's
     /// one copy: 0).
     pub fn instance(&self, k: usize) -> u32 {
-        if self.legacy_names && k == 0 { 0 } else { k as u32 + 1 }
+        if self.legacy_names && k == 0 {
+            0
+        } else {
+            k as u32 + 1
+        }
     }
 
     /// The name copy `k` gives the source face `n`.
     pub fn face_of(&self, feature: FeatureId, n: &FaceName, k: usize) -> FaceName {
-        FaceName::new(feature.0, FaceOrigin::Instance { of: n.op, face: face_hash(n), instance: self.instance(k) })
+        FaceName::new(
+            feature.0,
+            FaceOrigin::Instance {
+                of: n.op,
+                face: face_hash(n),
+                instance: self.instance(k),
+            },
+        )
     }
 }
 
@@ -478,7 +551,14 @@ pub fn legacy_part_id(feature: FeatureId, source: PartId) -> PartId {
 
 /// The face name main's pre-merge Derived feature gave the source face `source` (instance 0).
 pub fn legacy_face_name(feature: FeatureId, source: &FaceName) -> FaceName {
-    FaceName::new(feature.0, FaceOrigin::Instance { of: source.op, face: face_hash(source), instance: 0 })
+    FaceName::new(
+        feature.0,
+        FaceOrigin::Instance {
+            of: source.op,
+            face: face_hash(source),
+            instance: 0,
+        },
+    )
 }
 
 /// The id of copy `k` (0, 1, …) of the source part `source` made by the Derived feature
@@ -504,7 +584,14 @@ pub fn derived_entity(feature: FeatureId, source: FeatureId, k: usize) -> Featur
 /// The name copy `k` of the Derived feature `feature` gives the source face named `n` (as a
 /// pattern instance's: [`FaceOrigin::Instance`] under the Derived feature, instance `k + 1`).
 pub fn derived_face(feature: FeatureId, n: &FaceName, k: usize) -> FaceName {
-    FaceName::new(feature.0, FaceOrigin::Instance { of: n.op, face: face_hash(n), instance: k as u32 + 1 })
+    FaceName::new(
+        feature.0,
+        FaceOrigin::Instance {
+            of: n.op,
+            face: face_hash(n),
+            instance: k as u32 + 1,
+        },
+    )
 }
 
 /// What a Derived feature brought in, as the rebuild made it (the Feature list's children,
@@ -542,8 +629,14 @@ impl DerivedOutput {
     /// The component parts of the derived board copy whose board part is `board` (they follow
     /// it in [`DerivedOutput::parts`], up to the next copy's board part).
     pub fn components_of(&self, board: PartId) -> Vec<PartId> {
-        let Some(start) = self.parts.iter().position(|p| *p == board) else { return vec![] };
-        self.parts[start + 1..].iter().take_while(|p| !self.boards.iter().any(|b| b.part == **p)).copied().collect()
+        let Some(start) = self.parts.iter().position(|p| *p == board) else {
+            return vec![];
+        };
+        self.parts[start + 1..]
+            .iter()
+            .take_while(|p| !self.boards.iter().any(|b| b.part == **p))
+            .copied()
+            .collect()
     }
 }
 
@@ -569,19 +662,36 @@ pub struct Resolved {
 
 /// Points `d` at `r` (resolved through `res`; `log` is `doc`'s own history, for versions of this
 /// document): its features, part settings and names from the source, and the copies it needs.
-pub fn resolve(res: &mut Resolver, doc: &Document, log: Option<&HistoryLog>, mut d: DerivedFeature, r: SourceRef) -> Result<Resolved, LinkError> {
+pub fn resolve(
+    res: &mut Resolver,
+    doc: &Document,
+    log: Option<&HistoryLog>,
+    mut d: DerivedFeature,
+    r: SourceRef,
+) -> Result<Resolved, LinkError> {
     let this = r.document_or(doc.id) == doc.id;
-    let r = SourceRef { document: if this { None } else { r.document }, ..r };
+    let r = SourceRef {
+        document: if this { None } else { r.document },
+        ..r
+    };
     if r.at == RefAt::Workspace {
         if !this {
             return Err(LinkError::NoVersion);
         }
-        let el = doc.elements.iter().find(|e| e.id == r.element).ok_or_else(|| LinkError::NotFound("The Part Studio".into()))?;
+        let el = doc
+            .elements
+            .iter()
+            .find(|e| e.id == r.element)
+            .ok_or_else(|| LinkError::NotFound("The Part Studio".into()))?;
         if matches!(el.kind, ElementKind::PcbStudio(_)) {
-            d.fill_board_from(el, "", "").map_err(LinkError::NotLinkable)?;
+            d.fill_board_from(el, "", "")
+                .map_err(LinkError::NotLinkable)?;
             d.source = Some(r);
             d.copy = None;
-            return Ok(Resolved { derived: d, links: Vec::new() });
+            return Ok(Resolved {
+                derived: d,
+                links: Vec::new(),
+            });
         }
         if !matches!(el.kind, ElementKind::PartStudio { .. }) {
             return Err(LinkError::NotLinkable(format!("The tab {}", el.name)));
@@ -590,25 +700,44 @@ pub fn resolve(res: &mut Resolver, doc: &Document, log: Option<&HistoryLog>, mut
         d.fill_from(el, "", "");
         d.source = Some(r);
         d.copy = None;
-        return Ok(Resolved { derived: d, links: Vec::new() });
+        return Ok(Resolved {
+            derived: d,
+            links: Vec::new(),
+        });
     }
     let snap = res.resolve(r, doc, log)?;
-    let root = snap.root_link().ok_or_else(|| LinkError::NotFound("The Part Studio".into()))?;
-    let doc_name = if this { doc.name.clone() } else { root.document_name.clone() };
+    let root = snap
+        .root_link()
+        .ok_or_else(|| LinkError::NotFound("The Part Studio".into()))?;
+    let doc_name = if this {
+        doc.name.clone()
+    } else {
+        root.document_name.clone()
+    };
     if matches!(root.element.kind, ElementKind::PcbStudio(_)) {
-        d.fill_board_from(&root.element, &doc_name, &root.version_name).map_err(LinkError::NotLinkable)?;
+        d.fill_board_from(&root.element, &doc_name, &root.version_name)
+            .map_err(LinkError::NotLinkable)?;
         d.source = Some(r);
         d.copy = Some(snap.root);
-        return Ok(Resolved { derived: d, links: snap.links });
+        return Ok(Resolved {
+            derived: d,
+            links: snap.links,
+        });
     }
     if !matches!(root.element.kind, ElementKind::PartStudio { .. }) {
-        return Err(LinkError::NotLinkable(format!("The tab {}", root.element.name)));
+        return Err(LinkError::NotLinkable(format!(
+            "The tab {}",
+            root.element.name
+        )));
     }
     d.board = None;
     d.fill_from(&root.element, &doc_name, &root.version_name);
     d.source = Some(r);
     d.copy = Some(snap.root);
-    Ok(Resolved { derived: d, links: snap.links })
+    Ok(Resolved {
+        derived: d,
+        links: snap.links,
+    })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -617,16 +746,32 @@ pub fn resolve(res: &mut Resolver, doc: &Document, log: Option<&HistoryLog>, mut
 /// DV3.7, DV1.5: refuses deriving the host itself, deriving one Part Studio twice in a Part
 /// Studio, and circular chains (through workspace references in this document and through the
 /// copies `links` of a version reference).
-pub fn check(doc: &Document, element: ElementId, feature: FeatureId, d: &DerivedFeature, links: &[LinkedElement]) -> Result<(), LinkError> {
+pub fn check(
+    doc: &Document,
+    element: ElementId,
+    feature: FeatureId,
+    d: &DerivedFeature,
+    links: &[LinkedElement],
+) -> Result<(), LinkError> {
     let Some(r) = d.source else { return Ok(()) };
-    let host = doc.elements.iter().find(|e| e.id == element).ok_or_else(|| LinkError::NotFound("The Part Studio".into()))?;
+    let host = doc
+        .elements
+        .iter()
+        .find(|e| e.id == element)
+        .ok_or_else(|| LinkError::NotFound("The Part Studio".into()))?;
     let source_doc = r.document_or(doc.id);
     if source_doc == doc.id && r.element == element {
         if r.at == RefAt::Workspace {
-            return Err(LinkError::Refused(format!("{} can't derive itself", host.name)));
+            return Err(LinkError::Refused(format!(
+                "{} can't derive itself",
+                host.name
+            )));
         }
         // A version of itself: its later features would be built from an older copy of itself.
-        return Err(LinkError::Circular(format!("{} › {} → {} › {} ({}) → {}", doc.name, host.name, doc.name, host.name, d.version_name, doc.name)));
+        return Err(LinkError::Circular(format!(
+            "{} › {} → {} › {} ({}) → {}",
+            doc.name, host.name, doc.name, host.name, d.version_name, doc.name
+        )));
     }
     for f in host.features() {
         if f.id == feature {
@@ -639,10 +784,20 @@ pub fn check(doc: &Document, element: ElementId, feature: FeatureId, d: &Derived
             && o.board.as_ref().map(|b| b.board) == d.board.as_ref().map(|b| b.board)
         {
             if let Some(b) = &d.board {
-                return Err(LinkError::Refused(format!("{} is derived already in {} by {}: a board can be derived only once in a Part Studio (add locations for more copies)", b.board_name, host.name, f.name)));
+                return Err(LinkError::Refused(format!(
+                    "{} is derived already in {} by {}: a board can be derived only once in a Part Studio (add locations for more copies)",
+                    b.board_name, host.name, f.name
+                )));
             }
-            let what = if d.source_name.is_empty() { "This Part Studio".to_string() } else { d.source_name.clone() };
-            return Err(LinkError::Refused(format!("{what} is derived already in {} by {}: a Part Studio can be derived only once in a Part Studio", host.name, f.name)));
+            let what = if d.source_name.is_empty() {
+                "This Part Studio".to_string()
+            } else {
+                d.source_name.clone()
+            };
+            return Err(LinkError::Refused(format!(
+                "{what} is derived already in {} by {}: a Part Studio can be derived only once in a Part Studio",
+                host.name, f.name
+            )));
         }
     }
     if !links.is_empty() {
@@ -658,20 +813,34 @@ pub fn check(doc: &Document, element: ElementId, feature: FeatureId, d: &Derived
                 continue;
             }
             seen.push(e);
-            let Some(el) = doc.elements.iter().find(|x| x.id == e) else { continue };
+            let Some(el) = doc.elements.iter().find(|x| x.id == e) else {
+                continue;
+            };
             for f in el.features() {
-                let FeatureKind::Derived(o) = &f.kind else { continue };
+                let FeatureKind::Derived(o) = &f.kind else {
+                    continue;
+                };
                 let Some(or) = o.source else { continue };
                 if or.document_or(doc.id) == doc.id && or.at == RefAt::Workspace {
                     if or.element == element {
-                        let names: Vec<String> = std::iter::once(element).chain(path.iter().copied()).map(|x| format!("{} › {}", doc.name, name_of(doc, x))).collect();
-                        return Err(LinkError::Circular(format!("{} → {}", names.join(" → "), doc.name)));
+                        let names: Vec<String> = std::iter::once(element)
+                            .chain(path.iter().copied())
+                            .map(|x| format!("{} › {}", doc.name, name_of(doc, x)))
+                            .collect();
+                        return Err(LinkError::Circular(format!(
+                            "{} → {}",
+                            names.join(" → "),
+                            doc.name
+                        )));
                     }
                     let mut p = path.clone();
                     p.push(or.element);
                     stack.push((or.element, p));
                 } else if let Some(c) = o.copy {
-                    let chain: Vec<LinkedElement> = crate::link_update::closure(doc, c).into_iter().cloned().collect();
+                    let chain: Vec<LinkedElement> = crate::link_update::closure(doc, c)
+                        .into_iter()
+                        .cloned()
+                        .collect();
                     check_cycle(doc, element, &chain, chain.first())?;
                 }
             }
@@ -681,7 +850,11 @@ pub fn check(doc: &Document, element: ElementId, feature: FeatureId, d: &Derived
 }
 
 fn name_of(doc: &Document, e: ElementId) -> String {
-    doc.elements.iter().find(|x| x.id == e).map(|x| x.name.clone()).unwrap_or_default()
+    doc.elements
+        .iter()
+        .find(|x| x.id == e)
+        .map(|x| x.name.clone())
+        .unwrap_or_default()
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -695,12 +868,22 @@ fn add_links(doc: &mut Document, links: &[LinkedElement]) {
     }
 }
 
-fn derived_mut(doc: &mut Document, element: ElementId, feature: FeatureId) -> Result<&mut DerivedFeature, CommandError> {
-    let el = doc.element_mut(element).ok_or(CommandError::ElementNotFound(element))?;
+fn derived_mut(
+    doc: &mut Document,
+    element: ElementId,
+    feature: FeatureId,
+) -> Result<&mut DerivedFeature, CommandError> {
+    let el = doc
+        .element_mut(element)
+        .ok_or(CommandError::ElementNotFound(element))?;
     let ElementKind::PartStudio { features, .. } = &mut el.kind else {
         return Err(CommandError::Invalid("features need a Part Studio".into()));
     };
-    match features.iter_mut().find(|f| f.id == feature).map(|f| &mut f.kind) {
+    match features
+        .iter_mut()
+        .find(|f| f.id == feature)
+        .map(|f| &mut f.kind)
+    {
         Some(FeatureKind::Derived(d)) => Ok(d),
         _ => Err(CommandError::Invalid("Derived feature not found".into())),
     }
@@ -725,7 +908,13 @@ impl Command for AddDerived {
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
         check(doc, self.element, self.feature, &self.derived, &self.links)?;
-        crate::commands::AddFeature { element: self.element, feature: self.feature, base_name: "Derived".into(), kind: FeatureKind::Derived(Box::new(self.derived.clone())) }.apply(doc)?;
+        crate::commands::AddFeature {
+            element: self.element,
+            feature: self.feature,
+            base_name: "Derived".into(),
+            kind: FeatureKind::Derived(Box::new(self.derived.clone())),
+        }
+        .apply(doc)?;
         add_links(doc, &self.links);
         Ok(())
     }
@@ -764,7 +953,11 @@ impl Command for SetDerived {
 }
 
 /// The Derived feature `feature` of `element`, if it is one.
-pub fn derived_of(doc: &Document, element: ElementId, feature: FeatureId) -> Option<&DerivedFeature> {
+pub fn derived_of(
+    doc: &Document,
+    element: ElementId,
+    feature: FeatureId,
+) -> Option<&DerivedFeature> {
     match &doc.element(element)?.feature(feature)?.kind {
         FeatureKind::Derived(d) => Some(d),
         _ => None,
@@ -797,14 +990,25 @@ pub fn refresh(doc: &mut Document) {
         let mut updates: Vec<Update> = Vec::new();
         for (i, el) in doc.elements.iter().enumerate() {
             for (j, f) in el.features().iter().enumerate() {
-                let FeatureKind::Derived(d) = &f.kind else { continue };
+                let FeatureKind::Derived(d) = &f.kind else {
+                    continue;
+                };
                 let Some(r) = d.source else { continue };
-                if d.board.is_some() || r.at != RefAt::Workspace || r.document_or(this) != this || r.element == el.id {
+                if d.board.is_some()
+                    || r.at != RefAt::Workspace
+                    || r.document_or(this) != this
+                    || r.element == el.id
+                {
                     continue;
                 }
-                let Some(src) = doc.elements.iter().find(|e| e.id == r.element && matches!(e.kind, ElementKind::PartStudio { .. })) else { continue };
+                let Some(src) = doc.elements.iter().find(|e| {
+                    e.id == r.element && matches!(e.kind, ElementKind::PartStudio { .. })
+                }) else {
+                    continue;
+                };
                 let features = src.active_features();
-                if d.studio != features || d.props != src.part_props() || d.source_name != src.name {
+                if d.studio != features || d.props != src.part_props() || d.source_name != src.name
+                {
                     updates.push((i, j, features, src.part_props().to_vec(), src.name.clone()));
                 }
             }
@@ -834,12 +1038,24 @@ fn refresh_boards(doc: &mut Document) {
     let this = doc.id;
     /// (tab, feature, the new layout if it changed, the board's name, the studio's name, the
     /// outline link's problem, why the source is gone).
-    type Update = (usize, usize, Option<(cadrs_eda::board::Board, u64)>, String, String, Option<String>, Option<String>);
+    type Update = (
+        usize,
+        usize,
+        Option<(cadrs_eda::board::Board, u64)>,
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+    );
     let mut updates: Vec<Update> = Vec::new();
     for (i, el) in doc.elements.iter().enumerate() {
         for (j, f) in el.features().iter().enumerate() {
-            let FeatureKind::Derived(d) = &f.kind else { continue };
-            let (Some(r), Some(db)) = (d.source, d.board.as_ref()) else { continue };
+            let FeatureKind::Derived(d) = &f.kind else {
+                continue;
+            };
+            let (Some(r), Some(db)) = (d.source, d.board.as_ref()) else {
+                continue;
+            };
             if r.at != RefAt::Workspace || r.document_or(this) != this {
                 continue;
             }
@@ -847,11 +1063,25 @@ fn refresh_boards(doc: &mut Document) {
             let src = doc.elements.iter().find(|e| e.id == r.element);
             let Some(b) = src.and_then(|s| s.pcb()).and_then(|s| s.board(db.board)) else {
                 let why = match src {
-                    None => format!("Its PCB Studio, {}, is gone: the board stays as it was", d.source_name),
-                    Some(s) => format!("{} is gone from {}: the board stays as it was", db.board_name, s.name),
+                    None => format!(
+                        "Its PCB Studio, {}, is gone: the board stays as it was",
+                        d.source_name
+                    ),
+                    Some(s) => format!(
+                        "{} is gone from {}: the board stays as it was",
+                        db.board_name, s.name
+                    ),
                 };
                 if db.source_problem.as_ref() != Some(&why) {
-                    updates.push((i, j, None, db.board_name.clone(), d.source_name.clone(), db.outline_problem.clone(), Some(why)));
+                    updates.push((
+                        i,
+                        j,
+                        None,
+                        db.board_name.clone(),
+                        d.source_name.clone(),
+                        db.outline_problem.clone(),
+                        Some(why),
+                    ));
                 }
                 continue;
             };
@@ -859,8 +1089,21 @@ fn refresh_boards(doc: &mut Document) {
             let (layout, hash) = b.derived_layout();
             let layout = (hash != db.hash).then(|| (layout.into_owned(), hash));
             let problem = b.outline_link.as_ref().and_then(|l| l.problem.clone());
-            if layout.is_some() || b.name() != db.board_name || src.name != d.source_name || problem != db.outline_problem || db.source_problem.is_some() {
-                updates.push((i, j, layout, b.name().to_string(), src.name.clone(), problem, None));
+            if layout.is_some()
+                || b.name() != db.board_name
+                || src.name != d.source_name
+                || problem != db.outline_problem
+                || db.source_problem.is_some()
+            {
+                updates.push((
+                    i,
+                    j,
+                    layout,
+                    b.name().to_string(),
+                    src.name.clone(),
+                    problem,
+                    None,
+                ));
             }
         }
     }
@@ -884,7 +1127,12 @@ fn refresh_boards(doc: &mut Document) {
 /// face appearances, material and (with Include properties) its properties; the host keeps its
 /// own rename and hidden flag. Settings of derived parts that are gone are dropped.
 fn sync_props(el: &mut Element) {
-    let ElementKind::PartStudio { features, parts, .. } = &mut el.kind else { return };
+    let ElementKind::PartStudio {
+        features, parts, ..
+    } = &mut el.kind
+    else {
+        return;
+    };
     let derived: Vec<(FeatureId, &DerivedFeature)> = features
         .iter()
         .filter_map(|f| match &f.kind {
@@ -903,9 +1151,17 @@ fn sync_props(el: &mut Element) {
                     name: None,
                     hidden: false,
                     appearance: p.appearance,
-                    faces: p.faces.iter().map(|(n, a)| (d.face_of(*id, n, k), *a)).collect(),
+                    faces: p
+                        .faces
+                        .iter()
+                        .map(|(n, a)| (d.face_of(*id, n, k), *a))
+                        .collect(),
                     material: p.material.clone(),
-                    properties: if d.include_properties { p.properties.clone() } else { Default::default() },
+                    properties: if d.include_properties {
+                        p.properties.clone()
+                    } else {
+                        Default::default()
+                    },
                 });
             }
         }
@@ -918,9 +1174,21 @@ fn sync_props(el: &mut Element) {
         }
         // A derived part: its source's settings now, the host's rename and hidden flag kept.
         if let Some(w) = want.iter().find(|w| w.part == p.part) {
-            out.push(PartProps { name: p.name.clone(), hidden: p.hidden, ..w.clone() });
+            out.push(PartProps {
+                name: p.name.clone(),
+                hidden: p.hidden,
+                ..w.clone()
+            });
         } else if p.name.is_some() || p.hidden {
-            out.push(PartProps { part: p.part, name: p.name.clone(), hidden: p.hidden, appearance: None, faces: Vec::new(), material: None, properties: Default::default() });
+            out.push(PartProps {
+                part: p.part,
+                name: p.name.clone(),
+                hidden: p.hidden,
+                appearance: None,
+                faces: Vec::new(),
+                material: None,
+                properties: Default::default(),
+            });
         }
     }
     for w in want {
@@ -958,7 +1226,15 @@ impl DerivedFeature {
     /// Every part, sketch and plane of the Part Studio `element` of `document` (`None`: this
     /// document) at its workspace (see the module docs).
     pub fn new(document: Option<DocumentId>, element: ElementId) -> Self {
-        Self { source: Some(SourceRef { document, at: RefAt::Workspace, element, pinned: false }), ..Self::default() }
+        Self {
+            source: Some(SourceRef {
+                document,
+                at: RefAt::Workspace,
+                element,
+                pinned: false,
+            }),
+            ..Self::default()
+        }
     }
 }
 
@@ -974,14 +1250,19 @@ pub fn face_name(feature: FeatureId, source: &FaceName) -> FaceName {
 
 /// The name the (single) copy gives the source edge `source`.
 pub fn edge_name(feature: FeatureId, source: &cadrs_kernel::EdgeName) -> cadrs_kernel::EdgeName {
-    cadrs_kernel::EdgeName::new(face_name(feature, &source.faces[0]), face_name(feature, &source.faces[1]), source.index)
+    cadrs_kernel::EdgeName::new(
+        face_name(feature, &source.faces[0]),
+        face_name(feature, &source.faces[1]),
+        source.index,
+    )
 }
 
 /// Loads a document by id.
 pub type DocumentLoader = dyn Fn(DocumentId) -> Option<Document> + Send + Sync;
 
 fn loader_slot() -> &'static std::sync::RwLock<Option<std::sync::Arc<DocumentLoader>>> {
-    static SLOT: std::sync::OnceLock<std::sync::RwLock<Option<std::sync::Arc<DocumentLoader>>>> = std::sync::OnceLock::new();
+    static SLOT: std::sync::OnceLock<std::sync::RwLock<Option<std::sync::Arc<DocumentLoader>>>> =
+        std::sync::OnceLock::new();
     SLOT.get_or_init(Default::default)
 }
 
@@ -995,10 +1276,13 @@ pub fn set_document_loader(loader: Option<std::sync::Arc<DocumentLoader>>) {
 
 /// A loader reading documents from `store`, each parsed once per version of its file.
 pub fn store_loader(store: crate::Store) -> std::sync::Arc<DocumentLoader> {
-    type Cache = std::collections::HashMap<DocumentId, (Option<std::time::SystemTime>, Option<Document>)>;
+    type Cache =
+        std::collections::HashMap<DocumentId, (Option<std::time::SystemTime>, Option<Document>)>;
     let cache: std::sync::Mutex<Cache> = std::sync::Mutex::new(Cache::new());
     std::sync::Arc::new(move |id| {
-        let stamp = std::fs::metadata(store.document_path(id)).and_then(|m| m.modified()).ok();
+        let stamp = std::fs::metadata(store.document_path(id))
+            .and_then(|m| m.modified())
+            .ok();
         if let Ok(c) = cache.lock()
             && let Some((s, d)) = c.get(&id)
             && *s == stamp
@@ -1020,18 +1304,31 @@ fn global_loader() -> Option<std::sync::Arc<DocumentLoader>> {
 /// Fills the workspace references to other documents that have no snapshot yet, with `loader`.
 fn fill_other_documents(doc: &mut Document, loader: &dyn Fn(DocumentId) -> Option<Document>) {
     let this = doc.id;
-    let mut loaded: std::collections::HashMap<DocumentId, Option<Document>> = std::collections::HashMap::new();
+    let mut loaded: std::collections::HashMap<DocumentId, Option<Document>> =
+        std::collections::HashMap::new();
     for el in &mut doc.elements {
-        let ElementKind::PartStudio { features, .. } = &mut el.kind else { continue };
+        let ElementKind::PartStudio { features, .. } = &mut el.kind else {
+            continue;
+        };
         for f in features.iter_mut() {
-            let FeatureKind::Derived(d) = &mut f.kind else { continue };
+            let FeatureKind::Derived(d) = &mut f.kind else {
+                continue;
+            };
             let Some(r) = d.source else { continue };
             if r.at != RefAt::Workspace || !r.is_external(this) || !d.studio.is_empty() {
                 continue;
             }
             let other = r.document_or(this);
-            let Some(src) = loaded.entry(other).or_insert_with(|| loader(other)) else { continue };
-            let Some(e) = src.elements.iter().find(|e| e.id == r.element && matches!(e.kind, ElementKind::PartStudio { .. })) else { continue };
+            let Some(src) = loaded.entry(other).or_insert_with(|| loader(other)) else {
+                continue;
+            };
+            let Some(e) = src
+                .elements
+                .iter()
+                .find(|e| e.id == r.element && matches!(e.kind, ElementKind::PartStudio { .. }))
+            else {
+                continue;
+            };
             d.fill_from(e, &src.name, "");
         }
     }
@@ -1059,11 +1356,19 @@ pub fn source_parts(x: &DerivedFeature) -> Result<Vec<(PartId, String)>, String>
         return Err("The source Part Studio has not been loaded".into());
     }
     let build = crate::rebuild::build(&x.studio);
-    Ok(build.parts.iter().map(|p| (p.id, crate::parts::display_name(p, &x.props).to_string())).collect())
+    Ok(build
+        .parts
+        .iter()
+        .map(|p| (p.id, crate::parts::display_name(p, &x.props).to_string()))
+        .collect())
 }
 
 fn any_derived(doc: &Document) -> bool {
-    doc.elements.iter().any(|e| e.features().iter().any(|f| matches!(f.kind, FeatureKind::Derived(_))))
+    doc.elements.iter().any(|e| {
+        e.features()
+            .iter()
+            .any(|f| matches!(f.kind, FeatureKind::Derived(_)))
+    })
 }
 
 #[cfg(test)]
@@ -1077,13 +1382,19 @@ mod tests {
         assert_eq!(derived_part(f, p, 0), derived_part(f, p, 0));
         assert_ne!(derived_part(f, p, 0), derived_part(f, p, 1));
         assert_eq!(derived_part(f, p, 0).feature, f);
-        assert_ne!(derived_entity(f, FeatureId::from_u128(3), 0), derived_entity(FeatureId::from_u128(4), FeatureId::from_u128(3), 0));
+        assert_ne!(
+            derived_entity(f, FeatureId::from_u128(3), 0),
+            derived_entity(FeatureId::from_u128(4), FeatureId::from_u128(3), 0)
+        );
     }
 
     #[test]
     fn a_new_derived_feature_waits_for_a_source() {
         let d = DerivedFeature::default();
-        assert_eq!(d.problem(), Some("Select a Part Studio or a board to derive"));
+        assert_eq!(
+            d.problem(),
+            Some("Select a Part Studio or a board to derive")
+        );
         assert_eq!(d.copies(), 1);
         assert!(d.include_properties);
     }

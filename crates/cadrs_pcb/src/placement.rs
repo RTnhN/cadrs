@@ -31,7 +31,13 @@ pub struct Pose {
 
 impl Pose {
     pub fn of(p: &Placement) -> Pose {
-        Pose { x: p.x, y: p.y, rotation: p.rotation, side: p.side, mount_offset: p.mount_offset }
+        Pose {
+            x: p.x,
+            y: p.y,
+            rotation: p.rotation,
+            side: p.side,
+            mount_offset: p.mount_offset,
+        }
     }
 
     /// Writes the pose into a placement (other fields kept).
@@ -57,8 +63,14 @@ fn flip() -> Matrix3<f64> {
 /// The motion from the package frame to the board frame for a pose (see the module docs).
 pub fn pose_motion(pose: &Pose, thickness: f64) -> Motion {
     match pose.side {
-        MountSide::Top => Motion { linear: rz(pose.rotation), translation: Vector3::new(pose.x, pose.y, thickness + pose.mount_offset) },
-        MountSide::Bottom => Motion { linear: flip() * rz(pose.rotation), translation: Vector3::new(pose.x, pose.y, -pose.mount_offset) },
+        MountSide::Top => Motion {
+            linear: rz(pose.rotation),
+            translation: Vector3::new(pose.x, pose.y, thickness + pose.mount_offset),
+        },
+        MountSide::Bottom => Motion {
+            linear: flip() * rz(pose.rotation),
+            translation: Vector3::new(pose.x, pose.y, -pose.mount_offset),
+        },
     }
 }
 
@@ -91,11 +103,23 @@ pub fn pose_from_motion(m: &Motion, thickness: f64) -> Result<Pose, String> {
     let t = &m.translation;
     if (z.z - 1.0).abs() < 1e-6 {
         let rot = l[(1, 0)].atan2(l[(0, 0)]).to_degrees();
-        Ok(Pose { x: t.x, y: t.y, rotation: normalize_deg(rot), side: MountSide::Top, mount_offset: t.z - thickness })
+        Ok(Pose {
+            x: t.x,
+            y: t.y,
+            rotation: normalize_deg(rot),
+            side: MountSide::Top,
+            mount_offset: t.z - thickness,
+        })
     } else if (z.z + 1.0).abs() < 1e-6 {
         // linear = flip · Rz: first column (−c, s, 0).
         let rot = l[(1, 0)].atan2(-l[(0, 0)]).to_degrees();
-        Ok(Pose { x: t.x, y: t.y, rotation: normalize_deg(rot), side: MountSide::Bottom, mount_offset: -t.z })
+        Ok(Pose {
+            x: t.x,
+            y: t.y,
+            rotation: normalize_deg(rot),
+            side: MountSide::Bottom,
+            mount_offset: -t.z,
+        })
     } else {
         Err("the component is tilted: its top isn't parallel to the board".into())
     }
@@ -111,17 +135,41 @@ mod tests {
         let t = 1.6;
         for side in [MountSide::Top, MountSide::Bottom] {
             for rot in [0.0, 12.5, 90.0, 180.0, 270.0, 359.25] {
-                let pose = Pose { x: 12.345, y: -6.789, rotation: rot, side, mount_offset: 0.25 };
+                let pose = Pose {
+                    x: 12.345,
+                    y: -6.789,
+                    rotation: rot,
+                    side,
+                    mount_offset: 0.25,
+                };
                 let back = pose_from_motion(&pose_motion(&pose, t), t).unwrap();
                 assert_eq!(back.side, side);
-                for (a, b) in [(back.x, pose.x), (back.y, pose.y), (back.rotation, pose.rotation), (back.mount_offset, pose.mount_offset)] {
+                for (a, b) in [
+                    (back.x, pose.x),
+                    (back.y, pose.y),
+                    (back.rotation, pose.rotation),
+                    (back.mount_offset, pose.mount_offset),
+                ] {
                     assert!((a - b).abs() < 1e-9, "{pose:?} → {back:?}");
                 }
             }
         }
         // Rotations outside [0, 360) come back normalised.
-        let pose = Pose { x: 0.0, y: 0.0, rotation: -90.0, side: MountSide::Top, mount_offset: 0.0 };
-        assert!((pose_from_motion(&pose_motion(&pose, t), t).unwrap().rotation - 270.0).abs() < 1e-9);
+        let pose = Pose {
+            x: 0.0,
+            y: 0.0,
+            rotation: -90.0,
+            side: MountSide::Top,
+            mount_offset: 0.0,
+        };
+        assert!(
+            (pose_from_motion(&pose_motion(&pose, t), t)
+                .unwrap()
+                .rotation
+                - 270.0)
+                .abs()
+                < 1e-9
+        );
     }
 
     #[test]
@@ -142,9 +190,15 @@ mod tests {
             side: MountSide::Top,
             status: cadrs_idf::Status::Placed,
         };
-        let t = cadrs_core::pcb::PartTransform { translate: [1.0, 2.0, 0.0], rotate: [0.0, 0.0, 90.0] };
+        let t = cadrs_core::pcb::PartTransform {
+            translate: [1.0, 2.0, 0.0],
+            rotate: [0.0, 0.0, 90.0],
+        };
         let m = custom_motion(&p, 1.6, &t);
-        for (q, want) in [(Point3::new(1.0, 0.0, 0.0), Point3::new(7.0, 21.0, 1.6)), (Point3::new(0.0, 0.0, 1.0), Point3::new(8.0, 21.0, 2.6))] {
+        for (q, want) in [
+            (Point3::new(1.0, 0.0, 0.0), Point3::new(7.0, 21.0, 1.6)),
+            (Point3::new(0.0, 0.0, 1.0), Point3::new(8.0, 21.0, 2.6)),
+        ] {
             let got = m.point(&q);
             assert!((got - want).norm() < 1e-12, "{q} → {got}, want {want}");
         }
@@ -154,7 +208,13 @@ mod tests {
     fn bottom_matches_idf_plan_map() {
         // A package point (1, 0) at rotation 90 on the bottom: IDF gives (x, y) + M·R·p =
         // (x, y) + diag(−1, 1)·(0, 1) = (x, y + 1).
-        let pose = Pose { x: 5.0, y: 5.0, rotation: 90.0, side: MountSide::Bottom, mount_offset: 0.0 };
+        let pose = Pose {
+            x: 5.0,
+            y: 5.0,
+            rotation: 90.0,
+            side: MountSide::Bottom,
+            mount_offset: 0.0,
+        };
         let q = pose_motion(&pose, 1.0).point(&Point3::new(1.0, 0.0, 2.0));
         assert!((q - Point3::new(5.0, 6.0, -2.0)).norm() < 1e-12, "{q}");
     }

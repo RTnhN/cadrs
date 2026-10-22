@@ -24,8 +24,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::annotation::{
-    AnnGraphics, EdgeRef, GripKind, Orient, Pick, PlacedText, PointRef, Shape, ViewModel, layout_label, resolve, resolve_point,
-    runs, text_width, TextBlock,
+    AnnGraphics, EdgeRef, GripKind, Orient, Pick, PlacedText, PointRef, Shape, TextBlock,
+    ViewModel, layout_label, resolve, resolve_point, runs, text_width,
 };
 use crate::style::DrawingStyle;
 use crate::view::{View, rotate};
@@ -176,7 +176,10 @@ impl Gdt {
 
     /// Form tolerances take no datum.
     pub fn takes_datums(self) -> bool {
-        !matches!(self, Gdt::Straightness | Gdt::Flatness | Gdt::Circularity | Gdt::Cylindricity)
+        !matches!(
+            self,
+            Gdt::Straightness | Gdt::Flatness | Gdt::Circularity | Gdt::Cylindricity
+        )
     }
 }
 
@@ -234,7 +237,11 @@ pub enum FinishKind {
 }
 
 impl FinishKind {
-    pub const ALL: [FinishKind; 3] = [FinishKind::Basic, FinishKind::RemovalRequired, FinishKind::RemovalProhibited];
+    pub const ALL: [FinishKind; 3] = [
+        FinishKind::Basic,
+        FinishKind::RemovalRequired,
+        FinishKind::RemovalProhibited,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -266,7 +273,12 @@ pub enum WeldKind {
 }
 
 impl WeldKind {
-    pub const ALL: [WeldKind; 4] = [WeldKind::None, WeldKind::Fillet, WeldKind::VGroove, WeldKind::Square];
+    pub const ALL: [WeldKind; 4] = [
+        WeldKind::None,
+        WeldKind::Fillet,
+        WeldKind::VGroove,
+        WeldKind::Square,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -310,7 +322,11 @@ pub fn ordinate_values(view: &View, m: &dyn ViewModel, o: &Ordinate) -> Option<V
 
 /// A chamfer dimension's distance, second distance and angle: the Chamfer feature's, else the
 /// edge's legs as seen (the shorter leg and the angle to the longer side).
-pub fn chamfer_values(view: &View, m: &dyn ViewModel, c: &ChamferDim) -> Option<(f64, Option<f64>, f64)> {
+pub fn chamfer_values(
+    view: &View,
+    m: &dyn ViewModel,
+    c: &ChamferDim,
+) -> Option<(f64, Option<f64>, f64)> {
     let faces: Vec<&cadrs_kernel::naming::FaceName> = match (&c.edge.edge, &c.edge.face) {
         (Some(n), _) => n.faces.iter().collect(),
         (None, Some(f)) => vec![f],
@@ -334,20 +350,33 @@ pub fn chamfer_text(style: &DrawingStyle, v: (f64, Option<f64>, f64)) -> String 
         (d, Some(d2), _) => format!("{} x {}", style.format_length(d), style.format_length(d2)),
         (d, None, a) => {
             let decimals = if (a - a.round()).abs() < 1e-6 { 0 } else { 1 };
-            format!("{} x {}°", style.format_length(d), crate::style::format_number(a, decimals, true, false, style.decimal_separator))
+            format!(
+                "{} x {}°",
+                style.format_length(d),
+                crate::style::format_number(a, decimals, true, false, style.decimal_separator)
+            )
         }
     }
 }
 
 /// An arc's centre, radius, start angle and sweep (radians, counter-clockwise), as seen.
 fn arc_of(view: &View, m: &dyn ViewModel, e: &EdgeRef) -> Option<(P2, f64, f64, f64)> {
-    let Shape::Circle { center, radius, arc: Some(a) } = resolve(view, m, e).shape else {
+    let Shape::Circle {
+        center,
+        radius,
+        arc: Some(a),
+    } = resolve(view, m, e).shape
+    else {
         return None;
     };
     let ang = |p: P2| (p[1] - center[1]).atan2(p[0] - center[0]);
     let (a0, am, a1) = (ang(a[0]), ang(a[1]), ang(a[2]));
     let ccw = |f: f64, t: f64| (t - f).rem_euclid(std::f64::consts::TAU);
-    let (start, sweep) = if ccw(a0, am) <= ccw(a0, a1) { (a0, ccw(a0, a1)) } else { (a1, ccw(a1, a0)) };
+    let (start, sweep) = if ccw(a0, am) <= ccw(a0, a1) {
+        (a0, ccw(a0, a1))
+    } else {
+        (a1, ccw(a1, a0))
+    };
     Some((center, radius, start, sweep))
 }
 
@@ -403,7 +432,13 @@ pub fn gdt_strokes(g: Gdt, c: P2, s: f64) -> (Vec<Vec<P2>>, Vec<[P2; 3]>) {
     let mut fills = Vec::new();
     let strokes = match g {
         Gdt::Straightness => vec![vec![p(-0.35, 0.0), p(0.35, 0.0)]],
-        Gdt::Flatness => vec![vec![p(-0.35, -0.15), p(0.2, -0.15), p(0.35, 0.15), p(-0.2, 0.15), p(-0.35, -0.15)]],
+        Gdt::Flatness => vec![vec![
+            p(-0.35, -0.15),
+            p(0.2, -0.15),
+            p(0.35, 0.15),
+            p(-0.2, 0.15),
+            p(-0.35, -0.15),
+        ]],
         Gdt::Circularity => vec![circle_pts(c, 0.3 * s, 0.0, tau, 40)],
         Gdt::Cylindricity => vec![
             circle_pts(c, 0.25 * s, 0.0, tau, 40),
@@ -417,14 +452,23 @@ pub fn gdt_strokes(g: Gdt, c: P2, s: f64) -> (Vec<Vec<P2>>, Vec<[P2; 3]>) {
             vec![a]
         }
         Gdt::Angularity => vec![vec![p(0.35, 0.3), p(-0.35, -0.25), p(0.35, -0.25)]],
-        Gdt::Perpendicularity => vec![vec![p(0.0, 0.32), p(0.0, -0.25)], vec![p(-0.35, -0.25), p(0.35, -0.25)]],
-        Gdt::Parallelism => vec![vec![p(-0.3, -0.3), p(-0.05, 0.3)], vec![p(0.05, -0.3), p(0.3, 0.3)]],
+        Gdt::Perpendicularity => vec![
+            vec![p(0.0, 0.32), p(0.0, -0.25)],
+            vec![p(-0.35, -0.25), p(0.35, -0.25)],
+        ],
+        Gdt::Parallelism => vec![
+            vec![p(-0.3, -0.3), p(-0.05, 0.3)],
+            vec![p(0.05, -0.3), p(0.3, 0.3)],
+        ],
         Gdt::Position => vec![
             circle_pts(c, 0.24 * s, 0.0, tau, 40),
             vec![p(-0.4, 0.0), p(0.4, 0.0)],
             vec![p(0.0, -0.4), p(0.0, 0.4)],
         ],
-        Gdt::Concentricity => vec![circle_pts(c, 0.14 * s, 0.0, tau, 30), circle_pts(c, 0.32 * s, 0.0, tau, 40)],
+        Gdt::Concentricity => vec![
+            circle_pts(c, 0.14 * s, 0.0, tau, 30),
+            circle_pts(c, 0.32 * s, 0.0, tau, 40),
+        ],
         Gdt::Symmetry => vec![
             vec![p(-0.22, 0.2), p(0.22, 0.2)],
             vec![p(-0.38, 0.0), p(0.38, 0.0)],
@@ -465,7 +509,12 @@ struct Sz {
 }
 
 fn sizes(style: &DrawingStyle) -> Sz {
-    Sz { h: style.dim_text_height, arrow: style.dim_arrow_length, gap: style.extension_gap, beyond: style.extension_beyond }
+    Sz {
+        h: style.dim_text_height,
+        arrow: style.dim_arrow_length,
+        gap: style.extension_gap,
+        beyond: style.extension_beyond,
+    }
 }
 
 fn arrow(g: &mut AnnGraphics, tip: P2, dir: P2, length: f64) {
@@ -486,14 +535,21 @@ fn text(g: &mut AnnGraphics, block: &TextBlock, anchor: P2, h: f64, centered: bo
 }
 
 fn plain(s: &str) -> TextBlock {
-    TextBlock { lines: vec![runs(s)] }
+    TextBlock {
+        lines: vec![runs(s)],
+    }
 }
 
 /// The point of the edge (as drawn on the sheet) nearest `near` (sheet), with the edge's
 /// direction there.
 fn edge_foot(view: &View, m: &dyn ViewModel, e: &EdgeRef, near: P2) -> Option<(P2, P2)> {
     let r = resolve(view, m, e);
-    let pts: Vec<P2> = r.shape.polyline().into_iter().map(|p| view.to_sheet(p)).collect();
+    let pts: Vec<P2> = r
+        .shape
+        .polyline()
+        .into_iter()
+        .map(|p| view.to_sheet(p))
+        .collect();
     let mut best: Option<(f64, P2, P2)> = None;
     for w in pts.windows(2) {
         let (a, b) = (w[0], w[1]);
@@ -509,21 +565,40 @@ fn edge_foot(view: &View, m: &dyn ViewModel, e: &EdgeRef, near: P2) -> Option<(P
             best = Some((dd, q, unit(d)));
         }
     }
-    best.map(|(_, q, d)| (q, d)).or_else(|| pts.first().map(|p| (*p, [1.0, 0.0])))
+    best.map(|(_, q, d)| (q, d))
+        .or_else(|| pts.first().map(|p| (*p, [1.0, 0.0])))
 }
 
 fn attach(g: &mut AnnGraphics, view: &View, m: &dyn ViewModel, e: &EdgeRef) {
     let r = resolve(view, m, e);
-    g.attached.push(r.shape.polyline().into_iter().map(|p| view.to_sheet(p)).collect());
-    g.attached_dead.push(crate::annotation::ref_dangles(view, m, e));
+    g.attached.push(
+        r.shape
+            .polyline()
+            .into_iter()
+            .map(|p| view.to_sheet(p))
+            .collect(),
+    );
+    g.attached_dead
+        .push(crate::annotation::ref_dangles(view, m, e));
 }
 
 /// A baseline set's graphics: each target's linear dimension, stacked.
-pub fn baseline_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel, b: &Baseline) -> Option<AnnGraphics> {
-    use crate::annotation::{Annotation, AnnotationKind, DimFormat, DimKind, Dimension, annotation_graphics, centre_text_in_span};
+pub fn baseline_graphics(
+    style: &DrawingStyle,
+    view: &View,
+    m: &dyn ViewModel,
+    b: &Baseline,
+) -> Option<AnnGraphics> {
+    use crate::annotation::{
+        Annotation, AnnotationKind, DimFormat, DimKind, Dimension, annotation_graphics,
+        centre_text_in_span,
+    };
     let k = view.scale.factor();
     // The stacking direction (view 2D): away from the base, across the measured axis.
-    let (sx, sy) = (rotate([1.0, 0.0], -view.rotation), rotate([0.0, 1.0], -view.rotation));
+    let (sx, sy) = (
+        rotate([1.0, 0.0], -view.rotation),
+        rotate([0.0, 1.0], -view.rotation),
+    );
     let base_p = match b.base {
         Pick::Point(p) => resolve_point(view, m, &p)?.0,
         Pick::Edge(e) => resolve(view, m, &e).shape.polyline().first().copied()?,
@@ -533,23 +608,43 @@ pub fn baseline_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel, b
         Orient::Vertical => sx,
         Orient::Aligned => sy,
     };
-    let side = if dot(sub(b.text, base_p), across) >= 0.0 { 1.0 } else { -1.0 };
+    let side = if dot(sub(b.text, base_p), across) >= 0.0 {
+        1.0
+    } else {
+        -1.0
+    };
     let mut out = AnnGraphics::default();
     for (i, t) in b.targets.iter().enumerate() {
         let mut d = Dimension {
-            kind: DimKind::Distance { a: b.base, b: *t, orient: b.orient },
+            kind: DimKind::Distance {
+                a: b.base,
+                b: *t,
+                orient: b.orient,
+            },
             text: add(b.text, mul(across, side * i as f64 * b.spacing / k)),
             format: DimFormat::default(),
             last: None,
         };
         centre_text_in_span(view, m, &mut d);
-        let Some(g) = annotation_graphics(style, view, m, &Annotation::new(AnnotationKind::Dimension(d))) else { continue };
+        let Some(g) = annotation_graphics(
+            style,
+            view,
+            m,
+            &Annotation::new(AnnotationKind::Dimension(d)),
+        ) else {
+            continue;
+        };
         out.strokes.extend(g.strokes);
         out.fills.extend(g.fills);
         out.texts.extend(g.texts);
         out.boxes.extend(g.boxes);
         if i == 0 {
-            out.grips.extend(g.grips.iter().filter(|(_, k)| *k == GripKind::Text).copied());
+            out.grips.extend(
+                g.grips
+                    .iter()
+                    .filter(|(_, k)| *k == GripKind::Text)
+                    .copied(),
+            );
         }
         out.attached.extend(g.attached);
         out.attached_dead.extend(g.attached_dead);
@@ -558,7 +653,12 @@ pub fn baseline_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel, b
 }
 
 /// An ordinate set's graphics.
-pub fn ordinate_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel, o: &Ordinate) -> Option<AnnGraphics> {
+pub fn ordinate_graphics(
+    style: &DrawingStyle,
+    view: &View,
+    m: &dyn ViewModel,
+    o: &Ordinate,
+) -> Option<AnnGraphics> {
     let sz = sizes(style);
     let h = sz.h;
     let (p0, _) = resolve_point(view, m, &o.origin)?;
@@ -574,12 +674,20 @@ pub fn ordinate_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel, o
     // The view's outline on the sheet (its visible edges' bounds).
     let outline = {
         let mut b: Option<(P2, P2)> = None;
-        for e in m.projection().edges.iter().filter(|e| e.visibility == cadrs_kernel::ProjVisibility::Visible) {
+        for e in m
+            .projection()
+            .edges
+            .iter()
+            .filter(|e| e.visibility == cadrs_kernel::ProjVisibility::Visible)
+        {
             for q in &e.points {
                 let p = view.to_sheet([q.x, q.y]);
                 b = Some(match b {
                     None => (p, p),
-                    Some((lo, hi)) => ([lo[0].min(p[0]), lo[1].min(p[1])], [hi[0].max(p[0]), hi[1].max(p[1])]),
+                    Some((lo, hi)) => (
+                        [lo[0].min(p[0]), lo[1].min(p[1])],
+                        [hi[0].max(p[0]), hi[1].max(p[1])],
+                    ),
                 });
             }
         }
@@ -596,12 +704,20 @@ pub fn ordinate_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel, o
         let (p, v) = pts[idx];
         let s = view.to_sheet(p);
         let label = style.format_length(v);
-        let (along, perp_len) = if o.vertical { (h, text_width(&label) * h) } else { (text_width(&label) * h, h) };
+        let (along, perp_len) = if o.vertical {
+            (h, text_width(&label) * h)
+        } else {
+            (text_width(&label) * h, h)
+        };
         let _ = perp_len;
         // The value's centre along the axis: the point's, pushed clear of the previous value.
         let want = s[i];
         let half = along / 2.0 + 0.4 * h;
-        let at = if want - half < last_end { last_end + half } else { want };
+        let at = if want - half < last_end {
+            last_end + half
+        } else {
+            want
+        };
         last_end = at + half;
         // The leader: from the point (a gap off) to the level, jogged to the value's place.
         let sgn = if level_s[j] >= s[j] { 1.0 } else { -1.0 };
@@ -630,7 +746,10 @@ pub fn ordinate_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel, o
         }
         // The value beyond the leader's end.
         let c = if o.vertical {
-            [end[0] + sgn * (0.6 * h + text_width(&label) * h / 2.0), end[1]]
+            [
+                end[0] + sgn * (0.6 * h + text_width(&label) * h / 2.0),
+                end[1],
+            ]
         } else {
             [end[0], end[1] + sgn * (0.6 * h + h / 2.0)]
         };
@@ -651,7 +770,14 @@ pub fn ordinate_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel, o
 /// With `angled` the leader leaves `tip` at least 30° off the vertical,
 /// the shoulder shortened to make room (the chamfer note, clear of an extension line through
 /// the chamfer's end; P3C wrap-up).
-fn leader_text_with(g: &mut AnnGraphics, sz: &Sz, tip: P2, t: P2, block: &TextBlock, angled: bool) -> P2 {
+fn leader_text_with(
+    g: &mut AnnGraphics,
+    sz: &Sz,
+    tip: P2,
+    t: P2,
+    block: &TextBlock,
+    angled: bool,
+) -> P2 {
     let right = t[0] >= tip[0];
     let w = {
         let l = layout_label(block, [0.0, 0.0], sz.h, false);
@@ -659,7 +785,11 @@ fn leader_text_with(g: &mut AnnGraphics, sz: &Sz, tip: P2, t: P2, block: &TextBl
     };
     let left_x = if right { t[0] } else { t[0] - w };
     let pad = 0.35 * sz.h;
-    let land_end = if right { [left_x - pad, t[1]] } else { [left_x + w + pad, t[1]] };
+    let land_end = if right {
+        [left_x - pad, t[1]]
+    } else {
+        [left_x + w + pad, t[1]]
+    };
     let mut land_start = add(land_end, [if right { -sz.arrow } else { sz.arrow }, 0.0]);
     if angled {
         let dx = 0.58 * (t[1] - tip[1]).abs();
@@ -676,7 +806,12 @@ fn leader_text_with(g: &mut AnnGraphics, sz: &Sz, tip: P2, t: P2, block: &TextBl
 }
 
 /// A chamfer dimension's graphics.
-pub fn chamfer_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel, c: &ChamferDim) -> Option<AnnGraphics> {
+pub fn chamfer_graphics(
+    style: &DrawingStyle,
+    view: &View,
+    m: &dyn ViewModel,
+    c: &ChamferDim,
+) -> Option<AnnGraphics> {
     let sz = sizes(style);
     let label = chamfer_text(style, chamfer_values(view, m, c)?);
     let t = view.to_sheet(c.text);
@@ -693,7 +828,12 @@ pub fn chamfer_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel, c:
 }
 
 /// An arc length dimension's graphics.
-pub fn arc_length_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel, a: &ArcLength) -> Option<AnnGraphics> {
+pub fn arc_length_graphics(
+    style: &DrawingStyle,
+    view: &View,
+    m: &dyn ViewModel,
+    a: &ArcLength,
+) -> Option<AnnGraphics> {
     let sz = sizes(style);
     let (c, r, start, sweep) = arc_of(view, m, &a.edge)?;
     let value = r * sweep;
@@ -745,14 +885,20 @@ pub fn arc_length_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel,
 }
 
 /// A feature control frame's graphics.
-pub fn fcf_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel, f: &FeatureControl) -> Option<AnnGraphics> {
+pub fn fcf_graphics(
+    style: &DrawingStyle,
+    view: &View,
+    m: &dyn ViewModel,
+    f: &FeatureControl,
+) -> Option<AnnGraphics> {
     let sz = sizes(style);
     let h = sz.h;
     let origin = view.to_sheet(f.text);
     let cells = fcf_cells(f, origin, h);
     let mut g = AnnGraphics::default();
     let (lo, hi) = (cells[0].0, cells[cells.len() - 1].1);
-    g.strokes.push(vec![lo, [hi[0], lo[1]], hi, [lo[0], hi[1]], lo]);
+    g.strokes
+        .push(vec![lo, [hi[0], lo[1]], hi, [lo[0], hi[1]], lo]);
     for c in &cells[1..] {
         g.strokes.push(vec![c.0, [c.0[0], c.1[1]]]);
     }
@@ -762,20 +908,30 @@ pub fn fcf_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel, f: &Fe
     let (s, fl) = gdt_strokes(f.characteristic, c0, 2.0 * h * 0.8);
     g.strokes.extend(s);
     g.fills.extend(fl);
-    g.symbols.push(([c0[0] - 0.4 * h, c0[1]], h, f.characteristic.char()));
+    g.symbols
+        .push(([c0[0] - 0.4 * h, c0[1]], h, f.characteristic.char()));
     // The tolerance: Ø, value, modifier.
     let pad = 0.5 * h;
     let mut x = cells[1].0[0] + pad;
     let y = origin[1];
     if f.diameter {
-        g.texts.push(PlacedText { pos: [x, y], height: h, text: "Ø".into() });
+        g.texts.push(PlacedText {
+            pos: [x, y],
+            height: h,
+            text: "Ø".into(),
+        });
         x += 0.85 * h;
     }
-    g.texts.push(PlacedText { pos: [x, y], height: h, text: f.tolerance.clone() });
+    g.texts.push(PlacedText {
+        pos: [x, y],
+        height: h,
+        text: f.tolerance.clone(),
+    });
     x += text_width(&f.tolerance) * h;
     if let Some(md) = f.modifier {
         let c = [x + 0.7 * h, y];
-        g.strokes.push(circle_pts(c, 0.62 * h, 0.0, std::f64::consts::TAU, 32));
+        g.strokes
+            .push(circle_pts(c, 0.62 * h, 0.0, std::f64::consts::TAU, 32));
         let circled = match md {
             Modifier::Mmc => 'Ⓜ',
             Modifier::Lmc => 'Ⓛ',
@@ -783,22 +939,45 @@ pub fn fcf_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel, f: &Fe
         };
         g.symbols.push(([c[0] - 0.4 * h, c[1]], h, circled));
         let w = text_width(md.letter()) * 0.8 * h;
-        g.texts.push(PlacedText { pos: [c[0] - w / 2.0, y], height: 0.8 * h, text: md.letter().into() });
+        g.texts.push(PlacedText {
+            pos: [c[0] - w / 2.0, y],
+            height: 0.8 * h,
+            text: md.letter().into(),
+        });
     }
     // The datums.
     for (d, c) in f.datums.iter().zip(&cells[2..]) {
         let cc = mul(add(c.0, c.1), 0.5);
         let w = text_width(d) * h;
-        g.texts.push(PlacedText { pos: [cc[0] - w / 2.0, cc[1]], height: h, text: d.clone() });
+        g.texts.push(PlacedText {
+            pos: [cc[0] - w / 2.0, cc[1]],
+            height: h,
+            text: d.clone(),
+        });
     }
     g.grips.push((origin, GripKind::Text));
     // The leader from the frame's nearer end to the feature.
     if let Some(e) = &f.edge
         && let Some((foot, _)) = edge_foot(view, m, e, origin)
     {
-        let from = if foot[0] < lo[0] { lo_mid(lo, hi, true) } else if foot[0] > hi[0] { lo_mid(lo, hi, false) } else if foot[1] < lo[1] { [(lo[0] + hi[0]) / 2.0, lo[1]] } else { [(lo[0] + hi[0]) / 2.0, hi[1]] };
+        let from = if foot[0] < lo[0] {
+            lo_mid(lo, hi, true)
+        } else if foot[0] > hi[0] {
+            lo_mid(lo, hi, false)
+        } else if foot[1] < lo[1] {
+            [(lo[0] + hi[0]) / 2.0, lo[1]]
+        } else {
+            [(lo[0] + hi[0]) / 2.0, hi[1]]
+        };
         // An elbow: out of the frame horizontally, then to the feature.
-        let elbow = if from[1] == (lo[1] + hi[1]) / 2.0 { add(from, [if foot[0] < lo[0] { -sz.arrow } else { sz.arrow }, 0.0]) } else { from };
+        let elbow = if from[1] == (lo[1] + hi[1]) / 2.0 {
+            add(
+                from,
+                [if foot[0] < lo[0] { -sz.arrow } else { sz.arrow }, 0.0],
+            )
+        } else {
+            from
+        };
         g.strokes.push(vec![from, elbow, foot]);
         arrow(&mut g, foot, sub(foot, elbow), sz.arrow);
         g.grips.push((foot, GripKind::Attach(0)));
@@ -812,18 +991,31 @@ fn lo_mid(lo: P2, hi: P2, left: bool) -> P2 {
 }
 
 /// A datum feature symbol's graphics.
-pub fn datum_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel, d: &Datum) -> Option<AnnGraphics> {
+pub fn datum_graphics(
+    style: &DrawingStyle,
+    view: &View,
+    m: &dyn ViewModel,
+    d: &Datum,
+) -> Option<AnnGraphics> {
     let sz = sizes(style);
     let h = sz.h;
     let c = view.to_sheet(d.text);
     let (foot, dir) = edge_foot(view, m, &d.edge, c)?;
     let mut g = AnnGraphics::default();
     // The box.
-    let half = [(text_width(&d.letter) * h + 1.2 * h).max(2.2 * h) / 2.0, 1.1 * h];
+    let half = [
+        (text_width(&d.letter) * h + 1.2 * h).max(2.2 * h) / 2.0,
+        1.1 * h,
+    ];
     let (lo, hi) = (sub(c, half), add(c, half));
-    g.strokes.push(vec![lo, [hi[0], lo[1]], hi, [lo[0], hi[1]], lo]);
+    g.strokes
+        .push(vec![lo, [hi[0], lo[1]], hi, [lo[0], hi[1]], lo]);
     let w = text_width(&d.letter) * h;
-    g.texts.push(PlacedText { pos: [c[0] - w / 2.0, c[1]], height: h, text: d.letter.clone() });
+    g.texts.push(PlacedText {
+        pos: [c[0] - w / 2.0, c[1]],
+        height: h,
+        text: d.letter.clone(),
+    });
     g.boxes.push((lo, hi));
     // The triangle on the feature, pointing at the box, and the leader from its apex.
     let mut n = perp(dir);
@@ -832,7 +1024,11 @@ pub fn datum_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel, d: &
     }
     let t = 1.0 * h;
     let apex = add(foot, mul(n, t * 0.87));
-    g.fills.push([add(foot, mul(dir, t / 2.0)), sub(foot, mul(dir, t / 2.0)), apex]);
+    g.fills.push([
+        add(foot, mul(dir, t / 2.0)),
+        sub(foot, mul(dir, t / 2.0)),
+        apex,
+    ]);
     // The leader leaves the box's side facing the feature.
     let to_box = if (c[1] - apex[1]).abs() >= (c[0] - apex[0]).abs() {
         [c[0], if apex[1] < c[1] { lo[1] } else { hi[1] }]
@@ -847,7 +1043,12 @@ pub fn datum_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel, d: &
 }
 
 /// A surface finish symbol's graphics.
-pub fn finish_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel, f: &SurfaceFinish) -> Option<AnnGraphics> {
+pub fn finish_graphics(
+    style: &DrawingStyle,
+    view: &View,
+    m: &dyn ViewModel,
+    f: &SurfaceFinish,
+) -> Option<AnnGraphics> {
     let sz = sizes(style);
     let h = sz.h;
     let v = view.to_sheet(f.text);
@@ -868,21 +1069,38 @@ pub fn finish_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel, f: 
         }
         FinishKind::RemovalProhibited => {
             let r = s * 0.35;
-            g.strokes.push(circle_pts(add(v, [0.0, s * s60 * 0.55]), r, 0.0, std::f64::consts::TAU, 32));
+            g.strokes.push(circle_pts(
+                add(v, [0.0, s * s60 * 0.55]),
+                r,
+                0.0,
+                std::f64::consts::TAU,
+                32,
+            ));
         }
     }
     // The value on a line out from the long leg's top.
     let line_len = (text_width(&f.value) * h + 0.8 * h).max(2.0 * h);
     if !f.value.is_empty() {
-        g.strokes.push(vec![long_top, add(long_top, [line_len, 0.0])]);
-        g.texts.push(PlacedText { pos: [long_top[0] + 0.4 * h, long_top[1] + 0.9 * h], height: h, text: f.value.clone() });
+        g.strokes
+            .push(vec![long_top, add(long_top, [line_len, 0.0])]);
+        g.texts.push(PlacedText {
+            pos: [long_top[0] + 0.4 * h, long_top[1] + 0.9 * h],
+            height: h,
+            text: f.value.clone(),
+        });
     }
     // A leader when the point is off the surface.
     if dist(foot, v) > 0.5 {
         g.strokes.push(vec![foot, v]);
         arrow(&mut g, foot, sub(foot, v), sz.arrow);
     }
-    g.boxes.push(([short_top[0], v[1]], [long_top[0] + if f.value.is_empty() { 0.0 } else { line_len }, long_top[1] + 1.6 * h]));
+    g.boxes.push((
+        [short_top[0], v[1]],
+        [
+            long_top[0] + if f.value.is_empty() { 0.0 } else { line_len },
+            long_top[1] + 1.6 * h,
+        ],
+    ));
     g.grips.push((v, GripKind::Text));
     g.grips.push((foot, GripKind::Attach(0)));
     attach(&mut g, view, m, &f.edge);
@@ -894,17 +1112,30 @@ fn weld_symbol(g: &mut AnnGraphics, kind: WeldKind, x: f64, y: f64, up: f64, h: 
     match kind {
         WeldKind::None => {}
         // The perpendicular leg on the left.
-        WeldKind::Fillet => g.strokes.push(vec![[x, y], [x, y + up * s], [x + s, y], [x, y]]),
-        WeldKind::VGroove => g.strokes.push(vec![[x - s * 0.5, y + up * s], [x, y], [x + s * 0.5, y + up * s]]),
+        WeldKind::Fillet => g
+            .strokes
+            .push(vec![[x, y], [x, y + up * s], [x + s, y], [x, y]]),
+        WeldKind::VGroove => g.strokes.push(vec![
+            [x - s * 0.5, y + up * s],
+            [x, y],
+            [x + s * 0.5, y + up * s],
+        ]),
         WeldKind::Square => {
-            g.strokes.push(vec![[x - 0.3 * s, y], [x - 0.3 * s, y + up * s]]);
-            g.strokes.push(vec![[x + 0.3 * s, y], [x + 0.3 * s, y + up * s]]);
+            g.strokes
+                .push(vec![[x - 0.3 * s, y], [x - 0.3 * s, y + up * s]]);
+            g.strokes
+                .push(vec![[x + 0.3 * s, y], [x + 0.3 * s, y + up * s]]);
         }
     }
 }
 
 /// A weld symbol's graphics.
-pub fn weld_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel, w: &Weld) -> Option<AnnGraphics> {
+pub fn weld_graphics(
+    style: &DrawingStyle,
+    view: &View,
+    m: &dyn ViewModel,
+    w: &Weld,
+) -> Option<AnnGraphics> {
     let sz = sizes(style);
     let h = sz.h;
     let start = view.to_sheet(w.text);
@@ -923,19 +1154,36 @@ pub fn weld_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel, w: &W
     weld_symbol(&mut g, w.other_side, sx, start[1], 1.0, h);
     if !w.size.is_empty() {
         let tw = text_width(&w.size) * h;
-        let tx = sx - 0.5 * h - tw - if matches!(w.arrow_side, WeldKind::VGroove | WeldKind::Square) { 0.8 * h } else { 0.0 };
+        let tx = sx
+            - 0.5 * h
+            - tw
+            - if matches!(w.arrow_side, WeldKind::VGroove | WeldKind::Square) {
+                0.8 * h
+            } else {
+                0.0
+            };
         if w.arrow_side != WeldKind::None {
-            g.texts.push(PlacedText { pos: [tx, start[1] - 0.9 * h], height: h, text: w.size.clone() });
+            g.texts.push(PlacedText {
+                pos: [tx, start[1] - 0.9 * h],
+                height: h,
+                text: w.size.clone(),
+            });
         }
         if w.other_side != WeldKind::None {
-            g.texts.push(PlacedText { pos: [tx, start[1] + 0.9 * h], height: h, text: w.size.clone() });
+            g.texts.push(PlacedText {
+                pos: [tx, start[1] + 0.9 * h],
+                height: h,
+                text: w.size.clone(),
+            });
         }
     }
     if w.all_around {
-        g.strokes.push(circle_pts(start, 0.6 * h, 0.0, std::f64::consts::TAU, 32));
+        g.strokes
+            .push(circle_pts(start, 0.6 * h, 0.0, std::f64::consts::TAU, 32));
     }
     let (x0, x1) = (start[0].min(end[0]), start[0].max(end[0]));
-    g.boxes.push(([x0, start[1] - 2.0 * h], [x1, start[1] + 2.0 * h]));
+    g.boxes
+        .push(([x0, start[1] - 2.0 * h], [x1, start[1] + 2.0 * h]));
     g.grips.push((start, GripKind::Text));
     g.grips.push((foot, GripKind::Attach(0)));
     attach(&mut g, view, m, &w.edge);
@@ -964,7 +1212,13 @@ mod tests {
             assert!((w[0].1[0] - w[1].0[0]).abs() < 1e-12);
         }
         assert!(cells.iter().all(|c| (c.1[1] - c.0[1] - 6.0).abs() < 1e-12));
-        let no_datum = FeatureControl { characteristic: Gdt::Flatness, datums: Vec::new(), diameter: false, modifier: None, ..f };
+        let no_datum = FeatureControl {
+            characteristic: Gdt::Flatness,
+            datums: Vec::new(),
+            diameter: false,
+            modifier: None,
+            ..f
+        };
         assert_eq!(fcf_cells(&no_datum, [0.0, 0.0], 3.0).len(), 2);
     }
 
@@ -978,7 +1232,12 @@ mod tests {
             let (s, f) = gdt_strokes(g, [0.0, 0.0], 10.0);
             assert!(!s.is_empty(), "{g:?}");
             // Every stroke inside its cell.
-            assert!(s.iter().flatten().all(|p| p[0].abs() <= 5.0 && p[1].abs() <= 5.0), "{g:?}");
+            assert!(
+                s.iter()
+                    .flatten()
+                    .all(|p| p[0].abs() <= 5.0 && p[1].abs() <= 5.0),
+                "{g:?}"
+            );
             drawn.insert(format!("{s:?}{f:?}"));
         }
         assert_eq!(drawn.len(), 14);

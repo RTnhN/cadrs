@@ -76,16 +76,29 @@ pub struct FilePickerState {
 pub fn split_names(text: &str) -> Vec<String> {
     let t = text.trim();
     if !t.contains('"') {
-        return if t.is_empty() { vec![] } else { vec![t.to_string()] };
+        return if t.is_empty() {
+            vec![]
+        } else {
+            vec![t.to_string()]
+        };
     }
-    t.split('"').enumerate().filter(|(i, _)| i % 2 == 1).map(|(_, n)| n.trim().to_string()).filter(|n| !n.is_empty()).collect()
+    t.split('"')
+        .enumerate()
+        .filter(|(i, _)| i % 2 == 1)
+        .map(|(_, n)| n.trim().to_string())
+        .filter(|n| !n.is_empty())
+        .collect()
 }
 
 /// The File name field's text for picked names: the one name, or each name quoted.
 pub fn join_names(names: &[String]) -> String {
     match names {
         [one] => one.clone(),
-        many => many.iter().map(|n| format!("\"{n}\"")).collect::<Vec<_>>().join(" "),
+        many => many
+            .iter()
+            .map(|n| format!("\"{n}\""))
+            .collect::<Vec<_>>()
+            .join(" "),
     }
 }
 
@@ -105,11 +118,21 @@ pub fn list_dir(dir: &Path, extensions: &[String]) -> Vec<(String, bool, u64)> {
             if meta.is_dir() {
                 return Some((name, true, 0));
             }
-            let ext = Path::new(&name).extension().map(|x| x.to_string_lossy().to_lowercase()).unwrap_or_default();
-            (extensions.is_empty() || extensions.contains(&ext)).then_some((name, false, meta.len()))
+            let ext = Path::new(&name)
+                .extension()
+                .map(|x| x.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+            (extensions.is_empty() || extensions.contains(&ext)).then_some((
+                name,
+                false,
+                meta.len(),
+            ))
         })
         .collect();
-    out.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase())));
+    out.sort_by(|a, b| {
+        b.1.cmp(&a.1)
+            .then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase()))
+    });
     out
 }
 
@@ -134,7 +157,17 @@ pub fn open_file_picker(
     dir: PathBuf,
     extensions: &[&str],
 ) {
-    open_picker(commands, theme, name.into().into_owned(), title, tag, dir, extensions, false, false);
+    open_picker(
+        commands,
+        theme,
+        name.into().into_owned(),
+        title,
+        tag,
+        dir,
+        extensions,
+        false,
+        false,
+    );
 }
 
 /// Opens a picker for several files at once (see the module docs); the pick comes back as
@@ -148,13 +181,40 @@ pub fn open_files_picker(
     dir: PathBuf,
     extensions: &[&str],
 ) {
-    open_picker(commands, theme, name.into().into_owned(), title, tag, dir, extensions, false, true);
+    open_picker(
+        commands,
+        theme,
+        name.into().into_owned(),
+        title,
+        tag,
+        dir,
+        extensions,
+        false,
+        true,
+    );
 }
 
 /// Opens a folder picker (Browse… for a folder): the list shows subfolders, a click opens one,
 /// and Select folder picks the folder shown. The pick arrives as [`FilePicked`] with `tag`.
-pub fn open_folder_picker(commands: &mut Commands, theme: &Theme, name: impl Into<Cow<'static, str>>, title: &str, tag: &str, dir: PathBuf) {
-    open_picker(commands, theme, name.into().into_owned(), title, tag, dir, &[], true, false);
+pub fn open_folder_picker(
+    commands: &mut Commands,
+    theme: &Theme,
+    name: impl Into<Cow<'static, str>>,
+    title: &str,
+    tag: &str,
+    dir: PathBuf,
+) {
+    open_picker(
+        commands,
+        theme,
+        name.into().into_owned(),
+        title,
+        tag,
+        dir,
+        &[],
+        true,
+        false,
+    );
 }
 
 /// The folder as the picker shows it (P3E.2, P3E.1 judge: goldens mustn't depend on where the
@@ -164,7 +224,11 @@ pub fn display_dir(dir: &std::path::Path) -> String {
     let rel = |base: Option<PathBuf>, prefix: &str| {
         let base = base.and_then(|b| std::fs::canonicalize(&b).ok().or(Some(b)))?;
         let r = dir.strip_prefix(&base).ok()?;
-        Some(if r.as_os_str().is_empty() { prefix.to_string() } else { format!("{prefix}/{}", r.display()) })
+        Some(if r.as_os_str().is_empty() {
+            prefix.to_string()
+        } else {
+            format!("{prefix}/{}", r.display())
+        })
     };
     rel(std::env::current_dir().ok(), ".")
         .or_else(|| rel(std::env::var_os("HOME").map(PathBuf::from), "~"))
@@ -172,7 +236,17 @@ pub fn display_dir(dir: &std::path::Path) -> String {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn open_picker(commands: &mut Commands, theme: &Theme, name: String, title: &str, tag: &str, dir: PathBuf, extensions: &[&str], folders_only: bool, multi: bool) {
+fn open_picker(
+    commands: &mut Commands,
+    theme: &Theme,
+    name: String,
+    title: &str,
+    tag: &str,
+    dir: PathBuf,
+    extensions: &[&str],
+    folders_only: bool,
+    multi: bool,
+) {
     let dir = std::fs::canonicalize(&dir).unwrap_or(dir);
     let t = theme.clone();
     let (tb, tf) = (t.clone(), t.clone());
@@ -181,122 +255,168 @@ fn open_picker(commands: &mut Commands, theme: &Theme, name: String, title: &str
     let types = if extensions.is_empty() {
         "All files".to_string()
     } else {
-        extensions.iter().map(|e| format!("*.{e}")).collect::<Vec<_>>().join(", ")
+        extensions
+            .iter()
+            .map(|e| format!("*.{e}"))
+            .collect::<Vec<_>>()
+            .join(", ")
     };
-    commands
-        .spawn((
-            Dialog::new(name.clone())
-                .title(title.to_string())
-                .width(560.0)
-                .body(move |b| {
-                    let t = &tb;
-                    let n = &n1;
-                    b.spawn(Node { column_gap: Val::Px(6.0), align_items: AlignItems::Center, width: Val::Percent(100.0), ..default() })
-                        .with_children(|row| {
-                            row.spawn(t.text("Look in", t.font_base, FontWeight::MEDIUM, t.foreground));
-                            row.spawn(TextInput::new(format!("{n}-folder")).value(dir_text).width(Val::Percent(100.0)).height(30.0).build(t));
-                            let nn = n.clone();
-                            row.spawn((
-                                IconButton::new(format!("{n}-up"), "arrow-up").tooltip("Up one folder").build(t),
-                                observe(move |_: On<Activate>, mut commands: Commands| {
-                                    let nn = nn.clone();
-                                    commands.queue(move |w: &mut World| {
-                                        update(w, &nn, |s| {
-                                            if let Some(p) = s.dir.parent() {
-                                                s.dir = p.to_path_buf();
-                                                s.selected = None;
-                                            }
-                                        })
-                                    });
-                                }),
-                            ));
-                        });
-                    b.spawn((
-                        Name::new(format!("{n}-list-frame")),
-                        Node {
-                            height: Val::Px(260.0),
-                            width: Val::Percent(100.0),
-                            margin: UiRect::vertical(Val::Px(8.0)),
-                            border: UiRect::all(Val::Px(1.0)),
-                            ..default()
-                        },
-                        BorderColor::all(Color::srgb_u8(0xd0, 0xd0, 0xd0)),
-                    ))
-                    .with_children(|f| {
-                        let list = f
-                            .spawn((
-                                Name::new(format!("{n}-list")),
-                                bevy::ui_widgets::ScrollArea,
-                                Node {
-                                    flex_grow: 1.0,
-                                    flex_direction: FlexDirection::Column,
-                                    overflow: Overflow::scroll_y(),
-                                    padding: UiRect::right(Val::Px(14.0)),
-                                    ..default()
-                                },
-                            ))
-                            .id();
-                        f.spawn(crate::scrollbar::vertical_scrollbar(t, &format!("{n}-list-scrollbar"), list));
-                    });
-                    if !folders_only {
-                        b.spawn(Node { column_gap: Val::Px(6.0), align_items: AlignItems::Center, width: Val::Percent(100.0), ..default() })
-                            .with_children(|row| {
-                                row.spawn(t.text("File name", t.font_base, FontWeight::MEDIUM, t.foreground));
-                                row.spawn(TextInput::new(format!("{n}-name")).width(Val::Percent(100.0)).height(30.0).build(t));
-                            });
-                    }
-                    b.spawn((
-                        Name::new(format!("{n}-types")),
-                        t.text(
-                            if folders_only {
-                                "Open a folder, then Select folder".to_string()
-                            } else if multi {
-                                format!("Files of type: {types}. Ctrl+click to choose several files")
-                            } else {
-                                format!("Files of type: {types}")
-                            },
-                            t.font_sm,
-                            FontWeight::NORMAL,
-                            t.muted_foreground,
-                        ),
-                    ));
+    commands.spawn((
+        Dialog::new(name.clone())
+            .title(title.to_string())
+            .width(560.0)
+            .body(move |b| {
+                let t = &tb;
+                let n = &n1;
+                b.spawn(Node {
+                    column_gap: Val::Px(6.0),
+                    align_items: AlignItems::Center,
+                    width: Val::Percent(100.0),
+                    ..default()
                 })
-                .footer(move |f| {
-                    let t = &tf;
-                    let n = n2.clone();
-                    let n_open = n.clone();
-                    f.spawn((
-                        Button::new(format!("{n}-open")).label(if folders_only { "Select folder" } else { "Open" }).primary().build(t),
+                .with_children(|row| {
+                    row.spawn(t.text("Look in", t.font_base, FontWeight::MEDIUM, t.foreground));
+                    row.spawn(
+                        TextInput::new(format!("{n}-folder"))
+                            .value(dir_text)
+                            .width(Val::Percent(100.0))
+                            .height(30.0)
+                            .build(t),
+                    );
+                    let nn = n.clone();
+                    row.spawn((
+                        IconButton::new(format!("{n}-up"), "arrow-up")
+                            .tooltip("Up one folder")
+                            .build(t),
                         observe(move |_: On<Activate>, mut commands: Commands| {
-                            let n = n_open.clone();
-                            commands.queue(move |w: &mut World| accept(w, &n));
+                            let nn = nn.clone();
+                            commands.queue(move |w: &mut World| {
+                                update(w, &nn, |s| {
+                                    if let Some(p) = s.dir.parent() {
+                                        s.dir = p.to_path_buf();
+                                        s.selected = None;
+                                    }
+                                })
+                            });
                         }),
                     ));
-                    let n_cancel = n.clone();
-                    f.spawn((
-                        Button::new(format!("{n}-cancel")).label("Cancel").build(t),
-                        observe(move |_: On<Activate>, q: Query<(Entity, &FilePickerState)>, mut commands: Commands| {
+                });
+                b.spawn((
+                    Name::new(format!("{n}-list-frame")),
+                    Node {
+                        height: Val::Px(260.0),
+                        width: Val::Percent(100.0),
+                        margin: UiRect::vertical(Val::Px(8.0)),
+                        border: UiRect::all(Val::Px(1.0)),
+                        ..default()
+                    },
+                    BorderColor::all(Color::srgb_u8(0xd0, 0xd0, 0xd0)),
+                ))
+                .with_children(|f| {
+                    let list = f
+                        .spawn((
+                            Name::new(format!("{n}-list")),
+                            bevy::ui_widgets::ScrollArea,
+                            Node {
+                                flex_grow: 1.0,
+                                flex_direction: FlexDirection::Column,
+                                overflow: Overflow::scroll_y(),
+                                padding: UiRect::right(Val::Px(14.0)),
+                                ..default()
+                            },
+                        ))
+                        .id();
+                    f.spawn(crate::scrollbar::vertical_scrollbar(
+                        t,
+                        &format!("{n}-list-scrollbar"),
+                        list,
+                    ));
+                });
+                if !folders_only {
+                    b.spawn(Node {
+                        column_gap: Val::Px(6.0),
+                        align_items: AlignItems::Center,
+                        width: Val::Percent(100.0),
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        row.spawn(t.text(
+                            "File name",
+                            t.font_base,
+                            FontWeight::MEDIUM,
+                            t.foreground,
+                        ));
+                        row.spawn(
+                            TextInput::new(format!("{n}-name"))
+                                .width(Val::Percent(100.0))
+                                .height(30.0)
+                                .build(t),
+                        );
+                    });
+                }
+                b.spawn((
+                    Name::new(format!("{n}-types")),
+                    t.text(
+                        if folders_only {
+                            "Open a folder, then Select folder".to_string()
+                        } else if multi {
+                            format!("Files of type: {types}. Ctrl+click to choose several files")
+                        } else {
+                            format!("Files of type: {types}")
+                        },
+                        t.font_sm,
+                        FontWeight::NORMAL,
+                        t.muted_foreground,
+                    ),
+                ));
+            })
+            .footer(move |f| {
+                let t = &tf;
+                let n = n2.clone();
+                let n_open = n.clone();
+                f.spawn((
+                    Button::new(format!("{n}-open"))
+                        .label(if folders_only {
+                            "Select folder"
+                        } else {
+                            "Open"
+                        })
+                        .primary()
+                        .build(t),
+                    observe(move |_: On<Activate>, mut commands: Commands| {
+                        let n = n_open.clone();
+                        commands.queue(move |w: &mut World| accept(w, &n));
+                    }),
+                ));
+                let n_cancel = n.clone();
+                f.spawn((
+                    Button::new(format!("{n}-cancel")).label("Cancel").build(t),
+                    observe(
+                        move |_: On<Activate>,
+                              q: Query<(Entity, &FilePickerState)>,
+                              mut commands: Commands| {
                             for (e, s) in &q {
                                 if s.name == n_cancel {
                                     commands.trigger(DialogClose { entity: e });
                                 }
                             }
-                        }),
-                    ));
-                })
-                .build(theme),
-            FilePickerState {
-                name: name.clone(),
-                tag: tag.to_string(),
-                dir,
-                extensions: extensions.iter().map(|e| e.to_lowercase()).collect(),
-                selected: None,
-                folders_only,
-                multi,
-                picked: Vec::new(),
-                shown: None,
-            },
-        ));
+                        },
+                    ),
+                ));
+            })
+            .build(theme),
+        FilePickerState {
+            name: name.clone(),
+            tag: tag.to_string(),
+            dir,
+            extensions: extensions.iter().map(|e| e.to_lowercase()).collect(),
+            selected: None,
+            folders_only,
+            multi,
+            picked: Vec::new(),
+            shown: None,
+        },
+    ));
 }
 
 fn update(w: &mut World, name: &str, f: impl FnOnce(&mut FilePickerState)) {
@@ -308,7 +428,9 @@ fn update(w: &mut World, name: &str, f: impl FnOnce(&mut FilePickerState)) {
 
 fn field_text(w: &mut World, name: &str) -> Option<String> {
     let mut q = w.query_filtered::<(&Name, &EditableText), With<TextInputField>>();
-    q.iter(w).find(|(n, _)| n.as_str() == name).map(|(_, t)| t.value().to_string())
+    q.iter(w)
+        .find(|(n, _)| n.as_str() == name)
+        .map(|(_, t)| t.value().to_string())
 }
 
 fn set_field(w: &mut World, name: &str, value: &str) {
@@ -322,19 +444,39 @@ fn set_field(w: &mut World, name: &str, value: &str) {
 /// Open (or Enter in the name field): a folder opens, a file is picked.
 fn accept(w: &mut World, name: &str) {
     let mut q = w.query::<(Entity, &FilePickerState)>();
-    let Some((root, state)) = q.iter(w).find(|(_, s)| s.name == name).map(|(e, s)| (e, s.clone())) else {
+    let Some((root, state)) = q
+        .iter(w)
+        .find(|(_, s)| s.name == name)
+        .map(|(e, s)| (e, s.clone()))
+    else {
         return;
     };
     if state.folders_only {
-        w.write_message(FilePicked { tag: state.tag.clone(), path: state.dir.clone() });
+        w.write_message(FilePicked {
+            tag: state.tag.clone(),
+            path: state.dir.clone(),
+        });
         w.trigger(DialogClose { entity: root });
         return;
     }
     let typed = field_text(w, &format!("{name}-name-field")).unwrap_or_default();
     if state.multi {
         let names = split_names(&typed);
-        let names = if names.is_empty() { state.picked.clone() } else { names };
-        let paths: Vec<PathBuf> = names.iter().map(|n| if Path::new(n).is_absolute() { PathBuf::from(n) } else { state.dir.join(n) }).collect();
+        let names = if names.is_empty() {
+            state.picked.clone()
+        } else {
+            names
+        };
+        let paths: Vec<PathBuf> = names
+            .iter()
+            .map(|n| {
+                if Path::new(n).is_absolute() {
+                    PathBuf::from(n)
+                } else {
+                    state.dir.join(n)
+                }
+            })
+            .collect();
         if let [one] = paths.as_slice()
             && one.is_dir()
         {
@@ -350,16 +492,27 @@ fn accept(w: &mut World, name: &str) {
         if paths.is_empty() || !paths.iter().all(|p| p.is_file()) {
             return;
         }
-        w.write_message(FilesPicked { tag: state.tag.clone(), paths });
+        w.write_message(FilesPicked {
+            tag: state.tag.clone(),
+            paths,
+        });
         w.trigger(DialogClose { entity: root });
         return;
     }
     let typed = typed.trim();
-    let chosen = if typed.is_empty() { state.selected.clone().unwrap_or_default() } else { typed.to_string() };
+    let chosen = if typed.is_empty() {
+        state.selected.clone().unwrap_or_default()
+    } else {
+        typed.to_string()
+    };
     if chosen.is_empty() {
         return;
     }
-    let path = if Path::new(&chosen).is_absolute() { PathBuf::from(&chosen) } else { state.dir.join(&chosen) };
+    let path = if Path::new(&chosen).is_absolute() {
+        PathBuf::from(&chosen)
+    } else {
+        state.dir.join(&chosen)
+    };
     if path.is_dir() {
         update(w, name, |s| {
             s.dir = path;
@@ -371,12 +524,20 @@ fn accept(w: &mut World, name: &str) {
     if !path.is_file() {
         return;
     }
-    w.write_message(FilePicked { tag: state.tag.clone(), path });
+    w.write_message(FilePicked {
+        tag: state.tag.clone(),
+        path,
+    });
     w.trigger(DialogClose { entity: root });
 }
 
 /// Enter in the folder field opens that folder; in the name field, accepts.
-fn on_submit(ev: On<TextSubmit>, q: Query<&Name>, q_state: Query<&FilePickerState>, mut commands: Commands) {
+fn on_submit(
+    ev: On<TextSubmit>,
+    q: Query<&Name>,
+    q_state: Query<&FilePickerState>,
+    mut commands: Commands,
+) {
     let Ok(n) = q.get(ev.entity) else { return };
     for s in &q_state {
         if n.as_str() == format!("{}-folder-field", s.name) {
@@ -385,7 +546,9 @@ fn on_submit(ev: On<TextSubmit>, q: Query<&Name>, q_state: Query<&FilePickerStat
                 // "~/…" is the home folder (as the field shows it, [`display_dir`]).
                 let v = value.trim();
                 let p = match (v.strip_prefix('~'), std::env::var_os("HOME")) {
-                    (Some(rest), Some(home)) => PathBuf::from(home).join(rest.trim_start_matches('/')),
+                    (Some(rest), Some(home)) => {
+                        PathBuf::from(home).join(rest.trim_start_matches('/'))
+                    }
                     _ => PathBuf::from(v),
                 };
                 if p.is_dir() {
@@ -403,11 +566,23 @@ fn on_submit(ev: On<TextSubmit>, q: Query<&Name>, q_state: Query<&FilePickerStat
 }
 
 /// Fills a picker's list when its folder or selection changes.
-fn rebuild_lists(mut q: Query<(Entity, &mut FilePickerState)>, q_names: Query<(Entity, &Name)>, theme: Res<Theme>, mut commands: Commands) {
+fn rebuild_lists(
+    mut q: Query<(Entity, &mut FilePickerState)>,
+    q_names: Query<(Entity, &Name)>,
+    theme: Res<Theme>,
+    mut commands: Commands,
+) {
     for (_, mut state) in &mut q {
         let list_name = format!("{}-list", state.name);
-        let Some((list, _)) = q_names.iter().find(|(_, n)| n.as_str() == list_name) else { continue };
-        let key = format!("{}|{}|{}", state.dir.display(), state.selected.as_deref().unwrap_or(""), state.picked.join("|"));
+        let Some((list, _)) = q_names.iter().find(|(_, n)| n.as_str() == list_name) else {
+            continue;
+        };
+        let key = format!(
+            "{}|{}|{}",
+            state.dir.display(),
+            state.selected.as_deref().unwrap_or(""),
+            state.picked.join("|")
+        );
         if state.shown.as_ref() == Some(&key) {
             continue;
         }
@@ -427,8 +602,16 @@ fn rebuild_lists(mut q: Query<(Entity, &mut FilePickerState)>, q_names: Query<(E
             if entries.is_empty() {
                 l.spawn((
                     Name::new(format!("{name}-empty")),
-                    t.text("No matching files in this folder", t.font_base, FontWeight::NORMAL, t.muted_foreground),
-                    Node { margin: UiRect::all(Val::Px(10.0)), ..default() },
+                    t.text(
+                        "No matching files in this folder",
+                        t.font_base,
+                        FontWeight::NORMAL,
+                        t.muted_foreground,
+                    ),
+                    Node {
+                        margin: UiRect::all(Val::Px(10.0)),
+                        ..default()
+                    },
                 ));
             }
             for (file, is_dir, size) in entries {
@@ -437,8 +620,16 @@ fn rebuild_lists(mut q: Query<(Entity, &mut FilePickerState)>, q_names: Query<(E
                     .icon(if is_dir { "folder" } else { "file" })
                     .label(file.clone())
                     .height(26.0)
-                    .selected(if multi { picked.contains(&file) } else { selected.as_deref() == Some(file.as_str()) });
-                let item = if is_dir { item } else { item.detail(size_label(size)) };
+                    .selected(if multi {
+                        picked.contains(&file)
+                    } else {
+                        selected.as_deref() == Some(file.as_str())
+                    });
+                let item = if is_dir {
+                    item
+                } else {
+                    item.detail(size_label(size))
+                };
                 let (n1, f1, n2) = (name.clone(), file.clone(), name.clone());
                 l.spawn((
                     item.build(&t),
@@ -454,9 +645,15 @@ fn rebuild_lists(mut q: Query<(Entity, &mut FilePickerState)>, q_names: Query<(E
                                 });
                                 set_field(w, &format!("{n}-name-field"), "");
                             } else if multi {
-                                let add = w.get_resource::<ButtonInput<KeyCode>>().is_some_and(|k| {
-                                    k.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight, KeyCode::ShiftLeft, KeyCode::ShiftRight])
-                                });
+                                let add =
+                                    w.get_resource::<ButtonInput<KeyCode>>().is_some_and(|k| {
+                                        k.any_pressed([
+                                            KeyCode::ControlLeft,
+                                            KeyCode::ControlRight,
+                                            KeyCode::ShiftLeft,
+                                            KeyCode::ShiftRight,
+                                        ])
+                                    });
                                 let mut names = Vec::new();
                                 update(w, &n, |s| {
                                     if !add {
@@ -505,7 +702,10 @@ mod tests {
     fn names_split_and_join() {
         assert_eq!(split_names(""), Vec::<String>::new());
         assert_eq!(split_names(" Vision PCB.emn "), ["Vision PCB.emn"]);
-        assert_eq!(split_names(r#""Vision PCB.emn" "Vision PCB.emp""#), ["Vision PCB.emn", "Vision PCB.emp"]);
+        assert_eq!(
+            split_names(r#""Vision PCB.emn" "Vision PCB.emp""#),
+            ["Vision PCB.emn", "Vision PCB.emp"]
+        );
         let names = vec!["a b.emn".to_string(), "c.emp".to_string()];
         assert_eq!(split_names(&join_names(&names)), names);
         assert_eq!(join_names(&names[..1]), "a b.emn");

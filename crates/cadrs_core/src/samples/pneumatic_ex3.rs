@@ -14,8 +14,12 @@ use super::pneumatic_ex2 as ex2;
 use crate::assembly::commands::SetInstancesFixed;
 use crate::assembly::folders::{CreateAssemblyFolder, FolderList, MoveListItems, item};
 use crate::assembly::mate::MateId;
-use crate::assembly::standard::{HoleSite, StandardPart, StandardSpec, Stacking, plan_insert, site_of_edge};
-use crate::assembly::structure::{DissolveSubassembly, MoveIntoSubassembly, MoveOutOfSubassembly, MoveToNewSubassembly, derive};
+use crate::assembly::standard::{
+    HoleSite, Stacking, StandardPart, StandardSpec, plan_insert, site_of_edge,
+};
+use crate::assembly::structure::{
+    DissolveSubassembly, MoveIntoSubassembly, MoveOutOfSubassembly, MoveToNewSubassembly, derive,
+};
 use crate::assembly::{self, InstanceId};
 use crate::command::{Command, CommandError, History};
 use crate::commands::{DeleteElement, RenameElement};
@@ -33,7 +37,8 @@ pub const TOP_SUB: InstanceId = InstanceId::from_u128(0x3b04_0000_0000_0000_0000
 pub const REAR_SUB_EL: ElementId = ElementId::from_u128(0x3b04_0000_0000_0000_0000_0000_0000_0302);
 pub const REAR_SUB: InstanceId = InstanceId::from_u128(0x3b04_0000_0000_0000_0000_0000_0000_3002);
 /// The Piston subassembly (made, dissolved, its tab deleted).
-pub const PISTON_SUB_EL: ElementId = ElementId::from_u128(0x3b04_0000_0000_0000_0000_0000_0000_0303);
+pub const PISTON_SUB_EL: ElementId =
+    ElementId::from_u128(0x3b04_0000_0000_0000_0000_0000_0000_0303);
 pub const PISTON_SUB: InstanceId = InstanceId::from_u128(0x3b04_0000_0000_0000_0000_0000_0000_3003);
 /// The Hardware folder.
 pub const HARDWARE: FeatureId = FeatureId::from_u128(0x3b04_0000_0000_0000_0000_0000_0000_4001);
@@ -54,7 +59,8 @@ const fn fastener_mate(n: u128) -> MateId {
 
 /// The screws' configuration (A21.2): ANSI inch hex cap screw 1/4-28 x 0.75, Stainless Steel.
 pub fn screw_spec() -> StandardSpec {
-    let mut s = StandardSpec::new("ANSI inch", "Bolts & screws", "Hex bolts", "Hex cap screw").expect("in the library");
+    let mut s = StandardSpec::new("ANSI inch", "Bolts & screws", "Hex bolts", "Hex cap screw")
+        .expect("in the library");
     s.size = "1/4-28".into();
     s.material = "Stainless Steel".into();
     s.normalize();
@@ -63,7 +69,8 @@ pub fn screw_spec() -> StandardSpec {
 
 /// The nuts' configuration (A21.14): ANSI inch hex nut 3/8-16, Chamfered, Stainless Steel.
 pub fn nut_spec() -> StandardSpec {
-    let mut s = StandardSpec::new("ANSI inch", "Nuts", "Hex nuts", "Hex nut").expect("in the library");
+    let mut s =
+        StandardSpec::new("ANSI inch", "Nuts", "Hex nuts", "Hex nut").expect("in the library");
     s.size = "3/8-16".into();
     s.material = "Stainless Steel".into();
     s.normalize();
@@ -82,12 +89,18 @@ impl Ex3<'_> {
     }
 
     fn solids(&mut self) -> HashMap<InstanceId, Arc<Solid>> {
-        let asm = self.doc.element(ex2::ASSEMBLY).and_then(|e| e.assembly_model()).cloned().unwrap_or_default();
+        let asm = self
+            .doc
+            .element(ex2::ASSEMBLY)
+            .and_then(|e| e.assembly_model())
+            .cloned()
+            .unwrap_or_default();
         for o in assembly::structure::occurrences(self.doc, &asm) {
             if !self.builds.contains_key(&o.element)
                 && let Some(el) = self.doc.element(o.element)
             {
-                self.builds.insert(o.element, crate::rebuild::build(el.features()));
+                self.builds
+                    .insert(o.element, crate::rebuild::build(el.features()));
             }
         }
         let builds = self.builds.clone();
@@ -95,12 +108,25 @@ impl Ex3<'_> {
     }
 
     /// The circular edges of an occurrence's part with diameter `dia` (in) centred at `z` (in).
-    fn sites(&mut self, occurrence: InstanceId, dia: f64, z: f64) -> Result<Vec<HoleSite>, CommandError> {
-        let solid = self.solids().get(&occurrence).cloned().ok_or_else(|| CommandError::Invalid("no such occurrence".into()))?;
+    fn sites(
+        &mut self,
+        occurrence: InstanceId,
+        dia: f64,
+        z: f64,
+    ) -> Result<Vec<HoleSite>, CommandError> {
+        let solid = self
+            .solids()
+            .get(&occurrence)
+            .cloned()
+            .ok_or_else(|| CommandError::Invalid("no such occurrence".into()))?;
         let mut out: Vec<HoleSite> = solid
             .edges
             .iter()
-            .filter(|e| e.circle.is_some_and(|c| (2.0 * c.radius - dia * IN).abs() < 1e-3 && (c.center[2] - z * IN).abs() < 1e-3))
+            .filter(|e| {
+                e.circle.is_some_and(|c| {
+                    (2.0 * c.radius - dia * IN).abs() < 1e-3 && (c.center[2] - z * IN).abs() < 1e-3
+                })
+            })
             .filter_map(|e| site_of_edge(&solid, occurrence, &e.name))
             .collect();
         out.sort_by_key(|a| a.edge.index);
@@ -108,10 +134,24 @@ impl Ex3<'_> {
     }
 
     /// Inserts `spec` on `sites` with the instance ids `ids` and mate ids from `mate0`.
-    fn insert(&mut self, spec: &StandardSpec, sites: &[HoleSite], ids: &[InstanceId], mate0: u128) -> Result<(), CommandError> {
+    fn insert(
+        &mut self,
+        spec: &StandardSpec,
+        sites: &[HoleSite],
+        ids: &[InstanceId],
+        mate0: u128,
+    ) -> Result<(), CommandError> {
         let solids = self.solids();
         let part = StandardPart::new(spec)?;
-        let mut cmd = plan_insert(self.doc, ex2::ASSEMBLY, part, sites, false, Stacking::Plain, &solids)?;
+        let mut cmd = plan_insert(
+            self.doc,
+            ex2::ASSEMBLY,
+            part,
+            sites,
+            false,
+            Stacking::Plain,
+            &solids,
+        )?;
         for (k, ins) in cmd.inserts.iter_mut().enumerate() {
             ins.instance = ids[k];
             ins.mate = fastener_mate(mate0 + k as u128);
@@ -122,7 +162,11 @@ impl Ex3<'_> {
 
 /// Builds the Ex3 end state into `doc` (the Ex2 end state).
 pub fn build_in(doc: &mut Document, h: &mut History) -> Result<(), CommandError> {
-    let mut ex = Ex3 { doc, h, builds: HashMap::new() };
+    let mut ex = Ex3 {
+        doc,
+        h,
+        builds: HashMap::new(),
+    };
     // A21.2: six hex cap screws on the Retaining Plate's Ø0.266 hole edges (top face z 6.625).
     let sites = ex.sites(ex2::RETAINING_PLATE, 0.266, 6.625)?;
     let screws: Vec<InstanceId> = (0..6).map(screw).collect();
@@ -145,22 +189,69 @@ pub fn build_in(doc: &mut Document, h: &mut History) -> Result<(), CommandError>
         name: None,
         after: None,
     })?;
-    ex.run(&RenameElement { id: TOP_SUB_EL, name: "Top Cap subassembly".into() })?;
-    ex.run(&SetInstancesFixed { element: TOP_SUB_EL, instances: vec![ex2::TOP_CAP], fixed: true })?;
+    ex.run(&RenameElement {
+        id: TOP_SUB_EL,
+        name: "Top Cap subassembly".into(),
+    })?;
+    ex.run(&SetInstancesFixed {
+        element: TOP_SUB_EL,
+        instances: vec![ex2::TOP_CAP],
+        fixed: true,
+    })?;
     // A21.6–A21.8: an empty subassembly after the Rear Cap, filled, "Rear Cap subassembly".
-    ex.run(&MoveToNewSubassembly { element: ex2::ASSEMBLY, instances: vec![], new_element: REAR_SUB_EL, instance: REAR_SUB, name: None, after: Some(ex2::REAR_CAP) })?;
-    ex.run(&MoveIntoSubassembly { element: ex2::ASSEMBLY, sub: REAR_SUB, instances: vec![ex2::REAR_CAP, ex2::REAR_CAP_MOUNT, r1, r2] })?;
-    ex.run(&RenameElement { id: REAR_SUB_EL, name: "Rear Cap subassembly".into() })?;
-    ex.run(&SetInstancesFixed { element: REAR_SUB_EL, instances: vec![ex2::REAR_CAP], fixed: true })?;
+    ex.run(&MoveToNewSubassembly {
+        element: ex2::ASSEMBLY,
+        instances: vec![],
+        new_element: REAR_SUB_EL,
+        instance: REAR_SUB,
+        name: None,
+        after: Some(ex2::REAR_CAP),
+    })?;
+    ex.run(&MoveIntoSubassembly {
+        element: ex2::ASSEMBLY,
+        sub: REAR_SUB,
+        instances: vec![ex2::REAR_CAP, ex2::REAR_CAP_MOUNT, r1, r2],
+    })?;
+    ex.run(&RenameElement {
+        id: REAR_SUB_EL,
+        name: "Rear Cap subassembly".into(),
+    })?;
+    ex.run(&SetInstancesFixed {
+        element: REAR_SUB_EL,
+        instances: vec![ex2::REAR_CAP],
+        fixed: true,
+    })?;
     // A21.9–A21.10: Piston subassembly.
     let mut piston = vec![ex2::PISTON_ROD];
     piston.extend(ex2::ORINGS_185);
-    ex.run(&MoveToNewSubassembly { element: ex2::ASSEMBLY, instances: piston, new_element: PISTON_SUB_EL, instance: PISTON_SUB, name: None, after: None })?;
-    ex.run(&RenameElement { id: PISTON_SUB_EL, name: "Piston subassembly".into() })?;
-    ex.run(&SetInstancesFixed { element: PISTON_SUB_EL, instances: vec![ex2::PISTON_ROD], fixed: true })?;
+    ex.run(&MoveToNewSubassembly {
+        element: ex2::ASSEMBLY,
+        instances: piston,
+        new_element: PISTON_SUB_EL,
+        instance: PISTON_SUB,
+        name: None,
+        after: None,
+    })?;
+    ex.run(&RenameElement {
+        id: PISTON_SUB_EL,
+        name: "Piston subassembly".into(),
+    })?;
+    ex.run(&SetInstancesFixed {
+        element: PISTON_SUB_EL,
+        instances: vec![ex2::PISTON_ROD],
+        fixed: true,
+    })?;
     // A21.11: the Rear Cap mount out to the top; A21.12–A21.13: dissolve, delete the tab.
-    ex.run(&MoveOutOfSubassembly { element: ex2::ASSEMBLY, sub: REAR_SUB, instances: vec![ex2::REAR_CAP_MOUNT], at: Some(0) })?;
-    ex.run(&DissolveSubassembly { element: ex2::ASSEMBLY, sub: PISTON_SUB })?;
+    ex.run(&MoveOutOfSubassembly {
+        element: ex2::ASSEMBLY,
+        sub: REAR_SUB,
+        instances: vec![ex2::REAR_CAP_MOUNT],
+        at: Some(0),
+    })?;
+    ex.run(&DissolveSubassembly {
+        element: ex2::ASSEMBLY,
+        sub: PISTON_SUB,
+    })?;
     ex.run(&DeleteElement { id: PISTON_SUB_EL })?;
     // A21.14: eight hex nuts, on the four rod-hole edges on top of the Top Cap (z 6.5) and the
     // four on top of the Rear Cap's flange (z 0.75), inside their subassemblies: all eight seen
@@ -171,8 +262,16 @@ pub fn build_in(doc: &mut Document, h: &mut History) -> Result<(), CommandError>
     let nuts: Vec<InstanceId> = (0..8).map(nut).collect();
     ex.insert(&nut_spec(), &sites, &nuts, 10)?;
     // A21.15: the nuts dragged into Hardware (after its last item).
-    let asm = ex.doc.element(ex2::ASSEMBLY).and_then(|e| e.assembly_model()).ok_or(CommandError::ElementNotFound(ex2::ASSEMBLY))?;
-    let to = asm.instances.iter().filter(|i| !nuts.contains(&i.id)).count();
+    let asm = ex
+        .doc
+        .element(ex2::ASSEMBLY)
+        .and_then(|e| e.assembly_model())
+        .ok_or(CommandError::ElementNotFound(ex2::ASSEMBLY))?;
+    let to = asm
+        .instances
+        .iter()
+        .filter(|i| !nuts.contains(&i.id))
+        .count();
     ex.run(&MoveListItems {
         element: ex2::ASSEMBLY,
         list: FolderList::Instances,

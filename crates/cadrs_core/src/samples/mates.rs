@@ -27,8 +27,12 @@ use cadrs_sketch::{PlaneRef, SketchOp, Vec2};
 
 use crate::appearance::Appearance;
 use crate::command::{CommandError, History};
-use crate::commands::{AddExtrude, AddRevolve, AddSketch, EditSketch, RenamePart, SetExtrude, SetPartAppearance};
-use crate::document::{AxisRef, BooleanOp, Document, ExtrudeFeature, Offset, RevolveFeature, RevolveType};
+use crate::commands::{
+    AddExtrude, AddRevolve, AddSketch, EditSketch, RenamePart, SetExtrude, SetPartAppearance,
+};
+use crate::document::{
+    AxisRef, BooleanOp, Document, ExtrudeFeature, Offset, RevolveFeature, RevolveType,
+};
 use crate::ids::{ElementId, FeatureId, PartId};
 
 use super::gear_cover::{DocHistory, Studio};
@@ -86,20 +90,47 @@ fn v(x: f64, y: f64) -> Vec2 {
 }
 
 fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> SketchOp {
-    SketchOp::AddPolyline { points: vec![v(x0, y0), v(x1, y0), v(x1, y1), v(x0, y1)], closed: true, construction: false, label: "Add rectangle" }
+    SketchOp::AddPolyline {
+        points: vec![v(x0, y0), v(x1, y0), v(x1, y1), v(x0, y1)],
+        closed: true,
+        construction: false,
+        label: "Add rectangle",
+    }
 }
 
 fn circle(x: f64, y: f64, d: f64) -> SketchOp {
-    SketchOp::AddCircle { center: v(x, y), radius: d / 2.0, construction: false }
+    SketchOp::AddCircle {
+        center: v(x, y),
+        radius: d / 2.0,
+        construction: false,
+    }
 }
 
-fn sketch(s: &mut dyn Studio, el: ElementId, sketch: FeatureId, plane: PlaneRef, ops: Vec<SketchOp>) -> Result<cadrs_sketch::Sketch, CommandError> {
-    s.run(&AddSketch { element: el, feature: sketch, plane: Some(plane) })?;
-    s.run(&EditSketch { element: el, feature: sketch, op: SketchOp::Batch(ops) })?;
+fn sketch(
+    s: &mut dyn Studio,
+    el: ElementId,
+    sketch: FeatureId,
+    plane: PlaneRef,
+    ops: Vec<SketchOp>,
+) -> Result<cadrs_sketch::Sketch, CommandError> {
+    s.run(&AddSketch {
+        element: el,
+        feature: sketch,
+        plane: Some(plane),
+    })?;
+    s.run(&EditSketch {
+        element: el,
+        feature: sketch,
+        op: SketchOp::Batch(ops),
+    })?;
     geometry(s, el, sketch)
 }
 
-fn geometry(s: &dyn Studio, el: ElementId, sketch: FeatureId) -> Result<cadrs_sketch::Sketch, CommandError> {
+fn geometry(
+    s: &dyn Studio,
+    el: ElementId,
+    sketch: FeatureId,
+) -> Result<cadrs_sketch::Sketch, CommandError> {
     s.document()
         .element(el)
         .and_then(|x| x.feature(sketch))
@@ -110,33 +141,77 @@ fn geometry(s: &dyn Studio, el: ElementId, sketch: FeatureId) -> Result<cadrs_sk
 
 /// Extrudes the region of `sketch` under `seed`, from `z0` to `z1` along the plane's normal.
 #[allow(clippy::too_many_arguments)]
-fn extrude(s: &mut dyn Studio, el: ElementId, sketch: FeatureId, g: &cadrs_sketch::Sketch, feature: FeatureId, seed: Vec2, z: (f64, f64), op: BooleanOp, scope: &[PartId]) -> Result<(), CommandError> {
+fn extrude(
+    s: &mut dyn Studio,
+    el: ElementId,
+    sketch: FeatureId,
+    g: &cadrs_sketch::Sketch,
+    feature: FeatureId,
+    seed: Vec2,
+    z: (f64, f64),
+    op: BooleanOp,
+    scope: &[PartId],
+) -> Result<(), CommandError> {
     let regions = super::region_refs(sketch, g, &[seed]);
     if regions.len() != 1 {
-        return Err(CommandError::Invalid(format!("a region of the mates stand-in is missing ({feature:?})")));
+        return Err(CommandError::Invalid(format!(
+            "a region of the mates stand-in is missing ({feature:?})"
+        )));
     }
     let (z0, z1) = z;
     let mut x = super::extrude_of(regions, z1 - z0);
     x.op = op;
     x.merge_scope = scope.to_vec();
     if z0 != 0.0 {
-        x.start_offset = Some(Offset { value: z0.abs(), expr: format!("{} mm", z0.abs()), flip: z0 < 0.0 });
+        x.start_offset = Some(Offset {
+            value: z0.abs(),
+            expr: format!("{} mm", z0.abs()),
+            flip: z0 < 0.0,
+        });
     }
-    s.run(&AddExtrude { element: el, feature, extrude: ExtrudeFeature::default() })?;
-    s.run(&SetExtrude { element: el, feature, extrude: x, label: "Extrude".into() })?;
+    s.run(&AddExtrude {
+        element: el,
+        feature,
+        extrude: ExtrudeFeature::default(),
+    })?;
+    s.run(&SetExtrude {
+        element: el,
+        feature,
+        extrude: x,
+        label: "Extrude".into(),
+    })?;
     Ok(())
 }
 
 /// Extrudes the region of `sketch` under `seed` symmetric about the sketch plane, `depth` in all.
-fn extrude_symmetric(s: &mut dyn Studio, el: ElementId, sketch: FeatureId, g: &cadrs_sketch::Sketch, feature: FeatureId, seed: Vec2, depth: f64) -> Result<(), CommandError> {
+fn extrude_symmetric(
+    s: &mut dyn Studio,
+    el: ElementId,
+    sketch: FeatureId,
+    g: &cadrs_sketch::Sketch,
+    feature: FeatureId,
+    seed: Vec2,
+    depth: f64,
+) -> Result<(), CommandError> {
     let regions = super::region_refs(sketch, g, &[seed]);
     if regions.len() != 1 {
-        return Err(CommandError::Invalid(format!("a region of the mates stand-in is missing ({feature:?})")));
+        return Err(CommandError::Invalid(format!(
+            "a region of the mates stand-in is missing ({feature:?})"
+        )));
     }
     let mut x = super::extrude_of(regions, depth);
     x.symmetric = true;
-    s.run(&AddExtrude { element: el, feature, extrude: ExtrudeFeature::default() })?;
-    s.run(&SetExtrude { element: el, feature, extrude: x, label: "Extrude".into() })?;
+    s.run(&AddExtrude {
+        element: el,
+        feature,
+        extrude: ExtrudeFeature::default(),
+    })?;
+    s.run(&SetExtrude {
+        element: el,
+        feature,
+        extrude: x,
+        label: "Extrude".into(),
+    })?;
     Ok(())
 }
 
@@ -146,7 +221,17 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
     let top = PlaneRef::Top;
     // Slot Plate, and its slot round a construction line.
     let g = sketch(s, el, id(0x11), top, vec![rect(-60.0, -25.0, 20.0, 25.0)])?;
-    extrude(s, el, id(0x11), &g, id(0x12), v(10.0, 20.0), (0.0, 10.0), New, &[])?;
+    extrude(
+        s,
+        el,
+        id(0x11),
+        &g,
+        id(0x12),
+        v(10.0, 20.0),
+        (0.0, 10.0),
+        New,
+        &[],
+    )?;
     let (cx, cy) = (SLOT_CENTRE[0], SLOT_CENTRE[1]);
     let h = SLOT_LENGTH / 2.0;
     let g = sketch(
@@ -154,12 +239,40 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
         el,
         id(0x13),
         top,
-        vec![SketchOp::AddPolyline { points: vec![v(cx - h, cy), v(cx + h, cy)], closed: false, construction: true, label: "Add line" }],
+        vec![SketchOp::AddPolyline {
+            points: vec![v(cx - h, cy), v(cx + h, cy)],
+            closed: false,
+            construction: true,
+            label: "Add line",
+        }],
     )?;
-    let line = g.curves.keys().next().ok_or_else(|| CommandError::Invalid("slot line".into()))?;
-    s.run(&EditSketch { element: el, feature: id(0x13), op: SketchOp::Slot { source: line, width: SLOT_WIDTH, equal_to: None, construction: false } })?;
+    let line = g
+        .curves
+        .keys()
+        .next()
+        .ok_or_else(|| CommandError::Invalid("slot line".into()))?;
+    s.run(&EditSketch {
+        element: el,
+        feature: id(0x13),
+        op: SketchOp::Slot {
+            source: line,
+            width: SLOT_WIDTH,
+            equal_to: None,
+            construction: false,
+        },
+    })?;
     let g = geometry(s, el, id(0x13))?;
-    extrude(s, el, id(0x13), &g, id(0x14), v(cx, cy), (SLOT_FLOOR, 10.0), Remove, &[SLOT_PLATE])?;
+    extrude(
+        s,
+        el,
+        id(0x13),
+        &g,
+        id(0x14),
+        v(cx, cy),
+        (SLOT_FLOOR, 10.0),
+        Remove,
+        &[SLOT_PLATE],
+    )?;
     // Pin.
     let g = sketch(
         s,
@@ -168,10 +281,25 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
         top,
         vec![
             circle(cx, 45.0, 10.0),
-            SketchOp::AddPolyline { points: vec![v(cx - 7.0, 48.5), v(cx + 7.0, 48.5)], closed: false, construction: false, label: "Add line" },
+            SketchOp::AddPolyline {
+                points: vec![v(cx - 7.0, 48.5), v(cx + 7.0, 48.5)],
+                closed: false,
+                construction: false,
+                label: "Add line",
+            },
         ],
     )?;
-    extrude(s, el, id(0x21), &g, id(0x22), v(cx, 44.0), (0.0, 16.0), New, &[])?;
+    extrude(
+        s,
+        el,
+        id(0x21),
+        &g,
+        id(0x22),
+        v(cx, 44.0),
+        (0.0, 16.0),
+        New,
+        &[],
+    )?;
     // Ramp and Roller, on Front (sketch x = model X, y = model Z), extruded symmetric along Y.
     let front = PlaneRef::Front;
     let g = sketch(
@@ -180,91 +308,335 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
         id(0x31),
         front,
         vec![SketchOp::AddPolyline {
-            points: vec![v(40.0, 0.0), v(100.0, 0.0), v(100.0, 10.0), v(70.0, 10.0), v(40.0, 30.0)],
+            points: vec![
+                v(40.0, 0.0),
+                v(100.0, 0.0),
+                v(100.0, 10.0),
+                v(70.0, 10.0),
+                v(40.0, 30.0),
+            ],
             closed: true,
             construction: false,
             label: "Add line",
         }],
     )?;
-    let corner = g.point_at(v(70.0, 10.0), 1e-9).ok_or_else(|| CommandError::Invalid("ramp corner".into()))?;
-    s.run(&EditSketch { element: el, feature: id(0x31), op: SketchOp::Fillet { corner, radius: 15.0, equal_to: None } })?;
+    let corner = g
+        .point_at(v(70.0, 10.0), 1e-9)
+        .ok_or_else(|| CommandError::Invalid("ramp corner".into()))?;
+    s.run(&EditSketch {
+        element: el,
+        feature: id(0x31),
+        op: SketchOp::Fillet {
+            corner,
+            radius: 15.0,
+            equal_to: None,
+        },
+    })?;
     let g = geometry(s, el, id(0x31))?;
     extrude_symmetric(s, el, id(0x31), &g, id(0x32), v(90.0, 5.0), 50.0)?;
     let g = sketch(s, el, id(0x41), front, vec![circle(70.0, 60.0, 20.0)])?;
     extrude_symmetric(s, el, id(0x41), &g, id(0x42), v(70.0, 60.0), 40.0)?;
     // Clevis: the base, then the two uprights added.
     let g = sketch(s, el, id(0x51), top, vec![rect(120.0, -25.0, 160.0, 25.0)])?;
-    extrude(s, el, id(0x51), &g, id(0x52), v(140.0, 0.0), (0.0, 8.0), New, &[])?;
-    let g = sketch(s, el, id(0x53), top, vec![rect(120.0, -25.0, 160.0, -15.0), rect(120.0, 15.0, 160.0, 25.0)])?;
-    extrude(s, el, id(0x53), &g, id(0x54), v(140.0, -20.0), (8.0, 40.0), Add, &[CLEVIS])?;
-    extrude(s, el, id(0x53), &g, id(0x55), v(140.0, 20.0), (8.0, 40.0), Add, &[CLEVIS])?;
+    extrude(
+        s,
+        el,
+        id(0x51),
+        &g,
+        id(0x52),
+        v(140.0, 0.0),
+        (0.0, 8.0),
+        New,
+        &[],
+    )?;
+    let g = sketch(
+        s,
+        el,
+        id(0x53),
+        top,
+        vec![
+            rect(120.0, -25.0, 160.0, -15.0),
+            rect(120.0, 15.0, 160.0, 25.0),
+        ],
+    )?;
+    extrude(
+        s,
+        el,
+        id(0x53),
+        &g,
+        id(0x54),
+        v(140.0, -20.0),
+        (8.0, 40.0),
+        Add,
+        &[CLEVIS],
+    )?;
+    extrude(
+        s,
+        el,
+        id(0x53),
+        &g,
+        id(0x55),
+        v(140.0, 20.0),
+        (8.0, 40.0),
+        Add,
+        &[CLEVIS],
+    )?;
     // Tab and Jaw.
     let g = sketch(s, el, id(0x61), top, vec![rect(125.0, 40.0, 155.0, 52.0)])?;
-    extrude(s, el, id(0x61), &g, id(0x62), v(140.0, 46.0), (10.0, 40.0), New, &[])?;
+    extrude(
+        s,
+        el,
+        id(0x61),
+        &g,
+        id(0x62),
+        v(140.0, 46.0),
+        (10.0, 40.0),
+        New,
+        &[],
+    )?;
     let g = sketch(s, el, id(0x71), top, vec![rect(165.0, 40.0, 195.0, 48.0)])?;
-    extrude(s, el, id(0x71), &g, id(0x72), v(180.0, 44.0), (10.0, 30.0), New, &[])?;
+    extrude(
+        s,
+        el,
+        id(0x71),
+        &g,
+        id(0x72),
+        v(180.0, 44.0),
+        (10.0, 30.0),
+        New,
+        &[],
+    )?;
     let g = sketch(s, el, id(0xd1), top, vec![rect(165.0, 64.0, 195.0, 72.0)])?;
-    extrude(s, el, id(0xd1), &g, id(0xd2), v(180.0, 68.0), (10.0, 30.0), New, &[])?;
+    extrude(
+        s,
+        el,
+        id(0xd1),
+        &g,
+        id(0xd2),
+        v(180.0, 68.0),
+        (10.0, 30.0),
+        New,
+        &[],
+    )?;
     // Socket with its hole.
     let g = sketch(s, el, id(0x81), top, vec![rect(180.0, -20.0, 220.0, 20.0)])?;
-    extrude(s, el, id(0x81), &g, id(0x82), v(185.0, 15.0), (0.0, 20.0), New, &[])?;
+    extrude(
+        s,
+        el,
+        id(0x81),
+        &g,
+        id(0x82),
+        v(185.0, 15.0),
+        (0.0, 20.0),
+        New,
+        &[],
+    )?;
     let g = sketch(s, el, id(0x83), top, vec![circle(200.0, 0.0, 20.0)])?;
-    extrude(s, el, id(0x83), &g, id(0x84), v(200.0, 0.0), (10.0, 20.0), Remove, &[SOCKET])?;
+    extrude(
+        s,
+        el,
+        id(0x83),
+        &g,
+        id(0x84),
+        v(200.0, 0.0),
+        (10.0, 20.0),
+        Remove,
+        &[SOCKET],
+    )?;
     // Ball: a half disc on Front (sketch x = model X, y = model Z) turned about its diameter.
     let (bx, bz, r) = (240.0, 10.0, 10.0);
-    s.run(&AddSketch { element: el, feature: id(0x91), plane: Some(PlaneRef::Front) })?;
+    s.run(&AddSketch {
+        element: el,
+        feature: id(0x91),
+        plane: Some(PlaneRef::Front),
+    })?;
     s.run(&EditSketch {
         element: el,
         feature: id(0x91),
         op: SketchOp::Batch(vec![
-            SketchOp::AddPolyline { points: vec![v(bx, bz - r - 5.0), v(bx, bz + r + 5.0)], closed: false, construction: true, label: "Add line" },
-            SketchOp::AddArc { center: v(bx, bz), start: v(bx, bz - r), end: v(bx, bz + r), construction: false },
-            SketchOp::AddPolyline { points: vec![v(bx, bz + r), v(bx, bz - r)], closed: false, construction: false, label: "Add line" },
+            SketchOp::AddPolyline {
+                points: vec![v(bx, bz - r - 5.0), v(bx, bz + r + 5.0)],
+                closed: false,
+                construction: true,
+                label: "Add line",
+            },
+            SketchOp::AddArc {
+                center: v(bx, bz),
+                start: v(bx, bz - r),
+                end: v(bx, bz + r),
+                construction: false,
+            },
+            SketchOp::AddPolyline {
+                points: vec![v(bx, bz + r), v(bx, bz - r)],
+                closed: false,
+                construction: false,
+                label: "Add line",
+            },
         ]),
     })?;
     let g = geometry(s, el, id(0x91))?;
-    let axis = g.curves.iter().find(|(_, c)| c.construction).map(|(k, _)| k).ok_or_else(|| CommandError::Invalid("ball axis".into()))?;
+    let axis = g
+        .curves
+        .iter()
+        .find(|(_, c)| c.construction)
+        .map(|(k, _)| k)
+        .ok_or_else(|| CommandError::Invalid("ball axis".into()))?;
     let regions = super::region_refs(id(0x91), &g, &[v(bx + r / 2.0, bz)]);
     if regions.len() != 1 {
-        return Err(CommandError::Invalid("the ball's half disc is missing".into()));
+        return Err(CommandError::Invalid(
+            "the ball's half disc is missing".into(),
+        ));
     }
     let revolve = RevolveFeature {
         regions,
-        axis: Some(AxisRef::SketchCurve { sketch: id(0x91), curve: axis }),
+        axis: Some(AxisRef::SketchCurve {
+            sketch: id(0x91),
+            curve: axis,
+        }),
         kind: RevolveType::Full,
         angle: 360.0,
         angle_expr: "360 deg".into(),
         ..RevolveFeature::default()
     };
-    s.run(&AddRevolve { element: el, feature: id(0x92), revolve })?;
+    s.run(&AddRevolve {
+        element: el,
+        feature: id(0x92),
+        revolve,
+    })?;
     // Table, Puck, Magnet.
     let g = sketch(s, el, id(0xa1), top, vec![rect(280.0, -40.0, 380.0, 40.0)])?;
-    extrude(s, el, id(0xa1), &g, id(0xa2), v(330.0, 0.0), (0.0, 8.0), New, &[])?;
+    extrude(
+        s,
+        el,
+        id(0xa1),
+        &g,
+        id(0xa2),
+        v(330.0, 0.0),
+        (0.0, 8.0),
+        New,
+        &[],
+    )?;
     let g = sketch(s, el, id(0xb1), top, vec![circle(300.0, 60.0, 30.0)])?;
-    extrude(s, el, id(0xb1), &g, id(0xb2), v(300.0, 60.0), (0.0, 12.0), New, &[])?;
+    extrude(
+        s,
+        el,
+        id(0xb1),
+        &g,
+        id(0xb2),
+        v(300.0, 60.0),
+        (0.0, 12.0),
+        New,
+        &[],
+    )?;
     let g = sketch(s, el, id(0xc1), top, vec![circle(350.0, 60.0, 20.0)])?;
-    extrude(s, el, id(0xc1), &g, id(0xc2), v(350.0, 60.0), (0.0, 10.0), New, &[])?;
+    extrude(
+        s,
+        el,
+        id(0xc1),
+        &g,
+        id(0xc2),
+        v(350.0, 60.0),
+        (0.0, 10.0),
+        New,
+        &[],
+    )?;
     // Cam Plate and its arc slot (round a construction arc).
     let g = sketch(s, el, id(0xe1), top, vec![rect(-60.0, -120.0, 20.0, -60.0)])?;
-    extrude(s, el, id(0xe1), &g, id(0xe2), v(10.0, -115.0), (0.0, 10.0), New, &[])?;
+    extrude(
+        s,
+        el,
+        id(0xe1),
+        &g,
+        id(0xe2),
+        v(10.0, -115.0),
+        (0.0, 10.0),
+        New,
+        &[],
+    )?;
     let (ax, ay, ar) = (-20.0, -110.0, 30.0);
-    let at = |deg: f64| v(ax + ar * deg.to_radians().cos(), ay + ar * deg.to_radians().sin());
-    let g = sketch(s, el, id(0xe3), top, vec![SketchOp::AddArc { center: v(ax, ay), start: at(30.0), end: at(150.0), construction: true }])?;
-    let arc = g.curves.keys().next().ok_or_else(|| CommandError::Invalid("cam arc".into()))?;
-    s.run(&EditSketch { element: el, feature: id(0xe3), op: SketchOp::Slot { source: arc, width: 10.0, equal_to: None, construction: false } })?;
+    let at = |deg: f64| {
+        v(
+            ax + ar * deg.to_radians().cos(),
+            ay + ar * deg.to_radians().sin(),
+        )
+    };
+    let g = sketch(
+        s,
+        el,
+        id(0xe3),
+        top,
+        vec![SketchOp::AddArc {
+            center: v(ax, ay),
+            start: at(30.0),
+            end: at(150.0),
+            construction: true,
+        }],
+    )?;
+    let arc = g
+        .curves
+        .keys()
+        .next()
+        .ok_or_else(|| CommandError::Invalid("cam arc".into()))?;
+    s.run(&EditSketch {
+        element: el,
+        feature: id(0xe3),
+        op: SketchOp::Slot {
+            source: arc,
+            width: 10.0,
+            equal_to: None,
+            construction: false,
+        },
+    })?;
     let g = geometry(s, el, id(0xe3))?;
-    extrude(s, el, id(0xe3), &g, id(0xe4), v(ax, ay + ar), (SLOT_FLOOR, 10.0), Remove, &[CAM_PLATE])?;
+    extrude(
+        s,
+        el,
+        id(0xe3),
+        &g,
+        id(0xe4),
+        v(ax, ay + ar),
+        (SLOT_FLOOR, 10.0),
+        Remove,
+        &[CAM_PLATE],
+    )?;
     let g = sketch(s, el, id(0xf1), top, vec![circle(ax, ay + ar, 10.0)])?;
-    extrude(s, el, id(0xf1), &g, id(0xf2), v(ax, ay + ar), (SLOT_FLOOR, SLOT_FLOOR + 16.0), New, &[])?;
+    extrude(
+        s,
+        el,
+        id(0xf1),
+        &g,
+        id(0xf2),
+        v(ax, ay + ar),
+        (SLOT_FLOOR, SLOT_FLOOR + 16.0),
+        New,
+        &[],
+    )?;
     for (part, name) in PARTS {
-        s.run(&RenamePart { element: el, part, name: name.into() })?;
+        s.run(&RenamePart {
+            element: el,
+            part,
+            name: name.into(),
+        })?;
     }
     for (parts, a) in [
-        (vec![SLOT_PLATE, RAMP, CLEVIS, SOCKET, TABLE, CAM_PLATE], Appearance::rgb(150, 156, 163)),
-        (vec![PIN, ROLLER, BALL, CAM_PIN], Appearance::rgb(70, 74, 80)),
-        (vec![TAB, JAW, RIGHT_JAW, PUCK, MAGNET], Appearance::rgb(74, 124, 186)),
+        (
+            vec![SLOT_PLATE, RAMP, CLEVIS, SOCKET, TABLE, CAM_PLATE],
+            Appearance::rgb(150, 156, 163),
+        ),
+        (
+            vec![PIN, ROLLER, BALL, CAM_PIN],
+            Appearance::rgb(70, 74, 80),
+        ),
+        (
+            vec![TAB, JAW, RIGHT_JAW, PUCK, MAGNET],
+            Appearance::rgb(74, 124, 186),
+        ),
     ] {
-        s.run(&SetPartAppearance { element: el, parts, appearance: Some(a) })?;
+        s.run(&SetPartAppearance {
+            element: el,
+            parts,
+            appearance: Some(a),
+        })?;
     }
     Ok(())
 }

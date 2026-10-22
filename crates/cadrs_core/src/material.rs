@@ -36,13 +36,22 @@ pub struct MaterialLibrary {
 impl MaterialLibrary {
     /// The library's material called `name`, marked as from this library.
     pub fn material(&self, name: &str) -> Option<Material> {
-        self.materials.iter().find(|m| m.name == name).map(|m| Material { library: Some(self.name.clone()), ..m.clone() })
+        self.materials
+            .iter()
+            .find(|m| m.name == name)
+            .map(|m| Material {
+                library: Some(self.name.clone()),
+                ..m.clone()
+            })
     }
 }
 
 /// The next free library name, "Library 1", "Library 2", ….
 pub fn next_library_name(libraries: &[MaterialLibrary]) -> String {
-    (1..).map(|n| format!("Library {n}")).find(|n| !libraries.iter().any(|l| l.name == *n) && n != LIBRARY_NAME).unwrap_or_default()
+    (1..)
+        .map(|n| format!("Library {n}"))
+        .find(|n| !libraries.iter().any(|l| l.name == *n) && n != LIBRARY_NAME)
+        .unwrap_or_default()
 }
 
 /// A part's material.
@@ -138,7 +147,12 @@ const fn m(
     density: f64,
     poisson: f64,
     youngs_gpa: f64,
-    [tensile_yield_mpa, ultimate_tensile_mpa, compressive_yield_mpa, ultimate_compressive_mpa]: [f64; 4],
+    [
+        tensile_yield_mpa,
+        ultimate_tensile_mpa,
+        compressive_yield_mpa,
+        ultimate_compressive_mpa,
+    ]: [f64; 4],
     source: &'static str,
 ) -> LibraryMaterial {
     LibraryMaterial {
@@ -160,22 +174,127 @@ pub const POLYPROPYLENE_DENSITY: f64 = 0.033 * 0.453_592_37 / (0.0254 * 0.0254 *
 
 /// The bundled material library, alphabetical.
 pub const LIBRARY: &[LibraryMaterial] = &[
-    m("ABS", 1040.0, 0.35, 2.3, [43.0, 44.0, 0.0, 0.0], "MatWeb: ABS, molded (averages)"),
-    m("Acetal", 1410.0, 0.35, 2.9, [69.0, 69.0, 0.0, 0.0], "MatWeb: acetal copolymer (POM), unfilled"),
-    m("Acrylic", 1190.0, 0.37, 3.2, [0.0, 72.0, 0.0, 124.0], "MatWeb: PMMA (acrylic), cast"),
-    m("Aluminum - 1060", 2705.0, 0.33, 69.0, [27.6, 69.0, 0.0, 0.0], "ASM: aluminum 1060-O"),
-    m("Aluminum - 380", 2760.0, 0.33, 71.0, [159.0, 324.0, 0.0, 0.0], "ASM: aluminum 380.0-F die casting"),
-    m("Aluminum - 6061", 2700.0, 0.33, 68.9, [276.0, 310.0, 0.0, 0.0], "ASM: aluminum 6061-T6"),
-    m("Aluminum - 7075", 2810.0, 0.33, 71.7, [503.0, 572.0, 0.0, 0.0], "ASM: aluminum 7075-T6"),
-    m("Brass", 8500.0, 0.31, 97.0, [124.0, 338.0, 0.0, 0.0], "MatWeb: free-cutting brass C36000, annealed"),
-    m("Bronze", 8830.0, 0.34, 100.0, [125.0, 240.0, 0.0, 0.0], "MatWeb: bearing bronze C93200 (SAE 660), as cast"),
+    m(
+        "ABS",
+        1040.0,
+        0.35,
+        2.3,
+        [43.0, 44.0, 0.0, 0.0],
+        "MatWeb: ABS, molded (averages)",
+    ),
+    m(
+        "Acetal",
+        1410.0,
+        0.35,
+        2.9,
+        [69.0, 69.0, 0.0, 0.0],
+        "MatWeb: acetal copolymer (POM), unfilled",
+    ),
+    m(
+        "Acrylic",
+        1190.0,
+        0.37,
+        3.2,
+        [0.0, 72.0, 0.0, 124.0],
+        "MatWeb: PMMA (acrylic), cast",
+    ),
+    m(
+        "Aluminum - 1060",
+        2705.0,
+        0.33,
+        69.0,
+        [27.6, 69.0, 0.0, 0.0],
+        "ASM: aluminum 1060-O",
+    ),
+    m(
+        "Aluminum - 380",
+        2760.0,
+        0.33,
+        71.0,
+        [159.0, 324.0, 0.0, 0.0],
+        "ASM: aluminum 380.0-F die casting",
+    ),
+    m(
+        "Aluminum - 6061",
+        2700.0,
+        0.33,
+        68.9,
+        [276.0, 310.0, 0.0, 0.0],
+        "ASM: aluminum 6061-T6",
+    ),
+    m(
+        "Aluminum - 7075",
+        2810.0,
+        0.33,
+        71.7,
+        [503.0, 572.0, 0.0, 0.0],
+        "ASM: aluminum 7075-T6",
+    ),
+    m(
+        "Brass",
+        8500.0,
+        0.31,
+        97.0,
+        [124.0, 338.0, 0.0, 0.0],
+        "MatWeb: free-cutting brass C36000, annealed",
+    ),
+    m(
+        "Bronze",
+        8830.0,
+        0.34,
+        100.0,
+        [125.0, 240.0, 0.0, 0.0],
+        "MatWeb: bearing bronze C93200 (SAE 660), as cast",
+    ),
     // P3I.8: the sheet metal exercises' (E1, E2) "Carbon steel".
-    m("Carbon Steel", 7850.0, 0.29, 205.0, [350.0, 420.0, 0.0, 0.0], "MatWeb: AISI 1020 steel, cold drawn"),
-    m("Cast Iron", 7150.0, 0.26, 110.0, [0.0, 293.0, 0.0, 965.0], "MatWeb: gray cast iron ASTM A48 class 40"),
-    m("Copper", 8890.0, 0.31, 115.0, [69.0, 220.0, 0.0, 0.0], "MatWeb: copper C11000, annealed"),
-    m("Nylon 6/6", 1140.0, 0.41, 2.9, [0.0, 82.7, 0.0, 0.0], "MatWeb: nylon 66, unfilled, dry as molded"),
-    m("PLA", 1240.0, 0.36, 3.5, [60.0, 65.0, 0.0, 0.0], "MatWeb: polylactic acid (PLA), injection molded"),
-    m("Polycarbonate", 1200.0, 0.37, 2.38, [62.0, 65.0, 0.0, 0.0], "MatWeb: polycarbonate, unfilled"),
+    m(
+        "Carbon Steel",
+        7850.0,
+        0.29,
+        205.0,
+        [350.0, 420.0, 0.0, 0.0],
+        "MatWeb: AISI 1020 steel, cold drawn",
+    ),
+    m(
+        "Cast Iron",
+        7150.0,
+        0.26,
+        110.0,
+        [0.0, 293.0, 0.0, 965.0],
+        "MatWeb: gray cast iron ASTM A48 class 40",
+    ),
+    m(
+        "Copper",
+        8890.0,
+        0.31,
+        115.0,
+        [69.0, 220.0, 0.0, 0.0],
+        "MatWeb: copper C11000, annealed",
+    ),
+    m(
+        "Nylon 6/6",
+        1140.0,
+        0.41,
+        2.9,
+        [0.0, 82.7, 0.0, 0.0],
+        "MatWeb: nylon 66, unfilled, dry as molded",
+    ),
+    m(
+        "PLA",
+        1240.0,
+        0.36,
+        3.5,
+        [60.0, 65.0, 0.0, 0.0],
+        "MatWeb: polylactic acid (PLA), injection molded",
+    ),
+    m(
+        "Polycarbonate",
+        1200.0,
+        0.37,
+        2.38,
+        [62.0, 65.0, 0.0, 0.0],
+        "MatWeb: polycarbonate, unfilled",
+    ),
     m(
         "Polypropylene",
         POLYPROPYLENE_DENSITY,
@@ -184,16 +303,47 @@ pub const LIBRARY: &[LibraryMaterial] = &[
         [32.6, 74.6, 10.0, 0.0],
         "Onshape's library as the course's ex4-step17.png lists it (0.033 lb/in³; moduli and strengths in round MPa), confirmed by ex4-step18.png's funnel mass and inertia",
     ),
-    m("Stainless Steel - 304", 8000.0, 0.29, 193.0, [215.0, 505.0, 0.0, 0.0], "ASM: AISI type 304, annealed"),
-    m("Steel", 7850.0, 0.3, 210.0, [235.0, 360.0, 0.0, 0.0], "EN 1993-1-1 §3.2.6 and Table 3.1 (S235)"),
+    m(
+        "Stainless Steel - 304",
+        8000.0,
+        0.29,
+        193.0,
+        [215.0, 505.0, 0.0, 0.0],
+        "ASM: AISI type 304, annealed",
+    ),
+    m(
+        "Steel",
+        7850.0,
+        0.3,
+        210.0,
+        [235.0, 360.0, 0.0, 0.0],
+        "EN 1993-1-1 §3.2.6 and Table 3.1 (S235)",
+    ),
     // P3F.5: the course's simulation beam is steel with E = 200 GPa.
-    m("Steel - A36", 7850.0, 0.26, 200.0, [250.0, 400.0, 0.0, 0.0], "ASM: ASTM A36 steel, bar (E 200 GPa, ν 0.26, yield 250 MPa, ultimate 400–550 MPa)"),
-    m("Titanium - Ti-6Al-4V", 4430.0, 0.342, 113.8, [880.0, 950.0, 970.0, 0.0], "ASM: Ti-6Al-4V (grade 5), annealed"),
+    m(
+        "Steel - A36",
+        7850.0,
+        0.26,
+        200.0,
+        [250.0, 400.0, 0.0, 0.0],
+        "ASM: ASTM A36 steel, bar (E 200 GPa, ν 0.26, yield 250 MPa, ultimate 400–550 MPa)",
+    ),
+    m(
+        "Titanium - Ti-6Al-4V",
+        4430.0,
+        0.342,
+        113.8,
+        [880.0, 950.0, 970.0, 0.0],
+        "ASM: Ti-6Al-4V (grade 5), annealed",
+    ),
 ];
 
 /// A library material by name.
 pub fn library(name: &str) -> Option<Material> {
-    LIBRARY.iter().find(|m| m.name == name).map(LibraryMaterial::material)
+    LIBRARY
+        .iter()
+        .find(|m| m.name == name)
+        .map(LibraryMaterial::material)
 }
 
 /// The library's materials whose names contain `query` (any case), in order (the dialog's
@@ -212,11 +362,26 @@ mod tests {
 
     #[test]
     fn the_library_has_the_course_materials() {
-        for name in ["Polypropylene", "Aluminum - 380", "Aluminum - 1060", "Steel", "ABS", "Brass", "Aluminum - 6061"] {
+        for name in [
+            "Polypropylene",
+            "Aluminum - 380",
+            "Aluminum - 1060",
+            "Steel",
+            "ABS",
+            "Brass",
+            "Aluminum - 6061",
+        ] {
             assert!(library(name).is_some(), "{name}");
         }
-        assert!(LIBRARY.windows(2).all(|w| w[0].name < w[1].name), "alphabetical");
-        assert!(LIBRARY.iter().all(|m| m.density > 0.0 && !m.source.is_empty()));
+        assert!(
+            LIBRARY.windows(2).all(|w| w[0].name < w[1].name),
+            "alphabetical"
+        );
+        assert!(
+            LIBRARY
+                .iter()
+                .all(|m| m.density > 0.0 && !m.source.is_empty())
+        );
     }
 
     #[test]
@@ -238,7 +403,15 @@ mod tests {
     #[test]
     fn search_is_case_insensitive() {
         let hits: Vec<&str> = search("alum").iter().map(|m| m.name).collect();
-        assert_eq!(hits, ["Aluminum - 1060", "Aluminum - 380", "Aluminum - 6061", "Aluminum - 7075"]);
+        assert_eq!(
+            hits,
+            [
+                "Aluminum - 1060",
+                "Aluminum - 380",
+                "Aluminum - 6061",
+                "Aluminum - 7075"
+            ]
+        );
         assert_eq!(search("").len(), LIBRARY.len());
     }
 }

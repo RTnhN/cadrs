@@ -50,11 +50,21 @@ pub fn document(world: &mut World, id: DocumentId) -> Option<std::sync::Arc<Docu
 
 /// The contexts of the linked Part Studio of `instance` made in `assembly` (for the instance
 /// menu), with their status.
-pub fn contexts_of(world: &mut World, assembly: ElementId, instance: InstanceId) -> Vec<super::managed_context::InstanceContext> {
+pub fn contexts_of(
+    world: &mut World,
+    assembly: ElementId,
+    instance: InstanceId,
+) -> Vec<super::managed_context::InstanceContext> {
     let doc = world.resource::<ActiveDocument>().doc.clone();
-    let Some((d, studio)) = context::linked_studio_of(&doc, assembly, instance) else { return Vec::new() };
-    let Some(part_doc) = document(world, d) else { return Vec::new() };
-    let Some(el) = part_doc.element(studio) else { return Vec::new() };
+    let Some((d, studio)) = context::linked_studio_of(&doc, assembly, instance) else {
+        return Vec::new();
+    };
+    let Some(part_doc) = document(world, d) else {
+        return Vec::new();
+    };
+    let Some(el) = part_doc.element(studio) else {
+        return Vec::new();
+    };
     el.contexts
         .iter()
         .filter(|c| c.document == Some(doc.id) && c.assembly == assembly)
@@ -73,9 +83,16 @@ pub fn contexts_of(world: &mut World, assembly: ElementId, instance: InstanceId)
 
 /// **Edit in context** of a linked instance (MC5.1): its document's workspace, editable, with
 /// the context.
-pub fn edit_linked(world: &mut World, assembly: ElementId, instance: InstanceId, which: super::in_context::Which) {
+pub fn edit_linked(
+    world: &mut World,
+    assembly: ElementId,
+    instance: InstanceId,
+    which: super::in_context::Which,
+) {
     let asm_doc = world.resource::<ActiveDocument>().doc.clone();
-    let Some((d, studio)) = context::linked_studio_of(&asm_doc, assembly, instance) else { return };
+    let Some((d, studio)) = context::linked_studio_of(&asm_doc, assembly, instance) else {
+        return;
+    };
     let store = world.resource::<DocumentStore>().0.clone();
     let file = match store.load(d) {
         Ok(f) => f,
@@ -119,16 +136,28 @@ pub fn edit_linked(world: &mut World, assembly: ElementId, instance: InstanceId,
         context::set_pending(d, studio, Some(c));
     }
     world.insert_resource(open);
-    world.insert_resource(InContextSession { back, assembly, part_doc: d, studio });
-    world.resource_mut::<super::in_context::ActiveContexts>().0.insert(studio, id);
+    world.insert_resource(InContextSession {
+        back,
+        assembly,
+        part_doc: d,
+        studio,
+    });
+    world
+        .resource_mut::<super::in_context::ActiveContexts>()
+        .0
+        .insert(studio, id);
     world.resource_mut::<crate::viewport::Selection>().0.clear();
-    world.resource_mut::<crate::linked::LinkStatus>().invalidate();
+    world
+        .resource_mut::<crate::linked::LinkStatus>()
+        .invalidate();
 }
 
 /// **Go to assembly** from a linked part's document (MC5.4), or (`version`) **Create version and
 /// go to assembly** (MC5.5): its primary instance then uses the new version.
 pub fn go_back(world: &mut World, version: bool) {
-    let Some(session) = world.remove_resource::<InContextSession>() else { return };
+    let Some(session) = world.remove_resource::<InContextSession>() else {
+        return;
+    };
     let store = world.resource::<DocumentStore>().0.clone();
     let now = world.resource::<AppClock>().now();
     let user = world.resource::<UserProfile>().id.clone();
@@ -136,20 +165,40 @@ pub fn go_back(world: &mut World, version: bool) {
     // The context the part's document shows (its primary instance gets the version).
     let ctx: Option<StudioContext> = {
         let doc = &world.resource::<ActiveDocument>().doc;
-        world.resource::<super::in_context::ActiveContexts>().0.get(&studio).and_then(|id| doc.element(studio)?.context(*id).cloned())
+        world
+            .resource::<super::in_context::ActiveContexts>()
+            .0
+            .get(&studio)
+            .and_then(|id| doc.element(studio)?.context(*id).cloned())
     };
-    if let Err(e) = world.resource_mut::<ActiveDocument>().save_if_changed(&store, now, &user) {
+    if let Err(e) = world
+        .resource_mut::<ActiveDocument>()
+        .save_if_changed(&store, now, &user)
+    {
         warn!("cannot save the linked document: {e}");
     }
     let made = version.then(|| make_version(world)).flatten();
     context::set_pending(part_doc, studio, None);
-    world.resource_mut::<super::in_context::ActiveContexts>().0.remove(&studio);
+    world
+        .resource_mut::<super::in_context::ActiveContexts>()
+        .0
+        .remove(&studio);
     world.insert_resource(session.back);
-    world.resource_mut::<ActiveDocument>().set_active(session.assembly);
+    world
+        .resource_mut::<ActiveDocument>()
+        .set_active(session.assembly);
     crate::linked::resolver(world).0.forget(part_doc);
-    world.resource_mut::<crate::linked::LinkStatus>().invalidate();
+    world
+        .resource_mut::<crate::linked::LinkStatus>()
+        .invalidate();
     if let (Some(v), Some(ctx)) = (made, ctx) {
-        point_at(world, session.assembly, ctx.instance, v, "Create version and go to assembly");
+        point_at(
+            world,
+            session.assembly,
+            ctx.instance,
+            v,
+            "Create version and go to assembly",
+        );
     }
 }
 
@@ -168,29 +217,74 @@ fn make_version(world: &mut World) -> Option<cadrs_core::history_log::VersionId>
 
 /// Points the instance `instance` of `assembly` (in the open document) at version `v` of its
 /// source: one undo step.
-fn point_at(world: &mut World, assembly: ElementId, instance: InstanceId, v: cadrs_core::history_log::VersionId, label: &str) {
+fn point_at(
+    world: &mut World,
+    assembly: ElementId,
+    instance: InstanceId,
+    v: cadrs_core::history_log::VersionId,
+    label: &str,
+) {
     let doc = world.resource::<ActiveDocument>().doc.clone();
-    let Some(u) = cadrs_core::link_update::use_at(&doc, RefSite::Instance { element: assembly, instance }) else { return };
-    let change = cadrs_core::link_update::change_for(&mut crate::linked::resolver(world).0, &doc, None, &u, Target::Version(v));
+    let Some(u) = cadrs_core::link_update::use_at(
+        &doc,
+        RefSite::Instance {
+            element: assembly,
+            instance,
+        },
+    ) else {
+        return;
+    };
+    let change = cadrs_core::link_update::change_for(
+        &mut crate::linked::resolver(world).0,
+        &doc,
+        None,
+        &u,
+        Target::Version(v),
+    );
     match change {
         Ok(Some(c)) => {
-            super::run(world, &UpdateReferences { changes: vec![c], label: label.into() });
+            super::run(
+                world,
+                &UpdateReferences {
+                    changes: vec![c],
+                    label: label.into(),
+                },
+            );
         }
         Ok(None) => {}
         Err(e) => crate::linked::error_toast(world, e.to_string()),
     }
-    world.resource_mut::<crate::linked::LinkStatus>().invalidate();
+    world
+        .resource_mut::<crate::linked::LinkStatus>()
+        .invalidate();
 }
 
 /// **Update context from the assembly** of a linked part (MC5.8.1): the other document's context
 /// takes the snapshot, gets a version, and the primary instance uses it.
-pub fn update_from_assembly(world: &mut World, assembly: ElementId, instance: InstanceId, id: ContextNo) {
+pub fn update_from_assembly(
+    world: &mut World,
+    assembly: ElementId,
+    instance: InstanceId,
+    id: ContextNo,
+) {
     let asm_doc = world.resource::<ActiveDocument>().doc.clone();
-    let Some((d, studio)) = context::linked_studio_of(&asm_doc, assembly, instance) else { return };
+    let Some((d, studio)) = context::linked_studio_of(&asm_doc, assembly, instance) else {
+        return;
+    };
     let now = world.resource::<AppClock>().now();
     let user = world.resource::<UserProfile>().id.clone();
-    let primary = document(world, d).and_then(|p| p.element(studio)?.context(id).map(|c| c.instance)).unwrap_or(instance);
-    let made = context::update_linked_context(&mut crate::linked::resolver(world).0, &asm_doc, d, studio, id, now, &user);
+    let primary = document(world, d)
+        .and_then(|p| p.element(studio)?.context(id).map(|c| c.instance))
+        .unwrap_or(instance);
+    let made = context::update_linked_context(
+        &mut crate::linked::resolver(world).0,
+        &asm_doc,
+        d,
+        studio,
+        id,
+        now,
+        &user,
+    );
     match made {
         Ok(v) => point_at(world, assembly, primary, v, "Update context"),
         Err(e) => crate::linked::error_toast(world, e.to_string()),
@@ -215,15 +309,23 @@ pub fn open_assembly(world: &mut World, ctx: &StudioContext) {
     let file = match store.load(d) {
         Ok(f) => f,
         Err(e) => {
-            crate::linked::error_toast(world, format!("The assembly's document can't be opened: {e}"));
+            crate::linked::error_toast(
+                world,
+                format!("The assembly's document can't be opened: {e}"),
+            );
             return;
         }
     };
-    if let Err(e) = world.resource_mut::<ActiveDocument>().save_if_changed(&store, now, &user) {
+    if let Err(e) = world
+        .resource_mut::<ActiveDocument>()
+        .save_if_changed(&store, now, &user)
+    {
         warn!("cannot save: {e}");
     }
     let mut open = ActiveDocument::stored(file.document, file.meta);
     open.set_active(ctx.assembly);
     world.insert_resource(open);
-    world.resource_mut::<crate::linked::LinkStatus>().invalidate();
+    world
+        .resource_mut::<crate::linked::LinkStatus>()
+        .invalidate();
 }

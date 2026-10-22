@@ -19,7 +19,8 @@
 use std::f64::consts::PI;
 
 use cadrs_core::applied::{
-    ChamferFeature, ChamferType, EdgeOrFace, FilletFeature, FilletMeasurement, HoleFeature, HolePoint, ShellFeature,
+    ChamferFeature, ChamferType, EdgeOrFace, FilletFeature, FilletMeasurement, HoleFeature,
+    HolePoint, ShellFeature,
 };
 use cadrs_core::commands::{AddFeature, AddSketch, EditSketch, MoveFeatures};
 use cadrs_core::document::{Document, EdgeRef, FaceRef};
@@ -45,7 +46,11 @@ impl Studio {
     fn new() -> Self {
         let d = gc::document().expect("the stand-in builds");
         let el = d.elements[0].id;
-        Self { d, h: History::default(), el }
+        Self {
+            d,
+            h: History::default(),
+            el,
+        }
     }
 
     fn features(&self) -> Vec<Feature> {
@@ -85,7 +90,11 @@ fn face_ref(part: &Part, n: [f64; 3], p: [f64; 3]) -> FaceRef {
             }) && s.face_contains(i, p)
         })
         .expect("a face there");
-    FaceRef { part: part.id, face: s.faces[i].name, seed: p }
+    FaceRef {
+        part: part.id,
+        face: s.faces[i].name,
+        seed: p,
+    }
 }
 
 /// The edge of the part passing nearest `p`.
@@ -97,7 +106,11 @@ fn edge_ref(part: &Part, p: [f64; 3]) -> EdgeRef {
         .min_by(|a, b| a.distance(p).total_cmp(&b.distance(p)))
         .unwrap();
     assert!(e.distance(p) < 1e-3, "no edge at {p:?}");
-    EdgeRef { part: part.id, edge: e.name, seed: p }
+    EdgeRef {
+        part: part.id,
+        edge: e.name,
+        seed: p,
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -133,7 +146,8 @@ fn body_volume() -> f64 {
 /// their top at z 46) πr_c²·5 + πr_h²·41; the four on the flat top (from z 40) πr_c²·5 +
 /// πr_h²·35.
 fn holes_volume() -> f64 {
-    2.0 * (PI * RC * RC * 5.0 + PI * RH * RH * 41.0) + 4.0 * (PI * RC * RC * 5.0 + PI * RH * RH * 35.0)
+    2.0 * (PI * RC * RC * 5.0 + PI * RH * RH * 41.0)
+        + 4.0 * (PI * RC * RC * 5.0 + PI * RH * RH * 35.0)
 }
 
 /// The shell's cavity when it comes after the holes (the course's order after step 4): the
@@ -211,7 +225,12 @@ fn gear_cover_course_steps() {
     let shell = s.add(AddFeature::shell(
         s.el,
         FeatureId::new(),
-        ShellFeature { faces: vec![bottom], thickness: 4.0, thickness_expr: "4 mm".into(), ..ShellFeature::default() },
+        ShellFeature {
+            faces: vec![bottom],
+            thickness: 4.0,
+            thickness_expr: "4 mm".into(),
+            ..ShellFeature::default()
+        },
     ));
     let shelled = s.volume();
     assert!(shelled < body_volume() / 2.0, "{shelled}");
@@ -220,10 +239,19 @@ fn gear_cover_course_steps() {
     // bosses' edges, and four on the flat top, symmetric about the YZ plane.
     let part = s.part();
     let boss_top = face_ref(&part, [0.0, 0.0, 1.0], [gc::BOSS_X, gc::BOSS_Y, 46.0]);
-    let plane = cadrs_core::parts::face_plane(&s.features(), gc::EXTRUDE_3, boss_top.face).expect("a planar face");
+    let plane = cadrs_core::parts::face_plane(&s.features(), gc::EXTRUDE_3, boss_top.face)
+        .expect("a planar face");
     let frame = plane.frame();
     let sketch = FeatureId::new();
-    s.h.execute(&mut s.d, &AddSketch { element: s.el, feature: sketch, plane: Some(plane) }).unwrap();
+    s.h.execute(
+        &mut s.d,
+        &AddSketch {
+            element: s.el,
+            feature: sketch,
+            plane: Some(plane),
+        },
+    )
+    .unwrap();
     let pts = [
         [-gc::BOSS_X, gc::BOSS_Y],
         [gc::BOSS_X, gc::BOSS_Y],
@@ -237,11 +265,33 @@ fn gear_cover_course_steps() {
     // the closed form's pieces don't meet).
     let ops: Vec<SketchOp> = pts
         .iter()
-        .map(|p| SketchOp::AddPoint { pos: frame.to_sketch([p[0], p[1], 46.0]) })
+        .map(|p| SketchOp::AddPoint {
+            pos: frame.to_sketch([p[0], p[1], 46.0]),
+        })
         .collect();
-    s.h.execute(&mut s.d, &EditSketch { element: s.el, feature: sketch, op: SketchOp::Batch(ops) }).unwrap();
-    let g = s.d.element(s.el).unwrap().feature(sketch).unwrap().sketch().unwrap().geometry.clone();
-    let points: Vec<HolePoint> = g.points.keys().map(|point| HolePoint { sketch, point }).collect();
+    s.h.execute(
+        &mut s.d,
+        &EditSketch {
+            element: s.el,
+            feature: sketch,
+            op: SketchOp::Batch(ops),
+        },
+    )
+    .unwrap();
+    let g =
+        s.d.element(s.el)
+            .unwrap()
+            .feature(sketch)
+            .unwrap()
+            .sketch()
+            .unwrap()
+            .geometry
+            .clone();
+    let points: Vec<HolePoint> = g
+        .points
+        .keys()
+        .map(|point| HolePoint { sketch, point })
+        .collect();
     assert_eq!(points.len(), 6);
 
     // Step 3 (PS17.5): the hole, Metric, Counterbore, Clearance M5 Close → Ø5.3, Start from
@@ -254,13 +304,31 @@ fn gear_cover_course_steps() {
     spec.start = HoleStart::Part;
     spec.end = HoleEnd::ThroughAll;
     spec.apply_table();
-    assert_eq!((spec.diameter.value, spec.cbore_diameter.value, spec.cbore_depth.value), (5.3, 9.75, 5.0));
+    assert_eq!(
+        (
+            spec.diameter.value,
+            spec.cbore_diameter.value,
+            spec.cbore_depth.value
+        ),
+        (5.3, 9.75, 5.0)
+    );
     let hole = s.add(AddFeature::hole(
         s.el,
         FeatureId::new(),
-        HoleFeature { points, merge_scope: vec![gc::PART], spec, ..HoleFeature::default() },
+        HoleFeature {
+            points,
+            merge_scope: vec![gc::PART],
+            spec,
+            ..HoleFeature::default()
+        },
     ));
-    let hole_name = s.d.element(s.el).unwrap().feature(hole).unwrap().name.clone();
+    let hole_name =
+        s.d.element(s.el)
+            .unwrap()
+            .feature(hole)
+            .unwrap()
+            .name
+            .clone();
     assert_eq!(hole_name, "Ø 5.3 mm THRU | ⌴Ø 9.75 mm ↧ 5 mm");
     // With the shell first, the counterbores are cut through 4 mm walls ("most holes look like
     // plain holes"): less is removed than from the solid body.
@@ -271,7 +339,13 @@ fn gear_cover_course_steps() {
     let n = s.features().len();
     s.h.execute(
         &mut s.d,
-        &MoveFeatures { element: s.el, features: vec![shell], to: n - 1, folder: None, label: "Reorder Shell 1".into() },
+        &MoveFeatures {
+            element: s.el,
+            features: vec![shell],
+            to: n - 1,
+            folder: None,
+            label: "Reorder Shell 1".into(),
+        },
     )
     .unwrap();
     assert_eq!(s.features().last().unwrap().id, shell);
@@ -307,12 +381,24 @@ fn gear_cover_course_steps() {
 
     // Step 6 (PS17.8): Fillet R1, overflow on, three bottom rim edges (their tangent chain is
     // the whole outer rim).
-    let rim = [[0.0, -200.0, 0.0], [55.0, -100.0, 0.0], [-55.0, -100.0, 0.0]];
-    let entities = rim.iter().map(|p| EdgeOrFace::Edge(edge_ref(&before, *p))).collect();
+    let rim = [
+        [0.0, -200.0, 0.0],
+        [55.0, -100.0, 0.0],
+        [-55.0, -100.0, 0.0],
+    ];
+    let entities = rim
+        .iter()
+        .map(|p| EdgeOrFace::Edge(edge_ref(&before, *p)))
+        .collect();
     s.add(AddFeature::fillet(
         s.el,
         FeatureId::new(),
-        FilletFeature { entities, size: 1.0, size_expr: "1 mm".into(), ..FilletFeature::default() },
+        FilletFeature {
+            entities,
+            size: 1.0,
+            size_expr: "1 mm".into(),
+            ..FilletFeature::default()
+        },
     ));
     let v6 = s.volume();
     // Removed along the rim's length: (1 − π/4)·1² per mm (all the rim's corners are 90°), the
@@ -323,7 +409,14 @@ fn gear_cover_course_steps() {
     // Step 7 (PS17.9): Fillet 3 on the slope's edge (Edge of Extrude 2): Width 3 mm.
     let part = s.part();
     let slope_edge = edge_ref(&part, [55.0, -140.0, 24.0 + 0.2 * 60.0]);
-    assert!(slope_edge.edge.faces.iter().any(|f| f.op == gc::EXTRUDE_2.0), "an edge of Extrude 2");
+    assert!(
+        slope_edge
+            .edge
+            .faces
+            .iter()
+            .any(|f| f.op == gc::EXTRUDE_2.0),
+        "an edge of Extrude 2"
+    );
     s.add(AddFeature::fillet(
         s.el,
         FeatureId::new(),
@@ -356,7 +449,13 @@ fn gear_cover_course_steps() {
     let corner = (0..=n)
         .map(|i| {
             let a = -PI / 2.0 + PI / 2.0 * i as f64 / n as f64;
-            let wgt = if i == 0 || i == n { 1.0 } else if i % 2 == 1 { 4.0 } else { 2.0 };
+            let wgt = if i == 0 || i == n {
+                1.0
+            } else if i % 2 == 1 {
+                4.0
+            } else {
+                2.0
+            };
             wgt * (400.0 + 16.0 * a.cos().powi(2)).sqrt()
         })
         .sum::<f64>()
@@ -366,13 +465,21 @@ fn gear_cover_course_steps() {
     // on a shorter path: at least (1 − r/R) of the edge (Pappus). The two ends, where the
     // fillet stops at the slope's crease, change it by at most A·r each.
     let straight = 2.0 * side * a90 + front * a_front;
-    let low = straight + 2.0 * corner * a_front * (1.0 - r_front / gc::CORNER_R) - 2.0 * a90 * r_front;
+    let low =
+        straight + 2.0 * corner * a_front * (1.0 - r_front / gc::CORNER_R) - 2.0 * a90 * r_front;
     let high = straight + 2.0 * corner * a90 + 2.0 * a90 * r_front;
-    assert!(low < removed && removed < high, "the Width fillet removed {removed}, expected {low}..{high}");
+    assert!(
+        low < removed && removed < high,
+        "the Width fillet removed {removed}, expected {low}..{high}"
+    );
     // And OCCT's exact volume against the display mesh's (0.05 mm deflection): the mesh's
     // chords cut into the curved faces, so it is a little smaller, by under 1.5e-4.
     let mesh = done.solid.volume();
-    assert!((m.volume - mesh).abs() < 1.5e-4 * m.volume, "OCCT {} vs mesh {mesh}", m.volume);
+    assert!(
+        (m.volume - mesh).abs() < 1.5e-4 * m.volume,
+        "OCCT {} vs mesh {mesh}",
+        m.volume
+    );
     close(m.center_of_mass.x, 0.0, 1e-6);
 
     // Step 8 (PS17.10): Mass properties in kg (Aluminum - 380, 2760 kg/m³).
@@ -397,7 +504,8 @@ fn the_fixture_is_current() {
     // `fixtures/gear_cover_standin.cadrs` is the stand-in document as `gc::document()` builds
     // it. Regenerate it with `CADRS_WRITE_FIXTURES=1 cargo test -p cadrs_core --test gear_cover`.
     let doc = gc::document().unwrap();
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/gear_cover_standin.cadrs");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/gear_cover_standin.cadrs");
     let file = gc::file(doc.clone());
     let text = ron::ser::to_string_pretty(&file, ron::ser::PrettyConfig::default()).unwrap();
     if std::env::var("CADRS_WRITE_FIXTURES").is_ok() {
@@ -405,7 +513,10 @@ fn the_fixture_is_current() {
         std::fs::write(&path, &text).unwrap();
     }
     let stored = cadrs_core::Store::load_path(&path).expect("the fixture loads");
-    assert_eq!(stored.document, doc, "fixtures/gear_cover_standin.cadrs is out of date");
+    assert_eq!(
+        stored.document, doc,
+        "fixtures/gear_cover_standin.cadrs is out of date"
+    );
 }
 
 #[test]
@@ -418,14 +529,23 @@ fn a_feature_dragged_above_its_parent_fails() {
     assert_eq!(i, 1);
     s.h.execute(
         &mut s.d,
-        &MoveFeatures { element: s.el, features: vec![gc::EXTRUDE_1], to: 0, folder: Some(gc::FOLDER), label: "Reorder".into() },
+        &MoveFeatures {
+            element: s.el,
+            features: vec![gc::EXTRUDE_1],
+            to: 0,
+            folder: Some(gc::FOLDER),
+            label: "Reorder".into(),
+        },
     )
     .unwrap();
     let b = rebuild::build(&s.features());
     let why = b.error(gc::EXTRUDE_1).expect("Extrude 1 fails");
     assert!(why.contains("Sketch 1 is below this feature"), "{why}");
     // The folder still holds its six features, in their new order.
-    assert_eq!(s.d.element(s.el).unwrap().folders()[0].features[0], gc::EXTRUDE_1);
+    assert_eq!(
+        s.d.element(s.el).unwrap().folders()[0].features[0],
+        gc::EXTRUDE_1
+    );
     s.h.undo(&mut s.d).unwrap();
     assert!(rebuild::build(&s.features()).errors.is_empty());
 }

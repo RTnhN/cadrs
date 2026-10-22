@@ -51,7 +51,10 @@ pub struct Ellipsis {
 impl Ellipsis {
     /// Cut in the middle (see [`Ellipsis::middle`]).
     pub fn middle() -> Self {
-        Self { middle: true, ..Self::default() }
+        Self {
+            middle: true,
+            ..Self::default()
+        }
     }
 
     /// While cut, show the whole string in a tooltip on the text's parent.
@@ -96,8 +99,16 @@ pub fn cut_middle(full: &str, keep: usize) -> String {
     if keep >= chars.len() {
         return full.to_string();
     }
-    let last_word = full.rsplit(' ').next().map(|w| w.chars().count()).unwrap_or(0);
-    let tail = if last_word > 0 && last_word <= keep / 2 { last_word } else { keep / 3 };
+    let last_word = full
+        .rsplit(' ')
+        .next()
+        .map(|w| w.chars().count())
+        .unwrap_or(0);
+    let tail = if last_word > 0 && last_word <= keep / 2 {
+        last_word
+    } else {
+        keep / 3
+    };
     let head = keep.saturating_sub(tail);
     let a: String = chars[..head].iter().collect();
     let b: String = chars[chars.len() - tail..].iter().collect();
@@ -116,8 +127,12 @@ fn available(
 ) -> f32 {
     let inset = node.content_inset();
     let own = node.size().x - inset.min_inset.x - inset.max_inset.x;
-    let Ok(parent) = q_parent.get(e).map(|c| c.parent()) else { return own };
-    let (Ok((pn, pnode, _)), Ok(children)) = (q_nodes.get(parent), q_children.get(parent)) else { return own };
+    let Ok(parent) = q_parent.get(e).map(|c| c.parent()) else {
+        return own;
+    };
+    let (Ok((pn, pnode, _)), Ok(children)) = (q_nodes.get(parent), q_children.get(parent)) else {
+        return own;
+    };
     if pnode.flex_direction != FlexDirection::Row {
         return own;
     }
@@ -127,7 +142,9 @@ fn available(
     let mut room = pn.size().x - pin.min_inset.x - pin.max_inset.x;
     let mut count = 0;
     for c in children.iter() {
-        let Ok((cn, cnode, _)) = q_nodes.get(c) else { continue };
+        let Ok((cn, cnode, _)) = q_nodes.get(c) else {
+            continue;
+        };
         if cnode.display == Display::None || cnode.position_type == PositionType::Absolute {
             continue;
         }
@@ -144,14 +161,24 @@ fn available(
     }
     room -= px(pnode.column_gap) * (count.max(1) - 1) as f32;
     // The node's own margins and insets.
-    let (_, enode, _) = q_nodes.get(e).map(|(a, b, c)| (*a, b.clone(), c.copied())).unwrap_or((*node, Node::default(), None));
+    let (_, enode, _) = q_nodes
+        .get(e)
+        .map(|(a, b, c)| (*a, b.clone(), c.copied()))
+        .unwrap_or((*node, Node::default(), None));
     room -= px(enode.margin.left) + px(enode.margin.right) + inset.min_inset.x + inset.max_inset.x;
     room.max(own)
 }
 
 #[allow(clippy::type_complexity)]
 fn ellipsize(
-    mut q: Query<(Entity, &mut Ellipsis, &mut Text, &ComputedNode, &TextLayoutInfo, Option<&SymbolSource>)>,
+    mut q: Query<(
+        Entity,
+        &mut Ellipsis,
+        &mut Text,
+        &ComputedNode,
+        &TextLayoutInfo,
+        Option<&SymbolSource>,
+    )>,
     q_parent: Query<&ChildOf>,
     q_nodes: Query<(&ComputedNode, &Node, Option<&Visibility>)>,
     q_children: Query<&Children>,
@@ -166,7 +193,11 @@ fn ellipsize(
         {
             match &want {
                 Some(full) => {
-                    commands.entity(parent).try_insert(Tooltip { text: full.clone(), shortcut: None, style: TooltipStyle::Label });
+                    commands.entity(parent).try_insert(Tooltip {
+                        text: full.clone(),
+                        shortcut: None,
+                        style: TooltipStyle::Label,
+                    });
                 }
                 None => {
                     commands.entity(parent).try_remove::<Tooltip>();
@@ -198,7 +229,11 @@ fn ellipsize(
             el.overflow_room = f32::INFINITY;
         }
         let set = |el: &mut Ellipsis, text: &mut Text, keep: usize| {
-            let s = if el.middle { cut_middle(&el.full, keep) } else { cut(&el.full, keep) };
+            let s = if el.middle {
+                cut_middle(&el.full, keep)
+            } else {
+                cut(&el.full, keep)
+            };
             el.keep = keep;
             el.written = Some(s.clone());
             text.0 = s;
@@ -246,7 +281,10 @@ mod tests {
         assert_eq!(cut("Vertex of Extrude 1", 14), "Vertex of…");
         assert_eq!(cut("Reflector Surface Features", 12), "Reflector…");
         assert_eq!(cut("Ab Cdefghijklmnop", 10), "Ab Cdefghi…");
-        assert_eq!(cut_middle("Mate connector of Rear Cap mount", 27), "Mate connector of Rear…mount");
+        assert_eq!(
+            cut_middle("Mate connector of Rear Cap mount", 27),
+            "Mate connector of Rear…mount"
+        );
         assert_eq!(cut_middle("abc", 5), "abc");
     }
 }

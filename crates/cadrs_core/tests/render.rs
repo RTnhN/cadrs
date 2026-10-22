@@ -21,19 +21,40 @@ fn v(x: f64, y: f64) -> Vec2 {
 }
 
 fn sketch(g: Sketch) -> Feature {
-    Feature { id: FeatureId::new(), name: "Sketch 1".into(), kind: FeatureKind::Sketch(SketchFeature { plane: Some(PlaneRef::Top), disable_imprinting: false, geometry: g }), suppress_by: None }
+    Feature {
+        id: FeatureId::new(),
+        name: "Sketch 1".into(),
+        kind: FeatureKind::Sketch(SketchFeature {
+            plane: Some(PlaneRef::Top),
+            disable_imprinting: false,
+            geometry: g,
+        }),
+        suppress_by: None,
+    }
 }
 
 fn extrude(s: &Feature, seeds: &[Vec2], depth: f64) -> Feature {
     let g = &s.sketch().unwrap().geometry;
-    Feature { id: FeatureId::new(), name: "Extrude".into(), kind: FeatureKind::Extrude(samples::extrude_of(samples::region_refs(s.id, g, seeds), depth)), suppress_by: None }
+    Feature {
+        id: FeatureId::new(),
+        name: "Extrude".into(),
+        kind: FeatureKind::Extrude(samples::extrude_of(
+            samples::region_refs(s.id, g, seeds),
+            depth,
+        )),
+        suppress_by: None,
+    }
 }
 
 /// The Control Arm (PS6; both extrudes New, two parts), the first part in Aluminum - 6061 and
 /// the second in ABS with a blue appearance; and a Render Studio of it.
 fn control_arm_document() -> (Document, ElementId, ElementId) {
     let s = sketch(samples::control_arm_sketch());
-    let e1 = extrude(&s, &[v(0.0, 26.0), v(60.0, 0.0), v(107.5 + 14.0, 0.0)], 40.0);
+    let e1 = extrude(
+        &s,
+        &[v(0.0, 26.0), v(60.0, 0.0), v(107.5 + 14.0, 0.0)],
+        40.0,
+    );
     let e2 = extrude(&s, &[v(-60.0, 0.0), v(-107.5 - 14.0, 0.0)], 25.0);
     let features = vec![s, e1, e2];
     let build = cadrs_core::rebuild::build(&features);
@@ -48,7 +69,10 @@ fn control_arm_document() -> (Document, ElementId, ElementId) {
     p.material = cadrs_core::material::library("ABS");
     p.appearance = Some(cadrs_core::Appearance::rgb(41, 128, 185));
     props.push(p);
-    if let ElementKind::PartStudio { features: f, parts, .. } = &mut studio.kind {
+    if let ElementKind::PartStudio {
+        features: f, parts, ..
+    } = &mut studio.kind
+    {
         *f = features;
         *parts = props;
     }
@@ -57,12 +81,24 @@ fn control_arm_document() -> (Document, ElementId, ElementId) {
     doc.elements = vec![studio];
     let mut history = History::default();
     let id = ElementId::new();
-    history.execute(&mut doc, &AddElement { id, kind: NewElementKind::RenderStudio(Some(source)), name: None, after: Some(source) }).unwrap();
+    history
+        .execute(
+            &mut doc,
+            &AddElement {
+                id,
+                kind: NewElementKind::RenderStudio(Some(source)),
+                name: None,
+                after: Some(source),
+            },
+        )
+        .unwrap();
     assert_eq!(doc.element(id).unwrap().name, "Render Studio 1");
     (doc, source, id)
 }
 
-fn build_of(doc: &Document) -> impl FnMut(ElementId) -> Option<Arc<cadrs_core::rebuild::Build>> + '_ {
+fn build_of(
+    doc: &Document,
+) -> impl FnMut(ElementId) -> Option<Arc<cadrs_core::rebuild::Build>> + '_ {
     |e| Some(cadrs_core::rebuild::build(doc.element(e)?.features()))
 }
 
@@ -108,18 +144,55 @@ fn settings_change_through_commands_and_undo() {
     s.environment = RenderEnvironment::Outdoor;
     s.background = RenderBackground::Transparent;
     s.view = RenderView::Isometric;
-    history.execute(&mut doc, &SetRenderStudio { element: id, studio: s.clone(), label: "Environment Outdoor".into() }).unwrap();
-    assert_eq!(render::studio(&doc, id).unwrap().environment, RenderEnvironment::Outdoor);
+    history
+        .execute(
+            &mut doc,
+            &SetRenderStudio {
+                element: id,
+                studio: s.clone(),
+                label: "Environment Outdoor".into(),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        render::studio(&doc, id).unwrap().environment,
+        RenderEnvironment::Outdoor
+    );
     history.undo(&mut doc).expect("undo");
-    assert_eq!(render::studio(&doc, id).unwrap().environment, RenderEnvironment::Studio);
+    assert_eq!(
+        render::studio(&doc, id).unwrap().environment,
+        RenderEnvironment::Studio
+    );
     // A render can't reference a drawing or itself, nor be 0 pixels wide.
     let mut bad = s.clone();
     bad.source = Some(id);
-    assert!(history.execute(&mut doc, &SetRenderStudio { element: id, studio: bad, label: "x".into() }).is_err());
+    assert!(
+        history
+            .execute(
+                &mut doc,
+                &SetRenderStudio {
+                    element: id,
+                    studio: bad,
+                    label: "x".into()
+                }
+            )
+            .is_err()
+    );
     let mut bad = s;
     bad.source = Some(source);
     bad.width = 0;
-    assert!(history.execute(&mut doc, &SetRenderStudio { element: id, studio: bad, label: "x".into() }).is_err());
+    assert!(
+        history
+            .execute(
+                &mut doc,
+                &SetRenderStudio {
+                    element: id,
+                    studio: bad,
+                    label: "x".into()
+                }
+            )
+            .is_err()
+    );
     // The tab round-trips through the document file.
     let text = ron::to_string(&doc).unwrap();
     let back: Document = ron::from_str(&text).unwrap();

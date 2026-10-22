@@ -16,11 +16,11 @@
 //! - Triangles wind counter-clockwise seen from outside; normals point out. Each face has its
 //!   own vertices (flat shading), except that a curved face shares normals along its curve.
 
-use serde::{Deserialize, Serialize};
 use cadrs_kernel::naming::{self, Lost, Match};
 use cadrs_sketch::region::Region;
-pub use cadrs_sketch::{EdgeName, EdgeTag, FaceName, FaceOrigin, OpId, VertexName};
 use cadrs_sketch::{CurveId, PlaneFrame, Vec2, Vec3};
+pub use cadrs_sketch::{EdgeName, EdgeTag, FaceName, FaceOrigin, OpId, VertexName};
+use serde::{Deserialize, Serialize};
 use slotmap::Key;
 
 /// A face of a [`Solid`].
@@ -243,17 +243,38 @@ struct TreeNode {
 
 impl TriangleTree {
     fn build(solid: &Solid, tris: std::ops::Range<usize>) -> Option<Self> {
-        let corners = |t: usize| [0, 1, 2].map(|k| solid.indices.get(3 * t + k).and_then(|&i| solid.positions.get(i as usize)).copied());
+        let corners = |t: usize| {
+            [0, 1, 2].map(|k| {
+                solid
+                    .indices
+                    .get(3 * t + k)
+                    .and_then(|&i| solid.positions.get(i as usize))
+                    .copied()
+            })
+        };
         let mut items: Vec<(u32, Vec3)> = Vec::with_capacity(tris.len());
         for t in tris {
-            let [Some(a), Some(b), Some(c)] = corners(t) else { return None };
+            let [Some(a), Some(b), Some(c)] = corners(t) else {
+                return None;
+            };
             items.push((t as u32, [0, 1, 2].map(|i| (a[i] + b[i] + c[i]) / 3.0)));
         }
-        let mut tree = TriangleTree { nodes: Vec::new(), order: Vec::with_capacity(items.len()) };
-        let bounds = |items: &[(u32, Vec3)]| {
-            bounds_of(items.iter().flat_map(|(t, _)| corners(*t as usize).into_iter().flatten()))
+        let mut tree = TriangleTree {
+            nodes: Vec::new(),
+            order: Vec::with_capacity(items.len()),
         };
-        tree.nodes.push(TreeNode { bounds: bounds(&items)?, first: 0, count: 0 });
+        let bounds = |items: &[(u32, Vec3)]| {
+            bounds_of(
+                items
+                    .iter()
+                    .flat_map(|(t, _)| corners(*t as usize).into_iter().flatten()),
+            )
+        };
+        tree.nodes.push(TreeNode {
+            bounds: bounds(&items)?,
+            first: 0,
+            count: 0,
+        });
         // (node, its items), split until the leaves are small.
         let mut todo = vec![(0usize, items)];
         while let Some((node, mut items)) = todo.pop() {
@@ -263,16 +284,28 @@ impl TriangleTree {
                 tree.order.extend(items.iter().map(|(t, _)| *t));
                 continue;
             }
-            let (lo, hi) = items.iter().fold(([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]), |(lo, hi), (_, c)| {
-                ([0, 1, 2].map(|i| lo[i].min(c[i])), [0, 1, 2].map(|i| hi[i].max(c[i])))
-            });
-            let axis = (0..3).max_by(|&a, &b| (hi[a] - lo[a]).total_cmp(&(hi[b] - lo[b]))).unwrap_or(0);
+            let (lo, hi) = items.iter().fold(
+                ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]),
+                |(lo, hi), (_, c)| {
+                    (
+                        [0, 1, 2].map(|i| lo[i].min(c[i])),
+                        [0, 1, 2].map(|i| hi[i].max(c[i])),
+                    )
+                },
+            );
+            let axis = (0..3)
+                .max_by(|&a, &b| (hi[a] - lo[a]).total_cmp(&(hi[b] - lo[b])))
+                .unwrap_or(0);
             let mid = items.len() / 2;
             items.select_nth_unstable_by(mid, |a, b| a.1[axis].total_cmp(&b.1[axis]));
             let right = items.split_off(mid);
             let first = tree.nodes.len();
             for half in [&items, &right] {
-                tree.nodes.push(TreeNode { bounds: bounds(half)?, first: 0, count: 0 });
+                tree.nodes.push(TreeNode {
+                    bounds: bounds(half)?,
+                    first: 0,
+                    count: 0,
+                });
             }
             tree.nodes[node].first = first as u32;
             todo.push((first, items));
@@ -293,7 +326,9 @@ impl TriangleTree {
             if node.count == 0 {
                 stack.extend([first, first + 1]);
             } else {
-                self.order[first..first + node.count as usize].iter().for_each(|&t| each(t as usize));
+                self.order[first..first + node.count as usize]
+                    .iter()
+                    .for_each(|&t| each(t as usize));
             }
         }
     }
@@ -382,7 +417,13 @@ impl SolidImage {
             let l = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt().max(1e-300);
             [d[0] / l, d[1] / l, d[2] / l]
         });
-        Self { blob: self.blob.clone(), corner, u: sub(f(add(self.corner, self.u)), corner), v: sub(f(add(self.corner, self.v)), corner), facing }
+        Self {
+            blob: self.blob.clone(),
+            corner,
+            u: sub(f(add(self.corner, self.u)), corner),
+            v: sub(f(add(self.corner, self.v)), corner),
+            facing,
+        }
     }
 }
 
@@ -405,7 +446,11 @@ impl SurfaceGrid {
         let f = |p: &(Vec3, Vec3)| dot(p.1, back);
         let lerp = |a: &(Vec3, Vec3), b: &(Vec3, Vec3)| -> (Vec3, Vec3) {
             let (fa, fb) = (f(a), f(b));
-            let t = if (fa - fb).abs() < 1e-300 { 0.5 } else { fa / (fa - fb) };
+            let t = if (fa - fb).abs() < 1e-300 {
+                0.5
+            } else {
+                fa / (fa - fb)
+            };
             let mix = |x: Vec3, y: Vec3| add(x, scale(sub(y, x), t));
             (mix(a.0, b.0), normalize(mix(a.1, b.1)))
         };
@@ -514,7 +559,9 @@ impl Solid {
                 cells.entry(key(self.positions[i])).or_default().push(t);
             }
         }
-        let has = |t: usize, p: Vec3| (0..3).any(|k| len(sub(self.positions[self.indices[3 * t + k] as usize], p)) <= 1e-6);
+        let has = |t: usize, p: Vec3| {
+            (0..3).any(|k| len(sub(self.positions[self.indices[3 * t + k] as usize], p)) <= 1e-6)
+        };
         let near = |p: Vec3| -> Vec<usize> {
             let c = key(p);
             let mut out: Vec<usize> = Vec::new();
@@ -605,7 +652,10 @@ impl Solid {
         if self.face_aliases.is_empty() || self.faces.iter().any(|f| f.name == *name) {
             return *name;
         }
-        self.face_aliases.iter().find(|a| a.name == *name).map_or(*name, |a| a.face)
+        self.face_aliases
+            .iter()
+            .find(|a| a.name == *name)
+            .map_or(*name, |a| a.face)
     }
 
     /// An edge name with its faces by the names they are known by now.
@@ -613,7 +663,11 @@ impl Solid {
         if self.face_aliases.is_empty() {
             return *name;
         }
-        EdgeName::new(self.canonical_face(&name.faces[0]), self.canonical_face(&name.faces[1]), name.index)
+        EdgeName::new(
+            self.canonical_face(&name.faces[0]),
+            self.canonical_face(&name.faces[1]),
+            name.index,
+        )
     }
 
     /// A vertex name with its faces by the names they are known by now.
@@ -623,7 +677,10 @@ impl Solid {
         }
         let mut faces = name.faces.map(|f| self.canonical_face(&f));
         faces.sort();
-        VertexName { faces, index: name.index }
+        VertexName {
+            faces,
+            index: name.index,
+        }
     }
 
     /// The sketch frame of face `i` when it is referred to as `name`: the frame its merged-away
@@ -631,7 +688,10 @@ impl Solid {
     pub fn face_plane_as(&self, i: usize, name: &FaceName) -> Option<PlaneFrame> {
         let face = self.faces.get(i)?;
         if face.name != *name
-            && let Some(a) = self.face_aliases.iter().find(|a| a.name == *name && a.face == face.name)
+            && let Some(a) = self
+                .face_aliases
+                .iter()
+                .find(|a| a.name == *name && a.face == face.name)
             && a.plane.is_some()
         {
             return a.plane;
@@ -655,7 +715,9 @@ impl Solid {
             let seed = seed?;
             if let (Some(h), Some(p)) = (plane, self.faces[i].plane) {
                 let (a, b) = (normalize(h.normal()), normalize(p.normal()));
-                if dot(a, b) < 1.0 - 1e-9 || h.distance(p.origin).abs() / len(h.normal()).max(1e-300) > 1e-6 {
+                if dot(a, b) < 1.0 - 1e-9
+                    || h.distance(p.origin).abs() / len(h.normal()).max(1e-300) > 1e-6
+                {
                     return None;
                 }
             }
@@ -719,7 +781,12 @@ impl Solid {
         distance: impl Fn(&SolidEdge) -> Option<f64>,
     ) -> Result<(usize, Match), Lost> {
         let names: Vec<EdgeName> = self.edges.iter().map(|e| e.name).collect();
-        naming::resolve(&self.canonical_edge(name), &names, |i| distance(&self.edges[i]), 1e-6)
+        naming::resolve(
+            &self.canonical_edge(name),
+            &names,
+            |i| distance(&self.edges[i]),
+            1e-6,
+        )
     }
 
     /// How the two faces along an edge meet (P3.8, for Create selection → Pocket), from the mesh
@@ -742,7 +809,8 @@ impl Solid {
             // its centre: a face round a pocket has triangles across the pocket too).
             (f.first_triangle..f.first_triangle + f.triangle_count)
                 .map(|tri| {
-                    let [p, q, r] = [0, 1, 2].map(|j| self.positions[self.indices[3 * tri + j] as usize]);
+                    let [p, q, r] =
+                        [0, 1, 2].map(|j| self.positions[self.indices[3 * tri + j] as usize]);
                     let c = scale(add(add(p, q), r), 1.0 / 3.0);
                     let d = sub(closest_on_triangle(m, p, q, r), m);
                     (dot(d, d), normalize(cross(sub(q, p), sub(r, p))), c)
@@ -771,12 +839,18 @@ impl Solid {
     /// Faces → Pocket, PS27.12): `seed` and every face reached from it across concave or smooth
     /// edges; convex edges (the pocket's rim) stop it.
     pub fn pocket_faces(&self, seed: usize) -> Vec<usize> {
-        let Some(first) = self.faces.get(seed).map(|f| f.name) else { return Vec::new() };
+        let Some(first) = self.faces.get(seed).map(|f| f.name) else {
+            return Vec::new();
+        };
         let mut names = vec![first];
         let mut todo = vec![first];
         while let Some(cur) = todo.pop() {
             for e in self.edges.iter().filter(|e| e.name.touches(&cur)) {
-                let other = if e.name.faces[0] == cur { e.name.faces[1] } else { e.name.faces[0] };
+                let other = if e.name.faces[0] == cur {
+                    e.name.faces[1]
+                } else {
+                    e.name.faces[0]
+                };
                 if other == cur || names.contains(&other) {
                     continue;
                 }
@@ -786,7 +860,10 @@ impl Solid {
                 }
             }
         }
-        names.iter().filter_map(|n| self.faces.iter().position(|f| f.name == *n)).collect()
+        names
+            .iter()
+            .filter_map(|n| self.faces.iter().position(|f| f.name == *n))
+            .collect()
     }
 
     /// The edges of a face.
@@ -815,7 +892,12 @@ impl Solid {
 
     /// The solid's [`PickIndex`], built on first use.
     pub fn pick_index(&self) -> std::borrow::Cow<'_, PickIndex> {
-        let shape = [self.positions.len(), self.indices.len(), self.faces.len(), self.edges.len()];
+        let shape = [
+            self.positions.len(),
+            self.indices.len(),
+            self.faces.len(),
+            self.edges.len(),
+        ];
         let index = self.pick_cache.0.get_or_init(|| self.build_pick_index());
         if index.shape == shape {
             std::borrow::Cow::Borrowed(index)
@@ -826,35 +908,73 @@ impl Solid {
 
     fn build_pick_index(&self) -> PickIndex {
         let face = |f: &SolidFace| {
-            let idx = self.indices.get(3 * f.first_triangle..3 * (f.first_triangle + f.triangle_count)).unwrap_or(&[]);
-            bounds_of(idx.iter().filter_map(|&i| self.positions.get(i as usize).copied()))
+            let idx = self
+                .indices
+                .get(3 * f.first_triangle..3 * (f.first_triangle + f.triangle_count))
+                .unwrap_or(&[]);
+            bounds_of(
+                idx.iter()
+                    .filter_map(|&i| self.positions.get(i as usize).copied()),
+            )
         };
         PickIndex {
             bounds: bounds_of(self.positions.iter().copied()),
             faces: self.faces.iter().map(face).collect(),
-            edges: self.edges.iter().map(|e| bounds_of(e.points.iter().copied())).collect(),
+            edges: self
+                .edges
+                .iter()
+                .map(|e| bounds_of(e.points.iter().copied()))
+                .collect(),
             trees: self
                 .faces
                 .iter()
-                .map(|f| (f.triangle_count > TREE_LEAF).then(|| TriangleTree::build(self, f.first_triangle..f.first_triangle + f.triangle_count)).flatten())
+                .map(|f| {
+                    (f.triangle_count > TREE_LEAF)
+                        .then(|| {
+                            TriangleTree::build(
+                                self,
+                                f.first_triangle..f.first_triangle + f.triangle_count,
+                            )
+                        })
+                        .flatten()
+                })
                 .collect(),
-            shape: [self.positions.len(), self.indices.len(), self.faces.len(), self.edges.len()],
+            shape: [
+                self.positions.len(),
+                self.indices.len(),
+                self.faces.len(),
+                self.edges.len(),
+            ],
         }
     }
 
     /// [`Solid::pick`] among the faces `keep` accepts (the others let the ray through).
-    pub fn pick_where(&self, origin: Vec3, dir: Vec3, keep: impl Fn(&SolidFace) -> bool) -> Option<(usize, f64)> {
+    pub fn pick_where(
+        &self,
+        origin: Vec3,
+        dir: Vec3,
+        keep: impl Fn(&SolidFace) -> bool,
+    ) -> Option<(usize, f64)> {
         let index = self.pick_index();
-        if !index.bounds.as_ref().is_some_and(|b| line_hits_box(origin, dir, b)) {
+        if !index
+            .bounds
+            .as_ref()
+            .is_some_and(|b| line_hits_box(origin, dir, b))
+        {
             return None;
         }
         let mut best: Option<(usize, f64)> = None;
         for (fi, f) in self.faces.iter().enumerate() {
-            if !index.faces[fi].as_ref().is_some_and(|b| line_hits_box(origin, dir, b)) || !keep(f) {
+            if !index.faces[fi]
+                .as_ref()
+                .is_some_and(|b| line_hits_box(origin, dir, b))
+                || !keep(f)
+            {
                 continue;
             }
             let mut hit = |tri: usize| {
-                let [a, b, c] = [0, 1, 2].map(|k| self.positions[self.indices[3 * tri + k] as usize]);
+                let [a, b, c] =
+                    [0, 1, 2].map(|k| self.positions[self.indices[3 * tri + k] as usize]);
                 if let Some(t) = ray_triangle(origin, dir, a, b, c)
                     && best.is_none_or(|(_, bt)| t < bt)
                 {
@@ -955,7 +1075,13 @@ struct Ring<'a> {
 /// (`flip`: the other way). `regions` pairs each region with the index it is known by in the
 /// feature (it goes into the face tags). Adjacent regions extruded together share their
 /// common curve; its side faces and edges are left out (the regions merge into one body).
-pub fn extrude(op: OpId, frame: &PlaneFrame, regions: &[(u64, Region)], depth: f64, flip: bool) -> Solid {
+pub fn extrude(
+    op: OpId,
+    frame: &PlaneFrame,
+    regions: &[(u64, Region)],
+    depth: f64,
+    flip: bool,
+) -> Solid {
     let n = normalize(frame.normal());
     let dir = if flip { scale(n, -1.0) } else { n };
     let offset = scale(dir, depth);
@@ -1010,11 +1136,24 @@ pub fn extrude(op: OpId, frame: &PlaneFrame, regions: &[(u64, Region)], depth: f
             // The cap's frame: the sketch frame moved along, turned to face outward.
             let origin = add(frame.origin, shift);
             let plane = if dot(outward, n) > 0.0 {
-                PlaneFrame { origin, u: frame.u, v: frame.v }
+                PlaneFrame {
+                    origin,
+                    u: frame.u,
+                    v: frame.v,
+                }
             } else {
-                PlaneFrame { origin, u: frame.u, v: scale(frame.v, -1.0) }
+                PlaneFrame {
+                    origin,
+                    u: frame.u,
+                    v: scale(frame.v, -1.0),
+                }
             };
-            let mut loops = vec![r.outer.iter().map(|p| add(w(*p), shift)).collect::<Vec<_>>()];
+            let mut loops = vec![
+                r.outer
+                    .iter()
+                    .map(|p| add(w(*p), shift))
+                    .collect::<Vec<_>>(),
+            ];
             for h in &r.holes {
                 loops.push(h.iter().map(|p| add(w(*p), shift)).collect());
             }
@@ -1189,7 +1328,11 @@ fn side_faces(
         let plane = straight.then(|| {
             let t = normalize(sub(pts[1], pts[0]));
             // u × v must be the outward normal t × n.
-            let (u, v) = if forward { (t, dir) } else { (scale(t, -1.0), dir) };
+            let (u, v) = if forward {
+                (t, dir)
+            } else {
+                (scale(t, -1.0), dir)
+            };
             let outward = cross(u, v);
             // The projection of the world origin onto the face.
             let origin = scale(outward, dot(pts[0], outward));
@@ -1292,7 +1435,11 @@ mod tests {
         assert_eq!(solid.positions.len(), 24);
         // 4 edges at each cap + 4 lateral edges.
         assert_eq!(solid.edges.len(), 12);
-        assert!((solid.volume() - 50.0 * 30.0 * 25.0).abs() < 1e-6, "{}", solid.volume());
+        assert!(
+            (solid.volume() - 50.0 * 30.0 * 25.0).abs() < 1e-6,
+            "{}",
+            solid.volume()
+        );
         let (lo, hi) = solid.bounds().unwrap();
         assert!(close(lo, [0.0, 0.0, 0.0]) && close(hi, [50.0, 30.0, 25.0]));
         assert!(solid.rulings.is_empty());
@@ -1309,18 +1456,23 @@ mod tests {
         assert!(close(f.origin, [0.0, 0.0, 25.0]));
         // Sketch coordinates on the top face line up with the Top plane's.
         assert!(close(f.to_world(Vec2::new(10.0, 5.0)), [10.0, 5.0, 25.0]));
-        let bottom = solid.face(&face(FaceTag::Start { region: 0 })).unwrap().plane.unwrap();
+        let bottom = solid
+            .face(&face(FaceTag::Start { region: 0 }))
+            .unwrap()
+            .plane
+            .unwrap();
         assert!(close(bottom.normal(), [0.0, 0.0, -1.0]));
         // Four planar side faces, one per line, facing out.
-        let sides: Vec<&SolidFace> = solid
-            .faces
-            .iter()
-            .filter(|f| is_side(f))
-            .collect();
+        let sides: Vec<&SolidFace> = solid.faces.iter().filter(|f| is_side(f)).collect();
         assert_eq!(sides.len(), 4);
         let mut normals: Vec<Vec3> = sides.iter().map(|f| f.plane.unwrap().normal()).collect();
         normals.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let want = [[-1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]];
+        let want = [
+            [-1.0, 0.0, 0.0],
+            [0.0, -1.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [1.0, 0.0, 0.0],
+        ];
         for (a, b) in normals.iter().zip(want) {
             assert!(close(*a, b), "{normals:?}");
         }
@@ -1354,7 +1506,10 @@ mod tests {
                 rect(&mut s, 5.0, -3.0, 20.0, 10.0);
                 circle(&mut s, 12.0, 2.0, 2.0);
                 // Only the rectangle's region (with the circle as its hole).
-                let r = regions(&s).into_iter().find(|r| r.curves.len() == 4).unwrap();
+                let r = regions(&s)
+                    .into_iter()
+                    .find(|r| r.curves.len() == 4)
+                    .unwrap();
                 let solid = extrude(OP, &plane.frame(), &[(0, r)], 8.0, flip);
                 for face in &solid.faces {
                     for t in face.first_triangle..face.first_triangle + face.triangle_count {
@@ -1362,7 +1517,11 @@ mod tests {
                             [0, 1, 2].map(|k| solid.positions[solid.indices[3 * t + k] as usize]);
                         let wind = cross(sub(b, a), sub(c, a));
                         let na = solid.normals[solid.indices[3 * t] as usize];
-                        assert!(dot(wind, na) > 0.0, "{:?} winds against its normal", face.name);
+                        assert!(
+                            dot(wind, na) > 0.0,
+                            "{:?} winds against its normal",
+                            face.name
+                        );
                         if let Some(p) = face.plane {
                             assert!(dot(p.normal(), na) > 0.99, "{:?}", face.name);
                         }
@@ -1403,7 +1562,14 @@ mod tests {
             .find(|f| is_side(f) && f.plane.is_none())
             .unwrap();
         // The cap has two loops: the outline and the hole.
-        assert_eq!(solid.face(&face(FaceTag::End { region: 0 })).unwrap().loops.len(), 2);
+        assert_eq!(
+            solid
+                .face(&face(FaceTag::End { region: 0 }))
+                .unwrap()
+                .loops
+                .len(),
+            2
+        );
         // The hole's normals point toward its axis (out of the material).
         let tri = hole.first_triangle;
         let p = solid.positions[solid.indices[3 * tri] as usize];
@@ -1446,7 +1612,12 @@ mod tests {
         let lateral = solid
             .edges
             .iter()
-            .filter(|e| e.name.faces.iter().all(|f| matches!(f.origin, FaceOrigin::Side { .. })))
+            .filter(|e| {
+                e.name
+                    .faces
+                    .iter()
+                    .all(|f| matches!(f.origin, FaceOrigin::Side { .. }))
+            })
             .count();
         assert_eq!(lateral, 2);
         let want = std::f64::consts::PI * 25.0 / 2.0 * 4.0;
@@ -1460,7 +1631,11 @@ mod tests {
         let solid = solid_of(&s, PlaneRef::Top, 5.0, true);
         let (lo, hi) = solid.bounds().unwrap();
         assert!((lo[2] + 5.0).abs() < 1e-9 && hi[2].abs() < 1e-9);
-        let end = solid.face(&face(FaceTag::End { region: 0 })).unwrap().plane.unwrap();
+        let end = solid
+            .face(&face(FaceTag::End { region: 0 }))
+            .unwrap()
+            .plane
+            .unwrap();
         assert!(close(end.normal(), [0.0, 0.0, -1.0]));
         assert!(close(end.origin, [0.0, 0.0, -5.0]));
     }
@@ -1476,7 +1651,10 @@ mod tests {
         assert!((t - 75.0).abs() < 1e-9);
         // From the front (-Y), the front side face.
         let (f, _) = solid.pick([25.0, -100.0, 10.0], [0.0, 1.0, 0.0]).unwrap();
-        assert!(close(solid.faces[f].plane.unwrap().normal(), [0.0, -1.0, 0.0]));
+        assert!(close(
+            solid.faces[f].plane.unwrap().normal(),
+            [0.0, -1.0, 0.0]
+        ));
         // Missing it.
         assert!(solid.pick([80.0, 15.0, 100.0], [0.0, 0.0, -1.0]).is_none());
     }
@@ -1492,7 +1670,8 @@ mod tests {
             let mut best: Option<(usize, f64)> = None;
             for (fi, f) in solid.faces.iter().enumerate() {
                 for tri in f.first_triangle..f.first_triangle + f.triangle_count {
-                    let [a, b, c] = [0, 1, 2].map(|k| solid.positions[solid.indices[3 * tri + k] as usize]);
+                    let [a, b, c] =
+                        [0, 1, 2].map(|k| solid.positions[solid.indices[3 * tri + k] as usize]);
                     if let Some(t) = ray_triangle(o, d, a, b, c)
                         && best.is_none_or(|(_, bt)| t < bt)
                     {
@@ -1504,7 +1683,13 @@ mod tests {
         };
         // Rays in many directions through a grid of points around the part (some miss it,
         // some pass behind their origin: the pick takes the whole line).
-        let dirs = [[0.0, 0.0, -1.0], [0.3, 0.8, -0.5], [-0.6, 0.2, 0.7], [1.0, 0.0, 0.0], [0.577, -0.577, 0.577]];
+        let dirs = [
+            [0.0, 0.0, -1.0],
+            [0.3, 0.8, -0.5],
+            [-0.6, 0.2, 0.7],
+            [1.0, 0.0, 0.0],
+            [0.577, -0.577, 0.577],
+        ];
         let mut hits = 0;
         for d in dirs {
             for i in -2..14 {
@@ -1524,8 +1709,16 @@ mod tests {
         let mut moved = solid.clone();
         moved.positions.iter_mut().for_each(|p| p[0] += 100.0);
         assert!(moved.pick([125.0, 15.0, 100.0], [0.0, 0.0, -1.0]).is_some());
-        assert!(line_hits_box([0.0, 0.0, 5.0], [0.0, 0.0, 1.0], &([-1.0; 3], [1.0; 3])));
-        assert!(!line_hits_box([2.0, 0.0, 5.0], [0.0, 0.0, 1.0], &([-1.0; 3], [1.0; 3])));
+        assert!(line_hits_box(
+            [0.0, 0.0, 5.0],
+            [0.0, 0.0, 1.0],
+            &([-1.0; 3], [1.0; 3])
+        ));
+        assert!(!line_hits_box(
+            [2.0, 0.0, 5.0],
+            [0.0, 0.0, 1.0],
+            &([-1.0; 3], [1.0; 3])
+        ));
     }
 
     #[test]
@@ -1537,11 +1730,7 @@ mod tests {
         assert_eq!(rs.len(), 2);
         let solid = solid_of(&s, PlaneRef::Top, 5.0, false);
         // The shared wall is not a face.
-        let sides = solid
-            .faces
-            .iter()
-            .filter(|f| is_side(f))
-            .count();
+        let sides = solid.faces.iter().filter(|f| is_side(f)).count();
         assert_eq!(sides, 6);
         assert!((solid.volume() - 1000.0).abs() < 1e-6);
     }

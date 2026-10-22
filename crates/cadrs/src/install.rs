@@ -31,7 +31,10 @@ fn err(what: &str, p: &Path, e: std::io::Error) -> String {
 }
 
 fn env_dir(name: &str) -> Result<PathBuf, String> {
-    std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from).ok_or_else(|| format!("{name} is not set"))
+    std::env::var_os(name)
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .ok_or_else(|| format!("{name} is not set"))
 }
 
 /// Installs this build. Returns where it went.
@@ -63,7 +66,11 @@ pub fn run() -> Result<PathBuf, String> {
     if old.exists() {
         std::fs::remove_dir_all(&old).map_err(|e| err("remove", &old, e))?;
     }
-    launcher(&root.join(bin_dir()).join(format!("cadrs{}", std::env::consts::EXE_SUFFIX)))?;
+    launcher(
+        &root
+            .join(bin_dir())
+            .join(format!("cadrs{}", std::env::consts::EXE_SUFFIX)),
+    )?;
     Ok(root)
 }
 
@@ -81,7 +88,11 @@ fn install_root() -> Result<PathBuf, String> {
 
 /// Where the executable and `libraries/` go inside the install.
 fn bin_dir() -> &'static str {
-    if cfg!(target_os = "macos") { "Contents/MacOS" } else { "" }
+    if cfg!(target_os = "macos") {
+        "Contents/MacOS"
+    } else {
+        ""
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -100,10 +111,15 @@ fn launcher(installed: &Path) -> Result<(), String> {
     std::fs::write(&icon, ICON).map_err(|e| err("write", &icon, e))?;
     // The icon by its path: a user hicolor theme without an index.theme keeps a stale icon cache
     // that hides a new icon named by theme name.
-    let desktop = DESKTOP.replace("@EXEC@", &installed.to_string_lossy()).replace("@ICON@", &icon.to_string_lossy());
+    let desktop = DESKTOP
+        .replace("@EXEC@", &installed.to_string_lossy())
+        .replace("@ICON@", &icon.to_string_lossy());
     let entry = apps.join("cadrs.desktop");
     std::fs::write(&entry, desktop).map_err(|e| err("write", &entry, e))?;
-    let _ = std::process::Command::new("update-desktop-database").arg(&apps).stderr(std::process::Stdio::null()).status();
+    let _ = std::process::Command::new("update-desktop-database")
+        .arg(&apps)
+        .stderr(std::process::Stdio::null())
+        .status();
     Ok(())
 }
 
@@ -116,7 +132,8 @@ fn write_bundle(bundle: &Path) -> Result<(), String> {
     let icns = resources.join("cadrs.icns");
     std::fs::write(&icns, icns_of_png(ICON)).map_err(|e| err("write", &icns, e))?;
     let plist = contents.join("Info.plist");
-    std::fs::write(&plist, info_plist(env!("CARGO_PKG_VERSION"))).map_err(|e| err("write", &plist, e))
+    std::fs::write(&plist, info_plist(env!("CARGO_PKG_VERSION")))
+        .map_err(|e| err("write", &plist, e))
 }
 
 /// The bundle is the launcher; Launch Services is told about it so it shows at once.
@@ -124,7 +141,10 @@ fn write_bundle(bundle: &Path) -> Result<(), String> {
 fn launcher(installed: &Path) -> Result<(), String> {
     const LSREGISTER: &str = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
     if let Some(bundle) = installed.ancestors().nth(3) {
-        let _ = std::process::Command::new(LSREGISTER).arg("-f").arg(bundle).status();
+        let _ = std::process::Command::new(LSREGISTER)
+            .arg("-f")
+            .arg(bundle)
+            .status();
     }
     Ok(())
 }
@@ -135,7 +155,14 @@ fn launcher(installed: &Path) -> Result<(), String> {
     std::fs::create_dir_all(&programs).map_err(|e| err("create", &programs, e))?;
     let script = shortcut_script(&programs.join("cadrs.lnk"), installed);
     let status = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", &script])
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &script,
+        ])
         .status()
         .map_err(|e| format!("cannot run PowerShell for the Start Menu shortcut: {e}"))?;
     if !status.success() {
@@ -234,12 +261,18 @@ mod tests {
         let png = [1u8, 2, 3];
         let icns = icns_of_png(&png);
         assert_eq!(&icns[0..4], b"icns");
-        assert_eq!(u32::from_be_bytes(icns[4..8].try_into().unwrap()) as usize, icns.len());
+        assert_eq!(
+            u32::from_be_bytes(icns[4..8].try_into().unwrap()) as usize,
+            icns.len()
+        );
         assert_eq!(&icns[8..12], b"ic08");
         assert_eq!(u32::from_be_bytes(icns[12..16].try_into().unwrap()), 8 + 3);
         assert_eq!(&icns[16..], &png);
         // The real icon is a PNG, which `ic08` takes as is.
-        assert_eq!(&include_bytes!("../../../assets/icons/cadrs.png")[1..4], b"PNG");
+        assert_eq!(
+            &include_bytes!("../../../assets/icons/cadrs.png")[1..4],
+            b"PNG"
+        );
     }
 
     #[test]
@@ -252,7 +285,10 @@ mod tests {
 
     #[test]
     fn the_shortcut_script_quotes_its_paths() {
-        let s = shortcut_script(Path::new(r"C:\Users\o'neil\cadrs.lnk"), Path::new(r"C:\Programs\cadrs\cadrs.exe"));
+        let s = shortcut_script(
+            Path::new(r"C:\Users\o'neil\cadrs.lnk"),
+            Path::new(r"C:\Programs\cadrs\cadrs.exe"),
+        );
         assert!(s.contains(r"CreateShortcut('C:\Users\o''neil\cadrs.lnk')"));
         assert!(s.contains(r"$s.TargetPath = 'C:\Programs\cadrs\cadrs.exe'"));
         assert!(s.contains(r"$s.IconLocation = 'C:\Programs\cadrs\cadrs.exe' + ',0'"));

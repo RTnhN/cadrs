@@ -28,8 +28,9 @@ use cadrs_core::assembly::relation::{self, Relation, RelationType};
 use cadrs_sketch::units::Quantity;
 use cadrs_ui::prelude::*;
 use cadrs_ui::{
-    CheckboxChange, FeatureDialogAccept, FeatureDialogCancel, FeatureDialogState, NumberField, NumberFieldCommit, NumberFieldState,
-    OptionRow, Select, SelectChange, SelectState, SelectionList, SelectionListRemove, SelectionListState,
+    CheckboxChange, FeatureDialogAccept, FeatureDialogCancel, FeatureDialogState, NumberField,
+    NumberFieldCommit, NumberFieldState, OptionRow, Select, SelectChange, SelectState,
+    SelectionList, SelectionListRemove, SelectionListState,
 };
 
 use super::mate_display::MateSelection;
@@ -42,9 +43,14 @@ impl Plugin for RelationDialogPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (follow_mate_selection, sync_relation_dialog).chain().after(crate::parts::PartsSet).run_if(in_state(AppState::Document)),
+            (follow_mate_selection, sync_relation_dialog)
+                .chain()
+                .after(crate::parts::PartsSet)
+                .run_if(in_state(AppState::Document)),
         )
-        .add_systems(OnExit(AppState::Document), |mut commands: Commands| commands.remove_resource::<RelationSession>())
+        .add_systems(OnExit(AppState::Document), |mut commands: Commands| {
+            commands.remove_resource::<RelationSession>()
+        })
         .add_observer(on_accept)
         .add_observer(on_cancel)
         .add_observer(on_remove)
@@ -61,22 +67,46 @@ pub fn open_relations_menu(world: &mut World, button: Entity) {
     let at = world
         .get_entity(button)
         .ok()
-        .and_then(|e| Some((*e.get::<ComputedNode>()?, *e.get::<bevy::ui::UiGlobalTransform>()?)))
+        .and_then(|e| {
+            Some((
+                *e.get::<ComputedNode>()?,
+                *e.get::<bevy::ui::UiGlobalTransform>()?,
+            ))
+        })
         .map_or(Vec2::ZERO, |(n, t)| {
             let s = n.inverse_scale_factor();
             let size = n.size() * s;
             t.translation * s + Vec2::new(-size.x / 2.0, size.y / 2.0 + 2.0)
         });
-    let mut menu = cadrs_ui::menu::Menu::new("relations-menu").min_width(190.0).item_height(24.0);
+    let mut menu = cadrs_ui::menu::Menu::new("relations-menu")
+        .min_width(190.0)
+        .item_height(24.0);
     for t in RelationType::ALL {
-        menu = menu.item(cadrs_ui::menu::MenuItem::new(format!("relations-menu-{}", t.icon()), format!("{} relation", t.label())).icon(t.icon()));
+        menu = menu.item(
+            cadrs_ui::menu::MenuItem::new(
+                format!("relations-menu-{}", t.icon()),
+                format!("{} relation", t.label()),
+            )
+            .icon(t.icon()),
+        );
     }
     let mut commands = world.commands();
     let anchor = cadrs_ui::menu::open_context_menu(&mut commands, at, menu.build(&theme));
-    commands.entity(anchor).insert(DespawnOnExit(AppState::Document)).observe(|ev: On<cadrs_ui::menu::MenuAction>, mut commands: Commands| {
-        let Some(t) = ev.item.strip_prefix("relations-menu-").and_then(toolbar_type) else { return };
-        commands.queue(move |world: &mut World| open(world, t));
-    });
+    commands
+        .entity(anchor)
+        .insert(DespawnOnExit(AppState::Document))
+        .observe(
+            |ev: On<cadrs_ui::menu::MenuAction>, mut commands: Commands| {
+                let Some(t) = ev
+                    .item
+                    .strip_prefix("relations-menu-")
+                    .and_then(toolbar_type)
+                else {
+                    return;
+                };
+                commands.queue(move |world: &mut World| open(world, t));
+            },
+        );
     world.flush();
 }
 
@@ -95,7 +125,14 @@ pub struct RelationSession {
 
 impl RelationSession {
     fn feature(&self) -> MateFeature {
-        MateFeature { suppressed: self.suppressed, ..MateFeature::new(self.id, self.name.clone(), MateKind::Relation(self.relation.clone())) }
+        MateFeature {
+            suppressed: self.suppressed,
+            ..MateFeature::new(
+                self.id,
+                self.name.clone(),
+                MateKind::Relation(self.relation.clone()),
+            )
+        }
     }
 }
 
@@ -129,33 +166,73 @@ pub fn open(world: &mut World, t: RelationType) {
     world.remove_resource::<super::mate_dialog::MateSession>();
     world.remove_resource::<super::group_dialog::GroupSession>();
     super::animate::stop(world);
-    let Some(doc) = world.get_resource::<ActiveDocument>() else { return };
-    let Some(element) = super::active_assembly(doc) else { return };
-    let Some(model) = doc.active_element().and_then(|e| e.assembly_model()) else { return };
+    let Some(doc) = world.get_resource::<ActiveDocument>() else {
+        return;
+    };
+    let Some(element) = super::active_assembly(doc) else {
+        return;
+    };
+    let Some(model) = doc.active_element().and_then(|e| e.assembly_model()) else {
+        return;
+    };
     let name = next_name(&model.mates, t.label());
     let mut relation = Relation::new(t, Vec::new());
     if let Some(m) = world.resource::<MateSelection>().0
-        && model.mate(m).and_then(|f| f.mate()).is_some_and(|x| t.accepts(0, x.mate_type))
+        && model
+            .mate(m)
+            .and_then(|f| f.mate())
+            .is_some_and(|x| t.accepts(0, x.mate_type))
     {
         relation.mates.push(m);
     }
-    world.insert_resource(RelationSession { element, id: MateId::new(), name, editing: false, suppressed: false, relation, refused: None });
+    world.insert_resource(RelationSession {
+        element,
+        id: MateId::new(),
+        name,
+        editing: false,
+        suppressed: false,
+        relation,
+        refused: None,
+    });
 }
 
 /// Opens it on an existing relation (Edit…, double-click).
 pub fn edit(world: &mut World, id: MateId) {
     world.remove_resource::<super::mate_dialog::MateSession>();
     world.remove_resource::<super::group_dialog::GroupSession>();
-    let Some(doc) = world.get_resource::<ActiveDocument>() else { return };
-    let Some(element) = super::active_assembly(doc) else { return };
-    let Some(f) = doc.active_element().and_then(|e| e.assembly_model()?.mate(id).cloned()) else { return };
-    let MateKind::Relation(relation) = f.kind else { return };
+    let Some(doc) = world.get_resource::<ActiveDocument>() else {
+        return;
+    };
+    let Some(element) = super::active_assembly(doc) else {
+        return;
+    };
+    let Some(f) = doc
+        .active_element()
+        .and_then(|e| e.assembly_model()?.mate(id).cloned())
+    else {
+        return;
+    };
+    let MateKind::Relation(relation) = f.kind else {
+        return;
+    };
     world.resource_mut::<MateSelection>().0 = None;
-    world.insert_resource(RelationSession { element, id, name: f.name, editing: true, suppressed: f.suppressed, relation, refused: None });
+    world.insert_resource(RelationSession {
+        element,
+        id,
+        name: f.name,
+        editing: true,
+        suppressed: f.suppressed,
+        relation,
+        refused: None,
+    });
 }
 
 /// A mate clicked in the list or the view goes into the Mates field.
-fn follow_mate_selection(mut selection: ResMut<MateSelection>, session: Option<ResMut<RelationSession>>, doc: Option<Res<ActiveDocument>>) {
+fn follow_mate_selection(
+    mut selection: ResMut<MateSelection>,
+    session: Option<ResMut<RelationSession>>,
+    doc: Option<Res<ActiveDocument>>,
+) {
     let Some(mut s) = session else { return };
     if !selection.is_changed() {
         return;
@@ -163,7 +240,12 @@ fn follow_mate_selection(mut selection: ResMut<MateSelection>, session: Option<R
     let Some(picked) = selection.0 else { return };
     // The pick is taken: the row doesn't stay selected behind the dialog.
     selection.0 = None;
-    let Some(model) = doc.as_ref().and_then(|d| d.active_element()?.assembly_model()) else { return };
+    let Some(model) = doc
+        .as_ref()
+        .and_then(|d| d.active_element()?.assembly_model())
+    else {
+        return;
+    };
     let Some(f) = model.mate(picked) else { return };
     if f.id == s.id || s.relation.mates.contains(&picked) {
         return;
@@ -182,7 +264,11 @@ fn follow_mate_selection(mut selection: ResMut<MateSelection>, session: Option<R
         }
         Some(m) => {
             // Rack and pinion takes the rack first too: the pinion goes first.
-            if t == RelationType::RackPinion && k == 0 && t.accepts(1, m.mate_type) && !t.accepts(0, m.mate_type) {
+            if t == RelationType::RackPinion
+                && k == 0
+                && t.accepts(1, m.mate_type)
+                && !t.accepts(0, m.mate_type)
+            {
                 s.relation.mates.push(picked);
                 s.refused = None;
                 return;
@@ -225,10 +311,21 @@ fn on_select(ev: On<SelectChange>, q: Query<&Role>, mut commands: Commands) {
     if q.get(ev.entity) != Ok(&Role::Type) {
         return;
     }
-    let Some(t) = RelationType::ALL.get(ev.index).copied() else { return };
+    let Some(t) = RelationType::ALL.get(ev.index).copied() else {
+        return;
+    };
     commands.queue(move |world: &mut World| {
-        let names = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element()?.assembly_model().map(|m| m.mates.clone())).unwrap_or_default();
-        let Some(mut s) = world.get_resource_mut::<RelationSession>() else { return };
+        let names = world
+            .get_resource::<ActiveDocument>()
+            .and_then(|d| {
+                d.active_element()?
+                    .assembly_model()
+                    .map(|m| m.mates.clone())
+            })
+            .unwrap_or_default();
+        let Some(mut s) = world.get_resource_mut::<RelationSession>() else {
+            return;
+        };
         if s.relation.relation_type == t {
             return;
         }
@@ -241,10 +338,22 @@ fn on_select(ev: On<SelectChange>, q: Query<&Role>, mut commands: Commands) {
     });
 }
 
-fn on_number(ev: On<NumberFieldCommit>, q: Query<&Role>, mut q_state: Query<&mut NumberFieldState>, units: Res<crate::WorkspaceUnits>, mut commands: Commands) {
-    let Ok(role) = q.get(ev.entity).copied() else { return };
+fn on_number(
+    ev: On<NumberFieldCommit>,
+    q: Query<&Role>,
+    mut q_state: Query<&mut NumberFieldState>,
+    units: Res<crate::WorkspaceUnits>,
+    mut commands: Commands,
+) {
+    let Ok(role) = q.get(ev.entity).copied() else {
+        return;
+    };
     let text = ev.text.trim().to_string();
-    let q = if role == Role::Distance { Quantity::Length } else { Quantity::Count };
+    let q = if role == Role::Distance {
+        Quantity::Length
+    } else {
+        Quantity::Count
+    };
     let v = match units.0.eval(&text, q) {
         Ok(v) if v.is_finite() && (role == Role::Distance || v.abs() > 1e-12) => v,
         _ => {
@@ -260,7 +369,9 @@ fn on_number(ev: On<NumberFieldCommit>, q: Query<&Role>, mut q_state: Query<&mut
     }
     let enter = ev.enter;
     commands.queue(move |world: &mut World| {
-        let Some(mut s) = world.get_resource_mut::<RelationSession>() else { return };
+        let Some(mut s) = world.get_resource_mut::<RelationSession>() else {
+            return;
+        };
         match role {
             Role::RatioA => s.relation.ratio.0 = v,
             Role::RatioB => s.relation.ratio.1 = v,
@@ -288,9 +399,16 @@ fn on_checkbox(ev: On<CheckboxChange>, q: Query<&Name>, mut commands: Commands) 
 
 /// ✓: the relation is added (or replaced) and the assembly solved with it, one undo step.
 pub fn accept(world: &mut World) {
-    let Some(mut s) = world.get_resource::<RelationSession>().cloned() else { return };
-    let Some((mut model, solids)) = super::mate_dialog::model_and_solids(world) else { return };
-    let doc_model = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element()?.assembly_model().cloned()).unwrap_or_default();
+    let Some(mut s) = world.get_resource::<RelationSession>().cloned() else {
+        return;
+    };
+    let Some((mut model, solids)) = super::mate_dialog::model_and_solids(world) else {
+        return;
+    };
+    let doc_model = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.active_element()?.assembly_model().cloned())
+        .unwrap_or_default();
     s.relation = ordered(s.relation.clone(), &doc_model);
     if relation::check(&s.relation, &doc_model.mates).is_some() {
         return;
@@ -300,12 +418,30 @@ pub fn accept(world: &mut World) {
     model.mates.retain(|f| f.id != s.id);
     model.mates.push(feature.clone());
     let sol = cadrs_core::assembly::solve(&model, &solids, &Default::default());
-    let poses = if sol.converged { sol.changed(&model) } else { Vec::new() };
+    let poses = if sol.converged {
+        sol.changed(&model)
+    } else {
+        Vec::new()
+    };
     let element = s.element;
     let ok = if s.editing {
-        super::run(world, &SetMateFeature { element, feature, poses })
+        super::run(
+            world,
+            &SetMateFeature {
+                element,
+                feature,
+                poses,
+            },
+        )
     } else {
-        super::run(world, &AddMateFeature { element, feature, poses })
+        super::run(
+            world,
+            &AddMateFeature {
+                element,
+                feature,
+                poses,
+            },
+        )
     };
     if ok {
         world.remove_resource::<RelationSession>();
@@ -313,13 +449,21 @@ pub fn accept(world: &mut World) {
     }
 }
 
-fn on_accept(ev: On<FeatureDialogAccept>, q: Query<(), With<RelationDialog>>, mut commands: Commands) {
+fn on_accept(
+    ev: On<FeatureDialogAccept>,
+    q: Query<(), With<RelationDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(accept);
     }
 }
 
-fn on_cancel(ev: On<FeatureDialogCancel>, q: Query<(), With<RelationDialog>>, mut commands: Commands) {
+fn on_cancel(
+    ev: On<FeatureDialogCancel>,
+    q: Query<(), With<RelationDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(|world: &mut World| {
             world.remove_resource::<RelationSession>();
@@ -334,14 +478,30 @@ fn texts(r: &Relation, units: &cadrs_sketch::units::Units) -> [String; 4] {
         let s = format!("{v:.6}");
         s.trim_end_matches('0').trim_end_matches('.').to_string()
     };
-    [num(r.ratio.0), num(r.ratio.1), num(r.ratio.1 / r.ratio.0), units.with_unit(r.distance, Quantity::Length)]
+    [
+        num(r.ratio.0),
+        num(r.ratio.1),
+        num(r.ratio.1 / r.ratio.0),
+        units.with_unit(r.distance, Quantity::Length),
+    ]
 }
 
-fn relation_dialog(theme: &Theme, s: &RelationSession, items: Vec<String>, tx: [String; 4], message: Option<String>, valid: bool) -> impl Bundle {
+fn relation_dialog(
+    theme: &Theme,
+    s: &RelationSession,
+    items: Vec<String>,
+    tx: [String; 4],
+    message: Option<String>,
+    valid: bool,
+) -> impl Bundle {
     let tb = theme.clone();
     let t = s.relation.relation_type;
     let reverse = s.relation.reverse;
-    let placeholder = if t.mate_count() == 1 { "Cylindrical mate" } else { "Mates" };
+    let placeholder = if t.mate_count() == 1 {
+        "Cylindrical mate"
+    } else {
+        "Mates"
+    };
     let active = items.len() < t.mate_count();
     (
         RelationDialog,
@@ -358,10 +518,22 @@ fn relation_dialog(theme: &Theme, s: &RelationSession, items: Vec<String>, tx: [
                     select = select.option(rt.label(), true);
                 }
                 let i = RelationType::ALL.iter().position(|x| *x == t).unwrap_or(0);
-                b.spawn(Node { height: Val::Px(28.0), align_items: AlignItems::Center, ..default() }).with_child((Role::Type, select.selected(i).build(t0)));
+                b.spawn(Node {
+                    height: Val::Px(28.0),
+                    align_items: AlignItems::Center,
+                    ..default()
+                })
+                .with_child((Role::Type, select.selected(i).build(t0)));
                 b.spawn((
                     Role::Mates,
-                    SelectionList::new("relation-mates").placeholder(placeholder).item_icon(t.icon(), "Mate").tint_filled().items(items).active(active).error(message.is_some()).build(t0),
+                    SelectionList::new("relation-mates")
+                        .placeholder(placeholder)
+                        .item_icon(t.icon(), "Mate")
+                        .tint_filled()
+                        .items(items)
+                        .active(active)
+                        .error(message.is_some())
+                        .build(t0),
                 ))
                 .entry::<Node>()
                 .and_modify(|mut n| {
@@ -369,30 +541,94 @@ fn relation_dialog(theme: &Theme, s: &RelationSession, items: Vec<String>, tx: [
                     n.margin = UiRect::new(Val::ZERO, Val::Px(2.0), Val::Px(3.0), Val::Px(4.0));
                 });
                 if let Some(m) = &message {
-                    b.spawn((Role::Message, Name::new("relation-message"), t0.text(m.clone(), t0.font_sm, FontWeight::NORMAL, Color::srgb(0.80, 0.16, 0.14))));
+                    b.spawn((
+                        Role::Message,
+                        Name::new("relation-message"),
+                        t0.text(
+                            m.clone(),
+                            t0.font_sm,
+                            FontWeight::NORMAL,
+                            Color::srgb(0.80, 0.16, 0.14),
+                        ),
+                    ));
                 }
-                let field = |b: &mut ChildSpawner, role: Role, name: &str, label: &str, text: &str, width: f32| {
-                    b.spawn((role, NumberField::new(name.to_string(), label.to_string()).text(text.to_string()).label_width(width).build(t0)));
+                let field = |b: &mut ChildSpawner,
+                             role: Role,
+                             name: &str,
+                             label: &str,
+                             text: &str,
+                             width: f32| {
+                    b.spawn((
+                        role,
+                        NumberField::new(name.to_string(), label.to_string())
+                            .text(text.to_string())
+                            .label_width(width)
+                            .build(t0),
+                    ));
                 };
                 match t {
                     RelationType::Gear => {
                         // "Ratio  2 : 1".
-                        b.spawn((Name::new("relation-ratio"), Node { align_items: AlignItems::Center, column_gap: Val::Px(4.0), ..default() })).with_children(|r| {
-                            let col = |grow: f32| Node { flex_grow: grow, flex_basis: Val::Px(0.0), flex_direction: FlexDirection::Column, ..default() };
-                            r.spawn(col(1.0)).with_children(|c| field(c, Role::RatioA, "relation-ratio-a", "Ratio", &tx[0], 40.0));
+                        b.spawn((
+                            Name::new("relation-ratio"),
+                            Node {
+                                align_items: AlignItems::Center,
+                                column_gap: Val::Px(4.0),
+                                ..default()
+                            },
+                        ))
+                        .with_children(|r| {
+                            let col = |grow: f32| Node {
+                                flex_grow: grow,
+                                flex_basis: Val::Px(0.0),
+                                flex_direction: FlexDirection::Column,
+                                ..default()
+                            };
+                            r.spawn(col(1.0)).with_children(|c| {
+                                field(c, Role::RatioA, "relation-ratio-a", "Ratio", &tx[0], 40.0)
+                            });
                             r.spawn(t0.text(":", t0.font_base, FontWeight::BOLD, t0.foreground));
-                            r.spawn(col(0.55)).with_children(|c| field(c, Role::RatioB, "relation-ratio-b", "", &tx[1], 0.0));
+                            r.spawn(col(0.55)).with_children(|c| {
+                                field(c, Role::RatioB, "relation-ratio-b", "", &tx[1], 0.0)
+                            });
                         });
                     }
-                    RelationType::Linear => field(b, Role::Ratio, "relation-ratio", "Ratio", &tx[2], 84.0),
-                    RelationType::RackPinion => field(b, Role::Distance, "relation-distance", "Distance per revolution", &tx[3], 128.0),
-                    RelationType::Screw => field(b, Role::Distance, "relation-distance", "Pitch", &tx[3], 84.0),
+                    RelationType::Linear => {
+                        field(b, Role::Ratio, "relation-ratio", "Ratio", &tx[2], 84.0)
+                    }
+                    RelationType::RackPinion => field(
+                        b,
+                        Role::Distance,
+                        "relation-distance",
+                        "Distance per revolution",
+                        &tx[3],
+                        128.0,
+                    ),
+                    RelationType::Screw => field(
+                        b,
+                        Role::Distance,
+                        "relation-distance",
+                        "Pitch",
+                        &tx[3],
+                        84.0,
+                    ),
                 }
-                b.spawn(OptionRow::new("relation-reverse", "Reverse direction").checked(reverse).build(t0));
+                b.spawn(
+                    OptionRow::new("relation-reverse", "Reverse direction")
+                        .checked(reverse)
+                        .build(t0),
+                );
             })
             .footer(|f| {
-                f.spawn(Node { flex_grow: 1.0, ..default() });
-                f.spawn((Name::new("relation-help"), icon("help-filled", 14.0, Color::srgb_u8(0xa8, 0xa8, 0xa8)), Tooltip::new("Help")));
+                f.spawn(Node {
+                    flex_grow: 1.0,
+                    ..default()
+                });
+                f.spawn((
+                    Name::new("relation-help"),
+                    icon("help-filled", 14.0, Color::srgb_u8(0xa8, 0xa8, 0xa8)),
+                    Tooltip::new("Help"),
+                ));
             })
             .build(theme),
     )
@@ -419,14 +655,28 @@ fn sync_relation_dialog(
         return;
     };
     let Some(doc) = doc else { return };
-    let Some(model) = doc.active_element().and_then(|e| e.assembly_model()) else { return };
-    let items: Vec<String> = s.relation.mates.iter().map(|m| model.mate(*m).map(|f| f.name.clone()).unwrap_or_else(|| "Mate".into())).collect();
+    let Some(model) = doc.active_element().and_then(|e| e.assembly_model()) else {
+        return;
+    };
+    let items: Vec<String> = s
+        .relation
+        .mates
+        .iter()
+        .map(|m| {
+            model
+                .mate(*m)
+                .map(|f| f.name.clone())
+                .unwrap_or_else(|| "Mate".into())
+        })
+        .collect();
     let r = ordered(s.relation.clone(), model);
     let why = relation::check(&r, &model.mates);
     let valid = why.is_none();
     // Only a refused pick, or a wrong mate in a full field, is shown as an error; an empty
     // field is just incomplete.
-    let message = s.refused.clone().or_else(|| why.filter(|_| s.relation.mates.len() == s.relation.relation_type.mate_count()));
+    let message = s.refused.clone().or_else(|| {
+        why.filter(|_| s.relation.mates.len() == s.relation.relation_type.mate_count())
+    });
     let tx = texts(&s.relation, &units.0);
     let layout = Layout(s.relation.relation_type, message.is_some());
     match q_dialog.iter_mut().next() {
@@ -440,8 +690,12 @@ fn sync_relation_dialog(
             if let Some((e, ..)) = other {
                 commands.entity(e).try_despawn();
             }
-            let Some(area) = q_area.iter().next() else { return };
-            let d = commands.spawn(relation_dialog(&theme, &s, items, tx, message, valid)).id();
+            let Some(area) = q_area.iter().next() else {
+                return;
+            };
+            let d = commands
+                .spawn(relation_dialog(&theme, &s, items, tx, message, valid))
+                .id();
             commands.entity(area).add_child(d);
             return;
         }
@@ -454,7 +708,10 @@ fn sync_relation_dialog(
         }
     }
     for (role, mut st) in &mut q_select {
-        let want = RelationType::ALL.iter().position(|x| *x == s.relation.relation_type).unwrap_or(0);
+        let want = RelationType::ALL
+            .iter()
+            .position(|x| *x == s.relation.relation_type)
+            .unwrap_or(0);
         if *role == Role::Type && st.selected != want {
             st.selected = want;
         }

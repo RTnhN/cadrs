@@ -53,7 +53,10 @@ fn rect(s: &mut Sketch, a: Vec2, c: Vec2) -> ([CurveId; 4], [PointId; 4]) {
         let (p, q) = (ids[i], ids[(i + 1) % 4]);
         s.curves
             .keys()
-            .find(|k| s.curve_ends(*k).is_some_and(|(x, y)| (x, y) == (p, q) || (x, y) == (q, p)))
+            .find(|k| {
+                s.curve_ends(*k)
+                    .is_some_and(|(x, y)| (x, y) == (p, q) || (x, y) == (q, p))
+            })
             .unwrap()
     };
     ([side(0), side(1), side(2), side(3)], ids)
@@ -161,20 +164,78 @@ fn jacobians_match_finite_differences() {
         DimensionKind::Aligned { a: a1, b: a2 },
         DimensionKind::Diameter { curve: c2 },
         DimensionKind::Radius { curve: ar },
-        DimensionKind::PointLine { p: pref(lone), line: cref(l1) },
-        DimensionKind::PointLine { p: PointRef::Origin, line: cref(l2) },
-        DimensionKind::PointLine { p: pref(a2), line: CurveRef::XAxis },
-        DimensionKind::Angle { a: cref(l1), b: cref(l2), flip_a: false, flip_b: false },
-        DimensionKind::Angle { a: cref(l1), b: cref(l2), flip_a: true, flip_b: false },
-        DimensionKind::Angle { a: cref(l2), b: CurveRef::YAxis, flip_a: false, flip_b: true },
-        DimensionKind::PointCircle { p: pref(lone), circle: c1, far: false },
-        DimensionKind::PointCircle { p: pref(a1), circle: ar, far: true },
-        DimensionKind::LineCircle { line: cref(l1), circle: c2, far: false },
-        DimensionKind::LineCircle { line: cref(l2), circle: ar2, far: true },
-        DimensionKind::CircleCircle { a: c1, b: ar2, far_a: false, far_b: true, axis: None },
-        DimensionKind::CircleCircle { a: ar, b: ar2, far_a: true, far_b: false, axis: None },
-        DimensionKind::Offset { source: l1, target: l2 },
-        DimensionKind::Offset { source: ar, target: c2 },
+        DimensionKind::PointLine {
+            p: pref(lone),
+            line: cref(l1),
+        },
+        DimensionKind::PointLine {
+            p: PointRef::Origin,
+            line: cref(l2),
+        },
+        DimensionKind::PointLine {
+            p: pref(a2),
+            line: CurveRef::XAxis,
+        },
+        DimensionKind::Angle {
+            a: cref(l1),
+            b: cref(l2),
+            flip_a: false,
+            flip_b: false,
+        },
+        DimensionKind::Angle {
+            a: cref(l1),
+            b: cref(l2),
+            flip_a: true,
+            flip_b: false,
+        },
+        DimensionKind::Angle {
+            a: cref(l2),
+            b: CurveRef::YAxis,
+            flip_a: false,
+            flip_b: true,
+        },
+        DimensionKind::PointCircle {
+            p: pref(lone),
+            circle: c1,
+            far: false,
+        },
+        DimensionKind::PointCircle {
+            p: pref(a1),
+            circle: ar,
+            far: true,
+        },
+        DimensionKind::LineCircle {
+            line: cref(l1),
+            circle: c2,
+            far: false,
+        },
+        DimensionKind::LineCircle {
+            line: cref(l2),
+            circle: ar2,
+            far: true,
+        },
+        DimensionKind::CircleCircle {
+            a: c1,
+            b: ar2,
+            far_a: false,
+            far_b: true,
+            axis: None,
+        },
+        DimensionKind::CircleCircle {
+            a: ar,
+            b: ar2,
+            far_a: true,
+            far_b: false,
+            axis: None,
+        },
+        DimensionKind::Offset {
+            source: l1,
+            target: l2,
+        },
+        DimensionKind::Offset {
+            source: ar,
+            target: c2,
+        },
     ] {
         s.dimensions.insert(Dimension {
             kind,
@@ -208,8 +269,10 @@ fn residuals_are_zero_on_satisfied_geometry() {
     s.constraints.insert(C::Horizontal(Orient::Line(cref(l))));
     s.constraints.insert(C::Tangent(cref(l), cref(c)));
     s.constraints.insert(C::Parallel(cref(l), CurveRef::XAxis));
-    s.constraints.insert(C::Perpendicular(cref(l), CurveRef::YAxis));
-    s.constraints.insert(C::PointOnCurve(PointRef::Origin, cref(c)));
+    s.constraints
+        .insert(C::Perpendicular(cref(l), CurveRef::YAxis));
+    s.constraints
+        .insert(C::PointOnCurve(PointRef::Origin, cref(c)));
     assert!(max_residual(&s) < 1e-12);
     let _ = a;
 }
@@ -221,7 +284,10 @@ fn residuals_are_zero_on_satisfied_geometry() {
 fn constrained_rectangle_converges_to_its_dimensions() {
     let mut s = Sketch::new();
     let (_, p) = rect(&mut s, v(3.1, 2.2), v(49.1, 33.2));
-    add(&mut s, ConstraintOf::Coincident(pref(p[0]), PointRef::Origin));
+    add(
+        &mut s,
+        ConstraintOf::Coincident(pref(p[0]), PointRef::Origin),
+    );
     for (kind, value) in [
         (DimensionKind::Horizontal { a: p[0], b: p[1] }, 50.0),
         (DimensionKind::Vertical { a: p[1], b: p[2] }, 30.0),
@@ -241,7 +307,11 @@ fn constrained_rectangle_converges_to_its_dimensions() {
         .unwrap();
     }
     assert!(s.pos(p[0]).distance(v(0.0, 0.0)) < 1e-7);
-    assert!(s.pos(p[2]).distance(v(50.0, 30.0)) < 1e-7, "{:?}", s.pos(p[2]));
+    assert!(
+        s.pos(p[2]).distance(v(50.0, 30.0)) < 1e-7,
+        "{:?}",
+        s.pos(p[2])
+    );
     let a = analyze(&s);
     assert_eq!(a.dof, 0);
     assert!(a.fully_constrained());
@@ -328,7 +398,11 @@ fn horizontal_and_vertical_on_one_line_conflict() {
         .find(|(_, c)| matches!(c, ConstraintOf::Vertical(_)))
         .unwrap()
         .0;
-    assert_eq!(a.conflicting, vec![vert], "the newer constraint is the one not solved");
+    assert_eq!(
+        a.conflicting,
+        vec![vert],
+        "the newer constraint is the one not solved"
+    );
     assert_eq!(a.curve(l), Status::Over);
     // The geometry still satisfies the horizontal.
     for p in s.points.keys() {
@@ -389,8 +463,15 @@ fn dof_counts() {
     assert_eq!(analyze(&s).dof, 5, "free arc");
     let mut s = Sketch::new();
     let (_, p) = rect(&mut s, v(2.0, 1.0), v(10.0, 5.0));
-    assert_eq!(analyze(&s).dof, 4, "rectangle with its automatic constraints");
-    add(&mut s, ConstraintOf::Coincident(pref(p[0]), PointRef::Origin));
+    assert_eq!(
+        analyze(&s).dof,
+        4,
+        "rectangle with its automatic constraints"
+    );
+    add(
+        &mut s,
+        ConstraintOf::Coincident(pref(p[0]), PointRef::Origin),
+    );
     assert_eq!(analyze(&s).dof, 2);
     let mut s = Sketch::new();
     let (l, ..) = line(&mut s, v(1.0, 1.0), v(10.0, 3.0));
@@ -404,7 +485,10 @@ fn dof_counts() {
 fn status_matches_onshape_after_placing_a_rectangle() {
     let mut s = Sketch::new();
     let ([bottom, right, top, left], p) = rect(&mut s, v(0.0, 0.0), v(49.1, 33.2));
-    add(&mut s, ConstraintOf::Coincident(pref(p[0]), PointRef::Origin));
+    add(
+        &mut s,
+        ConstraintOf::Coincident(pref(p[0]), PointRef::Origin),
+    );
     let a = analyze(&s);
     assert_eq!(a.curve(bottom), Status::Full);
     assert_eq!(a.curve(left), Status::Full);
@@ -423,12 +507,28 @@ fn dragging_a_corner_moves_as_little_as_possible() {
     let mut s = Sketch::new();
     let ([_, _, top, _], p) = rect(&mut s, v(0.0, 0.0), v(20.0, 10.0));
     let target = v(25.0, 14.0);
-    assert!(drag(&mut s, &Drag::Points(vec![(p[2], target)]), &HashSet::new()));
+    assert!(drag(
+        &mut s,
+        &Drag::Points(vec![(p[2], target)]),
+        &HashSet::new()
+    ));
     assert!(s.pos(p[2]).distance(target) < 1e-8);
     // The opposite corner stays; the neighbours only slide.
-    assert!(s.pos(p[0]).distance(v(0.0, 0.0)) < 1e-8, "{:?}", s.pos(p[0]));
-    assert!(s.pos(p[1]).distance(v(25.0, 0.0)) < 1e-6, "{:?}", s.pos(p[1]));
-    assert!(s.pos(p[3]).distance(v(0.0, 14.0)) < 1e-6, "{:?}", s.pos(p[3]));
+    assert!(
+        s.pos(p[0]).distance(v(0.0, 0.0)) < 1e-8,
+        "{:?}",
+        s.pos(p[0])
+    );
+    assert!(
+        s.pos(p[1]).distance(v(25.0, 0.0)) < 1e-6,
+        "{:?}",
+        s.pos(p[1])
+    );
+    assert!(
+        s.pos(p[3]).distance(v(0.0, 14.0)) < 1e-6,
+        "{:?}",
+        s.pos(p[3])
+    );
     // The top stays horizontal.
     let (a, b) = s.curve_ends(top).unwrap();
     assert!((s.pos(a).y - s.pos(b).y).abs() < 1e-9);
@@ -456,7 +556,12 @@ fn dragging_out_and_back_restores_the_rectangle() {
         }))
         .collect();
     for target in &path {
-        drag_from(&base, &mut live, &Drag::Points(vec![(p[2], *target)]), &skip);
+        drag_from(
+            &base,
+            &mut live,
+            &Drag::Points(vec![(p[2], *target)]),
+            &skip,
+        );
     }
     for (i, q) in p.iter().enumerate() {
         assert!(
@@ -468,7 +573,12 @@ fn dragging_out_and_back_restores_the_rectangle() {
     }
     // A drag that stays on the right side follows the cursor exactly.
     let mut live = base.clone();
-    assert!(drag_from(&base, &mut live, &Drag::Points(vec![(p[2], v(150.0, 120.0))]), &skip));
+    assert!(drag_from(
+        &base,
+        &mut live,
+        &Drag::Points(vec![(p[2], v(150.0, 120.0))]),
+        &skip
+    ));
     assert!(live.pos(p[2]).distance(v(150.0, 120.0)) < 1e-8);
     assert!(live.pos(p[0]).distance(v(120.0, 100.0)) < 1e-8);
 }
@@ -490,10 +600,26 @@ fn dragging_a_corner_past_the_opposite_corner_flips_the_rectangle() {
         drag_from(&base, &mut live, &Drag::Points(vec![(p[2], target)]), &skip);
     }
     let target = v(108.0, 90.0);
-    assert!(live.pos(p[2]).distance(target) < 1e-6, "{:?}", live.pos(p[2]));
-    assert!(live.pos(p[0]).distance(v(120.0, 100.0)) < 1e-6, "{:?}", live.pos(p[0]));
-    assert!(live.pos(p[1]).distance(v(108.0, 100.0)) < 1e-6, "{:?}", live.pos(p[1]));
-    assert!(live.pos(p[3]).distance(v(120.0, 90.0)) < 1e-6, "{:?}", live.pos(p[3]));
+    assert!(
+        live.pos(p[2]).distance(target) < 1e-6,
+        "{:?}",
+        live.pos(p[2])
+    );
+    assert!(
+        live.pos(p[0]).distance(v(120.0, 100.0)) < 1e-6,
+        "{:?}",
+        live.pos(p[0])
+    );
+    assert!(
+        live.pos(p[1]).distance(v(108.0, 100.0)) < 1e-6,
+        "{:?}",
+        live.pos(p[1])
+    );
+    assert!(
+        live.pos(p[3]).distance(v(120.0, 90.0)) < 1e-6,
+        "{:?}",
+        live.pos(p[3])
+    );
     for l in [bottom, top] {
         let (a, b) = live.curve_ends(l).unwrap();
         assert!((live.pos(a).y - live.pos(b).y).abs() < 1e-9);
@@ -504,15 +630,45 @@ fn dragging_a_corner_past_the_opposite_corner_flips_the_rectangle() {
     }
     // The same target in one jump, straight from the start.
     let mut live = base.clone();
-    assert!(drag_from(&base, &mut live, &Drag::Points(vec![(p[2], target)]), &skip));
-    assert!(live.pos(p[2]).distance(target) < 1e-6, "{:?}", live.pos(p[2]));
-    assert!(live.pos(p[1]).distance(v(108.0, 100.0)) < 1e-6, "{:?}", live.pos(p[1]));
-    assert!(live.pos(p[3]).distance(v(120.0, 90.0)) < 1e-6, "{:?}", live.pos(p[3]));
+    assert!(drag_from(
+        &base,
+        &mut live,
+        &Drag::Points(vec![(p[2], target)]),
+        &skip
+    ));
+    assert!(
+        live.pos(p[2]).distance(target) < 1e-6,
+        "{:?}",
+        live.pos(p[2])
+    );
+    assert!(
+        live.pos(p[1]).distance(v(108.0, 100.0)) < 1e-6,
+        "{:?}",
+        live.pos(p[1])
+    );
+    assert!(
+        live.pos(p[3]).distance(v(120.0, 90.0)) < 1e-6,
+        "{:?}",
+        live.pos(p[3])
+    );
     // Across one side only: the width changes sign, the height stays.
     let mut live = base.clone();
-    assert!(drag_from(&base, &mut live, &Drag::Points(vec![(p[2], v(110.0, 112.0))]), &skip));
-    assert!(live.pos(p[1]).distance(v(110.0, 100.0)) < 1e-6, "{:?}", live.pos(p[1]));
-    assert!(live.pos(p[3]).distance(v(120.0, 112.0)) < 1e-6, "{:?}", live.pos(p[3]));
+    assert!(drag_from(
+        &base,
+        &mut live,
+        &Drag::Points(vec![(p[2], v(110.0, 112.0))]),
+        &skip
+    ));
+    assert!(
+        live.pos(p[1]).distance(v(110.0, 100.0)) < 1e-6,
+        "{:?}",
+        live.pos(p[1])
+    );
+    assert!(
+        live.pos(p[3]).distance(v(120.0, 112.0)) < 1e-6,
+        "{:?}",
+        live.pos(p[3])
+    );
 }
 
 #[test]
@@ -523,11 +679,19 @@ fn dragging_a_constrained_point_projects() {
     add(&mut s, ConstraintOf::FixCurve(cref(l)));
     let (_, q, _) = line(&mut s, v(5.0, 0.0), v(5.0, 8.0));
     add(&mut s, ConstraintOf::PointOnCurve(pref(q), cref(l)));
-    assert!(drag(&mut s, &Drag::Points(vec![(q, v(7.0, 3.0))]), &HashSet::new()));
+    assert!(drag(
+        &mut s,
+        &Drag::Points(vec![(q, v(7.0, 3.0))]),
+        &HashSet::new()
+    ));
     assert!(s.pos(q).distance(v(7.0, 0.0)) < 1e-6, "{:?}", s.pos(q));
     // A fixed point does not move at all.
     let before = s.pos(a);
-    drag(&mut s, &Drag::Points(vec![(a, v(-5.0, 4.0))]), &HashSet::new());
+    drag(
+        &mut s,
+        &Drag::Points(vec![(a, v(-5.0, 4.0))]),
+        &HashSet::new(),
+    );
     assert_eq!(s.pos(a), before);
     let _ = b;
 }
@@ -540,7 +704,11 @@ fn dragging_a_circle_rim_changes_its_radius() {
     let CurveKind::Circle { center, radius } = s.curves[c].kind else {
         unreachable!()
     };
-    assert!(s.pos(center).distance(v(0.0, 0.0)) < 0.1, "{:?}", s.pos(center));
+    assert!(
+        s.pos(center).distance(v(0.0, 0.0)) < 0.1,
+        "{:?}",
+        s.pos(center)
+    );
     assert!((s.pos(center).distance(v(8.0, 0.0)) - radius).abs() < 1e-8);
     assert!(radius > 7.8);
 }
@@ -550,7 +718,11 @@ fn dragging_a_horizontal_line_keeps_it_horizontal() {
     let mut s = Sketch::new();
     let (l, a, b) = line(&mut s, v(0.0, 0.0), v(10.0, 0.0));
     add(&mut s, ConstraintOf::Horizontal(Orient::Line(cref(l))));
-    assert!(drag(&mut s, &Drag::Points(vec![(b, v(12.0, 4.0))]), &HashSet::new()));
+    assert!(drag(
+        &mut s,
+        &Drag::Points(vec![(b, v(12.0, 4.0))]),
+        &HashSet::new()
+    ));
     assert!((s.pos(a).y - s.pos(b).y).abs() < 1e-9);
     assert!(s.pos(b).distance(v(12.0, 4.0)) < 1e-8);
 }
@@ -564,27 +736,48 @@ fn tools_fit_selections() {
     let ([bottom, right, top, left], p) = rect(&mut s, v(0.0, 0.0), v(20.0, 10.0));
     let c = circle(&mut s, v(40.0, 5.0), 3.0);
     let e = |x| SketchEntity::Curve(x);
-    assert_eq!(fit(ConstraintKind::Horizontal, &s, &[e(bottom)]), Fit::Complete(vec![
-        ConstraintOf::Horizontal(Orient::Line(cref(bottom)))
-    ]));
+    assert_eq!(
+        fit(ConstraintKind::Horizontal, &s, &[e(bottom)]),
+        Fit::Complete(vec![ConstraintOf::Horizontal(Orient::Line(cref(bottom)))])
+    );
     assert_eq!(
         fit(ConstraintKind::Horizontal, &s, &[SketchEntity::Point(p[0])]),
         Fit::Partial
     );
     assert_eq!(fit(ConstraintKind::Parallel, &s, &[e(top)]), Fit::Partial);
     // Already there.
-    assert_eq!(fit(ConstraintKind::Parallel, &s, &[e(top), e(bottom)]), Fit::Invalid);
-    assert_eq!(fit(ConstraintKind::Perpendicular, &s, &[e(c), e(left)]), Fit::Invalid);
-    assert!(matches!(fit(ConstraintKind::Tangent, &s, &[e(c), e(right)]), Fit::Complete(_)));
+    assert_eq!(
+        fit(ConstraintKind::Parallel, &s, &[e(top), e(bottom)]),
+        Fit::Invalid
+    );
+    assert_eq!(
+        fit(ConstraintKind::Perpendicular, &s, &[e(c), e(left)]),
+        Fit::Invalid
+    );
     assert!(matches!(
-        fit(ConstraintKind::Coincident, &s, &[SketchEntity::Point(p[0]), SketchEntity::Origin]),
+        fit(ConstraintKind::Tangent, &s, &[e(c), e(right)]),
         Fit::Complete(_)
     ));
     assert!(matches!(
-        fit(ConstraintKind::Midpoint, &s, &[e(bottom), SketchEntity::Origin]),
+        fit(
+            ConstraintKind::Coincident,
+            &s,
+            &[SketchEntity::Point(p[0]), SketchEntity::Origin]
+        ),
         Fit::Complete(_)
     ));
-    assert_eq!(fit(ConstraintKind::Fix, &s, &[SketchEntity::Origin]), Fit::Invalid);
+    assert!(matches!(
+        fit(
+            ConstraintKind::Midpoint,
+            &s,
+            &[e(bottom), SketchEntity::Origin]
+        ),
+        Fit::Complete(_)
+    ));
+    assert_eq!(
+        fit(ConstraintKind::Fix, &s, &[SketchEntity::Origin]),
+        Fit::Invalid
+    );
 }
 
 #[test]
@@ -664,17 +857,29 @@ fn new_dimension_residuals_hold_on_solved_geometry() {
     let (l1, ..) = line(&mut s, v(0.0, 0.0), v(10.0, 0.0));
     let (l2, ..) = line(&mut s, v(0.0, 0.0), v(5.0, 5.0));
     let p = s.add_point(v(3.0, 7.0));
-    let pl = DimensionKind::PointLine { p: pref(p), line: cref(l1) };
+    let pl = DimensionKind::PointLine {
+        p: pref(p),
+        line: cref(l1),
+    };
     assert!((measured(&s, pl) - 7.0).abs() < 1e-12);
-    let py = DimensionKind::PointLine { p: pref(p), line: CurveRef::YAxis };
+    let py = DimensionKind::PointLine {
+        p: pref(p),
+        line: CurveRef::YAxis,
+    };
     assert!((measured(&s, py) - 3.0).abs() < 1e-12);
-    let ang = |fa, fb| DimensionKind::Angle { a: cref(l1), b: cref(l2), flip_a: fa, flip_b: fb };
+    let ang = |fa, fb| DimensionKind::Angle {
+        a: cref(l1),
+        b: cref(l2),
+        flip_a: fa,
+        flip_b: fb,
+    };
     assert!((measured(&s, ang(false, false)) - 45.0).abs() < 1e-9);
     assert!((measured(&s, ang(true, false)) - 135.0).abs() < 1e-9);
     assert!((measured(&s, ang(true, true)) - 45.0).abs() < 1e-9);
     // The solver's residuals agree with the measured values.
     s.dimensions.insert(Dimension::new(pl, 7.0, 1.0));
-    s.dimensions.insert(Dimension::new(ang(true, false), 135.0, 1.0));
+    s.dimensions
+        .insert(Dimension::new(ang(true, false), 135.0, 1.0));
     assert!(max_residual(&s) < 1e-9);
 }
 
@@ -684,12 +889,24 @@ fn angle_and_point_line_dimensions_drive_geometry() {
     let (l1, ..) = line(&mut s, v(0.0, 0.0), v(20.0, 0.0));
     let (l2, ..) = line(&mut s, v(0.0, 0.0), v(10.0, 12.0));
     add(&mut s, ConstraintOf::FixCurve(cref(l1)));
-    let ang = DimensionKind::Angle { a: cref(l1), b: cref(l2), flip_a: false, flip_b: false };
+    let ang = DimensionKind::Angle {
+        a: cref(l1),
+        b: cref(l2),
+        flip_a: false,
+        flip_b: false,
+    };
     dim(&mut s, ang, 30.0);
     assert!((measured(&s, ang) - 30.0).abs() < 1e-6);
     // A point held 8 mm from the line.
     let p = s.add_point(v(5.0, 3.0));
-    dim(&mut s, DimensionKind::PointLine { p: pref(p), line: cref(l1) }, 8.0);
+    dim(
+        &mut s,
+        DimensionKind::PointLine {
+            p: pref(p),
+            line: cref(l1),
+        },
+        8.0,
+    );
     assert!((s.pos(p).y.abs() - 8.0).abs() < 1e-6, "{:?}", s.pos(p));
     assert!(conflicts(&s).is_empty());
 }
@@ -705,7 +922,11 @@ fn width_and_height_fully_constrain_a_rectangle_from_the_origin() {
     dim(&mut s, DimensionKind::Aligned { a: b0, b: b1 }, 50.0);
     let (r0, r1) = s.curve_ends(sides[1]).unwrap();
     dim(&mut s, DimensionKind::Aligned { a: r0, b: r1 }, 30.0);
-    assert!(s.pos(p[2]).distance(v(50.0, 30.0)) < 1e-6, "{:?}", s.pos(p[2]));
+    assert!(
+        s.pos(p[2]).distance(v(50.0, 30.0)) < 1e-6,
+        "{:?}",
+        s.pos(p[2])
+    );
     let a = analyze(&s);
     assert_eq!(a.dof, 0);
     assert!(a.fully_constrained());
@@ -733,7 +954,9 @@ fn an_extra_dimension_conflicts() {
     assert!(a.has_conflicts());
     assert_eq!(a.point(p[2]), Status::Over);
     // With another value it cannot hold: it is left unsolved and the rectangle keeps its size.
-    SketchOp::SetDimensionValue { id, value: 70.0 }.apply(&mut s).unwrap();
+    SketchOp::SetDimensionValue { id, value: 70.0 }
+        .apply(&mut s)
+        .unwrap();
     assert_eq!(conflicts(&s), vec![Source::Dimension(id)]);
     assert!(s.pos(p[2]).distance(v(50.0, 30.0)) < 1e-6);
     // Deleting it recovers.
@@ -756,25 +979,45 @@ fn editing_a_dimension_moves_the_geometry() {
     let (_, p) = origin_rect(&mut s);
     dim(&mut s, DimensionKind::Horizontal { a: p[0], b: p[1] }, 50.0);
     let id = s.dimensions.keys().next().unwrap();
-    SketchOp::SetDimensionValue { id, value: 40.0 }.apply(&mut s).unwrap();
-    assert!((s.pos(p[1]).x - 40.0).abs() < 1e-6);
-    // Invalid values are refused.
-    assert!(SketchOp::SetDimensionValue { id, value: -1.0 }.apply(&mut s).is_err());
-    // Moving the label changes nothing else.
-    let before = s.clone();
-    SketchOp::MoveDimensionLabel { id, offset: -12.0, along: 7.0 }
+    SketchOp::SetDimensionValue { id, value: 40.0 }
         .apply(&mut s)
         .unwrap();
+    assert!((s.pos(p[1]).x - 40.0).abs() < 1e-6);
+    // Invalid values are refused.
+    assert!(
+        SketchOp::SetDimensionValue { id, value: -1.0 }
+            .apply(&mut s)
+            .is_err()
+    );
+    // Moving the label changes nothing else.
+    let before = s.clone();
+    SketchOp::MoveDimensionLabel {
+        id,
+        offset: -12.0,
+        along: 7.0,
+    }
+    .apply(&mut s)
+    .unwrap();
     assert_eq!(s.dimensions[id].offset, -12.0);
     assert_eq!(s.dimensions[id].along, 7.0);
-    assert!(s.points.iter().all(|(k, pt)| pt.pos == before.points[k].pos));
+    assert!(
+        s.points
+            .iter()
+            .all(|(k, pt)| pt.pos == before.points[k].pos)
+    );
 }
 
 #[test]
 fn over_defining_dimensions_are_created_driven() {
     let mut s = Sketch::new();
     let (_, p) = origin_rect(&mut s);
-    let diag = |s: &Sketch| Dimension::new(DimensionKind::Aligned { a: p[0], b: p[2] }, s.pos(p[0]).distance(s.pos(p[2])), 5.0);
+    let diag = |s: &Sketch| {
+        Dimension::new(
+            DimensionKind::Aligned { a: p[0], b: p[2] },
+            s.pos(p[0]).distance(s.pos(p[2])),
+            5.0,
+        )
+    };
     // Under-defined: the diagonal is fine as a driving dimension.
     assert!(!crate::dimension::over_defines(&s, &diag(&s)));
     dim(&mut s, DimensionKind::Horizontal { a: p[0], b: p[1] }, 50.0);
@@ -782,19 +1025,38 @@ fn over_defining_dimensions_are_created_driven() {
     let d = diag(&s);
     assert!(crate::dimension::over_defines(&s, &d));
     // Driven: measured, not solved, no conflict, not editable.
-    let id = s.dimensions.insert(Dimension { driven: true, value: 1.0, ..d });
+    let id = s.dimensions.insert(Dimension {
+        driven: true,
+        value: 1.0,
+        ..d
+    });
     assert!(!analyze(&s).has_conflicts());
     assert!(analyze(&s).fully_constrained());
-    assert!(SketchOp::SetDimensionValue { id, value: 70.0 }.apply(&mut s).is_err());
+    assert!(
+        SketchOp::SetDimensionValue { id, value: 70.0 }
+            .apply(&mut s)
+            .is_err()
+    );
     // Made driving, it over-defines the sketch: conflicting (red), with its measured value.
-    SketchOp::SetDimensionDriven { id, driven: false }.apply(&mut s).unwrap();
+    SketchOp::SetDimensionDriven { id, driven: false }
+        .apply(&mut s)
+        .unwrap();
     assert!((s.dimensions[id].value - 50f64.hypot(30.0)).abs() < 1e-9);
     let a = analyze(&s);
     assert_eq!(a.conflicting_dimensions, vec![id]);
     // So are the width and height it conflicts with (the whole conflicting set).
-    assert_eq!(a.involved_dimensions.len(), 2, "{:?}", a.involved_dimensions);
+    assert_eq!(
+        a.involved_dimensions.len(),
+        2,
+        "{:?}",
+        a.involved_dimensions
+    );
     // The edges at its points are red too.
-    let red = s.curves.keys().filter(|k| a.curve(*k) == Status::Over).count();
+    let red = s
+        .curves
+        .keys()
+        .filter(|k| a.curve(*k) == Status::Over)
+        .count();
     assert_eq!(red, 4);
 }
 
@@ -802,7 +1064,12 @@ fn over_defining_dimensions_are_created_driven() {
 // Bézier curves and Curvature (Final re-audit, S12.14)
 
 fn bezier(s: &mut Sketch, p: [Vec2; 4]) -> CurveId {
-    SketchOp::AddBezier { points: p, construction: false }.apply(s).unwrap();
+    SketchOp::AddBezier {
+        points: p,
+        construction: false,
+    }
+    .apply(s)
+    .unwrap();
     s.curves
         .iter()
         .find(|(_, c)| matches!(c.kind, CurveKind::Bezier { a, b, .. } if s.pos(a).distance(p[0]) < 1e-9 && s.pos(b).distance(p[3]) < 1e-9))
@@ -813,19 +1080,43 @@ fn bezier(s: &mut Sketch, p: [Vec2; 4]) -> CurveId {
 #[test]
 fn curvature_joins_two_beziers_g2() {
     let mut s = Sketch::new();
-    let a = bezier(&mut s, [v(0.0, 0.0), v(10.0, 0.0), v(20.0, 5.0), v(30.0, 10.0)]);
+    let a = bezier(
+        &mut s,
+        [v(0.0, 0.0), v(10.0, 0.0), v(20.0, 5.0), v(30.0, 10.0)],
+    );
     // Drawn from the first's end, bending the other way and not tangent.
-    let b = bezier(&mut s, [v(30.0, 10.0), v(40.0, 20.0), v(50.0, 18.0), v(60.0, 10.0)]);
+    let b = bezier(
+        &mut s,
+        [v(30.0, 10.0), v(40.0, 20.0), v(50.0, 18.0), v(60.0, 10.0)],
+    );
     let sel = [SketchEntity::Curve(a), SketchEntity::Curve(b)];
-    let Fit::Complete(cs) = fit(ConstraintKind::Curvature, &s, &sel) else { panic!("Curvature fits two joined Béziers") };
-    SketchOp::AddConstraint { constraints: cs, label: "Add curvature" }.apply(&mut s).unwrap();
+    let Fit::Complete(cs) = fit(ConstraintKind::Curvature, &s, &sel) else {
+        panic!("Curvature fits two joined Béziers")
+    };
+    SketchOp::AddConstraint {
+        constraints: cs,
+        label: "Add curvature",
+    }
+    .apply(&mut s)
+    .unwrap();
     assert!(conflicts(&s).is_empty());
     let (ga, gb) = (s.bezier_geom(a).unwrap(), s.bezier_geom(b).unwrap());
     // One point, one tangent, one curvature where they meet.
     assert!(ga.point_at(1.0).distance(gb.point_at(0.0)) < 1e-9);
-    let (ta, tb) = (ga.tangent_at(1.0).normalize(), gb.tangent_at(0.0).normalize());
-    assert!(ta.cross(tb).abs() < 1e-7 && ta.dot(tb) > 0.0, "{ta:?} {tb:?}");
-    assert!((ga.curvature_at(1.0) - gb.curvature_at(0.0)).abs() < 1e-7, "{} {}", ga.curvature_at(1.0), gb.curvature_at(0.0));
+    let (ta, tb) = (
+        ga.tangent_at(1.0).normalize(),
+        gb.tangent_at(0.0).normalize(),
+    );
+    assert!(
+        ta.cross(tb).abs() < 1e-7 && ta.dot(tb) > 0.0,
+        "{ta:?} {tb:?}"
+    );
+    assert!(
+        (ga.curvature_at(1.0) - gb.curvature_at(0.0)).abs() < 1e-7,
+        "{} {}",
+        ga.curvature_at(1.0),
+        gb.curvature_at(0.0)
+    );
     // The analysis counts it: two equations (G1, G2) off the 16 point coordinates (the shared
     // end counted once: 14).
     assert_eq!(analyze(&s).dof, 14 - 2);
@@ -837,23 +1128,41 @@ fn curvature_of_a_bezier_and_an_arc_is_one_over_r() {
     // A quarter arc of radius 10 counter-clockwise from (10, 0) to (0, 10); a Bézier leaves
     // its start going down, roughly tangent.
     let r = arc(&mut s, v(0.0, 0.0), v(10.0, 0.0), v(0.0, 10.0));
-    let b = bezier(&mut s, [v(10.0, 0.0), v(10.5, -6.0), v(14.0, -12.0), v(20.0, -15.0)]);
+    let b = bezier(
+        &mut s,
+        [v(10.0, 0.0), v(10.5, -6.0), v(14.0, -12.0), v(20.0, -15.0)],
+    );
     let sel = [SketchEntity::Curve(b), SketchEntity::Curve(r)];
-    let Fit::Complete(cs) = fit(ConstraintKind::Curvature, &s, &sel) else { panic!() };
-    SketchOp::AddConstraint { constraints: cs, label: "Add curvature" }.apply(&mut s).unwrap();
+    let Fit::Complete(cs) = fit(ConstraintKind::Curvature, &s, &sel) else {
+        panic!()
+    };
+    SketchOp::AddConstraint {
+        constraints: cs,
+        label: "Add curvature",
+    }
+    .apply(&mut s)
+    .unwrap();
     assert!(conflicts(&s).is_empty());
     let g = s.bezier_geom(b).unwrap();
     let arc = s.arc_geom(r).unwrap();
     // Run through the joint: the arc backwards (clockwise) into its start, then the Bézier.
     let t = g.tangent_at(0.0).normalize();
     assert!(t.cross(-arc.start_tangent()).abs() < 1e-7);
-    assert!((g.curvature_at(0.0) - (-1.0 / arc.radius)).abs() < 1e-7, "{} vs {}", g.curvature_at(0.0), -1.0 / arc.radius);
+    assert!(
+        (g.curvature_at(0.0) - (-1.0 / arc.radius)).abs() < 1e-7,
+        "{} vs {}",
+        g.curvature_at(0.0),
+        -1.0 / arc.radius
+    );
 }
 
 #[test]
 fn tangent_and_curvature_need_a_shared_end() {
     let mut s = Sketch::new();
-    let a = bezier(&mut s, [v(0.0, 0.0), v(10.0, 0.0), v(20.0, 5.0), v(30.0, 10.0)]);
+    let a = bezier(
+        &mut s,
+        [v(0.0, 0.0), v(10.0, 0.0), v(20.0, 5.0), v(30.0, 10.0)],
+    );
     let (l, ..) = line(&mut s, v(40.0, 0.0), v(50.0, 0.0));
     let sel = [SketchEntity::Curve(a), SketchEntity::Curve(l)];
     assert_eq!(fit(ConstraintKind::Curvature, &s, &sel), Fit::Invalid);
@@ -861,8 +1170,15 @@ fn tangent_and_curvature_need_a_shared_end() {
     // Joined to a line: G2 to a line flattens the Bézier's end (curvature 0).
     let (m, ..) = line(&mut s, v(30.0, 10.0), v(40.0, 30.0));
     let sel = [SketchEntity::Curve(a), SketchEntity::Curve(m)];
-    let Fit::Complete(cs) = fit(ConstraintKind::Curvature, &s, &sel) else { panic!() };
-    SketchOp::AddConstraint { constraints: cs, label: "Add curvature" }.apply(&mut s).unwrap();
+    let Fit::Complete(cs) = fit(ConstraintKind::Curvature, &s, &sel) else {
+        panic!()
+    };
+    SketchOp::AddConstraint {
+        constraints: cs,
+        label: "Add curvature",
+    }
+    .apply(&mut s)
+    .unwrap();
     assert!(conflicts(&s).is_empty());
     let g = s.bezier_geom(a).unwrap();
     assert!(g.curvature_at(1.0).abs() < 1e-7);
@@ -877,7 +1193,10 @@ fn a_bezier_closes_a_region_with_its_exact_area() {
     // (0,10), (20,10), (20,0): y = 30 t(1 − t), x = 60t² − 40t³, so the area ∫ y dx =
     // 3600 ∫ t²(1 − t)² dt = 3600 / 30 = 120 exactly.
     let mut s = Sketch::new();
-    let b = bezier(&mut s, [v(0.0, 0.0), v(0.0, 10.0), v(20.0, 10.0), v(20.0, 0.0)]);
+    let b = bezier(
+        &mut s,
+        [v(0.0, 0.0), v(0.0, 10.0), v(20.0, 10.0), v(20.0, 0.0)],
+    );
     line(&mut s, v(20.0, 0.0), v(0.0, 0.0));
     let regions = crate::region::regions(&s);
     assert_eq!(regions.len(), 1);
@@ -885,8 +1204,17 @@ fn a_bezier_closes_a_region_with_its_exact_area() {
     let n = 20000;
     let pts: Vec<Vec2> = (0..=n).map(|i| g.point_at(i as f64 / n as f64)).collect();
     let poly = crate::geom::polygon_area(&pts).abs();
-    assert!((regions[0].area() - poly).abs() < 1e-5, "{} vs {}", regions[0].area(), poly);
-    assert!((regions[0].area() - 120.0).abs() < 1e-9, "{}", regions[0].area());
+    assert!(
+        (regions[0].area() - poly).abs() < 1e-5,
+        "{} vs {}",
+        regions[0].area(),
+        poly
+    );
+    assert!(
+        (regions[0].area() - 120.0).abs() < 1e-9,
+        "{}",
+        regions[0].area()
+    );
 }
 
 #[test]
@@ -894,7 +1222,10 @@ fn a_bezier_crossing_a_line_splits_regions() {
     let mut s = Sketch::new();
     rect(&mut s, v(0.0, 0.0), v(40.0, 20.0));
     // Across the rectangle, from its bottom side to its top side.
-    bezier(&mut s, [v(10.0, -5.0), v(15.0, 10.0), v(25.0, 10.0), v(30.0, 25.0)]);
+    bezier(
+        &mut s,
+        [v(10.0, -5.0), v(15.0, 10.0), v(25.0, 10.0), v(30.0, 25.0)],
+    );
     let regions = crate::region::regions(&s);
     assert_eq!(regions.len(), 2, "{}", regions.len());
     let total: f64 = regions.iter().map(|r| r.area()).sum();
@@ -907,13 +1238,27 @@ fn a_bezier_crossing_a_line_splits_regions() {
 #[test]
 fn a_line_tangent_to_an_ellipse() {
     let mut s = Sketch::new();
-    SketchOp::AddEllipse { center: v(0.0, 0.0), major: v(30.0, 0.0), minor: 10.0, construction: false }.apply(&mut s).unwrap();
+    SketchOp::AddEllipse {
+        center: v(0.0, 0.0),
+        major: v(30.0, 0.0),
+        minor: 10.0,
+        construction: false,
+    }
+    .apply(&mut s)
+    .unwrap();
     let e = s.curves.keys().next().unwrap();
     // A line above it, a little tilted, not touching.
     let (l, ..) = line(&mut s, v(-40.0, 14.0), v(40.0, 18.0));
     let sel = [SketchEntity::Curve(l), SketchEntity::Curve(e)];
-    let Fit::Complete(cs) = fit(ConstraintKind::Tangent, &s, &sel) else { panic!("a line and an ellipse take Tangent") };
-    SketchOp::AddConstraint { constraints: cs, label: "Add tangent" }.apply(&mut s).unwrap();
+    let Fit::Complete(cs) = fit(ConstraintKind::Tangent, &s, &sel) else {
+        panic!("a line and an ellipse take Tangent")
+    };
+    SketchOp::AddConstraint {
+        constraints: cs,
+        label: "Add tangent",
+    }
+    .apply(&mut s)
+    .unwrap();
     assert!(conflicts(&s).is_empty());
     let g = s.ellipse_geom(e).unwrap();
     let (a, b) = s.curve_ends(l).unwrap();
@@ -942,11 +1287,31 @@ fn inference_finds_where_an_ellipse_crosses_a_line() {
     // x = ±30·√(1 − 0.25).
     let x = 30.0 * 0.75f64.sqrt();
     assert_eq!(pts.len(), 2);
-    assert!(pts[0].distance(v(-x, 5.0)) < 1e-9 && pts[1].distance(v(x, 5.0)) < 1e-9, "{pts:?}");
+    assert!(
+        pts[0].distance(v(-x, 5.0)) < 1e-9 && pts[1].distance(v(x, 5.0)) < 1e-9,
+        "{pts:?}"
+    );
     // Only the existing part of a segment counts; and a circle crossing it.
     assert_eq!(intersect(&seg, &Shape::Ellipse(g)).len(), 2);
-    assert_eq!(intersect(&Shape::Segment(v(0.0, 5.0), v(50.0, 5.0)), &Shape::Ellipse(g)).len(), 1);
-    assert_eq!(intersect(&Shape::Ellipse(g), &Shape::Circle { center: v(30.0, 0.0), radius: 5.0 }).len(), 2);
+    assert_eq!(
+        intersect(
+            &Shape::Segment(v(0.0, 5.0), v(50.0, 5.0)),
+            &Shape::Ellipse(g)
+        )
+        .len(),
+        1
+    );
+    assert_eq!(
+        intersect(
+            &Shape::Ellipse(g),
+            &Shape::Circle {
+                center: v(30.0, 0.0),
+                radius: 5.0
+            }
+        )
+        .len(),
+        2
+    );
 }
 
 /// Ex2 step 2 (`intro-to-sketching/ex2-step2.png`): lines from the origin with H or V are black
@@ -959,7 +1324,14 @@ fn lines_from_the_origin_with_h_or_v_are_black() {
         let (l, p0, _) = line(&mut u, v(0.0, 0.0), v(dx, dy));
         add(&mut u, ConstraintOf::Coincident(pref(p0), PointRef::Origin));
         let o = Orient::Line(cref(l));
-        add(&mut u, if dx == 0.0 { ConstraintOf::Vertical(o) } else { ConstraintOf::Horizontal(o) });
+        add(
+            &mut u,
+            if dx == 0.0 {
+                ConstraintOf::Vertical(o)
+            } else {
+                ConstraintOf::Horizontal(o)
+            },
+        );
         assert_eq!(analyze(&u).curve(l), Status::Full, "({dx}, {dy})");
     }
     let mut s = Sketch::new();
@@ -972,5 +1344,8 @@ fn lines_from_the_origin_with_h_or_v_are_black() {
     let (side, ..) = line(&mut s, v(-60.0, 0.0), v(-60.0, 45.0));
     add(&mut s, ConstraintOf::Vertical(Orient::Line(cref(side))));
     let a = analyze(&s);
-    assert_eq!((a.curve(c), a.curve(b), a.curve(side)), (Status::Full, Status::Full, Status::Under));
+    assert_eq!(
+        (a.curve(c), a.curve(b), a.curve(side)),
+        (Status::Full, Status::Full, Status::Under)
+    );
 }

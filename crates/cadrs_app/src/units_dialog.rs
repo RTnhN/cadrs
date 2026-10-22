@@ -74,7 +74,10 @@ pub fn open_units_dialog(world: &mut World) {
                 for u in MassUnit::ALL {
                     mass = mass.option(u.label(), true);
                 }
-                let mass_selected = MassUnit::ALL.iter().position(|u| *u == units.mass).unwrap_or(0);
+                let mass_selected = MassUnit::ALL
+                    .iter()
+                    .position(|u| *u == units.mass)
+                    .unwrap_or(0);
                 b.spawn(form_row(t, "units-mass-row", "Mass units", 150.0))
                     .with_child(mass.selected(mass_selected).build(t));
                 // The decimal lists open upward so they do not cover OK and Cancel.
@@ -85,12 +88,20 @@ pub fn open_units_dialog(world: &mut World) {
                     }
                     d.selected(selected.min(MAX_DECIMALS) as usize)
                 };
-                b.spawn(form_row(t, "units-decimals-row", "Length decimal places", 150.0))
-                    .with_child(decimals_select("units-decimals", units.decimals).build(t));
-                b.spawn(form_row(t, "units-angle-decimals-row", "Angle decimal places", 150.0))
-                    .with_child(
-                        decimals_select("units-angle-decimals", units.angle_decimals).build(t),
-                    );
+                b.spawn(form_row(
+                    t,
+                    "units-decimals-row",
+                    "Length decimal places",
+                    150.0,
+                ))
+                .with_child(decimals_select("units-decimals", units.decimals).build(t));
+                b.spawn(form_row(
+                    t,
+                    "units-angle-decimals-row",
+                    "Angle decimal places",
+                    150.0,
+                ))
+                .with_child(decimals_select("units-angle-decimals", units.angle_decimals).build(t));
                 // Room under the rows, so the length list (opening down from the first row)
                 // ends above OK and Cancel (T2 judge).
                 b.spawn((

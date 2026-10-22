@@ -103,7 +103,11 @@ impl DraftBand {
         let f = |v: f64| {
             let s = format!("{v:.1}");
             let s = s.trim_end_matches('0').trim_end_matches('.').to_string();
-            if s == "-0" { "0".into() } else { s.replace('-', "−") }
+            if s == "-0" {
+                "0".into()
+            } else {
+                s.replace('-', "−")
+            }
         };
         format!("{}° to {}°", f(lo), f(hi))
     }
@@ -143,7 +147,9 @@ pub fn reflect(d: Vec3, n: Vec3) -> Vec3 {
 /// in the zebra pattern: 0…1 across one band pair, the white band where
 /// [`zebra_white`]. `part_shading.wgsl` does the same per pixel.
 pub fn zebra_phase(reflected: Vec3, bands: f64) -> f64 {
-    let phi = dot(normalize(reflected), normalize(ZEBRA_AXIS)).clamp(-1.0, 1.0).asin();
+    let phi = dot(normalize(reflected), normalize(ZEBRA_AXIS))
+        .clamp(-1.0, 1.0)
+        .asin();
     (phi * bands / std::f64::consts::PI).rem_euclid(1.0)
 }
 
@@ -153,7 +159,11 @@ pub fn zebra_phase(reflected: Vec3, bands: f64) -> f64 {
 /// eye. `part_shading.wgsl` does exactly this per pixel.
 pub fn zebra_phase_at(view: [Vec3; 3], eye: Vec3, point: Vec3, n: Vec3, ortho: bool) -> f64 {
     let [right, up, back] = view;
-    let e = if ortho { back } else { normalize(sub(eye, point)) };
+    let e = if ortho {
+        back
+    } else {
+        normalize(sub(eye, point))
+    };
     let r = reflect(scale(e, -1.0), n);
     zebra_phase([dot(r, right), dot(r, up), dot(r, back)], ZEBRA_BANDS)
 }
@@ -188,7 +198,11 @@ pub fn vertex_mean_curvature(positions: &[Vec3], normals: &[Vec3], indices: &[u3
         .map(|i| {
             let ni = normalize(normals[i]);
             // A tangent basis.
-            let helper = if ni[0].abs() < 0.9 { [1.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0] };
+            let helper = if ni[0].abs() < 0.9 {
+                [1.0, 0.0, 0.0]
+            } else {
+                [0.0, 1.0, 0.0]
+            };
             let u = normalize(cross(ni, helper));
             let v = cross(ni, u);
             let mut ata = [[0.0f64; 3]; 3];
@@ -231,7 +245,11 @@ pub fn vertex_mean_curvature(positions: &[Vec3], normals: &[Vec3], indices: &[u3
 
 /// Solves a 3×3 linear system (Cramer's rule); `None` when it is (nearly) singular.
 fn solve3(m: [[f64; 3]; 3], b: [f64; 3]) -> Option<[f64; 3]> {
-    let det = |m: [[f64; 3]; 3]| m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+    let det = |m: [[f64; 3]; 3]| {
+        m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+            - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+            + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
+    };
     let d = det(m);
     let scale = m.iter().flatten().fold(0.0f64, |a, x| a.max(x.abs()));
     if d.abs() <= 1e-9 * scale.powi(3).max(1e-300) {
@@ -288,7 +306,14 @@ pub fn curvature_band_label(band: usize, max: f64) -> String {
 
 /// The curvature bands' colours (sRGB), most curved first: red through yellow and green to
 /// blue for flat.
-pub const CURVATURE_COLORS: [[u8; 3]; CURVATURE_BANDS] = [[0xd7, 0x30, 0x27], [0xf4, 0x8c, 0x2c], [0xf2, 0xd4, 0x3a], [0x7c, 0xc4, 0x5a], [0x3a, 0xa8, 0xb8], [0x4a, 0x72, 0xc8]];
+pub const CURVATURE_COLORS: [[u8; 3]; CURVATURE_BANDS] = [
+    [0xd7, 0x30, 0x27],
+    [0xf4, 0x8c, 0x2c],
+    [0xf2, 0xd4, 0x3a],
+    [0x7c, 0xc4, 0x5a],
+    [0x3a, 0xa8, 0xb8],
+    [0x4a, 0x72, 0xc8],
+];
 
 /// One tooth of a curvature comb.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -314,7 +339,14 @@ impl CombTooth {
 pub fn curvature_comb(points: &[Vec3]) -> Vec<CombTooth> {
     let n = points.len();
     if n < 3 {
-        return points.iter().map(|p| CombTooth { at: *p, dir: [0.0; 3], curvature: 0.0 }).collect();
+        return points
+            .iter()
+            .map(|p| CombTooth {
+                at: *p,
+                dir: [0.0; 3],
+                curvature: 0.0,
+            })
+            .collect();
     }
     let closed = len(sub(points[0], points[n - 1])) < 1e-9;
     let at = |i: usize| -> Option<(Vec3, f64)> {
@@ -331,8 +363,16 @@ pub fn curvature_comb(points: &[Vec3]) -> Vec<CombTooth> {
     };
     let mut teeth: Vec<CombTooth> = (0..n)
         .map(|i| match at(i) {
-            Some((dir, k)) => CombTooth { at: points[i], dir, curvature: k },
-            None => CombTooth { at: points[i], dir: [0.0; 3], curvature: 0.0 },
+            Some((dir, k)) => CombTooth {
+                at: points[i],
+                dir,
+                curvature: k,
+            },
+            None => CombTooth {
+                at: points[i],
+                dir: [0.0; 3],
+                curvature: 0.0,
+            },
         })
         .collect();
     if !closed {
@@ -341,7 +381,11 @@ pub fn curvature_comb(points: &[Vec3]) -> Vec<CombTooth> {
         for (end, next) in [(0, 1), (n - 1, n - 2)] {
             let t = teeth[next];
             if t.curvature > 0.0 {
-                teeth[end] = CombTooth { at: points[end], dir: t.dir, curvature: t.curvature };
+                teeth[end] = CombTooth {
+                    at: points[end],
+                    dir: t.dir,
+                    curvature: t.curvature,
+                };
             }
         }
     }
@@ -398,7 +442,10 @@ mod tests {
         assert_eq!(DraftBand::of(3.0, a), DraftBand::Positive);
         assert_eq!(DraftBand::of(2.0, a), DraftBand::InsufficientPositive);
         // A vertical wall has no draft: not enough.
-        assert_eq!(DraftBand::of(draft_angle([1.0, 0.0, 0.0], [0.0, 0.0, 1.0]), a), DraftBand::InsufficientPositive);
+        assert_eq!(
+            DraftBand::of(draft_angle([1.0, 0.0, 0.0], [0.0, 0.0, 1.0]), a),
+            DraftBand::InsufficientPositive
+        );
         assert_eq!(DraftBand::of(-1.0, a), DraftBand::InsufficientNegative);
         assert_eq!(DraftBand::of(-3.0, a), DraftBand::Negative);
         assert_eq!(DraftBand::of(-90.0, a), DraftBand::NegativeSteep);
@@ -407,7 +454,17 @@ mod tests {
         close(draft_angle([0.0, 0.0, -1.0], [0.0, 0.0, 1.0]), -90.0, 1e-9);
         // The labels read top to bottom.
         let labels: Vec<String> = DraftBand::ALL.iter().map(|b| b.label(a)).collect();
-        assert_eq!(labels, ["6° to 90°", "3° to 6°", "0° to 3°", "−3° to 0°", "−6° to −3°", "−90° to −6°"]);
+        assert_eq!(
+            labels,
+            [
+                "6° to 90°",
+                "3° to 6°",
+                "0° to 3°",
+                "−3° to 0°",
+                "−6° to −3°",
+                "−90° to −6°"
+            ]
+        );
         for (i, b) in DraftBand::ALL.iter().enumerate() {
             assert_eq!(b.index(), i);
         }
@@ -422,7 +479,10 @@ mod tests {
         let mut last = None;
         for k in 0..=180 {
             let t = (k as f64 - 90.0).to_radians();
-            let white = zebra_white(zebra_phase(reflect(view, [t.sin(), 0.0, t.cos()]), ZEBRA_BANDS));
+            let white = zebra_white(zebra_phase(
+                reflect(view, [t.sin(), 0.0, t.cos()]),
+                ZEBRA_BANDS,
+            ));
             if last.is_some_and(|l| l != white) {
                 changes += 1;
             }
@@ -430,7 +490,11 @@ mod tests {
         }
         assert!(changes >= 6, "{changes}");
         // Head-on, the reflected ray is the axis-free back direction: the first band's middle.
-        close(zebra_phase(reflect(view, [0.0, 0.0, 1.0]), ZEBRA_BANDS), 0.0, 1e-12);
+        close(
+            zebra_phase(reflect(view, [0.0, 0.0, 1.0]), ZEBRA_BANDS),
+            0.0,
+            1e-12,
+        );
     }
 
     #[test]
@@ -443,18 +507,39 @@ mod tests {
         let view = [right, up, back];
         let eye = scale(back, 300.0);
         let n = [0.0, 0.0, 1.0];
-        let points = [[0.0, 0.0, 0.0], [40.0, 0.0, 0.0], [0.0, 60.0, 0.0], [-50.0, -30.0, 0.0], [80.0, 80.0, 0.0]];
-        let ortho: Vec<f64> = points.iter().map(|p| zebra_phase_at(view, eye, *p, n, true)).collect();
+        let points = [
+            [0.0, 0.0, 0.0],
+            [40.0, 0.0, 0.0],
+            [0.0, 60.0, 0.0],
+            [-50.0, -30.0, 0.0],
+            [80.0, 80.0, 0.0],
+        ];
+        let ortho: Vec<f64> = points
+            .iter()
+            .map(|p| zebra_phase_at(view, eye, *p, n, true))
+            .collect();
         for p in &ortho {
             close(*p, ortho[0], 1e-12);
         }
         // The orthographic phase is that of the view's back direction reflected, in the view's
         // frame.
         let r = reflect(scale(back, -1.0), n);
-        close(ortho[0], zebra_phase([dot(r, right), dot(r, up), dot(r, back)], ZEBRA_BANDS), 1e-12);
-        let persp: Vec<f64> = points.iter().map(|p| zebra_phase_at(view, eye, *p, n, false)).collect();
-        let spread = persp.iter().fold(0.0f64, |m, p| m.max((p - persp[0]).abs()));
-        assert!(spread > 0.05, "perspective phases vary over the plane: {persp:?}");
+        close(
+            ortho[0],
+            zebra_phase([dot(r, right), dot(r, up), dot(r, back)], ZEBRA_BANDS),
+            1e-12,
+        );
+        let persp: Vec<f64> = points
+            .iter()
+            .map(|p| zebra_phase_at(view, eye, *p, n, false))
+            .collect();
+        let spread = persp
+            .iter()
+            .fold(0.0f64, |m, p| m.max((p - persp[0]).abs()));
+        assert!(
+            spread > 0.05,
+            "perspective phases vary over the plane: {persp:?}"
+        );
         // At the point straight below the eye's ray through the origin, both agree.
         close(persp[0], ortho[0], 1e-9);
     }
@@ -506,7 +591,11 @@ mod tests {
             }
         }
         let nn = vec![[0.0, 0.0, 1.0]; pp.len()];
-        assert!(vertex_mean_curvature(&pp, &nn, &idx).iter().all(|k| k.abs() < 1e-12));
+        assert!(
+            vertex_mean_curvature(&pp, &nn, &idx)
+                .iter()
+                .all(|k| k.abs() < 1e-12)
+        );
         // A cylinder of radius 10: the mean of 1/10 and 0.
         let (mut cp, mut cn, mut ci) = (Vec::new(), Vec::new(), Vec::new());
         let segs = 36;
@@ -540,9 +629,16 @@ mod tests {
     #[test]
     fn a_vertical_wall_is_in_the_zero_to_a_band_either_side_of_zero() {
         for d in [0.0, 1e-6, -1e-6, -5e-5, 5e-5] {
-            assert_eq!(DraftBand::of(d, 3.0), DraftBand::InsufficientPositive, "{d}");
+            assert_eq!(
+                DraftBand::of(d, 3.0),
+                DraftBand::InsufficientPositive,
+                "{d}"
+            );
         }
-        assert_eq!(DraftBand::of(-2.0 * DRAFT_EPS, 3.0), DraftBand::InsufficientNegative);
+        assert_eq!(
+            DraftBand::of(-2.0 * DRAFT_EPS, 3.0),
+            DraftBand::InsufficientNegative
+        );
     }
 
     #[test]

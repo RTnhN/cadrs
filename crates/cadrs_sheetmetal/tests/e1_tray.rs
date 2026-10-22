@@ -4,7 +4,11 @@ use cadrs_sheetmetal::{Params, flatten, samples};
 
 #[test]
 fn the_e1_tray_lays_flat() {
-    let p = Params { thickness: 1.0, bend_radius: 1.0, ..Params::default() };
+    let p = Params {
+        thickness: 1.0,
+        bend_radius: 1.0,
+        ..Params::default()
+    };
     let m = samples::e1_tray(p).expect("builds");
     assert!(m.validate().is_empty(), "{:?}", m.validate());
     let flat = flatten(&m);

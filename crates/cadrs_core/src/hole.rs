@@ -72,7 +72,11 @@ pub enum HoleStyle {
 }
 
 impl HoleStyle {
-    pub const ALL: [HoleStyle; 3] = [HoleStyle::Simple, HoleStyle::Counterbore, HoleStyle::Countersink];
+    pub const ALL: [HoleStyle; 3] = [
+        HoleStyle::Simple,
+        HoleStyle::Counterbore,
+        HoleStyle::Countersink,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -98,7 +102,12 @@ pub enum HoleType {
 }
 
 impl HoleType {
-    pub const ALL: [HoleType; 4] = [HoleType::Drilled, HoleType::Clearance, HoleType::Tapped, HoleType::Pem];
+    pub const ALL: [HoleType; 4] = [
+        HoleType::Drilled,
+        HoleType::Clearance,
+        HoleType::Tapped,
+        HoleType::Pem,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -184,7 +193,12 @@ pub struct Tolerance {
 
 impl Default for Tolerance {
     fn default() -> Self {
-        Self { kind: ToleranceType::None, upper: 0.1, lower: 0.1, precision: 2 }
+        Self {
+            kind: ToleranceType::None,
+            upper: 0.1,
+            lower: 0.1,
+            precision: 2,
+        }
     }
 }
 
@@ -235,8 +249,12 @@ pub enum StyleTolerance {
 }
 
 impl StyleTolerance {
-    pub const ALL: [StyleTolerance; 4] =
-        [StyleTolerance::CboreDiameter, StyleTolerance::CboreDepth, StyleTolerance::CsinkDiameter, StyleTolerance::CsinkAngle];
+    pub const ALL: [StyleTolerance; 4] = [
+        StyleTolerance::CboreDiameter,
+        StyleTolerance::CboreDepth,
+        StyleTolerance::CsinkDiameter,
+        StyleTolerance::CsinkAngle,
+    ];
 
     /// The dialog's section title.
     pub fn label(self) -> &'static str {
@@ -293,10 +311,12 @@ pub const PEM: &[(&str, f64, f64)] = &[
 
 /// The mounting hole of a PEM® fastener of `size`.
 pub fn pem_hole(kind: PemType, size: &str) -> Option<f64> {
-    PEM.iter().find(|(n, ..)| *n == size).map(|(_, nut, stud)| match kind {
-        PemType::Nut => *nut,
-        PemType::Stud => *stud,
-    })
+    PEM.iter()
+        .find(|(n, ..)| *n == size)
+        .map(|(_, nut, stud)| match kind {
+            PemType::Nut => *nut,
+            PemType::Stud => *stud,
+        })
 }
 
 /// Fastener fit of a clearance hole.
@@ -341,7 +361,11 @@ pub enum HoleStart {
 }
 
 impl HoleStart {
-    pub const ALL: [HoleStart; 3] = [HoleStart::Part, HoleStart::SketchPlane, HoleStart::SelectedPlane];
+    pub const ALL: [HoleStart; 3] = [
+        HoleStart::Part,
+        HoleStart::SketchPlane,
+        HoleStart::SelectedPlane,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -368,7 +392,12 @@ pub enum HoleEnd {
 }
 
 impl HoleEnd {
-    pub const ALL: [HoleEnd; 4] = [HoleEnd::ThroughAll, HoleEnd::Blind, HoleEnd::UpToNext, HoleEnd::UpToEntity];
+    pub const ALL: [HoleEnd; 4] = [
+        HoleEnd::ThroughAll,
+        HoleEnd::Blind,
+        HoleEnd::UpToNext,
+        HoleEnd::UpToEntity,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -492,7 +521,11 @@ impl Default for HoleSpec {
 impl HoleSpec {
     /// A metric simple drilled hole of `size` (a drill size; "5 mm" if empty), Blind 10 mm.
     pub fn new(size: HoleSize) -> Self {
-        let size = if size.is_empty() { "5 mm".to_string() } else { size };
+        let size = if size.is_empty() {
+            "5 mm".to_string()
+        } else {
+            size
+        };
         let mut s = Self {
             standard: HoleStandard::Iso,
             style: HoleStyle::Simple,
@@ -529,9 +562,14 @@ impl HoleSpec {
     /// The sizes the Size dropdown offers for the standard and hole type.
     pub fn sizes(standard: HoleStandard, hole_type: HoleType) -> Vec<String> {
         match (standard, hole_type) {
-            (HoleStandard::Iso, HoleType::Drilled) => METRIC_DRILLS.iter().map(|d| format!("{} mm", fmt(*d))).collect(),
+            (HoleStandard::Iso, HoleType::Drilled) => METRIC_DRILLS
+                .iter()
+                .map(|d| format!("{} mm", fmt(*d)))
+                .collect(),
             (_, HoleType::Pem) => PEM.iter().map(|(n, ..)| n.to_string()).collect(),
-            (HoleStandard::Ansi, HoleType::Drilled) => INCH_DRILLS.iter().map(|(n, _)| n.to_string()).collect(),
+            (HoleStandard::Ansi, HoleType::Drilled) => {
+                INCH_DRILLS.iter().map(|(n, _)| n.to_string()).collect()
+            }
             (HoleStandard::Iso, _) => ISO.iter().map(|m| m.name.to_string()).collect(),
             (HoleStandard::Ansi, _) => ANSI.iter().map(|m| m.name.to_string()).collect(),
         }
@@ -565,8 +603,12 @@ impl HoleSpec {
     pub fn pitch_label(standard: HoleStandard, thread: &str) -> String {
         match standard {
             HoleStandard::Iso => {
-                let Some((m, p)) = thread.split_once('x') else { return thread.to_string() };
-                let Ok(v) = p.parse::<f64>() else { return thread.to_string() };
+                let Some((m, p)) = thread.split_once('x') else {
+                    return thread.to_string();
+                };
+                let Ok(v) = p.parse::<f64>() else {
+                    return thread.to_string();
+                };
                 let coarse = iso(m).is_some_and(|s| (s.coarse - v).abs() < 1e-9);
                 format!("{v:.2} mm ({})", if coarse { "Coarse" } else { "Fine" })
             }
@@ -585,7 +627,14 @@ impl HoleSpec {
         match self.standard {
             HoleStandard::Iso => self.pitch.split_once('x')?.1.parse().ok(),
             HoleStandard::Ansi => {
-                let tpi: f64 = self.pitch.split_once('-')?.1.split(' ').next()?.parse().ok()?;
+                let tpi: f64 = self
+                    .pitch
+                    .split_once('-')?
+                    .1
+                    .split(' ')
+                    .next()?
+                    .parse()
+                    .ok()?;
                 Some(25.4 / tpi)
             }
         }
@@ -632,7 +681,12 @@ impl HoleSpec {
             // PEM® mounting holes: the table's diameter, +0.08/−0 mm.
             if let Some(d) = pem_hole(self.pem, &self.size) {
                 self.diameter = Length::mm(d);
-                self.diameter_tol = Tolerance { kind: ToleranceType::Deviation, upper: 0.08, lower: 0.0, precision: 2 };
+                self.diameter_tol = Tolerance {
+                    kind: ToleranceType::Deviation,
+                    upper: 0.08,
+                    lower: 0.0,
+                    precision: 2,
+                };
             }
             return;
         }
@@ -645,7 +699,14 @@ impl HoleSpec {
         self.csink_angle = Length::deg(if st == HoleStandard::Ansi { 82.0 } else { 90.0 });
         // The depths follow the standard's unit (the Inch tab shows inches, to 0.001 in; the
         // Metric tab mm, to 0.01 mm).
-        let (unit, step) = (st.unit_name(), if st == HoleStandard::Ansi { 1000.0 } else { 100.0 });
+        let (unit, step) = (
+            st.unit_name(),
+            if st == HoleStandard::Ansi {
+                1000.0
+            } else {
+                100.0
+            },
+        );
         for l in [&mut self.depth, &mut self.tapped_depth] {
             if !l.expr.trim_end().ends_with(unit) {
                 *l = Length::of(st, (l.value / st.unit_mm() * step).round() / step);
@@ -664,7 +725,11 @@ impl HoleSpec {
                 }
                 // The head a fastener of this size has (the drill's nearest fastener for Drilled).
                 let m = match self.hole_type {
-                    HoleType::Drilled => ISO.iter().rev().find(|m| m.d <= self.diameter.value + 1e-9).or(ISO.first()),
+                    HoleType::Drilled => ISO
+                        .iter()
+                        .rev()
+                        .find(|m| m.d <= self.diameter.value + 1e-9)
+                        .or(ISO.first()),
                     _ => iso(&self.size),
                 };
                 if let Some(m) = m {
@@ -675,16 +740,29 @@ impl HoleSpec {
             }
             HoleStandard::Ansi => {
                 let d = match self.hole_type {
-                    HoleType::Drilled => INCH_DRILLS.iter().find(|(n, _)| *n == self.size).map(|(_, d)| *d),
+                    HoleType::Drilled => INCH_DRILLS
+                        .iter()
+                        .find(|(n, _)| *n == self.size)
+                        .map(|(_, d)| *d),
                     HoleType::Clearance => ansi(&self.size).map(|a| a.clearance[self.fit.index()]),
-                    HoleType::Tapped => ansi(&self.size).map(|a| if self.pitch.ends_with("UNF") { a.tap_unf.unwrap_or(a.tap_unc) } else { a.tap_unc }),
+                    HoleType::Tapped => ansi(&self.size).map(|a| {
+                        if self.pitch.ends_with("UNF") {
+                            a.tap_unf.unwrap_or(a.tap_unc)
+                        } else {
+                            a.tap_unc
+                        }
+                    }),
                     HoleType::Pem => None,
                 };
                 if let Some(d) = d {
                     self.diameter = Length::of(st, d);
                 }
                 let a = match self.hole_type {
-                    HoleType::Drilled => ANSI.iter().rev().find(|a| a.d <= self.diameter.value / 25.4 + 1e-9).or(ANSI.first()),
+                    HoleType::Drilled => ANSI
+                        .iter()
+                        .rev()
+                        .find(|a| a.d <= self.diameter.value / 25.4 + 1e-9)
+                        .or(ANSI.first()),
                     _ => ansi(&self.size),
                 };
                 if let Some(a) = a {
@@ -712,11 +790,15 @@ impl HoleSpec {
             HoleStyle::Counterbore if self.cbore_diameter.value <= self.diameter.value => {
                 Some("The counterbore must be wider than the hole")
             }
-            HoleStyle::Counterbore if !pos(&self.cbore_depth) => Some("The counterbore depth must be greater than zero"),
+            HoleStyle::Counterbore if !pos(&self.cbore_depth) => {
+                Some("The counterbore depth must be greater than zero")
+            }
             HoleStyle::Countersink if self.csink_diameter.value <= self.diameter.value => {
                 Some("The countersink must be wider than the hole")
             }
-            HoleStyle::Countersink if !(self.csink_angle.value > 0.0 && self.csink_angle.value < 180.0) => {
+            HoleStyle::Countersink
+                if !(self.csink_angle.value > 0.0 && self.csink_angle.value < 180.0) =>
+            {
                 Some("The countersink angle must be between 0 and 180°")
             }
             _ => None,
@@ -730,7 +812,9 @@ impl HoleSpec {
 
     /// The countersink cone's depth from the start down to the hole's diameter.
     pub fn csink_depth(&self) -> f64 {
-        (self.csink_diameter.value - self.diameter.value) / 2.0 / (self.csink_angle.value.to_radians() / 2.0).tan()
+        (self.csink_diameter.value - self.diameter.value)
+            / 2.0
+            / (self.csink_angle.value.to_radians() / 2.0).tan()
     }
 
     /// The half section, as (radius, depth below the start) corners in order from the axis
@@ -744,7 +828,10 @@ impl HoleSpec {
                 pts.push((r, -above));
             }
             HoleStyle::Counterbore => {
-                let (rc, hc) = (self.cbore_diameter.value / 2.0, self.cbore_depth.value.min(depth));
+                let (rc, hc) = (
+                    self.cbore_diameter.value / 2.0,
+                    self.cbore_depth.value.min(depth),
+                );
                 pts.extend([(rc, -above), (rc, hc), (r, hc)]);
             }
             HoleStyle::Countersink => {
@@ -788,7 +875,8 @@ impl HoleSpec {
 
     pub fn callout(&self) -> String {
         let st = self.standard;
-        let len = |l: &Length| format!("{} {}", fmt(round3(l.value / st.unit_mm())), st.unit_name());
+        let len =
+            |l: &Length| format!("{} {}", fmt(round3(l.value / st.unit_mm())), st.unit_name());
         let tol = |l: &Length, t: &Tolerance| t.apply(l.value / st.unit_mm(), st.unit_name());
         let depth = tol(&self.depth, &self.depth_tol);
         let end = match self.end {
@@ -858,8 +946,22 @@ pub struct IsoSize {
     pub dk: f64,
 }
 
-const fn m(name: &'static str, d: f64, coarse: f64, fine: &'static [f64], clearance: [f64; 3], dk: f64) -> IsoSize {
-    IsoSize { name, d, coarse, fine, clearance, dk }
+const fn m(
+    name: &'static str,
+    d: f64,
+    coarse: f64,
+    fine: &'static [f64],
+    clearance: [f64; 3],
+    dk: f64,
+) -> IsoSize {
+    IsoSize {
+        name,
+        d,
+        coarse,
+        fine,
+        clearance,
+        dk,
+    }
 }
 
 pub const ISO: &[IsoSize] = &[
@@ -927,29 +1029,229 @@ const fn a(
     head: f64,
     flat_head: f64,
 ) -> AnsiSize {
-    AnsiSize { name, d, unc, unf, clearance, tap_unc, tap_unf, head, flat_head }
+    AnsiSize {
+        name,
+        d,
+        unc,
+        unf,
+        clearance,
+        tap_unc,
+        tap_unf,
+        head,
+        flat_head,
+    }
 }
 
 pub const ANSI: &[AnsiSize] = &[
-    a("#0", 0.060, 80, None, [0.0635, 0.073, 0.081], 0.0469, None, 0.096, 0.119),
-    a("#1", 0.073, 64, Some(72), [0.076, 0.089, 0.104], 0.0595, Some(0.0595), 0.118, 0.146),
-    a("#2", 0.086, 56, Some(64), [0.089, 0.1015, 0.116], 0.070, Some(0.070), 0.140, 0.172),
-    a("#3", 0.099, 48, Some(56), [0.104, 0.110, 0.1285], 0.0785, Some(0.082), 0.161, 0.199),
-    a("#4", 0.112, 40, Some(48), [0.116, 0.1285, 0.144], 0.089, Some(0.0935), 0.183, 0.225),
-    a("#5", 0.125, 40, Some(44), [0.1285, 0.136, 0.1495], 0.1015, Some(0.104), 0.205, 0.252),
-    a("#6", 0.138, 32, Some(40), [0.144, 0.1495, 0.1695], 0.1065, Some(0.113), 0.226, 0.279),
-    a("#8", 0.164, 32, Some(36), [0.1695, 0.177, 0.196], 0.136, Some(0.136), 0.270, 0.332),
-    a("#10", 0.190, 24, Some(32), [0.196, 0.201, 0.221], 0.1495, Some(0.159), 0.312, 0.385),
-    a("#12", 0.216, 24, Some(28), [0.221, 0.228, 0.246], 0.177, Some(0.180), 0.354, 0.438),
-    a("1/4", 0.250, 20, Some(28), [0.257, 0.266, 0.281], 0.201, Some(0.213), 0.375, 0.507),
-    a("5/16", 0.3125, 18, Some(24), [0.323, 0.332, 0.344], 0.257, Some(0.272), 0.469, 0.635),
-    a("3/8", 0.375, 16, Some(24), [0.386, 0.397, 0.406], 0.3125, Some(0.332), 0.562, 0.762),
-    a("7/16", 0.4375, 14, Some(20), [0.453, 0.469, 0.484], 0.368, Some(0.3906), 0.656, 0.812),
-    a("1/2", 0.500, 13, Some(20), [0.516, 0.531, 0.547], 0.4219, Some(0.4531), 0.750, 0.875),
-    a("5/8", 0.625, 11, Some(18), [0.641, 0.656, 0.672], 0.5312, Some(0.5781), 0.938, 1.125),
-    a("3/4", 0.750, 10, Some(16), [0.766, 0.781, 0.797], 0.6562, Some(0.6875), 1.125, 1.375),
-    a("7/8", 0.875, 9, Some(14), [0.891, 0.906, 0.922], 0.7656, Some(0.8125), 1.312, 1.625),
-    a("1", 1.000, 8, Some(12), [1.016, 1.031, 1.047], 0.875, Some(0.9219), 1.500, 1.875),
+    a(
+        "#0",
+        0.060,
+        80,
+        None,
+        [0.0635, 0.073, 0.081],
+        0.0469,
+        None,
+        0.096,
+        0.119,
+    ),
+    a(
+        "#1",
+        0.073,
+        64,
+        Some(72),
+        [0.076, 0.089, 0.104],
+        0.0595,
+        Some(0.0595),
+        0.118,
+        0.146,
+    ),
+    a(
+        "#2",
+        0.086,
+        56,
+        Some(64),
+        [0.089, 0.1015, 0.116],
+        0.070,
+        Some(0.070),
+        0.140,
+        0.172,
+    ),
+    a(
+        "#3",
+        0.099,
+        48,
+        Some(56),
+        [0.104, 0.110, 0.1285],
+        0.0785,
+        Some(0.082),
+        0.161,
+        0.199,
+    ),
+    a(
+        "#4",
+        0.112,
+        40,
+        Some(48),
+        [0.116, 0.1285, 0.144],
+        0.089,
+        Some(0.0935),
+        0.183,
+        0.225,
+    ),
+    a(
+        "#5",
+        0.125,
+        40,
+        Some(44),
+        [0.1285, 0.136, 0.1495],
+        0.1015,
+        Some(0.104),
+        0.205,
+        0.252,
+    ),
+    a(
+        "#6",
+        0.138,
+        32,
+        Some(40),
+        [0.144, 0.1495, 0.1695],
+        0.1065,
+        Some(0.113),
+        0.226,
+        0.279,
+    ),
+    a(
+        "#8",
+        0.164,
+        32,
+        Some(36),
+        [0.1695, 0.177, 0.196],
+        0.136,
+        Some(0.136),
+        0.270,
+        0.332,
+    ),
+    a(
+        "#10",
+        0.190,
+        24,
+        Some(32),
+        [0.196, 0.201, 0.221],
+        0.1495,
+        Some(0.159),
+        0.312,
+        0.385,
+    ),
+    a(
+        "#12",
+        0.216,
+        24,
+        Some(28),
+        [0.221, 0.228, 0.246],
+        0.177,
+        Some(0.180),
+        0.354,
+        0.438,
+    ),
+    a(
+        "1/4",
+        0.250,
+        20,
+        Some(28),
+        [0.257, 0.266, 0.281],
+        0.201,
+        Some(0.213),
+        0.375,
+        0.507,
+    ),
+    a(
+        "5/16",
+        0.3125,
+        18,
+        Some(24),
+        [0.323, 0.332, 0.344],
+        0.257,
+        Some(0.272),
+        0.469,
+        0.635,
+    ),
+    a(
+        "3/8",
+        0.375,
+        16,
+        Some(24),
+        [0.386, 0.397, 0.406],
+        0.3125,
+        Some(0.332),
+        0.562,
+        0.762,
+    ),
+    a(
+        "7/16",
+        0.4375,
+        14,
+        Some(20),
+        [0.453, 0.469, 0.484],
+        0.368,
+        Some(0.3906),
+        0.656,
+        0.812,
+    ),
+    a(
+        "1/2",
+        0.500,
+        13,
+        Some(20),
+        [0.516, 0.531, 0.547],
+        0.4219,
+        Some(0.4531),
+        0.750,
+        0.875,
+    ),
+    a(
+        "5/8",
+        0.625,
+        11,
+        Some(18),
+        [0.641, 0.656, 0.672],
+        0.5312,
+        Some(0.5781),
+        0.938,
+        1.125,
+    ),
+    a(
+        "3/4",
+        0.750,
+        10,
+        Some(16),
+        [0.766, 0.781, 0.797],
+        0.6562,
+        Some(0.6875),
+        1.125,
+        1.375,
+    ),
+    a(
+        "7/8",
+        0.875,
+        9,
+        Some(14),
+        [0.891, 0.906, 0.922],
+        0.7656,
+        Some(0.8125),
+        1.312,
+        1.625,
+    ),
+    a(
+        "1",
+        1.000,
+        8,
+        Some(12),
+        [1.016, 1.031, 1.047],
+        0.875,
+        Some(0.9219),
+        1.500,
+        1.875,
+    ),
 ];
 
 pub fn ansi(size: &str) -> Option<&'static AnsiSize> {
@@ -958,8 +1260,8 @@ pub fn ansi(size: &str) -> Option<&'static AnsiSize> {
 
 /// Metric drill sizes (mm).
 pub const METRIC_DRILLS: &[f64] = &[
-    1.0, 1.5, 2.0, 2.5, 3.0, 3.2, 3.3, 3.5, 4.0, 4.2, 4.5, 5.0, 5.3, 5.5, 6.0, 6.4, 6.6, 6.8, 7.0, 8.0, 8.4, 8.5,
-    9.0, 10.0, 10.2, 10.5, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.5, 18.0, 20.0,
+    1.0, 1.5, 2.0, 2.5, 3.0, 3.2, 3.3, 3.5, 4.0, 4.2, 4.5, 5.0, 5.3, 5.5, 6.0, 6.4, 6.6, 6.8, 7.0,
+    8.0, 8.4, 8.5, 9.0, 10.0, 10.2, 10.5, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.5, 18.0, 20.0,
 ];
 
 /// Inch drill sizes: numbers, letters and fractions (inches).
@@ -1000,8 +1302,11 @@ pub fn hole_vertices(g: &cadrs_sketch::Sketch) -> Vec<cadrs_sketch::PointId> {
             CurveKind::Line { a, b } => vec![a, b],
             CurveKind::Circle { center, .. } => vec![center],
             CurveKind::Arc { center, start, end } => vec![center, start, end],
-            CurveKind::Ellipse { center, major, .. } | CurveKind::EllipseOffset { center, major, .. } => vec![center, major],
-            CurveKind::EllipseArc { center, start, end, .. } => vec![center, start, end],
+            CurveKind::Ellipse { center, major, .. }
+            | CurveKind::EllipseOffset { center, major, .. } => vec![center, major],
+            CurveKind::EllipseArc {
+                center, start, end, ..
+            } => vec![center, start, end],
             // Its ends (its control points are handles, not places for holes).
             CurveKind::Bezier { a, b, c1, c2 } => {
                 used.extend([c1, c2]);
@@ -1009,7 +1314,14 @@ pub fn hole_vertices(g: &cadrs_sketch::Sketch) -> Vec<cadrs_sketch::PointId> {
             }
         };
         used.extend(&pts);
-        if c.construction || matches!(c.kind, CurveKind::Ellipse { .. } | CurveKind::EllipseOffset { .. } | CurveKind::Spline { .. }) {
+        if c.construction
+            || matches!(
+                c.kind,
+                CurveKind::Ellipse { .. }
+                    | CurveKind::EllipseOffset { .. }
+                    | CurveKind::Spline { .. }
+            )
+        {
             continue;
         }
         for p in pts {
@@ -1101,12 +1413,24 @@ mod tests {
         assert_eq!(t.callout(), "M10x1.50 ↧ 20 mm");
         // PS27.8's last row: (20 − 10.02) / 1.5 = 6.653 threads of tap clearance.
         assert!((t.tap_clearance().unwrap() - 6.653_333).abs() < 1e-5);
-        assert_eq!(HoleSpec::pitch_label(HoleStandard::Iso, "M10x1.5"), "1.50 mm (Coarse)");
-        assert_eq!(HoleSpec::pitch_label(HoleStandard::Iso, "M10x1.25"), "1.25 mm (Fine)");
-        assert_eq!(HoleSpec::pitch_label(HoleStandard::Ansi, "1/4-20 UNC"), "20 tpi (UNC)");
+        assert_eq!(
+            HoleSpec::pitch_label(HoleStandard::Iso, "M10x1.5"),
+            "1.50 mm (Coarse)"
+        );
+        assert_eq!(
+            HoleSpec::pitch_label(HoleStandard::Iso, "M10x1.25"),
+            "1.25 mm (Fine)"
+        );
+        assert_eq!(
+            HoleSpec::pitch_label(HoleStandard::Ansi, "1/4-20 UNC"),
+            "20 tpi (UNC)"
+        );
         t.thread_class = true;
         assert_eq!(t.callout(), "M10x1.50 - 6H ↧ 20 mm");
-        assert_eq!(HoleSpec::pitches(HoleStandard::Iso, "M10"), ["M10x1.5", "M10x1.25", "M10x1"]);
+        assert_eq!(
+            HoleSpec::pitches(HoleStandard::Iso, "M10"),
+            ["M10x1.5", "M10x1.25", "M10x1"]
+        );
         t.pitch = "M10x1.25".into();
         t.apply_table();
         assert_eq!(t.diameter.value, 8.75);
@@ -1129,7 +1453,11 @@ mod tests {
         // The depths are in inches too (a new spec's 10 mm is 0.394 in).
         assert_eq!(s.depth.expr, "0.394 in");
         assert!((s.depth.value - 0.394 * 25.4).abs() < 1e-9);
-        assert!(s.tapped_depth.expr.ends_with(" in"), "{}", s.tapped_depth.expr);
+        assert!(
+            s.tapped_depth.expr.ends_with(" in"),
+            "{}",
+            s.tapped_depth.expr
+        );
         s.end = HoleEnd::ThroughAll;
         assert_eq!(s.callout(), "Ø 0.196 in THRU");
         let mut t = HoleSpec::new(String::new());
@@ -1149,16 +1477,34 @@ mod tests {
         let mut s = HoleSpec::new(String::new());
         s.diameter = Length::mm(5.3);
         s.end = HoleEnd::ThroughAll;
-        s.diameter_tol = Tolerance { kind: ToleranceType::Symmetrical, upper: 0.1, lower: 0.1, precision: 2 };
+        s.diameter_tol = Tolerance {
+            kind: ToleranceType::Symmetrical,
+            upper: 0.1,
+            lower: 0.1,
+            precision: 2,
+        };
         assert_eq!(s.callout(), "Ø 5.3 mm ±0.10 THRU");
-        s.diameter_tol = Tolerance { kind: ToleranceType::Deviation, upper: 0.1, lower: 0.05, precision: 2 };
+        s.diameter_tol = Tolerance {
+            kind: ToleranceType::Deviation,
+            upper: 0.1,
+            lower: 0.05,
+            precision: 2,
+        };
         assert_eq!(s.callout(), "Ø 5.3 mm +0.10/−0.05 THRU");
-        s.diameter_tol = Tolerance { kind: ToleranceType::Limits, upper: 0.1, lower: 0.1, precision: 2 };
+        s.diameter_tol = Tolerance {
+            kind: ToleranceType::Limits,
+            upper: 0.1,
+            lower: 0.1,
+            precision: 2,
+        };
         assert_eq!(s.callout(), "Ø 5.40/5.20 mm THRU");
         s.end = HoleEnd::Blind;
         s.diameter_tol = Tolerance::default();
         s.depth = Length::mm(12.0);
-        s.depth_tol = Tolerance { kind: ToleranceType::Max, ..Tolerance::default() };
+        s.depth_tol = Tolerance {
+            kind: ToleranceType::Max,
+            ..Tolerance::default()
+        };
         assert_eq!(s.callout(), "Ø 5.3 mm ↧ 12 mm MAX");
         // P3.11: the counterbore's and the countersink's tolerances follow their values.
         let mut c = HoleSpec::new(String::new());
@@ -1167,14 +1513,34 @@ mod tests {
         c.cbore_diameter = Length::mm(10.0);
         c.cbore_depth = Length::mm(4.0);
         assert_eq!(c.callout(), "Ø 5 mm THRU | ⌴Ø 10 mm ↧ 4 mm");
-        c.cbore_diameter_tol = Tolerance { kind: ToleranceType::Deviation, upper: 0.2, lower: 0.0, precision: 1 };
-        c.cbore_depth_tol = Tolerance { kind: ToleranceType::Symmetrical, upper: 0.1, lower: 0.1, precision: 2 };
+        c.cbore_diameter_tol = Tolerance {
+            kind: ToleranceType::Deviation,
+            upper: 0.2,
+            lower: 0.0,
+            precision: 1,
+        };
+        c.cbore_depth_tol = Tolerance {
+            kind: ToleranceType::Symmetrical,
+            upper: 0.1,
+            lower: 0.1,
+            precision: 2,
+        };
         assert_eq!(c.callout(), "Ø 5 mm THRU | ⌴Ø 10 mm +0.2/−0.0 ↧ 4 mm ±0.10");
         c.style = HoleStyle::Countersink;
         c.csink_diameter = Length::mm(10.0);
         c.csink_angle = Length::deg(90.0);
-        c.csink_diameter_tol = Tolerance { kind: ToleranceType::Limits, upper: 0.1, lower: 0.1, precision: 2 };
-        c.csink_angle_tol = Tolerance { kind: ToleranceType::Symmetrical, upper: 1.0, lower: 1.0, precision: 1 };
+        c.csink_diameter_tol = Tolerance {
+            kind: ToleranceType::Limits,
+            upper: 0.1,
+            lower: 0.1,
+            precision: 2,
+        };
+        c.csink_angle_tol = Tolerance {
+            kind: ToleranceType::Symmetrical,
+            upper: 1.0,
+            lower: 1.0,
+            precision: 1,
+        };
         assert_eq!(c.callout(), "Ø 5 mm THRU | ⌵Ø 10.10/9.90 mm X 90° ±1.0");
         c.csink_angle_tol.kind = ToleranceType::Limits;
         assert_eq!(c.callout(), "Ø 5 mm THRU | ⌵Ø 10.10/9.90 mm X 91.0°/89.0°");
@@ -1213,7 +1579,14 @@ mod tests {
         let tip = 2.5 / (59.0f64.to_radians()).tan();
         assert_eq!(
             s.section(20.0, false, 1.0),
-            vec![(0.0, -1.0), (5.0, -1.0), (5.0, 4.0), (2.5, 4.0), (2.5, 20.0), (0.0, 20.0 + tip)]
+            vec![
+                (0.0, -1.0),
+                (5.0, -1.0),
+                (5.0, 4.0),
+                (2.5, 4.0),
+                (2.5, 20.0),
+                (0.0, 20.0 + tip)
+            ]
         );
         assert_eq!(s.section(20.0, true, 1.0).last(), Some(&(0.0, 20.0)));
         s.style = HoleStyle::Countersink;

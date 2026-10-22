@@ -28,13 +28,15 @@ use cadrs_core::samples::hand_brake::{self as hb, drawing as hd};
 use cadrs_core::views::ViewGeometry;
 use cadrs_core::{Document, History};
 use cadrs_drawing::annotation::{
-    AnnotationId, AnnotationKind, DimKind, Pick, PointOf, PointRef, Shape, annotation_graphics, hole_of, hole_text,
-    is_dangling, resolve,
+    AnnotationId, AnnotationKind, DimKind, Pick, PointOf, PointRef, Shape, annotation_graphics,
+    hole_of, hole_text, is_dangling, resolve,
 };
 use cadrs_drawing::{Drawing, DrawingOp, View, ViewId};
 
 fn drawing(doc: &Document) -> &Drawing {
-    doc.element(hb::DRAWING).and_then(|e| e.drawing_data()).expect("the drawing")
+    doc.element(hb::DRAWING)
+        .and_then(|e| e.drawing_data())
+        .expect("the drawing")
 }
 
 /// View `id` projected from the drawing's snapshot (what it shows).
@@ -42,7 +44,8 @@ fn shown(doc: &Document, id: ViewId) -> (View, Arc<ViewGeometry>) {
     let d = drawing(doc);
     let (_, v) = d.view(id).unwrap();
     let st = StudioState::parse(&d.source(v.reference.element).unwrap().snapshot).unwrap();
-    let g = cadrs_core::views::project(&st.features, ds::view_request(&st, v)).expect("the view projects");
+    let g = cadrs_core::views::project(&st.features, ds::view_request(&st, v))
+        .expect("the view projects");
     (v.clone(), g)
 }
 
@@ -62,7 +65,12 @@ fn texts(doc: &Document, id: ViewId) -> Vec<(AnnotationId, String, bool)> {
                     let info = hole_of(&*g, &hc.edge).or(hc.last.as_ref()).unwrap();
                     hole_text(&d.style, info, &hc.prefix).plain()
                 }
-                _ => gr.texts.iter().map(|t| t.text.clone()).collect::<Vec<_>>().join(" "),
+                _ => gr
+                    .texts
+                    .iter()
+                    .map(|t| t.text.clone())
+                    .collect::<Vec<_>>()
+                    .join(" "),
             };
             (a.id, text, dangling)
         })
@@ -70,7 +78,10 @@ fn texts(doc: &Document, id: ViewId) -> Vec<(AnnotationId, String, bool)> {
 }
 
 fn text_of(t: &[(AnnotationId, String, bool)], id: AnnotationId) -> (String, bool) {
-    t.iter().find(|x| x.0 == id).map(|x| (x.1.clone(), x.2)).unwrap_or_else(|| panic!("no annotation {id:?}"))
+    t.iter()
+        .find(|x| x.0 == id)
+        .map(|x| (x.1.clone(), x.2))
+        .unwrap_or_else(|| panic!("no annotation {id:?}"))
 }
 
 fn two(v: f64) -> String {
@@ -83,7 +94,13 @@ fn the_handle_builds() {
     let el = doc.element(hb::STUDIO).unwrap();
     let sk = el.feature(hb::MAIN_SKETCH).unwrap().sketch().unwrap();
     let a = cadrs_sketch::solve::analyze(&sk.geometry);
-    assert!(a.fully_constrained(), "Main Sketch dof {} conflicts {:?} {:?}", a.dof, a.conflicting, a.conflicting_dimensions);
+    assert!(
+        a.fully_constrained(),
+        "Main Sketch dof {} conflicts {:?} {:?}",
+        a.dof,
+        a.conflicting,
+        a.conflicting_dimensions
+    );
     let b = rebuild::build(el.features());
     assert!(b.errors.is_empty(), "rebuild errors: {:?}", b.errors);
     assert_eq!(b.parts.len(), 2);
@@ -98,29 +115,47 @@ fn the_handle_builds() {
     // 8 thick (−Y), from the origin to the R16 arc round the end hole.
     // The end hole's centre before the edits: 225 + 46 across, 20 + 3 + 50 down.
     let c2 = (225.0 + 46.0, -(20.0 + 3.0 + 50.0));
-    assert!((lo[1] + 8.0).abs() < 1e-6 && hi[1].abs() < 1e-6, "{lo:?} {hi:?}");
-    assert!((hi[0] - (c2.0 + 16.0)).abs() < 0.05 && (lo[2] - (c2.1 - 16.0)).abs() < 0.05, "{lo:?} {hi:?}");
+    assert!(
+        (lo[1] + 8.0).abs() < 1e-6 && hi[1].abs() < 1e-6,
+        "{lo:?} {hi:?}"
+    );
+    assert!(
+        (hi[0] - (c2.0 + 16.0)).abs() < 0.05 && (lo[2] - (c2.1 - 16.0)).abs() < 0.05,
+        "{lo:?} {hi:?}"
+    );
 }
 
 #[test]
 fn the_fixture_is_current() {
     // Regenerate with `CADRS_WRITE_FIXTURES=1 cargo test -p cadrs_core --test hand_brake`.
     let doc = hb::document().unwrap();
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/hand_brake_standin.cadrs");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/hand_brake_standin.cadrs");
     let file = cadrs_core::samples::gear_cover::file(doc.clone());
     let text = ron::ser::to_string_pretty(&file, ron::ser::PrettyConfig::default()).unwrap();
     if std::env::var("CADRS_WRITE_FIXTURES").is_ok() {
         std::fs::write(&path, &text).unwrap();
     }
     let stored = cadrs_core::Store::load_path(&path).expect("the fixture loads");
-    assert_eq!(stored.document, doc, "fixtures/hand_brake_standin.cadrs is out of date");
+    assert_eq!(
+        stored.document, doc,
+        "fixtures/hand_brake_standin.cadrs is out of date"
+    );
 }
 
 /// The Handle sheet's views and the Grip sheet's.
 const HANDLE_VIEWS: [ViewId; 3] = [hd::HANDLE_FRONT, hd::HANDLE_TOP, hd::HANDLE_ISO];
 const GRIP_VIEWS: [ViewId; 3] = [hd::GRIP_FRONT, hd::GRIP_TOP, hd::GRIP_ISO];
 /// Every view: the two sheets' and the Assembly sheet's (P3C.5).
-const ALL_VIEWS: [ViewId; 7] = [hd::HANDLE_FRONT, hd::HANDLE_TOP, hd::HANDLE_ISO, hd::GRIP_FRONT, hd::GRIP_TOP, hd::GRIP_ISO, hd::ASSEMBLY_ISO];
+const ALL_VIEWS: [ViewId; 7] = [
+    hd::HANDLE_FRONT,
+    hd::HANDLE_TOP,
+    hd::HANDLE_ISO,
+    hd::GRIP_FRONT,
+    hd::GRIP_TOP,
+    hd::GRIP_ISO,
+    hd::ASSEMBLY_ISO,
+];
 
 fn sorted(mut v: Vec<ViewId>) -> Vec<ViewId> {
     v.sort();
@@ -132,28 +167,55 @@ fn sorted(mut v: Vec<ViewId>) -> Vec<ViewId> {
 fn the_dependency_tracker_marks_exactly_the_affected_views() {
     let mut doc = hb::document().unwrap();
     let mut h = History::default();
-    assert!(ds::out_of_date(&doc, drawing(&doc)).is_empty(), "the finished drawing is up to date");
+    assert!(
+        ds::out_of_date(&doc, drawing(&doc)).is_empty(),
+        "the finished drawing is up to date"
+    );
     // A change in another Part Studio: nothing is out of date.
     let other = cadrs_core::Element::part_studio("Enclosures");
     let other_id = other.id;
     doc.elements.push(other);
-    cadrs_core::samples::drawing_bracket::build_in(&mut DocHistory(&mut doc, &mut h), other_id).unwrap();
-    assert!(ds::out_of_date(&doc, drawing(&doc)).is_empty(), "an unreferenced studio doesn't matter");
+    cadrs_core::samples::drawing_bracket::build_in(&mut DocHistory(&mut doc, &mut h), other_id)
+        .unwrap();
+    assert!(
+        ds::out_of_date(&doc, drawing(&doc)).is_empty(),
+        "an unreferenced studio doesn't matter"
+    );
     // Hole 1 changes only the grip: the Grip sheet's views, not the plate's.
     let mut spec_doc = doc.clone();
-    let mut hole = spec_doc.element(hb::STUDIO).unwrap().feature(hb::HOLE_1).unwrap().hole().unwrap().clone();
+    let mut hole = spec_doc
+        .element(hb::STUDIO)
+        .unwrap()
+        .feature(hb::HOLE_1)
+        .unwrap()
+        .hole()
+        .unwrap()
+        .clone();
     hole.spec.size = "M6".into();
     hole.spec.apply_table();
     h.execute(
         &mut spec_doc,
-        &cadrs_core::commands::SetFeature { element: hb::STUDIO, feature: hb::HOLE_1, kind: cadrs_core::FeatureKind::Hole(hole), label: "Size".into() },
+        &cadrs_core::commands::SetFeature {
+            element: hb::STUDIO,
+            feature: hb::HOLE_1,
+            kind: cadrs_core::FeatureKind::Hole(hole),
+            label: "Size".into(),
+        },
     )
     .unwrap();
     // P3C.5: the assembly shows the grip too.
-    assert_eq!(sorted(ds::out_of_date(&spec_doc, drawing(&spec_doc))), sorted([GRIP_VIEWS.to_vec(), vec![hd::ASSEMBLY_ISO]].concat()));
+    assert_eq!(
+        sorted(ds::out_of_date(&spec_doc, drawing(&spec_doc))),
+        sorted([GRIP_VIEWS.to_vec(), vec![hd::ASSEMBLY_ISO]].concat())
+    );
     // The Main Sketch changes only the plate: the Handle sheet's views.
     let el = spec_doc.element(hb::STUDIO).unwrap();
-    let g = &el.feature(hb::MAIN_SKETCH).unwrap().sketch().unwrap().geometry;
+    let g = &el
+        .feature(hb::MAIN_SKETCH)
+        .unwrap()
+        .sketch()
+        .unwrap()
+        .geometry;
     let (id, _) = g.dimensions.iter().find(|(_, d)| d.value == 225.0).unwrap();
     h.execute(
         &mut doc,
@@ -164,18 +226,32 @@ fn the_dependency_tracker_marks_exactly_the_affected_views() {
         },
     )
     .unwrap();
-    assert_eq!(sorted(ds::out_of_date(&doc, drawing(&doc))), sorted([HANDLE_VIEWS.to_vec(), vec![hd::ASSEMBLY_ISO]].concat()));
+    assert_eq!(
+        sorted(ds::out_of_date(&doc, drawing(&doc))),
+        sorted([HANDLE_VIEWS.to_vec(), vec![hd::ASSEMBLY_ISO]].concat())
+    );
 }
 
 #[test]
 #[ignore = "slow (over 5 s): run with cargo test -r -- --ignored"]
 fn before_update_the_views_show_the_old_model() {
     let mut doc = hb::document().unwrap();
-    let before: Vec<Arc<ViewGeometry>> = [HANDLE_VIEWS, GRIP_VIEWS].concat().iter().map(|id| shown(&doc, *id).1).collect();
+    let before: Vec<Arc<ViewGeometry>> = [HANDLE_VIEWS, GRIP_VIEWS]
+        .concat()
+        .iter()
+        .map(|id| shown(&doc, *id).1)
+        .collect();
     let mut h = History::default();
     hb::course_edits(&mut DocHistory(&mut doc, &mut h), hb::STUDIO).unwrap();
-    assert_eq!(sorted(ds::out_of_date(&doc, drawing(&doc))), sorted(ALL_VIEWS.to_vec()));
-    let after: Vec<Arc<ViewGeometry>> = [HANDLE_VIEWS, GRIP_VIEWS].concat().iter().map(|id| shown(&doc, *id).1).collect();
+    assert_eq!(
+        sorted(ds::out_of_date(&doc, drawing(&doc))),
+        sorted(ALL_VIEWS.to_vec())
+    );
+    let after: Vec<Arc<ViewGeometry>> = [HANDLE_VIEWS, GRIP_VIEWS]
+        .concat()
+        .iter()
+        .map(|id| shown(&doc, *id).1)
+        .collect();
     for (b, a) in before.iter().zip(&after) {
         assert_eq!(b.projection, a.projection, "a view changed before Update");
     }
@@ -196,14 +272,27 @@ fn ex3_values_after_update() {
     assert_eq!(text_of(&t, hd::DIM_HEIGHT).0, two(20.0 + 3.0 + 50.0));
     assert_eq!(text_of(&t, hd::DIM_SMALL).0, "2x Ø8.25");
     let t = texts(&doc, hd::GRIP_FRONT);
-    assert_eq!(text_of(&t, hd::CALLOUT_GRIP).0, "3x Ø5.50 THRU ⌴Ø9.75 ↧5.00");
+    assert_eq!(
+        text_of(&t, hd::CALLOUT_GRIP).0,
+        "3x Ø5.50 THRU ⌴Ø9.75 ↧5.00"
+    );
     assert_eq!(text_of(&t, hd::DIM_GRIP_LENGTH).0, two(160.0 + 10.0));
 
     hb::course_edits(&mut DocHistory(&mut doc, &mut h), hb::STUDIO).unwrap();
     let op = ds::update_now(&doc, drawing(&doc)).expect("views are out of date");
     assert_eq!(op.label(), "Update from this workspace");
-    h.execute(&mut doc, &EditDrawing { element: hb::DRAWING, op }).unwrap();
-    assert!(ds::out_of_date(&doc, drawing(&doc)).is_empty(), "one update brings every view up to date");
+    h.execute(
+        &mut doc,
+        &EditDrawing {
+            element: hb::DRAWING,
+            op,
+        },
+    )
+    .unwrap();
+    assert!(
+        ds::out_of_date(&doc, drawing(&doc)).is_empty(),
+        "one update brings every view up to date"
+    );
 
     // D14.9: the Handle sheet.
     let t = texts(&doc, hd::HANDLE_FRONT);
@@ -230,22 +319,53 @@ fn ex3_values_after_update() {
     {
         let (v, g) = shown(&doc, hd::HANDLE_FRONT);
         let find = |id| v.annotations.iter().find(|a| a.id == id).unwrap();
-        let AnnotationKind::Dimension(d) = &find(hd::DIM_75).kind else { unreachable!() };
-        let DimKind::Distance { a: Pick::Point(pa), b: Pick::Point(pb), .. } = &d.kind else { unreachable!() };
-        let live = cadrs_drawing::annotation::resolve_point(&v, &*g, pb).unwrap().0;
-        let dead = cadrs_drawing::annotation::resolve_point(&v, &*g, pa).unwrap().0;
+        let AnnotationKind::Dimension(d) = &find(hd::DIM_75).kind else {
+            unreachable!()
+        };
+        let DimKind::Distance {
+            a: Pick::Point(pa),
+            b: Pick::Point(pb),
+            ..
+        } = &d.kind
+        else {
+            unreachable!()
+        };
+        let live = cadrs_drawing::annotation::resolve_point(&v, &*g, pb)
+            .unwrap()
+            .0;
+        let dead = cadrs_drawing::annotation::resolve_point(&v, &*g, pa)
+            .unwrap()
+            .0;
         assert!((live[0] - 296.0).abs() < 1e-6, "{live:?}");
-        assert!((dead[0] - 196.0).abs() < 1e-6 && (dead[1] + 23.0).abs() < 1e-6, "{dead:?}");
-        let AnnotationKind::Centermark(cm) = &find(hd::CENTERMARK_SMALL).kind else { unreachable!() };
+        assert!(
+            (dead[0] - 196.0).abs() < 1e-6 && (dead[1] + 23.0).abs() < 1e-6,
+            "{dead:?}"
+        );
+        let AnnotationKind::Centermark(cm) = &find(hd::CENTERMARK_SMALL).kind else {
+            unreachable!()
+        };
         assert_eq!(resolve(&v, &*g, cm).shape.circle().unwrap().0, dead);
-        let AnnotationKind::Dimension(sd) = &find(hd::DIM_SMALL).kind else { unreachable!() };
-        let DimKind::Diameter(se) = &sd.kind else { unreachable!() };
+        let AnnotationKind::Dimension(sd) = &find(hd::DIM_SMALL).kind else {
+            unreachable!()
+        };
+        let DimKind::Diameter(se) = &sd.kind else {
+            unreachable!()
+        };
         assert_eq!(resolve(&v, &*g, se).shape.circle().unwrap().0, dead);
         let (tv, tg) = shown(&doc, hd::HANDLE_TOP);
-        let cl = tv.annotations.iter().find(|a| a.id == hd::CENTERLINE_SMALL).unwrap();
-        let AnnotationKind::Centerline(c) = &cl.kind else { unreachable!() };
+        let cl = tv
+            .annotations
+            .iter()
+            .find(|a| a.id == hd::CENTERLINE_SMALL)
+            .unwrap();
+        let AnnotationKind::Centerline(c) = &cl.kind else {
+            unreachable!()
+        };
         let (e0, e1) = cadrs_drawing::annotation::centerline_ends(&tv, &*tg, c).unwrap();
-        assert!((e0[0] - 196.0).abs() < 1e-6 && (e1[0] - 196.0).abs() < 1e-6, "{e0:?} {e1:?}");
+        assert!(
+            (e0[0] - 196.0).abs() < 1e-6 && (e1[0] - 196.0).abs() < 1e-6,
+            "{e0:?} {e1:?}"
+        );
     }
     assert!(text_of(&t, hd::CENTERMARK_SMALL).1);
     for id in hd::CENTERMARKS {
@@ -253,7 +373,10 @@ fn ex3_values_after_update() {
     }
     let t = texts(&doc, hd::HANDLE_TOP);
     assert_eq!(text_of(&t, hd::DIM_THICKNESS), (two(8.0), false));
-    assert!(text_of(&t, hd::CENTERLINE_SMALL).1, "the small circle's centerline dangles");
+    assert!(
+        text_of(&t, hd::CENTERLINE_SMALL).1,
+        "the small circle's centerline dangles"
+    );
     assert!(!text_of(&t, hd::CENTERLINE_LARGE).1);
 
     // D14.10: the 75.00's end grip dragged onto the large hole's centre: 46.00, black.
@@ -267,23 +390,49 @@ fn ex3_values_after_update() {
         .map(cadrs_drawing::annotation::EdgeRef::of)
         .find(|r| matches!(resolve(&v, &*g, r).shape, Shape::Circle { center, radius, arc: None } if (radius - 12.7).abs() < 1e-6 && (center[0] - c1x).abs() < 1e-6))
         .expect("the large hole");
-    let mut a = v.annotations.iter().find(|a| a.id == hd::DIM_75).unwrap().clone();
+    let mut a = v
+        .annotations
+        .iter()
+        .find(|a| a.id == hd::DIM_75)
+        .unwrap()
+        .clone();
     if let AnnotationKind::Dimension(d) = &mut a.kind
         && let DimKind::Distance { a: end, .. } = &mut d.kind
     {
-        *end = Pick::Point(PointRef { edge: large, of: PointOf::Center, hint: [0.0, 0.0] });
+        *end = Pick::Point(PointRef {
+            edge: large,
+            of: PointOf::Center,
+            hint: [0.0, 0.0],
+        });
     }
     h.execute(
         &mut doc,
-        &EditDrawing { element: hb::DRAWING, op: DrawingOp::SetAnnotation { view: hd::HANDLE_FRONT, annotation: a, label: "Re-attach dimension".into() } },
+        &EditDrawing {
+            element: hb::DRAWING,
+            op: DrawingOp::SetAnnotation {
+                view: hd::HANDLE_FRONT,
+                annotation: a,
+                label: "Re-attach dimension".into(),
+            },
+        },
     )
     .unwrap();
     // 46.00 is the sketch's horizontal distance from the large hole to the end hole.
-    assert_eq!(text_of(&texts(&doc, hd::HANDLE_FRONT), hd::DIM_75), (two(46.0), false));
+    assert_eq!(
+        text_of(&texts(&doc, hd::HANDLE_FRONT), hd::DIM_75),
+        (two(46.0), false)
+    );
     h.undo(&mut doc);
-    assert_eq!(text_of(&texts(&doc, hd::HANDLE_FRONT), hd::DIM_75), ("75.00".into(), true), "undo: dangling again");
+    assert_eq!(
+        text_of(&texts(&doc, hd::HANDLE_FRONT), hd::DIM_75),
+        ("75.00".into(), true),
+        "undo: dangling again"
+    );
     h.redo(&mut doc);
-    assert_eq!(text_of(&texts(&doc, hd::HANDLE_FRONT), hd::DIM_75), (two(46.0), false));
+    assert_eq!(
+        text_of(&texts(&doc, hd::HANDLE_FRONT), hd::DIM_75),
+        (two(46.0), false)
+    );
     // Delete the dangling ones: no red remains.
     h.execute(
         &mut doc,
@@ -299,13 +448,24 @@ fn ex3_values_after_update() {
         },
     )
     .unwrap();
-    for id in [hd::HANDLE_FRONT, hd::HANDLE_TOP, hd::GRIP_FRONT, hd::GRIP_TOP] {
-        assert!(texts(&doc, id).iter().all(|x| !x.2), "red remains in {id:?}");
+    for id in [
+        hd::HANDLE_FRONT,
+        hd::HANDLE_TOP,
+        hd::GRIP_FRONT,
+        hd::GRIP_TOP,
+    ] {
+        assert!(
+            texts(&doc, id).iter().all(|x| !x.2),
+            "red remains in {id:?}"
+        );
     }
 
     // D14.11: the Grip sheet.
     let t = texts(&doc, hd::GRIP_FRONT);
-    assert_eq!(text_of(&t, hd::DIM_GRIP_D), (format!("Ø{}", two(25.0)), false));
+    assert_eq!(
+        text_of(&t, hd::DIM_GRIP_D),
+        (format!("Ø{}", two(25.0)), false)
+    );
     // 185.00 = the second end (175) + the first (10).
     assert_eq!(text_of(&t, hd::DIM_GRIP_LENGTH), (two(175.0 + 10.0), false));
     assert_eq!(text_of(&t, hd::DIM_GRIP_35), (two(25.0 + 10.0), false));
@@ -315,14 +475,23 @@ fn ex3_values_after_update() {
     assert_eq!(text_of(&t, hd::CALLOUT_GRIP), (callout, false));
     let t = texts(&doc, hd::GRIP_TOP);
     assert_eq!(text_of(&t, hd::DIM_SLOT), (two(8.0), false));
-    assert_eq!(text_of(&t, hd::DIM_SLOT_WALL), (two((25.0 - 8.0) / 2.0), false));
+    assert_eq!(
+        text_of(&t, hd::DIM_SLOT_WALL),
+        (two((25.0 - 8.0) / 2.0), false)
+    );
 
     // Undoing the deletions, the re-attach and the update puts the old drawing back: out of date.
     for _ in 0..3 {
         h.undo(&mut doc);
     }
-    assert_eq!(sorted(ds::out_of_date(&doc, drawing(&doc))), sorted(ALL_VIEWS.to_vec()));
-    assert_eq!(text_of(&texts(&doc, hd::HANDLE_FRONT), hd::DIM_LENGTH).0, "225.00");
+    assert_eq!(
+        sorted(ds::out_of_date(&doc, drawing(&doc))),
+        sorted(ALL_VIEWS.to_vec())
+    );
+    assert_eq!(
+        text_of(&texts(&doc, hd::HANDLE_FRONT), hd::DIM_LENGTH).0,
+        "225.00"
+    );
 }
 
 /// P3C.5, D14.7, D14.8: the Assembly sheet's BOM is the course's 10 rows; editing the three
@@ -337,15 +506,26 @@ fn d14_7_m6_cap_screws_update_the_assembly_sheet() {
     use cadrs_drawing::assembly::{SheetModel, callout_dangles, callout_texts};
     let mut doc = hb::document().unwrap();
     // The course's 12 mates (P3C wrap-up): Fastened, each met where the parts are.
-    let asm = doc.element(ha::ASSEMBLY).and_then(|e| e.assembly_model()).unwrap();
+    let asm = doc
+        .element(ha::ASSEMBLY)
+        .and_then(|e| e.assembly_model())
+        .unwrap();
     assert_eq!(asm.mates.len(), 12);
     assert!(asm.mates.iter().all(|m| matches!(&m.kind, cadrs_core::assembly::mate::MateKind::Mate(m) if m.mate_type == cadrs_core::assembly::mate::MateType::Fastened)));
     let d = drawing(&doc);
     let sheet = d.sheet(hd::ASSEMBLY_SHEET).unwrap();
     let bom = sheet.tables[0].bom.as_ref().unwrap();
     assert_eq!(bom.columns, ["Item No.", "Name", "Quantity"]);
-    let rows: Vec<(String, String, u32)> = bom.rows.iter().map(|r| (r.item.clone(), r.cells[1].clone(), r.quantity)).collect();
-    let want: Vec<(String, String, u32)> = ha::COURSE_BOM.iter().enumerate().map(|(i, (n, q))| ((i + 1).to_string(), n.to_string(), *q)).collect();
+    let rows: Vec<(String, String, u32)> = bom
+        .rows
+        .iter()
+        .map(|r| (r.item.clone(), r.cells[1].clone(), r.quantity))
+        .collect();
+    let want: Vec<(String, String, u32)> = ha::COURSE_BOM
+        .iter()
+        .enumerate()
+        .map(|(i, (n, q))| ((i + 1).to_string(), n.to_string(), *q))
+        .collect();
     assert_eq!(rows, want);
     // Ten balloons, one per item, each reading its item number.
     let (_, v) = d.view(hd::ASSEMBLY_ISO).unwrap();
@@ -362,15 +542,27 @@ fn d14_7_m6_cap_screws_update_the_assembly_sheet() {
     assert_eq!(items, (1..=10).map(|i| i.to_string()).collect::<Vec<_>>());
     let screw_owner = |doc: &Document| {
         let d = drawing(doc);
-        let row = &d.sheet(hd::ASSEMBLY_SHEET).unwrap().tables[0].bom.as_ref().unwrap().rows[7];
+        let row = &d.sheet(hd::ASSEMBLY_SHEET).unwrap().tables[0]
+            .bom
+            .as_ref()
+            .unwrap()
+            .rows[7];
         let owner = da::owner_of(&row.owner).unwrap();
-        doc.standard_part(owner.element()).unwrap().spec.size.clone()
+        doc.standard_part(owner.element())
+            .unwrap()
+            .spec
+            .size
+            .clone()
     };
     assert_eq!(screw_owner(&doc), ha::SCREW_BEFORE);
     let head = |doc: &Document| {
         let d = drawing(doc);
         let st = da::AssemblyState::parse(&d.source(ha::ASSEMBLY.0).unwrap().snapshot).unwrap();
-        let o = st.occurrences.iter().find(|o| o.id == ha::CAP_SCREWS[0]).unwrap();
+        let o = st
+            .occurrences
+            .iter()
+            .find(|o| o.id == ha::CAP_SCREWS[0])
+            .unwrap();
         let spec = &doc.standard_part(o.element).unwrap().spec;
         spec.size_row().unwrap().head.unwrap()
     };
@@ -378,22 +570,54 @@ fn d14_7_m6_cap_screws_update_the_assembly_sheet() {
     // D14.7.
     let mut h = History::default();
     ha::course_d14_7(&mut DocHistory(&mut doc, &mut h)).unwrap();
-    assert_eq!(ds::out_of_date(&doc, drawing(&doc)), vec![hd::ASSEMBLY_ISO], "only the assembly view");
+    assert_eq!(
+        ds::out_of_date(&doc, drawing(&doc)),
+        vec![hd::ASSEMBLY_ISO],
+        "only the assembly view"
+    );
     assert_eq!(ds::bom_updates(&doc, drawing(&doc)).len(), 1, "and its BOM");
-    assert_eq!(screw_owner(&doc), ha::SCREW_BEFORE, "nothing changes before Update");
+    assert_eq!(
+        screw_owner(&doc),
+        ha::SCREW_BEFORE,
+        "nothing changes before Update"
+    );
     // D14.8.
     let op = ds::update_now(&doc, drawing(&doc)).unwrap();
     assert_eq!(op.label(), "Update from this workspace");
-    h.execute(&mut doc, &EditDrawing { element: hb::DRAWING, op }).unwrap();
+    h.execute(
+        &mut doc,
+        &EditDrawing {
+            element: hb::DRAWING,
+            op,
+        },
+    )
+    .unwrap();
     assert!(ds::out_of_date(&doc, drawing(&doc)).is_empty());
     assert!(ds::bom_updates(&doc, drawing(&doc)).is_empty());
-    assert_eq!(screw_owner(&doc), ha::SCREW_AFTER, "row 8 is the M6 cap screw");
+    assert_eq!(
+        screw_owner(&doc),
+        ha::SCREW_AFTER,
+        "row 8 is the M6 cap screw"
+    );
     let d = drawing(&doc);
-    let row = &d.sheet(hd::ASSEMBLY_SHEET).unwrap().tables[0].bom.as_ref().unwrap().rows[7];
+    let row = &d.sheet(hd::ASSEMBLY_SHEET).unwrap().tables[0]
+        .bom
+        .as_ref()
+        .unwrap()
+        .rows[7];
     let owner = da::owner_of(&row.owner).unwrap();
-    let desc = cadrs_core::properties::text(&doc, owner, cadrs_core::properties::PropertyKey::Description, None);
+    let desc = cadrs_core::properties::text(
+        &doc,
+        owner,
+        cadrs_core::properties::PropertyKey::Description,
+        None,
+    );
     assert!(desc.contains("M6 x 16"), "{desc}");
-    assert_eq!((row.cells[1].as_str(), row.quantity), ("Hex socket head cap screw ISO 4762", 3), "the course's row");
+    assert_eq!(
+        (row.cells[1].as_str(), row.quantity),
+        ("Hex socket head cap screw ISO 4762", 3),
+        "the course's row"
+    );
     assert_eq!(head(&doc), 10.0, "ISO 4762 M6: dk 10");
     let (_, v) = d.view(hd::ASSEMBLY_ISO).unwrap();
     let m = SheetModel::new(d, d.sheet(hd::ASSEMBLY_SHEET).unwrap(), v, &geo);
@@ -421,21 +645,34 @@ fn assembly_view_hides_edges_inside_overlapping_parts() {
     hb::course_edits(&mut DocHistory(&mut doc, &mut h), hb::STUDIO).unwrap();
     ha::course_d14_7(&mut DocHistory(&mut doc, &mut h)).unwrap();
     let op = ds::update_now(&doc, drawing(&doc)).unwrap();
-    h.execute(&mut doc, &EditDrawing { element: hb::DRAWING, op }).unwrap();
+    h.execute(
+        &mut doc,
+        &EditDrawing {
+            element: hb::DRAWING,
+            op,
+        },
+    )
+    .unwrap();
     let d = drawing(&doc);
     let (_, v) = d.view(hd::ASSEMBLY_ISO).unwrap();
     let st = da::AssemblyState::parse(&d.source(ha::ASSEMBLY.0).unwrap().snapshot).unwrap();
     let g = da::project(&st, v).unwrap();
-    let mut by: std::collections::BTreeMap<(usize, u64), Vec<(ProjVisibility, f64)>> = Default::default();
+    let mut by: std::collections::BTreeMap<(usize, u64), Vec<(ProjVisibility, f64)>> =
+        Default::default();
     for e in &g.projection.edges {
         if let Some(s) = &e.source
             && let Some(id) = s.edge
         {
-            by.entry((s.body, id.0)).or_default().push((e.visibility, e.length()));
+            by.entry((s.body, id.0))
+                .or_default()
+                .push((e.visibility, e.length()));
         }
     }
     for (k, pieces) in &by {
-        let vis = pieces.iter().filter(|p| p.0 == ProjVisibility::Visible).count();
+        let vis = pieces
+            .iter()
+            .filter(|p| p.0 == ProjVisibility::Visible)
+            .count();
         assert!(vis <= 3, "edge {k:?} in {vis} visible pieces: {pieces:?}");
     }
     // X6, Show part intersections: the curves where the grown Handle Plate enters the enclosure
@@ -444,7 +681,11 @@ fn assembly_view_hides_edges_inside_overlapping_parts() {
         g.projection
             .edges
             .iter()
-            .filter(|e| e.source.is_none() && e.class == cadrs_kernel::ProjClass::Sharp && e.visibility == ProjVisibility::Visible)
+            .filter(|e| {
+                e.source.is_none()
+                    && e.class == cadrs_kernel::ProjClass::Sharp
+                    && e.visibility == ProjVisibility::Visible
+            })
             .map(|e| e.length())
             .sum::<f64>()
     };
@@ -453,5 +694,17 @@ fn assembly_view_hides_edges_inside_overlapping_parts() {
     shown.part_intersections = true;
     let gi = da::project(&st, &shown).unwrap();
     assert!(crossings(&gi) > 10.0, "{}", crossings(&gi));
-    assert_eq!(gi.projection.edges.len() - g.projection.edges.len(), gi.projection.edges.iter().filter(|e| e.source.is_none() && e.class == cadrs_kernel::ProjClass::Sharp).count() - g.projection.edges.iter().filter(|e| e.source.is_none() && e.class == cadrs_kernel::ProjClass::Sharp).count());
+    assert_eq!(
+        gi.projection.edges.len() - g.projection.edges.len(),
+        gi.projection
+            .edges
+            .iter()
+            .filter(|e| e.source.is_none() && e.class == cadrs_kernel::ProjClass::Sharp)
+            .count()
+            - g.projection
+                .edges
+                .iter()
+                .filter(|e| e.source.is_none() && e.class == cadrs_kernel::ProjClass::Sharp)
+                .count()
+    );
 }

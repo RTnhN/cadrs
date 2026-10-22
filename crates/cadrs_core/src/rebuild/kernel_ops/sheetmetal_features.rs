@@ -14,13 +14,19 @@
 use super::sheetmetal::refold::active_context;
 use super::sheetmetal::{face_index, key_of, p3, v3};
 use super::*;
-use cadrs_sheetmetal::model::{P3, V3};
-use cadrs_sheetmetal::sharp_edit::{self, EdgeFrame, EdgePick, FlangeEdge, FlangeOpts, HemEdge, HemKind, HemOpts, JointSpec, PickSide};
 use cadrs_sheetmetal::Model;
+use cadrs_sheetmetal::model::{P3, V3};
+use cadrs_sheetmetal::sharp_edit::{
+    self, EdgeFrame, EdgePick, FlangeEdge, FlangeOpts, HemEdge, HemKind, HemOpts, JointSpec,
+    PickSide,
+};
 
 use crate::applied::EdgeOrFace;
 use crate::document::DirectionRef;
-use crate::sheetmetal_features::{AngleControl, ChainType, Bound, FlangeEnd, FlangeFeature, HemFeature, MakeJointFeature, MakeJointType, SheetMetalFeature, SmTarget};
+use crate::sheetmetal_features::{
+    AngleControl, Bound, ChainType, FlangeEnd, FlangeFeature, HemFeature, MakeJointFeature,
+    MakeJointType, SheetMetalFeature, SmTarget,
+};
 
 /// A picked edge or side face: its part, its points and a stable key.
 struct Picked {
@@ -34,20 +40,37 @@ fn picked(state: &State, e: &EdgeOrFace) -> Option<Picked> {
         EdgeOrFace::Edge(r) => {
             let (part, _) = super::applied::edge_ids(state, r)?;
             let solid = &part.part.solid;
-            let (i, _) = solid.resolve_edge(&r.edge, |x| Some(x.distance(r.seed))).ok()?;
+            let (i, _) = solid
+                .resolve_edge(&r.edge, |x| Some(x.distance(r.seed)))
+                .ok()?;
             let ed = &solid.edges[i];
-            Some(Picked { part: part.part.id, pts: ed.points.iter().map(|p| p3(*p)).collect(), key: key_of(&ed.name) })
+            Some(Picked {
+                part: part.part.id,
+                pts: ed.points.iter().map(|p| p3(*p)).collect(),
+                key: key_of(&ed.name),
+            })
         }
         EdgeOrFace::Face(f) => {
             let (part, i) = face_index(state, f)?;
             let face = &part.part.solid.faces[i];
-            Some(Picked { part: part.part.id, pts: face.loops.iter().flatten().map(|p| p3(*p)).collect(), key: key_of(&face.name) })
+            Some(Picked {
+                part: part.part.id,
+                pts: face.loops.iter().flatten().map(|p| p3(*p)).collect(),
+                key: key_of(&face.name),
+            })
         }
     }
 }
 
 impl Rebuilder {
-    pub(in crate::rebuild) fn sheet_metal_feature(&mut self, before: &[Feature], id: FeatureId, name: &str, x: &SheetMetalFeature, state: &Arc<State>) -> Result<Output, String> {
+    pub(in crate::rebuild) fn sheet_metal_feature(
+        &mut self,
+        before: &[Feature],
+        id: FeatureId,
+        name: &str,
+        x: &SheetMetalFeature,
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
         if let Some(p) = x.problem() {
             return Err(p.into());
         }
@@ -68,7 +91,10 @@ impl Rebuilder {
             if !ctx.parts.iter().any(|(q, _)| *q == p.part) {
                 return Err("The selected edges are on different sheet metal models".into());
             }
-            eps.push(sharp_edit::locate(&model, &p.pts).ok_or("Select free edges or side faces of flat sheet metal walls")?);
+            eps.push(
+                sharp_edit::locate(&model, &p.pts)
+                    .ok_or("Select free edges or side faces of flat sheet metal walls")?,
+            );
         }
         enum Job {
             Flange(Vec<FlangeEdge>, FlangeOpts),
@@ -88,10 +114,21 @@ impl Rebuilder {
                 Job::Flange(edges, opts)
             }
             SheetMetalFeature::Hem(h) => {
-                let edges = picks.iter().zip(&eps).map(|(p, e)| HemEdge { pick: *e, key: p.key, toward: default_toward(e.side) != h.flip }).collect();
+                let edges = picks
+                    .iter()
+                    .zip(&eps)
+                    .map(|(p, e)| HemEdge {
+                        pick: *e,
+                        key: p.key,
+                        toward: default_toward(e.side) != h.flip,
+                    })
+                    .collect();
                 Job::Hem(edges, hem_opts(h, &model))
             }
-            SheetMetalFeature::MakeJoint(j) => Job::Joint(picks[0].key ^ picks[1].key.rotate_left(17), make_joint_spec(j)),
+            SheetMetalFeature::MakeJoint(j) => Job::Joint(
+                picks[0].key ^ picks[1].key.rotate_left(17),
+                make_joint_spec(j),
+            ),
         };
         self.edit_sheet_metal(id, name, state, ci, move |ctx| {
             let built = ctx.model.clone();
@@ -121,47 +158,82 @@ impl Rebuilder {
     }
 
     /// Each flange edge's angle, side, distance and partial stretch.
-    fn flange_edges(&self, before: &[Feature], state: &State, model: &Model, f: &FlangeFeature, picks: &[Picked], eps: &[EdgePick]) -> Result<Vec<FlangeEdge>, String> {
+    fn flange_edges(
+        &self,
+        before: &[Feature],
+        state: &State,
+        model: &Model,
+        f: &FlangeFeature,
+        picks: &[Picked],
+        eps: &[EdgePick],
+    ) -> Result<Vec<FlangeEdge>, String> {
         let t = model.params.thickness;
-        let r = if f.use_model_radius { model.params.bend_radius } else { f.radius };
+        let r = if f.use_model_radius {
+            model.params.bend_radius
+        } else {
+            f.radius
+        };
         let mut out = Vec::new();
         for (p, e) in picks.iter().zip(eps) {
             let fr = EdgeFrame::of(model, e).ok_or("The edge isn't on a flat wall")?;
             let (angle, toward) = match f.angle_control {
                 AngleControl::BendAngle => (f.angle.to_radians(), default_toward(e.side) != f.flip),
                 AngleControl::AlignToGeometry => {
-                    let d = f.parallel_to.as_ref().ok_or("Select what the flange is parallel to")?;
+                    let d = f
+                        .parallel_to
+                        .as_ref()
+                        .ok_or("Select what the flange is parallel to")?;
                     let g = v3(self.direction(before, state, d)?.into_inner().into());
                     // A line: along it; a plane: in it, across the edge.
-                    let g = if matches!(d, DirectionRef::Edge(_) | DirectionRef::SketchLine { .. }) { g } else { fr.e.cross(&g) };
+                    let g = if matches!(d, DirectionRef::Edge(_) | DirectionRef::SketchLine { .. })
+                    {
+                        g
+                    } else {
+                        fr.e.cross(&g)
+                    };
                     // Either way along it is parallel (θ to one side, 180° − θ to the other): the
                     // flange turns to the side of the face its edge was picked on, the arrow
                     // flips it (not the edge's or the line's own direction, which are arbitrary).
                     let side = default_toward(e.side) != f.flip;
                     let both = [fr.angle_of(g), fr.angle_of(-g)];
-                    both.iter().flatten().find(|(_, t)| *t == side).or(both.iter().flatten().next()).copied().ok_or("The flange can't be parallel to that")?
+                    both.iter()
+                        .flatten()
+                        .find(|(_, t)| *t == side)
+                        .or(both.iter().flatten().next())
+                        .copied()
+                        .ok_or("The flange can't be parallel to that")?
                 }
                 AngleControl::AngleFromDirection => {
                     let d = f.direction.as_ref().ok_or("Select a direction")?;
                     let g = v3(self.direction(before, state, d)?.into_inner().into());
                     let g = g - fr.e * g.dot(&fr.e);
-                    let g = g.try_normalize(1e-9).ok_or("The direction runs along the edge")?;
+                    let g = g
+                        .try_normalize(1e-9)
+                        .ok_or("The direction runs along the edge")?;
                     let a = f.direction_angle.to_radians() * if f.flip { -1.0 } else { 1.0 };
                     // The angle turns the direction away from the wall (towards the edge's outward
                     // direction), whichever way the edge itself runs.
                     let k = g.cross(&fr.out).try_normalize(1e-9).unwrap_or(fr.e);
                     let rot = g * a.cos() + k.cross(&g) * a.sin() + k * k.dot(&g) * (1.0 - a.cos());
-                    fr.angle_of(rot).ok_or("At that angle the flange lies flat")?
+                    fr.angle_of(rot)
+                        .ok_or("At that angle the flange lies flat")?
                 }
             };
             let distance = match f.end {
                 FlangeEnd::Blind => f.distance,
                 FlangeEnd::UpToEntity | FlangeEnd::UpToEntityOffset => {
-                    let target = f.up_to.as_ref().ok_or("Select what the flange goes up to")?;
+                    let target = f
+                        .up_to
+                        .as_ref()
+                        .ok_or("Select what the flange goes up to")?;
                     let s = fr.outer_sharp(f.alignment, angle, toward, r);
                     let dir = fr.flange_dir(angle, toward);
                     let d = self.distance_to(state, target, s, dir)?;
-                    d + if f.end == FlangeEnd::UpToEntityOffset { f.offset } else { 0.0 }
+                    d + if f.end == FlangeEnd::UpToEntityOffset {
+                        f.offset
+                    } else {
+                        0.0
+                    }
                 }
             };
             if !(distance > t * 1e-3) {
@@ -173,11 +245,16 @@ impl Rebuilder {
                     Ok(match b.kind {
                         FlangeEnd::Blind => b.distance,
                         _ => {
-                            let target = b.up_to.as_ref().ok_or("Select what the bound goes up to")?;
+                            let target =
+                                b.up_to.as_ref().ok_or("Select what the bound goes up to")?;
                             let pt = self.point_of(state, target)?;
                             let s = (pt - e.a).dot(&fr.e).clamp(0.0, len);
                             let s = if from_start { s } else { len - s };
-                            s + if b.kind == FlangeEnd::UpToEntityOffset { b.offset } else { 0.0 }
+                            s + if b.kind == FlangeEnd::UpToEntityOffset {
+                                b.offset
+                            } else {
+                                0.0
+                            }
                         }
                     })
                 };
@@ -187,11 +264,22 @@ impl Rebuilder {
                     Some(b) => at(b, !first_from_start)?,
                     None => 0.0,
                 };
-                Some(if first_from_start { (d_first, d_second) } else { (d_second, d_first) })
+                Some(if first_from_start {
+                    (d_first, d_second)
+                } else {
+                    (d_second, d_first)
+                })
             } else {
                 None
             };
-            out.push(FlangeEdge { pick: *e, key: p.key, angle, toward, distance, partial });
+            out.push(FlangeEdge {
+                pick: *e,
+                key: p.key,
+                angle,
+                toward,
+                distance,
+                partial,
+            });
         }
         Ok(out)
     }
@@ -204,12 +292,17 @@ impl Rebuilder {
             SmTarget::Face(f) => {
                 let (part, i) = face_index(state, f).ok_or_else(lost)?;
                 let face = &part.part.solid.faces[i];
-                p3(face.center.or_else(|| face.loops.first()?.first().copied()).ok_or_else(lost)?)
+                p3(face
+                    .center
+                    .or_else(|| face.loops.first()?.first().copied())
+                    .ok_or_else(lost)?)
             }
             SmTarget::Edge(r) => {
                 let (part, _) = super::applied::edge_ids(state, r).ok_or_else(lost)?;
                 let solid = &part.part.solid;
-                let (i, _) = solid.resolve_edge(&r.edge, |x| Some(x.distance(r.seed))).map_err(|_| lost())?;
+                let (i, _) = solid
+                    .resolve_edge(&r.edge, |x| Some(x.distance(r.seed)))
+                    .map_err(|_| lost())?;
                 let pts = &solid.edges[i].points;
                 let (a, b) = (p3(pts[0]), p3(*pts.last().ok_or_else(lost)?));
                 P3::from((a.coords + b.coords) / 2.0)
@@ -223,7 +316,9 @@ impl Rebuilder {
     fn distance_to(&self, state: &State, t: &SmTarget, s: P3, dir: V3) -> Result<f64, String> {
         let plane = match t {
             SmTarget::Plane(pl) => plane_of(state, pl),
-            SmTarget::Face(f) => face_index(state, f).and_then(|(part, i)| part.part.solid.faces[i].plane),
+            SmTarget::Face(f) => {
+                face_index(state, f).and_then(|(part, i)| part.part.solid.faces[i].plane)
+            }
             _ => None,
         };
         if let Some(pl) = plane {
@@ -246,12 +341,20 @@ fn default_toward(side: PickSide) -> bool {
 
 fn hem_opts(h: &HemFeature, model: &Model) -> HemOpts {
     let p = &model.params;
-    let radius = if h.kind == HemKind::Straight && h.flattened { p.minimal_gap / 2.0 } else { h.radius };
+    let radius = if h.kind == HemKind::Straight && h.flattened {
+        p.minimal_gap / 2.0
+    } else {
+        h.radius
+    };
     HemOpts {
         kind: h.kind,
         radius,
         angle: h.angle.to_radians(),
-        gap: if h.use_minimal_gap { p.minimal_gap } else { h.gap },
+        gap: if h.use_minimal_gap {
+            p.minimal_gap
+        } else {
+            h.gap
+        },
         total: h.total,
         alignment: h.alignment,
         closed: h.closed,

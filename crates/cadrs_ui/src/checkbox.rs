@@ -22,8 +22,12 @@ pub struct CheckboxPlugin;
 
 impl Plugin for CheckboxPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(on_click)
-            .add_systems(PostUpdate, (sync_disabled, sync_checkboxes).chain().before(bevy::ui::UiSystems::Prepare));
+        app.add_observer(on_click).add_systems(
+            PostUpdate,
+            (sync_disabled, sync_checkboxes)
+                .chain()
+                .before(bevy::ui::UiSystems::Prepare),
+        );
     }
 }
 
@@ -110,7 +114,10 @@ impl Checkbox {
         let disabled = self.disabled;
         (
             Name::new(self.name.into_owned()),
-            CheckboxState { checked, unavailable: false },
+            CheckboxState {
+                checked,
+                unavailable: false,
+            },
             CheckboxDrawnDisabled(disabled),
             Node {
                 height: Val::Px(self.height),
@@ -152,22 +159,42 @@ impl Checkbox {
                     Pickable::IGNORE,
                 ));
                 // A disabled option's label is greyed like a disabled tool (Onshape's greyed Draft).
-                let fg = if disabled { t.tool_disabled_foreground } else { t.tool_foreground };
-                p.spawn((CheckboxLabel(row), t.text(label, t.font_sm, FontWeight::MEDIUM, fg), Pickable::IGNORE));
+                let fg = if disabled {
+                    t.tool_disabled_foreground
+                } else {
+                    t.tool_foreground
+                };
+                p.spawn((
+                    CheckboxLabel(row),
+                    t.text(label, t.font_sm, FontWeight::MEDIUM, fg),
+                    Pickable::IGNORE,
+                ));
             })),
         )
     }
 }
 
-fn box_colors(t: &Theme, checked: bool, disabled: bool, unavailable: bool) -> (BackgroundColor, BorderColor) {
+fn box_colors(
+    t: &Theme,
+    checked: bool,
+    disabled: bool,
+    unavailable: bool,
+) -> (BackgroundColor, BorderColor) {
     if disabled && unavailable {
         let grey = Color::srgb_u8(0xa8, 0xa8, 0xa8);
         return (BackgroundColor(grey), BorderColor::all(grey));
     }
     if disabled {
         // A muted box: a light grey fill and a pale border (checked or not).
-        let fill = if checked { t.primary_disabled } else { t.input_disabled_background };
-        return (BackgroundColor(fill), BorderColor::all(t.disabled_foreground));
+        let fill = if checked {
+            t.primary_disabled
+        } else {
+            t.input_disabled_background
+        };
+        return (
+            BackgroundColor(fill),
+            BorderColor::all(t.disabled_foreground),
+        );
     }
     if checked {
         (
@@ -209,7 +236,12 @@ fn on_click(
 /// [`sync_checkboxes`], by touching its state) and its label.
 fn sync_disabled(
     theme: Res<Theme>,
-    mut q_rows: Query<(Entity, &mut CheckboxState, &mut CheckboxDrawnDisabled, Has<InteractionDisabled>)>,
+    mut q_rows: Query<(
+        Entity,
+        &mut CheckboxState,
+        &mut CheckboxDrawnDisabled,
+        Has<InteractionDisabled>,
+    )>,
     mut q_label: Query<(&CheckboxLabel, &mut TextColor)>,
 ) {
     let mut changed = Vec::new();
@@ -225,7 +257,11 @@ fn sync_disabled(
     }
     for (l, mut color) in &mut q_label {
         if let Some((_, disabled)) = changed.iter().find(|(e, _)| *e == l.0) {
-            color.0 = if *disabled { theme.tool_disabled_foreground } else { theme.tool_foreground };
+            color.0 = if *disabled {
+                theme.tool_disabled_foreground
+            } else {
+                theme.tool_foreground
+            };
         }
     }
 }

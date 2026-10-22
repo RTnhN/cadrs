@@ -121,7 +121,12 @@ impl SheetSize {
     pub fn long_label(self) -> String {
         let (s, l) = self.short_long_mm();
         match self.standard() {
-            Standard::Ansi => format!("{} ({} × {} in)", self.label(), fmt_in(s / 25.4), fmt_in(l / 25.4)),
+            Standard::Ansi => format!(
+                "{} ({} × {} in)",
+                self.label(),
+                fmt_in(s / 25.4),
+                fmt_in(l / 25.4)
+            ),
             Standard::Iso => format!("{} ({} × {} mm)", self.label(), s, l),
         }
     }
@@ -135,7 +140,12 @@ impl SheetSize {
             Orientation::Portrait => (s, l),
         };
         match self.standard() {
-            Standard::Ansi => format!("{} ({} × {} in)", self.label(), fmt_in(w / 25.4), fmt_in(h / 25.4)),
+            Standard::Ansi => format!(
+                "{} ({} × {} in)",
+                self.label(),
+                fmt_in(w / 25.4),
+                fmt_in(h / 25.4)
+            ),
             Standard::Iso => format!("{} ({} × {} mm)", self.label(), w, h),
         }
     }
@@ -480,8 +490,17 @@ mod tests {
 
     #[test]
     fn size_labels_follow_the_orientation() {
-        assert_eq!(SheetSize::AnsiA.oriented_label(Orientation::Landscape), "ANSI A (11 × 8.5 in)");
-        assert_eq!(SheetSize::AnsiA.oriented_label(Orientation::Portrait), "ANSI A (8.5 × 11 in)");
-        assert_eq!(SheetSize::IsoA3.oriented_label(Orientation::Landscape), "ISO A3 (420 × 297 mm)");
+        assert_eq!(
+            SheetSize::AnsiA.oriented_label(Orientation::Landscape),
+            "ANSI A (11 × 8.5 in)"
+        );
+        assert_eq!(
+            SheetSize::AnsiA.oriented_label(Orientation::Portrait),
+            "ANSI A (8.5 × 11 in)"
+        );
+        assert_eq!(
+            SheetSize::IsoA3.oriented_label(Orientation::Landscape),
+            "ISO A3 (420 × 297 mm)"
+        );
     }
 }

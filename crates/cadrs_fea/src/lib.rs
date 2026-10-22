@@ -20,5 +20,8 @@ pub mod solve;
 pub mod surface;
 
 pub use mesh::{BoundaryTri, MeshError, TetMesh};
-pub use solve::{Body, BodyResult, Bond, FeaError, Load, LoadKind, Material, Model, Options, Solution, Stage, Stats, solve};
+pub use solve::{
+    Body, BodyResult, Bond, FeaError, Load, LoadKind, Material, Model, Options, Solution, Stage,
+    Stats, solve,
+};
 pub use surface::Surface;

@@ -44,8 +44,12 @@ impl DrawList {
     /// The box around every line and area.
     pub fn drawn_bounds(&self) -> Option<Bounds> {
         let pts = self.lines.iter().flat_map(|l| l.pts.iter().copied());
-        let tris = self.areas.iter().flat_map(|a| a.tris.iter().map(|t| Pt::new(t[0] as Nm, t[1] as Nm)));
-        pts.chain(tris).fold(None, |acc, p| Some(Bounds::union(acc, Bounds::of(p))))
+        let tris = self
+            .areas
+            .iter()
+            .flat_map(|a| a.tris.iter().map(|t| Pt::new(t[0] as Nm, t[1] as Nm)));
+        pts.chain(tris)
+            .fold(None, |acc, p| Some(Bounds::union(acc, Bounds::of(p))))
     }
 
     fn line(&mut self, color: Rgba, width: Nm, pts: Vec<Pt>) {
@@ -77,9 +81,7 @@ impl DrawList {
 
     fn shape(&mut self, s: &Shape, stroke: Rgba, fill: Option<Rgba>, default_width: Nm, z: i32) {
         let (mut pts, closed) = poly::geom_points(&s.geom);
-        if closed
-            && let Some(f) = fill
-        {
+        if closed && let Some(f) = fill {
             let mut ring = pts.clone();
             if poly::ring_area(&ring) < 0.0 {
                 ring.reverse();
@@ -89,11 +91,14 @@ impl DrawList {
         if closed && !pts.is_empty() {
             pts.push(pts[0]);
         }
-        let w = if s.stroke.width > 0 { s.stroke.width } else { default_width };
+        let w = if s.stroke.width > 0 {
+            s.stroke.width
+        } else {
+            default_width
+        };
         self.line(stroke, w, pts);
     }
 }
-
 
 /// The colours of a made board, for [`board_surface`].
 pub mod made {
@@ -115,26 +120,74 @@ pub mod made {
 /// silkscreen on top; the holes. In board coordinates, whichever side.
 pub fn board_surface(b: &Board, side: Side) -> DrawList {
     let (cu, mask, paste, silk) = match side {
-        Side::Top => (Layer::TopCopper, Layer::TopMask, Layer::TopPaste, Layer::TopSilk),
-        Side::Bottom => (Layer::BottomCopper, Layer::BottomMask, Layer::BottomPaste, Layer::BottomSilk),
+        Side::Top => (
+            Layer::TopCopper,
+            Layer::TopMask,
+            Layer::TopPaste,
+            Layer::TopSilk,
+        ),
+        Side::Bottom => (
+            Layer::BottomCopper,
+            Layer::BottomMask,
+            Layer::BottomPaste,
+            Layer::BottomSilk,
+        ),
     };
     // The silkscreen and the holes, as the layout draws them, in the made colours.
-    let th = BoardTheme { background: made::MASK, board: made::MASK, top_silk: made::SILK, bottom_silk: made::SILK, via: made::MASK_OVER_COPPER, hole: made::HOLE, highlight: made::SILK, ..BoardTheme::default() };
-    let view = BoardView { visible: vec![silk], active: cu, selected: vec![], hovered: None, hot_corner: None, handle: mm(0.25), ratsnest: false, dim_inactive: false, highlight_net: None };
+    let th = BoardTheme {
+        background: made::MASK,
+        board: made::MASK,
+        top_silk: made::SILK,
+        bottom_silk: made::SILK,
+        via: made::MASK_OVER_COPPER,
+        hole: made::HOLE,
+        highlight: made::SILK,
+        ..BoardTheme::default()
+    };
+    let view = BoardView {
+        visible: vec![silk],
+        active: cu,
+        selected: vec![],
+        hovered: None,
+        hot_corner: None,
+        handle: mm(0.25),
+        ratsnest: false,
+        dim_inactive: false,
+        highlight_net: None,
+    };
     let mut d = board(b, &th, &view);
     let items = crate::copper::items(b);
     let pad_of = |c: &crate::copper::Copper| match c.item {
-        crate::copper::Item::Pad(fid, i) => b.footprints.iter().find(|f| f.id == fid).and_then(|f| f.footprint.pads.get(i).map(|p| f.placement.layers(p.layers))),
+        crate::copper::Item::Pad(fid, i) => {
+            b.footprints.iter().find(|f| f.id == fid).and_then(|f| {
+                f.footprint
+                    .pads
+                    .get(i)
+                    .map(|p| f.placement.layers(p.layers))
+            })
+        }
         _ => None,
     };
     let pads_open = |c: &crate::copper::Copper| pad_of(c).is_some_and(|l| l.contains(mask));
     // Pads that get solder paste (SMD) look silver, as soldered; the rest bare gold.
     let pasted = |c: &crate::copper::Copper| pad_of(c).is_some_and(|l| l.contains(paste));
-    let under: Vec<Region> = items.iter().filter(|c| !pads_open(c)).filter_map(|c| c.on(cu).cloned()).collect();
+    let under: Vec<Region> = items
+        .iter()
+        .filter(|c| !pads_open(c))
+        .filter_map(|c| c.on(cu).cloned())
+        .collect();
     d.region(made::MASK_OVER_COPPER, -9, &poly::union_all(&under));
-    let open: Vec<Region> = items.iter().filter(|c| pads_open(c) && !pasted(c)).filter_map(|c| c.on(cu).cloned()).collect();
+    let open: Vec<Region> = items
+        .iter()
+        .filter(|c| pads_open(c) && !pasted(c))
+        .filter_map(|c| c.on(cu).cloned())
+        .collect();
     d.region(made::GOLD, -8, &poly::union_all(&open));
-    let soldered: Vec<Region> = items.iter().filter(|c| pads_open(c) && pasted(c)).filter_map(|c| c.on(cu).cloned()).collect();
+    let soldered: Vec<Region> = items
+        .iter()
+        .filter(|c| pads_open(c) && pasted(c))
+        .filter_map(|c| c.on(cu).cloned())
+        .collect();
     d.region(made::SOLDER, -8, &poly::union_all(&soldered));
     // Copper drawings on the mask layer itself (openings drawn by hand) are bare too.
     for s in b.shapes.iter().filter(|s| s.layer == mask) {
@@ -200,7 +253,12 @@ const WIRE_W: Nm = 250_000;
 /// wire would join now.
 fn join_mark(d: &mut DrawList, th: &SchematicTheme, at: Pt, filled: bool) {
     let k = mm(0.5);
-    let sq = vec![at + Pt::new(-k, -k), at + Pt::new(k, -k), at + Pt::new(k, k), at + Pt::new(-k, k)];
+    let sq = vec![
+        at + Pt::new(-k, -k),
+        at + Pt::new(k, -k),
+        at + Pt::new(k, k),
+        at + Pt::new(-k, k),
+    ];
     if filled {
         d.region(th.pin_end, 3, &vec![sq]);
     } else {
@@ -213,7 +271,18 @@ fn join_mark(d: &mut DrawList, th: &SchematicTheme, at: Pt, filled: bool) {
 const BODY_W: Nm = 254_000;
 
 fn text_at(s: &str, at: Pt, angle: f64, size: Nm, h: HAlign, v: VAlign) -> Text {
-    Text { text: s.into(), at, angle, style: TextStyle { size: Size::new(size, size), h_align: h, v_align: v, ..Default::default() }, visible: true }
+    Text {
+        text: s.into(),
+        at,
+        angle,
+        style: TextStyle {
+            size: Size::new(size, size),
+            h_align: h,
+            v_align: v,
+            ..Default::default()
+        },
+        visible: true,
+    }
 }
 
 /// What is highlighted (selected, hovered) on a sheet.
@@ -243,17 +312,33 @@ pub enum PinEnds {
 pub fn schematic(sch: &Schematic, sheet: usize, th: &SchematicTheme, hl: &Highlight) -> DrawList {
     use crate::sch_edit::SchItem;
     // No paper, frame or title block: the sheet is unbounded, the paper's colour all over.
-    let mut d = DrawList { background: th.paper, ..Default::default() };
-    let Some(sh) = sch.sheets.get(sheet) else { return d };
+    let mut d = DrawList {
+        background: th.paper,
+        ..Default::default()
+    };
+    let Some(sh) = sch.sheets.get(sheet) else {
+        return d;
+    };
 
     let nl = netlist(sch);
-    let lone: Vec<Pt> = nl.nets.iter().filter(|n| n.pins.len() == 1 && n.labels.is_empty() && !n.no_connect).map(|n| n.pins[0].at).collect();
+    let lone: Vec<Pt> = nl
+        .nets
+        .iter()
+        .filter(|n| n.pins.len() == 1 && n.labels.is_empty() && !n.no_connect)
+        .map(|n| n.pins[0].at)
+        .collect();
     let lit = |it: &SchItem| hl.items.contains(it);
 
     for s in &sh.symbols {
-        let Some(def) = sch.symbol(&s.symbol) else { continue };
+        let Some(def) = sch.symbol(&s.symbol) else {
+            continue;
+        };
         let sel = lit(&SchItem::Symbol(s.id));
-        let (body, pin, fill_bg) = if sel { (th.highlight, th.highlight, th.body_fill) } else { (th.body, th.pin, th.body_fill) };
+        let (body, pin, fill_bg) = if sel {
+            (th.highlight, th.highlight, th.body_fill)
+        } else {
+            (th.body, th.pin, th.body_fill)
+        };
         for g in def.unit_graphics(s.unit, s.style) {
             match &g.item {
                 SymbolItem::Shape(shape) => {
@@ -264,7 +349,16 @@ pub fn schematic(sch: &Schematic, sheet: usize, th: &SchematicTheme, hl: &Highli
                         Fill::Background => Some(fill_bg),
                         Fill::Color(c) => Some([c.r, c.g, c.b, c.a]),
                     };
-                    d.shape(&Shape { geom, ..shape.clone() }, body, fill, BODY_W, 1);
+                    d.shape(
+                        &Shape {
+                            geom,
+                            ..shape.clone()
+                        },
+                        body,
+                        fill,
+                        BODY_W,
+                        1,
+                    );
                 }
                 SymbolItem::Text(t) => d.text(&s.placement.text(t), body),
             }
@@ -281,7 +375,20 @@ pub fn schematic(sch: &Schematic, sheet: usize, th: &SchematicTheme, hl: &Highli
             if matches!(p.shape, PinShape::Inverted | PinShape::InvertedClock) {
                 let r = mm(0.4);
                 let c = b - Pt::new(r, 0).rotated(dir);
-                d.shape(&Shape { geom: Geom::Circle { center: c, radius: r }, stroke: Default::default(), fill: Fill::None }, pin, None, WIRE_W, 1);
+                d.shape(
+                    &Shape {
+                        geom: Geom::Circle {
+                            center: c,
+                            radius: r,
+                        },
+                        stroke: Default::default(),
+                        fill: Fill::None,
+                    },
+                    pin,
+                    None,
+                    WIRE_W,
+                    1,
+                );
             }
             if lone.contains(&a) && p.kind == crate::symbol::PinType::NoConnect {
                 // A pin that connects to nothing by design: KiCad's small X at its end, in the
@@ -310,16 +417,37 @@ pub fn schematic(sch: &Schematic, sheet: usize, th: &SchematicTheme, hl: &Highli
             if def.show_pin_numbers {
                 let mid = Pt::new((a.x + b.x) / 2, (a.y + b.y) / 2);
                 let level = (dir.rem_euclid(180.0) - 90.0).abs() > 45.0;
-                let (angle, up) = if level { (0.0, Pt::new(0, mm(0.3))) } else { (90.0, Pt::new(-mm(0.3), 0)) };
-                d.text(&text_at(&p.number, mid + up, angle, p.number_size, HAlign::Center, VAlign::Bottom), th.pin_number);
+                let (angle, up) = if level {
+                    (0.0, Pt::new(0, mm(0.3)))
+                } else {
+                    (90.0, Pt::new(-mm(0.3), 0))
+                };
+                d.text(
+                    &text_at(
+                        &p.number,
+                        mid + up,
+                        angle,
+                        p.number_size,
+                        HAlign::Center,
+                        VAlign::Bottom,
+                    ),
+                    th.pin_number,
+                );
             }
             if def.show_pin_names && !p.name.is_empty() && p.name != "~" {
                 let at = b + Pt::new(def.pin_name_offset.max(mm(0.5)), 0).rotated(dir);
-                d.text(&text_at(&p.name, at, dir, p.name_size, HAlign::Left, VAlign::Center), th.pin_name);
+                d.text(
+                    &text_at(&p.name, at, dir, p.name_size, HAlign::Left, VAlign::Center),
+                    th.pin_name,
+                );
             }
         }
         for f in &s.fields {
-            let c = if sel || lit(&SchItem::Field(s.id, f.name.clone())) { th.highlight } else { th.field };
+            let c = if sel || lit(&SchItem::Field(s.id, f.name.clone())) {
+                th.highlight
+            } else {
+                th.field
+            };
             let mut t = f.text.clone();
             if f.show_name {
                 t.text = format!("{}: {}", f.name, t.text);
@@ -328,35 +456,79 @@ pub fn schematic(sch: &Schematic, sheet: usize, th: &SchematicTheme, hl: &Highli
         }
     }
     // A wire's and a junction's own colour when they have one, else the theme's.
-    let rgba = |c: Option<crate::graphics::Color>| c.filter(|c| c.a > 0).map(|c| [c.r, c.g, c.b, 255]);
+    let rgba =
+        |c: Option<crate::graphics::Color>| c.filter(|c| c.a > 0).map(|c| [c.r, c.g, c.b, 255]);
     for wire in &sh.wires {
-        let c = if lit(&SchItem::Wire(wire.id)) { th.highlight } else { rgba(wire.stroke.color).unwrap_or(th.wire) };
-        d.line(c, if wire.stroke.width > 0 { wire.stroke.width } else { WIRE_W }, vec![wire.a, wire.b]);
+        let c = if lit(&SchItem::Wire(wire.id)) {
+            th.highlight
+        } else {
+            rgba(wire.stroke.color).unwrap_or(th.wire)
+        };
+        d.line(
+            c,
+            if wire.stroke.width > 0 {
+                wire.stroke.width
+            } else {
+                WIRE_W
+            },
+            vec![wire.a, wire.b],
+        );
     }
     for b in &sh.buses {
         d.line(th.bus, mm(0.3), vec![b.a, b.b]);
     }
     for j in &sh.junctions {
-        let r = if j.diameter > 0 { j.diameter / 2 } else { mm(0.457) };
+        let r = if j.diameter > 0 {
+            j.diameter / 2
+        } else {
+            mm(0.457)
+        };
         // A dot with no colour of its own takes its wires' colour.
-        let wire_color = sh.wires.iter().filter(|w| crate::connectivity::on_segment(j.at, w.a, w.b)).find_map(|w| rgba(w.stroke.color));
-        let c = if lit(&SchItem::Junction(j.id)) { th.highlight } else { rgba(j.color).or(wire_color).unwrap_or(th.junction) };
+        let wire_color = sh
+            .wires
+            .iter()
+            .filter(|w| crate::connectivity::on_segment(j.at, w.a, w.b))
+            .find_map(|w| rgba(w.stroke.color));
+        let c = if lit(&SchItem::Junction(j.id)) {
+            th.highlight
+        } else {
+            rgba(j.color).or(wire_color).unwrap_or(th.junction)
+        };
         d.region(c, 2, &poly::circle(j.at, r));
     }
     for n in &sh.no_connects {
         let k = mm(0.635);
-        d.line(th.no_connect, WIRE_W, vec![n.at - Pt::new(k, k), n.at + Pt::new(k, k)]);
-        d.line(th.no_connect, WIRE_W, vec![n.at - Pt::new(k, -k), n.at + Pt::new(k, -k)]);
+        d.line(
+            th.no_connect,
+            WIRE_W,
+            vec![n.at - Pt::new(k, k), n.at + Pt::new(k, k)],
+        );
+        d.line(
+            th.no_connect,
+            WIRE_W,
+            vec![n.at - Pt::new(k, -k), n.at + Pt::new(k, -k)],
+        );
     }
     for l in &sh.labels {
         // Where the label joins a wire (its anchor): marked while it joins nothing, while
         // wiring, and filled where it would join now.
         let at = l.text.at;
-        let joined = sh.wires.iter().any(|w| crate::connectivity::on_segment(at, w.a, w.b)) || sh.symbols.iter().any(|s| sch.placed_pins(s).any(|(_, p)| p == at));
+        let joined = sh
+            .wires
+            .iter()
+            .any(|w| crate::connectivity::on_segment(at, w.a, w.b))
+            || sh
+                .symbols
+                .iter()
+                .any(|s| sch.placed_pins(s).any(|(_, p)| p == at));
         if !joined || hl.pin_ends == PinEnds::All || hl.hot_pin == Some(at) {
             join_mark(&mut d, th, at, hl.hot_pin == Some(at));
         }
-        let c = if lit(&SchItem::Label(l.id)) { th.highlight } else { th.label };
+        let c = if lit(&SchItem::Label(l.id)) {
+            th.highlight
+        } else {
+            th.label
+        };
         let mut t = l.text.clone();
         if matches!(l.kind, LabelKind::Local) {
             // A local label's text stands just above its wire.
@@ -368,7 +540,17 @@ pub fn schematic(sch: &Schematic, sheet: usize, th: &SchematicTheme, hl: &Highli
             let len = font::line_width(&t.text, &t.style).round() as Nm + size;
             let (hh, tip) = (size * 3 / 4, size / 2);
             let dir = t.angle;
-            let pts: Vec<Pt> = [Pt::new(0, 0), Pt::new(tip, hh), Pt::new(tip + len, hh), Pt::new(tip + len, -hh), Pt::new(tip, -hh), Pt::new(0, 0)].iter().map(|p| t.at + p.rotated(dir)).collect();
+            let pts: Vec<Pt> = [
+                Pt::new(0, 0),
+                Pt::new(tip, hh),
+                Pt::new(tip + len, hh),
+                Pt::new(tip + len, -hh),
+                Pt::new(tip, -hh),
+                Pt::new(0, 0),
+            ]
+            .iter()
+            .map(|p| t.at + p.rotated(dir))
+            .collect();
             d.line(c, WIRE_W, pts);
             t.at = t.at + Pt::new(tip + size / 2, 0).rotated(dir);
             t.style.v_align = VAlign::Center;
@@ -383,7 +565,13 @@ pub fn schematic(sch: &Schematic, sheet: usize, th: &SchematicTheme, hl: &Highli
         d.shape(&g.shape, th.note, None, WIRE_W, 0);
     }
     // Fit shows what is drawn (an empty sheet: an A4's worth from the origin).
-    d.bounds = Some(d.drawn_bounds().map_or(Bounds { min: Pt::ZERO, max: Pt::mm(297.0, 210.0) }, |b| b.grow(mm(10.0))));
+    d.bounds = Some(d.drawn_bounds().map_or(
+        Bounds {
+            min: Pt::ZERO,
+            max: Pt::mm(297.0, 210.0),
+        },
+        |b| b.grow(mm(10.0)),
+    ));
     d
 }
 
@@ -487,8 +675,28 @@ pub struct BoardView {
 impl BoardView {
     pub fn all(board: &Board) -> BoardView {
         let mut visible: Vec<Layer> = board.copper().collect();
-        visible.extend([Layer::TopSilk, Layer::BottomSilk, Layer::TopCourtyard, Layer::BottomCourtyard, Layer::TopFab, Layer::BottomFab, Layer::Outline, Layer::Drawings, Layer::Comments]);
-        BoardView { visible, active: Layer::TopCopper, selected: vec![], hovered: None, hot_corner: None, handle: mm(0.25), ratsnest: true, dim_inactive: false, highlight_net: None }
+        visible.extend([
+            Layer::TopSilk,
+            Layer::BottomSilk,
+            Layer::TopCourtyard,
+            Layer::BottomCourtyard,
+            Layer::TopFab,
+            Layer::BottomFab,
+            Layer::Outline,
+            Layer::Drawings,
+            Layer::Comments,
+        ]);
+        BoardView {
+            visible,
+            active: Layer::TopCopper,
+            selected: vec![],
+            hovered: None,
+            hot_corner: None,
+            handle: mm(0.25),
+            ratsnest: true,
+            dim_inactive: false,
+            highlight_net: None,
+        }
     }
 }
 
@@ -507,7 +715,14 @@ fn draw_order(board: &Board, active: Layer) -> Vec<Layer> {
     if active.is_copper() {
         v.push(active);
     }
-    v.extend([Layer::TopSilk, Layer::TopCourtyard, Layer::TopFab, Layer::Outline, Layer::Drawings, Layer::Comments]);
+    v.extend([
+        Layer::TopSilk,
+        Layer::TopCourtyard,
+        Layer::TopFab,
+        Layer::Outline,
+        Layer::Drawings,
+        Layer::Comments,
+    ]);
     v
 }
 
@@ -515,10 +730,16 @@ fn draw_order(board: &Board, active: Layer) -> Vec<Layer> {
 /// zone fills), holes, silkscreen, courtyards, fabrication drawing and outline, pad numbers,
 /// and the ratsnest.
 pub fn board(b: &Board, th: &BoardTheme, view: &BoardView) -> DrawList {
-    let mut d = DrawList { background: th.background, ..Default::default() };
+    let mut d = DrawList {
+        background: th.background,
+        ..Default::default()
+    };
     let region = crate::outline::board_region(b);
     d.region(th.board, -10, &region);
-    let mut bounds: Option<Bounds> = region.iter().flatten().fold(None, |acc, p| Some(Bounds::union(acc, Bounds::of(*p))));
+    let mut bounds: Option<Bounds> = region
+        .iter()
+        .flatten()
+        .fold(None, |acc, p| Some(Bounds::union(acc, Bounds::of(*p))));
     let items = crate::copper::items(b);
     let shown = |l: Layer| view.visible.contains(&l);
     for (z, layer) in draw_order(b, view.active).into_iter().enumerate() {
@@ -537,17 +758,28 @@ pub fn board(b: &Board, th: &BoardTheme, view: &BoardView) -> DrawList {
             // Zone fills a little see-through, so copper of the other side shows under them;
             // pads, tracks and vias on top.
             let zone = |c: &&crate::copper::Copper| matches!(c.item, crate::copper::Item::Zone(..));
-            let fills: Vec<Region> = items.iter().filter(zone).filter_map(|c| c.on(layer).cloned()).collect();
+            let fills: Vec<Region> = items
+                .iter()
+                .filter(zone)
+                .filter_map(|c| c.on(layer).cloned())
+                .collect();
             if !fills.is_empty() {
                 let mut faint = color;
                 faint[3] = (faint[3] as u32 * 55 / 100) as u8;
                 d.region(faint, z, &poly::union_all(&fills));
             }
-            let parts: Vec<Region> = items.iter().filter(|c| !zone(c)).filter_map(|c| c.on(layer).cloned()).collect();
+            let parts: Vec<Region> = items
+                .iter()
+                .filter(|c| !zone(c))
+                .filter_map(|c| c.on(layer).cloned())
+                .collect();
             let all = poly::union_all(&parts);
             d.region(color, z + 1, &all);
             // Each pad outlined at its clearance, a little way out (KiCad's clearance outline).
-            for c in items.iter().filter(|c| matches!(c.item, crate::copper::Item::Pad(..))) {
+            for c in items
+                .iter()
+                .filter(|c| matches!(c.item, crate::copper::Item::Pad(..)))
+            {
                 if let Some(r) = c.on(layer) {
                     for ring in poly::inflate(r, mm(0.2)) {
                         let mut pts = ring.clone();
@@ -560,9 +792,18 @@ pub fn board(b: &Board, th: &BoardTheme, view: &BoardView) -> DrawList {
             // lighter.
             let owner = |c: &crate::copper::Copper| match &c.item {
                 crate::copper::Item::Pad(f, _) | crate::copper::Item::FpShape(f, _) => *f,
-                crate::copper::Item::Track(t) | crate::copper::Item::Via(t) | crate::copper::Item::Shape(t) | crate::copper::Item::Zone(t, ..) => *t,
+                crate::copper::Item::Track(t)
+                | crate::copper::Item::Via(t)
+                | crate::copper::Item::Shape(t)
+                | crate::copper::Item::Zone(t, ..) => *t,
             };
-            let of = |want: &dyn Fn(uuid::Uuid) -> bool| -> Vec<Region> { items.iter().filter(|c| want(owner(c))).filter_map(|c| c.on(layer).cloned()).collect() };
+            let of = |want: &dyn Fn(uuid::Uuid) -> bool| -> Vec<Region> {
+                items
+                    .iter()
+                    .filter(|c| want(owner(c)))
+                    .filter_map(|c| c.on(layer).cloned())
+                    .collect()
+            };
             let sel = of(&|id| view.selected.contains(&id));
             if !sel.is_empty() {
                 d.region(th.highlight, z + 2, &poly::union_all(&sel));
@@ -573,29 +814,62 @@ pub fn board(b: &Board, th: &BoardTheme, view: &BoardView) -> DrawList {
             }
         }
         // The colour of an item on this layer: selected, under the pointer, or as the layer.
-        let tint = |id: uuid::Uuid| if view.selected.contains(&id) { th.highlight } else if view.hovered == Some(id) { lighter(color) } else { color };
+        let tint = |id: uuid::Uuid| {
+            if view.selected.contains(&id) {
+                th.highlight
+            } else if view.hovered == Some(id) {
+                lighter(color)
+            } else {
+                color
+            }
+        };
         for f in &b.footprints {
             let fc = tint(f.id);
             // Copper drawings are drawn as copper (above, from the copper items), not again as lines.
-            for s in f.footprint.shapes.iter().filter(|s| f.placement.layer(s.layer) == layer && !layer.is_copper()) {
-                let geom = if f.placement.angle % 90.0 == 0.0 { s.shape.geom.clone() } else { s.shape.geom.rect_as_polyline() };
-                let shape = Shape { geom: geom.map(|p| f.placement.apply(p)), ..s.shape.clone() };
+            for s in f
+                .footprint
+                .shapes
+                .iter()
+                .filter(|s| f.placement.layer(s.layer) == layer && !layer.is_copper())
+            {
+                let geom = if f.placement.angle % 90.0 == 0.0 {
+                    s.shape.geom.clone()
+                } else {
+                    s.shape.geom.rect_as_polyline()
+                };
+                let shape = Shape {
+                    geom: geom.map(|p| f.placement.apply(p)),
+                    ..s.shape.clone()
+                };
                 let fill = (s.shape.fill != crate::graphics::Fill::None).then_some(fc);
                 d.shape(&shape, fc, fill, mm(0.1), z);
             }
-            let texts = f.footprint.fields.iter().map(|x| &x.text).chain(f.footprint.texts.iter());
+            let texts = f
+                .footprint
+                .fields
+                .iter()
+                .map(|x| &x.text)
+                .chain(f.footprint.texts.iter());
             for t in texts.filter(|t| f.placement.layer(t.layer) == layer) {
                 let mut tt = t.text.clone();
                 tt.text = tt.text.replace("${REFERENCE}", f.reference());
                 tt.at = f.placement.apply(t.text.at);
-                tt.angle = if t.keep_upright { crate::units::normalize_deg(t.text.angle + f.placement.angle) } else { f.placement.apply_angle(t.text.angle) };
+                tt.angle = if t.keep_upright {
+                    crate::units::normalize_deg(t.text.angle + f.placement.angle)
+                } else {
+                    f.placement.apply_angle(t.text.angle)
+                };
                 if f.placement.side == Side::Bottom {
                     tt.style.mirrored = !tt.style.mirrored;
                 }
                 d.text(&tt, fc);
             }
         }
-        for s in b.shapes.iter().filter(|s| s.layer == layer && !layer.is_copper()) {
+        for s in b
+            .shapes
+            .iter()
+            .filter(|s| s.layer == layer && !layer.is_copper())
+        {
             // A filled shape (a logo, a copper area) is filled, the rest outlined.
             let c = tint(s.id);
             let fill = (s.shape.fill != crate::graphics::Fill::None).then_some(c);
@@ -610,21 +884,40 @@ pub fn board(b: &Board, th: &BoardTheme, view: &BoardView) -> DrawList {
     }
     // The highlighted net's copper, on every shown layer, over the rest.
     if let Some(net) = view.highlight_net.as_ref().filter(|n| !n.is_empty()) {
-        let mine: Vec<Region> = items.iter().filter(|c| &c.net == net).flat_map(|c| c.layers.iter().filter(|(l, _)| shown(*l)).map(|(_, r)| r.clone())).collect();
+        let mine: Vec<Region> = items
+            .iter()
+            .filter(|c| &c.net == net)
+            .flat_map(|c| {
+                c.layers
+                    .iter()
+                    .filter(|(l, _)| shown(*l))
+                    .map(|(_, r)| r.clone())
+            })
+            .collect();
         let mut lit = th.highlight;
         lit[3] = 0xd0;
         d.region(lit, 80, &poly::union_all(&mine));
     }
     // Zone outlines, and keep-outs hatched (the board's and footprints' ones).
-    let mut zones: Vec<(Vec<Vec<Pt>>, crate::layer::LayerSet, bool)> = b.zones.iter().map(|z| (z.outline.clone(), z.layers, z.keepout.is_some())).collect();
+    let mut zones: Vec<(Vec<Vec<Pt>>, crate::layer::LayerSet, bool)> = b
+        .zones
+        .iter()
+        .map(|z| (z.outline.clone(), z.layers, z.keepout.is_some()))
+        .collect();
     for f in &b.footprints {
         for z in &f.footprint.zones {
-            let rings = z.outline.iter().map(|r| r.iter().map(|p| f.placement.apply(*p)).collect()).collect();
+            let rings = z
+                .outline
+                .iter()
+                .map(|r| r.iter().map(|p| f.placement.apply(*p)).collect())
+                .collect();
             zones.push((rings, f.placement.layers(z.layers), z.keepout.is_some()));
         }
     }
     for (rings, layers, keepout) in zones {
-        let Some(layer) = layers.iter().find(|l| shown(*l)) else { continue };
+        let Some(layer) = layers.iter().find(|l| shown(*l)) else {
+            continue;
+        };
         let mut color = th.layer(layer);
         if view.dim_inactive && layer != view.active {
             color[3] = (color[3] as u32 * 30 / 100) as u8;
@@ -637,14 +930,22 @@ pub fn board(b: &Board, th: &BoardTheme, view: &BoardView) -> DrawList {
             d.line(color, mm(0.1), pts);
         }
         if keepout {
-            let region: Region = rings.iter().map(|r| {
-                let mut r = r.clone();
-                if poly::ring_area(&r) < 0.0 {
-                    r.reverse();
-                }
-                r
-            }).collect();
-            let bb = region.iter().flatten().fold(None, |acc: Option<Bounds>, p| Some(Bounds::union(acc, Bounds::of(*p))));
+            let region: Region = rings
+                .iter()
+                .map(|r| {
+                    let mut r = r.clone();
+                    if poly::ring_area(&r) < 0.0 {
+                        r.reverse();
+                    }
+                    r
+                })
+                .collect();
+            let bb = region
+                .iter()
+                .flatten()
+                .fold(None, |acc: Option<Bounds>, p| {
+                    Some(Bounds::union(acc, Bounds::of(*p)))
+                });
             if let Some(bb) = bb {
                 // 45° hatching, 1 mm apart.
                 let h = bb.max.y - bb.min.y;
@@ -652,7 +953,10 @@ pub fn board(b: &Board, th: &BoardTheme, view: &BoardView) -> DrawList {
                 let mut strokes = vec![];
                 let mut x = bb.min.x - h;
                 while x < bb.max.x {
-                    strokes.push(poly::stroke(&[Pt::new(x, bb.min.y), Pt::new(x + h, bb.max.y)], mm(0.05)));
+                    strokes.push(poly::stroke(
+                        &[Pt::new(x, bb.min.y), Pt::new(x + h, bb.max.y)],
+                        mm(0.05),
+                    ));
                     x += step;
                 }
                 let hatch = poly::intersection(&poly::union_all(&strokes), &region);
@@ -677,8 +981,21 @@ pub fn board(b: &Board, th: &BoardTheme, view: &BoardView) -> DrawList {
         };
         for (_, _, p) in crate::board_edit::corners(b, item) {
             let k = view.handle.max(mm(0.1));
-            let sq = vec![p + Pt::new(-k, -k), p + Pt::new(k, -k), p + Pt::new(k, k), p + Pt::new(-k, k)];
-            d.region(if view.hot_corner == Some(p) { th.handle_hot } else { th.handle }, 110, &vec![sq.clone()]);
+            let sq = vec![
+                p + Pt::new(-k, -k),
+                p + Pt::new(k, -k),
+                p + Pt::new(k, k),
+                p + Pt::new(-k, k),
+            ];
+            d.region(
+                if view.hot_corner == Some(p) {
+                    th.handle_hot
+                } else {
+                    th.handle
+                },
+                110,
+                &vec![sq.clone()],
+            );
             let mut ring = sq.clone();
             ring.push(sq[0]);
             d.line(th.handle_edge, k / 4, ring);
@@ -687,7 +1004,13 @@ pub fn board(b: &Board, th: &BoardTheme, view: &BoardView) -> DrawList {
     // Vias and holes over the copper.
     let top = 100;
     for v in &b.vias {
-        let c = if view.selected.contains(&v.id) { th.highlight } else if view.hovered == Some(v.id) { lighter(th.via) } else { th.via };
+        let c = if view.selected.contains(&v.id) {
+            th.highlight
+        } else if view.hovered == Some(v.id) {
+            lighter(th.via)
+        } else {
+            th.via
+        };
         d.region(c, top, &poly::circle(v.at, v.diameter / 2));
         d.region(th.hole, top + 1, &poly::circle(v.at, v.drill / 2));
     }
@@ -707,13 +1030,26 @@ pub fn board(b: &Board, th: &BoardTheme, view: &BoardView) -> DrawList {
                 }
             }
             // Pad numbers, small, in the pad.
-            let on_shown = f.placement.layers(p.layers).iter().any(|l| l.is_copper() && shown(l));
-            if on_shown && !p.number.is_empty() && !matches!(p.shape, PadShape::Custom { .. }) && p.kind != PadKind::NonPlated {
+            let on_shown = f
+                .placement
+                .layers(p.layers)
+                .iter()
+                .any(|l| l.is_copper() && shown(l));
+            if on_shown
+                && !p.number.is_empty()
+                && !matches!(p.shape, PadShape::Custom { .. })
+                && p.kind != PadKind::NonPlated
+            {
                 let at = f.placement.apply(p.at);
                 // The pad's size as it lies on the board (a quarter turn swaps its sides); the
                 // text runs along its long side, as KiCad's (a tall pad's reads upwards).
-                let turned = (f.placement.apply_angle(p.angle).rem_euclid(180.0) - 90.0).abs() < 1.0;
-                let (pw, ph) = if turned { (p.size.h, p.size.w) } else { (p.size.w, p.size.h) };
+                let turned =
+                    (f.placement.apply_angle(p.angle).rem_euclid(180.0) - 90.0).abs() < 1.0;
+                let (pw, ph) = if turned {
+                    (p.size.h, p.size.w)
+                } else {
+                    (p.size.w, p.size.h)
+                };
                 let tall = ph > pw;
                 let (long, short, angle) = if tall { (ph, pw, 90.0) } else { (pw, ph, 0.0) };
                 // "Up" in the text's frame.
@@ -721,21 +1057,48 @@ pub fn board(b: &Board, th: &BoardTheme, view: &BoardView) -> DrawList {
                 let s = (short * 9 / 20).min(mm(1.0));
                 // A no-connect pin's pad reads "x", as KiCad's.
                 // A pad on no net is "unconnected-(REF-pin-PadN)", KiCad's name for it.
-                let lone = format!("unconnected-({}-{}-Pad{})", f.reference(), if p.pin_function.is_empty() { "~" } else { p.pin_function.as_str() }, p.number);
-                let net = if p.pin_type.starts_with("no_connect") { Some("x") } else { p.net.as_deref().filter(|n| !n.is_empty()).or(Some(lone.as_str())) };
+                let lone = format!(
+                    "unconnected-({}-{}-Pad{})",
+                    f.reference(),
+                    if p.pin_function.is_empty() {
+                        "~"
+                    } else {
+                        p.pin_function.as_str()
+                    },
+                    p.number
+                );
+                let net = if p.pin_type.starts_with("no_connect") {
+                    Some("x")
+                } else {
+                    p.net
+                        .as_deref()
+                        .filter(|n| !n.is_empty())
+                        .or(Some(lone.as_str()))
+                };
                 // With a net: the number above, the net's name under it, shrunk to fit.
                 let (num_at, net_size) = match net {
                     Some(n) if short >= mm(0.5) => {
-                        let probe = text_at(n, Pt::ZERO, 0.0, mm(1.0), HAlign::Center, VAlign::Center);
-                        let w = crate::font::bounds(&probe).map_or(mm(1.0), |b| b.max.x - b.min.x).max(1);
+                        let probe =
+                            text_at(n, Pt::ZERO, 0.0, mm(1.0), HAlign::Center, VAlign::Center);
+                        let w = crate::font::bounds(&probe)
+                            .map_or(mm(1.0), |b| b.max.x - b.min.x)
+                            .max(1);
                         let size = ((long as f64 * 0.85 / w as f64) * mm(1.0) as f64) as Nm;
                         // Smaller than the number, as KiCad's.
-                        let cap = if long >= short * 9 / 5 { short * 2 / 7 } else { short / 4 };
+                        let cap = if long >= short * 9 / 5 {
+                            short * 2 / 7
+                        } else {
+                            short / 4
+                        };
                         (at + up(short / 5), Some(size.min(cap)))
                     }
                     _ => (at, None),
                 };
-                let s = if net_size.is_some() { s.min(short * 7 / 20) } else { s };
+                let s = if net_size.is_some() {
+                    s.min(short * 7 / 20)
+                } else {
+                    s
+                };
                 let mut t = text_at(&p.number, num_at, angle, s, HAlign::Center, VAlign::Center);
                 // Thin strokes, in proportion to the size (KiCad's pad text).
                 t.style.thickness = Some(s / 9);
@@ -743,7 +1106,14 @@ pub fn board(b: &Board, th: &BoardTheme, view: &BoardView) -> DrawList {
                 if let (Some(n), Some(ns)) = (net, net_size)
                     && ns >= mm(0.05)
                 {
-                    let mut t = text_at(n, at - up(short / 5), angle, ns, HAlign::Center, VAlign::Center);
+                    let mut t = text_at(
+                        n,
+                        at - up(short / 5),
+                        angle,
+                        ns,
+                        HAlign::Center,
+                        VAlign::Center,
+                    );
                     t.style.thickness = Some(ns / 9);
                     d.text(&t, th.pad_text);
                 }
@@ -752,7 +1122,11 @@ pub fn board(b: &Board, th: &BoardTheme, view: &BoardView) -> DrawList {
         }
     }
     // Net names along the tracks long enough to carry them, as KiCad writes them.
-    for t in b.tracks.iter().filter(|t| !t.net.is_empty() && shown(t.layer)) {
+    for t in b
+        .tracks
+        .iter()
+        .filter(|t| !t.net.is_empty() && shown(t.layer))
+    {
         let len = t.a.dist(t.b);
         let size = (t.width as f64 * 0.6).min(mm(0.8) as f64) as Nm;
         let probe = text_at(&t.net, Pt::ZERO, 0.0, size, HAlign::Center, VAlign::Center);
@@ -762,7 +1136,9 @@ pub fn board(b: &Board, th: &BoardTheme, view: &BoardView) -> DrawList {
         if size < mm(0.25) || len < need * 1.3 + mm(1.0) as f64 {
             continue;
         }
-        let mut angle = ((t.b.y - t.a.y) as f64).atan2((t.b.x - t.a.x) as f64).to_degrees();
+        let mut angle = ((t.b.y - t.a.y) as f64)
+            .atan2((t.b.x - t.a.x) as f64)
+            .to_degrees();
         // Reading left to right, or upwards.
         if !(-90.0..90.0).contains(&angle) || (angle - 90.0).abs() < 1e-6 {
             angle = crate::units::normalize_deg(angle + 180.0);
@@ -795,25 +1171,64 @@ pub fn board(b: &Board, th: &BoardTheme, view: &BoardView) -> DrawList {
 /// The draw list as an SVG document (Y up becomes SVG's Y down), millimetre units.
 pub fn to_svg(d: &DrawList) -> String {
     use std::fmt::Write;
-    let b = d.bounds.unwrap_or(Bounds { min: Pt::ZERO, max: Pt::mm(100.0, 100.0) });
+    let b = d.bounds.unwrap_or(Bounds {
+        min: Pt::ZERO,
+        max: Pt::mm(100.0, 100.0),
+    });
     let f = |v: Nm| v as f64 / 1e6;
     let (x0, y1, w, h) = (f(b.min.x), f(b.max.y), f(b.size().w), f(b.size().h));
-    let col = |c: Rgba| format!("rgba({},{},{},{:.3})", c[0], c[1], c[2], c[3] as f64 / 255.0);
+    let col = |c: Rgba| {
+        format!(
+            "rgba({},{},{},{:.3})",
+            c[0],
+            c[1],
+            c[2],
+            c[3] as f64 / 255.0
+        )
+    };
     let mut s = String::new();
-    let _ = writeln!(s, r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}mm" height="{h}mm" viewBox="{x0} {} {w} {h}">"#, -y1);
-    let _ = writeln!(s, r#"<rect x="{x0}" y="{}" width="{w}" height="{h}" fill="{}"/>"#, -y1, col(d.background));
+    let _ = writeln!(
+        s,
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}mm" height="{h}mm" viewBox="{x0} {} {w} {h}">"#,
+        -y1
+    );
+    let _ = writeln!(
+        s,
+        r#"<rect x="{x0}" y="{}" width="{w}" height="{h}" fill="{}"/>"#,
+        -y1,
+        col(d.background)
+    );
     let mut areas: Vec<&Area> = d.areas.iter().collect();
     areas.sort_by_key(|a| a.z);
     for a in areas {
         let _ = write!(s, r#"<path fill="{}" d=""#, col(a.color));
         for t in a.tris.chunks(3) {
-            let _ = write!(s, "M{} {}L{} {}L{} {}Z", t[0][0] / 1e6, -t[0][1] / 1e6, t[1][0] / 1e6, -t[1][1] / 1e6, t[2][0] / 1e6, -t[2][1] / 1e6);
+            let _ = write!(
+                s,
+                "M{} {}L{} {}L{} {}Z",
+                t[0][0] / 1e6,
+                -t[0][1] / 1e6,
+                t[1][0] / 1e6,
+                -t[1][1] / 1e6,
+                t[2][0] / 1e6,
+                -t[2][1] / 1e6
+            );
         }
         let _ = writeln!(s, r#""/>"#);
     }
     for l in &d.lines {
-        let pts: Vec<String> = l.pts.iter().map(|p| format!("{},{}", f(p.x), -f(p.y))).collect();
-        let _ = writeln!(s, r#"<polyline fill="none" stroke="{}" stroke-width="{}" stroke-linecap="round" stroke-linejoin="round" points="{}"/>"#, col(l.color), f(l.width.max(50_000)), pts.join(" "));
+        let pts: Vec<String> = l
+            .pts
+            .iter()
+            .map(|p| format!("{},{}", f(p.x), -f(p.y)))
+            .collect();
+        let _ = writeln!(
+            s,
+            r#"<polyline fill="none" stroke="{}" stroke-width="{}" stroke-linecap="round" stroke-linejoin="round" points="{}"/>"#,
+            col(l.color),
+            f(l.width.max(50_000)),
+            pts.join(" ")
+        );
     }
     s.push_str("</svg>\n");
     s
@@ -823,7 +1238,13 @@ pub fn to_svg(d: &DrawList) -> String {
 /// An editor view ([`symbol_view`], [`footprint_view`]) as a thumbnail: without the origin
 /// axes, its box just around what is drawn (`margin` out).
 pub fn tight(mut d: DrawList, margin: Nm) -> DrawList {
-    let axis = |l: &Line| l.pts.len() == 2 && l.width == 0 && (l.pts[0].x == -l.pts[1].x && l.pts[0].y == 0 && l.pts[1].y == 0 || l.pts[0].y == -l.pts[1].y && l.pts[0].x == 0 && l.pts[1].x == 0) && l.pts[0] != l.pts[1];
+    let axis = |l: &Line| {
+        l.pts.len() == 2
+            && l.width == 0
+            && (l.pts[0].x == -l.pts[1].x && l.pts[0].y == 0 && l.pts[1].y == 0
+                || l.pts[0].y == -l.pts[1].y && l.pts[0].x == 0 && l.pts[1].x == 0)
+            && l.pts[0] != l.pts[1]
+    };
     d.lines.retain(|l| !axis(l));
     let mut b: Option<Bounds> = None;
     for l in &d.lines {
@@ -833,7 +1254,10 @@ pub fn tight(mut d: DrawList, margin: Nm) -> DrawList {
     }
     for a in &d.areas {
         for t in &a.tris {
-            b = Some(Bounds::union(b, Bounds::of(Pt::new(t[0] as Nm, t[1] as Nm))));
+            b = Some(Bounds::union(
+                b,
+                Bounds::of(Pt::new(t[0] as Nm, t[1] as Nm)),
+            ));
         }
     }
     d.bounds = b.map(|b| b.grow(margin));
@@ -847,13 +1271,23 @@ fn origin_axes(d: &mut DrawList, color: Rgba, reach: Nm) {
 
 /// The symbol editor's view: the symbol at the origin with its pins (open circles at their
 /// ends), names, numbers and fields; the selected parts highlighted.
-pub fn symbol_view(sym: Option<&crate::symbol::Symbol>, th: &SchematicTheme, selected: &[crate::lib_edit::SymbolPart]) -> DrawList {
+pub fn symbol_view(
+    sym: Option<&crate::symbol::Symbol>,
+    th: &SchematicTheme,
+    selected: &[crate::lib_edit::SymbolPart],
+) -> DrawList {
     use crate::lib_edit::SymbolPart;
-    use crate::schematic::{Paper, Placement, PlacedSymbol, Sheet};
-    let mut d = DrawList { background: th.paper, ..Default::default() };
+    use crate::schematic::{Paper, PlacedSymbol, Placement, Sheet};
+    let mut d = DrawList {
+        background: th.paper,
+        ..Default::default()
+    };
     origin_axes(&mut d, [0x60, 0x60, 0xd0, 0x90], mm(50.0));
     let Some(sym) = sym else {
-        d.bounds = Some(Bounds { min: Pt::mm(-20.0, -15.0), max: Pt::mm(20.0, 15.0) });
+        d.bounds = Some(Bounds {
+            min: Pt::mm(-20.0, -15.0),
+            max: Pt::mm(20.0, 15.0),
+        });
         return d;
     };
     // The symbol placed at the origin on a sheet with no frame.
@@ -874,11 +1308,33 @@ pub fn symbol_view(sym: Option<&crate::symbol::Symbol>, th: &SchematicTheme, sel
     };
     // Selected pins and graphics are drawn again, highlighted, on top.
     let mut sel = s.clone();
-    sel.pins = s.pins.iter().enumerate().filter(|(i, _)| hl(SymbolPart::Pin(*i))).map(|(_, p)| p.clone()).collect();
-    sel.graphics = s.graphics.iter().enumerate().filter(|(i, _)| hl(SymbolPart::Graphic(*i))).map(|(_, g)| g.clone()).collect();
+    sel.pins = s
+        .pins
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| hl(SymbolPart::Pin(*i)))
+        .map(|(_, p)| p.clone())
+        .collect();
+    sel.graphics = s
+        .graphics
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| hl(SymbolPart::Graphic(*i)))
+        .map(|(_, g)| g.clone())
+        .collect();
     s.power = false;
-    let sheet = Sheet { paper: Paper { name: "User".into(), size: Size::mm(1.0, 1.0) }, symbols: vec![placed], ..Default::default() };
-    let sch = Schematic { symbols: vec![s.clone()], sheets: vec![sheet] };
+    let sheet = Sheet {
+        paper: Paper {
+            name: "User".into(),
+            size: Size::mm(1.0, 1.0),
+        },
+        symbols: vec![placed],
+        ..Default::default()
+    };
+    let sch = Schematic {
+        symbols: vec![s.clone()],
+        sheets: vec![sheet],
+    };
     let mut body = schematic(&sch, 0, th, &Highlight::default());
     // Drop the sheet's paper and frame (everything drawn before the symbol).
     body.areas.retain(|a| a.z != -10);
@@ -888,9 +1344,28 @@ pub fn symbol_view(sym: Option<&crate::symbol::Symbol>, th: &SchematicTheme, sel
     if !sel.pins.is_empty() || !sel.graphics.is_empty() {
         sel.fields.clear();
         let mut lit = th.clone();
-        (lit.body, lit.pin, lit.pin_number, lit.pin_name) = (th.highlight, th.highlight, th.highlight, th.highlight);
-        let sheet = Sheet { paper: Paper { name: "User".into(), size: Size::mm(1.0, 1.0) }, symbols: vec![PlacedSymbol { fields: vec![], ..sch.sheets[0].symbols[0].clone() }], ..Default::default() };
-        let mut over = schematic(&Schematic { symbols: vec![sel], sheets: vec![sheet] }, 0, &lit, &Highlight::default());
+        (lit.body, lit.pin, lit.pin_number, lit.pin_name) =
+            (th.highlight, th.highlight, th.highlight, th.highlight);
+        let sheet = Sheet {
+            paper: Paper {
+                name: "User".into(),
+                size: Size::mm(1.0, 1.0),
+            },
+            symbols: vec![PlacedSymbol {
+                fields: vec![],
+                ..sch.sheets[0].symbols[0].clone()
+            }],
+            ..Default::default()
+        };
+        let mut over = schematic(
+            &Schematic {
+                symbols: vec![sel],
+                sheets: vec![sheet],
+            },
+            0,
+            &lit,
+            &Highlight::default(),
+        );
         over.areas.retain(|a| a.z != -10);
         over.lines.retain(|l| l.color != lit.frame);
         d.lines.extend(over.lines);
@@ -903,12 +1378,28 @@ pub fn symbol_view(sym: Option<&crate::symbol::Symbol>, th: &SchematicTheme, sel
         if hl(SymbolPart::Field(i))
             && let Some(b) = crate::font::bounds(&f.text)
         {
-            d.line(th.highlight, 0, vec![b.min, Pt::new(b.max.x, b.min.y), b.max, Pt::new(b.min.x, b.max.y), b.min]);
+            d.line(
+                th.highlight,
+                0,
+                vec![
+                    b.min,
+                    Pt::new(b.max.x, b.min.y),
+                    b.max,
+                    Pt::new(b.min.x, b.max.y),
+                    b.min,
+                ],
+            );
         }
     }
-    let mut b: Option<Bounds> = Some(Bounds { min: Pt::mm(-10.0, -10.0), max: Pt::mm(10.0, 10.0) });
+    let mut b: Option<Bounds> = Some(Bounds {
+        min: Pt::mm(-10.0, -10.0),
+        max: Pt::mm(10.0, 10.0),
+    });
     for l in &d.lines {
-        if l.pts.iter().any(|p| p.x.abs() >= mm(50.0) || p.y.abs() >= mm(50.0)) {
+        if l.pts
+            .iter()
+            .any(|p| p.x.abs() >= mm(50.0) || p.y.abs() >= mm(50.0))
+        {
             continue;
         }
         for p in &l.pts {
@@ -921,12 +1412,25 @@ pub fn symbol_view(sym: Option<&crate::symbol::Symbol>, th: &SchematicTheme, sel
 
 /// The footprint editor's view: the footprint at the origin, top side up; the selected pads
 /// and shapes highlighted.
-pub fn footprint_view(fp: Option<&crate::footprint::Footprint>, th: &BoardTheme, selected: &[uuid::Uuid]) -> DrawList {
+pub fn footprint_view(
+    fp: Option<&crate::footprint::Footprint>,
+    th: &BoardTheme,
+    selected: &[uuid::Uuid],
+) -> DrawList {
     use crate::board::PlacedFootprint;
     let mut board = Board::default();
-    let mut d = DrawList { background: th.background, ..Default::default() };
+    let mut d = DrawList {
+        background: th.background,
+        ..Default::default()
+    };
     if let Some(fp) = fp {
-        board.footprints.push(PlacedFootprint { id: uuid::Uuid::nil(), footprint: fp.clone(), placement: Default::default(), locked: false, symbol: None });
+        board.footprints.push(PlacedFootprint {
+            id: uuid::Uuid::nil(),
+            footprint: fp.clone(),
+            placement: Default::default(),
+            locked: false,
+            symbol: None,
+        });
         let mut view = BoardView::all(&board);
         view.ratsnest = false;
         d = self::board(&board, th, &view);
@@ -944,14 +1448,23 @@ pub fn footprint_view(fp: Option<&crate::footprint::Footprint>, th: &BoardTheme,
         }
     }
     origin_axes(&mut d, [0x80, 0x80, 0x90, 0xa0], mm(50.0));
-    let mut b: Option<Bounds> = Some(Bounds { min: Pt::mm(-5.0, -5.0), max: Pt::mm(5.0, 5.0) });
+    let mut b: Option<Bounds> = Some(Bounds {
+        min: Pt::mm(-5.0, -5.0),
+        max: Pt::mm(5.0, 5.0),
+    });
     for a in &d.areas {
         for t in &a.tris {
-            b = Some(Bounds::union(b, Bounds::of(Pt::new(t[0] as Nm, t[1] as Nm))));
+            b = Some(Bounds::union(
+                b,
+                Bounds::of(Pt::new(t[0] as Nm, t[1] as Nm)),
+            ));
         }
     }
     for l in &d.lines {
-        if l.pts.iter().any(|p| p.x.abs() >= mm(50.0) || p.y.abs() >= mm(50.0)) {
+        if l.pts
+            .iter()
+            .any(|p| p.x.abs() >= mm(50.0) || p.y.abs() >= mm(50.0))
+        {
             continue;
         }
         for p in &l.pts {
@@ -971,14 +1484,32 @@ mod tests {
     fn course_views_draw() {
         let lib = LibraryTable::builtin();
         let d = crate::getting_started::gs18(&lib);
-        let s = schematic(&d.schematic, 0, &SchematicTheme::default(), &Highlight::default());
+        let s = schematic(
+            &d.schematic,
+            0,
+            &SchematicTheme::default(),
+            &Highlight::default(),
+        );
         assert!(s.lines.len() > 50);
         // Wires in the wire colour, junction dots filled.
-        assert!(s.lines.iter().filter(|l| l.color == SchematicTheme::default().wire).count() >= 8);
-        assert!(s.areas.iter().any(|a| a.color == SchematicTheme::default().junction));
+        assert!(
+            s.lines
+                .iter()
+                .filter(|l| l.color == SchematicTheme::default().wire)
+                .count()
+                >= 8
+        );
+        assert!(
+            s.areas
+                .iter()
+                .any(|a| a.color == SchematicTheme::default().junction)
+        );
         let b = board(&d.board, &BoardTheme::default(), &BoardView::all(&d.board));
         let th = BoardTheme::default();
-        assert!(b.areas.iter().any(|a| a.color == th.top_copper) && b.areas.iter().any(|a| a.color == th.bottom_copper));
+        assert!(
+            b.areas.iter().any(|a| a.color == th.top_copper)
+                && b.areas.iter().any(|a| a.color == th.bottom_copper)
+        );
         assert!(b.lines.iter().any(|l| l.color == th.top_silk));
         let bb = b.bounds.unwrap();
         assert!(bb.contains(Pt::mm(45.0, 50.0)) && bb.contains(Pt::ZERO));

@@ -20,8 +20,10 @@ pub struct SwitchPlugin;
 
 impl Plugin for SwitchPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(on_activate)
-            .add_systems(PostUpdate, sync_switches.before(bevy::ui::UiSystems::Prepare));
+        app.add_observer(on_activate).add_systems(
+            PostUpdate,
+            sync_switches.before(bevy::ui::UiSystems::Prepare),
+        );
     }
 }
 
@@ -83,7 +85,12 @@ impl Switch {
 
     pub fn build(self, theme: &Theme) -> impl Bundle {
         let t = theme.clone();
-        let Switch { name, label, on, label_width } = self;
+        let Switch {
+            name,
+            label,
+            on,
+            label_width,
+        } = self;
         (
             Name::new(name.into_owned()),
             SwitchState { on },
@@ -124,9 +131,18 @@ impl Switch {
                     Pickable::IGNORE,
                 ));
                 if !label.is_empty() {
-                    let mut text = p.spawn((t.text(label, 10.5, FontWeight::NORMAL, t.foreground), Pickable::IGNORE));
+                    let mut text = p.spawn((
+                        t.text(label, 10.5, FontWeight::NORMAL, t.foreground),
+                        Pickable::IGNORE,
+                    ));
                     if let Some(w) = label_width {
-                        text.insert((Node { width: Val::Px(w), ..default() }, TextLayout::default()));
+                        text.insert((
+                            Node {
+                                width: Val::Px(w),
+                                ..default()
+                            },
+                            TextLayout::default(),
+                        ));
                     }
                 }
             })),
@@ -135,7 +151,11 @@ impl Switch {
 }
 
 fn track_color(t: &Theme, on: bool) -> Color {
-    if on { Color::srgb_u8(0x1f, 0x6f, 0xc5) } else { t.disabled_foreground }
+    if on {
+        Color::srgb_u8(0x1f, 0x6f, 0xc5)
+    } else {
+        t.disabled_foreground
+    }
 }
 
 fn knob_left(on: bool) -> f32 {
@@ -146,7 +166,10 @@ fn knob_left(on: bool) -> f32 {
 fn on_activate(ev: On<Activate>, mut q: Query<&mut SwitchState>, mut commands: Commands) {
     if let Ok(mut s) = q.get_mut(ev.entity) {
         s.on = !s.on;
-        commands.trigger(SwitchChange { entity: ev.entity, on: s.on });
+        commands.trigger(SwitchChange {
+            entity: ev.entity,
+            on: s.on,
+        });
     }
 }
 

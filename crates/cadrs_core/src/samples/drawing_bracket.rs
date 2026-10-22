@@ -54,7 +54,13 @@ fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> SketchOp {
     }
 }
 
-fn fillet(s: &mut dyn Studio, el: ElementId, sketch: FeatureId, corner: Vec2, radius: f64) -> Result<(), CommandError> {
+fn fillet(
+    s: &mut dyn Studio,
+    el: ElementId,
+    sketch: FeatureId,
+    corner: Vec2,
+    radius: f64,
+) -> Result<(), CommandError> {
     let p = {
         let g = &s
             .document()
@@ -63,12 +69,17 @@ fn fillet(s: &mut dyn Studio, el: ElementId, sketch: FeatureId, corner: Vec2, ra
             .and_then(|f| f.sketch())
             .ok_or_else(|| CommandError::Invalid("sketch not found".into()))?
             .geometry;
-        g.point_at(corner, 1e-9).ok_or_else(|| CommandError::Invalid("corner not found".into()))?
+        g.point_at(corner, 1e-9)
+            .ok_or_else(|| CommandError::Invalid("corner not found".into()))?
     };
     s.run(&EditSketch {
         element: el,
         feature: sketch,
-        op: SketchOp::Fillet { corner: p, radius, equal_to: None },
+        op: SketchOp::Fillet {
+            corner: p,
+            radius,
+            equal_to: None,
+        },
     })
 }
 
@@ -90,28 +101,56 @@ pub fn extrude(
         .ok_or_else(|| CommandError::Invalid("sketch not found".into()))?;
     let regions = super::region_refs(sketch, &g, seeds);
     if regions.len() != seeds.len() {
-        return Err(CommandError::Invalid("a region of the sample is missing".into()));
+        return Err(CommandError::Invalid(
+            "a region of the sample is missing".into(),
+        ));
     }
     let mut e = super::extrude_of(regions, 10.0);
     set(&mut e);
-    s.run(&AddExtrude { element: el, feature, extrude: ExtrudeFeature::default() })?;
-    s.run(&SetExtrude { element: el, feature, extrude: e, label: "Extrude".into() })?;
+    s.run(&AddExtrude {
+        element: el,
+        feature,
+        extrude: ExtrudeFeature::default(),
+    })?;
+    s.run(&SetExtrude {
+        element: el,
+        feature,
+        extrude: e,
+        label: "Extrude".into(),
+    })?;
     Ok(())
 }
 
 /// Builds the bracket in Part Studio `el`.
 pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
     let v = Vec2::new;
-    s.run(&AddSketch { element: el, feature: SKETCH_1, plane: Some(PlaneRef::Top) })?;
-    s.run(&EditSketch { element: el, feature: SKETCH_1, op: rect(-PLATE_X, -PLATE_Y, PLATE_X, PLATE_Y) })?;
-    for c in [v(-PLATE_X, -PLATE_Y), v(PLATE_X, -PLATE_Y), v(PLATE_X, PLATE_Y), v(-PLATE_X, PLATE_Y)] {
+    s.run(&AddSketch {
+        element: el,
+        feature: SKETCH_1,
+        plane: Some(PlaneRef::Top),
+    })?;
+    s.run(&EditSketch {
+        element: el,
+        feature: SKETCH_1,
+        op: rect(-PLATE_X, -PLATE_Y, PLATE_X, PLATE_Y),
+    })?;
+    for c in [
+        v(-PLATE_X, -PLATE_Y),
+        v(PLATE_X, -PLATE_Y),
+        v(PLATE_X, PLATE_Y),
+        v(-PLATE_X, PLATE_Y),
+    ] {
         fillet(s, el, SKETCH_1, c, PLATE_R)?;
     }
     for (sx, sy) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
         s.run(&EditSketch {
             element: el,
             feature: SKETCH_1,
-            op: SketchOp::AddCircle { center: v(sx * HOLE_X, sy * HOLE_Y), radius: HOLE_R, construction: false },
+            op: SketchOp::AddCircle {
+                center: v(sx * HOLE_X, sy * HOLE_Y),
+                radius: HOLE_R,
+                construction: false,
+            },
         })?;
     }
     extrude(s, el, SKETCH_1, EXTRUDE_1, &[v(0.0, 0.0)], |e| {
@@ -119,8 +158,16 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
         e.depth_expr = format!("{PLATE_T} mm");
     })?;
     // The upright on Front: sketch x = model X, sketch y = model Z.
-    s.run(&AddSketch { element: el, feature: SKETCH_2, plane: Some(PlaneRef::Front) })?;
-    s.run(&EditSketch { element: el, feature: SKETCH_2, op: rect(-UP_X, PLATE_T, UP_X, UP_TOP) })?;
+    s.run(&AddSketch {
+        element: el,
+        feature: SKETCH_2,
+        plane: Some(PlaneRef::Front),
+    })?;
+    s.run(&EditSketch {
+        element: el,
+        feature: SKETCH_2,
+        op: rect(-UP_X, PLATE_T, UP_X, UP_TOP),
+    })?;
     fillet(s, el, SKETCH_2, v(UP_X, UP_TOP), UP_R)?;
     let corner = s
         .document()
@@ -132,12 +179,21 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
     s.run(&EditSketch {
         element: el,
         feature: SKETCH_2,
-        op: SketchOp::Chamfer { corner, d1: UP_CHAMFER, d2: UP_CHAMFER, equal_to: None },
+        op: SketchOp::Chamfer {
+            corner,
+            d1: UP_CHAMFER,
+            d2: UP_CHAMFER,
+            equal_to: None,
+        },
     })?;
     s.run(&EditSketch {
         element: el,
         feature: SKETCH_2,
-        op: SketchOp::AddCircle { center: v(0.0, UP_HOLE_Z), radius: UP_HOLE_R, construction: false },
+        op: SketchOp::AddCircle {
+            center: v(0.0, UP_HOLE_Z),
+            radius: UP_HOLE_R,
+            construction: false,
+        },
     })?;
     extrude(s, el, SKETCH_2, EXTRUDE_2, &[v(0.0, PLATE_T + 4.0)], |e| {
         e.op = BooleanOp::Add;
@@ -145,6 +201,10 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
         e.depth = UP_T;
         e.depth_expr = format!("{UP_T} mm");
     })?;
-    s.run(&RenamePart { element: el, part: PART, name: "Bracket".into() })?;
+    s.run(&RenamePart {
+        element: el,
+        part: PART,
+        name: "Bracket".into(),
+    })?;
     Ok(())
 }

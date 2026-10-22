@@ -44,7 +44,7 @@ use cadrs_sketch::{PlaneRef, SketchOp, Vec2};
 use crate::assembly::commands::{AddMateFeature, InsertInstance, SetInstancesFixed};
 use crate::assembly::connector::{ConnectorFrame, MateConnector};
 use crate::assembly::mate::{Mate, MateFeature, MateId, MateKind, MateType};
-use crate::assembly::standard::{StandardPart, StandardSpec, Stacking, plan_insert, site_of_edge};
+use crate::assembly::standard::{Stacking, StandardPart, StandardSpec, plan_insert, site_of_edge};
 use crate::assembly::{self, Instance, InstanceId, InstanceSource, Pose};
 use crate::command::{CommandError, History};
 use crate::commands::{AddExtrude, AddSketch, EditSketch, RenamePart, SetExtrude, SetPartMaterial};
@@ -66,7 +66,8 @@ const fn mid(n: u128) -> MateId {
 
 pub const DOCUMENT: DocumentId = DocumentId::from_u128(0x3e50_0000_0000_0000_0000_0000_0000_0100);
 /// Part Studio CARBURETOR.
-pub const CARBURETOR_STUDIO: ElementId = ElementId::from_u128(0x3e50_0000_0000_0000_0000_0000_0000_0101);
+pub const CARBURETOR_STUDIO: ElementId =
+    ElementId::from_u128(0x3e50_0000_0000_0000_0000_0000_0000_0101);
 /// Assembly CARBURETOR.
 pub const CARBURETOR: ElementId = ElementId::from_u128(0x3e50_0000_0000_0000_0000_0000_0000_0102);
 /// Part Studio DRILL BODY.
@@ -149,7 +150,12 @@ pub fn gasket_volume(thickness: f64) -> f64 {
 fn rect(l: f64, w: f64) -> SketchOp {
     let (hx, hy) = (l / 2.0, w / 2.0);
     SketchOp::AddPolyline {
-        points: vec![Vec2::new(-hx, -hy), Vec2::new(hx, -hy), Vec2::new(hx, hy), Vec2::new(-hx, hy)],
+        points: vec![
+            Vec2::new(-hx, -hy),
+            Vec2::new(hx, -hy),
+            Vec2::new(hx, hy),
+            Vec2::new(-hx, hy),
+        ],
         closed: true,
         construction: false,
         label: "Add rectangle",
@@ -170,10 +176,26 @@ fn block(
     (depth, down): (f64, bool),
     (name, number, description): (&str, &str, &str),
 ) -> Result<(), CommandError> {
-    s.run(&AddSketch { element: el, feature: sketch, plane: Some(PlaneRef::Top) })?;
-    s.run(&EditSketch { element: el, feature: sketch, op: rect(l, w) })?;
+    s.run(&AddSketch {
+        element: el,
+        feature: sketch,
+        plane: Some(PlaneRef::Top),
+    })?;
+    s.run(&EditSketch {
+        element: el,
+        feature: sketch,
+        op: rect(l, w),
+    })?;
     for &(x, y, r) in circles {
-        s.run(&EditSketch { element: el, feature: sketch, op: SketchOp::AddCircle { center: Vec2::new(x, y), radius: r, construction: false } })?;
+        s.run(&EditSketch {
+            element: el,
+            feature: sketch,
+            op: SketchOp::AddCircle {
+                center: Vec2::new(x, y),
+                radius: r,
+                construction: false,
+            },
+        })?;
     }
     let g = s
         .document()
@@ -184,30 +206,80 @@ fn block(
         .ok_or_else(|| CommandError::Invalid("the sketch".into()))?;
     let regions = super::region_refs(sketch, &g, &[seed]);
     if regions.len() != 1 {
-        return Err(CommandError::Invalid(format!("{name}: the region is missing")));
+        return Err(CommandError::Invalid(format!(
+            "{name}: the region is missing"
+        )));
     }
-    s.run(&AddExtrude { element: el, feature: extrude, extrude: ExtrudeFeature::default() })?;
+    s.run(&AddExtrude {
+        element: el,
+        feature: extrude,
+        extrude: ExtrudeFeature::default(),
+    })?;
     let mut e = super::extrude_of(regions, depth);
     e.flip = down;
-    s.run(&SetExtrude { element: el, feature: extrude, extrude: e, label: "Extrude".into() })?;
+    s.run(&SetExtrude {
+        element: el,
+        feature: extrude,
+        extrude: e,
+        label: "Extrude".into(),
+    })?;
     let part = PartId::new(extrude, 0);
-    s.run(&RenamePart { element: el, part, name: name.into() })?;
-    s.run(&SetPartMaterial { element: el, parts: vec![part], material: crate::material::library("Aluminum - 6061") })?;
-    props(s, PropertyOwner::Part { element: el, part }, number, description)
+    s.run(&RenamePart {
+        element: el,
+        part,
+        name: name.into(),
+    })?;
+    s.run(&SetPartMaterial {
+        element: el,
+        parts: vec![part],
+        material: crate::material::library("Aluminum - 6061"),
+    })?;
+    props(
+        s,
+        PropertyOwner::Part { element: el, part },
+        number,
+        description,
+    )
 }
 
-fn props(s: &mut dyn Studio, owner: PropertyOwner, number: &str, description: &str) -> Result<(), CommandError> {
+fn props(
+    s: &mut dyn Studio,
+    owner: PropertyOwner,
+    number: &str,
+    description: &str,
+) -> Result<(), CommandError> {
     s.run(&SetProperties {
         owners: vec![owner],
-        values: vec![(PropertyKey::PartNumber, PropertyValue::Text(number.into())), (PropertyKey::Description, PropertyValue::Text(description.into()))],
+        values: vec![
+            (PropertyKey::PartNumber, PropertyValue::Text(number.into())),
+            (
+                PropertyKey::Description,
+                PropertyValue::Text(description.into()),
+            ),
+        ],
         label: "Properties".into(),
     })
 }
 
 /// A Fastened mate `name` (`id`) of assembly `el` between connectors `a` and `b` (frames in
 /// their instances' coordinates); nothing moves.
-fn fastened(s: &mut dyn Studio, el: ElementId, id: MateId, name: &str, a: MateConnector, b: MateConnector) -> Result<(), CommandError> {
-    s.run(&AddMateFeature { element: el, feature: MateFeature::new(id, name, MateKind::Mate(Mate::new(MateType::Fastened, a, b))), poses: Vec::new() })
+fn fastened(
+    s: &mut dyn Studio,
+    el: ElementId,
+    id: MateId,
+    name: &str,
+    a: MateConnector,
+    b: MateConnector,
+) -> Result<(), CommandError> {
+    s.run(&AddMateFeature {
+        element: el,
+        feature: MateFeature::new(
+            id,
+            name,
+            MateKind::Mate(Mate::new(MateType::Fastened, a, b)),
+        ),
+        poses: Vec::new(),
+    })
 }
 
 fn up(origin: [f64; 3]) -> ConnectorFrame {
@@ -224,14 +296,22 @@ pub fn document() -> Result<Document, CommandError> {
         (DRILL_STUDIO, DRILL_STUDIO_NAME, false),
         (POWER_TRAIN, POWER_TRAIN_NAME, true),
     ] {
-        let mut el = if assembly { Element::assembly(name) } else { Element::part_studio(name) };
+        let mut el = if assembly {
+            Element::assembly(name)
+        } else {
+            Element::part_studio(name)
+        };
         el.id = id;
         doc.elements.push(el);
     }
     let mut h = History::default();
     let mut st = DocHistory(&mut doc, &mut h);
     let s: &mut dyn Studio = &mut st;
-    let holes = [(0.0, 0.0, BORE_R), (-HOLE_X, 0.0, HOLE_R), (HOLE_X, 0.0, HOLE_R)];
+    let holes = [
+        (0.0, 0.0, BORE_R),
+        (-HOLE_X, 0.0, HOLE_R),
+        (HOLE_X, 0.0, HOLE_R),
+    ];
     block(
         s,
         CARBURETOR_STUDIO,
@@ -257,22 +337,76 @@ pub fn document() -> Result<Document, CommandError> {
         DRILL_STUDIO,
         (DRILL_SKETCH, DRILL_EXTRUDE),
         (DRILL_L, DRILL_W),
-        &[(0.0, 0.0, BORE_R), (-HOLE_X, 0.0, TAP_R), (HOLE_X, 0.0, TAP_R)],
+        &[
+            (0.0, 0.0, BORE_R),
+            (-HOLE_X, 0.0, TAP_R),
+            (HOLE_X, 0.0, TAP_R),
+        ],
         Vec2::new(0.0, DRILL_W / 2.0 - 5.0),
         (DRILL_H, true),
         (DRILL_NAME, PART_NUMBERS[2].1, "Drill body casting"),
     )?;
     // CARBURETOR: the manifold fixed, the body fastened under it.
     let part = |element, part| InstanceSource::Part { element, part };
-    s.run(&InsertInstance { element: CARBURETOR, instance: Instance::new(MANIFOLD_INSTANCE, part(CARBURETOR_STUDIO, MANIFOLD_PART), Pose::IDENTITY) })?;
-    s.run(&SetInstancesFixed { element: CARBURETOR, instances: vec![MANIFOLD_INSTANCE], fixed: true })?;
-    s.run(&InsertInstance { element: CARBURETOR, instance: Instance::new(BODY_INSTANCE, part(CARBURETOR_STUDIO, BODY_PART), Pose::IDENTITY) })?;
-    fastened(s, CARBURETOR, mid(1), "Fastened 1", MateConnector::at(BODY_INSTANCE, up([0.0; 3])), MateConnector::at(MANIFOLD_INSTANCE, up([0.0; 3])))?;
-    props(s, PropertyOwner::Assembly { element: CARBURETOR }, PART_NUMBERS[3].1, "Carburetor assembly")?;
+    s.run(&InsertInstance {
+        element: CARBURETOR,
+        instance: Instance::new(
+            MANIFOLD_INSTANCE,
+            part(CARBURETOR_STUDIO, MANIFOLD_PART),
+            Pose::IDENTITY,
+        ),
+    })?;
+    s.run(&SetInstancesFixed {
+        element: CARBURETOR,
+        instances: vec![MANIFOLD_INSTANCE],
+        fixed: true,
+    })?;
+    s.run(&InsertInstance {
+        element: CARBURETOR,
+        instance: Instance::new(
+            BODY_INSTANCE,
+            part(CARBURETOR_STUDIO, BODY_PART),
+            Pose::IDENTITY,
+        ),
+    })?;
+    fastened(
+        s,
+        CARBURETOR,
+        mid(1),
+        "Fastened 1",
+        MateConnector::at(BODY_INSTANCE, up([0.0; 3])),
+        MateConnector::at(MANIFOLD_INSTANCE, up([0.0; 3])),
+    )?;
+    props(
+        s,
+        PropertyOwner::Assembly {
+            element: CARBURETOR,
+        },
+        PART_NUMBERS[3].1,
+        "Carburetor assembly",
+    )?;
     // FUEL AND POWER TRAIN: the drill body, fixed.
-    s.run(&InsertInstance { element: POWER_TRAIN, instance: Instance::new(DRILL_INSTANCE, part(DRILL_STUDIO, DRILL_PART), Pose::IDENTITY) })?;
-    s.run(&SetInstancesFixed { element: POWER_TRAIN, instances: vec![DRILL_INSTANCE], fixed: true })?;
-    props(s, PropertyOwner::Assembly { element: POWER_TRAIN }, PART_NUMBERS[4].1, "Fuel and power train")?;
+    s.run(&InsertInstance {
+        element: POWER_TRAIN,
+        instance: Instance::new(
+            DRILL_INSTANCE,
+            part(DRILL_STUDIO, DRILL_PART),
+            Pose::IDENTITY,
+        ),
+    })?;
+    s.run(&SetInstancesFixed {
+        element: POWER_TRAIN,
+        instances: vec![DRILL_INSTANCE],
+        fixed: true,
+    })?;
+    props(
+        s,
+        PropertyOwner::Assembly {
+            element: POWER_TRAIN,
+        },
+        PART_NUMBERS[4].1,
+        "Fuel and power train",
+    )?;
     Ok(doc)
 }
 
@@ -285,10 +419,18 @@ pub fn file(document: Document) -> crate::store::DocumentFile {
 // The exercise in code
 
 /// The planar face of `part` (built in `el`) with outward normal `n` that contains `p`.
-pub fn face_at(doc: &Document, el: ElementId, part: PartId, n: [f64; 3], p: [f64; 3]) -> Result<FaceRef, CommandError> {
+pub fn face_at(
+    doc: &Document,
+    el: ElementId,
+    part: PartId,
+    n: [f64; 3],
+    p: [f64; 3],
+) -> Result<FaceRef, CommandError> {
     let e = doc.element(el).ok_or(CommandError::ElementNotFound(el))?;
     let build = crate::rebuild::build(e.features());
-    let part = build.part(part).ok_or_else(|| CommandError::Invalid("the part isn't built".into()))?;
+    let part = build
+        .part(part)
+        .ok_or_else(|| CommandError::Invalid("the part isn't built".into()))?;
     let s = &part.solid;
     let i = (0..s.faces.len())
         .find(|&i| {
@@ -299,17 +441,46 @@ pub fn face_at(doc: &Document, el: ElementId, part: PartId, n: [f64; 3], p: [f64
             }) && s.face_contains(i, p)
         })
         .ok_or_else(|| CommandError::Invalid("no face there".into()))?;
-    Ok(FaceRef { part: part.id, face: s.faces[i].name, seed: p })
+    Ok(FaceRef {
+        part: part.id,
+        face: s.faces[i].name,
+        seed: p,
+    })
 }
 
 /// Step 2: the MANIFOLD's mounting face extruded `thickness` mm, New, renamed
 /// CARBURETOR_GASKET.
 pub fn add_gasket(s: &mut dyn Studio, thickness: f64) -> Result<(), CommandError> {
-    let face = face_at(s.document(), CARBURETOR_STUDIO, MANIFOLD_PART, [0.0, 0.0, 1.0], [0.0, MANIFOLD_W / 2.0 - 2.0, MANIFOLD_T])?;
-    s.run(&AddExtrude { element: CARBURETOR_STUDIO, feature: GASKET_EXTRUDE, extrude: ExtrudeFeature::default() })?;
-    let e = ExtrudeFeature { faces: vec![face], depth: thickness, depth_expr: format!("{thickness} mm"), op: BooleanOp::New, ..ExtrudeFeature::default() };
-    s.run(&SetExtrude { element: CARBURETOR_STUDIO, feature: GASKET_EXTRUDE, extrude: e, label: "Extrude".into() })?;
-    s.run(&RenamePart { element: CARBURETOR_STUDIO, part: GASKET_PART, name: GASKET_NAME.into() })
+    let face = face_at(
+        s.document(),
+        CARBURETOR_STUDIO,
+        MANIFOLD_PART,
+        [0.0, 0.0, 1.0],
+        [0.0, MANIFOLD_W / 2.0 - 2.0, MANIFOLD_T],
+    )?;
+    s.run(&AddExtrude {
+        element: CARBURETOR_STUDIO,
+        feature: GASKET_EXTRUDE,
+        extrude: ExtrudeFeature::default(),
+    })?;
+    let e = ExtrudeFeature {
+        faces: vec![face],
+        depth: thickness,
+        depth_expr: format!("{thickness} mm"),
+        op: BooleanOp::New,
+        ..ExtrudeFeature::default()
+    };
+    s.run(&SetExtrude {
+        element: CARBURETOR_STUDIO,
+        feature: GASKET_EXTRUDE,
+        extrude: e,
+        label: "Extrude".into(),
+    })?;
+    s.run(&RenamePart {
+        element: CARBURETOR_STUDIO,
+        part: GASKET_PART,
+        name: GASKET_NAME.into(),
+    })
 }
 
 /// Step 9's edit: the gasket's extrude `thickness` mm deep.
@@ -323,37 +494,81 @@ pub fn set_gasket_thickness(s: &mut dyn Studio, thickness: f64) -> Result<(), Co
         .ok_or_else(|| CommandError::Invalid("the gasket's extrude is missing".into()))?;
     e.depth = thickness;
     e.depth_expr = format!("{thickness} mm");
-    s.run(&SetExtrude { element: CARBURETOR_STUDIO, feature: GASKET_EXTRUDE, extrude: e, label: "Extrude".into() })
+    s.run(&SetExtrude {
+        element: CARBURETOR_STUDIO,
+        feature: GASKET_EXTRUDE,
+        extrude: e,
+        label: "Extrude".into(),
+    })
 }
 
 /// Step 3: the gasket in CARBURETOR where it was made, Fastened to the manifold at the centre
 /// of the bolt hole at x = +15.5 on the faces they share (z 20).
 pub fn insert_gasket(s: &mut dyn Studio) -> Result<(), CommandError> {
-    let source = InstanceSource::Part { element: CARBURETOR_STUDIO, part: GASKET_PART };
-    s.run(&InsertInstance { element: CARBURETOR, instance: Instance::new(GASKET_INSTANCE, source, Pose::IDENTITY) })?;
+    let source = InstanceSource::Part {
+        element: CARBURETOR_STUDIO,
+        part: GASKET_PART,
+    };
+    s.run(&InsertInstance {
+        element: CARBURETOR,
+        instance: Instance::new(GASKET_INSTANCE, source, Pose::IDENTITY),
+    })?;
     let hole = up([HOLE_X, 0.0, MANIFOLD_T]);
-    fastened(s, CARBURETOR, mid(2), "Fastened 2", MateConnector::at(GASKET_INSTANCE, hole), MateConnector::at(MANIFOLD_INSTANCE, hole))
+    fastened(
+        s,
+        CARBURETOR,
+        mid(2),
+        "Fastened 2",
+        MateConnector::at(GASKET_INSTANCE, hole),
+        MateConnector::at(MANIFOLD_INSTANCE, hole),
+    )
 }
 
 /// Where step 4 puts CARBURETOR in FUEL AND POWER TRAIN: half a turn about X through
 /// z = (20 + 2)/2, so the 2 mm gasket's top face lands on the drill body's top (z 0).
 pub fn carburetor_pose() -> Pose {
-    Pose::rotation_about([0.0, 0.0, (MANIFOLD_T + GASKET_T) / 2.0], [1.0, 0.0, 0.0], PI)
+    Pose::rotation_about(
+        [0.0, 0.0, (MANIFOLD_T + GASKET_T) / 2.0],
+        [1.0, 0.0, 0.0],
+        PI,
+    )
 }
 
 /// Step 4: CARBURETOR in FUEL AND POWER TRAIN, flipped onto the drill body, Fastened at the
 /// bore's centre (the gasket's top face to the drill body's top face).
 pub fn insert_carburetor(s: &mut dyn Studio) -> Result<(), CommandError> {
-    s.run(&InsertInstance { element: POWER_TRAIN, instance: Instance::new(CARBURETOR_INSTANCE, InstanceSource::Assembly { element: CARBURETOR }, carburetor_pose()) })?;
+    s.run(&InsertInstance {
+        element: POWER_TRAIN,
+        instance: Instance::new(
+            CARBURETOR_INSTANCE,
+            InstanceSource::Assembly {
+                element: CARBURETOR,
+            },
+            carburetor_pose(),
+        ),
+    })?;
     let gasket = assembly::structure::derive(CARBURETOR_INSTANCE, GASKET_INSTANCE);
     let mut a = MateConnector::at(gasket, up([0.0, 0.0, MANIFOLD_T + GASKET_T]));
     a.flip = true;
-    fastened(s, POWER_TRAIN, mid(3), "Fastened 1", a, MateConnector::at(DRILL_INSTANCE, up([0.0; 3])))
+    fastened(
+        s,
+        POWER_TRAIN,
+        mid(3),
+        "Fastened 1",
+        a,
+        MateConnector::at(DRILL_INSTANCE, up([0.0; 3])),
+    )
 }
 
 /// ISO 4762 M5 × 25.
 pub fn screw_spec() -> StandardSpec {
-    let mut s = StandardSpec::new("ISO", "Bolts & screws", "Socket head screws", "Socket head cap screw").expect("in the library");
+    let mut s = StandardSpec::new(
+        "ISO",
+        "Bolts & screws",
+        "Socket head screws",
+        "Socket head cap screw",
+    )
+    .expect("in the library");
     s.size = "M5".into();
     s.length = Some(25.0);
     s.normalize();
@@ -363,7 +578,11 @@ pub fn screw_spec() -> StandardSpec {
 /// Step 5: two ISO 4762 M5 × 25 screws on the manifold's bolt holes, on its back face (the
 /// hole edges at z = 22 in FUEL AND POWER TRAIN), batch placed with their Fastened mates.
 pub fn insert_screws(doc: &mut Document, h: &mut History) -> Result<(), CommandError> {
-    let asm = doc.element(POWER_TRAIN).and_then(|e| e.assembly_model()).cloned().ok_or(CommandError::ElementNotFound(POWER_TRAIN))?;
+    let asm = doc
+        .element(POWER_TRAIN)
+        .and_then(|e| e.assembly_model())
+        .cloned()
+        .ok_or(CommandError::ElementNotFound(POWER_TRAIN))?;
     let mut builds: HashMap<ElementId, Arc<crate::rebuild::Build>> = HashMap::new();
     for o in assembly::structure::occurrences(doc, &asm) {
         if let std::collections::hash_map::Entry::Vacant(e) = builds.entry(o.element)
@@ -374,22 +593,41 @@ pub fn insert_screws(doc: &mut Document, h: &mut History) -> Result<(), CommandE
     }
     let solids = assembly::occurrence_solids(doc, &asm, |e| builds.get(&e).cloned());
     let manifold = assembly::structure::derive(CARBURETOR_INSTANCE, MANIFOLD_INSTANCE);
-    let solid = solids.get(&manifold).ok_or_else(|| CommandError::Invalid("no manifold".into()))?;
+    let solid = solids
+        .get(&manifold)
+        .ok_or_else(|| CommandError::Invalid("no manifold".into()))?;
     // The back face is z = 0 in the manifold's own coordinates (the occurrence's solid is in
     // its studio's).
     let mut sites: Vec<_> = solid
         .edges
         .iter()
-        .filter(|e| e.circle.is_some_and(|c| (c.radius - HOLE_R).abs() < 1e-6 && c.center[2].abs() < 1e-6))
-        .filter_map(|e| site_of_edge(solid, manifold, &e.name).map(|s| (e.circle.map_or(0.0, |c| c.center[0]), s)))
+        .filter(|e| {
+            e.circle
+                .is_some_and(|c| (c.radius - HOLE_R).abs() < 1e-6 && c.center[2].abs() < 1e-6)
+        })
+        .filter_map(|e| {
+            site_of_edge(solid, manifold, &e.name)
+                .map(|s| (e.circle.map_or(0.0, |c| c.center[0]), s))
+        })
         .collect();
     sites.sort_by(|a, b| a.0.total_cmp(&b.0));
     if sites.len() != 2 {
-        return Err(CommandError::Invalid(format!("the manifold has {} bolt hole edges on its back", sites.len())));
+        return Err(CommandError::Invalid(format!(
+            "the manifold has {} bolt hole edges on its back",
+            sites.len()
+        )));
     }
     let sites: Vec<_> = sites.into_iter().map(|(_, s)| s).collect();
     let part = StandardPart::new(&screw_spec())?;
-    let mut cmd = plan_insert(doc, POWER_TRAIN, part, &sites, false, Stacking::Plain, &solids)?;
+    let mut cmd = plan_insert(
+        doc,
+        POWER_TRAIN,
+        part,
+        &sites,
+        false,
+        Stacking::Plain,
+        &solids,
+    )?;
     for (k, ins) in cmd.inserts.iter_mut().enumerate() {
         ins.instance = SCREW_INSTANCES[k];
         ins.mate = mid(10 + k as u128);

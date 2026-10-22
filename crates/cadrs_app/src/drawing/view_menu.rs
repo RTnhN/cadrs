@@ -20,7 +20,9 @@ use cadrs_core::ElementId;
 use cadrs_drawing::style::TangentEdges;
 use cadrs_drawing::{DrawingOp, View, ViewId};
 use cadrs_ui::prelude::*;
-use cadrs_ui::{Button, CheckboxChange, CheckboxState, DialogClose, MenuEntry, Select, SelectState, form_row};
+use cadrs_ui::{
+    Button, CheckboxChange, CheckboxState, DialogClose, MenuEntry, Select, SelectState, form_row,
+};
 
 use super::view_tools::{ViewTool, edit_drawing, scales, sheet_center};
 use super::views::{ViewCache, sheet_bounds, studio, view_at};
@@ -34,7 +36,10 @@ impl Plugin for ViewMenuPlugin {
         app.add_observer(on_view_menu_action)
             .add_observer(on_sketch_check)
             .add_observer(on_scale_change)
-            .add_systems(Update, filter_sketch_list.run_if(in_state(AppState::Document)));
+            .add_systems(
+                Update,
+                filter_sketch_list.run_if(in_state(AppState::Document)),
+            );
     }
 }
 
@@ -73,7 +78,13 @@ pub fn open_space_menu(world: &mut World, pos: Vec2) {
         let area = super::sheet_area(&rect, ui);
         let p = super::screen_to_sheet(view, area, pos);
         let pad = 6.0 / view.ppm as f64;
-        view_at(d, ui.sheet_index(element, d), world.resource::<ViewCache>(), p, pad)
+        view_at(
+            d,
+            ui.sheet_index(element, d),
+            world.resource::<ViewCache>(),
+            p,
+            pad,
+        )
     })();
     match hit {
         Some(v) => {
@@ -104,31 +115,61 @@ pub fn open_view_menu(world: &mut World, pos: Vec2, id: ViewId) {
         .map(|e| e.name.clone())
         .unwrap_or_else(|| "the referenced tab".into());
     // Insert BOM is for a view of an assembly (P3C.5, D11.1).
-    let is_assembly = cadrs_core::drawing_assembly::is_assembly(&doc.doc, ElementId(v.reference.element));
+    let is_assembly =
+        cadrs_core::drawing_assembly::is_assembly(&doc.doc, ElementId(v.reference.element));
     let theme = world.resource::<Theme>().clone();
     let tangent = |t: TangentEdges, name: &'static str, label: &'static str| {
         let item = MenuItem::new(name, label);
-        MenuEntry::Item(if v.tangent_edges == t { item.icon("check") } else { item })
+        MenuEntry::Item(if v.tangent_edges == t {
+            item.icon("check")
+        } else {
+            item
+        })
     };
     let menu = Menu::new("view-context-menu")
         .min_width(230.0)
         .item(MenuItem::new(
             "view-menu-hidden-lines",
-            if v.hidden_lines { "Hide hidden lines" } else { "Show hidden lines" },
+            if v.hidden_lines {
+                "Hide hidden lines"
+            } else {
+                "Show hidden lines"
+            },
         ))
-        .item(MenuItem::new("view-menu-tangent-edges", "Tangent edges").submenu(vec![
-            tangent(TangentEdges::Hidden, "view-menu-tangent-hidden", "Hidden"),
-            tangent(TangentEdges::Solid, "view-menu-tangent-solid", "Solid"),
-            tangent(TangentEdges::Phantom, "view-menu-tangent-phantom", "Phantom"),
-        ]))
+        .item(
+            MenuItem::new("view-menu-tangent-edges", "Tangent edges").submenu(vec![
+                tangent(TangentEdges::Hidden, "view-menu-tangent-hidden", "Hidden"),
+                tangent(TangentEdges::Solid, "view-menu-tangent-solid", "Solid"),
+                tangent(
+                    TangentEdges::Phantom,
+                    "view-menu-tangent-phantom",
+                    "Phantom",
+                ),
+            ]),
+        )
         .item(MenuItem::new(
             "view-menu-shaded",
-            if v.shaded { "Hide shaded view" } else { "Show shaded view" },
+            if v.shaded {
+                "Hide shaded view"
+            } else {
+                "Show shaded view"
+            },
         ))
-        .item(MenuItem::new("view-menu-threads", if v.threads { "Hide threads" } else { "Show threads" }))
+        .item(MenuItem::new(
+            "view-menu-threads",
+            if v.threads {
+                "Hide threads"
+            } else {
+                "Show threads"
+            },
+        ))
         .item(MenuItem::new(
             "view-menu-part-intersections",
-            if v.part_intersections { "Hide part intersections" } else { "Show part intersections" },
+            if v.part_intersections {
+                "Hide part intersections"
+            } else {
+                "Show part intersections"
+            },
         ))
         .item(
             MenuItem::new("view-menu-display-state", "Display state")
@@ -136,21 +177,40 @@ pub fn open_view_menu(world: &mut World, pos: Vec2, id: ViewId) {
                 .submenu(vec![]),
         )
         .separator()
-        .item(MenuItem::new("view-menu-projected", "Create projected view"))
+        .item(MenuItem::new(
+            "view-menu-projected",
+            "Create projected view",
+        ))
         .item(MenuItem::new("view-menu-properties", "View properties…"))
         .item(MenuItem::new("view-menu-front", "Bring to front").planned())
         .item(MenuItem::new("view-menu-back", "Send to back").planned())
         .separator()
-        .item(MenuItem::new("view-menu-bom", format!("Insert BOM for {reference}…")).disabled(!is_assembly))
+        .item(
+            MenuItem::new("view-menu-bom", format!("Insert BOM for {reference}…"))
+                .disabled(!is_assembly),
+        )
         .separator()
-        .item(MenuItem::new("view-menu-switch", format!("Switch to {reference}")))
+        .item(MenuItem::new(
+            "view-menu-switch",
+            format!("Switch to {reference}"),
+        ))
         .item(MenuItem::new("view-menu-move-to-sheet", "Move to sheet…"))
-        .item(MenuItem::new("view-menu-align-vertical", "Align view vertical"))
-        .item(MenuItem::new("view-menu-align-horizontal", "Align view horizontal"))
+        .item(MenuItem::new(
+            "view-menu-align-vertical",
+            "Align view vertical",
+        ))
+        .item(MenuItem::new(
+            "view-menu-align-horizontal",
+            "Align view horizontal",
+        ))
         .item(
             MenuItem::new(
                 "view-menu-suppress-alignment",
-                if v.align_suppressed { "Restore alignment with parent" } else { "Suppress alignment with parent" },
+                if v.align_suppressed {
+                    "Restore alignment with parent"
+                } else {
+                    "Suppress alignment with parent"
+                },
             )
             .disabled(v.fold.is_none() || v.parent.is_none()),
         )
@@ -159,8 +219,16 @@ pub fn open_view_menu(world: &mut World, pos: Vec2, id: ViewId) {
     let mut menu = menu;
     let removals = [
         (v.crop.is_some(), "view-menu-remove-crop", "Remove crop"),
-        (!v.breaks.is_empty(), "view-menu-remove-breaks", "Remove breaks"),
-        (v.broken_out.is_some(), "view-menu-remove-broken-out", "Remove broken-out section"),
+        (
+            !v.breaks.is_empty(),
+            "view-menu-remove-breaks",
+            "Remove breaks",
+        ),
+        (
+            v.broken_out.is_some(),
+            "view-menu-remove-broken-out",
+            "Remove broken-out section",
+        ),
     ];
     let extra = removals.iter().filter(|r| r.0).count();
     for (on, name, label) in removals {
@@ -170,7 +238,10 @@ pub fn open_view_menu(world: &mut World, pos: Vec2, id: ViewId) {
     }
     let menu = menu
         .separator()
-        .item(MenuItem::new("view-menu-clear-selection", "Clear selection"))
+        .item(MenuItem::new(
+            "view-menu-clear-selection",
+            "Clear selection",
+        ))
         .item(MenuItem::new("view-menu-zoom", "Zoom to fit"))
         .item(MenuItem::new("view-menu-delete", "Delete"));
     // The menu is tall (20 items): open it where it fits below the anchor, so it is never cut
@@ -192,7 +263,13 @@ pub fn set_view(world: &mut World, id: ViewId, label: &str, f: impl FnOnce(&mut 
         return;
     };
     f(&mut v);
-    edit_drawing(world, DrawingOp::SetView { view: v, label: label.into() });
+    edit_drawing(
+        world,
+        DrawingOp::SetView {
+            view: v,
+            label: label.into(),
+        },
+    );
 }
 
 fn on_view_menu_action(ev: On<MenuAction>, q: Query<&ViewMenuFor>, mut commands: Commands) {
@@ -211,27 +288,58 @@ pub(super) fn view_menu_action(w: &mut World, id: ViewId, item: &str) {
     match item {
         "view-menu-hidden-lines" => {
             let on = !v.hidden_lines;
-            set_view(w, id, if on { "Show hidden lines" } else { "Hide hidden lines" }, |v| v.hidden_lines = on);
+            set_view(
+                w,
+                id,
+                if on {
+                    "Show hidden lines"
+                } else {
+                    "Hide hidden lines"
+                },
+                |v| v.hidden_lines = on,
+            );
         }
-        "view-menu-tangent-hidden" => set_view(w, id, "Tangent edges: hidden", |v| v.tangent_edges = TangentEdges::Hidden),
-        "view-menu-tangent-solid" => set_view(w, id, "Tangent edges: solid", |v| v.tangent_edges = TangentEdges::Solid),
-        "view-menu-tangent-phantom" => {
-            set_view(w, id, "Tangent edges: phantom", |v| v.tangent_edges = TangentEdges::Phantom)
-        }
+        "view-menu-tangent-hidden" => set_view(w, id, "Tangent edges: hidden", |v| {
+            v.tangent_edges = TangentEdges::Hidden
+        }),
+        "view-menu-tangent-solid" => set_view(w, id, "Tangent edges: solid", |v| {
+            v.tangent_edges = TangentEdges::Solid
+        }),
+        "view-menu-tangent-phantom" => set_view(w, id, "Tangent edges: phantom", |v| {
+            v.tangent_edges = TangentEdges::Phantom
+        }),
         "view-menu-shaded" => {
             let on = !v.shaded;
-            set_view(w, id, if on { "Show shaded view" } else { "Hide shaded view" }, |v| v.shaded = on);
+            set_view(
+                w,
+                id,
+                if on {
+                    "Show shaded view"
+                } else {
+                    "Hide shaded view"
+                },
+                |v| v.shaded = on,
+            );
         }
         "view-menu-threads" => {
             let on = !v.threads;
-            set_view(w, id, if on { "Show threads" } else { "Hide threads" }, |v| v.threads = on);
+            set_view(
+                w,
+                id,
+                if on { "Show threads" } else { "Hide threads" },
+                |v| v.threads = on,
+            );
         }
         "view-menu-remove-crop" => set_view(w, id, "Remove crop", |v| v.crop = None),
         "view-menu-remove-breaks" => set_view(w, id, "Remove breaks", |v| v.breaks.clear()),
-        "view-menu-remove-broken-out" => set_view(w, id, "Remove broken-out section", |v| v.broken_out = None),
+        "view-menu-remove-broken-out" => {
+            set_view(w, id, "Remove broken-out section", |v| v.broken_out = None)
+        }
         "view-menu-part-intersections" => {
             let on = !v.part_intersections;
-            set_view(w, id, "Show part intersections", |v| v.part_intersections = on);
+            set_view(w, id, "Show part intersections", |v| {
+                v.part_intersections = on
+            });
         }
         "view-menu-projected" => {
             let mut ui = w.resource_mut::<DrawingUi>();
@@ -267,7 +375,11 @@ pub(super) fn view_menu_action(w: &mut World, id: ViewId, item: &str) {
             set_view(
                 w,
                 id,
-                if on { "Suppress alignment with parent" } else { "Restore alignment with parent" },
+                if on {
+                    "Suppress alignment with parent"
+                } else {
+                    "Restore alignment with parent"
+                },
                 |v| v.align_suppressed = on,
             );
             // Restoring alignment puts the view back on its parent's fold line.
@@ -279,7 +391,12 @@ pub(super) fn view_menu_action(w: &mut World, id: ViewId, item: &str) {
                 && let Some(n) = nv.fold_on_sheet(p.rotation)
             {
                 let a = cadrs_drawing::view::aligned_anchor(p.anchor, n, nv.anchor, None);
-                edit_drawing(w, DrawingOp::MoveViews { moves: vec![(id, a)] });
+                edit_drawing(
+                    w,
+                    DrawingOp::MoveViews {
+                        moves: vec![(id, a)],
+                    },
+                );
             }
         }
         "view-menu-sketches" => open_show_sketches(w, id),
@@ -309,13 +426,20 @@ fn zoom_to_view(w: &mut World, id: ViewId) {
     };
     let mut ui = w.resource_mut::<DrawingUi>();
     let area = super::sheet_area(&rect, &ui);
-    let (bw, bh) = ((hi[0] - lo[0]).max(1.0) as f32, (hi[1] - lo[1]).max(1.0) as f32);
+    let (bw, bh) = (
+        (hi[0] - lo[0]).max(1.0) as f32,
+        (hi[1] - lo[1]).max(1.0) as f32,
+    );
     let margin = 60.0;
-    let ppm = ((area.width() - 2.0 * margin).max(20.0) / bw).min((area.height() - 2.0 * margin).max(20.0) / bh);
+    let ppm = ((area.width() - 2.0 * margin).max(20.0) / bw)
+        .min((area.height() - 2.0 * margin).max(20.0) / bh);
     ui.views.insert(
         key,
         super::SheetView {
-            center: Vec2::new(((lo[0] + hi[0]) / 2.0) as f32, ((lo[1] + hi[1]) / 2.0) as f32),
+            center: Vec2::new(
+                ((lo[0] + hi[0]) / 2.0) as f32,
+                ((lo[1] + hi[1]) / 2.0) as f32,
+            ),
             ppm: ppm.clamp(0.05, 400.0),
             fitted: false,
         },
@@ -343,13 +467,16 @@ pub fn open_view_properties(world: &mut World, id: ViewId) {
     let Some((_, d)) = active_drawing(doc) else {
         return;
     };
-    let reference = super::reference_props(&doc.doc, Some(v.reference)).name.unwrap_or_default();
+    let reference = super::reference_props(&doc.doc, Some(v.reference))
+        .name
+        .unwrap_or_default();
     let studio_name = doc
         .doc
         .element(ElementId(v.reference.element))
         .map(|e| e.name.clone())
         .unwrap_or_default();
-    let sheets: Vec<(cadrs_drawing::SheetId, String)> = d.sheets.iter().map(|s| (s.id, s.name.clone())).collect();
+    let sheets: Vec<(cadrs_drawing::SheetId, String)> =
+        d.sheets.iter().map(|s| (s.id, s.name.clone())).collect();
     let scale = d.effective_scale(id).unwrap_or(v.scale);
     let list = scales(scale);
     let scale_selected = list.iter().position(|s| *s == scale).unwrap_or(0);
@@ -374,7 +501,12 @@ pub fn open_view_properties(world: &mut World, id: ViewId) {
                 b.spawn(form_row(t, "view-props-reference-row", "Reference", lw))
                     .with_children(|r| {
                         r.spawn((
-                            t.text(reference.clone(), t.font_base, FontWeight::MEDIUM, t.foreground),
+                            t.text(
+                                reference.clone(),
+                                t.font_base,
+                                FontWeight::MEDIUM,
+                                t.foreground,
+                            ),
                             Node {
                                 flex_grow: 1.0,
                                 ..default()
@@ -387,19 +519,24 @@ pub fn open_view_properties(world: &mut World, id: ViewId) {
                                 .ghost()
                                 .tooltip(format!("Switch to {studio_name}"))
                                 .build(t),
-                            observe(|_: On<Activate>, q: Query<(Entity, &ViewPropsDialog)>, mut commands: Commands| {
-                                if let Some((e, d)) = q.iter().next() {
-                                    let id = d.view;
-                                    commands.trigger(DialogClose { entity: e });
-                                    commands.queue(move |w: &mut World| {
-                                        if let Some((_, v)) = find_view(w, id)
-                                            && let Some(mut doc) = w.get_resource_mut::<ActiveDocument>()
-                                        {
-                                            doc.set_active(ElementId(v.reference.element));
-                                        }
-                                    });
-                                }
-                            }),
+                            observe(
+                                |_: On<Activate>,
+                                 q: Query<(Entity, &ViewPropsDialog)>,
+                                 mut commands: Commands| {
+                                    if let Some((e, d)) = q.iter().next() {
+                                        let id = d.view;
+                                        commands.trigger(DialogClose { entity: e });
+                                        commands.queue(move |w: &mut World| {
+                                            if let Some((_, v)) = find_view(w, id)
+                                                && let Some(mut doc) =
+                                                    w.get_resource_mut::<ActiveDocument>()
+                                            {
+                                                doc.set_active(ElementId(v.reference.element));
+                                            }
+                                        });
+                                    }
+                                },
+                            ),
                         ));
                     });
                 let mut sc = Select::new("view-props-scale").width(Val::Px(200.0));
@@ -411,7 +548,12 @@ pub fn open_view_properties(world: &mut World, id: ViewId) {
                 if inherited {
                     b.spawn((
                         Name::new("view-props-inherited-hint"),
-                        t.text("Inherited from the parent view", t.font_sm, FontWeight::NORMAL, t.muted_foreground),
+                        t.text(
+                            "Inherited from the parent view",
+                            t.font_sm,
+                            FontWeight::NORMAL,
+                            t.muted_foreground,
+                        ),
                         Node {
                             margin: UiRect::left(Val::Px(lw)),
                             ..default()
@@ -439,11 +581,15 @@ pub fn open_view_properties(world: &mut World, id: ViewId) {
                 ));
                 f.spawn((
                     Button::new("view-props-cancel").label("Cancel").build(t),
-                    observe(|_: On<Activate>, q: Query<Entity, With<ViewPropsDialog>>, mut commands: Commands| {
-                        for e in &q {
-                            commands.trigger(DialogClose { entity: e });
-                        }
-                    }),
+                    observe(
+                        |_: On<Activate>,
+                         q: Query<Entity, With<ViewPropsDialog>>,
+                         mut commands: Commands| {
+                            for e in &q {
+                                commands.trigger(DialogClose { entity: e });
+                            }
+                        },
+                    ),
                 ));
             })
             .build(&theme),
@@ -454,8 +600,15 @@ pub fn open_view_properties(world: &mut World, id: ViewId) {
 }
 
 /// A new scale is the view's own: the "Inherited from the parent view" hint goes.
-fn on_scale_change(ev: On<cadrs_ui::SelectChange>, q: Query<&Name>, mut q_hint: Query<(&Name, &mut Node)>) {
-    if !q.get(ev.entity).is_ok_and(|n| n.as_str() == "view-props-scale") {
+fn on_scale_change(
+    ev: On<cadrs_ui::SelectChange>,
+    q: Query<&Name>,
+    mut q_hint: Query<(&Name, &mut Node)>,
+) {
+    if !q
+        .get(ev.entity)
+        .is_ok_and(|n| n.as_str() == "view-props-scale")
+    {
         return;
     }
     for (name, mut node) in &mut q_hint {
@@ -467,7 +620,9 @@ fn on_scale_change(ev: On<cadrs_ui::SelectChange>, q: Query<&Name>, mut q_hint: 
 
 fn select_value(world: &mut World, name: &str) -> Option<usize> {
     let mut q = world.query::<(&Name, &SelectState)>();
-    q.iter(world).find(|(n, _)| n.as_str() == name).map(|(_, s)| s.selected)
+    q.iter(world)
+        .find(|(n, _)| n.as_str() == name)
+        .map(|(_, s)| s.selected)
 }
 
 fn apply_view_properties(world: &mut World) {
@@ -492,7 +647,13 @@ fn apply_view_properties(world: &mut World) {
             .get_resource::<ActiveDocument>()
             .and_then(|doc| active_drawing(doc).map(|(_, d)| d.sheets[from].id));
         if current != Some(sheet) {
-            edit_drawing(world, DrawingOp::MoveViewToSheet { id: dialog.view, sheet });
+            edit_drawing(
+                world,
+                DrawingOp::MoveViewToSheet {
+                    id: dialog.view,
+                    sheet,
+                },
+            );
         }
     }
     world.trigger(DialogClose { entity });
@@ -512,12 +673,20 @@ pub fn open_move_to_sheet(world: &mut World, id: ViewId) {
     let Some((sheet_index, v)) = find_view(world, id) else {
         return;
     };
-    let Some((_, d)) = world.get_resource::<ActiveDocument>().and_then(|doc| active_drawing(doc)) else {
+    let Some((_, d)) = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|doc| active_drawing(doc))
+    else {
         return;
     };
-    let sheets: Vec<(cadrs_drawing::SheetId, String)> = d.sheets.iter().map(|s| (s.id, s.name.clone())).collect();
+    let sheets: Vec<(cadrs_drawing::SheetId, String)> =
+        d.sheets.iter().map(|s| (s.id, s.name.clone())).collect();
     // Another sheet by default.
-    let selected = if sheets.len() > 1 { (sheet_index + 1) % sheets.len() } else { 0 };
+    let selected = if sheets.len() > 1 {
+        (sheet_index + 1) % sheets.len()
+    } else {
+        0
+    };
     let theme = world.resource::<Theme>().clone();
     let (tb, tf) = (theme.clone(), theme.clone());
     let dialog = MoveToSheetDialog {
@@ -580,9 +749,20 @@ fn apply_move_to_sheet(world: &mut World) {
     let Some((entity, dialog)) = q.iter(world).next().map(|(e, d)| (e, d.clone())) else {
         return;
     };
-    if let Some(sheet) = select_value(world, "move-to-sheet-select").and_then(|i| dialog.sheets.get(i).copied()) {
-        edit_drawing(world, DrawingOp::MoveViewToSheet { id: dialog.view, sheet });
-        world.resource_mut::<DrawingUi>().selected.retain(|s| *s != dialog.view);
+    if let Some(sheet) =
+        select_value(world, "move-to-sheet-select").and_then(|i| dialog.sheets.get(i).copied())
+    {
+        edit_drawing(
+            world,
+            DrawingOp::MoveViewToSheet {
+                id: dialog.view,
+                sheet,
+            },
+        );
+        world
+            .resource_mut::<DrawingUi>()
+            .selected
+            .retain(|s| *s != dialog.view);
     }
     world.trigger(DialogClose { entity });
 }
@@ -649,7 +829,12 @@ pub fn open_show_sketches(world: &mut World, id: ViewId) {
                 ))
                 .with_children(|l| {
                     if sketches.is_empty() {
-                        l.spawn(t.text("The referenced Part Studio has no sketches", t.font_sm, FontWeight::NORMAL, t.muted_foreground));
+                        l.spawn(t.text(
+                            "The referenced Part Studio has no sketches",
+                            t.font_sm,
+                            FontWeight::NORMAL,
+                            t.muted_foreground,
+                        ));
                     }
                     for (i, (sid, name)) in sketches.iter().enumerate() {
                         l.spawn((
@@ -665,18 +850,25 @@ pub fn open_show_sketches(world: &mut World, id: ViewId) {
             .footer(move |f| {
                 let t = &tf;
                 f.spawn((
-                    Button::new("show-sketches-ok").label("OK").primary().build(t),
+                    Button::new("show-sketches-ok")
+                        .label("OK")
+                        .primary()
+                        .build(t),
                     observe(|_: On<Activate>, mut commands: Commands| {
                         commands.queue(apply_show_sketches);
                     }),
                 ));
                 f.spawn((
                     Button::new("show-sketches-cancel").label("Cancel").build(t),
-                    observe(|_: On<Activate>, q: Query<Entity, With<SketchesDialog>>, mut commands: Commands| {
-                        for e in &q {
-                            commands.trigger(DialogClose { entity: e });
-                        }
-                    }),
+                    observe(
+                        |_: On<Activate>,
+                         q: Query<Entity, With<SketchesDialog>>,
+                         mut commands: Commands| {
+                            for e in &q {
+                                commands.trigger(DialogClose { entity: e });
+                            }
+                        },
+                    ),
                 ));
             })
             .build(&theme),
@@ -686,7 +878,11 @@ pub fn open_show_sketches(world: &mut World, id: ViewId) {
     world.flush();
 }
 
-fn on_sketch_check(ev: On<CheckboxChange>, q: Query<&SketchRow>, mut q_dialog: Query<&mut SketchesDialog>) {
+fn on_sketch_check(
+    ev: On<CheckboxChange>,
+    q: Query<&SketchRow>,
+    mut q_dialog: Query<&mut SketchesDialog>,
+) {
     let Ok(row) = q.get(ev.entity) else {
         return;
     };
@@ -730,14 +926,21 @@ fn apply_show_sketches(world: &mut World) {
     };
     // Keep the studio's order.
     let mut qc = world.query::<(&SketchRow, &CheckboxState)>();
-    let checked: Vec<uuid::Uuid> = qc.iter(world).filter(|(_, c)| c.checked).map(|(r, _)| r.0).collect();
-    let checked = if checked.is_empty() && !dialog.checked.is_empty() && qc.iter(world).next().is_none() {
-        dialog.checked.clone()
-    } else {
-        checked
-    };
+    let checked: Vec<uuid::Uuid> = qc
+        .iter(world)
+        .filter(|(_, c)| c.checked)
+        .map(|(r, _)| r.0)
+        .collect();
+    let checked =
+        if checked.is_empty() && !dialog.checked.is_empty() && qc.iter(world).next().is_none() {
+            dialog.checked.clone()
+        } else {
+            checked
+        };
     if find_view(world, dialog.view).is_some_and(|(_, v)| v.sketches != checked) {
-        set_view(world, dialog.view, "Show/hide sketches", |v| v.sketches = checked);
+        set_view(world, dialog.view, "Show/hide sketches", |v| {
+            v.sketches = checked
+        });
     }
     world.trigger(DialogClose { entity });
 }

@@ -39,7 +39,12 @@ impl Plugin for PartsListPlugin {
             .init_resource::<BoardsOpen>()
             .add_systems(
                 Update,
-                (rebuild_part_list, sync_isolate_bar, exit_isolate_on_escape, mark_menu_row)
+                (
+                    rebuild_part_list,
+                    sync_isolate_bar,
+                    exit_isolate_on_escape,
+                    mark_menu_row,
+                )
                     .after(crate::parts::PartsSet)
                     .run_if(in_state(AppState::Document)),
             )
@@ -99,7 +104,13 @@ struct BoardFolder(PartId);
 struct PartMenuFor(PartId);
 
 /// What the rows were built from (and the boards with their components, and the open ones).
-type RowKey = (Vec<(PartId, String, PartKind, bool, bool, bool)>, bool, bool, Vec<(PartId, Vec<PartId>)>, Vec<PartId>);
+type RowKey = (
+    Vec<(PartId, String, PartKind, bool, bool, bool)>,
+    bool,
+    bool,
+    Vec<(PartId, Vec<PartId>)>,
+    Vec<PartId>,
+);
 
 /// Rebuilds the groups and rows when the parts, their names or visibility change.
 #[allow(clippy::too_many_arguments)]
@@ -118,11 +129,25 @@ fn rebuild_part_list(
         return;
     };
     // P3H.6 judge: a composite part's row has the composite part icon.
-    let composite = |p: PartId| doc.as_deref().and_then(|d| Some(cadrs_core::transform::is_composite_part(&d.doc, d.active_element()?.id, p))).unwrap_or(false);
+    let composite = |p: PartId| {
+        doc.as_deref()
+            .and_then(|d| {
+                Some(cadrs_core::transform::is_composite_part(
+                    &d.doc,
+                    d.active_element()?.id,
+                    p,
+                ))
+            })
+            .unwrap_or(false)
+    };
     // While a Sheet metal model's edges are picked, the parts it makes (`t0101.0.png`), bold
     // as its preview.
     let staged = !cache.staged_parts.is_empty();
-    let listed = if staged { &cache.staged_parts } else { &cache.parts };
+    let listed = if staged {
+        &cache.staged_parts
+    } else {
+        &cache.parts
+    };
     let rows: Vec<(PartId, String, PartKind, bool, bool, bool)> = listed
         .iter()
         // P3B.9: an assembly context's parts are not the studio's.
@@ -132,7 +157,8 @@ fn rebuild_part_list(
                 p.id,
                 cache.part_name(p.id).unwrap_or(&p.name).to_string(),
                 p.kind,
-                over.previews(p) || (staged && over.staged.is_some_and(|f| p.features.contains(&f))),
+                over.previews(p)
+                    || (staged && over.staged.is_some_and(|f| p.features.contains(&f))),
                 // A board component hidden by its board's layout view greys as hidden.
                 cache.is_hidden_part(p.id) || cache.layout_hidden.contains(&p.id),
                 composite(p.id),
@@ -140,8 +166,23 @@ fn rebuild_part_list(
         })
         .collect();
     // Each derived board copy's part and its components.
-    let boards: Vec<(PartId, Vec<PartId>)> = cache.derived.values().flat_map(|o| o.boards.iter().map(move |b| (b.part, o.components_of(b.part)))).filter(|(_, c)| !c.is_empty()).collect();
-    let key = (rows, open.parts, open.surfaces, boards, boards_open.0.clone());
+    let boards: Vec<(PartId, Vec<PartId>)> = cache
+        .derived
+        .values()
+        .flat_map(|o| {
+            o.boards
+                .iter()
+                .map(move |b| (b.part, o.components_of(b.part)))
+        })
+        .filter(|(_, c)| !c.is_empty())
+        .collect();
+    let key = (
+        rows,
+        open.parts,
+        open.surfaces,
+        boards,
+        boards_open.0.clone(),
+    );
     if !added && last.as_ref() == Some(&key) {
         return;
     }
@@ -177,7 +218,10 @@ fn rebuild_part_list(
                 let open = folder.is_some_and(|(b, _)| key.4.contains(b));
                 spawn_row(c, &t, m, kind, 22.0, folder.map(|_| open));
                 if let Some((_, comps)) = folder.filter(|_| open) {
-                    for cm in comps.iter().filter_map(|id| members.iter().find(|r| r.0 == *id)) {
+                    for cm in comps
+                        .iter()
+                        .filter_map(|id| members.iter().find(|r| r.0 == *id))
+                    {
                         spawn_row(c, &t, cm, kind, 40.0, None);
                     }
                 }
@@ -188,12 +232,24 @@ fn rebuild_part_list(
 }
 
 /// A part's row: `left` its indent; `folder` a board's chevron (open or not).
-fn spawn_row(c: &mut ChildSpawnerCommands, t: &Theme, m: &(PartId, String, PartKind, bool, bool, bool), kind: PartKind, left: f32, folder: Option<bool>) {
+fn spawn_row(
+    c: &mut ChildSpawnerCommands,
+    t: &Theme,
+    m: &(PartId, String, PartKind, bool, bool, bool),
+    kind: PartKind,
+    left: f32,
+    folder: Option<bool>,
+) {
     let (id, label, _, bold, hidden, is_composite) = m;
     let visuals = Visuals {
-        background: StateColors::new(Color::NONE, t.list_hover, t.list_active, Color::NONE).with_selected(t.list_selected),
+        background: StateColors::new(Color::NONE, t.list_hover, t.list_active, Color::NONE)
+            .with_selected(t.list_selected),
         border: StateColors::all(Color::NONE),
-        foreground: StateColors::all(if *hidden { Color::srgb_u8(0xa6, 0xa6, 0xa6) } else { t.foreground }),
+        foreground: StateColors::all(if *hidden {
+            Color::srgb_u8(0xa6, 0xa6, 0xa6)
+        } else {
+            t.foreground
+        }),
         focus_ring: t.focus_ring,
     };
     let icon_name = match kind {
@@ -205,20 +261,42 @@ fn spawn_row(c: &mut ChildSpawnerCommands, t: &Theme, m: &(PartId, String, PartK
     let row_name = tab_node_name(label).replacen("tab-", "part-row-", 1);
     // The eye shows while the row is hovered (always, crossed, on a hidden part); a click shows
     // or hides the part.
-    let tip = if *hidden { format!("Show {label}") } else { format!("Hide {label}") };
+    let tip = if *hidden {
+        format!("Show {label}")
+    } else {
+        format!("Hide {label}")
+    };
     let mut item = TreeItem::new(row_name.clone(), label.clone())
-        .toggle(format!("{row_name}-visibility"), "visible", "hidden", !*hidden)
+        .toggle(
+            format!("{row_name}-visibility"),
+            "visible",
+            "hidden",
+            !*hidden,
+        )
         .toggle_tooltip(tip)
         .toggle_keeps_off()
         .icon(icon_name, 16.0)
-        .icon_color(if *hidden { Color::srgb_u8(0xc4, 0xc4, 0xc4) } else { t.muted_foreground })
-        .weight(if *bold { FontWeight::BOLD } else { FontWeight::MEDIUM })
+        .icon_color(if *hidden {
+            Color::srgb_u8(0xc4, 0xc4, 0xc4)
+        } else {
+            t.muted_foreground
+        })
+        .weight(if *bold {
+            FontWeight::BOLD
+        } else {
+            FontWeight::MEDIUM
+        })
         .left(if folder.is_some() { left - 14.0 } else { left })
         .editable();
     if folder.is_some() {
         item = item.disclosure(folder);
     }
-    let mut row = c.spawn((item.build(t), PickRow(Pick::Part(*id)), PartRow(*id), ContextMenuTarget));
+    let mut row = c.spawn((
+        item.build(t),
+        PickRow(Pick::Part(*id)),
+        PartRow(*id),
+        ContextMenuTarget,
+    ));
     if folder.is_some() {
         row.insert(BoardFolder(*id));
     }
@@ -255,7 +333,11 @@ fn on_part_eye(ev: On<cadrs_ui::TreeRowToggled>, q: Query<&PartRow>, mut command
         let Some(element) = doc.active_element().map(|e| e.id) else {
             return;
         };
-        let _ = doc.execute(&SetPartsHidden { element, parts, hidden });
+        let _ = doc.execute(&SetPartsHidden {
+            element,
+            parts,
+            hidden,
+        });
     });
 }
 
@@ -280,7 +362,11 @@ fn targets(world: &World, part: PartId) -> Vec<PartId> {
             _ => None,
         })
         .collect();
-    if selected.contains(&part) { selected } else { vec![part] }
+    if selected.contains(&part) {
+        selected
+    } else {
+        vec![part]
+    }
 }
 
 fn on_part_context_menu(
@@ -305,21 +391,36 @@ fn on_part_context_menu(
         .item(MenuItem::new("part-appearance", "Edit appearance…"))
         .separator()
         .item(MenuItem::new("part-copy-here", "Copy here…").planned())
-        .item(MenuItem::new("part-copy", format!("Copy {name}")).icon("copy").disabled(true))
+        .item(
+            MenuItem::new("part-copy", format!("Copy {name}"))
+                .icon("copy")
+                .disabled(true),
+        )
         .item(MenuItem::new("part-drawing", format!("Create Drawing of {name}…")).icon("file-new"));
     // P3I.7 (SM16.1): a sheet metal part's flat pattern.
     let sheet_metal = doc
         .as_deref()
-        .and_then(|d| d.active_element().map(|e| e.id).map(|e| crate::drawing::flat_views::is_sheet_metal_part(&d.doc, e, row.0)))
+        .and_then(|d| {
+            d.active_element()
+                .map(|e| e.id)
+                .map(|e| crate::drawing::flat_views::is_sheet_metal_part(&d.doc, e, row.0))
+        })
         .unwrap_or(false);
     let menu = if sheet_metal {
-        menu.item(MenuItem::new("part-flat-drawing", "Create drawing of flat pattern…").icon("flat-pattern"))
+        menu.item(
+            MenuItem::new("part-flat-drawing", "Create drawing of flat pattern…")
+                .icon("flat-pattern"),
+        )
     } else {
         menu
     };
     let menu = menu
         .item(MenuItem::new("part-export", "Export…").icon("file-export"))
-        .item(MenuItem::new("part-where-used", "Where used…").icon("tab-manager").planned())
+        .item(
+            MenuItem::new("part-where-used", "Where used…")
+                .icon("tab-manager")
+                .planned(),
+        )
         .item(MenuItem::new("part-task", "Create task…").planned())
         .separator()
         .item(if hidden {
@@ -334,7 +435,11 @@ fn on_part_context_menu(
             MenuItem::new("part-transparent", "Make transparent…")
         })
         .separator()
-        .item(MenuItem::new("part-comment", "Add comment").icon("comments").planned())
+        .item(
+            MenuItem::new("part-comment", "Add comment")
+                .icon("comments")
+                .planned(),
+        )
         .item(MenuItem::new("part-zoom", "Zoom to selection"))
         .separator()
         .item(MenuItem::new("part-delete", "Delete…").icon("remove-circle"));
@@ -344,7 +449,11 @@ fn on_part_context_menu(
         .insert((PartMenuFor(row.0), DespawnOnExit(AppState::Document)));
 }
 
-fn on_part_menu_action(ev: On<MenuAction>, q_anchor: Query<&PartMenuFor, With<ContextMenuAnchor>>, mut commands: Commands) {
+fn on_part_menu_action(
+    ev: On<MenuAction>,
+    q_anchor: Query<&PartMenuFor, With<ContextMenuAnchor>>,
+    mut commands: Commands,
+) {
     let Ok(target) = q_anchor.get(ev.entity) else {
         return;
     };
@@ -354,7 +463,8 @@ fn on_part_menu_action(ev: On<MenuAction>, q_anchor: Query<&PartMenuFor, With<Co
         // P3E.3a: the part (or the selected parts it is among).
         "part-zoom" => commands.queue(move |world: &mut World| {
             let parts = targets(world, part);
-            world.resource_mut::<crate::viewport::Selection>().0 = parts.into_iter().map(crate::viewport::Pick::Part).collect();
+            world.resource_mut::<crate::viewport::Selection>().0 =
+                parts.into_iter().map(crate::viewport::Pick::Part).collect();
             crate::view_options::zoom_to_selection(world);
         }),
         "part-hide" | "part-show" => {
@@ -367,19 +477,32 @@ fn on_part_menu_action(ev: On<MenuAction>, q_anchor: Query<&PartMenuFor, With<Co
                 let Some(element) = doc.active_element().map(|e| e.id) else {
                     return;
                 };
-                let _ = doc.execute(&SetPartsHidden { element, parts, hidden });
+                let _ = doc.execute(&SetPartsHidden {
+                    element,
+                    parts,
+                    hidden,
+                });
             });
         }
         "part-appearance" => commands.queue(move |world: &mut World| {
             let parts = targets(world, part);
-            crate::appearance::open_appearance_dialog(world, crate::appearance::AppearanceTarget::Parts(parts));
+            crate::appearance::open_appearance_dialog(
+                world,
+                crate::appearance::AppearanceTarget::Parts(parts),
+            );
         }),
         // P3B.6 (TD9.5): the part's properties.
         "part-properties" => commands.queue(move |world: &mut World| {
-            let Some(element) = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element().map(|e| e.id)) else {
+            let Some(element) = world
+                .get_resource::<ActiveDocument>()
+                .and_then(|d| d.active_element().map(|e| e.id))
+            else {
                 return;
             };
-            crate::properties_dialog::open_properties_dialog(world, cadrs_core::properties::PropertyOwner::Part { element, part });
+            crate::properties_dialog::open_properties_dialog(
+                world,
+                cadrs_core::properties::PropertyOwner::Part { element, part },
+            );
         }),
         "part-material" => commands.queue(move |world: &mut World| {
             let parts = targets(world, part);
@@ -387,17 +510,29 @@ fn on_part_menu_action(ev: On<MenuAction>, q_anchor: Query<&PartMenuFor, With<Co
         }),
         // D1.2 (P3C.5): Create Drawing of the part.
         "part-drawing" => commands.queue(move |world: &mut World| {
-            let Some(element) = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element().map(|e| e.id)) else {
+            let Some(element) = world
+                .get_resource::<ActiveDocument>()
+                .and_then(|d| d.active_element().map(|e| e.id))
+            else {
                 return;
             };
-            let r = cadrs_drawing::ObjectRef { element: element.0, part: Some((part.feature.0, part.index)) };
+            let r = cadrs_drawing::ObjectRef {
+                element: element.0,
+                part: Some((part.feature.0, part.index)),
+            };
             crate::drawing::create_dialog::open_create_drawing_of_part(world, r);
         }),
         "part-flat-drawing" => commands.queue(move |world: &mut World| {
-            let Some(element) = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element().map(|e| e.id)) else {
+            let Some(element) = world
+                .get_resource::<ActiveDocument>()
+                .and_then(|d| d.active_element().map(|e| e.id))
+            else {
                 return;
             };
-            let r = cadrs_drawing::ObjectRef { element: element.0, part: Some((part.feature.0, part.index)) };
+            let r = cadrs_drawing::ObjectRef {
+                element: element.0,
+                part: Some((part.feature.0, part.index)),
+            };
             crate::drawing::flat_views::open_create_drawing_of_flat(world, r);
         }),
         "part-export" => commands.queue(move |world: &mut World| {
@@ -408,7 +543,9 @@ fn on_part_menu_action(ev: On<MenuAction>, q_anchor: Query<&PartMenuFor, With<Co
             let on = ev.item == "part-transparent";
             commands.queue(move |world: &mut World| {
                 let parts = targets(world, part);
-                world.resource_mut::<PartCache>().set_transparent(&parts, on);
+                world
+                    .resource_mut::<PartCache>()
+                    .set_transparent(&parts, on);
             });
         }
         "part-isolate" => commands.queue(move |world: &mut World| {
@@ -420,7 +557,11 @@ fn on_part_menu_action(ev: On<MenuAction>, q_anchor: Query<&PartMenuFor, With<Co
             if let Some(mut doc) = world.get_resource_mut::<ActiveDocument>()
                 && let Some(element) = doc.active_element().map(|e| e.id)
             {
-                let _ = doc.execute(&AddFeature::delete_parts(element, cadrs_core::FeatureId::new(), parts.clone()));
+                let _ = doc.execute(&AddFeature::delete_parts(
+                    element,
+                    cadrs_core::FeatureId::new(),
+                    parts.clone(),
+                ));
             }
             world
                 .resource_mut::<Selection>()
@@ -443,7 +584,9 @@ fn mark_menu_row(
         // A selected row keeps its selection band.
         let want = open.contains(&row.0) && !selected;
         if want && !forced {
-            commands.entity(e).try_insert(cadrs_ui::ForceState(VisualState::Hover));
+            commands
+                .entity(e)
+                .try_insert(cadrs_ui::ForceState(VisualState::Hover));
         } else if !want && forced {
             commands.entity(e).try_remove::<cadrs_ui::ForceState>();
         }
@@ -453,7 +596,11 @@ fn mark_menu_row(
 /// Starts renaming a part in place in the Parts list (PS6.5): Enter or clicking elsewhere commits
 /// (one undo step), Esc cancels.
 pub fn rename_part(world: &mut World, part: PartId) {
-    let Some(name) = world.resource::<PartCache>().part_name(part).map(str::to_string) else {
+    let Some(name) = world
+        .resource::<PartCache>()
+        .part_name(part)
+        .map(str::to_string)
+    else {
         return;
     };
     let mut q = world.query::<(Entity, &PartRow)>();
@@ -472,7 +619,11 @@ pub fn rename_part(world: &mut World, part: PartId) {
     world.flush();
 }
 
-fn on_part_rename_commit(ev: On<InlineEditCommit>, q: Query<&PartRow>, doc: Option<ResMut<ActiveDocument>>) {
+fn on_part_rename_commit(
+    ev: On<InlineEditCommit>,
+    q: Query<&PartRow>,
+    doc: Option<ResMut<ActiveDocument>>,
+) {
     if ev.entity != ev.original_event_target() {
         return;
     }
@@ -540,7 +691,12 @@ fn sync_isolate_bar(
         ))
         .with_children(|b| {
             b.spawn(t.text("Isolated", t.font_sm, FontWeight::MEDIUM, Color::WHITE));
-            b.spawn(cadrs_ui::Button::new("exit-isolate").label("Exit isolate").size(ButtonSize::Small).build(&t));
+            b.spawn(
+                cadrs_ui::Button::new("exit-isolate")
+                    .label("Exit isolate")
+                    .size(ButtonSize::Small)
+                    .build(&t),
+            );
         })
         .id();
     commands.entity(area).add_child(bar);

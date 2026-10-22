@@ -11,10 +11,10 @@ mod smlib_common;
 #[allow(unused_imports)]
 use smlib_common::*;
 
+use cadrs_kernel::native::NativeKernel;
 use cadrs_kernel::native::math::{Frame, P3, V3};
 use cadrs_kernel::native::smb;
 use cadrs_kernel::native::surface::Surface;
-use cadrs_kernel::native::NativeKernel;
 use cadrs_kernel::{FaceReplacement, Kernel};
 
 const SUITE: &str = "local_ops";
@@ -35,20 +35,44 @@ fn frame(o: [f64; 3], x: [f64; 3], y: [f64; 3]) -> Frame {
 
 /// SMLib's `SmBrep::LocalOperation`: face `face` (SMLib's index) of `file` given the surface
 /// `new` over `domain` (`[u0, v0, u1, v1]` when the test names one), then checked.
-fn local_op(file: &str, face: usize, new: New, domain: Option<[f64; 4]>, e: &Expect) -> Result<(), String> {
+fn local_op(
+    file: &str,
+    face: usize,
+    new: New,
+    domain: Option<[f64; 4]>,
+    e: &Expect,
+) -> Result<(), String> {
     let m = model(SUITE, file)?;
-    let [id] = faces(&m, &[face])?[..] else { return Err("no face".into()) };
+    let [id] = faces(&m, &[face])?[..] else {
+        return Err("no face".into());
+    };
     let surface = match new {
         New::Plane(o, x, y) => Surface::Plane { f: frame(o, x, y) },
-        New::Cylinder(o, x, y, r) => Surface::Cylinder { f: frame(o, x, y), r },
-        New::Sms(s) => smb::read_surface(&std::fs::read(data(SUITE, s)).map_err(|e| format!("{s}: {e}"))?)?,
+        New::Cylinder(o, x, y, r) => Surface::Cylinder {
+            f: frame(o, x, y),
+            r,
+        },
+        New::Sms(s) => {
+            smb::read_surface(&std::fs::read(data(SUITE, s)).map_err(|e| format!("{s}: {e}"))?)?
+        }
     };
     let input = m.body.clone();
     let mut k = NativeKernel::new();
     let b = k.insert(m.body);
     let domain = domain.map(|d| ((d[0], d[2]), (d[1], d[3])));
-    let r = k.replace_faces(b, &[FaceReplacement { face: id, surface, domain }]).map_err(|e| format!("{e:?}"))?;
-    let [out] = r.bodies[..] else { return Err(format!("{} bodies", r.bodies.len())) };
+    let r = k
+        .replace_faces(
+            b,
+            &[FaceReplacement {
+                face: id,
+                surface,
+                domain,
+            }],
+        )
+        .map_err(|e| format!("{e:?}"))?;
+    let [out] = r.bodies[..] else {
+        return Err(format!("{} bodies", r.bodies.len()));
+    };
     let out = k.get(out).map_err(|e| format!("{e:?}"))?;
     check_result(&input, out, e)
 }
@@ -56,25 +80,79 @@ fn local_op(file: &str, face: usize, new: New, domain: Option<[f64; 4]>, e: &Exp
 /// SMLib local operation 1 (smFilletTest.cpp:3546): face 1 of `nurb_box.smb` becomes the plane through (0.0, 0.0, 12.0) with normal (0.0, -0.707107, 0.707107).
 #[test]
 fn local_op_1_nurb_box() {
-    local_op("nurb_box.smb", 1, New::Plane([0.0, 0.0, 12.0], [1.0, 0.0, 0.0], [0.0, 0.7071067811865475, 0.7071067811865475]), Some([-15.0, -15.0, 25.0, 25.0]), &Expect { volume: Some(1531.21278743), area: Some(894.561956057), faces: Some(6), edges: Some(12), solid: Some(true), ..Expect::default() }).unwrap();
+    local_op(
+        "nurb_box.smb",
+        1,
+        New::Plane(
+            [0.0, 0.0, 12.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.7071067811865475, 0.7071067811865475],
+        ),
+        Some([-15.0, -15.0, 25.0, 25.0]),
+        &Expect {
+            volume: Some(1531.21278743),
+            area: Some(894.561956057),
+            faces: Some(6),
+            edges: Some(12),
+            solid: Some(true),
+            ..Expect::default()
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib local operation 3 (smFilletTest.cpp:3613): face 1 of `box.smb` becomes the cylinder of radius 5.0 about (0.0, 1.0, -0.0) through (5.0, 0.0, 12.0). Closed form: the 10 × 10 × 12 block under a half round of radius 5 and length 10.
 /// SMLib (the oracle) gives volume 0, area 1083.12268681, 6 faces, 20 edges, not a solid.
 #[test]
 fn local_op_3_box() {
-    local_op("box.smb", 1, New::Cylinder([5.0, 0.0, 12.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0], 5.0), Some([0.0, 0.0, 3.141592653589793, 10.0]), &Expect { volume: Some(1592.699081698724), area: Some(815.6194490192345), ..Expect::default() }).unwrap();
+    local_op(
+        "box.smb",
+        1,
+        New::Cylinder([5.0, 0.0, 12.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0], 5.0),
+        Some([0.0, 0.0, 3.141592653589793, 10.0]),
+        &Expect {
+            volume: Some(1592.699081698724),
+            area: Some(815.6194490192345),
+            ..Expect::default()
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib local operation 5 (smFilletTest.cpp:3681): face 1 of `cylinder.smb` becomes the plane through (-3.0, 0.0, 5.0) with normal (-1.0, 0.0, 0.0). Closed form: the cylinder made 3 longer: radius 5, length 13.
 /// SMLib (the oracle) gives volume 1021.01453821, area 565.471426009, 3 faces, 3 edges.
 #[test]
 fn local_op_5_cylinder() {
-    local_op("cylinder.smb", 1, New::Plane([-3.0, 0.0, 5.0], [0.0, -1.0, 0.0], [0.0, 0.0, 1.0]), Some([-5.0, -10.0, 5.0, 0.0]), &Expect { volume: Some(1021.0176124166827), area: Some(565.4866776461628), ..Expect::default() }).unwrap();
+    local_op(
+        "cylinder.smb",
+        1,
+        New::Plane([-3.0, 0.0, 5.0], [0.0, -1.0, 0.0], [0.0, 0.0, 1.0]),
+        Some([-5.0, -10.0, 5.0, 0.0]),
+        &Expect {
+            volume: Some(1021.0176124166827),
+            area: Some(565.4866776461628),
+            ..Expect::default()
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib local operation 7 (smFilletTest.cpp:3751): face 4 of `box.smb` becomes the B-spline surface `offset_nurb.sms`.
 #[test]
 fn local_op_7_box() {
-    local_op("box.smb", 4, New::Sms("offset_nurb.sms"), None, &Expect { volume: Some(1151.34567842), area: Some(673.407453468), faces: Some(6), edges: Some(12), solid: Some(true), ..Expect::default() }).unwrap();
+    local_op(
+        "box.smb",
+        4,
+        New::Sms("offset_nurb.sms"),
+        None,
+        &Expect {
+            volume: Some(1151.34567842),
+            area: Some(673.407453468),
+            faces: Some(6),
+            edges: Some(12),
+            solid: Some(true),
+            ..Expect::default()
+        },
+    )
+    .unwrap();
 }

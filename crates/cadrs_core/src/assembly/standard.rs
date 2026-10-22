@@ -36,13 +36,20 @@ use cadrs_sketch::{PlaneRef, SketchOp, Vec2};
 use nalgebra::Vector3;
 use serde::{Deserialize, Serialize};
 
-use super::connector::{ConnectorAnchor, ConnectorFrame, EntityRef, ImplicitPoint, MateConnector, canonical_axis};
+use super::connector::{
+    ConnectorAnchor, ConnectorFrame, EntityRef, ImplicitPoint, MateConnector, canonical_axis,
+};
 use super::mate::{Mate, MateFeature, MateId, MateKind, MateOffset, MateType, next_name};
 use super::{Assembly, Instance, InstanceId, InstanceSource, Pose};
 use crate::appearance::Appearance;
 use crate::command::{Command, CommandError, History, Scope};
-use crate::commands::{AddExtrude, AddRevolve, AddSketch, EditSketch, RenamePart, SetExtrude, SetPartAppearance, SetPartMaterial};
-use crate::document::{AxisRef, BooleanOp, Document, Element, ExtrudeFeature, Offset, RevolveFeature, RevolveType};
+use crate::commands::{
+    AddExtrude, AddRevolve, AddSketch, EditSketch, RenamePart, SetExtrude, SetPartAppearance,
+    SetPartMaterial,
+};
+use crate::document::{
+    AxisRef, BooleanOp, Document, Element, ExtrudeFeature, Offset, RevolveFeature, RevolveType,
+};
 use crate::ids::{ElementId, FeatureId, PartId};
 use crate::samples::gear_cover::{DocHistory, Studio};
 use crate::solid::{EdgeName, FaceName, Solid};
@@ -80,7 +87,10 @@ pub enum Kind {
 impl Kind {
     /// A bolt or screw (externally threaded: it goes into a hole, auto-size rounds down).
     pub fn is_screw(self) -> bool {
-        matches!(self, Kind::HexCapScrew | Kind::PanHeadScrew | Kind::SocketHeadCapScrew)
+        matches!(
+            self,
+            Kind::HexCapScrew | Kind::PanHeadScrew | Kind::SocketHeadCapScrew
+        )
     }
 }
 
@@ -154,7 +164,10 @@ pub struct Size {
 /// The bundled library (`data/standard_content.ron`).
 pub fn library() -> &'static Library {
     static LIB: OnceLock<Library> = OnceLock::new();
-    LIB.get_or_init(|| ron::from_str(include_str!("../../data/standard_content.ron")).expect("data/standard_content.ron is valid"))
+    LIB.get_or_init(|| {
+        ron::from_str(include_str!("../../data/standard_content.ron"))
+            .expect("data/standard_content.ron is valid")
+    })
 }
 
 impl Library {
@@ -245,7 +258,10 @@ impl StandardSpec {
     /// The standard and component it is of.
     pub fn component_def(&self) -> Option<(&'static Standard, &'static Component)> {
         let st = library().standard(&self.standard)?;
-        let c = st.category(&self.category)?.class(&self.class)?.component(&self.component)?;
+        let c = st
+            .category(&self.category)?
+            .class(&self.class)?
+            .component(&self.component)?;
         Some((st, c))
     }
 
@@ -257,13 +273,21 @@ impl StandardSpec {
     /// Makes every option valid for the component: an unknown size, length or option becomes
     /// the first (or default) one; the thread length follows the length.
     pub fn normalize(&mut self) {
-        let Some((_, c)) = self.component_def() else { return };
+        let Some((_, c)) = self.component_def() else {
+            return;
+        };
         if c.size(&self.size).is_none() {
             self.size = c.sizes.first().map(|s| s.name.clone()).unwrap_or_default();
         }
         if c.has_length() {
-            let l = self.length.filter(|l| c.lengths.iter().any(|x| (x - l).abs() < 1e-9));
-            self.length = Some(l.unwrap_or(if c.default_length > 0.0 { c.default_length } else { c.lengths[0] }));
+            let l = self
+                .length
+                .filter(|l| c.lengths.iter().any(|x| (x - l).abs() < 1e-9));
+            self.length = Some(l.unwrap_or(if c.default_length > 0.0 {
+                c.default_length
+            } else {
+                c.lengths[0]
+            }));
             self.thread_length = Some(self.default_thread_length());
         } else {
             self.length = None;
@@ -276,7 +300,11 @@ impl StandardSpec {
             if list.is_empty() {
                 return None;
             }
-            Some(v.clone().filter(|x| list.contains(x)).unwrap_or_else(|| list[0].clone()))
+            Some(
+                v.clone()
+                    .filter(|x| list.contains(x))
+                    .unwrap_or_else(|| list[0].clone()),
+            )
         };
         self.bearing_face = pick(&self.bearing_face, &c.bearing_faces);
         self.finish = pick(&self.finish, &c.finishes);
@@ -285,7 +313,11 @@ impl StandardSpec {
     /// The thread length the standard gives for the length: ASME B18.2.1 LT = 2D + 1/4 (screws
     /// up to 6 in), ISO 4762 b = 2d + 12; a screw shorter than that is threaded full length.
     pub fn default_thread_length(&self) -> f64 {
-        let (Some((st, _)), Some(row), Some(l)) = (self.component_def(), self.size_row(), self.length) else { return 0.0 };
+        let (Some((st, _)), Some(row), Some(l)) =
+            (self.component_def(), self.size_row(), self.length)
+        else {
+            return 0.0;
+        };
         let lt = match st.unit {
             LibUnit::Inch => 2.0 * row.d + 0.25,
             LibUnit::Millimeter => 2.0 * row.d + 12.0,
@@ -313,15 +345,29 @@ impl StandardSpec {
 
     /// The Part number the library suggests: "HCS-1/4-28-0.75-SS".
     pub fn part_number(&self) -> String {
-        let prefix = self.component_def().map(|(_, c)| c.prefix.replace(' ', "-")).unwrap_or_default();
-        let mat: String = self.material.split_whitespace().filter_map(|w| w.chars().next()).collect::<String>().to_uppercase();
+        let prefix = self
+            .component_def()
+            .map(|(_, c)| c.prefix.replace(' ', "-"))
+            .unwrap_or_default();
+        let mat: String = self
+            .material
+            .split_whitespace()
+            .filter_map(|w| w.chars().next())
+            .collect::<String>()
+            .to_uppercase();
         let mut s = format!("{prefix}-{}", self.size.replace(' ', ""));
         if let Some(l) = self.length {
             s.push_str(&format!("-{}", fmt_len(l)));
         }
         s.push_str(&format!("-{mat}"));
         if let Some(f) = self.finish.as_ref().filter(|f| f.as_str() != "Plain") {
-            s.push_str(&format!("-{}", f.split_whitespace().filter_map(|w| w.chars().next()).collect::<String>().to_uppercase()));
+            s.push_str(&format!(
+                "-{}",
+                f.split_whitespace()
+                    .filter_map(|w| w.chars().next())
+                    .collect::<String>()
+                    .to_uppercase()
+            ));
         }
         if self.bearing_face.as_deref() == Some("Washer faced") {
             s.push_str("-WF");
@@ -381,19 +427,31 @@ pub struct StandardPart {
 impl StandardPart {
     /// The configuration generated, with the library's part number and description.
     pub fn new(spec: &StandardSpec) -> Result<Self, CommandError> {
-        Ok(Self { spec: spec.clone(), part_number: spec.part_number(), description: spec.description(), element: generate(spec)? })
+        Ok(Self {
+            spec: spec.clone(),
+            part_number: spec.part_number(),
+            description: spec.description(),
+            element: generate(spec)?,
+        })
     }
 
     /// Its instance source.
     pub fn source(&self) -> InstanceSource {
-        InstanceSource::Part { element: self.element.id, part: PART }
+        InstanceSource::Part {
+            element: self.element.id,
+            part: PART,
+        }
     }
 }
 
 /// Adds `part` to the document's standard content unless its configuration is there (then its
 /// Part number and Description are updated).
 pub fn upsert(doc: &mut Document, part: &StandardPart) {
-    match doc.standard_content.iter_mut().find(|p| p.element.id == part.element.id) {
+    match doc
+        .standard_content
+        .iter_mut()
+        .find(|p| p.element.id == part.element.id)
+    {
         Some(p) => {
             p.part_number = part.part_number.clone();
             p.description = part.description.clone();
@@ -417,16 +475,38 @@ pub fn standard_of<'a>(doc: &'a Document, source: &InstanceSource) -> Option<&'a
 /// Bolts and screws round **down** (the largest nominal diameter that fits the hole); nuts and
 /// washers round **up** (the smallest that goes over the shaft). Among the sizes of that
 /// diameter the current one is kept (its thread series), else the first (coarse) one.
-pub fn auto_size(unit: LibUnit, component: &Component, diameter: f64, current: &str) -> Option<String> {
+pub fn auto_size(
+    unit: LibUnit,
+    component: &Component,
+    diameter: f64,
+    current: &str,
+) -> Option<String> {
     let tol = 1e-3;
     let d = |s: &Size| s.d * unit.mm();
     let pick = if component.kind.is_screw() {
-        component.sizes.iter().filter(|s| d(s) <= diameter + tol).map(d).fold(None, |a: Option<f64>, x| Some(a.map_or(x, |a| a.max(x))))
+        component
+            .sizes
+            .iter()
+            .filter(|s| d(s) <= diameter + tol)
+            .map(d)
+            .fold(None, |a: Option<f64>, x| Some(a.map_or(x, |a| a.max(x))))
     } else {
-        component.sizes.iter().filter(|s| d(s) >= diameter - tol).map(d).fold(None, |a: Option<f64>, x| Some(a.map_or(x, |a| a.min(x))))
+        component
+            .sizes
+            .iter()
+            .filter(|s| d(s) >= diameter - tol)
+            .map(d)
+            .fold(None, |a: Option<f64>, x| Some(a.map_or(x, |a| a.min(x))))
     }?;
-    let same: Vec<&Size> = component.sizes.iter().filter(|s| (d(s) - pick).abs() < 1e-9).collect();
-    same.iter().find(|s| s.name == current).or(same.first()).map(|s| s.name.clone())
+    let same: Vec<&Size> = component
+        .sizes
+        .iter()
+        .filter(|s| (d(s) - pick).abs() < 1e-9)
+        .collect();
+    same.iter()
+        .find(|s| s.name == current)
+        .or(same.first())
+        .map(|s| s.name.clone())
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -446,7 +526,11 @@ fn v(x: f64, y: f64) -> Vec2 {
 }
 
 fn circle(r: f64) -> SketchOp {
-    SketchOp::AddCircle { center: v(0.0, 0.0), radius: r, construction: false }
+    SketchOp::AddCircle {
+        center: v(0.0, 0.0),
+        radius: r,
+        construction: false,
+    }
 }
 
 /// A hexagon `f` across flats, its corners on ±X.
@@ -456,12 +540,31 @@ fn hexagon(f: f64) -> SketchOp {
         let a = k as f64 * std::f64::consts::PI / 3.0;
         v(r * a.cos(), r * a.sin())
     });
-    SketchOp::AddPolyline { points: points.collect(), closed: true, construction: false, label: "Add polygon" }
+    SketchOp::AddPolyline {
+        points: points.collect(),
+        closed: true,
+        construction: false,
+        label: "Add polygon",
+    }
 }
 
-fn sketch(s: &mut dyn Studio, el: ElementId, id: FeatureId, plane: PlaneRef, ops: Vec<SketchOp>) -> Result<cadrs_sketch::Sketch, CommandError> {
-    s.run(&AddSketch { element: el, feature: id, plane: Some(plane) })?;
-    s.run(&EditSketch { element: el, feature: id, op: SketchOp::Batch(ops) })?;
+fn sketch(
+    s: &mut dyn Studio,
+    el: ElementId,
+    id: FeatureId,
+    plane: PlaneRef,
+    ops: Vec<SketchOp>,
+) -> Result<cadrs_sketch::Sketch, CommandError> {
+    s.run(&AddSketch {
+        element: el,
+        feature: id,
+        plane: Some(plane),
+    })?;
+    s.run(&EditSketch {
+        element: el,
+        feature: id,
+        op: SketchOp::Batch(ops),
+    })?;
     s.document()
         .element(el)
         .and_then(|x| x.feature(id))
@@ -470,17 +573,32 @@ fn sketch(s: &mut dyn Studio, el: ElementId, id: FeatureId, plane: PlaneRef, ops
         .ok_or_else(|| CommandError::Invalid("sketch not found".into()))
 }
 
-fn region(sketch_id: FeatureId, g: &cadrs_sketch::Sketch, seed: Vec2) -> Result<Vec<crate::document::RegionRef>, CommandError> {
+fn region(
+    sketch_id: FeatureId,
+    g: &cadrs_sketch::Sketch,
+    seed: Vec2,
+) -> Result<Vec<crate::document::RegionRef>, CommandError> {
     let r = crate::samples::region_refs(sketch_id, g, &[seed]);
     if r.len() != 1 {
-        return Err(CommandError::Invalid("a region of the fastener is missing".into()));
+        return Err(CommandError::Invalid(
+            "a region of the fastener is missing".into(),
+        ));
     }
     Ok(r)
 }
 
 /// Extrudes the region of a Top sketch under `seed` from z0 to z1 (mm).
 #[allow(clippy::too_many_arguments)]
-fn extrude(s: &mut dyn Studio, el: ElementId, sk: FeatureId, g: &cadrs_sketch::Sketch, feature: FeatureId, seed: Vec2, z: (f64, f64), op: BooleanOp) -> Result<(), CommandError> {
+fn extrude(
+    s: &mut dyn Studio,
+    el: ElementId,
+    sk: FeatureId,
+    g: &cadrs_sketch::Sketch,
+    feature: FeatureId,
+    seed: Vec2,
+    z: (f64, f64),
+    op: BooleanOp,
+) -> Result<(), CommandError> {
     let (z0, z1) = z;
     let mut x = crate::samples::extrude_of(region(sk, g, seed)?, z1 - z0);
     x.op = op;
@@ -488,15 +606,35 @@ fn extrude(s: &mut dyn Studio, el: ElementId, sk: FeatureId, g: &cadrs_sketch::S
         x.merge_scope = vec![PART];
     }
     if z0 != 0.0 {
-        x.start_offset = Some(Offset { value: z0.abs(), expr: format!("{} mm", fmt_len(z0.abs())), flip: z0 < 0.0 });
+        x.start_offset = Some(Offset {
+            value: z0.abs(),
+            expr: format!("{} mm", fmt_len(z0.abs())),
+            flip: z0 < 0.0,
+        });
     }
-    s.run(&AddExtrude { element: el, feature, extrude: ExtrudeFeature::default() })?;
-    s.run(&SetExtrude { element: el, feature, extrude: x, label: "Extrude".into() })
+    s.run(&AddExtrude {
+        element: el,
+        feature,
+        extrude: ExtrudeFeature::default(),
+    })?;
+    s.run(&SetExtrude {
+        element: el,
+        feature,
+        extrude: x,
+        label: "Extrude".into(),
+    })
 }
 
 /// Revolves a profile (Front sketch: x = radius, y = height; its points in order) a full turn
 /// about Z.
-fn revolve(s: &mut dyn Studio, el: ElementId, sk: FeatureId, feature: FeatureId, profile: &[(f64, f64)], op: BooleanOp) -> Result<(), CommandError> {
+fn revolve(
+    s: &mut dyn Studio,
+    el: ElementId,
+    sk: FeatureId,
+    feature: FeatureId,
+    profile: &[(f64, f64)],
+    op: BooleanOp,
+) -> Result<(), CommandError> {
     let lo = profile.iter().map(|p| p.1).fold(f64::MAX, f64::min);
     let hi = profile.iter().map(|p| p.1).fold(f64::MIN, f64::max);
     let pad = (hi - lo) * 0.2 + 1.0;
@@ -506,17 +644,35 @@ fn revolve(s: &mut dyn Studio, el: ElementId, sk: FeatureId, feature: FeatureId,
         sk,
         PlaneRef::Front,
         vec![
-            SketchOp::AddPolyline { points: vec![v(0.0, lo - pad), v(0.0, hi + pad)], closed: false, construction: true, label: "Add line" },
-            SketchOp::AddPolyline { points: profile.iter().map(|p| v(p.0, p.1)).collect(), closed: true, construction: false, label: "Add line" },
+            SketchOp::AddPolyline {
+                points: vec![v(0.0, lo - pad), v(0.0, hi + pad)],
+                closed: false,
+                construction: true,
+                label: "Add line",
+            },
+            SketchOp::AddPolyline {
+                points: profile.iter().map(|p| v(p.0, p.1)).collect(),
+                closed: true,
+                construction: false,
+                label: "Add line",
+            },
         ],
     )?;
-    let axis = g.curves.iter().find(|(_, c)| c.construction).map(|(k, _)| k).ok_or_else(|| CommandError::Invalid("revolve axis".into()))?;
+    let axis = g
+        .curves
+        .iter()
+        .find(|(_, c)| c.construction)
+        .map(|(k, _)| k)
+        .ok_or_else(|| CommandError::Invalid("revolve axis".into()))?;
     // A seed just inside the profile: near its widest point at mid height.
     let mid = (lo + hi) / 2.0;
     let seed = v(profile.iter().map(|p| p.0).fold(0.0, f64::max) * 0.25, mid);
     let mut r = RevolveFeature {
         regions: region(sk, &g, seed)?,
-        axis: Some(AxisRef::SketchCurve { sketch: sk, curve: axis }),
+        axis: Some(AxisRef::SketchCurve {
+            sketch: sk,
+            curve: axis,
+        }),
         kind: RevolveType::Full,
         angle: 360.0,
         angle_expr: "360 deg".into(),
@@ -526,7 +682,11 @@ fn revolve(s: &mut dyn Studio, el: ElementId, sk: FeatureId, feature: FeatureId,
     if op != BooleanOp::New {
         r.merge_scope = vec![PART];
     }
-    s.run(&AddRevolve { element: el, feature, revolve: r })
+    s.run(&AddRevolve {
+        element: el,
+        feature,
+        revolve: r,
+    })
 }
 
 /// The chamfer of a hex (a 30° cone cutting its corners down to a circle `rc` across) at its
@@ -549,8 +709,12 @@ fn hex_chamfer_profile(h: f64, rc: f64, g2: f64, both: bool, wf: f64) -> Vec<(f6
 /// Generates a configuration as a Part Studio (its id [`StandardSpec::element_id`]) whose one
 /// part [`PART`] is the fastener, named, with its material and look.
 pub fn generate(spec: &StandardSpec) -> Result<Element, CommandError> {
-    let (st, comp) = spec.component_def().ok_or_else(|| CommandError::Invalid(format!("no standard content component {}", spec.component)))?;
-    let row = spec.size_row().ok_or_else(|| CommandError::Invalid(format!("no size {} of {}", spec.size, spec.component)))?;
+    let (st, comp) = spec.component_def().ok_or_else(|| {
+        CommandError::Invalid(format!("no standard content component {}", spec.component))
+    })?;
+    let row = spec.size_row().ok_or_else(|| {
+        CommandError::Invalid(format!("no size {} of {}", spec.size, spec.component))
+    })?;
     let u = st.unit.mm();
     let mut doc = Document::empty("Standard content");
     let mut element = Element::part_studio(spec.part_name());
@@ -559,12 +723,22 @@ pub fn generate(spec: &StandardSpec) -> Result<Element, CommandError> {
     doc.elements.push(element);
     let mut h = History::default();
     build_fastener(&mut DocHistory(&mut doc, &mut h), el, spec, comp, row, u)?;
-    let mut element = doc.elements.pop().ok_or_else(|| CommandError::Invalid("generated studio missing".into()))?;
+    let mut element = doc
+        .elements
+        .pop()
+        .ok_or_else(|| CommandError::Invalid("generated studio missing".into()))?;
     element.name = "Standard content".into();
     Ok(element)
 }
 
-fn build_fastener(s: &mut dyn Studio, el: ElementId, spec: &StandardSpec, comp: &Component, row: &Size, u: f64) -> Result<(), CommandError> {
+fn build_fastener(
+    s: &mut dyn Studio,
+    el: ElementId,
+    spec: &StandardSpec,
+    comp: &Component,
+    row: &Size,
+    u: f64,
+) -> Result<(), CommandError> {
     let d = row.d * u;
     let hh = row.h * u;
     let length = spec.length.unwrap_or(0.0) * u;
@@ -573,55 +747,177 @@ fn build_fastener(s: &mut dyn Studio, el: ElementId, spec: &StandardSpec, comp: 
         Kind::HexCapScrew => {
             let f = row.f * u;
             let g = sketch(s, el, fid(0x01), top, vec![hexagon(f)])?;
-            extrude(s, el, fid(0x01), &g, BODY, v(0.0, 0.0), (0.0, hh), BooleanOp::New)?;
+            extrude(
+                s,
+                el,
+                fid(0x01),
+                &g,
+                BODY,
+                v(0.0, 0.0),
+                (0.0, hh),
+                BooleanOp::New,
+            )?;
             // The head's top chamfer (a 30° cone down to about F across).
             let g2 = f / 3f64.sqrt() * 1.02;
-            revolve(s, el, fid(0x03), fid(0x04), &hex_chamfer_profile(hh, 0.95 * f / 2.0, g2, false, 0.0), BooleanOp::Intersect)?;
+            revolve(
+                s,
+                el,
+                fid(0x03),
+                fid(0x04),
+                &hex_chamfer_profile(hh, 0.95 * f / 2.0, g2, false, 0.0),
+                BooleanOp::Intersect,
+            )?;
             let g = sketch(s, el, fid(0x05), top, vec![circle(d / 2.0)])?;
-            extrude(s, el, fid(0x05), &g, fid(0x06), v(0.0, 0.0), (-length, 0.0), BooleanOp::Add)?;
+            extrude(
+                s,
+                el,
+                fid(0x05),
+                &g,
+                fid(0x06),
+                v(0.0, 0.0),
+                (-length, 0.0),
+                BooleanOp::Add,
+            )?;
         }
         Kind::HexNut => {
             let f = row.f * u;
             let g = sketch(s, el, fid(0x01), top, vec![hexagon(f), circle(d / 2.0)])?;
-            extrude(s, el, fid(0x01), &g, BODY, v((d / 2.0 + f / 2.0) / 2.0, 0.0), (0.0, hh), BooleanOp::New)?;
+            extrude(
+                s,
+                el,
+                fid(0x01),
+                &g,
+                BODY,
+                v((d / 2.0 + f / 2.0) / 2.0, 0.0),
+                (0.0, hh),
+                BooleanOp::New,
+            )?;
             let g2 = f / 3f64.sqrt() * 1.02;
             let washer_faced = spec.bearing_face.as_deref() == Some("Washer faced");
             // ASME B18.2.2's washer face: 0.015 in thick.
-            let wf = if washer_faced { (0.015f64 * 25.4).min(hh / 4.0) } else { 0.0 };
-            revolve(s, el, fid(0x03), fid(0x04), &hex_chamfer_profile(hh, 0.95 * f / 2.0, g2, true, wf), BooleanOp::Intersect)?;
+            let wf = if washer_faced {
+                (0.015f64 * 25.4).min(hh / 4.0)
+            } else {
+                0.0
+            };
+            revolve(
+                s,
+                el,
+                fid(0x03),
+                fid(0x04),
+                &hex_chamfer_profile(hh, 0.95 * f / 2.0, g2, true, wf),
+                BooleanOp::Intersect,
+            )?;
         }
         Kind::PanHeadScrew => {
             let a = row.head.unwrap_or(2.0 * row.d) * u / 2.0;
-            let profile = [(0.0, -length), (d / 2.0, -length), (d / 2.0, 0.0), (a, 0.0), (a, 0.45 * hh), (0.88 * a, 0.82 * hh), (0.68 * a, hh), (0.0, hh)];
+            let profile = [
+                (0.0, -length),
+                (d / 2.0, -length),
+                (d / 2.0, 0.0),
+                (a, 0.0),
+                (a, 0.45 * hh),
+                (0.88 * a, 0.82 * hh),
+                (0.68 * a, hh),
+                (0.0, hh),
+            ];
             revolve(s, el, fid(0x01), BODY, &profile, BooleanOp::New)?;
             if let Some(j) = row.slot {
                 let (j, w) = (j * u / 2.0, a * 1.2);
-                let rect = SketchOp::AddPolyline { points: vec![v(-w, -j), v(w, -j), v(w, j), v(-w, j)], closed: true, construction: false, label: "Add rectangle" };
+                let rect = SketchOp::AddPolyline {
+                    points: vec![v(-w, -j), v(w, -j), v(w, j), v(-w, j)],
+                    closed: true,
+                    construction: false,
+                    label: "Add rectangle",
+                };
                 let g = sketch(s, el, fid(0x03), top, vec![rect])?;
-                extrude(s, el, fid(0x03), &g, fid(0x04), v(0.0, 0.0), (0.6 * hh, 1.3 * hh), BooleanOp::Remove)?;
+                extrude(
+                    s,
+                    el,
+                    fid(0x03),
+                    &g,
+                    fid(0x04),
+                    v(0.0, 0.0),
+                    (0.6 * hh, 1.3 * hh),
+                    BooleanOp::Remove,
+                )?;
             }
         }
         Kind::SocketHeadCapScrew => {
             let dk = row.head.unwrap_or(1.5 * row.d) * u;
             let g = sketch(s, el, fid(0x01), top, vec![circle(dk / 2.0)])?;
-            extrude(s, el, fid(0x01), &g, BODY, v(0.0, 0.0), (0.0, hh), BooleanOp::New)?;
+            extrude(
+                s,
+                el,
+                fid(0x01),
+                &g,
+                BODY,
+                v(0.0, 0.0),
+                (0.0, hh),
+                BooleanOp::New,
+            )?;
             if let Some(sk) = row.socket {
                 let g = sketch(s, el, fid(0x03), top, vec![hexagon(sk * u)])?;
-                extrude(s, el, fid(0x03), &g, fid(0x04), v(0.0, 0.0), (0.5 * hh, 1.2 * hh), BooleanOp::Remove)?;
+                extrude(
+                    s,
+                    el,
+                    fid(0x03),
+                    &g,
+                    fid(0x04),
+                    v(0.0, 0.0),
+                    (0.5 * hh, 1.2 * hh),
+                    BooleanOp::Remove,
+                )?;
             }
             let g = sketch(s, el, fid(0x05), top, vec![circle(d / 2.0)])?;
-            extrude(s, el, fid(0x05), &g, fid(0x06), v(0.0, 0.0), (-length, 0.0), BooleanOp::Add)?;
+            extrude(
+                s,
+                el,
+                fid(0x05),
+                &g,
+                fid(0x06),
+                v(0.0, 0.0),
+                (-length, 0.0),
+                BooleanOp::Add,
+            )?;
         }
         Kind::PlainWasher => {
             let od = row.head.unwrap_or(2.0 * row.d) * u;
             let id = row.inner.unwrap_or(row.d) * u;
-            let g = sketch(s, el, fid(0x01), top, vec![circle(od / 2.0), circle(id / 2.0)])?;
-            extrude(s, el, fid(0x01), &g, BODY, v((od + id) / 4.0, 0.0), (0.0, hh), BooleanOp::New)?;
+            let g = sketch(
+                s,
+                el,
+                fid(0x01),
+                top,
+                vec![circle(od / 2.0), circle(id / 2.0)],
+            )?;
+            extrude(
+                s,
+                el,
+                fid(0x01),
+                &g,
+                BODY,
+                v((od + id) / 4.0, 0.0),
+                (0.0, hh),
+                BooleanOp::New,
+            )?;
         }
     }
-    s.run(&RenamePart { element: el, part: PART, name: spec.part_name() })?;
-    s.run(&SetPartMaterial { element: el, parts: vec![PART], material: material(&spec.material) })?;
-    s.run(&SetPartAppearance { element: el, parts: vec![PART], appearance: Some(appearance(spec)) })
+    s.run(&RenamePart {
+        element: el,
+        part: PART,
+        name: spec.part_name(),
+    })?;
+    s.run(&SetPartMaterial {
+        element: el,
+        parts: vec![PART],
+        material: material(&spec.material),
+    })?;
+    s.run(&SetPartAppearance {
+        element: el,
+        parts: vec![PART],
+        appearance: Some(appearance(spec)),
+    })
 }
 
 /// The library material for a material option ("Stainless Steel" is AISI 304).
@@ -695,7 +991,9 @@ fn is_convex(s: &Solid, face: &FaceName) -> Option<bool> {
     for t in f.first_triangle..f.first_triangle + f.triangle_count {
         for k in 0..3 {
             let i = s.indices[3 * t + k] as usize;
-            let (Some(p), Some(n)) = (s.positions.get(i), s.normals.get(i)) else { continue };
+            let (Some(p), Some(n)) = (s.positions.get(i), s.normals.get(i)) else {
+                continue;
+            };
             let r = v3(*p) - p0;
             let radial = r - dir * r.dot(&dir);
             sum += radial.dot(&v3(*n));
@@ -717,22 +1015,48 @@ pub fn site_of_edge(s: &Solid, instance: InstanceId, edge: &EdgeName) -> Option<
     }
     let z = canonical_axis(c.normal);
     // Out of the part: the outward normal of the planar face the edge bounds.
-    let outward = edge.faces.iter().find_map(|f| super::connector::face_normal(s, f)).unwrap_or(z);
-    let shaft = edge.faces.iter().find_map(|f| is_convex(s, f)).unwrap_or(false);
-    Some(HoleSite { instance, edge: *edge, diameter: 2.0 * c.radius, shaft, flip: v3(z).dot(&v3(outward)) < 0.0 })
+    let outward = edge
+        .faces
+        .iter()
+        .find_map(|f| super::connector::face_normal(s, f))
+        .unwrap_or(z);
+    let shaft = edge
+        .faces
+        .iter()
+        .find_map(|f| is_convex(s, f))
+        .unwrap_or(false);
+    Some(HoleSite {
+        instance,
+        edge: *edge,
+        diameter: 2.0 * c.radius,
+        shaft,
+        flip: v3(z).dot(&v3(outward)) < 0.0,
+    })
 }
 
 /// The sites of a face (A19.6): a planar face gives every hole in it (whole circles, not convex); a
 /// hole's or shaft's cylindrical face gives its upper end (along the canonical axis).
 pub fn sites_of_face(s: &Solid, instance: InstanceId, face: &FaceName) -> Vec<HoleSite> {
-    let Some(f) = s.face(face) else { return Vec::new() };
-    let sites: Vec<HoleSite> = s.edges.iter().filter(|e| e.name.faces.contains(face)).filter_map(|e| site_of_edge(s, instance, &e.name)).collect();
+    let Some(f) = s.face(face) else {
+        return Vec::new();
+    };
+    let sites: Vec<HoleSite> = s
+        .edges
+        .iter()
+        .filter(|e| e.name.faces.contains(face))
+        .filter_map(|e| site_of_edge(s, instance, &e.name))
+        .collect();
     if f.plane.is_some() {
         // Its holes (not its outer boundary, nor a boss's edge).
         return sites.into_iter().filter(|s| !s.shaft).collect();
     }
     let top = sites.iter().max_by(|a, b| {
-        let at = |x: &HoleSite| s.edge(&x.edge).and_then(|e| e.circle).map(|c| v3(c.center).dot(&v3(canonical_axis(c.normal)))).unwrap_or(0.0);
+        let at = |x: &HoleSite| {
+            s.edge(&x.edge)
+                .and_then(|e| e.circle)
+                .map(|c| v3(c.center).dot(&v3(canonical_axis(c.normal))))
+                .unwrap_or(0.0)
+        };
         at(a).total_cmp(&at(b))
     });
     top.copied().into_iter().collect()
@@ -780,7 +1104,11 @@ pub struct InsertStandardContent {
 }
 
 fn offset_of(z: f64) -> Option<MateOffset> {
-    (z.abs() > 1e-12).then_some(MateOffset { translation: [0.0, 0.0, z], axis: 2, angle: 0.0 })
+    (z.abs() > 1e-12).then_some(MateOffset {
+        translation: [0.0, 0.0, z],
+        axis: 2,
+        angle: 0.0,
+    })
 }
 
 impl Command for InsertStandardContent {
@@ -805,14 +1133,24 @@ impl Command for InsertStandardContent {
             inst.index = asm.next_index(&source);
             asm.instances.push(inst);
             if let Some(hole) = ins.hole {
-                let mut m = Mate::new(MateType::Fastened, MateConnector::at(ins.instance, ConnectorFrame::default()), hole);
+                let mut m = Mate::new(
+                    MateType::Fastened,
+                    MateConnector::at(ins.instance, ConnectorFrame::default()),
+                    hole,
+                );
                 m.offset = offset_of(ins.offset);
                 let name = next_name(&asm.mates, "Fastened");
-                asm.mates.push(MateFeature::new(ins.mate, name, MateKind::Mate(m)));
+                asm.mates
+                    .push(MateFeature::new(ins.mate, name, MateKind::Mate(m)));
             }
         }
         for (mate, z, inst, pose) in &self.restack {
-            if let Some(m) = asm.mates.iter_mut().find(|m| m.id == *mate).and_then(|m| m.mate_mut()) {
+            if let Some(m) = asm
+                .mates
+                .iter_mut()
+                .find(|m| m.id == *mate)
+                .and_then(|m| m.mate_mut())
+            {
                 m.offset = offset_of(*z);
             }
             if let Some(i) = asm.instance_mut(*inst) {
@@ -825,16 +1163,26 @@ impl Command for InsertStandardContent {
 
 /// What is stacked on a site: the Fastened mates of standard content instances to the same
 /// connector, as (mate, instance, offset, height), nearest first.
-pub fn stack_on(doc: &Document, asm: &Assembly, hole: &MateConnector) -> Vec<(MateId, InstanceId, f64, f64)> {
+pub fn stack_on(
+    doc: &Document,
+    asm: &Assembly,
+    hole: &MateConnector,
+) -> Vec<(MateId, InstanceId, f64, f64)> {
     let mut out = Vec::new();
     for f in &asm.mates {
         let Some(m) = f.mate() else { continue };
         let b = &m.connectors[1];
-        if m.mate_type != MateType::Fastened || b.instance != hole.instance || b.anchor != hole.anchor || b.flip != hole.flip {
+        if m.mate_type != MateType::Fastened
+            || b.instance != hole.instance
+            || b.anchor != hole.anchor
+            || b.flip != hole.flip
+        {
             continue;
         }
         let a = m.connectors[0].instance;
-        let Some(sp) = asm.instance(a).and_then(|i| standard_of(doc, &i.source)) else { continue };
+        let Some(sp) = asm.instance(a).and_then(|i| standard_of(doc, &i.source)) else {
+            continue;
+        };
         let z = m.offset.map(|o| o.translation[2]).unwrap_or(0.0);
         out.push((f.id, a, z, sp.spec.stack_height()));
     }
@@ -854,14 +1202,25 @@ pub fn plan_insert(
     stacking: Stacking,
     solids: &HashMap<InstanceId, Arc<Solid>>,
 ) -> Result<InsertStandardContent, CommandError> {
-    let asm = doc.element(element).and_then(|e| e.assembly_model()).ok_or(CommandError::ElementNotFound(element))?;
-    let occ: HashMap<InstanceId, Pose> = super::structure::occurrences(doc, asm).into_iter().map(|o| (o.id, o.pose)).collect();
+    let asm = doc
+        .element(element)
+        .and_then(|e| e.assembly_model())
+        .ok_or(CommandError::ElementNotFound(element))?;
+    let occ: HashMap<InstanceId, Pose> = super::structure::occurrences(doc, asm)
+        .into_iter()
+        .map(|o| (o.id, o.pose))
+        .collect();
     let height = part.spec.stack_height();
     let mut inserts = Vec::new();
     let mut restack = Vec::new();
     for site in sites {
-        let solid = solids.get(&site.instance).ok_or_else(|| CommandError::Invalid("the site's part is missing".into()))?;
-        let pose = occ.get(&site.instance).copied().ok_or_else(|| CommandError::Invalid("the site's instance is missing".into()))?;
+        let solid = solids
+            .get(&site.instance)
+            .ok_or_else(|| CommandError::Invalid("the site's part is missing".into()))?;
+        let pose = occ
+            .get(&site.instance)
+            .copied()
+            .ok_or_else(|| CommandError::Invalid("the site's instance is missing".into()))?;
         let hole = site.connector(solid, flip);
         let world = hole.local_frame(Some(solid)).moved(&pose);
         let stack = stack_on(doc, asm, &hole);
@@ -871,15 +1230,31 @@ pub fn plan_insert(
             Stacking::Closest => {
                 for (m, i, z, _) in &stack {
                     let z = z + height;
-                    restack.push((*m, z, *i, world.then_local(&Pose::translation([0.0, 0.0, z])).pose()));
+                    restack.push((
+                        *m,
+                        z,
+                        *i,
+                        world.then_local(&Pose::translation([0.0, 0.0, z])).pose(),
+                    ));
                 }
                 0.0
             }
         };
         let at = world.then_local(&Pose::translation([0.0, 0.0, offset]));
-        inserts.push(StdInsert { instance: InstanceId::new(), mate: MateId::new(), pose: at.pose(), hole: Some(hole), offset });
+        inserts.push(StdInsert {
+            instance: InstanceId::new(),
+            mate: MateId::new(),
+            pose: at.pose(),
+            hole: Some(hole),
+            offset,
+        });
     }
-    Ok(InsertStandardContent { element, part, inserts, restack })
+    Ok(InsertStandardContent {
+        element,
+        part,
+        inserts,
+        restack,
+    })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -901,13 +1276,25 @@ pub struct EditStandardContent {
 impl EditStandardContent {
     /// The edit of `instances` of the assembly `element` to `size` and / or `length` (options
     /// the new size doesn't have fall back to its first ones).
-    pub fn new(doc: &Document, element: ElementId, instances: &[InstanceId], size: Option<&str>, length: Option<f64>) -> Result<Self, CommandError> {
-        let asm = doc.element(element).and_then(|e| e.assembly_model()).ok_or(CommandError::ElementNotFound(element))?;
+    pub fn new(
+        doc: &Document,
+        element: ElementId,
+        instances: &[InstanceId],
+        size: Option<&str>,
+        length: Option<f64>,
+    ) -> Result<Self, CommandError> {
+        let asm = doc
+            .element(element)
+            .and_then(|e| e.assembly_model())
+            .ok_or(CommandError::ElementNotFound(element))?;
         let mut parts: Vec<StandardPart> = Vec::new();
         let mut changes = Vec::new();
         for id in instances {
-            let inst = asm.instance(*id).ok_or_else(|| CommandError::Invalid(format!("instance {id} not found")))?;
-            let old = standard_of(doc, &inst.source).ok_or_else(|| CommandError::Invalid("not a standard content instance".into()))?;
+            let inst = asm
+                .instance(*id)
+                .ok_or_else(|| CommandError::Invalid(format!("instance {id} not found")))?;
+            let old = standard_of(doc, &inst.source)
+                .ok_or_else(|| CommandError::Invalid("not a standard content instance".into()))?;
             let spec = old.spec.with(size, length);
             let el = spec.element_id();
             if !parts.iter().any(|p| p.element.id == el) {
@@ -918,7 +1305,11 @@ impl EditStandardContent {
             }
             changes.push((*id, el));
         }
-        Ok(Self { element, changes, parts })
+        Ok(Self {
+            element,
+            changes,
+            parts,
+        })
     }
 }
 
@@ -938,8 +1329,13 @@ impl Command for EditStandardContent {
         }
         let asm = super::commands::assembly_mut(doc, self.element)?;
         for (id, el) in &self.changes {
-            let source = InstanceSource::Part { element: *el, part: PART };
-            let Some(inst) = asm.instance(*id) else { return Err(CommandError::Invalid(format!("instance {id} not found"))) };
+            let source = InstanceSource::Part {
+                element: *el,
+                part: PART,
+            };
+            let Some(inst) = asm.instance(*id) else {
+                return Err(CommandError::Invalid(format!("instance {id} not found")));
+            };
             if inst.source == source {
                 continue;
             }
@@ -969,7 +1365,11 @@ impl Command for SetStandardProperties {
         Scope::Whole
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
-        let p = doc.standard_content.iter_mut().find(|p| p.element.id == self.element).ok_or(CommandError::ElementNotFound(self.element))?;
+        let p = doc
+            .standard_content
+            .iter_mut()
+            .find(|p| p.element.id == self.element)
+            .ok_or(CommandError::ElementNotFound(self.element))?;
         p.part_number = self.part_number.clone();
         p.description = self.description.clone();
         Ok(())
@@ -979,8 +1379,14 @@ impl Command for SetStandardProperties {
 /// The instances of `asm` with the same configuration as `instance` (Select instances with same
 /// configuration, A19.9): the same standard content configuration (or, for other parts, the
 /// same Part Studio). With `same_part`, also the same part.
-pub fn same_configuration(asm: &Assembly, instance: InstanceId, same_part: bool) -> Vec<InstanceId> {
-    let Some(src) = asm.instance(instance).map(|i| i.source) else { return Vec::new() };
+pub fn same_configuration(
+    asm: &Assembly,
+    instance: InstanceId,
+    same_part: bool,
+) -> Vec<InstanceId> {
+    let Some(src) = asm.instance(instance).map(|i| i.source) else {
+        return Vec::new();
+    };
     asm.instances
         .iter()
         .filter(|i| i.source.element() == src.element() && (!same_part || i.source == src))
@@ -996,7 +1402,8 @@ mod tests {
     fn library_loads_and_specs_normalize() {
         let lib = library();
         assert_eq!(lib.standards.len(), 2);
-        let s = StandardSpec::new("ANSI inch", "Bolts & screws", "Hex bolts", "Hex cap screw").unwrap();
+        let s =
+            StandardSpec::new("ANSI inch", "Bolts & screws", "Hex bolts", "Hex cap screw").unwrap();
         assert_eq!(s.size, "1/4-20");
         assert_eq!(s.length, Some(0.75));
         assert_eq!(s.thread_length, Some(0.75));

@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use super::curve::Curve;
 use super::math::*;
-use super::nurbs::{NurbsCurve, NurbsSurface, H};
+use super::nurbs::{H, NurbsCurve, NurbsSurface};
 use super::surface::Surface;
 use super::topo::*;
 
@@ -163,7 +163,13 @@ impl W {
 pub fn write(b: &Body) -> Vec<u8> {
     let tols = b.verts.iter().any(|v| v.tol > TOL_MIN) || b.edges.iter().any(|e| e.tol > TOL_MIN);
     let mut w = W(if tols { MAGIC2 } else { MAGIC }.to_vec());
-    for n in [b.verts.len(), b.edges.len(), b.faces.len(), b.shells.len(), b.solids.len()] {
+    for n in [
+        b.verts.len(),
+        b.edges.len(),
+        b.faces.len(),
+        b.shells.len(),
+        b.solids.len(),
+    ] {
         w.u32(n);
     }
     for v in &b.verts {
@@ -235,7 +241,10 @@ type Res<T> = Result<T, String>;
 
 impl<'a> Rd<'a> {
     fn take(&mut self, n: usize) -> Res<&'a [u8]> {
-        let s = self.b.get(self.i..self.i + n).ok_or("the body data is cut short")?;
+        let s = self
+            .b
+            .get(self.i..self.i + n)
+            .ok_or("the body data is cut short")?;
         self.i += n;
         Ok(s)
     }
@@ -259,7 +268,9 @@ impl<'a> Rd<'a> {
     }
     fn f(&mut self) -> Res<f64> {
         let b = self.take(8)?;
-        Ok(f64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]))
+        Ok(f64::from_le_bytes([
+            b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+        ]))
     }
     fn p(&mut self) -> Res<P3> {
         Ok(P3::new(self.f()?, self.f()?, self.f()?))
@@ -271,7 +282,12 @@ impl<'a> Rd<'a> {
         Ok(H::new(self.f()?, self.f()?, self.f()?, self.f()?))
     }
     fn frame(&mut self) -> Res<Frame> {
-        Ok(Frame { o: self.p()?, x: self.v()?, y: self.v()?, z: self.v()? })
+        Ok(Frame {
+            o: self.p()?,
+            x: self.v()?,
+            y: self.v()?,
+            z: self.v()?,
+        })
     }
     fn knots(&mut self) -> Res<Vec<f64>> {
         let n = self.count(8)?;
@@ -279,15 +295,32 @@ impl<'a> Rd<'a> {
     }
     fn curve(&mut self) -> Res<Curve> {
         Ok(match self.u8()? {
-            0 => Curve::Line { o: self.p()?, d: self.v()? },
-            1 => Curve::Circle { c: self.p()?, x: self.v()?, y: self.v()?, r: self.f()? },
-            2 => Curve::Ellipse { c: self.p()?, x: self.v()?, y: self.v()?, a: self.f()?, b: self.f()? },
+            0 => Curve::Line {
+                o: self.p()?,
+                d: self.v()?,
+            },
+            1 => Curve::Circle {
+                c: self.p()?,
+                x: self.v()?,
+                y: self.v()?,
+                r: self.f()?,
+            },
+            2 => Curve::Ellipse {
+                c: self.p()?,
+                x: self.v()?,
+                y: self.v()?,
+                a: self.f()?,
+                b: self.f()?,
+            },
             3 => {
                 let degree = self.u32()?;
                 let knots = self.knots()?;
                 let n = self.count(32)?;
                 let cps = (0..n).map(|_| self.h()).collect::<Res<Vec<_>>>()?;
-                Curve::Nurbs(Arc::new(NurbsCurve::new(degree, knots, cps).map_err(|e| format!("a NURBS curve: {}", e.message()))?))
+                Curve::Nurbs(Arc::new(
+                    NurbsCurve::new(degree, knots, cps)
+                        .map_err(|e| format!("a NURBS curve: {}", e.message()))?,
+                ))
             }
             t => return Err(format!("unknown curve tag {t}")),
         })
@@ -295,12 +328,32 @@ impl<'a> Rd<'a> {
     fn surface(&mut self) -> Res<Surface> {
         Ok(match self.u8()? {
             0 => Surface::Plane { f: self.frame()? },
-            1 => Surface::Cylinder { f: self.frame()?, r: self.f()? },
-            2 => Surface::Cone { f: self.frame()?, r: self.f()?, a: self.f()? },
-            3 => Surface::Sphere { f: self.frame()?, r: self.f()? },
-            4 => Surface::Torus { f: self.frame()?, rmaj: self.f()?, rmin: self.f()? },
-            5 => Surface::Revolution { f: self.frame()?, m: self.curve()? },
-            6 => Surface::Extrusion { c: self.curve()?, d: self.v()? },
+            1 => Surface::Cylinder {
+                f: self.frame()?,
+                r: self.f()?,
+            },
+            2 => Surface::Cone {
+                f: self.frame()?,
+                r: self.f()?,
+                a: self.f()?,
+            },
+            3 => Surface::Sphere {
+                f: self.frame()?,
+                r: self.f()?,
+            },
+            4 => Surface::Torus {
+                f: self.frame()?,
+                rmaj: self.f()?,
+                rmin: self.f()?,
+            },
+            5 => Surface::Revolution {
+                f: self.frame()?,
+                m: self.curve()?,
+            },
+            6 => Surface::Extrusion {
+                c: self.curve()?,
+                d: self.v()?,
+            },
             7 => {
                 let (du, dv) = (self.u32()?, self.u32()?);
                 let (ku, kv) = (self.knots()?, self.knots()?);
@@ -312,7 +365,10 @@ impl<'a> Rd<'a> {
                 for _ in 0..nu {
                     cps.push((0..nv).map(|_| self.h()).collect::<Res<Vec<_>>>()?);
                 }
-                Surface::Nurbs(Arc::new(NurbsSurface::new(du, dv, ku, kv, cps).map_err(|e| format!("a NURBS surface: {}", e.message()))?))
+                Surface::Nurbs(Arc::new(
+                    NurbsSurface::new(du, dv, ku, kv, cps)
+                        .map_err(|e| format!("a NURBS surface: {}", e.message()))?,
+                ))
             }
             t => return Err(format!("unknown surface tag {t}")),
         })
@@ -325,7 +381,13 @@ pub fn read(bytes: &[u8]) -> Result<Body, String> {
         return Err("not a native kernel body".into());
     }
     let mut r = Rd { b: bytes, i: 8 };
-    let (nv, ne, nf, ns, nso) = (r.count(24)?, r.count(30)?, r.count(6)?, r.count(5)?, r.count(4)?);
+    let (nv, ne, nf, ns, nso) = (
+        r.count(24)?,
+        r.count(30)?,
+        r.count(6)?,
+        r.count(5)?,
+        r.count(4)?,
+    );
     let mut b = Body::default();
     let tols = &bytes[..8] == MAGIC2;
     for _ in 0..nv {
@@ -342,7 +404,13 @@ pub fn read(bytes: &[u8]) -> Result<Body, String> {
         }
         let degenerate = r.bool()?;
         let tol = if tols { r.f()? } else { TOL_MIN };
-        b.edges.push(Edge { curve, t, v, degenerate, tol });
+        b.edges.push(Edge {
+            curve,
+            t,
+            v,
+            degenerate,
+            tol,
+        });
     }
     for _ in 0..nf {
         let surf = r.surface()?;
@@ -357,7 +425,11 @@ pub fn read(bytes: &[u8]) -> Result<Body, String> {
                 if edge >= ne {
                     return Err("a coedge's edge is out of range".into());
                 }
-                l.push(Coedge { edge, fwd: r.bool()?, pc: r.curve()? });
+                l.push(Coedge {
+                    edge,
+                    fwd: r.bool()?,
+                    pc: r.curve()?,
+                });
             }
             loops.push(l);
         }
@@ -369,7 +441,10 @@ pub fn read(bytes: &[u8]) -> Result<Body, String> {
         if faces.iter().any(|&f| f >= nf) {
             return Err("a shell's face is out of range".into());
         }
-        b.shells.push(Shell { faces, closed: r.bool()? });
+        b.shells.push(Shell {
+            faces,
+            closed: r.bool()?,
+        });
     }
     for _ in 0..nso {
         let n = r.count(4)?;

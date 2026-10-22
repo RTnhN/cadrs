@@ -208,7 +208,11 @@ impl ListItem {
                 if let Some(open) = disclosure {
                     p.spawn((
                         icon_in(
-                            if open { "chevron-down" } else { "chevron-right" },
+                            if open {
+                                "chevron-down"
+                            } else {
+                                "chevron-right"
+                            },
                             14.0,
                             fg,
                             Node {
@@ -394,8 +398,15 @@ impl GridItem {
                         ));
                     }
                     None => {
-                        let size = if placeholder_icon == "part" { 24.0 } else { 40.0 };
-                        thumb.with_child((icon(placeholder_icon, size, placeholder), Pickable::IGNORE));
+                        let size = if placeholder_icon == "part" {
+                            24.0
+                        } else {
+                            40.0
+                        };
+                        thumb.with_child((
+                            icon(placeholder_icon, size, placeholder),
+                            Pickable::IGNORE,
+                        ));
                     }
                 }
                 p.spawn((

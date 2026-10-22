@@ -26,9 +26,11 @@ fn main() {
     let icon_out = out_dir.join("icons");
     std::fs::create_dir_all(&icon_out).unwrap();
 
-    let mut entries: Vec<(&str, Icon, f32)> = icon_rs::ALL.iter().map(|i| (i.name, *i, 1.0)).collect();
+    let mut entries: Vec<(&str, Icon, f32)> =
+        icon_rs::ALL.iter().map(|i| (i.name, *i, 1.0)).collect();
     for &(name, base, scale) in icon_raster::WEIGHTS {
-        let icon = icon_rs::get(base).unwrap_or_else(|| panic!("icon-rs has no {base:?} for {name:?}"));
+        let icon =
+            icon_rs::get(base).unwrap_or_else(|| panic!("icon-rs has no {base:?} for {name:?}"));
         entries.push((name, icon, scale));
     }
 
@@ -37,7 +39,11 @@ fn main() {
     let mut full_colour = String::new();
     for (name, icon, scale) in &entries {
         // The viewport manipulators are drawn larger.
-        let big: &[u32] = if name.starts_with("manipulator-") { &[48] } else { &[] };
+        let big: &[u32] = if name.starts_with("manipulator-") {
+            &[48]
+        } else {
+            &[]
+        };
         for &size in SIZES.iter().chain(big) {
             let (base, accent) = icon_raster::layers(icon, *scale, size);
             images += &embed(&icon_out, name, size, "", &base);
@@ -67,8 +73,14 @@ fn main() {
 
 /// Writes one raster and returns its `ICON_DATA` / `ACCENT_DATA` row.
 fn embed(dir: &std::path::Path, name: &str, size: u32, layer: &str, svg: &str) -> String {
-    let file = format!("{name}_{size}{}{layer}.rgba", if layer.is_empty() { "" } else { "_" });
-    let pixels = icon_raster::rasterize(svg, size).unwrap_or_else(|e| panic!("rasterizing icon {name}: {e}"));
+    let file = format!(
+        "{name}_{size}{}{layer}.rgba",
+        if layer.is_empty() { "" } else { "_" }
+    );
+    let pixels = icon_raster::rasterize(svg, size)
+        .unwrap_or_else(|e| panic!("rasterizing icon {name}: {e}"));
     std::fs::write(dir.join(&file), pixels).unwrap();
-    format!("    ({name:?}, {size}, include_bytes!(concat!(env!(\"OUT_DIR\"), \"/icons/{file}\"))),\n")
+    format!(
+        "    ({name:?}, {size}, include_bytes!(concat!(env!(\"OUT_DIR\"), \"/icons/{file}\"))),\n"
+    )
 }

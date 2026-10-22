@@ -30,8 +30,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::construct::stable_id;
 use crate::model::{
-    BuildError, HemAlignment, HemClip, Joint, JointId, JointKind, Model, P3, RipStyle, SharpBuilder, SharpJointKind, SharpWall, Surface, V3,
-    Wall, WallId, letters, shift_edge,
+    BuildError, HemAlignment, HemClip, Joint, JointId, JointKind, Model, P3, RipStyle,
+    SharpBuilder, SharpJointKind, SharpWall, Surface, V3, Wall, WallId, letters, shift_edge,
 };
 use crate::poly::{P2, Polygon, Seg2, V2, inward_normal, perp};
 
@@ -58,8 +58,16 @@ impl SharpDef {
     pub fn new(builder: SharpBuilder, built: &Model, walls: usize, joints: usize) -> SharpDef {
         SharpDef {
             builder,
-            extra_walls: built.walls.get(walls..).map(<[Wall]>::to_vec).unwrap_or_default(),
-            extra_joints: built.joints.get(joints..).map(<[Joint]>::to_vec).unwrap_or_default(),
+            extra_walls: built
+                .walls
+                .get(walls..)
+                .map(<[Wall]>::to_vec)
+                .unwrap_or_default(),
+            extra_joints: built
+                .joints
+                .get(joints..)
+                .map(<[Joint]>::to_vec)
+                .unwrap_or_default(),
             corner_overrides: built.corner_overrides.clone(),
         }
     }
@@ -69,17 +77,21 @@ impl SharpDef {
     pub fn merge(&mut self, other: SharpDef) {
         let (nw, seq) = (self.builder.walls.len(), self.builder.seq);
         self.builder.walls.extend(other.builder.walls);
-        self.builder.joints.extend(other.builder.joints.into_iter().map(|mut j| {
-            j.a += nw;
-            j.b += nw;
-            j.seq += seq;
-            j
-        }));
-        self.builder.hems.extend(other.builder.hems.into_iter().map(|mut h| {
-            h.wall += nw;
-            h.seq += seq;
-            h
-        }));
+        self.builder
+            .joints
+            .extend(other.builder.joints.into_iter().map(|mut j| {
+                j.a += nw;
+                j.b += nw;
+                j.seq += seq;
+                j
+            }));
+        self.builder
+            .hems
+            .extend(other.builder.hems.into_iter().map(|mut h| {
+                h.wall += nw;
+                h.seq += seq;
+                h
+            }));
         self.builder.seq += other.builder.seq;
         self.extra_walls.extend(other.extra_walls);
         self.extra_joints.extend(other.extra_joints);
@@ -91,7 +103,8 @@ impl SharpDef {
         let mut m = self.builder.build()?;
         m.walls.extend(self.extra_walls.iter().cloned());
         m.joints.extend(self.extra_joints.iter().cloned());
-        m.corner_overrides.extend(self.corner_overrides.iter().copied());
+        m.corner_overrides
+            .extend(self.corner_overrides.iter().copied());
         Ok(m)
     }
 
@@ -104,7 +117,11 @@ impl SharpDef {
             .filter_map(|j| j.name.as_deref())
             .chain(self.builder.hems.iter().filter_map(|h| h.name.as_deref()))
             .chain(self.extra_joints.iter().map(|j| j.name.as_str()));
-        names.filter_map(letter_index).map(|i| i + 1).max().unwrap_or(0)
+        names
+            .filter_map(letter_index)
+            .map(|i| i + 1)
+            .max()
+            .unwrap_or(0)
     }
 
     fn sharp_index(&self, id: WallId) -> Option<usize> {
@@ -161,10 +178,17 @@ pub struct EdgePick {
 /// don't lie along one).
 pub fn locate(model: &Model, pts: &[P3]) -> Option<EdgePick> {
     let t = model.params.thickness;
-    let size = model.walls.iter().filter_map(|w| w.outline.bounds()).map(|(lo, hi)| (hi - lo).norm()).fold(1.0, f64::max);
+    let size = model
+        .walls
+        .iter()
+        .filter_map(|w| w.outline.bounds())
+        .map(|(lo, hi)| (hi - lo).norm())
+        .fold(1.0, f64::max);
     let tol = 1e-5 * size.max(1.0);
     for w in &model.walls {
-        let Surface::Planar { origin, .. } = w.surface else { continue };
+        let Surface::Planar { origin, .. } = w.surface else {
+            continue;
+        };
         let n = w.surface.normal().expect("planar");
         let hs: Vec<f64> = pts.iter().map(|p| (p - origin).dot(&n)).collect();
         if hs.iter().any(|h| *h < -tol || *h > t + tol) {
@@ -181,11 +205,18 @@ pub fn locate(model: &Model, pts: &[P3]) -> Option<EdgePick> {
             }
             let dir = d / len;
             let nn = perp(dir);
-            let on = qs.iter().all(|x| (x - p).dot(&nn).abs() <= tol && (x - p).dot(&dir) >= -tol && (x - p).dot(&dir) <= len + tol);
+            let on = qs.iter().all(|x| {
+                (x - p).dot(&nn).abs() <= tol
+                    && (x - p).dot(&dir) >= -tol
+                    && (x - p).dot(&dir) <= len + tol
+            });
             if !on {
                 continue;
             }
-            let (lo, hi) = qs.iter().map(|x| (x - p).dot(&dir).clamp(0.0, len)).fold((f64::MAX, f64::MIN), |(a, b), s| (a.min(s), b.max(s)));
+            let (lo, hi) = qs
+                .iter()
+                .map(|x| (x - p).dot(&dir).clamp(0.0, len))
+                .fold((f64::MAX, f64::MIN), |(a, b), s| (a.min(s), b.max(s)));
             if hi - lo < tol {
                 continue;
             }
@@ -197,8 +228,17 @@ pub fn locate(model: &Model, pts: &[P3]) -> Option<EdgePick> {
                 PickSide::Side
             };
             let seg = Seg2::new(p + dir * lo, p + dir * hi);
-            let joined = model.joints.iter().any(|j| j.segment_on(w.id).is_some_and(|s| overlaps(s, seg, tol)));
-            return Some(EdgePick { wall: w.id, a: w.surface.point(seg.a), b: w.surface.point(seg.b), side, joined });
+            let joined = model
+                .joints
+                .iter()
+                .any(|j| j.segment_on(w.id).is_some_and(|s| overlaps(s, seg, tol)));
+            return Some(EdgePick {
+                wall: w.id,
+                a: w.surface.point(seg.a),
+                b: w.surface.point(seg.b),
+                side,
+                joined,
+            });
         }
     }
     None
@@ -252,11 +292,22 @@ impl SharpEdge {
 }
 
 fn sharp_edge(def: &SharpDef, pick: &EdgePick) -> Result<SharpEdge, String> {
-    let wi = def.sharp_index(pick.wall).ok_or("Only flat walls can take this feature")?;
+    let wi = def
+        .sharp_index(pick.wall)
+        .ok_or("Only flat walls can take this feature")?;
     let w = &def.builder.walls[wi];
-    let surf = Surface::Planar { origin: w.origin, u: w.u, v: w.v };
+    let surf = Surface::Planar {
+        origin: w.origin,
+        u: w.u,
+        v: w.v,
+    };
     let (qa, qb) = (surf.local(pick.a), surf.local(pick.b));
-    let size = w.outline.bounds().map(|(lo, hi)| (hi - lo).norm()).unwrap_or(1.0).max(1.0);
+    let size = w
+        .outline
+        .bounds()
+        .map(|(lo, hi)| (hi - lo).norm())
+        .unwrap_or(1.0)
+        .max(1.0);
     let tol = 1e-5 * size;
     let l = &w.outline.outer;
     for k in 0..l.len() {
@@ -279,7 +330,17 @@ fn sharp_edge(def: &SharpDef, pick: &EdgePick) -> Result<SharpEdge, String> {
         let n = w.u.cross(&w.v).normalize();
         let e = (w.u * dir.x + w.v * dir.y).normalize();
         let into3 = (w.u * into.x + w.v * into.y).normalize();
-        return Ok(SharpEdge { wall: wi, seg, into, origin: surf.point(p), e, into3, n, pick: (lo.max(0.0), hi.min(seg.len())), reversed: s0 > s1 });
+        return Ok(SharpEdge {
+            wall: wi,
+            seg,
+            into,
+            origin: surf.point(p),
+            e,
+            into3,
+            n,
+            pick: (lo.max(0.0), hi.min(seg.len())),
+            reversed: s0 > s1,
+        });
     }
     Err("The edge isn't on the wall's boundary".into())
 }
@@ -302,12 +363,23 @@ impl EdgeFrame {
         let w = model.wall(pick.wall)?;
         let n = w.surface.normal()?;
         let e = (pick.b - pick.a).try_normalize(1e-12)?;
-        let mid = w.surface.local(P3::from((pick.a.coords + pick.b.coords) / 2.0));
+        let mid = w
+            .surface
+            .local(P3::from((pick.a.coords + pick.b.coords) / 2.0));
         let d = w.surface.local(pick.a + e) - w.surface.local(pick.a);
         let into = inward_normal(&w.outline, Seg2::new(mid - d * 0.5, mid + d * 0.5))?;
-        let Surface::Planar { u, v, .. } = w.surface else { return None };
+        let Surface::Planar { u, v, .. } = w.surface else {
+            return None;
+        };
         let out = -(u * into.x + v * into.y).normalize();
-        Some(EdgeFrame { a: pick.a, b: pick.b, e, out, n, thickness: model.params.thickness })
+        Some(EdgeFrame {
+            a: pick.a,
+            b: pick.b,
+            e,
+            out,
+            n,
+            thickness: model.params.thickness,
+        })
     }
 
     /// The direction a flange runs at bend angle `angle`, turning towards the material side or
@@ -329,7 +401,13 @@ impl EdgeFrame {
 
     /// The outer virtual sharp at the picked stretch's start (where the outsides of the wall and
     /// a flange with these settings meet): the point the flange's Distance is measured from.
-    pub fn outer_sharp(&self, alignment: FlangeAlignment, angle: f64, toward: bool, radius: f64) -> P3 {
+    pub fn outer_sharp(
+        &self,
+        alignment: FlangeAlignment,
+        angle: f64,
+        toward: bool,
+        radius: f64,
+    ) -> P3 {
         let x = alignment.outer_offset(self.thickness, radius, angle);
         let level = if toward { 0.0 } else { self.thickness };
         self.a + self.out * x + self.n * level
@@ -355,7 +433,12 @@ pub enum FlangeAlignment {
 }
 
 impl FlangeAlignment {
-    pub const ALL: [FlangeAlignment; 4] = [FlangeAlignment::Inner, FlangeAlignment::Outer, FlangeAlignment::Middle, FlangeAlignment::HoldLine];
+    pub const ALL: [FlangeAlignment; 4] = [
+        FlangeAlignment::Inner,
+        FlangeAlignment::Outer,
+        FlangeAlignment::Middle,
+        FlangeAlignment::HoldLine,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -437,7 +520,10 @@ struct Pending {
 
 impl Pending {
     fn local(&self, p: P3) -> P2 {
-        P2::new((p - self.origin).dot(&self.u), (p - self.origin).dot(&self.v))
+        P2::new(
+            (p - self.origin).dot(&self.u),
+            (p - self.origin).dot(&self.v),
+        )
     }
 
     fn point(&self, q: P2) -> P3 {
@@ -446,7 +532,11 @@ impl Pending {
 }
 
 /// Adds a flange on each edge (SM3).
-pub fn flange(def: &mut SharpDef, edges: &[FlangeEdge], o: &FlangeOpts) -> Result<Vec<Added>, String> {
+pub fn flange(
+    def: &mut SharpDef,
+    edges: &[FlangeEdge],
+    o: &FlangeOpts,
+) -> Result<Vec<Added>, String> {
     let p = def.builder.params;
     let t = p.thickness;
     let r = o.radius.unwrap_or(p.bend_radius);
@@ -455,16 +545,36 @@ pub fn flange(def: &mut SharpDef, edges: &[FlangeEdge], o: &FlangeOpts) -> Resul
     }
     // A partial flange's bounds arrive measured from the picked stretch's start and end as the
     // pick runs; the sharp outline's edge may run the other way: put them in its order.
-    let ses: Vec<SharpEdge> = edges.iter().map(|fe| sharp_edge(def, &fe.pick)).collect::<Result<_, _>>()?;
-    let mut chained: Vec<FlangeEdge> = edges.iter().zip(&ses).map(|(fe, se)| FlangeEdge { partial: fe.partial.map(|(d0, d1)| if se.reversed { (d1, d0) } else { (d0, d1) }), ..*fe }).collect();
+    let ses: Vec<SharpEdge> = edges
+        .iter()
+        .map(|fe| sharp_edge(def, &fe.pick))
+        .collect::<Result<_, _>>()?;
+    let mut chained: Vec<FlangeEdge> = edges
+        .iter()
+        .zip(&ses)
+        .map(|(fe, se)| FlangeEdge {
+            partial: fe
+                .partial
+                .map(|(d0, d1)| if se.reversed { (d1, d0) } else { (d0, d1) }),
+            ..*fe
+        })
+        .collect();
     // Per chain (SM3.7): edges meeting end to end are one chain; the bounds apply at the chain's
     // free ends only: the first free end met (in the order the edges were picked) takes the first
     // bound, the chain's other free end the second. A lone edge takes both, as Per edge.
     if o.per_chain && edges.len() > 1 {
         let n = ses.len();
         let tol = 1e-6 * ses.iter().map(|x| x.len()).fold(1.0, f64::max);
-        let end = |x: &SharpEdge, i: usize| if i == 0 { x.at(0.0, 0.0) } else { x.at(x.len(), 0.0) };
-        let meet = |k: usize, i: usize, l: usize| (0..2).any(|j| (end(&ses[k], i) - end(&ses[l], j)).norm() < tol);
+        let end = |x: &SharpEdge, i: usize| {
+            if i == 0 {
+                x.at(0.0, 0.0)
+            } else {
+                x.at(x.len(), 0.0)
+            }
+        };
+        let meet = |k: usize, i: usize, l: usize| {
+            (0..2).any(|j| (end(&ses[k], i) - end(&ses[l], j)).norm() < tol)
+        };
         let shared = |k: usize, i: usize| (0..n).any(|l| l != k && meet(k, i, l));
         // The chains (union-find over shared ends).
         let mut chain: Vec<usize> = (0..n).collect();
@@ -512,7 +622,10 @@ pub fn flange(def: &mut SharpDef, edges: &[FlangeEdge], o: &FlangeOpts) -> Resul
     }
     let edges = &chained[..];
     // Where each picked edge's sharp ends are (to tell a corner this feature mitres).
-    let sharp_ends: Vec<[P3; 2]> = ses.iter().map(|x| [x.at(0.0, 0.0), x.at(x.len(), 0.0)]).collect();
+    let sharp_ends: Vec<[P3; 2]> = ses
+        .iter()
+        .map(|x| [x.at(0.0, 0.0), x.at(x.len(), 0.0)])
+        .collect();
     let mut pend: Vec<Pending> = Vec::new();
     for (fi, fe) in edges.iter().enumerate() {
         if fe.pick.joined {
@@ -541,7 +654,10 @@ pub fn flange(def: &mut SharpDef, edges: &[FlangeEdge], o: &FlangeOpts) -> Resul
         // (Outer and Middle only: Inner and Hold line keep the bend above that edge, and a
         // flange stopping just short of a ripped corner with Hold line leaves its wall
         // untrimmed in the builder, which is still open.)
-        let pull = matches!(o.alignment, FlangeAlignment::Outer | FlangeAlignment::Middle);
+        let pull = matches!(
+            o.alignment,
+            FlangeAlignment::Outer | FlangeAlignment::Middle
+        );
         for end in 0..2usize {
             if !pull {
                 break;
@@ -552,15 +668,23 @@ pub fn flange(def: &mut SharpDef, edges: &[FlangeEdge], o: &FlangeOpts) -> Resul
             }
             let corner = se.at(if end == 0 { 0.0 } else { se.len() }, 0.0);
             let tol = 1e-6 * se.len().max(1.0);
-            let mitred = sharp_ends.iter().enumerate().any(|(k, e)| k != fi && e.iter().any(|q| (q - corner).norm() < tol));
+            let mitred = sharp_ends
+                .iter()
+                .enumerate()
+                .any(|(k, e)| k != fi && e.iter().any(|q| (q - corner).norm() < tol));
             let joined = def.builder.joints.iter().any(|j| {
                 if j.a != se.wall && j.b != se.wall {
                     return false;
                 }
                 let (a, b) = j.edge;
-                let Some(d) = (b - a).try_normalize(1e-12) else { return false };
+                let Some(d) = (b - a).try_normalize(1e-12) else {
+                    return false;
+                };
                 let s = (corner - a).dot(&d);
-                d.cross(&se.e).norm() > 1e-6 && s > -tol && s < (b - a).norm() + tol && ((corner - a) - d * s).norm() < tol
+                d.cross(&se.e).norm() > 1e-6
+                    && s > -tol
+                    && s < (b - a).norm() + tol
+                    && ((corner - a) - d * s).norm() < tol
             });
             if mitred || !joined {
                 continue;
@@ -577,7 +701,11 @@ pub fn flange(def: &mut SharpDef, edges: &[FlangeEdge], o: &FlangeOpts) -> Resul
         };
         let side = if fe.toward { se.n } else { -se.n };
         let f = -se.into3 * theta.cos() + side * theta.sin();
-        let nf = if fe.toward { se.n * theta.cos() + se.into3 * theta.sin() } else { se.n * theta.cos() - se.into3 * theta.sin() };
+        let nf = if fe.toward {
+            se.n * theta.cos() + se.into3 * theta.sin()
+        } else {
+            se.n * theta.cos() - se.into3 * theta.sin()
+        };
         // Measured on the definition surface from its own sharp: the inner sharp lies
         // `T·tan(θ/2)` further along the flange than the outer one.
         let length = fe.distance - if fe.toward { 0.0 } else { t * h };
@@ -588,19 +716,42 @@ pub fn flange(def: &mut SharpDef, edges: &[FlangeEdge], o: &FlangeOpts) -> Resul
         let u = se.e;
         let v = nf.cross(&u);
         let sign = f.dot(&v).signum();
-        let outline = Polygon::rect(P2::new(span.0, 0.0f64.min(sign * length)), P2::new(span.1, 0.0f64.max(sign * length)));
-        pend.push(Pending { se, span, whole, origin, u, v, nf, length, sign, outline, x_d });
+        let outline = Polygon::rect(
+            P2::new(span.0, 0.0f64.min(sign * length)),
+            P2::new(span.1, 0.0f64.max(sign * length)),
+        );
+        pend.push(Pending {
+            se,
+            span,
+            whole,
+            origin,
+            u,
+            v,
+            nf,
+            length,
+            sign,
+            outline,
+            x_d,
+        });
     }
 
     // Miters where two flanges of the feature meet at a corner of the walls' sharps.
     let gap = p.minimal_gap;
     let mut rips: Vec<(usize, usize, (P3, P3))> = Vec::new();
-    let size = pend.iter().map(|x| x.se.len() + x.length).fold(1.0, f64::max);
+    let size = pend
+        .iter()
+        .map(|x| x.se.len() + x.length)
+        .fold(1.0, f64::max);
     let tol = 1e-6 * size;
     for k in 0..pend.len() {
         for l in k + 1..pend.len() {
             // A shared end of the two edges (on the sharps of the walls they are on).
-            let ends = |x: &Pending| [(x.se.at(0.0, 0.0), 0usize), (x.se.at(x.se.len(), 0.0), 1usize)];
+            let ends = |x: &Pending| {
+                [
+                    (x.se.at(0.0, 0.0), 0usize),
+                    (x.se.at(x.se.len(), 0.0), 1usize),
+                ]
+            };
             let mut shared = None;
             for (pk, ek) in ends(&pend[k]) {
                 for (pl, el) in ends(&pend[l]) {
@@ -609,7 +760,9 @@ pub fn flange(def: &mut SharpDef, edges: &[FlangeEdge], o: &FlangeOpts) -> Resul
                     }
                 }
             }
-            let Some((corner, ek, el)) = shared else { continue };
+            let Some((corner, ek, el)) = shared else {
+                continue;
+            };
             let reaches = |x: &Pending, e: usize| if e == 0 { x.whole.0 } else { x.whole.1 };
             if !reaches(&pend[k], ek) || !reaches(&pend[l], el) {
                 continue;
@@ -619,16 +772,27 @@ pub fn flange(def: &mut SharpDef, edges: &[FlangeEdge], o: &FlangeOpts) -> Resul
                     let reach = (pend[k].length + pend[l].length + t) * 4.0;
                     extend_end(&mut pend[k], ek, reach);
                     extend_end(&mut pend[l], el, reach);
-                    let coplanar = pend[k].nf.dot(&pend[l].nf) > 1.0 - 1e-9 && (pend[l].origin - pend[k].origin).dot(&pend[k].nf).abs() < tol;
+                    let coplanar = pend[k].nf.dot(&pend[l].nf) > 1.0 - 1e-9
+                        && (pend[l].origin - pend[k].origin).dot(&pend[k].nf).abs() < tol;
                     if coplanar {
                         // In one plane: cut along the bisector of the corner, the gap apart.
-                        let xk = pend[k].local(pend[k].se.at(if ek == 0 { 0.0 } else { pend[k].se.len() }, pend[k].x_d));
+                        let xk = pend[k].local(
+                            pend[k]
+                                .se
+                                .at(if ek == 0 { 0.0 } else { pend[k].se.len() }, pend[k].x_d),
+                        );
                         let dk = if ek == 0 { V2::x() } else { -V2::x() };
                         let ql = |x: f64| pend[k].local(pend[l].se.at(x, pend[l].x_d));
                         let (la, lb) = (ql(0.0), ql(pend[l].se.len()));
-                        let dl = if el == 0 { (lb - la).normalize() } else { (la - lb).normalize() };
+                        let dl = if el == 0 {
+                            (lb - la).normalize()
+                        } else {
+                            (la - lb).normalize()
+                        };
                         // Where the two flanges' bottom lines meet.
-                        let Some(x) = line_meet(xk, dk, la, lb - la) else { continue };
+                        let Some(x) = line_meet(xk, dk, la, lb - la) else {
+                            continue;
+                        };
                         let b = dk + dl;
                         if b.norm() < 1e-9 {
                             continue;
@@ -649,14 +813,21 @@ pub fn flange(def: &mut SharpDef, edges: &[FlangeEdge], o: &FlangeOpts) -> Resul
                     } else {
                         // Where their planes meet: each carried on to it, then a rip (an edge
                         // joint) between them.
-                        let Some((o3, d3)) = plane_line(pend[k].nf, pend[k].nf.dot(&pend[k].origin.coords), pend[l].nf, pend[l].nf.dot(&pend[l].origin.coords))
-                        else {
+                        let Some((o3, d3)) = plane_line(
+                            pend[k].nf,
+                            pend[k].nf.dot(&pend[k].origin.coords),
+                            pend[l].nf,
+                            pend[l].nf.dot(&pend[l].origin.coords),
+                        ) else {
                             continue;
                         };
                         for (a, b) in [(k, l), (l, k)] {
                             let mid = {
                                 let x = &pend[a];
-                                x.point(P2::new((x.span.0 + x.span.1) / 2.0, x.sign * x.length / 2.0))
+                                x.point(P2::new(
+                                    (x.span.0 + x.span.1) / 2.0,
+                                    x.sign * x.length / 2.0,
+                                ))
                             };
                             let nb = pend[b].nf;
                             let x = &pend[a];
@@ -664,7 +835,11 @@ pub fn flange(def: &mut SharpDef, edges: &[FlangeEdge], o: &FlangeOpts) -> Resul
                             if n2.norm() < 1e-9 {
                                 continue;
                             }
-                            let s = if (mid - o3).dot(&nb) >= 0.0 { 1.0 } else { -1.0 };
+                            let s = if (mid - o3).dot(&nb) >= 0.0 {
+                                1.0
+                            } else {
+                                -1.0
+                            };
                             let q = x.local(o3);
                             pend[a].outline = pend[a].outline.clip_half_plane(q, n2 * s);
                         }
@@ -675,12 +850,19 @@ pub fn flange(def: &mut SharpDef, edges: &[FlangeEdge], o: &FlangeOpts) -> Resul
                                 .outer
                                 .iter()
                                 .map(|q| x.point(*q))
-                                .filter(|q| ((q - o3) - d3 * (q - o3).dot(&d3)).norm() < 1e-6 * size)
+                                .filter(|q| {
+                                    ((q - o3) - d3 * (q - o3).dot(&d3)).norm() < 1e-6 * size
+                                })
                                 .map(|q| (q - o3).dot(&d3))
                                 .collect();
-                            (pts.len() >= 2).then(|| pts.iter().fold((f64::MAX, f64::MIN), |(a, b), s| (a.min(*s), b.max(*s))))
+                            (pts.len() >= 2).then(|| {
+                                pts.iter()
+                                    .fold((f64::MAX, f64::MIN), |(a, b), s| (a.min(*s), b.max(*s)))
+                            })
                         };
-                        let (Some(ik), Some(il)) = (along(&pend[k]), along(&pend[l])) else { continue };
+                        let (Some(ik), Some(il)) = (along(&pend[k]), along(&pend[l])) else {
+                            continue;
+                        };
                         let (lo, hi) = (ik.0.max(il.0), ik.1.min(il.1));
                         if hi - lo > tol {
                             rips.push((k, l, (o3 + d3 * lo, o3 + d3 * hi)));
@@ -696,9 +878,16 @@ pub fn flange(def: &mut SharpDef, edges: &[FlangeEdge], o: &FlangeOpts) -> Resul
                     // 45° stops both at the edge's end.
                     let alpha = alpha.clamp(1e-3, FRAC_PI_2 - 1e-3);
                     let lim = 4.0 * t;
-                    let ext = [(t * (1.0 - 1.0 / alpha.tan())).clamp(-size, lim), (t * (1.0 - alpha.tan())).clamp(-size, lim)];
+                    let ext = [
+                        (t * (1.0 - 1.0 / alpha.tan())).clamp(-size, lim),
+                        (t * (1.0 - alpha.tan())).clamp(-size, lim),
+                    ];
                     for ((i, e), x) in [(k, ek), (l, el)].into_iter().zip(ext) {
-                        let s0 = if e == 0 { pend[i].span.0 } else { pend[i].span.1 };
+                        let s0 = if e == 0 {
+                            pend[i].span.0
+                        } else {
+                            pend[i].span.1
+                        };
                         let out = if e == 0 { -1.0 } else { 1.0 };
                         let u = s0 + out * x;
                         if x > 0.0 {
@@ -710,7 +899,9 @@ pub fn flange(def: &mut SharpDef, edges: &[FlangeEdge], o: &FlangeOpts) -> Resul
                                 }
                             }
                         } else {
-                            pend[i].outline = pend[i].outline.clip_half_plane(P2::new(u, 0.0), V2::new(-out, 0.0));
+                            pend[i].outline = pend[i]
+                                .outline
+                                .clip_half_plane(P2::new(u, 0.0), V2::new(-out, 0.0));
                         }
                     }
                 }
@@ -725,11 +916,19 @@ pub fn flange(def: &mut SharpDef, edges: &[FlangeEdge], o: &FlangeOpts) -> Resul
     for (fe, x) in edges.iter().zip(&pend) {
         // Hold adjacent edges: the rest of the edge stays where it is (only the flange's stretch
         // moves to its sharp); off, the whole edge moves.
-        let (b0, b1) = if fe.partial.is_some() && o.hold_adjacent { x.span } else { (0.0, x.se.len()) };
-        let seg = Seg2::new(x.se.seg.a + x.se.seg.dir() * b0, x.se.seg.a + x.se.seg.dir() * b1);
+        let (b0, b1) = if fe.partial.is_some() && o.hold_adjacent {
+            x.span
+        } else {
+            (0.0, x.se.len())
+        };
+        let seg = Seg2::new(
+            x.se.seg.a + x.se.seg.dir() * b0,
+            x.se.seg.a + x.se.seg.dir() * b1,
+        );
         let wall = &mut def.builder.walls[x.se.wall];
         if x.x_d.abs() > 1e-12 {
-            wall.outline = shift_edge(&wall.outline, seg, x.se.into, -x.x_d).ok_or("The flange cuts its wall away")?;
+            wall.outline = shift_edge(&wall.outline, seg, x.se.into, -x.x_d)
+                .ok_or("The flange cuts its wall away")?;
         }
         if x.outline.is_empty() || x.outline.area() < 1e-9 {
             return Err("The flange's miter leaves nothing of it".into());
@@ -738,20 +937,38 @@ pub fn flange(def: &mut SharpDef, edges: &[FlangeEdge], o: &FlangeOpts) -> Resul
         if def.builder.walls.iter().any(|w| w.id == Some(id)) {
             return Err("This edge already has a flange".into());
         }
-        def.builder.walls.push(SharpWall { origin: x.origin, u: x.u, v: x.v, outline: x.outline.clone(), id: Some(id) });
+        def.builder.walls.push(SharpWall {
+            origin: x.origin,
+            u: x.u,
+            v: x.v,
+            outline: x.outline.clone(),
+            id: Some(id),
+        });
         let wi = def.builder.walls.len() - 1;
         new_walls.push(wi);
         let edge = (x.se.at(x.span.0, x.x_d), x.se.at(x.span.1, x.x_d));
-        let j = def.builder.joint(x.se.wall, wi, edge, SharpJointKind::Bend { radius: o.radius, value: None });
+        let j = def.builder.joint(
+            x.se.wall,
+            wi,
+            edge,
+            SharpJointKind::Bend {
+                radius: o.radius,
+                value: None,
+            },
+        );
         let jid = JointId(stable_id(fe.key.rotate_left(13) ^ 0x4245_4e44));
-        def.builder.set_joint_id(j, jid, Some(next_name("Bend", &mut letter)));
+        def.builder
+            .set_joint_id(j, jid, Some(next_name("Bend", &mut letter)));
         out.push((fe.key, id, jid));
     }
     for (k, l, edge) in rips {
-        let j = def.builder.rip(new_walls[k], new_walls[l], edge, RipStyle::EdgeJoint);
+        let j = def
+            .builder
+            .rip(new_walls[k], new_walls[l], edge, RipStyle::EdgeJoint);
         let key = edges[k].key.rotate_left(29) ^ edges[l].key ^ 0x5249_5000;
         let jid = JointId(stable_id(key));
-        def.builder.set_joint_id(j, jid, Some(next_name("Joint", &mut letter)));
+        def.builder
+            .set_joint_id(j, jid, Some(next_name("Joint", &mut letter)));
     }
     Ok(out)
 }
@@ -759,11 +976,24 @@ pub fn flange(def: &mut SharpDef, edges: &[FlangeEdge], o: &FlangeOpts) -> Resul
 /// Carries a pending flange's end at the edge's start (`end` 0) or end (1) on past the edge's
 /// own end by `reach` (the miter then cuts it back).
 fn extend_end(x: &mut Pending, end: usize, reach: f64) {
-    let Some((lo, hi)) = x.outline.bounds() else { return };
+    let Some((lo, hi)) = x.outline.bounds() else {
+        return;
+    };
     let (y0, y1) = (lo.y, hi.y);
-    let s = if end == 0 { 0.0 - reach } else { x.se.len() + reach };
-    let piece = if end == 0 { Polygon::rect(P2::new(s, y0), P2::new(x.span.0 + 1e-9, y1)) } else { Polygon::rect(P2::new(x.span.1 - 1e-9, y0), P2::new(s, y1)) };
-    if let Some(u) = crate::poly::union(&[x.outline.clone(), piece]).into_iter().max_by(|a, b| a.area().total_cmp(&b.area())) {
+    let s = if end == 0 {
+        0.0 - reach
+    } else {
+        x.se.len() + reach
+    };
+    let piece = if end == 0 {
+        Polygon::rect(P2::new(s, y0), P2::new(x.span.0 + 1e-9, y1))
+    } else {
+        Polygon::rect(P2::new(x.span.1 - 1e-9, y0), P2::new(s, y1))
+    };
+    if let Some(u) = crate::poly::union(&[x.outline.clone(), piece])
+        .into_iter()
+        .max_by(|a, b| a.area().total_cmp(&b.area()))
+    {
         x.outline = u;
     }
     if end == 0 {
@@ -858,7 +1088,9 @@ pub fn hem_shape(o: &HemOpts, t: f64) -> Result<(f64, f64), String> {
         HemKind::Straight => {
             let len = crate::model::hem_length_from_total(o.total, r, t);
             if !(len > 1e-9) {
-                return Err("The total length must be more than the inner radius plus the thickness".into());
+                return Err(
+                    "The total length must be more than the inner radius plus the thickness".into(),
+                );
             }
             Ok((PI, len))
         }
@@ -943,8 +1175,16 @@ pub fn hem(def: &mut SharpDef, edges: &[HemEdge], o: &HemOpts) -> Result<Vec<Add
                     // Both legs cut on the corner's bisector, half the gap off it (Simple,
                     // `hem-straight-simple.png`: a clean V in the flat); Closed first carries
                     // each leg on past its bend's end so the cut closes the corner.
-                    let extend = if o.closed { length + o.radius + 2.0 * t + trim } else { 0.0 };
-                    let clip = (dk - dl).try_normalize(1e-9).map(|nn| HemClip { point: pk + nn * (p.minimal_gap / 2.0), normal: nn, extend });
+                    let extend = if o.closed {
+                        length + o.radius + 2.0 * t + trim
+                    } else {
+                        0.0
+                    };
+                    let clip = (dk - dl).try_normalize(1e-9).map(|nn| HemClip {
+                        point: pk + nn * (p.minimal_gap / 2.0),
+                        normal: nn,
+                        extend,
+                    });
                     clips[k].extend(clip);
                 }
             }
@@ -956,12 +1196,18 @@ pub fn hem(def: &mut SharpDef, edges: &[HemEdge], o: &HemOpts) -> Result<Vec<Add
     for k in 0..ses.len() {
         for l in 0..k {
             let (a, b) = (&ses[k], &ses[l]);
-            if a.wall == b.wall || a.n.dot(&b.n).abs() < 1.0 - 1e-9 || (a.origin - b.origin).dot(&a.n).abs() > tol {
+            if a.wall == b.wall
+                || a.n.dot(&b.n).abs() < 1.0 - 1e-9
+                || (a.origin - b.origin).dot(&a.n).abs() > tol
+            {
                 continue;
             }
             for (i, pk) in [(0usize, a.at(0.0, 0.0)), (1, a.at(a.len(), 0.0))] {
                 // (Mitred flanges' edges end the minimal gap apart.)
-                if [b.at(0.0, 0.0), b.at(b.len(), 0.0)].iter().any(|q| (q - pk).norm() < tol + 2.0 * p.minimal_gap) {
+                if [b.at(0.0, 0.0), b.at(b.len(), 0.0)]
+                    .iter()
+                    .any(|q| (q - pk).norm() < tol + 2.0 * p.minimal_gap)
+                {
                     let clear = o.radius + t + p.minimal_gap;
                     if i == 0 {
                         spans[k].0 = clear;
@@ -988,7 +1234,16 @@ pub fn hem(def: &mut SharpDef, edges: &[HemEdge], o: &HemOpts) -> Result<Vec<Add
             // thickness and the gap apart).
             let near = 2.0 * (t + gap) + tol;
             let ends = |s: &SharpEdge| [(0usize, s.at(0.0, 0.0)), (1usize, s.at(s.len(), 0.0))];
-            let Some(ek) = ends(a).into_iter().flat_map(|(i, p)| ends(b).into_iter().map(move |(j, q)| (i, j, (p - q).norm()))).find(|x| x.2 < near).map(|x| x.0) else {
+            let Some(ek) = ends(a)
+                .into_iter()
+                .flat_map(|(i, p)| {
+                    ends(b)
+                        .into_iter()
+                        .map(move |(j, q)| (i, j, (p - q).norm()))
+                })
+                .find(|x| x.2 < near)
+                .map(|x| x.0)
+            else {
                 continue;
             };
             let wb = &def.builder.walls[b.wall];
@@ -996,11 +1251,19 @@ pub fn hem(def: &mut SharpDef, edges: &[HemEdge], o: &HemOpts) -> Result<Vec<Add
             // Where the earlier hem lies off its wall, and whether the later wall is on that side.
             let sigma = if edges[l].toward { 1.0 } else { -1.0 };
             let mid = a.at(a.len() / 2.0, 0.0);
-            let same_side = if sigma > 0.0 { hb(mid) > t } else { hb(mid) < 0.0 };
+            let same_side = if sigma > 0.0 {
+                hb(mid) > t
+            } else {
+                hb(mid) < 0.0
+            };
             if !same_side {
                 continue;
             }
-            let level = if sigma > 0.0 { t + depth + gap / 2.0 } else { -(depth + gap / 2.0) };
+            let level = if sigma > 0.0 {
+                t + depth + gap / 2.0
+            } else {
+                -(depth + gap / 2.0)
+            };
             let slope = a.e.dot(&b.n);
             if slope.abs() < 1e-9 {
                 continue;
@@ -1021,10 +1284,13 @@ pub fn hem(def: &mut SharpDef, edges: &[HemEdge], o: &HemOpts) -> Result<Vec<Add
             return Err("A hem is too short to clear the hem it meets".into());
         }
         let edge = (se.at(span.0, 0.0), se.at(span.1, 0.0));
-        let h = def.builder.hem(se.wall, edge, length, he.toward, o.alignment);
+        let h = def
+            .builder
+            .hem(se.wall, edge, length, he.toward, o.alignment);
         let id = WallId(stable_id(he.key));
         let jid = JointId(stable_id(he.key.rotate_left(13) ^ 0x4845_4d00));
-        def.builder.set_hem_id(h, jid, id, Some(next_name("Bend", &mut letter)));
+        def.builder
+            .set_hem_id(h, jid, id, Some(next_name("Bend", &mut letter)));
         let hm = &mut def.builder.hems[h];
         hm.radius = Some(o.radius);
         hm.angle = angle;
@@ -1048,7 +1314,13 @@ pub enum JointSpec {
 /// Joins the walls of two picked edges (SM6.1): both edges carried on or cut back to where the
 /// walls' planes meet, then a rip or a bend there. The first pick's wall is the joint's first
 /// wall (Butt joint – Direction 1: it stops short and the second runs on over its end).
-pub fn make_joint(def: &mut SharpDef, first: &EdgePick, second: &EdgePick, key: u64, spec: JointSpec) -> Result<JointId, String> {
+pub fn make_joint(
+    def: &mut SharpDef,
+    first: &EdgePick,
+    second: &EdgePick,
+    key: u64,
+    spec: JointSpec,
+) -> Result<JointId, String> {
     if first.joined || second.joined {
         return Err("An edge to join is already joined to another wall".into());
     }
@@ -1070,7 +1342,10 @@ pub fn make_joint(def: &mut SharpDef, first: &EdgePick, second: &EdgePick, key: 
         }
         // How far past the edge the line lies.
         let x = (lo3 - s.origin).dot(&-s.into3);
-        let (t0, t1) = ((s.origin - lo3).dot(&ld), (s.at(s.len(), 0.0) - lo3).dot(&ld));
+        let (t0, t1) = (
+            (s.origin - lo3).dot(&ld),
+            (s.at(s.len(), 0.0) - lo3).dot(&ld),
+        );
         spans.push((x, t0.min(t1), t0.max(t1)));
     }
     let (lo, hi) = (spans[0].1.max(spans[1].1), spans[0].2.min(spans[1].2));
@@ -1080,15 +1355,21 @@ pub fn make_joint(def: &mut SharpDef, first: &EdgePick, second: &EdgePick, key: 
     for (s, (x, ..)) in [(&s1, spans[0]), (&s2, spans[1])] {
         let wall = &mut def.builder.walls[s.wall];
         if x.abs() > 1e-12 {
-            wall.outline = shift_edge(&wall.outline, s.seg, s.into, -x).ok_or("The joint cuts a wall away")?;
+            wall.outline =
+                shift_edge(&wall.outline, s.seg, s.into, -x).ok_or("The joint cuts a wall away")?;
             // A bend that ends at the moved edge's corner runs on with it (else the wall's
             // corner past the bend's tangent line is left square).
             let tol = 1e-6 * s.len().max(1.0);
             let line = |p: P3| ((p - s.origin) - s.e * (p - s.origin).dot(&s.e)).norm() < tol;
-            for j in def.builder.joints.iter_mut().filter(|j| (j.a == s.wall || j.b == s.wall) && matches!(j.kind, SharpJointKind::Bend { .. })) {
+            for j in def.builder.joints.iter_mut().filter(|j| {
+                (j.a == s.wall || j.b == s.wall) && matches!(j.kind, SharpJointKind::Bend { .. })
+            }) {
                 let (a, b) = j.edge;
                 let d = b - a;
-                if d.norm() < tol || d.normalize().cross(&s.e).norm() < 1e-6 || d.normalize().dot(&s.into3).abs() < 1e-6 {
+                if d.norm() < tol
+                    || d.normalize().cross(&s.e).norm() < 1e-6
+                    || d.normalize().dot(&s.into3).abs() < 1e-6
+                {
                     continue;
                 }
                 let moved = |p: P3| p - s.into3 * x;
@@ -1103,8 +1384,22 @@ pub fn make_joint(def: &mut SharpDef, first: &EdgePick, second: &EdgePick, key: 
     let edge = (lo3 + ld * lo, lo3 + ld * hi);
     let mut letter = def.next_letter();
     let (j, name) = match spec {
-        JointSpec::Rip(style) => (def.builder.rip(s1.wall, s2.wall, edge, style), next_name("Joint", &mut letter)),
-        JointSpec::Bend(radius) => (def.builder.joint(s1.wall, s2.wall, edge, SharpJointKind::Bend { radius, value: None }), next_name("Bend", &mut letter)),
+        JointSpec::Rip(style) => (
+            def.builder.rip(s1.wall, s2.wall, edge, style),
+            next_name("Joint", &mut letter),
+        ),
+        JointSpec::Bend(radius) => (
+            def.builder.joint(
+                s1.wall,
+                s2.wall,
+                edge,
+                SharpJointKind::Bend {
+                    radius,
+                    value: None,
+                },
+            ),
+            next_name("Bend", &mut letter),
+        ),
     };
     let jid = JointId(stable_id(key ^ 0x4a4f_494e_0000));
     def.builder.set_joint_id(j, jid, Some(name));

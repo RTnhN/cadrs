@@ -157,7 +157,8 @@ struct Heartbeat {
 impl Heartbeat {
     fn beat(&self) {
         let start = *self.start.get_or_init(std::time::Instant::now);
-        self.last_frame.store(start.elapsed().as_millis() as u64 + 1, Ordering::Relaxed);
+        self.last_frame
+            .store(start.elapsed().as_millis() as u64 + 1, Ordering::Relaxed);
     }
 }
 
@@ -168,31 +169,44 @@ impl Heartbeat {
 fn watchdog(heartbeat: Arc<Heartbeat>, out_dir: PathBuf) {
     std::thread::Builder::new()
         .name("scenario-watchdog".into())
-        .spawn(move || loop {
-            std::thread::sleep(std::time::Duration::from_secs(1));
-            let Some(start) = heartbeat.start.get() else { continue };
-            let last = heartbeat.last_frame.load(Ordering::Relaxed);
-            let timeout = heartbeat.timeout.load(Ordering::Relaxed).max(1000);
-            let now = start.elapsed().as_millis() as u64;
-            if last == 0 || now.saturating_sub(last) < timeout {
-                continue;
+        .spawn(move || {
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                let Some(start) = heartbeat.start.get() else {
+                    continue;
+                };
+                let last = heartbeat.last_frame.load(Ordering::Relaxed);
+                let timeout = heartbeat.timeout.load(Ordering::Relaxed).max(1000);
+                let now = start.elapsed().as_millis() as u64;
+                if last == 0 || now.saturating_sub(last) < timeout {
+                    continue;
+                }
+                let pid = std::process::id().to_string();
+                let stacks = std::process::Command::new("eu-stack")
+                    .args(["-p", &pid])
+                    .output()
+                    .ok()
+                    .filter(|o| o.status.success() || !o.stdout.is_empty())
+                    .or_else(|| {
+                        std::process::Command::new("gdb")
+                            .args(["-p", &pid, "-batch", "-ex", "thread apply all bt"])
+                            .output()
+                            .ok()
+                    })
+                    .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+                    .unwrap_or_else(|| "(no eu-stack or gdb to dump the stacks)".into());
+                let path = out_dir.join("hang-stacks.txt");
+                let _ = std::fs::write(&path, &stacks);
+                eprintln!("{stacks}");
+                let msg = format!(
+                    "the app ran no frame for {} s (hung); thread stacks in {}",
+                    timeout / 1000,
+                    path.display()
+                );
+                error!("scenario failed: {msg}");
+                eprintln!("scenario failed: {msg}");
+                std::process::exit(1);
             }
-            let pid = std::process::id().to_string();
-            let stacks = std::process::Command::new("eu-stack")
-                .args(["-p", &pid])
-                .output()
-                .ok()
-                .filter(|o| o.status.success() || !o.stdout.is_empty())
-                .or_else(|| std::process::Command::new("gdb").args(["-p", &pid, "-batch", "-ex", "thread apply all bt"]).output().ok())
-                .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-                .unwrap_or_else(|| "(no eu-stack or gdb to dump the stacks)".into());
-            let path = out_dir.join("hang-stacks.txt");
-            let _ = std::fs::write(&path, &stacks);
-            eprintln!("{stacks}");
-            let msg = format!("the app ran no frame for {} s (hung); thread stacks in {}", timeout / 1000, path.display());
-            error!("scenario failed: {msg}");
-            eprintln!("scenario failed: {msg}");
-            std::process::exit(1);
         })
         .ok();
 }
@@ -200,12 +214,18 @@ fn watchdog(heartbeat: Arc<Heartbeat>, out_dir: PathBuf) {
 /// Runs `scenario` in the running app (live: no fixed time step, no watchdog, and the app keeps
 /// running after it). `done` gets its screenshots (in `out_dir`) or why it failed. Fails if a
 /// scenario is already running.
-pub fn start_live(world: &mut World, scenario: Scenario, out_dir: PathBuf, done: Box<dyn FnOnce(Result<Vec<PathBuf>, String>) + Send>) -> Result<(), String> {
+pub fn start_live(
+    world: &mut World,
+    scenario: Scenario,
+    out_dir: PathBuf,
+    done: Box<dyn FnOnce(Result<Vec<PathBuf>, String>) + Send>,
+) -> Result<(), String> {
     if world.contains_resource::<Runner>() {
         return Err("a scenario is already running".into());
     }
     let _ = std::fs::remove_dir_all(&out_dir);
-    std::fs::create_dir_all(&out_dir).map_err(|e| format!("cannot create {}: {e}", out_dir.display()))?;
+    std::fs::create_dir_all(&out_dir)
+        .map_err(|e| format!("cannot create {}: {e}", out_dir.display()))?;
     world.init_resource::<WorldToScreen>();
     world.init_resource::<SpaceToScreen>();
     world.init_resource::<FlatToScreen>();
@@ -247,7 +267,9 @@ fn end_live(world: &mut World, result: Result<Vec<PathBuf>, String>) {
 }
 
 fn is_live(world: &World) -> bool {
-    world.get_resource::<Runner>().is_some_and(|r| r.live.is_some())
+    world
+        .get_resource::<Runner>()
+        .is_some_and(|r| r.live.is_some())
 }
 
 pub fn add_runner(app: &mut App, scenario: Scenario, name: String, out_dir: PathBuf) {
@@ -256,7 +278,10 @@ pub fn add_runner(app: &mut App, scenario: Scenario, name: String, out_dir: Path
         panic!("cannot create {}: {e}", out_dir.display());
     }
     let heartbeat = Arc::new(Heartbeat::default());
-    heartbeat.timeout.store((scenario.timeout.max(0.1) * 1000.0) as u64, Ordering::Relaxed);
+    heartbeat.timeout.store(
+        (scenario.timeout.max(0.1) * 1000.0) as u64,
+        Ordering::Relaxed,
+    );
     watchdog(heartbeat.clone(), out_dir.clone());
     // (The app may be traced: a hang's stacks can be dumped, by the watchdog or by hand.)
     #[cfg(target_os = "linux")]
@@ -307,7 +332,9 @@ fn fail(world: &mut World, msg: String) {
 
 /// Runs the scenario's steps, a frame at a time (while there is a [`Runner`]).
 pub fn drive(world: &mut World) {
-    let Some(mut runner) = world.get_resource_mut::<Runner>() else { return };
+    let Some(mut runner) = world.get_resource_mut::<Runner>() else {
+        return;
+    };
     runner.heartbeat.beat();
     if runner.done {
         if runner.live.is_some() {
@@ -318,7 +345,8 @@ pub fn drive(world: &mut World) {
     }
     if let Some(m) = runner.measure.as_mut() {
         let now = std::time::Instant::now();
-        m.frames.push(now.duration_since(m.last).as_secs_f64() * 1000.0);
+        m.frames
+            .push(now.duration_since(m.last).as_secs_f64() * 1000.0);
         m.last = now;
     }
     if runner.pending.load(Ordering::SeqCst) > 0 {
@@ -364,24 +392,50 @@ pub fn drive(world: &mut World) {
     };
     if let Step::SetTimeout(secs) = step {
         runner.timeout = std::time::Duration::from_secs_f32(secs.max(0.1));
-        runner.heartbeat.timeout.store((secs.max(0.1) * 1000.0) as u64, Ordering::Relaxed);
+        runner
+            .heartbeat
+            .timeout
+            .store((secs.max(0.1) * 1000.0) as u64, Ordering::Relaxed);
         return;
     }
     // Every step (but a Wait or a measurement) waits for the app to settle: no pending work
     // (rebuilds, view animations, section caps, drawing views), then `QUIET_FRAMES` quiet frames.
     // (A WaitFor polls at once: it waits for something on screen itself, which may only be
     // there while the app is busy, like the loading cover. ScreenshotNow takes the frame as is.)
-    if !matches!(step, Step::Wait(_) | Step::WaitFor(_) | Step::ScreenshotNow(_) | Step::MeasureStart(_) | Step::MeasureEnd) {
-        let busy = world.get_resource::<cadrs_ui::PendingWork>().is_some_and(|w| w.0);
+    if !matches!(
+        step,
+        Step::Wait(_)
+            | Step::WaitFor(_)
+            | Step::ScreenshotNow(_)
+            | Step::MeasureStart(_)
+            | Step::MeasureEnd
+    ) {
+        let busy = world
+            .get_resource::<cadrs_ui::PendingWork>()
+            .is_some_and(|w| w.0);
         let mut runner = world.resource_mut::<Runner>();
         let since = *runner.waiting.get_or_insert_with(std::time::Instant::now);
-        runner.quiet = if busy { 0 } else { runner.quiet.saturating_add(1) };
+        runner.quiet = if busy {
+            0
+        } else {
+            runner.quiet.saturating_add(1)
+        };
         if runner.quiet < QUIET_FRAMES {
             if since.elapsed() > runner.timeout {
                 let secs = runner.timeout.as_secs_f32();
-                let why = world.get_resource::<cadrs_ui::PendingWhy>().map(|w| w.0.join(", ")).unwrap_or_default();
-                let why = if why.is_empty() { "unnamed pending work".to_string() } else { why };
-                return fail(world, format!("{step:?}: the app was still busy after {secs} s ({why})"));
+                let why = world
+                    .get_resource::<cadrs_ui::PendingWhy>()
+                    .map(|w| w.0.join(", "))
+                    .unwrap_or_default();
+                let why = if why.is_empty() {
+                    "unnamed pending work".to_string()
+                } else {
+                    why
+                };
+                return fail(
+                    world,
+                    format!("{step:?}: the app was still busy after {secs} s ({why})"),
+                );
             }
             runner.steps.push_front(step);
             return;
@@ -390,7 +444,9 @@ pub fn drive(world: &mut World) {
     // A screenshot waits for the app's background work (drawing views being projected), a few
     // frames more for what it produced to be drawn, and at most `WORK_TIMEOUT` frames.
     if matches!(step, Step::Screenshot(_)) {
-        let busy = world.get_resource::<cadrs_ui::PendingWork>().is_some_and(|w| w.0);
+        let busy = world
+            .get_resource::<cadrs_ui::PendingWork>()
+            .is_some_and(|w| w.0);
         let mut runner = world.resource_mut::<Runner>();
         if busy && runner.work_frames < WORK_TIMEOUT {
             runner.work_frames += 1;
@@ -544,7 +600,11 @@ fn expand(world: &mut World, step: &Step) -> Result<Vec<Vec<Op>>, String> {
                     return Ok(vec![]);
                 }
             };
-            vec![vec![Op::Move(resolve(world, t)?)], vec![Op::Press(button)], vec![]]
+            vec![
+                vec![Op::Move(resolve(world, t)?)],
+                vec![Op::Press(button)],
+                vec![],
+            ]
         }
         Step::ReleaseWith(b) => {
             let button = match parse_button(b) {
@@ -637,8 +697,11 @@ fn expand(world: &mut World, step: &Step) -> Result<Vec<Vec<Op>>, String> {
         }
         Step::AssertEnabled(name) => {
             resolve(world, &Target::Ui(name.clone()))?;
-            let mut q = world.query::<(&Name, bevy::ecs::query::Has<bevy::ui::InteractionDisabled>)>();
-            if q.iter(world).any(|(n, disabled)| n.as_str() == name && disabled) {
+            let mut q =
+                world.query::<(&Name, bevy::ecs::query::Has<bevy::ui::InteractionDisabled>)>();
+            if q.iter(world)
+                .any(|(n, disabled)| n.as_str() == name && disabled)
+            {
                 return Err(format!("{name} is disabled"));
             }
             vec![vec![]]
@@ -670,26 +733,44 @@ fn resolve(world: &mut World, target: &Target) -> Result<Vec2, String> {
     match target {
         Target::At(x, y) => Ok(Vec2::new(*x, *y)),
         Target::World(x, y) => {
-            let map = world.get_resource::<WorldToScreen>().copied().unwrap_or_default();
+            let map = world
+                .get_resource::<WorldToScreen>()
+                .copied()
+                .unwrap_or_default();
             // Whole pixels, like a real mouse.
             map.0
                 .map(|m| m.apply(Vec2::new(*x, *y)).round())
                 .ok_or_else(|| "world(..): no sketch plane mapping".to_string())
         }
         Target::Flat(x, y) => {
-            let map = world.get_resource::<FlatToScreen>().copied().unwrap_or_default();
-            map.0.map(|m| m.apply(Vec2::new(*x, *y)).round()).ok_or_else(|| "flat(..): the flat view isn't shown".to_string())
+            let map = world
+                .get_resource::<FlatToScreen>()
+                .copied()
+                .unwrap_or_default();
+            map.0
+                .map(|m| m.apply(Vec2::new(*x, *y)).round())
+                .ok_or_else(|| "flat(..): the flat view isn't shown".to_string())
         }
         Target::Xyz(x, y, z) => {
-            let map = world.get_resource::<SpaceToScreen>().copied().unwrap_or_default();
+            let map = world
+                .get_resource::<SpaceToScreen>()
+                .copied()
+                .unwrap_or_default();
             map.0
                 .map(|m| (m.origin + m.x_axis * *x + m.y_axis * *y + m.z_axis * *z).round())
                 .ok_or_else(|| "xyz(..): no view mapping".to_string())
         }
         Target::UiAt(name, fx, fy) => {
-            let mut q = world.query::<(&Name, &ComputedNode, &UiGlobalTransform, &InheritedVisibility)>();
+            let mut q = world.query::<(
+                &Name,
+                &ComputedNode,
+                &UiGlobalTransform,
+                &InheritedVisibility,
+            )>();
             q.iter(world)
-                .find(|(n, node, _, vis)| n.as_str() == name && vis.get() && node.size().x > 0.0 && node.size().y > 0.0)
+                .find(|(n, node, _, vis)| {
+                    n.as_str() == name && vis.get() && node.size().x > 0.0 && node.size().y > 0.0
+                })
                 .map(|(_, node, t, _)| {
                     let scale = node.inverse_scale_factor();
                     let size = node.size() * scale;
@@ -736,17 +817,32 @@ fn scroll_into_view(world: &mut World, e: Entity, pos: Vec2) -> bool {
     loop {
         // A node placed absolutely (a popup, a dialog over a list) isn't scrolled by the lists
         // it sits in.
-        if world.get::<Node>(cur).is_some_and(|n| n.position_type == PositionType::Absolute) {
+        if world
+            .get::<Node>(cur)
+            .is_some_and(|n| n.position_type == PositionType::Absolute)
+        {
             return false;
         }
-        let Some(parent) = world.get::<ChildOf>(cur).map(|c| c.parent()) else { return false };
+        let Some(parent) = world.get::<ChildOf>(cur).map(|c| c.parent()) else {
+            return false;
+        };
         cur = parent;
-        let Some(node) = world.get::<Node>(cur) else { continue };
-        let (sx, sy) = (node.overflow.x == OverflowAxis::Scroll, node.overflow.y == OverflowAxis::Scroll);
+        let Some(node) = world.get::<Node>(cur) else {
+            continue;
+        };
+        let (sx, sy) = (
+            node.overflow.x == OverflowAxis::Scroll,
+            node.overflow.y == OverflowAxis::Scroll,
+        );
         if !sx && !sy {
             continue;
         }
-        let (Some(c), Some(t)) = (world.get::<ComputedNode>(cur), world.get::<UiGlobalTransform>(cur)) else { continue };
+        let (Some(c), Some(t)) = (
+            world.get::<ComputedNode>(cur),
+            world.get::<UiGlobalTransform>(cur),
+        ) else {
+            continue;
+        };
         let k = c.inverse_scale_factor();
         let (center, half) = (t.translation * k, c.size() * k / 2.0);
         let margin = 6.0;
@@ -905,7 +1001,10 @@ fn execute(world: &mut World, op: Op) {
         }
         Op::Custom(cmd) => {
             // The harness's own: `harness-sleep <seconds>` blocks a frame (tests the watchdog).
-            if let Some(secs) = cmd.strip_prefix("harness-sleep ").and_then(|v| v.trim().parse::<f64>().ok()) {
+            if let Some(secs) = cmd
+                .strip_prefix("harness-sleep ")
+                .and_then(|v| v.trim().parse::<f64>().ok())
+            {
                 std::thread::sleep(std::time::Duration::from_secs_f64(secs));
                 return;
             }

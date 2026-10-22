@@ -12,13 +12,20 @@ use nalgebra::{Matrix3, Vector3};
 use crate::assembly::context::ContextTarget;
 
 fn motion_of(p: &crate::assembly::Pose) -> Motion {
-    Motion { linear: Matrix3::from_row_slice(&p.rotation.concat()), translation: Vector3::from(p.translation) }
+    Motion {
+        linear: Matrix3::from_row_slice(&p.rotation.concat()),
+        translation: Vector3::from(p.translation),
+    }
 }
 
 impl Rebuilder {
     /// `state` with the context parts of `targets` added, and the kernel bodies to release after
     /// the feature is built. No targets: `state` itself.
-    pub(in crate::rebuild) fn with_context_targets(&mut self, state: &Arc<State>, targets: &[ContextTarget]) -> Result<(Arc<State>, Vec<BodyId>), String> {
+    pub(in crate::rebuild) fn with_context_targets(
+        &mut self,
+        state: &Arc<State>,
+        targets: &[ContextTarget],
+    ) -> Result<(Arc<State>, Vec<BodyId>), String> {
         if targets.is_empty() {
             return Ok((state.clone(), Vec::new()));
         }
@@ -47,9 +54,14 @@ impl Rebuilder {
     /// no longer makes it.
     fn context_part(&mut self, t: &ContextTarget) -> Result<Option<(PartState, BodyId)>, String> {
         let (_, src) = self.sub_build(&t.source.features)?;
-        let Some(ps) = src.part(t.source_part) else { return Ok(None) };
+        let Some(ps) = src.part(t.source_part) else {
+            return Ok(None);
+        };
         let Some(body) = ps.body else { return Ok(None) };
-        let r = self.kernel.transform_motion(body, &motion_of(&t.pose)).map_err(|e| format!("The context part could not be placed: {e}"))?;
+        let r = self
+            .kernel
+            .transform_motion(body, &motion_of(&t.pose))
+            .map_err(|e| format!("The context part could not be placed: {e}"))?;
         let b = r.bodies[0];
         // The source's face names, through the move.
         let n = match self.kernel.faces(b) {
@@ -61,14 +73,22 @@ impl Rebuilder {
         };
         let mut faces: Vec<Option<cadrs_sketch::FaceName>> = vec![None; n];
         for (f, input) in &r.history.modified {
-            if let (Some(slot), Some(sn)) = (faces.get_mut(f.0 as usize), ps.names.face(input.face)) {
+            if let (Some(slot), Some(sn)) = (faces.get_mut(f.0 as usize), ps.names.face(input.face))
+            {
                 *slot = Some(sn);
             }
         }
         let faces = faces
             .into_iter()
             .enumerate()
-            .map(|(i, f)| f.unwrap_or_else(|| cadrs_sketch::FaceName::new(t.part.0, cadrs_sketch::FaceOrigin::Unnamed { index: i as u32 })))
+            .map(|(i, f)| {
+                f.unwrap_or_else(|| {
+                    cadrs_sketch::FaceName::new(
+                        t.part.0,
+                        cadrs_sketch::FaceOrigin::Unnamed { index: i as u32 },
+                    )
+                })
+            })
             .collect();
         let names = match self.names_from_faces(b, faces) {
             Ok(n) => n,
@@ -90,6 +110,13 @@ impl Rebuilder {
             source: None,
             derived: None,
         };
-        Ok(Some((PartState { part, body: Some(b), names: Arc::new(names) }, b)))
+        Ok(Some((
+            PartState {
+                part,
+                body: Some(b),
+                names: Arc::new(names),
+            },
+            b,
+        )))
     }
 }

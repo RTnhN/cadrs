@@ -240,7 +240,11 @@ fn dist(a: P2, b: P2) -> f64 {
 }
 fn unit(a: P2) -> P2 {
     let l = len(a);
-    if l < 1e-300 { [1.0, 0.0] } else { mul(a, 1.0 / l) }
+    if l < 1e-300 {
+        [1.0, 0.0]
+    } else {
+        mul(a, 1.0 / l)
+    }
 }
 fn perp(a: P2) -> P2 {
     [-a[1], a[0]]
@@ -254,11 +258,21 @@ fn lerp(a: P2, b: P2, t: f64) -> P2 {
 pub enum Shape {
     /// An edge seen end-on.
     Point(P2),
-    Line { a: P2, b: P2 },
+    Line {
+        a: P2,
+        b: P2,
+    },
     /// A circle, or an arc from `arc[0]` through `arc[1]` to `arc[2]`.
-    Circle { center: P2, radius: f64, arc: Option<[P2; 3]> },
+    Circle {
+        center: P2,
+        radius: f64,
+        arc: Option<[P2; 3]>,
+    },
     /// Anything else (an ellipse, a spline): its ends.
-    Curve { a: P2, b: P2 },
+    Curve {
+        a: P2,
+        b: P2,
+    },
 }
 
 impl Shape {
@@ -267,10 +281,25 @@ impl Shape {
     pub fn snap_points(&self) -> Vec<(PointOf, P2)> {
         match *self {
             Shape::Point(p) => vec![(PointOf::End, p)],
-            Shape::Line { a, b } => vec![(PointOf::End, a), (PointOf::End, b), (PointOf::Mid, lerp(a, b, 0.5))],
-            Shape::Circle { center, arc: None, .. } => vec![(PointOf::Center, center)],
-            Shape::Circle { center, arc: Some(a), .. } => {
-                vec![(PointOf::Center, center), (PointOf::End, a[0]), (PointOf::End, a[2]), (PointOf::Mid, a[1])]
+            Shape::Line { a, b } => vec![
+                (PointOf::End, a),
+                (PointOf::End, b),
+                (PointOf::Mid, lerp(a, b, 0.5)),
+            ],
+            Shape::Circle {
+                center, arc: None, ..
+            } => vec![(PointOf::Center, center)],
+            Shape::Circle {
+                center,
+                arc: Some(a),
+                ..
+            } => {
+                vec![
+                    (PointOf::Center, center),
+                    (PointOf::End, a[0]),
+                    (PointOf::End, a[2]),
+                    (PointOf::Mid, a[1]),
+                ]
             }
             Shape::Curve { a, b } => vec![(PointOf::End, a), (PointOf::End, b)],
         }
@@ -281,7 +310,11 @@ impl Shape {
         match *self {
             Shape::Point(q) => dist(p, q),
             Shape::Line { a, b } | Shape::Curve { a, b } => seg_distance(p, a, b),
-            Shape::Circle { center, radius, arc } => {
+            Shape::Circle {
+                center,
+                radius,
+                arc,
+            } => {
                 let d = (dist(p, center) - radius).abs();
                 match arc {
                     None => d,
@@ -309,11 +342,19 @@ impl Shape {
                 }
                 add(a, mul(d, (dot(sub(p, a), d) / l2).clamp(0.0, 1.0)))
             }
-            Shape::Circle { center, radius, arc } => {
+            Shape::Circle {
+                center,
+                radius,
+                arc,
+            } => {
                 let on = add(center, mul(unit(sub(p, center)), radius));
                 match arc {
                     Some(a) if !on_arc(center, a, sub(p, center)) => {
-                        if dist(p, a[0]) < dist(p, a[2]) { a[0] } else { a[2] }
+                        if dist(p, a[0]) < dist(p, a[2]) {
+                            a[0]
+                        } else {
+                            a[2]
+                        }
                     }
                     _ => on,
                 }
@@ -326,7 +367,11 @@ impl Shape {
         match *self {
             Shape::Point(p) => p,
             Shape::Line { a, b } | Shape::Curve { a, b } => lerp(a, b, 0.5),
-            Shape::Circle { center, arc: None, radius } => add(center, [radius, 0.0]),
+            Shape::Circle {
+                center,
+                arc: None,
+                radius,
+            } => add(center, [radius, 0.0]),
             Shape::Circle { arc: Some(a), .. } => a[1],
         }
     }
@@ -336,7 +381,11 @@ impl Shape {
         match *self {
             Shape::Point(p) => vec![p, p],
             Shape::Line { a, b } | Shape::Curve { a, b } => vec![a, b],
-            Shape::Circle { center, radius, arc } => {
+            Shape::Circle {
+                center,
+                radius,
+                arc,
+            } => {
                 let (a0, sweep) = match arc {
                     None => (0.0, std::f64::consts::TAU),
                     Some(a) => arc_angles(center, a),
@@ -385,22 +434,40 @@ fn arc_angles(center: P2, a: [P2; 3]) -> (f64, f64) {
     let (s, m, e) = (ang(a[0]), ang(a[1]), ang(a[2]));
     let ccw = |from: f64, to: f64| (to - from).rem_euclid(TAU);
     let sweep = ccw(s, e);
-    if ccw(s, m) <= sweep { (s, sweep) } else { (s, sweep - TAU) }
+    if ccw(s, m) <= sweep {
+        (s, sweep)
+    } else {
+        (s, sweep - TAU)
+    }
 }
 
 fn on_arc(center: P2, a: [P2; 3], d: P2) -> bool {
     use std::f64::consts::TAU;
     let (s, sweep) = arc_angles(center, a);
     let t = d[1].atan2(d[0]);
-    if sweep >= 0.0 { (t - s).rem_euclid(TAU) <= sweep + 1e-9 } else { (s - t).rem_euclid(TAU) <= -sweep + 1e-9 }
+    if sweep >= 0.0 {
+        (t - s).rem_euclid(TAU) <= sweep + 1e-9
+    } else {
+        (s - t).rem_euclid(TAU) <= -sweep + 1e-9
+    }
 }
 
 /// The 2D shape of a projected (HLR) edge.
 pub fn proj_shape(e: &ProjEdge) -> Shape {
     let p = |q: &nalgebra::Point2<f64>| [q.x, q.y];
     match &e.curve {
-        ProjCurve::Line { start, end } => Shape::Line { a: p(start), b: p(end) },
-        ProjCurve::Arc { center, radius, start, mid, end, full } => Shape::Circle {
+        ProjCurve::Line { start, end } => Shape::Line {
+            a: p(start),
+            b: p(end),
+        },
+        ProjCurve::Arc {
+            center,
+            radius,
+            start,
+            mid,
+            end,
+            full,
+        } => Shape::Circle {
             center: p(center),
             radius: *radius,
             arc: (!*full).then(|| [p(start), p(mid), p(end)]),
@@ -418,19 +485,28 @@ fn polyline_shape(pts: &[P2]) -> Shape {
         return Shape::Point([0.0, 0.0]);
     };
     // The two points farthest apart along the polyline's main direction.
-    let far = pts.iter().copied().max_by(|p, q| dist(*p, a).total_cmp(&dist(*q, a))).unwrap_or(b);
+    let far = pts
+        .iter()
+        .copied()
+        .max_by(|p, q| dist(*p, a).total_cmp(&dist(*q, a)))
+        .unwrap_or(b);
     let l = dist(a, far);
     if l < 1e-9 {
         return Shape::Point(a);
     }
     let d = unit(sub(far, a));
     let n = perp(d);
-    let straight = pts.iter().all(|p| dot(sub(*p, a), n).abs() <= 1e-6 * l.max(1.0));
+    let straight = pts
+        .iter()
+        .all(|p| dot(sub(*p, a), n).abs() <= 1e-6 * l.max(1.0));
     if straight {
         let ts: Vec<f64> = pts.iter().map(|p| dot(sub(*p, a), d)).collect();
         let lo = ts.iter().copied().fold(f64::MAX, f64::min);
         let hi = ts.iter().copied().fold(f64::MIN, f64::max);
-        Shape::Line { a: add(a, mul(d, lo)), b: add(a, mul(d, hi)) }
+        Shape::Line {
+            a: add(a, mul(d, lo)),
+            b: add(a, mul(d, hi)),
+        }
     } else {
         Shape::Curve { a, b }
     }
@@ -447,18 +523,39 @@ pub fn model_shape(view: &View, e: &ModelEdge) -> Shape {
     match e {
         ModelEdge::Line { a, b } => {
             let (a, b) = (to2(a), to2(b));
-            if dist(a, b) < 1e-9 { Shape::Point(a) } else { Shape::Line { a, b } }
+            if dist(a, b) < 1e-9 {
+                Shape::Point(a)
+            } else {
+                Shape::Line { a, b }
+            }
         }
-        ModelEdge::Circle { center, normal, radius, points } => {
+        ModelEdge::Circle {
+            center,
+            normal,
+            radius,
+            points,
+        } => {
             let n = nalgebra::Vector3::new(normal[0], normal[1], normal[2]);
             let c = n.normalize().dot(&f.dir).abs();
             if c > 1.0 - 1e-9 {
                 let closed = match (points.first(), points.last()) {
-                    (Some(a), Some(b)) => points.len() < 3 || (0..3).all(|i| (a[i] - b[i]).abs() < 1e-6),
+                    (Some(a), Some(b)) => {
+                        points.len() < 3 || (0..3).all(|i| (a[i] - b[i]).abs() < 1e-6)
+                    }
                     _ => true,
                 };
-                let arc = (!closed).then(|| [to2(&points[0]), to2(&points[points.len() / 2]), to2(&points[points.len() - 1])]);
-                Shape::Circle { center: to2(center), radius: *radius, arc }
+                let arc = (!closed).then(|| {
+                    [
+                        to2(&points[0]),
+                        to2(&points[points.len() / 2]),
+                        to2(&points[points.len() - 1]),
+                    ]
+                });
+                Shape::Circle {
+                    center: to2(center),
+                    radius: *radius,
+                    arc,
+                }
             } else {
                 let pts: Vec<P2> = points.iter().map(to2).collect();
                 polyline_shape(&pts)
@@ -493,7 +590,11 @@ impl EdgeRef {
         let src = e.source.as_ref();
         Self {
             edge: src.and_then(|s| s.edge_name),
-            face: if src.and_then(|s| s.edge_name).is_none() { src.and_then(|s| s.face_name) } else { None },
+            face: if src.and_then(|s| s.edge_name).is_none() {
+                src.and_then(|s| s.face_name)
+            } else {
+                None
+            },
             shape: proj_shape(e),
         }
     }
@@ -550,7 +651,11 @@ pub fn resolve(view: &View, m: &dyn ViewModel, r: &EdgeRef) -> Resolved {
     if let Some(name) = &r.edge
         && let Some(e) = m.model_edge(name)
     {
-        return Resolved { shape: model_shape(view, e), from_model: true, found: true };
+        return Resolved {
+            shape: model_shape(view, e),
+            from_model: true,
+            found: true,
+        };
     }
     let best = m
         .projection()
@@ -560,15 +665,25 @@ pub fn resolve(view: &View, m: &dyn ViewModel, r: &EdgeRef) -> Resolved {
             let s = e.source.as_ref();
             match (&r.edge, &r.face) {
                 (Some(n), _) => s.and_then(|s| s.edge_name.as_ref()) == Some(n),
-                (None, Some(f)) => s.is_some_and(|s| s.edge_name.is_none() && s.face_name.as_ref() == Some(f)),
+                (None, Some(f)) => {
+                    s.is_some_and(|s| s.edge_name.is_none() && s.face_name.as_ref() == Some(f))
+                }
                 (None, None) => false,
             }
         })
         .map(proj_shape)
         .min_by(|a, b| dist(a.mid(), r.shape.mid()).total_cmp(&dist(b.mid(), r.shape.mid())));
     match best {
-        Some(shape) => Resolved { shape, from_model: false, found: true },
-        None => Resolved { shape: r.shape, from_model: false, found: false },
+        Some(shape) => Resolved {
+            shape,
+            from_model: false,
+            found: true,
+        },
+        None => Resolved {
+            shape: r.shape,
+            from_model: false,
+            found: false,
+        },
     }
 }
 
@@ -586,7 +701,8 @@ pub fn resolve_point(view: &View, m: &dyn ViewModel, p: &PointRef) -> Option<(P2
                 Shape::Circle { arc: Some(a), .. } => vec![a[0], a[2]],
                 Shape::Circle { center, .. } => vec![center],
             };
-            pts.into_iter().min_by(|a, b| dist(*a, p.hint).total_cmp(&dist(*b, p.hint)))?
+            pts.into_iter()
+                .min_by(|a, b| dist(*a, p.hint).total_cmp(&dist(*b, p.hint)))?
         }
         (_, Shape::Point(q)) => q,
         _ => return None,
@@ -639,9 +755,16 @@ pub enum DimKind {
     Diameter(EdgeRef),
     Radius(EdgeRef),
     /// Point to point (oriented), point to line or line to line (perpendicular).
-    Distance { a: Pick, b: Pick, orient: Orient },
+    Distance {
+        a: Pick,
+        b: Pick,
+        orient: Orient,
+    },
     /// Between two lines; the text's quadrant picks which of the angles.
-    Angle { a: EdgeRef, b: EdgeRef },
+    Angle {
+        a: EdgeRef,
+        b: EdgeRef,
+    },
 }
 
 /// A tolerance (D6.6); lengths in mm, angles in degrees.
@@ -710,7 +833,10 @@ pub enum AnnotationKind {
     Centerline(Centerline),
     CircleCenterline(CircleCenterline),
     /// Where two lines would meet (D5.4).
-    VirtualSharp { a: EdgeRef, b: EdgeRef },
+    VirtualSharp {
+        a: EdgeRef,
+        b: EdgeRef,
+    },
     Dimension(Dimension),
     HoleCallout(HoleCallout),
     /// Baseline dimensions (P3C.8, D6.4).
@@ -761,7 +887,10 @@ pub struct Annotation {
 
 impl Annotation {
     pub fn new(kind: AnnotationKind) -> Self {
-        Self { id: AnnotationId::new(), kind }
+        Self {
+            id: AnnotationId::new(),
+            kind,
+        }
     }
 
     /// What it is, for undo labels ("Insert dimension").
@@ -822,7 +951,10 @@ pub struct Measure {
 
 /// The sheet's x and y directions in a view's frame.
 fn sheet_axes(view: &View) -> (P2, P2) {
-    (rotate([1.0, 0.0], -view.rotation), rotate([0.0, 1.0], -view.rotation))
+    (
+        rotate([1.0, 0.0], -view.rotation),
+        rotate([0.0, 1.0], -view.rotation),
+    )
 }
 
 enum Geo {
@@ -852,7 +984,14 @@ fn foot(p: P2, a: P2, b: P2) -> P2 {
 }
 
 /// The linear layout of a distance, given where its text is.
-fn linear(view: &View, m: &dyn ViewModel, a: &Pick, b: &Pick, orient: Orient, text: P2) -> Option<(Linear, bool)> {
+fn linear(
+    view: &View,
+    m: &dyn ViewModel,
+    a: &Pick,
+    b: &Pick,
+    orient: Orient,
+    text: P2,
+) -> Option<(Linear, bool)> {
     let (ga, ea) = pick_geo(view, m, a)?;
     let (gb, eb) = pick_geo(view, m, b)?;
     let (sx, sy) = sheet_axes(view);
@@ -864,15 +1003,33 @@ fn linear(view: &View, m: &dyn ViewModel, a: &Pick, b: &Pick, orient: Orient, te
                 Orient::Vertical => sy,
                 Orient::Aligned => unit(sub(p2, p1)),
             };
-            Linear { p1, p2, u, seg1: None, seg2: None }
+            Linear {
+                p1,
+                p2,
+                u,
+                seg1: None,
+                seg2: None,
+            }
         }
         (Geo::Point(p), Geo::Line(l0, l1)) => {
             let u = perp(unit(sub(l1, l0)));
-            Linear { p1: p, p2: near_on_segment(l0, l1, text), u, seg1: None, seg2: Some((l0, l1)) }
+            Linear {
+                p1: p,
+                p2: near_on_segment(l0, l1, text),
+                u,
+                seg1: None,
+                seg2: Some((l0, l1)),
+            }
         }
         (Geo::Line(l0, l1), Geo::Point(p)) => {
             let u = perp(unit(sub(l1, l0)));
-            Linear { p1: near_on_segment(l0, l1, text), p2: p, u, seg1: Some((l0, l1)), seg2: None }
+            Linear {
+                p1: near_on_segment(l0, l1, text),
+                p2: p,
+                u,
+                seg1: Some((l0, l1)),
+                seg2: None,
+            }
         }
         (Geo::Line(a0, a1), Geo::Line(b0, b1)) => {
             let da = unit(sub(a1, a0));
@@ -884,7 +1041,13 @@ fn linear(view: &View, m: &dyn ViewModel, a: &Pick, b: &Pick, orient: Orient, te
             let u = perp(da);
             let p1 = near_on_segment(a0, a1, text);
             let p2 = near_on_segment(b0, b1, text);
-            Linear { p1, p2, u, seg1: Some((a0, a1)), seg2: Some((b0, b1)) }
+            Linear {
+                p1,
+                p2,
+                u,
+                seg1: Some((a0, a1)),
+                seg2: Some((b0, b1)),
+            }
         }
     };
     Some((out, exact))
@@ -908,7 +1071,13 @@ struct AngleRays {
     exact: bool,
 }
 
-fn angle_rays(view: &View, m: &dyn ViewModel, a: &EdgeRef, b: &EdgeRef, text: P2) -> Option<AngleRays> {
+fn angle_rays(
+    view: &View,
+    m: &dyn ViewModel,
+    a: &EdgeRef,
+    b: &EdgeRef,
+    text: P2,
+) -> Option<AngleRays> {
     let ra = resolve(view, m, a);
     let rb = resolve(view, m, b);
     let line = |s: Shape| match s {
@@ -931,7 +1100,14 @@ fn angle_rays(view: &View, m: &dyn ViewModel, a: &EdgeRef, b: &EdgeRef, text: P2
     let beta = cross(da, c) / den;
     let ua = if alpha < 0.0 { mul(da, -1.0) } else { da };
     let ub = if beta < 0.0 { mul(db, -1.0) } else { db };
-    Some(AngleRays { x, ua, ub, sa: (a0, a1), sb: (b0, b1), exact: ra.from_model && rb.from_model })
+    Some(AngleRays {
+        x,
+        ua,
+        ub,
+        sa: (a0, a1),
+        sb: (b0, b1),
+        exact: ra.from_model && rb.from_model,
+    })
 }
 
 /// A dimension's value (mm or degrees) and kind, from the model where it can (D6.1).
@@ -942,14 +1118,22 @@ pub fn measure(view: &View, m: &dyn ViewModel, d: &Dimension) -> Option<Measure>
             let (_, radius) = r.shape.circle()?;
             let dia = matches!(d.kind, DimKind::Diameter(_));
             Some(Measure {
-                kind: if dia { ValueKind::Diameter } else { ValueKind::Radius },
+                kind: if dia {
+                    ValueKind::Diameter
+                } else {
+                    ValueKind::Radius
+                },
                 value: if dia { 2.0 * radius } else { radius },
                 from_model: r.from_model,
             })
         }
         DimKind::Distance { a, b, orient } => {
             let (l, exact) = linear(view, m, a, b, *orient, d.text)?;
-            Some(Measure { kind: ValueKind::Length, value: dot(sub(l.p2, l.p1), l.u).abs(), from_model: exact })
+            Some(Measure {
+                kind: ValueKind::Length,
+                value: dot(sub(l.p2, l.p1), l.u).abs(),
+                from_model: exact,
+            })
         }
         DimKind::Angle { a, b } => {
             let AngleRays { ua, ub, exact, .. } = angle_rays(view, m, a, b, d.text)?;
@@ -965,8 +1149,12 @@ pub fn measure(view: &View, m: &dyn ViewModel, d: &Dimension) -> Option<Measure>
 /// Centres a distance's text in its span (along the measured direction), keeping its offset
 /// from the geometry (after a re-attach, D6.5: the text goes between the new ends).
 pub fn centre_text_in_span(view: &View, m: &dyn ViewModel, d: &mut Dimension) {
-    let DimKind::Distance { a, b, orient } = &d.kind else { return };
-    let Some((l, _)) = linear(view, m, a, b, *orient, d.text) else { return };
+    let DimKind::Distance { a, b, orient } = &d.kind else {
+        return;
+    };
+    let Some((l, _)) = linear(view, m, a, b, *orient, d.text) else {
+        return;
+    };
     let t = dot(sub(d.text, l.p1), l.u);
     let span = dot(sub(l.p2, l.p1), l.u);
     d.text = add(d.text, mul(l.u, span / 2.0 - t));
@@ -1075,12 +1263,23 @@ pub fn runs(s: &str) -> Vec<Run> {
 }
 
 fn format_decimals(v: f64, decimals: u8, leading: bool, style: &DrawingStyle) -> String {
-    crate::style::format_number(v, decimals, leading, style.length_trailing_zeros, style.decimal_separator)
+    crate::style::format_number(
+        v,
+        decimals,
+        leading,
+        style.length_trailing_zeros,
+        style.decimal_separator,
+    )
 }
 
 /// A dimension's text: its value by the drawing's units and precision, with the dimension's own
 /// prefix, suffix, tolerance, precision and dual units.
-pub fn dimension_text(style: &DrawingStyle, kind: ValueKind, value: f64, f: &DimFormat) -> TextBlock {
+pub fn dimension_text(
+    style: &DrawingStyle,
+    kind: ValueKind,
+    value: f64,
+    f: &DimFormat,
+) -> TextBlock {
     let mut st = style.clone();
     if let Some(p) = f.precision {
         match kind {
@@ -1097,7 +1296,10 @@ pub fn dimension_text(style: &DrawingStyle, kind: ValueKind, value: f64, f: &Dim
         _ => st.format_length(v),
     };
     let tol = |v: f64| match kind {
-        ValueKind::Angle => format!("{}°", format_decimals(v.abs(), tp, st.angle_leading_zeros, &st)),
+        ValueKind::Angle => format!(
+            "{}°",
+            format_decimals(v.abs(), tp, st.angle_leading_zeros, &st)
+        ),
         _ => format_decimals(v.abs() / st.units.mm(), tp, st.tolerance_leading_zeros, &st),
     };
     let sign = |v: f64| if v < 0.0 { "-" } else { "+" };
@@ -1109,7 +1311,9 @@ pub fn dimension_text(style: &DrawingStyle, kind: ValueKind, value: f64, f: &Dim
     // A count prefix ("3x") stacks over the value, as Onshape draws it (`ex3-step9.png`).
     let count = {
         let p = f.prefix.trim();
-        p.len() >= 2 && p.ends_with(['x', 'X']) && p[..p.len() - 1].chars().all(|c| c.is_ascii_digit())
+        p.len() >= 2
+            && p.ends_with(['x', 'X'])
+            && p[..p.len() - 1].chars().all(|c| c.is_ascii_digit())
     };
     let mut lines = Vec::new();
     if count {
@@ -1150,14 +1354,20 @@ pub fn dimension_text(style: &DrawingStyle, kind: ValueKind, value: f64, f: &Dim
             style.length_trailing_zeros,
             style.decimal_separator,
         );
-        let unit = if style.show_dual_unit { format!(" {}", style.dual_units.symbol()) } else { String::new() };
+        let unit = if style.show_dual_unit {
+            format!(" {}", style.dual_units.symbol())
+        } else {
+            String::new()
+        };
         let text = format!("[{symbol}{d}{unit}]");
         match style.dual_location {
             crate::style::DualLocation::Top => lines.insert(0, vec![Run::Text(text)]),
             _ => lines.push(vec![Run::Text(text)]),
         }
     }
-    TextBlock { lines: merge_lines(lines) }
+    TextBlock {
+        lines: merge_lines(lines),
+    }
 }
 
 fn merge_lines(lines: Vec<Vec<Run>>) -> Vec<Vec<Run>> {
@@ -1187,13 +1397,21 @@ pub fn hole_text(style: &DrawingStyle, h: &HoleInfo, prefix: &str) -> TextBlock 
         (None, HoleEnd::UpToNext) => format!("Ø{} UP TO NEXT", l(h.diameter)),
         (None, HoleEnd::UpToEntity) => format!("Ø{} UP TO ENTITY", l(h.diameter)),
     };
-    let first = if prefix.trim().is_empty() { main } else { format!("{} {main}", prefix.trim()) };
+    let first = if prefix.trim().is_empty() {
+        main
+    } else {
+        format!("{} {main}", prefix.trim())
+    };
     let mut lines = vec![runs(&first)];
     if let Some((d, depth)) = h.cbore {
         lines.push(runs(&format!("⌴Ø{} ↧{}", l(d), l(depth))));
     }
     if let Some((d, angle)) = h.csink {
-        lines.push(runs(&format!("⌵Ø{} X {}°", l(d), crate::style::format_number(angle, 0, true, false, style.decimal_separator))));
+        lines.push(runs(&format!(
+            "⌵Ø{} X {}°",
+            l(d),
+            crate::style::format_number(angle, 0, true, false, style.decimal_separator)
+        )));
     }
     TextBlock { lines }
 }
@@ -1209,7 +1427,12 @@ pub fn hole_of<'a>(m: &'a dyn ViewModel, e: &EdgeRef) -> Option<&'a HoleInfo> {
 }
 
 /// The text a dimension shows now, with its value.
-pub fn dimension_display(style: &DrawingStyle, view: &View, m: &dyn ViewModel, d: &Dimension) -> Option<(TextBlock, Measure)> {
+pub fn dimension_display(
+    style: &DrawingStyle,
+    view: &View,
+    m: &dyn ViewModel,
+    d: &Dimension,
+) -> Option<(TextBlock, Measure)> {
     let v = measure(view, m, d)?;
     Some((dimension_text(style, v.kind, v.value, &d.format), v))
 }
@@ -1260,7 +1483,11 @@ const LINE: f64 = 1.7;
 /// Lays out `block` with cap height `h`: centred on `anchor`, or left-aligned with its first
 /// line's middle at `anchor`.
 pub fn layout_label(block: &TextBlock, anchor: P2, h: f64, centered: bool) -> Label {
-    let widths: Vec<f64> = block.lines.iter().map(|l| l.iter().map(|r| run_width(r, h)).sum()).collect();
+    let widths: Vec<f64> = block
+        .lines
+        .iter()
+        .map(|l| l.iter().map(|r| run_width(r, h)).sum())
+        .collect();
     let wmax = widths.iter().copied().fold(0.0, f64::max);
     let n = block.lines.len().max(1) as f64;
     let total_h = h * (1.0 + LINE * (n - 1.0));
@@ -1276,15 +1503,27 @@ pub fn layout_label(block: &TextBlock, anchor: P2, h: f64, centered: bool) -> La
         for r in line {
             let rw = run_width(r, h);
             match r {
-                Run::Text(s) => out.texts.push(PlacedText { pos: [x, y], height: h, text: s.clone() }),
+                Run::Text(s) => out.texts.push(PlacedText {
+                    pos: [x, y],
+                    height: h,
+                    text: s.clone(),
+                }),
                 Run::Sym(s) => {
                     out.strokes.extend(symbol_strokes(*s, [x, y - h / 2.0], h));
                     out.symbols.push(([x, y], h, s.char()));
                 }
                 Run::Stack(a, b) => {
                     let sh = h * 0.7;
-                    out.texts.push(PlacedText { pos: [x + 0.15 * h, y + 0.45 * h], height: sh, text: a.clone() });
-                    out.texts.push(PlacedText { pos: [x + 0.15 * h, y - 0.45 * h], height: sh, text: b.clone() });
+                    out.texts.push(PlacedText {
+                        pos: [x + 0.15 * h, y + 0.45 * h],
+                        height: sh,
+                        text: a.clone(),
+                    });
+                    out.texts.push(PlacedText {
+                        pos: [x + 0.15 * h, y - 0.45 * h],
+                        height: sh,
+                        text: b.clone(),
+                    });
                 }
             }
             x += rw;
@@ -1301,7 +1540,12 @@ pub fn layout_label(block: &TextBlock, anchor: P2, h: f64, centered: bool) -> La
 pub fn symbol_strokes(s: Symbol, origin: P2, h: f64) -> Vec<Vec<P2>> {
     let p = |x: f64, y: f64| [origin[0] + x * h, origin[1] + y * h];
     match s {
-        Symbol::Counterbore => vec![vec![p(0.12, 0.85), p(0.12, 0.0), p(0.82, 0.0), p(0.82, 0.85)]],
+        Symbol::Counterbore => vec![vec![
+            p(0.12, 0.85),
+            p(0.12, 0.0),
+            p(0.82, 0.0),
+            p(0.82, 0.85),
+        ]],
         Symbol::Countersink => vec![vec![p(0.1, 0.85), p(0.47, 0.0), p(0.84, 0.85)]],
         Symbol::Depth => vec![
             vec![p(0.37, 1.0), p(0.37, 0.12)],
@@ -1309,12 +1553,14 @@ pub fn symbol_strokes(s: Symbol, origin: P2, h: f64) -> Vec<Vec<P2>> {
             vec![p(0.1, 0.0), p(0.64, 0.0)],
         ],
         // As tall as the capitals and wider than a digit (P3C.8's delta: it read as a speck).
-        Symbol::Arc => vec![(0..=20)
-            .map(|i| {
-                let t = std::f64::consts::PI * i as f64 / 20.0;
-                p(0.5 + 0.42 * t.cos(), 0.3 + 0.62 * t.sin())
-            })
-            .collect()],
+        Symbol::Arc => vec![
+            (0..=20)
+                .map(|i| {
+                    let t = std::f64::consts::PI * i as f64 / 20.0;
+                    p(0.5 + 0.42 * t.cos(), 0.3 + 0.62 * t.sin())
+                })
+                .collect(),
+        ],
     }
 }
 
@@ -1420,7 +1666,12 @@ impl Sizes {
 
 /// The annotation's graphics on the sheet, or `None` when its references don't resolve to
 /// anything it can draw.
-pub fn annotation_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel, a: &Annotation) -> Option<AnnGraphics> {
+pub fn annotation_graphics(
+    style: &DrawingStyle,
+    view: &View,
+    m: &dyn ViewModel,
+    a: &Annotation,
+) -> Option<AnnGraphics> {
     // A dangling annotation's dead references are drawn from their stored shapes (never
     // re-attached to a guess, D13.3); its live ones follow the model.
     if let AnnotationKind::Callout(c) = &a.kind {
@@ -1430,10 +1681,14 @@ pub fn annotation_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel,
     let sz = Sizes::of(style);
     let s = |p: P2| view.to_sheet(p);
     let k = view.scale.factor();
-    let mut g = AnnGraphics { dangling, ..AnnGraphics::default() };
+    let mut g = AnnGraphics {
+        dangling,
+        ..AnnGraphics::default()
+    };
     let attach = |g: &mut AnnGraphics, e: &EdgeRef| {
         let r = resolve(view, m, e);
-        g.attached.push(r.shape.polyline().into_iter().map(s).collect());
+        g.attached
+            .push(r.shape.polyline().into_iter().map(s).collect());
         g.attached_dead.push(ref_dangles(view, m, e));
     };
     match &a.kind {
@@ -1445,8 +1700,15 @@ pub fn annotation_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel,
             let rad = sz.mark * 0.3;
             let n = 16;
             for i in 0..n {
-                let (a0, a1) = (std::f64::consts::TAU * i as f64 / n as f64, std::f64::consts::TAU * (i + 1) as f64 / n as f64);
-                g.fills.push([c, add(c, [rad * a0.cos(), rad * a0.sin()]), add(c, [rad * a1.cos(), rad * a1.sin()])]);
+                let (a0, a1) = (
+                    std::f64::consts::TAU * i as f64 / n as f64,
+                    std::f64::consts::TAU * (i + 1) as f64 / n as f64,
+                );
+                g.fills.push([
+                    c,
+                    add(c, [rad * a0.cos(), rad * a0.sin()]),
+                    add(c, [rad * a1.cos(), rad * a1.sin()]),
+                ]);
             }
             g.strokes.push(vec![c, c]);
             attach(&mut g, e);
@@ -1455,17 +1717,22 @@ pub fn annotation_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel,
             let r = resolve(view, m, e);
             let (c, radius) = r.shape.circle()?;
             let (c, radius) = (s(c), radius * k);
-            let (ax, ay) = (rotate([1.0, 0.0], view.rotation), rotate([0.0, 1.0], view.rotation));
+            let (ax, ay) = (
+                rotate([1.0, 0.0], view.rotation),
+                rotate([0.0, 1.0], view.rotation),
+            );
             let half = sz.mark / 2.0;
             for d in [ax, ay] {
-                g.strokes.push(vec![sub(c, mul(d, half)), add(c, mul(d, half))]);
+                g.strokes
+                    .push(vec![sub(c, mul(d, half)), add(c, mul(d, half))]);
                 // Small circles (holes) get the cross's arms out past the rim; large ones only
                 // the cross (`ex1-step7.png`).
                 let from = half + 1.2;
                 let to = radius + sz.extension;
                 if to > from + 0.5 && radius <= 4.0 * sz.mark {
                     for sgn in [1.0, -1.0] {
-                        g.strokes.push(vec![add(c, mul(d, sgn * from)), add(c, mul(d, sgn * to))]);
+                        g.strokes
+                            .push(vec![add(c, mul(d, sgn * from)), add(c, mul(d, sgn * to))]);
                     }
                 }
             }
@@ -1497,7 +1764,8 @@ pub fn annotation_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel,
             let n = 128;
             let pts: Vec<P2> = (0..=n)
                 .map(|i| {
-                    let t = std::f64::consts::TAU * i as f64 / n as f64 + std::f64::consts::FRAC_PI_4;
+                    let t =
+                        std::f64::consts::TAU * i as f64 / n as f64 + std::f64::consts::FRAC_PI_4;
                     add(c, [r * t.cos(), r * t.sin()])
                 })
                 .collect();
@@ -1522,7 +1790,10 @@ pub fn annotation_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel,
                         let (n, xs2) = (s(near), xs);
                         let d = unit(sub(xs2, n));
                         if dist(n, xs2) > sz.gap {
-                            g.strokes.push(vec![add(n, mul(d, sz.gap)), add(xs2, mul(d, sz.beyond * 0.5))]);
+                            g.strokes.push(vec![
+                                add(n, mul(d, sz.gap)),
+                                add(xs2, mul(d, sz.beyond * 0.5)),
+                            ]);
                         }
                     }
                 }
@@ -1538,7 +1809,10 @@ pub fn annotation_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel,
             }
             let t = s(d.text);
             let label = layout_label(&block, t, sz.text, true);
-            let half = [(label.max[0] - label.min[0]) / 2.0, (label.max[1] - label.min[1]) / 2.0];
+            let half = [
+                (label.max[0] - label.min[0]) / 2.0,
+                (label.max[1] - label.min[1]) / 2.0,
+            ];
             match &d.kind {
                 DimKind::Diameter(e) | DimKind::Radius(e) => {
                     let r = resolve(view, m, e);
@@ -1550,22 +1824,53 @@ pub fn annotation_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel,
                         _ => None,
                     };
                     let (c, radius) = (s(c), radius * k);
-                    radial(&mut g, &sz, c, radius, arc, t, half, matches!(d.kind, DimKind::Diameter(_)));
+                    radial(
+                        &mut g,
+                        &sz,
+                        c,
+                        radius,
+                        arc,
+                        t,
+                        half,
+                        matches!(d.kind, DimKind::Diameter(_)),
+                    );
                     attach(&mut g, e);
                 }
                 DimKind::Distance { a, b, orient } => {
                     let (l, _) = linear(view, m, a, b, *orient, d.text)?;
                     let seg = |s0: Option<(P2, P2)>| s0.map(|(p, q)| (s(p), s(q)));
                     let u = unit(sub(s(add(l.p1, l.u)), s(l.p1)));
-                    linear_graphics(&mut g, &sz, s(l.p1), s(l.p2), u, t, half, seg(l.seg1), seg(l.seg2));
+                    linear_graphics(
+                        &mut g,
+                        &sz,
+                        s(l.p1),
+                        s(l.p2),
+                        u,
+                        t,
+                        half,
+                        seg(l.seg1),
+                        seg(l.seg2),
+                    );
                     attach(&mut g, a.edge());
                     attach(&mut g, b.edge());
                 }
                 DimKind::Angle { a, b } => {
-                    let AngleRays { x, ua, ub, sa, sb, .. } = angle_rays(view, m, a, b, d.text)?;
+                    let AngleRays {
+                        x, ua, ub, sa, sb, ..
+                    } = angle_rays(view, m, a, b, d.text)?;
                     let to_sheet_dir = |v: P2| unit(sub(s(add(x, v)), s(x)));
                     let seg = |(p, q): (P2, P2)| (s(p), s(q));
-                    angle_graphics(&mut g, &sz, s(x), to_sheet_dir(ua), to_sheet_dir(ub), t, half, seg(sa), seg(sb));
+                    angle_graphics(
+                        &mut g,
+                        &sz,
+                        s(x),
+                        to_sheet_dir(ua),
+                        to_sheet_dir(ub),
+                        t,
+                        half,
+                        seg(sa),
+                        seg(sb),
+                    );
                     attach(&mut g, a);
                     attach(&mut g, b);
                 }
@@ -1589,7 +1894,11 @@ pub fn annotation_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel,
             let left_x = if right { t[0] } else { t[0] - w };
             let label = layout_label(&block, [left_x, t[1]], sz.text, false);
             let pad = 0.35 * sz.text;
-            let land_end = if right { [left_x - pad, t[1]] } else { [left_x + w + pad, t[1]] };
+            let land_end = if right {
+                [left_x - pad, t[1]]
+            } else {
+                [left_x + w + pad, t[1]]
+            };
             let land_start = add(land_end, [if right { -sz.arrow } else { sz.arrow }, 0.0]);
             let dir = unit(sub(land_start, c));
             let tip = add(c, mul(dir, radius));
@@ -1635,8 +1944,12 @@ pub fn edge_refs(a: &AnnotationKind) -> Vec<&EdgeRef> {
             CenterlineKind::Points { a, b } => vec![&a.edge, &b.edge],
             CenterlineKind::Lines { a, b } => vec![a, b],
         },
-        AnnotationKind::CircleCenterline(CircleCenterline::ThreePoints(p)) => p.iter().map(|p| &p.edge).collect(),
-        AnnotationKind::CircleCenterline(CircleCenterline::CenterPoint { center, on }) => vec![&center.edge, &on.edge],
+        AnnotationKind::CircleCenterline(CircleCenterline::ThreePoints(p)) => {
+            p.iter().map(|p| &p.edge).collect()
+        }
+        AnnotationKind::CircleCenterline(CircleCenterline::CenterPoint { center, on }) => {
+            vec![&center.edge, &on.edge]
+        }
         AnnotationKind::VirtualSharp { a, b } => vec![a, b],
         AnnotationKind::Dimension(d) => match &d.kind {
             DimKind::Diameter(e) | DimKind::Radius(e) => vec![e],
@@ -1644,8 +1957,12 @@ pub fn edge_refs(a: &AnnotationKind) -> Vec<&EdgeRef> {
             DimKind::Angle { a, b } => vec![a, b],
         },
         AnnotationKind::HoleCallout(hc) => vec![&hc.edge],
-        AnnotationKind::Baseline(b) => std::iter::once(b.base.edge()).chain(b.targets.iter().map(|t| t.edge())).collect(),
-        AnnotationKind::Ordinate(o) => std::iter::once(&o.origin.edge).chain(o.points.iter().map(|p| &p.edge)).collect(),
+        AnnotationKind::Baseline(b) => std::iter::once(b.base.edge())
+            .chain(b.targets.iter().map(|t| t.edge()))
+            .collect(),
+        AnnotationKind::Ordinate(o) => std::iter::once(&o.origin.edge)
+            .chain(o.points.iter().map(|p| &p.edge))
+            .collect(),
         AnnotationKind::ChamferDim(c) => vec![&c.edge],
         AnnotationKind::ArcLength(a) => vec![&a.edge],
         AnnotationKind::FeatureControl(f) => f.edge.iter().collect(),
@@ -1659,7 +1976,10 @@ pub fn edge_refs(a: &AnnotationKind) -> Vec<&EdgeRef> {
 /// Whether the annotation dangles (D13.3): one of its references no longer resolves, or a hole
 /// callout's hole feature is gone.
 pub fn is_dangling(view: &View, m: &dyn ViewModel, a: &Annotation) -> bool {
-    if edge_refs(&a.kind).into_iter().any(|r| ref_dangles(view, m, r)) {
+    if edge_refs(&a.kind)
+        .into_iter()
+        .any(|r| ref_dangles(view, m, r))
+    {
         return true;
     }
     if let AnnotationKind::Callout(c) = &a.kind {
@@ -1672,15 +1992,35 @@ pub fn is_dangling(view: &View, m: &dyn ViewModel, a: &Annotation) -> bool {
 /// line across the circle (text inside). A radius's leader stops at the arc (`ex3-step9.png`),
 /// on the arc's span.
 #[allow(clippy::too_many_arguments)]
-fn radial(g: &mut AnnGraphics, sz: &Sizes, c: P2, r: f64, arc: Option<[P2; 3]>, t: P2, half: P2, diameter: bool) {
+fn radial(
+    g: &mut AnnGraphics,
+    sz: &Sizes,
+    c: P2,
+    r: f64,
+    arc: Option<[P2; 3]>,
+    t: P2,
+    half: P2,
+    diameter: bool,
+) {
     if dist(t, c) > r + 1e-9 {
         let right = t[0] >= c[0];
-        let land_end = [if right { t[0] - half[0] } else { t[0] + half[0] }, t[1]];
+        let land_end = [
+            if right {
+                t[0] - half[0]
+            } else {
+                t[0] + half[0]
+            },
+            t[1],
+        ];
         let land_start = add(land_end, [if right { -sz.arrow } else { sz.arrow }, 0.0]);
         let dir = unit(sub(land_start, c));
         let tip = match arc {
             Some(a) if !on_arc(c, a, dir) => {
-                if dist(a[0], land_start) < dist(a[2], land_start) { a[0] } else { a[2] }
+                if dist(a[0], land_start) < dist(a[2], land_start) {
+                    a[0]
+                } else {
+                    a[2]
+                }
             }
             _ => add(c, mul(dir, r)),
         };
@@ -1693,7 +2033,11 @@ fn radial(g: &mut AnnGraphics, sz: &Sizes, c: P2, r: f64, arc: Option<[P2; 3]>, 
         g.grips.push((tip, GripKind::Attach(0)));
     } else {
         let d = unit(sub(t, c));
-        let d = if len(sub(t, c)) < 1e-9 { [std::f64::consts::FRAC_1_SQRT_2; 2] } else { d };
+        let d = if len(sub(t, c)) < 1e-9 {
+            [std::f64::consts::FRAC_1_SQRT_2; 2]
+        } else {
+            d
+        };
         let a = if diameter { sub(c, mul(d, r)) } else { c };
         let b = add(c, mul(d, r));
         g.strokes.push(vec![a, b]);
@@ -1726,7 +2070,8 @@ fn extension(g: &mut AnnGraphics, sz: &Sizes, p: P2, to: P2) {
         return;
     }
     let d = unit(sub(to, p));
-    g.strokes.push(vec![add(p, mul(d, sz.gap)), add(to, mul(d, sz.beyond))]);
+    g.strokes
+        .push(vec![add(p, mul(d, sz.gap)), add(to, mul(d, sz.beyond))]);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1749,7 +2094,11 @@ fn linear_graphics(
     let span_u = dot(sub(p2, p1), u);
     let beside = u[1].abs() > 0.99 && along_t >= span_u.min(0.0) && along_t <= span_u.max(0.0);
     let line_at = if beside {
-        let side = if dot(sub(p1, t), tn) >= 0.0 { 1.0 } else { -1.0 };
+        let side = if dot(sub(p1, t), tn) >= 0.0 {
+            1.0
+        } else {
+            -1.0
+        };
         add(t, mul(tn, side * (half[0] + 0.8)))
     } else {
         t
@@ -1764,14 +2113,21 @@ fn linear_graphics(
     let l = dist(d1, d2);
     let dir = if l < 1e-9 { u } else { unit(sub(d2, d1)) };
     let tpos = dot(sub(t, d1), dir);
-    let e = if beside { 0.0 } else { label_extent(half, dir, 0.8) };
+    let e = if beside {
+        0.0
+    } else {
+        label_extent(half, dir, 0.8)
+    };
     // Arrows inside when they and the text (if it sits between them) fit; else outside.
     let text_between = !beside && tpos > 0.0 && tpos < l;
     let inside = l >= 2.0 * sz.arrow + 1.0 && (!text_between || l >= 2.0 * e + 2.0 * sz.arrow);
     let (lo, hi) = if inside {
         ((tpos + e).min(0.0), (tpos - e).max(l))
     } else {
-        ((tpos + e).min(-2.0 * sz.arrow), (tpos - e).max(l + 2.0 * sz.arrow))
+        (
+            (tpos + e).min(-2.0 * sz.arrow),
+            (tpos - e).max(l + 2.0 * sz.arrow),
+        )
     };
     let at = |s: f64| add(d1, mul(dir, s));
     // The line from lo to hi, less the label.
@@ -1791,7 +2147,17 @@ fn linear_graphics(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn angle_graphics(g: &mut AnnGraphics, sz: &Sizes, x: P2, ua: P2, ub: P2, t: P2, half: P2, sa: (P2, P2), sb: (P2, P2)) {
+fn angle_graphics(
+    g: &mut AnnGraphics,
+    sz: &Sizes,
+    x: P2,
+    ua: P2,
+    ub: P2,
+    t: P2,
+    half: P2,
+    sa: (P2, P2),
+    sb: (P2, P2),
+) {
     let a0 = ua[1].atan2(ua[0]);
     let mut sweep = ub[1].atan2(ub[0]) - a0;
     while sweep > std::f64::consts::PI {
@@ -1819,7 +2185,10 @@ fn angle_graphics(g: &mut AnnGraphics, sz: &Sizes, x: P2, ua: P2, ub: P2, t: P2,
         })
         .collect();
     // Break the arc around the label.
-    let (lo, hi) = ([t[0] - half[0] - 0.6, t[1] - half[1] - 0.6], [t[0] + half[0] + 0.6, t[1] + half[1] + 0.6]);
+    let (lo, hi) = (
+        [t[0] - half[0] - 0.6, t[1] - half[1] - 0.6],
+        [t[0] + half[0] + 0.6, t[1] + half[1] + 0.6],
+    );
     let inside = |p: &P2| p[0] > lo[0] && p[0] < hi[0] && p[1] > lo[1] && p[1] < hi[1];
     let mut cur: Vec<P2> = Vec::new();
     for p in &pts {
@@ -1882,7 +2251,11 @@ pub fn centerline_ends(view: &View, m: &dyn ViewModel, cl: &Centerline) -> Optio
             let (b0, b1) = line_of(resolve(view, m, b).shape)?;
             let da = unit(sub(a1, a0));
             let db0 = unit(sub(b1, b0));
-            let db = if dot(da, db0) < 0.0 { mul(db0, -1.0) } else { db0 };
+            let db = if dot(da, db0) < 0.0 {
+                mul(db0, -1.0)
+            } else {
+                db0
+            };
             let t = unit(add(da, db));
             // The midline: halfway between the lines, over both their extents.
             let o = mul(add(a0, foot(a0, b0, b1)), 0.5);
@@ -1902,7 +2275,11 @@ fn line_of(s: Shape) -> Option<(P2, P2)> {
 }
 
 /// A circle centerline's centre and radius (view 2D).
-pub fn circle_centerline(view: &View, m: &dyn ViewModel, cc: &CircleCenterline) -> Option<(P2, f64)> {
+pub fn circle_centerline(
+    view: &View,
+    m: &dyn ViewModel,
+    cc: &CircleCenterline,
+) -> Option<(P2, f64)> {
     match cc {
         CircleCenterline::ThreePoints(p) => {
             let a = resolve_point(view, m, &p[0])?.0;
@@ -1983,8 +2360,17 @@ pub fn accepts(tool: DimTool, view: &View, m: &dyn ViewModel, picks: &[Pick], p:
 }
 
 /// The dimension the picks make with the text at `cursor` (view 2D), if they make one.
-pub fn propose(tool: DimTool, view: &View, m: &dyn ViewModel, picks: &[Pick], cursor: P2) -> Option<Dimension> {
-    let classes: Vec<char> = picks.iter().map(|p| pick_class(view, m, p)).collect::<Option<_>>()?;
+pub fn propose(
+    tool: DimTool,
+    view: &View,
+    m: &dyn ViewModel,
+    picks: &[Pick],
+    cursor: P2,
+) -> Option<Dimension> {
+    let classes: Vec<char> = picks
+        .iter()
+        .map(|p| pick_class(view, m, p))
+        .collect::<Option<_>>()?;
     let dim = |kind: DimKind| {
         Some(Dimension {
             kind,
@@ -1995,11 +2381,13 @@ pub fn propose(tool: DimTool, view: &View, m: &dyn ViewModel, picks: &[Pick], cu
     };
     let point_of = |p: &Pick| -> Pick {
         match p {
-            Pick::Edge(e) if matches!(resolve(view, m, e).shape, Shape::Circle { .. }) => Pick::Point(PointRef {
-                edge: *e,
-                of: PointOf::Center,
-                hint: cursor,
-            }),
+            Pick::Edge(e) if matches!(resolve(view, m, e).shape, Shape::Circle { .. }) => {
+                Pick::Point(PointRef {
+                    edge: *e,
+                    of: PointOf::Center,
+                    hint: cursor,
+                })
+            }
             other => *other,
         }
     };
@@ -2016,7 +2404,10 @@ pub fn propose(tool: DimTool, view: &View, m: &dyn ViewModel, picks: &[Pick], cu
         // In sheet axes: horizontal when the text is above or below, vertical beside.
         let q = |p: P2| [dot(p, sx), dot(p, sy)];
         let (qa, qb, qc) = (q(pa), q(pb), q(cursor));
-        let (lo, hi) = ([qa[0].min(qb[0]), qa[1].min(qb[1])], [qa[0].max(qb[0]), qa[1].max(qb[1])]);
+        let (lo, hi) = (
+            [qa[0].min(qb[0]), qa[1].min(qb[1])],
+            [qa[0].max(qb[0]), qa[1].max(qb[1])],
+        );
         let in_x = qc[0] >= lo[0] && qc[0] <= hi[0];
         let in_y = qc[1] >= lo[1] && qc[1] <= hi[1];
         let tiny = 1e-6 * dist(pa, pb).max(1.0);
@@ -2037,11 +2428,21 @@ pub fn propose(tool: DimTool, view: &View, m: &dyn ViewModel, picks: &[Pick], cu
         (DimTool::Radial, ['c' | 'a'], [p]) => dim(DimKind::Radius(*p.edge())),
         (DimTool::Smart, ['c'], [p]) => dim(DimKind::Diameter(*p.edge())),
         (DimTool::Smart, ['a'], [p]) => dim(DimKind::Radius(*p.edge())),
-        (DimTool::Smart | DimTool::PointToPoint, ['l'], [Pick::Edge(e)]) if tool == DimTool::Smart => {
+        (DimTool::Smart | DimTool::PointToPoint, ['l'], [Pick::Edge(e)])
+            if tool == DimTool::Smart =>
+        {
             let (a, b) = line_of(resolve(view, m, e).shape)?;
             oriented(
-                Pick::Point(PointRef { edge: *e, of: PointOf::End, hint: a }),
-                Pick::Point(PointRef { edge: *e, of: PointOf::End, hint: b }),
+                Pick::Point(PointRef {
+                    edge: *e,
+                    of: PointOf::End,
+                    hint: a,
+                }),
+                Pick::Point(PointRef {
+                    edge: *e,
+                    of: PointOf::End,
+                    hint: b,
+                }),
             )
         }
         (DimTool::Angular, ['l', 'l'], [Pick::Edge(a), Pick::Edge(b)]) => {
@@ -2049,11 +2450,29 @@ pub fn propose(tool: DimTool, view: &View, m: &dyn ViewModel, picks: &[Pick], cu
             dim(DimKind::Angle { a: *a, b: *b })
         }
         (DimTool::LineToLine, ['l', 'l'], [a, b]) => {
-            let d = Dimension { kind: DimKind::Distance { a: *a, b: *b, orient: Orient::Aligned }, text: cursor, format: DimFormat::default(), last: None };
+            let d = Dimension {
+                kind: DimKind::Distance {
+                    a: *a,
+                    b: *b,
+                    orient: Orient::Aligned,
+                },
+                text: cursor,
+                format: DimFormat::default(),
+                last: None,
+            };
             measure(view, m, &d).map(|_| d)
         }
         (DimTool::Smart, ['l', 'l'], [Pick::Edge(a), Pick::Edge(b)]) => {
-            let d = Dimension { kind: DimKind::Distance { a: picks[0], b: picks[1], orient: Orient::Aligned }, text: cursor, format: DimFormat::default(), last: None };
+            let d = Dimension {
+                kind: DimKind::Distance {
+                    a: picks[0],
+                    b: picks[1],
+                    orient: Orient::Aligned,
+                },
+                text: cursor,
+                format: DimFormat::default(),
+                last: None,
+            };
             if measure(view, m, &d).is_some() {
                 Some(d)
             } else {
@@ -2065,7 +2484,11 @@ pub fn propose(tool: DimTool, view: &View, m: &dyn ViewModel, picks: &[Pick], cu
             let (a, b) = (point_of(a), point_of(b));
             match (pick_class(view, m, &a)?, pick_class(view, m, &b)?) {
                 ('p', 'p') => oriented(a, b),
-                _ if tool == DimTool::Smart => dim(DimKind::Distance { a, b, orient: Orient::Aligned }),
+                _ if tool == DimTool::Smart => dim(DimKind::Distance {
+                    a,
+                    b,
+                    orient: Orient::Aligned,
+                }),
                 _ => None,
             }
         }
@@ -2076,32 +2499,53 @@ pub fn propose(tool: DimTool, view: &View, m: &dyn ViewModel, picks: &[Pick], cu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ObjectRef;
     use crate::standard::Scale;
     use crate::view::NamedView;
-    use crate::ObjectRef;
     use cadrs_kernel::naming::{FaceOrigin, OpId};
     use cadrs_kernel::{ProjClass, ProjSource, ProjVisibility};
 
     fn face(op: u128, k: u64) -> FaceName {
-        FaceName { op: OpId::from_u128(op), origin: FaceOrigin::Unnamed { index: k as u32 }, split: 0 }
+        FaceName {
+            op: OpId::from_u128(op),
+            origin: FaceOrigin::Unnamed { index: k as u32 },
+            split: 0,
+        }
     }
 
     fn edge_name(k: u64) -> EdgeName {
-        EdgeName { faces: [face(1, k), face(1, k + 100)], index: 0 }
+        EdgeName {
+            faces: [face(1, k), face(1, k + 100)],
+            index: 0,
+        }
     }
 
     fn line_edge(k: u64, a: P2, b: P2) -> ProjEdge {
         ProjEdge {
             visibility: ProjVisibility::Visible,
             class: ProjClass::Sharp,
-            curve: ProjCurve::Line { start: a.into(), end: b.into() },
+            curve: ProjCurve::Line {
+                start: a.into(),
+                end: b.into(),
+            },
             points: vec![a.into(), b.into()],
-            source: Some(ProjSource { edge_name: Some(edge_name(k)), ..Default::default() }),
+            source: Some(ProjSource {
+                edge_name: Some(edge_name(k)),
+                ..Default::default()
+            }),
         }
     }
 
     fn front(scale: Scale) -> View {
-        View::base(ObjectRef { element: Uuid::nil(), part: None }, NamedView::Front, scale, [100.0, 80.0])
+        View::base(
+            ObjectRef {
+                element: Uuid::nil(),
+                part: None,
+            },
+            NamedView::Front,
+            scale,
+            [100.0, 80.0],
+        )
     }
 
     /// A 40 × 30 rectangle's front view (x 0..40, z 0..30) with a circle Ø10 at (20, 15) seen
@@ -2117,8 +2561,16 @@ mod tests {
             (4, [0.0, 30.0], [0.0, 0.0]),
         ];
         for (k, a, b) in lines {
-            m.projection.edges.push(line_edge(k, add(a, [off, off]), add(b, [off, off])));
-            m.edges.insert(edge_name(k), ModelEdge::Line { a: [a[0], -5.0, a[1]], b: [b[0], -5.0, b[1]] });
+            m.projection
+                .edges
+                .push(line_edge(k, add(a, [off, off]), add(b, [off, off])));
+            m.edges.insert(
+                edge_name(k),
+                ModelEdge::Line {
+                    a: [a[0], -5.0, a[1]],
+                    b: [b[0], -5.0, b[1]],
+                },
+            );
         }
         let pts: Vec<[f64; 3]> = (0..=16)
             .map(|i| {
@@ -2138,11 +2590,19 @@ mod tests {
                 full: true,
             },
             points: vec![[25.0, 15.0].into(), [15.0, 15.0].into()],
-            source: Some(ProjSource { edge_name: Some(edge_name(9)), ..Default::default() }),
+            source: Some(ProjSource {
+                edge_name: Some(edge_name(9)),
+                ..Default::default()
+            }),
         });
         m.edges.insert(
             edge_name(9),
-            ModelEdge::Circle { center: [20.0, -5.0, 15.0], normal: [0.0, 1.0, 0.0], radius: 5.0, points: pts },
+            ModelEdge::Circle {
+                center: [20.0, -5.0, 15.0],
+                normal: [0.0, 1.0, 0.0],
+                radius: 5.0,
+                points: pts,
+            },
         );
         m
     }
@@ -2156,30 +2616,72 @@ mod tests {
         let m = model();
         let v = front(Scale::new(1, 2));
         // Ø10 from the model circle (the 2D arc says 10.04).
-        let d = propose(DimTool::Smart, &v, &m, &[Pick::Edge(r(&m, 4))], [30.0, 25.0]).unwrap();
+        let d = propose(
+            DimTool::Smart,
+            &v,
+            &m,
+            &[Pick::Edge(r(&m, 4))],
+            [30.0, 25.0],
+        )
+        .unwrap();
         assert!(matches!(d.kind, DimKind::Diameter(_)));
         let x = measure(&v, &m, &d).unwrap();
         assert_eq!(x.value, 10.0);
         assert!(x.from_model);
         // The two vertical sides: 40 apart (line to line).
-        let d = propose(DimTool::Smart, &v, &m, &[Pick::Edge(r(&m, 1)), Pick::Edge(r(&m, 3))], [20.0, 40.0]).unwrap();
+        let d = propose(
+            DimTool::Smart,
+            &v,
+            &m,
+            &[Pick::Edge(r(&m, 1)), Pick::Edge(r(&m, 3))],
+            [20.0, 40.0],
+        )
+        .unwrap();
         assert_eq!(measure(&v, &m, &d).unwrap().value, 40.0);
         // The bottom and the right side: an angle (90°).
-        let d = propose(DimTool::Smart, &v, &m, &[Pick::Edge(r(&m, 0)), Pick::Edge(r(&m, 1))], [35.0, 5.0]).unwrap();
+        let d = propose(
+            DimTool::Smart,
+            &v,
+            &m,
+            &[Pick::Edge(r(&m, 0)), Pick::Edge(r(&m, 1))],
+            [35.0, 5.0],
+        )
+        .unwrap();
         assert!(matches!(d.kind, DimKind::Angle { .. }));
         assert!((measure(&v, &m, &d).unwrap().value - 90.0).abs() < 1e-9);
         // The circle's centre to the top-right corner: vertical beside them, horizontal above.
-        let centre = Pick::Point(PointRef { edge: r(&m, 4), of: PointOf::Center, hint: [20.0, 15.0] });
-        let corner = Pick::Point(PointRef { edge: r(&m, 2), of: PointOf::End, hint: [40.0, 30.0] });
+        let centre = Pick::Point(PointRef {
+            edge: r(&m, 4),
+            of: PointOf::Center,
+            hint: [20.0, 15.0],
+        });
+        let corner = Pick::Point(PointRef {
+            edge: r(&m, 2),
+            of: PointOf::End,
+            hint: [40.0, 30.0],
+        });
         let d = propose(DimTool::Smart, &v, &m, &[centre, corner], [50.0, 22.0]).unwrap();
-        assert!(matches!(d.kind, DimKind::Distance { orient: Orient::Vertical, .. }));
+        assert!(matches!(
+            d.kind,
+            DimKind::Distance {
+                orient: Orient::Vertical,
+                ..
+            }
+        ));
         assert_eq!(measure(&v, &m, &d).unwrap().value, 15.0);
         let d = propose(DimTool::Smart, &v, &m, &[centre, corner], [30.0, 40.0]).unwrap();
         assert_eq!(measure(&v, &m, &d).unwrap().value, 20.0);
         // Without model edges, the 2D projection is used.
         let mut m2 = m.clone();
         m2.edges.clear();
-        let d = propose(DimTool::Diameter, &v, &m2, &[Pick::Edge(r(&m2, 4))], [30.0, 25.0]).unwrap();
+        let d = propose(
+            DimTool::Diameter,
+            &v,
+            &m2,
+            &[Pick::Edge(r(&m2, 4))],
+            [30.0, 25.0],
+        )
+        .unwrap();
         let x = measure(&v, &m2, &d).unwrap();
         assert!((x.value - 10.04).abs() < 1e-12 && !x.from_model);
     }
@@ -2189,11 +2691,31 @@ mod tests {
         let mut m = ModelData::default();
         // Two lines from the origin: along x, and at 43° above it.
         let a = 43f64.to_radians();
-        m.projection.edges.push(line_edge(1, [0.0, 0.0], [10.0, 0.0]));
-        m.projection.edges.push(line_edge(2, [0.0, 0.0], [10.0 * a.cos(), 10.0 * a.sin()]));
+        m.projection
+            .edges
+            .push(line_edge(1, [0.0, 0.0], [10.0, 0.0]));
+        m.projection
+            .edges
+            .push(line_edge(2, [0.0, 0.0], [10.0 * a.cos(), 10.0 * a.sin()]));
         let v = front(Scale::new(1, 1));
-        let (e1, e2) = (EdgeRef::of(&m.projection.edges[0]), EdgeRef::of(&m.projection.edges[1]));
-        let at = |t: P2| measure(&v, &m, &Dimension { kind: DimKind::Angle { a: e1, b: e2 }, text: t, format: DimFormat::default(), last: None }).unwrap().value;
+        let (e1, e2) = (
+            EdgeRef::of(&m.projection.edges[0]),
+            EdgeRef::of(&m.projection.edges[1]),
+        );
+        let at = |t: P2| {
+            measure(
+                &v,
+                &m,
+                &Dimension {
+                    kind: DimKind::Angle { a: e1, b: e2 },
+                    text: t,
+                    format: DimFormat::default(),
+                    last: None,
+                },
+            )
+            .unwrap()
+            .value
+        };
         assert!((at([5.0, 1.0]) - 43.0).abs() < 1e-9);
         assert!((at([-5.0, 1.0]) - 137.0).abs() < 1e-9);
         assert!((at([-5.0, -1.0]) - 43.0).abs() < 1e-9);
@@ -2209,19 +2731,40 @@ mod tests {
         assert_eq!(t(ValueKind::Angle, 43.0, &f), "43.0°");
         assert_eq!(t(ValueKind::Length, 0.266 * 25.4, &f), ".266");
         // ±.005 and dual millimetres (D6.6).
-        let p = DimFormat { tolerance: Tolerance::Symmetric(0.005 * 25.4), dual: Some(true), ..DimFormat::default() };
+        let p = DimFormat {
+            tolerance: Tolerance::Symmetric(0.005 * 25.4),
+            dual: Some(true),
+            ..DimFormat::default()
+        };
         assert_eq!(t(ValueKind::Length, 3.282 * 25.4, &p), "[83.36] 3.282±.005");
         let p = DimFormat {
             prefix: "2x ".into(),
-            tolerance: Tolerance::Deviation { upper: 0.005 * 25.4, lower: -0.002 * 25.4 },
+            tolerance: Tolerance::Deviation {
+                upper: 0.005 * 25.4,
+                lower: -0.002 * 25.4,
+            },
             precision: Some(2),
             ..DimFormat::default()
         };
         assert_eq!(t(ValueKind::Length, 3.282 * 25.4, &p), "2x 3.28+.005/-.002");
-        let p = DimFormat { tolerance: Tolerance::Limits { upper: 0.01 * 25.4, lower: -0.01 * 25.4 }, ..DimFormat::default() };
+        let p = DimFormat {
+            tolerance: Tolerance::Limits {
+                upper: 0.01 * 25.4,
+                lower: -0.01 * 25.4,
+            },
+            ..DimFormat::default()
+        };
         assert_eq!(t(ValueKind::Length, 1.0 * 25.4, &p), "1.010 .990");
         // Symbols are runs of their own (drawn as vectors).
-        assert_eq!(runs("⌴Ø.438 ↧.250"), vec![Run::Sym(Symbol::Counterbore), Run::Text("Ø.438 ".into()), Run::Sym(Symbol::Depth), Run::Text(".250".into())]);
+        assert_eq!(
+            runs("⌴Ø.438 ↧.250"),
+            vec![
+                Run::Sym(Symbol::Counterbore),
+                Run::Text("Ø.438 ".into()),
+                Run::Sym(Symbol::Depth),
+                Run::Text(".250".into())
+            ]
+        );
     }
 
     #[test]
@@ -2235,8 +2778,14 @@ mod tests {
             csink: None,
             thread: None,
         };
-        assert_eq!(hole_text(&inch, &cb, "4x").plain(), "4x Ø.266 THRU ⌴Ø.438 ↧.250");
-        let plain = HoleInfo { cbore: None, ..cb.clone() };
+        assert_eq!(
+            hole_text(&inch, &cb, "4x").plain(),
+            "4x Ø.266 THRU ⌴Ø.438 ↧.250"
+        );
+        let plain = HoleInfo {
+            cbore: None,
+            ..cb.clone()
+        };
         assert_eq!(hole_text(&inch, &plain, "8x").plain(), "8x Ø.266 THRU");
         assert_eq!(hole_text(&inch, &plain, "").plain(), "Ø.266 THRU");
     }
@@ -2246,7 +2795,14 @@ mod tests {
         let m = model();
         let v = front(Scale::new(1, 2));
         let style = DrawingStyle::default();
-        let d = propose(DimTool::Smart, &v, &m, &[Pick::Edge(r(&m, 1)), Pick::Edge(r(&m, 3))], [20.0, 40.0]).unwrap();
+        let d = propose(
+            DimTool::Smart,
+            &v,
+            &m,
+            &[Pick::Edge(r(&m, 1)), Pick::Edge(r(&m, 3))],
+            [20.0, 40.0],
+        )
+        .unwrap();
         let a = Annotation::new(AnnotationKind::Dimension(d));
         let g = annotation_graphics(&style, &v, &m, &a).unwrap();
         assert_eq!(g.fills.len(), 2);
@@ -2255,12 +2811,27 @@ mod tests {
         assert!(g.grips.iter().any(|(_, k)| *k == GripKind::Text));
         // Extension lines up from the sides' tops to the dimension line, which sits at z 40
         // (sheet y 80 + 20).
-        assert!(g.strokes.iter().any(|s| s.iter().any(|p| (p[1] - (100.0 + style.extension_beyond)).abs() < 1e-9)));
+        assert!(g.strokes.iter().any(|s| {
+            s.iter()
+                .any(|p| (p[1] - (100.0 + style.extension_beyond)).abs() < 1e-9)
+        }));
         // A centermark: a cross and four dashes.
         let cm = Annotation::new(AnnotationKind::Centermark(r(&m, 4)));
-        assert_eq!(annotation_graphics(&style, &v, &m, &cm).unwrap().strokes.len(), 6);
+        assert_eq!(
+            annotation_graphics(&style, &v, &m, &cm)
+                .unwrap()
+                .strokes
+                .len(),
+            6
+        );
         // A centerline between the sides: vertical at x 20, past both ends.
-        let cl = Centerline { kind: CenterlineKind::Lines { a: r(&m, 1), b: r(&m, 3) }, extend: [0.0, 5.0] };
+        let cl = Centerline {
+            kind: CenterlineKind::Lines {
+                a: r(&m, 1),
+                b: r(&m, 3),
+            },
+            extend: [0.0, 5.0],
+        };
         let (p0, p1) = centerline_ends(&v, &m, &cl).unwrap();
         assert!((p0[0] - 20.0).abs() < 1e-9 && (p1[0] - 20.0).abs() < 1e-9);
         assert!((p0[1] - p1[1]).abs() > 29.9);

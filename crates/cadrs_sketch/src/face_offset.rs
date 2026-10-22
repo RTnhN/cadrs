@@ -12,7 +12,13 @@ use crate::{CurveId, Link, Sketch};
 /// Uses `items` (a closed loop, in order, head to tail) as construction geometry and adds its
 /// offset by `distance` to the left of the loop's direction of travel (or the right), with a
 /// driving Offset dimension placed at `label`. Returns the new offset curves.
-pub fn offset_loop(s: &mut Sketch, items: &[(Projected, Link)], distance: f64, left: bool, label: (f64, f64)) -> Result<Vec<CurveId>, String> {
+pub fn offset_loop(
+    s: &mut Sketch,
+    items: &[(Projected, Link)],
+    distance: f64,
+    left: bool,
+    label: (f64, f64),
+) -> Result<Vec<CurveId>, String> {
     let chain = use_loop(s, items)?;
     let made = offset(s, &chain, distance, left, label)?;
     for c in &made {
@@ -25,13 +31,18 @@ pub fn offset_loop(s: &mut Sketch, items: &[(Projected, Link)], distance: f64, l
 
 /// Uses `items` (a closed loop) as construction geometry, its corners shared, and returns it
 /// as a chain ([`chain_of`]): what [`offset_loop`] offsets, and what the Offset tool previews.
-pub fn use_loop(s: &mut Sketch, items: &[(Projected, Link)]) -> Result<Vec<(CurveId, bool)>, String> {
+pub fn use_loop(
+    s: &mut Sketch,
+    items: &[(Projected, Link)],
+) -> Result<Vec<(CurveId, bool)>, String> {
     if items.is_empty() {
         return Err("the face has no edges to offset".into());
     }
     let mut used: Vec<CurveId> = Vec::new();
     for (shape, link) in items {
-        let id = s.add_projected(shape.clone(), *link).ok_or("the face's edges are already used")?;
+        let id = s
+            .add_projected(shape.clone(), *link)
+            .ok_or("the face's edges are already used")?;
         if let Some(c) = s.curves.get_mut(id) {
             c.construction = true;
         }
@@ -114,7 +125,10 @@ pub fn outer_loop(items: &[(Projected, Link)]) -> Vec<(Projected, Link)> {
         let mut lp = vec![first.clone()];
         let (start, mut at) = ends(&first.0).expect("filtered");
         while !near(at, start) {
-            let Some(i) = left.iter().position(|(p, _)| ends(p).is_some_and(|(a, b)| near(a, at) || near(b, at))) else {
+            let Some(i) = left
+                .iter()
+                .position(|(p, _)| ends(p).is_some_and(|(a, b)| near(a, at) || near(b, at)))
+            else {
                 break;
             };
             let (p, l) = left.swap_remove(i);
@@ -144,13 +158,23 @@ mod tests {
         let op = uuid::Uuid::from_u128(7);
         Link::Edge {
             feature: op,
-            edge: EdgeTag::Lateral { region: n, from: CurveId::default(), to: CurveId::default() }.to_name(op),
+            edge: EdgeTag::Lateral {
+                region: n,
+                from: CurveId::default(),
+                to: CurveId::default(),
+            }
+            .to_name(op),
         }
     }
 
     /// The Conrod stand-in's web face (inch): full width 1.0 at y = 1 and 0.6 at y = 5.
     fn trapezoid() -> Vec<(Projected, Link)> {
-        let p = [Vec2::new(-0.5, 1.0), Vec2::new(0.5, 1.0), Vec2::new(0.3, 5.0), Vec2::new(-0.3, 5.0)];
+        let p = [
+            Vec2::new(-0.5, 1.0),
+            Vec2::new(0.5, 1.0),
+            Vec2::new(0.3, 5.0),
+            Vec2::new(-0.3, 5.0),
+        ];
         // Out of order and some reversed, as a face's edges come.
         vec![
             (Projected::Line(p[2], p[1]), link(0)),
@@ -182,7 +206,11 @@ mod tests {
         assert!((a - 2.279_051).abs() < 1e-6);
         // The offset has one driving Offset dimension.
         offset_loop(&mut s, &items, 0.1, true, (0.0, 0.0)).unwrap();
-        let dims = s.dimensions.values().filter(|d| matches!(d.kind, crate::DimensionKind::Offset { .. })).count();
+        let dims = s
+            .dimensions
+            .values()
+            .filter(|d| matches!(d.kind, crate::DimensionKind::Offset { .. }))
+            .count();
         assert_eq!(dims, 1);
     }
 }

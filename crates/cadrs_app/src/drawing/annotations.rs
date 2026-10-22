@@ -36,8 +36,9 @@ use bevy::sprite::Anchor;
 use bevy::text::FontWeight;
 use cadrs_core::views::ViewGeometry;
 use cadrs_drawing::annotation::{
-    self as ann, AnnGraphics, Annotation, AnnotationId, AnnotationKind, Centerline, CenterlineKind, CircleCenterline,
-    DimKind, DimTool, EdgeRef, GripKind, HoleCallout, Pick, PointOf, PointRef, Shape,
+    self as ann, AnnGraphics, Annotation, AnnotationId, AnnotationKind, Centerline, CenterlineKind,
+    CircleCenterline, DimKind, DimTool, EdgeRef, GripKind, HoleCallout, Pick, PointOf, PointRef,
+    Shape,
 };
 use cadrs_drawing::{Drawing, DrawingOp, View, ViewId};
 use cadrs_ui::input::TextInputField;
@@ -45,7 +46,9 @@ use cadrs_ui::prelude::*;
 
 use super::view_tools::{ViewTool, edit_drawing};
 use super::views::{ViewCache, view_at};
-use super::{DRAWING_LAYER, DrawingUi, SheetText, active_drawing, current_view, screen_to_sheet, sheet_area};
+use super::{
+    DRAWING_LAYER, DrawingUi, SheetText, active_drawing, current_view, screen_to_sheet, sheet_area,
+};
 use crate::viewport::{ActiveKind, ViewportArea, ViewportRect};
 use crate::{ActiveDocument, AppState};
 
@@ -76,16 +79,25 @@ impl Plugin for AnnotationsPlugin {
             )
             .add_systems(
                 Update,
-                (rebuild_scene, sync_texts, sync_fills, draw_strokes, sync_hint)
+                (
+                    rebuild_scene,
+                    sync_texts,
+                    sync_fills,
+                    draw_strokes,
+                    sync_hint,
+                )
                     .chain()
                     .in_set(AnnotationDrawSet)
                     .after(super::views::ViewsSet)
                     .run_if(in_state(AppState::Document)),
             )
-            .add_systems(OnExit(AppState::Document), |mut u: ResMut<AnnotationUi>, mut s: ResMut<AnnotationScene>| {
-                *u = AnnotationUi::default();
-                *s = AnnotationScene::default();
-            })
+            .add_systems(
+                OnExit(AppState::Document),
+                |mut u: ResMut<AnnotationUi>, mut s: ResMut<AnnotationScene>| {
+                    *u = AnnotationUi::default();
+                    *s = AnnotationScene::default();
+                },
+            )
             .add_observer(on_annotation_menu)
             .add_observer(on_tool_menu);
     }
@@ -179,7 +191,10 @@ pub enum AnnTool {
 impl AnnTool {
     /// The symbol tools with a settings card (P3C.8).
     pub fn has_card(self) -> bool {
-        matches!(self, AnnTool::Gdt | AnnTool::Datum | AnnTool::SurfaceFinish | AnnTool::Weld)
+        matches!(
+            self,
+            AnnTool::Gdt | AnnTool::Datum | AnnTool::SurfaceFinish | AnnTool::Weld
+        )
     }
 }
 
@@ -197,7 +212,11 @@ pub struct Hover {
 impl Hover {
     pub fn pick(&self) -> Pick {
         match self.snap {
-            Some((of, at)) => Pick::Point(PointRef { edge: self.edge, of, hint: at }),
+            Some((of, at)) => Pick::Point(PointRef {
+                edge: self.edge,
+                of,
+                hint: at,
+            }),
             None => Pick::Edge(self.edge),
         }
     }
@@ -243,7 +262,11 @@ pub struct AnnotationUi {
 impl AnnotationUi {
     /// Starts `tool` (or ends it when it is already active).
     pub fn toggle(&mut self, tool: AnnTool) {
-        self.tool = if self.tool == tool { AnnTool::None } else { tool };
+        self.tool = if self.tool == tool {
+            AnnTool::None
+        } else {
+            tool
+        };
         self.extending = None;
         self.reset_picks();
         self.selected.clear();
@@ -275,7 +298,11 @@ pub fn start_tool(world: &mut World, tool: AnnTool) {
 // Access
 
 /// The active sheet's views with their current geometry.
-pub fn sheet_views(doc: &ActiveDocument, ui: &DrawingUi, cache: &ViewCache) -> Vec<(View, Option<Arc<ViewGeometry>>)> {
+pub fn sheet_views(
+    doc: &ActiveDocument,
+    ui: &DrawingUi,
+    cache: &ViewCache,
+) -> Vec<(View, Option<Arc<ViewGeometry>>)> {
     let Some((id, d)) = active_drawing(doc) else {
         return Vec::new();
     };
@@ -296,7 +323,9 @@ pub fn find_annotation(d: &Drawing, view: ViewId, id: AnnotationId) -> Option<(V
 }
 
 fn mm_per_px(doc: &ActiveDocument, ui: &DrawingUi) -> f64 {
-    current_view(doc, ui).map(|(_, v)| 1.0 / v.ppm as f64).unwrap_or(1.0)
+    current_view(doc, ui)
+        .map(|(_, v)| 1.0 / v.ppm as f64)
+        .unwrap_or(1.0)
 }
 
 /// The edges a view draws (the ones a tool can pick).
@@ -308,7 +337,10 @@ fn drawn_edges(v: &View, g: &ViewGeometry) -> Vec<usize> {
         .iter()
         .enumerate()
         // A flat pattern's bend lines while they are shown (P3I.7).
-        .filter(|(_, e)| !cadrs_drawing::flat_view::is_bend_edge(e) || v.flat.as_ref().is_some_and(|f| !f.bend_lines_hidden))
+        .filter(|(_, e)| {
+            !cadrs_drawing::flat_view::is_bend_edge(e)
+                || v.flat.as_ref().is_some_and(|f| !f.bend_lines_hidden)
+        })
         .filter(|(_, e)| match (e.visibility, e.class) {
             (ProjVisibility::Visible, ProjClass::Smooth) => v.tangent_edges != TangentEdges::Hidden,
             (ProjVisibility::Visible, _) => true,
@@ -322,7 +354,14 @@ fn drawn_edges(v: &View, g: &ViewGeometry) -> Vec<usize> {
 /// The geometry under the sheet point `p` in `v` that `accept` takes: the nearest snap point
 /// within `snap_tol` (sheet mm), else the nearest drawn edge within `tol`. (A hole's circle next
 /// to a nearer line is still found by a tool that only takes circles.)
-pub(crate) fn hover_in(v: &View, g: &ViewGeometry, p: Vec2, tol: f64, snap_tol: f64, accept: impl Fn(&Hover) -> bool) -> Option<Hover> {
+pub(crate) fn hover_in(
+    v: &View,
+    g: &ViewGeometry,
+    p: Vec2,
+    tol: f64,
+    snap_tol: f64,
+    accept: impl Fn(&Hover) -> bool,
+) -> Option<Hover> {
     let local = v.from_sheet([p.x as f64, p.y as f64]);
     let k = v.scale.factor();
     let mut snaps: Vec<(f64, Hover)> = Vec::new();
@@ -331,36 +370,76 @@ pub(crate) fn hover_in(v: &View, g: &ViewGeometry, p: Vec2, tol: f64, snap_tol: 
         let e = &g.projection.edges[i];
         let r = EdgeRef::of(e);
         let res = ann::resolve(v, g, &r);
-        let d = ann::proj_shape(e).distance(local).min(res.shape.distance(local)) * k;
+        let d = ann::proj_shape(e)
+            .distance(local)
+            .min(res.shape.distance(local))
+            * k;
         for (of, at) in res.shape.snap_points() {
             let ds = ((at[0] - local[0]).hypot(at[1] - local[1])) * k;
             // A circle's centre snaps from anywhere near it; ends and midpoints only on the edge.
             let near_edge = d <= snap_tol * 2.5 || of == PointOf::Center;
             if ds <= snap_tol && near_edge {
-                snaps.push((ds, Hover { view: v.id, edge: r, shape: res.shape, snap: Some((of, at)) }));
+                snaps.push((
+                    ds,
+                    Hover {
+                        view: v.id,
+                        edge: r,
+                        shape: res.shape,
+                        snap: Some((of, at)),
+                    },
+                ));
             }
         }
         if d <= tol {
-            edges.push((d, Hover { view: v.id, edge: r, shape: res.shape, snap: None }));
+            edges.push((
+                d,
+                Hover {
+                    view: v.id,
+                    edge: r,
+                    shape: res.shape,
+                    snap: None,
+                },
+            ));
         }
     }
     snaps.sort_by(|a, b| a.0.total_cmp(&b.0));
     edges.sort_by(|a, b| a.0.total_cmp(&b.0));
-    snaps.into_iter().chain(edges).map(|(_, h)| h).find(|h| accept(h))
+    snaps
+        .into_iter()
+        .chain(edges)
+        .map(|(_, h)| h)
+        .find(|h| accept(h))
 }
 
 /// What the tool accepts under the cursor.
-fn tool_accepts(tool: AnnTool, v: &View, g: &ViewGeometry, picks: &[Pick], h: &Hover) -> Option<Pick> {
+fn tool_accepts(
+    tool: AnnTool,
+    v: &View,
+    g: &ViewGeometry,
+    picks: &[Pick],
+    h: &Hover,
+) -> Option<Pick> {
     let pick = h.pick();
     let is_circle = matches!(h.shape, Shape::Circle { .. });
     let is_line = matches!(h.shape, Shape::Line { .. });
     let center = || {
-        is_circle.then_some(Pick::Point(PointRef { edge: h.edge, of: PointOf::Center, hint: [0.0, 0.0] }))
+        is_circle.then_some(Pick::Point(PointRef {
+            edge: h.edge,
+            of: PointOf::Center,
+            hint: [0.0, 0.0],
+        }))
     };
     match tool {
-        AnnTool::None | AnnTool::Table | AnnTool::SheetLine | AnnTool::SheetSpline | AnnTool::PlaceImport | AnnTool::PlaceBom => None,
+        AnnTool::None
+        | AnnTool::Table
+        | AnnTool::SheetLine
+        | AnnTool::SheetSpline
+        | AnnTool::PlaceImport
+        | AnnTool::PlaceBom => None,
         AnnTool::Callout => Some(Pick::Edge(h.edge)),
-        AnnTool::Gdt | AnnTool::Datum | AnnTool::SurfaceFinish | AnnTool::Weld => Some(Pick::Edge(h.edge)),
+        AnnTool::Gdt | AnnTool::Datum | AnnTool::SurfaceFinish | AnnTool::Weld => {
+            Some(Pick::Edge(h.edge))
+        }
         AnnTool::Dimension(DimTool::Chamfer) => is_line.then_some(Pick::Edge(h.edge)),
         AnnTool::Dimension(DimTool::ArcLength) => {
             matches!(h.shape, Shape::Circle { arc: Some(_), .. }).then_some(Pick::Edge(h.edge))
@@ -372,7 +451,11 @@ fn tool_accepts(tool: AnnTool, v: &View, g: &ViewGeometry, picks: &[Pick], h: &H
         AnnTool::Dimension(DimTool::Ordinate) => match pick {
             Pick::Point(_) => Some(pick),
             Pick::Edge(_) if is_circle => center(),
-            Pick::Edge(_) if is_line => Some(Pick::Point(PointRef { edge: h.edge, of: PointOf::Mid, hint: h.shape.polyline()[0] })),
+            Pick::Edge(_) if is_line => Some(Pick::Point(PointRef {
+                edge: h.edge,
+                of: PointOf::Mid,
+                hint: h.shape.polyline()[0],
+            })),
             _ => None,
         },
         AnnTool::Note | AnnTool::AddLeader(_) => Some(pick),
@@ -387,7 +470,9 @@ fn tool_accepts(tool: AnnTool, v: &View, g: &ViewGeometry, picks: &[Pick], h: &H
             let pick = if whole { Pick::Edge(h.edge) } else { pick };
             ann::accepts(t, v, g, picks, &pick).then_some(pick)
         }
-        AnnTool::HoleCallout => (is_circle && ann::hole_of(g, &h.edge).is_some()).then_some(Pick::Edge(h.edge)),
+        AnnTool::HoleCallout => {
+            (is_circle && ann::hole_of(g, &h.edge).is_some()).then_some(Pick::Edge(h.edge))
+        }
         AnnTool::Centermark => is_circle.then_some(Pick::Edge(h.edge)),
         AnnTool::VirtualSharp => is_line.then_some(Pick::Edge(h.edge)),
         AnnTool::Centerline(CenterlineMode::LineToLine) => is_line.then_some(Pick::Edge(h.edge)),
@@ -399,15 +484,32 @@ fn tool_accepts(tool: AnnTool, v: &View, g: &ViewGeometry, picks: &[Pick], h: &H
 }
 
 /// The annotation the tool makes once it has enough picks (with the text at `cursor`).
-fn complete(tool: AnnTool, v: &View, g: &ViewGeometry, picks: &[Pick], cursor: [f64; 2], specs: &super::symbol_cards::SymbolSpecs) -> Option<Annotation> {
+fn complete(
+    tool: AnnTool,
+    v: &View,
+    g: &ViewGeometry,
+    picks: &[Pick],
+    cursor: [f64; 2],
+    specs: &super::symbol_cards::SymbolSpecs,
+) -> Option<Annotation> {
     use cadrs_drawing::annotation_more as more;
     let point = |p: &Pick| match p {
         Pick::Point(pr) => Some(*pr),
         Pick::Edge(_) => None,
     };
     let kind = match (tool, picks) {
-        (AnnTool::Dimension(DimTool::Chamfer), [p]) => AnnotationKind::ChamferDim(more::ChamferDim { edge: *p.edge(), text: cursor }),
-        (AnnTool::Dimension(DimTool::ArcLength), [p]) => AnnotationKind::ArcLength(more::ArcLength { edge: *p.edge(), text: cursor }),
+        (AnnTool::Dimension(DimTool::Chamfer), [p]) => {
+            AnnotationKind::ChamferDim(more::ChamferDim {
+                edge: *p.edge(),
+                text: cursor,
+            })
+        }
+        (AnnTool::Dimension(DimTool::ArcLength), [p]) => {
+            AnnotationKind::ArcLength(more::ArcLength {
+                edge: *p.edge(),
+                text: cursor,
+            })
+        }
         (AnnTool::Dimension(DimTool::Baseline), [base, target]) => {
             let at = |p: &Pick| match p {
                 Pick::Point(pr) => ann::resolve_point(v, g, pr).map(|x| x.0),
@@ -415,29 +517,60 @@ fn complete(tool: AnnTool, v: &View, g: &ViewGeometry, picks: &[Pick], cursor: [
             };
             let (a, b) = (at(base)?, at(target)?);
             let (sa, sb) = (v.to_sheet(a), v.to_sheet(b));
-            let orient = if (sb[0] - sa[0]).abs() >= (sb[1] - sa[1]).abs() { ann::Orient::Horizontal } else { ann::Orient::Vertical };
-            AnnotationKind::Baseline(more::Baseline { base: *base, targets: vec![*target], orient, text: cursor, spacing: 2.6 * cadrs_drawing::DrawingStyle::default().dim_text_height })
+            let orient = if (sb[0] - sa[0]).abs() >= (sb[1] - sa[1]).abs() {
+                ann::Orient::Horizontal
+            } else {
+                ann::Orient::Vertical
+            };
+            AnnotationKind::Baseline(more::Baseline {
+                base: *base,
+                targets: vec![*target],
+                orient,
+                text: cursor,
+                spacing: 2.6 * cadrs_drawing::DrawingStyle::default().dim_text_height,
+            })
         }
         (AnnTool::Dimension(DimTool::Ordinate), [Pick::Point(o)]) => {
             let (p, _) = ann::resolve_point(v, g, o)?;
             let (sp, sc) = (v.to_sheet(p), v.to_sheet(cursor));
             // Values above or below: x ordinates (vertical leaders); beside: y ordinates.
             let vertical = (sc[0] - sp[0]).abs() > (sc[1] - sp[1]).abs();
-            AnnotationKind::Ordinate(more::Ordinate { origin: *o, points: Vec::new(), vertical, level: if vertical { cursor[0] } else { cursor[1] } })
+            AnnotationKind::Ordinate(more::Ordinate {
+                origin: *o,
+                points: Vec::new(),
+                vertical,
+                level: if vertical { cursor[0] } else { cursor[1] },
+            })
         }
         (AnnTool::Gdt, [p]) => AnnotationKind::FeatureControl(more::FeatureControl {
             characteristic: specs.gdt,
             tolerance: specs.tolerance.clone(),
             diameter: specs.diameter,
             modifier: specs.modifier,
-            datums: if specs.gdt.takes_datums() { specs.datums.iter().filter(|d| !d.is_empty()).cloned().collect() } else { Vec::new() },
+            datums: if specs.gdt.takes_datums() {
+                specs
+                    .datums
+                    .iter()
+                    .filter(|d| !d.is_empty())
+                    .cloned()
+                    .collect()
+            } else {
+                Vec::new()
+            },
             edge: Some(*p.edge()),
             text: cursor,
         }),
-        (AnnTool::Datum, [p]) => AnnotationKind::Datum(more::Datum { letter: specs.datum_letter.clone(), edge: *p.edge(), text: cursor }),
-        (AnnTool::SurfaceFinish, [p]) => {
-            AnnotationKind::SurfaceFinish(more::SurfaceFinish { kind: specs.finish, value: specs.finish_value.clone(), edge: *p.edge(), text: cursor })
-        }
+        (AnnTool::Datum, [p]) => AnnotationKind::Datum(more::Datum {
+            letter: specs.datum_letter.clone(),
+            edge: *p.edge(),
+            text: cursor,
+        }),
+        (AnnTool::SurfaceFinish, [p]) => AnnotationKind::SurfaceFinish(more::SurfaceFinish {
+            kind: specs.finish,
+            value: specs.finish_value.clone(),
+            edge: *p.edge(),
+            text: cursor,
+        }),
         (AnnTool::Weld, [p]) => AnnotationKind::Weld(more::Weld {
             edge: *p.edge(),
             text: cursor,
@@ -446,23 +579,50 @@ fn complete(tool: AnnTool, v: &View, g: &ViewGeometry, picks: &[Pick], cursor: [
             size: specs.weld_size.clone(),
             all_around: specs.all_around,
         }),
-        (AnnTool::Dimension(t), _) => AnnotationKind::Dimension(ann::propose(t, v, g, picks, cursor)?),
-        (AnnTool::HoleCallout, [p]) => AnnotationKind::HoleCallout(HoleCallout { edge: *p.edge(), text: cursor, prefix: String::new(), last: None }),
+        (AnnTool::Dimension(t), _) => {
+            AnnotationKind::Dimension(ann::propose(t, v, g, picks, cursor)?)
+        }
+        (AnnTool::HoleCallout, [p]) => AnnotationKind::HoleCallout(HoleCallout {
+            edge: *p.edge(),
+            text: cursor,
+            prefix: String::new(),
+            last: None,
+        }),
         (AnnTool::Centermark, [p]) => AnnotationKind::Centermark(*p.edge()),
-        (AnnTool::VirtualSharp, [a, b]) => AnnotationKind::VirtualSharp { a: *a.edge(), b: *b.edge() },
-        (AnnTool::Centerline(CenterlineMode::LineToLine), [a, b]) => AnnotationKind::Centerline(Centerline {
-            kind: CenterlineKind::Lines { a: *a.edge(), b: *b.edge() },
-            extend: [0.0, 0.0],
-        }),
-        (AnnTool::Centerline(CenterlineMode::PointToPoint), [a, b]) => AnnotationKind::Centerline(Centerline {
-            kind: CenterlineKind::Points { a: point(a)?, b: point(b)? },
-            extend: [0.0, 0.0],
-        }),
+        (AnnTool::VirtualSharp, [a, b]) => AnnotationKind::VirtualSharp {
+            a: *a.edge(),
+            b: *b.edge(),
+        },
+        (AnnTool::Centerline(CenterlineMode::LineToLine), [a, b]) => {
+            AnnotationKind::Centerline(Centerline {
+                kind: CenterlineKind::Lines {
+                    a: *a.edge(),
+                    b: *b.edge(),
+                },
+                extend: [0.0, 0.0],
+            })
+        }
+        (AnnTool::Centerline(CenterlineMode::PointToPoint), [a, b]) => {
+            AnnotationKind::Centerline(Centerline {
+                kind: CenterlineKind::Points {
+                    a: point(a)?,
+                    b: point(b)?,
+                },
+                extend: [0.0, 0.0],
+            })
+        }
         (AnnTool::Centerline(CenterlineMode::ThreePointCircle), [a, b, c]) => {
-            AnnotationKind::CircleCenterline(CircleCenterline::ThreePoints([point(a)?, point(b)?, point(c)?]))
+            AnnotationKind::CircleCenterline(CircleCenterline::ThreePoints([
+                point(a)?,
+                point(b)?,
+                point(c)?,
+            ]))
         }
         (AnnTool::Centerline(CenterlineMode::TwoPointCircle), [a, b]) => {
-            AnnotationKind::CircleCenterline(CircleCenterline::CenterPoint { center: point(a)?, on: point(b)? })
+            AnnotationKind::CircleCenterline(CircleCenterline::CenterPoint {
+                center: point(a)?,
+                on: point(b)?,
+            })
         }
         _ => return None,
     };
@@ -506,7 +666,12 @@ pub fn annotation_at(scene: &AnnotationScene, p: Vec2, tol: f64) -> Option<(View
         .map(|(_, v, id)| (v, id))
 }
 
-fn grip_at(scene: &AnnotationScene, sel: &[(ViewId, AnnotationId)], p: Vec2, tol: f64) -> Option<(ViewId, AnnotationId, GripKind)> {
+fn grip_at(
+    scene: &AnnotationScene,
+    sel: &[(ViewId, AnnotationId)],
+    p: Vec2,
+    tol: f64,
+) -> Option<(ViewId, AnnotationId, GripKind)> {
     let q = [p.x as f64, p.y as f64];
     let mut best: Option<(f64, (ViewId, AnnotationId, GripKind))> = None;
     for (v, id, g) in &scene.items {
@@ -553,13 +718,16 @@ fn annotation_pointer(
         inputs.clear();
         return;
     };
-    let Some((((element, _), view), (_, d))) = current_view(&doc, &dui).zip(active_drawing(&doc)) else {
+    let Some((((element, _), view), (_, d))) = current_view(&doc, &dui).zip(active_drawing(&doc))
+    else {
         inputs.clear();
         return;
     };
     let index = dui.sheet_index(element, d);
     let area = sheet_area(&rect, &dui);
-    let over = super::view_tools::pointer_over_sheet(&hover_map, &q_area) && q_menus.is_empty() && q_dialogs.is_empty();
+    let over = super::view_tools::pointer_over_sheet(&hover_map, &q_area)
+        && q_menus.is_empty()
+        && q_dialogs.is_empty();
     let px = mm_per_px(&doc, &dui);
     let ctrl = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
     let annotating = ui.tool != AnnTool::None;
@@ -567,17 +735,25 @@ fn annotation_pointer(
         dui.annotating = annotating;
     }
     let views: Vec<(View, Option<Arc<ViewGeometry>>)> = sheet_views(&doc, &dui, &cache);
-    let view_of = |id: ViewId| views.iter().find(|(v, _)| v.id == id).and_then(|(v, g)| g.clone().map(|g| (v.clone(), g)));
-    // What the tool would pick at `p`: in the view of the picks so far, else the view there.
-    let hover_at = |tool: AnnTool, pick_view: Option<ViewId>, picks: &[Pick], p: Vec2| -> Option<Hover> {
-        if tool == AnnTool::None {
-            return None;
-        }
-        let vid = pick_view.or_else(|| view_at(d, index, &cache, p, 6.0 * px));
-        vid.and_then(view_of).and_then(|(v, g)| {
-            hover_in(&v, &g, p, 5.0 * px, 7.0 * px, |h| tool_accepts(tool, &v, &g, picks, h).is_some())
-        })
+    let view_of = |id: ViewId| {
+        views
+            .iter()
+            .find(|(v, _)| v.id == id)
+            .and_then(|(v, g)| g.clone().map(|g| (v.clone(), g)))
     };
+    // What the tool would pick at `p`: in the view of the picks so far, else the view there.
+    let hover_at =
+        |tool: AnnTool, pick_view: Option<ViewId>, picks: &[Pick], p: Vec2| -> Option<Hover> {
+            if tool == AnnTool::None {
+                return None;
+            }
+            let vid = pick_view.or_else(|| view_at(d, index, &cache, p, 6.0 * px));
+            vid.and_then(view_of).and_then(|(v, g)| {
+                hover_in(&v, &g, p, 5.0 * px, 7.0 * px, |h| {
+                    tool_accepts(tool, &v, &g, picks, h).is_some()
+                })
+            })
+        };
     for input in inputs.read() {
         if input.pointer_id != PointerId::Mouse {
             continue;
@@ -611,7 +787,14 @@ fn annotation_pointer(
                 let tol = 4.0 * px;
                 if let Some((v, id, grip)) = grip_at(&scene, &ui.selected, p, 1.5 * tol) {
                     dui.annotation_press = true;
-                    ui.drag = Some(GripDrag { view: v, id, grip, start: p, at: p, moving: false });
+                    ui.drag = Some(GripDrag {
+                        view: v,
+                        id,
+                        grip,
+                        start: p,
+                        at: p,
+                        moving: false,
+                    });
                     continue;
                 }
                 match annotation_at(&scene, p, tol) {
@@ -628,7 +811,14 @@ fn annotation_pointer(
                             ui.selected = vec![hit];
                             ui.palette_open = false;
                         }
-                        ui.drag = Some(GripDrag { view: hit.0, id: hit.1, grip: GripKind::Text, start: p, at: p, moving: false });
+                        ui.drag = Some(GripDrag {
+                            view: hit.0,
+                            id: hit.1,
+                            grip: GripKind::Text,
+                            start: p,
+                            at: p,
+                            moving: false,
+                        });
                     }
                     None => {
                         dui.annotation_press = false;
@@ -645,7 +835,9 @@ fn annotation_pointer(
                     ui.drag_preview = None;
                     if drag.moving {
                         let target = if let GripKind::Attach(_) = drag.grip {
-                            view_of(drag.view).and_then(|(v, g)| hover_in(&v, &g, p, 5.0 * px, 7.0 * px, |_| true))
+                            view_of(drag.view).and_then(|(v, g)| {
+                                hover_in(&v, &g, p, 5.0 * px, 7.0 * px, |_| true)
+                            })
                         } else {
                             None
                         };
@@ -674,13 +866,15 @@ fn annotation_pointer(
     // `bom_tools::callout_preview`).
     let preview = match (ui.tool, ui.pick_view, pointer) {
         (AnnTool::Callout, _, _) => ui.preview.clone(),
-        (tool, Some(vid), Some(p)) if placed(tool) && !ui.picks.is_empty() => view_of(vid).and_then(|(v, g)| {
-            let cursor = v.from_sheet([p.x as f64, p.y as f64]);
-            complete(tool, &v, &g, &ui.picks, cursor, &specs).map(|a| (vid, a))
-        }),
+        (tool, Some(vid), Some(p)) if placed(tool) && !ui.picks.is_empty() => view_of(vid)
+            .and_then(|(v, g)| {
+                let cursor = v.from_sheet([p.x as f64, p.y as f64]);
+                complete(tool, &v, &g, &ui.picks, cursor, &specs).map(|a| (vid, a))
+            }),
         _ => None,
     };
-    if ui.preview.as_ref().map(|(v, a)| (v, &a.kind)) != preview.as_ref().map(|(v, a)| (v, &a.kind)) {
+    if ui.preview.as_ref().map(|(v, a)| (v, &a.kind)) != preview.as_ref().map(|(v, a)| (v, &a.kind))
+    {
         ui.preview = preview;
     }
     // The dragged annotation as it would be.
@@ -715,7 +909,9 @@ fn annotation_pointer(
     }
     // Hover highlight of annotations (no tool, not dragging).
     let hovered = match (ui.tool, pointer, over, ui.drag) {
-        (AnnTool::None, Some(p), true, None) if dui.tool == ViewTool::None => annotation_at(&scene, p, 4.0 * px),
+        (AnnTool::None, Some(p), true, None) if dui.tool == ViewTool::None => {
+            annotation_at(&scene, p, 4.0 * px)
+        }
         _ => None,
     };
     if ui.hovered != hovered {
@@ -729,15 +925,29 @@ fn annotation_pointer(
 
 /// A callout's anchor snapped to the other callouts of sheet `index` (D11.6); returns the
 /// guides. Other annotations are left alone.
-fn snap_callout(d: &Drawing, index: usize, v: &View, a: &mut Annotation) -> Vec<([f64; 2], [f64; 2])> {
-    let AnnotationKind::Callout(c) = &mut a.kind else { return Vec::new() };
-    let (t, guides) = super::bom_tools::snapped_anchor(d, index, v, v.to_sheet(c.text), Some((v.id, a.id)));
+fn snap_callout(
+    d: &Drawing,
+    index: usize,
+    v: &View,
+    a: &mut Annotation,
+) -> Vec<([f64; 2], [f64; 2])> {
+    let AnnotationKind::Callout(c) = &mut a.kind else {
+        return Vec::new();
+    };
+    let (t, guides) =
+        super::bom_tools::snapped_anchor(d, index, v, v.to_sheet(c.text), Some((v.id, a.id)));
     c.text = t;
     guides
 }
 
 /// An annotation after its grip was dragged to `drag.at` (and dropped on `target`).
-fn dragged(v: &View, g: &ViewGeometry, a: &Annotation, drag: GripDrag, target: Option<Hover>) -> Option<Annotation> {
+fn dragged(
+    v: &View,
+    g: &ViewGeometry,
+    a: &Annotation,
+    drag: GripDrag,
+    target: Option<Hover>,
+) -> Option<Annotation> {
     let mut a = a.clone();
     let delta = v.from_sheet([drag.at.x as f64, drag.at.y as f64]);
     let start = v.from_sheet([drag.start.x as f64, drag.start.y as f64]);
@@ -752,7 +962,15 @@ fn dragged(v: &View, g: &ViewGeometry, a: &Annotation, drag: GripDrag, target: O
         (AnnotationKind::Ordinate(o), GripKind::Text) => {
             o.level += if o.vertical { dv[0] } else { dv[1] };
         }
-        (k, GripKind::Text) if !matches!(k, AnnotationKind::Centermark(_) | AnnotationKind::Centerline(_) | AnnotationKind::CircleCenterline(_) | AnnotationKind::VirtualSharp { .. }) => {
+        (k, GripKind::Text)
+            if !matches!(
+                k,
+                AnnotationKind::Centermark(_)
+                    | AnnotationKind::Centerline(_)
+                    | AnnotationKind::CircleCenterline(_)
+                    | AnnotationKind::VirtualSharp { .. }
+            ) =>
+        {
             let t = k.text_mut()?;
             *t = [t[0] + dv[0], t[1] + dv[1]];
         }
@@ -779,7 +997,11 @@ fn dragged(v: &View, g: &ViewGeometry, a: &Annotation, drag: GripDrag, target: O
                 }
                 DimKind::Distance { a: pa, b: pb, .. } => {
                     let pick = match (pick, h.shape) {
-                        (Pick::Edge(e), Shape::Circle { .. }) => Pick::Point(PointRef { edge: e, of: PointOf::Center, hint: [0.0, 0.0] }),
+                        (Pick::Edge(e), Shape::Circle { .. }) => Pick::Point(PointRef {
+                            edge: e,
+                            of: PointOf::Center,
+                            hint: [0.0, 0.0],
+                        }),
                         (p, _) => p,
                     };
                     if i == 0 {
@@ -847,7 +1069,14 @@ fn finish_drag(w: &mut World, drag: GripDrag, target: Option<Hover>) {
         GripKind::Attach(_) => format!("Re-attach {}", a.noun()),
         GripKind::End(_) => "Extend centerline".to_string(),
     };
-    edit_drawing(w, DrawingOp::SetAnnotation { view: drag.view, annotation: new, label });
+    edit_drawing(
+        w,
+        DrawingOp::SetAnnotation {
+            view: drag.view,
+            annotation: new,
+            label,
+        },
+    );
 }
 
 /// A click with an annotation tool.
@@ -864,7 +1093,10 @@ fn tool_click(w: &mut World, tool: AnnTool, hover: Option<Hover>, p: Vec2) {
         super::notes::tool_click(w, tool, hover, p);
         return;
     }
-    if matches!(tool, AnnTool::SheetLine | AnnTool::SheetSpline | AnnTool::PlaceImport) {
+    if matches!(
+        tool,
+        AnnTool::SheetLine | AnnTool::SheetSpline | AnnTool::PlaceImport
+    ) {
         super::sheet_items::tool_click(w, tool, p);
         return;
     }
@@ -883,10 +1115,16 @@ fn tool_click(w: &mut World, tool: AnnTool, hover: Option<Hover>, p: Vec2) {
         let ui = w.resource::<AnnotationUi>();
         (ui.picks.clone(), ui.pick_view, ui.preview.clone())
     };
-    let view_of = |id: ViewId| views.iter().find(|(v, _)| v.id == id).and_then(|(v, g)| g.clone().map(|g| (v.clone(), g)));
+    let view_of = |id: ViewId| {
+        views
+            .iter()
+            .find(|(v, _)| v.id == id)
+            .and_then(|(v, g)| g.clone().map(|g| (v.clone(), g)))
+    };
     // A baseline or ordinate set just placed: each further pick adds to it (P3C.8).
     let extending = w.resource::<AnnotationUi>().extending;
-    if let (AnnTool::Dimension(DimTool::Baseline | DimTool::Ordinate), Some((vid, id)), Some(h)) = (tool, extending, hover)
+    if let (AnnTool::Dimension(DimTool::Baseline | DimTool::Ordinate), Some((vid, id)), Some(h)) =
+        (tool, extending, hover)
         && h.view == vid
         && let Some((v, g)) = view_of(vid)
         && let Some(pick) = tool_accepts(tool, &v, &g, &[], &h)
@@ -899,7 +1137,14 @@ fn tool_click(w: &mut World, tool: AnnTool, hover: Option<Hover>, p: Vec2) {
             _ => return,
         }
         let label = format!("Extend {}", a.noun());
-        edit_drawing(w, DrawingOp::SetAnnotation { view: vid, annotation: a, label });
+        edit_drawing(
+            w,
+            DrawingOp::SetAnnotation {
+                view: vid,
+                annotation: a,
+                label,
+            },
+        );
         return;
     }
     // A pick, if the cursor is on something the tool takes (and there is room for one).
@@ -907,7 +1152,10 @@ fn tool_click(w: &mut World, tool: AnnTool, hover: Option<Hover>, p: Vec2) {
         let (v, g) = view_of(h.view)?;
         let same_view = pick_view.is_none_or(|pv| pv == h.view);
         let room = picks.len() < needs(tool);
-        (same_view && room).then(|| tool_accepts(tool, &v, &g, &picks, &h)).flatten().map(|p| (h.view, p))
+        (same_view && room)
+            .then(|| tool_accepts(tool, &v, &g, &picks, &h))
+            .flatten()
+            .map(|p| (h.view, p))
     });
     // A click that places the annotation following the cursor.
     if placed(tool)
@@ -915,8 +1163,17 @@ fn tool_click(w: &mut World, tool: AnnTool, hover: Option<Hover>, p: Vec2) {
         && (pick.is_none() || picks.len() >= 2 || (needs(tool) == 1 && !picks.is_empty()))
     {
         let id = a.id;
-        let set = matches!(a.kind, AnnotationKind::Baseline(_) | AnnotationKind::Ordinate(_));
-        if edit_drawing(w, DrawingOp::AddAnnotation { view: vid, annotation: a }) {
+        let set = matches!(
+            a.kind,
+            AnnotationKind::Baseline(_) | AnnotationKind::Ordinate(_)
+        );
+        if edit_drawing(
+            w,
+            DrawingOp::AddAnnotation {
+                view: vid,
+                annotation: a,
+            },
+        ) {
             let mut ui = w.resource_mut::<AnnotationUi>();
             ui.reset_picks();
             if set {
@@ -940,7 +1197,13 @@ fn tool_click(w: &mut World, tool: AnnTool, hover: Option<Hover>, p: Vec2) {
         let cursor = v.from_sheet([p.x as f64, p.y as f64]);
         let specs = w.resource::<super::symbol_cards::SymbolSpecs>().clone();
         if let Some(a) = complete(tool, &v, &g, &new_picks, cursor, &specs) {
-            edit_drawing(w, DrawingOp::AddAnnotation { view: vid, annotation: a });
+            edit_drawing(
+                w,
+                DrawingOp::AddAnnotation {
+                    view: vid,
+                    annotation: a,
+                },
+            );
         }
         w.resource_mut::<AnnotationUi>().reset_picks();
     }
@@ -973,7 +1236,13 @@ fn annotation_keys(
     let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
     let alt = keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]);
     for k in keys_in.read() {
-        if k.state != bevy::input::ButtonState::Pressed || typing || !q_dialogs.is_empty() || !q_menus.is_empty() || ctrl || alt {
+        if k.state != bevy::input::ButtonState::Pressed
+            || typing
+            || !q_dialogs.is_empty()
+            || !q_menus.is_empty()
+            || ctrl
+            || alt
+        {
             continue;
         }
         let tool = match (k.shortcut_code(), shift) {
@@ -1002,7 +1271,9 @@ fn annotation_keys(
                     // A callout being placed: dropped; the tool stays.
                     ui.preview = None;
                     ui.guides.clear();
-                    commands.queue(|w: &mut World| w.resource_mut::<super::bom_tools::CalloutUi>().attach = None);
+                    commands.queue(|w: &mut World| {
+                        w.resource_mut::<super::bom_tools::CalloutUi>().attach = None
+                    });
                 } else if !ui.picks.is_empty() {
                     ui.reset_picks();
                 } else if ui.tool != AnnTool::None {
@@ -1013,7 +1284,9 @@ fn annotation_keys(
                     ui.palette_open = false;
                 }
             }
-            KeyCode::Delete | KeyCode::Backspace if ui.tool == AnnTool::None && !ui.selected.is_empty() => {
+            KeyCode::Delete | KeyCode::Backspace
+                if ui.tool == AnnTool::None && !ui.selected.is_empty() =>
+            {
                 let ids = std::mem::take(&mut ui.selected);
                 ui.palette_open = false;
                 commands.queue(move |w: &mut World| {
@@ -1040,7 +1313,11 @@ pub fn open_annotation_menu(world: &mut World, pos: Vec2) -> bool {
         let ui = world.resource::<DrawingUi>();
         let (_, view) = current_view(doc, ui)?;
         let p = screen_to_sheet(view, sheet_area(&rect, ui), pos);
-        annotation_at(world.resource::<AnnotationScene>(), p, 4.0 / view.ppm as f64)
+        annotation_at(
+            world.resource::<AnnotationScene>(),
+            p,
+            4.0 / view.ppm as f64,
+        )
     })();
     let Some((v, id)) = hit else {
         return false;
@@ -1060,7 +1337,10 @@ pub fn open_annotation_menu(world: &mut World, pos: Vec2) -> bool {
     }
     let theme = world.resource::<Theme>().clone();
     let mut menu = Menu::new("annotation-context-menu").min_width(180.0);
-    if matches!(a.kind, AnnotationKind::HoleCallout(_) | AnnotationKind::Callout(_)) {
+    if matches!(
+        a.kind,
+        AnnotationKind::HoleCallout(_) | AnnotationKind::Callout(_)
+    ) {
         menu = menu.item(MenuItem::new("annotation-menu-edit", "Edit…"));
     }
     if matches!(a.kind, AnnotationKind::Dimension(_)) {
@@ -1100,7 +1380,12 @@ fn on_annotation_menu(ev: On<MenuAction>, q: Query<&AnnotationMenuFor>, mut comm
             ui.palette_open = true;
         }
         "annotation-menu-delete" => {
-            edit_drawing(w, DrawingOp::DeleteAnnotations { ids: vec![(t.0, t.1)] });
+            edit_drawing(
+                w,
+                DrawingOp::DeleteAnnotations {
+                    ids: vec![(t.0, t.1)],
+                },
+            );
             w.resource_mut::<AnnotationUi>().selected.clear();
         }
         _ => {}
@@ -1113,42 +1398,136 @@ pub struct ToolMenuFor;
 
 /// The dimension tools' ▾ menu.
 pub const DIMENSION_TOOLS: [(&str, Option<DimTool>, &str, &str, &str); 10] = [
-    ("drawing-dim-smart", Some(DimTool::Smart), "Dimension", "dimension", "D"),
-    ("drawing-dim-radial", Some(DimTool::Radial), "Radial dimension", "center-arc", "Shift+R"),
-    ("drawing-dim-diameter", Some(DimTool::Diameter), "Diameter dimension", "center-circle", "Shift+D"),
-    ("drawing-dim-point-to-point", Some(DimTool::PointToPoint), "Point to point dimension", "ruler", ""),
-    ("drawing-dim-line-to-line", Some(DimTool::LineToLine), "Line to line dimension", "constraint-parallel", ""),
-    ("drawing-dim-angular", Some(DimTool::Angular), "Angular dimension", "constraint-perpendicular", ""),
-    ("drawing-dim-baseline", Some(DimTool::Baseline), "Baseline dimension", "linear-pattern", ""),
-    ("drawing-dim-ordinate", Some(DimTool::Ordinate), "Ordinate dimension", "list", ""),
-    ("drawing-dim-chamfer", Some(DimTool::Chamfer), "Chamfer dimension", "chamfer", ""),
-    ("drawing-dim-arc-length", Some(DimTool::ArcLength), "Arc length dimension", "three-point-arc", ""),
+    (
+        "drawing-dim-smart",
+        Some(DimTool::Smart),
+        "Dimension",
+        "dimension",
+        "D",
+    ),
+    (
+        "drawing-dim-radial",
+        Some(DimTool::Radial),
+        "Radial dimension",
+        "center-arc",
+        "Shift+R",
+    ),
+    (
+        "drawing-dim-diameter",
+        Some(DimTool::Diameter),
+        "Diameter dimension",
+        "center-circle",
+        "Shift+D",
+    ),
+    (
+        "drawing-dim-point-to-point",
+        Some(DimTool::PointToPoint),
+        "Point to point dimension",
+        "ruler",
+        "",
+    ),
+    (
+        "drawing-dim-line-to-line",
+        Some(DimTool::LineToLine),
+        "Line to line dimension",
+        "constraint-parallel",
+        "",
+    ),
+    (
+        "drawing-dim-angular",
+        Some(DimTool::Angular),
+        "Angular dimension",
+        "constraint-perpendicular",
+        "",
+    ),
+    (
+        "drawing-dim-baseline",
+        Some(DimTool::Baseline),
+        "Baseline dimension",
+        "linear-pattern",
+        "",
+    ),
+    (
+        "drawing-dim-ordinate",
+        Some(DimTool::Ordinate),
+        "Ordinate dimension",
+        "list",
+        "",
+    ),
+    (
+        "drawing-dim-chamfer",
+        Some(DimTool::Chamfer),
+        "Chamfer dimension",
+        "chamfer",
+        "",
+    ),
+    (
+        "drawing-dim-arc-length",
+        Some(DimTool::ArcLength),
+        "Arc length dimension",
+        "three-point-arc",
+        "",
+    ),
 ];
 
 /// The Geometric tolerance ▾ menu (P3C.8).
 pub const GDT_TOOLS: [(&str, AnnTool, &str, &str); 2] = [
-    ("drawing-gdt-frame", AnnTool::Gdt, "Feature control frame", "constraint-parallel"),
+    (
+        "drawing-gdt-frame",
+        AnnTool::Gdt,
+        "Feature control frame",
+        "constraint-parallel",
+    ),
     ("drawing-gdt-datum", AnnTool::Datum, "Datum feature", "tag"),
 ];
 
 /// The centerline modes' ▾ menu.
 pub const CENTERLINE_TOOLS: [(&str, CenterlineMode, &str, &str); 4] = [
-    ("drawing-centerline-point-to-point", CenterlineMode::PointToPoint, "Point to point centerline", "construction"),
-    ("drawing-centerline-line-to-line", CenterlineMode::LineToLine, "Line to line centerline", "constraint-parallel"),
-    ("drawing-centerline-3-point-circle", CenterlineMode::ThreePointCircle, "3 point circle centerline", "three-point-circle"),
-    ("drawing-centerline-2-point-circle", CenterlineMode::TwoPointCircle, "2 point circle centerline", "center-circle"),
+    (
+        "drawing-centerline-point-to-point",
+        CenterlineMode::PointToPoint,
+        "Point to point centerline",
+        "construction",
+    ),
+    (
+        "drawing-centerline-line-to-line",
+        CenterlineMode::LineToLine,
+        "Line to line centerline",
+        "constraint-parallel",
+    ),
+    (
+        "drawing-centerline-3-point-circle",
+        CenterlineMode::ThreePointCircle,
+        "3 point circle centerline",
+        "three-point-circle",
+    ),
+    (
+        "drawing-centerline-2-point-circle",
+        CenterlineMode::TwoPointCircle,
+        "2 point circle centerline",
+        "center-circle",
+    ),
 ];
 
 /// Opens a tool button's ▾ menu under it.
 pub fn open_tool_menu(world: &mut World, button: Entity, which: &str) {
-    let Some((left, bottom)) = world.get::<ComputedNode>(button).zip(world.get::<bevy::ui::UiGlobalTransform>(button)).map(|(n, t)| {
-        let s = n.inverse_scale_factor();
-        ((t.translation.x - n.size().x / 2.0) * s, (t.translation.y + n.size().y / 2.0) * s)
-    }) else {
+    let Some((left, bottom)) = world
+        .get::<ComputedNode>(button)
+        .zip(world.get::<bevy::ui::UiGlobalTransform>(button))
+        .map(|(n, t)| {
+            let s = n.inverse_scale_factor();
+            (
+                (t.translation.x - n.size().x / 2.0) * s,
+                (t.translation.y + n.size().y / 2.0) * s,
+            )
+        })
+    else {
         return;
     };
     let theme = world.resource::<Theme>().clone();
-    let mut menu = Menu::new(format!("{which}-menu")).min_width(230.0).keycap_shortcuts();
+    let mut menu = Menu::new(format!("{which}-menu"))
+        .min_width(230.0)
+        .keycap_shortcuts();
     if which == "drawing-gdt" {
         for (name, _, label, icon_name) in GDT_TOOLS {
             menu = menu.item(MenuItem::new(name, label).icon(icon_name));
@@ -1159,7 +1538,9 @@ pub fn open_tool_menu(world: &mut World, button: Entity, which: &str) {
         }
     } else if which == "drawing-dimension" {
         for (name, tool, label, icon_name, key) in DIMENSION_TOOLS {
-            let mut item = MenuItem::new(name, label).icon(icon_name).disabled(tool.is_none());
+            let mut item = MenuItem::new(name, label)
+                .icon(icon_name)
+                .disabled(tool.is_none());
             if !key.is_empty() {
                 item = item.shortcut(key);
             }
@@ -1171,8 +1552,14 @@ pub fn open_tool_menu(world: &mut World, button: Entity, which: &str) {
         }
     }
     let mut commands = world.commands();
-    let anchor = open_context_menu(&mut commands, Vec2::new(left, bottom + 2.0), menu.build(&theme));
-    commands.entity(anchor).insert((ToolMenuFor, DespawnOnExit(AppState::Document)));
+    let anchor = open_context_menu(
+        &mut commands,
+        Vec2::new(left, bottom + 2.0),
+        menu.build(&theme),
+    );
+    commands
+        .entity(anchor)
+        .insert((ToolMenuFor, DespawnOnExit(AppState::Document)));
     world.flush();
 }
 
@@ -1181,7 +1568,10 @@ fn on_tool_menu(ev: On<MenuAction>, q: Query<(), With<ToolMenuFor>>, mut command
         return;
     }
     let item = ev.item.clone();
-    if let Some((name, _, _)) = super::view_kind_tools::VIEW_KINDS.iter().find(|k| k.0 == item) {
+    if let Some((name, _, _)) = super::view_kind_tools::VIEW_KINDS
+        .iter()
+        .find(|k| k.0 == item)
+    {
         let name: &'static str = name;
         commands.queue(move |w: &mut World| {
             w.resource_mut::<super::toolbar::ToolChoices>().view_kind = name;
@@ -1194,7 +1584,12 @@ fn on_tool_menu(ev: On<MenuAction>, q: Query<(), With<ToolMenuFor>>, mut command
         .find(|t| t.0 == item)
         .and_then(|t| t.1)
         .map(AnnTool::Dimension)
-        .or_else(|| CENTERLINE_TOOLS.iter().find(|t| t.0 == item).map(|t| AnnTool::Centerline(t.1)))
+        .or_else(|| {
+            CENTERLINE_TOOLS
+                .iter()
+                .find(|t| t.0 == item)
+                .map(|t| AnnTool::Centerline(t.1))
+        })
         .or_else(|| GDT_TOOLS.iter().find(|t| t.0 == item).map(|t| t.1));
     if let Some(t) = tool {
         commands.queue(move |w: &mut World| {
@@ -1222,7 +1617,13 @@ pub struct SceneText {
 
 impl SceneText {
     pub fn plain(text: ann::PlacedText, color: Color) -> Self {
-        Self { text, color, bold: false, italic: false, rotation: 0.0 }
+        Self {
+            text,
+            color,
+            bold: false,
+            italic: false,
+            rotation: 0.0,
+        }
     }
 }
 
@@ -1286,7 +1687,10 @@ fn rebuild_scene(
     let ppm = current_view(&doc, &dui).map(|(_, v)| v.ppm).unwrap_or(1.0);
     let key = SceneKey {
         views: views.iter().map(|(v, _)| v.clone()).collect(),
-        geometry: views.iter().map(|(_, g)| g.as_ref().map(|g| Arc::as_ptr(g) as usize)).collect(),
+        geometry: views
+            .iter()
+            .map(|(_, g)| g.as_ref().map(|g| Arc::as_ptr(g) as usize))
+            .collect(),
         style: d.style.clone(),
         selected: ui.selected.clone(),
         hovered: ui.hovered,
@@ -1299,28 +1703,48 @@ fn rebuild_scene(
         tool: ui.tool,
         ppm,
         ghost: dui.ghost.clone(),
-        ghost_geometry: dui.ghost.as_ref().and_then(|g| cache.geometry(g)).map(|g| Arc::as_ptr(&g) as usize),
+        ghost_geometry: dui
+            .ghost
+            .as_ref()
+            .and_then(|g| cache.geometry(g))
+            .map(|g| Arc::as_ptr(&g) as usize),
         view_selected: dui.selected.clone(),
         guides: ui.guides.clone(),
-        tables: active_drawing(&doc).and_then(|(id, d)| d.sheets.get(dui.sheet_index(id, d))).map(|s| s.tables.clone()).unwrap_or_default(),
+        tables: active_drawing(&doc)
+            .and_then(|(id, d)| d.sheets.get(dui.sheet_index(id, d)))
+            .map(|s| s.tables.clone())
+            .unwrap_or_default(),
         sources: d.sources.as_ptr() as usize ^ d.sources.len(),
     };
     if scene.key.as_ref() == Some(&key) {
         return;
     }
-    let sheet_index = active_drawing(&doc).map(|(id, d)| dui.sheet_index(id, d)).unwrap_or(0);
-    let Some(sheet) = d.sheets.get(sheet_index) else { return };
+    let sheet_index = active_drawing(&doc)
+        .map(|(id, d)| dui.sheet_index(id, d))
+        .unwrap_or(0);
+    let Some(sheet) = d.sheets.get(sheet_index) else {
+        return;
+    };
     let mut items = Vec::new();
     let mut strokes: Vec<(Vec<Vec2>, Color)> = Vec::new();
     let mut fills: Vec<([Vec2; 3], Color)> = Vec::new();
     let mut texts = Vec::new();
     let v2 = |p: &[f64; 2]| Vec2::new(p[0] as f32, p[1] as f32);
-    let mut emit = |g: &AnnGraphics, color: Color, grips: bool, attached: bool, strokes: &mut Vec<(Vec<Vec2>, Color)>, fills: &mut Vec<([Vec2; 3], Color)>| {
+    let mut emit = |g: &AnnGraphics,
+                    color: Color,
+                    grips: bool,
+                    attached: bool,
+                    strokes: &mut Vec<(Vec<Vec2>, Color)>,
+                    fills: &mut Vec<([Vec2; 3], Color)>| {
         if attached {
             // The current attachments in blue (D6.5); ones whose geometry is gone in red, so a
             // selected (orange, D6.8) dangling annotation still shows what dangles.
             for (i, s) in g.attached.iter().enumerate() {
-                let c = if g.attached_dead.get(i).copied().unwrap_or(false) { dangling_red() } else { blue() };
+                let c = if g.attached_dead.get(i).copied().unwrap_or(false) {
+                    dangling_red()
+                } else {
+                    blue()
+                };
                 strokes.push((s.iter().map(v2).collect(), c));
             }
         }
@@ -1375,15 +1799,23 @@ fn rebuild_scene(
     // The annotation being placed, in orange.
     if let Some((vid, a)) = &ui.preview
         && let Some((v, Some(g))) = views.iter().find(|(v, _)| v.id == *vid)
-        && let Some(gr) = ann::annotation_graphics(&d.style, v, &cadrs_drawing::assembly::SheetModel::new(d, sheet, v, &**g), a)
+        && let Some(gr) = ann::annotation_graphics(
+            &d.style,
+            v,
+            &cadrs_drawing::assembly::SheetModel::new(d, sheet, v, &**g),
+            a,
+        )
     {
         emit(&gr, orange(), false, false, &mut strokes, &mut fills);
     }
     // Flat pattern views' bend notes (P3I.7).
     for (v, g) in &views {
         let Some(g) = g else { continue };
-        let Some(flat) = g.flat.as_ref() else { continue };
-        let selected = dui.selected.contains(&v.id) || dui.flat_preview.as_ref().is_some_and(|(id, _)| *id == v.id);
+        let Some(flat) = g.flat.as_ref() else {
+            continue;
+        };
+        let selected = dui.selected.contains(&v.id)
+            || dui.flat_preview.as_ref().is_some_and(|(id, _)| *id == v.id);
         let color = if selected { orange() } else { ink() };
         for n in cadrs_drawing::flat_view::bend_notes(&d.style, v, flat) {
             for st in &n.strokes {
@@ -1392,13 +1824,19 @@ fn rebuild_scene(
             for t in &n.fills {
                 fills.push((t.map(|p| v2(&p)), color));
             }
-            texts.push(SceneText { rotation: n.rotation as f32, ..SceneText::plain(n.text.clone(), color) });
+            texts.push(SceneText {
+                rotation: n.rotation as f32,
+                ..SceneText::plain(n.text.clone(), color)
+            });
         }
     }
     // Inference lines (D11.6): dashed, from the other callouts.
     for (a, b) in &ui.guides {
         for dash in cadrs_drawing::view::dashes(&[*a, *b], &[1.6, 1.0]) {
-            strokes.push((dash.iter().map(v2).collect(), Color::srgb_u8(0x1f, 0x7a, 0xe0)));
+            strokes.push((
+                dash.iter().map(v2).collect(),
+                Color::srgb_u8(0x1f, 0x7a, 0xe0),
+            ));
         }
     }
     // The views' decorations: section and detail labels, letters, cutting-line arrows (P3C.8).
@@ -1416,12 +1854,22 @@ fn rebuild_scene(
         for (v, g, color) in views
             .iter()
             .map(|(v, g)| {
-                let c = if dui.selected.contains(&v.id) { orange() } else { ink() };
+                let c = if dui.selected.contains(&v.id) {
+                    orange()
+                } else {
+                    ink()
+                };
                 (v, g.clone(), c)
             })
             .chain(ghost.iter().map(|(v, g)| (v, g.clone(), ghost_blue)))
         {
-            let dec = cadrs_drawing::view_kinds::view_decor(&d.style, &all, v, g.as_deref().map(|g| g as &dyn ann::ViewModel), &avoid);
+            let dec = cadrs_drawing::view_kinds::view_decor(
+                &d.style,
+                &all,
+                v,
+                g.as_deref().map(|g| g as &dyn ann::ViewModel),
+                &avoid,
+            );
             for t in &dec.fills {
                 fills.push((t.map(|p| v2(&p)), color));
             }
@@ -1433,11 +1881,21 @@ fn rebuild_scene(
     // The picks so far and the hovered geometry with its snap points (D6.3).
     let h = 2.6 / ppm;
     for p in &ui.picks {
-        let Some((v, Some(g))) = ui.pick_view.and_then(|pv| views.iter().find(|(v, _)| v.id == pv)) else {
+        let Some((v, Some(g))) = ui
+            .pick_view
+            .and_then(|pv| views.iter().find(|(v, _)| v.id == pv))
+        else {
             continue;
         };
         let shape = ann::resolve(v, &**g, p.edge()).shape;
-        strokes.push((shape.polyline().iter().map(|q| v2(&v.to_sheet(*q))).collect(), orange()));
+        strokes.push((
+            shape
+                .polyline()
+                .iter()
+                .map(|q| v2(&v.to_sheet(*q)))
+                .collect(),
+            orange(),
+        ));
         if let Pick::Point(pr) = p
             && let Some((at, _)) = ann::resolve_point(v, &**g, pr)
         {
@@ -1447,7 +1905,14 @@ fn rebuild_scene(
     if let Some(hv) = &ui.hover
         && let Some((v, _)) = views.iter().find(|(v, _)| v.id == hv.view)
     {
-        strokes.push((hv.shape.polyline().iter().map(|q| v2(&v.to_sheet(*q))).collect(), hover_orange()));
+        strokes.push((
+            hv.shape
+                .polyline()
+                .iter()
+                .map(|q| v2(&v.to_sheet(*q)))
+                .collect(),
+            hover_orange(),
+        ));
         for (_, at) in hv.shape.snap_points() {
             fills.extend(square(v2(&v.to_sheet(at)), h, orange()));
         }
@@ -1464,11 +1929,21 @@ fn rebuild_scene(
 
 /// A filled square (two triangles) of half size `h` at `c`.
 pub(crate) fn square(c: Vec2, h: f32, color: Color) -> [([Vec2; 3], Color); 2] {
-    let (a, b, cc, d) = (c + Vec2::new(-h, -h), c + Vec2::new(h, -h), c + Vec2::new(h, h), c + Vec2::new(-h, h));
+    let (a, b, cc, d) = (
+        c + Vec2::new(-h, -h),
+        c + Vec2::new(h, -h),
+        c + Vec2::new(h, h),
+        c + Vec2::new(-h, h),
+    );
     [([a, b, cc], color), ([a, cc, d], color)]
 }
 
-fn draw_strokes(scene: Res<AnnotationScene>, notes: Res<super::notes::NoteScene>, kind: Res<ActiveKind>, mut g: Gizmos<AnnotationLines>) {
+fn draw_strokes(
+    scene: Res<AnnotationScene>,
+    notes: Res<super::notes::NoteScene>,
+    kind: Res<ActiveKind>,
+    mut g: Gizmos<AnnotationLines>,
+) {
     if *kind != ActiveKind::Drawing {
         return;
     }
@@ -1489,11 +1964,29 @@ fn sync_texts(
     items: Res<super::sheet_items::ItemScene>,
     kind: Res<ActiveKind>,
     theme: Res<Theme>,
-    mut q: Query<(Entity, &mut AnnotationText, &mut Text2d, &mut TextFont, &mut TextColor, &mut SheetText, &mut Transform)>,
+    mut q: Query<(
+        Entity,
+        &mut AnnotationText,
+        &mut Text2d,
+        &mut TextFont,
+        &mut TextColor,
+        &mut SheetText,
+        &mut Transform,
+    )>,
     mut commands: Commands,
 ) {
-    let all: Vec<SceneText> = scene.texts.iter().chain(&notes.texts).chain(&items.texts).cloned().collect();
-    let want: &[SceneText] = if *kind == ActiveKind::Drawing { &all } else { &[] };
+    let all: Vec<SceneText> = scene
+        .texts
+        .iter()
+        .chain(&notes.texts)
+        .chain(&items.texts)
+        .cloned()
+        .collect();
+    let want: &[SceneText] = if *kind == ActiveKind::Drawing {
+        &all
+    } else {
+        &[]
+    };
     // The texts are updated in place, in order: a text that moves (a dragged dimension) keeps
     // its entity, so its size, set by `size_sheet_texts`, is not reset. Respawning it each frame
     // drew it at its spawn size, which showed as flicker and blur while dragging.
@@ -1528,7 +2021,9 @@ fn sync_texts(
                 commands.spawn((
                     Name::new("annotation-text"),
                     AnnotationText(t.clone()),
-                    SheetText { height: t.text.height as f32 },
+                    SheetText {
+                        height: t.text.height as f32,
+                    },
                     Text2d::new(t.text.text.clone()),
                     text_font(&theme, t),
                     TextColor(t.color),
@@ -1549,7 +2044,11 @@ fn sync_texts(
 /// A text's font at the sheet's size (set by `size_sheet_texts` once spawned): Medium and
 /// ExtraBold, as Regular draws grey at sheet sizes (see `cadrs_drawing::rich`).
 fn text_font(theme: &Theme, t: &SceneText) -> TextFont {
-    let weight = FontWeight(if t.bold { cadrs_drawing::rich::FACE_BOLD } else { cadrs_drawing::rich::FACE_REGULAR });
+    let weight = FontWeight(if t.bold {
+        cadrs_drawing::rich::FACE_BOLD
+    } else {
+        cadrs_drawing::rich::FACE_REGULAR
+    });
     let mut font = theme.font(12.0, weight);
     if t.italic {
         font.style = bevy::text::FontStyle::Italic;
@@ -1561,8 +2060,12 @@ fn text_font(theme: &Theme, t: &SceneText) -> TextFont {
 fn text_transform(t: &SceneText) -> Transform {
     let rot = t.rotation.to_radians();
     let drop = Vec2::new(0.0, TEXT_DROP * t.text.height as f32);
-    let d = Vec2::new(drop.x * rot.cos() - drop.y * rot.sin(), drop.x * rot.sin() + drop.y * rot.cos());
-    Transform::from_xyz(t.text.pos[0] as f32 + d.x, t.text.pos[1] as f32 + d.y, 2.0).with_rotation(Quat::from_rotation_z(rot))
+    let d = Vec2::new(
+        drop.x * rot.cos() - drop.y * rot.sin(),
+        drop.x * rot.sin() + drop.y * rot.cos(),
+    );
+    Transform::from_xyz(t.text.pos[0] as f32 + d.x, t.text.pos[1] as f32 + d.y, 2.0)
+        .with_rotation(Quat::from_rotation_z(rot))
 }
 
 /// Text2d centres a line's box, which sits a little above the capitals' middle in Inter: this
@@ -1589,7 +2092,16 @@ fn sync_fills(
     mut commands: Commands,
 ) {
     let (fronts, backs): (Vec<Tri>, Vec<Tri>) = if *kind == ActiveKind::Drawing {
-        (scene.fills.iter().chain(&notes.fills).chain(&items.fills).copied().collect(), notes.backs.clone())
+        (
+            scene
+                .fills
+                .iter()
+                .chain(&notes.fills)
+                .chain(&items.fills)
+                .copied()
+                .collect(),
+            notes.backs.clone(),
+        )
     } else {
         (Vec::new(), Vec::new())
     };
@@ -1626,7 +2138,10 @@ fn spawn_fill_mesh(
         }
     }
     let n = positions.len() as u32;
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
     // Both windings, so no triangle is culled.
@@ -1728,7 +2243,11 @@ fn sync_hint(
     mut q_text: Query<&mut Text>,
     mut commands: Commands,
 ) {
-    let text = if *kind == ActiveKind::Drawing { hint_text(&ui) } else { None };
+    let text = if *kind == ActiveKind::Drawing {
+        hint_text(&ui)
+    } else {
+        None
+    };
     match (text, q.single()) {
         (None, Ok((e, _))) => commands.entity(e).despawn(),
         (Some(t), Ok((_, children))) => {

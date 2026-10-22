@@ -100,7 +100,15 @@ impl TextDialog {
     }
 
     /// The starting text and style (Edit text opens with the entity's).
-    pub fn state(mut self, text: impl Into<String>, font: usize, bold: bool, italic: bool, flip_h: bool, flip_v: bool) -> Self {
+    pub fn state(
+        mut self,
+        text: impl Into<String>,
+        font: usize,
+        bold: bool,
+        italic: bool,
+        flip_h: bool,
+        flip_v: bool,
+    ) -> Self {
         self.state.text = text.into();
         self.state.font = font;
         self.state.bold = bold;
@@ -135,8 +143,20 @@ impl TextDialog {
                     let toggles = [
                         (Part::Bold, "bold", "bold", "Bold", st.bold),
                         (Part::Italic, "italic", "italic", "Italic", st.italic),
-                        (Part::FlipH, "flip-h", "flip-horizontal", "Flip left to right", st.flip_h),
-                        (Part::FlipV, "flip-v", "mirror", "Flip upside down", st.flip_v),
+                        (
+                            Part::FlipH,
+                            "flip-h",
+                            "flip-horizontal",
+                            "Flip left to right",
+                            st.flip_h,
+                        ),
+                        (
+                            Part::FlipV,
+                            "flip-v",
+                            "mirror",
+                            "Flip upside down",
+                            st.flip_v,
+                        ),
                     ];
                     for (part, suffix, icon_name, tip, on) in toggles {
                         r.spawn((
@@ -168,7 +188,12 @@ impl TextDialog {
                 .with_children(|pv| {
                     pv.spawn((
                         Of(root, Part::PreviewText),
-                        t.text(st.text.clone(), 20.0, FontWeight::NORMAL, Color::srgb_u8(0x6b, 0x6b, 0x6b)),
+                        t.text(
+                            st.text.clone(),
+                            20.0,
+                            FontWeight::NORMAL,
+                            Color::srgb_u8(0x6b, 0x6b, 0x6b),
+                        ),
                         UiTransform::default(),
                         Pickable::IGNORE,
                     ));
@@ -239,10 +264,10 @@ fn on_toggle(
 ) {
     let Ok(o) = q_of.get(a.entity) else { return };
     // Typing (and Enter) stay with the text field.
-    if let Some((field, _)) = q_fields
-        .iter()
-        .find(|(_, p)| q_of.get(p.parent()).is_ok_and(|x| x.0 == o.0 && x.1 == Part::Field))
-    {
+    if let Some((field, _)) = q_fields.iter().find(|(_, p)| {
+        q_of.get(p.parent())
+            .is_ok_and(|x| x.0 == o.0 && x.1 == Part::Field)
+    }) {
         focus.set(field, FocusCause::Pressed);
     }
     let Ok(mut s) = q.get_mut(o.0) else { return };
@@ -276,7 +301,9 @@ fn read_text(
 ) {
     for (text, parent) in &q_fields {
         // The field's frame is the dialog's input part.
-        let Ok(o) = q_of.get(parent.parent()) else { continue };
+        let Ok(o) = q_of.get(parent.parent()) else {
+            continue;
+        };
         if o.1 != Part::Field {
             continue;
         }
@@ -329,7 +356,11 @@ fn sync_parts(
                     let base = s.weights.get(s.font).copied().unwrap_or(400);
                     let w = if s.bold { (base + 400).min(900) } else { base };
                     font.weight = FontWeight(w);
-                    font.style = if s.italic { FontStyle::Italic } else { FontStyle::Normal };
+                    font.style = if s.italic {
+                        FontStyle::Italic
+                    } else {
+                        FontStyle::Normal
+                    };
                     let scale = Vec2::new(
                         if s.flip_h { -1.0 } else { 1.0 },
                         if s.flip_v { -1.0 } else { 1.0 },

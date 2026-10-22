@@ -40,7 +40,10 @@ pub enum ConnectorOrigin {
     /// A sketch curve (P3B.7, A22.8): a circle's or arc's centre, a line's midpoint, with the
     /// sketch's axes (Z its normal). So a sketch places a connector where there is no solid
     /// geometry ("Edge of Hole Positions", `ex4-step8.png`).
-    SketchCurve { sketch: FeatureId, curve: cadrs_sketch::CurveId },
+    SketchCurve {
+        sketch: FeatureId,
+        curve: cadrs_sketch::CurveId,
+    },
 }
 
 impl ConnectorOrigin {
@@ -51,7 +54,8 @@ impl ConnectorOrigin {
             ConnectorOrigin::Face(f) => Some(FeatureId(f.face.op)),
             ConnectorOrigin::Edge(e) => Some(FeatureId(e.edge.op())),
             ConnectorOrigin::Vertex(v) => Some(v.part.feature),
-            ConnectorOrigin::SketchPoint { sketch, .. } | ConnectorOrigin::SketchCurve { sketch, .. } => Some(*sketch),
+            ConnectorOrigin::SketchPoint { sketch, .. }
+            | ConnectorOrigin::SketchCurve { sketch, .. } => Some(*sketch),
         }
     }
 
@@ -82,7 +86,10 @@ impl ConnectorRef {
     /// connector" (as Onshape shows an implicit one, `ex5-step5.png`).
     pub fn label(&self, features: &[Feature]) -> String {
         match self {
-            ConnectorRef::Feature(f) => features.iter().find(|x| x.id == *f).map_or("Mate connector".into(), |x| x.name.clone()),
+            ConnectorRef::Feature(f) => features
+                .iter()
+                .find(|x| x.id == *f)
+                .map_or("Mate connector".into(), |x| x.name.clone()),
             ConnectorRef::Implicit(_) => "Mate connector".into(),
         }
     }
@@ -193,7 +200,11 @@ pub fn aligned(base: PlaneFrame, z: Vec3) -> PlaneFrame {
         return frame_with_z(base.origin, z);
     }
     let u = unit(u);
-    PlaneFrame { origin: base.origin, u, v: cross(z, u) }
+    PlaneFrame {
+        origin: base.origin,
+        u,
+        v: cross(z, u),
+    }
 }
 
 fn zero_exprs() -> [String; 3] {
@@ -233,15 +244,28 @@ impl MateConnectorFeature {
         if self.origin.is_none() {
             return Some("Select an origin entity");
         }
-        (self.origin_type == OriginType::BetweenEntities && self.between.is_none()).then_some("Select a between entity")
+        (self.origin_type == OriginType::BetweenEntities && self.between.is_none())
+            .then_some("Select a between entity")
     }
 
     /// The features it refers to (its entities' makers and sketches).
     pub fn parents(&self) -> Vec<FeatureId> {
         let mut out = Vec::new();
-        let between = if self.origin_type == OriginType::BetweenEntities { self.between } else { None };
-        let axes = if self.realign { [self.primary_axis, self.secondary_axis] } else { [None, None] };
-        for o in [self.origin, between, self.at].into_iter().chain(axes).flatten() {
+        let between = if self.origin_type == OriginType::BetweenEntities {
+            self.between
+        } else {
+            None
+        };
+        let axes = if self.realign {
+            [self.primary_axis, self.secondary_axis]
+        } else {
+            [None, None]
+        };
+        for o in [self.origin, between, self.at]
+            .into_iter()
+            .chain(axes)
+            .flatten()
+        {
             if let Some(p) = o.parent()
                 && !out.contains(&p)
             {
@@ -285,7 +309,11 @@ impl MateConnectorFeature {
                 let z = unit(origin_direction(p, features, parts)?);
                 // Keep X where it was, laid square to the new Z (else the default).
                 let x = sub(f.u, scale(z, dot(f.u, z)));
-                f = if len(x) > 1e-6 { frame_from(f.origin, z, x) } else { frame_with_z(f.origin, z) };
+                f = if len(x) > 1e-6 {
+                    frame_from(f.origin, z, x)
+                } else {
+                    frame_with_z(f.origin, z)
+                };
             }
             if let Some(sa) = &self.secondary_axis {
                 let x = origin_direction(sa, features, parts)?;
@@ -314,14 +342,27 @@ impl MateConnectorFeature {
         }
         let turn = |f: PlaneFrame, a: f64| {
             let (c, s) = (a.cos(), a.sin());
-            PlaneFrame { origin: f.origin, u: add(scale(f.u, c), scale(f.v, s)), v: sub(scale(f.v, c), scale(f.u, s)) }
+            PlaneFrame {
+                origin: f.origin,
+                u: add(scale(f.u, c), scale(f.v, s)),
+                v: sub(scale(f.v, c), scale(f.u, s)),
+            }
         };
-        f = turn(f, std::f64::consts::FRAC_PI_2 * f64::from(self.reorient % 4));
+        f = turn(
+            f,
+            std::f64::consts::FRAC_PI_2 * f64::from(self.reorient % 4),
+        );
         if !self.move_on {
             return f;
         }
         let n = f.normal();
-        f.origin = add(add(add(f.origin, scale(f.u, self.offset[0])), scale(f.v, self.offset[1])), scale(n, self.offset[2]));
+        f.origin = add(
+            add(
+                add(f.origin, scale(f.u, self.offset[0])),
+                scale(f.v, self.offset[1]),
+            ),
+            scale(n, self.offset[2]),
+        );
         turn(f, self.rotation.to_radians())
     }
 }
@@ -330,7 +371,11 @@ impl MateConnectorFeature {
 /// it.
 pub fn frame_with_z(origin: Vec3, z: Vec3) -> PlaneFrame {
     let z = unit(z);
-    let helper = if z[0].abs() < 0.9 { [1.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0] };
+    let helper = if z[0].abs() < 0.9 {
+        [1.0, 0.0, 0.0]
+    } else {
+        [0.0, 1.0, 0.0]
+    };
     let u = unit(sub(helper, scale(z, dot(helper, z))));
     let v = cross(z, u);
     PlaneFrame { origin, u, v }
@@ -340,13 +385,22 @@ pub fn frame_with_z(origin: Vec3, z: Vec3) -> PlaneFrame {
 pub fn frame_from(origin: Vec3, z: Vec3, x: Vec3) -> PlaneFrame {
     let z = unit(z);
     let u = unit(sub(x, scale(z, dot(x, z))));
-    PlaneFrame { origin, u, v: cross(z, u) }
+    PlaneFrame {
+        origin,
+        u,
+        v: cross(z, u),
+    }
 }
 
 /// The point of `b` that a Between-entities connector at `p` goes halfway to: `p` projected onto
 /// a flat face's plane, onto a cylindrical face's axis or a straight edge's line; else `b`'s own
 /// point (a circle's centre, a vertex).
-pub fn between_point(b: &ConnectorOrigin, p: Vec3, features: &[Feature], parts: &[Part]) -> Result<Vec3, String> {
+pub fn between_point(
+    b: &ConnectorOrigin,
+    p: Vec3,
+    features: &[Feature],
+    parts: &[Part],
+) -> Result<Vec3, String> {
     let f = origin_frame(b, features, parts)?;
     let onto_plane = |f: &PlaneFrame| {
         let n = unit(f.normal());
@@ -358,11 +412,17 @@ pub fn between_point(b: &ConnectorOrigin, p: Vec3, features: &[Feature], parts: 
     };
     Ok(match b {
         ConnectorOrigin::Face(face) => {
-            let planar = find_face(parts, face).is_some_and(|(part, i)| part.solid.faces[i].plane.is_some());
-            if planar { onto_plane(&f) } else { onto_line(&f) }
+            let planar =
+                find_face(parts, face).is_some_and(|(part, i)| part.solid.faces[i].plane.is_some());
+            if planar {
+                onto_plane(&f)
+            } else {
+                onto_line(&f)
+            }
         }
         ConnectorOrigin::Edge(e) => {
-            let circle = find_edge(parts, e).is_some_and(|(q, i)| q.solid.edges[i].circle.is_some());
+            let circle =
+                find_edge(parts, e).is_some_and(|(q, i)| q.solid.edges[i].circle.is_some());
             if circle { f.origin } else { onto_line(&f) }
         }
         _ => f.origin,
@@ -371,14 +431,24 @@ pub fn between_point(b: &ConnectorOrigin, p: Vec3, features: &[Feature], parts: 
 
 /// The direction an entity gives for **Realign** (A22.6): a straight edge's or sketch line's
 /// direction, a circle's or cylinder's axis, a flat face's normal; else its connector's Z.
-pub fn origin_direction(o: &ConnectorOrigin, features: &[Feature], parts: &[Part]) -> Result<Vec3, String> {
+pub fn origin_direction(
+    o: &ConnectorOrigin,
+    features: &[Feature],
+    parts: &[Part],
+) -> Result<Vec3, String> {
     if let ConnectorOrigin::SketchCurve { sketch, curve } = o
-        && let Some(sk) = features.iter().find(|f| f.id == *sketch).and_then(|f| f.sketch())
+        && let Some(sk) = features
+            .iter()
+            .find(|f| f.id == *sketch)
+            .and_then(|f| f.sketch())
         && let (Some(pl), Some(c)) = (sk.plane, sk.geometry.curves.get(*curve))
         && let cadrs_sketch::CurveKind::Line { a, b } = c.kind
     {
         let fr = pl.frame();
-        return Ok(sub(fr.to_world(sk.geometry.pos(b)), fr.to_world(sk.geometry.pos(a))));
+        return Ok(sub(
+            fr.to_world(sk.geometry.pos(b)),
+            fr.to_world(sk.geometry.pos(a)),
+        ));
     }
     Ok(origin_frame(o, features, parts)?.normal())
 }
@@ -390,14 +460,25 @@ fn unit(v: Vec3) -> Vec3 {
 
 /// The frame of an implicit connector, from the parts (their display meshes carry the kernel's
 /// exact centroids, axes and circles) and the sketches.
-pub fn origin_frame(o: &ConnectorOrigin, features: &[Feature], parts: &[Part]) -> Result<PlaneFrame, String> {
+pub fn origin_frame(
+    o: &ConnectorOrigin,
+    features: &[Feature],
+    parts: &[Part],
+) -> Result<PlaneFrame, String> {
     let lost = || "The mate connector's entity no longer exists".to_string();
     match o {
-        ConnectorOrigin::Origin => Ok(PlaneFrame { origin: [0.0; 3], u: [1.0, 0.0, 0.0], v: [0.0, 1.0, 0.0] }),
+        ConnectorOrigin::Origin => Ok(PlaneFrame {
+            origin: [0.0; 3],
+            u: [1.0, 0.0, 0.0],
+            v: [0.0, 1.0, 0.0],
+        }),
         ConnectorOrigin::Face(f) => {
             let (part, i) = find_face(parts, f).ok_or_else(lost)?;
             let face = &part.solid.faces[i];
-            let center = face.center.or_else(|| part.solid.face_point(i)).ok_or_else(lost)?;
+            let center = face
+                .center
+                .or_else(|| part.solid.face_point(i))
+                .ok_or_else(lost)?;
             if let Some(pl) = face.plane {
                 // Z out of the material: a cut's faces carry the frame of the tool that made
                 // them (a pocket floor's points down), so it is checked against the mesh. X is
@@ -407,7 +488,15 @@ pub fn origin_frame(o: &ConnectorOrigin, features: &[Feature], parts: &[Part]) -
                     Some(n) if dot(n, pl.normal()) < 0.0 => scale(pl.v, -1.0),
                     _ => pl.v,
                 };
-                return Ok(frame_with_z(center, PlaneFrame { origin: center, u: pl.u, v }.normal()));
+                return Ok(frame_with_z(
+                    center,
+                    PlaneFrame {
+                        origin: center,
+                        u: pl.u,
+                        v,
+                    }
+                    .normal(),
+                ));
             }
             if let Some((o, d)) = face.axis {
                 let at = add(o, scale(d, dot(sub(center, o), d)));
@@ -441,28 +530,52 @@ pub fn origin_frame(o: &ConnectorOrigin, features: &[Feature], parts: &[Part]) -
                 .find_map(|p| p.solid.vertex(&v.vertex))
                 .map(|x| x.point)
                 .unwrap_or(v.point);
-            Ok(PlaneFrame { origin: point, u: [1.0, 0.0, 0.0], v: [0.0, 1.0, 0.0] })
+            Ok(PlaneFrame {
+                origin: point,
+                u: [1.0, 0.0, 0.0],
+                v: [0.0, 1.0, 0.0],
+            })
         }
         ConnectorOrigin::SketchPoint { sketch, point } => {
-            let sk = features.iter().find(|f| f.id == *sketch).and_then(|f| f.sketch()).ok_or_else(lost)?;
+            let sk = features
+                .iter()
+                .find(|f| f.id == *sketch)
+                .and_then(|f| f.sketch())
+                .ok_or_else(lost)?;
             let frame = sk.plane.ok_or_else(lost)?.frame();
             let p = sk.geometry.points.get(*point).ok_or_else(lost)?;
-            Ok(PlaneFrame { origin: frame.to_world(p.pos), u: frame.u, v: frame.v })
+            Ok(PlaneFrame {
+                origin: frame.to_world(p.pos),
+                u: frame.u,
+                v: frame.v,
+            })
         }
         ConnectorOrigin::SketchCurve { sketch, curve } => {
             use cadrs_sketch::CurveKind;
-            let sk = features.iter().find(|f| f.id == *sketch).and_then(|f| f.sketch()).ok_or_else(lost)?;
+            let sk = features
+                .iter()
+                .find(|f| f.id == *sketch)
+                .and_then(|f| f.sketch())
+                .ok_or_else(lost)?;
             let frame = sk.plane.ok_or_else(lost)?.frame();
             let g = &sk.geometry;
             let c = g.curves.get(*curve).ok_or_else(lost)?;
             let at = match c.kind {
                 CurveKind::Line { a, b } => (g.pos(a) + g.pos(b)) * 0.5,
                 CurveKind::Circle { center, .. } | CurveKind::Arc { center, .. } => g.pos(center),
-                CurveKind::Ellipse { center, .. } | CurveKind::EllipseOffset { center, .. } => g.pos(center),
+                CurveKind::Ellipse { center, .. } | CurveKind::EllipseOffset { center, .. } => {
+                    g.pos(center)
+                }
                 #[allow(unreachable_patterns)]
-                _ => return Err("A mate connector needs a line, circle or arc of the sketch".into()),
+                _ => {
+                    return Err("A mate connector needs a line, circle or arc of the sketch".into());
+                }
             };
-            Ok(PlaneFrame { origin: frame.to_world(at), u: frame.u, v: frame.v })
+            Ok(PlaneFrame {
+                origin: frame.to_world(at),
+                u: frame.u,
+                v: frame.v,
+            })
         }
     }
 }
@@ -471,7 +584,11 @@ pub fn origin_frame(o: &ConnectorOrigin, features: &[Feature], parts: &[Part]) -
 /// names, a split face's piece or a re-indexed edge nearest where it was) on any part, then
 /// where it was (the kernel may have made the edge between differently named faces).
 pub fn find_edge<'a>(parts: &'a [Part], e: &EdgeRef) -> Option<(&'a Part, usize)> {
-    let ordered: Vec<&Part> = parts.iter().filter(|p| p.id == e.part).chain(parts.iter().filter(|p| p.id != e.part)).collect();
+    let ordered: Vec<&Part> = parts
+        .iter()
+        .filter(|p| p.id == e.part)
+        .chain(parts.iter().filter(|p| p.id != e.part))
+        .collect();
     for by_name in [true, false] {
         for p in &ordered {
             if let Ok((i, how)) = p.solid.resolve_edge(&e.edge, |x| Some(x.distance(e.seed))) {
@@ -487,7 +604,10 @@ pub fn find_edge<'a>(parts: &'a [Part], e: &EdgeRef) -> Option<(&'a Part, usize)
 
 /// The part and display face a face reference is on now (by name, then where it was).
 pub fn find_face<'a>(parts: &'a [Part], f: &FaceRef) -> Option<(&'a Part, usize)> {
-    let ordered = parts.iter().filter(|p| p.id == f.part).chain(parts.iter().filter(|p| p.id != f.part));
+    let ordered = parts
+        .iter()
+        .filter(|p| p.id == f.part)
+        .chain(parts.iter().filter(|p| p.id != f.part));
     let candidates: Vec<&Part> = ordered.collect();
     for by_name in [true, false] {
         for p in &candidates {
@@ -512,7 +632,10 @@ pub fn frame(
 ) -> Result<PlaneFrame, String> {
     match c {
         ConnectorRef::Feature(f) => connectors.get(f).copied().ok_or_else(|| {
-            let name = features.iter().find(|x| x.id == *f).map_or("The mate connector".to_string(), |x| x.name.clone());
+            let name = features
+                .iter()
+                .find(|x| x.id == *f)
+                .map_or("The mate connector".to_string(), |x| x.name.clone());
             format!("{name} has no frame (it failed or is gone)")
         }),
         ConnectorRef::Implicit(o) => origin_frame(o, features, parts),
@@ -527,16 +650,26 @@ mod tests {
     fn place_moves_along_its_own_axes() {
         let base = frame_with_z([1.0, 2.0, 3.0], [0.0, 0.0, 1.0]);
         assert_eq!(base.u, [1.0, 0.0, 0.0]);
-        let m = MateConnectorFeature { offset: [1.0, 0.0, 2.0], ..MateConnectorFeature::default() };
+        let m = MateConnectorFeature {
+            offset: [1.0, 0.0, 2.0],
+            ..MateConnectorFeature::default()
+        };
         let f = m.place(base);
         assert!(len(sub(f.origin, [2.0, 2.0, 5.0])) < 1e-12);
         // Flipped: Z points down, so +Z offsets go down.
-        let m = MateConnectorFeature { flip_primary: true, offset: [0.0, 0.0, 2.0], ..MateConnectorFeature::default() };
+        let m = MateConnectorFeature {
+            flip_primary: true,
+            offset: [0.0, 0.0, 2.0],
+            ..MateConnectorFeature::default()
+        };
         let f = m.place(base);
         assert!(len(sub(f.normal(), [0.0, 0.0, -1.0])) < 1e-12);
         assert!(len(sub(f.origin, [1.0, 2.0, 1.0])) < 1e-12);
         // A quarter turn: X becomes Y.
-        let m = MateConnectorFeature { rotation: 90.0, ..MateConnectorFeature::default() };
+        let m = MateConnectorFeature {
+            rotation: 90.0,
+            ..MateConnectorFeature::default()
+        };
         let f = m.place(base);
         assert!(len(sub(f.u, [0.0, 1.0, 0.0])) < 1e-12);
         assert!(len(sub(f.normal(), [0.0, 0.0, 1.0])) < 1e-12);

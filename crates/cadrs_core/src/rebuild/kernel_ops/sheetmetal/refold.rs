@@ -58,40 +58,72 @@ pub(in crate::rebuild) fn with_context(state: &State, ctx: SheetMetalContext) ->
 
 /// The active model holding `part` (by index), or why there is none.
 pub(in crate::rebuild) fn active_context(state: &State, part: PartId) -> Result<usize, String> {
-    if let Some(i) = state.sheet_metal.iter().position(|c| c.active && c.parts.iter().any(|(p, _)| *p == part)) {
+    if let Some(i) = state
+        .sheet_metal
+        .iter()
+        .position(|c| c.active && c.parts.iter().any(|(p, _)| *p == part))
+    {
         return Ok(i);
     }
-    Err(if state.sheet_metal.iter().any(|c| c.parts.iter().any(|(p, _)| *p == part)) {
-        "The sheet metal model is finished: its parts are ordinary solids now".to_string()
-    } else {
-        "Select a face or edge of an active sheet metal part".to_string()
-    })
+    Err(
+        if state
+            .sheet_metal
+            .iter()
+            .any(|c| c.parts.iter().any(|(p, _)| *p == part))
+        {
+            "The sheet metal model is finished: its parts are ordinary solids now".to_string()
+        } else {
+            "Select a face or edge of an active sheet metal part".to_string()
+        },
+    )
 }
 
 /// An output with nothing but a state (and an error).
 pub(in crate::rebuild) fn plain_output(state: State, error: Option<String>) -> Output {
-    Output { state: Arc::new(state), error, warning: None, contacts: None, owned: Vec::new(), stage: None, axis: None, arrows: Vec::new(), dots: None, uses: Vec::new() }
+    Output {
+        state: Arc::new(state),
+        error,
+        warning: None,
+        contacts: None,
+        owned: Vec::new(),
+        stage: None,
+        axis: None,
+        arrows: Vec::new(),
+        dots: None,
+        uses: Vec::new(),
+    }
 }
 
 /// A planar wall's frame (definition surface origin, u, v, normal) as a motion from the
 /// world's.
 fn wall_frame(model: &Model, wall: WallId) -> Option<Motion> {
     let w = model.wall(wall)?;
-    let cadrs_sheetmetal::model::Surface::Planar { origin, u, v } = w.surface else { return None };
+    let cadrs_sheetmetal::model::Surface::Planar { origin, u, v } = w.surface else {
+        return None;
+    };
     let (u, v) = (u.normalize(), v.normalize());
     let n = u.cross(&v).normalize();
-    Some(Motion { linear: nalgebra::Matrix3::from_columns(&[u, v, n]), translation: origin.coords })
+    Some(Motion {
+        linear: nalgebra::Matrix3::from_columns(&[u, v, n]),
+        translation: origin.coords,
+    })
 }
 
 /// `a` after `b`.
 fn compose(a: &Motion, b: &Motion) -> Motion {
-    Motion { linear: a.linear * b.linear, translation: a.linear * b.translation + a.translation }
+    Motion {
+        linear: a.linear * b.linear,
+        translation: a.linear * b.translation + a.translation,
+    }
 }
 
 /// A form copy's placement relative to its wall (its world placement `m` on `model`).
 pub(in crate::rebuild) fn local_to_wall(model: &Model, wall: WallId, m: &Motion) -> Option<Motion> {
     let f = wall_frame(model, wall)?;
-    let inv = Motion { linear: f.linear.transpose(), translation: -(f.linear.transpose() * f.translation) };
+    let inv = Motion {
+        linear: f.linear.transpose(),
+        translation: -(f.linear.transpose() * f.translation),
+    };
     Some(compose(&inv, m))
 }
 
@@ -106,7 +138,11 @@ impl Rebuilder {
         ci: usize,
         edit: impl FnOnce(&mut SheetMetalContext) -> Result<Option<String>, String>,
     ) -> Result<Output, String> {
-        let old = state.sheet_metal.get(ci).ok_or("The sheet metal model doesn't exist")?.clone();
+        let old = state
+            .sheet_metal
+            .get(ci)
+            .ok_or("The sheet metal model doesn't exist")?
+            .clone();
         if !old.active {
             return Err("The sheet metal model is finished: it can't be changed".into());
         }
@@ -139,15 +175,23 @@ impl Rebuilder {
         mut ctx: SheetMetalContext,
         consumed: &[PartId],
     ) -> Result<Output, String> {
-        let def: Definition = ctx.def.clone().ok_or("The sheet metal model has no definition")?;
+        let def: Definition = ctx
+            .def
+            .clone()
+            .ok_or("The sheet metal model has no definition")?;
         let model = def.build().map_err(|e| e.message(label))?;
         // A loft's facet joints (planar walls edge to edge, mitred) aren't smooth by design.
         let facet = |e: &cadrs_sheetmetal::model::ModelError| {
             e.kind == cadrs_sheetmetal::model::ModelErrorKind::NotSmooth
-                && model.joint(e.joint).is_some_and(|j| def.slabs.contains(&j.a) && def.slabs.contains(&j.b))
+                && model
+                    .joint(e.joint)
+                    .is_some_and(|j| def.slabs.contains(&j.a) && def.slabs.contains(&j.b))
         };
         if let Some(e) = model.validate().iter().find(|e| !facet(e)) {
-            return Err(format!("Sheet metal model is inconsistent: {}", e.message()));
+            return Err(format!(
+                "Sheet metal model is inconsistent: {}",
+                e.message()
+            ));
         }
         // The forms checked again on the model as it is now (SM20.3): each copy on its wall (or
         // the part of it a later Bend split off and turned), clear of joints and edges.
@@ -161,8 +205,14 @@ impl Rebuilder {
                 (Some(m), PieceKey::Joint(j)) => m.joint(j).is_some(),
                 (None, _) => false,
             };
-            let keys = model.walls.iter().map(|w| PieceKey::Wall(w.id)).chain(model.joints.iter().map(|j| PieceKey::Joint(j.id)));
-            let new: Vec<PieceKey> = keys.filter(|k| !had(*k) && !ctx.owners.iter().any(|(x, _)| x == k)).collect();
+            let keys = model
+                .walls
+                .iter()
+                .map(|w| PieceKey::Wall(w.id))
+                .chain(model.joints.iter().map(|j| PieceKey::Joint(j.id)));
+            let new: Vec<PieceKey> = keys
+                .filter(|k| !had(*k) && !ctx.owners.iter().any(|(x, _)| x == k))
+                .collect();
             ctx.owners.extend(new.into_iter().map(|k| (k, id)));
         }
         ctx.model = model.clone();
@@ -181,12 +231,19 @@ impl Rebuilder {
         };
         // Walls running into each other in 3D: a fused body smaller than its pieces.
         for (_, body, _, sum) in &folded {
-            let v = self.kernel.mass_properties(*body).map(|m| m.volume).unwrap_or(*sum);
+            let v = self
+                .kernel
+                .mass_properties(*body)
+                .map(|m| m.volume)
+                .unwrap_or(*sum);
             if v < sum - (1e-6 * sum + 1e-3) {
                 for (_, b, _, _) in &folded {
                     self.kernel.release(*b);
                 }
-                return Ok(plain_output(with_context(state, ctx), Some("Sheet metal walls intersect".into())));
+                return Ok(plain_output(
+                    with_context(state, ctx),
+                    Some("Sheet metal walls intersect".into()),
+                ));
             }
         }
         let mut groups = self.merge_groups(op, folded, &def.merges)?;
@@ -198,7 +255,10 @@ impl Rebuilder {
         }
         // The parts in place.
         let geoms = state.geoms.clone();
-        let mut next = State { geoms: geoms.clone(), ..(**state).clone() };
+        let mut next = State {
+            geoms: geoms.clone(),
+            ..(**state).clone()
+        };
         next.parts.retain(|p| !consumed.contains(&p.part.id));
         let mut used: Vec<PartId> = Vec::new();
         let mut placed: Vec<Placed> = Vec::new();
@@ -236,9 +296,16 @@ impl Rebuilder {
                 }
             }
             let pieces = kept;
-            let reuse = old_parts.iter().find(|(p, ws)| !used.contains(p) && ws.iter().any(|w| walls.contains(w))).map(|(p, _)| *p);
+            let reuse = old_parts
+                .iter()
+                .find(|(p, ws)| !used.contains(p) && ws.iter().any(|w| walls.contains(w)))
+                .map(|(p, _)| *p);
             for (n, pc) in pieces.into_iter().enumerate() {
-                let taken: Vec<PartId> = placed.iter().map(|(p, _)| *p).chain(used.iter().copied()).collect();
+                let taken: Vec<PartId> = placed
+                    .iter()
+                    .map(|(p, _)| *p)
+                    .chain(used.iter().copied())
+                    .collect();
                 let want = PartId::new(id, k as u32);
                 let pid = match (n, reuse) {
                     (0, Some(p)) => p,
@@ -253,13 +320,19 @@ impl Rebuilder {
             }
         }
         // The model's parts no folded part continues are gone.
-        next.parts.retain(|p| !(old_parts.iter().any(|(q, _)| *q == p.part.id) && !used.contains(&p.part.id)));
+        next.parts.retain(|p| {
+            !(old_parts.iter().any(|(q, _)| *q == p.part.id) && !used.contains(&p.part.id))
+        });
         let mut o = self.finish(id, placed, next, op, geoms, PartKind::Solid)?;
         // The rounds' facets (reliefs, corner breaks, round holes, cuts across bends) draw no
         // edge lines between them.
         {
             let mut st = (*o.state).clone();
-            for p in st.parts.iter_mut().filter(|p| walls_of.iter().any(|(q, _)| *q == p.part.id)) {
+            for p in st
+                .parts
+                .iter_mut()
+                .filter(|p| walls_of.iter().any(|(q, _)| *q == p.part.id))
+            {
                 let mut s = (*p.part.solid).clone();
                 s.mark_facet_seams(FACET_SEAM_ANGLE);
                 p.part.solid = Arc::new(s);
@@ -267,7 +340,10 @@ impl Rebuilder {
             o.state = Arc::new(st);
         }
         if dropped > 0 {
-            let w = format!("{dropped} loose sliver{} left by the fold removed", if dropped == 1 { "" } else { "s" });
+            let w = format!(
+                "{dropped} loose sliver{} left by the fold removed",
+                if dropped == 1 { "" } else { "s" }
+            );
             o.warning = Some(o.warning.map_or(w.clone(), |x| format!("{x}; {w}")));
         }
         ctx.parts = walls_of;
@@ -277,7 +353,12 @@ impl Rebuilder {
 
     /// The folded flat-pattern parts as parts: those a definition's `merges` join become one
     /// body (united), the others stay as they are. Each with its walls, body and names.
-    fn merge_groups(&mut self, op: cadrs_kernel::OpId, folded: Vec<Folded>, merges: &[(WallId, WallId)]) -> Result<Vec<(Vec<WallId>, BodyId, BodyNames)>, String> {
+    fn merge_groups(
+        &mut self,
+        op: cadrs_kernel::OpId,
+        folded: Vec<Folded>,
+        merges: &[(WallId, WallId)],
+    ) -> Result<Vec<(Vec<WallId>, BodyId, BodyNames)>, String> {
         let n = folded.len();
         let mut group: Vec<usize> = (0..n).collect();
         let find = |g: &[usize], mut i: usize| {
@@ -303,20 +384,33 @@ impl Rebuilder {
             if roots[r] != r {
                 continue;
             }
-            let members: Vec<Folded> = (0..n).filter(|i| roots[*i] == r).filter_map(|i| items[i].take()).collect();
+            let members: Vec<Folded> = (0..n)
+                .filter(|i| roots[*i] == r)
+                .filter_map(|i| items[i].take())
+                .collect();
             if members.len() == 1 {
                 let (w, b, nm, _) = members.into_iter().next().expect("one");
                 out.push((w, b, nm));
                 continue;
             }
-            let walls: Vec<WallId> = members.iter().flat_map(|(w, ..)| w.iter().copied()).collect();
+            let walls: Vec<WallId> = members
+                .iter()
+                .flat_map(|(w, ..)| w.iter().copied())
+                .collect();
             let first = members[0].1;
             let rest: Vec<BodyId> = members[1..].iter().map(|(_, b, _, _)| *b).collect();
-            let r = self.kernel.boolean(BoolOp::Union, first, &rest).and_then(|res| {
-                let body = res.bodies[0];
-                let inputs: Vec<(BodyId, &BodyNames)> = members.iter().map(|(_, b, nm, _)| (*b, nm)).collect();
-                Ok((body, naming::name_body(&self.kernel, body, op, &res.history, &inputs)?))
-            });
+            let r = self
+                .kernel
+                .boolean(BoolOp::Union, first, &rest)
+                .and_then(|res| {
+                    let body = res.bodies[0];
+                    let inputs: Vec<(BodyId, &BodyNames)> =
+                        members.iter().map(|(_, b, nm, _)| (*b, nm)).collect();
+                    Ok((
+                        body,
+                        naming::name_body(&self.kernel, body, op, &res.history, &inputs)?,
+                    ))
+                });
             for (_, b, _, _) in &members {
                 self.kernel.release(*b);
             }
@@ -335,10 +429,17 @@ impl Rebuilder {
 
     /// The forms' add and remove parts on the folded bodies (each copy on the body with its
     /// wall), in the order the forms were placed.
-    fn apply_forms(&mut self, groups: &mut [(Vec<WallId>, BodyId, BodyNames)], model: &Model, forms: &[FormStep]) -> Result<(), String> {
+    fn apply_forms(
+        &mut self,
+        groups: &mut [(Vec<WallId>, BodyId, BodyNames)],
+        model: &Model,
+        forms: &[FormStep],
+    ) -> Result<(), String> {
         for step in forms {
             let studio = form_studio(&step.pick, &step.variables, step.thickness)?;
-            let tag = tag_of(&studio).cloned().ok_or_else(|| format!("{} has no Tag (Form) feature", step.pick.name))?;
+            let tag = tag_of(&studio)
+                .cloned()
+                .ok_or_else(|| format!("{} has no Tag (Form) feature", step.pick.name))?;
             let (_, sstate) = self.sub_build(&studio)?;
             let op = step.feature.0;
             // By index: each group's body is replaced while `self` is borrowed for the kernel.
@@ -363,7 +464,9 @@ impl Rebuilder {
                 let mut adds: Vec<(BodyId, BodyNames)> = Vec::new();
                 let mut removes: Vec<(BodyId, BodyNames)> = Vec::new();
                 for (ci, m) in &copies {
-                    for (list, parts, off) in [(&mut adds, &tag.add, 0), (&mut removes, &tag.remove, 4)] {
+                    for (list, parts, off) in
+                        [(&mut adds, &tag.add, 0), (&mut removes, &tag.remove, 4)]
+                    {
                         for (pi, p) in parts.iter().enumerate() {
                             let Some(sp) = sstate.part(*p) else { continue };
                             let Some(sbody) = sp.body else { continue };
@@ -376,7 +479,13 @@ impl Rebuilder {
                             };
                             let b = r.bodies[0];
                             made.push(b);
-                            let names = match self.instance_names(b, &r.history, &sp.names, op, (ci * 8 + pi + off) as u32) {
+                            let names = match self.instance_names(
+                                b,
+                                &r.history,
+                                &sp.names,
+                                op,
+                                (ci * 8 + pi + off) as u32,
+                            ) {
                                 Ok(n) => n,
                                 Err(e) => {
                                     release(self, &made);
@@ -393,13 +502,19 @@ impl Rebuilder {
                     }
                     let (cur, cur_names) = (groups[gi].1, groups[gi].2.clone());
                     let tb: Vec<BodyId> = tools.iter().map(|(b, _)| *b).collect();
-                    let r = self.kernel.boolean(kind, cur, &tb).map_err(|e| format!("{} failed: {e}", step.name)).and_then(|r| {
-                        let nb = r.bodies[0];
-                        let mut inputs: Vec<(BodyId, &BodyNames)> = vec![(cur, &cur_names)];
-                        inputs.extend(tools.iter().map(|(b, n)| (*b, n)));
-                        let names = naming::name_body(&self.kernel, nb, op, &r.history, &inputs).map_err(|e| e.to_string())?;
-                        Ok((nb, names))
-                    });
+                    let r = self
+                        .kernel
+                        .boolean(kind, cur, &tb)
+                        .map_err(|e| format!("{} failed: {e}", step.name))
+                        .and_then(|r| {
+                            let nb = r.bodies[0];
+                            let mut inputs: Vec<(BodyId, &BodyNames)> = vec![(cur, &cur_names)];
+                            inputs.extend(tools.iter().map(|(b, n)| (*b, n)));
+                            let names =
+                                naming::name_body(&self.kernel, nb, op, &r.history, &inputs)
+                                    .map_err(|e| e.to_string())?;
+                            Ok((nb, names))
+                        });
                     match r {
                         Ok((nb, names)) => {
                             self.kernel.release(cur);
@@ -425,18 +540,32 @@ fn footprint_of(c: &FormCopy) -> Polygon {
     if c.footprint.len() >= 3 {
         return Polygon::new(c.footprint.clone());
     }
-    let pts: Vec<P2> = c.lines.iter().flat_map(|l| l.points.iter().copied()).collect();
+    let pts: Vec<P2> = c
+        .lines
+        .iter()
+        .flat_map(|l| l.points.iter().copied())
+        .collect();
     hull(&pts)
 }
 
 /// `c` moved by `d` in its wall's 2D (onto a wall whose 2D is its wall's shifted by `-d`).
 fn shift_copy(c: &FormCopy, wall: WallId, d: nalgebra::Vector2<f64>) -> FormCopy {
-    let sh = Motion { linear: nalgebra::Matrix3::identity(), translation: nalgebra::Vector3::new(-d.x, -d.y, 0.0) };
+    let sh = Motion {
+        linear: nalgebra::Matrix3::identity(),
+        translation: nalgebra::Vector3::new(-d.x, -d.y, 0.0),
+    };
     FormCopy {
         wall,
         local: compose(&sh, &c.local),
         center: c.center - d,
-        lines: c.lines.iter().map(|l| FormLine { points: l.points.iter().map(|p| p - d).collect(), closed: l.closed }).collect(),
+        lines: c
+            .lines
+            .iter()
+            .map(|l| FormLine {
+                points: l.points.iter().map(|p| p - d).collect(),
+                closed: l.closed,
+            })
+            .collect(),
         up: c.up,
         footprint: c.footprint.iter().map(|p| p - d).collect(),
     }
@@ -450,16 +579,25 @@ fn split_off(model: &Model, c: &FormCopy) -> Option<FormCopy> {
     let fp = footprint_of(c);
     let mid = |p: &Polygon| {
         let n = p.outer.len().max(1) as f64;
-        P2::from(p.outer.iter().fold(nalgebra::Vector2::zeros(), |a, q| a + q.coords) / n)
+        P2::from(
+            p.outer
+                .iter()
+                .fold(nalgebra::Vector2::zeros(), |a, q| a + q.coords)
+                / n,
+        )
     };
     let held = mid(&w.outline);
     for j in model.joints.iter().filter(|j| j.a == c.wall) {
-        let JointKind::Bend(b) = &j.kind else { continue };
+        let JointKind::Bend(b) = &j.kind else {
+            continue;
+        };
         // A fold's bend: the same line on both walls.
         if (b.on_a.a - b.on_b.a).norm() > 1e-9 || (b.on_a.b - b.on_b.b).norm() > 1e-9 {
             continue;
         }
-        let Some(ba) = b.allowance(&model.params) else { continue };
+        let Some(ba) = b.allowance(&model.params) else {
+            continue;
+        };
         let dir = b.on_a.dir();
         let mut nn = nalgebra::Vector2::new(-dir.y, dir.x);
         if (held - b.on_a.a).dot(&nn) > 0.0 {
@@ -471,7 +609,10 @@ fn split_off(model: &Model, c: &FormCopy) -> Option<FormCopy> {
         }
         let moved = shift_copy(c, j.b, nn * ba);
         let nw = model.wall(j.b)?;
-        let inside = poly::intersection(&footprint_of(&moved), &nw.outline).iter().map(Polygon::area).sum::<f64>();
+        let inside = poly::intersection(&footprint_of(&moved), &nw.outline)
+            .iter()
+            .map(Polygon::area)
+            .sum::<f64>();
         if inside > 0.5 * fp.area() {
             return Some(split_off(model, &moved).unwrap_or(moved));
         }
@@ -489,15 +630,24 @@ fn resolve_forms(model: &Model, forms: &[FormStep]) -> Result<Vec<FormStep>, Str
         let mut copies = Vec::with_capacity(step.copies.len());
         for c in &step.copies {
             let Some(w) = model.wall(c.wall) else {
-                return Err(format!("{} lost its wall: the wall a {} was placed on is gone", step.name, step.pick.name));
+                return Err(format!(
+                    "{} lost its wall: the wall a {} was placed on is gone",
+                    step.name, step.pick.name
+                ));
             };
-            let size = w.outline.bounds().map(|(lo, hi)| (hi - lo).norm()).unwrap_or(1.0);
+            let size = w
+                .outline
+                .bounds()
+                .map(|(lo, hi)| (hi - lo).norm())
+                .unwrap_or(1.0);
             let clearance = 1e-6 * size;
             let c = match check_footprint(model, c.wall, &footprint_of(c), clearance) {
                 Ok(()) => c.clone(),
                 Err(FormProblem::OffWall) => match split_off(model, c) {
                     Some(m) => m,
-                    None => return Err(format!("{}: {}", step.name, FormProblem::OffWall.message())),
+                    None => {
+                        return Err(format!("{}: {}", step.name, FormProblem::OffWall.message()));
+                    }
                 },
                 Err(e) => return Err(format!("{}: {}", step.name, e.message())),
             };
@@ -506,7 +656,10 @@ fn resolve_forms(model: &Model, forms: &[FormStep]) -> Result<Vec<FormStep>, Str
             }
             copies.push(c);
         }
-        out.push(FormStep { copies, ..step.clone() });
+        out.push(FormStep {
+            copies,
+            ..step.clone()
+        });
     }
     Ok(out)
 }
@@ -515,9 +668,22 @@ fn resolve_forms(model: &Model, forms: &[FormStep]) -> Result<Vec<FormStep>, Str
 fn form_flats(flat: &mut cadrs_sheetmetal::FlatPattern, model: &Model, forms: &[FormStep]) {
     for step in forms {
         for c in &step.copies {
-            let Some(pi) = flat.parts.iter().position(|p| p.walls.contains(&c.wall)) else { continue };
-            let Some((center, lines)) = on_flat(&flat.parts[pi], model, c.wall, c.center, &c.lines) else { continue };
-            flat.parts[pi].forms.push(FlatForm { source: source_of(step.feature), name: step.name.clone(), form: step.pick.name.clone(), wall: c.wall, center, lines, up: c.up });
+            let Some(pi) = flat.parts.iter().position(|p| p.walls.contains(&c.wall)) else {
+                continue;
+            };
+            let Some((center, lines)) = on_flat(&flat.parts[pi], model, c.wall, c.center, &c.lines)
+            else {
+                continue;
+            };
+            flat.parts[pi].forms.push(FlatForm {
+                source: source_of(step.feature),
+                name: step.name.clone(),
+                form: step.pick.name.clone(),
+                wall: c.wall,
+                center,
+                lines,
+                up: c.up,
+            });
         }
     }
 }

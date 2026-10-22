@@ -54,7 +54,10 @@ impl Plugin for InstanceListPlugin {
         .init_resource::<InstanceConnectorHover>()
         .init_resource::<PanelWidths>()
         .add_observer(on_panel_resized)
-        .add_systems(Update, (sync_connector_hover, list_width).run_if(in_state(AppState::Document)))
+        .add_systems(
+            Update,
+            (sync_connector_hover, list_width).run_if(in_state(AppState::Document)),
+        )
         .add_observer(on_row_menu)
         .add_observer(on_replicate_menu)
         .add_observer(on_eye_click)
@@ -67,7 +70,10 @@ impl Plugin for InstanceListPlugin {
 /// an anchor from leaking into another tree. Only currently displayed pickable rows range.
 #[derive(Default)]
 pub(crate) struct RangeAnchor {
-    anchor: Option<((cadrs_core::DocumentId, cadrs_core::ElementId, Entity), Pick)>,
+    anchor: Option<(
+        (cadrs_core::DocumentId, cadrs_core::ElementId, Entity),
+        Pick,
+    )>,
 }
 
 impl RangeAnchor {
@@ -82,12 +88,20 @@ impl RangeAnchor {
     ) -> crate::viewport::RowSelect {
         use crate::viewport::RowSelect;
         if shift {
-            let from = self.anchor.filter(|(s, p)| *s == scope && selection.contains(*p))
+            let from = self
+                .anchor
+                .filter(|(s, p)| *s == scope && selection.contains(*p))
                 .and_then(|(_, p)| order.iter().position(|r| *r == p));
             if let (Some(a), Some(b)) = (from, order.iter().position(|r| *r == clicked)) {
-                let mut range = if additive { selection.0.clone() } else { Vec::new() };
+                let mut range = if additive {
+                    selection.0.clone()
+                } else {
+                    Vec::new()
+                };
                 for p in &order[a.min(b)..=a.max(b)] {
-                    if !range.contains(p) { range.push(*p); }
+                    if !range.contains(p) {
+                        range.push(*p);
+                    }
                 }
                 return RowSelect::Range(range);
             }
@@ -95,13 +109,17 @@ impl RangeAnchor {
         self.anchor = Some((scope, clicked));
         // A click without Shift toggles the row, as in Onshape. A missing anchor starts a fresh
         // selection, never toggles off the Shift endpoint.
-        if !shift { RowSelect::Toggle }
-        else if additive {
+        if !shift {
+            RowSelect::Toggle
+        } else if additive {
             let mut range = selection.0.clone();
-            if !range.contains(&clicked) { range.push(clicked); }
+            if !range.contains(&clicked) {
+                range.push(clicked);
+            }
             RowSelect::Range(range)
+        } else {
+            RowSelect::Range(vec![clicked])
         }
-        else { RowSelect::Range(vec![clicked]) }
     }
 }
 
@@ -207,10 +225,7 @@ enum RowSpec {
         sub_child: bool,
     },
     /// An open subassembly's Items or Mate Features group (read-only).
-    SubGroup {
-        sub: InstanceId,
-        label: String,
-    },
+    SubGroup { sub: InstanceId, label: String },
     Folder {
         id: FeatureId,
         name: String,
@@ -228,7 +243,14 @@ type RowsKey = (Vec<RowSpec>, usize);
 const HIDDEN_FG: Color = Color::srgb(0.65, 0.65, 0.65);
 
 /// The rows of the list, in order (with the filter applied).
-fn rows(doc: &ActiveDocument, cache: &PartCache, dofs: &super::mates_list::InstanceDofs, ui: &ListUi, editing: Option<&(InstanceId, Vec<cadrs_core::PartId>)>, status: &crate::linked::LinkStatus) -> Option<Vec<RowSpec>> {
+fn rows(
+    doc: &ActiveDocument,
+    cache: &PartCache,
+    dofs: &super::mates_list::InstanceDofs,
+    ui: &ListUi,
+    editing: Option<&(InstanceId, Vec<cadrs_core::PartId>)>,
+    status: &crate::linked::LinkStatus,
+) -> Option<Vec<RowSpec>> {
     let model = doc.active_element()?.assembly_model()?;
     let occ = cadrs_core::assembly::structure::occurrences(&doc.doc, model);
     let name_of = |i: &cadrs_core::assembly::Instance| -> String {
@@ -243,7 +265,9 @@ fn rows(doc: &ActiveDocument, cache: &PartCache, dofs: &super::mates_list::Insta
                 // Suppressed, or not in the view yet (still rebuilding): the source's name as the
                 // document has it (waiting for the rebuild here froze the app; the rows are made
                 // again when the parts come).
-                Some(i.name(&cadrs_core::assembly::source_part_name(&doc.doc, &i.source, None)))
+                Some(i.name(&cadrs_core::assembly::source_part_name(
+                    &doc.doc, &i.source, None,
+                )))
             })
             .unwrap_or_else(|| format!("Missing part <{}>", i.index))
     };
@@ -253,7 +277,11 @@ fn rows(doc: &ActiveDocument, cache: &PartCache, dofs: &super::mates_list::Insta
         }
         if i.source.is_composite() {
             // A rigid subassembly moves as its first part does.
-            return occ.iter().find(|o| o.top == i.id).and_then(|o| dofs.dofs.get(&o.id).copied()).unwrap_or(if i.flexible { 0 } else { 6 });
+            return occ
+                .iter()
+                .find(|o| o.top == i.id)
+                .and_then(|o| dofs.dofs.get(&o.id).copied())
+                .unwrap_or(if i.flexible { 0 } else { 6 });
         }
         dofs.dofs.get(&i.id).copied().unwrap_or(6)
     };
@@ -261,7 +289,11 @@ fn rows(doc: &ActiveDocument, cache: &PartCache, dofs: &super::mates_list::Insta
     let folder_name = |f: Option<&cadrs_core::document::FeatureFolder>| f.map(|f| f.name.clone());
     let matches = |i: &cadrs_core::assembly::Instance, name: &str| -> bool {
         let Some(f) = filter else { return true };
-        let folder = folder_name(cadrs_core::assembly::folders::folder_of(model, FolderList::Instances, item(i.id)));
+        let folder = folder_name(cadrs_core::assembly::folders::folder_of(
+            model,
+            FolderList::Instances,
+            item(i.id),
+        ));
         let facts = cadrs_core::feature_list::FeatureFacts {
             name,
             type_label: if i.source.is_assembly() {
@@ -278,12 +310,21 @@ fn rows(doc: &ActiveDocument, cache: &PartCache, dofs: &super::mates_list::Insta
     };
     // The Part Studio mate connectors a part instance carries: (feature, name).
     let connectors_of = |i: &cadrs_core::assembly::Instance| -> Vec<(FeatureId, String)> {
-        let Some(p) = cache.part(i.id.part_id()) else { return Vec::new() };
+        let Some(p) = cache.part(i.id.part_id()) else {
+            return Vec::new();
+        };
         let el = doc.doc.element(i.source.element());
         p.solid
             .connectors
             .iter()
-            .map(|c| (c.feature, el.and_then(|e| e.feature(c.feature)).map(|f| f.name.clone()).unwrap_or_else(|| "Mate connector".into())))
+            .map(|c| {
+                (
+                    c.feature,
+                    el.and_then(|e| e.feature(c.feature))
+                        .map(|f| f.name.clone())
+                        .unwrap_or_else(|| "Mate connector".into()),
+                )
+            })
             .collect()
     };
     let mut out = Vec::new();
@@ -296,18 +337,35 @@ fn rows(doc: &ActiveDocument, cache: &PartCache, dofs: &super::mates_list::Insta
         fixed: i.fixed,
         dof: dof_of(i),
         suppressed: i.suppressed,
-        sub: i.source.is_assembly().then(|| (ui.expanded.contains(&i.id), i.flexible)),
+        sub: i
+            .source
+            .is_assembly()
+            .then(|| (ui.expanded.contains(&i.id), i.flexible)),
         folder,
         standard: cadrs_core::assembly::standard::standard_of(&doc.doc, &i.source).is_some(),
         studio: i.source.is_studio().then(|| ui.expanded.contains(&i.id)),
-        connectors: (!i.source.is_composite() && !connectors_of(i).is_empty()).then(|| ui.expanded.contains(&i.id)),
+        connectors: (!i.source.is_composite() && !connectors_of(i).is_empty())
+            .then(|| ui.expanded.contains(&i.id)),
         replicated: i.replicate.is_some_and(|r| model.mate(r).is_some()),
-        following: i
-            .follow
-            .filter(|_| !i.flexible)
-            .and_then(|f| doc.doc.element(i.source.element())?.assembly_model()?.named_position(f).map(|p| p.name.clone())),
-        linked: i.link.map(|r| crate::linked::instance_badge(&doc.doc, status, &r, doc.active_element().map(|e| e.id).unwrap_or_default(), i)),
-        composite: i.source.part().is_some_and(|p| cadrs_core::transform::is_composite_part(&doc.doc, i.source.element(), p)),
+        following: i.follow.filter(|_| !i.flexible).and_then(|f| {
+            doc.doc
+                .element(i.source.element())?
+                .assembly_model()?
+                .named_position(f)
+                .map(|p| p.name.clone())
+        }),
+        linked: i.link.map(|r| {
+            crate::linked::instance_badge(
+                &doc.doc,
+                status,
+                &r,
+                doc.active_element().map(|e| e.id).unwrap_or_default(),
+                i,
+            )
+        }),
+        composite: i.source.part().is_some_and(|p| {
+            cadrs_core::transform::is_composite_part(&doc.doc, i.source.element(), p)
+        }),
     };
     let push_children = |out: &mut Vec<RowSpec>, i: &cadrs_core::assembly::Instance| {
         if !ui.expanded.contains(&i.id) || filter.is_some() {
@@ -318,44 +376,99 @@ fn rows(doc: &ActiveDocument, cache: &PartCache, dofs: &super::mates_list::Insta
             for part in &i.parts {
                 // The source part's name (also while the Edit dialog hides it from the view).
                 let el = i.source.element();
-                let name = cadrs_core::assembly::source_part_name(&doc.doc, &cadrs_core::assembly::InstanceSource::Part { element: el, part: *part }, None);
-                let out_now = editing.is_some_and(|(id, ticked)| *id == i.id && !ticked.contains(part));
-                out.push(RowSpec::StudioPart { top: i.id, part: *part, name, out: out_now });
+                let name = cadrs_core::assembly::source_part_name(
+                    &doc.doc,
+                    &cadrs_core::assembly::InstanceSource::Part {
+                        element: el,
+                        part: *part,
+                    },
+                    None,
+                );
+                let out_now =
+                    editing.is_some_and(|(id, ticked)| *id == i.id && !ticked.contains(part));
+                out.push(RowSpec::StudioPart {
+                    top: i.id,
+                    part: *part,
+                    name,
+                    out: out_now,
+                });
             }
             return;
         }
         // P3B.7 judge: a part's Part Studio mate connectors.
         if !i.source.is_assembly() {
             for (feature, name) in connectors_of(i) {
-                out.push(RowSpec::Connector { instance: i.id, feature, name });
+                out.push(RowSpec::Connector {
+                    instance: i.id,
+                    feature,
+                    name,
+                });
             }
             return;
         }
-        let Some(child) = doc.doc.element(i.source.element()).and_then(|e| e.assembly_model()) else { return };
+        let Some(child) = doc
+            .doc
+            .element(i.source.element())
+            .and_then(|e| e.assembly_model())
+        else {
+            return;
+        };
         for c in &child.instances {
             let name = if c.source.is_assembly() {
-                c.name(&cadrs_core::assembly::source_part_name(&doc.doc, &c.source, None))
+                c.name(&cadrs_core::assembly::source_part_name(
+                    &doc.doc, &c.source, None,
+                ))
             } else {
-                cache.part_name(super::occurrence_part(derive(i.id, c.id))).map(str::to_string).unwrap_or_else(|| format!("Part <{}>", c.index))
+                cache
+                    .part_name(super::occurrence_part(derive(i.id, c.id)))
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("Part <{}>", c.index))
             };
-            out.push(RowSpec::Child { sub: i.id, id: c.id, name, fixed: c.fixed, sub_child: c.source.is_assembly() });
+            out.push(RowSpec::Child {
+                sub: i.id,
+                id: c.id,
+                name,
+                fixed: c.fixed,
+                sub_child: c.source.is_assembly(),
+            });
         }
         // Its own Items and Mate Features, closed and read-only (`ex3-step11.png`).
-        out.push(RowSpec::SubGroup { sub: i.id, label: format!("Items ({})", child.items.len()) });
-        out.push(RowSpec::SubGroup { sub: i.id, label: format!("Mate Features ({})", child.mates.len()) });
+        out.push(RowSpec::SubGroup {
+            sub: i.id,
+            label: format!("Items ({})", child.items.len()),
+        });
+        out.push(RowSpec::SubGroup {
+            sub: i.id,
+            label: format!("Mate Features ({})", child.mates.len()),
+        });
     };
     for inst in &model.instances {
-        let folder = cadrs_core::assembly::folders::folder_of(model, FolderList::Instances, item(inst.id)).cloned();
+        let folder =
+            cadrs_core::assembly::folders::folder_of(model, FolderList::Instances, item(inst.id))
+                .cloned();
         match folder {
             Some(f) => {
                 if folders_done.contains(&f.id) {
                     continue;
                 }
                 folders_done.push(f.id);
-                let members: Vec<&cadrs_core::assembly::Instance> = f.features.iter().filter_map(|x| model.instance(InstanceId(x.0))).collect();
+                let members: Vec<&cadrs_core::assembly::Instance> = f
+                    .features
+                    .iter()
+                    .filter_map(|x| model.instance(InstanceId(x.0)))
+                    .collect();
                 // A folder whose name matches shows all it holds.
-                let folder_hit = filter.is_some_and(|q| q.matches(&cadrs_core::feature_list::FeatureFacts { name: &f.name, type_label: "Folder", ..Default::default() }));
-                let shown: Vec<&&cadrs_core::assembly::Instance> = members.iter().filter(|m| folder_hit || matches(m, &name_of(m))).collect();
+                let folder_hit = filter.is_some_and(|q| {
+                    q.matches(&cadrs_core::feature_list::FeatureFacts {
+                        name: &f.name,
+                        type_label: "Folder",
+                        ..Default::default()
+                    })
+                });
+                let shown: Vec<&&cadrs_core::assembly::Instance> = members
+                    .iter()
+                    .filter(|m| folder_hit || matches(m, &name_of(m)))
+                    .collect();
                 if filter.is_some() && shown.is_empty() {
                     continue;
                 }
@@ -381,15 +494,26 @@ fn rows(doc: &ActiveDocument, cache: &PartCache, dofs: &super::mates_list::Insta
                         continue;
                     }
                     replicates_done.push(r);
-                    let copies: Vec<&cadrs_core::assembly::Instance> = model.instances.iter().filter(|i| i.replicate == Some(r)).collect();
-                    let shown: Vec<&&cadrs_core::assembly::Instance> = copies.iter().filter(|c| matches(c, &name_of(c))).collect();
+                    let copies: Vec<&cadrs_core::assembly::Instance> = model
+                        .instances
+                        .iter()
+                        .filter(|i| i.replicate == Some(r))
+                        .collect();
+                    let shown: Vec<&&cadrs_core::assembly::Instance> =
+                        copies.iter().filter(|c| matches(c, &name_of(c))).collect();
                     let name = model.mate(r).map(|f| f.name.clone()).unwrap_or_default();
                     if filter.is_some() && shown.is_empty() {
                         continue;
                     }
                     let key = InstanceId(r.0);
                     let open = ui.expanded.contains(&key) || filter.is_some();
-                    out.push(RowSpec::Replicate { id: r, name, count: copies.len(), open, folder: None });
+                    out.push(RowSpec::Replicate {
+                        id: r,
+                        name,
+                        count: copies.len(),
+                        open,
+                        folder: None,
+                    });
                     if open {
                         for c in shown {
                             out.push(spec(c, None));
@@ -407,7 +531,14 @@ fn rows(doc: &ActiveDocument, cache: &PartCache, dofs: &super::mates_list::Insta
     // Empty folders, last.
     if filter.is_none() {
         for f in model.folders.iter().filter(|f| f.features.is_empty()) {
-            out.push(RowSpec::Folder { id: f.id, name: f.name.clone(), count: 0, open: f.open, hidden: false, instances: Vec::new() });
+            out.push(RowSpec::Folder {
+                id: f.id,
+                name: f.name.clone(),
+                count: 0,
+                open: f.open,
+                hidden: false,
+                instances: Vec::new(),
+            });
         }
     }
     Some(out)
@@ -435,7 +566,16 @@ fn rebuild_instance_rows(
     let Some((container, added)) = q_rows.iter().next().map(|(e, r)| (e, r.is_added())) else {
         return;
     };
-    let Some(specs) = rows(&doc, &cache, &dofs, &ui, asm_parts.studio_preview.as_ref(), &status) else { return };
+    let Some(specs) = rows(
+        &doc,
+        &cache,
+        &dofs,
+        &ui,
+        asm_parts.studio_preview.as_ref(),
+        &status,
+    ) else {
+        return;
+    };
     let n = model.instances.len();
     let count = format!("Instances ({n})");
     for mut t in &mut q_count {
@@ -444,7 +584,11 @@ fn rebuild_instance_rows(
         }
     }
     for mut node in &mut q_hint {
-        let want = if n == 0 && model.folders.is_empty() { Display::Flex } else { Display::None };
+        let want = if n == 0 && model.folders.is_empty() {
+            Display::Flex
+        } else {
+            Display::None
+        };
         if node.display != want {
             node.display = want;
         }
@@ -459,10 +603,33 @@ fn rebuild_instance_rows(
     commands.entity(container).with_children(|c| {
         for r in &key.0 {
             match r {
-                RowSpec::Folder { id, name, count, open, hidden, instances } => {
+                RowSpec::Folder {
+                    id,
+                    name,
+                    count,
+                    open,
+                    hidden,
+                    instances,
+                } => {
                     spawn_folder_row(c, &t, *id, name, *count, *open, *hidden, instances);
                 }
-                RowSpec::Instance { id, name, hidden, fixed, dof, suppressed, sub, folder, standard, studio, connectors, replicated, following, linked, composite } => {
+                RowSpec::Instance {
+                    id,
+                    name,
+                    hidden,
+                    fixed,
+                    dof,
+                    suppressed,
+                    sub,
+                    folder,
+                    standard,
+                    studio,
+                    connectors,
+                    replicated,
+                    following,
+                    linked,
+                    composite,
+                } => {
                     k += 1;
                     let row = InstanceRowSpec {
                         k,
@@ -484,29 +651,57 @@ fn rebuild_instance_rows(
                     };
                     spawn_instance_row(c, &t, &row);
                 }
-                RowSpec::StudioPart { top, part, name, out } => {
+                RowSpec::StudioPart {
+                    top,
+                    part,
+                    name,
+                    out,
+                } => {
                     spawn_studio_part_row(c, &t, *top, *part, name, *out);
                 }
-                RowSpec::Connector { instance, feature, name } => {
+                RowSpec::Connector {
+                    instance,
+                    feature,
+                    name,
+                } => {
                     spawn_connector_row(c, &t, *instance, *feature, name);
                 }
-                RowSpec::Replicate { id, name, count, open, folder } => {
+                RowSpec::Replicate {
+                    id,
+                    name,
+                    count,
+                    open,
+                    folder,
+                } => {
                     spawn_replicate_row(c, &t, *id, name, *count, *open, *folder);
                 }
-                RowSpec::Child { sub, id, name, fixed, sub_child } => {
+                RowSpec::Child {
+                    sub,
+                    id,
+                    name,
+                    fixed,
+                    sub_child,
+                } => {
                     spawn_child_row(c, &t, *sub, *id, name, *fixed, *sub_child);
                 }
                 RowSpec::SubGroup { sub, label } => {
                     let slug = super::insert::slug(label.split(" (").next().unwrap_or(label));
                     c.spawn((
-                        TreeItem::new(format!("instance-sub-{slug}-{}", sub.0.as_u128() as u32), label.clone()).disclosure(Some(false)).left(20.0).build(&t),
+                        TreeItem::new(
+                            format!("instance-sub-{slug}-{}", sub.0.as_u128() as u32),
+                            label.clone(),
+                        )
+                        .disclosure(Some(false))
+                        .left(20.0)
+                        .build(&t),
                         Tooltip::new("Open the subassembly's tab to edit it"),
                     ))
                     .insert(row_visuals(&t, t.foreground))
                     .entry::<Node>()
                     .and_modify(|mut n| {
                         n.height = Val::Px(22.0);
-                        n.margin = UiRect::new(Val::Px(2.0), Val::Px(7.0), Val::Px(1.0), Val::Px(1.0));
+                        n.margin =
+                            UiRect::new(Val::Px(2.0), Val::Px(7.0), Val::Px(1.0), Val::Px(1.0));
                     });
                 }
             }
@@ -517,7 +712,8 @@ fn rebuild_instance_rows(
 
 fn row_visuals(t: &Theme, fg: Color) -> Visuals {
     Visuals {
-        background: StateColors::new(Color::NONE, t.list_hover, t.list_active, Color::NONE).with_selected(t.list_selected),
+        background: StateColors::new(Color::NONE, t.list_hover, t.list_active, Color::NONE)
+            .with_selected(t.list_selected),
         border: StateColors::all(Color::NONE),
         foreground: StateColors::all(fg),
         focus_ring: t.focus_ring,
@@ -527,7 +723,11 @@ fn row_visuals(t: &Theme, fg: Color) -> Visuals {
 fn eye_bundle(name: String, row: Entity, instances: Vec<InstanceId>, hidden: bool) -> impl Bundle {
     (
         Name::new(name),
-        RowEye { row, instances, hidden },
+        RowEye {
+            row,
+            instances,
+            hidden,
+        },
         Node {
             width: Val::Px(20.0),
             height: Val::Px(20.0),
@@ -541,12 +741,28 @@ fn eye_bundle(name: String, row: Entity, instances: Vec<InstanceId>, hidden: boo
         },
         Visibility::Hidden,
         Tooltip::new(if hidden { "Show" } else { "Hide" }),
-        children![(cadrs_ui::icon::icon(if hidden { "hidden" } else { "visible" }, 16.0, Color::srgb_u8(0x55, 0x55, 0x55)), Pickable::IGNORE,)],
+        children![(
+            cadrs_ui::icon::icon(
+                if hidden { "hidden" } else { "visible" },
+                16.0,
+                Color::srgb_u8(0x55, 0x55, 0x55)
+            ),
+            Pickable::IGNORE,
+        )],
     )
 }
 
 #[allow(clippy::too_many_arguments)]
-fn spawn_folder_row(c: &mut ChildSpawnerCommands, t: &Theme, id: FeatureId, name: &str, count: usize, open: bool, hidden: bool, instances: &[InstanceId]) {
+fn spawn_folder_row(
+    c: &mut ChildSpawnerCommands,
+    t: &Theme,
+    id: FeatureId,
+    name: &str,
+    count: usize,
+    open: bool,
+    hidden: bool,
+    instances: &[InstanceId],
+) {
     let slug = super::insert::slug(name);
     let row_name = format!("instance-folder-{slug}");
     let fg = if hidden { HIDDEN_FG } else { t.foreground };
@@ -554,21 +770,35 @@ fn spawn_folder_row(c: &mut ChildSpawnerCommands, t: &Theme, id: FeatureId, name
         TreeItem::new(row_name.clone(), format!("{name} ({count})"))
             .disclosure(Some(open))
             .icon("folder", 16.0)
-            .icon_color(if hidden { HIDDEN_FG } else { t.muted_foreground })
+            .icon_color(if hidden {
+                HIDDEN_FG
+            } else {
+                t.muted_foreground
+            })
             .left(4.0)
             .editable()
             .build(t),
-        AsmFolderRow { list: FolderList::Instances, id },
+        AsmFolderRow {
+            list: FolderList::Instances,
+            id,
+        },
         ContextMenuTarget,
         cadrs_ui::DoubleClickable,
     ));
-    row.insert(row_visuals(t, fg)).entry::<Node>().and_modify(|mut n| {
-        n.height = Val::Px(22.0);
-        n.margin = UiRect::new(Val::Px(2.0), Val::Px(7.0), Val::Px(1.0), Val::Px(1.0));
-    });
+    row.insert(row_visuals(t, fg))
+        .entry::<Node>()
+        .and_modify(|mut n| {
+            n.height = Val::Px(22.0);
+            n.margin = UiRect::new(Val::Px(2.0), Val::Px(7.0), Val::Px(1.0), Val::Px(1.0));
+        });
     let row_e = row.id();
     row.with_children(|r| {
-        r.spawn(eye_bundle(format!("{row_name}-eye"), row_e, instances.to_vec(), hidden));
+        r.spawn(eye_bundle(
+            format!("{row_name}-eye"),
+            row_e,
+            instances.to_vec(),
+            hidden,
+        ));
     });
 }
 
@@ -593,15 +823,40 @@ struct InstanceRowSpec<'a> {
 }
 
 fn spawn_instance_row(c: &mut ChildSpawnerCommands, t: &Theme, spec: &InstanceRowSpec) {
-    let InstanceRowSpec { k, id, name, hidden, fixed, dof, suppressed, sub, folder, standard, studio, connectors, replicated, following, linked, composite } = *spec;
-    let fg = if hidden || suppressed { HIDDEN_FG } else { t.foreground };
+    let InstanceRowSpec {
+        k,
+        id,
+        name,
+        hidden,
+        fixed,
+        dof,
+        suppressed,
+        sub,
+        folder,
+        standard,
+        studio,
+        connectors,
+        replicated,
+        following,
+        linked,
+        composite,
+    } = *spec;
+    let fg = if hidden || suppressed {
+        HIDDEN_FG
+    } else {
+        t.foreground
+    };
     let row_name = format!("instance-row-{k}");
     // The part name shrinks ("Structural R…"), the number stays (P3B.1 judge).
     let (part, number) = match name.rsplit_once(" <") {
         Some((p, n)) => (p.to_string(), format!("<{n}")),
         None => (name.to_string(), String::new()),
     };
-    let left = if folder.is_some() || replicated { 38.0 } else { 22.0 };
+    let left = if folder.is_some() || replicated {
+        38.0
+    } else {
+        22.0
+    };
     // Rows with a ▸: a subassembly, a rigid Part Studio, a part carrying mate connectors.
     let open = sub.map(|(o, _)| o).or(studio).or(connectors);
     let mut item = TreeItem::new(row_name.clone(), part)
@@ -617,37 +872,57 @@ fn spawn_instance_row(c: &mut ChildSpawnerCommands, t: &Theme, spec: &InstanceRo
             },
             16.0,
         )
-        .icon_color(if hidden || suppressed { HIDDEN_FG } else { t.muted_foreground })
+        .icon_color(if hidden || suppressed {
+            HIDDEN_FG
+        } else {
+            t.muted_foreground
+        })
         .strikethrough(suppressed)
         .left(if open.is_some() { left - 16.0 } else { left });
     if open.is_some() {
         item = item.disclosure(open);
     }
-    let tip = if studio.is_some() { format!("{name}\nRigid Part Studio instance") } else { name.to_string() };
-    let mut row = c.spawn((item.build(t), PickRow(Pick::Part(id.part_id())), InstanceRow(id), ContextMenuTarget, Tooltip::new(tip)));
+    let tip = if studio.is_some() {
+        format!("{name}\nRigid Part Studio instance")
+    } else {
+        name.to_string()
+    };
+    let mut row = c.spawn((
+        item.build(t),
+        PickRow(Pick::Part(id.part_id())),
+        InstanceRow(id),
+        ContextMenuTarget,
+        Tooltip::new(tip),
+    ));
     if let Some(f) = folder {
         row.insert(InAsmFolder(f));
     }
     let is_linked = linked.is_some();
-    row.insert(row_visuals(t, fg)).entry::<Node>().and_modify(move |mut n| {
-        n.height = Val::Px(22.0);
-        n.margin = UiRect::new(Val::Px(2.0), Val::Px(7.0), Val::Px(1.0), Val::Px(1.0));
-        // P3G.4 (P3G.3 carried, a name cut beside the link icon): a linked row's gaps are
-        // tighter and its eye's slot narrower, so the name keeps that room.
-        n.column_gap = Val::Px(if is_linked { 3.0 } else { 5.0 });
-        // The eye's slot is kept free, so the name and its <n> never run under it (P3B.4
-        // judge); a subassembly's lock shows beside it on hover, over the row's own icons, so the
-        // name keeps that room (P3B.8 judge: "Step Stool… <1>" with room to spare).
-        n.padding.right = Val::Px(if is_linked { 20.0 } else { 22.0 });
-        let _ = sub;
-    });
+    row.insert(row_visuals(t, fg))
+        .entry::<Node>()
+        .and_modify(move |mut n| {
+            n.height = Val::Px(22.0);
+            n.margin = UiRect::new(Val::Px(2.0), Val::Px(7.0), Val::Px(1.0), Val::Px(1.0));
+            // P3G.4 (P3G.3 carried, a name cut beside the link icon): a linked row's gaps are
+            // tighter and its eye's slot narrower, so the name keeps that room.
+            n.column_gap = Val::Px(if is_linked { 3.0 } else { 5.0 });
+            // The eye's slot is kept free, so the name and its <n> never run under it (P3B.4
+            // judge); a subassembly's lock shows beside it on hover, over the row's own icons, so the
+            // name keeps that room (P3B.8 judge: "Step Stool… <1>" with room to spare).
+            n.padding.right = Val::Px(if is_linked { 20.0 } else { 22.0 });
+            let _ = sub;
+        });
     let row_e = row.id();
     // Fixed (hatched ground), free (a small triad: it has degrees of freedom, A16.1), or
     // nothing when the mates hold it.
     let state = if fixed {
         Some(("constraint-fix", "fixed", "Fixed".to_string()))
     } else if dof > 0 && !suppressed {
-        let tip = if dof == 1 { "This instance has 1 degree of freedom".to_string() } else { format!("This instance has {dof} degrees of freedom") };
+        let tip = if dof == 1 {
+            "This instance has 1 degree of freedom".to_string()
+        } else {
+            format!("This instance has {dof} degrees of freedom")
+        };
         Some(("instance-dof", "dof", tip))
     } else {
         None
@@ -656,8 +931,16 @@ fn spawn_instance_row(c: &mut ChildSpawnerCommands, t: &Theme, spec: &InstanceRo
         if !number.is_empty() {
             r.spawn((
                 Name::new(format!("{row_name}-number")),
-                t.text(number.clone(), t.font_sm, bevy::text::FontWeight::NORMAL, fg),
-                Node { flex_shrink: 0.0, ..default() },
+                t.text(
+                    number.clone(),
+                    t.font_sm,
+                    bevy::text::FontWeight::NORMAL,
+                    fg,
+                ),
+                Node {
+                    flex_shrink: 0.0,
+                    ..default()
+                },
                 cadrs_ui::InheritFg,
                 Pickable::IGNORE,
             ));
@@ -666,14 +949,34 @@ fn spawn_instance_row(c: &mut ChildSpawnerCommands, t: &Theme, spec: &InstanceRo
         if let Some(pos) = following {
             r.spawn((
                 Name::new(format!("{row_name}-following")),
-                cadrs_ui::icon::icon_in("named-positions", 14.0, Color::srgb_u8(0x3c, 0x3c, 0x3c), Node { flex_shrink: 0.0, ..default() }),
+                cadrs_ui::icon::icon_in(
+                    "named-positions",
+                    14.0,
+                    Color::srgb_u8(0x3c, 0x3c, 0x3c),
+                    Node {
+                        flex_shrink: 0.0,
+                        ..default()
+                    },
+                ),
                 Tooltip::new(format!("Follows the named position \"{pos}\"")),
             ));
         }
         if let Some((state_icon, suffix, tip)) = state {
             r.spawn((
                 Name::new(format!("{row_name}-{suffix}")),
-                cadrs_ui::icon::icon_in(state_icon, 15.0, if hidden { HIDDEN_FG } else { Color::srgb_u8(0x3c, 0x3c, 0x3c) }, Node { flex_shrink: 0.0, ..default() }),
+                cadrs_ui::icon::icon_in(
+                    state_icon,
+                    15.0,
+                    if hidden {
+                        HIDDEN_FG
+                    } else {
+                        Color::srgb_u8(0x3c, 0x3c, 0x3c)
+                    },
+                    Node {
+                        flex_shrink: 0.0,
+                        ..default()
+                    },
+                ),
                 Tooltip::new(tip),
             ));
         }
@@ -681,13 +984,23 @@ fn spawn_instance_row(c: &mut ChildSpawnerCommands, t: &Theme, spec: &InstanceRo
         // row's end before the eye's slot (red while its source can't be reached, DV1.7; P3G.2:
         // the blue badge, the transitive arrow, the pin; a click opens the Reference manager).
         if let Some((tip, icon)) = linked {
-            crate::linked::spawn_link_icon(r, format!("{row_name}-linked"), icon, tip, crate::linked::LinkTarget::Instance(id));
+            crate::linked::spawn_link_icon(
+                r,
+                format!("{row_name}-linked"),
+                icon,
+                tip,
+                crate::linked::LinkTarget::Instance(id),
+            );
         }
         // A16.2: the lock of a subassembly: rigid (locked) or flexible.
         if let Some((_, flexible)) = sub {
             r.spawn((
                 Name::new(format!("{row_name}-lock")),
-                RowLock { row: row_e, instance: id, flexible },
+                RowLock {
+                    row: row_e,
+                    instance: id,
+                    flexible,
+                },
                 Node {
                     width: Val::Px(18.0),
                     height: Val::Px(20.0),
@@ -702,19 +1015,39 @@ fn spawn_instance_row(c: &mut ChildSpawnerCommands, t: &Theme, spec: &InstanceRo
                 // Over the row's own icons while hovered: on the hover colour.
                 BackgroundColor(t.list_hover),
                 Visibility::Hidden,
-                Tooltip::new(if flexible { "Flexible: its mates act here. Click to make it rigid" } else { "Rigid. Click to make it flexible" }),
+                Tooltip::new(if flexible {
+                    "Flexible: its mates act here. Click to make it rigid"
+                } else {
+                    "Rigid. Click to make it flexible"
+                }),
                 children![(
-                    cadrs_ui::icon::icon(if flexible { "lock-open" } else { "lock-filled" }, 14.0, Color::srgb_u8(0x55, 0x55, 0x55)),
+                    cadrs_ui::icon::icon(
+                        if flexible { "lock-open" } else { "lock-filled" },
+                        14.0,
+                        Color::srgb_u8(0x55, 0x55, 0x55)
+                    ),
                     Pickable::IGNORE,
                 )],
             ));
         }
-        r.spawn(eye_bundle(format!("{row_name}-eye"), row_e, vec![id], hidden));
+        r.spawn(eye_bundle(
+            format!("{row_name}-eye"),
+            row_e,
+            vec![id],
+            hidden,
+        ));
     });
 }
 
 /// A part of an open rigid Part Studio instance (read-only; picks the part).
-fn spawn_studio_part_row(c: &mut ChildSpawnerCommands, t: &Theme, top: InstanceId, part: cadrs_core::PartId, name: &str, out: bool) {
+fn spawn_studio_part_row(
+    c: &mut ChildSpawnerCommands,
+    t: &Theme,
+    top: InstanceId,
+    part: cadrs_core::PartId,
+    name: &str,
+    out: bool,
+) {
     let (label, _) = name.rsplit_once(" <").unwrap_or((name, ""));
     let slug = super::insert::slug(label);
     let o = derive(top, cadrs_core::assembly::structure::studio_part_key(part));
@@ -727,17 +1060,29 @@ fn spawn_studio_part_row(c: &mut ChildSpawnerCommands, t: &Theme, top: InstanceI
             .left(36.0)
             .build(t),
         PickRow(Pick::Part(super::occurrence_part(o))),
-        Tooltip::new(if out { format!("{label}: unticked in Edit (taken out on ✓)") } else { format!("{label} (in the rigid Part Studio instance)") }),
+        Tooltip::new(if out {
+            format!("{label}: unticked in Edit (taken out on ✓)")
+        } else {
+            format!("{label} (in the rigid Part Studio instance)")
+        }),
     ));
-    row.insert(row_visuals(t, fg)).entry::<Node>().and_modify(|mut n| {
-        n.height = Val::Px(22.0);
-        n.margin = UiRect::new(Val::Px(2.0), Val::Px(7.0), Val::Px(1.0), Val::Px(1.0));
-    });
+    row.insert(row_visuals(t, fg))
+        .entry::<Node>()
+        .and_modify(|mut n| {
+            n.height = Val::Px(22.0);
+            n.margin = UiRect::new(Val::Px(2.0), Val::Px(7.0), Val::Px(1.0), Val::Px(1.0));
+        });
 }
 
 /// A Part Studio mate connector of an open part instance (`ex4-step11.png`): hovering it
 /// highlights it in the view.
-fn spawn_connector_row(c: &mut ChildSpawnerCommands, t: &Theme, instance: InstanceId, feature: FeatureId, name: &str) {
+fn spawn_connector_row(
+    c: &mut ChildSpawnerCommands,
+    t: &Theme,
+    instance: InstanceId,
+    feature: FeatureId,
+    name: &str,
+) {
     let slug = super::insert::slug(name);
     let mut row = c.spawn((
         TreeItem::new(format!("instance-connector-{slug}"), name.to_string())
@@ -749,14 +1094,24 @@ fn spawn_connector_row(c: &mut ChildSpawnerCommands, t: &Theme, instance: Instan
         InstanceConnectorRow { instance, feature },
         Tooltip::new(name.to_string()),
     ));
-    row.insert(row_visuals(t, Color::srgb_u8(0x70, 0x75, 0x7a))).entry::<Node>().and_modify(|mut n| {
-        n.height = Val::Px(22.0);
-        n.margin = UiRect::new(Val::Px(2.0), Val::Px(7.0), Val::Px(1.0), Val::Px(1.0));
-    });
+    row.insert(row_visuals(t, Color::srgb_u8(0x70, 0x75, 0x7a)))
+        .entry::<Node>()
+        .and_modify(|mut n| {
+            n.height = Val::Px(22.0);
+            n.margin = UiRect::new(Val::Px(2.0), Val::Px(7.0), Val::Px(1.0), Val::Px(1.0));
+        });
 }
 
 /// A Replicate feature's row in the Instances list: ▸, the replicate icon, "Replicate 1".
-fn spawn_replicate_row(c: &mut ChildSpawnerCommands, t: &Theme, id: cadrs_core::assembly::mate::MateId, name: &str, count: usize, open: bool, folder: Option<FeatureId>) {
+fn spawn_replicate_row(
+    c: &mut ChildSpawnerCommands,
+    t: &Theme,
+    id: cadrs_core::assembly::mate::MateId,
+    name: &str,
+    count: usize,
+    open: bool,
+    folder: Option<FeatureId>,
+) {
     let slug = super::insert::slug(name);
     let mut row = c.spawn((
         TreeItem::new(format!("instance-replicate-{slug}"), name.to_string())
@@ -769,10 +1124,12 @@ fn spawn_replicate_row(c: &mut ChildSpawnerCommands, t: &Theme, id: cadrs_core::
         ContextMenuTarget,
         Tooltip::new(format!("{name}: {count} instances")),
     ));
-    row.insert(row_visuals(t, t.foreground)).entry::<Node>().and_modify(|mut n| {
-        n.height = Val::Px(22.0);
-        n.margin = UiRect::new(Val::Px(2.0), Val::Px(7.0), Val::Px(1.0), Val::Px(1.0));
-    });
+    row.insert(row_visuals(t, t.foreground))
+        .entry::<Node>()
+        .and_modify(|mut n| {
+            n.height = Val::Px(22.0);
+            n.margin = UiRect::new(Val::Px(2.0), Val::Px(7.0), Val::Px(1.0), Val::Px(1.0));
+        });
 }
 
 /// The widths the list panel was dragged to (its right edge), by the kind of tab it shows: a
@@ -797,7 +1154,9 @@ pub fn on_panel_resized(
     kind: Res<crate::viewport::ActiveKind>,
     mut widths: ResMut<PanelWidths>,
 ) {
-    if q.get(ev.entity).is_ok_and(|n| n.as_str() == "feature-panel") {
+    if q.get(ev.entity)
+        .is_ok_and(|n| n.as_str() == "feature-panel")
+    {
         widths.0.insert(width_key(*kind), ev.width);
     }
 }
@@ -814,13 +1173,17 @@ fn list_width(
     if q_grip.iter().any(|g| g.dragging()) {
         return;
     }
-    let want = widths.0.get(width_key(*kind)).copied().unwrap_or(match *kind {
-        crate::viewport::ActiveKind::Assembly => ASSEMBLY_LIST_W,
-        // P3H.3: the PCB Studio's Boards/Components panel.
-        crate::viewport::ActiveKind::PcbStudio => crate::pcb::PANEL_W,
-        crate::viewport::ActiveKind::Render => crate::render_ui::PANEL_W,
-        _ => 190.0,
-    });
+    let want = widths
+        .0
+        .get(width_key(*kind))
+        .copied()
+        .unwrap_or(match *kind {
+            crate::viewport::ActiveKind::Assembly => ASSEMBLY_LIST_W,
+            // P3H.3: the PCB Studio's Boards/Components panel.
+            crate::viewport::ActiveKind::PcbStudio => crate::pcb::PANEL_W,
+            crate::viewport::ActiveKind::Render => crate::render_ui::PANEL_W,
+            _ => 190.0,
+        });
     for (n, mut st) in &mut q {
         if n.as_str() == "feature-panel" && st.width() != want {
             st.set_width(want);
@@ -846,58 +1209,109 @@ pub struct ReplicateRow(pub cadrs_core::assembly::mate::MateId);
 #[derive(Resource, Debug, Clone, Copy, Default, PartialEq)]
 pub struct InstanceConnectorHover(pub Option<(InstanceId, FeatureId)>);
 
-fn sync_connector_hover(q: Query<(&InstanceConnectorRow, &Hovered)>, mut hover: ResMut<InstanceConnectorHover>) {
-    let over = q.iter().find(|(_, h)| h.get()).map(|(r, _)| (r.instance, r.feature));
+fn sync_connector_hover(
+    q: Query<(&InstanceConnectorRow, &Hovered)>,
+    mut hover: ResMut<InstanceConnectorHover>,
+) {
+    let over = q
+        .iter()
+        .find(|(_, h)| h.get())
+        .map(|(r, _)| (r.instance, r.feature));
     if hover.0 != over {
         hover.0 = over;
     }
 }
 
-fn spawn_child_row(c: &mut ChildSpawnerCommands, t: &Theme, sub: InstanceId, id: InstanceId, name: &str, fixed: bool, sub_child: bool) {
+fn spawn_child_row(
+    c: &mut ChildSpawnerCommands,
+    t: &Theme,
+    sub: InstanceId,
+    id: InstanceId,
+    name: &str,
+    fixed: bool,
+    sub_child: bool,
+) {
     let (part, number) = match name.rsplit_once(" <") {
         Some((p, n)) => (p.to_string(), format!("<{n}")),
         None => (name.to_string(), String::new()),
     };
     let slug = super::insert::slug(&part);
-    let row_name = format!("instance-child-{slug}-{}", number.trim_matches(|c| c == '<' || c == '>'));
+    let row_name = format!(
+        "instance-child-{slug}-{}",
+        number.trim_matches(|c| c == '<' || c == '>')
+    );
     let part_pick = super::occurrence_part(derive(sub, id));
     let mut row = c.spawn((
-        TreeItem::new(row_name.clone(), part).icon(if sub_child { "assembly" } else { "part" }, 15.0).icon_color(t.muted_foreground).left(36.0).build(t),
+        TreeItem::new(row_name.clone(), part)
+            .icon(if sub_child { "assembly" } else { "part" }, 15.0)
+            .icon_color(t.muted_foreground)
+            .left(36.0)
+            .build(t),
         PickRow(Pick::Part(part_pick)),
         ChildRow { sub, id },
         Tooltip::new(name.to_string()),
     ));
     // The standard row height (P3B.4 judge).
-    row.insert(row_visuals(t, t.foreground)).entry::<Node>().and_modify(|mut n| {
-        n.height = Val::Px(22.0);
-        n.margin = UiRect::new(Val::Px(2.0), Val::Px(7.0), Val::Px(1.0), Val::Px(1.0));
-        n.column_gap = Val::Px(5.0);
-    });
+    row.insert(row_visuals(t, t.foreground))
+        .entry::<Node>()
+        .and_modify(|mut n| {
+            n.height = Val::Px(22.0);
+            n.margin = UiRect::new(Val::Px(2.0), Val::Px(7.0), Val::Px(1.0), Val::Px(1.0));
+            n.column_gap = Val::Px(5.0);
+        });
     row.with_children(|r| {
         if !number.is_empty() {
             r.spawn((
                 Name::new(format!("{row_name}-number")),
-                t.text(number.clone(), t.font_sm, bevy::text::FontWeight::NORMAL, t.foreground),
-                Node { flex_shrink: 0.0, ..default() },
+                t.text(
+                    number.clone(),
+                    t.font_sm,
+                    bevy::text::FontWeight::NORMAL,
+                    t.foreground,
+                ),
+                Node {
+                    flex_shrink: 0.0,
+                    ..default()
+                },
                 Pickable::IGNORE,
             ));
         }
         if fixed {
-            r.spawn(cadrs_ui::icon::icon_in("constraint-fix", 14.0, Color::srgb_u8(0x3c, 0x3c, 0x3c), Node { flex_shrink: 0.0, ..default() }));
+            r.spawn(cadrs_ui::icon::icon_in(
+                "constraint-fix",
+                14.0,
+                Color::srgb_u8(0x3c, 0x3c, 0x3c),
+                Node {
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+            ));
         }
     });
 }
 
 /// The eye shows while its row is hovered, and always (crossed out) on a hidden instance; a
 /// subassembly's lock while hovered, and always when flexible.
-fn sync_eyes(mut q: Query<(&RowEye, &mut Visibility), Without<RowLock>>, mut q_lock: Query<(&RowLock, &mut Visibility), Without<RowEye>>, q_row: Query<&Hovered>) {
+fn sync_eyes(
+    mut q: Query<(&RowEye, &mut Visibility), Without<RowLock>>,
+    mut q_lock: Query<(&RowLock, &mut Visibility), Without<RowEye>>,
+    q_row: Query<&Hovered>,
+) {
     for (eye, mut vis) in &mut q {
         let show = eye.hidden || q_row.get(eye.row).is_ok_and(|h| h.get());
-        vis.set_if_neq(if show { Visibility::Inherited } else { Visibility::Hidden });
+        vis.set_if_neq(if show {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        });
     }
     for (lock, mut vis) in &mut q_lock {
         let show = lock.flexible || q_row.get(lock.row).is_ok_and(|h| h.get());
-        vis.set_if_neq(if show { Visibility::Inherited } else { Visibility::Hidden });
+        vis.set_if_neq(if show {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        });
     }
 }
 
@@ -911,7 +1325,9 @@ fn sync_root_state(
     mut commands: Commands,
 ) {
     let Some(doc) = doc else { return };
-    let Some(model) = doc.active_element().and_then(|e| e.assembly_model()) else { return };
+    let Some(model) = doc.active_element().and_then(|e| e.assembly_model()) else {
+        return;
+    };
     let fixed = cadrs_core::assembly::structure::root_fixed(model);
     // P3B.7: an instance fastened to the Origin by a mate.
     let fastened = !model.fastened_to_origin().is_empty();
@@ -928,18 +1344,32 @@ fn sync_root_state(
     if !want {
         return;
     }
-    let Some(root) = q_root.iter().next() else { return };
+    let Some(root) = q_root.iter().next() else {
+        return;
+    };
     let (name, tip) = if fastened {
         ("instance-root-fastened", "Fastened to the origin by a mate")
     } else {
-        ("instance-root-fixed", "Fastened to the origin: an instance of this assembly is fixed (not carried into a parent assembly)")
+        (
+            "instance-root-fixed",
+            "Fastened to the origin: an instance of this assembly is fixed (not carried into a parent assembly)",
+        )
     };
     let icon = commands
         .spawn((
             Name::new(name),
             RootState,
             // How the base is held (`ex3-drawing.png`'s, `ex4-step9.png`'s root row).
-            cadrs_ui::icon::icon_in("origin-fastened", 15.0, Color::srgb_u8(0x3c, 0x3c, 0x3c), Node { flex_shrink: 0.0, margin: UiRect::left(Val::Px(4.0)), ..default() }),
+            cadrs_ui::icon::icon_in(
+                "origin-fastened",
+                15.0,
+                Color::srgb_u8(0x3c, 0x3c, 0x3c),
+                Node {
+                    flex_shrink: 0.0,
+                    margin: UiRect::left(Val::Px(4.0)),
+                    ..default()
+                },
+            ),
             Tooltip::new(tip),
         ))
         .id();
@@ -958,25 +1388,58 @@ fn on_eye_click(mut click: On<Pointer<Click>>, q: Query<&RowEye>, mut commands: 
         return;
     }
     commands.queue(move |world: &mut World| {
-        let Some(element) = world.get_resource::<ActiveDocument>().and_then(super::active_assembly) else {
+        let Some(element) = world
+            .get_resource::<ActiveDocument>()
+            .and_then(super::active_assembly)
+        else {
             return;
         };
-        super::run(world, &SetInstancesHidden { element, instances, hidden });
+        super::run(
+            world,
+            &SetInstancesHidden {
+                element,
+                instances,
+                hidden,
+            },
+        );
     });
 }
 
 fn on_lock_click(mut click: On<Pointer<Click>>, q: Query<&RowLock>, mut commands: Commands) {
-    let Ok(lock) = q.get(click.entity).copied() else { return };
+    let Ok(lock) = q.get(click.entity).copied() else {
+        return;
+    };
     click.propagate(false);
     commands.queue(move |world: &mut World| {
-        let Some(element) = world.get_resource::<ActiveDocument>().and_then(super::active_assembly) else { return };
-        super::run(world, &cadrs_core::assembly::structure::SetSubassemblyFlexible { element, instances: vec![lock.instance], flexible: !lock.flexible });
+        let Some(element) = world
+            .get_resource::<ActiveDocument>()
+            .and_then(super::active_assembly)
+        else {
+            return;
+        };
+        super::run(
+            world,
+            &cadrs_core::assembly::structure::SetSubassemblyFlexible {
+                element,
+                instances: vec![lock.instance],
+                flexible: !lock.flexible,
+            },
+        );
     });
 }
 
 /// A subassembly row's ▸ opens it (its instances, indented).
-fn on_sub_toggle(ev: On<cadrs_ui::TreeToggle>, q: Query<&InstanceRow>, q_rep: Query<&ReplicateRow>, mut ui: ResMut<ListUi>) {
-    let key = q.get(ev.entity).map(|r| r.0).ok().or_else(|| q_rep.get(ev.entity).ok().map(|r| InstanceId(r.0.0)));
+fn on_sub_toggle(
+    ev: On<cadrs_ui::TreeToggle>,
+    q: Query<&InstanceRow>,
+    q_rep: Query<&ReplicateRow>,
+    mut ui: ResMut<ListUi>,
+) {
+    let key = q
+        .get(ev.entity)
+        .map(|r| r.0)
+        .ok()
+        .or_else(|| q_rep.get(ev.entity).ok().map(|r| InstanceId(r.0.0)));
     if let Some(k) = key
         && !ui.expanded.remove(&k)
     {
@@ -985,8 +1448,14 @@ fn on_sub_toggle(ev: On<cadrs_ui::TreeToggle>, q: Query<&InstanceRow>, q_rep: Qu
 }
 
 /// A Replicate row's menu: the feature's own (Edit…, Delete, …).
-fn on_replicate_menu(ev: On<ContextMenuRequested>, q: Query<&ReplicateRow>, mut commands: Commands) {
-    let Ok(row) = q.get(ev.entity).copied() else { return };
+fn on_replicate_menu(
+    ev: On<ContextMenuRequested>,
+    q: Query<&ReplicateRow>,
+    mut commands: Commands,
+) {
+    let Ok(row) = q.get(ev.entity).copied() else {
+        return;
+    };
     let (at, e) = (ev.position, ev.entity);
     commands.queue(move |world: &mut World| {
         let at = super::mates_list::beside_row(world, e, at);
@@ -1001,7 +1470,9 @@ fn on_row_menu(ev: On<ContextMenuRequested>, q: Query<&InstanceRow>, mut command
         // Right-click selects the row's instance (unless it is in the selection already), as
         // Onshape does (`ex1-step9.png`): the triad and the readout of the last pick go.
         let row = Pick::Part(instance.part_id());
-        if !super::selected_instances(world.resource::<crate::viewport::Selection>()).contains(&instance) {
+        if !super::selected_instances(world.resource::<crate::viewport::Selection>())
+            .contains(&instance)
+        {
             world.resource_mut::<crate::viewport::Selection>().0 = vec![row];
         }
         super::menu::open_instance_menu(world, at, instance, super::triad::TriadHandle::None);
@@ -1014,12 +1485,20 @@ mod range_tests {
     use crate::viewport::{RowSelect, Selection};
 
     fn picks(n: usize) -> Vec<Pick> {
-        (0..n).map(|_| Pick::Part(InstanceId::new().part_id())).collect()
+        (0..n)
+            .map(|_| Pick::Part(InstanceId::new().part_id()))
+            .collect()
     }
 
     fn apply(selection: &mut Selection, clicked: Pick, how: RowSelect) {
         match how {
-            RowSelect::Only => selection.0 = if selection.0 == [clicked] { vec![] } else { vec![clicked] },
+            RowSelect::Only => {
+                selection.0 = if selection.0 == [clicked] {
+                    vec![]
+                } else {
+                    vec![clicked]
+                }
+            }
             RowSelect::Toggle => selection.toggle(clicked),
             RowSelect::Range(rows) => selection.0 = rows,
         }
@@ -1028,7 +1507,11 @@ mod range_tests {
     #[test]
     fn forward_reverse_shrinking_and_additive_ranges_keep_the_anchor() {
         let order = picks(54);
-        let scope = (cadrs_core::DocumentId::new(), cadrs_core::ElementId::new(), Entity::PLACEHOLDER);
+        let scope = (
+            cadrs_core::DocumentId::new(),
+            cadrs_core::ElementId::new(),
+            Entity::PLACEHOLDER,
+        );
         let mut anchor = RangeAnchor::default();
         let mut selection = Selection::default();
         let mut click = |index, shift, additive| {
@@ -1050,45 +1533,78 @@ mod range_tests {
         assert_eq!(click(53, false, true), vec![order[20], order[53]]);
         let additive = click(50, true, true);
         assert_eq!(additive.len(), 5);
-        for p in [order[20], order[50], order[51], order[52], order[53]] { assert!(additive.contains(&p)); }
+        for p in [order[20], order[50], order[51], order[52], order[53]] {
+            assert!(additive.contains(&p));
+        }
         assert_eq!(click(52, true, false), order[52..54]);
     }
 
     #[test]
     fn missing_hidden_deleted_or_deselected_anchor_starts_at_endpoint() {
         let order = picks(5);
-        let scope = (cadrs_core::DocumentId::new(), cadrs_core::ElementId::new(), Entity::PLACEHOLDER);
+        let scope = (
+            cadrs_core::DocumentId::new(),
+            cadrs_core::ElementId::new(),
+            Entity::PLACEHOLDER,
+        );
         for case in 0..6 {
             let mut anchor = RangeAnchor::default();
             let mut selection = Selection(vec![order[0]]);
-            if case != 0 { anchor.select(scope, &order, order[0], &selection, false, false); }
+            if case != 0 {
+                anchor.select(scope, &order, order[0], &selection, false, false);
+            }
             let mut shown = order.clone();
             let mut new_scope = scope;
             match case {
-                1 => { shown.remove(0); } // Filtered, deleted or in a collapsed branch.
+                1 => {
+                    shown.remove(0);
+                } // Filtered, deleted or in a collapsed branch.
                 2 => selection.0.clear(),
                 3 => new_scope.0 = cadrs_core::DocumentId::new(),
                 4 => new_scope.1 = cadrs_core::ElementId::new(),
-                5 => { let mut world = World::new(); new_scope.2 = world.spawn_empty().id(); }
-                _ => {},
+                5 => {
+                    let mut world = World::new();
+                    new_scope.2 = world.spawn_empty().id();
+                }
+                _ => {}
             }
-            assert_eq!(anchor.select(new_scope, &shown, order[4], &selection, true, false), RowSelect::Range(vec![order[4]]), "case {case}");
+            assert_eq!(
+                anchor.select(new_scope, &shown, order[4], &selection, true, false),
+                RowSelect::Range(vec![order[4]]),
+                "case {case}"
+            );
             selection.0 = vec![order[4]];
-            assert_eq!(anchor.select(new_scope, &shown, order[3], &selection, true, false), RowSelect::Range(vec![order[3], order[4]]));
+            assert_eq!(
+                anchor.select(new_scope, &shown, order[3], &selection, true, false),
+                RowSelect::Range(vec![order[3], order[4]])
+            );
         }
     }
 
     #[test]
     fn visible_order_and_occurrences_are_respected_without_duplicate_picks() {
         let order = picks(5);
-        let scope = (cadrs_core::DocumentId::new(), cadrs_core::ElementId::new(), Entity::PLACEHOLDER);
+        let scope = (
+            cadrs_core::DocumentId::new(),
+            cadrs_core::ElementId::new(),
+            Entity::PLACEHOLDER,
+        );
         let mut anchor = RangeAnchor::default();
         let selection = Selection(vec![order[3], order[0]]);
         anchor.select(scope, &order, order[3], &selection, false, false);
         // Reordered/filter results (including expanded child rows) define the range.
         let shown = vec![order[4], order[3], order[1], order[1], order[0]];
-        assert_eq!(anchor.select(scope, &shown, order[0], &selection, true, false), RowSelect::Range(vec![order[3], order[1], order[0]]));
-        assert_eq!(anchor.select(scope, &[], order[2], &selection, true, true), RowSelect::Range(vec![order[3], order[0], order[2]]));
-        assert_eq!(anchor.select(scope, &order, order[0], &selection, false, true), RowSelect::Toggle);
+        assert_eq!(
+            anchor.select(scope, &shown, order[0], &selection, true, false),
+            RowSelect::Range(vec![order[3], order[1], order[0]])
+        );
+        assert_eq!(
+            anchor.select(scope, &[], order[2], &selection, true, true),
+            RowSelect::Range(vec![order[3], order[0], order[2]])
+        );
+        assert_eq!(
+            anchor.select(scope, &order, order[0], &selection, false, true),
+            RowSelect::Toggle
+        );
     }
 }

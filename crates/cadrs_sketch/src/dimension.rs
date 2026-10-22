@@ -132,7 +132,13 @@ pub fn measure(s: &Sketch, kind: DimensionKind) -> Option<f64> {
             let h = c.distance(foot(c, a, b));
             if far { h + r } else { (h - r).abs() }
         }
-        DimensionKind::CircleCircle { a, b, far_a, far_b, axis } => {
+        DimensionKind::CircleCircle {
+            a,
+            b,
+            far_a,
+            far_b,
+            axis,
+        } => {
             let (c1, r1) = round(s, a)?;
             let (c2, r2) = round(s, b)?;
             let rho1 = if far_a { -r1 } else { r1 };
@@ -151,7 +157,9 @@ pub fn measure(s: &Sketch, kind: DimensionKind) -> Option<f64> {
             2.0 * if major { g.major() } else { g.minor }
         }
         DimensionKind::Sides { circle, inscribed } => {
-            crate::entity::polygon_parts(s, circle, inscribed)?.sides.len() as f64
+            crate::entity::polygon_parts(s, circle, inscribed)?
+                .sides
+                .len() as f64
         }
     })
 }
@@ -191,7 +199,11 @@ fn circles_dir(c1: Vec2, c2: Vec2, axis: Option<crate::Axis>) -> Vec2 {
         None => d.normalize(),
         Some(axis) => axis.dir() * if d.dot(axis.dir()) < 0.0 { -1.0 } else { 1.0 },
     };
-    if u == Vec2::ZERO { Vec2::new(1.0, 0.0) } else { u }
+    if u == Vec2::ZERO {
+        Vec2::new(1.0, 0.0)
+    } else {
+        u
+    }
 }
 
 /// The two measured points of a dimension to circles (on the first entity, then on the
@@ -199,7 +211,11 @@ fn circles_dir(c1: Vec2, c2: Vec2, axis: Option<crate::Axis>) -> Vec2 {
 fn circle_attachments(s: &Sketch, kind: DimensionKind, angle: f64) -> Option<(Vec2, Vec2)> {
     let dir = |from: Vec2, to: Vec2| {
         let u = (to - from).normalize();
-        if u == Vec2::ZERO { Vec2::new(1.0, 0.0) } else { u }
+        if u == Vec2::ZERO {
+            Vec2::new(1.0, 0.0)
+        } else {
+            u
+        }
     };
     let rho = |r: f64, far: bool| if far { -r } else { r };
     Some(match kind {
@@ -220,7 +236,13 @@ fn circle_attachments(s: &Sketch, kind: DimensionKind, angle: f64) -> Option<(Ve
             let t = c + u * rho(r, far);
             (foot(t, a, b), t)
         }
-        DimensionKind::CircleCircle { a, b, far_a, far_b, axis } => {
+        DimensionKind::CircleCircle {
+            a,
+            b,
+            far_a,
+            far_b,
+            axis,
+        } => {
             let (c1, r1) = round(s, a)?;
             let (c2, r2) = round(s, b)?;
             let u = if kind.radial(s) {
@@ -313,7 +335,9 @@ fn classify(s: &Sketch, e: SketchEntity) -> Option<Pick> {
             CurveKind::Ellipse { .. } => Pick::Ellipse(c),
             // An offset ellipse is dimensioned by its Offset dimension only.
             // An elliptical arc (a projected part edge) is sized by its source.
-            CurveKind::EllipseOffset { .. } | CurveKind::EllipseArc { .. } | CurveKind::Spline { .. } => return None,
+            CurveKind::EllipseOffset { .. }
+            | CurveKind::EllipseArc { .. }
+            | CurveKind::Spline { .. } => return None,
             // A Bézier curve is sized by its points (dimension those).
             CurveKind::Bezier { .. } => return None,
         },
@@ -321,7 +345,9 @@ fn classify(s: &Sketch, e: SketchEntity) -> Option<Pick> {
         SketchEntity::Link(l) => Pick::Point(PointRef::Point(s.linked_point(l)?)),
         SketchEntity::XAxis => Pick::Line(CurveRef::XAxis),
         SketchEntity::YAxis => Pick::Line(CurveRef::YAxis),
-        SketchEntity::Dimension(_) | SketchEntity::Constraint(_) | SketchEntity::Text(_) => return None,
+        SketchEntity::Dimension(_) | SketchEntity::Constraint(_) | SketchEntity::Text(_) => {
+            return None;
+        }
     })
 }
 
@@ -354,7 +380,9 @@ fn complete(s: &Sketch, a: Pick, b: Pick) -> bool {
         | (Pick::Circle(c) | Pick::Arc(c), Pick::Point(p)) => {
             // Not the circle's own center (that is its radius).
             let center = match s.curves.get(c).map(|c| c.kind) {
-                Some(CurveKind::Circle { center, .. } | CurveKind::Arc { center, .. }) => Some(center),
+                Some(CurveKind::Circle { center, .. } | CurveKind::Arc { center, .. }) => {
+                    Some(center)
+                }
                 _ => None,
             };
             center.is_none_or(|c| p != PointRef::Point(c))
@@ -426,9 +454,17 @@ pub fn propose_at(
                 let k = if p == PointRef::Origin { q } else { p };
                 let pos = point_pos(s, k)?;
                 match (linear_orientation(Vec2::ZERO, pos, cursor), k) {
-                    (Orientation::Horizontal, _) => DimensionKind::PointLine { p: k, line: CurveRef::YAxis },
-                    (Orientation::Vertical, _) => DimensionKind::PointLine { p: k, line: CurveRef::XAxis },
-                    (Orientation::Aligned, PointRef::Point(p)) => DimensionKind::OriginAligned { p },
+                    (Orientation::Horizontal, _) => DimensionKind::PointLine {
+                        p: k,
+                        line: CurveRef::YAxis,
+                    },
+                    (Orientation::Vertical, _) => DimensionKind::PointLine {
+                        p: k,
+                        line: CurveRef::XAxis,
+                    },
+                    (Orientation::Aligned, PointRef::Point(p)) => {
+                        DimensionKind::OriginAligned { p }
+                    }
                     (Orientation::Aligned, PointRef::Origin) => return None,
                 }
             }
@@ -462,7 +498,13 @@ pub fn propose_at(
                 if pa.distance(pb) < 1e-6 {
                     // Concentric: always the ring's width, as Onshape does (where the edges
                     // were clicked can't pick a side, since the centers coincide).
-                    DimensionKind::CircleCircle { a: ca, b: cb, far_a: false, far_b: true, axis: None }
+                    DimensionKind::CircleCircle {
+                        a: ca,
+                        b: cb,
+                        far_a: false,
+                        far_b: true,
+                        axis: None,
+                    }
                 } else {
                     // The label picks the direction as for two points (the centers).
                     let axis = match linear_orientation(pa, pb, cursor) {
@@ -485,12 +527,8 @@ pub fn propose_at(
                 let (b1, b2) = line_ends(s, b)?;
                 match intersect(a1, a2, b1, b2) {
                     Some(x) => {
-                        let (flip_a, flip_b) = angle_quadrant(
-                            x,
-                            (a2 - a1).normalize(),
-                            (b2 - b1).normalize(),
-                            cursor,
-                        );
+                        let (flip_a, flip_b) =
+                            angle_quadrant(x, (a2 - a1).normalize(), (b2 - b1).normalize(), cursor);
                         DimensionKind::Angle {
                             a,
                             b,
@@ -503,12 +541,15 @@ pub fn propose_at(
                         // Measured from a sketch line's end to the other line: never from a
                         // plane axis (it has no ends, #31).
                         let axis = |l: CurveRef| !matches!(l, CurveRef::Curve(_));
-                        let (other, centre) = if axis(b) || (is_centreline(s, b) && !is_centreline(s, a)) {
-                            (a, b)
-                        } else {
-                            (b, a)
+                        let (other, centre) =
+                            if axis(b) || (is_centreline(s, b) && !is_centreline(s, a)) {
+                                (a, b)
+                            } else {
+                                (b, a)
+                            };
+                        let CurveRef::Curve(k) = other else {
+                            return None;
                         };
-                        let CurveRef::Curve(k) = other else { return None };
                         let (p, _) = s.curve_ends(k)?;
                         point_to_line(s, PointRef::Point(p), centre, cursor)?
                     }
@@ -558,7 +599,9 @@ fn linear_frame(s: &Sketch, kind: DimensionKind, angle: f64) -> Option<(Vec2, Ve
     let pos = |p| s.points.get(p).map(|p| p.pos);
     Some(match kind {
         // Horizontal or vertical between two circles' extremes.
-        DimensionKind::CircleCircle { axis: Some(axis), .. } if !kind.radial(s) => {
+        DimensionKind::CircleCircle {
+            axis: Some(axis), ..
+        } if !kind.radial(s) => {
             let (p1, p2) = circle_attachments(s, kind, angle)?;
             let u = axis.dir();
             (p1, p2, u, Vec2::new(u.y, u.x))
@@ -682,7 +725,9 @@ pub fn label_params(s: &Sketch, kind: DimensionKind, cursor: Vec2) -> Option<(f6
         }
         // An ellipse's offset: the label picks the point of the ellipse nearest it; the offset
         // holds that parameter.
-        DimensionKind::Offset { source, .. } if kind.radial(s) && s.ellipse_geom(source).is_some() => {
+        DimensionKind::Offset { source, .. }
+            if kind.radial(s) && s.ellipse_geom(source).is_some() =>
+        {
             let g = s.ellipse_geom(source)?;
             let t = g.nearest_t(cursor);
             let (p1, p2, u, _) = linear_frame(s, kind, t)?;
@@ -814,10 +859,17 @@ pub fn layout(s: &Sketch, d: &Dimension, st: LayoutStyle) -> Option<Layout> {
             let diameter = matches!(d.kind, DimensionKind::Diameter { .. });
             // A slot's width (Ø on an end arc) and a fillet's radius are written level, not
             // along the leader (`entity_tools/slot-examples.png`, `sketchfilletvertexexample.png`).
-            let sharp = if diameter { None } else { s.fillet_sharp(curve) };
+            let sharp = if diameter {
+                None
+            } else {
+                s.fillet_sharp(curve)
+            };
             let upright = sharp.is_some()
                 || (diameter
-                    && matches!(s.curves.get(curve).map(|c| c.kind), Some(CurveKind::Arc { .. })));
+                    && matches!(
+                        s.curves.get(curve).map(|c| c.kind),
+                        Some(CurveKind::Arc { .. })
+                    ));
             // The value's extent along the leader: its half width when written along it.
             let half = if upright {
                 px(st.extent(u))
@@ -893,7 +945,8 @@ pub fn layout(s: &Sketch, d: &Dimension, st: LayoutStyle) -> Option<Layout> {
                 let n = side * d.offset.signum();
                 let h = d.offset.abs();
                 for e in [a, b] {
-                    out.lines.push((e + n * px(st.ext_gap), e + n * (h + px(st.ext_over))));
+                    out.lines
+                        .push((e + n * px(st.ext_gap), e + n * (h + px(st.ext_over))));
                 }
                 let (pa, pb) = (a + n * h, b + n * h);
                 out.label = g.center + n * h + dir * along.clamp(-r, r);
@@ -913,10 +966,12 @@ pub fn layout(s: &Sketch, d: &Dimension, st: LayoutStyle) -> Option<Layout> {
             let half = px(st.extent(dir));
             let (g0, g1) = (along - half, along + half);
             if g0 > -r {
-                out.lines.push((g.center - dir * r, g.center + dir * g0.min(r)));
+                out.lines
+                    .push((g.center - dir * r, g.center + dir * g0.min(r)));
             }
             if g1 < r {
-                out.lines.push((g.center + dir * g1.max(-r), g.center + dir * r));
+                out.lines
+                    .push((g.center + dir * g1.max(-r), g.center + dir * r));
             }
             out.arrows.push((g.center + dir * r, dir));
             out.arrows.push((g.center - dir * r, -dir));
@@ -1015,7 +1070,8 @@ pub fn layout(s: &Sketch, d: &Dimension, st: LayoutStyle) -> Option<Layout> {
                 -Vec2::from_angle(arc.start_angle + back).perp(),
             ));
             let end = arc.start_angle + arc.sweep - back;
-            out.arrows.push((arc.point_at(end), Vec2::from_angle(end).perp()));
+            out.arrows
+                .push((arc.point_at(end), Vec2::from_angle(end).perp()));
             // Extension lines where the arc ends beyond a line.
             for (line, ray) in [(a, ra), (b, rb)] {
                 let Some((p1, p2)) = line_ends(s, line) else {
@@ -1028,10 +1084,13 @@ pub fn layout(s: &Sketch, d: &Dimension, st: LayoutStyle) -> Option<Layout> {
                 }
                 if r > hi + px(1.0) {
                     let from = hi.max(0.0) + px(st.ext_gap).min(r - hi.max(0.0));
-                    out.lines.push((x + ray * from, x + ray * (r + px(st.ext_over))));
-                } else if r < lo - px(1.0) {
                     out.lines
-                        .push((x + ray * (r - px(st.ext_over)), x + ray * (lo - px(st.ext_gap))));
+                        .push((x + ray * from, x + ray * (r + px(st.ext_over))));
+                } else if r < lo - px(1.0) {
+                    out.lines.push((
+                        x + ray * (r - px(st.ext_over)),
+                        x + ray * (lo - px(st.ext_gap)),
+                    ));
                 }
             }
         }
@@ -1074,7 +1133,10 @@ pub fn layout(s: &Sketch, d: &Dimension, st: LayoutStyle) -> Option<Layout> {
                 let len = (e - p).dot(n);
                 if len.abs() > px(st.ext_gap + 1.0) {
                     let sgn = len.signum();
-                    out.lines.push((p + n * (sgn * px(st.ext_gap)), e + n * (sgn * px(st.ext_over))));
+                    out.lines.push((
+                        p + n * (sgn * px(st.ext_gap)),
+                        e + n * (sgn * px(st.ext_over)),
+                    ));
                 }
             }
             let (lo, hi) = if (e2 - e1).dot(u) >= 0.0 {
@@ -1100,7 +1162,8 @@ pub fn layout(s: &Sketch, d: &Dimension, st: LayoutStyle) -> Option<Layout> {
             let clear = half_len + px(4.0) + half + if outside_arrows { arrow } else { 0.0 };
             let along = if d.along == 0.0 && room < 2.0 * half {
                 clear
-            } else if room < 2.0 * half && d.along.abs() + half > half_len && d.along.abs() < clear {
+            } else if room < 2.0 * half && d.along.abs() + half > half_len && d.along.abs() < clear
+            {
                 // A short dimension's value placed across an end would sit on the geometry
                 // there (T5 judge: an offset's "5" on the offset line): past that end instead.
                 clear * d.along.signum()
@@ -1172,15 +1235,36 @@ mod tests {
     fn two_points_by_label_placement() {
         let (pa, pb) = (v(0.0, 0.0), v(40.0, 30.0));
         // Straight above (between them in x): horizontal.
-        assert_eq!(linear_orientation(pa, pb, v(20.0, 45.0)), Orientation::Horizontal);
-        assert_eq!(linear_orientation(pa, pb, v(20.0, -10.0)), Orientation::Horizontal);
+        assert_eq!(
+            linear_orientation(pa, pb, v(20.0, 45.0)),
+            Orientation::Horizontal
+        );
+        assert_eq!(
+            linear_orientation(pa, pb, v(20.0, -10.0)),
+            Orientation::Horizontal
+        );
         // To the side: vertical.
-        assert_eq!(linear_orientation(pa, pb, v(55.0, 15.0)), Orientation::Vertical);
-        assert_eq!(linear_orientation(pa, pb, v(-5.0, 15.0)), Orientation::Vertical);
+        assert_eq!(
+            linear_orientation(pa, pb, v(55.0, 15.0)),
+            Orientation::Vertical
+        );
+        assert_eq!(
+            linear_orientation(pa, pb, v(-5.0, 15.0)),
+            Orientation::Vertical
+        );
         // Diagonal regions and between them: aligned.
-        assert_eq!(linear_orientation(pa, pb, v(50.0, 40.0)), Orientation::Aligned);
-        assert_eq!(linear_orientation(pa, pb, v(-5.0, -5.0)), Orientation::Aligned);
-        assert_eq!(linear_orientation(pa, pb, v(20.0, 15.0)), Orientation::Aligned);
+        assert_eq!(
+            linear_orientation(pa, pb, v(50.0, 40.0)),
+            Orientation::Aligned
+        );
+        assert_eq!(
+            linear_orientation(pa, pb, v(-5.0, -5.0)),
+            Orientation::Aligned
+        );
+        assert_eq!(
+            linear_orientation(pa, pb, v(20.0, 15.0)),
+            Orientation::Aligned
+        );
         // Points level with each other have no vertical distance: aligned.
         assert_eq!(
             linear_orientation(v(0.0, 0.0), v(10.0, 0.0), v(15.0, 0.0)),
@@ -1197,7 +1281,12 @@ mod tests {
         // #31: an edge-on default plane (the sketch X axis) as a dimension's line.
         let mut s = Sketch::new();
         let (_, a, _) = line(&mut s, v(15.0, 33.0), v(130.0, 45.0));
-        let d = propose(&s, &[SketchEntity::Point(a), SketchEntity::XAxis], v(-10.0, 20.0)).unwrap();
+        let d = propose(
+            &s,
+            &[SketchEntity::Point(a), SketchEntity::XAxis],
+            v(-10.0, 20.0),
+        )
+        .unwrap();
         assert_eq!(
             d.kind,
             DimensionKind::PointLine {
@@ -1220,7 +1309,13 @@ mod tests {
         assert!((d.value - 50.0).abs() < 1e-9);
         // Over the point's x span: still the vertical distance to the X axis.
         let h = propose(&s, &picks, v(15.0, 60.0)).unwrap();
-        assert!(matches!(h.kind, DimensionKind::PointLine { line: CurveRef::YAxis, .. }));
+        assert!(matches!(
+            h.kind,
+            DimensionKind::PointLine {
+                line: CurveRef::YAxis,
+                ..
+            }
+        ));
         SketchOp::SetDimension {
             dimension: Dimension { value: 100.0, ..d },
             moves: vec![],
@@ -1242,7 +1337,13 @@ mod tests {
             [SketchEntity::YAxis, SketchEntity::Curve(l)],
         ] {
             let d = propose(&s, &picks, v(20.0, 40.0)).unwrap();
-            assert!(matches!(d.kind, DimensionKind::PointLine { line: CurveRef::YAxis, .. }));
+            assert!(matches!(
+                d.kind,
+                DimensionKind::PointLine {
+                    line: CurveRef::YAxis,
+                    ..
+                }
+            ));
             assert!((d.value - 40.0).abs() < 1e-9);
         }
     }
@@ -1280,7 +1381,12 @@ mod tests {
         assert!(lay.arrows.iter().any(|(p, _)| (p.y + 33.0).abs() < 1e-9));
         assert!((lay.label.y + 20.0).abs() < 1e-9);
         // A regular line doesn't double.
-        let d = propose(&s, &[SketchEntity::Point(a), SketchEntity::Curve(plain)], v(-10.0, 80.0)).unwrap();
+        let d = propose(
+            &s,
+            &[SketchEntity::Point(a), SketchEntity::Curve(plain)],
+            v(-10.0, 80.0),
+        )
+        .unwrap();
         assert!(matches!(d.kind, DimensionKind::PointLine { .. }));
         // Solved to Ø50: the point is 25 from the centreline.
         let dia = Dimension::new(
@@ -1300,7 +1406,11 @@ mod tests {
         .unwrap();
         crate::solve::solve(&mut s);
         let (p0, p1) = line_ends(&s, CurveRef::Curve(axis)).unwrap();
-        assert!((s.pos(a).distance(foot(s.pos(a), p0, p1)) - 25.0).abs() < 1e-6, "{:?}", s.pos(a));
+        assert!(
+            (s.pos(a).distance(foot(s.pos(a), p0, p1)) - 25.0).abs() < 1e-6,
+            "{:?}",
+            s.pos(a)
+        );
         assert!((measure(&s, dia.kind).unwrap() - 50.0).abs() < 1e-6);
     }
 
@@ -1335,8 +1445,12 @@ mod tests {
         assert!(accepts(&s, &[SketchEntity::Point(c)]));
         assert!(propose(&s, &[SketchEntity::Point(c)], v(0.0, 0.0)).is_none());
         // The origin and a point: distances to the axes.
-        let d = propose(&s, &[SketchEntity::Origin, SketchEntity::Point(b)], v(20.0, 40.0))
-            .unwrap();
+        let d = propose(
+            &s,
+            &[SketchEntity::Origin, SketchEntity::Point(b)],
+            v(20.0, 40.0),
+        )
+        .unwrap();
         assert_eq!(
             d.kind,
             DimensionKind::PointLine {
@@ -1411,7 +1525,10 @@ mod tests {
             // The label is on the arc, between the two rays.
             let lay = layout(&s, &d, LayoutStyle::new(4.0, (10.0, 6.0))).unwrap();
             let ang = lay.label.angle().to_degrees().rem_euclid(360.0);
-            assert!((ang - cursor_deg).abs() < want / 2.0 + 1e-6, "{ang} vs {cursor_deg}");
+            assert!(
+                (ang - cursor_deg).abs() < want / 2.0 + 1e-6,
+                "{ang} vs {cursor_deg}"
+            );
             assert_eq!(lay.arrows.len(), 2);
         }
         // Parallel lines: the distance between them.
@@ -1466,34 +1583,61 @@ mod tests {
         for clicks in [(76.0, 41.0), (74.0, 39.0), (76.0, 39.0), (75.0, 40.0)] {
             let d = propose_at(
                 &s,
-                &[(e(big), Some(v(0.0, clicks.0))), (e(small), Some(v(0.0, clicks.1)))],
+                &[
+                    (e(big), Some(v(0.0, clicks.0))),
+                    (e(small), Some(v(0.0, clicks.1))),
+                ],
                 cursor,
             )
             .unwrap();
             assert!((d.value - 35.0).abs() < 1e-9, "{clicks:?} {d:?}");
             let d = propose_at(
                 &s,
-                &[(e(small), Some(v(0.0, clicks.1))), (e(big), Some(v(0.0, clicks.0)))],
+                &[
+                    (e(small), Some(v(0.0, clicks.1))),
+                    (e(big), Some(v(0.0, clicks.0))),
+                ],
                 cursor,
             )
             .unwrap();
             assert!((d.value - 35.0).abs() < 1e-9, "{clicks:?} {d:?}");
         }
         // A line and a circle: clicked on the line's side (outside), the near side: 120 - 75.
-        let near = propose_at(&s, &[(e(l), None), (e(big), Some(v(76.0, 0.0)))], v(100.0, 60.0))
-            .unwrap();
-        assert!(matches!(near.kind, DimensionKind::LineCircle { far: false, .. }));
+        let near = propose_at(
+            &s,
+            &[(e(l), None), (e(big), Some(v(76.0, 0.0)))],
+            v(100.0, 60.0),
+        )
+        .unwrap();
+        assert!(matches!(
+            near.kind,
+            DimensionKind::LineCircle { far: false, .. }
+        ));
         assert!((near.value - 45.0).abs() < 1e-9);
         // Clicked on the half away from the line: to the far side, 120 + 75.
-        let far = propose_at(&s, &[(e(l), None), (e(big), Some(v(-74.0, 0.0)))], v(100.0, 60.0))
-            .unwrap();
+        let far = propose_at(
+            &s,
+            &[(e(l), None), (e(big), Some(v(-74.0, 0.0)))],
+            v(100.0, 60.0),
+        )
+        .unwrap();
         assert!((far.value - 195.0).abs() < 1e-9);
         // A point and a circle.
         let p = SketchEntity::Point(a);
-        let d = propose_at(&s, &[(p, None), (e(small), Some(v(41.0, 0.0)))], v(80.0, 10.0)).unwrap();
+        let d = propose_at(
+            &s,
+            &[(p, None), (e(small), Some(v(41.0, 0.0)))],
+            v(80.0, 10.0),
+        )
+        .unwrap();
         let want = v(120.0, -50.0).length() - 40.0;
         assert!((d.value - want).abs() < 1e-9);
-        let d = propose_at(&s, &[(p, None), (e(small), Some(v(-39.0, 0.0)))], v(80.0, 10.0)).unwrap();
+        let d = propose_at(
+            &s,
+            &[(p, None), (e(small), Some(v(-39.0, 0.0)))],
+            v(80.0, 10.0),
+        )
+        .unwrap();
         assert!((d.value - (want + 80.0)).abs() < 1e-9);
         // The center of a circle with the circle is not a distance.
         let center = s.curve_points(small)[0];
@@ -1522,7 +1666,10 @@ mod tests {
         )
         .unwrap();
         SketchOp::SetDimension {
-            dimension: Dimension { value: 35.0, ..ring },
+            dimension: Dimension {
+                value: 35.0,
+                ..ring
+            },
             moves: vec![],
             radii: vec![],
         }
@@ -1532,9 +1679,19 @@ mod tests {
             CurveKind::Circle { radius, .. } => radius,
             _ => 0.0,
         };
-        assert!((r(big) - 70.0).abs() < 1e-7 && (r(small) - 35.0).abs() < 1e-7, "{} {}", r(big), r(small));
+        assert!(
+            (r(big) - 70.0).abs() < 1e-7 && (r(small) - 35.0).abs() < 1e-7,
+            "{} {}",
+            r(big),
+            r(small)
+        );
         let (l, ..) = line(&mut s, v(100.0, -20.0), v(100.0, 20.0));
-        let d = propose_at(&s, &[(e(l), None), (e(big), Some(v(71.0, 0.0)))], v(90.0, 40.0)).unwrap();
+        let d = propose_at(
+            &s,
+            &[(e(l), None), (e(big), Some(v(71.0, 0.0)))],
+            v(90.0, 40.0),
+        )
+        .unwrap();
         SketchOp::SetDimension {
             dimension: Dimension { value: 50.0, ..d },
             moves: vec![],
@@ -1573,7 +1730,9 @@ mod tests {
 
     /// Whether an extension line starts (after its small gap) from `p`, across `u`.
     fn starts_at(lay: &Layout, p: Vec2, u: Vec2) -> bool {
-        lay.lines.iter().any(|(a, _)| (*a - p).dot(u).abs() < 1e-6 && a.distance(p) < 20.0)
+        lay.lines
+            .iter()
+            .any(|(a, _)| (*a - p).dot(u).abs() < 1e-6 && a.distance(p) < 20.0)
     }
 
     /// Two circles of different radii, off the axes (`reference/onshape/dimension/two-circles.png`
@@ -1593,7 +1752,9 @@ mod tests {
         let d = cb - ca;
         let u = d.normalize();
         // A click on a circle on the side `dir` points to, nudged off the curve by `out`.
-        let on = |c: Vec2, r: f64, dir: Vec2, tilt: f64, out: f64| c + Vec2::from_angle(dir.angle() + tilt) * (r + out);
+        let on = |c: Vec2, r: f64, dir: Vec2, tilt: f64, out: f64| {
+            c + Vec2::from_angle(dir.angle() + tilt) * (r + out)
+        };
         let combos = [(false, false), (false, true), (true, false), (true, true)];
         // Along the centers, the label up and to the left of both (out of both bands).
         for &(far_a, far_b) in &combos {
@@ -1602,7 +1763,8 @@ mod tests {
                 let ka = on(ca, ra, if far_a { -u } else { u }, tilt, out);
                 let kb = on(cb, rb, if far_b { u } else { -u }, -tilt, -out);
                 for cursor in [v(-70.0, 80.0), v(20.0, -10.0)] {
-                    let dim = propose_at(&s, &[(e(a), Some(ka)), (e(b), Some(kb))], cursor).unwrap();
+                    let dim =
+                        propose_at(&s, &[(e(a), Some(ka)), (e(b), Some(kb))], cursor).unwrap();
                     assert!(
                         (dim.value - want).abs() < 1e-9,
                         "aligned far_a {far_a} far_b {far_b} tilt {tilt} out {out}: {} != {want}",
@@ -1652,12 +1814,18 @@ mod tests {
                 let pa = ca + towards * if far_a { -ra } else { ra };
                 let pb = cb - towards * if far_b { -rb } else { rb };
                 for want in [pa, pb] {
-                    assert!(starts_at(&lay, want, axis), "no extension line from {want:?}");
+                    assert!(
+                        starts_at(&lay, want, axis),
+                        "no extension line from {want:?}"
+                    );
                 }
                 // Driving it moves the circles to the new distance.
                 let mut t = s.clone();
                 SketchOp::SetDimension {
-                    dimension: Dimension { value: want + 5.0, ..dim },
+                    dimension: Dimension {
+                        value: want + 5.0,
+                        ..dim
+                    },
                     moves: vec![],
                     radii: vec![],
                 }
@@ -1671,7 +1839,11 @@ mod tests {
         let pa = s.curve_points(a)[0];
         let pb = s.curve_points(b)[0];
         let p = SketchEntity::Point;
-        for (cursor, want) in [(v(-23.0, 70.0), d.x.abs()), (v(30.0, 31.0), d.y.abs()), (v(-70.0, 80.0), d.length())] {
+        for (cursor, want) in [
+            (v(-23.0, 70.0), d.x.abs()),
+            (v(30.0, 31.0), d.y.abs()),
+            (v(-70.0, 80.0), d.length()),
+        ] {
             let dim = propose(&s, &[p(pa), p(pb)], cursor).unwrap();
             assert!((dim.value - want).abs() < 1e-9, "{} != {want}", dim.value);
         }

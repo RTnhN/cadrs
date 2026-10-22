@@ -141,7 +141,11 @@ impl MateType {
     /// and Planar.
     pub fn limit_dofs(self) -> &'static [Dof] {
         match self {
-            MateType::Revolute | MateType::Slider | MateType::Cylindrical | MateType::PinSlot | MateType::Planar => self.dof(),
+            MateType::Revolute
+            | MateType::Slider
+            | MateType::Cylindrical
+            | MateType::PinSlot
+            | MateType::Planar => self.dof(),
             _ => &[],
         }
     }
@@ -264,12 +268,24 @@ pub struct Mate {
 
 impl Mate {
     pub fn new(mate_type: MateType, a: MateConnector, b: MateConnector) -> Self {
-        Self { mate_type, connectors: [a, b], offset: None, limits: None, tabs: Vec::new(), propagate: true, flip: false, simulation: false }
+        Self {
+            mate_type,
+            connectors: [a, b],
+            offset: None,
+            limits: None,
+            tabs: Vec::new(),
+            propagate: true,
+            flip: false,
+            simulation: false,
+        }
     }
 
     /// A Width mate: `tabs` (one or two) centred between `widths` (A12).
     pub fn width(tabs: Vec<MateConnector>, widths: [MateConnector; 2]) -> Self {
-        Self { tabs, ..Self::new(MateType::Width, widths[0], widths[1]) }
+        Self {
+            tabs,
+            ..Self::new(MateType::Width, widths[0], widths[1])
+        }
     }
 
     /// Every connector: the pair, then the tabs.
@@ -287,14 +303,22 @@ impl Mate {
 
     /// The mate's limits for a degree of freedom it has.
     pub fn limit(&self, d: Dof) -> Option<(f64, f64)> {
-        self.mate_type.limit_dofs().contains(&d).then(|| self.limits.and_then(|l| l.of(d))).flatten()
+        self.mate_type
+            .limit_dofs()
+            .contains(&d)
+            .then(|| self.limits.and_then(|l| l.of(d)))
+            .flatten()
     }
 }
 
 /// A mate's position for world frames `f1` (the first connector, adjusted) and `g` (the target):
 /// D = F₁⁻¹ · G as (Z translation, angle about Z).
 pub fn mate_position(f1: &ConnectorFrame, g: &ConnectorFrame) -> (f64, f64) {
-    let d = [g.origin[0] - f1.origin[0], g.origin[1] - f1.origin[1], g.origin[2] - f1.origin[2]];
+    let d = [
+        g.origin[0] - f1.origin[0],
+        g.origin[1] - f1.origin[1],
+        g.origin[2] - f1.origin[2],
+    ];
     let z = f1.z[0] * d[0] + f1.z[1] * d[1] + f1.z[2] * d[2];
     let y1 = f1.y();
     let dot = |a: Vec3, b: Vec3| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -305,7 +329,11 @@ pub fn mate_position(f1: &ConnectorFrame, g: &ConnectorFrame) -> (f64, f64) {
 /// A mate's position along one DOF for world frames `f1` and `g` (see [`mate_position`]): X, Y
 /// or Z of D's translation (mm), or its angle about Z (radians).
 pub fn dof_value(f1: &ConnectorFrame, g: &ConnectorFrame, dof: Dof) -> f64 {
-    let d = [g.origin[0] - f1.origin[0], g.origin[1] - f1.origin[1], g.origin[2] - f1.origin[2]];
+    let d = [
+        g.origin[0] - f1.origin[0],
+        g.origin[1] - f1.origin[1],
+        g.origin[2] - f1.origin[2],
+    ];
     let dot = |a: Vec3, b: Vec3| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
     match dof {
         Dof::X => dot(f1.x, d),
@@ -346,7 +374,9 @@ pub enum OffsetSlot {
 pub enum MateKind {
     Mate(Mate),
     /// A13: instances with no motion between them.
-    Group { instances: Vec<InstanceId> },
+    Group {
+        instances: Vec<InstanceId>,
+    },
     /// P3B.8, X16: copies of a seed instance and its mate on matching geometry
     /// ([`super::replicate`]).
     Replicate(super::replicate::Replicate),
@@ -359,7 +389,13 @@ pub enum MateKind {
 
 impl MateFeature {
     pub fn new(id: MateId, name: impl Into<String>, kind: MateKind) -> Self {
-        Self { id, name: name.into(), kind, suppressed: false, exprs: Vec::new() }
+        Self {
+            id,
+            name: name.into(),
+            kind,
+            suppressed: false,
+            exprs: Vec::new(),
+        }
     }
 
     /// The type's label ("Fastened", "Group").
@@ -376,7 +412,10 @@ impl MateFeature {
     pub fn mate(&self) -> Option<&Mate> {
         match &self.kind {
             MateKind::Mate(m) => Some(m),
-            MateKind::Group { .. } | MateKind::Replicate(_) | MateKind::Relation(_) | MateKind::Variable(_) => None,
+            MateKind::Group { .. }
+            | MateKind::Replicate(_)
+            | MateKind::Relation(_)
+            | MateKind::Variable(_) => None,
         }
     }
 
@@ -398,7 +437,10 @@ impl MateFeature {
     pub fn mate_mut(&mut self) -> Option<&mut Mate> {
         match &mut self.kind {
             MateKind::Mate(m) => Some(m),
-            MateKind::Group { .. } | MateKind::Replicate(_) | MateKind::Relation(_) | MateKind::Variable(_) => None,
+            MateKind::Group { .. }
+            | MateKind::Replicate(_)
+            | MateKind::Relation(_)
+            | MateKind::Variable(_) => None,
         }
     }
 
@@ -416,7 +458,9 @@ impl MateFeature {
                 out
             }
             MateKind::Group { instances } => instances.clone(),
-            MateKind::Replicate(r) => std::iter::once(r.seed).chain(r.instances.iter().copied()).collect(),
+            MateKind::Replicate(r) => std::iter::once(r.seed)
+                .chain(r.instances.iter().copied())
+                .collect(),
             MateKind::Relation(_) | MateKind::Variable(_) => Vec::new(),
         }
     }

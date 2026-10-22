@@ -8,7 +8,9 @@ use cadrs_core::{Document, Element, History, parts::display_name};
 use cadrs_pcb::{BodyClass, PcbBoard, sample};
 
 fn fixture(dir: &str, name: &str) -> PcbBoard {
-    let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/idf").join(dir);
+    let d = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/idf")
+        .join(dir);
     let emn = std::fs::read_to_string(d.join(format!("{name}.emn"))).unwrap();
     let emp = std::fs::read_to_string(d.join(format!("{name}.emp"))).unwrap();
     PcbBoard::read(&emn, &emp).unwrap()
@@ -30,17 +32,32 @@ fn vision_pcb_part_studio() {
     assert!(build.errors.is_empty(), "{:?}", build.errors);
     assert_eq!(build.parts.len(), 30);
     let props = e.part_props().to_vec();
-    let board = build.parts.iter().find(|p| display_name(p, &props) == "Board [Vision PCB]").unwrap();
+    let board = build
+        .parts
+        .iter()
+        .find(|p| display_name(p, &props) == "Board [Vision PCB]")
+        .unwrap();
     let t = pcb.thickness();
     let v = board.mass.unwrap().volume;
     let expect = (101.6 * 76.2 - 4.0 * PI * (3.175f64 / 2.0).powi(2)) * t;
     assert!((v - expect).abs() < 1e-6 * expect, "{v} vs {expect}");
-    let u1 = build.parts.iter().find(|p| display_name(p, &props) == "U1 QFP100_600MIL").unwrap();
+    let u1 = build
+        .parts
+        .iter()
+        .find(|p| display_name(p, &props) == "U1 QFP100_600MIL")
+        .unwrap();
     assert!((u1.mass.unwrap().volume - 232.2576 * 1.6002).abs() < 1e-6);
     // Bottom components hang below the board.
-    let c10 = build.parts.iter().find(|p| display_name(p, &props).starts_with("C10 ")).unwrap();
+    let c10 = build
+        .parts
+        .iter()
+        .find(|p| display_name(p, &props).starts_with("C10 "))
+        .unwrap();
     assert!(c10.mass.unwrap().center_of_mass.z < 0.0);
-    assert_eq!(made.iter().filter(|p| p.class == BodyClass::Board).count(), 1);
+    assert_eq!(
+        made.iter().filter(|p| p.class == BodyClass::Board).count(),
+        1
+    );
 }
 
 #[test]
@@ -52,12 +69,21 @@ fn cell_phone_part_studio() {
     d.elements.push(el);
     let mut h = History::default();
     let made = sample::build_in(&mut DocHistory(&mut d, &mut h), id, &pcb).unwrap();
-    assert_eq!(made.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["Board [Cell phone]", "Keep-out 1", "Keep-out 2"]);
+    assert_eq!(
+        made.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+        ["Board [Cell phone]", "Keep-out 1", "Keep-out 2"]
+    );
     let build = cadrs_core::rebuild::build(d.element(id).unwrap().features());
     assert!(build.errors.is_empty(), "{:?}", build.errors);
     let vols: Vec<f64> = build.parts.iter().map(|p| p.mass.unwrap().volume).collect();
-    assert!((vols[0] - (11570.0 + 64.0 * PI) * 0.062).abs() < 1e-6, "{vols:?}");
-    assert!((vols[1] - 5400.0).abs() < 1e-6 && (vols[2] - 900.0).abs() < 1e-6, "{vols:?}");
+    assert!(
+        (vols[0] - (11570.0 + 64.0 * PI) * 0.062).abs() < 1e-6,
+        "{vols:?}"
+    );
+    assert!(
+        (vols[1] - 5400.0).abs() < 1e-6 && (vols[2] - 900.0).abs() < 1e-6,
+        "{vols:?}"
+    );
     // The keep-outs are below the board.
     assert!(build.parts[1].mass.unwrap().center_of_mass.z < 0.0);
     // Everything is undoable.
@@ -72,11 +98,23 @@ fn board_mesh_has_every_body() {
     assert!(m.warnings.is_empty(), "{:?}", m.warnings);
     // Board, 8 keep-out markers, 29 components.
     assert_eq!(m.bodies.len(), 1 + 8 + 29);
-    assert!(m.bodies.iter().all(|b| !b.indices.is_empty() && b.positions.len() == b.normals.len() && !b.edges.is_empty()));
+    assert!(m.bodies.iter().all(|b| !b.indices.is_empty()
+        && b.positions.len() == b.normals.len()
+        && !b.edges.is_empty()));
     let (lo, hi) = m.bounds().unwrap();
-    assert!((lo[0] - 0.0).abs() < 1e-3 && (hi[0] - 101.6).abs() < 1e-3, "{lo:?} {hi:?}");
-    assert!((lo[1] - 0.0).abs() < 1e-3 && (hi[1] - 76.2).abs() < 1e-3, "{lo:?} {hi:?}");
-    assert!(m.bodies.iter().any(|b| b.class == BodyClass::Board && b.color == cadrs_pcb::colors::BOARD_GREEN));
+    assert!(
+        (lo[0] - 0.0).abs() < 1e-3 && (hi[0] - 101.6).abs() < 1e-3,
+        "{lo:?} {hi:?}"
+    );
+    assert!(
+        (lo[1] - 0.0).abs() < 1e-3 && (hi[1] - 76.2).abs() < 1e-3,
+        "{lo:?} {hi:?}"
+    );
+    assert!(
+        m.bodies
+            .iter()
+            .any(|b| b.class == BodyClass::Board && b.color == cadrs_pcb::colors::BOARD_GREEN)
+    );
 }
 
 #[test]

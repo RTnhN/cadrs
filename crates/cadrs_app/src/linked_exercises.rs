@@ -27,11 +27,16 @@ use cadrs_core::samples::piston as ps;
 use crate::{ActiveDocument, AppClock, DocumentStore, UserProfile};
 
 /// The library folder the linked sources go in (ER1.2 locations).
-const FOLDER: cadrs_core::FolderId = cadrs_core::FolderId::from_u128(0x3a61_0000_0000_0000_0000_0000_0000_0f01);
+const FOLDER: cadrs_core::FolderId =
+    cadrs_core::FolderId::from_u128(0x3a61_0000_0000_0000_0000_0000_0000_0f01);
 
 fn fixture_path(name: &str, ext: &str) -> std::path::PathBuf {
     let local = std::path::PathBuf::from("fixtures");
-    let dir = if local.is_dir() { local } else { std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures")) };
+    let dir = if local.is_dir() {
+        local
+    } else {
+        std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures"))
+    };
     dir.join(format!("{name}.{ext}"))
 }
 
@@ -55,7 +60,12 @@ fn store_fixture(world: &mut World, name: &str, folder: bool) -> Option<cadrs_co
         let (lib, _) = store.list();
         if lib.folders.iter().all(|f| f.id != FOLDER) {
             let mut after = lib.clone();
-            after.folders.push(cadrs_core::FolderEntry { id: FOLDER, name: "Linked parts".into(), created: now - 7_200, owned_by: user.clone() });
+            after.folders.push(cadrs_core::FolderEntry {
+                id: FOLDER,
+                name: "Linked parts".into(),
+                created: now - 7_200,
+                owned_by: user.clone(),
+            });
             if let Err(e) = store.sync(&lib, &after) {
                 warn!("linked-fixture {name}: {e}");
             }
@@ -94,7 +104,9 @@ pub fn fixture_script(world: &mut World, arg: &str) {
             store_fixture(world, name, rest.contains(&"folder"));
         }
         ["open", name, tab @ ..] => {
-            let Some(id) = store_fixture(world, name, false) else { return };
+            let Some(id) = store_fixture(world, name, false) else {
+                return;
+            };
             crate::move_document::open_document(world, id);
             let tab = tab.join(" ");
             if !tab.is_empty()
@@ -120,15 +132,33 @@ pub fn script(world: &mut World, arg: &str) {
                 return;
             };
             let doc = world.resource::<ActiveDocument>().doc.clone();
-            let d = DerivedFeature { locations: vec![ConnectorRef::Implicit(ConnectorOrigin::Origin), ConnectorRef::Feature(lb::HOST_CONNECTOR)], ..DerivedFeature::default() };
+            let d = DerivedFeature {
+                locations: vec![
+                    ConnectorRef::Implicit(ConnectorOrigin::Origin),
+                    ConnectorRef::Feature(lb::HOST_CONNECTOR),
+                ],
+                ..DerivedFeature::default()
+            };
             let got = {
                 let mut res = crate::linked::resolver(world);
-                cadrs_core::derived::resolve(&mut res.0, &doc, None, d, SourceRef::version(Some(lb::DOCUMENT), lb::STUDIO, v.id()))
+                cadrs_core::derived::resolve(
+                    &mut res.0,
+                    &doc,
+                    None,
+                    d,
+                    SourceRef::version(Some(lb::DOCUMENT), lb::STUDIO, v.id()),
+                )
             };
             match got {
                 Ok(g) => {
-                    let f = cadrs_core::FeatureId::from_u128(0x3a61_0000_0000_0000_0000_0000_0000_0b01);
-                    if let Err(e) = world.resource_mut::<ActiveDocument>().execute(&AddDerived { element: lb::HOST_STUDIO, feature: f, derived: g.derived, links: g.links }) {
+                    let f =
+                        cadrs_core::FeatureId::from_u128(0x3a61_0000_0000_0000_0000_0000_0000_0b01);
+                    if let Err(e) = world.resource_mut::<ActiveDocument>().execute(&AddDerived {
+                        element: lb::HOST_STUDIO,
+                        feature: f,
+                        derived: g.derived,
+                        links: g.links,
+                    }) {
                         warn!("linked-ex dv1: {e}");
                     }
                 }
@@ -137,24 +167,36 @@ pub fn script(world: &mut World, arg: &str) {
         }
         "dv4-mate" => {
             let doc = world.resource::<ActiveDocument>().doc.clone();
-            let Some(block) = doc.element(lb::BASE_ASSEMBLY).and_then(|e| e.assembly_model()).and_then(|a| a.instances.iter().find(|i| i.link.is_some()).map(|i| i.id)) else {
+            let Some(block) = doc
+                .element(lb::BASE_ASSEMBLY)
+                .and_then(|e| e.assembly_model())
+                .and_then(|a| a.instances.iter().find(|i| i.link.is_some()).map(|i| i.id))
+            else {
                 warn!("linked-ex dv4-mate: no linked Block in Assembly 1");
                 return;
             };
-            if let Err(e) = lb::fasten_on_base(&mut *world.resource_mut::<ActiveDocument>(), block) {
+            if let Err(e) = lb::fasten_on_base(&mut *world.resource_mut::<ActiveDocument>(), block)
+            {
                 warn!("linked-ex dv4-mate: {e}");
             }
         }
         "dv4-redraw" => {
             use cadrs_core::history_log::{HistoryLog, Origin};
-            world.resource_mut::<crate::linked::LinkStatus>().invalidate();
+            world
+                .resource_mut::<crate::linked::LinkStatus>()
+                .invalidate();
             let store = world.resource::<DocumentStore>().0.clone();
             let now = world.resource::<AppClock>().now();
             let user = world.resource::<UserProfile>().id.clone();
-            let Ok(file) = store.load(lb::DOCUMENT) else { return };
+            let Ok(file) = store.load(lb::DOCUMENT) else {
+                return;
+            };
             let mut a = file.document;
             let mut h = cadrs_core::History::default();
-            if let Err(e) = lb::redraw(&mut cadrs_core::samples::gear_cover::DocHistory(&mut a, &mut h), lb::STUDIO) {
+            if let Err(e) = lb::redraw(
+                &mut cadrs_core::samples::gear_cover::DocHistory(&mut a, &mut h),
+                lb::STUDIO,
+            ) {
                 warn!("linked-ex dv4-redraw: {e}");
                 return;
             }
@@ -169,16 +211,33 @@ pub fn script(world: &mut World, arg: &str) {
         }
         "hexapod-revolute" => {
             let doc = world.resource::<ActiveDocument>().doc.clone();
-            let Some(p) = doc.element(ps::PROJECT_HEXAPOD).and_then(|e| e.assembly_model()).and_then(|a| a.instances.iter().find(|i| i.source.is_assembly()).map(|i| i.id)) else {
+            let Some(p) = doc
+                .element(ps::PROJECT_HEXAPOD)
+                .and_then(|e| e.assembly_model())
+                .and_then(|a| {
+                    a.instances
+                        .iter()
+                        .find(|i| i.source.is_assembly())
+                        .map(|i| i.id)
+                })
+            else {
                 warn!("linked-ex hexapod-revolute: no piston");
                 return;
             };
-            if let Err(e) = ps::revolute_piston(&mut *world.resource_mut::<ActiveDocument>(), ps::PROJECT_HEXAPOD, p, 0) {
+            if let Err(e) = ps::revolute_piston(
+                &mut *world.resource_mut::<ActiveDocument>(),
+                ps::PROJECT_HEXAPOD,
+                p,
+                0,
+            ) {
                 warn!("linked-ex hexapod-revolute: {e}");
             }
         }
         "hexapod-mates" => {
-            if let Err(e) = ps::complete_hexapod(&mut *world.resource_mut::<ActiveDocument>(), ps::PROJECT_HEXAPOD) {
+            if let Err(e) = ps::complete_hexapod(
+                &mut *world.resource_mut::<ActiveDocument>(),
+                ps::PROJECT_HEXAPOD,
+            ) {
                 warn!("linked-ex hexapod-mates: {e}");
             }
         }

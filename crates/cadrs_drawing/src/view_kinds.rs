@@ -85,11 +85,17 @@ pub struct Boundary {
 
 impl Boundary {
     pub fn rectangle(a: P2, b: P2) -> Self {
-        Self { kind: BoundaryKind::Rectangle, points: vec![a, b] }
+        Self {
+            kind: BoundaryKind::Rectangle,
+            points: vec![a, b],
+        }
     }
 
     pub fn spline(points: Vec<P2>) -> Self {
-        Self { kind: BoundaryKind::Spline, points }
+        Self {
+            kind: BoundaryKind::Spline,
+            points,
+        }
     }
 
     /// The boundary as a closed polygon (the last point not repeated).
@@ -125,7 +131,10 @@ pub fn closed_spline(points: &[P2], per: usize) -> Vec<P2> {
             let t = s as f64 / per as f64;
             let (t2, t3) = (t * t, t * t * t);
             let f = |a: f64, b: f64, c: f64, d: f64| {
-                0.5 * (2.0 * b + (-a + c) * t + (2.0 * a - 5.0 * b + 4.0 * c - d) * t2 + (-a + 3.0 * b - 3.0 * c + d) * t3)
+                0.5 * (2.0 * b
+                    + (-a + c) * t
+                    + (2.0 * a - 5.0 * b + 4.0 * c - d) * t2
+                    + (-a + 3.0 * b - 3.0 * c + d) * t3)
             };
             out.push([f(p0[0], p1[0], p2[0], p3[0]), f(p0[1], p1[1], p2[1], p3[1])]);
         }
@@ -283,7 +292,11 @@ impl Clip {
     }
 
     pub fn keeps(&self, p: P2) -> bool {
-        self.polygons.iter().all(|poly| inside(poly, p)) && self.bands.iter().all(|&(i, lo, hi)| p[i] <= lo || p[i] >= hi)
+        self.polygons.iter().all(|poly| inside(poly, p))
+            && self
+                .bands
+                .iter()
+                .all(|&(i, lo, hi)| p[i] <= lo || p[i] >= hi)
     }
 
     /// The pieces of the polyline that are shown.
@@ -322,7 +335,10 @@ impl Clip {
                 let (t0, t1) = (k[0], k[1]);
                 if self.keeps(at((t0 + t1) / 2.0)) {
                     let a = at(t0);
-                    if cur.last().is_none_or(|l| (l[0] - a[0]).abs() > 1e-12 || (l[1] - a[1]).abs() > 1e-12) {
+                    if cur
+                        .last()
+                        .is_none_or(|l| (l[0] - a[0]).abs() > 1e-12 || (l[1] - a[1]).abs() > 1e-12)
+                    {
                         if cur.len() >= 2 {
                             out.push(std::mem::take(&mut cur));
                         }
@@ -394,7 +410,10 @@ pub fn hatch_segments(loops: &[Vec<P2>], spacing: f64, angle: f64) -> Vec<(P2, P
     // Rotate by −angle: the hatch lines become horizontal.
     let to = |p: P2| [c * p[0] + s * p[1], -s * p[0] + c * p[1]];
     let back = |p: P2| [c * p[0] - s * p[1], s * p[0] + c * p[1]];
-    let rl: Vec<Vec<P2>> = loops.iter().map(|l| l.iter().map(|p| to(*p)).collect()).collect();
+    let rl: Vec<Vec<P2>> = loops
+        .iter()
+        .map(|l| l.iter().map(|p| to(*p)).collect())
+        .collect();
     let (mut lo, mut hi) = (f64::MAX, f64::MIN);
     for l in &rl {
         for p in l {
@@ -479,7 +498,10 @@ pub fn next_letter<'a>(views: impl Iterator<Item = &'a View>) -> String {
                 .chain(v.detail.as_ref().map(|d| d.letter.clone()))
         })
         .collect();
-    (0..).map(letter).find(|l| !used.contains(l)).unwrap_or_else(|| "A".into())
+    (0..)
+        .map(letter)
+        .find(|l| !used.contains(l))
+        .unwrap_or_else(|| "A".into())
 }
 
 fn clear_special(v: &mut View) {
@@ -509,7 +531,14 @@ fn line_normal(a: P2, b: P2, side: P2) -> Option<P2> {
 /// The section view of `parent` cut along the line a→b (the parent's 2D frame), placed on the
 /// side of `cursor` (sheet mm): folded out like an auxiliary view and aligned with the parent,
 /// the material between the eye and the cutting plane removed, hidden lines off.
-pub fn section_view(parent: &View, a: P2, b: P2, cursor: P2, projection: Projection, letter: &str) -> Option<View> {
+pub fn section_view(
+    parent: &View,
+    a: P2,
+    b: P2,
+    cursor: P2,
+    projection: Projection,
+    letter: &str,
+) -> Option<View> {
     let n = line_normal(a, b, parent.from_sheet(cursor))?;
     let frame = fold_frame(&parent.frame, n, projection);
     // The cutting plane holds the line and the parent's direction of sight: its depth in the
@@ -530,8 +559,15 @@ pub fn section_view(parent: &View, a: P2, b: P2, cursor: P2, projection: Project
     v.hidden_lines = false;
     v.broken_out = None;
     clear_special(&mut v);
-    v.cut = Some(ViewCut { depth, polygon: Vec::new() });
-    v.section = Some(SectionLine { letter: letter.to_string(), a, b });
+    v.cut = Some(ViewCut {
+        depth,
+        polygon: Vec::new(),
+    });
+    v.section = Some(SectionLine {
+        letter: letter.to_string(),
+        a,
+        b,
+    });
     v.anchor = aligned_anchor(parent.anchor, rotate(n, parent.rotation), cursor, None);
     v.name = format!("Section {letter}-{letter}");
     v.source_hash = parent.source_hash;
@@ -551,7 +587,14 @@ fn gcd(a: u32, b: u32) -> u32 {
 
 /// The detail view of `parent` inside the circle (`center`, `radius`; the parent's 2D frame)
 /// at `scale`, its circle's centre at `cursor` (sheet mm).
-pub fn detail_view(parent: &View, center: P2, radius: f64, scale: Scale, cursor: P2, letter: &str) -> View {
+pub fn detail_view(
+    parent: &View,
+    center: P2,
+    radius: f64,
+    scale: Scale,
+    cursor: P2,
+    letter: &str,
+) -> View {
     let mut v = parent.clone();
     v.id = ViewId::new();
     v.kind = ViewKind::Detail;
@@ -562,7 +605,11 @@ pub fn detail_view(parent: &View, center: P2, radius: f64, scale: Scale, cursor:
     v.align_suppressed = false;
     v.shaded = false;
     clear_special(&mut v);
-    v.detail = Some(DetailCircle { letter: letter.to_string(), center, radius });
+    v.detail = Some(DetailCircle {
+        letter: letter.to_string(),
+        center,
+        radius,
+    });
     let k = scale.factor();
     let off = rotate([center[0] * k, center[1] * k], v.rotation);
     v.anchor = [cursor[0] - off[0], cursor[1] - off[1]];
@@ -609,7 +656,11 @@ fn unit(a: P2) -> P2 {
 /// A text of cap height `h` centred on `c`.
 fn centred_text(c: P2, h: f64, text: &str) -> PlacedText {
     let w = crate::annotation::text_width(text) * h;
-    PlacedText { pos: [c[0] - w / 2.0, c[1]], height: h, text: text.to_string() }
+    PlacedText {
+        pos: [c[0] - w / 2.0, c[1]],
+        height: h,
+        text: text.to_string(),
+    }
 }
 
 fn arrow(d: &mut Decor, tip: P2, dir: P2, length: f64) {
@@ -644,7 +695,11 @@ pub fn shown_bounds(view: &View, m: &dyn ViewModel) -> Option<(P2, P2)> {
 fn seg_dist(p: P2, a: P2, b: P2) -> f64 {
     let d = sub(b, a);
     let l2 = d[0] * d[0] + d[1] * d[1];
-    let t = if l2 > 1e-18 { (((p[0] - a[0]) * d[0] + (p[1] - a[1]) * d[1]) / l2).clamp(0.0, 1.0) } else { 0.0 };
+    let t = if l2 > 1e-18 {
+        (((p[0] - a[0]) * d[0] + (p[1] - a[1]) * d[1]) / l2).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
     let q = add(a, mul(d, t));
     (p[0] - q[0]).hypot(p[1] - q[1])
 }
@@ -654,7 +709,9 @@ fn densify(pts: &[P2], step: f64) -> Vec<P2> {
     let mut out = Vec::new();
     for w in pts.windows(2) {
         let (a, b) = (w[0], w[1]);
-        let n = (((b[0] - a[0]).hypot(b[1] - a[1])) / step.max(1e-9)).ceil().max(1.0) as usize;
+        let n = (((b[0] - a[0]).hypot(b[1] - a[1])) / step.max(1e-9))
+            .ceil()
+            .max(1.0) as usize;
         for i in 0..n {
             out.push(add(a, mul(sub(b, a), i as f64 / n as f64)));
         }
@@ -668,7 +725,14 @@ fn densify(pts: &[P2], step: f64) -> Vec<P2> {
 /// The runs of polyline `pts` that lie on or inside the loops `material` (within `tol`).
 pub fn on_material(pts: &[P2], material: &[Vec<P2>], tol: f64, step: f64) -> Vec<Vec<P2>> {
     let near = |p: P2| {
-        material.iter().any(|l| inside(l, p) || l.windows(2).chain(std::iter::once(&[*l.last().unwrap_or(&p), *l.first().unwrap_or(&p)][..])).any(|w| seg_dist(p, w[0], w[1]) <= tol))
+        material.iter().any(|l| {
+            inside(l, p)
+                || l.windows(2)
+                    .chain(std::iter::once(
+                        &[*l.last().unwrap_or(&p), *l.first().unwrap_or(&p)][..],
+                    ))
+                    .any(|w| seg_dist(p, w[0], w[1]) <= tol)
+        })
     };
     let mut out: Vec<Vec<P2>> = Vec::new();
     let mut cur: Vec<P2> = Vec::new();
@@ -711,14 +775,23 @@ pub fn label_avoid(sheet: &crate::Sheet) -> Vec<(P2, P2)> {
     if !sheet.title_block {
         return Vec::new();
     }
-    let r = crate::title_block::placement(crate::standard::frame(sheet.format).inner, sheet.format.size);
+    let r = crate::title_block::placement(
+        crate::standard::frame(sheet.format).inner,
+        sheet.format.size,
+    );
     vec![(r.min, r.max)]
 }
 
 /// The decorations of `view` (one of `sheet_views`, the views of its sheet), with its model
 /// `m` if it has been generated. A section or detail label goes under its view, or above it
 /// where it would cover one of `avoid` (the title block).
-pub fn view_decor(style: &DrawingStyle, sheet_views: &[View], view: &View, m: Option<&dyn ViewModel>, avoid: &[(P2, P2)]) -> Decor {
+pub fn view_decor(
+    style: &DrawingStyle,
+    sheet_views: &[View],
+    view: &View,
+    m: Option<&dyn ViewModel>,
+    avoid: &[(P2, P2)],
+) -> Decor {
     let mut d = Decor::default();
     let h = style.dim_text_height;
     if let Some(m) = m {
@@ -772,7 +845,10 @@ pub fn view_decor(style: &DrawingStyle, sheet_views: &[View], view: &View, m: Op
         // Labels under section and detail views.
         let label_lines: Vec<String> = match (&view.section, &view.detail) {
             (Some(s), _) => vec![format!("SECTION {0}-{0}", s.letter)],
-            (_, Some(dt)) => vec![format!("DETAIL {}", dt.letter), format!("SCALE {}", view.scale.label())],
+            (_, Some(dt)) => vec![
+                format!("DETAIL {}", dt.letter),
+                format!("SCALE {}", view.scale.label()),
+            ],
             _ => Vec::new(),
         };
         if !label_lines.is_empty()
@@ -787,11 +863,23 @@ pub fn view_decor(style: &DrawingStyle, sheet_views: &[View], view: &View, m: Op
             let cx = (lo[0] + hi[0]) / 2.0;
             let n = label_lines.len() as f64;
             let block = 1.25 * h + 1.9 * h * (n - 1.0);
-            let w = label_lines.iter().map(|l| crate::annotation::text_width(l) * 1.25 * h).fold(0.0, f64::max);
+            let w = label_lines
+                .iter()
+                .map(|l| crate::annotation::text_width(l) * 1.25 * h)
+                .fold(0.0, f64::max);
             let below_top = lo[1] - 2.2 * h + 0.7 * h;
-            let below = ([cx - w / 2.0, below_top - block - 0.5 * h], [cx + w / 2.0, below_top]);
-            let overlaps = |(a, b): (P2, P2), (c, e): &(P2, P2)| a[0] < e[0] && b[0] > c[0] && a[1] < e[1] && b[1] > c[1];
-            let mut y = if avoid.iter().any(|r| overlaps(below, r)) { hi[1] + 2.0 * h + block - 1.25 * h } else { lo[1] - 2.2 * h };
+            let below = (
+                [cx - w / 2.0, below_top - block - 0.5 * h],
+                [cx + w / 2.0, below_top],
+            );
+            let overlaps = |(a, b): (P2, P2), (c, e): &(P2, P2)| {
+                a[0] < e[0] && b[0] > c[0] && a[1] < e[1] && b[1] > c[1]
+            };
+            let mut y = if avoid.iter().any(|r| overlaps(below, r)) {
+                hi[1] + 2.0 * h + block - 1.25 * h
+            } else {
+                lo[1] - 2.2 * h
+            };
             for (k, l) in label_lines.iter().enumerate() {
                 let hh = if k == 0 { h * 1.25 } else { h };
                 d.texts.push(centred_text([cx, y], hh, l));
@@ -819,7 +907,11 @@ pub fn view_decor(style: &DrawingStyle, sheet_views: &[View], view: &View, m: Op
         let hatch: &[Vec<P2>] = m.map(|m| m.hatch()).unwrap_or(&[]);
         let k = view.scale.factor().max(1e-9);
         for piece in clip.apply(&poly) {
-            let runs = if hatch.is_empty() { vec![piece] } else { on_material(&piece, hatch, 0.3 / k, 0.5 / k) };
+            let runs = if hatch.is_empty() {
+                vec![piece]
+            } else {
+                on_material(&piece, hatch, 0.3 / k, 0.5 / k)
+            };
             for run in runs {
                 d.thin.push(run.iter().map(|p| view.to_sheet(*p)).collect());
             }
@@ -828,13 +920,22 @@ pub fn view_decor(style: &DrawingStyle, sheet_views: &[View], view: &View, m: Op
     // A detail view carries its parent's centermarks and centerlines inside its circle (P3C.8's
     // delta).
     if let (Some(dt), Some(m)) = (&view.detail, m)
-        && let Some(parent) = view.parent.and_then(|p| sheet_views.iter().find(|v| v.id == p))
+        && let Some(parent) = view
+            .parent
+            .and_then(|p| sheet_views.iter().find(|v| v.id == p))
     {
         use crate::annotation::AnnotationKind as K;
         let c = view.to_sheet(dt.center);
         let r = dt.radius * view.scale.factor();
-        for a in parent.annotations.iter().filter(|a| matches!(a.kind, K::Centermark(_) | K::Centerline(_) | K::CircleCenterline(_))) {
-            let Some(g) = crate::annotation::annotation_graphics(style, view, m, a) else { continue };
+        for a in parent.annotations.iter().filter(|a| {
+            matches!(
+                a.kind,
+                K::Centermark(_) | K::Centerline(_) | K::CircleCenterline(_)
+            )
+        }) {
+            let Some(g) = crate::annotation::annotation_graphics(style, view, m, a) else {
+                continue;
+            };
             for stroke in &g.strokes {
                 for run in inside_circle(stroke, c, r, 0.3) {
                     d.thin.push(run);
@@ -856,7 +957,16 @@ pub fn view_decor(style: &DrawingStyle, sheet_views: &[View], view: &View, m: Op
                 pts.push(f);
             }
             d.thin.push(pts);
-            let q = add(center, mul([std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2], r + 1.6 * h));
+            let q = add(
+                center,
+                mul(
+                    [
+                        std::f64::consts::FRAC_1_SQRT_2,
+                        std::f64::consts::FRAC_1_SQRT_2,
+                    ],
+                    r + 1.6 * h,
+                ),
+            );
             d.texts.push(centred_text(q, h * 1.25, &dt.letter));
         }
     }
@@ -871,7 +981,14 @@ const CUT_CLEAR: f64 = 3.0;
 /// outside). The
 /// line runs across the parent's outline `bounds` and a gap beyond it (P3C.8's delta: its ends
 /// and letters sat on the view and its dimensions).
-fn cutting_line(d: &mut Decor, style: &DrawingStyle, view: &View, c: &View, s: &SectionLine, bounds: Option<(P2, P2)>) {
+fn cutting_line(
+    d: &mut Decor,
+    style: &DrawingStyle,
+    view: &View,
+    c: &View,
+    s: &SectionLine,
+    bounds: Option<(P2, P2)>,
+) {
     let h = style.dim_text_height;
     let (mut a, mut b) = (view.to_sheet(s.a), view.to_sheet(s.b));
     let along = unit(sub(b, a));
@@ -928,7 +1045,13 @@ fn thread_marks(d: &mut Decor, view: &View, m: &dyn ViewModel) {
         }
     };
     for t in m.threads() {
-        let ThreadInfo { center, axis, major, length, .. } = *t;
+        let ThreadInfo {
+            center,
+            axis,
+            major,
+            length,
+            ..
+        } = *t;
         let ax = nalgebra::Vector3::new(axis[0], axis[1], axis[2]);
         let c3 = nalgebra::Point3::new(center[0], center[1], center[2]);
         let c2 = f.to_2d(&c3);
@@ -938,7 +1061,8 @@ fn thread_marks(d: &mut Decor, view: &View, m: &dyn ViewModel) {
             // End on: a 3/4 circle of the major diameter (the gap in the upper right quadrant).
             let pts: Vec<P2> = (0..=54)
                 .map(|i| {
-                    let t = std::f64::consts::FRAC_PI_2 + 1.5 * std::f64::consts::PI * i as f64 / 54.0;
+                    let t =
+                        std::f64::consts::FRAC_PI_2 + 1.5 * std::f64::consts::PI * i as f64 / 54.0;
                     [c2.x + r * t.cos(), c2.y + r * t.sin()]
                 })
                 .collect();
@@ -951,7 +1075,10 @@ fn thread_marks(d: &mut Decor, view: &View, m: &dyn ViewModel) {
             let c = [c2.x, c2.y];
             let e = add(c, mul(u, length));
             // Visible where a cut opens it up (a section, or a broken-out section around it).
-            let opened = sectioned && view.effective_cut().is_some_and(|c| c.polygon.len() < 3 || inside(&c.polygon, [c2.x, c2.y]));
+            let opened = sectioned
+                && view
+                    .effective_cut()
+                    .is_some_and(|c| c.polygon.len() < 3 || inside(&c.polygon, [c2.x, c2.y]));
             let hidden = !opened;
             if hidden && !view.hidden_lines {
                 continue;
@@ -971,7 +1098,15 @@ mod tests {
     use crate::view::NamedView;
 
     fn base() -> View {
-        View::base(ObjectRef { element: uuid::Uuid::nil(), part: None }, NamedView::Front, Scale::new(1, 2), [100.0, 80.0])
+        View::base(
+            ObjectRef {
+                element: uuid::Uuid::nil(),
+                part: None,
+            },
+            NamedView::Front,
+            Scale::new(1, 2),
+            [100.0, 80.0],
+        )
     }
 
     #[test]
@@ -983,14 +1118,21 @@ mod tests {
         let segs = hatch_segments(&loops, 1.0, 0.0);
         // Lines at y = 0..10: those through the hole are split in two.
         assert!(segs.iter().all(|(a, b)| (a[1] - b[1]).abs() < 1e-9));
-        let through_hole = segs.iter().filter(|(a, _)| (a[1] - 5.0).abs() < 1e-9).count();
+        let through_hole = segs
+            .iter()
+            .filter(|(a, _)| (a[1] - 5.0).abs() < 1e-9)
+            .count();
         assert_eq!(through_hole, 2);
     }
 
     #[test]
     fn breaks_map_and_invert() {
         let mut v = base();
-        v.breaks.push(Break { vertical: true, lo: 20.0, hi: 120.0 });
+        v.breaks.push(Break {
+            vertical: true,
+            lo: 20.0,
+            hi: 120.0,
+        });
         let gap = BREAK_GAP * 2.0; // 1:2
         let far = break_forward(&v, [150.0, 3.0]);
         assert!((far[0] - (150.0 - (100.0 - gap))).abs() < 1e-9);
@@ -1007,11 +1149,20 @@ mod tests {
 
     #[test]
     fn clipping_keeps_the_inside_of_a_circle_and_drops_bands() {
-        let c = Clip { polygons: vec![circle_polygon([0.0, 0.0], 10.0, 256)], bands: Vec::new() };
+        let c = Clip {
+            polygons: vec![circle_polygon([0.0, 0.0], 10.0, 256)],
+            bands: Vec::new(),
+        };
         let pieces = c.apply(&[[-20.0, 0.0], [20.0, 0.0]]);
         assert_eq!(pieces.len(), 1);
-        assert!((pieces[0][0][0] + 10.0).abs() < 1e-3 && (pieces[0].last().unwrap()[0] - 10.0).abs() < 1e-3);
-        let b = Clip { polygons: Vec::new(), bands: vec![(0, -5.0, 5.0)] };
+        assert!(
+            (pieces[0][0][0] + 10.0).abs() < 1e-3
+                && (pieces[0].last().unwrap()[0] - 10.0).abs() < 1e-3
+        );
+        let b = Clip {
+            polygons: Vec::new(),
+            bands: vec![(0, -5.0, 5.0)],
+        };
         let pieces = b.apply(&[[-20.0, 1.0], [20.0, 1.0]]);
         assert_eq!(pieces.len(), 2);
     }
@@ -1020,7 +1171,11 @@ mod tests {
     fn letters_skip_i_o_q() {
         let l: Vec<String> = (0..10).map(letter).collect();
         assert_eq!(l.join(""), "ABCDEFGHJK");
-        assert!(!(0..23).map(letter).any(|s| s == "I" || s == "O" || s == "Q"));
+        assert!(
+            !(0..23)
+                .map(letter)
+                .any(|s| s == "I" || s == "O" || s == "Q")
+        );
         assert_eq!(letter(23), "AA");
     }
 
@@ -1028,7 +1183,15 @@ mod tests {
     fn section_views_fold_out_and_cut_at_the_line() {
         let p = base();
         // A vertical cutting line at x = 10 on the Front view, the section placed to the right.
-        let s = section_view(&p, [10.0, -50.0], [10.0, 50.0], [200.0, 80.0], Projection::Third, "A").unwrap();
+        let s = section_view(
+            &p,
+            [10.0, -50.0],
+            [10.0, 50.0],
+            [200.0, 80.0],
+            Projection::Third,
+            "A",
+        )
+        .unwrap();
         assert_eq!(NamedView::of(&s.frame), Some(NamedView::Right));
         // Seen from +x looking along −x: depth of the plane x = 10 is −10.
         assert!((s.cut.as_ref().unwrap().depth + 10.0).abs() < 1e-9);

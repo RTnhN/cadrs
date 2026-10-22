@@ -203,10 +203,16 @@ fn ellipse_crossings(g: &crate::geom::EllipseGeom, other: &Shape) -> Vec<Vec2> {
 pub fn intersect(a: &Shape, b: &Shape) -> Vec<Vec2> {
     // An ellipse crossing anything (Final re-audit, S8: intersection inference on ellipses).
     if let Shape::Ellipse(g) = a {
-        return ellipse_crossings(g, b).into_iter().filter(|p| b.contains(*p)).collect();
+        return ellipse_crossings(g, b)
+            .into_iter()
+            .filter(|p| b.contains(*p))
+            .collect();
     }
     if let Shape::Ellipse(g) = b {
-        return ellipse_crossings(g, a).into_iter().filter(|p| a.contains(*p)).collect();
+        return ellipse_crossings(g, a)
+            .into_iter()
+            .filter(|p| a.contains(*p))
+            .collect();
     }
     let (Some(ca), Some(cb)) = (a.carrier(), b.carrier()) else {
         return Vec::new();
@@ -235,7 +241,9 @@ pub fn shapes(s: &Sketch) -> Vec<(CurveRef, Shape)> {
                     radius,
                 },
                 CurveKind::Arc { .. } => Shape::Arc(s.arc_geom(k)?),
-                CurveKind::Ellipse { .. } | CurveKind::EllipseOffset { .. } => Shape::Ellipse(s.ellipse_geom(k)?),
+                CurveKind::Ellipse { .. } | CurveKind::EllipseOffset { .. } => {
+                    Shape::Ellipse(s.ellipse_geom(k)?)
+                }
                 CurveKind::Spline { .. } => return None,
                 // Nothing snaps onto an elliptical arc's body (its ends and center are points).
                 CurveKind::EllipseArc { .. } => return None,
@@ -457,9 +465,7 @@ pub fn infer(cursor: Vec2, px_per_mm: f64, s: &Sketch, ctx: &ToolContext) -> Vec
         .keys()
         .filter(|k| !ctx.exclude_curves.contains(k))
         .filter_map(|k| s.ellipse_geom(k).map(|g| (k, g)))
-        .flat_map(|(k, g)| {
-            [g.center - g.a, g.center + g.b(), g.center - g.b()].map(|p| (k, p))
-        })
+        .flat_map(|(k, g)| [g.center - g.a, g.center + g.b(), g.center - g.b()].map(|p| (k, p)))
         .filter(|(_, p)| away_from_anchor(*p))
         .filter_map(|(k, p)| {
             let d = px(p.distance(cursor));
@@ -479,8 +485,7 @@ pub fn infer(cursor: Vec2, px_per_mm: f64, s: &Sketch, ctx: &ToolContext) -> Vec
     shapes.retain(|(r, _)| !matches!(r, CurveRef::Curve(k) if ctx.exclude_curves.contains(k)));
     let is_existing_point = |p: Vec2| {
         px(p.distance(Vec2::ZERO)) < 1e-6
-            || s
-                .points
+            || s.points
                 .iter()
                 .any(|(k, q)| !ctx.exclude.contains(&k) && px(q.pos.distance(p)) < 1e-6)
     };
@@ -768,7 +773,9 @@ pub fn drag_constraints(p: PointId, placed: &[Placed]) -> Vec<crate::Constraint>
             Placed::Horizontal(Guide::Point(r)) => {
                 Some(ConstraintOf::Horizontal(Orient::Points(here, r)))
             }
-            Placed::Vertical(Guide::Point(r)) => Some(ConstraintOf::Vertical(Orient::Points(here, r))),
+            Placed::Vertical(Guide::Point(r)) => {
+                Some(ConstraintOf::Vertical(Orient::Points(here, r)))
+            }
             _ => None,
         })
         .collect()
@@ -778,7 +785,11 @@ pub fn drag_constraints(p: PointId, placed: &[Placed]) -> Vec<crate::Constraint>
 /// started (`base`, the sketch before the drag): dropping a point back where it was, or where it
 /// was already level with a point or on a curve, adds nothing (Onshape infers what the drop
 /// changes, not what already held).
-pub fn drag_constraints_from(base: &Sketch, p: PointId, placed: &[Placed]) -> Vec<crate::Constraint> {
+pub fn drag_constraints_from(
+    base: &Sketch,
+    p: PointId,
+    placed: &[Placed],
+) -> Vec<crate::Constraint> {
     let Some(start) = base.points.get(p).map(|q| q.pos) else {
         return Vec::new();
     };
@@ -796,10 +807,14 @@ pub fn drag_constraints_from(base: &Sketch, p: PointId, placed: &[Placed]) -> Ve
             let held = match *c {
                 ConstraintOf::Coincident(_, r) => pos(r).is_some_and(|q| q.distance(start) < EPS),
                 ConstraintOf::PointOnCurve(_, c) => on(c),
-                ConstraintOf::Midpoint(_, CurveRef::Curve(k)) => match base.curves.get(k).map(|c| c.kind) {
-                    Some(CurveKind::Line { a, b }) => base.pos(a).midpoint(base.pos(b)).distance(start) < EPS,
-                    _ => false,
-                },
+                ConstraintOf::Midpoint(_, CurveRef::Curve(k)) => {
+                    match base.curves.get(k).map(|c| c.kind) {
+                        Some(CurveKind::Line { a, b }) => {
+                            base.pos(a).midpoint(base.pos(b)).distance(start) < EPS
+                        }
+                        _ => false,
+                    }
+                }
                 ConstraintOf::Horizontal(Orient::Points(_, r)) => {
                     pos(r).is_some_and(|q| (q.y - start.y).abs() < EPS)
                 }
@@ -908,7 +923,10 @@ mod tests {
         assert_eq!(c.constraints, vec![Placed::Horizontal(Guide::Anchor)]);
         assert!(c.pos.distance(Vec2::new(30.0, 0.0)) < 1e-12);
         let specs = placed_specs(&s, c.pos, &c.constraints, ctx.anchor, true);
-        assert!(matches!(specs[..], [ConstraintOf::Horizontal(Orient::Line(_))]));
+        assert!(matches!(
+            specs[..],
+            [ConstraintOf::Horizontal(Orient::Line(_))]
+        ));
         // Along Y from a point on the Y axis: vertical.
         let ctx = ToolContext {
             anchor: Some(Vec2::new(0.0, -10.0)),
@@ -1144,7 +1162,10 @@ mod tests {
         let mid = s.point_at(Vec2::new(20.0, 10.0), 1e-9).unwrap();
         let end = s.point_at(c.pos, 1e-9).unwrap();
         let has = |want: crate::Constraint| s.constraints.values().any(|x| x.same_as(&want));
-        assert!(has(ConstraintOf::Midpoint(PointRef::Point(mid), CurveRef::Curve(l))));
+        assert!(has(ConstraintOf::Midpoint(
+            PointRef::Point(mid),
+            CurveRef::Curve(l)
+        )));
         assert!(has(ConstraintOf::Vertical(Orient::Points(
             PointRef::Point(end),
             PointRef::Point(mid)

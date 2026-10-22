@@ -16,9 +16,9 @@ use bevy::diagnostic::DiagnosticsStore;
 use bevy::gizmos::config::GizmoConfigStore;
 use bevy::gizmos::{GizmoAsset, GizmoHandles};
 use bevy::log::BoxedLayer;
+use bevy::log::tracing::Subscriber;
 use bevy::log::tracing::field::{Field, Visit};
 use bevy::log::tracing::span::{Attributes, Id};
-use bevy::log::tracing::Subscriber;
 use bevy::log::tracing_subscriber::Layer;
 use bevy::log::tracing_subscriber::layer::Context;
 use bevy::log::tracing_subscriber::registry::LookupSpan;
@@ -33,8 +33,17 @@ const GPU_STALE_SECS: f32 = 1.0;
 
 /// The schedules the main loop runs one after another each frame (`Main`'s, then the render
 /// world's extract): their bars add up to about the frame.
-pub const MAIN_SCHEDULES: &[&str] =
-    &["First", "PreUpdate", "StateTransition", "RunFixedMainLoop", "Update", "SpawnScene", "PostUpdate", "Last", "ExtractSchedule"];
+pub const MAIN_SCHEDULES: &[&str] = &[
+    "First",
+    "PreUpdate",
+    "StateTransition",
+    "RunFixedMainLoop",
+    "Update",
+    "SpawnScene",
+    "PostUpdate",
+    "Last",
+    "ExtractSchedule",
+];
 /// The render thread's schedules (it renders the frame before while the main loop runs; the
 /// extract waits for it). `RenderGraph` runs inside `Render`.
 pub const RENDER_SCHEDULES: &[&str] = &["Render"];
@@ -43,7 +52,8 @@ pub struct FrameProfilePlugin;
 
 impl Plugin for FrameProfilePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<FrameProfile>().add_systems(First, take_frame);
+        app.init_resource::<FrameProfile>()
+            .add_systems(First, take_frame);
         if !app.is_plugin_added::<RenderDiagnosticsPlugin>() {
             app.add_plugins(RenderDiagnosticsPlugin);
         }
@@ -123,8 +133,12 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for ProfilerLayer {
     fn on_exit(&self, id: &Id, ctx: Context<'_, S>) {
         let Some(span) = ctx.span(id) else { return };
         let mut ext = span.extensions_mut();
-        let Some(Entered(start)) = ext.remove::<Entered>() else { return };
-        let Some(SpanLabel(kind, name)) = ext.get_mut::<SpanLabel>() else { return };
+        let Some(Entered(start)) = ext.remove::<Entered>() else {
+            return;
+        };
+        let Some(SpanLabel(kind, name)) = ext.get_mut::<SpanLabel>() else {
+            return;
+        };
         let ns = start.elapsed().as_nanos() as u64;
         if let Ok(mut tally) = self.0.lock() {
             let e = tally.entry((*kind, name.clone())).or_default();
@@ -185,7 +199,12 @@ impl FrameProfile {
         let now = sample.at;
         self.frames.push_back(sample);
         // At least the last frame stays, however long it took.
-        while self.frames.len() > 1 && self.frames.front().is_some_and(|f| now - f.at > WINDOW_SECS) {
+        while self.frames.len() > 1
+            && self
+                .frames
+                .front()
+                .is_some_and(|f| now - f.at > WINDOW_SECS)
+        {
             self.frames.pop_front();
         }
     }
@@ -205,20 +224,41 @@ impl FrameProfile {
             }
             let mut rows: Vec<Row> = by
                 .into_iter()
-                .map(|(name, (sum, max_ms, runs))| Row { name, ms: sum / n as f32, max_ms, runs: runs as f32 / n as f32 })
+                .map(|(name, (sum, max_ms, runs))| Row {
+                    name,
+                    ms: sum / n as f32,
+                    max_ms,
+                    runs: runs as f32 / n as f32,
+                })
                 .collect();
             rows.sort_by(|a, b| b.ms.total_cmp(&a.ms).then_with(|| a.name.cmp(&b.name)));
             rows
         };
         let cpu = |kind: Kind| {
-            let mut it = self.frames.iter().flat_map(move |f| f.cpu.iter().filter(move |c| c.0 == kind).map(|c| (c.1.to_string(), c.2, c.3)));
+            let mut it = self.frames.iter().flat_map(move |f| {
+                f.cpu
+                    .iter()
+                    .filter(move |c| c.0 == kind)
+                    .map(|c| (c.1.to_string(), c.2, c.3))
+            });
             rows(&mut it)
         };
         let schedules = cpu(Kind::Schedule);
-        let pick = |names: &[&str]| names.iter().filter_map(|s| schedules.iter().find(|r| r.name == *s).cloned()).collect();
+        let pick = |names: &[&str]| {
+            names
+                .iter()
+                .filter_map(|s| schedules.iter().find(|r| r.name == *s).cloned())
+                .collect()
+        };
         let (main, render) = (pick(MAIN_SCHEDULES), pick(RENDER_SCHEDULES));
-        let mut gpu = self.frames.iter().flat_map(|f| f.gpu.iter().map(|(p, ms)| (p.clone(), *ms, 1)));
-        let mut gizmos = self.frames.iter().flat_map(|f| f.gizmos.iter().map(|(g, n)| (g.clone(), *n as f32, 1)));
+        let mut gpu = self
+            .frames
+            .iter()
+            .flat_map(|f| f.gpu.iter().map(|(p, ms)| (p.clone(), *ms, 1)));
+        let mut gizmos = self
+            .frames
+            .iter()
+            .flat_map(|f| f.gizmos.iter().map(|(g, n)| (g.clone(), *n as f32, 1)));
         Summary {
             frames: n,
             frame_ms: self.frames.iter().map(|f| f.frame_ms).sum::<f32>() / n as f32,
@@ -299,18 +339,30 @@ fn take_frame(
         .map(|s| {
             s.iter()
                 .filter_map(|d| {
-                    let path = d.path().as_str().strip_prefix("render/")?.strip_suffix("/elapsed_gpu")?;
+                    let path = d
+                        .path()
+                        .as_str()
+                        .strip_prefix("render/")?
+                        .strip_suffix("/elapsed_gpu")?;
                     let m = d.measurement()?;
-                    (now.saturating_duration_since(m.time).as_secs_f32() < GPU_STALE_SECS).then(|| (path.to_string(), m.value as f32))
+                    (now.saturating_duration_since(m.time).as_secs_f32() < GPU_STALE_SECS)
+                        .then(|| (path.to_string(), m.value as f32))
                 })
                 .collect()
         })
         .unwrap_or_default();
     let mut gizmos = Vec::new();
-    if let (Some(handles), Some(configs), Some(assets)) = (gizmo_handles, gizmo_configs, gizmo_assets) {
-        let names: HashMap<_, _> = configs.iter().map(|(id, _, group)| (*id, group.reflect_type_path().to_string())).collect();
+    if let (Some(handles), Some(configs), Some(assets)) =
+        (gizmo_handles, gizmo_configs, gizmo_assets)
+    {
+        let names: HashMap<_, _> = configs
+            .iter()
+            .map(|(id, _, group)| (*id, group.reflect_type_path().to_string()))
+            .collect();
         for (id, handle) in handles.handles() {
-            let Some(asset) = handle.as_ref().and_then(|h| assets.get(h)) else { continue };
+            let Some(asset) = handle.as_ref().and_then(|h| assets.get(h)) else {
+                continue;
+            };
             let b = asset.buffer();
             let n = (b.list_positions.len() + b.strip_positions.len()) as u32;
             if n > 0 {
@@ -318,7 +370,13 @@ fn take_frame(
             }
         }
     }
-    profile.push(FrameSample { at: time.elapsed_secs_f64(), frame_ms: time.delta_secs() * 1000.0, cpu, gpu, gizmos });
+    profile.push(FrameSample {
+        at: time.elapsed_secs_f64(),
+        frame_ms: time.delta_secs() * 1000.0,
+        cpu,
+        gpu,
+        gizmos,
+    });
 }
 
 #[cfg(test)]
@@ -327,8 +385,14 @@ mod tests {
 
     #[test]
     fn short_names_drop_generics_and_crates() {
-        assert_eq!(short_name("cadrs_app::plane_display::place_plane_feature_labels"), "plane_display::place_plane_feature_labels");
-        assert_eq!(short_name("bevy_ecs::event::update<bevy_window::WindowResized>"), "event::update");
+        assert_eq!(
+            short_name("cadrs_app::plane_display::place_plane_feature_labels"),
+            "plane_display::place_plane_feature_labels"
+        );
+        assert_eq!(
+            short_name("bevy_ecs::event::update<bevy_window::WindowResized>"),
+            "event::update"
+        );
         assert_eq!(short_name("tick"), "tick");
     }
 
@@ -340,19 +404,34 @@ mod tests {
             p.push(FrameSample {
                 at: i as f64 * 0.1,
                 frame_ms: 100.0,
-                cpu: vec![(Kind::System, sys.clone(), 10.0 * (i + 1) as f32, 1), (Kind::Schedule, "Update".into(), 50.0, 1)],
+                cpu: vec![
+                    (Kind::System, sys.clone(), 10.0 * (i + 1) as f32, 1),
+                    (Kind::Schedule, "Update".into(), 50.0, 1),
+                ],
                 gpu: vec![("main_pass".into(), 2.0)],
                 gizmos: vec![("Lines".into(), 100)],
             });
         }
         let s = p.summary();
         assert_eq!(s.frames, 4);
-        assert_eq!(s.systems[0], Row { name: "a::b::slow".into(), ms: 25.0, max_ms: 40.0, runs: 1.0 });
+        assert_eq!(
+            s.systems[0],
+            Row {
+                name: "a::b::slow".into(),
+                ms: 25.0,
+                max_ms: 40.0,
+                runs: 1.0
+            }
+        );
         assert_eq!(s.main.len(), 1);
         assert_eq!(s.gpu[0].ms, 2.0);
         assert_eq!(s.gizmos[0].ms, 100.0);
         // A frame long after drops the others, but the last frame always stays.
-        p.push(FrameSample { at: 5.0, frame_ms: 3000.0, ..default() });
+        p.push(FrameSample {
+            at: 5.0,
+            frame_ms: 3000.0,
+            ..default()
+        });
         assert_eq!(p.summary().frames, 1);
         assert_eq!(p.describe(5)["window_frames"], 1);
     }

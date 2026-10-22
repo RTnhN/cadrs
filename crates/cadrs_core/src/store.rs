@@ -107,7 +107,12 @@ struct EntryFile {
 /// The size and modified time (ns since the epoch) of a file.
 fn file_stamp(path: &Path) -> Option<(u64, u64)> {
     let m = std::fs::metadata(path).ok()?;
-    let ns = m.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos();
+    let ns = m
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_nanos();
     Some((m.len(), ns as u64))
 }
 
@@ -179,7 +184,8 @@ impl Store {
             .and_then(|m| m.modified())
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok());
-        saved.is_none_or(|t| (t.as_secs() as Timestamp) < modified) || !self.doc_dir(id).join(THUMBNAIL_LARGE_FILE).exists()
+        saved.is_none_or(|t| (t.as_secs() as Timestamp) < modified)
+            || !self.doc_dir(id).join(THUMBNAIL_LARGE_FILE).exists()
     }
 
     /// Writes `document.ron` for `doc`.
@@ -207,7 +213,10 @@ impl Store {
     /// Creates a new document on disk with a placeholder thumbnail.
     pub fn create(&self, doc: &Document, meta: &DocumentMeta) -> Result<DocumentEntry, StoreError> {
         self.save(doc, meta)?;
-        self.write_thumbnail(doc.id, &thumbnail::placeholder(thumbnail_seed(&doc.name, meta.created)))?;
+        self.write_thumbnail(
+            doc.id,
+            &thumbnail::placeholder(thumbnail_seed(&doc.name, meta.created)),
+        )?;
         Ok(DocumentEntry {
             id: doc.id,
             name: doc.name.clone(),
@@ -278,8 +287,12 @@ impl Store {
         // Most documents have a current `entry.ron`; parse the rest in full, in parallel, and
         // write their `entry.ron` for next time.
         let cached: Vec<Option<DocumentEntry>> = paths.iter().map(|p| read_entry(p)).collect();
-        let missing: Vec<&PathBuf> =
-            paths.iter().zip(&cached).filter(|(_, c)| c.is_none()).map(|(p, _)| p).collect();
+        let missing: Vec<&PathBuf> = paths
+            .iter()
+            .zip(&cached)
+            .filter(|(_, c)| c.is_none())
+            .map(|(p, _)| p)
+            .collect();
         let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
         let chunk = missing.len().div_ceil(threads).max(1);
         let mut read: Vec<Result<DocumentEntry, StoreError>> = std::thread::scope(|s| {
@@ -299,13 +312,18 @@ impl Store {
                     })
                 })
                 .collect();
-            jobs.into_iter().flat_map(|j| j.join().expect("a document read panicked")).collect::<Vec<_>>()
+            jobs.into_iter()
+                .flat_map(|j| j.join().expect("a document read panicked"))
+                .collect::<Vec<_>>()
         })
         .into_iter()
         .rev()
         .collect();
         for (path, cached) in paths.into_iter().zip(cached) {
-            match cached.map(Ok).unwrap_or_else(|| read.pop().expect("one read per missing entry")) {
+            match cached
+                .map(Ok)
+                .unwrap_or_else(|| read.pop().expect("one read per missing entry"))
+            {
                 Ok(e) => lib.entries.push(e),
                 Err(e) => errors.push((path, e)),
             }
@@ -365,7 +383,12 @@ impl Store {
     /// merged with what is on disk now: what `before` → `after` added, changed or removed is
     /// applied to the current `folders.ron`, so a folder another thread wrote since `before`
     /// was read (Create assembly's component folder, P3H) isn't lost.
-    pub fn sync_locked(&self, _lock: &LibraryLock, before: &Library, after: &Library) -> Result<(), StoreError> {
+    pub fn sync_locked(
+        &self,
+        _lock: &LibraryLock,
+        before: &Library,
+        after: &Library,
+    ) -> Result<(), StoreError> {
         // Permanently deleted: move aside (undo moves it back).
         for e in &before.entries {
             if after.get(e.id).is_none() && self.doc_dir(e.id).is_dir() {
@@ -387,7 +410,11 @@ impl Store {
         }
         if before.folders != after.folders || before.labels != after.labels {
             // Unreadable: as before the merge (`before` stands for the disk, so `after` is written).
-            let disk = self.read_folders().unwrap_or_else(|_| FoldersFile { version: SCHEMA_VERSION, folders: before.folders.clone(), labels: before.labels.clone() });
+            let disk = self.read_folders().unwrap_or_else(|_| FoldersFile {
+                version: SCHEMA_VERSION,
+                folders: before.folders.clone(),
+                labels: before.labels.clone(),
+            });
             let file = FoldersFile {
                 version: SCHEMA_VERSION,
                 folders: merge_by_id(&before.folders, &after.folders, &disk.folders, |f| f.id),
@@ -474,7 +501,12 @@ impl Store {
         let large = self.doc_dir(id).join(THUMBNAIL_LARGE_FILE);
         if img.width() > thumbnail::THUMB_W {
             write_atomic(&large, &png(img)?)?;
-            let small = image::imageops::resize(img, thumbnail::THUMB_W, thumbnail::THUMB_H, image::imageops::FilterType::Triangle);
+            let small = image::imageops::resize(
+                img,
+                thumbnail::THUMB_W,
+                thumbnail::THUMB_H,
+                image::imageops::FilterType::Triangle,
+            );
             write_atomic(&self.thumbnail_path(id), &png(&small)?)?;
         } else {
             if large.exists() {
@@ -528,7 +560,8 @@ impl Store {
         ];
         #[allow(clippy::needless_range_loop)]
         for i in 0..n {
-            let id = DocumentId::from_u128(0xcad0_0000_0000_0000_0000_0000_0000_0000 + i as u128 + 1);
+            let id =
+                DocumentId::from_u128(0xcad0_0000_0000_0000_0000_0000_0000_0000 + i as u128 + 1);
             let name = if i < NAMES.len() {
                 NAMES[i].to_string()
             } else {
@@ -536,7 +569,10 @@ impl Store {
             };
             let mut doc = Document::new(name);
             doc.id = id;
-            let age = AGES_MIN.get(i).copied().unwrap_or(43_300 + 1_440 * i as i64);
+            let age = AGES_MIN
+                .get(i)
+                .copied()
+                .unwrap_or(43_300 + 1_440 * i as i64);
             let modified = now - age * 60;
             let mut meta = DocumentMeta::new(user, modified - 3_600);
             meta.modified = modified;
@@ -557,7 +593,12 @@ static LIBRARY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// `disk` with the change from `before` to `after` applied (by id): items `after` removed are
 /// dropped, items it added or changed take `after`'s value; the result is in `after`'s order,
 /// then the items only `disk` has (added by someone else since `before` was read).
-fn merge_by_id<T: Clone + PartialEq, K: PartialEq>(before: &[T], after: &[T], disk: &[T], id: impl Fn(&T) -> K) -> Vec<T> {
+fn merge_by_id<T: Clone + PartialEq, K: PartialEq>(
+    before: &[T],
+    after: &[T],
+    disk: &[T],
+    id: impl Fn(&T) -> K,
+) -> Vec<T> {
     let mut out: Vec<T> = Vec::new();
     for a in after {
         let unchanged = before.iter().any(|b| b == a);
@@ -665,7 +706,12 @@ mod migrate {
             // Each extrude's region keys, by index.
             let keys: Vec<(uuid::Uuid, Vec<u64>)> = features
                 .iter()
-                .filter_map(|f| Some((f.id.0, f.extrude()?.regions.iter().map(|r| r.key()).collect())))
+                .filter_map(|f| {
+                    Some((
+                        f.id.0,
+                        f.extrude()?.regions.iter().map(|r| r.key()).collect(),
+                    ))
+                })
                 .collect();
             let fix = |name: FaceName, op: uuid::Uuid| -> FaceName {
                 if !name.op.is_nil() {
@@ -679,8 +725,14 @@ mod migrate {
                         .unwrap_or(u64::MAX - i)
                 };
                 let origin = match name.origin {
-                    FaceOrigin::Cap { region, end } => FaceOrigin::Cap { region: key(region), end },
-                    FaceOrigin::Side { region, curve } => FaceOrigin::Side { region: key(region), curve },
+                    FaceOrigin::Cap { region, end } => FaceOrigin::Cap {
+                        region: key(region),
+                        end,
+                    },
+                    FaceOrigin::Side { region, curve } => FaceOrigin::Side {
+                        region: key(region),
+                        curve,
+                    },
                     o => o,
                 };
                 FaceName { op, origin, ..name }
@@ -898,19 +950,42 @@ mod tests {
         let ps = doc.elements[0].id;
         let mut h = crate::History::default();
         let (a, b) = (FeatureId::new(), FeatureId::new());
-        h.execute(&mut doc, &AddSketch { element: ps, feature: a, plane: Some(PlaneRef::Front) })
-            .unwrap();
         h.execute(
             &mut doc,
-            &AddSketchLine { element: ps, feature: a, a: Vec2::ZERO, b: Vec2::new(5.0, 2.0) },
+            &AddSketch {
+                element: ps,
+                feature: a,
+                plane: Some(PlaneRef::Front),
+            },
+        )
+        .unwrap();
+        h.execute(
+            &mut doc,
+            &AddSketchLine {
+                element: ps,
+                feature: a,
+                a: Vec2::ZERO,
+                b: Vec2::new(5.0, 2.0),
+            },
         )
         .unwrap();
         // An accepted sketch without a plane (invalid) persists too.
-        h.execute(&mut doc, &AddSketch { element: ps, feature: b, plane: None })
-            .unwrap();
         h.execute(
             &mut doc,
-            &SetSketchImprinting { element: ps, feature: b, disable_imprinting: true },
+            &AddSketch {
+                element: ps,
+                feature: b,
+                plane: None,
+            },
+        )
+        .unwrap();
+        h.execute(
+            &mut doc,
+            &SetSketchImprinting {
+                element: ps,
+                feature: b,
+                disable_imprinting: true,
+            },
         )
         .unwrap();
         let meta = DocumentMeta::new("me", 1_000);
@@ -930,7 +1005,11 @@ mod tests {
         use cadrs_sketch::{PlaneRef, Sketch, Vec2};
         let store = temp_store("v1");
         let doc_id = DocumentId::from_u128(42);
-        let (ps, asm, f) = (ElementId::from_u128(1), ElementId::from_u128(2), FeatureId::from_u128(3));
+        let (ps, asm, f) = (
+            ElementId::from_u128(1),
+            ElementId::from_u128(2),
+            FeatureId::from_u128(3),
+        );
         let mut geometry = Sketch::new();
         geometry.add_line(Vec2::new(1.0, 2.0), Vec2::new(3.0, 4.0));
         let inner = ron::to_string(&geometry).unwrap();
@@ -977,25 +1056,43 @@ mod tests {
         let ps = doc.elements[0].id;
         let mut h = crate::History::default();
         let f = FeatureId::new();
-        h.execute(&mut doc, &AddSketch { element: ps, feature: f, plane: Some(PlaneRef::Top) })
-            .unwrap();
         h.execute(
             &mut doc,
-            &AddSketchLine { element: ps, feature: f, a: Vec2::ZERO, b: Vec2::new(5.0, 2.0) },
+            &AddSketch {
+                element: ps,
+                feature: f,
+                plane: Some(PlaneRef::Top),
+            },
+        )
+        .unwrap();
+        h.execute(
+            &mut doc,
+            &AddSketchLine {
+                element: ps,
+                feature: f,
+                a: Vec2::ZERO,
+                b: Vec2::new(5.0, 2.0),
+            },
         )
         .unwrap();
         let meta = DocumentMeta::new("me", 1_000);
         store.save(&doc, &meta).unwrap();
         // Rewrite it as an M8 build would have: the same text with version 2.
         let path = store.document_path(doc.id);
-        let text = std::fs::read_to_string(&path).unwrap().replace("version: 5", "version: 2");
+        let text = std::fs::read_to_string(&path)
+            .unwrap()
+            .replace("version: 5", "version: 2");
         assert!(!text.contains("Extrude") && !text.contains("Face("));
         std::fs::write(&path, text).unwrap();
         let file = store.load(doc.id).unwrap();
         assert_eq!(file.version, SCHEMA_VERSION);
         assert_eq!(file.document, doc);
         store.save(&file.document, &file.meta).unwrap();
-        assert!(std::fs::read_to_string(&path).unwrap().contains("version: 5"));
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("version: 5")
+        );
         std::fs::remove_dir_all(store.root()).unwrap();
     }
 
@@ -1011,8 +1108,15 @@ mod tests {
         let ps = doc.elements[0].id;
         let mut h = crate::History::default();
         let (sk, ex, sk2) = (FeatureId::new(), FeatureId::new(), FeatureId::new());
-        h.execute(&mut doc, &AddSketch { element: ps, feature: sk, plane: Some(PlaneRef::Top) })
-            .unwrap();
+        h.execute(
+            &mut doc,
+            &AddSketch {
+                element: ps,
+                feature: sk,
+                plane: Some(PlaneRef::Top),
+            },
+        )
+        .unwrap();
         h.execute(
             &mut doc,
             &EditSketch {
@@ -1032,7 +1136,13 @@ mod tests {
             },
         )
         .unwrap();
-        let geometry = doc.elements[0].feature(sk).unwrap().sketch().unwrap().geometry.clone();
+        let geometry = doc.elements[0]
+            .feature(sk)
+            .unwrap()
+            .sketch()
+            .unwrap()
+            .geometry
+            .clone();
         let region = cadrs_sketch::region::regions(&geometry).remove(0);
         let extrude = ExtrudeFeature {
             regions: vec![RegionRef::new(sk, &region)],
@@ -1041,15 +1151,38 @@ mod tests {
             flip: true,
             ..ExtrudeFeature::default()
         };
-        h.execute(&mut doc, &AddExtrude { element: ps, feature: ex, extrude }).unwrap();
+        h.execute(
+            &mut doc,
+            &AddExtrude {
+                element: ps,
+                feature: ex,
+                extrude,
+            },
+        )
+        .unwrap();
         let features = doc.elements[0].features().to_vec();
-        let face = crate::parts::face_plane(&features, ex, crate::parts::cap_name(&features, ex, 0, true).unwrap()).unwrap();
-        h.execute(&mut doc, &AddSketch { element: ps, feature: sk2, plane: Some(face) })
-            .unwrap();
+        let face = crate::parts::face_plane(
+            &features,
+            ex,
+            crate::parts::cap_name(&features, ex, 0, true).unwrap(),
+        )
+        .unwrap();
+        h.execute(
+            &mut doc,
+            &AddSketch {
+                element: ps,
+                feature: sk2,
+                plane: Some(face),
+            },
+        )
+        .unwrap();
         let meta = DocumentMeta::new("me", 1_000);
         store.save(&doc, &meta).unwrap();
         let text = std::fs::read_to_string(store.document_path(doc.id)).unwrap();
-        assert!(text.contains("Extrude(") && text.contains("Face("), "{text}");
+        assert!(
+            text.contains("Extrude(") && text.contains("Face("),
+            "{text}"
+        );
         let file = store.load(doc.id).unwrap();
         assert_eq!(file.document, doc);
         let parts = crate::parts::parts(file.document.elements[0].features());
@@ -1119,7 +1252,9 @@ mod tests {
     #[test]
     fn purge_moves_aside_and_undo_restores() {
         use crate::ids::FolderId;
-        use crate::library::{CreateFolder, LibraryCommand, LibraryHistory, PurgeEntry, TrashEntry};
+        use crate::library::{
+            CreateFolder, LibraryCommand, LibraryHistory, PurgeEntry, TrashEntry,
+        };
         let store = temp_store("purge");
         store.seed_samples(2, "me", 1_000_000).unwrap();
         let (mut lib, _) = store.list();
@@ -1180,7 +1315,9 @@ mod tests {
     #[test]
     fn labels_and_descriptions_survive_a_reload() {
         use crate::ids::LabelId;
-        use crate::library::{CreateLabel, DeleteLabel, LibraryCommand, LibraryHistory, SetDescription, SetLabels};
+        use crate::library::{
+            CreateLabel, DeleteLabel, LibraryCommand, LibraryHistory, SetDescription, SetLabels,
+        };
         let store = temp_store("labels");
         store.seed_samples(5, "me", 1_000_000).unwrap();
         let (mut lib, _) = store.list();
@@ -1192,15 +1329,53 @@ mod tests {
         };
         let (fixtures, hardware) = (LabelId::from_u128(1), LabelId::from_u128(2));
         let ids: Vec<DocumentId> = lib.entries.iter().map(|e| e.id).collect();
-        step(&mut lib, &mut h, &CreateLabel { id: fixtures, name: "Fixtures".into(), colour: [1, 2, 3], assign: vec![ids[0]] });
-        step(&mut lib, &mut h, &CreateLabel { id: hardware, name: "Hardware".into(), colour: [4, 5, 6], assign: vec![] });
-        step(&mut lib, &mut h, &SetLabels { id: ids[2], labels: vec![hardware, fixtures] });
-        step(&mut lib, &mut h, &SetDescription { id: ids[1], description: "Extended hubcap".into() });
+        step(
+            &mut lib,
+            &mut h,
+            &CreateLabel {
+                id: fixtures,
+                name: "Fixtures".into(),
+                colour: [1, 2, 3],
+                assign: vec![ids[0]],
+            },
+        );
+        step(
+            &mut lib,
+            &mut h,
+            &CreateLabel {
+                id: hardware,
+                name: "Hardware".into(),
+                colour: [4, 5, 6],
+                assign: vec![],
+            },
+        );
+        step(
+            &mut lib,
+            &mut h,
+            &SetLabels {
+                id: ids[2],
+                labels: vec![hardware, fixtures],
+            },
+        );
+        step(
+            &mut lib,
+            &mut h,
+            &SetDescription {
+                id: ids[1],
+                description: "Extended hubcap".into(),
+            },
+        );
         let (reloaded, errors) = store.list();
         assert!(errors.is_empty());
         assert_eq!(reloaded, lib);
-        assert_eq!(reloaded.get(ids[2]).unwrap().meta.labels, [hardware, fixtures]);
-        assert_eq!(reloaded.get(ids[1]).unwrap().meta.description, "Extended hubcap");
+        assert_eq!(
+            reloaded.get(ids[2]).unwrap().meta.labels,
+            [hardware, fixtures]
+        );
+        assert_eq!(
+            reloaded.get(ids[1]).unwrap().meta.description,
+            "Extended hubcap"
+        );
         // Deleting a label, then undoing it, reloads the same way.
         step(&mut lib, &mut h, &DeleteLabel { id: fixtures });
         assert_eq!(store.list().0, lib);
@@ -1218,10 +1393,15 @@ mod tests {
     fn a_sample_copy_is_a_new_editable_document() {
         use crate::library::{AddEntry, LibraryHistory};
         let store = temp_store("sample");
-        let path = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/linked_block_standin.cadrs"));
+        let path = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/linked_block_standin.cadrs"
+        ));
         let source = Store::load_path(path).unwrap();
         let id = DocumentId::from_u128(77);
-        let entry = store.copy_from_file(path, id, "Block source copy", "me", 5_000).unwrap();
+        let entry = store
+            .copy_from_file(path, id, "Block source copy", "me", 5_000)
+            .unwrap();
         assert_eq!(entry.meta.owned_by, "me");
         let mut lib = Library::default();
         let mut h = LibraryHistory::default();

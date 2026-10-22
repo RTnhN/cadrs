@@ -2,9 +2,9 @@
 //! (profiles, feature specs) and what comes out (ids, face and edge info, meshes, mass
 //! properties, history). Lengths are mm and angles radians throughout.
 
+use crate::native::tol;
 use nalgebra::{Isometry3, Matrix3, Point2, Point3, Unit, Vector3};
 use serde::{Deserialize, Serialize};
-use crate::native::tol;
 
 /// A body (solid) owned by a kernel session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -178,7 +178,13 @@ impl Curve2 {
     pub fn point_at(&self, s: f64) -> Point2<f64> {
         match *self {
             Curve2::Line { a, b, .. } => a + (b - a) * s,
-            Curve2::Arc { center, radius, start_angle, sweep, .. } => {
+            Curve2::Arc {
+                center,
+                radius,
+                start_angle,
+                sweep,
+                ..
+            } => {
                 let t = start_angle + sweep * s;
                 Point2::new(center.x + radius * t.cos(), center.y + radius * t.sin())
             }
@@ -186,19 +192,51 @@ impl Curve2 {
                 let t = std::f64::consts::TAU * s;
                 Point2::new(center.x + radius * t.cos(), center.y + radius * t.sin())
             }
-            Curve2::Ellipse { center, major_radius, minor_radius, rotation, .. } => ellipse_point(
+            Curve2::Ellipse {
+                center,
+                major_radius,
+                minor_radius,
+                rotation,
+                ..
+            } => ellipse_point(
                 center,
                 major_radius,
                 minor_radius,
                 rotation,
                 std::f64::consts::TAU * s,
             ),
-            Curve2::EllipseArc { center, major_radius, minor_radius, rotation, start, sweep, .. } => {
-                ellipse_point(center, major_radius, minor_radius, rotation, start + sweep * s)
-            }
-            Curve2::OffsetEllipseArc { center, major_radius, minor_radius, rotation, start, sweep, offset, .. } => {
-                offset_ellipse_point(center, major_radius, minor_radius, rotation, offset, start + sweep * s)
-            }
+            Curve2::EllipseArc {
+                center,
+                major_radius,
+                minor_radius,
+                rotation,
+                start,
+                sweep,
+                ..
+            } => ellipse_point(
+                center,
+                major_radius,
+                minor_radius,
+                rotation,
+                start + sweep * s,
+            ),
+            Curve2::OffsetEllipseArc {
+                center,
+                major_radius,
+                minor_radius,
+                rotation,
+                start,
+                sweep,
+                offset,
+                ..
+            } => offset_ellipse_point(
+                center,
+                major_radius,
+                minor_radius,
+                rotation,
+                offset,
+                start + sweep * s,
+            ),
             Curve2::Bezier { ref poles, .. } => bezier_point(poles, s),
         }
     }
@@ -221,7 +259,9 @@ impl Curve2 {
     pub fn is_closed(&self) -> bool {
         match *self {
             Curve2::Circle { .. } | Curve2::Ellipse { .. } => true,
-            Curve2::Arc { sweep, .. } | Curve2::EllipseArc { sweep, .. } | Curve2::OffsetEllipseArc { sweep, .. } => {
+            Curve2::Arc { sweep, .. }
+            | Curve2::EllipseArc { sweep, .. }
+            | Curve2::OffsetEllipseArc { sweep, .. } => {
                 sweep.abs() >= std::f64::consts::TAU - tol::ANGULAR
             }
             Curve2::Line { .. } | Curve2::Bezier { .. } => false,
@@ -230,7 +270,13 @@ impl Curve2 {
 }
 
 /// `center + R(rotation)·(major·cos t, minor·sin t)`.
-pub fn ellipse_point(center: Point2<f64>, major: f64, minor: f64, rotation: f64, t: f64) -> Point2<f64> {
+pub fn ellipse_point(
+    center: Point2<f64>,
+    major: f64,
+    minor: f64,
+    rotation: f64,
+    t: f64,
+) -> Point2<f64> {
     let (x, y) = (major * t.cos(), minor * t.sin());
     let (s, c) = rotation.sin_cos();
     Point2::new(center.x + c * x - s * y, center.y + s * x + c * y)
@@ -239,7 +285,14 @@ pub fn ellipse_point(center: Point2<f64>, major: f64, minor: f64, rotation: f64,
 /// The point at `t` of the curve `offset` from the ellipse of [`ellipse_point`]: the ellipse's
 /// point moved `offset` along its outward unit normal (the gradient of `x²/a² + y²/b²`, which
 /// points outward whatever the signs of the radii).
-pub fn offset_ellipse_point(center: Point2<f64>, major: f64, minor: f64, rotation: f64, offset: f64, t: f64) -> Point2<f64> {
+pub fn offset_ellipse_point(
+    center: Point2<f64>,
+    major: f64,
+    minor: f64,
+    rotation: f64,
+    offset: f64,
+    t: f64,
+) -> Point2<f64> {
     let (x, y) = (major * t.cos(), minor * t.sin());
     let (gx, gy) = (x / (major * major), y / (minor * minor));
     let l = (gx * gx + gy * gy).sqrt().max(tol::TINY);
@@ -1136,12 +1189,18 @@ impl Default for Motion {
 impl Motion {
     /// The motion that moves nothing.
     pub fn identity() -> Self {
-        Self { linear: Matrix3::identity(), translation: Vector3::zeros() }
+        Self {
+            linear: Matrix3::identity(),
+            translation: Vector3::zeros(),
+        }
     }
 
     /// A move by `v`.
     pub fn translation(v: Vector3<f64>) -> Self {
-        Self { linear: Matrix3::identity(), translation: v }
+        Self {
+            linear: Matrix3::identity(),
+            translation: v,
+        }
     }
 
     /// A turn by `angle` (radians, counter-clockwise seen from the tip of `axis.dir`) about
@@ -1149,7 +1208,10 @@ impl Motion {
     pub fn rotation(axis: &Axis, angle: f64) -> Self {
         let r = nalgebra::Rotation3::from_axis_angle(&axis.dir, angle).into_inner();
         let o = axis.origin.coords;
-        Self { linear: r, translation: o - r * o }
+        Self {
+            linear: r,
+            translation: o - r * o,
+        }
     }
 
     /// The reflection in the plane through `point` with unit normal `normal`:
@@ -1157,23 +1219,35 @@ impl Motion {
     pub fn reflection(point: Point3<f64>, normal: Unit<Vector3<f64>>) -> Self {
         let n = normal.into_inner();
         let linear = Matrix3::identity() - 2.0 * n * n.transpose();
-        Self { linear, translation: 2.0 * n * n.dot(&point.coords) }
+        Self {
+            linear,
+            translation: 2.0 * n * n.dot(&point.coords),
+        }
     }
 
     /// The rigid motion `t`.
     pub fn from_isometry(t: &Transform) -> Self {
-        Self { linear: t.rotation.to_rotation_matrix().into_inner(), translation: t.translation.vector }
+        Self {
+            linear: t.rotation.to_rotation_matrix().into_inner(),
+            translation: t.translation.vector,
+        }
     }
 
     /// `self` then `next`.
     pub fn then(&self, next: &Motion) -> Motion {
-        Motion { linear: next.linear * self.linear, translation: next.linear * self.translation + next.translation }
+        Motion {
+            linear: next.linear * self.linear,
+            translation: next.linear * self.translation + next.translation,
+        }
     }
 
     /// The motion that undoes this one.
     pub fn inverse(&self) -> Motion {
         let inv = self.linear.transpose();
-        Motion { linear: inv, translation: -(inv * self.translation) }
+        Motion {
+            linear: inv,
+            translation: -(inv * self.translation),
+        }
     }
 
     /// `p` moved.
@@ -1197,13 +1271,29 @@ impl Motion {
             return None;
         }
         let r = nalgebra::Rotation3::from_matrix_unchecked(self.linear);
-        Some(Transform::from_parts(nalgebra::Translation3::from(self.translation), nalgebra::UnitQuaternion::from_rotation_matrix(&r)))
+        Some(Transform::from_parts(
+            nalgebra::Translation3::from(self.translation),
+            nalgebra::UnitQuaternion::from_rotation_matrix(&r),
+        ))
     }
 
     /// The 3 × 4 matrix `[linear | translation]` row by row.
     pub fn rows(&self) -> [f64; 12] {
         let (m, t) = (&self.linear, &self.translation);
-        [m[(0, 0)], m[(0, 1)], m[(0, 2)], t.x, m[(1, 0)], m[(1, 1)], m[(1, 2)], t.y, m[(2, 0)], m[(2, 1)], m[(2, 2)], t.z]
+        [
+            m[(0, 0)],
+            m[(0, 1)],
+            m[(0, 2)],
+            t.x,
+            m[(1, 0)],
+            m[(1, 1)],
+            m[(1, 2)],
+            t.y,
+            m[(2, 0)],
+            m[(2, 1)],
+            m[(2, 2)],
+            t.z,
+        ]
     }
 }
 

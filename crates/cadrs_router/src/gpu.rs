@@ -35,7 +35,20 @@ pub struct Gpu {
 }
 
 fn words(p: &Params) -> [u32; 12] {
-    [p.nx, p.ny, p.nl, p.slots, p.ortho, p.diag, p.via, p.wrong_way, p.h_layers, p.v_layers, 0, 0]
+    [
+        p.nx,
+        p.ny,
+        p.nl,
+        p.slots,
+        p.ortho,
+        p.diag,
+        p.via,
+        p.wrong_way,
+        p.h_layers,
+        p.v_layers,
+        0,
+        0,
+    ]
 }
 
 impl Gpu {
@@ -51,15 +64,50 @@ impl Gpu {
             return Err("no router shader built (cargo gpu build --shader-crate crates/cadrs_router_kernels --output-dir crates/cadrs_router/shaders)".into());
         }
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-        let adapter = futures_lite::future::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, ..Default::default() })).map_err(|e| e.to_string())?;
+        let adapter = futures_lite::future::block_on(instance.request_adapter(
+            &wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                ..Default::default()
+            },
+        ))
+        .map_err(|e| e.to_string())?;
         let limits = adapter.limits();
         let name = adapter.get_info().name;
-        let (device, queue) = futures_lite::future::block_on(adapter.request_device(&wgpu::DeviceDescriptor { label: Some("cadrs_router"), required_limits: limits.clone(), ..Default::default() })).map_err(|e| e.to_string())?;
-        let code: Vec<u32> = SPIRV.as_chunks::<4>().0.iter().map(|b| u32::from_le_bytes(*b)).collect();
-        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("cadrs_router_kernels"), source: wgpu::ShaderSource::SpirV(Cow::Owned(code)) });
-        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor { label: Some("relax"), layout: None, module: &module, entry_point: Some("relax"), compilation_options: Default::default(), cache: None });
+        let (device, queue) =
+            futures_lite::future::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+                label: Some("cadrs_router"),
+                required_limits: limits.clone(),
+                ..Default::default()
+            }))
+            .map_err(|e| e.to_string())?;
+        let code: Vec<u32> = SPIRV
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|b| u32::from_le_bytes(*b))
+            .collect();
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("cadrs_router_kernels"),
+            source: wgpu::ShaderSource::SpirV(Cow::Owned(code)),
+        });
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("relax"),
+            layout: None,
+            module: &module,
+            entry_point: Some("relax"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
         let layout = pipeline.get_bind_group_layout(0);
-        Ok(Gpu { device, queue, pipeline, layout, max_binding: limits.max_storage_buffer_binding_size, max_groups: limits.max_compute_workgroups_per_dimension, name })
+        Ok(Gpu {
+            device,
+            queue,
+            pipeline,
+            layout,
+            max_binding: limits.max_storage_buffer_binding_size,
+            max_groups: limits.max_compute_workgroups_per_dimension,
+            name,
+        })
     }
 
     /// How many nets one batch can search on a grid of `cells` (their distance grids in one
@@ -73,8 +121,17 @@ impl Gpu {
 
     fn storage(&self, label: &str, data: &[u32], extra: wgpu::BufferUsages) -> wgpu::Buffer {
         // An empty binding is not allowed: one word at least.
-        let data: Cow<[u32]> = if data.is_empty() { Cow::Owned(vec![0]) } else { Cow::Borrowed(data) };
-        self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(label), contents: bytemuck::cast_slice(&data), usage: wgpu::BufferUsages::STORAGE | extra })
+        let data: Cow<[u32]> = if data.is_empty() {
+            Cow::Owned(vec![0])
+        } else {
+            Cow::Borrowed(data)
+        };
+        self.device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents: bytemuck::cast_slice(&data),
+                usage: wgpu::BufferUsages::STORAGE | extra,
+            })
     }
 
     fn read(&self, buf: &wgpu::Buffer) -> Vec<u32> {
@@ -88,7 +145,14 @@ impl Gpu {
 
     /// Each search's distance grid: `searches` are (net, its source cells), at most
     /// [`Gpu::slots`] of them; `cong` is what entering each cell costs besides the move.
-    pub fn distances(&self, params: &Params, owner: &[u32], via_owner: &[u32], cong: &[u32], searches: &[(u32, &[u32])]) -> Vec<Vec<u32>> {
+    pub fn distances(
+        &self,
+        params: &Params,
+        owner: &[u32],
+        via_owner: &[u32],
+        cong: &[u32],
+        searches: &[(u32, &[u32])],
+    ) -> Vec<Vec<u32>> {
         let cells = params.cells();
         let slots = searches.len() as u32;
         let mut p = *params;
@@ -100,19 +164,43 @@ impl Gpu {
             }
         }
         let nets: Vec<u32> = searches.iter().map(|s| s.0).collect();
-        let uniform = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("params"), contents: bytemuck::cast_slice(&words(&p)), usage: wgpu::BufferUsages::UNIFORM });
+        let uniform = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("params"),
+                contents: bytemuck::cast_slice(&words(&p)),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
         let none = wgpu::BufferUsages::empty();
         let owner_b = self.storage("owner", owner, none);
         let via_b = self.storage("via_owner", via_owner, none);
         let cong_b = self.storage("cong", cong, none);
         let nets_b = self.storage("nets", &nets, none);
         let dist_b = self.storage("dist", &dist, wgpu::BufferUsages::COPY_SRC);
-        let changed_b = self.storage("changed", &vec![0; slots as usize], wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST);
-        let read_changed = self.device.create_buffer(&wgpu::BufferDescriptor { label: Some("changed-read"), size: slots as u64 * 4, usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+        let changed_b = self.storage(
+            "changed",
+            &vec![0; slots as usize],
+            wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+        );
+        let read_changed = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("changed-read"),
+            size: slots as u64 * 4,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("relax"),
             layout: &self.layout,
-            entries: &[&uniform, &owner_b, &via_b, &cong_b, &nets_b, &dist_b, &changed_b].iter().enumerate().map(|(i, b)| wgpu::BindGroupEntry { binding: i as u32, resource: b.as_entire_binding() }).collect::<Vec<_>>(),
+            entries: &[
+                &uniform, &owner_b, &via_b, &cong_b, &nets_b, &dist_b, &changed_b,
+            ]
+            .iter()
+            .enumerate()
+            .map(|(i, b)| wgpu::BindGroupEntry {
+                binding: i as u32,
+                resource: b.as_entire_binding(),
+            })
+            .collect::<Vec<_>>(),
         });
         let groups = cells.div_ceil(WORKGROUP);
         let zeros = vec![0u32; slots as usize];
@@ -122,10 +210,18 @@ impl Gpu {
         let mut rounds = 0;
         loop {
             rounds += 1;
-            self.queue.write_buffer(&changed_b, 0, bytemuck::cast_slice(&zeros));
-            let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("relax") });
+            self.queue
+                .write_buffer(&changed_b, 0, bytemuck::cast_slice(&zeros));
+            let mut enc = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("relax"),
+                });
             {
-                let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("relax"), timestamp_writes: None });
+                let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("relax"),
+                    timestamp_writes: None,
+                });
                 pass.set_pipeline(&self.pipeline);
                 pass.set_bind_group(0, &bind, &[]);
                 for _ in 0..PASSES {
@@ -140,13 +236,25 @@ impl Gpu {
                 break;
             }
         }
-        let read_dist = self.device.create_buffer(&wgpu::BufferDescriptor { label: Some("dist-read"), size: (cells * slots) as u64 * 4, usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
-        let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("dist") });
+        let read_dist = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("dist-read"),
+            size: (cells * slots) as u64 * 4,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut enc = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("dist"),
+            });
         enc.copy_buffer_to_buffer(&dist_b, 0, &read_dist, 0, (cells * slots) as u64 * 4);
         self.queue.submit([enc.finish()]);
         let all = self.read(&read_dist);
         if std::env::var_os("CADRS_ROUTER_TRACE").is_some() {
-            eprintln!("distances: {slots} slots, {cells} cells, {rounds} rounds of {PASSES} passes, {:.3} s", t0.elapsed().as_secs_f64());
+            eprintln!(
+                "distances: {slots} slots, {cells} cells, {rounds} rounds of {PASSES} passes, {:.3} s",
+                t0.elapsed().as_secs_f64()
+            );
         }
         all.chunks(cells as usize).map(|c| c.to_vec()).collect()
     }
@@ -173,10 +281,17 @@ fn batches(neg: &Negotiation, todo: &[usize], size: usize, margin: u32) -> Vec<V
                 let (x, y, _) = p.coords(c);
                 (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
             }
-            (x0.saturating_sub(margin), y0.saturating_sub(margin), x1 + margin, y1 + margin)
+            (
+                x0.saturating_sub(margin),
+                y0.saturating_sub(margin),
+                x1 + margin,
+                y1 + margin,
+            )
         })
         .collect();
-    let apart = |a: &(u32, u32, u32, u32), b: &(u32, u32, u32, u32)| a.2 < b.0 || b.2 < a.0 || a.3 < b.1 || b.3 < a.1;
+    let apart = |a: &(u32, u32, u32, u32), b: &(u32, u32, u32, u32)| {
+        a.2 < b.0 || b.2 < a.0 || a.3 < b.1 || b.3 < a.1
+    };
     let mut left: Vec<usize> = (0..todo.len()).collect();
     let mut out = vec![];
     while !left.is_empty() {
@@ -216,22 +331,42 @@ pub fn run(neg: &mut Negotiation, gpu: &Gpu, pricing: &Pricing) -> Vec<usize> {
                 .iter()
                 .map(|&j| {
                     let job: &Job = &neg.jobs[j];
-                    let (first, rest) = job.groups.split_first().map_or((vec![], vec![]), |(f, r)| (f.clone(), r.to_vec()));
-                    Growing { job: j, tree: first, left: rest, route: NetRoute::default() }
+                    let (first, rest) = job
+                        .groups
+                        .split_first()
+                        .map_or((vec![], vec![]), |(f, r)| (f.clone(), r.to_vec()));
+                    Growing {
+                        job: j,
+                        tree: first,
+                        left: rest,
+                        route: NetRoute::default(),
+                    }
                 })
                 .collect();
             loop {
-                let active: Vec<usize> = (0..growing.len()).filter(|&k| !growing[k].left.is_empty()).collect();
+                let active: Vec<usize> = (0..growing.len())
+                    .filter(|&k| !growing[k].left.is_empty())
+                    .collect();
                 if active.is_empty() {
                     break;
                 }
-                let searches: Vec<(u32, &[u32])> = active.iter().map(|&k| (neg.jobs[growing[k].job].net, growing[k].tree.as_slice())).collect();
-                let dists = gpu.distances(&p, &neg.grid.owner, &neg.grid.via_owner, &cong, &searches);
+                let searches: Vec<(u32, &[u32])> = active
+                    .iter()
+                    .map(|&k| (neg.jobs[growing[k].job].net, growing[k].tree.as_slice()))
+                    .collect();
+                let dists =
+                    gpu.distances(&p, &neg.grid.owner, &neg.grid.via_owner, &cong, &searches);
                 for (&k, dist) in active.iter().zip(&dists) {
                     let g = &mut growing[k];
                     let net = neg.jobs[g.job].net;
                     // The nearest cell of a piece not yet reached.
-                    let best = g.left.iter().enumerate().flat_map(|(gi, cells)| cells.iter().map(move |&c| (gi, c))).filter(|&(_, c)| dist[c as usize] != INF).min_by_key(|&(_, c)| (dist[c as usize], c));
+                    let best = g
+                        .left
+                        .iter()
+                        .enumerate()
+                        .flat_map(|(gi, cells)| cells.iter().map(move |&c| (gi, c)))
+                        .filter(|&(_, c)| dist[c as usize] != INF)
+                        .min_by_key(|&(_, c)| (dist[c as usize], c));
                     let path = best.and_then(|(_, c)| trace_back(&costs, net, dist, c));
                     match (best, path) {
                         (Some((gi, _)), Some(path)) => {

@@ -44,7 +44,12 @@ impl Plugin for SketchConstrainPlugin {
             .init_resource::<SketchFacesLost>()
             .add_systems(
                 Update,
-                (update_analysis, constraint_activation, normal_to_plane, sync_conflict_banner)
+                (
+                    update_analysis,
+                    constraint_activation,
+                    normal_to_plane,
+                    sync_conflict_banner,
+                )
                     .chain()
                     .after(crate::sketch_tools::SketchToolsSet)
                     .before(crate::sketch_draw::SketchDrawSet)
@@ -120,7 +125,10 @@ type LostKey = (PartsKey, HashSet<FeatureId>);
 type Pending<T> = std::sync::Arc<std::sync::Mutex<Option<T>>>;
 
 /// Runs `f` on a background thread, or right here when `wait` (scripted runs).
-fn run_or_spawn<T: Send + 'static>(wait: bool, f: impl FnOnce() -> T + Send + 'static) -> Pending<T> {
+fn run_or_spawn<T: Send + 'static>(
+    wait: bool,
+    f: impl FnOnce() -> T + Send + 'static,
+) -> Pending<T> {
     if wait {
         return std::sync::Arc::new(std::sync::Mutex::new(Some(f())));
     }
@@ -146,7 +154,11 @@ fn sketch_status(g: &Sketch) -> (bool, bool) {
 pub(crate) fn update_analysis(
     doc: Option<Res<ActiveDocument>>,
     session: Option<Res<SketchSession>>,
-    (draw, parts, budget): (Res<SketchDraw>, Res<crate::parts::PartCache>, Res<crate::parts::RebuildBudget>),
+    (draw, parts, budget): (
+        Res<SketchDraw>,
+        Res<crate::parts::PartCache>,
+        Res<crate::parts::RebuildBudget>,
+    ),
     mut analysis: ResMut<SketchAnalysis>,
     mut errors: ResMut<SketchErrors>,
     (mut under, mut faces_lost): (ResMut<SketchUnderDefined>, ResMut<SketchFacesLost>),
@@ -168,7 +180,11 @@ pub(crate) fn update_analysis(
         for f in el.features() {
             let Some(sk) = f.sketch() else { continue };
             live.insert(f.id);
-            if !badges.done.iter().any(|(id, g, ..)| *id == f.id && *g == sk.geometry) {
+            if !badges
+                .done
+                .iter()
+                .any(|(id, g, ..)| *id == f.id && *g == sk.geometry)
+            {
                 todo.push((f.id, sk.geometry.clone()));
             }
         }
@@ -208,7 +224,9 @@ pub(crate) fn update_analysis(
         && !parts.rebuilding
         && lost.running.is_none()
         && let Some(el) = doc.active_element()
-        && parts.settled().is_some_and(|(e, f, _)| e == el.id && f == el.features())
+        && parts
+            .settled()
+            .is_some_and(|(e, f, _)| e == el.id && f == el.features())
     {
         let features = el.features().to_vec();
         let solids = parts.parts.clone();
@@ -220,11 +238,19 @@ pub(crate) fn update_analysis(
         });
         lost.running = Some((key, found));
     }
-    if let Some(found) = lost.running.as_ref().and_then(|(k, r)| Some((*k, r.lock().ok()?.take()?))) {
+    if let Some(found) = lost
+        .running
+        .as_ref()
+        .and_then(|(k, r)| Some((*k, r.lock().ok()?.take()?)))
+    {
         lost.running = None;
         lost.done = Some(found);
     }
-    let lost = lost.done.as_ref().map(|(_, l)| l.clone()).unwrap_or_default();
+    let lost = lost
+        .done
+        .as_ref()
+        .map(|(_, l)| l.clone())
+        .unwrap_or_default();
     if faces_lost.0 != lost {
         faces_lost.0 = lost.clone();
     }
@@ -290,7 +316,11 @@ fn edit_sketch(commands: &mut Commands, session: &SketchSession, op: SketchOp) {
     let (element, feature) = (session.element, session.feature);
     commands.queue(move |world: &mut World| {
         if let Some(mut doc) = world.get_resource_mut::<ActiveDocument>()
-            && let Err(e) = doc.execute(&EditSketch { element, feature, op })
+            && let Err(e) = doc.execute(&EditSketch {
+                element,
+                feature,
+                op,
+            })
         {
             warn!("cannot add the constraint: {e}");
         }
@@ -385,23 +415,43 @@ fn normal_to_plane(
             },
             _ => continue,
         };
-        let Some(sketch) = session_sketch(Some(s), Some(doc)) else { continue };
-        let [SketchEntity::Curve(line)] = selection.0[..] else {
-            show_toast(&mut commands, &theme, "Pick a line first, then the plane".to_string());
+        let Some(sketch) = session_sketch(Some(s), Some(doc)) else {
             continue;
         };
-        if !matches!(sketch.curves.get(line).map(|c| c.kind), Some(CurveKind::Line { .. })) {
+        let [SketchEntity::Curve(line)] = selection.0[..] else {
+            show_toast(
+                &mut commands,
+                &theme,
+                "Pick a line first, then the plane".to_string(),
+            );
+            continue;
+        };
+        if !matches!(
+            sketch.curves.get(line).map(|c| c.kind),
+            Some(CurveKind::Line { .. })
+        ) {
             continue;
         }
         let Some(frame) = doc
             .active_element()
-            .and_then(|el| el.features().iter().find(|f| f.id == s.feature).and_then(|f| f.sketch()?.plane))
+            .and_then(|el| {
+                el.features()
+                    .iter()
+                    .find(|f| f.id == s.feature)
+                    .and_then(|f| f.sketch()?.plane)
+            })
             .map(|p| p.frame())
         else {
             continue;
         };
-        let Some(cadrs_core::links::Curve3::Line(a, b)) = cadrs_core::links::plane_trace(&plane.frame(), &frame) else {
-            show_toast(&mut commands, &theme, "Normal: the plane is parallel to the sketch".to_string());
+        let Some(cadrs_core::links::Curve3::Line(a, b)) =
+            cadrs_core::links::plane_trace(&plane.frame(), &frame)
+        else {
+            show_toast(
+                &mut commands,
+                &theme,
+                "Normal: the plane is parallel to the sketch".to_string(),
+            );
             continue;
         };
         let op = SketchOp::NormalToPlane {
@@ -412,7 +462,11 @@ fn normal_to_plane(
         let (element, feature) = (s.element, s.feature);
         commands.queue(move |world: &mut World| {
             if let Some(mut doc) = world.get_resource_mut::<ActiveDocument>()
-                && let Err(e) = doc.execute(&EditSketch { element, feature, op })
+                && let Err(e) = doc.execute(&EditSketch {
+                    element,
+                    feature,
+                    op,
+                })
             {
                 warn!("normal to plane: {e}");
             }
@@ -489,7 +543,11 @@ impl DragInfo {
         skip: HashSet<Source>,
         selection: &[SketchEntity],
     ) -> Option<Self> {
-        let group = if selection.contains(&entity) { group_points(sketch, selection) } else { Vec::new() };
+        let group = if selection.contains(&entity) {
+            group_points(sketch, selection)
+        } else {
+            Vec::new()
+        };
         // A text is dragged by its box's lower edge; the rest of the box follows.
         let entity = match entity {
             SketchEntity::Text(t) => SketchEntity::Curve(sketch.texts.get(t)?.lines[0]),
@@ -514,7 +572,9 @@ impl DragInfo {
         let delta = cursor - self.grab;
         let s = &self.base;
         if !self.group.is_empty() {
-            return Some(Drag::Points(self.group.iter().map(|p| (*p, s.pos(*p) + delta)).collect()));
+            return Some(Drag::Points(
+                self.group.iter().map(|p| (*p, s.pos(*p) + delta)).collect(),
+            ));
         }
         Some(match self.entity {
             SketchEntity::Point(p) => Drag::Points(vec![(p, s.pos(p) + delta)]),
@@ -524,14 +584,22 @@ impl DragInfo {
                 }
                 CurveKind::Circle { .. } | CurveKind::Arc { .. } => Drag::Rim(c, cursor),
                 // An ellipse moves as a whole.
-                CurveKind::Ellipse { center, major, .. } | CurveKind::EllipseOffset { center, major, .. } => Drag::Points(vec![
+                CurveKind::Ellipse { center, major, .. }
+                | CurveKind::EllipseOffset { center, major, .. } => Drag::Points(vec![
                     (center, s.pos(center) + delta),
                     (major, s.pos(major) + delta),
                 ]),
                 // A spline or an elliptical arc moves as a whole (its points).
-                CurveKind::Spline { .. } | CurveKind::EllipseArc { .. } => Drag::Points(s.curve_points(c).into_iter().map(|p| (p, s.pos(p) + delta)).collect()),
+                CurveKind::Spline { .. } | CurveKind::EllipseArc { .. } => Drag::Points(
+                    s.curve_points(c)
+                        .into_iter()
+                        .map(|p| (p, s.pos(p) + delta))
+                        .collect(),
+                ),
                 // A Bézier curve moves as a whole (drag a handle to reshape it).
-                CurveKind::Bezier { a, c1, c2, b } => Drag::Points([a, c1, c2, b].map(|p| (p, s.pos(p) + delta)).to_vec()),
+                CurveKind::Bezier { a, c1, c2, b } => {
+                    Drag::Points([a, c1, c2, b].map(|p| (p, s.pos(p) + delta)).to_vec())
+                }
             },
             _ => return None,
         })
@@ -548,7 +616,11 @@ fn group_points(sketch: &Sketch, selection: &[SketchEntity]) -> Vec<PointId> {
             SketchEntity::Point(p) if sketch.points.contains_key(p) => vec![p],
             SketchEntity::Curve(c) if sketch.curves.contains_key(c) => sketch.curve_points(c),
             SketchEntity::Text(t) => match sketch.texts.get(t) {
-                Some(t) => t.lines.iter().flat_map(|c| sketch.curve_points(*c)).collect(),
+                Some(t) => t
+                    .lines
+                    .iter()
+                    .flat_map(|c| sketch.curve_points(*c))
+                    .collect(),
                 None => continue,
             },
             _ => continue,
@@ -672,14 +744,23 @@ pub fn open_glyph_menu(world: &mut World, constraint: ConstraintId, at: Vec2) {
         .min_width(200.0)
         .item_height(23.0)
         .item(MenuItem::new("sketch-glyph-delete", "Delete").icon("delete"))
-        .item(MenuItem::new("sketch-glyph-select-geometry", "Select geometry"))
+        .item(MenuItem::new(
+            "sketch-glyph-select-geometry",
+            "Select geometry",
+        ))
         .item(MenuItem::new("sketch-glyph-hide", "Hide constraints"))
         .separator()
         .item(MenuItem::new("sketch-glyph-escape", "Escape constraint"))
-        .item(MenuItem::new("sketch-glyph-confirm", format!("Confirm {sketch_name}")))
+        .item(MenuItem::new(
+            "sketch-glyph-confirm",
+            format!("Confirm {sketch_name}"),
+        ))
         .separator()
         .item(MenuItem::new("sketch-glyph-zoom-to-fit", "Zoom to fit"))
-        .item(MenuItem::new("sketch-glyph-normal-to", "View normal to sketch plane"));
+        .item(MenuItem::new(
+            "sketch-glyph-normal-to",
+            "View normal to sketch plane",
+        ));
     let mut commands = world.commands();
     let anchor = cadrs_ui::open_context_menu(&mut commands, at, menu.build(&theme));
     commands
@@ -705,8 +786,8 @@ fn on_glyph_menu(
         "sketch-glyph-delete" => {}
         "sketch-glyph-select-geometry" => {
             // The constraint's points and curves (not the sketch origin or axes).
-            let Some(c) = session_sketch(Some(&s), doc.as_deref())
-                .and_then(|sk| sk.constraints.get(id))
+            let Some(c) =
+                session_sketch(Some(&s), doc.as_deref()).and_then(|sk| sk.constraints.get(id))
             else {
                 return;
             };
@@ -832,9 +913,7 @@ fn sync_conflict_banner(
         let banner = show_notification(
             &mut commands,
             &theme,
-            Notification::warning(message)
-            .name(name)
-            .at(at.0, at.1),
+            Notification::warning(message).name(name).at(at.0, at.1),
         );
         commands.entity(banner).insert(ConflictBanner);
     }
@@ -857,15 +936,26 @@ mod tests {
         .apply(&mut base)
         .unwrap();
         let center = base.point_at(SVec2::new(20.0, 30.0), 1e-9).unwrap();
-        let vertical = ConstraintOf::Vertical(Orient::Points(PointRef::Point(center), PointRef::Origin));
-        let op = drag_op(&base, vec![(center, SVec2::new(0.0, 33.0))], vec![], vec![vertical]);
+        let vertical =
+            ConstraintOf::Vertical(Orient::Points(PointRef::Point(center), PointRef::Origin));
+        let op = drag_op(
+            &base,
+            vec![(center, SVec2::new(0.0, 33.0))],
+            vec![],
+            vec![vertical],
+        );
         assert_eq!(op.label(), "Drag");
         let mut s = base.clone();
         op.apply(&mut s).unwrap();
         assert!(s.pos(center).distance(SVec2::new(0.0, 33.0)) < 1e-6);
         assert!(s.constraints.values().any(|c| *c == vertical));
         // Already there: just the geometry.
-        let again = drag_op(&s, vec![(center, SVec2::new(0.0, 40.0))], vec![], vec![vertical]);
+        let again = drag_op(
+            &s,
+            vec![(center, SVec2::new(0.0, 40.0))],
+            vec![],
+            vec![vertical],
+        );
         assert!(matches!(again, SketchOp::SetGeometry { .. }));
         // Nothing inferred: just the geometry.
         assert!(matches!(
@@ -878,19 +968,41 @@ mod tests {
     fn grabbing_one_of_a_selection_drags_it_all() {
         let mut s = Sketch::new();
         let line = s.add_line(SVec2::new(0.0, 0.0), SVec2::new(10.0, 0.0));
-        SketchOp::AddCircle { center: SVec2::new(20.0, 5.0), radius: 3.0, construction: false }.apply(&mut s).unwrap();
+        SketchOp::AddCircle {
+            center: SVec2::new(20.0, 5.0),
+            radius: 3.0,
+            construction: false,
+        }
+        .apply(&mut s)
+        .unwrap();
         let circle = s.curves.keys().find(|c| *c != line).unwrap();
         let selection = [SketchEntity::Curve(line), SketchEntity::Curve(circle)];
         let grab = SVec2::new(5.0, 0.0);
-        let d = DragInfo::new(SketchEntity::Curve(line), &s, grab, HashSet::new(), &selection).unwrap();
-        let Some(Drag::Points(pins)) = d.target(grab + SVec2::new(1.0, 2.0)) else { panic!() };
+        let d = DragInfo::new(
+            SketchEntity::Curve(line),
+            &s,
+            grab,
+            HashSet::new(),
+            &selection,
+        )
+        .unwrap();
+        let Some(Drag::Points(pins)) = d.target(grab + SVec2::new(1.0, 2.0)) else {
+            panic!()
+        };
         // Both line ends and the circle's center, all moved by the same amount.
         assert_eq!(pins.len(), 3);
         for (p, t) in pins {
             assert!(t.distance(s.pos(p) + SVec2::new(1.0, 2.0)) < 1e-9);
         }
         // Grabbing something outside the selection drags just that.
-        let d = DragInfo::new(SketchEntity::Curve(circle), &s, grab, HashSet::new(), &selection[..1]).unwrap();
+        let d = DragInfo::new(
+            SketchEntity::Curve(circle),
+            &s,
+            grab,
+            HashSet::new(),
+            &selection[..1],
+        )
+        .unwrap();
         assert!(matches!(d.target(grab), Some(Drag::Rim(..))));
     }
 }

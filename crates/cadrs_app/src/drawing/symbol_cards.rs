@@ -18,8 +18,8 @@ use cadrs_ui::{CheckboxState, Select, SelectState};
 use super::annotations::{AnnTool, AnnotationUi};
 use super::note_bar::{card_bundle, header};
 use super::{DrawingUi, sheet_area};
-use crate::viewport::ViewportRect;
 use crate::AppState;
+use crate::viewport::ViewportRect;
 
 pub struct SymbolCardsPlugin;
 
@@ -70,12 +70,27 @@ impl Default for SymbolSpecs {
 #[derive(Component, Clone, Copy, PartialEq)]
 struct SymbolCard(AnnTool);
 
-const MODIFIERS: [(Option<Modifier>, &str); 4] =
-    [(None, "None"), (Some(Modifier::Mmc), "Maximum material (M)"), (Some(Modifier::Lmc), "Least material (L)"), (Some(Modifier::Rfs), "Regardless of size (S)")];
+const MODIFIERS: [(Option<Modifier>, &str); 4] = [
+    (None, "None"),
+    (Some(Modifier::Mmc), "Maximum material (M)"),
+    (Some(Modifier::Lmc), "Least material (L)"),
+    (Some(Modifier::Rfs), "Regardless of size (S)"),
+];
 
 fn row(p: &mut ChildSpawnerCommands, t: &Theme, label: &str, child: impl Bundle) {
-    p.spawn(Node { align_items: AlignItems::Center, column_gap: Val::Px(8.0), ..default() }).with_children(|r| {
-        r.spawn((t.text(label, t.font_sm, FontWeight::NORMAL, t.muted_foreground), Node { width: Val::Px(74.0), ..default() }));
+    p.spawn(Node {
+        align_items: AlignItems::Center,
+        column_gap: Val::Px(8.0),
+        ..default()
+    })
+    .with_children(|r| {
+        r.spawn((
+            t.text(label, t.font_sm, FontWeight::NORMAL, t.muted_foreground),
+            Node {
+                width: Val::Px(74.0),
+                ..default()
+            },
+        ));
         r.spawn(child);
     });
 }
@@ -136,61 +151,133 @@ pub fn open(world: &mut World, tool: AnnTool) {
         })
         .with_children(|c| {
             header(c, &t, title, prefix, None, cancel);
-            c.spawn(Node { flex_direction: FlexDirection::Column, padding: UiRect::all(Val::Px(8.0)), row_gap: Val::Px(6.0), ..default() })
-                .with_children(|b| match tool {
-                    AnnTool::Gdt => {
-                        let mut s = Select::new("gdt-symbol").width(Val::Px(150.0));
-                        for g in Gdt::ALL {
-                            s = s.option(g.label(), true);
-                        }
-                        let i = Gdt::ALL.iter().position(|g| *g == spec.gdt).unwrap_or(0);
-                        row(b, &t, "Symbol", s.selected(i).build(&t));
-                        row(b, &t, "Tolerance", TextInput::new("gdt-tolerance").value(spec.tolerance.clone()).width(Val::Px(90.0)).select_all_on_focus().build(&t));
-                        b.spawn(Checkbox::new("gdt-diameter").label("Diameter (Ø)").checked(spec.diameter).build(&t));
-                        let mut m = Select::new("gdt-modifier").width(Val::Px(150.0));
-                        for (_, l) in MODIFIERS {
-                            m = m.option(l, true);
-                        }
-                        let mi = MODIFIERS.iter().position(|(x, _)| *x == spec.modifier).unwrap_or(0);
-                        row(b, &t, "Modifier", m.selected(mi).build(&t));
-                        for (k, d) in spec.datums.iter().enumerate() {
-                            row(
-                                b,
-                                &t,
-                                &format!("Datum {}", k + 1),
-                                TextInput::new(format!("gdt-datum-{}", k + 1)).value(d.clone()).width(Val::Px(50.0)).select_all_on_focus().build(&t),
-                            );
-                        }
+            c.spawn(Node {
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::all(Val::Px(8.0)),
+                row_gap: Val::Px(6.0),
+                ..default()
+            })
+            .with_children(|b| match tool {
+                AnnTool::Gdt => {
+                    let mut s = Select::new("gdt-symbol").width(Val::Px(150.0));
+                    for g in Gdt::ALL {
+                        s = s.option(g.label(), true);
                     }
-                    AnnTool::Datum => {
-                        row(b, &t, "Letter", TextInput::new("datum-letter").value(spec.datum_letter.clone()).width(Val::Px(50.0)).select_all_on_focus().build(&t));
+                    let i = Gdt::ALL.iter().position(|g| *g == spec.gdt).unwrap_or(0);
+                    row(b, &t, "Symbol", s.selected(i).build(&t));
+                    row(
+                        b,
+                        &t,
+                        "Tolerance",
+                        TextInput::new("gdt-tolerance")
+                            .value(spec.tolerance.clone())
+                            .width(Val::Px(90.0))
+                            .select_all_on_focus()
+                            .build(&t),
+                    );
+                    b.spawn(
+                        Checkbox::new("gdt-diameter")
+                            .label("Diameter (Ø)")
+                            .checked(spec.diameter)
+                            .build(&t),
+                    );
+                    let mut m = Select::new("gdt-modifier").width(Val::Px(150.0));
+                    for (_, l) in MODIFIERS {
+                        m = m.option(l, true);
                     }
-                    AnnTool::SurfaceFinish => {
-                        let mut s = Select::new("finish-kind").width(Val::Px(160.0));
-                        for k in FinishKind::ALL {
+                    let mi = MODIFIERS
+                        .iter()
+                        .position(|(x, _)| *x == spec.modifier)
+                        .unwrap_or(0);
+                    row(b, &t, "Modifier", m.selected(mi).build(&t));
+                    for (k, d) in spec.datums.iter().enumerate() {
+                        row(
+                            b,
+                            &t,
+                            &format!("Datum {}", k + 1),
+                            TextInput::new(format!("gdt-datum-{}", k + 1))
+                                .value(d.clone())
+                                .width(Val::Px(50.0))
+                                .select_all_on_focus()
+                                .build(&t),
+                        );
+                    }
+                }
+                AnnTool::Datum => {
+                    row(
+                        b,
+                        &t,
+                        "Letter",
+                        TextInput::new("datum-letter")
+                            .value(spec.datum_letter.clone())
+                            .width(Val::Px(50.0))
+                            .select_all_on_focus()
+                            .build(&t),
+                    );
+                }
+                AnnTool::SurfaceFinish => {
+                    let mut s = Select::new("finish-kind").width(Val::Px(160.0));
+                    for k in FinishKind::ALL {
+                        s = s.option(k.label(), true);
+                    }
+                    let i = FinishKind::ALL
+                        .iter()
+                        .position(|k| *k == spec.finish)
+                        .unwrap_or(0);
+                    row(b, &t, "Type", s.selected(i).build(&t));
+                    row(
+                        b,
+                        &t,
+                        "Value",
+                        TextInput::new("finish-value")
+                            .value(spec.finish_value.clone())
+                            .width(Val::Px(90.0))
+                            .select_all_on_focus()
+                            .build(&t),
+                    );
+                }
+                AnnTool::Weld => {
+                    for (name, label, v) in [
+                        ("weld-arrow-side", "Arrow side", spec.weld_arrow),
+                        ("weld-other-side", "Other side", spec.weld_other),
+                    ] {
+                        let mut s = Select::new(name).width(Val::Px(150.0));
+                        for k in WeldKind::ALL {
                             s = s.option(k.label(), true);
                         }
-                        let i = FinishKind::ALL.iter().position(|k| *k == spec.finish).unwrap_or(0);
-                        row(b, &t, "Type", s.selected(i).build(&t));
-                        row(b, &t, "Value", TextInput::new("finish-value").value(spec.finish_value.clone()).width(Val::Px(90.0)).select_all_on_focus().build(&t));
+                        let i = WeldKind::ALL.iter().position(|k| *k == v).unwrap_or(0);
+                        row(b, &t, label, s.selected(i).build(&t));
                     }
-                    AnnTool::Weld => {
-                        for (name, label, v) in [("weld-arrow-side", "Arrow side", spec.weld_arrow), ("weld-other-side", "Other side", spec.weld_other)] {
-                            let mut s = Select::new(name).width(Val::Px(150.0));
-                            for k in WeldKind::ALL {
-                                s = s.option(k.label(), true);
-                            }
-                            let i = WeldKind::ALL.iter().position(|k| *k == v).unwrap_or(0);
-                            row(b, &t, label, s.selected(i).build(&t));
-                        }
-                        row(b, &t, "Size", TextInput::new("weld-size").value(spec.weld_size.clone()).width(Val::Px(60.0)).select_all_on_focus().build(&t));
-                        b.spawn(Checkbox::new("weld-all-around").label("All around").checked(spec.all_around).build(&t));
-                    }
-                    _ => {}
-                });
+                    row(
+                        b,
+                        &t,
+                        "Size",
+                        TextInput::new("weld-size")
+                            .value(spec.weld_size.clone())
+                            .width(Val::Px(60.0))
+                            .select_all_on_focus()
+                            .build(&t),
+                    );
+                    b.spawn(
+                        Checkbox::new("weld-all-around")
+                            .label("All around")
+                            .checked(spec.all_around)
+                            .build(&t),
+                    );
+                }
+                _ => {}
+            });
             c.spawn((
-                t.text("Pick an edge, then click to place", t.font_sm, FontWeight::NORMAL, t.muted_foreground),
-                Node { margin: UiRect::new(Val::Px(8.0), Val::Px(8.0), Val::Px(0.0), Val::Px(8.0)), ..default() },
+                t.text(
+                    "Pick an edge, then click to place",
+                    t.font_sm,
+                    FontWeight::NORMAL,
+                    t.muted_foreground,
+                ),
+                Node {
+                    margin: UiRect::new(Val::Px(8.0), Val::Px(8.0), Val::Px(0.0), Val::Px(8.0)),
+                    ..default()
+                },
             ));
         });
     world.flush();
@@ -200,7 +287,9 @@ pub fn open(world: &mut World, tool: AnnTool) {
 fn next_datum(world: &World) -> Option<String> {
     let doc = world.get_resource::<crate::ActiveDocument>()?;
     let (id, d) = super::active_drawing(doc)?;
-    let sheet = d.sheets.get(world.resource::<DrawingUi>().sheet_index(id, d))?;
+    let sheet = d
+        .sheets
+        .get(world.resource::<DrawingUi>().sheet_index(id, d))?;
     let used: Vec<&str> = sheet
         .views
         .iter()
@@ -210,7 +299,9 @@ fn next_datum(world: &World) -> Option<String> {
             _ => None,
         })
         .collect();
-    (0..).map(cadrs_drawing::view_kinds::letter).find(|l| !used.contains(&l.as_str()))
+    (0..)
+        .map(cadrs_drawing::view_kinds::letter)
+        .find(|l| !used.contains(&l.as_str()))
 }
 
 /// Reads the open card into [`SymbolSpecs`]; closes it when its tool ends.
@@ -247,10 +338,30 @@ fn read_cards(
     for (n, st) in &q_select {
         match n.as_str() {
             "gdt-symbol" => s.gdt = Gdt::ALL.get(st.selected).copied().unwrap_or(s.gdt),
-            "gdt-modifier" => s.modifier = MODIFIERS.get(st.selected).map(|m| m.0).unwrap_or(s.modifier),
-            "finish-kind" => s.finish = FinishKind::ALL.get(st.selected).copied().unwrap_or(s.finish),
-            "weld-arrow-side" => s.weld_arrow = WeldKind::ALL.get(st.selected).copied().unwrap_or(s.weld_arrow),
-            "weld-other-side" => s.weld_other = WeldKind::ALL.get(st.selected).copied().unwrap_or(s.weld_other),
+            "gdt-modifier" => {
+                s.modifier = MODIFIERS
+                    .get(st.selected)
+                    .map(|m| m.0)
+                    .unwrap_or(s.modifier)
+            }
+            "finish-kind" => {
+                s.finish = FinishKind::ALL
+                    .get(st.selected)
+                    .copied()
+                    .unwrap_or(s.finish)
+            }
+            "weld-arrow-side" => {
+                s.weld_arrow = WeldKind::ALL
+                    .get(st.selected)
+                    .copied()
+                    .unwrap_or(s.weld_arrow)
+            }
+            "weld-other-side" => {
+                s.weld_other = WeldKind::ALL
+                    .get(st.selected)
+                    .copied()
+                    .unwrap_or(s.weld_other)
+            }
             _ => {}
         }
     }

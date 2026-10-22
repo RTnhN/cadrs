@@ -9,12 +9,15 @@
 
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
 
-use cadrs_sheetmetal::sharp_edit::{
-    self as edit, EdgeFrame, EdgePick, FlangeAlignment, FlangeEdge, FlangeOpts, HemEdge, HemKind, HemOpts, JointSpec, PickSide, SharpDef,
+use cadrs_sheetmetal::model::{
+    HemAlignment, JointKind, Model, P3, RipStyle, SharpBuilder, Surface, V3,
 };
-use cadrs_sheetmetal::model::{HemAlignment, JointKind, Model, P3, RipStyle, SharpBuilder, Surface, V3};
 use cadrs_sheetmetal::params::Params;
 use cadrs_sheetmetal::poly::{P2, Polygon};
+use cadrs_sheetmetal::sharp_edit::{
+    self as edit, EdgeFrame, EdgePick, FlangeAlignment, FlangeEdge, FlangeOpts, HemEdge, HemKind,
+    HemOpts, JointSpec, PickSide, SharpDef,
+};
 use cadrs_sheetmetal::{bend, flatten};
 
 const T: f64 = 2.0;
@@ -25,7 +28,13 @@ const OSSB: f64 = R + T;
 const TOL: f64 = 1e-6;
 
 fn params() -> Params {
-    Params { thickness: T, bend_radius: R, k_factor: K, minimal_gap: GAP, ..Default::default() }
+    Params {
+        thickness: T,
+        bend_radius: R,
+        k_factor: K,
+        minimal_gap: GAP,
+        ..Default::default()
+    }
 }
 
 fn ba(theta: f64, r: f64) -> f64 {
@@ -35,7 +44,12 @@ fn ba(theta: f64, r: f64) -> f64 {
 /// A 50 × 40 base in the XY plane, material above (z 0..T).
 fn base() -> SharpDef {
     let mut b = SharpBuilder::new(params());
-    let w = b.wall(P3::origin(), V3::x(), V3::y(), Polygon::rect(P2::origin(), P2::new(50.0, 40.0)));
+    let w = b.wall(
+        P3::origin(),
+        V3::x(),
+        V3::y(),
+        Polygon::rect(P2::origin(), P2::new(50.0, 40.0)),
+    );
     b.set_wall_id(w, cadrs_sheetmetal::WallId(1));
     let m = b.build().unwrap();
     SharpDef::new(b, &m, m.walls.len(), m.joints.len())
@@ -43,7 +57,11 @@ fn base() -> SharpDef {
 
 fn model(def: &SharpDef) -> Model {
     let m = def.build().expect("builds");
-    assert!(m.validate().is_empty(), "consistent in 3D: {:?}", m.validate());
+    assert!(
+        m.validate().is_empty(),
+        "consistent in 3D: {:?}",
+        m.validate()
+    );
     m
 }
 
@@ -71,13 +89,37 @@ fn east_edge(m: &Model) -> EdgePick {
 }
 
 #[allow(clippy::type_complexity)]
-fn flange_on(def: &mut SharpDef, edges: Vec<(EdgePick, f64, bool, f64, Option<(f64, f64)>)>, alignment: FlangeAlignment, miter: Option<f64>, hold: bool) {
+fn flange_on(
+    def: &mut SharpDef,
+    edges: Vec<(EdgePick, f64, bool, f64, Option<(f64, f64)>)>,
+    alignment: FlangeAlignment,
+    miter: Option<f64>,
+    hold: bool,
+) {
     let fe: Vec<FlangeEdge> = edges
         .into_iter()
         .enumerate()
-        .map(|(i, (pick, angle, toward, distance, partial))| FlangeEdge { pick, key: 100 + i as u64, angle, toward, distance, partial })
+        .map(|(i, (pick, angle, toward, distance, partial))| FlangeEdge {
+            pick,
+            key: 100 + i as u64,
+            angle,
+            toward,
+            distance,
+            partial,
+        })
         .collect();
-    edit::flange(def, &fe, &FlangeOpts { alignment, radius: None, miter, hold_adjacent: hold, per_chain: false }).expect("flange");
+    edit::flange(
+        def,
+        &fe,
+        &FlangeOpts {
+            alignment,
+            radius: None,
+            miter,
+            hold_adjacent: hold,
+            per_chain: false,
+        },
+    )
+    .expect("flange");
 }
 
 #[test]
@@ -88,7 +130,16 @@ fn locate_finds_the_face_a_picked_edge_is_on() {
     let bottom = pick(&m, P3::new(50.0, 0.0, 0.0), P3::new(50.0, 40.0, 0.0));
     assert_eq!(bottom.side, PickSide::Definition);
     // A side face: its corners.
-    let side = edit::locate(&m, &[P3::new(50.0, 0.0, 0.0), P3::new(50.0, 40.0, 0.0), P3::new(50.0, 40.0, T), P3::new(50.0, 0.0, T)]).unwrap();
+    let side = edit::locate(
+        &m,
+        &[
+            P3::new(50.0, 0.0, 0.0),
+            P3::new(50.0, 40.0, 0.0),
+            P3::new(50.0, 40.0, T),
+            P3::new(50.0, 0.0, T),
+        ],
+    )
+    .unwrap();
     assert_eq!(side.side, PickSide::Side);
     assert!(edit::locate(&m, &[P3::new(20.0, 10.0, 0.0), P3::new(30.0, 10.0, 0.0)]).is_none());
 }
@@ -103,14 +154,24 @@ fn flange_alignments_move_the_bend() {
     ] {
         let mut def = base();
         let m = model(&def);
-        flange_on(&mut def, vec![(east_edge(&m), FRAC_PI_2, true, 30.0, None)], align, None, true);
+        flange_on(
+            &mut def,
+            vec![(east_edge(&m), FRAC_PI_2, true, 30.0, None)],
+            align,
+            None,
+            true,
+        );
         let m = model(&def);
         let (w, h) = size(&m);
         let want = base_len + ba(FRAC_PI_2, R) + (30.0 - OSSB);
         assert!(close(w, want), "{align:?}: {w} vs {want}");
         assert!(close(h, 40.0));
         // Its outer face reaches the distance above the base's outer (bottom) face.
-        let top = m.walls.iter().flat_map(|wl| wl.outline.outer.iter().map(|q| wl.surface.point(*q).z)).fold(f64::MIN, f64::max);
+        let top = m
+            .walls
+            .iter()
+            .flat_map(|wl| wl.outline.outer.iter().map(|q| wl.surface.point(*q).z))
+            .fold(f64::MIN, f64::max);
         assert!(close(top, 30.0), "{align:?}: {top}");
         assert_eq!(m.joints[0].name, "Bend A");
     }
@@ -122,11 +183,24 @@ fn flange_away_from_the_material_measures_from_the_outer_sharp_too() {
     let m = model(&def);
     // Down from the bottom-face edge (away from the material): the outside is now the top.
     let p = pick(&m, P3::new(50.0, 0.0, 0.0), P3::new(50.0, 40.0, 0.0));
-    flange_on(&mut def, vec![(p, FRAC_PI_2, false, 30.0, None)], FlangeAlignment::Inner, None, true);
+    flange_on(
+        &mut def,
+        vec![(p, FRAC_PI_2, false, 30.0, None)],
+        FlangeAlignment::Inner,
+        None,
+        true,
+    );
     let m = model(&def);
     let (w, _) = size(&m);
-    assert!(close(w, 50.0 - R + ba(FRAC_PI_2, R) + (30.0 - T - R)), "{w}");
-    let low = m.walls.iter().flat_map(|wl| wl.outline.outer.iter().map(|q| wl.surface.point(*q).z)).fold(f64::MAX, f64::min);
+    assert!(
+        close(w, 50.0 - R + ba(FRAC_PI_2, R) + (30.0 - T - R)),
+        "{w}"
+    );
+    let low = m
+        .walls
+        .iter()
+        .flat_map(|wl| wl.outline.outer.iter().map(|q| wl.surface.point(*q).z))
+        .fold(f64::MAX, f64::min);
     // The tip is 30 below the top (outer) face.
     assert!(close(low, T - 30.0), "{low}");
 }
@@ -135,7 +209,13 @@ fn flange_away_from_the_material_measures_from_the_outer_sharp_too() {
 fn flange_at_45_degrees() {
     let mut def = base();
     let m = model(&def);
-    flange_on(&mut def, vec![(east_edge(&m), FRAC_PI_4, true, 30.0, None)], FlangeAlignment::Outer, None, true);
+    flange_on(
+        &mut def,
+        vec![(east_edge(&m), FRAC_PI_4, true, 30.0, None)],
+        FlangeAlignment::Outer,
+        None,
+        true,
+    );
     let m = model(&def);
     let sb = OSSB * (FRAC_PI_4 / 2.0).tan();
     let (w, _) = size(&m);
@@ -160,16 +240,34 @@ fn partial_flange_keeps_the_rest_of_the_edge() {
     for hold in [true, false] {
         let mut def = base();
         let m = model(&def);
-        flange_on(&mut def, vec![(east_edge(&m), FRAC_PI_2, true, 30.0, Some((10.0, 15.0)))], FlangeAlignment::Outer, None, hold);
+        flange_on(
+            &mut def,
+            vec![(east_edge(&m), FRAC_PI_2, true, 30.0, Some((10.0, 15.0)))],
+            FlangeAlignment::Outer,
+            None,
+            hold,
+        );
         let m = model(&def);
-        let flange = m.walls.iter().find(|w| w.id != cadrs_sheetmetal::WallId(1)).unwrap();
+        let flange = m
+            .walls
+            .iter()
+            .find(|w| w.id != cadrs_sheetmetal::WallId(1))
+            .unwrap();
         let (lo, hi) = flange.outline.bounds().unwrap();
-        let along = if (hi.x - lo.x - 15.0).abs() < 1e-9 { hi.x - lo.x } else { hi.y - lo.y };
+        let along = if (hi.x - lo.x - 15.0).abs() < 1e-9 {
+            hi.x - lo.x
+        } else {
+            hi.y - lo.y
+        };
         assert!(close(along, 15.0), "{lo:?} {hi:?}");
         let f = flatten(&m);
         assert!(f.is_ok(), "{:?}", f.errors);
         // The base keeps its corners (it reaches x = 50 outside the flange's stretch).
-        let b = m.walls.iter().find(|w| w.id == cadrs_sheetmetal::WallId(1)).unwrap();
+        let b = m
+            .walls
+            .iter()
+            .find(|w| w.id == cadrs_sheetmetal::WallId(1))
+            .unwrap();
         let reach = b.outline.outer.iter().map(|q| q.x).fold(f64::MIN, f64::max);
         assert!(close(reach, 50.0), "{reach}");
         // Bend reliefs at both ends of the bend.
@@ -182,14 +280,38 @@ fn two_flanges_meeting_at_a_corner_are_mitred_with_a_rip() {
     let mut def = base();
     let m = model(&def);
     let north = pick(&m, P3::new(0.0, 40.0, T), P3::new(50.0, 40.0, T));
-    flange_on(&mut def, vec![(east_edge(&m), FRAC_PI_2, true, 20.0, None), (north, FRAC_PI_2, true, 20.0, None)], FlangeAlignment::Inner, None, true);
+    flange_on(
+        &mut def,
+        vec![
+            (east_edge(&m), FRAC_PI_2, true, 20.0, None),
+            (north, FRAC_PI_2, true, 20.0, None),
+        ],
+        FlangeAlignment::Inner,
+        None,
+        true,
+    );
     let m = model(&def);
     let names: Vec<&str> = m.joints.iter().map(|j| j.name.as_str()).collect();
     assert_eq!(names, ["Bend A", "Bend B", "Joint C"]);
-    assert!(matches!(m.joints[2].kind, JointKind::Rip { style: RipStyle::EdgeJoint, .. }));
+    assert!(matches!(
+        m.joints[2].kind,
+        JointKind::Rip {
+            style: RipStyle::EdgeJoint,
+            ..
+        }
+    ));
     // Edge joint: each flange stops at the other's inside face, half the minimal gap short.
-    let east = m.walls.iter().find(|w| w.id == cadrs_sheetmetal::WallId(cadrs_sheetmetal::construct::stable_id(100))).unwrap();
-    let ymax = east.outline.outer.iter().map(|q| east.surface.point(*q).y).fold(f64::MIN, f64::max);
+    let east = m
+        .walls
+        .iter()
+        .find(|w| w.id == cadrs_sheetmetal::WallId(cadrs_sheetmetal::construct::stable_id(100)))
+        .unwrap();
+    let ymax = east
+        .outline
+        .outer
+        .iter()
+        .map(|q| east.surface.point(*q).y)
+        .fold(f64::MIN, f64::max);
     assert!(close(ymax, 40.0 - GAP / 2.0), "{ymax}");
     let f = flatten(&m);
     assert!(f.is_ok(), "{:?}", f.errors);
@@ -201,13 +323,30 @@ fn flanges_without_automatic_miter_are_cut_at_the_miter_angle() {
     let mut def = base();
     let m = model(&def);
     let north = pick(&m, P3::new(0.0, 40.0, T), P3::new(50.0, 40.0, T));
-    flange_on(&mut def, vec![(east_edge(&m), FRAC_PI_2, true, 20.0, None), (north, FRAC_PI_2, true, 20.0, None)], FlangeAlignment::Outer, Some(FRAC_PI_4), true);
+    flange_on(
+        &mut def,
+        vec![
+            (east_edge(&m), FRAC_PI_2, true, 20.0, None),
+            (north, FRAC_PI_2, true, 20.0, None),
+        ],
+        FlangeAlignment::Outer,
+        Some(FRAC_PI_4),
+        true,
+    );
     let m = model(&def);
     assert_eq!(m.joints.len(), 2, "no rip");
     let f = flatten(&m);
     assert!(f.is_ok(), "{:?}", f.errors);
     // 45°: both stop at their edges' ends (the plate's corner).
-    let reach = |m: &Model, id: u64, axis: usize| m.wall(stable(id)).unwrap().outline.outer.iter().map(|q| m.wall(stable(id)).unwrap().surface.point(*q)[axis]).fold(f64::MIN, f64::max);
+    let reach = |m: &Model, id: u64, axis: usize| {
+        m.wall(stable(id))
+            .unwrap()
+            .outline
+            .outer
+            .iter()
+            .map(|q| m.wall(stable(id)).unwrap().surface.point(*q)[axis])
+            .fold(f64::MIN, f64::max)
+    };
     assert!(close(reach(&m, 100, 1), 40.0) && close(reach(&m, 101, 0), 50.0));
     // 30° (Inner, so the flanges' insides are on the plate's edges and the corner's outside is
     // at (52, 42)): the miter plane through the outside corner at 30° to the east flange cuts its
@@ -216,7 +355,16 @@ fn flanges_without_automatic_miter_are_cut_at_the_miter_angle() {
     let mut def = base();
     let m = model(&def);
     let north = pick(&m, P3::new(0.0, 40.0, T), P3::new(50.0, 40.0, T));
-    flange_on(&mut def, vec![(east_edge(&m), FRAC_PI_2, true, 20.0, None), (north, FRAC_PI_2, true, 20.0, None)], FlangeAlignment::Inner, Some(PI / 6.0), true);
+    flange_on(
+        &mut def,
+        vec![
+            (east_edge(&m), FRAC_PI_2, true, 20.0, None),
+            (north, FRAC_PI_2, true, 20.0, None),
+        ],
+        FlangeAlignment::Inner,
+        Some(PI / 6.0),
+        true,
+    );
     let m = model(&def);
     let (ey, nx) = (reach(&m, 100, 1), reach(&m, 101, 0));
     assert!(close(ey, 40.0 + T - T / (PI / 6.0).tan()), "{ey}");
@@ -225,12 +373,28 @@ fn flanges_without_automatic_miter_are_cut_at_the_miter_angle() {
 }
 
 fn hem_on(def: &mut SharpDef, picks: Vec<EdgePick>, o: HemOpts) {
-    let he: Vec<HemEdge> = picks.into_iter().enumerate().map(|(i, pick)| HemEdge { pick, key: 200 + i as u64, toward: true }).collect();
+    let he: Vec<HemEdge> = picks
+        .into_iter()
+        .enumerate()
+        .map(|(i, pick)| HemEdge {
+            pick,
+            key: 200 + i as u64,
+            toward: true,
+        })
+        .collect();
     edit::hem(def, &he, &o).expect("hem");
 }
 
 fn hem_opts(kind: HemKind) -> HemOpts {
-    HemOpts { kind, radius: R, angle: 1.5 * PI, gap: 0.5, total: 12.5, alignment: HemAlignment::Outer, closed: false }
+    HemOpts {
+        kind,
+        radius: R,
+        angle: 1.5 * PI,
+        gap: 0.5,
+        total: 12.5,
+        alignment: HemAlignment::Outer,
+        closed: false,
+    }
 }
 
 #[test]
@@ -238,7 +402,10 @@ fn straight_hem_total_length() {
     for (flattened, r) in [(false, R), (true, GAP / 2.0)] {
         let mut def = base();
         let m = model(&def);
-        let o = HemOpts { radius: r, ..hem_opts(HemKind::Straight) };
+        let o = HemOpts {
+            radius: r,
+            ..hem_opts(HemKind::Straight)
+        };
         hem_on(&mut def, vec![east_edge(&m)], o);
         let m = model(&def);
         let (w, _) = size(&m);
@@ -265,7 +432,14 @@ fn rolled_hem_is_its_bend() {
     // In place: the bend starts at the edge.
     let mut def = base();
     let m = model(&def);
-    hem_on(&mut def, vec![east_edge(&m)], HemOpts { alignment: HemAlignment::InPlace, ..hem_opts(HemKind::Rolled) });
+    hem_on(
+        &mut def,
+        vec![east_edge(&m)],
+        HemOpts {
+            alignment: HemAlignment::InPlace,
+            ..hem_opts(HemKind::Rolled)
+        },
+    );
     let (w, _) = size(&model(&def));
     assert!(close(w, 50.0 + ba(1.5 * PI, R) + edit::ROLLED_TAIL), "{w}");
 }
@@ -279,18 +453,33 @@ fn tear_drop_hem_ends_the_gap_off_the_wall() {
     assert!(((R + T) * (1.0 + beta.sin()) + leg * beta.cos() - total).abs() < 1e-9);
     let mut def = base();
     let m = model(&def);
-    hem_on(&mut def, vec![east_edge(&m)], HemOpts { gap, total, ..hem_opts(HemKind::TearDrop) });
+    hem_on(
+        &mut def,
+        vec![east_edge(&m)],
+        HemOpts {
+            gap,
+            total,
+            ..hem_opts(HemKind::TearDrop)
+        },
+    );
     let m = model(&def);
     let (w, _) = size(&m);
     assert!(close(w, (50.0 - OSSB) + ba(PI + beta, R) + leg), "{w}");
     // In 3D: the leg's end comes `gap` above the base's top face, and `total` in from x = 50.
     let hem = &m.walls[1];
-    let Surface::Planar { .. } = hem.surface else { panic!() };
+    let Surface::Planar { .. } = hem.surface else {
+        panic!()
+    };
     let nb = hem.surface.normal().unwrap();
-    let pts: Vec<P3> = hem.outline.outer.iter().flat_map(|q| {
-        let p = hem.surface.point(*q);
-        [p, p + nb * T]
-    }).collect();
+    let pts: Vec<P3> = hem
+        .outline
+        .outer
+        .iter()
+        .flat_map(|q| {
+            let p = hem.surface.point(*q);
+            [p, p + nb * T]
+        })
+        .collect();
     let zmin = pts.iter().map(|p| p.z).fold(f64::MAX, f64::min);
     let xmin = pts.iter().map(|p| p.x).fold(f64::MAX, f64::min);
     assert!((zmin - T - gap).abs() < 1e-9, "{zmin}");
@@ -301,7 +490,11 @@ fn tear_drop_hem_ends_the_gap_off_the_wall() {
 fn slab(m: &Model, id: cadrs_sheetmetal::WallId) -> Vec<P3> {
     let w = m.wall(id).unwrap();
     let n = w.surface.normal().unwrap();
-    w.outline.outer.iter().flat_map(|q| [w.surface.point(*q), w.surface.point(*q) + n * T]).collect()
+    w.outline
+        .outer
+        .iter()
+        .flat_map(|q| [w.surface.point(*q), w.surface.point(*q) + n * T])
+        .collect()
 }
 
 fn max_of(pts: &[P3], f: impl Fn(&P3) -> f64) -> f64 {
@@ -319,19 +512,35 @@ fn hems_meeting_at_a_corner() {
         let mut def = base();
         let m = model(&def);
         let north = pick(&m, P3::new(0.0, 40.0, T), P3::new(50.0, 40.0, T));
-        hem_on(&mut def, vec![east_edge(&m), north], HemOpts { closed, ..hem_opts(HemKind::Straight) });
+        hem_on(
+            &mut def,
+            vec![east_edge(&m), north],
+            HemOpts {
+                closed,
+                ..hem_opts(HemKind::Straight)
+            },
+        );
         let m = model(&def);
         let f = flatten(&m);
         assert!(f.is_ok(), "closed {closed}: {:?}", f.errors);
         let (east, north) = (slab(&m, stable(200)), slab(&m, stable(201)));
         let (ey, nx) = (max_of(&east, |p| p.y), max_of(&north, |p| p.x));
         let want = 40.0 - OSSB - GAP / 2f64.sqrt();
-        assert!(close(ey, want), "closed {closed}: east leg reaches y = {ey}, want {want}");
+        assert!(
+            close(ey, want),
+            "closed {closed}: east leg reaches y = {ey}, want {want}"
+        );
         let want = 50.0 - OSSB - GAP / 2f64.sqrt();
-        assert!(close(nx, want), "closed {closed}: north leg reaches x = {nx}, want {want}");
+        assert!(
+            close(nx, want),
+            "closed {closed}: north leg reaches x = {nx}, want {want}"
+        );
         // The legs' lengths: Total length 12.5 from the outside, so 12.5 − (R + T) from the
         // tangent line at x = 45.
-        assert!(close(max_of(&east, |p| -p.x), -(50.0 - OSSB - (12.5 - OSSB))), "{east:?}");
+        assert!(
+            close(max_of(&east, |p| -p.x), -(50.0 - OSSB - (12.5 - OSSB))),
+            "{east:?}"
+        );
     }
 }
 
@@ -348,14 +557,50 @@ fn hems_meeting_at_a_box_corner() {
         let mut def = base();
         let m = model(&def);
         let north = pick(&m, P3::new(0.0, 40.0, T), P3::new(50.0, 40.0, T));
-        flange_on(&mut def, vec![(east_edge(&m), FRAC_PI_2, true, 20.0, None), (north, FRAC_PI_2, true, 20.0, None)], FlangeAlignment::Inner, None, true);
+        flange_on(
+            &mut def,
+            vec![
+                (east_edge(&m), FRAC_PI_2, true, 20.0, None),
+                (north, FRAC_PI_2, true, 20.0, None),
+            ],
+            FlangeAlignment::Inner,
+            None,
+            true,
+        );
         let m = model(&def);
         let top = |id| wall_edge(&m, stable(id), |p| p.z);
         let (a, b) = (top(100), top(101));
         // Fold inwards: over the material side when the flange's normal points in.
-        let inward = |id: u64, d: V3| m.wall(stable(id)).unwrap().surface.normal().unwrap().dot(&d) > 0.0;
-        let he = vec![HemEdge { pick: a, key: 200, toward: inward(100, -V3::x()) }, HemEdge { pick: b, key: 201, toward: inward(101, -V3::y()) }];
-        edit::hem(&mut def, &he, &HemOpts { closed, ..hem_opts(HemKind::Straight) }).expect("hem");
+        let inward = |id: u64, d: V3| {
+            m.wall(stable(id))
+                .unwrap()
+                .surface
+                .normal()
+                .unwrap()
+                .dot(&d)
+                > 0.0
+        };
+        let he = vec![
+            HemEdge {
+                pick: a,
+                key: 200,
+                toward: inward(100, -V3::x()),
+            },
+            HemEdge {
+                pick: b,
+                key: 201,
+                toward: inward(101, -V3::y()),
+            },
+        ];
+        edit::hem(
+            &mut def,
+            &he,
+            &HemOpts {
+                closed,
+                ..hem_opts(HemKind::Straight)
+            },
+        )
+        .expect("hem");
         let m = model(&def);
         let f = flatten(&m);
         assert!(f.is_ok(), "closed {closed}: {:?}", f.errors);
@@ -363,7 +608,10 @@ fn hems_meeting_at_a_box_corner() {
         let (east, north) = (slab(&m, stable(200)), slab(&m, stable(201)));
         let depth = 2.0 * R + T;
         let nx = max_of(&north, |p| p.x);
-        assert!(close(nx, 50.0 - depth - GAP / 2.0), "north hem reaches x = {nx}");
+        assert!(
+            close(nx, 50.0 - depth - GAP / 2.0),
+            "north hem reaches x = {nx}"
+        );
         let ey = max_of(&east, |p| p.y);
         assert!(close(ey, 40.0 - GAP / 2.0), "east hem reaches y = {ey}");
         let ex = east.iter().map(|p| p.x).fold(f64::MAX, f64::min);
@@ -376,9 +624,19 @@ fn make_joint_bend_and_rip() {
     // A base and a wall standing 5 above its east edge, apart.
     let make = || {
         let mut b = SharpBuilder::new(params());
-        let a = b.wall(P3::origin(), V3::x(), V3::y(), Polygon::rect(P2::origin(), P2::new(50.0, 40.0)));
+        let a = b.wall(
+            P3::origin(),
+            V3::x(),
+            V3::y(),
+            Polygon::rect(P2::origin(), P2::new(50.0, 40.0)),
+        );
         b.set_wall_id(a, cadrs_sheetmetal::WallId(1));
-        let w = b.wall(P3::new(50.0, 0.0, 5.0), V3::z(), V3::y(), Polygon::rect(P2::origin(), P2::new(25.0, 40.0)));
+        let w = b.wall(
+            P3::new(50.0, 0.0, 5.0),
+            V3::z(),
+            V3::y(),
+            Polygon::rect(P2::origin(), P2::new(25.0, 40.0)),
+        );
         b.set_wall_id(w, cadrs_sheetmetal::WallId(2));
         let m = b.build().unwrap();
         SharpDef::new(b, &m, m.walls.len(), m.joints.len())
@@ -390,7 +648,10 @@ fn make_joint_bend_and_rip() {
     edit::make_joint(&mut def, &e1, &e2, 7, JointSpec::Bend(None)).unwrap();
     let m = model(&def);
     let (w, _) = size(&m);
-    assert!(close(w, (50.0 - OSSB) + ba(FRAC_PI_2, R) + (30.0 - OSSB)), "{w}");
+    assert!(
+        close(w, (50.0 - OSSB) + ba(FRAC_PI_2, R) + (30.0 - OSSB)),
+        "{w}"
+    );
     for style in RipStyle::ALL {
         let mut def = make();
         let m = model(&def);
@@ -409,7 +670,10 @@ fn wall_edge(m: &Model, id: cadrs_sheetmetal::WallId, score: impl Fn(P3) -> f64)
     let l = &w.outline.outer;
     let best = (0..l.len())
         .map(|k| (w.surface.point(l[k]), w.surface.point(l[(k + 1) % l.len()])))
-        .max_by(|a, b| score(P3::from((a.0.coords + a.1.coords) / 2.0)).total_cmp(&score(P3::from((b.0.coords + b.1.coords) / 2.0))))
+        .max_by(|a, b| {
+            score(P3::from((a.0.coords + a.1.coords) / 2.0))
+                .total_cmp(&score(P3::from((b.0.coords + b.1.coords) / 2.0)))
+        })
         .unwrap();
     edit::locate(m, &[best.0, best.1]).expect("on its wall")
 }
@@ -420,9 +684,30 @@ fn stable(k: u64) -> cadrs_sheetmetal::WallId {
 
 /// One flange of its own feature on `pick`, running along `dir`.
 fn flange_along(def: &mut SharpDef, m: &Model, pick: EdgePick, key: u64, dir: V3, distance: f64) {
-    let (angle, toward) = EdgeFrame::of(m, &pick).unwrap().angle_of(dir).expect("an angle");
-    let fe = FlangeEdge { pick, key, angle, toward, distance, partial: None };
-    edit::flange(def, &[fe], &FlangeOpts { alignment: FlangeAlignment::Inner, radius: None, miter: None, hold_adjacent: true, per_chain: false }).expect("flange");
+    let (angle, toward) = EdgeFrame::of(m, &pick)
+        .unwrap()
+        .angle_of(dir)
+        .expect("an angle");
+    let fe = FlangeEdge {
+        pick,
+        key,
+        angle,
+        toward,
+        distance,
+        partial: None,
+    };
+    edit::flange(
+        def,
+        &[fe],
+        &FlangeOpts {
+            alignment: FlangeAlignment::Inner,
+            radius: None,
+            miter: None,
+            hold_adjacent: true,
+            per_chain: false,
+        },
+    )
+    .expect("flange");
 }
 
 /// Exercise E2's steps 9–11 on a channel's wall (`ex2-creating-sheet-metal-parts/step-09.png`
@@ -441,7 +726,10 @@ fn flange_on_a_walls_side_edge_then_make_joint_with_the_lip() {
     let m = model(&def);
     // The flange on the wall's end edge at y = 0 (vertical), 10 in over the base.
     let end = wall_edge(&m, stable(100), |p| -p.y - (p.z - 15.0).abs() * 1e-3);
-    assert!((end.a - end.b).normalize().z.abs() > 0.999, "the vertical end edge: {end:?}");
+    assert!(
+        (end.a - end.b).normalize().z.abs() > 0.999,
+        "the vertical end edge: {end:?}"
+    );
     flange_along(&mut def, &m, end, 102, -V3::x(), 10.0);
     let m = model(&def);
     let f = flatten(&m);
@@ -452,40 +740,109 @@ fn flange_on_a_walls_side_edge_then_make_joint_with_the_lip() {
     // under the lip's top, z = 30 + T: Inner puts the lip's inside on the wall's top edge); it
     // runs 10 in from the wall's outside (x = 52); its inside face is on the edge (y = 0).
     let end_wall = m.wall(stable(102)).unwrap();
-    let pts: Vec<P3> = end_wall.outline.outer.iter().map(|q| end_wall.surface.point(*q)).collect();
+    let pts: Vec<P3> = end_wall
+        .outline
+        .outer
+        .iter()
+        .map(|q| end_wall.surface.point(*q))
+        .collect();
     let n = end_wall.surface.normal().unwrap();
     let all: Vec<P3> = pts.iter().flat_map(|p| [*p, p + n * T]).collect();
-    let (zlo, zhi) = all.iter().fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p.z), b.max(p.z)));
-    let (ylo, yhi) = all.iter().fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p.y), b.max(p.y)));
+    let (zlo, zhi) = all
+        .iter()
+        .fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p.z), b.max(p.z)));
+    let (ylo, yhi) = all
+        .iter()
+        .fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p.y), b.max(p.y)));
     let xlo = all.iter().map(|p| p.x).fold(f64::MAX, f64::min);
     let lip = m.wall(stable(101)).unwrap();
     let lip_n = lip.surface.normal().unwrap();
-    let lip_z: Vec<f64> = lip.outline.outer.iter().flat_map(|q| [lip.surface.point(*q).z, (lip.surface.point(*q) + lip_n * T).z]).collect();
-    let (lip_lo, lip_hi) = lip_z.iter().fold((f64::MAX, f64::MIN), |(a, b), z| (a.min(*z), b.max(*z)));
-    assert!(close(lip_lo, 30.0) && close(lip_hi, 30.0 + T), "{lip_lo} {lip_hi}");
-    assert!(close(zlo, OSSB) && close(zhi, 30.0 + T - OSSB), "{zlo} {zhi}");
+    let lip_z: Vec<f64> = lip
+        .outline
+        .outer
+        .iter()
+        .flat_map(|q| {
+            [
+                lip.surface.point(*q).z,
+                (lip.surface.point(*q) + lip_n * T).z,
+            ]
+        })
+        .collect();
+    let (lip_lo, lip_hi) = lip_z
+        .iter()
+        .fold((f64::MAX, f64::MIN), |(a, b), z| (a.min(*z), b.max(*z)));
+    assert!(
+        close(lip_lo, 30.0) && close(lip_hi, 30.0 + T),
+        "{lip_lo} {lip_hi}"
+    );
+    assert!(
+        close(zlo, OSSB) && close(zhi, 30.0 + T - OSSB),
+        "{zlo} {zhi}"
+    );
     assert!(close(xlo, 52.0 - 10.0), "{xlo}");
     assert!(close(ylo, -T) && close(yhi, 0.0), "{ylo} {yhi}");
     // Its bend's ends meet the wall's other bends at corners (reliefs, no collision).
-    assert!(f.parts[0].corners.len() >= 2, "{:?}", f.parts[0].corners.len());
+    assert!(
+        f.parts[0].corners.len() >= 2,
+        "{:?}",
+        f.parts[0].corners.len()
+    );
 
     // Make joint: the lip's end (y = 0) and the end flange's top edge, butt joint – direction 1.
     let lip_end = wall_edge(&m, stable(101), |p| -p.y - p.x.abs() * 1e-6);
     let flange_top = wall_edge(&m, stable(102), |p| p.z);
-    edit::make_joint(&mut def, &lip_end, &flange_top, 9, JointSpec::Rip(RipStyle::ButtDirection1)).expect("make joint");
+    edit::make_joint(
+        &mut def,
+        &lip_end,
+        &flange_top,
+        9,
+        JointSpec::Rip(RipStyle::ButtDirection1),
+    )
+    .expect("make joint");
     let m = model(&def);
     let f = flatten(&m);
     assert!(f.is_ok(), "{:?}", f.errors);
-    let rip = m.joints.iter().find(|j| matches!(j.kind, JointKind::Rip { style: RipStyle::ButtDirection1, .. })).expect("the butt joint");
-    assert_eq!((rip.a, rip.b), (stable(101), stable(102)), "the lip stops short, the end flange runs on over its end");
+    let rip = m
+        .joints
+        .iter()
+        .find(|j| {
+            matches!(
+                j.kind,
+                JointKind::Rip {
+                    style: RipStyle::ButtDirection1,
+                    ..
+                }
+            )
+        })
+        .expect("the butt joint");
+    assert_eq!(
+        (rip.a, rip.b),
+        (stable(101), stable(102)),
+        "the lip stops short, the end flange runs on over its end"
+    );
     // Butt direction 1: the end flange is carried up to the lip's top face (z = 30 + T) and over
     // the lip's end; the lip, carried on towards it, stops the minimal gap short of its inside
     // face (y = 0).
     let end_wall = m.wall(stable(102)).unwrap();
-    let zhi = end_wall.outline.outer.iter().flat_map(|q| [end_wall.surface.point(*q).z, (end_wall.surface.point(*q) + n * T).z]).fold(f64::MIN, f64::max);
+    let zhi = end_wall
+        .outline
+        .outer
+        .iter()
+        .flat_map(|q| {
+            [
+                end_wall.surface.point(*q).z,
+                (end_wall.surface.point(*q) + n * T).z,
+            ]
+        })
+        .fold(f64::MIN, f64::max);
     assert!(close(zhi, 30.0 + T), "{zhi}");
     let lip = m.wall(stable(101)).unwrap();
-    let lip_y = lip.outline.outer.iter().map(|q| lip.surface.point(*q).y).fold(f64::MAX, f64::min);
+    let lip_y = lip
+        .outline
+        .outer
+        .iter()
+        .map(|q| lip.surface.point(*q).y)
+        .fold(f64::MAX, f64::min);
     assert!(close(lip_y, GAP), "{lip_y}");
 }
 
@@ -505,26 +862,74 @@ fn flange_on_a_sloping_edge_stays_joined() {
         let m = model(&def);
         flange_along(&mut def, &m, east_edge(&m), 100, V3::z(), 30.0);
         // Its top cut down to slope: z = 20 + y / 4 (20 high at y = 0, 30 at y = 40).
-        let wi = def.builder.walls.iter().position(|w| w.id == Some(stable(100))).unwrap();
+        let wi = def
+            .builder
+            .walls
+            .iter()
+            .position(|w| w.id == Some(stable(100)))
+            .unwrap();
         let w = &mut def.builder.walls[wi];
         let n = V3::new(0.0, -0.25, 1.0);
         let m2 = cadrs_sheetmetal::poly::V2::new(n.dot(&w.u), n.dot(&w.v));
         let level = 20.0 - n.dot(&w.origin.coords);
-        w.outline = w.outline.clip_half_plane(P2::from(m2 * (level / m2.norm_squared())), -m2);
+        w.outline = w
+            .outline
+            .clip_half_plane(P2::from(m2 * (level / m2.norm_squared())), -m2);
         let m = model(&def);
         let slope = wall_edge(&m, stable(100), |p| p.z);
-        assert!(((slope.b - slope.a).normalize().z).abs() > 0.1, "the sloping edge: {slope:?}");
-        let (angle, toward) = EdgeFrame::of(&m, &slope).unwrap().angle_of(V3::x() * dir).expect("an angle");
-        let fe = FlangeEdge { pick: slope, key: 101, angle, toward, distance: 15.0, partial };
-        edit::flange(&mut def, &[fe], &FlangeOpts { alignment: align, radius: None, miter: None, hold_adjacent: true, per_chain: false }).expect("flange");
+        assert!(
+            ((slope.b - slope.a).normalize().z).abs() > 0.1,
+            "the sloping edge: {slope:?}"
+        );
+        let (angle, toward) = EdgeFrame::of(&m, &slope)
+            .unwrap()
+            .angle_of(V3::x() * dir)
+            .expect("an angle");
+        let fe = FlangeEdge {
+            pick: slope,
+            key: 101,
+            angle,
+            toward,
+            distance: 15.0,
+            partial,
+        };
+        edit::flange(
+            &mut def,
+            &[fe],
+            &FlangeOpts {
+                alignment: align,
+                radius: None,
+                miter: None,
+                hold_adjacent: true,
+                per_chain: false,
+            },
+        )
+        .expect("flange");
         let m = model(&def);
         // The wall is trimmed by the bend's setback along the flange's stretch.
         let w = m.wall(stable(100)).unwrap();
-        let top = w.outline.outer.iter().map(|q| w.surface.point(*q).z).fold(f64::MIN, f64::max);
-        assert!(top < 30.0 - 1.0, "{align:?} {dir} {partial:?}: the wall's top {top}: {:?}", w.outline.outer.iter().map(|q| w.surface.point(*q)).collect::<Vec<_>>());
+        let top = w
+            .outline
+            .outer
+            .iter()
+            .map(|q| w.surface.point(*q).z)
+            .fold(f64::MIN, f64::max);
+        assert!(
+            top < 30.0 - 1.0,
+            "{align:?} {dir} {partial:?}: the wall's top {top}: {:?}",
+            w.outline
+                .outer
+                .iter()
+                .map(|q| w.surface.point(*q))
+                .collect::<Vec<_>>()
+        );
         let f = flatten(&m);
         assert!(f.is_ok(), "{align:?} {dir}: {:?}", f.errors);
-        assert_eq!(f.parts.len(), 1, "{align:?} {dir}: the flange stays joined to its wall");
+        assert_eq!(
+            f.parts.len(),
+            1,
+            "{align:?} {dir}: the flange stays joined to its wall"
+        );
         assert_eq!(m.joints.iter().filter(|j| j.bend().is_some()).count(), 2);
     }
 }

@@ -87,10 +87,11 @@ impl Layer {
     /// The side a one-sided layer belongs to (`None` for inner copper and the shared layers).
     pub fn side(self) -> Option<Side> {
         match self {
-            TopCopper | TopSilk | TopMask | TopPaste | TopAdhesive | TopCourtyard | TopFab => Some(Side::Top),
-            BottomCopper | BottomSilk | BottomMask | BottomPaste | BottomAdhesive | BottomCourtyard | BottomFab => {
-                Some(Side::Bottom)
+            TopCopper | TopSilk | TopMask | TopPaste | TopAdhesive | TopCourtyard | TopFab => {
+                Some(Side::Top)
             }
+            BottomCopper | BottomSilk | BottomMask | BottomPaste | BottomAdhesive
+            | BottomCourtyard | BottomFab => Some(Side::Bottom),
             _ => None,
         }
     }
@@ -202,7 +203,9 @@ impl Layer {
     /// Copper layers of a board with `count` copper layers (2 or more), top to bottom.
     pub fn copper(count: u8) -> impl Iterator<Item = Layer> {
         let inner = count.saturating_sub(2).min(MAX_INNER);
-        std::iter::once(TopCopper).chain((1..=inner).map(Inner)).chain(std::iter::once(BottomCopper))
+        std::iter::once(TopCopper)
+            .chain((1..=inner).map(Inner))
+            .chain(std::iter::once(BottomCopper))
     }
 }
 
@@ -259,7 +262,9 @@ impl LayerSet {
     }
 
     pub fn iter(self) -> impl Iterator<Item = Layer> {
-        (0..64u32).filter(move |b| self.0 & (1 << b) != 0).map(Layer::from_bit)
+        (0..64u32)
+            .filter(move |b| self.0 & (1 << b) != 0)
+            .map(Layer::from_bit)
     }
 }
 
@@ -281,7 +286,10 @@ mod tests {
 
     #[test]
     fn bits_round_trip() {
-        let all: Vec<Layer> = Layer::copper(32).chain(TECHNICAL).chain((2..=MAX_USER).map(User)).collect();
+        let all: Vec<Layer> = Layer::copper(32)
+            .chain(TECHNICAL)
+            .chain((2..=MAX_USER).map(User))
+            .collect();
         assert_eq!(all.len(), 32 + 19 + 8);
         let set = LayerSet::of(&all);
         assert_eq!(set.iter().count(), all.len());
@@ -293,9 +301,15 @@ mod tests {
     #[test]
     fn flips_sides() {
         let s = LayerSet::of(&[TopCopper, TopMask, TopPaste, Outline]);
-        assert_eq!(s.flipped(), LayerSet::of(&[BottomCopper, BottomMask, BottomPaste, Outline]));
+        assert_eq!(
+            s.flipped(),
+            LayerSet::of(&[BottomCopper, BottomMask, BottomPaste, Outline])
+        );
         assert!(LayerSet::ALL_COPPER.contains(Inner(7)));
         assert!(!LayerSet::ALL_COPPER.contains(TopSilk));
-        assert_eq!(Layer::copper(4).collect::<Vec<_>>(), vec![TopCopper, Inner(1), Inner(2), BottomCopper]);
+        assert_eq!(
+            Layer::copper(4).collect::<Vec<_>>(),
+            vec![TopCopper, Inner(1), Inner(2), BottomCopper]
+        );
     }
 }

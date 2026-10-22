@@ -60,13 +60,20 @@ impl Plugin for TriadPlugin {
             )
             .add_systems(
                 PostUpdate,
-                (place_value_box, sync_value_edit, sync_readout, place_markers)
+                (
+                    place_value_box,
+                    sync_value_edit,
+                    sync_readout,
+                    place_markers,
+                )
                     .before(bevy::ui::UiSystems::Layout)
                     .run_if(in_state(AppState::Document)),
             )
             .add_observer(on_value_commit)
             .add_observer(on_value_cancel)
-            .add_systems(OnExit(AppState::Document), |mut t: ResMut<Triad>| *t = Triad::default());
+            .add_systems(OnExit(AppState::Document), |mut t: ResMut<Triad>| {
+                *t = Triad::default()
+            });
     }
 }
 
@@ -160,7 +167,10 @@ struct TriadDrag {
 
 /// The radial direction grabbed in the plane perpendicular to the chosen rotation axis.
 #[derive(Debug, Clone, Copy)]
-struct RingDrag { zero: Vec3, edge_on: bool }
+struct RingDrag {
+    zero: Vec3,
+    edge_on: bool,
+}
 
 /// The triad: where it is, the handle under the pointer, and a drag in progress.
 #[derive(Resource, Debug, Default)]
@@ -224,9 +234,15 @@ const SNAP: f32 = 14.0;
 
 /// Magnetic stops at the preferred increment; Shift bypasses both stops and degree rounding.
 fn rotation_degrees(degrees: f64, increment: f64, tolerance: f64, shift: bool) -> f64 {
-    if shift || increment == 0.0 { return degrees; }
+    if shift || increment == 0.0 {
+        return degrees;
+    }
     let stop = (degrees / increment).round() * increment;
-    if (degrees - stop).abs() <= tolerance + 1e-5 { stop } else { degrees.round() }
+    if (degrees - stop).abs() <= tolerance + 1e-5 {
+        stop
+    } else {
+        degrees.round()
+    }
 }
 
 fn v3(p: [f64; 3]) -> Vec3 {
@@ -259,7 +275,11 @@ fn pose_of(world_doc: &ActiveDocument, preview: Option<&Pose>, id: InstanceId) -
     if let Some(p) = preview {
         return Some(*p);
     }
-    world_doc.active_element()?.assembly_model()?.instance(id).map(|i| i.pose)
+    world_doc
+        .active_element()?
+        .assembly_model()?
+        .instance(id)
+        .map(|i| i.pose)
 }
 
 /// The triad's world frame: origin and unit X, Y, Z.
@@ -306,7 +326,9 @@ fn circle_axis(part: &Part, e: &cadrs_core::SolidEdge) -> Option<(Vec3, Vec3, f6
 /// on circles and faces bring their axis (a circle's Z pointing into the part, as the triad
 /// placed on it); midpoints and vertices keep the triad's axes.
 fn snaps_of(part: &Part, entity: Option<&Pick>) -> Vec<Snap> {
-    use cadrs_core::assembly::connector::{EntityRef, ImplicitPoint, all_implicit_points, implicit_points};
+    use cadrs_core::assembly::connector::{
+        EntityRef, ImplicitPoint, all_implicit_points, implicit_points,
+    };
     let s = &part.solid;
     let points = match entity {
         None => all_implicit_points(s),
@@ -320,17 +342,31 @@ fn snaps_of(part: &Part, entity: Option<&Pick>) -> Vec<Snap> {
         .map(|p| {
             let at = v3(p.frame.origin);
             let z = match p.point {
-                ImplicitPoint::CircleCenter(e) => s.edge(&e).and_then(|e| circle_axis(part, e)).map(|(_, n, _)| n),
-                ImplicitPoint::FaceCentroid(_) | ImplicitPoint::AxisMiddle(_) => Some(v3(p.frame.z)),
+                ImplicitPoint::CircleCenter(e) => s
+                    .edge(&e)
+                    .and_then(|e| circle_axis(part, e))
+                    .map(|(_, n, _)| n),
+                ImplicitPoint::FaceCentroid(_) | ImplicitPoint::AxisMiddle(_) => {
+                    Some(v3(p.frame.z))
+                }
                 _ => None,
             };
-            Snap { at, z, circle: p.diameter }
+            Snap {
+                at,
+                z,
+                circle: p.diameter,
+            }
         })
         .collect()
 }
 
 /// The spot on a picked entity under the pointer, and the triad frame there (world).
-fn frame_at(part: &Part, pick: &Pick, view: &ViewState, offset: Vec2) -> Option<(Vec3, Vec3, Option<f64>)> {
+fn frame_at(
+    part: &Part,
+    pick: &Pick,
+    view: &ViewState,
+    offset: Vec2,
+) -> Option<(Vec3, Vec3, Option<f64>)> {
     let (o, d) = view.ray(offset);
     let s = &part.solid;
     match pick {
@@ -347,13 +383,18 @@ fn frame_at(part: &Part, pick: &Pick, view: &ViewState, offset: Vec2) -> Option<
                 }
                 let tt = n.dot(a - o) / den;
                 let p = o + d * tt;
-                let inside = [(a, b), (b, c), (c, a)].iter().all(|(u, w)| (*w - *u).cross(p - *u).dot(n) >= -1e-4);
+                let inside = [(a, b), (b, c), (c, a)]
+                    .iter()
+                    .all(|(u, w)| (*w - *u).cross(p - *u).dot(n) >= -1e-4);
                 if inside && best.is_none_or(|(bt, ..)| tt < bt) {
                     best = Some((tt, p, n));
                 }
             }
             let (_, p, n) = best?;
-            let n = f.plane.map(|pl| v3(pl.u).cross(v3(pl.v)).normalize_or_zero()).unwrap_or(n);
+            let n = f
+                .plane
+                .map(|pl| v3(pl.u).cross(v3(pl.v)).normalize_or_zero())
+                .unwrap_or(n);
             Some((p, n, None))
         }
         Pick::Edge(_, name) => {
@@ -398,10 +439,18 @@ type PickSessions<'w> = (
 
 /// Whole-instance selections (tree clicks and box selection) use a shared widget at the
 /// selection's bounds. Prefer a movable representative so a fixed row cannot disable it.
-fn whole_selection_frame(doc: &ActiveDocument, selection: &Selection, cache: &PartCache) -> Option<TriadFrame> {
+fn whole_selection_frame(
+    doc: &ActiveDocument,
+    selection: &Selection,
+    cache: &PartCache,
+) -> Option<TriadFrame> {
     let model = doc.active_element()?.assembly_model()?;
     let ids = super::selected_instances(selection);
-    let instance = ids.iter().rev().filter_map(|id| model.instance(*id)).find(|i| !i.fixed)
+    let instance = ids
+        .iter()
+        .rev()
+        .filter_map(|id| model.instance(*id))
+        .find(|i| !i.fixed)
         .or_else(|| ids.iter().rev().find_map(|id| model.instance(*id)))?;
     let mut lo = Vec3::splat(f32::INFINITY);
     let mut hi = Vec3::splat(f32::NEG_INFINITY);
@@ -414,9 +463,19 @@ fn whole_selection_frame(doc: &ActiveDocument, selection: &Selection, cache: &Pa
             }
         }
     }
-    let center = if lo.is_finite() && hi.is_finite() { d3((lo + hi) * 0.5) } else { instance.pose.translation };
+    let center = if lo.is_finite() && hi.is_finite() {
+        d3((lo + hi) * 0.5)
+    } else {
+        instance.pose.translation
+    };
     let inv = instance.pose.inverse();
-    Some(TriadFrame { instance: instance.id, origin: inv.apply(center), x: inv.rotate([1.0, 0.0, 0.0]), z: inv.rotate([0.0, 0.0, 1.0]), circle: None })
+    Some(TriadFrame {
+        instance: instance.id,
+        origin: inv.apply(center),
+        x: inv.rotate([1.0, 0.0, 0.0]),
+        z: inv.rotate([0.0, 0.0, 1.0]),
+        circle: None,
+    })
 }
 
 /// Places the triad where an instance's face, edge or vertex was just clicked; removes it when
@@ -437,14 +496,25 @@ fn place_on_pick(
 ) {
     let Some(doc) = doc else { return };
     // The pointer system cancels any in-flight widget drag while editing a section.
-    if sessions.6.dialog.is_some() { return; }
+    if sessions.6.dialog.is_some() {
+        return;
+    }
     // Hidden while measuring; gone while inserting, mating or grouping.
     let hidden = mass.is_some();
     if triad.hidden != hidden {
         triad.hidden = hidden;
     }
     // (Gone too while a board's layout is edited in context.)
-    if super::active_assembly(&doc).is_none() || eda.plane().is_some() || insert.is_some() || sessions.0.is_some() || sessions.1.is_some() || sessions.2.is_some() || sessions.3.editing() || sessions.4.is_some() || sessions.5.is_some() {
+    if super::active_assembly(&doc).is_none()
+        || eda.plane().is_some()
+        || insert.is_some()
+        || sessions.0.is_some()
+        || sessions.1.is_some()
+        || sessions.2.is_some()
+        || sessions.3.editing()
+        || sessions.4.is_some()
+        || sessions.5.is_some()
+    {
         if triad.frame.is_some() {
             *triad = Triad::default();
         }
@@ -453,7 +523,10 @@ fn place_on_pick(
     if triad.placed_for == selection.0 || triad.drag.is_some() {
         // The instance may have gone (undo, delete).
         if let Some(f) = triad.frame
-            && doc.active_element().and_then(|e| e.assembly_model()?.instance(f.instance)).is_none()
+            && doc
+                .active_element()
+                .and_then(|e| e.assembly_model()?.instance(f.instance))
+                .is_none()
         {
             triad.frame = None;
         }
@@ -463,25 +536,51 @@ fn place_on_pick(
         .0
         .iter()
         .rev()
-        .find(|p| matches!(p, Pick::Face(..) | Pick::Edge(..) | Pick::Vertex(..)) && !triad.placed_for.contains(p))
+        .find(|p| {
+            matches!(p, Pick::Face(..) | Pick::Edge(..) | Pick::Vertex(..))
+                && !triad.placed_for.contains(p)
+        })
         .copied();
     triad.placed_for = selection.0.clone();
-    let any = selection.0.iter().any(|p| matches!(p, Pick::Face(..) | Pick::Edge(..) | Pick::Vertex(..)));
+    let any = selection
+        .0
+        .iter()
+        .any(|p| matches!(p, Pick::Face(..) | Pick::Edge(..) | Pick::Vertex(..)));
     if !any || super::selected_instances(&selection).len() > 1 {
         triad.frame = whole_selection_frame(&doc, &selection, &cache);
         return;
     }
-    let Some(pick) = newest.or_else(|| selection.0.iter().rev().find(|p| matches!(p, Pick::Face(..) | Pick::Edge(..) | Pick::Vertex(..))).copied()) else { return };
+    let Some(pick) = newest.or_else(|| {
+        selection
+            .0
+            .iter()
+            .rev()
+            .find(|p| matches!(p, Pick::Face(..) | Pick::Edge(..) | Pick::Vertex(..)))
+            .copied()
+    }) else {
+        return;
+    };
     let Some(part_id) = pick.part() else { return };
-    let Some(part) = cache.part(part_id) else { return };
+    let Some(part) = cache.part(part_id) else {
+        return;
+    };
     let instance = InstanceId::of_part(part_id);
-    let Some(pose) = pose_of(&doc, None, instance) else { return };
-    let Some((p, z, circle)) = frame_at(part, &pick, &view.view, rect.offset(drag.pointer())) else {
+    let Some(pose) = pose_of(&doc, None, instance) else {
+        return;
+    };
+    let Some((p, z, circle)) = frame_at(part, &pick, &view.view, rect.offset(drag.pointer()))
+    else {
         return;
     };
     let inv = pose.inverse();
     let x = x_for(z);
-    triad.frame = Some(TriadFrame { instance, origin: inv.apply(d3(p)), x: inv.rotate(d3(x)), z: inv.rotate(d3(z)), circle });
+    triad.frame = Some(TriadFrame {
+        instance,
+        origin: inv.apply(d3(p)),
+        x: inv.rotate(d3(x)),
+        z: inv.rotate(d3(z)),
+        circle,
+    });
 }
 
 /// The triad's geometry on screen, for hit tests.
@@ -499,14 +598,26 @@ fn screen(view: &ViewState, rect: &ViewportRect, o: Vec3, axes: &[Vec3; 3]) -> S
     let to = |p: Vec3| rect.to_screen(view.project(p));
     let tips = [0, 1, 2].map(|i| to(o + axes[i] * ARROW * s));
     let bases = [0, 1, 2].map(|i| to(o + axes[i] * ORIGIN_R * 1.4 * s));
-    let arcs = [0, 1, 2].map(|i| rotation_arc(o, axes, i, s).into_iter().map(to).collect::<Vec<_>>());
+    let arcs = [0, 1, 2].map(|i| {
+        rotation_arc(o, axes, i, s)
+            .into_iter()
+            .map(to)
+            .collect::<Vec<_>>()
+    });
     let rings = [0, 1, 2].map(|i| arcs[i][arcs[i].len() / 2]);
     let squares = [0, 1, 2].map(|k| {
         let (i, j) = ((k + 1) % 3, (k + 2) % 3);
         let (a, b) = (SQ_A * ARROW * s, SQ_B * ARROW * s);
         [(a, a), (b, a), (b, b), (a, b)].map(|(u, w)| to(o + axes[i] * u + axes[j] * w))
     });
-    Screen { origin: to(o), tips, bases, rings, arcs, squares }
+    Screen {
+        origin: to(o),
+        tips,
+        bases,
+        rings,
+        arcs,
+        squares,
+    }
 }
 
 const ROTATION_RADIUS: f32 = ARROW + RING_GAP;
@@ -515,42 +626,85 @@ const ROTATION_RADIUS: f32 = ARROW + RING_GAP;
 fn rotation_arc(origin: Vec3, axes: &[Vec3; 3], i: usize, scale: f32) -> Vec<Vec3> {
     let u = axes[(i + 1) % 3];
     let v = axes[i].cross(u).normalize_or_zero();
-    (0..=24).map(|k| {
-        let a = (18.0 + 54.0 * k as f32 / 24.0).to_radians();
-        origin + (u * a.cos() + v * a.sin()) * ROTATION_RADIUS * scale
-    }).collect()
+    (0..=24)
+        .map(|k| {
+            let a = (18.0 + 54.0 * k as f32 / 24.0).to_radians();
+            origin + (u * a.cos() + v * a.sin()) * ROTATION_RADIUS * scale
+        })
+        .collect()
 }
 
-fn radial_at(view: &ViewState, rect: &ViewportRect, origin: Vec3, axis: Vec3, pos: Vec2) -> Option<Vec3> {
+fn radial_at(
+    view: &ViewState,
+    rect: &ViewportRect,
+    origin: Vec3,
+    axis: Vec3,
+    pos: Vec2,
+) -> Option<Vec3> {
     let (o, direction) = view.ray(rect.offset(pos));
     let denominator = direction.dot(axis);
-    if denominator.abs() < 1e-5 { return None; }
+    if denominator.abs() < 1e-5 {
+        return None;
+    }
     let radial = o + direction * ((origin - o).dot(axis) / denominator) - origin;
     (radial.length() > 1e-5).then(|| radial.normalize())
 }
 
-fn begin_ring(view: &ViewState, rect: &ViewportRect, origin: Vec3, axes: &[Vec3; 3], index: usize, pos: Vec2) -> RingDrag {
+fn begin_ring(
+    view: &ViewState,
+    rect: &ViewportRect,
+    origin: Vec3,
+    axes: &[Vec3; 3],
+    index: usize,
+    pos: Vec2,
+) -> RingDrag {
     let edge_on = view.back().dot(axes[index]).abs() < 0.1;
-    let zero = (!edge_on).then(|| radial_at(view, rect, origin, axes[index], pos)).flatten().unwrap_or_else(|| {
-        let point = rotation_arc(origin, axes, index, view.scale).into_iter()
-            .min_by(|a, b| view.project(*a).distance_squared(rect.offset(pos)).total_cmp(&view.project(*b).distance_squared(rect.offset(pos)))).unwrap();
-        (point - origin).normalize()
-    });
+    let zero = (!edge_on)
+        .then(|| radial_at(view, rect, origin, axes[index], pos))
+        .flatten()
+        .unwrap_or_else(|| {
+            let point = rotation_arc(origin, axes, index, view.scale)
+                .into_iter()
+                .min_by(|a, b| {
+                    view.project(*a)
+                        .distance_squared(rect.offset(pos))
+                        .total_cmp(&view.project(*b).distance_squared(rect.offset(pos)))
+                })
+                .unwrap();
+            (point - origin).normalize()
+        });
     RingDrag { zero, edge_on }
 }
 
-fn ring_degrees(drag: RingDrag, view: &ViewState, rect: &ViewportRect, origin: Vec3, axis: Vec3, start: Vec2, pos: Vec2) -> Option<f64> {
+fn ring_degrees(
+    drag: RingDrag,
+    view: &ViewState,
+    rect: &ViewportRect,
+    origin: Vec3,
+    axis: Vec3,
+    start: Vec2,
+    pos: Vec2,
+) -> Option<f64> {
     if drag.edge_on {
         let tangent = view.project_vector(axis.cross(drag.zero) * ROTATION_RADIUS * view.scale);
-        return (tangent.length_squared() > 1e-6).then(|| ((pos - start).dot(tangent) / tangent.length_squared()).to_degrees() as f64);
+        return (tangent.length_squared() > 1e-6)
+            .then(|| ((pos - start).dot(tangent) / tangent.length_squared()).to_degrees() as f64);
     }
     let radial = radial_at(view, rect, origin, axis, pos)?;
-    Some(axis.dot(drag.zero.cross(radial)).atan2(drag.zero.dot(radial)).to_degrees() as f64)
+    Some(
+        axis.dot(drag.zero.cross(radial))
+            .atan2(drag.zero.dot(radial))
+            .to_degrees() as f64,
+    )
 }
 
 fn rotation_about(start: &Pose, solved: &Pose, axis: Vec3) -> f64 {
     let r = solved.rotation_matrix() * start.rotation_matrix().transpose();
-    let w = [r[(2, 1)] - r[(1, 2)], r[(0, 2)] - r[(2, 0)], r[(1, 0)] - r[(0, 1)]];
+    let w = [
+        r[(2, 1)] - r[(1, 2)],
+        r[(0, 2)] - r[(2, 0)],
+        r[(1, 0)] - r[(0, 1)],
+    ];
     let sine = (w[0] * axis.x as f64 + w[1] * axis.y as f64 + w[2] * axis.z as f64) / 2.0;
     sine.atan2((r.trace() - 1.0) / 2.0).to_degrees()
 }
@@ -582,32 +736,52 @@ fn hit(sc: &Screen, p: Vec2) -> Option<TriadHandle> {
     if sc.origin.distance(p) <= ORIGIN_R + 3.0 {
         return Some(TriadHandle::Origin);
     }
-    if let Some((distance, i)) = (0..3).map(|i| {
-        let distance = sc.arcs[i].windows(2).map(|w| segment_distance(p, w[0], w[1])).fold(f32::INFINITY, f32::min);
-        (distance, i)
-    }).min_by(|a, b| a.0.total_cmp(&b.0)) {
-        if distance <= GRAB { return Some(TriadHandle::Ring(i)); }
+    if let Some((distance, i)) = (0..3)
+        .map(|i| {
+            let distance = sc.arcs[i]
+                .windows(2)
+                .map(|w| segment_distance(p, w[0], w[1]))
+                .fold(f32::INFINITY, f32::min);
+            (distance, i)
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+    {
+        if distance <= GRAB {
+            return Some(TriadHandle::Ring(i));
+        }
     }
     for i in 0..3 {
         if segment_distance(p, sc.bases[i], sc.tips[i]) <= GRAB {
             return Some(TriadHandle::Arrow(i));
         }
     }
-    (0..3).find(|k| inside(p, &sc.squares[*k])).map(TriadHandle::Plane)
+    (0..3)
+        .find(|k| inside(p, &sc.squares[*k]))
+        .map(TriadHandle::Plane)
 }
 
 /// The triad handle at a screen position (for the right-click menu), with its instance.
 pub fn handle_at(world: &World, at: Vec2) -> Option<(InstanceId, TriadHandle)> {
     let t = world.resource::<Triad>();
-    if t.hidden || world.contains_resource::<crate::measure::MeasurePanel>()
-        || world.resource::<crate::section_view::SectionViews>().dialog.is_some() {
+    if t.hidden
+        || world.contains_resource::<crate::measure::MeasurePanel>()
+        || world
+            .resource::<crate::section_view::SectionViews>()
+            .dialog
+            .is_some()
+    {
         return None;
     }
     let f = t.frame?;
     let doc = world.get_resource::<ActiveDocument>()?;
     let pose = pose_of(doc, None, f.instance)?;
     let (o, axes) = world_frame(&f, &pose);
-    let sc = screen(&world.resource::<ViewportView>().view, world.resource::<ViewportRect>(), o, &axes);
+    let sc = screen(
+        &world.resource::<ViewportView>().view,
+        world.resource::<ViewportRect>(),
+        o,
+        &axes,
+    );
     hit(&sc, at).map(|h| (f.instance, h))
 }
 
@@ -622,7 +796,10 @@ fn triad_pointer(
     rect: Res<ViewportRect>,
     vdrag: Res<ViewportDrag>,
     keys: Res<ButtonInput<KeyCode>>,
-    (units, prefs): (Res<crate::WorkspaceUnits>, Res<crate::preferences_ui::LocalPreferences>),
+    (units, prefs): (
+        Res<crate::WorkspaceUnits>,
+        Res<crate::preferences_ui::LocalPreferences>,
+    ),
     highlight: Res<crate::viewport::PlaneHighlight>,
     mut triad: ResMut<Triad>,
     mut asm: ResMut<super::AssemblyParts>,
@@ -650,8 +827,13 @@ fn triad_pointer(
     let events: Vec<PointerInput> = inputs.read().cloned().collect();
     // The value box closes on any press outside it (the press then does what it does).
     if let Some(e) = triad.edit.as_ref() {
-        let r = Rect::from_corners(e.at + rect.0.min, e.at + rect.0.min + Vec2::new(120.0, 28.0));
-        let pressed_outside = events.iter().any(|i| matches!(i.action, PointerAction::Press(_)) && !r.contains(i.location.position));
+        let r = Rect::from_corners(
+            e.at + rect.0.min,
+            e.at + rect.0.min + Vec2::new(120.0, 28.0),
+        );
+        let pressed_outside = events.iter().any(|i| {
+            matches!(i.action, PointerAction::Press(_)) && !r.contains(i.location.position)
+        });
         if !pressed_outside {
             return;
         }
@@ -706,17 +888,26 @@ fn triad_pointer(
                     value: String::new(),
                     snaps: Vec::new(),
                     face: None,
-                    rotation: match h { TriadHandle::Ring(i) => Some(begin_ring(&view.view, &rect, o, &axes, i, pos)), _ => None },
+                    rotation: match h {
+                        TriadHandle::Ring(i) => {
+                            Some(begin_ring(&view.view, &rect, o, &axes, i, pos))
+                        }
+                        _ => None,
+                    },
                 });
             }
             PointerAction::Move { .. } => {
-                let Some(d) = triad.drag.as_mut() else { continue };
+                let Some(d) = triad.drag.as_mut() else {
+                    continue;
+                };
                 let delta = pos - d.start;
                 let s = view.view.scale;
                 match d.handle {
                     TriadHandle::Origin => {
                         let parts = super::view_parts(&cache, &[f.instance]);
-                        let Some(part) = parts.first().and_then(|p| cache.part(*p)) else { continue };
+                        let Some(part) = parts.first().and_then(|p| cache.part(*p)) else {
+                            continue;
+                        };
                         // Shift locks the entity under the pointer.
                         let hovered = highlight.viewport.filter(|p| p.part() == Some(part.id));
                         if shift {
@@ -734,10 +925,16 @@ fn triad_pointer(
                             Some(e) => snaps_of(part, Some(&e)),
                             None => Vec::new(),
                         };
-                        if let Some(face) = d.face.filter(|f| Some(*f) != entity && d.locked.is_none()) {
+                        if let Some(face) =
+                            d.face.filter(|f| Some(*f) != entity && d.locked.is_none())
+                        {
                             near.extend(snaps_of(part, Some(&face)));
                         }
-                        let all = if d.locked.is_some() { near.clone() } else { snaps_of(part, None) };
+                        let all = if d.locked.is_some() {
+                            near.clone()
+                        } else {
+                            snaps_of(part, None)
+                        };
                         d.snaps = near.iter().map(|s| s.at).collect();
                         let off = rect.offset(pos);
                         let best = all
@@ -765,7 +962,11 @@ fn triad_pointer(
                                 let n = view.view.back();
                                 let t = n.dot(d.origin - ro) / n.dot(rd);
                                 let p = ro + rd * t;
-                                TriadFrame { origin: inv.apply(d3(p)), circle: None, ..f }
+                                TriadFrame {
+                                    origin: inv.apply(d3(p)),
+                                    circle: None,
+                                    ..f
+                                }
                             }
                         };
                         d.frame = Some(new);
@@ -783,7 +984,9 @@ fn triad_pointer(
                         let step = crate::extrude::snap_step(px.length() * unit as f32) * unit;
                         let dist = ((along as f64) / step).round() * step;
                         d.current = Some(d.pose.then(&Pose::translation(d3(a * dist as f32))));
-                        d.value = units.0.with_unit(dist, cadrs_sketch::units::Quantity::Length);
+                        d.value = units
+                            .0
+                            .with_unit(dist, cadrs_sketch::units::Quantity::Length);
                     }
                     TriadHandle::Plane(k) => {
                         let n = d.axes[k];
@@ -797,14 +1000,31 @@ fn triad_pointer(
                             let step = (crate::extrude::snap_step(unit as f32 / s) * unit) as f32;
                             let m = ((b - a) / step).round() * step;
                             d.current = Some(d.pose.then(&Pose::translation(d3(m))));
-                            d.value = units.0.with_unit(m.length() as f64, cadrs_sketch::units::Quantity::Length);
+                            d.value = units.0.with_unit(
+                                m.length() as f64,
+                                cadrs_sketch::units::Quantity::Length,
+                            );
                         }
                     }
                     TriadHandle::Ring(i) => {
                         let Some(rotation) = d.rotation else { continue };
-                        let Some(raw) = ring_degrees(rotation, &view.view, &rect, d.origin, d.axes[i], d.start, pos) else { continue };
-                        let deg = rotation_degrees(raw, prefs.0.rotation_snap_degrees(), prefs.0.rotation_snap_tolerance_degrees(), shift);
-                        d.current = Some(core_asm::rotated(&d.pose, d3(d.origin), d3(d.axes[i]), deg.to_radians()));
+                        let Some(raw) = ring_degrees(
+                            rotation, &view.view, &rect, d.origin, d.axes[i], d.start, pos,
+                        ) else {
+                            continue;
+                        };
+                        let deg = rotation_degrees(
+                            raw,
+                            prefs.0.rotation_snap_degrees(),
+                            prefs.0.rotation_snap_tolerance_degrees(),
+                            shift,
+                        );
+                        d.current = Some(core_asm::rotated(
+                            &d.pose,
+                            d3(d.origin),
+                            d3(d.axes[i]),
+                            deg.to_radians(),
+                        ));
                         d.value = format!("{} deg", (deg * 10.0).round() / 10.0 + 0.0);
                     }
                     TriadHandle::None | TriadHandle::View => {}
@@ -817,8 +1037,10 @@ fn triad_pointer(
                     let selection = d.selection.clone();
                     commands.queue(move |world: &mut World| {
                         // The readout shows what the mates let happen, not what was asked.
-                        if let Some(solved) = super::drag::preview_move(world, id, p, anchor, &selection)
-                            && let Some(text) = solved_value(handle, &start, &solved, anchor, &axes, &u)
+                        if let Some(solved) =
+                            super::drag::preview_move(world, id, p, anchor, &selection)
+                            && let Some(text) =
+                                solved_value(handle, &start, &solved, anchor, &axes, &u)
                             && let Some(d) = world.resource_mut::<Triad>().drag.as_mut()
                         {
                             d.value = text;
@@ -843,7 +1065,11 @@ fn triad_pointer(
                     let id = f.instance;
                     let anchor = d3(d.origin);
                     let selection = d.selection.clone();
-                    commands.queue(move |world: &mut World| super::drag::commit_move_for(world, element, id, p, anchor, label, &selection));
+                    commands.queue(move |world: &mut World| {
+                        super::drag::commit_move_for(
+                            world, element, id, p, anchor, label, &selection,
+                        )
+                    });
                     // The value box stays: an exact value can be typed (A3.4).
                     let moved = v3(p.translation) - v3(d.pose.translation);
                     triad.edit = Some(ValueEdit {
@@ -870,27 +1096,53 @@ fn triad_pointer(
 
 /// The value a drag reached (the readout): the distance the triad origin moved along the arrow
 /// (or in the plane), or the angle turned about the ring's axis, from `start` to `solved`.
-fn solved_value(handle: TriadHandle, start: &Pose, solved: &Pose, anchor: [f64; 3], axes: &[Vec3; 3], units: &cadrs_sketch::units::Units) -> Option<String> {
+fn solved_value(
+    handle: TriadHandle,
+    start: &Pose,
+    solved: &Pose,
+    anchor: [f64; 3],
+    axes: &[Vec3; 3],
+    units: &cadrs_sketch::units::Units,
+) -> Option<String> {
     let moved = {
         let local = start.inverse().apply(anchor);
         let q = solved.apply(local);
-        Vec3::new((q[0] - anchor[0]) as f32, (q[1] - anchor[1]) as f32, (q[2] - anchor[2]) as f32)
+        Vec3::new(
+            (q[0] - anchor[0]) as f32,
+            (q[1] - anchor[1]) as f32,
+            (q[2] - anchor[2]) as f32,
+        )
     };
     match handle {
-        TriadHandle::Arrow(i) => Some(units.with_unit(moved.dot(axes[i]) as f64, cadrs_sketch::units::Quantity::Length)),
-        TriadHandle::Plane(_) => Some(units.with_unit(moved.length() as f64, cadrs_sketch::units::Quantity::Length)),
-        TriadHandle::Ring(i) => Some(format!("{} deg", (rotation_about(start, solved, axes[i]) * 10.0).round() / 10.0 + 0.0)),
+        TriadHandle::Arrow(i) => Some(units.with_unit(
+            moved.dot(axes[i]) as f64,
+            cadrs_sketch::units::Quantity::Length,
+        )),
+        TriadHandle::Plane(_) => {
+            Some(units.with_unit(moved.length() as f64, cadrs_sketch::units::Quantity::Length))
+        }
+        TriadHandle::Ring(i) => Some(format!(
+            "{} deg",
+            (rotation_about(start, solved, axes[i]) * 10.0).round() / 10.0 + 0.0
+        )),
         _ => None,
     }
 }
 
 /// The triad's menu items (Move to origin, Align / Anti-align with Z, Rotate 90° / 180°).
 pub fn triad_action(world: &mut World, handle: TriadHandle, item: &str) {
-    let Some(f) = world.resource::<Triad>().frame else { return };
-    let Some(element) = world.get_resource::<ActiveDocument>().and_then(super::active_assembly) else {
+    let Some(f) = world.resource::<Triad>().frame else {
         return;
     };
-    let Some(pose) = pose_of(world.resource::<ActiveDocument>(), None, f.instance) else { return };
+    let Some(element) = world
+        .get_resource::<ActiveDocument>()
+        .and_then(super::active_assembly)
+    else {
+        return;
+    };
+    let Some(pose) = pose_of(world.resource::<ActiveDocument>(), None, f.instance) else {
+        return;
+    };
     let (o, axes) = world_frame(&f, &pose);
     let axis = match handle {
         TriadHandle::Arrow(i) | TriadHandle::Ring(i) => i,
@@ -903,11 +1155,21 @@ pub fn triad_action(world: &mut World, handle: TriadHandle, item: &str) {
             let fallback = axes[(axis + 1) % 3];
             (
                 core_asm::aligned_with_z(&pose, d3(o), d3(axes[axis]), d3(fallback), anti),
-                if anti { "Anti-align with Z" } else { "Align with Z" },
+                if anti {
+                    "Anti-align with Z"
+                } else {
+                    "Align with Z"
+                },
             )
         }
-        "asm-rotate-90" => (core_asm::rotated(&pose, d3(o), d3(axes[axis]), std::f64::consts::FRAC_PI_2), "Rotate 90°"),
-        "asm-rotate-180" => (core_asm::rotated(&pose, d3(o), d3(axes[axis]), std::f64::consts::PI), "Rotate 180°"),
+        "asm-rotate-90" => (
+            core_asm::rotated(&pose, d3(o), d3(axes[axis]), std::f64::consts::FRAC_PI_2),
+            "Rotate 90°",
+        ),
+        "asm-rotate-180" => (
+            core_asm::rotated(&pose, d3(o), d3(axes[axis]), std::f64::consts::PI),
+            "Rotate 180°",
+        ),
         _ => return,
     };
     if new != pose {
@@ -928,7 +1190,10 @@ fn draw_triad(
     view: Res<ViewportView>,
     mut halo: Gizmos<TriadHaloGizmos>,
     mut line: Gizmos<TriadGizmos>,
-    mut dots: (Gizmos<super::connectors::ConnectorHaloGizmos>, Gizmos<super::connectors::ConnectorGizmos>),
+    mut dots: (
+        Gizmos<super::connectors::ConnectorHaloGizmos>,
+        Gizmos<super::connectors::ConnectorGizmos>,
+    ),
     measuring: Option<Res<crate::measure::MeasurePanel>>,
 ) {
     let Some(doc) = doc else { return };
@@ -936,8 +1201,12 @@ fn draw_triad(
     if triad.hidden || measuring.is_some() {
         return;
     }
-    let Some(f) = triad.drag.as_ref().and_then(|d| d.frame).or(triad.frame) else { return };
-    let Some(pose) = pose_of(&doc, asm.preview.get(&f.instance), f.instance) else { return };
+    let Some(f) = triad.drag.as_ref().and_then(|d| d.frame).or(triad.frame) else {
+        return;
+    };
+    let Some(pose) = pose_of(&doc, asm.preview.get(&f.instance), f.instance) else {
+        return;
+    };
     let (o, axes) = world_frame(&f, &pose);
     let v = view.view;
     let s = v.scale;
@@ -950,13 +1219,23 @@ fn draw_triad(
             HOVER
         } else {
             match h {
-                TriadHandle::Arrow(i) | TriadHandle::Ring(i) => [Color::srgb_u8(0xd8, 0x45, 0x45), Color::srgb_u8(0x32, 0xa0, 0x57), Color::srgb_u8(0x3d, 0x6f, 0xd8)][i],
+                TriadHandle::Arrow(i) | TriadHandle::Ring(i) => [
+                    Color::srgb_u8(0xd8, 0x45, 0x45),
+                    Color::srgb_u8(0x32, 0xa0, 0x57),
+                    Color::srgb_u8(0x3d, 0x6f, 0xd8),
+                ][i],
                 _ => WHITE,
             }
         }
     };
     // The handle whose menu is open stays highlighted (P3B.1 judge).
-    let color = |h: TriadHandle| if triad.menu_handle == Some(h) && active.is_none() { HOVER } else { color(h) };
+    let color = |h: TriadHandle| {
+        if triad.menu_handle == Some(h) && active.is_none() {
+            HOVER
+        } else {
+            color(h)
+        }
+    };
     let mut seg = |a: Vec3, b: Vec3, c: Color| {
         halo.line(a, b, HALO);
         line.line(a, b, c);
@@ -977,14 +1256,20 @@ fn draw_triad(
     for i in 0..3 {
         let rc = color(TriadHandle::Ring(i));
         let points = rotation_arc(o, &axes, i, s);
-        for pair in points.windows(2) { seg(pair[0], pair[1], rc); }
+        for pair in points.windows(2) {
+            seg(pair[0], pair[1], rc);
+        }
         let center = points[points.len() / 2];
         let (u, w) = (v.right(), v.up());
-        let points: Vec<_> = (0..=16).map(|k| {
-            let a = k as f32 / 16.0 * std::f32::consts::TAU;
-            center + (u * a.cos() + w * a.sin()) * RING_R * 0.6 * s
-        }).collect();
-        for pair in points.windows(2) { seg(pair[0], pair[1], rc); }
+        let points: Vec<_> = (0..=16)
+            .map(|k| {
+                let a = k as f32 / 16.0 * std::f32::consts::TAU;
+                center + (u * a.cos() + w * a.sin()) * RING_R * 0.6 * s
+            })
+            .collect();
+        for pair in points.windows(2) {
+            seg(pair[0], pair[1], rc);
+        }
     }
     // Show the actual solved rotation as an arc and its start/end radii.
     if let Some(drag) = &triad.drag
@@ -994,10 +1279,19 @@ fn draw_triad(
         let degrees = rotation_about(&drag.pose, &pose, drag.axes[i]);
         let radius = (ROTATION_RADIUS + 5.0) * s;
         let steps = ((degrees.abs() / 3.0).ceil() as usize).max(1);
-        let points: Vec<_> = (0..=steps).map(|k| {
-            drag.origin + Quat::from_axis_angle(drag.axes[i], (degrees * k as f64 / steps as f64).to_radians() as f32) * rotation.zero * radius
-        }).collect();
-        for pair in points.windows(2) { seg(pair[0], pair[1], ACTIVE); }
+        let points: Vec<_> = (0..=steps)
+            .map(|k| {
+                drag.origin
+                    + Quat::from_axis_angle(
+                        drag.axes[i],
+                        (degrees * k as f64 / steps as f64).to_radians() as f32,
+                    ) * rotation.zero
+                        * radius
+            })
+            .collect();
+        for pair in points.windows(2) {
+            seg(pair[0], pair[1], ACTIVE);
+        }
         seg(drag.origin, points[0], ACTIVE);
         seg(drag.origin, *points.last().unwrap(), ACTIVE);
     }
@@ -1013,7 +1307,11 @@ fn draw_triad(
     }
     // The origin: a ring facing the viewer, orange while the triad is on (`ex1-step4.png`).
     let (u, w) = (v.right(), v.up());
-    let oc = if active == Some(TriadHandle::Origin) { ACTIVE } else { HOVER };
+    let oc = if active == Some(TriadHandle::Origin) {
+        ACTIVE
+    } else {
+        HOVER
+    };
     let ring: Vec<Vec3> = (0..=28)
         .map(|k| {
             let t = k as f32 / 28.0 * std::f32::consts::TAU;
@@ -1051,7 +1349,11 @@ fn place_value_box(
     mut q_text: Query<&mut Text>,
     mut commands: Commands,
 ) {
-    let value = triad.drag.as_ref().map(|d| d.value.clone()).filter(|v| !v.is_empty());
+    let value = triad
+        .drag
+        .as_ref()
+        .map(|d| d.value.clone())
+        .filter(|v| !v.is_empty());
     let Some(value) = value else {
         for (e, ..) in &q {
             commands.entity(e).try_despawn();
@@ -1071,7 +1373,9 @@ fn place_value_box(
         }
         return;
     }
-    let Some(area) = q_area.iter().next() else { return };
+    let Some(area) = q_area.iter().next() else {
+        return;
+    };
     let e = commands
         .spawn((
             Name::new("triad-value"),
@@ -1089,7 +1393,10 @@ fn place_value_box(
             BorderColor::all(Color::srgb_u8(0x2b, 0x7d, 0xe9)),
             Pickable::IGNORE,
             DespawnOnExit(AppState::Document),
-            children![(theme.text(value, 12.0, FontWeight::MEDIUM, theme.foreground), Pickable::IGNORE)],
+            children![(
+                theme.text(value, 12.0, FontWeight::MEDIUM, theme.foreground),
+                Pickable::IGNORE
+            )],
         ))
         .id();
     commands.entity(area).add_child(e);
@@ -1114,7 +1421,8 @@ fn contour(part: &Part, back: Vec3) -> Vec<[Vec3; 2]> {
         .map(|f| {
             (f.first_triangle..f.first_triangle + f.triangle_count)
                 .map(|t| {
-                    let [a, b, c] = [0, 1, 2].map(|k| v3(s.positions[s.indices[3 * t + k] as usize]));
+                    let [a, b, c] =
+                        [0, 1, 2].map(|k| v3(s.positions[s.indices[3 * t + k] as usize]));
                     ((a + b + c) / 3.0, (b - a).cross(c - a).normalize_or_zero())
                 })
                 .collect()
@@ -1153,7 +1461,10 @@ fn contour(part: &Part, back: Vec3) -> Vec<[Vec3; 2]> {
         let (da, db) = (v3(a.normal).dot(back), v3(b.normal).dot(back));
         if da.signum() != db.signum() {
             let t = da / (da - db);
-            out.push([v3(a.start).lerp(v3(b.start), t), v3(a.end).lerp(v3(b.end), t)]);
+            out.push([
+                v3(a.start).lerp(v3(b.start), t),
+                v3(a.end).lerp(v3(b.end), t),
+            ]);
         }
     }
     out
@@ -1182,7 +1493,9 @@ fn draw_silhouettes(
     for id in ids {
         // A subassembly: each of its parts.
         for pid in super::view_parts(&cache, &[id]) {
-            let Some(part) = cache.part(pid) else { continue };
+            let Some(part) = cache.part(pid) else {
+                continue;
+            };
             if cache.is_hidden_part(part.id) {
                 continue;
             }
@@ -1225,13 +1538,21 @@ fn sync_value_edit(
     if !q.is_empty() {
         return;
     }
-    let Some(area) = q_area.iter().next() else { return };
+    let Some(area) = q_area.iter().next() else {
+        return;
+    };
     let unit = match e.handle {
         TriadHandle::Ring(_) => "deg".to_string(),
         _ => units.0.length.symbol().to_string(),
     };
     let b = commands
-        .spawn((ValueEditBox, DespawnOnExit(AppState::Document), cadrs_ui::QuickDim::new("triad-value-edit", e.value.clone()).unit(unit).build(&theme)))
+        .spawn((
+            ValueEditBox,
+            DespawnOnExit(AppState::Document),
+            cadrs_ui::QuickDim::new("triad-value-edit", e.value.clone())
+                .unit(unit)
+                .build(&theme),
+        ))
         .insert(Node {
             position_type: PositionType::Absolute,
             left: Val::Px(e.at.x),
@@ -1250,8 +1571,16 @@ fn sync_value_edit(
     commands.entity(area).add_child(b);
 }
 
-fn on_value_commit(ev: On<cadrs_ui::QuickDimCommit>, q: Query<(), With<ValueEditBox>>, q_parent: Query<&ChildOf>, mut commands: Commands) {
-    let is_ours = q.contains(ev.entity) || q_parent.get(ev.entity).is_ok_and(|p| q.contains(p.parent()));
+fn on_value_commit(
+    ev: On<cadrs_ui::QuickDimCommit>,
+    q: Query<(), With<ValueEditBox>>,
+    q_parent: Query<&ChildOf>,
+    mut commands: Commands,
+) {
+    let is_ours = q.contains(ev.entity)
+        || q_parent
+            .get(ev.entity)
+            .is_ok_and(|p| q.contains(p.parent()));
     if !is_ours {
         return;
     }
@@ -1259,12 +1588,22 @@ fn on_value_commit(ev: On<cadrs_ui::QuickDimCommit>, q: Query<(), With<ValueEdit
     commands.queue(move |world: &mut World| apply_typed(world, &text));
 }
 
-fn on_value_cancel(ev: On<cadrs_ui::QuickDimCancel>, q: Query<(), With<ValueEditBox>>, q_parent: Query<&ChildOf>, mut commands: Commands) {
-    let is_ours = q.contains(ev.entity) || q_parent.get(ev.entity).is_ok_and(|p| q.contains(p.parent()));
+fn on_value_cancel(
+    ev: On<cadrs_ui::QuickDimCancel>,
+    q: Query<(), With<ValueEditBox>>,
+    q_parent: Query<&ChildOf>,
+    mut commands: Commands,
+) {
+    let is_ours = q.contains(ev.entity)
+        || q_parent
+            .get(ev.entity)
+            .is_ok_and(|p| q.contains(p.parent()));
     if is_ours {
         commands.queue(|world: &mut World| {
             world.resource_mut::<Triad>().edit = None;
-            world.resource_mut::<bevy::input_focus::InputFocus>().clear();
+            world
+                .resource_mut::<bevy::input_focus::InputFocus>()
+                .clear();
         });
     }
 }
@@ -1272,28 +1611,55 @@ fn on_value_cancel(ev: On<cadrs_ui::QuickDimCancel>, q: Query<(), With<ValueEdit
 /// Applies a typed value: the placement before the drag, moved or turned by exactly that much;
 /// the drag's own step is undone first, so the whole move stays one undo step.
 fn apply_typed(world: &mut World, text: &str) {
-    let Some(e) = world.resource::<Triad>().edit.clone() else { return };
+    let Some(e) = world.resource::<Triad>().edit.clone() else {
+        return;
+    };
     let units = world.resource::<crate::WorkspaceUnits>().0;
     let angle = matches!(e.handle, TriadHandle::Ring(_));
-    let q = if angle { cadrs_sketch::units::Quantity::Angle } else { cadrs_sketch::units::Quantity::Length };
+    let q = if angle {
+        cadrs_sketch::units::Quantity::Angle
+    } else {
+        cadrs_sketch::units::Quantity::Length
+    };
     let Ok(v) = units.eval(text, q) else { return };
     let new = match e.handle {
         TriadHandle::Arrow(i) => e.pose.then(&Pose::translation(along(e.axes[i], v))),
         TriadHandle::Plane(_) => e.pose.then(&Pose::translation(along(e.direction, v))),
-        TriadHandle::Ring(i) => core_asm::rotated(&e.pose, d3(e.origin), d3(e.axes[i]), v.to_radians()),
+        TriadHandle::Ring(i) => {
+            core_asm::rotated(&e.pose, d3(e.origin), d3(e.axes[i]), v.to_radians())
+        }
         _ => return,
     };
-    let Some(element) = world.get_resource::<ActiveDocument>().and_then(super::active_assembly) else { return };
+    let Some(element) = world
+        .get_resource::<ActiveDocument>()
+        .and_then(super::active_assembly)
+    else {
+        return;
+    };
     {
         let mut doc = world.resource_mut::<ActiveDocument>();
         if doc.history.undo_len() == e.mark {
             doc.undo();
         }
     }
-    let label = if angle { "Rotate instance" } else { "Move instance" };
-    super::drag::commit_move_for(world, element, e.instance, new, d3(e.origin), label, &e.selection);
+    let label = if angle {
+        "Rotate instance"
+    } else {
+        "Move instance"
+    };
+    super::drag::commit_move_for(
+        world,
+        element,
+        e.instance,
+        new,
+        d3(e.origin),
+        label,
+        &e.selection,
+    );
     world.resource_mut::<Triad>().edit = None;
-    world.resource_mut::<bevy::input_focus::InputFocus>().clear();
+    world
+        .resource_mut::<bevy::input_focus::InputFocus>()
+        .clear();
 }
 
 /// The bottom-right measurement readout (`ex1-step5.png`): "Diameter: 0.563 in" while the triad
@@ -1316,19 +1682,28 @@ fn sync_readout(
 ) {
     let in_asm = doc.as_deref().and_then(super::active_assembly).is_some();
     // (Not the hidden triad's circle: Mass properties hides it, Final part 3: ex1_start 13.)
-    let circle = triad.drag.as_ref().and_then(|d| d.frame).or(triad.frame).filter(|_| !triad.hidden).and_then(|f| f.circle).or_else(|| {
-        selection.0.iter().rev().find_map(|p| match p {
-            Pick::Edge(part, name) => {
-                let part = cache.part(*part)?;
-                let e = part.solid.edges.iter().find(|e| e.name == *name)?;
-                e.circle.map(|c| c.radius * 2.0)
-            }
-            _ => None,
-        })
-    });
+    let circle = triad
+        .drag
+        .as_ref()
+        .and_then(|d| d.frame)
+        .or(triad.frame)
+        .filter(|_| !triad.hidden)
+        .and_then(|f| f.circle)
+        .or_else(|| {
+            selection.0.iter().rev().find_map(|p| match p {
+                Pick::Edge(part, name) => {
+                    let part = cache.part(*part)?;
+                    let e = part.solid.edges.iter().find(|e| e.name == *name)?;
+                    e.circle.map(|c| c.radius * 2.0)
+                }
+                _ => None,
+            })
+        });
     // None while Mass properties is open (it hides the triad; its panel is the readout then,
     // Final part 4: ex1_start 13 kept the selected hole's diameter).
-    let text = circle.filter(|_| in_asm && !triad.hidden).map(|d| format!("Diameter: {}", units.0.fixed_length(d)));
+    let text = circle
+        .filter(|_| in_asm && !triad.hidden)
+        .map(|d| format!("Diameter: {}", units.0.fixed_length(d)));
     let Some(text) = text else {
         for (e, _) in &q {
             commands.entity(e).try_despawn();
@@ -1345,7 +1720,9 @@ fn sync_readout(
         }
         return;
     }
-    let Some((tools, _)) = q_tools.iter().find(|(_, n)| n.as_str() == "viewport-tools") else { return };
+    let Some((tools, _)) = q_tools.iter().find(|(_, n)| n.as_str() == "viewport-tools") else {
+        return;
+    };
     let e = commands
         .spawn((
             Name::new("measure-readout"),
@@ -1358,8 +1735,14 @@ fn sync_readout(
             },
             Pickable::IGNORE,
             children![
-                (cadrs_ui::icon::icon("origin", 14.0, theme.muted_foreground), Pickable::IGNORE),
-                (theme.text(text, 11.5, FontWeight::MEDIUM, theme.foreground), Pickable::IGNORE),
+                (
+                    cadrs_ui::icon::icon("origin", 14.0, theme.muted_foreground),
+                    Pickable::IGNORE
+                ),
+                (
+                    theme.text(text, 11.5, FontWeight::MEDIUM, theme.foreground),
+                    Pickable::IGNORE
+                ),
             ],
         ))
         .id();
@@ -1397,10 +1780,16 @@ fn place_markers(
     let axis = ["x", "y", "z"];
     let mut spots: Vec<(String, Vec2)> = vec![("triad-origin".into(), sc.origin)];
     for (i, axis) in axis.iter().enumerate() {
-        spots.push((format!("triad-arrow-{}", axis), sc.bases[i].lerp(sc.tips[i], 0.55)));
+        spots.push((
+            format!("triad-arrow-{}", axis),
+            sc.bases[i].lerp(sc.tips[i], 0.55),
+        ));
         spots.push((format!("triad-ring-{}", axis), sc.rings[i]));
         let q4 = sc.squares[i];
-        spots.push((format!("triad-plane-{}", axis), (q4[0] + q4[1] + q4[2] + q4[3]) / 4.0));
+        spots.push((
+            format!("triad-plane-{}", axis),
+            (q4[0] + q4[1] + q4[2] + q4[3]) / 4.0,
+        ));
     }
     let size = 6.0;
     let mut have: Vec<String> = Vec::new();
@@ -1412,7 +1801,9 @@ fn place_markers(
             have.push(name.to_string());
         }
     }
-    let Some(area) = q_area.iter().next() else { return };
+    let Some(area) = q_area.iter().next() else {
+        return;
+    };
     for (name, p) in spots {
         if have.contains(&name) {
             continue;
@@ -1447,22 +1838,30 @@ mod movement_tests {
         let axes = [Vec3::X, Vec3::Y, Vec3::Z];
         let origin = Vec3::new(10.0, -4.0, 3.0);
         let rect = ViewportRect(Rect::new(0.0, 0.0, 1200.0, 900.0));
-        let view = ViewState { scale: 0.5, ..ViewState::standard(crate::camera::StandardView::Isometric) };
+        let view = ViewState {
+            scale: 0.5,
+            ..ViewState::standard(crate::camera::StandardView::Isometric)
+        };
         let sc = screen(&view, &rect, origin, &axes);
         for i in 0..3 {
             let arc = rotation_arc(origin, &axes, i, view.scale);
             assert!(arc.iter().all(|p| (*p - origin).dot(axes[i]).abs() < 1e-5));
             assert_eq!(hit(&sc, sc.rings[i]), Some(TriadHandle::Ring(i)));
             let radial = (arc[arc.len() / 2] - origin).normalize();
-            let press = rect.to_screen(view.project(origin + radial * ROTATION_RADIUS * view.scale));
+            let press =
+                rect.to_screen(view.project(origin + radial * ROTATION_RADIUS * view.scale));
             let drag = begin_ring(&view, &rect, origin, &axes, i, press);
             assert!(!drag.edge_on);
             for degrees in [-90.0f32, -30.0, 30.0, 90.0] {
                 let end = Quat::from_axis_angle(axes[i], degrees.to_radians()) * radial;
                 let pos = rect.to_screen(view.project(origin + end * ROTATION_RADIUS * view.scale));
                 let angle = ring_degrees(drag, &view, &rect, origin, axes[i], press, pos).unwrap();
-                assert!((angle - degrees as f64).abs() < 0.01, "axis {i}: {angle} instead of {degrees}");
-                let pose = core_asm::rotated(&Pose::IDENTITY, d3(origin), d3(axes[i]), angle.to_radians());
+                assert!(
+                    (angle - degrees as f64).abs() < 0.01,
+                    "axis {i}: {angle} instead of {degrees}"
+                );
+                let pose =
+                    core_asm::rotated(&Pose::IDENTITY, d3(origin), d3(axes[i]), angle.to_radians());
                 assert!((rotation_about(&Pose::IDENTITY, &pose, axes[i]) - angle).abs() < 1e-4);
             }
             // The cross product points toward the positive sweep on each arc.
@@ -1480,9 +1879,19 @@ mod movement_tests {
             let press = rect.to_screen(view.project(arc[arc.len() / 2]));
             let drag = begin_ring(&view, &rect, Vec3::ZERO, &axes, i, press);
             assert!(drag.edge_on);
-            let tangent = view.project_vector(axes[i].cross(drag.zero) * ROTATION_RADIUS * view.scale);
+            let tangent =
+                view.project_vector(axes[i].cross(drag.zero) * ROTATION_RADIUS * view.scale);
             for sign in [-1.0, 1.0] {
-                let angle = ring_degrees(drag, &view, &rect, Vec3::ZERO, axes[i], press, press + tangent * 0.1 * sign).unwrap();
+                let angle = ring_degrees(
+                    drag,
+                    &view,
+                    &rect,
+                    Vec3::ZERO,
+                    axes[i],
+                    press,
+                    press + tangent * 0.1 * sign,
+                )
+                .unwrap();
                 assert!(angle.is_finite() && angle.signum() == sign as f64);
             }
         }
@@ -1493,10 +1902,16 @@ mod movement_tests {
         for stop in [-180.0, -135.0, -90.0, -45.0, 0.0, 45.0, 90.0, 135.0, 180.0] {
             for delta in [-5.0, -4.5, 0.0, 4.5, 5.0] {
                 assert_eq!(rotation_degrees(stop + delta, 45.0, 5.0, false), stop);
-                assert_eq!(rotation_degrees(stop + delta, 45.0, 5.0, true), stop + delta);
+                assert_eq!(
+                    rotation_degrees(stop + delta, 45.0, 5.0, true),
+                    stop + delta
+                );
             }
             for delta in [-5.01, 5.01] {
-                assert_eq!(rotation_degrees(stop + delta, 45.0, 5.0, false), (stop + delta).round());
+                assert_eq!(
+                    rotation_degrees(stop + delta, 45.0, 5.0, false),
+                    (stop + delta).round()
+                );
                 assert_ne!(rotation_degrees(stop + delta, 45.0, 5.0, false), stop);
             }
         }
@@ -1509,9 +1924,18 @@ mod movement_tests {
         assert_eq!(rotation_degrees(29.9, 45.0, 15.0, false), 30.0);
         assert_eq!(rotation_degrees(30.0, 45.0, 15.0, true), 30.0);
         for increment in [15.0, 22.5, 30.0, 60.0, 90.0] {
-            assert_eq!(rotation_degrees(increment - 4.5, increment, 5.0, false), increment);
-            assert_eq!(rotation_degrees(-increment + 4.5, increment, 5.0, false), -increment);
-            assert_eq!(rotation_degrees(increment - 4.5, increment, 5.0, true), increment - 4.5);
+            assert_eq!(
+                rotation_degrees(increment - 4.5, increment, 5.0, false),
+                increment
+            );
+            assert_eq!(
+                rotation_degrees(-increment + 4.5, increment, 5.0, false),
+                -increment
+            );
+            assert_eq!(
+                rotation_degrees(increment - 4.5, increment, 5.0, true),
+                increment - 4.5
+            );
         }
         assert_eq!(rotation_degrees(43.25, 0.0, 5.0, false), 43.25);
         assert_eq!(rotation_degrees(43.25, 45.0, 5.0, true), 43.25);
@@ -1526,7 +1950,10 @@ mod movement_tests {
         let studio = doc.elements[0].id;
         let assembly = doc.elements[1].id;
         let ids = [InstanceId::new(), InstanceId::new()];
-        let source = InstanceSource::Part { element: studio, part: PartId::new(FeatureId::new(), 0) };
+        let source = InstanceSource::Part {
+            element: studio,
+            part: PartId::new(FeatureId::new(), 0),
+        };
         doc.elements[1].assembly.instances = vec![
             Instance::new(ids[0], source.clone(), Pose::IDENTITY),
             Instance::new(ids[1], source, Pose::translation([20.0, 0.0, 0.0])),
@@ -1539,17 +1966,34 @@ mod movement_tests {
             let feature = cadrs_core::FeatureId(id.0);
             let x = n as f64 * 20.0;
             cache.parts.push(Part {
-                id: id.part_id(), feature, name: format!("Part {n}"), kind: PartKind::Solid,
-                palette: n as u32, mass: None, features: vec![feature], source: None, derived: None,
-                solid: std::sync::Arc::new(Solid { positions: vec![[x - 1.0, -1.0, -1.0], [x + 1.0, 1.0, 1.0]], ..default() }),
+                id: id.part_id(),
+                feature,
+                name: format!("Part {n}"),
+                kind: PartKind::Solid,
+                palette: n as u32,
+                mass: None,
+                features: vec![feature],
+                source: None,
+                derived: None,
+                solid: std::sync::Arc::new(Solid {
+                    positions: vec![[x - 1.0, -1.0, -1.0], [x + 1.0, 1.0, 1.0]],
+                    ..default()
+                }),
             });
         }
         let selection = Selection(ids.iter().map(|i| Pick::Part(i.part_id())).collect());
-        let frame = whole_selection_frame(&doc, &selection, &cache).expect("tree and box selections need a widget without a face pick");
-        assert_eq!(frame.instance, ids[0], "a fixed last selection must not disable the widget");
+        let frame = whole_selection_frame(&doc, &selection, &cache)
+            .expect("tree and box selections need a widget without a face pick");
+        assert_eq!(
+            frame.instance, ids[0],
+            "a fixed last selection must not disable the widget"
+        );
         assert_eq!(frame.origin, [10.0, 0.0, 0.0]);
         assert!(whole_selection_frame(&doc, &Selection::default(), &cache).is_none());
         doc.doc.elements[1].assembly.instances.clear();
-        assert!(whole_selection_frame(&doc, &selection, &cache).is_none(), "deleted rows must not retain a widget");
+        assert!(
+            whole_selection_frame(&doc, &selection, &cache).is_none(),
+            "deleted rows must not retain a widget"
+        );
     }
 }

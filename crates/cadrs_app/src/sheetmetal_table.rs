@@ -59,7 +59,10 @@ use bevy::text::FontWeight;
 use bevy::ui::UiGlobalTransform;
 use bevy::ui_widgets::Activate;
 use cadrs_core::sheetmetal::SheetMetalContext;
-use cadrs_core::sheetmetal_joint::{ModifyJointFeature, PutModifyJoint, SetTableOrder, TableEdit, bend_feature_edit, bend_feature_of, modify_joint_of, radius_error, table_edit, value_error};
+use cadrs_core::sheetmetal_joint::{
+    ModifyJointFeature, PutModifyJoint, SetTableOrder, TableEdit, bend_feature_edit,
+    bend_feature_of, modify_joint_of, radius_error, table_edit, value_error,
+};
 use cadrs_core::{ElementId, FeatureId, FeatureKind, PartId, Solid};
 use cadrs_sheetmetal::model::P3;
 use cadrs_sheetmetal::poly::P2;
@@ -67,15 +70,25 @@ use cadrs_sheetmetal::table::{self, Table};
 use cadrs_sheetmetal::view::{FlatScene, Tris};
 use cadrs_sheetmetal::{BendCalc, JointId, JointKind, RipStyle, WallId};
 use cadrs_sketch::units::Quantity;
-use cadrs_ui::inline_edit::{DoubleClick, DoubleClickable, InlineEdit, InlineEditCommit, InlineEditLabel, InlineEditOptions, begin_inline_edit};
-use cadrs_ui::menu::{ContextMenuAnchor, ContextMenuRequested, ContextMenuTarget, Menu, MenuAction, MenuItem};
+use cadrs_ui::inline_edit::{
+    DoubleClick, DoubleClickable, InlineEdit, InlineEditCommit, InlineEditLabel, InlineEditOptions,
+    begin_inline_edit,
+};
+use cadrs_ui::menu::{
+    ContextMenuAnchor, ContextMenuRequested, ContextMenuTarget, Menu, MenuAction, MenuItem,
+};
 use cadrs_ui::prelude::*;
-use cadrs_ui::{Column, Select, SelectChange, TableBody, TableHeader, TableRoot, TableRow, open_context_menu};
+use cadrs_ui::{
+    Column, Select, SelectChange, TableBody, TableHeader, TableRoot, TableRow, open_context_menu,
+};
 
 use crate::appearance::SidePanel;
 use crate::camera::{StandardView, ViewState};
 use crate::parts::PartCache;
-use crate::viewport::{ActiveKind, ExtraHighlight, Pick, PlaneHighlight, Selection, ViewportArea, ViewportRect, ViewportView};
+use crate::viewport::{
+    ActiveKind, ExtraHighlight, Pick, PlaneHighlight, Selection, ViewportArea, ViewportRect,
+    ViewportView,
+};
 use crate::{ActiveDocument, AppState};
 
 /// The render layer of the flat view, and of its cube's rotate arrows.
@@ -132,12 +145,24 @@ impl Plugin for SheetMetalTablePlugin {
                     .after(crate::parts::PartsSet)
                     .run_if(in_state(AppState::Document)),
             )
-            .add_systems(Update, kept_inputs_translucent.before(crate::parts::PartsSet).run_if(in_state(AppState::Document)))
-            .add_systems(OnExit(AppState::Document), |mut t: ResMut<SmTable>, mut extra: ResMut<ExtraHighlight>| {
-                let (image, cube) = (t.image.clone(), t.cube_image.clone());
-                *t = SmTable { image, cube_image: cube, ..SmTable::default() };
-                extra.hovered.clear();
-            });
+            .add_systems(
+                Update,
+                kept_inputs_translucent
+                    .before(crate::parts::PartsSet)
+                    .run_if(in_state(AppState::Document)),
+            )
+            .add_systems(
+                OnExit(AppState::Document),
+                |mut t: ResMut<SmTable>, mut extra: ResMut<ExtraHighlight>| {
+                    let (image, cube) = (t.image.clone(), t.cube_image.clone());
+                    *t = SmTable {
+                        image,
+                        cube_image: cube,
+                        ..SmTable::default()
+                    };
+                    extra.hovered.clear();
+                },
+            );
     }
 }
 
@@ -145,9 +170,18 @@ impl Plugin for SheetMetalTablePlugin {
 /// dialog (so the folded part around it shows as it is made) and after, as Onshape shows it
 /// (`18-…/t0055.8.png`). A view state like the Parts list's Make transparent: a part that turns
 /// a kept input is made transparent once, so Make opaque still works on it.
-fn kept_inputs_translucent(doc: Option<Res<ActiveDocument>>, mut cache: ResMut<PartCache>, mut mine: Local<(Option<cadrs_core::ElementId>, std::collections::HashSet<PartId>)>) {
+fn kept_inputs_translucent(
+    doc: Option<Res<ActiveDocument>>,
+    mut cache: ResMut<PartCache>,
+    mut mine: Local<(
+        Option<cadrs_core::ElementId>,
+        std::collections::HashSet<PartId>,
+    )>,
+) {
     let Some(doc) = doc else { return };
-    let Some(el) = doc.active_element() else { return };
+    let Some(el) = doc.active_element() else {
+        return;
+    };
     if mine.0 != Some(el.id) {
         *mine = (Some(el.id), Default::default());
     }
@@ -155,7 +189,11 @@ fn kept_inputs_translucent(doc: Option<Res<ActiveDocument>>, mut cache: ResMut<P
         .features()
         .iter()
         .filter_map(|f| match &f.kind {
-            FeatureKind::SheetMetalModel(x) if x.operation == cadrs_core::sheetmetal::SheetMetalOp::Convert && x.keep_input => Some(x.parts.iter().copied()),
+            FeatureKind::SheetMetalModel(x)
+                if x.operation == cadrs_core::sheetmetal::SheetMetalOp::Convert && x.keep_input =>
+            {
+                Some(x.parts.iter().copied())
+            }
             _ => None,
         })
         .flatten()
@@ -163,8 +201,17 @@ fn kept_inputs_translucent(doc: Option<Res<ActiveDocument>>, mut cache: ResMut<P
     if want == mine.1 {
         return;
     }
-    let add: Vec<PartId> = want.iter().filter(|p| !mine.1.contains(p)).copied().collect();
-    let drop: Vec<PartId> = mine.1.iter().filter(|p| !want.contains(p)).copied().collect();
+    let add: Vec<PartId> = want
+        .iter()
+        .filter(|p| !mine.1.contains(p))
+        .copied()
+        .collect();
+    let drop: Vec<PartId> = mine
+        .1
+        .iter()
+        .filter(|p| !want.contains(p))
+        .copied()
+        .collect();
     if !add.is_empty() {
         cache.set_transparent(&add, true);
     }
@@ -371,12 +418,22 @@ struct MenuFor(JointId, bool);
 struct FlatViewMenu;
 
 fn target_image(size: UVec2) -> Image {
-    let mut image = Image::new_target_texture(size.x.max(1), size.y.max(1), TextureFormat::Rgba8UnormSrgb, None);
+    let mut image = Image::new_target_texture(
+        size.x.max(1),
+        size.y.max(1),
+        TextureFormat::Rgba8UnormSrgb,
+        None,
+    );
     image.asset_usage = RenderAssetUsages::default();
     image
 }
 
-fn spawn_cameras(mut commands: Commands, mut images: ResMut<Assets<Image>>, theme: Res<Theme>, mut t: ResMut<SmTable>) {
+fn spawn_cameras(
+    mut commands: Commands,
+    mut images: ResMut<Assets<Image>>,
+    theme: Res<Theme>,
+    mut t: ResMut<SmTable>,
+) {
     let image = images.add(target_image(UVec2::new(64, 64)));
     t.image = Some(image.clone());
     t.image_size = UVec2::new(64, 64);
@@ -385,7 +442,12 @@ fn spawn_cameras(mut commands: Commands, mut images: ResMut<Assets<Image>>, them
         FlatCamera,
         Camera3d::default(),
         RenderTarget::Image(image.into()),
-        Camera { order: -2, is_active: false, clear_color: ClearColorConfig::Custom(theme.viewport_background), ..default() },
+        Camera {
+            order: -2,
+            is_active: false,
+            clear_color: ClearColorConfig::Custom(theme.viewport_background),
+            ..default()
+        },
         Projection::Orthographic(OrthographicProjection {
             scaling_mode: ScalingMode::WindowSize,
             scale: 1.0,
@@ -406,7 +468,12 @@ fn spawn_cameras(mut commands: Commands, mut images: ResMut<Assets<Image>>, them
         FlatCubeCamera,
         Camera3d::default(),
         RenderTarget::Image(cube.into()),
-        Camera { order: -1, is_active: false, clear_color: ClearColorConfig::Custom(Color::NONE), ..default() },
+        Camera {
+            order: -1,
+            is_active: false,
+            clear_color: ClearColorConfig::Custom(Color::NONE),
+            ..default()
+        },
         crate::view_cube::cube_projection(),
         Tonemapping::None,
         DebandDither::Disabled,
@@ -427,7 +494,9 @@ fn is_open(open: &SidePanel, kind: &ActiveKind) -> bool {
 /// context a Derived feature brought in (P3I.8, SM18) by the source model's name, where the
 /// Derived feature is.
 fn models(doc: &ActiveDocument, cache: &PartCache) -> Vec<(FeatureId, String)> {
-    let Some(el) = doc.active_element() else { return Vec::new() };
+    let Some(el) = doc.active_element() else {
+        return Vec::new();
+    };
     let features = el.features();
     let mut out: Vec<(usize, FeatureId, String)> = cache
         .sheet_metal
@@ -435,7 +504,11 @@ fn models(doc: &ActiveDocument, cache: &PartCache) -> Vec<(FeatureId, String)> {
         .map(|c| match features.iter().position(|f| f.id == c.feature) {
             Some(i) => (i, c.feature, features[i].name.clone()),
             None => {
-                let at = c.editors.iter().find_map(|e| features.iter().position(|f| f.id == *e)).unwrap_or(usize::MAX);
+                let at = c
+                    .editors
+                    .iter()
+                    .find_map(|e| features.iter().position(|f| f.id == *e))
+                    .unwrap_or(usize::MAX);
                 (at, c.feature, c.name.clone())
             }
         })
@@ -446,7 +519,9 @@ fn models(doc: &ActiveDocument, cache: &PartCache) -> Vec<(FeatureId, String)> {
 
 /// The context shown.
 fn shown<'a>(t: &SmTable, cache: &'a PartCache) -> Option<&'a SheetMetalContext> {
-    t.context.and_then(|f| cache.sheet_metal.iter().find(|c| c.feature == f)).or(cache.sheet_metal.first())
+    t.context
+        .and_then(|f| cache.sheet_metal.iter().find(|c| c.feature == f))
+        .or(cache.sheet_metal.first())
 }
 
 /// A point on a face of a solid (its first triangle's centre).
@@ -471,7 +546,11 @@ fn edge_point(s: &Solid, i: usize) -> Option<P3> {
     let p = e.points.get(e.points.len() / 2)?;
     if e.points.len() >= 2 && e.points.len() % 2 == 0 {
         let q = e.points[e.points.len() / 2 - 1];
-        return Some(P3::new((p[0] + q[0]) / 2.0, (p[1] + q[1]) / 2.0, (p[2] + q[2]) / 2.0));
+        return Some(P3::new(
+            (p[0] + q[0]) / 2.0,
+            (p[1] + q[1]) / 2.0,
+            (p[2] + q[2]) / 2.0,
+        ));
     }
     Some(P3::new(p[0], p[1], p[2]))
 }
@@ -485,7 +564,10 @@ fn tolerance(ctx: &SheetMetalContext) -> f64 {
 /// faces or their edges.
 pub fn joint_of_pick(cache: &PartCache, pick: Pick) -> Option<(FeatureId, JointId)> {
     let part = pick.part()?;
-    let ctx = cache.sheet_metal.iter().find(|c| c.parts.iter().any(|(p, _)| *p == part))?;
+    let ctx = cache
+        .sheet_metal
+        .iter()
+        .find(|c| c.parts.iter().any(|(p, _)| *p == part))?;
     let solid = &cache.parts.iter().find(|p| p.id == part)?.solid;
     let p = match pick {
         Pick::Face(_, name) => face_point(solid, solid.faces.iter().position(|f| f.name == name)?)?,
@@ -500,9 +582,13 @@ pub fn joint_picks(cache: &PartCache, ctx: &SheetMetalContext, joint: JointId) -
     let tol = tolerance(ctx);
     let mut out = Vec::new();
     for (pid, _) in &ctx.parts {
-        let Some(part) = cache.parts.iter().find(|p| p.id == *pid) else { continue };
+        let Some(part) = cache.parts.iter().find(|p| p.id == *pid) else {
+            continue;
+        };
         for (i, f) in part.solid.faces.iter().enumerate() {
-            if face_point(&part.solid, i).is_some_and(|p| cadrs_sheetmetal::view::joint_at(&ctx.model, p, tol) == Some(joint)) {
+            if face_point(&part.solid, i).is_some_and(|p| {
+                cadrs_sheetmetal::view::joint_at(&ctx.model, p, tol) == Some(joint)
+            }) {
                 out.push(Pick::Face(*pid, f.name));
             }
         }
@@ -517,7 +603,11 @@ fn pick_point(cache: &PartCache, pick: Pick) -> Option<P3> {
     match pick {
         Pick::Face(_, name) => face_point(solid, solid.faces.iter().position(|f| f.name == name)?),
         Pick::Edge(_, name) => edge_point(solid, solid.edges.iter().position(|e| e.name == name)?),
-        Pick::Vertex(_, name) => solid.vertices.iter().find(|v| v.name == name).map(|v| P3::new(v.point[0], v.point[1], v.point[2])),
+        Pick::Vertex(_, name) => solid
+            .vertices
+            .iter()
+            .find(|v| v.name == name)
+            .map(|v| P3::new(v.point[0], v.point[1], v.point[2])),
         _ => None,
     }
 }
@@ -529,9 +619,13 @@ pub fn hit_of_pick(cache: &PartCache, pick: Pick) -> Option<(FeatureId, FlatHit)
         return Some((m, FlatHit::Joint(j)));
     }
     let part = pick.part()?;
-    let ctx = cache.sheet_metal.iter().find(|c| c.parts.iter().any(|(p, _)| *p == part))?;
+    let ctx = cache
+        .sheet_metal
+        .iter()
+        .find(|c| c.parts.iter().any(|(p, _)| *p == part))?;
     let p = pick_point(cache, pick)?;
-    cadrs_sheetmetal::view::wall_at(&ctx.model, p, tolerance(ctx)).map(|w| (ctx.feature, FlatHit::Wall(w)))
+    cadrs_sheetmetal::view::wall_at(&ctx.model, p, tolerance(ctx))
+        .map(|w| (ctx.feature, FlatHit::Wall(w)))
 }
 
 /// A wall's faces in the folded model: both (`both`), or only its definition face (what a
@@ -543,9 +637,13 @@ fn wall_picks(cache: &PartCache, ctx: &SheetMetalContext, wall: WallId, both: bo
         if !walls.contains(&wall) {
             continue;
         }
-        let Some(part) = cache.parts.iter().find(|p| p.id == *pid) else { continue };
+        let Some(part) = cache.parts.iter().find(|p| p.id == *pid) else {
+            continue;
+        };
         for (i, f) in part.solid.faces.iter().enumerate() {
-            let Some(p) = face_point(&part.solid, i) else { continue };
+            let Some(p) = face_point(&part.solid, i) else {
+                continue;
+            };
             if cadrs_sheetmetal::view::joint_at(&ctx.model, p, tol).is_some() {
                 continue;
             }
@@ -572,7 +670,12 @@ fn hit_picks(cache: &PartCache, ctx: &SheetMetalContext, hit: FlatHit, both: boo
 /// The model edge or vertex at a wall outline's side or corner in the flat: the flat point
 /// carried back onto the wall's definition face ([`cadrs_sheetmetal::view::from_flat`]), then
 /// the part's nearest edge or vertex there.
-fn model_pick_at(cache: &PartCache, ctx: &SheetMetalContext, scene: &FlatScene, hit: cadrs_sheetmetal::view::OutlineHit) -> Option<Pick> {
+fn model_pick_at(
+    cache: &PartCache,
+    ctx: &SheetMetalContext,
+    scene: &FlatScene,
+    hit: cadrs_sheetmetal::view::OutlineHit,
+) -> Option<Pick> {
     use cadrs_sheetmetal::view::OutlineHit;
     let (w, q, corner) = match hit {
         OutlineHit::Corner(w, q) => (w, q, true),
@@ -583,12 +686,22 @@ fn model_pick_at(cache: &PartCache, ctx: &SheetMetalContext, scene: &FlatScene, 
     let (pid, _) = ctx.parts.iter().find(|(_, walls)| walls.contains(&w))?;
     let solid = &cache.parts.iter().find(|x| x.id == *pid)?.solid;
     let tol = (0.3 * ctx.model.params.thickness).max(0.05);
-    let d = |a: [f64; 3]| ((a[0] - p[0]).powi(2) + (a[1] - p[1]).powi(2) + (a[2] - p[2]).powi(2)).sqrt();
+    let d = |a: [f64; 3]| {
+        ((a[0] - p[0]).powi(2) + (a[1] - p[1]).powi(2) + (a[2] - p[2]).powi(2)).sqrt()
+    };
     if corner {
-        let v = solid.vertices.iter().map(|v| (d(v.point), v.name)).min_by(|a, b| a.0.total_cmp(&b.0))?;
+        let v = solid
+            .vertices
+            .iter()
+            .map(|v| (d(v.point), v.name))
+            .min_by(|a, b| a.0.total_cmp(&b.0))?;
         return (v.0 <= tol).then_some(Pick::Vertex(*pid, v.1));
     }
-    let e = solid.edges.iter().map(|e| (e.distance(p), e.name)).min_by(|a, b| a.0.total_cmp(&b.0))?;
+    let e = solid
+        .edges
+        .iter()
+        .map(|e| (e.distance(p), e.name))
+        .min_by(|a, b| a.0.total_cmp(&b.0))?;
     (e.0 <= tol).then_some(Pick::Edge(*pid, e.1))
 }
 
@@ -603,9 +716,18 @@ enum FlatMark {
 }
 
 /// Where a model pick lies in the shown model's flat (`None`: not on it).
-fn flat_mark(cache: &PartCache, ctx: &SheetMetalContext, scene: &FlatScene, pick: Pick) -> Option<FlatMark> {
+fn flat_mark(
+    cache: &PartCache,
+    ctx: &SheetMetalContext,
+    scene: &FlatScene,
+    pick: Pick,
+) -> Option<FlatMark> {
     if let Pick::Part(pid) = pick {
-        return ctx.parts.iter().position(|(p, _)| *p == pid).map(FlatMark::Part);
+        return ctx
+            .parts
+            .iter()
+            .position(|(p, _)| *p == pid)
+            .map(FlatMark::Part);
     }
     let part = pick.part()?;
     if !ctx.parts.iter().any(|(p, _)| *p == part) {
@@ -613,7 +735,9 @@ fn flat_mark(cache: &PartCache, ctx: &SheetMetalContext, scene: &FlatScene, pick
     }
     // An edge or vertex shows where it lies on its wall, even along a rip.
     let on_wall = matches!(pick, Pick::Edge(..) | Pick::Vertex(..))
-        .then(|| cadrs_sheetmetal::view::wall_at(&ctx.model, pick_point(cache, pick)?, tolerance(ctx)))
+        .then(|| {
+            cadrs_sheetmetal::view::wall_at(&ctx.model, pick_point(cache, pick)?, tolerance(ctx))
+        })
         .flatten();
     let w = match on_wall {
         Some(w) => w,
@@ -624,7 +748,9 @@ fn flat_mark(cache: &PartCache, ctx: &SheetMetalContext, scene: &FlatScene, pick
         },
     };
     let solid = &cache.parts.iter().find(|p| p.id == part)?.solid;
-    let to = |q: &[f64; 3]| cadrs_sheetmetal::view::to_flat(&ctx.model, &ctx.flat, scene, w, P3::new(q[0], q[1], q[2]));
+    let to = |q: &[f64; 3]| {
+        cadrs_sheetmetal::view::to_flat(&ctx.model, &ctx.flat, scene, w, P3::new(q[0], q[1], q[2]))
+    };
     let lines: Vec<Vec<P2>> = match pick {
         Pick::Face(_, name) => solid
             .faces
@@ -634,8 +760,21 @@ fn flat_mark(cache: &PartCache, ctx: &SheetMetalContext, scene: &FlatScene, pick
             .iter()
             .map(|l| l.iter().chain(l.first()).filter_map(to).collect())
             .collect(),
-        Pick::Edge(_, name) => vec![solid.edges.iter().find(|e| e.name == name)?.points.iter().filter_map(to).collect()],
-        Pick::Vertex(_, name) => vec![vec![to(&solid.vertices.iter().find(|v| v.name == name)?.point)?]],
+        Pick::Edge(_, name) => vec![
+            solid
+                .edges
+                .iter()
+                .find(|e| e.name == name)?
+                .points
+                .iter()
+                .filter_map(to)
+                .collect(),
+        ],
+        Pick::Vertex(_, name) => vec![vec![to(&solid
+            .vertices
+            .iter()
+            .find(|v| v.name == name)?
+            .point)?]],
         _ => return None,
     };
     Some(FlatMark::Lines(lines))
@@ -651,17 +790,27 @@ enum FillOf {
 /// What a model pick fills in the flat: a wall's face fills its wall, a part all of its flat.
 fn fill_of(cache: &PartCache, ctx: &SheetMetalContext, pick: Pick) -> Option<FillOf> {
     match pick {
-        Pick::Part(pid) => ctx.parts.iter().position(|(p, _)| *p == pid).map(FillOf::Part),
-        Pick::Face(pid, _) if ctx.parts.iter().any(|(p, _)| *p == pid) => match hit_of_pick(cache, pick)? {
-            (_, FlatHit::Wall(w)) => Some(FillOf::Wall(w)),
-            _ => None,
-        },
+        Pick::Part(pid) => ctx
+            .parts
+            .iter()
+            .position(|(p, _)| *p == pid)
+            .map(FillOf::Part),
+        Pick::Face(pid, _) if ctx.parts.iter().any(|(p, _)| *p == pid) => {
+            match hit_of_pick(cache, pick)? {
+                (_, FlatHit::Wall(w)) => Some(FillOf::Wall(w)),
+                _ => None,
+            }
+        }
         _ => None,
     }
 }
 
 /// The shown model's joints selected in the view.
-fn selected_joints(cache: &PartCache, ctx: &SheetMetalContext, selection: &Selection) -> Vec<JointId> {
+fn selected_joints(
+    cache: &PartCache,
+    ctx: &SheetMetalContext,
+    selection: &Selection,
+) -> Vec<JointId> {
     let mut out = Vec::new();
     for p in &selection.0 {
         if let Some((m, j)) = joint_of_pick(cache, *p)
@@ -675,7 +824,11 @@ fn selected_joints(cache: &PartCache, ctx: &SheetMetalContext, selection: &Selec
 }
 
 /// The Modify joint of a joint, if it has one.
-fn modify_joint(doc: &ActiveDocument, model: FeatureId, joint: JointId) -> Option<(FeatureId, ModifyJointFeature)> {
+fn modify_joint(
+    doc: &ActiveDocument,
+    model: FeatureId,
+    joint: JointId,
+) -> Option<(FeatureId, ModifyJointFeature)> {
     let el = doc.active_element()?;
     let f = modify_joint_of(el.features(), model, joint)?;
     match &f.kind {
@@ -691,8 +844,15 @@ fn modify_joint(doc: &ActiveDocument, model: FeatureId, joint: JointId) -> Optio
 /// there is none. While a Sheet metal model dialog is open the panel stays (P3I.8, SM17.2: the
 /// table and flat follow the picks, even through a pick that leaves the model failing for a
 /// moment).
-fn strip_button(kind: Res<ActiveKind>, cache: Res<PartCache>, session: Option<Res<crate::applied::AppliedSession>>, mut open: ResMut<SidePanel>, mut q: Query<(&Name, &mut Node)>) {
-    let editing = session.is_some_and(|s| matches!(s.kind, crate::applied::AppliedKind::SheetMetal));
+fn strip_button(
+    kind: Res<ActiveKind>,
+    cache: Res<PartCache>,
+    session: Option<Res<crate::applied::AppliedSession>>,
+    mut open: ResMut<SidePanel>,
+    mut q: Query<(&Name, &mut Node)>,
+) {
+    let editing =
+        session.is_some_and(|s| matches!(s.kind, crate::applied::AppliedKind::SheetMetal));
     let has = *kind == ActiveKind::PartStudio && (!cache.sheet_metal.is_empty() || editing);
     for (n, mut node) in &mut q {
         if n.as_str() == "panel-sheet-metal" {
@@ -709,11 +869,19 @@ fn strip_button(kind: Res<ActiveKind>, cache: Res<PartCache>, session: Option<Re
 
 /// The context follows the models: the first one by default, and the shown one if the
 /// selection is on another model's joint.
-fn sync_context(mut t: ResMut<SmTable>, cache: Res<PartCache>, selection: Res<Selection>, open: Res<SidePanel>, kind: Res<ActiveKind>) {
+fn sync_context(
+    mut t: ResMut<SmTable>,
+    cache: Res<PartCache>,
+    selection: Res<Selection>,
+    open: Res<SidePanel>,
+    kind: Res<ActiveKind>,
+) {
     if !is_open(&open, &kind) {
         return;
     }
-    let valid = t.context.is_some_and(|f| cache.sheet_metal.iter().any(|c| c.feature == f));
+    let valid = t
+        .context
+        .is_some_and(|f| cache.sheet_metal.iter().any(|c| c.feature == f));
     if !valid {
         let first = cache.sheet_metal.first().map(|c| c.feature);
         if t.context != first {
@@ -730,12 +898,18 @@ fn sync_context(mut t: ResMut<SmTable>, cache: Res<PartCache>, selection: Res<Se
 }
 
 fn units(world: &World) -> cadrs_sketch::units::Units {
-    world.get_resource::<crate::WorkspaceUnits>().map(|u| u.0).unwrap_or_default()
+    world
+        .get_resource::<crate::WorkspaceUnits>()
+        .map(|u| u.0)
+        .unwrap_or_default()
 }
 
 /// The panel, rebuilt when what it shows changes.
 fn sync_panel(world: &mut World) {
-    let open = is_open(world.resource::<SidePanel>(), world.resource::<ActiveKind>());
+    let open = is_open(
+        world.resource::<SidePanel>(),
+        world.resource::<ActiveKind>(),
+    );
     let mut q_panel = world.query_filtered::<Entity, With<PanelRoot>>();
     let old: Vec<Entity> = q_panel.iter(world).collect();
     if !open {
@@ -751,31 +925,56 @@ fn sync_panel(world: &mut World) {
         }
         return;
     }
-    let Some(doc) = world.get_resource::<ActiveDocument>() else { return };
+    let Some(doc) = world.get_resource::<ActiveDocument>() else {
+        return;
+    };
     let cache = world.resource::<PartCache>();
     let t = world.resource::<SmTable>();
     let list = models(doc, cache);
     let ctx = shown(t, cache).cloned();
     let units = units(world);
     let rows = ctx.as_ref().map(|c| table::table(&c.model));
-    let features: Vec<cadrs_core::Feature> = doc.active_element().map(|e| e.features().to_vec()).unwrap_or_default();
-    let mut mjs: Vec<CellState> = ctx.as_ref().map(|c| cell_states(doc, &features, c)).unwrap_or_default();
+    let features: Vec<cadrs_core::Feature> = doc
+        .active_element()
+        .map(|e| e.features().to_vec())
+        .unwrap_or_default();
+    let mut mjs: Vec<CellState> = ctx
+        .as_ref()
+        .map(|c| cell_states(doc, &features, c))
+        .unwrap_or_default();
     // Edits that couldn't be made show red with why.
     for (j, kind, text, msg) in &t.edit_errors {
         let i = match mjs.iter().position(|c| c.joint == *j) {
             Some(i) => i,
             None => {
-                mjs.push(CellState { joint: *j, radius_error: None, radius_text: None, value_error: None, value_text: None, made_by: None });
+                mjs.push(CellState {
+                    joint: *j,
+                    radius_error: None,
+                    radius_text: None,
+                    value_error: None,
+                    value_text: None,
+                    made_by: None,
+                });
                 mjs.len() - 1
             }
         };
         let c = &mut mjs[i];
         match kind {
-            CellKind::Radius => (c.radius_error, c.radius_text) = (Some(msg.clone()), Some(text.clone())),
-            CellKind::Value => (c.value_error, c.value_text) = (Some(msg.clone()), Some(text.clone())),
+            CellKind::Radius => {
+                (c.radius_error, c.radius_text) = (Some(msg.clone()), Some(text.clone()))
+            }
+            CellKind::Value => {
+                (c.value_error, c.value_text) = (Some(msg.clone()), Some(text.clone()))
+            }
         }
     }
-    let key = format!("{list:?}|{:?}|{rows:?}|{mjs:?}|{}|{}|{:?}", ctx.as_ref().map(|c| (c.feature, c.corner_broken)), t.bends_open, t.joints_open, units);
+    let key = format!(
+        "{list:?}|{:?}|{rows:?}|{mjs:?}|{}|{}|{:?}",
+        ctx.as_ref().map(|c| (c.feature, c.corner_broken)),
+        t.bends_open,
+        t.joints_open,
+        units
+    );
     if t.key.as_deref() == Some(key.as_str()) && !old.is_empty() {
         return;
     }
@@ -801,12 +1000,21 @@ fn sync_panel(world: &mut World) {
         }
     }
     let mut q_area = world.query_filtered::<(Entity, &ChildOf), With<ViewportArea>>();
-    let Some((area, parent)) = q_area.iter(world).next().map(|(e, c)| (e, c.parent())) else { return };
+    let Some((area, parent)) = q_area.iter(world).next().map(|(e, c)| (e, c.parent())) else {
+        return;
+    };
     let theme = world.resource::<Theme>().clone();
     let t = world.resource::<SmTable>();
-    let (image, cube) = (t.image.clone().unwrap_or_default(), t.cube_image.clone().unwrap_or_default());
+    let (image, cube) = (
+        t.image.clone().unwrap_or_default(),
+        t.cube_image.clone().unwrap_or_default(),
+    );
     let shown_feature = ctx.as_ref().map(|c| c.feature);
-    let model_name = list.iter().find(|(f, _)| Some(*f) == shown_feature).map(|(_, n)| n.clone()).unwrap_or_default();
+    let model_name = list
+        .iter()
+        .find(|(f, _)| Some(*f) == shown_feature)
+        .map(|(_, n)| n.clone())
+        .unwrap_or_default();
     let mut commands = world.commands();
     let panel = commands
         .spawn((
@@ -816,7 +1024,10 @@ fn sync_panel(world: &mut World) {
             crate::appearance::side_panel_node(&theme),
         ))
         .id();
-    commands.entity(panel).entry::<Node>().and_modify(|mut n| n.width = Val::Px(PANEL_W));
+    commands
+        .entity(panel)
+        .entry::<Node>()
+        .and_modify(|mut n| n.width = Val::Px(PANEL_W));
     let th = theme.clone();
     commands.entity(panel).with_children(|p| {
         // Sheet metal context: <model> ▾
@@ -829,12 +1040,20 @@ fn sync_panel(world: &mut World) {
             ..default()
         })
         .with_children(|r| {
-            r.spawn(th.text("Sheet metal context:", 12.0, FontWeight::NORMAL, th.foreground));
+            r.spawn(th.text(
+                "Sheet metal context:",
+                12.0,
+                FontWeight::NORMAL,
+                th.foreground,
+            ));
             let mut s = Select::new("smt-context").bordered().width(Val::Px(230.0));
             for (_, n) in &list {
                 s = s.option(n.clone(), true);
             }
-            let sel = list.iter().position(|(f, _)| Some(*f) == shown_feature).unwrap_or(0);
+            let sel = list
+                .iter()
+                .position(|(f, _)| Some(*f) == shown_feature)
+                .unwrap_or(0);
             r.spawn(s.selected(sel).build(&th));
         });
         // The tables, scrolling together above the flat view, with a scrollbar on the right
@@ -873,11 +1092,20 @@ fn sync_panel(world: &mut World) {
                     if let (Some(ctx), Some(rows)) = (&ctx, &rows) {
                         spawn_tables(b, &th, ctx, rows, &mjs, &units, bends_open, joints_open);
                     } else {
-                        b.spawn(th.text("No sheet metal model", 12.0, FontWeight::NORMAL, th.muted_foreground));
+                        b.spawn(th.text(
+                            "No sheet metal model",
+                            12.0,
+                            FontWeight::NORMAL,
+                            th.muted_foreground,
+                        ));
                     }
                 })
                 .id();
-            f.spawn(cadrs_ui::vertical_scrollbar(&th, "smt-tables-scrollbar", list));
+            f.spawn(cadrs_ui::vertical_scrollbar(
+                &th,
+                "smt-tables-scrollbar",
+                list,
+            ));
         });
         // The flat view.
         p.spawn((
@@ -906,7 +1134,14 @@ fn sync_panel(world: &mut World) {
                 Name::new("smt-flat-image"),
                 FlatImage,
                 ImageNode::new(image),
-                Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    ..default()
+                },
                 Pickable::IGNORE,
                 // Under a flat sketch's glyphs and values (`crate::flat_ui`).
                 ZIndex(-20),
@@ -927,11 +1162,18 @@ fn sync_panel(world: &mut World) {
             .observe(on_cube_click)
             .with_children(|c| {
                 // The triad's letters (the flat is seen from the top: X and Y).
-                for (axis, letter, color) in [(Vec3::X, "X", Color::srgb_u8(0xd0, 0x30, 0x30)), (Vec3::Y, "Y", Color::srgb_u8(0x3a, 0x9a, 0x3a)), (Vec3::Z, "Z", th.axis_z)] {
+                for (axis, letter, color) in [
+                    (Vec3::X, "X", Color::srgb_u8(0xd0, 0x30, 0x30)),
+                    (Vec3::Y, "Y", Color::srgb_u8(0x3a, 0x9a, 0x3a)),
+                    (Vec3::Z, "Z", th.axis_z),
+                ] {
                     c.spawn((
                         Name::new(format!("smt-flat-axis-{}", letter.to_lowercase())),
                         FlatAxisLabel(axis),
-                        Node { position_type: PositionType::Absolute, ..default() },
+                        Node {
+                            position_type: PositionType::Absolute,
+                            ..default()
+                        },
                         th.text(letter, 12.0, FontWeight::BOLD, color),
                         Pickable::IGNORE,
                     ));
@@ -958,7 +1200,10 @@ fn sync_panel(world: &mut World) {
                         Visibility::Hidden,
                         Pickable::IGNORE,
                     ))
-                    .with_child((th.text(j.name.clone(), 11.0, FontWeight::MEDIUM, th.foreground), Pickable::IGNORE));
+                    .with_child((
+                        th.text(j.name.clone(), 11.0, FontWeight::MEDIUM, th.foreground),
+                        Pickable::IGNORE,
+                    ));
                 }
             }
         });
@@ -968,7 +1213,9 @@ fn sync_panel(world: &mut World) {
     // in the viewport and the flat view").
     if let Some(ctx) = &ctx {
         for j in &ctx.model.joints {
-            let Some(spot) = cadrs_sheetmetal::view::label_spot(&ctx.model, j.id) else { continue };
+            let Some(spot) = cadrs_sheetmetal::view::label_spot(&ctx.model, j.id) else {
+                continue;
+            };
             let label = commands
                 .spawn((
                     Name::new(format!("smt-label-{}", j.name)),
@@ -986,13 +1233,19 @@ fn sync_panel(world: &mut World) {
                     Visibility::Hidden,
                     Pickable::IGNORE,
                 ))
-                .with_child((th.text(j.name.clone(), 11.0, FontWeight::MEDIUM, th.foreground), Pickable::IGNORE))
+                .with_child((
+                    th.text(j.name.clone(), 11.0, FontWeight::MEDIUM, th.foreground),
+                    Pickable::IGNORE,
+                ))
                 .id();
             commands.entity(area).add_child(label);
         }
     }
     world.flush();
-    let at = world.get::<Children>(parent).and_then(|c| c.iter().position(|e| e == area)).map_or(0, |i| i + 1);
+    let at = world
+        .get::<Children>(parent)
+        .and_then(|c| c.iter().position(|e| e == area))
+        .map_or(0, |i| i + 1);
     world.entity_mut(parent).insert_children(at, &[panel]);
 }
 
@@ -1010,13 +1263,21 @@ struct CellState {
     made_by: Option<String>,
 }
 
-fn cell_states(doc: &ActiveDocument, features: &[cadrs_core::Feature], ctx: &SheetMetalContext) -> Vec<CellState> {
+fn cell_states(
+    doc: &ActiveDocument,
+    features: &[cadrs_core::Feature],
+    ctx: &SheetMetalContext,
+) -> Vec<CellState> {
     let mut out = Vec::new();
     for j in &ctx.model.joints {
         if let Some(f) = bend_feature_of(features, ctx, j.id) {
             let b = match &f.kind {
-                FeatureKind::SheetMetalTool(cadrs_core::sheetmetal_tools::SheetMetalTool::Bend(b)) => b,
-                FeatureKind::SheetMetalTool(cadrs_core::sheetmetal_tools::SheetMetalTool::Jog(x)) => &x.bend,
+                FeatureKind::SheetMetalTool(
+                    cadrs_core::sheetmetal_tools::SheetMetalTool::Bend(b),
+                ) => b,
+                FeatureKind::SheetMetalTool(cadrs_core::sheetmetal_tools::SheetMetalTool::Jog(
+                    x,
+                )) => &x.bend,
                 _ => continue,
             };
             let r_bad = !b.use_model_radius && (b.radius.is_nan() || b.radius <= 0.0);
@@ -1031,15 +1292,27 @@ fn cell_states(doc: &ActiveDocument, features: &[cadrs_core::Feature], ctx: &She
             });
             continue;
         }
-        let Some((_, x)) = modify_joint(doc, ctx.feature, j.id) else { continue };
+        let Some((_, x)) = modify_joint(doc, ctx.feature, j.id) else {
+            continue;
+        };
         let bend = x.joint_type == cadrs_core::sheetmetal_joint::JointType::Bend;
-        let r = (bend && !x.use_model_radius).then(|| radius_error(x.radius)).flatten().map(|e| e.message());
-        let v = (bend && !x.use_model_value).then(|| value_error(x.calc, x.value)).flatten().map(|e| e.message());
+        let r = (bend && !x.use_model_radius)
+            .then(|| radius_error(x.radius))
+            .flatten()
+            .map(|e| e.message());
+        let v = (bend && !x.use_model_value)
+            .then(|| value_error(x.calc, x.value))
+            .flatten()
+            .map(|e| e.message());
         out.push(CellState {
             joint: j.id,
-            radius_text: r.as_ref().map(|_| x.radius_expr.trim_end_matches(" mm").to_string()),
+            radius_text: r
+                .as_ref()
+                .map(|_| x.radius_expr.trim_end_matches(" mm").to_string()),
             radius_error: r,
-            value_text: v.as_ref().map(|_| x.value_expr.trim_end_matches(" mm").to_string()),
+            value_text: v
+                .as_ref()
+                .map(|_| x.value_expr.trim_end_matches(" mm").to_string()),
             value_error: v,
             made_by: None,
         });
@@ -1048,36 +1321,66 @@ fn cell_states(doc: &ActiveDocument, features: &[cadrs_core::Feature], ctx: &She
 }
 
 /// A table title with its caret.
-fn caret_header(b: &mut ChildSpawnerCommands, t: &Theme, name: &'static str, title: &str, open: bool) {
+fn caret_header(
+    b: &mut ChildSpawnerCommands,
+    t: &Theme,
+    name: &'static str,
+    title: &str,
+    open: bool,
+) {
     b.spawn(cadrs_ui::Button::new(name).ghost().build(t))
-    .insert(Node {
-        height: Val::Px(32.0),
-        flex_shrink: 0.0,
-        padding: UiRect::horizontal(Val::Px(8.0)),
-        align_items: AlignItems::Center,
-        column_gap: Val::Px(6.0),
-        justify_content: JustifyContent::Start,
-        ..default()
-    })
-    .insert(BackgroundColor(Color::srgb_u8(0xf0, 0xf0, 0xf0)))
-    .with_children(|h| {
-        h.spawn((cadrs_ui::icon(if open { "chevron-down" } else { "chevron-right" }, 14.0, t.foreground), Pickable::IGNORE));
-        h.spawn((t.text(title, 14.0, FontWeight::MEDIUM, t.foreground), Pickable::IGNORE));
-    });
+        .insert(Node {
+            height: Val::Px(32.0),
+            flex_shrink: 0.0,
+            padding: UiRect::horizontal(Val::Px(8.0)),
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(6.0),
+            justify_content: JustifyContent::Start,
+            ..default()
+        })
+        .insert(BackgroundColor(Color::srgb_u8(0xf0, 0xf0, 0xf0)))
+        .with_children(|h| {
+            h.spawn((
+                cadrs_ui::icon(
+                    if open {
+                        "chevron-down"
+                    } else {
+                        "chevron-right"
+                    },
+                    14.0,
+                    t.foreground,
+                ),
+                Pickable::IGNORE,
+            ));
+            h.spawn((
+                t.text(title, 14.0, FontWeight::MEDIUM, t.foreground),
+                Pickable::IGNORE,
+            ));
+        });
 }
 
 fn number(v: f64, decimals: usize) -> String {
     let s = format!("{v:.decimals$}");
     let s = s.trim_end_matches('0').trim_end_matches('.');
-    if s.is_empty() || s == "-" || s == "-0" { "0".into() } else { s.into() }
+    if s.is_empty() || s == "-" || s == "-0" {
+        "0".into()
+    } else {
+        s.into()
+    }
 }
 
 /// The calculation column's title and quantity.
 fn value_title(calc: BendCalc, units: &cadrs_sketch::units::Units) -> (String, Quantity) {
     match calc {
         BendCalc::KFactor => ("K Factor".into(), Quantity::Count),
-        BendCalc::BendAllowance => (format!("Bend allowance({})", units.length.symbol()), Quantity::Length),
-        BendCalc::BendDeduction => (format!("Bend deduction({})", units.length.symbol()), Quantity::Length),
+        BendCalc::BendAllowance => (
+            format!("Bend allowance({})", units.length.symbol()),
+            Quantity::Length,
+        ),
+        BendCalc::BendDeduction => (
+            format!("Bend deduction({})", units.length.symbol()),
+            Quantity::Length,
+        ),
     }
 }
 
@@ -1089,7 +1392,8 @@ fn rip_angle(ctx: &SheetMetalContext, j: &cadrs_sheetmetal::Joint) -> Option<f64
 }
 
 /// Why a joint's Type and Style (and Convert) are locked after a Corner break (SM11.4).
-const CORNER_BREAK_LOCK: &str = "Locked by a Corner break on this model.\nMake Corner breaks after the joints are final.";
+const CORNER_BREAK_LOCK: &str =
+    "Locked by a Corner break on this model.\nMake Corner breaks after the joints are final.";
 
 /// The shaded "#" column's fill.
 const NUMBER_FILL: Color = Color::srgb(0.945, 0.945, 0.945);
@@ -1117,12 +1421,30 @@ fn spawn_tables(
         Column::new("dir", "Bend direction").grow(1.25),
         Column::new("value", value_label).grow(1.45),
     ];
-    let joint_cols = vec![Column::new("name", "Name").width(110.0).shaded(NUMBER_FILL), Column::new("type", "Type").width(110.0), Column::new("style", "Style").width(220.0)];
+    let joint_cols = vec![
+        Column::new("name", "Name").width(110.0).shaded(NUMBER_FILL),
+        Column::new("type", "Type").width(110.0),
+        Column::new("style", "Style").width(220.0),
+    ];
     let locked = ctx.corner_broken;
     caret_header(b, t, "smt-bends-caret", "Bends", bends_open);
     if bends_open {
-        b.spawn((Name::new("smt-bends"), TableRoot, Node { flex_direction: FlexDirection::Column, flex_shrink: 0.0, ..default() })).with_children(|tbl| {
-            tbl.spawn(TableHeader::new("smt-bends-header", bend_cols.clone()).height(ROW_H).grid().build(t));
+        b.spawn((
+            Name::new("smt-bends"),
+            TableRoot,
+            Node {
+                flex_direction: FlexDirection::Column,
+                flex_shrink: 0.0,
+                ..default()
+            },
+        ))
+        .with_children(|tbl| {
+            tbl.spawn(
+                TableHeader::new("smt-bends-header", bend_cols.clone())
+                    .height(ROW_H)
+                    .grid()
+                    .build(t),
+            );
             for (i, r) in rows.bends.iter().enumerate() {
                 let joint = r.joint;
                 let st = cells.iter().find(|c| c.joint == joint);
@@ -1134,7 +1456,9 @@ fn spawn_tables(
                 let value = match st.and_then(|c| c.value_text.clone()) {
                     Some(typed) => typed,
                     None => match r.value {
-                        Some(v) if value_q == Quantity::Length => units.value(v.value(), Quantity::Length),
+                        Some(v) if value_q == Quantity::Length => {
+                            units.value(v.value(), Quantity::Length)
+                        }
                         Some(v) => number(v.value(), 3),
                         None => "–".into(),
                     },
@@ -1144,12 +1468,22 @@ fn spawn_tables(
                 let cells_of: Vec<(String, Option<CellKind>, Option<String>)> = vec![
                     (r.number.to_string(), None, None),
                     (r.name.clone(), None, None),
-                    (radius, editable.then_some(CellKind::Radius), st.and_then(|c| c.radius_error.clone())),
+                    (
+                        radius,
+                        editable.then_some(CellKind::Radius),
+                        st.and_then(|c| c.radius_error.clone()),
+                    ),
                     (number(r.angle_deg, 2), None, None),
                     (r.direction.label().to_string(), None, None),
-                    (value, editable.then_some(CellKind::Value), st.and_then(|c| c.value_error.clone())),
+                    (
+                        value,
+                        editable.then_some(CellKind::Value),
+                        st.and_then(|c| c.value_error.clone()),
+                    ),
                 ];
-                let mut tr = TableRow::new(format!("smt-bend-row-{i}"), &bend_cols).height(ROW_H).grid();
+                let mut tr = TableRow::new(format!("smt-bend-row-{i}"), &bend_cols)
+                    .height(ROW_H)
+                    .grid();
                 for (c, (text, kind, err)) in cells_of.into_iter().enumerate() {
                     let th = t.clone();
                     // Only the cell whose value is out of range is red (the Radius for a radius).
@@ -1174,35 +1508,78 @@ fn spawn_tables(
                             },
                         ));
                         if let Some(k) = kind {
-                            e.insert((CellRef { joint, kind: k }, DoubleClickable, InlineEdit::default()));
+                            e.insert((
+                                CellRef { joint, kind: k },
+                                DoubleClickable,
+                                InlineEdit::default(),
+                            ));
                             if !red && let Some(f) = &made_by {
-                                e.insert(Tooltip::new(format!("Set in {f}: a new value edits {f}")));
+                                e.insert(Tooltip::new(format!(
+                                    "Set in {f}: a new value edits {f}"
+                                )));
                             }
                         }
                         if red {
-                            e.insert((BackgroundColor(Color::srgb_u8(0xf8, 0xd7, 0xd7)), BorderColor::all(th.feature_error)));
-                            e.entry::<Node>().and_modify(|mut n| n.border = UiRect::all(Val::Px(1.0)));
+                            e.insert((
+                                BackgroundColor(Color::srgb_u8(0xf8, 0xd7, 0xd7)),
+                                BorderColor::all(th.feature_error),
+                            ));
+                            e.entry::<Node>()
+                                .and_modify(|mut n| n.border = UiRect::all(Val::Px(1.0)));
                             if let Some(m) = err {
                                 e.insert(Tooltip::error(m));
                             }
                         }
                         let fg = if red { th.feature_error } else { th.foreground };
-                        let weight = if bold_num { FontWeight::BOLD } else { FontWeight::MEDIUM };
-                        e.with_child((th.text(text, 12.0, weight, fg), InlineEditLabel, Pickable::IGNORE));
+                        let weight = if bold_num {
+                            FontWeight::BOLD
+                        } else {
+                            FontWeight::MEDIUM
+                        };
+                        e.with_child((
+                            th.text(text, 12.0, weight, fg),
+                            InlineEditLabel,
+                            Pickable::IGNORE,
+                        ));
                     });
                 }
-                tbl.spawn((tr.build(t), RowRef { joint, bend: true, index: i }));
+                tbl.spawn((
+                    tr.build(t),
+                    RowRef {
+                        joint,
+                        bend: true,
+                        index: i,
+                    },
+                ));
             }
         });
     }
     caret_header(b, t, "smt-joints-caret", "Other joints", joints_open);
     if joints_open {
-        b.spawn((Name::new("smt-joints"), TableRoot, Node { flex_direction: FlexDirection::Column, flex_shrink: 0.0, ..default() })).with_children(|tbl| {
-            tbl.spawn(TableHeader::new("smt-joints-header", joint_cols.clone()).height(ROW_H).grid().build(t));
+        b.spawn((
+            Name::new("smt-joints"),
+            TableRoot,
+            Node {
+                flex_direction: FlexDirection::Column,
+                flex_shrink: 0.0,
+                ..default()
+            },
+        ))
+        .with_children(|tbl| {
+            tbl.spawn(
+                TableHeader::new("smt-joints-header", joint_cols.clone())
+                    .height(ROW_H)
+                    .grid()
+                    .build(t),
+            );
             for (i, r) in rows.joints.iter().enumerate() {
                 let joint = r.joint;
                 let tangent = r.kind == table::JointType::Tangent;
-                let ninety = ctx.model.joint(joint).and_then(|j| rip_angle(ctx, j)).is_some_and(|a| (a - 90.0).abs() < 1e-3);
+                let ninety = ctx
+                    .model
+                    .joint(joint)
+                    .and_then(|j| rip_angle(ctx, j))
+                    .is_some_and(|a| (a - 90.0).abs() < 1e-3);
                 let style = r.style.unwrap_or_default();
                 let name = r.name.clone();
                 let th = t.clone();
@@ -1212,24 +1589,53 @@ fn spawn_tables(
                     .cell({
                         let th = th.clone();
                         move |c| {
-                            c.spawn(Node { width: Val::Percent(100.0), justify_content: JustifyContent::Center, ..default() })
-                                .with_child((th.text(name, 12.0, FontWeight::BOLD, th.foreground), Pickable::IGNORE));
+                            c.spawn(Node {
+                                width: Val::Percent(100.0),
+                                justify_content: JustifyContent::Center,
+                                ..default()
+                            })
+                            .with_child((
+                                th.text(name, 12.0, FontWeight::BOLD, th.foreground),
+                                Pickable::IGNORE,
+                            ));
                         }
                     })
                     .cell({
                         let th = th.clone();
                         move |c| {
                             let label = if tangent { "Tangent" } else { "Rip" };
-                            let options = if tangent { vec![("Tangent".to_string(), true)] } else { vec![("Rip".to_string(), true), ("Bend".to_string(), true)] };
+                            let options = if tangent {
+                                vec![("Tangent".to_string(), true)]
+                            } else {
+                                vec![("Rip".to_string(), true), ("Bend".to_string(), true)]
+                            };
                             let tip = locked.then_some(CORNER_BREAK_LOCK);
-                            dropdown(c, &th, format!("smt-joint-{i}-type"), label, Dropdown { select: JointSelect::Type(joint), options, disabled: tangent || locked }, tip);
+                            dropdown(
+                                c,
+                                &th,
+                                format!("smt-joint-{i}-type"),
+                                label,
+                                Dropdown {
+                                    select: JointSelect::Type(joint),
+                                    options,
+                                    disabled: tangent || locked,
+                                },
+                                tip,
+                            );
                         }
                     })
                     .cell(move |c| {
                         if tangent {
                             // Onshape's "n/a" (`17-…/t0043.9.png`): a tangent joint has no style.
-                            c.spawn(Node { width: Val::Percent(100.0), justify_content: JustifyContent::Center, ..default() })
-                                .with_child((th.text("n/a", 12.0, FontWeight::NORMAL, th.muted_foreground), Pickable::IGNORE));
+                            c.spawn(Node {
+                                width: Val::Percent(100.0),
+                                justify_content: JustifyContent::Center,
+                                ..default()
+                            })
+                            .with_child((
+                                th.text("n/a", 12.0, FontWeight::NORMAL, th.muted_foreground),
+                                Pickable::IGNORE,
+                            ));
                             return;
                         }
                         let options = vec![
@@ -1238,9 +1644,27 @@ fn spawn_tables(
                             (RipStyle::ButtDirection2.label().to_string(), ninety),
                         ];
                         let tip = locked.then_some(CORNER_BREAK_LOCK);
-                        dropdown(c, &th, format!("smt-joint-{i}-style"), style.label(), Dropdown { select: JointSelect::Style(joint), options, disabled: locked }, tip);
+                        dropdown(
+                            c,
+                            &th,
+                            format!("smt-joint-{i}-style"),
+                            style.label(),
+                            Dropdown {
+                                select: JointSelect::Style(joint),
+                                options,
+                                disabled: locked,
+                            },
+                            tip,
+                        );
                     });
-                tbl.spawn((tr.build(t), RowRef { joint, bend: false, index: i }));
+                tbl.spawn((
+                    tr.build(t),
+                    RowRef {
+                        joint,
+                        bend: false,
+                        index: i,
+                    },
+                ));
             }
         });
     }
@@ -1259,8 +1683,19 @@ struct Dropdown {
 #[derive(Component, Clone)]
 struct DropdownFor(JointSelect, String);
 
-fn dropdown(c: &mut ChildSpawner, t: &Theme, name: String, label: &str, d: Dropdown, tip: Option<&str>) {
-    let fg = if d.disabled { t.muted_foreground } else { t.foreground };
+fn dropdown(
+    c: &mut ChildSpawner,
+    t: &Theme,
+    name: String,
+    label: &str,
+    d: Dropdown,
+    tip: Option<&str>,
+) {
+    let fg = if d.disabled {
+        t.muted_foreground
+    } else {
+        t.foreground
+    };
     let mut e = c.spawn((
         Name::new(name),
         d,
@@ -1282,29 +1717,52 @@ fn dropdown(c: &mut ChildSpawner, t: &Theme, name: String, label: &str, d: Dropd
         e.insert(Tooltip::new(tip));
     }
     e.observe(on_dropdown_click).with_children(|r| {
-        r.spawn((t.text(label, 12.0, FontWeight::NORMAL, fg), Pickable::IGNORE));
-        r.spawn((cadrs_ui::icon("caret-down-filled", 10.0, t.tool_foreground), Pickable::IGNORE));
+        r.spawn((
+            t.text(label, 12.0, FontWeight::NORMAL, fg),
+            Pickable::IGNORE,
+        ));
+        r.spawn((
+            cadrs_ui::icon("caret-down-filled", 10.0, t.tool_foreground),
+            Pickable::IGNORE,
+        ));
     });
 }
 
-fn on_dropdown_click(mut c: On<Pointer<Click>>, q: Query<(&Dropdown, &Name, &ComputedNode, &UiGlobalTransform)>, theme: Res<Theme>, mut commands: Commands) {
+fn on_dropdown_click(
+    mut c: On<Pointer<Click>>,
+    q: Query<(&Dropdown, &Name, &ComputedNode, &UiGlobalTransform)>,
+    theme: Res<Theme>,
+    mut commands: Commands,
+) {
     // A click on a row's select isn't a click on the row.
     c.propagate(false);
     if c.button != PointerButton::Primary {
         return;
     }
-    let Ok((d, name, node, tr)) = q.get(c.entity) else { return };
+    let Ok((d, name, node, tr)) = q.get(c.entity) else {
+        return;
+    };
     if d.disabled {
         return;
     }
     let s = node.inverse_scale_factor();
-    let at = Vec2::new(tr.translation.x - node.size().x / 2.0, tr.translation.y + node.size().y / 2.0) * s;
-    let mut menu = Menu::new(format!("{name}-menu")).min_width((node.size().x * s).max(120.0)).item_height(24.0).text_only();
+    let at = Vec2::new(
+        tr.translation.x - node.size().x / 2.0,
+        tr.translation.y + node.size().y / 2.0,
+    ) * s;
+    let mut menu = Menu::new(format!("{name}-menu"))
+        .min_width((node.size().x * s).max(120.0))
+        .item_height(24.0)
+        .text_only();
     for (i, (label, enabled)) in d.options.iter().enumerate() {
-        menu = menu.item(MenuItem::new(format!("{name}-option-{i}"), label.clone()).disabled(!enabled));
+        menu = menu
+            .item(MenuItem::new(format!("{name}-option-{i}"), label.clone()).disabled(!enabled));
     }
     let anchor = open_context_menu(&mut commands, at, menu.build(&theme));
-    commands.entity(anchor).insert((DropdownFor(d.select, name.to_string()), DespawnOnExit(AppState::Document)));
+    commands.entity(anchor).insert((
+        DropdownFor(d.select, name.to_string()),
+        DespawnOnExit(AppState::Document),
+    ));
 }
 
 /// Rows show selected while their joint is (in any view).
@@ -1315,7 +1773,14 @@ fn sync_rows(
     selection: Res<Selection>,
     open: Res<SidePanel>,
     kind: Res<ActiveKind>,
-    q_rows: Query<(Entity, &RowRef, Has<cadrs_ui::style::Selected>, &Hovered, &ComputedNode, Option<&cadrs_ui::style::ForceState>)>,
+    q_rows: Query<(
+        Entity,
+        &RowRef,
+        Has<cadrs_ui::style::Selected>,
+        &Hovered,
+        &ComputedNode,
+        Option<&cadrs_ui::style::ForceState>,
+    )>,
     mut q_scroll: Query<(&mut ScrollPosition, &ComputedNode), With<RowsScroll>>,
     q_menus: Query<&MenuFor, With<ContextMenuAnchor>>,
     mut commands: Commands,
@@ -1326,7 +1791,11 @@ fn sync_rows(
     let Some(ctx) = shown(&t, &cache) else { return };
     let selected = selected_joints(&cache, ctx, &selection);
     let mut scroll_to: Option<usize> = None;
-    let new: Vec<JointId> = selected.iter().filter(|j| !t.seen.contains(j)).copied().collect();
+    let new: Vec<JointId> = selected
+        .iter()
+        .filter(|j| !t.seen.contains(j))
+        .copied()
+        .collect();
     let mut row_y = 0.0;
     // The row whose menu is open stays highlighted while it is (frame t0016).
     let menu_row = q_menus.iter().next().map(|m| (m.0, m.1));
@@ -1339,9 +1808,13 @@ fn sync_rows(
         }
         let menu = menu_row == Some((r.joint, r.bend));
         if menu && force.is_none() {
-            commands.entity(e).try_insert(cadrs_ui::style::ForceState(cadrs_ui::style::VisualState::Pressed));
+            commands.entity(e).try_insert(cadrs_ui::style::ForceState(
+                cadrs_ui::style::VisualState::Pressed,
+            ));
         } else if !menu && force.is_some() {
-            commands.entity(e).try_remove::<cadrs_ui::style::ForceState>();
+            commands
+                .entity(e)
+                .try_remove::<cadrs_ui::style::ForceState>();
         }
         row_y = node.size().y * node.inverse_scale_factor();
         if new.contains(&r.joint) {
@@ -1350,7 +1823,11 @@ fn sync_rows(
             scroll_to = Some(if r.bend { r.index } else { bends + 2 + r.index });
         }
     }
-    let hovered = q_rows.iter().find(|(_, _, _, h, ..)| h.get()).map(|(_, r, ..)| FlatHit::Joint(r.joint)).or(t.flat_hover);
+    let hovered = q_rows
+        .iter()
+        .find(|(_, _, _, h, ..)| h.get())
+        .map(|(_, r, ..)| FlatHit::Joint(r.joint))
+        .or(t.flat_hover);
     if t.hovered != hovered {
         t.hovered = hovered;
     }
@@ -1370,13 +1847,27 @@ fn sync_rows(
 
 /// What the main view's pointer is on, in the shown model's flat (SM1.4: a hovered face, edge
 /// or vertex of a wall, or a joint's, lights up in the flat view).
-fn model_hover(mut t: ResMut<SmTable>, cache: Res<PartCache>, highlight: Res<PlaneHighlight>, open: Res<SidePanel>, kind: Res<ActiveKind>) {
-    let pick = if is_open(&open, &kind) { highlight.viewport } else { None };
+fn model_hover(
+    mut t: ResMut<SmTable>,
+    cache: Res<PartCache>,
+    highlight: Res<PlaneHighlight>,
+    open: Res<SidePanel>,
+    kind: Res<ActiveKind>,
+) {
+    let pick = if is_open(&open, &kind) {
+        highlight.viewport
+    } else {
+        None
+    };
     if t.model_hover.map(|(p, _)| p) == pick && !cache.is_changed() {
         return;
     }
     let shown_model = shown(&t, &cache).map(|c| c.feature);
-    let want = pick.and_then(|p| hit_of_pick(&cache, p).filter(|(m, _)| Some(*m) == shown_model).map(|(_, h)| (p, h)));
+    let want = pick.and_then(|p| {
+        hit_of_pick(&cache, p)
+            .filter(|(m, _)| Some(*m) == shown_model)
+            .map(|(_, h)| (p, h))
+    });
     if t.model_hover != want {
         t.model_hover = want;
     }
@@ -1384,8 +1875,17 @@ fn model_hover(mut t: ResMut<SmTable>, cache: Res<PartCache>, highlight: Res<Pla
 
 /// The hovered row's joint, or the flat view's joint or wall, shows hovered in the model: all of
 /// its faces (a bend's cylinders and ends, a rip's two sides, a wall's faces).
-fn hover_to_view(mut t: ResMut<SmTable>, cache: Res<PartCache>, mut extra: ResMut<ExtraHighlight>, open: Res<SidePanel>, kind: Res<ActiveKind>) {
-    let want = t.hovered.filter(|_| is_open(&open, &kind)).and_then(|h| shown(&t, &cache).map(|c| (c.feature, h)));
+fn hover_to_view(
+    mut t: ResMut<SmTable>,
+    cache: Res<PartCache>,
+    mut extra: ResMut<ExtraHighlight>,
+    open: Res<SidePanel>,
+    kind: Res<ActiveKind>,
+) {
+    let want = t
+        .hovered
+        .filter(|_| is_open(&open, &kind))
+        .and_then(|h| shown(&t, &cache).map(|c| (c.feature, h)));
     if want == t.hover_set && !(want.is_some() && cache.is_changed()) {
         return;
     }
@@ -1404,12 +1904,24 @@ fn hover_to_view(mut t: ResMut<SmTable>, cache: Res<PartCache>, mut extra: ResMu
 
 /// A table edit of `joint` in the shown model: its Modify joint edited, or a new one (one step).
 fn edit_joint(world: &mut World, joint: JointId, edit: TableEdit) {
-    let Some(ctx) = shown(world.resource::<SmTable>(), world.resource::<PartCache>()).cloned() else { return };
-    let Some(j) = ctx.model.joint(joint).cloned() else { return };
-    let Some(doc) = world.get_resource::<ActiveDocument>() else { return };
-    let Some(element) = doc.active_element().map(|e| e.id) else { return };
+    let Some(ctx) = shown(world.resource::<SmTable>(), world.resource::<PartCache>()).cloned()
+    else {
+        return;
+    };
+    let Some(j) = ctx.model.joint(joint).cloned() else {
+        return;
+    };
+    let Some(doc) = world.get_resource::<ActiveDocument>() else {
+        return;
+    };
+    let Some(element) = doc.active_element().map(|e| e.id) else {
+        return;
+    };
     // A bend a Bend or Jog feature made: that feature's own radius or K factor (SM13.3).
-    let features: Vec<cadrs_core::Feature> = doc.active_element().map(|e| e.features().to_vec()).unwrap_or_default();
+    let features: Vec<cadrs_core::Feature> = doc
+        .active_element()
+        .map(|e| e.features().to_vec())
+        .unwrap_or_default();
     if let Some(f) = bend_feature_of(&features, &ctx, joint) {
         let cell = match &edit {
             TableEdit::Radius(_, x) => Some((CellKind::Radius, x.clone())),
@@ -1419,15 +1931,27 @@ fn edit_joint(world: &mut World, joint: JointId, edit: TableEdit) {
         match bend_feature_edit(f, &j, &ctx.model.params, &edit) {
             Ok(f) => {
                 let label = edit.label(&j.name);
-                world.resource_mut::<SmTable>().edit_errors.retain(|e| e.0 != joint);
-                run(world, element, &cadrs_core::commands::ReplaceFeature { element, feature: f, label });
+                world
+                    .resource_mut::<SmTable>()
+                    .edit_errors
+                    .retain(|e| e.0 != joint);
+                run(
+                    world,
+                    element,
+                    &cadrs_core::commands::ReplaceFeature {
+                        element,
+                        feature: f,
+                        label,
+                    },
+                );
             }
             // Shown in the cell: the typed text, red, with why as its tooltip.
             Err(e) => match cell {
                 Some((kind, text)) => {
                     let mut t = world.resource_mut::<SmTable>();
                     t.edit_errors.retain(|x| !(x.0 == joint && x.1 == kind));
-                    t.edit_errors.push((joint, kind, text.trim_end_matches(" mm").to_string(), e));
+                    t.edit_errors
+                        .push((joint, kind, text.trim_end_matches(" mm").to_string(), e));
                 }
                 None => warn!("sheet metal table: {e}"),
             },
@@ -1435,13 +1959,29 @@ fn edit_joint(world: &mut World, joint: JointId, edit: TableEdit) {
         return;
     }
     let existing = modify_joint(doc, ctx.feature, joint);
-    let x = table_edit(ctx.feature, existing.as_ref().map(|(_, x)| x), &j, &ctx.model.params, &edit);
+    let x = table_edit(
+        ctx.feature,
+        existing.as_ref().map(|(_, x)| x),
+        &j,
+        &ctx.model.params,
+        &edit,
+    );
     if existing.as_ref().is_some_and(|(_, e)| *e == x) {
         return;
     }
     let feature = existing.map_or_else(FeatureId::new, |(f, _)| f);
     let label = edit.label(&j.name);
-    run(world, element, &PutModifyJoint { element, feature, joint: x, after: ctx.editors.clone(), label });
+    run(
+        world,
+        element,
+        &PutModifyJoint {
+            element,
+            feature,
+            joint: x,
+            after: ctx.editors.clone(),
+            label,
+        },
+    );
 }
 
 fn run(world: &mut World, _element: ElementId, cmd: &dyn cadrs_core::Command) {
@@ -1456,12 +1996,36 @@ fn run(world: &mut World, _element: ElementId, cmd: &dyn cadrs_core::Command) {
 }
 
 fn move_joint(world: &mut World, joint: JointId, by: isize) {
-    let Some(ctx) = shown(world.resource::<SmTable>(), world.resource::<PartCache>()).cloned() else { return };
-    let Some(order) = cadrs_sheetmetal::joint_edit::moved(&ctx.model, joint, by) else { return };
-    let Some(element) = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element()).map(|e| e.id) else { return };
-    let name = ctx.model.joint(joint).map(|j| j.name.clone()).unwrap_or_default();
+    let Some(ctx) = shown(world.resource::<SmTable>(), world.resource::<PartCache>()).cloned()
+    else {
+        return;
+    };
+    let Some(order) = cadrs_sheetmetal::joint_edit::moved(&ctx.model, joint, by) else {
+        return;
+    };
+    let Some(element) = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.active_element())
+        .map(|e| e.id)
+    else {
+        return;
+    };
+    let name = ctx
+        .model
+        .joint(joint)
+        .map(|j| j.name.clone())
+        .unwrap_or_default();
     let label = format!("{} {name}", if by < 0 { "Move up" } else { "Move down" });
-    run(world, element, &SetTableOrder { element, model: ctx.feature, order, label });
+    run(
+        world,
+        element,
+        &SetTableOrder {
+            element,
+            model: ctx.feature,
+            order,
+            label,
+        },
+    );
 }
 
 /// Toggles a joint's faces in the selection (a row or the flat view clicked).
@@ -1473,7 +2037,9 @@ fn toggle_joint(world: &mut World, joint: JointId) {
 fn toggle_hit(world: &mut World, hit: FlatHit) {
     let picks = {
         let cache = world.resource::<PartCache>();
-        let Some(ctx) = shown(world.resource::<SmTable>(), cache) else { return };
+        let Some(ctx) = shown(world.resource::<SmTable>(), cache) else {
+            return;
+        };
         hit_picks(cache, ctx, hit, false)
     };
     toggle_picks(world, picks);
@@ -1495,7 +2061,12 @@ fn toggle_picks(world: &mut World, picks: Vec<Pick>) {
     }
 }
 
-fn on_activate(a: On<Activate>, q_row: Query<&RowRef>, q_name: Query<&Name>, mut commands: Commands) {
+fn on_activate(
+    a: On<Activate>,
+    q_row: Query<&RowRef>,
+    q_name: Query<&Name>,
+    mut commands: Commands,
+) {
     if let Ok(r) = q_row.get(a.entity) {
         let j = r.joint;
         commands.queue(move |world: &mut World| toggle_joint(world, j));
@@ -1516,7 +2087,10 @@ fn on_activate(a: On<Activate>, q_row: Query<&RowRef>, q_name: Query<&Name>, mut
 }
 
 fn on_select_change(ev: On<SelectChange>, q_name: Query<&Name>, mut commands: Commands) {
-    if q_name.get(ev.entity).is_ok_and(|n| n.as_str() == "smt-context") {
+    if q_name
+        .get(ev.entity)
+        .is_ok_and(|n| n.as_str() == "smt-context")
+    {
         let i = ev.index;
         commands.queue(move |world: &mut World| {
             let list = match world.get_resource::<ActiveDocument>() {
@@ -1536,14 +2110,21 @@ fn on_double_click(ev: On<DoubleClick>, q: Query<&CellRef>, mut commands: Comman
     let Ok(c) = q.get(ev.entity) else { return };
     let (c, entity) = (*c, ev.entity);
     commands.queue(move |world: &mut World| {
-        let Some(ctx) = shown(world.resource::<SmTable>(), world.resource::<PartCache>()).cloned() else { return };
-        let Some(b) = ctx.model.joint(c.joint).and_then(|j| j.bend().copied()) else { return };
+        let Some(ctx) = shown(world.resource::<SmTable>(), world.resource::<PartCache>()).cloned()
+        else {
+            return;
+        };
+        let Some(b) = ctx.model.joint(c.joint).and_then(|j| j.bend().copied()) else {
+            return;
+        };
         let units = units(world);
         let text = match c.kind {
             CellKind::Radius => units.value(b.radius, Quantity::Length),
             CellKind::Value => {
                 let p = &ctx.model.params;
-                let v = b.value_or_model(p).to_calc(p.bend_calc, b.radius, p.thickness, b.angle);
+                let v = b
+                    .value_or_model(p)
+                    .to_calc(p.bend_calc, b.radius, p.thickness, b.angle);
                 match (v, p.bend_calc) {
                     (Some(v), BendCalc::KFactor) => number(v.value(), 4),
                     (Some(v), _) => units.value(v.value(), Quantity::Length),
@@ -1553,7 +2134,14 @@ fn on_double_click(ev: On<DoubleClick>, q: Query<&CellRef>, mut commands: Comman
         };
         let theme = world.resource::<Theme>().clone();
         let mut cm = world.commands();
-        let mut o = InlineEditOptions::new(format!("smt-edit-{}", if c.kind == CellKind::Radius { "radius" } else { "value" }));
+        let mut o = InlineEditOptions::new(format!(
+            "smt-edit-{}",
+            if c.kind == CellKind::Radius {
+                "radius"
+            } else {
+                "value"
+            }
+        ));
         o.height = 24.0;
         begin_inline_edit(&mut cm, &theme, entity, text, o);
         world.flush();
@@ -1564,15 +2152,28 @@ fn on_commit(ev: On<InlineEditCommit>, q: Query<&CellRef>, mut commands: Command
     let Ok(c) = q.get(ev.entity) else { return };
     let (c, text) = (*c, ev.value.clone());
     commands.queue(move |world: &mut World| {
-        let Some(ctx) = shown(world.resource::<SmTable>(), world.resource::<PartCache>()).cloned() else { return };
+        let Some(ctx) = shown(world.resource::<SmTable>(), world.resource::<PartCache>()).cloned()
+        else {
+            return;
+        };
         let units = units(world);
-        let vars = world.get_resource::<crate::variables_ui::ActiveVariables>().cloned().unwrap_or_default();
+        let vars = world
+            .get_resource::<crate::variables_ui::ActiveVariables>()
+            .cloned()
+            .unwrap_or_default();
         let q = match (c.kind, ctx.model.params.bend_calc) {
-            (CellKind::Radius, _) | (CellKind::Value, BendCalc::BendAllowance | BendCalc::BendDeduction) => Quantity::Length,
+            (CellKind::Radius, _)
+            | (CellKind::Value, BendCalc::BendAllowance | BendCalc::BendDeduction) => {
+                Quantity::Length
+            }
             (CellKind::Value, BendCalc::KFactor) => Quantity::Count,
         };
-        let Some((v, expr)) = crate::sheetmetal_ui::parse(&text, q, &units, &vars) else { return };
-        let Some(b) = ctx.model.joint(c.joint).and_then(|j| j.bend().copied()) else { return };
+        let Some((v, expr)) = crate::sheetmetal_ui::parse(&text, q, &units, &vars) else {
+            return;
+        };
+        let Some(b) = ctx.model.joint(c.joint).and_then(|j| j.bend().copied()) else {
+            return;
+        };
         let edit = match c.kind {
             CellKind::Radius if (v - b.radius).abs() > 1e-12 => TableEdit::Radius(v, expr),
             CellKind::Value => TableEdit::Value(v, expr),
@@ -1588,7 +2189,10 @@ fn flat_name(world: &World, part: usize) -> Option<String> {
     let ctx = shown(world.resource::<SmTable>(), cache)?;
     let (pid, _) = ctx.parts.get(part)?;
     let p = cache.parts.iter().find(|p| p.id == *pid)?;
-    Some(format!("Flat pattern of {}", cadrs_core::parts::display_name(p, &cache.props)))
+    Some(format!(
+        "Flat pattern of {}",
+        cadrs_core::parts::display_name(p, &cache.props)
+    ))
 }
 
 /// A Select other entry's label.
@@ -1597,10 +2201,20 @@ fn flat_name(world: &World, part: usize) -> Option<String> {
 fn hit_label(world: &World, ctx: &SheetMetalContext, hit: FlatHit) -> String {
     let named = |f: FeatureId| feature_name(world, f).unwrap_or_else(|| ctx.name.clone());
     match hit {
-        FlatHit::Joint(j) => ctx.model.joint(j).map_or_else(|| "Joint".into(), |j| j.name.clone()),
-        FlatHit::Wall(w) => format!("Face of {}", named(ctx.owner(cadrs_core::sheetmetal::PieceKey::Wall(w)))),
+        FlatHit::Joint(j) => ctx
+            .model
+            .joint(j)
+            .map_or_else(|| "Joint".into(), |j| j.name.clone()),
+        FlatHit::Wall(w) => format!(
+            "Face of {}",
+            named(ctx.owner(cadrs_core::sheetmetal::PieceKey::Wall(w)))
+        ),
         FlatHit::Pick(p) => {
-            let what = if matches!(p, Pick::Vertex(..)) { "Vertex" } else { "Edge" };
+            let what = if matches!(p, Pick::Vertex(..)) {
+                "Vertex"
+            } else {
+                "Edge"
+            };
             let op = match p {
                 Pick::Edge(_, n) => n.faces[0].op,
                 _ => ctx.feature.0,
@@ -1660,17 +2274,31 @@ fn on_context_menu(
     let Ok(r) = q_row.get(ev.entity) else { return };
     let (joint, bend, at) = (r.joint, r.bend, ev.position);
     commands.queue(move |world: &mut World| {
-        let Some(ctx) = shown(world.resource::<SmTable>(), world.resource::<PartCache>()).cloned() else { return };
-        let Some(j) = ctx.model.joint(joint) else { return };
+        let Some(ctx) = shown(world.resource::<SmTable>(), world.resource::<PartCache>()).cloned()
+        else {
+            return;
+        };
+        let Some(j) = ctx.model.joint(joint) else {
+            return;
+        };
         let up = cadrs_sheetmetal::joint_edit::moved(&ctx.model, joint, -1).is_some();
         let down = cadrs_sheetmetal::joint_edit::moved(&ctx.model, joint, 1).is_some();
         let hem = j.bend().is_some_and(|b| b.hem);
         let tangent = matches!(j.kind, JointKind::Tangent { .. });
-        let features: Vec<cadrs_core::Feature> = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element()).map(|e| e.features().to_vec()).unwrap_or_default();
+        let features: Vec<cadrs_core::Feature> = world
+            .get_resource::<ActiveDocument>()
+            .and_then(|d| d.active_element())
+            .map(|e| e.features().to_vec())
+            .unwrap_or_default();
         // A bend a Bend or Jog made stays a bend (edit or delete that feature instead).
         let made_by = bend_feature_of(&features, &ctx, joint).map(|f| f.name.clone());
-        let convert = if bend { format!("Convert {} to rip", j.name) } else { format!("Convert {} to bend", j.name) };
-        let mut item = MenuItem::new("smt-convert", convert).disabled(hem || tangent || made_by.is_some() || ctx.corner_broken);
+        let convert = if bend {
+            format!("Convert {} to rip", j.name)
+        } else {
+            format!("Convert {} to bend", j.name)
+        };
+        let mut item = MenuItem::new("smt-convert", convert)
+            .disabled(hem || tangent || made_by.is_some() || ctx.corner_broken);
         if ctx.corner_broken {
             item = item.tooltip(CORNER_BREAK_LOCK);
         } else if let Some(f) = &made_by {
@@ -1689,7 +2317,8 @@ fn on_context_menu(
         let theme = world.resource::<Theme>().clone();
         let mut cm = world.commands();
         let anchor = open_context_menu(&mut cm, at, menu.build(&theme));
-        cm.entity(anchor).insert((MenuFor(joint, bend), DespawnOnExit(AppState::Document)));
+        cm.entity(anchor)
+            .insert((MenuFor(joint, bend), DespawnOnExit(AppState::Document)));
         world.flush();
     });
 }
@@ -1703,18 +2332,31 @@ fn flat_sketch_at(world: &World, p: P2, tol: f64) -> Option<FeatureId> {
     let features = el.active_features();
     for f in &features {
         let Some(sk) = f.sketch() else { continue };
-        let Some(cadrs_sketch::PlaneRef::Feature(fp)) = sk.plane else { continue };
-        let Some((model, index)) = cadrs_core::sheetmetal_flat::flat_target(&features, fp.feature) else { continue };
+        let Some(cadrs_sketch::PlaneRef::Feature(fp)) = sk.plane else {
+            continue;
+        };
+        let Some((model, index)) = cadrs_core::sheetmetal_flat::flat_target(&features, fp.feature)
+        else {
+            continue;
+        };
         if model != ctx.feature {
             continue;
         }
-        let shift = scene.shifts.get(index).copied().unwrap_or_else(cadrs_sheetmetal::poly::V2::zeros);
+        let shift = scene
+            .shifts
+            .get(index)
+            .copied()
+            .unwrap_or_else(cadrs_sheetmetal::poly::V2::zeros);
         for l in sketch_polylines(&sk.geometry) {
             for w in l.windows(2) {
                 let a = P2::new(w[0].x, w[0].y) + shift;
                 let b = P2::new(w[1].x, w[1].y) + shift;
                 let d = b - a;
-                let k = if d.norm_squared() > 0.0 { ((p - a).dot(&d) / d.norm_squared()).clamp(0.0, 1.0) } else { 0.0 };
+                let k = if d.norm_squared() > 0.0 {
+                    ((p - a).dot(&d) / d.norm_squared()).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
                 if (p - (a + d * k)).norm() <= tol {
                     return Some(f.id);
                 }
@@ -1726,7 +2368,11 @@ fn flat_sketch_at(world: &World, p: P2, tol: f64) -> Option<FeatureId> {
 
 /// A feature's name in the active Part Studio.
 fn feature_name(world: &World, id: FeatureId) -> Option<String> {
-    world.get_resource::<ActiveDocument>()?.active_element()?.feature(id).map(|f| f.name.clone())
+    world
+        .get_resource::<ActiveDocument>()?
+        .active_element()?
+        .feature(id)
+        .map(|f| f.name.clone())
 }
 
 /// The flat view's menu, as Onshape's (lesson 15, t0026.5; SM14.1, SM15.1, SM16.1): Edit the
@@ -1741,11 +2387,17 @@ fn open_flat_menu(world: &mut World, position: Vec2) {
         (t.menu_part, t.menu_others.clone(), t.menu_point)
     };
     let name = part.and_then(|p| flat_name(world, p));
-    let model = shown(world.resource::<SmTable>(), world.resource::<PartCache>()).map(|c| c.feature);
+    let model =
+        shown(world.resource::<SmTable>(), world.resource::<PartCache>()).map(|c| c.feature);
     let model_name = model.and_then(|m| feature_name(world, m));
     let sketch = at.and_then(|(p, tol)| flat_sketch_at(world, p, tol));
     let sketch_name = sketch.and_then(|f| feature_name(world, f));
-    let dims_shown = sketch.is_some_and(|f| world.resource::<crate::feature_menu::ShownDimensions>().0.contains(&f));
+    let dims_shown = sketch.is_some_and(|f| {
+        world
+            .resource::<crate::feature_menu::ShownDimensions>()
+            .0
+            .contains(&f)
+    });
     let off = name.is_none();
     let of = name.clone().unwrap_or_else(|| "flat pattern".into());
     let tip = "Right-click a flat pattern";
@@ -1755,50 +2407,123 @@ fn open_flat_menu(world: &mut World, position: Vec2) {
         let ctx = shown(world.resource::<SmTable>(), cache);
         let mut v: Vec<MenuEntry> = Vec::new();
         if let Some(n) = &name {
-            v.push(MenuEntry::Item(MenuItem::new("smt-select-other-part", n.clone())));
+            v.push(MenuEntry::Item(MenuItem::new(
+                "smt-select-other-part",
+                n.clone(),
+            )));
         }
         if let Some(ctx) = ctx {
             for (i, h) in others.iter().enumerate() {
-                v.push(MenuEntry::Item(MenuItem::new(format!("smt-select-other-{i}"), hit_label(world, ctx, *h))));
+                v.push(MenuEntry::Item(MenuItem::new(
+                    format!("smt-select-other-{i}"),
+                    hit_label(world, ctx, *h),
+                )));
             }
         }
         v
     };
     let mut entries = Vec::new();
     // The model's (and the flat sketch's) own items.
-    let m = model_name.clone().unwrap_or_else(|| "sheet metal model".into());
-    let mut edit_model = MenuItem::new("smt-flat-edit-model", format!("Edit {m}…")).icon("edit").disabled(model_name.is_none());
+    let m = model_name
+        .clone()
+        .unwrap_or_else(|| "sheet metal model".into());
+    let mut edit_model = MenuItem::new("smt-flat-edit-model", format!("Edit {m}…"))
+        .icon("edit")
+        .disabled(model_name.is_none());
     if model_name.is_none() {
-        edit_model = edit_model.tooltip("The sheet metal model is derived from another Part Studio");
+        edit_model =
+            edit_model.tooltip("The sheet metal model is derived from another Part Studio");
     }
     entries.push(MenuEntry::Item(edit_model));
     if let Some(sn) = &sketch_name {
-        entries.push(MenuEntry::Item(MenuItem::new("smt-flat-edit-sketch", format!("Edit {sn}…")).icon("sketch")));
-        entries.push(MenuEntry::Item(MenuItem::new("smt-flat-dimensions", if dims_shown { "Hide dimensions" } else { "Show dimensions" }).icon("dimension")));
+        entries.push(MenuEntry::Item(
+            MenuItem::new("smt-flat-edit-sketch", format!("Edit {sn}…")).icon("sketch"),
+        ));
+        entries.push(MenuEntry::Item(
+            MenuItem::new(
+                "smt-flat-dimensions",
+                if dims_shown {
+                    "Hide dimensions"
+                } else {
+                    "Show dimensions"
+                },
+            )
+            .icon("dimension"),
+        ));
     }
-    entries.push(MenuEntry::Item(MenuItem::new("smt-flat-dependencies", format!("Show dependencies of {m}…")).disabled(model_name.is_none())));
+    entries.push(MenuEntry::Item(
+        MenuItem::new(
+            "smt-flat-dependencies",
+            format!("Show dependencies of {m}…"),
+        )
+        .disabled(model_name.is_none()),
+    ));
     entries.push(MenuEntry::Separator);
-    entries.push(MenuEntry::Item(with_tip(MenuItem::new("smt-flat-sketch", format!("New sketch on {of}…")).icon("sketch").disabled(off))));
-    entries.push(MenuEntry::Item(with_tip(MenuItem::new("smt-flat-copy", format!("Copy {of}")).icon("copy").disabled(off))));
-    entries.push(MenuEntry::Item(with_tip(MenuItem::new("smt-flat-drawing", format!("Create drawing of {of}…")).icon("file-new").disabled(off))));
-    entries.push(MenuEntry::Item(with_tip(MenuItem::new("smt-flat-export", format!("Export DXF/DWG of {of}…")).icon("file-export").disabled(off))));
+    entries.push(MenuEntry::Item(with_tip(
+        MenuItem::new("smt-flat-sketch", format!("New sketch on {of}…"))
+            .icon("sketch")
+            .disabled(off),
+    )));
+    entries.push(MenuEntry::Item(with_tip(
+        MenuItem::new("smt-flat-copy", format!("Copy {of}"))
+            .icon("copy")
+            .disabled(off),
+    )));
+    entries.push(MenuEntry::Item(with_tip(
+        MenuItem::new("smt-flat-drawing", format!("Create drawing of {of}…"))
+            .icon("file-new")
+            .disabled(off),
+    )));
+    entries.push(MenuEntry::Item(with_tip(
+        MenuItem::new("smt-flat-export", format!("Export DXF/DWG of {of}…"))
+            .icon("file-export")
+            .disabled(off),
+    )));
     entries.push(MenuEntry::Separator);
     let empty = others_entries.is_empty();
-    entries.push(MenuEntry::Item(MenuItem::new("smt-flat-select-other", "Select other…").submenu(others_entries).disabled(empty)));
+    entries.push(MenuEntry::Item(
+        MenuItem::new("smt-flat-select-other", "Select other…")
+            .submenu(others_entries)
+            .disabled(empty),
+    ));
     // Comments aren't in cadrs yet (the Parts list's Add comment is off too).
-    entries.push(MenuEntry::Item(MenuItem::new("smt-flat-comment", "Add comment").icon("comments").planned()));
+    entries.push(MenuEntry::Item(
+        MenuItem::new("smt-flat-comment", "Add comment")
+            .icon("comments")
+            .planned(),
+    ));
     entries.push(MenuEntry::Separator);
-    entries.push(MenuEntry::Item(MenuItem::new("smt-zoom-fit", "Zoom to fit")));
-    entries.push(MenuEntry::Item(MenuItem::new("smt-zoom-selection", "Zoom to selection").disabled(off && world.resource::<Selection>().0.is_empty())));
-    entries.push(MenuEntry::Item(MenuItem::new("smt-normal-to", "View normal to")));
+    entries.push(MenuEntry::Item(MenuItem::new(
+        "smt-zoom-fit",
+        "Zoom to fit",
+    )));
+    entries.push(MenuEntry::Item(
+        MenuItem::new("smt-zoom-selection", "Zoom to selection")
+            .disabled(off && world.resource::<Selection>().0.is_empty()),
+    ));
+    entries.push(MenuEntry::Item(MenuItem::new(
+        "smt-normal-to",
+        "View normal to",
+    )));
     entries.push(MenuEntry::Separator);
     // As Onshape's: Delete the Sheet metal model feature.
-    entries.push(MenuEntry::Item(MenuItem::new("smt-flat-delete", format!("Delete {m}")).icon("remove-circle").disabled(model_name.is_none())));
-    let menu = Menu::new("smt-flat-menu").min_width(280.0).item_height(22.0).entries(entries);
+    entries.push(MenuEntry::Item(
+        MenuItem::new("smt-flat-delete", format!("Delete {m}"))
+            .icon("remove-circle")
+            .disabled(model_name.is_none()),
+    ));
+    let menu = Menu::new("smt-flat-menu")
+        .min_width(280.0)
+        .item_height(22.0)
+        .entries(entries);
     let theme = world.resource::<Theme>().clone();
     let mut cm = world.commands();
     let anchor = open_context_menu(&mut cm, position, menu.build(&theme));
-    cm.entity(anchor).insert((FlatViewMenu, MenuSketch(sketch), DespawnOnExit(AppState::Document)));
+    cm.entity(anchor).insert((
+        FlatViewMenu,
+        MenuSketch(sketch),
+        DespawnOnExit(AppState::Document),
+    ));
     world.flush();
 }
 
@@ -1814,7 +2539,9 @@ fn zoom_to_selection(world: &mut World) {
     let polys: Vec<cadrs_sheetmetal::poly::Polygon> = {
         let t = world.resource::<SmTable>();
         let cache = world.resource::<PartCache>();
-        let (Some(scene), Some(ctx)) = (t.scene.as_ref(), shown(t, cache)) else { return };
+        let (Some(scene), Some(ctx)) = (t.scene.as_ref(), shown(t, cache)) else {
+            return;
+        };
         let mut v = Vec::new();
         for p in &world.resource::<Selection>().0 {
             // Edges and vertices: where they lie in the flat (a vertex with some room round it).
@@ -1823,7 +2550,10 @@ fn zoom_to_selection(world: &mut World) {
             {
                 for q in ls.into_iter().flatten() {
                     let r = 5.0 * ctx.model.params.thickness.max(1.0);
-                    extra.extend([q + cadrs_sheetmetal::poly::V2::new(-r, -r), q + cadrs_sheetmetal::poly::V2::new(r, r)]);
+                    extra.extend([
+                        q + cadrs_sheetmetal::poly::V2::new(-r, -r),
+                        q + cadrs_sheetmetal::poly::V2::new(r, r),
+                    ]);
                 }
             }
             match fill_of(cache, ctx, *p) {
@@ -1832,7 +2562,13 @@ fn zoom_to_selection(world: &mut World) {
                 None => {}
             }
             if let Some((_, FlatHit::Joint(j))) = hit_of_pick(cache, *p) {
-                v.extend(scene.bends.iter().filter(|b| b.joint == j).flat_map(|b| b.region.iter().cloned()));
+                v.extend(
+                    scene
+                        .bends
+                        .iter()
+                        .filter(|b| b.joint == j)
+                        .flat_map(|b| b.region.iter().cloned()),
+                );
             }
         }
         if v.is_empty()
@@ -1846,12 +2582,19 @@ fn zoom_to_selection(world: &mut World) {
     let Some(size) = size else { return };
     let mut t = world.resource_mut::<SmTable>();
     let z = t.scene.as_ref().map_or(0.0, |s| s.thickness as f32);
-    let pts: Vec<Vec3> = polys.iter().flat_map(|p| p.outer.iter().copied()).chain(extra).map(|q| Vec3::new(q.x as f32, q.y as f32, z)).collect();
+    let pts: Vec<Vec3> = polys
+        .iter()
+        .flat_map(|p| p.outer.iter().copied())
+        .chain(extra)
+        .map(|q| Vec3::new(q.x as f32, q.y as f32, z))
+        .collect();
     if pts.is_empty() {
         return;
     }
     let cube = crate::view_cube::CUBE_WIDGET;
-    t.view = t.view.fitted(&pts, Vec2::new((size.x - cube.x).max(1.0), size.y), 0.8);
+    t.view = t
+        .view
+        .fitted(&pts, Vec2::new((size.x - cube.x).max(1.0), size.y), 0.8);
     t.view.pan(Vec2::new(-cube.x / 2.0, 0.0));
 }
 
@@ -1863,7 +2606,13 @@ fn on_menu_action(
     mut commands: Commands,
 ) {
     if let Ok(DropdownFor(sel, name)) = q_drop.get(ev.entity) {
-        let Some(i) = ev.item.strip_prefix(&format!("{name}-option-")).and_then(|n| n.parse::<usize>().ok()) else { return };
+        let Some(i) = ev
+            .item
+            .strip_prefix(&format!("{name}-option-"))
+            .and_then(|n| n.parse::<usize>().ok())
+        else {
+            return;
+        };
         let sel = *sel;
         commands.queue(move |world: &mut World| match sel {
             JointSelect::Type(j) if i == 1 => edit_joint(world, j, TableEdit::ConvertToBend),
@@ -1880,7 +2629,8 @@ fn on_menu_action(
         let item = ev.item.to_string();
         let sketch = *sketch;
         commands.queue(move |world: &mut World| {
-            let model = shown(world.resource::<SmTable>(), world.resource::<PartCache>()).map(|c| c.feature);
+            let model = shown(world.resource::<SmTable>(), world.resource::<PartCache>())
+                .map(|c| c.feature);
             match item.as_str() {
                 "smt-zoom-fit" => zoom_to_fit(world),
                 "smt-zoom-selection" => zoom_to_selection(world),
@@ -1905,13 +2655,24 @@ fn on_menu_action(
                     }
                 }
                 "smt-flat-delete" => {
-                    let (Some(m), Some(element)) = (model, world.get_resource::<ActiveDocument>().and_then(|d| d.active)) else { return };
+                    let (Some(m), Some(element)) = (
+                        model,
+                        world
+                            .get_resource::<ActiveDocument>()
+                            .and_then(|d| d.active),
+                    ) else {
+                        return;
+                    };
                     if crate::linked_session::refuse(world) {
                         return;
                     }
                     let label = format!("Delete {}", feature_name(world, m).unwrap_or_default());
                     if let Some(mut doc) = world.get_resource_mut::<ActiveDocument>()
-                        && let Err(e) = doc.execute(&cadrs_core::commands::DeleteFeature { element, feature: m, label })
+                        && let Err(e) = doc.execute(&cadrs_core::commands::DeleteFeature {
+                            element,
+                            feature: m,
+                            label,
+                        })
                     {
                         warn!("cannot delete the sheet metal model: {e}");
                     }
@@ -1933,7 +2694,8 @@ fn on_menu_action(
                 "smt-flat-sketch" => {
                     if let Some((_, part, model)) = flat_part(world) {
                         // P3I.6: a sketch on the flat pattern plane of the part.
-                        let index = crate::flat_export_dialog::flat_ref(world, part).map_or(0, |r| r.index);
+                        let index =
+                            crate::flat_export_dialog::flat_ref(world, part).map_or(0, |r| r.index);
                         crate::flat_ui::begin_flat_sketch(world, model, index);
                     }
                 }
@@ -1944,7 +2706,9 @@ fn on_menu_action(
                     }
                 }
                 other => {
-                    if let Some(i) = other.strip_prefix("smt-select-other-").and_then(|n| n.parse::<usize>().ok())
+                    if let Some(i) = other
+                        .strip_prefix("smt-select-other-")
+                        .and_then(|n| n.parse::<usize>().ok())
                         && let Some(h) = world.resource::<SmTable>().menu_others.get(i).copied()
                     {
                         toggle_hit(world, h);
@@ -1959,7 +2723,17 @@ fn on_menu_action(
     match ev.item.as_str() {
         "smt-move-up" => commands.queue(move |world: &mut World| move_joint(world, joint, -1)),
         "smt-move-down" => commands.queue(move |world: &mut World| move_joint(world, joint, 1)),
-        "smt-convert" => commands.queue(move |world: &mut World| edit_joint(world, joint, if bend { TableEdit::ConvertToRip } else { TableEdit::ConvertToBend })),
+        "smt-convert" => commands.queue(move |world: &mut World| {
+            edit_joint(
+                world,
+                joint,
+                if bend {
+                    TableEdit::ConvertToRip
+                } else {
+                    TableEdit::ConvertToBend
+                },
+            )
+        }),
         _ => {}
     }
 }
@@ -1977,11 +2751,19 @@ fn flat_part(world: &World) -> Option<(cadrs_core::ElementId, PartId, FeatureId)
 /// Copy Flat pattern of <part>: its outline (and tear slits) as sketch lines on the sketch
 /// clipboard, to paste into a sketch with Ctrl+V (as Copy sketch).
 fn copy_flat(world: &mut World) {
-    let Some(i) = world.resource::<SmTable>().menu_part else { return };
-    let Some(name) = flat_name(world, i) else { return };
+    let Some(i) = world.resource::<SmTable>().menu_part else {
+        return;
+    };
+    let Some(name) = flat_name(world, i) else {
+        return;
+    };
     let sketch = {
-        let Some(ctx) = shown(world.resource::<SmTable>(), world.resource::<PartCache>()) else { return };
-        let Some(part) = ctx.flat.parts.get(i) else { return };
+        let Some(ctx) = shown(world.resource::<SmTable>(), world.resource::<PartCache>()) else {
+            return;
+        };
+        let Some(part) = ctx.flat.parts.get(i) else {
+            return;
+        };
         let mut g = cadrs_sketch::Sketch::new();
         let v = |q: P2| cadrs_sketch::Vec2::new(q.x, q.y);
         for poly in &part.outline {
@@ -1999,17 +2781,34 @@ fn copy_flat(world: &mut World) {
         }
         g
     };
-    world.resource_mut::<crate::feature_menu::SketchClipboard>().0 = Some((name.clone(), sketch));
+    world
+        .resource_mut::<crate::feature_menu::SketchClipboard>()
+        .0 = Some((name.clone(), sketch));
     let theme = world.resource::<Theme>().clone();
     let mut commands = world.commands();
-    cadrs_ui::show_notification(&mut commands, &theme, cadrs_ui::Notification::info(format!("{name} copied. Paste it into a sketch with Ctrl+V.")).name("smt-flat-copied-toast"));
+    cadrs_ui::show_notification(
+        &mut commands,
+        &theme,
+        cadrs_ui::Notification::info(format!(
+            "{name} copied. Paste it into a sketch with Ctrl+V."
+        ))
+        .name("smt-flat-copied-toast"),
+    );
     world.flush();
 }
 
 /// Create drawing of flat pattern (SM16.1), from the flat view's menu.
 fn create_flat_drawing(world: &mut World) {
-    let Some((el, part, _)) = flat_part(world) else { return };
-    crate::drawing::flat_views::open_create_drawing_of_flat(world, cadrs_drawing::ObjectRef { element: el.0, part: Some((part.feature.0, part.index)) });
+    let Some((el, part, _)) = flat_part(world) else {
+        return;
+    };
+    crate::drawing::flat_views::open_create_drawing_of_flat(
+        world,
+        cadrs_drawing::ObjectRef {
+            element: el.0,
+            part: Some((part.feature.0, part.index)),
+        },
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2029,7 +2828,9 @@ fn resize_target(
     if t.body != body {
         t.body = body;
     }
-    let Some((_, node, _)) = q_body.iter().next() else { return };
+    let Some((_, node, _)) = q_body.iter().next() else {
+        return;
+    };
     let size = node.size().round().as_uvec2();
     if size.x < 4 || size.y < 4 {
         return;
@@ -2046,14 +2847,19 @@ fn resize_target(
         img.image = handle.clone();
     }
     for mut target in &mut q_cam {
-        *target = RenderTarget::Image(ImageRenderTarget { handle: handle.clone(), scale_factor: scale });
+        *target = RenderTarget::Image(ImageRenderTarget {
+            handle: handle.clone(),
+            scale_factor: scale,
+        });
     }
 }
 
 /// The flat view's size (logical px).
 fn body_size(world: &mut World) -> Option<Vec2> {
     let mut q = world.query_filtered::<&ComputedNode, With<FlatBody>>();
-    q.iter(world).next().map(|n| n.size() * n.inverse_scale_factor())
+    q.iter(world)
+        .next()
+        .map(|n| n.size() * n.inverse_scale_factor())
 }
 
 /// Zoom to fit: the flat pattern fills the flat view, seen from the top.
@@ -2061,9 +2867,14 @@ pub fn zoom_to_fit(world: &mut World) {
     let size = body_size(world);
     let mut t = world.resource_mut::<SmTable>();
     let Some(scene) = t.scene.clone() else { return };
-    let Some((lo, hi)) = scene.bounds() else { return };
+    let Some((lo, hi)) = scene.bounds() else {
+        return;
+    };
     let z = scene.thickness as f32;
-    let pts = [Vec3::new(lo.x as f32, lo.y as f32, 0.0), Vec3::new(hi.x as f32, hi.y as f32, z)];
+    let pts = [
+        Vec3::new(lo.x as f32, lo.y as f32, 0.0),
+        Vec3::new(hi.x as f32, hi.y as f32, z),
+    ];
     if let Some(size) = size {
         // The cube's box sits in the top-right corner: the flat goes left of it or under it,
         // whichever shows it larger, centred in what is left.
@@ -2113,7 +2924,10 @@ fn sync_cameras(
     t: Res<SmTable>,
     open: Res<SidePanel>,
     kind: Res<ActiveKind>,
-    mut q_cam: Query<(&mut Camera, &mut Transform, &mut Projection), (With<FlatCamera>, Without<FlatCubeCamera>)>,
+    mut q_cam: Query<
+        (&mut Camera, &mut Transform, &mut Projection),
+        (With<FlatCamera>, Without<FlatCubeCamera>),
+    >,
     mut q_cube: Query<(&mut Camera, &mut Transform), (With<FlatCubeCamera>, Without<FlatCamera>)>,
 ) {
     let on = is_open(&open, &kind) && t.key.is_some();
@@ -2145,11 +2959,14 @@ fn sync_cameras(
 }
 
 fn tris_mesh(t: &Tris, colors: Vec<[f32; 4]>) -> Mesh {
-    Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
-        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, t.positions.clone())
-        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, t.normals.clone())
-        .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colors)
-        .with_inserted_indices(Indices::U32(t.indices.clone()))
+    Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, t.positions.clone())
+    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, t.normals.clone())
+    .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colors)
+    .with_inserted_indices(Indices::U32(t.indices.clone()))
 }
 
 /// A face colour lit by a head light from the view.
@@ -2175,8 +2992,19 @@ fn sync_meshes(
     mut commands: Commands,
 ) {
     // The Modify joint dialog's joint (`ExtraHighlight::selected`) shows selected here too.
-    let selection = Selection(selection.0.iter().chain(extra.selected.iter()).copied().collect());
-    let ctx = if is_open(&open, &kind) { shown(&t, &cache).cloned() } else { None };
+    let selection = Selection(
+        selection
+            .0
+            .iter()
+            .chain(extra.selected.iter())
+            .copied()
+            .collect(),
+    );
+    let ctx = if is_open(&open, &kind) {
+        shown(&t, &cache).cloned()
+    } else {
+        None
+    };
     // The scene, laid out again when the model changes.
     let want_scene = ctx.as_ref().map(|c| {
         use std::hash::{Hash, Hasher};
@@ -2185,7 +3013,9 @@ fn sync_meshes(
         (c.feature, h.finish())
     });
     if want_scene != t.scene_of {
-        t.scene = ctx.as_ref().map(|c| Arc::new(FlatScene::new(&c.model, &c.flat)));
+        t.scene = ctx
+            .as_ref()
+            .map(|c| Arc::new(FlatScene::new(&c.model, &c.flat)));
         // Another model's flat is fitted; the same model's changed flat (a joint edited, a flat
         // Extrude's preview) keeps the view unless it no longer fits (P3I.6: the Add preview
         // re-fitted the view under the dialog).
@@ -2193,10 +3023,12 @@ fn sync_meshes(
         let fits = match (t.scene.as_ref().and_then(|s| s.bounds()), t.body) {
             (Some((lo, hi)), Some((_, rect))) => {
                 let half = rect.size() / 2.0;
-                [(lo.x, lo.y), (hi.x, lo.y), (hi.x, hi.y), (lo.x, hi.y)].into_iter().all(|(x, y)| {
-                    let p = t.view.project(Vec3::new(x as f32, y as f32, 0.0));
-                    p.x.abs() <= half.x && p.y.abs() <= half.y
-                })
+                [(lo.x, lo.y), (hi.x, lo.y), (hi.x, hi.y), (lo.x, hi.y)]
+                    .into_iter()
+                    .all(|(x, y)| {
+                        let p = t.view.project(Vec3::new(x as f32, y as f32, 0.0));
+                        p.x.abs() <= half.x && p.y.abs() <= half.y
+                    })
             }
             _ => false,
         };
@@ -2205,9 +3037,15 @@ fn sync_meshes(
         }
         t.scene_of = want_scene;
     }
-    let selected = ctx.as_ref().map(|c| selected_joints(&cache, c, &selection)).unwrap_or_default();
+    let selected = ctx
+        .as_ref()
+        .map(|c| selected_joints(&cache, c, &selection))
+        .unwrap_or_default();
     // The joint hovered in the panel or in the main view.
-    let hovered_joint = t.hovered.and_then(FlatHit::joint).or(t.model_hover.and_then(|(_, h)| h.joint()));
+    let hovered_joint = t
+        .hovered
+        .and_then(FlatHit::joint)
+        .or(t.model_hover.and_then(|(_, h)| h.joint()));
     // The part the flat view's menu is open on is orange all over (lesson 15, t0026.5).
     let menu_part = t.menu_part.filter(|_| !q_menu.is_empty());
     // Walls and parts filled orange (lesson 13 t0052, lesson 15 t0026.5): selected ones (a
@@ -2239,7 +3077,12 @@ fn sync_meshes(
         hovered_joint.hash(&mut h);
         menu_part.hash(&mut h);
         fills.hash(&mut h);
-        [(v.azimuth * 2.0).round() as i32, (v.elevation * 2.0).round() as i32, (v.roll * 2.0).round() as i32].hash(&mut h);
+        [
+            (v.azimuth * 2.0).round() as i32,
+            (v.elevation * 2.0).round() as i32,
+            (v.roll * 2.0).round() as i32,
+        ]
+        .hash(&mut h);
         h.finish()
     };
     let want = ctx.is_some().then_some(key);
@@ -2250,31 +3093,67 @@ fn sync_meshes(
     for e in &q {
         commands.entity(e).try_despawn();
     }
-    let Some(scene) = t.scene.clone().filter(|_| ctx.is_some()) else { return };
+    let Some(scene) = t.scene.clone().filter(|_| ctx.is_some()) else {
+        return;
+    };
     let back = v.back();
-    let material = materials.add(StandardMaterial { base_color: Color::WHITE, unlit: true, ..default() });
+    let material = materials.add(StandardMaterial {
+        base_color: Color::WHITE,
+        unlit: true,
+        ..default()
+    });
     let tz = scene.thickness;
     let mut spawn = |tris: Tris, base: [f32; 3]| {
         if tris.is_empty() {
             return;
         }
-        let colors = tris.normals.iter().map(|n| shaded(base, *n, back)).collect();
-        commands.spawn((Name::new("smt-flat-mesh"), FlatMesh, Mesh3d(meshes.add(tris_mesh(&tris, colors))), MeshMaterial3d(material.clone()), Transform::default(), RenderLayers::layer(FLAT_LAYER), DespawnOnExit(AppState::Document)));
+        let colors = tris
+            .normals
+            .iter()
+            .map(|n| shaded(base, *n, back))
+            .collect();
+        commands.spawn((
+            Name::new("smt-flat-mesh"),
+            FlatMesh,
+            Mesh3d(meshes.add(tris_mesh(&tris, colors))),
+            MeshMaterial3d(material.clone()),
+            Transform::default(),
+            RenderLayers::layer(FLAT_LAYER),
+            DespawnOnExit(AppState::Document),
+        ));
     };
-    let all: Vec<_> = scene.pieces.iter().flat_map(|(_, v)| v.iter().cloned()).collect();
-    spawn(cadrs_sheetmetal::view::slab(&all, 0.0, tz), [0.55, 0.56, 0.58]);
-    let lift = tz * 1.0 + 1e-3 * scene.bounds().map(|(lo, hi)| (hi - lo).norm()).unwrap_or(1.0);
+    let all: Vec<_> = scene
+        .pieces
+        .iter()
+        .flat_map(|(_, v)| v.iter().cloned())
+        .collect();
+    spawn(
+        cadrs_sheetmetal::view::slab(&all, 0.0, tz),
+        [0.55, 0.56, 0.58],
+    );
+    let lift = tz * 1.0
+        + 1e-3
+            * scene
+                .bounds()
+                .map(|(lo, hi)| (hi - lo).norm())
+                .unwrap_or(1.0);
     for (f, sel) in &fills {
         let polys = match f {
             FillOf::Wall(w) => scene.wall_region(*w),
             FillOf::Part(i) => scene.part_region(*i),
         };
         let s = (if *sel { ORANGE_MENU } else { ORANGE_HOVER }).to_srgba();
-        spawn(cadrs_sheetmetal::view::fill(&polys, tz + 1e-4 * lift), [s.red, s.green, s.blue]);
+        spawn(
+            cadrs_sheetmetal::view::fill(&polys, tz + 1e-4 * lift),
+            [s.red, s.green, s.blue],
+        );
     }
     if let Some(i) = menu_part {
         let s = ORANGE_MENU.to_srgba();
-        spawn(cadrs_sheetmetal::view::slab(&scene.part_region(i), 0.0, tz + 1e-3 * lift), [s.red, s.green, s.blue]);
+        spawn(
+            cadrs_sheetmetal::view::slab(&scene.part_region(i), 0.0, tz + 1e-3 * lift),
+            [s.red, s.green, s.blue],
+        );
     }
     for b in &scene.bends {
         let c = if selected.contains(&b.joint) {
@@ -2285,10 +3164,16 @@ fn sync_meshes(
             continue;
         };
         let s = c.to_srgba();
-        spawn(cadrs_sheetmetal::view::fill(&b.region, lift), [s.red, s.green, s.blue]);
+        spawn(
+            cadrs_sheetmetal::view::fill(&b.region, lift),
+            [s.red, s.green, s.blue],
+        );
     }
     if !scene.collisions.is_empty() {
-        spawn(cadrs_sheetmetal::view::fill(&scene.collisions, lift), [0.9, 0.15, 0.15]);
+        spawn(
+            cadrs_sheetmetal::view::fill(&scene.collisions, lift),
+            [0.9, 0.15, 0.15],
+        );
     }
 }
 
@@ -2311,7 +3196,14 @@ fn draw_flat(
     mut hi: Gizmos<FlatHighlightGizmos>,
 ) {
     // The Modify joint dialog's joint (`ExtraHighlight::selected`) shows selected here too.
-    let selection = Selection(selection.0.iter().chain(extra.selected.iter()).copied().collect());
+    let selection = Selection(
+        selection
+            .0
+            .iter()
+            .chain(extra.selected.iter())
+            .copied()
+            .collect(),
+    );
     if !is_open(&open, &kind) || t.key.is_none() {
         return;
     }
@@ -2332,7 +3224,11 @@ fn draw_flat(
     let (dash, gap) = (8.0 * px, 5.0 * px);
     let selected = selected_joints(&cache, ctx, &selection);
     for b in &scene.bends {
-        let c = if selected.contains(&b.joint) { Color::srgb(0.85, 0.42, 0.05) } else { dark };
+        let c = if selected.contains(&b.joint) {
+            Color::srgb(0.85, 0.42, 0.05)
+        } else {
+            dark
+        };
         for s in &b.center_visible {
             let len = s.len();
             if len < 1e-9 {
@@ -2366,20 +3262,38 @@ fn draw_flat(
         .map(|el| {
             el.features()
                 .iter()
-                .filter(|f| matches!(f.kind, cadrs_core::FeatureKind::Form(_)) && el.sketch_visibility(f.id) == Some(false))
+                .filter(|f| {
+                    matches!(f.kind, cadrs_core::FeatureKind::Form(_))
+                        && el.sketch_visibility(f.id) == Some(false)
+                })
                 .map(|f| cadrs_core::sheetmetal_form::flat_key(f.id))
                 .collect()
         })
         .unwrap_or_default();
     // (Nothing of a hidden Form is left on the flat, `form-12.png`.)
-    for (ls, c, _) in scene.forms.iter().filter(|(_, _, s)| !hidden_forms.contains(s)) {
+    for (ls, c, _) in scene
+        .forms
+        .iter()
+        .filter(|(_, _, s)| !hidden_forms.contains(s))
+    {
         for l in ls {
-            let pts = l.points.iter().chain(l.closed.then(|| l.points.first()).flatten());
+            let pts = l
+                .points
+                .iter()
+                .chain(l.closed.then(|| l.points.first()).flatten());
             lines.linestrip(pts.map(|q| v3(*q, z)), form);
         }
         let r = 3.0 * px;
-        lines.line(v3(*c - cadrs_sheetmetal::poly::V2::new(r, 0.0), z), v3(*c + cadrs_sheetmetal::poly::V2::new(r, 0.0), z), form);
-        lines.line(v3(*c - cadrs_sheetmetal::poly::V2::new(0.0, r), z), v3(*c + cadrs_sheetmetal::poly::V2::new(0.0, r), z), form);
+        lines.line(
+            v3(*c - cadrs_sheetmetal::poly::V2::new(r, 0.0), z),
+            v3(*c + cadrs_sheetmetal::poly::V2::new(r, 0.0), z),
+            form,
+        );
+        lines.line(
+            v3(*c - cadrs_sheetmetal::poly::V2::new(0.0, r), z),
+            v3(*c + cadrs_sheetmetal::poly::V2::new(0.0, r), z),
+            form,
+        );
     }
     // Sketches on the flat pattern (in the flat's coordinates, moved with their part).
     if let Some(el) = doc.as_ref().and_then(|d| d.active_element()) {
@@ -2389,21 +3303,41 @@ fn draw_flat(
             let Some(sk) = f.sketch() else { continue };
             // The one being edited is drawn by the sketch (`crate::sketch_draw`); hidden and
             // consumed ones not at all.
-            if sketching.as_ref().is_some_and(|s| s.feature == f.id) || cache.hidden_sketches.contains(&f.id) || el.sketch_visibility(f.id) == Some(false) {
+            if sketching.as_ref().is_some_and(|s| s.feature == f.id)
+                || cache.hidden_sketches.contains(&f.id)
+                || el.sketch_visibility(f.id) == Some(false)
+            {
                 continue;
             }
-            let Some(cadrs_sketch::PlaneRef::Feature(fp)) = sk.plane else { continue };
-            let Some((model, index)) = cadrs_core::sheetmetal_flat::flat_target(&features, fp.feature) else { continue };
+            let Some(cadrs_sketch::PlaneRef::Feature(fp)) = sk.plane else {
+                continue;
+            };
+            let Some((model, index)) =
+                cadrs_core::sheetmetal_flat::flat_target(&features, fp.feature)
+            else {
+                continue;
+            };
             if model != ctx.feature {
                 continue;
             }
-            let shift = scene.shifts.get(index).copied().unwrap_or_else(cadrs_sheetmetal::poly::V2::zeros);
+            let shift = scene
+                .shifts
+                .get(index)
+                .copied()
+                .unwrap_or_else(cadrs_sheetmetal::poly::V2::zeros);
             for l in sketch_polylines(&sk.geometry) {
-                lines.linestrip(l.into_iter().map(|q| v3(cadrs_sheetmetal::poly::P2::new(q.x, q.y) + shift, z + 1e-3)), sketch_color);
+                lines.linestrip(
+                    l.into_iter()
+                        .map(|q| v3(cadrs_sheetmetal::poly::P2::new(q.x, q.y) + shift, z + 1e-3)),
+                    sketch_color,
+                );
             }
         }
     }
-    let hovered_joint = t.hovered.and_then(FlatHit::joint).or(t.model_hover.and_then(|(_, h)| h.joint()));
+    let hovered_joint = t
+        .hovered
+        .and_then(FlatHit::joint)
+        .or(t.model_hover.and_then(|(_, h)| h.joint()));
     for j in &scene.joints {
         let c = if selected.contains(&j.joint) {
             ORANGE
@@ -2420,7 +3354,9 @@ fn draw_flat(
     // selected or hovered in the model shows where it lies in the flat; a selected part is
     // outlined whole.
     let zz = z + 1e-3;
-    let outline = |hi: &mut Gizmos<FlatHighlightGizmos>, polys: &[cadrs_sheetmetal::poly::Polygon], c: Color| {
+    let outline = |hi: &mut Gizmos<FlatHighlightGizmos>,
+                   polys: &[cadrs_sheetmetal::poly::Polygon],
+                   c: Color| {
         for p in polys {
             for l in std::iter::once(&p.outer).chain(&p.holes) {
                 hi.linestrip(l.iter().chain(l.first()).map(|q| v3(*q, zz)), c);
@@ -2439,10 +3375,16 @@ fn draw_flat(
                     // A vertex: a small ring.
                     let r = 4.0 * px;
                     let o = l[0];
-                    hi.linestrip((0..=16).map(|k| {
-                        let a = k as f64 / 16.0 * std::f64::consts::TAU;
-                        v3(o + cadrs_sheetmetal::poly::V2::new(r * a.cos(), r * a.sin()), zz)
-                    }), c);
+                    hi.linestrip(
+                        (0..=16).map(|k| {
+                            let a = k as f64 / 16.0 * std::f64::consts::TAU;
+                            v3(
+                                o + cadrs_sheetmetal::poly::V2::new(r * a.cos(), r * a.sin()),
+                                zz,
+                            )
+                        }),
+                        c,
+                    );
                 } else {
                     hi.linestrip(l.iter().map(|q| v3(*q, zz)), c);
                 }
@@ -2479,14 +3421,22 @@ fn sketch_polylines(g: &cadrs_sketch::Sketch) -> Vec<Vec<cadrs_sketch::Vec2>> {
             cadrs_sketch::CurveKind::Line { a, b } => out.push(vec![g.pos(a), g.pos(b)]),
             cadrs_sketch::CurveKind::Circle { center, radius } => {
                 let o = g.pos(center);
-                out.push((0..=48).map(|k| {
-                    let a = k as f64 / 48.0 * std::f64::consts::TAU;
-                    cadrs_sketch::Vec2::new(o.x + radius * a.cos(), o.y + radius * a.sin())
-                }).collect());
+                out.push(
+                    (0..=48)
+                        .map(|k| {
+                            let a = k as f64 / 48.0 * std::f64::consts::TAU;
+                            cadrs_sketch::Vec2::new(o.x + radius * a.cos(), o.y + radius * a.sin())
+                        })
+                        .collect(),
+                );
             }
             cadrs_sketch::CurveKind::Arc { .. } => {
                 if let Some(a) = g.arc_geom(id) {
-                    out.push((0..=24).map(|k| a.point_at(a.start_angle + a.sweep * k as f64 / 24.0)).collect());
+                    out.push(
+                        (0..=24)
+                            .map(|k| a.point_at(a.start_angle + a.sweep * k as f64 / 24.0))
+                            .collect(),
+                    );
                 }
             }
             _ => {}
@@ -2495,7 +3445,13 @@ fn sketch_polylines(g: &cadrs_sketch::Sketch) -> Vec<Vec<cadrs_sketch::Vec2>> {
     out
 }
 
-fn draw_cube_arcs(t: Res<SmTable>, open: Res<SidePanel>, kind: Res<ActiveKind>, theme: Res<Theme>, mut arcs: Gizmos<FlatCubeArcGizmos>) {
+fn draw_cube_arcs(
+    t: Res<SmTable>,
+    open: Res<SidePanel>,
+    kind: Res<ActiveKind>,
+    theme: Res<Theme>,
+    mut arcs: Gizmos<FlatCubeArcGizmos>,
+) {
     use crate::view_cube::CubeColors;
     if is_open(&open, &kind) && t.key.is_some() {
         crate::view_cube::draw_cube_arcs(&mut arcs, &t.view, theme.view_cube_arrow());
@@ -2521,17 +3477,37 @@ fn place_labels(
     cache: Res<PartCache>,
     (selection, extra): (Res<Selection>, Res<ExtraHighlight>),
     q_body: Query<&ComputedNode, With<FlatBody>>,
-    mut q: Query<(&FlatLabel, &mut Node, &mut Visibility, &ComputedNode, &Children)>,
+    mut q: Query<(
+        &FlatLabel,
+        &mut Node,
+        &mut Visibility,
+        &ComputedNode,
+        &Children,
+    )>,
     mut q_text: Query<&mut TextColor>,
     theme: Res<Theme>,
 ) {
     // The Modify joint dialog's joint (`ExtraHighlight::selected`) shows selected here too.
-    let selection = Selection(selection.0.iter().chain(extra.selected.iter()).copied().collect());
-    let Some(body) = q_body.iter().next() else { return };
+    let selection = Selection(
+        selection
+            .0
+            .iter()
+            .chain(extra.selected.iter())
+            .copied()
+            .collect(),
+    );
+    let Some(body) = q_body.iter().next() else {
+        return;
+    };
     let Some(scene) = &t.scene else { return };
     let size = body.size() * body.inverse_scale_factor();
-    let selected = shown(&t, &cache).map(|c| selected_joints(&cache, c, &selection)).unwrap_or_default();
-    let hovered = t.hovered.and_then(FlatHit::joint).or(t.model_hover.and_then(|(_, h)| h.joint()));
+    let selected = shown(&t, &cache)
+        .map(|c| selected_joints(&cache, c, &selection))
+        .unwrap_or_default();
+    let hovered = t
+        .hovered
+        .and_then(FlatHit::joint)
+        .or(t.model_hover.and_then(|(_, h)| h.joint()));
     // The sheet's outlines on screen: labels keep off them (they would read as the edge's).
     let z = scene.thickness;
     let outline: Vec<(Vec2, Vec2)> = scene
@@ -2539,14 +3515,19 @@ fn place_labels(
         .iter()
         .flat_map(|p| std::iter::once(&p.outer).chain(&p.holes))
         .flat_map(|l| (0..l.len()).map(move |i| (l[i], l[(i + 1) % l.len()])))
-        .map(|(a, b)| (t.view.project(v3(a, z)) + size / 2.0, t.view.project(v3(b, z)) + size / 2.0))
+        .map(|(a, b)| {
+            (
+                t.view.project(v3(a, z)) + size / 2.0,
+                t.view.project(v3(b, z)) + size / 2.0,
+            )
+        })
         .collect();
     let crosses = |r: &Rect| outline.iter().any(|(a, b)| segment_hits_rect(*a, *b, *r));
     // Bends first (their spot is the clearer one), then rips; each label tries its places (a
     // rip has one by each of its edges), moved further out along its direction or slid along
     // the line, for a spot inside the view that overlaps no label placed before and no outline.
     let mut items: Vec<_> = q.iter_mut().collect();
-    items.sort_by_key(|(l, ..)| (scene.bends.iter().all(|b| b.joint != l.0), l.0 .0));
+    items.sort_by_key(|(l, ..)| (scene.bends.iter().all(|b| b.joint != l.0), l.0.0));
     let mut placed: Vec<Rect> = Vec::new();
     for (l, mut node, mut vis, cn, children) in items {
         let lsize = cn.size() * cn.inverse_scale_factor();
@@ -2561,7 +3542,10 @@ fn place_labels(
         for (spot, dir) in &l.1 {
             let p = t.view.project(v3(*spot, z)) + size / 2.0;
             // The label's box sits on the side its direction points to, 4 px off the spot.
-            let d = t.view.project_vector(Vec3::new(dir.x as f32, dir.y as f32, 0.0)).normalize_or_zero();
+            let d = t
+                .view
+                .project_vector(Vec3::new(dir.x as f32, dir.y as f32, 0.0))
+                .normalize_or_zero();
             let along = Vec2::new(-d.y, d.x);
             let reach = (d.x.abs() * lsize.x + d.y.abs() * lsize.y) / 2.0;
             for (o, sl) in &tries {
@@ -2569,9 +3553,12 @@ fn place_labels(
                 cands.push(Rect::from_center_size(c, lsize + Vec2::splat(2.0)));
             }
         }
-        let inside = |r: &Rect| r.min.x >= 0.0 && r.min.y >= 0.0 && r.max.x <= size.x && r.max.y <= size.y;
+        let inside =
+            |r: &Rect| r.min.x >= 0.0 && r.min.y >= 0.0 && r.max.x <= size.x && r.max.y <= size.y;
         let free = |r: &Rect| placed.iter().all(|q| q.intersect(*r).is_empty());
-        let Some(&first) = cands.first() else { continue };
+        let Some(&first) = cands.first() else {
+            continue;
+        };
         let r = cands
             .iter()
             .find(|r| inside(r) && free(r) && !crosses(r))
@@ -2585,7 +3572,11 @@ fn place_labels(
             node.top = Val::Px(y);
         }
         let inside = x >= 0.0 && y >= 0.0 && x + lsize.x <= size.x && y + lsize.y <= size.y;
-        let want = if inside { Visibility::Inherited } else { Visibility::Hidden };
+        let want = if inside {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
         if *vis != want {
             *vis = want;
         }
@@ -2610,7 +3601,12 @@ fn segment_hits_rect(a: Vec2, b: Vec2, r: Rect) -> bool {
         let (d1, d2, d3, d4) = (d(u, v, p), d(u, v, q), d(p, q, u), d(p, q, v));
         (d1 > 0.0) != (d2 > 0.0) && (d3 > 0.0) != (d4 > 0.0)
     };
-    let c = [r.min, Vec2::new(r.max.x, r.min.y), r.max, Vec2::new(r.min.x, r.max.y)];
+    let c = [
+        r.min,
+        Vec2::new(r.max.x, r.min.y),
+        r.max,
+        Vec2::new(r.min.x, r.max.y),
+    ];
     (0..4).any(|i| cross(a, b, c[i], c[(i + 1) % 4]))
 }
 
@@ -2625,18 +3621,29 @@ fn place_folded_labels(
     rect: Res<ViewportRect>,
     open: Res<SidePanel>,
     kind: Res<ActiveKind>,
-    mut q: Query<(&FoldedLabel, &mut Node, &mut Visibility, &ComputedNode, &Children)>,
+    mut q: Query<(
+        &FoldedLabel,
+        &mut Node,
+        &mut Visibility,
+        &ComputedNode,
+        &Children,
+    )>,
     mut q_text: Query<&mut TextColor>,
     theme: Res<Theme>,
 ) {
     let on = is_open(&open, &kind) && !cache.rebuilding;
-    let selected = shown(&t, &cache).map(|c| selected_joints(&cache, c, &selection)).unwrap_or_default();
-    let hovered = t.hovered.and_then(FlatHit::joint).or(t.model_hover.and_then(|(_, h)| h.joint()));
+    let selected = shown(&t, &cache)
+        .map(|c| selected_joints(&cache, c, &selection))
+        .unwrap_or_default();
+    let hovered = t
+        .hovered
+        .and_then(FlatHit::joint)
+        .or(t.model_hover.and_then(|(_, h)| h.joint()));
     let v = view.view;
     let size = rect.0.size();
     // Labels that would overlap one placed before move up or down a line.
     let mut items: Vec<_> = q.iter_mut().collect();
-    items.sort_by_key(|(l, ..)| l.0 .0);
+    items.sort_by_key(|(l, ..)| l.0.0);
     let mut placed: Vec<Rect> = Vec::new();
     for (l, mut node, mut vis, cn, children) in items {
         let p = rect.to_screen(v.project(l.1)) - rect.0.min;
@@ -2645,7 +3652,12 @@ fn place_folded_labels(
         let step = lsize.y + 2.0;
         let r = [0.0, -step, step, -2.0 * step, 2.0 * step]
             .iter()
-            .map(|dy| Rect::from_corners(base + Vec2::new(0.0, *dy), base + Vec2::new(0.0, *dy) + lsize))
+            .map(|dy| {
+                Rect::from_corners(
+                    base + Vec2::new(0.0, *dy),
+                    base + Vec2::new(0.0, *dy) + lsize,
+                )
+            })
             .find(|r| placed.iter().all(|q| q.intersect(*r).is_empty()))
             .unwrap_or(Rect::from_corners(base, base + lsize));
         placed.push(r);
@@ -2655,7 +3667,11 @@ fn place_folded_labels(
             node.top = Val::Px(y);
         }
         let inside = x >= 0.0 && y >= 0.0 && x + lsize.x <= size.x && y + lsize.y <= size.y;
-        let want = if on && inside { Visibility::Inherited } else { Visibility::Hidden };
+        let want = if on && inside {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
         if *vis != want {
             *vis = want;
         }
@@ -2671,9 +3687,16 @@ fn place_folded_labels(
 }
 
 /// The flat view cube's axis letters follow its view, as the main cube's do.
-fn place_flat_axes(t: Res<SmTable>, mut q: Query<(&FlatAxisLabel, &ComputedNode, &mut Node, &mut TextColor)>) {
+fn place_flat_axes(
+    t: Res<SmTable>,
+    mut q: Query<(&FlatAxisLabel, &ComputedNode, &mut Node, &mut TextColor)>,
+) {
     for (axis, cn, mut node, mut color) in &mut q {
-        let (p, a) = crate::view_cube::axis_label_spot(&t.view, axis.0, cn.size() * cn.inverse_scale_factor());
+        let (p, a) = crate::view_cube::axis_label_spot(
+            &t.view,
+            axis.0,
+            cn.size() * cn.inverse_scale_factor(),
+        );
         if (color.0.alpha() - a).abs() > 1e-3 {
             color.0.set_alpha(a);
         }
@@ -2685,7 +3708,11 @@ fn place_flat_axes(t: Res<SmTable>, mut q: Query<(&FlatAxisLabel, &ComputedNode,
 }
 
 /// The flat point under a pointer position (on the sheet's top).
-fn flat_point(t: &SmTable, q: &Query<(&ComputedNode, &UiGlobalTransform), With<FlatBody>>, pos: Vec2) -> Option<(P2, f64)> {
+fn flat_point(
+    t: &SmTable,
+    q: &Query<(&ComputedNode, &UiGlobalTransform), With<FlatBody>>,
+    pos: Vec2,
+) -> Option<(P2, f64)> {
     let (node, tr) = q.iter().next()?;
     let s = node.inverse_scale_factor();
     let offset = pos - tr.translation * s;
@@ -2713,11 +3740,21 @@ fn on_flat_drag(ev: On<Pointer<Drag>>, mut t: ResMut<SmTable>) {
     }
 }
 
-fn on_flat_scroll(ev: On<Pointer<bevy::picking::events::Scroll>>, mut t: ResMut<SmTable>, q: Query<(&ComputedNode, &UiGlobalTransform), With<FlatBody>>) {
-    let Some((node, tr)) = q.iter().next() else { return };
+fn on_flat_scroll(
+    ev: On<Pointer<bevy::picking::events::Scroll>>,
+    mut t: ResMut<SmTable>,
+    q: Query<(&ComputedNode, &UiGlobalTransform), With<FlatBody>>,
+) {
+    let Some((node, tr)) = q.iter().next() else {
+        return;
+    };
     let s = node.inverse_scale_factor();
     let cursor = ev.pointer_location.position - tr.translation * s;
-    let lines = if ev.unit == bevy::input::mouse::MouseScrollUnit::Line { ev.y } else { ev.y / 40.0 };
+    let lines = if ev.unit == bevy::input::mouse::MouseScrollUnit::Line {
+        ev.y
+    } else {
+        ev.y / 40.0
+    };
     t.view.wheel(lines, cursor);
 }
 
@@ -2738,8 +3775,14 @@ fn flat_hit(cache: &PartCache, t: &SmTable, p: P2, tol: f64) -> Option<FlatHit> 
         .or_else(|| scene.wall_at(p).map(FlatHit::Wall))
 }
 
-fn on_flat_move(ev: On<Pointer<Move>>, mut t: ResMut<SmTable>, cache: Res<PartCache>, q: Query<(&ComputedNode, &UiGlobalTransform), With<FlatBody>>) {
-    let hit = flat_point(&t, &q, ev.pointer_location.position).and_then(|(p, tol)| flat_hit(&cache, &t, p, tol));
+fn on_flat_move(
+    ev: On<Pointer<Move>>,
+    mut t: ResMut<SmTable>,
+    cache: Res<PartCache>,
+    q: Query<(&ComputedNode, &UiGlobalTransform), With<FlatBody>>,
+) {
+    let hit = flat_point(&t, &q, ev.pointer_location.position)
+        .and_then(|(p, tol)| flat_hit(&cache, &t, p, tol));
     if t.flat_hover != hit {
         t.flat_hover = hit;
     }
@@ -2757,7 +3800,9 @@ fn on_flat_click(
     if ev.button != PointerButton::Primary || sketching.is_some() {
         return;
     }
-    let Some((p, tol)) = flat_point(&t, &q, ev.pointer_location.position) else { return };
+    let Some((p, tol)) = flat_point(&t, &q, ev.pointer_location.position) else {
+        return;
+    };
     let hit = flat_hit(&cache, &t, p, tol);
     commands.queue(move |world: &mut World| {
         // A region of a sketch on the flat (P3I.6, SM14.2: picked for the flat Extrude) wins
@@ -2770,15 +3815,23 @@ fn on_flat_click(
     });
 }
 
-fn on_cube_click(mut ev: On<Pointer<Click>>, mut t: ResMut<SmTable>, q: Query<(&ComputedNode, &UiGlobalTransform), With<FlatCubeImage>>) {
+fn on_cube_click(
+    mut ev: On<Pointer<Click>>,
+    mut t: ResMut<SmTable>,
+    q: Query<(&ComputedNode, &UiGlobalTransform), With<FlatCubeImage>>,
+) {
     ev.propagate(false);
     if ev.button != PointerButton::Primary {
         return;
     }
-    let Some((node, tr)) = q.iter().next() else { return };
+    let Some((node, tr)) = q.iter().next() else {
+        return;
+    };
     let s = node.inverse_scale_factor();
     let top_left = tr.translation * s - crate::view_cube::CUBE_WIDGET / 2.0;
-    if let Some(v) = crate::view_cube::view_at_spot(&t.view, ev.pointer_location.position - top_left) {
+    if let Some(v) =
+        crate::view_cube::view_at_spot(&t.view, ev.pointer_location.position - top_left)
+    {
         t.view = v;
     }
 }
@@ -2804,9 +3857,22 @@ pub fn flat_display(t: &SmTable, model: FeatureId, part: usize) -> Option<FlatDi
     }
     let scene = t.scene.as_ref()?;
     let (body, rect) = t.body?;
-    let shift = scene.shifts.get(part).copied().unwrap_or_else(cadrs_sheetmetal::poly::V2::zeros);
-    let frame = cadrs_sketch::PlaneFrame { origin: [shift.x, shift.y, scene.thickness], u: [1.0, 0.0, 0.0], v: [0.0, 1.0, 0.0] };
-    Some(FlatDisplay { body, rect, view: t.view, frame })
+    let shift = scene
+        .shifts
+        .get(part)
+        .copied()
+        .unwrap_or_else(cadrs_sheetmetal::poly::V2::zeros);
+    let frame = cadrs_sketch::PlaneFrame {
+        origin: [shift.x, shift.y, scene.thickness],
+        u: [1.0, 0.0, 0.0],
+        v: [0.0, 1.0, 0.0],
+    };
+    Some(FlatDisplay {
+        body,
+        rect,
+        view: t.view,
+        frame,
+    })
 }
 
 /// Shows `model`'s flat in the panel, seen from the top and fitted (P3I.6: a sketch on the

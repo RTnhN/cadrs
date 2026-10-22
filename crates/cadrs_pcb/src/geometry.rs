@@ -17,7 +17,9 @@
 use std::collections::HashMap;
 
 use cadrs_idf::{MountSide, Segment, Side};
-use cadrs_kernel::{BodyId, Curve2, Extent, Kernel, KernelError, Loop, Motion, Plane, Profile, Region};
+use cadrs_kernel::{
+    BodyId, Curve2, Extent, Kernel, KernelError, Loop, Motion, Plane, Profile, Region,
+};
 use nalgebra::{Point2, Point3};
 
 use crate::board::{ItemId, KeepArea, KeepKind, PcbBoard};
@@ -37,15 +39,29 @@ pub fn idf_loop_to_kernel(l: &cadrs_idf::Loop) -> Loop {
         .segments()
         .filter_map(|s| match s {
             Segment::Line { start, end } => ((start[0] - end[0]).hypot(start[1] - end[1]) > 1e-12)
-                .then(|| Curve2::Line { a: p(start), b: p(end), source: None }),
-            Segment::Arc { start, center, radius, sweep, .. } => (radius > 1e-12).then(|| Curve2::Arc {
+                .then(|| Curve2::Line {
+                    a: p(start),
+                    b: p(end),
+                    source: None,
+                }),
+            Segment::Arc {
+                start,
+                center,
+                radius,
+                sweep,
+                ..
+            } => (radius > 1e-12).then(|| Curve2::Arc {
                 center: p(center),
                 radius,
                 start_angle: (start[1] - center[1]).atan2(start[0] - center[0]),
                 sweep: sweep.to_radians(),
                 source: None,
             }),
-            Segment::Circle { center, radius } => (radius > 1e-12).then(|| Curve2::Circle { center: p(center), radius, source: None }),
+            Segment::Circle { center, radius } => (radius > 1e-12).then(|| Curve2::Circle {
+                center: p(center),
+                radius,
+                source: None,
+            }),
         })
         .collect();
     Loop { curves }
@@ -155,7 +171,14 @@ pub fn component_plan(pcb: &PcbBoard, id: ItemId, p: &cadrs_idf::Placement) -> B
         MountSide::Top => (t + p.mount_offset, h),
         MountSide::Bottom => (-p.mount_offset, -h),
     };
-    BodyPlan { name: component_name(p), class, item: Some(id), loops: p.place_loops(&pkg, cadrs_idf::Units::Mm), z0, depth }
+    BodyPlan {
+        name: component_name(p),
+        class,
+        item: Some(id),
+        loops: p.place_loops(&pkg, cadrs_idf::Units::Mm),
+        z0,
+        depth,
+    }
 }
 
 /// The [`PLACEHOLDER`] box as a package, centred on its origin.
@@ -167,14 +190,25 @@ pub fn placeholder_package(p: &cadrs_idf::Placement) -> cadrs_idf::Package {
         part_number: p.part_number.clone(),
         units: cadrs_idf::Units::Mm,
         height: h,
-        loops: vec![cadrs_idf::Loop::rect(0, -w / 2.0, -d / 2.0, w / 2.0, d / 2.0)],
+        loops: vec![cadrs_idf::Loop::rect(
+            0,
+            -w / 2.0,
+            -d / 2.0,
+            w / 2.0,
+            d / 2.0,
+        )],
         props: vec![],
     }
 }
 
 /// The package of a placement: by name and part number, else by name alone.
-pub fn find_package<'a>(pcb: &'a PcbBoard, p: &cadrs_idf::Placement) -> Option<&'a cadrs_idf::Package> {
-    pcb.library.package(&p.package, &p.part_number).or_else(|| pcb.library.packages.iter().find(|k| k.name == p.package))
+pub fn find_package<'a>(
+    pcb: &'a PcbBoard,
+    p: &cadrs_idf::Placement,
+) -> Option<&'a cadrs_idf::Package> {
+    pcb.library
+        .package(&p.package, &p.part_number)
+        .or_else(|| pcb.library.packages.iter().find(|k| k.name == p.package))
 }
 
 /// One body of a [`BoardGeometry`].
@@ -224,21 +258,55 @@ impl BoardGeometry {
     }
 }
 
-fn extrude_loops(kernel: &mut dyn Kernel, loops: &[cadrs_idf::Loop], z0: f64, depth: f64) -> Result<BodyId, KernelError> {
-    let plane = Plane { origin: Point3::new(0.0, 0.0, z0), ..Plane::top() };
-    let mut kl = loops.iter().map(idf_loop_to_kernel).filter(|l| !l.curves.is_empty());
-    let outer = kl.next().ok_or_else(|| KernelError::InvalidProfile("the outline is empty".into()))?;
+fn extrude_loops(
+    kernel: &mut dyn Kernel,
+    loops: &[cadrs_idf::Loop],
+    z0: f64,
+    depth: f64,
+) -> Result<BodyId, KernelError> {
+    let plane = Plane {
+        origin: Point3::new(0.0, 0.0, z0),
+        ..Plane::top()
+    };
+    let mut kl = loops
+        .iter()
+        .map(idf_loop_to_kernel)
+        .filter(|l| !l.curves.is_empty());
+    let outer = kl
+        .next()
+        .ok_or_else(|| KernelError::InvalidProfile("the outline is empty".into()))?;
     let holes: Vec<Loop> = kl.collect();
-    let region = Region { outer: outer.clone(), holes: holes.clone(), source: None };
+    let region = Region {
+        outer: outer.clone(),
+        holes: holes.clone(),
+        source: None,
+    };
     match kernel.extrude(&Profile::new(plane, vec![region]), Extent::Blind(depth)) {
         Ok(r) => first_body(r.bodies),
         // Cut-outs that touch the outline or each other can't be holes of one face: cut them
         // one by one.
         Err(_) if !holes.is_empty() => {
-            let one = |k: &mut dyn Kernel, l: Loop, d: f64, z: f64| -> Result<BodyId, KernelError> {
-                let plane = Plane { origin: Point3::new(0.0, 0.0, z), ..Plane::top() };
-                first_body(k.extrude(&Profile::new(plane, vec![Region { outer: l, holes: vec![], source: None }]), Extent::Blind(d))?.bodies)
-            };
+            let one =
+                |k: &mut dyn Kernel, l: Loop, d: f64, z: f64| -> Result<BodyId, KernelError> {
+                    let plane = Plane {
+                        origin: Point3::new(0.0, 0.0, z),
+                        ..Plane::top()
+                    };
+                    first_body(
+                        k.extrude(
+                            &Profile::new(
+                                plane,
+                                vec![Region {
+                                    outer: l,
+                                    holes: vec![],
+                                    source: None,
+                                }],
+                            ),
+                            Extent::Blind(d),
+                        )?
+                        .bodies,
+                    )
+                };
             let mut body = one(kernel, outer, depth, z0)?;
             let s = depth.signum();
             for h in holes {
@@ -255,25 +323,41 @@ fn extrude_loops(kernel: &mut dyn Kernel, loops: &[cadrs_idf::Loop], z0: f64, de
 }
 
 fn first_body(bodies: Vec<BodyId>) -> Result<BodyId, KernelError> {
-    bodies.into_iter().next().ok_or_else(|| KernelError::OperationFailed("no body was made".into()))
+    bodies
+        .into_iter()
+        .next()
+        .ok_or_else(|| KernelError::OperationFailed("no body was made".into()))
 }
 
 /// A package's body in the package frame: its outline extruded from z = 0 up by its height
 /// (at least [`MARKER`]).
-pub fn package_body(kernel: &mut dyn Kernel, pkg: &cadrs_idf::Package) -> Result<BodyId, KernelError> {
+pub fn package_body(
+    kernel: &mut dyn Kernel,
+    pkg: &cadrs_idf::Package,
+) -> Result<BodyId, KernelError> {
     extrude_loops(kernel, &pkg.loops, 0.0, pkg.height.max(MARKER))
 }
 
 /// Makes a plan's body.
 pub fn plan_body(kernel: &mut dyn Kernel, plan: &BodyPlan) -> Result<PcbBody, KernelError> {
     let body = extrude_loops(kernel, &plan.loops, plan.z0, plan.depth)?;
-    Ok(PcbBody { name: plan.name.clone(), class: plan.class, color: plan.class.color(), body, item: plan.item, motion: None })
+    Ok(PcbBody {
+        name: plan.name.clone(),
+        class: plan.class,
+        color: plan.class.color(),
+        body,
+        item: plan.item,
+        motion: None,
+    })
 }
 
 /// The whole board as kernel bodies: the board, every keep area, every component (see the
 /// module docs). Kernel failures on a keep area or component are warnings; a board that can't
 /// be made is an error.
-pub fn board_geometry(kernel: &mut dyn Kernel, pcb: &PcbBoard) -> Result<BoardGeometry, KernelError> {
+pub fn board_geometry(
+    kernel: &mut dyn Kernel,
+    pcb: &PcbBoard,
+) -> Result<BoardGeometry, KernelError> {
     let mut g = BoardGeometry::default();
     let t = pcb.thickness();
     if let Some(plan) = board_plan(pcb) {
@@ -292,9 +376,16 @@ pub fn board_geometry(kernel: &mut dyn Kernel, pcb: &PcbBoard) -> Result<BoardGe
     for (id, p) in pcb.components() {
         let pkg = find_package(pcb, p);
         let key = pkg.map(|k| (k.name.clone(), k.part_number.clone()));
-        let class = if pkg.is_some() { BodyClass::Component(component_kind(&p.package)) } else { BodyClass::Placeholder };
+        let class = if pkg.is_some() {
+            BodyClass::Component(component_kind(&p.package))
+        } else {
+            BodyClass::Placeholder
+        };
         if pkg.is_none() {
-            g.warnings.push(format!("{}: package {} ({}) isn't in the library; shown as a placeholder box", p.refdes, p.package, p.part_number));
+            g.warnings.push(format!(
+                "{}: package {} ({}) isn't in the library; shown as a placeholder box",
+                p.refdes, p.package, p.part_number
+            ));
         }
         let proto = match protos.get(&key) {
             Some(b) => *b,
@@ -314,7 +405,10 @@ pub fn board_geometry(kernel: &mut dyn Kernel, pcb: &PcbBoard) -> Result<BoardGe
             }
         };
         let motion = placement_motion(p, t);
-        match kernel.transform_motion(proto, &motion).and_then(|r| first_body(r.bodies)) {
+        match kernel
+            .transform_motion(proto, &motion)
+            .and_then(|r| first_body(r.bodies))
+        {
             Ok(body) => g.bodies.push(PcbBody {
                 name: component_name(p),
                 class,

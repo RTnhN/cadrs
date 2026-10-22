@@ -28,8 +28,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::bend::BendValue;
 use crate::joint_edit::{self, JointChange, JointEdit};
-use crate::model::{BendReliefOverride, BuildError, CornerOverride, Joint, JointId, Model, P3, Surface, Wall, WallId};
-use crate::model_edit::{self, BendSpec, CornerBreakKind, CutTool, EditError, JogSpec, Placement, Region3};
+use crate::model::{
+    BendReliefOverride, BuildError, CornerOverride, Joint, JointId, Model, P3, Surface, Wall,
+    WallId,
+};
+use crate::model_edit::{
+    self, BendSpec, CornerBreakKind, CutTool, EditError, JogSpec, Placement, Region3,
+};
 use crate::poly::P2;
 use crate::sharp_edit::SharpDef;
 
@@ -59,18 +64,34 @@ pub enum StepEdit {
     /// **Jog** (SM19.1).
     Jog { spec: JogSpec, seed: u64 },
     /// **Tab** (SM5): profiles added to these walls.
-    Tab { regions: Vec<Region3>, walls: Vec<WallId> },
+    Tab {
+        regions: Vec<Region3>,
+        walls: Vec<WallId>,
+    },
     /// Perpendicular cuts (Extrude → Remove on active sheet metal, Tab's subtraction scope;
     /// SM1.6, SM12.1).
-    Cut { tools: Vec<CutTool>, walls: Option<Vec<WallId>> },
+    Cut {
+        tools: Vec<CutTool>,
+        walls: Option<Vec<WallId>>,
+    },
     /// **Corner break** (SM11) and fillets or chamfers of corners (SM12.1): each wall corner
     /// (local 2D) and its shape.
-    CornerBreaks { corners: Vec<(WallId, P2, CornerBreakKind)> },
+    CornerBreaks {
+        corners: Vec<(WallId, P2, CornerBreakKind)>,
+    },
     /// Face pattern / Face mirror of walls (SM12.2): one copy per placement.
-    Copy { walls: Vec<WallId>, places: Vec<Placement>, seed: u64 },
+    Copy {
+        walls: Vec<WallId>,
+        places: Vec<Placement>,
+        seed: u64,
+    },
     /// Part pattern / Part mirror of a sheet metal part (SM12.2): the part's walls copied as a
     /// part of its own, one per placement.
-    CopyPart { walls: Vec<WallId>, places: Vec<Placement>, seed: u64 },
+    CopyPart {
+        walls: Vec<WallId>,
+        places: Vec<Placement>,
+        seed: u64,
+    },
     /// **Corner** (SM7).
     CornerRelief(CornerOverride),
     /// **Bend relief** (SM8).
@@ -85,7 +106,11 @@ pub enum StepEdit {
     },
     /// A flat pattern extrude (P3I.6, SM14): regions added to or cut from flat-pattern part
     /// `part` in the flat ([`crate::flat_edit`]).
-    Flat { part: usize, regions: Vec<crate::poly::Polygon>, remove: bool },
+    Flat {
+        part: usize,
+        regions: Vec<crate::poly::Polygon>,
+        remove: bool,
+    },
 }
 
 /// Why a definition doesn't build.
@@ -93,7 +118,11 @@ pub enum StepEdit {
 pub enum DefError {
     Base(BuildError),
     /// Step `index` (by its feature `label`) no longer fits.
-    Step { index: usize, label: String, error: String },
+    Step {
+        index: usize,
+        label: String,
+        error: String,
+    },
 }
 
 impl DefError {
@@ -128,13 +157,29 @@ pub struct Definition {
 
 impl Definition {
     pub fn sharp(def: SharpDef) -> Definition {
-        Definition { base: Base::Sharp(def), steps: Vec::new(), table_order: Vec::new(), slabs: Vec::new(), merges: Vec::new() }
+        Definition {
+            base: Base::Sharp(def),
+            steps: Vec::new(),
+            table_order: Vec::new(),
+            slabs: Vec::new(),
+            merges: Vec::new(),
+        }
     }
 
     /// A model made directly; its walls fold as slabs when `slabs`.
     pub fn fixed(model: Model, slabs: bool) -> Definition {
-        let walls = if slabs { model.walls.iter().map(|w| w.id).collect() } else { Vec::new() };
-        Definition { base: Base::Fixed(model), steps: Vec::new(), table_order: Vec::new(), slabs: walls, merges: Vec::new() }
+        let walls = if slabs {
+            model.walls.iter().map(|w| w.id).collect()
+        } else {
+            Vec::new()
+        };
+        Definition {
+            base: Base::Fixed(model),
+            steps: Vec::new(),
+            table_order: Vec::new(),
+            slabs: walls,
+            merges: Vec::new(),
+        }
     }
 
     /// The sharp base, for Flange, Hem and Make joint (`None` for a fixed base).
@@ -154,7 +199,10 @@ impl Definition {
 
     /// Adds a step.
     pub fn push(&mut self, label: impl Into<String>, edit: StepEdit) {
-        self.steps.push(Step { label: label.into(), edit });
+        self.steps.push(Step {
+            label: label.into(),
+            edit,
+        });
     }
 
     /// The model the base builds.
@@ -176,8 +224,17 @@ impl Definition {
         let mut made = Vec::new();
         for (i, s) in self.steps.iter().enumerate() {
             let before: Vec<JointId> = m.joints.iter().map(|j| j.id).collect();
-            apply(&mut m, &s.edit).map_err(|error| DefError::Step { index: i, label: s.label.clone(), error })?;
-            made.extend(m.joints.iter().filter(|j| !before.contains(&j.id)).map(|j| (j.id, i)));
+            apply(&mut m, &s.edit).map_err(|error| DefError::Step {
+                index: i,
+                label: s.label.clone(),
+                error,
+            })?;
+            made.extend(
+                m.joints
+                    .iter()
+                    .filter(|j| !before.contains(&j.id))
+                    .map(|j| (j.id, i)),
+            );
         }
         joint_edit::reorder(&mut m, &self.table_order);
         Ok((m, made))
@@ -193,7 +250,10 @@ impl Definition {
         {
             return Ok(());
         }
-        if self.sharp_def().is_some_and(|d| d.builder.hems.iter().any(|h| h.id == Some(e.joint))) {
+        if self
+            .sharp_def()
+            .is_some_and(|d| d.builder.hems.iter().any(|h| h.id == Some(e.joint)))
+        {
             return Err("A hem's bend is set in its Hem feature".into());
         }
         let (_, made) = self.build_traced().map_err(|x| x.message(""))?;
@@ -231,7 +291,9 @@ impl Definition {
     /// wall isn't a planar wall of the base (a wall a step made).
     pub fn pull_back(&self, built: &Model, wall: WallId, pts: &[P3]) -> Option<Vec<P3>> {
         let w = built.wall(wall)?;
-        let Surface::Planar { .. } = w.surface else { return None };
+        let Surface::Planar { .. } = w.surface else {
+            return None;
+        };
         let nf = w.surface.normal()?;
         let of = w.surface.point(P2::origin());
         let (origin, u, v) = match &self.base {
@@ -246,15 +308,28 @@ impl Definition {
         };
         let base = Surface::Planar { origin, u, v };
         let nb = base.normal()?;
-        Some(pts.iter().map(|p| base.point(w.surface.local(*p)) + nb * (p - of).dot(&nf)).collect())
+        Some(
+            pts.iter()
+                .map(|p| base.point(w.surface.local(*p)) + nb * (p - of).dot(&nf))
+                .collect(),
+        )
     }
 }
 
 /// Replays one step on a model (the error message if it no longer fits).
 fn apply(m: &mut Model, e: &StepEdit) -> Result<(), String> {
-    if let StepEdit::Flat { part, regions, remove } = e {
+    if let StepEdit::Flat {
+        part,
+        regions,
+        remove,
+    } = e
+    {
         let flat = crate::flat::flatten(m);
-        let r = if *remove { crate::flat_edit::remove(m, &flat, *part, regions) } else { crate::flat_edit::add(m, &flat, *part, regions) };
+        let r = if *remove {
+            crate::flat_edit::remove(m, &flat, *part, regions)
+        } else {
+            crate::flat_edit::add(m, &flat, *part, regions)
+        };
         return r.map_err(|x| x.message().to_string());
     }
     apply_model(m, e).map_err(|x| x.message().to_string())
@@ -266,20 +341,30 @@ fn apply_model(m: &mut Model, e: &StepEdit) -> Result<(), EditError> {
         StepEdit::Bend { spec, seed } => model_edit::bend_wall(m, spec, *seed).map(|_| ()),
         StepEdit::Jog { spec, seed } => model_edit::jog_wall(m, spec, *seed).map(|_| ()),
         StepEdit::Tab { regions, walls } => model_edit::add_tab(m, regions, walls).map(|_| ()),
-        StepEdit::Cut { tools, walls } => model_edit::cut_walls(m, tools, walls.as_deref()).map(|_| ()),
+        StepEdit::Cut { tools, walls } => {
+            model_edit::cut_walls(m, tools, walls.as_deref()).map(|_| ())
+        }
         StepEdit::CornerBreaks { corners } => {
             for (w, at, kind) in corners {
                 model_edit::break_corner(m, *w, *at, *kind)?;
             }
             Ok(())
         }
-        StepEdit::Copy { walls, places, seed } => {
+        StepEdit::Copy {
+            walls,
+            places,
+            seed,
+        } => {
             for (k, p) in places.iter().enumerate() {
                 model_edit::copy_walls(m, walls, p, seed ^ ((k as u64) << 48))?;
             }
             Ok(())
         }
-        StepEdit::CopyPart { walls, places, seed } => {
+        StepEdit::CopyPart {
+            walls,
+            places,
+            seed,
+        } => {
             for (k, p) in places.iter().enumerate() {
                 model_edit::copy_part(m, walls, p, seed ^ ((k as u64) << 48))?;
             }
@@ -293,11 +378,22 @@ fn apply_model(m: &mut Model, e: &StepEdit) -> Result<(), EditError> {
             m.bend_relief_overrides.push(*o);
             Ok(())
         }
-        StepEdit::AddWalls { walls, joints, trims } => {
+        StepEdit::AddWalls {
+            walls,
+            joints,
+            trims,
+        } => {
             for (w, cut) in trims {
-                let wall = m.walls.iter_mut().find(|x| x.id == *w).ok_or(EditError::NoWall)?;
+                let wall = m
+                    .walls
+                    .iter_mut()
+                    .find(|x| x.id == *w)
+                    .ok_or(EditError::NoWall)?;
                 let left = crate::poly::difference(std::slice::from_ref(&wall.outline), cut);
-                wall.outline = left.into_iter().max_by(|a, b| a.area().total_cmp(&b.area())).ok_or(EditError::WallCutAway)?;
+                wall.outline = left
+                    .into_iter()
+                    .max_by(|a, b| a.area().total_cmp(&b.area()))
+                    .ok_or(EditError::WallCutAway)?;
             }
             m.walls.extend(walls.iter().cloned());
             m.joints.extend(joints.iter().cloned());
@@ -318,12 +414,24 @@ mod tests {
     use crate::sharp_edit::{self, FlangeAlignment, FlangeEdge, FlangeOpts};
 
     fn params() -> Params {
-        Params { thickness: 2.0, bend_radius: 3.0, k_factor: 0.45, minimal_gap: 0.2, ..Default::default() }
+        Params {
+            thickness: 2.0,
+            bend_radius: 3.0,
+            k_factor: 0.45,
+            minimal_gap: 0.2,
+            ..Default::default()
+        }
     }
 
     /// A 100 × 60 plate (Thicken of one face).
     fn plate() -> Definition {
-        let f = FaceIn { key: 1, origin: P3::origin(), u: V3::x(), v: V3::y(), outline: Polygon::rect(P2::origin(), P2::new(100.0, 60.0)) };
+        let f = FaceIn {
+            key: 1,
+            origin: P3::origin(),
+            u: V3::x(),
+            v: V3::y(),
+            outline: Polygon::rect(P2::origin(), P2::new(100.0, 60.0)),
+        };
         let b = construct::from_faces(params(), &[f], &[], &[], &FaceOpts::default()).unwrap();
         Definition::sharp(b.def)
     }
@@ -332,9 +440,31 @@ mod tests {
         let pick = sharp_edit::locate(m, &[a, b]).unwrap();
         let wall = pick.wall;
         let pts = d.pull_back(m, wall, &[pick.a, pick.b]).unwrap();
-        let pick = sharp_edit::EdgePick { a: pts[0], b: pts[1], ..pick };
-        let e = FlangeEdge { pick, key, angle: std::f64::consts::FRAC_PI_2, toward: true, distance: 30.0, partial: None };
-        sharp_edit::flange(d.sharp_mut().unwrap(), &[e], &FlangeOpts { alignment: FlangeAlignment::Inner, radius: None, miter: None, hold_adjacent: false, per_chain: false }).unwrap();
+        let pick = sharp_edit::EdgePick {
+            a: pts[0],
+            b: pts[1],
+            ..pick
+        };
+        let e = FlangeEdge {
+            pick,
+            key,
+            angle: std::f64::consts::FRAC_PI_2,
+            toward: true,
+            distance: 30.0,
+            partial: None,
+        };
+        sharp_edit::flange(
+            d.sharp_mut().unwrap(),
+            &[e],
+            &FlangeOpts {
+                alignment: FlangeAlignment::Inner,
+                radius: None,
+                miter: None,
+                hold_adjacent: false,
+                per_chain: false,
+            },
+        )
+        .unwrap();
     }
 
     fn bend_step(m: &Model, wall: WallId, x: f64, seed: u64) -> StepEdit {
@@ -357,11 +487,24 @@ mod tests {
     fn a_flange_then_a_modify_joint_on_its_bend() {
         let mut d = plate();
         let m = d.build().unwrap();
-        flange_on(&mut d, &m, P3::new(0.0, 60.0, 0.0), P3::new(100.0, 60.0, 0.0), 77);
+        flange_on(
+            &mut d,
+            &m,
+            P3::new(0.0, 60.0, 0.0),
+            P3::new(100.0, 60.0, 0.0),
+            77,
+        );
         let m = d.build().unwrap();
         let bend = m.joints.iter().find(|j| j.bend().is_some()).unwrap().id;
         let before = flatten(&m);
-        d.edit_joint(JointEdit { joint: bend, change: JointChange::Bend { radius: Some(6.0), value: None } }).unwrap();
+        d.edit_joint(JointEdit {
+            joint: bend,
+            change: JointChange::Bend {
+                radius: Some(6.0),
+                value: None,
+            },
+        })
+        .unwrap();
         let m2 = d.build().unwrap();
         assert_eq!(m2.joint(bend).unwrap().bend().unwrap().radius, 6.0);
         assert!(m2.validate().is_empty());
@@ -369,9 +512,18 @@ mod tests {
         assert!(after.is_ok());
         assert_ne!(before.parts[0].bounds(), after.parts[0].bounds());
         // Made a rip: the flange comes off as a part of its own.
-        d.edit_joint(JointEdit { joint: bend, change: JointChange::Rip { style: RipStyle::EdgeJoint } }).unwrap();
+        d.edit_joint(JointEdit {
+            joint: bend,
+            change: JointChange::Rip {
+                style: RipStyle::EdgeJoint,
+            },
+        })
+        .unwrap();
         let m3 = d.build().unwrap();
-        assert!(matches!(m3.joint(bend).unwrap().kind, JointKind::Rip { .. }));
+        assert!(matches!(
+            m3.joint(bend).unwrap().kind,
+            JointKind::Rip { .. }
+        ));
         assert_eq!(flatten(&m3).parts.len(), 2);
     }
 
@@ -388,18 +540,39 @@ mod tests {
         // wall, so it can't take a flange; the near end can.
         let moved = m.walls.iter().find(|w| w.id != wall).unwrap().id;
         assert!(d.pull_back(&m, moved, &[P3::origin()]).is_none());
-        flange_on(&mut d, &m, P3::new(0.0, 0.0, 0.0), P3::new(0.0, 60.0, 0.0), 9);
+        flange_on(
+            &mut d,
+            &m,
+            P3::new(0.0, 0.0, 0.0),
+            P3::new(0.0, 60.0, 0.0),
+            9,
+        );
         let m = d.build().unwrap();
         assert_eq!(m.joints.iter().filter(|j| j.bend().is_some()).count(), 2);
         assert!(m.validate().is_empty(), "{:?}", m.validate());
         assert!(flatten(&m).is_ok());
         // The Bend's bend takes a new radius into its step.
-        d.edit_joint(JointEdit { joint: bent, change: JointChange::Bend { radius: Some(5.0), value: Some(BendValue::KFactor(0.3)) } }).unwrap();
+        d.edit_joint(JointEdit {
+            joint: bent,
+            change: JointChange::Bend {
+                radius: Some(5.0),
+                value: Some(BendValue::KFactor(0.3)),
+            },
+        })
+        .unwrap();
         let m = d.build().unwrap();
         let b = m.joint(bent).unwrap().bend().unwrap();
         assert_eq!((b.radius, b.value), (5.0, Some(BendValue::KFactor(0.3))));
         // ...but it can't be made a rip.
-        assert!(d.edit_joint(JointEdit { joint: bent, change: JointChange::Rip { style: RipStyle::EdgeJoint } }).is_err());
+        assert!(
+            d.edit_joint(JointEdit {
+                joint: bent,
+                change: JointChange::Rip {
+                    style: RipStyle::EdgeJoint
+                }
+            })
+            .is_err()
+        );
     }
 
     #[test]
@@ -412,7 +585,12 @@ mod tests {
         let e = d.build().unwrap_err();
         assert_eq!(e.message("Bend 2"), EditError::LineMissesWall.message());
         d.steps.swap(0, 1);
-        assert!(d.build().unwrap_err().message("Bend 1").starts_with("Bend 2 no longer fits"));
+        assert!(
+            d.build()
+                .unwrap_err()
+                .message("Bend 1")
+                .starts_with("Bend 2 no longer fits")
+        );
     }
 
     #[test]

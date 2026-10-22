@@ -11,9 +11,9 @@ use smlib_common::*;
 #[path = "smlib_common/intersect.rs"]
 mod intersect;
 
-use cadrs_kernel::native::draw::{Ax3, DEdge, Shape};
-use cadrs_kernel::native::math::{any_perpendicular, Affine, P3, V3};
 use cadrs_kernel::native::NativeKernel;
+use cadrs_kernel::native::draw::{Ax3, DEdge, Shape};
+use cadrs_kernel::native::math::{Affine, P3, V3, any_perpendicular};
 
 const SUITE: &str = "section";
 
@@ -61,7 +61,10 @@ fn loops(edges: &[DEdge], tol: f64) -> Result<usize, String> {
         }
     }
     if let Some(i) = (0..n).find(|&i| degree[i].iter().any(|&d| d == 0)) {
-        return Err(format!("section edge {i} ends in the air ({:?} – {:?})", ends[i][0], ends[i][1]));
+        return Err(format!(
+            "section edge {i} ends in the air ({:?} – {:?})",
+            ends[i][0], ends[i][1]
+        ));
     }
     let mut roots: Vec<usize> = (0..n).map(|i| root(&mut parent, i)).collect();
     roots.sort_unstable();
@@ -72,7 +75,9 @@ fn loops(edges: &[DEdge], tol: f64) -> Result<usize, String> {
 /// SMLib's `my_test_tsurf_section`: `file` moved by `mv`, cut by planes square to `n`.
 fn section(file: &str, mv: [f64; 3], n: [f64; 3], planes: &[Plane]) -> Result<(), String> {
     let m = model(SUITE, file)?;
-    let body = m.body.transformed(&Affine::translation(V3::new(mv[0], mv[1], mv[2])));
+    let body = m
+        .body
+        .transformed(&Affine::translation(V3::new(mv[0], mv[1], mv[2])));
     let surfs: Vec<_> = body.faces.iter().map(|f| f.surf.clone()).collect();
     let size = body.bbox().diagonal();
     let mut k = NativeKernel::new();
@@ -90,8 +95,14 @@ fn section(file: &str, mv: [f64; 3], n: [f64; 3], planes: &[Plane]) -> Result<()
         // The plane as the top face of a slab behind it (sections take solids); only the
         // section edges on that face count.
         let corner = c(-size, -size);
-        let ax = Ax3 { origin: P3::new(corner[0], corner[1], corner[2]) - n * size, z: n, x };
-        let slab = k.box_on(&ax, 2.0 * size, 2.0 * size, size).map_err(|e| format!("{e:?}"))?;
+        let ax = Ax3 {
+            origin: P3::new(corner[0], corner[1], corner[2]) - n * size,
+            z: n,
+            x,
+        };
+        let slab = k
+            .box_on(&ax, 2.0 * size, 2.0 * size, size)
+            .map_err(|e| format!("{e:?}"))?;
         let edges = match k.bsection(&solid, &slab) {
             Ok(Shape::Wire(es)) => es
                 .into_iter()
@@ -111,9 +122,14 @@ fn section(file: &str, mv: [f64; 3], n: [f64; 3], planes: &[Plane]) -> Result<()
                 let t = e.t0 + (e.t1 - e.t0) * s as f64 / 8.0;
                 let p = e.curve.point(t);
                 let dp = (p - o).dot(&n).abs();
-                let ds = surfs.iter().map(|s| intersect::dist(s, &p)).fold(f64::INFINITY, f64::min);
+                let ds = surfs
+                    .iter()
+                    .map(|s| intersect::dist(s, &p))
+                    .fold(f64::INFINITY, f64::min);
                 if dp > 1e-6 * size || ds > intersect::ON_TOL {
-                    off = Some(format!("plane {i}, edge {j}: {p:?} is {dp:.1e} off the plane and {ds:.1e} off the model"));
+                    off = Some(format!(
+                        "plane {i}, edge {j}: {p:?} is {dp:.1e} off the plane and {ds:.1e} off the model"
+                    ));
                     break 'edges;
                 }
             }
@@ -124,55 +140,167 @@ fn section(file: &str, mv: [f64; 3], n: [f64; 3], planes: &[Plane]) -> Result<()
         }
         let len: f64 = edges.iter().map(|e| e.length()).sum();
         if (len - pl.length).abs() > 1e-3 * pl.length.max(1.0) {
-            errs.push(format!("plane {i}: section length {len:.6}, the closed form gives {:.6}", pl.length));
+            errs.push(format!(
+                "plane {i}: section length {len:.6}, the closed form gives {:.6}",
+                pl.length
+            ));
         }
         match loops(&edges, 1e-6 * size) {
-            Ok(nl) if nl < pl.loops.0 || nl > pl.loops.1 => errs.push(format!("plane {i}: {nl} loops, want {}..={}", pl.loops.0, pl.loops.1)),
+            Ok(nl) if nl < pl.loops.0 || nl > pl.loops.1 => errs.push(format!(
+                "plane {i}: {nl} loops, want {}..={}",
+                pl.loops.0, pl.loops.1
+            )),
             Ok(_) => {}
             Err(e) => errs.push(format!("plane {i}: {e}")),
         }
     }
-    if errs.is_empty() { Ok(()) } else { Err(errs.join("; ")) }
+    if errs.is_empty() {
+        Ok(())
+    } else {
+        Err(errs.join("; "))
+    }
 }
 
 /// SMLib advanced section 1: `torus.smb` moved by (0, 0, 0), 7 planes square to (0, 1, 0); SMLib's test asserts `lNumFound == 14 || lNumFound == 16`, SMLib (the oracle) finds 9 curves, lengths 0, 54.56, 74.16, 0, 111.2, 54.56, 0.
 #[test]
 fn section_1_torus_y() {
-    section("torus.smb", [0.0, 0.0, 0.0], [0.0, 1.0, 0.0], &[
-        Plane { at: [-15.00002, -15.00002, -5.00002], length: 0.0, loops: (0, 1) },
-        Plane { at: [-10.0000133333, -10.0000133333, -3.33334666667], length: 54.55523374559993, loops: (1, 1) },
-        Plane { at: [-5.00000666667, -5.00000666667, -1.66667333333], length: 74.14342473561146, loops: (1, 2) },
-        Plane { at: [1.7763568394e-15, 7.1054273576e-15, 0.0], length: 62.83185306921201, loops: (2, 2) },
-        Plane { at: [5.00000666667, 5.00000666667, 1.66667333333], length: 74.14342473561146, loops: (1, 2) },
-        Plane { at: [10.0000133333, 10.0000133333, 3.33334666667], length: 54.55523374559993, loops: (1, 1) },
-        Plane { at: [15.00002, 15.00002, 5.00002], length: 0.0, loops: (0, 1) },
-    ]).unwrap();
+    section(
+        "torus.smb",
+        [0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        &[
+            Plane {
+                at: [-15.00002, -15.00002, -5.00002],
+                length: 0.0,
+                loops: (0, 1),
+            },
+            Plane {
+                at: [-10.0000133333, -10.0000133333, -3.33334666667],
+                length: 54.55523374559993,
+                loops: (1, 1),
+            },
+            Plane {
+                at: [-5.00000666667, -5.00000666667, -1.66667333333],
+                length: 74.14342473561146,
+                loops: (1, 2),
+            },
+            Plane {
+                at: [1.7763568394e-15, 7.1054273576e-15, 0.0],
+                length: 62.83185306921201,
+                loops: (2, 2),
+            },
+            Plane {
+                at: [5.00000666667, 5.00000666667, 1.66667333333],
+                length: 74.14342473561146,
+                loops: (1, 2),
+            },
+            Plane {
+                at: [10.0000133333, 10.0000133333, 3.33334666667],
+                length: 54.55523374559993,
+                loops: (1, 1),
+            },
+            Plane {
+                at: [15.00002, 15.00002, 5.00002],
+                length: 0.0,
+                loops: (0, 1),
+            },
+        ],
+    )
+    .unwrap();
 }
 
 /// SMLib advanced section 2: `torus.smb` moved by (0, -40, 0), 7 planes square to (0, 0, 1); SMLib's test asserts `lNumFound == 13`, SMLib (the oracle) finds 0 curves, lengths 0, 0, 0, 0, 0, 0, 0.
 #[test]
 fn section_2_torus_z() {
-    section("torus.smb", [0.0, -40.0, 0.0], [0.0, 0.0, 1.0], &[
-        Plane { at: [-15.00002, -55.00002, -5.00002], length: 0.0, loops: (0, 1) },
-        Plane { at: [-10.0000133333, -50.0000133333, -3.33334666667], length: 125.66370614359172, loops: (2, 2) },
-        Plane { at: [-5.00000666667, -45.0000066667, -1.66667333333], length: 125.66370614359172, loops: (2, 2) },
-        Plane { at: [1.7763568394e-15, -40.0, 0.0], length: 125.66370614359172, loops: (2, 2) },
-        Plane { at: [5.00000666667, -34.9999933333, 1.66667333333], length: 125.66370614359172, loops: (2, 2) },
-        Plane { at: [10.0000133333, -29.9999866667, 3.33334666667], length: 125.66370614359172, loops: (2, 2) },
-        Plane { at: [15.00002, -24.99998, 5.00002], length: 0.0, loops: (0, 1) },
-    ]).unwrap();
+    section(
+        "torus.smb",
+        [0.0, -40.0, 0.0],
+        [0.0, 0.0, 1.0],
+        &[
+            Plane {
+                at: [-15.00002, -55.00002, -5.00002],
+                length: 0.0,
+                loops: (0, 1),
+            },
+            Plane {
+                at: [-10.0000133333, -50.0000133333, -3.33334666667],
+                length: 125.66370614359172,
+                loops: (2, 2),
+            },
+            Plane {
+                at: [-5.00000666667, -45.0000066667, -1.66667333333],
+                length: 125.66370614359172,
+                loops: (2, 2),
+            },
+            Plane {
+                at: [1.7763568394e-15, -40.0, 0.0],
+                length: 125.66370614359172,
+                loops: (2, 2),
+            },
+            Plane {
+                at: [5.00000666667, -34.9999933333, 1.66667333333],
+                length: 125.66370614359172,
+                loops: (2, 2),
+            },
+            Plane {
+                at: [10.0000133333, -29.9999866667, 3.33334666667],
+                length: 125.66370614359172,
+                loops: (2, 2),
+            },
+            Plane {
+                at: [15.00002, -24.99998, 5.00002],
+                length: 0.0,
+                loops: (0, 1),
+            },
+        ],
+    )
+    .unwrap();
 }
 
 /// SMLib advanced section 3: `torus.smb` moved by (-40, -40, 0), 7 planes square to (1, 0, 0); SMLib's test asserts `lNumFound == 16 || lNumFound == 17`, SMLib (the oracle) finds 12 curves, lengths 0, 54.56, 74.15, 0, 74.22, 54.56, 0.
 #[test]
 fn section_3_torus_x() {
-    section("torus.smb", [-40.0, -40.0, 0.0], [1.0, 0.0, 0.0], &[
-        Plane { at: [-55.00002, -55.00002, -5.00002], length: 0.0, loops: (0, 1) },
-        Plane { at: [-50.0000133333, -50.0000133333, -3.33334666667], length: 54.55523374559994, loops: (1, 1) },
-        Plane { at: [-45.0000066667, -45.0000066667, -1.66667333333], length: 74.14342469159959, loops: (1, 2) },
-        Plane { at: [-40.0, -40.0, 0.0], length: 62.83185306921201, loops: (2, 2) },
-        Plane { at: [-34.9999933333, -34.9999933333, 1.66667333333], length: 74.14342469159959, loops: (1, 2) },
-        Plane { at: [-29.9999866667, -29.9999866667, 3.33334666667], length: 54.55523374559993, loops: (1, 1) },
-        Plane { at: [-24.99998, -24.99998, 5.00002], length: 0.0, loops: (0, 1) },
-    ]).unwrap();
+    section(
+        "torus.smb",
+        [-40.0, -40.0, 0.0],
+        [1.0, 0.0, 0.0],
+        &[
+            Plane {
+                at: [-55.00002, -55.00002, -5.00002],
+                length: 0.0,
+                loops: (0, 1),
+            },
+            Plane {
+                at: [-50.0000133333, -50.0000133333, -3.33334666667],
+                length: 54.55523374559994,
+                loops: (1, 1),
+            },
+            Plane {
+                at: [-45.0000066667, -45.0000066667, -1.66667333333],
+                length: 74.14342469159959,
+                loops: (1, 2),
+            },
+            Plane {
+                at: [-40.0, -40.0, 0.0],
+                length: 62.83185306921201,
+                loops: (2, 2),
+            },
+            Plane {
+                at: [-34.9999933333, -34.9999933333, 1.66667333333],
+                length: 74.14342469159959,
+                loops: (1, 2),
+            },
+            Plane {
+                at: [-29.9999866667, -29.9999866667, 3.33334666667],
+                length: 54.55523374559993,
+                loops: (1, 1),
+            },
+            Plane {
+                at: [-24.99998, -24.99998, 5.00002],
+                length: 0.0,
+                loops: (0, 1),
+            },
+        ],
+    )
+    .unwrap();
 }

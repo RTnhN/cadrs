@@ -37,7 +37,10 @@ pub fn dist(s: &Surface, p: &P3) -> f64 {
     if let Some(d) = s.signed_distance(p) {
         return d.abs();
     }
-    feet(s, p, None).into_iter().map(|(u, v)| (s.eval(u, v) - p).norm()).fold(f64::INFINITY, f64::min)
+    feet(s, p, None)
+        .into_iter()
+        .map(|(u, v)| (s.eval(u, v) - p).norm())
+        .fold(f64::INFINITY, f64::min)
 }
 
 /// Distance from `p` to `s`, Newton from the foot of the point before (`hint`, updated), or a
@@ -54,7 +57,13 @@ pub fn dist_along(s: &Surface, p: &P3, hint: &std::cell::Cell<Option<(f64, f64)>
             return d;
         }
     }
-    let best = feet(s, p, None).into_iter().map(|(u, v)| ((s.eval(u, v) - p).norm(), (u, v))).fold((f64::INFINITY, (0.0, 0.0)), |x, y| if y.0 < x.0 { y } else { x });
+    let best = feet(s, p, None)
+        .into_iter()
+        .map(|(u, v)| ((s.eval(u, v) - p).norm(), (u, v)))
+        .fold(
+            (f64::INFINITY, (0.0, 0.0)),
+            |x, y| if y.0 < x.0 { y } else { x },
+        );
     hint.set(Some(best.1));
     best.0
 }
@@ -70,7 +79,18 @@ pub fn feet(s: &Surface, p: &P3, uv: Option<UvBox>) -> Vec<(f64, f64)> {
     let ((pu0, pu1), (pv0, pv1)) = s.param_box();
     let bounded = |a: f64, b: f64| a > -1e4 && b < 1e4;
     let ((u0, u1), (v0, v1)) = match uv {
-        Some(((fu0, fu1), (fv0, fv1))) => (if bounded(pu0, pu1) { (pu0, pu1) } else { (fu0, fu1) }, if bounded(pv0, pv1) { (pv0, pv1) } else { (fv0, fv1) }),
+        Some(((fu0, fu1), (fv0, fv1))) => (
+            if bounded(pu0, pu1) {
+                (pu0, pu1)
+            } else {
+                (fu0, fu1)
+            },
+            if bounded(pv0, pv1) {
+                (pv0, pv1)
+            } else {
+                (fv0, fv1)
+            },
+        ),
         None => ((pu0, pu1), (pv0, pv1)),
     };
     if bounded(u0, u1) && bounded(v0, v1) {
@@ -78,7 +98,10 @@ pub fn feet(s: &Surface, p: &P3, uv: Option<UvBox>) -> Vec<(f64, f64)> {
             let mut best = (f64::INFINITY, (u0, v0));
             for i in 0..=n {
                 for j in 0..=n {
-                    let (a, b) = (u0 + (u1 - u0) * i as f64 / n as f64, v0 + (v1 - v0) * j as f64 / n as f64);
+                    let (a, b) = (
+                        u0 + (u1 - u0) * i as f64 / n as f64,
+                        v0 + (v1 - v0) * j as f64 / n as f64,
+                    );
                     let d = (s.eval(a, b) - p).norm_squared();
                     if d < best.0 {
                         best = (d, (a, b));
@@ -119,12 +142,18 @@ impl Patch {
         let face = &body.faces[f];
         let polys = classify::face_polygons(body, face);
         let uv = poly_box(&polys);
-        Patch { surf: face.surf.clone(), polys, uv }
+        Patch {
+            surf: face.surf.clone(),
+            polys,
+            uv,
+        }
     }
 
     /// Every face of `body`.
     pub fn faces(body: &Body) -> Vec<Patch> {
-        (0..body.faces.len()).map(|f| Patch::face(body, f)).collect()
+        (0..body.faces.len())
+            .map(|f| Patch::face(body, f))
+            .collect()
     }
 
     /// Face `f` of `body` as SMLib's `GlobalSurfaceIntersect` takes it: its surface over the face's
@@ -138,20 +167,35 @@ impl Patch {
         let bounded = |a: f64, b: f64| a > -1e4 && b < 1e4;
         // (A cylinder's own face keeps its angle range: SMLib's cylinder domain is its sweep.)
         let whole = !matches!(face.surf, Surface::Cylinder { .. });
-        let u = if whole && bounded(u0, u1) { (u0, u1) } else { face.uv.0 };
-        let v = if whole && bounded(v0, v1) { (v0, v1) } else { face.uv.1 };
+        let u = if whole && bounded(u0, u1) {
+            (u0, u1)
+        } else {
+            face.uv.0
+        };
+        let v = if whole && bounded(v0, v1) {
+            (v0, v1)
+        } else {
+            face.uv.1
+        };
         Patch::rect(face.surf, (u, v))
     }
 
     /// Every face of `body` as SMLib intersects it ([`Patch::domain`]).
     pub fn domains(body: &Body) -> Vec<Patch> {
-        (0..body.faces.len()).map(|f| Patch::domain(body, f)).collect()
+        (0..body.faces.len())
+            .map(|f| Patch::domain(body, f))
+            .collect()
     }
 
     /// The surface over the uv rectangle `uv` (an untrimmed face, `CreateFaceFromSurface`).
     pub fn rect(surf: Surface, uv: UvBox) -> Patch {
         let ((u0, u1), (v0, v1)) = uv;
-        let polys = vec![vec![P2::new(u0, v0), P2::new(u1, v0), P2::new(u1, v1), P2::new(u0, v1)]];
+        let polys = vec![vec![
+            P2::new(u0, v0),
+            P2::new(u1, v0),
+            P2::new(u1, v1),
+            P2::new(u0, v1),
+        ]];
         Patch { surf, polys, uv }
     }
 
@@ -167,12 +211,19 @@ impl Patch {
     /// [`Patch::contains`] for a point along a curve: the foot first from the foot of the point
     /// before (`hint`, updated), the global search only where that comes out far.
     pub fn contains_along(&self, p: &P3, hint: &std::cell::Cell<Option<(f64, f64)>>) -> bool {
-        let hinted = hint.get().map(|h| self.surf.project(p, Some(h))).filter(|&(u, v)| (self.surf.eval(u, v) - p).norm() <= ON_TOL);
+        let hinted = hint
+            .get()
+            .map(|h| self.surf.project(p, Some(h)))
+            .filter(|&(u, v)| (self.surf.eval(u, v) - p).norm() <= ON_TOL);
         let starts = match hinted {
             Some(uv) => vec![uv],
             None => feet(&self.surf, p, Some(self.uv)),
         };
-        if let Some(&best) = starts.iter().min_by(|x, y| (self.surf.eval(x.0, x.1) - p).norm().total_cmp(&(self.surf.eval(y.0, y.1) - p).norm())) {
+        if let Some(&best) = starts.iter().min_by(|x, y| {
+            (self.surf.eval(x.0, x.1) - p)
+                .norm()
+                .total_cmp(&(self.surf.eval(y.0, y.1) - p).norm())
+        }) {
             hint.set(Some(best));
         }
         starts.into_iter().any(|(u, v)| {
@@ -182,11 +233,15 @@ impl Patch {
             }
             // A point past a bounded (B-spline) surface's edge projects onto the edge: on the
             // face's boundary only when it lies on the surface too.
-            classify::periodic_candidates(&self.surf, u, v, &self.polys).into_iter().any(|uv| match classify::in_face(&self.polys, &self.surf, uv, 1e-8) {
-                InFace::Inside => true,
-                InFace::Boundary => d <= 1e-6 * (1.0 + p.coords.norm()),
-                InFace::Outside => false,
-            })
+            classify::periodic_candidates(&self.surf, u, v, &self.polys)
+                .into_iter()
+                .any(
+                    |uv| match classify::in_face(&self.polys, &self.surf, uv, 1e-8) {
+                        InFace::Inside => true,
+                        InFace::Boundary => d <= 1e-6 * (1.0 + p.coords.norm()),
+                        InFace::Outside => false,
+                    },
+                )
         })
     }
 }
@@ -230,13 +285,19 @@ impl Found {
 pub fn seg_dist(p: &P3, a: &P3, b: &P3) -> f64 {
     let d = b - a;
     let l2 = d.norm_squared();
-    let t = if l2 > 0.0 { ((p - a).dot(&d) / l2).clamp(0.0, 1.0) } else { 0.0 };
+    let t = if l2 > 0.0 {
+        ((p - a).dot(&d) / l2).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
     (a + d * t - p).norm()
 }
 
 /// The runs of [t0, t1] where `inside` holds, their ends found by bisection.
 pub fn runs(t0: f64, t1: f64, n: usize, inside: impl Fn(f64) -> bool) -> Vec<(f64, f64)> {
-    let ts: Vec<f64> = (0..=n).map(|i| t0 + (t1 - t0) * i as f64 / n as f64).collect();
+    let ts: Vec<f64> = (0..=n)
+        .map(|i| t0 + (t1 - t0) * i as f64 / n as f64)
+        .collect();
     let ins: Vec<bool> = ts.iter().map(|&t| inside(t)).collect();
     let edge = |a: f64, b: f64, a_in: bool| {
         // The switch between a (inside or not) and b (the other).
@@ -272,7 +333,9 @@ pub fn runs(t0: f64, t1: f64, n: usize, inside: impl Fn(f64) -> bool) -> Vec<(f6
 
 /// A curve's points at `n + 1` even parameters of [t0, t1].
 pub fn polyline(c: &Curve, t0: f64, t1: f64, n: usize) -> Vec<P3> {
-    (0..=n).map(|i| c.point(t0 + (t1 - t0) * i as f64 / n as f64)).collect()
+    (0..=n)
+        .map(|i| c.point(t0 + (t1 - t0) * i as f64 / n as f64))
+        .collect()
 }
 
 /// Intersects every patch of `pa` with every patch of `pb` (`ssi::surface_surface`, crossing and
@@ -288,7 +351,11 @@ pub fn intersect_patches(pa: &[Patch], pb: &[Patch]) -> Result<Found, String> {
                 continue;
             }
             // The boxes' overlap.
-            let region = Bbox { min: ba.min.sup(&bb.min), max: ba.max.inf(&bb.max) }.grow(1e-6 * size);
+            let region = Bbox {
+                min: ba.min.sup(&bb.min),
+                max: ba.max.inf(&bb.max),
+            }
+            .grow(1e-6 * size);
             let curves = ssi::surface_surface(&a.surf, a.uv, &b.surf, b.uv, &region);
             for (k, c) in curves.iter().enumerate() {
                 let (t0, t1) = (c.t0.min(c.t1), c.t0.max(c.t1));
@@ -301,7 +368,9 @@ pub fn intersect_patches(pa: &[Patch], pb: &[Patch]) -> Result<Found, String> {
                 let on_both = |p: &P3| -> Result<(), String> {
                     let (da, db) = (dist_along(&a.surf, p, &ha), dist_along(&b.surf, p, &hb));
                     if da > ON_TOL || db > ON_TOL {
-                        return Err(format!("faces {i}×{j}, curve {k}: the point {p:?} is {da:.1e} off the first surface and {db:.1e} off the second"));
+                        return Err(format!(
+                            "faces {i}×{j}, curve {k}: the point {p:?} is {da:.1e} off the first surface and {db:.1e} off the second"
+                        ));
                     }
                     Ok(())
                 };
@@ -363,14 +432,21 @@ pub fn check_found(f: &Found, w: &Want) -> Result<(), String> {
     }
     if let Some(l) = w.length {
         if (f.length - l).abs() > LEN_TOL * l.max(1.0) {
-            return Err(format!("total length {:.6}, SMLib gives {l:.6} ({} curves, {} points)", f.length, f.pieces.len(), f.points.len()));
+            return Err(format!(
+                "total length {:.6}, SMLib gives {l:.6} ({} curves, {} points)",
+                f.length,
+                f.pieces.len(),
+                f.points.len()
+            ));
         }
     }
     for (k, s) in w.samples.iter().enumerate() {
         let p = P3::new(s[0], s[1], s[2]);
         let d = f.distance(&p);
         if d > SAMPLE_TOL {
-            return Err(format!("SMLib's sample {k} {p:?} is {d:.1e} from our curves"));
+            return Err(format!(
+                "SMLib's sample {k} {p:?} is {d:.1e} from our curves"
+            ));
         }
     }
     Ok(())

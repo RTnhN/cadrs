@@ -20,7 +20,9 @@ use cadrs_core::plane::PlaneEntity;
 use cadrs_core::{FeatureKind, PartId};
 use cadrs_sketch::EdgeName;
 use cadrs_ui::prelude::*;
-use cadrs_ui::{FeatureDialogCancel, OptionRow, Select, SelectionList, SelectionListState, TabStrip};
+use cadrs_ui::{
+    FeatureDialogCancel, OptionRow, Select, SelectionList, SelectionListState, TabStrip,
+};
 
 use crate::applied::{AppliedField, AppliedSession, current, entity_of, set};
 use crate::parts::PartCache;
@@ -89,8 +91,17 @@ fn open_with(world: &mut World, faces_mode: bool) {
         }
         close(world);
     }
-    world.insert_resource(CreateSelection { faces_mode, ..CreateSelection::default() });
-    let Some(area) = world.query_filtered::<Entity, With<ViewportArea>>().iter(world).next() else { return };
+    world.insert_resource(CreateSelection {
+        faces_mode,
+        ..CreateSelection::default()
+    });
+    let Some(area) = world
+        .query_filtered::<Entity, With<ViewportArea>>()
+        .iter(world)
+        .next()
+    else {
+        return;
+    };
     let theme = world.resource::<Theme>().clone();
     let tb = theme.clone();
     let panel = world
@@ -105,10 +116,22 @@ fn open_with(world: &mut World, faces_mode: bool) {
                 .body_padding(UiRect::ZERO)
                 .body(move |b| {
                     let t = &tb;
-                    b.spawn(TabStrip::new("create-selection-type").compact().tab("Faces").tab("Edges").selected(if faces_mode { 0 } else { 1 }).build(t));
+                    b.spawn(
+                        TabStrip::new("create-selection-type")
+                            .compact()
+                            .tab("Faces")
+                            .tab("Edges")
+                            .selected(if faces_mode { 0 } else { 1 })
+                            .build(t),
+                    );
                     b.spawn(Node {
                         flex_direction: FlexDirection::Column,
-                        padding: UiRect::new(Val::Px(4.0), Val::Px(4.0), Val::Px(6.0), Val::Px(4.0)),
+                        padding: UiRect::new(
+                            Val::Px(4.0),
+                            Val::Px(4.0),
+                            Val::Px(6.0),
+                            Val::Px(4.0),
+                        ),
                         row_gap: Val::Px(3.0),
                         ..default()
                     })
@@ -126,15 +149,45 @@ fn open_with(world: &mut World, faces_mode: bool) {
                                 .option("Boundary", false)
                         };
                         c.spawn(rule.selected(0).build(t));
-                        c.spawn((SeedField, SelectionList::new("create-selection-field").placeholder("Selection").active(true).build(t)));
-                        c.spawn(OptionRow::new("create-selection-patterns", "Select patterns").disabled(true).build(t));
+                        c.spawn((
+                            SeedField,
+                            SelectionList::new("create-selection-field")
+                                .placeholder("Selection")
+                                .active(true)
+                                .build(t),
+                        ));
+                        c.spawn(
+                            OptionRow::new("create-selection-patterns", "Select patterns")
+                                .disabled(true)
+                                .build(t),
+                        );
                         c.spawn((
                             CountText,
                             Name::new("create-selection-count"),
-                            t.text(if faces_mode { "0 faces selected" } else { "0 edges selected" }, t.font_sm, bevy::text::FontWeight::NORMAL, t.muted_foreground),
+                            t.text(
+                                if faces_mode {
+                                    "0 faces selected"
+                                } else {
+                                    "0 edges selected"
+                                },
+                                t.font_sm,
+                                bevy::text::FontWeight::NORMAL,
+                                t.muted_foreground,
+                            ),
                         ));
-                        c.spawn(Node { justify_content: JustifyContent::Center, margin: UiRect::vertical(Val::Px(3.0)), ..default() })
-                            .with_child((AddButton, cadrs_ui::Button::new("create-selection-add").label("Add selection").small().outline().build(t)));
+                        c.spawn(Node {
+                            justify_content: JustifyContent::Center,
+                            margin: UiRect::vertical(Val::Px(3.0)),
+                            ..default()
+                        })
+                        .with_child((
+                            AddButton,
+                            cadrs_ui::Button::new("create-selection-add")
+                                .label("Add selection")
+                                .small()
+                                .outline()
+                                .build(t),
+                        ));
                     });
                 })
                 .build(&theme),
@@ -150,13 +203,20 @@ fn open_with(world: &mut World, faces_mode: bool) {
 
 fn close(world: &mut World) {
     world.remove_resource::<CreateSelection>();
-    let panels: Vec<Entity> = world.query_filtered::<Entity, With<CreateSelectionPanel>>().iter(world).collect();
+    let panels: Vec<Entity> = world
+        .query_filtered::<Entity, With<CreateSelectionPanel>>()
+        .iter(world)
+        .collect();
     for e in panels {
         world.entity_mut(e).despawn();
     }
 }
 
-fn on_cancel(ev: On<FeatureDialogCancel>, q: Query<(), With<CreateSelectionPanel>>, mut commands: Commands) {
+fn on_cancel(
+    ev: On<FeatureDialogCancel>,
+    q: Query<(), With<CreateSelectionPanel>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(close);
     }
@@ -164,24 +224,39 @@ fn on_cancel(ev: On<FeatureDialogCancel>, q: Query<(), With<CreateSelectionPanel
 
 /// Faces | Edges: the panel again on that tab.
 fn on_tab(ev: On<cadrs_ui::TabStripSelect>, q: Query<&Name>, mut commands: Commands) {
-    if q.get(ev.entity).is_ok_and(|n| n.as_str() == "create-selection-type") {
+    if q.get(ev.entity)
+        .is_ok_and(|n| n.as_str() == "create-selection-type")
+    {
         let faces = ev.index == 0;
         commands.queue(move |world: &mut World| open_with(world, faces));
     }
 }
 
 /// While the panel is open, a clicked edge is its seed.
-fn create_selection_picks(mut picks: MessageReader<PickRequest>, create: Option<Res<CreateSelection>>, mut commands: Commands) {
+fn create_selection_picks(
+    mut picks: MessageReader<PickRequest>,
+    create: Option<Res<CreateSelection>>,
+    mut commands: Commands,
+) {
     if create.is_none() {
         return;
     }
     for p in picks.read() {
         if let Some(Pick::Face(part, face)) = p.0 {
             commands.queue(move |world: &mut World| {
-                let faces = world.resource::<PartCache>().part(part).map_or(Vec::new(), |p| {
-                    let seed = p.solid.faces.iter().position(|f| f.name == face);
-                    seed.map_or(Vec::new(), |i| p.solid.pocket_faces(i).into_iter().map(|j| p.solid.faces[j].name).collect())
-                });
+                let faces = world
+                    .resource::<PartCache>()
+                    .part(part)
+                    .map_or(Vec::new(), |p| {
+                        let seed = p.solid.faces.iter().position(|f| f.name == face);
+                        seed.map_or(Vec::new(), |i| {
+                            p.solid
+                                .pocket_faces(i)
+                                .into_iter()
+                                .map(|j| p.solid.faces[j].name)
+                                .collect()
+                        })
+                    });
                 if let Some(mut c) = world.get_resource_mut::<CreateSelection>()
                     && c.faces_mode
                 {
@@ -191,9 +266,12 @@ fn create_selection_picks(mut picks: MessageReader<PickRequest>, create: Option<
             });
             continue;
         }
-        let Some(Pick::Edge(part, edge)) = p.0 else { continue };
+        let Some(Pick::Edge(part, edge)) = p.0 else {
+            continue;
+        };
         commands.queue(move |world: &mut World| {
-            let edges = crate::advanced::tangent_connected(world.resource::<PartCache>(), part, edge);
+            let edges =
+                crate::advanced::tangent_connected(world.resource::<PartCache>(), part, edge);
             if let Some(mut c) = world.get_resource_mut::<CreateSelection>() {
                 c.seed = Some((part, edge));
                 c.edges = edges.into_iter().map(|e| (part, e)).collect();
@@ -215,19 +293,39 @@ fn sync_panel(
     if !c.is_changed() {
         return;
     }
-    let features = doc.as_ref().and_then(|d| d.active_element()).map(|e| e.features().to_vec()).unwrap_or_default();
-    let name = |op: cadrs_sketch::OpId| features.iter().find(|f| f.id.0 == op).map_or("part", |f| f.name.as_str()).to_string();
+    let features = doc
+        .as_ref()
+        .and_then(|d| d.active_element())
+        .map(|e| e.features().to_vec())
+        .unwrap_or_default();
+    let name = |op: cadrs_sketch::OpId| {
+        features
+            .iter()
+            .find(|f| f.id.0 == op)
+            .map_or("part", |f| f.name.as_str())
+            .to_string()
+    };
     let items: Vec<String> = if c.faces_mode {
-        c.face_seed.iter().map(|(_, f)| format!("Face of {}", name(f.op))).collect()
+        c.face_seed
+            .iter()
+            .map(|(_, f)| format!("Face of {}", name(f.op)))
+            .collect()
     } else {
-        c.seed.iter().map(|(_, e)| format!("Edge of {}", name(crate::parts::edge_maker(&features, e)))).collect()
+        c.seed
+            .iter()
+            .map(|(_, e)| format!("Edge of {}", name(crate::parts::edge_maker(&features, e))))
+            .collect()
     };
     for mut l in &mut q_field {
         if l.items != items {
             l.items = items.clone();
         }
     }
-    let (n, what) = if c.faces_mode { (c.faces.len(), "face") } else { (c.edges.len(), "edge") };
+    let (n, what) = if c.faces_mode {
+        (c.faces.len(), "face")
+    } else {
+        (c.edges.len(), "edge")
+    };
     let text = format!("{n} {what}{} selected", if n == 1 { "" } else { "s" });
     for mut t in &mut q_count {
         if t.0 != text {
@@ -249,7 +347,9 @@ fn on_add(a: On<Activate>, q: Query<(), With<AddButton>>, mut commands: Commands
         return;
     }
     commands.queue(|world: &mut World| {
-        let Some(c) = world.get_resource::<CreateSelection>().cloned() else { return };
+        let Some(c) = world.get_resource::<CreateSelection>().cloned() else {
+            return;
+        };
         if c.faces_mode {
             add_faces(world, &c.faces);
         } else {
@@ -286,28 +386,44 @@ pub fn add_edges(world: &mut World, edges: &[(PartId, EdgeName)]) {
     match (&mut kind, s.field) {
         (FeatureKind::Sweep(x), AppliedField::Path) => {
             for r in refs {
-                if !x.path.iter().any(|p| matches!(p, PathRef::Edge(g) if g.edge == r.edge)) {
+                if !x
+                    .path
+                    .iter()
+                    .any(|p| matches!(p, PathRef::Edge(g) if g.edge == r.edge))
+                {
                     x.path.push(PathRef::Edge(r));
                 }
             }
         }
         (FeatureKind::Fillet(x), AppliedField::Entities) => {
             for r in refs {
-                if !x.entities.iter().any(|e| matches!(e, EdgeOrFace::Edge(g) if g.edge == r.edge)) {
+                if !x
+                    .entities
+                    .iter()
+                    .any(|e| matches!(e, EdgeOrFace::Edge(g) if g.edge == r.edge))
+                {
                     x.entities.push(EdgeOrFace::Edge(r));
                 }
             }
         }
         (FeatureKind::Chamfer(x), AppliedField::Entities) => {
             for r in refs {
-                if !x.entities.iter().any(|e| matches!(e, EdgeOrFace::Edge(g) if g.edge == r.edge)) {
+                if !x
+                    .entities
+                    .iter()
+                    .any(|e| matches!(e, EdgeOrFace::Edge(g) if g.edge == r.edge))
+                {
                     x.entities.push(EdgeOrFace::Edge(r));
                 }
             }
         }
         (FeatureKind::Plane(x), AppliedField::PlaneEntities) => {
             for r in refs {
-                if !x.entities.iter().any(|e| matches!(e, PlaneEntity::Edge(g) if g.edge == r.edge)) {
+                if !x
+                    .entities
+                    .iter()
+                    .any(|e| matches!(e, PlaneEntity::Edge(g) if g.edge == r.edge))
+                {
                     x.entities.push(PlaneEntity::Edge(r));
                 }
             }
@@ -344,8 +460,12 @@ pub fn add_faces(world: &mut World, faces: &[(PartId, cadrs_sketch::FaceName)]) 
     let Some(f) = current(world) else { return };
     let mut kind = f.kind.clone();
     let list = match &mut kind {
-        FeatureKind::Pattern(x) if x.pattern_type == cadrs_core::pattern::PatternType::Face => &mut x.faces,
-        FeatureKind::Mirror(x) if x.mirror_type == cadrs_core::pattern::PatternType::Face => &mut x.faces,
+        FeatureKind::Pattern(x) if x.pattern_type == cadrs_core::pattern::PatternType::Face => {
+            &mut x.faces
+        }
+        FeatureKind::Mirror(x) if x.mirror_type == cadrs_core::pattern::PatternType::Face => {
+            &mut x.faces
+        }
         _ => return,
     };
     for r in refs {

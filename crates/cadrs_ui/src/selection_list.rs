@@ -34,17 +34,25 @@ use bevy::ui_widgets::{Activate, observe};
 
 use crate::button::{Button, visuals_for};
 use crate::icon::icon;
-use crate::tooltip::Tooltip;
 use crate::style::StateColors;
 use crate::theme::Theme;
+use crate::tooltip::Tooltip;
 
 pub struct SelectionListPlugin;
 
 impl Plugin for SelectionListPlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(on_list_click)
-            .add_systems(PostUpdate, sync_selection_lists.before(bevy::ui::UiSystems::Prepare))
-            .add_systems(PostUpdate, show_replace_on_hover.after(sync_selection_lists).before(bevy::ui::UiSystems::Prepare));
+            .add_systems(
+                PostUpdate,
+                sync_selection_lists.before(bevy::ui::UiSystems::Prepare),
+            )
+            .add_systems(
+                PostUpdate,
+                show_replace_on_hover
+                    .after(sync_selection_lists)
+                    .before(bevy::ui::UiSystems::Prepare),
+            );
     }
 }
 
@@ -189,7 +197,11 @@ impl SelectionList {
     }
 
     /// A small icon on every item, before its ✕ (a mate connector's edit glyph, A6.3).
-    pub fn item_icon(mut self, icon: impl Into<Cow<'static, str>>, tooltip: impl Into<String>) -> Self {
+    pub fn item_icon(
+        mut self,
+        icon: impl Into<Cow<'static, str>>,
+        tooltip: impl Into<String>,
+    ) -> Self {
         self.item_icon = Some((icon.into(), tooltip.into()));
         self
     }
@@ -252,11 +264,23 @@ impl SelectionList {
         let state = self.state;
         let (node, bg, border) = list_style(&t, &state, meta.tint_filled);
         // The rows are spawned by `sync_selection_lists` (the new state counts as changed).
-        (Name::new(self.name.into_owned()), meta, state, SelectionListReorder::default(), node, bg, border)
+        (
+            Name::new(self.name.into_owned()),
+            meta,
+            state,
+            SelectionListReorder::default(),
+            node,
+            bg,
+            border,
+        )
     }
 }
 
-fn list_style(t: &Theme, s: &SelectionListState, tint_filled: bool) -> (Node, BackgroundColor, BorderColor) {
+fn list_style(
+    t: &Theme,
+    s: &SelectionListState,
+    tint_filled: bool,
+) -> (Node, BackgroundColor, BorderColor) {
     let filled = !s.items.is_empty();
     let node = Node {
         flex_direction: FlexDirection::Column,
@@ -267,7 +291,11 @@ fn list_style(t: &Theme, s: &SelectionListState, tint_filled: bool) -> (Node, Ba
         } else {
             UiRect::horizontal(Val::Px(6.0))
         },
-        justify_content: if filled { JustifyContent::FlexStart } else { JustifyContent::Center },
+        justify_content: if filled {
+            JustifyContent::FlexStart
+        } else {
+            JustifyContent::Center
+        },
         border: UiRect::all(Val::Px(1.0)),
         border_radius: BorderRadius::all(Val::Px(2.0)),
         ..default()
@@ -320,7 +348,12 @@ fn spawn_contents(
 ) {
     if s.items.is_empty() {
         p.spawn((
-            t.text(meta.placeholder.clone(), 10.5, FontWeight::NORMAL, Color::srgb_u8(0x3d, 0x4b, 0x52)),
+            t.text(
+                meta.placeholder.clone(),
+                10.5,
+                FontWeight::NORMAL,
+                Color::srgb_u8(0x3d, 0x4b, 0x52),
+            ),
             Pickable::IGNORE,
         ));
         return;
@@ -337,7 +370,12 @@ fn spawn_contents(
         ))
         .with_children(|c| {
             c.spawn((
-                t.text(meta.placeholder.clone(), 10.0, FontWeight::NORMAL, t.muted_foreground),
+                t.text(
+                    meta.placeholder.clone(),
+                    10.0,
+                    FontWeight::NORMAL,
+                    t.muted_foreground,
+                ),
                 Node {
                     flex_grow: 1.0,
                     ..default()
@@ -352,17 +390,24 @@ fn spawn_contents(
                     .selected(reordering)
                     .tooltip("Reorder items")
                     .build(t),
-                observe(move |_: On<Activate>, mut q: Query<&mut SelectionListReorder>| {
-                    if let Ok(mut r) = q.get_mut(list) {
-                        r.0 = !r.0;
-                    }
-                }),
+                observe(
+                    move |_: On<Activate>, mut q: Query<&mut SelectionListReorder>| {
+                        if let Ok(mut r) = q.get_mut(list) {
+                            r.0 = !r.0;
+                        }
+                    },
+                ),
             ))
             .insert((ghost_visuals(t), small_square()));
         });
     } else {
         p.spawn((
-            t.text(meta.placeholder.clone(), 10.0, FontWeight::NORMAL, t.muted_foreground),
+            t.text(
+                meta.placeholder.clone(),
+                10.0,
+                FontWeight::NORMAL,
+                t.muted_foreground,
+            ),
             Node {
                 margin: UiRect::bottom(Val::Px(1.0)),
                 ..default()
@@ -375,7 +420,11 @@ fn spawn_contents(
         let marked = s.red.get(i).copied().unwrap_or(false);
         // With single items marked, an error field reds only them (P3D.1).
         let red = marked || s.red_items || (s.error && !s.red.iter().any(|r| *r));
-        let color = if red { t.feature_error } else { t.tool_foreground };
+        let color = if red {
+            t.feature_error
+        } else {
+            t.tool_foreground
+        };
         let ghost = ghost_visuals(t);
         p.spawn((
             Name::new(format!("{}-item-{i}", meta.name)),
@@ -391,14 +440,21 @@ fn spawn_contents(
             ZIndex(0),
             // Hoverable (for the Replace icon and the app's highlights), letting clicks through
             // to the list.
-            Pickable { should_block_lower: false, is_hoverable: true },
+            Pickable {
+                should_block_lower: false,
+                is_hoverable: true,
+            },
         ))
         .with_children(|r| {
             if reordering {
                 let row = r.target_entity();
                 r.spawn((
                     Name::new(format!("{}-item-{i}-handle", meta.name)),
-                    ItemHandle { list, index: i, row },
+                    ItemHandle {
+                        list,
+                        index: i,
+                        row,
+                    },
                     icon("drag-handle", 12.0, Color::srgb_u8(0x70, 0x70, 0x70)),
                     Tooltip::new("Drag to reorder"),
                 ))
@@ -439,14 +495,21 @@ fn spawn_contents(
                 },
                 // Hovering the label shows the whole item (a cut one ends in "…"), beside the
                 // field so it doesn't cover the rows below (P3G.5 judge: the Blind dropdown).
-                Pickable { should_block_lower: false, is_hoverable: true },
+                Pickable {
+                    should_block_lower: false,
+                    is_hoverable: true,
+                },
                 Tooltip::beside(item.clone()),
             ))
             .with_children(|c| {
                 c.spawn((
                     t.text(item.clone(), t.font_base, FontWeight::NORMAL, color),
                     crate::ellipsis::Ellipsis::node(),
-                    if meta.middle_ellipsis { crate::ellipsis::Ellipsis::middle() } else { crate::ellipsis::Ellipsis::default() },
+                    if meta.middle_ellipsis {
+                        crate::ellipsis::Ellipsis::middle()
+                    } else {
+                        crate::ellipsis::Ellipsis::default()
+                    },
                     Pickable::IGNORE,
                 ))
                 .insert(TextLayout::no_wrap());
@@ -463,7 +526,11 @@ fn spawn_contents(
                 let mut v = ghost_visuals(t);
                 v.background = StateColors::all(field_bg.0);
                 r.spawn((
-                    ItemReplace { list, index: i, row },
+                    ItemReplace {
+                        list,
+                        index: i,
+                        row,
+                    },
                     Button::new(format!("{}-item-{i}-replace", meta.name))
                         // Two sheets, as the course's Replace reference glyph (not "restore",
                         // a bin with an arrow that read as delete).
@@ -472,11 +539,16 @@ fn spawn_contents(
                         .ghost()
                         .tooltip("Replace reference")
                         .build(t),
-                    observe(|a: On<Activate>, q: Query<&ItemReplace>, mut commands: Commands| {
-                        if let Ok(c) = q.get(a.entity) {
-                            commands.trigger(SelectionListReplace { entity: c.list, index: c.index });
-                        }
-                    }),
+                    observe(
+                        |a: On<Activate>, q: Query<&ItemReplace>, mut commands: Commands| {
+                            if let Ok(c) = q.get(a.entity) {
+                                commands.trigger(SelectionListReplace {
+                                    entity: c.list,
+                                    index: c.index,
+                                });
+                            }
+                        },
+                    ),
                 ))
                 .insert((
                     v,
@@ -513,14 +585,16 @@ fn spawn_contents(
                     .ghost()
                     .tooltip("Remove")
                     .build(t),
-                observe(|a: On<Activate>, q: Query<&ItemRemove>, mut commands: Commands| {
-                    if let Ok(c) = q.get(a.entity) {
-                        commands.trigger(SelectionListRemove {
-                            entity: c.list,
-                            index: c.index,
-                        });
-                    }
-                }),
+                observe(
+                    |a: On<Activate>, q: Query<&ItemRemove>, mut commands: Commands| {
+                        if let Ok(c) = q.get(a.entity) {
+                            commands.trigger(SelectionListRemove {
+                                entity: c.list,
+                                index: c.index,
+                            });
+                        }
+                    },
+                ),
             ))
             .insert((ghost, small_square()));
         });
@@ -532,12 +606,17 @@ fn spawn_contents(
             ..default()
         })
         .with_child((
-            Button::new(format!("{}-done", meta.name)).label("Done").small().build(t),
-            observe(move |_: On<Activate>, mut q: Query<&mut SelectionListReorder>| {
-                if let Ok(mut r) = q.get_mut(list) {
-                    r.0 = false;
-                }
-            }),
+            Button::new(format!("{}-done", meta.name))
+                .label("Done")
+                .small()
+                .build(t),
+            observe(
+                move |_: On<Activate>, mut q: Query<&mut SelectionListReorder>| {
+                    if let Ok(mut r) = q.get_mut(list) {
+                        r.0 = false;
+                    }
+                },
+            ),
         ));
     }
 }
@@ -548,7 +627,11 @@ fn rows_moved(dy: f32) -> isize {
 }
 
 /// A handle's drag moves its row with the pointer.
-fn on_handle_drag(mut ev: On<Pointer<Drag>>, q: Query<&ItemHandle>, mut q_node: Query<(&mut Node, &mut ZIndex)>) {
+fn on_handle_drag(
+    mut ev: On<Pointer<Drag>>,
+    q: Query<&ItemHandle>,
+    mut q_node: Query<(&mut Node, &mut ZIndex)>,
+) {
     ev.propagate(false);
     let Ok(h) = q.get(ev.entity) else { return };
     if let Ok((mut n, mut z)) = q_node.get_mut(h.row) {
@@ -577,11 +660,19 @@ fn on_handle_drag_end(
     }
     let to = (h.index as isize + rows_moved(ev.distance.y)).clamp(0, n as isize - 1) as usize;
     if to != h.index {
-        commands.trigger(SelectionListMove { entity: h.list, from: h.index, to });
+        commands.trigger(SelectionListMove {
+            entity: h.list,
+            from: h.index,
+            to,
+        });
     }
 }
 
-fn on_list_click(mut click: On<Pointer<Click>>, q: Query<(), With<SelectionListState>>, mut commands: Commands) {
+fn on_list_click(
+    mut click: On<Pointer<Click>>,
+    q: Query<(), With<SelectionListState>>,
+    mut commands: Commands,
+) {
     if click.button != PointerButton::Primary {
         return;
     }
@@ -607,7 +698,11 @@ fn sync_selection_lists(
             &mut BorderColor,
             Option<&SelectionListReplaceable>,
         ),
-        Or<(Changed<SelectionListState>, Changed<SelectionListReorder>, Changed<SelectionListReplaceable>)>,
+        Or<(
+            Changed<SelectionListState>,
+            Changed<SelectionListReorder>,
+            Changed<SelectionListReplaceable>,
+        )>,
     >,
     mut commands: Commands,
 ) {

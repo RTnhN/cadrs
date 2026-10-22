@@ -22,7 +22,11 @@ pub enum BendCalc {
 }
 
 impl BendCalc {
-    pub const ALL: [BendCalc; 3] = [BendCalc::KFactor, BendCalc::BendAllowance, BendCalc::BendDeduction];
+    pub const ALL: [BendCalc; 3] = [
+        BendCalc::KFactor,
+        BendCalc::BendAllowance,
+        BendCalc::BendDeduction,
+    ];
 
     /// The dialog and table label ("K Factor", "Bend allowance", "Bend deduction").
     pub fn label(self) -> &'static str {
@@ -69,11 +73,17 @@ impl CornerReliefKind {
     }
 
     pub fn is_sized(self) -> bool {
-        matches!(self, CornerReliefKind::SquareSized | CornerReliefKind::RoundSized)
+        matches!(
+            self,
+            CornerReliefKind::SquareSized | CornerReliefKind::RoundSized
+        )
     }
 
     pub fn is_scaled(self) -> bool {
-        matches!(self, CornerReliefKind::RectangleScaled | CornerReliefKind::RoundScaled)
+        matches!(
+            self,
+            CornerReliefKind::RectangleScaled | CornerReliefKind::RoundScaled
+        )
     }
 }
 
@@ -99,7 +109,11 @@ impl BendReliefKind {
     ];
 
     /// The types the Sheet metal model feature offers (the Bend relief feature offers all).
-    pub const MODEL: [BendReliefKind; 3] = [BendReliefKind::RectangleScaled, BendReliefKind::ObroundScaled, BendReliefKind::Tear];
+    pub const MODEL: [BendReliefKind; 3] = [
+        BendReliefKind::RectangleScaled,
+        BendReliefKind::ObroundScaled,
+        BendReliefKind::Tear,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -112,11 +126,17 @@ impl BendReliefKind {
     }
 
     pub fn is_sized(self) -> bool {
-        matches!(self, BendReliefKind::SquareSized | BendReliefKind::ObroundSized)
+        matches!(
+            self,
+            BendReliefKind::SquareSized | BendReliefKind::ObroundSized
+        )
     }
 
     pub fn is_scaled(self) -> bool {
-        matches!(self, BendReliefKind::RectangleScaled | BendReliefKind::ObroundScaled)
+        matches!(
+            self,
+            BendReliefKind::RectangleScaled | BendReliefKind::ObroundScaled
+        )
     }
 }
 
@@ -223,7 +243,12 @@ pub struct RangeError {
 impl RangeError {
     pub fn message(&self) -> String {
         if self.max.is_finite() {
-            format!("{} must be between {} and {}", self.field, fmt_num(self.min), fmt_num(self.max))
+            format!(
+                "{} must be between {} and {}",
+                self.field,
+                fmt_num(self.min),
+                fmt_num(self.max)
+            )
         } else if self.min_exclusive {
             format!("{} must be greater than {}", self.field, fmt_num(self.min))
         } else {
@@ -243,7 +268,11 @@ impl std::error::Error for RangeError {}
 fn fmt_num(v: f64) -> String {
     let s = format!("{v:.4}");
     let s = s.trim_end_matches('0').trim_end_matches('.');
-    if s.is_empty() || s == "-" { "0".into() } else { s.into() }
+    if s.is_empty() || s == "-" {
+        "0".into()
+    } else {
+        s.into()
+    }
 }
 
 /// The valid ranges (inclusive), as Onshape's help gives them.
@@ -300,25 +329,54 @@ impl Params {
         check_positive(&mut out, "Thickness", self.thickness);
         check_non_negative(&mut out, "Bend radius", self.bend_radius);
         // The K factor always matters: hems use it whatever the calculation.
-        check(&mut out, "Default bend K Factor", self.k_factor, range::K_FACTOR);
+        check(
+            &mut out,
+            "Default bend K Factor",
+            self.k_factor,
+            range::K_FACTOR,
+        );
         match self.bend_calc {
             BendCalc::KFactor => {}
-            BendCalc::BendAllowance => check_positive(&mut out, "Bend allowance", self.bend_allowance),
-            BendCalc::BendDeduction => check_non_negative(&mut out, "Bend deduction", self.bend_deduction),
+            BendCalc::BendAllowance => {
+                check_positive(&mut out, "Bend allowance", self.bend_allowance)
+            }
+            BendCalc::BendDeduction => {
+                check_non_negative(&mut out, "Bend deduction", self.bend_deduction)
+            }
         }
-        check(&mut out, "Rolled K Factor", self.rolled_k_factor, range::K_FACTOR);
+        check(
+            &mut out,
+            "Rolled K Factor",
+            self.rolled_k_factor,
+            range::K_FACTOR,
+        );
         check_non_negative(&mut out, "Minimal gap", self.minimal_gap);
         let c = &self.corner_relief;
         if c.kind.is_scaled() {
-            check(&mut out, "Corner relief scale", c.scale, range::CORNER_RELIEF_SCALE);
+            check(
+                &mut out,
+                "Corner relief scale",
+                c.scale,
+                range::CORNER_RELIEF_SCALE,
+            );
         }
         if c.kind.is_sized() {
             check_positive(&mut out, "Corner relief size", c.size);
         }
         let b = &self.bend_relief;
         if b.kind.is_scaled() {
-            check(&mut out, "Bend relief depth scale", b.depth_scale, range::BEND_RELIEF_DEPTH_SCALE);
-            check(&mut out, "Bend relief width scale", b.width_scale, range::BEND_RELIEF_WIDTH_SCALE);
+            check(
+                &mut out,
+                "Bend relief depth scale",
+                b.depth_scale,
+                range::BEND_RELIEF_DEPTH_SCALE,
+            );
+            check(
+                &mut out,
+                "Bend relief width scale",
+                b.width_scale,
+                range::BEND_RELIEF_WIDTH_SCALE,
+            );
         }
         if b.kind.is_sized() {
             check_positive(&mut out, "Bend relief depth", b.depth);
@@ -354,9 +412,23 @@ mod tests {
         p.bend_relief.width_scale = 0.01;
         let errs = p.validate();
         let fields: Vec<_> = errs.iter().map(|e| e.field.as_str()).collect();
-        assert_eq!(fields, ["Thickness", "Default bend K Factor", "Corner relief scale", "Bend relief width scale"]);
-        assert_eq!(errs[1].message(), "Default bend K Factor must be between 0 and 1");
-        assert_eq!(errs[3].message(), "Bend relief width scale must be between 0.0625 and 2");
+        assert_eq!(
+            fields,
+            [
+                "Thickness",
+                "Default bend K Factor",
+                "Corner relief scale",
+                "Bend relief width scale"
+            ]
+        );
+        assert_eq!(
+            errs[1].message(),
+            "Default bend K Factor must be between 0 and 1"
+        );
+        assert_eq!(
+            errs[3].message(),
+            "Bend relief width scale must be between 0.0625 and 2"
+        );
         assert_eq!(errs[0].message(), "Thickness must be greater than 0");
     }
 

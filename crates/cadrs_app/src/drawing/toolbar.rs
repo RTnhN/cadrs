@@ -52,8 +52,10 @@ pub struct DrawingToolbarPlugin;
 
 impl Plugin for DrawingToolbarPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ToolChoices>()
-            .add_systems(Update, sync_tool_buttons.run_if(in_state(crate::AppState::Document)));
+        app.init_resource::<ToolChoices>().add_systems(
+            Update,
+            sync_tool_buttons.run_if(in_state(crate::AppState::Document)),
+        );
     }
 }
 
@@ -102,7 +104,9 @@ fn sync_tool_buttons(
             "drawing-projected-view" => matches!(ui.tool, ViewTool::Projected { .. }),
             "drawing-auxiliary-view" => matches!(ui.tool, ViewTool::Auxiliary { .. }),
             "drawing-section-view" => matches!(ui.tool, ViewTool::Section { .. }),
-            "drawing-detail-view" => ui.tool.is_view_kind() && !matches!(ui.tool, ViewTool::Section { .. }),
+            "drawing-detail-view" => {
+                ui.tool.is_view_kind() && !matches!(ui.tool, ViewTool::Section { .. })
+            }
             "drawing-dimension" => matches!(ann.tool, AnnTool::Dimension(_)),
             "drawing-hole-callout" => ann.tool == AnnTool::HoleCallout,
             "drawing-gdt" => matches!(ann.tool, AnnTool::Gdt | AnnTool::Datum),
@@ -139,7 +143,12 @@ fn on_caret(world: &mut World, button: Entity) -> bool {
         .iter(world)
         .find(|(id, _)| **id == PointerId::Mouse)
         .and_then(|(_, l)| l.location.as_ref().map(|l| l.position.x))
-        .unwrap_or_else(|| world.resource::<crate::viewport::ViewportDrag>().pointer().x);
+        .unwrap_or_else(|| {
+            world
+                .resource::<crate::viewport::ViewportDrag>()
+                .pointer()
+                .x
+        });
     world
         .get::<ComputedNode>(button)
         .zip(world.get::<bevy::ui::UiGlobalTransform>(button))
@@ -281,12 +290,32 @@ type Tool = (&'static str, &'static str, bool, &'static str);
 
 /// The toolbar's groups.
 pub const GROUPS: [&[Tool]; 7] = [
-    &[("drawing-update", "history", false, "Update from this workspace (Ctrl+Q)")],
+    &[(
+        "drawing-update",
+        "history",
+        false,
+        "Update from this workspace (Ctrl+Q)",
+    )],
     &[
         ("drawing-insert-view", "part", false, "Insert view"),
-        ("drawing-projected-view", "replicate", false, "Projected view"),
-        ("drawing-auxiliary-view", "arrow-up-right", false, "Auxiliary view"),
-        ("drawing-section-view", "section-view", false, "Section view"),
+        (
+            "drawing-projected-view",
+            "replicate",
+            false,
+            "Projected view",
+        ),
+        (
+            "drawing-auxiliary-view",
+            "arrow-up-right",
+            false,
+            "Auxiliary view",
+        ),
+        (
+            "drawing-section-view",
+            "section-view",
+            false,
+            "Section view",
+        ),
         ("drawing-detail-view", "find", true, "Detail view"),
     ],
     &[
@@ -294,9 +323,19 @@ pub const GROUPS: [&[Tool]; 7] = [
         ("drawing-hole-callout", "hole", false, "Hole callout"),
     ],
     &[
-        ("drawing-surface-finish", "check", false, "Surface finish symbol"),
+        (
+            "drawing-surface-finish",
+            "check",
+            false,
+            "Surface finish symbol",
+        ),
         ("drawing-weld", "fillet", false, "Weld symbol"),
-        ("drawing-gdt", "constraint-parallel", true, "Geometric tolerance"),
+        (
+            "drawing-gdt",
+            "constraint-parallel",
+            true,
+            "Geometric tolerance",
+        ),
     ],
     &[
         ("drawing-note", "note", false, "Note (N)"),
@@ -312,7 +351,12 @@ pub const GROUPS: [&[Tool]; 7] = [
     &[
         ("drawing-line", "line", false, "Line"),
         ("drawing-spline", "spline", false, "Spline"),
-        ("drawing-insert-dxf", "file-import", false, "Insert DXF or DWG"),
+        (
+            "drawing-insert-dxf",
+            "file-import",
+            false,
+            "Insert DXF or DWG",
+        ),
         ("drawing-insert-image", "image", false, "Insert image"),
     ],
 ];
@@ -338,7 +382,10 @@ pub fn drawing_toolbar(tb: &mut ChildSpawnerCommands, t: &Theme) {
             if ENABLED.contains(name) {
                 let n: &'static str = name;
                 tb.spawn((
-                    ToolButton::new(*name, *icon).dropdown(*dropdown).tooltip(*tip).build(t),
+                    ToolButton::new(*name, *icon)
+                        .dropdown(*dropdown)
+                        .tooltip(*tip)
+                        .build(t),
                     observe(move |a: On<Activate>, mut commands: Commands| {
                         let button = a.entity;
                         commands.queue(move |w: &mut World| start_tool(w, n, button));

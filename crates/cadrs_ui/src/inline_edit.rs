@@ -168,10 +168,7 @@ pub fn begin_inline_edit(
             return;
         }
         edit.editing = true;
-        let children: Vec<Entity> = e
-            .get::<Children>()
-            .map(|c| c.to_vec())
-            .unwrap_or_default();
+        let children: Vec<Entity> = e.get::<Children>().map(|c| c.to_vec()).unwrap_or_default();
         let mut index = children.len();
         for (i, c) in children.iter().enumerate() {
             if world.get::<InlineEditLabel>(*c).is_some() {
@@ -218,10 +215,7 @@ pub fn end_inline_edit(world: &mut World, owner: Entity) {
     if let Some(mut edit) = e.get_mut::<InlineEdit>() {
         edit.editing = false;
     }
-    let children: Vec<Entity> = e
-        .get::<Children>()
-        .map(|c| c.to_vec())
-        .unwrap_or_default();
+    let children: Vec<Entity> = e.get::<Children>().map(|c| c.to_vec()).unwrap_or_default();
     for c in children {
         if (world.get::<InlineEditLabel>(c).is_some() || world.get::<InlineEditHide>(c).is_some())
             && let Some(mut n) = world.get_mut::<Node>(c)
@@ -233,9 +227,7 @@ pub fn end_inline_edit(world: &mut World, owner: Entity) {
 
 fn finish(commands: &mut Commands, owner: Entity, value: Option<String>) {
     commands.queue(move |world: &mut World| {
-        let editing = world
-            .get::<InlineEdit>(owner)
-            .is_some_and(|e| e.editing);
+        let editing = world.get::<InlineEdit>(owner).is_some_and(|e| e.editing);
         if !editing {
             return;
         }

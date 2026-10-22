@@ -24,8 +24,8 @@ use cadrs_sheetmetal::poly::P2;
 use cadrs_sketch::PlaneFrame;
 
 use super::derived::motion_between;
-use crate::mate::ConnectorRef;
 use super::sheetmetal::refold::local_to_wall;
+use crate::mate::ConnectorRef;
 use crate::sheetmetal::{FormCopy, FormStep};
 use crate::sheetmetal_form::{FormFeature, FormLocation, TagFormFeature, form_studio, tag_of};
 
@@ -39,7 +39,9 @@ fn moved(m: &Motion, p: [f64; 3]) -> P3 {
 
 /// A sketch's construction curves as polylines in world coordinates.
 fn construction_lines(sk: &crate::document::SketchFeature) -> Vec<(Vec<[f64; 3]>, bool)> {
-    let Some(frame) = sk.plane.map(|p| p.frame()) else { return Vec::new() };
+    let Some(frame) = sk.plane.map(|p| p.frame()) else {
+        return Vec::new();
+    };
     let g = &sk.geometry;
     let mut out: Vec<(Vec<[f64; 3]>, bool)> = Vec::new();
     for (id, c) in g.curves.iter().filter(|(_, c)| c.construction) {
@@ -47,28 +49,49 @@ fn construction_lines(sk: &crate::document::SketchFeature) -> Vec<(Vec<[f64; 3]>
             cadrs_sketch::CurveKind::Line { a, b } => (vec![g.pos(a), g.pos(b)], false),
             cadrs_sketch::CurveKind::Circle { center, radius } => {
                 let o = g.pos(center);
-                ((0..48).map(|k| {
-                    let a = k as f64 / 48.0 * std::f64::consts::TAU;
-                    cadrs_sketch::Vec2::new(o.x + radius * a.cos(), o.y + radius * a.sin())
-                }).collect(), true)
+                (
+                    (0..48)
+                        .map(|k| {
+                            let a = k as f64 / 48.0 * std::f64::consts::TAU;
+                            cadrs_sketch::Vec2::new(o.x + radius * a.cos(), o.y + radius * a.sin())
+                        })
+                        .collect(),
+                    true,
+                )
             }
             cadrs_sketch::CurveKind::Arc { .. } => match g.arc_geom(id) {
-                Some(a) => ((0..=24).map(|k| a.point_at(a.start_angle + a.sweep * k as f64 / 24.0)).collect(), false),
+                Some(a) => (
+                    (0..=24)
+                        .map(|k| a.point_at(a.start_angle + a.sweep * k as f64 / 24.0))
+                        .collect(),
+                    false,
+                ),
                 None => continue,
             },
             _ => continue,
         };
-        out.push((pts.0.into_iter().map(|q| frame.to_world(q)).collect(), pts.1));
+        out.push((
+            pts.0.into_iter().map(|q| frame.to_world(q)).collect(),
+            pts.1,
+        ));
     }
     // Lines that meet end to end make one outline (a rectangle's four sides).
-    let size = out.iter().flat_map(|(l, _)| l.iter()).map(|p| v(*p).norm()).fold(1.0, f64::max);
+    let size = out
+        .iter()
+        .flat_map(|(l, _)| l.iter())
+        .map(|p| v(*p).norm())
+        .fold(1.0, f64::max);
     let tol = 1e-6 * size;
     let (mut closed, mut open): (Vec<_>, Vec<_>) = out.into_iter().partition(|(_, c)| *c);
     while !open.is_empty() {
         let mut line: Vec<[f64; 3]> = open.remove(0).0;
         loop {
             let end = v(line[line.len() - 1]);
-            let Some(i) = open.iter().position(|(l, _)| (v(l[0]) - end).norm() <= tol || (v(l[l.len() - 1]) - end).norm() <= tol) else { break };
+            let Some(i) = open.iter().position(|(l, _)| {
+                (v(l[0]) - end).norm() <= tol || (v(l[l.len() - 1]) - end).norm() <= tol
+            }) else {
+                break;
+            };
             let (mut l, _) = open.remove(i);
             if (v(l[0]) - end).norm() > tol {
                 l.reverse();
@@ -85,17 +108,34 @@ fn construction_lines(sk: &crate::document::SketchFeature) -> Vec<(Vec<[f64; 3]>
 }
 
 /// The frames of a Form's locations.
-fn location_frames(before: &[Feature], state: &State, locs: &[FormLocation]) -> Result<Vec<PlaneFrame>, String> {
+fn location_frames(
+    before: &[Feature],
+    state: &State,
+    locs: &[FormLocation],
+) -> Result<Vec<PlaneFrame>, String> {
     let mut out = Vec::new();
     for l in locs {
         match l {
-            FormLocation::Connector(c) => out.push(super::super::connector_frame(before, state, c)?),
+            FormLocation::Connector(c) => {
+                out.push(super::super::connector_frame(before, state, c)?)
+            }
             FormLocation::SketchPoints(s) => {
-                let sk = before.iter().find(|f| f.id == *s).and_then(|f| f.sketch()).ok_or("A location sketch no longer exists")?;
-                let frame = sk.plane.map(|p| p.frame()).ok_or("A location sketch has no plane")?;
+                let sk = before
+                    .iter()
+                    .find(|f| f.id == *s)
+                    .and_then(|f| f.sketch())
+                    .ok_or("A location sketch no longer exists")?;
+                let frame = sk
+                    .plane
+                    .map(|p| p.frame())
+                    .ok_or("A location sketch has no plane")?;
                 for p in crate::hole::hole_vertices(&sk.geometry) {
                     let q = frame.to_world(sk.geometry.pos(p));
-                    out.push(PlaneFrame { origin: q, u: frame.u, v: frame.v });
+                    out.push(PlaneFrame {
+                        origin: q,
+                        u: frame.u,
+                        v: frame.v,
+                    });
                 }
             }
         }
@@ -104,12 +144,21 @@ fn location_frames(before: &[Feature], state: &State, locs: &[FormLocation]) -> 
 }
 
 impl Rebuilder {
-    pub(in crate::rebuild) fn tag_form(&mut self, id: FeatureId, x: &TagFormFeature, state: &Arc<State>) -> Result<Output, String> {
+    pub(in crate::rebuild) fn tag_form(
+        &mut self,
+        id: FeatureId,
+        x: &TagFormFeature,
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
         let _ = id;
         if let Some(p) = x.problem() {
             return Err(p.into());
         }
-        if x.add.iter().chain(&x.remove).any(|p| state.part(*p).is_none()) {
+        if x.add
+            .iter()
+            .chain(&x.remove)
+            .any(|p| state.part(*p).is_none())
+        {
             return Err("A tagged part no longer exists".into());
         }
         if let Some(ConnectorRef::Feature(f)) = x.origin
@@ -117,10 +166,28 @@ impl Rebuilder {
         {
             return Err("The form origin mate connector no longer exists".into());
         }
-        Ok(Output { state: state.clone(), error: None, warning: None, contacts: None, owned: Vec::new(), stage: None, axis: None, arrows: Vec::new(), dots: None, uses: Vec::new() })
+        Ok(Output {
+            state: state.clone(),
+            error: None,
+            warning: None,
+            contacts: None,
+            owned: Vec::new(),
+            stage: None,
+            axis: None,
+            arrows: Vec::new(),
+            dots: None,
+            uses: Vec::new(),
+        })
     }
 
-    pub(in crate::rebuild) fn sheet_metal_form(&mut self, before: &[Feature], id: FeatureId, name: &str, x: &FormFeature, state: &Arc<State>) -> Result<Output, String> {
+    pub(in crate::rebuild) fn sheet_metal_form(
+        &mut self,
+        before: &[Feature],
+        id: FeatureId,
+        name: &str,
+        x: &FormFeature,
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
         if let Some(p) = x.problem() {
             return Err(p.into());
         }
@@ -135,40 +202,85 @@ impl Rebuilder {
         for f in &x.targets {
             let (part, ids) = face_ids(state, f).ok_or("A target face no longer exists")?;
             let body = part.body.ok_or("A target face no longer exists")?;
-            let info = self.kernel.faces(body).map_err(|e| e.to_string())?.into_iter().find(|i| Some(&i.id) == ids.first()).ok_or("A target face no longer exists")?;
-            let Some(pl) = info.plane else { return Err("Forms go on flat faces of sheet metal walls".into()) };
+            let info = self
+                .kernel
+                .faces(body)
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .find(|i| Some(&i.id) == ids.first())
+                .ok_or("A target face no longer exists")?;
+            let Some(pl) = info.plane else {
+                return Err("Forms go on flat faces of sheet metal walls".into());
+            };
             let ctx = state
                 .sheet_metal
                 .iter()
                 .position(|c| c.active && c.parts.iter().any(|(p, _)| *p == part.part.id))
                 .ok_or("The target face isn't on an active sheet metal part")?;
             let n = pl.normal.into_inner();
-            targets.push(Target { ctx, point: P3::new(info.center.x, info.center.y, info.center.z), normal: V3::new(n.x, n.y, n.z) });
+            targets.push(Target {
+                ctx,
+                point: P3::new(info.center.x, info.center.y, info.center.z),
+                normal: V3::new(n.x, n.y, n.z),
+            });
         }
         let thickness = state.sheet_metal[targets[0].ctx].model.params.thickness;
         let studio = form_studio(pick, &x.variables, thickness)?;
-        let tag = tag_of(&studio).cloned().ok_or_else(|| format!("{} has no Tag (Form) feature", pick.name))?;
+        let tag = tag_of(&studio)
+            .cloned()
+            .ok_or_else(|| format!("{} has no Tag (Form) feature", pick.name))?;
         let (sb, sstate) = self.sub_build(&studio)?;
         let origin = tag.origin.ok_or("The form has no origin mate connector")?;
-        let base = crate::mate::frame(&origin, &studio, &sb.parts, &sstate.connectors).map_err(|e| format!("The form's origin: {e}"))?;
-        let base_motion = motion_between(&base, &PlaneFrame { origin: [0.0; 3], u: [1.0, 0.0, 0.0], v: [0.0, 1.0, 0.0] });
+        let base = crate::mate::frame(&origin, &studio, &sb.parts, &sstate.connectors)
+            .map_err(|e| format!("The form's origin: {e}"))?;
+        let base_motion = motion_between(
+            &base,
+            &PlaneFrame {
+                origin: [0.0; 3],
+                u: [1.0, 0.0, 0.0],
+                v: [0.0, 1.0, 0.0],
+            },
+        );
         // The form in its own frame: outline lines and footprint.
         let local = |p: [f64; 3]| moved(&base_motion, p);
         let mut lines: Vec<(Vec<P3>, bool)> = Vec::new();
-        if let Some(sk) = tag.sketch.and_then(|s| studio.iter().find(|f| f.id == s)).and_then(|f| f.sketch()) {
-            lines = construction_lines(sk).into_iter().map(|(l, c)| (l.into_iter().map(local).collect(), c)).collect();
+        if let Some(sk) = tag
+            .sketch
+            .and_then(|s| studio.iter().find(|f| f.id == s))
+            .and_then(|f| f.sketch())
+        {
+            lines = construction_lines(sk)
+                .into_iter()
+                .map(|(l, c)| (l.into_iter().map(local).collect(), c))
+                .collect();
         }
-        let tool_parts: Vec<&PartState> = tag.add.iter().chain(&tag.remove).filter_map(|p| sstate.part(*p)).collect();
+        let tool_parts: Vec<&PartState> = tag
+            .add
+            .iter()
+            .chain(&tag.remove)
+            .filter_map(|p| sstate.part(*p))
+            .collect();
         if tool_parts.is_empty() {
             return Err(format!("{}'s tagged parts don't build", pick.name));
         }
-        let foot: Vec<P2> = tool_parts.iter().flat_map(|p| p.part.solid.positions.iter()).map(|q| {
-            let l = local(*q);
-            P2::new(l.x, l.y)
-        }).collect();
+        let foot: Vec<P2> = tool_parts
+            .iter()
+            .flat_map(|p| p.part.solid.positions.iter())
+            .map(|q| {
+                let l = local(*q);
+                P2::new(l.x, l.y)
+            })
+            .collect();
         let footprint = hull(&foot);
         if lines.is_empty() {
-            lines.push((footprint.outer.iter().map(|q| P3::new(q.x, q.y, 0.0)).collect(), true));
+            lines.push((
+                footprint
+                    .outer
+                    .iter()
+                    .map(|q| P3::new(q.x, q.y, 0.0))
+                    .collect(),
+                true,
+            ));
         }
         // Each location onto its target face.
         let frames = location_frames(before, state, &x.locations)?;
@@ -190,13 +302,25 @@ impl Rebuilder {
                 .expect("targets");
             let t = &targets[ti];
             let n = if x.flip { -t.normal } else { t.normal };
-            let on = o - t.normal * (o - t.point.coords).dot(&t.normal) - if x.flip { t.normal * thickness } else { V3::zeros() };
+            let on = o
+                - t.normal * (o - t.point.coords).dot(&t.normal)
+                - if x.flip {
+                    t.normal * thickness
+                } else {
+                    V3::zeros()
+                };
             let ux = {
                 let u = v(fr.u);
                 let w = u - n * u.dot(&n);
-                if w.norm() > 1e-6 { w.normalize() } else { let vv = v(fr.v); (vv - n * vv.dot(&n)).normalize() }
+                if w.norm() > 1e-6 {
+                    w.normalize()
+                } else {
+                    let vv = v(fr.v);
+                    (vv - n * vv.dot(&n)).normalize()
+                }
             };
-            let to = crate::mate::frame_from([on.x, on.y, on.z], [n.x, n.y, n.z], [ux.x, ux.y, ux.z]);
+            let to =
+                crate::mate::frame_from([on.x, on.y, on.z], [n.x, n.y, n.z], [ux.x, ux.y, ux.z]);
             marks.push(([on.x, on.y, on.z], [n.x, n.y, n.z]));
             marks.push(([ux.x, ux.y, ux.z], [0.0; 3]));
             let m = motion_between(&base, &to);
@@ -210,25 +334,47 @@ impl Rebuilder {
                 .filter(|w| matches!(w.surface, Surface::Planar { .. }))
                 .filter(|w| {
                     let wn = w.surface.normal().unwrap_or_default();
-                    let Surface::Planar { origin, .. } = w.surface else { return false };
+                    let Surface::Planar { origin, .. } = w.surface else {
+                        return false;
+                    };
                     let d = (center - origin).dot(&wn);
-                    wn.dot(&n).abs() > 1.0 - 1e-6 && ((d).abs() < 1e-4 * (1.0 + tt) || (d - tt).abs() < 1e-4 * (1.0 + tt) || (d + tt).abs() < 1e-4 * (1.0 + tt))
+                    wn.dot(&n).abs() > 1.0 - 1e-6
+                        && ((d).abs() < 1e-4 * (1.0 + tt)
+                            || (d - tt).abs() < 1e-4 * (1.0 + tt)
+                            || (d + tt).abs() < 1e-4 * (1.0 + tt))
                 })
                 .min_by(|a, b| {
-                    let inside = |w: &cadrs_sheetmetal::Wall| !w.outline.contains(w.surface.local(center));
+                    let inside =
+                        |w: &cadrs_sheetmetal::Wall| !w.outline.contains(w.surface.local(center));
                     inside(a).cmp(&inside(b))
                 })
-                .ok_or("Forms go on the flat faces of sheet metal walls (not rolled walls or bends)")?;
+                .ok_or(
+                    "Forms go on the flat faces of sheet metal walls (not rolled walls or bends)",
+                )?;
             let wall_id = wall.id;
             let to_wall = |p: P3| wall.surface.local(p);
-            let size = wall.outline.bounds().map(|(lo, hi)| (hi - lo).norm()).unwrap_or(1.0);
+            let size = wall
+                .outline
+                .bounds()
+                .map(|(lo, hi)| (hi - lo).norm())
+                .unwrap_or(1.0);
             // A point in the form's own frame, placed by this copy, in the wall's 2D.
             let place = |q: V3| {
                 let w = base_motion.linear.transpose() * (q - base_motion.translation);
                 to_wall(moved(&m, [w.x, w.y, w.z]))
             };
-            let fp: Vec<P2> = footprint.outer.iter().map(|q| place(V3::new(q.x, q.y, 0.0))).collect();
-            check_footprint(model, wall_id, &cadrs_sheetmetal::poly::Polygon::new(fp.clone()), 1e-6 * size).map_err(|e| e.message())?;
+            let fp: Vec<P2> = footprint
+                .outer
+                .iter()
+                .map(|q| place(V3::new(q.x, q.y, 0.0)))
+                .collect();
+            check_footprint(
+                model,
+                wall_id,
+                &cadrs_sheetmetal::poly::Polygon::new(fp.clone()),
+                1e-6 * size,
+            )
+            .map_err(|e| e.message())?;
             // The flat: outline and centermark, in the wall's 2D.
             let flines: Vec<FormLine> = lines
                 .iter()
@@ -239,8 +385,16 @@ impl Rebuilder {
                 .collect();
             let wn = wall.surface.normal().unwrap_or_default();
             let up = (n.dot(&wn) > 0.0) != model.params.flip_direction_up;
-            let local = local_to_wall(model, wall_id, &m).ok_or("Forms go on the flat faces of sheet metal walls")?;
-            let copy = FormCopy { wall: wall_id, local, center: to_wall(center), lines: flines, up, footprint: fp };
+            let local = local_to_wall(model, wall_id, &m)
+                .ok_or("Forms go on the flat faces of sheet metal walls")?;
+            let copy = FormCopy {
+                wall: wall_id,
+                local,
+                center: to_wall(center),
+                lines: flines,
+                up,
+                footprint: fp,
+            };
             match by_ctx.iter_mut().find(|(c, _)| *c == t.ctx) {
                 Some((_, v)) => v.push(copy),
                 None => by_ctx.push((t.ctx, vec![copy])),
@@ -251,7 +405,14 @@ impl Rebuilder {
         let mut owned = Vec::new();
         let mut last: Option<Output> = None;
         for (ci, copies) in by_ctx {
-            let step = FormStep { feature: id, name: name.to_string(), pick: pick.clone(), variables: x.variables.clone(), thickness, copies };
+            let step = FormStep {
+                feature: id,
+                name: name.to_string(),
+                pick: pick.clone(),
+                variables: x.variables.clone(),
+                thickness,
+                copies,
+            };
             let o = self.edit_sheet_metal(id, name, &current, ci, |ctx| {
                 ctx.forms.push(step);
                 Ok(None)

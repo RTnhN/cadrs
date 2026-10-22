@@ -28,7 +28,10 @@ impl Plugin for DialogPlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(on_close_button)
             .add_observer(on_dialog_close)
-            .add_systems(Update, (stack_new_dialogs, close_on_escape, dismiss_toasts_on_open));
+            .add_systems(
+                Update,
+                (stack_new_dialogs, close_on_escape, dismiss_toasts_on_open),
+            );
     }
 }
 
@@ -259,7 +262,10 @@ fn close_on_escape(
     mut commands: Commands,
 ) {
     for k in keys.read() {
-        if k.state != ButtonState::Pressed || k.shortcut_code() != KeyCode::Escape || !q_menus.is_empty() {
+        if k.state != ButtonState::Pressed
+            || k.shortcut_code() != KeyCode::Escape
+            || !q_menus.is_empty()
+        {
             continue;
         }
         // Close the topmost dialog.
@@ -288,9 +294,16 @@ fn dismiss_toasts_on_open(
 
 /// A dialog opened over another (a browser from a properties dialog) goes on top of it, its
 /// backdrop covering the one below.
-fn stack_new_dialogs(q_new: Query<Entity, Added<DialogRoot>>, mut q_all: Query<(Entity, &mut GlobalZIndex), With<DialogRoot>>) {
+fn stack_new_dialogs(
+    q_new: Query<Entity, Added<DialogRoot>>,
+    mut q_all: Query<(Entity, &mut GlobalZIndex), With<DialogRoot>>,
+) {
     for e in &q_new {
-        let top = q_all.iter().filter(|(o, _)| *o != e).map(|(_, z)| z.0).max();
+        let top = q_all
+            .iter()
+            .filter(|(o, _)| *o != e)
+            .map(|(_, z)| z.0)
+            .max();
         if let (Some(top), Ok((_, mut z))) = (top, q_all.get_mut(e))
             && z.0 <= top
         {

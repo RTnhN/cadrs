@@ -43,7 +43,10 @@ use bevy::text::FontWeight;
 use bevy::ui_widgets::Activate;
 use cadrs_core::tab_tree::{self, MoveTabItems, RenameTabFolder, TabItem, TabNode};
 use cadrs_core::{ElementId, ElementKind};
-use cadrs_ui::menu::{ContextMenuAnchor, ContextMenuRequested, ContextMenuTarget, Menu, MenuAction, MenuItem, open_context_menu, open_menu};
+use cadrs_ui::menu::{
+    ContextMenuAnchor, ContextMenuRequested, ContextMenuTarget, Menu, MenuAction, MenuItem,
+    open_context_menu, open_menu,
+};
 use cadrs_ui::prelude::*;
 use cadrs_ui::{InlineEditCommit, InlineEditOptions, begin_inline_edit};
 
@@ -57,12 +60,31 @@ impl Plugin for TabManagerPlugin {
             .init_resource::<ManagerDrag>()
             .init_resource::<TabThumbs>()
             .init_resource::<PendingRowRename>()
-            .add_systems(Update, (read_search, sync_panel, fill_thumbs, sync_filters, sync_rows, sync_preview, start_row_rename, place_drop).chain().run_if(in_state(AppState::Document)))
-            .add_systems(OnExit(AppState::Document), |mut tm: ResMut<TabManager>, mut d: ResMut<ManagerDrag>, mut th: ResMut<TabThumbs>| {
-                *tm = TabManager::default();
-                *d = ManagerDrag::default();
-                *th = TabThumbs::default();
-            })
+            .add_systems(
+                Update,
+                (
+                    read_search,
+                    sync_panel,
+                    fill_thumbs,
+                    sync_filters,
+                    sync_rows,
+                    sync_preview,
+                    start_row_rename,
+                    place_drop,
+                )
+                    .chain()
+                    .run_if(in_state(AppState::Document)),
+            )
+            .add_systems(
+                OnExit(AppState::Document),
+                |mut tm: ResMut<TabManager>,
+                 mut d: ResMut<ManagerDrag>,
+                 mut th: ResMut<TabThumbs>| {
+                    *tm = TabManager::default();
+                    *d = ManagerDrag::default();
+                    *th = TabThumbs::default();
+                },
+            )
             .add_observer(on_button)
             .add_observer(on_sort_action)
             .add_observer(on_row_menu)
@@ -124,7 +146,9 @@ pub struct TabManager {
 impl TabManager {
     /// A flat list (searching, filtering or sorted) rather than the folder tree.
     fn flat(&self) -> bool {
-        !self.search.trim().is_empty() || self.filter != TypeFilter::All || self.sort != SortBy::Document
+        !self.search.trim().is_empty()
+            || self.filter != TypeFilter::All
+            || self.sort != SortBy::Document
     }
 }
 
@@ -201,19 +225,51 @@ fn rows_of(doc: &cadrs_core::Document, tm: &TabManager) -> Vec<RowSpec> {
     let layout = tab_tree::layout(doc);
     let mut out = Vec::new();
     let needle = tm.search.trim().to_lowercase();
-    let folder_kind = |n: usize| if n == 1 { "Folder · 1 tab".to_string() } else { format!("Folder · {n} tabs") };
+    let folder_kind = |n: usize| {
+        if n == 1 {
+            "Folder · 1 tab".to_string()
+        } else {
+            format!("Folder · {n} tabs")
+        }
+    };
     if !tm.flat() {
-        fn walk(doc: &cadrs_core::Document, tm: &TabManager, nodes: &[TabNode], depth: usize, parent: Option<ElementId>, out: &mut Vec<RowSpec>, folder_kind: &dyn Fn(usize) -> String) {
+        fn walk(
+            doc: &cadrs_core::Document,
+            tm: &TabManager,
+            nodes: &[TabNode],
+            depth: usize,
+            parent: Option<ElementId>,
+            out: &mut Vec<RowSpec>,
+            folder_kind: &dyn Fn(usize) -> String,
+        ) {
             for n in nodes {
                 match n {
                     TabNode::Tab(e) => {
                         let Some(el) = doc.element(*e) else { continue };
-                        out.push(RowSpec { item: TabItem::Tab(*e), depth, parent, name: el.name.clone(), icon: tab_icon(el), kind: tab_type(el).into(), folder: None, location: None });
+                        out.push(RowSpec {
+                            item: TabItem::Tab(*e),
+                            depth,
+                            parent,
+                            name: el.name.clone(),
+                            icon: tab_icon(el),
+                            kind: tab_type(el).into(),
+                            folder: None,
+                            location: None,
+                        });
                     }
                     TabNode::Folder { id, name, children } => {
                         let open = !tm.collapsed.contains(id);
                         let count = n.tabs().len();
-                        out.push(RowSpec { item: TabItem::Folder(*id), depth, parent, name: name.clone(), icon: "folder", kind: folder_kind(count), folder: Some((open, count)), location: None });
+                        out.push(RowSpec {
+                            item: TabItem::Folder(*id),
+                            depth,
+                            parent,
+                            name: name.clone(),
+                            icon: "folder",
+                            kind: folder_kind(count),
+                            folder: Some((open, count)),
+                            location: None,
+                        });
                         if open {
                             walk(doc, tm, children, depth + 1, Some(*id), out, folder_kind);
                         }
@@ -229,23 +285,46 @@ fn rows_of(doc: &cadrs_core::Document, tm: &TabManager) -> Vec<RowSpec> {
                 continue;
             }
             let parent = tab_tree::parent_of(&layout, TabItem::Tab(e));
-            let location = parent.and_then(|p| doc.tab_tree.folder(p)).map(|f| f.name.clone());
-            out.push(RowSpec { item: TabItem::Tab(e), depth: 0, parent, name: el.name.clone(), icon: tab_icon(el), kind: tab_type(el).into(), folder: None, location });
+            let location = parent
+                .and_then(|p| doc.tab_tree.folder(p))
+                .map(|f| f.name.clone());
+            out.push(RowSpec {
+                item: TabItem::Tab(e),
+                depth: 0,
+                parent,
+                name: el.name.clone(),
+                icon: tab_icon(el),
+                kind: tab_type(el).into(),
+                folder: None,
+                location,
+            });
         }
         let lower = |r: &RowSpec| r.name.to_lowercase();
         match tm.sort {
             SortBy::Document => {}
-            SortBy::NameAsc => out.sort_by(|a, b| cadrs_core::library::natural_cmp(&lower(a), &lower(b))),
-            SortBy::NameDesc => out.sort_by(|a, b| cadrs_core::library::natural_cmp(&lower(b), &lower(a))),
+            SortBy::NameAsc => {
+                out.sort_by(|a, b| cadrs_core::library::natural_cmp(&lower(a), &lower(b)))
+            }
+            SortBy::NameDesc => {
+                out.sort_by(|a, b| cadrs_core::library::natural_cmp(&lower(b), &lower(a)))
+            }
             SortBy::Type => out.sort_by(|a, b| a.kind.cmp(&b.kind)),
         }
     }
     out
 }
 
-fn on_button(a: On<Activate>, q: Query<&Name>, mut tm: ResMut<TabManager>, theme: Res<Theme>, mut commands: Commands) {
+fn on_button(
+    a: On<Activate>,
+    q: Query<&Name>,
+    mut tm: ResMut<TabManager>,
+    theme: Res<Theme>,
+    mut commands: Commands,
+) {
     let Ok(name) = q.get(a.entity) else { return };
-    let toggle = |tm: &mut TabManager, f: TypeFilter| tm.filter = if tm.filter == f { TypeFilter::All } else { f };
+    let toggle = |tm: &mut TabManager, f: TypeFilter| {
+        tm.filter = if tm.filter == f { TypeFilter::All } else { f }
+    };
     match name.as_str() {
         "tab-manager" => {
             tm.open = !tm.open;
@@ -275,14 +354,28 @@ fn on_button(a: On<Activate>, q: Query<&Name>, mut tm: ResMut<TabManager>, theme
         }
         "tab-manager-sort" => {
             let sort = tm.sort;
-            let item = |id: &'static str, label: &str, s: SortBy| MenuItem::new(id, label).checked(sort == s);
+            let item = |id: &'static str, label: &str, s: SortBy| {
+                MenuItem::new(id, label).checked(sort == s)
+            };
             let menu = Menu::new("tab-manager-sort-menu")
                 .min_width(170.0)
                 .item_height(22.0)
                 .text_only()
-                .item(item("tab-manager-sort-document", "Document order", SortBy::Document))
-                .item(item("tab-manager-sort-name-asc", "Name A–Z", SortBy::NameAsc))
-                .item(item("tab-manager-sort-name-desc", "Name Z–A", SortBy::NameDesc))
+                .item(item(
+                    "tab-manager-sort-document",
+                    "Document order",
+                    SortBy::Document,
+                ))
+                .item(item(
+                    "tab-manager-sort-name-asc",
+                    "Name A–Z",
+                    SortBy::NameAsc,
+                ))
+                .item(item(
+                    "tab-manager-sort-name-desc",
+                    "Name Z–A",
+                    SortBy::NameDesc,
+                ))
                 .item(item("tab-manager-sort-type", "Type", SortBy::Type));
             open_menu(&mut commands, a.entity, menu.build(&theme));
         }
@@ -318,7 +411,10 @@ fn set_search_field(world: &mut World, value: &str) {
 }
 
 fn read_search(q: Query<(&Name, &bevy::text::EditableText)>, mut tm: ResMut<TabManager>) {
-    if let Some(v) = q.iter().find(|(n, _)| n.as_str() == "tab-manager-search-field").map(|(_, t)| t.value().to_string())
+    if let Some(v) = q
+        .iter()
+        .find(|(n, _)| n.as_str() == "tab-manager-search-field")
+        .map(|(_, t)| t.value().to_string())
         && tm.search != v
     {
         tm.search = v;
@@ -336,7 +432,10 @@ fn selected_tabs(doc: &cadrs_core::Document, sel: &[ElementId]) -> Vec<ElementId
             picked.push(*s);
         }
     }
-    tab_tree::flatten(&layout).into_iter().filter(|e| picked.contains(e)).collect()
+    tab_tree::flatten(&layout)
+        .into_iter()
+        .filter(|e| picked.contains(e))
+        .collect()
 }
 
 /// The selection as tree items, in list order, without those inside a selected folder.
@@ -362,11 +461,16 @@ fn selected_items(doc: &cadrs_core::Document, sel: &[ElementId]) -> Vec<TabItem>
         }
         false
     };
-    order.into_iter().filter(|i| sel.contains(&i.id()) && !inside_selected(i)).collect()
+    order
+        .into_iter()
+        .filter(|i| sel.contains(&i.id()) && !inside_selected(i))
+        .collect()
 }
 
 fn move_to_document(world: &mut World, sel: Vec<ElementId>) {
-    let Some(doc) = world.get_resource::<ActiveDocument>() else { return };
+    let Some(doc) = world.get_resource::<ActiveDocument>() else {
+        return;
+    };
     let tabs = selected_tabs(&doc.doc, &sel);
     if tabs.is_empty() {
         return;
@@ -414,55 +518,106 @@ fn fill_thumbs(world: &mut World) {
     if !world.resource::<TabManager>().open || !world.resource::<ManagerDrag>().items.is_empty() {
         return;
     }
-    let Some(doc) = world.get_resource::<ActiveDocument>().map(|d| d.doc.clone()) else { return };
+    let Some(doc) = world
+        .get_resource::<ActiveDocument>()
+        .map(|d| d.doc.clone())
+    else {
+        return;
+    };
     let mut budget = 2;
     for el in &doc.elements {
         if budget == 0 {
             break;
         }
-        let fresh = world.resource::<TabThumbs>().map.get(&el.id).is_some_and(|(e, _)| e == el);
+        let fresh = world
+            .resource::<TabThumbs>()
+            .map
+            .get(&el.id)
+            .is_some_and(|(e, _)| e == el);
         if fresh {
             continue;
         }
         // P3E.3a (P3E.2 carried delta: a big studio's preview was its icon): a studio too big
         // to rebuild again for its thumbnail is drawn from the parts on screen, once they are
         // built from its current features.
-        let big = matches!(el.kind, ElementKind::PartStudio { .. }) && el.features().len() > THUMB_FEATURE_LIMIT;
+        let big = matches!(el.kind, ElementKind::PartStudio { .. })
+            && el.features().len() > THUMB_FEATURE_LIMIT;
         if big {
             let cache = world.resource::<crate::parts::PartCache>();
-            let on_screen = cache.settled().is_some_and(|(id, features, over)| id == el.id && features == el.features() && *over == crate::parts::PartOverride::default());
+            let on_screen = cache.settled().is_some_and(|(id, features, over)| {
+                id == el.id
+                    && features == el.features()
+                    && *over == crate::parts::PartOverride::default()
+            });
             if !on_screen {
                 continue;
             }
         }
         budget -= 1;
-        let img = world.resource_scope(|world, mut parts: Mut<crate::assembly::AssemblyParts>| -> Option<image::RgbaImage> {
-            match &el.kind {
-                ElementKind::PartStudio { .. } if big => {
-                    let cache = world.resource::<crate::parts::PartCache>();
-                    let list: Vec<(&cadrs_core::Solid, [u8; 3])> =
-                        cache.parts.iter().map(|p| (&*p.solid, cadrs_core::appearance::part_appearance(p, el.part_props()).rgb)).collect();
-                    (!list.is_empty()).then(|| cadrs_core::assembly::thumb::render(&list, THUMB_SIZE))
+        let img = world.resource_scope(
+            |world, mut parts: Mut<crate::assembly::AssemblyParts>| -> Option<image::RgbaImage> {
+                match &el.kind {
+                    ElementKind::PartStudio { .. } if big => {
+                        let cache = world.resource::<crate::parts::PartCache>();
+                        let list: Vec<(&cadrs_core::Solid, [u8; 3])> = cache
+                            .parts
+                            .iter()
+                            .map(|p| {
+                                (
+                                    &*p.solid,
+                                    cadrs_core::appearance::part_appearance(p, el.part_props()).rgb,
+                                )
+                            })
+                            .collect();
+                        (!list.is_empty())
+                            .then(|| cadrs_core::assembly::thumb::render(&list, THUMB_SIZE))
+                    }
+                    ElementKind::PartStudio { .. }
+                        if el.features().len() <= THUMB_FEATURE_LIMIT =>
+                    {
+                        let build = parts.build(&doc, el.id)?;
+                        let list: Vec<(&cadrs_core::Solid, [u8; 3])> = build
+                            .parts
+                            .iter()
+                            .map(|p| {
+                                (
+                                    &*p.solid,
+                                    cadrs_core::appearance::part_appearance(p, el.part_props()).rgb,
+                                )
+                            })
+                            .collect();
+                        (!list.is_empty())
+                            .then(|| cadrs_core::assembly::thumb::render(&list, THUMB_SIZE))
+                    }
+                    ElementKind::Assembly => {
+                        let asm = el.assembly_model()?;
+                        let (ps, props) = cadrs_core::assembly::instance_parts(&doc, asm, |e| {
+                            parts.build(&doc, e)
+                        });
+                        let list: Vec<(&cadrs_core::Solid, [u8; 3])> = ps
+                            .iter()
+                            .map(|p| {
+                                (
+                                    &*p.solid,
+                                    cadrs_core::appearance::part_appearance(p, &props).rgb,
+                                )
+                            })
+                            .collect();
+                        (!list.is_empty())
+                            .then(|| cadrs_core::assembly::thumb::render(&list, THUMB_SIZE))
+                    }
+                    _ => None,
                 }
-                ElementKind::PartStudio { .. } if el.features().len() <= THUMB_FEATURE_LIMIT => {
-                    let build = parts.build(&doc, el.id)?;
-                    let list: Vec<(&cadrs_core::Solid, [u8; 3])> =
-                        build.parts.iter().map(|p| (&*p.solid, cadrs_core::appearance::part_appearance(p, el.part_props()).rgb)).collect();
-                    (!list.is_empty()).then(|| cadrs_core::assembly::thumb::render(&list, THUMB_SIZE))
-                }
-                ElementKind::Assembly => {
-                    let asm = el.assembly_model()?;
-                    let (ps, props) = cadrs_core::assembly::instance_parts(&doc, asm, |e| parts.build(&doc, e));
-                    let list: Vec<(&cadrs_core::Solid, [u8; 3])> = ps.iter().map(|p| (&*p.solid, cadrs_core::appearance::part_appearance(p, &props).rgb)).collect();
-                    (!list.is_empty()).then(|| cadrs_core::assembly::thumb::render(&list, THUMB_SIZE))
-                }
-                _ => None,
-            }
-        });
+            },
+        );
         let handle = img.map(|img| {
             let (w, h) = img.dimensions();
             world.resource_mut::<Assets<Image>>().add(Image::new(
-                Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+                Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                },
                 TextureDimension::D2,
                 img.into_raw(),
                 TextureFormat::Rgba8UnormSrgb,
@@ -476,7 +631,11 @@ fn fill_thumbs(world: &mut World) {
 }
 
 fn thumb_of(world: &World, id: ElementId) -> Option<Handle<Image>> {
-    world.resource::<TabThumbs>().map.get(&id).and_then(|(_, h)| h.clone())
+    world
+        .resource::<TabThumbs>()
+        .map
+        .get(&id)
+        .and_then(|(_, h)| h.clone())
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -487,7 +646,9 @@ fn thumb_of(world: &World, id: ElementId) -> Option<Handle<Image>> {
 fn sync_panel(world: &mut World) {
     let open = world.resource::<TabManager>().open;
     let mut q_dock = world.query_filtered::<(Entity, &mut Node), With<TabManagerDock>>();
-    let Some((dock, mut node)) = q_dock.iter_mut(world).next() else { return };
+    let Some((dock, mut node)) = q_dock.iter_mut(world).next() else {
+        return;
+    };
     let want = if open { Display::Flex } else { Display::None };
     if node.display != want {
         node.display = want;
@@ -511,48 +672,158 @@ fn sync_panel(world: &mut World) {
             Name::new("tab-manager-panel"),
             TabManagerPanel,
             ChildOf(dock),
-            Node { flex_grow: 1.0, min_height: Val::Px(0.0), flex_direction: FlexDirection::Column, ..default() },
+            Node {
+                flex_grow: 1.0,
+                min_height: Val::Px(0.0),
+                flex_direction: FlexDirection::Column,
+                ..default()
+            },
             Pickable::default(),
         ))
         .id();
     world.entity_mut(panel).with_children(|p| {
-        p.spawn(Node { align_items: AlignItems::Center, height: Val::Px(36.0), flex_shrink: 0.0, padding: UiRect::new(Val::Px(10.0), Val::Px(6.0), Val::ZERO, Val::ZERO), column_gap: Val::Px(4.0), ..default() }).with_children(|h| {
-            h.spawn((t.text("Tabs", t.font_md, FontWeight::BOLD, t.foreground), Node { flex_grow: 1.0, ..default() }));
-            h.spawn(IconButton::new("tab-manager-sort", "sort-descending").icon_size(16.0).tooltip("Sort").build(t));
-            h.spawn(IconButton::new("tab-manager-close", "close").icon_size(14.0).tooltip("Close").build(t));
+        p.spawn(Node {
+            align_items: AlignItems::Center,
+            height: Val::Px(36.0),
+            flex_shrink: 0.0,
+            padding: UiRect::new(Val::Px(10.0), Val::Px(6.0), Val::ZERO, Val::ZERO),
+            column_gap: Val::Px(4.0),
+            ..default()
+        })
+        .with_children(|h| {
+            h.spawn((
+                t.text("Tabs", t.font_md, FontWeight::BOLD, t.foreground),
+                Node {
+                    flex_grow: 1.0,
+                    ..default()
+                },
+            ));
+            h.spawn(
+                IconButton::new("tab-manager-sort", "sort-descending")
+                    .icon_size(16.0)
+                    .tooltip("Sort")
+                    .build(t),
+            );
+            h.spawn(
+                IconButton::new("tab-manager-close", "close")
+                    .icon_size(14.0)
+                    .tooltip("Close")
+                    .build(t),
+            );
         });
-        p.spawn(Node { padding: UiRect::new(Val::Px(8.0), Val::Px(8.0), Val::ZERO, Val::Px(4.0)), flex_shrink: 0.0, ..default() }).with_children(|r| {
-            r.spawn(TextInput::new("tab-manager-search").placeholder("Search tabs").value(tm.search.clone()).height(28.0).cleanable().width(Val::Percent(100.0)).build(t));
+        p.spawn(Node {
+            padding: UiRect::new(Val::Px(8.0), Val::Px(8.0), Val::ZERO, Val::Px(4.0)),
+            flex_shrink: 0.0,
+            ..default()
+        })
+        .with_children(|r| {
+            r.spawn(
+                TextInput::new("tab-manager-search")
+                    .placeholder("Search tabs")
+                    .value(tm.search.clone())
+                    .height(28.0)
+                    .cleanable()
+                    .width(Val::Percent(100.0))
+                    .build(t),
+            );
         });
-        p.spawn((FilterBox, Node { align_items: AlignItems::Center, flex_shrink: 0.0, height: Val::Px(32.0), padding: UiRect::horizontal(Val::Px(8.0)), column_gap: Val::Px(2.0), ..default() }));
-        p.spawn(Node { align_items: AlignItems::Center, flex_shrink: 0.0, padding: UiRect::new(Val::Px(10.0), Val::Px(8.0), Val::Px(2.0), Val::Px(4.0)), column_gap: Val::Px(6.0), border: UiRect::bottom(Val::Px(1.0)), ..default() })
-            .insert(BorderColor::all(t.border))
-            .with_children(|r| {
-                r.spawn((CountText, Name::new("tab-manager-count"), t.text(String::new(), 10.5, FontWeight::NORMAL, t.muted_foreground), Node { flex_grow: 1.0, ..default() }));
-                r.spawn(cadrs_ui::Button::new("tab-manager-new-folder").label("New folder").icon("folder-new").small().ghost().build(t)).insert(Tooltip::new("Put the selected tabs in a new folder"));
-            });
+        p.spawn((
+            FilterBox,
+            Node {
+                align_items: AlignItems::Center,
+                flex_shrink: 0.0,
+                height: Val::Px(32.0),
+                padding: UiRect::horizontal(Val::Px(8.0)),
+                column_gap: Val::Px(2.0),
+                ..default()
+            },
+        ));
+        p.spawn(Node {
+            align_items: AlignItems::Center,
+            flex_shrink: 0.0,
+            padding: UiRect::new(Val::Px(10.0), Val::Px(8.0), Val::Px(2.0), Val::Px(4.0)),
+            column_gap: Val::Px(6.0),
+            border: UiRect::bottom(Val::Px(1.0)),
+            ..default()
+        })
+        .insert(BorderColor::all(t.border))
+        .with_children(|r| {
+            r.spawn((
+                CountText,
+                Name::new("tab-manager-count"),
+                t.text(String::new(), 10.5, FontWeight::NORMAL, t.muted_foreground),
+                Node {
+                    flex_grow: 1.0,
+                    ..default()
+                },
+            ));
+            r.spawn(
+                cadrs_ui::Button::new("tab-manager-new-folder")
+                    .label("New folder")
+                    .icon("folder-new")
+                    .small()
+                    .ghost()
+                    .build(t),
+            )
+            .insert(Tooltip::new("Put the selected tabs in a new folder"));
+        });
         // The list takes the height left, whatever the filter shows (a stable panel).
-        p.spawn(Node { flex_grow: 1.0, flex_basis: Val::Px(0.0), min_height: Val::Px(0.0), flex_direction: FlexDirection::Column, ..default() }).with_children(|frame| {
+        p.spawn(Node {
+            flex_grow: 1.0,
+            flex_basis: Val::Px(0.0),
+            min_height: Val::Px(0.0),
+            flex_direction: FlexDirection::Column,
+            ..default()
+        })
+        .with_children(|frame| {
             let list = frame
                 .spawn((
                     Name::new("tab-manager-rows"),
                     RowsBox,
                     bevy::ui_widgets::ScrollArea,
                     cadrs_ui::scrollbar::ScrollGutter(6.0),
-                    Node { flex_direction: FlexDirection::Column, flex_grow: 1.0, min_height: Val::Px(0.0), overflow: Overflow::scroll_y(), ..default() },
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        flex_grow: 1.0,
+                        min_height: Val::Px(0.0),
+                        overflow: Overflow::scroll_y(),
+                        ..default()
+                    },
                 ))
                 .id();
-            frame.spawn(cadrs_ui::vertical_scrollbar(t, "tab-manager-scrollbar", list));
+            frame.spawn(cadrs_ui::vertical_scrollbar(
+                t,
+                "tab-manager-scrollbar",
+                list,
+            ));
         });
-        p.spawn(Node { flex_shrink: 0.0, padding: UiRect::new(Val::Px(8.0), Val::Px(8.0), Val::Px(6.0), Val::Px(6.0)), border: UiRect::top(Val::Px(1.0)), ..default() })
-            .insert(BorderColor::all(t.border))
-            .with_children(|f| {
-                f.spawn(cadrs_ui::Button::new("tab-manager-move").label("Move to document…").small().disabled(true).build(t));
-            });
+        p.spawn(Node {
+            flex_shrink: 0.0,
+            padding: UiRect::new(Val::Px(8.0), Val::Px(8.0), Val::Px(6.0), Val::Px(6.0)),
+            border: UiRect::top(Val::Px(1.0)),
+            ..default()
+        })
+        .insert(BorderColor::all(t.border))
+        .with_children(|f| {
+            f.spawn(
+                cadrs_ui::Button::new("tab-manager-move")
+                    .label("Move to document…")
+                    .small()
+                    .disabled(true)
+                    .build(t),
+            );
+        });
         p.spawn((
             Name::new("tab-manager-preview"),
             PreviewBox,
-            Node { flex_shrink: 0.0, height: Val::Px(230.0), flex_direction: FlexDirection::Column, padding: UiRect::all(Val::Px(10.0)), border: UiRect::top(Val::Px(1.0)), ..default() },
+            Node {
+                flex_shrink: 0.0,
+                height: Val::Px(230.0),
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::all(Val::Px(10.0)),
+                border: UiRect::top(Val::Px(1.0)),
+                ..default()
+            },
             BorderColor::all(t.border),
             BackgroundColor(t.sidebar),
         ));
@@ -579,14 +850,44 @@ fn sync_filters(world: &mut World, mut last: Local<Option<FilterKey>>) {
     world.entity_mut(bx).despawn_children();
     world.entity_mut(bx).with_children(|r| {
         for (name, icon_name, tip, f) in [
-            ("tab-manager-filter-part-studios", "part-studio", "Part Studios", TypeFilter::PartStudios),
-            ("tab-manager-filter-assemblies", "assembly", "Assemblies", TypeFilter::Assemblies),
-            ("tab-manager-filter-drawings", "details", "Drawings", TypeFilter::Drawings),
+            (
+                "tab-manager-filter-part-studios",
+                "part-studio",
+                "Part Studios",
+                TypeFilter::PartStudios,
+            ),
+            (
+                "tab-manager-filter-assemblies",
+                "assembly",
+                "Assemblies",
+                TypeFilter::Assemblies,
+            ),
+            (
+                "tab-manager-filter-drawings",
+                "details",
+                "Drawings",
+                TypeFilter::Drawings,
+            ),
         ] {
-            r.spawn(IconButton::new(name, icon_name).icon_size(18.0).tooltip(format!("Show only {tip}")).selected(tm.filter == f).build(&theme));
+            r.spawn(
+                IconButton::new(name, icon_name)
+                    .icon_size(18.0)
+                    .tooltip(format!("Show only {tip}"))
+                    .selected(tm.filter == f)
+                    .build(&theme),
+            );
         }
-        r.spawn(Node { flex_grow: 1.0, ..default() });
-        r.spawn(cadrs_ui::Button::new("tab-manager-clear").label("Clear").small().disabled(!tm.flat()).build(&theme));
+        r.spawn(Node {
+            flex_grow: 1.0,
+            ..default()
+        });
+        r.spawn(
+            cadrs_ui::Button::new("tab-manager-clear")
+                .label("Clear")
+                .small()
+                .disabled(!tm.flat())
+                .build(&theme),
+        );
     });
     world.flush();
 }
@@ -604,9 +905,12 @@ fn sync_rows(world: &mut World, mut last: Local<Option<RowsKey>>) {
     if !world.resource::<ManagerDrag>().items.is_empty() {
         return;
     }
-    let Some(doc) = world.get_resource::<ActiveDocument>() else { return };
+    let Some(doc) = world.get_resource::<ActiveDocument>() else {
+        return;
+    };
     // Rows gone (moved, deleted) leave the selection.
-    let known = |e: &ElementId| doc.doc.element(*e).is_some() || doc.doc.tab_tree.folder(*e).is_some();
+    let known =
+        |e: &ElementId| doc.doc.element(*e).is_some() || doc.doc.tab_tree.folder(*e).is_some();
     if tm.selected.iter().any(|e| !known(e)) {
         let keep: Vec<ElementId> = tm.selected.iter().copied().filter(known).collect();
         world.resource_mut::<TabManager>().selected = keep;
@@ -618,8 +922,16 @@ fn sync_rows(world: &mut World, mut last: Local<Option<RowsKey>>) {
     let move_count = selected_tabs(&doc.doc, &tm.selected).len();
     let generation = world.resource::<TabThumbs>().generation;
     let mut q_box = world.query_filtered::<(Entity, Ref<RowsBox>), ()>();
-    let Some((rows_box, added)) = q_box.iter(world).next().map(|(e, r)| (e, r.is_added())) else { return };
-    let key: RowsKey = (rows.clone(), tm.selected.clone(), active, n_tabs, generation);
+    let Some((rows_box, added)) = q_box.iter(world).next().map(|(e, r)| (e, r.is_added())) else {
+        return;
+    };
+    let key: RowsKey = (
+        rows.clone(),
+        tm.selected.clone(),
+        active,
+        n_tabs,
+        generation,
+    );
     if !added && last.as_ref() == Some(&key) {
         return;
     }
@@ -628,7 +940,9 @@ fn sync_rows(world: &mut World, mut last: Local<Option<RowsKey>>) {
     let t = &theme;
     world.entity_mut(rows_box).despawn_children();
     let shown_tabs = rows.iter().filter(|r| r.folder.is_none()).count();
-    let count = if tm.flat() && tm.sort == SortBy::Document || (!tm.search.trim().is_empty() || tm.filter != TypeFilter::All) {
+    let count = if tm.flat() && tm.sort == SortBy::Document
+        || (!tm.search.trim().is_empty() || tm.filter != TypeFilter::All)
+    {
         format!("{shown_tabs} of {n_tabs} tabs")
     } else if n_tabs == 1 {
         "1 tab".into()
@@ -639,19 +953,38 @@ fn sync_rows(world: &mut World, mut last: Local<Option<RowsKey>>) {
     for mut c in q_count.iter_mut(world) {
         c.0 = count.clone();
     }
-    let thumbs: HashMap<ElementId, Handle<Image>> = rows.iter().filter_map(|r| Some((r.item.id(), thumb_of(world, r.item.id())?))).collect();
+    let thumbs: HashMap<ElementId, Handle<Image>> = rows
+        .iter()
+        .filter_map(|r| Some((r.item.id(), thumb_of(world, r.item.id())?)))
+        .collect();
     let active_fill = Color::srgb_u8(0xb3, 0xdc, 0xf2);
     let active_bar = Color::srgb_u8(0x1f, 0x5f, 0xa8);
     world.entity_mut(rows_box).with_children(|list| {
         if rows.is_empty() {
-            list.spawn((Name::new("tab-manager-empty"), t.text("No tabs match.", t.font_sm, FontWeight::NORMAL, t.muted_foreground), Node { margin: UiRect::new(Val::Px(12.0), Val::Px(8.0), Val::Px(8.0), Val::Px(8.0)), ..default() }));
+            list.spawn((
+                Name::new("tab-manager-empty"),
+                t.text(
+                    "No tabs match.",
+                    t.font_sm,
+                    FontWeight::NORMAL,
+                    t.muted_foreground,
+                ),
+                Node {
+                    margin: UiRect::new(Val::Px(12.0), Val::Px(8.0), Val::Px(8.0), Val::Px(8.0)),
+                    ..default()
+                },
+            ));
         }
         let mut k = 0;
         for r in &rows {
             let selected = tm.selected.contains(&r.item.id());
             let is_active = r.folder.is_none() && active == Some(r.item.id());
             let name = match r.folder {
-                Some(_) => crate::document::tab_node_name(&r.name).replacen("tab-", "tab-manager-folder-", 1),
+                Some(_) => crate::document::tab_node_name(&r.name).replacen(
+                    "tab-",
+                    "tab-manager-folder-",
+                    1,
+                ),
                 None => {
                     k += 1;
                     format!("tab-manager-row-{k}")
@@ -660,21 +993,40 @@ fn sync_rows(world: &mut World, mut last: Local<Option<RowsKey>>) {
             let normal = if is_active { active_fill } else { Color::NONE };
             let mut row = list.spawn((
                 Name::new(name),
-                ManagerRow { item: r.item, depth: r.depth, parent: r.parent },
+                ManagerRow {
+                    item: r.item,
+                    depth: r.depth,
+                    parent: r.parent,
+                },
                 ContextMenuTarget,
                 Node {
                     align_items: AlignItems::Center,
                     column_gap: Val::Px(8.0),
                     height: Val::Px(54.0),
                     flex_shrink: 0.0,
-                    padding: UiRect::new(Val::Px(10.0 + 16.0 * r.depth as f32), Val::Px(10.0), Val::ZERO, Val::ZERO),
+                    padding: UiRect::new(
+                        Val::Px(10.0 + 16.0 * r.depth as f32),
+                        Val::Px(10.0),
+                        Val::ZERO,
+                        Val::ZERO,
+                    ),
                     ..default()
                 },
                 BackgroundColor(normal),
                 Pickable::default(),
                 bevy::picking::hover::Hovered::default(),
                 cadrs_ui::style::Visuals {
-                    background: cadrs_ui::style::StateColors::new(normal, if is_active { active_fill } else { t.menu_hover }, t.list_active, normal).with_selected(if is_active { active_fill } else { t.list_selected }),
+                    background: cadrs_ui::style::StateColors::new(
+                        normal,
+                        if is_active { active_fill } else { t.menu_hover },
+                        t.list_active,
+                        normal,
+                    )
+                    .with_selected(if is_active {
+                        active_fill
+                    } else {
+                        t.list_selected
+                    }),
                     border: cadrs_ui::style::StateColors::all(Color::NONE),
                     foreground: cadrs_ui::style::StateColors::all(t.foreground),
                     focus_ring: Color::NONE,
@@ -686,33 +1038,100 @@ fn sync_rows(world: &mut World, mut last: Local<Option<RowsKey>>) {
             let thumb = thumbs.get(&r.item.id()).cloned();
             row.with_children(|c| {
                 if is_active {
-                    c.spawn((Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), bottom: Val::Px(0.0), width: Val::Px(5.0), ..default() }, BackgroundColor(active_bar), Pickable::IGNORE));
+                    c.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(0.0),
+                            top: Val::Px(0.0),
+                            bottom: Val::Px(0.0),
+                            width: Val::Px(5.0),
+                            ..default()
+                        },
+                        BackgroundColor(active_bar),
+                        Pickable::IGNORE,
+                    ));
                 }
                 // The chevron's column (every row has it, so the indent is the same filtered).
-                let chevron = Node { width: Val::Px(12.0), flex_shrink: 0.0, ..default() };
+                let chevron = Node {
+                    width: Val::Px(12.0),
+                    flex_shrink: 0.0,
+                    ..default()
+                };
                 match r.folder {
                     Some((open, _)) => {
-                        c.spawn((chevron, Pickable::IGNORE)).with_child((cadrs_ui::icon::icon(if open { "chevron-down" } else { "chevron-right" }, 12.0, t.tool_foreground), Pickable::IGNORE));
+                        c.spawn((chevron, Pickable::IGNORE)).with_child((
+                            cadrs_ui::icon::icon(
+                                if open {
+                                    "chevron-down"
+                                } else {
+                                    "chevron-right"
+                                },
+                                12.0,
+                                t.tool_foreground,
+                            ),
+                            Pickable::IGNORE,
+                        ));
                     }
                     None => {
                         c.spawn((chevron, Pickable::IGNORE));
                     }
                 }
-                let bx = Node { width: Val::Px(48.0), height: Val::Px(42.0), flex_shrink: 0.0, justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() };
-                c.spawn((bx, Pickable::IGNORE)).with_children(|b| match thumb {
-                    Some(h) => {
-                        b.spawn((ImageNode::new(h), Node { width: Val::Px(42.0), height: Val::Px(42.0), ..default() }, Pickable::IGNORE));
-                    }
-                    None => {
-                        b.spawn((cadrs_ui::icon::icon(r.icon, 28.0, t.tool_foreground), Pickable::IGNORE));
-                    }
-                });
-                let mut name_col = c.spawn((RowName(r.item), Node { flex_direction: FlexDirection::Column, flex_grow: 1.0, min_width: Val::Px(0.0), row_gap: Val::Px(2.0), ..default() }, Pickable::IGNORE));
+                let bx = Node {
+                    width: Val::Px(48.0),
+                    height: Val::Px(42.0),
+                    flex_shrink: 0.0,
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                };
+                c.spawn((bx, Pickable::IGNORE))
+                    .with_children(|b| match thumb {
+                        Some(h) => {
+                            b.spawn((
+                                ImageNode::new(h),
+                                Node {
+                                    width: Val::Px(42.0),
+                                    height: Val::Px(42.0),
+                                    ..default()
+                                },
+                                Pickable::IGNORE,
+                            ));
+                        }
+                        None => {
+                            b.spawn((
+                                cadrs_ui::icon::icon(r.icon, 28.0, t.tool_foreground),
+                                Pickable::IGNORE,
+                            ));
+                        }
+                    });
+                let mut name_col = c.spawn((
+                    RowName(r.item),
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        flex_grow: 1.0,
+                        min_width: Val::Px(0.0),
+                        row_gap: Val::Px(2.0),
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ));
                 if r.folder.is_some() {
                     name_col.insert(cadrs_ui::InlineEdit::default());
                 }
                 name_col.with_children(|col| {
-                    let mut label = col.spawn((t.text(r.name.clone(), t.font_base, if is_active { FontWeight::BOLD } else { FontWeight::NORMAL }, t.foreground), Pickable::IGNORE));
+                    let mut label = col.spawn((
+                        t.text(
+                            r.name.clone(),
+                            t.font_base,
+                            if is_active {
+                                FontWeight::BOLD
+                            } else {
+                                FontWeight::NORMAL
+                            },
+                            t.foreground,
+                        ),
+                        Pickable::IGNORE,
+                    ));
                     if r.folder.is_some() {
                         label.insert(cadrs_ui::InlineEditLabel);
                     }
@@ -722,19 +1141,34 @@ fn sync_rows(world: &mut World, mut last: Local<Option<RowsKey>>) {
                         Some(loc) => format!("{} · in {loc}", r.kind),
                         None => r.kind.clone(),
                     };
-                    col.spawn((Text::new(second), font, TextColor(t.muted_foreground), Pickable::IGNORE));
+                    col.spawn((
+                        Text::new(second),
+                        font,
+                        TextColor(t.muted_foreground),
+                        Pickable::IGNORE,
+                    ));
                 });
             });
             row.observe(on_row_click);
         }
     });
     // The Move button's label and state.
-    let label = if move_count > 1 { format!("Move {move_count} tabs to document…") } else { "Move to document…".to_string() };
+    let label = if move_count > 1 {
+        format!("Move {move_count} tabs to document…")
+    } else {
+        "Move to document…".to_string()
+    };
     let mut q_btn = world.query::<(Entity, &Name)>();
-    let btn = q_btn.iter(world).find(|(_, n)| n.as_str() == "tab-manager-move").map(|(e, _)| e);
+    let btn = q_btn
+        .iter(world)
+        .find(|(_, n)| n.as_str() == "tab-manager-move")
+        .map(|(e, _)| e);
     if let Some(b) = btn {
         let mut q_kids = world.query::<(&Children,)>();
-        let texts: Vec<Entity> = q_kids.get(world, b).map(|(c,)| c.iter().collect()).unwrap_or_default();
+        let texts: Vec<Entity> = q_kids
+            .get(world, b)
+            .map(|(c,)| c.iter().collect())
+            .unwrap_or_default();
         for e in texts {
             if let Some(mut tx) = world.get_mut::<Text>(e) {
                 tx.0 = label.clone();
@@ -743,7 +1177,9 @@ fn sync_rows(world: &mut World, mut last: Local<Option<RowsKey>>) {
         if move_count == 0 {
             world.entity_mut(b).insert(bevy::ui::InteractionDisabled);
         } else {
-            world.entity_mut(b).remove::<bevy::ui::InteractionDisabled>();
+            world
+                .entity_mut(b)
+                .remove::<bevy::ui::InteractionDisabled>();
         }
     }
     world.flush();
@@ -757,11 +1193,23 @@ fn sync_preview(world: &mut World, mut last: Local<Option<(Option<ElementId>, St
         return;
     };
     let tm = world.resource::<TabManager>().clone();
-    let Some(doc) = world.get_resource::<ActiveDocument>() else { return };
-    let pick = tm.selected.iter().rev().copied().find(|e| doc.doc.elements.iter().any(|x| x.id == *e)).or(doc.active);
+    let Some(doc) = world.get_resource::<ActiveDocument>() else {
+        return;
+    };
+    let pick = tm
+        .selected
+        .iter()
+        .rev()
+        .copied()
+        .find(|e| doc.doc.elements.iter().any(|x| x.id == *e))
+        .or(doc.active);
     let el = pick.and_then(|e| doc.doc.element(e)).cloned();
     let generation = world.resource::<TabThumbs>().generation;
-    let key = (pick, el.as_ref().map(|e| e.name.clone()).unwrap_or_default(), generation);
+    let key = (
+        pick,
+        el.as_ref().map(|e| e.name.clone()).unwrap_or_default(),
+        generation,
+    );
     if !added && last.as_ref() == Some(&key) {
         return;
     }
@@ -772,16 +1220,49 @@ fn sync_preview(world: &mut World, mut last: Local<Option<(Option<ElementId>, St
     world.entity_mut(bx).despawn_children();
     world.entity_mut(bx).with_children(|p| {
         let Some(el) = el else { return };
-        p.spawn(Node { align_items: AlignItems::Center, column_gap: Val::Px(8.0), ..default() }).with_children(|h| {
-            h.spawn((cadrs_ui::icon::icon(tab_icon(&el), 18.0, t.tool_foreground), Pickable::IGNORE));
-            h.spawn((Name::new("tab-manager-preview-name"), t.text(el.name.clone(), t.font_md, FontWeight::SEMIBOLD, t.foreground)));
+        p.spawn(Node {
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(8.0),
+            ..default()
+        })
+        .with_children(|h| {
+            h.spawn((
+                cadrs_ui::icon::icon(tab_icon(&el), 18.0, t.tool_foreground),
+                Pickable::IGNORE,
+            ));
+            h.spawn((
+                Name::new("tab-manager-preview-name"),
+                t.text(
+                    el.name.clone(),
+                    t.font_md,
+                    FontWeight::SEMIBOLD,
+                    t.foreground,
+                ),
+            ));
         });
-        p.spawn(Node { flex_grow: 1.0, justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() }).with_children(|b| match thumb {
+        p.spawn(Node {
+            flex_grow: 1.0,
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            ..default()
+        })
+        .with_children(|b| match thumb {
             Some(h) => {
-                b.spawn((ImageNode::new(h), Node { width: Val::Px(170.0), height: Val::Px(170.0), ..default() }, Pickable::IGNORE));
+                b.spawn((
+                    ImageNode::new(h),
+                    Node {
+                        width: Val::Px(170.0),
+                        height: Val::Px(170.0),
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ));
             }
             None => {
-                b.spawn((cadrs_ui::icon::icon(tab_icon(&el), 72.0, t.subtle_foreground), Pickable::IGNORE));
+                b.spawn((
+                    cadrs_ui::icon::icon(tab_icon(&el), 72.0, t.subtle_foreground),
+                    Pickable::IGNORE,
+                ));
             }
         });
     });
@@ -804,22 +1285,38 @@ pub fn rename_in_row(world: &mut World, folder: ElementId) {
     world.resource_mut::<PendingRowRename>().0 = Some(folder);
 }
 
-fn start_row_rename(mut pending: ResMut<PendingRowRename>, q: Query<(Entity, &RowName)>, doc: Option<Res<ActiveDocument>>, theme: Res<Theme>, mut commands: Commands) {
+fn start_row_rename(
+    mut pending: ResMut<PendingRowRename>,
+    q: Query<(Entity, &RowName)>,
+    doc: Option<Res<ActiveDocument>>,
+    theme: Res<Theme>,
+    mut commands: Commands,
+) {
     let Some(folder) = pending.0 else { return };
-    let Some((e, _)) = q.iter().find(|(_, r)| r.0 == TabItem::Folder(folder)) else { return };
+    let Some((e, _)) = q.iter().find(|(_, r)| r.0 == TabItem::Folder(folder)) else {
+        return;
+    };
     pending.0 = None;
-    let name = doc.and_then(|d| d.doc.tab_tree.folder(folder).map(|f| f.name.clone())).unwrap_or_default();
+    let name = doc
+        .and_then(|d| d.doc.tab_tree.folder(folder).map(|f| f.name.clone()))
+        .unwrap_or_default();
     let mut opts = InlineEditOptions::new("tab-manager-folder-rename-field");
     opts.width = Val::Px(160.0);
     opts.height = 22.0;
     begin_inline_edit(&mut commands, &theme, e, name, opts);
 }
 
-fn on_row_rename_commit(ev: On<InlineEditCommit>, q: Query<&RowName>, doc: Option<ResMut<ActiveDocument>>) {
+fn on_row_rename_commit(
+    ev: On<InlineEditCommit>,
+    q: Query<&RowName>,
+    doc: Option<ResMut<ActiveDocument>>,
+) {
     if ev.entity != ev.original_event_target() {
         return;
     }
-    let (Ok(row), Some(mut doc)) = (q.get(ev.entity), doc) else { return };
+    let (Ok(row), Some(mut doc)) = (q.get(ev.entity), doc) else {
+        return;
+    };
     let TabItem::Folder(f) = row.0 else { return };
     let name = ev.value.trim().to_string();
     if name.is_empty() || doc.doc.tab_tree.folder(f).is_some_and(|x| x.name == name) {
@@ -828,7 +1325,14 @@ fn on_row_rename_commit(ev: On<InlineEditCommit>, q: Query<&RowName>, doc: Optio
     let _ = doc.execute(&RenameTabFolder { id: f, name });
 }
 
-fn on_row_click(mut click: On<Pointer<Click>>, q: Query<&ManagerRow>, keys: Res<ButtonInput<KeyCode>>, drag: Res<ManagerDrag>, mut tm: ResMut<TabManager>, doc: Option<ResMut<ActiveDocument>>) {
+fn on_row_click(
+    mut click: On<Pointer<Click>>,
+    q: Query<&ManagerRow>,
+    keys: Res<ButtonInput<KeyCode>>,
+    drag: Res<ManagerDrag>,
+    mut tm: ResMut<TabManager>,
+    doc: Option<ResMut<ActiveDocument>>,
+) {
     if click.button != PointerButton::Primary {
         return;
     }
@@ -836,9 +1340,16 @@ fn on_row_click(mut click: On<Pointer<Click>>, q: Query<&ManagerRow>, keys: Res<
     if drag.moved {
         return;
     }
-    let (Ok(row), Some(mut doc)) = (q.get(click.entity).copied(), doc) else { return };
+    let (Ok(row), Some(mut doc)) = (q.get(click.entity).copied(), doc) else {
+        return;
+    };
     let id = row.item.id();
-    let ctrl = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight, KeyCode::SuperLeft, KeyCode::SuperRight]);
+    let ctrl = keys.any_pressed([
+        KeyCode::ControlLeft,
+        KeyCode::ControlRight,
+        KeyCode::SuperLeft,
+        KeyCode::SuperRight,
+    ]);
     let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
     // The rows in list order (a range runs over what is shown).
     let order: Vec<ElementId> = rows_of(&doc.doc, &tm).iter().map(|r| r.item.id()).collect();
@@ -871,7 +1382,11 @@ fn on_row_click(mut click: On<Pointer<Click>>, q: Query<&ManagerRow>, keys: Res<
 
 /// The rows a Shift+click selects: every row of `order` (the list as shown, scrolled out of view
 /// or not) from the anchor to the clicked row, in list order. `None` if either isn't listed.
-pub fn range_selection(order: &[ElementId], anchor: ElementId, clicked: ElementId) -> Option<Vec<ElementId>> {
+pub fn range_selection(
+    order: &[ElementId],
+    anchor: ElementId,
+    clicked: ElementId,
+) -> Option<Vec<ElementId>> {
     let i = order.iter().position(|e| *e == anchor)?;
     let j = order.iter().position(|e| *e == clicked)?;
     let (lo, hi) = (i.min(j), i.max(j));
@@ -884,8 +1399,17 @@ pub fn range_selection(order: &[ElementId], anchor: ElementId, clicked: ElementI
 #[derive(Component)]
 struct RowMenu;
 
-fn on_row_menu(ev: On<ContextMenuRequested>, q: Query<&ManagerRow>, mut tm: ResMut<TabManager>, doc: Option<Res<ActiveDocument>>, theme: Res<Theme>, mut commands: Commands) {
-    let Ok(row) = q.get(ev.entity).copied() else { return };
+fn on_row_menu(
+    ev: On<ContextMenuRequested>,
+    q: Query<&ManagerRow>,
+    mut tm: ResMut<TabManager>,
+    doc: Option<Res<ActiveDocument>>,
+    theme: Res<Theme>,
+    mut commands: Commands,
+) {
+    let Ok(row) = q.get(ev.entity).copied() else {
+        return;
+    };
     let Some(doc) = doc else { return };
     let id = row.item.id();
     if !tm.selected.contains(&id) {
@@ -895,12 +1419,27 @@ fn on_row_menu(ev: On<ContextMenuRequested>, q: Query<&ManagerRow>, mut tm: ResM
     let n = selected_tabs(&doc.doc, &tm.selected).len();
     let items = selected_items(&doc.doc, &tm.selected);
     let layout = tab_tree::layout(&doc.doc);
-    let any_in_folder = items.iter().any(|i| tab_tree::parent_of(&layout, *i).is_some());
+    let any_in_folder = items
+        .iter()
+        .any(|i| tab_tree::parent_of(&layout, *i).is_some());
     let mut menu = Menu::new("tab-manager-menu")
         .min_width(210.0)
         .item_height(22.0)
-        .item(MenuItem::new("tab-manager-menu-move", if n > 1 { format!("Move {n} tabs to document…") } else { "Move to document…".to_string() }).disabled(n == 0))
-        .item(MenuItem::new("tab-manager-menu-folder", "New folder from selection").icon("folder-new"));
+        .item(
+            MenuItem::new(
+                "tab-manager-menu-move",
+                if n > 1 {
+                    format!("Move {n} tabs to document…")
+                } else {
+                    "Move to document…".to_string()
+                },
+            )
+            .disabled(n == 0),
+        )
+        .item(
+            MenuItem::new("tab-manager-menu-folder", "New folder from selection")
+                .icon("folder-new"),
+        );
     if any_in_folder {
         menu = menu.item(MenuItem::new("tab-manager-menu-top", "Move to top level").icon("home"));
     }
@@ -912,10 +1451,16 @@ fn on_row_menu(ev: On<ContextMenuRequested>, q: Query<&ManagerRow>, mut tm: ResM
             .item(MenuItem::new("tab-manager-menu-delete", "Delete folder…").icon("remove-circle"));
     }
     let anchor = open_context_menu(&mut commands, ev.position, menu.build(&theme));
-    commands.entity(anchor).insert((RowMenu, DespawnOnExit(AppState::Document)));
+    commands
+        .entity(anchor)
+        .insert((RowMenu, DespawnOnExit(AppState::Document)));
 }
 
-fn on_row_menu_action(ev: On<MenuAction>, q: Query<(), (With<RowMenu>, With<ContextMenuAnchor>)>, mut commands: Commands) {
+fn on_row_menu_action(
+    ev: On<MenuAction>,
+    q: Query<(), (With<RowMenu>, With<ContextMenuAnchor>)>,
+    mut commands: Commands,
+) {
     if !q.contains(ev.entity) {
         return;
     }
@@ -927,9 +1472,16 @@ fn on_row_menu_action(ev: On<MenuAction>, q: Query<(), (With<RowMenu>, With<Cont
             "tab-manager-menu-move" => move_to_document(w, sel),
             "tab-manager-menu-folder" => new_folder_from(w, sel),
             "tab-manager-menu-top" => {
-                let Some(mut doc) = w.get_resource_mut::<ActiveDocument>() else { return };
+                let Some(mut doc) = w.get_resource_mut::<ActiveDocument>() else {
+                    return;
+                };
                 let items = selected_items(&doc.doc, &sel);
-                let _ = doc.execute(&MoveTabItems { items, parent: None, before: None, label: "Move to top level".into() });
+                let _ = doc.execute(&MoveTabItems {
+                    items,
+                    parent: None,
+                    before: None,
+                    label: "Move to top level".into(),
+                });
             }
             "tab-manager-menu-open" => {
                 if let Some(f) = folder {
@@ -969,17 +1521,35 @@ struct DropLine;
 #[derive(Component)]
 struct DragGhost;
 
-fn on_drag_start(ev: On<Pointer<DragStart>>, q: Query<&ManagerRow>, tm: Res<TabManager>, doc: Option<Res<ActiveDocument>>, mut drag: ResMut<ManagerDrag>) {
+fn on_drag_start(
+    ev: On<Pointer<DragStart>>,
+    q: Query<&ManagerRow>,
+    tm: Res<TabManager>,
+    doc: Option<Res<ActiveDocument>>,
+    mut drag: ResMut<ManagerDrag>,
+) {
     if ev.button != PointerButton::Primary {
         return;
     }
-    let (Ok(row), Some(doc)) = (q.get(ev.entity), doc) else { return };
+    let (Ok(row), Some(doc)) = (q.get(ev.entity), doc) else {
+        return;
+    };
     // Reordering works on the tree, not a filtered list.
     if !tm.search.trim().is_empty() || tm.filter != TypeFilter::All {
         return;
     }
-    let items = if tm.selected.contains(&row.item.id()) { selected_items(&doc.doc, &tm.selected) } else { vec![row.item] };
-    *drag = ManagerDrag { items, start: ev.pointer_location.position, pointer: ev.pointer_location.position, moved: false, target: None };
+    let items = if tm.selected.contains(&row.item.id()) {
+        selected_items(&doc.doc, &tm.selected)
+    } else {
+        vec![row.item]
+    };
+    *drag = ManagerDrag {
+        items,
+        start: ev.pointer_location.position,
+        pointer: ev.pointer_location.position,
+        moved: false,
+        target: None,
+    };
 }
 
 fn on_drag(ev: On<Pointer<Drag>>, q: Query<(), With<ManagerRow>>, mut drag: ResMut<ManagerDrag>) {
@@ -998,8 +1568,12 @@ fn on_drag_end(ev: On<Pointer<DragEnd>>, q: Query<(), With<ManagerRow>>, mut com
     commands.queue(|world: &mut World| {
         let drag = std::mem::take(&mut *world.resource_mut::<ManagerDrag>());
         world.resource_mut::<ManagerDrag>().moved = drag.moved;
-        let (true, Some((parent, before))) = (drag.moved, drag.target) else { return };
-        let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return };
+        let (true, Some((parent, before))) = (drag.moved, drag.target) else {
+            return;
+        };
+        let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+            return;
+        };
         let layout = tab_tree::layout(&doc.doc);
         // Nothing moves: one item dropped just before or after itself in its own level.
         if let [one] = drag.items.as_slice()
@@ -1013,15 +1587,36 @@ fn on_drag_end(ev: On<Pointer<DragEnd>>, q: Query<(), With<ManagerRow>>, mut com
             }
         }
         let name = match drag.items.as_slice() {
-            [TabItem::Tab(e)] => doc.doc.element(*e).map(|e| e.name.clone()).unwrap_or_default(),
-            [TabItem::Folder(f)] => doc.doc.tab_tree.folder(*f).map(|f| f.name.clone()).unwrap_or_default(),
+            [TabItem::Tab(e)] => doc
+                .doc
+                .element(*e)
+                .map(|e| e.name.clone())
+                .unwrap_or_default(),
+            [TabItem::Folder(f)] => doc
+                .doc
+                .tab_tree
+                .folder(*f)
+                .map(|f| f.name.clone())
+                .unwrap_or_default(),
             many => format!("{} tabs", many.len()),
         };
         let label = match (parent, before) {
-            (Some(f), None) => format!("Move {name} into {}", doc.doc.tab_tree.folder(f).map(|f| f.name.as_str()).unwrap_or("folder")),
+            (Some(f), None) => format!(
+                "Move {name} into {}",
+                doc.doc
+                    .tab_tree
+                    .folder(f)
+                    .map(|f| f.name.as_str())
+                    .unwrap_or("folder")
+            ),
             _ => format!("Reorder {name}"),
         };
-        let _ = doc.execute(&MoveTabItems { items: drag.items, parent, before, label });
+        let _ = doc.execute(&MoveTabItems {
+            items: drag.items,
+            parent,
+            before,
+            label,
+        });
     });
 }
 
@@ -1029,7 +1624,10 @@ fn on_drag_end(ev: On<Pointer<DragEnd>>, q: Query<(), With<ManagerRow>>, mut com
 fn place_drop(
     mut drag: ResMut<ManagerDrag>,
     q_rows: Query<(&ComputedNode, &bevy::ui::UiGlobalTransform, &ManagerRow)>,
-    mut q_line: Query<(Entity, &mut Node, &mut BackgroundColor, &mut BorderColor), (With<DropLine>, Without<DragGhost>)>,
+    mut q_line: Query<
+        (Entity, &mut Node, &mut BackgroundColor, &mut BorderColor),
+        (With<DropLine>, Without<DragGhost>),
+    >,
     mut q_ghost: Query<(Entity, &mut Node), (With<DragGhost>, Without<DropLine>)>,
     q_dim: Query<(Entity, &ChildOf), With<crate::tab_folders::DragDim>>,
     q_row_entities: Query<(Entity, &ManagerRow)>,
@@ -1065,27 +1663,48 @@ fn place_drop(
         .map(|(n, t, r)| {
             let s = n.inverse_scale_factor();
             let (c, size) = (t.translation * s, n.size() * s);
-            (c.y - size.y / 2.0, c.y + size.y / 2.0, c.x - size.x / 2.0, size.x, *r)
+            (
+                c.y - size.y / 2.0,
+                c.y + size.y / 2.0,
+                c.x - size.x / 2.0,
+                size.x,
+                *r,
+            )
         })
         .collect();
     rows.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let Some(first) = rows.first().copied() else { return };
+    let Some(first) = rows.first().copied() else {
+        return;
+    };
     let p = drag.pointer;
-    let inside = p.x > first.2 - 30.0 && p.x < first.2 + first.3 + 30.0 && p.y > first.0 - 30.0 && p.y < rows.last().map_or(0.0, |r| r.1) + 30.0;
+    let inside = p.x > first.2 - 30.0
+        && p.x < first.2 + first.3 + 30.0
+        && p.y > first.0 - 30.0
+        && p.y < rows.last().map_or(0.0, |r| r.1) + 30.0;
     let blue = Color::srgb_u8(0x2b, 0x64, 0xc0);
     drag.target = None;
     let mut mark: Option<(f32, f32, f32, f32, bool)> = None;
     if inside {
         // Onto a folder row's middle: into it.
-        if let Some((top, bottom, left, width, r)) = rows.iter().find(|(top, bottom, ..)| p.y > top + 6.0 && p.y < bottom - 6.0).filter(|r| matches!(r.4.item, TabItem::Folder(_)))
+        if let Some((top, bottom, left, width, r)) = rows
+            .iter()
+            .find(|(top, bottom, ..)| p.y > top + 6.0 && p.y < bottom - 6.0)
+            .filter(|r| matches!(r.4.item, TabItem::Folder(_)))
             && !drag.items.contains(&r.item)
         {
             drag.target = Some((Some(r.item.id()), None));
             mark = Some((*top, *left, *width, bottom - top, true));
         } else {
-            let k = rows.iter().position(|(top, bottom, ..)| p.y < (top + bottom) / 2.0);
+            let k = rows
+                .iter()
+                .position(|(top, bottom, ..)| p.y < (top + bottom) / 2.0);
             let (parent, before, y, depth) = match k {
-                Some(k) => (rows[k].4.parent, Some(rows[k].4.item), rows[k].0, rows[k].4.depth),
+                Some(k) => (
+                    rows[k].4.parent,
+                    Some(rows[k].4.item),
+                    rows[k].0,
+                    rows[k].4.depth,
+                ),
                 None => (None, None, rows[rows.len() - 1].1, 0),
             };
             // Not into a dragged folder.
@@ -1093,7 +1712,13 @@ fn place_drop(
             if !bad {
                 drag.target = Some((parent, before));
                 let indent = 10.0 + 16.0 * depth as f32;
-                mark = Some((y - 1.5, first.2 + indent, first.3 - indent - 8.0, 3.0, false));
+                mark = Some((
+                    y - 1.5,
+                    first.2 + indent,
+                    first.3 - indent - 8.0,
+                    3.0,
+                    false,
+                ));
             }
         }
     }
@@ -1105,7 +1730,11 @@ fn place_drop(
         }
         Some((top, left, width, height, boxed)) => {
             // A line's border is blue too: a 2 px node's fill sits inside its 1 px borders.
-            let (bg, border) = if boxed { (blue.with_alpha(0.18), blue) } else { (blue, blue) };
+            let (bg, border) = if boxed {
+                (blue.with_alpha(0.18), blue)
+            } else {
+                (blue, blue)
+            };
             let (tv, lv, wv, hv) = (Val::Px(top), Val::Px(left), Val::Px(width), Val::Px(height));
             match q_line.iter_mut().next() {
                 Some((_, mut n, mut b, mut bc)) => {
@@ -1122,7 +1751,16 @@ fn place_drop(
                     commands.spawn((
                         Name::new("tab-manager-drop-line"),
                         DropLine,
-                        Node { position_type: PositionType::Absolute, top: tv, left: lv, width: wv, height: hv, border: UiRect::all(Val::Px(1.0)), border_radius: BorderRadius::all(Val::Px(3.0)), ..default() },
+                        Node {
+                            position_type: PositionType::Absolute,
+                            top: tv,
+                            left: lv,
+                            width: wv,
+                            height: hv,
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(3.0)),
+                            ..default()
+                        },
                         BackgroundColor(bg),
                         BorderColor::all(border),
                         GlobalZIndex(40),
@@ -1146,9 +1784,19 @@ fn place_drop(
             let (label, icon) = match drag.items.as_slice() {
                 [TabItem::Tab(e)] => {
                     let el = doc.doc.element(*e);
-                    (el.map(|e| e.name.clone()).unwrap_or_default(), el.map(tab_icon).unwrap_or("part-studio"))
+                    (
+                        el.map(|e| e.name.clone()).unwrap_or_default(),
+                        el.map(tab_icon).unwrap_or("part-studio"),
+                    )
                 }
-                [TabItem::Folder(f)] => (doc.doc.tab_tree.folder(*f).map(|f| f.name.clone()).unwrap_or_default(), "folder"),
+                [TabItem::Folder(f)] => (
+                    doc.doc
+                        .tab_tree
+                        .folder(*f)
+                        .map(|f| f.name.clone())
+                        .unwrap_or_default(),
+                    "folder",
+                ),
                 many => (format!("{} items", many.len()), "tab-manager"),
             };
             let t = &*theme;
@@ -1173,8 +1821,19 @@ fn place_drop(
                 Pickable::IGNORE,
                 DespawnOnExit(AppState::Document),
                 children![
-                    (cadrs_ui::icon::icon(icon, 14.0, t.tool_foreground), Pickable::IGNORE),
-                    (t.text(label, t.font_sm, FontWeight::MEDIUM, t.foreground.with_alpha(0.85)), Pickable::IGNORE),
+                    (
+                        cadrs_ui::icon::icon(icon, 14.0, t.tool_foreground),
+                        Pickable::IGNORE
+                    ),
+                    (
+                        t.text(
+                            label,
+                            t.font_sm,
+                            FontWeight::MEDIUM,
+                            t.foreground.with_alpha(0.85)
+                        ),
+                        Pickable::IGNORE
+                    ),
                 ],
             ));
         }
@@ -1203,22 +1862,32 @@ mod tests {
     fn a_shift_click_range_covers_rows_out_of_view() {
         let mut d = Document::empty("T");
         for i in 0..60 {
-            d.elements.push(Element::part_studio(format!("Studio {}", i + 2)));
+            d.elements
+                .push(Element::part_studio(format!("Studio {}", i + 2)));
         }
         let tm = TabManager::default();
         let order: Vec<ElementId> = rows_of(&d, &tm).iter().map(|r| r.item.id()).collect();
         assert_eq!(order.len(), 60);
         let range = range_selection(&order, order[0], order[11]).unwrap();
         assert_eq!(range, order[..12].to_vec());
-        assert_eq!(range_selection(&order, order[11], order[0]).unwrap(), order[..12].to_vec());
-        assert_eq!(range_selection(&order, order[5], order[5]).unwrap(), vec![order[5]]);
+        assert_eq!(
+            range_selection(&order, order[11], order[0]).unwrap(),
+            order[..12].to_vec()
+        );
+        assert_eq!(
+            range_selection(&order, order[5], order[5]).unwrap(),
+            vec![order[5]]
+        );
         assert!(range_selection(&order, ElementId::new(), order[3]).is_none());
     }
 
     #[test]
     fn search_and_type_filters() {
         let d = doc();
-        let mut tm = TabManager { search: "PLATE".into(), ..default() };
+        let mut tm = TabManager {
+            search: "PLATE".into(),
+            ..default()
+        };
         let names: Vec<String> = rows_of(&d, &tm).into_iter().map(|r| r.name).collect();
         assert_eq!(names, ["Base plate", "Top plate"]);
         tm.search.clear();
@@ -1234,16 +1903,36 @@ mod tests {
         let mut d = doc();
         let ids: Vec<ElementId> = d.elements.iter().map(|e| e.id).collect();
         let f = ElementId::new();
-        CreateTabFolder { id: f, name: Some("Plates".into()), parent: None, before: None, items: vec![TabItem::Tab(ids[0]), TabItem::Tab(ids[2])] }.apply(&mut d).unwrap();
+        CreateTabFolder {
+            id: f,
+            name: Some("Plates".into()),
+            parent: None,
+            before: None,
+            items: vec![TabItem::Tab(ids[0]), TabItem::Tab(ids[2])],
+        }
+        .apply(&mut d)
+        .unwrap();
         let mut tm = TabManager::default();
         let rows = rows_of(&d, &tm);
         let names: Vec<(&str, usize)> = rows.iter().map(|r| (r.name.as_str(), r.depth)).collect();
-        assert_eq!(names, [("Plates", 0), ("Base plate", 1), ("Top plate", 1), ("Hexapod", 0), ("Piston", 0)]);
+        assert_eq!(
+            names,
+            [
+                ("Plates", 0),
+                ("Base plate", 1),
+                ("Top plate", 1),
+                ("Hexapod", 0),
+                ("Piston", 0)
+            ]
+        );
         assert_eq!(rows[0].folder, Some((true, 2)));
         tm.collapsed.push(f);
         assert_eq!(rows_of(&d, &tm).len(), 3);
         // A selected folder moves (and moves to another document) with its tabs.
         assert_eq!(selected_tabs(&d, &[f]), vec![ids[0], ids[2]]);
-        assert_eq!(selected_items(&d, &[f, ids[0], ids[3]]), vec![TabItem::Folder(f), TabItem::Tab(ids[3])]);
+        assert_eq!(
+            selected_items(&d, &[f, ids[0], ids[3]]),
+            vec![TabItem::Folder(f), TabItem::Tab(ids[3])]
+        );
     }
 }

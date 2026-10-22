@@ -23,7 +23,10 @@ impl Surface {
         let mut it = self.positions.iter();
         let first = *it.next()?;
         Some(it.fold((first, first), |(lo, hi), p| {
-            ([lo[0].min(p[0]), lo[1].min(p[1]), lo[2].min(p[2])], [hi[0].max(p[0]), hi[1].max(p[1]), hi[2].max(p[2])])
+            (
+                [lo[0].min(p[0]), lo[1].min(p[1]), lo[2].min(p[2])],
+                [hi[0].max(p[0]), hi[1].max(p[1]), hi[2].max(p[2])],
+            )
         }))
     }
 
@@ -41,9 +44,22 @@ impl Surface {
     /// A box `[lo, hi]` with its six faces numbered 0 −x, 1 +x, 2 −y, 3 +y, 4 −z, 5 +z, two
     /// triangles each (as a kernel tessellates a box). For tests and examples.
     pub fn cuboid(lo: V3, hi: V3) -> Surface {
-        let c = |i: usize| -> V3 { [if i & 1 == 0 { lo[0] } else { hi[0] }, if i & 2 == 0 { lo[1] } else { hi[1] }, if i & 4 == 0 { lo[2] } else { hi[2] }] };
+        let c = |i: usize| -> V3 {
+            [
+                if i & 1 == 0 { lo[0] } else { hi[0] },
+                if i & 2 == 0 { lo[1] } else { hi[1] },
+                if i & 4 == 0 { lo[2] } else { hi[2] },
+            ]
+        };
         // Each face as a quad (corner indices), counter-clockwise from outside.
-        let quads: [[usize; 4]; 6] = [[0, 4, 6, 2], [1, 3, 7, 5], [0, 1, 5, 4], [2, 6, 7, 3], [0, 2, 3, 1], [4, 5, 7, 6]];
+        let quads: [[usize; 4]; 6] = [
+            [0, 4, 6, 2],
+            [1, 3, 7, 5],
+            [0, 1, 5, 4],
+            [2, 6, 7, 3],
+            [0, 2, 3, 1],
+            [4, 5, 7, 6],
+        ];
         let mut s = Surface::default();
         for (f, q) in quads.iter().enumerate() {
             let base = s.positions.len() as u32;
@@ -67,7 +83,13 @@ pub(crate) struct Welded {
 /// Welds vertices closer than `tol` and drops triangles that collapse.
 pub(crate) fn weld(s: &Surface, tol: f64) -> Welded {
     let cell = tol.max(1e-12) * 4.0;
-    let key = |p: V3| [(p[0] / cell).floor() as i64, (p[1] / cell).floor() as i64, (p[2] / cell).floor() as i64];
+    let key = |p: V3| {
+        [
+            (p[0] / cell).floor() as i64,
+            (p[1] / cell).floor() as i64,
+            (p[2] / cell).floor() as i64,
+        ]
+    };
     let mut grid: HashMap<[i64; 3], Vec<u32>> = HashMap::new();
     let mut pts: Vec<V3> = Vec::new();
     let mut map = vec![0u32; s.positions.len()];
@@ -95,7 +117,10 @@ pub(crate) fn weld(s: &Surface, tol: f64) -> Welded {
             j
         });
     }
-    let mut w = Welded { pts, ..Default::default() };
+    let mut w = Welded {
+        pts,
+        ..Default::default()
+    };
     for (t, tri) in s.triangles.iter().enumerate() {
         let v = tri.map(|i| map[i as usize]);
         if v[0] != v[1] && v[1] != v[2] && v[0] != v[2] {
@@ -145,7 +170,10 @@ pub(crate) fn sample(w: &Welded, h: f64) -> (Vec<V3>, Vec<Vec<u32>>) {
         let (pa, pb) = (w.pts[a as usize], w.pts[b as usize]);
         let n = (len(sub(pb, pa)) / h).ceil() as usize;
         for k in 1..n {
-            pts.push(add(pa, crate::geom::scale(sub(pb, pa), k as f64 / n as f64)));
+            pts.push(add(
+                pa,
+                crate::geom::scale(sub(pb, pa), k as f64 / n as f64),
+            ));
             faces.push(edges[&(a, b)].clone());
         }
     }
@@ -158,11 +186,18 @@ pub(crate) fn sample(w: &Welded, h: f64) -> (Vec<V3>, Vec<Vec<u32>>) {
         }
         // A lattice in the triangle's plane, along its longest edge.
         let sides = [(a, b), (b, c), (c, a)];
-        let (o, e) = sides.iter().copied().max_by(|x, y| len(sub(x.1, x.0)).total_cmp(&len(sub(y.1, y.0)))).unwrap();
+        let (o, e) = sides
+            .iter()
+            .copied()
+            .max_by(|x, y| len(sub(x.1, x.0)).total_cmp(&len(sub(y.1, y.0))))
+            .unwrap();
         let u = crate::geom::normalize(sub(e, o));
         let nn = crate::geom::normalize(n);
         let v = cross(nn, u);
-        let far = [a, b, c].iter().map(|p| dot(sub(*p, o), v)).fold(f64::MIN, f64::max);
+        let far = [a, b, c]
+            .iter()
+            .map(|p| dot(sub(*p, o), v))
+            .fold(f64::MIN, f64::max);
         let (lo_v, hi_v) = (far.min(0.0), far.max(0.0));
         let span_u = len(sub(e, o));
         let dist_to_edge = |p: V3, (x, y): (V3, V3)| {
@@ -174,7 +209,13 @@ pub(crate) fn sample(w: &Welded, h: f64) -> (Vec<V3>, Vec<Vec<u32>>) {
         while j as f64 * h <= hi_v {
             let mut i = 0i64;
             while i as f64 * h <= span_u {
-                let p = add(o, add(crate::geom::scale(u, i as f64 * h), crate::geom::scale(v, j as f64 * h)));
+                let p = add(
+                    o,
+                    add(
+                        crate::geom::scale(u, i as f64 * h),
+                        crate::geom::scale(v, j as f64 * h),
+                    ),
+                );
                 let bary_ok = {
                     let c0 = dot(cross(sub(b, a), sub(p, a)), nn);
                     let c1 = dot(cross(sub(c, b), sub(p, b)), nn);
@@ -244,7 +285,16 @@ impl SurfaceIndex {
                 }
             }
         }
-        Self { tris: tri_pts, face: face.to_vec(), lo, cell, dims, bins, ray_bins, diag }
+        Self {
+            tris: tri_pts,
+            face: face.to_vec(),
+            lo,
+            cell,
+            dims,
+            bins,
+            ray_bins,
+            diag,
+        }
     }
 
     fn cell_of(&self, p: V3) -> [i64; 3] {
@@ -254,14 +304,26 @@ impl SurfaceIndex {
     /// Is `p` inside the closed surface? (Parity of the crossings of a ray along +x; a ray that
     /// grazes an edge is retried from a slightly moved point.)
     pub fn inside(&self, p: V3) -> bool {
-        let mut rng = Rng::new(0x1234_5678 ^ p[0].to_bits() ^ p[1].to_bits().rotate_left(21) ^ p[2].to_bits().rotate_left(42));
+        let mut rng = Rng::new(
+            0x1234_5678
+                ^ p[0].to_bits()
+                ^ p[1].to_bits().rotate_left(21)
+                ^ p[2].to_bits().rotate_left(42),
+        );
         let mut q = p;
         for _ in 0..16 {
             if let Some(c) = self.crossings(q) {
                 return c % 2 == 1;
             }
             let e = self.diag * 1e-9;
-            q = add(p, [(rng.next_f64() - 0.5) * e, (rng.next_f64() - 0.5) * e, (rng.next_f64() - 0.5) * e]);
+            q = add(
+                p,
+                [
+                    (rng.next_f64() - 0.5) * e,
+                    (rng.next_f64() - 0.5) * e,
+                    (rng.next_f64() - 0.5) * e,
+                ],
+            );
         }
         false
     }
@@ -291,7 +353,10 @@ impl SurfaceIndex {
                 }
                 continue;
             }
-            if (s0 > 0.0) != (area > 0.0) || (s1 > 0.0) != (area > 0.0) || (s2 > 0.0) != (area > 0.0) {
+            if (s0 > 0.0) != (area > 0.0)
+                || (s1 > 0.0) != (area > 0.0)
+                || (s2 > 0.0) != (area > 0.0)
+            {
                 continue;
             }
             let x = (s0 * a[0] + s1 * b[0] + s2 * cc[0]) / (s0 + s1 + s2);
@@ -313,10 +378,18 @@ impl SurfaceIndex {
         for x in c[0] - reach..=c[0] + reach {
             for y in c[1] - reach..=c[1] + reach {
                 for z in c[2] - reach..=c[2] + reach {
-                    if x < 0 || y < 0 || z < 0 || x as usize >= self.dims[0] || y as usize >= self.dims[1] || z as usize >= self.dims[2] {
+                    if x < 0
+                        || y < 0
+                        || z < 0
+                        || x as usize >= self.dims[0]
+                        || y as usize >= self.dims[1]
+                        || z as usize >= self.dims[2]
+                    {
                         continue;
                     }
-                    for &t in &self.bins[(x as usize * self.dims[1] + y as usize) * self.dims[2] + z as usize] {
+                    for &t in &self.bins
+                        [(x as usize * self.dims[1] + y as usize) * self.dims[2] + z as usize]
+                    {
                         let [a, b, cc] = self.tris[t as usize];
                         let (q, w) = closest_on_triangle(p, a, b, cc);
                         let d = len(sub(q, p));
@@ -334,7 +407,6 @@ impl SurfaceIndex {
     pub fn distance_within_cell(&self, p: V3) -> f64 {
         self.closest(p, 1).map_or(self.cell, |c| c.0.min(self.cell))
     }
-
 }
 
 #[cfg(test)]
@@ -354,7 +426,11 @@ mod tests {
         for (p, f) in pts.iter().zip(&faces) {
             for &face in f {
                 let axis = (face / 2) as usize;
-                let at = if face % 2 == 0 { 0.0 } else { [10.0, 2.0, 3.0][axis] };
+                let at = if face % 2 == 0 {
+                    0.0
+                } else {
+                    [10.0, 2.0, 3.0][axis]
+                };
                 assert!((p[axis] - at).abs() < 1e-9, "{p:?} not on face {face}");
             }
         }
@@ -365,7 +441,11 @@ mod tests {
             }
         }
         let area = 2.0 * (10.0 * 2.0 + 10.0 * 3.0 + 2.0 * 3.0);
-        assert!(pts.len() < (3.0 * area / (0.7 * 0.7)) as usize, "{} points", pts.len());
+        assert!(
+            pts.len() < (3.0 * area / (0.7 * 0.7)) as usize,
+            "{} points",
+            pts.len()
+        );
         let idx = SurfaceIndex::new(&w.pts, &w.tris, &w.face, 0.7);
         assert!(idx.inside([5.0, 1.0, 1.5]));
         // Grid-aligned points (rays along the triangles' edges) still classify.

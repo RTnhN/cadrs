@@ -221,7 +221,10 @@ impl EdgeTag {
                 },
             ),
             EdgeTag::Lateral { region, from, to } => (
-                FaceTag::Side { region, curve: from },
+                FaceTag::Side {
+                    region,
+                    curve: from,
+                },
                 FaceTag::Side { region, curve: to },
             ),
         }
@@ -310,11 +313,18 @@ pub enum Link {
     /// flat's (and so the sketch's) coordinates: part `part` of the Sheet metal model `model`;
     /// the centre line of the bend of joint `bend`, else the edge of its outline or of a
     /// cut-out nearest where the used curve lies.
-    FlatLine { model: uuid::Uuid, part: u8, bend: Option<u32> },
+    FlatLine {
+        model: uuid::Uuid,
+        part: u8,
+        bend: Option<u32>,
+    },
     /// A vertex (corner) of the part made by `feature`, seen along the sketch normal: a point,
     /// held by a [`ConstraintOf::Pierce`] constraint (a model vertex picked in the sketch to
     /// constrain to, as Onshape uses it).
-    Vertex { feature: uuid::Uuid, vertex: VertexName },
+    Vertex {
+        feature: uuid::Uuid,
+        vertex: VertexName,
+    },
 }
 
 impl Link {
@@ -338,7 +348,11 @@ impl Link {
         match self {
             Link::Edge { feature, edge } => Link::Edge {
                 feature,
-                edge: EdgeName::new(f(edge.faces[0], feature), f(edge.faces[1], feature), edge.index),
+                edge: EdgeName::new(
+                    f(edge.faces[0], feature),
+                    f(edge.faces[1], feature),
+                    edge.index,
+                ),
             },
             Link::Silhouette {
                 feature,
@@ -354,7 +368,10 @@ impl Link {
                 faces.sort();
                 Link::Vertex {
                     feature,
-                    vertex: VertexName { faces, index: vertex.index },
+                    vertex: VertexName {
+                        faces,
+                        index: vertex.index,
+                    },
                 }
             }
             l => l,
@@ -551,7 +568,13 @@ impl PlaneFrame {
             let l = dot(a, a).sqrt();
             [a[0] / l, a[1] / l, a[2] / l]
         };
-        let cross = |a: Vec3, b: Vec3| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+        let cross = |a: Vec3, b: Vec3| {
+            [
+                a[1] * b[2] - a[2] * b[1],
+                a[2] * b[0] - a[0] * b[2],
+                a[0] * b[1] - a[1] * b[0],
+            ]
+        };
         // The world axis projected onto the plane.
         let onto = |n: Vec3, a: Vec3| {
             let d = dot(a, n);
@@ -565,7 +588,11 @@ impl PlaneFrame {
             let v = onto(n, [0.0, 0.0, 1.0]);
             (cross(v, n), v)
         };
-        PlaneFrame { origin: self.origin, u, v }
+        PlaneFrame {
+            origin: self.origin,
+            u,
+            v,
+        }
     }
 
     /// Signed distance of a world point from the plane, along the normal.
@@ -818,7 +845,11 @@ impl Dimension {
 impl DimensionKind {
     /// The dimension with its points passed through `pt` and its curves through `cv` (`None`
     /// if one isn't mapped). The origin and the sketch axes stay.
-    pub fn map_ids(self, pt: impl Fn(PointId) -> Option<PointId>, cv: impl Fn(CurveId) -> Option<CurveId>) -> Option<Self> {
+    pub fn map_ids(
+        self,
+        pt: impl Fn(PointId) -> Option<PointId>,
+        cv: impl Fn(CurveId) -> Option<CurveId>,
+    ) -> Option<Self> {
         use DimensionKind as K;
         let pref = |p: PointRef| match p {
             PointRef::Point(k) => pt(k).map(PointRef::Point),
@@ -835,15 +866,51 @@ impl DimensionKind {
             K::OriginAligned { p } => pt(p).map(|p| K::OriginAligned { p }),
             K::Diameter { curve } => cv(curve).map(|curve| K::Diameter { curve }),
             K::Radius { curve } => cv(curve).map(|curve| K::Radius { curve }),
-            K::PointLine { p, line } => pref(p).zip(cref(line)).map(|(p, line)| K::PointLine { p, line }),
-            K::Diametral { p, line } => pref(p).zip(cref(line)).map(|(p, line)| K::Diametral { p, line }),
-            K::Angle { a, b, flip_a, flip_b } => cref(a).zip(cref(b)).map(|(a, b)| K::Angle { a, b, flip_a, flip_b }),
-            K::PointCircle { p, circle, far } => pref(p).zip(cv(circle)).map(|(p, circle)| K::PointCircle { p, circle, far }),
-            K::LineCircle { line, circle, far } => cref(line).zip(cv(circle)).map(|(line, circle)| K::LineCircle { line, circle, far }),
-            K::CircleCircle { a, b, far_a, far_b, axis } => cv(a).zip(cv(b)).map(|(a, b)| K::CircleCircle { a, b, far_a, far_b, axis }),
-            K::Offset { source, target } => cv(source).zip(cv(target)).map(|(source, target)| K::Offset { source, target }),
-            K::EllipseRadius { curve, major } => cv(curve).map(|curve| K::EllipseRadius { curve, major }),
-            K::Sides { circle, inscribed } => cv(circle).map(|circle| K::Sides { circle, inscribed }),
+            K::PointLine { p, line } => pref(p)
+                .zip(cref(line))
+                .map(|(p, line)| K::PointLine { p, line }),
+            K::Diametral { p, line } => pref(p)
+                .zip(cref(line))
+                .map(|(p, line)| K::Diametral { p, line }),
+            K::Angle {
+                a,
+                b,
+                flip_a,
+                flip_b,
+            } => cref(a).zip(cref(b)).map(|(a, b)| K::Angle {
+                a,
+                b,
+                flip_a,
+                flip_b,
+            }),
+            K::PointCircle { p, circle, far } => pref(p)
+                .zip(cv(circle))
+                .map(|(p, circle)| K::PointCircle { p, circle, far }),
+            K::LineCircle { line, circle, far } => cref(line)
+                .zip(cv(circle))
+                .map(|(line, circle)| K::LineCircle { line, circle, far }),
+            K::CircleCircle {
+                a,
+                b,
+                far_a,
+                far_b,
+                axis,
+            } => cv(a).zip(cv(b)).map(|(a, b)| K::CircleCircle {
+                a,
+                b,
+                far_a,
+                far_b,
+                axis,
+            }),
+            K::Offset { source, target } => cv(source)
+                .zip(cv(target))
+                .map(|(source, target)| K::Offset { source, target }),
+            K::EllipseRadius { curve, major } => {
+                cv(curve).map(|curve| K::EllipseRadius { curve, major })
+            }
+            K::Sides { circle, inscribed } => {
+                cv(circle).map(|circle| K::Sides { circle, inscribed })
+            }
         }
     }
 
@@ -856,9 +923,7 @@ impl DimensionKind {
             DimensionKind::OriginAligned { p: q } => q == p,
             DimensionKind::PointLine { p: q, .. }
             | DimensionKind::Diametral { p: q, .. }
-            | DimensionKind::PointCircle { p: q, .. } => {
-                q == PointRef::Point(p)
-            }
+            | DimensionKind::PointCircle { p: q, .. } => q == PointRef::Point(p),
             _ => false,
         }
     }
@@ -869,7 +934,9 @@ impl DimensionKind {
             DimensionKind::Diameter { curve } | DimensionKind::Radius { curve } => {
                 CurveRef::Curve(curve) == c
             }
-            DimensionKind::PointLine { line, .. } | DimensionKind::Diametral { line, .. } => line == c,
+            DimensionKind::PointLine { line, .. } | DimensionKind::Diametral { line, .. } => {
+                line == c
+            }
             DimensionKind::Angle { a, b, .. } => a == c || b == c,
             DimensionKind::PointCircle { circle, .. } => CurveRef::Curve(circle) == c,
             DimensionKind::LineCircle { line, circle, .. } => {
@@ -881,9 +948,8 @@ impl DimensionKind {
             DimensionKind::Offset { source, target } => {
                 CurveRef::Curve(source) == c || CurveRef::Curve(target) == c
             }
-            DimensionKind::EllipseRadius { curve, .. } | DimensionKind::Sides { circle: curve, .. } => {
-                CurveRef::Curve(curve) == c
-            }
+            DimensionKind::EllipseRadius { curve, .. }
+            | DimensionKind::Sides { circle: curve, .. } => CurveRef::Curve(curve) == c,
             _ => false,
         }
     }
@@ -899,7 +965,11 @@ impl DimensionKind {
             _ => None,
         };
         match *self {
-            DimensionKind::CircleCircle { a, b, .. } | DimensionKind::Offset { source: a, target: b } => {
+            DimensionKind::CircleCircle { a, b, .. }
+            | DimensionKind::Offset {
+                source: a,
+                target: b,
+            } => {
                 match (center(a), center(b)) {
                     (Some(p), Some(q)) => p.distance(q) < 1e-6,
                     // An ellipse and its offset (P3.7): the dimension runs between them along
@@ -959,7 +1029,9 @@ impl DimensionKind {
             DimensionKind::Diameter { curve } | DimensionKind::Radius { curve } => {
                 push(CurveRef::Curve(curve))
             }
-            DimensionKind::PointLine { line, .. } | DimensionKind::Diametral { line, .. } => push(line),
+            DimensionKind::PointLine { line, .. } | DimensionKind::Diametral { line, .. } => {
+                push(line)
+            }
             DimensionKind::Angle { a, b, .. } => {
                 push(a);
                 push(b);
@@ -970,13 +1042,15 @@ impl DimensionKind {
                 push(CurveRef::Curve(circle));
             }
             DimensionKind::CircleCircle { a, b, .. }
-            | DimensionKind::Offset { source: a, target: b } => {
+            | DimensionKind::Offset {
+                source: a,
+                target: b,
+            } => {
                 push(CurveRef::Curve(a));
                 push(CurveRef::Curve(b));
             }
-            DimensionKind::EllipseRadius { curve, .. } | DimensionKind::Sides { circle: curve, .. } => {
-                push(CurveRef::Curve(curve))
-            }
+            DimensionKind::EllipseRadius { curve, .. }
+            | DimensionKind::Sides { circle: curve, .. } => push(CurveRef::Curve(curve)),
             _ => {}
         }
         out
@@ -1122,7 +1196,10 @@ impl Sketch {
 
     /// The expression a dimension's value came from (P3F.4), if it names variables.
     pub fn expression(&self, id: DimensionId) -> Option<&str> {
-        self.expressions.iter().find(|(d, _)| *d == id).map(|(_, e)| e.as_str())
+        self.expressions
+            .iter()
+            .find(|(d, _)| *d == id)
+            .map(|(_, e)| e.as_str())
     }
 
     /// True if the sketch has no geometry.
@@ -1193,7 +1270,9 @@ impl Sketch {
         let mut ellipse = false;
         for (id, c) in &self.curves {
             match c.kind {
-                CurveKind::Ellipse { major, .. } | CurveKind::EllipseOffset { major, .. } | CurveKind::EllipseArc { major, .. }
+                CurveKind::Ellipse { major, .. }
+                | CurveKind::EllipseOffset { major, .. }
+                | CurveKind::EllipseArc { major, .. }
                     if major == p =>
                 {
                     ellipse = true
@@ -1325,23 +1404,50 @@ impl Sketch {
     }
 
     /// Adds a spline through new (or existing, where one is at the spot) points.
-    pub fn add_spline(&mut self, pts: &[Vec2], periodic: bool, start_tangent: Option<Vec2>, end_tangent: Option<Vec2>, construction: bool) -> Option<CurveId> {
+    pub fn add_spline(
+        &mut self,
+        pts: &[Vec2],
+        periodic: bool,
+        start_tangent: Option<Vec2>,
+        end_tangent: Option<Vec2>,
+        construction: bool,
+    ) -> Option<CurveId> {
         if pts.len() < 2 || (periodic && pts.len() < 3) {
             return None;
         }
         let points: Vec<PointId> = pts.iter().map(|p| self.ensure_point(*p)).collect();
-        let (start, end) = (points[0], if periodic { points[0] } else { points[points.len() - 1] });
-        let id = self.curves.insert(Curve { kind: CurveKind::Spline { start, end }, construction });
-        self.splines.insert(id, spline::SplineData { points, periodic, start_tangent: start_tangent.filter(|_| !periodic), end_tangent: end_tangent.filter(|_| !periodic) });
+        let (start, end) = (
+            points[0],
+            if periodic {
+                points[0]
+            } else {
+                points[points.len() - 1]
+            },
+        );
+        let id = self.curves.insert(Curve {
+            kind: CurveKind::Spline { start, end },
+            construction,
+        });
+        self.splines.insert(
+            id,
+            spline::SplineData {
+                points,
+                periodic,
+                start_tangent: start_tangent.filter(|_| !periodic),
+                end_tangent: end_tangent.filter(|_| !periodic),
+            },
+        );
         Some(id)
     }
 
     /// An arc's geometry (counter-clockwise from start to end).
     pub fn arc_geom(&self, id: CurveId) -> Option<ArcGeom> {
         match self.curves.get(id)?.kind {
-            CurveKind::Arc { center, start, end } => {
-                Some(ArcGeom::ccw(self.pos(center), self.pos(start), self.pos(end)))
-            }
+            CurveKind::Arc { center, start, end } => Some(ArcGeom::ccw(
+                self.pos(center),
+                self.pos(start),
+                self.pos(end),
+            )),
             _ => None,
         }
     }
@@ -1363,14 +1469,22 @@ impl Sketch {
             CurveKind::Spline { start, end } => (start != end).then_some((start, end)),
             CurveKind::Bezier { a, b, .. } => Some((a, b)),
             CurveKind::EllipseArc { start, end, .. } => Some((start, end)),
-            CurveKind::Circle { .. } | CurveKind::Ellipse { .. } | CurveKind::EllipseOffset { .. } => None,
+            CurveKind::Circle { .. }
+            | CurveKind::Ellipse { .. }
+            | CurveKind::EllipseOffset { .. } => None,
         }
     }
 
     /// An elliptical arc's geometry.
     pub fn ellipse_arc_geom(&self, id: CurveId) -> Option<geom::EllipseArcGeom> {
         match self.curves.get(id)?.kind {
-            CurveKind::EllipseArc { center, major, minor, start, end } => Some(geom::EllipseArcGeom::ccw(
+            CurveKind::EllipseArc {
+                center,
+                major,
+                minor,
+                start,
+                end,
+            } => Some(geom::EllipseArcGeom::ccw(
                 self.pos(center),
                 self.pos(major),
                 minor,
@@ -1384,27 +1498,44 @@ impl Sketch {
     /// A Bézier curve's geometry.
     pub fn bezier_geom(&self, id: CurveId) -> Option<geom::BezierGeom> {
         match self.curves.get(id)?.kind {
-            CurveKind::Bezier { a, c1, c2, b } => {
-                Some(geom::BezierGeom::new([self.pos(a), self.pos(c1), self.pos(c2), self.pos(b)]))
-            }
+            CurveKind::Bezier { a, c1, c2, b } => Some(geom::BezierGeom::new([
+                self.pos(a),
+                self.pos(c1),
+                self.pos(c2),
+                self.pos(b),
+            ])),
             _ => None,
         }
     }
 
     /// True for a Bézier curve's control point (a handle, not an end).
     pub fn bezier_handle(&self, p: PointId) -> bool {
-        self.curves.values().any(|c| matches!(c.kind, CurveKind::Bezier { c1, c2, .. } if c1 == p || c2 == p))
+        self.curves
+            .values()
+            .any(|c| matches!(c.kind, CurveKind::Bezier { c1, c2, .. } if c1 == p || c2 == p))
     }
 
     /// An ellipse's geometry.
     pub fn ellipse_geom(&self, id: CurveId) -> Option<geom::EllipseGeom> {
         match self.curves.get(id)?.kind {
-            CurveKind::Ellipse { center, major, minor } => {
-                Some(geom::EllipseGeom::new(self.pos(center), self.pos(major), minor))
-            }
-            CurveKind::EllipseOffset { center, major, minor, distance } => {
-                Some(geom::EllipseGeom::new(self.pos(center), self.pos(major), minor).with_offset(distance))
-            }
+            CurveKind::Ellipse {
+                center,
+                major,
+                minor,
+            } => Some(geom::EllipseGeom::new(
+                self.pos(center),
+                self.pos(major),
+                minor,
+            )),
+            CurveKind::EllipseOffset {
+                center,
+                major,
+                minor,
+                distance,
+            } => Some(
+                geom::EllipseGeom::new(self.pos(center), self.pos(major), minor)
+                    .with_offset(distance),
+            ),
             _ => None,
         }
     }
@@ -1435,12 +1566,23 @@ impl Sketch {
             }
             CurveKind::EllipseArc { start, .. } => {
                 let g = self.ellipse_arc_geom(id)?;
-                Some(if start == p { g.start_tangent() } else { -g.end_tangent() })
+                Some(if start == p {
+                    g.start_tangent()
+                } else {
+                    -g.end_tangent()
+                })
             }
-            CurveKind::Spline { .. } | CurveKind::Circle { .. } | CurveKind::Ellipse { .. } | CurveKind::EllipseOffset { .. } => None,
+            CurveKind::Spline { .. }
+            | CurveKind::Circle { .. }
+            | CurveKind::Ellipse { .. }
+            | CurveKind::EllipseOffset { .. } => None,
             CurveKind::Bezier { a, .. } => {
                 let g = self.bezier_geom(id)?;
-                let d = if a == p { g.tangent_at(0.0) } else { -g.tangent_at(1.0) };
+                let d = if a == p {
+                    g.tangent_at(0.0)
+                } else {
+                    -g.tangent_at(1.0)
+                };
                 (d.length() > 1e-12).then(|| d.normalize())
             }
         }
@@ -1455,7 +1597,10 @@ impl Sketch {
         let swap = |p: PointId| if p == gone { keep } else { p };
         for c in self.curves.values_mut() {
             c.kind = match c.kind {
-                CurveKind::Line { a, b } => CurveKind::Line { a: swap(a), b: swap(b) },
+                CurveKind::Line { a, b } => CurveKind::Line {
+                    a: swap(a),
+                    b: swap(b),
+                },
                 CurveKind::Circle { center, radius } => CurveKind::Circle {
                     center: swap(center),
                     radius,
@@ -1465,25 +1610,43 @@ impl Sketch {
                     start: swap(start),
                     end: swap(end),
                 },
-                CurveKind::Ellipse { center, major, minor } => CurveKind::Ellipse {
+                CurveKind::Ellipse {
+                    center,
+                    major,
+                    minor,
+                } => CurveKind::Ellipse {
                     center: swap(center),
                     major: swap(major),
                     minor,
                 },
-                CurveKind::EllipseOffset { center, major, minor, distance } => CurveKind::EllipseOffset {
+                CurveKind::EllipseOffset {
+                    center,
+                    major,
+                    minor,
+                    distance,
+                } => CurveKind::EllipseOffset {
                     center: swap(center),
                     major: swap(major),
                     minor,
                     distance,
                 },
-                CurveKind::EllipseArc { center, major, minor, start, end } => CurveKind::EllipseArc {
+                CurveKind::EllipseArc {
+                    center,
+                    major,
+                    minor,
+                    start,
+                    end,
+                } => CurveKind::EllipseArc {
                     center: swap(center),
                     major: swap(major),
                     minor,
                     start: swap(start),
                     end: swap(end),
                 },
-                CurveKind::Spline { start, end } => CurveKind::Spline { start: swap(start), end: swap(end) },
+                CurveKind::Spline { start, end } => CurveKind::Spline {
+                    start: swap(start),
+                    end: swap(end),
+                },
                 CurveKind::Bezier { a, c1, c2, b } => CurveKind::Bezier {
                     a: swap(a),
                     c1: swap(c1),
@@ -1524,25 +1687,42 @@ impl Sketch {
         }
         for d in self.dimensions.values_mut() {
             d.kind = match d.kind {
-                DimensionKind::Horizontal { a, b } => DimensionKind::Horizontal { a: swap(a), b: swap(b) },
-                DimensionKind::Vertical { a, b } => DimensionKind::Vertical { a: swap(a), b: swap(b) },
-                DimensionKind::Aligned { a, b } => DimensionKind::Aligned { a: swap(a), b: swap(b) },
+                DimensionKind::Horizontal { a, b } => DimensionKind::Horizontal {
+                    a: swap(a),
+                    b: swap(b),
+                },
+                DimensionKind::Vertical { a, b } => DimensionKind::Vertical {
+                    a: swap(a),
+                    b: swap(b),
+                },
+                DimensionKind::Aligned { a, b } => DimensionKind::Aligned {
+                    a: swap(a),
+                    b: swap(b),
+                },
                 DimensionKind::OriginAligned { p } => DimensionKind::OriginAligned { p: swap(p) },
-                DimensionKind::PointLine { p: PointRef::Point(p), line } => DimensionKind::PointLine {
+                DimensionKind::PointLine {
+                    p: PointRef::Point(p),
+                    line,
+                } => DimensionKind::PointLine {
                     p: PointRef::Point(swap(p)),
                     line,
                 },
-                DimensionKind::Diametral { p: PointRef::Point(p), line } => DimensionKind::Diametral {
+                DimensionKind::Diametral {
+                    p: PointRef::Point(p),
+                    line,
+                } => DimensionKind::Diametral {
                     p: PointRef::Point(swap(p)),
                     line,
                 },
-                DimensionKind::PointCircle { p: PointRef::Point(p), circle, far } => {
-                    DimensionKind::PointCircle {
-                        p: PointRef::Point(swap(p)),
-                        circle,
-                        far,
-                    }
-                }
+                DimensionKind::PointCircle {
+                    p: PointRef::Point(p),
+                    circle,
+                    far,
+                } => DimensionKind::PointCircle {
+                    p: PointRef::Point(swap(p)),
+                    circle,
+                    far,
+                },
                 k => k,
             };
         }
@@ -1569,9 +1749,22 @@ pub(crate) fn curve_points(kind: &CurveKind) -> Vec<PointId> {
         CurveKind::Line { a, b } => vec![a, b],
         CurveKind::Circle { center, .. } => vec![center],
         CurveKind::Arc { center, start, end } => vec![center, start, end],
-        CurveKind::Ellipse { center, major, .. } | CurveKind::EllipseOffset { center, major, .. } => vec![center, major],
-        CurveKind::EllipseArc { center, major, start, end, .. } => vec![center, major, start, end],
-        CurveKind::Spline { start, end } => if start == end { vec![start] } else { vec![start, end] },
+        CurveKind::Ellipse { center, major, .. }
+        | CurveKind::EllipseOffset { center, major, .. } => vec![center, major],
+        CurveKind::EllipseArc {
+            center,
+            major,
+            start,
+            end,
+            ..
+        } => vec![center, major, start, end],
+        CurveKind::Spline { start, end } => {
+            if start == end {
+                vec![start]
+            } else {
+                vec![start, end]
+            }
+        }
         CurveKind::Bezier { a, c1, c2, b } => vec![a, c1, c2, b],
     }
 }
@@ -1620,7 +1813,11 @@ mod tests {
     fn upright_frames_match_the_default_planes() {
         // A side face whose frame runs along -Z and the extrude direction (+X), facing -Y:
         // upright, it reads as the Front plane.
-        let side = PlaneFrame { origin: [0.0, 26.0, 0.0], u: [0.0, 0.0, -1.0], v: [1.0, 0.0, 0.0] };
+        let side = PlaneFrame {
+            origin: [0.0, 26.0, 0.0],
+            u: [0.0, 0.0, -1.0],
+            v: [1.0, 0.0, 0.0],
+        };
         let up = side.upright();
         assert!(close3(up.u, PlaneRef::Front.frame().u) && close3(up.v, PlaneRef::Front.frame().v));
         assert!(close3(up.origin, side.origin));
@@ -1628,16 +1825,44 @@ mod tests {
         // facing the same way, seen from the other side (v still up, or u still +X) otherwise.
         for plane in PlaneRef::ALL {
             let f = plane.frame();
-            let turned = PlaneFrame { origin: f.origin, u: f.v, v: f.u.map(|x| -x) };
+            let turned = PlaneFrame {
+                origin: f.origin,
+                u: f.v,
+                v: f.u.map(|x| -x),
+            };
             let up = turned.upright();
             assert!(close3(up.u, f.u) && close3(up.v, f.v), "{plane:?}");
-            let back = PlaneFrame { origin: f.origin, u: f.v, v: f.u }.upright();
+            let back = PlaneFrame {
+                origin: f.origin,
+                u: f.v,
+                v: f.u,
+            }
+            .upright();
             assert!(close3(back.normal(), f.normal().map(|x| -x)), "{plane:?}");
-            let level = if plane == PlaneRef::Top { [1.0, 0.0, 0.0] } else { [0.0, 0.0, 1.0] };
-            assert!(close3(if plane == PlaneRef::Top { back.u } else { back.v }, level), "{plane:?}");
+            let level = if plane == PlaneRef::Top {
+                [1.0, 0.0, 0.0]
+            } else {
+                [0.0, 0.0, 1.0]
+            };
+            assert!(
+                close3(
+                    if plane == PlaneRef::Top {
+                        back.u
+                    } else {
+                        back.v
+                    },
+                    level
+                ),
+                "{plane:?}"
+            );
         }
         // A tilted face keeps its normal and gets a level u.
-        let tilted = PlaneFrame { origin: [0.0; 3], u: [0.0, 1.0, 0.0], v: [-0.6, 0.0, 0.8] }.upright();
+        let tilted = PlaneFrame {
+            origin: [0.0; 3],
+            u: [0.0, 1.0, 0.0],
+            v: [-0.6, 0.0, 0.8],
+        }
+        .upright();
         assert!(close3(tilted.normal(), [0.8, 0.0, 0.6]));
         assert!(tilted.u[2].abs() < 1e-12 && tilted.v[2] > 0.0);
     }
@@ -1678,7 +1903,9 @@ mod tests {
     #[test]
     fn rays_hit_the_plane() {
         let f = PlaneRef::Top.frame();
-        let hit = f.intersect_ray([3.0, 4.0, 100.0], [0.0, 0.0, -1.0]).unwrap();
+        let hit = f
+            .intersect_ray([3.0, 4.0, 100.0], [0.0, 0.0, -1.0])
+            .unwrap();
         assert!(hit.distance(Vec2::new(3.0, 4.0)) < 1e-9);
         let oblique = f.intersect_ray([0.0, 0.0, 10.0], [1.0, 0.0, -1.0]).unwrap();
         assert!(oblique.distance(Vec2::new(10.0, 0.0)) < 1e-9);

@@ -36,7 +36,14 @@ fn an_image_is_a_surface_part_whose_picture_moves_and_copies_with_it() {
     let mut h = History::default();
     // 200 × 100 px on Top, centred at (10, 20): 100 × 50 mm.
     let image = FeatureId::new();
-    let cmd = AddImage { element: el, feature: image, file_name: "Logo.PNG".into(), bytes: Arc::new(png(200, 100)), plane: PlaneRef::Top, center: [10.0, 20.0] };
+    let cmd = AddImage {
+        element: el,
+        feature: image,
+        file_name: "Logo.PNG".into(),
+        bytes: Arc::new(png(200, 100)),
+        plane: PlaneRef::Top,
+        center: [10.0, 20.0],
+    };
     h.execute(&mut d, &cmd).unwrap();
     let features = d.element(el).unwrap().features().to_vec();
     assert_eq!(features[0].name, "Image 1");
@@ -47,18 +54,49 @@ fn an_image_is_a_surface_part_whose_picture_moves_and_copies_with_it() {
     assert_eq!((p.name.as_str(), p.kind), ("Logo", PartKind::Surface));
     let area: f64 = p.solid.faces.iter().filter_map(|f| f.area).sum();
     assert!((area - 5000.0).abs() < 1e-3, "area {area}");
-    let [pic] = &p.solid.images[..] else { panic!("one picture: {:?}", p.solid.images) };
+    let [pic] = &p.solid.images[..] else {
+        panic!("one picture: {:?}", p.solid.images)
+    };
     close3(pic.corner, [-40.0, -5.0, 0.0]);
     close3(pic.u, [100.0, 0.0, 0.0]);
     close3(pic.v, [0.0, 50.0, 0.0]);
     let part = p.id;
 
     // Moved 5 along Z: the picture follows.
-    let mv = TransformFeature { parts: vec![part], dz: 5.0, dz_expr: "5 mm".into(), ..TransformFeature::new(TransformType::TranslateXyz) };
-    h.execute(&mut d, &AddFeature { element: el, feature: FeatureId::new(), base_name: "Transform".into(), kind: FeatureKind::Transform(mv) }).unwrap();
+    let mv = TransformFeature {
+        parts: vec![part],
+        dz: 5.0,
+        dz_expr: "5 mm".into(),
+        ..TransformFeature::new(TransformType::TranslateXyz)
+    };
+    h.execute(
+        &mut d,
+        &AddFeature {
+            element: el,
+            feature: FeatureId::new(),
+            base_name: "Transform".into(),
+            kind: FeatureKind::Transform(mv),
+        },
+    )
+    .unwrap();
     // Copied 30 along X: the copy shows it too, the original keeps its own.
-    let cp = TransformFeature { parts: vec![part], copy: true, dx: 30.0, dx_expr: "30 mm".into(), ..TransformFeature::new(TransformType::TranslateXyz) };
-    h.execute(&mut d, &AddFeature { element: el, feature: FeatureId::new(), base_name: "Transform".into(), kind: FeatureKind::Transform(cp) }).unwrap();
+    let cp = TransformFeature {
+        parts: vec![part],
+        copy: true,
+        dx: 30.0,
+        dx_expr: "30 mm".into(),
+        ..TransformFeature::new(TransformType::TranslateXyz)
+    };
+    h.execute(
+        &mut d,
+        &AddFeature {
+            element: el,
+            feature: FeatureId::new(),
+            base_name: "Transform".into(),
+            kind: FeatureKind::Transform(cp),
+        },
+    )
+    .unwrap();
     let b = rebuild::build(d.element(el).unwrap().features());
     assert!(b.errors.is_empty(), "rebuild errors: {:?}", b.errors);
     assert_eq!(b.parts.len(), 2);
@@ -66,7 +104,9 @@ fn an_image_is_a_surface_part_whose_picture_moves_and_copies_with_it() {
     close3(moved.solid.images[0].corner, [-40.0, -5.0, 5.0]);
     close3(moved.solid.images[0].u, [100.0, 0.0, 0.0]);
     let copy = b.parts.iter().find(|q| q.id != part).unwrap();
-    let [pic] = &copy.solid.images[..] else { panic!("the copy shows the picture") };
+    let [pic] = &copy.solid.images[..] else {
+        panic!("the copy shows the picture")
+    };
     close3(pic.corner, [-10.0, -5.0, 5.0]);
     close3(pic.v, [0.0, 50.0, 0.0]);
     assert_eq!(pic.blob, moved.solid.images[0].blob);
@@ -76,7 +116,14 @@ fn an_image_is_a_surface_part_whose_picture_moves_and_copies_with_it() {
 fn an_image_blob_is_saved_with_its_document() {
     let mut d = Document::new("Image");
     let el = d.elements[0].id;
-    let cmd = AddImage { element: el, feature: FeatureId::new(), file_name: "photo.jpeg".into(), bytes: Arc::new(png(3, 2)), plane: PlaneRef::Front, center: [0.0, 0.0] };
+    let cmd = AddImage {
+        element: el,
+        feature: FeatureId::new(),
+        file_name: "photo.jpeg".into(),
+        bytes: Arc::new(png(3, 2)),
+        plane: PlaneRef::Front,
+        center: [0.0, 0.0],
+    };
     History::default().execute(&mut d, &cmd).unwrap();
     let used = cadrs_core::blobs::used_by(&d);
     assert_eq!(used.len(), 1);

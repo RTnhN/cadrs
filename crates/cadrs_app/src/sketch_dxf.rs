@@ -32,7 +32,11 @@ use cadrs_core::dxf_import::{DxfUnits, InsertDxf, read_file, sketch_of};
 use cadrs_core::vector_import::{InsertVector, VectorFormat};
 use cadrs_drawing::sheet_sketch::Entity as DxfEntity;
 use cadrs_ui::prelude::*;
-use cadrs_ui::{Button, CheckboxState, FilePicked, FloatingPanel, FloatingPanelClose, Notification, ScriptCommand, Select, SelectState, TabStrip, TabStripSelect, TextInputField, show_notification};
+use cadrs_ui::{
+    Button, CheckboxState, FilePicked, FloatingPanel, FloatingPanelClose, Notification,
+    ScriptCommand, Select, SelectState, TabStrip, TabStripSelect, TextInputField,
+    show_notification,
+};
 
 use crate::sketch::SketchSession;
 use crate::{ActiveDocument, AppState};
@@ -42,7 +46,16 @@ pub struct SketchDxfPlugin;
 impl Plugin for SketchDxfPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SketchDxfDir>()
-            .add_systems(Update, (script_dir, on_file_picked, filter_rows, close_without_sketch).run_if(in_state(AppState::Document)))
+            .add_systems(
+                Update,
+                (
+                    script_dir,
+                    on_file_picked,
+                    filter_rows,
+                    close_without_sketch,
+                )
+                    .run_if(in_state(AppState::Document)),
+            )
             .add_observer(on_tab)
             .add_observer(on_close);
     }
@@ -100,32 +113,63 @@ fn thumbnail(path: &Path, w: u32, h: u32) -> Image {
         c.copy_from_slice(&[0x10, 0x10, 0x10, 0xff]);
     }
     let format = VectorFormat::of_path(path);
-    let drawing = if format == Some(VectorFormat::Dxf) { std::fs::read_to_string(path).ok().and_then(|t| cadrs_drawing::dxf::read_dxf(&t).ok()) } else { None };
+    let drawing = if format == Some(VectorFormat::Dxf) {
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|t| cadrs_drawing::dxf::read_dxf(&t).ok())
+    } else {
+        None
+    };
     // An SVG drawn from its sketch geometry (EPS and PDF would need their converters run for
     // each thumbnail: they stay blank).
-    let svg = if format == Some(VectorFormat::Svg) { std::fs::read(path).ok().and_then(|b| cadrs_core::vector_import::sketch_of_svg(&b).ok()) } else { None };
+    let svg = if format == Some(VectorFormat::Svg) {
+        std::fs::read(path)
+            .ok()
+            .and_then(|b| cadrs_core::vector_import::sketch_of_svg(&b).ok())
+    } else {
+        None
+    };
     let svg_lines = svg.map(|(s, _)| {
-        s.curves.keys().map(|id| cadrs_sketch::hit::curve_polyline(&s, id).into_iter().map(|p| [p.x, p.y]).collect()).collect::<Vec<Vec<[f64; 2]>>>()
+        s.curves
+            .keys()
+            .map(|id| {
+                cadrs_sketch::hit::curve_polyline(&s, id)
+                    .into_iter()
+                    .map(|p| [p.x, p.y])
+                    .collect()
+            })
+            .collect::<Vec<Vec<[f64; 2]>>>()
     });
     if drawing.is_some() || svg_lines.is_some() {
-        let lines: Vec<Vec<[f64; 2]>> = drawing.map(|d| d
-            .entities
-            .iter()
-            .filter_map(|e| match e {
-                DxfEntity::Line { a, b } => Some(vec![*a, *b]),
-                DxfEntity::Arc { center, radius, start, end } => Some(cadrs_drawing::sheet_sketch::arc_polyline(*center, *radius, *start, *end)),
-                DxfEntity::Circle { center, radius } => Some(cadrs_drawing::sheet_sketch::arc_polyline(*center, *radius, 0.0, 360.0)),
-                DxfEntity::Polyline { points, closed, .. } => {
-                    let mut p = points.clone();
-                    if *closed && let Some(f) = points.first() {
-                        p.push(*f);
-                    }
-                    Some(p)
-                }
-                e @ DxfEntity::Spline { .. } => Some(cadrs_drawing::dxf::spline_points(e)),
-                _ => None,
+        let lines: Vec<Vec<[f64; 2]>> = drawing
+            .map(|d| {
+                d.entities
+                    .iter()
+                    .filter_map(|e| match e {
+                        DxfEntity::Line { a, b } => Some(vec![*a, *b]),
+                        DxfEntity::Arc {
+                            center,
+                            radius,
+                            start,
+                            end,
+                        } => Some(cadrs_drawing::sheet_sketch::arc_polyline(
+                            *center, *radius, *start, *end,
+                        )),
+                        DxfEntity::Circle { center, radius } => Some(
+                            cadrs_drawing::sheet_sketch::arc_polyline(*center, *radius, 0.0, 360.0),
+                        ),
+                        DxfEntity::Polyline { points, closed, .. } => {
+                            let mut p = points.clone();
+                            if *closed && let Some(f) = points.first() {
+                                p.push(*f);
+                            }
+                            Some(p)
+                        }
+                        e @ DxfEntity::Spline { .. } => Some(cadrs_drawing::dxf::spline_points(e)),
+                        _ => None,
+                    })
+                    .collect()
             })
-            .collect())
             .or(svg_lines)
             .unwrap_or_default();
         let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
@@ -136,9 +180,18 @@ fn thumbnail(path: &Path, w: u32, h: u32) -> Image {
             }
         }
         if lo[0] < hi[0] {
-            let s = ((w - 6) as f64 / (hi[0] - lo[0])).min((h - 6) as f64 / (hi[1] - lo[1]).max(1e-9));
-            let (ox, oy) = ((w as f64 - (hi[0] - lo[0]) * s) / 2.0, (h as f64 - (hi[1] - lo[1]) * s) / 2.0);
-            let to = |p: [f64; 2]| (ox + (p[0] - lo[0]) * s, h as f64 - (oy + (p[1] - lo[1]) * s));
+            let s =
+                ((w - 6) as f64 / (hi[0] - lo[0])).min((h - 6) as f64 / (hi[1] - lo[1]).max(1e-9));
+            let (ox, oy) = (
+                (w as f64 - (hi[0] - lo[0]) * s) / 2.0,
+                (h as f64 - (hi[1] - lo[1]) * s) / 2.0,
+            );
+            let to = |p: [f64; 2]| {
+                (
+                    ox + (p[0] - lo[0]) * s,
+                    h as f64 - (oy + (p[1] - lo[1]) * s),
+                )
+            };
             let mut plot = |x: f64, y: f64| {
                 let (x, y) = (x.round() as i64, y.round() as i64);
                 if x >= 0 && y >= 0 && (x as u32) < w && (y as u32) < h {
@@ -158,7 +211,17 @@ fn thumbnail(path: &Path, w: u32, h: u32) -> Image {
             }
         }
     }
-    Image::new(Extent3d { width: w, height: h, depth_or_array_layers: 1 }, TextureDimension::D2, px, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::default())
+    Image::new(
+        Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        px,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::default(),
+    )
 }
 
 /// Insert DXF or DWG (the sketch toolbar's button): the dialog.
@@ -170,10 +233,18 @@ pub fn open(world: &mut World) {
     let list = files(&dir);
     let thumbs: Vec<(PathBuf, Handle<Image>)> = {
         let mut images = world.resource_mut::<Assets<Image>>();
-        list.iter().map(|p| (p.clone(), images.add(thumbnail(p, 64, 40)))).collect()
+        list.iter()
+            .map(|p| (p.clone(), images.add(thumbnail(p, 64, 40))))
+            .collect()
     };
-    let inch = world.get_resource::<ActiveDocument>().is_some_and(|d| d.doc.units.length == cadrs_sketch::units::LengthUnit::Inch);
-    let unit = if inch { DxfUnits::Inch } else { DxfUnits::Millimeter };
+    let inch = world
+        .get_resource::<ActiveDocument>()
+        .is_some_and(|d| d.doc.units.length == cadrs_sketch::units::LengthUnit::Inch);
+    let unit = if inch {
+        DxfUnits::Inch
+    } else {
+        DxfUnits::Millimeter
+    };
     let shown_dir = cadrs_ui::file_picker::display_dir(&dir);
     // Open already: once.
     let mut q = world.query_filtered::<Entity, With<SketchDxfDialog>>();
@@ -181,7 +252,9 @@ pub fn open(world: &mut World) {
         return;
     }
     let mut q_area = world.query_filtered::<Entity, With<crate::viewport::ViewportArea>>();
-    let Some(area) = q_area.iter(world).next() else { return };
+    let Some(area) = q_area.iter(world).next() else {
+        return;
+    };
     // Near the view's full height, the list taking what the rest leaves (`step-03.png`: Units
     // and Import… at the bottom).
     let view_h = world.resource::<crate::viewport::ViewportRect>().0.height();
@@ -191,59 +264,146 @@ pub fn open(world: &mut World) {
     let mut commands = world.commands();
     // A floating panel over the view, below the sketch dialog's right edge, as Onshape's
     // (`step-03.png`), not a modal: the view stays usable.
-    let panel = commands.spawn((
-        FloatingPanel::new("sketch-dxf-dialog", "Insert a DXF or DWG file")
-            .width(WIDTH)
-            .at(PANEL_AT.x, PANEL_AT.y)
-            .body(move |b| {
-                let t = &tb;
-                b.spawn((Name::new("sketch-dxf-tabs-row"), Node { width: Val::Percent(100.0), ..default() }))
-                    .with_child(TabStrip::new("sketch-dxf-tabs").tab("Current folder").tab("Other folders").selected(0).build(t));
-                b.spawn((Node { flex_direction: FlexDirection::Column, margin: UiRect::vertical(Val::Px(6.0)), ..default() },)).with_children(|h| {
-                    h.spawn((Name::new("sketch-dxf-folder"), t.text(shown_dir, t.font_base, FontWeight::BOLD, t.foreground)));
-                });
-                b.spawn(TextInput::new("sketch-dxf-search").placeholder("Search DXF, DWG or vector files").width(Val::Percent(100.0)).height(26.0).build(t));
-                b.spawn((
-                    Name::new("sketch-dxf-list"),
-                    Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(2.0), margin: UiRect::vertical(Val::Px(6.0)), height: Val::Px(list_h), overflow: Overflow::scroll_y(), ..default() },
-                ))
-                .with_children(|l| {
-                    if thumbs.is_empty() {
-                        l.spawn(t.text("No DXF, DWG or vector files here. Use Import… to pick one.", t.font_sm, FontWeight::NORMAL, t.muted_foreground));
-                    }
-                    for (path, img) in thumbs {
-                        let file = path.file_name().and_then(|n| n.to_str()).unwrap_or("file").to_string();
-                        l.spawn((DxfRow(file.to_lowercase()), Node { align_items: AlignItems::Center, column_gap: Val::Px(8.0), ..default() })).with_children(|r| {
-                            r.spawn((ImageNode::new(img), Node { width: Val::Px(64.0), height: Val::Px(40.0), flex_shrink: 0.0, ..default() }));
-                            let p = path.clone();
-                            r.spawn((
-                                Button::new(format!("sketch-dxf-file-{file}")).label(file.clone()).ghost().build(t),
-                                observe(move |_: On<Activate>, mut commands: Commands| {
-                                    let p = p.clone();
-                                    commands.queue(move |w: &mut World| insert(w, &p));
-                                }),
+    let panel = commands
+        .spawn((
+            FloatingPanel::new("sketch-dxf-dialog", "Insert a DXF or DWG file")
+                .width(WIDTH)
+                .at(PANEL_AT.x, PANEL_AT.y)
+                .body(move |b| {
+                    let t = &tb;
+                    b.spawn((
+                        Name::new("sketch-dxf-tabs-row"),
+                        Node {
+                            width: Val::Percent(100.0),
+                            ..default()
+                        },
+                    ))
+                    .with_child(
+                        TabStrip::new("sketch-dxf-tabs")
+                            .tab("Current folder")
+                            .tab("Other folders")
+                            .selected(0)
+                            .build(t),
+                    );
+                    b.spawn((Node {
+                        flex_direction: FlexDirection::Column,
+                        margin: UiRect::vertical(Val::Px(6.0)),
+                        ..default()
+                    },))
+                        .with_children(|h| {
+                            h.spawn((
+                                Name::new("sketch-dxf-folder"),
+                                t.text(shown_dir, t.font_base, FontWeight::BOLD, t.foreground),
                             ));
                         });
-                    }
-                });
-                b.spawn(Node { align_items: AlignItems::Center, column_gap: Val::Px(8.0), margin: UiRect::top(Val::Px(4.0)), ..default() }).with_children(|r| {
-                    r.spawn(t.text("Units", t.font_sm, FontWeight::BOLD, t.foreground));
-                    let mut s = Select::new("sketch-dxf-units").bordered().width(Val::Px(200.0));
-                    for u in DxfUnits::ALL {
-                        s = s.option(u.label(), true);
-                    }
-                    r.spawn(s.selected(DxfUnits::ALL.iter().position(|u| *u == unit).unwrap_or(2)).build(t));
-                });
-                b.spawn(Checkbox::new("sketch-dxf-origin").label("Use file origin position").checked(true).height(24.0).build(t));
-                b.spawn((
-                    Button::new("sketch-dxf-import").label("Import…").icon("file-import").ghost().small().build(t),
-                    observe(|_: On<Activate>, mut commands: Commands| commands.queue(pick_other)),
-                ));
-            })
-            .build(&theme),
-        SketchDxfDialog,
-        DespawnOnExit(AppState::Document),
-    )).id();
+                    b.spawn(
+                        TextInput::new("sketch-dxf-search")
+                            .placeholder("Search DXF, DWG or vector files")
+                            .width(Val::Percent(100.0))
+                            .height(26.0)
+                            .build(t),
+                    );
+                    b.spawn((
+                        Name::new("sketch-dxf-list"),
+                        Node {
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(2.0),
+                            margin: UiRect::vertical(Val::Px(6.0)),
+                            height: Val::Px(list_h),
+                            overflow: Overflow::scroll_y(),
+                            ..default()
+                        },
+                    ))
+                    .with_children(|l| {
+                        if thumbs.is_empty() {
+                            l.spawn(t.text(
+                                "No DXF, DWG or vector files here. Use Import… to pick one.",
+                                t.font_sm,
+                                FontWeight::NORMAL,
+                                t.muted_foreground,
+                            ));
+                        }
+                        for (path, img) in thumbs {
+                            let file = path
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("file")
+                                .to_string();
+                            l.spawn((
+                                DxfRow(file.to_lowercase()),
+                                Node {
+                                    align_items: AlignItems::Center,
+                                    column_gap: Val::Px(8.0),
+                                    ..default()
+                                },
+                            ))
+                            .with_children(|r| {
+                                r.spawn((
+                                    ImageNode::new(img),
+                                    Node {
+                                        width: Val::Px(64.0),
+                                        height: Val::Px(40.0),
+                                        flex_shrink: 0.0,
+                                        ..default()
+                                    },
+                                ));
+                                let p = path.clone();
+                                r.spawn((
+                                    Button::new(format!("sketch-dxf-file-{file}"))
+                                        .label(file.clone())
+                                        .ghost()
+                                        .build(t),
+                                    observe(move |_: On<Activate>, mut commands: Commands| {
+                                        let p = p.clone();
+                                        commands.queue(move |w: &mut World| insert(w, &p));
+                                    }),
+                                ));
+                            });
+                        }
+                    });
+                    b.spawn(Node {
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(8.0),
+                        margin: UiRect::top(Val::Px(4.0)),
+                        ..default()
+                    })
+                    .with_children(|r| {
+                        r.spawn(t.text("Units", t.font_sm, FontWeight::BOLD, t.foreground));
+                        let mut s = Select::new("sketch-dxf-units")
+                            .bordered()
+                            .width(Val::Px(200.0));
+                        for u in DxfUnits::ALL {
+                            s = s.option(u.label(), true);
+                        }
+                        r.spawn(
+                            s.selected(DxfUnits::ALL.iter().position(|u| *u == unit).unwrap_or(2))
+                                .build(t),
+                        );
+                    });
+                    b.spawn(
+                        Checkbox::new("sketch-dxf-origin")
+                            .label("Use file origin position")
+                            .checked(true)
+                            .height(24.0)
+                            .build(t),
+                    );
+                    b.spawn((
+                        Button::new("sketch-dxf-import")
+                            .label("Import…")
+                            .icon("file-import")
+                            .ghost()
+                            .small()
+                            .build(t),
+                        observe(|_: On<Activate>, mut commands: Commands| {
+                            commands.queue(pick_other)
+                        }),
+                    ));
+                })
+                .build(&theme),
+            SketchDxfDialog,
+            DespawnOnExit(AppState::Document),
+        ))
+        .id();
     commands.entity(area).add_child(panel);
     world.flush();
 }
@@ -263,14 +423,22 @@ fn close_panels(world: &mut World) {
     }
 }
 
-fn on_close(ev: On<FloatingPanelClose>, q: Query<(), With<SketchDxfDialog>>, mut commands: Commands) {
+fn on_close(
+    ev: On<FloatingPanelClose>,
+    q: Query<(), With<SketchDxfDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.entity(ev.entity).try_despawn();
     }
 }
 
 /// The panel goes with the sketch.
-fn close_without_sketch(session: Option<Res<SketchSession>>, q: Query<Entity, With<SketchDxfDialog>>, mut commands: Commands) {
+fn close_without_sketch(
+    session: Option<Res<SketchSession>>,
+    q: Query<Entity, With<SketchDxfDialog>>,
+    mut commands: Commands,
+) {
     if session.is_none() {
         for e in &q {
             commands.entity(e).try_despawn();
@@ -283,12 +451,23 @@ fn pick_other(world: &mut World) {
     let dir = folder(world);
     let theme = world.resource::<Theme>().clone();
     let mut commands = world.commands();
-    cadrs_ui::open_file_picker(&mut commands, &theme, "sketch-dxf-picker", "Insert a DXF, DWG or vector file", "sketch-insert-dxf", dir, &VectorFormat::EXTENSIONS);
+    cadrs_ui::open_file_picker(
+        &mut commands,
+        &theme,
+        "sketch-dxf-picker",
+        "Insert a DXF, DWG or vector file",
+        "sketch-insert-dxf",
+        dir,
+        &VectorFormat::EXTENSIONS,
+    );
     world.flush();
 }
 
 fn on_tab(ev: On<TabStripSelect>, q: Query<&Name>, mut commands: Commands) {
-    if ev.index == 1 && q.get(ev.entity).is_ok_and(|n| n.as_str() == "sketch-dxf-tabs") {
+    if ev.index == 1
+        && q.get(ev.entity)
+            .is_ok_and(|n| n.as_str() == "sketch-dxf-tabs")
+    {
         commands.queue(pick_other);
     }
 }
@@ -307,11 +486,23 @@ fn on_file_picked(mut msgs: MessageReader<FilePicked>, mut commands: Commands) {
 }
 
 /// The search filters the rows.
-fn filter_rows(q_search: Query<(&Name, &EditableText), With<TextInputField>>, mut q: Query<(&DxfRow, &mut Node)>) {
-    let Some((_, t)) = q_search.iter().find(|(n, _)| n.as_str() == "sketch-dxf-search-field") else { return };
+fn filter_rows(
+    q_search: Query<(&Name, &EditableText), With<TextInputField>>,
+    mut q: Query<(&DxfRow, &mut Node)>,
+) {
+    let Some((_, t)) = q_search
+        .iter()
+        .find(|(n, _)| n.as_str() == "sketch-dxf-search-field")
+    else {
+        return;
+    };
     let want = t.value().to_string().to_lowercase();
     for (row, mut node) in &mut q {
-        let d = if want.is_empty() || row.0.contains(want.trim()) { Display::Flex } else { Display::None };
+        let d = if want.is_empty() || row.0.contains(want.trim()) {
+            Display::Flex
+        } else {
+            Display::None
+        };
         if node.display != d {
             node.display = d;
         }
@@ -330,55 +521,124 @@ fn toast(world: &mut World, note: Notification) {
 fn insert(world: &mut World, path: &Path) {
     let unit = {
         let mut q = world.query::<(&Name, &SelectState)>();
-        q.iter(world).find(|(n, _)| n.as_str() == "sketch-dxf-units").map(|(_, s)| s.selected).unwrap_or(2)
+        q.iter(world)
+            .find(|(n, _)| n.as_str() == "sketch-dxf-units")
+            .map(|(_, s)| s.selected)
+            .unwrap_or(2)
     };
     let origin = {
         let mut q = world.query::<(&Name, &CheckboxState)>();
-        q.iter(world).find(|(n, _)| n.as_str() == "sketch-dxf-origin").is_none_or(|(_, s)| s.checked)
+        q.iter(world)
+            .find(|(n, _)| n.as_str() == "sketch-dxf-origin")
+            .is_none_or(|(_, s)| s.checked)
     };
     close_panels(world);
-    let Some((element, feature)) = world.get_resource::<SketchSession>().map(|s| (s.element, s.feature)) else { return };
-    if !matches!(VectorFormat::of_path(path), Some(VectorFormat::Dxf | VectorFormat::Dwg)) {
+    let Some((element, feature)) = world
+        .get_resource::<SketchSession>()
+        .map(|s| (s.element, s.feature))
+    else {
+        return;
+    };
+    if !matches!(
+        VectorFormat::of_path(path),
+        Some(VectorFormat::Dxf | VectorFormat::Dwg)
+    ) {
         return insert_vector(world, path, element, feature, origin);
     }
     let d = match read_file(path) {
         Ok(d) => d,
-        Err(e) => return toast(world, Notification::warning(format!("Cannot insert {}: {e}", path.display()))),
+        Err(e) => {
+            return toast(
+                world,
+                Notification::warning(format!("Cannot insert {}: {e}", path.display())),
+            );
+        }
     };
-    let (geometry, report) = sketch_of(&d, DxfUnits::ALL[unit.min(DxfUnits::ALL.len() - 1)], origin);
+    let (geometry, report) =
+        sketch_of(&d, DxfUnits::ALL[unit.min(DxfUnits::ALL.len() - 1)], origin);
     if report.curves() == 0 {
-        return toast(world, Notification::warning(format!("{} has no lines, arcs, circles or splines", path.display())));
+        return toast(
+            world,
+            Notification::warning(format!(
+                "{} has no lines, arcs, circles or splines",
+                path.display()
+            )),
+        );
     }
-    let r = world.resource_mut::<ActiveDocument>().execute(&InsertDxf { element, feature, geometry });
+    let r = world.resource_mut::<ActiveDocument>().execute(&InsertDxf {
+        element,
+        feature,
+        geometry,
+    });
     match r {
         Ok(()) => {
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("the file").to_string();
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("the file")
+                .to_string();
             info!("inserted {name}: {report:?}");
             // Constraint glyphs only on hover and selection, as Onshape's sketch has them (Show
             // constraints off, `step-03.png`): an imported drawing's every shared corner had a
             // glyph.
-            world.resource_mut::<crate::sketch::SketchViewSettings>().show_constraints = false;
-            toast(world, Notification::info(format!("Inserted {name}: {} curves", report.curves())).seconds(5.0));
+            world
+                .resource_mut::<crate::sketch::SketchViewSettings>()
+                .show_constraints = false;
+            toast(
+                world,
+                Notification::info(format!("Inserted {name}: {} curves", report.curves()))
+                    .seconds(5.0),
+            );
         }
         Err(e) => toast(world, Notification::warning(format!("Cannot insert: {e}"))),
     }
 }
 
 /// A vector drawing other than DXF or DWG into the sketch being edited, at its own size.
-fn insert_vector(world: &mut World, path: &Path, element: cadrs_core::ElementId, feature: cadrs_core::FeatureId, origin: bool) {
-    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("the file").to_string();
+fn insert_vector(
+    world: &mut World,
+    path: &Path,
+    element: cadrs_core::ElementId,
+    feature: cadrs_core::FeatureId,
+    origin: bool,
+) {
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("the file")
+        .to_string();
     let (geometry, report) = match cadrs_core::vector_import::read_sketch(path, None, origin) {
         Ok(g) => g,
-        Err(e) => return toast(world, Notification::warning(format!("Cannot insert {name}: {e}"))),
+        Err(e) => {
+            return toast(
+                world,
+                Notification::warning(format!("Cannot insert {name}: {e}")),
+            );
+        }
     };
     if report.curves() == 0 {
-        return toast(world, Notification::warning(format!("{name} has no lines or curves to insert")));
+        return toast(
+            world,
+            Notification::warning(format!("{name} has no lines or curves to insert")),
+        );
     }
-    let cmd = InsertVector { element, feature, file_name: name.clone(), geometry, offset: cadrs_sketch::Vec2::ZERO };
+    let cmd = InsertVector {
+        element,
+        feature,
+        file_name: name.clone(),
+        geometry,
+        offset: cadrs_sketch::Vec2::ZERO,
+    };
     match world.resource_mut::<ActiveDocument>().execute(&cmd) {
         Ok(()) => {
-            world.resource_mut::<crate::sketch::SketchViewSettings>().show_constraints = false;
-            toast(world, Notification::info(format!("Inserted {name}: {} curves", report.curves())).seconds(5.0));
+            world
+                .resource_mut::<crate::sketch::SketchViewSettings>()
+                .show_constraints = false;
+            toast(
+                world,
+                Notification::info(format!("Inserted {name}: {} curves", report.curves()))
+                    .seconds(5.0),
+            );
         }
         Err(e) => toast(world, Notification::warning(format!("Cannot insert: {e}"))),
     }

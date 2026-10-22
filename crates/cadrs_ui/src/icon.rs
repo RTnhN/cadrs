@@ -92,16 +92,18 @@ impl IconAtlas {
         let table = if accent { &self.accents } else { &self.images };
         let sizes = table.get(name)?;
         let base = pick(sizes, size)?;
-        let built = sizes.iter().find(|(_, h)| *h == base).map_or(0, |(s, _)| *s);
+        let built = sizes
+            .iter()
+            .find(|(_, h)| *h == base)
+            .map_or(0, |(s, _)| *s);
         let px = (built as f32 * scale).round().clamp(1.0, 512.0) as u32;
         if px == built {
             return Some(base);
         }
         let key = (name.to_owned(), px, accent);
-        let made = self
-            .rendered
-            .entry(key)
-            .or_insert_with(|| render(name, built, px, accent).map(|rgba| images.add(rgba_image(px, rgba))));
+        let made = self.rendered.entry(key).or_insert_with(|| {
+            render(name, built, px, accent).map(|rgba| images.add(rgba_image(px, rgba)))
+        });
         Some(made.clone().unwrap_or(base))
     }
 
@@ -156,7 +158,9 @@ impl IconAtlas {
         let mut add = |table: &'static [(&'static str, u32, &'static [u8])]| {
             let mut out: HashMap<&'static str, Vec<(u32, Handle<Image>)>> = HashMap::default();
             for &(name, size, rgba) in table {
-                out.entry(name).or_default().push((size, images.add(rgba_image(size, rgba.to_vec()))));
+                out.entry(name)
+                    .or_default()
+                    .push((size, images.add(rgba_image(size, rgba.to_vec()))));
             }
             for sizes in out.values_mut() {
                 sizes.sort_by_key(|(s, _)| *s);
@@ -249,7 +253,14 @@ pub fn resolve_icons(
     window: Query<&Window, With<PrimaryWindow>>,
     ui_scale: Res<UiScale>,
     mut last_scale: Local<f32>,
-    mut q: Query<(Entity, Ref<Icon>, &mut ImageNode, &mut Node, Option<&Children>, Has<SolidTint>)>,
+    mut q: Query<(
+        Entity,
+        Ref<Icon>,
+        &mut ImageNode,
+        &mut Node,
+        Option<&Children>,
+        Has<SolidTint>,
+    )>,
     q_accent: Query<(), With<IconAccent>>,
 ) {
     // Physical pixels per logical pixel.
@@ -284,7 +295,11 @@ pub fn resolve_icons(
                 IconAccent,
                 ImageNode {
                     image: accent,
-                    color: if solid { image.color } else { accent_layer_color(image.color) },
+                    color: if solid {
+                        image.color
+                    } else {
+                        accent_layer_color(image.color)
+                    },
                     ..default()
                 },
                 Node {
@@ -326,7 +341,16 @@ fn accent_layer_color(tint: Color) -> Color {
 /// disabled or enabled, even when that doesn't change the icon's tint (P3H.4 judge).
 #[allow(clippy::type_complexity)]
 fn sync_icon_layers(
-    mut q_icons: Query<(Mut<ImageNode>, Has<FullColour>, Option<&Children>, Option<&ChildOf>, Has<SolidTint>), With<Icon>>,
+    mut q_icons: Query<
+        (
+            Mut<ImageNode>,
+            Has<FullColour>,
+            Option<&Children>,
+            Option<&ChildOf>,
+            Has<SolidTint>,
+        ),
+        With<Icon>,
+    >,
     mut q_accent: Query<&mut ImageNode, (With<IconAccent>, Without<Icon>)>,
     q_disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
     q_now_disabled: Query<Entity, Added<bevy::ui::InteractionDisabled>>,
@@ -357,7 +381,11 @@ fn sync_icon_layers(
                 image.color = white;
             }
         }
-        let accent = if disabled || solid { image.color } else { accent_layer_color(image.color) };
+        let accent = if disabled || solid {
+            image.color
+        } else {
+            accent_layer_color(image.color)
+        };
         for child in children.into_iter().flatten() {
             if let Ok(mut layer) = q_accent.get_mut(*child)
                 && layer.color != accent
@@ -367,7 +395,6 @@ fn sync_icon_layers(
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -382,17 +409,29 @@ mod tests {
         assert_eq!(Some(&at_100), atlas.get("plus", 16.0).as_ref());
         // 150 % and 200 %: rendered at 24 and 32 px (not the 16 px raster stretched), once each.
         for (scale, px) in [(1.5, 24), (2.0, 32)] {
-            let h = atlas.scaled("plus", 16.0, scale, false, &mut images).unwrap();
+            let h = atlas
+                .scaled("plus", 16.0, scale, false, &mut images)
+                .unwrap();
             let image = images.get(&h).unwrap();
             assert_eq!((image.width(), image.height()), (px, px));
-            assert!(image.data.as_ref().unwrap().chunks(4).any(|p| p[3] > 0), "drawn");
-            assert_eq!(atlas.scaled("plus", 16.0, scale, false, &mut images), Some(h));
+            assert!(
+                image.data.as_ref().unwrap().chunks(4).any(|p| p[3] > 0),
+                "drawn"
+            );
+            assert_eq!(
+                atlas.scaled("plus", 16.0, scale, false, &mut images),
+                Some(h)
+            );
         }
         // Weight variants and accent layers too.
-        let bold = atlas.scaled("check-bold", 16.0, 2.0, false, &mut images).unwrap();
+        let bold = atlas
+            .scaled("check-bold", 16.0, 2.0, false, &mut images)
+            .unwrap();
         assert_eq!(images.get(&bold).unwrap().width(), 32);
         let with_accent = data::ACCENT_DATA[0].0;
-        let accent = atlas.scaled(with_accent, 16.0, 2.0, true, &mut images).unwrap();
+        let accent = atlas
+            .scaled(with_accent, 16.0, 2.0, true, &mut images)
+            .unwrap();
         assert_eq!(images.get(&accent).unwrap().width(), 32);
     }
 }

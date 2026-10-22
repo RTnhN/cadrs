@@ -8,16 +8,20 @@ mod smlib_common;
 #[allow(unused_imports)]
 use smlib_common::*;
 
+use cadrs_kernel::native::NativeKernel;
 use cadrs_kernel::native::surfacing;
 use cadrs_kernel::native::topo::Body;
-use cadrs_kernel::native::NativeKernel;
 use cadrs_kernel::{BoolOp, Kernel};
 
 const SUITE: &str = "stitch";
 
 /// Edges used by one face only.
 fn lamina(b: &Body) -> usize {
-    b.edge_faces().iter().zip(&b.edges).filter(|(f, e)| !e.degenerate && f.len() == 1).count()
+    b.edge_faces()
+        .iter()
+        .zip(&b.edges)
+        .filter(|(f, e)| !e.degenerate && f.len() == 1)
+        .count()
 }
 
 /// `file`'s faces sewn at `tol` (`StitchFaces`): valid, with at most `max_lamina` lamina edges.
@@ -69,15 +73,25 @@ fn stitch_then_cut(file: &str, tols: &[f64], tool: &str) -> Result<(), String> {
     let mut k = NativeKernel::new();
     let (_, part) = stitched(&mut k, file, tols)?;
     let cut = model(SUITE, tool)?.body;
-    let (vp, vc) = (cadrs_kernel::native::mass::body_mass(&part).volume, cadrs_kernel::native::mass::body_mass(&cut).volume);
+    let (vp, vc) = (
+        cadrs_kernel::native::mass::body_mass(&part).volume,
+        cadrs_kernel::native::mass::body_mass(&cut).volume,
+    );
     let (a, b) = (k.insert(part.clone()), k.insert(cut));
-    let r = k.boolean(BoolOp::Subtract, a, &[b]).map_err(|e| format!("{e:?}"))?;
-    let [one] = r.bodies.as_slice() else { return Err(format!("{} bodies", r.bodies.len())) };
+    let r = k
+        .boolean(BoolOp::Subtract, a, &[b])
+        .map_err(|e| format!("{e:?}"))?;
+    let [one] = r.bodies.as_slice() else {
+        return Err(format!("{} bodies", r.bodies.len()));
+    };
     let out = (**k.get(*one).map_err(|e| format!("{e:?}"))?).clone();
     check_result(&part, &out, &Expect::default())?;
     let v = cadrs_kernel::native::mass::body_mass(&out).volume;
     if !(v >= vp - vc - 1e-6 * vp && v < vp) {
-        return Err(format!("volume {v:.6}: not between the part's less the cylinder's ({:.6}) and the part's ({vp:.6})", vp - vc));
+        return Err(format!(
+            "volume {v:.6}: not between the part's less the cylinder's ({:.6}) and the part's ({vp:.6})",
+            vp - vc
+        ));
     }
     Ok(())
 }
@@ -91,7 +105,17 @@ fn stitch_1_fillet_ts_0001() {
 /// SMLib stitching 2: `fillet_ts.smb` stitched at 0.001 then 0.005: closed, SMLib's volume 924.828575 and area 605.235965.
 #[test]
 fn stitch_2_fillet_ts_0005() {
-    stitch_closed("fillet_ts.smb", &[0.001, 0.005], &Expect { volume: Some(924.82857533), area: Some(605.235964878), solid: Some(true), ..Expect::default() }).unwrap();
+    stitch_closed(
+        "fillet_ts.smb",
+        &[0.001, 0.005],
+        &Expect {
+            volume: Some(924.82857533),
+            area: Some(605.235964878),
+            solid: Some(true),
+            ..Expect::default()
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib stitching 3: `fillet_cut.smb` (the cylinder cut from the stitched part) reads as a solid.
@@ -103,5 +127,9 @@ fn stitch_3_read_fillet_cut() {
 /// SMLib stitching 4: the stitched `fillet_ts.smb` less `fillet_cut.smb` (`my_two_prim_test`).
 #[test]
 fn stitch_4_cut() {
-    known_failure(stitch_then_cut("fillet_ts.smb", &[0.001, 0.005], "fillet_cut.smb"), "stitch", "stitch_4_cut");
+    known_failure(
+        stitch_then_cut("fillet_ts.smb", &[0.001, 0.005], "fillet_cut.smb"),
+        "stitch",
+        "stitch_4_cut",
+    );
 }

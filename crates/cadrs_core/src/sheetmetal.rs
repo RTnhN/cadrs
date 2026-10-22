@@ -30,7 +30,11 @@ pub enum SheetMetalOp {
 }
 
 impl SheetMetalOp {
-    pub const ALL: [SheetMetalOp; 3] = [SheetMetalOp::Convert, SheetMetalOp::Extrude, SheetMetalOp::Thicken];
+    pub const ALL: [SheetMetalOp; 3] = [
+        SheetMetalOp::Convert,
+        SheetMetalOp::Extrude,
+        SheetMetalOp::Thicken,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -42,7 +46,13 @@ impl SheetMetalOp {
 }
 
 /// The end types a sheet metal Extrude offers (SM2.3): the extrude's, less Through all.
-pub const EXTRUDE_ENDS: [EndType; 5] = [EndType::Blind, EndType::UpToNext, EndType::UpToFace, EndType::UpToPart, EndType::UpToVertex];
+pub const EXTRUDE_ENDS: [EndType; 5] = [
+    EndType::Blind,
+    EndType::UpToNext,
+    EndType::UpToFace,
+    EndType::UpToPart,
+    EndType::UpToVertex,
+];
 
 /// A sketch curve.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -98,7 +108,11 @@ impl Default for SheetMetalExprs {
 pub fn plain(v: f64) -> String {
     let s = format!("{v:.4}");
     let s = s.trim_end_matches('0').trim_end_matches('.');
-    if s.is_empty() || s == "-" { "0".into() } else { s.into() }
+    if s.is_empty() || s == "-" {
+        "0".into()
+    } else {
+        s.into()
+    }
 }
 
 /// A Sheet metal model feature.
@@ -238,7 +252,9 @@ impl SheetMetalModelFeature {
         match self.operation {
             SheetMetalOp::Convert => self.parts.is_empty(),
             SheetMetalOp::Extrude => self.curves.is_empty() && self.sketches.is_empty(),
-            SheetMetalOp::Thicken => self.faces.is_empty() && self.regions.is_empty() && self.region_sketches.is_empty(),
+            SheetMetalOp::Thicken => {
+                self.faces.is_empty() && self.regions.is_empty() && self.region_sketches.is_empty()
+            }
         }
     }
 
@@ -277,7 +293,10 @@ impl SheetMetalModelFeature {
         };
         match self.operation {
             SheetMetalOp::Extrude => {
-                self.curves.iter().chain(&self.arcs_as_bends).for_each(|c| add(c.sketch));
+                self.curves
+                    .iter()
+                    .chain(&self.arcs_as_bends)
+                    .for_each(|c| add(c.sketch));
                 self.sketches.iter().for_each(|s| add(*s));
             }
             SheetMetalOp::Thicken => {
@@ -426,7 +445,10 @@ pub enum PieceKey {
 impl SheetMetalContext {
     /// The part a wall is in.
     pub fn part_of_wall(&self, w: WallId) -> Option<PartId> {
-        self.parts.iter().find(|(_, ws)| ws.contains(&w)).map(|(p, _)| *p)
+        self.parts
+            .iter()
+            .find(|(_, ws)| ws.contains(&w))
+            .map(|(p, _)| *p)
     }
 
     /// The table order (Move up / Move down, SM13.4).
@@ -436,7 +458,11 @@ impl SheetMetalContext {
 
     /// The feature that made a wall or joint (its faces are named by it).
     pub fn owner(&self, k: PieceKey) -> FeatureId {
-        self.owners.iter().rev().find(|(x, _)| *x == k).map_or(self.feature, |(_, f)| *f)
+        self.owners
+            .iter()
+            .rev()
+            .find(|(x, _)| *x == k)
+            .map_or(self.feature, |(_, f)| *f)
     }
 }
 
@@ -450,8 +476,16 @@ pub fn tangent_faces(solid: &crate::solid::Solid, chosen: &mut Vec<usize>) {
         let f = &solid.faces[chosen[k]];
         for e in &solid.edges {
             let [a, b] = e.name.faces;
-            let other = if a == f.name { b } else if b == f.name { a } else { continue };
-            let Some(oi) = solid.faces.iter().position(|g| g.name == other) else { continue };
+            let other = if a == f.name {
+                b
+            } else if b == f.name {
+                a
+            } else {
+                continue;
+            };
+            let Some(oi) = solid.faces.iter().position(|g| g.name == other) else {
+                continue;
+            };
             if !chosen.contains(&oi) && tangent_across(solid, chosen[k], oi, e) {
                 chosen.push(oi);
             }
@@ -464,16 +498,25 @@ pub fn tangent_faces(solid: &crate::solid::Solid, chosen: &mut Vec<usize>) {
 /// the surface normal at a mesh vertex for curved faces).
 fn normal_near(solid: &crate::solid::Solid, face: usize, p: [f64; 3]) -> Option<[f64; 3]> {
     let f = &solid.faces[face];
-    let tri = solid.indices.get(3 * f.first_triangle..3 * (f.first_triangle + f.triangle_count))?;
+    let tri = solid
+        .indices
+        .get(3 * f.first_triangle..3 * (f.first_triangle + f.triangle_count))?;
     let d = |q: [f64; 3]| (0..3).map(|i| (q[i] - p[i]).powi(2)).sum::<f64>();
-    let vi = *tri.iter().min_by(|a, b| d(solid.positions[**a as usize]).total_cmp(&d(solid.positions[**b as usize])))? as usize;
+    let vi = *tri.iter().min_by(|a, b| {
+        d(solid.positions[**a as usize]).total_cmp(&d(solid.positions[**b as usize]))
+    })? as usize;
     let n = *solid.normals.get(vi)?;
     let l = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
     (l > 0.0).then(|| [n[0] / l, n[1] / l, n[2] / l])
 }
 
 /// Whether faces `a` and `b` meet smoothly (tangent, the same side out) along edge `e`.
-fn tangent_across(solid: &crate::solid::Solid, a: usize, b: usize, e: &crate::solid::SolidEdge) -> bool {
+fn tangent_across(
+    solid: &crate::solid::Solid,
+    a: usize,
+    b: usize,
+    e: &crate::solid::SolidEdge,
+) -> bool {
     if e.points.is_empty() {
         return false;
     }
@@ -512,16 +555,19 @@ mod tests {
         let back: SheetMetalModelFeature = ron::from_str(&s).unwrap();
         assert_eq!(back, f);
         // An old document without the new fields reads with the defaults.
-        let old: SheetMetalModelFeature = ron::from_str("(depth: 10.0, depth_expr: \"10 mm\")").unwrap();
+        let old: SheetMetalModelFeature =
+            ron::from_str("(depth: 10.0, depth_expr: \"10 mm\")").unwrap();
         assert_eq!(old.params, SheetMetalModelFeature::default_params());
     }
 
     #[test]
     fn out_of_range_settings_are_a_problem() {
-        let mut f = SheetMetalModelFeature { parts: vec![PartId::new(FeatureId::new(), 0)], ..Default::default() };
+        let mut f = SheetMetalModelFeature {
+            parts: vec![PartId::new(FeatureId::new(), 0)],
+            ..Default::default()
+        };
         assert_eq!(f.problem(), None);
         f.params.k_factor = 1.5;
         assert_eq!(f.problem(), Some("A value is out of range"));
     }
 }
-

@@ -45,8 +45,12 @@ pub fn shape_of(s: &Sketch, id: CurveId) -> Option<Shape> {
             radius,
         },
         CurveKind::Arc { .. } => Shape::Arc(s.arc_geom(id)?),
-        CurveKind::Ellipse { .. } | CurveKind::EllipseOffset { .. } => Shape::Ellipse(s.ellipse_geom(id)?),
-        CurveKind::EllipseArc { .. } | CurveKind::Spline { .. } | CurveKind::Bezier { .. } => return None,
+        CurveKind::Ellipse { .. } | CurveKind::EllipseOffset { .. } => {
+            Shape::Ellipse(s.ellipse_geom(id)?)
+        }
+        CurveKind::EllipseArc { .. } | CurveKind::Spline { .. } | CurveKind::Bezier { .. } => {
+            return None;
+        }
     })
 }
 
@@ -54,7 +58,10 @@ pub fn shape_of(s: &Sketch, id: CurveId) -> Option<Shape> {
 /// polylines meet): such a Bézier is not trimmed (only a lone one is deleted).
 fn bezier_crossed(s: &Sketch, id: CurveId) -> bool {
     let own = crate::hit::curve_polyline(s, id);
-    let ends = s.curve_ends(id).map(|(a, b)| [s.pos(a), s.pos(b)]).unwrap_or_default();
+    let ends = s
+        .curve_ends(id)
+        .map(|(a, b)| [s.pos(a), s.pos(b)])
+        .unwrap_or_default();
     let seg_hit = |a: Vec2, b: Vec2, c: Vec2, d: Vec2| -> Option<Vec2> {
         let (r, q) = (b - a, d - c);
         let den = r.cross(q);
@@ -65,14 +72,18 @@ fn bezier_crossed(s: &Sketch, id: CurveId) -> bool {
         let u = (c - a).cross(r) / den;
         ((-1e-9..=1.0 + 1e-9).contains(&t) && (-1e-9..=1.0 + 1e-9).contains(&u)).then(|| a + r * t)
     };
-    s.curves.iter().filter(|(k, c)| *k != id && !c.construction).any(|(k, _)| {
-        let other = crate::hit::curve_polyline(s, k);
-        own.windows(2).any(|w| {
-            other.windows(2).any(|v| {
-                seg_hit(w[0], w[1], v[0], v[1]).is_some_and(|p| ends.iter().all(|e| e.distance(p) > 1e-6))
+    s.curves
+        .iter()
+        .filter(|(k, c)| *k != id && !c.construction)
+        .any(|(k, _)| {
+            let other = crate::hit::curve_polyline(s, k);
+            own.windows(2).any(|w| {
+                other.windows(2).any(|v| {
+                    seg_hit(w[0], w[1], v[0], v[1])
+                        .is_some_and(|p| ends.iter().all(|e| e.distance(p) > 1e-6))
+                })
             })
         })
-    })
 }
 
 /// A shape's whole carrier: the infinite line, the whole circle or the ellipse.
@@ -183,10 +194,15 @@ fn param(s: &Sketch, id: CurveId, p: Vec2) -> Option<(f64, f64)> {
                 g.sweep * g.radius,
             )
         }
-        CurveKind::Circle { center, radius } => {
-            (norm_angle((p - s.pos(center)).angle()) * radius, TAU * radius)
-        }
-        CurveKind::Ellipse { .. } | CurveKind::EllipseOffset { .. } | CurveKind::EllipseArc { .. } | CurveKind::Spline { .. } | CurveKind::Bezier { .. } => return None,
+        CurveKind::Circle { center, radius } => (
+            norm_angle((p - s.pos(center)).angle()) * radius,
+            TAU * radius,
+        ),
+        CurveKind::Ellipse { .. }
+        | CurveKind::EllipseOffset { .. }
+        | CurveKind::EllipseArc { .. }
+        | CurveKind::Spline { .. }
+        | CurveKind::Bezier { .. } => return None,
     })
 }
 
@@ -211,7 +227,11 @@ pub fn cuts(s: &Sketch, id: CurveId) -> Vec<Cut> {
         for k in s.curves.keys().filter(|k| *k != id) {
             if let Some(o) = shape_of(s, k) {
                 for p in crossings(&me, &o) {
-                    out.push(Cut { at: 0.0, pos: p, by: k });
+                    out.push(Cut {
+                        at: 0.0,
+                        pos: p,
+                        by: k,
+                    });
                 }
             }
         }
@@ -221,7 +241,9 @@ pub fn cuts(s: &Sketch, id: CurveId) -> Vec<Cut> {
     for k in s.curves.keys().filter(|k| *k != id) {
         let Some(o) = shape_of(s, k) else { continue };
         for p in crossings(&me, &o) {
-            let Some((at, _)) = param(s, id, p) else { continue };
+            let Some((at, _)) = param(s, id, p) else {
+                continue;
+            };
             if !closed && (at <= EPS || at >= len - EPS) {
                 continue;
             }
@@ -316,7 +338,11 @@ pub fn trim_removed_path(s: &Sketch, id: CurveId, at: Vec2) -> Option<Vec<Vec2>>
             }
             .tessellate(STEP, 2)
         }
-        CurveKind::Ellipse { .. } | CurveKind::EllipseOffset { .. } | CurveKind::EllipseArc { .. } | CurveKind::Spline { .. } | CurveKind::Bezier { .. } => return None,
+        CurveKind::Ellipse { .. }
+        | CurveKind::EllipseOffset { .. }
+        | CurveKind::EllipseArc { .. }
+        | CurveKind::Spline { .. }
+        | CurveKind::Bezier { .. } => return None,
     })
 }
 
@@ -336,10 +362,15 @@ fn end_point(s: &mut Sketch, cut: Cut) -> PointId {
 
 /// Replaces `old` with `new` in the curve's points.
 fn replace_point(s: &mut Sketch, id: CurveId, old: PointId, new: PointId) {
-    let Some(c) = s.curves.get_mut(id) else { return };
+    let Some(c) = s.curves.get_mut(id) else {
+        return;
+    };
     let swap = |p: PointId| if p == old { new } else { p };
     c.kind = match c.kind {
-        CurveKind::Line { a, b } => CurveKind::Line { a: swap(a), b: swap(b) },
+        CurveKind::Line { a, b } => CurveKind::Line {
+            a: swap(a),
+            b: swap(b),
+        },
         CurveKind::Arc { center, start, end } => CurveKind::Arc {
             center: swap(center),
             start: swap(start),
@@ -359,7 +390,10 @@ fn drop_if_unused(s: &mut Sketch, p: PointId) {
 /// Drops what no longer means the same once a curve's extent changes: Equal lengths (lines),
 /// a midpoint on it, symmetry with it.
 fn drop_extent_constraints(s: &mut Sketch, id: CurveId) {
-    let line = matches!(s.curves.get(id).map(|c| c.kind), Some(CurveKind::Line { .. }));
+    let line = matches!(
+        s.curves.get(id).map(|c| c.kind),
+        Some(CurveKind::Line { .. })
+    );
     let me = CurveRef::Curve(id);
     s.constraints.retain(|_, c| match *c {
         ConstraintOf::Equal(a, b) if line => a != me && b != me,
@@ -428,7 +462,9 @@ fn redistribute(s: &mut Sketch, id: CurveId, new: Option<CurveId>) {
     // Points now structurally on a piece (its own ends) need no point-on-curve.
     s.constraints.retain(|_, c| match *c {
         ConstraintOf::PointOnCurve(PointRef::Point(p), CurveRef::Curve(k)) => {
-            !(s.curves.get(k).is_some_and(|cv| crate::curve_points(&cv.kind).contains(&p)))
+            !(s.curves
+                .get(k)
+                .is_some_and(|cv| crate::curve_points(&cv.kind).contains(&p)))
         }
         _ => true,
     });
@@ -469,7 +505,8 @@ fn copy_direction(s: &mut Sketch, from: CurveId, to: CurveId) {
 
 /// Trims curve `id` at `at` (a point on it): see the module docs.
 pub fn trim(s: &mut Sketch, id: CurveId, at: Vec2) -> Result<(), String> {
-    let plan = trim_plan(s, id, at).ok_or("an ellipse or a Bézier curve that is crossed cannot be trimmed")?;
+    let plan = trim_plan(s, id, at)
+        .ok_or("an ellipse or a Bézier curve that is crossed cannot be trimmed")?;
     let TrimPlan::Cut { lo, hi } = plan else {
         s.remove_curve(id);
         return Ok(());
@@ -477,7 +514,12 @@ pub fn trim(s: &mut Sketch, id: CurveId, at: Vec2) -> Result<(), String> {
     let curve = s.curves[id];
     let mut new = None;
     match curve.kind {
-        CurveKind::Line { a: first, b: last } | CurveKind::Arc { start: first, end: last, .. } => {
+        CurveKind::Line { a: first, b: last }
+        | CurveKind::Arc {
+            start: first,
+            end: last,
+            ..
+        } => {
             match (lo, hi) {
                 (None, Some(h)) => {
                     let p = end_point(s, h);
@@ -506,7 +548,10 @@ pub fn trim(s: &mut Sketch, id: CurveId, at: Vec2) -> Result<(), String> {
                         // The pieces of one arc share its center: no coincident glyph there.
                         s.quiet.points.insert(center);
                         // The two pieces stay on one circle.
-                        s.add_constraint(ConstraintOf::Equal(CurveRef::Curve(id), CurveRef::Curve(n)));
+                        s.add_constraint(ConstraintOf::Equal(
+                            CurveRef::Curve(id),
+                            CurveRef::Curve(n),
+                        ));
                     } else {
                         copy_direction(s, id, n);
                     }
@@ -529,7 +574,11 @@ pub fn trim(s: &mut Sketch, id: CurveId, at: Vec2) -> Result<(), String> {
             };
             drop_extent_constraints(s, id);
         }
-        CurveKind::Ellipse { .. } | CurveKind::EllipseOffset { .. } | CurveKind::EllipseArc { .. } | CurveKind::Spline { .. } | CurveKind::Bezier { .. } => {
+        CurveKind::Ellipse { .. }
+        | CurveKind::EllipseOffset { .. }
+        | CurveKind::EllipseArc { .. }
+        | CurveKind::Spline { .. }
+        | CurveKind::Bezier { .. } => {
             unreachable!("handled by the plan")
         }
     }
@@ -540,7 +589,11 @@ pub fn trim(s: &mut Sketch, id: CurveId, at: Vec2) -> Result<(), String> {
 /// Trims several picks in turn (a drag across curves, one undo step): each pick is a curve and
 /// a point on it. A curve cut by an earlier pick is found again by position. Standalone points
 /// in `points` are deleted. Fails if nothing was trimmed.
-pub fn trim_all(s: &mut Sketch, picks: &[(CurveId, Vec2)], points: &[PointId]) -> Result<(), String> {
+pub fn trim_all(
+    s: &mut Sketch,
+    picks: &[(CurveId, Vec2)],
+    points: &[PointId],
+) -> Result<(), String> {
     let mut done = false;
     for &(id, at) in picks {
         let target = if shape_of(s, id).is_some_and(|sh| on_shape_loose(&sh, at)) {
@@ -565,7 +618,11 @@ pub fn trim_all(s: &mut Sketch, picks: &[(CurveId, Vec2)], points: &[PointId]) -
             done = true;
         }
     }
-    if done { Ok(()) } else { Err("nothing to trim".into()) }
+    if done {
+        Ok(())
+    } else {
+        Err("nothing to trim".into())
+    }
 }
 
 /// A line's or arc's end that only it uses, nearest `at`.
@@ -599,7 +656,12 @@ pub fn extension(s: &Sketch, id: CurveId, end: PointId, limit: Option<Vec2>) -> 
     // The ray (line) or the way round the circle (arc), as a distance function along it.
     enum Way {
         Line(Vec2),
-        Arc { g: ArcGeom, from: f64, dir: f64, max: f64 },
+        Arc {
+            g: ArcGeom,
+            from: f64,
+            dir: f64,
+            max: f64,
+        },
     }
     let way = match kind {
         CurveKind::Line { .. } => {
@@ -626,7 +688,9 @@ pub fn extension(s: &Sketch, id: CurveId, end: PointId, limit: Option<Vec2>) -> 
     let dist = |p: Vec2| -> f64 {
         match way {
             Way::Line(d) => (p - pe).dot(d),
-            Way::Arc { g, from, dir, .. } => norm_angle(dir * ((p - g.center).angle() - from)) * g.radius,
+            Way::Arc { g, from, dir, .. } => {
+                norm_angle(dir * ((p - g.center).angle() - from)) * g.radius
+            }
         }
     };
     let carrier = match way {
@@ -643,7 +707,9 @@ pub fn extension(s: &Sketch, id: CurveId, end: PointId, limit: Option<Vec2>) -> 
     let mut best: Option<(f64, Vec2, CurveId)> = None;
     for k in s.curves.keys().filter(|k| *k != id) {
         let Some(o) = shape_of(s, k) else { continue };
-        let (Some(fa), Some(fb)) = (full(&carrier), full(&o)) else { continue };
+        let (Some(fa), Some(fb)) = (full(&carrier), full(&o)) else {
+            continue;
+        };
         for p in carrier_crossings(fa, fb) {
             if !on_shape(&o, p) {
                 continue;
@@ -680,7 +746,13 @@ pub fn extension(s: &Sketch, id: CurveId, end: PointId, limit: Option<Vec2>) -> 
 }
 
 /// Extends line or arc `id` at its free end `end` to `to`, on curve `by` if given.
-pub fn extend(s: &mut Sketch, id: CurveId, end: PointId, to: Vec2, by: Option<CurveId>) -> Result<(), String> {
+pub fn extend(
+    s: &mut Sketch,
+    id: CurveId,
+    end: PointId,
+    to: Vec2,
+    by: Option<CurveId>,
+) -> Result<(), String> {
     let (a, b) = s.curve_ends(id).ok_or("only lines and arcs extend")?;
     if end != a && end != b {
         return Err("not an end of the curve".into());
@@ -700,7 +772,10 @@ pub fn extend(s: &mut Sketch, id: CurveId, end: PointId, to: Vec2, by: Option<Cu
     if let Some(k) = by
         && !existing
     {
-        s.add_constraint(ConstraintOf::PointOnCurve(PointRef::Point(p), CurveRef::Curve(k)));
+        s.add_constraint(ConstraintOf::PointOnCurve(
+            PointRef::Point(p),
+            CurveRef::Curve(k),
+        ));
     }
     drop_extent_constraints(s, id);
     redistribute(s, id, None);
@@ -727,7 +802,11 @@ fn split_once(s: &mut Sketch, id: CurveId, pos: Vec2) -> Result<CurveId, String>
             (CurveKind::Line { a: p, b }, b)
         }
         CurveKind::Arc { center, start, end } => {
-            s.curves[id].kind = CurveKind::Arc { center, start, end: p };
+            s.curves[id].kind = CurveKind::Arc {
+                center,
+                start,
+                end: p,
+            };
             // The pieces share the center: no coincident glyph there.
             s.quiet.points.insert(center);
             (
@@ -771,7 +850,10 @@ fn split_once(s: &mut Sketch, id: CurveId, pos: Vec2) -> Result<CurveId, String>
     if let CurveKind::Line { .. } = kind {
         // The pieces stay collinear: the far end stays on the first piece's line. Internal to
         // the split: no glyph (T4 judge: a stray coincident glyph at the far end).
-        s.add_quiet_constraint(ConstraintOf::PointOnCurve(PointRef::Point(first), CurveRef::Curve(id)));
+        s.add_quiet_constraint(ConstraintOf::PointOnCurve(
+            PointRef::Point(first),
+            CurveRef::Curve(id),
+        ));
     }
     Ok(n)
 }
@@ -788,7 +870,8 @@ pub fn split(s: &mut Sketch, id: CurveId, at: &[Vec2]) -> Result<Vec<CurveId>, S
         }
         let (p1, p2) = (at[0], at[1]);
         let c = s.pos(center);
-        if (norm_angle((p2 - c).angle() - (p1 - c).angle())).min(norm_angle((p1 - c).angle() - (p2 - c).angle()))
+        if (norm_angle((p2 - c).angle() - (p1 - c).angle()))
+            .min(norm_angle((p1 - c).angle() - (p2 - c).angle()))
             * p1.distance(c)
             <= EPS
         {

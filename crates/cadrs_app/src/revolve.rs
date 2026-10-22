@@ -21,7 +21,9 @@ use bevy::picking::pointer::{PointerAction, PointerButton, PointerId, PointerInp
 use bevy::prelude::*;
 use bevy::ui::UiTransform;
 use cadrs_core::commands::{AddRevolve, SetRevolve};
-use cadrs_core::document::{AxisRef, BooleanOp, EdgeRef, EndType, FaceRef, RevolveType, UpTo, VertexRef};
+use cadrs_core::document::{
+    AxisRef, BooleanOp, EdgeRef, EndType, FaceRef, RevolveType, UpTo, VertexRef,
+};
 use cadrs_core::{ElementKind, FeatureId, RegionRef, RevolveFeature};
 use cadrs_sketch::units::Quantity;
 
@@ -37,7 +39,11 @@ impl Plugin for RevolvePlugin {
         app.init_resource::<AngleArrow>()
             .add_systems(
                 Update,
-                (revolve_picks, angle_arrow_pointer, crate::revolve_dialog::sync_revolve_dialog)
+                (
+                    revolve_picks,
+                    angle_arrow_pointer,
+                    crate::revolve_dialog::sync_revolve_dialog,
+                )
                     .chain()
                     .after(crate::viewport::apply_view_to_camera)
                     .before(crate::parts::PartsSet)
@@ -52,7 +58,11 @@ impl Plugin for RevolvePlugin {
             .add_plugins(crate::revolve_dialog::RevolveDialogPlugin)
             .add_systems(
                 Update,
-                (automatic_operation, show_references, draw_sketch_curve_picks)
+                (
+                    automatic_operation,
+                    show_references,
+                    draw_sketch_curve_picks,
+                )
                     .after(crate::parts::PartsSet)
                     .run_if(in_state(AppState::Document)),
             );
@@ -64,7 +74,9 @@ impl Plugin for RevolvePlugin {
 
 /// Starts a new revolve in the active Part Studio (the Revolve button and Shift+W).
 pub fn begin_revolve(world: &mut World) {
-    if world.contains_resource::<ExtrudeSession>() || world.contains_resource::<crate::sketch::SketchSession>() {
+    if world.contains_resource::<ExtrudeSession>()
+        || world.contains_resource::<crate::sketch::SketchSession>()
+    {
         return;
     }
     let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
@@ -108,7 +120,11 @@ pub fn edit_revolve(world: &mut World, feature: FeatureId) {
         return;
     };
     let element = el.id;
-    let Some(before) = el.feature(feature).filter(|f| f.revolve().is_some()).cloned() else {
+    let Some(before) = el
+        .feature(feature)
+        .filter(|f| f.revolve().is_some())
+        .cloned()
+    else {
         return;
     };
     let mark = doc.history.undo_len();
@@ -123,7 +139,11 @@ pub(crate) fn rparams(world: &World) -> Option<RevolveFeature> {
 }
 
 /// Records a parameter change as an undo step.
-pub(crate) fn set_rparams(world: &mut World, revolve: RevolveFeature, label: impl Into<String>) -> bool {
+pub(crate) fn set_rparams(
+    world: &mut World,
+    revolve: RevolveFeature,
+    label: impl Into<String>,
+) -> bool {
     let Some(s) = world.get_resource::<ExtrudeSession>().cloned() else {
         return false;
     };
@@ -164,7 +184,8 @@ fn toggle_region(world: &mut World, sketch: FeatureId, index: u32) {
     };
     let name = sketch_name(world, sketch).unwrap_or_default();
     let rr = RegionRef::new(sketch, &region);
-    let same = |x: &RegionRef| x.sketch == sketch && x.curves == rr.curves && region.contains(x.seed);
+    let same =
+        |x: &RegionRef| x.sketch == sketch && x.curves == rr.curves && region.contains(x.seed);
     let label = if let Some(i) = r.regions.iter().position(same) {
         r.regions.remove(i);
         format!("Deselect Face of {name}")
@@ -178,7 +199,9 @@ fn toggle_region(world: &mut World, sketch: FeatureId, index: u32) {
 /// A sketch picked in the feature list toggles as a whole (PS1.6).
 fn toggle_sketch(world: &mut World, sketch: FeatureId) {
     let Some(mut r) = rparams(world) else { return };
-    let Some(name) = sketch_name(world, sketch) else { return };
+    let Some(name) = sketch_name(world, sketch) else {
+        return;
+    };
     let label = if let Some(i) = r.sketches.iter().position(|s| *s == sketch) {
         r.sketches.remove(i);
         format!("Deselect {name}")
@@ -232,7 +255,10 @@ fn take_pick(world: &mut World, field: ExtrudeField, pick: Pick) -> Option<()> {
                 let p = cache.part(part)?;
                 let i = p.solid.faces.iter().position(|f| f.name == face)?;
                 let seed = p.solid.face_point(i)?;
-                Some((FaceRef { part, face, seed }, p.solid.faces[i].plane.is_some()))
+                Some((
+                    FaceRef { part, face, seed },
+                    p.solid.faces[i].plane.is_some(),
+                ))
             })(),
             _ => None,
         };
@@ -240,14 +266,24 @@ fn take_pick(world: &mut World, field: ExtrudeField, pick: Pick) -> Option<()> {
             Pick::Vertex(part, vertex) => cache
                 .part(part)
                 .and_then(|p| p.solid.vertex(&vertex))
-                .map(|v| VertexRef { part, vertex, point: v.point }),
+                .map(|v| VertexRef {
+                    part,
+                    vertex,
+                    point: v.point,
+                }),
             _ => None,
         };
         let edge = match pick {
-            Pick::Edge(part, edge) => cache
-                .part(part)
-                .and_then(|p| p.solid.edge(&edge))
-                .map(|e| EdgeRef { part, edge, seed: e.midpoint() }),
+            Pick::Edge(part, edge) => {
+                cache
+                    .part(part)
+                    .and_then(|p| p.solid.edge(&edge))
+                    .map(|e| EdgeRef {
+                        part,
+                        edge,
+                        seed: e.midpoint(),
+                    })
+            }
             _ => None,
         };
         let auto_scope = cache
@@ -279,7 +315,11 @@ fn take_pick(world: &mut World, field: ExtrudeField, pick: Pick) -> Option<()> {
         }
         // P3.10 (PS7.2): the mate connector button: a connector's Z axis.
         (ExtrudeField::AxisConnector, pick) => {
-            let features = world.get_resource::<ActiveDocument>()?.active_element()?.features().to_vec();
+            let features = world
+                .get_resource::<ActiveDocument>()?
+                .active_element()?
+                .features()
+                .to_vec();
             let c = crate::pattern::connector_of(&features, world.resource::<PartCache>(), pick)?;
             let mut r = rparams(world)?;
             r.axis = Some(AxisRef::Connector(c));
@@ -298,7 +338,9 @@ fn take_pick(world: &mut World, field: ExtrudeField, pick: Pick) -> Option<()> {
             };
             let axis = match pick {
                 // An explicit mate connector's Z axis (P3.8, PS7.2).
-                Pick::Feature(f) if is_connector => Some(AxisRef::Connector(cadrs_core::mate::ConnectorRef::Feature(f))),
+                Pick::Feature(f) if is_connector => Some(AxisRef::Connector(
+                    cadrs_core::mate::ConnectorRef::Feature(f),
+                )),
                 Pick::SketchCurve(sketch, curve) => Some(AxisRef::SketchCurve { sketch, curve }),
                 Pick::Edge(_, e) if !own(e.op()) => edge.map(AxisRef::Edge),
                 // A curved face: its axis (a planar face has none).
@@ -315,9 +357,15 @@ fn take_pick(world: &mut World, field: ExtrudeField, pick: Pick) -> Option<()> {
         (ExtrudeField::UpTo | ExtrudeField::SecondUpTo, pick) => {
             let mut r = rparams(world)?;
             let second = field == ExtrudeField::SecondUpTo;
-            let end = if second { r.second.as_ref().map(|s| s.end) } else { Some(r.kind.end_type()) };
+            let end = if second {
+                r.second.as_ref().map(|s| s.end)
+            } else {
+                Some(r.kind.end_type())
+            };
             let target = match (end, pick) {
-                (Some(EndType::UpToFace), Pick::Face(_, f)) if !own(f.op) => face.map(|(x, _)| UpTo::Face(x)),
+                (Some(EndType::UpToFace), Pick::Face(_, f)) if !own(f.op) => {
+                    face.map(|(x, _)| UpTo::Face(x))
+                }
                 (Some(EndType::UpToPart), p) => p.part().map(UpTo::Part),
                 (Some(EndType::UpToVertex), Pick::Vertex(..)) => vertex.map(UpTo::Vertex),
                 _ => None,
@@ -350,22 +398,38 @@ fn take_pick(world: &mut World, field: ExtrudeField, pick: Pick) -> Option<()> {
 }
 
 /// A new revolve picks New or Add by itself (PS5.2, PS7.5), as an extrude does.
-fn automatic_operation(session: Option<Res<ExtrudeSession>>, cache: Res<PartCache>, mut commands: Commands) {
+fn automatic_operation(
+    session: Option<Res<ExtrudeSession>>,
+    cache: Res<PartCache>,
+    mut commands: Commands,
+) {
     let Some(s) = session.filter(|s| s.op_auto) else {
         return;
     };
     if cache.rebuilding {
         return;
     }
-    let touches = cache.contacts.get(&s.feature).is_some_and(|c| !c.touches.is_empty());
+    let touches = cache
+        .contacts
+        .get(&s.feature)
+        .is_some_and(|c| !c.touches.is_empty());
     let feature = s.feature;
     commands.queue(move |world: &mut World| {
         let Some(mut r) = rparams(world) else { return };
-        if !matches!(r.op, BooleanOp::New | BooleanOp::Add) || r.body == cadrs_core::BodyType::Surface {
+        if !matches!(r.op, BooleanOp::New | BooleanOp::Add)
+            || r.body == cadrs_core::BodyType::Surface
+        {
             return;
         }
-        let want = if touches { BooleanOp::Add } else { BooleanOp::New };
-        let known = world.resource::<PartCache>().contacts.contains_key(&feature);
+        let want = if touches {
+            BooleanOp::Add
+        } else {
+            BooleanOp::New
+        };
+        let known = world
+            .resource::<PartCache>()
+            .contacts
+            .contains_key(&feature);
         if r.op != want && (known || want == BooleanOp::New) && !r.is_empty() {
             r.op = want;
             set_rparams(world, r, want.label());
@@ -383,7 +447,12 @@ fn show_references(
     let (Some(s), Some(doc)) = (session, doc) else {
         return;
     };
-    let Some(r) = doc.doc.element(s.element).and_then(|el| el.feature(s.feature)).and_then(|f| f.revolve()) else {
+    let Some(r) = doc
+        .doc
+        .element(s.element)
+        .and_then(|el| el.feature(s.feature))
+        .and_then(|f| f.revolve())
+    else {
         return;
     };
     let face_pick = |f: &FaceRef| {
@@ -443,7 +512,11 @@ fn draw_sketch_curve_picks(
             } else {
                 continue;
             };
-            g.linestrip(pts.iter().map(|p| Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32)), color);
+            g.linestrip(
+                pts.iter()
+                    .map(|p| Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32)),
+                color,
+            );
         }
     }
 }
@@ -551,12 +624,20 @@ fn angle_arrow_pointer(
         return;
     };
     let pointer = drag.pointer();
-    arrow.hovered = arrow.base_tip.is_some_and(|(a, b)| segment_distance(pointer, a, b) <= ARROW_GRAB);
-    arrow.second_hovered =
-        !arrow.hovered && arrow.second_base_tip.is_some_and(|(a, b)| segment_distance(pointer, a, b) <= ARROW_GRAB);
-    let params = doc
-        .as_ref()
-        .and_then(|d| d.doc.element(s.element)?.feature(s.feature)?.revolve().cloned());
+    arrow.hovered = arrow
+        .base_tip
+        .is_some_and(|(a, b)| segment_distance(pointer, a, b) <= ARROW_GRAB);
+    arrow.second_hovered = !arrow.hovered
+        && arrow
+            .second_base_tip
+            .is_some_and(|(a, b)| segment_distance(pointer, a, b) <= ARROW_GRAB);
+    let params = doc.as_ref().and_then(|d| {
+        d.doc
+            .element(s.element)?
+            .feature(s.feature)?
+            .revolve()
+            .cloned()
+    });
     for input in inputs.read() {
         if input.pointer_id != PointerId::Mouse {
             continue;
@@ -564,11 +645,16 @@ fn angle_arrow_pointer(
         let pos = input.location.position;
         match input.action {
             PointerAction::Press(PointerButton::Primary) => {
-                let hit = arrow.base_tip.is_some_and(|(a, b)| segment_distance(pos, a, b) <= ARROW_GRAB);
+                let hit = arrow
+                    .base_tip
+                    .is_some_and(|(a, b)| segment_distance(pos, a, b) <= ARROW_GRAB);
                 let hit2 = !hit
-                    && arrow.second_base_tip.is_some_and(|(a, b)| segment_distance(pos, a, b) <= ARROW_GRAB);
+                    && arrow
+                        .second_base_tip
+                        .is_some_and(|(a, b)| segment_distance(pos, a, b) <= ARROW_GRAB);
                 let scale = if hit { arrow.scale } else { arrow.second_scale };
-                if let (true, Some(p), Some((px_per_deg, signed))) = (hit || hit2, params.clone(), scale)
+                if let (true, Some(p), Some((px_per_deg, signed))) =
+                    (hit || hit2, params.clone(), scale)
                     && px_per_deg.length() > 1e-3
                 {
                     arrow.drag = Some(AngleDrag {
@@ -587,7 +673,8 @@ fn angle_arrow_pointer(
                 {
                     // The second end: its angle, in whole degrees (back through its start
                     // stops at 1°).
-                    let (angle, crossed) = dragged_angle(d.start_signed, d.px_per_deg, pos - d.start);
+                    let (angle, crossed) =
+                        dragged_angle(d.start_signed, d.px_per_deg, pos - d.start);
                     let angle = if crossed { 1.0 } else { angle };
                     if let Some(end) = d.revolve.second.as_mut()
                         && (end.depth != angle || end.end != cadrs_core::EndType::Blind)
@@ -603,7 +690,8 @@ fn angle_arrow_pointer(
                         over.revolve = want;
                     }
                 } else if let Some(d) = arrow.drag.as_mut() {
-                    let (angle, crossed) = dragged_angle(d.start_signed, d.px_per_deg, pos - d.start);
+                    let (angle, crossed) =
+                        dragged_angle(d.start_signed, d.px_per_deg, pos - d.start);
                     let flip = d.flip0 ^ crossed;
                     let r = &mut d.revolve;
                     if (angle, flip) != (r.angle, r.flip) || !r.kind.has_angle() {
@@ -647,16 +735,25 @@ fn place_angle_arrow(
     rect: Res<ViewportRect>,
     mut arrow: ResMut<AngleArrow>,
     q_area: Query<Entity, With<ViewportArea>>,
-    mut q: Query<(Entity, &mut Node, &mut UiTransform, &mut Visibility, &AngleArrowNode)>,
+    mut q: Query<(
+        Entity,
+        &mut Node,
+        &mut UiTransform,
+        &mut Visibility,
+        &AngleArrowNode,
+    )>,
     mut q_line: Query<(&AngleArrowLine, &mut ImageNode)>,
     mut commands: Commands,
 ) {
     let target = session.as_ref().and_then(|s| {
-        let r = arrow
-            .drag
-            .as_ref()
-            .map(|d| d.revolve.clone())
-            .or_else(|| doc.as_ref()?.doc.element(s.element)?.feature(s.feature)?.revolve().cloned())?;
+        let r = arrow.drag.as_ref().map(|d| d.revolve.clone()).or_else(|| {
+            doc.as_ref()?
+                .doc
+                .element(s.element)?
+                .feature(s.feature)?
+                .revolve()
+                .cloned()
+        })?;
         if r.kind == RevolveType::Full || cache.errors.contains_key(&s.feature) {
             return None;
         }
@@ -701,18 +798,26 @@ fn place_angle_arrow(
     });
     // The second end (P3.5): the middle of its end face (the start cap), turning the other way.
     let second = session.as_ref().and_then(|s| {
-        let r = arrow
-            .drag
-            .as_ref()
-            .map(|d| d.revolve.clone())
-            .or_else(|| doc.as_ref()?.doc.element(s.element)?.feature(s.feature)?.revolve().cloned())?;
+        let r = arrow.drag.as_ref().map(|d| d.revolve.clone()).or_else(|| {
+            doc.as_ref()?
+                .doc
+                .element(s.element)?
+                .feature(s.feature)?
+                .revolve()
+                .cloned()
+        })?;
         let end = r.second.as_ref()?;
         if !r.kind.one_sided() || cache.errors.contains_key(&s.feature) {
             return None;
         }
         let mut sum = Vec3::ZERO;
         let mut n = 0.0;
-        for p in cache.parts.iter().chain(cache.tool.iter()).filter(|p| p.features.contains(&s.feature)) {
+        for p in cache
+            .parts
+            .iter()
+            .chain(cache.tool.iter())
+            .filter(|p| p.features.contains(&s.feature))
+        {
             for f in &p.solid.faces {
                 if let cadrs_sketch::FaceOrigin::Cap { end: false, .. } = f.name.origin
                     && f.name.op == s.feature.0
@@ -737,10 +842,15 @@ fn place_angle_arrow(
             return None;
         }
         let per_deg = turn * std::f32::consts::PI / 180.0;
-        let signed = if end.end == cadrs_core::EndType::Blind { end.depth } else { 90.0 };
+        let signed = if end.end == cadrs_core::EndType::Blind {
+            end.depth
+        } else {
+            90.0
+        };
         Some((anchor, turn.normalize(), per_deg, signed))
     });
-    arrow.second_scale = second.map(|(_, _, per_deg, signed)| (view.view.project_vector(per_deg), signed));
+    arrow.second_scale =
+        second.map(|(_, _, per_deg, signed)| (view.view.project_vector(per_deg), signed));
     arrow.second_base_tip = second.and_then(|(anchor, dir, _, _)| {
         let p = view.view.project_vector(dir);
         (p.length() >= 0.05).then(|| {
@@ -764,8 +874,14 @@ fn place_angle_arrow(
     let d = view.view.project_vector(dir);
     arrow.base_tip = (d.length() >= 0.05).then(|| (base, base + d.normalize() * ARROW_LEN));
     let arrows = [
-        (arrow.base_tip, arrow.hovered || arrow.drag.as_ref().is_some_and(|d| !d.second)),
-        (arrow.second_base_tip, arrow.second_hovered || arrow.drag.as_ref().is_some_and(|d| d.second)),
+        (
+            arrow.base_tip,
+            arrow.hovered || arrow.drag.as_ref().is_some_and(|d| !d.second),
+        ),
+        (
+            arrow.second_base_tip,
+            arrow.second_hovered || arrow.drag.as_ref().is_some_and(|d| d.second),
+        ),
     ];
     if q.iter().count() < 2 {
         let Some(area) = q_area.iter().next() else {
@@ -788,7 +904,10 @@ fn place_angle_arrow(
         };
         let u = (tip - base).normalize_or_zero();
         let center = (base + tip) / 2.0 - rect.0.min;
-        let (l, t) = (Val::Px(center.x - ARROW_LEN / 2.0), Val::Px(center.y - ARROW_LEN / 2.0));
+        let (l, t) = (
+            Val::Px(center.x - ARROW_LEN / 2.0),
+            Val::Px(center.y - ARROW_LEN / 2.0),
+        );
         if node.left != l || node.top != t {
             node.left = l;
             node.top = t;
@@ -801,7 +920,11 @@ fn place_angle_arrow(
             *transform = want;
         }
         vis.set_if_neq(Visibility::Inherited);
-        let c = if active { Color::srgb_u8(0xff, 0xb4, 0x5a) } else { Color::WHITE };
+        let c = if active {
+            Color::srgb_u8(0xff, 0xb4, 0x5a)
+        } else {
+            Color::WHITE
+        };
         for (line, mut img) in &mut q_line {
             if line.0 == which.0 && img.color != c {
                 img.color = c;
@@ -813,7 +936,11 @@ fn place_angle_arrow(
 /// An angle arrow's node: `revolve-arrow` (the first end) or `revolve-arrow-2`.
 fn angle_arrow_node(i: usize) -> impl Bundle {
     (
-        Name::new(if i == 0 { "revolve-arrow".to_string() } else { "revolve-arrow-2".to_string() }),
+        Name::new(if i == 0 {
+            "revolve-arrow".to_string()
+        } else {
+            "revolve-arrow-2".to_string()
+        }),
         AngleArrowNode(i),
         Node {
             position_type: PositionType::Absolute,

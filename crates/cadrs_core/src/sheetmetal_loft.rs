@@ -30,7 +30,10 @@ pub enum LoftItem {
     Face(FaceRef),
     Curve(CurveRef),
     Edge(EdgeRef),
-    SketchPoint { sketch: FeatureId, point: cadrs_sketch::PointId },
+    SketchPoint {
+        sketch: FeatureId,
+        point: cadrs_sketch::PointId,
+    },
     Vertex(VertexRef),
 }
 
@@ -44,7 +47,10 @@ pub struct RegionRefKey {
 
 impl RegionRefKey {
     pub fn of(r: &RegionRef) -> Self {
-        RegionRefKey { sketch: r.sketch, seed: r.seed }
+        RegionRefKey {
+            sketch: r.sketch,
+            seed: r.seed,
+        }
     }
 }
 
@@ -86,7 +92,11 @@ impl LoftConnection {
 
     /// A connection just added: neither end picked.
     pub fn pending() -> Self {
-        LoftConnection { t1: Self::PENDING, t2: Self::PENDING, rip: false }
+        LoftConnection {
+            t1: Self::PENDING,
+            t2: Self::PENDING,
+            rip: false,
+        }
     }
 
     /// Both ends picked (only these take part in the loft).
@@ -152,7 +162,10 @@ impl Default for SheetMetalLoftFeature {
             connections_on: false,
             connections: Vec::new(),
             chordal_tolerance: cadrs_sheetmetal::loft::DEFAULT_CHORDAL_TOLERANCE,
-            chordal_tolerance_expr: format!("{} mm", plain(cadrs_sheetmetal::loft::DEFAULT_CHORDAL_TOLERANCE)),
+            chordal_tolerance_expr: format!(
+                "{} mm",
+                plain(cadrs_sheetmetal::loft::DEFAULT_CHORDAL_TOLERANCE)
+            ),
             params,
             flip_thickness: false,
             exprs: SheetMetalExprs::of(&params),
@@ -175,7 +188,10 @@ impl SheetMetalLoftFeature {
         if self.op == SmLoftOp::New && !self.params.validate().is_empty() {
             return Some("A value is out of range");
         }
-        if self.chordal_tolerance.is_nan() || self.chordal_tolerance <= 0.0 || self.chordal_tolerance.is_infinite() {
+        if self.chordal_tolerance.is_nan()
+            || self.chordal_tolerance <= 0.0
+            || self.chordal_tolerance.is_infinite()
+        {
             return Some("The chordal tolerance must be greater than 0");
         }
         if self.op == SmLoftOp::Add && self.merge_scope.is_empty() {
@@ -187,7 +203,12 @@ impl SheetMetalLoftFeature {
     /// The sketches its profiles come from (hidden once used, like a loft's).
     pub fn sketch_ids(&self) -> Vec<FeatureId> {
         let mut v = Vec::new();
-        for s in self.profile1.iter().chain(&self.profile2).filter_map(LoftItem::sketch) {
+        for s in self
+            .profile1
+            .iter()
+            .chain(&self.profile2)
+            .filter_map(LoftItem::sketch)
+        {
             if !v.contains(&s) {
                 v.push(s);
             }
@@ -197,7 +218,13 @@ impl SheetMetalLoftFeature {
 
     pub fn parents(&self) -> Vec<FeatureId> {
         let mut v: Vec<FeatureId> = Vec::new();
-        for f in self.profile1.iter().chain(&self.profile2).map(LoftItem::parent).chain(self.merge_scope.iter().map(|p| p.feature)) {
+        for f in self
+            .profile1
+            .iter()
+            .chain(&self.profile2)
+            .map(LoftItem::parent)
+            .chain(self.merge_scope.iter().map(|p| p.feature))
+        {
             if !v.contains(&f) {
                 v.push(f);
             }
@@ -216,7 +243,10 @@ mod tests {
         assert_eq!(f.chordal_tolerance, 1.0);
         assert_eq!(f.chordal_tolerance_expr, "1 mm");
         assert_eq!(f.problem(), Some("Select the first profile"));
-        let p = LoftItem::SketchPoint { sketch: FeatureId::new(), point: Default::default() };
+        let p = LoftItem::SketchPoint {
+            sketch: FeatureId::new(),
+            point: Default::default(),
+        };
         f.profile1.push(p);
         f.profile2.push(p);
         assert_eq!(f.problem(), None);

@@ -31,11 +31,19 @@ use bevy::text::FontWeight;
 use bevy::ui_widgets::{Activate, observe};
 use cadrs_core::ElementId;
 use cadrs_core::pcb::bom::{BomRow, bom};
-use cadrs_core::pcb::{BoardId, ItemId, PartTransform, Representation, SetRefdes, SetRepresentation};
+use cadrs_core::pcb::{
+    BoardId, ItemId, PartTransform, Representation, SetRefdes, SetRepresentation,
+};
 use cadrs_sketch::units::{Quantity, format_with_unit};
-use cadrs_ui::inline_edit::{DoubleClick, DoubleClickable, InlineEdit, InlineEditCommit, InlineEditLabel, InlineEditOptions, begin_inline_edit};
+use cadrs_ui::inline_edit::{
+    DoubleClick, DoubleClickable, InlineEdit, InlineEditCommit, InlineEditLabel, InlineEditOptions,
+    begin_inline_edit,
+};
 use cadrs_ui::prelude::*;
-use cadrs_ui::{Button, Column, Visuals, Notification, show_notification, NumberField, NumberFieldCommit, NumberFieldState, RadioChange, RadioGroup, TableHeader, TableRoot, TableRow};
+use cadrs_ui::{
+    Button, Column, Notification, NumberField, NumberFieldCommit, NumberFieldState, RadioChange,
+    RadioGroup, TableHeader, TableRoot, TableRow, Visuals, show_notification,
+};
 
 use super::{CustomEdit, PcbPane, PcbUi, PcbView};
 use crate::viewport::ViewportArea;
@@ -46,7 +54,10 @@ pub const PANE_W: f32 = 360.0;
 
 pub fn register(app: &mut App) {
     app.init_resource::<PaneKey>()
-        .add_systems(Update, (bom_hover, sync_bom_rows).run_if(in_state(AppState::Document)))
+        .add_systems(
+            Update,
+            (bom_hover, sync_bom_rows).run_if(in_state(AppState::Document)),
+        )
         .add_observer(on_representation)
         .add_observer(on_ecad_link)
         .add_observer(on_number_commit)
@@ -85,17 +96,30 @@ fn subject(world: &World) -> Option<Subject> {
         PcbView::Component { package, .. } => package.clone(),
         PcbView::Board => board.component(*ui.selected.first()?)?.package.clone(),
     };
-    let part_number = board.board.placements.iter().find(|p| p.package == package).map(|p| p.part_number.clone()).unwrap_or_default();
+    let part_number = board
+        .board
+        .placements
+        .iter()
+        .find(|p| p.package == package)
+        .map(|p| p.part_number.clone())
+        .unwrap_or_default();
     let doc = world.resource::<ActiveDocument>();
     let representation = doc.doc.element(el)?.pcb()?.library.get(&package).clone();
-    Some(Subject { element: el, board: b, package, part_number, representation })
+    Some(Subject {
+        element: el,
+        board: b,
+        package,
+        part_number,
+        representation,
+    })
 }
 
 /// Rebuilds the docked pane when what it shows changed (selection and hover only restyle the
 /// BOM's rows, so a double click's two clicks land on the same cell).
 pub fn sync_panes(world: &mut World) {
     let pane = world.resource::<PcbUi>().pane;
-    let pcb = *world.resource::<crate::viewport::ActiveKind>() == crate::viewport::ActiveKind::PcbStudio;
+    let pcb =
+        *world.resource::<crate::viewport::ActiveKind>() == crate::viewport::ActiveKind::PcbStudio;
     let key = if !pcb {
         None
     } else {
@@ -107,12 +131,19 @@ pub fn sync_panes(world: &mut World) {
                 if let Some(s) = &s {
                     let want = s.representation.custom().map(|c| c.transform);
                     let mut ui = world.resource_mut::<PcbUi>();
-                    let stale = ui.edit.as_ref().is_some_and(|e| e.element != s.element || e.package != s.package);
+                    let stale = ui
+                        .edit
+                        .as_ref()
+                        .is_some_and(|e| e.element != s.element || e.package != s.package);
                     if stale || want.is_none() {
                         ui.edit = None;
                     }
                     if let (Some(t), None) = (want, &ui.edit) {
-                        ui.edit = Some(CustomEdit { element: s.element, package: s.package.clone(), transform: t });
+                        ui.edit = Some(CustomEdit {
+                            element: s.element,
+                            package: s.package.clone(),
+                            transform: t,
+                        });
                     }
                 }
                 let edit = world.resource::<PcbUi>().edit.clone();
@@ -127,7 +158,10 @@ pub fn sync_panes(world: &mut World) {
             }
         }
     };
-    let have: Vec<Entity> = world.query_filtered::<Entity, With<PaneRoot>>().iter(world).collect();
+    let have: Vec<Entity> = world
+        .query_filtered::<Entity, With<PaneRoot>>()
+        .iter(world)
+        .collect();
     if world.resource::<PaneKey>().0 == key && have.is_empty() == key.is_none() {
         return;
     }
@@ -139,14 +173,19 @@ pub fn sync_panes(world: &mut World) {
         return;
     }
     let mut q_area = world.query_filtered::<(Entity, &ChildOf), With<ViewportArea>>();
-    let Some((area, parent)) = q_area.iter(world).next().map(|(e, c)| (e, c.parent())) else { return };
+    let Some((area, parent)) = q_area.iter(world).next().map(|(e, c)| (e, c.parent())) else {
+        return;
+    };
     let theme = world.resource::<Theme>().clone();
     let panel = match pane {
         PcbPane::Component => spawn_component_pane(world, &theme),
         PcbPane::Bom => spawn_bom_pane(world, &theme),
         PcbPane::None => return,
     };
-    let at = world.get::<Children>(parent).and_then(|c| c.iter().position(|e| e == area)).map_or(0, |i| i + 1);
+    let at = world
+        .get::<Children>(parent)
+        .and_then(|c| c.iter().position(|e| e == area))
+        .map_or(0, |i| i + 1);
     world.entity_mut(parent).insert_children(at, &[panel]);
 }
 
@@ -185,9 +224,17 @@ fn pane_frame(world: &mut World, t: &Theme, name: &str, title: &str, icon: &str)
         ))
         .with_children(|h| {
             h.spawn((icon_bundle(&icon, 16.0, t2.primary), Pickable::IGNORE));
-            h.spawn((t2.text(title, 13.0, FontWeight::BOLD, t2.foreground), Node { flex_grow: 1.0, ..default() }));
             h.spawn((
-                IconButton::new("pcb-pane-close", "close").tooltip("Close").build(&t2),
+                t2.text(title, 13.0, FontWeight::BOLD, t2.foreground),
+                Node {
+                    flex_grow: 1.0,
+                    ..default()
+                },
+            ));
+            h.spawn((
+                IconButton::new("pcb-pane-close", "close")
+                    .tooltip("Close")
+                    .build(&t2),
                 observe(|_: On<Activate>, mut ui: ResMut<PcbUi>| ui.pane = PcbPane::None),
             ));
         });
@@ -204,7 +251,18 @@ fn icon_bundle(name: &str, size: f32, color: Color) -> impl Bundle {
 // Component pane
 
 fn caption(t: &Theme, text: &str) -> impl Bundle {
-    (t.text(text.to_string(), t.font_sm, FontWeight::MEDIUM, t.muted_foreground), Node { margin: UiRect::top(Val::Px(8.0)), ..default() })
+    (
+        t.text(
+            text.to_string(),
+            t.font_sm,
+            FontWeight::MEDIUM,
+            t.muted_foreground,
+        ),
+        Node {
+            margin: UiRect::top(Val::Px(8.0)),
+            ..default()
+        },
+    )
 }
 
 fn read_only(t: &Theme, name: &str, text: &str) -> impl Bundle {
@@ -223,7 +281,15 @@ fn read_only(t: &Theme, name: &str, text: &str) -> impl Bundle {
         BackgroundColor(t.input_disabled_background),
         BorderColor::all(t.input_border),
         Tooltip::new(text.to_string()),
-        Children::spawn_one((t.text(text.to_string(), t.font_base, FontWeight::NORMAL, t.foreground), Pickable::IGNORE)),
+        Children::spawn_one((
+            t.text(
+                text.to_string(),
+                t.font_base,
+                FontWeight::NORMAL,
+                t.foreground,
+            ),
+            Pickable::IGNORE,
+        )),
     )
 }
 
@@ -276,16 +342,29 @@ fn spawn_component_pane(world: &mut World, t: &Theme) -> Entity {
     pane
 }
 
-fn custom_section(b: &mut ChildSpawnerCommands, t: &Theme, source: &str, now: PartTransform, accepted: PartTransform) {
+fn custom_section(
+    b: &mut ChildSpawnerCommands,
+    t: &Theme,
+    source: &str,
+    now: PartTransform,
+    accepted: PartTransform,
+) {
     b.spawn((
         Name::new("pcb-custom-source"),
         Text::new(source.to_string()),
         t.font(t.font_sm, FontWeight::NORMAL),
         TextColor(t.foreground),
-        Node { margin: UiRect::new(Val::Px(19.0), Val::ZERO, Val::Px(2.0), Val::Px(4.0)), max_width: Val::Percent(100.0), ..default() },
+        Node {
+            margin: UiRect::new(Val::Px(19.0), Val::ZERO, Val::Px(2.0), Val::Px(4.0)),
+            max_width: Val::Percent(100.0),
+            ..default()
+        },
     ));
     b.spawn((
-        Button::new("pcb-custom-select").label("Select custom part").small().build(t),
+        Button::new("pcb-custom-select")
+            .label("Select custom part")
+            .small()
+            .build(t),
         observe(|_: On<Activate>, mut commands: Commands| {
             commands.queue(|w: &mut World| {
                 if let Some(s) = subject(w) {
@@ -301,10 +380,20 @@ fn custom_section(b: &mut ChildSpawnerCommands, t: &Theme, source: &str, now: Pa
     });
     b.spawn(caption(t, "Translate"));
     for (i, axis) in ["x", "y", "z"].into_iter().enumerate() {
-        b.spawn(NumberField::new(format!("pcb-translate-{axis}"), axis.to_uppercase()).label_width(24.0).text(format_with_unit(now.translate[i], Quantity::Length)).build(t));
+        b.spawn(
+            NumberField::new(format!("pcb-translate-{axis}"), axis.to_uppercase())
+                .label_width(24.0)
+                .text(format_with_unit(now.translate[i], Quantity::Length))
+                .build(t),
+        );
     }
     b.spawn((
-        Button::new("pcb-custom-center").icon("origin").label("Center").small().tooltip("Put the part in the middle of the footprint, standing on the board").build(t),
+        Button::new("pcb-custom-center")
+            .icon("origin")
+            .label("Center")
+            .small()
+            .tooltip("Put the part in the middle of the footprint, standing on the board")
+            .build(t),
         observe(|_: On<Activate>, mut commands: Commands| {
             commands.queue(center_part);
         }),
@@ -316,22 +405,45 @@ fn custom_section(b: &mut ChildSpawnerCommands, t: &Theme, source: &str, now: Pa
     });
     b.spawn(caption(t, "Rotate"));
     for (i, axis) in ["x", "y", "z"].into_iter().enumerate() {
-        b.spawn(NumberField::new(format!("pcb-rotate-{axis}"), axis.to_uppercase()).label_width(24.0).text(format_with_unit(now.rotate[i], Quantity::Angle)).build(t));
+        b.spawn(
+            NumberField::new(format!("pcb-rotate-{axis}"), axis.to_uppercase())
+                .label_width(24.0)
+                .text(format_with_unit(now.rotate[i], Quantity::Angle))
+                .build(t),
+        );
     }
     let changed = now != accepted;
-    b.spawn(Node { column_gap: Val::Px(8.0), margin: UiRect::top(Val::Px(10.0)), ..default() }).with_children(|r| {
+    b.spawn(Node {
+        column_gap: Val::Px(8.0),
+        margin: UiRect::top(Val::Px(10.0)),
+        ..default()
+    })
+    .with_children(|r| {
         r.spawn((
-            Button::new("pcb-custom-accept").icon("check").label("Accept").primary().small().disabled(!changed).tooltip("Accept the new position").build(t),
+            Button::new("pcb-custom-accept")
+                .icon("check")
+                .label("Accept")
+                .primary()
+                .small()
+                .disabled(!changed)
+                .tooltip("Accept the new position")
+                .build(t),
             observe(|_: On<Activate>, mut commands: Commands| {
                 commands.queue(accept_edit);
             }),
         ));
         r.spawn((
-            Button::new("pcb-custom-cancel").label("Cancel").small().disabled(!changed).build(t),
+            Button::new("pcb-custom-cancel")
+                .label("Cancel")
+                .small()
+                .disabled(!changed)
+                .build(t),
             observe(|_: On<Activate>, mut commands: Commands| {
                 commands.queue(|w: &mut World| {
-                    let accepted = subject(w).and_then(|s| s.representation.custom().map(|c| c.transform));
-                    if let (Some(a), Some(e)) = (accepted, w.resource_mut::<PcbUi>().edit.as_mut()) {
+                    let accepted =
+                        subject(w).and_then(|s| s.representation.custom().map(|c| c.transform));
+                    if let (Some(a), Some(e)) = (accepted, w.resource_mut::<PcbUi>().edit.as_mut())
+                    {
                         e.transform = a;
                     }
                 });
@@ -343,7 +455,10 @@ fn custom_section(b: &mut ChildSpawnerCommands, t: &Theme, source: &str, now: Pa
 /// The Representation radio: None and From ECAD data apply at once; Custom part opens Select
 /// custom part (the radio goes back if it is cancelled).
 fn on_representation(ev: On<RadioChange>, q: Query<&Name>, mut commands: Commands) {
-    if !q.get(ev.entity).is_ok_and(|n| n.as_str() == "pcb-representation") {
+    if !q
+        .get(ev.entity)
+        .is_ok_and(|n| n.as_str() == "pcb-representation")
+    {
         return;
     }
     let index = ev.index;
@@ -360,7 +475,12 @@ fn on_representation(ev: On<RadioChange>, q: Query<&Name>, mut commands: Command
             }
         };
         let label = format!("{} for {}", rep.label(), s.package);
-        let cmd = SetRepresentation { element: s.element, package: s.package.clone(), representation: rep, label };
+        let cmd = SetRepresentation {
+            element: s.element,
+            package: s.package.clone(),
+            representation: rep,
+            label,
+        };
         if let Err(e) = w.resource_mut::<ActiveDocument>().execute(&cmd) {
             warn!("representation: {e}");
         }
@@ -369,7 +489,10 @@ fn on_representation(ev: On<RadioChange>, q: Query<&Name>, mut commands: Command
 
 /// The open-link icon by From ECAD data: the package's component view.
 fn on_ecad_link(a: On<Activate>, q: Query<&Name>, mut commands: Commands) {
-    if !q.get(a.entity).is_ok_and(|n| n.as_str() == "pcb-rep-ecad-link") {
+    if !q
+        .get(a.entity)
+        .is_ok_and(|n| n.as_str() == "pcb-rep-ecad-link")
+    {
         return;
     }
     commands.queue(|w: &mut World| {
@@ -394,12 +517,20 @@ fn on_number_commit(ev: On<NumberFieldCommit>, q: Query<&Name>, mut commands: Co
     let (entity, text) = (ev.entity, ev.text.clone());
     commands.queue(move |w: &mut World| {
         let units = w.resource::<ActiveDocument>().doc.units;
-        let q = if rotate { Quantity::Angle } else { Quantity::Length };
+        let q = if rotate {
+            Quantity::Angle
+        } else {
+            Quantity::Length
+        };
         match units.eval(&text, q) {
             Ok(v) => {
                 // A turn is about the part's middle, so it turns in place (P3H.4).
                 let pts = if rotate {
-                    subject(w).and_then(|s| s.representation.custom().cloned()).and_then(|c| super::view::custom_solid(w, &c.source)).map(|(s, _)| s.positions.clone()).unwrap_or_default()
+                    subject(w)
+                        .and_then(|s| s.representation.custom().cloned())
+                        .and_then(|c| super::view::custom_solid(w, &c.source))
+                        .map(|(s, _)| s.positions.clone())
+                        .unwrap_or_default()
                 } else {
                     vec![]
                 };
@@ -429,8 +560,12 @@ fn on_number_commit(ev: On<NumberFieldCommit>, q: Query<&Name>, mut commands: Co
 /// Center: the part in the middle of the footprint, on the board (the rotation kept).
 fn center_part(world: &mut World) {
     let Some(s) = subject(world) else { return };
-    let Some(c) = s.representation.custom() else { return };
-    let Some((solid, _)) = super::view::custom_solid(world, &c.source) else { return };
+    let Some(c) = s.representation.custom() else {
+        return;
+    };
+    let Some((solid, _)) = super::view::custom_solid(world, &c.source) else {
+        return;
+    };
     if let Some(e) = world.resource_mut::<PcbUi>().edit.as_mut() {
         e.transform = e.transform.centered(&solid.positions);
     }
@@ -439,13 +574,22 @@ fn center_part(world: &mut World) {
 /// ✓: the moved part into the library (one undo step).
 fn accept_edit(world: &mut World) {
     let Some(s) = subject(world) else { return };
-    let Some(mut c) = s.representation.custom().cloned() else { return };
-    let Some(e) = world.resource::<PcbUi>().edit.clone() else { return };
+    let Some(mut c) = s.representation.custom().cloned() else {
+        return;
+    };
+    let Some(e) = world.resource::<PcbUi>().edit.clone() else {
+        return;
+    };
     if e.transform == c.transform {
         return;
     }
     c.transform = e.transform;
-    let cmd = SetRepresentation { element: s.element, package: s.package.clone(), representation: Representation::Custom(Box::new(c)), label: format!("Move custom part of {}", s.package) };
+    let cmd = SetRepresentation {
+        element: s.element,
+        package: s.package.clone(),
+        representation: Representation::Custom(Box::new(c)),
+        label: format!("Move custom part of {}", s.package),
+    };
     if let Err(err) = world.resource_mut::<ActiveDocument>().execute(&cmd) {
         warn!("custom part: {err}");
     }
@@ -478,11 +622,24 @@ fn bom_columns() -> Vec<Column> {
 }
 
 fn spawn_bom_pane(world: &mut World, t: &Theme) -> Entity {
-    let pane = pane_frame(world, t, "pcb-bom-pane", "Bill of materials", "bill-of-materials");
-    let Some((_, _, board)) = super::shown(world) else { return pane };
+    let pane = pane_frame(
+        world,
+        t,
+        "pcb-bom-pane",
+        "Bill of materials",
+        "bill-of-materials",
+    );
+    let Some((_, _, board)) = super::shown(world) else {
+        return pane;
+    };
     let rows = bom(&board);
     let expanded = world.resource::<PcbUi>().bom_expanded.clone();
-    let refdes = |i: ItemId| board.component(i).map(|p| p.refdes.clone()).unwrap_or_default();
+    let refdes = |i: ItemId| {
+        board
+            .component(i)
+            .map(|p| p.refdes.clone())
+            .unwrap_or_default()
+    };
     let columns = bom_columns();
     // (row name, a component's own row, its components, cells: text, designator, open).
     type Cell = (String, Option<BomDesignator>, bool);
@@ -491,11 +648,17 @@ fn spawn_bom_pane(world: &mut World, t: &Theme) -> Entity {
         let open = expanded.contains(&(r.package.clone(), r.part_number.clone()));
         let group: &BomRow = r;
         let single = group.items.len() == 1;
-        let d = BomDesignator { group: gi, item: single.then(|| group.items[0]), refdes: group.designators() };
+        let d = BomDesignator {
+            group: gi,
+            item: single.then(|| group.items[0]),
+            refdes: group.designators(),
+        };
         specs.push((
             format!("pcb-bom-row-{gi}"),
             false,
-            BomRowRef { items: group.items.clone() },
+            BomRowRef {
+                items: group.items.clone(),
+            },
             vec![
                 (group.quantity().to_string(), None, false),
                 (group.designators(), Some(d), open),
@@ -505,12 +668,21 @@ fn spawn_bom_pane(world: &mut World, t: &Theme) -> Entity {
         ));
         if open && !single {
             for (j, item) in group.items.iter().enumerate() {
-                let d = BomDesignator { group: gi, item: Some(*item), refdes: refdes(*item) };
+                let d = BomDesignator {
+                    group: gi,
+                    item: Some(*item),
+                    refdes: refdes(*item),
+                };
                 specs.push((
                     format!("pcb-bom-row-{gi}-{j}"),
                     true,
                     BomRowRef { items: vec![*item] },
-                    vec![("".into(), None, false), (refdes(*item), Some(d), false), (group.package.clone(), None, false), (group.part_number.clone(), None, false)],
+                    vec![
+                        ("".into(), None, false),
+                        (refdes(*item), Some(d), false),
+                        (group.package.clone(), None, false),
+                        (group.part_number.clone(), None, false),
+                    ],
                 ));
             }
         }
@@ -521,56 +693,127 @@ fn spawn_bom_pane(world: &mut World, t: &Theme) -> Entity {
         p.spawn((
             Name::new("pcb-bom-table"),
             TableRoot,
-            Node { flex_direction: FlexDirection::Column, flex_grow: 1.0, min_height: Val::Px(0.0), overflow: Overflow::clip(), ..default() },
+            Node {
+                flex_direction: FlexDirection::Column,
+                flex_grow: 1.0,
+                min_height: Val::Px(0.0),
+                overflow: Overflow::clip(),
+                ..default()
+            },
         ))
         .with_children(|tbl| {
-            tbl.spawn(TableHeader::new("pcb-bom-header", columns.clone()).height(28.0).build(&t));
-            tbl.spawn((Name::new("pcb-bom-rows"), cadrs_ui::TableBody, Node { flex_direction: FlexDirection::Column, flex_grow: 1.0, min_height: Val::Px(0.0), overflow: Overflow::scroll_y(), ..default() }))
-                .with_children(|rows| {
-                    for (name, instance, row_ref, cells) in specs {
-                        let mut tr = TableRow::new(name.clone(), &columns).height(26.0);
-                        for (ci, (text, desig, open)) in cells.into_iter().enumerate() {
-                            let theme = t.clone();
-                            let cell_name = desig.as_ref().map(|d| match d.item.filter(|_| instance) {
-                                Some(_) => format!("pcb-bom-designator-{}", name.trim_start_matches("pcb-bom-row-")),
-                                None => format!("pcb-bom-designator-{}", d.group),
+            tbl.spawn(
+                TableHeader::new("pcb-bom-header", columns.clone())
+                    .height(28.0)
+                    .build(&t),
+            );
+            tbl.spawn((
+                Name::new("pcb-bom-rows"),
+                cadrs_ui::TableBody,
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    flex_grow: 1.0,
+                    min_height: Val::Px(0.0),
+                    overflow: Overflow::scroll_y(),
+                    ..default()
+                },
+            ))
+            .with_children(|rows| {
+                for (name, instance, row_ref, cells) in specs {
+                    let mut tr = TableRow::new(name.clone(), &columns).height(26.0);
+                    for (ci, (text, desig, open)) in cells.into_iter().enumerate() {
+                        let theme = t.clone();
+                        let cell_name = desig.as_ref().map(|d| match d.item.filter(|_| instance) {
+                            Some(_) => format!(
+                                "pcb-bom-designator-{}",
+                                name.trim_start_matches("pcb-bom-row-")
+                            ),
+                            None => format!("pcb-bom-designator-{}", d.group),
+                        });
+                        let muted = instance && ci >= 2;
+                        tr = tr.cell(move |cell| {
+                            let fg = if muted {
+                                theme.muted_foreground
+                            } else {
+                                theme.foreground
+                            };
+                            let mut e = cell.spawn(Node {
+                                width: Val::Percent(100.0),
+                                height: Val::Percent(100.0),
+                                align_items: AlignItems::Center,
+                                column_gap: Val::Px(3.0),
+                                overflow: Overflow::clip(),
+                                ..default()
                             });
-                            let muted = instance && ci >= 2;
-                            tr = tr.cell(move |cell| {
-                                let fg = if muted { theme.muted_foreground } else { theme.foreground };
-                                let mut e = cell.spawn(Node { width: Val::Percent(100.0), height: Val::Percent(100.0), align_items: AlignItems::Center, column_gap: Val::Px(3.0), overflow: Overflow::clip(), ..default() });
-                                if let (Some(d), Some(n)) = (desig, cell_name) {
-                                    let caret = (d.item.is_none()).then_some(if open { "chevron-down" } else { "chevron-right" });
-                                    let editable = d.item.is_some();
-                                    let pad = if instance { 14.0 } else { 0.0 };
-                                    e.insert((Name::new(n), DoubleClickable, Tooltip::new(if editable { "Double-click to rename" } else { "Double-click to list its components" })));
-                                    e.entry::<Node>().and_modify(move |mut node| node.padding = UiRect::left(Val::Px(pad)));
-                                    if editable {
-                                        e.insert(InlineEdit::default());
-                                    }
-                                    e.insert(d);
-                                    e.with_children(|x| {
-                                        if let Some(c) = caret {
-                                            x.spawn((cadrs_ui::icon(c, 11.0, theme.muted_foreground), Pickable::IGNORE));
-                                        }
-                                        x.spawn((theme.text(text, theme.font_base, FontWeight::MEDIUM, fg), cadrs_ui::ellipsis::Ellipsis::default().with_tooltip(), cadrs_ui::ellipsis::Ellipsis::node(), InlineEditLabel, Pickable::IGNORE));
-                                    });
+                            if let (Some(d), Some(n)) = (desig, cell_name) {
+                                let caret = (d.item.is_none()).then_some(if open {
+                                    "chevron-down"
                                 } else {
-                                    e.insert(Pickable::IGNORE);
-                                    e.with_children(|x| {
-                                        x.spawn((theme.text(text, theme.font_base, FontWeight::MEDIUM, fg), cadrs_ui::ellipsis::Ellipsis::default().with_tooltip(), cadrs_ui::ellipsis::Ellipsis::node(), Pickable::IGNORE));
-                                    });
+                                    "chevron-right"
+                                });
+                                let editable = d.item.is_some();
+                                let pad = if instance { 14.0 } else { 0.0 };
+                                e.insert((
+                                    Name::new(n),
+                                    DoubleClickable,
+                                    Tooltip::new(if editable {
+                                        "Double-click to rename"
+                                    } else {
+                                        "Double-click to list its components"
+                                    }),
+                                ));
+                                e.entry::<Node>().and_modify(move |mut node| {
+                                    node.padding = UiRect::left(Val::Px(pad))
+                                });
+                                if editable {
+                                    e.insert(InlineEdit::default());
                                 }
-                            });
-                        }
-                        rows.spawn((tr.build(&t), row_ref));
+                                e.insert(d);
+                                e.with_children(|x| {
+                                    if let Some(c) = caret {
+                                        x.spawn((
+                                            cadrs_ui::icon(c, 11.0, theme.muted_foreground),
+                                            Pickable::IGNORE,
+                                        ));
+                                    }
+                                    x.spawn((
+                                        theme.text(text, theme.font_base, FontWeight::MEDIUM, fg),
+                                        cadrs_ui::ellipsis::Ellipsis::default().with_tooltip(),
+                                        cadrs_ui::ellipsis::Ellipsis::node(),
+                                        InlineEditLabel,
+                                        Pickable::IGNORE,
+                                    ));
+                                });
+                            } else {
+                                e.insert(Pickable::IGNORE);
+                                e.with_children(|x| {
+                                    x.spawn((
+                                        theme.text(text, theme.font_base, FontWeight::MEDIUM, fg),
+                                        cadrs_ui::ellipsis::Ellipsis::default().with_tooltip(),
+                                        cadrs_ui::ellipsis::Ellipsis::node(),
+                                        Pickable::IGNORE,
+                                    ));
+                                });
+                            }
+                        });
                     }
-                });
+                    rows.spawn((tr.build(&t), row_ref));
+                }
+            });
         });
         p.spawn((
             Name::new("pcb-bom-hint"),
-            t.text("Double-click a designator to rename it.", t.font_sm, FontWeight::NORMAL, t.muted_foreground),
-            Node { padding: UiRect::all(Val::Px(8.0)), flex_shrink: 0.0, ..default() },
+            t.text(
+                "Double-click a designator to rename it.",
+                t.font_sm,
+                FontWeight::NORMAL,
+                t.muted_foreground,
+            ),
+            Node {
+                padding: UiRect::all(Val::Px(8.0)),
+                flex_shrink: 0.0,
+                ..default()
+            },
         ));
     });
     world.flush();
@@ -578,9 +821,19 @@ fn spawn_bom_pane(world: &mut World, t: &Theme) -> Entity {
 }
 
 /// A click on a row selects its components (Ctrl or Shift adds them).
-fn on_bom_row(a: On<Activate>, q: Query<&BomRowRef>, keys: Res<ButtonInput<KeyCode>>, mut ui: ResMut<PcbUi>) {
+fn on_bom_row(
+    a: On<Activate>,
+    q: Query<&BomRowRef>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut ui: ResMut<PcbUi>,
+) {
     let Ok(r) = q.get(a.entity) else { return };
-    if keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight, KeyCode::ShiftLeft, KeyCode::ShiftRight]) {
+    if keys.any_pressed([
+        KeyCode::ControlLeft,
+        KeyCode::ControlRight,
+        KeyCode::ShiftLeft,
+        KeyCode::ShiftRight,
+    ]) {
         for i in &r.items {
             if !ui.selected.contains(i) {
                 ui.selected.push(*i);
@@ -593,7 +846,11 @@ fn on_bom_row(a: On<Activate>, q: Query<&BomRowRef>, keys: Res<ButtonInput<KeyCo
 
 /// The row under the pointer lights its components in the view.
 fn bom_hover(q: Query<(&BomRowRef, &Hovered)>, mut ui: ResMut<PcbUi>) {
-    let want: Vec<ItemId> = q.iter().find(|(_, h)| h.get()).map(|(r, _)| r.items.clone()).unwrap_or_default();
+    let want: Vec<ItemId> = q
+        .iter()
+        .find(|(_, h)| h.get())
+        .map(|(r, _)| r.items.clone())
+        .unwrap_or_default();
     if ui.bom_hover != want {
         ui.bom_hover = want;
     }
@@ -611,7 +868,18 @@ const MATCH_ROW_TINT: Color = Color::srgb(0.85, 0.92, 0.99);
 /// Rows show the selection (selected; a group with some members selected is tinted) and the
 /// search matches (their own tint), both ways with the view.
 #[allow(clippy::type_complexity)]
-fn sync_bom_rows(ui: Res<PcbUi>, mut q: Query<(Entity, &BomRowRef, Has<cadrs_ui::Selected>, &mut Visuals, Option<&RowBase>)>, q_new: Query<(), Added<BomRowRef>>, mut commands: Commands) {
+fn sync_bom_rows(
+    ui: Res<PcbUi>,
+    mut q: Query<(
+        Entity,
+        &BomRowRef,
+        Has<cadrs_ui::Selected>,
+        &mut Visuals,
+        Option<&RowBase>,
+    )>,
+    q_new: Query<(), Added<BomRowRef>>,
+    mut commands: Commands,
+) {
     if !ui.is_changed() && q_new.is_empty() {
         return;
     }
@@ -628,7 +896,9 @@ fn sync_bom_rows(ui: Res<PcbUi>, mut q: Query<(Entity, &BomRowRef, Has<cadrs_ui:
         let (own, own_hover) = match base {
             Some(b) => (b.0, b.1),
             None => {
-                commands.entity(e).try_insert(RowBase(vis.background.normal, vis.background.hover));
+                commands
+                    .entity(e)
+                    .try_insert(RowBase(vis.background.normal, vis.background.hover));
                 (vis.background.normal, vis.background.hover)
             }
         };
@@ -651,12 +921,18 @@ fn sync_bom_rows(ui: Res<PcbUi>, mut q: Query<(Entity, &BomRowRef, Has<cadrs_ui:
 /// Double-click a designator: a group of several opens into one row per component (or closes);
 /// a component's designator is edited in place.
 fn on_bom_double_click(ev: On<DoubleClick>, q: Query<&BomDesignator>, mut commands: Commands) {
-    let Ok(d) = q.get(ev.entity).cloned() else { return };
+    let Ok(d) = q.get(ev.entity).cloned() else {
+        return;
+    };
     let entity = ev.entity;
     commands.queue(move |w: &mut World| {
         if d.item.is_none() {
-            let Some((_, _, board)) = super::shown(w) else { return };
-            let Some(r) = bom(&board).into_iter().nth(d.group) else { return };
+            let Some((_, _, board)) = super::shown(w) else {
+                return;
+            };
+            let Some(r) = bom(&board).into_iter().nth(d.group) else {
+                return;
+            };
             let key = (r.package, r.part_number);
             let mut ui = w.resource_mut::<PcbUi>();
             if !ui.bom_expanded.remove(&key) {
@@ -676,19 +952,33 @@ fn on_bom_double_click(ev: On<DoubleClick>, q: Query<&BomDesignator>, mut comman
 /// Enter in a designator being edited: rename it (one undo step); a duplicate is refused with a
 /// message.
 fn on_bom_commit(ev: On<InlineEditCommit>, q: Query<&BomDesignator>, mut commands: Commands) {
-    let Ok(d) = q.get(ev.entity).cloned() else { return };
+    let Ok(d) = q.get(ev.entity).cloned() else {
+        return;
+    };
     let Some(item) = d.item else { return };
     let value = ev.value.trim().to_string();
     if value == d.refdes {
         return;
     }
     commands.queue(move |w: &mut World| {
-        let Some((el, b, _)) = super::shown(w) else { return };
-        let cmd = SetRefdes { element: el, board: b, item, refdes: value };
+        let Some((el, b, _)) = super::shown(w) else {
+            return;
+        };
+        let cmd = SetRefdes {
+            element: el,
+            board: b,
+            item,
+            refdes: value,
+        };
         if let Err(e) = w.resource_mut::<ActiveDocument>().execute(&cmd) {
             let theme = w.resource::<Theme>().clone();
             let mut commands = w.commands();
-            show_notification(&mut commands, &theme, Notification::warning(format!("Couldn't rename {}: {e}", d.refdes)).name("pcb-refdes-toast"));
+            show_notification(
+                &mut commands,
+                &theme,
+                Notification::warning(format!("Couldn't rename {}: {e}", d.refdes))
+                    .name("pcb-refdes-toast"),
+            );
             w.flush();
             // Show the designator as it was.
             refresh(w);

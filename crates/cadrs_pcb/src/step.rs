@@ -11,7 +11,10 @@ use crate::board::PcbBoard;
 fn moved(k: &mut dyn Kernel, b: BodyId, m: &Motion) -> Result<BodyId, String> {
     let r = k.transform_motion(b, m).map_err(|e| e.to_string())?;
     k.release(b);
-    r.bodies.into_iter().next().ok_or_else(|| "no body".to_string())
+    r.bodies
+        .into_iter()
+        .next()
+        .ok_or_else(|| "no body".to_string())
 }
 
 /// Bodies with their names (the board, then each part by reference).
@@ -21,19 +24,32 @@ pub type NamedBodies = Vec<(String, BodyId)>;
 /// be made. The caller releases the bodies. The board and the placements are the Part Studio's
 /// ([`cadrs_core::pcb::board3d::board_body`], [`cadrs_core::pcb::model::footprint_motion`]), so
 /// an exported board and a derived one agree.
-pub fn native_board_bodies(k: &mut dyn Kernel, pcb: &PcbBoard, design: &cadrs_eda::Design) -> Result<(NamedBodies, Vec<String>), String> {
+pub fn native_board_bodies(
+    k: &mut dyn Kernel,
+    pcb: &PcbBoard,
+    design: &cadrs_eda::Design,
+) -> Result<(NamedBodies, Vec<String>), String> {
     let (board, _, mut warnings) = cadrs_core::pcb::board3d::board_body(k, &design.board)?;
     let mut out = vec![(format!("Board [{}]", pcb.name()), board)];
     let t = cadrs_core::pcb::board3d::thickness(&design.board);
     for f in &design.board.footprints {
-        let Some(m) = cadrs_core::pcb::model::shown_model(&f.footprint) else { continue };
+        let Some(m) = cadrs_core::pcb::model::shown_model(&f.footprint) else {
+            continue;
+        };
         let place = cadrs_core::pcb::model::footprint_motion(&f.placement, t);
         match cadrs_core::pcb::model_solids::model_bodies(k, m) {
             Ok((bodies, unit)) => {
                 let motion = crate::mesh::model_motion(m, unit).then(&place);
                 for (i, b) in bodies.into_iter().enumerate() {
                     match moved(k, b, &motion) {
-                        Ok(b) => out.push((if i == 0 { f.reference().to_string() } else { format!("{} {}", f.reference(), i + 1) }, b)),
+                        Ok(b) => out.push((
+                            if i == 0 {
+                                f.reference().to_string()
+                            } else {
+                                format!("{} {}", f.reference(), i + 1)
+                            },
+                            b,
+                        )),
                         Err(e) => warnings.push(format!("{}: {e}", f.reference())),
                     }
                 }
@@ -46,7 +62,10 @@ pub fn native_board_bodies(k: &mut dyn Kernel, pcb: &PcbBoard, design: &cadrs_ed
 
 /// The board as STEP bytes (and the warnings).
 #[cfg(feature = "brep")]
-pub fn native_board_step(pcb: &PcbBoard, design: &cadrs_eda::Design) -> Result<(Vec<u8>, Vec<String>), String> {
+pub fn native_board_step(
+    pcb: &PcbBoard,
+    design: &cadrs_eda::Design,
+) -> Result<(Vec<u8>, Vec<String>), String> {
     let mut k = cadrs_kernel::DefaultKernel::new();
     let (bodies, warnings) = native_board_bodies(&mut k, pcb, design)?;
     let ids: Vec<BodyId> = bodies.iter().map(|(_, b)| *b).collect();
@@ -70,7 +89,11 @@ mod tests {
         let (bodies, warnings) = native_board_bodies(&mut k, &pcb, &d).unwrap();
         assert!(warnings.is_empty(), "{warnings:?}");
         // The board and the three parts' generated bodies (several primitives each).
-        assert!(bodies.iter().any(|(n, _)| n.starts_with("Board")), "{:?}", bodies.iter().map(|b| &b.0).collect::<Vec<_>>());
+        assert!(
+            bodies.iter().any(|(n, _)| n.starts_with("Board")),
+            "{:?}",
+            bodies.iter().map(|b| &b.0).collect::<Vec<_>>()
+        );
         for r in ["BT1", "R1", "D1"] {
             assert!(bodies.iter().any(|(n, _)| n == r), "{r}");
         }

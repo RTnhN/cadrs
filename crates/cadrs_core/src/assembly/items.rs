@@ -7,8 +7,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::commands::assembly_mut;
 use super::Assembly;
+use super::commands::assembly_mut;
 use crate::command::{Command, CommandError, Scope};
 use crate::document::Document;
 use crate::ids::ElementId;
@@ -47,7 +47,12 @@ pub struct Item {
 
 impl Item {
     pub fn new(id: ItemId, name: impl Into<String>, quantity: u32) -> Self {
-        Self { id, name: name.into(), quantity, properties: Properties::default() }
+        Self {
+            id,
+            name: name.into(),
+            quantity,
+            properties: Properties::default(),
+        }
     }
 }
 
@@ -80,7 +85,9 @@ impl Command for SetItem {
             return Err(CommandError::Invalid("an item needs a name".into()));
         }
         if self.item.quantity == 0 {
-            return Err(CommandError::Invalid("the quantity must be at least 1".into()));
+            return Err(CommandError::Invalid(
+                "the quantity must be at least 1".into(),
+            ));
         }
         let asm = assembly_mut(doc, self.element)?;
         let mut item = self.item.clone();

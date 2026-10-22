@@ -46,8 +46,11 @@ pub fn search(studio: &PcbStudio, active: Option<BoardId>, term: &str) -> Vec<Hi
         if has(b.name()) {
             out.push(Hit::Board(b.id));
         }
-        let mut comps: Vec<(ItemId, &cadrs_idf::Placement)> =
-            b.board.components().filter(|(_, p)| has(&p.refdes) || has(&p.package) || has(&p.part_number)).collect();
+        let mut comps: Vec<(ItemId, &cadrs_idf::Placement)> = b
+            .board
+            .components()
+            .filter(|(_, p)| has(&p.refdes) || has(&p.package) || has(&p.part_number))
+            .collect();
         comps.sort_by(|x, y| natural_cmp(&x.1.refdes, &y.1.refdes));
         out.extend(comps.into_iter().map(|(i, _)| Hit::Component(b.id, i)));
     }
@@ -66,7 +69,11 @@ pub struct SearchState {
 impl SearchState {
     /// Runs a search; the first hit is current.
     pub fn run(studio: &PcbStudio, active: Option<BoardId>, term: &str) -> SearchState {
-        SearchState { term: term.trim().to_string(), hits: search(studio, active, term), current: 0 }
+        SearchState {
+            term: term.trim().to_string(),
+            hits: search(studio, active, term),
+            current: 0,
+        }
     }
 
     pub fn is_active(&self) -> bool {
@@ -97,6 +104,10 @@ impl SearchState {
 
     /// "3 of 13", or "No results".
     pub fn counter(&self) -> String {
-        if self.hits.is_empty() { "No results".into() } else { format!("{} of {}", self.current + 1, self.hits.len()) }
+        if self.hits.is_empty() {
+            "No results".into()
+        } else {
+            format!("{} of {}", self.current + 1, self.hits.len())
+        }
     }
 }

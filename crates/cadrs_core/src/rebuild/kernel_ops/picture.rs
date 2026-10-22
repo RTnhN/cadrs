@@ -10,7 +10,12 @@ use crate::picture::ImageFeature;
 
 impl Rebuilder {
     /// The Image feature.
-    pub(in crate::rebuild) fn picture(&mut self, id: FeatureId, x: &ImageFeature, state: &Arc<State>) -> Result<Output, String> {
+    pub(in crate::rebuild) fn picture(
+        &mut self,
+        id: FeatureId,
+        x: &ImageFeature,
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
         if let Some(p) = x.problem() {
             return Err(p.into());
         }
@@ -22,12 +27,32 @@ impl Rebuilder {
         };
         let corners = x.corners().map(|[u, v]| Point2::new(u, v));
         let curves = (0..4)
-            .map(|i| FillCurve::Sketch { plane, curve: Curve2::Line { a: corners[i], b: corners[(i + 1) % 4], source: Some(i as u64) } })
+            .map(|i| FillCurve::Sketch {
+                plane,
+                curve: Curve2::Line {
+                    a: corners[i],
+                    b: corners[(i + 1) % 4],
+                    source: Some(i as u64),
+                },
+            })
             .collect();
         let op = id.0;
-        let r = self.kernel.fill(&FillSpec { curves, source: op.as_u128() as u64 }).map_err(|e| format!("The image failed: {e}"))?;
-        let tool = self.name_new(state, op, &r).map_err(|e| format!("The image failed: {e}"))?;
-        let merge = Merge { op: BooleanOp::New, merge_all: false, scope: &[], surface: true };
+        let r = self
+            .kernel
+            .fill(&FillSpec {
+                curves,
+                source: op.as_u128() as u64,
+            })
+            .map_err(|e| format!("The image failed: {e}"))?;
+        let tool = self
+            .name_new(state, op, &r)
+            .map_err(|e| format!("The image failed: {e}"))?;
+        let merge = Merge {
+            op: BooleanOp::New,
+            merge_all: false,
+            scope: &[],
+            surface: true,
+        };
         let geoms = state.geoms.clone();
         let mut out = self.combine(id, &merge, tool, state, geoms)?;
         // The new surface is named after the file and shows the picture.

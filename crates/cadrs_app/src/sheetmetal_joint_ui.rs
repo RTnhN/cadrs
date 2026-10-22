@@ -20,7 +20,6 @@
 //! `smj-model-radius(-checkbox)`, `smj-radius`, `smj-model-k(-checkbox)`, `smj-calc`,
 //! `smj-value`.
 
-use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
@@ -29,10 +28,12 @@ use cadrs_core::sheetmetal_joint::{JointType, ModifyJointFeature, value_expr};
 use cadrs_core::{ElementId, Feature, FeatureId, FeatureKind};
 use cadrs_sheetmetal::{BendCalc, RipStyle};
 use cadrs_sketch::units::Quantity;
+use cadrs_ui::ShortcutKey;
 use cadrs_ui::prelude::*;
 use cadrs_ui::{
-    CheckboxChange, FeatureDialogAccept, FeatureDialogCancel, FeatureDialogState, NumberField, NumberFieldCommit, NumberFieldState, OptionRow, Select, SelectChange,
-    SelectionList, SelectionListRemove, SelectionListState,
+    CheckboxChange, FeatureDialogAccept, FeatureDialogCancel, FeatureDialogState, NumberField,
+    NumberFieldCommit, NumberFieldState, OptionRow, Select, SelectChange, SelectionList,
+    SelectionListRemove, SelectionListState,
 };
 
 use crate::parts::PartCache;
@@ -43,20 +44,31 @@ pub struct ModifyJointUiPlugin;
 
 impl Plugin for ModifyJointUiPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (joint_picks, joint_keys, sync_dialog).chain().before(crate::parts::PartsSet).run_if(in_state(AppState::Document)))
-            .add_systems(Update, show_joint.after(crate::parts::PartsSet).run_if(in_state(AppState::Document)))
-            .add_systems(OnExit(AppState::Document), |world: &mut World| {
-                if world.contains_resource::<ModifyJointSession>() {
-                    finish(world);
-                }
-            })
-            .add_observer(on_accept)
-            .add_observer(on_cancel)
-            .add_observer(on_checkbox)
-            .add_observer(on_select)
-            .add_observer(on_number)
-            .add_observer(on_slider)
-            .add_observer(on_remove);
+        app.add_systems(
+            Update,
+            (joint_picks, joint_keys, sync_dialog)
+                .chain()
+                .before(crate::parts::PartsSet)
+                .run_if(in_state(AppState::Document)),
+        )
+        .add_systems(
+            Update,
+            show_joint
+                .after(crate::parts::PartsSet)
+                .run_if(in_state(AppState::Document)),
+        )
+        .add_systems(OnExit(AppState::Document), |world: &mut World| {
+            if world.contains_resource::<ModifyJointSession>() {
+                finish(world);
+            }
+        })
+        .add_observer(on_accept)
+        .add_observer(on_cancel)
+        .add_observer(on_checkbox)
+        .add_observer(on_select)
+        .add_observer(on_number)
+        .add_observer(on_slider)
+        .add_observer(on_remove);
     }
 }
 
@@ -105,21 +117,39 @@ fn close_others(world: &mut World) {
 
 /// Opens a Modify joint for editing (a feature row's double-click or Edit).
 pub fn edit(world: &mut World, feature: FeatureId) {
-    if world.get_resource::<ModifyJointSession>().is_some_and(|s| s.feature == feature) {
+    if world
+        .get_resource::<ModifyJointSession>()
+        .is_some_and(|s| s.feature == feature)
+    {
         return;
     }
     if world.contains_resource::<ModifyJointSession>() {
         finish(world);
     }
     close_others(world);
-    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return };
-    let Some(el) = doc.active_element() else { return };
+    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+        return;
+    };
+    let Some(el) = doc.active_element() else {
+        return;
+    };
     let element = el.id;
-    let Some(before) = el.feature(feature).filter(|f| matches!(f.kind, FeatureKind::ModifyJoint(_))).cloned() else { return };
+    let Some(before) = el
+        .feature(feature)
+        .filter(|f| matches!(f.kind, FeatureKind::ModifyJoint(_)))
+        .cloned()
+    else {
+        return;
+    };
     let mark = doc.history.undo_len();
     doc.discard_since(mark);
     world.resource_mut::<Selection>().0.clear();
-    world.insert_resource(ModifyJointSession { element, feature, mark, before: Some(before) });
+    world.insert_resource(ModifyJointSession {
+        element,
+        feature,
+        mark,
+        before: Some(before),
+    });
 }
 
 fn end(world: &mut World) {
@@ -128,7 +158,12 @@ fn end(world: &mut World) {
 }
 
 fn current(world: &World, s: &ModifyJointSession) -> Option<Feature> {
-    world.get_resource::<ActiveDocument>()?.doc.element(s.element)?.feature(s.feature).cloned()
+    world
+        .get_resource::<ActiveDocument>()?
+        .doc
+        .element(s.element)?
+        .feature(s.feature)
+        .cloned()
 }
 
 fn params(world: &World) -> Option<ModifyJointFeature> {
@@ -140,15 +175,25 @@ fn params(world: &World) -> Option<ModifyJointFeature> {
 }
 
 fn set(world: &mut World, x: ModifyJointFeature, label: &str) {
-    let Some(s) = world.get_resource::<ModifyJointSession>().cloned() else { return };
-    let Some(mut f) = current(world, &s) else { return };
+    let Some(s) = world.get_resource::<ModifyJointSession>().cloned() else {
+        return;
+    };
+    let Some(mut f) = current(world, &s) else {
+        return;
+    };
     let kind = FeatureKind::ModifyJoint(x);
     if f.kind == kind {
         return;
     }
     f.kind = kind;
-    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return };
-    if let Err(e) = doc.execute(&ReplaceFeature { element: s.element, feature: f, label: label.into() }) {
+    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+        return;
+    };
+    if let Err(e) = doc.execute(&ReplaceFeature {
+        element: s.element,
+        feature: f,
+        label: label.into(),
+    }) {
         warn!("cannot change the modify joint: {e}");
     }
 }
@@ -161,8 +206,12 @@ fn update(world: &mut World, label: &str, f: impl FnOnce(&mut ModifyJointFeature
 }
 
 pub fn accept(world: &mut World) {
-    let Some(s) = world.get_resource::<ModifyJointSession>().cloned() else { return };
-    let Some(f) = current(world, &s).filter(|f| f.is_valid()) else { return };
+    let Some(s) = world.get_resource::<ModifyJointSession>().cloned() else {
+        return;
+    };
+    let Some(f) = current(world, &s).filter(|f| f.is_valid()) else {
+        return;
+    };
     let label = format!("Edit {}", f.name);
     if let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() {
         doc.squash_element_since(s.mark, s.element, label);
@@ -171,7 +220,9 @@ pub fn accept(world: &mut World) {
 }
 
 pub fn cancel(world: &mut World) {
-    let Some(s) = world.get_resource::<ModifyJointSession>().cloned() else { return };
+    let Some(s) = world.get_resource::<ModifyJointSession>().cloned() else {
+        return;
+    };
     let cur = current(world, &s);
     if let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() {
         let name = cur.as_ref().map(|f| f.name.clone()).unwrap_or_default();
@@ -179,7 +230,11 @@ pub fn cancel(world: &mut World) {
         if let (Some(before), Some(f)) = (s.before.clone(), cur)
             && f != before
         {
-            let _ = doc.execute(&ReplaceFeature { element: s.element, feature: before, label: format!("Cancel {name}") });
+            let _ = doc.execute(&ReplaceFeature {
+                element: s.element,
+                feature: before,
+                label: format!("Cancel {name}"),
+            });
         }
     }
     end(world);
@@ -196,14 +251,21 @@ pub fn finish(world: &mut World) {
 // Input
 
 /// A click on a bend or rip of the same model picks it as the joint.
-fn joint_picks(mut picks: MessageReader<PickRequest>, session: Option<Res<ModifyJointSession>>, cache: Res<PartCache>, mut commands: Commands) {
+fn joint_picks(
+    mut picks: MessageReader<PickRequest>,
+    session: Option<Res<ModifyJointSession>>,
+    cache: Res<PartCache>,
+    mut commands: Commands,
+) {
     if session.is_none() {
         picks.clear();
         return;
     }
     for p in picks.read() {
         let Some(pick) = p.0 else { continue };
-        let Some((model, joint)) = crate::sheetmetal_table::joint_of_pick(&cache, pick) else { continue };
+        let Some((model, joint)) = crate::sheetmetal_table::joint_of_pick(&cache, pick) else {
+            continue;
+        };
         commands.queue(move |world: &mut World| {
             update(world, "Select joint", |x| {
                 if x.model == model {
@@ -253,8 +315,12 @@ fn on_checkbox(ev: On<CheckboxChange>, q: Query<&Name>, mut commands: Commands) 
     let Ok(n) = q.get(ev.entity) else { return };
     let on = ev.checked;
     match n.as_str() {
-        "smj-model-radius-checkbox" => commands.queue(move |world: &mut World| update(world, "Use model bend radius", |x| x.use_model_radius = on)),
-        "smj-model-k-checkbox" => commands.queue(move |world: &mut World| update(world, "Use model K Factor", |x| x.use_model_value = on)),
+        "smj-model-radius-checkbox" => commands.queue(move |world: &mut World| {
+            update(world, "Use model bend radius", |x| x.use_model_radius = on)
+        }),
+        "smj-model-k-checkbox" => commands.queue(move |world: &mut World| {
+            update(world, "Use model K Factor", |x| x.use_model_value = on)
+        }),
         _ => {}
     }
 }
@@ -299,14 +365,22 @@ fn on_number(ev: On<NumberFieldCommit>, q: Query<&Num>, mut commands: Commands) 
     let (n, text) = (*n, ev.text.clone());
     commands.queue(move |world: &mut World| {
         let Some(x) = params(world) else { return };
-        let units = world.get_resource::<crate::WorkspaceUnits>().map(|u| u.0).unwrap_or_default();
-        let vars = world.get_resource::<crate::variables_ui::ActiveVariables>().cloned().unwrap_or_default();
+        let units = world
+            .get_resource::<crate::WorkspaceUnits>()
+            .map(|u| u.0)
+            .unwrap_or_default();
+        let vars = world
+            .get_resource::<crate::variables_ui::ActiveVariables>()
+            .cloned()
+            .unwrap_or_default();
         let q = match n {
             Num::Radius => Quantity::Length,
             Num::Value if x.calc == BendCalc::KFactor => Quantity::Count,
             Num::Value => Quantity::Length,
         };
-        let Some((v, expr)) = crate::sheetmetal_ui::parse(&text, q, &units, &vars) else { return };
+        let Some((v, expr)) = crate::sheetmetal_ui::parse(&text, q, &units, &vars) else {
+            return;
+        };
         match n {
             Num::Radius => update(world, "Bend radius", |x| {
                 x.radius = v;
@@ -359,10 +433,14 @@ fn show_joint(
     mut last: Local<Option<(cadrs_core::sheetmetal_joint::ModifyJointFeature, u64)>>,
 ) {
     let x = match (doc.as_deref(), session.as_deref()) {
-        (Some(d), Some(s)) => d.doc.element(s.element).and_then(|e| e.feature(s.feature)).and_then(|f| match &f.kind {
-            FeatureKind::ModifyJoint(x) => Some(x.clone()),
-            _ => None,
-        }),
+        (Some(d), Some(s)) => d
+            .doc
+            .element(s.element)
+            .and_then(|e| e.feature(s.feature))
+            .and_then(|f| match &f.kind {
+                FeatureKind::ModifyJoint(x) => Some(x.clone()),
+                _ => None,
+            }),
         _ => None,
     };
     let Some(x) = x else {
@@ -375,7 +453,10 @@ fn show_joint(
     if last.as_ref() == Some(&key) {
         return;
     }
-    let picks = match (x.joint, cache.sheet_metal.iter().find(|c| c.feature == x.model)) {
+    let picks = match (
+        x.joint,
+        cache.sheet_metal.iter().find(|c| c.feature == x.model),
+    ) {
         (Some(j), Some(ctx)) => crate::sheetmetal_table::joint_picks(&cache, ctx, j),
         _ => Vec::new(),
     };
@@ -388,18 +469,45 @@ fn show_joint(
 // ---------------------------------------------------------------------------------------------
 // Dialog
 
-fn labelled_select(b: &mut ChildSpawner, t: &Theme, name: &str, label: &str, options: &[(&str, bool)], selected: usize) {
+fn labelled_select(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    name: &str,
+    label: &str,
+    options: &[(&str, bool)],
+    selected: usize,
+) {
     let mut s = Select::new(name.to_string());
     for (o, en) in options {
         s = s.option(*o, *en);
     }
-    b.spawn(Node { height: Val::Px(28.0), margin: UiRect::new(Val::Px(2.0), Val::Px(2.0), Val::Px(1.0), Val::Px(1.0)), align_items: AlignItems::Center, column_gap: Val::Px(4.0), ..default() })
-        .with_children(|r| {
-            if !label.is_empty() {
-                r.spawn((t.text(label, 11.0, bevy::text::FontWeight::NORMAL, t.muted_foreground), Node { width: Val::Px(100.0), flex_shrink: 0.0, ..default() }));
-            }
-            r.spawn(s.selected(selected).build(t)).entry::<Node>().and_modify(|mut n| n.flex_grow = 1.0);
-        });
+    b.spawn(Node {
+        height: Val::Px(28.0),
+        margin: UiRect::new(Val::Px(2.0), Val::Px(2.0), Val::Px(1.0), Val::Px(1.0)),
+        align_items: AlignItems::Center,
+        column_gap: Val::Px(4.0),
+        ..default()
+    })
+    .with_children(|r| {
+        if !label.is_empty() {
+            r.spawn((
+                t.text(
+                    label,
+                    11.0,
+                    bevy::text::FontWeight::NORMAL,
+                    t.muted_foreground,
+                ),
+                Node {
+                    width: Val::Px(100.0),
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+            ));
+        }
+        r.spawn(s.selected(selected).build(t))
+            .entry::<Node>()
+            .and_modify(|mut n| n.flex_grow = 1.0);
+    });
 }
 
 /// The joint's name in its model (from the last rebuild).
@@ -410,9 +518,15 @@ fn joint_name(cache: &PartCache, x: &ModifyJointFeature) -> Option<String> {
 
 /// Whether the joint is a 90° one (butt joints allowed).
 fn ninety(cache: &PartCache, x: &ModifyJointFeature) -> bool {
-    let Some(ctx) = cache.sheet_metal.iter().find(|c| c.feature == x.model) else { return true };
-    let Some(j) = x.joint.and_then(|j| ctx.model.joint(j)) else { return true };
-    let (Some(a), Some(b)) = (ctx.model.wall(j.a), ctx.model.wall(j.b)) else { return true };
+    let Some(ctx) = cache.sheet_metal.iter().find(|c| c.feature == x.model) else {
+        return true;
+    };
+    let Some(j) = x.joint.and_then(|j| ctx.model.joint(j)) else {
+        return true;
+    };
+    let (Some(a), Some(b)) = (ctx.model.wall(j.a), ctx.model.wall(j.b)) else {
+        return true;
+    };
     match (a.surface.normal(), b.surface.normal()) {
         (Some(na), Some(nb)) => na.dot(&nb).abs() < 1e-6,
         _ => false,
@@ -441,19 +555,37 @@ fn sync_dialog(
         }
         return;
     };
-    let Some(f) = doc.doc.element(s.element).and_then(|e| e.feature(s.feature)) else { return };
-    let FeatureKind::ModifyJoint(x) = &f.kind else { return };
+    let Some(f) = doc
+        .doc
+        .element(s.element)
+        .and_then(|e| e.feature(s.feature))
+    else {
+        return;
+    };
+    let FeatureKind::ModifyJoint(x) = &f.kind else {
+        return;
+    };
     let units = units.map(|u| u.0).unwrap_or_default();
     // The joint as an entity chip: "Bend A of Sheet metal model 1".
-    let model_name = doc.doc.element(s.element).and_then(|e| e.feature(x.model)).map(|f| f.name.clone());
-    let names: Vec<String> = joint_name(&cache, x).map(|j| match &model_name {
-        Some(m) => format!("{j} of {m}"),
-        None => j,
-    }).into_iter().collect();
+    let model_name = doc
+        .doc
+        .element(s.element)
+        .and_then(|e| e.feature(x.model))
+        .map(|f| f.name.clone());
+    let names: Vec<String> = joint_name(&cache, x)
+        .map(|j| match &model_name {
+            Some(m) => format!("{j} of {m}"),
+            None => j,
+        })
+        .into_iter()
+        .collect();
     let error = cache.errors.get(&f.id).cloned();
     let valid = f.is_valid() && error.is_none() && !cache.rebuilding;
     let ninety = ninety(&cache, x);
-    let layout = BuiltFor(format!("{:?}{}{}{:?}{}", x.joint_type, x.use_model_radius, x.use_model_value, x.calc, ninety));
+    let layout = BuiltFor(format!(
+        "{:?}{}{}{:?}{}",
+        x.joint_type, x.use_model_radius, x.use_model_value, x.calc, ninety
+    ));
     let text_of = |n: Num| match n {
         Num::Radius => units.with_unit(x.radius, Quantity::Length),
         Num::Value if x.calc == BendCalc::KFactor => cadrs_core::sheetmetal::plain(x.value),
@@ -464,7 +596,9 @@ fn sync_dialog(
         if let Some((e, _)) = built {
             commands.entity(e).try_despawn();
         }
-        let Some(area) = q_area.iter().next() else { return };
+        let Some(area) = q_area.iter().next() else {
+            return;
+        };
         let t = theme.clone();
         let x = x.clone();
         let (radius, value) = (text_of(Num::Radius), text_of(Num::Value));
@@ -487,26 +621,95 @@ fn sync_dialog(
                                 .active(true)
                                 .build(&t),
                         ));
-                        let types: Vec<(&str, bool)> = JointType::ALL.iter().map(|j| (j.label(), true)).collect();
-                        labelled_select(b, &t, "smj-type", "", &types, JointType::ALL.iter().position(|j| *j == x.joint_type).unwrap_or(0));
+                        let types: Vec<(&str, bool)> =
+                            JointType::ALL.iter().map(|j| (j.label(), true)).collect();
+                        labelled_select(
+                            b,
+                            &t,
+                            "smj-type",
+                            "",
+                            &types,
+                            JointType::ALL
+                                .iter()
+                                .position(|j| *j == x.joint_type)
+                                .unwrap_or(0),
+                        );
                         match x.joint_type {
                             JointType::Rip => {
-                                let styles: Vec<(&str, bool)> = RipStyle::ALL.iter().map(|s| (s.label(), *s == RipStyle::EdgeJoint || ninety)).collect();
-                                labelled_select(b, &t, "smj-rip-style", "", &styles, RipStyle::ALL.iter().position(|s| *s == x.rip_style).unwrap_or(0));
+                                let styles: Vec<(&str, bool)> = RipStyle::ALL
+                                    .iter()
+                                    .map(|s| (s.label(), *s == RipStyle::EdgeJoint || ninety))
+                                    .collect();
+                                labelled_select(
+                                    b,
+                                    &t,
+                                    "smj-rip-style",
+                                    "",
+                                    &styles,
+                                    RipStyle::ALL
+                                        .iter()
+                                        .position(|s| *s == x.rip_style)
+                                        .unwrap_or(0),
+                                );
                             }
                             JointType::Bend => {
-                                b.spawn(OptionRow::new("smj-model-radius", "Use model bend radius").checked(x.use_model_radius).build(&t));
+                                b.spawn(
+                                    OptionRow::new("smj-model-radius", "Use model bend radius")
+                                        .checked(x.use_model_radius)
+                                        .build(&t),
+                                );
                                 if !x.use_model_radius {
-                                    b.spawn((Num::Radius, NumberField::new("smj-radius", "Bend radius").text(radius.clone()).label_width(100.0).build(&t)));
+                                    b.spawn((
+                                        Num::Radius,
+                                        NumberField::new("smj-radius", "Bend radius")
+                                            .text(radius.clone())
+                                            .label_width(100.0)
+                                            .build(&t),
+                                    ));
                                 }
-                                b.spawn(OptionRow::new("smj-model-k", "Use model K Factor").checked(x.use_model_value).build(&t));
+                                b.spawn(
+                                    OptionRow::new("smj-model-k", "Use model K Factor")
+                                        .checked(x.use_model_value)
+                                        .build(&t),
+                                );
                                 if !x.use_model_value {
-                                    let calcs: Vec<(&str, bool)> = BendCalc::ALL.iter().map(|c| (c.label(), true)).collect();
-                                    labelled_select(b, &t, "smj-calc", "Bend calculation", &calcs, BendCalc::ALL.iter().position(|c| *c == x.calc).unwrap_or(0));
-                                    b.spawn((Num::Value, NumberField::new("smj-value", x.calc.label()).text(value.clone()).label_width(100.0).build(&t)));
+                                    let calcs: Vec<(&str, bool)> =
+                                        BendCalc::ALL.iter().map(|c| (c.label(), true)).collect();
+                                    labelled_select(
+                                        b,
+                                        &t,
+                                        "smj-calc",
+                                        "Bend calculation",
+                                        &calcs,
+                                        BendCalc::ALL
+                                            .iter()
+                                            .position(|c| *c == x.calc)
+                                            .unwrap_or(0),
+                                    );
+                                    b.spawn((
+                                        Num::Value,
+                                        NumberField::new("smj-value", x.calc.label())
+                                            .text(value.clone())
+                                            .label_width(100.0)
+                                            .build(&t),
+                                    ));
                                     if x.calc == BendCalc::KFactor {
-                                        b.spawn(Node { padding: UiRect::new(Val::Px(6.0), Val::Px(6.0), Val::Px(4.0), Val::Px(6.0)), ..default() })
-                                            .with_child(cadrs_ui::Slider::new("smj-k-slider").value(k_to_slider(x.value)).width(130.0).tooltip("K Factor").build(&t));
+                                        b.spawn(Node {
+                                            padding: UiRect::new(
+                                                Val::Px(6.0),
+                                                Val::Px(6.0),
+                                                Val::Px(4.0),
+                                                Val::Px(6.0),
+                                            ),
+                                            ..default()
+                                        })
+                                        .with_child(
+                                            cadrs_ui::Slider::new("smj-k-slider")
+                                                .value(k_to_slider(x.value))
+                                                .width(130.0)
+                                                .tooltip("K Factor")
+                                                .build(&t),
+                                        );
                                     }
                                 }
                             }
@@ -514,8 +717,15 @@ fn sync_dialog(
                         }
                     })
                     .footer(|f| {
-                        f.spawn(Node { flex_grow: 1.0, ..default() });
-                        f.spawn((Name::new("modify-joint-dialog-help"), cadrs_ui::icon("help-filled", 14.0, Color::srgb_u8(0xa8, 0xa8, 0xa8)), Tooltip::new("Help")));
+                        f.spawn(Node {
+                            flex_grow: 1.0,
+                            ..default()
+                        });
+                        f.spawn((
+                            Name::new("modify-joint-dialog-help"),
+                            cadrs_ui::icon("help-filled", 14.0, Color::srgb_u8(0xa8, 0xa8, 0xa8)),
+                            Tooltip::new("Help"),
+                        ));
                     })
                     .build(&theme),
             ))
@@ -524,13 +734,23 @@ fn sync_dialog(
         return;
     }
     for (_, _, mut st) in &mut q_dialog {
-        let want = FeatureDialogState { title: f.name.clone(), valid, error: error.is_some() };
+        let want = FeatureDialogState {
+            title: f.name.clone(),
+            valid,
+            error: error.is_some(),
+        };
         if *st != want {
             *st = want;
         }
     }
     for mut l in &mut q_list {
-        let want = SelectionListState { items: names.clone(), active: true, error: x.joint.is_none(), red_items: false, red: Vec::new() };
+        let want = SelectionListState {
+            items: names.clone(),
+            active: true,
+            error: x.joint.is_none(),
+            red_items: false,
+            red: Vec::new(),
+        };
         if *l != want {
             *l = want;
         }
@@ -540,11 +760,18 @@ fn sync_dialog(
     let range = x.range_error().map(|e| e.message());
     for (e, n, mut st, tip) in &mut q_num {
         let err = match n {
-            Num::Radius => cadrs_core::sheetmetal_joint::radius_error(x.radius).map(|e| e.message()),
-            Num::Value => cadrs_core::sheetmetal_joint::value_error(x.calc, x.value).map(|e| e.message()),
+            Num::Radius => {
+                cadrs_core::sheetmetal_joint::radius_error(x.radius).map(|e| e.message())
+            }
+            Num::Value => {
+                cadrs_core::sheetmetal_joint::value_error(x.calc, x.value).map(|e| e.message())
+            }
         };
         if editing != Some(e) {
-            let want = NumberFieldState { text: text_of(*n), error: err.is_some() };
+            let want = NumberFieldState {
+                text: text_of(*n),
+                error: err.is_some(),
+            };
             if *st != want {
                 *st = want;
             }

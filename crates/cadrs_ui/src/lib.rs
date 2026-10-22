@@ -20,16 +20,16 @@ pub mod avatar;
 pub mod button;
 pub mod checkbox;
 pub mod collapsible;
-pub mod command_palette;
 pub mod color_editor;
 pub mod color_legend;
 pub mod color_picker;
+pub mod command_palette;
 pub mod cursor;
 pub mod dialog;
 pub mod dialog_fields;
 pub mod dim_edit;
-pub mod dock;
 pub mod doc_details;
+pub mod dock;
 pub mod document_browser;
 pub mod ellipsis;
 pub mod entry_list;
@@ -38,13 +38,16 @@ pub mod file_picker;
 pub mod float_bar;
 pub mod floating_panel;
 pub mod fonts;
-pub mod glyphs;
 pub mod gallery;
+pub mod glyphs;
 pub mod icon;
 mod icon_raster;
 pub mod inline_edit;
 pub mod input;
 pub mod list;
+pub mod menu;
+pub mod name_popup;
+pub mod path_field;
 pub mod quick_dim;
 pub mod radio;
 pub mod scrollbar;
@@ -53,20 +56,17 @@ pub mod selection_box;
 pub mod selection_field;
 pub mod selection_list;
 pub mod shortcut_key;
-pub mod menu;
-pub mod name_popup;
-pub mod path_field;
 pub mod spinner;
 pub mod splitter;
 pub mod style;
+pub mod surface;
 pub mod switch;
 pub mod symbols;
-pub mod surface;
 pub mod tab_strip;
-pub mod text_dialog;
 pub mod table;
 pub mod tabs;
 pub mod tag;
+pub mod text_dialog;
 pub mod theme;
 pub mod timeline;
 pub mod toast;
@@ -79,80 +79,103 @@ use bevy::prelude::*;
 
 pub use action_row::{ActionRow, ActionRowAction};
 pub use anim::{FadeIn, FinishAnimations};
-pub use shortcut_key::ShortcutKey;
-pub use float_bar::FloatBar;
-pub use segmented::{Segmented, SegmentedSelect, SegmentedState};
-pub use floating_panel::{FloatingPanel, FloatingPanelBody, FloatingPanelClose, panel_caption};
-pub use switch::{Switch, SwitchChange, SwitchState};
 pub use avatar::Avatar;
-pub use color_editor::{ColorEditor, ColorEditorChange, ColorEditorCustom, ColorEditorDefault, ColorEditorSaveCustom, ColorEditorState, CustomColorSwatch};
-pub use color_legend::{ColorLegend, color_map};
-pub use color_picker::{ColorMixer, ColorMixerChange, ColorMixerState, ColorSwatch, SwatchColor, SwatchSelected};
-pub use command_palette::{CommandPalette, CommandPaletteClose, CommandPaletteLayer, CommandPaletteResults, palette_row};
-pub use collapsible::{Collapsible, CollapsibleState, CollapsibleToggled};
-pub use spinner::Spinner;
-pub use table::{Column, ColumnSort, TableBody, TableColumnResize, TableHeader, TableRoot, TableRow, TableSortChange};
 pub use button::{Button, ButtonSize, ButtonVariant, IconButton};
+pub use checkbox::{Checkbox, CheckboxChange, CheckboxState};
+pub use collapsible::{Collapsible, CollapsibleState, CollapsibleToggled};
+pub use color_editor::{
+    ColorEditor, ColorEditorChange, ColorEditorCustom, ColorEditorDefault, ColorEditorSaveCustom,
+    ColorEditorState, CustomColorSwatch,
+};
+pub use color_legend::{ColorLegend, color_map};
+pub use color_picker::{
+    ColorMixer, ColorMixerChange, ColorMixerState, ColorSwatch, SwatchColor, SwatchSelected,
+};
+pub use command_palette::{
+    CommandPalette, CommandPaletteClose, CommandPaletteLayer, CommandPaletteResults, palette_row,
+};
+pub use cursor::{CursorKind, CursorRequest, CursorState};
 pub use dialog::{Dialog, DialogClose, DialogRoot};
 pub use dialog_fields::{
-    NumberField, NumberFieldCancel, NumberFieldCommit, NumberFieldEdit, NumberFieldState, OptionRow,
-    Select, SelectChange, SelectState, Slider, SliderChange, SliderState, form_row,
+    NumberField, NumberFieldCancel, NumberFieldCommit, NumberFieldEdit, NumberFieldState,
+    OptionRow, Select, SelectChange, SelectState, Slider, SliderChange, SliderState, form_row,
 };
+pub use dim_edit::{DimEdit, DimEditBox, DimEditCancel, DimEditCommit, DimEditField};
+pub use doc_details::{
+    LabelChip, details_caption, details_divider, details_header, details_value, side_tab,
+};
+pub use dock::{
+    DockGrip, DockPanel, DockPanelResized, DockPanelState, DockPanelToggled, ToggleDockPanel,
+};
+pub use document_browser::{BrowserSearch, DocumentRow, OpenedHeader, location_row};
 pub use entry_list::{
-    Entry, EntryGroup, EntryGroupAction, EntryGroupActivate, EntryGroupState, EntryRemove, EntryState, EntryToggled,
+    Entry, EntryGroup, EntryGroupAction, EntryGroupActivate, EntryGroupState, EntryRemove,
+    EntryState, EntryToggled,
 };
-pub use dock::{DockGrip, DockPanel, DockPanelResized, DockPanelState, DockPanelToggled, ToggleDockPanel};
-pub use inline_edit::{
-    DoubleClick, DoubleClickable, InlineEdit, InlineEditCancel, InlineEditCommit,
-    InlineEditLabel, InlineEditOptions, begin_inline_edit,
+pub use feature_dialog::{
+    FeatureDialog, FeatureDialogAccept, FeatureDialogCancel, FeatureDialogState,
 };
-pub use tabs::Tab;
-pub use tag::Tag;
-pub use tab_strip::{TabStrip, TabStripSelect, TabStripState, select_tab};
-pub use toolbar::{Kbd, ToolButton, toolbar_separator};
-pub use tree::{TreeItem, TreeRowToggle, TreeRowToggled, TreeToggle, tree_guide};
+pub use file_picker::{
+    FilePicked, FilePickerState, FilesPicked, open_file_picker, open_files_picker,
+};
+pub use float_bar::FloatBar;
+pub use floating_panel::{FloatingPanel, FloatingPanelBody, FloatingPanelClose, panel_caption};
 pub use icon::{Icon, IconAtlas, icon};
+pub use inline_edit::{
+    DoubleClick, DoubleClickable, InlineEdit, InlineEditCancel, InlineEditCommit, InlineEditLabel,
+    InlineEditOptions, begin_inline_edit,
+};
 pub use input::{CaretBlinkOverride, TextCancel, TextInput, TextInputField, TextSubmit};
 pub use list::{GridItem, ListItem};
 pub use menu::{
     ContextMenuRequested, ContextMenuTarget, Menu, MenuAction, MenuEntry, MenuItem,
     close_all_menus, open_context_menu, open_menu,
 };
-pub use style::{ForceState, InheritFg, Selected, StateColors, VisualState, Visuals};
-pub use surface::RenderSurface;
-pub use theme::Theme;
-pub use timeline::{TimelineMarker, TimelineRow, TimelineRowState};
-pub use version_graph::{VersionGraph, VersionGraphNode, VersionGraphSelect, VersionNode, VersionNodeKind};
-pub use document_browser::{BrowserSearch, DocumentRow, OpenedHeader, location_row};
-pub use doc_details::{LabelChip, details_caption, details_divider, details_header, details_value, side_tab};
-pub use toast::{
-    Notification, ToastHost, close_toasts, close_transient_toasts, show_notification, show_toast, show_toast_for,
-    toast_action,
+pub use name_popup::{NamePopup, NamePopupCancel, NamePopupCommit};
+pub use path_field::{
+    PathField, PathFieldBrowse, path_field_value, set_path_field, set_path_field_display,
 };
-pub use checkbox::{Checkbox, CheckboxChange, CheckboxState};
+pub use quick_dim::{
+    QuickDim, QuickDimBox, QuickDimCancel, QuickDimCommit, QuickDimField,
+    start_typing as quick_dim_start_typing,
+};
 pub use radio::{RadioChange, RadioGroup, RadioGroupState, RadioOption};
-pub use path_field::{PathField, PathFieldBrowse, path_field_value, set_path_field, set_path_field_display};
-pub use file_picker::{FilePicked, FilePickerState, FilesPicked, open_file_picker, open_files_picker};
-pub use feature_dialog::{
-    FeatureDialog, FeatureDialogAccept, FeatureDialogCancel, FeatureDialogState,
-};
+pub use scrollbar::{WheelScroll, horizontal_scrollbar, vertical_scrollbar};
+pub use segmented::{Segmented, SegmentedSelect, SegmentedState};
 pub use selection_field::{
     SelectionField, SelectionFieldActivate, SelectionFieldClear, SelectionFieldState,
 };
 pub use selection_list::{
-    SelectionList, SelectionListActivate, SelectionListItem, SelectionListMove, SelectionListRemove, SelectionListReorder,
-    SelectionListReplace, SelectionListReplaceable, SelectionListState,
+    SelectionList, SelectionListActivate, SelectionListItem, SelectionListMove,
+    SelectionListRemove, SelectionListReorder, SelectionListReplace, SelectionListReplaceable,
+    SelectionListState,
 };
-pub use quick_dim::{
-    QuickDim, QuickDimBox, QuickDimCancel, QuickDimCommit, QuickDimField, start_typing as quick_dim_start_typing,
-};
-pub use dim_edit::{DimEdit, DimEditBox, DimEditCancel, DimEditCommit, DimEditField};
-pub use tooltip::{Tooltip, TooltipStyle};
-pub use name_popup::{NamePopup, NamePopupCancel, NamePopupCommit};
-pub use text_dialog::{TextDialog, TextDialogState};
-pub use scrollbar::{WheelScroll, horizontal_scrollbar, vertical_scrollbar};
+pub use shortcut_key::ShortcutKey;
+pub use spinner::Spinner;
 pub use splitter::{HoverCursor, Splitter, SplitterMoved, horizontal_splitter};
-pub use cursor::{CursorKind, CursorRequest, CursorState};
+pub use style::{ForceState, InheritFg, Selected, StateColors, VisualState, Visuals};
+pub use surface::RenderSurface;
+pub use switch::{Switch, SwitchChange, SwitchState};
+pub use tab_strip::{TabStrip, TabStripSelect, TabStripState, select_tab};
+pub use table::{
+    Column, ColumnSort, TableBody, TableColumnResize, TableHeader, TableRoot, TableRow,
+    TableSortChange,
+};
+pub use tabs::Tab;
+pub use tag::Tag;
+pub use text_dialog::{TextDialog, TextDialogState};
+pub use theme::Theme;
+pub use timeline::{TimelineMarker, TimelineRow, TimelineRowState};
+pub use toast::{
+    Notification, ToastHost, close_toasts, close_transient_toasts, show_notification, show_toast,
+    show_toast_for, toast_action,
+};
+pub use toolbar::{Kbd, ToolButton, toolbar_separator};
+pub use tooltip::{Tooltip, TooltipStyle};
+pub use tree::{TreeItem, TreeRowToggle, TreeRowToggled, TreeToggle, tree_guide};
+pub use version_graph::{
+    VersionGraph, VersionGraphNode, VersionGraphSelect, VersionNode, VersionNodeKind,
+};
 
 /// A named action sent by a scripted scenario (`Custom("...")` steps), for set-ups that would
 /// take hundreds of clicks, such as filling a sketch with 500 entities. The app handles the
@@ -190,9 +213,8 @@ pub mod prelude {
         VisualState, icon, open_context_menu, open_menu,
     };
     pub use crate::{
-        Checkbox, DockPanel, DoubleClick, FeatureDialog, InlineEditCommit, Kbd, SelectionField, Tab,
-        ToolButton, TreeItem,
-        toolbar_separator,
+        Checkbox, DockPanel, DoubleClick, FeatureDialog, InlineEditCommit, Kbd, SelectionField,
+        Tab, ToolButton, TreeItem, toolbar_separator,
     };
     pub use bevy::ui_widgets::{Activate, observe};
 }
@@ -212,12 +234,15 @@ impl Plugin for CadrsUiPlugin {
         app.init_resource::<Theme>()
             .init_resource::<PendingWork>()
             .init_resource::<PendingWhy>()
-            .add_systems(PreUpdate, |mut p: ResMut<PendingWork>, mut why: ResMut<PendingWhy>| {
-                p.set_if_neq(PendingWork(false));
-                if !why.0.is_empty() {
-                    why.0.clear();
-                }
-            })
+            .add_systems(
+                PreUpdate,
+                |mut p: ResMut<PendingWork>, mut why: ResMut<PendingWhy>| {
+                    p.set_if_neq(PendingWork(false));
+                    if !why.0.is_empty() {
+                        why.0.clear();
+                    }
+                },
+            )
             .init_resource::<RenderSurface>()
             .insert_resource(ClearColor(Theme::default().viewport_background))
             .add_plugins(bevy::input_focus::tab_navigation::TabNavigationPlugin)
@@ -259,7 +284,15 @@ impl Plugin for CadrsUiPlugin {
             .add_plugins(radio::RadioPlugin)
             .add_plugins(entry_list::EntryListPlugin)
             .add_plugins(name_popup::NamePopupPlugin)
-            .add_plugins((floating_panel::FloatingPanelPlugin, segmented::SegmentedPlugin, switch::SwitchPlugin, version_graph::VersionGraphPlugin, splitter::SplitterPlugin, selection_box::SelectionBoxPlugin, color_editor::ColorEditorPlugin))
+            .add_plugins((
+                floating_panel::FloatingPanelPlugin,
+                segmented::SegmentedPlugin,
+                switch::SwitchPlugin,
+                version_graph::VersionGraphPlugin,
+                splitter::SplitterPlugin,
+                selection_box::SelectionBoxPlugin,
+                color_editor::ColorEditorPlugin,
+            ))
             .add_message::<ScriptCommand>();
     }
 }

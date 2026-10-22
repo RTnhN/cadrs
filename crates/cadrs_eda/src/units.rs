@@ -25,7 +25,9 @@ pub fn to_mm(v: Nm) -> f64 {
 }
 
 /// A point or vector in nanometres.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub struct Pt {
     pub x: Nm,
     pub y: Nm,
@@ -164,7 +166,10 @@ impl Bounds {
     }
 
     pub fn grow(self, by: Nm) -> Bounds {
-        Bounds { min: Pt::new(self.min.x - by, self.min.y - by), max: Pt::new(self.max.x + by, self.max.y + by) }
+        Bounds {
+            min: Pt::new(self.min.x - by, self.min.y - by),
+            max: Pt::new(self.max.x + by, self.max.y + by),
+        }
     }
 
     pub fn contains(&self, p: Pt) -> bool {

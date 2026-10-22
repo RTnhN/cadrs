@@ -21,8 +21,13 @@ use crate::model::{JointId, Model, RipStyle, SharpBuilder, SharpJointKind};
 pub enum JointChange {
     /// A bend: `radius: None` uses the model's bend radius, `value: None` the model's K factor
     /// (or allowance, or deduction).
-    Bend { radius: Option<f64>, value: Option<BendValue> },
-    Rip { style: RipStyle },
+    Bend {
+        radius: Option<f64>,
+        value: Option<BendValue>,
+    },
+    Rip {
+        style: RipStyle,
+    },
 }
 
 /// One joint's edit.
@@ -35,7 +40,10 @@ pub struct JointEdit {
 /// "Bend C" ↔ "Joint C": the joint keeps its letter when it changes kind (its row moves between
 /// the tables, SM13.4).
 pub fn renamed(name: &str, bend: bool) -> String {
-    let letter = name.strip_prefix("Bend ").or_else(|| name.strip_prefix("Joint ")).or_else(|| name.strip_prefix("Rip "));
+    let letter = name
+        .strip_prefix("Bend ")
+        .or_else(|| name.strip_prefix("Joint "))
+        .or_else(|| name.strip_prefix("Rip "));
     match letter {
         Some(l) if bend => format!("Bend {l}"),
         Some(l) => format!("Joint {l}"),
@@ -70,7 +78,9 @@ pub fn apply(b: &mut SharpBuilder, edits: &[JointEdit]) -> Vec<JointId> {
 /// table; the others keep their places (Move up / Move down, SM13.4).
 pub fn reorder(m: &mut Model, order: &[JointId]) {
     let rank = |id: JointId| order.iter().position(|o| *o == id);
-    let slots: Vec<usize> = (0..m.joints.len()).filter(|i| rank(m.joints[*i].id).is_some()).collect();
+    let slots: Vec<usize> = (0..m.joints.len())
+        .filter(|i| rank(m.joints[*i].id).is_some())
+        .collect();
     let mut listed: Vec<_> = slots.iter().map(|i| m.joints[*i].clone()).collect();
     listed.sort_by_key(|j| rank(j.id));
     for (slot, j) in slots.into_iter().zip(listed) {
@@ -82,7 +92,8 @@ pub fn reorder(m: &mut Model, order: &[JointId]) {
 /// the whole order of the model's joints, to keep with the model.
 pub fn moved(m: &Model, joint: JointId, by: isize) -> Option<Vec<JointId>> {
     let mut m = m.clone();
-    m.move_joint(joint, by).then(|| m.joints.iter().map(|j| j.id).collect())
+    m.move_joint(joint, by)
+        .then(|| m.joints.iter().map(|j| j.id).collect())
 }
 
 #[cfg(test)]
@@ -90,20 +101,32 @@ mod tests {
     use super::*;
     use crate::construct::{self, EdgeIn, FaceIn, FaceOpts, stable_id};
     use crate::definition::Definition;
-    use crate::params::Params;
     use crate::flat::flatten;
     use crate::model::{JointKind, P3, V3};
+    use crate::params::Params;
     use crate::poly::{P2, Polygon};
 
     fn params() -> Params {
-        Params { thickness: 2.0, bend_radius: 3.0, k_factor: 0.45, minimal_gap: 0.2, ..Default::default() }
+        Params {
+            thickness: 2.0,
+            bend_radius: 3.0,
+            k_factor: 0.45,
+            minimal_gap: 0.2,
+            ..Default::default()
+        }
     }
 
     /// A 100 × 60 × 40 box's faces and edges (as `construct`'s tests), converted with its
     /// bottom's four edges bent: an open box and a separate top.
     fn open_box() -> Definition {
         let (x, y, z) = (100.0, 60.0, 40.0);
-        let f = |key, origin: P3, u: V3, v: V3, w: f64, h: f64| FaceIn { key, origin, u, v, outline: Polygon::rect(P2::origin(), P2::new(w, h)) };
+        let f = |key, origin: P3, u: V3, v: V3, w: f64, h: f64| FaceIn {
+            key,
+            origin,
+            u,
+            v,
+            outline: Polygon::rect(P2::origin(), P2::new(w, h)),
+        };
         let faces = vec![
             f(1, P3::new(0.0, y, 0.0), V3::x(), -V3::y(), x, y),
             f(2, P3::new(0.0, 0.0, z), V3::x(), V3::y(), x, y),
@@ -112,7 +135,12 @@ mod tests {
             f(5, P3::new(0.0, y, 0.0), -V3::y(), V3::z(), y, z),
             f(6, P3::new(x, 0.0, 0.0), V3::y(), V3::z(), y, z),
         ];
-        let e = |key, a: P3, b: P3, fa, fb| EdgeIn { key, a, b, faces: (fa, fb) };
+        let e = |key, a: P3, b: P3, fa, fb| EdgeIn {
+            key,
+            a,
+            b,
+            faces: (fa, fb),
+        };
         let edges = vec![
             e(10, P3::new(0.0, 0.0, 0.0), P3::new(x, 0.0, 0.0), 0, 2),
             e(11, P3::new(0.0, y, 0.0), P3::new(x, y, 0.0), 0, 3),
@@ -127,8 +155,15 @@ mod tests {
             e(20, P3::new(0.0, y, 0.0), P3::new(0.0, y, z), 3, 4),
             e(21, P3::new(x, y, 0.0), P3::new(x, y, z), 3, 5),
         ];
-        let opts = FaceOpts { bends: vec![10, 11, 12, 13], ..Default::default() };
-        Definition::sharp(construct::from_faces(params(), &faces, &[], &edges, &opts).unwrap().def)
+        let opts = FaceOpts {
+            bends: vec![10, 11, 12, 13],
+            ..Default::default()
+        };
+        Definition::sharp(
+            construct::from_faces(params(), &faces, &[], &edges, &opts)
+                .unwrap()
+                .def,
+        )
     }
 
     /// The model with `edits` made (as Modify joint features in turn).
@@ -151,7 +186,12 @@ mod tests {
         assert_eq!(flatten(&before).parts.len(), 2);
         // Bend A (the bottom–south edge) becomes a rip: the south wall comes off on its own.
         let a = id(10);
-        let edits = [JointEdit { joint: a, change: JointChange::Rip { style: RipStyle::EdgeJoint } }];
+        let edits = [JointEdit {
+            joint: a,
+            change: JointChange::Rip {
+                style: RipStyle::EdgeJoint,
+            },
+        }];
         let after = built(&r, &edits);
         let j = after.joint(a).unwrap();
         assert!(matches!(j.kind, JointKind::Rip { .. }));
@@ -164,7 +204,16 @@ mod tests {
         let top_south = id(14);
         let name = before.joint(top_south).unwrap().name.clone();
         assert!(name.starts_with("Joint "));
-        let edits = [edits[0], JointEdit { joint: top_south, change: JointChange::Bend { radius: None, value: None } }];
+        let edits = [
+            edits[0],
+            JointEdit {
+                joint: top_south,
+                change: JointChange::Bend {
+                    radius: None,
+                    value: None,
+                },
+            },
+        ];
         let after = built(&r, &edits);
         let j = after.joint(top_south).unwrap();
         assert_eq!(j.bend().map(|b| b.radius), Some(3.0));
@@ -184,11 +233,23 @@ mod tests {
         let b = id(11);
         let len = |m: &Model| {
             let f = flatten(m);
-            let (lo, hi) = f.parts.iter().max_by_key(|p| p.walls.len()).unwrap().bounds().unwrap();
+            let (lo, hi) = f
+                .parts
+                .iter()
+                .max_by_key(|p| p.walls.len())
+                .unwrap()
+                .bounds()
+                .unwrap();
             (hi.x - lo.x) + 1e3 * (hi.y - lo.y)
         };
         let k = BendValue::KFactor(0.3);
-        let edits = [JointEdit { joint: b, change: JointChange::Bend { radius: Some(6.0), value: Some(k) } }];
+        let edits = [JointEdit {
+            joint: b,
+            change: JointChange::Bend {
+                radius: Some(6.0),
+                value: Some(k),
+            },
+        }];
         let after = built(&r, &edits);
         let bend = *after.joint(b).unwrap().bend().unwrap();
         assert_eq!(bend.radius, 6.0);
@@ -199,9 +260,20 @@ mod tests {
         assert!((len(&after) - len(&before)).abs() > 1e-3);
         // A rip's style (a 90° rip, so a butt joint is allowed).
         let rip = id(18);
-        let edits = [JointEdit { joint: rip, change: JointChange::Rip { style: RipStyle::ButtDirection1 } }];
+        let edits = [JointEdit {
+            joint: rip,
+            change: JointChange::Rip {
+                style: RipStyle::ButtDirection1,
+            },
+        }];
         let after = built(&r, &edits);
-        assert!(matches!(after.joint(rip).unwrap().kind, JointKind::Rip { style: RipStyle::ButtDirection1, .. }));
+        assert!(matches!(
+            after.joint(rip).unwrap().kind,
+            JointKind::Rip {
+                style: RipStyle::ButtDirection1,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -210,12 +282,20 @@ mod tests {
         let mut m = built(&r, &[]);
         let order = moved(&m, id(12), -1).unwrap();
         reorder(&mut m, &order);
-        let bends: Vec<&str> = m.joints.iter().filter(|j| j.bend().is_some()).map(|j| j.name.as_str()).collect();
+        let bends: Vec<&str> = m
+            .joints
+            .iter()
+            .filter(|j| j.bend().is_some())
+            .map(|j| j.name.as_str())
+            .collect();
         assert_eq!(bends, ["Bend A", "Bend C", "Bend B", "Bend D"]);
         // Rebuilt from scratch and reordered: the same order.
         let mut again = built(&r, &[]);
         reorder(&mut again, &order);
-        assert_eq!(again.joints.iter().map(|j| j.id).collect::<Vec<_>>(), m.joints.iter().map(|j| j.id).collect::<Vec<_>>());
+        assert_eq!(
+            again.joints.iter().map(|j| j.id).collect::<Vec<_>>(),
+            m.joints.iter().map(|j| j.id).collect::<Vec<_>>()
+        );
         // Moving the first bend up does nothing.
         assert!(moved(&m, id(10), -1).is_none());
     }

@@ -118,7 +118,9 @@ pub fn model_edge(e: &crate::solid::SolidEdge) -> ModelEdge {
         };
     }
     let (Some(a), Some(b)) = (e.points.first().copied(), e.points.last().copied()) else {
-        return ModelEdge::Curve { points: e.points.clone() };
+        return ModelEdge::Curve {
+            points: e.points.clone(),
+        };
     };
     let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
     let l = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
@@ -132,7 +134,9 @@ pub fn model_edge(e: &crate::solid::SolidEdge) -> ModelEdge {
     if straight {
         ModelEdge::Line { a, b }
     } else {
-        ModelEdge::Curve { points: e.points.clone() }
+        ModelEdge::Curve {
+            points: e.points.clone(),
+        }
     }
 }
 
@@ -149,15 +153,24 @@ pub fn hole_info(spec: &crate::hole::HoleSpec) -> HoleInfo {
             E::UpToEntity => HoleEnd::UpToEntity,
         },
         depth: spec.depth.value,
-        cbore: (spec.style == HoleStyle::Counterbore).then_some((spec.cbore_diameter.value, spec.cbore_depth.value)),
-        csink: (spec.style == HoleStyle::Countersink).then_some((spec.csink_diameter.value, spec.csink_angle.value)),
-        thread: (spec.hole_type == HoleType::Tapped && !spec.pitch.is_empty())
-            .then(|| (crate::hole::thread_label(&spec.pitch), spec.tapped_depth.value)),
+        cbore: (spec.style == HoleStyle::Counterbore)
+            .then_some((spec.cbore_diameter.value, spec.cbore_depth.value)),
+        csink: (spec.style == HoleStyle::Countersink)
+            .then_some((spec.csink_diameter.value, spec.csink_angle.value)),
+        thread: (spec.hole_type == HoleType::Tapped && !spec.pitch.is_empty()).then(|| {
+            (
+                crate::hole::thread_label(&spec.pitch),
+                spec.tapped_depth.value,
+            )
+        }),
     }
 }
 
 /// The model data of `parts` and `features` a view's annotations read.
-pub fn model_data(parts: &[&Part], features: &[Feature]) -> (HashMap<EdgeName, ModelEdge>, HashMap<uuid::Uuid, HoleInfo>) {
+pub fn model_data(
+    parts: &[&Part],
+    features: &[Feature],
+) -> (HashMap<EdgeName, ModelEdge>, HashMap<uuid::Uuid, HoleInfo>) {
     let edges = parts
         .iter()
         .flat_map(|p| p.solid.edges.iter())
@@ -174,19 +187,30 @@ pub fn model_data(parts: &[&Part], features: &[Feature]) -> (HashMap<EdgeName, M
 pub fn chamfer_info(c: &crate::applied::ChamferFeature) -> ChamferInfo {
     use crate::applied::ChamferType;
     match c.kind {
-        ChamferType::EqualDistance => ChamferInfo { distance: c.distance, distance2: None, angle: 45.0 },
+        ChamferType::EqualDistance => ChamferInfo {
+            distance: c.distance,
+            distance2: None,
+            angle: 45.0,
+        },
         ChamferType::TwoDistances => ChamferInfo {
             distance: c.distance,
             distance2: Some(c.distance2),
             angle: (c.distance2 / c.distance.max(1e-12)).atan().to_degrees(),
         },
-        ChamferType::DistanceAngle => ChamferInfo { distance: c.distance, distance2: None, angle: c.angle },
+        ChamferType::DistanceAngle => ChamferInfo {
+            distance: c.distance,
+            distance2: None,
+            angle: c.angle,
+        },
     }
 }
 
 /// The studio's Chamfer features' specs.
 pub fn chamfers(features: &[Feature]) -> HashMap<uuid::Uuid, ChamferInfo> {
-    features.iter().filter_map(|f| f.chamfer().map(|c| (f.id.0, chamfer_info(c)))).collect()
+    features
+        .iter()
+        .filter_map(|f| f.chamfer().map(|c| (f.id.0, chamfer_info(c))))
+        .collect()
 }
 
 /// A thread's major diameter (mm) from its designation: "M6x1" → 6, "1/4-20 UNC" → 6.35,
@@ -194,7 +218,10 @@ pub fn chamfers(features: &[Feature]) -> HashMap<uuid::Uuid, ChamferInfo> {
 pub fn thread_major(pitch: &str) -> Option<f64> {
     let p = pitch.trim();
     if let Some(rest) = p.strip_prefix('M') {
-        let n: String = rest.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+        let n: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_digit() || *c == '.')
+            .collect();
         return n.parse().ok();
     }
     let size = p.split(['-', ' ']).next()?;
@@ -227,7 +254,9 @@ pub fn threads(parts: &[&Part], features: &[Feature]) -> Vec<ThreadInfo> {
         if h.spec.hole_type != HoleType::Tapped {
             continue;
         }
-        let Some(major) = thread_major(&h.spec.pitch) else { continue };
+        let Some(major) = thread_major(&h.spec.pitch) else {
+            continue;
+        };
         let minor = h.spec.diameter.value;
         let r = minor / 2.0;
         // The drilling direction from the first point's sketch plane.
@@ -239,7 +268,8 @@ pub fn threads(parts: &[&Part], features: &[Feature]) -> Vec<ThreadInfo> {
             .and_then(|s| s.plane)
             .map(|pl| {
                 let fr = pl.frame();
-                let n = nalgebra::Vector3::new(fr.u[0], fr.u[1], fr.u[2]).cross(&nalgebra::Vector3::new(fr.v[0], fr.v[1], fr.v[2]));
+                let n = nalgebra::Vector3::new(fr.u[0], fr.u[1], fr.u[2])
+                    .cross(&nalgebra::Vector3::new(fr.v[0], fr.v[1], fr.v[2]));
                 n.normalize()
             })
             .unwrap_or(nalgebra::Vector3::z());
@@ -258,7 +288,11 @@ pub fn threads(parts: &[&Part], features: &[Feature]) -> Vec<ThreadInfo> {
                     continue;
                 }
                 let n = nalgebra::Vector3::new(c.normal[0], c.normal[1], c.normal[2]).normalize();
-                circles.push((nalgebra::Point3::new(c.center[0], c.center[1], c.center[2]), n, own));
+                circles.push((
+                    nalgebra::Point3::new(c.center[0], c.center[1], c.center[2]),
+                    n,
+                    own,
+                ));
             }
         }
         // Group the circles by axis line.
@@ -283,11 +317,21 @@ pub fn threads(parts: &[&Part], features: &[Feature]) -> Vec<ThreadInfo> {
             }
             let axis = if ni.dot(&drill) >= 0.0 { ni } else { -ni };
             let along = |k: usize| (circles[k].0 - nalgebra::Point3::origin()).dot(&axis);
-            let entry = *group.iter().min_by(|a, b| along(**a).total_cmp(&along(**b))).expect("two");
-            let last = *group.iter().max_by(|a, b| along(**a).total_cmp(&along(**b))).expect("two");
+            let entry = *group
+                .iter()
+                .min_by(|a, b| along(**a).total_cmp(&along(**b)))
+                .expect("two");
+            let last = *group
+                .iter()
+                .max_by(|a, b| along(**a).total_cmp(&along(**b)))
+                .expect("two");
             let length = along(last) - along(entry);
             let through = h.spec.end == HoleEnd::ThroughAll && circles[last].2 == 1;
-            let tl = if h.spec.tapped_depth.value > 0.0 { h.spec.tapped_depth.value.min(length) } else { length };
+            let tl = if h.spec.tapped_depth.value > 0.0 {
+                h.spec.tapped_depth.value.min(length)
+            } else {
+                length
+            };
             let c = circles[entry].0;
             out.push(ThreadInfo {
                 center: [c.x, c.y, c.z],
@@ -318,7 +362,10 @@ pub fn mesh_bounds(parts: &[&Part], frame: &ViewFrame) -> Option<([f64; 2], [f64
             let q = frame.to_2d(&nalgebra::Point3::new(v[0], v[1], v[2]));
             out = Some(match out {
                 None => ([q.x, q.y], [q.x, q.y]),
-                Some((lo, hi)) => ([lo[0].min(q.x), lo[1].min(q.y)], [hi[0].max(q.x), hi[1].max(q.y)]),
+                Some((lo, hi)) => (
+                    [lo[0].min(q.x), lo[1].min(q.y)],
+                    [hi[0].max(q.x), hi[1].max(q.y)],
+                ),
             });
         }
     }
@@ -330,7 +377,12 @@ pub fn mesh_bounds(parts: &[&Part], frame: &ViewFrame) -> Option<([f64; 2], [f64
 /// degree; at a slant a picture would hide what it should not) and facing the viewer, with no
 /// triangle of `occluders` (other than the picture's own part) in front of any of it. (A
 /// picture partly covered is left out whole: the drawing has no depth to cut it by.)
-pub fn pictures(parts: &[&Part], occluders: &[&Part], frame: &ViewFrame, faded: bool) -> Vec<cadrs_drawing::export::Picture> {
+pub fn pictures(
+    parts: &[&Part],
+    occluders: &[&Part],
+    frame: &ViewFrame,
+    faded: bool,
+) -> Vec<cadrs_drawing::export::Picture> {
     let v3 = |a: [f64; 3]| nalgebra::Vector3::new(a[0], a[1], a[2]);
     let p3 = |a: [f64; 3]| nalgebra::Point3::new(a[0], a[1], a[2]);
     let to2 = |a: [f64; 3]| {
@@ -341,21 +393,33 @@ pub fn pictures(parts: &[&Part], occluders: &[&Part], frame: &ViewFrame, faded: 
     for p in parts {
         for img in &p.solid.images {
             let (u, v) = (v3(img.u), v3(img.v));
-            let n = img.facing.map(v3).unwrap_or_else(|| u.cross(&v)).normalize();
+            let n = img
+                .facing
+                .map(v3)
+                .unwrap_or_else(|| u.cross(&v))
+                .normalize();
             let square = n.dot(&frame.dir).abs() > (0.5f64).to_radians().cos();
             if !square || img.facing.is_some_and(|f| v3(f).dot(&frame.dir) > 0.0) {
                 continue;
             }
-            let Some(data) = crate::blobs::get(&img.blob) else { continue };
+            let Some(data) = crate::blobs::get(&img.blob) else {
+                continue;
+            };
             let c = img.corner;
             let add = |a: [f64; 3], b: Vec3| [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
-            let quad = [to2(c), to2(add(c, img.u)), to2(add(add(c, img.u), img.v)), to2(add(c, img.v))];
+            let quad = [
+                to2(c),
+                to2(add(c, img.u)),
+                to2(add(add(c, img.u), img.v)),
+                to2(add(c, img.v)),
+            ];
             let depth = frame.depth(&p3(c));
             let hidden = occluders.iter().filter(|o| o.id != p.id).any(|o| {
                 let s = &o.solid;
                 s.indices.as_chunks::<3>().0.iter().any(|t| {
                     let pts = t.map(|i| s.positions[i as usize]);
-                    pts.iter().any(|q| frame.depth(&p3(*q)) < depth - 0.01) && convex_overlap(&pts.map(to2), &quad)
+                    pts.iter().any(|q| frame.depth(&p3(*q)) < depth - 0.01)
+                        && convex_overlap(&pts.map(to2), &quad)
                 })
             });
             if !hidden {
@@ -367,7 +431,13 @@ pub fn pictures(parts: &[&Part], occluders: &[&Part], frame: &ViewFrame, faded: 
                     false => data,
                 };
                 let d = |a: [f64; 2], b: [f64; 2]| [b[0] - a[0], b[1] - a[1]];
-                out.push(cadrs_drawing::export::Picture { at: quad[0], u: d(quad[0], quad[1]), v: d(quad[0], quad[3]), depth: Some(depth), data });
+                out.push(cadrs_drawing::export::Picture {
+                    at: quad[0],
+                    u: d(quad[0], quad[1]),
+                    v: d(quad[0], quad[3]),
+                    depth: Some(depth),
+                    data,
+                });
             }
         }
     }
@@ -385,7 +455,11 @@ fn convex_overlap(a: &[[f64; 2]], b: &[[f64; 2]]) -> bool {
             if n[0] * n[0] + n[1] * n[1] < 1e-18 {
                 return false;
             }
-            let range = |pts: &[[f64; 2]]| pts.iter().map(|r| r[0] * n[0] + r[1] * n[1]).fold((f64::MAX, f64::MIN), |(lo, hi), x| (lo.min(x), hi.max(x)));
+            let range = |pts: &[[f64; 2]]| {
+                pts.iter()
+                    .map(|r| r[0] * n[0] + r[1] * n[1])
+                    .fold((f64::MAX, f64::MIN), |(lo, hi), x| (lo.min(x), hi.max(x)))
+            };
             let ((a0, a1), (b0, b1)) = (range(a), range(b));
             let eps = 1e-9 * (n[0].abs() + n[1].abs());
             a1 <= b0 + eps || b1 <= a0 + eps
@@ -420,10 +494,15 @@ pub fn shade(
         let s = &part.solid;
         for face in &s.faces {
             let a = face_appearance(part, &face.name, props, appearances).0;
-            let base = [srgb_to_linear(a.rgb[0]), srgb_to_linear(a.rgb[1]), srgb_to_linear(a.rgb[2])];
+            let base = [
+                srgb_to_linear(a.rgb[0]),
+                srgb_to_linear(a.rgb[1]),
+                srgb_to_linear(a.rgb[2]),
+            ];
             let alpha = a.alpha as f32 / 255.0;
             for t in face.first_triangle..face.first_triangle + face.triangle_count {
-                let idx = [s.indices[3 * t], s.indices[3 * t + 1], s.indices[3 * t + 2]].map(|i| i as usize);
+                let idx = [s.indices[3 * t], s.indices[3 * t + 1], s.indices[3 * t + 2]]
+                    .map(|i| i as usize);
                 if idx.iter().any(|&i| i >= s.positions.len()) {
                     continue;
                 }
@@ -441,12 +520,23 @@ pub fn shade(
                     let n = nalgebra::Vector3::new(n[0], n[1], n[2]);
                     // Normals facing away (the back of a thin wall seen edge-on) are turned
                     // round, so no face goes black.
-                    let lit = if n.norm() > 0.0 { n.normalize().dot(&light).abs() } else { 0.7 } as f32;
+                    let lit = if n.norm() > 0.0 {
+                        n.normalize().dot(&light).abs()
+                    } else {
+                        0.7
+                    } as f32;
                     let k = 0.38 + 0.62 * lit;
                     [base[0] * k, base[1] * k, base[2] * k, alpha]
                 });
                 let depths = p.map(|pt| frame.depth(&pt));
-                tris.push((depth, ShadedTriangle { points: q, colors, depths }));
+                tris.push((
+                    depth,
+                    ShadedTriangle {
+                        points: q,
+                        colors,
+                        depths,
+                    },
+                ));
             }
         }
     }
@@ -464,7 +554,8 @@ pub struct PendingView {
 impl Drop for PendingView {
     /// Dropping it cancels the projection if it hasn't started yet.
     fn drop(&mut self) {
-        self.cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.cancelled
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -474,14 +565,20 @@ impl PendingView {
         match self.rx.lock().ok()?.try_recv() {
             Ok(r) => Some(r),
             Err(std::sync::mpsc::TryRecvError::Empty) => None,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(Err("The rebuild thread stopped".into())),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                Some(Err("The rebuild thread stopped".into()))
+            }
         }
     }
 
     /// Waits for the view.
     pub fn wait(self) -> Result<Arc<ViewGeometry>, String> {
-        let rx = self.rx.lock().map_err(|_| "The rebuild thread stopped".to_string())?;
-        rx.recv().unwrap_or_else(|_| Err("The rebuild thread stopped".into()))
+        let rx = self
+            .rx
+            .lock()
+            .map_err(|_| "The rebuild thread stopped".to_string())?;
+        rx.recv()
+            .unwrap_or_else(|_| Err("The rebuild thread stopped".into()))
     }
 }
 
@@ -502,7 +599,10 @@ pub fn project(features: &[Feature], req: ViewRequest) -> Result<Arc<ViewGeometr
 
 /// Starts projecting an assembly's occurrences for a drawing view on the worker thread (P3C.5,
 /// see [`crate::drawing_assembly`]).
-pub fn request_assembly(state: crate::drawing_assembly::AssemblyState, req: ViewRequest) -> PendingView {
+pub fn request_assembly(
+    state: crate::drawing_assembly::AssemblyState,
+    req: ViewRequest,
+) -> PendingView {
     let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let rx = crate::rebuild::project_assembly_view(state, req, cancelled.clone());
     PendingView {

@@ -31,14 +31,23 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 use bevy::text::FontWeight;
 use bevy::ui_widgets::{Activate, observe};
-use cadrs_core::analysis::{CURVATURE_BANDS, CURVATURE_COLORS, DraftBand, curvature_band_label, curvature_comb, vertex_mean_curvature};
+use cadrs_core::analysis::{
+    CURVATURE_BANDS, CURVATURE_COLORS, DraftBand, curvature_band_label, curvature_comb,
+    vertex_mean_curvature,
+};
 use cadrs_core::{ElementId, FeatureId, PartId};
 use cadrs_sketch::{EdgeName, FaceName};
 use cadrs_ui::prelude::*;
-use cadrs_ui::{FeatureDialogAccept, FeatureDialogCancel, MenuAction, MenuItem, NumberField, NumberFieldCommit, SelectionList, open_menu};
+use cadrs_ui::{
+    FeatureDialogAccept, FeatureDialogCancel, MenuAction, MenuItem, NumberField, NumberFieldCommit,
+    SelectionList, open_menu,
+};
 
 use crate::parts::{PartCache, PickFilter};
-use crate::viewport::{ActiveKind, Pick, PickFilterOverride, PickRequest, PlaneKind, PlanesVisible, Selection, ViewportArea, ViewportView};
+use crate::viewport::{
+    ActiveKind, Pick, PickFilterOverride, PickRequest, PlaneKind, PlanesVisible, Selection,
+    ViewportArea, ViewportView,
+};
 use crate::{ActiveDocument, AppState};
 
 pub struct AnalysisPlugin;
@@ -51,17 +60,29 @@ impl Plugin for AnalysisPlugin {
             .add_systems(Startup, configure_gizmos)
             .add_systems(
                 Update,
-                (take_picks, follow_selection, sync_dialog, sync_max_curvature, sync_legend, sync_shading_analysis, draw_combs, sync_pull_arrow)
+                (
+                    take_picks,
+                    follow_selection,
+                    sync_dialog,
+                    sync_max_curvature,
+                    sync_legend,
+                    sync_shading_analysis,
+                    draw_combs,
+                    sync_pull_arrow,
+                )
                     .chain()
                     .after(crate::parts::PartsSet)
                     .run_if(in_state(AppState::Document)),
             )
-            .add_systems(OnExit(AppState::Document), |mut views: ResMut<AnalysisViews>, mut over: ResMut<PickFilterOverride>| {
-                if views.dialog.is_some() {
-                    over.0 = None;
-                }
-                *views = AnalysisViews::default();
-            })
+            .add_systems(
+                OnExit(AppState::Document),
+                |mut views: ResMut<AnalysisViews>, mut over: ResMut<PickFilterOverride>| {
+                    if views.dialog.is_some() {
+                        over.0 = None;
+                    }
+                    *views = AnalysisViews::default();
+                },
+            )
             .add_observer(on_tool)
             .add_observer(on_menu)
             .add_observer(on_accept)
@@ -97,7 +118,14 @@ pub struct DraftState {
 
 impl Default for DraftState {
     fn default() -> Self {
-        Self { reference: Some(PullRef::Plane(PlaneKind::Top)), label: "Top plane".into(), pull: Vec3::Z, anchor: Vec3::ZERO, flip: false, angle: DEFAULT_DRAFT_ANGLE }
+        Self {
+            reference: Some(PullRef::Plane(PlaneKind::Top)),
+            label: "Top plane".into(),
+            pull: Vec3::Z,
+            anchor: Vec3::ZERO,
+            flip: false,
+            angle: DEFAULT_DRAFT_ANGLE,
+        }
     }
 }
 
@@ -152,13 +180,20 @@ impl ShadingAnalysis {
             3 => cadrs_core::analysis::CURVATURE_FLAT,
             _ => cadrs_core::analysis::DRAFT_EPS,
         } as f32;
-        (Vec4::new(self.mode as f32, self.angle, ZEBRA_STRIPES, w), self.pull.extend(0.0))
+        (
+            Vec4::new(self.mode as f32, self.angle, ZEBRA_STRIPES, w),
+            self.pull.extend(0.0),
+        )
     }
 
     /// The bands' colours for the material (linear, top band first): the curvature bands in
     /// Curvature, else the draft bands.
     pub fn band_colors(&self) -> [Vec4; 6] {
-        let srgb = if self.mode == 3 { CURVATURE_COLORS } else { DraftBand::ALL.map(|b| b.color()) };
+        let srgb = if self.mode == 3 {
+            CURVATURE_COLORS
+        } else {
+            DraftBand::ALL.map(|b| b.color())
+        };
         srgb.map(|[r, g, b]| Color::srgb_u8(r, g, b).to_linear().to_vec4())
     }
 }
@@ -178,7 +213,9 @@ fn modeling_tab(world: &World) -> Option<ElementId> {
 
 /// The active tab's analyses.
 pub fn active_state(world: &World) -> AnalysisState {
-    modeling_tab(world).and_then(|el| world.resource::<AnalysisViews>().per.get(&el).cloned()).unwrap_or_default()
+    modeling_tab(world)
+        .and_then(|el| world.resource::<AnalysisViews>().per.get(&el).cloned())
+        .unwrap_or_default()
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -203,7 +240,14 @@ fn on_tool(a: On<Activate>, q: Query<&Name>, mut commands: Commands) {
             .side(bevy::ui_widgets::popover::PopoverSide::Top)
             .min_width(190.0)
             .text_only()
-            .item(MenuItem::new("analysis-draft", if st.draft.is_some() { "Exit draft analysis" } else { "Draft analysis…" }))
+            .item(MenuItem::new(
+                "analysis-draft",
+                if st.draft.is_some() {
+                    "Exit draft analysis"
+                } else {
+                    "Draft analysis…"
+                },
+            ))
             .separator()
             .item(MenuItem::new("analysis-curvature", "Curvature").checked(st.curvature))
             .item(MenuItem::new("analysis-combs", "Curvature combs").checked(st.combs))
@@ -237,7 +281,9 @@ fn on_menu(ev: On<MenuAction>, q: Query<&Name>, mut commands: Commands) {
 }
 
 fn with_state(world: &mut World, f: impl FnOnce(&mut AnalysisState)) {
-    let Some(el) = modeling_tab(world) else { return };
+    let Some(el) = modeling_tab(world) else {
+        return;
+    };
     let mut views = world.resource_mut::<AnalysisViews>();
     let s = views.per.entry(el).or_default();
     f(s);
@@ -281,7 +327,9 @@ pub fn set_zebra(world: &mut World, on: bool) {
 
 /// The menu's Draft analysis… (opens the dialog) or Exit draft analysis.
 pub fn toggle_draft(world: &mut World) {
-    let Some(el) = modeling_tab(world) else { return };
+    let Some(el) = modeling_tab(world) else {
+        return;
+    };
     if world.resource::<AnalysisViews>().dialog == Some(el) {
         return;
     }
@@ -295,15 +343,26 @@ pub fn toggle_draft(world: &mut World) {
 /// Opens the Draft analysis dialog on the active tab (the analysis shows at once, pulled along
 /// the Top plane's normal, or along what is selected if it gives a direction).
 pub fn open_draft(world: &mut World) {
-    let Some(el) = modeling_tab(world) else { return };
-    let picked = world.resource::<Selection>().0.iter().rev().find_map(|p| resolve(world, *p));
+    let Some(el) = modeling_tab(world) else {
+        return;
+    };
+    let picked = world
+        .resource::<Selection>()
+        .0
+        .iter()
+        .rev()
+        .find_map(|p| resolve(world, *p));
     let took = picked.is_some();
     with_state(world, |s| {
         s.zebra = false;
         s.curvature = false;
         let d = s.draft.get_or_insert_with(DraftState::default);
         if let Some(p) = picked {
-            *d = DraftState { flip: false, angle: d.angle, ..p };
+            *d = DraftState {
+                flip: false,
+                angle: d.angle,
+                ..p
+            };
         }
     });
     if took {
@@ -313,15 +372,30 @@ pub fn open_draft(world: &mut World) {
     let kind = *world.resource::<ActiveKind>();
     let planes = world.resource::<PlanesVisible>().0;
     let filter = if kind == ActiveKind::Assembly {
-        PickFilter { faces: true, edges: true, ..PickFilter::none() }
+        PickFilter {
+            faces: true,
+            edges: true,
+            ..PickFilter::none()
+        }
     } else {
-        PickFilter { planes, faces: true, edges: true, plane_features: true, ..PickFilter::none() }
+        PickFilter {
+            planes,
+            faces: true,
+            edges: true,
+            plane_features: true,
+            ..PickFilter::none()
+        }
     };
     world.resource_mut::<PickFilterOverride>().0 = Some(filter);
 }
 
 fn close_dialog(world: &mut World) {
-    if world.resource_mut::<AnalysisViews>().dialog.take().is_some() {
+    if world
+        .resource_mut::<AnalysisViews>()
+        .dialog
+        .take()
+        .is_some()
+    {
         world.resource_mut::<PickFilterOverride>().0 = None;
     }
 }
@@ -339,29 +413,57 @@ fn resolve(world: &World, pick: Pick) -> Option<DraftState> {
     let v3 = |p: [f64; 3]| Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32);
     let label_of = |pick: Pick| {
         let doc = world.get_resource::<ActiveDocument>();
-        let features = doc.as_ref().and_then(|d| d.active_element()).map(|e| e.features()).unwrap_or(&[]);
+        let features = doc
+            .as_ref()
+            .and_then(|d| d.active_element())
+            .map(|e| e.features())
+            .unwrap_or(&[]);
         crate::parts::pick_label(features, cache, pick)
     };
     let (reference, label, pull, anchor) = match pick {
-        Pick::Plane(k) => (PullRef::Plane(k), format!("{} plane", k.name()), k.normal(), Vec3::ZERO),
+        Pick::Plane(k) => (
+            PullRef::Plane(k),
+            format!("{} plane", k.name()),
+            k.normal(),
+            Vec3::ZERO,
+        ),
         Pick::Face(part, name) => {
             let p = cache.part(part)?;
             let i = p.solid.faces.iter().position(|f| f.name == name)?;
             let f = &p.solid.faces[i];
-            let dir = if f.plane.is_some() { v3(p.solid.face_normal(i)?) } else { v3(f.axis?.1) };
-            let at = f.center.or_else(|| p.solid.face_point(i)).map(v3).unwrap_or(Vec3::ZERO);
-            let label = label_of(pick).filter(|l| l != "Face").or_else(|| cache.part_name(part).map(|n| format!("Face of {n}"))).unwrap_or_else(|| "Face".into());
+            let dir = if f.plane.is_some() {
+                v3(p.solid.face_normal(i)?)
+            } else {
+                v3(f.axis?.1)
+            };
+            let at = f
+                .center
+                .or_else(|| p.solid.face_point(i))
+                .map(v3)
+                .unwrap_or(Vec3::ZERO);
+            let label = label_of(pick)
+                .filter(|l| l != "Face")
+                .or_else(|| cache.part_name(part).map(|n| format!("Face of {n}")))
+                .unwrap_or_else(|| "Face".into());
             (PullRef::Face(part, name), label, dir, at)
         }
         Pick::Edge(part, name) => {
             let e = cache.part(part)?.solid.edge(&name)?;
             let (a, b) = (v3(*e.points.first()?), v3(*e.points.last()?));
             let dir = b - a;
-            let straight = dir.length() > 1e-4 && e.points.iter().all(|p| (v3(*p) - a).cross(dir).length() / dir.length() < 1e-3);
+            let straight = dir.length() > 1e-4
+                && e.points
+                    .iter()
+                    .all(|p| (v3(*p) - a).cross(dir).length() / dir.length() < 1e-3);
             if !straight {
                 return None;
             }
-            (PullRef::Edge(part, name), label_of(pick).unwrap_or_else(|| "Edge".into()), dir, (a + b) / 2.0)
+            (
+                PullRef::Edge(part, name),
+                label_of(pick).unwrap_or_else(|| "Edge".into()),
+                dir,
+                (a + b) / 2.0,
+            )
         }
         Pick::Feature(f) => {
             let doc = world.get_resource::<ActiveDocument>()?;
@@ -370,17 +472,32 @@ fn resolve(world: &World, pick: Pick) -> Option<DraftState> {
                 Some(frame) => *frame,
                 None => feature.sketch()?.plane?.frame(),
             };
-            (PullRef::Feature(f), feature.name.clone(), v3(frame.normal()), v3(frame.origin))
+            (
+                PullRef::Feature(f),
+                feature.name.clone(),
+                v3(frame.normal()),
+                v3(frame.origin),
+            )
         }
         _ => return None,
     };
     let pull = pull.normalize_or_zero();
-    (pull != Vec3::ZERO).then(|| DraftState { reference: Some(reference), label, pull, anchor, ..default() })
+    (pull != Vec3::ZERO).then(|| DraftState {
+        reference: Some(reference),
+        label,
+        pull,
+        anchor,
+        ..default()
+    })
 }
 
 /// The dialog's picks in the view (the pick filter is overridden, so they don't reach the
 /// selection on their own).
-fn take_picks(mut picks: MessageReader<PickRequest>, views: Res<AnalysisViews>, mut selection: ResMut<Selection>) {
+fn take_picks(
+    mut picks: MessageReader<PickRequest>,
+    views: Res<AnalysisViews>,
+    mut selection: ResMut<Selection>,
+) {
     if views.dialog.is_none() {
         return;
     }
@@ -397,11 +514,19 @@ fn follow_selection(selection: Res<Selection>, views: Res<AnalysisViews>, mut co
     }
     let picks = selection.0.clone();
     commands.queue(move |world: &mut World| {
-        let Some(el) = world.resource::<AnalysisViews>().dialog else { return };
-        let Some(state) = picks.iter().rev().find_map(|p| resolve(world, *p)) else { return };
+        let Some(el) = world.resource::<AnalysisViews>().dialog else {
+            return;
+        };
+        let Some(state) = picks.iter().rev().find_map(|p| resolve(world, *p)) else {
+            return;
+        };
         let mut views = world.resource_mut::<AnalysisViews>();
         if let Some(d) = views.per.entry(el).or_default().draft.as_mut() {
-            *d = DraftState { flip: d.flip, angle: d.angle, ..state };
+            *d = DraftState {
+                flip: d.flip,
+                angle: d.angle,
+                ..state
+            };
         }
         world.resource_mut::<Selection>().0.clear();
     });
@@ -425,7 +550,9 @@ fn on_angle(ev: On<NumberFieldCommit>, q: Query<&Name>, mut commands: Commands) 
     }
     let text = ev.text.clone();
     commands.queue(move |world: &mut World| {
-        let Some(deg) = parse_degrees(&text) else { return };
+        let Some(deg) = parse_degrees(&text) else {
+            return;
+        };
         let mut views = world.resource_mut::<AnalysisViews>();
         let Some(el) = views.dialog else { return };
         if let Some(d) = views.per.get_mut(&el).and_then(|s| s.draft.as_mut()) {
@@ -436,7 +563,11 @@ fn on_angle(ev: On<NumberFieldCommit>, q: Query<&Name>, mut commands: Commands) 
 
 /// "3", "3 deg", "3°" → 3.
 fn parse_degrees(text: &str) -> Option<f32> {
-    let t = text.trim().trim_end_matches("deg").trim_end_matches('°').trim();
+    let t = text
+        .trim()
+        .trim_end_matches("deg")
+        .trim_end_matches('°')
+        .trim();
     t.parse::<f32>().ok().filter(|v| v.is_finite())
 }
 
@@ -463,22 +594,40 @@ fn degrees_text(v: f32) -> String {
 
 fn draft_dialog(t: &Theme, d: &DraftState) -> impl Bundle {
     let tb = t.clone();
-    let items = if d.reference.is_some() { vec![d.label.clone()] } else { Vec::new() };
+    let items = if d.reference.is_some() {
+        vec![d.label.clone()]
+    } else {
+        Vec::new()
+    };
     let (flipped, angle) = (d.flip, degrees_text(d.angle));
     FeatureDialog::new("draft-analysis-dialog")
         .title("Draft analysis")
         .valid(true)
         .width(240.0)
         .body(move |b| {
-            b.spawn(Node { align_items: AlignItems::Center, column_gap: Val::Px(2.0), ..default() }).with_children(|r| {
-                r.spawn(SelectionList::new("draft-pull").placeholder("Pull direction").items(items).active(true).build(&tb))
-                    .entry::<Node>()
-                    .and_modify(|mut n| {
-                        n.flex_grow = 1.0;
-                        n.margin = UiRect::vertical(Val::Px(2.0));
-                    });
+            b.spawn(Node {
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(2.0),
+                ..default()
+            })
+            .with_children(|r| {
+                r.spawn(
+                    SelectionList::new("draft-pull")
+                        .placeholder("Pull direction")
+                        .items(items)
+                        .active(true)
+                        .build(&tb),
+                )
+                .entry::<Node>()
+                .and_modify(|mut n| {
+                    n.flex_grow = 1.0;
+                    n.margin = UiRect::vertical(Val::Px(2.0));
+                });
                 r.spawn((
-                    IconButton::new("draft-flip", crate::extrude_dialog::flip_icon(flipped)).icon_size(20.0).tooltip("Flip the pull direction").build(&tb),
+                    IconButton::new("draft-flip", crate::extrude_dialog::flip_icon(flipped))
+                        .icon_size(20.0)
+                        .tooltip("Flip the pull direction")
+                        .build(&tb),
                     observe(|_: On<Activate>, mut commands: Commands| commands.queue(flip)),
                 ))
                 .entry::<Node>()
@@ -488,29 +637,59 @@ fn draft_dialog(t: &Theme, d: &DraftState) -> impl Bundle {
                     n.flex_shrink = 0.0;
                 });
             });
-            b.spawn(NumberField::new("draft-angle", "Draft angle").text(angle).label_width(80.0).build(&tb));
+            b.spawn(
+                NumberField::new("draft-angle", "Draft angle")
+                    .text(angle)
+                    .label_width(80.0)
+                    .build(&tb),
+            );
         })
         .build(t)
 }
 
-fn sync_dialog(views: Res<AnalysisViews>, doc: Option<Res<ActiveDocument>>, theme: Res<Theme>, q_dialog: Query<(Entity, &DraftDialog)>, q_area: Query<Entity, With<ViewportArea>>, mut commands: Commands) {
-    let open = views.dialog.filter(|el| doc.as_ref().and_then(|d| d.active) == Some(*el));
-    let state = open.and_then(|el| views.per.get(&el)).and_then(|s| s.draft.clone());
+fn sync_dialog(
+    views: Res<AnalysisViews>,
+    doc: Option<Res<ActiveDocument>>,
+    theme: Res<Theme>,
+    q_dialog: Query<(Entity, &DraftDialog)>,
+    q_area: Query<Entity, With<ViewportArea>>,
+    mut commands: Commands,
+) {
+    let open = views
+        .dialog
+        .filter(|el| doc.as_ref().and_then(|d| d.active) == Some(*el));
+    let state = open
+        .and_then(|el| views.per.get(&el))
+        .and_then(|s| s.draft.clone());
     let Some(d) = state else {
         for (e, _) in &q_dialog {
             commands.entity(e).try_despawn();
         }
         return;
     };
-    let key = format!("{}|{}|{}|{}", d.reference.is_some(), d.label, d.flip, d.angle);
+    let key = format!(
+        "{}|{}|{}|{}",
+        d.reference.is_some(),
+        d.label,
+        d.flip,
+        d.angle
+    );
     if let Some((e, dd)) = q_dialog.iter().next() {
         if dd.0 == key {
             return;
         }
         commands.entity(e).try_despawn();
     }
-    let Some(area) = q_area.iter().next() else { return };
-    let e = commands.spawn((DraftDialog(key), DespawnOnExit(AppState::Document), draft_dialog(&theme, &d))).id();
+    let Some(area) = q_area.iter().next() else {
+        return;
+    };
+    let e = commands
+        .spawn((
+            DraftDialog(key),
+            DespawnOnExit(AppState::Document),
+            draft_dialog(&theme, &d),
+        ))
+        .id();
     commands.entity(area).add_child(e);
 }
 
@@ -521,20 +700,48 @@ struct Legend(String);
 /// A legend: its title, subtitle and bands (colour, text), top first.
 type LegendRows = (String, String, Vec<([u8; 3], String)>);
 
-fn sync_legend(views: Res<AnalysisViews>, doc: Option<Res<ActiveDocument>>, kind: Res<ActiveKind>, theme: Res<Theme>, q: Query<(Entity, &Legend)>, q_area: Query<Entity, With<ViewportArea>>, mut commands: Commands) {
+fn sync_legend(
+    views: Res<AnalysisViews>,
+    doc: Option<Res<ActiveDocument>>,
+    kind: Res<ActiveKind>,
+    theme: Res<Theme>,
+    q: Query<(Entity, &Legend)>,
+    q_area: Query<Entity, With<ViewportArea>>,
+    mut commands: Commands,
+) {
     let modeling = matches!(*kind, ActiveKind::PartStudio | ActiveKind::Assembly);
     let el = doc.as_ref().and_then(|d| d.active).filter(|_| modeling);
     let st = el.and_then(|el| views.per.get(&el));
     let rows: Option<LegendRows> = match st {
         Some(AnalysisState { draft: Some(d), .. }) => {
             let required = d.angle as f64;
-            let subtitle = format!("{}{} · {}", d.label, if d.flip { " (flipped)" } else { "" }, degrees_text(d.angle));
-            Some(("Draft analysis".into(), subtitle, DraftBand::ALL.into_iter().map(|b| (b.color(), b.label(required))).collect()))
+            let subtitle = format!(
+                "{}{} · {}",
+                d.label,
+                if d.flip { " (flipped)" } else { "" },
+                degrees_text(d.angle)
+            );
+            Some((
+                "Draft analysis".into(),
+                subtitle,
+                DraftBand::ALL
+                    .into_iter()
+                    .map(|b| (b.color(), b.label(required)))
+                    .collect(),
+            ))
         }
-        Some(AnalysisState { curvature: true, .. }) => {
+        Some(AnalysisState {
+            curvature: true, ..
+        }) => {
             let max = views.max_curvature.map_or(0.0, |(_, m)| m);
             let subtitle = "Mean curvature (1 / radius)".to_string();
-            Some(("Curvature".into(), subtitle, (0..CURVATURE_BANDS).map(|i| (CURVATURE_COLORS[i], curvature_band_label(i, max))).collect()))
+            Some((
+                "Curvature".into(),
+                subtitle,
+                (0..CURVATURE_BANDS)
+                    .map(|i| (CURVATURE_COLORS[i], curvature_band_label(i, max)))
+                    .collect(),
+            ))
         }
         _ => None,
     };
@@ -544,16 +751,25 @@ fn sync_legend(views: Res<AnalysisViews>, doc: Option<Res<ActiveDocument>>, kind
         }
         return;
     };
-    let key = format!("{title}|{subtitle}|{:?}", bands.iter().map(|b| &b.1).collect::<Vec<_>>());
+    let key = format!(
+        "{title}|{subtitle}|{:?}",
+        bands.iter().map(|b| &b.1).collect::<Vec<_>>()
+    );
     if let Some((e, l)) = q.iter().next() {
         if l.0 == key {
             return;
         }
         commands.entity(e).try_despawn();
     }
-    let Some(area) = q_area.iter().next() else { return };
+    let Some(area) = q_area.iter().next() else {
+        return;
+    };
     let t = theme.clone();
-    let prefix = if title == "Curvature" { "curvature" } else { "draft" };
+    let prefix = if title == "Curvature" {
+        "curvature"
+    } else {
+        "draft"
+    };
     let legend = commands
         .spawn((
             Name::new(format!("{prefix}-legend")),
@@ -575,22 +791,46 @@ fn sync_legend(views: Res<AnalysisViews>, doc: Option<Res<ActiveDocument>>, kind
             DespawnOnExit(AppState::Document),
         ))
         .with_children(|p| {
-            p.spawn((Name::new(format!("{prefix}-legend-title")), t.text(title, t.font_sm, FontWeight::BOLD, t.foreground), Pickable::IGNORE));
+            p.spawn((
+                Name::new(format!("{prefix}-legend-title")),
+                t.text(title, t.font_sm, FontWeight::BOLD, t.foreground),
+                Pickable::IGNORE,
+            ));
             p.spawn((
                 Name::new(format!("{prefix}-legend-pull")),
                 t.text(subtitle, 11.0, FontWeight::NORMAL, t.muted_foreground),
-                Node { margin: UiRect::bottom(Val::Px(3.0)), ..default() },
+                Node {
+                    margin: UiRect::bottom(Val::Px(3.0)),
+                    ..default()
+                },
                 Pickable::IGNORE,
             ));
             for (i, ([r, g, b], label)) in bands.into_iter().enumerate() {
-                p.spawn((Name::new(format!("{prefix}-legend-{i}")), Node { align_items: AlignItems::Center, column_gap: Val::Px(6.0), ..default() }, Pickable::IGNORE)).with_children(|row| {
+                p.spawn((
+                    Name::new(format!("{prefix}-legend-{i}")),
+                    Node {
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(6.0),
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ))
+                .with_children(|row| {
                     row.spawn((
-                        Node { width: Val::Px(14.0), height: Val::Px(12.0), border: UiRect::all(Val::Px(1.0)), ..default() },
+                        Node {
+                            width: Val::Px(14.0),
+                            height: Val::Px(12.0),
+                            border: UiRect::all(Val::Px(1.0)),
+                            ..default()
+                        },
                         BackgroundColor(Color::srgb_u8(r, g, b)),
                         BorderColor::all(Color::srgba(0.0, 0.0, 0.0, 0.25)),
                         Pickable::IGNORE,
                     ));
-                    row.spawn((t.text(label, 11.5, FontWeight::NORMAL, t.foreground), Pickable::IGNORE));
+                    row.spawn((
+                        t.text(label, 11.5, FontWeight::NORMAL, t.foreground),
+                        Pickable::IGNORE,
+                    ));
                 });
             }
         })
@@ -600,30 +840,72 @@ fn sync_legend(views: Res<AnalysisViews>, doc: Option<Res<ActiveDocument>>, kind
 
 /// The largest mean curvature of the parts shown, while Curvature is on (worked out again when
 /// the parts change).
-fn sync_max_curvature(mut views: ResMut<AnalysisViews>, doc: Option<Res<ActiveDocument>>, kind: Res<ActiveKind>, cache: Res<PartCache>) {
+fn sync_max_curvature(
+    mut views: ResMut<AnalysisViews>,
+    doc: Option<Res<ActiveDocument>>,
+    kind: Res<ActiveKind>,
+    cache: Res<PartCache>,
+) {
     let modeling = matches!(*kind, ActiveKind::PartStudio | ActiveKind::Assembly);
-    let on = doc.as_ref().and_then(|d| d.active).filter(|_| modeling).and_then(|el| views.per.get(&el)).is_some_and(|s| s.curvature);
+    let on = doc
+        .as_ref()
+        .and_then(|d| d.active)
+        .filter(|_| modeling)
+        .and_then(|el| views.per.get(&el))
+        .is_some_and(|s| s.curvature);
     if !on {
         if views.max_curvature.is_some() {
             views.max_curvature = None;
         }
         return;
     }
-    if views.max_curvature.is_some_and(|(g, _)| g == cache.generation) {
+    if views
+        .max_curvature
+        .is_some_and(|(g, _)| g == cache.generation)
+    {
         return;
     }
-    let max = cache.shown().map(|p| vertex_mean_curvature(&p.solid.positions, &p.solid.normals, &p.solid.indices).into_iter().fold(0.0, f64::max)).fold(0.0, f64::max);
+    let max = cache
+        .shown()
+        .map(|p| {
+            vertex_mean_curvature(&p.solid.positions, &p.solid.normals, &p.solid.indices)
+                .into_iter()
+                .fold(0.0, f64::max)
+        })
+        .fold(0.0, f64::max);
     views.max_curvature = Some((cache.generation, max));
 }
 
 /// What the part material colours the faces by on the active tab.
-fn sync_shading_analysis(views: Res<AnalysisViews>, doc: Option<Res<ActiveDocument>>, kind: Res<ActiveKind>, mut out: ResMut<ShadingAnalysis>) {
+fn sync_shading_analysis(
+    views: Res<AnalysisViews>,
+    doc: Option<Res<ActiveDocument>>,
+    kind: Res<ActiveKind>,
+    mut out: ResMut<ShadingAnalysis>,
+) {
     let modeling = matches!(*kind, ActiveKind::PartStudio | ActiveKind::Assembly);
-    let st = doc.as_ref().and_then(|d| d.active).filter(|_| modeling).and_then(|el| views.per.get(&el));
+    let st = doc
+        .as_ref()
+        .and_then(|d| d.active)
+        .filter(|_| modeling)
+        .and_then(|el| views.per.get(&el));
     let want = match st {
-        Some(AnalysisState { draft: Some(d), .. }) => ShadingAnalysis { mode: 2, angle: d.angle, pull: d.direction() },
-        Some(AnalysisState { zebra: true, .. }) => ShadingAnalysis { mode: 1, ..default() },
-        Some(AnalysisState { curvature: true, .. }) => ShadingAnalysis { mode: 3, angle: views.max_curvature.map_or(0.0, |(_, m)| m as f32), ..default() },
+        Some(AnalysisState { draft: Some(d), .. }) => ShadingAnalysis {
+            mode: 2,
+            angle: d.angle,
+            pull: d.direction(),
+        },
+        Some(AnalysisState { zebra: true, .. }) => ShadingAnalysis {
+            mode: 1,
+            ..default()
+        },
+        Some(AnalysisState {
+            curvature: true, ..
+        }) => ShadingAnalysis {
+            mode: 3,
+            angle: views.max_curvature.map_or(0.0, |(_, m)| m as f32),
+            ..default()
+        },
         _ => ShadingAnalysis::default(),
     };
     if *out != want {
@@ -639,16 +921,32 @@ struct PullArrow;
 /// The pull arrow's length on screen (logical px).
 const PULL_ARROW_PX: f32 = 72.0;
 
-fn sync_pull_arrow(views: Res<AnalysisViews>, doc: Option<Res<ActiveDocument>>, kind: Res<ActiveKind>, mut q: Query<(Entity, &mut crate::manipulator::Arrow3d), With<PullArrow>>, mut commands: Commands) {
+fn sync_pull_arrow(
+    views: Res<AnalysisViews>,
+    doc: Option<Res<ActiveDocument>>,
+    kind: Res<ActiveKind>,
+    mut q: Query<(Entity, &mut crate::manipulator::Arrow3d), With<PullArrow>>,
+    mut commands: Commands,
+) {
     let modeling = matches!(*kind, ActiveKind::PartStudio | ActiveKind::Assembly);
-    let draft = doc.as_ref().and_then(|d| d.active).filter(|_| modeling).and_then(|el| views.per.get(&el)).and_then(|s| s.draft.clone());
+    let draft = doc
+        .as_ref()
+        .and_then(|d| d.active)
+        .filter(|_| modeling)
+        .and_then(|el| views.per.get(&el))
+        .and_then(|s| s.draft.clone());
     let Some(d) = draft else {
         for (e, _) in &q {
             commands.entity(e).try_despawn();
         }
         return;
     };
-    let a = crate::manipulator::Arrow3d { base: d.anchor, dir: d.direction(), length_px: PULL_ARROW_PX, hot: false };
+    let a = crate::manipulator::Arrow3d {
+        base: d.anchor,
+        dir: d.direction(),
+        length_px: PULL_ARROW_PX,
+        hot: false,
+    };
     match q.iter_mut().next() {
         Some((_, mut cur)) => {
             if *cur != a {
@@ -656,7 +954,11 @@ fn sync_pull_arrow(views: Res<AnalysisViews>, doc: Option<Res<ActiveDocument>>, 
             }
         }
         None => {
-            commands.spawn((crate::manipulator::arrow("draft-pull-arrow", a), PullArrow, DespawnOnExit(AppState::Document)));
+            commands.spawn((
+                crate::manipulator::arrow("draft-pull-arrow", a),
+                PullArrow,
+                DespawnOnExit(AppState::Document),
+            ));
         }
     }
 }
@@ -685,14 +987,37 @@ const MAX_COMBED_EDGES: usize = 400;
 const TOOTH: Color = Color::srgb(0.42, 0.28, 0.82);
 const ENVELOPE: Color = Color::srgb(0.30, 0.16, 0.66);
 
-fn draw_combs(views: Res<AnalysisViews>, doc: Option<Res<ActiveDocument>>, kind: Res<ActiveKind>, cache: Res<PartCache>, selection: Res<Selection>, view: Res<ViewportView>, mut g: Gizmos<CurvatureGizmos>) {
+fn draw_combs(
+    views: Res<AnalysisViews>,
+    doc: Option<Res<ActiveDocument>>,
+    kind: Res<ActiveKind>,
+    cache: Res<PartCache>,
+    selection: Res<Selection>,
+    view: Res<ViewportView>,
+    mut g: Gizmos<CurvatureGizmos>,
+) {
     let modeling = matches!(*kind, ActiveKind::PartStudio | ActiveKind::Assembly);
-    let on = doc.as_ref().and_then(|d| d.active).filter(|_| modeling).and_then(|el| views.per.get(&el)).is_some_and(|s| s.combs);
+    let on = doc
+        .as_ref()
+        .and_then(|d| d.active)
+        .filter(|_| modeling)
+        .and_then(|el| views.per.get(&el))
+        .is_some_and(|s| s.combs);
     if !on {
         return;
     }
     // The selected edges, or every curved edge of the parts shown.
-    let picked: Vec<(PartId, EdgeName)> = selection.0.iter().filter_map(|p| if let Pick::Edge(part, e) = p { Some((*part, *e)) } else { None }).collect();
+    let picked: Vec<(PartId, EdgeName)> = selection
+        .0
+        .iter()
+        .filter_map(|p| {
+            if let Pick::Edge(part, e) = p {
+                Some((*part, *e))
+            } else {
+                None
+            }
+        })
+        .collect();
     let mut combs = Vec::new();
     if picked.is_empty() {
         for p in cache.shown() {
@@ -713,7 +1038,11 @@ fn draw_combs(views: Res<AnalysisViews>, doc: Option<Res<ActiveDocument>>, kind:
             }
         }
     }
-    let max = combs.iter().flatten().map(|t| t.curvature).fold(0.0_f64, f64::max);
+    let max = combs
+        .iter()
+        .flatten()
+        .map(|t| t.curvature)
+        .fold(0.0_f64, f64::max);
     if max <= 1e-9 {
         return;
     }
@@ -753,13 +1082,20 @@ mod tests {
 
     #[test]
     fn the_shading_uniforms() {
-        let s = ShadingAnalysis { mode: 2, angle: 3.0, pull: Vec3::Z };
+        let s = ShadingAnalysis {
+            mode: 2,
+            angle: 3.0,
+            pull: Vec3::Z,
+        };
         let (a, p) = s.uniforms();
         assert_eq!(a.x, 2.0);
         assert_eq!(a.y, 3.0);
         assert_eq!(p.truncate(), Vec3::Z);
         // A flipped pull points the other way.
-        let d = DraftState { flip: true, ..default() };
+        let d = DraftState {
+            flip: true,
+            ..default()
+        };
         assert_eq!(d.direction(), -Vec3::Z);
         assert_eq!(band_colors().len(), 6);
     }

@@ -20,10 +20,16 @@ use cadrs_core::history_log::HistoryLog;
 use cadrs_core::link_update::{self as lu, RefSite, UpdateReferences};
 use cadrs_core::move_doc::{self as md, MoveTarget};
 use cadrs_core::samples::piston as ps;
-use cadrs_core::{Document, DocumentId, DocumentMeta, ElementId, Filter, History, SortDir, SortKey, Store};
+use cadrs_core::{
+    Document, DocumentId, DocumentMeta, ElementId, Filter, History, SortDir, SortKey, Store,
+};
 
 fn temp_store(tag: &str) -> Store {
-    Store::new(std::env::temp_dir().join(format!("cadrs-move-{tag}-{}-{}", std::process::id(), uuid::Uuid::new_v4())))
+    Store::new(std::env::temp_dir().join(format!(
+        "cadrs-move-{tag}-{}-{}",
+        std::process::id(),
+        uuid::Uuid::new_v4()
+    )))
 }
 
 #[track_caller]
@@ -56,8 +62,13 @@ fn hexapod_closed_form() -> (f64, f64) {
     (v, (base * 5.0 + top * 121.0 + 6.0 * vp * (zp + 20.0)) / v)
 }
 
-fn build_of(doc: &Document) -> impl FnMut(ElementId) -> Option<Arc<cadrs_core::rebuild::Build>> + '_ {
-    |e| doc.element(e).map(|el| cadrs_core::rebuild::build(el.features()))
+fn build_of(
+    doc: &Document,
+) -> impl FnMut(ElementId) -> Option<Arc<cadrs_core::rebuild::Build>> + '_ {
+    |e| {
+        doc.element(e)
+            .map(|el| cadrs_core::rebuild::build(el.features()))
+    }
 }
 
 /// Volume and centroid (x, y, z) of assembly `asm`.
@@ -79,7 +90,10 @@ fn mass(doc: &Document, asm: ElementId) -> (f64, [f64; 3]) {
 /// Every occurrence's world pose in assembly `asm`, by occurrence id.
 fn poses(doc: &Document, asm: ElementId) -> Vec<(InstanceId, assembly::Pose)> {
     let model = doc.element(asm).unwrap().assembly_model().unwrap();
-    let mut v: Vec<(InstanceId, assembly::Pose)> = structure::occurrences(doc, model).into_iter().map(|o| (o.id, o.pose)).collect();
+    let mut v: Vec<(InstanceId, assembly::Pose)> = structure::occurrences(doc, model)
+        .into_iter()
+        .map(|o| (o.id, o.pose))
+        .collect();
     v.sort_by_key(|x| x.0);
     v
 }
@@ -90,9 +104,15 @@ fn same_poses(a: &[(InstanceId, assembly::Pose)], b: &[(InstanceId, assembly::Po
     for ((ia, pa), (ib, pb)) in a.iter().zip(b) {
         assert_eq!(ia, ib);
         for r in 0..3 {
-            assert!((pa.translation[r] - pb.translation[r]).abs() < 1e-9, "{ia:?} translation");
+            assert!(
+                (pa.translation[r] - pb.translation[r]).abs() < 1e-9,
+                "{ia:?} translation"
+            );
             for c in 0..3 {
-                assert!((pa.rotation[r][c] - pb.rotation[r][c]).abs() < 1e-9, "{ia:?} rotation");
+                assert!(
+                    (pa.rotation[r][c] - pb.rotation[r][c]).abs() < 1e-9,
+                    "{ia:?} rotation"
+                );
             }
         }
     }
@@ -116,7 +136,11 @@ fn tab_names(doc: &Document) -> Vec<&str> {
 #[test]
 fn moving_the_piston_assembly_takes_two_tabs_and_keeps_every_world_pose() {
     let (store, mut doc) = setup("piston");
-    assert_eq!(md::referenced_tabs(&doc, &[ps::PISTON_ASSEMBLY]), vec![ps::PISTON_STUDIO], "1 referenced tab: \"2 referenced tabs will be moved\" with the assembly");
+    assert_eq!(
+        md::referenced_tabs(&doc, &[ps::PISTON_ASSEMBLY]),
+        vec![ps::PISTON_STUDIO],
+        "1 referenced tab: \"2 referenced tabs will be moved\" with the assembly"
+    );
     let (hv, hz) = hexapod_closed_form();
     let (v0, c0) = mass(&doc, ps::HEXAPOD);
     close("Hexapod volume before", v0, hv, 1e-3);
@@ -128,14 +152,32 @@ fn moving_the_piston_assembly_takes_two_tabs_and_keeps_every_world_pose() {
     let before = doc.clone();
     let mut log = None;
     let tabs = [ps::PISTON_ASSEMBLY, ps::PISTON_STUDIO];
-    let out = md::move_tabs(&store, &doc, &mut log, &tabs, &MoveTarget::New { name: "Pneumatic Piston".into() }, 2_000, "me").unwrap();
-    assert!(log.is_none(), "no tab left behind: no version of the source");
+    let out = md::move_tabs(
+        &store,
+        &doc,
+        &mut log,
+        &tabs,
+        &MoveTarget::New {
+            name: "Pneumatic Piston".into(),
+        },
+        2_000,
+        "me",
+    )
+    .unwrap();
+    assert!(
+        log.is_none(),
+        "no tab left behind: no version of the source"
+    );
     assert_eq!(out.ids.len(), 2);
     assert_eq!(out.summary(), "Moved 2 tabs to Pneumatic Piston");
     assert_eq!(out.version_name, "V1");
     let mut h = History::default();
     h.execute(&mut doc, &out.command).unwrap();
-    assert_eq!(tab_names(&doc), ["Hexapod", "Topplate", "Baseplate"], "ER8.4: the two tabs are gone");
+    assert_eq!(
+        tab_names(&doc),
+        ["Hexapod", "Topplate", "Baseplate"],
+        "ER8.4: the two tabs are gone"
+    );
     let model = doc.element(ps::HEXAPOD).unwrap().assembly_model().unwrap();
     for k in 0..6 {
         let i = model.instance(ps::piston(k)).unwrap();
@@ -144,7 +186,11 @@ fn moving_the_piston_assembly_takes_two_tabs_and_keeps_every_world_pose() {
         assert_eq!(r.at, RefAt::Version(out.version));
         assert_eq!(r.element, ps::PISTON_ASSEMBLY);
         assert!(!r.pinned);
-        assert_eq!(i.index as usize, k + 1, "the same instance, renumbered never");
+        assert_eq!(
+            i.index as usize,
+            k + 1,
+            "the same instance, renumbered never"
+        );
     }
     same_poses(&poses0, &poses(&doc, ps::HEXAPOD));
     let (v1, c1) = mass(&doc, ps::HEXAPOD);
@@ -154,10 +200,27 @@ fn moving_the_piston_assembly_takes_two_tabs_and_keeps_every_world_pose() {
     // The new document: the user's, with both tabs and its version.
     let target = store.load(out.target).unwrap();
     assert_eq!(target.document.name, "Pneumatic Piston");
-    assert_eq!(tab_names(&target.document), ["Pneumatic Piston", "Piston Assembly"], "ER8.6");
+    assert_eq!(
+        tab_names(&target.document),
+        ["Pneumatic Piston", "Piston Assembly"],
+        "ER8.6"
+    );
     let (lib, _) = store.list();
-    let created: Vec<String> = lib.view(Filter::CreatedByMe, "me", "", SortKey::Modified, SortDir::Descending).into_iter().map(|e| e.name).collect();
-    assert!(created.contains(&"Pneumatic Piston".to_string()), "ER8.5: Created by me lists it");
+    let created: Vec<String> = lib
+        .view(
+            Filter::CreatedByMe,
+            "me",
+            "",
+            SortKey::Modified,
+            SortDir::Descending,
+        )
+        .into_iter()
+        .map(|e| e.name)
+        .collect();
+    assert!(
+        created.contains(&"Pneumatic Piston".to_string()),
+        "ER8.5: Created by me lists it"
+    );
     let tlog = HistoryLog::load(&store, out.target).unwrap().unwrap();
     assert_eq!(tlog.versions().len(), 1);
     assert!(tlog.versions()[0].auto(), "made by the move");
@@ -172,7 +235,10 @@ fn moving_the_piston_assembly_takes_two_tabs_and_keeps_every_world_pose() {
     // Undo: the tabs are back; the new document stays.
     h.undo(&mut doc).unwrap();
     assert_eq!(doc, before, "undo restores the document exactly");
-    assert!(store.load(out.target).is_ok(), "the new document and its version stay");
+    assert!(
+        store.load(out.target).is_ok(),
+        "the new document and its version stay"
+    );
     let _ = std::fs::remove_dir_all(store.root());
 }
 
@@ -183,15 +249,38 @@ fn a_referenced_tab_left_behind_becomes_a_link_back() {
     let (store, mut doc) = setup("back");
     let poses0 = poses(&doc, ps::HEXAPOD);
     let mut log = None;
-    let out = md::move_tabs(&store, &doc, &mut log, &[ps::PISTON_ASSEMBLY], &MoveTarget::New { name: String::new() }, 2_000, "me").unwrap();
-    assert_eq!(out.target_name, "Piston Assembly", "named after the tab by default");
+    let out = md::move_tabs(
+        &store,
+        &doc,
+        &mut log,
+        &[ps::PISTON_ASSEMBLY],
+        &MoveTarget::New {
+            name: String::new(),
+        },
+        2_000,
+        "me",
+    )
+    .unwrap();
+    assert_eq!(
+        out.target_name, "Piston Assembly",
+        "named after the tab by default"
+    );
     let (sv, sv_name) = out.source_version.clone().expect("a version of the source");
     assert_eq!(sv_name, "V1");
-    let slog = HistoryLog::load(&store, ps::MOVE_DOCUMENT).unwrap().unwrap();
-    assert!(slog.version(sv).is_some_and(|v| v.auto()), "an auto version, saved");
+    let slog = HistoryLog::load(&store, ps::MOVE_DOCUMENT)
+        .unwrap()
+        .unwrap();
+    assert!(
+        slog.version(sv).is_some_and(|v| v.auto()),
+        "an auto version, saved"
+    );
     assert_eq!(out.links_back, 4, "the four part instances");
     let target = store.load(out.target).unwrap().document;
-    let asm = target.element(ps::PISTON_ASSEMBLY).unwrap().assembly_model().unwrap();
+    let asm = target
+        .element(ps::PISTON_ASSEMBLY)
+        .unwrap()
+        .assembly_model()
+        .unwrap();
     for i in &asm.instances {
         let r = i.link.expect("a link back");
         assert_eq!(r.document, Some(ps::MOVE_DOCUMENT));
@@ -203,7 +292,10 @@ fn a_referenced_tab_left_behind_becomes_a_link_back() {
     close("its centroid z", tc[2], pz, 1e-6);
     let mut h = History::default();
     h.execute(&mut doc, &out.command).unwrap();
-    assert_eq!(tab_names(&doc), ["Hexapod", "Pneumatic Piston", "Topplate", "Baseplate"]);
+    assert_eq!(
+        tab_names(&doc),
+        ["Hexapod", "Pneumatic Piston", "Topplate", "Baseplate"]
+    );
     same_poses(&poses0, &poses(&doc, ps::HEXAPOD));
     let (hv, hz) = hexapod_closed_form();
     let (v, c) = mass(&doc, ps::HEXAPOD);
@@ -219,13 +311,27 @@ fn moving_to_an_existing_document_creates_a_version_there() {
     let (store, mut doc) = setup("existing");
     let mut other = Document::new("Plates");
     other.id = DocumentId::from_u128(0x9157_0000_0000_0000_0000_0000_0000_0099);
-    store.create(&other, &DocumentMeta::new("me", 1_100)).unwrap();
+    store
+        .create(&other, &DocumentMeta::new("me", 1_100))
+        .unwrap();
     let mut olog = HistoryLog::start(&other, 1_100, "me");
     olog.create_version("", "", 1_200, "me");
     olog.save(&store).unwrap();
     assert!(md::referenced_tabs(&doc, &[ps::TOPPLATE]).is_empty());
     let mut log = None;
-    let out = md::move_tabs(&store, &doc, &mut log, &[ps::TOPPLATE], &MoveTarget::Existing { document: other.id, version_name: String::new() }, 2_000, "me").unwrap();
+    let out = md::move_tabs(
+        &store,
+        &doc,
+        &mut log,
+        &[ps::TOPPLATE],
+        &MoveTarget::Existing {
+            document: other.id,
+            version_name: String::new(),
+        },
+        2_000,
+        "me",
+    )
+    .unwrap();
     assert!(!out.created);
     assert_eq!(out.version_name, "V2");
     let olog = HistoryLog::load(&store, other.id).unwrap().unwrap();
@@ -233,12 +339,25 @@ fn moving_to_an_existing_document_creates_a_version_there() {
     assert!(!olog.versions()[1].auto(), "named in the dialog");
     assert!(olog.versions()[1].description().contains("Topplate"));
     let target = store.load(other.id).unwrap().document;
-    assert_eq!(tab_names(&target), ["Part Studio 1", "Assembly 1", "Topplate"]);
+    assert_eq!(
+        tab_names(&target),
+        ["Part Studio 1", "Assembly 1", "Topplate"]
+    );
     let poses0 = poses(&doc, ps::HEXAPOD);
     let mut h = History::default();
     h.execute(&mut doc, &out.command).unwrap();
-    let top = doc.element(ps::HEXAPOD).unwrap().assembly_model().unwrap().instance(ps::TOP_INSTANCE).unwrap().clone();
-    assert_eq!(top.link.map(|r| (r.document, r.at)), Some((Some(other.id), RefAt::Version(out.version))));
+    let top = doc
+        .element(ps::HEXAPOD)
+        .unwrap()
+        .assembly_model()
+        .unwrap()
+        .instance(ps::TOP_INSTANCE)
+        .unwrap()
+        .clone();
+    assert_eq!(
+        top.link.map(|r| (r.document, r.at)),
+        Some((Some(other.id), RefAt::Version(out.version)))
+    );
     same_poses(&poses0, &poses(&doc, ps::HEXAPOD));
     let (hv, _) = hexapod_closed_form();
     close("Hexapod volume", mass(&doc, ps::HEXAPOD).0, hv, 1e-3);
@@ -258,16 +377,50 @@ fn a_same_document_version_reference_to_a_moved_tab_offers_the_new_document() {
     let r = SourceRef::version(None, ps::PISTON_STUDIO, v1);
     let snap = cadrs_core::external::snapshot(&doc, r, "V1").unwrap();
     let i = InstanceId::from_u128(0x77);
-    let inst = assembly::Instance::new(i, InstanceSource::Part { element: snap.root, part: ps::UJOINT }, assembly::Pose::translation([300.0, 0.0, 0.0]));
-    h.execute(&mut doc, &InsertLinked { element: ps::HEXAPOD, snapshot: snap, instances: vec![inst], reference: r }).unwrap();
-    let site = RefSite::Instance { element: ps::HEXAPOD, instance: i };
+    let inst = assembly::Instance::new(
+        i,
+        InstanceSource::Part {
+            element: snap.root,
+            part: ps::UJOINT,
+        },
+        assembly::Pose::translation([300.0, 0.0, 0.0]),
+    );
+    h.execute(
+        &mut doc,
+        &InsertLinked {
+            element: ps::HEXAPOD,
+            snapshot: snap,
+            instances: vec![inst],
+            reference: r,
+        },
+    )
+    .unwrap();
+    let site = RefSite::Instance {
+        element: ps::HEXAPOD,
+        instance: i,
+    };
     let ujoint = |d: &Document| {
         let model = d.element(ps::HEXAPOD).unwrap().assembly_model().unwrap();
         let (parts, _) = assembly::instance_parts(d, model, build_of(d));
-        parts.iter().filter(|p| InstanceId::of_part(p.id) == i).map(|p| p.mass.as_ref().unwrap().volume).sum::<f64>()
+        parts
+            .iter()
+            .filter(|p| InstanceId::of_part(p.id) == i)
+            .map(|p| p.mass.as_ref().unwrap().volume)
+            .sum::<f64>()
     };
     close("the UJoint at V1", ujoint(&doc), 1000.0, 1e-6);
-    let out = md::move_tabs(&store, &doc, &mut log, &[ps::PISTON_ASSEMBLY, ps::PISTON_STUDIO], &MoveTarget::New { name: "Pneumatic Piston".into() }, 2_000, "me").unwrap();
+    let out = md::move_tabs(
+        &store,
+        &doc,
+        &mut log,
+        &[ps::PISTON_ASSEMBLY, ps::PISTON_STUDIO],
+        &MoveTarget::New {
+            name: "Pneumatic Piston".into(),
+        },
+        2_000,
+        "me",
+    )
+    .unwrap();
     h.execute(&mut doc, &out.command).unwrap();
     let u = lu::use_at(&doc, site).unwrap();
     assert_eq!(u.reference, r, "it keeps pointing at V1 of this document");
@@ -278,12 +431,27 @@ fn a_same_document_version_reference_to_a_moved_tab_offers_the_new_document() {
     assert_eq!(m.document_name, "Pneumatic Piston");
     let mut res = Resolver::new(store.clone());
     let c = md::change_to_new_document(&mut res, &doc, log.as_ref(), &u, &m).unwrap();
-    h.execute(&mut doc, &UpdateReferences { changes: vec![c], label: "Update to the new document".into() }).unwrap();
+    h.execute(
+        &mut doc,
+        &UpdateReferences {
+            changes: vec![c],
+            label: "Update to the new document".into(),
+        },
+    )
+    .unwrap();
     let u = lu::use_at(&doc, site).unwrap();
     assert_eq!(u.reference.document, Some(out.target));
     assert_eq!(u.reference.at, RefAt::Version(out.version));
-    assert!(md::moved_record(&doc, &u, &mut load).is_none(), "nothing more to offer");
-    close("the UJoint from the new document", ujoint(&doc), 1000.0, 1e-6);
+    assert!(
+        md::moved_record(&doc, &u, &mut load).is_none(),
+        "nothing more to offer"
+    );
+    close(
+        "the UJoint from the new document",
+        ujoint(&doc),
+        1000.0,
+        1e-6,
+    );
     let _ = std::fs::remove_dir_all(store.root());
 }
 
@@ -294,12 +462,39 @@ fn a_refused_move_writes_nothing() {
     let (store, doc) = setup("refused");
     let mut log = None;
     let missing = DocumentId::from_u128(0xdead);
-    let e = md::move_tabs(&store, &doc, &mut log, &[ps::PISTON_ASSEMBLY], &MoveTarget::Existing { document: missing, version_name: "V1".into() }, 2_000, "me").unwrap_err();
+    let e = md::move_tabs(
+        &store,
+        &doc,
+        &mut log,
+        &[ps::PISTON_ASSEMBLY],
+        &MoveTarget::Existing {
+            document: missing,
+            version_name: "V1".into(),
+        },
+        2_000,
+        "me",
+    )
+    .unwrap_err();
     assert_eq!(e.to_string(), "Resource does not exist");
     let all: Vec<ElementId> = doc.elements.iter().map(|e| e.id).collect();
-    assert!(md::move_tabs(&store, &doc, &mut log, &all, &MoveTarget::New { name: "All".into() }, 2_000, "me").is_err());
+    assert!(
+        md::move_tabs(
+            &store,
+            &doc,
+            &mut log,
+            &all,
+            &MoveTarget::New { name: "All".into() },
+            2_000,
+            "me"
+        )
+        .is_err()
+    );
     assert!(log.is_none(), "no version of the source");
-    assert!(HistoryLog::load(&store, ps::MOVE_DOCUMENT).unwrap().is_none());
+    assert!(
+        HistoryLog::load(&store, ps::MOVE_DOCUMENT)
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(store.list().0.entries.len(), 1, "no new document");
     let _ = std::fs::remove_dir_all(store.root());
 }

@@ -26,16 +26,22 @@ pub struct Pairing {
 }
 
 fn ext(p: &Path) -> String {
-    p.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default()
+    p.extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default()
 }
 
 fn stem(p: &Path) -> String {
-    p.file_stem().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default()
+    p.file_stem()
+        .map(|s| s.to_string_lossy().to_lowercase())
+        .unwrap_or_default()
 }
 
 /// A file's name for messages.
 pub fn file_name(p: &Path) -> String {
-    p.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| p.display().to_string())
+    p.file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| p.display().to_string())
 }
 
 /// Pairs the picked files (see the module docs). No `.emn` at all is an error.
@@ -43,8 +49,14 @@ pub fn pair_files(paths: &[PathBuf]) -> Result<Pairing, String> {
     let mut out = Pairing::default();
     let emns: Vec<&PathBuf> = paths.iter().filter(|p| ext(p) == "emn").collect();
     let emps: Vec<&PathBuf> = paths.iter().filter(|p| ext(p) == "emp").collect();
-    for p in paths.iter().filter(|p| !matches!(ext(p).as_str(), "emn" | "emp")) {
-        out.warnings.push(format!("{} is not an IDF file (.emn or .emp); skipped", file_name(p)));
+    for p in paths
+        .iter()
+        .filter(|p| !matches!(ext(p).as_str(), "emn" | "emp"))
+    {
+        out.warnings.push(format!(
+            "{} is not an IDF file (.emn or .emp); skipped",
+            file_name(p)
+        ));
     }
     if emns.is_empty() {
         return Err(if emps.is_empty() {
@@ -64,13 +76,22 @@ pub fn pair_files(paths: &[PathBuf]) -> Result<Pairing, String> {
         if let Some(i) = emp {
             used[i] = true;
         } else {
-            out.warnings.push(format!("No library file (.emp) for {}: its components are shown as placeholder boxes", file_name(emn)));
+            out.warnings.push(format!(
+                "No library file (.emp) for {}: its components are shown as placeholder boxes",
+                file_name(emn)
+            ));
         }
-        out.pairs.push(FilePair { emn: (*emn).clone(), emp: emp.map(|i| emps[i].clone()) });
+        out.pairs.push(FilePair {
+            emn: (*emn).clone(),
+            emp: emp.map(|i| emps[i].clone()),
+        });
     }
     for (i, e) in emps.iter().enumerate() {
         if !used[i] {
-            out.warnings.push(format!("{} has no board file (.emn) with the same name; skipped", file_name(e)));
+            out.warnings.push(format!(
+                "{} has no board file (.emn) with the same name; skipped",
+                file_name(e)
+            ));
         }
     }
     Ok(out)
@@ -88,7 +109,11 @@ pub struct ReadBoard {
 /// component is a placeholder box (see `cadrs_pcb::geometry`), with a warning.
 pub fn read_board(emn: &str, emp: Option<&str>, fallback_name: &str) -> Result<ReadBoard, String> {
     let b = cadrs_idf::parse_emn(emn).map_err(|e| format!(".emn: {e}"))?;
-    let mut warnings: Vec<String> = b.warnings.iter().map(|w| format!(".emn line {}: {}", w.line, w.message)).collect();
+    let mut warnings: Vec<String> = b
+        .warnings
+        .iter()
+        .map(|w| format!(".emn line {}: {}", w.line, w.message))
+        .collect();
     let mut board = b.value;
     if board.name.trim().is_empty() {
         board.name = fallback_name.to_string();
@@ -96,7 +121,11 @@ pub fn read_board(emn: &str, emp: Option<&str>, fallback_name: &str) -> Result<R
     let library = match emp {
         Some(text) => {
             let l = cadrs_idf::parse_emp(text).map_err(|e| format!(".emp: {e}"))?;
-            warnings.extend(l.warnings.iter().map(|w| format!(".emp line {}: {}", w.line, w.message)));
+            warnings.extend(
+                l.warnings
+                    .iter()
+                    .map(|w| format!(".emp line {}: {}", w.line, w.message)),
+            );
             l.value
         }
         None => cadrs_idf::Library::new(board.header.version),
@@ -115,9 +144,15 @@ pub fn read_board(emn: &str, emp: Option<&str>, fallback_name: &str) -> Result<R
         m
     };
     if !missing.is_empty() && emp.is_some() {
-        warnings.push(format!("Not in the library, shown as placeholder boxes: {}", missing.join(", ")));
+        warnings.push(format!(
+            "Not in the library, shown as placeholder boxes: {}",
+            missing.join(", ")
+        ));
     }
-    Ok(ReadBoard { board: pcb, warnings })
+    Ok(ReadBoard {
+        board: pcb,
+        warnings,
+    })
 }
 
 /// One board read from files, ready for [`super::ImportBoard`].
@@ -133,11 +168,19 @@ pub fn read_pair(pair: &FilePair) -> Result<Imported, String> {
     let read = |p: &Path| std::fs::read_to_string(p).map_err(|e| format!("{}: {e}", file_name(p)));
     let emn = read(&pair.emn)?;
     let emp = pair.emp.as_deref().map(read).transpose()?;
-    let fallback = pair.emn.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "Board".into());
-    let r = read_board(&emn, emp.as_deref(), &fallback).map_err(|e| format!("{}: {e}", file_name(&pair.emn)))?;
+    let fallback = pair
+        .emn
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "Board".into());
+    let r = read_board(&emn, emp.as_deref(), &fallback)
+        .map_err(|e| format!("{}: {e}", file_name(&pair.emn)))?;
     Ok(Imported {
         board: r.board,
-        source: BoardSource::Idf { emn: file_name(&pair.emn), emp: pair.emp.as_deref().map(file_name) },
+        source: BoardSource::Idf {
+            emn: file_name(&pair.emn),
+            emp: pair.emp.as_deref().map(file_name),
+        },
         warnings: r.warnings,
     })
 }

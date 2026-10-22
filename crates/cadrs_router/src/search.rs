@@ -24,7 +24,10 @@ pub struct Costs<'a> {
 
 impl Costs<'_> {
     pub fn cong(&self, i: u32) -> u32 {
-        sat_add(self.hist[i as usize], (self.occ[i as usize] as u32).saturating_mul(self.present))
+        sat_add(
+            self.hist[i as usize],
+            (self.occ[i as usize] as u32).saturating_mul(self.present),
+        )
     }
 
     /// Every move out of cell `i` for `net`: (to, cost).
@@ -42,7 +45,10 @@ impl Costs<'_> {
             if !free(to) {
                 continue;
             }
-            if dx != 0 && dy != 0 && (!free(p.index(tx as u32, y, l)) || !free(p.index(x, ty as u32, l))) {
+            if dx != 0
+                && dy != 0
+                && (!free(p.index(tx as u32, y, l)) || !free(p.index(x, ty as u32, l)))
+            {
                 continue;
             }
             f(to, sat_add(move_cost(p, l, dx, dy), self.cong(to)));
@@ -71,11 +77,23 @@ pub struct Searcher {
 impl Searcher {
     /// The cheapest path for `net` from any of `sources` to any of `targets` (cells), source
     /// first; `None` when none is reachable.
-    pub fn search(&mut self, c: &Costs, net: u32, sources: &[u32], targets: &[u32]) -> Option<Vec<u32>> {
+    pub fn search(
+        &mut self,
+        c: &Costs,
+        net: u32,
+        sources: &[u32],
+        targets: &[u32],
+    ) -> Option<Vec<u32>> {
         let p = &c.grid.params;
         let n = p.cells() as usize;
         if self.g.len() != n {
-            *self = Searcher { g: vec![INF; n], parent: vec![INF; n], seen: vec![0; n], stamp: 0, target: vec![0; n] };
+            *self = Searcher {
+                g: vec![INF; n],
+                parent: vec![INF; n],
+                seen: vec![0; n],
+                stamp: 0,
+                target: vec![0; n],
+            };
         }
         self.stamp = self.stamp.wrapping_add(1);
         if self.stamp == 0 {

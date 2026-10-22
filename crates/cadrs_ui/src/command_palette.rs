@@ -52,7 +52,14 @@ pub struct CommandPalette {
 
 impl CommandPalette {
     pub fn new(name: impl Into<Cow<'static, str>>) -> Self {
-        Self { name: name.into(), placeholder: String::new(), value: String::new(), left: 0.0, top: 0.0, width: 240.0 }
+        Self {
+            name: name.into(),
+            placeholder: String::new(),
+            value: String::new(),
+            left: 0.0,
+            top: 0.0,
+            width: 240.0,
+        }
     }
 
     pub fn placeholder(mut self, p: impl Into<String>) -> Self {
@@ -95,7 +102,13 @@ impl CommandPalette {
             },
             BackgroundColor(t.popover),
             BorderColor::all(t.border),
-            BoxShadow::new(Color::srgba(0.0, 0.0, 0.0, 0.16), Val::Px(0.0), Val::Px(3.0), Val::Px(0.0), Val::Px(8.0)),
+            BoxShadow::new(
+                Color::srgba(0.0, 0.0, 0.0, 0.16),
+                Val::Px(0.0),
+                Val::Px(3.0),
+                Val::Px(0.0),
+                Val::Px(8.0),
+            ),
         );
         (
             Name::new(self.name.into_owned()),
@@ -150,8 +163,14 @@ pub fn palette_row(
     item.build(t)
 }
 
-fn on_layer_press(press: On<Pointer<Press>>, q: Query<(), With<CommandPaletteLayer>>, mut commands: Commands) {
+fn on_layer_press(
+    press: On<Pointer<Press>>,
+    q: Query<(), With<CommandPaletteLayer>>,
+    mut commands: Commands,
+) {
     if q.contains(press.entity) && press.original_event_target() == press.entity {
-        commands.trigger(CommandPaletteClose { entity: press.entity });
+        commands.trigger(CommandPaletteClose {
+            entity: press.entity,
+        });
     }
 }

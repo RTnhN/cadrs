@@ -125,7 +125,12 @@ pub enum SecondaryAxis {
 }
 
 impl SecondaryAxis {
-    pub const ALL: [SecondaryAxis; 4] = [SecondaryAxis::PlusX, SecondaryAxis::PlusY, SecondaryAxis::MinusX, SecondaryAxis::MinusY];
+    pub const ALL: [SecondaryAxis; 4] = [
+        SecondaryAxis::PlusX,
+        SecondaryAxis::PlusY,
+        SecondaryAxis::MinusX,
+        SecondaryAxis::MinusY,
+    ];
 
     /// Onshape's enum name (`PLUS_X`, …).
     pub fn onshape(self) -> &'static str {
@@ -153,7 +158,10 @@ impl SecondaryAxis {
 
     /// The next one (the dialog's Reorient button turns it a quarter).
     pub fn next(self) -> SecondaryAxis {
-        let i = SecondaryAxis::ALL.iter().position(|a| *a == self).unwrap_or(0);
+        let i = SecondaryAxis::ALL
+            .iter()
+            .position(|a| *a == self)
+            .unwrap_or(0);
         SecondaryAxis::ALL[(i + 1) % 4]
     }
 }
@@ -305,7 +313,10 @@ impl Default for TransformFeature {
 impl TransformFeature {
     /// A Transform of `t` (the rest at their defaults).
     pub fn new(t: TransformType) -> Self {
-        Self { transform_type: t, ..Self::default() }
+        Self {
+            transform_type: t,
+            ..Self::default()
+        }
     }
 
     /// A Translate by XYZ of `parts` by `(dx, dy, dz)` mm.
@@ -353,18 +364,30 @@ impl TransformFeature {
             return Some("Copy one mate connector at a time");
         }
         match self.transform_type {
-            TransformType::TranslateByLine if self.line.is_none() => Some("Select a line to translate along"),
+            TransformType::TranslateByLine if self.line.is_none() => {
+                Some("Select a line to translate along")
+            }
             TransformType::TranslateByLine => match self.line {
                 Some(DirectionRef::Edge(_) | DirectionRef::SketchLine { .. }) => None,
                 _ => Some("Translate by line needs a straight edge or a sketch line"),
             },
-            TransformType::TranslateByDistance if self.direction.is_none() => Some("Select a direction"),
-            TransformType::TranslateByDistance if !self.distance.is_finite() => Some("The distance must be a number"),
-            TransformType::TranslateXyz if ![self.dx, self.dy, self.dz].iter().all(|v| v.is_finite()) => {
+            TransformType::TranslateByDistance if self.direction.is_none() => {
+                Some("Select a direction")
+            }
+            TransformType::TranslateByDistance if !self.distance.is_finite() => {
+                Some("The distance must be a number")
+            }
+            TransformType::TranslateXyz
+                if ![self.dx, self.dy, self.dz].iter().all(|v| v.is_finite()) =>
+            {
                 Some("The distances must be numbers")
             }
-            TransformType::MateConnectors if self.from.is_none() => Some("Select the mate connector to move from"),
-            TransformType::MateConnectors if self.to.is_none() => Some("Select the mate connector to move to"),
+            TransformType::MateConnectors if self.from.is_none() => {
+                Some("Select the mate connector to move from")
+            }
+            TransformType::MateConnectors if self.to.is_none() => {
+                Some("Select the mate connector to move to")
+            }
             TransformType::Rotate if self.axis.is_none() => Some("Select an axis of rotation"),
             TransformType::Rotate if !self.angle.is_finite() => Some("The angle must be a number"),
             TransformType::ScaleUniformly if !(self.scale.is_finite() && self.scale > 0.0) => {
@@ -378,7 +401,11 @@ impl TransformFeature {
 impl TransformFeature {
     /// Every part it takes: its own, then the context parts' ids in the studio's view.
     pub fn picked(&self) -> Vec<PartId> {
-        self.parts.iter().copied().chain(self.context.iter().map(|c| PartId::new(c.id, 0))).collect()
+        self.parts
+            .iter()
+            .copied()
+            .chain(self.context.iter().map(|c| PartId::new(c.id, 0)))
+            .collect()
     }
 
     /// Sets the parts it takes from `picked` (its own and context parts) in the Part Studio
@@ -432,14 +459,18 @@ pub struct CompositeFeature {
 
 impl CompositeFeature {
     pub fn problem(&self) -> Option<&'static str> {
-        self.parts.is_empty().then_some("Select parts for the composite part")
+        self.parts
+            .is_empty()
+            .then_some("Select parts for the composite part")
     }
 }
 
 /// Whether the part `part` of the element `element` is a composite part (made by a Composite
 /// part feature): its Parts list and Instances rows show the `composite-part` icon.
 pub fn is_composite_part(doc: &Document, element: ElementId, part: PartId) -> bool {
-    doc.element(element).and_then(|e| e.feature(part.feature)).is_some_and(|f| matches!(f.kind, crate::document::FeatureKind::Composite(_)))
+    doc.element(element)
+        .and_then(|e| e.feature(part.feature))
+        .is_some_and(|f| matches!(f.kind, crate::document::FeatureKind::Composite(_)))
 }
 
 /// A composite part a rebuild made: its part, its members and whether it is closed.
@@ -453,9 +484,14 @@ pub struct Composite {
 /// Splits parts picked in the Part Studio `studio` into its own parts and context parts, the
 /// latter with their snapshot (see [`TransformFeature::context`]): the source studios' current
 /// features and where the context has the parts.
-pub fn context_copies(doc: &Document, studio: ElementId, picked: &[PartId]) -> (Vec<PartId>, Vec<ContextCopy>, Vec<ContextSource>) {
+pub fn context_copies(
+    doc: &Document,
+    studio: ElementId,
+    picked: &[PartId],
+) -> (Vec<PartId>, Vec<ContextCopy>, Vec<ContextSource>) {
     let el = doc.element(studio);
-    let (mut own, mut copies, mut sources): (Vec<PartId>, Vec<ContextCopy>, Vec<ContextSource>) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut own, mut copies, mut sources): (Vec<PartId>, Vec<ContextCopy>, Vec<ContextSource>) =
+        (Vec::new(), Vec::new(), Vec::new());
     for p in picked {
         if !crate::assembly::context::is_context(p.feature) {
             if !own.contains(p) {
@@ -463,23 +499,48 @@ pub fn context_copies(doc: &Document, studio: ElementId, picked: &[PartId]) -> (
             }
             continue;
         }
-        let Some((ctx, cp)) = el.and_then(|e| crate::assembly::context::find_part(doc, e.id, p.feature)) else { continue };
+        let Some((ctx, cp)) =
+            el.and_then(|e| crate::assembly::context::find_part(doc, e.id, p.feature))
+        else {
+            continue;
+        };
         let (ctx, cp) = (&ctx, &cp);
         if copies.iter().any(|c: &ContextCopy| c.id == cp.id) {
             continue;
         }
         // The context's snapshot of the source studio (MC1.2), or its features now (an old
         // context).
-        let Some(features) = crate::assembly::context::source_features(doc, ctx, cp.element) else { continue };
-        let source = match sources.iter().position(|s| s.element == cp.element && s.features == features) {
+        let Some(features) = crate::assembly::context::source_features(doc, ctx, cp.element) else {
+            continue;
+        };
+        let source = match sources
+            .iter()
+            .position(|s| s.element == cp.element && s.features == features)
+        {
             Some(i) => i,
             None => {
-                sources.push(ContextSource { element: cp.element, features });
+                sources.push(ContextSource {
+                    element: cp.element,
+                    features,
+                });
                 sources.len() - 1
             }
         };
-        let appearance = if ctx.studios.is_empty() { doc.element(cp.element).and_then(|e| e.part_props().iter().find(|q| q.part == cp.part)).and_then(|q| q.appearance) } else { cp.appearance };
-        copies.push(ContextCopy { id: cp.id, source, part: cp.part, pose: cp.pose, name: cp.name.clone(), appearance });
+        let appearance = if ctx.studios.is_empty() {
+            doc.element(cp.element)
+                .and_then(|e| e.part_props().iter().find(|q| q.part == cp.part))
+                .and_then(|q| q.appearance)
+        } else {
+            cp.appearance
+        };
+        copies.push(ContextCopy {
+            id: cp.id,
+            source,
+            part: cp.part,
+            pose: cp.pose,
+            name: cp.name.clone(),
+            appearance,
+        });
     }
     (own, copies, sources)
 }
@@ -502,12 +563,16 @@ mod tests {
     #[test]
     fn older_documents_load() {
         // Only the type and the parts: everything else takes its default.
-        let x: TransformFeature = ron::from_str("(transform_type: TranslateXyz, parts: [])").unwrap();
+        let x: TransformFeature =
+            ron::from_str("(transform_type: TranslateXyz, parts: [])").unwrap();
         assert_eq!(x.scale, 1.0);
         assert_eq!(x.distance_expr, "25 mm");
         assert!(!x.copies());
         let x = TransformFeature::translate_xyz(vec![], [1.5, 0.0, -2.0]);
-        assert_eq!((x.dx_expr.as_str(), x.dz_expr.as_str()), ("1.5 mm", "-2 mm"));
+        assert_eq!(
+            (x.dx_expr.as_str(), x.dz_expr.as_str()),
+            ("1.5 mm", "-2 mm")
+        );
         assert_eq!(x.problem(), Some("Select parts to transform"));
     }
 }

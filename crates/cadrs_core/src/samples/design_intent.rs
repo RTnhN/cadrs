@@ -27,8 +27,13 @@ use cadrs_sketch::{CurveRef, Dimension, DimensionKind, Link, PlaneRef, Sketch, S
 
 use super::gear_cover::Studio;
 use crate::command::CommandError;
-use crate::commands::{AddExtrude, AddFeature, AddRevolve, AddSketch, EditSketch, RenameFeature, RenamePart, SetExtrude};
-use crate::document::{AxisRef, BooleanOp, DirectionRef, ExtrudeFeature, FeatureKind, RevolveFeature, RevolveType};
+use crate::commands::{
+    AddExtrude, AddFeature, AddRevolve, AddSketch, EditSketch, RenameFeature, RenamePart,
+    SetExtrude,
+};
+use crate::document::{
+    AxisRef, BooleanOp, DirectionRef, ExtrudeFeature, FeatureKind, RevolveFeature, RevolveType,
+};
 use crate::ids::{ElementId, FeatureId, PartId};
 use crate::mate::{ConnectorOrigin, ConnectorRef};
 use crate::pattern::{PatternFeature, PatternKind, PatternType};
@@ -73,7 +78,8 @@ pub fn body_volume(piston_d: f64, clearance: f64) -> f64 {
     let id = piston_d + clearance;
     let od = id + 2.0 * WALL;
     let q = std::f64::consts::FRAC_PI_4;
-    q * (od * od - id * id) * LENGTH - GROOVES as f64 * q * ((id + 2.0 * GROOVE_DEPTH).powi(2) - id * id) * GROOVE_WIDTH
+    q * (od * od - id * id) * LENGTH
+        - GROOVES as f64 * q * ((id + 2.0 * GROOVE_DEPTH).powi(2) - id * id) * GROOVE_WIDTH
 }
 
 /// The clamp's volume (mm³): the square less the piston's section, 10 mm thick.
@@ -99,20 +105,54 @@ fn rect_with(
     corners: [Vec2; 4],
     dims: impl Fn([cadrs_sketch::PointId; 4]) -> Vec<(DimensionKind, f64, Option<&'static str>)>,
 ) -> Result<(), CommandError> {
-    let edit = |s: &mut dyn Studio, op: SketchOp| s.run(&EditSketch { element: el, feature: sketch, op });
-    edit(s, SketchOp::AddPolyline { points: corners.to_vec(), closed: true, construction: false, label: "Add rectangle" })?;
+    let edit = |s: &mut dyn Studio, op: SketchOp| {
+        s.run(&EditSketch {
+            element: el,
+            feature: sketch,
+            op,
+        })
+    };
+    edit(
+        s,
+        SketchOp::AddPolyline {
+            points: corners.to_vec(),
+            closed: true,
+            construction: false,
+            label: "Add rectangle",
+        },
+    )?;
     edit(s, SketchOp::AddConstraints(rectangle_constraints(corners)))?;
     let g = sketch_of(s, el, sketch)?;
     let mut ids = [cadrs_sketch::PointId::default(); 4];
     for (i, c) in corners.iter().enumerate() {
-        ids[i] = g.point_at(*c, 1e-6).ok_or_else(|| CommandError::Invalid("a corner is missing".into()))?;
+        ids[i] = g
+            .point_at(*c, 1e-6)
+            .ok_or_else(|| CommandError::Invalid("a corner is missing".into()))?;
     }
     for (kind, value, expr) in dims(ids) {
-        edit(s, SketchOp::SetDimension { dimension: Dimension::new(kind, value, 8.0), moves: vec![], radii: vec![] })?;
+        edit(
+            s,
+            SketchOp::SetDimension {
+                dimension: Dimension::new(kind, value, 8.0),
+                moves: vec![],
+                radii: vec![],
+            },
+        )?;
         if let Some(e) = expr {
             let g = sketch_of(s, el, sketch)?;
-            let id = g.dimensions.iter().find(|(_, d)| d.kind == kind).map(|(id, _)| id).ok_or_else(|| CommandError::Invalid("a dimension is missing".into()))?;
-            edit(s, SketchOp::SetDimensionExpr { id, expr: Some(e.into()) })?;
+            let id = g
+                .dimensions
+                .iter()
+                .find(|(_, d)| d.kind == kind)
+                .map(|(id, _)| id)
+                .ok_or_else(|| CommandError::Invalid("a dimension is missing".into()))?;
+            edit(
+                s,
+                SketchOp::SetDimensionExpr {
+                    id,
+                    expr: Some(e.into()),
+                },
+            )?;
         }
     }
     Ok(())
@@ -121,50 +161,148 @@ fn rect_with(
 /// Adds the model to the Part Studio `el`.
 pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
     let v = Vec2::new;
-    let z_axis = || Some(AxisRef::Connector(ConnectorRef::Implicit(ConnectorOrigin::Origin)));
+    let z_axis = || {
+        Some(AxisRef::Connector(ConnectorRef::Implicit(
+            ConnectorOrigin::Origin,
+        )))
+    };
     // The variables.
-    s.run(&AddFeature::variable(el, VAR_PISTON, VariableFeature {
-        description: "Piston diameter".into(),
-        ..VariableFeature::length("piston_d", "40 mm")
-    }))?;
-    s.run(&AddFeature::variable(el, VAR_CLEARANCE, VariableFeature {
-        description: "Diametral clearance of the bore".into(),
-        ..VariableFeature::length("clearance", "0.5 mm")
-    }))?;
-    let (ri, ro) = ((PISTON_D + CLEARANCE) / 2.0, (PISTON_D + CLEARANCE) / 2.0 + WALL);
+    s.run(&AddFeature::variable(
+        el,
+        VAR_PISTON,
+        VariableFeature {
+            description: "Piston diameter".into(),
+            ..VariableFeature::length("piston_d", "40 mm")
+        },
+    ))?;
+    s.run(&AddFeature::variable(
+        el,
+        VAR_CLEARANCE,
+        VariableFeature {
+            description: "Diametral clearance of the bore".into(),
+            ..VariableFeature::length("clearance", "0.5 mm")
+        },
+    ))?;
+    let (ri, ro) = (
+        (PISTON_D + CLEARANCE) / 2.0,
+        (PISTON_D + CLEARANCE) / 2.0 + WALL,
+    );
     // The master sketch and the body.
-    s.run(&AddSketch { element: el, feature: MASTER_SKETCH, plane: Some(PlaneRef::Front) })?;
-    s.run(&RenameFeature { element: el, feature: MASTER_SKETCH, name: "Master sketch".into() })?;
-    rect_with(s, el, MASTER_SKETCH, [v(ri, 0.0), v(ro, 0.0), v(ro, LENGTH), v(ri, LENGTH)], |p| {
-        vec![
-            (DimensionKind::Diametral { p: PointRef::Point(p[0]), line: CurveRef::YAxis }, 2.0 * ri, Some("#piston_d + #clearance")),
-            (DimensionKind::Horizontal { a: p[0], b: p[1] }, WALL, None),
-            (DimensionKind::Vertical { a: p[1], b: p[2] }, LENGTH, None),
-            (DimensionKind::PointLine { p: PointRef::Point(p[2]), line: CurveRef::XAxis }, LENGTH, None),
-        ]
+    s.run(&AddSketch {
+        element: el,
+        feature: MASTER_SKETCH,
+        plane: Some(PlaneRef::Front),
     })?;
+    s.run(&RenameFeature {
+        element: el,
+        feature: MASTER_SKETCH,
+        name: "Master sketch".into(),
+    })?;
+    rect_with(
+        s,
+        el,
+        MASTER_SKETCH,
+        [v(ri, 0.0), v(ro, 0.0), v(ro, LENGTH), v(ri, LENGTH)],
+        |p| {
+            vec![
+                (
+                    DimensionKind::Diametral {
+                        p: PointRef::Point(p[0]),
+                        line: CurveRef::YAxis,
+                    },
+                    2.0 * ri,
+                    Some("#piston_d + #clearance"),
+                ),
+                (DimensionKind::Horizontal { a: p[0], b: p[1] }, WALL, None),
+                (DimensionKind::Vertical { a: p[1], b: p[2] }, LENGTH, None),
+                (
+                    DimensionKind::PointLine {
+                        p: PointRef::Point(p[2]),
+                        line: CurveRef::XAxis,
+                    },
+                    LENGTH,
+                    None,
+                ),
+            ]
+        },
+    )?;
     let g = sketch_of(s, el, MASTER_SKETCH)?;
     let regions = super::region_refs(MASTER_SKETCH, &g, &[v((ri + ro) / 2.0, LENGTH / 2.0)]);
     s.run(&AddRevolve {
         element: el,
         feature: BODY,
-        revolve: RevolveFeature { regions, axis: z_axis(), kind: RevolveType::Full, op: BooleanOp::New, ..RevolveFeature::default() },
+        revolve: RevolveFeature {
+            regions,
+            axis: z_axis(),
+            kind: RevolveType::Full,
+            op: BooleanOp::New,
+            ..RevolveFeature::default()
+        },
     })?;
-    s.run(&RenameFeature { element: el, feature: BODY, name: "Body".into() })?;
+    s.run(&RenameFeature {
+        element: el,
+        feature: BODY,
+        name: "Body".into(),
+    })?;
     // One groove, cut, then patterned.
     let (gi, go) = (ri - 1.0, ri + GROOVE_DEPTH);
-    s.run(&AddSketch { element: el, feature: GROOVE_SKETCH, plane: Some(PlaneRef::Front) })?;
-    s.run(&RenameFeature { element: el, feature: GROOVE_SKETCH, name: "Groove sketch".into() })?;
-    rect_with(s, el, GROOVE_SKETCH, [v(gi, GROOVE_Z), v(go, GROOVE_Z), v(go, GROOVE_Z + GROOVE_WIDTH), v(gi, GROOVE_Z + GROOVE_WIDTH)], |p| {
-        vec![
-            (DimensionKind::Diametral { p: PointRef::Point(p[0]), line: CurveRef::YAxis }, 2.0 * gi, Some("#piston_d + #clearance - 2 mm")),
-            (DimensionKind::Horizontal { a: p[0], b: p[1] }, go - gi, None),
-            (DimensionKind::Vertical { a: p[1], b: p[2] }, GROOVE_WIDTH, None),
-            (DimensionKind::PointLine { p: PointRef::Point(p[0]), line: CurveRef::XAxis }, GROOVE_Z, None),
-        ]
+    s.run(&AddSketch {
+        element: el,
+        feature: GROOVE_SKETCH,
+        plane: Some(PlaneRef::Front),
     })?;
+    s.run(&RenameFeature {
+        element: el,
+        feature: GROOVE_SKETCH,
+        name: "Groove sketch".into(),
+    })?;
+    rect_with(
+        s,
+        el,
+        GROOVE_SKETCH,
+        [
+            v(gi, GROOVE_Z),
+            v(go, GROOVE_Z),
+            v(go, GROOVE_Z + GROOVE_WIDTH),
+            v(gi, GROOVE_Z + GROOVE_WIDTH),
+        ],
+        |p| {
+            vec![
+                (
+                    DimensionKind::Diametral {
+                        p: PointRef::Point(p[0]),
+                        line: CurveRef::YAxis,
+                    },
+                    2.0 * gi,
+                    Some("#piston_d + #clearance - 2 mm"),
+                ),
+                (
+                    DimensionKind::Horizontal { a: p[0], b: p[1] },
+                    go - gi,
+                    None,
+                ),
+                (
+                    DimensionKind::Vertical { a: p[1], b: p[2] },
+                    GROOVE_WIDTH,
+                    None,
+                ),
+                (
+                    DimensionKind::PointLine {
+                        p: PointRef::Point(p[0]),
+                        line: CurveRef::XAxis,
+                    },
+                    GROOVE_Z,
+                    None,
+                ),
+            ]
+        },
+    )?;
     let g = sketch_of(s, el, GROOVE_SKETCH)?;
-    let regions = super::region_refs(GROOVE_SKETCH, &g, &[v((gi + go) / 2.0, GROOVE_Z + GROOVE_WIDTH / 2.0)]);
+    let regions = super::region_refs(
+        GROOVE_SKETCH,
+        &g,
+        &[v((gi + go) / 2.0, GROOVE_Z + GROOVE_WIDTH / 2.0)],
+    );
     s.run(&AddRevolve {
         element: el,
         feature: GROOVE,
@@ -177,7 +315,11 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
             ..RevolveFeature::default()
         },
     })?;
-    s.run(&RenameFeature { element: el, feature: GROOVE, name: "Groove".into() })?;
+    s.run(&RenameFeature {
+        element: el,
+        feature: GROOVE,
+        name: "Groove".into(),
+    })?;
     let mut p = PatternFeature::new(PatternKind::Linear);
     p.pattern_type = PatternType::Feature;
     p.features = vec![GROOVE];
@@ -185,36 +327,93 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
     p.first.distance = GROOVE_PITCH;
     p.first.distance_expr = format!("{GROOVE_PITCH} mm");
     p.first.count = GROOVES;
-    s.run(&AddFeature { element: el, feature: GROOVE_PATTERN, base_name: "Linear pattern".into(), kind: FeatureKind::Pattern(p) })?;
+    s.run(&AddFeature {
+        element: el,
+        feature: GROOVE_PATTERN,
+        base_name: "Linear pattern".into(),
+        kind: FeatureKind::Pattern(p),
+    })?;
     // The piston.
-    s.run(&AddSketch { element: el, feature: PISTON_SKETCH, plane: Some(PlaneRef::Top) })?;
-    s.run(&RenameFeature { element: el, feature: PISTON_SKETCH, name: "Piston sketch".into() })?;
+    s.run(&AddSketch {
+        element: el,
+        feature: PISTON_SKETCH,
+        plane: Some(PlaneRef::Top),
+    })?;
+    s.run(&RenameFeature {
+        element: el,
+        feature: PISTON_SKETCH,
+        name: "Piston sketch".into(),
+    })?;
     let r = PISTON_D / 2.0;
-    s.run(&EditSketch { element: el, feature: PISTON_SKETCH, op: SketchOp::AddCircle { center: v(0.0, 0.0), radius: r, construction: false } })?;
+    s.run(&EditSketch {
+        element: el,
+        feature: PISTON_SKETCH,
+        op: SketchOp::AddCircle {
+            center: v(0.0, 0.0),
+            radius: r,
+            construction: false,
+        },
+    })?;
     let g = sketch_of(s, el, PISTON_SKETCH)?;
-    let circle = g.curves.keys().next().ok_or_else(|| CommandError::Invalid("no piston circle".into()))?;
+    let circle = g
+        .curves
+        .keys()
+        .next()
+        .ok_or_else(|| CommandError::Invalid("no piston circle".into()))?;
     let kind = DimensionKind::Diameter { curve: circle };
     s.run(&EditSketch {
         element: el,
         feature: PISTON_SKETCH,
-        op: SketchOp::SetDimension { dimension: Dimension::new(kind, PISTON_D, std::f64::consts::FRAC_PI_4), moves: vec![], radii: vec![] },
+        op: SketchOp::SetDimension {
+            dimension: Dimension::new(kind, PISTON_D, std::f64::consts::FRAC_PI_4),
+            moves: vec![],
+            radii: vec![],
+        },
     })?;
     let g = sketch_of(s, el, PISTON_SKETCH)?;
-    let dim = g.dimensions.keys().next().ok_or_else(|| CommandError::Invalid("no piston dimension".into()))?;
-    s.run(&EditSketch { element: el, feature: PISTON_SKETCH, op: SketchOp::SetDimensionExpr { id: dim, expr: Some("#piston_d".into()) } })?;
+    let dim = g
+        .dimensions
+        .keys()
+        .next()
+        .ok_or_else(|| CommandError::Invalid("no piston dimension".into()))?;
+    s.run(&EditSketch {
+        element: el,
+        feature: PISTON_SKETCH,
+        op: SketchOp::SetDimensionExpr {
+            id: dim,
+            expr: Some("#piston_d".into()),
+        },
+    })?;
     let regions = super::region_refs(PISTON_SKETCH, &g, &[v(0.0, 0.0)]);
-    s.run(&AddExtrude { element: el, feature: PISTON, extrude: ExtrudeFeature::default() })?;
+    s.run(&AddExtrude {
+        element: el,
+        feature: PISTON,
+        extrude: ExtrudeFeature::default(),
+    })?;
     s.run(&SetExtrude {
         element: el,
         feature: PISTON,
-        extrude: ExtrudeFeature { op: BooleanOp::New, ..super::extrude_of(regions, PISTON_LENGTH) },
+        extrude: ExtrudeFeature {
+            op: BooleanOp::New,
+            ..super::extrude_of(regions, PISTON_LENGTH)
+        },
         label: "Extrude".into(),
     })?;
-    s.run(&RenameFeature { element: el, feature: PISTON, name: "Piston".into() })?;
+    s.run(&RenameFeature {
+        element: el,
+        feature: PISTON,
+        name: "Piston".into(),
+    })?;
     // The clamp: its bore uses the piston's bottom edge.
-    let features = s.document().element(el).map(|e| e.features().to_vec()).unwrap_or_default();
+    let features = s
+        .document()
+        .element(el)
+        .map(|e| e.features().to_vec())
+        .unwrap_or_default();
     let build = crate::rebuild::build(&features);
-    let piston = build.part(PISTON_PART).ok_or_else(|| CommandError::Invalid("the piston didn't build".into()))?;
+    let piston = build
+        .part(PISTON_PART)
+        .ok_or_else(|| CommandError::Invalid("the piston didn't build".into()))?;
     let at = [r, 0.0, 0.0];
     let edge = piston
         .solid
@@ -224,28 +423,71 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
         .min_by(|a, b| a.distance(at).total_cmp(&b.distance(at)))
         .filter(|e| e.distance(at) < 1e-3)
         .ok_or_else(|| CommandError::Invalid("no bottom edge on the piston".into()))?;
-    s.run(&AddSketch { element: el, feature: CLAMP_SKETCH, plane: Some(PlaneRef::Top) })?;
-    s.run(&RenameFeature { element: el, feature: CLAMP_SKETCH, name: "Clamp sketch".into() })?;
-    let items = vec![(Projected::Circle(v(0.0, 0.0), r), Link::Edge { feature: PISTON.0, edge: edge.name })];
-    s.run(&EditSketch { element: el, feature: CLAMP_SKETCH, op: SketchOp::Use { items } })?;
+    s.run(&AddSketch {
+        element: el,
+        feature: CLAMP_SKETCH,
+        plane: Some(PlaneRef::Top),
+    })?;
+    s.run(&RenameFeature {
+        element: el,
+        feature: CLAMP_SKETCH,
+        name: "Clamp sketch".into(),
+    })?;
+    let items = vec![(
+        Projected::Circle(v(0.0, 0.0), r),
+        Link::Edge {
+            feature: PISTON.0,
+            edge: edge.name,
+        },
+    )];
+    s.run(&EditSketch {
+        element: el,
+        feature: CLAMP_SKETCH,
+        op: SketchOp::Use { items },
+    })?;
     let h = CLAMP_SIDE / 2.0;
     s.run(&EditSketch {
         element: el,
         feature: CLAMP_SKETCH,
-        op: SketchOp::AddPolyline { points: vec![v(-h, -h), v(h, -h), v(h, h), v(-h, h)], closed: true, construction: false, label: "Add rectangle" },
+        op: SketchOp::AddPolyline {
+            points: vec![v(-h, -h), v(h, -h), v(h, h), v(-h, h)],
+            closed: true,
+            construction: false,
+            label: "Add rectangle",
+        },
     })?;
     let g = sketch_of(s, el, CLAMP_SKETCH)?;
     let regions = super::region_refs(CLAMP_SKETCH, &g, &[v(h - 2.0, h - 2.0)]);
-    s.run(&AddExtrude { element: el, feature: CLAMP, extrude: ExtrudeFeature::default() })?;
+    s.run(&AddExtrude {
+        element: el,
+        feature: CLAMP,
+        extrude: ExtrudeFeature::default(),
+    })?;
     s.run(&SetExtrude {
         element: el,
         feature: CLAMP,
-        extrude: ExtrudeFeature { op: BooleanOp::New, flip: true, ..super::extrude_of(regions, CLAMP_THICKNESS) },
+        extrude: ExtrudeFeature {
+            op: BooleanOp::New,
+            flip: true,
+            ..super::extrude_of(regions, CLAMP_THICKNESS)
+        },
         label: "Extrude".into(),
     })?;
-    s.run(&RenameFeature { element: el, feature: CLAMP, name: "Clamp".into() })?;
-    for (part, name) in [(BODY_PART, "Body"), (PISTON_PART, "Piston"), (CLAMP_PART, "Clamp")] {
-        s.run(&RenamePart { element: el, part, name: name.into() })?;
+    s.run(&RenameFeature {
+        element: el,
+        feature: CLAMP,
+        name: "Clamp".into(),
+    })?;
+    for (part, name) in [
+        (BODY_PART, "Body"),
+        (PISTON_PART, "Piston"),
+        (CLAMP_PART, "Clamp"),
+    ] {
+        s.run(&RenamePart {
+            element: el,
+            part,
+            name: name.into(),
+        })?;
     }
     Ok(())
 }

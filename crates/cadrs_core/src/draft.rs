@@ -106,7 +106,11 @@ pub struct ExtrudeDraft {
 
 impl Default for ExtrudeDraft {
     fn default() -> Self {
-        Self { angle: 3.0, expr: "3 deg".into(), flip: false }
+        Self {
+            angle: 3.0,
+            expr: "3 deg".into(),
+            flip: false,
+        }
     }
 }
 

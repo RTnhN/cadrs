@@ -15,7 +15,9 @@
 //!   tabs, *Keep tools*, *Trim to face boundaries* and *Keep both sides* with its flip.
 
 use bevy::prelude::*;
-use cadrs_core::advanced::{LoftCondition, LoftProfile, PathRef, ProfileControl, SplitToolRef, SplitType};
+use cadrs_core::advanced::{
+    LoftCondition, LoftProfile, PathRef, ProfileControl, SplitToolRef, SplitType,
+};
 use cadrs_core::document::{BodyType, BooleanOp, DirectionRef, ThinWall};
 use cadrs_core::plane::{PlaneEntity, PlaneType};
 use cadrs_core::{Feature, FeatureId, FeatureKind};
@@ -62,15 +64,24 @@ pub(crate) fn layout(kind: &FeatureKind) -> Option<String> {
 }
 
 fn name_of(features: &[Feature], id: FeatureId) -> String {
-    features.iter().find(|f| f.id == id).map_or("sketch".into(), |f| f.name.clone())
+    features
+        .iter()
+        .find(|f| f.id == id)
+        .map_or("sketch".into(), |f| f.name.clone())
 }
 
 fn op_name(features: &[Feature], op: cadrs_sketch::OpId) -> String {
-    features.iter().find(|f| f.id.0 == op).map_or("part".into(), |f| f.name.clone())
+    features
+        .iter()
+        .find(|f| f.id.0 == op)
+        .map_or("part".into(), |f| f.name.clone())
 }
 
 fn edge_label(features: &[Feature], e: &cadrs_sketch::EdgeName) -> String {
-    format!("Edge of {}", op_name(features, crate::parts::edge_maker(features, e)))
+    format!(
+        "Edge of {}",
+        op_name(features, crate::parts::edge_maker(features, e))
+    )
 }
 
 /// A whole sketch as a profile: "Face of Sketch 3" or "Faces of Sketch 2".
@@ -79,7 +90,12 @@ fn sketch_label(features: &[Feature], s: FeatureId) -> String {
 }
 
 /// The items of a list.
-pub(crate) fn items(features: &[Feature], cache: &PartCache, kind: &FeatureKind, role: Role) -> Option<Vec<String>> {
+pub(crate) fn items(
+    features: &[Feature],
+    cache: &PartCache,
+    kind: &FeatureKind,
+    role: Role,
+) -> Option<Vec<String>> {
     let parts = |ids: &[cadrs_core::PartId]| crate::applied::part_names(cache, ids);
     Some(match (kind, role) {
         (FeatureKind::Plane(x), Role::PlaneEntities) => x
@@ -89,16 +105,30 @@ pub(crate) fn items(features: &[Feature], cache: &PartCache, kind: &FeatureKind,
                 PlaneEntity::Plane(p) => crate::viewport::plane_label(features, *p),
                 PlaneEntity::Face(f) => format!("Face of {}", op_name(features, f.face.op)),
                 PlaneEntity::Edge(r) => edge_label(features, &r.edge),
-                PlaneEntity::Vertex(v) => format!("Vertex of {}", op_name(features, v.vertex.faces[0].op)),
-                PlaneEntity::SketchPoint { sketch, .. } => format!("Vertex of {}", name_of(features, *sketch)),
-                PlaneEntity::SketchCurve { sketch, .. } => format!("Curve of {}", name_of(features, *sketch)),
+                PlaneEntity::Vertex(v) => {
+                    format!("Vertex of {}", op_name(features, v.vertex.faces[0].op))
+                }
+                PlaneEntity::SketchPoint { sketch, .. } => {
+                    format!("Vertex of {}", name_of(features, *sketch))
+                }
+                PlaneEntity::SketchCurve { sketch, .. } => {
+                    format!("Curve of {}", name_of(features, *sketch))
+                }
                 PlaneEntity::Origin => "Origin".into(),
             })
             .collect(),
         (FeatureKind::Sweep(x), Role::SweepProfile) => {
-            let mut v: Vec<String> = x.regions.iter().map(|r| format!("Face of {}", name_of(features, r.sketch))).collect();
+            let mut v: Vec<String> = x
+                .regions
+                .iter()
+                .map(|r| format!("Face of {}", name_of(features, r.sketch)))
+                .collect();
             v.extend(x.sketches.iter().map(|s| sketch_label(features, *s)));
-            v.extend(x.faces.iter().map(|f| format!("Face of {}", op_name(features, f.face.op))));
+            v.extend(
+                x.faces
+                    .iter()
+                    .map(|f| format!("Face of {}", op_name(features, f.face.op))),
+            );
             v
         }
         (FeatureKind::Sweep(x), Role::SweepPath) => x
@@ -106,30 +136,56 @@ pub(crate) fn items(features: &[Feature], cache: &PartCache, kind: &FeatureKind,
             .iter()
             .map(|p| match p {
                 PathRef::Edge(e) => edge_label(features, &e.edge),
-                PathRef::SketchCurve { sketch, .. } => format!("Curve of {}", name_of(features, *sketch)),
+                PathRef::SketchCurve { sketch, .. } => {
+                    format!("Curve of {}", name_of(features, *sketch))
+                }
                 PathRef::Sketch(s) | PathRef::Curve(s) => name_of(features, *s),
             })
             .collect(),
-        (FeatureKind::Sweep(x), Role::LockDirection) => x.lock_direction.iter().map(|d| direction_label(features, d)).collect(),
-        (FeatureKind::Loft(x), Role::LoftStartDirection) => x.start_direction.iter().map(|d| direction_label(features, d)).collect(),
-        (FeatureKind::Loft(x), Role::LoftEndDirection) => x.end_direction.iter().map(|d| direction_label(features, d)).collect(),
+        (FeatureKind::Sweep(x), Role::LockDirection) => x
+            .lock_direction
+            .iter()
+            .map(|d| direction_label(features, d))
+            .collect(),
+        (FeatureKind::Loft(x), Role::LoftStartDirection) => x
+            .start_direction
+            .iter()
+            .map(|d| direction_label(features, d))
+            .collect(),
+        (FeatureKind::Loft(x), Role::LoftEndDirection) => x
+            .end_direction
+            .iter()
+            .map(|d| direction_label(features, d))
+            .collect(),
         (FeatureKind::Sweep(x), Role::MergeScope) => parts(&x.merge_scope),
         (FeatureKind::Loft(x), Role::LoftProfiles) => x
             .profiles
             .iter()
             .map(|p| match p {
-                LoftProfile::Regions { sketch, regions } if regions.len() > 1 => format!("Faces of {}", name_of(features, *sketch)),
-                LoftProfile::Regions { sketch, .. } => format!("Face of {}", name_of(features, *sketch)),
+                LoftProfile::Regions { sketch, regions } if regions.len() > 1 => {
+                    format!("Faces of {}", name_of(features, *sketch))
+                }
+                LoftProfile::Regions { sketch, .. } => {
+                    format!("Face of {}", name_of(features, *sketch))
+                }
                 LoftProfile::Sketch(s) => sketch_label(features, *s),
                 LoftProfile::Face(f) => format!("Face of {}", op_name(features, f.face.op)),
-                LoftProfile::SketchPoint { sketch, .. } => format!("Vertex of {}", name_of(features, *sketch)),
-                LoftProfile::Vertex(v) => format!("Vertex of {}", op_name(features, v.vertex.faces[0].op)),
+                LoftProfile::SketchPoint { sketch, .. } => {
+                    format!("Vertex of {}", name_of(features, *sketch))
+                }
+                LoftProfile::Vertex(v) => {
+                    format!("Vertex of {}", op_name(features, v.vertex.faces[0].op))
+                }
             })
             .collect(),
         (FeatureKind::Loft(x), Role::MergeScope) => parts(&x.merge_scope),
         (FeatureKind::Split(x), Role::SplitParts) => match x.split_type {
             SplitType::Part => parts(&x.parts),
-            SplitType::Face => x.faces.iter().map(|f| format!("Face of {}", op_name(features, f.face.op))).collect(),
+            SplitType::Face => x
+                .faces
+                .iter()
+                .map(|f| format!("Face of {}", op_name(features, f.face.op)))
+                .collect(),
         },
         (FeatureKind::Split(x), Role::SplitTool) => x
             .tool
@@ -148,7 +204,9 @@ pub(crate) fn items(features: &[Feature], cache: &PartCache, kind: &FeatureKind,
 fn direction_label(features: &[Feature], d: &DirectionRef) -> String {
     match d {
         DirectionRef::Edge(r) => edge_label(features, &r.edge),
-        DirectionRef::SketchLine { sketch, .. } => format!("Line of {}", name_of(features, *sketch)),
+        DirectionRef::SketchLine { sketch, .. } => {
+            format!("Line of {}", name_of(features, *sketch))
+        }
         DirectionRef::FaceNormal(f) => format!("Face of {}", op_name(features, f.face.op)),
         DirectionRef::PlaneNormal(p) => crate::viewport::plane_label(features, *p),
         DirectionRef::Connector(c) => c.label(features),
@@ -183,91 +241,252 @@ fn body_tabs(b: &mut ChildSpawner, t: &Theme, name: &str, body: BodyType, op: Bo
     };
     b.spawn((
         Role::BodyTab,
-        TabStrip::new(format!("{name}-body-type")).compact().tab("Solid").tab("Surface").tab("Thin").selected(i).build(t),
+        TabStrip::new(format!("{name}-body-type"))
+            .compact()
+            .tab("Solid")
+            .tab("Surface")
+            .tab("Thin")
+            .selected(i)
+            .build(t),
     ));
     if body != BodyType::Surface {
         let mut strip = TabStrip::new(format!("{name}-operation")).compact();
         for o in BooleanOp::ALL {
             strip = strip.tab(o.label());
         }
-        b.spawn((Role::OpTab, strip.selected(index_of(&BooleanOp::ALL, &op)).build(t)));
+        b.spawn((
+            Role::OpTab,
+            strip.selected(index_of(&BooleanOp::ALL, &op)).build(t),
+        ));
     }
 }
 
 /// Thin's rows: Thickness 1 with the Flip wall button, Mid plane, Thickness 2.
 fn thin_rows(b: &mut ChildSpawner, t: &Theme, name: &str, thin: &ThinWall) {
-    b.spawn(Node { align_items: AlignItems::Center, column_gap: Val::Px(4.0), ..default() }).with_children(|r| {
+    b.spawn(Node {
+        align_items: AlignItems::Center,
+        column_gap: Val::Px(4.0),
+        ..default()
+    })
+    .with_children(|r| {
         r.spawn((
             Role::Thickness1,
-            NumberField::new(format!("{name}-thickness1"), "Thickness 1").text(thin.thickness1_expr.clone()).label_width(70.0).build(t),
+            NumberField::new(format!("{name}-thickness1"), "Thickness 1")
+                .text(thin.thickness1_expr.clone())
+                .label_width(70.0)
+                .build(t),
         ))
         .entry::<Node>()
         .and_modify(|mut n| n.flex_grow = 1.0);
-        flip_button_any(r, t, &format!("{name}-flip-wall"), Role::FlipWall, thin.flip_wall, "Flip wall");
+        flip_button_any(
+            r,
+            t,
+            &format!("{name}-flip-wall"),
+            Role::FlipWall,
+            thin.flip_wall,
+            "Flip wall",
+        );
     });
-    b.spawn(OptionRow::new(format!("{name}-mid-plane"), "Mid plane").checked(thin.mid_plane).build(t));
+    b.spawn(
+        OptionRow::new(format!("{name}-mid-plane"), "Mid plane")
+            .checked(thin.mid_plane)
+            .build(t),
+    );
     if !thin.mid_plane {
         b.spawn((
             Role::Thickness2,
-            NumberField::new(format!("{name}-thickness2"), "Thickness 2").text(thin.thickness2_expr.clone()).label_width(70.0).build(t),
+            NumberField::new(format!("{name}-thickness2"), "Thickness 2")
+                .text(thin.thickness2_expr.clone())
+                .label_width(70.0)
+                .build(t),
         ));
     }
 }
 
 /// Merge with all and the Merge scope (for Add, Remove and Intersect).
-fn merge_rows(b: &mut ChildSpawner, t: &Theme, name: &str, merge_all: bool, items: Vec<String>, active: bool) {
-    b.spawn(OptionRow::new(format!("{name}-merge-all"), "Merge with all").checked(merge_all).build(t));
+fn merge_rows(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    name: &str,
+    merge_all: bool,
+    items: Vec<String>,
+    active: bool,
+) {
+    b.spawn(
+        OptionRow::new(format!("{name}-merge-all"), "Merge with all")
+            .checked(merge_all)
+            .build(t),
+    );
     if !merge_all {
-        list(b, t, &format!("{name}-merge-scope-field"), "Merge scope", Role::MergeScope, items, active);
+        list(
+            b,
+            t,
+            &format!("{name}-merge-scope-field"),
+            "Merge scope",
+            Role::MergeScope,
+            items,
+            active,
+        );
     }
 }
 
 /// A select with its label above it ("Start profile condition").
-fn stacked_select(b: &mut ChildSpawner, t: &Theme, name: &str, label: &str, role: Role, options: &[(String, bool)], selected: usize) {
+fn stacked_select(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    name: &str,
+    label: &str,
+    role: Role,
+    options: &[(String, bool)],
+    selected: usize,
+) {
     b.spawn((
-        t.text(label, t.font_sm, bevy::text::FontWeight::NORMAL, t.muted_foreground),
-        Node { margin: UiRect::top(Val::Px(4.0)), ..default() },
+        t.text(
+            label,
+            t.font_sm,
+            bevy::text::FontWeight::NORMAL,
+            t.muted_foreground,
+        ),
+        Node {
+            margin: UiRect::top(Val::Px(4.0)),
+            ..default()
+        },
     ));
     select_row(b, t, name, "", role, options, selected, None);
 }
 
 /// The rows of the dialog's body.
-pub(crate) fn body(b: &mut ChildSpawner, t: &Theme, kind: &FeatureKind, field: AppliedField, items_of: &dyn Fn(Role) -> Vec<String>) {
+pub(crate) fn body(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    kind: &FeatureKind,
+    field: AppliedField,
+    items_of: &dyn Fn(Role) -> Vec<String>,
+) {
     match kind {
         FeatureKind::Plane(x) => body_column(b, |b| {
-            list(b, t, "plane-entities-field", "Entities", Role::PlaneEntities, items_of(Role::PlaneEntities), field == AppliedField::PlaneEntities);
-            select_row(b, t, "plane-type", "", Role::PlaneType, &opts(&PlaneType::ALL, |m| m.label(), |_| true), index_of(&PlaneType::ALL, &x.kind), None);
+            list(
+                b,
+                t,
+                "plane-entities-field",
+                "Entities",
+                Role::PlaneEntities,
+                items_of(Role::PlaneEntities),
+                field == AppliedField::PlaneEntities,
+            );
+            select_row(
+                b,
+                t,
+                "plane-type",
+                "",
+                Role::PlaneType,
+                &opts(&PlaneType::ALL, |m| m.label(), |_| true),
+                index_of(&PlaneType::ALL, &x.kind),
+                None,
+            );
             match x.kind {
-                PlaneType::Offset => number(b, t, "plane-offset", "Offset distance", Role::PlaneOffset, &x.offset_expr, Some(x.flip)),
+                PlaneType::Offset => number(
+                    b,
+                    t,
+                    "plane-offset",
+                    "Offset distance",
+                    Role::PlaneOffset,
+                    &x.offset_expr,
+                    Some(x.flip),
+                ),
                 // Tangent: the angle round the face's axis (without a point), and which of the two
                 // tangents through a point outside it.
                 PlaneType::LineAngle | PlaneType::Tangent => {
-                    number(b, t, "plane-angle", "Angle", Role::PlaneAngle, &x.angle_expr, Some(x.flip));
-                    b.spawn(OptionRow::new("plane-flip-alignment", "Flip alignment").checked(x.flip_alignment).build(t));
+                    number(
+                        b,
+                        t,
+                        "plane-angle",
+                        "Angle",
+                        Role::PlaneAngle,
+                        &x.angle_expr,
+                        Some(x.flip),
+                    );
+                    b.spawn(
+                        OptionRow::new("plane-flip-alignment", "Flip alignment")
+                            .checked(x.flip_alignment)
+                            .build(t),
+                    );
                 }
                 // Mid plane of two planes at an angle: which bisector.
                 PlaneType::MidPlane => {
-                    b.spawn(OptionRow::new("plane-flip-alignment", "Flip alignment").checked(x.flip_alignment).build(t));
+                    b.spawn(
+                        OptionRow::new("plane-flip-alignment", "Flip alignment")
+                            .checked(x.flip_alignment)
+                            .build(t),
+                    );
                 }
                 _ => {}
             }
-            b.spawn(OptionRow::new("plane-flip-normal", "Flip normal").checked(x.flip_normal).build(t));
+            b.spawn(
+                OptionRow::new("plane-flip-normal", "Flip normal")
+                    .checked(x.flip_normal)
+                    .build(t),
+            );
         }),
         FeatureKind::Sweep(x) => {
             body_tabs(b, t, "sweep", x.body, x.op);
             body_column(b, |b| {
-                let what = if x.body == BodyType::Surface { "Edges and sketch curves to sweep" } else { "Faces and sketch regions to sweep" };
-                list(b, t, "sweep-profile-field", what, Role::SweepProfile, items_of(Role::SweepProfile), field == AppliedField::Profile);
-                list(b, t, "sweep-path-field", "Sweep path", Role::SweepPath, items_of(Role::SweepPath), field == AppliedField::Path);
+                let what = if x.body == BodyType::Surface {
+                    "Edges and sketch curves to sweep"
+                } else {
+                    "Faces and sketch regions to sweep"
+                };
+                list(
+                    b,
+                    t,
+                    "sweep-profile-field",
+                    what,
+                    Role::SweepProfile,
+                    items_of(Role::SweepProfile),
+                    field == AppliedField::Profile,
+                );
+                list(
+                    b,
+                    t,
+                    "sweep-path-field",
+                    "Sweep path",
+                    Role::SweepPath,
+                    items_of(Role::SweepPath),
+                    field == AppliedField::Path,
+                );
                 if x.body == BodyType::Thin {
                     thin_rows(b, t, "sweep", &x.thin);
                 }
-                select_row(b, t, "sweep-profile-control", "", Role::ProfileControl, &opts(&ProfileControl::ALL, |m| m.label(), |_| true), index_of(&ProfileControl::ALL, &x.control), None);
+                select_row(
+                    b,
+                    t,
+                    "sweep-profile-control",
+                    "",
+                    Role::ProfileControl,
+                    &opts(&ProfileControl::ALL, |m| m.label(), |_| true),
+                    index_of(&ProfileControl::ALL, &x.control),
+                    None,
+                );
                 if x.control == ProfileControl::LockDirection {
-                    list(b, t, "sweep-direction-field", "Direction", Role::LockDirection, items_of(Role::LockDirection), field == AppliedField::LockDirection);
+                    list(
+                        b,
+                        t,
+                        "sweep-direction-field",
+                        "Direction",
+                        Role::LockDirection,
+                        items_of(Role::LockDirection),
+                        field == AppliedField::LockDirection,
+                    );
                 }
                 if x.op != BooleanOp::New && x.body != BodyType::Surface {
-                    merge_rows(b, t, "sweep", x.merge_all, items_of(Role::MergeScope), field == AppliedField::MergeScope);
+                    merge_rows(
+                        b,
+                        t,
+                        "sweep",
+                        x.merge_all,
+                        items_of(Role::MergeScope),
+                        field == AppliedField::MergeScope,
+                    );
                 }
             });
         }
@@ -292,29 +511,94 @@ pub(crate) fn body(b: &mut ChildSpawner, t: &Theme, kind: &FeatureKind, field: A
                 if x.body == BodyType::Thin {
                     thin_rows(b, t, "loft", &x.thin);
                 }
-                b.spawn(Node { align_items: AlignItems::Center, column_gap: Val::Px(4.0), margin: UiRect::top(Val::Px(6.0)), ..default() })
-                    .with_children(|r| {
-                        r.spawn(icon("chevron-down", 12.0, t.foreground));
-                        r.spawn(t.text("End conditions", t.font_base, bevy::text::FontWeight::NORMAL, t.foreground));
-                    });
+                b.spawn(Node {
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(4.0),
+                    margin: UiRect::top(Val::Px(6.0)),
+                    ..default()
+                })
+                .with_children(|r| {
+                    r.spawn(icon("chevron-down", 12.0, t.foreground));
+                    r.spawn(t.text(
+                        "End conditions",
+                        t.font_base,
+                        bevy::text::FontWeight::NORMAL,
+                        t.foreground,
+                    ));
+                });
                 let conditions = opts(&LoftCondition::ALL, |c| c.label(), |c| c.available());
-                stacked_select(b, t, "loft-start-condition", "Start profile condition", Role::StartCondition, &conditions, index_of(&LoftCondition::ALL, &x.start));
+                stacked_select(
+                    b,
+                    t,
+                    "loft-start-condition",
+                    "Start profile condition",
+                    Role::StartCondition,
+                    &conditions,
+                    index_of(&LoftCondition::ALL, &x.start),
+                );
                 // P3.11 (PS20.4): Normal direction and Tangent direction take a picked vector.
                 if x.start.takes_direction() {
-                    list(b, t, "loft-start-direction-field", "Start direction", Role::LoftStartDirection, items_of(Role::LoftStartDirection), field == AppliedField::LoftStartDirection);
+                    list(
+                        b,
+                        t,
+                        "loft-start-direction-field",
+                        "Start direction",
+                        Role::LoftStartDirection,
+                        items_of(Role::LoftStartDirection),
+                        field == AppliedField::LoftStartDirection,
+                    );
                 }
                 if x.start.has_magnitude() {
-                    number(b, t, "loft-start-magnitude", "Start magnitude", Role::StartMagnitude, &x.start_magnitude_expr, None);
+                    number(
+                        b,
+                        t,
+                        "loft-start-magnitude",
+                        "Start magnitude",
+                        Role::StartMagnitude,
+                        &x.start_magnitude_expr,
+                        None,
+                    );
                 }
-                stacked_select(b, t, "loft-end-condition", "End profile condition", Role::EndCondition, &conditions, index_of(&LoftCondition::ALL, &x.end));
+                stacked_select(
+                    b,
+                    t,
+                    "loft-end-condition",
+                    "End profile condition",
+                    Role::EndCondition,
+                    &conditions,
+                    index_of(&LoftCondition::ALL, &x.end),
+                );
                 if x.end.takes_direction() {
-                    list(b, t, "loft-end-direction-field", "End direction", Role::LoftEndDirection, items_of(Role::LoftEndDirection), field == AppliedField::LoftEndDirection);
+                    list(
+                        b,
+                        t,
+                        "loft-end-direction-field",
+                        "End direction",
+                        Role::LoftEndDirection,
+                        items_of(Role::LoftEndDirection),
+                        field == AppliedField::LoftEndDirection,
+                    );
                 }
                 if x.end.has_magnitude() {
-                    number(b, t, "loft-end-magnitude", "End magnitude", Role::EndMagnitude, &x.end_magnitude_expr, None);
+                    number(
+                        b,
+                        t,
+                        "loft-end-magnitude",
+                        "End magnitude",
+                        Role::EndMagnitude,
+                        &x.end_magnitude_expr,
+                        None,
+                    );
                 }
                 if x.op != BooleanOp::New && x.body != BodyType::Surface {
-                    merge_rows(b, t, "loft", x.merge_all, items_of(Role::MergeScope), field == AppliedField::MergeScope);
+                    merge_rows(
+                        b,
+                        t,
+                        "loft",
+                        x.merge_all,
+                        items_of(Role::MergeScope),
+                        field == AppliedField::MergeScope,
+                    );
                 }
             });
         }
@@ -323,32 +607,81 @@ pub(crate) fn body(b: &mut ChildSpawner, t: &Theme, kind: &FeatureKind, field: A
         FeatureKind::Split(x) => {
             b.spawn((
                 Role::SplitTypeTab,
-                TabStrip::new("split-type").compact().tab("Part").tab("Face").selected(index_of(&SplitType::ALL, &x.split_type)).build(t),
+                TabStrip::new("split-type")
+                    .compact()
+                    .tab("Part")
+                    .tab("Face")
+                    .selected(index_of(&SplitType::ALL, &x.split_type))
+                    .build(t),
             ));
             body_column(b, |b| {
                 let what = match x.split_type {
                     SplitType::Part => "Parts or surfaces to split",
                     SplitType::Face => "Faces to split",
                 };
-                list(b, t, "split-parts-field", what, Role::SplitParts, items_of(Role::SplitParts), field == AppliedField::SplitParts);
-                list(b, t, "split-tool-field", "Entity to split with", Role::SplitTool, items_of(Role::SplitTool), field == AppliedField::SplitTool);
+                list(
+                    b,
+                    t,
+                    "split-parts-field",
+                    what,
+                    Role::SplitParts,
+                    items_of(Role::SplitParts),
+                    field == AppliedField::SplitParts,
+                );
+                list(
+                    b,
+                    t,
+                    "split-tool-field",
+                    "Entity to split with",
+                    Role::SplitTool,
+                    items_of(Role::SplitTool),
+                    field == AppliedField::SplitTool,
+                );
                 match x.split_type {
                     SplitType::Part => {
-                        b.spawn(OptionRow::new("split-keep-tools", "Keep tools").checked(x.keep_tools).build(t));
+                        b.spawn(
+                            OptionRow::new("split-keep-tools", "Keep tools")
+                                .checked(x.keep_tools)
+                                .build(t),
+                        );
                         if matches!(x.tool, Some(SplitToolRef::Face(_))) {
-                            b.spawn(OptionRow::new("split-trim", "Trim to face boundaries").checked(x.trim).build(t));
+                            b.spawn(
+                                OptionRow::new("split-trim", "Trim to face boundaries")
+                                    .checked(x.trim)
+                                    .build(t),
+                            );
                         }
-                        b.spawn(Node { align_items: AlignItems::Center, column_gap: Val::Px(4.0), ..default() }).with_children(|r| {
-                            r.spawn(OptionRow::new("split-keep-both", "Keep both sides").checked(x.keep_both).build(t))
-                                .entry::<Node>()
-                                .and_modify(|mut n| n.flex_grow = 1.0);
+                        b.spawn(Node {
+                            align_items: AlignItems::Center,
+                            column_gap: Val::Px(4.0),
+                            ..default()
+                        })
+                        .with_children(|r| {
+                            r.spawn(
+                                OptionRow::new("split-keep-both", "Keep both sides")
+                                    .checked(x.keep_both)
+                                    .build(t),
+                            )
+                            .entry::<Node>()
+                            .and_modify(|mut n| n.flex_grow = 1.0);
                             if !x.keep_both {
-                                flip_button_any(r, t, "split-flip", Role::Flip, x.flip, "Opposite direction");
+                                flip_button_any(
+                                    r,
+                                    t,
+                                    "split-flip",
+                                    Role::Flip,
+                                    x.flip,
+                                    "Opposite direction",
+                                );
                             }
                         });
                     }
                     SplitType::Face => {
-                        b.spawn(OptionRow::new("split-keep-tools", "Keep tool surfaces and curves").checked(x.keep_tools).build(t));
+                        b.spawn(
+                            OptionRow::new("split-keep-tools", "Keep tool surfaces and curves")
+                                .checked(x.keep_tools)
+                                .build(t),
+                        );
                     }
                 }
             });
@@ -421,10 +754,16 @@ pub(crate) fn tab(k: &mut FeatureKind, role: Role, i: usize) {
 
 pub(crate) fn select(k: &mut FeatureKind, role: Role, i: usize) {
     match (k, role) {
-        (FeatureKind::Plane(x), Role::PlaneType) => x.kind = PlaneType::ALL[i.min(PlaneType::ALL.len() - 1)],
+        (FeatureKind::Plane(x), Role::PlaneType) => {
+            x.kind = PlaneType::ALL[i.min(PlaneType::ALL.len() - 1)]
+        }
         (FeatureKind::Sweep(x), Role::ProfileControl) => x.control = ProfileControl::ALL[i.min(2)],
-        (FeatureKind::Loft(x), Role::StartCondition) => x.start = LoftCondition::ALL[i.min(LoftCondition::ALL.len() - 1)],
-        (FeatureKind::Loft(x), Role::EndCondition) => x.end = LoftCondition::ALL[i.min(LoftCondition::ALL.len() - 1)],
+        (FeatureKind::Loft(x), Role::StartCondition) => {
+            x.start = LoftCondition::ALL[i.min(LoftCondition::ALL.len() - 1)]
+        }
+        (FeatureKind::Loft(x), Role::EndCondition) => {
+            x.end = LoftCondition::ALL[i.min(LoftCondition::ALL.len() - 1)]
+        }
         (k, r) => crate::pattern_dialog::select(k, r, i),
     }
 }
@@ -596,16 +935,14 @@ pub(crate) fn remove(k: &mut FeatureKind, role: Role, i: usize) {
         (FeatureKind::Loft(x), Role::MergeScope) => {
             take(&mut x.merge_scope, i);
         }
-        (FeatureKind::Split(x), Role::SplitParts) => {
-            match x.split_type {
-                SplitType::Part => {
-                    take(&mut x.parts, i);
-                }
-                SplitType::Face => {
-                    take(&mut x.faces, i);
-                }
+        (FeatureKind::Split(x), Role::SplitParts) => match x.split_type {
+            SplitType::Part => {
+                take(&mut x.parts, i);
             }
-        }
+            SplitType::Face => {
+                take(&mut x.faces, i);
+            }
+        },
         (FeatureKind::Split(x), Role::SplitTool) => x.tool = None,
         (k, r) => crate::pattern_dialog::remove(k, r, i),
     }
@@ -631,9 +968,14 @@ mod tests {
     fn a_dragged_profile_moves() {
         let ids = [FeatureId::new(), FeatureId::new(), FeatureId::new()];
         let s = |i: usize| LoftProfile::Sketch(ids[i]);
-        let mut k = FeatureKind::Loft(LoftFeature { profiles: vec![s(0), s(1), s(2)], ..LoftFeature::default() });
+        let mut k = FeatureKind::Loft(LoftFeature {
+            profiles: vec![s(0), s(1), s(2)],
+            ..LoftFeature::default()
+        });
         move_item(&mut k, Role::LoftProfiles, 0, 2);
-        let FeatureKind::Loft(x) = &k else { unreachable!() };
+        let FeatureKind::Loft(x) = &k else {
+            unreachable!()
+        };
         assert_eq!(x.profiles, vec![s(1), s(2), s(0)]);
     }
 }

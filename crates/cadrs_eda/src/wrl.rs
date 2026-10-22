@@ -79,7 +79,10 @@ impl<'a> Parser<'a> {
 
     /// A node: `Kind { field value … }` (the kind already read).
     fn node(&mut self, kind: &str) -> Node {
-        let mut n = Node { kind: kind.to_string(), fields: vec![] };
+        let mut n = Node {
+            kind: kind.to_string(),
+            fields: vec![],
+        };
         if self.peek() != Some("{") {
             return n;
         }
@@ -123,7 +126,11 @@ impl<'a> Parser<'a> {
                         nodes.push(self.value());
                     }
                 }
-                if nodes.is_empty() { Value::Numbers(nums) } else { Value::Nodes(nodes) }
+                if nodes.is_empty() {
+                    Value::Numbers(nums)
+                } else {
+                    Value::Nodes(nodes)
+                }
             }
             Some(t) if t.parse::<f64>().is_ok() => {
                 let mut nums = vec![];
@@ -133,7 +140,10 @@ impl<'a> Parser<'a> {
                 }
                 Value::Numbers(nums)
             }
-            Some(t) if t.chars().next().is_some_and(|c| c.is_ascii_uppercase()) && self.t.get(self.i + 1) == Some(&"{") => {
+            Some(t)
+                if t.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+                    && self.t.get(self.i + 1) == Some(&"{") =>
+            {
                 self.i += 1;
                 Value::Node(Box::new(self.node(t)))
             }
@@ -161,7 +171,10 @@ struct Affine {
 }
 
 impl Affine {
-    const ID: Affine = Affine { m: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], t: [0.0; 3] };
+    const ID: Affine = Affine {
+        m: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        t: [0.0; 3],
+    };
 
     fn apply(&self, p: [f64; 3]) -> [f64; 3] {
         let mut out = self.t;
@@ -179,7 +192,10 @@ impl Affine {
                 *x = (0..3).map(|k| self.m[r][k] * inner.m[k][c]).sum();
             }
         }
-        Affine { m, t: self.apply(inner.t) }
+        Affine {
+            m,
+            t: self.apply(inner.t),
+        }
     }
 
     /// A `Transform` node's translation · rotation (axis, angle) · scale.
@@ -188,8 +204,12 @@ impl Affine {
             Some(Value::Numbers(v)) => Some(v.clone()),
             _ => None,
         };
-        let t = nums("translation").filter(|v| v.len() == 3).map_or([0.0; 3], |v| [v[0], v[1], v[2]]);
-        let s = nums("scale").filter(|v| v.len() == 3).map_or([1.0; 3], |v| [v[0], v[1], v[2]]);
+        let t = nums("translation")
+            .filter(|v| v.len() == 3)
+            .map_or([0.0; 3], |v| [v[0], v[1], v[2]]);
+        let s = nums("scale")
+            .filter(|v| v.len() == 3)
+            .map_or([1.0; 3], |v| [v[0], v[1], v[2]]);
         let r = nums("rotation").filter(|v| v.len() == 4);
         let mut rot = Affine::ID.m;
         if let Some(r) = r {
@@ -198,7 +218,11 @@ impl Affine {
                 let (x, y, z) = (r[0] / len, r[1] / len, r[2] / len);
                 let (c, sn) = (r[3].cos(), r[3].sin());
                 let k = 1.0 - c;
-                rot = [[c + x * x * k, x * y * k - z * sn, x * z * k + y * sn], [y * x * k + z * sn, c + y * y * k, y * z * k - x * sn], [z * x * k - y * sn, z * y * k + x * sn, c + z * z * k]];
+                rot = [
+                    [c + x * x * k, x * y * k - z * sn, x * z * k + y * sn],
+                    [y * x * k + z * sn, c + y * y * k, y * z * k - x * sn],
+                    [z * x * k - y * sn, z * y * k + x * sn, c + z * z * k],
+                ];
             }
         }
         let mut m = [[0.0; 3]; 3];
@@ -245,29 +269,50 @@ fn shape(p: &Parser, n: &Node, at: Affine, out: &mut Vec<Mesh>) {
     let material = node(p, n.get("appearance")).and_then(|a| node(p, a.get("material")));
     let color: Rgb = material
         .and_then(|m| match m.get("diffuseColor") {
-            Some(Value::Numbers(c)) if c.len() == 3 => Some([0, 1, 2].map(|i| (c[i].clamp(0.0, 1.0) * 255.0).round() as u8)),
+            Some(Value::Numbers(c)) if c.len() == 3 => {
+                Some([0, 1, 2].map(|i| (c[i].clamp(0.0, 1.0) * 255.0).round() as u8))
+            }
             _ => None,
         })
         .unwrap_or([180, 180, 180]);
-    let Some(geom) = node(p, n.get("geometry")) else { return };
+    let Some(geom) = node(p, n.get("geometry")) else {
+        return;
+    };
     if geom.kind != "IndexedFaceSet" {
         return;
     }
-    let Some(coord) = node(p, geom.get("coord")) else { return };
-    let Some(Value::Numbers(pts)) = coord.get("point").map(|v| p.resolve(v)) else { return };
-    let Some(Value::Numbers(idx)) = geom.get("coordIndex").map(|v| p.resolve(v)) else { return };
-    let points: Vec<[f64; 3]> = pts.as_chunks::<3>().0.iter().map(|c| at.apply(*c)).collect();
+    let Some(coord) = node(p, geom.get("coord")) else {
+        return;
+    };
+    let Some(Value::Numbers(pts)) = coord.get("point").map(|v| p.resolve(v)) else {
+        return;
+    };
+    let Some(Value::Numbers(idx)) = geom.get("coordIndex").map(|v| p.resolve(v)) else {
+        return;
+    };
+    let points: Vec<[f64; 3]> = pts
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .map(|c| at.apply(*c))
+        .collect();
     let i = match out.iter().position(|m| m.color == color) {
         Some(i) => i,
         None => {
-            out.push(Mesh { color, ..Default::default() });
+            out.push(Mesh {
+                color,
+                ..Default::default()
+            });
             out.len() - 1
         }
     };
     let m = &mut out[i];
     let mut face: Vec<usize> = vec![];
     let flush = |face: &mut Vec<usize>, m: &mut Mesh| {
-        let f: Vec<[f64; 3]> = face.iter().filter_map(|&k| points.get(k).copied()).collect();
+        let f: Vec<[f64; 3]> = face
+            .iter()
+            .filter_map(|&k| points.get(k).copied())
+            .collect();
         face.clear();
         if f.len() < 3 {
             return;
@@ -280,8 +325,14 @@ fn shape(p: &Parser, n: &Node, at: Affine, out: &mut Vec<Mesh>) {
             nrm[1] += (a[2] - b[2]) * (a[0] + b[0]);
             nrm[2] += (a[0] - b[0]) * (a[1] + b[1]);
         }
-        let l = (nrm[0] * nrm[0] + nrm[1] * nrm[1] + nrm[2] * nrm[2]).sqrt().max(1e-12);
-        let n32 = [(nrm[0] / l) as f32, (nrm[1] / l) as f32, (nrm[2] / l) as f32];
+        let l = (nrm[0] * nrm[0] + nrm[1] * nrm[1] + nrm[2] * nrm[2])
+            .sqrt()
+            .max(1e-12);
+        let n32 = [
+            (nrm[0] / l) as f32,
+            (nrm[1] / l) as f32,
+            (nrm[2] / l) as f32,
+        ];
         for k in 1..f.len() - 1 {
             for q in [f[0], f[k], f[k + 1]] {
                 m.indices.push(m.positions.len() as u32);
@@ -305,7 +356,11 @@ pub fn read(text: &str) -> Result<Vec<Mesh>, String> {
     if !text.trim_start().starts_with("#VRML V2.0") {
         return Err("Not a VRML 2.0 file".into());
     }
-    let mut p = Parser { t: tokens(text), i: 0, defs: HashMap::new() };
+    let mut p = Parser {
+        t: tokens(text),
+        i: 0,
+        defs: HashMap::new(),
+    };
     let mut top = vec![];
     while let Some(t) = p.peek() {
         let v = p.value();
@@ -351,26 +406,42 @@ mod tests {
 
     #[test]
     fn reads_the_test_fixture() {
-        let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/eda/test_part.wrl")).unwrap();
+        let text = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/eda/test_part.wrl"
+        ))
+        .unwrap();
         let m = read(&text).unwrap();
         // The body and its two ends (one shared geometry, moved apart).
         assert_eq!(m.len(), 2);
         assert_eq!(m.iter().map(|m| m.indices.len() / 3).sum::<usize>(), 36);
         let xs: Vec<f32> = m[1].positions.iter().map(|p| p[0]).collect();
-        let (lo, hi) = (xs.iter().cloned().fold(f32::MAX, f32::min), xs.iter().cloned().fold(f32::MIN, f32::max));
-        assert!((hi - 0.7874).abs() < 1e-3 && (lo + 0.7874).abs() < 1e-3, "{lo} {hi}");
+        let (lo, hi) = (
+            xs.iter().cloned().fold(f32::MAX, f32::min),
+            xs.iter().cloned().fold(f32::MIN, f32::max),
+        );
+        assert!(
+            (hi - 0.7874).abs() < 1e-3 && (lo + 0.7874).abs() < 1e-3,
+            "{lo} {hi}"
+        );
     }
 
     /// The target project's LoRa module model, when it is on this machine.
     #[test]
     fn reads_an_easyeda_model() {
         let path = std::path::Path::new(&std::env::var("HOME").unwrap_or_default()).join("work/desk_power_monitor/hardware/desk_power_monitor_mini32_lora/library/easyeda2kicad.3dshapes/WIRELM-SMD_RA-01SH.wrl");
-        let Ok(text) = std::fs::read_to_string(&path) else { return };
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            return;
+        };
         let m = read(&text).unwrap();
         let tris: usize = m.iter().map(|m| m.indices.len() / 3).sum();
         assert!(tris > 100, "{tris}");
         // 16 mm wide: ±3.15 units of 2.54 mm.
-        let xmax = m.iter().flat_map(|m| m.positions.iter()).map(|p| p[0]).fold(f32::MIN, f32::max);
+        let xmax = m
+            .iter()
+            .flat_map(|m| m.positions.iter())
+            .map(|p| p[0])
+            .fold(f32::MIN, f32::max);
         assert!((xmax as f64 * KICAD_UNIT_MM - 8.0).abs() < 0.2, "{xmax}");
     }
 }

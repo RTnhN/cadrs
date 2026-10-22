@@ -8,18 +8,30 @@ mod smlib_common;
 #[allow(unused_imports)]
 use smlib_common::*;
 
+use cadrs_kernel::native::NativeKernel;
 use cadrs_kernel::native::mass;
 use cadrs_kernel::native::smb;
 use cadrs_kernel::native::surface::Surface;
-use cadrs_kernel::native::NativeKernel;
 
 const SUITE: &str = "brep_import";
 
 /// The area of `s` over its parameter box, |Su × Sv| integrated by 5-point Gauss–Legendre on a
 /// 32 × 32 grid.
 fn surface_area(s: &Surface) -> f64 {
-    const X: [f64; 5] = [-0.906_179_845_938_664, -0.538_469_310_105_683, 0.0, 0.538_469_310_105_683, 0.906_179_845_938_664];
-    const W: [f64; 5] = [0.236_926_885_056_189, 0.478_628_670_499_366, 0.568_888_888_888_889, 0.478_628_670_499_366, 0.236_926_885_056_189];
+    const X: [f64; 5] = [
+        -0.906_179_845_938_664,
+        -0.538_469_310_105_683,
+        0.0,
+        0.538_469_310_105_683,
+        0.906_179_845_938_664,
+    ];
+    const W: [f64; 5] = [
+        0.236_926_885_056_189,
+        0.478_628_670_499_366,
+        0.568_888_888_888_889,
+        0.478_628_670_499_366,
+        0.236_926_885_056_189,
+    ];
     let ((u0, u1), (v0, v1)) = s.param_box();
     let n = 32;
     let (hu, hv) = ((u1 - u0) / n as f64, (v1 - v0) / n as f64);
@@ -42,21 +54,39 @@ fn surface_area(s: &Surface) -> f64 {
 /// `my_test_MakeFace`: `file` holds `surfaces` surfaces, `curves` curves and no B-reps; its
 /// surface made a face has `faces` faces, `edges` edges and `verts` vertices, and the surface's
 /// area.
-fn make_face(file: &str, surfaces: usize, curves: usize, faces: usize, edges: usize, verts: usize) -> Result<(), String> {
+fn make_face(
+    file: &str,
+    surfaces: usize,
+    curves: usize,
+    faces: usize,
+    edges: usize,
+    verts: usize,
+) -> Result<(), String> {
     let bytes = std::fs::read(data(SUITE, file)).map_err(|e| format!("{file}: {e}"))?;
     let p = smb::read_part(&bytes)?;
     if (p.surfaces.len(), p.curves.len(), p.breps.len()) != (surfaces, curves, 0) {
-        return Err(format!("{} surfaces, {} curves, {} B-reps", p.surfaces.len(), p.curves.len(), p.breps.len()));
+        return Err(format!(
+            "{} surfaces, {} curves, {} B-reps",
+            p.surfaces.len(),
+            p.curves.len(),
+            p.breps.len()
+        ));
     }
     let mut k = NativeKernel::new();
-    let id = k.face_from_bare_surface(&p.surfaces[0], None).map_err(|e| format!("{e:?}"))?;
+    let id = k
+        .face_from_bare_surface(&p.surfaces[0], None)
+        .map_err(|e| format!("{e:?}"))?;
     let b = k.get(id).map_err(|e| format!("{e:?}"))?;
     if let Some(i) = invalid(&b) {
         return Err(i);
     }
     let ne = b.edges.iter().filter(|e| !e.degenerate).count();
     if (b.faces.len(), ne, b.verts.len()) != (faces, edges, verts) {
-        return Err(format!("{} faces, {ne} edges, {} vertices", b.faces.len(), b.verts.len()));
+        return Err(format!(
+            "{} faces, {ne} edges, {} vertices",
+            b.faces.len(),
+            b.verts.len()
+        ));
     }
     let (got, want) = (mass::face_area(b, 0).0, surface_area(&p.surfaces[0]));
     if (got - want).abs() > 1e-6 * want {

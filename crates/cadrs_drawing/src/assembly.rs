@@ -53,7 +53,10 @@ pub struct OccurrenceInfo {
 impl OccurrenceInfo {
     /// A property's value, if the part has it.
     pub fn prop(&self, label: &str) -> Option<&str> {
-        self.props.iter().find(|(k, _)| k.eq_ignore_ascii_case(label)).map(|(_, v)| v.as_str())
+        self.props
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(label))
+            .map(|(_, v)| v.as_str())
     }
 }
 
@@ -70,7 +73,14 @@ impl AssemblyInfo {
 }
 
 /// The part properties a callout's `Part:` menu offers (the ones the drawing keeps).
-pub const PART_PROPERTIES: [&str; 6] = ["Name", "Part number", "Description", "Material", "Revision", "Vendor"];
+pub const PART_PROPERTIES: [&str; 6] = [
+    "Name",
+    "Part number",
+    "Description",
+    "Material",
+    "Revision",
+    "Vendor",
+];
 
 /// The BOM table properties a callout's `Table:` menu offers.
 pub const TABLE_PROPERTIES: [&str; 2] = ["Item No.", "Qty."];
@@ -196,14 +206,25 @@ impl BomData {
 /// (the header too, bold), padded; a text longer than 30 text heights wraps, between words
 /// only, so the column is never narrower than its longest word.
 fn column_width(texts: &[&str], h: f64, header: &str) -> f64 {
-    let bold = crate::rich::CharStyle { bold: true, ..Default::default() };
-    let w = texts.iter().map(|t| text_width(t.trim())).fold(0.0, f64::max) * h;
+    let bold = crate::rich::CharStyle {
+        bold: true,
+        ..Default::default()
+    };
+    let w = texts
+        .iter()
+        .map(|t| text_width(t.trim()))
+        .fold(0.0, f64::max)
+        * h;
     let hw = crate::rich::width(header.trim(), &bold) * h;
     let word = texts
         .iter()
         .flat_map(|t| t.split_whitespace())
         .map(text_width)
-        .chain(header.split_whitespace().map(|w| crate::rich::width(w, &bold)))
+        .chain(
+            header
+                .split_whitespace()
+                .map(|w| crate::rich::width(w, &bold)),
+        )
         .fold(0.0, f64::max)
         * h;
     let pad = 1.2 * h;
@@ -216,11 +237,17 @@ fn fill(t: &mut Table, data: &BomData, row_h: f64) {
     let n = data.rows.len() + 1;
     let cols = data.columns.len().max(1);
     let mut cells: Vec<Vec<RichText>> = Vec::with_capacity(n);
-    let header: Vec<RichText> = (0..cols).map(|c| RichText::plain(data.columns.get(c).map(String::as_str).unwrap_or(""))).collect();
+    let header: Vec<RichText> = (0..cols)
+        .map(|c| RichText::plain(data.columns.get(c).map(String::as_str).unwrap_or("")))
+        .collect();
     let body: Vec<Vec<RichText>> = data
         .rows
         .iter()
-        .map(|r| (0..cols).map(|c| RichText::plain(r.cells.get(c).map(String::as_str).unwrap_or(""))).collect())
+        .map(|r| {
+            (0..cols)
+                .map(|c| RichText::plain(r.cells.get(c).map(String::as_str).unwrap_or("")))
+                .collect()
+        })
         .collect();
     match data.order {
         BomOrder::TopToBottom => {
@@ -245,8 +272,16 @@ fn fill(t: &mut Table, data: &BomData, row_h: f64) {
 pub fn column_widths(data: &BomData, h: f64) -> Vec<f64> {
     (0..data.columns.len().max(1))
         .map(|c| {
-            let texts: Vec<&str> = data.rows.iter().map(|r| r.cells.get(c).map(String::as_str).unwrap_or("")).collect();
-            column_width(&texts, h, data.columns.get(c).map(String::as_str).unwrap_or(""))
+            let texts: Vec<&str> = data
+                .rows
+                .iter()
+                .map(|r| r.cells.get(c).map(String::as_str).unwrap_or(""))
+                .collect();
+            column_width(
+                &texts,
+                h,
+                data.columns.get(c).map(String::as_str).unwrap_or(""),
+            )
         })
         .collect()
 }
@@ -266,13 +301,20 @@ pub fn bom_table(data: BomData, fixed: Corner, at: P2, style: &DrawingStyle) -> 
 /// corner and text height stay, and its column widths when the columns are the same.
 pub fn refreshed_bom_table(t: &Table, data: BomData, style: &DrawingStyle) -> Table {
     let mut out = t.clone();
-    let same_columns = t.bom.as_ref().is_some_and(|b| b.columns == data.columns) && t.cols.len() == data.columns.len();
+    let same_columns = t.bom.as_ref().is_some_and(|b| b.columns == data.columns)
+        && t.cols.len() == data.columns.len();
     if !same_columns {
         out.cols = column_widths(&data, t.text_height);
     }
     // The body rows keep the height the table's rows have now (a resized table stays resized).
-    let row_h = (0..t.n_rows()).map(|r| t.natural_row(r)).fold(f64::MAX, f64::min);
-    let row_h = if row_h.is_finite() && row_h > 0.0 { row_h } else { style.table_row_height };
+    let row_h = (0..t.n_rows())
+        .map(|r| t.natural_row(r))
+        .fold(f64::MAX, f64::min);
+    let row_h = if row_h.is_finite() && row_h > 0.0 {
+        row_h
+    } else {
+        style.table_row_height
+    };
     fill(&mut out, &data, row_h);
     out.bom = Some(data);
     out
@@ -309,10 +351,15 @@ pub fn snap_to_title_block(at: P2, corner: Corner, block: (P2, P2), tol: f64) ->
         _ => {}
     }
     let d = |p: &P2| (at[0] - p[0]).hypot(at[1] - p[1]);
-    if let Some(p) = points.into_iter().filter(|p| d(p) <= tol).min_by(|a, b| d(a).total_cmp(&d(b))) {
+    if let Some(p) = points
+        .into_iter()
+        .filter(|p| d(p) <= tol)
+        .min_by(|a, b| d(a).total_cmp(&d(b)))
+    {
         return Some(p);
     }
-    (right && (at[0] - lo[0]).abs() <= tol && at[1] >= lo[1] && at[1] <= hi[1]).then_some([lo[0], at[1]])
+    (right && (at[0] - lo[0]).abs() <= tol && at[1] >= lo[1] && at[1] <= hi[1])
+        .then_some([lo[0], at[1]])
 }
 
 /// Table `t` narrowed so it stays within the frame `border` across (P3E.5 judge: a six-column
@@ -322,21 +369,35 @@ pub fn snap_to_title_block(at: P2, corner: Corner, block: (P2, P2), tol: f64) ->
 pub fn fit_within(t: &Table, border: (P2, P2)) -> Table {
     use crate::table::Side;
     let (lo, hi) = t.rect();
-    let (side, edge, over) = if t.fixed.right() { (Side::Left, border.0[0], lo[0] < border.0[0] - 1e-9) } else { (Side::Right, border.1[0], hi[0] > border.1[0] + 1e-9) };
+    let (side, edge, over) = if t.fixed.right() {
+        (Side::Left, border.0[0], lo[0] < border.0[0] - 1e-9)
+    } else {
+        (Side::Right, border.1[0], hi[0] > border.1[0] + 1e-9)
+    };
     if !over {
         return t.clone();
     }
-    t.resize(side, [edge, t.at[1]]).unwrap_or_else(|_| t.clone())
+    t.resize(side, [edge, t.at[1]])
+        .unwrap_or_else(|_| t.clone())
 }
 
 /// Where a table's fixed corner snaps: the frame's corner ([`snap_to_border`]) or the title
 /// block ([`snap_to_title_block`]), whichever is nearer.
-pub fn snap_table_corner(at: P2, corner: Corner, border: (P2, P2), block: Option<(P2, P2)>, tol: f64) -> Option<P2> {
+pub fn snap_table_corner(
+    at: P2,
+    corner: Corner,
+    border: (P2, P2),
+    block: Option<(P2, P2)>,
+    tol: f64,
+) -> Option<P2> {
     let d = |p: &P2| (at[0] - p[0]).hypot(at[1] - p[1]);
-    [snap_to_border(at, corner, border, tol), block.and_then(|b| snap_to_title_block(at, corner, b, tol))]
-        .into_iter()
-        .flatten()
-        .min_by(|a, b| d(a).total_cmp(&d(b)))
+    [
+        snap_to_border(at, corner, border, tol),
+        block.and_then(|b| snap_to_title_block(at, corner, b, tol)),
+    ]
+    .into_iter()
+    .flatten()
+    .min_by(|a, b| d(a).total_cmp(&d(b)))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -354,7 +415,13 @@ pub enum Border {
 }
 
 impl Border {
-    pub const ALL: [Border; 5] = [Border::Circle, Border::Underline, Border::Box, Border::Triangle, Border::None];
+    pub const ALL: [Border; 5] = [
+        Border::Circle,
+        Border::Underline,
+        Border::Box,
+        Border::Triangle,
+        Border::None,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -368,7 +435,13 @@ impl Border {
 }
 
 /// A callout border's size: tight around its text, or wide enough for `n` characters.
-pub const SIZES: [(u8, &str); 5] = [(0, "Tight Fit"), (1, "1 Character"), (2, "2 Characters"), (3, "3 Characters"), (4, "4 Characters")];
+pub const SIZES: [(u8, &str); 5] = [
+    (0, "Tight Fit"),
+    (1, "1 Character"),
+    (2, "2 Characters"),
+    (3, "3 Characters"),
+    (4, "4 Characters"),
+];
 
 /// The five text fields (D11.4): literal text with `{Part: …}` and `{Table: …}` tokens.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -388,7 +461,13 @@ pub struct CalloutFields {
 impl CalloutFields {
     /// Upper, lower, left, right, centre.
     pub fn all(&self) -> [&str; 5] {
-        [&self.upper, &self.lower, &self.left, &self.right, &self.center]
+        [
+            &self.upper,
+            &self.lower,
+            &self.left,
+            &self.right,
+            &self.center,
+        ]
     }
 }
 
@@ -433,7 +512,9 @@ pub fn parse_field(s: &str) -> Vec<FieldPart> {
         let tok = if let Some(p) = inner.strip_prefix("Part:") {
             Some(FieldPart::Part(p.trim().to_string()))
         } else {
-            inner.strip_prefix("Table:").map(|t| FieldPart::Table(t.trim().to_string()))
+            inner
+                .strip_prefix("Table:")
+                .map(|t| FieldPart::Table(t.trim().to_string()))
         };
         match tok {
             Some(t) => {
@@ -499,7 +580,11 @@ pub fn callout_dangles(m: &dyn ViewModel, c: &Callout) -> bool {
 /// The callout's border extent around its centre text of width `w` at cap height `h`: half
 /// width and half height.
 fn border_half(c: &Callout, w: f64, h: f64) -> (f64, f64) {
-    let fit = if c.size == 0 { w } else { (c.size as f64 * 0.72 * h).max(w) };
+    let fit = if c.size == 0 {
+        w
+    } else {
+        (c.size as f64 * 0.72 * h).max(w)
+    };
     match c.border {
         Border::Circle => {
             let r = (fit / 2.0 + 0.55 * h).max(1.05 * h);
@@ -544,7 +629,11 @@ fn layout_center(c: &Callout, t: P2, attach: P2, w: f64, h: f64) -> (P2, Option<
             // The line runs away from the leader: right of the anchor when the part is to the
             // left.
             let right = attach[0] <= t[0];
-            let (a, b) = if right { (t, [t[0] + 2.0 * hw + 0.4 * h, t[1]]) } else { ([t[0] - 2.0 * hw - 0.4 * h, t[1]], t) };
+            let (a, b) = if right {
+                (t, [t[0] + 2.0 * hw + 0.4 * h, t[1]])
+            } else {
+                ([t[0] - 2.0 * hw - 0.4 * h, t[1]], t)
+            };
             let mid = [(a[0] + b[0]) / 2.0, t[1] + 0.85 * h];
             (mid, (c.border == Border::Underline).then_some((a, b)))
         }
@@ -554,8 +643,16 @@ fn layout_center(c: &Callout, t: P2, attach: P2, w: f64, h: f64) -> (P2, Option<
 
 /// A callout's graphics on the sheet: its border, leader (a small arrow on the part), texts,
 /// its boxes for picking and its text grip.
-pub fn callout_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel, c: &Callout) -> AnnGraphics {
-    let mut g = AnnGraphics { dangling: callout_dangles(m, c), ..AnnGraphics::default() };
+pub fn callout_graphics(
+    style: &DrawingStyle,
+    view: &View,
+    m: &dyn ViewModel,
+    c: &Callout,
+) -> AnnGraphics {
+    let mut g = AnnGraphics {
+        dangling: callout_dangles(m, c),
+        ..AnnGraphics::default()
+    };
     let [upper, lower, left, right, center] = callout_texts(m, c);
     let h = c.text_height;
     let t = view.to_sheet(c.text);
@@ -568,10 +665,18 @@ pub fn callout_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel, c:
         Border::Circle => {
             g.strokes.push(circle_pts(mid, hw));
             let d = dist(attach, mid).max(1e-9);
-            [mid[0] + (attach[0] - mid[0]) / d * hw, mid[1] + (attach[1] - mid[1]) / d * hw]
+            [
+                mid[0] + (attach[0] - mid[0]) / d * hw,
+                mid[1] + (attach[1] - mid[1]) / d * hw,
+            ]
         }
         Border::Box => {
-            let (a, b, cc, dd) = ([mid[0] - hw, mid[1] - hh], [mid[0] + hw, mid[1] - hh], [mid[0] + hw, mid[1] + hh], [mid[0] - hw, mid[1] + hh]);
+            let (a, b, cc, dd) = (
+                [mid[0] - hw, mid[1] - hh],
+                [mid[0] + hw, mid[1] - hh],
+                [mid[0] + hw, mid[1] + hh],
+                [mid[0] - hw, mid[1] + hh],
+            );
             g.strokes.push(vec![a, b, cc, dd, a]);
             [(a, b), (b, cc), (cc, dd), (dd, a)]
                 .iter()
@@ -581,7 +686,10 @@ pub fn callout_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel, c:
         }
         Border::Triangle => {
             let top = [mid[0], mid[1] + 1.35 * hh];
-            let (l, r) = ([mid[0] - hw, mid[1] - 0.65 * hh], [mid[0] + hw, mid[1] - 0.65 * hh]);
+            let (l, r) = (
+                [mid[0] - hw, mid[1] - 0.65 * hh],
+                [mid[0] + hw, mid[1] - 0.65 * hh],
+            );
             g.strokes.push(vec![l, r, top, l]);
             [(l, r), (r, top), (top, l)]
                 .iter()
@@ -592,7 +700,11 @@ pub fn callout_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel, c:
         Border::Underline => {
             let (a, b) = underline.unwrap_or((t, t));
             g.strokes.push(vec![a, b]);
-            if dist(a, attach) <= dist(b, attach) { a } else { b }
+            if dist(a, attach) <= dist(b, attach) {
+                a
+            } else {
+                b
+            }
         }
         Border::None => t,
     };
@@ -605,7 +717,11 @@ pub fn callout_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel, c:
         let u = [d[0] / l, d[1] / l];
         let base = [attach[0] - u[0] * len, attach[1] - u[1] * len];
         let n = [-u[1] * len * 0.3, u[0] * len * 0.3];
-        g.fills.push([attach, [base[0] + n[0], base[1] + n[1]], [base[0] - n[0], base[1] - n[1]]]);
+        g.fills.push([
+            attach,
+            [base[0] + n[0], base[1] + n[1]],
+            [base[0] - n[0], base[1] - n[1]],
+        ]);
     }
     // Texts: the centre inside (on) the border, the others around it.
     let place = |s: &str, x: f64, y: f64, g: &mut AnnGraphics| {
@@ -613,22 +729,40 @@ pub fn callout_graphics(style: &DrawingStyle, view: &View, m: &dyn ViewModel, c:
             return;
         }
         let tw = text_width(s) * h;
-        g.texts.push(PlacedText { pos: [x, y], height: h, text: s.to_string() });
-        g.boxes.push(([x - 0.2 * h, y - 0.7 * h], [x + tw + 0.2 * h, y + 0.7 * h]));
+        g.texts.push(PlacedText {
+            pos: [x, y],
+            height: h,
+            text: s.to_string(),
+        });
+        g.boxes
+            .push(([x - 0.2 * h, y - 0.7 * h], [x + tw + 0.2 * h, y + 0.7 * h]));
     };
     place(&center, mid[0] - w / 2.0, mid[1], &mut g);
-    let side = if c.border == Border::Underline || c.border == Border::None { w / 2.0 + 0.5 * h } else { hw + 0.5 * h };
+    let side = if c.border == Border::Underline || c.border == Border::None {
+        w / 2.0 + 0.5 * h
+    } else {
+        hw + 0.5 * h
+    };
     place(&right, mid[0] + side, mid[1], &mut g);
     let lw = text_width(&left) * h;
     place(&left, mid[0] - side - lw, mid[1], &mut g);
-    let vert = if c.border == Border::Underline || c.border == Border::None { 1.6 * h } else { hh + 1.0 * h };
+    let vert = if c.border == Border::Underline || c.border == Border::None {
+        1.6 * h
+    } else {
+        hh + 1.0 * h
+    };
     let uw = text_width(&upper) * h;
     place(&upper, mid[0] - uw / 2.0, mid[1] + vert, &mut g);
     let bw = text_width(&lower) * h;
-    let below = if c.border == Border::Underline { 1.75 * h } else { vert };
+    let below = if c.border == Border::Underline {
+        1.75 * h
+    } else {
+        vert
+    };
     place(&lower, mid[0] - bw / 2.0, mid[1] - below, &mut g);
     // The border's box picks the callout too.
-    g.boxes.push(([mid[0] - hw, mid[1] - hh], [mid[0] + hw, mid[1] + hh]));
+    g.boxes
+        .push(([mid[0] - hw, mid[1] - hh], [mid[0] + hw, mid[1] + hh]));
     g.grips.push((t, GripKind::Text));
     g.grips.push((attach, GripKind::Attach(0)));
     g.attached.push(vec![attach]);
@@ -648,8 +782,14 @@ pub fn callout_arrow_length(style: &DrawingStyle, h: f64) -> f64 {
 pub fn inference(p: P2, others: &[P2], tol: f64) -> (P2, Vec<(P2, P2)>) {
     let mut out = p;
     let mut lines = Vec::new();
-    let best_x = others.iter().filter(|o| (o[0] - p[0]).abs() <= tol).min_by(|a, b| (a[0] - p[0]).abs().total_cmp(&(b[0] - p[0]).abs()));
-    let best_y = others.iter().filter(|o| (o[1] - p[1]).abs() <= tol).min_by(|a, b| (a[1] - p[1]).abs().total_cmp(&(b[1] - p[1]).abs()));
+    let best_x = others
+        .iter()
+        .filter(|o| (o[0] - p[0]).abs() <= tol)
+        .min_by(|a, b| (a[0] - p[0]).abs().total_cmp(&(b[0] - p[0]).abs()));
+    let best_y = others
+        .iter()
+        .filter(|o| (o[1] - p[1]).abs() <= tol)
+        .min_by(|a, b| (a[1] - p[1]).abs().total_cmp(&(b[1] - p[1]).abs()));
     if let Some(o) = best_x {
         out[0] = o[0];
     }
@@ -668,7 +808,13 @@ pub fn inference(p: P2, others: &[P2], tol: f64) -> (P2, Vec<(P2, P2)>) {
 /// Callout `c` of view `view` after an update from the assembly `old` to `new` (P3C.6): its
 /// leader follows its occurrence (the origin's move, projected); when the occurrence is gone it
 /// keeps its place and its last texts (it dangles red).
-pub fn refresh_callout(view: &View, old: Option<&AssemblyInfo>, new: Option<&AssemblyInfo>, boms: &[&BomData], c: &Callout) -> Callout {
+pub fn refresh_callout(
+    view: &View,
+    old: Option<&AssemblyInfo>,
+    new: Option<&AssemblyInfo>,
+    boms: &[&BomData],
+    c: &Callout,
+) -> Callout {
     let mut out = c.clone();
     let frame = view.frame.view_frame();
     let proj = |p: [f64; 3]| {
@@ -703,8 +849,19 @@ pub struct SheetModel<'a> {
 
 impl<'a> SheetModel<'a> {
     /// The model of view `v` on sheet `sheet` of `d`.
-    pub fn new(d: &'a crate::Drawing, sheet: &'a crate::Sheet, v: &View, inner: &'a dyn ViewModel) -> Self {
-        Self { inner, assembly: d.source(v.reference.element).and_then(|s| s.assembly.as_ref()), tables: &sheet.tables }
+    pub fn new(
+        d: &'a crate::Drawing,
+        sheet: &'a crate::Sheet,
+        v: &View,
+        inner: &'a dyn ViewModel,
+    ) -> Self {
+        Self {
+            inner,
+            assembly: d
+                .source(v.reference.element)
+                .and_then(|s| s.assembly.as_ref()),
+            tables: &sheet.tables,
+        }
     }
 }
 
@@ -712,7 +869,10 @@ impl ViewModel for SheetModel<'_> {
     fn projection(&self) -> &cadrs_kernel::Projection {
         self.inner.projection()
     }
-    fn model_edge(&self, name: &cadrs_kernel::naming::EdgeName) -> Option<&crate::annotation::ModelEdge> {
+    fn model_edge(
+        &self,
+        name: &cadrs_kernel::naming::EdgeName,
+    ) -> Option<&crate::annotation::ModelEdge> {
         self.inner.model_edge(name)
     }
     fn hole(&self, feature: &Uuid) -> Option<&crate::annotation::HoleInfo> {
@@ -728,7 +888,9 @@ impl ViewModel for SheetModel<'_> {
         self.inner.chamfer(feature)
     }
     fn occurrence(&self, id: &Uuid) -> Option<&OccurrenceInfo> {
-        self.assembly.and_then(|a| a.occurrence(id)).or_else(|| self.inner.occurrence(id))
+        self.assembly
+            .and_then(|a| a.occurrence(id))
+            .or_else(|| self.inner.occurrence(id))
     }
     fn is_assembly(&self) -> bool {
         self.assembly.is_some() || self.inner.is_assembly()
@@ -758,8 +920,14 @@ mod tests {
         let h = 2.5;
         let w = column_widths(&b, h);
         assert!(w[1] >= text_width("Hex socket head cap screw ISO 4762") * h);
-        let bold = crate::rich::CharStyle { bold: true, ..Default::default() };
-        assert!(w[0] >= crate::rich::width("Item No.", &bold) * h, "the header on one line");
+        let bold = crate::rich::CharStyle {
+            bold: true,
+            ..Default::default()
+        };
+        assert!(
+            w[0] >= crate::rich::width("Item No.", &bold) * h,
+            "the header on one line"
+        );
         b.rows[0].cells[1] = "word ".repeat(40);
         assert!(column_widths(&b, h)[1] <= 31.3 * h);
     }
@@ -774,8 +942,18 @@ mod tests {
     fn info() -> AssemblyInfo {
         AssemblyInfo {
             occurrences: vec![
-                OccurrenceInfo { id: Uuid::from_u128(1), name: "Flange <1>".into(), origin: [0.0; 3], props: vec![("Name".into(), "Universal Joint Flange".into())] },
-                OccurrenceInfo { id: Uuid::from_u128(2), name: "Flange <2>".into(), origin: [0.0, 0.0, 50.0], props: vec![("Name".into(), "Universal Joint Flange".into())] },
+                OccurrenceInfo {
+                    id: Uuid::from_u128(1),
+                    name: "Flange <1>".into(),
+                    origin: [0.0; 3],
+                    props: vec![("Name".into(), "Universal Joint Flange".into())],
+                },
+                OccurrenceInfo {
+                    id: Uuid::from_u128(2),
+                    name: "Flange <2>".into(),
+                    origin: [0.0, 0.0, 50.0],
+                    props: vec![("Name".into(), "Universal Joint Flange".into())],
+                },
             ],
         }
     }
@@ -803,13 +981,23 @@ mod tests {
         let a = info();
         let b = bom();
         let occ = a.occurrence(&Uuid::from_u128(2));
-        assert_eq!(resolve_field("{Part: Name}", occ, &[&b]), "Universal Joint Flange");
+        assert_eq!(
+            resolve_field("{Part: Name}", occ, &[&b]),
+            "Universal Joint Flange"
+        );
         assert_eq!(resolve_field("x {Table: Qty.}", occ, &[&b]), "x 2");
         assert_eq!(resolve_field("{Table: Item No.}", occ, &[&b]), "1");
         // Without a BOM table only the part's properties read.
         assert_eq!(resolve_field("x {Table: Qty.}", occ, &[]), "x");
         assert_eq!(resolve_field("{Part: Vendor}", occ, &[&b]), "");
-        assert_eq!(parse_field("a {Part: Name} b"), vec![FieldPart::Text("a ".into()), FieldPart::Part("Name".into()), FieldPart::Text(" b".into())]);
+        assert_eq!(
+            parse_field("a {Part: Name} b"),
+            vec![
+                FieldPart::Text("a ".into()),
+                FieldPart::Part("Name".into()),
+                FieldPart::Text(" b".into())
+            ]
+        );
         assert_eq!(token(false, "Qty."), "{Table: Qty.}");
     }
 
@@ -822,37 +1010,90 @@ mod tests {
         let mut b = bom();
         b.order = BomOrder::BottomToTop;
         let t2 = refreshed_bom_table(&t, b, &style);
-        assert_eq!(t2.cells[1][0].plain_text(), "Item No.", "the header at the bottom");
+        assert_eq!(
+            t2.cells[1][0].plain_text(),
+            "Item No.",
+            "the header at the bottom"
+        );
         assert!(t2.heading(1) && !t2.heading(0));
         assert_eq!(t2.at, t.at);
         assert_eq!(t2.cols, t.cols, "same columns, same widths");
-        assert_eq!(snap_to_border([259.0, 199.0], Corner::TopRight, ([10.0, 10.0], [260.0, 200.0]), 3.0), Some([260.0, 200.0]));
-        assert_eq!(snap_to_border([250.0, 199.0], Corner::TopRight, ([10.0, 10.0], [260.0, 200.0]), 3.0), None);
+        assert_eq!(
+            snap_to_border(
+                [259.0, 199.0],
+                Corner::TopRight,
+                ([10.0, 10.0], [260.0, 200.0]),
+                3.0
+            ),
+            Some([260.0, 200.0])
+        );
+        assert_eq!(
+            snap_to_border(
+                [250.0, 199.0],
+                Corner::TopRight,
+                ([10.0, 10.0], [260.0, 200.0]),
+                3.0
+            ),
+            None
+        );
     }
 
     /// P3E.5 (TD10.5): a BOM's bottom-right corner snaps to the title block's left edge.
     #[test]
     fn a_table_corner_snaps_to_the_title_block() {
-        let (frame, block) = (([12.7, 12.7], [419.1, 266.7]), ([260.35, 12.7], [419.1, 57.15]));
+        let (frame, block) = (
+            ([12.7, 12.7], [419.1, 266.7]),
+            ([260.35, 12.7], [419.1, 57.15]),
+        );
         // Its bottom-left corner (on the frame's bottom), and its top-left corner.
-        assert_eq!(snap_to_title_block([258.0, 14.0], Corner::BottomRight, block, 4.0), Some([260.35, 12.7]));
-        assert_eq!(snap_to_title_block([262.0, 56.0], Corner::BottomRight, block, 4.0), Some([260.35, 57.15]));
+        assert_eq!(
+            snap_to_title_block([258.0, 14.0], Corner::BottomRight, block, 4.0),
+            Some([260.35, 12.7])
+        );
+        assert_eq!(
+            snap_to_title_block([262.0, 56.0], Corner::BottomRight, block, 4.0),
+            Some([260.35, 57.15])
+        );
         // Level with the edge, between its ends: onto the edge.
-        assert_eq!(snap_to_title_block([258.5, 30.0], Corner::BottomRight, block, 4.0), Some([260.35, 30.0]));
+        assert_eq!(
+            snap_to_title_block([258.5, 30.0], Corner::BottomRight, block, 4.0),
+            Some([260.35, 30.0])
+        );
         // Standing on the block: its top-right corner.
-        assert_eq!(snap_to_title_block([417.0, 58.0], Corner::BottomRight, block, 4.0), Some([419.1, 57.15]));
+        assert_eq!(
+            snap_to_title_block([417.0, 58.0], Corner::BottomRight, block, 4.0),
+            Some([419.1, 57.15])
+        );
         // Too far, or a left-hand corner off the block's top: no snap.
-        assert_eq!(snap_to_title_block([250.0, 30.0], Corner::BottomRight, block, 4.0), None);
-        assert_eq!(snap_to_title_block([258.5, 30.0], Corner::BottomLeft, block, 4.0), None);
+        assert_eq!(
+            snap_to_title_block([250.0, 30.0], Corner::BottomRight, block, 4.0),
+            None
+        );
+        assert_eq!(
+            snap_to_title_block([258.5, 30.0], Corner::BottomLeft, block, 4.0),
+            None
+        );
         // With the frame: the nearer one wins (the frame's corner is the block's right end).
-        assert_eq!(snap_table_corner([258.0, 14.0], Corner::BottomRight, frame, Some(block), 4.0), Some([260.35, 12.7]));
-        assert_eq!(snap_table_corner([418.0, 13.0], Corner::BottomRight, frame, Some(block), 4.0), Some([419.1, 12.7]));
-        assert_eq!(snap_table_corner([258.0, 14.0], Corner::BottomRight, frame, None, 4.0), None);
+        assert_eq!(
+            snap_table_corner([258.0, 14.0], Corner::BottomRight, frame, Some(block), 4.0),
+            Some([260.35, 12.7])
+        );
+        assert_eq!(
+            snap_table_corner([418.0, 13.0], Corner::BottomRight, frame, Some(block), 4.0),
+            Some([419.1, 12.7])
+        );
+        assert_eq!(
+            snap_table_corner([258.0, 14.0], Corner::BottomRight, frame, None, 4.0),
+            None
+        );
         // A BOM at the block's corner kept within the frame across: its left edge on the frame
         // (or left where it was, when it fits).
         let style = DrawingStyle::default();
         let w = bom_table(bom(), Corner::BottomRight, [0.0, 0.0], &style).width();
-        let mins: f64 = bom_table(bom(), Corner::BottomRight, [0.0, 0.0], &style).column_mins().iter().sum();
+        let mins: f64 = bom_table(bom(), Corner::BottomRight, [0.0, 0.0], &style)
+            .column_mins()
+            .iter()
+            .sum();
         // Its right edge where the full width overflows but the narrowest fits.
         let x = frame.0[0] + (w + mins) / 2.0;
         let t = bom_table(bom(), Corner::BottomRight, [x, 12.7], &style);
@@ -867,7 +1108,15 @@ mod tests {
     #[test]
     fn callouts_dangle_when_their_occurrence_goes() {
         let a = info();
-        let v = View::base(ObjectRef { element: Uuid::from_u128(9), part: None }, NamedView::Front, Scale::new(1, 2), [100.0, 100.0]);
+        let v = View::base(
+            ObjectRef {
+                element: Uuid::from_u128(9),
+                part: None,
+            },
+            NamedView::Front,
+            Scale::new(1, 2),
+            [100.0, 100.0],
+        );
         let c = Callout {
             occurrence: Uuid::from_u128(2),
             attach: [0.0, 10.0],
@@ -875,12 +1124,25 @@ mod tests {
             border: Border::Underline,
             size: 0,
             text_height: 3.0,
-            fields: CalloutFields { center: "{Part: Name}".into(), right: "x {Table: Qty.}".into(), ..Default::default() },
+            fields: CalloutFields {
+                center: "{Part: Name}".into(),
+                right: "x {Table: Qty.}".into(),
+                ..Default::default()
+            },
             last: None,
         };
         let geo = ModelData::default();
-        let tables = [bom_table(bom(), Corner::TopRight, [260.0, 200.0], &DrawingStyle::default())];
-        let m = SheetModel { inner: &geo, assembly: Some(&a), tables: &tables };
+        let tables = [bom_table(
+            bom(),
+            Corner::TopRight,
+            [260.0, 200.0],
+            &DrawingStyle::default(),
+        )];
+        let m = SheetModel {
+            inner: &geo,
+            assembly: Some(&a),
+            tables: &tables,
+        };
         let texts = callout_texts(&m, &c);
         assert_eq!(texts[4], "Universal Joint Flange");
         assert_eq!(texts[3], "x 2");
@@ -894,11 +1156,19 @@ mod tests {
         let mut gone = a.clone();
         gone.occurrences.remove(1);
         let c3 = refresh_callout(&v, Some(&a), Some(&gone), &boms, &c);
-        let m2 = SheetModel { inner: &geo, assembly: Some(&gone), tables: &tables };
+        let m2 = SheetModel {
+            inner: &geo,
+            assembly: Some(&gone),
+            tables: &tables,
+        };
         assert!(callout_dangles(&m2, &c3));
         let g = callout_graphics(&DrawingStyle::default(), &v, &m2, &c3);
         assert!(g.dangling);
-        assert_eq!(callout_texts(&m2, &c3)[4], "Universal Joint Flange", "the last text stays");
+        assert_eq!(
+            callout_texts(&m2, &c3)[4],
+            "Universal Joint Flange",
+            "the last text stays"
+        );
     }
 
     #[test]

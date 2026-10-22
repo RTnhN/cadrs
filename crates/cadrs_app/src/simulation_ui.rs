@@ -40,19 +40,24 @@ use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use bevy::text::FontWeight;
 use cadrs_core::simulation::{
-    self as sim, AddLoad, Bonded, DeleteLoad, ForceDirection, LoadId, LoadKind, MeshDensity, SetLoad, SetMeshDensity, SimFace, SimLoad,
+    self as sim, AddLoad, Bonded, DeleteLoad, ForceDirection, LoadId, LoadKind, MeshDensity,
+    SetLoad, SetMeshDensity, SimFace, SimLoad,
 };
 use cadrs_core::{ElementId, PartId};
 use cadrs_fea::{FeaError, Solution, Stage};
 use cadrs_ui::prelude::*;
 use cadrs_ui::{
-    CheckboxChange, ColorLegend, DoubleClick, DoubleClickable, FeatureDialogAccept, FeatureDialogCancel, NumberField, NumberFieldCommit,
-    NumberFieldState, OptionRow, Select, SelectChange, SelectionList, SelectionListRemove, SelectionListState, color_map,
+    CheckboxChange, ColorLegend, DoubleClick, DoubleClickable, FeatureDialogAccept,
+    FeatureDialogCancel, NumberField, NumberFieldCommit, NumberFieldState, OptionRow, Select,
+    SelectChange, SelectionList, SelectionListRemove, SelectionListState, color_map,
 };
 
 use crate::appearance::{SidePanel, dock_beside_viewport, side_panel_header, side_panel_node};
 use crate::parts::{PartCache, PartMesh, PickFilter};
-use crate::viewport::{ActiveKind, Pick, PickFilterOverride, PickRequest, Selection, ViewportArea, ViewportDrag, ViewportRect, ViewportView};
+use crate::viewport::{
+    ActiveKind, Pick, PickFilterOverride, PickRequest, Selection, ViewportArea, ViewportDrag,
+    ViewportRect, ViewportView,
+};
 use crate::{ActiveDocument, AppState};
 
 pub struct SimulationPlugin;
@@ -66,19 +71,37 @@ impl Plugin for SimulationPlugin {
             .add_systems(Startup, configure_gizmos)
             .add_systems(
                 Update,
-                (update_inputs, load_picks, load_keys, poll_run, sync_panel, update_progress, sync_load_dialog, sync_load_rows)
+                (
+                    update_inputs,
+                    load_picks,
+                    load_keys,
+                    poll_run,
+                    sync_panel,
+                    update_progress,
+                    sync_load_dialog,
+                    sync_load_rows,
+                )
                     .chain()
                     .after(crate::parts::PartsSet)
                     .run_if(in_state(AppState::Document)),
             )
             .add_systems(
                 Update,
-                (sync_results_view, hide_result_parts, sync_legend, draw_load_glyphs, update_probe)
+                (
+                    sync_results_view,
+                    hide_result_parts,
+                    sync_legend,
+                    draw_load_glyphs,
+                    update_probe,
+                )
                     .chain()
                     .after(sync_load_rows)
                     .run_if(in_state(AppState::Document)),
             )
-            .add_systems(PostUpdate, flag_pending_work.run_if(in_state(AppState::Document)))
+            .add_systems(
+                PostUpdate,
+                flag_pending_work.run_if(in_state(AppState::Document)),
+            )
             .add_systems(OnExit(AppState::Document), |world: &mut World| {
                 if let Some(r) = world.resource_mut::<SimState>().run.take() {
                     r.cancel.store(true, Ordering::Relaxed);
@@ -234,8 +257,17 @@ fn input_key(doc: &ActiveDocument, cache: &PartCache) -> Option<(ElementId, u64)
     if let Some(a) = el.assembly_model() {
         format!("{:?}", sim::assembly_bonds(a).0).hash(&mut h);
     }
-    for (p, props) in cache.parts.iter().map(|p| (p, cadrs_core::parts::part_material(p, &cache.props))) {
-        format!("{:?}{:?}", p.id, props.map(|m| (m.youngs_modulus, m.poisson))).hash(&mut h);
+    for (p, props) in cache
+        .parts
+        .iter()
+        .map(|p| (p, cadrs_core::parts::part_material(p, &cache.props)))
+    {
+        format!(
+            "{:?}{:?}",
+            p.id,
+            props.map(|m| (m.youngs_modulus, m.poisson))
+        )
+        .hash(&mut h);
         p.solid.positions.len().hash(&mut h);
         if let Some((lo, hi)) = p.solid.bounds() {
             for v in lo.iter().chain(hi.iter()) {
@@ -256,7 +288,11 @@ pub struct SimInputs {
     seen: Option<(u64, u32)>,
 }
 
-fn update_inputs(doc: Option<Res<ActiveDocument>>, cache: Res<PartCache>, mut inputs: ResMut<SimInputs>) {
+fn update_inputs(
+    doc: Option<Res<ActiveDocument>>,
+    cache: Res<PartCache>,
+    mut inputs: ResMut<SimInputs>,
+) {
     let Some(doc) = doc else {
         if inputs.key.is_some() {
             *inputs = SimInputs::default();
@@ -268,7 +304,11 @@ fn update_inputs(doc: Option<Res<ActiveDocument>>, cache: Res<PartCache>, mut in
         return;
     }
     let ids: Vec<PartId> = cache.parts.iter().map(|p| p.id).collect();
-    *inputs = SimInputs { key: input_key(&doc, &cache), size: model_size(&cache, &ids), seen };
+    *inputs = SimInputs {
+        key: input_key(&doc, &cache),
+        size: model_size(&cache, &ids),
+        seen,
+    };
 }
 
 fn bonds_of(doc: &ActiveDocument, cache: &PartCache) -> (Vec<Bonded>, Vec<String>) {
@@ -280,18 +320,30 @@ fn bonds_of(doc: &ActiveDocument, cache: &PartCache) -> (Vec<Bonded>, Vec<String
 
 /// Starts a solve of the active element.
 fn start_solve(world: &mut World) {
-    let Some(doc) = world.get_resource::<ActiveDocument>() else { return };
+    let Some(doc) = world.get_resource::<ActiveDocument>() else {
+        return;
+    };
     let cache = world.resource::<PartCache>();
-    let Some(el) = doc.active_element() else { return };
+    let Some(el) = doc.active_element() else {
+        return;
+    };
     let element = el.id;
-    let Some((_, key)) = input_key(doc, cache) else { return };
+    let Some((_, key)) = input_key(doc, cache) else {
+        return;
+    };
     let (bonds, mut notes) = bonds_of(doc, cache);
     let setup = sim::setup(&el.simulation, &cache.parts, &cache.props, &bonds);
     let yields: Vec<Option<f64>> = match &setup {
         Ok(s) => s
             .parts
             .iter()
-            .map(|id| cache.part(*id).and_then(|p| cadrs_core::parts::part_material(p, &cache.props)).and_then(|m| m.tensile_yield).map(|y| y / 1e6))
+            .map(|id| {
+                cache
+                    .part(*id)
+                    .and_then(|p| cadrs_core::parts::part_material(p, &cache.props))
+                    .and_then(|m| m.tensile_yield)
+                    .map(|y| y / 1e6)
+            })
             .collect(),
         Err(_) => Vec::new(),
     };
@@ -336,7 +388,17 @@ fn start_solve(world: &mut World) {
             }
         })
         .ok();
-    state.run = Some(Run { element, key, parts: setup.parts, notes, yields, progress, out, cancel, started: std::time::Instant::now() });
+    state.run = Some(Run {
+        element,
+        key,
+        parts: setup.parts,
+        notes,
+        yields,
+        progress,
+        out,
+        cancel,
+        started: std::time::Instant::now(),
+    });
 }
 
 /// Takes a finished solve's results.
@@ -353,7 +415,13 @@ fn poll_run(mut state: ResMut<SimState>) {
             let st = &solution.stats;
             info!(
                 "simulation: {} elements, {} dofs, h {:.2} mm: mesh {:.2} s, assemble {:.2} s, factor {:.2} s, total {:.2} s",
-                st.elements, st.dofs, st.element_size, st.mesh_seconds, st.assemble_seconds, st.factor_seconds, st.total_seconds
+                st.elements,
+                st.dofs,
+                st.element_size,
+                st.mesh_seconds,
+                st.assemble_seconds,
+                st.factor_seconds,
+                st.total_seconds
             );
             state.result = Some(SimResult {
                 element: run.element,
@@ -441,7 +509,11 @@ fn load_color(k: &LoadKind) -> Color {
 }
 
 fn faces_word(n: usize) -> String {
-    if n == 1 { "1 face".into() } else { format!("{n} faces") }
+    if n == 1 {
+        "1 face".into()
+    } else {
+        format!("{n} faces")
+    }
 }
 
 /// The results in view for the active element, if they're current.
@@ -474,9 +546,17 @@ struct PanelModel {
     safety: bool,
 }
 
-fn panel_model(doc: &ActiveDocument, cache: &PartCache, state: &SimState, inputs: &SimInputs) -> Option<PanelModel> {
+fn panel_model(
+    doc: &ActiveDocument,
+    cache: &PartCache,
+    state: &SimState,
+    inputs: &SimInputs,
+) -> Option<PanelModel> {
     let el = doc.active_element()?;
-    if el.features().is_empty() && el.assembly_model().is_none() && !matches!(el.kind, cadrs_core::ElementKind::PartStudio { .. }) {
+    if el.features().is_empty()
+        && el.assembly_model().is_none()
+        && !matches!(el.kind, cadrs_core::ElementKind::PartStudio { .. })
+    {
         return None;
     }
     let s = &el.simulation;
@@ -494,12 +574,24 @@ fn panel_model(doc: &ActiveDocument, cache: &PartCache, state: &SimState, inputs
         match cadrs_core::parts::part_material(p, &cache.props) {
             Some(m) => {
                 let detail = match (m.youngs_modulus, m.poisson) {
-                    (Some(e), Some(nu)) => format!("E {} GPa · ν {}", cadrs_ui::color_legend::format_value(e / 1e9), cadrs_ui::color_legend::format_value(nu)),
+                    (Some(e), Some(nu)) => format!(
+                        "E {} GPa · ν {}",
+                        cadrs_ui::color_legend::format_value(e / 1e9),
+                        cadrs_ui::color_legend::format_value(nu)
+                    ),
                     _ => "no Young's modulus or Poisson's ratio".into(),
                 };
-                materials.push((format!("{name} · {}", m.name), detail, m.youngs_modulus.is_none()));
+                materials.push((
+                    format!("{name} · {}", m.name),
+                    detail,
+                    m.youngs_modulus.is_none(),
+                ));
             }
-            None => materials.push((name, "no material: right-click it → Assign material".into(), true)),
+            None => materials.push((
+                name,
+                "no material: right-click it → Assign material".into(),
+                true,
+            )),
         }
     }
     let loads = s
@@ -514,26 +606,52 @@ fn panel_model(doc: &ActiveDocument, cache: &PartCache, state: &SimState, inputs
         })
         .collect();
     let key = inputs.key;
-    let result = state.result.as_ref().filter(|r| Some(r.element) == key.map(|k| k.0));
+    let result = state
+        .result
+        .as_ref()
+        .filter(|r| Some(r.element) == key.map(|k| k.0));
     let cur = current(state, key);
-    let error = state.error.as_ref().filter(|(e, _)| *e == el.id).map(|(_, m)| m.clone());
+    let error = state
+        .error
+        .as_ref()
+        .filter(|(e, _)| *e == el.id)
+        .map(|(_, m)| m.clone());
     let stale = result.is_some() && cur.is_none() && error.is_none();
     let results = cur.map(|r| {
         let s = &r.solution;
         let mut rows = vec![
-            ("sim-elements".to_string(), "Mesh".to_string(), format!("{} elements", s.stats.elements)),
-            ("sim-max-displacement".to_string(), "Max displacement".to_string(), val(s.max_displacement(), "mm")),
-            ("sim-max-stress".to_string(), "Max von Mises".to_string(), val(s.max_von_mises(), "MPa")),
+            (
+                "sim-elements".to_string(),
+                "Mesh".to_string(),
+                format!("{} elements", s.stats.elements),
+            ),
+            (
+                "sim-max-displacement".to_string(),
+                "Max displacement".to_string(),
+                val(s.max_displacement(), "mm"),
+            ),
+            (
+                "sim-max-stress".to_string(),
+                "Max von Mises".to_string(),
+                val(s.max_von_mises(), "MPa"),
+            ),
         ];
         // The smallest tensile yield ÷ von Mises over the bodies with a yield strength.
         if let Some(sf) = min_safety(r) {
-            rows.push(("sim-safety".to_string(), "Min safety factor".to_string(), format!("{sf:.2}")));
+            rows.push((
+                "sim-safety".to_string(),
+                "Min safety factor".to_string(),
+                format!("{sf:.2}"),
+            ));
         }
         rows
     });
     let exaggeration = cur.and_then(|r| exaggeration(r, inputs.size));
     let notes = cur.map(|r| r.notes.clone()).unwrap_or_default();
-    let hint = (s.loads.is_empty()).then(|| "Add a Fixed load on the faces that are held, and a Force or a Pressure, then Solve.".to_string());
+    let hint = (s.loads.is_empty()).then(|| {
+        "Add a Fixed load on the faces that are held, and a Force or a Pressure, then Solve."
+            .to_string()
+    });
     Some(PanelModel {
         materials,
         loads,
@@ -580,7 +698,10 @@ impl PanelModel {
             "{}|{:?}|{:?}|{:?}|{}|{:?}|{}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}",
             self.safety,
             self.materials,
-            self.loads.iter().map(|l| (l.0, &l.1, &l.2, l.3)).collect::<Vec<_>>(),
+            self.loads
+                .iter()
+                .map(|l| (l.0, &l.1, &l.2, l.3))
+                .collect::<Vec<_>>(),
             self.mesh,
             self.running,
             self.error,
@@ -609,7 +730,10 @@ fn sync_panel(
     q_panel: Query<(Entity, &PanelKey), With<SimPanel>>,
     mut commands: Commands,
 ) {
-    let model = doc.as_ref().filter(|_| *open == SidePanel::Simulation && !kind.is_flat()).and_then(|d| panel_model(d, &cache, &state, &inputs));
+    let model = doc
+        .as_ref()
+        .filter(|_| *open == SidePanel::Simulation && !kind.is_flat())
+        .and_then(|d| panel_model(d, &cache, &state, &inputs));
     let Some(model) = model else {
         for (e, _) in &q_panel {
             commands.entity(e).try_despawn();
@@ -620,7 +744,9 @@ fn sync_panel(
     if q_panel.iter().any(|(_, k)| *k == key) {
         return;
     }
-    let Some(area) = q_area.iter().next() else { return };
+    let Some(area) = q_area.iter().next() else {
+        return;
+    };
     let existed = !q_panel.is_empty();
     for (e, _) in &q_panel {
         commands.entity(e).try_despawn();
@@ -628,7 +754,13 @@ fn sync_panel(
     let _ = existed;
     let t = theme.clone();
     let panel = commands
-        .spawn((Name::new("simulation-panel"), SimPanel, key, DespawnOnExit(AppState::Document), side_panel_node(&t)))
+        .spawn((
+            Name::new("simulation-panel"),
+            SimPanel,
+            key,
+            DespawnOnExit(AppState::Document),
+            side_panel_node(&t),
+        ))
         .with_children(|p| {
             side_panel_header(p, &t, "Simulation", "simulation-panel-close");
             p.spawn(Node {
@@ -646,12 +778,35 @@ fn sync_panel(
 }
 
 fn heading(b: &mut ChildSpawnerCommands, t: &Theme, name: &str, text: impl Into<String>) {
-    b.spawn((Name::new(name.to_string()), t.text(text.into(), 12.0, FontWeight::BOLD, t.foreground), Node { margin: UiRect::top(Val::Px(8.0)), ..default() }));
+    b.spawn((
+        Name::new(name.to_string()),
+        t.text(text.into(), 12.0, FontWeight::BOLD, t.foreground),
+        Node {
+            margin: UiRect::top(Val::Px(8.0)),
+            ..default()
+        },
+    ));
 }
 
-fn wrapped(b: &mut ChildSpawnerCommands, t: &Theme, name: &str, text: impl Into<String>, color: Color) {
-    b.spawn((Name::new(name.to_string()), t.text(text.into(), 11.0, FontWeight::NORMAL, color), Node { width: Val::Px(214.0), ..default() }))
-        .insert(TextLayout::new(bevy::text::Justify::Left, bevy::text::LineBreak::WordBoundary));
+fn wrapped(
+    b: &mut ChildSpawnerCommands,
+    t: &Theme,
+    name: &str,
+    text: impl Into<String>,
+    color: Color,
+) {
+    b.spawn((
+        Name::new(name.to_string()),
+        t.text(text.into(), 11.0, FontWeight::NORMAL, color),
+        Node {
+            width: Val::Px(214.0),
+            ..default()
+        },
+    ))
+    .insert(TextLayout::new(
+        bevy::text::Justify::Left,
+        bevy::text::LineBreak::WordBoundary,
+    ));
 }
 
 fn panel_body(b: &mut ChildSpawnerCommands, t: &Theme, m: &PanelModel) {
@@ -661,21 +816,73 @@ fn panel_body(b: &mut ChildSpawnerCommands, t: &Theme, m: &PanelModel) {
     }
     for (k, (line, detail, red)) in m.materials.iter().enumerate() {
         let color = if *red { t.feature_error } else { t.foreground };
-        b.spawn((Name::new(format!("sim-material-{}", k + 1)), t.text(line.clone(), 11.5, FontWeight::MEDIUM, color)));
-        b.spawn((Name::new(format!("sim-material-{}-detail", k + 1)), t.text(detail.clone(), 10.5, FontWeight::NORMAL, if *red { t.feature_error } else { t.muted_foreground })));
+        b.spawn((
+            Name::new(format!("sim-material-{}", k + 1)),
+            t.text(line.clone(), 11.5, FontWeight::MEDIUM, color),
+        ));
+        b.spawn((
+            Name::new(format!("sim-material-{}-detail", k + 1)),
+            t.text(
+                detail.clone(),
+                10.5,
+                FontWeight::NORMAL,
+                if *red {
+                    t.feature_error
+                } else {
+                    t.muted_foreground
+                },
+            ),
+        ));
     }
     // Loads.
-    b.spawn(Node { align_items: AlignItems::Center, margin: UiRect::top(Val::Px(8.0)), column_gap: Val::Px(2.0), ..default() }).with_children(|h| {
-        h.spawn((Name::new("sim-loads-heading"), t.text(format!("Loads ({})", m.loads.len()), 12.0, FontWeight::BOLD, t.foreground)));
+    b.spawn(Node {
+        align_items: AlignItems::Center,
+        margin: UiRect::top(Val::Px(8.0)),
+        column_gap: Val::Px(2.0),
+        ..default()
+    })
+    .with_children(|h| {
+        h.spawn((
+            Name::new("sim-loads-heading"),
+            t.text(
+                format!("Loads ({})", m.loads.len()),
+                12.0,
+                FontWeight::BOLD,
+                t.foreground,
+            ),
+        ));
     });
     // P3F.5 judge: labelled buttons, not three bare icons.
-    b.spawn((Name::new("sim-add-loads"), Node { column_gap: Val::Px(4.0), margin: UiRect::vertical(Val::Px(3.0)), ..default() })).with_children(|h| {
+    b.spawn((
+        Name::new("sim-add-loads"),
+        Node {
+            column_gap: Val::Px(4.0),
+            margin: UiRect::vertical(Val::Px(3.0)),
+            ..default()
+        },
+    ))
+    .with_children(|h| {
         for (name, label, tip) in [
             ("sim-add-fixed", "Fixed", "Add Fixed: faces that don't move"),
-            ("sim-add-force", "Force", "Add Force: a force spread over faces"),
-            ("sim-add-pressure", "Pressure", "Add Pressure: a pressure on faces"),
+            (
+                "sim-add-force",
+                "Force",
+                "Add Force: a force spread over faces",
+            ),
+            (
+                "sim-add-pressure",
+                "Pressure",
+                "Add Pressure: a pressure on faces",
+            ),
         ] {
-            h.spawn(cadrs_ui::Button::new(name).label(format!("+ {label}")).small().outline().tooltip(tip).build(t));
+            h.spawn(
+                cadrs_ui::Button::new(name)
+                    .label(format!("+ {label}"))
+                    .small()
+                    .outline()
+                    .tooltip(tip)
+                    .build(t),
+            );
         }
     });
     if let Some(hint) = &m.hint {
@@ -695,7 +902,14 @@ fn panel_body(b: &mut ChildSpawnerCommands, t: &Theme, m: &PanelModel) {
             Tooltip::new(format!("{name}: {summary}\nClick to edit")),
         ))
         .with_children(|r| {
-            r.spawn((DeleteLoadButton(*id), IconButton::new(format!("{row}-delete"), "close").tooltip("Delete").build(t))).entry::<Node>().and_modify(|mut n| {
+            r.spawn((
+                DeleteLoadButton(*id),
+                IconButton::new(format!("{row}-delete"), "close")
+                    .tooltip("Delete")
+                    .build(t),
+            ))
+            .entry::<Node>()
+            .and_modify(|mut n| {
                 n.width = Val::Px(18.0);
                 n.height = Val::Px(18.0);
                 n.flex_shrink = 0.0;
@@ -703,71 +917,200 @@ fn panel_body(b: &mut ChildSpawnerCommands, t: &Theme, m: &PanelModel) {
         });
     }
     // Mesh and Solve.
-    b.spawn(Node { align_items: AlignItems::Center, column_gap: Val::Px(8.0), margin: UiRect::top(Val::Px(10.0)), ..default() }).with_children(|r| {
+    b.spawn(Node {
+        align_items: AlignItems::Center,
+        column_gap: Val::Px(8.0),
+        margin: UiRect::top(Val::Px(10.0)),
+        ..default()
+    })
+    .with_children(|r| {
         r.spawn(t.text("Mesh", 11.5, FontWeight::MEDIUM, t.foreground));
         let mut s = Select::new("sim-mesh").bordered().width(Val::Px(96.0));
         for d in MeshDensity::ALL {
             s = s.option(d.label(), true);
         }
-        r.spawn((PanelSelect::Mesh, s.selected(MeshDensity::ALL.iter().position(|d| *d == m.mesh).unwrap_or(1)).build(t)));
+        r.spawn((
+            PanelSelect::Mesh,
+            s.selected(
+                MeshDensity::ALL
+                    .iter()
+                    .position(|d| *d == m.mesh)
+                    .unwrap_or(1),
+            )
+            .build(t),
+        ));
     });
-    b.spawn(Node { column_gap: Val::Px(6.0), margin: UiRect::top(Val::Px(6.0)), ..default() }).with_children(|r| {
-        r.spawn(cadrs_ui::Button::new("sim-solve").label("Solve").icon("play").primary().disabled(m.running).build(t));
+    b.spawn(Node {
+        column_gap: Val::Px(6.0),
+        margin: UiRect::top(Val::Px(6.0)),
+        ..default()
+    })
+    .with_children(|r| {
+        r.spawn(
+            cadrs_ui::Button::new("sim-solve")
+                .label("Solve")
+                .icon("play")
+                .primary()
+                .disabled(m.running)
+                .build(t),
+        );
         if m.running {
             r.spawn(cadrs_ui::Button::new("sim-cancel").label("Cancel").build(t));
         }
     });
     if m.running {
-        b.spawn((Name::new("sim-progress"), ProgressText, t.text("Meshing…", 11.0, FontWeight::NORMAL, t.muted_foreground)));
+        b.spawn((
+            Name::new("sim-progress"),
+            ProgressText,
+            t.text("Meshing…", 11.0, FontWeight::NORMAL, t.muted_foreground),
+        ));
         b.spawn((
             Name::new("sim-progress-bar"),
-            Node { width: Val::Px(214.0), height: Val::Px(5.0), border_radius: BorderRadius::all(Val::Px(3.0)), ..default() },
+            Node {
+                width: Val::Px(214.0),
+                height: Val::Px(5.0),
+                border_radius: BorderRadius::all(Val::Px(3.0)),
+                ..default()
+            },
             BackgroundColor(t.panel_border),
         ))
-        .with_child((ProgressFill, Node { width: Val::Percent(0.0), height: Val::Percent(100.0), border_radius: BorderRadius::all(Val::Px(3.0)), ..default() }, BackgroundColor(t.primary)));
+        .with_child((
+            ProgressFill,
+            Node {
+                width: Val::Percent(0.0),
+                height: Val::Percent(100.0),
+                border_radius: BorderRadius::all(Val::Px(3.0)),
+                ..default()
+            },
+            BackgroundColor(t.primary),
+        ));
     }
     if let Some(e) = &m.error {
         wrapped(b, t, "sim-error", e.clone(), t.feature_error);
     }
     if m.stale {
-        wrapped(b, t, "sim-stale", "The model or its loads changed since the last solve: Solve again for results.", t.muted_foreground);
+        wrapped(
+            b,
+            t,
+            "sim-stale",
+            "The model or its loads changed since the last solve: Solve again for results.",
+            t.muted_foreground,
+        );
     }
     // Results.
     if let Some(rows) = &m.results {
         heading(b, t, "sim-results-heading", "Results");
-        b.spawn(Node { align_items: AlignItems::Center, column_gap: Val::Px(8.0), ..default() }).with_children(|r| {
-            r.spawn((t.text("Show", 11.5, FontWeight::MEDIUM, t.foreground), Node { width: Val::Px(74.0), ..default() }));
+        b.spawn(Node {
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(8.0),
+            ..default()
+        })
+        .with_children(|r| {
+            r.spawn((
+                t.text("Show", 11.5, FontWeight::MEDIUM, t.foreground),
+                Node {
+                    width: Val::Px(74.0),
+                    ..default()
+                },
+            ));
             r.spawn((
                 PanelSelect::Show,
-                Select::new("sim-show").bordered().width(Val::Px(132.0)).option("Von Mises stress", true).option("Displacement", true).option("Safety factor", m.safety).selected(m.show.index()).build(t),
+                Select::new("sim-show")
+                    .bordered()
+                    .width(Val::Px(132.0))
+                    .option("Von Mises stress", true)
+                    .option("Displacement", true)
+                    .option("Safety factor", m.safety)
+                    .selected(m.show.index())
+                    .build(t),
             ));
         });
-        b.spawn(Node { align_items: AlignItems::Center, column_gap: Val::Px(8.0), ..default() }).with_children(|r| {
-            r.spawn((t.text("Deformation", 11.5, FontWeight::MEDIUM, t.foreground), Node { width: Val::Px(74.0), ..default() }));
-            let ex = m.exaggeration.map_or("Exaggerated".to_string(), |e| format!("Exaggerated ×{}", cadrs_ui::color_legend::format_value(e.round().max(1.0))));
+        b.spawn(Node {
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(8.0),
+            ..default()
+        })
+        .with_children(|r| {
+            r.spawn((
+                t.text("Deformation", 11.5, FontWeight::MEDIUM, t.foreground),
+                Node {
+                    width: Val::Px(74.0),
+                    ..default()
+                },
+            ));
+            let ex = m.exaggeration.map_or("Exaggerated".to_string(), |e| {
+                format!(
+                    "Exaggerated ×{}",
+                    cadrs_ui::color_legend::format_value(e.round().max(1.0))
+                )
+            });
             let selected = match m.deform {
                 Deform::Undeformed => 0,
                 Deform::Actual => 1,
                 Deform::Exaggerated => 2,
             };
-            r.spawn((PanelSelect::Deform, Select::new("sim-deform").bordered().width(Val::Px(132.0)).option("Undeformed", true).option("Actual (×1)", true).option(ex, true).selected(selected).build(t)));
+            r.spawn((
+                PanelSelect::Deform,
+                Select::new("sim-deform")
+                    .bordered()
+                    .width(Val::Px(132.0))
+                    .option("Undeformed", true)
+                    .option("Actual (×1)", true)
+                    .option(ex, true)
+                    .selected(selected)
+                    .build(t),
+            ));
         });
         for (name, label, value) in rows {
-            b.spawn((Name::new(name.clone()), Node { column_gap: Val::Px(8.0), ..default() })).with_children(|r| {
-                r.spawn((t.text(label.clone(), 11.5, FontWeight::NORMAL, t.muted_foreground), Node { width: Val::Px(112.0), ..default() }));
-                r.spawn((Name::new(format!("{name}-value")), t.text(value.clone(), 11.5, FontWeight::MEDIUM, t.foreground)));
+            b.spawn((
+                Name::new(name.clone()),
+                Node {
+                    column_gap: Val::Px(8.0),
+                    ..default()
+                },
+            ))
+            .with_children(|r| {
+                r.spawn((
+                    t.text(label.clone(), 11.5, FontWeight::NORMAL, t.muted_foreground),
+                    Node {
+                        width: Val::Px(112.0),
+                        ..default()
+                    },
+                ));
+                r.spawn((
+                    Name::new(format!("{name}-value")),
+                    t.text(value.clone(), 11.5, FontWeight::MEDIUM, t.foreground),
+                ));
             });
         }
-        wrapped(b, t, "sim-probe-hint", "Hover the model to read the value at a point.", t.muted_foreground);
+        wrapped(
+            b,
+            t,
+            "sim-probe-hint",
+            "Hover the model to read the value at a point.",
+            t.muted_foreground,
+        );
     }
     for (k, n) in m.notes.iter().enumerate() {
-        wrapped(b, t, &format!("sim-note-{}", k + 1), n.clone(), t.muted_foreground);
+        wrapped(
+            b,
+            t,
+            &format!("sim-note-{}", k + 1),
+            n.clone(),
+            t.muted_foreground,
+        );
     }
 }
 
-fn update_progress(state: Res<SimState>, mut q_text: Query<&mut Text, With<ProgressText>>, mut q_fill: Query<&mut Node, With<ProgressFill>>) {
+fn update_progress(
+    state: Res<SimState>,
+    mut q_text: Query<&mut Text, With<ProgressText>>,
+    mut q_fill: Query<&mut Node, With<ProgressFill>>,
+) {
     let Some(run) = &state.run else { return };
-    let Ok((stage, f)) = run.progress.lock().map(|p| *p) else { return };
+    let Ok((stage, f)) = run.progress.lock().map(|p| *p) else {
+        return;
+    };
     // Rough weights of the stages in the whole solve, for one bar.
     let (start, span) = match stage {
         Stage::Meshing => (0.0, 0.15),
@@ -795,9 +1138,19 @@ fn update_progress(state: Res<SimState>, mut q_text: Query<&mut Text, With<Progr
 // Panel events
 
 fn new_load(world: &mut World, kind: LoadKind) {
-    let Some(doc) = world.get_resource::<ActiveDocument>() else { return };
-    let Some(el) = doc.active_element() else { return };
-    let load = SimLoad { id: LoadId::new(), name: el.simulation.next_name(&kind), kind, faces: Vec::new(), suppressed: false };
+    let Some(doc) = world.get_resource::<ActiveDocument>() else {
+        return;
+    };
+    let Some(el) = doc.active_element() else {
+        return;
+    };
+    let load = SimLoad {
+        id: LoadId::new(),
+        name: el.simulation.next_name(&kind),
+        kind,
+        faces: Vec::new(),
+        suppressed: false,
+    };
     open_session(world, el.id, load, false);
 }
 
@@ -807,9 +1160,22 @@ fn open_session(world: &mut World, element: ElementId, load: SimLoad, editing: b
         LoadKind::Force { newtons, .. } => sim::format_force(newtons),
         LoadKind::Pressure { pascals } => sim::format_pressure(pascals),
     };
-    world.resource_mut::<Selection>().0 = load.faces.iter().map(|f| Pick::Face(f.part, f.face)).collect();
-    world.insert_resource(LoadSession { element, load, editing, text, text_error: false });
-    world.resource_mut::<PickFilterOverride>().0 = Some(PickFilter { faces: true, ..PickFilter::none() });
+    world.resource_mut::<Selection>().0 = load
+        .faces
+        .iter()
+        .map(|f| Pick::Face(f.part, f.face))
+        .collect();
+    world.insert_resource(LoadSession {
+        element,
+        load,
+        editing,
+        text,
+        text_error: false,
+    });
+    world.resource_mut::<PickFilterOverride>().0 = Some(PickFilter {
+        faces: true,
+        ..PickFilter::none()
+    });
 }
 
 fn close_session(world: &mut World) {
@@ -820,7 +1186,9 @@ fn close_session(world: &mut World) {
 }
 
 fn run_cmd(world: &mut World, cmd: &dyn cadrs_core::Command) -> bool {
-    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return false };
+    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+        return false;
+    };
     match doc.execute(cmd) {
         Ok(()) => true,
         Err(e) => {
@@ -844,18 +1212,47 @@ fn on_activate(
     }
     if let Ok(DeleteLoadButton(id)) = q_delete.get(ev.entity).copied() {
         commands.queue(move |world: &mut World| {
-            let Some(el) = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element()).map(|e| e.id) else { return };
-            run_cmd(world, &DeleteLoad { element: el, load: id });
+            let Some(el) = world
+                .get_resource::<ActiveDocument>()
+                .and_then(|d| d.active_element())
+                .map(|e| e.id)
+            else {
+                return;
+            };
+            run_cmd(
+                world,
+                &DeleteLoad {
+                    element: el,
+                    load: id,
+                },
+            );
         });
         return;
     }
     let Ok(name) = q.get(ev.entity) else { return };
     match name.as_str() {
-        "panel-simulation" => *open = if *open == SidePanel::Simulation { SidePanel::None } else { SidePanel::Simulation },
+        "panel-simulation" => {
+            *open = if *open == SidePanel::Simulation {
+                SidePanel::None
+            } else {
+                SidePanel::Simulation
+            }
+        }
         "simulation-panel-close" => *open = SidePanel::None,
         "sim-add-fixed" => commands.queue(|world: &mut World| new_load(world, LoadKind::Fixed)),
-        "sim-add-force" => commands.queue(|world: &mut World| new_load(world, LoadKind::Force { newtons: 100.0, direction: ForceDirection::Normal, flip: false })),
-        "sim-add-pressure" => commands.queue(|world: &mut World| new_load(world, LoadKind::Pressure { pascals: 1e6 })),
+        "sim-add-force" => commands.queue(|world: &mut World| {
+            new_load(
+                world,
+                LoadKind::Force {
+                    newtons: 100.0,
+                    direction: ForceDirection::Normal,
+                    flip: false,
+                },
+            )
+        }),
+        "sim-add-pressure" => {
+            commands.queue(|world: &mut World| new_load(world, LoadKind::Pressure { pascals: 1e6 }))
+        }
         "sim-solve" => commands.queue(|world: &mut World| {
             close_session(world);
             start_solve(world);
@@ -870,13 +1267,26 @@ fn on_activate(
 }
 
 fn edit_load(world: &mut World, id: LoadId) {
-    let Some(el) = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element()) else { return };
-    let Some(load) = el.simulation.load(id).cloned() else { return };
+    let Some(el) = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.active_element())
+    else {
+        return;
+    };
+    let Some(load) = el.simulation.load(id).cloned() else {
+        return;
+    };
     let element = el.id;
     open_session(world, element, load, true);
 }
 
-fn on_select(ev: On<SelectChange>, q: Query<&PanelSelect>, mut q_dir: Query<(), With<DirectionSelect>>, mut state: ResMut<SimState>, mut commands: Commands) {
+fn on_select(
+    ev: On<SelectChange>,
+    q: Query<&PanelSelect>,
+    mut q_dir: Query<(), With<DirectionSelect>>,
+    mut state: ResMut<SimState>,
+    mut commands: Commands,
+) {
     let index = ev.index;
     if q_dir.get_mut(ev.entity).is_ok() {
         if let Some(d) = ForceDirection::ALL.get(index).copied() {
@@ -894,7 +1304,13 @@ fn on_select(ev: On<SelectChange>, q: Query<&PanelSelect>, mut q_dir: Query<(), 
         Ok(PanelSelect::Mesh) => {
             if let Some(mesh) = MeshDensity::ALL.get(index).copied() {
                 commands.queue(move |world: &mut World| {
-                    let Some(el) = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element()).map(|e| e.id) else { return };
+                    let Some(el) = world
+                        .get_resource::<ActiveDocument>()
+                        .and_then(|d| d.active_element())
+                        .map(|e| e.id)
+                    else {
+                        return;
+                    };
                     run_cmd(world, &SetMeshDensity { element: el, mesh });
                 });
             }
@@ -971,13 +1387,22 @@ fn sync_load_dialog(
             return;
         }
         for mut l in &mut q_faces {
-            let want = SelectionListState { items: items.clone(), active: true, error: false, red_items: false, red: Vec::new() };
+            let want = SelectionListState {
+                items: items.clone(),
+                active: true,
+                error: false,
+                red_items: false,
+                red: Vec::new(),
+            };
             if *l != want {
                 *l = want;
             }
         }
         for mut v in &mut q_value {
-            let want = NumberFieldState { text: s.text.clone(), error: s.text_error };
+            let want = NumberFieldState {
+                text: s.text.clone(),
+                error: s.text_error,
+            };
             if *v != want {
                 *v = want;
             }
@@ -989,7 +1414,9 @@ fn sync_load_dialog(
         }
         return;
     }
-    let Some(area) = q_area.iter().next() else { return };
+    let Some(area) = q_area.iter().next() else {
+        return;
+    };
     let t = theme.clone();
     let kind = s.load.kind;
     let text = s.text.clone();
@@ -1004,33 +1431,96 @@ fn sync_load_dialog(
                 .width(240.0)
                 .body(move |b| {
                     let t = &t;
-                    b.spawn((FacesField, SelectionList::new("sim-load-faces").placeholder("Faces").items(items.clone()).active(true).build(t)));
+                    b.spawn((
+                        FacesField,
+                        SelectionList::new("sim-load-faces")
+                            .placeholder("Faces")
+                            .items(items.clone())
+                            .active(true)
+                            .build(t),
+                    ));
                     match kind {
                         LoadKind::Fixed => {
                             b.spawn((
                                 Name::new("sim-load-fixed-note"),
-                                t.text("The faces don't move.", 11.0, FontWeight::NORMAL, t.muted_foreground),
-                                Node { margin: UiRect::top(Val::Px(4.0)), ..default() },
+                                t.text(
+                                    "The faces don't move.",
+                                    11.0,
+                                    FontWeight::NORMAL,
+                                    t.muted_foreground,
+                                ),
+                                Node {
+                                    margin: UiRect::top(Val::Px(4.0)),
+                                    ..default()
+                                },
                             ));
                         }
-                        LoadKind::Force { direction, flip, .. } => {
-                            b.spawn((MagnitudeField, NumberField::new("sim-load-magnitude", "Force").text(text.clone()).label_width(64.0).build(t)));
-                            b.spawn(Node { height: Val::Px(28.0), align_items: AlignItems::Center, column_gap: Val::Px(8.0), ..default() }).with_children(|r| {
-                                r.spawn((t.text("Direction", 11.5, FontWeight::NORMAL, t.foreground), Node { width: Val::Px(64.0), ..default() }));
-                                let mut sel = Select::new("sim-load-direction").width(Val::Px(130.0));
+                        LoadKind::Force {
+                            direction, flip, ..
+                        } => {
+                            b.spawn((
+                                MagnitudeField,
+                                NumberField::new("sim-load-magnitude", "Force")
+                                    .text(text.clone())
+                                    .label_width(64.0)
+                                    .build(t),
+                            ));
+                            b.spawn(Node {
+                                height: Val::Px(28.0),
+                                align_items: AlignItems::Center,
+                                column_gap: Val::Px(8.0),
+                                ..default()
+                            })
+                            .with_children(|r| {
+                                r.spawn((
+                                    t.text("Direction", 11.5, FontWeight::NORMAL, t.foreground),
+                                    Node {
+                                        width: Val::Px(64.0),
+                                        ..default()
+                                    },
+                                ));
+                                let mut sel =
+                                    Select::new("sim-load-direction").width(Val::Px(130.0));
                                 for d in ForceDirection::ALL {
                                     sel = sel.option(d.label(), true);
                                 }
-                                r.spawn((DirectionSelect, sel.selected(ForceDirection::ALL.iter().position(|d| *d == direction).unwrap_or(0)).build(t)));
+                                r.spawn((
+                                    DirectionSelect,
+                                    sel.selected(
+                                        ForceDirection::ALL
+                                            .iter()
+                                            .position(|d| *d == direction)
+                                            .unwrap_or(0),
+                                    )
+                                    .build(t),
+                                ));
                             });
-                            b.spawn(OptionRow::new("sim-load-flip", "Flip direction").checked(flip).build(t));
+                            b.spawn(
+                                OptionRow::new("sim-load-flip", "Flip direction")
+                                    .checked(flip)
+                                    .build(t),
+                            );
                         }
                         LoadKind::Pressure { .. } => {
-                            b.spawn((MagnitudeField, NumberField::new("sim-load-magnitude", "Pressure").text(text.clone()).label_width(64.0).build(t)));
+                            b.spawn((
+                                MagnitudeField,
+                                NumberField::new("sim-load-magnitude", "Pressure")
+                                    .text(text.clone())
+                                    .label_width(64.0)
+                                    .build(t),
+                            ));
                             b.spawn((
                                 Name::new("sim-load-pressure-note"),
-                                t.text("Pushes into the faces.", 11.0, FontWeight::NORMAL, t.muted_foreground),
-                                Node { margin: UiRect::top(Val::Px(2.0)), ..default() },
+                                t.text(
+                                    "Pushes into the faces.",
+                                    11.0,
+                                    FontWeight::NORMAL,
+                                    t.muted_foreground,
+                                ),
+                                Node {
+                                    margin: UiRect::top(Val::Px(2.0)),
+                                    ..default()
+                                },
                             ));
                         }
                     }
@@ -1042,7 +1532,12 @@ fn sync_load_dialog(
 }
 
 /// Faces clicked while the dialog is open go to its Faces field.
-fn load_picks(mut picks: MessageReader<PickRequest>, session: Option<ResMut<LoadSession>>, kind: Res<ActiveKind>, mut selection: ResMut<Selection>) {
+fn load_picks(
+    mut picks: MessageReader<PickRequest>,
+    session: Option<ResMut<LoadSession>>,
+    kind: Res<ActiveKind>,
+    mut selection: ResMut<Selection>,
+) {
     let Some(mut s) = session else {
         picks.clear();
         return;
@@ -1050,7 +1545,10 @@ fn load_picks(mut picks: MessageReader<PickRequest>, session: Option<ResMut<Load
     let mut changed = false;
     for p in picks.read() {
         if let Some(Pick::Face(part, face)) = &p.0 {
-            let f = SimFace { part: *part, face: *face };
+            let f = SimFace {
+                part: *part,
+                face: *face,
+            };
             if let Some(i) = s.load.faces.iter().position(|x| *x == f) {
                 s.load.faces.remove(i);
             } else {
@@ -1071,29 +1569,46 @@ fn selection_of(load: &SimLoad, kind: ActiveKind) -> Vec<Pick> {
     if kind == ActiveKind::Assembly {
         return Vec::new();
     }
-    load.faces.iter().map(|f| Pick::Face(f.part, f.face)).collect()
+    load.faces
+        .iter()
+        .map(|f| Pick::Face(f.part, f.face))
+        .collect()
 }
 
-fn load_keys(mut keys: MessageReader<KeyboardInput>, session: Option<Res<LoadSession>>, focus: Res<bevy::input_focus::InputFocus>, mut commands: Commands) {
+fn load_keys(
+    mut keys: MessageReader<KeyboardInput>,
+    session: Option<Res<LoadSession>>,
+    focus: Res<bevy::input_focus::InputFocus>,
+    mut commands: Commands,
+) {
     if session.is_none() {
         keys.clear();
         return;
     }
     for k in keys.read() {
-        if k.state == ButtonState::Pressed && k.shortcut_code() == KeyCode::Escape && focus.get().is_none() {
+        if k.state == ButtonState::Pressed
+            && k.shortcut_code() == KeyCode::Escape
+            && focus.get().is_none()
+        {
             commands.queue(close_session);
         }
     }
 }
 
-fn on_face_remove(ev: On<SelectionListRemove>, q: Query<(), With<FacesField>>, mut commands: Commands) {
+fn on_face_remove(
+    ev: On<SelectionListRemove>,
+    q: Query<(), With<FacesField>>,
+    mut commands: Commands,
+) {
     if !q.contains(ev.entity) {
         return;
     }
     let index = ev.index;
     commands.queue(move |world: &mut World| {
         let kind = *world.resource::<ActiveKind>();
-        let Some(mut s) = world.get_resource_mut::<LoadSession>() else { return };
+        let Some(mut s) = world.get_resource_mut::<LoadSession>() else {
+            return;
+        };
         if index < s.load.faces.len() {
             s.load.faces.remove(index);
         }
@@ -1103,7 +1618,9 @@ fn on_face_remove(ev: On<SelectionListRemove>, q: Query<(), With<FacesField>>, m
 }
 
 fn on_checkbox(ev: On<CheckboxChange>, q: Query<&Name>, mut commands: Commands) {
-    if q.get(ev.entity).is_ok_and(|n| n.as_str() == "sim-load-flip-checkbox") {
+    if q.get(ev.entity)
+        .is_ok_and(|n| n.as_str() == "sim-load-flip-checkbox")
+    {
         let on = ev.checked;
         commands.queue(move |world: &mut World| {
             if let Some(mut s) = world.get_resource_mut::<LoadSession>()
@@ -1115,13 +1632,19 @@ fn on_checkbox(ev: On<CheckboxChange>, q: Query<&Name>, mut commands: Commands) 
     }
 }
 
-fn on_number(ev: On<NumberFieldCommit>, q: Query<(), With<MagnitudeField>>, mut commands: Commands) {
+fn on_number(
+    ev: On<NumberFieldCommit>,
+    q: Query<(), With<MagnitudeField>>,
+    mut commands: Commands,
+) {
     if !q.contains(ev.entity) {
         return;
     }
     let text = ev.text.clone();
     commands.queue(move |world: &mut World| {
-        let Some(mut s) = world.get_resource_mut::<LoadSession>() else { return };
+        let Some(mut s) = world.get_resource_mut::<LoadSession>() else {
+            return;
+        };
         let parsed = match s.load.kind {
             LoadKind::Force { .. } => sim::parse_force(&text),
             LoadKind::Pressure { .. } => sim::parse_pressure(&text),
@@ -1155,11 +1678,29 @@ fn on_accept(ev: On<FeatureDialogAccept>, q: Query<(), With<LoadDialog>>, mut co
         return;
     }
     commands.queue(|world: &mut World| {
-        let Some(s) = world.get_resource::<LoadSession>().cloned() else { return };
+        let Some(s) = world.get_resource::<LoadSession>().cloned() else {
+            return;
+        };
         if s.load.faces.is_empty() || s.text_error {
             return;
         }
-        let ok = if s.editing { run_cmd(world, &SetLoad { element: s.element, load: s.load }) } else { run_cmd(world, &AddLoad { element: s.element, load: s.load }) };
+        let ok = if s.editing {
+            run_cmd(
+                world,
+                &SetLoad {
+                    element: s.element,
+                    load: s.load,
+                },
+            )
+        } else {
+            run_cmd(
+                world,
+                &AddLoad {
+                    element: s.element,
+                    load: s.load,
+                },
+            )
+        };
         if ok {
             close_session(world);
         }
@@ -1198,8 +1739,18 @@ fn sync_load_rows(
     mut commands: Commands,
 ) {
     let Some(doc) = doc else { return };
-    let Some(el) = doc.active_element().filter(|e| e.assembly_model().is_some()) else { return };
-    let key: Vec<(LoadId, String, String)> = el.simulation.loads.iter().map(|l| (l.id, l.name.clone(), l.kind.summary())).collect();
+    let Some(el) = doc
+        .active_element()
+        .filter(|e| e.assembly_model().is_some())
+    else {
+        return;
+    };
+    let key: Vec<(LoadId, String, String)> = el
+        .simulation
+        .loads
+        .iter()
+        .map(|l| (l.id, l.name.clone(), l.kind.summary()))
+        .collect();
     let count = format!("Loads ({})", key.len());
     for children in &q_header {
         let mut stack: Vec<Entity> = children.iter().collect();
@@ -1215,12 +1766,19 @@ fn sync_load_rows(
             }
         }
     }
-    let Some((container, added)) = q_rows.iter().next().map(|(e, r)| (e, r.is_added())) else { return };
+    let Some((container, added)) = q_rows.iter().next().map(|(e, r)| (e, r.is_added())) else {
+        return;
+    };
     if !added && last.as_ref() == Some(&key) {
         return;
     }
     let t = theme.clone();
-    let loads: Vec<(LoadId, String, String, LoadKind)> = el.simulation.loads.iter().map(|l| (l.id, l.name.clone(), l.kind.summary(), l.kind)).collect();
+    let loads: Vec<(LoadId, String, String, LoadKind)> = el
+        .simulation
+        .loads
+        .iter()
+        .map(|l| (l.id, l.name.clone(), l.kind.summary(), l.kind))
+        .collect();
     commands.entity(container).despawn_children();
     commands.entity(container).with_children(|c| {
         for (k, (id, name, summary, kind)) in loads.iter().enumerate() {
@@ -1230,7 +1788,10 @@ fn sync_load_rows(
                     .icon(load_icon(kind), 14.0)
                     .icon_color(load_color(kind))
                     .left(22.0)
-                    .trailing((!summary.is_empty()).then(|| summary.clone()), t.muted_foreground)
+                    .trailing(
+                        (!summary.is_empty()).then(|| summary.clone()),
+                        t.muted_foreground,
+                    )
                     .build(&t),
                 TreeLoadRow(*id),
                 DoubleClickable,
@@ -1246,7 +1807,12 @@ fn sync_load_rows(
     *last = Some(key);
 }
 
-fn on_load_row_double_click(ev: On<DoubleClick>, q: Query<&TreeLoadRow>, mut open: ResMut<SidePanel>, mut commands: Commands) {
+fn on_load_row_double_click(
+    ev: On<DoubleClick>,
+    q: Query<&TreeLoadRow>,
+    mut open: ResMut<SidePanel>,
+    mut commands: Commands,
+) {
     if let Ok(TreeLoadRow(id)) = q.get(ev.entity).copied() {
         *open = SidePanel::Simulation;
         commands.queue(move |world: &mut World| edit_load(world, id));
@@ -1277,7 +1843,13 @@ struct ResultMesh {
 
 /// The results to draw now, if any: the panel is open on the element they're for, they're
 /// current, and no load dialog is open.
-fn shown_result<'a>(open: &SidePanel, kind: &ActiveKind, key: Option<(ElementId, u64)>, state: &'a SimState, session: bool) -> Option<&'a SimResult> {
+fn shown_result<'a>(
+    open: &SidePanel,
+    kind: &ActiveKind,
+    key: Option<(ElementId, u64)>,
+    state: &'a SimState,
+    session: bool,
+) -> Option<&'a SimResult> {
     if *open != SidePanel::Simulation || kind.is_flat() || session {
         return None;
     }
@@ -1309,7 +1881,11 @@ fn sync_results_view(
         }
         return;
     };
-    let key = (r.key ^ (Arc::as_ptr(&r.solution) as u64), state.show, state.deform);
+    let key = (
+        r.key ^ (Arc::as_ptr(&r.solution) as u64),
+        state.show,
+        state.deform,
+    );
     let v = &view.view;
     let now = (v.right(), v.up(), v.back());
     if geometry.key != Some(key) || q.is_empty() {
@@ -1324,14 +1900,21 @@ fn sync_results_view(
         let s = &r.solution;
         let max_vm = s.max_von_mises().max(1e-30) as f32;
         let max_u = s.max_displacement().max(1e-30) as f32;
-        let mut g = ResultGeometry { key: Some(key), ..default() };
+        let mut g = ResultGeometry {
+            key: Some(key),
+            ..default()
+        };
         let (fs_lo, fs_hi) = safety_range(min_safety(r).unwrap_or(1.0));
         let mat = materials.add(crate::parts::part_material(false));
         for (bi, b) in s.bodies.iter().enumerate() {
             let at = |n: u32| {
                 let p = b.mesh.nodes[n as usize];
                 let u = b.displacement[n as usize];
-                Vec3::new((p[0] + scale * u[0]) as f32, (p[1] + scale * u[1]) as f32, (p[2] + scale * u[2]) as f32)
+                Vec3::new(
+                    (p[0] + scale * u[0]) as f32,
+                    (p[1] + scale * u[1]) as f32,
+                    (p[2] + scale * u[2]) as f32,
+                )
             };
             let yield_mpa = r.yields.get(bi).copied().flatten();
             let umag = |n: u32| {
@@ -1343,7 +1926,12 @@ fn sync_results_view(
             let mut base = Vec::with_capacity(b.mesh.boundary.len() * 12);
             for tri in &b.mesh.boundary {
                 let [c0, c1, c2, m01, m12, m20] = tri.nodes;
-                for sub in [[c0, m01, m20], [m01, c1, m12], [m20, m12, c2], [m01, m12, m20]] {
+                for sub in [
+                    [c0, m01, m20],
+                    [m01, c1, m12],
+                    [m20, m12, c2],
+                    [m01, m12, m20],
+                ] {
                     let p = sub.map(at);
                     let n = (p[1] - p[0]).cross(p[2] - p[0]).normalize_or_zero();
                     for (k, &node) in sub.iter().enumerate() {
@@ -1357,7 +1945,10 @@ fn sync_results_view(
                             Show::VonMises => vm / max_vm,
                             Show::Displacement => du / max_u,
                             // Red at the smallest factor, blue from five times it.
-                            Show::SafetyFactor => 1.0 - ((fs as f64 - fs_lo) / (fs_hi - fs_lo).max(1e-12)).clamp(0.0, 1.0) as f32,
+                            Show::SafetyFactor => {
+                                1.0 - ((fs as f64 - fs_lo) / (fs_hi - fs_lo).max(1e-12))
+                                    .clamp(0.0, 1.0) as f32
+                            }
                         };
                         positions.push(p[k]);
                         normals.push(n);
@@ -1370,11 +1961,20 @@ fn sync_results_view(
                 }
             }
             let colors: Vec<[f32; 4]> = shade(v, &normals, &base);
-            let mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
-                .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions.iter().map(|p| p.to_array()).collect::<Vec<_>>())
-                .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals.iter().map(|n| n.to_array()).collect::<Vec<_>>())
-                .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colors)
-                .with_inserted_indices(Indices::U32((0..positions.len() as u32).collect()));
+            let mesh = Mesh::new(
+                PrimitiveTopology::TriangleList,
+                RenderAssetUsages::default(),
+            )
+            .with_inserted_attribute(
+                Mesh::ATTRIBUTE_POSITION,
+                positions.iter().map(|p| p.to_array()).collect::<Vec<_>>(),
+            )
+            .with_inserted_attribute(
+                Mesh::ATTRIBUTE_NORMAL,
+                normals.iter().map(|n| n.to_array()).collect::<Vec<_>>(),
+            )
+            .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colors)
+            .with_inserted_indices(Indices::U32((0..positions.len() as u32).collect()));
             commands.spawn((
                 Name::new(format!("sim-result-{}", bi + 1)),
                 ResultMesh { normals, base },
@@ -1428,7 +2028,10 @@ fn hide_result_parts(
     // While results show, the view reads values (the probe) rather than picking the hidden
     // parts; the load dialog picks faces.
     let want = if session.is_some() {
-        Some(PickFilter { faces: true, ..PickFilter::none() })
+        Some(PickFilter {
+            faces: true,
+            ..PickFilter::none()
+        })
     } else if shown.is_some() {
         Some(PickFilter::none())
     } else {
@@ -1439,7 +2042,11 @@ fn hide_result_parts(
     }
     for (pm, mut vis) in &mut q {
         let hide = shown.is_some_and(|r| r.parts.contains(&pm.id));
-        let want = if hide { Visibility::Hidden } else { Visibility::Inherited };
+        let want = if hide {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        };
         if *vis != want {
             *vis = want;
         }
@@ -1476,30 +2083,57 @@ fn sync_legend(
         let caption = match state.deform {
             Deform::Undeformed => "Undeformed shape".to_string(),
             Deform::Actual => "Deformed ×1 (actual)".to_string(),
-            Deform::Exaggerated => format!("Deformed ×{} (exaggerated)", cadrs_ui::color_legend::format_value(exaggeration(r, inputs.size).unwrap_or(1.0).round().max(1.0))),
+            Deform::Exaggerated => format!(
+                "Deformed ×{} (exaggerated)",
+                cadrs_ui::color_legend::format_value(
+                    exaggeration(r, inputs.size).unwrap_or(1.0).round().max(1.0)
+                )
+            ),
         };
         (title, unit, lo, max, caption)
     });
-    let key = want.as_ref().map(|(t, u, l, m, c)| LegendKey(format!("{t}|{u}|{l}|{m}|{c}")));
+    let key = want
+        .as_ref()
+        .map(|(t, u, l, m, c)| LegendKey(format!("{t}|{u}|{l}|{m}|{c}")));
     if let Some((e, k)) = q.iter().next() {
         if Some(k) == key.as_ref() {
             return;
         }
         commands.entity(e).try_despawn();
     }
-    let (Some((title, unit, lo, max, caption)), Some(key), Some(area)) = (want, key, q_area.iter().next()) else { return };
+    let (Some((title, unit, lo, max, caption)), Some(key), Some(area)) =
+        (want, key, q_area.iter().next())
+    else {
+        return;
+    };
     let t = theme.clone();
     let e = commands
         .spawn((
             Name::new("sim-legend-box"),
             key,
-            Node { position_type: PositionType::Absolute, left: Val::Px(12.0), bottom: Val::Px(14.0), flex_direction: FlexDirection::Column, row_gap: Val::Px(4.0), ..default() },
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(12.0),
+                bottom: Val::Px(14.0),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(4.0),
+                ..default()
+            },
             Pickable::IGNORE,
             DespawnOnExit(AppState::Document),
         ))
         .with_children(|c| {
-            c.spawn(ColorLegend::new("sim-legend", title).range(lo, max).unit(unit).build(&t));
-            c.spawn((Name::new("sim-legend-caption"), t.text(caption, 11.0, FontWeight::NORMAL, t.muted_foreground), Pickable::IGNORE));
+            c.spawn(
+                ColorLegend::new("sim-legend", title)
+                    .range(lo, max)
+                    .unit(unit)
+                    .build(&t),
+            );
+            c.spawn((
+                Name::new("sim-legend-caption"),
+                t.text(caption, 11.0, FontWeight::NORMAL, t.muted_foreground),
+                Pickable::IGNORE,
+            ));
         })
         .id();
     commands.entity(area).add_child(e);
@@ -1547,16 +2181,30 @@ fn update_probe(
     let vm = at(&geometry.von_mises) as f64;
     let du = at(&geometry.displacement) as f64;
     let (first, second) = match state.show {
-        Show::VonMises => (format!("Von Mises: {}", val(vm, "MPa")), format!("Displacement: {}", val(du, "mm"))),
-        Show::Displacement => (format!("Displacement: {}", val(du, "mm")), format!("Von Mises: {}", val(vm, "MPa"))),
+        Show::VonMises => (
+            format!("Von Mises: {}", val(vm, "MPa")),
+            format!("Displacement: {}", val(du, "mm")),
+        ),
+        Show::Displacement => (
+            format!("Displacement: {}", val(du, "mm")),
+            format!("Von Mises: {}", val(vm, "MPa")),
+        ),
         Show::SafetyFactor => {
             // From the interpolated stress (the corner factors can be infinite).
-            let y = geometry.safety.get(3 * k).zip(geometry.von_mises.get(3 * k)).map(|(f, v)| (*f * *v) as f64).filter(|y| y.is_finite() && *y > 0.0);
+            let y = geometry
+                .safety
+                .get(3 * k)
+                .zip(geometry.von_mises.get(3 * k))
+                .map(|(f, v)| (*f * *v) as f64)
+                .filter(|y| y.is_finite() && *y > 0.0);
             let fs = match y {
                 Some(y) if vm > 0.0 => format!("{:.2}", y / vm),
                 _ => "—".into(),
             };
-            (format!("Safety factor: {fs}"), format!("Von Mises: {}", val(vm, "MPa")))
+            (
+                format!("Safety factor: {fs}"),
+                format!("Von Mises: {}", val(vm, "MPa")),
+            )
         }
     };
     let text = format!("{first}\n{second}");
@@ -1576,7 +2224,9 @@ fn update_probe(
         }
         return;
     }
-    let Some(area) = q_area.iter().next() else { return };
+    let Some(area) = q_area.iter().next() else {
+        return;
+    };
     let t = theme.clone();
     let e = commands
         .spawn((
@@ -1597,7 +2247,13 @@ fn update_probe(
             Pickable::IGNORE,
             DespawnOnExit(AppState::Document),
         ))
-        .with_child((Name::new("sim-probe-text"), Text::new(text), t.font(11.5, FontWeight::MEDIUM), TextColor(t.foreground), Pickable::IGNORE))
+        .with_child((
+            Name::new("sim-probe-text"),
+            Text::new(text),
+            t.font(11.5, FontWeight::MEDIUM),
+            TextColor(t.foreground),
+            Pickable::IGNORE,
+        ))
         .id();
     commands.entity(area).add_child(e);
 }
@@ -1647,13 +2303,21 @@ fn draw_load_glyphs(
     if shown_result(&open, &kind, inputs.key, &state, session.is_some()).is_some() {
         return;
     }
-    let Some(el) = doc.as_ref().and_then(|d| d.active_element()) else { return };
+    let Some(el) = doc.as_ref().and_then(|d| d.active_element()) else {
+        return;
+    };
     let size = inputs.size as f32;
     if size <= 0.0 {
         return;
     }
     // The load being edited is drawn as it is in the dialog.
-    let mut loads: Vec<SimLoad> = el.simulation.loads.iter().filter(|l| !l.suppressed).cloned().collect();
+    let mut loads: Vec<SimLoad> = el
+        .simulation
+        .loads
+        .iter()
+        .filter(|l| !l.suppressed)
+        .cloned()
+        .collect();
     if let Some(s) = &session {
         loads.retain(|l| l.id != s.load.id);
         loads.push(s.load.clone());
@@ -1663,10 +2327,17 @@ fn draw_load_glyphs(
         && *kind == ActiveKind::Assembly
     {
         for f in &s.load.faces {
-            let Some(part) = cache.part(f.part) else { continue };
-            let Some(face) = part.solid.faces.iter().find(|x| x.name == f.face) else { continue };
+            let Some(part) = cache.part(f.part) else {
+                continue;
+            };
+            let Some(face) = part.solid.faces.iter().find(|x| x.name == f.face) else {
+                continue;
+            };
             for l in &face.loops {
-                let mut pts: Vec<Vec3> = l.iter().map(|p| Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32)).collect();
+                let mut pts: Vec<Vec3> = l
+                    .iter()
+                    .map(|p| Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32))
+                    .collect();
                 if let Some(first) = pts.first().copied() {
                     pts.push(first);
                 }
@@ -1678,19 +2349,34 @@ fn draw_load_glyphs(
     for l in &loads {
         let color = load_color(&l.kind);
         for f in &l.faces {
-            let Some(part) = cache.part(f.part) else { continue };
-            let Some(i) = part.solid.faces.iter().position(|x| x.name == f.face) else { continue };
+            let Some(part) = cache.part(f.part) else {
+                continue;
+            };
+            let Some(i) = part.solid.faces.iter().position(|x| x.name == f.face) else {
+                continue;
+            };
             let face = &part.solid.faces[i];
-            let Some(c) = face.center.or_else(|| part.solid.face_point(i)) else { continue };
+            let Some(c) = face.center.or_else(|| part.solid.face_point(i)) else {
+                continue;
+            };
             let c = Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32);
-            let n = part.solid.face_normal(i).map(|n| Vec3::new(n[0] as f32, n[1] as f32, n[2] as f32)).unwrap_or(Vec3::Z);
+            let n = part
+                .solid
+                .face_normal(i)
+                .map(|n| Vec3::new(n[0] as f32, n[1] as f32, n[2] as f32))
+                .unwrap_or(Vec3::Z);
             let t1 = n.any_orthonormal_vector();
             let t2 = n.cross(t1);
             match l.kind {
                 LoadKind::Fixed => {
                     // A ground symbol on the face: a square with hatching behind it.
                     let h = size * 0.03;
-                    let corners = [c + (t1 + t2) * h, c + (t2 - t1) * h, c - (t1 + t2) * h, c + (t1 - t2) * h];
+                    let corners = [
+                        c + (t1 + t2) * h,
+                        c + (t2 - t1) * h,
+                        c - (t1 + t2) * h,
+                        c + (t1 - t2) * h,
+                    ];
                     for k in 0..4 {
                         gizmos.line(corners[k], corners[(k + 1) % 4], color);
                     }
@@ -1699,7 +2385,9 @@ fn draw_load_glyphs(
                         gizmos.line(p, p + n * h * 0.9 - t2 * h * 0.6, color);
                     }
                 }
-                LoadKind::Force { direction, flip, .. } => {
+                LoadKind::Force {
+                    direction, flip, ..
+                } => {
                     let mut d = match direction {
                         ForceDirection::Normal => -n,
                         ForceDirection::X => Vec3::X,
@@ -1712,13 +2400,23 @@ fn draw_load_glyphs(
                     // The arrow ends on the face, pushing or pulling.
                     let start = if d.dot(n) < 0.0 { c - d * arrow } else { c };
                     let end = start + d * arrow;
-                    gizmos.arrow(start, end, color).with_tip_length(arrow * 0.25);
+                    gizmos
+                        .arrow(start, end, color)
+                        .with_tip_length(arrow * 0.25);
                 }
                 LoadKind::Pressure { .. } => {
                     let h = size * 0.04;
-                    for (a, b) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0), (0.0, 0.0)] {
+                    for (a, b) in [
+                        (-1.0, -1.0),
+                        (1.0, -1.0),
+                        (-1.0, 1.0),
+                        (1.0, 1.0),
+                        (0.0, 0.0),
+                    ] {
                         let p = c + t1 * (a * h) + t2 * (b * h);
-                        gizmos.arrow(p + n * arrow * 0.5, p, color).with_tip_length(arrow * 0.12);
+                        gizmos
+                            .arrow(p + n * arrow * 0.5, p, color)
+                            .with_tip_length(arrow * 0.12);
                     }
                 }
             }
@@ -1735,7 +2433,9 @@ mod tests {
         let (a, b, c) = (Vec3::ZERO, Vec3::X, Vec3::Y);
         let (t, w) = ray_triangle(Vec3::new(0.25, 0.25, 5.0), -Vec3::Z, a, b, c).unwrap();
         assert!((t - 5.0).abs() < 1e-6);
-        assert!((w[0] - 0.5).abs() < 1e-6 && (w[1] - 0.25).abs() < 1e-6 && (w[2] - 0.25).abs() < 1e-6);
+        assert!(
+            (w[0] - 0.5).abs() < 1e-6 && (w[1] - 0.25).abs() < 1e-6 && (w[2] - 0.25).abs() < 1e-6
+        );
         assert!(ray_triangle(Vec3::new(2.0, 2.0, 5.0), -Vec3::Z, a, b, c).is_none());
     }
 }

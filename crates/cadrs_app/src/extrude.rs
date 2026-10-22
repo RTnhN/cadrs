@@ -19,7 +19,6 @@
 //! Every change goes through the command layer; the arrow drag previews through
 //! [`PartOverride`] and records one step when released.
 
-use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::input_focus::InputFocus;
@@ -30,6 +29,7 @@ use cadrs_core::commands::{AddExtrude, DeleteFeature, ReplaceFeature, SetExtrude
 use cadrs_core::document::{BooleanOp, DirectionRef, EdgeRef, EndType, FaceRef, UpTo, VertexRef};
 use cadrs_core::{ElementId, ElementKind, ExtrudeFeature, Feature, FeatureId, PartId, RegionRef};
 use cadrs_sketch::units::Quantity;
+use cadrs_ui::ShortcutKey;
 use cadrs_ui::input::TextInputField;
 
 use crate::parts::{PartCache, PartOverride};
@@ -210,7 +210,10 @@ pub fn begin_extrude(world: &mut World) {
         extrude.regions = pre.regions;
         extrude.sketches = pre.sketches;
         extrude.depth = PRESELECTED_DEPTH;
-        extrude.depth_expr = world.resource::<crate::WorkspaceUnits>().0.with_unit(PRESELECTED_DEPTH, Quantity::Length);
+        extrude.depth_expr = world
+            .resource::<crate::WorkspaceUnits>()
+            .0
+            .with_unit(PRESELECTED_DEPTH, Quantity::Length);
         // Material right beyond them: going that way would add nothing to see, so it goes the
         // other way; with material there too (a part's own face), it cuts into it.
         if pre.blocked_out {
@@ -226,7 +229,11 @@ pub fn begin_extrude(world: &mut World) {
     };
     let feature = FeatureId::new();
     let mark = doc.history.undo_len();
-    if let Err(e) = doc.execute(&AddExtrude { element, feature, extrude }) {
+    if let Err(e) = doc.execute(&AddExtrude {
+        element,
+        feature,
+        extrude,
+    }) {
         warn!("cannot insert an extrude: {e}");
         return;
     }
@@ -261,7 +268,13 @@ const HUGE_PART_FACES: usize = 10_000;
 fn preselected(world: &World) -> Option<Preselected> {
     let cache = world.resource::<PartCache>();
     let doc = world.get_resource::<ActiveDocument>();
-    let mut out = Preselected { faces: Vec::new(), regions: Vec::new(), sketches: Vec::new(), blocked_out: true, blocked_in: true };
+    let mut out = Preselected {
+        faces: Vec::new(),
+        regions: Vec::new(),
+        sketches: Vec::new(),
+        blocked_out: true,
+        blocked_in: true,
+    };
     let v = |p: [f64; 3]| Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32);
     // A point on each and its normal.
     let mut probes: Vec<(Vec3, Vec3)> = Vec::new();
@@ -269,22 +282,39 @@ fn preselected(world: &World) -> Option<Preselected> {
         match *pick {
             Pick::Face(part, face) => {
                 let Some(p) = cache.part(part) else { continue };
-                let Some(i) = p.solid.faces.iter().position(|f| f.name == face) else { continue };
+                let Some(i) = p.solid.faces.iter().position(|f| f.name == face) else {
+                    continue;
+                };
                 if p.solid.faces[i].plane.is_none() {
                     continue;
                 }
-                let (Some(seed), Some(n)) = (p.solid.face_point(i), p.solid.face_normal(i)) else { continue };
+                let (Some(seed), Some(n)) = (p.solid.face_point(i), p.solid.face_normal(i)) else {
+                    continue;
+                };
                 probes.push((v(seed), v(n).normalize_or_zero()));
                 out.faces.push(FaceRef { part, face, seed });
             }
             Pick::Region(sketch, index) => {
-                let Some(sr) = cache.sketch_regions(sketch) else { continue };
-                let Some(region) = sr.regions.get(index as usize) else { continue };
+                let Some(sr) = cache.sketch_regions(sketch) else {
+                    continue;
+                };
+                let Some(region) = sr.regions.get(index as usize) else {
+                    continue;
+                };
                 let r = RegionRef::new(sketch, region);
-                probes.push((v(sr.frame.to_world(r.seed)), v(sr.frame.normal()).normalize_or_zero()));
+                probes.push((
+                    v(sr.frame.to_world(r.seed)),
+                    v(sr.frame.normal()).normalize_or_zero(),
+                ));
                 out.regions.push(r);
             }
-            Pick::Feature(f) if doc.and_then(|d| d.active_element()?.feature(f)?.sketch()).is_some() => out.sketches.push(f),
+            Pick::Feature(f)
+                if doc
+                    .and_then(|d| d.active_element()?.feature(f)?.sketch())
+                    .is_some() =>
+            {
+                out.sketches.push(f)
+            }
             _ => {}
         }
     }
@@ -296,7 +326,13 @@ fn preselected(world: &World) -> Option<Preselected> {
     // A huge part (an imported mesh's facets) doesn't choose for it: a new extrude beside or
     // through an STL starts as a plain New (issue #11).
     let solid = |at: Vec3| {
-        cache.parts.iter().filter(|q| q.kind == cadrs_core::PartKind::Solid && q.solid.faces.len() <= HUGE_PART_FACES).any(|q| inside(&q.solid, at))
+        cache
+            .parts
+            .iter()
+            .filter(|q| {
+                q.kind == cadrs_core::PartKind::Solid && q.solid.faces.len() <= HUGE_PART_FACES
+            })
+            .any(|q| inside(&q.solid, at))
     };
     out.blocked_out = !probes.is_empty() && probes.iter().all(|(p, n)| solid(*p + *n * 0.05));
     out.blocked_in = probes.iter().all(|(p, n)| solid(*p - *n * 0.05));
@@ -307,7 +343,10 @@ fn preselected(world: &World) -> Option<Preselected> {
 /// from `p` (in a slanted direction, so it doesn't graze edges).
 fn inside(s: &cadrs_core::Solid, p: Vec3) -> bool {
     if let Some((lo, hi)) = s.bounds() {
-        let (lo, hi) = (Vec3::new(lo[0] as f32, lo[1] as f32, lo[2] as f32), Vec3::new(hi[0] as f32, hi[1] as f32, hi[2] as f32));
+        let (lo, hi) = (
+            Vec3::new(lo[0] as f32, lo[1] as f32, lo[2] as f32),
+            Vec3::new(hi[0] as f32, hi[1] as f32, hi[2] as f32),
+        );
         if p.cmplt(lo).any() || p.cmpgt(hi).any() {
             return false;
         }
@@ -363,7 +402,11 @@ pub fn edit_extrude(world: &mut World, feature: FeatureId) {
         return;
     };
     let element = el.id;
-    let Some(before) = el.feature(feature).filter(|f| f.extrude().is_some()).cloned() else {
+    let Some(before) = el
+        .feature(feature)
+        .filter(|f| f.extrude().is_some())
+        .cloned()
+    else {
         return;
     };
     let mark = doc.history.undo_len();
@@ -407,7 +450,12 @@ pub(crate) fn start_session(
 pub(crate) fn feature_name(world: &World, s: &ExtrudeSession) -> String {
     world
         .get_resource::<ActiveDocument>()
-        .and_then(|d| d.doc.element(s.element)?.feature(s.feature).map(|f| f.name.clone()))
+        .and_then(|d| {
+            d.doc
+                .element(s.element)?
+                .feature(s.feature)
+                .map(|f| f.name.clone())
+        })
         .unwrap_or_else(|| "Extrude".into())
 }
 
@@ -485,7 +533,8 @@ pub fn cancel_extrude(world: &mut World) {
     let label = format!("Cancel {name}");
     match (&cur, s.is_new) {
         (Some(f), true)
-            if f.extrude().is_some_and(|e| e.is_empty()) || f.revolve().is_some_and(|r| r.is_empty()) =>
+            if f.extrude().is_some_and(|e| e.is_empty())
+                || f.revolve().is_some_and(|r| r.is_empty()) =>
         {
             // Nothing worth keeping: forget it entirely.
             doc.discard_element_since(s.mark, s.element);
@@ -555,7 +604,11 @@ fn end_session_on_tab_change(
 }
 
 /// Records a parameter change as an undo step.
-pub(crate) fn set_params(world: &mut World, extrude: ExtrudeFeature, label: impl Into<String>) -> bool {
+pub(crate) fn set_params(
+    world: &mut World,
+    extrude: ExtrudeFeature,
+    label: impl Into<String>,
+) -> bool {
     let Some(s) = world.get_resource::<ExtrudeSession>().cloned() else {
         return false;
     };
@@ -601,7 +654,8 @@ fn toggle_region(world: &mut World, sketch: FeatureId, index: u32) {
     let r = RegionRef::new(sketch, &region);
     // The same region: the same boundary curves around the same seed (two regions can share
     // their curves, like the two halves of a circle a line cuts).
-    let same = |x: &RegionRef| x.sketch == sketch && x.curves == r.curves && region.contains(x.seed);
+    let same =
+        |x: &RegionRef| x.sketch == sketch && x.curves == r.curves && region.contains(x.seed);
     let label = if let Some(i) = e.regions.iter().position(same) {
         e.regions.remove(i);
         format!("Deselect Face of {name}")
@@ -663,7 +717,10 @@ fn take_pick_inner(world: &mut World, field: ExtrudeField, pick: Pick) -> Option
                 let p = cache.part(part)?;
                 let i = p.solid.faces.iter().position(|f| f.name == face)?;
                 let seed = p.solid.face_point(i)?;
-                Some((FaceRef { part, face, seed }, p.solid.faces[i].plane.is_some()))
+                Some((
+                    FaceRef { part, face, seed },
+                    p.solid.faces[i].plane.is_some(),
+                ))
             })(),
             _ => None,
         };
@@ -671,14 +728,24 @@ fn take_pick_inner(world: &mut World, field: ExtrudeField, pick: Pick) -> Option
             Pick::Vertex(part, vertex) => cache
                 .part(part)
                 .and_then(|p| p.solid.vertex(&vertex))
-                .map(|v| VertexRef { part, vertex, point: v.point }),
+                .map(|v| VertexRef {
+                    part,
+                    vertex,
+                    point: v.point,
+                }),
             _ => None,
         };
         let edge = match pick {
-            Pick::Edge(part, edge) => cache
-                .part(part)
-                .and_then(|p| p.solid.edge(&edge))
-                .map(|e| EdgeRef { part, edge, seed: e.midpoint() }),
+            Pick::Edge(part, edge) => {
+                cache
+                    .part(part)
+                    .and_then(|p| p.solid.edge(&edge))
+                    .map(|e| EdgeRef {
+                        part,
+                        edge,
+                        seed: e.midpoint(),
+                    })
+            }
             _ => None,
         };
         let auto_scope = cache
@@ -689,7 +756,12 @@ fn take_pick_inner(world: &mut World, field: ExtrudeField, pick: Pick) -> Option
                 _ => c.overlaps.clone(),
             })
             .unwrap_or_default();
-        Picked { face, vertex, edge, auto_scope }
+        Picked {
+            face,
+            vertex,
+            edge,
+            auto_scope,
+        }
     };
     // Nothing the extrude itself made can be its own input or target.
     let own = |op: cadrs_sketch::OpId| op == s.feature.0;
@@ -711,9 +783,15 @@ fn take_pick_inner(world: &mut World, field: ExtrudeField, pick: Pick) -> Option
         (ExtrudeField::UpTo | ExtrudeField::SecondUpTo, pick) => {
             let mut e = params(world)?;
             let second = field == ExtrudeField::SecondUpTo;
-            let end = if second { e.second.as_ref().map(|s| s.end) } else { Some(e.end) };
+            let end = if second {
+                e.second.as_ref().map(|s| s.end)
+            } else {
+                Some(e.end)
+            };
             let target = match (end, pick) {
-                (Some(EndType::UpToFace), Pick::Face(_, face)) if !own(face.op) => picked.face.map(|(r, _)| UpTo::Face(r)),
+                (Some(EndType::UpToFace), Pick::Face(_, face)) if !own(face.op) => {
+                    picked.face.map(|(r, _)| UpTo::Face(r))
+                }
                 (Some(EndType::UpToPart), p) => p.part().map(UpTo::Part),
                 (Some(EndType::UpToVertex), Pick::Vertex(..)) => picked.vertex.map(UpTo::Vertex),
                 _ => None,
@@ -738,7 +816,9 @@ fn take_pick_inner(world: &mut World, field: ExtrudeField, pick: Pick) -> Option
                 Pick::Plane(k) => Some(DirectionRef::PlaneNormal(k.plane_ref())),
                 Pick::Feature(f) => world
                     .get_resource::<ActiveDocument>()
-                    .and_then(|d| cadrs_core::parts::plane_feature_ref(d.active_element()?.features(), f))
+                    .and_then(|d| {
+                        cadrs_core::parts::plane_feature_ref(d.active_element()?.features(), f)
+                    })
                     .map(DirectionRef::PlaneNormal),
                 _ => None,
             }?;
@@ -768,13 +848,11 @@ fn take_pick_inner(world: &mut World, field: ExtrudeField, pick: Pick) -> Option
 /// A sketch picked in the feature list toggles as a whole (PS1.1).
 fn toggle_sketch(world: &mut World, sketch: FeatureId) {
     let Some(mut e) = params(world) else { return };
-    let name = world
-        .get_resource::<ActiveDocument>()
-        .and_then(|d| {
-            let f = d.active_element()?.feature(sketch)?;
-            f.sketch()?;
-            Some(f.name.clone())
-        });
+    let name = world.get_resource::<ActiveDocument>().and_then(|d| {
+        let f = d.active_element()?.feature(sketch)?;
+        f.sketch()?;
+        Some(f.name.clone())
+    });
     let Some(name) = name else { return };
     let label = if let Some(i) = e.sketches.iter().position(|s| *s == sketch) {
         e.sketches.remove(i);
@@ -841,7 +919,9 @@ fn show_references(
         Some(DirectionRef::FaceNormal(f)) => want.extend(face_pick(&f)),
         // A sketch line stays highlighted too (P3.5: every reference of the dialog shows while
         // another field is active).
-        Some(DirectionRef::SketchLine { sketch, curve }) => want.push(Pick::SketchCurve(sketch, curve)),
+        Some(DirectionRef::SketchLine { sketch, curve }) => {
+            want.push(Pick::SketchCurve(sketch, curve))
+        }
         Some(DirectionRef::PlaneNormal(p)) => want.extend(crate::viewport::plane_pick(p)),
         Some(DirectionRef::Connector(c)) => want.extend(crate::pattern::connector_pick(&c)),
         None => {}
@@ -853,23 +933,39 @@ fn show_references(
 
 /// A new extrude picks New or Add by itself (PS5.2): Add once its body touches a part, New
 /// while it doesn't (until a tab is clicked).
-fn automatic_operation(session: Option<Res<ExtrudeSession>>, cache: Res<PartCache>, mut commands: Commands) {
+fn automatic_operation(
+    session: Option<Res<ExtrudeSession>>,
+    cache: Res<PartCache>,
+    mut commands: Commands,
+) {
     let Some(s) = session.filter(|s| s.op_auto) else {
         return;
     };
     if cache.rebuilding {
         return;
     }
-    let touches = cache.contacts.get(&s.feature).is_some_and(|c| !c.touches.is_empty());
+    let touches = cache
+        .contacts
+        .get(&s.feature)
+        .is_some_and(|c| !c.touches.is_empty());
     let feature = s.feature;
     commands.queue(move |world: &mut World| {
         let Some(mut e) = params(world) else { return };
-        if !matches!(e.op, BooleanOp::New | BooleanOp::Add) || e.body == cadrs_core::BodyType::Surface {
+        if !matches!(e.op, BooleanOp::New | BooleanOp::Add)
+            || e.body == cadrs_core::BodyType::Surface
+        {
             return;
         }
-        let want = if touches { BooleanOp::Add } else { BooleanOp::New };
+        let want = if touches {
+            BooleanOp::Add
+        } else {
+            BooleanOp::New
+        };
         // Only once the rebuild knows about this extrude's body.
-        let known = world.resource::<PartCache>().contacts.contains_key(&feature);
+        let known = world
+            .resource::<PartCache>()
+            .contacts
+            .contains_key(&feature);
         if e.op != want && (known || want == BooleanOp::New) && !e.is_empty() {
             e.op = want;
             set_params(world, e, want.label());
@@ -925,7 +1021,9 @@ fn extrude_keys(
                     && session.is_none()
                     && *kind == crate::viewport::ActiveKind::PartStudio =>
             {
-                commands.queue(|world: &mut World| crate::applied::begin(world, crate::applied::AppliedKind::Fillet))
+                commands.queue(|world: &mut World| {
+                    crate::applied::begin(world, crate::applied::AppliedKind::Fillet)
+                })
             }
             KeyCode::Enter | KeyCode::NumpadEnter if session.is_some() => {
                 commands.queue(accept_extrude)
@@ -933,7 +1031,11 @@ fn extrude_keys(
             KeyCode::Escape if session.is_some() => commands.queue(|world: &mut World| {
                 if world.resource::<ArrowState>().drag.is_some() {
                     end_drag(world, false);
-                } else if world.resource::<crate::revolve::AngleArrow>().drag.is_some() {
+                } else if world
+                    .resource::<crate::revolve::AngleArrow>()
+                    .drag
+                    .is_some()
+                {
                     crate::revolve::end_angle_drag(world, false);
                 } else {
                     cancel_extrude(world);
@@ -994,9 +1096,13 @@ fn arrow_pointer(
         && arrow
             .second_base_tip
             .is_some_and(|(a, b)| segment_distance(pointer, a, b) <= ARROW_GRAB);
-    let params = doc
-        .as_ref()
-        .and_then(|d| d.doc.element(s.element)?.feature(s.feature)?.extrude().cloned());
+    let params = doc.as_ref().and_then(|d| {
+        d.doc
+            .element(s.element)?
+            .feature(s.feature)?
+            .extrude()
+            .cloned()
+    });
     for input in inputs.read() {
         if input.pointer_id != PointerId::Mouse {
             continue;
@@ -1012,7 +1118,9 @@ fn arrow_pointer(
                         .second_base_tip
                         .is_some_and(|(a, b)| segment_distance(pos, a, b) <= ARROW_GRAB);
                 let axis = if hit { arrow.axis } else { arrow.second_axis };
-                if let (true, Some(p), Some((n, signed, anchor))) = (hit || hit2, params.clone(), axis) {
+                if let (true, Some(p), Some((n, signed, anchor))) =
+                    (hit || hit2, params.clone(), axis)
+                {
                     let normal_px = view.view.project_vector(n);
                     if normal_px.length() > 0.05 {
                         arrow.drag = Some(ArrowDrag {
@@ -1033,7 +1141,11 @@ fn arrow_pointer(
                     // The second end goes the other way from the sketch plane; dragging it back
                     // through the plane stops at the smallest step.
                     let (depth, flip) = dragged_depth(d.start_signed, d.normal_px, pos - d.start);
-                    let depth = if flip { snap_step(d.normal_px.length()) } else { depth };
+                    let depth = if flip {
+                        snap_step(d.normal_px.length())
+                    } else {
+                        depth
+                    };
                     if let Some(end) = d.extrude.second.as_mut()
                         && (end.depth != depth || end.end != EndType::Blind)
                     {
@@ -1049,7 +1161,9 @@ fn arrow_pointer(
                     }
                 } else if let Some(d) = arrow.drag.as_mut() {
                     let (depth, flip) = dragged_depth(d.start_signed, d.normal_px, pos - d.start);
-                    if (depth, flip) != (d.extrude.depth, d.extrude.flip) || d.extrude.end != EndType::Blind {
+                    if (depth, flip) != (d.extrude.depth, d.extrude.flip)
+                        || d.extrude.end != EndType::Blind
+                    {
                         // Dragging an "Up to" end makes it Blind at the dragged depth.
                         d.extrude.end = EndType::Blind;
                         d.extrude.up_to = None;
@@ -1095,12 +1209,27 @@ fn segment_distance(p: Vec2, a: Vec2, b: Vec2) -> f32 {
 }
 
 /// The origin and unit normal of the first extruded region's sketch plane (or picked face).
-fn sketch_origin_normal(doc: Option<&ActiveDocument>, cache: &PartCache, s: &ExtrudeSession, e: &ExtrudeFeature) -> (Vec3, Vec3) {
-    let frame = doc
-        .and_then(|d| {
-            let sketch = e.regions.first().map(|r| r.sketch).or(e.sketches.first().copied())?;
-            Some(d.doc.element(s.element)?.feature(sketch)?.sketch()?.plane?.frame())
-        });
+fn sketch_origin_normal(
+    doc: Option<&ActiveDocument>,
+    cache: &PartCache,
+    s: &ExtrudeSession,
+    e: &ExtrudeFeature,
+) -> (Vec3, Vec3) {
+    let frame = doc.and_then(|d| {
+        let sketch = e
+            .regions
+            .first()
+            .map(|r| r.sketch)
+            .or(e.sketches.first().copied())?;
+        Some(
+            d.doc
+                .element(s.element)?
+                .feature(sketch)?
+                .sketch()?
+                .plane?
+                .frame(),
+        )
+    });
     let v = |p: [f64; 3]| Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32);
     match frame {
         Some(f) => (v(f.origin), v(f.normal()).normalize()),
@@ -1129,16 +1258,30 @@ fn built_start(cache: &PartCache, s: &ExtrudeSession, e: &ExtrudeFeature) -> Opt
 /// it, see [`built_start`]).
 fn face_frame(cache: &PartCache, e: &ExtrudeFeature) -> Option<cadrs_sketch::PlaneFrame> {
     let f = e.faces.first()?;
-    cache.parts.iter().filter(|p| p.id == f.part).chain(cache.parts.iter()).find_map(|p| p.solid.face(&f.face)?.plane)
+    cache
+        .parts
+        .iter()
+        .filter(|p| p.id == f.part)
+        .chain(cache.parts.iter())
+        .find_map(|p| p.solid.face(&f.face)?.plane)
 }
 
 /// The unit direction an extrude goes before its flip: its Direction (a part edge, a planar
 /// face's normal, a sketch line), else its sketch plane's normal.
-fn extrude_direction(doc: Option<&ActiveDocument>, cache: &PartCache, s: &ExtrudeSession, e: &ExtrudeFeature) -> Vec3 {
+fn extrude_direction(
+    doc: Option<&ActiveDocument>,
+    cache: &PartCache,
+    s: &ExtrudeSession,
+    e: &ExtrudeFeature,
+) -> Vec3 {
     let v = |p: [f64; 3]| Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32);
     let picked = e.direction.and_then(|d| match d {
         DirectionRef::Edge(r) => {
-            let edge = cache.parts.iter().chain(cache.tool.iter()).find_map(|p| p.solid.edge(&r.edge))?;
+            let edge = cache
+                .parts
+                .iter()
+                .chain(cache.tool.iter())
+                .find_map(|p| p.solid.edge(&r.edge))?;
             let (a, b) = (edge.points.first()?, edge.points.last()?);
             Some(v(*b) - v(*a))
         }
@@ -1168,10 +1311,19 @@ fn extrude_direction(doc: Option<&ActiveDocument>, cache: &PartCache, s: &Extrud
 }
 
 /// The world normal of the first extruded region's sketch plane.
-fn sketch_normal(doc: Option<&ActiveDocument>, cache: &PartCache, s: &ExtrudeSession, e: &ExtrudeFeature) -> Vec3 {
+fn sketch_normal(
+    doc: Option<&ActiveDocument>,
+    cache: &PartCache,
+    s: &ExtrudeSession,
+    e: &ExtrudeFeature,
+) -> Vec3 {
     let n = doc
         .and_then(|d| {
-            let sketch = e.regions.first().map(|r| r.sketch).or(e.sketches.first().copied())?;
+            let sketch = e
+                .regions
+                .first()
+                .map(|r| r.sketch)
+                .or(e.sketches.first().copied())?;
             d.doc.element(s.element)?.feature(sketch)?.sketch()?.plane
         })
         .map(|p| p.frame().normal());
@@ -1184,7 +1336,15 @@ fn sketch_normal(doc: Option<&ActiveDocument>, cache: &PartCache, s: &ExtrudeSes
     // parts show the face.
     built_start(cache, s, e)
         .map(|(_, n)| n)
-        .or_else(|| face_frame(cache, e).map(|f| Vec3::new(f.normal()[0] as f32, f.normal()[1] as f32, f.normal()[2] as f32)))
+        .or_else(|| {
+            face_frame(cache, e).map(|f| {
+                Vec3::new(
+                    f.normal()[0] as f32,
+                    f.normal()[1] as f32,
+                    f.normal()[2] as f32,
+                )
+            })
+        })
         .unwrap_or(Vec3::Z)
 }
 
@@ -1220,9 +1380,15 @@ fn draw_regions(
     // While sketching, the wash is drawn with the edited sketch's translucent fill over the parts
     // (P3.8, `crate::sketch_draw`) and after it (its larger depth bias sorts it nearer), so the
     // selected region stays orange (`course_s17_regions_without_trim` 02); otherwise behind parts.
-    let layer = if sketching.is_some() { crate::viewport::OVERLAY_LAYER } else { crate::viewport::OCCLUDED_LAYER };
+    let layer = if sketching.is_some() {
+        crate::viewport::OVERLAY_LAYER
+    } else {
+        crate::viewport::OCCLUDED_LAYER
+    };
     if let Some((e, _, mat, _)) = fill.as_ref() {
-        commands.entity(*e).insert(bevy::camera::visibility::RenderLayers::layer(layer));
+        commands
+            .entity(*e)
+            .insert(bevy::camera::visibility::RenderLayers::layer(layer));
         let bias = wash_bias(layer);
         if materials.get(mat).is_some_and(|m| m.depth_bias != bias)
             && let Some(mut m) = materials.get_mut(mat)
@@ -1235,7 +1401,10 @@ fn draw_regions(
             let el = d.doc.element(s.element);
             let f = el.and_then(|e| e.feature(s.feature));
             let (regions, sketches) = f.map(|f| f.input_regions()).unwrap_or((&[], &[]));
-            let mut v: SelectedRegions = regions.iter().map(|r| (r.sketch, r.curves.clone(), r.seed)).collect();
+            let mut v: SelectedRegions = regions
+                .iter()
+                .map(|r| (r.sketch, r.curves.clone(), r.seed))
+                .collect();
             // A whole sketch: the regions it extrudes (PS1.1).
             for sk in sketches.iter().copied() {
                 let Some(g) = el.and_then(|el| el.feature(sk)).and_then(|f| f.sketch()) else {
@@ -1256,10 +1425,19 @@ fn draw_regions(
         (None, Some(a), Some(d)) => {
             let el = d.doc.element(a.element);
             match el.and_then(|e| e.feature(a.feature)).map(|f| &f.kind) {
-                Some(cadrs_core::FeatureKind::SheetMetalModel(x)) if x.operation == cadrs_core::sheetmetal::SheetMetalOp::Thicken => {
-                    let mut v: SelectedRegions = x.regions.iter().map(|r| (r.sketch, r.curves.clone(), r.seed)).collect();
+                Some(cadrs_core::FeatureKind::SheetMetalModel(x))
+                    if x.operation == cadrs_core::sheetmetal::SheetMetalOp::Thicken =>
+                {
+                    let mut v: SelectedRegions = x
+                        .regions
+                        .iter()
+                        .map(|r| (r.sketch, r.curves.clone(), r.seed))
+                        .collect();
                     for sk in x.region_sketches.iter().copied() {
-                        let Some(g) = el.and_then(|el| el.feature(sk)).and_then(|f| f.sketch()) else { continue };
+                        let Some(g) = el.and_then(|el| el.feature(sk)).and_then(|f| f.sketch())
+                        else {
+                            continue;
+                        };
                         for r in cadrs_core::rebuild::whole_sketch_regions(&g.geometry) {
                             let rr = RegionRef::new(sk, &r);
                             v.push((sk, rr.curves, rr.seed));
@@ -1273,7 +1451,11 @@ fn draw_regions(
         _ => Vec::new(),
     };
     let extruding = session.is_some() || !thicken.is_empty();
-    let selected = if thicken.is_empty() { selected } else { thicken };
+    let selected = if thicken.is_empty() {
+        selected
+    } else {
+        thicken
+    };
     // The selected region's outline in `screens/23`; a plain selection's in `ex1-step8`.
     // A failing feature's regions are red (P3.7, PS20.5).
     let orange = if failed.0 {
@@ -1286,7 +1468,11 @@ fn draw_regions(
     let mut tris: Vec<[f32; 3]> = Vec::new();
     let mut plain_key: Vec<(FeatureId, usize)> = Vec::new();
     // Sketches on a flat pattern show their regions in the flat view (`crate::flat_ui`).
-    for sr in cache.regions.iter().filter(|sr| !cache.flat_sketches.contains(&sr.sketch)) {
+    for sr in cache
+        .regions
+        .iter()
+        .filter(|sr| !cache.flat_sketches.contains(&sr.sketch))
+    {
         for (i, r) in sr.regions.iter().enumerate() {
             let mut curves = r.curves.clone();
             curves.sort();
@@ -1411,7 +1597,11 @@ fn draw_regions(
 /// overlay, which has no parts' depth); otherwise a hair in front of a face the region lies on
 /// and of a shown sketch's fill, but not through a part (P3I.6: 1001 showed through sheets).
 fn wash_bias(layer: usize) -> f32 {
-    if layer == crate::viewport::OVERLAY_LAYER { 1001.0 } else { crate::sketch_draw::FILL_BIAS + 8.0 }
+    if layer == crate::viewport::OVERLAY_LAYER {
+        1001.0
+    } else {
+        crate::sketch_draw::FILL_BIAS + 8.0
+    }
 }
 
 /// The region fill entity, its mesh and material, and what it was built from.
@@ -1474,12 +1664,19 @@ fn configure_gizmos(mut store: ResMut<GizmoConfigStore>) {
 fn region_fill_mesh(tris: Vec<[f32; 3]>) -> Mesh {
     use bevy::asset::RenderAssetUsages;
     use bevy::mesh::{Indices, PrimitiveTopology};
-    let positions = if tris.is_empty() { vec![[0.0; 3]; 3] } else { tris };
+    let positions = if tris.is_empty() {
+        vec![[0.0; 3]; 3]
+    } else {
+        tris
+    };
     let n = positions.len() as u32;
-    Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
-        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 0.0, 1.0]; n as usize])
-        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
-        .with_inserted_indices(Indices::U32((0..n).collect()))
+    Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 0.0, 1.0]; n as usize])
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+    .with_inserted_indices(Indices::U32((0..n).collect()))
 }
 
 /// Places the arrow manipulator at the middle of the preview's far face, pointing the way the
@@ -1493,16 +1690,25 @@ fn place_arrow(
     rect: Res<ViewportRect>,
     mut arrow: ResMut<ArrowState>,
     q_area: Query<Entity, With<ViewportArea>>,
-    mut q: Query<(Entity, &mut Node, &mut UiTransform, &mut Visibility, &ArrowNode)>,
+    mut q: Query<(
+        Entity,
+        &mut Node,
+        &mut UiTransform,
+        &mut Visibility,
+        &ArrowNode,
+    )>,
     mut q_line: Query<(&ArrowLine, &mut ImageNode)>,
     mut commands: Commands,
 ) {
     let target = session.as_ref().and_then(|s| {
-        let e = arrow
-            .drag
-            .as_ref()
-            .map(|d| d.extrude.clone())
-            .or_else(|| doc.as_ref()?.doc.element(s.element)?.feature(s.feature)?.extrude().cloned())?;
+        let e = arrow.drag.as_ref().map(|d| d.extrude.clone()).or_else(|| {
+            doc.as_ref()?
+                .doc
+                .element(s.element)?
+                .feature(s.feature)?
+                .extrude()
+                .cloned()
+        })?;
         if cache.errors.contains_key(&s.feature) {
             return None;
         }
@@ -1539,9 +1745,16 @@ fn place_arrow(
                 .filter(|p| p.features.contains(&s.feature))
                 .flat_map(|p| p.solid.edges.iter())
                 .filter(|e| e.name.faces.iter().any(|f| f.op == s.feature.0))
-                .flat_map(|e| e.points.iter().map(|p| Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32)))
+                .flat_map(|e| {
+                    e.points
+                        .iter()
+                        .map(|p| Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32))
+                })
                 .collect();
-            let far = pts.iter().map(|p| p.dot(dir)).fold(f32::NEG_INFINITY, f32::max);
+            let far = pts
+                .iter()
+                .map(|p| p.dot(dir))
+                .fold(f32::NEG_INFINITY, f32::max);
             let tol = 1e-4 * (1.0 + far.abs());
             for p in pts.iter().filter(|p| (p.dot(dir) - far).abs() <= tol) {
                 sum += *p;
@@ -1557,7 +1770,10 @@ fn place_arrow(
         // While dragged, the arrow moves from where it was by the depth's change (the cap moves
         // along the direction), not waiting for the preview's rebuild.
         let anchor = match dragged {
-            Some(d) => d.anchor + base * ((if e.flip { -e.depth } else { e.depth }) - d.start_signed) as f32,
+            Some(d) => {
+                d.anchor
+                    + base * ((if e.flip { -e.depth } else { e.depth }) - d.start_signed) as f32
+            }
             None => sum / n,
         };
         let signed = if e.end == EndType::Blind {
@@ -1574,48 +1790,59 @@ fn place_arrow(
     });
     // The second end's arrow (P3.5): at the middle of the start cap (the second end's far face),
     // pointing away from the first end.
-    let second = session.as_ref().zip(target).and_then(|(s, (_, dir, _, _))| {
-        let e = arrow
-            .drag
-            .as_ref()
-            .map(|d| d.extrude.clone())
-            .or_else(|| doc.as_ref()?.doc.element(s.element)?.feature(s.feature)?.extrude().cloned())?;
-        let end = e.second.as_ref()?;
-        if e.symmetric {
-            return None;
-        }
-        let mut sum = Vec3::ZERO;
-        let mut n = 0.0;
-        for p in cache.parts.iter().chain(cache.tool.iter()).filter(|p| p.features.contains(&s.feature)) {
-            for f in &p.solid.faces {
-                if let cadrs_sketch::FaceOrigin::Cap { end: false, .. } = f.name.origin
-                    && f.name.op == s.feature.0
-                    && let Some(l) = crate::parts::outer_loop(&f.loops)
-                {
-                    for q in l {
-                        sum += Vec3::new(q[0] as f32, q[1] as f32, q[2] as f32);
-                        n += 1.0;
+    let second = session
+        .as_ref()
+        .zip(target)
+        .and_then(|(s, (_, dir, _, _))| {
+            let e = arrow.drag.as_ref().map(|d| d.extrude.clone()).or_else(|| {
+                doc.as_ref()?
+                    .doc
+                    .element(s.element)?
+                    .feature(s.feature)?
+                    .extrude()
+                    .cloned()
+            })?;
+            let end = e.second.as_ref()?;
+            if e.symmetric {
+                return None;
+            }
+            let mut sum = Vec3::ZERO;
+            let mut n = 0.0;
+            for p in cache
+                .parts
+                .iter()
+                .chain(cache.tool.iter())
+                .filter(|p| p.features.contains(&s.feature))
+            {
+                for f in &p.solid.faces {
+                    if let cadrs_sketch::FaceOrigin::Cap { end: false, .. } = f.name.origin
+                        && f.name.op == s.feature.0
+                        && let Some(l) = crate::parts::outer_loop(&f.loops)
+                    {
+                        for q in l {
+                            sum += Vec3::new(q[0] as f32, q[1] as f32, q[2] as f32);
+                            n += 1.0;
+                        }
                     }
                 }
             }
-        }
-        let dragged = arrow.drag.as_ref().filter(|d| d.second);
-        if n == 0.0 && dragged.is_none() {
-            return None;
-        }
-        let dir2 = -dir;
-        let anchor = match dragged {
-            Some(d) => d.anchor + dir2 * (end.depth - d.start_signed) as f32,
-            None => sum / n,
-        };
-        let signed = if end.end == EndType::Blind {
-            end.depth
-        } else {
-            let (o, _) = sketch_origin_normal(doc.as_deref(), &cache, s, &e);
-            (anchor - o).dot(dir2) as f64
-        };
-        Some((anchor, dir2, signed))
-    });
+            let dragged = arrow.drag.as_ref().filter(|d| d.second);
+            if n == 0.0 && dragged.is_none() {
+                return None;
+            }
+            let dir2 = -dir;
+            let anchor = match dragged {
+                Some(d) => d.anchor + dir2 * (end.depth - d.start_signed) as f32,
+                None => sum / n,
+            };
+            let signed = if end.end == EndType::Blind {
+                end.depth
+            } else {
+                let (o, _) = sketch_origin_normal(doc.as_deref(), &cache, s, &e);
+                (anchor - o).dot(dir2) as f64
+            };
+            Some((anchor, dir2, signed))
+        });
     arrow.second_axis = second.map(|(anchor, d, signed)| (d, signed, anchor));
     arrow.second_base_tip = second.and_then(|(anchor, d, _)| {
         let p = view.view.project_vector(d);
@@ -1648,7 +1875,8 @@ fn place_arrow(
     let tip = base + u * ARROW_LEN;
     arrow.base_tip = Some((base, tip));
     let active = arrow.hovered || arrow.drag.as_ref().is_some_and(|d| !d.second);
-    let arrows: [(Option<(Vec2, Vec2)>, bool); 2] = [(Some((base, tip)), active), (second_tip, second_active)];
+    let arrows: [(Option<(Vec2, Vec2)>, bool); 2] =
+        [(Some((base, tip)), active), (second_tip, second_active)];
     if q.iter().count() < 2 {
         let Some(area) = q_area.iter().next() else {
             return;
@@ -1705,7 +1933,11 @@ fn place_arrow(
 /// An arrow manipulator's node: `extrude-arrow` (the first end) or `extrude-arrow-2`.
 fn arrow_node(i: usize) -> impl Bundle {
     (
-        Name::new(if i == 0 { "extrude-arrow".to_string() } else { "extrude-arrow-2".to_string() }),
+        Name::new(if i == 0 {
+            "extrude-arrow".to_string()
+        } else {
+            "extrude-arrow-2".to_string()
+        }),
         ArrowNode(i),
         Node {
             position_type: PositionType::Absolute,
@@ -1782,14 +2014,23 @@ mod tests {
         assert_eq!(snap_step(4.0), 1.0);
         // The default isometric view: whole millimetres (8 mm up from 25 is 33).
         assert_eq!(snap_step(2.88), 1.0);
-        assert_eq!(dragged_depth(25.0, Vec2::new(0.0, -2.8832), Vec2::new(0.0, -23.0)).0, 33.0);
+        assert_eq!(
+            dragged_depth(25.0, Vec2::new(0.0, -2.8832), Vec2::new(0.0, -23.0)).0,
+            33.0
+        );
         assert_eq!(snap_step(20.0), 0.2);
     }
 
     #[test]
     fn depth_expressions() {
-        assert_eq!(cadrs_sketch::units::eval("20 + 5*2", Quantity::Length), Ok(30.0));
-        assert_eq!(cadrs_sketch::units::eval("1 in", Quantity::Length), Ok(25.4));
+        assert_eq!(
+            cadrs_sketch::units::eval("20 + 5*2", Quantity::Length),
+            Ok(30.0)
+        );
+        assert_eq!(
+            cadrs_sketch::units::eval("1 in", Quantity::Length),
+            Ok(25.4)
+        );
         assert!(cadrs_sketch::units::eval("20 +", Quantity::Length).is_err());
     }
 

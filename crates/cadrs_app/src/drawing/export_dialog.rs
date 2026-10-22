@@ -22,7 +22,9 @@ use bevy::ui_widgets::{Activate, observe};
 use cadrs_core::ElementId;
 use cadrs_drawing::export::{ExportOptions, Format};
 use cadrs_ui::prelude::*;
-use cadrs_ui::{Button, DialogClose, Notification, Select, SelectState, TextInputField, show_notification};
+use cadrs_ui::{
+    Button, DialogClose, Notification, Select, SelectState, TextInputField, show_notification,
+};
 
 use crate::{ActiveDocument, AppClock, AppState};
 
@@ -30,8 +32,11 @@ pub struct DrawingExportPlugin;
 
 impl Plugin for DrawingExportPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (sync_format_rows, on_folder_picked).run_if(in_state(AppState::Document)))
-            .add_observer(on_submit);
+        app.add_systems(
+            Update,
+            (sync_format_rows, on_folder_picked).run_if(in_state(AppState::Document)),
+        )
+        .add_observer(on_submit);
     }
 }
 
@@ -56,10 +61,21 @@ const FIELD_H: f32 = 26.0;
 fn browse_folder(world: &mut World) {
     let typed = field(world, "drawing-export-folder-field");
     let dir = std::path::PathBuf::from(typed.trim());
-    let dir = if dir.is_dir() { dir } else { std::env::current_dir().unwrap_or_default() };
+    let dir = if dir.is_dir() {
+        dir
+    } else {
+        std::env::current_dir().unwrap_or_default()
+    };
     let theme = world.resource::<Theme>().clone();
     let mut commands = world.commands();
-    cadrs_ui::file_picker::open_folder_picker(&mut commands, &theme, "folder-picker", "Choose a folder", "export-folder", dir);
+    cadrs_ui::file_picker::open_folder_picker(
+        &mut commands,
+        &theme,
+        "folder-picker",
+        "Choose a folder",
+        "export-folder",
+        dir,
+    );
     world.flush();
 }
 
@@ -72,7 +88,10 @@ fn on_folder_picked(mut msgs: MessageReader<cadrs_ui::FilePicked>, mut commands:
         let path = m.path.display().to_string();
         commands.queue(move |w: &mut World| {
             let mut q = w.query_filtered::<(&Name, &mut EditableText), With<TextInputField>>();
-            if let Some((_, mut t)) = q.iter_mut(w).find(|(n, _)| n.as_str() == "drawing-export-folder-field") {
+            if let Some((_, mut t)) = q
+                .iter_mut(w)
+                .find(|(n, _)| n.as_str() == "drawing-export-folder-field")
+            {
                 t.queue_edit(bevy::text::TextEdit::SelectAll);
                 t.queue_edit(bevy::text::TextEdit::Insert(path.into()));
             }
@@ -103,14 +122,18 @@ fn row(name: &str) -> impl Bundle {
 pub fn open_drawing_export(world: &mut World, element: ElementId) {
     let Some((name, sheets, current)) = world.get_resource::<ActiveDocument>().and_then(|doc| {
         let el = doc.doc.element(element)?;
-        let cadrs_core::ElementKind::Drawing(d) = &el.kind else { return None };
+        let cadrs_core::ElementKind::Drawing(d) = &el.kind else {
+            return None;
+        };
         let current = world.resource::<super::DrawingUi>().sheet_index(element, d);
         let names: Vec<String> = d.sheets.iter().map(|s| s.name.clone()).collect();
         Some((el.name.clone(), names, current))
     }) else {
         return;
     };
-    let dir = crate::export_dir(world).map(|d| d.display().to_string()).unwrap_or_default();
+    let dir = crate::export_dir(world)
+        .map(|d| d.display().to_string())
+        .unwrap_or_default();
     let converter = cadrs_drawing::dwg::find_converter().filter(|c| c.can_write());
     let theme = world.resource::<Theme>().clone();
     let (tb, tf) = (theme.clone(), theme.clone());
@@ -272,9 +295,13 @@ fn sync_format_rows(
     }
     for (n, mut node) in &mut q_rows {
         let show = match n.as_str() {
-            "drawing-export-color-row" => matches!(d.format, Format::Pdf | Format::Png | Format::Jpeg),
+            "drawing-export-color-row" => {
+                matches!(d.format, Format::Pdf | Format::Png | Format::Jpeg)
+            }
             "drawing-export-dpi-row" => matches!(d.format, Format::Png | Format::Jpeg),
-            "drawing-export-version-row" => matches!(d.format, Format::Dxf | Format::Dwg | Format::Dwt),
+            "drawing-export-version-row" => {
+                matches!(d.format, Format::Dxf | Format::Dwg | Format::Dwt)
+            }
             _ => continue,
         };
         let want = if show { Display::Flex } else { Display::None };
@@ -285,19 +312,27 @@ fn sync_format_rows(
 }
 
 fn on_submit(ev: On<TextSubmit>, q: Query<&Name>, mut commands: Commands) {
-    if q.get(ev.entity).is_ok_and(|n| n.as_str() == "drawing-export-name-field") {
+    if q.get(ev.entity)
+        .is_ok_and(|n| n.as_str() == "drawing-export-name-field")
+    {
         commands.queue(run_export);
     }
 }
 
 fn field(w: &mut World, name: &str) -> String {
     let mut q = w.query_filtered::<(&Name, &EditableText), With<TextInputField>>();
-    q.iter(w).find(|(n, _)| n.as_str() == name).map(|(_, t)| t.value().to_string()).unwrap_or_default()
+    q.iter(w)
+        .find(|(n, _)| n.as_str() == name)
+        .map(|(_, t)| t.value().to_string())
+        .unwrap_or_default()
 }
 
 fn select(w: &mut World, name: &str) -> usize {
     let mut q = w.query::<(&Name, &SelectState)>();
-    q.iter(w).find(|(n, _)| n.as_str() == name).map(|(_, s)| s.selected).unwrap_or(0)
+    q.iter(w)
+        .find(|(n, _)| n.as_str() == name)
+        .map(|(_, s)| s.selected)
+        .unwrap_or(0)
 }
 
 /// Export: writes the files and says where they went.
@@ -311,9 +346,22 @@ fn run_export(world: &mut World) {
     let all = select(world, "drawing-export-sheets") == 0;
     let color = select(world, "drawing-export-color") == 0;
     let dpi = [150.0, 300.0, 600.0][select(world, "drawing-export-dpi").min(2)];
-    let dxf_version = cadrs_drawing::dxf::DxfVersion::ALL[select(world, "drawing-export-version").min(1)];
+    let dxf_version =
+        cadrs_drawing::dxf::DxfVersion::ALL[select(world, "drawing-export-version").min(1)];
     world.trigger(DialogClose { entity: dialog });
-    let result = export_now(world, &spec, &base, &folder, all, &ExportOptions { format: spec.format, color, dpi, dxf_version });
+    let result = export_now(
+        world,
+        &spec,
+        &base,
+        &folder,
+        all,
+        &ExportOptions {
+            format: spec.format,
+            color,
+            dpi,
+            dxf_version,
+        },
+    );
     let theme = world.resource::<Theme>().clone();
     let note = match result {
         Ok(files) => {
@@ -322,7 +370,12 @@ fn run_export(world: &mut World) {
             }
             match files.as_slice() {
                 [one] => Notification::info(format!("Exported {}", one.display())).seconds(8.0),
-                many => Notification::info(format!("Exported {} files to {}", many.len(), folder.trim())).seconds(8.0),
+                many => Notification::info(format!(
+                    "Exported {} files to {}",
+                    many.len(),
+                    folder.trim()
+                ))
+                .seconds(8.0),
             }
         }
         Err(why) => Notification::warning(format!("Export failed: {why}")),
@@ -333,20 +386,39 @@ fn run_export(world: &mut World) {
 }
 
 /// Writes drawing `spec.element`'s sheets (all, or the current one) into `folder`.
-pub fn export_now(world: &mut World, spec: &DrawingExportDialog, base: &str, folder: &str, all: bool, opts: &ExportOptions) -> Result<Vec<PathBuf>, String> {
+pub fn export_now(
+    world: &mut World,
+    spec: &DrawingExportDialog,
+    base: &str,
+    folder: &str,
+    all: bool,
+    opts: &ExportOptions,
+) -> Result<Vec<PathBuf>, String> {
     let folder = folder.trim();
     if folder.is_empty() {
         return Err("no folder to save to".into());
     }
     let date = super::notes::today(world.get_resource::<AppClock>());
-    let doc = world.get_resource::<ActiveDocument>().ok_or("no document")?;
+    let doc = world
+        .get_resource::<ActiveDocument>()
+        .ok_or("no document")?;
     let el = doc.doc.element(spec.element).ok_or("the drawing is gone")?;
     let cadrs_core::ElementKind::Drawing(d) = &el.kind else {
         return Err("not a drawing".into());
     };
-    let sheets: Vec<usize> = if all { (0..d.sheets.len()).collect() } else { vec![spec.current.min(d.sheets.len().saturating_sub(1))] };
+    let sheets: Vec<usize> = if all {
+        (0..d.sheets.len()).collect()
+    } else {
+        vec![spec.current.min(d.sheets.len().saturating_sub(1))]
+    };
     let cache = world.resource::<super::views::ViewCache>();
-    let pages = cadrs_core::drawing_export::pages(&doc.doc, &el.name, d, &sheets, date, &|v| cache.geometry(v));
-    let base = if base.trim().is_empty() { el.name.clone() } else { base.trim().to_string() };
+    let pages = cadrs_core::drawing_export::pages(&doc.doc, &el.name, d, &sheets, date, &|v| {
+        cache.geometry(v)
+    });
+    let base = if base.trim().is_empty() {
+        el.name.clone()
+    } else {
+        base.trim().to_string()
+    };
     cadrs_drawing::export::write_files(&pages, opts, std::path::Path::new(folder), &base)
 }

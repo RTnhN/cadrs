@@ -25,7 +25,8 @@ pub struct RadioPlugin;
 
 impl Plugin for RadioPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(on_click).add_systems(PostUpdate, sync_rings.before(bevy::ui::UiSystems::Prepare));
+        app.add_observer(on_click)
+            .add_systems(PostUpdate, sync_rings.before(bevy::ui::UiSystems::Prepare));
     }
 }
 
@@ -80,17 +81,32 @@ pub struct RadioGroup {
 
 impl RadioGroup {
     pub fn new(name: impl Into<Cow<'static, str>>) -> Self {
-        Self { name: name.into(), options: Vec::new(), selected: None, row_height: 24.0 }
+        Self {
+            name: name.into(),
+            options: Vec::new(),
+            selected: None,
+            row_height: 24.0,
+        }
     }
 
     /// Adds an option; `name` names its clickable row.
     pub fn option(mut self, name: impl Into<Cow<'static, str>>, label: impl Into<String>) -> Self {
-        self.options.push(OptionSpec { name: name.into(), label: label.into(), disabled: false, icon: None });
+        self.options.push(OptionSpec {
+            name: name.into(),
+            label: label.into(),
+            disabled: false,
+            icon: None,
+        });
         self
     }
 
     /// Gives the last option a small icon button after its label (named `name`).
-    pub fn option_icon(mut self, icon: impl Into<Cow<'static, str>>, name: impl Into<Cow<'static, str>>, tooltip: impl Into<String>) -> Self {
+    pub fn option_icon(
+        mut self,
+        icon: impl Into<Cow<'static, str>>,
+        name: impl Into<Cow<'static, str>>,
+        tooltip: impl Into<String>,
+    ) -> Self {
         if let Some(o) = self.options.last_mut() {
             o.icon = Some((icon.into(), name.into(), tooltip.into()));
         }
@@ -117,22 +133,47 @@ impl RadioGroup {
 
     pub fn build(self, theme: &Theme) -> impl Bundle {
         let t = theme.clone();
-        let RadioGroup { name, options, selected, row_height } = self;
+        let RadioGroup {
+            name,
+            options,
+            selected,
+            row_height,
+        } = self;
         (
             Name::new(name.into_owned()),
             RadioGroupState { selected },
-            Node { flex_direction: FlexDirection::Column, flex_shrink: 0.0, ..default() },
+            Node {
+                flex_direction: FlexDirection::Column,
+                flex_shrink: 0.0,
+                ..default()
+            },
             Children::spawn(SpawnWith(move |p: &mut ChildSpawner| {
                 let group = p.target_entity();
                 for (index, o) in options.into_iter().enumerate() {
                     let on = selected == Some(index);
-                    let fg = if o.disabled { t.tool_disabled_foreground } else { t.foreground };
+                    let fg = if o.disabled {
+                        t.tool_disabled_foreground
+                    } else {
+                        t.foreground
+                    };
                     let tt = t.clone();
-                    p.spawn(Node { height: Val::Px(row_height), align_items: AlignItems::Center, column_gap: Val::Px(2.0), flex_shrink: 0.0, ..default() }).with_children(|row| {
+                    p.spawn(Node {
+                        height: Val::Px(row_height),
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(2.0),
+                        flex_shrink: 0.0,
+                        ..default()
+                    })
+                    .with_children(|row| {
                         let mut opt = row.spawn((
                             Name::new(o.name.into_owned()),
                             RadioOption { group, index },
-                            Node { height: Val::Percent(100.0), align_items: AlignItems::Center, column_gap: Val::Px(6.0), ..default() },
+                            Node {
+                                height: Val::Percent(100.0),
+                                align_items: AlignItems::Center,
+                                column_gap: Val::Px(6.0),
+                                ..default()
+                            },
                         ));
                         if o.disabled {
                             opt.insert(InteractionDisabled);
@@ -156,15 +197,34 @@ impl RadioGroup {
                             ))
                             .with_child((
                                 RadioDot { group, index },
-                                Node { width: Val::Px(7.0), height: Val::Px(7.0), border_radius: BorderRadius::MAX, ..default() },
+                                Node {
+                                    width: Val::Px(7.0),
+                                    height: Val::Px(7.0),
+                                    border_radius: BorderRadius::MAX,
+                                    ..default()
+                                },
                                 BackgroundColor(ring_color(&tt, true, o.disabled)),
-                                if on { Visibility::Inherited } else { Visibility::Hidden },
+                                if on {
+                                    Visibility::Inherited
+                                } else {
+                                    Visibility::Hidden
+                                },
                                 Pickable::IGNORE,
                             ));
-                            c.spawn((tt.text(o.label, tt.font_sm, FontWeight::MEDIUM, fg), Pickable::IGNORE));
+                            c.spawn((
+                                tt.text(o.label, tt.font_sm, FontWeight::MEDIUM, fg),
+                                Pickable::IGNORE,
+                            ));
                         });
                         if let Some((icon, name, tip)) = o.icon {
-                            row.spawn(IconButton::new(name, icon).icon_size(13.0).tooltip(tip).build(&tt)).entry::<Node>().and_modify(|mut n| {
+                            row.spawn(
+                                IconButton::new(name, icon)
+                                    .icon_size(13.0)
+                                    .tooltip(tip)
+                                    .build(&tt),
+                            )
+                            .entry::<Node>()
+                            .and_modify(|mut n| {
                                 n.width = Val::Px(20.0);
                                 n.min_width = Val::Px(20.0);
                                 n.height = Val::Px(20.0);
@@ -187,21 +247,33 @@ fn ring_color(t: &Theme, on: bool, disabled: bool) -> Color {
     }
 }
 
-fn on_click(mut click: On<Pointer<Click>>, q: Query<(&RadioOption, Has<InteractionDisabled>)>, mut q_group: Query<&mut RadioGroupState>, mut commands: Commands) {
+fn on_click(
+    mut click: On<Pointer<Click>>,
+    q: Query<(&RadioOption, Has<InteractionDisabled>)>,
+    mut q_group: Query<&mut RadioGroupState>,
+    mut commands: Commands,
+) {
     if click.button != PointerButton::Primary {
         return;
     }
-    let Ok((o, disabled)) = q.get(click.entity) else { return };
+    let Ok((o, disabled)) = q.get(click.entity) else {
+        return;
+    };
     click.propagate(false);
     if disabled {
         return;
     }
-    let Ok(mut state) = q_group.get_mut(o.group) else { return };
+    let Ok(mut state) = q_group.get_mut(o.group) else {
+        return;
+    };
     if state.selected == Some(o.index) {
         return;
     }
     state.selected = Some(o.index);
-    commands.trigger(RadioChange { entity: o.group, index: o.index });
+    commands.trigger(RadioChange {
+        entity: o.group,
+        index: o.index,
+    });
 }
 
 fn sync_rings(
@@ -214,16 +286,28 @@ fn sync_rings(
     if q_groups.is_empty() {
         return;
     }
-    let disabled = |g: Entity, i: usize| q_opts.iter().any(|(o, d)| o.group == g && o.index == i && d);
+    let disabled = |g: Entity, i: usize| {
+        q_opts
+            .iter()
+            .any(|(o, d)| o.group == g && o.index == i && d)
+    };
     for (r, mut b) in &mut q_ring {
         if let Ok(s) = q_groups.get(r.group) {
-            let c = BorderColor::all(ring_color(&theme, s.selected == Some(r.index), disabled(r.group, r.index)));
+            let c = BorderColor::all(ring_color(
+                &theme,
+                s.selected == Some(r.index),
+                disabled(r.group, r.index),
+            ));
             b.set_if_neq(c);
         }
     }
     for (d, mut v) in &mut q_dot {
         if let Ok(s) = q_groups.get(d.group) {
-            v.set_if_neq(if s.selected == Some(d.index) { Visibility::Inherited } else { Visibility::Hidden });
+            v.set_if_neq(if s.selected == Some(d.index) {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            });
         }
     }
 }

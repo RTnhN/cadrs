@@ -111,12 +111,19 @@ pub fn control_arm_constraints(g: &Sketch) -> SketchOp {
     ];
     let corners = [v(-22.5, -5.0), v(22.5, -5.0), v(22.5, 5.0), v(-22.5, 5.0)];
     specs.extend(rectangle_constraints(corners));
-    specs.push(ConstraintOf::Center(PointSpec::Origin, PointSpec::At(corners[0]), PointSpec::At(corners[2])));
+    specs.push(ConstraintOf::Center(
+        PointSpec::Origin,
+        PointSpec::At(corners[0]),
+        PointSpec::At(corners[2]),
+    ));
     let t = ((HUB_R - EYE_R) / EYE_X).acos();
     for side in [1.0, -1.0] {
         let cx = side * EYE_X;
         let eye = circle(v(cx, 0.0), EYE_R);
-        specs.push(ConstraintOf::Concentric(eye, circle(v(cx, 0.0), EYE_HOLE_R)));
+        specs.push(ConstraintOf::Concentric(
+            eye,
+            circle(v(cx, 0.0), EYE_HOLE_R),
+        ));
         for sgn in [1.0, -1.0] {
             let a = v(side * HUB_R * t.cos(), sgn * HUB_R * t.sin());
             let b = v(cx + side * EYE_R * t.cos(), sgn * EYE_R * t.sin());
@@ -127,7 +134,10 @@ pub fn control_arm_constraints(g: &Sketch) -> SketchOp {
             specs.push(ConstraintOf::Tangent(line, eye));
         }
     }
-    specs.push(ConstraintOf::Horizontal(Orient::Points(PointSpec::At(v(-EYE_X, 0.0)), PointSpec::Origin)));
+    specs.push(ConstraintOf::Horizontal(Orient::Points(
+        PointSpec::At(v(-EYE_X, 0.0)),
+        PointSpec::Origin,
+    )));
     // The eyes and their holes symmetric about the Y axis: the right ones take the left ones'
     // positions and sizes (only the left eye is dimensioned, as in `ex1-step2.png`).
     for r in [EYE_R, EYE_HOLE_R] {
@@ -176,9 +186,18 @@ pub fn control_arm_constraints(g: &Sketch) -> SketchOp {
         ops.push(dim(DimensionKind::Vertical { a: b, b: c }, 10.0, 8.0));
     }
     // The overall length, 250: from the far side of one eye to the far side of the other.
-    if let (Some(a), Some(b)) = (circle_id(v(-EYE_X, 0.0), EYE_R), circle_id(v(EYE_X, 0.0), EYE_R)) {
+    if let (Some(a), Some(b)) = (
+        circle_id(v(-EYE_X, 0.0), EYE_R),
+        circle_id(v(EYE_X, 0.0), EYE_R),
+    ) {
         ops.push(dim(
-            DimensionKind::CircleCircle { a, b, far_a: true, far_b: true, axis: None },
+            DimensionKind::CircleCircle {
+                a,
+                b,
+                far_a: true,
+                far_b: true,
+                axis: None,
+            },
             2.0 * (EYE_X + EYE_R),
             -40.0,
         ));
@@ -189,7 +208,9 @@ pub fn control_arm_constraints(g: &Sketch) -> SketchOp {
 /// The Control Arm sketch, with the eye hole's dimension.
 pub fn control_arm_sketch() -> Sketch {
     let mut s = Sketch::new();
-    control_arm_geometry().apply(&mut s).expect("control arm geometry");
+    control_arm_geometry()
+        .apply(&mut s)
+        .expect("control arm geometry");
     if let Some(op) = eye_hole_dimension(&s) {
         op.apply(&mut s).expect("eye hole dimension");
     }
@@ -243,34 +264,34 @@ impl crate::rebuild::task::Task for StepFixture {
 }
 pub mod conrod;
 pub mod design_intent;
-pub mod flange;
+pub mod drawing_bar;
 pub mod drawing_bracket;
 pub mod drill;
+pub mod flange;
 pub mod gasket;
 pub mod gear_cover;
 pub mod hand_brake;
 pub mod in_context;
 pub mod inspection;
 pub mod linked_block;
+pub mod mates;
 pub mod motor_mount;
 pub mod p3b9;
 pub mod pcb_enclosure;
 pub mod phone_case;
 pub mod piston;
-pub mod mates;
 pub mod pneumatic;
 pub mod pneumatic_ex2;
 pub mod pneumatic_ex3;
 pub mod reflector;
 pub mod scale;
+pub mod sheetmetal_exercises;
 pub mod sheetmetal_forms;
 pub mod sheetmetal_legacy;
 pub mod sheetmetal_topdown;
-pub mod sheetmetal_exercises;
 pub mod simulation;
 pub mod step_stool;
 pub mod ujoint;
 pub mod ujoint_assembly;
 pub mod ujoint_drawing;
 pub mod with_hole;
-pub mod drawing_bar;

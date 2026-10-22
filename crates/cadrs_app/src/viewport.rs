@@ -18,6 +18,7 @@ use cadrs_ui::ShortcutKey;
 use std::collections::HashMap;
 
 use bevy::camera::ScalingMode;
+use bevy::camera::visibility::RenderLayers;
 use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
 use bevy::dev_tools::infinite_grid::{InfiniteGrid, InfiniteGridPlugin, InfiniteGridSettings};
 use bevy::input::keyboard::KeyboardInput;
@@ -28,7 +29,6 @@ use bevy::picking::pointer::{PointerAction, PointerButton, PointerId, PointerInp
 use bevy::prelude::*;
 use bevy::text::FontWeight;
 use bevy::ui::{UiGlobalTransform, UiTransform};
-use bevy::camera::visibility::RenderLayers;
 use cadrs_core::{ElementId, FeatureId, PartId};
 use cadrs_sketch::PlaneRef;
 use cadrs_ui::input::TextInputField;
@@ -58,7 +58,10 @@ impl Plugin for ViewportPlugin {
             .init_gizmo_group::<HighlightGizmos>()
             .init_gizmo_group::<HoverGizmos>()
             .init_gizmo_group::<EdgeOnGizmos>()
-            .add_systems(PostUpdate, flag_pending_work.run_if(in_state(AppState::Document)))
+            .add_systems(
+                PostUpdate,
+                flag_pending_work.run_if(in_state(AppState::Document)),
+            )
             .add_message::<PickRequest>()
             .add_systems(Startup, (spawn_main_camera, configure_gizmos))
             .add_systems(OnEnter(AppState::Document), spawn_scene)
@@ -71,8 +74,7 @@ impl Plugin for ViewportPlugin {
                     track_viewport_rect,
                     track_dialog_inset,
                     viewport_pointer,
-                    apply_pick_requests
-                        .run_if(in_state(crate::sketch::PartStudioMode::Modeling)),
+                    apply_pick_requests.run_if(in_state(crate::sketch::PartStudioMode::Modeling)),
                     view_shortcuts,
                     animate_view,
                     update_hover,
@@ -224,7 +226,11 @@ impl ViewportView {
     pub fn animate_to(&mut self, to: ViewState) {
         // The render mode and the projection are the tab's (P3E.3a): a change of view keeps
         // them (`crate::view_options` sets them).
-        let to = ViewState { render: self.view.render, perspective: self.view.perspective, ..to };
+        let to = ViewState {
+            render: self.view.render,
+            perspective: self.view.perspective,
+            ..to
+        };
         if self.view.approx_eq(&to) {
             return;
         }
@@ -361,7 +367,10 @@ pub fn plane_label(features: &[cadrs_core::Feature], p: PlaneRef) -> String {
     if let PlaneRef::Feature(f) = p
         && let Some((model, _)) = cadrs_core::sheetmetal_flat::flat_target(features, f.feature)
     {
-        let name = features.iter().find(|x| x.id == model).map_or("Sheet metal model", |x| x.name.as_str());
+        let name = features
+            .iter()
+            .find(|x| x.id == model)
+            .map_or("Sheet metal model", |x| x.name.as_str());
         return format!("Face of {name}");
     }
     match p {
@@ -416,7 +425,10 @@ impl Pick {
 /// vertex's latest), the sketch of a sketch curve, point or region, the feature that made a part.
 pub fn feature_of(features: &[cadrs_core::Feature], pick: Pick) -> Option<FeatureId> {
     let op = match pick {
-        Pick::Feature(f) | Pick::Region(f, _) | Pick::SketchCurve(f, _) | Pick::SketchPoint(f, _) => return Some(f),
+        Pick::Feature(f)
+        | Pick::Region(f, _)
+        | Pick::SketchCurve(f, _)
+        | Pick::SketchPoint(f, _) => return Some(f),
         Pick::Part(p) => return Some(p.feature),
         Pick::Face(_, face) => face.op,
         Pick::Edge(_, edge) => crate::parts::edge_maker(features, &edge),
@@ -427,7 +439,11 @@ pub fn feature_of(features: &[cadrs_core::Feature], pick: Pick) -> Option<Featur
         _ => return None,
     };
     let id = FeatureId(op);
-    features.iter().any(|f| f.id == id).then_some(id).or_else(|| pick.part().map(|p| p.feature))
+    features
+        .iter()
+        .any(|f| f.id == id)
+        .then_some(id)
+        .or_else(|| pick.part().map(|p| p.feature))
 }
 
 /// A double-click in the Part Studio: opens the feature behind what was clicked (its sketch,
@@ -873,13 +889,17 @@ fn track_active_element(
         v.fit_pending = None;
         v.view = match v.per_element.get(&el.id).copied() {
             Some(saved) => saved,
-            // An Assembly tab opened for the first time (a new subassembly's): its instances
-            // framed with the assembly margin (`ex3-step5.png`), once they are built: the
-            // rebuild of their Part Studios goes on in the background (a big one takes seconds).
-            None if k == ActiveKind::Assembly && el.assembly_model().is_some_and(|a| !a.instances.is_empty()) => {
+            // A Part Studio or Assembly tab opened for the first time: its parts (an assembly's
+            // instances, with the assembly margin, `ex3-step5.png`) framed once they are built:
+            // the rebuild goes on in the background (a big one takes seconds).
+            None if k == ActiveKind::PartStudio
+                || (k == ActiveKind::Assembly
+                    && el.assembly_model().is_some_and(|a| !a.instances.is_empty())) =>
+            {
                 let start = ViewState::default();
-                match assembly_points(&cache, el.id) {
-                    Some(pts) => start.fitted(&pts, rect.0.size(), ASM_FIT_FILL),
+                match built_points(&cache, el.id, k) {
+                    Some(pts) if pts.is_empty() => start,
+                    Some(pts) => start.fitted(&pts, rect.0.size(), fit_fill(k)),
                     None => {
                         v.fit_pending = Some((el.id, start));
                         start
@@ -895,22 +915,44 @@ fn track_active_element(
     }
 }
 
-/// The points of the shown instances of Assembly tab `element` as built in the part cache;
-/// `None` while they are being built.
-fn assembly_points(cache: &crate::parts::PartCache, element: ElementId) -> Option<Vec<Vec3>> {
-    if cache.assembly != Some(element) || cache.rebuilding {
+/// The points of the shown parts of tab `element` (an Assembly's instances) as built in the
+/// part cache; `None` while they are being built. Empty for a Part Studio without parts.
+fn built_points(
+    cache: &crate::parts::PartCache,
+    element: ElementId,
+    kind: ActiveKind,
+) -> Option<Vec<Vec3>> {
+    if kind == ActiveKind::Assembly {
+        if cache.assembly != Some(element) || cache.rebuilding {
+            return None;
+        }
+    } else if cache.rebuilding || cache.settled().map(|(id, ..)| id) != Some(element) {
         return None;
     }
     let pts: Vec<Vec3> = cache
         .shown()
-        .flat_map(|p| p.solid.positions.iter().map(|q| Vec3::new(q[0] as f32, q[1] as f32, q[2] as f32)))
+        .flat_map(|p| {
+            p.solid
+                .positions
+                .iter()
+                .map(|q| Vec3::new(q[0] as f32, q[1] as f32, q[2] as f32))
+        })
         .collect();
-    Some(if pts.is_empty() { vec![Vec3::ZERO] } else { pts })
+    Some(if pts.is_empty() && kind == ActiveKind::Assembly {
+        vec![Vec3::ZERO]
+    } else {
+        pts
+    })
 }
 
-/// Fits an Assembly tab's first view to its instances once their parts are built
+/// Fits a Part Studio's or Assembly's first view to its parts once they are built
 /// ([`ViewportView::fit_pending`]).
-fn fit_assembly_when_built(mut view: ResMut<ViewportView>, cache: Res<crate::parts::PartCache>, rect: Res<ViewportRect>) {
+fn fit_assembly_when_built(
+    mut view: ResMut<ViewportView>,
+    cache: Res<crate::parts::PartCache>,
+    rect: Res<ViewportRect>,
+    kind: Res<ActiveKind>,
+) {
     let Some((el, start)) = view.fit_pending else {
         return;
     };
@@ -918,12 +960,12 @@ fn fit_assembly_when_built(mut view: ResMut<ViewportView>, cache: Res<crate::par
         view.fit_pending = None;
         return;
     }
-    let Some(pts) = assembly_points(&cache, el) else {
+    let Some(pts) = built_points(&cache, el, *kind) else {
         return;
     };
     view.fit_pending = None;
-    if view.animation.is_none() && view.view.approx_eq(&start) {
-        view.view = start.fitted(&pts, rect.0.size(), ASM_FIT_FILL);
+    if !pts.is_empty() && view.animation.is_none() && view.view.approx_eq(&start) {
+        view.view = start.fitted(&pts, rect.0.size(), fit_fill(*kind));
     }
 }
 
@@ -973,7 +1015,10 @@ fn track_dialog_inset(
 }
 
 /// True while the mouse pointer is over the viewport area (not a panel, menu or dialog).
-pub(crate) fn pointer_over_viewport(hover: &HoverMap, q_area: &Query<Entity, With<ViewportArea>>) -> bool {
+pub(crate) fn pointer_over_viewport(
+    hover: &HoverMap,
+    q_area: &Query<Entity, With<ViewportArea>>,
+) -> bool {
     let Some(hits) = hover.get(&PointerId::Mouse) else {
         return false;
     };
@@ -1018,7 +1063,13 @@ fn viewport_pointer(
         return;
     }
     let over = pointer_over_viewport(&hover, &q_area);
-    let filter = pick_filter(planes.0, sketch.as_deref(), extrude.as_deref(), applied.as_deref(), create.as_deref());
+    let filter = pick_filter(
+        planes.0,
+        sketch.as_deref(),
+        extrude.as_deref(),
+        applied.as_deref(),
+        create.as_deref(),
+    );
     let forced = pick_override.0;
     let filter = forced.or(filter);
     let modeling = sketch.is_none() && extrude.is_none();
@@ -1043,7 +1094,9 @@ fn viewport_pointer(
                     let action = [(2, PointerButton::Middle), (1, PointerButton::Secondary)]
                         .into_iter()
                         .filter(|(i, _)| drag.buttons[*i])
-                        .find_map(|(_, b)| mouse.action(crate::preferences_ui::mouse_button(b), mods));
+                        .find_map(|(_, b)| {
+                            mouse.action(crate::preferences_ui::mouse_button(b), mods)
+                        });
                     match action {
                         Some(ViewAction::Rotate) => match view.pivot {
                             Some(p) => view.view.orbit_about(p, |v| v.orbit(delta)),
@@ -1130,10 +1183,17 @@ fn viewport_pointer(
                         // (the dialog would take what is selected as its own).
                         let now = time.elapsed_secs();
                         let again = drag.last_click.take().is_some_and(|(t, at, p)| {
-                            Some(p) == picked && now - t <= cadrs_ui::inline_edit::DOUBLE_CLICK_TIME && at.distance(pos) < 6.0
+                            Some(p) == picked
+                                && now - t <= cadrs_ui::inline_edit::DOUBLE_CLICK_TIME
+                                && at.distance(pos) < 6.0
                         });
                         match picked {
-                            Some(p) if again && modeling && forced.is_none() && *kind == ActiveKind::PartStudio => {
+                            Some(p)
+                                if again
+                                    && modeling
+                                    && forced.is_none()
+                                    && *kind == ActiveKind::PartStudio =>
+                            {
                                 commands.queue(move |world: &mut World| edit_picked(world, p));
                             }
                             _ => {
@@ -1150,7 +1210,9 @@ fn viewport_pointer(
                         // P3.11 (P3.8 judge): a box dragged over a pattern's Skip dots toggles
                         // every dot in it.
                         let (a, b) = (rect.offset(down), rect.offset(pos));
-                        commands.queue(move |world: &mut World| crate::pattern::skip_dots_in_box(world, a, b));
+                        commands.queue(move |world: &mut World| {
+                            crate::pattern::skip_dots_in_box(world, a, b)
+                        });
                     }
                 } else {
                     // S1.2, S2.3: a right-click (no drag) in the Part Studio opens the menu of
@@ -1168,7 +1230,9 @@ fn viewport_pointer(
                             rect.offset(pos),
                             crate::assembly::pick_filter(),
                         );
-                        commands.queue(move |world: &mut World| crate::assembly::menu::open_viewport_menu(world, pos, picked));
+                        commands.queue(move |world: &mut World| {
+                            crate::assembly::menu::open_viewport_menu(world, pos, picked)
+                        });
                     }
                     if b == PointerButton::Secondary
                         && let Some(down) = drag.secondary_down.take()
@@ -1233,7 +1297,17 @@ pub fn pick_filter(
     if let Some(c) = create
         && sketch.is_none()
     {
-        return Some(if c.faces_mode { PickFilter { faces: true, ..PickFilter::none() } } else { PickFilter { edges: true, ..PickFilter::none() } });
+        return Some(if c.faces_mode {
+            PickFilter {
+                faces: true,
+                ..PickFilter::none()
+            }
+        } else {
+            PickFilter {
+                edges: true,
+                ..PickFilter::none()
+            }
+        });
     }
     if let Some(a) = applied {
         return Some(a.pick_filter());
@@ -1265,11 +1339,13 @@ pub fn pick_filter(
                 ..none
             },
             // Faces, edges and vertices (a part through any of them).
-            ExtrudeField::UpTo | ExtrudeField::SecondUpTo | ExtrudeField::MergeScope => PickFilter {
-                faces: true,
-                edges: true,
-                ..none
-            },
+            ExtrudeField::UpTo | ExtrudeField::SecondUpTo | ExtrudeField::MergeScope => {
+                PickFilter {
+                    faces: true,
+                    edges: true,
+                    ..none
+                }
+            }
             // P3.7 (PS12.3): a plane's normal is a direction too; P3.8: a mate connector's Z.
             ExtrudeField::Direction => PickFilter {
                 faces: true,
@@ -1324,7 +1400,10 @@ fn apply_pick_requests(
     create: Option<Res<crate::create_selection::CreateSelection>>,
     insert: Option<Res<crate::assembly::insert::InsertSession>>,
     mate: Option<Res<crate::assembly::mate_dialog::MateSession>>,
-    (connector, composite): (Option<Res<crate::assembly::connector_tool::ConnectorSession>>, Option<Res<crate::composite_ui::CompositeSession>>),
+    (connector, composite): (
+        Option<Res<crate::assembly::connector_tool::ConnectorSession>>,
+        Option<Res<crate::composite_ui::CompositeSession>>,
+    ),
     pick_override: Res<PickFilterOverride>,
     derived: Option<Res<crate::derived_ui::DerivedSession>>,
     mut row_click: ResMut<FeatureRowClick>,
@@ -1333,19 +1412,39 @@ fn apply_pick_requests(
     // dialog its entities, P3B.7.)
     // The Insert dialog's Standard content tab takes holes from the selection (P3B.5).
     let insert_takes = insert.is_some_and(|s| !s.standard);
-    if extrude.is_some() || boolean.is_some() || mass.is_some() || applied.is_some() || create.is_some() || insert_takes || mate.is_some() || connector.is_some() || pick_override.0.is_some() || derived.is_some() || composite.is_some() {
+    if extrude.is_some()
+        || boolean.is_some()
+        || mass.is_some()
+        || applied.is_some()
+        || create.is_some()
+        || insert_takes
+        || mate.is_some()
+        || connector.is_some()
+        || pick_override.0.is_some()
+        || derived.is_some()
+        || composite.is_some()
+    {
         picks.clear();
         row_click.pending = None;
         return;
     }
     for p in picks.read() {
-        let row = row_click.pending.take_if(|(r, _)| Some(*r) == p.0).map(|(_, how)| how);
+        let row = row_click
+            .pending
+            .take_if(|(r, _)| Some(*r) == p.0)
+            .map(|(_, how)| how);
         match (p.0, row) {
             (Some(p), Some(RowSelect::Only)) => {
-                selection.0 = if selection.0 == [p] { Vec::new() } else { vec![p] };
+                selection.0 = if selection.0 == [p] {
+                    Vec::new()
+                } else {
+                    vec![p]
+                };
                 row_click.anchor = Some(p);
             }
-            (Some(p), Some(RowSelect::Range(rows))) => selection.0 = if rows.is_empty() { vec![p] } else { rows },
+            (Some(p), Some(RowSelect::Range(rows))) => {
+                selection.0 = if rows.is_empty() { vec![p] } else { rows }
+            }
             (Some(p), Some(RowSelect::Toggle)) => {
                 selection.toggle(p);
                 row_click.anchor = Some(p);
@@ -1380,9 +1479,7 @@ pub fn pick_in(view: &ViewState, offset: Vec2, planes: bool) -> Option<Pick> {
     let (o, d) = view.ray(offset);
     PlaneKind::ALL
         .into_iter()
-        .filter_map(|k| {
-            ray_square(o, d, Vec3::ZERO, k.u(), k.v(), PLANE_HALF).map(|t| (t, k))
-        })
+        .filter_map(|k| ray_square(o, d, Vec3::ZERO, k.u(), k.v(), PLANE_HALF).map(|t| (t, k)))
         .min_by(|a, b| a.0.total_cmp(&b.0))
         .map(|(_, k)| Pick::Plane(k))
 }
@@ -1406,7 +1503,13 @@ fn view_shortcuts(
     doc: Option<Res<ActiveDocument>>,
     mut planes: ResMut<PlanesVisible>,
     inset: Res<DialogInset>,
-    (cache, asm_parts, pcb_scene, eda2d, layout): (Res<crate::parts::PartCache>, Res<crate::assembly::AssemblyParts>, Option<Res<crate::pcb::view::PcbScene>>, Res<crate::eda::Eda2d>, Res<crate::eda::layout_tools::LayoutState>),
+    (cache, asm_parts, pcb_scene, eda2d, layout): (
+        Res<crate::parts::PartCache>,
+        Res<crate::assembly::AssemblyParts>,
+        Option<Res<crate::pcb::view::PcbScene>>,
+        Res<crate::eda::Eda2d>,
+        Res<crate::eda::layout_tools::LayoutState>,
+    ),
 ) {
     if kind.is_flat() || eda2d.flat() {
         // No 3D views on a sheet or a render; F and Ctrl+S are handled by `crate::drawing`.
@@ -1470,7 +1573,10 @@ fn view_shortcuts(
         match k.shortcut_code() {
             // A board's layout edited in the view: normal to the board, from the top (N) or the
             // bottom (Shift+N).
-            KeyCode::KeyN if *kind == ActiveKind::PartStudio && let Some(h) = eda2d.plane() => {
+            KeyCode::KeyN
+                if *kind == ActiveKind::PartStudio
+                    && let Some(h) = eda2d.plane() =>
+            {
                 let n = h.frame.normal();
                 let n = Vec3::new(n[0] as f32, n[1] as f32, n[2] as f32);
                 let to = view.target().normal_to(if shift { -n } else { n });
@@ -1480,7 +1586,12 @@ fn view_shortcuts(
                 // In a sketch: normal to the sketch plane. Otherwise normal to the selected
                 // plane, or to the plane of the selected sketch.
                 let sketch_plane = |f: FeatureId| {
-                    let p = doc.as_ref()?.active_element()?.feature(f)?.sketch()?.plane?;
+                    let p = doc
+                        .as_ref()?
+                        .active_element()?
+                        .feature(f)?
+                        .sketch()?
+                        .plane?;
                     Some(plane_normal(p))
                 };
                 let normal = match &session {
@@ -1506,7 +1617,13 @@ fn view_shortcuts(
             }
             // A board's layout edited in the view: F flips the selected footprint
             // (`crate::eda::layout_tools`).
-            KeyCode::KeyF if !shift && eda2d.plane().is_some() && layout.selection.iter().any(|i| matches!(i, cadrs_eda::board_edit::BoardItem::Footprint(_))) => {}
+            KeyCode::KeyF
+                if !shift
+                    && eda2d.plane().is_some()
+                    && layout
+                        .selection
+                        .iter()
+                        .any(|i| matches!(i, cadrs_eda::board_edit::BoardItem::Footprint(_))) => {}
             KeyCode::KeyF if !shift => {
                 let mut pts = scene_points(doc.as_deref(), *kind, planes.0);
                 // In an assembly with a mate dialog's or a drag's preview, the instances as drawn
@@ -1516,7 +1633,12 @@ fn view_shortcuts(
                 if *kind == ActiveKind::Assembly && !asm_parts.preview.is_empty() {
                     let drawn: Vec<Vec3> = cache
                         .shown()
-                        .flat_map(|p| p.solid.positions.iter().map(|q| Vec3::new(q[0] as f32, q[1] as f32, q[2] as f32)))
+                        .flat_map(|p| {
+                            p.solid
+                                .positions
+                                .iter()
+                                .map(|q| Vec3::new(q[0] as f32, q[1] as f32, q[2] as f32))
+                        })
                         .collect();
                     if !drawn.is_empty() {
                         pts = drawn;
@@ -1524,14 +1646,22 @@ fn view_shortcuts(
                 }
                 // PCB Studio: the board shown (as the zoom-to-fit button does; P3H.6 fix round 1,
                 // F framed the origin).
-                if *kind == ActiveKind::PcbStudio && let Some(scene) = pcb_scene.as_deref() {
+                if *kind == ActiveKind::PcbStudio
+                    && let Some(scene) = pcb_scene.as_deref()
+                {
                     pts = scene.fit_points();
                 }
-                let to = view.target().fitted_beside(&pts, rect.0.size(), fit_fill(*kind), inset.0);
+                let to = view
+                    .target()
+                    .fitted_beside(&pts, rect.0.size(), fit_fill(*kind), inset.0);
                 view.animate_to(to);
             }
             KeyCode::KeyZ => {
-                let factor = if shift { ZOOM_KEY_FACTOR } else { 1.0 / ZOOM_KEY_FACTOR };
+                let factor = if shift {
+                    ZOOM_KEY_FACTOR
+                } else {
+                    1.0 / ZOOM_KEY_FACTOR
+                };
                 let to = view.target().zoomed(factor);
                 view.animate_to(to);
             }
@@ -1554,7 +1684,12 @@ pub fn zoom_to_fit(world: &mut World) {
         let cache = world.resource::<crate::parts::PartCache>();
         let drawn: Vec<Vec3> = cache
             .shown()
-            .flat_map(|p| p.solid.positions.iter().map(|q| Vec3::new(q[0] as f32, q[1] as f32, q[2] as f32)))
+            .flat_map(|p| {
+                p.solid
+                    .positions
+                    .iter()
+                    .map(|q| Vec3::new(q[0] as f32, q[1] as f32, q[2] as f32))
+            })
             .collect();
         if !drawn.is_empty() {
             pts = drawn;
@@ -1567,7 +1702,9 @@ pub fn zoom_to_fit(world: &mut World) {
     let size = world.resource::<ViewportRect>().0.size();
     let inset = world.resource::<DialogInset>().0;
     let mut view = world.resource_mut::<ViewportView>();
-    let to = view.target().fitted_beside(&pts, size, fit_fill(kind), inset);
+    let to = view
+        .target()
+        .fitted_beside(&pts, size, fit_fill(kind), inset);
     view.animate_to(to);
 }
 
@@ -1609,7 +1746,11 @@ pub const ASM_FIT_FILL: f32 = 0.6;
 
 /// The zoom to fit fill for a tab of `kind`.
 pub fn fit_fill(kind: ActiveKind) -> f32 {
-    if kind == ActiveKind::Assembly { ASM_FIT_FILL } else { FIT_FILL }
+    if kind == ActiveKind::Assembly {
+        ASM_FIT_FILL
+    } else {
+        FIT_FILL
+    }
 }
 /// Zoom per Z / Shift+Z press.
 pub const ZOOM_KEY_FACTOR: f32 = 1.25;
@@ -1619,7 +1760,11 @@ pub const DRAG_ZOOM_PER_PX: f32 = 1.006;
 
 /// The points zoom to fit frames: the default planes (the ones shown) and every sketch of the
 /// active Part Studio (the origin for an Assembly).
-pub fn scene_points(doc: Option<&ActiveDocument>, kind: ActiveKind, planes: [bool; 3]) -> Vec<Vec3> {
+pub fn scene_points(
+    doc: Option<&ActiveDocument>,
+    kind: ActiveKind,
+    planes: [bool; 3],
+) -> Vec<Vec3> {
     let mut pts = Vec::new();
     if kind == ActiveKind::PcbStudio {
         // The board is framed by `crate::pcb::view` (zoom_to_fit uses its box).
@@ -1724,7 +1869,12 @@ fn update_hover(
         Res<PickFilterOverride>,
         Option<Res<crate::assembly::triad::Triad>>,
     ),
-    (zoom_window, section_arrow, eda2d, fit): (Option<Res<crate::view_options::ZoomWindow>>, Res<crate::section_view::SectionArrow>, Res<crate::eda::Eda2d>, Res<crate::board_fit::FitState>),
+    (zoom_window, section_arrow, eda2d, fit): (
+        Option<Res<crate::view_options::ZoomWindow>>,
+        Res<crate::section_view::SectionArrow>,
+        Res<crate::eda::Eda2d>,
+        Res<crate::board_fit::FitState>,
+    ),
     mut last: Local<Option<(Vec2, crate::parts::PickFilter, Option<Pick>)>>,
     box_select: Option<Res<crate::assembly::box_select::AssemblyBox>>,
 ) {
@@ -1739,18 +1889,36 @@ fn update_hover(
     }
     // While a sketch has its plane, planes no longer react to the pointer (the sketch tools
     // own it); while it waits for one, planes highlight as pick candidates.
-    let filter = pick_override.0.or(pick_filter(planes.0, session.as_deref(), extrude.as_deref(), applied.as_deref(), create.as_deref()));
+    let filter = pick_override.0.or(pick_filter(
+        planes.0,
+        session.as_deref(),
+        extrude.as_deref(),
+        applied.as_deref(),
+        create.as_deref(),
+    ));
     let picking = filter.is_some();
     // Zoom to window's box and the section plane's arrow own the pointer: nothing under it
     // highlights (P3E.3a).
     // A board's layout edited in the view owns the pointer too, unless Align waits for a pick.
     let layout_edit = eda2d.plane().is_some() && fit.align == crate::board_fit::AlignStep::Off;
-    let over = pointer_over_viewport(&hover, &q_area) && zoom_window.is_none() && section_arrow.drag.is_none() && !layout_edit;
+    let over = pointer_over_viewport(&hover, &q_area)
+        && zoom_window.is_none()
+        && section_arrow.drag.is_none()
+        && !layout_edit;
     let query = match filter {
         Some(f) if over && !drag.navigating && *kind == ActiveKind::PartStudio => Some(f),
         // No pre-highlight while a triad drag or its value box is active (P3H.6 judge).
-        Some(f) if over && !drag.navigating && *kind == ActiveKind::Assembly && !triad.as_deref().is_some_and(|t| t.busy()) => {
-            Some(if pick_override.0.is_some() { f } else { crate::assembly::pick_filter() })
+        Some(f)
+            if over
+                && !drag.navigating
+                && *kind == ActiveKind::Assembly
+                && !triad.as_deref().is_some_and(|t| t.busy()) =>
+        {
+            Some(if pick_override.0.is_some() {
+                f
+            } else {
+                crate::assembly::pick_filter()
+            })
         }
         _ => None,
     };
@@ -1910,7 +2078,13 @@ fn draw_plane_edges(
             } else {
                 Vec3::X
             };
-            cut(&mut edge_on_gizmos, clip, t.transform_point(-along * h), t.transform_point(along * h), Color::srgb_u8(0x79, 0xa1, 0xcc));
+            cut(
+                &mut edge_on_gizmos,
+                clip,
+                t.transform_point(-along * h),
+                t.transform_point(along * h),
+                Color::srgb_u8(0x79, 0xa1, 0xcc),
+            );
             continue;
         }
         for i in 0..4 {
@@ -1926,14 +2100,19 @@ fn draw_plane_edges(
                 cut(&mut hl_gizmos, clip, a, b, theme.selection_3d);
             } else if edge_on {
                 // The sketch axes in a normal-to view: `#79a1cc` (`screens/10`).
-                cut(&mut edge_on_gizmos, clip, a, b, Color::srgb_u8(0x79, 0xa1, 0xcc));
+                cut(
+                    &mut edge_on_gizmos,
+                    clip,
+                    a,
+                    b,
+                    Color::srgb_u8(0x79, 0xa1, 0xcc),
+                );
             } else {
                 cut(&mut gizmos, clip, a, b, theme.plane_edge_line());
             }
         }
     }
 }
-
 
 trait PlaneEdge {
     fn plane_edge_line(&self) -> Color;
@@ -1964,7 +2143,12 @@ fn sync_plane_rows(
     kind: Res<ActiveKind>,
     planes: Res<PlanesVisible>,
     theme: Res<Theme>,
-    mut q: Query<(Entity, &PickRow, Has<Selected>, Option<&mut cadrs_ui::Visuals>)>,
+    mut q: Query<(
+        Entity,
+        &PickRow,
+        Has<Selected>,
+        Option<&mut cadrs_ui::Visuals>,
+    )>,
     mut q_toggle: Query<&mut cadrs_ui::TreeRowToggle>,
     children: Query<&Children>,
     mut q_img: Query<&mut ImageNode>,
@@ -2104,8 +2288,13 @@ fn place_plane_labels(
         .filter_map(|part| {
             let (lo, hi) = part.solid.pick_index().bounds?;
             let mut pts = (0..8).map(|k| {
-                let c = [if k & 1 == 0 { lo[0] } else { hi[0] }, if k & 2 == 0 { lo[1] } else { hi[1] }, if k & 4 == 0 { lo[2] } else { hi[2] }];
-                rect.to_screen(v.project(Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32))) - rect.0.min
+                let c = [
+                    if k & 1 == 0 { lo[0] } else { hi[0] },
+                    if k & 2 == 0 { lo[1] } else { hi[1] },
+                    if k & 4 == 0 { lo[2] } else { hi[2] },
+                ];
+                rect.to_screen(v.project(Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32)))
+                    - rect.0.min
             });
             let first = pts.next()?;
             Some(pts.fold(Rect::from_corners(first, first), |r, p| r.union_point(p)))
@@ -2169,18 +2358,31 @@ fn place_plane_labels(
                 r.union_point(*p)
             });
         // A sketch's region fill in front of the label hides it too (`course_ps21_funnel` 05).
-        let world = |q: Vec2| (w - u) * PLANE_HALF + (u * (pad.x + q.x) - w * (pad.y + q.y)) * v.scale;
-        let behind_fill = [Vec2::ZERO, Vec2::new(size.x, 0.0), Vec2::new(0.0, size.y), size, size / 2.0]
-            .iter()
-            .any(|q| {
-                let p = world(*q);
-                let (ro, rd) = v.ray(v.project(p));
-                crate::plane_display::fill_in_front(&meshes, &fills, ro, rd, (p - ro).dot(rd))
-            });
+        let world =
+            |q: Vec2| (w - u) * PLANE_HALF + (u * (pad.x + q.x) - w * (pad.y + q.y)) * v.scale;
+        let behind_fill = [
+            Vec2::ZERO,
+            Vec2::new(size.x, 0.0),
+            Vec2::new(0.0, size.y),
+            size,
+            size / 2.0,
+        ]
+        .iter()
+        .any(|q| {
+            let p = world(*q);
+            let (ro, rd) = v.ray(v.project(p));
+            crate::plane_display::fill_in_front(&meshes, &fills, ro, rd, (p - ro).dot(rd))
+        });
         // A label running out of the view hides: the UI's clip doesn't follow its turned
         // text, so it drew over the toolbar (P3E.3a judge, `course_td_render_modes` 20).
-        let outside = !Rect::from_corners(Vec2::ZERO, rect.0.size()).contains(label_box.min) || !Rect::from_corners(Vec2::ZERO, rect.0.size()).contains(label_box.max);
-        if behind_fill || outside || part_boxes.iter().any(|r| !r.intersect(label_box).is_empty()) {
+        let outside = !Rect::from_corners(Vec2::ZERO, rect.0.size()).contains(label_box.min)
+            || !Rect::from_corners(Vec2::ZERO, rect.0.size()).contains(label_box.max);
+        if behind_fill
+            || outside
+            || part_boxes
+                .iter()
+                .any(|r| !r.intersect(label_box).is_empty())
+        {
             vis.set_if_neq(Visibility::Hidden);
             continue;
         }
@@ -2237,13 +2439,19 @@ pub fn fitted_isometric(viewport: Vec2) -> ViewState {
 
 /// [`fitted_isometric`] for a view in perspective or not.
 pub fn fitted_isometric_for(perspective: bool, viewport: Vec2) -> ViewState {
-    let v = ViewState { perspective, ..ViewState::standard(StandardView::Isometric) };
+    let v = ViewState {
+        perspective,
+        ..ViewState::standard(StandardView::Isometric)
+    };
     if !perspective {
         return fitted_isometric_from(v, viewport);
     }
     let pts: Vec<Vec3> = PlaneKind::ALL
         .into_iter()
-        .flat_map(|k| [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].map(|(a, b)| (k.u() * a + k.v() * b) * PLANE_HALF))
+        .flat_map(|k| {
+            [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
+                .map(|(a, b)| (k.u() * a + k.v() * b) * PLANE_HALF)
+        })
         .collect();
     v.fitted(&pts, viewport, 0.72)
 }
@@ -2323,7 +2531,11 @@ fn flag_pending_work(
     mut pending: ResMut<cadrs_ui::PendingWork>,
     mut why: ResMut<cadrs_ui::PendingWhy>,
 ) {
-    for (busy, what) in [(cache.rebuilding, "rebuild"), (view.animation.is_some(), "view animation"), (section.busy(), "section caps")] {
+    for (busy, what) in [
+        (cache.rebuilding, "rebuild"),
+        (view.animation.is_some(), "view animation"),
+        (section.busy(), "section caps"),
+    ] {
         if busy {
             pending.0 = true;
             why.add(what);
@@ -2379,12 +2591,16 @@ mod tests {
         assert_eq!(v.render, RenderMode::HiddenEdgesVisible);
         assert!(v.perspective);
         show(&mut app, b);
-        assert_eq!(app.world().resource::<ViewportView>().view.render, RenderMode::Translucent);
+        assert_eq!(
+            app.world().resource::<ViewportView>().view.render,
+            RenderMode::Translucent
+        );
     }
 
     #[test]
     fn affine_parts_rebuild_the_map() {
-        let rot = |a: f32| Mat2::from_cols(Vec2::new(a.cos(), a.sin()), Vec2::new(-a.sin(), a.cos()));
+        let rot =
+            |a: f32| Mat2::from_cols(Vec2::new(a.cos(), a.sin()), Vec2::new(-a.sin(), a.cos()));
         for (a, b) in [
             (Vec2::new(0.9, 0.26), Vec2::new(0.0, 0.86)),
             (Vec2::new(0.5, -0.43), Vec2::new(0.0, 0.86)),
@@ -2401,14 +2617,23 @@ mod tests {
     #[test]
     fn picks_the_nearest_plane() {
         let v = ViewState::default();
-        assert!(matches!(pick(&v, Vec2::new(-60.0, -120.0)), Some(Pick::Plane(_))));
+        assert!(matches!(
+            pick(&v, Vec2::new(-60.0, -120.0)),
+            Some(Pick::Plane(_))
+        ));
         // Straight above the origin only the vertical planes reach; the Front plane's corner
         // region at the far upper left belongs to the Front plane alone.
-        assert_eq!(pick(&v, Vec2::new(-240.0, -290.0)), Some(Pick::Plane(PlaneKind::Front)));
+        assert_eq!(
+            pick(&v, Vec2::new(-240.0, -290.0)),
+            Some(Pick::Plane(PlaneKind::Front))
+        );
         assert_eq!(pick(&v, Vec2::ZERO), Some(Pick::Origin));
         assert_eq!(pick(&v, Vec2::new(2000.0, 0.0)), None);
         // Far left, only the Top plane reaches.
-        assert_eq!(pick(&v, Vec2::new(-360.0, 40.0)), Some(Pick::Plane(PlaneKind::Top)));
+        assert_eq!(
+            pick(&v, Vec2::new(-360.0, 40.0)),
+            Some(Pick::Plane(PlaneKind::Top))
+        );
     }
 
     #[test]
@@ -2422,7 +2647,10 @@ mod tests {
         assert_eq!(label_alpha(-0.9), 0.0);
         // In the Top view the Front and Right planes are edge-on: no labels.
         let top = ViewState::standard(StandardView::Top);
-        assert_eq!(label_alpha(PlaneKind::Front.normal().dot(top.back()).abs()), 0.0);
+        assert_eq!(
+            label_alpha(PlaneKind::Front.normal().dot(top.back()).abs()),
+            0.0
+        );
     }
 
     #[test]
@@ -2448,7 +2676,10 @@ mod tests {
                 if a.perp_dot(b).abs() > 1e-3 {
                     assert!(a.perp_dot(b) > 0.0, "{k:?} mirrored at {az} {el} {roll}");
                 }
-                assert!(a.x >= -0.2 * a.length() - 1e-4, "{k:?} upside down at {az} {el} {roll}");
+                assert!(
+                    a.x >= -0.2 * a.length() - 1e-4,
+                    "{k:?} upside down at {az} {el} {roll}"
+                );
             }
         }
     }
@@ -2477,4 +2708,3 @@ mod tests {
         assert_eq!(PlaneKind::Top.label_corner(), Vec3::new(-75.0, 75.0, 0.0));
     }
 }
-

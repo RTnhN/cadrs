@@ -48,9 +48,11 @@ pub struct SketchClipboard(pub Option<(String, Sketch)>);
 
 /// Copy sketch: the sketch goes to the clipboard.
 pub fn copy_sketch(world: &mut World, id: FeatureId) {
-    let found = world
-        .get_resource::<ActiveDocument>()
-        .and_then(|d| d.active_element()?.feature(id).and_then(|f| Some((f.name.clone(), f.sketch()?.geometry.clone()))));
+    let found = world.get_resource::<ActiveDocument>().and_then(|d| {
+        d.active_element()?
+            .feature(id)
+            .and_then(|f| Some((f.name.clone(), f.sketch()?.geometry.clone())))
+    });
     let Some((name, sketch)) = found else { return };
     world.resource_mut::<SketchClipboard>().0 = Some((name.clone(), sketch));
     let theme = world.resource::<Theme>().clone();
@@ -58,7 +60,10 @@ pub fn copy_sketch(world: &mut World, id: FeatureId) {
     show_notification(
         &mut commands,
         &theme,
-        Notification::info(format!("{name} copied. Paste it into a sketch with Ctrl+V.")).name("sketch-copied-toast"),
+        Notification::info(format!(
+            "{name} copied. Paste it into a sketch with Ctrl+V."
+        ))
+        .name("sketch-copied-toast"),
     );
     world.flush();
 }
@@ -76,10 +81,13 @@ fn paste_shortcut(
     let ctrl = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
     let typing = focus.get().is_some_and(|e| q_fields.contains(e));
     for k in keys_in.read() {
-        if k.state != ButtonState::Pressed || !ctrl || typing || k.shortcut_code() != KeyCode::KeyV {
+        if k.state != ButtonState::Pressed || !ctrl || typing || k.shortcut_code() != KeyCode::KeyV
+        {
             continue;
         }
-        let (Some(s), Some((_, sketch))) = (session.as_ref(), clipboard.0.as_ref()) else { continue };
+        let (Some(s), Some((_, sketch))) = (session.as_ref(), clipboard.0.as_ref()) else {
+            continue;
+        };
         if s.waiting_for_plane {
             continue;
         }
@@ -88,20 +96,40 @@ fn paste_shortcut(
         commands.queue(move |world: &mut World| {
             // Centred on the pointer when it is over the plane; else where it was.
             let cursor = world.resource::<crate::sketch_tools::SketchDraw>().cursor;
-            let offset = cursor.and_then(|c| bounds_center(&sketch).map(|m| c - m)).unwrap_or(SVec2::ZERO);
-            let before: Vec<cadrs_sketch::CurveId> =
-                crate::sketch_tools::world_sketch(world).map(|g| g.curves.keys().collect()).unwrap_or_default();
-            let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return };
-            let op = SketchOp::Paste { sketch: Box::new(sketch), offset };
-            if let Err(e) = doc.execute(&EditSketch { element, feature, op }) {
+            let offset = cursor
+                .and_then(|c| bounds_center(&sketch).map(|m| c - m))
+                .unwrap_or(SVec2::ZERO);
+            let before: Vec<cadrs_sketch::CurveId> = crate::sketch_tools::world_sketch(world)
+                .map(|g| g.curves.keys().collect())
+                .unwrap_or_default();
+            let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+                return;
+            };
+            let op = SketchOp::Paste {
+                sketch: Box::new(sketch),
+                offset,
+            };
+            if let Err(e) = doc.execute(&EditSketch {
+                element,
+                feature,
+                op,
+            }) {
                 warn!("cannot paste the sketch: {e}");
                 return;
             }
             // The pasted curves are selected.
             let pasted: Vec<cadrs_sketch::SketchEntity> = crate::sketch_tools::world_sketch(world)
-                .map(|g| g.curves.keys().filter(|k| !before.contains(k)).map(cadrs_sketch::SketchEntity::Curve).collect())
+                .map(|g| {
+                    g.curves
+                        .keys()
+                        .filter(|k| !before.contains(k))
+                        .map(cadrs_sketch::SketchEntity::Curve)
+                        .collect()
+                })
                 .unwrap_or_default();
-            world.resource_mut::<crate::sketch_tools::SketchSelection>().0 = pasted;
+            world
+                .resource_mut::<crate::sketch_tools::SketchSelection>()
+                .0 = pasted;
         });
     }
 }
@@ -123,16 +151,33 @@ pub fn toggle_dimensions(world: &mut World, id: FeatureId) {
 
 /// Show or hide a sketch (one undo step), as its row's eye does.
 pub fn set_sketch_visible(world: &mut World, id: FeatureId, visible: bool) {
-    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return };
-    let Some(element) = doc.active_element().map(|e| e.id) else { return };
-    let _ = doc.execute(&SetSketchVisibility { element, sketch: id, visible: Some(visible) });
+    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+        return;
+    };
+    let Some(element) = doc.active_element().map(|e| e.id) else {
+        return;
+    };
+    let _ = doc.execute(&SetSketchVisibility {
+        element,
+        sketch: id,
+        visible: Some(visible),
+    });
 }
 
 /// Show all sketches: every hidden sketch of the Part Studio shown, as one undo step.
 pub fn show_all_sketches(world: &mut World) {
-    let hidden: Vec<FeatureId> = world.resource::<crate::parts::PartCache>().hidden_sketches.iter().copied().collect();
-    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return };
-    let Some(el) = doc.active_element() else { return };
+    let hidden: Vec<FeatureId> = world
+        .resource::<crate::parts::PartCache>()
+        .hidden_sketches
+        .iter()
+        .copied()
+        .collect();
+    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+        return;
+    };
+    let Some(el) = doc.active_element() else {
+        return;
+    };
     let element = el.id;
     // Only sketches hidden by the user or by a feature using them (not rolled back ones).
     let bar = el.rollback_index();
@@ -141,7 +186,9 @@ pub fn show_all_sketches(world: &mut World) {
         .features()
         .iter()
         .enumerate()
-        .filter(|(i, f)| f.sketch().is_some() && *i < bar && hidden.contains(&f.id) && !off.contains(&f.id))
+        .filter(|(i, f)| {
+            f.sketch().is_some() && *i < bar && hidden.contains(&f.id) && !off.contains(&f.id)
+        })
         .map(|(_, f)| f.id)
         .collect();
     if ids.is_empty() {
@@ -149,23 +196,32 @@ pub fn show_all_sketches(world: &mut World) {
     }
     let mark = doc.history.undo_len();
     for sketch in ids {
-        let _ = doc.execute(&SetSketchVisibility { element, sketch, visible: Some(true) });
+        let _ = doc.execute(&SetSketchVisibility {
+            element,
+            sketch,
+            visible: Some(true),
+        });
     }
     doc.squash_element_since(mark, element, "Show all sketches");
 }
 
 /// Whether a sketch is shown in the view.
 pub fn sketch_shown(world: &World, id: FeatureId) -> bool {
-    !world.resource::<crate::parts::PartCache>().hidden_sketches.contains(&id)
+    !world
+        .resource::<crate::parts::PartCache>()
+        .hidden_sketches
+        .contains(&id)
 }
 
 /// Zoom to selection: the view fitted to the faces the feature made (or, for a sketch, its
 /// curves), right of the feature panel.
 pub fn zoom_to_feature(world: &mut World, id: FeatureId) {
     let mut pts: Vec<Vec3> = Vec::new();
-    let sketch = world
-        .get_resource::<ActiveDocument>()
-        .and_then(|d| d.active_element()?.feature(id).and_then(|f| f.sketch().cloned()));
+    let sketch = world.get_resource::<ActiveDocument>().and_then(|d| {
+        d.active_element()?
+            .feature(id)
+            .and_then(|f| f.sketch().cloned())
+    });
     if let Some(sk) = sketch {
         if let Some(plane) = sk.plane {
             let frame = plane.frame();
@@ -183,7 +239,11 @@ pub fn zoom_to_feature(world: &mut World, id: FeatureId) {
             for f in s.faces.iter().filter(|f| f.name.op == id.0) {
                 for t in f.first_triangle..f.first_triangle + f.triangle_count {
                     for k in 0..3 {
-                        if let Some(p) = s.indices.get(3 * t + k).and_then(|i| s.positions.get(*i as usize)) {
+                        if let Some(p) = s
+                            .indices
+                            .get(3 * t + k)
+                            .and_then(|i| s.positions.get(*i as usize))
+                        {
                             pts.push(Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32));
                         }
                     }
@@ -192,8 +252,17 @@ pub fn zoom_to_feature(world: &mut World, id: FeatureId) {
         }
         if pts.is_empty() {
             // Nothing of its own left (a boolean, a deleted face): its parts.
-            for part in cache.parts.iter().filter(|p| p.feature == id || p.features.contains(&id)) {
-                pts.extend(part.solid.positions.iter().map(|q| Vec3::new(q[0] as f32, q[1] as f32, q[2] as f32)));
+            for part in cache
+                .parts
+                .iter()
+                .filter(|p| p.feature == id || p.features.contains(&id))
+            {
+                pts.extend(
+                    part.solid
+                        .positions
+                        .iter()
+                        .map(|q| Vec3::new(q[0] as f32, q[1] as f32, q[2] as f32)),
+                );
             }
         }
     }

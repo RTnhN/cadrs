@@ -4,7 +4,10 @@
 
 use std::f64::consts::PI;
 
-use crate::model::{BuildError, HemAlignment, Joint, JointId, JointKind, Model, P3, RipStyle, SharpBuilder, Surface, V3, Wall, WallId};
+use crate::model::{
+    BuildError, HemAlignment, Joint, JointId, JointKind, Model, P3, RipStyle, SharpBuilder,
+    Surface, V3, Wall, WallId,
+};
 use crate::params::Params;
 use crate::poly::{P2, Polygon, Seg2};
 
@@ -29,8 +32,16 @@ pub fn u_channel(p: Params) -> Result<Model, BuildError> {
     let base = b.wall(P3::origin(), V3::x(), V3::y(), rect(60.0, 40.0));
     let right = b.wall(P3::new(60.0, 0.0, 0.0), V3::z(), V3::y(), rect(25.0, 40.0));
     let left = b.wall(P3::new(0.0, 40.0, 0.0), V3::z(), -V3::y(), rect(25.0, 40.0));
-    b.bend(base, right, (P3::new(60.0, 0.0, 0.0), P3::new(60.0, 40.0, 0.0)));
-    b.bend(base, left, (P3::new(0.0, 0.0, 0.0), P3::new(0.0, 40.0, 0.0)));
+    b.bend(
+        base,
+        right,
+        (P3::new(60.0, 0.0, 0.0), P3::new(60.0, 40.0, 0.0)),
+    );
+    b.bend(
+        base,
+        left,
+        (P3::new(0.0, 0.0, 0.0), P3::new(0.0, 40.0, 0.0)),
+    );
     b.build()
 }
 
@@ -49,9 +60,24 @@ pub fn open_box(p: Params, style: RipStyle) -> Result<Model, BuildError> {
     b.bend(base, west, (P3::new(0.0, y, 0.0), P3::new(0.0, 0.0, 0.0)));
     b.bend(base, south, (P3::new(0.0, 0.0, 0.0), P3::new(x, 0.0, 0.0)));
     b.rip(east, north, (P3::new(x, y, 0.0), P3::new(x, y, h)), style);
-    b.rip(north, west, (P3::new(0.0, y, 0.0), P3::new(0.0, y, h)), style);
-    b.rip(west, south, (P3::new(0.0, 0.0, 0.0), P3::new(0.0, 0.0, h)), style);
-    b.rip(south, east, (P3::new(x, 0.0, 0.0), P3::new(x, 0.0, h)), style);
+    b.rip(
+        north,
+        west,
+        (P3::new(0.0, y, 0.0), P3::new(0.0, y, h)),
+        style,
+    );
+    b.rip(
+        west,
+        south,
+        (P3::new(0.0, 0.0, 0.0), P3::new(0.0, 0.0, h)),
+        style,
+    );
+    b.rip(
+        south,
+        east,
+        (P3::new(x, 0.0, 0.0), P3::new(x, 0.0, h)),
+        style,
+    );
     b.build()
 }
 
@@ -70,7 +96,13 @@ pub fn partial_flange(p: Params) -> Result<Model, BuildError> {
 pub fn hem(p: Params) -> Result<Model, BuildError> {
     let mut b = SharpBuilder::new(p);
     let a = b.wall(P3::origin(), V3::x(), V3::y(), rect(50.0, 20.0));
-    b.hem(a, (P3::new(50.0, 0.0, 0.0), P3::new(50.0, 20.0, 0.0)), 10.0, true, HemAlignment::InPlace);
+    b.hem(
+        a,
+        (P3::new(50.0, 0.0, 0.0), P3::new(50.0, 20.0, 0.0)),
+        10.0,
+        true,
+        HemAlignment::InPlace,
+    );
     b.build()
 }
 
@@ -158,8 +190,16 @@ pub fn hook_collision(p: Params) -> Result<Model, BuildError> {
         P2::new(2.0, 0.0),
     ]);
     let north = b.wall(P3::new(10.0, 10.0, 0.0), V3::z(), -V3::x(), hook);
-    b.bend(base, east, (P3::new(10.0, 0.0, 0.0), P3::new(10.0, 10.0, 0.0)));
-    b.bend(base, north, (P3::new(10.0, 10.0, 0.0), P3::new(0.0, 10.0, 0.0)));
+    b.bend(
+        base,
+        east,
+        (P3::new(10.0, 0.0, 0.0), P3::new(10.0, 10.0, 0.0)),
+    );
+    b.bend(
+        base,
+        north,
+        (P3::new(10.0, 10.0, 0.0), P3::new(0.0, 10.0, 0.0)),
+    );
     b.build()
 }
 
@@ -168,10 +208,27 @@ pub fn bend_loop(p: Params) -> Result<Model, BuildError> {
     let mut b = SharpBuilder::new(p);
     let base = b.wall(P3::origin(), V3::x(), V3::y(), rect(40.0, 40.0));
     let east = b.wall(P3::new(40.0, 0.0, 0.0), V3::z(), V3::y(), rect(30.0, 40.0));
-    let north = b.wall(P3::new(40.0, 40.0, 0.0), V3::z(), -V3::x(), rect(30.0, 40.0));
-    b.bend(base, east, (P3::new(40.0, 0.0, 0.0), P3::new(40.0, 40.0, 0.0)));
-    b.bend(base, north, (P3::new(40.0, 40.0, 0.0), P3::new(0.0, 40.0, 0.0)));
-    b.bend(east, north, (P3::new(40.0, 40.0, 0.0), P3::new(40.0, 40.0, 30.0)));
+    let north = b.wall(
+        P3::new(40.0, 40.0, 0.0),
+        V3::z(),
+        -V3::x(),
+        rect(30.0, 40.0),
+    );
+    b.bend(
+        base,
+        east,
+        (P3::new(40.0, 0.0, 0.0), P3::new(40.0, 40.0, 0.0)),
+    );
+    b.bend(
+        base,
+        north,
+        (P3::new(40.0, 40.0, 0.0), P3::new(0.0, 40.0, 0.0)),
+    );
+    b.bend(
+        east,
+        north,
+        (P3::new(40.0, 40.0, 0.0), P3::new(40.0, 40.0, 30.0)),
+    );
     b.build()
 }
 
@@ -215,13 +272,39 @@ pub fn e1_tray_with(p: Params, opts: [bool; 3]) -> Result<Model, BuildError> {
     if !with_holes {
         holes.clear();
     }
-    let base = b.wall(P3::origin(), V3::x(), V3::y(), Polygon::with_holes(rect(x, y).outer, holes));
+    let base = b.wall(
+        P3::origin(),
+        V3::x(),
+        V3::y(),
+        Polygon::with_holes(rect(x, y).outer, holes),
+    );
     // South (y = 0): local (height, x), material towards +y; three slots.
-    let slots = if with_holes { [60.0, 100.0, 140.0].map(|c| slot(P2::new(25.0, c), 30.0, 6.0)).to_vec() } else { Vec::new() };
-    let south = b.wall(P3::new(0.0, 0.0, 0.0), V3::z(), V3::x(), Polygon::with_holes(rect(h, x).outer, slots));
+    let slots = if with_holes {
+        [60.0, 100.0, 140.0]
+            .map(|c| slot(P2::new(25.0, c), 30.0, 6.0))
+            .to_vec()
+    } else {
+        Vec::new()
+    };
+    let south = b.wall(
+        P3::new(0.0, 0.0, 0.0),
+        V3::z(),
+        V3::x(),
+        Polygon::with_holes(rect(h, x).outer, slots),
+    );
     // North (y = 120): local (height, 200 − x), material towards −y; a 40 × 20 cut-out.
-    let cut = rect(20.0, 20.0).map(|q| P2::new(q.x + 15.0, q.y * 2.0 + 80.0)).outer;
-    let north = b.wall(P3::new(x, y, 0.0), V3::z(), -V3::x(), Polygon::with_holes(rect(h, x).outer, if with_holes { vec![cut] } else { Vec::new() }));
+    let cut = rect(20.0, 20.0)
+        .map(|q| P2::new(q.x + 15.0, q.y * 2.0 + 80.0))
+        .outer;
+    let north = b.wall(
+        P3::new(x, y, 0.0),
+        V3::z(),
+        -V3::x(),
+        Polygon::with_holes(
+            rect(h, x).outer,
+            if with_holes { vec![cut] } else { Vec::new() },
+        ),
+    );
     // The lips, at the walls' tops, bent inwards (material down).
     b.bend(base, south, (P3::new(x, 0.0, 0.0), P3::new(0.0, 0.0, 0.0)));
     b.bend(base, north, (P3::new(0.0, y, 0.0), P3::new(x, y, 0.0)));
@@ -234,9 +317,18 @@ pub fn e1_tray_with(p: Params, opts: [bool; 3]) -> Result<Model, BuildError> {
     if with_ends {
         // The end flanges on the middle 100 of the short edges.
         let east = b.wall(P3::new(x, 10.0, 0.0), V3::z(), V3::y(), rect(end, 100.0));
-        let west = b.wall(P3::new(0.0, 110.0, 0.0), V3::z(), -V3::y(), rect(end, 100.0));
+        let west = b.wall(
+            P3::new(0.0, 110.0, 0.0),
+            V3::z(),
+            -V3::y(),
+            rect(end, 100.0),
+        );
         b.bend(base, east, (P3::new(x, 10.0, 0.0), P3::new(x, 110.0, 0.0)));
-        b.bend(base, west, (P3::new(0.0, 110.0, 0.0), P3::new(0.0, 10.0, 0.0)));
+        b.bend(
+            base,
+            west,
+            (P3::new(0.0, 110.0, 0.0), P3::new(0.0, 10.0, 0.0)),
+        );
     }
     b.build()
 }

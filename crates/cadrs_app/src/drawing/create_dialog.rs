@@ -25,8 +25,8 @@ use cadrs_drawing::{
     Drawing, DrawingOp, DrawingUnits, ObjectRef, Orientation, Projection, SheetSize, Standard,
     Template,
 };
-use cadrs_ui::prelude::*;
 use cadrs_ui::Button;
+use cadrs_ui::prelude::*;
 use cadrs_ui::{
     Column, DialogClose, DoubleClickable, Select, SelectChange, SelectState, TabStrip,
     TabStripSelect, form_row,
@@ -179,18 +179,30 @@ fn open_with(world: &mut World, reference: Option<ObjectRef>, flat: bool, named:
         return;
     };
     // Opened on a part (an instance's or the Parts list's menu): the title names it.
-    let of = reference.and_then(|r| r.part.map(|(f, index)| (r.element, f, index))).map(|(e, f, index)| {
-        let owner = cadrs_core::properties::PropertyOwner::Part {
-            element: cadrs_core::ElementId(e),
-            part: cadrs_core::ids::PartId { feature: cadrs_core::FeatureId(f), index },
-        };
-        cadrs_core::properties::text(&doc.doc, owner, cadrs_core::properties::PropertyKey::Name, None)
-    });
+    let of = reference
+        .and_then(|r| r.part.map(|(f, index)| (r.element, f, index)))
+        .map(|(e, f, index)| {
+            let owner = cadrs_core::properties::PropertyOwner::Part {
+                element: cadrs_core::ElementId(e),
+                part: cadrs_core::ids::PartId {
+                    feature: cadrs_core::FeatureId(f),
+                    index,
+                },
+            };
+            cadrs_core::properties::text(
+                &doc.doc,
+                owner,
+                cadrs_core::properties::PropertyKey::Name,
+                None,
+            )
+        });
     let of = of.filter(|n| !n.trim().is_empty());
     // Create drawing of flat pattern names the drawing as Onshape does (`16-drawings/t0015.3`,
     // `t0026.7`): "Flat pattern of <part> Drawing 1", the tab "Flat pattern of <part> …".
     let name = match &of {
-        Some(part) if flat => doc.doc.next_element_name(&format!("Flat pattern of {part} Drawing")),
+        Some(part) if flat => doc
+            .doc
+            .next_element_name(&format!("Flat pattern of {part} Drawing")),
         Some(part) if named => doc.doc.next_element_name(&format!("{part} Drawing")),
         _ => doc.doc.next_element_name("Drawing"),
     };
@@ -209,7 +221,9 @@ fn open_with(world: &mut World, reference: Option<ObjectRef>, flat: bool, named:
     }
     {
         let store = world.resource::<DocumentStore>().clone();
-        world.resource_mut::<TemplateLibrary>().ensure_loaded(&store);
+        world
+            .resource_mut::<TemplateLibrary>()
+            .ensure_loaded(&store);
     }
     let state = CreateDrawingState {
         name: name.clone(),
@@ -244,18 +258,27 @@ fn open_with(world: &mut World, reference: Option<ObjectRef>, flat: bool, named:
             .footer(move |f| {
                 let t = &tf;
                 f.spawn((
-                    Button::new("create-drawing-ok").label("OK").primary().build(t),
+                    Button::new("create-drawing-ok")
+                        .label("OK")
+                        .primary()
+                        .build(t),
                     observe(|_: On<Activate>, mut commands: Commands| {
                         commands.queue(accept);
                     }),
                 ));
                 f.spawn((
-                    Button::new("create-drawing-cancel").label("Cancel").build(t),
-                    observe(|_: On<Activate>, q: Query<Entity, With<CreateDrawingState>>, mut commands: Commands| {
-                        for e in &q {
-                            commands.trigger(DialogClose { entity: e });
-                        }
-                    }),
+                    Button::new("create-drawing-cancel")
+                        .label("Cancel")
+                        .build(t),
+                    observe(
+                        |_: On<Activate>,
+                         q: Query<Entity, With<CreateDrawingState>>,
+                         mut commands: Commands| {
+                            for e in &q {
+                                commands.trigger(DialogClose { entity: e });
+                            }
+                        },
+                    ),
                 ));
             })
             .build(&theme),
@@ -269,7 +292,11 @@ fn open_with(world: &mut World, reference: Option<ObjectRef>, flat: bool, named:
 pub fn listed_templates(state: &CreateDrawingState, lib: &TemplateLibrary) -> Vec<Template> {
     let all: Vec<Template> = match state.source {
         0 => builtin_templates(),
-        1 => state.in_document.iter().filter_map(|n| lib.find(n)).collect(),
+        1 => state
+            .in_document
+            .iter()
+            .filter_map(|n| lib.find(n))
+            .collect(),
         2 => lib.custom.clone(),
         _ => lib.recent.iter().filter_map(|n| lib.find(n)).collect(),
     };
@@ -338,7 +365,12 @@ fn sync_body(
     });
 }
 
-fn existing_tab(m: &mut ChildSpawnerCommands, t: &Theme, state: &CreateDrawingState, templates: Vec<Template>) {
+fn existing_tab(
+    m: &mut ChildSpawnerCommands,
+    t: &Theme,
+    state: &CreateDrawingState,
+    templates: Vec<Template>,
+) {
     // Source list.
     m.spawn((
         Name::new("template-sources"),
@@ -359,7 +391,11 @@ fn existing_tab(m: &mut ChildSpawnerCommands, t: &Theme, state: &CreateDrawingSt
                     .icon(*icon)
                     .label(*label)
                     .height(28.0)
-                    .weight(if i == state.source { FontWeight::SEMIBOLD } else { FontWeight::NORMAL })
+                    .weight(if i == state.source {
+                        FontWeight::SEMIBOLD
+                    } else {
+                        FontWeight::NORMAL
+                    })
                     .selection_indicator()
                     .selected(i == state.source)
                     .build(t),
@@ -409,71 +445,97 @@ fn existing_tab(m: &mut ChildSpawnerCommands, t: &Theme, state: &CreateDrawingSt
             ..default()
         })
         .with_children(|wrap| {
-        let list = wrap.spawn((
-            Name::new("template-table-rows"),
-            bevy::ui_widgets::ScrollArea,
-            Node {
-                flex_grow: 1.0,
-                min_height: Val::Px(0.0),
-                flex_direction: FlexDirection::Column,
-                overflow: Overflow::scroll_y(),
-                padding: UiRect::right(Val::Px(14.0)),
-                ..default()
-            },
-        ))
-        .with_children(|rows| {
-            if templates.is_empty() {
-                rows.spawn((
-                    Name::new("template-table-empty"),
-                    t.text("No templates here yet", t.font_base, FontWeight::NORMAL, t.muted_foreground),
+            let list = wrap
+                .spawn((
+                    Name::new("template-table-rows"),
+                    bevy::ui_widgets::ScrollArea,
                     Node {
-                        margin: UiRect::all(Val::Px(12.0)),
+                        flex_grow: 1.0,
+                        min_height: Val::Px(0.0),
+                        flex_direction: FlexDirection::Column,
+                        overflow: Overflow::scroll_y(),
+                        padding: UiRect::right(Val::Px(14.0)),
                         ..default()
                     },
-                ));
-            }
-            for tpl in templates {
-                let selected = state.selected.as_deref() == Some(tpl.name.as_str());
-                let name = tpl.name.clone();
-                // The picked row: a solid blue bar with bold text (lesson-create-drawing-dialog.png),
-                // clearly unlike the grey hover.
-                let weight = if selected { FontWeight::BOLD } else { FontWeight::MEDIUM };
-                let mut row = TableRow::new(format!("template-row-{}", tpl.name), &columns)
-                    .height(26.0)
-                    .selected(selected);
-                for text in [tpl.name.clone(), tpl.document_label(), tpl.owner_label().to_string()] {
-                    let cell = (
-                        t.text(text, t.font_base, weight, t.foreground),
-                        cadrs_ui::InheritFg,
-                        Pickable::IGNORE,
-                    );
-                    row = row.cell(move |p| {
-                        p.spawn(cell);
-                    });
-                }
-                let mut visuals = cadrs_ui::Visuals {
-                    background: cadrs_ui::StateColors::new(Color::NONE, t.list_hover, t.list_active, Color::NONE)
-                        .with_selected(selected_row_color()),
-                    border: cadrs_ui::StateColors::all(t.row_separator),
-                    foreground: cadrs_ui::StateColors::all(t.foreground),
-                    focus_ring: t.focus_ring,
-                };
-                visuals.foreground = visuals.foreground.with_selected(t.foreground);
-                rows.spawn((
-                    row.build(t),
-                    DoubleClickable,
-                    observe(move |_: On<Activate>, mut commands: Commands| {
-                        let n = name.clone();
-                        commands.queue(move |w: &mut World| update_state(w, |s| s.selected = Some(n)));
-                    }),
-                    observe(|_: On<DoubleClick>, mut commands: Commands| {
-                        commands.queue(accept);
-                    }),
-                )).insert(visuals);
-            }
-        })
-        .id();
-        wrap.spawn(cadrs_ui::vertical_scrollbar(t, "template-table-scrollbar", list));
+                ))
+                .with_children(|rows| {
+                    if templates.is_empty() {
+                        rows.spawn((
+                            Name::new("template-table-empty"),
+                            t.text(
+                                "No templates here yet",
+                                t.font_base,
+                                FontWeight::NORMAL,
+                                t.muted_foreground,
+                            ),
+                            Node {
+                                margin: UiRect::all(Val::Px(12.0)),
+                                ..default()
+                            },
+                        ));
+                    }
+                    for tpl in templates {
+                        let selected = state.selected.as_deref() == Some(tpl.name.as_str());
+                        let name = tpl.name.clone();
+                        // The picked row: a solid blue bar with bold text (lesson-create-drawing-dialog.png),
+                        // clearly unlike the grey hover.
+                        let weight = if selected {
+                            FontWeight::BOLD
+                        } else {
+                            FontWeight::MEDIUM
+                        };
+                        let mut row = TableRow::new(format!("template-row-{}", tpl.name), &columns)
+                            .height(26.0)
+                            .selected(selected);
+                        for text in [
+                            tpl.name.clone(),
+                            tpl.document_label(),
+                            tpl.owner_label().to_string(),
+                        ] {
+                            let cell = (
+                                t.text(text, t.font_base, weight, t.foreground),
+                                cadrs_ui::InheritFg,
+                                Pickable::IGNORE,
+                            );
+                            row = row.cell(move |p| {
+                                p.spawn(cell);
+                            });
+                        }
+                        let mut visuals = cadrs_ui::Visuals {
+                            background: cadrs_ui::StateColors::new(
+                                Color::NONE,
+                                t.list_hover,
+                                t.list_active,
+                                Color::NONE,
+                            )
+                            .with_selected(selected_row_color()),
+                            border: cadrs_ui::StateColors::all(t.row_separator),
+                            foreground: cadrs_ui::StateColors::all(t.foreground),
+                            focus_ring: t.focus_ring,
+                        };
+                        visuals.foreground = visuals.foreground.with_selected(t.foreground);
+                        rows.spawn((
+                            row.build(t),
+                            DoubleClickable,
+                            observe(move |_: On<Activate>, mut commands: Commands| {
+                                let n = name.clone();
+                                commands.queue(move |w: &mut World| {
+                                    update_state(w, |s| s.selected = Some(n))
+                                });
+                            }),
+                            observe(|_: On<DoubleClick>, mut commands: Commands| {
+                                commands.queue(accept);
+                            }),
+                        ))
+                        .insert(visuals);
+                    }
+                })
+                .id();
+            wrap.spawn(cadrs_ui::vertical_scrollbar(
+                t,
+                "template-table-scrollbar",
+                list,
+            ));
         });
     });
 }
@@ -503,39 +565,81 @@ fn custom_tab(m: &mut ChildSpawnerCommands, t: &Theme, state: &CreateDrawingStat
             }
             s.selected(selected)
         };
-        let std_i = Standard::ALL.iter().position(|s| *s == c.standard).unwrap_or(0);
-        f.spawn(form_row(t, "custom-standard-row", "Standard", lw)).with_child(
-            select("custom-standard", Standard::ALL.iter().map(|s| s.label().to_string()).collect(), std_i)
+        let std_i = Standard::ALL
+            .iter()
+            .position(|s| *s == c.standard)
+            .unwrap_or(0);
+        f.spawn(form_row(t, "custom-standard-row", "Standard", lw))
+            .with_child(
+                select(
+                    "custom-standard",
+                    Standard::ALL
+                        .iter()
+                        .map(|s| s.label().to_string())
+                        .collect(),
+                    std_i,
+                )
                 .build(t),
-        );
+            );
         let sizes = c.standard.sizes();
         let size_i = sizes.iter().position(|s| *s == c.size).unwrap_or(0);
-        f.spawn(form_row(t, "custom-size-row", "Size", lw)).with_child(
-            select("custom-size", sizes.iter().map(|s| s.long_label()).collect(), size_i).build(t),
-        );
-        let o_i = Orientation::ALL.iter().position(|o| *o == c.orientation).unwrap_or(0);
-        f.spawn(form_row(t, "custom-orientation-row", "Orientation", lw)).with_child(
-            select(
-                "custom-orientation",
-                Orientation::ALL.iter().map(|o| o.label().to_string()).collect(),
-                o_i,
-            )
-            .build(t),
-        );
-        let u_i = DrawingUnits::ALL.iter().position(|u| *u == c.units).unwrap_or(0);
-        f.spawn(form_row(t, "custom-units-row", "Units", lw)).with_child(
-            select("custom-units", DrawingUnits::ALL.iter().map(|u| u.label().to_string()).collect(), u_i)
+        f.spawn(form_row(t, "custom-size-row", "Size", lw))
+            .with_child(
+                select(
+                    "custom-size",
+                    sizes.iter().map(|s| s.long_label()).collect(),
+                    size_i,
+                )
                 .build(t),
-        );
-        let p_i = Projection::ALL.iter().position(|p| *p == c.projection).unwrap_or(0);
-        f.spawn(form_row(t, "custom-projection-row", "Projection", lw)).with_child(
-            select(
-                "custom-projection",
-                Projection::ALL.iter().map(|p| p.label().to_string()).collect(),
-                p_i,
-            )
-            .build(t),
-        );
+            );
+        let o_i = Orientation::ALL
+            .iter()
+            .position(|o| *o == c.orientation)
+            .unwrap_or(0);
+        f.spawn(form_row(t, "custom-orientation-row", "Orientation", lw))
+            .with_child(
+                select(
+                    "custom-orientation",
+                    Orientation::ALL
+                        .iter()
+                        .map(|o| o.label().to_string())
+                        .collect(),
+                    o_i,
+                )
+                .build(t),
+            );
+        let u_i = DrawingUnits::ALL
+            .iter()
+            .position(|u| *u == c.units)
+            .unwrap_or(0);
+        f.spawn(form_row(t, "custom-units-row", "Units", lw))
+            .with_child(
+                select(
+                    "custom-units",
+                    DrawingUnits::ALL
+                        .iter()
+                        .map(|u| u.label().to_string())
+                        .collect(),
+                    u_i,
+                )
+                .build(t),
+            );
+        let p_i = Projection::ALL
+            .iter()
+            .position(|p| *p == c.projection)
+            .unwrap_or(0);
+        f.spawn(form_row(t, "custom-projection-row", "Projection", lw))
+            .with_child(
+                select(
+                    "custom-projection",
+                    Projection::ALL
+                        .iter()
+                        .map(|p| p.label().to_string())
+                        .collect(),
+                    p_i,
+                )
+                .build(t),
+            );
         f.spawn((
             Name::new("custom-template-name"),
             t.text(
@@ -582,11 +686,27 @@ fn options_row(b: &mut ChildSpawnerCommands, t: &Theme, state: &CreateDrawingSta
         })
         .with_children(|r| {
             for (name, label, icon_name, selected, enabled) in [
-                ("template-option-four-views", "Four views", "apps", state.four_views, can_four),
-                ("template-option-no-views", "No views", "file", !state.four_views, true),
+                (
+                    "template-option-four-views",
+                    "Four views",
+                    "apps",
+                    state.four_views,
+                    can_four,
+                ),
+                (
+                    "template-option-no-views",
+                    "No views",
+                    "file",
+                    !state.four_views,
+                    true,
+                ),
             ] {
                 let four = name == "template-option-four-views";
-                let fg = if enabled { t.foreground } else { t.disabled_foreground };
+                let fg = if enabled {
+                    t.foreground
+                } else {
+                    t.disabled_foreground
+                };
                 r.spawn((
                     Name::new(name),
                     Node {
@@ -607,19 +727,28 @@ fn options_row(b: &mut ChildSpawnerCommands, t: &Theme, state: &CreateDrawingSta
                     BorderColor::all(t.primary),
                     Tooltip::new(match (four, enabled) {
                         (false, _) => "Start with an empty sheet and insert views yourself",
-                        (true, true) => "Front, top, side and isometric views of the referenced object",
-                        (true, false) => "Four views needs a referenced part: use Create Drawing of… on its tab",
+                        (true, true) => {
+                            "Front, top, side and isometric views of the referenced object"
+                        }
+                        (true, false) => {
+                            "Four views needs a referenced part: use Create Drawing of… on its tab"
+                        }
                     }),
                     Interaction::default(),
                     observe(move |_: On<Pointer<Click>>, mut commands: Commands| {
                         if enabled {
-                            commands.queue(move |w: &mut World| update_state(w, |s| s.four_views = four));
+                            commands.queue(move |w: &mut World| {
+                                update_state(w, |s| s.four_views = four)
+                            });
                         }
                     }),
                 ))
                 .with_children(|tile| {
                     tile.spawn((icon(icon_name, 24.0, fg), Pickable::IGNORE));
-                    tile.spawn((t.text(label, t.font_sm, FontWeight::MEDIUM, fg), Pickable::IGNORE));
+                    tile.spawn((
+                        t.text(label, t.font_sm, FontWeight::MEDIUM, fg),
+                        Pickable::IGNORE,
+                    ));
                 });
             }
         });
@@ -632,7 +761,9 @@ fn on_tab_select(ev: On<TabStripSelect>, q: Query<&Name>, mut commands: Commands
     };
     let i = ev.index;
     match name.as_str() {
-        "create-drawing-tabs" => commands.queue(move |w: &mut World| update_state(w, |s| s.tab = i)),
+        "create-drawing-tabs" => {
+            commands.queue(move |w: &mut World| update_state(w, |s| s.tab = i))
+        }
         "template-filter" => commands.queue(move |w: &mut World| {
             update_state(w, |s| {
                 s.filter = i;
@@ -732,7 +863,9 @@ fn accept(world: &mut World) {
     {
         let mut views = four_views_of(&doc.doc, &drawing, r);
         // P3C.6: the drawing shows the studio as it is now, until it is updated.
-        if let Some(src) = cadrs_core::drawing_source::live_source(&doc.doc, cadrs_core::ElementId(r.element)) {
+        if let Some(src) =
+            cadrs_core::drawing_source::live_source(&doc.doc, cadrs_core::ElementId(r.element))
+        {
             for v in &mut views {
                 v.source_hash = src.hash_of(v.reference.part);
             }
@@ -775,38 +908,56 @@ fn accept(world: &mut World) {
 }
 
 /// The Four views of `r` on the first sheet of `d` (above the title block).
-pub(crate) fn four_views_of(doc: &cadrs_core::Document, d: &Drawing, r: ObjectRef) -> Vec<cadrs_drawing::View> {
+pub(crate) fn four_views_of(
+    doc: &cadrs_core::Document,
+    d: &Drawing,
+    r: ObjectRef,
+) -> Vec<cadrs_drawing::View> {
     let Some(sheet) = d.sheets.first() else {
         return Vec::new();
     };
     // An assembly's (P3C.5): its occurrences' meshes where they are placed.
-    let parts: Vec<cadrs_core::Part> = if cadrs_core::drawing_assembly::is_assembly(doc, cadrs_core::ElementId(r.element)) {
-        let Some(state) = cadrs_core::drawing_assembly::AssemblyState::of(doc, cadrs_core::ElementId(r.element)) else {
-            return Vec::new();
+    let parts: Vec<cadrs_core::Part> =
+        if cadrs_core::drawing_assembly::is_assembly(doc, cadrs_core::ElementId(r.element)) {
+            let Some(state) = cadrs_core::drawing_assembly::AssemblyState::of(
+                doc,
+                cadrs_core::ElementId(r.element),
+            ) else {
+                return Vec::new();
+            };
+            let builds = cadrs_core::drawing_assembly::builds(&state);
+            state
+                .occurrences
+                .iter()
+                .filter(|o| !o.hidden)
+                .filter_map(|o| {
+                    let p = builds.get(&o.element)?.part(o.part)?;
+                    let mut q = p.clone();
+                    q.solid = std::sync::Arc::new(cadrs_core::assembly::transform_solid(
+                        &p.solid, &o.pose,
+                    ));
+                    Some(q)
+                })
+                .collect()
+        } else {
+            let Some(studio) = super::views::studio(doc, &r) else {
+                return Vec::new();
+            };
+            let build = cadrs_core::rebuild::build(studio.features);
+            cadrs_core::views::view_parts(&build.parts, super::views::part_of(&r))
+                .into_iter()
+                .cloned()
+                .collect()
         };
-        let builds = cadrs_core::drawing_assembly::builds(&state);
-        state
-            .occurrences
-            .iter()
-            .filter(|o| !o.hidden)
-            .filter_map(|o| {
-                let p = builds.get(&o.element)?.part(o.part)?;
-                let mut q = p.clone();
-                q.solid = std::sync::Arc::new(cadrs_core::assembly::transform_solid(&p.solid, &o.pose));
-                Some(q)
-            })
-            .collect()
-    } else {
-        let Some(studio) = super::views::studio(doc, &r) else {
-            return Vec::new();
-        };
-        let build = cadrs_core::rebuild::build(studio.features);
-        cadrs_core::views::view_parts(&build.parts, super::views::part_of(&r)).into_iter().cloned().collect()
-    };
     let parts: Vec<&cadrs_core::Part> = parts.iter().collect();
     let frame = cadrs_drawing::standard::frame(sheet.format);
     let tb = cadrs_drawing::title_block::placement(frame.inner, sheet.format.size);
-    let area = cadrs_drawing::standard::Rect::new(frame.inner.min[0], tb.max[1], frame.inner.max[0], frame.inner.max[1]);
+    let area = cadrs_drawing::standard::Rect::new(
+        frame.inner.min[0],
+        tb.max[1],
+        frame.inner.max[0],
+        frame.inner.max[1],
+    );
     cadrs_drawing::view::four_views(
         r,
         d.projection,
@@ -834,7 +985,9 @@ pub fn open_update_from_template(world: &mut World) {
     };
     {
         let store = world.resource::<DocumentStore>().clone();
-        world.resource_mut::<TemplateLibrary>().ensure_loaded(&store);
+        world
+            .resource_mut::<TemplateLibrary>()
+            .ensure_loaded(&store);
     }
     let lib = world.resource::<TemplateLibrary>().clone();
     let mut names: Vec<String> = builtin_templates().into_iter().map(|t| t.name).collect();

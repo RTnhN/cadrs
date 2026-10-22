@@ -23,10 +23,12 @@ use cadrs_sketch::{FacePlane, PlaneRef, SketchOp, Vec2};
 use super::gear_cover::{DocHistory, Studio};
 use crate::command::{CommandError, History};
 use crate::commands::{
-    AddExtrude, AddFeature, AddRevolve, AddSketch, CreateFolder, EditSketch, RenameFeature, RenamePart, SetExtrude,
-    SetPartAppearance, SetPartMaterial,
+    AddExtrude, AddFeature, AddRevolve, AddSketch, CreateFolder, EditSketch, RenameFeature,
+    RenamePart, SetExtrude, SetPartAppearance, SetPartMaterial,
 };
-use crate::document::{AxisRef, BooleanOp, Document, ExtrudeFeature, FaceRef, FeatureKind, RevolveFeature, RevolveType};
+use crate::document::{
+    AxisRef, BooleanOp, Document, ExtrudeFeature, FaceRef, FeatureKind, RevolveFeature, RevolveType,
+};
 use crate::ids::{ElementId, FeatureId, PartId};
 use crate::mate::{ConnectorOrigin, MateConnectorFeature};
 
@@ -35,7 +37,8 @@ pub const EXTRUDE_1: FeatureId = FeatureId::from_u128(0x7e11_ec70_0000_0000_0000
 pub const SKETCH_2: FeatureId = FeatureId::from_u128(0x7e11_ec70_0000_0000_0000_0000_0000_0003);
 pub const REVOLVE_1: FeatureId = FeatureId::from_u128(0x7e11_ec70_0000_0000_0000_0000_0000_0004);
 pub const PATTERN_AXIS: FeatureId = FeatureId::from_u128(0x7e11_ec70_0000_0000_0000_0000_0000_0005);
-pub const FEATURE_SKETCH: FeatureId = FeatureId::from_u128(0x7e11_ec70_0000_0000_0000_0000_0000_0006);
+pub const FEATURE_SKETCH: FeatureId =
+    FeatureId::from_u128(0x7e11_ec70_0000_0000_0000_0000_0000_0006);
 pub const FOLDER: FeatureId = FeatureId::from_u128(0x7e11_ec70_0000_0000_0000_0000_0000_0007);
 /// The plate.
 pub const PART: PartId = PartId::new(EXTRUDE_1, 0);
@@ -86,32 +89,75 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
             .ok_or_else(|| CommandError::Invalid("sketch not found".into()))
     };
     // Sketch 1: the rounded square.
-    s.run(&AddSketch { element: el, feature: SKETCH_1, plane: Some(PlaneRef::Top) })?;
-    s.run(&EditSketch { element: el, feature: SKETCH_1, op: poly(&[[-HALF, -HALF], [HALF, -HALF], [HALF, HALF], [-HALF, HALF]]) })?;
-    for corner in [v(-HALF, -HALF), v(HALF, -HALF), v(HALF, HALF), v(-HALF, HALF)] {
-        let p = sketch_of(s, SKETCH_1)?.point_at(corner, 1e-9).ok_or_else(|| CommandError::Invalid("corner not found".into()))?;
-        s.run(&EditSketch { element: el, feature: SKETCH_1, op: SketchOp::Fillet { corner: p, radius: CORNER_R, equal_to: None } })?;
+    s.run(&AddSketch {
+        element: el,
+        feature: SKETCH_1,
+        plane: Some(PlaneRef::Top),
+    })?;
+    s.run(&EditSketch {
+        element: el,
+        feature: SKETCH_1,
+        op: poly(&[[-HALF, -HALF], [HALF, -HALF], [HALF, HALF], [-HALF, HALF]]),
+    })?;
+    for corner in [
+        v(-HALF, -HALF),
+        v(HALF, -HALF),
+        v(HALF, HALF),
+        v(-HALF, HALF),
+    ] {
+        let p = sketch_of(s, SKETCH_1)?
+            .point_at(corner, 1e-9)
+            .ok_or_else(|| CommandError::Invalid("corner not found".into()))?;
+        s.run(&EditSketch {
+            element: el,
+            feature: SKETCH_1,
+            op: SketchOp::Fillet {
+                corner: p,
+                radius: CORNER_R,
+                equal_to: None,
+            },
+        })?;
     }
     let g = sketch_of(s, SKETCH_1)?;
     let regions = super::region_refs(SKETCH_1, &g, &[v(0.0, 0.0)]);
     if regions.len() != 1 {
-        return Err(CommandError::Invalid("the plate's region is missing".into()));
+        return Err(CommandError::Invalid(
+            "the plate's region is missing".into(),
+        ));
     }
     let e = ExtrudeFeature {
         op: BooleanOp::New,
         depth_expr: "45 mm".into(),
         ..super::extrude_of(regions, HEIGHT)
     };
-    s.run(&AddExtrude { element: el, feature: EXTRUDE_1, extrude: ExtrudeFeature::default() })?;
-    s.run(&SetExtrude { element: el, feature: EXTRUDE_1, extrude: e, label: "Extrude".into() })?;
+    s.run(&AddExtrude {
+        element: el,
+        feature: EXTRUDE_1,
+        extrude: ExtrudeFeature::default(),
+    })?;
+    s.run(&SetExtrude {
+        element: el,
+        feature: EXTRUDE_1,
+        extrude: e,
+        label: "Extrude".into(),
+    })?;
     // Sketch 2 on Front (sketch x = model X, sketch y = model Z): the region under the arc.
     let edge = bottom(REVOLVE_OUT);
-    s.run(&AddSketch { element: el, feature: SKETCH_2, plane: Some(PlaneRef::Front) })?;
+    s.run(&AddSketch {
+        element: el,
+        feature: SKETCH_2,
+        plane: Some(PlaneRef::Front),
+    })?;
     s.run(&EditSketch {
         element: el,
         feature: SKETCH_2,
         op: SketchOp::AddPolyline {
-            points: vec![v(0.0, 0.0), v(0.0, -10.0), v(REVOLVE_OUT, -10.0), v(REVOLVE_OUT, edge)],
+            points: vec![
+                v(0.0, 0.0),
+                v(0.0, -10.0),
+                v(REVOLVE_OUT, -10.0),
+                v(REVOLVE_OUT, edge),
+            ],
             closed: false,
             construction: false,
             label: "Add line",
@@ -120,57 +166,128 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
     s.run(&EditSketch {
         element: el,
         feature: SKETCH_2,
-        op: SketchOp::AddArc { center: v(0.0, SPHERE_R), start: v(0.0, 0.0), end: v(REVOLVE_OUT, edge), construction: false },
+        op: SketchOp::AddArc {
+            center: v(0.0, SPHERE_R),
+            start: v(0.0, 0.0),
+            end: v(REVOLVE_OUT, edge),
+            construction: false,
+        },
     })?;
     let g = sketch_of(s, SKETCH_2)?;
     let regions = super::region_refs(SKETCH_2, &g, &[v(REVOLVE_OUT / 2.0, -2.0)]);
     if regions.len() != 1 {
-        return Err(CommandError::Invalid("the revolve's region is missing".into()));
+        return Err(CommandError::Invalid(
+            "the revolve's region is missing".into(),
+        ));
     }
     // The axis: the line along x = 0 (the region's side on the Z axis).
     let axis = g
         .curves
         .iter()
         .find(|(_, c)| match c.kind {
-            cadrs_sketch::CurveKind::Line { a, b } => g.pos(a).x.abs() < 1e-9 && g.pos(b).x.abs() < 1e-9,
+            cadrs_sketch::CurveKind::Line { a, b } => {
+                g.pos(a).x.abs() < 1e-9 && g.pos(b).x.abs() < 1e-9
+            }
             _ => false,
         })
         .map(|(id, _)| id)
         .ok_or_else(|| CommandError::Invalid("the revolve axis is missing".into()))?;
     let r = RevolveFeature {
         regions,
-        axis: Some(AxisRef::SketchCurve { sketch: SKETCH_2, curve: axis }),
+        axis: Some(AxisRef::SketchCurve {
+            sketch: SKETCH_2,
+            curve: axis,
+        }),
         kind: RevolveType::Full,
         op: BooleanOp::Remove,
         merge_all: true,
         ..RevolveFeature::default()
     };
-    s.run(&AddRevolve { element: el, feature: REVOLVE_1, revolve: r })?;
+    s.run(&AddRevolve {
+        element: el,
+        feature: REVOLVE_1,
+        revolve: r,
+    })?;
     // The top face (Extrude 1's end cap) for the connector and the Feature Sketch.
-    let features = s.document().element(el).map(|e| e.features().to_vec()).unwrap_or_default();
-    let top = crate::parts::cap_name(&features, EXTRUDE_1, 0, true).ok_or_else(|| CommandError::Invalid("no top face".into()))?;
-    let frame = crate::parts::face_frame(&features, EXTRUDE_1, &top).ok_or_else(|| CommandError::Invalid("no top face frame".into()))?;
+    let features = s
+        .document()
+        .element(el)
+        .map(|e| e.features().to_vec())
+        .unwrap_or_default();
+    let top = crate::parts::cap_name(&features, EXTRUDE_1, 0, true)
+        .ok_or_else(|| CommandError::Invalid("no top face".into()))?;
+    let frame = crate::parts::face_frame(&features, EXTRUDE_1, &top)
+        .ok_or_else(|| CommandError::Invalid("no top face frame".into()))?;
     let center = [0.0, 0.0, HEIGHT];
     s.run(&AddFeature {
         element: el,
         feature: PATTERN_AXIS,
         base_name: "Mate connector".into(),
         kind: FeatureKind::MateConnector(MateConnectorFeature {
-            origin: Some(ConnectorOrigin::Face(FaceRef { part: PART, face: top, seed: center })),
+            origin: Some(ConnectorOrigin::Face(FaceRef {
+                part: PART,
+                face: top,
+                seed: center,
+            })),
             ..MateConnectorFeature::default()
         }),
     })?;
-    s.run(&RenameFeature { element: el, feature: PATTERN_AXIS, name: "Pattern Axis".into() })?;
-    let plane = PlaneRef::Face(FacePlane { feature: EXTRUDE_1.0, face: top, origin: frame.origin, u: frame.u, v: frame.v, seed: Some(center), upright: false });
-    s.run(&AddSketch { element: el, feature: FEATURE_SKETCH, plane: Some(plane) })?;
-    for op in [poly(&TRIANGLE_A), poly(&TRIANGLE_B), poly(&[[RECT[0], RECT[1]], [RECT[2], RECT[1]], [RECT[2], RECT[3]], [RECT[0], RECT[3]]])] {
-        s.run(&EditSketch { element: el, feature: FEATURE_SKETCH, op })?;
+    s.run(&RenameFeature {
+        element: el,
+        feature: PATTERN_AXIS,
+        name: "Pattern Axis".into(),
+    })?;
+    let plane = PlaneRef::Face(FacePlane {
+        feature: EXTRUDE_1.0,
+        face: top,
+        origin: frame.origin,
+        u: frame.u,
+        v: frame.v,
+        seed: Some(center),
+        upright: false,
+    });
+    s.run(&AddSketch {
+        element: el,
+        feature: FEATURE_SKETCH,
+        plane: Some(plane),
+    })?;
+    for op in [
+        poly(&TRIANGLE_A),
+        poly(&TRIANGLE_B),
+        poly(&[
+            [RECT[0], RECT[1]],
+            [RECT[2], RECT[1]],
+            [RECT[2], RECT[3]],
+            [RECT[0], RECT[3]],
+        ]),
+    ] {
+        s.run(&EditSketch {
+            element: el,
+            feature: FEATURE_SKETCH,
+            op,
+        })?;
     }
-    s.run(&RenameFeature { element: el, feature: FEATURE_SKETCH, name: "Feature Sketch".into() })?;
-    s.run(&RenamePart { element: el, part: PART, name: "Reflector".into() })?;
-    s.run(&SetPartMaterial { element: el, parts: vec![PART], material: crate::material::library("Aluminum - 1060") })?;
+    s.run(&RenameFeature {
+        element: el,
+        feature: FEATURE_SKETCH,
+        name: "Feature Sketch".into(),
+    })?;
+    s.run(&RenamePart {
+        element: el,
+        part: PART,
+        name: "Reflector".into(),
+    })?;
+    s.run(&SetPartMaterial {
+        element: el,
+        parts: vec![PART],
+        material: crate::material::library("Aluminum - 1060"),
+    })?;
     // The course's plate is orange (`ex5-step2.png`).
-    s.run(&SetPartAppearance { element: el, parts: vec![PART], appearance: Some(crate::appearance::Appearance::rgb(0xd8, 0x86, 0x2a)) })?;
+    s.run(&SetPartAppearance {
+        element: el,
+        parts: vec![PART],
+        appearance: Some(crate::appearance::Appearance::rgb(0xd8, 0x86, 0x2a)),
+    })?;
     s.run(&CreateFolder {
         element: el,
         folder: FOLDER,

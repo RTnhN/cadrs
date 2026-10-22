@@ -63,13 +63,15 @@ fn with_stroke(svg: &str, scale: f32) -> String {
 /// The ink in white, with the accent detail removed.
 fn ink_layer(svg: &str) -> String {
     let (ink, accent) = (Palette::LIGHT.ink.to_hex(), Palette::LIGHT.accent.to_hex());
-    svg.replace(&format!("=\"{ink}\""), "=\"#ffffff\"").replace(&format!("=\"{accent}\""), "=\"none\"")
+    svg.replace(&format!("=\"{ink}\""), "=\"#ffffff\"")
+        .replace(&format!("=\"{accent}\""), "=\"none\"")
 }
 
 /// Only the accent detail, in white.
 fn accent_layer(svg: &str) -> String {
     let (ink, accent) = (Palette::LIGHT.ink.to_hex(), Palette::LIGHT.accent.to_hex());
-    svg.replace(&format!("=\"{ink}\""), "=\"none\"").replace(&format!("=\"{accent}\""), "=\"#ffffff\"")
+    svg.replace(&format!("=\"{ink}\""), "=\"none\"")
+        .replace(&format!("=\"{accent}\""), "=\"#ffffff\"")
 }
 
 /// The SVG rendered at `px` × `px`, as straight-alpha RGBA8.

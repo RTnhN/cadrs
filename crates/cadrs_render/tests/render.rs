@@ -8,8 +8,21 @@ use cadrs_render::*;
 
 /// A box `lo`–`hi` as 12 triangles with flat normals.
 fn cuboid(b: &mut SceneBuilder, lo: [f32; 3], hi: [f32; 3], material: u32) {
-    let c = |i: usize| [if i & 1 == 0 { lo[0] } else { hi[0] }, if i & 2 == 0 { lo[1] } else { hi[1] }, if i & 4 == 0 { lo[2] } else { hi[2] }];
-    let faces = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]];
+    let c = |i: usize| {
+        [
+            if i & 1 == 0 { lo[0] } else { hi[0] },
+            if i & 2 == 0 { lo[1] } else { hi[1] },
+            if i & 4 == 0 { lo[2] } else { hi[2] },
+        ]
+    };
+    let faces = [
+        [0, 2, 3, 1],
+        [4, 5, 7, 6],
+        [0, 1, 5, 4],
+        [2, 6, 7, 3],
+        [0, 4, 6, 2],
+        [1, 3, 7, 5],
+    ];
     for f in faces {
         let pos: Vec<[f32; 3]> = f.iter().map(|&i| c(i)).collect();
         b.add_mesh(&pos, &[], &[0, 1, 2, 0, 2, 3], |_| material);
@@ -27,7 +40,11 @@ fn sphere(b: &mut SceneBuilder, center: [f32; 3], r: f32, material: u32) {
             let p = 2.0 * std::f32::consts::PI * i as f32 / nu as f32;
             let n = [t.sin() * p.cos(), t.sin() * p.sin(), t.cos()];
             nrm.push(n);
-            pos.push([center[0] + r * n[0], center[1] + r * n[1], center[2] + r * n[2]]);
+            pos.push([
+                center[0] + r * n[0],
+                center[1] + r * n[1],
+                center[2] + r * n[2],
+            ]);
         }
     }
     let mut idx = Vec::new();
@@ -54,7 +71,14 @@ fn camera(scene: &Scene, s: &Settings, projection: Projection) -> Camera {
     // The isometric view (azimuth 45°, elevation 35.26°).
     let (az, el) = (45f32.to_radians(), 35.264f32.to_radians());
     let back = [az.sin() * el.cos(), -az.cos() * el.cos(), el.sin()];
-    Camera::fit(scene.bounds().unwrap(), back, [0.0, 0.0, 1.0], projection, s.width as f32 / s.height as f32, 0.08)
+    Camera::fit(
+        scene.bounds().unwrap(),
+        back,
+        [0.0, 0.0, 1.0],
+        projection,
+        s.width as f32 / s.height as f32,
+        0.08,
+    )
 }
 
 fn out_dir() -> std::path::PathBuf {
@@ -66,7 +90,13 @@ fn out_dir() -> std::path::PathBuf {
 #[test]
 fn a_fixed_seed_renders_identical_bytes() {
     let sc = scene();
-    let s = Settings { width: 160, height: 90, samples: 6, seed: 42, ..Settings::default() };
+    let s = Settings {
+        width: 160,
+        height: 90,
+        samples: 6,
+        seed: 42,
+        ..Settings::default()
+    };
     let cam = camera(&sc, &s, Projection::Perspective { fov_y: 30.0 });
     let cancel = AtomicBool::new(false);
     // Different thread counts: the samples don't depend on scheduling.
@@ -83,12 +113,34 @@ fn renders_are_not_blank_and_shadowed() {
     let sc = scene();
     let cancel = AtomicBool::new(false);
     for (name, env, projection) in [
-        ("studio", EnvironmentPreset::Studio, Projection::Perspective { fov_y: 30.0 }),
-        ("soft", EnvironmentPreset::SoftLight, Projection::Orthographic { height: 1.0 }),
-        ("outdoor", EnvironmentPreset::Outdoor, Projection::Perspective { fov_y: 30.0 }),
-        ("sunset", EnvironmentPreset::Sunset, Projection::Perspective { fov_y: 30.0 }),
+        (
+            "studio",
+            EnvironmentPreset::Studio,
+            Projection::Perspective { fov_y: 30.0 },
+        ),
+        (
+            "soft",
+            EnvironmentPreset::SoftLight,
+            Projection::Orthographic { height: 1.0 },
+        ),
+        (
+            "outdoor",
+            EnvironmentPreset::Outdoor,
+            Projection::Perspective { fov_y: 30.0 },
+        ),
+        (
+            "sunset",
+            EnvironmentPreset::Sunset,
+            Projection::Perspective { fov_y: 30.0 },
+        ),
     ] {
-        let s = Settings { width: 480, height: 270, samples: 32, environment: env, ..Settings::default() };
+        let s = Settings {
+            width: 480,
+            height: 270,
+            samples: 32,
+            environment: env,
+            ..Settings::default()
+        };
         let cam = camera(&sc, &s, projection);
         let mut calls = 0;
         let img = render(sc.clone(), cam, s, 4, &cancel, |d, t| {
@@ -108,7 +160,13 @@ fn renders_are_not_blank_and_shadowed() {
 #[test]
 fn transparent_background_keeps_the_shadow() {
     let sc = scene();
-    let s = Settings { width: 240, height: 135, samples: 16, background: Background::Transparent, ..Settings::default() };
+    let s = Settings {
+        width: 240,
+        height: 135,
+        samples: 16,
+        background: Background::Transparent,
+        ..Settings::default()
+    };
     let cam = camera(&sc, &s, Projection::Perspective { fov_y: 30.0 });
     let img = render(sc, cam, s, 4, &AtomicBool::new(false), |_, _| {}).unwrap();
     img.save(out_dir().join("transparent.png")).unwrap();
@@ -121,7 +179,12 @@ fn transparent_background_keeps_the_shadow() {
 #[test]
 fn cancelling_stops() {
     let sc = scene();
-    let s = Settings { width: 64, height: 36, samples: 100, ..Settings::default() };
+    let s = Settings {
+        width: 64,
+        height: 36,
+        samples: 100,
+        ..Settings::default()
+    };
     let cam = camera(&sc, &s, Projection::Perspective { fov_y: 30.0 });
     let cancel = AtomicBool::new(false);
     let mut n = 0;
@@ -139,11 +202,30 @@ fn cancelling_stops() {
 fn fitting_frames_the_model() {
     let sc = scene();
     let s = Settings::default();
-    for projection in [Projection::Perspective { fov_y: 30.0 }, Projection::Orthographic { height: 1.0 }] {
+    for projection in [
+        Projection::Perspective { fov_y: 30.0 },
+        Projection::Orthographic { height: 1.0 },
+    ] {
         let cam = camera(&sc, &s, projection);
         // A cheap render's coverage: the model reaches near the frame but not past it.
-        let small = Settings { width: 192, height: 108, samples: 1, ground_shadow: false, background: Background::Transparent, denoise: false, ..s };
-        let img = render(sc.clone(), cam, small, 2, &AtomicBool::new(false), |_, _| {}).unwrap();
+        let small = Settings {
+            width: 192,
+            height: 108,
+            samples: 1,
+            ground_shadow: false,
+            background: Background::Transparent,
+            denoise: false,
+            ..s
+        };
+        let img = render(
+            sc.clone(),
+            cam,
+            small,
+            2,
+            &AtomicBool::new(false),
+            |_, _| {},
+        )
+        .unwrap();
         let (mut x0, mut x1, mut y0, mut y1) = (u32::MAX, 0, u32::MAX, 0);
         for (x, y, p) in img.enumerate_pixels() {
             if p[3] > 0 {
@@ -153,8 +235,14 @@ fn fitting_frames_the_model() {
                 y1 = y1.max(y);
             }
         }
-        assert!(x0 > 0 && y0 > 0 && x1 < 191 && y1 < 107, "{projection:?}: {x0} {x1} {y0} {y1}");
+        assert!(
+            x0 > 0 && y0 > 0 && x1 < 191 && y1 < 107,
+            "{projection:?}: {x0} {x1} {y0} {y1}"
+        );
         // It fills one direction to within the margin (8 % a side, perspective a little less).
-        assert!((y1 - y0) as f32 > 108.0 * 0.6 || (x1 - x0) as f32 > 192.0 * 0.6, "{projection:?}: {x0} {x1} {y0} {y1}");
+        assert!(
+            (y1 - y0) as f32 > 108.0 * 0.6 || (x1 - x0) as f32 > 192.0 * 0.6,
+            "{projection:?}: {x0} {x1} {y0} {y1}"
+        );
     }
 }

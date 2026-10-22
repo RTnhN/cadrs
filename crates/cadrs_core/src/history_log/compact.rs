@@ -8,7 +8,9 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use super::workspaces::Track;
-use super::{Delta, HealthyMark, HistoryLog, LogEntry, RonCache, SNAPSHOT_EVERY, track_state_at, writer};
+use super::{
+    Delta, HealthyMark, HistoryLog, LogEntry, RonCache, SNAPSHOT_EVERY, track_state_at, writer,
+};
 use crate::document::Document;
 use crate::store::Store;
 
@@ -31,11 +33,21 @@ impl Kept {
 /// empty): the first becomes **Start** with a full copy, each other one the change from the one
 /// before it, with a full copy every [`SNAPSHOT_EVERY`] entries as usual. `None` if every entry
 /// is kept already.
-fn compact_track(entries: &[LogEntry], snapshots: &[(usize, Arc<Document>)], healthy: &[HealthyMark], keep: &BTreeSet<usize>) -> Option<Kept> {
+fn compact_track(
+    entries: &[LogEntry],
+    snapshots: &[(usize, Arc<Document>)],
+    healthy: &[HealthyMark],
+    keep: &BTreeSet<usize>,
+) -> Option<Kept> {
     if keep.len() == entries.len() {
         return None;
     }
-    let mut kept = Kept { entries: Vec::with_capacity(keep.len()), snapshots: Vec::new(), healthy: Vec::new(), moved: Vec::new() };
+    let mut kept = Kept {
+        entries: Vec::with_capacity(keep.len()),
+        snapshots: Vec::new(),
+        healthy: Vec::new(),
+        moved: Vec::new(),
+    };
     let mut before: Option<Document> = None;
     for &k in keep {
         let state = track_state_at(entries, snapshots, k)?;
@@ -60,7 +72,15 @@ fn compact_track(entries: &[LogEntry], snapshots: &[(usize, Arc<Document>)], hea
         kept.moved.push((k, i));
         before = Some(state);
     }
-    kept.healthy = healthy.iter().filter_map(|m| Some(HealthyMark { entry: kept.index(m.entry)?, ..*m })).collect();
+    kept.healthy = healthy
+        .iter()
+        .filter_map(|m| {
+            Some(HealthyMark {
+                entry: kept.index(m.entry)?,
+                ..*m
+            })
+        })
+        .collect();
     Some(kept)
 }
 
@@ -71,7 +91,11 @@ impl HistoryLog {
     /// dropped.
     pub fn compact(&mut self) -> bool {
         let keep = |log: &Self, workspace, len: usize| -> BTreeSet<usize> {
-            log.versions_in(workspace).map(|(_, v)| v.entry).filter(|e| *e < len).chain([len - 1]).collect()
+            log.versions_in(workspace)
+                .map(|(_, v)| v.entry)
+                .filter(|e| *e < len)
+                .chain([len - 1])
+                .collect()
         };
         let mut changed = false;
         let current = keep(self, self.current, self.entries.len());
@@ -84,13 +108,29 @@ impl HistoryLog {
             changed = true;
         }
         for t in 0..self.parked.len() {
-            let Track { workspace, entries, snapshots, healthy } = &self.parked[t];
+            let Track {
+                workspace,
+                entries,
+                snapshots,
+                healthy,
+            } = &self.parked[t];
             let (workspace, keep) = (*workspace, keep(self, *workspace, entries.len()));
-            let Some(k) = compact_track(entries, snapshots, healthy, &keep) else { continue };
-            for v in self.versions.iter_mut().filter(|v| v.workspace == workspace) {
+            let Some(k) = compact_track(entries, snapshots, healthy, &keep) else {
+                continue;
+            };
+            for v in self
+                .versions
+                .iter_mut()
+                .filter(|v| v.workspace == workspace)
+            {
                 v.entry = k.index(v.entry).unwrap_or(0);
             }
-            self.parked[t] = Track { workspace, entries: k.entries, snapshots: k.snapshots, healthy: k.healthy };
+            self.parked[t] = Track {
+                workspace,
+                entries: k.entries,
+                snapshots: k.snapshots,
+                healthy: k.healthy,
+            };
             changed = true;
         }
         if changed {

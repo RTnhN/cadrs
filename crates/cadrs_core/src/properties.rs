@@ -42,17 +42,27 @@ use crate::rebuild::Build;
 /// Assembly tab.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum PropertyOwner {
-    Part { element: ElementId, part: PartId },
-    Assembly { element: ElementId },
+    Part {
+        element: ElementId,
+        part: PartId,
+    },
+    Assembly {
+        element: ElementId,
+    },
     /// An assembly's non-geometric **Item** (P3B.8, A1.7, [`crate::assembly::items`]).
-    Item { element: ElementId, item: crate::assembly::items::ItemId },
+    Item {
+        element: ElementId,
+        item: crate::assembly::items::ItemId,
+    },
 }
 
 impl PropertyOwner {
     /// The Part Studio (or standard content studio) or Assembly tab.
     pub fn element(&self) -> ElementId {
         match self {
-            PropertyOwner::Part { element, .. } | PropertyOwner::Assembly { element } | PropertyOwner::Item { element, .. } => *element,
+            PropertyOwner::Part { element, .. }
+            | PropertyOwner::Assembly { element }
+            | PropertyOwner::Item { element, .. } => *element,
         }
     }
 
@@ -67,7 +77,9 @@ impl From<InstanceSource> for PropertyOwner {
             InstanceSource::Part { element, part } => PropertyOwner::Part { element, part },
             // A rigid Part Studio instance has no properties of its own (its parts do): the BOM
             // and the mass list its parts.
-            InstanceSource::Assembly { element } | InstanceSource::Studio { element, .. } => PropertyOwner::Assembly { element },
+            InstanceSource::Assembly { element } | InstanceSource::Studio { element, .. } => {
+                PropertyOwner::Assembly { element }
+            }
         }
     }
 }
@@ -125,14 +137,23 @@ impl PropertyKey {
             PropertyKey::Appearance => "Appearance".into(),
             PropertyKey::Mass => "Mass".into(),
             PropertyKey::BomBehavior => "Subassembly BOM behavior".into(),
-            PropertyKey::Custom(id) => settings.definition(*id).map(|d| d.name.clone()).unwrap_or_else(|| "(deleted property)".into()),
+            PropertyKey::Custom(id) => settings
+                .definition(*id)
+                .map(|d| d.name.clone())
+                .unwrap_or_else(|| "(deleted property)".into()),
         }
     }
 
     /// A text property typed in (a BOM cell edited in place, A20.10): not Material (a picker),
     /// Appearance, Mass or the BOM behaviour.
     pub fn is_text(&self) -> bool {
-        !matches!(self, PropertyKey::Material | PropertyKey::Appearance | PropertyKey::Mass | PropertyKey::BomBehavior)
+        !matches!(
+            self,
+            PropertyKey::Material
+                | PropertyKey::Appearance
+                | PropertyKey::Mass
+                | PropertyKey::BomBehavior
+        )
     }
 }
 
@@ -149,7 +170,11 @@ pub enum SubassemblyBom {
 }
 
 impl SubassemblyBom {
-    pub const ALL: [SubassemblyBom; 3] = [SubassemblyBom::AssemblyAndComponents, SubassemblyBom::AssemblyOnly, SubassemblyBom::ComponentsOnly];
+    pub const ALL: [SubassemblyBom; 3] = [
+        SubassemblyBom::AssemblyAndComponents,
+        SubassemblyBom::AssemblyOnly,
+        SubassemblyBom::ComponentsOnly,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -165,10 +190,29 @@ impl SubassemblyBom {
 }
 
 /// The units of measure offered (Onshape's list, abridged); "Each" is the default.
-pub const UNITS_OF_MEASURE: [&str; 12] = ["Each", "Millimeter", "Centimeter", "Meter", "Inch", "Foot", "Gram", "Kilogram", "Ounce", "Pound", "Liter", "Gallon"];
+pub const UNITS_OF_MEASURE: [&str; 12] = [
+    "Each",
+    "Millimeter",
+    "Centimeter",
+    "Meter",
+    "Inch",
+    "Foot",
+    "Gram",
+    "Kilogram",
+    "Ounce",
+    "Pound",
+    "Liter",
+    "Gallon",
+];
 
 /// The categories offered; any text is accepted.
-pub const CATEGORIES: [&str; 5] = ["Manufactured", "Purchased", "Standard content", "Reference", "Assembly"];
+pub const CATEGORIES: [&str; 5] = [
+    "Manufactured",
+    "Purchased",
+    "Standard content",
+    "Reference",
+    "Assembly",
+];
 
 /// A part's or assembly's own property values (those not kept elsewhere; see the module's
 /// table). `None` / empty means not set.
@@ -206,7 +250,10 @@ impl Properties {
 
     /// A custom property's value, if set.
     pub fn custom(&self, id: PropertyDefId) -> Option<&str> {
-        self.custom.iter().find(|(d, _)| *d == id).map(|(_, v)| v.as_str())
+        self.custom
+            .iter()
+            .find(|(d, _)| *d == id)
+            .map(|(_, v)| v.as_str())
     }
 
     fn text_slot(&mut self, key: PropertyKey) -> Option<&mut Option<String>> {
@@ -265,13 +312,24 @@ impl PropertyKind {
         }
         match self {
             PropertyKind::Text => Ok(v.to_string()),
-            PropertyKind::Number => v.parse::<f64>().ok().filter(|x| x.is_finite()).map(|_| v.to_string()).ok_or_else(|| CommandError::Invalid(format!("\"{v}\" is not a number"))),
+            PropertyKind::Number => v
+                .parse::<f64>()
+                .ok()
+                .filter(|x| x.is_finite())
+                .map(|_| v.to_string())
+                .ok_or_else(|| CommandError::Invalid(format!("\"{v}\" is not a number"))),
             PropertyKind::Boolean => match v.to_ascii_lowercase().as_str() {
                 "true" | "yes" | "1" => Ok("true".into()),
                 "false" | "no" | "0" => Ok("false".into()),
-                _ => Err(CommandError::Invalid(format!("\"{v}\" is not true or false"))),
+                _ => Err(CommandError::Invalid(format!(
+                    "\"{v}\" is not true or false"
+                ))),
             },
-            PropertyKind::List(choices) => choices.iter().find(|c| c.eq_ignore_ascii_case(v)).cloned().ok_or_else(|| CommandError::Invalid(format!("\"{v}\" is not one of the choices"))),
+            PropertyKind::List(choices) => choices
+                .iter()
+                .find(|c| c.eq_ignore_ascii_case(v))
+                .cloned()
+                .ok_or_else(|| CommandError::Invalid(format!("\"{v}\" is not one of the choices"))),
         }
     }
 }
@@ -295,7 +353,11 @@ pub struct NumberingScheme {
 
 impl Default for NumberingScheme {
     fn default() -> Self {
-        Self { prefix: "PRT-".into(), digits: 6, next: 1 }
+        Self {
+            prefix: "PRT-".into(),
+            digits: 6,
+            next: 1,
+        }
     }
 }
 
@@ -359,21 +421,37 @@ fn part_props(doc: &Document, element: ElementId, part: PartId) -> Option<&PartP
 /// The owner's own [`Properties`] (empty when it has none).
 pub fn properties(doc: &Document, owner: PropertyOwner) -> Properties {
     match owner {
-        PropertyOwner::Part { element, part } => part_props(doc, element, part).map(|p| p.properties.clone()).unwrap_or_default(),
-        PropertyOwner::Assembly { element } => doc.element(element).and_then(|e| e.assembly_model()).map(|a| a.properties.clone()).unwrap_or_default(),
-        PropertyOwner::Item { element, item } => item_of(doc, element, item).map(|i| i.properties.clone()).unwrap_or_default(),
+        PropertyOwner::Part { element, part } => part_props(doc, element, part)
+            .map(|p| p.properties.clone())
+            .unwrap_or_default(),
+        PropertyOwner::Assembly { element } => doc
+            .element(element)
+            .and_then(|e| e.assembly_model())
+            .map(|a| a.properties.clone())
+            .unwrap_or_default(),
+        PropertyOwner::Item { element, item } => item_of(doc, element, item)
+            .map(|i| i.properties.clone())
+            .unwrap_or_default(),
     }
 }
 
-fn item_of(doc: &Document, element: ElementId, item: crate::assembly::items::ItemId) -> Option<&crate::assembly::items::Item> {
+fn item_of(
+    doc: &Document,
+    element: ElementId,
+    item: crate::assembly::items::ItemId,
+) -> Option<&crate::assembly::items::Item> {
     doc.element(element)?.assembly_model()?.item(item)
 }
 
 /// The owner exists (its studio or tab is in the document).
 pub fn exists(doc: &Document, owner: PropertyOwner) -> bool {
     match owner {
-        PropertyOwner::Part { element, .. } => doc.element(element).is_some_and(|e| e.assembly_model().is_none()),
-        PropertyOwner::Assembly { element } => doc.element(element).is_some_and(|e| e.assembly_model().is_some()),
+        PropertyOwner::Part { element, .. } => doc
+            .element(element)
+            .is_some_and(|e| e.assembly_model().is_none()),
+        PropertyOwner::Assembly { element } => doc
+            .element(element)
+            .is_some_and(|e| e.assembly_model().is_some()),
         PropertyOwner::Item { element, item } => item_of(doc, element, item).is_some(),
     }
 }
@@ -384,7 +462,11 @@ pub fn name(doc: &Document, owner: PropertyOwner, build: Option<&Build>) -> Stri
     let source = match owner {
         PropertyOwner::Part { element, part } => InstanceSource::Part { element, part },
         PropertyOwner::Assembly { element } => InstanceSource::Assembly { element },
-        PropertyOwner::Item { element, item } => return item_of(doc, element, item).map(|i| i.name.clone()).unwrap_or_default(),
+        PropertyOwner::Item { element, item } => {
+            return item_of(doc, element, item)
+                .map(|i| i.name.clone())
+                .unwrap_or_default();
+        }
     };
     crate::assembly::source_part_name(doc, &source, build)
 }
@@ -393,51 +475,85 @@ pub fn name(doc: &Document, owner: PropertyOwner, build: Option<&Build>) -> Stri
 /// are its configuration's (A19.3); its Category defaults to "Standard content". Name needs
 /// `build` for a part's default name; Material gives the material's name, Appearance its
 /// colour as `#RRGGBB`; Mass is left to [`mass`]; the BOM behaviour gives its label.
-pub fn text(doc: &Document, owner: PropertyOwner, key: PropertyKey, build: Option<&Build>) -> String {
+pub fn text(
+    doc: &Document,
+    owner: PropertyOwner,
+    key: PropertyKey,
+    build: Option<&Build>,
+) -> String {
     let std = match owner {
         PropertyOwner::Part { element, .. } => doc.standard_part(element),
         PropertyOwner::Assembly { .. } | PropertyOwner::Item { .. } => None,
     };
     match key {
         PropertyKey::Name => name(doc, owner, build),
-        PropertyKey::PartNumber if std.is_some() => std.map(|s| s.part_number.clone()).unwrap_or_default(),
-        PropertyKey::Description if std.is_some() => std.map(|s| s.description.clone()).unwrap_or_default(),
+        PropertyKey::PartNumber if std.is_some() => {
+            std.map(|s| s.part_number.clone()).unwrap_or_default()
+        }
+        PropertyKey::Description if std.is_some() => {
+            std.map(|s| s.description.clone()).unwrap_or_default()
+        }
         PropertyKey::Material => material(doc, owner).map(|m| m.name).unwrap_or_default(),
-        PropertyKey::Appearance => appearance(doc, owner, build).map(|a| format!("#{:02X}{:02X}{:02X}", a.rgb[0], a.rgb[1], a.rgb[2])).unwrap_or_default(),
+        PropertyKey::Appearance => appearance(doc, owner, build)
+            .map(|a| format!("#{:02X}{:02X}{:02X}", a.rgb[0], a.rgb[1], a.rgb[2]))
+            .unwrap_or_default(),
         PropertyKey::Mass => String::new(),
         PropertyKey::BomBehavior => properties(doc, owner).bom_behavior.label().to_string(),
-        PropertyKey::UnitOfMeasure => properties(doc, owner).unit_of_measure.unwrap_or_else(|| UNITS_OF_MEASURE[0].to_string()),
+        PropertyKey::UnitOfMeasure => properties(doc, owner)
+            .unit_of_measure
+            .unwrap_or_else(|| UNITS_OF_MEASURE[0].to_string()),
         PropertyKey::Category => {
             let own = properties(doc, owner).category;
-            own.or_else(|| std.map(|_| "Standard content".to_string())).unwrap_or_default()
+            own.or_else(|| std.map(|_| "Standard content".to_string()))
+                .unwrap_or_default()
         }
-        _ => properties(doc, owner).text(key).unwrap_or_default().to_string(),
+        _ => properties(doc, owner)
+            .text(key)
+            .unwrap_or_default()
+            .to_string(),
     }
 }
 
 /// A part's material (an assembly has none).
 pub fn material(doc: &Document, owner: PropertyOwner) -> Option<Material> {
     match owner {
-        PropertyOwner::Part { element, part } => part_props(doc, element, part).and_then(|p| p.material.clone()),
+        PropertyOwner::Part { element, part } => {
+            part_props(doc, element, part).and_then(|p| p.material.clone())
+        }
         PropertyOwner::Assembly { .. } | PropertyOwner::Item { .. } => None,
     }
 }
 
 /// A part's appearance: its own, else its palette colour from `build`.
-pub fn appearance(doc: &Document, owner: PropertyOwner, build: Option<&Build>) -> Option<Appearance> {
-    let PropertyOwner::Part { element, part } = owner else { return None };
+pub fn appearance(
+    doc: &Document,
+    owner: PropertyOwner,
+    build: Option<&Build>,
+) -> Option<Appearance> {
+    let PropertyOwner::Part { element, part } = owner else {
+        return None;
+    };
     part_props(doc, element, part)
         .and_then(|p| p.appearance)
         .or_else(|| {
-            let props = doc.element(element).map(|e| e.part_props()).unwrap_or_default();
-            build.and_then(|b| b.part(part)).map(|p| crate::appearance::default_appearance(p, props))
+            let props = doc
+                .element(element)
+                .map(|e| e.part_props())
+                .unwrap_or_default();
+            build
+                .and_then(|b| b.part(part))
+                .map(|p| crate::appearance::default_appearance(p, props))
         })
 }
 
 /// The mass of one of the owner (kg): its override, else a part's density × volume (`None`
 /// without a material), else an assembly's parts summed (`None` if one has no mass).
 /// `build_of` gives each Part Studio's rebuild.
-pub fn mass(doc: &Document, owner: PropertyOwner, build_of: &mut dyn FnMut(ElementId) -> Option<Arc<Build>>) -> Option<f64> {
+pub fn mass(
+    doc: &Document,
+    owner: PropertyOwner,
+    build_of: &mut dyn FnMut(ElementId) -> Option<Arc<Build>>,
+) -> Option<f64> {
     if let Some(m) = properties(doc, owner).mass_override {
         return Some(m);
     }
@@ -455,7 +571,14 @@ pub fn mass(doc: &Document, owner: PropertyOwner, build_of: &mut dyn FnMut(Eleme
                     // A rigid Part Studio instance: its parts.
                     InstanceSource::Studio { element, .. } => {
                         for part in inst.rigid_parts(doc).iter() {
-                            total += mass(doc, PropertyOwner::Part { element, part: *part }, build_of)?;
+                            total += mass(
+                                doc,
+                                PropertyOwner::Part {
+                                    element,
+                                    part: *part,
+                                },
+                                build_of,
+                            )?;
                         }
                     }
                     s => total += mass(doc, s.into(), build_of)?,
@@ -491,11 +614,18 @@ pub fn part_numbers_in_use(doc: &Document) -> Vec<String> {
 
 /// The owner's [`PartProps`] entry, made if missing (a part of a Part Studio tab or of a
 /// standard content studio).
-fn part_props_mut(doc: &mut Document, element: ElementId, part: PartId) -> Result<&mut PartProps, CommandError> {
+fn part_props_mut(
+    doc: &mut Document,
+    element: ElementId,
+    part: PartId,
+) -> Result<&mut PartProps, CommandError> {
     let props = if doc.elements.iter().any(|e| e.id == element) {
         doc.element_mut(element).and_then(|e| e.part_props_mut())
     } else {
-        doc.standard_content.iter_mut().find(|p| p.element.id == element).and_then(|p| p.element.part_props_mut())
+        doc.standard_content
+            .iter_mut()
+            .find(|p| p.element.id == element)
+            .and_then(|p| p.element.part_props_mut())
     }
     .ok_or(CommandError::ElementNotFound(element))?;
     if let Some(i) = props.iter().position(|p| p.part == part) {
@@ -509,7 +639,10 @@ fn tidy(doc: &mut Document, element: ElementId) {
     let props = if doc.elements.iter().any(|e| e.id == element) {
         doc.element_mut(element).and_then(|e| e.part_props_mut())
     } else {
-        doc.standard_content.iter_mut().find(|p| p.element.id == element).and_then(|p| p.element.part_props_mut())
+        doc.standard_content
+            .iter_mut()
+            .find(|p| p.element.id == element)
+            .and_then(|p| p.element.part_props_mut())
     };
     if let Some(p) = props {
         p.retain(|p| !p.is_default());
@@ -522,52 +655,98 @@ fn opt(v: &str) -> Option<String> {
 }
 
 /// Sets one property of `owner` (see [`SetProperties`] for the rules).
-pub fn set(doc: &mut Document, owner: PropertyOwner, key: PropertyKey, value: &PropertyValue) -> Result<(), CommandError> {
+pub fn set(
+    doc: &mut Document,
+    owner: PropertyOwner,
+    key: PropertyKey,
+    value: &PropertyValue,
+) -> Result<(), CommandError> {
     let is_std = matches!(owner, PropertyOwner::Part { element, .. } if doc.standard_part(element).is_some());
     let wrong = || CommandError::Invalid(format!("wrong value for {key:?}"));
     // Text of a custom property is checked against its kind.
     let value = match (key, value) {
         (PropertyKey::Custom(id), PropertyValue::Text(t)) => {
-            let def = doc.properties.definition(id).ok_or_else(|| CommandError::Invalid("no such property".into()))?;
+            let def = doc
+                .properties
+                .definition(id)
+                .ok_or_else(|| CommandError::Invalid("no such property".into()))?;
             PropertyValue::Text(def.kind.check(t)?)
         }
         _ => value.clone(),
     };
     match (owner, key, &value) {
         (_, PropertyKey::Name, PropertyValue::Text(t)) => {
-            let n = opt(t).ok_or_else(|| CommandError::Invalid("the name can't be empty".into()))?;
+            let n =
+                opt(t).ok_or_else(|| CommandError::Invalid("the name can't be empty".into()))?;
             match owner {
-                PropertyOwner::Part { element, part } => part_props_mut(doc, element, part)?.name = Some(n),
-                PropertyOwner::Assembly { element } => doc.element_mut(element).ok_or(CommandError::ElementNotFound(element))?.name = n,
+                PropertyOwner::Part { element, part } => {
+                    part_props_mut(doc, element, part)?.name = Some(n)
+                }
+                PropertyOwner::Assembly { element } => {
+                    doc.element_mut(element)
+                        .ok_or(CommandError::ElementNotFound(element))?
+                        .name = n
+                }
                 PropertyOwner::Item { element, item } => {
-                    crate::assembly::commands::assembly_mut(doc, element)?.item_mut(item).ok_or_else(|| CommandError::Invalid("item not found".into()))?.name = n;
+                    crate::assembly::commands::assembly_mut(doc, element)?
+                        .item_mut(item)
+                        .ok_or_else(|| CommandError::Invalid("item not found".into()))?
+                        .name = n;
                 }
             }
         }
-        (PropertyOwner::Part { element, .. }, PropertyKey::PartNumber | PropertyKey::Description, PropertyValue::Text(t)) if is_std => {
-            let s = doc.standard_content.iter_mut().find(|p| p.element.id == element).ok_or(CommandError::ElementNotFound(element))?;
+        (
+            PropertyOwner::Part { element, .. },
+            PropertyKey::PartNumber | PropertyKey::Description,
+            PropertyValue::Text(t),
+        ) if is_std => {
+            let s = doc
+                .standard_content
+                .iter_mut()
+                .find(|p| p.element.id == element)
+                .ok_or(CommandError::ElementNotFound(element))?;
             if key == PropertyKey::PartNumber {
                 s.part_number = t.trim().to_string();
             } else {
                 s.description = t.trim().to_string();
             }
         }
-        (PropertyOwner::Part { element, part }, PropertyKey::Material, PropertyValue::Material(m)) => {
+        (
+            PropertyOwner::Part { element, part },
+            PropertyKey::Material,
+            PropertyValue::Material(m),
+        ) => {
             part_props_mut(doc, element, part)?.material = m.clone();
         }
-        (PropertyOwner::Part { element, part }, PropertyKey::Appearance, PropertyValue::Appearance(a)) => {
+        (
+            PropertyOwner::Part { element, part },
+            PropertyKey::Appearance,
+            PropertyValue::Appearance(a),
+        ) => {
             part_props_mut(doc, element, part)?.appearance = *a;
         }
-        (PropertyOwner::Assembly { .. } | PropertyOwner::Item { .. }, PropertyKey::Material | PropertyKey::Appearance, _) => {
-            return Err(CommandError::Invalid("an assembly has no material or appearance of its own".into()));
+        (
+            PropertyOwner::Assembly { .. } | PropertyOwner::Item { .. },
+            PropertyKey::Material | PropertyKey::Appearance,
+            _,
+        ) => {
+            return Err(CommandError::Invalid(
+                "an assembly has no material or appearance of its own".into(),
+            ));
         }
         (_, PropertyKey::Mass, PropertyValue::Mass(m)) => {
             if m.is_some_and(|m| !(m.is_finite() && m >= 0.0)) {
-                return Err(CommandError::Invalid("the mass must be a positive number".into()));
+                return Err(CommandError::Invalid(
+                    "the mass must be a positive number".into(),
+                ));
             }
             own_mut(doc, owner, &mut |p| p.mass_override = *m)?;
         }
-        (PropertyOwner::Assembly { .. }, PropertyKey::BomBehavior, PropertyValue::BomBehavior(b)) => {
+        (
+            PropertyOwner::Assembly { .. },
+            PropertyKey::BomBehavior,
+            PropertyValue::BomBehavior(b),
+        ) => {
             own_mut(doc, owner, &mut |p| p.bom_behavior = *b)?;
         }
         (_, PropertyKey::Custom(id), PropertyValue::Text(t)) => {
@@ -585,12 +764,30 @@ pub fn set(doc: &mut Document, owner: PropertyOwner, key: PropertyKey, value: &P
             if let Some(u) = &v
                 && !UNITS_OF_MEASURE.iter().any(|x| x.eq_ignore_ascii_case(u))
             {
-                return Err(CommandError::Invalid(format!("\"{u}\" is not a unit of measure")));
+                return Err(CommandError::Invalid(format!(
+                    "\"{u}\" is not a unit of measure"
+                )));
             }
-            let v = v.map(|u| UNITS_OF_MEASURE.iter().find(|x| x.eq_ignore_ascii_case(&u)).map(|x| x.to_string()).unwrap_or(u)).filter(|u| u != "Each");
+            let v = v
+                .map(|u| {
+                    UNITS_OF_MEASURE
+                        .iter()
+                        .find(|x| x.eq_ignore_ascii_case(&u))
+                        .map(|x| x.to_string())
+                        .unwrap_or(u)
+                })
+                .filter(|u| u != "Each");
             own_mut(doc, owner, &mut |p| p.unit_of_measure = v.clone())?;
         }
-        (_, PropertyKey::PartNumber | PropertyKey::Description | PropertyKey::Revision | PropertyKey::Vendor | PropertyKey::Category, PropertyValue::Text(t)) => {
+        (
+            _,
+            PropertyKey::PartNumber
+            | PropertyKey::Description
+            | PropertyKey::Revision
+            | PropertyKey::Vendor
+            | PropertyKey::Category,
+            PropertyValue::Text(t),
+        ) => {
             let v = opt(t);
             own_mut(doc, owner, &mut |p| {
                 if let Some(slot) = p.text_slot(key) {
@@ -607,12 +804,23 @@ pub fn set(doc: &mut Document, owner: PropertyOwner, key: PropertyKey, value: &P
 }
 
 /// Edits the owner's own [`Properties`].
-fn own_mut(doc: &mut Document, owner: PropertyOwner, f: &mut dyn FnMut(&mut Properties)) -> Result<(), CommandError> {
+fn own_mut(
+    doc: &mut Document,
+    owner: PropertyOwner,
+    f: &mut dyn FnMut(&mut Properties),
+) -> Result<(), CommandError> {
     match owner {
-        PropertyOwner::Part { element, part } => f(&mut part_props_mut(doc, element, part)?.properties),
-        PropertyOwner::Assembly { element } => f(&mut crate::assembly::commands::assembly_mut(doc, element)?.properties),
+        PropertyOwner::Part { element, part } => {
+            f(&mut part_props_mut(doc, element, part)?.properties)
+        }
+        PropertyOwner::Assembly { element } => {
+            f(&mut crate::assembly::commands::assembly_mut(doc, element)?.properties)
+        }
         PropertyOwner::Item { element, item } => {
-            f(&mut crate::assembly::commands::assembly_mut(doc, element)?.item_mut(item).ok_or_else(|| CommandError::Invalid("item not found".into()))?.properties)
+            f(&mut crate::assembly::commands::assembly_mut(doc, element)?
+                .item_mut(item)
+                .ok_or_else(|| CommandError::Invalid("item not found".into()))?
+                .properties)
         }
     }
     Ok(())
@@ -664,7 +872,15 @@ pub struct AddPropertyDefinition {
 impl AddPropertyDefinition {
     /// The id the definition gets in `doc`.
     pub fn id_in(doc: &Document) -> PropertyDefId {
-        PropertyDefId(doc.properties.definitions.iter().map(|d| d.id.0).max().unwrap_or(0) + 1)
+        PropertyDefId(
+            doc.properties
+                .definitions
+                .iter()
+                .map(|d| d.id.0)
+                .max()
+                .unwrap_or(0)
+                + 1,
+        )
     }
 }
 
@@ -676,11 +892,20 @@ impl Command for AddPropertyDefinition {
         Scope::Document
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
-        let name = opt(&self.name).ok_or_else(|| CommandError::Invalid("the name can't be empty".into()))?;
-        let taken = PropertyKey::BUILT_IN.iter().any(|k| k.label(&doc.properties).eq_ignore_ascii_case(&name))
-            || doc.properties.definitions.iter().any(|d| d.name.eq_ignore_ascii_case(&name));
+        let name = opt(&self.name)
+            .ok_or_else(|| CommandError::Invalid("the name can't be empty".into()))?;
+        let taken = PropertyKey::BUILT_IN
+            .iter()
+            .any(|k| k.label(&doc.properties).eq_ignore_ascii_case(&name))
+            || doc
+                .properties
+                .definitions
+                .iter()
+                .any(|d| d.name.eq_ignore_ascii_case(&name));
         if taken {
-            return Err(CommandError::Invalid(format!("a property \"{name}\" exists")));
+            return Err(CommandError::Invalid(format!(
+                "a property \"{name}\" exists"
+            )));
         }
         if let PropertyKind::List(c) = &self.kind
             && c.is_empty()
@@ -688,7 +913,11 @@ impl Command for AddPropertyDefinition {
             return Err(CommandError::Invalid("a list needs choices".into()));
         }
         let id = Self::id_in(doc);
-        doc.properties.definitions.push(PropertyDef { id, name, kind: self.kind.clone() });
+        doc.properties.definitions.push(PropertyDef {
+            id,
+            name,
+            kind: self.kind.clone(),
+        });
         Ok(())
     }
 }
@@ -782,7 +1011,10 @@ impl GenerateMissingPartNumbers {
         let mut out: Vec<(PropertyOwner, String)> = Vec::new();
         let mut seen: Vec<PropertyOwner> = Vec::new();
         for o in &self.owners {
-            if seen.contains(o) || !exists(doc, *o) || !text(doc, *o, PropertyKey::PartNumber, None).is_empty() {
+            if seen.contains(o)
+                || !exists(doc, *o)
+                || !text(doc, *o, PropertyKey::PartNumber, None).is_empty()
+            {
                 continue;
             }
             seen.push(*o);
@@ -817,7 +1049,10 @@ impl Command for GenerateMissingPartNumbers {
         }
         // The scheme continues after the last number given.
         let scheme = &mut doc.properties.numbering;
-        if let Some(k) = last.strip_prefix(scheme.prefix.as_str()).and_then(|d| d.parse::<u32>().ok()) {
+        if let Some(k) = last
+            .strip_prefix(scheme.prefix.as_str())
+            .and_then(|d| d.parse::<u32>().ok())
+        {
             scheme.next = k + 1;
         }
         Ok(())

@@ -42,7 +42,10 @@ impl Plugin for MenuPlugin {
             .add_observer(on_dismiss_press)
             .add_observer(on_secondary_click)
             .add_systems(Update, (update_submenus, close_on_escape))
-            .add_systems(PostUpdate, fit_menus_to_window.before(bevy::ui::UiSystems::Layout));
+            .add_systems(
+                PostUpdate,
+                fit_menus_to_window.before(bevy::ui::UiSystems::Layout),
+            );
     }
 }
 
@@ -92,12 +95,19 @@ fn fit_menus_to_window(
     q_parent: Query<(&ComputedNode, &UiGlobalTransform, Has<ContextMenuAnchor>)>,
     mut q_anchor: Query<&mut Node, (With<ContextMenuAnchor>, Without<MenuPopup>)>,
 ) {
-    let Some(w) = windows.iter().next() else { return };
+    let Some(w) = windows.iter().next() else {
+        return;
+    };
     let h = w.height() - insets.bottom;
     for (mut fit, parent, computed, mut node) in &mut q {
-        let Ok((pn, pt, context)) = q_parent.get(parent.parent()) else { continue };
+        let Ok((pn, pt, context)) = q_parent.get(parent.parent()) else {
+            continue;
+        };
         let s = pn.inverse_scale_factor();
-        let (top, bottom) = (pt.translation.y * s - pn.size().y * s / 2.0, pt.translation.y * s + pn.size().y * s / 2.0);
+        let (top, bottom) = (
+            pt.translation.y * s - pn.size().y * s / 2.0,
+            pt.translation.y * s + pn.size().y * s / 2.0,
+        );
         // The room on either side of the anchor (a submenu beside its item: from the item's top
         // or bottom to the far edge).
         let room = if fit.vertical {
@@ -124,7 +134,9 @@ fn fit_menus_to_window(
             let above = top - insets.top - WINDOW_MARGIN - 2.0;
             let full = h - insets.top - 2.0 * WINDOW_MARGIN - 2.0;
             // (One that fits above opens there, flipped by the popover, as before.)
-            if height > below + 0.5 && height > above + 0.5 && height <= full
+            if height > below + 0.5
+                && height > above + 0.5
+                && height <= full
                 && let Ok(mut a) = q_anchor.get_mut(parent.parent())
                 && let Val::Px(t) = a.top
             {
@@ -143,7 +155,11 @@ fn fit_menus_to_window(
         let want = cap.map_or(Val::Auto, Val::Px);
         if node.max_height != want {
             node.max_height = want;
-            node.overflow = if cap.is_some() { Overflow::scroll_y() } else { Overflow::DEFAULT };
+            node.overflow = if cap.is_some() {
+                Overflow::scroll_y()
+            } else {
+                Overflow::DEFAULT
+            };
         }
     }
 }
@@ -423,7 +439,11 @@ impl Menu {
             // (a context menu opened at the viewport's right edge opens toward the left, P3B.1
             // judge).
             side => {
-                let other = if self.align_end { PopoverAlign::Start } else { PopoverAlign::End };
+                let other = if self.align_end {
+                    PopoverAlign::Start
+                } else {
+                    PopoverAlign::End
+                };
                 vec![
                     placement(side, align, 2.0),
                     placement(side.mirror(), align, 2.0),
@@ -441,14 +461,22 @@ impl Menu {
         (
             Name::new(self.name.into_owned()),
             MenuPopup,
-            MenuFit { cap: max_height, vertical, fitted: None },
+            MenuFit {
+                cap: max_height,
+                vertical,
+                fitted: None,
+            },
             // Wheel scrolling for a capped menu (`max_height`).
             bevy::ui_widgets::ScrollArea,
             Node {
                 position_type: PositionType::Absolute,
                 flex_direction: FlexDirection::Column,
                 max_height: max_height.map_or(Val::Auto, Val::Px),
-                overflow: if max_height.is_some() { Overflow::scroll_y() } else { Overflow::DEFAULT },
+                overflow: if max_height.is_some() {
+                    Overflow::scroll_y()
+                } else {
+                    Overflow::DEFAULT
+                },
                 min_width: Val::Px(self.min_width),
                 padding: UiRect::vertical(Val::Px(theme.space[2])),
                 border: UiRect::all(Val::Px(1.0)),
@@ -486,7 +514,8 @@ impl Menu {
                         }
                         MenuEntry::Item(mut item) => {
                             let tip = item.tooltip.take();
-                            let mut e = p.spawn(item_bundle(&theme, item, item_height, icon_column, look));
+                            let mut e =
+                                p.spawn(item_bundle(&theme, item, item_height, icon_column, look));
                             if let Some(t) = tip {
                                 e.insert(crate::tooltip::Tooltip::card(t));
                             }
@@ -564,7 +593,14 @@ fn item_bundle(
         muted
     };
     let t = theme.clone();
-    let font = theme.font(theme.font_base, if look.medium { FontWeight::MEDIUM } else { FontWeight::NORMAL });
+    let font = theme.font(
+        theme.font_base,
+        if look.medium {
+            FontWeight::MEDIUM
+        } else {
+            FontWeight::NORMAL
+        },
+    );
     let small = theme.font(theme.font_sm, FontWeight::NORMAL);
     let has_submenu = item.submenu.is_some();
     let MenuItem {
@@ -624,8 +660,21 @@ fn item_bundle(
             match icon_name {
                 _ if !icon_column => {}
                 _ if dot.is_some() => {
-                    p.spawn((Node { width: Val::Px(look.icon_size), justify_content: JustifyContent::Center, ..default() }, Pickable::IGNORE)).with_child((
-                        Node { width: Val::Px(10.0), height: Val::Px(10.0), border_radius: BorderRadius::MAX, ..default() },
+                    p.spawn((
+                        Node {
+                            width: Val::Px(look.icon_size),
+                            justify_content: JustifyContent::Center,
+                            ..default()
+                        },
+                        Pickable::IGNORE,
+                    ))
+                    .with_child((
+                        Node {
+                            width: Val::Px(10.0),
+                            height: Val::Px(10.0),
+                            border_radius: BorderRadius::MAX,
+                            ..default()
+                        },
                         BackgroundColor(dot.unwrap_or(Color::NONE)),
                         Pickable::IGNORE,
                     ));
@@ -885,7 +934,10 @@ fn close_on_escape(
     mut commands: Commands,
 ) {
     for k in keys.read() {
-        if k.state == ButtonState::Pressed && k.shortcut_code() == KeyCode::Escape && !q_layer.is_empty() {
+        if k.state == ButtonState::Pressed
+            && k.shortcut_code() == KeyCode::Escape
+            && !q_layer.is_empty()
+        {
             commands.queue(close_all_menus);
         }
     }
@@ -898,16 +950,22 @@ mod tests {
     // separators left around them don't pile up.
     #[test]
     fn planned_items_are_left_out() {
-        let names = |e: &[MenuEntry]| e.iter().map(|e| match e {
-            MenuEntry::Item(i) => i.name.to_string(),
-            MenuEntry::Separator => "-".into(),
-        }).collect::<Vec<_>>();
+        let names = |e: &[MenuEntry]| {
+            e.iter()
+                .map(|e| match e {
+                    MenuEntry::Item(i) => i.name.to_string(),
+                    MenuEntry::Separator => "-".into(),
+                })
+                .collect::<Vec<_>>()
+        };
         let entries = vec![
             MenuItem::new("rename", "Rename").into(),
             MenuEntry::Separator,
             MenuItem::new("print", "Print").planned().into(),
             MenuEntry::Separator,
-            MenuItem::new("apps", "Apps").submenu(vec![MenuItem::new("none", "None").planned().into()]).into(),
+            MenuItem::new("apps", "Apps")
+                .submenu(vec![MenuItem::new("none", "None").planned().into()])
+                .into(),
             MenuItem::new("export", "Export").into(),
             MenuEntry::Separator,
             MenuItem::new("comment", "Comment").planned().into(),

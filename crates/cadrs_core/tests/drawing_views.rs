@@ -42,13 +42,31 @@ fn features(d: &Document, el: ElementId) -> Vec<Feature> {
 }
 
 /// A polygon on `plane`, extruded `depth` (seeded at `seed`).
-fn prism(d: &mut Document, h: &mut History, el: ElementId, plane: PlaneRef, ops: Vec<SketchOp>, seed: Vec2, depth: f64) {
+fn prism(
+    d: &mut Document,
+    h: &mut History,
+    el: ElementId,
+    plane: PlaneRef,
+    ops: Vec<SketchOp>,
+    seed: Vec2,
+    depth: f64,
+) {
     let mut s = DocHistory(d, h);
     let sketch = FeatureId::new();
     use cadrs_core::samples::gear_cover::Studio;
-    s.run(&AddSketch { element: el, feature: sketch, plane: Some(plane) }).unwrap();
+    s.run(&AddSketch {
+        element: el,
+        feature: sketch,
+        plane: Some(plane),
+    })
+    .unwrap();
     for op in ops {
-        s.run(&EditSketch { element: el, feature: sketch, op }).unwrap();
+        s.run(&EditSketch {
+            element: el,
+            feature: sketch,
+            op,
+        })
+        .unwrap();
     }
     bracket::extrude(&mut s, el, sketch, FeatureId::new(), &[seed], |e| {
         e.depth = depth;
@@ -70,7 +88,10 @@ fn request(view: &View, hidden: bool) -> ViewRequest {
     ViewRequest {
         part: None,
         frame: view.frame.view_frame(),
-        options: ProjectOptions { hidden, ..ProjectOptions::default() },
+        options: ProjectOptions {
+            hidden,
+            ..ProjectOptions::default()
+        },
         shaded: false,
         props: Vec::new(),
         appearances: Vec::new(),
@@ -81,15 +102,33 @@ fn request(view: &View, hidden: bool) -> ViewRequest {
 }
 
 fn reference() -> ObjectRef {
-    ObjectRef { element: uuid::Uuid::nil(), part: None }
+    ObjectRef {
+        element: uuid::Uuid::nil(),
+        part: None,
+    }
 }
 
 /// The L-block on Front: 4 wide (x 0..4), 4 tall (z 0..4), 4 deep, with the 2 × 2 notch at
 /// x 2..4, z 2..4.
 fn l_block() -> Vec<Feature> {
     let (mut d, mut h, el) = studio();
-    let l = poly(&[(0.0, 0.0), (4.0, 0.0), (4.0, 2.0), (2.0, 2.0), (2.0, 4.0), (0.0, 4.0)]);
-    prism(&mut d, &mut h, el, PlaneRef::Front, vec![l], Vec2::new(1.0, 1.0), 4.0);
+    let l = poly(&[
+        (0.0, 0.0),
+        (4.0, 0.0),
+        (4.0, 2.0),
+        (2.0, 2.0),
+        (2.0, 4.0),
+        (0.0, 4.0),
+    ]);
+    prism(
+        &mut d,
+        &mut h,
+        el,
+        PlaneRef::Front,
+        vec![l],
+        Vec2::new(1.0, 1.0),
+        4.0,
+    );
     features(&d, el)
 }
 
@@ -101,16 +140,25 @@ fn lines(view: &View, f: &[Feature], kind: LineKind) -> Vec<([f64; 2], [f64; 2])
     view_lines(&v, &g.projection)
         .into_iter()
         .filter(|l| l.kind == kind)
-        .map(|l| (v.from_sheet(l.points[0]), v.from_sheet(*l.points.last().unwrap())))
+        .map(|l| {
+            (
+                v.from_sheet(l.points[0]),
+                v.from_sheet(*l.points.last().unwrap()),
+            )
+        })
         .collect()
 }
 
 fn horizontal_at(ls: &[([f64; 2], [f64; 2])], y: f64) -> bool {
-    ls.iter().any(|(a, b)| (a[1] - y).abs() < 1e-6 && (b[1] - y).abs() < 1e-6 && (a[0] - b[0]).abs() > 1.0)
+    ls.iter().any(|(a, b)| {
+        (a[1] - y).abs() < 1e-6 && (b[1] - y).abs() < 1e-6 && (a[0] - b[0]).abs() > 1.0
+    })
 }
 
 fn vertical_at(ls: &[([f64; 2], [f64; 2])], x: f64) -> bool {
-    ls.iter().any(|(a, b)| (a[0] - x).abs() < 1e-6 && (b[0] - x).abs() < 1e-6 && (a[1] - b[1]).abs() > 1.0)
+    ls.iter().any(|(a, b)| {
+        (a[0] - x).abs() < 1e-6 && (b[0] - x).abs() < 1e-6 && (a[1] - b[1]).abs() > 1.0
+    })
 }
 
 /// Sheet bounds of a view.
@@ -122,12 +170,37 @@ fn bounds(view: &View, f: &[Feature]) -> ([f64; 2], [f64; 2]) {
 #[test]
 fn l_block_first_angle_puts_left_on_the_right_and_top_below() {
     let f = l_block();
-    let front = View::base(reference(), NamedView::Front, Scale::new(10, 1), [100.0, 150.0]);
+    let front = View::base(
+        reference(),
+        NamedView::Front,
+        Scale::new(10, 1),
+        [100.0, 150.0],
+    );
     // The cursor off the fold lines: the views snap onto them.
-    let side = projected_view(&front, Placement::Ortho([1.0, 0.0]), Projection::First, [200.0, 163.0], None);
-    let below = projected_view(&front, Placement::Ortho([0.0, -1.0]), Projection::First, [91.0, 60.0], None);
-    assert_eq!(side.anchor, [200.0, 150.0], "snapped onto Front's horizontal fold line");
-    assert_eq!(below.anchor, [100.0, 60.0], "snapped onto Front's vertical fold line");
+    let side = projected_view(
+        &front,
+        Placement::Ortho([1.0, 0.0]),
+        Projection::First,
+        [200.0, 163.0],
+        None,
+    );
+    let below = projected_view(
+        &front,
+        Placement::Ortho([0.0, -1.0]),
+        Projection::First,
+        [91.0, 60.0],
+        None,
+    );
+    assert_eq!(
+        side.anchor,
+        [200.0, 150.0],
+        "snapped onto Front's horizontal fold line"
+    );
+    assert_eq!(
+        below.anchor,
+        [100.0, 60.0],
+        "snapped onto Front's vertical fold line"
+    );
     // Placement: right of and below the front view, aligned with it.
     let (fb, sb, bb) = (bounds(&front, &f), bounds(&side, &f), bounds(&below, &f));
     assert!(sb.0[0] > fb.1[0], "the side view is right of Front");
@@ -138,11 +211,17 @@ fn l_block_first_angle_puts_left_on_the_right_and_top_below() {
     // The side view hides the notch's floor (z = 2): it is seen from the left.
     let side_hidden = lines(&side, &f, LineKind::Hidden);
     let side_visible = lines(&side, &f, LineKind::Visible);
-    assert!(horizontal_at(&side_hidden, 2.0), "hidden floor: {side_hidden:?}");
+    assert!(
+        horizontal_at(&side_hidden, 2.0),
+        "hidden floor: {side_hidden:?}"
+    );
     assert!(!horizontal_at(&side_visible, 2.0));
     // The view below shows the step (x = 2) as a visible line: it is seen from above.
     let below_visible = lines(&below, &f, LineKind::Visible);
-    assert!(vertical_at(&below_visible, 2.0), "visible step: {below_visible:?}");
+    assert!(
+        vertical_at(&below_visible, 2.0),
+        "visible step: {below_visible:?}"
+    );
     assert_eq!(side.name, "Left");
     assert_eq!(below.name, "Top");
 }
@@ -150,11 +229,36 @@ fn l_block_first_angle_puts_left_on_the_right_and_top_below() {
 #[test]
 fn l_block_third_angle_puts_top_above_and_right_on_the_right() {
     let f = l_block();
-    let front = View::base(reference(), NamedView::Front, Scale::new(10, 1), [100.0, 100.0]);
-    let side = projected_view(&front, Placement::Ortho([1.0, 0.0]), Projection::Third, [200.0, 87.5], None);
-    let above = projected_view(&front, Placement::Ortho([0.0, 1.0]), Projection::Third, [111.0, 200.0], None);
-    assert_eq!(side.anchor, [200.0, 100.0], "snapped onto Front's horizontal fold line");
-    assert_eq!(above.anchor, [100.0, 200.0], "snapped onto Front's vertical fold line");
+    let front = View::base(
+        reference(),
+        NamedView::Front,
+        Scale::new(10, 1),
+        [100.0, 100.0],
+    );
+    let side = projected_view(
+        &front,
+        Placement::Ortho([1.0, 0.0]),
+        Projection::Third,
+        [200.0, 87.5],
+        None,
+    );
+    let above = projected_view(
+        &front,
+        Placement::Ortho([0.0, 1.0]),
+        Projection::Third,
+        [111.0, 200.0],
+        None,
+    );
+    assert_eq!(
+        side.anchor,
+        [200.0, 100.0],
+        "snapped onto Front's horizontal fold line"
+    );
+    assert_eq!(
+        above.anchor,
+        [100.0, 200.0],
+        "snapped onto Front's vertical fold line"
+    );
     let (fb, sb, ab) = (bounds(&front, &f), bounds(&side, &f), bounds(&above, &f));
     assert!(sb.0[0] > fb.1[0]);
     assert!(ab.0[1] > fb.1[1], "the view above is over Front");
@@ -162,7 +266,10 @@ fn l_block_third_angle_puts_top_above_and_right_on_the_right() {
     close(ab.1[0], fb.1[0], 1e-6);
     // The side view sees the notch's floor: it is seen from the right.
     let side_visible = lines(&side, &f, LineKind::Visible);
-    assert!(horizontal_at(&side_visible, 2.0), "visible floor: {side_visible:?}");
+    assert!(
+        horizontal_at(&side_visible, 2.0),
+        "visible floor: {side_visible:?}"
+    );
     assert!(!horizontal_at(&lines(&side, &f, LineKind::Hidden), 2.0));
     // The view above sees the step.
     assert!(vertical_at(&lines(&above, &f, LineKind::Visible), 2.0));
@@ -174,8 +281,20 @@ fn l_block_third_angle_puts_top_above_and_right_on_the_right() {
 fn cube_with_a_hole_shows_two_dashed_lines_from_the_side() {
     let (mut d, mut h, el) = studio();
     let square = poly(&[(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)]);
-    let hole = SketchOp::AddCircle { center: Vec2::new(10.0, 10.0), radius: 5.0, construction: false };
-    prism(&mut d, &mut h, el, PlaneRef::Top, vec![square, hole], Vec2::new(1.0, 1.0), 20.0);
+    let hole = SketchOp::AddCircle {
+        center: Vec2::new(10.0, 10.0),
+        radius: 5.0,
+        construction: false,
+    };
+    prism(
+        &mut d,
+        &mut h,
+        el,
+        PlaneRef::Top,
+        vec![square, hole],
+        Vec2::new(1.0, 1.0),
+        20.0,
+    );
     let f = features(&d, el);
     let mut side = View::base(reference(), NamedView::Right, Scale::new(1, 1), [0.0, 0.0]);
     side.hidden_lines = true;
@@ -195,7 +314,11 @@ fn cube_with_a_hole_shows_two_dashed_lines_from_the_side() {
     }
     // With hidden lines off, none.
     side.hidden_lines = false;
-    assert!(view_lines(&side, &g.projection).iter().all(|l| l.kind != LineKind::Hidden));
+    assert!(
+        view_lines(&side, &g.projection)
+            .iter()
+            .all(|l| l.kind != LineKind::Hidden)
+    );
 }
 
 #[test]
@@ -206,13 +329,20 @@ fn half_scale_halves_every_projected_length() {
         bracket::build_in(&mut s, el).unwrap();
     }
     let f = features(&d, el);
-    let mut full = View::base(reference(), NamedView::Front, Scale::new(1, 1), [30.0, 40.0]);
+    let mut full = View::base(
+        reference(),
+        NamedView::Front,
+        Scale::new(1, 1),
+        [30.0, 40.0],
+    );
     full.hidden_lines = true;
     let mut half = full.clone();
     half.scale = Scale::new(1, 2);
     let g = views::project(&f, request(&full, true)).unwrap();
     let len = |pts: &[[f64; 2]]| -> f64 {
-        pts.windows(2).map(|w| ((w[1][0] - w[0][0]).powi(2) + (w[1][1] - w[0][1]).powi(2)).sqrt()).sum()
+        pts.windows(2)
+            .map(|w| ((w[1][0] - w[0][0]).powi(2) + (w[1][1] - w[0][1]).powi(2)).sqrt())
+            .sum()
     };
     let a = view_lines(&full, &g.projection);
     let b = view_lines(&half, &g.projection);
@@ -257,9 +387,19 @@ fn bracket_views_have_hidden_and_tangent_edges_with_names() {
     let g = views::project(&f, req).unwrap();
     use cadrs_kernel::{ProjClass, ProjVisibility};
     // The plate's four holes seen from the front: their sides are hidden.
-    assert!(g.projection.of(ProjVisibility::Hidden, ProjClass::Outline).count() >= 4);
+    assert!(
+        g.projection
+            .of(ProjVisibility::Hidden, ProjClass::Outline)
+            .count()
+            >= 4
+    );
     // The plate's rounded corners meet its front and side faces in tangent edges.
-    assert!(g.projection.of(ProjVisibility::Visible, ProjClass::Smooth).count() >= 2);
+    assert!(
+        g.projection
+            .of(ProjVisibility::Visible, ProjClass::Smooth)
+            .count()
+            >= 2
+    );
     // Sharp edges carry persistent names.
     let named = g
         .projection
@@ -268,8 +408,16 @@ fn bracket_views_have_hidden_and_tangent_edges_with_names() {
         .filter(|e| e.class == ProjClass::Sharp)
         .filter(|e| e.source.and_then(|s| s.edge_name).is_some())
         .count();
-    let sharp = g.projection.edges.iter().filter(|e| e.class == ProjClass::Sharp).count();
-    assert!(named * 10 >= sharp * 9, "{named} of {sharp} sharp edges named");
+    let sharp = g
+        .projection
+        .edges
+        .iter()
+        .filter(|e| e.class == ProjClass::Sharp)
+        .count();
+    assert!(
+        named * 10 >= sharp * 9,
+        "{named} of {sharp} sharp edges named"
+    );
     // Shaded triangles cover the part's outline (120 wide, 70 tall).
     assert!(!g.shaded.is_empty());
     let (lo, hi) = g.bounds.unwrap();

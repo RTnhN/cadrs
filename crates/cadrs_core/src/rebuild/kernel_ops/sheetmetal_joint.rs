@@ -13,13 +13,26 @@ use cadrs_sheetmetal::JointKind;
 use crate::sheetmetal_joint::ModifyJointFeature;
 
 impl Rebuilder {
-    pub(in crate::rebuild) fn modify_joint(&mut self, id: FeatureId, name: &str, x: &ModifyJointFeature, state: &Arc<State>) -> Result<Output, String> {
-        let ci = state.sheet_metal.iter().position(|c| c.feature == x.model).ok_or("The sheet metal model of this joint doesn't exist")?;
+    pub(in crate::rebuild) fn modify_joint(
+        &mut self,
+        id: FeatureId,
+        name: &str,
+        x: &ModifyJointFeature,
+        state: &Arc<State>,
+    ) -> Result<Output, String> {
+        let ci = state
+            .sheet_metal
+            .iter()
+            .position(|c| c.feature == x.model)
+            .ok_or("The sheet metal model of this joint doesn't exist")?;
         if let Some(e) = x.range_error() {
             return Err(e.message());
         }
         let joint = x.joint.ok_or("Select a joint")?;
-        let now = state.sheet_metal[ci].model.joint(joint).ok_or("The joint no longer exists")?;
+        let now = state.sheet_metal[ci]
+            .model
+            .joint(joint)
+            .ok_or("The joint no longer exists")?;
         let tangent_now = matches!(now.kind, JointKind::Tangent { .. });
         let Some(edit) = x.edit() else {
             // Tangent: only a joint between a rolled wall and its neighbour is one, as it is.
@@ -33,7 +46,10 @@ impl Rebuilder {
             return Err("A tangent joint can't be made a bend or a rip".into());
         }
         self.edit_sheet_metal(id, name, state, ci, |ctx| {
-            ctx.def.as_mut().ok_or("The sheet metal model must be rebuilt before its joints can be modified")?.edit_joint(edit)?;
+            ctx.def
+                .as_mut()
+                .ok_or("The sheet metal model must be rebuilt before its joints can be modified")?
+                .edit_joint(edit)?;
             Ok(None)
         })
     }

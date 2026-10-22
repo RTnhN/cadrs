@@ -28,7 +28,14 @@ pub enum DxfUnits {
 }
 
 impl DxfUnits {
-    pub const ALL: [DxfUnits; 6] = [DxfUnits::Meter, DxfUnits::Centimeter, DxfUnits::Millimeter, DxfUnits::Inch, DxfUnits::Foot, DxfUnits::Yard];
+    pub const ALL: [DxfUnits; 6] = [
+        DxfUnits::Meter,
+        DxfUnits::Centimeter,
+        DxfUnits::Millimeter,
+        DxfUnits::Inch,
+        DxfUnits::Foot,
+        DxfUnits::Yard,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -56,7 +63,10 @@ impl DxfUnits {
     /// The units a file says it is in (its `$INSUNITS`), millimetres when it says nothing we
     /// know.
     pub fn of_file(unit_mm: f64) -> DxfUnits {
-        DxfUnits::ALL.into_iter().find(|u| (u.mm() - unit_mm).abs() < 1e-9 * unit_mm.max(1.0)).unwrap_or_default()
+        DxfUnits::ALL
+            .into_iter()
+            .find(|u| (u.mm() - unit_mm).abs() < 1e-9 * unit_mm.max(1.0))
+            .unwrap_or_default()
     }
 }
 
@@ -94,7 +104,9 @@ pub(crate) struct Builder {
 
 impl Builder {
     pub(crate) fn pt(&mut self, p: Vec2) -> PointId {
-        self.s.point_at(p, JOIN).unwrap_or_else(|| self.s.add_point(p))
+        self.s
+            .point_at(p, JOIN)
+            .unwrap_or_else(|| self.s.add_point(p))
     }
 
     pub(crate) fn line(&mut self, a: Vec2, b: Vec2) {
@@ -103,7 +115,10 @@ impl Builder {
             return;
         }
         let (a, b) = (self.pt(a), self.pt(b));
-        self.s.curves.insert(Curve { kind: CurveKind::Line { a, b }, construction: false });
+        self.s.curves.insert(Curve {
+            kind: CurveKind::Line { a, b },
+            construction: false,
+        });
         self.r.lines += 1;
     }
 
@@ -115,7 +130,10 @@ impl Builder {
         }
         let center = self.s.add_point(c);
         let (start, end) = (self.pt(a), self.pt(b));
-        self.s.curves.insert(Curve { kind: CurveKind::Arc { center, start, end }, construction: false });
+        self.s.curves.insert(Curve {
+            kind: CurveKind::Arc { center, start, end },
+            construction: false,
+        });
         self.r.arcs += 1;
     }
 
@@ -125,7 +143,10 @@ impl Builder {
             return;
         }
         let center = self.s.add_point(c);
-        self.s.curves.insert(Curve { kind: CurveKind::Circle { center, radius }, construction: false });
+        self.s.curves.insert(Curve {
+            kind: CurveKind::Circle { center, radius },
+            construction: false,
+        });
         self.r.circles += 1;
     }
 
@@ -137,7 +158,10 @@ impl Builder {
         }
         let (a, b) = (self.pt(a), self.pt(b));
         let (c1, c2) = (self.s.add_point(c1), self.s.add_point(c2));
-        self.s.curves.insert(Curve { kind: CurveKind::Bezier { a, c1, c2, b }, construction: false });
+        self.s.curves.insert(Curve {
+            kind: CurveKind::Bezier { a, c1, c2, b },
+            construction: false,
+        });
         self.r.beziers += 1;
     }
 
@@ -153,9 +177,17 @@ impl Builder {
         let d = Vec2::new((b.x - a.x) / chord, (b.y - a.y) / chord);
         // The centre is left of a→b for a counter-clockwise bulge less than a half turn.
         let h = (r * r - chord * chord / 4.0).max(0.0).sqrt();
-        let side = if (bulge > 0.0) == (sweep.abs() < std::f64::consts::PI) { 1.0 } else { -1.0 };
+        let side = if (bulge > 0.0) == (sweep.abs() < std::f64::consts::PI) {
+            1.0
+        } else {
+            -1.0
+        };
         let c = Vec2::new(mid.x - d.y * h * side, mid.y + d.x * h * side);
-        if bulge > 0.0 { self.arc(c, a, b) } else { self.arc(c, b, a) }
+        if bulge > 0.0 {
+            self.arc(c, a, b)
+        } else {
+            self.arc(c, b, a)
+        }
     }
 }
 
@@ -165,7 +197,10 @@ pub fn sketch_of(d: &DxfDrawing, units: DxfUnits, file_origin: bool) -> (Sketch,
     // The reader keeps the file's numbers (its `unit_mm` only says what the file claims).
     let k = units.mm();
     let mut ents: Vec<Entity> = d.entities.clone();
-    let mut b = Builder { s: Sketch::new(), r: ImportReport::default() };
+    let mut b = Builder {
+        s: Sketch::new(),
+        r: ImportReport::default(),
+    };
     // Where the geometry goes: its bounds' centre onto the origin unless the file's origin is kept.
     let mut shift = [0.0, 0.0];
     if !file_origin {
@@ -184,7 +219,9 @@ pub fn sketch_of(d: &DxfDrawing, units: DxfUnits, file_origin: bool) -> (Sketch,
                     grow([center[0] + radius, center[1] + radius]);
                 }
                 Entity::Polyline { points, .. } => points.iter().copied().for_each(&mut grow),
-                Entity::Spline { control, fit, .. } => control.iter().chain(fit).copied().for_each(&mut grow),
+                Entity::Spline { control, fit, .. } => {
+                    control.iter().chain(fit).copied().for_each(&mut grow)
+                }
                 _ => {}
             }
         }
@@ -196,12 +233,26 @@ pub fn sketch_of(d: &DxfDrawing, units: DxfUnits, file_origin: bool) -> (Sketch,
     for e in ents.drain(..) {
         match e {
             Entity::Line { a, b: e2 } => b.line(v(a), v(e2)),
-            Entity::Arc { center, radius, start, end } => {
-                let at = |deg: f64| [center[0] + radius * deg.to_radians().cos(), center[1] + radius * deg.to_radians().sin()];
+            Entity::Arc {
+                center,
+                radius,
+                start,
+                end,
+            } => {
+                let at = |deg: f64| {
+                    [
+                        center[0] + radius * deg.to_radians().cos(),
+                        center[1] + radius * deg.to_radians().sin(),
+                    ]
+                };
                 b.arc(v(center), v(at(start)), v(at(end)));
             }
             Entity::Circle { center, radius } => b.circle(v(center), radius * k),
-            Entity::Polyline { points, bulges, closed } => {
+            Entity::Polyline {
+                points,
+                bulges,
+                closed,
+            } => {
                 let n = points.len();
                 let segs = if closed { n } else { n.saturating_sub(1) };
                 for i in 0..segs {
@@ -210,10 +261,23 @@ pub fn sketch_of(d: &DxfDrawing, units: DxfUnits, file_origin: bool) -> (Sketch,
                 }
             }
             e @ Entity::Spline { .. } => {
-                let Entity::Spline { fit, .. } = &e else { unreachable!() };
-                let pts: Vec<Vec2> = if fit.len() >= 2 { fit.iter().map(|p| v(*p)).collect() } else { cadrs_drawing::dxf::spline_points(&e).into_iter().map(v).collect() };
+                let Entity::Spline { fit, .. } = &e else {
+                    unreachable!()
+                };
+                let pts: Vec<Vec2> = if fit.len() >= 2 {
+                    fit.iter().map(|p| v(*p)).collect()
+                } else {
+                    cadrs_drawing::dxf::spline_points(&e)
+                        .into_iter()
+                        .map(v)
+                        .collect()
+                };
                 let closed = pts.len() > 3 && pts[0].distance(pts[pts.len() - 1]) <= JOIN;
-                let pts = if closed { &pts[..pts.len() - 1] } else { &pts[..] };
+                let pts = if closed {
+                    &pts[..pts.len() - 1]
+                } else {
+                    &pts[..]
+                };
                 match b.s.add_spline(pts, closed, None, None, false) {
                     Some(_) => b.r.splines += 1,
                     None => b.r.skipped += 1,
@@ -227,7 +291,10 @@ pub fn sketch_of(d: &DxfDrawing, units: DxfUnits, file_origin: bool) -> (Sketch,
 
 /// Reads a DXF or DWG file (a DWG through the external converter).
 pub fn read_file(path: &std::path::Path) -> Result<DxfDrawing, String> {
-    let dwg = path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("dwg"));
+    let dwg = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("dwg"));
     let text = if dwg {
         let conv = cadrs_drawing::dwg::find_converter().ok_or(cadrs_drawing::dwg::INSTALL_HINT)?;
         cadrs_drawing::dwg::dwg_to_dxf(&conv, path)?
@@ -254,8 +321,16 @@ impl Command for InsertDxf {
         Scope::Element(self.element)
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
-        let op = SketchOp::Paste { sketch: Box::new(self.geometry.clone()), offset: Vec2::ZERO };
-        crate::commands::EditSketch { element: self.element, feature: self.feature, op }.apply(doc)
+        let op = SketchOp::Paste {
+            sketch: Box::new(self.geometry.clone()),
+            offset: Vec2::ZERO,
+        };
+        crate::commands::EditSketch {
+            element: self.element,
+            feature: self.feature,
+            op,
+        }
+        .apply(doc)
     }
 }
 
@@ -284,8 +359,13 @@ mod tests {
         assert!((x - 20.0 * 25.4).abs() < 1e-9, "{x}");
         // Centred.
         let (s, _) = sketch_of(&d, DxfUnits::Millimeter, false);
-        let (lo, hi) = s.points.values().fold((f64::MAX, f64::MIN), |(lo, hi), p| (lo.min(p.pos.x), hi.max(p.pos.x)));
-        assert!((lo + 10.0).abs() < 1e-9 && (hi - 10.0).abs() < 1e-9, "{lo} {hi}");
+        let (lo, hi) = s.points.values().fold((f64::MAX, f64::MIN), |(lo, hi), p| {
+            (lo.min(p.pos.x), hi.max(p.pos.x))
+        });
+        assert!(
+            (lo + 10.0).abs() < 1e-9 && (hi - 10.0).abs() < 1e-9,
+            "{lo} {hi}"
+        );
     }
 
     #[test]
@@ -300,7 +380,10 @@ mod tests {
         ];
         let mut dxf = String::from("0\nSECTION\n2\nENTITIES\n");
         for (a, b) in lines {
-            dxf += &format!("0\nLINE\n8\n0\n10\n{}\n20\n{}\n11\n{}\n21\n{}\n", a[0], a[1], b[0], b[1]);
+            dxf += &format!(
+                "0\nLINE\n8\n0\n10\n{}\n20\n{}\n11\n{}\n21\n{}\n",
+                a[0], a[1], b[0], b[1]
+            );
         }
         dxf += "0\nCIRCLE\n8\n0\n10\n15.0\n20\n10.0\n40\n4.0\n0\nENDSEC\n0\nEOF\n";
         let d = cadrs_drawing::dxf::read_dxf(&dxf).unwrap();
@@ -309,8 +392,15 @@ mod tests {
         // The four corners shared (plus the circle's centre).
         assert_eq!(s.points.len(), 5);
         let regions = cadrs_sketch::region::regions(&s);
-        let plate = regions.iter().find(|g| !g.holes.is_empty()).expect("the plate closes round its hole");
+        let plate = regions
+            .iter()
+            .find(|g| !g.holes.is_empty())
+            .expect("the plate closes round its hole");
         let want = 30.0 * 20.0 - std::f64::consts::PI * 16.0;
-        assert!((plate.area() - want).abs() < 0.05, "{} vs {want}", plate.area());
+        assert!(
+            (plate.area() - want).abs() < 0.05,
+            "{} vs {want}",
+            plate.area()
+        );
     }
 }

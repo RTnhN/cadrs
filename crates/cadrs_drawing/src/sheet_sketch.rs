@@ -45,16 +45,24 @@ pub struct SketchItem {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ItemKind {
-    Line { a: P2, b: P2 },
+    Line {
+        a: P2,
+        b: P2,
+    },
     /// Passes through `points` (at least two).
-    Spline { points: Vec<P2> },
+    Spline {
+        points: Vec<P2>,
+    },
     Block(Block),
     Image(SheetImage),
 }
 
 impl SketchItem {
     pub fn new(kind: ItemKind) -> Self {
-        Self { id: ItemId::new(), kind }
+        Self {
+            id: ItemId::new(),
+            kind,
+        }
     }
 
     /// What the undo label calls it.
@@ -87,10 +95,21 @@ fn one() -> f64 {
 /// A 2D entity of an imported drawing (block coordinates, mm).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Entity {
-    Line { a: P2, b: P2 },
+    Line {
+        a: P2,
+        b: P2,
+    },
     /// Counter-clockwise from `start` to `end` (degrees).
-    Arc { center: P2, radius: f64, start: f64, end: f64 },
-    Circle { center: P2, radius: f64 },
+    Arc {
+        center: P2,
+        radius: f64,
+        start: f64,
+        end: f64,
+    },
+    Circle {
+        center: P2,
+        radius: f64,
+    },
     /// `bulges[i]` bends the segment from point `i` to the next (tan of a quarter of its angle).
     Polyline {
         points: Vec<P2>,
@@ -108,9 +127,16 @@ pub enum Entity {
         fit: Vec<P2>,
     },
     /// `at` is the left end of the baseline; `height` the cap height (mm).
-    Text { at: P2, height: f64, text: String, rotation: f64 },
+    Text {
+        at: P2,
+        height: f64,
+        text: String,
+        rotation: f64,
+    },
     /// A filled polygon (DXF SOLID).
-    Solid { points: Vec<P2> },
+    Solid {
+        points: Vec<P2>,
+    },
 }
 
 /// An image on the sheet.
@@ -138,14 +164,26 @@ impl SheetImage {
     /// The corners: bottom-left, bottom-right, top-right, top-left.
     pub fn corners(&self) -> [P2; 4] {
         let [x, y] = self.at;
-        [[x, y], [x + self.width, y], [x + self.width, y + self.height], [x, y + self.height]]
+        [
+            [x, y],
+            [x + self.width, y],
+            [x + self.width, y + self.height],
+            [x, y + self.height],
+        ]
     }
 }
 
 /// An image `width` mm wide with its file's aspect ratio, its bottom-left corner at `at`.
 pub fn image_item(name: &str, data: Vec<u8>, pixels: (u32, u32), at: P2, width: f64) -> SheetImage {
     let aspect = pixels.0.max(1) as f64 / pixels.1.max(1) as f64;
-    SheetImage { name: name.into(), at, width, height: width / aspect, pixels, data }
+    SheetImage {
+        name: name.into(),
+        at,
+        width,
+        height: width / aspect,
+        pixels,
+        data,
+    }
 }
 
 /// The smallest an image gets (mm, its shorter side).
@@ -159,11 +197,19 @@ pub fn resize_image(img: &SheetImage, corner: usize, to: P2) -> SheetImage {
     let aspect = img.aspect();
     let (dx, dy) = ((to[0] - fixed[0]).abs(), (to[1] - fixed[1]).abs());
     let mut w = dx.max(dy * aspect);
-    let min_w = if aspect >= 1.0 { MIN_IMAGE * aspect } else { MIN_IMAGE };
+    let min_w = if aspect >= 1.0 {
+        MIN_IMAGE * aspect
+    } else {
+        MIN_IMAGE
+    };
     w = w.max(min_w);
     let h = w / aspect;
     // The moved corner stays on its side of the fixed one.
-    let sx = if corner == 1 || corner == 2 { 1.0 } else { -1.0 };
+    let sx = if corner == 1 || corner == 2 {
+        1.0
+    } else {
+        -1.0
+    };
     let sy = if corner >= 2 { 1.0 } else { -1.0 };
     let other = [fixed[0] + sx * w, fixed[1] + sy * h];
     let mut out = img.clone();
@@ -186,7 +232,12 @@ pub fn spline_beziers(points: &[P2]) -> Vec<[P2; 4]> {
     let k = points;
     let lerp = |a: P2, b: P2, t: f64| [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
     if n == 1 {
-        return vec![[k[0], lerp(k[0], k[1], 1.0 / 3.0), lerp(k[0], k[1], 2.0 / 3.0), k[1]]];
+        return vec![[
+            k[0],
+            lerp(k[0], k[1], 1.0 / 3.0),
+            lerp(k[0], k[1], 2.0 / 3.0),
+            k[1],
+        ]];
     }
     // The first control points solve a tridiagonal system (the natural spline in Bézier form).
     let mut a = vec![0.0; n];
@@ -195,11 +246,29 @@ pub fn spline_beziers(points: &[P2]) -> Vec<[P2; 4]> {
     let mut r = vec![[0.0; 2]; n];
     for i in 0..n {
         let (ai, bi, ci, ri) = if i == 0 {
-            (0.0, 2.0, 1.0, [k[0][0] + 2.0 * k[1][0], k[0][1] + 2.0 * k[1][1]])
+            (
+                0.0,
+                2.0,
+                1.0,
+                [k[0][0] + 2.0 * k[1][0], k[0][1] + 2.0 * k[1][1]],
+            )
         } else if i == n - 1 {
-            (2.0, 7.0, 0.0, [8.0 * k[n - 1][0] + k[n][0], 8.0 * k[n - 1][1] + k[n][1]])
+            (
+                2.0,
+                7.0,
+                0.0,
+                [8.0 * k[n - 1][0] + k[n][0], 8.0 * k[n - 1][1] + k[n][1]],
+            )
         } else {
-            (1.0, 4.0, 1.0, [4.0 * k[i][0] + 2.0 * k[i + 1][0], 4.0 * k[i][1] + 2.0 * k[i + 1][1]])
+            (
+                1.0,
+                4.0,
+                1.0,
+                [
+                    4.0 * k[i][0] + 2.0 * k[i + 1][0],
+                    4.0 * k[i][1] + 2.0 * k[i + 1][1],
+                ],
+            )
         };
         a[i] = ai;
         b[i] = bi;
@@ -214,14 +283,23 @@ pub fn spline_beziers(points: &[P2]) -> Vec<[P2; 4]> {
     let mut p1 = vec![[0.0; 2]; n];
     p1[n - 1] = [r[n - 1][0] / b[n - 1], r[n - 1][1] / b[n - 1]];
     for i in (0..n - 1).rev() {
-        p1[i] = [(r[i][0] - c[i] * p1[i + 1][0]) / b[i], (r[i][1] - c[i] * p1[i + 1][1]) / b[i]];
+        p1[i] = [
+            (r[i][0] - c[i] * p1[i + 1][0]) / b[i],
+            (r[i][1] - c[i] * p1[i + 1][1]) / b[i],
+        ];
     }
     (0..n)
         .map(|i| {
             let p2 = if i < n - 1 {
-                [2.0 * k[i + 1][0] - p1[i + 1][0], 2.0 * k[i + 1][1] - p1[i + 1][1]]
+                [
+                    2.0 * k[i + 1][0] - p1[i + 1][0],
+                    2.0 * k[i + 1][1] - p1[i + 1][1],
+                ]
             } else {
-                [(k[n][0] + p1[n - 1][0]) / 2.0, (k[n][1] + p1[n - 1][1]) / 2.0]
+                [
+                    (k[n][0] + p1[n - 1][0]) / 2.0,
+                    (k[n][1] + p1[n - 1][1]) / 2.0,
+                ]
             };
             [k[i], p1[i], p2, k[i + 1]]
         })
@@ -274,7 +352,13 @@ pub fn spline_nurbs(points: &[P2]) -> (Vec<f64>, Vec<P2>) {
 }
 
 /// Evaluates a (rational) B-spline of `degree` at `t` (de Boor).
-pub fn bspline_at(degree: usize, knots: &[f64], control: &[P2], weights: &[f64], t: f64) -> Option<P2> {
+pub fn bspline_at(
+    degree: usize,
+    knots: &[f64],
+    control: &[P2],
+    weights: &[f64],
+    t: f64,
+) -> Option<P2> {
     let p = degree;
     let n = control.len();
     if n == 0 || knots.len() < n + p + 1 {
@@ -297,7 +381,11 @@ pub fn bspline_at(degree: usize, knots: &[f64], control: &[P2], weights: &[f64],
         for j in (r..=p).rev() {
             let i = j + k - p;
             let den = knots[i + p + 1 - r] - knots[i];
-            let alpha = if den.abs() < 1e-300 { 0.0 } else { (t - knots[i]) / den };
+            let alpha = if den.abs() < 1e-300 {
+                0.0
+            } else {
+                (t - knots[i]) / den
+            };
             let prev = d[j - 1];
             for (c, v) in d[j].iter_mut().enumerate() {
                 *v = (1.0 - alpha) * prev[c] + alpha * *v;
@@ -309,19 +397,39 @@ pub fn bspline_at(degree: usize, knots: &[f64], control: &[P2], weights: &[f64],
 }
 
 /// A B-spline as a polyline (`per` points per knot span).
-pub fn bspline_polyline(degree: usize, knots: &[f64], control: &[P2], weights: &[f64], per: usize) -> Vec<P2> {
+pub fn bspline_polyline(
+    degree: usize,
+    knots: &[f64],
+    control: &[P2],
+    weights: &[f64],
+    per: usize,
+) -> Vec<P2> {
     let n = control.len();
     if n < 2 || knots.len() < n + degree + 1 {
         return control.to_vec();
     }
     let (t0, t1) = (knots[degree], knots[n]);
-    let spans = knots[degree..=n].windows(2).filter(|w| w[1] > w[0]).count().max(1);
+    let spans = knots[degree..=n]
+        .windows(2)
+        .filter(|w| w[1] > w[0])
+        .count()
+        .max(1);
     let steps = spans * per;
     (0..=steps)
         .filter_map(|i| {
             let t = t0 + (t1 - t0) * i as f64 / steps as f64;
             // The last point is exactly the end.
-            if i == steps { bspline_at(degree, knots, control, weights, t1 - 1e-12 * (t1 - t0).abs().max(1.0)) } else { bspline_at(degree, knots, control, weights, t) }
+            if i == steps {
+                bspline_at(
+                    degree,
+                    knots,
+                    control,
+                    weights,
+                    t1 - 1e-12 * (t1 - t0).abs().max(1.0),
+                )
+            } else {
+                bspline_at(degree, knots, control, weights, t)
+            }
         })
         .collect()
 }
@@ -392,10 +500,25 @@ pub fn block_to_sheet(b: &Block, p: P2) -> P2 {
 pub fn entity_polylines(e: &Entity) -> Vec<Vec<P2>> {
     match e {
         Entity::Line { a, b } => vec![vec![*a, *b]],
-        Entity::Arc { center, radius, start, end } => vec![arc_polyline(*center, *radius, *start, *end)],
+        Entity::Arc {
+            center,
+            radius,
+            start,
+            end,
+        } => vec![arc_polyline(*center, *radius, *start, *end)],
         Entity::Circle { center, radius } => vec![arc_polyline(*center, *radius, 0.0, 360.0)],
-        Entity::Polyline { points, bulges, closed } => vec![bulge_polyline(points, bulges, *closed)],
-        Entity::Spline { degree, knots, control, weights, .. } => vec![bspline_polyline(*degree, knots, control, weights, 16)],
+        Entity::Polyline {
+            points,
+            bulges,
+            closed,
+        } => vec![bulge_polyline(points, bulges, *closed)],
+        Entity::Spline {
+            degree,
+            knots,
+            control,
+            weights,
+            ..
+        } => vec![bspline_polyline(*degree, knots, control, weights, 16)],
         Entity::Solid { points } => {
             let mut p = points.clone();
             if let Some(f) = points.first() {
@@ -411,7 +534,12 @@ pub fn entity_polylines(e: &Entity) -> Vec<Vec<P2>> {
 pub fn bounds(points: impl IntoIterator<Item = P2>) -> Option<(P2, P2)> {
     let mut it = points.into_iter();
     let f = it.next()?;
-    Some(it.fold((f, f), |(lo, hi), p| ([lo[0].min(p[0]), lo[1].min(p[1])], [hi[0].max(p[0]), hi[1].max(p[1])])))
+    Some(it.fold((f, f), |(lo, hi), p| {
+        (
+            [lo[0].min(p[0]), lo[1].min(p[1])],
+            [hi[0].max(p[0]), hi[1].max(p[1])],
+        )
+    }))
 }
 
 /// The extent of a text entity (block coordinates): its baseline box.
@@ -419,13 +547,23 @@ fn text_corners(at: P2, height: f64, text: &str, rotation: f64) -> [P2; 4] {
     let w = crate::annotation::text_width(text) * height;
     let (s, c) = rotation.to_radians().sin_cos();
     let q = |x: f64, y: f64| [at[0] + x * c - y * s, at[1] + x * s + y * c];
-    [q(0.0, -0.25 * height), q(w, -0.25 * height), q(w, 1.1 * height), q(0.0, 1.1 * height)]
+    [
+        q(0.0, -0.25 * height),
+        q(w, -0.25 * height),
+        q(w, 1.1 * height),
+        q(0.0, 1.1 * height),
+    ]
 }
 
 /// The entities' bounding box (block coordinates).
 pub fn entities_bounds(es: &[Entity]) -> Option<(P2, P2)> {
     bounds(es.iter().flat_map(|e| match e {
-        Entity::Text { at, height, text, rotation } => text_corners(*at, *height, text, *rotation).to_vec(),
+        Entity::Text {
+            at,
+            height,
+            text,
+            rotation,
+        } => text_corners(*at, *height, text, *rotation).to_vec(),
         e => entity_polylines(e).into_iter().flatten().collect(),
     }))
 }
@@ -462,7 +600,11 @@ pub fn item_bounds(item: &SketchItem) -> Option<(P2, P2)> {
 fn seg_distance(p: P2, a: P2, b: P2) -> f64 {
     let d = [b[0] - a[0], b[1] - a[1]];
     let l2 = d[0] * d[0] + d[1] * d[1];
-    let t = if l2 < 1e-300 { 0.0 } else { (((p[0] - a[0]) * d[0] + (p[1] - a[1]) * d[1]) / l2).clamp(0.0, 1.0) };
+    let t = if l2 < 1e-300 {
+        0.0
+    } else {
+        (((p[0] - a[0]) * d[0] + (p[1] - a[1]) * d[1]) / l2).clamp(0.0, 1.0)
+    };
     (p[0] - a[0] - d[0] * t).hypot(p[1] - a[1] - d[1] * t)
 }
 
@@ -479,7 +621,11 @@ pub fn item_distance(item: &SketchItem, p: P2) -> f64 {
     }
     item_polylines(item)
         .iter()
-        .flat_map(|pl| pl.windows(2).map(|w| seg_distance(p, w[0], w[1])).collect::<Vec<_>>())
+        .flat_map(|pl| {
+            pl.windows(2)
+                .map(|w| seg_distance(p, w[0], w[1]))
+                .collect::<Vec<_>>()
+        })
         .fold(f64::MAX, f64::min)
 }
 
@@ -496,9 +642,18 @@ pub enum ItemGrip {
 pub fn item_grips(item: &SketchItem) -> Vec<(P2, ItemGrip)> {
     match &item.kind {
         ItemKind::Line { a, b } => vec![(*a, ItemGrip::Point(0)), (*b, ItemGrip::Point(1))],
-        ItemKind::Spline { points } => points.iter().enumerate().map(|(i, p)| (*p, ItemGrip::Point(i))).collect(),
+        ItemKind::Spline { points } => points
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (*p, ItemGrip::Point(i)))
+            .collect(),
         ItemKind::Block(_) => Vec::new(),
-        ItemKind::Image(img) => img.corners().iter().enumerate().map(|(i, p)| (*p, ItemGrip::Corner(i))).collect(),
+        ItemKind::Image(img) => img
+            .corners()
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (*p, ItemGrip::Corner(i)))
+            .collect(),
     }
 }
 
@@ -547,7 +702,11 @@ const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012
 pub fn base64_encode(data: &[u8]) -> String {
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
         let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
         for i in 0..4 {
             if i <= chunk.len() {
@@ -604,7 +763,14 @@ mod tests {
     use super::*;
 
     fn img() -> SheetImage {
-        SheetImage { name: "logo.png".into(), at: [10.0, 20.0], width: 40.0, height: 20.0, pixels: (200, 100), data: vec![1, 2, 3] }
+        SheetImage {
+            name: "logo.png".into(),
+            at: [10.0, 20.0],
+            width: 40.0,
+            height: 20.0,
+            pixels: (200, 100),
+            data: vec![1, 2, 3],
+        }
     }
 
     #[test]
@@ -613,7 +779,12 @@ mod tests {
         // Top-right corner dragged up and right: the larger drag wins, the bottom-left stays.
         let r = resize_image(&i, 2, [80.0, 30.0]);
         assert_eq!(r.at, [10.0, 20.0]);
-        assert!((r.width / r.height - 2.0).abs() < 1e-12, "{} x {}", r.width, r.height);
+        assert!(
+            (r.width / r.height - 2.0).abs() < 1e-12,
+            "{} x {}",
+            r.width,
+            r.height
+        );
         assert!((r.width - 70.0).abs() < 1e-12);
         let r = resize_image(&i, 2, [20.0, 80.0]);
         assert!((r.width / r.height - 2.0).abs() < 1e-12);
@@ -621,7 +792,10 @@ mod tests {
         // Bottom-left dragged: the top-right corner stays.
         let r = resize_image(&i, 0, [0.0, 0.0]);
         let tr = r.corners()[2];
-        assert!((tr[0] - 50.0).abs() < 1e-12 && (tr[1] - 40.0).abs() < 1e-12, "{tr:?}");
+        assert!(
+            (tr[0] - 50.0).abs() < 1e-12 && (tr[1] - 40.0).abs() < 1e-12,
+            "{tr:?}"
+        );
         assert!((r.width / r.height - 2.0).abs() < 1e-12);
         // Dragged past the fixed corner: never smaller than the minimum.
         let r = resize_image(&i, 2, [10.0, 20.0]);
@@ -656,7 +830,10 @@ mod tests {
             for t in [0.0, 0.3, 0.7] {
                 let a = bezier_at(s, t);
                 let b = bspline_at(3, &knots, &ctrl, &[], i as f64 + t).unwrap();
-                assert!((a[0] - b[0]).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9, "{a:?} {b:?}");
+                assert!(
+                    (a[0] - b[0]).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9,
+                    "{a:?} {b:?}"
+                );
             }
         }
         let poly = spline_polyline(&pts, 8);

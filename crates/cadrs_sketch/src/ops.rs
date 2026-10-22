@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 use crate::constraint::{Constraint, ConstraintOf, CurveRef, PointRef};
 use crate::solve::{self, Source};
 use crate::{
-    ConstraintId, ConstraintSpec, Curve, CurveId, CurveKind, Dimension, DimensionId, PointId, PointSpec,
-    Sketch, Vec2,
+    ConstraintId, ConstraintSpec, Curve, CurveId, CurveKind, Dimension, DimensionId, PointId,
+    PointSpec, Sketch, Vec2,
 };
 
 /// The undo-menu label of an edit that came in as data (JSON), which has none.
@@ -111,7 +111,10 @@ pub enum SketchOp {
     SetDimensionDriven { id: DimensionId, driven: bool },
     /// Keeps (or with `None` drops) the expression a dimension's value was typed as (P3F.4,
     /// `#piston_d + #clearance`); the value itself is set by [`SketchOp::SetDimensionValue`].
-    SetDimensionExpr { id: DimensionId, expr: Option<String> },
+    SetDimensionExpr {
+        id: DimensionId,
+        expr: Option<String>,
+    },
     /// Moves a dimension's label (see [`Dimension::offset`] and [`Dimension::along`]).
     MoveDimensionLabel {
         id: DimensionId,
@@ -152,7 +155,10 @@ pub enum SketchOp {
     /// A cubic Bézier curve (S12.14, Final): its end `points[0]`, control points `points[1]`
     /// and `points[2]`, and end `points[3]`. An end placed on an existing point shares it (so a
     /// curve drawn from another's end joins it).
-    AddBezier { points: [Vec2; 4], construction: bool },
+    AddBezier {
+        points: [Vec2; 4],
+        construction: bool,
+    },
     /// A polygon on a construction circle (S7, see [`crate::entity::add_polygon`]).
     AddPolygon {
         center: Vec2,
@@ -217,7 +223,11 @@ pub enum SketchOp {
     /// Makes `line` normal to a plane (S12.10, Final re-audit): the plane's trace in the sketch
     /// (`trace`, from `link`) is used as a construction line, and the line is held square to
     /// it by a Normal constraint.
-    NormalToPlane { line: CurveId, trace: (Vec2, Vec2), link: crate::Link },
+    NormalToPlane {
+        line: CurveId,
+        trace: (Vec2, Vec2),
+        link: crate::Link,
+    },
     /// Projects shapes into the sketch, each linked to its source (S20, Use).
     Use {
         items: Vec<(crate::projection::Projected, crate::Link)>,
@@ -267,7 +277,9 @@ impl SketchOp {
             SketchOp::AddCenterRectangle { .. } => "Add rectangle".into(),
             SketchOp::AddArc { .. } => "Add arc".into(),
             SketchOp::Delete { .. } => "Delete".into(),
-            SketchOp::SetConstruction { construction: true, .. } => "Make construction".into(),
+            SketchOp::SetConstruction {
+                construction: true, ..
+            } => "Make construction".into(),
             SketchOp::SetConstruction { .. } => "Make regular geometry".into(),
             SketchOp::MovePoints { .. } => "Move".into(),
             SketchOp::SetGeometry { .. } => "Drag".into(),
@@ -341,9 +353,9 @@ impl SketchOp {
                     let (Some(CurveKind::Line { a, b }), Some(center)) = (
                         s.curves.get(l).map(|c| c.kind),
                         match s.curves.get(k).map(|c| c.kind) {
-                            Some(CurveKind::Circle { center, .. } | CurveKind::Arc { center, .. }) => {
-                                Some(s.pos(center))
-                            }
+                            Some(
+                                CurveKind::Circle { center, .. } | CurveKind::Arc { center, .. },
+                            ) => Some(s.pos(center)),
                             _ => None,
                         },
                     ) else {
@@ -355,9 +367,10 @@ impl SketchOp {
                             && !s.constraints.values().any(|x| x.uses_point(p))
                             && !s.dimensions.values().any(|d| d.kind.uses_point(p))
                     };
-                    let busy = s.constraints.values().any(|x| {
-                        x.uses_curve(l) && !matches!(x, ConstraintOf::Normal(..))
-                    });
+                    let busy = s
+                        .constraints
+                        .values()
+                        .any(|x| x.uses_curve(l) && !matches!(x, ConstraintOf::Normal(..)));
                     if !free(a) || !free(b) || busy {
                         continue;
                     }
@@ -448,10 +461,14 @@ impl SketchOp {
                 // chamfer or slot, not what it was made on: the corners (virtual sharps) and a
                 // slot's spine stay.
                 let entity_dim = match s.dimensions.get(*id).map(|d| d.kind) {
-                    Some(crate::DimensionKind::Radius { curve } | crate::DimensionKind::Diameter { curve }) => {
+                    Some(
+                        crate::DimensionKind::Radius { curve }
+                        | crate::DimensionKind::Diameter { curve },
+                    ) => {
                         let mut arcs = vec![curve];
                         for c in s.constraints.values() {
-                            if let ConstraintOf::Equal(CurveRef::Curve(a), CurveRef::Curve(b)) = *c {
+                            if let ConstraintOf::Equal(CurveRef::Curve(a), CurveRef::Curve(b)) = *c
+                            {
                                 if a == curve {
                                     arcs.push(b);
                                 } else if b == curve {
@@ -460,13 +477,17 @@ impl SketchOp {
                             }
                         }
                         for k in arcs {
-                            if let Some(CurveKind::Arc { center, .. }) = s.curves.get(k).map(|c| c.kind)
+                            if let Some(CurveKind::Arc { center, .. }) =
+                                s.curves.get(k).map(|c| c.kind)
                                 && s.curves_at(center).count() > 1
                             {
                                 out.push(ConstraintOf::FixPoint(PointRef::Point(center)));
                             }
                         }
-                        matches!(s.curves.get(curve).map(|c| c.kind), Some(CurveKind::Arc { .. }))
+                        matches!(
+                            s.curves.get(curve).map(|c| c.kind),
+                            Some(CurveKind::Arc { .. })
+                        )
                     }
                     Some(crate::DimensionKind::Aligned { a, b }) => {
                         s.virtual_sharp(a) || s.virtual_sharp(b)
@@ -497,7 +518,11 @@ impl SketchOp {
                     else {
                         continue;
                     };
-                    let Some(id) = s.constraints.iter().find(|(_, x)| **x == *c).map(|(k, _)| k)
+                    let Some(id) = s
+                        .constraints
+                        .iter()
+                        .find(|(_, x)| **x == *c)
+                        .map(|(k, _)| k)
                     else {
                         continue;
                     };
@@ -528,19 +553,37 @@ impl SketchOp {
     /// Applies the edit without solving.
     pub(crate) fn apply_raw(&self, s: &mut Sketch) -> Result<(), String> {
         match self {
-            SketchOp::AddSpline { points, periodic, start_tangent, end_tangent, construction } => {
+            SketchOp::AddSpline {
+                points,
+                periodic,
+                start_tangent,
+                end_tangent,
+                construction,
+            } => {
                 let mut pts: Vec<Vec2> = Vec::with_capacity(points.len());
                 for p in points {
-                    if pts.last().is_none_or(|q: &Vec2| q.distance(*p) > crate::MERGE_EPS) {
+                    if pts
+                        .last()
+                        .is_none_or(|q: &Vec2| q.distance(*p) > crate::MERGE_EPS)
+                    {
                         pts.push(*p);
                     }
                 }
-                if *periodic && pts.len() > 1 && pts[0].distance(pts[pts.len() - 1]) <= crate::MERGE_EPS {
+                if *periodic
+                    && pts.len() > 1
+                    && pts[0].distance(pts[pts.len() - 1]) <= crate::MERGE_EPS
+                {
                     pts.pop();
                 }
                 s.add_spline(&pts, *periodic, *start_tangent, *end_tangent, *construction)
                     .map(|_| ())
-                    .ok_or_else(|| if *periodic { "a closed spline needs three points".into() } else { "a spline needs two points".into() })
+                    .ok_or_else(|| {
+                        if *periodic {
+                            "a closed spline needs three points".into()
+                        } else {
+                            "a spline needs two points".into()
+                        }
+                    })
             }
             SketchOp::SetSplineTangents { curve, start, end } => {
                 let d = s.splines.get_mut(*curve).ok_or("not a spline")?;
@@ -778,7 +821,10 @@ impl SketchOp {
                             && s.point_at(m, crate::MERGE_EPS).is_none()
                         {
                             let p = s.add_point(m);
-                            s.add_constraint(ConstraintOf::Midpoint(PointRef::Point(p), CurveRef::Curve(c)));
+                            s.add_constraint(ConstraintOf::Midpoint(
+                                PointRef::Point(p),
+                                CurveRef::Curve(c),
+                            ));
                         }
                     }
                     if let Some(c) = spec.resolve(s) {
@@ -823,7 +869,10 @@ impl SketchOp {
                 });
                 Ok(())
             }
-            SketchOp::AddBezier { points, construction } => {
+            SketchOp::AddBezier {
+                points,
+                construction,
+            } => {
                 if points[0].distance(points[3]) <= 1e-9 {
                     return Err("a Bézier curve needs two different ends".into());
                 }
@@ -933,10 +982,15 @@ impl SketchOp {
                 Ok(())
             }
             SketchOp::NormalToPlane { line, trace, link } => {
-                if !matches!(s.curves.get(*line).map(|c| c.kind), Some(CurveKind::Line { .. })) {
+                if !matches!(
+                    s.curves.get(*line).map(|c| c.kind),
+                    Some(CurveKind::Line { .. })
+                ) {
                     return Err("Normal to a plane takes a line".into());
                 }
-                let t = match s.add_projected(crate::projection::Projected::Line(trace.0, trace.1), *link) {
+                let t = match s
+                    .add_projected(crate::projection::Projected::Line(trace.0, trace.1), *link)
+                {
                     Some(t) => t,
                     // Used already: that line.
                     None => s
@@ -962,7 +1016,9 @@ impl SketchOp {
                 for (shape, link) in items {
                     // A part vertex is a point; anything else a curve.
                     let new = match shape {
-                        crate::projection::Projected::Point(p) => s.add_projected_point(*p, *link).is_some(),
+                        crate::projection::Projected::Point(p) => {
+                            s.add_projected_point(*p, *link).is_some()
+                        }
                         _ => s.add_projected(shape.clone(), *link).is_some(),
                     };
                     added += new as usize;
@@ -997,9 +1053,12 @@ impl SketchOp {
                 crate::edit::paste(s, sketch, *offset);
                 Ok(())
             }
-            SketchOp::OffsetLoop { items, distance, left, label } => {
-                crate::face_offset::offset_loop(s, items, *distance, *left, *label).map(|_| ())
-            }
+            SketchOp::OffsetLoop {
+                items,
+                distance,
+                left,
+                label,
+            } => crate::face_offset::offset_loop(s, items, *distance, *left, *label).map(|_| ()),
             SketchOp::Batch(ops) => {
                 for op in ops {
                     op.apply_raw(s)?;
@@ -1110,9 +1169,13 @@ mod tests {
     #[test]
     fn a_new_normal_turns_the_line_about_its_middle() {
         let mut s = Sketch::new();
-        SketchOp::AddCircle { center: Vec2::new(-35.0, 15.0), radius: 7.5, construction: false }
-            .apply(&mut s)
-            .unwrap();
+        SketchOp::AddCircle {
+            center: Vec2::new(-35.0, 15.0),
+            radius: 7.5,
+            construction: false,
+        }
+        .apply(&mut s)
+        .unwrap();
         let l = s.add_line(Vec2::new(-12.0, -38.0), Vec2::new(8.0, -12.0));
         let before = s.line_length(l).unwrap();
         let (a, b) = s.curve_ends(l).unwrap();
@@ -1132,17 +1195,33 @@ mod tests {
     fn a_new_dimension_moves_its_first_point() {
         let mut s = Sketch::new();
         let l = s.add_line(Vec2::new(-50.0, -20.0), Vec2::new(40.0, -20.0));
-        s.add_constraint(ConstraintOf::Horizontal(crate::Orient::Line(CurveRef::Curve(l))));
+        s.add_constraint(ConstraintOf::Horizontal(crate::Orient::Line(
+            CurveRef::Curve(l),
+        )));
         let (left, right) = s.curve_ends(l).unwrap();
         crate::modify::split(&mut s, l, &[Vec2::new(5.0, -20.0)]).unwrap();
         crate::solve::solve(&mut s);
         let mid = s.point_at(Vec2::new(5.0, -20.0), 1e-6).unwrap();
-        let d = s.dimensions.insert(Dimension::new(DimensionKind::Horizontal { a: mid, b: left }, 55.0, -10.0));
-        SketchOp::SetDimensionValue { id: d, value: 30.0 }.apply(&mut s).unwrap();
+        let d = s.dimensions.insert(Dimension::new(
+            DimensionKind::Horizontal { a: mid, b: left },
+            55.0,
+            -10.0,
+        ));
+        SketchOp::SetDimensionValue { id: d, value: 30.0 }
+            .apply(&mut s)
+            .unwrap();
         // The split point slid; the ends stayed.
-        assert!(s.pos(left).distance(Vec2::new(-50.0, -20.0)) < 1e-6, "{:?}", s.pos(left));
+        assert!(
+            s.pos(left).distance(Vec2::new(-50.0, -20.0)) < 1e-6,
+            "{:?}",
+            s.pos(left)
+        );
         assert!(s.pos(right).distance(Vec2::new(40.0, -20.0)) < 1e-6);
-        assert!(s.pos(mid).distance(Vec2::new(-20.0, -20.0)) < 1e-6, "{:?}", s.pos(mid));
+        assert!(
+            s.pos(mid).distance(Vec2::new(-20.0, -20.0)) < 1e-6,
+            "{:?}",
+            s.pos(mid)
+        );
     }
 
     fn rect(s: &mut Sketch, w: f64, h: f64) {
@@ -1375,7 +1454,11 @@ mod tests {
         .unwrap();
         assert!((s.pos(a).distance(s.pos(b)) - 45.0).abs() < 1e-6);
         // A driven dimension cannot be edited.
-        assert!(SketchOp::SetDimensionValue { id, value: 5.0 }.apply(&mut s.clone()).is_err());
+        assert!(
+            SketchOp::SetDimensionValue { id, value: 5.0 }
+                .apply(&mut s.clone())
+                .is_err()
+        );
         // Back to driving: it takes the measured 45 and holds it.
         SketchOp::SetDimensionDriven { id, driven: false }
             .apply(&mut s)

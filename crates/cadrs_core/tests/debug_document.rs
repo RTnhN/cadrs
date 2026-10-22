@@ -5,7 +5,9 @@
 #[test]
 #[ignore]
 fn debug_rebuild_document() {
-    let Ok(path) = std::env::var("CADRS_DOC") else { return };
+    let Ok(path) = std::env::var("CADRS_DOC") else {
+        return;
+    };
     let mut p = std::path::PathBuf::from(path);
     if p.is_dir() {
         p.push("document.ron");
@@ -26,7 +28,10 @@ fn debug_rebuild_document() {
             }
         }
         for (f, e) in &b.errors {
-            let name = features.iter().find(|x| x.id == *f).map_or("?", |x| x.name.as_str());
+            let name = features
+                .iter()
+                .find(|x| x.id == *f)
+                .map_or("?", |x| x.name.as_str());
             println!("  ERROR {name}: {e}");
         }
     }

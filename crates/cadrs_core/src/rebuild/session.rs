@@ -38,7 +38,9 @@ pub(super) fn forget_written() {
 }
 
 fn restorable(key: &BlobKey) -> bool {
-    WRITTEN_SINCE_CLEAR.lock().is_ok_and(|v| v.as_ref().is_none_or(|v| v.contains(key)))
+    WRITTEN_SINCE_CLEAR
+        .lock()
+        .is_ok_and(|v| v.as_ref().is_none_or(|v| v.contains(key)))
 }
 
 /// Keeps snapshots in `store` (`None`: none are read or written; tests and benchmarks build
@@ -73,7 +75,9 @@ impl Rebuilder {
     /// Before rebuilding `features` for the app: their outputs from the store, unless this
     /// session has them. Returns how many outputs were restored.
     pub fn restore_snapshot(&mut self, features: &[Feature]) -> usize {
-        if !features.iter().any(Feature::is_part_feature) || self.entries.contains_key(&final_key(features)) {
+        if !features.iter().any(Feature::is_part_feature)
+            || self.entries.contains_key(&final_key(features))
+        {
             return 0;
         }
         let Some(store) = store() else { return 0 };
@@ -81,7 +85,9 @@ impl Rebuilder {
         if !restorable(&key) {
             return 0;
         }
-        let Some(blob) = store.get(&key) else { return 0 };
+        let Some(blob) = store.get(&key) else {
+            return 0;
+        };
         self.restore(&blob).unwrap_or(0)
     }
 
@@ -89,7 +95,13 @@ impl Rebuilder {
     /// without a store).
     pub(super) fn plan_save(&self, features: &[Feature]) -> Option<PendingSave> {
         store()?;
-        features.iter().any(Feature::is_part_feature).then(|| PendingSave { key: snapshot_key(features), outputs: self.snapshot_keys(features) })
+        features
+            .iter()
+            .any(Feature::is_part_feature)
+            .then(|| PendingSave {
+                key: snapshot_key(features),
+                outputs: self.snapshot_keys(features),
+            })
     }
 
     /// Writes a planned snapshot (the outputs that are still cached).

@@ -29,7 +29,10 @@ use crate::assembly::connector::{ConnectorFrame, MateConnector};
 use crate::assembly::mate::{Mate, MateFeature, MateId, MateKind, MateLimits, MateType};
 use crate::assembly::{Instance, InstanceId, InstanceSource, Pose};
 use crate::command::{CommandError, History};
-use crate::commands::{AddElement, AddExtrude, AddSketch, EditSketch, NewElementKind, RenamePart, SetExtrude, SetPartMaterial};
+use crate::commands::{
+    AddElement, AddExtrude, AddSketch, EditSketch, NewElementKind, RenamePart, SetExtrude,
+    SetPartMaterial,
+};
 use crate::document::{BooleanOp, Document, ExtrudeFeature, Offset};
 use crate::ids::{ElementId, FeatureId, PartId};
 
@@ -56,7 +59,12 @@ fn v(x: f64, y: f64) -> Vec2 {
 }
 
 fn poly(points: Vec<Vec2>) -> SketchOp {
-    SketchOp::AddPolyline { points, closed: true, construction: false, label: "Add polygon" }
+    SketchOp::AddPolyline {
+        points,
+        closed: true,
+        construction: false,
+        label: "Add polygon",
+    }
 }
 
 fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> SketchOp {
@@ -64,15 +72,36 @@ fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> SketchOp {
 }
 
 fn circle(x: f64, y: f64, r: f64) -> SketchOp {
-    SketchOp::AddCircle { center: v(x, y), radius: r, construction: false }
+    SketchOp::AddCircle {
+        center: v(x, y),
+        radius: r,
+        construction: false,
+    }
 }
 
 /// A sketch on Top of `ops` and its extrude from `z0` to `z1` (mm), New: one part, named.
 #[allow(clippy::too_many_arguments)]
-fn part(s: &mut dyn Studio, el: ElementId, n: u128, ops: Vec<SketchOp>, seed: Vec2, z: (f64, f64), name: &str, material: &str) -> Result<PartId, CommandError> {
+fn part(
+    s: &mut dyn Studio,
+    el: ElementId,
+    n: u128,
+    ops: Vec<SketchOp>,
+    seed: Vec2,
+    z: (f64, f64),
+    name: &str,
+    material: &str,
+) -> Result<PartId, CommandError> {
     let (sk, ex) = (fid(n), fid(n + 1));
-    s.run(&AddSketch { element: el, feature: sk, plane: Some(PlaneRef::Top) })?;
-    s.run(&EditSketch { element: el, feature: sk, op: SketchOp::Batch(ops) })?;
+    s.run(&AddSketch {
+        element: el,
+        feature: sk,
+        plane: Some(PlaneRef::Top),
+    })?;
+    s.run(&EditSketch {
+        element: el,
+        feature: sk,
+        op: SketchOp::Batch(ops),
+    })?;
     let g = s
         .document()
         .element(el)
@@ -88,13 +117,34 @@ fn part(s: &mut dyn Studio, el: ElementId, n: u128, ops: Vec<SketchOp>, seed: Ve
     let mut x = super::extrude_of(regions, z1 - z0);
     x.op = BooleanOp::New;
     if z0 != 0.0 {
-        x.start_offset = Some(Offset { value: z0.abs(), expr: format!("{} mm", z0.abs()), flip: z0 < 0.0 });
+        x.start_offset = Some(Offset {
+            value: z0.abs(),
+            expr: format!("{} mm", z0.abs()),
+            flip: z0 < 0.0,
+        });
     }
-    s.run(&AddExtrude { element: el, feature: ex, extrude: ExtrudeFeature::default() })?;
-    s.run(&SetExtrude { element: el, feature: ex, extrude: x, label: "Extrude".into() })?;
+    s.run(&AddExtrude {
+        element: el,
+        feature: ex,
+        extrude: ExtrudeFeature::default(),
+    })?;
+    s.run(&SetExtrude {
+        element: el,
+        feature: ex,
+        extrude: x,
+        label: "Extrude".into(),
+    })?;
     let p = PartId::new(ex, 0);
-    s.run(&RenamePart { element: el, part: p, name: name.into() })?;
-    s.run(&SetPartMaterial { element: el, parts: vec![p], material: crate::material::library(material) })?;
+    s.run(&RenamePart {
+        element: el,
+        part: p,
+        name: name.into(),
+    })?;
+    s.run(&SetPartMaterial {
+        element: el,
+        parts: vec![p],
+        material: crate::material::library(material),
+    })?;
     Ok(p)
 }
 
@@ -140,17 +190,23 @@ pub fn rack_outline(x0: f64, x1: f64, xc: f64, y: f64, pitch: f64, m: f64) -> Ve
 
 fn hexagon(cx: f64, cy: f64, across_flats: f64) -> Vec<Vec2> {
     let r = across_flats / 3f64.sqrt();
-    (0..6).map(|k| {
-        let a = (k as f64 * 60.0).to_radians();
-        v(cx + r * a.cos(), cy + r * a.sin())
-    }).collect()
+    (0..6)
+        .map(|k| {
+            let a = (k as f64 * 60.0).to_radians();
+            v(cx + r * a.cos(), cy + r * a.sin())
+        })
+        .collect()
 }
 
 fn file_doc(name: &str, n: u128, units_inch: bool) -> Document {
     let mut doc = Document::empty(name);
     doc.id = crate::ids::DocumentId::from_u128(0x3b09_0000_0000_0000_0000_0000_0000_0000 + n);
     if units_inch {
-        doc.units = cadrs_sketch::units::Units { length: cadrs_sketch::units::LengthUnit::Inch, mass: cadrs_sketch::units::MassUnit::Pound, ..Default::default() };
+        doc.units = cadrs_sketch::units::Units {
+            length: cadrs_sketch::units::LengthUnit::Inch,
+            mass: cadrs_sketch::units::MassUnit::Pound,
+            ..Default::default()
+        };
     }
     doc
 }
@@ -161,16 +217,54 @@ fn studio(doc: &mut Document, el: ElementId, name: &str) {
     doc.elements.push(e);
 }
 
-fn insert(doc: &mut Document, h: &mut History, asm: ElementId, i: InstanceId, el: ElementId, p: PartId, pose: Pose) -> Result<(), CommandError> {
-    h.execute(doc, &InsertInstance { element: asm, instance: Instance::new(i, InstanceSource::Part { element: el, part: p }, pose) })
+fn insert(
+    doc: &mut Document,
+    h: &mut History,
+    asm: ElementId,
+    i: InstanceId,
+    el: ElementId,
+    p: PartId,
+    pose: Pose,
+) -> Result<(), CommandError> {
+    h.execute(
+        doc,
+        &InsertInstance {
+            element: asm,
+            instance: Instance::new(
+                i,
+                InstanceSource::Part {
+                    element: el,
+                    part: p,
+                },
+                pose,
+            ),
+        },
+    )
 }
 
 /// A mate of `t` between `a` and `b` at the same frame (`at`, Z along `z`, X along `x`) in both
 /// parts' coordinates (every part is where its studio has it).
 #[allow(clippy::too_many_arguments)]
-fn mate_at(n: u128, name: &str, t: MateType, a: InstanceId, b: InstanceId, at: [f64; 3], z: [f64; 3], x: [f64; 3]) -> MateFeature {
+fn mate_at(
+    n: u128,
+    name: &str,
+    t: MateType,
+    a: InstanceId,
+    b: InstanceId,
+    at: [f64; 3],
+    z: [f64; 3],
+    x: [f64; 3],
+) -> MateFeature {
     let f = ConnectorFrame::new(at, z, x);
-    MateFeature::new(mid(n), name, MateKind::Mate(Mate::new(t, MateConnector::at(a, f), MateConnector::at(b, f))))
+    MateFeature::new(
+        mid(n),
+        name,
+        MateKind::Mate(Mate::new(
+            t,
+            MateConnector::at(a, f),
+            MateConnector::at(b, f),
+        )),
+    )
 }
 
 fn assembly_first(doc: &mut Document, asm: ElementId) {
@@ -222,46 +316,236 @@ pub fn relations_document() -> Result<Document, CommandError> {
         let s = &mut DocHistory(&mut doc, &mut h);
         let el = MECHANISMS;
         let steel = "Steel";
-        let base = part(s, el, 0x10, vec![rect(-150.0, -110.0, 150.0, 90.0)], v(0.0, 0.0), (-10.0, 0.0), "Base", "Aluminum - 6061")?;
+        let base = part(
+            s,
+            el,
+            0x10,
+            vec![rect(-150.0, -110.0, 150.0, 90.0)],
+            v(0.0, 0.0),
+            (-10.0, 0.0),
+            "Base",
+            "Aluminum - 6061",
+        )?;
         let [gx, gy] = GEAR_12_AT;
         // Each gear and the pinion has a marker hole off its axis, so its turn shows.
-        let g12 = part(s, el, 0x20, vec![poly(gear_outline(gx, gy, 12, 20.0, 0.0)), circle(gx, gy, 4.0), circle(gx, gy + 11.0, 2.5)], v(gx + 12.0, gy), (0.0, 8.0), "Gear 12T", steel)?;
+        let g12 = part(
+            s,
+            el,
+            0x20,
+            vec![
+                poly(gear_outline(gx, gy, 12, 20.0, 0.0)),
+                circle(gx, gy, 4.0),
+                circle(gx, gy + 11.0, 2.5),
+            ],
+            v(gx + 12.0, gy),
+            (0.0, 8.0),
+            "Gear 12T",
+            steel,
+        )?;
         let [gx, gy] = GEAR_24_AT;
-        let g24 = part(s, el, 0x30, vec![poly(gear_outline(gx, gy, 24, 40.0, std::f64::consts::PI / 24.0)), circle(gx, gy, 4.0), circle(gx, gy + 26.0, 4.0)], v(gx + 20.0, gy), (0.0, 8.0), "Gear 24T", steel)?;
+        let g24 = part(
+            s,
+            el,
+            0x30,
+            vec![
+                poly(gear_outline(gx, gy, 24, 40.0, std::f64::consts::PI / 24.0)),
+                circle(gx, gy, 4.0),
+                circle(gx, gy + 26.0, 4.0),
+            ],
+            v(gx + 20.0, gy),
+            (0.0, 8.0),
+            "Gear 24T",
+            steel,
+        )?;
         let [px, py] = PINION_AT;
-        let pin = part(s, el, 0x40, vec![poly(gear_outline(px, py, 10, PINION_R, 0.0)), circle(px, py, 3.0), circle(px, py + 7.5, 1.8)], v(px + 7.0, py), (0.0, 10.0), "Pinion", steel)?;
+        let pin = part(
+            s,
+            el,
+            0x40,
+            vec![
+                poly(gear_outline(px, py, 10, PINION_R, 0.0)),
+                circle(px, py, 3.0),
+                circle(px, py + 7.5, 1.8),
+            ],
+            v(px + 7.0, py),
+            (0.0, 10.0),
+            "Pinion",
+            steel,
+        )?;
         let pitch = std::f64::consts::TAU * PINION_R / 10.0;
-        let rack = part(s, el, 0x50, vec![poly(rack_outline(12.0, 140.0, px, py - PINION_R, pitch, 3.0))], v(60.0, py - PINION_R - 10.0), (0.0, 10.0), "Rack", steel)?;
+        let rack = part(
+            s,
+            el,
+            0x50,
+            vec![poly(rack_outline(
+                12.0,
+                140.0,
+                px,
+                py - PINION_R,
+                pitch,
+                3.0,
+            ))],
+            v(60.0, py - PINION_R - 10.0),
+            (0.0, 10.0),
+            "Rack",
+            steel,
+        )?;
         let [sx, sy] = SCREW_AT;
-        let screw = part(s, el, 0x60, vec![circle(sx, sy, 6.0)], v(sx, sy), (0.0, 90.0), "Screw", steel)?;
-        let nut = part(s, el, 0x70, vec![poly(hexagon(sx, sy, 22.0)), circle(sx, sy, 6.0)], v(sx + 9.0, sy), (20.0, 32.0), "Nut", "Brass")?;
-        let a = part(s, el, 0x80, vec![rect(-130.0, -60.0, -90.0, -40.0)], v(-110.0, -50.0), (0.0, 15.0), "Slide A", "Aluminum - 6061")?;
-        let b = part(s, el, 0x90, vec![rect(-130.0, -95.0, -90.0, -75.0)], v(-110.0, -85.0), (0.0, 15.0), "Slide B", "Aluminum - 6061")?;
+        let screw = part(
+            s,
+            el,
+            0x60,
+            vec![circle(sx, sy, 6.0)],
+            v(sx, sy),
+            (0.0, 90.0),
+            "Screw",
+            steel,
+        )?;
+        let nut = part(
+            s,
+            el,
+            0x70,
+            vec![poly(hexagon(sx, sy, 22.0)), circle(sx, sy, 6.0)],
+            v(sx + 9.0, sy),
+            (20.0, 32.0),
+            "Nut",
+            "Brass",
+        )?;
+        let a = part(
+            s,
+            el,
+            0x80,
+            vec![rect(-130.0, -60.0, -90.0, -40.0)],
+            v(-110.0, -50.0),
+            (0.0, 15.0),
+            "Slide A",
+            "Aluminum - 6061",
+        )?;
+        let b = part(
+            s,
+            el,
+            0x90,
+            vec![rect(-130.0, -95.0, -90.0, -75.0)],
+            v(-110.0, -85.0),
+            (0.0, 15.0),
+            "Slide B",
+            "Aluminum - 6061",
+        )?;
         [base, g12, g24, pin, rack, screw, nut, a, b]
     };
     let asm = RELATIONS_ASSEMBLY;
-    h.execute(&mut doc, &AddElement { id: asm, kind: NewElementKind::Assembly, name: Some("Mechanisms Assembly".into()), after: None })?;
-    let ids = [BASE, GEAR_12, GEAR_24, PINION, RACK, SCREW, NUT, SLIDE_A, SLIDE_B];
+    h.execute(
+        &mut doc,
+        &AddElement {
+            id: asm,
+            kind: NewElementKind::Assembly,
+            name: Some("Mechanisms Assembly".into()),
+            after: None,
+        },
+    )?;
+    let ids = [
+        BASE, GEAR_12, GEAR_24, PINION, RACK, SCREW, NUT, SLIDE_A, SLIDE_B,
+    ];
     for (i, p) in ids.iter().zip(parts) {
         insert(&mut doc, &mut h, asm, *i, MECHANISMS, p, Pose::IDENTITY)?;
     }
-    h.execute(&mut doc, &SetInstancesFixed { element: asm, instances: vec![BASE, SCREW], fixed: true })?;
+    h.execute(
+        &mut doc,
+        &SetInstancesFixed {
+            element: asm,
+            instances: vec![BASE, SCREW],
+            fixed: true,
+        },
+    )?;
     let (up, x) = ([0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
     let along_x = ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
     let mut mates = vec![
-        mate_at(1, "Revolute 1", MateType::Revolute, GEAR_12, BASE, [GEAR_12_AT[0], GEAR_12_AT[1], 0.0], up, x),
-        mate_at(2, "Revolute 2", MateType::Revolute, GEAR_24, BASE, [GEAR_24_AT[0], GEAR_24_AT[1], 0.0], up, x),
-        mate_at(3, "Revolute 3", MateType::Revolute, PINION, BASE, [PINION_AT[0], PINION_AT[1], 0.0], up, x),
-        mate_at(4, "Slider 1", MateType::Slider, RACK, BASE, [PINION_AT[0], PINION_AT[1] - PINION_R, 0.0], along_x.0, along_x.1),
-        mate_at(5, "Cylindrical 1", MateType::Cylindrical, NUT, SCREW, [SCREW_AT[0], SCREW_AT[1], 20.0], up, x),
-        mate_at(6, "Slider 2", MateType::Slider, SLIDE_A, BASE, [-110.0, -50.0, 0.0], along_x.0, along_x.1),
-        mate_at(7, "Slider 3", MateType::Slider, SLIDE_B, BASE, [-110.0, -85.0, 0.0], along_x.0, along_x.1),
+        mate_at(
+            1,
+            "Revolute 1",
+            MateType::Revolute,
+            GEAR_12,
+            BASE,
+            [GEAR_12_AT[0], GEAR_12_AT[1], 0.0],
+            up,
+            x,
+        ),
+        mate_at(
+            2,
+            "Revolute 2",
+            MateType::Revolute,
+            GEAR_24,
+            BASE,
+            [GEAR_24_AT[0], GEAR_24_AT[1], 0.0],
+            up,
+            x,
+        ),
+        mate_at(
+            3,
+            "Revolute 3",
+            MateType::Revolute,
+            PINION,
+            BASE,
+            [PINION_AT[0], PINION_AT[1], 0.0],
+            up,
+            x,
+        ),
+        mate_at(
+            4,
+            "Slider 1",
+            MateType::Slider,
+            RACK,
+            BASE,
+            [PINION_AT[0], PINION_AT[1] - PINION_R, 0.0],
+            along_x.0,
+            along_x.1,
+        ),
+        mate_at(
+            5,
+            "Cylindrical 1",
+            MateType::Cylindrical,
+            NUT,
+            SCREW,
+            [SCREW_AT[0], SCREW_AT[1], 20.0],
+            up,
+            x,
+        ),
+        mate_at(
+            6,
+            "Slider 2",
+            MateType::Slider,
+            SLIDE_A,
+            BASE,
+            [-110.0, -50.0, 0.0],
+            along_x.0,
+            along_x.1,
+        ),
+        mate_at(
+            7,
+            "Slider 3",
+            MateType::Slider,
+            SLIDE_B,
+            BASE,
+            [-110.0, -85.0, 0.0],
+            along_x.0,
+            along_x.1,
+        ),
     ];
     if let MateKind::Mate(m) = &mut mates[5].kind {
-        m.limits = Some(MateLimits { z: Some((-25.0, 25.0)), ..Default::default() });
+        m.limits = Some(MateLimits {
+            z: Some((-25.0, 25.0)),
+            ..Default::default()
+        });
     }
     for f in mates {
-        h.execute(&mut doc, &AddMateFeature { element: asm, feature: f, poses: Vec::new() })?;
+        h.execute(
+            &mut doc,
+            &AddMateFeature {
+                element: asm,
+                feature: f,
+                poses: Vec::new(),
+            },
+        )?;
     }
     assembly_first(&mut doc, asm);
     Ok(doc)
@@ -293,18 +577,92 @@ pub fn interference_document() -> Result<Document, CommandError> {
     studio(&mut doc, PIN_STUDIO, "Pin");
     let (block, plate, pin) = {
         let s = &mut DocHistory(&mut doc, &mut h);
-        let block = part(s, BLOCKS, 0x110, vec![rect(0.0, 0.0, 50.0, 30.0)], v(25.0, 15.0), (0.0, 20.0), "Block", "Aluminum - 6061")?;
-        let plate = part(s, PLATE_STUDIO, 0x120, vec![rect(0.0, 0.0, 60.0, 40.0), circle(30.0, 20.0, 4.0)], v(5.0, 5.0), (0.0, 10.0), "Plate", "Aluminum - 6061")?;
-        let pin = part(s, PIN_STUDIO, 0x130, vec![circle(0.0, 0.0, 5.0)], v(0.0, 0.0), (0.0, 25.0), "Pin", "Steel")?;
+        let block = part(
+            s,
+            BLOCKS,
+            0x110,
+            vec![rect(0.0, 0.0, 50.0, 30.0)],
+            v(25.0, 15.0),
+            (0.0, 20.0),
+            "Block",
+            "Aluminum - 6061",
+        )?;
+        let plate = part(
+            s,
+            PLATE_STUDIO,
+            0x120,
+            vec![rect(0.0, 0.0, 60.0, 40.0), circle(30.0, 20.0, 4.0)],
+            v(5.0, 5.0),
+            (0.0, 10.0),
+            "Plate",
+            "Aluminum - 6061",
+        )?;
+        let pin = part(
+            s,
+            PIN_STUDIO,
+            0x130,
+            vec![circle(0.0, 0.0, 5.0)],
+            v(0.0, 0.0),
+            (0.0, 25.0),
+            "Pin",
+            "Steel",
+        )?;
         (block, plate, pin)
     };
     let asm = INTERFERENCE_ASSEMBLY;
-    h.execute(&mut doc, &AddElement { id: asm, kind: NewElementKind::Assembly, name: Some("Interference Assembly".into()), after: None })?;
-    insert(&mut doc, &mut h, asm, BLOCK_1, BLOCKS, block, Pose::IDENTITY)?;
-    insert(&mut doc, &mut h, asm, BLOCK_2, BLOCKS, block, Pose::translation(BLOCK_2_AT))?;
-    insert(&mut doc, &mut h, asm, PLATE, PLATE_STUDIO, plate, Pose::translation([100.0, 0.0, 0.0]))?;
-    insert(&mut doc, &mut h, asm, PIN, PIN_STUDIO, pin, Pose::translation([130.0, 20.0, -8.0]))?;
-    h.execute(&mut doc, &SetInstancesFixed { element: asm, instances: vec![BLOCK_1, PLATE], fixed: true })?;
+    h.execute(
+        &mut doc,
+        &AddElement {
+            id: asm,
+            kind: NewElementKind::Assembly,
+            name: Some("Interference Assembly".into()),
+            after: None,
+        },
+    )?;
+    insert(
+        &mut doc,
+        &mut h,
+        asm,
+        BLOCK_1,
+        BLOCKS,
+        block,
+        Pose::IDENTITY,
+    )?;
+    insert(
+        &mut doc,
+        &mut h,
+        asm,
+        BLOCK_2,
+        BLOCKS,
+        block,
+        Pose::translation(BLOCK_2_AT),
+    )?;
+    insert(
+        &mut doc,
+        &mut h,
+        asm,
+        PLATE,
+        PLATE_STUDIO,
+        plate,
+        Pose::translation([100.0, 0.0, 0.0]),
+    )?;
+    insert(
+        &mut doc,
+        &mut h,
+        asm,
+        PIN,
+        PIN_STUDIO,
+        pin,
+        Pose::translation([130.0, 20.0, -8.0]),
+    )?;
+    h.execute(
+        &mut doc,
+        &SetInstancesFixed {
+            element: asm,
+            instances: vec![BLOCK_1, PLATE],
+            fixed: true,
+        },
+    )?;
     assembly_first(&mut doc, asm);
     Ok(doc)
 }
@@ -335,20 +693,64 @@ pub fn context_document() -> Result<Document, CommandError> {
             s,
             CONTEXT_BASE_STUDIO,
             0x210,
-            vec![rect(-70.0, -45.0, 70.0, 45.0), circle(HOLES_X[0], 0.0, HOLE_R), circle(HOLES_X[1], 0.0, HOLE_R)],
+            vec![
+                rect(-70.0, -45.0, 70.0, 45.0),
+                circle(HOLES_X[0], 0.0, HOLE_R),
+                circle(HOLES_X[1], 0.0, HOLE_R),
+            ],
             v(0.0, 20.0),
             (-10.0, 0.0),
             "Base",
             "Aluminum - 6061",
         )?;
-        let cover = part(s, COVER_STUDIO, 0x220, vec![rect(-60.0, -40.0, 60.0, 40.0)], v(0.0, 0.0), (0.0, 6.0), "Cover", "Aluminum - 6061")?;
+        let cover = part(
+            s,
+            COVER_STUDIO,
+            0x220,
+            vec![rect(-60.0, -40.0, 60.0, 40.0)],
+            v(0.0, 0.0),
+            (0.0, 6.0),
+            "Cover",
+            "Aluminum - 6061",
+        )?;
         (base, cover)
     };
     let asm = CONTEXT_ASSEMBLY;
-    h.execute(&mut doc, &AddElement { id: asm, kind: NewElementKind::Assembly, name: Some("Assembly 1".into()), after: None })?;
-    insert(&mut doc, &mut h, asm, CONTEXT_BASE, CONTEXT_BASE_STUDIO, base, Pose::IDENTITY)?;
-    insert(&mut doc, &mut h, asm, COVER, COVER_STUDIO, cover, Pose::IDENTITY)?;
-    h.execute(&mut doc, &SetInstancesFixed { element: asm, instances: vec![COVER], fixed: true })?;
+    h.execute(
+        &mut doc,
+        &AddElement {
+            id: asm,
+            kind: NewElementKind::Assembly,
+            name: Some("Assembly 1".into()),
+            after: None,
+        },
+    )?;
+    insert(
+        &mut doc,
+        &mut h,
+        asm,
+        CONTEXT_BASE,
+        CONTEXT_BASE_STUDIO,
+        base,
+        Pose::IDENTITY,
+    )?;
+    insert(
+        &mut doc,
+        &mut h,
+        asm,
+        COVER,
+        COVER_STUDIO,
+        cover,
+        Pose::IDENTITY,
+    )?;
+    h.execute(
+        &mut doc,
+        &SetInstancesFixed {
+            element: asm,
+            instances: vec![COVER],
+            fixed: true,
+        },
+    )?;
     assembly_first(&mut doc, asm);
     Ok(doc)
 }
@@ -363,7 +765,9 @@ pub const DOWEL_PART: PartId = PartId::new(fid(0x322), 0);
 
 /// The flange stand-in with the Long Screw and Dowel studios (inch): see the module doc.
 pub fn replace_document() -> Result<Document, CommandError> {
-    use super::step_stool::{circle as circle_in, extrude as extrude_in, sketch as sketch_in, v as v_in};
+    use super::step_stool::{
+        circle as circle_in, extrude as extrude_in, sketch as sketch_in, v as v_in,
+    };
     let mut doc = super::flange::document()?;
     doc.name = "Replace instances (stand-in)".into();
     doc.id = crate::ids::DocumentId::from_u128(0x3b09_0000_0000_0000_0000_0000_0000_0004);
@@ -372,17 +776,84 @@ pub fn replace_document() -> Result<Document, CommandError> {
     studio(&mut doc, DOWEL_STUDIO, "Dowel");
     let s = &mut DocHistory(&mut doc, &mut h);
     let el = LONG_SCREW_STUDIO;
-    let g = sketch_in(s, el, fid(0x311), PlaneRef::Top, vec![circle_in(0.0, 0.0, super::flange::HOLE_D)])?;
-    extrude_in(s, el, fid(0x311), &g, fid(0x312), &[v_in(0.0, 0.0)], (-1.5, 0.0), BooleanOp::New, &[], false)?;
-    let g = sketch_in(s, el, fid(0x313), PlaneRef::Top, vec![circle_in(0.0, 0.0, 0.4)])?;
-    extrude_in(s, el, fid(0x313), &g, fid(0x314), &[v_in(0.0, 0.0)], (0.0, 0.2), BooleanOp::Add, &[LONG_SCREW_PART], false)?;
-    s.run(&RenamePart { element: el, part: LONG_SCREW_PART, name: "Long Screw".into() })?;
-    s.run(&SetPartMaterial { element: el, parts: vec![LONG_SCREW_PART], material: crate::material::library("Steel") })?;
+    let g = sketch_in(
+        s,
+        el,
+        fid(0x311),
+        PlaneRef::Top,
+        vec![circle_in(0.0, 0.0, super::flange::HOLE_D)],
+    )?;
+    extrude_in(
+        s,
+        el,
+        fid(0x311),
+        &g,
+        fid(0x312),
+        &[v_in(0.0, 0.0)],
+        (-1.5, 0.0),
+        BooleanOp::New,
+        &[],
+        false,
+    )?;
+    let g = sketch_in(
+        s,
+        el,
+        fid(0x313),
+        PlaneRef::Top,
+        vec![circle_in(0.0, 0.0, 0.4)],
+    )?;
+    extrude_in(
+        s,
+        el,
+        fid(0x313),
+        &g,
+        fid(0x314),
+        &[v_in(0.0, 0.0)],
+        (0.0, 0.2),
+        BooleanOp::Add,
+        &[LONG_SCREW_PART],
+        false,
+    )?;
+    s.run(&RenamePart {
+        element: el,
+        part: LONG_SCREW_PART,
+        name: "Long Screw".into(),
+    })?;
+    s.run(&SetPartMaterial {
+        element: el,
+        parts: vec![LONG_SCREW_PART],
+        material: crate::material::library("Steel"),
+    })?;
     let el = DOWEL_STUDIO;
-    let g = sketch_in(s, el, fid(0x321), PlaneRef::Top, vec![circle_in(0.0, 0.0, 0.3)])?;
-    extrude_in(s, el, fid(0x321), &g, fid(0x322), &[v_in(0.0, 0.0)], (-1.0, 0.0), BooleanOp::New, &[], false)?;
-    s.run(&RenamePart { element: el, part: DOWEL_PART, name: "Dowel".into() })?;
-    s.run(&SetPartMaterial { element: el, parts: vec![DOWEL_PART], material: crate::material::library("Steel") })?;
+    let g = sketch_in(
+        s,
+        el,
+        fid(0x321),
+        PlaneRef::Top,
+        vec![circle_in(0.0, 0.0, 0.3)],
+    )?;
+    extrude_in(
+        s,
+        el,
+        fid(0x321),
+        &g,
+        fid(0x322),
+        &[v_in(0.0, 0.0)],
+        (-1.0, 0.0),
+        BooleanOp::New,
+        &[],
+        false,
+    )?;
+    s.run(&RenamePart {
+        element: el,
+        part: DOWEL_PART,
+        name: "Dowel".into(),
+    })?;
+    s.run(&SetPartMaterial {
+        element: el,
+        parts: vec![DOWEL_PART],
+        material: crate::material::library("Steel"),
+    })?;
     Ok(doc)
 }
 

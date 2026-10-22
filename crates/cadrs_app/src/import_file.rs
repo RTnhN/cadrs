@@ -28,7 +28,9 @@ use std::path::PathBuf;
 use bevy::prelude::*;
 use bevy::text::FontWeight;
 use bevy::ui_widgets::{Activate, observe};
-use cadrs_core::import::{ImportAs, ImportFormat, ImportFile, ImportIds, ImportPlan, import_elements, imported_document};
+use cadrs_core::import::{
+    ImportAs, ImportFile, ImportFormat, ImportIds, ImportPlan, import_elements, imported_document,
+};
 use cadrs_core::rebuild::PendingJob;
 use cadrs_core::{DocumentMeta, ElementKind};
 use cadrs_ui::prelude::*;
@@ -112,24 +114,44 @@ pub fn start(world: &mut World, target: ImportTarget) {
         exts.push("stl");
         exts.push("cadrs");
     }
-    cadrs_ui::file_picker::open_file_picker(&mut commands, &theme, "import-picker", "Import", target.tag(), start_dir(), &exts);
+    cadrs_ui::file_picker::open_file_picker(
+        &mut commands,
+        &theme,
+        "import-picker",
+        "Import",
+        target.tag(),
+        start_dir(),
+        &exts,
+    );
     world.flush();
 }
 
-fn on_file_picked(mut msgs: MessageReader<cadrs_ui::FilePicked>, theme: Res<Theme>, mut commands: Commands) {
+fn on_file_picked(
+    mut msgs: MessageReader<cadrs_ui::FilePicked>,
+    theme: Res<Theme>,
+    mut commands: Commands,
+) {
     for m in msgs.read() {
         let target = match m.tag.as_str() {
             "import-new" => ImportTarget::NewDocument,
             "import-here" => ImportTarget::ActiveDocument,
             _ => continue,
         };
-        if matches!(target, ImportTarget::NewDocument) && m.path.extension().is_some_and(|e| e.eq_ignore_ascii_case("cadrs")) {
+        if matches!(target, ImportTarget::NewDocument)
+            && m.path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("cadrs"))
+        {
             let path = m.path.clone();
             commands.queue(move |w: &mut World| crate::native_document::import(w, &path));
             continue;
         }
         // An STL mesh as a new document: the documents page's undoable import (P3E.1).
-        if matches!(target, ImportTarget::NewDocument) && m.path.extension().is_some_and(|e| e.eq_ignore_ascii_case("stl")) {
+        if matches!(target, ImportTarget::NewDocument)
+            && m.path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("stl"))
+        {
             let path = m.path.clone();
             commands.queue(move |w: &mut World| crate::landing::import_mesh_document(w, &path));
             continue;
@@ -141,27 +163,59 @@ fn on_file_picked(mut msgs: MessageReader<cadrs_ui::FilePicked>, theme: Res<Them
 /// Reads a STEP or IGES file for an import to `target` (picked, or dropped on the window): the
 /// kernel reads it on its thread, then the Import dialog asks how to bring it in.
 pub fn read(commands: &mut Commands, theme: &Theme, target: ImportTarget, path: &std::path::Path) {
-    let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let file_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let Some(format) = ImportFormat::of_path(path).filter(|f| f.kernel().is_some()) else {
-        show_notification(commands, theme, Notification::warning(format!("{file_name}: only STEP and IGES files can be imported")).name("import-toast"));
+        show_notification(
+            commands,
+            theme,
+            Notification::warning(format!(
+                "{file_name}: only STEP and IGES files can be imported"
+            ))
+            .name("import-toast"),
+        );
         return;
     };
     let bytes = match std::fs::read(path) {
         Ok(b) => b,
         Err(e) => {
-            show_notification(commands, theme, Notification::warning(format!("{file_name}: {e}")).name("import-toast"));
+            show_notification(
+                commands,
+                theme,
+                Notification::warning(format!("{file_name}: {e}")).name("import-toast"),
+            );
             return;
         }
     };
     let data = String::from_utf8_lossy(&bytes).into_owned();
     let pending = cadrs_core::rebuild::exchange::plan_import(format, data.clone().into_bytes());
-    show_notification(commands, theme, Notification::info(format!("Reading {file_name}…")).seconds(4.0).name("import-reading"));
-    commands.spawn((Name::new("import-running"), Reading { pending, file: ReadFile { target, file_name, data } }));
+    show_notification(
+        commands,
+        theme,
+        Notification::info(format!("Reading {file_name}…"))
+            .seconds(4.0)
+            .name("import-reading"),
+    );
+    commands.spawn((
+        Name::new("import-running"),
+        Reading {
+            pending,
+            file: ReadFile {
+                target,
+                file_name,
+                data,
+            },
+        },
+    ));
 }
 
 fn poll_reading(q: Query<(Entity, &Reading)>, theme: Res<Theme>, mut commands: Commands) {
     for (e, r) in &q {
-        let Some(result) = r.pending.poll() else { continue };
+        let Some(result) = r.pending.poll() else {
+            continue;
+        };
         commands.entity(e).despawn();
         match result.unwrap_or_else(|| Err("the kernel thread stopped".into())) {
             Ok(plan) => {
@@ -169,32 +223,68 @@ fn poll_reading(q: Query<(Entity, &Reading)>, theme: Res<Theme>, mut commands: C
                 commands.queue(move |w: &mut World| open_dialog(w, file, plan));
             }
             Err(why) => {
-                show_notification(&mut commands, &theme, Notification::warning(format!("Import of {} failed: {why}", r.file.file_name)).name("import-toast"));
+                show_notification(
+                    &mut commands,
+                    &theme,
+                    Notification::warning(format!("Import of {} failed: {why}", r.file.file_name))
+                        .name("import-toast"),
+                );
             }
         }
     }
 }
 
 fn plural(n: usize, one: &str) -> String {
-    if n == 1 { format!("1 {one}") } else { format!("{n} {one}s") }
+    if n == 1 {
+        format!("1 {one}")
+    } else {
+        format!("{n} {one}s")
+    }
 }
 
 fn open_dialog(world: &mut World, file: ReadFile, plan: ImportPlan) {
     let theme = world.resource::<Theme>().clone();
     let assembly = plan.is_assembly();
-    let how = if assembly { ImportAs::Assembly } else { ImportAs::PartStudio };
+    let how = if assembly {
+        ImportAs::Assembly
+    } else {
+        ImportAs::PartStudio
+    };
     let distinct = plan.parts.len();
     let summary = if assembly {
-        format!("{} file: an assembly of {} with {}", plan.format.label(), plural(distinct, "part"), plural(plan.occurrences.len(), "instance"))
+        format!(
+            "{} file: an assembly of {} with {}",
+            plan.format.label(),
+            plural(distinct, "part"),
+            plural(plan.occurrences.len(), "instance")
+        )
     } else {
-        format!("{} file: {}", plan.format.label(), plural(plan.part_count(cadrs_core::import::ImportMode::Flatten), "part"))
+        format!(
+            "{} file: {}",
+            plan.format.label(),
+            plural(
+                plan.part_count(cadrs_core::import::ImportMode::Flatten),
+                "part"
+            )
+        )
     };
     let stem = cadrs_core::import::stem(&file.file_name);
     let into = match file.target {
         ImportTarget::NewDocument => format!("Into a new document, \"{stem}\""),
         ImportTarget::ActiveDocument => "Into new tabs of this document".to_string(),
     };
-    let names: Vec<String> = plan.parts.iter().enumerate().map(|(i, p)| if p.name.trim().is_empty() { format!("Part {}", i + 1) } else { p.name.clone() }).collect();
+    let names: Vec<String> = plan
+        .parts
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            if p.name.trim().is_empty() {
+                format!("Part {}", i + 1)
+            } else {
+                p.name.clone()
+            }
+        })
+        .collect();
     let file_name = file.file_name.clone();
     let (tb, tf) = (theme.clone(), theme.clone());
     let mut commands = world.commands();
@@ -276,7 +366,11 @@ fn open_dialog(world: &mut World, file: ReadFile, plan: ImportPlan) {
 }
 
 /// The chosen option shows selected.
-fn sync_choice(q: Query<&ImportDialog, Changed<ImportDialog>>, q_buttons: Query<(Entity, &ChoiceButton, Has<cadrs_ui::Selected>)>, mut commands: Commands) {
+fn sync_choice(
+    q: Query<&ImportDialog, Changed<ImportDialog>>,
+    q_buttons: Query<(Entity, &ChoiceButton, Has<cadrs_ui::Selected>)>,
+    mut commands: Commands,
+) {
     let Some(d) = q.iter().next() else { return };
     for (e, b, sel) in &q_buttons {
         if (b.0 == d.how) != sel {
@@ -292,10 +386,13 @@ fn sync_choice(q: Query<&ImportDialog, Changed<ImportDialog>>, q_buttons: Query<
 /// Import: makes the tabs (a new document, or one undo step here) and opens them.
 fn run_import(world: &mut World) {
     let mut q = world.query::<(Entity, &ImportDialog)>();
-    let Some((dialog, d)) = q.iter(world).next().map(|(e, d)| (e, d.clone())) else { return };
+    let Some((dialog, d)) = q.iter(world).next().map(|(e, d)| (e, d.clone())) else {
+        return;
+    };
     let y_up = {
         let mut q = world.query::<(&Name, &cadrs_ui::CheckboxState)>();
-        q.iter(world).any(|(n, s)| n.as_str() == "import-y-up" && s.checked)
+        q.iter(world)
+            .any(|(n, s)| n.as_str() == "import-y-up" && s.checked)
     };
     world.trigger(DialogClose { entity: dialog });
     let theme = world.resource::<Theme>().clone();
@@ -306,7 +403,13 @@ fn run_import(world: &mut World) {
     let parts = d.plan.part_count(mode);
     let message = match d.file.target {
         ImportTarget::NewDocument => {
-            let mut doc = imported_document(&d.plan, &d.file.file_name, d.file.data.clone(), d.how, ImportIds::fresh());
+            let mut doc = imported_document(
+                &d.plan,
+                &d.file.file_name,
+                d.file.data.clone(),
+                d.how,
+                ImportIds::fresh(),
+            );
             if y_up {
                 cadrs_core::import::file_is_y_up(&mut doc.elements);
             }
@@ -317,14 +420,21 @@ fn run_import(world: &mut World) {
             meta.last_opened = Some(now);
             match store.create(&doc, &meta) {
                 Ok(_) => {
-                    let show = doc.elements.iter().find(|e| e.assembly_model().is_some()).or(doc.elements.first()).map(|e| e.id);
+                    let show = doc
+                        .elements
+                        .iter()
+                        .find(|e| e.assembly_model().is_some())
+                        .or(doc.elements.first())
+                        .map(|e| e.id);
                     let mut active = ActiveDocument::stored(doc, meta);
                     active.fresh = true;
                     if let Some(id) = show {
                         active.set_active(id);
                     }
                     world.insert_resource(active);
-                    world.resource_mut::<NextState<AppState>>().set(AppState::Document);
+                    world
+                        .resource_mut::<NextState<AppState>>()
+                        .set(AppState::Document);
                     Ok(())
                 }
                 Err(e) => Err(e.to_string()),
@@ -332,12 +442,28 @@ fn run_import(world: &mut World) {
         }
         ImportTarget::ActiveDocument => match world.get_resource_mut::<ActiveDocument>() {
             Some(mut doc) => {
-                let mut els = import_elements(&doc.doc, &d.plan, &d.file.file_name, d.file.data.clone(), d.how, ImportIds::fresh());
+                let mut els = import_elements(
+                    &doc.doc,
+                    &d.plan,
+                    &d.file.file_name,
+                    d.file.data.clone(),
+                    d.how,
+                    ImportIds::fresh(),
+                );
                 if y_up {
                     cadrs_core::import::file_is_y_up(&mut els);
                 }
-                let show = els.iter().find(|e| !matches!(e.kind, ElementKind::PartStudio { .. })).or(els.first()).map(|e| e.id);
-                let r = doc.execute(&ImportFile { file_name: d.file.file_name.clone(), elements: els }).map_err(|e| e.to_string());
+                let show = els
+                    .iter()
+                    .find(|e| !matches!(e.kind, ElementKind::PartStudio { .. }))
+                    .or(els.first())
+                    .map(|e| e.id);
+                let r = doc
+                    .execute(&ImportFile {
+                        file_name: d.file.file_name.clone(),
+                        elements: els,
+                    })
+                    .map_err(|e| e.to_string());
                 if let (Ok(()), Some(id)) = (&r, show) {
                     doc.set_active(id);
                 }
@@ -347,7 +473,12 @@ fn run_import(world: &mut World) {
         },
     };
     let note = match message {
-        Ok(()) => Notification::info(format!("Imported {}: {}", d.file.file_name, plural(parts, "part"))).seconds(6.0),
+        Ok(()) => Notification::info(format!(
+            "Imported {}: {}",
+            d.file.file_name,
+            plural(parts, "part")
+        ))
+        .seconds(6.0),
         Err(why) => Notification::warning(format!("Import of {} failed: {why}", d.file.file_name)),
     };
     let mut commands = world.commands();

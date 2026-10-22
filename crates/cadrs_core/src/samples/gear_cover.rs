@@ -18,7 +18,9 @@
 use cadrs_sketch::{PlaneRef, SketchOp, Vec2};
 
 use crate::command::{CommandError, History};
-use crate::commands::{AddExtrude, AddSketch, CreateFolder, EditSketch, RenamePart, SetExtrude, SetPartMaterial};
+use crate::commands::{
+    AddExtrude, AddSketch, CreateFolder, EditSketch, RenamePart, SetExtrude, SetPartMaterial,
+};
 use crate::document::{BooleanOp, Document, ExtrudeFeature, Offset};
 use crate::ids::{ElementId, FeatureId, PartId};
 
@@ -78,9 +80,22 @@ pub fn build(doc: &mut Document, h: &mut History, el: ElementId) -> Result<(), C
 pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
     let v = Vec2::new;
     // Sketch 1: the rounded rectangle.
-    s.run(&AddSketch { element: el, feature: SKETCH_1, plane: Some(PlaneRef::Top) })?;
-    s.run(&EditSketch { element: el, feature: SKETCH_1, op: rect(-HALF_WIDTH, -LENGTH, HALF_WIDTH, 0.0) })?;
-    for corner in [v(-HALF_WIDTH, -LENGTH), v(HALF_WIDTH, -LENGTH), v(HALF_WIDTH, 0.0), v(-HALF_WIDTH, 0.0)] {
+    s.run(&AddSketch {
+        element: el,
+        feature: SKETCH_1,
+        plane: Some(PlaneRef::Top),
+    })?;
+    s.run(&EditSketch {
+        element: el,
+        feature: SKETCH_1,
+        op: rect(-HALF_WIDTH, -LENGTH, HALF_WIDTH, 0.0),
+    })?;
+    for corner in [
+        v(-HALF_WIDTH, -LENGTH),
+        v(HALF_WIDTH, -LENGTH),
+        v(HALF_WIDTH, 0.0),
+        v(-HALF_WIDTH, 0.0),
+    ] {
         let p = {
             let g = &s
                 .document()
@@ -89,15 +104,18 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
                 .and_then(|f| f.sketch())
                 .ok_or_else(|| CommandError::Invalid("sketch 1 not found".into()))?
                 .geometry;
-            g.point_at(corner, 1e-9).ok_or_else(|| CommandError::Invalid("corner not found".into()))?
+            g.point_at(corner, 1e-9)
+                .ok_or_else(|| CommandError::Invalid("corner not found".into()))?
         };
-        s.run(
-            &EditSketch {
-                element: el,
-                feature: SKETCH_1,
-                op: SketchOp::Fillet { corner: p, radius: CORNER_R, equal_to: None },
+        s.run(&EditSketch {
+            element: el,
+            feature: SKETCH_1,
+            op: SketchOp::Fillet {
+                corner: p,
+                radius: CORNER_R,
+                equal_to: None,
             },
-        )?;
+        })?;
     }
     extrude(s, el, SKETCH_1, EXTRUDE_1, &[v(0.0, -100.0)], |e| {
         e.depth = HEIGHT;
@@ -106,19 +124,26 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
     // Sketch 2 on Right (sketch x = model Y, sketch y = model Z): the region over the slope.
     let y0 = -LENGTH - 10.0;
     let z0 = SLOPE_Z0 + SLOPE_K * (y0 + LENGTH);
-    s.run(&AddSketch { element: el, feature: SKETCH_2, plane: Some(PlaneRef::Right) })?;
-    s.run(
-        &EditSketch {
-            element: el,
-            feature: SKETCH_2,
-            op: SketchOp::AddPolyline {
-                points: vec![v(y0, z0), v(SLOPE_END, HEIGHT), v(SLOPE_END, HEIGHT + 20.0), v(y0, HEIGHT + 20.0)],
-                closed: true,
-                construction: false,
-                label: "Add polygon",
-            },
+    s.run(&AddSketch {
+        element: el,
+        feature: SKETCH_2,
+        plane: Some(PlaneRef::Right),
+    })?;
+    s.run(&EditSketch {
+        element: el,
+        feature: SKETCH_2,
+        op: SketchOp::AddPolyline {
+            points: vec![
+                v(y0, z0),
+                v(SLOPE_END, HEIGHT),
+                v(SLOPE_END, HEIGHT + 20.0),
+                v(y0, HEIGHT + 20.0),
+            ],
+            closed: true,
+            construction: false,
+            label: "Add polygon",
         },
-    )?;
+    })?;
     extrude(s, el, SKETCH_2, EXTRUDE_2, &[v(-190.0, 50.0)], |e| {
         e.op = BooleanOp::Remove;
         e.symmetric = true;
@@ -126,34 +151,57 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
         e.depth_expr = "200 mm".into();
     })?;
     // Sketch 3: the bosses, extruded from the top face (a starting offset of 40 mm).
-    s.run(&AddSketch { element: el, feature: SKETCH_3, plane: Some(PlaneRef::Top) })?;
-    for x in [-BOSS_X, BOSS_X] {
-        s.run(
-            &EditSketch {
-                element: el,
-                feature: SKETCH_3,
-                op: SketchOp::AddCircle { center: v(x, BOSS_Y), radius: BOSS_R, construction: false },
-            },
-        )?;
-    }
-    extrude(s, el, SKETCH_3, EXTRUDE_3, &[v(-BOSS_X, BOSS_Y), v(BOSS_X, BOSS_Y)], |e| {
-        e.op = BooleanOp::Add;
-        e.depth = BOSS_H;
-        e.depth_expr = "6 mm".into();
-        e.start_offset = Some(Offset { value: HEIGHT, expr: "40 mm".into(), flip: false });
+    s.run(&AddSketch {
+        element: el,
+        feature: SKETCH_3,
+        plane: Some(PlaneRef::Top),
     })?;
-    s.run(&RenamePart { element: el, part: PART, name: "Gear Cover".into() })?;
-    s.run(
-        &SetPartMaterial { element: el, parts: vec![PART], material: crate::material::library("Aluminum - 380") },
-    )?;
-    s.run(
-        &CreateFolder {
+    for x in [-BOSS_X, BOSS_X] {
+        s.run(&EditSketch {
             element: el,
-            folder: FOLDER,
-            name: Some("Base Features".into()),
-            features: vec![SKETCH_1, EXTRUDE_1, SKETCH_2, EXTRUDE_2, SKETCH_3, EXTRUDE_3],
+            feature: SKETCH_3,
+            op: SketchOp::AddCircle {
+                center: v(x, BOSS_Y),
+                radius: BOSS_R,
+                construction: false,
+            },
+        })?;
+    }
+    extrude(
+        s,
+        el,
+        SKETCH_3,
+        EXTRUDE_3,
+        &[v(-BOSS_X, BOSS_Y), v(BOSS_X, BOSS_Y)],
+        |e| {
+            e.op = BooleanOp::Add;
+            e.depth = BOSS_H;
+            e.depth_expr = "6 mm".into();
+            e.start_offset = Some(Offset {
+                value: HEIGHT,
+                expr: "40 mm".into(),
+                flip: false,
+            });
         },
     )?;
+    s.run(&RenamePart {
+        element: el,
+        part: PART,
+        name: "Gear Cover".into(),
+    })?;
+    s.run(&SetPartMaterial {
+        element: el,
+        parts: vec![PART],
+        material: crate::material::library("Aluminum - 380"),
+    })?;
+    s.run(&CreateFolder {
+        element: el,
+        folder: FOLDER,
+        name: Some("Base Features".into()),
+        features: vec![
+            SKETCH_1, EXTRUDE_1, SKETCH_2, EXTRUDE_2, SKETCH_3, EXTRUDE_3,
+        ],
+    })?;
     Ok(())
 }
 
@@ -174,12 +222,23 @@ fn extrude(
         .ok_or_else(|| CommandError::Invalid("sketch not found".into()))?;
     let regions = super::region_refs(sketch, &g, seeds);
     if regions.len() != seeds.len() {
-        return Err(CommandError::Invalid("a region of the stand-in is missing".into()));
+        return Err(CommandError::Invalid(
+            "a region of the stand-in is missing".into(),
+        ));
     }
     let mut e = super::extrude_of(regions, 25.0);
     set(&mut e);
-    s.run(&AddExtrude { element: el, feature, extrude: ExtrudeFeature::default() })?;
-    s.run(&SetExtrude { element: el, feature, extrude: e, label: "Extrude".into() })?;
+    s.run(&AddExtrude {
+        element: el,
+        feature,
+        extrude: ExtrudeFeature::default(),
+    })?;
+    s.run(&SetExtrude {
+        element: el,
+        feature,
+        extrude: e,
+        label: "Extrude".into(),
+    })?;
     Ok(())
 }
 

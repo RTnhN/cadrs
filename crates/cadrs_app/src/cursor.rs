@@ -102,10 +102,22 @@ mod tests {
 
     #[test]
     fn sketch_cursors() {
-        assert_eq!(sketch_cursor(SketchTool::Line, None, false), Some(CursorKind::Crosshair));
-        assert_eq!(sketch_cursor(SketchTool::Dimension, None, false), Some(CursorKind::Crosshair));
-        assert_eq!(sketch_cursor(SketchTool::Trim, None, false), Some(CursorKind::Crosshair));
-        assert_eq!(sketch_cursor(SketchTool::Split, None, false), Some(CursorKind::Crosshair));
+        assert_eq!(
+            sketch_cursor(SketchTool::Line, None, false),
+            Some(CursorKind::Crosshair)
+        );
+        assert_eq!(
+            sketch_cursor(SketchTool::Dimension, None, false),
+            Some(CursorKind::Crosshair)
+        );
+        assert_eq!(
+            sketch_cursor(SketchTool::Trim, None, false),
+            Some(CursorKind::Crosshair)
+        );
+        assert_eq!(
+            sketch_cursor(SketchTool::Split, None, false),
+            Some(CursorKind::Crosshair)
+        );
         assert_eq!(sketch_cursor(SketchTool::Line, None, true), None);
         assert_eq!(sketch_cursor(SketchTool::Select, None, false), None);
         assert_eq!(

@@ -29,7 +29,11 @@ pub enum SyncPlaneChoice {
 }
 
 impl SyncPlaneChoice {
-    pub const ALL: [SyncPlaneChoice; 3] = [SyncPlaneChoice::Top, SyncPlaneChoice::Front, SyncPlaneChoice::Right];
+    pub const ALL: [SyncPlaneChoice; 3] = [
+        SyncPlaneChoice::Top,
+        SyncPlaneChoice::Front,
+        SyncPlaneChoice::Right,
+    ];
 
     /// The dropdown's label ("Top Plane").
     pub fn label(self) -> &'static str {
@@ -57,7 +61,10 @@ pub struct McadSource {
 
 impl McadSource {
     pub fn frame(&self, refdes: &str) -> Option<Pose> {
-        self.frames.iter().find(|(r, _)| r == refdes).map(|(_, p)| *p)
+        self.frames
+            .iter()
+            .find(|(r, _)| r == refdes)
+            .map(|(_, p)| *p)
     }
 }
 
@@ -70,7 +77,15 @@ impl super::PcbStudio {
             return Some(s.id);
         }
         // P3H.6: the tabs Create assembly made from a board sync back into that board.
-        self.boards.iter().find(|b| from(b)).map(|b| b.id).or_else(|| self.generated_from(element).map(|g| g.board).filter(|b| self.board(*b).is_some()))
+        self.boards
+            .iter()
+            .find(|b| from(b))
+            .map(|b| b.id)
+            .or_else(|| {
+                self.generated_from(element)
+                    .map(|g| g.board)
+                    .filter(|b| self.board(*b).is_some())
+            })
     }
 }
 
@@ -117,7 +132,11 @@ impl SyncBoard {
 
 impl Command for SyncBoard {
     fn label(&self) -> String {
-        if self.target.is_some() { format!("Sync {}", self.name) } else { format!("Sync {} (new board)", self.name) }
+        if self.target.is_some() {
+            format!("Sync {}", self.name)
+        } else {
+            format!("Sync {} (new board)", self.name)
+        }
     }
     fn scope(&self) -> Scope {
         Scope::Element(self.element)
@@ -126,7 +145,9 @@ impl Command for SyncBoard {
         let s = studio_mut(doc, self.element)?;
         match self.target {
             Some(id) => {
-                let sb = s.board_mut(id).ok_or_else(|| CommandError::Invalid("the board to update is gone".into()))?;
+                let sb = s
+                    .board_mut(id)
+                    .ok_or_else(|| CommandError::Invalid("the board to update is gone".into()))?;
                 let old = match &sb.source {
                     BoardSource::Mcad(m) => m.clone(),
                     _ => McadSource::default(),
@@ -135,12 +156,20 @@ impl Command for SyncBoard {
                 // Keep areas: the same part (by name) in the same section keeps its id.
                 let keep = |kind: KeepKind, i: usize| -> Option<ItemId> {
                     let name = self.part_of(kind, i)?;
-                    old.keep_parts.iter().find(|(id, n)| n == name && before.keep_position(*id).is_some_and(|(k, _)| k == kind)).map(|(id, _)| *id)
+                    old.keep_parts
+                        .iter()
+                        .find(|(id, n)| {
+                            n == name && before.keep_position(*id).is_some_and(|(k, _)| k == kind)
+                        })
+                        .map(|(id, _)| *id)
                 };
                 // Components: the same designator keeps its id.
                 let comp = |i: usize| -> Option<ItemId> {
                     let r = &self.board.placements.get(i)?.refdes;
-                    before.components().find(|(_, p)| p.refdes.eq_ignore_ascii_case(r)).map(|(id, _)| id)
+                    before
+                        .components()
+                        .find(|(_, p)| p.refdes.eq_ignore_ascii_case(r))
+                        .map(|(id, _)| id)
                 };
                 sb.board.resync(&self.board, &self.library, &keep, &comp);
                 let keep_parts = self.keep_parts(&sb.board);
@@ -151,14 +180,24 @@ impl Command for SyncBoard {
                         None => frames.push((r.clone(), *p)),
                     }
                 }
-                sb.source = BoardSource::Mcad(McadSource { element: self.source, plane: self.plane, keep_parts, frames });
+                sb.source = BoardSource::Mcad(McadSource {
+                    element: self.source,
+                    plane: self.plane,
+                    keep_parts,
+                    frames,
+                });
                 s.active = Some(id);
             }
             None => {
                 let mut b = PcbBoard::new(&self.board, &self.library);
                 b.board.name = s.free_name(&self.name);
                 let keep_parts = self.keep_parts(&b);
-                let source = BoardSource::Mcad(McadSource { element: self.source, plane: self.plane, keep_parts, frames: self.frames.clone() });
+                let source = BoardSource::Mcad(McadSource {
+                    element: self.source,
+                    plane: self.plane,
+                    keep_parts,
+                    frames: self.frames.clone(),
+                });
                 let id = s.add_board(b, source);
                 s.active = Some(id);
             }

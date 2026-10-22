@@ -26,11 +26,11 @@
 use bevy::prelude::*;
 use cadrs_core::document::{BodyType, RegionRef};
 use cadrs_core::sheetmetal_flat::{FlatExtrudeFeature, flat_lines, flat_plane_id, sketch_target};
+use cadrs_core::{Feature, FeatureId, FeatureKind};
 use cadrs_sketch::Link;
 use cadrs_sketch::projection::Projected;
-use cadrs_core::{Feature, FeatureId, FeatureKind};
-use cadrs_ui::prelude::*;
 use cadrs_ui::TabStrip;
+use cadrs_ui::prelude::*;
 
 use crate::ActiveDocument;
 use crate::applied::{AppliedField, AppliedKind};
@@ -39,12 +39,22 @@ use crate::parts::PartCache;
 use crate::viewport::{Pick, Selection};
 
 fn region_of(cache: &PartCache, sketch: FeatureId, index: u32) -> Option<RegionRef> {
-    let r = cache.sketch_regions(sketch)?.regions.get(index as usize)?.clone();
+    let r = cache
+        .sketch_regions(sketch)?
+        .regions
+        .get(index as usize)?
+        .clone();
     Some(RegionRef::new(sketch, &r))
 }
 
 fn features(world: &World) -> Option<Vec<Feature>> {
-    Some(world.get_resource::<ActiveDocument>()?.active_element()?.features().to_vec())
+    Some(
+        world
+            .get_resource::<ActiveDocument>()?
+            .active_element()?
+            .features()
+            .to_vec(),
+    )
 }
 
 /// Whether every picked region lies on the flat's material (a new flat extrude then starts on
@@ -54,18 +64,38 @@ fn all_on_material(features: &[Feature], cache: &PartCache, picks: &[(FeatureId,
     let build = cadrs_core::rebuild::build(features);
     !picks.is_empty()
         && picks.iter().all(|(s, i)| {
-            let Some((model, part)) = sketch_target(features, *s) else { return false };
-            let Some(r) = cache.sketch_regions(*s).and_then(|r| r.regions.get(*i as usize)) else { return false };
-            let ring = |l: &[cadrs_sketch::Vec2]| l.iter().map(|q| P2::new(q.x, q.y)).collect::<Vec<_>>();
-            let poly = Polygon::with_holes(ring(&r.outer), r.holes.iter().map(|h| ring(h)).collect());
-            let Some(flat) = build.sheet_metal.iter().rev().find(|c| c.feature == model).and_then(|c| c.flat.parts.get(part)) else { return false };
+            let Some((model, part)) = sketch_target(features, *s) else {
+                return false;
+            };
+            let Some(r) = cache
+                .sketch_regions(*s)
+                .and_then(|r| r.regions.get(*i as usize))
+            else {
+                return false;
+            };
+            let ring =
+                |l: &[cadrs_sketch::Vec2]| l.iter().map(|q| P2::new(q.x, q.y)).collect::<Vec<_>>();
+            let poly =
+                Polygon::with_holes(ring(&r.outer), r.holes.iter().map(|h| ring(h)).collect());
+            let Some(flat) = build
+                .sheet_metal
+                .iter()
+                .rev()
+                .find(|c| c.feature == model)
+                .and_then(|c| c.flat.parts.get(part))
+            else {
+                return false;
+            };
             let on: f64 = flat.outline.iter().map(|o| overlap_area(&poly, o)).sum();
             on >= poly.area() * (1.0 - 1e-6)
         })
 }
 
 /// A new flat extrude from the selection: its regions (and whole sketches).
-pub fn initial(world: &World, picked: &[Pick]) -> Option<(&'static str, FeatureKind, AppliedField)> {
+pub fn initial(
+    world: &World,
+    picked: &[Pick],
+) -> Option<(&'static str, FeatureKind, AppliedField)> {
     let features = features(world)?;
     let cache = world.resource::<PartCache>();
     let mut x = FlatExtrudeFeature::default();
@@ -85,13 +115,19 @@ pub fn initial(world: &World, picked: &[Pick]) -> Option<(&'static str, FeatureK
         }
     }
     x.remove = all_on_material(&features, cache, &regions);
-    Some(("Extrude", FeatureKind::FlatExtrude(x), AppliedField::FlatRegions))
+    Some((
+        "Extrude",
+        FeatureKind::FlatExtrude(x),
+        AppliedField::FlatRegions,
+    ))
 }
 
 /// Extrude with regions or sketches of a flat-pattern sketch selected: the abbreviated flat
 /// extrude instead (true if it started).
 pub fn extrude_redirect(world: &mut World) -> bool {
-    let Some(features) = features(world) else { return false };
+    let Some(features) = features(world) else {
+        return false;
+    };
     let flat = world.resource::<Selection>().0.iter().any(|p| match *p {
         Pick::Region(s, _) | Pick::Feature(s) => sketch_target(&features, s).is_some(),
         _ => false,
@@ -104,25 +140,37 @@ pub fn extrude_redirect(world: &mut World) -> bool {
 
 /// A pick into the regions field. False if it doesn't fit.
 pub fn pick(world: &mut World, kind: &mut FeatureKind, field: AppliedField, pick: Pick) -> bool {
-    let (FeatureKind::FlatExtrude(x), AppliedField::FlatRegions) = (kind, field) else { return false };
-    let Some(features) = features(world) else { return false };
+    let (FeatureKind::FlatExtrude(x), AppliedField::FlatRegions) = (kind, field) else {
+        return false;
+    };
+    let Some(features) = features(world) else {
+        return false;
+    };
     let cache = world.resource::<PartCache>();
     match pick {
         Pick::Region(s, i) => {
-            let Some(r) = region_of(cache, s, i) else { return false };
-            match x.regions.iter().position(|y| y.sketch == r.sketch && y.curves == r.curves) {
+            let Some(r) = region_of(cache, s, i) else {
+                return false;
+            };
+            match x
+                .regions
+                .iter()
+                .position(|y| y.sketch == r.sketch && y.curves == r.curves)
+            {
                 Some(k) => {
                     x.regions.remove(k);
                 }
                 None => x.regions.push(r),
             }
         }
-        Pick::Feature(f) if features.iter().any(|g| g.id == f && g.sketch().is_some()) => match x.sketches.iter().position(|s| *s == f) {
-            Some(k) => {
-                x.sketches.remove(k);
+        Pick::Feature(f) if features.iter().any(|g| g.id == f && g.sketch().is_some()) => {
+            match x.sketches.iter().position(|s| *s == f) {
+                Some(k) => {
+                    x.sketches.remove(k);
+                }
+                None => x.sketches.push(f),
             }
-            None => x.sketches.push(f),
-        },
+        }
         _ => return false,
     }
     true
@@ -132,7 +180,9 @@ pub fn pick(world: &mut World, kind: &mut FeatureKind, field: AppliedField, pick
 // The dialog (called at the end of the applied dialogs' chain, from `crate::surfacing_ui`)
 
 pub(crate) fn name(kind: &FeatureKind) -> Option<&'static str> {
-    matches!(kind, FeatureKind::FlatExtrude(_)).then_some("flat-extrude").or_else(|| crate::direct_edit_ui::name(kind))
+    matches!(kind, FeatureKind::FlatExtrude(_))
+        .then_some("flat-extrude")
+        .or_else(|| crate::direct_edit_ui::name(kind))
 }
 
 pub(crate) fn layout(kind: &FeatureKind) -> Option<String> {
@@ -145,9 +195,22 @@ pub(crate) fn layout(kind: &FeatureKind) -> Option<String> {
 pub(crate) fn items(features: &[Feature], kind: &FeatureKind, role: Role) -> Option<Vec<String>> {
     match (kind, role) {
         (FeatureKind::FlatExtrude(x), Role::FlatRegions) => {
-            let name = |id: FeatureId| features.iter().find(|f| f.id == id).map_or("sketch".into(), |f| f.name.clone());
-            let mut v: Vec<String> = x.regions.iter().map(|r| format!("Face of {}", name(r.sketch))).collect();
-            v.extend(x.sketches.iter().map(|s| crate::extrude_dialog::whole_sketch_label(features, *s, BodyType::Solid)));
+            let name = |id: FeatureId| {
+                features
+                    .iter()
+                    .find(|f| f.id == id)
+                    .map_or("sketch".into(), |f| f.name.clone())
+            };
+            let mut v: Vec<String> = x
+                .regions
+                .iter()
+                .map(|r| format!("Face of {}", name(r.sketch)))
+                .collect();
+            v.extend(
+                x.sketches.iter().map(|s| {
+                    crate::extrude_dialog::whole_sketch_label(features, *s, BodyType::Solid)
+                }),
+            );
             Some(v)
         }
         (k, r) => crate::direct_edit_ui::items(features, k, r),
@@ -155,15 +218,41 @@ pub(crate) fn items(features: &[Feature], kind: &FeatureKind, role: Role) -> Opt
 }
 
 pub(crate) fn list_field(role: Role) -> Option<AppliedField> {
-    (role == Role::FlatRegions).then_some(AppliedField::FlatRegions).or_else(|| crate::direct_edit_ui::list_field(role))
+    (role == Role::FlatRegions)
+        .then_some(AppliedField::FlatRegions)
+        .or_else(|| crate::direct_edit_ui::list_field(role))
 }
 
 /// Add | Remove, then the regions.
-pub(crate) fn body(b: &mut ChildSpawner, t: &Theme, kind: &FeatureKind, field: AppliedField, items_of: &dyn Fn(Role) -> Vec<String>) {
-    let FeatureKind::FlatExtrude(x) = kind else { return crate::direct_edit_ui::body(b, t, kind, field, items_of) };
-    b.spawn((Role::OpTab, TabStrip::new("flat-extrude-operation").compact().tab("Add").tab("Remove").selected(usize::from(x.remove)).build(t)));
+pub(crate) fn body(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    kind: &FeatureKind,
+    field: AppliedField,
+    items_of: &dyn Fn(Role) -> Vec<String>,
+) {
+    let FeatureKind::FlatExtrude(x) = kind else {
+        return crate::direct_edit_ui::body(b, t, kind, field, items_of);
+    };
+    b.spawn((
+        Role::OpTab,
+        TabStrip::new("flat-extrude-operation")
+            .compact()
+            .tab("Add")
+            .tab("Remove")
+            .selected(usize::from(x.remove))
+            .build(t),
+    ));
     body_column(b, |b| {
-        list(b, t, "flat-extrude-regions-field", "Faces and sketch regions to extrude", Role::FlatRegions, items_of(Role::FlatRegions), field == AppliedField::FlatRegions);
+        list(
+            b,
+            t,
+            "flat-extrude-regions-field",
+            "Faces and sketch regions to extrude",
+            Role::FlatRegions,
+            items_of(Role::FlatRegions),
+            field == AppliedField::FlatRegions,
+        );
     });
 }
 
@@ -177,7 +266,9 @@ pub(crate) fn remove(k: &mut FeatureKind, role: Role, i: usize) {
     if !matches!(k, FeatureKind::FlatExtrude(_)) {
         return crate::direct_edit_ui::remove(k, role, i);
     }
-    let (FeatureKind::FlatExtrude(x), Role::FlatRegions) = (k, role) else { return };
+    let (FeatureKind::FlatExtrude(x), Role::FlatRegions) = (k, role) else {
+        return;
+    };
     if i < x.regions.len() {
         x.regions.remove(i);
     } else if i - x.regions.len() < x.sketches.len() {
@@ -192,7 +283,9 @@ pub(crate) fn remove(k: &mut FeatureKind, role: Role, i: usize) {
 pub fn flat_plane(world: &World, model: FeatureId, part: usize) -> Option<cadrs_sketch::PlaneRef> {
     let id = flat_plane_id(model, part);
     let frame = *world.resource::<PartCache>().planes.get(&FeatureId(id))?;
-    Some(cadrs_sketch::PlaneRef::Feature(cadrs_sketch::FeaturePlane::new(id, frame)))
+    Some(cadrs_sketch::PlaneRef::Feature(
+        cadrs_sketch::FeaturePlane::new(id, frame),
+    ))
 }
 
 /// New sketch on the flat pattern of `model`'s part `part` (SM14.1): in the flat view (the
@@ -201,20 +294,43 @@ pub fn begin_flat_sketch(world: &mut World, model: FeatureId, part: usize) {
     let Some(plane) = flat_plane(world, model, part) else {
         let theme = world.resource::<Theme>().clone();
         let mut commands = world.commands();
-        cadrs_ui::show_notification(&mut commands, &theme, cadrs_ui::Notification::warning("The sheet metal model has no flat pattern to sketch on").name("flat-sketch-toast"));
+        cadrs_ui::show_notification(
+            &mut commands,
+            &theme,
+            cadrs_ui::Notification::warning(
+                "The sheet metal model has no flat pattern to sketch on",
+            )
+            .name("flat-sketch-toast"),
+        );
         world.flush();
         return;
     };
     crate::sheetmetal_table::show_flat(world, model);
     crate::sketch::begin_sketch_on(world, Some(plane));
-    let Some(s) = world.get_resource::<crate::sketch::SketchSession>().map(|s| (s.element, s.feature)) else { return };
+    let Some(s) = world
+        .get_resource::<crate::sketch::SketchSession>()
+        .map(|s| (s.element, s.feature))
+    else {
+        return;
+    };
     // The bend lines, to dimension and constrain against (the lesson's slot is placed from a
     // bend line).
     let items: Vec<(Projected, Link)> = flat_part(world.resource::<PartCache>(), model, part)
         .map(|flat| {
             flat_lines(flat)
                 .into_iter()
-                .filter_map(|((a, b), bend)| bend.map(|j| (Projected::Line(a, b), Link::FlatLine { model: model.0, part: part as u8, bend: Some(j) })))
+                .filter_map(|((a, b), bend)| {
+                    bend.map(|j| {
+                        (
+                            Projected::Line(a, b),
+                            Link::FlatLine {
+                                model: model.0,
+                                part: part as u8,
+                                bend: Some(j),
+                            },
+                        )
+                    })
+                })
                 .collect()
         })
         .unwrap_or_default();
@@ -222,21 +338,40 @@ pub fn begin_flat_sketch(world: &mut World, model: FeatureId, part: usize) {
         return;
     }
     if let Some(mut doc) = world.get_resource_mut::<ActiveDocument>()
-        && let Err(e) = doc.execute(&cadrs_core::commands::EditSketch { element: s.0, feature: s.1, op: cadrs_sketch::SketchOp::UseConstruction { items } })
+        && let Err(e) = doc.execute(&cadrs_core::commands::EditSketch {
+            element: s.0,
+            feature: s.1,
+            op: cadrs_sketch::SketchOp::UseConstruction { items },
+        })
     {
         warn!("cannot use the bend lines: {e}");
     }
 }
 
 /// Part `part` of `model`'s flat pattern, as the last rebuild has it.
-fn flat_part(cache: &PartCache, model: FeatureId, part: usize) -> Option<&cadrs_sheetmetal::flat::FlatPart> {
-    cache.sheet_metal.iter().rev().find(|c| c.feature == model)?.flat.parts.get(part)
+fn flat_part(
+    cache: &PartCache,
+    model: FeatureId,
+    part: usize,
+) -> Option<&cadrs_sheetmetal::flat::FlatPart> {
+    cache
+        .sheet_metal
+        .iter()
+        .rev()
+        .find(|c| c.feature == model)?
+        .flat
+        .parts
+        .get(part)
 }
 
 /// The flat's lines a sketch on it snaps to and uses when touched (its outline, cut-outs and
 /// bend lines), as imprints linked to them; `None` unless `sketch` is a sketch on a flat
 /// pattern.
-pub fn flat_imprints(doc: &ActiveDocument, cache: &PartCache, sketch: FeatureId) -> Option<Vec<cadrs_sketch::Imprint>> {
+pub fn flat_imprints(
+    doc: &ActiveDocument,
+    cache: &PartCache,
+    sketch: FeatureId,
+) -> Option<Vec<cadrs_sketch::Imprint>> {
     let features = doc.active_element()?.features();
     let (model, part) = sketch_target(features, sketch)?;
     let flat = flat_part(cache, model, part)?;
@@ -247,7 +382,11 @@ pub fn flat_imprints(doc: &ActiveDocument, cache: &PartCache, sketch: FeatureId)
             .map(|(i, ((a, b), bend))| cadrs_sketch::Imprint {
                 id: cadrs_sketch::synthetic_curve(1, i as u32),
                 shape: cadrs_sketch::ImprintShape::Line(a, b),
-                link: Some(Link::FlatLine { model: model.0, part: part as u8, bend }),
+                link: Some(Link::FlatLine {
+                    model: model.0,
+                    part: part as u8,
+                    bend,
+                }),
             })
             .collect(),
     )
@@ -262,10 +401,18 @@ pub fn region_at(world: &World, p: cadrs_sheetmetal::poly::P2) -> Option<Pick> {
     let cache = world.resource::<PartCache>();
     let mut best: Option<(f64, Pick)> = None;
     for sr in &cache.regions {
-        let Some((_, part)) = sketch_target(&features, sr.sketch) else { continue };
-        let shift = scene.shifts.get(part).copied().unwrap_or_else(cadrs_sheetmetal::poly::V2::zeros);
+        let Some((_, part)) = sketch_target(&features, sr.sketch) else {
+            continue;
+        };
+        let shift = scene
+            .shifts
+            .get(part)
+            .copied()
+            .unwrap_or_else(cadrs_sheetmetal::poly::V2::zeros);
         let q = cadrs_sketch::Vec2::new(p.x - shift.x, p.y - shift.y);
-        let Some(i) = cadrs_sketch::region::region_at(&sr.regions, q) else { continue };
+        let Some(i) = cadrs_sketch::region::region_at(&sr.regions, q) else {
+            continue;
+        };
         let area = sr.regions[i].area();
         if best.as_ref().is_none_or(|(a, _)| area < *a) {
             best = Some((area, Pick::Region(sr.sketch, i as u32)));
@@ -282,7 +429,14 @@ pub struct FlatUiPlugin;
 
 impl Plugin for FlatUiPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (keep_flat_view, draw_picked_regions.after(crate::parts::PartsSet)).run_if(in_state(crate::AppState::Document)));
+        app.add_systems(
+            Update,
+            (
+                keep_flat_view,
+                draw_picked_regions.after(crate::parts::PartsSet),
+            )
+                .run_if(in_state(crate::AppState::Document)),
+        );
     }
 }
 
@@ -327,7 +481,9 @@ fn keep_flat_view(
         let features = doc.as_ref()?.active_element()?.features();
         sketch_target(features, s.feature).map(|t| (s.feature, t))
     });
-    let Some((sketch, (model, _))) = target.filter(|_| *kind == crate::viewport::ActiveKind::PartStudio) else {
+    let Some((sketch, (model, _))) =
+        target.filter(|_| *kind == crate::viewport::ActiveKind::PartStudio)
+    else {
         if let Some(m) = memo.take() {
             if settings.show_constraints != m.show_constraints {
                 settings.show_constraints = m.show_constraints;
@@ -347,7 +503,12 @@ fn keep_flat_view(
         // A new (or reopened) flat sketch: the flat view opens without a word.
         let was = memo.map_or(settings.show_constraints, |m| m.show_constraints);
         let panel = memo.map_or(*open, |m| m.panel);
-        *memo = Some(FlatSession { sketch, show_constraints: was, panel, note_since: None });
+        *memo = Some(FlatSession {
+            sketch,
+            show_constraints: was,
+            panel,
+            note_since: None,
+        });
         settings.show_constraints = false;
         if *open != SidePanel::SheetMetal {
             *open = SidePanel::SheetMetal;
@@ -388,7 +549,15 @@ fn keep_flat_view(
                 },
                 BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.92)),
                 Pickable::IGNORE,
-                children![(theme.text("The flat view stays open while a sketch on the flat pattern is edited", 11.5, bevy::text::FontWeight::NORMAL, theme.foreground), Pickable::IGNORE)],
+                children![(
+                    theme.text(
+                        "The flat view stays open while a sketch on the flat pattern is edited",
+                        11.5,
+                        bevy::text::FontWeight::NORMAL,
+                        theme.foreground
+                    ),
+                    Pickable::IGNORE
+                )],
             ))
             .id();
         commands.entity(body).add_child(note);
@@ -403,15 +572,28 @@ type FillState = (Entity, Handle<Mesh>, Vec<(FeatureId, usize)>, Option<u64>);
 
 /// The regions of sketches on the flat to show orange: the selected ones (or picked in the
 /// sketch being edited), and the flat Extrude's while its dialog is open.
-fn picked_regions(world_features: &[Feature], cache: &PartCache, selected: &crate::region_select::SelectedRegions, extrude: Option<&FlatExtrudeFeature>) -> Vec<(FeatureId, usize)> {
-    let mut out: Vec<(FeatureId, usize)> = selected.0.iter().copied().filter(|(s, _)| sketch_target(world_features, *s).is_some()).collect();
+fn picked_regions(
+    world_features: &[Feature],
+    cache: &PartCache,
+    selected: &crate::region_select::SelectedRegions,
+    extrude: Option<&FlatExtrudeFeature>,
+) -> Vec<(FeatureId, usize)> {
+    let mut out: Vec<(FeatureId, usize)> = selected
+        .0
+        .iter()
+        .copied()
+        .filter(|(s, _)| sketch_target(world_features, *s).is_some())
+        .collect();
     if let Some(x) = extrude {
         for sr in &cache.regions {
             for (i, r) in sr.regions.iter().enumerate() {
                 let mut curves = r.curves.clone();
                 curves.sort();
                 curves.dedup();
-                let picked = x.sketches.contains(&sr.sketch) || x.regions.iter().any(|q| q.sketch == sr.sketch && q.curves == curves && r.contains(q.seed));
+                let picked = x.sketches.contains(&sr.sketch)
+                    || x.regions
+                        .iter()
+                        .any(|q| q.sketch == sr.sketch && q.curves == curves && r.contains(q.seed));
                 if picked && !out.contains(&(sr.sketch, i)) {
                     out.push((sr.sketch, i));
                 }
@@ -423,11 +605,17 @@ fn picked_regions(world_features: &[Feature], cache: &PartCache, selected: &crat
 
 /// A flat point on the folded part: on the wall whose material it lies on (bend regions are
 /// left out), on both of the wall's faces.
-fn folded(ctx: &cadrs_core::sheetmetal::SheetMetalContext, flat: &cadrs_sheetmetal::flat::FlatPart, p: cadrs_sheetmetal::poly::P2) -> Option<(usize, [Vec3; 2])> {
+fn folded(
+    ctx: &cadrs_core::sheetmetal::SheetMetalContext,
+    flat: &cadrs_sheetmetal::flat::FlatPart,
+    p: cadrs_sheetmetal::poly::P2,
+) -> Option<(usize, [Vec3; 2])> {
     use cadrs_sheetmetal::flat::PieceSource;
     let t = ctx.model.params.thickness;
     flat.pieces.iter().enumerate().find_map(|(k, piece)| {
-        let PieceSource::Wall(w) = piece.source else { return None };
+        let PieceSource::Wall(w) = piece.source else {
+            return None;
+        };
         if !piece.polygon.contains(p) {
             return None;
         }
@@ -459,12 +647,17 @@ fn draw_picked_regions(
     if state.as_ref().is_some_and(|(e, ..)| !q_fill.contains(*e)) {
         *state = None;
     }
-    let Some(el) = doc.as_ref().and_then(|d| d.active_element()) else { return };
+    let Some(el) = doc.as_ref().and_then(|d| d.active_element()) else {
+        return;
+    };
     let features = el.features();
-    let extrude = applied.as_ref().and_then(|s| el.feature(s.feature)).and_then(|f| match &f.kind {
-        FeatureKind::FlatExtrude(x) => Some(x),
-        _ => None,
-    });
+    let extrude = applied
+        .as_ref()
+        .and_then(|s| el.feature(s.feature))
+        .and_then(|f| match &f.kind {
+            FeatureKind::FlatExtrude(x) => Some(x),
+            _ => None,
+        });
     let picked = picked_regions(features, &cache, &selected, extrude);
     let orange = Color::srgb_u8(0xe8, 0x9a, 0x2c);
     let scene = table.scene.clone();
@@ -476,13 +669,23 @@ fn draw_picked_regions(
     });
     let mut tris: Vec<[f32; 3]> = Vec::new();
     for (sk, i) in &picked {
-        let Some((model, part)) = sketch_target(features, *sk) else { continue };
-        let Some(r) = cache.sketch_regions(*sk).and_then(|r| r.regions.get(*i)) else { continue };
+        let Some((model, part)) = sketch_target(features, *sk) else {
+            continue;
+        };
+        let Some(r) = cache.sketch_regions(*sk).and_then(|r| r.regions.get(*i)) else {
+            continue;
+        };
         // The flat view: the outline and an orange wash on the sheet's top.
         if let Some(scene) = scene.as_ref() {
-            let shift = scene.shifts.get(part).copied().unwrap_or_else(cadrs_sheetmetal::poly::V2::zeros);
+            let shift = scene
+                .shifts
+                .get(part)
+                .copied()
+                .unwrap_or_else(cadrs_sheetmetal::poly::V2::zeros);
             let z = scene.thickness as f32 + 2e-3;
-            let at = |q: &cadrs_sketch::Vec2| Vec3::new((q.x + shift.x) as f32, (q.y + shift.y) as f32, z);
+            let at = |q: &cadrs_sketch::Vec2| {
+                Vec3::new((q.x + shift.x) as f32, (q.y + shift.y) as f32, z)
+            };
             for ring in std::iter::once(&r.outer).chain(&r.holes) {
                 flat_lines_g.linestrip(ring.iter().chain(ring.first()).map(at), orange);
             }
@@ -490,21 +693,32 @@ fn draw_picked_regions(
             tris.extend(idx.into_iter().map(|k| at(&v[k as usize]).to_array()));
         }
         // The folded part: the outline wrapped onto the walls it lies on.
-        let Some(ctx) = cache.sheet_metal.iter().rev().find(|c| c.feature == model) else { continue };
-        let Some(flat) = ctx.flat.parts.get(part) else { continue };
+        let Some(ctx) = cache.sheet_metal.iter().rev().find(|c| c.feature == model) else {
+            continue;
+        };
+        let Some(flat) = ctx.flat.parts.get(part) else {
+            continue;
+        };
         for ring in std::iter::once(&r.outer).chain(&r.holes) {
             let n = ring.len();
             let mut runs: [Vec<Vec3>; 2] = [Vec::new(), Vec::new()];
             let mut wall = None;
             for k in 0..=n {
                 let (a, b) = (ring[k % n], ring[(k + 1) % n]);
-                let steps = if k == n { 1 } else { ((a.distance(b) / 1.0).ceil() as usize).clamp(1, 200) };
+                let steps = if k == n {
+                    1
+                } else {
+                    ((a.distance(b) / 1.0).ceil() as usize).clamp(1, 200)
+                };
                 for s in 0..steps {
                     if k == n && s > 0 {
                         break;
                     }
                     let f = s as f64 / steps as f64;
-                    let q = cadrs_sheetmetal::poly::P2::new(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f);
+                    let q = cadrs_sheetmetal::poly::P2::new(
+                        a.x + (b.x - a.x) * f,
+                        a.y + (b.y - a.y) * f,
+                    );
                     match folded(ctx, flat, q) {
                         Some((w, pts)) if wall.is_none_or(|x| x == w) => {
                             wall = Some(w);
@@ -537,18 +751,28 @@ fn draw_picked_regions(
         }
     }
     // The wash: one mesh on the flat view's layer, rebuilt when the picked regions change.
-    if state.as_ref().is_some_and(|(_, _, k, s)| *k == picked && *s == scene_key) {
+    if state
+        .as_ref()
+        .is_some_and(|(_, _, k, s)| *k == picked && *s == scene_key)
+    {
         return;
     }
     let mesh = {
         use bevy::asset::RenderAssetUsages;
         use bevy::mesh::{Indices, PrimitiveTopology};
-        let positions = if tris.is_empty() { vec![[0.0; 3]; 3] } else { tris };
+        let positions = if tris.is_empty() {
+            vec![[0.0; 3]; 3]
+        } else {
+            tris
+        };
         let n = positions.len() as u32;
-        Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
-            .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 0.0, 1.0]; n as usize])
-            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
-            .with_inserted_indices(Indices::U32((0..n).collect()))
+        Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        )
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 0.0, 1.0]; n as usize])
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+        .with_inserted_indices(Indices::U32((0..n).collect()))
     };
     match state.as_mut() {
         Some((_, handle, k, s)) => {
@@ -575,7 +799,9 @@ fn draw_picked_regions(
                     Mesh3d(handle.clone()),
                     MeshMaterial3d(material),
                     Transform::IDENTITY,
-                    bevy::camera::visibility::RenderLayers::layer(crate::sheetmetal_table::FLAT_LAYER),
+                    bevy::camera::visibility::RenderLayers::layer(
+                        crate::sheetmetal_table::FLAT_LAYER,
+                    ),
                     DespawnOnExit(crate::AppState::Document),
                 ))
                 .id();

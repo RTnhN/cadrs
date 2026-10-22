@@ -29,11 +29,17 @@ use std::path::PathBuf;
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontWeight, TextEdit};
 use bevy::ui_widgets::{Activate, observe};
-use cadrs_core::flat_export::{FlatExportOptions, FlatScope, default_file_name, flat_parts_named, part_page, scope_parts, side_by_side};
+use cadrs_core::flat_export::{
+    FlatExportOptions, FlatScope, default_file_name, flat_parts_named, part_page, scope_parts,
+    side_by_side,
+};
 use cadrs_core::{FeatureId, PartId};
 use cadrs_drawing::dxf::DxfVersion;
 use cadrs_ui::prelude::*;
-use cadrs_ui::{Button, CheckboxState, DialogClose, Notification, Select, SelectState, TextInputField, show_notification};
+use cadrs_ui::{
+    Button, CheckboxState, DialogClose, Notification, Select, SelectState, TextInputField,
+    show_notification,
+};
 
 use crate::parts::PartCache;
 use crate::{ActiveDocument, AppState};
@@ -42,7 +48,10 @@ pub struct FlatExportDialogPlugin;
 
 impl Plugin for FlatExportDialogPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (on_folder_picked, sync_separate).run_if(in_state(AppState::Document)));
+        app.add_systems(
+            Update,
+            (on_folder_picked, sync_separate).run_if(in_state(AppState::Document)),
+        );
     }
 }
 
@@ -59,7 +68,11 @@ const FIELD_H: f32 = 30.0;
 /// (shown disabled: the DXF writer writes 2000 and later only), then every version it writes,
 /// 2000 (the default) to 2018.
 fn versions() -> Vec<(&'static str, Option<DxfVersion>)> {
-    let mut v: Vec<(&'static str, Option<DxfVersion>)> = vec![("Release 11-12", None), ("Release 13", None), ("Release 14", None)];
+    let mut v: Vec<(&'static str, Option<DxfVersion>)> = vec![
+        ("Release 11-12", None),
+        ("Release 13", None),
+        ("Release 14", None),
+    ];
     v.extend(DxfVersion::WRITTEN.into_iter().map(|d| (d.year(), Some(d))));
     v
 }
@@ -67,12 +80,28 @@ fn versions() -> Vec<(&'static str, Option<DxfVersion>)> {
 /// The checkboxes: name, label, default.
 const CHECKS: [(&str, &str, bool); 8] = [
     ("flat-export-splines", "Export splines as polylines", false),
-    ("flat-export-z-zero", "Set z-height to zero and normals to positive", true),
+    (
+        "flat-export-z-zero",
+        "Set z-height to zero and normals to positive",
+        true,
+    ),
     ("flat-export-centerlines", "Include bend centerlines", true),
     ("flat-export-tangents", "Include bend tangent lines", false),
-    ("flat-export-cbore", "Include counterbore and countersink lines", false),
-    ("flat-export-form-outlines", "Include form feature outlines", false),
-    ("flat-export-form-centermarks", "Include form feature centermarks", false),
+    (
+        "flat-export-cbore",
+        "Include counterbore and countersink lines",
+        false,
+    ),
+    (
+        "flat-export-form-outlines",
+        "Include form feature outlines",
+        false,
+    ),
+    (
+        "flat-export-form-centermarks",
+        "Include form feature centermarks",
+        false,
+    ),
     ("flat-export-sketches", "Include visible sketches", true),
 ];
 
@@ -83,17 +112,32 @@ fn label(p: &mut ChildSpawner, t: &Theme, text: &str) {
 fn row(name: &str) -> impl Bundle {
     (
         Name::new(name.to_string()),
-        Node { flex_direction: FlexDirection::Column, width: Val::Percent(100.0), row_gap: Val::Px(6.0), margin: UiRect::bottom(Val::Px(12.0)), ..default() },
+        Node {
+            flex_direction: FlexDirection::Column,
+            width: Val::Percent(100.0),
+            row_gap: Val::Px(6.0),
+            margin: UiRect::bottom(Val::Px(12.0)),
+            ..default()
+        },
     )
 }
 
 /// The active Part Studio's part renames.
 fn props(world: &World) -> Vec<cadrs_core::PartProps> {
-    world.get_resource::<ActiveDocument>().and_then(|d| d.active_element()).map(|e| e.part_props().to_vec()).unwrap_or_default()
+    world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.active_element())
+        .map(|e| e.part_props().to_vec())
+        .unwrap_or_default()
 }
 
 /// The flat-pattern parts of the active Part Studio, as the last rebuild has them.
-fn studio_build(world: &World) -> Option<(Vec<cadrs_core::Feature>, std::sync::Arc<cadrs_core::rebuild::Build>)> {
+fn studio_build(
+    world: &World,
+) -> Option<(
+    Vec<cadrs_core::Feature>,
+    std::sync::Arc<cadrs_core::rebuild::Build>,
+)> {
     let el = world.get_resource::<ActiveDocument>()?.active_element()?;
     let features = el.active_features();
     let build = cadrs_core::rebuild::build(&features);
@@ -103,13 +147,18 @@ fn studio_build(world: &World) -> Option<(Vec<cadrs_core::Feature>, std::sync::A
 /// The first part of a Sheet metal model (for its feature list menu).
 pub fn first_part(world: &World, model: FeatureId) -> Option<PartId> {
     let (_, build) = studio_build(world)?;
-    flat_parts_named(&build, &props(world)).into_iter().find(|r| r.model == model).map(|r| r.part)
+    flat_parts_named(&build, &props(world))
+        .into_iter()
+        .find(|r| r.model == model)
+        .map(|r| r.part)
 }
 
 /// The flat-pattern part `part` is, if it is one (its view menu offers the flat's items).
 pub fn flat_ref(world: &World, part: PartId) -> Option<cadrs_core::flat_export::FlatPartRef> {
     let (_, build) = studio_build(world)?;
-    flat_parts_named(&build, &props(world)).into_iter().find(|r| r.part == part)
+    flat_parts_named(&build, &props(world))
+        .into_iter()
+        .find(|r| r.part == part)
 }
 
 fn toast(world: &mut World, note: Notification) {
@@ -121,15 +170,25 @@ fn toast(world: &mut World, note: Notification) {
 
 /// Opens the dialog on a flat-pattern part.
 pub fn open(world: &mut World, part: PartId) {
-    let Some((_, build)) = studio_build(world) else { return };
+    let Some((_, build)) = studio_build(world) else {
+        return;
+    };
     // Named as the Parts list names them (a renamed part by its new name).
     let all = flat_parts_named(&build, &props(world));
     let Some(me) = all.iter().find(|r| r.part == part).cloned() else {
-        return toast(world, Notification::warning("That part has no flat pattern"));
+        return toast(
+            world,
+            Notification::warning("That part has no flat pattern"),
+        );
     };
-    let document = world.get_resource::<ActiveDocument>().map(|d| d.doc.name.clone()).unwrap_or_default();
+    let document = world
+        .get_resource::<ActiveDocument>()
+        .map(|d| d.doc.name.clone())
+        .unwrap_or_default();
     let base = default_file_name(&document, &me.name);
-    let dir = crate::export_dir(world).map(|d| d.display().to_string()).unwrap_or_default();
+    let dir = crate::export_dir(world)
+        .map(|d| d.display().to_string())
+        .unwrap_or_default();
     let converter = cadrs_drawing::dwg::find_converter().filter(|c| c.can_write());
     let theme = world.resource::<Theme>().clone();
     let (tb, tf) = (theme.clone(), theme.clone());
@@ -227,11 +286,17 @@ pub fn open(world: &mut World, part: PartId) {
 }
 
 /// *Export each part as its own file* shows for the scopes of several parts.
-fn sync_separate(q_dialog: Query<(), With<FlatExportDialog>>, q_sel: Query<(&Name, &SelectState)>, mut q: Query<(&Name, &mut Node)>) {
+fn sync_separate(
+    q_dialog: Query<(), With<FlatExportDialog>>,
+    q_sel: Query<(&Name, &SelectState)>,
+    mut q: Query<(&Name, &mut Node)>,
+) {
     if q_dialog.is_empty() {
         return;
     }
-    let many = q_sel.iter().any(|(n, s)| n.as_str() == "flat-export-scope" && s.selected > 0);
+    let many = q_sel
+        .iter()
+        .any(|(n, s)| n.as_str() == "flat-export-scope" && s.selected > 0);
     for (n, mut node) in &mut q {
         if n.as_str() == "flat-export-separate" {
             let want = if many { Display::Flex } else { Display::None };
@@ -245,10 +310,21 @@ fn sync_separate(q_dialog: Query<(), With<FlatExportDialog>>, q_sel: Query<(&Nam
 fn browse_folder(world: &mut World) {
     let typed = field(world, "flat-export-folder-field");
     let dir = PathBuf::from(typed.trim());
-    let dir = if dir.is_dir() { dir } else { std::env::current_dir().unwrap_or_default() };
+    let dir = if dir.is_dir() {
+        dir
+    } else {
+        std::env::current_dir().unwrap_or_default()
+    };
     let theme = world.resource::<Theme>().clone();
     let mut commands = world.commands();
-    cadrs_ui::file_picker::open_folder_picker(&mut commands, &theme, "folder-picker", "Choose a folder", "flat-export-folder", dir);
+    cadrs_ui::file_picker::open_folder_picker(
+        &mut commands,
+        &theme,
+        "folder-picker",
+        "Choose a folder",
+        "flat-export-folder",
+        dir,
+    );
     world.flush();
 }
 
@@ -260,7 +336,10 @@ fn on_folder_picked(mut msgs: MessageReader<cadrs_ui::FilePicked>, mut commands:
         let text = m.path.display().to_string();
         commands.queue(move |w: &mut World| {
             let mut q = w.query_filtered::<(&Name, &mut EditableText), With<TextInputField>>();
-            if let Some((_, mut t)) = q.iter_mut(w).find(|(n, _)| n.as_str() == "flat-export-folder-field") {
+            if let Some((_, mut t)) = q
+                .iter_mut(w)
+                .find(|(n, _)| n.as_str() == "flat-export-folder-field")
+            {
                 t.queue_edit(TextEdit::SelectAll);
                 t.queue_edit(TextEdit::Insert(text.clone().into()));
             }
@@ -270,12 +349,18 @@ fn on_folder_picked(mut msgs: MessageReader<cadrs_ui::FilePicked>, mut commands:
 
 fn field(w: &mut World, name: &str) -> String {
     let mut q = w.query_filtered::<(&Name, &EditableText), With<TextInputField>>();
-    q.iter(w).find(|(n, _)| n.as_str() == name).map(|(_, t)| t.value().to_string()).unwrap_or_default()
+    q.iter(w)
+        .find(|(n, _)| n.as_str() == name)
+        .map(|(_, t)| t.value().to_string())
+        .unwrap_or_default()
 }
 
 fn select(w: &mut World, name: &str) -> usize {
     let mut q = w.query::<(&Name, &SelectState)>();
-    q.iter(w).find(|(n, _)| n.as_str() == name).map(|(_, s)| s.selected).unwrap_or(0)
+    q.iter(w)
+        .find(|(n, _)| n.as_str() == name)
+        .map(|(_, s)| s.selected)
+        .unwrap_or(0)
 }
 
 fn checked(w: &mut World, name: &str) -> bool {
@@ -286,12 +371,16 @@ fn checked(w: &mut World, name: &str) -> bool {
 /// Export: writes the file(s) and closes the dialog.
 fn start_export(world: &mut World) {
     let mut q = world.query::<(Entity, &FlatExportDialog)>();
-    let Some((dialog, spec)) = q.iter(world).next().map(|(e, d)| (e, *d)) else { return };
+    let Some((dialog, spec)) = q.iter(world).next().map(|(e, d)| (e, *d)) else {
+        return;
+    };
     let base = field(world, "flat-export-name-field").trim().to_string();
     let folder = field(world, "flat-export-folder-field").trim().to_string();
     let dwg = select(world, "flat-export-format") == 1;
     let all = versions();
-    let version = all[select(world, "flat-export-version").min(all.len() - 1)].1.unwrap_or(DxfVersion::R2000);
+    let version = all[select(world, "flat-export-version").min(all.len() - 1)]
+        .1
+        .unwrap_or(DxfVersion::R2000);
     let scope = FlatScope::ALL[select(world, "flat-export-scope").min(2)];
     let separate = checked(world, "flat-export-separate") && scope != FlatScope::Single;
     let o = FlatExportOptions {
@@ -308,20 +397,45 @@ fn start_export(world: &mut World) {
     if folder.is_empty() {
         return toast(world, Notification::warning("Nowhere to save the export"));
     }
-    let Some((features, build)) = studio_build(world) else { return };
-    let document = world.get_resource::<ActiveDocument>().map(|d| d.doc.name.clone()).unwrap_or_default();
+    let Some((features, build)) = studio_build(world) else {
+        return;
+    };
+    let document = world
+        .get_resource::<ActiveDocument>()
+        .map(|d| d.doc.name.clone())
+        .unwrap_or_default();
     let hidden = world.resource::<PartCache>().hidden_sketches.clone();
-    let el = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element().cloned());
-    let shown = |id: FeatureId| !hidden.contains(&id) && el.as_ref().is_none_or(|e| e.sketch_visibility(id) != Some(false));
+    let el = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.active_element().cloned());
+    let shown = |id: FeatureId| {
+        !hidden.contains(&id)
+            && el
+                .as_ref()
+                .is_none_or(|e| e.sketch_visibility(id) != Some(false))
+    };
     let refs = scope_parts(&build, &props(world), spec.part, scope);
-    let pages: Vec<(String, cadrs_drawing::export::Page)> = refs.iter().filter_map(|r| Some((r.name.clone(), part_page(&build, &features, r, &o, &shown)?))).collect();
+    let pages: Vec<(String, cadrs_drawing::export::Page)> = refs
+        .iter()
+        .filter_map(|r| Some((r.name.clone(), part_page(&build, &features, r, &o, &shown)?)))
+        .collect();
     if pages.is_empty() {
-        return toast(world, Notification::warning("Export failed: no flat pattern to export"));
+        return toast(
+            world,
+            Notification::warning("Export failed: no flat pattern to export"),
+        );
     }
     let dir = PathBuf::from(&folder);
-    let name = if base.is_empty() { "Flat pattern".to_string() } else { base };
+    let name = if base.is_empty() {
+        "Flat pattern".to_string()
+    } else {
+        base
+    };
     let files: Vec<(String, cadrs_drawing::export::Page)> = if separate {
-        pages.into_iter().map(|(part, p)| (default_file_name(&document, &part), p)).collect()
+        pages
+            .into_iter()
+            .map(|(part, p)| (default_file_name(&document, &part), p))
+            .collect()
     } else if pages.len() == 1 {
         vec![(name, pages.into_iter().next().expect("one").1)]
     } else {
@@ -330,12 +444,23 @@ fn start_export(world: &mut World) {
     };
     let mut written = Vec::new();
     for (stem, page) in &files {
-        match cadrs_core::dxf_export::write_file(page, version, dwg, &dir, &cadrs_core::export::sanitize(stem)) {
+        match cadrs_core::dxf_export::write_file(
+            page,
+            version,
+            dwg,
+            &dir,
+            &cadrs_core::export::sanitize(stem),
+        ) {
             Ok(p) => {
                 info!("exported {}", p.display());
                 written.push(p);
             }
-            Err(why) => return toast(world, Notification::warning(format!("Export failed: {why}"))),
+            Err(why) => {
+                return toast(
+                    world,
+                    Notification::warning(format!("Export failed: {why}")),
+                );
+            }
         }
     }
     let note = match written.as_slice() {

@@ -116,7 +116,11 @@ impl TabStrip {
             equal,
         } = self;
         let prefix = name.to_string();
-        let (height, gap, font_size) = if compact { (25.0, 0.0, 12.0) } else { (36.0, 8.0, 14.0) };
+        let (height, gap, font_size) = if compact {
+            (25.0, 0.0, 12.0)
+        } else {
+            (36.0, 8.0, 14.0)
+        };
         (
             Name::new(name.into_owned()),
             TabStripState { selected },
@@ -132,7 +136,11 @@ impl TabStrip {
             Children::spawn(SpawnWith(move |p: &mut ChildSpawner| {
                 let strip = p.target_entity();
                 for (index, label) in labels.into_iter().enumerate() {
-                    let normal_fg = if compact { t.tool_foreground } else { t.foreground };
+                    let normal_fg = if compact {
+                        t.tool_foreground
+                    } else {
+                        t.foreground
+                    };
                     let visuals = Visuals {
                         background: StateColors::all(Color::NONE),
                         border: StateColors::all(Color::NONE).with_selected(t.link),
@@ -142,7 +150,11 @@ impl TabStrip {
                             normal_fg,
                             t.link,
                             t.link,
-                            if compact { normal_fg } else { t.disabled_foreground },
+                            if compact {
+                                normal_fg
+                            } else {
+                                t.disabled_foreground
+                            },
                         )
                         .with_selected(t.link),
                         focus_ring: t.focus_ring,
@@ -248,9 +260,17 @@ fn on_tab_activate(
 /// caller already knows): the tab drawn selected, the strip's state set.
 pub fn select_tab(world: &mut World, strip: Entity, index: usize) {
     let mut q = world.query::<(Entity, &StripTab, &Children)>();
-    let tabs: Vec<(Entity, usize, Vec<Entity>)> = q.iter(world).filter(|(_, t, _)| t.strip == strip).map(|(e, t, c)| (e, t.index, c.to_vec())).collect();
+    let tabs: Vec<(Entity, usize, Vec<Entity>)> = q
+        .iter(world)
+        .filter(|(_, t, _)| t.strip == strip)
+        .map(|(e, t, c)| (e, t.index, c.to_vec()))
+        .collect();
     for (e, i, children) in tabs {
-        let weight = if i == index { FontWeight::SEMIBOLD } else { FontWeight::NORMAL };
+        let weight = if i == index {
+            FontWeight::SEMIBOLD
+        } else {
+            FontWeight::NORMAL
+        };
         for c in children {
             if world.get::<StripTabLabel>(c).is_some()
                 && let Some(mut f) = world.get_mut::<TextFont>(c)

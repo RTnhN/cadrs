@@ -23,7 +23,6 @@ pub mod component_docs;
 pub mod design;
 pub mod fit;
 pub mod frames;
-pub mod ops;
 pub mod generated;
 pub mod import;
 pub mod library;
@@ -31,6 +30,7 @@ pub mod mesh_solid;
 pub mod model;
 pub mod model_solids;
 pub mod names;
+pub mod ops;
 pub mod outline_link;
 pub mod search;
 pub mod sync;
@@ -43,8 +43,11 @@ use crate::ids::{DocumentId, ElementId, FolderId};
 
 pub use board::{ItemId, KeepArea, KeepIds, KeepKind, PcbBoard};
 pub use generated::{CreatePcbAssembly, GeneratedAssembly, GeneratedPackage, LinkedComponent};
+pub use library::{
+    ComponentLibrary, CustomPart, DEFAULT_LIBRARY_FILE, PartSource, PartTransform, PcbWorkspace,
+    Representation,
+};
 pub use sync::{McadSource, SyncBoard, SyncPlaneChoice};
-pub use library::{ComponentLibrary, CustomPart, DEFAULT_LIBRARY_FILE, PartSource, PartTransform, PcbWorkspace, Representation};
 
 /// A board's id within its PCB Studio, stable while the board exists (the tree, the view cache
 /// and the active board refer to boards by it).
@@ -102,8 +105,18 @@ struct StudioBoardFile {
 
 impl From<StudioBoardFile> for StudioBoard {
     fn from(f: StudioBoardFile) -> Self {
-        let layout_hash = f.design.as_ref().map_or(0, |d| board3d::layout_hash(&d.board));
-        StudioBoard { id: f.id, board: f.board, source: f.source, design: f.design, layout_hash, outline_link: f.outline_link }
+        let layout_hash = f
+            .design
+            .as_ref()
+            .map_or(0, |d| board3d::layout_hash(&d.board));
+        StudioBoard {
+            id: f.id,
+            board: f.board,
+            source: f.source,
+            design: f.design,
+            layout_hash,
+            outline_link: f.outline_link,
+        }
     }
 }
 
@@ -120,7 +133,11 @@ pub struct StudioComponent {
 
 impl PartialEq for StudioBoard {
     fn eq(&self, o: &Self) -> bool {
-        self.id == o.id && self.board == o.board && self.source == o.source && self.design == o.design && self.outline_link == o.outline_link
+        self.id == o.id
+            && self.board == o.board
+            && self.source == o.source
+            && self.design == o.design
+            && self.outline_link == o.outline_link
     }
 }
 
@@ -191,11 +208,19 @@ pub struct FolderRef {
 pub struct PcbSettings {
     /// The component library document. `None`: the default library file in the documents
     /// folder ([`DEFAULT_LIBRARY_FILE`]).
-    #[serde(default, rename = "library_document", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "library_document",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub library: Option<LibraryRef>,
     /// The folder new component documents are created in (Create assembly, PCB7). `None`: not
     /// chosen yet ("Select a folder…").
-    #[serde(default, rename = "component_folder_ref", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "component_folder_ref",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub component_folder: Option<FolderRef>,
 }
 
@@ -203,7 +228,10 @@ impl PcbSettings {
     /// The library's short name for the settings field: the document's name, or "Default
     /// library".
     pub fn library_name(&self) -> String {
-        self.library.as_ref().map(|l| l.name.clone()).unwrap_or_else(|| "Default library".into())
+        self.library
+            .as_ref()
+            .map(|l| l.name.clone())
+            .unwrap_or_else(|| "Default library".into())
     }
 }
 
@@ -247,7 +275,10 @@ pub struct PcbStudio {
 /// the studio is (equal, not written, a copy keeps it since it is made from the boards the copy
 /// has too).
 #[derive(Clone, Default)]
-struct PartFeatures(std::sync::OnceLock<Vec<crate::document::Feature>>, std::sync::Arc<std::sync::Mutex<std::collections::HashMap<BoardId, Vec<crate::ids::PartId>>>>);
+struct PartFeatures(
+    std::sync::OnceLock<Vec<crate::document::Feature>>,
+    std::sync::Arc<std::sync::Mutex<std::collections::HashMap<BoardId, Vec<crate::ids::PartId>>>>,
+);
 
 impl PartialEq for PartFeatures {
     fn eq(&self, _: &Self) -> bool {
@@ -264,7 +295,9 @@ impl std::fmt::Debug for PartFeatures {
 /// The feature that stands for the board `board` in [`PcbStudio::part_features`] (its parts are
 /// `PartId(this, k)`).
 pub fn board_feature(board: BoardId) -> crate::ids::FeatureId {
-    crate::ids::FeatureId::from_u128(0xb0a2_d000_0000_4000_8000_0000_0000_0000 + u128::from(board.0))
+    crate::ids::FeatureId::from_u128(
+        0xb0a2_d000_0000_4000_8000_0000_0000_0000 + u128::from(board.0),
+    )
 }
 
 impl PcbStudio {
@@ -281,18 +314,28 @@ impl PcbStudio {
                 .map(|b| {
                     // (An IDF board: its outline and package boxes.)
                     let (layout, hash) = b.derived_layout();
-                    let mut db = crate::derived::DerivedBoard::new(b.id, b.name(), Default::default());
+                    let mut db =
+                        crate::derived::DerivedBoard::new(b.id, b.name(), Default::default());
                     db.set_layout_hashed(layout.into_owned(), hash);
                     // At the layout's origin: an outline edit moves no component.
                     db.options.anchor = board3d::BoardAnchor::Origin;
                     let d = crate::derived::DerivedFeature {
                         // (The source is this studio: no tab needs naming for the rebuild.)
-                        source: Some(crate::external::SourceRef { document: None, at: crate::external::RefAt::Workspace, element: ElementId::from_u128(0), pinned: false }),
+                        source: Some(crate::external::SourceRef {
+                            document: None,
+                            at: crate::external::RefAt::Workspace,
+                            element: ElementId::from_u128(0),
+                            pinned: false,
+                        }),
                         source_name: b.name().to_string(),
                         board: Some(Box::new(db)),
                         ..Default::default()
                     };
-                    crate::document::Feature::new(board_feature(b.id), b.name(), crate::document::FeatureKind::Derived(Box::new(d)))
+                    crate::document::Feature::new(
+                        board_feature(b.id),
+                        b.name(),
+                        crate::document::FeatureKind::Derived(Box::new(d)),
+                    )
                 })
                 .collect()
         })
@@ -304,7 +347,13 @@ impl PcbStudio {
     /// these, so a footprint added or removed later comes and goes with it.
     pub fn board_parts(&self, board: BoardId) -> Vec<crate::ids::PartId> {
         // Asked for often (every listing of an assembly's occurrences): made once per change.
-        if let Some(v) = self.part_features.1.lock().ok().and_then(|m| m.get(&board).cloned()) {
+        if let Some(v) = self
+            .part_features
+            .1
+            .lock()
+            .ok()
+            .and_then(|m| m.get(&board).cloned())
+        {
             return v;
         }
         let v = self.make_board_parts(board);
@@ -315,15 +364,28 @@ impl PcbStudio {
     }
 
     fn make_board_parts(&self, board: BoardId) -> Vec<crate::ids::PartId> {
-        let Some(b) = self.board(board) else { return vec![] };
+        let Some(b) = self.board(board) else {
+            return vec![];
+        };
         let f = board_feature(board);
         let (layout, _) = b.derived_layout();
-        let options = board3d::BoardOptions { anchor: board3d::BoardAnchor::Origin, ..Default::default() };
+        let options = board3d::BoardOptions {
+            anchor: board3d::BoardAnchor::Origin,
+            ..Default::default()
+        };
         let (components, _) = board3d::components(&layout, &options);
         let src = |id: crate::ids::FeatureId| crate::ids::PartId::new(id, 0);
-        std::iter::once(crate::derived::derived_part(f, src(crate::ids::FeatureId(uuid::Uuid::nil())), 0))
-            .chain(components.iter().map(|c| crate::derived::derived_part(f, src(crate::ids::FeatureId(c.footprint)), 0)))
-            .collect()
+        std::iter::once(crate::derived::derived_part(
+            f,
+            src(crate::ids::FeatureId(uuid::Uuid::nil())),
+            0,
+        ))
+        .chain(
+            components.iter().map(|c| {
+                crate::derived::derived_part(f, src(crate::ids::FeatureId(c.footprint)), 0)
+            }),
+        )
+        .collect()
     }
 
     /// The board a feature of [`PcbStudio::part_features`] stands for.
@@ -346,10 +408,19 @@ impl PcbStudio {
 
     /// Adds a board at the end and returns its id.
     pub fn add_board(&mut self, board: PcbBoard, source: BoardSource) -> BoardId {
-        let n = self.next_board.max(self.boards.iter().map(|b| b.id.0 + 1).max().unwrap_or(0));
+        let n = self
+            .next_board
+            .max(self.boards.iter().map(|b| b.id.0 + 1).max().unwrap_or(0));
         let id = BoardId(n);
         self.next_board = n + 1;
-        self.boards.push(StudioBoard { id, board, source, design: None, layout_hash: 0, outline_link: None });
+        self.boards.push(StudioBoard {
+            id,
+            board,
+            source,
+            design: None,
+            layout_hash: 0,
+            outline_link: None,
+        });
         id
     }
 
@@ -363,12 +434,18 @@ impl PcbStudio {
         if !used(name) {
             return name.to_string();
         }
-        (1..).map(|n| format!("{name} ({n})")).find(|c| !used(c)).unwrap()
+        (1..)
+            .map(|n| format!("{name} ({n})"))
+            .find(|c| !used(c))
+            .unwrap()
     }
 
     /// The first "Board 1", "Board 2", … (or "Component n") not yet used.
     fn next_free(&self, base: &str, used: impl Fn(&str) -> bool) -> String {
-        (1..).map(|n| format!("{base} {n}")).find(|c| !used(c)).unwrap()
+        (1..)
+            .map(|n| format!("{base} {n}"))
+            .find(|c| !used(c))
+            .unwrap()
     }
 
     /// Removes a board. If it was active, its neighbour (the next board, else the previous one)
@@ -377,7 +454,11 @@ impl PcbStudio {
         let i = self.boards.iter().position(|b| b.id == id)?;
         let b = self.boards.remove(i);
         if self.active == Some(id) {
-            self.active = self.boards.get(i).or_else(|| self.boards.get(i.wrapping_sub(1))).map(|b| b.id);
+            self.active = self
+                .boards
+                .get(i)
+                .or_else(|| self.boards.get(i.wrapping_sub(1)))
+                .map(|b| b.id);
         }
         Some(b)
     }
@@ -387,7 +468,10 @@ impl PcbStudio {
         if !self.boards.iter().any(|b| b.name() == name) {
             return name.to_string();
         }
-        (1..).map(|n| format!("{name} ({n})")).find(|c| !self.boards.iter().any(|b| b.name() == c)).unwrap()
+        (1..)
+            .map(|n| format!("{name} ({n})"))
+            .find(|c| !self.boards.iter().any(|b| b.name() == c))
+            .unwrap()
     }
 }
 
@@ -494,7 +578,9 @@ impl Command for DeleteBoard {
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
         let s = studio_mut(doc, self.element)?;
-        s.remove_board(self.board).map(|_| ()).ok_or_else(|| CommandError::Invalid("no such board".into()))
+        s.remove_board(self.board)
+            .map(|_| ())
+            .ok_or_else(|| CommandError::Invalid("no such board".into()))
     }
 }
 
@@ -512,8 +598,16 @@ impl AddBoard {
     /// A new empty board: one empty schematic sheet, a 100 × 80 mm outline, no parts.
     pub fn new_board(element: ElementId) -> AddBoard {
         use cadrs_eda::units::mm;
-        let design = cadrs_eda::Design { board: cadrs_eda::board::Board::with_rect_outline(mm(100.0), mm(80.0)), ..cadrs_eda::Design::new() };
-        AddBoard { element, name: None, design: Box::new(design), imported_from: None }
+        let design = cadrs_eda::Design {
+            board: cadrs_eda::board::Board::with_rect_outline(mm(100.0), mm(80.0)),
+            ..cadrs_eda::Design::new()
+        };
+        AddBoard {
+            element,
+            name: None,
+            design: Box::new(design),
+            imported_from: None,
+        }
     }
 }
 
@@ -535,7 +629,12 @@ impl Command for AddBoard {
             None => s.next_free("Board", |c| s.boards.iter().any(|b| b.name() == c)),
         };
         let board = design::pcb_board(&name, &self.design);
-        let id = s.add_board(board, BoardSource::Native { imported_from: self.imported_from.clone() });
+        let id = s.add_board(
+            board,
+            BoardSource::Native {
+                imported_from: self.imported_from.clone(),
+            },
+        );
         if let Some(b) = s.board_mut(id) {
             b.set_design(self.design.clone());
         }
@@ -566,10 +665,17 @@ impl Command for RenameBoard {
             return Err(CommandError::Invalid("A board name can't be empty".into()));
         }
         let s = studio_mut(doc, self.element)?;
-        if s.boards.iter().any(|b| b.id != self.board && b.name() == name) {
-            return Err(CommandError::Invalid(format!("There is already a board named {name}")));
+        if s.boards
+            .iter()
+            .any(|b| b.id != self.board && b.name() == name)
+        {
+            return Err(CommandError::Invalid(format!(
+                "There is already a board named {name}"
+            )));
         }
-        let b = s.board_mut(self.board).ok_or_else(|| CommandError::Invalid("no such board".into()))?;
+        let b = s
+            .board_mut(self.board)
+            .ok_or_else(|| CommandError::Invalid("no such board".into()))?;
         b.board.board.name = name.to_string();
         Ok(())
     }
@@ -593,14 +699,25 @@ impl Command for AddComponent {
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
         let s = studio_mut(doc, self.element)?;
-        let wanted = self.name.as_deref().or(self.value.as_ref().map(|v| v.name.as_str()));
+        let wanted = self
+            .name
+            .as_deref()
+            .or(self.value.as_ref().map(|v| v.name.as_str()));
         let name = match wanted {
             Some(n) => s.free_component_name(n.trim()),
-            None => s.next_free("Component", |c| s.components.iter().any(|x| x.component.name == c)),
+            None => s.next_free("Component", |c| {
+                s.components.iter().any(|x| x.component.name == c)
+            }),
         };
-        let n = s.next_component.max(s.components.iter().map(|c| c.id.0 + 1).max().unwrap_or(0));
+        let n = s
+            .next_component
+            .max(s.components.iter().map(|c| c.id.0 + 1).max().unwrap_or(0));
         s.next_component = n + 1;
-        let mut component = self.value.as_deref().cloned().unwrap_or_else(|| cadrs_eda::Component::new(""));
+        let mut component = self
+            .value
+            .as_deref()
+            .cloned()
+            .unwrap_or_else(|| cadrs_eda::Component::new(""));
         // Numbered (a pasted copy beside the original): its symbol and footprint, while they go
         // by its name, take the new one, so the project library tells them apart.
         let old = std::mem::replace(&mut component.name, name);
@@ -612,7 +729,10 @@ impl Command for AddComponent {
                 fp.id = component.name.clone();
             }
         }
-        s.components.push(StudioComponent { id: ComponentId(n), component });
+        s.components.push(StudioComponent {
+            id: ComponentId(n),
+            component,
+        });
         Ok(())
     }
 }
@@ -633,7 +753,11 @@ impl Command for DeleteComponent {
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
         let s = studio_mut(doc, self.element)?;
-        let i = s.components.iter().position(|c| c.id == self.component).ok_or_else(|| CommandError::Invalid("no such component".into()))?;
+        let i = s
+            .components
+            .iter()
+            .position(|c| c.id == self.component)
+            .ok_or_else(|| CommandError::Invalid("no such component".into()))?;
         s.components.remove(i);
         Ok(())
     }
@@ -657,14 +781,29 @@ impl Command for RenameComponent {
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
         let name = self.name.trim();
         if name.is_empty() {
-            return Err(CommandError::Invalid("A component name can't be empty".into()));
+            return Err(CommandError::Invalid(
+                "A component name can't be empty".into(),
+            ));
         }
-        let lib = project_library_name(&doc.element(self.element).ok_or(CommandError::ElementNotFound(self.element))?.name);
+        let lib = project_library_name(
+            &doc.element(self.element)
+                .ok_or(CommandError::ElementNotFound(self.element))?
+                .name,
+        );
         let s = studio_mut(doc, self.element)?;
-        if s.components.iter().any(|c| c.id != self.component && c.component.name == name) {
-            return Err(CommandError::Invalid(format!("There is already a component named {name}")));
+        if s.components
+            .iter()
+            .any(|c| c.id != self.component && c.component.name == name)
+        {
+            return Err(CommandError::Invalid(format!(
+                "There is already a component named {name}"
+            )));
         }
-        let c = s.components.iter_mut().find(|c| c.id == self.component).ok_or_else(|| CommandError::Invalid("no such component".into()))?;
+        let c = s
+            .components
+            .iter_mut()
+            .find(|c| c.id == self.component)
+            .ok_or_else(|| CommandError::Invalid("no such component".into()))?;
         let old = std::mem::replace(&mut c.component.name, name.to_string());
         // Its symbol and footprint go by the component's name while they carry it, and the
         // boards' schematics and layouts that use them follow (as the project library has them:
@@ -682,15 +821,29 @@ impl Command for RenameComponent {
             return Ok(());
         }
         let renamed = &renamed;
-        let map = |footprint: bool| move |id: &str| renamed.iter().find(|(o, _, s)| *s != footprint && o == id).map(|(_, n, _)| n.clone());
+        let map = |footprint: bool| {
+            move |id: &str| {
+                renamed
+                    .iter()
+                    .find(|(o, _, s)| *s != footprint && o == id)
+                    .map(|(_, n, _)| n.clone())
+            }
+        };
         let (sym, fp) = (map(false), map(true));
         for b in &mut s.boards {
             if let Some(d) = b.design.as_deref_mut() {
                 cadrs_eda::rename::rename_parts(d, &sym, &fp);
                 // A part placed under the old name shows the new one.
-                for p in d.schematic.sheets.iter_mut().flat_map(|sh| sh.symbols.iter_mut()) {
+                for p in d
+                    .schematic
+                    .sheets
+                    .iter_mut()
+                    .flat_map(|sh| sh.symbols.iter_mut())
+                {
                     if p.symbol == format!("{lib}:{name}")
-                        && let Some(f) = p.field_mut(cadrs_eda::symbol::fields::VALUE).filter(|f| f.text.text == old)
+                        && let Some(f) = p
+                            .field_mut(cadrs_eda::symbol::fields::VALUE)
+                            .filter(|f| f.text.text == old)
                     {
                         f.text.text = name.to_string();
                     }
@@ -705,7 +858,16 @@ impl Command for RenameComponent {
 /// A studio's name as the name of its project library (its components, as boards' schematics
 /// refer to them): "PCB Studio 1" → "PCB_Studio_1".
 pub fn project_library_name(studio: &str) -> String {
-    studio.chars().map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' }).collect()
+    studio
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 /// An edit of a native board's schematic or layout: the editors compute the new design with
@@ -728,9 +890,14 @@ impl Command for SetDesign {
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
         let s = studio_mut(doc, self.element)?;
-        let b = s.board_mut(self.board).ok_or_else(|| CommandError::Invalid("no such board".into()))?;
+        let b = s
+            .board_mut(self.board)
+            .ok_or_else(|| CommandError::Invalid("no such board".into()))?;
         if b.design().is_none() {
-            return Err(CommandError::Invalid(format!("{} is not designed in cadrs", b.name())));
+            return Err(CommandError::Invalid(format!(
+                "{} is not designed in cadrs",
+                b.name()
+            )));
         }
         b.set_design(self.design.clone());
         Ok(())
@@ -756,7 +923,11 @@ impl Command for SetComponent {
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
         let s = studio_mut(doc, self.element)?;
-        let c = s.components.iter_mut().find(|c| c.id == self.component).ok_or_else(|| CommandError::Invalid("no such component".into()))?;
+        let c = s
+            .components
+            .iter_mut()
+            .find(|c| c.id == self.component)
+            .ok_or_else(|| CommandError::Invalid("no such component".into()))?;
         let name = c.component.name.clone();
         c.component = (*self.value).clone();
         // The name is the list's; renaming goes through RenameComponent.
@@ -810,13 +981,29 @@ impl Command for SetRefdes {
             return Err(CommandError::Invalid("A designator can't be empty".into()));
         }
         if new.contains(char::is_whitespace) {
-            return Err(CommandError::Invalid("A designator can't contain spaces".into()));
+            return Err(CommandError::Invalid(
+                "A designator can't contain spaces".into(),
+            ));
         }
         let s = studio_mut(doc, self.element)?;
-        let b = &mut s.board_mut(self.board).ok_or_else(|| CommandError::Invalid("no such board".into()))?.board;
-        let i = b.component_ids.iter().position(|c| *c == self.item).ok_or_else(|| CommandError::Invalid("no such component".into()))?;
-        if b.board.placements.iter().enumerate().any(|(j, p)| j != i && p.refdes.eq_ignore_ascii_case(new)) {
-            return Err(CommandError::Invalid(format!("{new} is already used on this board")));
+        let b = &mut s
+            .board_mut(self.board)
+            .ok_or_else(|| CommandError::Invalid("no such board".into()))?
+            .board;
+        let i = b
+            .component_ids
+            .iter()
+            .position(|c| *c == self.item)
+            .ok_or_else(|| CommandError::Invalid("no such component".into()))?;
+        if b.board
+            .placements
+            .iter()
+            .enumerate()
+            .any(|(j, p)| j != i && p.refdes.eq_ignore_ascii_case(new))
+        {
+            return Err(CommandError::Invalid(format!(
+                "{new} is already used on this board"
+            )));
         }
         b.board.placements[i].refdes = new.to_string();
         Ok(())
@@ -836,7 +1023,11 @@ pub struct SetRepresentation {
 
 impl Command for SetRepresentation {
     fn label(&self) -> String {
-        if self.label.is_empty() { format!("Set representation of {}", self.package) } else { self.label.clone() }
+        if self.label.is_empty() {
+            format!("Set representation of {}", self.package)
+        } else {
+            self.label.clone()
+        }
     }
     fn scope(&self) -> Scope {
         Scope::Element(self.element)

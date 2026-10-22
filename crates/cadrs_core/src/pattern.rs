@@ -94,7 +94,15 @@ pub struct LinearDirection {
 
 impl Default for LinearDirection {
     fn default() -> Self {
-        Self { direction: None, distance: 25.0, distance_expr: "25 mm".into(), count: 2, count_expr: String::new(), flip: false, centered: false }
+        Self {
+            direction: None,
+            distance: 25.0,
+            distance_expr: "25 mm".into(),
+            count: 2,
+            count_expr: String::new(),
+            flip: false,
+            centered: false,
+        }
     }
 }
 
@@ -197,7 +205,10 @@ impl Default for PatternFeature {
 impl PatternFeature {
     /// A new pattern of `kind` (Onshape's defaults: 2 instances 25 mm apart; 4 round 360°).
     pub fn new(kind: PatternKind) -> Self {
-        let mut p = Self { kind, ..Self::default() };
+        let mut p = Self {
+            kind,
+            ..Self::default()
+        };
         if kind == PatternKind::Circular {
             p.first.count = 4;
         }
@@ -266,13 +277,21 @@ impl PatternFeature {
             (0..n).map(|i| f64::from(i) - f64::from(shift)).collect()
         };
         let a = axis_offsets(&self.first);
-        let b = if self.kind == PatternKind::Linear && self.second_on { axis_offsets(&self.second) } else { vec![0.0] };
+        let b = if self.kind == PatternKind::Linear && self.second_on {
+            axis_offsets(&self.second)
+        } else {
+            vec![0.0]
+        };
         let mut seed = Vec::new();
         let mut out = Vec::new();
         for (j, y) in b.iter().enumerate() {
             for (i, x) in a.iter().enumerate() {
                 let item = ([i as u32, j as u32], [*x, *y]);
-                if *x == 0.0 && *y == 0.0 { seed.push(item) } else { out.push(item) }
+                if *x == 0.0 && *y == 0.0 {
+                    seed.push(item)
+                } else {
+                    out.push(item)
+                }
             }
         }
         seed.extend(out);
@@ -283,7 +302,11 @@ impl PatternFeature {
     /// (a full turn by the count, else by the gaps between them), otherwise it is the step.
     pub fn angle_step(&self) -> f64 {
         let n = f64::from(self.first.count.max(1));
-        let a = if self.first.flip { -self.angle } else { self.angle };
+        let a = if self.first.flip {
+            -self.angle
+        } else {
+            self.angle
+        };
         if !self.equal_spacing {
             return a;
         }
@@ -298,7 +321,11 @@ impl PatternFeature {
 
     /// The feature ids it copies (Feature pattern).
     pub fn feature_seeds(&self) -> &[FeatureId] {
-        if self.pattern_type == PatternType::Feature { &self.features } else { &[] }
+        if self.pattern_type == PatternType::Feature {
+            &self.features
+        } else {
+            &[]
+        }
     }
 }
 
@@ -393,7 +420,11 @@ mod tests {
         assert_eq!(c.angle_step(), 90.0);
         c.angle = 60.0;
         c.first.count = 3;
-        assert_eq!(c.angle_step(), 30.0, "3 over 60° with equal spacing: a 30° step (PS24.2)");
+        assert_eq!(
+            c.angle_step(),
+            30.0,
+            "3 over 60° with equal spacing: a 30° step (PS24.2)"
+        );
         c.equal_spacing = false;
         assert_eq!(c.angle_step(), 60.0, "3 × 60° spans 120°");
         assert_eq!(index_label([2, 0]), "(2, 0)");

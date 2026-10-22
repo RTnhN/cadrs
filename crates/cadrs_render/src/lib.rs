@@ -70,14 +70,23 @@ impl SceneBuilder {
 
     /// Adds a mesh: `normals` per position (or empty for flat shading), `indices` in threes,
     /// `material_of(k)` the material of triangle `k`.
-    pub fn add_mesh(&mut self, positions: &[[f32; 3]], normals: &[[f32; 3]], indices: &[u32], material_of: impl Fn(usize) -> u32) {
+    pub fn add_mesh(
+        &mut self,
+        positions: &[[f32; 3]],
+        normals: &[[f32; 3]],
+        indices: &[u32],
+        material_of: impl Fn(usize) -> u32,
+    ) {
         let base = self.positions.len() as u32;
-        self.positions.extend(positions.iter().map(|p| V3::from_array(*p)));
+        self.positions
+            .extend(positions.iter().map(|p| V3::from_array(*p)));
         if normals.len() == positions.len() {
-            self.normals.extend(normals.iter().map(|n| V3::from_array(*n).normalize()));
+            self.normals
+                .extend(normals.iter().map(|n| V3::from_array(*n).normalize()));
         } else {
             // No normals: marked zero, so the face normal is used.
-            self.normals.extend(std::iter::repeat_n(V3::ZERO, positions.len()));
+            self.normals
+                .extend(std::iter::repeat_n(V3::ZERO, positions.len()));
         }
         for (k, t) in indices.chunks_exact(3).enumerate() {
             if t.iter().any(|&i| i as usize >= positions.len()) {
@@ -89,15 +98,34 @@ impl SceneBuilder {
     }
 
     pub fn build(self) -> Scene {
-        let corners: Vec<[V3; 3]> =
-            self.tris.iter().map(|t| [self.positions[t[0] as usize], self.positions[t[1] as usize], self.positions[t[2] as usize]]).collect();
-        let face_normals = corners.iter().map(|[a, b, c]| (*b - *a).cross(*c - *a).normalize()).collect();
+        let corners: Vec<[V3; 3]> = self
+            .tris
+            .iter()
+            .map(|t| {
+                [
+                    self.positions[t[0] as usize],
+                    self.positions[t[1] as usize],
+                    self.positions[t[2] as usize],
+                ]
+            })
+            .collect();
+        let face_normals = corners
+            .iter()
+            .map(|[a, b, c]| (*b - *a).cross(*c - *a).normalize())
+            .collect();
         let bvh = bvh::Bvh::build(&corners);
         let mut materials = self.materials;
         if materials.is_empty() {
             materials.push(Material::default());
         }
-        Scene { normals: self.normals, tris: self.tris, tri_material: self.tri_material, face_normals, materials, bvh }
+        Scene {
+            normals: self.normals,
+            tris: self.tris,
+            tri_material: self.tri_material,
+            face_normals,
+            materials,
+            bvh,
+        }
     }
 }
 
@@ -138,16 +166,33 @@ impl Camera {
     /// A camera looking back along `back` (the unit vector from the model toward the camera)
     /// with `up` the screen's up, framing `bounds` with `margin` (a fraction of the image) on
     /// each side at `aspect` (width / height).
-    pub fn fit(bounds: ([f32; 3], [f32; 3]), back: [f32; 3], up: [f32; 3], projection: Projection, aspect: f32, margin: f32) -> Camera {
+    pub fn fit(
+        bounds: ([f32; 3], [f32; 3]),
+        back: [f32; 3],
+        up: [f32; 3],
+        projection: Projection,
+        aspect: f32,
+        margin: f32,
+    ) -> Camera {
         let back = V3::from_array(back).normalize();
         let right = V3::from_array(up).cross(back).normalize();
         let up = back.cross(right).normalize();
         let (lo, hi) = (V3::from_array(bounds.0), V3::from_array(bounds.1));
         let center = (lo + hi) * 0.5;
         let corners: Vec<V3> = (0..8)
-            .map(|i| v3(if i & 1 == 0 { lo.x } else { hi.x }, if i & 2 == 0 { lo.y } else { hi.y }, if i & 4 == 0 { lo.z } else { hi.z }) - center)
+            .map(|i| {
+                v3(
+                    if i & 1 == 0 { lo.x } else { hi.x },
+                    if i & 2 == 0 { lo.y } else { hi.y },
+                    if i & 4 == 0 { lo.z } else { hi.z },
+                ) - center
+            })
             .collect();
-        let radius = corners.iter().map(|c| c.length()).fold(0.0f32, f32::max).max(1e-3);
+        let radius = corners
+            .iter()
+            .map(|c| c.length())
+            .fold(0.0f32, f32::max)
+            .max(1e-3);
         let fill = (1.0 - 2.0 * margin).clamp(0.1, 1.0);
         match projection {
             Projection::Orthographic { .. } => {
@@ -158,7 +203,13 @@ impl Camera {
                 }
                 let height = (2.0 * y).max(2.0 * x / aspect) / fill;
                 let eye = center + back * (radius * 4.0);
-                Camera { eye: eye.to_array(), forward: (-back).to_array(), right: right.to_array(), up: up.to_array(), projection: Projection::Orthographic { height } }
+                Camera {
+                    eye: eye.to_array(),
+                    forward: (-back).to_array(),
+                    right: right.to_array(),
+                    up: up.to_array(),
+                    projection: Projection::Orthographic { height },
+                }
             }
             Projection::Perspective { fov_y } => {
                 let ty = (fov_y.to_radians() / 2.0).tan() * fill;
@@ -167,31 +218,49 @@ impl Camera {
                 let mut d = radius * 1.05;
                 for c in &corners {
                     let z = c.dot(back);
-                    d = d.max(z + c.dot(right).abs() / tx).max(z + c.dot(up).abs() / ty);
+                    d = d
+                        .max(z + c.dot(right).abs() / tx)
+                        .max(z + c.dot(up).abs() / ty);
                 }
                 let eye = center + back * d;
-                Camera { eye: eye.to_array(), forward: (-back).to_array(), right: right.to_array(), up: up.to_array(), projection }
+                Camera {
+                    eye: eye.to_array(),
+                    forward: (-back).to_array(),
+                    right: right.to_array(),
+                    up: up.to_array(),
+                    projection,
+                }
             }
         }
     }
 
     /// The ray through image point (`sx`, `sy`) in 0–1 from the top left.
     fn ray(&self, sx: f32, sy: f32, aspect: f32) -> (V3, V3) {
-        let (eye, f, r, u) = (V3::from_array(self.eye), V3::from_array(self.forward), V3::from_array(self.right), V3::from_array(self.up));
+        let (eye, f, r, u) = (
+            V3::from_array(self.eye),
+            V3::from_array(self.forward),
+            V3::from_array(self.right),
+            V3::from_array(self.up),
+        );
         let (px, py) = (2.0 * sx - 1.0, 1.0 - 2.0 * sy);
         match self.projection {
             Projection::Perspective { fov_y } => {
                 let t = (fov_y.to_radians() / 2.0).tan();
                 (eye, (f + r * (px * t * aspect) + u * (py * t)).normalize())
             }
-            Projection::Orthographic { height } => (eye + r * (px * height * aspect / 2.0) + u * (py * height / 2.0), f),
+            Projection::Orthographic { height } => (
+                eye + r * (px * height * aspect / 2.0) + u * (py * height / 2.0),
+                f,
+            ),
         }
     }
 
     /// The model-space size of one pixel at distance `t` along a ray.
     fn footprint(&self, t: f32, height_px: u32) -> f32 {
         match self.projection {
-            Projection::Perspective { fov_y } => t * 2.0 * (fov_y.to_radians() / 2.0).tan() / height_px as f32,
+            Projection::Perspective { fov_y } => {
+                t * 2.0 * (fov_y.to_radians() / 2.0).tan() / height_px as f32
+            }
             Projection::Orthographic { height } => height / height_px as f32,
         }
     }
@@ -297,11 +366,19 @@ pub struct Renderer {
 
 /// The threads a render uses: half the machine's, at most eight (the app stays responsive).
 pub fn default_threads() -> usize {
-    std::thread::available_parallelism().map(|n| n.get() / 2).unwrap_or(2).clamp(1, 8)
+    std::thread::available_parallelism()
+        .map(|n| n.get() / 2)
+        .unwrap_or(2)
+        .clamp(1, 8)
 }
 
 impl Renderer {
-    pub fn new(scene: std::sync::Arc<Scene>, camera: Camera, settings: Settings, threads: usize) -> Self {
+    pub fn new(
+        scene: std::sync::Arc<Scene>,
+        camera: Camera,
+        settings: Settings,
+        threads: usize,
+    ) -> Self {
         let n = (settings.width as usize) * (settings.height as usize);
         let (ground_z, eps) = match scene.bounds() {
             Some((lo, hi)) => {
@@ -310,7 +387,10 @@ impl Renderer {
             }
             None => (0.0, 1e-4),
         };
-        let pool = rayon::ThreadPoolBuilder::new().num_threads(threads.max(1)).build().expect("render threads");
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(threads.max(1))
+            .build()
+            .expect("render threads");
         Renderer {
             scene,
             camera,
@@ -346,33 +426,42 @@ impl Renderer {
         {
             let this = &*self;
             this.pool.install(|| {
-                accum.par_chunks_mut(w).zip(guide.par_chunks_mut(w)).enumerate().for_each(|(y, (acc, gd))| {
-                    for x in 0..w {
-                        let r = this.sample(x as u32, y as u32, s, (s == 0).then_some(&mut gd[x]));
-                        let a = &mut acc[x];
-                        match r {
-                            SampleResult::Model { radiance } => {
-                                a.model[0] += radiance.x;
-                                a.model[1] += radiance.y;
-                                a.model[2] += radiance.z;
-                                a.n_model += 1.0;
-                            }
-                            SampleResult::Ground { occluded, open, sky } => {
-                                a.n_ground += 1.0;
-                                a.occluded += occluded;
-                                a.open += open;
-                                a.sky[0] += sky.x;
-                                a.sky[1] += sky.y;
-                                a.sky[2] += sky.z;
-                            }
-                            SampleResult::Miss { sky } => {
-                                a.sky[0] += sky.x;
-                                a.sky[1] += sky.y;
-                                a.sky[2] += sky.z;
+                accum
+                    .par_chunks_mut(w)
+                    .zip(guide.par_chunks_mut(w))
+                    .enumerate()
+                    .for_each(|(y, (acc, gd))| {
+                        for x in 0..w {
+                            let r =
+                                this.sample(x as u32, y as u32, s, (s == 0).then_some(&mut gd[x]));
+                            let a = &mut acc[x];
+                            match r {
+                                SampleResult::Model { radiance } => {
+                                    a.model[0] += radiance.x;
+                                    a.model[1] += radiance.y;
+                                    a.model[2] += radiance.z;
+                                    a.n_model += 1.0;
+                                }
+                                SampleResult::Ground {
+                                    occluded,
+                                    open,
+                                    sky,
+                                } => {
+                                    a.n_ground += 1.0;
+                                    a.occluded += occluded;
+                                    a.open += open;
+                                    a.sky[0] += sky.x;
+                                    a.sky[1] += sky.y;
+                                    a.sky[2] += sky.z;
+                                }
+                                SampleResult::Miss { sky } => {
+                                    a.sky[0] += sky.x;
+                                    a.sky[1] += sky.y;
+                                    a.sky[2] += sky.z;
+                                }
                             }
                         }
-                    }
-                });
+                    });
             });
         }
         self.accum = accum;
@@ -382,12 +471,24 @@ impl Renderer {
 
     fn sample(&self, x: u32, y: u32, s: u32, guide: Option<&mut Guide>) -> SampleResult {
         let (w, h) = (self.settings.width, self.settings.height);
-        let mut rng = Rng::new(self.settings.seed, (y as u64) * (w as u64) + x as u64, s as u64);
+        let mut rng = Rng::new(
+            self.settings.seed,
+            (y as u64) * (w as u64) + x as u64,
+            s as u64,
+        );
         // The first sample goes through the pixel's centre (the denoiser's guides); the others
         // are jittered over it.
-        let (jx, jy) = if s == 0 { (0.5, 0.5) } else { (rng.f(), rng.f()) };
+        let (jx, jy) = if s == 0 {
+            (0.5, 0.5)
+        } else {
+            (rng.f(), rng.f())
+        };
         let aspect = w as f32 / h as f32;
-        let (o, d) = self.camera.ray((x as f32 + jx) / w as f32, (y as f32 + jy) / h as f32, aspect);
+        let (o, d) = self.camera.ray(
+            (x as f32 + jx) / w as f32,
+            (y as f32 + jy) / h as f32,
+            aspect,
+        );
         let hit = self.scene.bvh.intersect(o, d, f32::MAX);
         let ground_t = if self.settings.ground_shadow && d.z < -1e-6 {
             let t = (self.ground_z - o.z) / d.z;
@@ -395,7 +496,13 @@ impl Renderer {
         } else {
             None
         };
-        let sky = || if self.env.backdrop(0.5, 0.5).is_none() { self.env.dome(d) } else { V3::ZERO };
+        let sky = || {
+            if self.env.backdrop(0.5, 0.5).is_none() {
+                self.env.dome(d)
+            } else {
+                V3::ZERO
+            }
+        };
         match (hit, ground_t) {
             (Some(hit), g) if g.is_none_or(|g| hit.t < g) => {
                 let radiance = self.trace(o, d, hit, &mut rng, guide);
@@ -404,7 +511,11 @@ impl Renderer {
             (_, Some(t)) => {
                 let p = o + d * t;
                 let (occluded, open) = self.ground_light(p, &mut rng);
-                SampleResult::Ground { occluded, open, sky: sky() }
+                SampleResult::Ground {
+                    occluded,
+                    open,
+                    sky: sky(),
+                }
             }
             _ => SampleResult::Miss { sky: sky() },
         }
@@ -449,7 +560,14 @@ impl Renderer {
 
     /// A path from the first hit: next-event estimation of the lights with multiple importance
     /// sampling, the dome reached by the surface lobes, Russian roulette after three bounces.
-    fn trace(&self, mut o: V3, mut d: V3, first: bvh::Hit, rng: &mut Rng, mut guide: Option<&mut Guide>) -> V3 {
+    fn trace(
+        &self,
+        mut o: V3,
+        mut d: V3,
+        first: bvh::Hit,
+        rng: &mut Rng,
+        mut guide: Option<&mut Guide>,
+    ) -> V3 {
         let scene = &*self.scene;
         let lights = &self.env.lights;
         let n_lights = lights.len() as f32;
@@ -482,7 +600,11 @@ impl Renderer {
             let [ia, ib, ic] = scene.tris[tri];
             let p = o + d * h.t;
             let mut ng = scene.face_normals[tri];
-            let (na, nb, nc) = (scene.normals[ia as usize], scene.normals[ib as usize], scene.normals[ic as usize]);
+            let (na, nb, nc) = (
+                scene.normals[ia as usize],
+                scene.normals[ib as usize],
+                scene.normals[ic as usize],
+            );
             let mut ns = if na == V3::ZERO || nb == V3::ZERO || nc == V3::ZERO {
                 ng
             } else {
@@ -512,7 +634,13 @@ impl Renderer {
                 continue;
             }
             if let Some(g) = guide.take() {
-                *g = Guide { normal: ns, albedo: V3::from_array(m.base_color), position: p, footprint: self.camera.footprint(h.t, self.settings.height), hit: true };
+                *g = Guide {
+                    normal: ns,
+                    albedo: V3::from_array(m.base_color),
+                    position: p,
+                    footprint: self.camera.footprint(h.t, self.settings.height),
+                    hit: true,
+                };
             }
             let bsdf = bsdf::Bsdf::new(m, ns.dot(wo));
             let origin = p + ng * self.eps;
@@ -554,7 +682,11 @@ impl Renderer {
         }
         // Fireflies (a rare path onto a small bright light) are clamped.
         let m = radiance.max_elem();
-        if m > 24.0 { radiance * (24.0 / m) } else { radiance }
+        if m > 24.0 {
+            radiance * (24.0 / m)
+        } else {
+            radiance
+        }
     }
 
     /// The image so far, denoised if asked, as straight-alpha sRGB.
@@ -575,7 +707,13 @@ impl Renderer {
         let mut model: Vec<V3> = self
             .accum
             .iter()
-            .map(|a| if a.n_model > 0.0 { v3(a.model[0], a.model[1], a.model[2]) / a.n_model } else { V3::ZERO })
+            .map(|a| {
+                if a.n_model > 0.0 {
+                    v3(a.model[0], a.model[1], a.model[2]) / a.n_model
+                } else {
+                    V3::ZERO
+                }
+            })
             .collect();
         if denoise && self.samples_done > 1 {
             model = self.denoise(&model);
@@ -593,13 +731,21 @@ impl Renderer {
                 // The shadow: how much of the ground's light the model takes, over the pixel's
                 // background samples.
                 let bg_samples = (n - a.n_model).max(0.0);
-                let shadow = if a.n_ground > 0.0 && bg_samples > 0.0 { shadows[i] * 0.85 * (a.n_ground / bg_samples) } else { 0.0 };
+                let shadow = if a.n_ground > 0.0 && bg_samples > 0.0 {
+                    shadows[i] * 0.85 * (a.n_ground / bg_samples)
+                } else {
+                    0.0
+                };
                 let (sx, sy) = ((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32);
                 let (rgb, alpha) = match background {
                     Background::Transparent => {
                         // Premultiplied: the model over a black shadow of opacity `shadow`.
                         let alpha = coverage + rest * shadow;
-                        let c = if alpha > 0.0 { m * (coverage / alpha) } else { V3::ZERO };
+                        let c = if alpha > 0.0 {
+                            m * (coverage / alpha)
+                        } else {
+                            V3::ZERO
+                        };
                         (c, alpha)
                     }
                     _ => {
@@ -607,7 +753,11 @@ impl Renderer {
                             (Background::White, _) => V3::ONE,
                             (_, Some(c)) => c,
                             (_, None) => {
-                                let s = if bg_samples > 0.0 { v3(a.sky[0], a.sky[1], a.sky[2]) / bg_samples } else { V3::ZERO };
+                                let s = if bg_samples > 0.0 {
+                                    v3(a.sky[0], a.sky[1], a.sky[2]) / bg_samples
+                                } else {
+                                    V3::ZERO
+                                };
                                 tonemap(s * exposure)
                             }
                         };
@@ -615,7 +765,11 @@ impl Renderer {
                     }
                 };
                 let px = |c: f32| (c.clamp(0.0, 1.0) * 255.0).round() as u8;
-                out.put_pixel(x as u32, y as u32, Rgba([px(rgb.x), px(rgb.y), px(rgb.z), px(alpha)]));
+                out.put_pixel(
+                    x as u32,
+                    y as u32,
+                    Rgba([px(rgb.x), px(rgb.y), px(rgb.z), px(alpha)]),
+                );
             }
         }
         out
@@ -626,13 +780,31 @@ impl Renderer {
     /// are not.
     fn shadows(&self) -> Vec<f32> {
         let (w, h) = (self.settings.width as usize, self.settings.height as usize);
-        let ground: Vec<bool> = self.accum.iter().map(|a| a.n_ground > 0.0 && a.open > 0.0).collect();
-        let mut cur: Vec<f32> = self.accum.iter().map(|a| if a.open > 0.0 { (1.0 - a.occluded / a.open).clamp(0.0, 1.0) } else { 0.0 }).collect();
+        let ground: Vec<bool> = self
+            .accum
+            .iter()
+            .map(|a| a.n_ground > 0.0 && a.open > 0.0)
+            .collect();
+        let mut cur: Vec<f32> = self
+            .accum
+            .iter()
+            .map(|a| {
+                if a.open > 0.0 {
+                    (1.0 - a.occluded / a.open).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                }
+            })
+            .collect();
         if self.samples_done <= 1 {
             return cur;
         }
         let kernel = [1.0 / 16.0, 1.0 / 4.0, 3.0 / 8.0, 1.0 / 4.0, 1.0 / 16.0];
-        let steps: &[usize] = if self.samples_done >= 256 { &[1] } else { &[1, 2, 4] };
+        let steps: &[usize] = if self.samples_done >= 256 {
+            &[1]
+        } else {
+            &[1, 2, 4]
+        };
         for &step in steps {
             let src = &cur;
             let ground = &ground;
@@ -678,7 +850,17 @@ impl Renderer {
         let (w, h) = (self.settings.width as usize, self.settings.height as usize);
         let guide = &self.guide;
         let albedo = |i: usize| guide[i].albedo.max(V3::splat(0.02));
-        let mut cur: Vec<V3> = input.iter().enumerate().map(|(i, c)| if guide[i].hit { v3(c.x / albedo(i).x, c.y / albedo(i).y, c.z / albedo(i).z) } else { *c }).collect();
+        let mut cur: Vec<V3> = input
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                if guide[i].hit {
+                    v3(c.x / albedo(i).x, c.y / albedo(i).y, c.z / albedo(i).z)
+                } else {
+                    *c
+                }
+            })
+            .collect();
         // Stronger with fewer samples.
         let noise = (1.0 / (self.samples_done as f32).sqrt()).clamp(0.02, 0.7);
         let kernel = [1.0 / 16.0, 1.0 / 4.0, 3.0 / 8.0, 1.0 / 4.0, 1.0 / 16.0];
@@ -714,11 +896,13 @@ impl Renderer {
                                         continue;
                                     }
                                     let wn = g.normal.dot(q.normal).max(0.0).powi(64);
-                                    let plane = g.normal.dot(q.position - g.position).abs() / (g.footprint * step as f32 * 1.5 + 1e-6);
+                                    let plane = g.normal.dot(q.position - g.position).abs()
+                                        / (g.footprint * step as f32 * 1.5 + 1e-6);
                                     let wp = (-plane).exp();
                                     let da = g.albedo - q.albedo;
                                     let wa = (-da.dot(da) * 200.0).exp();
-                                    let dl = (src[j].luminance() - lp).abs() / (sigma_l * (lp + 0.05));
+                                    let dl =
+                                        (src[j].luminance() - lp).abs() / (sigma_l * (lp + 0.05));
                                     let wl = (-dl).exp();
                                     let wgt = kxw * kyw * wn * wp * wa * wl;
                                     sum += src[j] * wgt;
@@ -732,7 +916,16 @@ impl Renderer {
             });
             cur = next;
         }
-        cur.iter().enumerate().map(|(i, c)| if guide[i].hit { c.mul_v(albedo(i)) } else { input[i] }).collect()
+        cur.iter()
+            .enumerate()
+            .map(|(i, c)| {
+                if guide[i].hit {
+                    c.mul_v(albedo(i))
+                } else {
+                    input[i]
+                }
+            })
+            .collect()
     }
 }
 
@@ -752,11 +945,22 @@ pub fn tonemap(c: V3) -> V3 {
         let g = 1.0 - 1.0 / (desaturation * (peak - new_peak) + 1.0);
         c = c.lerp(V3::splat(new_peak), g);
     }
-    v3(math::linear_to_srgb(c.x), math::linear_to_srgb(c.y), math::linear_to_srgb(c.z))
+    v3(
+        math::linear_to_srgb(c.x),
+        math::linear_to_srgb(c.y),
+        math::linear_to_srgb(c.z),
+    )
 }
 
 /// Renders every sample: `progress(done, total)` after each pass; `None` if `cancel` was set.
-pub fn render(scene: std::sync::Arc<Scene>, camera: Camera, settings: Settings, threads: usize, cancel: &AtomicBool, mut progress: impl FnMut(u32, u32)) -> Option<RgbaImage> {
+pub fn render(
+    scene: std::sync::Arc<Scene>,
+    camera: Camera,
+    settings: Settings,
+    threads: usize,
+    cancel: &AtomicBool,
+    mut progress: impl FnMut(u32, u32),
+) -> Option<RgbaImage> {
     let mut r = Renderer::new(scene, camera, settings, threads);
     while !r.is_done() {
         if cancel.load(Ordering::Relaxed) {

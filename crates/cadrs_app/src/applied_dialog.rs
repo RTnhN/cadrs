@@ -36,15 +36,18 @@ use bevy::prelude::*;
 use cadrs_core::applied::{
     ChamferMeasurement, ChamferType, EdgeOrFace, FilletControl, FilletMeasurement, FilletType,
 };
-use cadrs_core::hole::{Fit, HoleEnd, HoleSpec, HoleStandard, HoleStart, HoleStyle, HoleType, Length, PemType, TapType, ToleranceType};
+use cadrs_core::hole::{
+    Fit, HoleEnd, HoleSpec, HoleStandard, HoleStart, HoleStyle, HoleType, Length, PemType, TapType,
+    ToleranceType,
+};
 use cadrs_core::{Feature, FeatureKind};
 use cadrs_sketch::units::Quantity;
 use cadrs_ui::prelude::*;
 use cadrs_ui::{
     CheckboxChange, FeatureDialogAccept, FeatureDialogCancel, FeatureDialogState, NumberField,
-    NumberFieldCommit, NumberFieldState, OptionRow, Select, SelectChange, SelectState, SelectionList,
-    SelectionListActivate, SelectionListMove, SelectionListRemove, SelectionListState, TabStrip,
-    TabStripSelect,
+    NumberFieldCommit, NumberFieldState, OptionRow, Select, SelectChange, SelectState,
+    SelectionList, SelectionListActivate, SelectionListMove, SelectionListRemove,
+    SelectionListState, TabStrip, TabStripSelect,
 };
 
 use crate::applied::{AppliedField, AppliedKind, AppliedSession, current, set};
@@ -335,12 +338,18 @@ pub enum SmNum {
 }
 
 fn name_of(features: &[Feature], op: cadrs_sketch::OpId) -> String {
-    features.iter().find(|f| f.id.0 == op).map_or("part".into(), |f| f.name.clone())
+    features
+        .iter()
+        .find(|f| f.id.0 == op)
+        .map_or("part".into(), |f| f.name.clone())
 }
 
 fn entity_label(features: &[Feature], e: &EdgeOrFace) -> String {
     match e {
-        EdgeOrFace::Edge(r) => format!("Edge of {}", name_of(features, crate::parts::edge_maker(features, &r.edge))),
+        EdgeOrFace::Edge(r) => format!(
+            "Edge of {}",
+            name_of(features, crate::parts::edge_maker(features, &r.edge))
+        ),
         EdgeOrFace::Face(r) => format!("Face of {}", name_of(features, r.face.op)),
     }
 }
@@ -348,51 +357,79 @@ fn entity_label(features: &[Feature], e: &EdgeOrFace) -> String {
 /// The items of a list for the feature.
 fn items(features: &[Feature], cache: &PartCache, kind: &FeatureKind, role: Role) -> Vec<String> {
     match (kind, role) {
-        (FeatureKind::Fillet(x), Role::Entities) => x.entities.iter().map(|e| entity_label(features, e)).collect(),
-        (FeatureKind::Chamfer(x), Role::Entities) => x.entities.iter().map(|e| entity_label(features, e)).collect(),
-        (FeatureKind::Chamfer(x), Role::Overrides) => {
-            x.overrides.iter().map(|e| entity_label(features, &EdgeOrFace::Edge(*e))).collect()
+        (FeatureKind::Fillet(x), Role::Entities) => x
+            .entities
+            .iter()
+            .map(|e| entity_label(features, e))
+            .collect(),
+        (FeatureKind::Chamfer(x), Role::Entities) => x
+            .entities
+            .iter()
+            .map(|e| entity_label(features, e))
+            .collect(),
+        (FeatureKind::Chamfer(x), Role::Overrides) => x
+            .overrides
+            .iter()
+            .map(|e| entity_label(features, &EdgeOrFace::Edge(*e)))
+            .collect(),
+        (FeatureKind::Shell(x), Role::Faces) if x.hollow => {
+            crate::applied::part_names(cache, &x.parts)
         }
-        (FeatureKind::Shell(x), Role::Faces) if x.hollow => crate::applied::part_names(cache, &x.parts),
-        (FeatureKind::Shell(x), Role::Faces) => {
-            x.faces.iter().map(|f| entity_label(features, &EdgeOrFace::Face(*f))).collect()
-        }
+        (FeatureKind::Shell(x), Role::Faces) => x
+            .faces
+            .iter()
+            .map(|f| entity_label(features, &EdgeOrFace::Face(*f)))
+            .collect(),
         (FeatureKind::Hole(x), Role::Points) => {
-            let mut v: Vec<String> = x.points.iter().map(|p| format!("Vertex of {}", name_of(features, p.sketch.0))).collect();
+            let mut v: Vec<String> = x
+                .points
+                .iter()
+                .map(|p| format!("Vertex of {}", name_of(features, p.sketch.0)))
+                .collect();
             v.extend(x.sketches.iter().map(|s| name_of(features, s.0)));
             // P3.8 (PS15.2): its mate connectors ("Pattern Axis").
             v.extend(crate::pattern_dialog::hole_connector_items(features, x));
             v
         }
-        (FeatureKind::Hole(x), Role::MergeScope) => crate::applied::part_names(cache, &x.merge_scope),
+        (FeatureKind::Hole(x), Role::MergeScope) => {
+            crate::applied::part_names(cache, &x.merge_scope)
+        }
         (FeatureKind::Fillet(x), Role::Side1 | Role::Center | Role::Side2) => {
             let list = match role {
                 Role::Side1 => &x.side1,
                 Role::Center => &x.center,
                 _ => &x.side2,
             };
-            list.iter().map(|f| entity_label(features, &EdgeOrFace::Face(*f))).collect()
+            list.iter()
+                .map(|f| entity_label(features, &EdgeOrFace::Face(*f)))
+                .collect()
         }
-        (FeatureKind::SheetMetalModel(x), r) => crate::sheetmetal_ui::items(features, cache, x, r).unwrap_or_default(),
-        (FeatureKind::SheetMetal(_), r) => crate::sheetmetal_features_ui::items(features, kind, r).unwrap_or_default(),
+        (FeatureKind::SheetMetalModel(x), r) => {
+            crate::sheetmetal_ui::items(features, cache, x, r).unwrap_or_default()
+        }
+        (FeatureKind::SheetMetal(_), r) => {
+            crate::sheetmetal_features_ui::items(features, kind, r).unwrap_or_default()
+        }
         _ => crate::advanced_dialog::items(features, cache, kind, role).unwrap_or_default(),
     }
 }
 
 fn layout_of(kind: &FeatureKind) -> String {
     match kind {
-        FeatureKind::Fillet(x) => format!(
-            "fillet {:?} {:?} {:?} {} {} {} {} {} {}",
-            x.kind,
-            x.measurement,
-            x.control,
-            x.asymmetric,
-            x.flip_asymmetric,
-            x.variable,
-            x.vertices.len(),
-            x.edge_points.len(),
-            x.smooth_transition,
-        ) + &format!(" {} {:?} {}", x.partial, x.partial_bound, x.flip_partial),
+        FeatureKind::Fillet(x) => {
+            format!(
+                "fillet {:?} {:?} {:?} {} {} {} {} {} {}",
+                x.kind,
+                x.measurement,
+                x.control,
+                x.asymmetric,
+                x.flip_asymmetric,
+                x.variable,
+                x.vertices.len(),
+                x.edge_points.len(),
+                x.smooth_transition,
+            ) + &format!(" {} {:?} {}", x.partial, x.partial_bound, x.flip_partial)
+        }
         // The flip buttons' icons show their state, so a flip rebuilds the rows.
         FeatureKind::Chamfer(x) => format!("chamfer {:?} {}", x.kind, x.flip),
         FeatureKind::Shell(x) => format!("shell {} {}", x.hollow, x.outward),
@@ -415,8 +452,12 @@ fn layout_of(kind: &FeatureKind) -> String {
             )
         }
         FeatureKind::SheetMetalModel(x) => crate::sheetmetal_ui::layout(x),
-        k @ (FeatureKind::SheetMetalLoft(_) | FeatureKind::Form(_) | FeatureKind::TagForm(_)) => crate::sheetmetal_p3i9_ui::layout(k).unwrap_or_default(),
-        k @ FeatureKind::SheetMetal(_) => crate::sheetmetal_features_ui::layout(k).unwrap_or_default(),
+        k @ (FeatureKind::SheetMetalLoft(_) | FeatureKind::Form(_) | FeatureKind::TagForm(_)) => {
+            crate::sheetmetal_p3i9_ui::layout(k).unwrap_or_default()
+        }
+        k @ FeatureKind::SheetMetal(_) => {
+            crate::sheetmetal_features_ui::layout(k).unwrap_or_default()
+        }
         FeatureKind::SheetMetalTool(x) => crate::sheetmetal_tools_ui::layout(x),
         k => crate::advanced_dialog::layout(k).unwrap_or_default(),
     }
@@ -425,10 +466,22 @@ fn layout_of(kind: &FeatureKind) -> String {
 // ---------------------------------------------------------------------------------------------
 // Building
 
-pub(crate) fn list(b: &mut ChildSpawner, t: &Theme, name: &str, placeholder: &str, role: Role, items: Vec<String>, active: bool) {
+pub(crate) fn list(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    name: &str,
+    placeholder: &str,
+    role: Role,
+    items: Vec<String>,
+    active: bool,
+) {
     b.spawn((
         role,
-        SelectionList::new(name.to_string()).placeholder(placeholder).items(items).active(active).build(t),
+        SelectionList::new(name.to_string())
+            .placeholder(placeholder)
+            .items(items)
+            .active(active)
+            .build(t),
     ))
     .entry::<Node>()
     .and_modify(|mut n| {
@@ -463,30 +516,80 @@ pub(crate) fn select_row(
     .with_children(|r| {
         if !label.is_empty() {
             r.spawn((
-                t.text(label, t.font_sm, bevy::text::FontWeight::NORMAL, t.muted_foreground),
-                Node { width: Val::Px(80.0), flex_shrink: 0.0, ..default() },
+                t.text(
+                    label,
+                    t.font_sm,
+                    bevy::text::FontWeight::NORMAL,
+                    t.muted_foreground,
+                ),
+                Node {
+                    width: Val::Px(80.0),
+                    flex_shrink: 0.0,
+                    ..default()
+                },
             ));
         }
-        r.spawn((role, select.selected(selected).build(t))).entry::<Node>().and_modify(|mut n| n.flex_grow = 1.0);
-        if let Some(f) = flip {
-            flip_button_any(r, t, &format!("{name}-flip"), Role::Flip, f, "Opposite direction");
-        }
-    });
-}
-
-pub(crate) fn number(b: &mut ChildSpawner, t: &Theme, name: &str, label: &str, role: Role, text: &str, flip: Option<bool>) {
-    b.spawn(Node { align_items: AlignItems::Center, column_gap: Val::Px(4.0), ..default() }).with_children(|r| {
-        r.spawn((role, NumberField::new(name.to_string(), label.to_string()).text(text.to_string()).label_width(96.0).build(t)))
+        r.spawn((role, select.selected(selected).build(t)))
             .entry::<Node>()
             .and_modify(|mut n| n.flex_grow = 1.0);
         if let Some(f) = flip {
-            flip_button_any(r, t, &format!("{name}-flip"), Role::Flip, f, "Opposite direction");
+            flip_button_any(
+                r,
+                t,
+                &format!("{name}-flip"),
+                Role::Flip,
+                f,
+                "Opposite direction",
+            );
         }
     });
 }
 
-pub(crate) fn opts<T: Copy + PartialEq>(all: &[T], label: impl Fn(T) -> &'static str, enabled: impl Fn(T) -> bool) -> Vec<(String, bool)> {
-    all.iter().map(|x| (label(*x).to_string(), enabled(*x))).collect()
+pub(crate) fn number(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    name: &str,
+    label: &str,
+    role: Role,
+    text: &str,
+    flip: Option<bool>,
+) {
+    b.spawn(Node {
+        align_items: AlignItems::Center,
+        column_gap: Val::Px(4.0),
+        ..default()
+    })
+    .with_children(|r| {
+        r.spawn((
+            role,
+            NumberField::new(name.to_string(), label.to_string())
+                .text(text.to_string())
+                .label_width(96.0)
+                .build(t),
+        ))
+        .entry::<Node>()
+        .and_modify(|mut n| n.flex_grow = 1.0);
+        if let Some(f) = flip {
+            flip_button_any(
+                r,
+                t,
+                &format!("{name}-flip"),
+                Role::Flip,
+                f,
+                "Opposite direction",
+            );
+        }
+    });
+}
+
+pub(crate) fn opts<T: Copy + PartialEq>(
+    all: &[T],
+    label: impl Fn(T) -> &'static str,
+    enabled: impl Fn(T) -> bool,
+) -> Vec<(String, bool)> {
+    all.iter()
+        .map(|x| (label(*x).to_string(), enabled(*x)))
+        .collect()
 }
 
 pub(crate) fn index_of<T: PartialEq>(all: &[T], x: &T) -> usize {
@@ -494,8 +597,12 @@ pub(crate) fn index_of<T: PartialEq>(all: &[T], x: &T) -> usize {
 }
 
 fn footer(f: &mut ChildSpawner, t: &Theme, name: &str, show_final: bool) {
-    f.spawn(Node { flex_grow: 1.0, padding: UiRect::left(Val::Px(2.0)), ..default() })
-        .with_child(crate::feature_list::preview_slider(t, name));
+    f.spawn(Node {
+        flex_grow: 1.0,
+        padding: UiRect::left(Val::Px(2.0)),
+        ..default()
+    })
+    .with_child(crate::feature_list::preview_slider(t, name));
     // Final: the whole Part Studio while a feature before the end is edited.
     f.spawn((
         Role::Final,
@@ -546,7 +653,9 @@ fn dialog(
         FeatureKind::Shell(_) => "shell",
         FeatureKind::Hole(_) => "hole",
         FeatureKind::SheetMetalModel(_) => "sheet-metal-model",
-        k @ (FeatureKind::SheetMetalLoft(_) | FeatureKind::Form(_) | FeatureKind::TagForm(_)) => crate::sheetmetal_p3i9_ui::name(k)?.0,
+        k @ (FeatureKind::SheetMetalLoft(_) | FeatureKind::Form(_) | FeatureKind::TagForm(_)) => {
+            crate::sheetmetal_p3i9_ui::name(k)?.0
+        }
         k @ FeatureKind::SheetMetal(_) => crate::sheetmetal_features_ui::name(k)?,
         FeatureKind::SheetMetalTool(x) => crate::sheetmetal_tools_ui::dialog_name(x),
         k => crate::advanced_dialog::name(k)?,
@@ -612,11 +721,17 @@ fn dialog(
         Role::FlatRegions,
         Role::DirectEditFaces,
     ]
-        .into_iter()
-        .chain(crate::sheetmetal_features_ui::LIST_ROLES)
-        .map(|r| (r, items(features, cache, &kind, r)))
-        .collect();
-    let items_of = move |r: Role| lists.iter().find(|(x, _)| *x == r).map(|(_, v)| v.clone()).unwrap_or_default();
+    .into_iter()
+    .chain(crate::sheetmetal_features_ui::LIST_ROLES)
+    .map(|r| (r, items(features, cache, &kind, r)))
+    .collect();
+    let items_of = move |r: Role| {
+        lists
+            .iter()
+            .find(|(x, _)| *x == r)
+            .map(|(_, v)| v.clone())
+            .unwrap_or_default()
+    };
     // P3I.9's lists.
     let sm9_items = crate::sheetmetal_p3i9_ui::lists(features, cache, &kind);
     Some((
@@ -634,7 +749,8 @@ fn dialog(
                 "sheet-metal-flange" | "sheet-metal-hem" | "sheet-metal-make-joint" => 222.0,
                 n if n.starts_with("sheet-metal-") => 228.0,
                 "chamfer" | "sweep" | "loft" | "plane" | "draft" | "transform" => 216.0,
-                "linear-pattern" | "circular-pattern" | "curve-pattern" | "mirror" | "mate-connector" => 216.0,
+                "linear-pattern" | "circular-pattern" | "curve-pattern" | "mirror"
+                | "mate-connector" => 216.0,
                 _ => 202.0,
             })
             .body_padding(UiRect::ZERO)
@@ -642,70 +758,296 @@ fn dialog(
                 let t = &tb;
                 match &kind {
                     FeatureKind::Fillet(x) if x.kind == FilletType::FullRound => {
-                        b.spawn((Role::FilletTab, TabStrip::new("fillet-type").compact().tab("Edge").tab("Full round").selected(1).build(t)));
+                        b.spawn((
+                            Role::FilletTab,
+                            TabStrip::new("fillet-type")
+                                .compact()
+                                .tab("Edge")
+                                .tab("Full round")
+                                .selected(1)
+                                .build(t),
+                        ));
                         body_column(b, |b| {
-                            list(b, t, "fillet-side1-field", "Side face 1", Role::Side1, items_of(Role::Side1), field == AppliedField::Side1);
-                            list(b, t, "fillet-center-field", "Center face", Role::Center, items_of(Role::Center), field == AppliedField::Center);
-                            list(b, t, "fillet-side2-field", "Side face 2", Role::Side2, items_of(Role::Side2), field == AppliedField::Side2);
+                            list(
+                                b,
+                                t,
+                                "fillet-side1-field",
+                                "Side face 1",
+                                Role::Side1,
+                                items_of(Role::Side1),
+                                field == AppliedField::Side1,
+                            );
+                            list(
+                                b,
+                                t,
+                                "fillet-center-field",
+                                "Center face",
+                                Role::Center,
+                                items_of(Role::Center),
+                                field == AppliedField::Center,
+                            );
+                            list(
+                                b,
+                                t,
+                                "fillet-side2-field",
+                                "Side face 2",
+                                Role::Side2,
+                                items_of(Role::Side2),
+                                field == AppliedField::Side2,
+                            );
                         });
                     }
                     FeatureKind::Fillet(x) => {
-                        b.spawn((Role::FilletTab, TabStrip::new("fillet-type").compact().tab("Edge").tab("Full round").selected(0).build(t)));
+                        b.spawn((
+                            Role::FilletTab,
+                            TabStrip::new("fillet-type")
+                                .compact()
+                                .tab("Edge")
+                                .tab("Full round")
+                                .selected(0)
+                                .build(t),
+                        ));
                         body_column(b, |b| {
-                            list(b, t, "fillet-entities-field", "Entities to fillet", Role::Entities, items_of(Role::Entities), field == AppliedField::Entities);
-                            b.spawn(OptionRow::new("fillet-tangent-propagation", "Tangent propagation").checked(x.tangent_propagation).build(t));
-                            select_row(b, t, "fillet-measurement", "Measurement", Role::Measurement, &opts(&FilletMeasurement::ALL, |m| m.label(), |_| true), index_of(&FilletMeasurement::ALL, &x.measurement), None);
-                            select_row(b, t, "fillet-control", "Control", Role::Control, &opts(&FilletControl::ALL, |m| m.label(), |_| true), index_of(&FilletControl::ALL, &x.control), None);
-                            number(b, t, "fillet-size", x.measurement.label(), Role::Size1, &x.size_expr, None);
+                            list(
+                                b,
+                                t,
+                                "fillet-entities-field",
+                                "Entities to fillet",
+                                Role::Entities,
+                                items_of(Role::Entities),
+                                field == AppliedField::Entities,
+                            );
+                            b.spawn(
+                                OptionRow::new("fillet-tangent-propagation", "Tangent propagation")
+                                    .checked(x.tangent_propagation)
+                                    .build(t),
+                            );
+                            select_row(
+                                b,
+                                t,
+                                "fillet-measurement",
+                                "Measurement",
+                                Role::Measurement,
+                                &opts(&FilletMeasurement::ALL, |m| m.label(), |_| true),
+                                index_of(&FilletMeasurement::ALL, &x.measurement),
+                                None,
+                            );
+                            select_row(
+                                b,
+                                t,
+                                "fillet-control",
+                                "Control",
+                                Role::Control,
+                                &opts(&FilletControl::ALL, |m| m.label(), |_| true),
+                                index_of(&FilletControl::ALL, &x.control),
+                                None,
+                            );
+                            number(
+                                b,
+                                t,
+                                "fillet-size",
+                                x.measurement.label(),
+                                Role::Size1,
+                                &x.size_expr,
+                                None,
+                            );
                             match x.control {
-                                FilletControl::Conic => number(b, t, "fillet-rho", "Rho", Role::Rho, &plain(x.rho), None),
-                                FilletControl::Curvature => number(b, t, "fillet-magnitude", "Magnitude", Role::Magnitude, &plain(x.magnitude), None),
+                                FilletControl::Conic => number(
+                                    b,
+                                    t,
+                                    "fillet-rho",
+                                    "Rho",
+                                    Role::Rho,
+                                    &plain(x.rho),
+                                    None,
+                                ),
+                                FilletControl::Curvature => number(
+                                    b,
+                                    t,
+                                    "fillet-magnitude",
+                                    "Magnitude",
+                                    Role::Magnitude,
+                                    &plain(x.magnitude),
+                                    None,
+                                ),
                                 FilletControl::Distance => {}
                             }
                             crate::draft_ui::fillet_rows(b, t, x, field, &items_of);
                         });
                     }
                     FeatureKind::Chamfer(x) => body_column(b, |b| {
-                        list(b, t, "chamfer-entities-field", "Entities to chamfer", Role::Entities, items_of(Role::Entities), field == AppliedField::Entities);
-                        select_row(b, t, "chamfer-measurement", "Measurement", Role::Measurement, &opts(&ChamferMeasurement::ALL, |m| m.label(), |_| true), index_of(&ChamferMeasurement::ALL, &x.measurement), None);
-                        select_row(b, t, "chamfer-type", "Chamfer type", Role::ChamferKind, &opts(&ChamferType::ALL, |m| m.label(), |_| true), index_of(&ChamferType::ALL, &x.kind), None);
+                        list(
+                            b,
+                            t,
+                            "chamfer-entities-field",
+                            "Entities to chamfer",
+                            Role::Entities,
+                            items_of(Role::Entities),
+                            field == AppliedField::Entities,
+                        );
+                        select_row(
+                            b,
+                            t,
+                            "chamfer-measurement",
+                            "Measurement",
+                            Role::Measurement,
+                            &opts(&ChamferMeasurement::ALL, |m| m.label(), |_| true),
+                            index_of(&ChamferMeasurement::ALL, &x.measurement),
+                            None,
+                        );
+                        select_row(
+                            b,
+                            t,
+                            "chamfer-type",
+                            "Chamfer type",
+                            Role::ChamferKind,
+                            &opts(&ChamferType::ALL, |m| m.label(), |_| true),
+                            index_of(&ChamferType::ALL, &x.kind),
+                            None,
+                        );
                         let flip = (x.kind != ChamferType::EqualDistance).then_some(x.flip);
-                        let first = if x.kind == ChamferType::TwoDistances { "Distance 1" } else { "Distance" };
-                        number(b, t, "chamfer-distance", first, Role::Size1, &x.distance_expr, flip);
+                        let first = if x.kind == ChamferType::TwoDistances {
+                            "Distance 1"
+                        } else {
+                            "Distance"
+                        };
+                        number(
+                            b,
+                            t,
+                            "chamfer-distance",
+                            first,
+                            Role::Size1,
+                            &x.distance_expr,
+                            flip,
+                        );
                         match x.kind {
-                            ChamferType::TwoDistances => number(b, t, "chamfer-distance2", "Distance 2", Role::Distance2, &x.distance2_expr, None),
-                            ChamferType::DistanceAngle => number(b, t, "chamfer-angle", "Angle", Role::Angle, &x.angle_expr, None),
+                            ChamferType::TwoDistances => number(
+                                b,
+                                t,
+                                "chamfer-distance2",
+                                "Distance 2",
+                                Role::Distance2,
+                                &x.distance2_expr,
+                                None,
+                            ),
+                            ChamferType::DistanceAngle => number(
+                                b,
+                                t,
+                                "chamfer-angle",
+                                "Angle",
+                                Role::Angle,
+                                &x.angle_expr,
+                                None,
+                            ),
                             ChamferType::EqualDistance => {}
                         }
                         if x.kind != ChamferType::EqualDistance {
-                            list(b, t, "chamfer-overrides-field", "Direction overrides", Role::Overrides, items_of(Role::Overrides), field == AppliedField::Overrides);
+                            list(
+                                b,
+                                t,
+                                "chamfer-overrides-field",
+                                "Direction overrides",
+                                Role::Overrides,
+                                items_of(Role::Overrides),
+                                field == AppliedField::Overrides,
+                            );
                         }
-                        b.spawn(OptionRow::new("chamfer-tangent-propagation", "Tangent propagation").checked(x.tangent_propagation).build(t));
+                        b.spawn(
+                            OptionRow::new("chamfer-tangent-propagation", "Tangent propagation")
+                                .checked(x.tangent_propagation)
+                                .build(t),
+                        );
                     }),
                     FeatureKind::Shell(x) => body_column(b, |b| {
-                        b.spawn(OptionRow::new("shell-hollow", "Hollow").checked(x.hollow).build(t));
-                        let placeholder = if x.hollow { "Parts to hollow" } else { "Faces to remove" };
-                        list(b, t, "shell-faces-field", placeholder, Role::Faces, items_of(Role::Faces), field == AppliedField::Faces);
-                        number(b, t, "shell-thickness", "Shell thickness", Role::Thickness, &x.thickness_expr, Some(x.outward));
+                        b.spawn(
+                            OptionRow::new("shell-hollow", "Hollow")
+                                .checked(x.hollow)
+                                .build(t),
+                        );
+                        let placeholder = if x.hollow {
+                            "Parts to hollow"
+                        } else {
+                            "Faces to remove"
+                        };
+                        list(
+                            b,
+                            t,
+                            "shell-faces-field",
+                            placeholder,
+                            Role::Faces,
+                            items_of(Role::Faces),
+                            field == AppliedField::Faces,
+                        );
+                        number(
+                            b,
+                            t,
+                            "shell-thickness",
+                            "Shell thickness",
+                            Role::Thickness,
+                            &x.thickness_expr,
+                            Some(x.outward),
+                        );
                     }),
                     FeatureKind::Hole(x) => {
                         let s = &x.spec;
-                        b.spawn((Role::Standard, TabStrip::new("hole-standard").compact().tab("Inch").tab("Metric").selected(index_of(&HoleStandard::ALL, &s.standard)).build(t)));
+                        b.spawn((
+                            Role::Standard,
+                            TabStrip::new("hole-standard")
+                                .compact()
+                                .tab("Inch")
+                                .tab("Metric")
+                                .selected(index_of(&HoleStandard::ALL, &s.standard))
+                                .build(t),
+                        ));
                         let mut strip = TabStrip::new("hole-style").compact();
                         for st in HoleStyle::ALL {
                             strip = strip.tab(st.label());
                         }
-                        b.spawn((Role::Style, strip.selected(index_of(&HoleStyle::ALL, &s.style)).build(t)));
+                        b.spawn((
+                            Role::Style,
+                            strip.selected(index_of(&HoleStyle::ALL, &s.style)).build(t),
+                        ));
                         body_column(b, |b| {
                             // P3.8 (PS15.2): the mate connector button beside it takes connectors.
-                            b.spawn(Node { align_items: AlignItems::FlexStart, column_gap: Val::Px(2.0), ..default() }).with_children(|r| {
-                                r.spawn(Node { flex_grow: 1.0, flex_basis: Val::Px(0.0), min_width: Val::Px(0.0), flex_direction: FlexDirection::Column, ..default() }).with_children(|c| {
-                                    let active = matches!(field, AppliedField::Points | AppliedField::HoleConnectors);
-                                    list(c, t, "hole-points-field", "Sketch points to place holes", Role::Points, items_of(Role::Points), active);
+                            b.spawn(Node {
+                                align_items: AlignItems::FlexStart,
+                                column_gap: Val::Px(2.0),
+                                ..default()
+                            })
+                            .with_children(|r| {
+                                r.spawn(Node {
+                                    flex_grow: 1.0,
+                                    flex_basis: Val::Px(0.0),
+                                    min_width: Val::Px(0.0),
+                                    flex_direction: FlexDirection::Column,
+                                    ..default()
+                                })
+                                .with_children(|c| {
+                                    let active = matches!(
+                                        field,
+                                        AppliedField::Points | AppliedField::HoleConnectors
+                                    );
+                                    list(
+                                        c,
+                                        t,
+                                        "hole-points-field",
+                                        "Sketch points to place holes",
+                                        Role::Points,
+                                        items_of(Role::Points),
+                                        active,
+                                    );
                                 });
-                                let mut v = cadrs_ui::button::visuals_for(t, cadrs_ui::ButtonVariant::Ghost);
-                                v.foreground = cadrs_ui::StateColors::all(Color::srgb_u8(0x1e, 0x1e, 0x1e));
-                                r.spawn(Node { margin: UiRect::top(Val::Px(4.0)), ..default() }).with_children(|c| {
+                                let mut v = cadrs_ui::button::visuals_for(
+                                    t,
+                                    cadrs_ui::ButtonVariant::Ghost,
+                                );
+                                v.foreground =
+                                    cadrs_ui::StateColors::all(Color::srgb_u8(0x1e, 0x1e, 0x1e));
+                                r.spawn(Node {
+                                    margin: UiRect::top(Val::Px(4.0)),
+                                    ..default()
+                                })
+                                .with_children(|c| {
                                     c.spawn((
                                         Role::HoleConnectorButton,
                                         IconButton::new("hole-connector-button", "mate-connector")
@@ -722,93 +1064,357 @@ fn dialog(
                                     });
                                 });
                             });
-                            list(b, t, "hole-merge-scope-field", "Merge scope", Role::MergeScope, items_of(Role::MergeScope), field == AppliedField::MergeScope);
-                            select_row(b, t, "hole-standard-select", "Standard", Role::StandardSelect, &[("ANSI".to_string(), true), ("ISO".to_string(), true)], index_of(&HoleStandard::ALL, &s.standard), None);
-                            select_row(b, t, "hole-type", "Hole type", Role::HoleType, &opts(&HoleType::ALL, |m| m.label(), |h| h.available(s.standard)), index_of(&HoleType::ALL, &s.hole_type), None);
+                            list(
+                                b,
+                                t,
+                                "hole-merge-scope-field",
+                                "Merge scope",
+                                Role::MergeScope,
+                                items_of(Role::MergeScope),
+                                field == AppliedField::MergeScope,
+                            );
+                            select_row(
+                                b,
+                                t,
+                                "hole-standard-select",
+                                "Standard",
+                                Role::StandardSelect,
+                                &[("ANSI".to_string(), true), ("ISO".to_string(), true)],
+                                index_of(&HoleStandard::ALL, &s.standard),
+                                None,
+                            );
+                            select_row(
+                                b,
+                                t,
+                                "hole-type",
+                                "Hole type",
+                                Role::HoleType,
+                                &opts(&HoleType::ALL, |m| m.label(), |h| h.available(s.standard)),
+                                index_of(&HoleType::ALL, &s.hole_type),
+                                None,
+                            );
                             if s.hole_type == HoleType::Tapped {
-                                select_row(b, t, "hole-tap-type", "Tap type", Role::TapType, &opts(&TapType::ALL, |m| m.label(), |m| m == TapType::Straight), index_of(&TapType::ALL, &s.tap_type), None);
+                                select_row(
+                                    b,
+                                    t,
+                                    "hole-tap-type",
+                                    "Tap type",
+                                    Role::TapType,
+                                    &opts(&TapType::ALL, |m| m.label(), |m| m == TapType::Straight),
+                                    index_of(&TapType::ALL, &s.tap_type),
+                                    None,
+                                );
                             }
                             if s.hole_type == HoleType::Pem {
-                                select_row(b, t, "hole-pem-type", "Fastener", Role::PemKind, &opts(&PemType::ALL, |m| m.label(), |_| true), index_of(&PemType::ALL, &s.pem), None);
+                                select_row(
+                                    b,
+                                    t,
+                                    "hole-pem-type",
+                                    "Fastener",
+                                    Role::PemKind,
+                                    &opts(&PemType::ALL, |m| m.label(), |_| true),
+                                    index_of(&PemType::ALL, &s.pem),
+                                    None,
+                                );
                             }
-                            let sizes: Vec<(String, bool)> = HoleSpec::sizes(s.standard, s.hole_type).into_iter().map(|x| (x, true)).collect();
+                            let sizes: Vec<(String, bool)> =
+                                HoleSpec::sizes(s.standard, s.hole_type)
+                                    .into_iter()
+                                    .map(|x| (x, true))
+                                    .collect();
                             let si = sizes.iter().position(|(n, _)| *n == s.size).unwrap_or(0);
                             select_row(b, t, "hole-size", "Size", Role::Size, &sizes, si, None);
                             match s.hole_type {
-                                HoleType::Clearance => select_row(b, t, "hole-fit", "Fastener fit", Role::Fit, &opts(&Fit::ALL, |m| m.label(), |_| true), index_of(&Fit::ALL, &s.fit), None),
+                                HoleType::Clearance => select_row(
+                                    b,
+                                    t,
+                                    "hole-fit",
+                                    "Fastener fit",
+                                    Role::Fit,
+                                    &opts(&Fit::ALL, |m| m.label(), |_| true),
+                                    index_of(&Fit::ALL, &s.fit),
+                                    None,
+                                ),
                                 HoleType::Tapped => {
                                     // "1.50 mm (Coarse)" (PS27.8), and Fastener fit None (a
                                     // tapped hole takes no clearance fit).
-                                    let pitches: Vec<(String, bool)> = HoleSpec::pitches(s.standard, &s.size).into_iter().map(|x| (HoleSpec::pitch_label(s.standard, &x), true)).collect();
-                                    let pi = HoleSpec::pitches(s.standard, &s.size).iter().position(|n| *n == s.pitch).unwrap_or(0);
-                                    select_row(b, t, "hole-pitch", "Pitch", Role::Pitch, &pitches, pi, None);
-                                    let none: Vec<(String, bool)> = std::iter::once(("None".to_string(), true)).chain(Fit::ALL.iter().map(|f| (f.label().to_string(), false))).collect();
-                                    select_row(b, t, "hole-fit", "Fastener fit", Role::Fit, &none, 0, None);
+                                    let pitches: Vec<(String, bool)> =
+                                        HoleSpec::pitches(s.standard, &s.size)
+                                            .into_iter()
+                                            .map(|x| (HoleSpec::pitch_label(s.standard, &x), true))
+                                            .collect();
+                                    let pi = HoleSpec::pitches(s.standard, &s.size)
+                                        .iter()
+                                        .position(|n| *n == s.pitch)
+                                        .unwrap_or(0);
+                                    select_row(
+                                        b,
+                                        t,
+                                        "hole-pitch",
+                                        "Pitch",
+                                        Role::Pitch,
+                                        &pitches,
+                                        pi,
+                                        None,
+                                    );
+                                    let none: Vec<(String, bool)> =
+                                        std::iter::once(("None".to_string(), true))
+                                            .chain(
+                                                Fit::ALL
+                                                    .iter()
+                                                    .map(|f| (f.label().to_string(), false)),
+                                            )
+                                            .collect();
+                                    select_row(
+                                        b,
+                                        t,
+                                        "hole-fit",
+                                        "Fastener fit",
+                                        Role::Fit,
+                                        &none,
+                                        0,
+                                        None,
+                                    );
                                 }
                                 HoleType::Drilled | HoleType::Pem => {}
                             }
                             if s.hole_type == HoleType::Tapped {
                                 crate::draft_ui::thread_class_row(b, t, s);
                             }
-                            let dia = if s.hole_type == HoleType::Tapped { "Tap drill Ø" } else { "Hole Ø" };
-                            number(b, t, "hole-diameter", dia, Role::Diameter, &s.diameter.expr, None);
-                            crate::draft_ui::tolerance_rows(b, t, "hole-diameter-tolerance", "Diameter tolerance", &s.diameter_tol, s.standard.unit_name(), [Role::DiameterTolType, Role::DiameterTolUpper, Role::DiameterTolLower, Role::DiameterTolPrecision]);
-                            select_row(b, t, "hole-start", "Start plane", Role::Start, &opts(&HoleStart::ALL, |m| m.label(), |_| true), index_of(&HoleStart::ALL, &s.start), None);
+                            let dia = if s.hole_type == HoleType::Tapped {
+                                "Tap drill Ø"
+                            } else {
+                                "Hole Ø"
+                            };
+                            number(
+                                b,
+                                t,
+                                "hole-diameter",
+                                dia,
+                                Role::Diameter,
+                                &s.diameter.expr,
+                                None,
+                            );
+                            crate::draft_ui::tolerance_rows(
+                                b,
+                                t,
+                                "hole-diameter-tolerance",
+                                "Diameter tolerance",
+                                &s.diameter_tol,
+                                s.standard.unit_name(),
+                                [
+                                    Role::DiameterTolType,
+                                    Role::DiameterTolUpper,
+                                    Role::DiameterTolLower,
+                                    Role::DiameterTolPrecision,
+                                ],
+                            );
+                            select_row(
+                                b,
+                                t,
+                                "hole-start",
+                                "Start plane",
+                                Role::Start,
+                                &opts(&HoleStart::ALL, |m| m.label(), |_| true),
+                                index_of(&HoleStart::ALL, &s.start),
+                                None,
+                            );
                             if s.start == HoleStart::SelectedPlane {
-                                list(b, t, "hole-start-plane-field", "Hole start plane", Role::HoleStartPlane, items_of(Role::HoleStartPlane), field == AppliedField::HoleStartPlane);
+                                list(
+                                    b,
+                                    t,
+                                    "hole-start-plane-field",
+                                    "Hole start plane",
+                                    Role::HoleStartPlane,
+                                    items_of(Role::HoleStartPlane),
+                                    field == AppliedField::HoleStartPlane,
+                                );
                             }
-                            select_row(b, t, "hole-termination", "Termination", Role::End, &opts(&HoleEnd::ALL, |m| m.label(), |_| true), index_of(&HoleEnd::ALL, &s.end), Some(x.flip));
+                            select_row(
+                                b,
+                                t,
+                                "hole-termination",
+                                "Termination",
+                                Role::End,
+                                &opts(&HoleEnd::ALL, |m| m.label(), |_| true),
+                                index_of(&HoleEnd::ALL, &s.end),
+                                Some(x.flip),
+                            );
                             if s.end == HoleEnd::UpToEntity {
-                                list(b, t, "hole-up-to-field", "Up to entity", Role::HoleUpTo, items_of(Role::HoleUpTo), field == AppliedField::HoleUpTo);
+                                list(
+                                    b,
+                                    t,
+                                    "hole-up-to-field",
+                                    "Up to entity",
+                                    Role::HoleUpTo,
+                                    items_of(Role::HoleUpTo),
+                                    field == AppliedField::HoleUpTo,
+                                );
                             }
                             if matches!(s.end, HoleEnd::UpToNext | HoleEnd::UpToEntity) {
                                 crate::draft_ui::hole_offset_row(b, t, s);
                             }
                             if s.end == HoleEnd::Blind {
-                                number(b, t, "hole-depth", "Hole depth", Role::Depth, &s.depth.expr, None);
-                                crate::draft_ui::tolerance_rows(b, t, "hole-depth-tolerance", "Depth tolerance", &s.depth_tol, s.standard.unit_name(), [Role::DepthTolType, Role::DepthTolUpper, Role::DepthTolLower, Role::DepthTolPrecision]);
+                                number(
+                                    b,
+                                    t,
+                                    "hole-depth",
+                                    "Hole depth",
+                                    Role::Depth,
+                                    &s.depth.expr,
+                                    None,
+                                );
+                                crate::draft_ui::tolerance_rows(
+                                    b,
+                                    t,
+                                    "hole-depth-tolerance",
+                                    "Depth tolerance",
+                                    &s.depth_tol,
+                                    s.standard.unit_name(),
+                                    [
+                                        Role::DepthTolType,
+                                        Role::DepthTolUpper,
+                                        Role::DepthTolLower,
+                                        Role::DepthTolPrecision,
+                                    ],
+                                );
                             }
                             if s.end != HoleEnd::ThroughAll {
                                 let (angles, i) = crate::draft_ui::tip_angles(s);
-                                select_row(b, t, "hole-tip-angle", "Tip angle", Role::TipAngle, &angles, i, None);
+                                select_row(
+                                    b,
+                                    t,
+                                    "hole-tip-angle",
+                                    "Tip angle",
+                                    Role::TipAngle,
+                                    &angles,
+                                    i,
+                                    None,
+                                );
                             }
                             match s.style {
                                 // P3.11 (PS15.8): each size with its tolerance section.
                                 HoleStyle::Counterbore => {
-                                    number(b, t, "hole-cbore-diameter", "Counterbore Ø", Role::CboreDiameter, &s.cbore_diameter.expr, None);
-                                    crate::draft_ui::style_tolerance_rows(b, t, s, cadrs_core::hole::StyleTolerance::CboreDiameter);
-                                    number(b, t, "hole-cbore-depth", "Counterbore depth", Role::CboreDepth, &s.cbore_depth.expr, None);
-                                    crate::draft_ui::style_tolerance_rows(b, t, s, cadrs_core::hole::StyleTolerance::CboreDepth);
+                                    number(
+                                        b,
+                                        t,
+                                        "hole-cbore-diameter",
+                                        "Counterbore Ø",
+                                        Role::CboreDiameter,
+                                        &s.cbore_diameter.expr,
+                                        None,
+                                    );
+                                    crate::draft_ui::style_tolerance_rows(
+                                        b,
+                                        t,
+                                        s,
+                                        cadrs_core::hole::StyleTolerance::CboreDiameter,
+                                    );
+                                    number(
+                                        b,
+                                        t,
+                                        "hole-cbore-depth",
+                                        "Counterbore depth",
+                                        Role::CboreDepth,
+                                        &s.cbore_depth.expr,
+                                        None,
+                                    );
+                                    crate::draft_ui::style_tolerance_rows(
+                                        b,
+                                        t,
+                                        s,
+                                        cadrs_core::hole::StyleTolerance::CboreDepth,
+                                    );
                                 }
                                 HoleStyle::Countersink => {
-                                    number(b, t, "hole-csink-diameter", "Countersink Ø", Role::CsinkDiameter, &s.csink_diameter.expr, None);
-                                    crate::draft_ui::style_tolerance_rows(b, t, s, cadrs_core::hole::StyleTolerance::CsinkDiameter);
-                                    number(b, t, "hole-csink-angle", "Countersink angle", Role::CsinkAngle, &s.csink_angle.expr, None);
-                                    crate::draft_ui::style_tolerance_rows(b, t, s, cadrs_core::hole::StyleTolerance::CsinkAngle);
+                                    number(
+                                        b,
+                                        t,
+                                        "hole-csink-diameter",
+                                        "Countersink Ø",
+                                        Role::CsinkDiameter,
+                                        &s.csink_diameter.expr,
+                                        None,
+                                    );
+                                    crate::draft_ui::style_tolerance_rows(
+                                        b,
+                                        t,
+                                        s,
+                                        cadrs_core::hole::StyleTolerance::CsinkDiameter,
+                                    );
+                                    number(
+                                        b,
+                                        t,
+                                        "hole-csink-angle",
+                                        "Countersink angle",
+                                        Role::CsinkAngle,
+                                        &s.csink_angle.expr,
+                                        None,
+                                    );
+                                    crate::draft_ui::style_tolerance_rows(
+                                        b,
+                                        t,
+                                        s,
+                                        cadrs_core::hole::StyleTolerance::CsinkAngle,
+                                    );
                                 }
                                 HoleStyle::Simple => {}
                             }
                             if s.hole_type == HoleType::Tapped && s.end != HoleEnd::ThroughAll {
-                                number(b, t, "hole-tapped-depth", "Tapped depth", Role::TappedDepth, &s.tapped_depth.expr, None);
+                                number(
+                                    b,
+                                    t,
+                                    "hole-tapped-depth",
+                                    "Tapped depth",
+                                    Role::TappedDepth,
+                                    &s.tapped_depth.expr,
+                                    None,
+                                );
                                 // PS27.8's last row: the tap clearance in threads.
                                 if s.end == HoleEnd::Blind {
-                                    number(b, t, "hole-tap-clearance", "Tap clearance", Role::TapClearance, &crate::draft_ui::clearance_text(s), None);
+                                    number(
+                                        b,
+                                        t,
+                                        "hole-tap-clearance",
+                                        "Tap clearance",
+                                        Role::TapClearance,
+                                        &crate::draft_ui::clearance_text(s),
+                                        None,
+                                    );
                                 }
                             }
                         });
                     }
-                    FeatureKind::SheetMetalModel(x) => crate::sheetmetal_ui::body(b, t, x, field, &items_of, sections),
-                    k @ (FeatureKind::SheetMetalLoft(_) | FeatureKind::Form(_) | FeatureKind::TagForm(_)) => {
-                        crate::sheetmetal_p3i9_ui::body(b, t, k, field, &sm9_items, [sections[1], sections[2], sections[3]])
+                    FeatureKind::SheetMetalModel(x) => {
+                        crate::sheetmetal_ui::body(b, t, x, field, &items_of, sections)
                     }
-                    k @ FeatureKind::SheetMetal(_) => crate::sheetmetal_features_ui::body(b, t, k, field, &items_of),
-                    FeatureKind::SheetMetalTool(x) => crate::sheetmetal_tools_ui::body(b, t, x, field, &sm_items),
+                    k @ (FeatureKind::SheetMetalLoft(_)
+                    | FeatureKind::Form(_)
+                    | FeatureKind::TagForm(_)) => crate::sheetmetal_p3i9_ui::body(
+                        b,
+                        t,
+                        k,
+                        field,
+                        &sm9_items,
+                        [sections[1], sections[2], sections[3]],
+                    ),
+                    k @ FeatureKind::SheetMetal(_) => {
+                        crate::sheetmetal_features_ui::body(b, t, k, field, &items_of)
+                    }
+                    FeatureKind::SheetMetalTool(x) => {
+                        crate::sheetmetal_tools_ui::body(b, t, x, field, &sm_items)
+                    }
                     k => crate::advanced_dialog::body(b, t, k, field, &items_of),
                 }
                 b.spawn((
                     Name::new(format!("{name}-error")),
                     ErrorLine,
-                    t.text("", t.font_sm, bevy::text::FontWeight::MEDIUM, t.feature_error),
+                    t.text(
+                        "",
+                        t.font_sm,
+                        bevy::text::FontWeight::MEDIUM,
+                        t.feature_error,
+                    ),
                     Node {
                         display: Display::None,
                         max_width: Val::Px(186.0),
@@ -816,7 +1422,10 @@ fn dialog(
                         ..default()
                     },
                 ))
-                .insert(TextLayout::new(bevy::text::Justify::Left, bevy::text::LineBreak::WordBoundary));
+                .insert(TextLayout::new(
+                    bevy::text::Justify::Left,
+                    bevy::text::LineBreak::WordBoundary,
+                ));
             })
             .footer(move |f| footer(f, &tf, name, show_final))
             .build(theme),
@@ -874,8 +1483,19 @@ pub(crate) fn sync_applied_dialog(
             if let Some((e, _)) = other {
                 commands.entity(e).try_despawn();
             }
-            let Some(area) = q_area.iter().next() else { return };
-            if let Some(bundle) = dialog(&theme, feature, valid, s.field, s.show_final, s.sections, el.features(), &cache) {
+            let Some(area) = q_area.iter().next() else {
+                return;
+            };
+            if let Some(bundle) = dialog(
+                &theme,
+                feature,
+                valid,
+                s.field,
+                s.show_final,
+                s.sections,
+                el.features(),
+                &cache,
+            ) {
                 let d = commands.spawn(bundle).id();
                 commands.entity(area).add_child(d);
             }
@@ -894,24 +1514,37 @@ pub(crate) fn sync_applied_dialog(
     for (_, _, mut st) in &mut q_dialog {
         // P3I.4: a Flange, Hem or Make joint with nothing picked yet isn't shown as failed.
         let empty_sm = matches!(&kind, FeatureKind::SheetMetal(x) if x.entities().is_empty());
-        let want = FeatureDialogState { title: feature.name.clone(), valid, error: failed && !empty_sm };
+        let want = FeatureDialogState {
+            title: feature.name.clone(),
+            valid,
+            error: failed && !empty_sm,
+        };
         if *st != want {
             *st = want;
         }
     }
     // P3I.2: a new sheet metal model with nothing picked yet shows that in its red Selections,
     // as Onshape does, not as an error line.
-    let incomplete = matches!(&kind, FeatureKind::SheetMetalModel(x) if x.is_empty()) || crate::sheetmetal_p3i9_ui::incomplete(&kind);
+    let incomplete = matches!(&kind, FeatureKind::SheetMetalModel(x) if x.is_empty())
+        || crate::sheetmetal_p3i9_ui::incomplete(&kind);
     // P3I.4: likewise a Flange, Hem or Make joint with no edges picked yet.
     let incomplete = incomplete || matches!(&kind, FeatureKind::SheetMetal(x) if x.entities().is_empty())
         // P3I.5: so does a sheet metal feature still waiting for its picks (the active field).
         || matches!(&kind, FeatureKind::SheetMetalTool(x) if x.problem().is_some_and(|p| p.starts_with("Select")));
-    let why = if incomplete { String::new() } else { cache.errors.get(&s.feature).cloned().unwrap_or_default() };
+    let why = if incomplete {
+        String::new()
+    } else {
+        cache.errors.get(&s.feature).cloned().unwrap_or_default()
+    };
     for (mut text, mut node) in &mut q_error {
         if text.0 != why {
             text.0 = why.clone();
         }
-        let d = if why.is_empty() { Display::None } else { Display::Flex };
+        let d = if why.is_empty() {
+            Display::None
+        } else {
+            Display::Flex
+        };
         if node.display != d {
             node.display = d;
         }
@@ -930,8 +1563,12 @@ pub(crate) fn sync_applied_dialog(
             Role::HoleUpTo => s.field == AppliedField::HoleUpTo,
             Role::FilletVertices => s.field == AppliedField::FilletVertices,
             Role::FilletEdgePoints => s.field == AppliedField::FilletEdgePoints,
-            r if crate::sheetmetal_ui::list_field(*r).is_some() => crate::sheetmetal_ui::list_field(*r) == Some(s.field),
-            r if crate::sheetmetal_features_ui::list_field(*r).is_some() => crate::sheetmetal_features_ui::list_field(*r) == Some(s.field),
+            r if crate::sheetmetal_ui::list_field(*r).is_some() => {
+                crate::sheetmetal_ui::list_field(*r) == Some(s.field)
+            }
+            r if crate::sheetmetal_features_ui::list_field(*r).is_some() => {
+                crate::sheetmetal_features_ui::list_field(*r) == Some(s.field)
+            }
             r => match crate::advanced_dialog::list_field(*r) {
                 Some(f) => s.field == f,
                 None => continue,
@@ -955,7 +1592,13 @@ pub(crate) fn sync_applied_dialog(
             }
             _ => red,
         };
-        let error = matches!((&kind, role), (FeatureKind::Fillet(_) | FeatureKind::Chamfer(_), Role::Entities)) && !red.is_empty();
+        let error = matches!(
+            (&kind, role),
+            (
+                FeatureKind::Fillet(_) | FeatureKind::Chamfer(_),
+                Role::Entities
+            )
+        ) && !red.is_empty();
         let want = SelectionListState {
             items,
             active,
@@ -969,7 +1612,9 @@ pub(crate) fn sync_applied_dialog(
     }
     let editing = focus.get().and_then(|f| q_edit.get(f).ok()).map(|e| e.0);
     for (entity, role, mut n) in &mut q_numbers {
-        let Some(text) = number_text(&kind, *role) else { continue };
+        let Some(text) = number_text(&kind, *role) else {
+            continue;
+        };
         if editing == Some(entity) || n.error {
             continue;
         }
@@ -980,10 +1625,16 @@ pub(crate) fn sync_applied_dialog(
     }
     for (role, mut sel) in &mut q_selects {
         let i = match (&kind, role) {
-            (FeatureKind::Fillet(x), Role::Measurement) => index_of(&FilletMeasurement::ALL, &x.measurement),
+            (FeatureKind::Fillet(x), Role::Measurement) => {
+                index_of(&FilletMeasurement::ALL, &x.measurement)
+            }
             (FeatureKind::Fillet(x), Role::Control) => index_of(&FilletControl::ALL, &x.control),
-            (FeatureKind::Fillet(x), Role::PartialBound) => index_of(&cadrs_core::applied::PartialBound::ALL, &x.partial_bound),
-            (FeatureKind::Chamfer(x), Role::Measurement) => index_of(&ChamferMeasurement::ALL, &x.measurement),
+            (FeatureKind::Fillet(x), Role::PartialBound) => {
+                index_of(&cadrs_core::applied::PartialBound::ALL, &x.partial_bound)
+            }
+            (FeatureKind::Chamfer(x), Role::Measurement) => {
+                index_of(&ChamferMeasurement::ALL, &x.measurement)
+            }
             (FeatureKind::Chamfer(x), Role::ChamferKind) => index_of(&ChamferType::ALL, &x.kind),
             (FeatureKind::Hole(x), Role::HoleType) => index_of(&HoleType::ALL, &x.spec.hole_type),
             (FeatureKind::Hole(x), Role::Size) => {
@@ -998,21 +1649,30 @@ pub(crate) fn sync_applied_dialog(
             (FeatureKind::Hole(x), Role::Fit) => index_of(&Fit::ALL, &x.spec.fit),
             (FeatureKind::Hole(x), Role::Pitch) => {
                 let pitches = HoleSpec::pitches(x.spec.standard, &x.spec.size);
-                let want: Vec<(String, bool)> = pitches.iter().map(|n| (HoleSpec::pitch_label(x.spec.standard, n), true)).collect();
+                let want: Vec<(String, bool)> = pitches
+                    .iter()
+                    .map(|n| (HoleSpec::pitch_label(x.spec.standard, n), true))
+                    .collect();
                 if sel.options != want {
                     sel.options = want;
                 }
                 pitches.iter().position(|n| *n == x.spec.pitch).unwrap_or(0)
             }
-            (FeatureKind::Hole(x), Role::StandardSelect) => index_of(&HoleStandard::ALL, &x.spec.standard),
+            (FeatureKind::Hole(x), Role::StandardSelect) => {
+                index_of(&HoleStandard::ALL, &x.spec.standard)
+            }
             (FeatureKind::Hole(x), Role::Start) => index_of(&HoleStart::ALL, &x.spec.start),
             (FeatureKind::Hole(x), Role::TipAngle) => crate::draft_ui::tip_angles(&x.spec).1,
             (FeatureKind::Hole(x), Role::End) => index_of(&HoleEnd::ALL, &x.spec.end),
-            (FeatureKind::SheetMetalModel(x), r) if crate::sheetmetal_ui::owns_select(*r) => crate::sheetmetal_ui::select_index(x, *r).unwrap_or(0),
-            (k @ FeatureKind::SheetMetal(_), r) if crate::sheetmetal_features_ui::owns(*r) => match crate::sheetmetal_features_ui::select_index(k, *r) {
-                Some(i) => i,
-                None => continue,
-            },
+            (FeatureKind::SheetMetalModel(x), r) if crate::sheetmetal_ui::owns_select(*r) => {
+                crate::sheetmetal_ui::select_index(x, *r).unwrap_or(0)
+            }
+            (k @ FeatureKind::SheetMetal(_), r) if crate::sheetmetal_features_ui::owns(*r) => {
+                match crate::sheetmetal_features_ui::select_index(k, *r) {
+                    Some(i) => i,
+                    None => continue,
+                }
+            }
             (k, r) => match crate::advanced_dialog::select_index(k, *r) {
                 Some(i) => i,
                 None => continue,
@@ -1047,10 +1707,14 @@ fn number_text(kind: &FeatureKind, role: Role) -> Option<String> {
                 r => return crate::draft_ui::number_text(kind, r),
             }
         }
-        (FeatureKind::Fillet(_), r) if crate::draft_ui::owns_number(r) => return crate::draft_ui::number_text(kind, r),
+        (FeatureKind::Fillet(_), r) if crate::draft_ui::owns_number(r) => {
+            return crate::draft_ui::number_text(kind, r);
+        }
         // P3I.2: kept in step by `sheetmetal_ui::sync_numbers` (with their range tooltips).
         (FeatureKind::SheetMetalModel(_), _) => return None,
-        (k @ FeatureKind::SheetMetal(_), r) => return crate::sheetmetal_features_ui::number_text(k, r),
+        (k @ FeatureKind::SheetMetal(_), r) => {
+            return crate::sheetmetal_features_ui::number_text(k, r);
+        }
         (k, r) => return crate::advanced_dialog::number_text(k, r),
     })
 }
@@ -1058,22 +1722,36 @@ fn number_text(kind: &FeatureKind, role: Role) -> Option<String> {
 // ---------------------------------------------------------------------------------------------
 // Input
 
-fn on_accept(ev: On<FeatureDialogAccept>, q: Query<(), With<AppliedDialog>>, mut commands: Commands) {
+fn on_accept(
+    ev: On<FeatureDialogAccept>,
+    q: Query<(), With<AppliedDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(crate::applied::accept);
     }
 }
 
-fn on_cancel(ev: On<FeatureDialogCancel>, q: Query<(), With<AppliedDialog>>, mut commands: Commands) {
+fn on_cancel(
+    ev: On<FeatureDialogCancel>,
+    q: Query<(), With<AppliedDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(crate::applied::cancel);
     }
 }
 
 /// Changes the feature's parameters with `f` (one command, if anything changed).
-fn change(commands: &mut Commands, label: &'static str, f: impl FnOnce(&mut FeatureKind) + Send + 'static) {
+fn change(
+    commands: &mut Commands,
+    label: &'static str,
+    f: impl FnOnce(&mut FeatureKind) + Send + 'static,
+) {
     commands.queue(move |world: &mut World| {
-        let Some(feature) = current(world) else { return };
+        let Some(feature) = current(world) else {
+            return;
+        };
         let mut k = feature.kind.clone();
         f(&mut k);
         if k != feature.kind {
@@ -1099,7 +1777,11 @@ fn on_tab(ev: On<TabStripSelect>, q: Query<&Role>, mut commands: Commands) {
                     x.kind = kind;
                 }
             });
-            let field = if kind == FilletType::FullRound { AppliedField::Side1 } else { AppliedField::Entities };
+            let field = if kind == FilletType::FullRound {
+                AppliedField::Side1
+            } else {
+                AppliedField::Entities
+            };
             commands.queue(move |world: &mut World| {
                 if let Some(mut s) = world.get_resource_mut::<AppliedSession>() {
                     s.field = field;
@@ -1148,9 +1830,15 @@ fn on_tab(ev: On<TabStripSelect>, q: Query<&Role>, mut commands: Commands) {
         }),
         Ok(r @ (Role::BodyTab | Role::OpTab)) => {
             let r = *r;
-            change(&mut commands, if r == Role::BodyTab { "Body type" } else { "Operation" }, move |k| {
-                crate::advanced_dialog::tab(k, r, i)
-            });
+            change(
+                &mut commands,
+                if r == Role::BodyTab {
+                    "Body type"
+                } else {
+                    "Operation"
+                },
+                move |k| crate::advanced_dialog::tab(k, r, i),
+            );
         }
         _ => {}
     }
@@ -1158,7 +1846,9 @@ fn on_tab(ev: On<TabStripSelect>, q: Query<&Role>, mut commands: Commands) {
 
 fn on_select(ev: On<SelectChange>, q: Query<&Role>, mut commands: Commands) {
     let i = ev.index;
-    let Ok(role) = q.get(ev.entity).copied() else { return };
+    let Ok(role) = q.get(ev.entity).copied() else {
+        return;
+    };
     // P3I.4: Flange, Hem and Make joint.
     if crate::sheetmetal_features_ui::owns(role) {
         commands.queue(move |world: &mut World| {
@@ -1168,7 +1858,8 @@ fn on_select(ev: On<SelectChange>, q: Query<&Role>, mut commands: Commands) {
             if k != f.kind {
                 set(world, k, label);
             }
-            if let (Some(field), Some(mut s)) = (field, world.get_resource_mut::<AppliedSession>()) {
+            if let (Some(field), Some(mut s)) = (field, world.get_resource_mut::<AppliedSession>())
+            {
                 s.field = field;
             }
         });
@@ -1178,13 +1869,16 @@ fn on_select(ev: On<SelectChange>, q: Query<&Role>, mut commands: Commands) {
     if crate::sheetmetal_ui::owns_select(role) {
         commands.queue(move |world: &mut World| {
             let Some(f) = current(world) else { return };
-            let FeatureKind::SheetMetalModel(mut x) = f.kind.clone() else { return };
+            let FeatureKind::SheetMetalModel(mut x) = f.kind.clone() else {
+                return;
+            };
             let (label, field) = crate::sheetmetal_ui::set_select(&mut x, role, i);
             let k = FeatureKind::SheetMetalModel(x);
             if k != f.kind {
                 set(world, k, label);
             }
-            if let (Some(field), Some(mut s)) = (field, world.get_resource_mut::<AppliedSession>()) {
+            if let (Some(field), Some(mut s)) = (field, world.get_resource_mut::<AppliedSession>())
+            {
                 s.field = field;
             }
         });
@@ -1220,7 +1914,11 @@ fn on_select(ev: On<SelectChange>, q: Query<&Role>, mut commands: Commands) {
         Role::PatternType => "Pattern type",
         Role::ConnectorOriginType => {
             // Between entities: its field takes the next picks.
-            let field = if i == 1 { AppliedField::ConnectorBetween } else { AppliedField::ConnectorOrigin };
+            let field = if i == 1 {
+                AppliedField::ConnectorBetween
+            } else {
+                AppliedField::ConnectorOrigin
+            };
             commands.queue(move |world: &mut World| {
                 if let Some(mut s) = world.get_resource_mut::<AppliedSession>() {
                     s.field = field;
@@ -1247,7 +1945,9 @@ fn on_select(ev: On<SelectChange>, q: Query<&Role>, mut commands: Commands) {
             x.measurement = FilletMeasurement::ALL[i.min(1)];
         }
         (FeatureKind::Fillet(x), Role::Control) => x.control = FilletControl::ALL[i.min(2)],
-        (FeatureKind::Chamfer(x), Role::Measurement) => x.measurement = ChamferMeasurement::ALL[i.min(1)],
+        (FeatureKind::Chamfer(x), Role::Measurement) => {
+            x.measurement = ChamferMeasurement::ALL[i.min(1)]
+        }
         (FeatureKind::Chamfer(x), Role::ChamferKind) => x.kind = ChamferType::ALL[i.min(2)],
         (FeatureKind::Hole(h), r) => {
             let s = &mut h.spec;
@@ -1292,10 +1992,16 @@ fn on_select(ev: On<SelectChange>, q: Query<&Role>, mut commands: Commands) {
     });
     // P3.10: the start plane's and Up to entity's fields take the picks as they appear.
     let next = match role {
-        Role::Start if HoleStart::ALL.get(i) == Some(&HoleStart::SelectedPlane) => Some(AppliedField::HoleStartPlane),
-        Role::End if HoleEnd::ALL.get(i) == Some(&HoleEnd::UpToEntity) => Some(AppliedField::HoleUpTo),
+        Role::Start if HoleStart::ALL.get(i) == Some(&HoleStart::SelectedPlane) => {
+            Some(AppliedField::HoleStartPlane)
+        }
+        Role::End if HoleEnd::ALL.get(i) == Some(&HoleEnd::UpToEntity) => {
+            Some(AppliedField::HoleUpTo)
+        }
         // The Transform's type: its first reference field takes the picks.
-        Role::TransformType => cadrs_core::transform::TransformType::ALL.get(i).map(|t| crate::transform_ui::first_field(*t)),
+        Role::TransformType => cadrs_core::transform::TransformType::ALL
+            .get(i)
+            .map(|t| crate::transform_ui::first_field(*t)),
         _ => None,
     };
     if let Some(f) = next {
@@ -1316,11 +2022,15 @@ fn on_checkbox(ev: On<CheckboxChange>, q: Query<&Name>, mut commands: Commands) 
         commands.queue(move |world: &mut World| {
             let Some(f) = current(world) else { return };
             let mut k = f.kind.clone();
-            let Some((label, field)) = crate::sheetmetal_features_ui::checkbox(&mut k, &n, on) else { return };
+            let Some((label, field)) = crate::sheetmetal_features_ui::checkbox(&mut k, &n, on)
+            else {
+                return;
+            };
             if k != f.kind {
                 set(world, k, label);
             }
-            if let (Some(field), Some(mut s)) = (field, world.get_resource_mut::<AppliedSession>()) {
+            if let (Some(field), Some(mut s)) = (field, world.get_resource_mut::<AppliedSession>())
+            {
                 s.field = field;
             }
         });
@@ -1331,13 +2041,18 @@ fn on_checkbox(ev: On<CheckboxChange>, q: Query<&Name>, mut commands: Commands) 
         let n = name.to_string();
         commands.queue(move |world: &mut World| {
             let Some(f) = current(world) else { return };
-            let FeatureKind::SheetMetalModel(mut x) = f.kind.clone() else { return };
-            let Some((label, field)) = crate::sheetmetal_ui::checkbox(&mut x, &n, on) else { return };
+            let FeatureKind::SheetMetalModel(mut x) = f.kind.clone() else {
+                return;
+            };
+            let Some((label, field)) = crate::sheetmetal_ui::checkbox(&mut x, &n, on) else {
+                return;
+            };
             let k = FeatureKind::SheetMetalModel(x);
             if k != f.kind {
                 set(world, k, label);
             }
-            if let (Some(field), Some(mut s)) = (field, world.get_resource_mut::<AppliedSession>()) {
+            if let (Some(field), Some(mut s)) = (field, world.get_resource_mut::<AppliedSession>())
+            {
                 s.field = field;
             }
         });
@@ -1347,13 +2062,16 @@ fn on_checkbox(ev: On<CheckboxChange>, q: Query<&Name>, mut commands: Commands) 
     if crate::draft_ui::is_checkbox(name.as_str()) {
         let n = name.to_string();
         commands.queue(move |world: &mut World| {
-            let Some(feature) = current(world) else { return };
+            let Some(feature) = current(world) else {
+                return;
+            };
             let mut k = feature.kind.clone();
             if let Some((label, field)) = crate::draft_ui::checkbox(&mut k, &n, on)
                 && k != feature.kind
             {
                 set(world, k, label);
-                if let (Some(f), Some(mut s)) = (field, world.get_resource_mut::<AppliedSession>()) {
+                if let (Some(f), Some(mut s)) = (field, world.get_resource_mut::<AppliedSession>())
+                {
                     s.field = f;
                 }
             }
@@ -1361,21 +2079,25 @@ fn on_checkbox(ev: On<CheckboxChange>, q: Query<&Name>, mut commands: Commands) 
         return;
     }
     match name.as_str() {
-        "fillet-tangent-propagation-checkbox" => change(&mut commands, "Tangent propagation", move |k| {
-            if let FeatureKind::Fillet(x) = k {
-                x.tangent_propagation = on;
-            }
-        }),
+        "fillet-tangent-propagation-checkbox" => {
+            change(&mut commands, "Tangent propagation", move |k| {
+                if let FeatureKind::Fillet(x) = k {
+                    x.tangent_propagation = on;
+                }
+            })
+        }
         "fillet-overflow-checkbox" => change(&mut commands, "Allow edge overflow", move |k| {
             if let FeatureKind::Fillet(x) = k {
                 x.allow_overflow = on;
             }
         }),
-        "chamfer-tangent-propagation-checkbox" => change(&mut commands, "Tangent propagation", move |k| {
-            if let FeatureKind::Chamfer(x) = k {
-                x.tangent_propagation = on;
-            }
-        }),
+        "chamfer-tangent-propagation-checkbox" => {
+            change(&mut commands, "Tangent propagation", move |k| {
+                if let FeatureKind::Chamfer(x) = k {
+                    x.tangent_propagation = on;
+                }
+            })
+        }
         "shell-hollow-checkbox" => change(&mut commands, "Hollow", move |k| {
             if let FeatureKind::Shell(x) = k {
                 x.hollow = on;
@@ -1384,7 +2106,9 @@ fn on_checkbox(ev: On<CheckboxChange>, q: Query<&Name>, mut commands: Commands) 
         n if crate::advanced_dialog::is_checkbox(n) => {
             let n = n.to_string();
             commands.queue(move |world: &mut World| {
-                let Some(feature) = current(world) else { return };
+                let Some(feature) = current(world) else {
+                    return;
+                };
                 let mut k = feature.kind.clone();
                 if let Some(label) = crate::advanced_dialog::checkbox(&mut k, &n, on)
                     && k != feature.kind
@@ -1411,18 +2135,24 @@ fn on_number(
     vars: Res<crate::variables_ui::ActiveVariables>,
     mut commands: Commands,
 ) {
-    let Ok(role) = q.get(ev.entity).copied() else { return };
+    let Ok(role) = q.get(ev.entity).copied() else {
+        return;
+    };
     let text = ev.text.trim().to_string();
     // P3I.4: Flange, Hem and Make joint.
     if matches!(role, Role::Smf(_)) {
         let (entity, enter) = (ev.entity, ev.enter);
-        commands.queue(move |world: &mut World| crate::sheetmetal_features_ui::commit_number(world, entity, role, text, enter));
+        commands.queue(move |world: &mut World| {
+            crate::sheetmetal_features_ui::commit_number(world, entity, role, text, enter)
+        });
         return;
     }
     // P3I.2: the Sheet metal model's numbers (zero allowed; out of range kept, shown red).
     if let Role::SmNumber(n) = role {
         let (entity, enter) = (ev.entity, ev.enter);
-        commands.queue(move |world: &mut World| crate::sheetmetal_ui::commit_number(world, entity, n, text, enter));
+        commands.queue(move |world: &mut World| {
+            crate::sheetmetal_ui::commit_number(world, entity, n, text, enter)
+        });
         return;
     }
     // P3.10: the Draft angle, the fillet's second radius and variable radii, the hole's tap
@@ -1437,7 +2167,11 @@ fn on_number(
         }
         let Some((v, expr)) = parsed else { return };
         let enter = ev.enter;
-        change(&mut commands, crate::draft_ui::number_label(role), move |k| crate::draft_ui::set_number(k, role, v, expr));
+        change(
+            &mut commands,
+            crate::draft_ui::number_label(role),
+            move |k| crate::draft_ui::set_number(k, role, v, expr),
+        );
         if enter {
             commands.queue(|world: &mut World| {
                 world.resource_mut::<InputFocus>().clear();
@@ -1448,7 +2182,10 @@ fn on_number(
     }
     // Rho and Magnitude are plain numbers between 0 and 1.
     if matches!(role, Role::Rho | Role::Magnitude) {
-        let ok = text.parse::<f64>().ok().filter(|v| *v > 0.0 && (*v < 1.0 || (role == Role::Magnitude && *v == 1.0)));
+        let ok = text
+            .parse::<f64>()
+            .ok()
+            .filter(|v| *v > 0.0 && (*v < 1.0 || (role == Role::Magnitude && *v == 1.0)));
         if let Ok(mut s) = q_state.get_mut(ev.entity) {
             s.error = ok.is_none();
             if ok.is_none() {
@@ -1457,15 +2194,23 @@ fn on_number(
         }
         let Some(v) = ok else { return };
         let enter = ev.enter;
-        change(&mut commands, if role == Role::Rho { "Rho" } else { "Magnitude" }, move |k| {
-            if let FeatureKind::Fillet(x) = k {
-                if role == Role::Rho {
-                    x.rho = v;
-                } else {
-                    x.magnitude = v;
+        change(
+            &mut commands,
+            if role == Role::Rho {
+                "Rho"
+            } else {
+                "Magnitude"
+            },
+            move |k| {
+                if let FeatureKind::Fillet(x) = k {
+                    if role == Role::Rho {
+                        x.rho = v;
+                    } else {
+                        x.magnitude = v;
+                    }
                 }
-            }
-        });
+            },
+        );
         if enter {
             commands.queue(|world: &mut World| {
                 world.resource_mut::<InputFocus>().clear();
@@ -1477,12 +2222,21 @@ fn on_number(
     // P3.8: instance counts (whole numbers of at least 1) and a connector's move (any sign).
     if crate::pattern_dialog::is_count(role) || crate::pattern_dialog::is_signed(role) {
         let count = crate::pattern_dialog::is_count(role);
-        let quantity = if crate::pattern_dialog::is_angle(role) { Quantity::Angle } else { Quantity::Length };
+        let quantity = if crate::pattern_dialog::is_angle(role) {
+            Quantity::Angle
+        } else {
+            Quantity::Length
+        };
         let value = if count {
             // P3F.4: `#bolts` or `#n * 2` too, rounded.
-            vars.eval(&units.0, &text, Quantity::Count).ok().map(f64::round).filter(|v| *v >= 1.0 && *v <= 500.0)
+            vars.eval(&units.0, &text, Quantity::Count)
+                .ok()
+                .map(f64::round)
+                .filter(|v| *v >= 1.0 && *v <= 500.0)
         } else {
-            vars.eval(&units.0, &text, quantity).ok().filter(|v| v.is_finite())
+            vars.eval(&units.0, &text, quantity)
+                .ok()
+                .filter(|v| v.is_finite())
         };
         if let Ok(mut s) = q_state.get_mut(ev.entity) {
             s.error = value.is_none();
@@ -1502,7 +2256,9 @@ fn on_number(
         };
         let enter = ev.enter;
         let label = crate::pattern_dialog::number_label(role).unwrap_or("Value");
-        change(&mut commands, label, move |k| crate::pattern_dialog::set_number(k, role, v, expr));
+        change(&mut commands, label, move |k| {
+            crate::pattern_dialog::set_number(k, role, v, expr)
+        });
         if enter {
             commands.queue(|world: &mut World| {
                 world.resource_mut::<InputFocus>().clear();
@@ -1513,7 +2269,10 @@ fn on_number(
     }
     // The loft's magnitudes: plain numbers greater than zero.
     if crate::advanced_dialog::is_plain(role) {
-        let ok = text.parse::<f64>().ok().filter(|v| *v > 0.0 && v.is_finite());
+        let ok = text
+            .parse::<f64>()
+            .ok()
+            .filter(|v| *v > 0.0 && v.is_finite());
         if let Ok(mut s) = q_state.get_mut(ev.entity) {
             s.error = ok.is_none();
             if ok.is_none() {
@@ -1523,7 +2282,9 @@ fn on_number(
         let Some(v) = ok else { return };
         let enter = ev.enter;
         let label = crate::advanced_dialog::number_label(role).unwrap_or("Magnitude");
-        change(&mut commands, label, move |k| crate::advanced_dialog::set_number(k, role, v, plain(v)));
+        change(&mut commands, label, move |k| {
+            crate::advanced_dialog::set_number(k, role, v, plain(v))
+        });
         if enter {
             commands.queue(|world: &mut World| {
                 world.resource_mut::<InputFocus>().clear();
@@ -1532,11 +2293,28 @@ fn on_number(
         }
         return;
     }
-    let angle = matches!(role, Role::Angle | Role::TipAngle | Role::CsinkAngle) || crate::advanced_dialog::is_angle(role);
-    let quantity = if angle { Quantity::Angle } else { Quantity::Length };
-    let max = if role == Role::PlaneAngle { 360.0 } else if angle { 180.0 } else { f64::INFINITY };
+    let angle = matches!(role, Role::Angle | Role::TipAngle | Role::CsinkAngle)
+        || crate::advanced_dialog::is_angle(role);
+    let quantity = if angle {
+        Quantity::Angle
+    } else {
+        Quantity::Length
+    };
+    let max = if role == Role::PlaneAngle {
+        360.0
+    } else if angle {
+        180.0
+    } else {
+        f64::INFINITY
+    };
     // A pattern's angle may be a whole turn (PS24.2).
-    let fits = |v: f64| if role == Role::PatternAngle { v <= 360.0 } else { v < max };
+    let fits = |v: f64| {
+        if role == Role::PatternAngle {
+            v <= 360.0
+        } else {
+            v < max
+        }
+    };
     let v = match vars.eval(&units.0, &text, quantity) {
         Ok(v) if v.is_finite() && v > 0.0 && fits(v) => v,
         _ => {
@@ -1550,9 +2328,16 @@ fn on_number(
     if let Ok(mut s) = q_state.get_mut(ev.entity) {
         s.error = false;
     }
-    let expr = if text.parse::<f64>().is_ok() { units.0.with_unit(v, quantity) } else { text };
+    let expr = if text.parse::<f64>().is_ok() {
+        units.0.with_unit(v, quantity)
+    } else {
+        text
+    };
     let enter = ev.enter;
-    let len = Length { value: v, expr: expr.clone() };
+    let len = Length {
+        value: v,
+        expr: expr.clone(),
+    };
     let label: &'static str = match role {
         Role::Size1 => "Size",
         Role::Distance2 => "Distance 2",
@@ -1641,7 +2426,11 @@ fn on_button(a: On<Activate>, q: Query<&Role>, mut commands: Commands) {
         }),
         Ok(r @ (Role::SmExtrudeFlip | Role::SmThicknessFlip)) => {
             let r = *r;
-            let label = if r == Role::SmExtrudeFlip { "Opposite direction" } else { "Flip thickness direction" };
+            let label = if r == Role::SmExtrudeFlip {
+                "Opposite direction"
+            } else {
+                "Flip thickness direction"
+            };
             change(&mut commands, label, move |k| {
                 if let FeatureKind::SheetMetalModel(x) = k {
                     crate::sheetmetal_ui::flip(x, r);
@@ -1672,9 +2461,15 @@ fn on_button(a: On<Activate>, q: Query<&Role>, mut commands: Commands) {
                 o.value = -o.value;
             }
         }),
-        Ok(Role::FlipWall) => change(&mut commands, "Flip wall", |k| crate::advanced_dialog::flip(k, Role::FlipWall)),
-        Ok(Role::PatternFlip) => change(&mut commands, "Flip direction", |k| crate::pattern_dialog::flip(k, Role::PatternFlip)),
-        Ok(Role::PatternFlip2) => change(&mut commands, "Flip direction", |k| crate::pattern_dialog::flip(k, Role::PatternFlip2)),
+        Ok(Role::FlipWall) => change(&mut commands, "Flip wall", |k| {
+            crate::advanced_dialog::flip(k, Role::FlipWall)
+        }),
+        Ok(Role::PatternFlip) => change(&mut commands, "Flip direction", |k| {
+            crate::pattern_dialog::flip(k, Role::PatternFlip)
+        }),
+        Ok(Role::PatternFlip2) => change(&mut commands, "Flip direction", |k| {
+            crate::pattern_dialog::flip(k, Role::PatternFlip2)
+        }),
         Ok(Role::SkipClear) => change(&mut commands, "Clear skipped instances", |k| {
             if let FeatureKind::Pattern(x) = k {
                 x.skipped.clear();
@@ -1687,8 +2482,14 @@ fn on_button(a: On<Activate>, q: Query<&Role>, mut commands: Commands) {
         }),
         Ok(r @ (Role::TransformFlipPrimary | Role::TransformReorient)) => {
             let r = *r;
-            let label = if r == Role::TransformFlipPrimary { "Flip primary axis" } else { "Reorient secondary axis" };
-            change(&mut commands, label, move |k| crate::transform_ui::flip(k, r));
+            let label = if r == Role::TransformFlipPrimary {
+                "Flip primary axis"
+            } else {
+                "Reorient secondary axis"
+            };
+            change(&mut commands, label, move |k| {
+                crate::transform_ui::flip(k, r)
+            });
         }
         Ok(Role::ConnectorFlip) => change(&mut commands, "Flip primary axis", |k| {
             if let FeatureKind::MateConnector(x) = k {
@@ -1710,7 +2511,11 @@ fn on_button(a: On<Activate>, q: Query<&Role>, mut commands: Commands) {
         }),
         Ok(Role::HoleConnectorButton) => commands.queue(|world: &mut World| {
             if let Some(mut s) = world.get_resource_mut::<AppliedSession>() {
-                s.field = if s.field == AppliedField::HoleConnectors { AppliedField::Points } else { AppliedField::HoleConnectors };
+                s.field = if s.field == AppliedField::HoleConnectors {
+                    AppliedField::Points
+                } else {
+                    AppliedField::HoleConnectors
+                };
             }
         }),
         Ok(Role::CreateSelectionFaces) => commands.queue(|world: &mut World| {
@@ -1730,55 +2535,67 @@ fn on_button(a: On<Activate>, q: Query<&Role>, mut commands: Commands) {
 
 fn on_list_remove(ev: On<SelectionListRemove>, q: Query<&Role>, mut commands: Commands) {
     let i = ev.index;
-    let Ok(role) = q.get(ev.entity).copied() else { return };
-    change(&mut commands, "Remove selection", move |k| match (k, role) {
-        (FeatureKind::Fillet(x), Role::Entities) if i < x.entities.len() => {
-            x.entities.remove(i);
-        }
-        (FeatureKind::Chamfer(x), Role::Entities) if i < x.entities.len() => {
-            x.entities.remove(i);
-        }
-        (FeatureKind::Chamfer(x), Role::Overrides) if i < x.overrides.len() => {
-            x.overrides.remove(i);
-        }
-        (FeatureKind::Shell(x), Role::Faces) => {
-            if x.hollow && i < x.parts.len() {
-                x.parts.remove(i);
-            } else if !x.hollow && i < x.faces.len() {
-                x.faces.remove(i);
+    let Ok(role) = q.get(ev.entity).copied() else {
+        return;
+    };
+    change(&mut commands, "Remove selection", move |k| {
+        match (k, role) {
+            (FeatureKind::Fillet(x), Role::Entities) if i < x.entities.len() => {
+                x.entities.remove(i);
             }
-        }
-        (FeatureKind::Hole(x), Role::Points) => {
-            if i < x.points.len() {
-                x.points.remove(i);
-            } else if i - x.points.len() < x.sketches.len() {
-                let j = i - x.points.len();
-                x.sketches.remove(j);
-            } else {
-                let j = i - x.points.len() - x.sketches.len();
-                crate::pattern_dialog::remove_hole_connector(x, j);
+            (FeatureKind::Chamfer(x), Role::Entities) if i < x.entities.len() => {
+                x.entities.remove(i);
             }
+            (FeatureKind::Chamfer(x), Role::Overrides) if i < x.overrides.len() => {
+                x.overrides.remove(i);
+            }
+            (FeatureKind::Shell(x), Role::Faces) => {
+                if x.hollow && i < x.parts.len() {
+                    x.parts.remove(i);
+                } else if !x.hollow && i < x.faces.len() {
+                    x.faces.remove(i);
+                }
+            }
+            (FeatureKind::Hole(x), Role::Points) => {
+                if i < x.points.len() {
+                    x.points.remove(i);
+                } else if i - x.points.len() < x.sketches.len() {
+                    let j = i - x.points.len();
+                    x.sketches.remove(j);
+                } else {
+                    let j = i - x.points.len() - x.sketches.len();
+                    crate::pattern_dialog::remove_hole_connector(x, j);
+                }
+            }
+            (FeatureKind::Hole(x), Role::MergeScope) if i < x.merge_scope.len() => {
+                x.merge_scope.remove(i);
+            }
+            (
+                k @ (FeatureKind::Fillet(_) | FeatureKind::Hole(_)),
+                r @ (Role::FilletVertices
+                | Role::FilletEdgePoints
+                | Role::HoleStartPlane
+                | Role::HoleUpTo),
+            ) => crate::draft_ui::remove(k, r, i),
+            (FeatureKind::Fillet(x), Role::Side1) => x.side1.clear(),
+            (FeatureKind::Fillet(x), Role::Center) => x.center.clear(),
+            (FeatureKind::Fillet(x), Role::Side2) => x.side2.clear(),
+            (FeatureKind::SheetMetalModel(x), r) => crate::sheetmetal_ui::remove(x, r, i),
+            (k @ FeatureKind::SheetMetal(_), r) => crate::sheetmetal_features_ui::remove(k, r, i),
+            (k, r) => crate::advanced_dialog::remove(k, r, i),
         }
-        (FeatureKind::Hole(x), Role::MergeScope) if i < x.merge_scope.len() => {
-            x.merge_scope.remove(i);
-        }
-        (k @ (FeatureKind::Fillet(_) | FeatureKind::Hole(_)), r @ (Role::FilletVertices | Role::FilletEdgePoints | Role::HoleStartPlane | Role::HoleUpTo)) => {
-            crate::draft_ui::remove(k, r, i)
-        }
-        (FeatureKind::Fillet(x), Role::Side1) => x.side1.clear(),
-        (FeatureKind::Fillet(x), Role::Center) => x.center.clear(),
-        (FeatureKind::Fillet(x), Role::Side2) => x.side2.clear(),
-        (FeatureKind::SheetMetalModel(x), r) => crate::sheetmetal_ui::remove(x, r, i),
-        (k @ FeatureKind::SheetMetal(_), r) => crate::sheetmetal_features_ui::remove(k, r, i),
-        (k, r) => crate::advanced_dialog::remove(k, r, i),
     });
 }
 
 /// A loft profile dragged by its handle (PS20.2).
 fn on_list_move(ev: On<SelectionListMove>, q: Query<&Role>, mut commands: Commands) {
-    let Ok(role) = q.get(ev.entity).copied() else { return };
+    let Ok(role) = q.get(ev.entity).copied() else {
+        return;
+    };
     let (from, to) = (ev.from, ev.to);
-    change(&mut commands, "Reorder profiles", move |k| crate::advanced_dialog::move_item(k, role, from, to));
+    change(&mut commands, "Reorder profiles", move |k| {
+        crate::advanced_dialog::move_item(k, role, from, to)
+    });
 }
 
 fn on_list_activate(ev: On<SelectionListActivate>, q: Query<&Role>, mut commands: Commands) {
@@ -1795,8 +2612,12 @@ fn on_list_activate(ev: On<SelectionListActivate>, q: Query<&Role>, mut commands
         Ok(Role::HoleUpTo) => AppliedField::HoleUpTo,
         Ok(Role::FilletVertices) => AppliedField::FilletVertices,
         Ok(Role::FilletEdgePoints) => AppliedField::FilletEdgePoints,
-        Ok(r) if crate::sheetmetal_ui::list_field(*r).is_some() => crate::sheetmetal_ui::list_field(*r).expect("checked"),
-        Ok(r) if crate::sheetmetal_features_ui::list_field(*r).is_some() => crate::sheetmetal_features_ui::list_field(*r).expect("checked"),
+        Ok(r) if crate::sheetmetal_ui::list_field(*r).is_some() => {
+            crate::sheetmetal_ui::list_field(*r).expect("checked")
+        }
+        Ok(r) if crate::sheetmetal_features_ui::list_field(*r).is_some() => {
+            crate::sheetmetal_features_ui::list_field(*r).expect("checked")
+        }
         Ok(r) => match crate::advanced_dialog::list_field(*r) {
             Some(f) => f,
             None => return,
@@ -1830,9 +2651,15 @@ pub fn toolbar_kind(name: &str) -> Option<AppliedKind> {
         "loft" => Some(AppliedKind::Loft),
         "split" => Some(AppliedKind::Split),
         "draft" => Some(AppliedKind::Draft),
-        "pattern" | "linear-pattern" => Some(AppliedKind::Pattern(cadrs_core::pattern::PatternKind::Linear)),
-        "circular-pattern" => Some(AppliedKind::Pattern(cadrs_core::pattern::PatternKind::Circular)),
-        "curve-pattern" => Some(AppliedKind::Pattern(cadrs_core::pattern::PatternKind::Curve)),
+        "pattern" | "linear-pattern" => Some(AppliedKind::Pattern(
+            cadrs_core::pattern::PatternKind::Linear,
+        )),
+        "circular-pattern" => Some(AppliedKind::Pattern(
+            cadrs_core::pattern::PatternKind::Circular,
+        )),
+        "curve-pattern" => Some(AppliedKind::Pattern(
+            cadrs_core::pattern::PatternKind::Curve,
+        )),
         "mirror" => Some(AppliedKind::Mirror),
         "mate-connector" => Some(AppliedKind::MateConnector),
         "transform" => Some(AppliedKind::Transform),

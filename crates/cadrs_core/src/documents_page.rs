@@ -98,6 +98,11 @@ pub fn versions(store: &Store, id: DocumentId) -> Result<Vec<VersionRow>, StoreE
         .versions()
         .iter()
         .rev()
-        .map(|v| VersionRow { name: v.name().to_string(), description: v.description().to_string(), time: v.time(), user: v.user().to_string() })
+        .map(|v| VersionRow {
+            name: v.name().to_string(),
+            description: v.description().to_string(),
+            time: v.time(),
+            user: v.user().to_string(),
+        })
         .collect())
 }

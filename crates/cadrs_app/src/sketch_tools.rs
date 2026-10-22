@@ -50,8 +50,8 @@ use cadrs_sketch::geom::{arc_through, tangent_arc};
 use cadrs_sketch::hit::{box_select, hit_test};
 use cadrs_sketch::infer::{self, Candidate, Kind, Placed, ToolContext, placed_specs};
 use cadrs_sketch::{
-    ArcGeom, ConstraintOf, ConstraintSpec, CurveId, CurveKind, CurveSpec, Dimension,
-    DimensionKind, PlaneRef, PointId, PointRef, PointSpec, Sketch, SketchEntity, SketchOp,
+    ArcGeom, ConstraintOf, ConstraintSpec, CurveId, CurveKind, CurveSpec, Dimension, DimensionKind,
+    PlaneRef, PointId, PointRef, PointSpec, Sketch, SketchEntity, SketchOp,
 };
 use cadrs_ui::input::TextInputField;
 use cadrs_ui::{QuickDim, QuickDimBox, QuickDimCancel, QuickDimCommit, Theme};
@@ -84,8 +84,7 @@ impl Plugin for SketchToolsPlugin {
                     update_sketch_screen,
                     reset_on_tool_change,
                     sync_external_snap,
-                    (sketch_pointer, sketch_edit_keys)
-                        .run_if(in_state(PartStudioMode::Sketching)),
+                    (sketch_pointer, sketch_edit_keys).run_if(in_state(PartStudioMode::Sketching)),
                     prune_selection,
                     sync_quick_dim,
                 )
@@ -159,12 +158,17 @@ impl ScreenMap {
     /// other two default planes cut the sketch plane along its axes (seen edge-on), and are
     /// picked as line references (mirror lines, dimensions, constraints; #31).
     pub fn axis_at(&self, pos: Vec2) -> Option<SketchEntity> {
-        if !matches!(self.plane, PlaneRef::Top | PlaneRef::Front | PlaneRef::Right) {
+        if !matches!(
+            self.plane,
+            PlaneRef::Top | PlaneRef::Front | PlaneRef::Right
+        ) {
             return None;
         }
         let half = crate::viewport::PLANE_HALF as f64;
-        cadrs_sketch::hit::axis_hit(SVec2::new(pos.x as f64, pos.y as f64), half, |p| self.to_screen64(p))
-            .map(|h| h.entity)
+        cadrs_sketch::hit::axis_hit(SVec2::new(pos.x as f64, pos.y as f64), half, |p| {
+            self.to_screen64(p)
+        })
+        .map(|h| h.entity)
     }
 
     /// The sketch point under a screen position, or `None` when the plane is seen edge-on (or,
@@ -172,7 +176,10 @@ impl ScreenMap {
     pub fn to_sketch(&self, s: Vec2) -> Option<SVec2> {
         // In f64: an f32 solve put clicked points a few 1e-6 mm off (30.0000038 in a DXF).
         let v = |p: Vec2| (p.x as f64, p.y as f64);
-        let (dx, dy) = (s.x as f64 - self.origin.x as f64, s.y as f64 - self.origin.y as f64);
+        let (dx, dy) = (
+            s.x as f64 - self.origin.x as f64,
+            s.y as f64 - self.origin.y as f64,
+        );
         let (wx, wy) = v(self.w);
         // `d·(1 + w·p) = x·p.x + y·p.y`, linear in `p`.
         let ((xx, xy), (yx, yy)) = (v(self.x), v(self.y));
@@ -199,7 +206,9 @@ impl ScreenMap {
         let (a, b, c, d) = (self.x.x, self.y.x, self.x.y, self.y.y);
         let s = a * a + b * b + c * c + d * d;
         let det = a * d - b * c;
-        ((s + (s * s - 4.0 * det * det).max(0.0).sqrt()) / 2.0).sqrt().max(1e-9)
+        ((s + (s * s - 4.0 * det * det).max(0.0).sqrt()) / 2.0)
+            .sqrt()
+            .max(1e-9)
     }
 }
 
@@ -247,7 +256,11 @@ static FLAT_SKETCH_AREA: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomi
 
 /// The flat view's display of the flat-pattern sketch being edited, if that is one and the
 /// panel shows its flat.
-fn flat_area(session: Option<&SketchSession>, doc: Option<&ActiveDocument>, table: &crate::sheetmetal_table::SmTable) -> Option<crate::sheetmetal_table::FlatDisplay> {
+fn flat_area(
+    session: Option<&SketchSession>,
+    doc: Option<&ActiveDocument>,
+    table: &crate::sheetmetal_table::SmTable,
+) -> Option<crate::sheetmetal_table::FlatDisplay> {
     let s = session?;
     let features = doc?.active_element()?.features();
     let (model, part) = cadrs_core::sheetmetal_flat::sketch_target(features, s.feature)?;
@@ -270,12 +283,24 @@ fn update_sketch_screen(
     if area.flat != flat {
         area.flat = flat;
     }
-    FLAT_SKETCH_AREA.store(flat.map_or(0, |f| f.body.to_bits()), std::sync::atomic::Ordering::Relaxed);
+    FLAT_SKETCH_AREA.store(
+        flat.map_or(0, |f| f.body.to_bits()),
+        std::sync::atomic::Ordering::Relaxed,
+    );
     // A sketch on the flat has no 3D mapping: while the flat view isn't laid out (the panel
     // opening, `crate::flat_ui::keep_flat_view`) it is neither drawn nor edited anywhere.
-    let on_flat = session.as_deref().zip(doc.as_deref().and_then(|d| d.active_element())).is_some_and(|(s, el)| cadrs_core::sheetmetal_flat::sketch_target(el.features(), s.feature).is_some());
+    let on_flat = session
+        .as_deref()
+        .zip(doc.as_deref().and_then(|d| d.active_element()))
+        .is_some_and(|(s, el)| {
+            cadrs_core::sheetmetal_flat::sketch_target(el.features(), s.feature).is_some()
+        });
     let active = match (plane, flat) {
-        (Some(PlaneRef::Feature(fp)), Some(f)) => Some(ScreenMap::new(PlaneRef::Feature(cadrs_sketch::FeaturePlane::new(fp.feature, f.frame)), &f.view, &ViewportRect(f.rect))),
+        (Some(PlaneRef::Feature(fp)), Some(f)) => Some(ScreenMap::new(
+            PlaneRef::Feature(cadrs_sketch::FeaturePlane::new(fp.feature, f.frame)),
+            &f.view,
+            &ViewportRect(f.rect),
+        )),
         _ if on_flat => None,
         (p, _) => p.map(|p| ScreenMap::new(p, &view.view, &rect)),
     };
@@ -306,32 +331,52 @@ pub(crate) fn session_plane(
 #[derive(Resource, Default)]
 pub struct ExternalSnap {
     /// The sketch it was made from, and the copy (none without part edges to snap to).
-    made: Option<(cadrs_core::FeatureId, Sketch, Option<cadrs_sketch::external::External>)>,
+    made: Option<(
+        cadrs_core::FeatureId,
+        Sketch,
+        Option<cadrs_sketch::external::External>,
+    )>,
 }
 
 impl ExternalSnap {
     /// The copy for the sketch `feature`, and the sketch it was made from.
-    pub fn get(&self, feature: cadrs_core::FeatureId) -> Option<(&Sketch, &cadrs_sketch::external::External)> {
+    pub fn get(
+        &self,
+        feature: cadrs_core::FeatureId,
+    ) -> Option<(&Sketch, &cadrs_sketch::external::External)> {
         let (f, base, ext) = self.made.as_ref()?;
         (*f == feature).then_some(())?;
         Some((base, ext.as_ref()?))
     }
 }
 
-fn sync_external_snap(session: Option<Res<SketchSession>>, doc: Option<Res<ActiveDocument>>, cache: Res<crate::parts::PartCache>, mut snap: ResMut<ExternalSnap>) {
+fn sync_external_snap(
+    session: Option<Res<SketchSession>>,
+    doc: Option<Res<ActiveDocument>>,
+    cache: Res<crate::parts::PartCache>,
+    mut snap: ResMut<ExternalSnap>,
+) {
     let Some(sketch) = session_sketch(session.as_deref(), doc.as_deref()) else {
         if snap.made.is_some() {
             snap.made = None;
         }
         return;
     };
-    let Some(feature) = session.as_ref().map(|s| s.feature) else { return };
-    if snap.made.as_ref().is_some_and(|(f, base, _)| *f == feature && base == sketch) {
+    let Some(feature) = session.as_ref().map(|s| s.feature) else {
+        return;
+    };
+    if snap
+        .made
+        .as_ref()
+        .is_some_and(|(f, base, _)| *f == feature && base == sketch)
+    {
         return;
     }
     // A sketch on the flat pattern snaps to the flat's outline, cut-outs and bend lines and
     // uses the ones it touches (P3I.6, SM14), as a sketch on a face does its edges.
-    let flat = doc.as_deref().and_then(|d| crate::flat_ui::flat_imprints(d, &cache, feature));
+    let flat = doc
+        .as_deref()
+        .and_then(|d| crate::flat_ui::flat_imprints(d, &cache, feature));
     let ext = match flat {
         Some(imprint) => {
             let mut with = sketch.clone();
@@ -376,10 +421,18 @@ pub enum DrawState {
         tangent: bool,
     },
     /// A rectangle from `first` (a corner, or the center when `centered`) to the cursor.
-    Rect { first: SVec2, centered: bool },
-    Circle { center: SVec2 },
+    Rect {
+        first: SVec2,
+        centered: bool,
+    },
+    Circle {
+        center: SVec2,
+    },
     /// A 3-point arc: `start`, then `end`, then the cursor sets the bulge.
-    Arc { start: SVec2, end: Option<SVec2> },
+    Arc {
+        start: SVec2,
+        end: Option<SVec2>,
+    },
     /// A tangent arc leaving `start` (the end of `curve`) along `dir`.
     TangentArc {
         start: SVec2,
@@ -395,15 +448,26 @@ pub enum DrawState {
         sweep: f64,
     },
     /// A midpoint line (S3.2): its middle at `mid`, one end at the cursor.
-    MidLine { mid: SVec2 },
+    MidLine {
+        mid: SVec2,
+    },
     /// An aligned rectangle (S3.3): the first side from `p0` (to `p1` once placed), then the
     /// cursor sets the width.
-    AlignedRect { p0: SVec2, p1: Option<SVec2> },
+    AlignedRect {
+        p0: SVec2,
+        p1: Option<SVec2>,
+    },
     /// A 3-point circle (S4.2): two points on it placed (`p2` once placed), the cursor the last.
-    Circle3 { p1: SVec2, p2: Option<SVec2> },
+    Circle3 {
+        p1: SVec2,
+        p2: Option<SVec2>,
+    },
     /// An ellipse (S8): its center, then the end of its major axis, then the cursor sets the
     /// minor radius.
-    Ellipse { center: SVec2, major: Option<SVec2> },
+    Ellipse {
+        center: SVec2,
+        major: Option<SVec2>,
+    },
     /// A polygon (S7.2): its center, then the size point (with where it was clicked on
     /// screen); moving up or right from there adds sides, down or left removes them, and a
     /// last click places it.
@@ -415,15 +479,25 @@ pub enum DrawState {
     },
     /// A Bézier curve (S12.14): the first `n` of its start and two control points placed
     /// (1–3), the cursor the next; the fourth click places its end.
-    Bezier { pts: [SVec2; 3], n: u8 },
+    Bezier {
+        pts: [SVec2; 3],
+        n: u8,
+    },
     /// A box selection dragged from `start` (screen px).
-    BoxSelect { start: Vec2 },
+    BoxSelect {
+        start: Vec2,
+    },
     /// The Text tool's box (S16.1): a corner rectangle from `first` to the cursor.
-    TextBox { first: SVec2 },
+    TextBox {
+        first: SVec2,
+    },
     /// A spline (Onshape's Spline tool): its points so far are the pending points, from
     /// `start` to `last`; each click adds one, a click on the first point closes it, a double
     /// click (or Enter, Esc) ends it.
-    Spline { start: SVec2, last: SVec2 },
+    Spline {
+        start: SVec2,
+        last: SVec2,
+    },
 }
 
 impl SketchDraw {
@@ -511,20 +585,45 @@ pub fn spline_handles(s: &Sketch, selection: &SketchSelection) -> Vec<(SplineHan
         if d.periodic || !s.curves.contains_key(id) {
             continue;
         }
-        let shown = selection.contains(SketchEntity::Curve(id)) || d.start_tangent.is_some() || d.end_tangent.is_some();
+        let shown = selection.contains(SketchEntity::Curve(id))
+            || d.start_tangent.is_some()
+            || d.end_tangent.is_some();
         if !shown {
             continue;
         }
         let pts: Vec<SVec2> = d.points.iter().map(|p| s.pos(*p)).collect();
-        let Some((hs, he)) = cadrs_sketch::spline::handle_positions(&pts, d.start_tangent, d.end_tangent) else { continue };
-        out.push((SplineHandle { curve: id, at_start: true, pos: hs }, pts[0]));
-        out.push((SplineHandle { curve: id, at_start: false, pos: he }, pts[pts.len() - 1]));
+        let Some((hs, he)) =
+            cadrs_sketch::spline::handle_positions(&pts, d.start_tangent, d.end_tangent)
+        else {
+            continue;
+        };
+        out.push((
+            SplineHandle {
+                curve: id,
+                at_start: true,
+                pos: hs,
+            },
+            pts[0],
+        ));
+        out.push((
+            SplineHandle {
+                curve: id,
+                at_start: false,
+                pos: he,
+            },
+            pts[pts.len() - 1],
+        ));
     }
     out
 }
 
 /// The spline handle under the screen point `pos`, if one is shown there.
-fn spline_handle_at(s: &Sketch, map: &ScreenMap, selection: &SketchSelection, pos: Vec2) -> Option<SplineHandle> {
+fn spline_handle_at(
+    s: &Sketch,
+    map: &ScreenMap,
+    selection: &SketchSelection,
+    pos: Vec2,
+) -> Option<SplineHandle> {
     spline_handles(s, selection)
         .into_iter()
         .map(|(h, _)| (h, map.to_screen(h.pos).distance(pos)))
@@ -538,8 +637,16 @@ pub fn spline_handle_op(s: &Sketch, h: SplineHandle) -> Option<SketchOp> {
     let d = s.splines.get(h.curve)?;
     let pts: Vec<SVec2> = d.points.iter().map(|p| s.pos(*p)).collect();
     let t = cadrs_sketch::spline::tangent_for_handle(&pts, h.at_start, h.pos)?;
-    let (start, end) = if h.at_start { (Some(t), d.end_tangent) } else { (d.start_tangent, Some(t)) };
-    Some(SketchOp::SetSplineTangents { curve: h.curve, start, end })
+    let (start, end) = if h.at_start {
+        (Some(t), d.end_tangent)
+    } else {
+        (d.start_tangent, Some(t))
+    };
+    Some(SketchOp::SetSplineTangents {
+        curve: h.curve,
+        start,
+        end,
+    })
 }
 
 /// Where a dragged point snapped (S11.4).
@@ -594,7 +701,9 @@ impl SketchDraw {
 
     /// True if the cursor snapped to the sketch origin.
     pub fn snapped_origin(&self) -> bool {
-        self.inference.as_ref().is_some_and(|c| c.kind == Kind::Origin)
+        self.inference
+            .as_ref()
+            .is_some_and(|c| c.kind == Kind::Origin)
     }
 }
 
@@ -639,7 +748,7 @@ fn reset_tools(
     draw.press = None;
     draw.inference = None;
     draw.woken.clear();
-        draw.woken_curves.clear();
+    draw.woken_curves.clear();
     draw.woken_mids.clear();
     draw.pending.clear();
     draw.cursor = None;
@@ -699,14 +808,19 @@ fn prune_selection(
         SketchEntity::Constraint(c) => sketch.constraints.contains_key(c),
         SketchEntity::Text(t) => sketch.texts.contains_key(t),
         // A part vertex: drawn while it exists (`sketch_links`).
-        SketchEntity::Origin | SketchEntity::Link(_) | SketchEntity::XAxis | SketchEntity::YAxis => true,
+        SketchEntity::Origin
+        | SketchEntity::Link(_)
+        | SketchEntity::XAxis
+        | SketchEntity::YAxis => true,
     };
     if !selection.0.iter().all(exists) {
         selection.0.retain(exists);
     }
     // The Dimension tool hovers the face's part edges too (on the snap copy).
     let on_copy = |e: &SketchEntity| {
-        let Some((_, ext)) = session.as_deref().and_then(|s| external.get(s.feature)) else { return false };
+        let Some((_, ext)) = session.as_deref().and_then(|s| external.get(s.feature)) else {
+            return false;
+        };
         match *e {
             SketchEntity::Point(p) => ext.sketch.points.contains_key(p),
             SketchEntity::Curve(c) => ext.is_edge(c),
@@ -777,12 +891,13 @@ pub fn tool_context(state: DrawState, draw: &SketchDraw, suppress: bool) -> Tool
         DrawState::MidLine { mid } => (Some(mid), true),
         DrawState::AlignedRect { p0, p1: None } => (Some(p0), true),
         DrawState::Circle3 { p1, p2: None } => (Some(p1), false),
-        DrawState::Ellipse { center, major: None } => (Some(center), false),
+        DrawState::Ellipse {
+            center,
+            major: None,
+        } => (Some(center), false),
         DrawState::Bezier { pts, n } => (Some(pts[(n as usize).clamp(1, 3) - 1]), false),
         DrawState::Polygon {
-            center,
-            size: None,
-            ..
+            center, size: None, ..
         } => (Some(center), false),
         _ => (None, false),
     };
@@ -833,7 +948,16 @@ pub(crate) fn sketch_pointer(
     mut hover: ResMut<SketchHover>,
     mut selection: ResMut<SketchSelection>,
     mut flow: ResMut<QuickDimFlow>,
-    (overlay, analysis, mut glyph_offsets, mut region_sel, units, time, external, (cache, view, rect)): (
+    (
+        overlay,
+        analysis,
+        mut glyph_offsets,
+        mut region_sel,
+        units,
+        time,
+        external,
+        (cache, view, rect),
+    ): (
         Res<crate::sketch_glyphs::SketchOverlay>,
         Res<crate::sketch_constrain::SketchAnalysis>,
         ResMut<crate::sketch_glyphs::GlyphOffsets>,
@@ -841,7 +965,11 @@ pub(crate) fn sketch_pointer(
         Res<crate::WorkspaceUnits>,
         Res<Time>,
         Res<ExternalSnap>,
-        (Res<crate::parts::PartCache>, Res<crate::viewport::ViewportView>, Res<ViewportRect>),
+        (
+            Res<crate::parts::PartCache>,
+            Res<crate::viewport::ViewportView>,
+            Res<ViewportRect>,
+        ),
     ),
     mut commands: Commands,
 ) {
@@ -874,11 +1002,22 @@ pub(crate) fn sketch_pointer(
     let select = tool.tool == SketchTool::Select;
     let dimension_tool = tool.tool == SketchTool::Dimension;
     // A part vertex (selecting, or with a constraint tool): constrained to as a used point.
-    let features = doc.as_deref().and_then(|d| d.doc.element(s.element)).map_or(&[][..], |el| el.features());
-    let frame = features.iter().find(|f| f.id == s.feature).and_then(|f| f.sketch()?.plane).map(|p| p.frame());
+    let features = doc
+        .as_deref()
+        .and_then(|d| d.doc.element(s.element))
+        .map_or(&[][..], |el| el.features());
+    let frame = features
+        .iter()
+        .find(|f| f.id == s.feature)
+        .and_then(|f| f.sketch()?.plane)
+        .map(|p| p.frame());
     let vertex_at = |pos: Vec2| {
         (select || constraint_tool.is_some())
-            .then(|| crate::sketch_links::vertex_under(features, s.feature, &cache, &view.view, &rect, pos))
+            .then(|| {
+                crate::sketch_links::vertex_under(
+                    features, s.feature, &cache, &view.view, &rect, pos,
+                )
+            })
             .flatten()
             .map(SketchEntity::Link)
     };
@@ -953,7 +1092,11 @@ pub(crate) fn sketch_pointer(
                         cadrs_sketch::dimension::label_params(sketch, d.kind, c)
                 {
                     // Centered on the cursor, but never over an arrowhead (`screens/16a`).
-                    let moved = cadrs_sketch::Dimension { offset, along, ..*d };
+                    let moved = cadrs_sketch::Dimension {
+                        offset,
+                        along,
+                        ..*d
+                    };
                     let text = crate::sketch_dimension::dimension_text(&moved, false, &units.0);
                     let moved = crate::sketch_draw::clear_of_arrows(sketch, &map, moved, &text);
                     draw.label_drag = Some((id, moved.offset, moved.along));
@@ -1078,7 +1221,9 @@ pub(crate) fn sketch_pointer(
                         });
                     }
                     let inferred = snap
-                        .map(|s| infer::drag_constraints_from(&d.base, s.point, &s.candidate.constraints))
+                        .map(|s| {
+                            infer::drag_constraints_from(&d.base, s.point, &s.candidate.constraints)
+                        })
                         .unwrap_or_default();
                     let base = d.base;
                     commands.queue(move |world: &mut World| {
@@ -1098,12 +1243,16 @@ pub(crate) fn sketch_pointer(
                                 s,
                                 |l| {
                                     let frame = frame?;
-                                    crate::sketch_links::vertex_at(features, s.feature, &frame, &cache, l)
-                                        .map(|(p, _)| p)
+                                    crate::sketch_links::vertex_at(
+                                        features, s.feature, &frame, &cache, l,
+                                    )
+                                    .map(|(p, _)| p)
                                 },
                             ),
                             // Pierce's curve is outside the sketch (`sketch_links`).
-                            None if kind != cadrs_sketch::ConstraintKind::Pierce => selection.0.clear(),
+                            None if kind != cadrs_sketch::ConstraintKind::Pierce => {
+                                selection.0.clear()
+                            }
                             None => {}
                         }
                     }
@@ -1125,7 +1274,13 @@ pub(crate) fn sketch_pointer(
                 {
                     // #37: every curve in the box is mirrored at once.
                     let found = in_box(start);
-                    crate::sketch_edit_tools::mirror_box(sketch, &selection, &found, &mut commands, target);
+                    crate::sketch_edit_tools::mirror_box(
+                        sketch,
+                        &selection,
+                        &found,
+                        &mut commands,
+                        target,
+                    );
                     draw.state = DrawState::Idle;
                     continue;
                 }
@@ -1162,7 +1317,14 @@ pub(crate) fn sketch_pointer(
                     let double = is_double_click(draw.last_click, pos, now);
                     draw.last_click = Some((pos, now));
                     if double && matches!(draw.state, DrawState::Spline { .. }) && !press.began {
-                        finish_spline(&mut draw, &mut commands, target, snap_sketch, construction, false);
+                        finish_spline(
+                            &mut draw,
+                            &mut commands,
+                            target,
+                            snap_sketch,
+                            construction,
+                            false,
+                        );
                         draw.last_click = None;
                         continue;
                     }
@@ -1212,10 +1374,11 @@ pub(crate) fn sketch_pointer(
                 {
                     let text = select
                         .then(|| {
-                            let hit = hit_test(sketch, SVec2::new(pos.x as f64, pos.y as f64), |p| {
-                                map.to_screen64(p)
-                            })
-                            .map(|h| h.entity);
+                            let hit =
+                                hit_test(sketch, SVec2::new(pos.x as f64, pos.y as f64), |p| {
+                                    map.to_screen64(p)
+                                })
+                                .map(|h| h.entity);
                             crate::sketch_text::text_under(sketch, hit)
                         })
                         .flatten();
@@ -1261,7 +1424,10 @@ pub(crate) fn sketch_pointer(
             );
             match crate::sketch_edit_tools::mirror_axis(sketch, &selection) {
                 Some(axis) if tool.tool == SketchTool::Mirror => {
-                    crate::sketch_edit_tools::mirror_targets(sketch, axis, &found).into_iter().map(SketchEntity::Curve).collect()
+                    crate::sketch_edit_tools::mirror_targets(sketch, axis, &found)
+                        .into_iter()
+                        .map(SketchEntity::Curve)
+                        .collect()
                 }
                 _ => found,
             }
@@ -1285,7 +1451,12 @@ pub(crate) fn sketch_pointer(
         {
             let want = d.base.pos(p) + (c - d.grab);
             let mut woken = vec![PointRef::Origin];
-            woken.extend(draw.woken.iter().copied().filter(|w| *w != PointRef::Point(p)));
+            woken.extend(
+                draw.woken
+                    .iter()
+                    .copied()
+                    .filter(|w| *w != PointRef::Point(p)),
+            );
             // Not the point itself, its own curves or the points those curves already tie it
             // to (a drop there would collapse the curve).
             let own: Vec<CurveId> = sketch.curves_at(p).collect();
@@ -1391,8 +1562,10 @@ pub(crate) fn sketch_pointer(
         PointRef::Point(p) => snap_sketch.points.contains_key(*p),
         PointRef::Origin => true,
     });
-    draw.woken_curves.retain(|c| snap_sketch.curves.contains_key(*c));
-    draw.woken_mids.retain(|c| snap_sketch.curves.contains_key(*c));
+    draw.woken_curves
+        .retain(|c| snap_sketch.curves.contains_key(*c));
+    draw.woken_mids
+        .retain(|c| snap_sketch.curves.contains_key(*c));
     track_sweep(&mut draw);
     track_sides(&mut draw);
     let dragged = draw.drag.as_ref().map(|d| d.entity);
@@ -1494,7 +1667,11 @@ fn begin(
             };
             let Some((curve, dir)) = sketch
                 .curves_at(pt)
-                .filter(|c| sketch.curve_ends(*c).is_some_and(|(a, b)| a == pt || b == pt))
+                .filter(|c| {
+                    sketch
+                        .curve_ends(*c)
+                        .is_some_and(|(a, b)| a == pt || b == pt)
+                })
                 .find_map(|c| sketch.direction_from(c, pt).map(|d| (c, d)))
             else {
                 draw.pending.clear();
@@ -1534,24 +1711,46 @@ pub(crate) fn finish_spline(
     execute_with(
         commands,
         target,
-        SketchOp::AddSpline { points, periodic: closed, start_tangent: None, end_tangent: None, construction },
+        SketchOp::AddSpline {
+            points,
+            periodic: closed,
+            start_tangent: None,
+            end_tangent: None,
+            construction,
+        },
         specs,
     );
 }
 
 /// [`finish_spline`] from a queued command (Enter or Esc while a spline is being drawn).
 pub(crate) fn finish_spline_world(world: &mut World) {
-    let Some(s) = world.get_resource::<SketchSession>() else { return };
+    let Some(s) = world.get_resource::<SketchSession>() else {
+        return;
+    };
     let target = (s.element, s.feature);
-    let construction = world.get_resource::<ActiveSketchTool>().is_some_and(|t| t.construction);
-    let Some(sketch) = world_sketch(world).cloned() else { return };
+    let construction = world
+        .get_resource::<ActiveSketchTool>()
+        .is_some_and(|t| t.construction);
+    let Some(sketch) = world_sketch(world).cloned() else {
+        return;
+    };
     // Its points may have snapped to part edges.
-    let sketch = world.resource::<ExternalSnap>().get(target.1).map_or(sketch, |(_, e)| e.sketch.clone());
+    let sketch = world
+        .resource::<ExternalSnap>()
+        .get(target.1)
+        .map_or(sketch, |(_, e)| e.sketch.clone());
     let mut draw = std::mem::take(&mut *world.resource_mut::<SketchDraw>());
     let mut queue = bevy::ecs::world::CommandQueue::default();
     {
         let mut commands = Commands::new(&mut queue, world);
-        finish_spline(&mut draw, &mut commands, target, &sketch, construction, false);
+        finish_spline(
+            &mut draw,
+            &mut commands,
+            target,
+            &sketch,
+            construction,
+            false,
+        );
     }
     *world.resource_mut::<SketchDraw>() = draw;
     queue.apply(world);
@@ -1698,11 +1897,7 @@ fn complete(
                 }
             };
             execute_with(commands, target, op, specs);
-            let anchor = if centered {
-                first
-            } else {
-                corners[0]
-            };
+            let anchor = if centered { first } else { corners[0] };
             commands.queue(move |world: &mut World| {
                 let Some(ids) = find_points(world, &corners) else {
                     return;
@@ -1737,7 +1932,8 @@ fn complete(
                 height: hi.y - lo.y,
                 width: hi.x - lo.x,
             };
-            commands.queue(move |world: &mut World| crate::sketch_text::open_text_dialog(world, mode));
+            commands
+                .queue(move |world: &mut World| crate::sketch_text::open_text_dialog(world, mode));
         }
         DrawState::Circle { center } => {
             let r = center.distance(p);
@@ -1955,8 +2151,14 @@ fn complete(
                 open_quick_dims(
                     world,
                     [
-                        QuickDimTarget::AlignedSide { corners, height: false },
-                        QuickDimTarget::AlignedSide { corners, height: true },
+                        QuickDimTarget::AlignedSide {
+                            corners,
+                            height: false,
+                        },
+                        QuickDimTarget::AlignedSide {
+                            corners,
+                            height: true,
+                        },
                     ]
                     .into(),
                 );
@@ -2010,7 +2212,10 @@ fn complete(
             if n < 3 {
                 // A control point: a handle, so no constraints from where it snapped.
                 pts[n] = p;
-                draw.state = DrawState::Bezier { pts, n: n as u8 + 1 };
+                draw.state = DrawState::Bezier {
+                    pts,
+                    n: n as u8 + 1,
+                };
                 return;
             }
             draw.state = DrawState::Idle;
@@ -2026,7 +2231,10 @@ fn complete(
                 specs,
             );
         }
-        DrawState::Ellipse { center, major: None } => {
+        DrawState::Ellipse {
+            center,
+            major: None,
+        } => {
             if center.distance(p) < tiny {
                 return;
             }
@@ -2065,7 +2273,10 @@ fn complete(
                         world,
                         [
                             QuickDimTarget::EllipseRadius { curve, major: true },
-                            QuickDimTarget::EllipseRadius { curve, major: false },
+                            QuickDimTarget::EllipseRadius {
+                                curve,
+                                major: false,
+                            },
                         ]
                         .into(),
                     );
@@ -2208,7 +2419,8 @@ fn open_arc_radius_box(commands: &mut Commands, arc: ArcGeom, from: SVec2) {
         let Some(curve) = find_arc(world, arc) else {
             return;
         };
-        let Some(fixed) = world_sketch(world).and_then(|s| s.point_at(from, cadrs_sketch::MERGE_EPS))
+        let Some(fixed) =
+            world_sketch(world).and_then(|s| s.point_at(from, cadrs_sketch::MERGE_EPS))
         else {
             return;
         };
@@ -2238,8 +2450,8 @@ fn end_tangent_spec(
         })
         .find_map(|c| {
             let leave = sketch.direction_from(c, k)?;
-            let smooth = leave.dot(arrive) > 0.0
-                && arrive.cross(leave).abs() < 25f64.to_radians().sin();
+            let smooth =
+                leave.dot(arrive) > 0.0 && arrive.cross(leave).abs() < 25f64.to_radians().sin();
             smooth.then_some(ConstraintOf::Tangent(
                 CurveSpec::Id(c),
                 CurveSpec::Between(a.start(), a.end()),
@@ -2356,7 +2568,10 @@ pub(crate) fn execute_now(
     op: SketchOp,
 ) {
     // Geometry snapped to part edges uses them (`cadrs_sketch::external`).
-    let op = match world.get_resource::<ExternalSnap>().and_then(|x| x.get(feature)) {
+    let op = match world
+        .get_resource::<ExternalSnap>()
+        .and_then(|x| x.get(feature))
+    {
         Some((base, ext)) => ext.commit(base, op),
         None => op,
     };
@@ -2505,9 +2720,8 @@ fn sketch_edit_keys(
             && starts_value(ch)
         {
             let (e, text) = (open.entity, ch.to_string());
-            commands.queue(move |world: &mut World| {
-                cadrs_ui::quick_dim_start_typing(world, e, &text)
-            });
+            commands
+                .queue(move |world: &mut World| cadrs_ui::quick_dim_start_typing(world, e, &text));
             continue;
         }
         if ctrl {
@@ -2548,9 +2762,7 @@ fn sketch_edit_keys(
                 // A point selected together with its curve goes with the curve; on its own,
                 // deleting a point deletes the curves it holds together.
                 if let Some(sk) = sketch {
-                    points.retain(|p| {
-                        !sk.curves_at(*p).any(|c| curves.contains(&c))
-                    });
+                    points.retain(|p| !sk.curves_at(*p).any(|c| curves.contains(&c)));
                 }
                 selection.0.clear();
                 execute(
@@ -2654,17 +2866,31 @@ pub enum QuickDimTarget {
     Dim(cadrs_sketch::DimensionId),
     /// A line just drawn: its length, keeping `fixed` (the end it started from) in place
     /// (S13.1).
-    LineLength { curve: CurveId, fixed: PointId },
+    LineLength {
+        curve: CurveId,
+        fixed: PointId,
+    },
     /// A tangent arc just drawn: its radius, keeping `fixed` (where it started) and its
     /// direction there.
-    ArcRadius { curve: CurveId, fixed: PointId },
+    ArcRadius {
+        curve: CurveId,
+        fixed: PointId,
+    },
     /// A midpoint line just drawn: its length, about its middle.
-    MidLineLength { curve: CurveId },
+    MidLineLength {
+        curve: CurveId,
+    },
     /// An aligned rectangle's first side (`height` false) or its width square to it
     /// (`corners` in [`cadrs_sketch::entity::aligned_corners`] order).
-    AlignedSide { corners: [PointId; 4], height: bool },
+    AlignedSide {
+        corners: [PointId; 4],
+        height: bool,
+    },
     /// An ellipse's major or minor radius.
-    EllipseRadius { curve: CurveId, major: bool },
+    EllipseRadius {
+        curve: CurveId,
+        major: bool,
+    },
 }
 
 impl QuickDimTarget {
@@ -2766,7 +2992,11 @@ fn open_next(world: &mut World) {
     let passive = target.passive();
     let mut q = world.query_filtered::<Entity, With<ViewportArea>>();
     let viewport = q.iter(world).next();
-    let Some(area) = world.resource::<SketchArea>().host(viewport, world.resource::<ViewportRect>()).0 else {
+    let Some(area) = world
+        .resource::<SketchArea>()
+        .host(viewport, world.resource::<ViewportRect>())
+        .0
+    else {
         return;
     };
     let entity = world
@@ -2792,7 +3022,10 @@ pub fn label_crowded(s: &Sketch, at: SVec2, own: &[CurveId], px_per_mm: f64) -> 
             .windows(2)
             .any(|w| cadrs_sketch::geom::dist_point_segment(at, w[0], w[1]) < near)
     });
-    on_curve || cadrs_sketch::region::regions_shared(s).iter().any(|r| r.contains(at))
+    on_curve
+        || cadrs_sketch::region::regions_shared(s)
+            .iter()
+            .any(|r| r.contains(at))
 }
 
 pub fn current_value(s: &Sketch, target: QuickDimTarget) -> Option<f64> {
@@ -2817,7 +3050,12 @@ pub fn current_value(s: &Sketch, target: QuickDimTarget) -> Option<f64> {
         QuickDimTarget::ArcRadius { curve, .. } => s.arc_geom(curve).map(|g| g.radius),
         QuickDimTarget::AlignedSide { corners, height } => {
             let (i, j) = if height { (1, 2) } else { (0, 1) };
-            Some(s.points.get(corners[i])?.pos.distance(s.points.get(corners[j])?.pos))
+            Some(
+                s.points
+                    .get(corners[i])?
+                    .pos
+                    .distance(s.points.get(corners[j])?.pos),
+            )
         }
         // Whole axes (see `DimensionKind::EllipseRadius`).
         QuickDimTarget::EllipseRadius { curve, major } => {
@@ -2880,7 +3118,11 @@ pub fn quick_dim_anchor(s: &Sketch, map: &ScreenMap, target: QuickDimTarget) -> 
             let (sa, sb) = (map.to_screen(s.pos(a)), map.to_screen(s.pos(b)));
             let d = (sb - sa).normalize_or_zero();
             let n = Vec2::new(d.y, -d.x);
-            let n = if n.y > 0.0 || (n.y.abs() < 1e-6 && n.x > 0.0) { -n } else { n };
+            let n = if n.y > 0.0 || (n.y.abs() < 1e-6 && n.x > 0.0) {
+                -n
+            } else {
+                n
+            };
             Some((sa + sb) / 2.0 + n * 30.0)
         }
         QuickDimTarget::MidLineLength { curve } => {
@@ -2888,7 +3130,11 @@ pub fn quick_dim_anchor(s: &Sketch, map: &ScreenMap, target: QuickDimTarget) -> 
             let (sa, sb) = (map.to_screen(s.pos(a)), map.to_screen(s.pos(b)));
             let d = (sb - sa).normalize_or_zero();
             let n = Vec2::new(d.y, -d.x);
-            let n = if n.y > 0.0 || (n.y.abs() < 1e-6 && n.x > 0.0) { -n } else { n };
+            let n = if n.y > 0.0 || (n.y.abs() < 1e-6 && n.x > 0.0) {
+                -n
+            } else {
+                n
+            };
             Some((sa + sb) / 2.0 + n * 30.0)
         }
         // Beside the side, outside the rectangle.
@@ -3001,7 +3247,9 @@ fn on_quick_dim_commit(
             // Not a length: keep the box open.
             return;
         };
-        if !apply_quick_dim(world, open.target, v) { return; }
+        if !apply_quick_dim(world, open.target, v) {
+            return;
+        }
         let frame = world.resource::<bevy::diagnostic::FrameCount>().0;
         let mut flow = world.resource_mut::<QuickDimFlow>();
         flow.open = None;
@@ -3012,11 +3260,7 @@ fn on_quick_dim_commit(
     });
 }
 
-fn on_quick_dim_cancel(
-    ev: On<QuickDimCancel>,
-    q_parent: Query<&ChildOf>,
-    mut commands: Commands,
-) {
+fn on_quick_dim_cancel(ev: On<QuickDimCancel>, q_parent: Query<&ChildOf>, mut commands: Commands) {
     let Ok(parent) = q_parent.get(ev.entity).map(|c| c.parent()) else {
         return;
     };
@@ -3080,7 +3324,9 @@ fn apply_quick_dim(world: &mut World, target: QuickDimTarget, v: f64) -> bool {
     }
     // The line tool's chain goes on from where that end is now.
     if let Some((p, old)) = moved_end
-        && let Some(new) = world_sketch(world).and_then(|s| s.points.get(p)).map(|p| p.pos)
+        && let Some(new) = world_sketch(world)
+            .and_then(|s| s.points.get(p))
+            .map(|p| p.pos)
     {
         let mut draw = world.resource_mut::<SketchDraw>();
         if let DrawState::Line { start, .. } = &mut draw.state
@@ -3096,7 +3342,12 @@ fn apply_quick_dim(world: &mut World, target: QuickDimTarget, v: f64) -> bool {
 /// fixed number of pixels from the geometry.
 ///
 /// A new dimension's label keeps clear of other geometry where it can (see [`label_crowded`]).
-pub fn quick_dim_op(s: &Sketch, target: QuickDimTarget, v: f64, px_per_mm: f64) -> Option<SketchOp> {
+pub fn quick_dim_op(
+    s: &Sketch,
+    target: QuickDimTarget,
+    v: f64,
+    px_per_mm: f64,
+) -> Option<SketchOp> {
     let pos = |p: PointId| s.points.get(p).map(|p| p.pos);
     match target {
         QuickDimTarget::RectWidth(r) | QuickDimTarget::RectHeight(r) => {
@@ -3138,8 +3389,10 @@ pub fn quick_dim_op(s: &Sketch, target: QuickDimTarget, v: f64, px_per_mm: f64) 
                 r.corners
                     .iter()
                     .zip(&pts)
-                    .find(|(_, p)| (p.x < (pts[0].x + pts[2].x) / 2.0) == want_x_low
-                        && (p.y < (pts[0].y + pts[2].y) / 2.0) == want_y_low)
+                    .find(|(_, p)| {
+                        (p.x < (pts[0].x + pts[2].x) / 2.0) == want_x_low
+                            && (p.y < (pts[0].y + pts[2].y) / 2.0) == want_y_low
+                    })
                     .map(|(id, _)| *id)
             };
             // The width sits about 32 px below the bottom edge and the height about 64 px to
@@ -3147,14 +3400,26 @@ pub fn quick_dim_op(s: &Sketch, target: QuickDimTarget, v: f64, px_per_mm: f64) 
             let gap = if horizontal { 32.0 } else { 64.0 } / px_per_mm;
             // On the other side when other geometry is in the way there (T4 judge: a "50"
             // inside a circle drawn over the rectangle's side).
-            let (lo_x, hi_x) = (pts.iter().map(|p| p.x).fold(f64::MAX, f64::min), pts.iter().map(|p| p.x).fold(f64::MIN, f64::max));
-            let (lo_y, hi_y) = (pts.iter().map(|p| p.y).fold(f64::MAX, f64::min), pts.iter().map(|p| p.y).fold(f64::MIN, f64::max));
-            let own: Vec<CurveId> = r.corners.iter().flat_map(|p| s.curves_at(*p).collect::<Vec<_>>()).collect();
+            let (lo_x, hi_x) = (
+                pts.iter().map(|p| p.x).fold(f64::MAX, f64::min),
+                pts.iter().map(|p| p.x).fold(f64::MIN, f64::max),
+            );
+            let (lo_y, hi_y) = (
+                pts.iter().map(|p| p.y).fold(f64::MAX, f64::min),
+                pts.iter().map(|p| p.y).fold(f64::MIN, f64::max),
+            );
+            let own: Vec<CurveId> = r
+                .corners
+                .iter()
+                .flat_map(|p| s.curves_at(*p).collect::<Vec<_>>())
+                .collect();
             let (kind, offset) = if horizontal {
                 let (a, b) = (at(true, true)?, at(false, true)?);
                 let below = SVec2::new((lo_x + hi_x) / 2.0, lo_y - gap);
                 let above = SVec2::new((lo_x + hi_x) / 2.0, hi_y + gap);
-                if label_crowded(s, below, &own, px_per_mm) && !label_crowded(s, above, &own, px_per_mm) {
+                if label_crowded(s, below, &own, px_per_mm)
+                    && !label_crowded(s, above, &own, px_per_mm)
+                {
                     // Measured from the bottom corners: up past the top.
                     (DimensionKind::Horizontal { a, b }, (hi_y - lo_y) + gap)
                 } else {
@@ -3164,7 +3429,9 @@ pub fn quick_dim_op(s: &Sketch, target: QuickDimTarget, v: f64, px_per_mm: f64) 
                 let (a, b) = (at(false, true)?, at(false, false)?);
                 let right = SVec2::new(hi_x + gap, (lo_y + hi_y) / 2.0);
                 let left = SVec2::new(lo_x - gap, (lo_y + hi_y) / 2.0);
-                if label_crowded(s, right, &own, px_per_mm) && !label_crowded(s, left, &own, px_per_mm) {
+                if label_crowded(s, right, &own, px_per_mm)
+                    && !label_crowded(s, left, &own, px_per_mm)
+                {
                     (DimensionKind::Vertical { a, b }, -((hi_x - lo_x) + gap))
                 } else {
                     (DimensionKind::Vertical { a, b }, gap)
@@ -3182,38 +3449,45 @@ pub fn quick_dim_op(s: &Sketch, target: QuickDimTarget, v: f64, px_per_mm: f64) 
                 radii: vec![],
             })
         }
-        QuickDimTarget::Diameter(c) => Some(SketchOp::SetDimension {
-            dimension: Dimension {
-                kind: DimensionKind::Diameter { curve: c },
-                value: v,
-                // A polygon's circle: down and right, where its box was. Otherwise up and right,
-                // or the next diagonal clear of other geometry.
-                offset: if s
-                    .dimensions
-                    .values()
-                    .any(|d| matches!(d.kind, DimensionKind::Sides { circle, .. } if circle == c))
-                {
-                    -std::f64::consts::FRAC_PI_4
-                } else {
-                    use std::f64::consts::FRAC_PI_4 as Q;
-                    match s.curves.get(c).map(|k| k.kind) {
-                        Some(CurveKind::Circle { center, .. }) => {
-                            let o = pos(center)?;
-                            let reach = v / 2.0 + 24.0 / px_per_mm;
-                            [Q, 3.0 * Q, -Q, -3.0 * Q]
-                                .into_iter()
-                                .find(|a| !label_crowded(s, o + SVec2::from_angle(*a) * reach, &[c], px_per_mm))
-                                .unwrap_or(Q)
+        QuickDimTarget::Diameter(c) => {
+            Some(SketchOp::SetDimension {
+                dimension: Dimension {
+                    kind: DimensionKind::Diameter { curve: c },
+                    value: v,
+                    // A polygon's circle: down and right, where its box was. Otherwise up and right,
+                    // or the next diagonal clear of other geometry.
+                    offset: if s.dimensions.values().any(
+                        |d| matches!(d.kind, DimensionKind::Sides { circle, .. } if circle == c),
+                    ) {
+                        -std::f64::consts::FRAC_PI_4
+                    } else {
+                        use std::f64::consts::FRAC_PI_4 as Q;
+                        match s.curves.get(c).map(|k| k.kind) {
+                            Some(CurveKind::Circle { center, .. }) => {
+                                let o = pos(center)?;
+                                let reach = v / 2.0 + 24.0 / px_per_mm;
+                                [Q, 3.0 * Q, -Q, -3.0 * Q]
+                                    .into_iter()
+                                    .find(|a| {
+                                        !label_crowded(
+                                            s,
+                                            o + SVec2::from_angle(*a) * reach,
+                                            &[c],
+                                            px_per_mm,
+                                        )
+                                    })
+                                    .unwrap_or(Q)
+                            }
+                            _ => Q,
                         }
-                        _ => Q,
-                    }
+                    },
+                    along: 0.0,
+                    driven: false,
                 },
-                along: 0.0,
-                driven: false,
-            },
-            moves: vec![],
-            radii: vec![(c, v / 2.0)],
-        }),
+                moves: vec![],
+                radii: vec![(c, v / 2.0)],
+            })
+        }
         QuickDimTarget::Radius(c) => {
             let CurveKind::Arc { center, start, end } = s.curves.get(c)?.kind else {
                 return None;
@@ -3249,7 +3523,11 @@ pub fn quick_dim_op(s: &Sketch, target: QuickDimTarget, v: f64, px_per_mm: f64) 
             // from the line (`dimension/sketchdims-linedim.png`).
             let u = (o - f).normalize();
             let n = -u.perp();
-            let side = if n.y.abs() > 1e-6 { n.y.signum() } else { -n.x.signum() };
+            let side = if n.y.abs() > 1e-6 {
+                n.y.signum()
+            } else {
+                -n.x.signum()
+            };
             Some(SketchOp::SetDimension {
                 dimension: Dimension {
                     kind: DimensionKind::Aligned { a: fixed, b: other },
@@ -3272,7 +3550,11 @@ pub fn quick_dim_op(s: &Sketch, target: QuickDimTarget, v: f64, px_per_mm: f64) 
             let m = pa.midpoint(pb);
             let u = (pb - pa).normalize();
             let n = -u.perp();
-            let side = if n.y.abs() > 1e-6 { n.y.signum() } else { -n.x.signum() };
+            let side = if n.y.abs() > 1e-6 {
+                n.y.signum()
+            } else {
+                -n.x.signum()
+            };
             Some(SketchOp::SetDimension {
                 dimension: Dimension {
                     kind: DimensionKind::Aligned { a, b },
@@ -3300,7 +3582,11 @@ pub fn quick_dim_op(s: &Sketch, target: QuickDimTarget, v: f64, px_per_mm: f64) 
             // Outside the rectangle, 28 px off the side.
             let center = (pts[0] + pts[2]) * 0.5;
             let n = -u.perp();
-            let side = if n.dot(pts[i].midpoint(pts[j]) - center) >= 0.0 { 1.0 } else { -1.0 };
+            let side = if n.dot(pts[i].midpoint(pts[j]) - center) >= 0.0 {
+                1.0
+            } else {
+                -1.0
+            };
             Some(SketchOp::SetDimension {
                 dimension: Dimension {
                     kind: DimensionKind::Aligned {
@@ -3401,16 +3687,34 @@ mod tests {
     fn screen_map_follows_perspective() {
         let rect = ViewportRect(Rect::new(0.0, 0.0, 1200.0, 800.0));
         for perspective in [false, true] {
-            let view = crate::camera::ViewState { perspective, focus: Vec3::new(5.0, -3.0, 2.0), ..Default::default() };
+            let view = crate::camera::ViewState {
+                perspective,
+                focus: Vec3::new(5.0, -3.0, 2.0),
+                ..Default::default()
+            };
             for plane in [PlaneRef::Top, PlaneRef::Front, PlaneRef::Right] {
                 let map = ScreenMap::new(plane, &view, &rect);
-                for p in [SVec2::new(0.0, 0.0), SVec2::new(80.0, -40.0), SVec2::new(-60.0, 90.0)] {
+                for p in [
+                    SVec2::new(0.0, 0.0),
+                    SVec2::new(80.0, -40.0),
+                    SVec2::new(-60.0, 90.0),
+                ] {
                     let q = plane.frame().to_world(p);
-                    let want = rect.to_screen(view.project(Vec3::new(q[0] as f32, q[1] as f32, q[2] as f32)));
+                    let want = rect.to_screen(view.project(Vec3::new(
+                        q[0] as f32,
+                        q[1] as f32,
+                        q[2] as f32,
+                    )));
                     let got = map.to_screen(p);
-                    assert!(got.distance(want) < 1e-2, "{perspective} {plane:?} {p:?}: {got} vs {want}");
+                    assert!(
+                        got.distance(want) < 1e-2,
+                        "{perspective} {plane:?} {p:?}: {got} vs {want}"
+                    );
                     let back = map.to_sketch(got).unwrap();
-                    assert!((back - p).length() < 1e-2, "{perspective} {plane:?}: {back:?} vs {p:?}");
+                    assert!(
+                        (back - p).length() < 1e-2,
+                        "{perspective} {plane:?}: {back:?} vs {p:?}"
+                    );
                 }
             }
         }
@@ -3449,16 +3753,27 @@ mod tests {
             .apply(&mut s)
             .unwrap();
         let xs: Vec<f64> = r.corners.iter().map(|p| s.pos(*p).x).collect();
-        assert!(xs.iter().all(|x| (*x - 0.0).abs() < 1e-9 || (*x - 10.0).abs() < 1e-9));
+        assert!(
+            xs.iter()
+                .all(|x| (*x - 0.0).abs() < 1e-9 || (*x - 10.0).abs() < 1e-9)
+        );
     }
 
     #[test]
     fn a_double_click_is_quick_and_in_place() {
         // S3.1: double-clicking the last point ends a chain.
         let p = Vec2::new(500.0, 300.0);
-        assert!(is_double_click(Some((p, 1.0)), p + Vec2::new(2.0, 1.0), 1.3));
+        assert!(is_double_click(
+            Some((p, 1.0)),
+            p + Vec2::new(2.0, 1.0),
+            1.3
+        ));
         assert!(!is_double_click(Some((p, 1.0)), p, 1.6));
-        assert!(!is_double_click(Some((p, 1.0)), p + Vec2::new(20.0, 0.0), 1.1));
+        assert!(!is_double_click(
+            Some((p, 1.0)),
+            p + Vec2::new(20.0, 0.0),
+            1.1
+        ));
         assert!(!is_double_click(None, p, 1.0));
     }
 
@@ -3490,7 +3805,10 @@ mod tests {
         let t = QuickDimTarget::LineLength { curve, fixed };
         assert!(t.passive());
         assert!((current_value(&s, t).unwrap() - 5.0).abs() < 1e-9);
-        quick_dim_op(&s, t, 20.0, 4.0).unwrap().apply(&mut s).unwrap();
+        quick_dim_op(&s, t, 20.0, 4.0)
+            .unwrap()
+            .apply(&mut s)
+            .unwrap();
         assert!(s.pos(fixed).distance(SVec2::new(5.0, 5.0)) < 1e-9);
         assert!(s.pos(other).distance(SVec2::new(17.0, 21.0)) < 1e-6);
         assert!(s.dimensions.values().any(|d| matches!(
@@ -3505,7 +3823,10 @@ mod tests {
         let fixed = s.point_at(SVec2::ZERO, 1e-9).unwrap();
         let t = QuickDimTarget::ArcRadius { curve, fixed };
         assert!((current_value(&s, t).unwrap() - 10.0).abs() < 1e-6);
-        quick_dim_op(&s, t, 25.0, 4.0).unwrap().apply(&mut s).unwrap();
+        quick_dim_op(&s, t, 25.0, 4.0)
+            .unwrap()
+            .apply(&mut s)
+            .unwrap();
         let g = s.arc_geom(curve).unwrap();
         assert!((g.radius - 25.0).abs() < 1e-6);
         assert!(s.pos(fixed).distance(SVec2::ZERO) < 1e-9);
@@ -3546,7 +3867,8 @@ mod tests {
     fn entity_quick_dims() {
         // A midpoint line's length keeps its middle.
         let mut s = Sketch::new();
-        let (a, b) = cadrs_sketch::entity::midpoint_line(SVec2::new(5.0, 5.0), SVec2::new(8.0, 9.0));
+        let (a, b) =
+            cadrs_sketch::entity::midpoint_line(SVec2::new(5.0, 5.0), SVec2::new(8.0, 9.0));
         SketchOp::AddPolyline {
             points: vec![a, b],
             closed: false,
@@ -3558,7 +3880,10 @@ mod tests {
         let curve = s.curves.keys().next().unwrap();
         let t = QuickDimTarget::MidLineLength { curve };
         assert!((current_value(&s, t).unwrap() - 10.0).abs() < 1e-9);
-        quick_dim_op(&s, t, 30.0, 4.0).unwrap().apply(&mut s).unwrap();
+        quick_dim_op(&s, t, 30.0, 4.0)
+            .unwrap()
+            .apply(&mut s)
+            .unwrap();
         let (pa, pb) = s.curve_ends(curve).unwrap();
         assert!(s.pos(pa).midpoint(s.pos(pb)).distance(SVec2::new(5.0, 5.0)) < 1e-9);
         assert!((s.line_length(curve).unwrap() - 30.0).abs() < 1e-9);

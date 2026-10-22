@@ -16,9 +16,9 @@
 //! - **SM14.3**: an ordinary Extrude of a flat-pattern sketch fails with Onshape's
 //!   [`MODEL_SPACE`] message.
 
+use cadrs_sheetmetal::Model;
 use cadrs_sheetmetal::flat::FlatPart;
 use cadrs_sheetmetal::model::Surface;
-use cadrs_sheetmetal::Model;
 use cadrs_sketch::projection::Projected;
 use cadrs_sketch::{PlaneFrame, PlaneRef, Vec2};
 use serde::{Deserialize, Serialize};
@@ -28,7 +28,8 @@ use crate::ids::FeatureId;
 
 /// Why an ordinary Extrude can't use a flat-pattern sketch (SM14.3; Onshape's words,
 /// `help/feature-tools/extrude2_3dmodel_warning.png`).
-pub const MODEL_SPACE: &str = "Feature defined in model space can not reference sheet metal flat geometry";
+pub const MODEL_SPACE: &str =
+    "Feature defined in model space can not reference sheet metal flat geometry";
 
 /// How many flat-pattern parts of one model get a plane.
 pub const MAX_PARTS: usize = 64;
@@ -50,7 +51,11 @@ pub fn flat_target(features: &[Feature], plane: uuid::Uuid) -> Option<(FeatureId
     features
         .iter()
         .filter(|f| matches!(f.kind, FeatureKind::SheetMetalModel(_)))
-        .find_map(|f| (0..MAX_PARTS).find(|k| flat_plane_id(f.id, *k) == plane).map(|k| (f.id, k)))
+        .find_map(|f| {
+            (0..MAX_PARTS)
+                .find(|k| flat_plane_id(f.id, *k) == plane)
+                .map(|k| (f.id, k))
+        })
 }
 
 /// The model and flat part a sketch lies on, if it is a flat-pattern sketch.
@@ -64,7 +69,9 @@ pub fn sketch_target(features: &[Feature], sketch: FeatureId) -> Option<(Feature
 
 /// Whether any of `sketches` is a flat-pattern sketch (SM14.3).
 pub fn on_flat(features: &[Feature], sketches: &[FeatureId]) -> bool {
-    sketches.iter().any(|s| sketch_target(features, *s).is_some())
+    sketches
+        .iter()
+        .any(|s| sketch_target(features, *s).is_some())
 }
 
 /// The flat pattern plane of `part` in 3D: on its anchor wall (its first), with the flat's 2D
@@ -75,10 +82,19 @@ pub fn flat_frame(model: &Model, part: &FlatPart) -> Option<PlaneFrame> {
     let wall = model.wall(anchor)?;
     let pm = part.placement(anchor)?;
     let Surface::Planar { origin, u, v } = wall.surface else {
-        let w = model.walls.iter().find(|w| matches!(w.surface, Surface::Planar { .. }))?;
-        let Surface::Planar { origin, u, v } = w.surface else { return None };
+        let w = model
+            .walls
+            .iter()
+            .find(|w| matches!(w.surface, Surface::Planar { .. }))?;
+        let Surface::Planar { origin, u, v } = w.surface else {
+            return None;
+        };
         let (u, v) = (u.normalize(), v.normalize());
-        return Some(PlaneFrame { origin: [origin.x, origin.y, origin.z], u: [u.x, u.y, u.z], v: [v.x, v.y, v.z] });
+        return Some(PlaneFrame {
+            origin: [origin.x, origin.y, origin.z],
+            u: [u.x, u.y, u.z],
+            v: [v.x, v.y, v.z],
+        });
     };
     let inv = pm.inverse()?;
     // 3D of a flat point p: origin + [u v] · inv(p).
@@ -86,7 +102,11 @@ pub fn flat_frame(model: &Model, part: &FlatPart) -> Option<PlaneFrame> {
     let o = origin + to3(inv.t);
     let fu = to3(inv.m.column(0).into_owned()).normalize();
     let fv = to3(inv.m.column(1).into_owned()).normalize();
-    Some(PlaneFrame { origin: [o.x, o.y, o.z], u: [fu.x, fu.y, fu.z], v: [fv.x, fv.y, fv.z] })
+    Some(PlaneFrame {
+        origin: [o.x, o.y, o.z],
+        u: [fu.x, fu.y, fu.z],
+        v: [fv.x, fv.y, fv.z],
+    })
 }
 
 /// The lines of a flat-pattern part a sketch on it can use (snap to, constrain and dimension
@@ -94,7 +114,11 @@ pub fn flat_frame(model: &Model, part: &FlatPart) -> Option<PlaneFrame> {
 /// cut-outs (`None`), in the flat's coordinates.
 pub fn flat_lines(part: &FlatPart) -> Vec<((Vec2, Vec2), Option<u32>)> {
     let v = |p: cadrs_sheetmetal::poly::P2| Vec2::new(p.x, p.y);
-    let mut out: Vec<((Vec2, Vec2), Option<u32>)> = part.bends.iter().map(|b| ((v(b.center.a), v(b.center.b)), Some(b.joint.0))).collect();
+    let mut out: Vec<((Vec2, Vec2), Option<u32>)> = part
+        .bends
+        .iter()
+        .map(|b| ((v(b.center.a), v(b.center.b)), Some(b.joint.0)))
+        .collect();
     for poly in &part.outline {
         for ring in std::iter::once(&poly.outer).chain(&poly.holes) {
             for (i, a) in ring.iter().enumerate() {
@@ -111,7 +135,13 @@ pub fn flat_lines(part: &FlatPart) -> Vec<((Vec2, Vec2), Option<u32>)> {
 /// Where a flat pattern line a sketch on the flat uses ([`cadrs_sketch::Link::FlatLine`]) lies
 /// now: the bend's centre line, or the outline edge nearest `at` (points of the used curve as
 /// it was). `None` when the model, part or bend is gone.
-pub fn flat_line(contexts: &[crate::sheetmetal::SheetMetalContext], model: FeatureId, part: usize, bend: Option<u32>, at: &[Vec2]) -> Option<Projected> {
+pub fn flat_line(
+    contexts: &[crate::sheetmetal::SheetMetalContext],
+    model: FeatureId,
+    part: usize,
+    bend: Option<u32>,
+    at: &[Vec2],
+) -> Option<Projected> {
     let ctx = contexts.iter().rev().find(|c| c.feature == model)?;
     let flat = ctx.flat.parts.get(part)?;
     let lines = flat_lines(flat);
@@ -121,7 +151,11 @@ pub fn flat_line(contexts: &[crate::sheetmetal::SheetMetalContext], model: Featu
             .into_iter()
             .filter(|(_, k)| k.is_none())
             .min_by(|x, y| {
-                let far = |(a, b): (Vec2, Vec2)| at.iter().map(|p| cadrs_sketch::geom::dist_point_segment(*p, a, b)).fold(0.0, f64::max);
+                let far = |(a, b): (Vec2, Vec2)| {
+                    at.iter()
+                        .map(|p| cadrs_sketch::geom::dist_point_segment(*p, a, b))
+                        .fold(0.0, f64::max)
+                };
                 far(x.0).total_cmp(&far(y.0))
             })?,
     };
@@ -149,13 +183,19 @@ impl FlatExtrudeFeature {
     }
 
     pub fn problem(&self) -> Option<&'static str> {
-        self.is_empty().then_some("Select faces or sketch regions to extrude")
+        self.is_empty()
+            .then_some("Select faces or sketch regions to extrude")
     }
 
     /// The sketches its regions come from.
     pub fn sketch_ids(&self) -> Vec<FeatureId> {
         let mut v: Vec<FeatureId> = Vec::new();
-        for s in self.regions.iter().map(|r| r.sketch).chain(self.sketches.iter().copied()) {
+        for s in self
+            .regions
+            .iter()
+            .map(|r| r.sketch)
+            .chain(self.sketches.iter().copied())
+        {
             if !v.contains(&s) {
                 v.push(s);
             }
@@ -187,7 +227,10 @@ mod tests {
             kind: FeatureKind::SheetMetalModel(Default::default()),
             suppress_by: None,
         };
-        assert_eq!(flat_target(std::slice::from_ref(&f), flat_plane_id(m, 3)), Some((m, 3)));
+        assert_eq!(
+            flat_target(std::slice::from_ref(&f), flat_plane_id(m, 3)),
+            Some((m, 3))
+        );
         assert_eq!(flat_target(&[f], uuid::Uuid::new_v4()), None);
     }
 
@@ -206,7 +249,12 @@ mod tests {
             let at = part.placement(w.id).unwrap().apply(q);
             let mine = cadrs_sketch::PlaneFrame::to_world(&f, cadrs_sketch::Vec2::new(at.x, at.y));
             let want = w.surface.point(q);
-            assert!((mine[0] - want.x).abs() < 1e-9 && (mine[1] - want.y).abs() < 1e-9 && (mine[2] - want.z).abs() < 1e-9, "{flip}: {mine:?} {want:?}");
+            assert!(
+                (mine[0] - want.x).abs() < 1e-9
+                    && (mine[1] - want.y).abs() < 1e-9
+                    && (mine[2] - want.z).abs() < 1e-9,
+                "{flip}: {mine:?} {want:?}"
+            );
         }
     }
 }

@@ -18,7 +18,10 @@ pub struct DocStudio {
 impl DocStudio {
     pub fn new(doc: Document) -> Self {
         // The import is replayed from scratch each time: no need to keep undo steps around.
-        Self { doc, history: History::new(1) }
+        Self {
+            doc,
+            history: History::new(1),
+        }
     }
 }
 

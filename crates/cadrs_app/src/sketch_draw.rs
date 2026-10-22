@@ -31,16 +31,13 @@ use bevy::prelude::*;
 use bevy::text::FontWeight;
 use bevy::ui::UiTransform;
 use cadrs_core::{ElementKind, FeatureId};
-use cadrs_sketch::geom::{arc_through, tangent_arc};
 use cadrs_sketch::geom::segment_hits_box;
+use cadrs_sketch::geom::{arc_through, tangent_arc};
 use cadrs_sketch::hit::curve_polyline;
-use cadrs_sketch::units::Units;
 use cadrs_sketch::infer::{Guide, Kind};
-use cadrs_sketch::{
-    ArcGeom, CurveRef, PlaneFrame, PlaneRef, PointRef, Sketch,
-    SketchEntity,
-};
 use cadrs_sketch::solve::Status;
+use cadrs_sketch::units::Units;
+use cadrs_sketch::{ArcGeom, CurveRef, PlaneFrame, PlaneRef, PointRef, Sketch, SketchEntity};
 use cadrs_ui::Theme;
 
 use crate::sketch::{ActiveSketchTool, SketchSession, SketchViewSettings};
@@ -50,8 +47,8 @@ use crate::sketch_glyphs::{
 };
 use crate::sketch_tools::{
     DrawState, QuickDimFlow, QuickDimTarget, SVec2, ScreenMap, SketchDraw, SketchHover,
-    SketchScreen, SketchSelection, current_value, places_points, quick_dim_anchor,
-    rect_corners, session_sketch,
+    SketchScreen, SketchSelection, current_value, places_points, quick_dim_anchor, rect_corners,
+    session_sketch,
 };
 use crate::viewport::{OVERLAY_LAYER, ViewportArea, ViewportRect, ViewportView};
 use crate::{ActiveDocument, AppState};
@@ -83,7 +80,12 @@ impl Plugin for SketchDrawPlugin {
             .add_systems(Startup, configure_gizmos)
             .add_systems(
                 Update,
-                (sync_gizmo_layers, draw_sketches, sync_fills, draw_list_hovered_sketch)
+                (
+                    sync_gizmo_layers,
+                    draw_sketches,
+                    sync_fills,
+                    draw_list_hovered_sketch,
+                )
                     .chain()
                     .in_set(SketchDrawSet)
                     .after(crate::sketch_tools::SketchToolsSet)
@@ -115,10 +117,17 @@ fn draw_list_hovered_sketch(
     };
     // The sketch being edited draws itself; a sketch on a flat pattern isn't in 3D, and while
     // one is edited these gizmos draw in the flat view.
-    if session.as_ref().is_some_and(|s| s.feature == id) || parts.flat_sketches.contains(&id) || area.flat.is_some() {
+    if session.as_ref().is_some_and(|s| s.feature == id)
+        || parts.flat_sketches.contains(&id)
+        || area.flat.is_some()
+    {
         return;
     }
-    let Some(f) = doc.as_ref().and_then(|d| d.active_element()).and_then(|el| el.feature(id)) else {
+    let Some(f) = doc
+        .as_ref()
+        .and_then(|d| d.active_element())
+        .and_then(|el| el.feature(id))
+    else {
         return;
     };
     let Some(sk) = f.sketch() else { return };
@@ -126,7 +135,12 @@ fn draw_list_hovered_sketch(
     let frame = plane.frame();
     let color = crate::parts::EDGE_HOVER;
     for c in sk.geometry.curves.keys() {
-        g.linestrip(curve_polyline(&sk.geometry, c).into_iter().map(|p| world_exact(&frame, p)), color);
+        g.linestrip(
+            curve_polyline(&sk.geometry, c)
+                .into_iter()
+                .map(|p| world_exact(&frame, p)),
+            color,
+        );
     }
     for t in sk.geometry.texts.keys() {
         for mut c in cadrs_sketch::text::outlines(&sk.geometry, t) {
@@ -298,12 +312,16 @@ fn configure_gizmos(mut store: ResMut<GizmoConfigStore>) {
     accepted_dots.depth_bias = -1.0;
     accepted_dots.render_layers = RenderLayers::layer(crate::viewport::OCCLUDED_LAYER);
     set(1.3, store.config_mut::<SketchHiddenGizmos>().0);
-    store.config_mut::<SketchHiddenGizmos>().0.render_layers = RenderLayers::layer(crate::viewport::OCCLUDED_LAYER);
+    store.config_mut::<SketchHiddenGizmos>().0.render_layers =
+        RenderLayers::layer(crate::viewport::OCCLUDED_LAYER);
 }
 
 /// The edited sketch's gizmos draw in the flat view while a sketch on a flat pattern is edited
 /// there (P3I.6), else over the 3D view.
-fn sync_gizmo_layers(area: Res<crate::sketch_tools::SketchArea>, mut store: ResMut<GizmoConfigStore>) {
+fn sync_gizmo_layers(
+    area: Res<crate::sketch_tools::SketchArea>,
+    mut store: ResMut<GizmoConfigStore>,
+) {
     let want = match area.flat {
         Some(_) => RenderLayers::layer(crate::sheetmetal_table::FLAT_LAYER),
         None => RenderLayers::layer(OVERLAY_LAYER),
@@ -379,7 +397,13 @@ fn visible_runs(pts: &[SVec2], map: &ScreenMap, clip: Rect) -> Vec<Vec<SVec2>> {
             cur.clear();
             continue;
         };
-        let at = |t: f32, end: SVec2| if t <= 0.0 || t >= 1.0 { end } else { map.to_sketch(a.lerp(b, t)).unwrap_or(end) };
+        let at = |t: f32, end: SVec2| {
+            if t <= 0.0 || t >= 1.0 {
+                end
+            } else {
+                map.to_sketch(a.lerp(b, t)).unwrap_or(end)
+            }
+        };
         if t0 > 0.0 || cur.is_empty() {
             if cur.len() > 1 {
                 runs.push(std::mem::take(&mut cur));
@@ -401,7 +425,12 @@ fn visible_runs(pts: &[SVec2], map: &ScreenMap, clip: Rect) -> Vec<Vec<SVec2>> {
 fn clip_segment(a: Vec2, b: Vec2, clip: Rect) -> Option<(f32, f32)> {
     let d = b - a;
     let (mut t0, mut t1) = (0.0f32, 1.0f32);
-    for (p, q) in [(-d.x, a.x - clip.min.x), (d.x, clip.max.x - a.x), (-d.y, a.y - clip.min.y), (d.y, clip.max.y - a.y)] {
+    for (p, q) in [
+        (-d.x, a.x - clip.min.x),
+        (d.x, clip.max.x - a.x),
+        (-d.y, a.y - clip.min.y),
+        (d.y, clip.max.y - a.y),
+    ] {
         if p == 0.0 {
             if q < 0.0 {
                 return None;
@@ -479,7 +508,14 @@ fn stroke<C: GizmoConfigGroup>(
     }
 }
 
-fn dot<C: GizmoConfigGroup>(g: &mut Gizmos<C>, frame: &PlaneFrame, p: SVec2, px: f32, px_per_mm: f32, color: Color) {
+fn dot<C: GizmoConfigGroup>(
+    g: &mut Gizmos<C>,
+    frame: &PlaneFrame,
+    p: SVec2,
+    px: f32,
+    px_per_mm: f32,
+    color: Color,
+) {
     let n = frame.normal();
     let rot = Quat::from_rotation_arc(Vec3::Z, Vec3::new(n[0] as f32, n[1] as f32, n[2] as f32));
     g.circle(Isometry3d::new(world(frame, p), rot), px / px_per_mm, color)
@@ -560,7 +596,19 @@ fn draw_sketches(
     ),
     mut labels: ResMut<SketchLabels>,
     area: Res<crate::sketch_tools::SketchArea>,
-    (parts, units, keys, mut held, entity_tools, picked_features, modify, sketch_errors, text_editing, shown_dims, external): (
+    (
+        parts,
+        units,
+        keys,
+        mut held,
+        entity_tools,
+        picked_features,
+        modify,
+        sketch_errors,
+        text_editing,
+        shown_dims,
+        external,
+    ): (
         Res<crate::parts::PartCache>,
         Res<crate::WorkspaceUnits>,
         Res<ButtonInput<KeyCode>>,
@@ -573,8 +621,22 @@ fn draw_sketches(
         Res<crate::feature_menu::ShownDimensions>,
         Res<crate::sketch_tools::ExternalSnap>,
     ),
-    (section, plane_highlight): (Res<crate::section_view::SectionClip>, Res<crate::viewport::PlaneHighlight>),
-    (mut lines, mut thin, mut rubber_g, mut hover_g, mut dots, mut accepted, mut rings, mut wide_g, mut accepted_dots, mut hidden): (
+    (section, plane_highlight): (
+        Res<crate::section_view::SectionClip>,
+        Res<crate::viewport::PlaneHighlight>,
+    ),
+    (
+        mut lines,
+        mut thin,
+        mut rubber_g,
+        mut hover_g,
+        mut dots,
+        mut accepted,
+        mut rings,
+        mut wide_g,
+        mut accepted_dots,
+        mut hidden,
+    ): (
         Gizmos<SketchLineGizmos>,
         Gizmos<SketchThinGizmos>,
         Gizmos<SketchRubberGizmos>,
@@ -618,11 +680,18 @@ fn draw_sketches(
         let Some(plane) = sk.plane else { continue };
         // Sketches an extrude used are hidden (`screens/24`); sketches on a flat pattern are
         // drawn in the flat view (P3I.6).
-        if Some(f.id) == editing || parts.hidden_sketches.contains(&f.id) || parts.rolled_back_sketches.contains(&f.id) || parts.flat_sketches.contains(&f.id) {
+        if Some(f.id) == editing
+            || parts.hidden_sketches.contains(&f.id)
+            || parts.rolled_back_sketches.contains(&f.id)
+            || parts.flat_sketches.contains(&f.id)
+        {
             continue;
         }
         // P3E.3a: a sketch on the side a section view removes is not drawn.
-        if section.plane.is_some_and(|clip| crate::section_view::plane_removed(&plane.frame(), clip)) {
+        if section
+            .plane
+            .is_some_and(|clip| crate::section_view::plane_removed(&plane.frame(), clip))
+        {
             continue;
         }
         let map = ScreenMap::new(plane, &view.view, &rect);
@@ -643,24 +712,61 @@ fn draw_sketches(
             for (i, r) in sr.regions.iter().enumerate() {
                 let pick = crate::viewport::Pick::Region(f.id, i as u32);
                 if plane_highlight.is_hovered(pick) || picked_features.contains(pick) {
-                    outlined.extend(r.curves.iter().chain(r.hole_curves.iter().flatten()).copied());
+                    outlined.extend(
+                        r.curves
+                            .iter()
+                            .chain(r.hole_curves.iter().flatten())
+                            .copied(),
+                    );
                 }
             }
         }
         // A hovered or selected curve is drawn orange over everything too.
         let outlined = |c: cadrs_sketch::CurveId| {
             let pick = crate::viewport::Pick::SketchCurve(f.id, c);
-            outlined.contains(&c) || plane_highlight.is_hovered(pick) || picked_features.contains(pick)
+            outlined.contains(&c)
+                || plane_highlight.is_hovered(pick)
+                || picked_features.contains(pick)
         };
-        draw_accepted(&sk.geometry, plane, &map, rect.0, &skip, (whole, error, color, &curve_color, &outlined), &mut accepted, &mut accepted_dots, &mut hidden);
+        draw_accepted(
+            &sk.geometry,
+            plane,
+            &map,
+            rect.0,
+            &skip,
+            (whole, error, color, &curve_color, &outlined),
+            &mut accepted,
+            &mut accepted_dots,
+            &mut hidden,
+        );
         // P3D.1 (IR5.5): the feature menu's Show dimensions.
         if shown_dims.0.contains(&f.id) {
             let knock = |_: SVec2| knockout(false);
             for (k, d) in &sk.geometry.dimensions {
                 let d = shown_dimension(&sk.geometry, k, d, None);
-                let text = crate::sketch_dimension::dimension_text_of(&sk.geometry, k, &d, false, &units.0, false);
-                let style = if d.driven { DimStyle::driven() } else { DimStyle::normal() };
-                draw_dimension(&sk.geometry, &map, &d, text, style, &knock, &mut thin, &mut out);
+                let text = crate::sketch_dimension::dimension_text_of(
+                    &sk.geometry,
+                    k,
+                    &d,
+                    false,
+                    &units.0,
+                    false,
+                );
+                let style = if d.driven {
+                    DimStyle::driven()
+                } else {
+                    DimStyle::normal()
+                };
+                draw_dimension(
+                    &sk.geometry,
+                    &map,
+                    &d,
+                    text,
+                    style,
+                    &knock,
+                    &mut thin,
+                    &mut out,
+                );
             }
         }
     }
@@ -756,14 +862,18 @@ fn draw_sketches(
             CurveRef::Curve(_) => None,
         };
         for r in &hot {
-            let Some((a, b)) = axis_ends(*r) else { continue };
+            let Some((a, b)) = axis_ends(*r) else {
+                continue;
+            };
             unnudged(|| {
                 hover_g.line(world(&frame, a), world(&frame, b), hover_band());
                 lines.line(world(&frame, a), world(&frame, b), hover_core());
             });
         }
         for r in selection.0.iter().filter_map(|e| e.axis()) {
-            let Some((a, b)) = axis_ends(r).filter(|_| !hot.contains(&r)) else { continue };
+            let Some((a, b)) = axis_ends(r).filter(|_| !hot.contains(&r)) else {
+                continue;
+            };
             unnudged(|| lines.line(world(&frame, a), world(&frame, b), selected()));
         }
         // Snapped part edges in the sketch plane (they aren't sketch curves), and the ones the
@@ -780,9 +890,17 @@ fn draw_sketches(
                     });
                 }
             }
-            let dim_entities = hover.0.into_iter().map(|e| (e, false)).chain(dim_tool.picks.iter().map(|e| (*e, true)));
+            let dim_entities = hover
+                .0
+                .into_iter()
+                .map(|e| (e, false))
+                .chain(dim_tool.picks.iter().map(|e| (*e, true)));
             for (e, picked) in dim_entities {
-                let (band, core) = if picked { (picked_band(), picked_core()) } else { (hover_band(), hover_core()) };
+                let (band, core) = if picked {
+                    (picked_band(), picked_core())
+                } else {
+                    (hover_band(), hover_core())
+                };
                 match e {
                     SketchEntity::Curve(k) if ext.is_edge(k) => {
                         let pts = curve_polyline(&ext.sketch, k);
@@ -791,8 +909,17 @@ fn draw_sketches(
                             stroke(&mut lines, &frame, &pts, core, false, ppm);
                         });
                     }
-                    SketchEntity::Point(p) if !sketch.points.contains_key(p) && ext.sketch.points.contains_key(p) => {
-                        dot(&mut dots, &frame, ext.sketch.pos(p), 4.0, map.px_per_mm(), band);
+                    SketchEntity::Point(p)
+                        if !sketch.points.contains_key(p) && ext.sketch.points.contains_key(p) =>
+                    {
+                        dot(
+                            &mut dots,
+                            &frame,
+                            ext.sketch.pos(p),
+                            4.0,
+                            map.px_per_mm(),
+                            band,
+                        );
                     }
                     _ => {}
                 }
@@ -812,10 +939,30 @@ fn draw_sketches(
                 .links()
                 .into_iter()
                 .filter_map(|(_, t, l)| match (t, l) {
-                    (cadrs_sketch::projection::LinkTarget::Curve(c), cadrs_sketch::Link::FlatLine { model, part, bend: Some(j) }) => {
-                        let flat = parts.sheet_metal.iter().rev().find(|x| x.feature.0 == model)?.flat.parts.get(part as usize)?;
+                    (
+                        cadrs_sketch::projection::LinkTarget::Curve(c),
+                        cadrs_sketch::Link::FlatLine {
+                            model,
+                            part,
+                            bend: Some(j),
+                        },
+                    ) => {
+                        let flat = parts
+                            .sheet_metal
+                            .iter()
+                            .rev()
+                            .find(|x| x.feature.0 == model)?
+                            .flat
+                            .parts
+                            .get(part as usize)?;
                         let b = flat.bend(cadrs_sheetmetal::model::JointId(j))?;
-                        Some((c, b.center_visible.iter().map(|s| vec![SVec2::new(s.a.x, s.a.y), SVec2::new(s.b.x, s.b.y)]).collect()))
+                        Some((
+                            c,
+                            b.center_visible
+                                .iter()
+                                .map(|s| vec![SVec2::new(s.a.x, s.a.y), SVec2::new(s.b.x, s.b.y)])
+                                .collect(),
+                        ))
                     }
                     _ => None,
                 })
@@ -835,7 +982,11 @@ fn draw_sketches(
             }
             // Trim: the piece a click removes in the hover tan, the rest as it is
             // (`edit_tools/trim-points-03.png`).
-            if let crate::sketch_modify_tools::Preview::Trim { curve, removed, kept } = &modify.preview
+            if let crate::sketch_modify_tools::Preview::Trim {
+                curve,
+                removed,
+                kept,
+            } = &modify.preview
                 && *curve == id
                 && tool.tool == crate::sketch::SketchTool::Trim
             {
@@ -846,7 +997,14 @@ fn draw_sketches(
                 // A band about 6 px wide (`trim-points-03.png`).
                 unnudged(|| {
                     wide_g.linestrip(removed.iter().map(|p| world(&frame, *p)), trim_band());
-                    stroke(&mut lines, &frame, removed, trim_core(), c.construction, ppm);
+                    stroke(
+                        &mut lines,
+                        &frame,
+                        removed,
+                        trim_core(),
+                        c.construction,
+                        ppm,
+                    );
                 });
                 continue;
             }
@@ -863,7 +1021,9 @@ fn draw_sketches(
                 continue;
             }
             // Extend: the line to extend in yellow-green (`edit_tools/extend-line-02.png`).
-            if tool.tool == crate::sketch::SketchTool::Extend && modify.hovered_curve(tool.tool) == Some(id) {
+            if tool.tool == crate::sketch::SketchTool::Extend
+                && modify.hovered_curve(tool.tool) == Some(id)
+            {
                 unnudged(|| {
                     wide_g.linestrip(pts.iter().map(|p| world(&frame, *p)), extend_band());
                     stroke(&mut lines, &frame, &pts, extend_core(), c.construction, ppm);
@@ -898,7 +1058,9 @@ fn draw_sketches(
         // A Bézier curve's handles: short dashes from each end to its control point, in the
         // curve's colour (Onshape's control polygon), the control points hollow rings below.
         for (id, c) in &sketch.curves {
-            let cadrs_sketch::CurveKind::Bezier { a, c1, c2, b } = c.kind else { continue };
+            let cadrs_sketch::CurveKind::Bezier { a, c1, c2, b } = c.kind else {
+                continue;
+            };
             let color = if selection.contains(SketchEntity::Curve(id)) {
                 selected()
             } else {
@@ -950,10 +1112,14 @@ fn draw_sketches(
             }
         }
         // Ellipses' major points are handles, not drawn (`entity_tools/ellipse-04.png`).
-        let any_ellipse = sketch
-            .curves
-            .values()
-            .any(|c| matches!(c.kind, cadrs_sketch::CurveKind::Ellipse { .. } | cadrs_sketch::CurveKind::EllipseOffset { .. } | cadrs_sketch::CurveKind::EllipseArc { .. }));
+        let any_ellipse = sketch.curves.values().any(|c| {
+            matches!(
+                c.kind,
+                cadrs_sketch::CurveKind::Ellipse { .. }
+                    | cadrs_sketch::CurveKind::EllipseOffset { .. }
+                    | cadrs_sketch::CurveKind::EllipseArc { .. }
+            )
+        });
         let hidden_touch = cadrs_sketch::entity::hidden_touch_points(sketch);
         // Hollow rings (worked out once, not per point: 500-entity sketches).
         let rings_at = ring_points(sketch);
@@ -978,7 +1144,14 @@ fn draw_sketches(
             }
             if picked(e) {
                 // Picked by the Dimension tool: an orange disc (`dimension-highlights-01.png`).
-                dot(&mut dots, &frame, p.pos, 4.0, map.px_per_mm(), picked_band());
+                dot(
+                    &mut dots,
+                    &frame,
+                    p.pos,
+                    4.0,
+                    map.px_per_mm(),
+                    picked_band(),
+                );
             }
             // A center-point rectangle's center is a hollow ring (`ex2-step13.png`), and so are
             // a fillet's virtual sharp and a polygon's touch points
@@ -990,7 +1163,11 @@ fn draw_sketches(
                     Vec3::new(n[0] as f32, n[1] as f32, n[2] as f32),
                 );
                 rings
-                    .circle(Isometry3d::new(world(&frame, p.pos), rot), 3.0 / map.px_per_mm(), color)
+                    .circle(
+                        Isometry3d::new(world(&frame, p.pos), rot),
+                        3.0 / map.px_per_mm(),
+                        color,
+                    )
                     .resolution(16);
                 continue;
             }
@@ -1002,8 +1179,10 @@ fn draw_sketches(
         // Inference feedback: the square, dotted alignment guides, glyphs at the cursor.
         // While a (non-passive) value box is open, none for the click that opened it (T3
         // judge: a stray glyph on the new ellipse); hovering elsewhere still infers.
-        let inference =
-            inference.filter(|_| flow.open.is_none_or(|o| o.shows_inference(draw.cursor_screen)));
+        let inference = inference.filter(|_| {
+            flow.open
+                .is_none_or(|o| o.shows_inference(draw.cursor_screen))
+        });
         if let Some(c) = inference {
             if let Some(p) = square_for(c) {
                 new_overlay.square = Some(map.to_screen(p));
@@ -1025,7 +1204,8 @@ fn draw_sketches(
                 };
                 // A guide lying on a plane axis (from the origin) would vanish into the blue
                 // axis line: it is drawn over it, 2 px and darker (T2 judge).
-                let on_axis = (horizontal && from.y.abs() < 1e-9) || (!horizontal && from.x.abs() < 1e-9);
+                let on_axis =
+                    (horizontal && from.y.abs() < 1e-9) || (!horizontal && from.x.abs() < 1e-9);
                 if on_axis {
                     unnudged(|| {
                         for d in dashes(&[from, to], 4.0 / ppm, 3.0 / ppm) {
@@ -1074,13 +1254,23 @@ fn draw_sketches(
             .iter()
             .flat_map(|(k, d)| {
                 let d = shown_dimension(sketch, k, d, draw.label_drag);
-                let text = crate::sketch_dimension::dimension_text_of(sketch, k, &d, false, &units.0, settings.show_expressions);
+                let text = crate::sketch_dimension::dimension_text_of(
+                    sketch,
+                    k,
+                    &d,
+                    false,
+                    &units.0,
+                    settings.show_expressions,
+                );
                 dimension_obstacles(sketch, &map, &d, &text)
             })
             // The Dimension tool's dimension following the cursor too, so glyphs move out of
             // its way while it is placed.
             .chain(dim_tool.preview.into_iter().flat_map(|d| {
-                let sketch = session.as_ref().and_then(|s| external.get(s.feature)).map_or(sketch, |(_, e)| &e.sketch);
+                let sketch = session
+                    .as_ref()
+                    .and_then(|s| external.get(s.feature))
+                    .map_or(sketch, |(_, e)| &e.sketch);
                 let text = crate::sketch_dimension::dimension_text(&d, true, &units.0);
                 let d = clear_of_arrows(sketch, &map, d, &text);
                 dimension_obstacles(sketch, &map, &d, &text)
@@ -1120,7 +1310,9 @@ fn draw_sketches(
             (settings.show_constraints && !dense)
                 || glyphs_shown_for(sketch, h, hovered)
                 || glyphs_shown_for(sketch, h, kept)
-                || selected_glyphs.iter().any(|e| glyphs_shown_for(sketch, h, Some(*e)))
+                || selected_glyphs
+                    .iter()
+                    .any(|e| glyphs_shown_for(sketch, h, Some(*e)))
         });
         glyph_memory.0 = layout.placed;
         for (a, b) in &layout.leaders {
@@ -1162,7 +1354,9 @@ fn draw_sketches(
             if regs.iter().any(|r| r.contains(p)) {
                 fill()
             } else {
-                knockout(plane_half.is_some_and(|h| p.x.abs() <= h.x as f64 && p.y.abs() <= h.y as f64))
+                knockout(
+                    plane_half.is_some_and(|h| p.x.abs() <= h.x as f64 && p.y.abs() <= h.y as f64),
+                )
             }
         };
         for (k, d) in &sketch.dimensions {
@@ -1185,7 +1379,14 @@ fn draw_sketches(
             };
             // The value being edited shows only in its box, which sits on the label (T3 judge:
             // the box must not leave half a value showing beside it).
-            let text = crate::sketch_dimension::dimension_text_of(sketch, k, &d, false, &units.0, settings.show_expressions);
+            let text = crate::sketch_dimension::dimension_text_of(
+                sketch,
+                k,
+                &d,
+                false,
+                &units.0,
+                settings.show_expressions,
+            );
             if let Some((center, half)) =
                 draw_dimension(sketch, &map, &d, text, style, &knock, &mut thin, &mut out)
             {
@@ -1201,7 +1402,10 @@ fn draw_sketches(
         }
         // The Dimension tool's dimension following the cursor, with its live value (measured on the
         // copy with the face's part edges, which it may measure to).
-        let dim_sketch = session.as_ref().and_then(|s| external.get(s.feature)).map_or(sketch, |(_, e)| &e.sketch);
+        let dim_sketch = session
+            .as_ref()
+            .and_then(|s| external.get(s.feature))
+            .map_or(sketch, |(_, e)| &e.sketch);
         if let Some(d) = dim_tool.preview {
             let text = crate::sketch_dimension::dimension_text(&d, true, &units.0);
             // The value sits on the cursor, clear of the arrowheads (`screens/16a`).
@@ -1211,7 +1415,9 @@ fn draw_sketches(
             } else {
                 DimStyle::normal()
             };
-            draw_dimension(dim_sketch, &map, &d, text, style, &knock, &mut thin, &mut out);
+            draw_dimension(
+                dim_sketch, &map, &d, text, style, &knock, &mut thin, &mut out,
+            );
         }
         let first_live_label = out.len();
         // Rubber band. A line inferred parallel to another is drawn dotted
@@ -1259,7 +1465,14 @@ fn draw_sketches(
                     Some(d) if d.curve == h.curve && d.at_start == h.at_start => d,
                     _ => h,
                 };
-                stroke(&mut rubber_g, &frame, &[end, h.pos], rubber(), true, ppm as f64);
+                stroke(
+                    &mut rubber_g,
+                    &frame,
+                    &[end, h.pos],
+                    rubber(),
+                    true,
+                    ppm as f64,
+                );
                 dot(&mut dots, &frame, h.pos, 3.5, ppm, rubber());
                 dot(&mut dots, &frame, h.pos, 2.0, ppm, Color::WHITE);
             }
@@ -1285,7 +1498,8 @@ fn draw_sketches(
             for p in [pts[0], pts[pts.len() - 1]] {
                 dot(&mut dots, &frame, p, 1.5, map.px_per_mm(), rubber());
             }
-            let away = (map.to_screen(at) - map.to_screen(sketch.pos(live.corner))).normalize_or_zero();
+            let away =
+                (map.to_screen(at) - map.to_screen(sketch.pos(live.corner))).normalize_or_zero();
             out.push(live_label(
                 format!("{prefix}{}", units.0.live(live.size)),
                 map.to_screen(at),
@@ -1302,7 +1516,11 @@ fn draw_sketches(
                 let lo = pts.iter().fold(pts[0], |a, b| a.min(*b));
                 let hi = pts.iter().fold(pts[0], |a, b| a.max(*b));
                 let at = map.to_screen(SVec2::new(lo.x, (lo.y + hi.y) / 2.0));
-                out.push(live_label(units.0.live(v), at, Some((-map.x.normalize(), 13.0))));
+                out.push(live_label(
+                    units.0.live(v),
+                    at,
+                    Some((-map.x.normalize(), 13.0)),
+                ));
             }
         }
         // A short leader from the measured edge to the open width box (`screens/12`).
@@ -1316,7 +1534,11 @@ fn draw_sketches(
             let edge = SVec2::new((lo.x + hi.x) / 2.0, lo.y);
             let top = anchor - Vec2::new(0.0, 13.0);
             if let Some(end) = map.to_sketch(top) {
-                thin.line(world(&frame, edge), world(&frame, end), Color::srgb_u8(0xb4, 0xb8, 0xbb));
+                thin.line(
+                    world(&frame, edge),
+                    world(&frame, end),
+                    Color::srgb_u8(0xb4, 0xb8, 0xbb),
+                );
             }
         }
         // Constraint glyphs under a live value (of what is being drawn, sized or dragged) give
@@ -1331,7 +1553,10 @@ fn draw_sketches(
                 _ => true,
             });
         }
-        let live: Vec<Rect> = out[first_live_label..].iter().map(live_label_rect).collect();
+        let live: Vec<Rect> = out[first_live_label..]
+            .iter()
+            .map(live_label_rect)
+            .collect();
         if !live.is_empty() {
             new_overlay.glyphs.retain(|g| {
                 g.style == GlyphStyle::Inference
@@ -1433,7 +1658,10 @@ fn rubber_polylines(state: DrawState, cursor: SVec2, pending: &[SVec2]) -> Vec<V
             prev,
             tangent,
             ..
-        } => match prev.filter(|_| tangent).and_then(|d| tangent_arc(start, d, cursor)) {
+        } => match prev
+            .filter(|_| tangent)
+            .and_then(|d| tangent_arc(start, d, cursor))
+        {
             Some(a) => vec![arc_pts(a)],
             None => vec![vec![start, cursor]],
         },
@@ -1459,9 +1687,10 @@ fn rubber_polylines(state: DrawState, cursor: SVec2, pending: &[SVec2]) -> Vec<V
             Some(a) => vec![arc_pts(a)],
             None => vec![vec![start, end]],
         },
-        DrawState::TangentArc { start, dir, .. } => {
-            tangent_arc(start, dir, cursor).map(arc_pts).into_iter().collect()
-        }
+        DrawState::TangentArc { start, dir, .. } => tangent_arc(start, dir, cursor)
+            .map(arc_pts)
+            .into_iter()
+            .collect(),
         DrawState::CenterArc {
             center,
             start: None,
@@ -1563,7 +1792,8 @@ fn polygon_preview(state: DrawState, cursor: SVec2) -> Option<(Vec<SVec2>, f64, 
     if r < 1e-9 {
         return None;
     }
-    let pts = cadrs_sketch::entity::polygon_corners(center, r, (sp - center).angle(), sides, inscribed);
+    let pts =
+        cadrs_sketch::entity::polygon_corners(center, r, (sp - center).angle(), sides, inscribed);
     Some((pts, r, sides))
 }
 
@@ -1581,16 +1811,28 @@ fn free_spot(
 ) -> Option<(Vec2, Vec2)> {
     let d = (b - a).normalize_or_zero();
     let n = Vec2::new(d.y, -d.x);
-    let n = if n.y > 0.0 || (n.y == 0.0 && n.x > 0.0) { -n } else { n };
+    let n = if n.y > 0.0 || (n.y == 0.0 && n.x > 0.0) {
+        -n
+    } else {
+        n
+    };
     // Estimated label size (13 px Inter).
     let size = Vec2::new(text.chars().count() as f32 * 7.4, 16.0);
     let mid = (a + b) / 2.0;
     let blocked = |at: Vec2, dir: Vec2| {
         let half = (dir.x.abs() * size.x + dir.y.abs() * size.y) / 2.0;
         let c = at + dir * (gap + half);
-        let lo = SVec2::new((c.x - size.x / 2.0 - 3.0) as f64, (c.y - size.y / 2.0 - 3.0) as f64);
-        let hi = SVec2::new((c.x + size.x / 2.0 + 3.0) as f64, (c.y + size.y / 2.0 + 3.0) as f64);
-        obstacles.iter().any(|(p, q)| segment_hits_box(*p, *q, lo, hi))
+        let lo = SVec2::new(
+            (c.x - size.x / 2.0 - 3.0) as f64,
+            (c.y - size.y / 2.0 - 3.0) as f64,
+        );
+        let hi = SVec2::new(
+            (c.x + size.x / 2.0 + 3.0) as f64,
+            (c.y + size.y / 2.0 + 3.0) as f64,
+        );
+        obstacles
+            .iter()
+            .any(|(p, q)| segment_hits_box(*p, *q, lo, hi))
             || crosses_axes(map, c, size)
     };
     let reach = a.distance(b) / 2.0 - 12.0;
@@ -1631,36 +1873,41 @@ fn draw_rubber(
             .circle(Isometry3d::new(world(&frame, p), rot), 2.5 / ppm, color)
             .resolution(16);
     };
-    let arc_preview = |arc: ArcGeom, g: &mut Gizmos<SketchRubberGizmos>, labels: &mut Vec<LabelSpec>| {
-        let pts = arc.tessellate(std::f64::consts::PI / 90.0, 8);
-        stroke(g, &frame, &pts, color, construction, ppm as f64);
-        // At the chord's midpoint, toward the center (clear of the arc and its ends).
-        let chord_mid = arc.start().midpoint(arc.end());
-        let toward = map.to_screen(arc.center) - map.to_screen(chord_mid);
-        let dir = if toward.length() > 1.0 {
-            toward.normalize()
-        } else {
-            // A half circle: the chord passes through the center; go toward the arc's inside.
-            (map.to_screen(arc.center) - map.to_screen(arc.mid())).normalize_or_zero()
+    let arc_preview =
+        |arc: ArcGeom, g: &mut Gizmos<SketchRubberGizmos>, labels: &mut Vec<LabelSpec>| {
+            let pts = arc.tessellate(std::f64::consts::PI / 90.0, 8);
+            stroke(g, &frame, &pts, color, construction, ppm as f64);
+            // At the chord's midpoint, toward the center (clear of the arc and its ends).
+            let chord_mid = arc.start().midpoint(arc.end());
+            let toward = map.to_screen(arc.center) - map.to_screen(chord_mid);
+            let dir = if toward.length() > 1.0 {
+                toward.normalize()
+            } else {
+                // A half circle: the chord passes through the center; go toward the arc's inside.
+                (map.to_screen(arc.center) - map.to_screen(arc.mid())).normalize_or_zero()
+            };
+            // Never over the center dot: when the chord passes near the center, the value moves
+            // out along the radius to the arc's middle, away from the center.
+            let (center_px, chord_px) = (map.to_screen(arc.center), map.to_screen(chord_mid));
+            let r_px = map.to_screen(arc.mid()).distance(center_px);
+            let (at, push) = if r_px > 60.0 {
+                // On the radius to the arc's middle, well clear of the center.
+                let out = (map.to_screen(arc.mid()) - center_px).normalize_or_zero();
+                let t = (r_px * 0.5).clamp(32.0, r_px - 18.0);
+                let side = if out.perp().y > 0.0 {
+                    -out.perp()
+                } else {
+                    out.perp()
+                };
+                (center_px + out * t, (side, 4.0))
+            } else {
+                (chord_px, (dir, 8.0))
+            };
+            labels.push(LabelSpec {
+                avoid_axes: false,
+                ..live_label(format!("R{}", u.live(arc.radius)), at, Some(push))
+            });
         };
-        // Never over the center dot: when the chord passes near the center, the value moves
-        // out along the radius to the arc's middle, away from the center.
-        let (center_px, chord_px) = (map.to_screen(arc.center), map.to_screen(chord_mid));
-        let r_px = map.to_screen(arc.mid()).distance(center_px);
-        let (at, push) = if r_px > 60.0 {
-            // On the radius to the arc's middle, well clear of the center.
-            let out = (map.to_screen(arc.mid()) - center_px).normalize_or_zero();
-            let t = (r_px * 0.5).clamp(32.0, r_px - 18.0);
-            let side = if out.perp().y > 0.0 { -out.perp() } else { out.perp() };
-            (center_px + out * t, (side, 4.0))
-        } else {
-            (chord_px, (dir, 8.0))
-        };
-        labels.push(LabelSpec {
-            avoid_axes: false,
-            ..live_label(format!("R{}", u.live(arc.radius)), at, Some(push))
-        });
-    };
     // The center of a tangent arc being drawn: a 5 px dot.
     let center_dot = |dots: &mut Gizmos<SketchDotGizmos>, arc: &ArcGeom| {
         dot(dots, &frame, arc.center, 2.5, ppm, color);
@@ -1712,7 +1959,14 @@ fn draw_rubber(
             if start.distance(cursor) < 1e-9 {
                 return;
             }
-            stroke(g, &frame, &[start, cursor], color, construction || dotted, ppm as f64);
+            stroke(
+                g,
+                &frame,
+                &[start, cursor],
+                color,
+                construction || dotted,
+                ppm as f64,
+            );
             dot_at(start);
             ring_at(cursor);
             labels.push(chord_label((map, u), start, cursor, obstacles));
@@ -1783,15 +2037,17 @@ fn draw_rubber(
             let blocked = |t: f32, side: Vec2| {
                 let c = a + d * (t * len) + side * (8.0 + 8.0);
                 let (hx, hy) = (width / 2.0 + 3.0, 11.0);
-                let corners = [(-hx, -hy), (hx, -hy), (hx, hy), (-hx, hy)]
-                    .map(|(x, y)| c + d * x + side * y);
+                let corners =
+                    [(-hx, -hy), (hx, -hy), (hx, hy), (-hx, hy)].map(|(x, y)| c + d * x + side * y);
                 let lo = corners.iter().fold(Vec2::splat(f32::MAX), |m, p| m.min(*p));
                 let hi = corners.iter().fold(Vec2::splat(f32::MIN), |m, p| m.max(*p));
                 let (lo, hi) = (
                     SVec2::new(lo.x as f64, lo.y as f64),
                     SVec2::new(hi.x as f64, hi.y as f64),
                 );
-                obstacles.iter().any(|(p, q)| segment_hits_box(*p, *q, lo, hi))
+                obstacles
+                    .iter()
+                    .any(|(p, q)| segment_hits_box(*p, *q, lo, hi))
                     || crosses_axes(map, c, Vec2::new(width, 16.0))
             };
             let (t, n) = [0.5f32, 0.35, 0.65, 0.25, 0.75]
@@ -1887,10 +2143,21 @@ fn draw_rubber(
                     } else {
                         color
                     };
-                    g.line(world(&frame, mid.lerp(b, t0)), world(&frame, mid.lerp(b, t1)), c);
+                    g.line(
+                        world(&frame, mid.lerp(b, t0)),
+                        world(&frame, mid.lerp(b, t1)),
+                        c,
+                    );
                 }
             } else {
-                stroke(g, &frame, &[a, b], color, construction || dotted, ppm as f64);
+                stroke(
+                    g,
+                    &frame,
+                    &[a, b],
+                    color,
+                    construction || dotted,
+                    ppm as f64,
+                );
             }
             dot_at(mid);
             dot_at(a);
@@ -1903,14 +2170,25 @@ fn draw_rubber(
             let _ = obstacles;
             labels.push(LabelSpec {
                 avoid_axes: false,
-                ..live_label(u.live(a.distance(b)), map.to_screen(mid), Some((down, 10.0)))
+                ..live_label(
+                    u.live(a.distance(b)),
+                    map.to_screen(mid),
+                    Some((down, 10.0)),
+                )
             });
         }
         DrawState::AlignedRect { p0, p1: None } => {
             if p0.distance(cursor) < 1e-9 {
                 return;
             }
-            stroke(g, &frame, &[p0, cursor], color, construction || dotted, ppm as f64);
+            stroke(
+                g,
+                &frame,
+                &[p0, cursor],
+                color,
+                construction || dotted,
+                ppm as f64,
+            );
             dot_at(p0);
             ring_at(cursor);
             labels.push(chord_label((map, u), p0, cursor, obstacles));
@@ -1981,7 +2259,10 @@ fn draw_rubber(
             poly.push(cursor);
             let px = |v: f64| v / ppm as f64;
             for d in dash_pattern(&poly, &[px(4.0), px(3.0)]) {
-                g.linestrip(d.into_iter().map(|p| world(&frame, p)), color.with_alpha(0.7));
+                g.linestrip(
+                    d.into_iter().map(|p| world(&frame, p)),
+                    color.with_alpha(0.7),
+                );
             }
             for p in &pts[..n as usize] {
                 dot_at(*p);
@@ -2070,7 +2351,11 @@ fn chord_label(
         None => {
             let d = (sb - sa).normalize_or_zero();
             let n = Vec2::new(d.y, -d.x);
-            let n = if n.y > 0.0 || (n.y == 0.0 && n.x > 0.0) { -n } else { n };
+            let n = if n.y > 0.0 || (n.y == 0.0 && n.x > 0.0) {
+                -n
+            } else {
+                n
+            };
             live_label(text, (sa + sb) / 2.0, Some((n, 13.0)))
         }
     }
@@ -2150,7 +2435,10 @@ pub(crate) fn clear_of_arrows(
 ) -> cadrs_sketch::Dimension {
     use cadrs_sketch::DimensionKind as K;
     use cadrs_sketch::dimension::{LayoutStyle, layout};
-    if matches!(d.kind, K::Angle { .. } | K::Radius { .. } | K::Diameter { .. }) {
+    if matches!(
+        d.kind,
+        K::Angle { .. } | K::Radius { .. } | K::Diameter { .. }
+    ) {
         return d;
     }
     let ppm = map.px_per_mm() as f64;
@@ -2158,7 +2446,14 @@ pub(crate) fn clear_of_arrows(
     let st = LayoutStyle::new(ppm, (half_w, 6.5));
     let (Some(l0), Some(l1)) = (
         layout(s, &d, st),
-        layout(s, &cadrs_sketch::Dimension { along: d.along + 1.0, ..d }, st),
+        layout(
+            s,
+            &cadrs_sketch::Dimension {
+                along: d.along + 1.0,
+                ..d
+            },
+            st,
+        ),
     ) else {
         return d;
     };
@@ -2185,7 +2480,11 @@ pub(crate) fn clear_of_arrows(
     let mut t_new = t;
     for end in [hl, -hl] {
         let sgn = end.signum();
-        let (arrow_in, arrow_out) = if outside_arrows { (4.0, arrow) } else { (arrow, 4.0) };
+        let (arrow_in, arrow_out) = if outside_arrows {
+            (4.0, arrow)
+        } else {
+            (arrow, 4.0)
+        };
         let (lo, hi) = if sgn > 0.0 {
             (end - arrow_in, end + arrow_out)
         } else {
@@ -2249,7 +2548,11 @@ fn dimension_obstacles(
             (t2, t1)
         };
         let depth = p1.distance(t1).max(p2.distance(t2));
-        let n = if depth <= 60.0 { (depth / 10.0).ceil() as usize } else { 0 };
+        let n = if depth <= 60.0 {
+            (depth / 10.0).ceil() as usize
+        } else {
+            0
+        };
         for i in 1..n {
             let f = i as f64 / n as f64;
             out.push((p1 + (t1 - p1) * f, p2 + (t2 - p2) * f));
@@ -2261,7 +2564,11 @@ fn dimension_obstacles(
     let (ux, uy) = match lay.label_dir {
         Some(d) => {
             let a = map.to_screen64(lay.label + d) - c;
-            let a = if a.length() > 1e-9 { a.normalize() } else { SVec2::new(1.0, 0.0) };
+            let a = if a.length() > 1e-9 {
+                a.normalize()
+            } else {
+                SVec2::new(1.0, 0.0)
+            };
             (a, a.perp())
         }
         None => (SVec2::new(1.0, 0.0), SVec2::new(0.0, 1.0)),
@@ -2368,7 +2675,9 @@ fn draw_dimension(
     }
     let at = map.to_screen(lay.label);
     // Radius and diameter values read along their leader, kept upright.
-    let angle = lay.label_dir.map_or(0.0, |u| upright_angle(map.x * u.x as f32 + map.y * u.y as f32));
+    let angle = lay.label_dir.map_or(0.0, |u| {
+        upright_angle(map.x * u.x as f32 + map.y * u.y as f32)
+    });
     labels.push(LabelSpec {
         text,
         at,
@@ -2383,7 +2692,10 @@ fn draw_dimension(
     // The rotated box's bounds (for picking the value).
     let half = Vec2::new(width as f32 / 2.0 + 3.0, 10.0);
     let (c, s) = (angle.cos().abs(), angle.sin().abs());
-    Some((at, Vec2::new(c * half.x + s * half.y, s * half.x + c * half.y)))
+    Some((
+        at,
+        Vec2::new(c * half.x + s * half.y, s * half.x + c * half.y),
+    ))
 }
 
 /// The clockwise screen rotation (radians) that makes text read along `dir` without being
@@ -2407,7 +2719,13 @@ fn draw_accepted(
     map: &ScreenMap,
     viewport: Rect,
     skip: &dyn Fn(cadrs_sketch::CurveId) -> bool,
-    (selected, error, color, curve_color, outlined): (bool, bool, Option<Color>, &dyn Fn(cadrs_sketch::CurveId) -> Option<Color>, &dyn Fn(cadrs_sketch::CurveId) -> bool),
+    (selected, error, color, curve_color, outlined): (
+        bool,
+        bool,
+        Option<Color>,
+        &dyn Fn(cadrs_sketch::CurveId) -> Option<Color>,
+        &dyn Fn(cadrs_sketch::CurveId) -> bool,
+    ),
     g: &mut Gizmos<SketchAcceptedGizmos>,
     dots: &mut Gizmos<SketchAcceptedDotGizmos>,
     hidden: &mut Gizmos<SketchHiddenGizmos>,
@@ -2433,7 +2751,14 @@ fn draw_accepted(
         let pts = curve_polyline(s, id);
         // A curve's own appearance (PS9.5) unless the sketch is selected or in error.
         let own = (!selected && !error).then(|| curve_color(id)).flatten();
-        stroke(g, &frame, &pts, own.unwrap_or(edge), c.construction, ppm as f64);
+        stroke(
+            g,
+            &frame,
+            &pts,
+            own.unwrap_or(edge),
+            c.construction,
+            ppm as f64,
+        );
         // Behind a wall: dashed (8 px dash, 5 px gap), a construction curve dash-dotted as in
         // view; on the plane, so the dashes stay put as the view turns.
         // Not along a hovered or selected region's outline, which lies over the edge.
@@ -2441,12 +2766,19 @@ fn draw_accepted(
             continue;
         }
         let px = |v: f64| v / ppm as f64;
-        let pattern = if c.construction { [px(12.0), px(4.0), px(2.0), px(4.0)].to_vec() } else { vec![px(8.0), px(5.0)] };
+        let pattern = if c.construction {
+            [px(12.0), px(4.0), px(2.0), px(4.0)].to_vec()
+        } else {
+            vec![px(8.0), px(5.0)]
+        };
         // Only along what is in the view: a 100 m contour line zoomed in to a house was a
         // million dashes a frame.
         for run in visible_runs(&pts, map, viewport.inflate(DASH_CLIP_MARGIN_PX)) {
             for d in dash_pattern(&run, &pattern) {
-                hidden.linestrip(d.into_iter().map(|p| world(&frame, p)), own.unwrap_or(edge).with_alpha(0.7));
+                hidden.linestrip(
+                    d.into_iter().map(|p| world(&frame, p)),
+                    own.unwrap_or(edge).with_alpha(0.7),
+                );
             }
         }
     }
@@ -2458,18 +2790,27 @@ fn draw_accepted(
         }
     }
     let rings_at = ring_points(s);
-    let any_ellipse = s
-        .curves
-        .values()
-        .any(|c| matches!(c.kind, cadrs_sketch::CurveKind::Ellipse { .. } | cadrs_sketch::CurveKind::EllipseOffset { .. } | cadrs_sketch::CurveKind::EllipseArc { .. }));
+    let any_ellipse = s.curves.values().any(|c| {
+        matches!(
+            c.kind,
+            cadrs_sketch::CurveKind::Ellipse { .. }
+                | cadrs_sketch::CurveKind::EllipseOffset { .. }
+                | cadrs_sketch::CurveKind::EllipseArc { .. }
+        )
+    });
     for (id, p) in &s.points {
         if rings_at.contains(&id) {
             // A center-point rectangle's center, a virtual sharp: a small grey ring
             // (`ex2-step16.png`).
             let n = frame.normal();
-            let rot = Quat::from_rotation_arc(Vec3::Z, Vec3::new(n[0] as f32, n[1] as f32, n[2] as f32));
-            g.circle(Isometry3d::new(world(&frame, p.pos), rot), 2.5 / ppm, Color::srgb_u8(0x70, 0x74, 0x78))
-                .resolution(16);
+            let rot =
+                Quat::from_rotation_arc(Vec3::Z, Vec3::new(n[0] as f32, n[1] as f32, n[2] as f32));
+            g.circle(
+                Isometry3d::new(world(&frame, p.pos), rot),
+                2.5 / ppm,
+                Color::srgb_u8(0x70, 0x74, 0x78),
+            )
+            .resolution(16);
         } else if !(any_ellipse && s.hidden_point(id)) {
             dot(dots, &frame, p.pos, 1.0, ppm, point_color);
         }
@@ -2625,7 +2966,11 @@ fn sync_fills(
         for f in el.features().iter().chain(parts.derived_sketches.iter()) {
             let Some(sk) = f.sketch() else { continue };
             let Some(plane) = sk.plane else { continue };
-            if parts.hidden_sketches.contains(&f.id) || parts.preview_sketches.contains(&f.id) || parts.rolled_back_sketches.contains(&f.id) || parts.flat_sketches.contains(&f.id) {
+            if parts.hidden_sketches.contains(&f.id)
+                || parts.preview_sketches.contains(&f.id)
+                || parts.rolled_back_sketches.contains(&f.id)
+                || parts.flat_sketches.contains(&f.id)
+            {
                 continue;
             }
             live.push(f.id);
@@ -2662,7 +3007,11 @@ fn sync_fills(
             cache.outlined.insert(f.id, outlined);
             let mesh = fill_mesh_with(geometry, plane, outlined);
             let on_face = matches!(plane, PlaneRef::Face(_)) && !outlined;
-            let fill_material = if on_face { face_material.clone() } else { material.clone() };
+            let fill_material = if on_face {
+                face_material.clone()
+            } else {
+                material.clone()
+            };
             if let Some((g, p, e, handle)) = cache.fills.get_mut(&f.id) {
                 // Update the mesh in place (replacing the entity drops a mesh the renderer may
                 // still be uploading).
@@ -2687,11 +3036,16 @@ fn sync_fills(
                     DespawnOnExit(AppState::Document),
                 ))
                 .id();
-            cache.fills.insert(f.id, (geometry.clone(), plane, e, handle));
+            cache
+                .fills
+                .insert(f.id, (geometry.clone(), plane, e, handle));
         }
     }
     // The edited sketch's translucent copy.
-    let edited = session.as_deref().map(|s| s.feature).filter(|f| cache.fills.contains_key(f));
+    let edited = session
+        .as_deref()
+        .map(|s| s.feature)
+        .filter(|f| cache.fills.contains_key(f));
     match (edited, cache.overlay) {
         (Some(f), Some((g, _))) if f == g => {}
         (want, have) => {
@@ -2748,19 +3102,32 @@ pub(crate) fn fill_mesh(s: &Sketch, plane: PlaneRef) -> Mesh {
 fn bare_face_edge(s: &Sketch, r: &cadrs_sketch::Region) -> bool {
     let n = r.outer.len();
     let covered = |p: cadrs_sketch::Vec2| {
-        s.curves.iter().filter(|(_, c)| !c.construction).any(|(id, c)| {
-            let d = match c.kind {
-                cadrs_sketch::CurveKind::Line { a, b } => cadrs_sketch::geom::dist_point_segment(p, s.pos(a), s.pos(b)),
-                cadrs_sketch::CurveKind::Circle { center, radius } => (p.distance(s.pos(center)) - radius).abs(),
-                cadrs_sketch::CurveKind::Arc { .. } => s.arc_geom(id).map_or(f64::INFINITY, |g| g.distance(p)),
-                _ => f64::INFINITY,
-            };
-            d < 1e-6
-        })
+        s.curves
+            .iter()
+            .filter(|(_, c)| !c.construction)
+            .any(|(id, c)| {
+                let d = match c.kind {
+                    cadrs_sketch::CurveKind::Line { a, b } => {
+                        cadrs_sketch::geom::dist_point_segment(p, s.pos(a), s.pos(b))
+                    }
+                    cadrs_sketch::CurveKind::Circle { center, radius } => {
+                        (p.distance(s.pos(center)) - radius).abs()
+                    }
+                    cadrs_sketch::CurveKind::Arc { .. } => {
+                        s.arc_geom(id).map_or(f64::INFINITY, |g| g.distance(p))
+                    }
+                    _ => f64::INFINITY,
+                };
+                d < 1e-6
+            })
     };
     (0..n).any(|i| {
         let c = r.outer_curves.get(i).copied();
-        c.is_some_and(|c| s.imprint.iter().any(|x| x.id == c)) && !covered(cadrs_sketch::Vec2::new((r.outer[i].x + r.outer[(i + 1) % n].x) * 0.5, (r.outer[i].y + r.outer[(i + 1) % n].y) * 0.5))
+        c.is_some_and(|c| s.imprint.iter().any(|x| x.id == c))
+            && !covered(cadrs_sketch::Vec2::new(
+                (r.outer[i].x + r.outer[(i + 1) % n].x) * 0.5,
+                (r.outer[i].y + r.outer[(i + 1) % n].y) * 0.5,
+            ))
     })
 }
 
@@ -2797,10 +3164,13 @@ pub(crate) fn fill_mesh_with(s: &Sketch, plane: PlaneRef, outlined: bool) -> Mes
         indices = vec![0, 1, 2];
     }
     let normals = vec![normal; positions.len()];
-    Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
-        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
-        .with_inserted_indices(Indices::U32(indices))
+    Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
+    .with_inserted_indices(Indices::U32(indices))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2895,7 +3265,8 @@ fn sync_labels(
             let axes = screen.active.filter(|_| spec.avoid_axes);
             let mut extra = 0.0;
             while extra < 40.0
-                && axes.is_some_and(|m| crosses_axes(&m, spec.at + dir * (gap + half + extra), size))
+                && axes
+                    .is_some_and(|m| crosses_axes(&m, spec.at + dir * (gap + half + extra), size))
             {
                 extra += 2.0;
             }
@@ -2914,7 +3285,9 @@ fn sync_labels(
         // Hide labels outside the viewport and under the view cube.
         let cube = crate::view_cube::cube_rect(rect.0);
         let inside = rect.0.contains(center)
-            && Rect::from_center_size(center, size).intersect(cube).is_empty();
+            && Rect::from_center_size(center, size)
+                .intersect(cube)
+                .is_empty();
         vis.set_if_neq(if inside {
             Visibility::Inherited
         } else {
@@ -2969,7 +3342,9 @@ fn crosses_axes(map: &ScreenMap, center: Vec2, size: Vec2) -> bool {
     [map.x, map.y].iter().any(|d| {
         let n = Vec2::new(-d.y, d.x).normalize_or_zero();
         let s: Vec<f32> = corners.iter().map(|c| (*c - map.origin).dot(n)).collect();
-        let (lo, hi) = s.iter().fold((f32::MAX, f32::MIN), |(lo, hi), v| (lo.min(*v), hi.max(*v)));
+        let (lo, hi) = s
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(lo, hi), v| (lo.min(*v), hi.max(*v)));
         lo <= 0.0 && hi >= 0.0
     })
 }
@@ -3002,19 +3377,48 @@ mod tests {
     #[test]
     fn only_what_is_in_the_view_is_dashed() {
         // 1 mm a pixel, the sketch origin at the screen's.
-        let map = ScreenMap { plane: PlaneRef::Top, origin: Vec2::ZERO, x: Vec2::X, y: Vec2::Y, w: Vec2::ZERO };
+        let map = ScreenMap {
+            plane: PlaneRef::Top,
+            origin: Vec2::ZERO,
+            x: Vec2::X,
+            y: Vec2::Y,
+            w: Vec2::ZERO,
+        };
         let view = Rect::new(0.0, 0.0, 100.0, 100.0);
         // A long line across the view, a turn far outside it, and back in through the top.
-        let pts = [SVec2::new(-1000.0, 50.0), SVec2::new(1000.0, 50.0), SVec2::new(1000.0, -500.0), SVec2::new(50.0, -500.0), SVec2::new(50.0, 20.0)];
+        let pts = [
+            SVec2::new(-1000.0, 50.0),
+            SVec2::new(1000.0, 50.0),
+            SVec2::new(1000.0, -500.0),
+            SVec2::new(50.0, -500.0),
+            SVec2::new(50.0, 20.0),
+        ];
         let runs = visible_runs(&pts, &map, view);
         assert_eq!(runs.len(), 2, "{runs:?}");
         let near = |p: SVec2, x: f64, y: f64| (p.x - x).abs() < 1e-3 && (p.y - y).abs() < 1e-3;
-        assert!(near(runs[0][0], 0.0, 50.0) && near(runs[0][1], 100.0, 50.0), "{runs:?}");
-        assert!(near(runs[1][0], 50.0, 0.0) && near(runs[1][1], 50.0, 20.0), "{runs:?}");
+        assert!(
+            near(runs[0][0], 0.0, 50.0) && near(runs[0][1], 100.0, 50.0),
+            "{runs:?}"
+        );
+        assert!(
+            near(runs[1][0], 50.0, 0.0) && near(runs[1][1], 50.0, 20.0),
+            "{runs:?}"
+        );
         // All inside: the polyline as it is.
-        let inside = [SVec2::new(10.0, 10.0), SVec2::new(20.0, 10.0), SVec2::new(20.0, 30.0)];
+        let inside = [
+            SVec2::new(10.0, 10.0),
+            SVec2::new(20.0, 10.0),
+            SVec2::new(20.0, 30.0),
+        ];
         assert_eq!(visible_runs(&inside, &map, view), vec![inside.to_vec()]);
-        assert!(visible_runs(&[SVec2::new(-10.0, -10.0), SVec2::new(-5.0, -20.0)], &map, view).is_empty());
+        assert!(
+            visible_runs(
+                &[SVec2::new(-10.0, -10.0), SVec2::new(-5.0, -20.0)],
+                &map,
+                view
+            )
+            .is_empty()
+        );
     }
 
     #[test]
@@ -3040,12 +3444,18 @@ mod tests {
 
     #[test]
     fn construction_lines_are_dash_dot() {
-        let d = dash_pattern(&[SVec2::ZERO, SVec2::new(44.0, 0.0)], &[12.0, 4.0, 2.0, 4.0]);
+        let d = dash_pattern(
+            &[SVec2::ZERO, SVec2::new(44.0, 0.0)],
+            &[12.0, 4.0, 2.0, 4.0],
+        );
         let spans: Vec<(f64, f64)> = d.iter().map(|p| (p[0].x, p.last().unwrap().x)).collect();
         let want = [(0.0, 12.0), (16.0, 18.0), (22.0, 34.0), (38.0, 40.0)];
         assert_eq!(spans.len(), want.len());
         for (a, b) in spans.iter().zip(want) {
-            assert!((a.0 - b.0).abs() < 1e-9 && (a.1 - b.1).abs() < 1e-9, "{spans:?}");
+            assert!(
+                (a.0 - b.0).abs() < 1e-9 && (a.1 - b.1).abs() < 1e-9,
+                "{spans:?}"
+            );
         }
     }
 }

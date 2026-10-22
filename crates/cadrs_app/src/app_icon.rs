@@ -32,7 +32,9 @@ fn set_window_icon(
     let Ok(entity) = windows.single() else { return };
     WINIT_WINDOWS.with_borrow(|w| {
         // Not made yet (or headless: no winit window at all, nothing to do then).
-        let Some(window) = w.get_window(entity) else { return };
+        let Some(window) = w.get_window(entity) else {
+            return;
+        };
         let scale = window.scale_factor();
         if *set_for_scale == Some(scale) {
             return;
@@ -42,10 +44,13 @@ fn set_window_icon(
         if set_from_resource(window, scale) {
             return;
         }
-        let icon = image::load_from_memory(ICON_PNG).ok().map(|i| i.into_rgba8()).and_then(|i| {
-            let (wd, ht) = i.dimensions();
-            winit::window::Icon::from_rgba(i.into_raw(), wd, ht).ok()
-        });
+        let icon = image::load_from_memory(ICON_PNG)
+            .ok()
+            .map(|i| i.into_rgba8())
+            .and_then(|i| {
+                let (wd, ht) = i.dimensions();
+                winit::window::Icon::from_rgba(i.into_raw(), wd, ht).ok()
+            });
         if icon.is_none() {
             warn!("the app icon couldn't be read");
         }

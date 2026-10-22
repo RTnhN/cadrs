@@ -47,7 +47,13 @@ fn near(s: &Surface, p: &P3, hint: Option<(f64, f64)>) -> (f64, f64) {
     let ((u0, u1), (v0, v1)) = s.param_box();
     let mut best = uv;
     let g = s.project(p, None);
-    for c in [g, s.project(p, Some((u0, uv.1))), s.project(p, Some((u1, uv.1))), s.project(p, Some((uv.0, v0))), s.project(p, Some((uv.0, v1)))] {
+    for c in [
+        g,
+        s.project(p, Some((u0, uv.1))),
+        s.project(p, Some((u1, uv.1))),
+        s.project(p, Some((uv.0, v0))),
+        s.project(p, Some((uv.0, v1))),
+    ] {
         if (s.eval(c.0, c.1) - p).norm() < (s.eval(best.0, best.1) - p).norm() {
             best = c;
         }
@@ -72,9 +78,15 @@ fn clipped(cs: &[IntCurve], a: &Surface, da: Dom, b: &Surface, db: Dom) -> (f64,
             hb = Some(ub);
             let inside = in_dom(a, da, ua) && in_dom(b, db, ub);
             if inside {
-                let d = (a.eval(ua.0, ua.1) - p).norm().max((b.eval(ub.0, ub.1) - p).norm());
+                let d = (a.eval(ua.0, ua.1) - p)
+                    .norm()
+                    .max((b.eval(ub.0, ub.1) - p).norm());
                 if d > 1e-6 && std::env::var_os("SSI_TEST_DEBUG").is_some() {
-                    eprintln!("  off by {d:e} at sample {i}/{n} {p:?}: a {:e} b {:e}", (a.eval(ua.0, ua.1) - p).norm(), (b.eval(ub.0, ub.1) - p).norm());
+                    eprintln!(
+                        "  off by {d:e} at sample {i}/{n} {p:?}: a {:e} b {:e}",
+                        (a.eval(ua.0, ua.1) - p).norm(),
+                        (b.eval(ub.0, ub.1) - p).norm()
+                    );
                 }
                 dev = dev.max(d);
             }
@@ -89,7 +101,10 @@ fn clipped(cs: &[IntCurve], a: &Surface, da: Dom, b: &Surface, db: Dom) -> (f64,
 
 /// The parameter box of a face: its p-curves' extent.
 fn face_dom(body: &Body, f: usize) -> Dom {
-    let (mut u, mut v) = ((f64::INFINITY, f64::NEG_INFINITY), (f64::INFINITY, f64::NEG_INFINITY));
+    let (mut u, mut v) = (
+        (f64::INFINITY, f64::NEG_INFINITY),
+        (f64::INFINITY, f64::NEG_INFINITY),
+    );
     for co in body.faces[f].loops.iter().flatten() {
         let e = &body.edges[co.edge];
         for i in 0..=64 {
@@ -108,25 +123,45 @@ fn smlib_domain(s: &Surface, face: Dom) -> Dom {
     let ((u0, u1), (v0, v1)) = s.param_box();
     let open = |a: f64, b: f64| a <= -1e4 || b >= 1e4;
     let whole = matches!(s, Surface::Nurbs(_) | Surface::Sphere { .. });
-    let u = if whole && !open(u0, u1) { (u0, u1) } else { face.0 };
-    let v = if whole && !open(v0, v1) { (v0, v1) } else { face.1 };
+    let u = if whole && !open(u0, u1) {
+        (u0, u1)
+    } else {
+        face.0
+    };
+    let v = if whole && !open(v0, v1) {
+        (v0, v1)
+    } else {
+        face.1
+    };
     (u, v)
 }
 
 /// The two surfaces of a fixture with their parameter boxes: brep 0's and brep 1's face, or
 /// the part's two surfaces over their whole ranges.
 fn fixture(file: &str) -> [(Surface, Dom); 2] {
-    let path = format!("{}/tests/data/smlib/ssi_advanced/{file}", env!("CARGO_MANIFEST_DIR"));
+    let path = format!(
+        "{}/tests/data/smlib/ssi_advanced/{file}",
+        env!("CARGO_MANIFEST_DIR")
+    );
     let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
     let part = smb::read_part(&bytes).unwrap_or_else(|e| panic!("{file}: {e}"));
     if part.breps.len() >= 2 {
         let side = |k: usize| {
             let body = &part.breps[k].body;
-            assert_eq!(body.faces.len(), 1, "{file}: brep {k} has {} faces", body.faces.len());
+            assert_eq!(
+                body.faces.len(),
+                1,
+                "{file}: brep {k} has {} faces",
+                body.faces.len()
+            );
             let s = body.faces[0].surf.clone();
             let d = face_dom(body, 0);
             // (A face whose p-curves span nothing, a closed surface's seam: the whole range.)
-            let d = if d.0 .1 - d.0 .0 > 1e-9 && d.1 .1 - d.1 .0 > 1e-9 { d } else { s.param_box() };
+            let d = if d.0.1 - d.0.0 > 1e-9 && d.1.1 - d.1.0 > 1e-9 {
+                d
+            } else {
+                s.param_box()
+            };
             (s.clone(), smlib_domain(&s, d))
         };
         [side(0), side(1)]
@@ -152,17 +187,32 @@ fn intersect(a: &Surface, da: Dom, b: &Surface, db: Dom) -> Vec<IntCurve> {
 fn smlib_case(file: &str, length: f64, rel: f64) {
     let [(a, da), (b, db)] = fixture(file);
     if std::env::var_os("SSI_TEST_DEBUG").is_some() {
-        eprintln!("{file}: a {:?} over {da:?} (box {:?}), b {:?} over {db:?} (box {:?})", a.kind(), a.param_box(), b.kind(), b.param_box());
+        eprintln!(
+            "{file}: a {:?} over {da:?} (box {:?}), b {:?} over {db:?} (box {:?})",
+            a.kind(),
+            a.param_box(),
+            b.kind(),
+            b.param_box()
+        );
     }
     let t = std::time::Instant::now();
     let cs = intersect(&a, da, &b, db);
     let el = t.elapsed();
     let (len, dev) = clipped(&cs, &a, da, &b, db);
     let raw: Vec<f64> = cs.iter().map(|ic| ic.c.length(ic.t0, ic.t1)).collect();
-    eprintln!("{file}: {} curves {raw:.4?}, length {len:.6} (SMLib {length:.6}), deviation {dev:.1e}, {el:?}", cs.len());
+    eprintln!(
+        "{file}: {} curves {raw:.4?}, length {len:.6} (SMLib {length:.6}), deviation {dev:.1e}, {el:?}",
+        cs.len()
+    );
     let scale = a.patch_bbox(da.0, da.1).diagonal().max(1.0);
-    assert!(dev < 1e-6 * scale, "{file}: a curve strays {dev:e} from the surfaces");
-    assert!((len - length).abs() <= rel * length.max(1.0), "{file}: length {len}, SMLib {length}");
+    assert!(
+        dev < 1e-6 * scale,
+        "{file}: a curve strays {dev:e} from the surfaces"
+    );
+    assert!(
+        (len - length).abs() <= rel * length.max(1.0),
+        "{file}: length {len}, SMLib {length}"
+    );
 }
 
 macro_rules! smlib {
@@ -240,7 +290,10 @@ fn frame(o: P3, z: V3) -> Frame {
 }
 
 fn region(r: f64) -> Bbox {
-    Bbox { min: P3::new(-r, -r, -r), max: P3::new(r, r, r) }
+    Bbox {
+        min: P3::new(-r, -r, -r),
+        max: P3::new(r, r, r),
+    }
 }
 
 /// The surface as a B-spline (so no closed form applies).
@@ -254,7 +307,10 @@ fn assert_on_both(cs: &[IntCurve], a: &Surface, b: &Surface, tol: f64) {
         for i in 0..=200 {
             let p = ic.c.point(ic.t0 + (ic.t1 - ic.t0) * i as f64 / 200.0);
             let (da, db) = (a.distance(&p), b.distance(&p));
-            assert!(da < tol && db < tol, "point {p:?} off the surfaces: {da:e}, {db:e}");
+            assert!(
+                da < tol && db < tol,
+                "point {p:?} off the surfaces: {da:e}, {db:e}"
+            );
         }
     }
 }
@@ -267,9 +323,21 @@ fn total_length(cs: &[IntCurve]) -> f64 {
 /// points where the cylinders are tangent.
 #[test]
 fn branching_cylinders() {
-    let a = Surface::Cylinder { f: frame(P3::origin(), V3::z()), r: 1.0 };
-    let b = Surface::Cylinder { f: frame(P3::origin(), V3::x()), r: 1.0 };
-    let cs = ssi::surface_surface(&a, ((0.0, TAU), (-2.0, 2.0)), &b, ((0.0, TAU), (-2.0, 2.0)), &region(2.0));
+    let a = Surface::Cylinder {
+        f: frame(P3::origin(), V3::z()),
+        r: 1.0,
+    };
+    let b = Surface::Cylinder {
+        f: frame(P3::origin(), V3::x()),
+        r: 1.0,
+    };
+    let cs = ssi::surface_surface(
+        &a,
+        ((0.0, TAU), (-2.0, 2.0)),
+        &b,
+        ((0.0, TAU), (-2.0, 2.0)),
+        &region(2.0),
+    );
     assert_on_both(&cs, &a, &b, 1e-6);
     // Each ellipse has semi-axes √2 and 1: perimeter 7.640395578.
     let len = total_length(&cs);
@@ -279,9 +347,21 @@ fn branching_cylinders() {
 /// Two perpendicular cylinders touching from outside: a single point of contact, no curve.
 #[test]
 fn tangent_cylinders_touch_at_a_point() {
-    let a = Surface::Cylinder { f: frame(P3::origin(), V3::z()), r: 1.0 };
-    let b = Surface::Cylinder { f: frame(P3::new(0.0, 2.0, 0.0), V3::x()), r: 1.0 };
-    let cs = ssi::surface_surface(&a, ((0.0, TAU), (-2.0, 2.0)), &b, ((0.0, TAU), (-2.0, 2.0)), &region(3.0));
+    let a = Surface::Cylinder {
+        f: frame(P3::origin(), V3::z()),
+        r: 1.0,
+    };
+    let b = Surface::Cylinder {
+        f: frame(P3::new(0.0, 2.0, 0.0), V3::x()),
+        r: 1.0,
+    };
+    let cs = ssi::surface_surface(
+        &a,
+        ((0.0, TAU), (-2.0, 2.0)),
+        &b,
+        ((0.0, TAU), (-2.0, 2.0)),
+        &region(3.0),
+    );
     assert!(total_length(&cs) < 1e-6, "{} curves", cs.len());
 }
 
@@ -289,17 +369,32 @@ fn tangent_cylinders_touch_at_a_point() {
 /// surface 2 across: a loop far smaller than any fixed sampling grid sees.
 #[test]
 fn small_loop_on_a_spline_sphere() {
-    let sph = Surface::Sphere { f: frame(P3::origin(), V3::z()), r: 1.0 };
+    let sph = Surface::Sphere {
+        f: frame(P3::origin(), V3::z()),
+        r: 1.0,
+    };
     let a = nurbs(&sph, (0.0, TAU), (-PI / 2.0, PI / 2.0));
     let h = 0.99999;
-    let b = Surface::Plane { f: Frame::from_z(P3::new(0.0, 0.0, h), V3::new(0.3, 0.2, 1.0).normalize()) };
+    let b = Surface::Plane {
+        f: Frame::from_z(P3::new(0.0, 0.0, h), V3::new(0.3, 0.2, 1.0).normalize()),
+    };
     let n = V3::new(0.3, 0.2, 1.0).normalize();
     let d = h * n.z; // the plane's distance from the centre
     let r = (1.0 - d * d).sqrt();
-    let cs = ssi::surface_surface(&a, ((0.0, TAU), (-PI / 2.0, PI / 2.0)), &b, ((-2.0, 2.0), (-2.0, 2.0)), &region(1.5));
+    let cs = ssi::surface_surface(
+        &a,
+        ((0.0, TAU), (-PI / 2.0, PI / 2.0)),
+        &b,
+        ((-2.0, 2.0), (-2.0, 2.0)),
+        &region(1.5),
+    );
     assert_on_both(&cs, &sph, &b, 1e-7);
     let len = total_length(&cs);
-    assert!((len - TAU * r).abs() < 1e-5 * TAU * r + 1e-9, "length {len}, circle {}", TAU * r);
+    assert!(
+        (len - TAU * r).abs() < 1e-5 * TAU * r + 1e-9,
+        "length {len}, circle {}",
+        TAU * r
+    );
     assert!(cs.iter().all(|c| c.closed), "the loop isn't closed");
 }
 
@@ -307,15 +402,28 @@ fn small_loop_on_a_spline_sphere() {
 /// searched.
 #[test]
 fn numeric_engine_finds_tiny_loop() {
-    let sph = Surface::Sphere { f: frame(P3::origin(), V3::z()), r: 1.0 };
+    let sph = Surface::Sphere {
+        f: frame(P3::origin(), V3::z()),
+        r: 1.0,
+    };
     let r: f64 = 1e-3;
-    let b = Surface::Plane { f: Frame::from_z(P3::new(0.0, 0.0, (1.0 - r * r).sqrt()), V3::z()) };
-    let (res, st) = ssi_numeric::intersect_stats(&sph, UvBox::new((0.0, TAU), (-PI / 2.0, PI / 2.0)), &b, UvBox::new((-2.0, 2.0), (-2.0, 2.0)), &region(1.5));
+    let b = Surface::Plane {
+        f: Frame::from_z(P3::new(0.0, 0.0, (1.0 - r * r).sqrt()), V3::z()),
+    };
+    let (res, st) = ssi_numeric::intersect_stats(
+        &sph,
+        UvBox::new((0.0, TAU), (-PI / 2.0, PI / 2.0)),
+        &b,
+        UvBox::new((-2.0, 2.0), (-2.0, 2.0)),
+        &region(1.5),
+    );
     eprintln!("tiny loop: {st:?}, {} curves", res.curves.len());
     assert_eq!(res.curves.len(), 1);
     let c = &res.curves[0];
     assert!(c.closed);
-    let len: f64 = (0..c.pts.len()).map(|k| (c.pts[(k + 1) % c.pts.len()].p - c.pts[k].p).norm()).sum();
+    let len: f64 = (0..c.pts.len())
+        .map(|k| (c.pts[(k + 1) % c.pts.len()].p - c.pts[k].p).norm())
+        .sum();
     assert!((len - TAU * r).abs() < 0.01 * TAU * r, "length {len}");
 }
 
@@ -323,9 +431,22 @@ fn numeric_engine_finds_tiny_loop() {
 /// pinched almost to a point where the sphere is nearly tangent to the tube.
 #[test]
 fn near_tangent_torus_and_sphere() {
-    let tor = Surface::Torus { f: frame(P3::origin(), V3::z()), rmaj: 3.0, rmin: 1.0 };
-    let sph = Surface::Sphere { f: frame(P3::new(3.0, 0.0, 0.0), V3::z()), r: 1.001 };
-    let cs = ssi::surface_surface(&tor, ((0.0, TAU), (-PI, PI)), &sph, ((0.0, TAU), (-PI / 2.0, PI / 2.0)), &region(5.0));
+    let tor = Surface::Torus {
+        f: frame(P3::origin(), V3::z()),
+        rmaj: 3.0,
+        rmin: 1.0,
+    };
+    let sph = Surface::Sphere {
+        f: frame(P3::new(3.0, 0.0, 0.0), V3::z()),
+        r: 1.001,
+    };
+    let cs = ssi::surface_surface(
+        &tor,
+        ((0.0, TAU), (-PI, PI)),
+        &sph,
+        ((0.0, TAU), (-PI / 2.0, PI / 2.0)),
+        &region(5.0),
+    );
     assert_on_both(&cs, &tor, &sph, 1e-6);
     assert_eq!(cs.len(), 2, "two loops");
     assert!(cs.iter().all(|c| c.closed));
@@ -335,9 +456,22 @@ fn near_tangent_torus_and_sphere() {
 /// of length 2π) and crosses it nowhere.
 #[test]
 fn tangent_torus_and_sphere() {
-    let tor = Surface::Torus { f: frame(P3::origin(), V3::z()), rmaj: 3.0, rmin: 1.0 };
-    let sph = Surface::Sphere { f: frame(P3::new(3.0, 0.0, 0.0), V3::z()), r: 1.0 };
-    let cs = ssi::surface_surface(&tor, ((0.0, TAU), (-PI, PI)), &sph, ((0.0, TAU), (-PI / 2.0, PI / 2.0)), &region(5.0));
+    let tor = Surface::Torus {
+        f: frame(P3::origin(), V3::z()),
+        rmaj: 3.0,
+        rmin: 1.0,
+    };
+    let sph = Surface::Sphere {
+        f: frame(P3::new(3.0, 0.0, 0.0), V3::z()),
+        r: 1.0,
+    };
+    let cs = ssi::surface_surface(
+        &tor,
+        ((0.0, TAU), (-PI, PI)),
+        &sph,
+        ((0.0, TAU), (-PI / 2.0, PI / 2.0)),
+        &region(5.0),
+    );
     assert_on_both(&cs, &tor, &sph, 1e-5);
     let len = total_length(&cs);
     assert!((len - TAU).abs() < 1e-2, "length {len}");
@@ -347,8 +481,16 @@ fn tangent_torus_and_sphere() {
 /// every curve point on both surfaces, and the same length either way round.
 #[test]
 fn crossing_spline_tori_symmetric() {
-    let t1 = Surface::Torus { f: frame(P3::origin(), V3::z()), rmaj: 3.0, rmin: 1.0 };
-    let t2 = Surface::Torus { f: frame(P3::new(3.0, 0.0, 0.0), V3::y()), rmaj: 1.5, rmin: 1.0 };
+    let t1 = Surface::Torus {
+        f: frame(P3::origin(), V3::z()),
+        rmaj: 3.0,
+        rmin: 1.0,
+    };
+    let t2 = Surface::Torus {
+        f: frame(P3::new(3.0, 0.0, 0.0), V3::y()),
+        rmaj: 1.5,
+        rmin: 1.0,
+    };
     let (da, db) = (((0.0, TAU), (-PI, PI)), ((0.0, TAU), (-PI, PI)));
     let (n1, n2) = (nurbs(&t1, da.0, da.1), nurbs(&t2, db.0, db.1));
     let ab = ssi::surface_surface(&n1, da, &n2, db, &region(8.0));
@@ -358,16 +500,33 @@ fn crossing_spline_tori_symmetric() {
     assert!(l1 > 1.0 && (l1 - l2).abs() < 1e-5 * l1, "{l1} vs {l2}");
 }
 
-
 /// SMLib's ssi_cone_cyl1 with the cone analytic: a cone (apex (5, 0, 0), base radius 5 at x = 0,
 /// its seam on +z) against a cylinder of radius 5 along x, touching it along the generator to
 /// the apex. The curve through the apex crosses the cone's seam; its two marches met there
 /// overlapping (14.517 against SMLib's 14.483). Regression: they meet at the earlier one's end.
 #[test]
 fn cone_seam_curves_meet_without_overlap() {
-    let cone = Surface::Cone { f: Frame { o: P3::origin(), x: V3::z(), y: V3::x().cross(&V3::z()), z: V3::x() }, r: 5.0, a: -std::f64::consts::FRAC_PI_4 };
-    let cyl = Surface::Cylinder { f: frame(P3::new(0.0, -5.0, 0.0), V3::x()), r: 5.0 };
-    let cs = ssi::surface_surface(&cyl, ((0.0, TAU), (0.0, 5.0)), &cone, ((0.0, TAU), (0.0, 5.0 * 2f64.sqrt())), &region(10.0));
+    let cone = Surface::Cone {
+        f: Frame {
+            o: P3::origin(),
+            x: V3::z(),
+            y: V3::x().cross(&V3::z()),
+            z: V3::x(),
+        },
+        r: 5.0,
+        a: -std::f64::consts::FRAC_PI_4,
+    };
+    let cyl = Surface::Cylinder {
+        f: frame(P3::new(0.0, -5.0, 0.0), V3::x()),
+        r: 5.0,
+    };
+    let cs = ssi::surface_surface(
+        &cyl,
+        ((0.0, TAU), (0.0, 5.0)),
+        &cone,
+        ((0.0, TAU), (0.0, 5.0 * 2f64.sqrt())),
+        &region(10.0),
+    );
     assert_on_both(&cs, &cyl, &cone, 1e-6);
     let len = total_length(&cs);
     assert!((len - 14.48270673448).abs() < 5e-3, "length {len}");
@@ -380,22 +539,54 @@ fn cone_seam_curves_meet_without_overlap() {
 /// Now the side itself (one curve) and the eight crossings, each from the side to the far side.
 #[test]
 fn box_side_on_the_other_surface() {
-    let body = cadrs_kernel::native::bodyio::read(include_bytes!("data/ssi_side_on_cylinder.body")).unwrap();
+    let body = cadrs_kernel::native::bodyio::read(include_bytes!("data/ssi_side_on_cylinder.body"))
+        .unwrap();
     let (cyl, wall) = (&body.faces[0].surf, &body.faces[1].surf);
-    let region = Bbox { min: P3::new(-0.07701975090180072, -0.11003187651919082, 0.298583911423951), max: P3::new(0.11003456216815335, 0.11003869235335319, 0.50071534336464) };
-    let r = ssi::surface_surface_full(cyl, ((0.0, TAU), (0.0, 1.0)), wall, ((0.0, 1.0), (0.0, 1.0)), &region);
+    let region = Bbox {
+        min: P3::new(
+            -0.07701975090180072,
+            -0.11003187651919082,
+            0.298583911423951,
+        ),
+        max: P3::new(0.11003456216815335, 0.11003869235335319, 0.50071534336464),
+    };
+    let r = ssi::surface_surface_full(
+        cyl,
+        ((0.0, TAU), (0.0, 1.0)),
+        wall,
+        ((0.0, 1.0), (0.0, 1.0)),
+        &region,
+    );
     let len = |c: &IntCurve| c.c.length(c.t0.min(c.t1), c.t0.max(c.t1));
-    let (long, short): (Vec<&IntCurve>, Vec<&IntCurve>) = r.curves.iter().partition(|c| len(c) > 0.5);
-    assert_eq!(long.len(), 1, "the side, once: {:?}", r.curves.iter().map(len).collect::<Vec<_>>());
-    assert!((len(long[0]) - 1.1675).abs() < 1e-3, "the side's length {}", len(long[0]));
-    assert_eq!(short.len(), 8, "the crossings: {:?}", short.iter().map(|c| len(c)).collect::<Vec<_>>());
+    let (long, short): (Vec<&IntCurve>, Vec<&IntCurve>) =
+        r.curves.iter().partition(|c| len(c) > 0.5);
+    assert_eq!(
+        long.len(),
+        1,
+        "the side, once: {:?}",
+        r.curves.iter().map(len).collect::<Vec<_>>()
+    );
+    assert!(
+        (len(long[0]) - 1.1675).abs() < 1e-3,
+        "the side's length {}",
+        len(long[0])
+    );
+    assert_eq!(
+        short.len(),
+        8,
+        "the crossings: {:?}",
+        short.iter().map(|c| len(c)).collect::<Vec<_>>()
+    );
     // Each crossing runs from the side (on the cylinder of radius 0.1 round z) to the face's
     // far side (radius 0.11).
     let rho = |p: P3| (p.x * p.x + p.y * p.y).sqrt();
     for c in short {
         let (a, b) = (rho(c.c.point(c.t0)), rho(c.c.point(c.t1)));
         let (lo, hi) = (a.min(b), a.max(b));
-        assert!((lo - 0.1).abs() < 1e-6 && (hi - 0.11).abs() < 1e-6, "a crossing from radius {lo} to {hi}");
+        assert!(
+            (lo - 0.1).abs() < 1e-6 && (hi - 0.11).abs() < 1e-6,
+            "a crossing from radius {lo} to {hi}"
+        );
     }
 }
 
@@ -404,20 +595,62 @@ fn box_side_on_the_other_surface() {
 /// y = 0 and 1 up to where a leaves b) and where a leaves b inside the boxes (the line x ≈ 1).
 #[test]
 fn partly_coincident_region_boundary() {
-    use cadrs_kernel::native::nurbs::{hom, NurbsSurface};
+    use cadrs_kernel::native::nurbs::{NurbsSurface, hom};
     let row = |x: f64, z: f64| vec![hom(&P3::new(x, 0.0, z), 1.0), hom(&P3::new(x, 1.0, z), 1.0)];
-    let a = NurbsSurface::new(2, 1, vec![0.0, 0.0, 0.0, 1.0, 2.0, 2.0, 2.0], vec![0.0, 0.0, 1.0, 1.0], vec![row(0.0, 0.0), row(0.5, 0.0), row(1.5, 0.0), row(2.0, 1.0)]).unwrap();
-    let b = NurbsSurface::new(1, 1, vec![0.0, 0.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0], vec![vec![hom(&P3::new(-0.5, -0.5, 0.0), 1.0), hom(&P3::new(-0.5, 1.5, 0.0), 1.0)], vec![hom(&P3::new(2.5, -0.5, 0.0), 1.0), hom(&P3::new(2.5, 1.5, 0.0), 1.0)]]).unwrap();
+    let a = NurbsSurface::new(
+        2,
+        1,
+        vec![0.0, 0.0, 0.0, 1.0, 2.0, 2.0, 2.0],
+        vec![0.0, 0.0, 1.0, 1.0],
+        vec![row(0.0, 0.0), row(0.5, 0.0), row(1.5, 0.0), row(2.0, 1.0)],
+    )
+    .unwrap();
+    let b = NurbsSurface::new(
+        1,
+        1,
+        vec![0.0, 0.0, 1.0, 1.0],
+        vec![0.0, 0.0, 1.0, 1.0],
+        vec![
+            vec![
+                hom(&P3::new(-0.5, -0.5, 0.0), 1.0),
+                hom(&P3::new(-0.5, 1.5, 0.0), 1.0),
+            ],
+            vec![
+                hom(&P3::new(2.5, -0.5, 0.0), 1.0),
+                hom(&P3::new(2.5, 1.5, 0.0), 1.0),
+            ],
+        ],
+    )
+    .unwrap();
     let (a, b) = (Surface::Nurbs(Arc::new(a)), Surface::Nurbs(Arc::new(b)));
-    let r = ssi::surface_surface_full(&a, ((0.0, 2.0), (0.0, 1.0)), &b, ((0.0, 1.0), (0.0, 1.0)), &region(3.0));
+    let r = ssi::surface_surface_full(
+        &a,
+        ((0.0, 2.0), (0.0, 1.0)),
+        &b,
+        ((0.0, 1.0), (0.0, 1.0)),
+        &region(3.0),
+    );
     let len = |c: &IntCurve| c.c.length(c.t0.min(c.t1), c.t0.max(c.t1));
     let total: f64 = r.coincident.iter().map(len).sum();
-    assert!(r.curves.is_empty() && r.tangent.is_empty(), "nothing but the region's boundary: {} crossing, {} tangent", r.curves.len(), r.tangent.len());
+    assert!(
+        r.curves.is_empty() && r.tangent.is_empty(),
+        "nothing but the region's boundary: {} crossing, {} tangent",
+        r.curves.len(),
+        r.tangent.len()
+    );
     // x = 0 (1), the two sides to x ≈ 1 (each a little over 1), and the line where a parts.
     assert!((total - 4.0).abs() < 0.05, "the boundary's length {total}");
-    let parting = r.coincident.iter().find(|c| [0.0, 0.5, 1.0].iter().all(|f| (c.c.point(c.t0 + (c.t1 - c.t0) * f).x - 1.0).abs() < 0.02));
+    let parting = r.coincident.iter().find(|c| {
+        [0.0, 0.5, 1.0]
+            .iter()
+            .all(|f| (c.c.point(c.t0 + (c.t1 - c.t0) * f).x - 1.0).abs() < 0.02)
+    });
     let parting = parting.expect("a boundary curve along x ≈ 1");
-    assert!((len(parting) - 1.0).abs() < 1e-3, "the parting line's length {}", len(parting));
+    assert!(
+        (len(parting) - 1.0).abs() < 1e-3,
+        "the parting line's length {}",
+        len(parting)
+    );
     for f in [0.0, 0.25, 0.5, 0.75, 1.0] {
         let p = parting.c.point(parting.t0 + (parting.t1 - parting.t0) * f);
         assert!(p.z.abs() < 1e-5, "the parting line off b: {p:?}");

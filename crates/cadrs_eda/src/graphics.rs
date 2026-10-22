@@ -35,7 +35,10 @@ pub struct Stroke {
 
 impl Stroke {
     pub fn width(width: Nm) -> Stroke {
-        Stroke { width, ..Default::default() }
+        Stroke {
+            width,
+            ..Default::default()
+        }
     }
 }
 
@@ -54,16 +57,34 @@ pub enum Fill {
 /// The geometry of a shape.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Geom {
-    Line { a: Pt, b: Pt },
+    Line {
+        a: Pt,
+        b: Pt,
+    },
     /// Joined segments; `closed` joins the last point to the first.
-    Polyline { pts: Vec<Pt>, closed: bool },
+    Polyline {
+        pts: Vec<Pt>,
+        closed: bool,
+    },
     /// Corners `a` and `b`, axis-aligned.
-    Rect { a: Pt, b: Pt },
-    Circle { center: Pt, radius: Nm },
+    Rect {
+        a: Pt,
+        b: Pt,
+    },
+    Circle {
+        center: Pt,
+        radius: Nm,
+    },
     /// Through `start`, `mid` and `end`.
-    Arc { start: Pt, mid: Pt, end: Pt },
+    Arc {
+        start: Pt,
+        mid: Pt,
+        end: Pt,
+    },
     /// A cubic Bézier.
-    Bezier { pts: [Pt; 4] },
+    Bezier {
+        pts: [Pt; 4],
+    },
 }
 
 impl Geom {
@@ -78,10 +99,20 @@ impl Geom {
     pub fn map(&self, f: impl Fn(Pt) -> Pt) -> Geom {
         match self {
             Geom::Line { a, b } => Geom::Line { a: f(*a), b: f(*b) },
-            Geom::Polyline { pts, closed } => Geom::Polyline { pts: pts.iter().map(|p| f(*p)).collect(), closed: *closed },
+            Geom::Polyline { pts, closed } => Geom::Polyline {
+                pts: pts.iter().map(|p| f(*p)).collect(),
+                closed: *closed,
+            },
             Geom::Rect { a, b } => Geom::Rect { a: f(*a), b: f(*b) },
-            Geom::Circle { center, radius } => Geom::Circle { center: f(*center), radius: *radius },
-            Geom::Arc { start, mid, end } => Geom::Arc { start: f(*start), mid: f(*mid), end: f(*end) },
+            Geom::Circle { center, radius } => Geom::Circle {
+                center: f(*center),
+                radius: *radius,
+            },
+            Geom::Arc { start, mid, end } => Geom::Arc {
+                start: f(*start),
+                mid: f(*mid),
+                end: f(*end),
+            },
             Geom::Bezier { pts } => Geom::Bezier { pts: pts.map(&f) },
         }
     }
@@ -89,7 +120,10 @@ impl Geom {
     /// A rectangle as its closed polygon (other shapes unchanged).
     pub fn rect_as_polyline(&self) -> Geom {
         match self {
-            Geom::Rect { a, b } => Geom::Polyline { pts: vec![*a, Pt::new(b.x, a.y), *b, Pt::new(a.x, b.y)], closed: true },
+            Geom::Rect { a, b } => Geom::Polyline {
+                pts: vec![*a, Pt::new(b.x, a.y), *b, Pt::new(a.x, b.y)],
+                closed: true,
+            },
             g => g.clone(),
         }
     }
@@ -100,11 +134,15 @@ impl Geom {
             Geom::Line { a, b } | Geom::Rect { a, b } => vec![*a, *b],
             Geom::Polyline { pts, .. } => pts.clone(),
             Geom::Circle { center, radius } => {
-                vec![*center - Pt::new(*radius, *radius), *center + Pt::new(*radius, *radius)]
+                vec![
+                    *center - Pt::new(*radius, *radius),
+                    *center + Pt::new(*radius, *radius),
+                ]
             }
-            Geom::Arc { start, mid, end } => {
-                crate::geom::arc_points(*start, *mid, *end, mm(0.01)).into_iter().map(|[x, y]| Pt::new(x as Nm, y as Nm)).collect()
-            }
+            Geom::Arc { start, mid, end } => crate::geom::arc_points(*start, *mid, *end, mm(0.01))
+                .into_iter()
+                .map(|[x, y]| Pt::new(x as Nm, y as Nm))
+                .collect(),
             Geom::Bezier { pts } => pts.to_vec(),
         }
     }
@@ -189,7 +227,13 @@ pub struct Text {
 
 impl Text {
     pub fn new(text: impl Into<String>, at: Pt) -> Text {
-        Text { text: text.into(), at, angle: 0.0, style: TextStyle::default(), visible: true }
+        Text {
+            text: text.into(),
+            at,
+            angle: 0.0,
+            style: TextStyle::default(),
+            visible: true,
+        }
     }
 
     /// How it is drawn: [`readable`] applied to its angle and alignment.

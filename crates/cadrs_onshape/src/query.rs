@@ -154,7 +154,12 @@ pub fn decode(query_string: &str) -> Result<Option<Value>, DecodeError> {
     let Some(body) = p.strip_prefix('%') else {
         return err(format!("payload does not start with '%': {:.20}", p));
     };
-    let mut r = Reader { s: body.as_bytes(), i: 0, names: Vec::new(), values: Vec::new() };
+    let mut r = Reader {
+        s: body.as_bytes(),
+        i: 0,
+        names: Vec::new(),
+        values: Vec::new(),
+    };
     let v = r.value(false)?;
     if r.i != r.s.len() {
         return err(format!("{} trailing bytes", r.s.len() - r.i));
@@ -171,7 +176,10 @@ struct Reader<'a> {
 
 impl Reader<'_> {
     fn peek(&self) -> Result<u8, DecodeError> {
-        self.s.get(self.i).copied().ok_or_else(|| DecodeError("unexpected end".into()))
+        self.s
+            .get(self.i)
+            .copied()
+            .ok_or_else(|| DecodeError("unexpected end".into()))
     }
 
     fn next(&mut self) -> Result<u8, DecodeError> {
@@ -187,11 +195,15 @@ impl Reader<'_> {
             self.i += 1;
         }
         let start = self.i;
-        while self.i < self.s.len() && self.s[self.i].is_ascii_hexdigit() && !self.s[self.i].is_ascii_uppercase() {
+        while self.i < self.s.len()
+            && self.s[self.i].is_ascii_hexdigit()
+            && !self.s[self.i].is_ascii_uppercase()
+        {
             self.i += 1;
         }
         let t = std::str::from_utf8(&self.s[start..self.i]).unwrap_or_default();
-        let n = i64::from_str_radix(t, 16).map_err(|_| DecodeError(format!("bad hex at {start}")))?;
+        let n =
+            i64::from_str_radix(t, 16).map_err(|_| DecodeError(format!("bad hex at {start}")))?;
         Ok(if neg { -n } else { n })
     }
 
@@ -215,7 +227,8 @@ impl Reader<'_> {
             }
         }
         let t = std::str::from_utf8(&self.s[start..self.i]).unwrap_or_default();
-        t.parse().map_err(|_| DecodeError(format!("bad number {t:?}")))
+        t.parse()
+            .map_err(|_| DecodeError(format!("bad number {t:?}")))
     }
 
     fn chars(&mut self, n: usize) -> Result<String, DecodeError> {
@@ -343,7 +356,10 @@ mod tests {
         let q = decode(FRONT).unwrap().unwrap();
         assert_eq!(q.type_name(), Some("Query"));
         assert_eq!(q.get("entityType").and_then(Value::as_str), Some("FACE"));
-        assert_eq!(q.get("operationId").and_then(Value::as_str), Some("Front.planeOp"));
+        assert_eq!(
+            q.get("operationId").and_then(Value::as_str),
+            Some("Front.planeOp")
+        );
         assert_eq!(q.get("queryType").and_then(Value::as_str), Some("DUMMY"));
     }
 
@@ -352,23 +368,41 @@ mod tests {
         let q = decode(REGION).unwrap().unwrap();
         // The outer query: the FACE the sketch imprint made.
         assert_eq!(q.get("entityType").and_then(Value::as_str), Some("FACE"));
-        assert_eq!(q.get("operationId").and_then(Value::as_str), Some("FszbPo4NarCEC97_1.imprint"));
+        assert_eq!(
+            q.get("operationId").and_then(Value::as_str),
+            Some("FszbPo4NarCEC97_1.imprint")
+        );
         assert_eq!(q.get("queryType").and_then(Value::as_str), Some("IMPRINT"));
         // Its one adjacent edge: [query, 1], derived from the cap edge of the extruded
         // sketch entity.
         let dd = &q.get("disambiguationData").unwrap().items()[0];
-        assert_eq!(dd.get("disambiguationType").and_then(Value::as_str), Some("TOPOLOGY"));
+        assert_eq!(
+            dd.get("disambiguationType").and_then(Value::as_str),
+            Some("TOPOLOGY")
+        );
         let pair = &dd.get("entities").unwrap().items()[0];
         assert_eq!(pair.items()[1], Value::Num(1.0));
         let edge = pair.items()[0].get("derivedFrom").unwrap();
-        assert_eq!(edge.get("queryType").and_then(Value::as_str), Some("CAP_EDGE"));
+        assert_eq!(
+            edge.get("queryType").and_then(Value::as_str),
+            Some("CAP_EDGE")
+        );
         assert_eq!(edge.get("isStart"), Some(&Value::Bool(false)));
-        let original = &edge.get("disambiguationData").unwrap().items()[0].get("originals").unwrap().items()[0];
-        assert_eq!(original.get("sketchEntityId").and_then(Value::as_str), Some("r15giJ5DaqKR"));
+        let original = &edge.get("disambiguationData").unwrap().items()[0]
+            .get("originals")
+            .unwrap()
+            .items()[0];
+        assert_eq!(
+            original.get("sketchEntityId").and_then(Value::as_str),
+            Some("r15giJ5DaqKR")
+        );
     }
 
     #[test]
     fn other_query_forms() {
-        assert_eq!(decode(r#"query = qSketchRegion(id + "FNP2rXizZqnAwTP_1", true);"#).unwrap(), None);
+        assert_eq!(
+            decode(r#"query = qSketchRegion(id + "FNP2rXizZqnAwTP_1", true);"#).unwrap(),
+            None
+        );
     }
 }

@@ -91,10 +91,15 @@ impl P<'_> {
             _ => {
                 self.ws();
                 let start = self.i;
-                while self.i < self.s.len() && (self.s[self.i].is_ascii_digit() || self.s[self.i] == b'.') {
+                while self.i < self.s.len()
+                    && (self.s[self.i].is_ascii_digit() || self.s[self.i] == b'.')
+                {
                     self.i += 1;
                 }
-                let n: f64 = std::str::from_utf8(&self.s[start..self.i]).unwrap().parse().map_err(|_| format!("not a number at {}", start + 1))?;
+                let n: f64 = std::str::from_utf8(&self.s[start..self.i])
+                    .unwrap()
+                    .parse()
+                    .map_err(|_| format!("not a number at {}", start + 1))?;
                 Ok(self.unit(n))
             }
         }
@@ -103,7 +108,14 @@ impl P<'_> {
     fn unit(&mut self, v: f64) -> (f64, bool) {
         self.ws();
         let rest = std::str::from_utf8(&self.s[self.i..]).unwrap_or("");
-        for (word, u) in [("mils", Unit::Mil), ("mil", Unit::Mil), ("mm", Unit::Mm), ("in", Unit::Inch), ("\"", Unit::Inch), ("th", Unit::Mil)] {
+        for (word, u) in [
+            ("mils", Unit::Mil),
+            ("mil", Unit::Mil),
+            ("mm", Unit::Mm),
+            ("in", Unit::Inch),
+            ("\"", Unit::Inch),
+            ("th", Unit::Mil),
+        ] {
             if rest.starts_with(word) {
                 self.i += word.len();
                 return (v * u.nm(), true);
@@ -115,7 +127,11 @@ impl P<'_> {
 
 /// Evaluates `text` to nanometres; plain numbers are in `default`.
 pub fn eval(text: &str, default: Unit) -> Result<Nm, String> {
-    let mut p = P { s: text.as_bytes(), i: 0, default };
+    let mut p = P {
+        s: text.as_bytes(),
+        i: 0,
+        default,
+    };
     let v = p.sum()?;
     if p.peek().is_some() {
         return Err(format!("unexpected '{}'", &text[p.i..]));

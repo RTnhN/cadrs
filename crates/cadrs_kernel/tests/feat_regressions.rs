@@ -2,20 +2,35 @@
 //! closed forms: pockets up to and between curved faces, through-all drafted prisms, and
 //! features up to several faces.
 
-use cadrs_kernel::native::draw::Shape;
 use cadrs_kernel::native::NativeKernel;
+use cadrs_kernel::native::draw::Shape;
 use cadrs_kernel::{Kernel, SurfaceKind};
 
 /// The face of a body with a surface of `kind`.
 fn face_of(k: &NativeKernel, s: &Shape, kind: SurfaceKind) -> Shape {
-    let Shape::Body(b) = s else { panic!("not a body") };
-    let f = k.faces(*b).unwrap().into_iter().find(|f| f.kind == kind).unwrap();
+    let Shape::Body(b) = s else {
+        panic!("not a body")
+    };
+    let f = k
+        .faces(*b)
+        .unwrap()
+        .into_iter()
+        .find(|f| f.kind == kind)
+        .unwrap();
     Shape::BodyFace(*b, f.id)
 }
 
 /// A rectangle x ∈ [x0, x1], z ∈ [z0, z1] in the plane y = `y`, as a planar face.
 fn rect(k: &NativeKernel, y: f64, (x0, x1): (f64, f64), (z0, z1): (f64, f64)) -> Shape {
-    let w = k.polyline(&[[x0, y, z0], [x1, y, z0], [x1, y, z1], [x0, y, z1], [x0, y, z0]]).unwrap();
+    let w = k
+        .polyline(&[
+            [x0, y, z0],
+            [x1, y, z0],
+            [x1, y, z1],
+            [x0, y, z1],
+            [x0, y, z0],
+        ])
+        .unwrap();
     k.mkplane(&w).unwrap()
 }
 
@@ -36,7 +51,18 @@ fn pocket_up_to_a_cylinder_goes_through_it() {
     let side = face_of(&k, &cyl, SurfaceKind::Cylinder);
     let (xs, zs) = ((-20.0, 25.0), (60.0, 150.0));
     let prof = rect(&k, -100.0, xs, zs);
-    let res = k.featperform(&cyl, &prof, &prof, "prism", [0.0, 1.0, 0.0, 0.0, 0.0, 0.0], 0, None, Some(&side)).unwrap();
+    let res = k
+        .featperform(
+            &cyl,
+            &prof,
+            &prof,
+            "prism",
+            [0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
+            0,
+            None,
+            Some(&side),
+        )
+        .unwrap();
     let v = k.vprops(&res).unwrap();
     let want = std::f64::consts::PI * r * r * h - (zs.1 - zs.0) * chord_area(r, xs.0, xs.1);
     assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
@@ -52,7 +78,18 @@ fn pocket_between_the_same_curved_face_spans_it() {
     let side = face_of(&k, &cyl, SurfaceKind::Cylinder);
     let (xs, zs) = ((-10.0, 30.0), (20.0, 70.0));
     let prof = rect(&k, -90.0, xs, zs);
-    let res = k.featperform(&cyl, &prof, &prof, "prism", [0.0, 1.0, 0.0, 0.0, 0.0, 0.0], 0, Some(&side), Some(&side)).unwrap();
+    let res = k
+        .featperform(
+            &cyl,
+            &prof,
+            &prof,
+            "prism",
+            [0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
+            0,
+            Some(&side),
+            Some(&side),
+        )
+        .unwrap();
     let v = k.vprops(&res).unwrap();
     let want = std::f64::consts::PI * r * r * h - (zs.1 - zs.0) * chord_area(r, xs.0, xs.1);
     assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
@@ -69,7 +106,18 @@ fn drafted_prism_through_all_tapers_through_the_profile() {
     let slab = k.ttranslate(&slab, -50.0, t0, -50.0).unwrap();
     let prof = rect(&k, 0.0, (-a / 2.0, a / 2.0), (-a / 2.0, a / 2.0));
     let angle_deg: f64 = 10.0; // DRAW's: the draft is half of it
-    let res = k.featperform(&slab, &prof, &prof, "dprism", [angle_deg, 0.0, 0.0, 0.0, 0.0, 0.0], 0, None, None).unwrap();
+    let res = k
+        .featperform(
+            &slab,
+            &prof,
+            &prof,
+            "dprism",
+            [angle_deg, 0.0, 0.0, 0.0, 0.0, 0.0],
+            0,
+            None,
+            None,
+        )
+        .unwrap();
     let v = k.vprops(&res).unwrap();
     let ta = (angle_deg.to_radians() / 2.0).tan();
     let frustum = |s: f64| {
@@ -79,5 +127,8 @@ fn drafted_prism_through_all_tapers_through_the_profile() {
     };
     let full = 100.0 * (t1 - t0) * 100.0;
     let (w1, w2) = (full - frustum(1.0), full - frustum(-1.0));
-    assert!((v - w1).abs() < 1e-6 * w1 || (v - w2).abs() < 1e-6 * w2, "{v} vs {w1} or {w2}");
+    assert!(
+        (v - w1).abs() < 1e-6 * w1 || (v - w2).abs() < 1e-6 * w2,
+        "{v} vs {w1} or {w2}"
+    );
 }

@@ -37,8 +37,8 @@ use cadrs_ui::prelude::*;
 use cadrs_ui::{
     CheckboxChange, FeatureDialogAccept, FeatureDialogCancel, FeatureDialogState, NumberField,
     NumberFieldCommit, NumberFieldState, OptionRow, Select, SelectChange, SelectState,
-    SelectionList, SelectionListActivate, SelectionListRemove, SelectionListState,
-    TabStrip, TabStripSelect,
+    SelectionList, SelectionListActivate, SelectionListRemove, SelectionListState, TabStrip,
+    TabStripSelect,
 };
 
 use crate::extrude::{ExtrudeField, ExtrudeSession, params, set_params};
@@ -170,37 +170,84 @@ fn up_to_label(features: &[Feature], cache: &PartCache, u: &UpTo) -> String {
 /// How a whole sketch reads in a feature's input field, as Onshape shows it: "Face of Sketch 1"
 /// for one region (`ex2-step3.png`), "Faces of Sketch 3" for several (`ex2-step5.png`); a
 /// surface's curves: the sketch's name.
-pub(crate) fn whole_sketch_label(features: &[Feature], sketch: FeatureId, body: BodyType) -> String {
+pub(crate) fn whole_sketch_label(
+    features: &[Feature],
+    sketch: FeatureId,
+    body: BodyType,
+) -> String {
     let Some(f) = features.iter().find(|f| f.id == sketch) else {
         return "sketch".into();
     };
     if body == BodyType::Surface {
         return f.name.clone();
     }
-    let n = f
-        .sketch()
-        .map_or(0, |s| cadrs_core::rebuild::whole_sketch_regions(&s.geometry).len());
-    if n > 1 { format!("Faces of {}", f.name) } else { format!("Face of {}", f.name) }
+    let n = f.sketch().map_or(0, |s| {
+        cadrs_core::rebuild::whole_sketch_regions(&s.geometry).len()
+    });
+    if n > 1 {
+        format!("Faces of {}", f.name)
+    } else {
+        format!("Face of {}", f.name)
+    }
 }
 
 /// The dialog's selection field items for `e`.
-pub(crate) fn labels(features: &[Feature], cache: &PartCache, feature: FeatureId, e: &ExtrudeFeature) -> Labels {
+pub(crate) fn labels(
+    features: &[Feature],
+    cache: &PartCache,
+    feature: FeatureId,
+    e: &ExtrudeFeature,
+) -> Labels {
     // P3G.4: a derived sketch's region reads "Face of Sketch 2 (Derived 1)".
     let name = |id: FeatureId| {
-        features.iter().find(|f| f.id == id).map(|f| f.name.clone()).or_else(|| {
-            let (d, n) = cache.derived.iter().find_map(|(d, o)| o.sketches.iter().find(|(s, _)| *s == id).map(|(_, n)| (*d, n.clone())))?;
-            let owner = features.iter().find(|f| f.id == d).map(|f| f.name.clone()).unwrap_or_default();
-            Some(format!("{n} ({owner})"))
-        }).unwrap_or_else(|| "sketch".into())
+        features
+            .iter()
+            .find(|f| f.id == id)
+            .map(|f| f.name.clone())
+            .or_else(|| {
+                let (d, n) = cache.derived.iter().find_map(|(d, o)| {
+                    o.sketches
+                        .iter()
+                        .find(|(s, _)| *s == id)
+                        .map(|(_, n)| (*d, n.clone()))
+                })?;
+                let owner = features
+                    .iter()
+                    .find(|f| f.id == d)
+                    .map(|f| f.name.clone())
+                    .unwrap_or_default();
+                Some(format!("{n} ({owner})"))
+            })
+            .unwrap_or_else(|| "sketch".into())
     };
     // A surface extrudes the region's boundary curves: "Curves of Sketch 1" (as the revolve's,
     // P3.5).
-    let what = if e.body == BodyType::Surface { "Curves" } else { "Face" };
-    let mut input: Vec<String> = e.regions.iter().map(|r| format!("{what} of {}", name(r.sketch))).collect();
-    input.extend(e.sketches.iter().map(|s| whole_sketch_label(features, *s, e.body)));
-    input.extend(e.faces.iter().map(|f| format!("Face of {}", feature_name(features, f.face.op))));
+    let what = if e.body == BodyType::Surface {
+        "Curves"
+    } else {
+        "Face"
+    };
+    let mut input: Vec<String> = e
+        .regions
+        .iter()
+        .map(|r| format!("{what} of {}", name(r.sketch)))
+        .collect();
+    input.extend(
+        e.sketches
+            .iter()
+            .map(|s| whole_sketch_label(features, *s, e.body)),
+    );
+    input.extend(
+        e.faces
+            .iter()
+            .map(|f| format!("Face of {}", feature_name(features, f.face.op))),
+    );
     let input_missing = missing_marks(cache, feature, &mut input);
-    let up_to = e.up_to.iter().map(|u| up_to_label(features, cache, u)).collect();
+    let up_to = e
+        .up_to
+        .iter()
+        .map(|u| up_to_label(features, cache, u))
+        .collect();
     let second_up_to = e
         .second
         .iter()
@@ -245,8 +292,16 @@ pub(crate) fn labels(features: &[Feature], cache: &PartCache, feature: FeatureId
 /// P3D.1 (IR5.2, X3): marks the inputs of `feature` the last rebuild could not resolve and
 /// renames them "Missing <label>" ("Missing Face of Sketch 3", `ex1-step13.png`): a lost input
 /// stays in its field, red, rather than being dropped. Returns the marks (one per item).
-pub(crate) fn missing_marks(cache: &PartCache, feature: FeatureId, items: &mut [String]) -> Vec<bool> {
-    let lost = cache.missing.get(&feature).map(Vec::as_slice).unwrap_or(&[]);
+pub(crate) fn missing_marks(
+    cache: &PartCache,
+    feature: FeatureId,
+    items: &mut [String],
+) -> Vec<bool> {
+    let lost = cache
+        .missing
+        .get(&feature)
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
     let mut marks = vec![false; items.len()];
     for &i in lost {
         if let Some(item) = items.get_mut(i) {
@@ -254,7 +309,11 @@ pub(crate) fn missing_marks(cache: &PartCache, feature: FeatureId, items: &mut [
             marks[i] = true;
         }
     }
-    if marks.iter().any(|m| *m) { marks } else { Vec::new() }
+    if marks.iter().any(|m| *m) {
+        marks
+    } else {
+        Vec::new()
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -279,7 +338,12 @@ pub(crate) fn final_button(f: &mut ChildSpawner, t: &Theme, name: &str) {
     f.spawn((
         ExtrudeFinal,
         crate::feature_list::FinalButton,
-        cadrs_ui::Button::new(format!("{name}-final")).label("Final").small().outline().tooltip("Show the final result").build(t),
+        cadrs_ui::Button::new(format!("{name}-final"))
+            .label("Final")
+            .small()
+            .outline()
+            .tooltip("Show the final result")
+            .build(t),
         observe(|_: On<Activate>, mut commands: Commands| {
             commands.queue(|world: &mut World| {
                 if let Some(mut s) = world.get_resource_mut::<ExtrudeSession>() {
@@ -311,11 +375,22 @@ pub(crate) fn sync_final_buttons(
 }
 
 pub(crate) fn flip_icon(flip: bool) -> &'static str {
-    if flip { "flip-direction-up" } else { "flip-direction" }
+    if flip {
+        "flip-direction-up"
+    } else {
+        "flip-direction"
+    }
 }
 
 /// A flip button (the black arrow of `screens/22`), 22 px square.
-pub(crate) fn flip_button_any<R: Component>(r: &mut ChildSpawner, t: &Theme, name: &str, role: R, flip: bool, tip: &str) {
+pub(crate) fn flip_button_any<R: Component>(
+    r: &mut ChildSpawner,
+    t: &Theme,
+    name: &str,
+    role: R,
+    flip: bool,
+    tip: &str,
+) {
     let mut v = cadrs_ui::button::visuals_for(t, cadrs_ui::ButtonVariant::Ghost);
     v.foreground = cadrs_ui::StateColors::all(Color::srgb_u8(0x1e, 0x1e, 0x1e));
     r.spawn((
@@ -346,8 +421,21 @@ fn sized(n: &mut Node) {
 /// A row: an end type select and its flip button (the first end's is `extrude-flip`, the
 /// second's `<name>-flip`).
 #[allow(clippy::too_many_arguments)]
-fn end_row(b: &mut ChildSpawner, t: &Theme, name: &str, role: Role, flip_role: Role, end: EndType, flip: bool, types: &[EndType]) {
-    let flip_name = if role == Role::EndType { "extrude-flip".to_string() } else { format!("{name}-flip") };
+fn end_row(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    name: &str,
+    role: Role,
+    flip_role: Role,
+    end: EndType,
+    flip: bool,
+    types: &[EndType],
+) {
+    let flip_name = if role == Role::EndType {
+        "extrude-flip".to_string()
+    } else {
+        format!("{name}-flip")
+    };
     let selected = types.iter().position(|x| *x == end).unwrap_or(0);
     let mut select = Select::new(name.to_string());
     for ty in types {
@@ -367,7 +455,15 @@ fn end_row(b: &mut ChildSpawner, t: &Theme, name: &str, role: Role, flip_role: R
 }
 
 /// A number field with a flip button after it.
-fn offset_row(b: &mut ChildSpawner, t: &Theme, name: &str, label: &str, role: Role, flip_role: Role, o: &Offset) {
+fn offset_row(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    name: &str,
+    label: &str,
+    role: Role,
+    flip_role: Role,
+    o: &Offset,
+) {
     b.spawn(Node {
         align_items: AlignItems::Center,
         column_gap: Val::Px(4.0),
@@ -384,11 +480,26 @@ fn offset_row(b: &mut ChildSpawner, t: &Theme, name: &str, label: &str, role: Ro
         ))
         .entry::<Node>()
         .and_modify(|mut n| n.flex_grow = 1.0);
-        flip_button(r, t, &format!("{name}-flip"), flip_role, o.flip, "Opposite direction");
+        flip_button(
+            r,
+            t,
+            &format!("{name}-flip"),
+            flip_role,
+            o.flip,
+            "Opposite direction",
+        );
     });
 }
 
-fn list(b: &mut ChildSpawner, t: &Theme, name: &str, placeholder: &str, role: Role, items: Vec<String>, active: bool) {
+fn list(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    name: &str,
+    placeholder: &str,
+    role: Role,
+    items: Vec<String>,
+    active: bool,
+) {
     b.spawn((
         role,
         SelectionList::new(name.to_string())
@@ -428,11 +539,28 @@ fn end_fields(
             ));
         }
         EndType::ThroughAll | EndType::UpToNext => {}
-        e => list(b, t, &format!("{prefix}up-to-field"), end_placeholder(e), up_to_role, up_to_items, up_to_active),
+        e => list(
+            b,
+            t,
+            &format!("{prefix}up-to-field"),
+            end_placeholder(e),
+            up_to_role,
+            up_to_items,
+            up_to_active,
+        ),
     }
     if end.end.is_up_to() {
         let o = end.offset.as_ref().map(|o| (o.expr.as_str(), o.flip));
-        inline_option(b, t, &format!("{prefix}offset"), &format!("{prefix}offset-distance"), "Offset distance", o, offset_role, offset_flip_role);
+        inline_option(
+            b,
+            t,
+            &format!("{prefix}offset"),
+            &format!("{prefix}offset-distance"),
+            "Offset distance",
+            o,
+            offset_role,
+            offset_flip_role,
+        );
     }
 }
 
@@ -440,22 +568,53 @@ fn end_fields(
 /// Onshape lays out "Offset distance" and "Draft" (P3.8 judge, P3.10).
 /// Also the hole's Offset (P3.11, P3.10 judge).
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn inline_option<R: Component>(b: &mut ChildSpawner, t: &Theme, name: &str, value_name: &str, label: &str, value: Option<(&str, bool)>, role: R, flip_role: R) {
-    b.spawn(Node { align_items: AlignItems::Center, column_gap: Val::Px(2.0), ..default() }).with_children(|r| {
-        r.spawn(OptionRow::new(name.to_string(), label.to_string()).checked(value.is_some()).build(t))
+pub(crate) fn inline_option<R: Component>(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    name: &str,
+    value_name: &str,
+    label: &str,
+    value: Option<(&str, bool)>,
+    role: R,
+    flip_role: R,
+) {
+    b.spawn(Node {
+        align_items: AlignItems::Center,
+        column_gap: Val::Px(2.0),
+        ..default()
+    })
+    .with_children(|r| {
+        r.spawn(
+            OptionRow::new(name.to_string(), label.to_string())
+                .checked(value.is_some())
+                .build(t),
+        )
+        .entry::<Node>()
+        .and_modify(|mut n| {
+            n.flex_grow = if value.is_some() { 0.0 } else { 1.0 };
+            n.flex_shrink = 0.0;
+        });
+        if let Some((text, flip)) = value {
+            r.spawn((
+                role,
+                NumberField::new(value_name.to_string(), "")
+                    .text(text.to_string())
+                    .label_width(0.0)
+                    .build(t),
+            ))
             .entry::<Node>()
             .and_modify(|mut n| {
-                n.flex_grow = if value.is_some() { 0.0 } else { 1.0 };
-                n.flex_shrink = 0.0;
+                n.flex_grow = 1.0;
+                n.min_width = Val::Px(0.0);
             });
-        if let Some((text, flip)) = value {
-            r.spawn((role, NumberField::new(value_name.to_string(), "").text(text.to_string()).label_width(0.0).build(t)))
-                .entry::<Node>()
-                .and_modify(|mut n| {
-                    n.flex_grow = 1.0;
-                    n.min_width = Val::Px(0.0);
-                });
-            flip_button_any(r, t, &format!("{value_name}-flip"), flip_role, flip, "Opposite direction");
+            flip_button_any(
+                r,
+                t,
+                &format!("{value_name}-flip"),
+                flip_role,
+                flip,
+                "Opposite direction",
+            );
         }
     });
 }
@@ -521,9 +680,26 @@ fn extrude_dialog(
                     } else {
                         "Faces and sketch regions to extrude"
                     };
-                    list(b, t, "extrude-regions-field", placeholder, Role::Input, labels.input.clone(), field == ExtrudeField::Input);
+                    list(
+                        b,
+                        t,
+                        "extrude-regions-field",
+                        placeholder,
+                        Role::Input,
+                        labels.input.clone(),
+                        field == ExtrudeField::Input,
+                    );
                     let types = layout.end_types();
-                    end_row(b, t, "extrude-end-type", Role::EndType, Role::Flip, e.end, e.flip, &types);
+                    end_row(
+                        b,
+                        t,
+                        "extrude-end-type",
+                        Role::EndType,
+                        Role::Flip,
+                        e.end,
+                        e.flip,
+                        &types,
+                    );
                     // Keep the old name of the flip button.
                     end_fields(
                         b,
@@ -550,9 +726,20 @@ fn extrude_dialog(
                             ))
                             .entry::<Node>()
                             .and_modify(|mut n| n.flex_grow = 1.0);
-                            flip_button(r, t, "extrude-flip-wall", Role::FlipWall, e.thin.flip_wall, "Flip wall");
+                            flip_button(
+                                r,
+                                t,
+                                "extrude-flip-wall",
+                                Role::FlipWall,
+                                e.thin.flip_wall,
+                                "Flip wall",
+                            );
                         });
-                        b.spawn(OptionRow::new("extrude-mid-plane", "Mid plane").checked(e.thin.mid_plane).build(t));
+                        b.spawn(
+                            OptionRow::new("extrude-mid-plane", "Mid plane")
+                                .checked(e.thin.mid_plane)
+                                .build(t),
+                        );
                         if !e.thin.mid_plane {
                             b.spawn((
                                 Role::Thickness2,
@@ -570,7 +757,15 @@ fn extrude_dialog(
                             .build(t),
                     );
                     if layout.direction {
-                        list(b, t, "extrude-direction-field", "Direction", Role::DirectionField, labels.direction.clone(), field == ExtrudeField::Direction);
+                        list(
+                            b,
+                            t,
+                            "extrude-direction-field",
+                            "Direction",
+                            Role::DirectionField,
+                            labels.direction.clone(),
+                            field == ExtrudeField::Direction,
+                        );
                     }
                     b.spawn(
                         OptionRow::new("extrude-starting-offset", "Starting offset")
@@ -579,16 +774,37 @@ fn extrude_dialog(
                             .build(t),
                     );
                     if let Some(o) = &e.start_offset {
-                        offset_row(b, t, "extrude-start-offset", "Starting offset", Role::StartOffsetValue, Role::StartOffsetFlip, o);
+                        offset_row(
+                            b,
+                            t,
+                            "extrude-start-offset",
+                            "Starting offset",
+                            Role::StartOffsetValue,
+                            Role::StartOffsetFlip,
+                            o,
+                        );
                     }
                     // Symmetric only splits a depth: Blind and Through all (P3.8 judge).
                     if matches!(e.end, EndType::Blind | EndType::ThroughAll) {
-                        b.spawn(OptionRow::new("extrude-symmetric", "Symmetric").checked(e.symmetric).build(t));
+                        b.spawn(
+                            OptionRow::new("extrude-symmetric", "Symmetric")
+                                .checked(e.symmetric)
+                                .build(t),
+                        );
                     }
                     // P3.10 (PS4.9): Draft, solids only.
                     if e.body == BodyType::Solid {
                         let d = e.draft.as_ref().map(|d| (d.expr.as_str(), d.flip));
-                        inline_option(b, t, "extrude-draft", "extrude-draft-angle", "Draft", d, Role::DraftAngle, Role::DraftFlip);
+                        inline_option(
+                            b,
+                            t,
+                            "extrude-draft",
+                            "extrude-draft-angle",
+                            "Draft",
+                            d,
+                            Role::DraftAngle,
+                            Role::DraftFlip,
+                        );
                     }
                     if !e.symmetric {
                         b.spawn(
@@ -598,7 +814,16 @@ fn extrude_dialog(
                                 .build(t),
                         );
                         if let Some(sec) = &e.second {
-                            end_row(b, t, "extrude-second-end-type", Role::SecondEndType, Role::SecondFlip, sec.end, !e.flip, &EndType::ALL);
+                            end_row(
+                                b,
+                                t,
+                                "extrude-second-end-type",
+                                Role::SecondEndType,
+                                Role::SecondFlip,
+                                sec.end,
+                                !e.flip,
+                                &EndType::ALL,
+                            );
                             end_fields(
                                 b,
                                 t,
@@ -606,14 +831,31 @@ fn extrude_dialog(
                                 sec,
                                 labels.second_up_to.clone(),
                                 field == ExtrudeField::SecondUpTo,
-                                [Role::SecondDepth, Role::SecondUpTo, Role::SecondOffsetValue, Role::SecondOffsetFlip],
+                                [
+                                    Role::SecondDepth,
+                                    Role::SecondUpTo,
+                                    Role::SecondOffsetValue,
+                                    Role::SecondOffsetFlip,
+                                ],
                             );
                         }
                     }
                     if e.op != BooleanOp::New && e.body != BodyType::Surface {
-                        b.spawn(OptionRow::new("extrude-merge-all", "Merge with all").checked(e.merge_all).build(t));
+                        b.spawn(
+                            OptionRow::new("extrude-merge-all", "Merge with all")
+                                .checked(e.merge_all)
+                                .build(t),
+                        );
                         if !e.merge_all {
-                            list(b, t, "extrude-merge-scope-field", "Merge scope", Role::MergeScope, labels.merge_scope.clone(), field == ExtrudeField::MergeScope);
+                            list(
+                                b,
+                                t,
+                                "extrude-merge-scope-field",
+                                "Merge scope",
+                                Role::MergeScope,
+                                labels.merge_scope.clone(),
+                                field == ExtrudeField::MergeScope,
+                            );
                         }
                     }
                 });
@@ -643,7 +885,11 @@ fn extrude_dialog(
 /// True if the feature's rebuild refused its depth (the kernel's tolerance): the Depth field
 /// shows red and the dialog can't be accepted.
 fn depth_refused(cache: &PartCache, feature: FeatureId, e: &ExtrudeFeature) -> bool {
-    e.end == EndType::Blind && cache.errors.get(&feature).is_some_and(|m| m.contains("depth"))
+    e.end == EndType::Blind
+        && cache
+            .errors
+            .get(&feature)
+            .is_some_and(|m| m.contains("depth"))
 }
 
 /// Spawns, updates and removes the dialog.
@@ -700,7 +946,14 @@ pub(crate) fn sync_extrude_dialog(
                 return;
             };
             let dialog = commands
-                .spawn(extrude_dialog(&theme, &feature.name, valid, shown, &s, &labels))
+                .spawn(extrude_dialog(
+                    &theme,
+                    &feature.name,
+                    valid,
+                    shown,
+                    &s,
+                    &labels,
+                ))
                 .id();
             commands.entity(area).add_child(dialog);
             return;
@@ -726,7 +979,11 @@ pub(crate) fn sync_extrude_dialog(
             _ => continue,
         };
         // P3D.1: a missing input is red in a red-tinted field.
-        let red = if matches!(role, Role::Input) { labels.input_missing.clone() } else { Vec::new() };
+        let red = if matches!(role, Role::Input) {
+            labels.input_missing.clone()
+        } else {
+            Vec::new()
+        };
         let want = SelectionListState {
             items: items.clone(),
             active,
@@ -742,9 +999,21 @@ pub(crate) fn sync_extrude_dialog(
     for (entity, role, mut n) in &mut q_numbers {
         let text = match role {
             Role::Depth => shown.depth_expr.clone(),
-            Role::OffsetValue => shown.offset.as_ref().map(|o| o.expr.clone()).unwrap_or_default(),
-            Role::StartOffsetValue => shown.start_offset.as_ref().map(|o| o.expr.clone()).unwrap_or_default(),
-            Role::SecondDepth => shown.second.as_ref().map(|s| s.depth_expr.clone()).unwrap_or_default(),
+            Role::OffsetValue => shown
+                .offset
+                .as_ref()
+                .map(|o| o.expr.clone())
+                .unwrap_or_default(),
+            Role::StartOffsetValue => shown
+                .start_offset
+                .as_ref()
+                .map(|o| o.expr.clone())
+                .unwrap_or_default(),
+            Role::SecondDepth => shown
+                .second
+                .as_ref()
+                .map(|s| s.depth_expr.clone())
+                .unwrap_or_default(),
             Role::SecondOffsetValue => shown
                 .second
                 .as_ref()
@@ -753,7 +1022,11 @@ pub(crate) fn sync_extrude_dialog(
                 .unwrap_or_default(),
             Role::Thickness1 => shown.thin.thickness1_expr.clone(),
             Role::Thickness2 => shown.thin.thickness2_expr.clone(),
-            Role::DraftAngle => shown.draft.as_ref().map(|d| d.expr.clone()).unwrap_or_default(),
+            Role::DraftAngle => shown
+                .draft
+                .as_ref()
+                .map(|d| d.expr.clone())
+                .unwrap_or_default(),
             _ => continue,
         };
         // While a field is typed in it keeps its text; a refused depth shows red.
@@ -791,20 +1064,32 @@ pub(crate) fn sync_extrude_dialog(
 // ---------------------------------------------------------------------------------------------
 // Input
 
-fn on_accept(ev: On<FeatureDialogAccept>, q: Query<(), With<ExtrudeDialog>>, mut commands: Commands) {
+fn on_accept(
+    ev: On<FeatureDialogAccept>,
+    q: Query<(), With<ExtrudeDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(crate::extrude::accept_extrude);
     }
 }
 
-fn on_cancel(ev: On<FeatureDialogCancel>, q: Query<(), With<ExtrudeDialog>>, mut commands: Commands) {
+fn on_cancel(
+    ev: On<FeatureDialogCancel>,
+    q: Query<(), With<ExtrudeDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(crate::extrude::cancel_extrude);
     }
 }
 
 /// Changes the parameters with `f` as one undo step called `label`.
-fn change(commands: &mut Commands, label: &'static str, f: impl FnOnce(&mut ExtrudeFeature) + Send + 'static) {
+fn change(
+    commands: &mut Commands,
+    label: &'static str,
+    f: impl FnOnce(&mut ExtrudeFeature) + Send + 'static,
+) {
     commands.queue(move |world: &mut World| {
         if let Some(mut e) = params(world) {
             let before = e.clone();
@@ -923,16 +1208,24 @@ fn on_checkbox(ev: On<CheckboxChange>, q: Query<&Name>, mut commands: Commands) 
         "extrude-second-end-checkbox" => change(&mut commands, "Second end position", move |e| {
             e.second = on.then(EndCondition::default);
         }),
-        "extrude-mid-plane-checkbox" => change(&mut commands, "Mid plane", move |e| e.thin.mid_plane = on),
+        "extrude-mid-plane-checkbox" => {
+            change(&mut commands, "Mid plane", move |e| e.thin.mid_plane = on)
+        }
         "extrude-draft-checkbox" => change(&mut commands, "Draft", move |e| {
             e.draft = on.then(cadrs_core::draft::ExtrudeDraft::default);
         }),
-        "extrude-merge-all-checkbox" => change(&mut commands, "Merge with all", move |e| e.merge_all = on),
+        "extrude-merge-all-checkbox" => {
+            change(&mut commands, "Merge with all", move |e| e.merge_all = on)
+        }
         "extrude-direction-checkbox" => {
             commands.queue(move |world: &mut World| {
                 if let Some(mut s) = world.get_resource_mut::<ExtrudeSession>() {
                     s.direction_on = on;
-                    s.field = if on { ExtrudeField::Direction } else { ExtrudeField::Input };
+                    s.field = if on {
+                        ExtrudeField::Direction
+                    } else {
+                        ExtrudeField::Input
+                    };
                 }
             });
             if !on {
@@ -957,7 +1250,10 @@ fn on_number(
     let text = ev.text.trim().to_string();
     // P3.10: the Draft angle, in degrees between 0 and 90.
     if role == Role::DraftAngle {
-        let ok = vars.eval(&units.0, &text, Quantity::Angle).ok().filter(|v| v.is_finite() && *v > 0.0 && *v < 90.0);
+        let ok = vars
+            .eval(&units.0, &text, Quantity::Angle)
+            .ok()
+            .filter(|v| v.is_finite() && *v > 0.0 && *v < 90.0);
         if let Ok(mut s) = q_state.get_mut(ev.entity) {
             s.error = ok.is_none();
             if ok.is_none() {
@@ -965,7 +1261,11 @@ fn on_number(
             }
         }
         let Some(v) = ok else { return };
-        let expr = if text.parse::<f64>().is_ok() { units.0.with_unit(v, Quantity::Angle) } else { text };
+        let expr = if text.parse::<f64>().is_ok() {
+            units.0.with_unit(v, Quantity::Angle)
+        } else {
+            text
+        };
         let enter = ev.enter;
         change(&mut commands, "Draft angle", move |e| {
             if let Some(d) = &mut e.draft {
@@ -1009,42 +1309,63 @@ fn on_number(
     };
     let enter = ev.enter;
     let (label, f): (&'static str, Change) = match role {
-        Role::Depth => ("Depth", Box::new(move |e| {
-            e.depth = v;
-            e.depth_expr = expr;
-        })),
-        Role::OffsetValue => ("Offset distance", Box::new(move |e| {
-            if let Some(o) = &mut e.offset {
-                o.value = v;
-                o.expr = expr;
-            }
-        })),
-        Role::StartOffsetValue => ("Starting offset", Box::new(move |e| {
-            if let Some(o) = &mut e.start_offset {
-                o.value = v;
-                o.expr = expr;
-            }
-        })),
-        Role::SecondDepth => ("Second depth", Box::new(move |e| {
-            if let Some(s) = &mut e.second {
-                s.depth = v;
-                s.depth_expr = expr;
-            }
-        })),
-        Role::SecondOffsetValue => ("Offset distance", Box::new(move |e| {
-            if let Some(o) = e.second.as_mut().and_then(|s| s.offset.as_mut()) {
-                o.value = v;
-                o.expr = expr;
-            }
-        })),
-        Role::Thickness1 => ("Thickness 1", Box::new(move |e| {
-            e.thin.thickness1 = v;
-            e.thin.thickness1_expr = expr;
-        })),
-        Role::Thickness2 => ("Thickness 2", Box::new(move |e| {
-            e.thin.thickness2 = v;
-            e.thin.thickness2_expr = expr;
-        })),
+        Role::Depth => (
+            "Depth",
+            Box::new(move |e| {
+                e.depth = v;
+                e.depth_expr = expr;
+            }),
+        ),
+        Role::OffsetValue => (
+            "Offset distance",
+            Box::new(move |e| {
+                if let Some(o) = &mut e.offset {
+                    o.value = v;
+                    o.expr = expr;
+                }
+            }),
+        ),
+        Role::StartOffsetValue => (
+            "Starting offset",
+            Box::new(move |e| {
+                if let Some(o) = &mut e.start_offset {
+                    o.value = v;
+                    o.expr = expr;
+                }
+            }),
+        ),
+        Role::SecondDepth => (
+            "Second depth",
+            Box::new(move |e| {
+                if let Some(s) = &mut e.second {
+                    s.depth = v;
+                    s.depth_expr = expr;
+                }
+            }),
+        ),
+        Role::SecondOffsetValue => (
+            "Offset distance",
+            Box::new(move |e| {
+                if let Some(o) = e.second.as_mut().and_then(|s| s.offset.as_mut()) {
+                    o.value = v;
+                    o.expr = expr;
+                }
+            }),
+        ),
+        Role::Thickness1 => (
+            "Thickness 1",
+            Box::new(move |e| {
+                e.thin.thickness1 = v;
+                e.thin.thickness1_expr = expr;
+            }),
+        ),
+        Role::Thickness2 => (
+            "Thickness 2",
+            Box::new(move |e| {
+                e.thin.thickness2 = v;
+                e.thin.thickness2_expr = expr;
+            }),
+        ),
         _ => return,
     };
     commands.queue(move |world: &mut World| {
@@ -1086,7 +1407,9 @@ fn on_button(a: On<Activate>, q: Query<&Role>, mut commands: Commands) {
                 o.flip = !o.flip;
             }
         }),
-        Ok(Role::FlipWall) => change(&mut commands, "Flip wall", |e| e.thin.flip_wall = !e.thin.flip_wall),
+        Ok(Role::FlipWall) => change(&mut commands, "Flip wall", |e| {
+            e.thin.flip_wall = !e.thin.flip_wall
+        }),
         Ok(Role::DraftFlip) => change(&mut commands, "Flip draft", |e| {
             if let Some(d) = &mut e.draft {
                 d.flip = !d.flip;
@@ -1115,7 +1438,9 @@ fn on_list_remove(ev: On<SelectionListRemove>, q: Query<&Role>, mut commands: Co
                 s.up_to = None;
             }
         }),
-        Ok(Role::DirectionField) => change(&mut commands, "Remove selection", |e| e.direction = None),
+        Ok(Role::DirectionField) => {
+            change(&mut commands, "Remove selection", |e| e.direction = None)
+        }
         Ok(Role::MergeScope) => {
             commands.queue(move |world: &mut World| {
                 let Some(s) = world.get_resource::<ExtrudeSession>().map(|s| s.feature) else {
@@ -1124,10 +1449,14 @@ fn on_list_remove(ev: On<SelectionListRemove>, q: Query<&Role>, mut commands: Co
                 let Some(mut e) = params(world) else { return };
                 if e.merge_scope.is_empty() {
                     // Removing one of the automatic parts: the others become the scope.
-                    let auto = world.resource::<PartCache>().contacts.get(&s).map(|c| match e.op {
-                        BooleanOp::Add => c.touches.clone(),
-                        _ => c.overlaps.clone(),
-                    });
+                    let auto = world
+                        .resource::<PartCache>()
+                        .contacts
+                        .get(&s)
+                        .map(|c| match e.op {
+                            BooleanOp::Add => c.touches.clone(),
+                            _ => c.overlaps.clone(),
+                        });
                     e.merge_scope = auto.unwrap_or_default();
                 }
                 if i < e.merge_scope.len() {

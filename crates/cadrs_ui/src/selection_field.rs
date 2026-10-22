@@ -174,11 +174,13 @@ impl SelectionField {
                         .ghost()
                         .tooltip("Clear")
                         .build(&t),
-                    observe(|a: On<Activate>, q: Query<&FieldClear>, mut commands: Commands| {
-                        if let Ok(c) = q.get(a.entity) {
-                            commands.trigger(SelectionFieldClear { entity: c.0 });
-                        }
-                    }),
+                    observe(
+                        |a: On<Activate>, q: Query<&FieldClear>, mut commands: Commands| {
+                            if let Ok(c) = q.get(a.entity) {
+                                commands.trigger(SelectionFieldClear { entity: c.0 });
+                            }
+                        },
+                    ),
                 ))
                 .insert((
                     ghost,
@@ -208,7 +210,11 @@ fn value_style(t: &Theme, filled: bool, error: bool) -> (f32, Color) {
     }
 }
 
-fn field_style(t: &Theme, s: &SelectionFieldState, width: Val) -> (Node, BackgroundColor, BorderColor) {
+fn field_style(
+    t: &Theme,
+    s: &SelectionFieldState,
+    width: Val,
+) -> (Node, BackgroundColor, BorderColor) {
     let filled = s.value.is_some();
     let node = Node {
         width,
@@ -266,9 +272,15 @@ fn sync_selection_fields(
         ),
         Changed<SelectionFieldState>,
     >,
-    mut q_caption: Query<(&FieldCaption, &mut Node), (Without<SelectionFieldState>, Without<FieldClear>)>,
+    mut q_caption: Query<
+        (&FieldCaption, &mut Node),
+        (Without<SelectionFieldState>, Without<FieldClear>),
+    >,
     mut q_value: Query<(&FieldValue, &mut Text, &mut TextFont, &mut TextColor)>,
-    mut q_clear: Query<(&FieldClear, &mut Node), (Without<SelectionFieldState>, Without<FieldCaption>)>,
+    mut q_clear: Query<
+        (&FieldClear, &mut Node),
+        (Without<SelectionFieldState>, Without<FieldCaption>),
+    >,
 ) {
     for (e, s, placeholder, mut node, mut bg, mut border) in &mut q {
         let (n, b, br) = field_style(&theme, s, node.width);

@@ -119,7 +119,9 @@ pub fn referenced_tabs(doc: &Document, selected: &[ElementId]) -> Vec<ElementId>
     let mut stack: Vec<ElementId> = selected.to_vec();
     let mut found: HashSet<ElementId> = HashSet::new();
     while let Some(e) = stack.pop() {
-        let Some(el) = doc.elements.iter().find(|x| x.id == e) else { continue };
+        let Some(el) = doc.elements.iter().find(|x| x.id == e) else {
+            continue;
+        };
         for d in tab_dependencies(doc, el) {
             if seen.insert(d) {
                 found.insert(d);
@@ -127,7 +129,11 @@ pub fn referenced_tabs(doc: &Document, selected: &[ElementId]) -> Vec<ElementId>
             }
         }
     }
-    doc.elements.iter().map(|e| e.id).filter(|e| found.contains(e)).collect()
+    doc.elements
+        .iter()
+        .map(|e| e.id)
+        .filter(|e| found.contains(e))
+        .collect()
 }
 
 /// Where the tabs go.
@@ -137,7 +143,10 @@ pub enum MoveTarget {
     New { name: String },
     /// An existing document of the library, which gets a version called `version_name` ("V<n>"
     /// when empty).
-    Existing { document: DocumentId, version_name: String },
+    Existing {
+        document: DocumentId,
+        version_name: String,
+    },
 }
 
 /// Re-points the uses of moved tabs, removes them and notes where they went: the source's one
@@ -159,10 +168,16 @@ impl Command for MoveTabs {
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
         if self.remove.is_empty() || doc.elements.iter().all(|e| self.remove.contains(&e.id)) {
-            return Err(CommandError::Invalid("A document keeps at least one tab".into()));
+            return Err(CommandError::Invalid(
+                "A document keeps at least one tab".into(),
+            ));
         }
         if !self.changes.is_empty() {
-            UpdateReferences { changes: self.changes.clone(), label: self.label.clone() }.apply(doc)?;
+            UpdateReferences {
+                changes: self.changes.clone(),
+                label: self.label.clone(),
+            }
+            .apply(doc)?;
         }
         // The copies only the moved tabs used go with them.
         let mut candidates: Vec<ElementId> = Vec::new();
@@ -183,10 +198,20 @@ impl Command for MoveTabs {
 fn linked_sources(doc: &Document, el: &Element) -> Vec<ElementId> {
     let mut out = Vec::new();
     if let Some(m) = el.assembly_model() {
-        out.extend(m.instances.iter().map(|i| i.source.element()).filter(|e| doc.linked_element(*e).is_some()));
+        out.extend(
+            m.instances
+                .iter()
+                .map(|i| i.source.element())
+                .filter(|e| doc.linked_element(*e).is_some()),
+        );
     }
     if let Some(d) = el.drawing_data() {
-        out.extend(d.sources.iter().map(|s| ElementId(s.element)).filter(|e| doc.linked_element(*e).is_some()));
+        out.extend(
+            d.sources
+                .iter()
+                .map(|s| ElementId(s.element))
+                .filter(|e| doc.linked_element(*e).is_some()),
+        );
     }
     out
 }
@@ -215,7 +240,11 @@ impl MoveOutcome {
     /// "Moved 2 tabs to Pneumatic Piston".
     pub fn summary(&self) -> String {
         let n = self.ids.len();
-        format!("Moved {n} tab{} to {}", if n == 1 { "" } else { "s" }, self.target_name)
+        format!(
+            "Moved {n} tab{} to {}",
+            if n == 1 { "" } else { "s" },
+            self.target_name
+        )
     }
 }
 
@@ -229,9 +258,17 @@ fn remap(el: &mut Element, map: &HashMap<ElementId, ElementId>) {
     if let Some(model) = el.assembly_model_mut() {
         for i in model.instances.iter_mut().filter(|i| i.link.is_none()) {
             i.source = match i.source {
-                InstanceSource::Part { element, part } => InstanceSource::Part { element: m(element), part },
-                InstanceSource::Assembly { element } => InstanceSource::Assembly { element: m(element) },
-                InstanceSource::Studio { element, board } => InstanceSource::Studio { element: m(element), board },
+                InstanceSource::Part { element, part } => InstanceSource::Part {
+                    element: m(element),
+                    part,
+                },
+                InstanceSource::Assembly { element } => InstanceSource::Assembly {
+                    element: m(element),
+                },
+                InstanceSource::Studio { element, board } => InstanceSource::Studio {
+                    element: m(element),
+                    board,
+                },
             };
         }
     }
@@ -260,19 +297,43 @@ fn stored(store: &Store, id: DocumentId) -> bool {
 /// `target` (see the module docs). `source_log` is `doc`'s history (started if `None` and a
 /// version of it is needed); it is saved when `doc` is in the store. Writes the target (and any
 /// versions) at once; returns the command for the source.
-pub fn move_tabs(store: &Store, doc: &Document, source_log: &mut Option<HistoryLog>, tabs: &[ElementId], target: &MoveTarget, now: Timestamp, user: &str) -> Result<MoveOutcome, MoveError> {
+pub fn move_tabs(
+    store: &Store,
+    doc: &Document,
+    source_log: &mut Option<HistoryLog>,
+    tabs: &[ElementId],
+    target: &MoveTarget,
+    now: Timestamp,
+    user: &str,
+) -> Result<MoveOutcome, MoveError> {
     // Everything that can fail before anything is written.
-    let moved: Vec<ElementId> = doc.elements.iter().map(|e| e.id).filter(|e| tabs.contains(e)).collect();
+    let moved: Vec<ElementId> = doc
+        .elements
+        .iter()
+        .map(|e| e.id)
+        .filter(|e| tabs.contains(e))
+        .collect();
     if moved.is_empty() {
         return Err(MoveError("No tabs to move".into()));
     }
     if moved.len() == doc.elements.len() {
-        return Err(MoveError("A document keeps at least one tab: leave one here".into()));
+        return Err(MoveError(
+            "A document keeps at least one tab: leave one here".into(),
+        ));
     }
     let (mut t, meta, old_target) = match target {
         MoveTarget::New { name } => {
-            let first = doc.elements.iter().find(|e| e.id == moved[0]).map(|e| e.name.clone()).unwrap_or_default();
-            let name = if name.trim().is_empty() { first } else { name.trim().to_string() };
+            let first = doc
+                .elements
+                .iter()
+                .find(|e| e.id == moved[0])
+                .map(|e| e.name.clone())
+                .unwrap_or_default();
+            let name = if name.trim().is_empty() {
+                first
+            } else {
+                name.trim().to_string()
+            };
             let mut t = Document::empty(name);
             t.units = doc.units;
             t.properties = doc.properties.clone();
@@ -283,9 +344,21 @@ pub fn move_tabs(store: &Store, doc: &Document, source_log: &mut Option<HistoryL
             if *document == doc.id {
                 return Err(MoveError("The tabs are in that document already".into()));
             }
-            let file = store.load(*document).map_err(|_| MoveError(external::link_state(store, *document).message().unwrap_or("The document can't be read").into()))?;
+            let file = store.load(*document).map_err(|_| {
+                MoveError(
+                    external::link_state(store, *document)
+                        .message()
+                        .unwrap_or("The document can't be read")
+                        .into(),
+                )
+            })?;
             if file.meta.trashed.is_some() {
-                return Err(MoveError(external::LinkState::Trashed.message().unwrap_or_default().into()));
+                return Err(MoveError(
+                    external::LinkState::Trashed
+                        .message()
+                        .unwrap_or_default()
+                        .into(),
+                ));
             }
             let old = file.document.clone();
             (file.document, file.meta, Some(old))
@@ -294,7 +367,11 @@ pub fn move_tabs(store: &Store, doc: &Document, source_log: &mut Option<HistoryL
     let left_behind: Vec<ElementId> = {
         let mut out: Vec<ElementId> = Vec::new();
         for e in &moved {
-            let el = doc.elements.iter().find(|x| x.id == *e).expect("moved tabs are tabs");
+            let el = doc
+                .elements
+                .iter()
+                .find(|x| x.id == *e)
+                .expect("moved tabs are tabs");
             for d in tab_dependencies(doc, el) {
                 if !moved.contains(&d) && !out.contains(&d) {
                     out.push(d);
@@ -304,14 +381,18 @@ pub fn move_tabs(store: &Store, doc: &Document, source_log: &mut Option<HistoryL
         out
     };
     // The moved tabs, under new ids where the target has theirs already.
-    let taken = |e: ElementId, t: &Document| t.element(e).is_some() || t.linked_element(e).is_some();
+    let taken =
+        |e: ElementId, t: &Document| t.element(e).is_some() || t.linked_element(e).is_some();
     let mut map: HashMap<ElementId, ElementId> = HashMap::new();
     for e in &moved {
         if taken(*e, &t) {
             map.insert(*e, ElementId::new());
         }
     }
-    let ids: Vec<(ElementId, ElementId)> = moved.iter().map(|e| (*e, map.get(e).copied().unwrap_or(*e))).collect();
+    let ids: Vec<(ElementId, ElementId)> = moved
+        .iter()
+        .map(|e| (*e, map.get(e).copied().unwrap_or(*e)))
+        .collect();
     let new_id = |e: ElementId| map.get(&e).copied().unwrap_or(e);
     // The source's version the target references back (only when a tab stays behind).
     let source_version = if left_behind.is_empty() {
@@ -321,23 +402,47 @@ pub fn move_tabs(store: &Store, doc: &Document, source_log: &mut Option<HistoryL
         if log.head() != doc {
             log.record(doc, Origin::Command("Move to document".into()), now, user);
         }
-        let names: Vec<String> = moved.iter().filter_map(|e| doc.element(*e).map(|x| x.name.clone())).collect();
-        let v = log.create_auto_version(&format!("Created by Move to document: {} moved to {}", names.join(", "), t.name), now, user);
-        let name = log.version(v).map(|x| x.name().to_string()).unwrap_or_default();
+        let names: Vec<String> = moved
+            .iter()
+            .filter_map(|e| doc.element(*e).map(|x| x.name.clone()))
+            .collect();
+        let v = log.create_auto_version(
+            &format!(
+                "Created by Move to document: {} moved to {}",
+                names.join(", "),
+                t.name
+            ),
+            now,
+            user,
+        );
+        let name = log
+            .version(v)
+            .map(|x| x.name().to_string())
+            .unwrap_or_default();
         if stored(store, doc.id) {
-            log.save(store).map_err(|e| MoveError(format!("The history of {} ({e})", doc.name)))?;
+            log.save(store)
+                .map_err(|e| MoveError(format!("The history of {} ({e})", doc.name)))?;
         }
         Some((v, name))
     };
     // The target's contents: the tabs, the copies and standard content they use.
     for e in &moved {
-        let mut el = doc.elements.iter().find(|x| x.id == *e).cloned().expect("moved tabs are tabs");
+        let mut el = doc
+            .elements
+            .iter()
+            .find(|x| x.id == *e)
+            .cloned()
+            .expect("moved tabs are tabs");
         el.id = new_id(*e);
         remap(&mut el, &map);
         t.elements.push(el);
     }
     for e in &moved {
-        let el = doc.elements.iter().find(|x| x.id == *e).expect("moved tabs are tabs");
+        let el = doc
+            .elements
+            .iter()
+            .find(|x| x.id == *e)
+            .expect("moved tabs are tabs");
         for src in linked_sources(doc, el) {
             for l in lu::closure(doc, src) {
                 if t.linked_element(l.id()).is_none() {
@@ -366,13 +471,33 @@ pub fn move_tabs(store: &Store, doc: &Document, source_log: &mut Option<HistoryL
             let el = t.elements.iter().find(|x| x.id == *to).expect("just added");
             let mut sites: Vec<(RefSite, ElementId)> = Vec::new();
             if let Some(m) = el.assembly_model() {
-                for i in m.instances.iter().filter(|i| i.link.is_none() && left_behind.contains(&i.source.element())) {
-                    sites.push((RefSite::Instance { element: el.id, instance: i.id }, i.source.element()));
+                for i in m
+                    .instances
+                    .iter()
+                    .filter(|i| i.link.is_none() && left_behind.contains(&i.source.element()))
+                {
+                    sites.push((
+                        RefSite::Instance {
+                            element: el.id,
+                            instance: i.id,
+                        },
+                        i.source.element(),
+                    ));
                 }
             }
             if let Some(d) = el.drawing_data() {
-                for s in d.sources.iter().filter(|s| left_behind.contains(&ElementId(s.element))) {
-                    sites.push((RefSite::Drawing { element: el.id, source: ElementId(s.element) }, ElementId(s.element)));
+                for s in d
+                    .sources
+                    .iter()
+                    .filter(|s| left_behind.contains(&ElementId(s.element)))
+                {
+                    sites.push((
+                        RefSite::Drawing {
+                            element: el.id,
+                            source: ElementId(s.element),
+                        },
+                        ElementId(s.element),
+                    ));
                 }
             }
             for (site, src) in sites {
@@ -380,21 +505,47 @@ pub fn move_tabs(store: &Store, doc: &Document, source_log: &mut Option<HistoryL
                 if let std::collections::hash_map::Entry::Vacant(v) = snaps.entry(src) {
                     v.insert(external::snapshot(doc, r, sv_name)?);
                 }
-                changes.push(Change { site, to: r, snapshot: snaps.get(&src).cloned() });
+                changes.push(Change {
+                    site,
+                    to: r,
+                    snapshot: snaps.get(&src).cloned(),
+                });
             }
         }
         links_back = changes.len();
         if !changes.is_empty() {
-            UpdateReferences { changes, label: "Move to document".into() }.apply(&mut t)?;
+            UpdateReferences {
+                changes,
+                label: "Move to document".into(),
+            }
+            .apply(&mut t)?;
         }
     }
     // Write the target and its version.
-    let tabs_moved: Vec<String> = ids.iter().filter_map(|(_, e)| t.elements.iter().find(|x| x.id == *e).map(|x| x.name.clone())).collect();
-    let label = format!("Move {} to {}", if ids.len() == 1 { tabs_moved.first().cloned().unwrap_or_default() } else { format!("{} tabs", ids.len()) }, t.name);
+    let tabs_moved: Vec<String> = ids
+        .iter()
+        .filter_map(|(_, e)| {
+            t.elements
+                .iter()
+                .find(|x| x.id == *e)
+                .map(|x| x.name.clone())
+        })
+        .collect();
+    let label = format!(
+        "Move {} to {}",
+        if ids.len() == 1 {
+            tabs_moved.first().cloned().unwrap_or_default()
+        } else {
+            format!("{} tabs", ids.len())
+        },
+        t.name
+    );
     let created = old_target.is_none();
     let mut log = match &old_target {
         None => {
-            store.create(&t, &meta).map_err(|e| MoveError(format!("Cannot create {} ({e})", t.name)))?;
+            store
+                .create(&t, &meta)
+                .map_err(|e| MoveError(format!("Cannot create {} ({e})", t.name)))?;
             HistoryLog::start(&t, now, user)
         }
         Some(old) => {
@@ -402,19 +553,40 @@ pub fn move_tabs(store: &Store, doc: &Document, source_log: &mut Option<HistoryL
             m.modified = now;
             m.modified_by = user.to_string();
             let log = HistoryLog::load(store, t.id).ok().flatten();
-            store.save(&t, &m).map_err(|e| MoveError(format!("Cannot save {} ({e})", t.name)))?;
+            store
+                .save(&t, &m)
+                .map_err(|e| MoveError(format!("Cannot save {} ({e})", t.name)))?;
             let mut log = log.unwrap_or_else(|| HistoryLog::start(old, meta.created, user));
-            log.record(&t, Origin::Command(format!("Moved in from {}: {}", doc.name, tabs_moved.join(", "))), now, user);
+            log.record(
+                &t,
+                Origin::Command(format!(
+                    "Moved in from {}: {}",
+                    doc.name,
+                    tabs_moved.join(", ")
+                )),
+                now,
+                user,
+            );
             log
         }
     };
     let description = format!("Moved from {}: {}", doc.name, tabs_moved.join(", "));
     let version = match target {
-        MoveTarget::New { .. } => log.create_auto_version(&format!("Created by Move to document. {description}"), now, user),
-        MoveTarget::Existing { version_name, .. } => log.create_version(version_name, &description, now, user),
+        MoveTarget::New { .. } => log.create_auto_version(
+            &format!("Created by Move to document. {description}"),
+            now,
+            user,
+        ),
+        MoveTarget::Existing { version_name, .. } => {
+            log.create_version(version_name, &description, now, user)
+        }
     };
-    let version_name = log.version(version).map(|v| v.name().to_string()).unwrap_or_default();
-    log.save(store).map_err(|e| MoveError(format!("The history of {} ({e})", t.name)))?;
+    let version_name = log
+        .version(version)
+        .map(|v| v.name().to_string())
+        .unwrap_or_default();
+    log.save(store)
+        .map_err(|e| MoveError(format!("The history of {} ({e})", t.name)))?;
     // The source: its uses of the moved tabs point at that version of the target.
     let mut snaps: HashMap<ElementId, LinkSnapshot> = HashMap::new();
     let mut changes = Vec::new();
@@ -426,11 +598,28 @@ pub fn move_tabs(store: &Store, doc: &Document, source_log: &mut Option<HistoryL
         if let std::collections::hash_map::Entry::Vacant(v) = snaps.entry(u.source) {
             v.insert(external::snapshot(&t, to, &version_name)?);
         }
-        changes.push(Change { site: u.site, to, snapshot: snaps.get(&u.source).cloned() });
+        changes.push(Change {
+            site: u.site,
+            to,
+            snapshot: snaps.get(&u.source).cloned(),
+        });
     }
-    let records = ids.iter().map(|(from, to)| MovedElement { element: *from, document: t.id, to: *to, document_name: t.name.clone() }).collect();
+    let records = ids
+        .iter()
+        .map(|(from, to)| MovedElement {
+            element: *from,
+            document: t.id,
+            to: *to,
+            document_name: t.name.clone(),
+        })
+        .collect();
     Ok(MoveOutcome {
-        command: MoveTabs { changes, remove: moved, records, label },
+        command: MoveTabs {
+            changes,
+            remove: moved,
+            records,
+            label,
+        },
         target: t.id,
         target_name: t.name.clone(),
         created,
@@ -444,24 +633,57 @@ pub fn move_tabs(store: &Store, doc: &Document, source_log: &mut Option<HistoryL
 
 /// ER7.6: where the tab `u` references went, if it was moved out of its document (and isn't
 /// there any more). `load` reads another document.
-pub fn moved_record(doc: &Document, u: &RefUse, load: &mut dyn FnMut(DocumentId) -> Option<std::sync::Arc<Document>>) -> Option<MovedElement> {
-    let RefAt::Version(_) = u.reference.at else { return None };
+pub fn moved_record(
+    doc: &Document,
+    u: &RefUse,
+    load: &mut dyn FnMut(DocumentId) -> Option<std::sync::Arc<Document>>,
+) -> Option<MovedElement> {
+    let RefAt::Version(_) = u.reference.at else {
+        return None;
+    };
     let d = u.reference.document_or(doc.id);
     let find = |src: &Document| {
         if src.elements.iter().any(|e| e.id == u.reference.element) {
             return None;
         }
-        src.moved.iter().find(|m| m.element == u.reference.element).cloned()
+        src.moved
+            .iter()
+            .find(|m| m.element == u.reference.element)
+            .cloned()
     };
-    if d == doc.id { find(doc) } else { find(&*load(d)?) }
+    if d == doc.id {
+        find(doc)
+    } else {
+        find(&*load(d)?)
+    }
 }
 
 /// ER7.6: "Update to the new document": `u` pointed at the newest version of the document its
 /// tab moved to (`m`).
-pub fn change_to_new_document(res: &mut Resolver, doc: &Document, log: Option<&HistoryLog>, u: &RefUse, m: &MovedElement) -> Result<Change, LinkError> {
+pub fn change_to_new_document(
+    res: &mut Resolver,
+    doc: &Document,
+    log: Option<&HistoryLog>,
+    u: &RefUse,
+    m: &MovedElement,
+) -> Result<Change, LinkError> {
     let this = m.document == doc.id;
-    let v = if this { log.and_then(|l| l.versions().last().map(|v| v.id())) } else { res.latest(m.document).map(|v| v.id()) }.ok_or(LinkError::NoVersion)?;
-    let to = SourceRef { document: (!this).then_some(m.document), at: RefAt::Version(v), element: m.to, pinned: u.reference.pinned };
+    let v = if this {
+        log.and_then(|l| l.versions().last().map(|v| v.id()))
+    } else {
+        res.latest(m.document).map(|v| v.id())
+    }
+    .ok_or(LinkError::NoVersion)?;
+    let to = SourceRef {
+        document: (!this).then_some(m.document),
+        at: RefAt::Version(v),
+        element: m.to,
+        pinned: u.reference.pinned,
+    };
     let snapshot = res.resolve(to, doc, log)?;
-    Ok(Change { site: u.site, to, snapshot: Some(snapshot) })
+    Ok(Change {
+        site: u.site,
+        to,
+        snapshot: Some(snapshot),
+    })
 }

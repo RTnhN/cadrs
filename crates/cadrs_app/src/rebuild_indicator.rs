@@ -58,7 +58,12 @@ pub fn spawn_rebuild_indicator(p: &mut ChildSpawnerCommands, t: &Theme) {
             Pickable::IGNORE,
         ))
         .with_children(|pill| {
-            pill.spawn(Spinner::new("rebuild-indicator-spinner").size(14.0).thickness(2.0).build(t));
+            pill.spawn(
+                Spinner::new("rebuild-indicator-spinner")
+                    .size(14.0)
+                    .thickness(2.0)
+                    .build(t),
+            );
             pill.spawn((
                 Name::new("rebuild-indicator-text"),
                 RebuildIndicatorText,

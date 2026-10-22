@@ -5,6 +5,8 @@
 use crate::Design;
 use crate::board::Board;
 use crate::board_edit as be;
+use crate::expr::{Unit, eval};
+use crate::footprint::MountKind;
 use crate::forward;
 use crate::graphics::{Fill, Geom};
 use crate::layer::Layer;
@@ -12,8 +14,6 @@ use crate::lib_edit::{self as le, Orientation, PinProps};
 use crate::library::{Library, LibraryTable, Scope};
 use crate::sch_edit::{self as se, SchItem};
 use crate::schematic::{LabelKind, Schematic, TitleBlock};
-use crate::footprint::MountKind;
-use crate::expr::{Unit, eval};
 use crate::units::{MIL, Pt, mm};
 use crate::{outline, zone};
 use uuid::Uuid;
@@ -28,18 +28,35 @@ pub fn new_design() -> Design {
 }
 
 pub fn sym(sch: &Schematic, reference: &str) -> Uuid {
-    sch.sheets[0].symbols.iter().find(|s| s.reference() == reference).unwrap_or_else(|| panic!("{reference}")).id
+    sch.sheets[0]
+        .symbols
+        .iter()
+        .find(|s| s.reference() == reference)
+        .unwrap_or_else(|| panic!("{reference}"))
+        .id
 }
 
 pub fn pin(sch: &Schematic, reference: &str, number: &str) -> Pt {
-    let s = sch.sheets[0].symbols.iter().find(|s| s.reference() == reference).unwrap();
-    sch.placed_pins(s).find(|(p, _)| p.number == number).unwrap().1
+    let s = sch.sheets[0]
+        .symbols
+        .iter()
+        .find(|s| s.reference() == reference)
+        .unwrap();
+    sch.placed_pins(s)
+        .find(|(p, _)| p.number == number)
+        .unwrap()
+        .1
 }
 
 /// GS3–GS4: page set up; LED, resistor and battery placed (in that order).
 pub fn gs04(lib: &LibraryTable) -> Design {
     let mut d = new_design();
-    let tb = TitleBlock { title: "Getting Started".into(), date: "2026-10-06".into(), revision: "0".into(), ..Default::default() };
+    let tb = TitleBlock {
+        title: "Getting Started".into(),
+        date: "2026-10-06".into(),
+        revision: "0".into(),
+        ..Default::default()
+    };
     se::set_page(&mut d.schematic, 0, se::paper("B").unwrap(), tb);
     let led = lib.search_symbols("LED", false)[0].clone();
     let r = lib.search_symbols("R_US", false)[0].clone();
@@ -70,12 +87,37 @@ pub fn gs07(lib: &LibraryTable) -> Design {
     let (bt_p, bt_n) = (pin(s, "BT1", "1"), pin(s, "BT1", "2"));
     let (r_1, r_2) = (pin(s, "R1", "1"), pin(s, "R1", "2"));
     let (d_a, d_k) = (pin(s, "D1", "2"), pin(s, "D1", "1"));
-    se::add_wire(s, 0, &[bt_p, p(bt_p.to_mm()[0], 127.0), p(r_1.to_mm()[0], 127.0), r_1]);
+    se::add_wire(
+        s,
+        0,
+        &[
+            bt_p,
+            p(bt_p.to_mm()[0], 127.0),
+            p(r_1.to_mm()[0], 127.0),
+            r_1,
+        ],
+    );
     se::add_wire(s, 0, &[r_2, d_a]);
-    se::add_wire(s, 0, &[d_k, p(d_k.to_mm()[0], 76.2), p(bt_n.to_mm()[0], 76.2), bt_n]);
-    se::place_symbol(s, 0, lib.symbol("power:VCC").unwrap(), p(152.4, 132.08), Uuid::new_v4());
+    se::add_wire(
+        s,
+        0,
+        &[d_k, p(d_k.to_mm()[0], 76.2), p(bt_n.to_mm()[0], 76.2), bt_n],
+    );
+    se::place_symbol(
+        s,
+        0,
+        lib.symbol("power:VCC").unwrap(),
+        p(152.4, 132.08),
+        Uuid::new_v4(),
+    );
     se::add_wire(s, 0, &[p(152.4, 132.08), p(152.4, 127.0)]);
-    se::place_symbol(s, 0, lib.symbol("power:GND").unwrap(), p(152.4, 71.12), Uuid::new_v4());
+    se::place_symbol(
+        s,
+        0,
+        lib.symbol("power:GND").unwrap(),
+        p(152.4, 71.12),
+        Uuid::new_v4(),
+    );
     se::add_wire(s, 0, &[p(152.4, 71.12), p(152.4, 76.2)]);
     let mid = Pt::new(r_2.x, (r_2.y + d_a.y) / 2);
     se::add_label(s, 0, "led", mid, 90.0, LabelKind::Local);
@@ -93,7 +135,10 @@ pub fn gs10(lib: &LibraryTable) -> Design {
     for (r, f) in [
         ("BT1", "Battery:BatteryHolder_Keystone_1058_1x2032"),
         ("D1", "LED_THT:LED_D5.0mm"),
-        ("R1", "Resistor_THT:R_Axial_DIN0309_L9.0mm_D3.2mm_P12.70mm_Horizontal"),
+        (
+            "R1",
+            "Resistor_THT:R_Axial_DIN0309_L9.0mm_D3.2mm_P12.70mm_Horizontal",
+        ),
     ] {
         crate::assign::assign(s, r, f);
     }
@@ -105,18 +150,33 @@ pub fn gs11(lib: &LibraryTable) -> Design {
     let mut d = gs10(lib);
     let s = &mut d.schematic;
     let bt = pin(s, "BT1", "1").to_mm()[0];
-    se::place_symbol(s, 0, lib.symbol("power:PWR_FLAG").unwrap(), p(bt, 116.84), Uuid::new_v4());
-    se::place_symbol(s, 0, lib.symbol("power:PWR_FLAG").unwrap(), p(bt, 86.36), Uuid::new_v4());
+    se::place_symbol(
+        s,
+        0,
+        lib.symbol("power:PWR_FLAG").unwrap(),
+        p(bt, 116.84),
+        Uuid::new_v4(),
+    );
+    se::place_symbol(
+        s,
+        0,
+        lib.symbol("power:PWR_FLAG").unwrap(),
+        p(bt, 86.36),
+        Uuid::new_v4(),
+    );
     // The flags' pins sit on the battery's wires: they join them.
     se::fix_junctions(s, 0);
     d
 }
 
-
 /// GS13: board setup: two layers, 1.6 mm; the Default class's tracks 0.4 mm.
 pub fn gs13(lib: &LibraryTable) -> Design {
     let mut d = gs11(lib);
-    d.board.title_block = TitleBlock { title: "Getting Started".into(), revision: "0".into(), ..Default::default() };
+    d.board.title_block = TitleBlock {
+        title: "Getting Started".into(),
+        revision: "0".into(),
+        ..Default::default()
+    };
     d.board.paper = se::paper("A").unwrap();
     d.board.rules.class_mut("Default").unwrap().track_width = mm(0.4);
     d
@@ -125,7 +185,14 @@ pub fn gs13(lib: &LibraryTable) -> Design {
 /// GS14: Update PCB from schematic.
 pub fn gs14(lib: &LibraryTable) -> (Design, forward::Report) {
     let mut d = gs13(lib);
-    let rep = forward::update_pcb(&mut d, lib, &forward::Options { place_at: p(0.0, 60.0), ..Default::default() });
+    let rep = forward::update_pcb(
+        &mut d,
+        lib,
+        &forward::Options {
+            place_at: p(0.0, 60.0),
+            ..Default::default()
+        },
+    );
     (d, rep)
 }
 
@@ -148,7 +215,12 @@ pub fn gs16(lib: &LibraryTable) -> Design {
 
 pub fn pad(b: &Board, r: &str, n: &str) -> Pt {
     let f = be::footprint_index(b, r).unwrap();
-    let i = b.footprints[f].footprint.pads.iter().position(|x| x.number == n).unwrap();
+    let i = b.footprints[f]
+        .footprint
+        .pads
+        .iter()
+        .position(|x| x.number == n)
+        .unwrap();
     be::pad_center(b, f, i)
 }
 
@@ -176,7 +248,12 @@ pub fn gs17(lib: &LibraryTable) -> Design {
 pub fn gs18(lib: &LibraryTable) -> Design {
     let mut d = gs17(lib);
     let b = &mut d.board;
-    zone::add_zone(b, "GND", Layer::BottomCopper, vec![p(0.0, 0.0), p(45.0, 0.0), p(45.0, 50.0), p(0.0, 50.0)]);
+    zone::add_zone(
+        b,
+        "GND",
+        Layer::BottomCopper,
+        vec![p(0.0, 0.0), p(45.0, 0.0), p(45.0, 50.0), p(0.0, 50.0)],
+    );
     zone::fill_all(b);
     d
 }
@@ -186,13 +263,31 @@ pub const SW_FP: &str = "getting-started:Switch_Toggle_SPST_NKK_M2011S3A1x03";
 /// GS23: the switch symbol, pins A/2 and B/3 200 mil either side, a lever drawn between.
 pub fn switch_symbol() -> crate::symbol::Symbol {
     let mut s = le::new_symbol("M2011S3A1W03", "SW", false);
-    le::add_pin(&mut s, &PinProps::new("A", "2", Pt::new(-200 * MIL, 0), Orientation::Right));
+    le::add_pin(
+        &mut s,
+        &PinProps::new("A", "2", Pt::new(-200 * MIL, 0), Orientation::Right),
+    );
     let b = le::repeat_pin(&mut s).unwrap();
-    le::set_pin(&mut s, b, &PinProps::new("B", "3", Pt::new(200 * MIL, 0), Orientation::Left));
-    let lever = |x: f64| Geom::Circle { center: Pt::new((x * MIL as f64) as i64, 0), radius: 15 * MIL };
+    le::set_pin(
+        &mut s,
+        b,
+        &PinProps::new("B", "3", Pt::new(200 * MIL, 0), Orientation::Left),
+    );
+    let lever = |x: f64| Geom::Circle {
+        center: Pt::new((x * MIL as f64) as i64, 0),
+        radius: 15 * MIL,
+    };
     le::add_symbol_shape(&mut s, lever(-100.0), mm(0.254), Fill::None);
     le::add_symbol_shape(&mut s, lever(100.0), mm(0.254), Fill::None);
-    le::add_symbol_shape(&mut s, Geom::Line { a: Pt::new(-85 * MIL, 5 * MIL), b: Pt::new(80 * MIL, 70 * MIL) }, mm(0.254), Fill::None);
+    le::add_symbol_shape(
+        &mut s,
+        Geom::Line {
+            a: Pt::new(-85 * MIL, 5 * MIL),
+            b: Pt::new(80 * MIL, 70 * MIL),
+        },
+        mm(0.254),
+        Fill::None,
+    );
     le::set_symbol_field(&mut s, "Value", "M2011S3A1W03");
     s.keywords = "spst switch toggle".into();
     le::set_symbol_field(&mut s, "Footprint", SW_FP);
@@ -201,24 +296,56 @@ pub fn switch_symbol() -> crate::symbol::Symbol {
 
 /// GS24: the switch footprint: pads 2 and 3 4.7 mm apart, fab, silkscreen and courtyard.
 pub fn switch_footprint() -> crate::footprint::Footprint {
-    let mut f = le::new_footprint("Switch_Toggle_SPST_NKK_M2011S3A1x03", "Switch_Toggle_SPST_NKK_M2011S3A1x03", MountKind::ThroughHole);
+    let mut f = le::new_footprint(
+        "Switch_Toggle_SPST_NKK_M2011S3A1x03",
+        "Switch_Toggle_SPST_NKK_M2011S3A1x03",
+        MountKind::ThroughHole,
+    );
     // (KiCad's Y runs down; ours up: its (0, 4.7) is our (0, -4.7).)
     let p2 = le::add_pad(&mut f, p(0.0, -4.7));
     f.pads[p2].number = "2".into();
     let hole = eval("1.42 + 0.2", Unit::Mm).unwrap();
     let ring = eval("1.62 + 2*0.15", Unit::Mm).unwrap();
-    f.pads[p2].drill = Some(crate::footprint::Drill { size: crate::units::Size::new(hole, hole), offset: Pt::ZERO });
+    f.pads[p2].drill = Some(crate::footprint::Drill {
+        size: crate::units::Size::new(hole, hole),
+        offset: Pt::ZERO,
+    });
     f.pads[p2].size = crate::units::Size::new(ring, ring);
     le::add_pad(&mut f, p(0.0, -9.4));
     // Bigger annular rings: pad 2 to 1.62+2*0.3, then pushed to the other pad.
     let bigger = eval("1.62+2*0.3", Unit::Mm).unwrap();
     f.pads[p2].size = crate::units::Size::new(bigger, bigger);
     le::push_pad_properties(&mut f, p2);
-    let rect = |a: (f64, f64), b: (f64, f64)| Geom::Rect { a: p(a.0, a.1), b: p(b.0, b.1) };
-    le::add_fp_shape(&mut f, rect((-3.95, 1.8), (3.95, -11.2)), Layer::TopFab, mm(0.1));
-    le::add_fp_shape(&mut f, rect((-4.06, 1.91), (4.06, -11.31)), Layer::TopSilk, mm(0.12));
-    le::add_fp_shape(&mut f, rect((-4.2, 2.05), (4.2, -11.45)), Layer::TopCourtyard, mm(0.05));
-    le::set_model(&mut f, "getting-started.3dshapes/Switch_Toggle_SPST_NKK_M2011S3A1x03.step", [0.0, 0.0, 0.0], [0.0, 0.0, 90.0], [1.0, 1.0, 1.0], 1.0);
+    let rect = |a: (f64, f64), b: (f64, f64)| Geom::Rect {
+        a: p(a.0, a.1),
+        b: p(b.0, b.1),
+    };
+    le::add_fp_shape(
+        &mut f,
+        rect((-3.95, 1.8), (3.95, -11.2)),
+        Layer::TopFab,
+        mm(0.1),
+    );
+    le::add_fp_shape(
+        &mut f,
+        rect((-4.06, 1.91), (4.06, -11.31)),
+        Layer::TopSilk,
+        mm(0.12),
+    );
+    le::add_fp_shape(
+        &mut f,
+        rect((-4.2, 2.05), (4.2, -11.45)),
+        Layer::TopCourtyard,
+        mm(0.05),
+    );
+    le::set_model(
+        &mut f,
+        "getting-started.3dshapes/Switch_Toggle_SPST_NKK_M2011S3A1x03.step",
+        [0.0, 0.0, 0.0],
+        [0.0, 0.0, 90.0],
+        [1.0, 1.0, 1.0],
+        1.0,
+    );
     f
 }
 
@@ -242,33 +369,79 @@ pub fn gs25() -> (Design, LibraryTable, forward::Report) {
     let x = bt_p.to_mm()[0];
     // The flag on the wire from the battery up to the corner, then that wire (one again once
     // nothing joins it on the way), make way.
-    let flag = s.sheets[0].symbols.iter().find(|x| x.value() == "PWR_FLAG" && x.placement.at.y > bt_p.y).unwrap().id;
+    let flag = s.sheets[0]
+        .symbols
+        .iter()
+        .find(|x| x.value() == "PWR_FLAG" && x.placement.at.y > bt_p.y)
+        .unwrap()
+        .id;
     se::delete_items(s, 0, &[SchItem::Symbol(flag)]);
     se::fix_junctions(s, 0);
-    let w = s.sheets[0].wires.iter().find(|w| w.a == bt_p || w.b == bt_p).unwrap().id;
+    let w = s.sheets[0]
+        .wires
+        .iter()
+        .find(|w| w.a == bt_p || w.b == bt_p)
+        .unwrap()
+        .id;
     se::delete_items(s, 0, &[SchItem::Wire(w)]);
-    let sw = se::place_symbol(s, 0, lib.symbol("getting-started:M2011S3A1W03").unwrap(), p(x, 115.57), Uuid::new_v4());
+    let sw = se::place_symbol(
+        s,
+        0,
+        lib.symbol("getting-started:M2011S3A1W03").unwrap(),
+        p(x, 115.57),
+        Uuid::new_v4(),
+    );
     let c = se::selection_center(s, 0, &[SchItem::Symbol(sw)]);
     se::rotate_items(s, 0, &[SchItem::Symbol(sw)], c);
     let (s2, s3) = (pin(s, "SW1", "2"), pin(s, "SW1", "3"));
     se::add_wire(s, 0, &[bt_p, s2]);
     se::add_wire(s, 0, &[s3, p(x, 127.0)]);
-    se::place_symbol(s, 0, lib.symbol("power:PWR_FLAG").unwrap(), p(x, 123.19), Uuid::new_v4());
+    se::place_symbol(
+        s,
+        0,
+        lib.symbol("power:PWR_FLAG").unwrap(),
+        p(x, 123.19),
+        Uuid::new_v4(),
+    );
     se::fix_junctions(s, 0);
 
-    let rep = forward::update_pcb(&mut d, &lib, &forward::Options { place_at: p(60.0, 20.0), ..Default::default() });
+    let rep = forward::update_pcb(
+        &mut d,
+        &lib,
+        &forward::Options {
+            place_at: p(60.0, 20.0),
+            ..Default::default()
+        },
+    );
     let b = &mut d.board;
     // The battery-to-resistor connection (U, U again: through the via) goes.
-    let t = b.tracks.iter().find(|t| t.net == "VCC" && t.layer == Layer::BottomCopper).unwrap().id;
+    let t = b
+        .tracks
+        .iter()
+        .find(|t| t.net == "VCC" && t.layer == Layer::BottomCopper)
+        .unwrap()
+        .id;
     let chain = be::select_connected(b, t, true);
     be::delete_tracks(b, &chain);
     // A wider board (and zone) for SW1.
-    let outline = b.shapes.iter_mut().find(|s| s.layer == Layer::Outline).unwrap();
-    outline.shape.geom = Geom::Rect { a: p(0.0, 0.0), b: p(55.0, 50.0) };
+    let outline = b
+        .shapes
+        .iter_mut()
+        .find(|s| s.layer == Layer::Outline)
+        .unwrap();
+    outline.shape.geom = Geom::Rect {
+        a: p(0.0, 0.0),
+        b: p(55.0, 50.0),
+    };
     b.zones[0].outline = vec![vec![p(0.0, 0.0), p(55.0, 0.0), p(55.0, 50.0), p(0.0, 50.0)]];
     let swi = be::footprint_index(b, "SW1").unwrap();
     be::move_footprint(b, swi, p(49.0, 26.0));
-    let (bt1, sw2, sw3, r1a) = (pad(b, "BT1", "1"), pad(b, "SW1", "2"), pad(b, "SW1", "3"), pad(b, "R1", "1"));
+    let (bt1, sw2, sw3, r1a) = (
+        pad(b, "BT1", "1"),
+        pad(b, "SW1", "2"),
+        pad(b, "SW1", "3"),
+        pad(b, "R1", "1"),
+    );
     let l = be::start_layer(b, bt1, Layer::TopCopper);
     be::route(b, &be::posture(bt1, sw2, false), l, None);
     be::route(b, &be::posture(sw3, r1a, false), Layer::TopCopper, None);
@@ -276,15 +449,23 @@ pub fn gs25() -> (Design, LibraryTable, forward::Report) {
     (d, lib, rep)
 }
 
-
 /// For trying wire editing (not a course step): a 4-pin connector at (101.6, 101.6) whose pins
 /// each run left and then down in nested Ls (pin 1's outermost), and an upright wire at
 /// x 50.8 with a level wire teeing into it at y 101.6 and a stub past the tee.
 pub fn wire_editing(lib: &LibraryTable) -> Design {
     let mut d = Design::new();
     let s = &mut d.schematic;
-    se::place_symbol(s, 0, lib.symbol("Connector:Conn_01x04").unwrap(), p(101.6, 101.6), Uuid::new_v4());
-    let mut pins: Vec<Pt> = s.placed_pins(&s.sheets[0].symbols[0]).map(|(_, p)| p).collect();
+    se::place_symbol(
+        s,
+        0,
+        lib.symbol("Connector:Conn_01x04").unwrap(),
+        p(101.6, 101.6),
+        Uuid::new_v4(),
+    );
+    let mut pins: Vec<Pt> = s
+        .placed_pins(&s.sheets[0].symbols[0])
+        .map(|(_, p)| p)
+        .collect();
     pins.sort_by_key(|p| -p.y);
     for (r, pin) in pins.iter().enumerate() {
         let corner = *pin - Pt::mm(5.08 + 2.54 * (3 - r) as f64, 0.0);

@@ -23,7 +23,10 @@ use cadrs_core::{ElementId, Feature, FeatureId, FeatureKind};
 use cadrs_sketch::PlaneRef;
 use cadrs_sketch::units::Quantity;
 use cadrs_ui::prelude::*;
-use cadrs_ui::{CheckboxChange, FeatureDialogAccept, FeatureDialogCancel, FeatureDialogState, NumberField, NumberFieldCommit, NumberFieldState, OptionRow, SelectionField};
+use cadrs_ui::{
+    CheckboxChange, FeatureDialogAccept, FeatureDialogCancel, FeatureDialogState, NumberField,
+    NumberFieldCommit, NumberFieldState, OptionRow, SelectionField,
+};
 
 use crate::parts::PartCache;
 use crate::viewport::{Pick, PickRequest, ViewportArea};
@@ -38,9 +41,19 @@ impl Plugin for ImageDialogPlugin {
             .add_systems(Startup, configure_gizmos)
             .add_systems(
                 Update,
-                (image_picks, gizmo_pointer).chain().after(crate::viewport::apply_view_to_camera).before(crate::parts::PartsSet).run_if(in_state(AppState::Document)),
+                (image_picks, gizmo_pointer)
+                    .chain()
+                    .after(crate::viewport::apply_view_to_camera)
+                    .before(crate::parts::PartsSet)
+                    .run_if(in_state(AppState::Document)),
             )
-            .add_systems(Update, (sync_image_dialog, draw_gizmo).chain().after(crate::parts::PartsSet).run_if(in_state(AppState::Document)))
+            .add_systems(
+                Update,
+                (sync_image_dialog, draw_gizmo)
+                    .chain()
+                    .after(crate::parts::PartsSet)
+                    .run_if(in_state(AppState::Document)),
+            )
             .add_systems(OnExit(AppState::Document), |world: &mut World| {
                 if world.contains_resource::<ImageSession>() {
                     finish(world);
@@ -82,7 +95,13 @@ enum Field {
 }
 
 impl Field {
-    const ALL: [Field; 5] = [Field::X, Field::Y, Field::Width, Field::Height, Field::Rotation];
+    const ALL: [Field; 5] = [
+        Field::X,
+        Field::Y,
+        Field::Width,
+        Field::Height,
+        Field::Rotation,
+    ];
 
     fn name(self) -> &'static str {
         match self {
@@ -105,7 +124,11 @@ impl Field {
     }
 
     fn quantity(self) -> Quantity {
-        if self == Field::Rotation { Quantity::Angle } else { Quantity::Length }
+        if self == Field::Rotation {
+            Quantity::Angle
+        } else {
+            Quantity::Length
+        }
     }
 
     fn get(self, x: &ImageFeature) -> f64 {
@@ -121,40 +144,76 @@ impl Field {
 
 /// Opens an Image for editing.
 pub fn edit_image(world: &mut World, feature: FeatureId) {
-    if world.get_resource::<ImageSession>().is_some_and(|s| s.feature == feature) {
+    if world
+        .get_resource::<ImageSession>()
+        .is_some_and(|s| s.feature == feature)
+    {
         return;
     }
     if world.contains_resource::<ImageSession>() {
         finish(world);
     }
     crate::import_dialog::close_other_sessions(world);
-    let Some(doc) = world.get_resource::<ActiveDocument>() else { return };
-    let Some(el) = doc.active_element() else { return };
+    let Some(doc) = world.get_resource::<ActiveDocument>() else {
+        return;
+    };
+    let Some(el) = doc.active_element() else {
+        return;
+    };
     let element = el.id;
-    let Some(before) = el.feature(feature).filter(|f| matches!(f.kind, FeatureKind::Image(_))).cloned() else { return };
+    let Some(before) = el
+        .feature(feature)
+        .filter(|f| matches!(f.kind, FeatureKind::Image(_)))
+        .cloned()
+    else {
+        return;
+    };
     let mark = doc.history.undo_len();
-    world.insert_resource(ImageSession { element, feature, mark, before, keep_aspect: true });
+    world.insert_resource(ImageSession {
+        element,
+        feature,
+        mark,
+        before,
+        keep_aspect: true,
+    });
 }
 
 fn params(world: &World) -> Option<ImageFeature> {
     let s = world.get_resource::<ImageSession>()?;
-    match &world.get_resource::<ActiveDocument>()?.doc.element(s.element)?.feature(s.feature)?.kind {
+    match &world
+        .get_resource::<ActiveDocument>()?
+        .doc
+        .element(s.element)?
+        .feature(s.feature)?
+        .kind
+    {
         FeatureKind::Image(x) => Some(x.clone()),
         _ => None,
     }
 }
 
 fn set(world: &mut World, x: ImageFeature, label: &str) {
-    let Some(s) = world.get_resource::<ImageSession>().cloned() else { return };
-    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return };
-    if let Err(e) = doc.execute(&SetFeature { element: s.element, feature: s.feature, kind: FeatureKind::Image(x), label: label.into() }) {
+    let Some(s) = world.get_resource::<ImageSession>().cloned() else {
+        return;
+    };
+    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+        return;
+    };
+    if let Err(e) = doc.execute(&SetFeature {
+        element: s.element,
+        feature: s.feature,
+        kind: FeatureKind::Image(x),
+        label: label.into(),
+    }) {
         warn!("cannot change the image: {e}");
     }
 }
 
 /// ✓: keeps the changes as one step.
 pub fn accept(world: &mut World) {
-    let Some(s) = world.remove_resource::<ImageSession>() else { return };
+    let Some(s) = world.remove_resource::<ImageSession>() else {
+        return;
+    };
     if let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() {
         doc.squash_element_since(s.mark, s.element, format!("Edit {}", s.before.name));
     }
@@ -162,13 +221,25 @@ pub fn accept(world: &mut World) {
 
 /// ✕: puts the picture back as it was.
 pub fn cancel(world: &mut World) {
-    let Some(s) = world.remove_resource::<ImageSession>() else { return };
-    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return };
+    let Some(s) = world.remove_resource::<ImageSession>() else {
+        return;
+    };
+    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+        return;
+    };
     let name = s.before.name.clone();
     doc.squash_element_since(s.mark, s.element, format!("Edit {name}"));
-    let now = doc.doc.element(s.element).and_then(|e| e.feature(s.feature)).cloned();
+    let now = doc
+        .doc
+        .element(s.element)
+        .and_then(|e| e.feature(s.feature))
+        .cloned();
     if now.is_some_and(|f| f != s.before) {
-        let _ = doc.execute(&ReplaceFeature { element: s.element, feature: s.before, label: format!("Cancel {name}") });
+        let _ = doc.execute(&ReplaceFeature {
+            element: s.element,
+            feature: s.before,
+            label: format!("Cancel {name}"),
+        });
     }
 }
 
@@ -189,9 +260,21 @@ fn on_cancel(ev: On<FeatureDialogCancel>, q: Query<(), With<ImageDialog>>, mut c
     }
 }
 
-fn on_number(ev: On<NumberFieldCommit>, q: Query<&Field>, mut q_state: Query<&mut NumberFieldState>, units: Res<crate::WorkspaceUnits>, mut commands: Commands) {
-    let Ok(field) = q.get(ev.entity).copied() else { return };
-    let v = units.0.eval(ev.text.trim(), field.quantity()).ok().filter(|v| v.is_finite() && (!matches!(field, Field::Width | Field::Height) || *v > 0.0));
+fn on_number(
+    ev: On<NumberFieldCommit>,
+    q: Query<&Field>,
+    mut q_state: Query<&mut NumberFieldState>,
+    units: Res<crate::WorkspaceUnits>,
+    mut commands: Commands,
+) {
+    let Ok(field) = q.get(ev.entity).copied() else {
+        return;
+    };
+    let v = units
+        .0
+        .eval(ev.text.trim(), field.quantity())
+        .ok()
+        .filter(|v| v.is_finite() && (!matches!(field, Field::Width | Field::Height) || *v > 0.0));
     let Some(v) = v else {
         if let Ok(mut s) = q_state.get_mut(ev.entity) {
             s.text = ev.text.trim().to_string();
@@ -201,7 +284,9 @@ fn on_number(ev: On<NumberFieldCommit>, q: Query<&Field>, mut q_state: Query<&mu
     };
     commands.queue(move |world: &mut World| {
         let Some(mut x) = params(world) else { return };
-        let keep = world.get_resource::<ImageSession>().is_some_and(|s| s.keep_aspect);
+        let keep = world
+            .get_resource::<ImageSession>()
+            .is_some_and(|s| s.keep_aspect);
         match field {
             Field::X => x.center[0] = v,
             Field::Y => x.center[1] = v,
@@ -223,8 +308,13 @@ fn on_number(ev: On<NumberFieldCommit>, q: Query<&Field>, mut q_state: Query<&mu
     });
 }
 
-fn on_keep_aspect(ev: On<CheckboxChange>, q: Query<&Name>, mut session: Option<ResMut<ImageSession>>) {
-    if q.get(ev.entity).is_ok_and(|n| n.as_str() == "image-keep-aspect-checkbox")
+fn on_keep_aspect(
+    ev: On<CheckboxChange>,
+    q: Query<&Name>,
+    mut session: Option<ResMut<ImageSession>>,
+) {
+    if q.get(ev.entity)
+        .is_ok_and(|n| n.as_str() == "image-keep-aspect-checkbox")
         && let Some(s) = session.as_mut()
     {
         s.keep_aspect = ev.checked;
@@ -248,19 +338,33 @@ fn sync_image_dialog(
         }
         return;
     };
-    let Some(f) = doc.doc.element(s.element).and_then(|e| e.feature(s.feature)) else { return };
-    let FeatureKind::Image(x) = &f.kind else { return };
+    let Some(f) = doc
+        .doc
+        .element(s.element)
+        .and_then(|e| e.feature(s.feature))
+    else {
+        return;
+    };
+    let FeatureKind::Image(x) = &f.kind else {
+        return;
+    };
     let error = cache.errors.get(&f.id).cloned();
     let valid = f.is_valid() && error.is_none();
     let texts = Field::ALL.map(|k| units.0.with_unit(k.get(x), k.quantity()));
-    let plane = doc.doc.element(s.element).map(|el| crate::sketch::plane_label(x.plane, el.features(), &cache)).unwrap_or_default();
+    let plane = doc
+        .doc
+        .element(s.element)
+        .map(|el| crate::sketch::plane_label(x.plane, el.features(), &cache))
+        .unwrap_or_default();
     let layout = BuiltFor(plane.clone(), texts.clone(), s.keep_aspect);
     let built = q_dialog.iter().next().map(|(e, k, _)| (e, k.clone()));
     if built.as_ref().is_none_or(|(_, k)| *k != layout) {
         if let Some((e, _)) = built {
             commands.entity(e).try_despawn();
         }
-        let Some(area) = q_area.iter().next() else { return };
+        let Some(area) = q_area.iter().next() else {
+            return;
+        };
         let t = theme.clone();
         let keep = s.keep_aspect;
         let dialog = commands
@@ -272,12 +376,32 @@ fn sync_image_dialog(
                     .title(f.name.clone())
                     .valid(valid)
                     .body(move |b| {
-                        b.spawn(Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(4.0), ..default() }).with_children(|b| {
-                            b.spawn(SelectionField::new("image-plane-field").placeholder("Plane").value(Some(plane)).build(&t));
+                        b.spawn(Node {
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(4.0),
+                            ..default()
+                        })
+                        .with_children(|b| {
+                            b.spawn(
+                                SelectionField::new("image-plane-field")
+                                    .placeholder("Plane")
+                                    .value(Some(plane))
+                                    .build(&t),
+                            );
                             for (k, text) in Field::ALL.into_iter().zip(texts) {
-                                b.spawn((k, NumberField::new(k.name(), k.label()).text(text).label_width(64.0).build(&t)));
+                                b.spawn((
+                                    k,
+                                    NumberField::new(k.name(), k.label())
+                                        .text(text)
+                                        .label_width(64.0)
+                                        .build(&t),
+                                ));
                                 if k == Field::Height {
-                                    b.spawn(OptionRow::new("image-keep-aspect", "Keep aspect ratio").checked(keep).build(&t));
+                                    b.spawn(
+                                        OptionRow::new("image-keep-aspect", "Keep aspect ratio")
+                                            .checked(keep)
+                                            .build(&t),
+                                    );
                                 }
                             }
                         });
@@ -289,7 +413,11 @@ fn sync_image_dialog(
         return;
     }
     for (_, _, mut st) in &mut q_dialog {
-        let want = FeatureDialogState { title: f.name.clone(), valid, error: error.is_some() };
+        let want = FeatureDialogState {
+            title: f.name.clone(),
+            valid,
+            error: error.is_some(),
+        };
         if *st != want {
             *st = want;
         }
@@ -301,7 +429,11 @@ fn sync_image_dialog(
 
 /// While the dialog is open, a plane, Plane feature or flat face clicked becomes the picture's
 /// plane (not its own face).
-fn image_picks(mut picks: MessageReader<PickRequest>, session: Option<Res<ImageSession>>, mut commands: Commands) {
+fn image_picks(
+    mut picks: MessageReader<PickRequest>,
+    session: Option<Res<ImageSession>>,
+    mut commands: Commands,
+) {
     let Some(s) = session else {
         picks.clear();
         return;
@@ -310,12 +442,17 @@ fn image_picks(mut picks: MessageReader<PickRequest>, session: Option<Res<ImageS
     for p in picks.read() {
         let Some(pick) = p.0 else { continue };
         commands.queue(move |world: &mut World| {
-            let plane = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element()).and_then(|el| match pick {
-                Pick::Plane(k) => Some(k.plane_ref()),
-                Pick::Feature(f) => cadrs_core::parts::plane_feature_ref(el.features(), f),
-                Pick::Face(f, tag) if f.feature != own => crate::parts::face_plane_of(el, f.feature, tag),
-                _ => None,
-            });
+            let plane = world
+                .get_resource::<ActiveDocument>()
+                .and_then(|d| d.active_element())
+                .and_then(|el| match pick {
+                    Pick::Plane(k) => Some(k.plane_ref()),
+                    Pick::Feature(f) => cadrs_core::parts::plane_feature_ref(el.features(), f),
+                    Pick::Face(f, tag) if f.feature != own => {
+                        crate::parts::face_plane_of(el, f.feature, tag)
+                    }
+                    _ => None,
+                });
             if let (Some(plane), Some(mut x)) = (plane, params(world))
                 && x.plane != plane
             {
@@ -390,9 +527,16 @@ fn turn_at(x: &ImageFeature, mm_per_px: f64) -> [f64; 2] {
     [x.center[0] - up * s, x.center[1] + up * c]
 }
 
-fn on_screen(x: &ImageFeature, view: &crate::camera::ViewState, rect: &crate::viewport::ViewportRect) -> OnScreen {
+fn on_screen(
+    x: &ImageFeature,
+    view: &crate::camera::ViewState,
+    rect: &crate::viewport::ViewportRect,
+) -> OnScreen {
     let screen = |p: [f64; 2]| rect.to_screen(view.project(to_world(x.plane, p)));
-    OnScreen { corners: x.corners().map(screen), turn: screen(turn_at(x, view.scale as f64)) }
+    OnScreen {
+        corners: x.corners().map(screen),
+        turn: screen(turn_at(x, view.scale as f64)),
+    }
 }
 
 /// Inside a convex quad (either winding).
@@ -418,7 +562,10 @@ fn dragged(d: &GizmoDrag, at: [f64; 2], step: f64, keep_aspect: bool) -> ImageFe
     let snap = |v: f64| ((v / step).round() * step * 1e6).round() / 1e6 + 0.0;
     match d.grip {
         Grip::Move => {
-            x.center = [snap(d.before.center[0] + at[0] - d.start[0]), snap(d.before.center[1] + at[1] - d.start[1])];
+            x.center = [
+                snap(d.before.center[0] + at[0] - d.start[0]),
+                snap(d.before.center[1] + at[1] - d.start[1]),
+            ];
         }
         Grip::Corner(_) => {
             // The pointer in the picture's own axes, from its centre.
@@ -438,7 +585,10 @@ fn dragged(d: &GizmoDrag, at: [f64; 2], step: f64, keep_aspect: bool) -> ImageFe
             }
         }
         Grip::Rotate => {
-            let a = (at[1] - x.center[1]).atan2(at[0] - x.center[0]).to_degrees() - 90.0;
+            let a = (at[1] - x.center[1])
+                .atan2(at[0] - x.center[0])
+                .to_degrees()
+                - 90.0;
             let mut a = a.round();
             let near = (a / 15.0).round() * 15.0;
             if (a - near).abs() <= 3.0 {
@@ -466,9 +616,17 @@ fn gizmo_pointer(
     mut commands: Commands,
 ) {
     use bevy::picking::pointer::{PointerAction, PointerButton};
-    let current = session.as_ref().and_then(|s| match &doc.as_ref()?.doc.element(s.element)?.feature(s.feature)?.kind {
-        FeatureKind::Image(x) => Some(x.clone()),
-        _ => None,
+    let current = session.as_ref().and_then(|s| {
+        match &doc
+            .as_ref()?
+            .doc
+            .element(s.element)?
+            .feature(s.feature)?
+            .kind
+        {
+            FeatureKind::Image(x) => Some(x.clone()),
+            _ => None,
+        }
     });
     let (Some(s), Some(current)) = (session, current) else {
         inputs.clear();
@@ -476,9 +634,17 @@ fn gizmo_pointer(
         gizmo.drag = None;
         return;
     };
-    let shown = gizmo.drag.as_ref().map_or(current.clone(), |d| d.now.clone());
+    let shown = gizmo
+        .drag
+        .as_ref()
+        .map_or(current.clone(), |d| d.now.clone());
     let o = on_screen(&shown, &view.view, &rect);
-    let hovered = gizmo.drag.as_ref().map(|d| d.grip).or_else(|| rect.0.contains(drag.pointer()).then(|| grip_at(&o, drag.pointer())).flatten());
+    let hovered = gizmo.drag.as_ref().map(|d| d.grip).or_else(|| {
+        rect.0
+            .contains(drag.pointer())
+            .then(|| grip_at(&o, drag.pointer()))
+            .flatten()
+    });
     if gizmo.hovered != hovered {
         gizmo.hovered = hovered;
     }
@@ -488,7 +654,12 @@ fn gizmo_pointer(
         match input.action {
             PointerAction::Press(PointerButton::Primary) if rect.0.contains(pos) => {
                 if let (Some(grip), Some(start)) = (grip_at(&o, pos), on_plane(pos)) {
-                    gizmo.drag = Some(GizmoDrag { grip, start, before: current.clone(), now: current.clone() });
+                    gizmo.drag = Some(GizmoDrag {
+                        grip,
+                        start,
+                        before: current.clone(),
+                        now: current.clone(),
+                    });
                     // Not a click that picks.
                     grab.0 = true;
                 }
@@ -507,7 +678,9 @@ fn gizmo_pointer(
             PointerAction::Release(PointerButton::Primary) if gizmo.drag.is_some() => {
                 commands.queue(|world: &mut World| {
                     world.resource_mut::<crate::parts::PartOverride>().applied = None;
-                    let Some(d) = world.resource_mut::<ImageGizmo>().drag.take() else { return };
+                    let Some(d) = world.resource_mut::<ImageGizmo>().drag.take() else {
+                        return;
+                    };
                     if d.now != d.before {
                         let label = match d.grip {
                             Grip::Move => "Move image",
@@ -539,13 +712,24 @@ fn draw_gizmo(
     let Some(s) = session else { return };
     let x = match &gizmo.drag {
         Some(d) => d.now.clone(),
-        None => match doc.as_ref().and_then(|d| d.doc.element(s.element)?.feature(s.feature).map(|f| f.kind.clone())) {
+        None => match doc.as_ref().and_then(|d| {
+            d.doc
+                .element(s.element)?
+                .feature(s.feature)
+                .map(|f| f.kind.clone())
+        }) {
             Some(FeatureKind::Image(x)) => x,
             _ => return,
         },
     };
     let rgb = |c: [u8; 3]| Color::srgb_u8(c[0], c[1], c[2]);
-    let color = |g: Grip| if gizmo.hovered == Some(g) { rgb(crate::manipulator::ARROW_HOT) } else { rgb(crate::manipulator::ARROW_BLUE) };
+    let color = |g: Grip| {
+        if gizmo.hovered == Some(g) {
+            rgb(crate::manipulator::ARROW_HOT)
+        } else {
+            rgb(crate::manipulator::ARROW_BLUE)
+        }
+    };
     let mm_px = view.view.scale as f64;
     let w = |p: [f64; 2]| to_world(x.plane, p);
     let c = x.corners();
@@ -556,9 +740,15 @@ fn draw_gizmo(
     // Corner squares, square to the picture, a fixed size on screen.
     let (sn, cs) = x.rotation.to_radians().sin_cos();
     let h = CORNER_PX as f64 * mm_px;
-    let local = |p: [f64; 2], dx: f64, dy: f64| [p[0] + dx * cs - dy * sn, p[1] + dx * sn + dy * cs];
+    let local =
+        |p: [f64; 2], dx: f64, dy: f64| [p[0] + dx * cs - dy * sn, p[1] + dx * sn + dy * cs];
     for (i, p) in c.iter().enumerate() {
-        let sq = [local(*p, -h, -h), local(*p, h, -h), local(*p, h, h), local(*p, -h, h)];
+        let sq = [
+            local(*p, -h, -h),
+            local(*p, h, -h),
+            local(*p, h, h),
+            local(*p, -h, h),
+        ];
         let col = color(Grip::Corner(i));
         for k in 0..4 {
             gizmos.line(w(sq[k]), w(sq[(k + 1) % 4]), col);
@@ -570,7 +760,10 @@ fn draw_gizmo(
     let col = color(Grip::Rotate);
     let r = TURN_PX as f64 * mm_px;
     let len = (at[0] - top[0]).hypot(at[1] - top[1]).max(1e-9);
-    let stalk_end = [at[0] - (at[0] - top[0]) / len * r, at[1] - (at[1] - top[1]) / len * r];
+    let stalk_end = [
+        at[0] - (at[0] - top[0]) / len * r,
+        at[1] - (at[1] - top[1]) / len * r,
+    ];
     gizmos.line(w(top), w(stalk_end), col);
     const N: usize = 24;
     for k in 0..N {

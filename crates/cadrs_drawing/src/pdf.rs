@@ -42,11 +42,20 @@ fn n(v: f64) -> String {
     }
     let s = format!("{v:.4}");
     let s = s.trim_end_matches('0').trim_end_matches('.');
-    if s == "-0" || s.is_empty() { "0".into() } else { s.to_string() }
+    if s == "-0" || s.is_empty() {
+        "0".into()
+    } else {
+        s.to_string()
+    }
 }
 
 fn rgb(c: Rgb) -> String {
-    format!("{} {} {}", n(c[0] as f64 / 255.0), n(c[1] as f64 / 255.0), n(c[2] as f64 / 255.0))
+    format!(
+        "{} {} {}",
+        n(c[0] as f64 / 255.0),
+        n(c[1] as f64 / 255.0),
+        n(c[2] as f64 / 255.0)
+    )
 }
 
 /// A face used on the pages: (weight, italic) as `rich::face` gives them.
@@ -58,7 +67,11 @@ struct FontUse {
 }
 
 fn face_key(bold: bool, italic: bool) -> FaceKey {
-    let style = CharStyle { bold, italic, ..CharStyle::default() };
+    let style = CharStyle {
+        bold,
+        italic,
+        ..CharStyle::default()
+    };
     let (w, it) = rich::face(&style);
     (w, it && !bold)
 }
@@ -72,7 +85,10 @@ impl Writer {
     fn new() -> Self {
         let mut out = Vec::new();
         out.extend_from_slice(b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n");
-        Self { out, offsets: Vec::new() }
+        Self {
+            out,
+            offsets: Vec::new(),
+        }
     }
 
     /// Reserves an object number.
@@ -88,14 +104,22 @@ impl Writer {
 
     fn stream(&mut self, id: usize, dict: &str, data: &[u8]) {
         self.offsets[id - 1] = self.out.len();
-        let _ = write!(self.out, "{id} 0 obj\n<< {dict} /Length {} >>\nstream\n", data.len());
+        let _ = write!(
+            self.out,
+            "{id} 0 obj\n<< {dict} /Length {} >>\nstream\n",
+            data.len()
+        );
         self.out.extend_from_slice(data);
         self.out.extend_from_slice(b"\nendstream\nendobj\n");
     }
 
     fn finish(mut self, root: usize) -> Vec<u8> {
         let xref = self.out.len();
-        let _ = write!(self.out, "xref\n0 {}\n0000000000 65535 f \n", self.offsets.len() + 1);
+        let _ = write!(
+            self.out,
+            "xref\n0 {}\n0000000000 65535 f \n",
+            self.offsets.len() + 1
+        );
         for o in &self.offsets {
             let _ = writeln!(self.out, "{o:010} 00000 n ");
         }
@@ -132,7 +156,12 @@ fn path(c: &mut String, s: &Shape) {
                 }
             }
         }
-        Shape::Arc { center, radius, start, end } => {
+        Shape::Arc {
+            center,
+            radius,
+            start,
+            end,
+        } => {
             let mut sweep = (end - start).rem_euclid(360.0);
             if sweep < 1e-9 {
                 sweep = 360.0;
@@ -143,18 +172,34 @@ fn path(c: &mut String, s: &Shape) {
             arc_path(c, *center, *radius, 0.0, 360.0, true);
             c.push_str("h\n");
         }
-        Shape::Spline { knots, control, points, .. } => {
+        Shape::Spline {
+            knots,
+            control,
+            points,
+            ..
+        } => {
             // Our splines are joined cubic Béziers (interior knots of multiplicity 3): drawn as
             // curves; any other B-spline as its polyline.
             let segs = control.len().saturating_sub(1) / 3;
             let bezier = control.len() >= 4
                 && control.len() % 3 == 1
                 && knots.len() == control.len() + 4
-                && (0..segs.saturating_sub(1)).all(|i| knots[4 + 3 * i] == knots[5 + 3 * i] && knots[5 + 3 * i] == knots[6 + 3 * i]);
+                && (0..segs.saturating_sub(1)).all(|i| {
+                    knots[4 + 3 * i] == knots[5 + 3 * i] && knots[5 + 3 * i] == knots[6 + 3 * i]
+                });
             if bezier {
                 mv(c, control[0]);
                 for k in control[1..].chunks(3) {
-                    let _ = writeln!(c, "{} {} {} {} {} {} c", n(k[0][0]), n(k[0][1]), n(k[1][0]), n(k[1][1]), n(k[2][0]), n(k[2][1]));
+                    let _ = writeln!(
+                        c,
+                        "{} {} {} {} {} {} c",
+                        n(k[0][0]),
+                        n(k[0][1]),
+                        n(k[1][0]),
+                        n(k[1][1]),
+                        n(k[2][0]),
+                        n(k[2][1])
+                    );
                 }
             } else if let Some(f) = points.first() {
                 mv(c, *f);
@@ -182,7 +227,16 @@ fn arc_path(c: &mut String, center: [f64; 2], r: f64, start: f64, sweep: f64, mo
         let (p0, p3) = (at(a), at(b));
         let c1 = [p0[0] - k * r * a.sin(), p0[1] + k * r * a.cos()];
         let c2 = [p3[0] + k * r * b.sin(), p3[1] - k * r * b.cos()];
-        let _ = writeln!(c, "{} {} {} {} {} {} c", n(c1[0]), n(c1[1]), n(c2[0]), n(c2[1]), n(p3[0]), n(p3[1]));
+        let _ = writeln!(
+            c,
+            "{} {} {} {} {} {} c",
+            n(c1[0]),
+            n(c1[1]),
+            n(c2[0]),
+            n(c2[1]),
+            n(p3[0]),
+            n(p3[1])
+        );
         a = b;
     }
 }
@@ -191,7 +245,10 @@ fn pen_state(c: &mut String, pen: &Pen, last: &mut Option<(String, String, Strin
     let w = n(pen.width);
     let col = rgb(pen.color);
     let dash = match &pen.dash {
-        Some(d) => format!("[{}] 0 d", d.iter().map(|x| n(*x)).collect::<Vec<_>>().join(" ")),
+        Some(d) => format!(
+            "[{}] 0 d",
+            d.iter().map(|x| n(*x)).collect::<Vec<_>>().join(" ")
+        ),
         None => "[] 0 d".into(),
     };
     let want = (w, col, dash);
@@ -203,7 +260,14 @@ fn pen_state(c: &mut String, pen: &Pen, last: &mut Option<(String, String, Strin
 
 /// Writes `pages` as a PDF.
 pub fn write_pdf(pages: &[Page], opts: &PdfOptions) -> Vec<u8> {
-    let pages: Vec<Page> = if opts.color { pages.to_vec() } else { pages.iter().map(crate::export::to_black_and_white).collect() };
+    let pages: Vec<Page> = if opts.color {
+        pages.to_vec()
+    } else {
+        pages
+            .iter()
+            .map(crate::export::to_black_and_white)
+            .collect()
+    };
     // The faces and glyphs used.
     let mut fonts: BTreeMap<FaceKey, FontUse> = BTreeMap::new();
     let mut faces: HashMap<FaceKey, Option<ttf_parser::Face<'static>>> = HashMap::new();
@@ -213,8 +277,15 @@ pub fn write_pdf(pages: &[Page], opts: &PdfOptions) -> Vec<u8> {
             if let Item::Symbol { .. } = it {
                 let key = face_key(false, false);
                 let data = cadrs_sketch::text::inter_data(key.0, key.1);
-                if let Some(face) = faces.entry(key).or_insert_with(|| ttf_parser::Face::parse(data, 0).ok()).as_ref() {
-                    let u = fonts.entry(key).or_insert_with(|| FontUse { data, glyphs: BTreeMap::new() });
+                if let Some(face) = faces
+                    .entry(key)
+                    .or_insert_with(|| ttf_parser::Face::parse(data, 0).ok())
+                    .as_ref()
+                {
+                    let u = fonts.entry(key).or_insert_with(|| FontUse {
+                        data,
+                        glyphs: BTreeMap::new(),
+                    });
                     if let Some(g) = face.glyph_index(' ') {
                         u.glyphs.entry(g.0).or_insert(' ');
                     }
@@ -223,10 +294,17 @@ pub fn write_pdf(pages: &[Page], opts: &PdfOptions) -> Vec<u8> {
             if let Item::Text(t) = it {
                 let key = face_key(t.bold, t.italic);
                 let data = cadrs_sketch::text::inter_data(key.0, key.1);
-                let Some(face) = faces.entry(key).or_insert_with(|| ttf_parser::Face::parse(data, 0).ok()).as_ref() else {
+                let Some(face) = faces
+                    .entry(key)
+                    .or_insert_with(|| ttf_parser::Face::parse(data, 0).ok())
+                    .as_ref()
+                else {
                     continue;
                 };
-                let u = fonts.entry(key).or_insert_with(|| FontUse { data, glyphs: BTreeMap::new() });
+                let u = fonts.entry(key).or_insert_with(|| FontUse {
+                    data,
+                    glyphs: BTreeMap::new(),
+                });
                 for ch in t.text.chars() {
                     if let Some(g) = face.glyph_index(ch) {
                         u.glyphs.entry(g.0).or_insert(ch);
@@ -241,7 +319,9 @@ pub fn write_pdf(pages: &[Page], opts: &PdfOptions) -> Vec<u8> {
     // Fonts.
     let mut font_ids: HashMap<FaceKey, (usize, String)> = HashMap::new();
     for (i, (key, u)) in fonts.iter().enumerate() {
-        let Some(face) = faces[key].as_ref() else { continue };
+        let Some(face) = faces[key].as_ref() else {
+            continue;
+        };
         let upem = face.units_per_em() as f64;
         let scale = 1000.0 / upem;
         let name = match key {
@@ -288,7 +368,11 @@ pub fn write_pdf(pages: &[Page], opts: &PdfOptions) -> Vec<u8> {
             ),
         );
         let packed = deflate(u.data);
-        w.stream(file, &format!("/Filter /FlateDecode /Length1 {}", u.data.len()), &packed);
+        w.stream(
+            file,
+            &format!("/Filter /FlateDecode /Length1 {}", u.data.len()),
+            &packed,
+        );
         let mut cmap = String::from(
             "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n",
         );
@@ -297,7 +381,11 @@ pub fn write_pdf(pages: &[Page], opts: &PdfOptions) -> Vec<u8> {
             let _ = writeln!(cmap, "{} beginbfchar", chunk.len());
             for (g, ch) in chunk {
                 let mut buf = [0u16; 2];
-                let hex: String = ch.encode_utf16(&mut buf).iter().map(|u| format!("{u:04X}")).collect();
+                let hex: String = ch
+                    .encode_utf16(&mut buf)
+                    .iter()
+                    .map(|u| format!("{u:04X}"))
+                    .collect();
                 let _ = writeln!(cmap, "<{:04X}> <{hex}>", g);
             }
             cmap.push_str("endbfchar\n");
@@ -312,7 +400,12 @@ pub fn write_pdf(pages: &[Page], opts: &PdfOptions) -> Vec<u8> {
         let content_id = w.reserve();
         let mut images: Vec<(String, usize)> = Vec::new();
         let mut c = String::new();
-        let _ = writeln!(c, "q\n{} 0 0 {} 0 0 cm\n1 J 1 j", n(PT_PER_MM), n(PT_PER_MM));
+        let _ = writeln!(
+            c,
+            "q\n{} 0 0 {} 0 0 cm\n1 J 1 j",
+            n(PT_PER_MM),
+            n(PT_PER_MM)
+        );
         let mut last_pen = None;
         for it in &p.items {
             match it {
@@ -321,12 +414,22 @@ pub fn write_pdf(pages: &[Page], opts: &PdfOptions) -> Vec<u8> {
                     path(&mut c, s);
                     c.push_str("S\n");
                 }
-                Item::Fill { points, color, layer } => {
+                Item::Fill {
+                    points,
+                    color,
+                    layer,
+                } => {
                     if points.len() < 3 {
                         continue;
                     }
                     let _ = writeln!(c, "{} rg", rgb(*color));
-                    path(&mut c, &Shape::Polyline { points: points.clone(), closed: true });
+                    path(
+                        &mut c,
+                        &Shape::Polyline {
+                            points: points.clone(),
+                            closed: true,
+                        },
+                    );
                     if *layer == crate::export::Layer::Shaded {
                         // A hairline of the same colour hides the seams between triangles.
                         let _ = writeln!(c, "0.05 w {} RG [] 0 d B", rgb(*color));
@@ -337,7 +440,11 @@ pub fn write_pdf(pages: &[Page], opts: &PdfOptions) -> Vec<u8> {
                 }
                 Item::Text(t) => {
                     let key = face_key(t.bold, t.italic);
-                    let (Some((_, fname)), Some(Some(face))) = (font_ids.get(&key), faces.get(&key)) else { continue };
+                    let (Some((_, fname)), Some(Some(face))) =
+                        (font_ids.get(&key), faces.get(&key))
+                    else {
+                        continue;
+                    };
                     let hex: String = t
                         .text
                         .chars()
@@ -366,8 +473,14 @@ pub fn write_pdf(pages: &[Page], opts: &PdfOptions) -> Vec<u8> {
                     // The character as ActualText on an invisible space (render mode 3), so
                     // text extraction reads "⌴Ø.438" where the strokes draw the symbol.
                     let key = face_key(false, false);
-                    let (Some((_, fname)), Some(Some(face))) = (font_ids.get(&key), faces.get(&key)) else { continue };
-                    let Some(space) = face.glyph_index(' ') else { continue };
+                    let (Some((_, fname)), Some(Some(face))) =
+                        (font_ids.get(&key), faces.get(&key))
+                    else {
+                        continue;
+                    };
+                    let Some(space) = face.glyph_index(' ') else {
+                        continue;
+                    };
                     let mut utf16 = String::from("FEFF");
                     for u in ch.encode_utf16(&mut [0u16; 2]) {
                         let _ = write!(utf16, "{:04X}", u);
@@ -383,10 +496,21 @@ pub fn write_pdf(pages: &[Page], opts: &PdfOptions) -> Vec<u8> {
                     );
                 }
                 Item::Image(pic) => {
-                    let Ok(img) = crate::export::decode_image(&pic.data) else { continue };
+                    let Ok(img) = crate::export::decode_image(&pic.data) else {
+                        continue;
+                    };
                     let id = image_object(&mut w, &img, opts.color);
                     let name = format!("Im{}", images.len() + 1);
-                    let _ = writeln!(c, "q {} {} {} {} {} {} cm /{name} Do Q", n(pic.u[0]), n(pic.u[1]), n(pic.v[0]), n(pic.v[1]), n(pic.at[0]), n(pic.at[1]));
+                    let _ = writeln!(
+                        c,
+                        "q {} {} {} {} {} {} cm /{name} Do Q",
+                        n(pic.u[0]),
+                        n(pic.u[1]),
+                        n(pic.v[0]),
+                        n(pic.v[1]),
+                        n(pic.at[0]),
+                        n(pic.at[1])
+                    );
                     images.push((name, id));
                 }
             }
@@ -412,8 +536,18 @@ pub fn write_pdf(pages: &[Page], opts: &PdfOptions) -> Vec<u8> {
         page_ids.push(page_id);
     }
     let kids: Vec<String> = page_ids.iter().map(|i| format!("{i} 0 R")).collect();
-    w.object(pages_id, &format!("<< /Type /Pages /Kids [{}] /Count {} >>", kids.join(" "), page_ids.len()));
-    w.object(catalog, &format!("<< /Type /Catalog /Pages {pages_id} 0 R >>"));
+    w.object(
+        pages_id,
+        &format!(
+            "<< /Type /Pages /Kids [{}] /Count {} >>",
+            kids.join(" "),
+            page_ids.len()
+        ),
+    );
+    w.object(
+        catalog,
+        &format!("<< /Type /Catalog /Pages {pages_id} 0 R >>"),
+    );
     w.finish(catalog)
 }
 
@@ -433,9 +567,22 @@ fn image_object(w: &mut Writer, img: &image::RgbaImage, color: bool) -> usize {
         m
     });
     let (space, samples): (&str, Vec<u8>) = if color {
-        ("DeviceRGB", img.pixels().flat_map(|p| [p.0[0], p.0[1], p.0[2]]).collect())
+        (
+            "DeviceRGB",
+            img.pixels()
+                .flat_map(|p| [p.0[0], p.0[1], p.0[2]])
+                .collect(),
+        )
     } else {
-        ("DeviceGray", img.pixels().map(|p| (0.299 * p.0[0] as f64 + 0.587 * p.0[1] as f64 + 0.114 * p.0[2] as f64).round() as u8).collect())
+        (
+            "DeviceGray",
+            img.pixels()
+                .map(|p| {
+                    (0.299 * p.0[0] as f64 + 0.587 * p.0[1] as f64 + 0.114 * p.0[2] as f64).round()
+                        as u8
+                })
+                .collect(),
+        )
     };
     let smask = mask.map(|m| format!(" /SMask {m} 0 R")).unwrap_or_default();
     w.stream(
@@ -453,7 +600,13 @@ pub fn read_back(pdf: &[u8]) -> (Vec<String>, Vec<(f64, f64)>) {
     let text = String::from_utf8_lossy(pdf);
     let mut sizes = Vec::new();
     for part in text.split("/MediaBox [").skip(1) {
-        let nums: Vec<f64> = part.split(']').next().unwrap_or("").split_whitespace().filter_map(|x| x.parse().ok()).collect();
+        let nums: Vec<f64> = part
+            .split(']')
+            .next()
+            .unwrap_or("")
+            .split_whitespace()
+            .filter_map(|x| x.parse().ok())
+            .collect();
         if nums.len() == 4 {
             sizes.push((nums[2] - nums[0], nums[3] - nums[1]));
         }
@@ -463,7 +616,9 @@ pub fn read_back(pdf: &[u8]) -> (Vec<String>, Vec<(f64, f64)>) {
     let mut rest = pdf;
     while let Some(at) = find(rest, b">>\nstream\n") {
         let start = at + 10;
-        let Some(end) = find(&rest[start..], b"\nendstream") else { break };
+        let Some(end) = find(&rest[start..], b"\nendstream") else {
+            break;
+        };
         let data = &rest[start..start + end];
         let mut d = flate2::read::ZlibDecoder::new(data);
         let mut out = Vec::new();
@@ -485,9 +640,12 @@ pub fn read_back(pdf: &[u8]) -> (Vec<String>, Vec<(f64, f64)>) {
             if parts.len() == 2 && parts[0].starts_with('<') && parts[1].starts_with('<') {
                 let g = u16::from_str_radix(parts[0].trim_matches(|c| c == '<' || c == '>'), 16);
                 let u = parts[1].trim_matches(|c| c == '<' || c == '>');
-                let units: Vec<u16> = (0..u.len() / 4).filter_map(|i| u16::from_str_radix(&u[4 * i..4 * i + 4], 16).ok()).collect();
+                let units: Vec<u16> = (0..u.len() / 4)
+                    .filter_map(|i| u16::from_str_radix(&u[4 * i..4 * i + 4], 16).ok())
+                    .collect();
                 if let Ok(g) = g {
-                    map.entry(g).or_insert_with(|| String::from_utf16_lossy(&units));
+                    map.entry(g)
+                        .or_insert_with(|| String::from_utf16_lossy(&units));
                 }
             }
         }
@@ -518,11 +676,30 @@ mod tests {
 
     #[test]
     fn a_page_with_text_reads_back() {
-        let mut page = Page { name: "Sheet1".into(), width: 279.4, height: 215.9, items: Vec::new() };
-        page.items.push(Item::Stroke(Shape::Circle { center: [50.0, 50.0], radius: 10.0 }, Pen::new(0.35, Layer::Visible)));
+        let mut page = Page {
+            name: "Sheet1".into(),
+            width: 279.4,
+            height: 215.9,
+            items: Vec::new(),
+        };
         page.items.push(Item::Stroke(
-            Shape::Arc { center: [80.0, 50.0], radius: 10.0, start: 10.0, end: 200.0 },
-            Pen { dash: Some(vec![2.0, 0.8]), ..Pen::new(0.25, Layer::Hidden) },
+            Shape::Circle {
+                center: [50.0, 50.0],
+                radius: 10.0,
+            },
+            Pen::new(0.35, Layer::Visible),
+        ));
+        page.items.push(Item::Stroke(
+            Shape::Arc {
+                center: [80.0, 50.0],
+                radius: 10.0,
+                start: 10.0,
+                end: 200.0,
+            },
+            Pen {
+                dash: Some(vec![2.0, 0.8]),
+                ..Pen::new(0.25, Layer::Hidden)
+            },
         ));
         for (i, s) in ["Ø4.750", "±0.1", "43.0°"].iter().enumerate() {
             page.items.push(Item::Text(Text {
@@ -542,6 +719,9 @@ mod tests {
         assert!(strings.iter().any(|s| s == "±0.1"), "{strings:?}");
         assert!(strings.iter().any(|s| s == "43.0°"), "{strings:?}");
         assert_eq!(sizes.len(), 2);
-        assert!((sizes[0].0 - 792.0).abs() < 1e-3 && (sizes[0].1 - 612.0).abs() < 1e-3, "{sizes:?}");
+        assert!(
+            (sizes[0].0 - 792.0).abs() < 1e-3 && (sizes[0].1 - 612.0).abs() < 1e-3,
+            "{sizes:?}"
+        );
     }
 }

@@ -107,7 +107,10 @@ impl RenderMode {
 
     /// The faces are shaded (lit by the head light) rather than white.
     pub fn shaded(self) -> bool {
-        !matches!(self, RenderMode::HiddenEdgesRemoved | RenderMode::HiddenEdgesVisible)
+        !matches!(
+            self,
+            RenderMode::HiddenEdgesRemoved | RenderMode::HiddenEdgesVisible
+        )
     }
 
     /// The visible edges are drawn.
@@ -117,7 +120,10 @@ impl RenderMode {
 
     /// The edges behind faces are drawn too (faintly).
     pub fn hidden_edges(self) -> bool {
-        matches!(self, RenderMode::ShadedWithHiddenEdges | RenderMode::HiddenEdgesVisible)
+        matches!(
+            self,
+            RenderMode::ShadedWithHiddenEdges | RenderMode::HiddenEdgesVisible
+        )
     }
 
     pub fn translucent(self) -> bool {
@@ -430,7 +436,9 @@ impl ViewState {
         let center = (lo + hi) / 2.0;
         let extent = (hi - lo).max(Vec2::splat(1e-3));
         let avail = (viewport * fill.clamp(0.05, 1.0)).max(Vec2::ONE);
-        let scale = (extent.x / avail.x).max(extent.y / avail.y).clamp(MIN_SCALE, MAX_SCALE);
+        let scale = (extent.x / avail.x)
+            .max(extent.y / avail.y)
+            .clamp(MIN_SCALE, MAX_SCALE);
         let mut out = Self {
             focus: self.focus + self.right() * center.x + self.up() * center.y,
             scale,
@@ -463,7 +471,13 @@ impl ViewState {
 
     /// [`Self::fitted`] into the part of the viewport right of `left_inset` px (a feature
     /// dialog floating over its left side): the points are centred in what stays visible.
-    pub fn fitted_beside(self, points: &[Vec3], viewport: Vec2, fill: f32, left_inset: f32) -> Self {
+    pub fn fitted_beside(
+        self,
+        points: &[Vec3],
+        viewport: Vec2,
+        fill: f32,
+        left_inset: f32,
+    ) -> Self {
         let inset = left_inset.clamp(0.0, viewport.x * 0.6);
         let mut to = self.fitted(points, Vec2::new(viewport.x - inset, viewport.y), fill);
         if !points.is_empty() {
@@ -610,8 +624,16 @@ mod tests {
             let f = drawing.frame();
             let sight = Vec3::new(f.dir[0] as f32, f.dir[1] as f32, f.dir[2] as f32);
             let right = Vec3::new(f.x[0] as f32, f.x[1] as f32, f.x[2] as f32);
-            assert!(close(-v.back(), sight.normalize()), "{cube:?}: sight {:?} vs {sight:?}", -v.back());
-            assert!(close(v.right(), right.normalize()), "{cube:?}: right {:?} vs {right:?}", v.right());
+            assert!(
+                close(-v.back(), sight.normalize()),
+                "{cube:?}: sight {:?} vs {sight:?}",
+                -v.back()
+            );
+            assert!(
+                close(v.right(), right.normalize()),
+                "{cube:?}: right {:?} vs {right:?}",
+                v.right()
+            );
         }
     }
 
@@ -681,17 +703,37 @@ mod tests {
         // A board far from the origin: after F the view orbits about its middle, not a point
         // on the line of sight in front of or behind it.
         let mid = Vec3::new(100.0, -80.0, 0.8);
-        let pts: Vec<Vec3> = (0..8).map(|i| mid + Vec3::new(15.0, 20.0, 0.8) * Vec3::new([-1.0, 1.0][i & 1], [-1.0, 1.0][(i >> 1) & 1], [-1.0, 1.0][i >> 2])).collect();
+        let pts: Vec<Vec3> = (0..8)
+            .map(|i| {
+                mid + Vec3::new(15.0, 20.0, 0.8)
+                    * Vec3::new(
+                        [-1.0, 1.0][i & 1],
+                        [-1.0, 1.0][(i >> 1) & 1],
+                        [-1.0, 1.0][i >> 2],
+                    )
+            })
+            .collect();
         // (In perspective the drawn box is centred, which is a few mm off its middle.)
         for (perspective, tol) in [(false, 0.01), (true, 5.0)] {
-            let v = ViewState { perspective, ..ViewState::default() }.fitted(&pts, Vec2::new(1200.0, 800.0), 0.8);
-            assert!((v.focus - mid).length() < tol, "{perspective}: {:?}", v.focus);
+            let v = ViewState {
+                perspective,
+                ..ViewState::default()
+            }
+            .fitted(&pts, Vec2::new(1200.0, 800.0), 0.8);
+            assert!(
+                (v.focus - mid).length() < tol,
+                "{perspective}: {:?}",
+                v.focus
+            );
         }
     }
 
     #[test]
     fn orbit_about_a_pivot_keeps_it_in_place() {
-        let mut v = ViewState { focus: Vec3::new(100.0, -80.0, 0.0), ..ViewState::default() };
+        let mut v = ViewState {
+            focus: Vec3::new(100.0, -80.0, 0.0),
+            ..ViewState::default()
+        };
         let pivot = Vec3::new(110.0, -72.0, 3.0);
         let on_screen = v.project(pivot);
         let depth = (pivot - v.focus).dot(v.back());
@@ -720,7 +762,11 @@ mod tests {
         assert!(b.right().distance(v.right()) < 1e-4);
         // Drags compose into a rolled view whose basis stays orthonormal.
         let mut c = v;
-        for d in [Vec2::new(200.0, 0.0), Vec2::new(0.0, 150.0), Vec2::new(-90.0, 40.0)] {
+        for d in [
+            Vec2::new(200.0, 0.0),
+            Vec2::new(0.0, 150.0),
+            Vec2::new(-90.0, 40.0),
+        ] {
             c.orbit(d);
         }
         assert!(c.roll.abs() > 0.5, "{}", c.roll);
@@ -750,7 +796,11 @@ mod tests {
         let p = v.unproject(cursor);
         for lines in [3.0, -1.5, 7.0] {
             v.wheel(lines, cursor);
-            assert!((v.project(p) - cursor).length() < 1e-2, "{:?}", v.project(p));
+            assert!(
+                (v.project(p) - cursor).length() < 1e-2,
+                "{:?}",
+                v.project(p)
+            );
         }
         // Wheel away from the user zooms in (fewer mm per pixel).
         let s = v.scale;
@@ -831,7 +881,10 @@ mod tests {
         assert_eq!(camera_distance(DEFAULT_SCALE), CAMERA_DISTANCE);
         assert_eq!(camera_far(DEFAULT_SCALE), CAMERA_FAR);
         // 60 m on a 1500 px viewport: 40 mm per pixel.
-        let v = ViewState { scale: 40.0, ..ViewState::default() };
+        let v = ViewState {
+            scale: 40.0,
+            ..ViewState::default()
+        };
         let corner = v.focus + Vec3::new(30_000.0, 30_000.0, 10_000.0);
         let depth = (v.camera_position() - corner).dot(v.back());
         assert!(depth > 0.0 && depth < camera_far(v.scale), "depth {depth}");
@@ -858,16 +911,26 @@ mod tests {
     /// larger, zoom about the cursor keeps the point under it and a fit fills the view.
     #[test]
     fn perspective_projection_rays_zoom_and_fit() {
-        let mut v = ViewState { perspective: true, ..ViewState::default() };
+        let mut v = ViewState {
+            perspective: true,
+            ..ViewState::default()
+        };
         v.pan(Vec2::new(20.0, -10.0));
         // On the focus plane, as in orthographic.
         let q = v.unproject(Vec2::new(120.0, -80.0));
         assert!((v.project(q) - Vec2::new(120.0, -80.0)).length() < 1e-2);
         // Every point lies on the ray through its projection.
-        for p in [Vec3::new(30.0, -20.0, 45.0), Vec3::new(-60.0, 80.0, -5.0), Vec3::ZERO] {
+        for p in [
+            Vec3::new(30.0, -20.0, 45.0),
+            Vec3::new(-60.0, 80.0, -5.0),
+            Vec3::ZERO,
+        ] {
             let (o, d) = v.ray(v.project(p));
             let along = (p - o).dot(d);
-            assert!((o + d * along).distance(p) < 1e-2 * p.length().max(1.0), "{p:?}");
+            assert!(
+                (o + d * along).distance(p) < 1e-2 * p.length().max(1.0),
+                "{p:?}"
+            );
             assert!(along > 0.0);
         }
         // The eye is at the camera position; nearer is larger.
@@ -882,11 +945,17 @@ mod tests {
         let p = v.unproject(cursor);
         for lines in [2.0, -3.0, 5.0] {
             v.wheel(lines, cursor);
-            assert!((v.project(p) - cursor).length() < 1e-2, "{:?}", v.project(p));
+            assert!(
+                (v.project(p) - cursor).length() < 1e-2,
+                "{:?}",
+                v.project(p)
+            );
         }
         // A fit of a 100 mm cube fills 80% of the viewport, measured on the drawn corners.
         let pts: Vec<Vec3> = (0..8)
-            .map(|i| Vec3::new((i & 1) as f32, ((i >> 1) & 1) as f32, ((i >> 2) & 1) as f32) * 100.0)
+            .map(|i| {
+                Vec3::new((i & 1) as f32, ((i >> 1) & 1) as f32, ((i >> 2) & 1) as f32) * 100.0
+            })
             .collect();
         let size = Vec2::new(1000.0, 700.0);
         let f = v.fitted(&pts, size, 0.8);
@@ -899,7 +968,10 @@ mod tests {
         assert!((fill - 0.8).abs() < 0.01, "{fill}");
         assert!(((hi + lo) / 2.0).length() < 1.0, "centred");
         // The eye stays outside the cube.
-        assert!(pts.iter().all(|p| (f.camera_position() - *p).dot(f.back()) > 0.0));
+        assert!(
+            pts.iter()
+                .all(|p| (f.camera_position() - *p).dot(f.back()) > 0.0)
+        );
         // Orthographic is unchanged by the flag's default.
         assert!(!ViewState::default().perspective);
         assert_eq!(ViewState::default().render, RenderMode::Shaded);
@@ -910,7 +982,10 @@ mod tests {
     /// under the cursor.
     #[test]
     fn refocus_keeps_the_picture() {
-        let mut v = ViewState { perspective: true, ..ViewState::default() };
+        let mut v = ViewState {
+            perspective: true,
+            ..ViewState::default()
+        };
         v.pan(Vec2::new(-40.0, 25.0));
         let p = Vec3::new(30.0, -20.0, 45.0);
         let r = v.refocused(p);
@@ -923,7 +998,11 @@ mod tests {
         z.wheel(4.0, cursor);
         assert!((z.project(p) - cursor).length() < 1e-2);
         // Orthographic: unchanged.
-        assert!(ViewState::default().refocused(p).approx_eq(&ViewState::default()));
+        assert!(
+            ViewState::default()
+                .refocused(p)
+                .approx_eq(&ViewState::default())
+        );
     }
 
     #[test]
@@ -936,7 +1015,10 @@ mod tests {
         let w = (z.project(v.unproject(b)) - z.project(v.unproject(a))).x;
         assert!((w - 800.0).abs() < 0.5, "{w}");
         // A click (no box) leaves it alone.
-        assert!(v.zoomed_to_box(a, a + Vec2::ONE, Vec2::new(800.0, 600.0)).approx_eq(&v));
+        assert!(
+            v.zoomed_to_box(a, a + Vec2::ONE, Vec2::new(800.0, 600.0))
+                .approx_eq(&v)
+        );
     }
 
     #[test]

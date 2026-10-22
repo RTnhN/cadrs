@@ -128,7 +128,13 @@ impl FloatingPanel {
             },
             BackgroundColor(t.background),
             BorderColor::all(Color::srgb_u8(0xdc, 0xdc, 0xdc)),
-            BoxShadow::new(Color::srgba(0.0, 0.0, 0.0, 0.35), Val::Px(1.0), Val::Px(2.0), Val::Px(0.0), Val::Px(6.0)),
+            BoxShadow::new(
+                Color::srgba(0.0, 0.0, 0.0, 0.35),
+                Val::Px(1.0),
+                Val::Px(2.0),
+                Val::Px(0.0),
+                Val::Px(6.0),
+            ),
             GlobalZIndex(crate::z::DIALOG - 9),
             Pickable::default(),
             Children::spawn(SpawnWith(move |p: &mut ChildSpawner| {
@@ -151,7 +157,10 @@ impl FloatingPanel {
                     h.spawn((
                         Name::new(title_name),
                         t.text(title, t.font_sm, FontWeight::BOLD, t.foreground),
-                        Node { flex_grow: 1.0, ..default() },
+                        Node {
+                            flex_grow: 1.0,
+                            ..default()
+                        },
                         Pickable::IGNORE,
                     ));
                     let mut close = visuals_for(&t, crate::ButtonVariant::Ghost);
@@ -162,7 +171,10 @@ impl FloatingPanel {
                         t.disabled_foreground,
                     );
                     h.spawn((
-                        IconButton::new(close_name, "close").icon_size(14.0).tooltip("Close").build(&t),
+                        IconButton::new(close_name, "close")
+                            .icon_size(14.0)
+                            .tooltip("Close")
+                            .build(&t),
                         observe(move |_: On<Activate>, mut commands: Commands| {
                             commands.trigger(FloatingPanelClose { entity: panel });
                         }),
@@ -181,7 +193,12 @@ impl FloatingPanel {
                         flex_direction: FlexDirection::Column,
                         flex_shrink: 1.0,
                         min_height: Val::Px(0.0),
-                        padding: UiRect::new(Val::Px(6.0), Val::Px(6.0), Val::Px(5.0), Val::Px(2.0)),
+                        padding: UiRect::new(
+                            Val::Px(6.0),
+                            Val::Px(6.0),
+                            Val::Px(5.0),
+                            Val::Px(2.0),
+                        ),
                         ..default()
                     },
                 ))
@@ -194,7 +211,12 @@ impl FloatingPanel {
                     p.spawn(Node {
                         min_height: Val::Px(24.0),
                         flex_shrink: 0.0,
-                        padding: UiRect::new(Val::Px(6.0), Val::Px(4.0), Val::Px(2.0), Val::Px(4.0)),
+                        padding: UiRect::new(
+                            Val::Px(6.0),
+                            Val::Px(4.0),
+                            Val::Px(2.0),
+                            Val::Px(4.0),
+                        ),
                         align_items: AlignItems::Center,
                         column_gap: Val::Px(4.0),
                         ..default()
@@ -209,7 +231,9 @@ impl FloatingPanel {
 /// Dragging the header moves the panel.
 fn on_header_drag(ev: On<Pointer<Drag>>, q: Query<&PanelHeader>, mut q_node: Query<&mut Node>) {
     let Ok(h) = q.get(ev.entity) else { return };
-    let Ok(mut n) = q_node.get_mut(h.0) else { return };
+    let Ok(mut n) = q_node.get_mut(h.0) else {
+        return;
+    };
     let px = |v: Val| if let Val::Px(x) = v { x } else { 0.0 };
     let (left, top) = (px(n.left), px(n.top));
     n.left = Val::Px(left + ev.delta.x);
@@ -219,8 +243,16 @@ fn on_header_drag(ev: On<Pointer<Drag>>, q: Query<&PanelHeader>, mut q_node: Que
 /// A small grey section caption inside a panel ("Type", "Mode", "Loose ends").
 pub fn panel_caption(t: &Theme, text: impl Into<String>) -> impl Bundle {
     (
-        t.text(text, 10.5, FontWeight::MEDIUM, Color::srgb_u8(0x55, 0x5b, 0x60)),
-        Node { margin: UiRect::new(Val::ZERO, Val::ZERO, Val::Px(4.0), Val::Px(2.0)), ..default() },
+        t.text(
+            text,
+            10.5,
+            FontWeight::MEDIUM,
+            Color::srgb_u8(0x55, 0x5b, 0x60),
+        ),
+        Node {
+            margin: UiRect::new(Val::ZERO, Val::ZERO, Val::Px(4.0), Val::Px(2.0)),
+            ..default()
+        },
         Pickable::IGNORE,
     )
 }

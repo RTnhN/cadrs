@@ -35,7 +35,12 @@ pub enum RelationType {
 }
 
 impl RelationType {
-    pub const ALL: [RelationType; 4] = [RelationType::Gear, RelationType::RackPinion, RelationType::Screw, RelationType::Linear];
+    pub const ALL: [RelationType; 4] = [
+        RelationType::Gear,
+        RelationType::RackPinion,
+        RelationType::Screw,
+        RelationType::Linear,
+    ];
 
     /// "Gear", "Rack and pinion", … (the dialog's type dropdown and feature names).
     pub fn label(self) -> &'static str {
@@ -85,7 +90,11 @@ impl RelationType {
 /// The turning DOF of a mate type a relation couples: Revolute's, Cylindrical's and Pin slot's
 /// Z angle.
 pub fn angle_dof(t: MateType) -> Option<Dof> {
-    matches!(t, MateType::Revolute | MateType::Cylindrical | MateType::PinSlot).then_some(Dof::Angle)
+    matches!(
+        t,
+        MateType::Revolute | MateType::Cylindrical | MateType::PinSlot
+    )
+    .then_some(Dof::Angle)
 }
 
 /// The sliding DOF of a mate type a relation couples: Slider's and Cylindrical's Z, Pin slot's
@@ -123,7 +132,13 @@ fn one_one() -> (f64, f64) {
 impl Relation {
     /// A relation of `t` between `mates` with its defaults: ratio 1 : 1, 1 in per revolution.
     pub fn new(t: RelationType, mates: Vec<MateId>) -> Self {
-        Self { relation_type: t, mates, ratio: (1.0, 1.0), distance: 25.4, reverse: false }
+        Self {
+            relation_type: t,
+            mates,
+            ratio: (1.0, 1.0),
+            distance: 25.4,
+            reverse: false,
+        }
     }
 
     /// Whether its values make sense (non-zero ratio, distance).
@@ -131,7 +146,9 @@ impl Relation {
         match self.relation_type {
             RelationType::Gear => self.ratio.0.abs() > 1e-12 && self.ratio.1.abs() > 1e-12,
             RelationType::Linear => self.ratio.1.is_finite() && self.ratio.0.abs() > 1e-12,
-            RelationType::RackPinion | RelationType::Screw => self.distance.is_finite() && self.distance.abs() > 1e-9,
+            RelationType::RackPinion | RelationType::Screw => {
+                self.distance.is_finite() && self.distance.abs() > 1e-9
+            }
         }
     }
 }
@@ -153,7 +170,11 @@ impl Coupling {
     /// The residual for the values `v₁`, `v₂` (mm or radians).
     pub fn residual(&self, v1: f64, v2: f64) -> f64 {
         let r = self.k[0] * v1 + self.k[1] * v2;
-        if self.period > 0.0 { reduce(r, self.period) } else { r }
+        if self.period > 0.0 {
+            reduce(r, self.period)
+        } else {
+            r
+        }
     }
 }
 
@@ -199,24 +220,44 @@ pub fn coupling(r: &Relation, types: &[MateType]) -> Option<Coupling> {
             let (d1, d2) = (angle_dof(*types.first()?)?, angle_dof(*types.get(1)?)?);
             // a·θ₂ + b·θ₁ = 0 (reversed: a·θ₂ − b·θ₁ = 0).
             let k = [s * b, a];
-            Some(Coupling { k, dofs: [d1, d2], period: tau * common_step(k[0], k[1]), angular: true })
+            Some(Coupling {
+                k,
+                dofs: [d1, d2],
+                period: tau * common_step(k[0], k[1]),
+                angular: true,
+            })
         }
         RelationType::RackPinion => {
             let (d1, d2) = (angle_dof(*types.first()?)?, linear_dof(*types.get(1)?)?);
             // z − s·d·θ/2π = 0: whole turns of θ move z by d.
             let k = [-s * r.distance / tau, 1.0];
-            Some(Coupling { k, dofs: [d1, d2], period: r.distance.abs(), angular: false })
+            Some(Coupling {
+                k,
+                dofs: [d1, d2],
+                period: r.distance.abs(),
+                angular: false,
+            })
         }
         RelationType::Screw => {
             let m = *types.first()?;
             (m == MateType::Cylindrical).then_some(())?;
             let k = [-s * r.distance / tau, 1.0];
-            Some(Coupling { k, dofs: [Dof::Angle, Dof::Z], period: r.distance.abs(), angular: false })
+            Some(Coupling {
+                k,
+                dofs: [Dof::Angle, Dof::Z],
+                period: r.distance.abs(),
+                angular: false,
+            })
         }
         RelationType::Linear => {
             let (d1, d2) = (linear_dof(*types.first()?)?, linear_dof(*types.get(1)?)?);
             let ratio = r.ratio.1 / r.ratio.0;
-            Some(Coupling { k: [-s * ratio, 1.0], dofs: [d1, d2], period: 0.0, angular: false })
+            Some(Coupling {
+                k: [-s * ratio, 1.0],
+                dofs: [d1, d2],
+                period: 0.0,
+                angular: false,
+            })
         }
     }
 }
@@ -225,7 +266,11 @@ pub fn coupling(r: &Relation, types: &[MateType]) -> Option<Coupling> {
 pub fn check(r: &Relation, mates: &[MateFeature]) -> Option<String> {
     let t = r.relation_type;
     if r.mates.len() != t.mate_count() {
-        return Some(if t.mate_count() == 1 { "Select a Cylindrical mate".into() } else { "Select two mates".into() });
+        return Some(if t.mate_count() == 1 {
+            "Select a Cylindrical mate".into()
+        } else {
+            "Select two mates".into()
+        });
     }
     if r.mates.len() == 2 && r.mates[0] == r.mates[1] {
         return Some("Select two different mates".into());
@@ -239,11 +284,17 @@ pub fn check(r: &Relation, mates: &[MateFeature]) -> Option<String> {
         };
         if !t.accepts(k, m.mate_type) {
             let want = match (t, k) {
-                (RelationType::Gear, _) | (RelationType::RackPinion, 0) => "a Revolute, Cylindrical or Pin slot mate",
+                (RelationType::Gear, _) | (RelationType::RackPinion, 0) => {
+                    "a Revolute, Cylindrical or Pin slot mate"
+                }
                 (RelationType::Screw, _) => "a Cylindrical mate",
                 _ => "a Slider, Cylindrical or Pin slot mate",
             };
-            return Some(format!("{} is a {} mate; select {want}", f.name, m.mate_type.label()));
+            return Some(format!(
+                "{} is a {} mate; select {want}",
+                f.name,
+                m.mate_type.label()
+            ));
         }
     }
     if !r.values_ok() {
@@ -258,7 +309,16 @@ pub fn check(r: &Relation, mates: &[MateFeature]) -> Option<String> {
 
 /// The mate types of a relation's mates, if they are all there and mates.
 pub fn mate_types(r: &Relation, mates: &[MateFeature]) -> Option<Vec<MateType>> {
-    r.mates.iter().map(|id| mates.iter().find(|f| f.id == *id).and_then(|f| f.mate()).map(|m| m.mate_type)).collect()
+    r.mates
+        .iter()
+        .map(|id| {
+            mates
+                .iter()
+                .find(|f| f.id == *id)
+                .and_then(|f| f.mate())
+                .map(|m| m.mate_type)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -276,7 +336,13 @@ mod tests {
 
     #[test]
     fn a_gear_holds_modulo_whole_turns() {
-        let r = Relation { ratio: (2.0, 1.0), ..Relation::new(RelationType::Gear, vec![MateId::from_u128(1), MateId::from_u128(2)]) };
+        let r = Relation {
+            ratio: (2.0, 1.0),
+            ..Relation::new(
+                RelationType::Gear,
+                vec![MateId::from_u128(1), MateId::from_u128(2)],
+            )
+        };
         let c = coupling(&r, &[MateType::Revolute, MateType::Revolute]).unwrap();
         let pi = std::f64::consts::PI;
         assert!(c.residual(pi / 2.0, -pi / 4.0).abs() < 1e-12);

@@ -29,7 +29,10 @@ impl Plugin for ColorPickerPlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(on_mixer_press)
             .add_observer(on_mixer_drag)
-            .add_systems(PostUpdate, (sync_mixers, sync_swatches).before(bevy::ui::UiSystems::Prepare));
+            .add_systems(
+                PostUpdate,
+                (sync_mixers, sync_swatches).before(bevy::ui::UiSystems::Prepare),
+            );
     }
 }
 
@@ -44,19 +47,34 @@ pub struct SwatchColor(pub Color);
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SwatchSelected(pub bool);
 
-const SWATCH_RING: Color = Color::srgb(0x2b as f32 / 255.0, 0x64 as f32 / 255.0, 0xc0 as f32 / 255.0);
+const SWATCH_RING: Color = Color::srgb(
+    0x2b as f32 / 255.0,
+    0x64 as f32 / 255.0,
+    0xc0 as f32 / 255.0,
+);
 const SWATCH_EDGE: Color = Color::srgba(0.0, 0.0, 0.0, 0.22);
-const SWATCH_HOVER: Color = Color::srgb(0x55 as f32 / 255.0, 0x55 as f32 / 255.0, 0x55 as f32 / 255.0);
+const SWATCH_HOVER: Color = Color::srgb(
+    0x55 as f32 / 255.0,
+    0x55 as f32 / 255.0,
+    0x55 as f32 / 255.0,
+);
 
 fn swatch_border(selected: bool) -> (StateColors, UiRect) {
     (
-        StateColors::new(if selected { SWATCH_RING } else { SWATCH_EDGE }, SWATCH_HOVER, SWATCH_HOVER, SWATCH_EDGE),
+        StateColors::new(
+            if selected { SWATCH_RING } else { SWATCH_EDGE },
+            SWATCH_HOVER,
+            SWATCH_HOVER,
+            SWATCH_EDGE,
+        ),
         UiRect::all(Val::Px(if selected { 2.0 } else { 1.0 })),
     )
 }
 
 /// Moves the ring when [`SwatchSelected`] changes.
-fn sync_swatches(mut q: Query<(&SwatchSelected, &mut Visuals, &mut Node), Changed<SwatchSelected>>) {
+fn sync_swatches(
+    mut q: Query<(&SwatchSelected, &mut Visuals, &mut Node), Changed<SwatchSelected>>,
+) {
     for (sel, mut v, mut n) in &mut q {
         let (border, width) = swatch_border(sel.0);
         if v.border != border {
@@ -208,7 +226,11 @@ impl ColorMixer {
 
     /// The colour: hue (degrees), saturation and value (0–1).
     pub fn hsv(mut self, hue: f32, saturation: f32, value: f32) -> Self {
-        self.state = ColorMixerState { hue, saturation, value };
+        self.state = ColorMixerState {
+            hue,
+            saturation,
+            value,
+        };
         self
     }
 
@@ -271,7 +293,13 @@ impl ColorMixer {
                         ..default()
                     },
                     BorderColor::all(Color::WHITE),
-                    BoxShadow::new(Color::srgba(0.0, 0.0, 0.0, 0.5), Val::ZERO, Val::ZERO, Val::ZERO, Val::Px(2.0)),
+                    BoxShadow::new(
+                        Color::srgba(0.0, 0.0, 0.0, 0.5),
+                        Val::ZERO,
+                        Val::ZERO,
+                        Val::ZERO,
+                        Val::Px(2.0),
+                    ),
                     Pickable::IGNORE,
                 ));
                 let stops = (0..=6)
@@ -307,7 +335,13 @@ impl ColorMixer {
                         ..default()
                     },
                     BorderColor::all(Color::WHITE),
-                    BoxShadow::new(Color::srgba(0.0, 0.0, 0.0, 0.5), Val::ZERO, Val::ZERO, Val::ZERO, Val::Px(2.0)),
+                    BoxShadow::new(
+                        Color::srgba(0.0, 0.0, 0.0, 0.5),
+                        Val::ZERO,
+                        Val::ZERO,
+                        Val::ZERO,
+                        Val::Px(2.0),
+                    ),
                     Pickable::IGNORE,
                 ));
             })),
@@ -335,13 +369,19 @@ fn mix_at(
     let (mixer, update): (Entity, Box<dyn Fn(&mut ColorMixerState)>) =
         if let Ok((m, node, t)) = q_square.get(entity) {
             let p = local(node, t, at);
-            (m.0, Box::new(move |s: &mut ColorMixerState| {
-                s.saturation = p.x;
-                s.value = 1.0 - p.y;
-            }))
+            (
+                m.0,
+                Box::new(move |s: &mut ColorMixerState| {
+                    s.saturation = p.x;
+                    s.value = 1.0 - p.y;
+                }),
+            )
         } else if let Ok((m, node, t)) = q_hue.get(entity) {
             let p = local(node, t, at);
-            (m.0, Box::new(move |s: &mut ColorMixerState| s.hue = (p.x * 360.0).min(359.9)))
+            (
+                m.0,
+                Box::new(move |s: &mut ColorMixerState| s.hue = (p.x * 360.0).min(359.9)),
+            )
         } else {
             return false;
         };
@@ -370,7 +410,14 @@ fn on_mixer_press(
     mut q_state: Query<&mut ColorMixerState>,
     mut commands: Commands,
 ) {
-    if mix_at(ev.entity, ev.pointer_location.position, &q_square, &q_hue, &mut q_state, &mut commands) {
+    if mix_at(
+        ev.entity,
+        ev.pointer_location.position,
+        &q_square,
+        &q_hue,
+        &mut q_state,
+        &mut commands,
+    ) {
         ev.propagate(false);
     }
 }
@@ -383,7 +430,14 @@ fn on_mixer_drag(
     mut q_state: Query<&mut ColorMixerState>,
     mut commands: Commands,
 ) {
-    if mix_at(ev.entity, ev.pointer_location.position, &q_square, &q_hue, &mut q_state, &mut commands) {
+    if mix_at(
+        ev.entity,
+        ev.pointer_location.position,
+        &q_square,
+        &q_hue,
+        &mut q_state,
+        &mut commands,
+    ) {
         ev.propagate(false);
     }
 }

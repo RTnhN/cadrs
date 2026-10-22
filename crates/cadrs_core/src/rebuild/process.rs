@@ -121,16 +121,34 @@ impl Features {
 enum Request {
     /// Where the documents (a Derived feature's sources in other documents) and the session
     /// snapshots are.
-    Configure { documents: Option<PathBuf>, snapshots: Option<PathBuf> },
+    Configure {
+        documents: Option<PathBuf>,
+        snapshots: Option<PathBuf>,
+    },
     /// Files of the app's blob cache.
     Blobs(Vec<(String, Vec<u8>)>),
     /// Cache keys of features not to compute (they crashed it).
     Poison(Vec<u64>),
-    Rebuild { features: Features, persist: bool },
-    Export { features: Features, request: StepRequest },
-    Project { features: Features, request: crate::views::ViewRequest },
-    ProjectAssembly { state: crate::drawing_assembly::AssemblyState, request: crate::views::ViewRequest },
-    Task { name: String, input: Vec<u8> },
+    Rebuild {
+        features: Features,
+        persist: bool,
+    },
+    Export {
+        features: Features,
+        request: StepRequest,
+    },
+    Project {
+        features: Features,
+        request: crate::views::ViewRequest,
+    },
+    ProjectAssembly {
+        state: crate::drawing_assembly::AssemblyState,
+        request: crate::views::ViewRequest,
+    },
+    Task {
+        name: String,
+        input: Vec<u8>,
+    },
 }
 
 /// The kernel process to the app: what it is doing, then the reply.
@@ -222,7 +240,12 @@ struct ReceivedSolids {
 
 impl ReceivedSolids {
     /// Puts the meshes back into `b`.
-    fn restore(&mut self, b: &mut Build, solids: SentMeshes, recent: &mut Recent) -> Result<(), String> {
+    fn restore(
+        &mut self,
+        b: &mut Build,
+        solids: SentMeshes,
+        recent: &mut Recent,
+    ) -> Result<(), String> {
         let mut it = solids.into_iter();
         let mut missing = None;
         each_solid(b, |s| match it.next() {
@@ -264,7 +287,10 @@ static LAUNCH: OnceLock<Launch> = OnceLock::new();
 /// <token>`, which must call [`main`]. Only before the first job (the worker starts with the
 /// first one); later calls change nothing.
 pub fn use_process(program: impl Into<PathBuf>, args: Vec<OsString>) {
-    let _ = LAUNCH.set(Launch { program: program.into(), args });
+    let _ = LAUNCH.set(Launch {
+        program: program.into(),
+        args,
+    });
 }
 
 /// Whether the kernel runs in its own process.
@@ -279,7 +305,13 @@ struct Config {
 }
 
 /// The configuration, and a count of its changes (sent again to the process when it changed).
-static CONFIG: Mutex<(Config, u64)> = Mutex::new((Config { documents: None, snapshots: None }, 0));
+static CONFIG: Mutex<(Config, u64)> = Mutex::new((
+    Config {
+        documents: None,
+        snapshots: None,
+    },
+    0,
+));
 
 fn set_config(f: impl FnOnce(&mut Config)) {
     if let Ok(mut c) = CONFIG.lock() {
@@ -347,7 +379,9 @@ impl Conn {
                 }
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                     if let Some(status) = child.try_wait()? {
-                        return Err(io::Error::other(format!("the kernel process exited at start ({status})")));
+                        return Err(io::Error::other(format!(
+                            "the kernel process exited at start ({status})"
+                        )));
                     }
                     if start.elapsed() > CONNECT_TIMEOUT {
                         let _ = child.kill();
@@ -378,12 +412,24 @@ impl Conn {
     fn sync(&mut self) -> io::Result<()> {
         let (config, version) = CONFIG.lock().map(|c| c.clone()).unwrap_or_default();
         if version != self.config {
-            write_msg(&mut self.writer, &Request::Configure { documents: config.documents, snapshots: config.snapshots })?;
+            write_msg(
+                &mut self.writer,
+                &Request::Configure {
+                    documents: config.documents,
+                    snapshots: config.snapshots,
+                },
+            )?;
             self.config = version;
         }
-        let new: Vec<String> = crate::blobs::hashes().into_iter().filter(|h| !self.blobs.contains(h)).collect();
+        let new: Vec<String> = crate::blobs::hashes()
+            .into_iter()
+            .filter(|h| !self.blobs.contains(h))
+            .collect();
         if !new.is_empty() {
-            let blobs: Vec<(String, Vec<u8>)> = new.iter().filter_map(|h| Some((h.clone(), crate::blobs::get(h)?.to_vec()))).collect();
+            let blobs: Vec<(String, Vec<u8>)> = new
+                .iter()
+                .filter_map(|h| Some((h.clone(), crate::blobs::get(h)?.to_vec())))
+                .collect();
             write_msg(&mut self.writer, &Request::Blobs(blobs))?;
             self.blobs.extend(new);
         }
@@ -400,7 +446,9 @@ impl Conn {
             std::thread::sleep(Duration::from_millis(2));
         }
         let _ = self.child.kill();
-        self.child.wait().map_or_else(|e| e.to_string(), |s| format!("stopped, {s}"))
+        self.child
+            .wait()
+            .map_or_else(|e| e.to_string(), |s| format!("stopped, {s}"))
     }
 }
 
@@ -419,7 +467,11 @@ struct Recent {
 const RECENT: usize = 512;
 
 /// The value in `recent` equal to `x` (made the newest), else `x` (kept).
-fn settle<T: PartialEq + Clone>(recent: &mut std::collections::VecDeque<T>, x: &T, same_size: impl Fn(&T, &T) -> bool) -> T {
+fn settle<T: PartialEq + Clone>(
+    recent: &mut std::collections::VecDeque<T>,
+    x: &T,
+    same_size: impl Fn(&T, &T) -> bool,
+) -> T {
     if let Some(i) = recent.iter().position(|r| same_size(r, x) && r == x) {
         let r = recent.remove(i).expect("found");
         recent.push_front(r.clone());
@@ -432,7 +484,9 @@ fn settle<T: PartialEq + Clone>(recent: &mut std::collections::VecDeque<T>, x: &
 
 impl Recent {
     fn solid(&mut self, s: &Arc<crate::solid::Solid>) -> Arc<crate::solid::Solid> {
-        settle(&mut self.solids, s, |a, b| a.positions.len() == b.positions.len() && a.indices.len() == b.indices.len())
+        settle(&mut self.solids, s, |a, b| {
+            a.positions.len() == b.positions.len() && a.indices.len() == b.indices.len()
+        })
     }
 
     /// `b` with the values of earlier builds where it has the same (its meshes are
@@ -470,7 +524,12 @@ impl Remote {
         if self.conn.is_none() {
             match Conn::start(&self.launch, &self.poisoned) {
                 Ok(c) => self.conn = Some(c),
-                Err(e) => return Err(Failure::Crashed { computing: None, why: format!("The geometry kernel couldn't start: {e}") }),
+                Err(e) => {
+                    return Err(Failure::Crashed {
+                        computing: None,
+                        why: format!("The geometry kernel couldn't start: {e}"),
+                    });
+                }
             }
         }
         let conn = self.conn.as_mut().expect("just started");
@@ -504,8 +563,17 @@ impl Remote {
     }
 
     fn rebuild(&mut self, features: Vec<Feature>, persist: bool) -> Build {
-        let request = Request::Rebuild { features: Features::of(features), persist };
-        let Request::Rebuild { features: Features { list: features, .. }, .. } = &request else { unreachable!() };
+        let request = Request::Rebuild {
+            features: Features::of(features),
+            persist,
+        };
+        let Request::Rebuild {
+            features: Features { list: features, .. },
+            ..
+        } = &request
+        else {
+            unreachable!()
+        };
         for _ in 0..MAX_CRASHES {
             match self.call(&request) {
                 Ok(Event::Rebuilt(b, solids)) => {
@@ -520,14 +588,22 @@ impl Remote {
                     self.recent.settle(&mut b);
                     return b;
                 }
-                Ok(_) => return Build::failed(features, "The geometry kernel answered something else"),
+                Ok(_) => {
+                    return Build::failed(features, "The geometry kernel answered something else");
+                }
                 // Ask again, without the feature it crashed on.
-                Err(Failure::Crashed { computing: Some(key), .. }) => {
+                Err(Failure::Crashed {
+                    computing: Some(key),
+                    ..
+                }) => {
                     if !self.poisoned.contains(&key) {
                         self.poisoned.push(key);
                     }
                 }
-                Err(Failure::Crashed { computing: None, why }) => {
+                Err(Failure::Crashed {
+                    computing: None,
+                    why,
+                }) => {
                     return Build::failed(features, &format!("The geometry kernel stopped: {why}"));
                 }
             }
@@ -538,44 +614,81 @@ impl Remote {
     fn run(&mut self, rx: mpsc::Receiver<Job>) {
         while let Ok(job) = rx.recv() {
             match job {
-                Job::Rebuild { features, reply, cancelled, persist } => {
+                Job::Rebuild {
+                    features,
+                    reply,
+                    cancelled,
+                    persist,
+                } => {
                     if cancelled.load(Ordering::Relaxed) {
                         continue;
                     }
                     let _ = reply.send(Arc::new(self.rebuild(features, persist)));
                 }
-                Job::Export { features, request, reply } => {
-                    let out = match self.call(&Request::Export { features: Features::of(features), request }) {
+                Job::Export {
+                    features,
+                    request,
+                    reply,
+                } => {
+                    let out = match self.call(&Request::Export {
+                        features: Features::of(features),
+                        request,
+                    }) {
                         Ok(Event::Exported(r)) => r,
                         Ok(_) => Err("The geometry kernel answered something else".into()),
-                        Err(Failure::Crashed { .. }) => Err("The geometry kernel crashed while exporting".into()),
+                        Err(Failure::Crashed { .. }) => {
+                            Err("The geometry kernel crashed while exporting".into())
+                        }
                     };
                     let _ = reply.send(out);
                 }
-                Job::Project { features, request, reply, cancelled } => {
+                Job::Project {
+                    features,
+                    request,
+                    reply,
+                    cancelled,
+                } => {
                     if cancelled.load(Ordering::Relaxed) {
                         continue;
                     }
-                    let out = match self.call(&Request::Project { features: Features::of(features), request: *request }) {
+                    let out = match self.call(&Request::Project {
+                        features: Features::of(features),
+                        request: *request,
+                    }) {
                         Ok(Event::Projected(r)) => r,
                         Ok(_) => Err("The geometry kernel answered something else".into()),
-                        Err(Failure::Crashed { .. }) => Err("The geometry kernel crashed while projecting the view".into()),
+                        Err(Failure::Crashed { .. }) => {
+                            Err("The geometry kernel crashed while projecting the view".into())
+                        }
                     };
                     let _ = reply.send(out);
                 }
-                Job::ProjectAssembly { state, request, reply, cancelled } => {
+                Job::ProjectAssembly {
+                    state,
+                    request,
+                    reply,
+                    cancelled,
+                } => {
                     if cancelled.load(Ordering::Relaxed) {
                         continue;
                     }
-                    let out = match self.call(&Request::ProjectAssembly { state: *state, request: *request }) {
+                    let out = match self.call(&Request::ProjectAssembly {
+                        state: *state,
+                        request: *request,
+                    }) {
                         Ok(Event::Projected(r)) => r,
                         Ok(_) => Err("The geometry kernel answered something else".into()),
-                        Err(Failure::Crashed { .. }) => Err("The geometry kernel crashed while projecting the assembly".into()),
+                        Err(Failure::Crashed { .. }) => {
+                            Err("The geometry kernel crashed while projecting the assembly".into())
+                        }
                     };
                     let _ = reply.send(out);
                 }
                 Job::Task { name, input, done } => {
-                    let out = match self.call(&Request::Task { name: name.into(), input }) {
+                    let out = match self.call(&Request::Task {
+                        name: name.into(),
+                        input,
+                    }) {
                         Ok(Event::TaskDone(Ok(o))) => Some(o),
                         _ => None,
                     };
@@ -597,8 +710,17 @@ impl Remote {
 
 /// The worker loop with the kernel in its own process (see [`super::worker`]).
 pub(super) fn run_remote(rx: mpsc::Receiver<Job>) {
-    let Some(launch) = LAUNCH.get().cloned() else { return super::run(rx) };
-    Remote { launch, conn: None, poisoned: Vec::new(), local: None, recent: Recent::default() }.run(rx);
+    let Some(launch) = LAUNCH.get().cloned() else {
+        return super::run(rx);
+    };
+    Remote {
+        launch,
+        conn: None,
+        poisoned: Vec::new(),
+        local: None,
+        recent: Recent::default(),
+    }
+    .run(rx);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -622,7 +744,9 @@ pub(super) fn emit(e: &Event) {
 /// Whether the feature with this cache key crashed a kernel process before (in the kernel
 /// process; never elsewhere).
 pub(super) fn is_poisoned(key: u64) -> bool {
-    POISONED.read().is_ok_and(|p| p.as_ref().is_some_and(|p| p.contains(&key)))
+    POISONED
+        .read()
+        .is_ok_and(|p| p.as_ref().is_some_and(|p| p.contains(&key)))
 }
 
 thread_local! {
@@ -640,7 +764,11 @@ pub(super) fn computing(key: u64, f: &Feature) -> Computing {
     emit(&Event::Computing(Some(key)));
     // For tests of the crash handling: crash on the feature with this name.
     static CRASH_ON: OnceLock<Option<String>> = OnceLock::new();
-    if CRASH_ON.get_or_init(|| std::env::var("CADRS_KERNEL_CRASH_ON").ok()).as_deref() == Some(f.name.as_str()) {
+    if CRASH_ON
+        .get_or_init(|| std::env::var("CADRS_KERNEL_CRASH_ON").ok())
+        .as_deref()
+        == Some(f.name.as_str())
+    {
         std::process::abort();
     }
     Computing(true)
@@ -665,7 +793,10 @@ impl Drop for Computing {
 /// The kernel process: `args` are the ones after [`ARG`] (the port and the token). Returns the
 /// exit code (when the app closes the connection).
 pub fn main(args: &[String]) -> i32 {
-    let (Some(port), Some(token)) = (args.first().and_then(|p| p.parse::<u16>().ok()), args.get(1)) else {
+    let (Some(port), Some(token)) = (
+        args.first().and_then(|p| p.parse::<u16>().ok()),
+        args.get(1),
+    ) else {
         eprintln!("usage: {ARG} <port> <token>");
         return 2;
     };
@@ -677,9 +808,16 @@ pub fn main(args: &[String]) -> i32 {
         }
     };
     let _ = stream.set_nodelay(true);
-    let (Ok(read), Ok(write)) = (stream.try_clone(), stream.try_clone()) else { return 1 };
+    let (Ok(read), Ok(write)) = (stream.try_clone(), stream.try_clone()) else {
+        return 1;
+    };
     let writer = Arc::new(Mutex::new(BufWriter::new(write)));
-    if write_msg(&mut *writer.lock().expect("unshared"), &Event::Hello(token.clone())).is_err() {
+    if write_msg(
+        &mut *writer.lock().expect("unshared"),
+        &Event::Hello(token.clone()),
+    )
+    .is_err()
+    {
         return 1;
     }
     let sink = writer.clone();
@@ -702,14 +840,28 @@ pub fn main(args: &[String]) -> i32 {
         .expect("failed to start the rebuild thread");
     let mut reader = BufReader::new(read);
     let mut sent = SentSolids::default();
-    let send = |e: &Event| -> bool { writer.lock().is_ok_and(|mut w| write_msg(&mut *w, e).is_ok()) };
+    let send = |e: &Event| -> bool {
+        writer
+            .lock()
+            .is_ok_and(|mut w| write_msg(&mut *w, e).is_ok())
+    };
     loop {
-        let Ok(request) = read_msg::<Request>(&mut reader) else { return 0 };
+        let Ok(request) = read_msg::<Request>(&mut reader) else {
+            return 0;
+        };
         let reply = match request {
-            Request::Configure { documents, snapshots } => {
-                crate::derived::set_document_loader(documents.map(|d| crate::derived::store_loader(crate::Store::new(d))));
+            Request::Configure {
+                documents,
+                snapshots,
+            } => {
+                crate::derived::set_document_loader(
+                    documents.map(|d| crate::derived::store_loader(crate::Store::new(d))),
+                );
                 #[cfg(feature = "brep")]
-                super::session::set_store(snapshots.map(|d| Arc::new(crate::blob_store::DiskStore::new(d)) as Arc<dyn crate::blob_store::BlobStore>));
+                super::session::set_store(snapshots.map(|d| {
+                    Arc::new(crate::blob_store::DiskStore::new(d))
+                        as Arc<dyn crate::blob_store::BlobStore>
+                }));
                 #[cfg(not(feature = "brep"))]
                 let _ = snapshots;
                 continue;
@@ -729,7 +881,12 @@ pub fn main(args: &[String]) -> i32 {
             Request::Rebuild { features, persist } => {
                 let (reply, rx) = mpsc::channel();
                 let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
-                let _ = tx.send(Job::Rebuild { features: features.into_list(), reply, cancelled, persist });
+                let _ = tx.send(Job::Rebuild {
+                    features: features.into_list(),
+                    reply,
+                    cancelled,
+                    persist,
+                });
                 match rx.recv() {
                     Ok(b) => {
                         let (b, solids) = sent.strip(&b);
@@ -740,27 +897,53 @@ pub fn main(args: &[String]) -> i32 {
             }
             Request::Export { features, request } => {
                 let (reply, rx) = mpsc::channel();
-                let _ = tx.send(Job::Export { features: features.into_list(), request, reply });
-                Event::Exported(rx.recv().unwrap_or_else(|_| Err("The rebuild thread stopped".into())))
+                let _ = tx.send(Job::Export {
+                    features: features.into_list(),
+                    request,
+                    reply,
+                });
+                Event::Exported(
+                    rx.recv()
+                        .unwrap_or_else(|_| Err("The rebuild thread stopped".into())),
+                )
             }
             Request::Project { features, request } => {
                 let (reply, rx) = mpsc::channel();
                 let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
-                let _ = tx.send(Job::Project { features: features.into_list(), request: Box::new(request), reply, cancelled });
-                Event::Projected(rx.recv().unwrap_or_else(|_| Err("The rebuild thread stopped".into())))
+                let _ = tx.send(Job::Project {
+                    features: features.into_list(),
+                    request: Box::new(request),
+                    reply,
+                    cancelled,
+                });
+                Event::Projected(
+                    rx.recv()
+                        .unwrap_or_else(|_| Err("The rebuild thread stopped".into())),
+                )
             }
             Request::ProjectAssembly { state, request } => {
                 let (reply, rx) = mpsc::channel();
                 let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
-                let _ = tx.send(Job::ProjectAssembly { state: Box::new(state), request: Box::new(request), reply, cancelled });
-                Event::Projected(rx.recv().unwrap_or_else(|_| Err("The rebuild thread stopped".into())))
+                let _ = tx.send(Job::ProjectAssembly {
+                    state: Box::new(state),
+                    request: Box::new(request),
+                    reply,
+                    cancelled,
+                });
+                Event::Projected(
+                    rx.recv()
+                        .unwrap_or_else(|_| Err("The rebuild thread stopped".into())),
+                )
             }
             Request::Task { name, input } => {
                 let (reply, rx) = mpsc::channel();
                 let _ = tx.send(Job::Run(Box::new(move |r: &mut Rebuilder| {
                     let _ = reply.send(super::task::run_named(&name, &input, r));
                 })));
-                Event::TaskDone(rx.recv().unwrap_or_else(|_| Err("the task panicked".into())))
+                Event::TaskDone(
+                    rx.recv()
+                        .unwrap_or_else(|_| Err("the task panicked".into())),
+                )
             }
         };
         if !send(&reply) {
@@ -786,14 +969,20 @@ mod tests {
             if path.extension().is_none_or(|e| e != "cadrs") {
                 continue;
             }
-            let file = crate::native::import(&path, &store, "test", 0).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            let file = crate::native::import(&path, &store, "test", 0)
+                .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
             for el in &file.document.elements {
                 let list = el.features().to_vec();
                 if list.is_empty() {
                     continue;
                 }
                 let back: Features = decode(&encode(&Features::of(list.clone())).unwrap()).unwrap();
-                assert!(back.into_list() == list, "{}: {} changed on the way", path.display(), el.name);
+                assert!(
+                    back.into_list() == list,
+                    "{}: {} changed on the way",
+                    path.display(),
+                    el.name
+                );
                 lists += 1;
             }
         }
@@ -812,7 +1001,11 @@ mod tests {
         let back: Features = decode(&encode(&Features::of(list.clone())).unwrap()).unwrap();
         assert!(back.into_list() == list);
 
-        for list in [crate::samples::bracket_pair::bracket(), crate::samples::sheetmetal_legacy::channel(), crate::samples::sheetmetal_legacy::case_round()] {
+        for list in [
+            crate::samples::bracket_pair::bracket(),
+            crate::samples::sheetmetal_legacy::channel(),
+            crate::samples::sheetmetal_legacy::case_round(),
+        ] {
             let build = Rebuilder::new().rebuild(&list);
             assert!(!build.parts.is_empty());
             let back: Build = decode(&encode(&build).unwrap()).unwrap();

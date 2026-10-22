@@ -26,15 +26,17 @@
 //! - While it shows a mass, the **centre of mass** is marked in the view with the quartered
 //!   circle (P3.6, `ex4-step18.png`, `ex3-step10.png`).
 
-use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
 use bevy::text::FontWeight;
 use cadrs_core::PartId;
 use cadrs_sketch::units::Units;
+use cadrs_ui::ShortcutKey;
 use cadrs_ui::prelude::*;
-use cadrs_ui::{FeatureDialogCancel, SelectionList, SelectionListRemove, SelectionListState, TabStrip};
+use cadrs_ui::{
+    FeatureDialogCancel, SelectionList, SelectionListRemove, SelectionListState, TabStrip,
+};
 
 use crate::parts::PartCache;
 use crate::viewport::{Pick, PickRequest, Selection, ViewportArea};
@@ -46,14 +48,22 @@ impl Plugin for MassPropsPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (mass_picks, mass_keys, sync_mass_panel, sync_mass_unit_select, drop_assembly_pick)
+            (
+                mass_picks,
+                mass_keys,
+                sync_mass_panel,
+                sync_mass_unit_select,
+                drop_assembly_pick,
+            )
                 .chain()
                 .after(crate::parts::PartsSet)
                 .run_if(in_state(AppState::Document)),
         )
         .add_systems(
             PostUpdate,
-            place_com_glyph.before(bevy::ui::UiSystems::Layout).run_if(in_state(AppState::Document)),
+            place_com_glyph
+                .before(bevy::ui::UiSystems::Layout)
+                .run_if(in_state(AppState::Document)),
         )
         .add_systems(OnExit(AppState::Document), |mut commands: Commands| {
             commands.remove_resource::<MassPanel>();
@@ -130,7 +140,11 @@ fn panel_units(workspace: &Units, choice: &MassUnitChoice) -> Units {
     u
 }
 
-fn on_mass_unit(ev: On<cadrs_ui::SelectChange>, q: Query<&Name>, mut choice: ResMut<MassUnitChoice>) {
+fn on_mass_unit(
+    ev: On<cadrs_ui::SelectChange>,
+    q: Query<&Name>,
+    mut choice: ResMut<MassUnitChoice>,
+) {
     if q.get(ev.entity).map(|n| n.as_str()) != Ok("mass-unit") {
         return;
     }
@@ -154,7 +168,12 @@ fn sync_mass_unit_select(
     }
     *last = Some(workspace.0.mass);
     let unit = panel_units(&workspace.0, &choice).mass;
-    let Some(i) = cadrs_sketch::units::MassUnit::ALL.iter().position(|m| *m == unit) else { return };
+    let Some(i) = cadrs_sketch::units::MassUnit::ALL
+        .iter()
+        .position(|m| *m == unit)
+    else {
+        return;
+    };
     for (n, mut s) in &mut q {
         if n.as_str() == "mass-unit" && s.selected != i {
             s.selected = i;
@@ -164,7 +183,11 @@ fn sync_mass_unit_select(
 
 /// Closing the panel drops the whole assembly it measured from the selection (P3B.8 judge: the
 /// assembly stayed selected, all orange, after the dialog closed).
-fn drop_assembly_pick(panel: Option<Res<MassPanel>>, mut was_open: Local<bool>, mut selection: ResMut<Selection>) {
+fn drop_assembly_pick(
+    panel: Option<Res<MassPanel>>,
+    mut was_open: Local<bool>,
+    mut selection: ResMut<Selection>,
+) {
     let open = panel.is_some();
     if *was_open && !open && selection.contains(Pick::Assembly) {
         selection.0.retain(|p| *p != Pick::Assembly);
@@ -216,10 +239,20 @@ pub fn measured(selection: &Selection, cache: &PartCache) -> Vec<PartId> {
     }
     // P3B.4: a subassembly instance (its row's `PartId(instance, 0)`) is all of its parts.
     if cache.assembly.is_some() {
-        let whole: Vec<PartId> = out.iter().copied().filter(|id| id.index == 0 && cache.part(*id).is_none()).collect();
+        let whole: Vec<PartId> = out
+            .iter()
+            .copied()
+            .filter(|id| id.index == 0 && cache.part(*id).is_none())
+            .collect();
         for w in whole {
             out.retain(|x| *x != w);
-            out.extend(cache.parts.iter().filter(|p| p.id.feature == w.feature).map(|p| p.id));
+            out.extend(
+                cache
+                    .parts
+                    .iter()
+                    .filter(|p| p.id.feature == w.feature)
+                    .map(|p| p.id),
+            );
         }
     }
     out
@@ -241,11 +274,21 @@ pub struct Readouts {
 /// measure). Mass, centre of mass and inertia stay blank while a part has no material, as
 /// Onshape leaves them (`ex1-step6.png`).
 pub fn values(cache: &PartCache, parts: &[PartId], units: &Units) -> Readouts {
-    values_with(cache, parts, units, cadrs_core::parts::MassOptions::default())
+    values_with(
+        cache,
+        parts,
+        units,
+        cadrs_core::parts::MassOptions::default(),
+    )
 }
 
 /// [`values`] with the panel's Override and reference frame (P3.10, X7).
-pub fn values_with(cache: &PartCache, parts: &[PartId], units: &Units, opts: cadrs_core::parts::MassOptions) -> Readouts {
+pub fn values_with(
+    cache: &PartCache,
+    parts: &[PartId],
+    units: &Units,
+    opts: cadrs_core::parts::MassOptions,
+) -> Readouts {
     let list: Vec<&cadrs_core::Part> = parts.iter().filter_map(|p| cache.part(*p)).collect();
     if parts.is_empty() {
         return Readouts::default();
@@ -288,12 +331,20 @@ pub fn measured_faces(selection: &Selection) -> Vec<(PartId, cadrs_sketch::FaceN
 
 /// The Face tab's readouts: the total area and the area-weighted centroid (exact, from the
 /// kernel's faces).
-pub fn face_values(cache: &PartCache, faces: &[(PartId, cadrs_sketch::FaceName)], units: &Units) -> [String; 4] {
+pub fn face_values(
+    cache: &PartCache,
+    faces: &[(PartId, cadrs_sketch::FaceName)],
+    units: &Units,
+) -> [String; 4] {
     let mut area = 0.0;
     let mut moment = [0.0; 3];
     for (part, face) in faces {
-        let Some(f) = cache.part(*part).and_then(|p| p.solid.face(face)) else { continue };
-        let (Some(a), Some(c)) = (f.area, f.center) else { continue };
+        let Some(f) = cache.part(*part).and_then(|p| p.solid.face(face)) else {
+            continue;
+        };
+        let (Some(a), Some(c)) = (f.area, f.center) else {
+            continue;
+        };
         area += a;
         for k in 0..3 {
             moment[k] += c[k] * a;
@@ -311,7 +362,11 @@ pub fn face_values(cache: &PartCache, faces: &[(PartId, cadrs_sketch::FaceName)]
 }
 
 /// The reference frame of the panel's mate connector, among the parts built.
-fn reference_frame(world_features: &[cadrs_core::Feature], cache: &PartCache, c: &cadrs_core::mate::ConnectorRef) -> Option<cadrs_sketch::PlaneFrame> {
+fn reference_frame(
+    world_features: &[cadrs_core::Feature],
+    cache: &PartCache,
+    c: &cadrs_core::mate::ConnectorRef,
+) -> Option<cadrs_sketch::PlaneFrame> {
     cadrs_core::mate::frame(c, world_features, &cache.parts, &cache.connectors).ok()
 }
 
@@ -343,7 +398,12 @@ fn on_close(ev: On<FeatureDialogCancel>, q: Query<(), With<MassDialog>>, mut com
     }
 }
 
-fn on_tab(ev: On<cadrs_ui::TabStripSelect>, q: Query<&Name>, panel: Option<ResMut<MassPanel>>, mut selection: ResMut<Selection>) {
+fn on_tab(
+    ev: On<cadrs_ui::TabStripSelect>,
+    q: Query<&Name>,
+    panel: Option<ResMut<MassPanel>>,
+    mut selection: ResMut<Selection>,
+) {
     if !q.get(ev.entity).is_ok_and(|n| n.as_str() == "mass-tabs") {
         return;
     }
@@ -359,8 +419,17 @@ fn on_tab(ev: On<cadrs_ui::TabStripSelect>, q: Query<&Name>, panel: Option<ResMu
     }
 }
 
-fn on_override(ev: On<cadrs_ui::CheckboxChange>, q: Query<&Name>, panel: Option<ResMut<MassPanel>>, cache: Res<PartCache>, selection: Res<Selection>) {
-    if !q.get(ev.entity).is_ok_and(|n| n.as_str() == "mass-override") {
+fn on_override(
+    ev: On<cadrs_ui::CheckboxChange>,
+    q: Query<&Name>,
+    panel: Option<ResMut<MassPanel>>,
+    cache: Res<PartCache>,
+    selection: Res<Selection>,
+) {
+    if !q
+        .get(ev.entity)
+        .is_ok_and(|n| n.as_str() == "mass-override")
+    {
         return;
     }
     let Some(mut p) = panel else { return };
@@ -368,7 +437,9 @@ fn on_override(ev: On<cadrs_ui::CheckboxChange>, q: Query<&Name>, panel: Option<
         // Starts from the mass shown (1 kg without one).
         let parts = measured(&selection, &cache);
         let list: Vec<&cadrs_core::Part> = parts.iter().filter_map(|x| cache.part(*x)).collect();
-        let m = cadrs_core::parts::mass_report(&list, &cache.props).and_then(|r| r.mass).map_or(1.0, |m| m.mass);
+        let m = cadrs_core::parts::mass_report(&list, &cache.props)
+            .and_then(|r| r.mass)
+            .map_or(1.0, |m| m.mass);
         Some((m, format!("{} kg", cadrs_core::hole::fmt(m))))
     } else {
         None
@@ -405,12 +476,20 @@ fn on_override_value(
         }
     }
     if let (Some(v), Some(mut p)) = (parsed, panel) {
-        let shown = if text.parse::<f64>().is_ok() { units.0.mass(v) } else { text };
+        let shown = if text.parse::<f64>().is_ok() {
+            units.0.mass(v)
+        } else {
+            text
+        };
         p.override_mass = Some((v, shown));
     }
 }
 
-fn on_reference_activate(ev: On<cadrs_ui::SelectionFieldActivate>, q: Query<(), With<ReferenceField>>, panel: Option<ResMut<MassPanel>>) {
+fn on_reference_activate(
+    ev: On<cadrs_ui::SelectionFieldActivate>,
+    q: Query<(), With<ReferenceField>>,
+    panel: Option<ResMut<MassPanel>>,
+) {
     if q.contains(ev.entity)
         && let Some(mut p) = panel
     {
@@ -418,7 +497,11 @@ fn on_reference_activate(ev: On<cadrs_ui::SelectionFieldActivate>, q: Query<(), 
     }
 }
 
-fn on_reference_clear(ev: On<cadrs_ui::SelectionFieldClear>, q: Query<(), With<ReferenceField>>, panel: Option<ResMut<MassPanel>>) {
+fn on_reference_clear(
+    ev: On<cadrs_ui::SelectionFieldClear>,
+    q: Query<(), With<ReferenceField>>,
+    panel: Option<ResMut<MassPanel>>,
+) {
     if q.contains(ev.entity)
         && let Some(mut p) = panel
     {
@@ -427,7 +510,11 @@ fn on_reference_clear(ev: On<cadrs_ui::SelectionFieldClear>, q: Query<(), With<R
     }
 }
 
-fn on_remove(ev: On<SelectionListRemove>, q: Query<(), With<PartsField>>, mut selection: ResMut<Selection>) {
+fn on_remove(
+    ev: On<SelectionListRemove>,
+    q: Query<(), With<PartsField>>,
+    mut selection: ResMut<Selection>,
+) {
     if !q.contains(ev.entity) {
         return;
     }
@@ -456,8 +543,14 @@ fn mass_picks(
     };
     for p in picks.read() {
         if panel.reference_active {
-            let features = doc.as_ref().and_then(|d| d.active_element()).map(|e| e.features().to_vec()).unwrap_or_default();
-            if let Some(c) = p.0.and_then(|pick| crate::pattern::connector_of(&features, &cache, pick)) {
+            let features = doc
+                .as_ref()
+                .and_then(|d| d.active_element())
+                .map(|e| e.features().to_vec())
+                .unwrap_or_default();
+            if let Some(c) =
+                p.0.and_then(|pick| crate::pattern::connector_of(&features, &cache, pick))
+            {
                 panel.reference = Some(c);
                 panel.reference_active = false;
             }
@@ -477,13 +570,19 @@ fn mass_picks(
         if let Some(part) = p.0.and_then(|p| p.part()) {
             let whole = Pick::Part(part);
             // A face picked on a measured part toggles the part.
-            selection.0.retain(|x| !(x.part() == Some(part) && *x != whole));
+            selection
+                .0
+                .retain(|x| !(x.part() == Some(part) && *x != whole));
             selection.toggle(whole);
         }
     }
 }
 
-fn mass_keys(mut keys: MessageReader<KeyboardInput>, panel: Option<Res<MassPanel>>, mut commands: Commands) {
+fn mass_keys(
+    mut keys: MessageReader<KeyboardInput>,
+    panel: Option<Res<MassPanel>>,
+    mut commands: Commands,
+) {
     if panel.is_none() {
         keys.clear();
         return;
@@ -523,9 +622,13 @@ fn value_row(p: &mut ChildSpawner, t: &Theme, label: &str, label_color: Color, v
             BorderColor::all(Color::srgb_u8(0xd8, 0xd8, 0xd8)),
         ))
         .with_children(|c| {
-            let mut text = c.spawn(t.text(String::new(), 12.0, FontWeight::MEDIUM, t.tool_foreground));
+            let mut text =
+                c.spawn(t.text(String::new(), 12.0, FontWeight::MEDIUM, t.tool_foreground));
             if let Some(v) = v {
-                text.insert((v, Name::new(format!("mass-{}", format!("{v:?}").to_lowercase()))));
+                text.insert((
+                    v,
+                    Name::new(format!("mass-{}", format!("{v:?}").to_lowercase())),
+                ));
             }
         });
     });
@@ -533,8 +636,21 @@ fn value_row(p: &mut ChildSpawner, t: &Theme, label: &str, label_color: Color, v
 
 /// A Face tab row: its label and value (P3.10).
 fn face_row(p: &mut ChildSpawner, t: &Theme, label: &str, label_color: Color, v: FaceValue) {
-    p.spawn(Node { height: Val::Px(24.0), align_items: AlignItems::Center, column_gap: Val::Px(6.0), ..default() }).with_children(|r| {
-        r.spawn((t.text(label.to_string(), 11.5, FontWeight::MEDIUM, label_color), Node { width: Val::Px(62.0), flex_shrink: 0.0, ..default() }));
+    p.spawn(Node {
+        height: Val::Px(24.0),
+        align_items: AlignItems::Center,
+        column_gap: Val::Px(6.0),
+        ..default()
+    })
+    .with_children(|r| {
+        r.spawn((
+            t.text(label.to_string(), 11.5, FontWeight::MEDIUM, label_color),
+            Node {
+                width: Val::Px(62.0),
+                flex_shrink: 0.0,
+                ..default()
+            },
+        ));
         r.spawn((
             Node {
                 flex_grow: 1.0,
@@ -556,7 +672,14 @@ fn face_row(p: &mut ChildSpawner, t: &Theme, label: &str, label_color: Color, v:
 
 /// A centre-of-mass row: the axis letter and its arrow (X ↘ red, Y ↗ green, Z ↑ blue, as in
 /// `ex1-step6.png`), then the value.
-fn axis_row(p: &mut ChildSpawner, t: &Theme, label: &str, arrow: &'static str, color: Color, v: Value) {
+fn axis_row(
+    p: &mut ChildSpawner,
+    t: &Theme,
+    label: &str,
+    arrow: &'static str,
+    color: Color,
+    v: Value,
+) {
     p.spawn(Node {
         height: Val::Px(24.0),
         align_items: AlignItems::Center,
@@ -614,7 +737,13 @@ fn heading(p: &mut ChildSpawner, t: &Theme, label: &str, override_box: bool) {
             } else {
                 format!("mass-{}-override", label.to_lowercase().replace(' ', "-"))
             };
-            r.spawn((Checkbox::new(name).label("Override").disabled(true).build(t), NeedsMass));
+            r.spawn((
+                Checkbox::new(name)
+                    .label("Override")
+                    .disabled(true)
+                    .build(t),
+                NeedsMass,
+            ));
         }
     });
 }
@@ -626,7 +755,9 @@ fn inertia_heading(units: &Units) -> String {
     let l = units.length.symbol();
     let m = units.mass.symbol();
     match units.length {
-        LengthUnit::Inch | LengthUnit::Foot | LengthUnit::Yard => format!("Mass moments of inertia ({l}² {m})"),
+        LengthUnit::Inch | LengthUnit::Foot | LengthUnit::Yard => {
+            format!("Mass moments of inertia ({l}² {m})")
+        }
         _ => format!("Mass moments of inertia ({m} {l}²)"),
     }
 }
@@ -664,17 +795,35 @@ fn mass_dialog(
             .body_padding(UiRect::ZERO)
             .body(move |b| {
                 let t = &tb;
-                b.spawn(TabStrip::new("mass-tabs").compact().tab("Part").tab("Face").selected(usize::from(layout.face_tab)).build(t));
+                b.spawn(
+                    TabStrip::new("mass-tabs")
+                        .compact()
+                        .tab("Part")
+                        .tab("Face")
+                        .selected(usize::from(layout.face_tab))
+                        .build(t),
+                );
                 if layout.face_tab {
                     // P3.10 (X7): the Face tab.
                     b.spawn(Node {
                         flex_direction: FlexDirection::Column,
-                        padding: UiRect::new(Val::Px(4.0), Val::Px(6.0), Val::Px(6.0), Val::Px(6.0)),
+                        padding: UiRect::new(
+                            Val::Px(4.0),
+                            Val::Px(6.0),
+                            Val::Px(6.0),
+                            Val::Px(6.0),
+                        ),
                         row_gap: Val::Px(2.0),
                         ..default()
                     })
                     .with_children(|c| {
-                        c.spawn((FacesField, SelectionList::new("mass-faces-field").placeholder("Faces to measure").active(true).build(t)));
+                        c.spawn((
+                            FacesField,
+                            SelectionList::new("mass-faces-field")
+                                .placeholder("Faces to measure")
+                                .active(true)
+                                .build(t),
+                        ));
                         face_row(c, t, "Area", t.foreground, FaceValue::Area);
                         heading(c, t, "Centroid", false);
                         face_row(c, t, "X", Color::srgb_u8(0xd0, 0x30, 0x30), FaceValue::X);
@@ -710,7 +859,12 @@ fn mass_dialog(
                         n.flex_grow = 0.0;
                         n.margin = UiRect::vertical(Val::Px(3.0));
                     });
-                    c.spawn(Checkbox::new("mass-variance").label("Show calculation variance").disabled(true).build(t));
+                    c.spawn(
+                        Checkbox::new("mass-variance")
+                            .label("Show calculation variance")
+                            .disabled(true)
+                            .build(t),
+                    );
                     c.spawn(Node {
                         height: Val::Px(24.0),
                         align_items: AlignItems::Center,
@@ -719,12 +873,20 @@ fn mass_dialog(
                     })
                     .with_children(|r| {
                         r.spawn(t.text("Mass", 11.5, FontWeight::MEDIUM, t.foreground));
-                        r.spawn(Checkbox::new("mass-override").label("Override").checked(layout.overridden).build(t));
+                        r.spawn(
+                            Checkbox::new("mass-override")
+                                .label("Override")
+                                .checked(layout.overridden)
+                                .build(t),
+                        );
                         if layout.overridden {
                             // P3.10 (X7): the overriding mass, typed.
                             r.spawn((
                                 OverrideValue,
-                                cadrs_ui::NumberField::new("mass-override-value", "").text(override_text.clone()).label_width(0.0).build(t),
+                                cadrs_ui::NumberField::new("mass-override-value", "")
+                                    .text(override_text.clone())
+                                    .label_width(0.0)
+                                    .build(t),
                             ))
                             .entry::<Node>()
                             .and_modify(|mut n| n.flex_grow = 1.0);
@@ -751,17 +913,46 @@ fn mass_dialog(
                         for m in cadrs_sketch::units::MassUnit::ALL {
                             sel = sel.option(m.symbol(), true);
                         }
-                        let i = cadrs_sketch::units::MassUnit::ALL.iter().position(|m| *m == mass_unit).unwrap_or(0);
-                        r.spawn(sel.selected(i).build(t)).insert(Tooltip::new("Mass unit"));
+                        let i = cadrs_sketch::units::MassUnit::ALL
+                            .iter()
+                            .position(|m| *m == mass_unit)
+                            .unwrap_or(0);
+                        r.spawn(sel.selected(i).build(t))
+                            .insert(Tooltip::new("Mass unit"));
                     });
                     value_row(c, t, "Volume", t.foreground, Some(Value::Volume));
                     value_row(c, t, "Surface area", t.foreground, Some(Value::Area));
                     heading(c, t, "Center of mass", true);
-                    axis_row(c, t, "X", "arrow-down-right", Color::srgb_u8(0xd0, 0x30, 0x30), Value::X);
-                    axis_row(c, t, "Y", "arrow-up-right", Color::srgb_u8(0x2e, 0x9e, 0x3e), Value::Y);
-                    axis_row(c, t, "Z", "arrow-up", Color::srgb_u8(0x2b, 0x64, 0xc0), Value::Z);
+                    axis_row(
+                        c,
+                        t,
+                        "X",
+                        "arrow-down-right",
+                        Color::srgb_u8(0xd0, 0x30, 0x30),
+                        Value::X,
+                    );
+                    axis_row(
+                        c,
+                        t,
+                        "Y",
+                        "arrow-up-right",
+                        Color::srgb_u8(0x2e, 0x9e, 0x3e),
+                        Value::Y,
+                    );
+                    axis_row(
+                        c,
+                        t,
+                        "Z",
+                        "arrow-up",
+                        Color::srgb_u8(0x2b, 0x64, 0xc0),
+                        Value::Z,
+                    );
                     heading(c, t, &inertia, true);
-                    for row in [["Lxx", "Lxy", "Lxz"], ["Lyx", "Lyy", "Lyz"], ["Lzx", "Lzy", "Lzz"]] {
+                    for row in [
+                        ["Lxx", "Lxy", "Lxz"],
+                        ["Lyx", "Lyy", "Lyz"],
+                        ["Lzx", "Lzy", "Lzz"],
+                    ] {
                         c.spawn(Node {
                             height: Val::Px(24.0),
                             column_gap: Val::Px(8.0),
@@ -783,9 +974,19 @@ fn mass_dialog(
                                 })
                                 .insert(BorderColor::all(Color::srgb_u8(0xd8, 0xd8, 0xd8)))
                                 .with_children(|cell| {
-                                    cell.spawn(t.text(l, 11.0, FontWeight::NORMAL, t.muted_foreground));
+                                    cell.spawn(t.text(
+                                        l,
+                                        11.0,
+                                        FontWeight::NORMAL,
+                                        t.muted_foreground,
+                                    ));
                                     cell.spawn((
-                                        t.text(String::new(), 11.0, FontWeight::MEDIUM, t.tool_foreground),
+                                        t.text(
+                                            String::new(),
+                                            11.0,
+                                            FontWeight::MEDIUM,
+                                            t.tool_foreground,
+                                        ),
                                         Value::Inertia(i, j),
                                         Name::new(format!("mass-{}", l.to_lowercase())),
                                     ));
@@ -833,24 +1034,45 @@ fn sync_mass_panel(
         }
         return;
     };
-    let layout = MassLayout { face_tab: panel.face_tab, overridden: panel.override_mass.is_some() };
+    let layout = MassLayout {
+        face_tab: panel.face_tab,
+        overridden: panel.override_mass.is_some(),
+    };
     if q_layout.iter().next().is_some_and(|l| *l != layout) {
         for e in &q_dialog {
             commands.entity(e).try_despawn();
         }
         return;
     }
-    let features = doc.as_ref().and_then(|d| d.active_element()).map(|e| e.features().to_vec()).unwrap_or_default();
+    let features = doc
+        .as_ref()
+        .and_then(|d| d.active_element())
+        .map(|e| e.features().to_vec())
+        .unwrap_or_default();
     let units = crate::WorkspaceUnits(panel_units(&workspace.0, &choice));
     // The Face tab (P3.10, X7).
     if panel.face_tab && !q_dialog.is_empty() {
         let faces = measured_faces(&selection);
         let items: Vec<String> = faces
             .iter()
-            .map(|(_, f)| format!("Face of {}", features.iter().find(|x| x.id.0 == f.op).map_or("part", |x| x.name.as_str())))
+            .map(|(_, f)| {
+                format!(
+                    "Face of {}",
+                    features
+                        .iter()
+                        .find(|x| x.id.0 == f.op)
+                        .map_or("part", |x| x.name.as_str())
+                )
+            })
             .collect();
         for mut l in &mut q_faces {
-            let want = SelectionListState { items: items.clone(), active: true, error: false, red_items: false, red: Vec::new() };
+            let want = SelectionListState {
+                items: items.clone(),
+                active: true,
+                error: false,
+                red_items: false,
+                red: Vec::new(),
+            };
             if *l != want {
                 *l = want;
             }
@@ -869,7 +1091,10 @@ fn sync_mass_panel(
         }
         return;
     }
-    let reference = panel.reference.as_ref().and_then(|c| reference_frame(&features, &cache, c));
+    let reference = panel
+        .reference
+        .as_ref()
+        .and_then(|c| reference_frame(&features, &cache, c));
     // The Override field shows the mass it holds (as typed, or with its unit).
     if let Some((_, text)) = &panel.override_mass {
         let editing = focus.get().and_then(|f| q_edit.get(f).ok()).map(|e| e.0);
@@ -894,9 +1119,15 @@ fn sync_mass_panel(
     // `intro-to-assemblies/ex1-step10.png`).
     let root = cache.assembly.is_some() && selection.contains(Pick::Assembly);
     let items: Vec<String> = if root {
-        doc.as_ref().and_then(|d| d.active_element()).map(|e| vec![e.name.clone()]).unwrap_or_default()
+        doc.as_ref()
+            .and_then(|d| d.active_element())
+            .map(|e| vec![e.name.clone()])
+            .unwrap_or_default()
     } else {
-        parts.iter().filter_map(|p| cache.part_name(*p).map(str::to_string)).collect()
+        parts
+            .iter()
+            .filter_map(|p| cache.part_name(*p).map(str::to_string))
+            .collect()
     };
     let red_of = |cache: &PartCache| {
         let r = without_material(cache, &parts);
@@ -907,9 +1138,28 @@ fn sync_mass_panel(
             return;
         };
         let red = red_of(&cache);
-        let text = panel.override_mass.as_ref().map(|(_, t)| t.clone()).unwrap_or_default();
-        let placeholder = if cache.assembly.is_some() { "Instances to measure" } else { "Parts to measure" };
-        let d = commands.spawn(mass_dialog(&theme, items, red, inertia_heading(&units.0), layout, text, placeholder, units.0.mass)).id();
+        let text = panel
+            .override_mass
+            .as_ref()
+            .map(|(_, t)| t.clone())
+            .unwrap_or_default();
+        let placeholder = if cache.assembly.is_some() {
+            "Instances to measure"
+        } else {
+            "Parts to measure"
+        };
+        let d = commands
+            .spawn(mass_dialog(
+                &theme,
+                items,
+                red,
+                inertia_heading(&units.0),
+                layout,
+                text,
+                placeholder,
+                units.0.mass,
+            ))
+            .id();
         commands.entity(area).add_child(d);
         return;
     }
@@ -925,7 +1175,10 @@ fn sync_mass_panel(
             *f = want;
         }
     }
-    let opts = cadrs_core::parts::MassOptions { override_mass: panel.override_mass.as_ref().map(|(m, _)| *m), reference };
+    let opts = cadrs_core::parts::MassOptions {
+        override_mass: panel.override_mass.as_ref().map(|(m, _)| *m),
+        reference,
+    };
     let r = values_with(&cache, &parts, &units.0, opts);
     for (v, mut text) in &mut q_values {
         let want = match v {
@@ -999,7 +1252,9 @@ fn place_com_glyph(
             }
         }
         None => {
-            let Some(area) = q_area.iter().next() else { return };
+            let Some(area) = q_area.iter().next() else {
+                return;
+            };
             let e = commands
                 .spawn((
                     Name::new("mass-com-glyph"),
@@ -1017,7 +1272,15 @@ fn place_com_glyph(
                     DespawnOnExit(AppState::Document),
                     children![
                         (
-                            cadrs_ui::icon::icon_in("center-of-mass-disc", COM_SIZE, Color::WHITE, Node { position_type: PositionType::Absolute, ..default() }),
+                            cadrs_ui::icon::icon_in(
+                                "center-of-mass-disc",
+                                COM_SIZE,
+                                Color::WHITE,
+                                Node {
+                                    position_type: PositionType::Absolute,
+                                    ..default()
+                                }
+                            ),
                             Pickable::IGNORE,
                         ),
                         (
@@ -1025,7 +1288,10 @@ fn place_com_glyph(
                                 "center-of-mass-quarters",
                                 COM_SIZE,
                                 Color::srgb_u8(0x14, 0x14, 0x14),
-                                Node { position_type: PositionType::Absolute, ..default() },
+                                Node {
+                                    position_type: PositionType::Absolute,
+                                    ..default()
+                                },
                             ),
                             Pickable::IGNORE,
                         ),

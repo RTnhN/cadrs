@@ -51,8 +51,13 @@ impl ExplodeMotion {
     /// The motion done to the fraction `t` (0…1).
     pub fn pose(&self, t: f64) -> Pose {
         match *self {
-            ExplodeMotion::Translate { direction, distance } => Pose::translation(direction.map(|c| c * distance * t)),
-            ExplodeMotion::Rotate { point, axis, angle } => Pose::rotation_about(point, axis, angle * t),
+            ExplodeMotion::Translate {
+                direction,
+                distance,
+            } => Pose::translation(direction.map(|c| c * distance * t)),
+            ExplodeMotion::Rotate { point, axis, angle } => {
+                Pose::rotation_about(point, axis, angle * t)
+            }
         }
     }
 
@@ -67,8 +72,15 @@ impl ExplodeMotion {
     /// The same motion with another size.
     pub fn with_amount(&self, v: f64) -> Self {
         match *self {
-            ExplodeMotion::Translate { direction, .. } => ExplodeMotion::Translate { direction, distance: v },
-            ExplodeMotion::Rotate { point, axis, .. } => ExplodeMotion::Rotate { point, axis, angle: v },
+            ExplodeMotion::Translate { direction, .. } => ExplodeMotion::Translate {
+                direction,
+                distance: v,
+            },
+            ExplodeMotion::Rotate { point, axis, .. } => ExplodeMotion::Rotate {
+                point,
+                axis,
+                angle: v,
+            },
         }
     }
 }
@@ -98,7 +110,12 @@ fn yes() -> bool {
 
 impl ExplodedView {
     pub fn new(id: ExplodedViewId, name: impl Into<String>) -> Self {
-        Self { id, name: name.into(), steps: Vec::new(), trails: true }
+        Self {
+            id,
+            name: name.into(),
+            steps: Vec::new(),
+            trails: true,
+        }
     }
 }
 
@@ -113,7 +130,13 @@ pub fn next_name(asm: &Assembly) -> String {
     let n = asm
         .exploded_views
         .iter()
-        .filter_map(|p| p.name.strip_prefix("Exploded view ")?.trim().parse::<u32>().ok())
+        .filter_map(|p| {
+            p.name
+                .strip_prefix("Exploded view ")?
+                .trim()
+                .parse::<u32>()
+                .ok()
+        })
         .max()
         .unwrap_or(0);
     format!("Exploded view {}", n + 1)
@@ -137,7 +160,9 @@ pub fn exploded_poses(asm: &Assembly, view: &ExplodedView, t: f64) -> Vec<(Insta
         }
         let m = step.motion.pose(f);
         for id in &step.instances {
-            let Some(inst) = asm.instance(*id) else { continue };
+            let Some(inst) = asm.instance(*id) else {
+                continue;
+            };
             match poses.iter_mut().find(|(i, _)| i == id) {
                 Some(slot) => slot.1 = slot.1.then(&m),
                 None => poses.push((*id, inst.pose.then(&m))),
@@ -150,7 +175,12 @@ pub fn exploded_poses(asm: &Assembly, view: &ExplodedView, t: f64) -> Vec<(Insta
 /// The trail lines of `view` at `t`: for each step and instance, the path of the instance's
 /// point `anchor(id)` (in its own coordinates) during the step, as a polyline (assembly
 /// coordinates; a turn is drawn as an arc).
-pub fn trails(asm: &Assembly, view: &ExplodedView, t: f64, anchor: impl Fn(InstanceId) -> Vec3) -> Vec<Vec<Vec3>> {
+pub fn trails(
+    asm: &Assembly,
+    view: &ExplodedView,
+    t: f64,
+    anchor: impl Fn(InstanceId) -> Vec3,
+) -> Vec<Vec<Vec3>> {
     let mut out = Vec::new();
     let mut poses: Vec<(InstanceId, Pose)> = asm.instances.iter().map(|i| (i.id, i.pose)).collect();
     let fr = step_fractions(view.steps.len(), t);
@@ -163,9 +193,17 @@ pub fn trails(asm: &Assembly, view: &ExplodedView, t: f64, anchor: impl Fn(Insta
             ExplodeMotion::Rotate { .. } => 16,
         };
         for id in &step.instances {
-            let Some(slot) = poses.iter_mut().find(|(i, _)| i == id) else { continue };
+            let Some(slot) = poses.iter_mut().find(|(i, _)| i == id) else {
+                continue;
+            };
             let a = anchor(*id);
-            let line: Vec<Vec3> = (0..=samples).map(|k| slot.1.then(&step.motion.pose(f * k as f64 / samples as f64)).apply(a)).collect();
+            let line: Vec<Vec3> = (0..=samples)
+                .map(|k| {
+                    slot.1
+                        .then(&step.motion.pose(f * k as f64 / samples as f64))
+                        .apply(a)
+                })
+                .collect();
             out.push(line);
             slot.1 = slot.1.then(&step.motion.pose(f));
         }
@@ -189,10 +227,18 @@ impl Command for SetExplodedView {
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
         if self.view.name.trim().is_empty() {
-            return Err(CommandError::Invalid("an exploded view needs a name".into()));
+            return Err(CommandError::Invalid(
+                "an exploded view needs a name".into(),
+            ));
         }
         let asm = assembly_mut(doc, self.element)?;
-        if let Some(i) = self.view.steps.iter().flat_map(|s| s.instances.iter()).find(|i| asm.instance(**i).is_none()) {
+        if let Some(i) = self
+            .view
+            .steps
+            .iter()
+            .flat_map(|s| s.instances.iter())
+            .find(|i| asm.instance(**i).is_none())
+        {
             return Err(CommandError::Invalid(format!("instance {i} not found")));
         }
         match asm.exploded_views.iter_mut().find(|v| v.id == self.view.id) {

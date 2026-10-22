@@ -11,8 +11,9 @@ use cadrs_ui::prelude::*;
 
 use crate::parts::PartCache;
 use crate::viewport::{
-    ActiveKind, AffineInner, HighlightGizmos, HoverGizmos, PLANE_HALF, Pick, PlaneHighlight, PlaneMaterials, Selection,
-    ViewportArea, ViewportRect, ViewportView, label_alpha, place_affine, readable_axes,
+    ActiveKind, AffineInner, HighlightGizmos, HoverGizmos, PLANE_HALF, Pick, PlaneHighlight,
+    PlaneMaterials, Selection, ViewportArea, ViewportRect, ViewportView, label_alpha, place_affine,
+    readable_axes,
 };
 use crate::{ActiveDocument, AppState};
 
@@ -22,7 +23,11 @@ impl Plugin for PlaneDisplayPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (sync_plane_quads, draw_plane_feature_edges, draw_curve_features)
+            (
+                sync_plane_quads,
+                draw_plane_feature_edges,
+                draw_curve_features,
+            )
                 .chain()
                 .after(crate::parts::PartsSet)
                 .run_if(in_state(AppState::Document)),
@@ -59,20 +64,27 @@ fn v3(p: [f64; 3]) -> Vec3 {
 
 /// Origin, u, v of a frame.
 fn axes(f: &PlaneFrame) -> [Vec3; 3] {
-    [v3(f.origin), v3(f.u).normalize_or_zero(), v3(f.v).normalize_or_zero()]
+    [
+        v3(f.origin),
+        v3(f.u).normalize_or_zero(),
+        v3(f.v).normalize_or_zero(),
+    ]
 }
 
 /// The planes to show: the Part Studio's built Plane features, less the ones hidden with their
 /// eye, with their names.
-fn shown(doc: Option<&ActiveDocument>, cache: &PartCache, kind: ActiveKind) -> Vec<(FeatureId, [Vec3; 3], String, f32)> {
+fn shown(
+    doc: Option<&ActiveDocument>,
+    cache: &PartCache,
+    kind: ActiveKind,
+) -> Vec<(FeatureId, [Vec3; 3], String, f32)> {
     if kind != ActiveKind::PartStudio {
         return Vec::new();
     }
     let Some(el) = doc.and_then(|d| d.active_element()) else {
         return Vec::new();
     };
-    el
-        .features()
+    el.features()
         .iter()
         .filter(|f| matches!(f.kind, cadrs_core::FeatureKind::Plane(_)))
         .filter(|f| el.sketch_visibility(f.id) != Some(false))
@@ -84,13 +96,20 @@ fn shown(doc: Option<&ActiveDocument>, cache: &PartCache, kind: ActiveKind) -> V
             Some((f.id, a, f.name.clone(), half))
         })
         // P3G.4: the planes Derived features brought in, drawn and picked the same way.
-        .chain(el.features().iter().filter_map(|f| cache.derived.get(&f.id)).flat_map(|d| d.planes.iter()).filter(|(id, _)| el.sketch_visibility(*id) != Some(false)).filter_map(|(id, name)| {
-            let frame = cache.planes.get(id)?;
-            let (center, half) = cache.plane_square(frame);
-            let mut a = axes(frame);
-            a[0] = v3(center);
-            Some((*id, a, name.clone(), half))
-        }))
+        .chain(
+            el.features()
+                .iter()
+                .filter_map(|f| cache.derived.get(&f.id))
+                .flat_map(|d| d.planes.iter())
+                .filter(|(id, _)| el.sketch_visibility(*id) != Some(false))
+                .filter_map(|(id, name)| {
+                    let frame = cache.planes.get(id)?;
+                    let (center, half) = cache.plane_square(frame);
+                    let mut a = axes(frame);
+                    a[0] = v3(center);
+                    Some((*id, a, name.clone(), half))
+                }),
+        )
         .collect()
 }
 
@@ -112,13 +131,22 @@ fn sync_plane_quads(
 ) {
     let Some(m) = materials else { return };
     let want = shown(doc.as_deref(), &cache, *kind);
-    let quad = quad.get_or_insert_with(|| meshes.add(Rectangle::new(PLANE_HALF * 2.0, PLANE_HALF * 2.0))).clone();
+    let quad = quad
+        .get_or_insert_with(|| meshes.add(Rectangle::new(PLANE_HALF * 2.0, PLANE_HALF * 2.0)))
+        .clone();
     // Squares.
     for (e, pq, mut mat) in &mut q {
-        match want.iter().find(|(id, f, _, h)| *id == pq.feature && *f == pq.frame && *h == pq.half) {
+        match want
+            .iter()
+            .find(|(id, f, _, h)| *id == pq.feature && *f == pq.frame && *h == pq.half)
+        {
             None => commands.entity(e).despawn(),
             Some(_) => {
-                let target = if selection.contains(Pick::Feature(pq.feature)) { &m.selected } else { &m.normal };
+                let target = if selection.contains(Pick::Feature(pq.feature)) {
+                    &m.selected
+                } else {
+                    &m.normal
+                };
                 if mat.0 != *target {
                     mat.0 = target.clone();
                 }
@@ -126,7 +154,9 @@ fn sync_plane_quads(
         }
     }
     for (id, f, _, h) in &want {
-        if q.iter().any(|(_, pq, _)| pq.feature == *id && pq.frame == *f && pq.half == *h) {
+        if q.iter()
+            .any(|(_, pq, _)| pq.feature == *id && pq.frame == *f && pq.half == *h)
+        {
             continue;
         }
         let n = f[1].cross(f[2]);
@@ -134,17 +164,30 @@ fn sync_plane_quads(
         let k = *h / PLANE_HALF;
         commands.spawn((
             Name::new(format!("plane-feature-{}", id.0)),
-            PlaneQuad { feature: *id, frame: *f, half: *h },
+            PlaneQuad {
+                feature: *id,
+                frame: *f,
+                half: *h,
+            },
             Mesh3d(quad.clone()),
             MeshMaterial3d(m.normal.clone()),
-            Transform { translation: f[0], rotation, scale: Vec3::new(k, k, 1.0) },
+            Transform {
+                translation: f[0],
+                rotation,
+                scale: Vec3::new(k, k, 1.0),
+            },
             DespawnOnExit(AppState::Document),
         ));
     }
     // Labels.
-    let Some(area) = q_area.iter().next() else { return };
+    let Some(area) = q_area.iter().next() else {
+        return;
+    };
     for (e, l, children) in &q_labels {
-        match want.iter().find(|(id, f, _, h)| *id == l.feature && *f == l.frame && *h == l.half) {
+        match want
+            .iter()
+            .find(|(id, f, _, h)| *id == l.feature && *f == l.frame && *h == l.half)
+        {
             None => commands.entity(e).despawn(),
             Some((_, _, name, _)) => {
                 if let Some(mut t) = children.first().and_then(|c| q_text.get_mut(*c).ok())
@@ -156,14 +199,24 @@ fn sync_plane_quads(
         }
     }
     for (id, f, name, h) in &want {
-        if q_labels.iter().any(|(_, l, _)| l.feature == *id && l.frame == *f && l.half == *h) {
+        if q_labels
+            .iter()
+            .any(|(_, l, _)| l.feature == *id && l.frame == *f && l.half == *h)
+        {
             continue;
         }
         let label = commands
             .spawn((
                 Name::new(format!("plane-feature-label-{}", id.0)),
-                PlaneFeatureLabel { feature: *id, frame: *f, half: *h },
-                Node { position_type: PositionType::Absolute, ..default() },
+                PlaneFeatureLabel {
+                    feature: *id,
+                    frame: *f,
+                    half: *h,
+                },
+                Node {
+                    position_type: PositionType::Absolute,
+                    ..default()
+                },
                 // Under the dialogs that share the viewport area.
                 ZIndex(-1),
                 Visibility::Hidden,
@@ -200,7 +253,12 @@ fn draw_plane_feature_edges(
     for pq in &q {
         let [o, u, v] = pq.frame;
         let h = pq.half;
-        let corners = [o + (-u - v) * h, o + (u - v) * h, o + (u + v) * h, o + (-u + v) * h];
+        let corners = [
+            o + (-u - v) * h,
+            o + (u - v) * h,
+            o + (u + v) * h,
+            o + (-u + v) * h,
+        ];
         let p = Pick::Feature(pq.feature);
         let (selected, hovered) = (selection.contains(p), highlight.is_hovered(p));
         for i in 0..4 {
@@ -237,12 +295,18 @@ fn draw_curve_features(
     if *kind != ActiveKind::PartStudio {
         return;
     }
-    let Some(el) = doc.as_deref().and_then(|d| d.active_element()) else { return };
+    let Some(el) = doc.as_deref().and_then(|d| d.active_element()) else {
+        return;
+    };
     for f in el.features() {
-        if !matches!(f.kind, cadrs_core::FeatureKind::Helix(_)) || el.sketch_visibility(f.id) == Some(false) {
+        if !matches!(f.kind, cadrs_core::FeatureKind::Helix(_))
+            || el.sketch_visibility(f.id) == Some(false)
+        {
             continue;
         }
-        let Some(g) = cache.curves.get(&f.id) else { continue };
+        let Some(g) = cache.curves.get(&f.id) else {
+            continue;
+        };
         let pts: Vec<Vec3> = g.polyline().into_iter().map(v3).collect();
         let p = Pick::Feature(f.id);
         if highlight.is_hovered(p) {
@@ -271,8 +335,12 @@ pub(crate) fn fill_in_front(
 ) -> bool {
     let eps = 1e-3 * t.abs().max(1.0);
     fills.iter().filter(|(_, v)| v.get()).any(|(m, _)| {
-        let Some(mesh) = meshes.get(&m.0) else { return false };
-        let Some(bevy::mesh::VertexAttributeValues::Float32x3(pos)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else {
+        let Some(mesh) = meshes.get(&m.0) else {
+            return false;
+        };
+        let Some(bevy::mesh::VertexAttributeValues::Float32x3(pos)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
             return false;
         };
         let tri = |i: usize| Vec3::from_array(pos[i]);
@@ -294,7 +362,8 @@ pub(crate) fn fill_in_front(
         match mesh.indices() {
             Some(idx) => {
                 let idx: Vec<usize> = idx.iter().collect();
-                idx.chunks_exact(3).any(|c| hit(tri(c[0]), tri(c[1]), tri(c[2])))
+                idx.chunks_exact(3)
+                    .any(|c| hit(tri(c[0]), tri(c[1]), tri(c[2])))
             }
             None => (0..pos.len() / 3).any(|i| hit(tri(3 * i), tri(3 * i + 1), tri(3 * i + 2))),
         }
@@ -310,7 +379,16 @@ fn place_plane_feature_labels(
     meshes: Res<Assets<Mesh>>,
     fills: Query<(&Mesh3d, &InheritedVisibility), With<LabelOccluder>>,
     doc: Option<Res<ActiveDocument>>,
-    mut q: Query<(&PlaneFeatureLabel, &Children, &mut Node, &mut UiTransform, &mut Visibility), Without<AffineInner>>,
+    mut q: Query<
+        (
+            &PlaneFeatureLabel,
+            &Children,
+            &mut Node,
+            &mut UiTransform,
+            &mut Visibility,
+        ),
+        Without<AffineInner>,
+    >,
     mut q_inner: Query<(&ComputedNode, &mut UiTransform, &mut TextColor), With<AffineInner>>,
 ) {
     let v = view.view;
@@ -327,8 +405,12 @@ fn place_plane_feature_labels(
     };
     labels.sort_by_key(|(l, ..)| order(l.feature));
     for (label, children, mut node, mut transform, mut vis) in labels {
-        let Some(&child) = children.first() else { continue };
-        let Ok((inner_node, mut inner_t, mut color)) = q_inner.get_mut(child) else { continue };
+        let Some(&child) = children.first() else {
+            continue;
+        };
+        let Ok((inner_node, mut inner_t, mut color)) = q_inner.get_mut(child) else {
+            continue;
+        };
         let [o, pu, pv] = label.frame;
         let (u, w) = readable_axes(&v, pu, pv);
         let a = v.project_vector(u) * v.scale;
@@ -356,22 +438,42 @@ fn place_plane_feature_labels(
         let clear = corners.iter().find_map(|d| {
             let start = o + (w - u) * half + u * d.x - w * d.y;
             let corner = rect.to_screen(v.project(start)) - rect.0.min;
-            let pts = [Vec2::ZERO, Vec2::new(size.x, 0.0), Vec2::new(0.0, size.y), size].map(|q| corner + a * (pad.x + q.x) + b * (pad.y + q.y));
+            let pts = [
+                Vec2::ZERO,
+                Vec2::new(size.x, 0.0),
+                Vec2::new(0.0, size.y),
+                size,
+            ]
+            .map(|q| corner + a * (pad.x + q.x) + b * (pad.y + q.y));
             if pts.iter().any(|p| !inside.contains(*p)) {
                 return None;
             }
-            let screen = pts[1..].iter().fold(Rect::from_corners(pts[0], pts[0]), |r, p| r.union_point(*p));
-            if placed.iter().any(|r| !r.inflate(2.0).intersect(screen).is_empty()) {
+            let screen = pts[1..]
+                .iter()
+                .fold(Rect::from_corners(pts[0], pts[0]), |r, p| r.union_point(*p));
+            if placed
+                .iter()
+                .any(|r| !r.inflate(2.0).intersect(screen).is_empty())
+            {
                 return None;
             }
             // Parts or region fills in front of the label hide it (it is drawn over the view,
             // not in it): its corners and middle, on the plane, each along its ray.
             let world = |q: Vec2| start + (u * (pad.x + q.x) - w * (pad.y + q.y)) * v.scale;
-            let behind = [Vec2::ZERO, Vec2::new(size.x, 0.0), Vec2::new(0.0, size.y), size, size / 2.0].iter().any(|q| {
+            let behind = [
+                Vec2::ZERO,
+                Vec2::new(size.x, 0.0),
+                Vec2::new(0.0, size.y),
+                size,
+                size / 2.0,
+            ]
+            .iter()
+            .any(|q| {
                 let p = world(*q);
                 let (ro, rd) = v.ray(v.project(p));
                 let t = (p - ro).dot(rd);
-                crate::parts::pick_face(&cache, &v, v.project(p)).is_some_and(|(_, _, hit)| hit < t - 1e-3 * t.abs().max(1.0))
+                crate::parts::pick_face(&cache, &v, v.project(p))
+                    .is_some_and(|(_, _, hit)| hit < t - 1e-3 * t.abs().max(1.0))
                     || fill_in_front(&meshes, &fills, ro, rd, t)
             });
             (!behind).then_some((corner, screen))
@@ -382,7 +484,16 @@ fn place_plane_feature_labels(
         };
         placed.push(screen);
         vis.set_if_neq(Visibility::Inherited);
-        place_affine(&mut node, &mut transform, &mut inner_t, size, corner, a, b, pad);
+        place_affine(
+            &mut node,
+            &mut transform,
+            &mut inner_t,
+            size,
+            corner,
+            a,
+            b,
+            pad,
+        );
         let c = theme.plane_label.with_alpha(alpha);
         if color.0 != c {
             color.0 = c;

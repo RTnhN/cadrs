@@ -14,9 +14,9 @@
 use cadrs_sketch::FaceName;
 use serde::{Deserialize, Serialize};
 
+use crate::document::PartProps;
 use crate::ids::FeatureId;
 use crate::parts::Part;
-use crate::document::PartProps;
 
 /// A colour (sRGB) and its opacity (255: opaque).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -32,7 +32,10 @@ fn opaque() -> u8 {
 
 impl Appearance {
     pub const fn rgb(r: u8, g: u8, b: u8) -> Self {
-        Self { rgb: [r, g, b], alpha: 255 }
+        Self {
+            rgb: [r, g, b],
+            alpha: 255,
+        }
     }
 
     pub fn with_alpha(self, alpha: u8) -> Self {
@@ -127,7 +130,14 @@ pub const PALETTE: [Appearance; 8] = [
 /// The preset swatches of the Edit appearance dialog (PS9.2): the palette, then a row of
 /// stronger colours and a row of neutrals.
 pub const SWATCHES: [Appearance; 24] = [
-    PALETTE[0], PALETTE[1], PALETTE[2], PALETTE[3], PALETTE[4], PALETTE[5], PALETTE[6], PALETTE[7],
+    PALETTE[0],
+    PALETTE[1],
+    PALETTE[2],
+    PALETTE[3],
+    PALETTE[4],
+    PALETTE[5],
+    PALETTE[6],
+    PALETTE[7],
     Appearance::rgb(214, 48, 49),
     Appearance::rgb(230, 126, 34),
     Appearance::rgb(241, 196, 15),
@@ -154,15 +164,23 @@ pub fn palette(n: u32) -> Appearance {
 /// A part's appearance: its own, else (a pattern's or mirror's copy, P3.8, PS9.6) its seed
 /// part's, else its palette colour (a copy has its seed's palette entry).
 pub fn part_appearance(part: &Part, props: &[PartProps]) -> Appearance {
-    let own = |id: crate::ids::PartId| props.iter().find(|p| p.part == id).and_then(|p| p.appearance);
+    let own = |id: crate::ids::PartId| {
+        props
+            .iter()
+            .find(|p| p.part == id)
+            .and_then(|p| p.appearance)
+    };
     own(part.id)
         .or_else(|| own(part.source?))
         .or_else(|| part.derived.as_ref()?.appearance)
         .or_else(|| {
             // Partial face styles must leave unstyled faces at the palette color, including
             // after a transform or pattern changes the imported faces' names.
-            if part.solid.looks.len() < part.solid.faces.len() { None }
-            else { part.solid.looks.first().map(|(_, a)| *a) }
+            if part.solid.looks.len() < part.solid.faces.len() {
+                None
+            } else {
+                part.solid.looks.first().map(|(_, a)| *a)
+            }
         })
         .unwrap_or_else(|| default_appearance(part, props))
 }
@@ -175,7 +193,9 @@ pub const KEEP_GREY: Appearance = Appearance::rgb(128, 128, 128);
 /// ([`crate::pcb::names::role_of`]), else its palette colour.
 pub fn default_appearance(part: &Part, props: &[PartProps]) -> Appearance {
     match crate::pcb::names::role_of(crate::parts::display_name(part, props)) {
-        Some(crate::pcb::names::PartRole::KeepOut | crate::pcb::names::PartRole::KeepIn) => KEEP_GREY,
+        Some(crate::pcb::names::PartRole::KeepOut | crate::pcb::names::PartRole::KeepIn) => {
+            KEEP_GREY
+        }
         _ => palette(part.palette),
     }
 }
@@ -197,7 +217,10 @@ pub fn face_appearance(
     features: &[(FeatureId, Appearance)],
 ) -> (Appearance, Source) {
     let prop = props.iter().find(|p| p.part == part.id);
-    if let Some(a) = prop.and_then(|p| p.faces.iter().find(|(f, _)| f == face)).map(|(_, a)| *a) {
+    if let Some(a) = prop
+        .and_then(|p| p.faces.iter().find(|(f, _)| f == face))
+        .map(|(_, a)| *a)
+    {
         return (a, Source::Face);
     }
     if let Some((f, a)) = features.iter().find(|(f, _)| f.0 == face.op) {
@@ -220,9 +243,18 @@ pub fn face_appearance(
 }
 
 /// True if any face of the part has its own or a feature's appearance (it is drawn per face).
-pub fn has_face_overrides(part: &Part, props: &[PartProps], features: &[(FeatureId, Appearance)]) -> bool {
-    props.iter().any(|p| p.part == part.id && !p.faces.is_empty())
-        || (!part.solid.looks.is_empty() && !props.iter().any(|p| p.part == part.id && p.appearance.is_some()))
+pub fn has_face_overrides(
+    part: &Part,
+    props: &[PartProps],
+    features: &[(FeatureId, Appearance)],
+) -> bool {
+    props
+        .iter()
+        .any(|p| p.part == part.id && !p.faces.is_empty())
+        || (!part.solid.looks.is_empty()
+            && !props
+                .iter()
+                .any(|p| p.part == part.id && p.appearance.is_some()))
         || features
             .iter()
             .any(|(f, _)| part.solid.faces.iter().any(|x| x.name.op == f.0))
@@ -238,7 +270,10 @@ mod tests {
         assert_eq!(a.hex(), "#9BC1D8");
         assert_eq!(Appearance::from_hex("#9bc1d8"), Some(a));
         assert_eq!(Appearance::from_hex("9BC1D8"), Some(a));
-        assert_eq!(Appearance::from_hex("#fff"), Some(Appearance::rgb(255, 255, 255)));
+        assert_eq!(
+            Appearance::from_hex("#fff"),
+            Some(Appearance::rgb(255, 255, 255))
+        );
         assert_eq!(Appearance::from_hex("#12345"), None);
         assert_eq!(Appearance::from_hex("#zzzzzz"), None);
     }
@@ -249,9 +284,18 @@ mod tests {
             let [h, s, v] = a.hsv();
             assert_eq!(Appearance::from_hsv(h, s, v), a, "{a:?}");
         }
-        assert_eq!(Appearance::from_hsv(0.0, 1.0, 1.0), Appearance::rgb(255, 0, 0));
-        assert_eq!(Appearance::from_hsv(120.0, 1.0, 1.0), Appearance::rgb(0, 255, 0));
-        assert_eq!(Appearance::from_hsv(240.0, 1.0, 0.5), Appearance::rgb(0, 0, 128));
+        assert_eq!(
+            Appearance::from_hsv(0.0, 1.0, 1.0),
+            Appearance::rgb(255, 0, 0)
+        );
+        assert_eq!(
+            Appearance::from_hsv(120.0, 1.0, 1.0),
+            Appearance::rgb(0, 255, 0)
+        );
+        assert_eq!(
+            Appearance::from_hsv(240.0, 1.0, 0.5),
+            Appearance::rgb(0, 0, 128)
+        );
     }
 
     #[test]
@@ -259,6 +303,9 @@ mod tests {
         assert_eq!(palette(0), PALETTE[0]);
         assert_eq!(palette(8), PALETTE[0]);
         assert_eq!(palette(9), PALETTE[1]);
-        assert_eq!(Appearance::rgb(1, 2, 3).with_alpha(128).opacity_percent(), 50);
+        assert_eq!(
+            Appearance::rgb(1, 2, 3).with_alpha(128).opacity_percent(),
+            50
+        );
     }
 }

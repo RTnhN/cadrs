@@ -65,7 +65,9 @@ impl std::fmt::Display for ParseError {
             ParseError::Units => write!(f, "Units do not match"),
             ParseError::DivideByZero => write!(f, "Division by zero"),
             ParseError::Incomplete => write!(f, "Incomplete expression"),
-            ParseError::UnknownVariable(n) => write!(f, "Variable #{n} is not defined before this feature"),
+            ParseError::UnknownVariable(n) => {
+                write!(f, "Variable #{n} is not defined before this feature")
+            }
             ParseError::UnknownFunction(n) => write!(f, "Unknown function \"{n}\""),
             ParseError::Arguments(n) => write!(f, "Wrong number of arguments to {n}"),
             ParseError::Domain(n) => write!(f, "Value out of range for {n}"),
@@ -123,7 +125,9 @@ fn tokenize(text: &str) -> Result<Vec<Tok>, ParseError> {
         } else if c.is_ascii_digit() || c == '.' || (c == ',' && decimal_comma) {
             let start = i;
             while i < chars.len()
-                && (chars[i].is_ascii_digit() || chars[i] == '.' || (chars[i] == ',' && decimal_comma))
+                && (chars[i].is_ascii_digit()
+                    || chars[i] == '.'
+                    || (chars[i] == ',' && decimal_comma))
             {
                 i += 1;
             }
@@ -287,7 +291,8 @@ pub fn variable_names(text: &str) -> Vec<String> {
 /// Whether `name` is a valid variable name: a letter or `_`, then letters, digits or `_`.
 pub fn is_variable_name(name: &str) -> bool {
     let mut c = name.chars();
-    c.next().is_some_and(|f| f.is_alphabetic() || f == '_') && c.all(|x| x.is_alphanumeric() || x == '_')
+    c.next().is_some_and(|f| f.is_alphabetic() || f == '_')
+        && c.all(|x| x.is_alphanumeric() || x == '_')
 }
 
 struct Parser<'a> {
@@ -368,7 +373,12 @@ pub enum MassUnit {
 }
 
 impl MassUnit {
-    pub const ALL: [MassUnit; 4] = [MassUnit::Kilogram, MassUnit::Gram, MassUnit::Pound, MassUnit::Ounce];
+    pub const ALL: [MassUnit; 4] = [
+        MassUnit::Kilogram,
+        MassUnit::Gram,
+        MassUnit::Pound,
+        MassUnit::Ounce,
+    ];
 
     /// Kilograms per unit (the international avoirdupois pound is exactly 0.45359237 kg, the
     /// ounce a sixteenth of it).
@@ -501,15 +511,20 @@ impl Units {
     /// ("0.033 lb/in³").
     pub fn density(&self, kg_m3: f64) -> (f64, String) {
         match (self.length, self.mass) {
-            (LengthUnit::Millimeter | LengthUnit::Centimeter | LengthUnit::Meter, MassUnit::Kilogram) => {
-                (kg_m3, "kg/m\u{b3}".into())
-            }
-            (LengthUnit::Millimeter | LengthUnit::Centimeter | LengthUnit::Meter, MassUnit::Gram) => {
-                (kg_m3 / 1000.0, "g/cm\u{b3}".into())
-            }
+            (
+                LengthUnit::Millimeter | LengthUnit::Centimeter | LengthUnit::Meter,
+                MassUnit::Kilogram,
+            ) => (kg_m3, "kg/m\u{b3}".into()),
+            (
+                LengthUnit::Millimeter | LengthUnit::Centimeter | LengthUnit::Meter,
+                MassUnit::Gram,
+            ) => (kg_m3 / 1000.0, "g/cm\u{b3}".into()),
             (l, m) => {
                 let m3 = (l.mm() / 1000.0).powi(3);
-                (kg_m3 * m3 / m.kg(), format!("{}/{}\u{b3}", m.symbol(), l.symbol()))
+                (
+                    kg_m3 * m3 / m.kg(),
+                    format!("{}/{}\u{b3}", m.symbol(), l.symbol()),
+                )
             }
         }
     }
@@ -595,7 +610,11 @@ impl Units {
     /// zero (see [`fixed_or_scientific_of`]).
     pub fn fixed_length_of(&self, mm: f64, size: f64) -> String {
         let v = self.to_unit(mm);
-        format!("{} {}", fixed_or_scientific_of(v, self.decimals as usize, self.to_unit(size)), self.length.symbol())
+        format!(
+            "{} {}",
+            fixed_or_scientific_of(v, self.decimals as usize, self.to_unit(size)),
+            self.length.symbol()
+        )
     }
 
     /// Evaluates typed text for `q`: a bare number (or a plain result) is in the workspace unit
@@ -611,8 +630,17 @@ impl Units {
     }
 
     /// [`Units::eval`] with variables (`#name`, P3F.4): `#piston_d + #clearance`.
-    pub fn eval_vars(&self, text: &str, q: Quantity, vars: &dyn Variables) -> Result<f64, ParseError> {
-        let default = if q == Quantity::Length { self.length.mm() } else { 1.0 };
+    pub fn eval_vars(
+        &self,
+        text: &str,
+        q: Quantity,
+        vars: &dyn Variables,
+    ) -> Result<f64, ParseError> {
+        let default = if q == Quantity::Length {
+            self.length.mm()
+        } else {
+            1.0
+        };
         eval_with(text, q, default, vars)
     }
 
@@ -621,7 +649,6 @@ impl Units {
         self.eval(text, Quantity::Length).ok()
     }
 }
-
 
 impl Parser<'_> {
     fn peek(&self) -> Option<&Tok> {
@@ -735,7 +762,11 @@ impl Parser<'_> {
                 if a.v < 0.0 {
                     return Err(ParseError::Domain(name.to_string()));
                 }
-                Ok(Val { v: a.v.sqrt(), len: a.len / 2, ang: a.ang / 2 })
+                Ok(Val {
+                    v: a.v.sqrt(),
+                    len: a.len / 2,
+                    ang: a.ang / 2,
+                })
             }
             "sin" | "cos" | "tan" => {
                 let a = one(&args)?;
@@ -778,10 +809,21 @@ impl Parser<'_> {
             }
             Some(Tok::Var(name)) => {
                 self.i += 1;
-                let x = self.vars.variable(&name).ok_or(ParseError::UnknownVariable(name))?;
+                let x = self
+                    .vars
+                    .variable(&name)
+                    .ok_or(ParseError::UnknownVariable(name))?;
                 return Ok(match x.quantity {
-                    Quantity::Length => Val { v: x.value, len: 1, ang: 0 },
-                    Quantity::Angle => Val { v: x.value, len: 0, ang: 1 },
+                    Quantity::Length => Val {
+                        v: x.value,
+                        len: 1,
+                        ang: 0,
+                    },
+                    Quantity::Angle => Val {
+                        v: x.value,
+                        len: 0,
+                        ang: 1,
+                    },
                     Quantity::Count => Val::plain(x.value),
                 });
             }
@@ -810,8 +852,16 @@ impl Parser<'_> {
             }
             let (f, q) = unit_of(&u).ok_or(ParseError::UnknownUnit(u))?;
             val = match q {
-                Quantity::Angle => Val { v: val.v * f, len: 0, ang: 1 },
-                _ => Val { v: val.v * f, len: 1, ang: 0 },
+                Quantity::Angle => Val {
+                    v: val.v * f,
+                    len: 0,
+                    ang: 1,
+                },
+                _ => Val {
+                    v: val.v * f,
+                    len: 1,
+                    ang: 0,
+                },
             };
         }
         Ok(val)
@@ -830,7 +880,12 @@ pub fn eval_vars(text: &str, q: Quantity, vars: &dyn Variables) -> Result<f64, P
 
 /// [`eval`] with a plain number (a plain result, or a plain number in a sum with a length)
 /// worth `default` millimetres, and `vars` for `#name`.
-fn eval_with(text: &str, q: Quantity, default: f64, vars: &dyn Variables) -> Result<f64, ParseError> {
+fn eval_with(
+    text: &str,
+    q: Quantity,
+    default: f64,
+    vars: &dyn Variables,
+) -> Result<f64, ParseError> {
     let toks = tokenize(text)?;
     if toks.is_empty() {
         return Err(ParseError::Empty);
@@ -889,7 +944,10 @@ pub fn eval_any(text: &str, default: f64, vars: &dyn Variables) -> Result<VarVal
         (0, 1) => Quantity::Angle,
         _ => return Err(ParseError::Units),
     };
-    Ok(VarValue { value: v.v, quantity })
+    Ok(VarValue {
+        value: v.v,
+        quantity,
+    })
 }
 
 /// Parses a length (with arithmetic) and returns it in millimetres.
@@ -987,7 +1045,10 @@ mod tests {
         close(len("1e1"), 10.0);
         // An angle is not a length.
         assert_eq!(len("5 deg"), Err(ParseError::Units));
-        assert_eq!(len("5 parsec"), Err(ParseError::UnknownUnit("parsec".into())));
+        assert_eq!(
+            len("5 parsec"),
+            Err(ParseError::UnknownUnit("parsec".into()))
+        );
     }
 
     #[test]
@@ -1020,14 +1081,29 @@ mod tests {
     }
 
     fn vars() -> Vec<(String, VarValue)> {
-        let l = |v| VarValue { value: v, quantity: Quantity::Length };
+        let l = |v| VarValue {
+            value: v,
+            quantity: Quantity::Length,
+        };
         vec![
             ("piston_d".into(), l(40.0)),
             // 0.5 mm typed as 0.019685 in: mixed units still add up in mm.
             ("clearance".into(), l(0.5)),
             ("clearance_in".into(), l(0.02 * 25.4)),
-            ("angle".into(), VarValue { value: 30.0, quantity: Quantity::Angle }),
-            ("n".into(), VarValue { value: 3.0, quantity: Quantity::Count }),
+            (
+                "angle".into(),
+                VarValue {
+                    value: 30.0,
+                    quantity: Quantity::Angle,
+                },
+            ),
+            (
+                "n".into(),
+                VarValue {
+                    value: 3.0,
+                    quantity: Quantity::Count,
+                },
+            ),
         ]
     }
 
@@ -1045,14 +1121,25 @@ mod tests {
         // An inch workspace reads a plain number in inches, variables stay what they are.
         let inch = Units::new(LengthUnit::Inch, 3);
         close(inch.eval_vars("#piston_d + 1", Quantity::Length, &v), 65.4);
-        assert_eq!(e("#missing + 1"), Err(ParseError::UnknownVariable("missing".into())));
+        assert_eq!(
+            e("#missing + 1"),
+            Err(ParseError::UnknownVariable("missing".into()))
+        );
         assert_eq!(e("#piston_d + #angle"), Err(ParseError::Units));
         assert_eq!(e("#piston_d * #piston_d"), Err(ParseError::Units));
-        assert_eq!(eval_vars("#piston_d", Quantity::Count, &v), Err(ParseError::Units));
+        assert_eq!(
+            eval_vars("#piston_d", Quantity::Count, &v),
+            Err(ParseError::Units)
+        );
         close(eval_vars("#n * 2", Quantity::Count, &v), 6.0);
         close(eval_vars("#angle * 2", Quantity::Angle, &v), 60.0);
-        assert_eq!(variable_names("#a + #b_2*#a - 2"), vec!["a".to_string(), "b_2".to_string()]);
-        assert!(is_variable_name("piston_d") && !is_variable_name("2x") && !is_variable_name("a b"));
+        assert_eq!(
+            variable_names("#a + #b_2*#a - 2"),
+            vec!["a".to_string(), "b_2".to_string()]
+        );
+        assert!(
+            is_variable_name("piston_d") && !is_variable_name("2x") && !is_variable_name("a b")
+        );
     }
 
     #[test]
@@ -1079,9 +1166,21 @@ mod tests {
         assert_eq!(e("min(1 mm, 2 deg)"), Err(ParseError::Units));
         assert_eq!(e("max(1, 2"), Err(ParseError::Incomplete));
         // A variable's own expression keeps its quantity.
-        assert_eq!(eval_any("40 mm", 1.0, &v).map(|x| x.quantity), Ok(Quantity::Length));
-        assert_eq!(eval_any("3", 1.0, &v).map(|x| x.quantity), Ok(Quantity::Count));
-        assert_eq!(eval_any("#angle / 2", 1.0, &v), Ok(VarValue { value: 15.0, quantity: Quantity::Angle }));
+        assert_eq!(
+            eval_any("40 mm", 1.0, &v).map(|x| x.quantity),
+            Ok(Quantity::Length)
+        );
+        assert_eq!(
+            eval_any("3", 1.0, &v).map(|x| x.quantity),
+            Ok(Quantity::Count)
+        );
+        assert_eq!(
+            eval_any("#angle / 2", 1.0, &v),
+            Ok(VarValue {
+                value: 15.0,
+                quantity: Quantity::Angle
+            })
+        );
     }
 
     #[test]
@@ -1121,8 +1220,14 @@ mod tests {
         let cm = Units::new(LengthUnit::Centimeter, 2);
         assert_eq!(cm.value(123.0, Quantity::Length), "12.3");
         close(cm.eval("1.5", Quantity::Length), 15.0);
-        close(Units::new(LengthUnit::Yard, 3).eval("1", Quantity::Length), 914.4);
-        close(Units::new(LengthUnit::Foot, 3).eval("1 yd", Quantity::Length), 914.4);
+        close(
+            Units::new(LengthUnit::Yard, 3).eval("1", Quantity::Length),
+            914.4,
+        );
+        close(
+            Units::new(LengthUnit::Foot, 3).eval("1 yd", Quantity::Length),
+            914.4,
+        );
         assert_eq!(Units::new(LengthUnit::Meter, 9).decimals, MAX_DECIMALS);
     }
 

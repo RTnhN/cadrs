@@ -42,9 +42,15 @@ impl Rebuilder {
                 missing += 1;
                 continue;
             };
-            let Some(body) = self.body_or_skip(part) else { continue };
+            let Some(body) = self.body_or_skip(part) else {
+                continue;
+            };
             match groups.iter_mut().find(|g| g.0 == part.part.id) {
-                Some(g) => g.2.extend(ids.into_iter().filter(|i| !g.2.contains(i)).collect::<Vec<_>>()),
+                Some(g) => g.2.extend(
+                    ids.into_iter()
+                        .filter(|i| !g.2.contains(i))
+                        .collect::<Vec<_>>(),
+                ),
                 None => groups.push((part.part.id, body, ids)),
             }
         }
@@ -55,7 +61,14 @@ impl Rebuilder {
         let bodies = groups.iter().map(|g| (g.0, g.1)).collect();
         let (angle, tangent) = (x.angle.to_radians(), x.tangent_propagation);
         let mut out = self.per_part(id, "Draft", state, bodies, |this, i, body| {
-            let spec = DraftSpec { faces: faces[i].clone(), angle, pull, neutral, neutral_normal: None, tangent_propagation: tangent };
+            let spec = DraftSpec {
+                faces: faces[i].clone(),
+                angle,
+                pull,
+                neutral,
+                neutral_normal: None,
+                tangent_propagation: tangent,
+            };
             this.kernel.draft(body, &spec)
         })?;
         // PS11.1: some faces gone but the rest drafted is a warning, not a failure.
@@ -73,7 +86,12 @@ impl Rebuilder {
     /// the profile's curves made) drafted about the start plane with the pull along that end's
     /// direction, and the ends joined; the result's faces carry the extrude's own names (the far
     /// face of a second end is its start cap, as a two-ended extrude's).
-    pub(in crate::rebuild) fn drafted_extrude(&mut self, profile: &Profile, spec: &ExtrudeSpec, angle: f64) -> cadrs_kernel::Result<OpResult> {
+    pub(in crate::rebuild) fn drafted_extrude(
+        &mut self,
+        profile: &Profile,
+        spec: &ExtrudeSpec,
+        angle: f64,
+    ) -> cadrs_kernel::Result<OpResult> {
         let start = profile.plane.origin + spec.direction.into_inner() * spec.start_offset;
         let one = |end: ExtrudeEnd, direction: Unit<Vector3<f64>>, start_offset: f64| ExtrudeSpec {
             end,
@@ -98,11 +116,13 @@ impl Rebuilder {
             }
         }
         let mut made: Vec<(cadrs_kernel::BodyId, Vec<(cadrs_kernel::FaceId, Origin)>)> = Vec::new();
-        let release = |k: &mut cadrs_kernel::DefaultKernel, made: &[(cadrs_kernel::BodyId, Vec<(cadrs_kernel::FaceId, Origin)>)]| {
-            for (b, _) in made {
-                k.release(*b);
-            }
-        };
+        let release =
+            |k: &mut cadrs_kernel::DefaultKernel,
+             made: &[(cadrs_kernel::BodyId, Vec<(cadrs_kernel::FaceId, Origin)>)]| {
+                for (b, _) in made {
+                    k.release(*b);
+                }
+            };
         for (half, second) in &halves {
             let r = match self.kernel.extrude_with(profile, half) {
                 Ok(r) => r,
@@ -112,7 +132,13 @@ impl Rebuilder {
                 }
             };
             let body = r.bodies[0];
-            let origin_of = |f: cadrs_kernel::FaceId| r.history.generated.iter().find(|(g, _)| *g == f).map(|(_, o)| *o);
+            let origin_of = |f: cadrs_kernel::FaceId| {
+                r.history
+                    .generated
+                    .iter()
+                    .find(|(g, _)| *g == f)
+                    .map(|(_, o)| *o)
+            };
             let sides: Vec<cadrs_kernel::FaceId> = r
                 .history
                 .generated
@@ -122,7 +148,14 @@ impl Rebuilder {
                 .collect();
             let drafted = self.kernel.draft(
                 body,
-                &DraftSpec { faces: sides, angle, pull: half.direction, neutral: start, neutral_normal: None, tangent_propagation: true },
+                &DraftSpec {
+                    faces: sides,
+                    angle,
+                    pull: half.direction,
+                    neutral: start,
+                    neutral_normal: None,
+                    tangent_propagation: true,
+                },
             );
             self.kernel.release(body);
             let d = match drafted {
@@ -152,21 +185,36 @@ impl Rebuilder {
         }
         if made.len() == 1 {
             let (body, tags) = made.pop().expect("one");
-            return Ok(OpResult { bodies: vec![body], history: cadrs_kernel::History { generated: tags, ..Default::default() } });
+            return Ok(OpResult {
+                bodies: vec![body],
+                history: cadrs_kernel::History {
+                    generated: tags,
+                    ..Default::default()
+                },
+            });
         }
         let (a, b) = (made[0].0, made[1].0);
         let joined = self.kernel.boolean(cadrs_kernel::BoolOp::Union, a, &[b]);
         let result = joined.map(|r| {
             let mut tags: Vec<(cadrs_kernel::FaceId, Origin)> = Vec::new();
             for (f, input) in &r.history.modified {
-                let from = made.iter().find(|(m, _)| *m == input.body).and_then(|(_, t)| t.iter().find(|(g, _)| *g == input.face));
+                let from = made
+                    .iter()
+                    .find(|(m, _)| *m == input.body)
+                    .and_then(|(_, t)| t.iter().find(|(g, _)| *g == input.face));
                 if let Some((_, o)) = from
                     && !tags.iter().any(|(g, _)| g == f)
                 {
                     tags.push((*f, *o));
                 }
             }
-            OpResult { bodies: r.bodies.clone(), history: cadrs_kernel::History { generated: tags, ..Default::default() } }
+            OpResult {
+                bodies: r.bodies.clone(),
+                history: cadrs_kernel::History {
+                    generated: tags,
+                    ..Default::default()
+                },
+            }
         });
         release(&mut self.kernel, &made);
         result

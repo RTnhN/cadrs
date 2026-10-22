@@ -25,8 +25,8 @@
 //!   ([`crate::document::Element::active_features`]), and [`check`] fails a feature whose
 //!   expression names a variable that isn't defined above it (it then builds, with the error).
 
-use cadrs_sketch::units::{self, ParseError, Quantity, Units, VarValue};
 use cadrs_sketch::SketchOp;
+use cadrs_sketch::units::{self, ParseError, Quantity, Units, VarValue};
 use serde::{Deserialize, Serialize};
 
 use crate::document::{Feature, FeatureKind};
@@ -46,7 +46,10 @@ pub struct SuppressByVariable {
 impl SuppressByVariable {
     /// Suppression by `#name` (suppressed while it is 0).
     pub fn variable(name: &str) -> Self {
-        Self { expr: format!("#{name}"), invert: false }
+        Self {
+            expr: format!("#{name}"),
+            invert: false,
+        }
     }
 
     /// Whether it suppresses its feature with the variables above it (`env`); why not, when the
@@ -55,7 +58,9 @@ impl SuppressByVariable {
         for n in units::variable_names(&self.expr) {
             if !env.iter().any(|(k, _)| *k == n) {
                 return Err(if later.contains(&n) {
-                    format!("Suppression: #{n} is used before it is defined; move its Variable above this feature")
+                    format!(
+                        "Suppression: #{n} is used before it is defined; move its Variable above this feature"
+                    )
                 } else {
                     format!("Suppression: #{n} is not defined")
                 });
@@ -68,7 +73,11 @@ impl SuppressByVariable {
 
     /// How the feature list shows it: "#withHole", "not #withHole" when inverted.
     pub fn label(&self) -> String {
-        if self.invert { format!("not {}", self.expr.trim()) } else { self.expr.trim().to_string() }
+        if self.invert {
+            format!("not {}", self.expr.trim())
+        } else {
+            self.expr.trim().to_string()
+        }
     }
 }
 
@@ -102,8 +111,15 @@ pub fn suppressed_by_variables(features: &[Feature], suppressed: &[FeatureId]) -
 
 /// The variables a feature's suppression variable can name (IR5.5's picker): those defined
 /// above it among `features` (the ones that build), with their values.
-pub fn in_scope(features: &[Feature], feature: FeatureId, units: &Units) -> Vec<(String, VarValue)> {
-    let end = features.iter().position(|f| f.id == feature).unwrap_or(features.len());
+pub fn in_scope(
+    features: &[Feature],
+    feature: FeatureId,
+    units: &Units,
+) -> Vec<(String, VarValue)> {
+    let end = features
+        .iter()
+        .position(|f| f.id == feature)
+        .unwrap_or(features.len());
     let mut env = defined(&features[..end], units);
     // The last definition of a name wins: list each name once.
     let mut seen: Vec<String> = Vec::new();
@@ -129,7 +145,12 @@ pub enum VariableType {
 }
 
 impl VariableType {
-    pub const ALL: [VariableType; 4] = [VariableType::Length, VariableType::Angle, VariableType::Number, VariableType::Any];
+    pub const ALL: [VariableType; 4] = [
+        VariableType::Length,
+        VariableType::Angle,
+        VariableType::Number,
+        VariableType::Any,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -204,18 +225,29 @@ impl Default for VariableFeature {
 impl VariableFeature {
     /// A Length variable `#name = expr`, evaluated without other variables.
     pub fn length(name: &str, expr: &str) -> Self {
-        let mut v = Self { name: name.into(), expr: expr.into(), ..Self::default() };
+        let mut v = Self {
+            name: name.into(),
+            expr: expr.into(),
+            ..Self::default()
+        };
         let _ = v.evaluate(&Units::default(), &Vec::new());
         v
     }
 
     /// The value as expressions see it.
     pub fn var_value(&self) -> VarValue {
-        VarValue { value: self.value, quantity: self.kind.quantity() }
+        VarValue {
+            value: self.value,
+            quantity: self.kind.quantity(),
+        }
     }
 
     /// Evaluates the expression with the variables above it (`vars`), setting the value.
-    pub fn evaluate(&mut self, units: &Units, vars: &[(String, VarValue)]) -> Result<(), ParseError> {
+    pub fn evaluate(
+        &mut self,
+        units: &Units,
+        vars: &[(String, VarValue)],
+    ) -> Result<(), ParseError> {
         let (value, kind) = eval_variable(self.var_type, &self.expr, units, vars)?;
         self.value = value;
         self.kind = kind;
@@ -239,7 +271,11 @@ impl VariableFeature {
     /// The value with its unit, as the Variable table shows it ("40.5 mm").
     pub fn display(&self, units: &Units) -> String {
         match self.kind {
-            VariableKind::Length => format!("{} {}", units.value(self.value, Quantity::Length), units.length.symbol()),
+            VariableKind::Length => format!(
+                "{} {}",
+                units.value(self.value, Quantity::Length),
+                units.length.symbol()
+            ),
             VariableKind::Angle => format!("{} deg", units.value(self.value, Quantity::Angle)),
             VariableKind::Number => {
                 let s = format!("{:.6}", self.value);
@@ -250,11 +286,25 @@ impl VariableFeature {
 }
 
 /// A variable's expression evaluated as its type asks: its value and what it measures.
-pub fn eval_variable(t: VariableType, expr: &str, units: &Units, vars: &[(String, VarValue)]) -> Result<(f64, VariableKind), ParseError> {
+pub fn eval_variable(
+    t: VariableType,
+    expr: &str,
+    units: &Units,
+    vars: &[(String, VarValue)],
+) -> Result<(f64, VariableKind), ParseError> {
     Ok(match t {
-        VariableType::Length => (units.eval_vars(expr, Quantity::Length, &vars)?, VariableKind::Length),
-        VariableType::Angle => (units.eval_vars(expr, Quantity::Angle, &vars)?, VariableKind::Angle),
-        VariableType::Number => (units.eval_vars(expr, Quantity::Count, &vars)?, VariableKind::Number),
+        VariableType::Length => (
+            units.eval_vars(expr, Quantity::Length, &vars)?,
+            VariableKind::Length,
+        ),
+        VariableType::Angle => (
+            units.eval_vars(expr, Quantity::Angle, &vars)?,
+            VariableKind::Angle,
+        ),
+        VariableType::Number => (
+            units.eval_vars(expr, Quantity::Count, &vars)?,
+            VariableKind::Number,
+        ),
         VariableType::Any => {
             let v = units::eval_any(expr, units.length.mm(), &vars)?;
             (v.value, VariableKind::of(v.quantity))
@@ -276,9 +326,17 @@ pub struct Slot<'a> {
 pub fn slots(kind: &mut FeatureKind, f: &mut dyn FnMut(Slot<'_>)) {
     use Quantity::{Angle as A, Count as C, Length as L};
     let mut s = |label: &'static str, expr: &mut String, value: &mut f64, quantity: Quantity| {
-        f(Slot { label, expr, value, quantity })
+        f(Slot {
+            label,
+            expr,
+            value,
+            quantity,
+        })
     };
-    let count = |label: &'static str, expr: &mut String, n: &mut u32, s: &mut dyn FnMut(&'static str, &mut String, &mut f64, Quantity)| {
+    let count = |label: &'static str,
+                 expr: &mut String,
+                 n: &mut u32,
+                 s: &mut dyn FnMut(&'static str, &mut String, &mut f64, Quantity)| {
         let mut v = *n as f64;
         s(label, expr, &mut v, C);
         *n = v.round().max(0.0) as u32;
@@ -298,8 +356,18 @@ pub fn slots(kind: &mut FeatureKind, f: &mut dyn FnMut(Slot<'_>)) {
                     s("Second offset distance", &mut o.expr, &mut o.value, L);
                 }
             }
-            s("Thickness 1", &mut e.thin.thickness1_expr, &mut e.thin.thickness1, L);
-            s("Thickness 2", &mut e.thin.thickness2_expr, &mut e.thin.thickness2, L);
+            s(
+                "Thickness 1",
+                &mut e.thin.thickness1_expr,
+                &mut e.thin.thickness1,
+                L,
+            );
+            s(
+                "Thickness 2",
+                &mut e.thin.thickness2_expr,
+                &mut e.thin.thickness2,
+                L,
+            );
             if let Some(d) = &mut e.draft {
                 s("Draft angle", &mut d.expr, &mut d.angle, A);
             }
@@ -315,8 +383,18 @@ pub fn slots(kind: &mut FeatureKind, f: &mut dyn FnMut(Slot<'_>)) {
                     s("Second offset angle", &mut o.expr, &mut o.value, A);
                 }
             }
-            s("Thickness 1", &mut r.thin.thickness1_expr, &mut r.thin.thickness1, L);
-            s("Thickness 2", &mut r.thin.thickness2_expr, &mut r.thin.thickness2, L);
+            s(
+                "Thickness 1",
+                &mut r.thin.thickness1_expr,
+                &mut r.thin.thickness1,
+                L,
+            );
+            s(
+                "Thickness 2",
+                &mut r.thin.thickness2_expr,
+                &mut r.thin.thickness2,
+                L,
+            );
         }
         FeatureKind::Boolean(b) => {
             if let Some(o) = &mut b.offset {
@@ -332,9 +410,23 @@ pub fn slots(kind: &mut FeatureKind, f: &mut dyn FnMut(Slot<'_>)) {
             for p in &mut x.edge_points {
                 s("Point radius", &mut p.expr, &mut p.radius, L);
             }
-            let q = if x.partial_bound == crate::applied::PartialBound::Length { L } else { C };
-            s("First bound", &mut x.partial_first_expr, &mut x.partial_first, q);
-            s("Second bound", &mut x.partial_second_expr, &mut x.partial_second, q);
+            let q = if x.partial_bound == crate::applied::PartialBound::Length {
+                L
+            } else {
+                C
+            };
+            s(
+                "First bound",
+                &mut x.partial_first_expr,
+                &mut x.partial_first,
+                q,
+            );
+            s(
+                "Second bound",
+                &mut x.partial_second_expr,
+                &mut x.partial_second,
+                q,
+            );
         }
         FeatureKind::Chamfer(x) => {
             s("Distance", &mut x.distance_expr, &mut x.distance, L);
@@ -369,14 +461,44 @@ pub fn slots(kind: &mut FeatureKind, f: &mut dyn FnMut(Slot<'_>)) {
             s("Angle", &mut x.angle_expr, &mut x.angle, A);
         }
         FeatureKind::Loft(x) => {
-            s("Start magnitude", &mut x.start_magnitude_expr, &mut x.start_magnitude, C);
-            s("End magnitude", &mut x.end_magnitude_expr, &mut x.end_magnitude, C);
+            s(
+                "Start magnitude",
+                &mut x.start_magnitude_expr,
+                &mut x.start_magnitude,
+                C,
+            );
+            s(
+                "End magnitude",
+                &mut x.end_magnitude_expr,
+                &mut x.end_magnitude,
+                C,
+            );
         }
         FeatureKind::Pattern(x) => {
-            s("Distance", &mut x.first.distance_expr, &mut x.first.distance, L);
-            count("Instance count", &mut x.first.count_expr, &mut x.first.count, &mut s);
-            s("Second distance", &mut x.second.distance_expr, &mut x.second.distance, L);
-            count("Second instance count", &mut x.second.count_expr, &mut x.second.count, &mut s);
+            s(
+                "Distance",
+                &mut x.first.distance_expr,
+                &mut x.first.distance,
+                L,
+            );
+            count(
+                "Instance count",
+                &mut x.first.count_expr,
+                &mut x.first.count,
+                &mut s,
+            );
+            s(
+                "Second distance",
+                &mut x.second.distance_expr,
+                &mut x.second.distance,
+                L,
+            );
+            count(
+                "Second instance count",
+                &mut x.second.count_expr,
+                &mut x.second.count,
+                &mut s,
+            );
             s("Angle", &mut x.angle_expr, &mut x.angle, A);
         }
         FeatureKind::Draft(x) => s("Draft angle", &mut x.angle_expr, &mut x.angle, A),
@@ -389,7 +511,10 @@ pub fn slots(kind: &mut FeatureKind, f: &mut dyn FnMut(Slot<'_>)) {
             s("Scale", &mut x.scale_expr, &mut x.scale, C);
         }
         FeatureKind::MateConnector(x) => {
-            for (i, label) in ["X translation", "Y translation", "Z translation"].into_iter().enumerate() {
+            for (i, label) in ["X translation", "Y translation", "Z translation"]
+                .into_iter()
+                .enumerate()
+            {
                 s(label, &mut x.offset_expr[i], &mut x.offset[i], L);
             }
             s("Rotation", &mut x.rotation_expr, &mut x.rotation, A);
@@ -399,11 +524,21 @@ pub fn slots(kind: &mut FeatureKind, f: &mut dyn FnMut(Slot<'_>)) {
             s("Thickness 2", &mut x.thickness2_expr, &mut x.thickness2, L);
         }
         FeatureKind::Helix(x) => {
-            s("Revolutions", &mut x.revolutions_expr, &mut x.revolutions, C);
+            s(
+                "Revolutions",
+                &mut x.revolutions_expr,
+                &mut x.revolutions,
+                C,
+            );
             s("Pitch", &mut x.pitch_expr, &mut x.pitch, L);
             s("Height", &mut x.height_expr, &mut x.height, L);
             s("Radius", &mut x.radius_expr, &mut x.radius, L);
-            s("Start angle", &mut x.start_angle_expr, &mut x.start_angle, A);
+            s(
+                "Start angle",
+                &mut x.start_angle_expr,
+                &mut x.start_angle,
+                A,
+            );
         }
         FeatureKind::SheetMetalModel(x) => {
             let e = &mut x.exprs;
@@ -411,15 +546,55 @@ pub fn slots(kind: &mut FeatureKind, f: &mut dyn FnMut(Slot<'_>)) {
             s("Thickness", &mut e.thickness, &mut p.thickness, L);
             s("Bend radius", &mut e.bend_radius, &mut p.bend_radius, L);
             s("Default bend K Factor", &mut e.k_factor, &mut p.k_factor, C);
-            s("Rolled K Factor", &mut e.rolled_k_factor, &mut p.rolled_k_factor, C);
-            s("Bend allowance", &mut e.bend_allowance, &mut p.bend_allowance, L);
-            s("Bend deduction", &mut e.bend_deduction, &mut p.bend_deduction, L);
+            s(
+                "Rolled K Factor",
+                &mut e.rolled_k_factor,
+                &mut p.rolled_k_factor,
+                C,
+            );
+            s(
+                "Bend allowance",
+                &mut e.bend_allowance,
+                &mut p.bend_allowance,
+                L,
+            );
+            s(
+                "Bend deduction",
+                &mut e.bend_deduction,
+                &mut p.bend_deduction,
+                L,
+            );
             s("Minimal gap", &mut e.minimal_gap, &mut p.minimal_gap, L);
-            s("Corner relief scale", &mut e.corner_relief_scale, &mut p.corner_relief.scale, C);
-            s("Corner relief size", &mut e.corner_relief_size, &mut p.corner_relief.size, L);
-            s("Bend relief depth scale", &mut e.bend_relief_depth_scale, &mut p.bend_relief.depth_scale, C);
-            s("Bend relief width scale", &mut e.bend_relief_width_scale, &mut p.bend_relief.width_scale, C);
-            s("Clearance from input", &mut x.clearance_expr, &mut x.clearance, L);
+            s(
+                "Corner relief scale",
+                &mut e.corner_relief_scale,
+                &mut p.corner_relief.scale,
+                C,
+            );
+            s(
+                "Corner relief size",
+                &mut e.corner_relief_size,
+                &mut p.corner_relief.size,
+                L,
+            );
+            s(
+                "Bend relief depth scale",
+                &mut e.bend_relief_depth_scale,
+                &mut p.bend_relief.depth_scale,
+                C,
+            );
+            s(
+                "Bend relief width scale",
+                &mut e.bend_relief_width_scale,
+                &mut p.bend_relief.width_scale,
+                C,
+            );
+            s(
+                "Clearance from input",
+                &mut x.clearance_expr,
+                &mut x.clearance,
+                L,
+            );
             s("Depth", &mut x.depth_expr, &mut x.depth, L);
             if let Some(c) = &mut x.second {
                 s("Second depth", &mut c.depth_expr, &mut c.depth, L);
@@ -427,18 +602,32 @@ pub fn slots(kind: &mut FeatureKind, f: &mut dyn FnMut(Slot<'_>)) {
         }
         FeatureKind::ModifyJoint(x) => {
             s("Bend radius", &mut x.radius_expr, &mut x.radius, L);
-            let q = if x.calc == cadrs_sheetmetal::BendCalc::KFactor { C } else { L };
+            let q = if x.calc == cadrs_sheetmetal::BendCalc::KFactor {
+                C
+            } else {
+                L
+            };
             s(x.calc.label(), &mut x.value_expr, &mut x.value, q);
         }
         // P3I.9.
         FeatureKind::SheetMetalLoft(x) => {
             let e = &mut x.exprs;
             let p = &mut x.params;
-            s("Chordal tolerance", &mut x.chordal_tolerance_expr, &mut x.chordal_tolerance, L);
+            s(
+                "Chordal tolerance",
+                &mut x.chordal_tolerance_expr,
+                &mut x.chordal_tolerance,
+                L,
+            );
             s("Thickness", &mut e.thickness, &mut p.thickness, L);
             s("Bend radius", &mut e.bend_radius, &mut p.bend_radius, L);
             s("Default bend K Factor", &mut e.k_factor, &mut p.k_factor, C);
-            s("Rolled K Factor", &mut e.rolled_k_factor, &mut p.rolled_k_factor, C);
+            s(
+                "Rolled K Factor",
+                &mut e.rolled_k_factor,
+                &mut p.rolled_k_factor,
+                C,
+            );
             s("Minimal gap", &mut e.minimal_gap, &mut p.minimal_gap, L);
         }
         FeatureKind::Form(x) => {
@@ -464,28 +653,60 @@ pub fn slots(kind: &mut FeatureKind, f: &mut dyn FnMut(Slot<'_>)) {
         // P3I.5: the sheet metal features after the model.
         FeatureKind::SheetMetalTool(t) => {
             use crate::sheetmetal_tools::SheetMetalTool as T;
-            let bend = |b: &mut crate::sheetmetal_tools::BendFeature, s: &mut dyn FnMut(&'static str, &mut String, &mut f64, Quantity)| {
-                s("Bend angle", &mut b.angle_expr, &mut b.angle, A);
-                s("Bend radius", &mut b.radius_expr, &mut b.radius, L);
-                s("K Factor", &mut b.k_expr, &mut b.k_factor, C);
-            };
+            let bend =
+                |b: &mut crate::sheetmetal_tools::BendFeature,
+                 s: &mut dyn FnMut(&'static str, &mut String, &mut f64, Quantity)| {
+                    s("Bend angle", &mut b.angle_expr, &mut b.angle, A);
+                    s("Bend radius", &mut b.radius_expr, &mut b.radius, L);
+                    s("K Factor", &mut b.k_expr, &mut b.k_factor, C);
+                };
             match t {
                 T::Bend(b) => bend(b, &mut s),
                 T::Jog(j) => {
                     bend(&mut j.bend, &mut s);
                     s("Jog offset", &mut j.offset_expr, &mut j.offset, L);
-                    s("Offset distance", &mut j.up_to_offset_expr, &mut j.up_to_offset, L);
+                    s(
+                        "Offset distance",
+                        &mut j.up_to_offset_expr,
+                        &mut j.up_to_offset,
+                        L,
+                    );
                     s("Thickness factor", &mut j.factor_expr, &mut j.factor, C);
                 }
                 T::Tab(x) => s("Subtraction offset", &mut x.offset_expr, &mut x.offset, L),
                 T::Corner(x) => {
-                    s("Corner relief scale", &mut x.scale_expr, &mut x.relief.scale, C);
-                    s("Corner relief size", &mut x.size_expr, &mut x.relief.size, L);
+                    s(
+                        "Corner relief scale",
+                        &mut x.scale_expr,
+                        &mut x.relief.scale,
+                        C,
+                    );
+                    s(
+                        "Corner relief size",
+                        &mut x.size_expr,
+                        &mut x.relief.size,
+                        L,
+                    );
                 }
                 T::BendRelief(x) => {
-                    s("Bend relief depth scale", &mut x.depth_scale_expr, &mut x.relief.depth_scale, C);
-                    s("Bend relief width scale", &mut x.width_scale_expr, &mut x.relief.width_scale, C);
-                    s("Bend relief depth", &mut x.depth_expr, &mut x.relief.depth, L);
+                    s(
+                        "Bend relief depth scale",
+                        &mut x.depth_scale_expr,
+                        &mut x.relief.depth_scale,
+                        C,
+                    );
+                    s(
+                        "Bend relief width scale",
+                        &mut x.width_scale_expr,
+                        &mut x.relief.width_scale,
+                        C,
+                    );
+                    s(
+                        "Bend relief depth",
+                        &mut x.depth_expr,
+                        &mut x.relief.depth,
+                        L,
+                    );
                 }
                 T::CornerBreak(x) => {
                     s("Radius", &mut x.size_expr, &mut x.size, L);
@@ -513,7 +734,9 @@ pub fn slots(kind: &mut FeatureKind, f: &mut dyn FnMut(Slot<'_>)) {
 }
 
 /// A sketch's dimension expressions: (dimension, expression, what it measures).
-pub fn sketch_expressions(g: &cadrs_sketch::Sketch) -> Vec<(cadrs_sketch::DimensionId, String, Quantity)> {
+pub fn sketch_expressions(
+    g: &cadrs_sketch::Sketch,
+) -> Vec<(cadrs_sketch::DimensionId, String, Quantity)> {
     g.expressions
         .iter()
         .filter_map(|(id, e)| Some((*id, e.clone(), g.dimensions.get(*id)?.kind.quantity())))
@@ -564,7 +787,10 @@ pub fn defined(features: &[Feature], units: &Units) -> Vec<(String, VarValue)> {
                 continue;
             }
             let value = eval_variable(v.var_type, &v.expr, units, &env)
-                .map(|(value, kind)| VarValue { value, quantity: kind.quantity() })
+                .map(|(value, kind)| VarValue {
+                    value,
+                    quantity: kind.quantity(),
+                })
                 .unwrap_or_else(|_| v.var_value());
             env.push((v.name.clone(), value));
         }
@@ -574,11 +800,20 @@ pub fn defined(features: &[Feature], units: &Units) -> Vec<(String, VarValue)> {
 
 /// Why an expression can't be used here: a name defined only below, not at all, or an
 /// evaluation error.
-fn why(label: &str, expr: &str, q: Quantity, units: &Units, env: &[(String, VarValue)], later: &[String]) -> Option<String> {
+fn why(
+    label: &str,
+    expr: &str,
+    q: Quantity,
+    units: &Units,
+    env: &[(String, VarValue)],
+    later: &[String],
+) -> Option<String> {
     for n in units::variable_names(expr) {
         if !env.iter().any(|(k, _)| *k == n) {
             return Some(if later.contains(&n) {
-                format!("{label}: #{n} is used before it is defined; move its Variable above this feature")
+                format!(
+                    "{label}: #{n} is used before it is defined; move its Variable above this feature"
+                )
             } else {
                 format!("{label}: #{n} is not defined")
             });
@@ -718,8 +953,13 @@ pub fn refresh(features: &mut [Feature], suppressed: &[FeatureId], units: &Units
                 let g = &mut sk.geometry;
                 let mut ops = Vec::new();
                 for (id, e, q) in sketch_expressions(g) {
-                    let Ok(value) = units.eval_vars(&e, q, &env) else { continue };
-                    if g.dimensions.get(id).is_some_and(|d| (d.value - value).abs() > 1e-12 && !d.driven) {
+                    let Ok(value) = units.eval_vars(&e, q, &env) else {
+                        continue;
+                    };
+                    if g.dimensions
+                        .get(id)
+                        .is_some_and(|d| (d.value - value).abs() > 1e-12 && !d.driven)
+                    {
                         ops.push(SketchOp::SetDimensionValue { id, value });
                     }
                 }

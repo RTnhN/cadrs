@@ -11,18 +11,18 @@
 //! ✕ or Esc removes it (or reverts an edit). Every change is a command; accepting squashes them
 //! into one undo step, as the Extrude dialog does.
 
-use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
 use cadrs_core::commands::{AddFeature, ReplaceFeature, SetBoolean};
 use cadrs_core::document::{BooleanFeature, BooleanKind, BooleanOffset};
 use cadrs_core::{ElementId, ElementKind, Feature, FeatureId, PartId};
+use cadrs_ui::ShortcutKey;
 use cadrs_ui::prelude::*;
 use cadrs_ui::{
-    CheckboxChange, FeatureDialogAccept, FeatureDialogCancel, FeatureDialogState, NumberField, NumberFieldCommit,
-    NumberFieldState, OptionRow, SelectionList, SelectionListActivate, SelectionListMove, SelectionListRemove,
-    SelectionListState, TabStrip, TabStripSelect,
+    CheckboxChange, FeatureDialogAccept, FeatureDialogCancel, FeatureDialogState, NumberField,
+    NumberFieldCommit, NumberFieldState, OptionRow, SelectionList, SelectionListActivate,
+    SelectionListMove, SelectionListRemove, SelectionListState, TabStrip, TabStripSelect,
 };
 
 use crate::parts::PartCache;
@@ -35,14 +35,21 @@ impl Plugin for BooleanPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (boolean_picks, boolean_keys, sync_boolean_dialog, sync_boolean_final)
+            (
+                boolean_picks,
+                boolean_keys,
+                sync_boolean_dialog,
+                sync_boolean_final,
+            )
                 .chain()
                 .before(crate::parts::PartsSet)
                 .run_if(in_state(AppState::Document)),
         )
         .add_systems(
             Update,
-            show_parts.after(crate::parts::PartsSet).run_if(in_state(AppState::Document)),
+            show_parts
+                .after(crate::parts::PartsSet)
+                .run_if(in_state(AppState::Document)),
         )
         .add_systems(OnExit(AppState::Document), |world: &mut World| {
             if world.contains_resource::<BooleanSession>() {
@@ -146,7 +153,10 @@ pub fn begin_boolean(world: &mut World) {
 
 /// Opens an existing Boolean for editing.
 pub fn edit_boolean(world: &mut World, feature: FeatureId) {
-    if world.get_resource::<BooleanSession>().is_some_and(|s| s.feature == feature) {
+    if world
+        .get_resource::<BooleanSession>()
+        .is_some_and(|s| s.feature == feature)
+    {
         return;
     }
     if world.contains_resource::<BooleanSession>() {
@@ -165,7 +175,11 @@ pub fn edit_boolean(world: &mut World, feature: FeatureId) {
         return;
     };
     let element = el.id;
-    let Some(before) = el.feature(feature).filter(|f| f.boolean().is_some()).cloned() else {
+    let Some(before) = el
+        .feature(feature)
+        .filter(|f| f.boolean().is_some())
+        .cloned()
+    else {
         return;
     };
     let mark = doc.history.undo_len();
@@ -173,7 +187,14 @@ pub fn edit_boolean(world: &mut World, feature: FeatureId) {
     start(world, element, feature, false, mark, Some(before));
 }
 
-fn start(world: &mut World, element: ElementId, feature: FeatureId, is_new: bool, mark: usize, before: Option<Feature>) {
+fn start(
+    world: &mut World,
+    element: ElementId,
+    feature: FeatureId,
+    is_new: bool,
+    mark: usize,
+    before: Option<Feature>,
+) {
     world.resource_mut::<Selection>().0.clear();
     world.insert_resource(BooleanSession {
         element,
@@ -240,7 +261,11 @@ pub fn accept(world: &mut World) {
     if crate::accept::builds(world, "boolean", features, f.id, accept) != Some(true) {
         return;
     }
-    let label = if s.is_new { format!("Insert {}", f.name) } else { format!("Edit {}", f.name) };
+    let label = if s.is_new {
+        format!("Insert {}", f.name)
+    } else {
+        format!("Edit {}", f.name)
+    };
     if let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() {
         doc.squash_element_since(s.mark, s.element, label);
     }
@@ -293,7 +318,11 @@ fn show_parts(
     mut had: Local<bool>,
 ) {
     let found = session.zip(doc).and_then(|(s, doc)| {
-        doc.doc.element(s.element).and_then(|e| e.feature(s.feature)).and_then(|f| f.boolean()).cloned()
+        doc.doc
+            .element(s.element)
+            .and_then(|e| e.feature(s.feature))
+            .and_then(|f| f.boolean())
+            .cloned()
     });
     let Some(b) = found else {
         if *had {
@@ -327,7 +356,11 @@ fn show_parts(
 // ---------------------------------------------------------------------------------------------
 // Input
 
-fn boolean_picks(mut picks: MessageReader<PickRequest>, session: Option<Res<BooleanSession>>, mut commands: Commands) {
+fn boolean_picks(
+    mut picks: MessageReader<PickRequest>,
+    session: Option<Res<BooleanSession>>,
+    mut commands: Commands,
+) {
     let Some(s) = session else {
         picks.clear();
         return;
@@ -337,7 +370,9 @@ fn boolean_picks(mut picks: MessageReader<PickRequest>, session: Option<Res<Bool
         if s.offset_faces_active {
             let Some(pick) = p.0 else { continue };
             commands.queue(move |world: &mut World| {
-                let Some(cadrs_core::applied::EdgeOrFace::Face(f)) = crate::applied::entity_of(world.resource::<PartCache>(), pick) else {
+                let Some(cadrs_core::applied::EdgeOrFace::Face(f)) =
+                    crate::applied::entity_of(world.resource::<PartCache>(), pick)
+                else {
                     return;
                 };
                 let Some(mut b) = params(world) else { return };
@@ -352,11 +387,17 @@ fn boolean_picks(mut picks: MessageReader<PickRequest>, session: Option<Res<Bool
             });
             continue;
         }
-        let Some(part) = p.0.and_then(|p| p.part()) else { continue };
+        let Some(part) = p.0.and_then(|p| p.part()) else {
+            continue;
+        };
         let targets = s.targets_active;
         commands.queue(move |world: &mut World| {
             let Some(mut b) = params(world) else { return };
-            let list = if targets && b.op == BooleanKind::Subtract { &mut b.targets } else { &mut b.tools };
+            let list = if targets && b.op == BooleanKind::Subtract {
+                &mut b.targets
+            } else {
+                &mut b.tools
+            };
             if let Some(i) = list.iter().position(|x| *x == part) {
                 list.remove(i);
             } else {
@@ -389,20 +430,31 @@ fn boolean_keys(
     }
 }
 
-fn on_accept(ev: On<FeatureDialogAccept>, q: Query<(), With<BooleanDialog>>, mut commands: Commands) {
+fn on_accept(
+    ev: On<FeatureDialogAccept>,
+    q: Query<(), With<BooleanDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(accept);
     }
 }
 
-fn on_cancel(ev: On<FeatureDialogCancel>, q: Query<(), With<BooleanDialog>>, mut commands: Commands) {
+fn on_cancel(
+    ev: On<FeatureDialogCancel>,
+    q: Query<(), With<BooleanDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(cancel);
     }
 }
 
 fn on_tab(ev: On<TabStripSelect>, q: Query<&Name>, mut commands: Commands) {
-    if !q.get(ev.entity).is_ok_and(|n| n.as_str() == "boolean-operation") {
+    if !q
+        .get(ev.entity)
+        .is_ok_and(|n| n.as_str() == "boolean-operation")
+    {
         return;
     }
     let op = BooleanKind::ALL[ev.index.min(2)];
@@ -468,7 +520,10 @@ fn on_offset_distance(
         return;
     }
     let text = ev.text.trim().to_string();
-    let v = vars.eval(&units.0, &text, cadrs_sketch::units::Quantity::Length).ok().filter(|v| v.is_finite() && *v > 0.0);
+    let v = vars
+        .eval(&units.0, &text, cadrs_sketch::units::Quantity::Length)
+        .ok()
+        .filter(|v| v.is_finite() && *v > 0.0);
     if let Ok(mut st) = q_state.get_mut(ev.entity) {
         st.error = v.is_none();
         if v.is_none() {
@@ -476,7 +531,11 @@ fn on_offset_distance(
         }
     }
     let Some(v) = v else { return };
-    let expr = if text.parse::<f64>().is_ok() { units.0.with_unit(v, cadrs_sketch::units::Quantity::Length) } else { text };
+    let expr = if text.parse::<f64>().is_ok() {
+        units.0.with_unit(v, cadrs_sketch::units::Quantity::Length)
+    } else {
+        text
+    };
     let enter = ev.enter;
     commands.queue(move |world: &mut World| {
         if let Some(mut b) = params(world)
@@ -487,13 +546,19 @@ fn on_offset_distance(
             set(world, b, "Offset distance");
         }
         if enter {
-            world.resource_mut::<bevy::input_focus::InputFocus>().clear();
+            world
+                .resource_mut::<bevy::input_focus::InputFocus>()
+                .clear();
             accept(world);
         }
     });
 }
 
-fn on_offset_flip(a: On<bevy::ui_widgets::Activate>, q: Query<(), With<OffsetFlip>>, mut commands: Commands) {
+fn on_offset_flip(
+    a: On<bevy::ui_widgets::Activate>,
+    q: Query<(), With<OffsetFlip>>,
+    mut commands: Commands,
+) {
     if !q.contains(a.entity) {
         return;
     }
@@ -552,19 +617,30 @@ fn on_remove(ev: On<SelectionListRemove>, q: Query<&ListRole>, mut commands: Com
 
 /// The footer: the before/after slider and Final (P3.9, PS13.2, PS13.3).
 fn boolean_footer(f: &mut ChildSpawner, t: &Theme) {
-    f.spawn(Node { flex_grow: 1.0, padding: UiRect::left(Val::Px(2.0)), ..default() })
-        .with_child(crate::feature_list::preview_slider(t, "boolean"));
+    f.spawn(Node {
+        flex_grow: 1.0,
+        padding: UiRect::left(Val::Px(2.0)),
+        ..default()
+    })
+    .with_child(crate::feature_list::preview_slider(t, "boolean"));
     f.spawn((
         crate::feature_list::FinalButton,
         BooleanFinal,
-        cadrs_ui::Button::new("boolean-final").label("Final").small().outline().tooltip("Show the final result").build(t),
-        bevy::ui_widgets::observe(|_: On<bevy::ui_widgets::Activate>, mut commands: Commands| {
-            commands.queue(|world: &mut World| {
-                if let Some(mut s) = world.get_resource_mut::<BooleanSession>() {
-                    s.show_final = !s.show_final;
-                }
-            });
-        }),
+        cadrs_ui::Button::new("boolean-final")
+            .label("Final")
+            .small()
+            .outline()
+            .tooltip("Show the final result")
+            .build(t),
+        bevy::ui_widgets::observe(
+            |_: On<bevy::ui_widgets::Activate>, mut commands: Commands| {
+                commands.queue(|world: &mut World| {
+                    if let Some(mut s) = world.get_resource_mut::<BooleanSession>() {
+                        s.show_final = !s.show_final;
+                    }
+                });
+            },
+        ),
     ))
     .entry::<Node>()
     .and_modify(|mut n| n.margin = UiRect::right(Val::Px(4.0)));
@@ -629,7 +705,11 @@ fn sync_boolean_dialog(
         }
         return;
     };
-    let Some(f) = doc.doc.element(s.element).and_then(|e| e.feature(s.feature)) else {
+    let Some(f) = doc
+        .doc
+        .element(s.element)
+        .and_then(|e| e.feature(s.feature))
+    else {
         return;
     };
     let Some(b) = f.boolean() else { return };
@@ -639,14 +719,27 @@ fn sync_boolean_dialog(
             .collect()
     };
     let valid = f.is_valid() && !cache.errors.contains_key(&f.id) && !cache.rebuilding;
-    let layout = BuiltFor(b.op, b.offset.as_ref().filter(|_| b.op == BooleanKind::Subtract).map(|o| (o.all, o.flip)));
+    let layout = BuiltFor(
+        b.op,
+        b.offset
+            .as_ref()
+            .filter(|_| b.op == BooleanKind::Subtract)
+            .map(|o| (o.all, o.flip)),
+    );
     let face_names: Vec<String> = b
         .offset
         .iter()
         .flat_map(|o| o.faces.iter())
         .map(|f| {
-            let features = doc.doc.element(s.element).map(|e| e.features()).unwrap_or(&[]);
-            let op = features.iter().find(|x| x.id.0 == f.face.op).map_or("part".to_string(), |x| x.name.clone());
+            let features = doc
+                .doc
+                .element(s.element)
+                .map(|e| e.features())
+                .unwrap_or(&[]);
+            let op = features
+                .iter()
+                .find(|x| x.id.0 == f.face.op)
+                .map_or("part".to_string(), |x| x.name.clone());
             format!("Face of {op}")
         })
         .collect();
@@ -684,7 +777,12 @@ fn sync_boolean_dialog(
                         p.spawn(strip.selected(i).build(&t));
                         p.spawn(Node {
                             flex_direction: FlexDirection::Column,
-                            padding: UiRect::new(Val::Px(2.0), Val::Px(3.0), Val::Px(6.0), Val::Px(4.0)),
+                            padding: UiRect::new(
+                                Val::Px(2.0),
+                                Val::Px(3.0),
+                                Val::Px(6.0),
+                                Val::Px(4.0),
+                            ),
                             row_gap: Val::Px(3.0),
                             ..default()
                         })
@@ -694,7 +792,10 @@ fn sync_boolean_dialog(
                                 SelectionList::new("boolean-tools-field")
                                     .placeholder("Tools")
                                     .items(tools.clone())
-                                    .active((!targets_active || op != BooleanKind::Subtract) && !faces_active)
+                                    .active(
+                                        (!targets_active || op != BooleanKind::Subtract)
+                                            && !faces_active,
+                                    )
                                     .reorderable(true)
                                     .build(&t),
                             ));
@@ -708,7 +809,12 @@ fn sync_boolean_dialog(
                                         .build(&t),
                                 ));
                                 // P3.10 (PS5.5): the tools offset before they cut.
-                                b.spawn(OptionRow::new("boolean-offset", "Offset").chevron().checked(offset.is_some()).build(&t));
+                                b.spawn(
+                                    OptionRow::new("boolean-offset", "Offset")
+                                        .chevron()
+                                        .checked(offset.is_some())
+                                        .build(&t),
+                                );
                                 if let Some(o) = &offset {
                                     // Offset's rows nest under it, their checkbox under its
                                     // checkbox (P3.10 judge: Offset all stood out-dented).
@@ -722,7 +828,11 @@ fn sync_boolean_dialog(
                                         },
                                     ))
                                     .with_children(|b| {
-                                        b.spawn(OptionRow::new("boolean-offset-all", "Offset all").checked(o.all).build(&t));
+                                        b.spawn(
+                                            OptionRow::new("boolean-offset-all", "Offset all")
+                                                .checked(o.all)
+                                                .build(&t),
+                                        );
                                         if !o.all {
                                             b.spawn((
                                                 ListRole::OffsetFaces,
@@ -733,19 +843,43 @@ fn sync_boolean_dialog(
                                                     .build(&t),
                                             ));
                                         }
-                                        b.spawn(Node { align_items: AlignItems::Center, column_gap: Val::Px(4.0), ..default() }).with_children(|r| {
-                                            r.spawn((
-                                                OffsetDistance,
-                                                NumberField::new("boolean-offset-distance", "Distance").text(o.expr.clone()).label_width(82.0).build(&t),
-                                            ))
-                                            .entry::<Node>()
-                                            .and_modify(|mut n| n.flex_grow = 1.0);
-                                            crate::extrude_dialog::flip_button_any(r, &t, "boolean-offset-flip", OffsetFlip, o.flip, "Opposite direction");
-                                        });
+                                        b.spawn(Node {
+                                            align_items: AlignItems::Center,
+                                            column_gap: Val::Px(4.0),
+                                            ..default()
+                                        })
+                                        .with_children(
+                                            |r| {
+                                                r.spawn((
+                                                    OffsetDistance,
+                                                    NumberField::new(
+                                                        "boolean-offset-distance",
+                                                        "Distance",
+                                                    )
+                                                    .text(o.expr.clone())
+                                                    .label_width(82.0)
+                                                    .build(&t),
+                                                ))
+                                                .entry::<Node>()
+                                                .and_modify(|mut n| n.flex_grow = 1.0);
+                                                crate::extrude_dialog::flip_button_any(
+                                                    r,
+                                                    &t,
+                                                    "boolean-offset-flip",
+                                                    OffsetFlip,
+                                                    o.flip,
+                                                    "Opposite direction",
+                                                );
+                                            },
+                                        );
                                     });
                                 }
                             }
-                            b.spawn(OptionRow::new("boolean-keep-tools", "Keep tools").checked(keep).build(&t));
+                            b.spawn(
+                                OptionRow::new("boolean-keep-tools", "Keep tools")
+                                    .checked(keep)
+                                    .build(&t),
+                            );
                         });
                     })
                     .footer(move |f| boolean_footer(f, &tf))
@@ -769,7 +903,8 @@ fn sync_boolean_dialog(
         let want = match role {
             ListRole::Tools => SelectionListState {
                 items: names(&b.tools),
-                active: (!s.targets_active || b.op != BooleanKind::Subtract) && !s.offset_faces_active,
+                active: (!s.targets_active || b.op != BooleanKind::Subtract)
+                    && !s.offset_faces_active,
                 error: false,
                 red_items: false,
                 red: Vec::new(),

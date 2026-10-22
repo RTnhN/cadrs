@@ -65,15 +65,23 @@ pub use zip::zip_entries;
 /// Parse a board file and its library together (warnings are dropped; use [`parse_emn`] /
 /// [`parse_emp`] to see them). Library errors are prefixed with `.emp:`.
 pub fn read_pair(emn: &str, emp: &str) -> Result<(Board, Library), IdfError> {
-    let board = parse_emn(emn).map_err(|e| IdfError::new(e.line, format!(".emn: {}", e.message)))?.value;
-    let library = parse_emp(emp).map_err(|e| IdfError::new(e.line, format!(".emp: {}", e.message)))?.value;
+    let board = parse_emn(emn)
+        .map_err(|e| IdfError::new(e.line, format!(".emn: {}", e.message)))?
+        .value;
+    let library = parse_emp(emp)
+        .map_err(|e| IdfError::new(e.line, format!(".emp: {}", e.message)))?
+        .value;
     Ok((board, library))
 }
 
 /// The board as PCB Studio exports it at `version`: our source string in the header, and for
 /// IDF 2.0 no keep areas (see the crate docs).
 pub fn export_board(board: &Board, version: IdfVersion) -> Board {
-    let mut b = if version == IdfVersion::V2 { board.without_keep_areas() } else { board.clone() };
+    let mut b = if version == IdfVersion::V2 {
+        board.without_keep_areas()
+    } else {
+        board.clone()
+    };
     b.header.source_system = CADRS_SOURCE.to_string();
     b.for_version(version)
 }
@@ -97,10 +105,20 @@ pub fn zip_paths(board_name: &str) -> (String, String) {
 pub fn safe_file_name(name: &str) -> String {
     let s: String = name
         .chars()
-        .map(|c| if c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { '_' } else { c })
+        .map(|c| {
+            if c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') {
+                '_'
+            } else {
+                c
+            }
+        })
         .collect();
     let s = s.trim().to_string();
-    if s.is_empty() || s == "." || s == ".." { "board".to_string() } else { s }
+    if s.is_empty() || s == "." || s == ".." {
+        "board".to_string()
+    } else {
+        s
+    }
 }
 
 /// "Export this board to IDF" (PCB9.7–9.8): a zip holding `<board>/<board>.emn` and
@@ -110,7 +128,13 @@ pub fn write_zip(board: &Board, library: &Library, version: IdfVersion) -> Vec<u
     let l = export_library(library, &b, version);
     let (emn, emp) = zip_paths(&b.name);
     let dos = zip::dos_datetime(&b.header.date);
-    zip::build_zip(&[(emn, write_emn(&b, version).into_bytes()), (emp, write_emp(&l, version).into_bytes())], dos)
+    zip::build_zip(
+        &[
+            (emn, write_emn(&b, version).into_bytes()),
+            (emp, write_emp(&l, version).into_bytes()),
+        ],
+        dos,
+    )
 }
 
 /// Read a zip holding one `.emn` and one `.emp` (in any folder).

@@ -50,11 +50,11 @@ pub mod explode;
 pub mod folders;
 pub mod group_dialog;
 pub mod in_context;
-pub mod linked_context;
 pub mod insert;
 pub mod insert_linked;
 pub mod interference;
 pub mod items;
+pub mod linked_context;
 pub mod list;
 pub mod managed_context;
 pub mod mate_dialog;
@@ -97,24 +97,37 @@ impl Plugin for AssemblyPlugin {
             .init_resource::<InstanceClipboard>()
             .init_gizmo_group::<connectors::ConnectorHaloGizmos>()
             .init_gizmo_group::<connectors::ConnectorGizmos>()
-            .add_systems(Startup, |mut store: ResMut<GizmoConfigStore>| connectors::configure(&mut store))
+            .add_systems(Startup, |mut store: ResMut<GizmoConfigStore>| {
+                connectors::configure(&mut store)
+            })
             .add_systems(
                 Update,
                 (assembly_keys, apply_pending_selection)
                     .after(crate::viewport::apply_view_to_camera)
                     .run_if(in_state(AppState::Document)),
             )
-            .add_systems(Update, prune_selection.after(crate::parts::PartsSet).run_if(in_state(AppState::Document)))
+            .add_systems(
+                Update,
+                prune_selection
+                    .after(crate::parts::PartsSet)
+                    .run_if(in_state(AppState::Document)),
+            )
             // P3H.6: box select in the view.
             .init_resource::<box_select::AssemblyBox>()
             .add_systems(
                 Update,
-                (box_select::box_select, box_select::draw_box).chain().after(triad::TriadSet).run_if(in_state(AppState::Document)),
+                (box_select::box_select, box_select::draw_box)
+                    .chain()
+                    .after(triad::TriadSet)
+                    .run_if(in_state(AppState::Document)),
             )
-            .add_systems(OnExit(AppState::Document), |mut a: ResMut<AssemblyParts>, mut p: ResMut<PendingSelection>| {
-                *a = AssemblyParts::default();
-                p.0 = None;
-            })
+            .add_systems(
+                OnExit(AppState::Document),
+                |mut a: ResMut<AssemblyParts>, mut p: ResMut<PendingSelection>| {
+                    *a = AssemblyParts::default();
+                    p.0 = None;
+                },
+            )
             .add_plugins((
                 list::InstanceListPlugin,
                 folders::AssemblyFoldersPlugin,
@@ -131,8 +144,21 @@ impl Plugin for AssemblyPlugin {
                 bom_panel::BomPanelPlugin,
                 connector_tool::ConnectorToolPlugin,
             ))
-            .add_plugins((studio_edit::StudioEditPlugin, named_positions::NamedPositionsPlugin, explode::ExplodePlugin, replicate_dialog::ReplicatePlugin, items::ItemsPlugin))
-            .add_plugins((relation_dialog::RelationDialogPlugin, in_context::InContextPlugin, managed_context::ManagedContextPlugin, interference::InterferencePlugin, replace_dialog::ReplaceDialogPlugin, where_used::WhereUsedPlugin))
+            .add_plugins((
+                studio_edit::StudioEditPlugin,
+                named_positions::NamedPositionsPlugin,
+                explode::ExplodePlugin,
+                replicate_dialog::ReplicatePlugin,
+                items::ItemsPlugin,
+            ))
+            .add_plugins((
+                relation_dialog::RelationDialogPlugin,
+                in_context::InContextPlugin,
+                managed_context::ManagedContextPlugin,
+                interference::InterferencePlugin,
+                replace_dialog::ReplaceDialogPlugin,
+                where_used::WhereUsedPlugin,
+            ))
             .add_plugins(insert_linked::InsertLinkedPlugin);
     }
 }
@@ -162,7 +188,12 @@ pub fn copy_instance(world: &mut World, instance: InstanceId) {
 
 /// **Copy n items**: every instance of `instances` (P3G.1, ER6.7), each with its link (ER X5).
 pub fn copy_instances(world: &mut World, instances: &[InstanceId]) {
-    let Some(model) = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element()?.assembly_model().cloned()) else { return };
+    let Some(model) = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.active_element()?.assembly_model().cloned())
+    else {
+        return;
+    };
     let cache = world.resource::<PartCache>();
     let mut items: Vec<ClipboardInstance> = instances
         .iter()
@@ -171,7 +202,10 @@ pub fn copy_instances(world: &mut World, instances: &[InstanceId]) {
             source: inst.source,
             parts: inst.parts.clone(),
             pose: inst.pose,
-            name: cache.part_name(inst.id.part_id()).unwrap_or("instance").to_string(),
+            name: cache
+                .part_name(inst.id.part_id())
+                .unwrap_or("instance")
+                .to_string(),
             link: inst.link,
             more: Vec::new(),
         })
@@ -192,11 +226,23 @@ pub fn copy_instances(world: &mut World, instances: &[InstanceId]) {
 /// a pointer, next to the copies. A linked instance's copy keeps its reference (ER X5). One undo
 /// step.
 pub fn paste_instance(world: &mut World, at: Option<Vec2>) {
-    let Some(clip) = world.resource::<InstanceClipboard>().0.clone() else { return };
-    let Some(element) = world.get_resource::<ActiveDocument>().and_then(active_assembly) else { return };
+    let Some(clip) = world.resource::<InstanceClipboard>().0.clone() else {
+        return;
+    };
+    let Some(element) = world
+        .get_resource::<ActiveDocument>()
+        .and_then(active_assembly)
+    else {
+        return;
+    };
     let pose = match at {
         Some(p) => {
-            let item = insert::Item { sources: vec![clip.source], label: clip.name.clone(), rigid: clip.parts.clone(), link: None };
+            let item = insert::Item {
+                sources: vec![clip.source],
+                label: clip.name.clone(),
+                rigid: clip.parts.clone(),
+                link: None,
+            };
             insert::pose_at_pointer(world, &item, p)
         }
         None => clip.pose.then(&Pose::translation([25.4, 0.0, 0.0])),
@@ -207,11 +253,20 @@ pub fn paste_instance(world: &mut World, at: Option<Vec2>) {
     let all: Vec<&ClipboardInstance> = std::iter::once(&clip).chain(clip.more.iter()).collect();
     for (k, c) in all.iter().enumerate() {
         let p = if k == 0 { pose } else { c.pose.then(&shift) };
-        let instance = Instance { parts: c.parts.clone(), link: c.link, ..Instance::new(InstanceId::new(), c.source, p) };
-        run(world, &cadrs_core::assembly::commands::InsertInstance { element, instance });
+        let instance = Instance {
+            parts: c.parts.clone(),
+            link: c.link,
+            ..Instance::new(InstanceId::new(), c.source, p)
+        };
+        run(
+            world,
+            &cadrs_core::assembly::commands::InsertInstance { element, instance },
+        );
     }
     if all.len() > 1 {
-        world.resource_mut::<ActiveDocument>().squash_since(mark, "Paste instances");
+        world
+            .resource_mut::<ActiveDocument>()
+            .squash_since(mark, "Paste instances");
     }
 }
 
@@ -249,7 +304,12 @@ pub struct AssemblyParts {
     pub linked_extra: Vec<cadrs_core::external::LinkedElement>,
 }
 
-type AssemblyKey = (ElementId, Vec<cadrs_core::assembly::structure::Occurrence>, Vec<(ElementId, usize, Vec<cadrs_core::PartProps>, String)>, Vec<Instance>);
+type AssemblyKey = (
+    ElementId,
+    Vec<cadrs_core::assembly::structure::Occurrence>,
+    Vec<(ElementId, usize, Vec<cadrs_core::PartProps>, String)>,
+    Vec<Instance>,
+);
 
 /// The parts of the view that are parts inside subassemblies, and the occurrences they stand for
 /// (P3B.4): a pick on `PartId(S, k)` is on the occurrence `derive(S, …)` for mates and drags, and
@@ -274,12 +334,20 @@ pub fn occurrence_of(part: PartId) -> InstanceId {
 
 /// The part of the view that shows an occurrence.
 pub fn occurrence_part(i: InstanceId) -> PartId {
-    OCCURRENCES.read().ok().and_then(|t| t.as_ref().and_then(|(_, m)| m.get(&i).copied())).unwrap_or_else(|| i.part_id())
+    OCCURRENCES
+        .read()
+        .ok()
+        .and_then(|t| t.as_ref().and_then(|(_, m)| m.get(&i).copied()))
+        .unwrap_or_else(|| i.part_id())
 }
 
 /// An occurrence of the active assembly (or a ghost of the Insert dialog): its placement and
 /// its source part.
-pub fn occurrence_source(doc: &ActiveDocument, parts: &AssemblyParts, id: InstanceId) -> Option<(Pose, ElementId, PartId)> {
+pub fn occurrence_source(
+    doc: &ActiveDocument,
+    parts: &AssemblyParts,
+    id: InstanceId,
+) -> Option<(Pose, ElementId, PartId)> {
     if let Some(g) = parts.ghosts.iter().find(|g| g.id == id) {
         return Some((g.pose, g.source.element(), g.source.part()?));
     }
@@ -287,7 +355,10 @@ pub fn occurrence_source(doc: &ActiveDocument, parts: &AssemblyParts, id: Instan
     if let Some(i) = model.instance(id) {
         return Some((i.pose, i.source.element(), i.source.part()?));
     }
-    cadrs_core::assembly::structure::occurrences(&doc.doc, model).into_iter().find(|o| o.id == id).map(|o| (o.pose, o.element, o.part))
+    cadrs_core::assembly::structure::occurrences(&doc.doc, model)
+        .into_iter()
+        .find(|o| o.id == id)
+        .map(|o| (o.pose, o.element, o.part))
 }
 
 /// The active assembly as the solver sees it (its parts at any depth, [`solver_model`]).
@@ -295,7 +366,9 @@ pub fn occurrence_source(doc: &ActiveDocument, parts: &AssemblyParts, id: Instan
 /// [`solver_model`]: cadrs_core::assembly::structure::solver_model
 pub fn flat_model(doc: &ActiveDocument) -> Option<cadrs_core::assembly::Assembly> {
     let model = doc.active_element()?.assembly_model()?;
-    Some(cadrs_core::assembly::structure::solver_model(&doc.doc, model))
+    Some(cadrs_core::assembly::structure::solver_model(
+        &doc.doc, model,
+    ))
 }
 
 /// For a subassembly instance: its first part's occurrence and its placement in the
@@ -305,7 +378,10 @@ pub fn first_part_of(doc: &ActiveDocument, instance: InstanceId) -> Option<(Inst
     if !model.instance(instance)?.source.is_composite() {
         return None;
     }
-    cadrs_core::assembly::structure::occurrences(&doc.doc, model).into_iter().find(|o| o.top == instance).map(|o| (o.id, o.in_top))
+    cadrs_core::assembly::structure::occurrences(&doc.doc, model)
+        .into_iter()
+        .find(|o| o.top == instance)
+        .map(|o| (o.id, o.in_top))
 }
 
 impl AssemblyParts {
@@ -317,11 +393,21 @@ impl AssemblyParts {
     /// The rebuild of the Part Studio `element`, waiting at most `budget` for it (`None`: until
     /// it is done). A longer one goes on in the background: this gives the last rebuild (if
     /// any) and `false` until it is done.
-    pub fn build_within(&mut self, doc: &cadrs_core::Document, element: ElementId, budget: Option<std::time::Duration>) -> (Option<Arc<Build>>, bool) {
+    pub fn build_within(
+        &mut self,
+        doc: &cadrs_core::Document,
+        element: ElementId,
+        budget: Option<std::time::Duration>,
+    ) -> (Option<Arc<Build>>, bool) {
         let Some(el) = doc
             .element(element)
             .or_else(|| self.extra.iter().find(|e| e.id == element))
-            .or_else(|| self.linked_extra.iter().find(|l| l.id() == element).map(|l| &l.element))
+            .or_else(|| {
+                self.linked_extra
+                    .iter()
+                    .find(|l| l.id() == element)
+                    .map(|l| &l.element)
+            })
         else {
             return (None, true);
         };
@@ -335,12 +421,19 @@ impl AssemblyParts {
         {
             return (Some(b.clone()), true);
         }
-        if !self.pending.get(&element).is_some_and(|(f, _)| f.as_slice() == features) {
+        if !self
+            .pending
+            .get(&element)
+            .is_some_and(|(f, _)| f.as_slice() == features)
+        {
             // Restored from the session snapshot when the document was opened before.
             let p = cadrs_core::rebuild::request_persisted(features.to_vec());
             self.pending.insert(element, (features.to_vec(), p));
         }
-        let done = self.pending.get_mut(&element).and_then(|(_, p)| p.wait(budget));
+        let done = self
+            .pending
+            .get_mut(&element)
+            .and_then(|(_, p)| p.wait(budget));
         match done {
             Some(b) => {
                 self.pending.remove(&element);
@@ -354,7 +447,13 @@ impl AssemblyParts {
 
 /// The instances of the active Assembly tab `el`, with the overrides, as parts of the
 /// [`PartCache`] (called by the part cache's update while an Assembly tab is active).
-pub fn update_assembly_parts(doc: &ActiveDocument, el: &Element, cache: &mut PartCache, asm: &mut AssemblyParts, budget: Option<std::time::Duration>) {
+pub fn update_assembly_parts(
+    doc: &ActiveDocument,
+    el: &Element,
+    cache: &mut PartCache,
+    asm: &mut AssemblyParts,
+    budget: Option<std::time::Duration>,
+) {
     let Some(model) = el.assembly_model() else {
         return;
     };
@@ -412,14 +511,21 @@ pub fn update_assembly_parts(doc: &ActiveDocument, el: &Element, cache: &mut Par
         }
         return;
     }
-    let by_part: HashMap<PartId, InstanceId> = occ.iter().filter(|o| o.id != o.top).map(|o| (o.view_part, o.id)).collect();
+    let by_part: HashMap<PartId, InstanceId> = occ
+        .iter()
+        .filter(|o| o.id != o.top)
+        .map(|o| (o.view_part, o.id))
+        .collect();
     let by_occ: HashMap<InstanceId, PartId> = by_part.iter().map(|(p, i)| (*i, *p)).collect();
     if let Ok(mut t) = OCCURRENCES.write() {
         *t = Some((by_part, by_occ));
     }
-    let builds: HashMap<ElementId, Arc<Build>> =
-        sources.iter().filter_map(|s| Some((*s, asm.builds.get(s)?.1.clone()))).collect();
-    let (parts, props) = cadrs_core::assembly::instance_parts(d, &view, |e| builds.get(&e).cloned());
+    let builds: HashMap<ElementId, Arc<Build>> = sources
+        .iter()
+        .filter_map(|s| Some((*s, asm.builds.get(s)?.1.clone())))
+        .collect();
+    let (parts, props) =
+        cadrs_core::assembly::instance_parts(d, &view, |e| builds.get(&e).cloned());
     // The source studios' feature appearances (faces keep their feature's colour).
     let mut appearances = Vec::new();
     for s in &sources {
@@ -434,18 +540,46 @@ pub fn update_assembly_parts(doc: &ActiveDocument, el: &Element, cache: &mut Par
     // (Top-level instances by their own id; one inside a subassembly by its board part's
     // occurrence, `crate::board_in_studio::instance_board`.)
     // (key, PCB Studio, board, pose, source part → view part)
-    type Host = (FeatureId, ElementId, cadrs_core::pcb::BoardId, Pose, HashMap<PartId, PartId>);
+    type Host = (
+        FeatureId,
+        ElementId,
+        cadrs_core::pcb::BoardId,
+        Pose,
+        HashMap<PartId, PartId>,
+    );
     let mut hosts: Vec<Host> = Vec::new();
     for i in &view.instances {
-        let cadrs_core::assembly::InstanceSource::Studio { element, board: Some(b) } = i.source else { continue };
-        let ids = occ.iter().filter(|o| o.top == i.id).map(|o| (o.part, o.view_part)).collect();
+        let cadrs_core::assembly::InstanceSource::Studio {
+            element,
+            board: Some(b),
+        } = i.source
+        else {
+            continue;
+        };
+        let ids = occ
+            .iter()
+            .filter(|o| o.top == i.id)
+            .map(|o| (o.part, o.view_part))
+            .collect();
         hosts.push((FeatureId(i.id.0), element, b, i.pose, ids));
     }
     for o in occ.iter().filter(|o| o.child.is_some()) {
-        let Some(b) = crate::board_in_studio::board_of_occurrence(d, o) else { continue };
+        let Some(b) = crate::board_in_studio::board_of_occurrence(d, o) else {
+            continue;
+        };
         // Its parts: those of the same board instance (same subassembly instance, studio, board
         // and place in it: deeper down, `child` is the innermost subassembly's instance).
-        let ids = occ.iter().filter(|x| x.top == o.top && x.child == o.child && x.element == o.element && x.part.feature == o.part.feature && x.in_top == o.in_top).map(|x| (x.part, x.view_part)).collect();
+        let ids = occ
+            .iter()
+            .filter(|x| {
+                x.top == o.top
+                    && x.child == o.child
+                    && x.element == o.element
+                    && x.part.feature == o.part.feature
+                    && x.in_top == o.in_top
+            })
+            .map(|x| (x.part, x.view_part))
+            .collect();
         hosts.push((FeatureId(o.id.0), o.element, b, o.pose, ids));
     }
     if let Ok(mut t) = BOARD_HOSTS.write() {
@@ -456,7 +590,12 @@ pub fn update_assembly_parts(doc: &ActiveDocument, el: &Element, cache: &mut Par
     }
     let mut boards = HashMap::new();
     for (key, element, b, p, ids) in hosts {
-        let Some(out) = builds.get(&element).and_then(|x| x.derived.get(&cadrs_core::pcb::board_feature(b))) else { continue };
+        let Some(out) = builds
+            .get(&element)
+            .and_then(|x| x.derived.get(&cadrs_core::pcb::board_feature(b)))
+        else {
+            continue;
+        };
         let id = |q: &PartId| ids.get(q).copied();
         let mut mine = cadrs_core::derived::DerivedOutput {
             parts: out.parts.iter().filter_map(id).collect(),
@@ -465,21 +604,50 @@ pub fn update_assembly_parts(doc: &ActiveDocument, el: &Element, cache: &mut Par
                 .iter()
                 .filter_map(|c| {
                     let f = c.frame;
-                    let frame = cadrs_sketch::PlaneFrame { origin: p.apply(f.origin), u: p.rotate(f.u), v: p.rotate(f.v) };
-                    Some(cadrs_core::derived::BoardCopy { part: id(&c.part)?, frame, thickness: c.thickness })
+                    let frame = cadrs_sketch::PlaneFrame {
+                        origin: p.apply(f.origin),
+                        u: p.rotate(f.u),
+                        v: p.rotate(f.v),
+                    };
+                    Some(cadrs_core::derived::BoardCopy {
+                        part: id(&c.part)?,
+                        frame,
+                        thickness: c.thickness,
+                    })
                 })
                 .collect(),
-            footprints: out.footprints.iter().filter_map(|(q, f)| Some((id(q)?, *f))).collect(),
+            footprints: out
+                .footprints
+                .iter()
+                .filter_map(|(q, f)| Some((id(q)?, *f)))
+                .collect(),
             ..Default::default()
         };
         // Its components running into the other instances, hidden or not (on their meshes, as
         // a Part Studio's derived board checks them).
-        let solid = |p: &PartId| cache.parts.iter().find(|x| x.id == *p).map(|x| (x.id, x.solid.clone()));
-        let comps: Vec<(PartId, Arc<cadrs_core::solid::Solid>)> = mine.footprints.iter().filter_map(|(p, _)| solid(p)).collect();
-        let others: Vec<(PartId, Arc<cadrs_core::solid::Solid>)> = cache.parts.iter().filter(|x| !ids.values().any(|v| *v == x.id)).map(|x| (x.id, x.solid.clone())).collect();
+        let solid = |p: &PartId| {
+            cache
+                .parts
+                .iter()
+                .find(|x| x.id == *p)
+                .map(|x| (x.id, x.solid.clone()))
+        };
+        let comps: Vec<(PartId, Arc<cadrs_core::solid::Solid>)> = mine
+            .footprints
+            .iter()
+            .filter_map(|(p, _)| solid(p))
+            .collect();
+        let others: Vec<(PartId, Arc<cadrs_core::solid::Solid>)> = cache
+            .parts
+            .iter()
+            .filter(|x| !ids.values().any(|v| *v == x.id))
+            .map(|x| (x.id, x.solid.clone()))
+            .collect();
         if let Some(frame) = mine.boards.first().map(|b| b.frame) {
-            let c: Vec<(PartId, &Arc<cadrs_core::solid::Solid>)> = comps.iter().map(|(p, s)| (*p, s)).collect();
-            let o: Vec<(PartId, &Arc<cadrs_core::solid::Solid>)> = others.iter().map(|(p, s)| (*p, s)).collect();
+            let c: Vec<(PartId, &Arc<cadrs_core::solid::Solid>)> =
+                comps.iter().map(|(p, s)| (*p, s)).collect();
+            let o: Vec<(PartId, &Arc<cadrs_core::solid::Solid>)> =
+                others.iter().map(|(p, s)| (*p, s)).collect();
             mine.collisions = cadrs_core::pcb::fit::collisions(&c, &o, &frame);
         }
         boards.insert(key, mine);
@@ -494,7 +662,12 @@ pub fn update_assembly_parts(doc: &ActiveDocument, el: &Element, cache: &mut Par
 
 /// What a click picks in an assembly: the origin, and faces, edges and vertices of instances.
 pub fn pick_filter() -> PickFilter {
-    PickFilter { origin: true, faces: true, edges: true, ..PickFilter::none() }
+    PickFilter {
+        origin: true,
+        faces: true,
+        edges: true,
+        ..PickFilter::none()
+    }
 }
 
 /// The instance a pick is on (a face, edge or vertex of it, or the whole instance).
@@ -504,7 +677,9 @@ pub fn instance_of(p: &Pick) -> Option<InstanceId> {
 
 /// The active tab, if it is an assembly.
 pub fn active_assembly(doc: &ActiveDocument) -> Option<ElementId> {
-    doc.active_element().filter(|e| e.assembly_model().is_some()).map(|e| e.id)
+    doc.active_element()
+        .filter(|e| e.assembly_model().is_some())
+        .map(|e| e.id)
 }
 
 /// The instances selected (in the list or the view; a face or edge selects its instance).
@@ -526,10 +701,17 @@ pub fn shown_points(doc: &ActiveDocument) -> Vec<Vec3> {
         return Vec::new();
     };
     let mut out = Vec::new();
-    for o in cadrs_core::assembly::structure::occurrences(&doc.doc, model).iter().filter(|o| !o.hidden) {
-        let Some(el) = doc.doc.element(o.element) else { continue };
+    for o in cadrs_core::assembly::structure::occurrences(&doc.doc, model)
+        .iter()
+        .filter(|o| !o.hidden)
+    {
+        let Some(el) = doc.doc.element(o.element) else {
+            continue;
+        };
         let build = cadrs_core::rebuild::build(el.part_features());
-        let Some(p) = build.part(o.part) else { continue };
+        let Some(p) = build.part(o.part) else {
+            continue;
+        };
         out.extend(p.solid.positions.iter().map(|q| {
             let w = o.pose.apply(*q);
             Vec3::new(w[0] as f32, w[1] as f32, w[2] as f32)
@@ -555,10 +737,21 @@ pub fn run(world: &mut World, cmd: &dyn cadrs_core::Command) -> bool {
 /// Shared by the instance menu and keyboard: remove placements in one undo step, retaining
 /// their source parts and clearing picks of the removed instances only after success.
 fn delete_instances(world: &mut World, element: ElementId, instances: Vec<InstanceId>) {
-    if instances.is_empty() || !run(world, &cadrs_core::assembly::commands::DeleteInstances { element, instances: instances.clone() }) {
+    if instances.is_empty()
+        || !run(
+            world,
+            &cadrs_core::assembly::commands::DeleteInstances {
+                element,
+                instances: instances.clone(),
+            },
+        )
+    {
         return;
     }
-    world.resource_mut::<Selection>().0.retain(|p| instance_of(p).is_none_or(|i| !instances.contains(&i)));
+    world
+        .resource_mut::<Selection>()
+        .0
+        .retain(|p| instance_of(p).is_none_or(|i| !instances.contains(&i)));
 }
 
 /// A selection to make once the view shows `element` (Switch to: the source part is selected
@@ -571,7 +764,9 @@ fn apply_pending_selection(
     view: Res<crate::viewport::ViewportView>,
     mut selection: ResMut<Selection>,
 ) {
-    let Some((el, picks)) = pending.0.clone() else { return };
+    let Some((el, picks)) = pending.0.clone() else {
+        return;
+    };
     if view.element == Some(el) {
         selection.0 = picks;
         pending.0 = None;
@@ -580,14 +775,28 @@ fn apply_pending_selection(
 
 /// Picks of instances that are gone (deleted, or replaced by a Replicate edit) leave the
 /// selection, so an undo that brings them back doesn't bring them back selected (P3B.8 judge).
-fn prune_selection(doc: Option<Res<ActiveDocument>>, cache: Res<PartCache>, mut selection: ResMut<Selection>) {
+fn prune_selection(
+    doc: Option<Res<ActiveDocument>>,
+    cache: Res<PartCache>,
+    mut selection: ResMut<Selection>,
+) {
     let Some(doc) = doc else { return };
-    if active_assembly(&doc).is_none() || !(doc.is_changed() || cache.is_changed()) || cache.assembly != doc.active {
+    if active_assembly(&doc).is_none()
+        || !(doc.is_changed() || cache.is_changed())
+        || cache.assembly != doc.active
+    {
         return;
     }
     // An instance's pick is on any part of it (a subassembly's row picks `PartId(S, 0)`).
-    let shown: std::collections::HashSet<InstanceId> = cache.parts.iter().map(|p| InstanceId::of_part(p.id)).collect();
-    let gone = |p: &Pick| p.part().is_some_and(|part| !shown.contains(&InstanceId::of_part(part)));
+    let shown: std::collections::HashSet<InstanceId> = cache
+        .parts
+        .iter()
+        .map(|p| InstanceId::of_part(p.id))
+        .collect();
+    let gone = |p: &Pick| {
+        p.part()
+            .is_some_and(|part| !shown.contains(&InstanceId::of_part(part)))
+    };
     if selection.0.iter().any(gone) {
         selection.0.retain(|p| !gone(p));
     }
@@ -629,7 +838,12 @@ fn assembly_keys(
         KeyCode::SuperRight,
     ]);
     let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
-    let ctrl = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight, KeyCode::SuperLeft, KeyCode::SuperRight]);
+    let ctrl = keys.any_pressed([
+        KeyCode::ControlLeft,
+        KeyCode::ControlRight,
+        KeyCode::SuperLeft,
+        KeyCode::SuperRight,
+    ]);
     for k in keys_in.read() {
         if k.state != ButtonState::Pressed || typing || !q_dialogs.is_empty() {
             continue;
@@ -646,10 +860,15 @@ fn assembly_keys(
                 KeyCode::KeyV => {
                     commands.queue(|world: &mut World| {
                         let hover = world.resource::<bevy::picking::hover::HoverMap>();
-                        let over = hover.get(&bevy::picking::pointer::PointerId::Mouse).is_some_and(|hits| {
-                            hits.keys().any(|e| world.get::<crate::viewport::ViewportArea>(*e).is_some())
-                        });
-                        let at = over.then(|| world.resource::<crate::viewport::ViewportDrag>().pointer());
+                        let over = hover
+                            .get(&bevy::picking::pointer::PointerId::Mouse)
+                            .is_some_and(|hits| {
+                                hits.keys().any(|e| {
+                                    world.get::<crate::viewport::ViewportArea>(*e).is_some()
+                                })
+                            });
+                        let at = over
+                            .then(|| world.resource::<crate::viewport::ViewportDrag>().pointer());
                         paste_instance(world, at);
                     });
                 }
@@ -690,20 +909,34 @@ fn assembly_keys(
             continue;
         }
         match k.shortcut_code() {
-            KeyCode::Delete | KeyCode::Backspace if !k.repeat && insert.is_none() && q_features.is_empty() => {
+            KeyCode::Delete | KeyCode::Backspace
+                if !k.repeat && insert.is_none() && q_features.is_empty() =>
+            {
                 commands.queue(move |world: &mut World| {
                     let instances = selected_instances(world.resource::<Selection>());
                     delete_instances(world, element, instances);
                 });
             }
             KeyCode::KeyM if !shift => {
-                commands.queue(|world: &mut World| mate_dialog::open_mate_dialog(world, cadrs_core::assembly::mate::MateType::Fastened));
+                commands.queue(|world: &mut World| {
+                    mate_dialog::open_mate_dialog(
+                        world,
+                        cadrs_core::assembly::mate::MateType::Fastened,
+                    )
+                });
             }
             // A14.1: all mates shown or hidden.
             KeyCode::KeyJ if !shift => {
                 commands.queue(|world: &mut World| {
-                    let Some(model) = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element()?.assembly_model().cloned()) else { return };
-                    world.resource_mut::<mate_display::MateDisplay>().toggle_all(&model);
+                    let Some(model) = world
+                        .get_resource::<ActiveDocument>()
+                        .and_then(|d| d.active_element()?.assembly_model().cloned())
+                    else {
+                        return;
+                    };
+                    world
+                        .resource_mut::<mate_display::MateDisplay>()
+                        .toggle_all(&model);
                 });
             }
             // A14.4: show mates mode.
@@ -725,7 +958,11 @@ fn assembly_keys(
                     commands.queue(move |world: &mut World| {
                         run(
                             world,
-                            &cadrs_core::assembly::commands::SetInstancesHidden { element, instances: vec![i], hidden: true },
+                            &cadrs_core::assembly::commands::SetInstancesHidden {
+                                element,
+                                instances: vec![i],
+                                hidden: true,
+                            },
                         );
                     });
                 }
@@ -740,7 +977,12 @@ fn assembly_keys(
 
 /// The parts of the view that show instances (a subassembly instance: all of its parts).
 pub fn view_parts(cache: &PartCache, instances: &[InstanceId]) -> Vec<PartId> {
-    cache.parts.iter().map(|p| p.id).filter(|p| instances.contains(&InstanceId::of_part(*p))).collect()
+    cache
+        .parts
+        .iter()
+        .map(|p| p.id)
+        .filter(|p| instances.contains(&InstanceId::of_part(*p)))
+        .collect()
 }
 
 /// The part id an instance has in the view.
@@ -762,9 +1004,27 @@ mod deletion_tests {
         doc.elements.push(child);
         let ids = [InstanceId::new(), InstanceId::new(), InstanceId::new()];
         doc.elements[1].assembly.instances = vec![
-            Instance::new(ids[0], InstanceSource::Part { element: studio, part: source }, Pose::IDENTITY),
-            Instance::new(ids[1], InstanceSource::Assembly { element: child_id }, Pose::IDENTITY),
-            Instance::new(ids[2], InstanceSource::Part { element: studio, part: source }, Pose::IDENTITY),
+            Instance::new(
+                ids[0],
+                InstanceSource::Part {
+                    element: studio,
+                    part: source,
+                },
+                Pose::IDENTITY,
+            ),
+            Instance::new(
+                ids[1],
+                InstanceSource::Assembly { element: child_id },
+                Pose::IDENTITY,
+            ),
+            Instance::new(
+                ids[2],
+                InstanceSource::Part {
+                    element: studio,
+                    part: source,
+                },
+                Pose::IDENTITY,
+            ),
         ];
         let mut active = ActiveDocument::new(doc);
         active.active = Some(assembly);
@@ -781,8 +1041,12 @@ mod deletion_tests {
 
     fn press(app: &mut App, code: KeyCode, repeat: bool) {
         app.world_mut().write_message(KeyboardInput {
-            key_code: code, logical_key: bevy::input::keyboard::Key::Delete,
-            state: ButtonState::Pressed, text: None, repeat, window: Entity::PLACEHOLDER,
+            key_code: code,
+            logical_key: bevy::input::keyboard::Key::Delete,
+            state: ButtonState::Pressed,
+            text: None,
+            repeat,
+            window: Entity::PLACEHOLDER,
         });
         app.update();
     }
@@ -792,9 +1056,13 @@ mod deletion_tests {
         for key in [KeyCode::Delete, KeyCode::Backspace] {
             let (mut app, element, ids) = scene();
             let before = app.world().resource::<ActiveDocument>().doc.clone();
-            let face = cadrs_sketch::FaceName::new(ids[0].0, cadrs_sketch::FaceOrigin::Unnamed { index: 0 });
+            let face = cadrs_sketch::FaceName::new(
+                ids[0].0,
+                cadrs_sketch::FaceOrigin::Unnamed { index: 0 },
+            );
             app.world_mut().resource_mut::<Selection>().0 = vec![
-                Pick::Part(ids[0].part_id()), Pick::Face(ids[0].part_id(), face),
+                Pick::Part(ids[0].part_id()),
+                Pick::Face(ids[0].part_id(), face),
                 Pick::Part(PartId::new(FeatureId(ids[1].0), 1)),
             ];
             press(&mut app, key, false);
@@ -802,15 +1070,30 @@ mod deletion_tests {
             let remaining = &active.doc.element(element).unwrap().assembly.instances;
             assert_eq!(remaining.len(), 1);
             assert_eq!(remaining[0].id, ids[2]);
-            assert_eq!(active.doc.elements[0], before.elements[0], "source studio must remain intact");
-            assert_eq!(active.doc.elements[2], before.elements[2], "source subassembly must remain intact");
+            assert_eq!(
+                active.doc.elements[0], before.elements[0],
+                "source studio must remain intact"
+            );
+            assert_eq!(
+                active.doc.elements[2], before.elements[2],
+                "source subassembly must remain intact"
+            );
             assert_eq!(active.history.undo_len(), 1);
             assert!(app.world().resource::<Selection>().0.is_empty());
             let mut active = app.world_mut().resource_mut::<ActiveDocument>();
             assert!(active.undo().is_some());
             assert_eq!(active.doc, before);
             assert!(active.redo().is_some());
-            assert_eq!(active.doc.element(element).unwrap().assembly.instances.len(), 1);
+            assert_eq!(
+                active
+                    .doc
+                    .element(element)
+                    .unwrap()
+                    .assembly
+                    .instances
+                    .len(),
+                1
+            );
         }
     }
 
@@ -825,11 +1108,25 @@ mod deletion_tests {
                     let field = app.world_mut().spawn(TextInputField).id();
                     app.insert_resource(InputFocus::from_entity(field));
                 }
-                2 => { app.world_mut().spawn(cadrs_ui::DialogRoot); }
-                3 => { app.world_mut().spawn(cadrs_ui::FeatureDialogState { title: "Insert".into(), valid: true, error: false }); }
-                4 => app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::ControlLeft),
-                5 => { let studio = before.elements[0].id; app.world_mut().resource_mut::<ActiveDocument>().active = Some(studio); }
-                _ => {},
+                2 => {
+                    app.world_mut().spawn(cadrs_ui::DialogRoot);
+                }
+                3 => {
+                    app.world_mut().spawn(cadrs_ui::FeatureDialogState {
+                        title: "Insert".into(),
+                        valid: true,
+                        error: false,
+                    });
+                }
+                4 => app
+                    .world_mut()
+                    .resource_mut::<ButtonInput<KeyCode>>()
+                    .press(KeyCode::ControlLeft),
+                5 => {
+                    let studio = before.elements[0].id;
+                    app.world_mut().resource_mut::<ActiveDocument>().active = Some(studio);
+                }
+                _ => {}
             }
             press(&mut app, KeyCode::Delete, guard == 6);
             let active = app.world().resource::<ActiveDocument>();

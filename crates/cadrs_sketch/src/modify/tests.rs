@@ -84,11 +84,7 @@ fn trim_line_between_two_crossings() {
     s.add_constraint(ConstraintOf::Horizontal(Orient::Line(CurveRef::Curve(h))));
     trim_op(&mut s, h, v(45.0, 0.0));
     // Two pieces are left: 0..30 and 60..100, each still horizontal.
-    let lines: Vec<CurveId> = s
-        .curves
-        .keys()
-        .filter(|k| *k != v1 && *k != v2)
-        .collect();
+    let lines: Vec<CurveId> = s.curves.keys().filter(|k| *k != v1 && *k != v2).collect();
     assert_eq!(lines.len(), 2);
     let mut spans: Vec<(Vec2, Vec2)> = lines.iter().map(|k| ends(&s, *k)).collect();
     spans.sort_by(|a, b| a.0.x.min(a.1.x).total_cmp(&b.0.x.min(b.1.x)));
@@ -158,7 +154,11 @@ fn trim_circle_becomes_arc() {
     let mut s = Sketch::new();
     let c = circle(&mut s, v(0.0, 0.0), 10.0);
     let l = line(&mut s, v(-20.0, 5.0), v(20.0, 5.0));
-    s.dimensions.insert(Dimension::new(DimensionKind::Diameter { curve: c }, 20.0, 0.0));
+    s.dimensions.insert(Dimension::new(
+        DimensionKind::Diameter { curve: c },
+        20.0,
+        0.0,
+    ));
     // Trim the top cap (above y = 5).
     trim_op(&mut s, c, v(0.0, 10.0));
     let CurveKind::Arc { .. } = s.curves[c].kind else {
@@ -208,7 +208,11 @@ fn trim_arc_between_crossings() {
         assert!(g.sweep < std::f64::consts::FRAC_PI_2);
     }
     // One circle: the two pieces are Equal.
-    assert!(s.constraints.values().any(|c| matches!(c, ConstraintOf::Equal(..))));
+    assert!(
+        s.constraints
+            .values()
+            .any(|c| matches!(c, ConstraintOf::Equal(..)))
+    );
     assert!(solve::conflicts(&s).is_empty());
     // Trimming an arc's end piece.
     let mut s = Sketch::new();
@@ -228,17 +232,38 @@ fn trim_keeps_and_drops_constraints() {
     // the whole line, and an Equal with another line.
     let q_gone = s.add_point(v(80.0, 0.0));
     let q_kept = s.add_point(v(10.0, 0.0));
-    s.add_constraint(ConstraintOf::PointOnCurve(PointRef::Point(q_gone), CurveRef::Curve(h)));
-    s.add_constraint(ConstraintOf::PointOnCurve(PointRef::Point(q_kept), CurveRef::Curve(h)));
+    s.add_constraint(ConstraintOf::PointOnCurve(
+        PointRef::Point(q_gone),
+        CurveRef::Curve(h),
+    ));
+    s.add_constraint(ConstraintOf::PointOnCurve(
+        PointRef::Point(q_kept),
+        CurveRef::Curve(h),
+    ));
     s.add_constraint(ConstraintOf::Equal(CurveRef::Curve(h), CurveRef::Curve(v1)));
     s.add_constraint(ConstraintOf::Horizontal(Orient::Line(CurveRef::Curve(h))));
-    s.dimensions.insert(Dimension::new(DimensionKind::Aligned { a: left, b: right }, 100.0, 5.0));
+    s.dimensions.insert(Dimension::new(
+        DimensionKind::Aligned { a: left, b: right },
+        100.0,
+        5.0,
+    ));
     trim_op(&mut s, h, v(80.0, 0.0));
     let has = |c: ConstraintOf<PointRef, CurveRef>| s.constraints.values().any(|x| *x == c);
-    assert!(!has(ConstraintOf::PointOnCurve(PointRef::Point(q_gone), CurveRef::Curve(h))));
-    assert!(has(ConstraintOf::PointOnCurve(PointRef::Point(q_kept), CurveRef::Curve(h))));
-    assert!(has(ConstraintOf::Horizontal(Orient::Line(CurveRef::Curve(h)))));
-    assert!(!has(ConstraintOf::Equal(CurveRef::Curve(h), CurveRef::Curve(v1))));
+    assert!(!has(ConstraintOf::PointOnCurve(
+        PointRef::Point(q_gone),
+        CurveRef::Curve(h)
+    )));
+    assert!(has(ConstraintOf::PointOnCurve(
+        PointRef::Point(q_kept),
+        CurveRef::Curve(h)
+    )));
+    assert!(has(ConstraintOf::Horizontal(Orient::Line(
+        CurveRef::Curve(h)
+    ))));
+    assert!(!has(ConstraintOf::Equal(
+        CurveRef::Curve(h),
+        CurveRef::Curve(v1)
+    )));
     // The dimension to the removed end went with it.
     assert!(s.dimensions.is_empty());
     assert!(solve::conflicts(&s).is_empty());
@@ -309,8 +334,14 @@ fn extend_line_to_line_arc_and_circle() {
     assert!(close(ext.to, v(50.0, 0.0)));
     assert_eq!(ext.by, Some(wall));
     // With the cursor short of the wall, it stops at the cursor; past it, at the wall.
-    assert!(close(extension(&s, l, end, Some(v(30.0, 4.0))).unwrap().to, v(30.0, 0.0)));
-    assert!(close(extension(&s, l, end, Some(v(90.0, 0.0))).unwrap().to, v(50.0, 0.0)));
+    assert!(close(
+        extension(&s, l, end, Some(v(30.0, 4.0))).unwrap().to,
+        v(30.0, 0.0)
+    ));
+    assert!(close(
+        extension(&s, l, end, Some(v(90.0, 0.0))).unwrap().to,
+        v(50.0, 0.0)
+    ));
     SketchOp::Extend {
         curve: l,
         end,
@@ -320,7 +351,11 @@ fn extend_line_to_line_arc_and_circle() {
     .apply(&mut s)
     .unwrap();
     assert!(close(ends(&s, l).1, v(50.0, 0.0)));
-    assert!(s.constraints.values().any(|c| matches!(c, ConstraintOf::PointOnCurve(_, CurveRef::Curve(k)) if *k == wall)));
+    assert!(
+        s.constraints
+            .values()
+            .any(|c| matches!(c, ConstraintOf::PointOnCurve(_, CurveRef::Curve(k)) if *k == wall))
+    );
     assert!(solve::conflicts(&s).is_empty());
 
     // To a circle: the near side.
@@ -403,7 +438,12 @@ fn split_line_keeps_shape_and_point_dimensions() {
     let p = s.point_at(v(40.0, 0.0), 1e-9).unwrap();
     assert_eq!(s.curves_at(p).count(), 2);
     // The only new freedom is the split point sliding along the line.
-    assert_eq!(analyze(&s).dof, dof + 1, "{:?}", s.constraints.values().collect::<Vec<_>>());
+    assert_eq!(
+        analyze(&s).dof,
+        dof + 1,
+        "{:?}",
+        s.constraints.values().collect::<Vec<_>>()
+    );
     // The split point takes a dimension from the line's start, and slides along the line.
     let a = s.point_at(v(0.0, 0.0), 1e-9).unwrap();
     let far = s.point_at(v(100.0, 0.0), 1e-9).unwrap();
@@ -471,7 +511,11 @@ fn split_arc_and_circle() {
     .apply(&mut s)
     .unwrap();
     assert_eq!(s.curves.len(), 2);
-    assert!(s.curves.values().all(|c| matches!(c.kind, CurveKind::Arc { .. })));
+    assert!(
+        s.curves
+            .values()
+            .all(|c| matches!(c.kind, CurveKind::Arc { .. }))
+    );
     // Two split points, each sliding round the circle.
     assert_eq!(analyze(&s).dof, dof + 2);
     assert!(analyze(&s).conflicting.is_empty());
@@ -486,12 +530,22 @@ fn normal_line_to_circle_and_ellipse() {
     let Fit::Complete(cs) = fit(ConstraintKind::Normal, &s, &sel) else {
         panic!("a line and a circle take Normal");
     };
-    assert_eq!(cs, vec![ConstraintOf::Normal(CurveRef::Curve(l), CurveRef::Curve(c))]);
+    assert_eq!(
+        cs,
+        vec![ConstraintOf::Normal(CurveRef::Curve(l), CurveRef::Curve(c))]
+    );
     // Either order; two lines do not.
-    assert!(matches!(fit(ConstraintKind::Normal, &s, &[sel[1], sel[0]]), Fit::Complete(_)));
+    assert!(matches!(
+        fit(ConstraintKind::Normal, &s, &[sel[1], sel[0]]),
+        Fit::Complete(_)
+    ));
     let l2 = line(&mut s, v(0.0, 40.0), v(10.0, 40.0));
     assert_eq!(
-        fit(ConstraintKind::Normal, &s, &[SketchEntity::Curve(l), SketchEntity::Curve(l2)]),
+        fit(
+            ConstraintKind::Normal,
+            &s,
+            &[SketchEntity::Curve(l), SketchEntity::Curve(l2)]
+        ),
         Fit::Invalid
     );
     SketchOp::AddConstraint {
@@ -523,7 +577,10 @@ fn normal_line_to_circle_and_ellipse() {
     let p = v(20.0 * 0.6f64.cos(), 10.0 * 0.6f64.sin());
     let l = line(&mut s, p, p + v(10.0, 3.0));
     let pe = s.point_at(p, 1e-9).unwrap();
-    s.add_constraint(ConstraintOf::PointOnCurve(PointRef::Point(pe), CurveRef::Curve(e)));
+    s.add_constraint(ConstraintOf::PointOnCurve(
+        PointRef::Point(pe),
+        CurveRef::Curve(e),
+    ));
     SketchOp::AddConstraint {
         constraints: vec![ConstraintOf::Normal(CurveRef::Curve(l), CurveRef::Curve(e))],
         label: "Add normal",

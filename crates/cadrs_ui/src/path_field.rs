@@ -116,7 +116,10 @@ impl PathFieldBuilder {
             (v, _) => (v.clone(), false),
         };
         let value_tip = self.value_tooltip.clone();
-        let mut input = TextInput::new(format!("{name}-input")).value(self.value).height(self.height).width(Val::Percent(100.0));
+        let mut input = TextInput::new(format!("{name}-input"))
+            .value(self.value)
+            .height(self.height)
+            .width(Val::Percent(100.0));
         if let Some(p) = self.placeholder {
             input = input.placeholder(p);
         }
@@ -126,11 +129,20 @@ impl PathFieldBuilder {
         (
             Name::new(name.clone()),
             PathField { name: name.clone() },
-            Node { width: Val::Percent(100.0), align_items: AlignItems::Center, column_gap: Val::Px(4.0), ..default() },
+            Node {
+                width: Val::Percent(100.0),
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(4.0),
+                ..default()
+            },
             Children::spawn(bevy::ecs::spawn::SpawnWith(move |p: &mut ChildSpawner| {
                 let root = p.target_entity();
                 if read_only {
-                    let fg = if is_placeholder { t.muted_foreground } else { t.foreground };
+                    let fg = if is_placeholder {
+                        t.muted_foreground
+                    } else {
+                        t.foreground
+                    };
                     let mut b = p.spawn((
                         Name::new(format!("{n}-input")),
                         PathFieldDisplay,
@@ -157,15 +169,23 @@ impl PathFieldBuilder {
                         Pickable::IGNORE,
                     ));
                 } else {
-                    p.spawn(input.build(&t)).entry::<Node>().and_modify(|mut node| {
-                        node.flex_grow = 1.0;
-                        node.min_width = Val::Px(0.0);
-                    });
+                    p.spawn(input.build(&t))
+                        .entry::<Node>()
+                        .and_modify(|mut node| {
+                            node.flex_grow = 1.0;
+                            node.min_width = Val::Px(0.0);
+                        });
                 }
                 p.spawn((
-                    IconButton::new(format!("{n}-browse"), icon).icon_size(18.0).tooltip(tip).build(&t),
+                    IconButton::new(format!("{n}-browse"), icon)
+                        .icon_size(18.0)
+                        .tooltip(tip)
+                        .build(&t),
                     observe(move |_: On<Activate>, mut commands: Commands| {
-                        commands.trigger(PathFieldBrowse { entity: root, name: n.clone() });
+                        commands.trigger(PathFieldBrowse {
+                            entity: root,
+                            name: n.clone(),
+                        });
                     }),
                 ))
                 .entry::<Node>()
@@ -183,7 +203,9 @@ impl PathFieldBuilder {
 pub fn path_field_value(world: &mut World, name: &str) -> Option<String> {
     let want = format!("{name}-input-field");
     let mut q = world.query_filtered::<(&Name, &EditableText), With<TextInputField>>();
-    q.iter(world).find(|(n, _)| n.as_str() == want).map(|(_, t)| t.value().to_string())
+    q.iter(world)
+        .find(|(n, _)| n.as_str() == want)
+        .map(|(_, t)| t.value().to_string())
 }
 
 /// Replaces the text of the path field `name`.
@@ -208,6 +230,8 @@ pub fn set_path_field_display(world: &mut World, name: &str, text: &str, tooltip
     let want = format!("{name}-input");
     let mut q = world.query_filtered::<(Entity, &Name), With<PathFieldDisplay>>();
     if let Some((e, _)) = q.iter(world).find(|(_, n)| n.as_str() == want) {
-        world.entity_mut(e).insert(crate::tooltip::Tooltip::new(tooltip));
+        world
+            .entity_mut(e)
+            .insert(crate::tooltip::Tooltip::new(tooltip));
     }
 }

@@ -21,7 +21,10 @@
 //! every round hole; runs of outline edges on one circle (corner break rounds, round reliefs)
 //! are true arcs.
 
-use cadrs_drawing::flat_view::{FlatBendInfo, FlatFormInfo, FlatInput, FlatLoop, circle_of, find_arcs, flat_projection, key_of, simplify_loop};
+use cadrs_drawing::flat_view::{
+    FlatBendInfo, FlatFormInfo, FlatInput, FlatLoop, circle_of, find_arcs, flat_projection, key_of,
+    simplify_loop,
+};
 use cadrs_sheetmetal::flat::{FlatPart, PieceSource};
 use cadrs_sheetmetal::poly::Seg2;
 
@@ -82,7 +85,12 @@ fn edge_key(part: &FlatPart, s: [P2; 2], fallback: u64) -> u64 {
 }
 
 /// A point in wall `w`'s own 2D on the flat of `part` (as forms are placed).
-fn hole_on_flat(ctx: &SheetMetalContext, part: &FlatPart, w: cadrs_sheetmetal::WallId, q: cadrs_sheetmetal::poly::P2) -> Option<P2> {
+fn hole_on_flat(
+    ctx: &SheetMetalContext,
+    part: &FlatPart,
+    w: cadrs_sheetmetal::WallId,
+    q: cadrs_sheetmetal::poly::P2,
+) -> Option<P2> {
     let place = part.placement(w)?;
     let wall = ctx.model.wall(w)?;
     Some(p2(&place.apply(wall.flat_local(&ctx.model.params, q))))
@@ -91,9 +99,16 @@ fn hole_on_flat(ctx: &SheetMetalContext, part: &FlatPart, w: cadrs_sheetmetal::W
 /// The flat view input of `part` in sheet metal model `ctx`.
 pub fn flat_input(ctx: &SheetMetalContext, part: PartId) -> Option<FlatInput> {
     let walls = &ctx.parts.iter().find(|(p, _)| *p == part)?.1;
-    let flat = ctx.flat.parts.iter().find(|f| f.walls.iter().any(|w| walls.contains(w)))?;
+    let flat = ctx
+        .flat
+        .parts
+        .iter()
+        .find(|f| f.walls.iter().any(|w| walls.contains(w)))?;
     let table = cadrs_sheetmetal::table::table(&ctx.model);
-    let mut input = FlatInput { thickness: ctx.model.params.thickness, ..Default::default() };
+    let mut input = FlatInput {
+        thickness: ctx.model.params.thickness,
+        ..Default::default()
+    };
     let mut li = 0u64;
     for poly in &flat.outline {
         for l in std::iter::once(&poly.outer).chain(poly.holes.iter()) {
@@ -104,21 +119,40 @@ pub fn flat_input(ctx: &SheetMetalContext, part: PartId) -> Option<FlatInput> {
             }
             if let Some((center, radius)) = circle_of(&raw) {
                 let key = edge_key(flat, [raw[0], raw[1]], li << 16);
-                input.loops.push(FlatLoop::Circle { center, radius, key });
+                input.loops.push(FlatLoop::Circle {
+                    center,
+                    radius,
+                    key,
+                });
                 // A counterbored or countersunk hole: its outer diameter too (the Hole feature's
                 // own cut-out: its centre where the feature's hole goes through the wall).
                 let mine = |m: &&crate::sheetmetal::HoleMark| {
                     (m.radius - radius).abs() <= 1e-3 * m.radius.max(1.0)
-                        && m.at.iter().filter_map(|(w, q)| hole_on_flat(ctx, flat, *w, *q)).any(|c| (c[0] - center[0]).hypot(c[1] - center[1]) <= 1e-3 * radius.max(1.0))
+                        && m.at
+                            .iter()
+                            .filter_map(|(w, q)| hole_on_flat(ctx, flat, *w, *q))
+                            .any(|c| {
+                                (c[0] - center[0]).hypot(c[1] - center[1]) <= 1e-3 * radius.max(1.0)
+                            })
                 };
                 if let Some(m) = ctx.hole_marks.iter().find(mine) {
-                    input.hole_marks.push((center, m.outer, key_of(&[key, 0xC0])));
+                    input
+                        .hole_marks
+                        .push((center, m.outer, key_of(&[key, 0xC0])));
                 }
                 continue;
             }
             let points = simplify_loop(&raw, 1e-6);
             let n = points.len();
-            let keys = (0..n).map(|i| edge_key(flat, [points[i], points[(i + 1) % n]], (li << 16) | i as u64)).collect();
+            let keys = (0..n)
+                .map(|i| {
+                    edge_key(
+                        flat,
+                        [points[i], points[(i + 1) % n]],
+                        (li << 16) | i as u64,
+                    )
+                })
+                .collect();
             let arcs = find_arcs(&points);
             input.loops.push(FlatLoop::Polygon { points, keys, arcs });
         }
@@ -127,12 +161,18 @@ pub fn flat_input(ctx: &SheetMetalContext, part: PartId) -> Option<FlatInput> {
         if let Some(s) = c.slit {
             // Keyed by the relief that made it (its corner's or bend end's joints).
             let what: Vec<u64> = format!("{:?}", c.source).bytes().map(u64::from).collect();
-            input.slits.push((seg(&s), key_of(&[key_of(&what), i as u64])));
+            input
+                .slits
+                .push((seg(&s), key_of(&[key_of(&what), i as u64])));
         }
     }
     for (i, f) in flat.forms.iter().enumerate() {
         input.forms.push(FlatFormInfo {
-            lines: f.lines.iter().map(|l| (l.points.iter().map(p2).collect(), l.closed)).collect(),
+            lines: f
+                .lines
+                .iter()
+                .map(|l| (l.points.iter().map(p2).collect(), l.closed))
+                .collect(),
             center: p2(&f.center),
             key: key_of(&[f.source, i as u64]),
         });
@@ -144,7 +184,9 @@ pub fn flat_input(ctx: &SheetMetalContext, part: PartId) -> Option<FlatInput> {
             name: b.name.clone(),
             up: b.up,
             angle_deg: row.map(|r| r.angle_deg).unwrap_or(90.0),
-            radius: row.map(|r| r.radius).unwrap_or(ctx.model.params.bend_radius),
+            radius: row
+                .map(|r| r.radius)
+                .unwrap_or(ctx.model.params.bend_radius),
             center: seg(&b.center),
             center_visible: b.center_visible.iter().map(seg).collect(),
             tangent_visible: b.tangent_visible.iter().map(seg).collect(),
@@ -155,25 +197,45 @@ pub fn flat_input(ctx: &SheetMetalContext, part: PartId) -> Option<FlatInput> {
 
 /// The sheet metal model `part` belongs to, if any.
 pub fn context_of(contexts: &[SheetMetalContext], part: PartId) -> Option<&SheetMetalContext> {
-    contexts.iter().find(|c| c.parts.iter().any(|(p, _)| *p == part))
+    contexts
+        .iter()
+        .find(|c| c.parts.iter().any(|(p, _)| *p == part))
 }
 
 /// The parts of a rebuild that have a flat pattern (the Insert view dialog's Flat patterns
 /// filter, SM16.2).
 pub fn flat_parts(contexts: &[SheetMetalContext]) -> Vec<PartId> {
-    contexts.iter().filter(|c| c.flat.is_ok()).flat_map(|c| c.parts.iter().map(|(p, _)| *p)).collect()
+    contexts
+        .iter()
+        .filter(|c| c.flat.is_ok())
+        .flat_map(|c| c.parts.iter().map(|(p, _)| *p))
+        .collect()
 }
 
 /// A flat pattern view's geometry (see the module docs).
-pub fn flat_geometry(contexts: &[SheetMetalContext], req: &ViewRequest) -> Result<ViewGeometry, String> {
-    let part = req.part.ok_or("A flat pattern view shows one sheet metal part")?;
+pub fn flat_geometry(
+    contexts: &[SheetMetalContext],
+    req: &ViewRequest,
+) -> Result<ViewGeometry, String> {
+    let part = req
+        .part
+        .ok_or("A flat pattern view shows one sheet metal part")?;
     let ctx = context_of(contexts, part).ok_or("The part is not a sheet metal part")?;
     let input = flat_input(ctx, part).ok_or("The part has no flat pattern")?;
     let f = &req.frame;
     let frame = cadrs_drawing::Frame3::new([f.dir.x, f.dir.y, f.dir.z], [f.x.x, f.x.y, f.x.z]);
     let (projection, edges, data) = flat_projection(ctx.feature.0, &input, &frame);
-    let bounds = projection.bounds().map(|(lo, hi)| ([lo.x, lo.y], [hi.x, hi.y]));
-    Ok(ViewGeometry { projection, parts: vec![part], bounds, edges, flat: Some(data), ..Default::default() })
+    let bounds = projection
+        .bounds()
+        .map(|(lo, hi)| ([lo.x, lo.y], [hi.x, hi.y]));
+    Ok(ViewGeometry {
+        projection,
+        parts: vec![part],
+        bounds,
+        edges,
+        flat: Some(data),
+        ..Default::default()
+    })
 }
 
 #[cfg(test)]
@@ -189,7 +251,22 @@ mod tests {
         let part = PartId::new(feature, 0);
         let walls = model.walls.iter().map(|w| w.id).collect();
         (
-            SheetMetalContext { feature, name: String::new(), model, flat, parts: vec![(part, walls)], active: true, wall_keys: Vec::new(), joint_keys: Vec::new(), def: None, owners: Vec::new(), editors: Vec::new(), forms: Vec::new(), corner_broken: false, hole_marks: Vec::new() },
+            SheetMetalContext {
+                feature,
+                name: String::new(),
+                model,
+                flat,
+                parts: vec![(part, walls)],
+                active: true,
+                wall_keys: Vec::new(),
+                joint_keys: Vec::new(),
+                def: None,
+                owners: Vec::new(),
+                editors: Vec::new(),
+                forms: Vec::new(),
+                corner_broken: false,
+                hole_marks: Vec::new(),
+            },
             part,
         )
     }
@@ -198,7 +275,10 @@ mod tests {
         ViewRequest {
             part: Some(part),
             frame: view.frame().view_frame(),
-            options: cadrs_kernel::ProjectOptions { tolerance: 0.01, hidden: true },
+            options: cadrs_kernel::ProjectOptions {
+                tolerance: 0.01,
+                hidden: true,
+            },
             shaded: false,
             props: Vec::new(),
             appearances: Vec::new(),
@@ -210,13 +290,23 @@ mod tests {
 
     #[test]
     fn the_flat_view_is_the_flat_pattern() {
-        let (ctx, part) = context(samples::open_box(Params::default(), RipStyle::EdgeJoint).unwrap());
-        let g = flat_geometry(std::slice::from_ref(&ctx), &request(part, cadrs_drawing::NamedView::Top)).unwrap();
+        let (ctx, part) =
+            context(samples::open_box(Params::default(), RipStyle::EdgeJoint).unwrap());
+        let g = flat_geometry(
+            std::slice::from_ref(&ctx),
+            &request(part, cadrs_drawing::NamedView::Top),
+        )
+        .unwrap();
         let fp = &ctx.flat.parts[0];
         // The view's bounds are the flat's.
         let (lo, hi) = fp.bounds().unwrap();
         let (vlo, vhi) = g.bounds.unwrap();
-        for (a, b) in [(vlo[0], lo.x), (vlo[1], lo.y), (vhi[0], hi.x), (vhi[1], hi.y)] {
+        for (a, b) in [
+            (vlo[0], lo.x),
+            (vlo[1], lo.y),
+            (vhi[0], hi.x),
+            (vhi[1], hi.y),
+        ] {
             assert!((a - b).abs() < 1e-9, "{vlo:?} {vhi:?} vs {lo:?} {hi:?}");
         }
         // Every outline edge lies on the flat's outline, and the outline's length is all there.
@@ -226,16 +316,25 @@ mod tests {
             .flat_map(|p| std::iter::once(&p.outer).chain(p.holes.iter()))
             .flat_map(|l| (0..l.len()).map(move |i| [p2(&l[i]), p2(&l[(i + 1) % l.len()])]))
             .collect();
-        let perimeter: f64 = outline.iter().map(|s| (s[1][0] - s[0][0]).hypot(s[1][1] - s[0][1])).sum();
+        let perimeter: f64 = outline
+            .iter()
+            .map(|s| (s[1][0] - s[0][0]).hypot(s[1][1] - s[0][1]))
+            .sum();
         let mut drawn = 0.0;
         for e in &g.projection.edges {
             let name = e.source.unwrap().edge_name.unwrap();
             if kind_of(&name) != Some(FlatEdgeKind::Outline) {
                 continue;
             }
-            let s = [[e.points[0].x, e.points[0].y], [e.points[1].x, e.points[1].y]];
+            let s = [
+                [e.points[0].x, e.points[0].y],
+                [e.points[1].x, e.points[1].y],
+            ];
             drawn += (s[1][0] - s[0][0]).hypot(s[1][1] - s[0][1]);
-            assert!(outline.iter().any(|o| overlaps(*o, s) || overlaps(s, *o)), "{s:?} is not on the outline");
+            assert!(
+                outline.iter().any(|o| overlaps(*o, s) || overlaps(s, *o)),
+                "{s:?} is not on the outline"
+            );
             assert!(g.edges.contains_key(&name));
         }
         assert!((drawn - perimeter).abs() < 1e-6, "{drawn} vs {perimeter}");
@@ -249,8 +348,19 @@ mod tests {
             assert!((info.radius - ctx.model.params.bend_radius).abs() < 1e-12);
             assert!((info.angle_deg - 90.0).abs() < 1e-9);
         }
-        let tangents = g.projection.edges.iter().filter(|e| e.class == cadrs_kernel::ProjClass::Smooth).count();
-        assert_eq!(tangents, fp.bends.iter().map(|b| b.tangent_visible.len()).sum::<usize>());
+        let tangents = g
+            .projection
+            .edges
+            .iter()
+            .filter(|e| e.class == cadrs_kernel::ProjClass::Smooth)
+            .count();
+        assert_eq!(
+            tangents,
+            fp.bends
+                .iter()
+                .map(|b| b.tangent_visible.len())
+                .sum::<usize>()
+        );
     }
 
     #[test]
@@ -261,8 +371,16 @@ mod tests {
         let (mut b, _) = context(samples::open_box(p, RipStyle::EdgeJoint).unwrap());
         b.feature = a.feature;
         b.parts[0].0 = part;
-        let ga = flat_geometry(std::slice::from_ref(&a), &request(part, cadrs_drawing::NamedView::Top)).unwrap();
-        let gb = flat_geometry(std::slice::from_ref(&b), &request(part, cadrs_drawing::NamedView::Top)).unwrap();
+        let ga = flat_geometry(
+            std::slice::from_ref(&a),
+            &request(part, cadrs_drawing::NamedView::Top),
+        )
+        .unwrap();
+        let gb = flat_geometry(
+            std::slice::from_ref(&b),
+            &request(part, cadrs_drawing::NamedView::Top),
+        )
+        .unwrap();
         let names = |g: &ViewGeometry| {
             let mut v: Vec<_> = g.edges.keys().copied().collect();
             v.sort();
@@ -276,7 +394,13 @@ mod tests {
     fn a_part_without_a_flat_is_refused() {
         let (ctx, _) = context(samples::open_box(Params::default(), RipStyle::EdgeJoint).unwrap());
         let other = PartId::new(FeatureId::new(), 0);
-        assert!(flat_geometry(std::slice::from_ref(&ctx), &request(other, cadrs_drawing::NamedView::Top)).is_err());
+        assert!(
+            flat_geometry(
+                std::slice::from_ref(&ctx),
+                &request(other, cadrs_drawing::NamedView::Top)
+            )
+            .is_err()
+        );
         assert_eq!(flat_parts(std::slice::from_ref(&ctx)).len(), 1);
     }
 }

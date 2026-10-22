@@ -17,8 +17,8 @@
 
 use nalgebra::{Point2, Vector2};
 
-use crate::{Chain, Curve2, KernelError, Loop, Profile, Region, Result};
 use crate::native::tol;
+use crate::{Chain, Curve2, KernelError, Loop, Profile, Region, Result};
 
 /// Set in the curve id of a thin wall's left-hand offset side.
 pub const THIN_LEFT: u64 = 1 << 61;
@@ -38,9 +38,23 @@ pub fn thin_profile(profile: &Profile, left: f64, right: f64) -> Result<Profile>
     let mut regions = Vec::new();
     for (i, r) in profile.regions.iter().enumerate() {
         let source = r.source.unwrap_or(i as u64);
-        wall(&oriented(&r.outer.curves, true), true, left, right, source, &mut regions)?;
+        wall(
+            &oriented(&r.outer.curves, true),
+            true,
+            left,
+            right,
+            source,
+            &mut regions,
+        )?;
         for h in &r.holes {
-            wall(&oriented(&h.curves, false), true, left, right, source, &mut regions)?;
+            wall(
+                &oriented(&h.curves, false),
+                true,
+                left,
+                right,
+                source,
+                &mut regions,
+            )?;
         }
     }
     for (i, c) in profile.chains.iter().enumerate() {
@@ -58,7 +72,14 @@ pub fn thin_profile(profile: &Profile, left: f64, right: f64) -> Result<Profile>
 }
 
 /// The bands and corner fills of one loop (`closed`) or chain.
-fn wall(curves: &[Curve2], closed: bool, left: f64, right: f64, source: u64, out: &mut Vec<Region>) -> Result<()> {
+fn wall(
+    curves: &[Curve2],
+    closed: bool,
+    left: f64,
+    right: f64,
+    source: u64,
+    out: &mut Vec<Region>,
+) -> Result<()> {
     for c in curves {
         out.push(band(c, curves.len() == 1 && closed, left, right, source)?);
     }
@@ -71,7 +92,14 @@ fn wall(curves: &[Curve2], closed: bool, left: f64, right: f64, source: u64, out
     };
     for i in 0..joints {
         let (a, b) = (&curves[i], &curves[(i + 1) % n]);
-        if let Some(f) = fill(b.start(), (a, end_tangent(a)), (b, start_tangent(b)), left, right, source) {
+        if let Some(f) = fill(
+            b.start(),
+            (a, end_tangent(a)),
+            (b, start_tangent(b)),
+            left,
+            right,
+            source,
+        ) {
             out.push(f);
         }
     }
@@ -120,7 +148,13 @@ fn band(c: &Curve2, whole: bool, left: f64, right: f64, source: u64) -> Result<R
                 vec![],
             ))
         }
-        Curve2::Arc { center, radius, start_angle, sweep, .. } if !whole && sweep.abs() < std::f64::consts::TAU - tol::ANGULAR => {
+        Curve2::Arc {
+            center,
+            radius,
+            start_angle,
+            sweep,
+            ..
+        } if !whole && sweep.abs() < std::f64::consts::TAU - tol::ANGULAR => {
             // Left of a counter-clockwise arc is toward its centre.
             let ccw = sweep > 0.0;
             let rl = if ccw { radius - left } else { radius + left };
@@ -156,21 +190,37 @@ fn band(c: &Curve2, whole: bool, left: f64, right: f64, source: u64) -> Result<R
                 _ => true,
             };
             let r = radius.abs();
-            let (inner, outer) = if ccw { (r - left, r + right) } else { (r - right, r + left) };
+            let (inner, outer) = if ccw {
+                (r - left, r + right)
+            } else {
+                (r - right, r + left)
+            };
             if inner < EPS {
                 return Err(KernelError::InvalidParameter(
                     "the wall is thicker than a circle's radius".into(),
                 ));
             }
-            let circle = |r: f64, src: Option<u64>| Curve2::Circle { center, radius: r, source: src };
+            let circle = |r: f64, src: Option<u64>| Curve2::Circle {
+                center,
+                radius: r,
+                source: src,
+            };
             let (inner_src, outer_src) = if ccw {
-                (side_source(c, left, THIN_LEFT), side_source(c, right, THIN_RIGHT))
+                (
+                    side_source(c, left, THIN_LEFT),
+                    side_source(c, right, THIN_RIGHT),
+                )
             } else {
-                (side_source(c, right, THIN_RIGHT), side_source(c, left, THIN_LEFT))
+                (
+                    side_source(c, right, THIN_RIGHT),
+                    side_source(c, left, THIN_LEFT),
+                )
             };
             Ok(region(
                 vec![circle(outer, outer_src)],
-                vec![Loop { curves: vec![circle(inner, inner_src)] }],
+                vec![Loop {
+                    curves: vec![circle(inner, inner_src)],
+                }],
             ))
         }
         Curve2::Ellipse { .. } | Curve2::EllipseArc { .. } | Curve2::OffsetEllipseArc { .. } => {
@@ -181,7 +231,10 @@ fn band(c: &Curve2, whole: bool, left: f64, right: f64, source: u64) -> Result<R
             // the offset curve at their ends (points and derivatives, scaled by 1 − d·κ).
             let right_side = offset_bezier(poles, -right, side_source(c, right, THIN_RIGHT))?;
             let left_side = offset_bezier(poles, left, side_source(c, left, THIN_LEFT))?;
-            let (rs, re) = (right_side[0].start(), right_side[right_side.len() - 1].end());
+            let (rs, re) = (
+                right_side[0].start(),
+                right_side[right_side.len() - 1].end(),
+            );
             let (ls, le) = (left_side[0].start(), left_side[left_side.len() - 1].end());
             let mut curves = right_side;
             curves.push(line(re, le, None));
@@ -200,23 +253,30 @@ fn offset_bezier(poles: &[Point2<f64>], d: f64, source: Option<u64>) -> Result<V
     let at = |t: f64| crate::types::bezier_point(&b, t);
     let deriv = |t: f64| {
         let u = 1.0 - t;
-        (b[1] - b[0]) * (3.0 * u * u) + (b[2] - b[1]) * (6.0 * u * t) + (b[3] - b[2]) * (3.0 * t * t)
+        (b[1] - b[0]) * (3.0 * u * u)
+            + (b[2] - b[1]) * (6.0 * u * t)
+            + (b[3] - b[2]) * (3.0 * t * t)
     };
     let second = |t: f64| {
         let u = 1.0 - t;
-        (b[2] - b[1] * 2.0 + b[0].coords) * (6.0 * u) + (b[3] - b[2] * 2.0 + b[1].coords) * (6.0 * t)
+        (b[2] - b[1] * 2.0 + b[0].coords) * (6.0 * u)
+            + (b[3] - b[2] * 2.0 + b[1].coords) * (6.0 * t)
     };
     // The offset point and its derivative (in the piece's own parameter) at `t`.
     let off = |t: f64, scale: f64| -> Result<(Point2<f64>, Vector2<f64>)> {
         let d1 = deriv(t);
         let l = d1.norm();
         if l < EPS {
-            return Err(KernelError::InvalidProfile("a spline with a cusp can't have a thin wall".into()));
+            return Err(KernelError::InvalidProfile(
+                "a spline with a cusp can't have a thin wall".into(),
+            ));
         }
         let k = (d1.x * second(t).y - d1.y * second(t).x) / (l * l * l);
         let f = 1.0 - k * d;
         if f <= EPS {
-            return Err(KernelError::InvalidParameter("the wall is thicker than a spline's radius of curvature".into()));
+            return Err(KernelError::InvalidParameter(
+                "the wall is thicker than a spline's radius of curvature".into(),
+            ));
         }
         Ok((at(t) + perp(d1 / l) * d, d1 * (f * scale)))
     };
@@ -226,7 +286,10 @@ fn offset_bezier(poles: &[Point2<f64>], d: f64, source: Option<u64>) -> Result<V
             let (t0, t1) = (i as f64 * h, (i + 1) as f64 * h);
             let (p0, d0) = off(t0, h)?;
             let (p3, d3) = off(t1, h)?;
-            Ok(Curve2::Bezier { poles: [p0, p0 + d0 / 3.0, p3 - d3 / 3.0, p3], source })
+            Ok(Curve2::Bezier {
+                poles: [p0, p0 + d0 / 3.0, p3 - d3 / 3.0, p3],
+                source,
+            })
         })
         .collect()
 }
@@ -284,7 +347,9 @@ fn end_tangent(c: &Curve2) -> Vector2<f64> {
 fn tangent(c: &Curve2, s: f64) -> Vector2<f64> {
     match *c {
         Curve2::Line { a, b, .. } => (b - a).normalize(),
-        Curve2::Arc { start_angle, sweep, .. } => {
+        Curve2::Arc {
+            start_angle, sweep, ..
+        } => {
             let t = start_angle + sweep * s;
             Vector2::new(-t.sin(), t.cos()) * sweep.signum()
         }
@@ -292,11 +357,20 @@ fn tangent(c: &Curve2, s: f64) -> Vector2<f64> {
             // The exact end tangents (the joints of a spline's spans line up to rounding, so
             // they get no corner fill).
             let u = 1.0 - s;
-            let v = (poles[1] - poles[0]) * (u * u) + (poles[2] - poles[1]) * (2.0 * u * s) + (poles[3] - poles[2]) * (s * s);
-            if v.norm() > tol::DEGENERATE { v.normalize() } else { (poles[3] - poles[0]).normalize() }
+            let v = (poles[1] - poles[0]) * (u * u)
+                + (poles[2] - poles[1]) * (2.0 * u * s)
+                + (poles[3] - poles[2]) * (s * s);
+            if v.norm() > tol::DEGENERATE {
+                v.normalize()
+            } else {
+                (poles[3] - poles[0]).normalize()
+            }
         }
         _ => {
-            let (a, b) = (c.point_at((s - tol::DIFF_STEP).max(0.0)), c.point_at((s + tol::DIFF_STEP).min(1.0)));
+            let (a, b) = (
+                c.point_at((s - tol::DIFF_STEP).max(0.0)),
+                c.point_at((s + tol::DIFF_STEP).min(1.0)),
+            );
             (b - a).normalize()
         }
     }
@@ -306,33 +380,55 @@ fn tangent(c: &Curve2, s: f64) -> Vector2<f64> {
 fn reverse(c: &Curve2) -> Curve2 {
     match c.clone() {
         Curve2::Line { a, b, source } => Curve2::Line { a: b, b: a, source },
-        Curve2::Arc { center, radius, start_angle, sweep, source } => Curve2::Arc {
+        Curve2::Arc {
+            center,
+            radius,
+            start_angle,
+            sweep,
+            source,
+        } => Curve2::Arc {
             center,
             radius,
             start_angle: start_angle + sweep,
             sweep: -sweep,
             source,
         },
-        Curve2::EllipseArc { center, major_radius, minor_radius, rotation, start, sweep, source } => {
-            Curve2::EllipseArc {
-                center,
-                major_radius,
-                minor_radius,
-                rotation,
-                start: start + sweep,
-                sweep: -sweep,
-                source,
-            }
-        }
+        Curve2::EllipseArc {
+            center,
+            major_radius,
+            minor_radius,
+            rotation,
+            start,
+            sweep,
+            source,
+        } => Curve2::EllipseArc {
+            center,
+            major_radius,
+            minor_radius,
+            rotation,
+            start: start + sweep,
+            sweep: -sweep,
+            source,
+        },
         // Whole circles and ellipses: marked clockwise by a negative sweep, as an arc.
-        Curve2::Circle { center, radius, source } => Curve2::Arc {
+        Curve2::Circle {
+            center,
+            radius,
+            source,
+        } => Curve2::Arc {
             center,
             radius,
             start_angle: 0.0,
             sweep: -std::f64::consts::TAU,
             source,
         },
-        Curve2::Bezier { poles: [a, b, c, d], source } => Curve2::Bezier { poles: [d, c, b, a], source },
+        Curve2::Bezier {
+            poles: [a, b, c, d],
+            source,
+        } => Curve2::Bezier {
+            poles: [d, c, b, a],
+            source,
+        },
         other => other,
     }
 }
@@ -384,10 +480,16 @@ mod tests {
     fn a_square_wall_is_bands_and_fills() {
         let p = Point2::new;
         let sq = [p(0.0, 0.0), p(20.0, 0.0), p(20.0, 20.0), p(0.0, 20.0)];
-        let curves = (0..4).map(|i| line(sq[i], sq[(i + 1) % 4], Some(i as u64 + 1))).collect();
+        let curves = (0..4)
+            .map(|i| line(sq[i], sq[(i + 1) % 4], Some(i as u64 + 1)))
+            .collect();
         let profile = Profile::new(
             Plane::top(),
-            vec![Region { outer: Loop { curves }, holes: vec![], source: Some(9) }],
+            vec![Region {
+                outer: Loop { curves },
+                holes: vec![],
+                source: Some(9),
+            }],
         );
         // 1 mm outside: four 20 × 1 bands and four 1 × 1 corner fills (the outside of every
         // left turn): 84 = 22² − 20².
@@ -407,7 +509,11 @@ mod tests {
             Plane::top(),
             vec![Region {
                 outer: Loop {
-                    curves: vec![Curve2::Circle { center: Point2::origin(), radius: 10.0, source: Some(3) }],
+                    curves: vec![Curve2::Circle {
+                        center: Point2::origin(),
+                        radius: 10.0,
+                        source: Some(3),
+                    }],
                 },
                 holes: vec![],
                 source: None,

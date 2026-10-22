@@ -54,19 +54,36 @@ pub fn circle_through(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> Option<([f64; 2]
 
 /// An arc (start, mid, end) as `n` + 1 points.
 fn flatten_arc(a: [f64; 2], m: [f64; 2], b: [f64; 2], n: usize) -> Vec<[f64; 2]> {
-    let Some((c, r)) = circle_through(a, m, b) else { return vec![a, b] };
+    let Some((c, r)) = circle_through(a, m, b) else {
+        return vec![a, b];
+    };
     let ang = |p: [f64; 2]| (p[1] - c[1]).atan2(p[0] - c[0]);
     let (t0, tm, t1) = (ang(a), ang(m), ang(b));
     let tau = std::f64::consts::TAU;
     // Sweep from t0 to t1 through tm.
     let ccw = (tm - t0).rem_euclid(tau) < (t1 - t0).rem_euclid(tau);
-    let sweep = if ccw { (t1 - t0).rem_euclid(tau) } else { -(t0 - t1).rem_euclid(tau) };
-    (0..=n).map(|i| t0 + sweep * i as f64 / n as f64).map(|t| [c[0] + r * t.cos(), c[1] + r * t.sin()]).collect()
+    let sweep = if ccw {
+        (t1 - t0).rem_euclid(tau)
+    } else {
+        -(t0 - t1).rem_euclid(tau)
+    };
+    (0..=n)
+        .map(|i| t0 + sweep * i as f64 / n as f64)
+        .map(|t| [c[0] + r * t.cos(), c[1] + r * t.sin()])
+        .collect()
 }
 
 /// An SVG elliptical arc (endpoint form) as a circular arc's three points, or line pieces when
 /// it's elliptical.
-fn svg_arc(p0: [f64; 2], rx: f64, ry: f64, phi_deg: f64, large: bool, sweep: bool, p1: [f64; 2]) -> Vec<Seg> {
+fn svg_arc(
+    p0: [f64; 2],
+    rx: f64,
+    ry: f64,
+    phi_deg: f64,
+    large: bool,
+    sweep: bool,
+    p1: [f64; 2],
+) -> Vec<Seg> {
     if (rx.abs() < 1e-9 || ry.abs() < 1e-9) || (p0[0] - p1[0]).hypot(p0[1] - p1[1]) < 1e-9 {
         return vec![Seg::Line(p0, p1)];
     }
@@ -88,10 +105,18 @@ fn svg_arc(p0: [f64; 2], rx: f64, ry: f64, phi_deg: f64, large: bool, sweep: boo
         k = -k;
     }
     let (cx1, cy1) = (k * rx * y1 / ry, -k * ry * x1 / rx);
-    let (cx, cy) = (cp * cx1 - sp * cy1 + (p0[0] + p1[0]) / 2.0, sp * cx1 + cp * cy1 + (p0[1] + p1[1]) / 2.0);
+    let (cx, cy) = (
+        cp * cx1 - sp * cy1 + (p0[0] + p1[0]) / 2.0,
+        sp * cx1 + cp * cy1 + (p0[1] + p1[1]) / 2.0,
+    );
     let angle = |ux: f64, uy: f64, vx: f64, vy: f64| (ux * vy - uy * vx).atan2(ux * vx + uy * vy);
     let t1 = angle(1.0, 0.0, (x1 - cx1) / rx, (y1 - cy1) / ry);
-    let mut dt = angle((x1 - cx1) / rx, (y1 - cy1) / ry, (-x1 - cx1) / rx, (-y1 - cy1) / ry);
+    let mut dt = angle(
+        (x1 - cx1) / rx,
+        (y1 - cy1) / ry,
+        (-x1 - cx1) / rx,
+        (-y1 - cy1) / ry,
+    );
     let tau = std::f64::consts::TAU;
     if !sweep && dt > 0.0 {
         dt -= tau;
@@ -106,7 +131,10 @@ fn svg_arc(p0: [f64; 2], rx: f64, ry: f64, phi_deg: f64, large: bool, sweep: boo
         // Circular; a full turn needs two halves to stay well defined.
         if dt.abs() > std::f64::consts::PI * 1.5 {
             let m = at(t1 + dt / 2.0);
-            return vec![Seg::Arc(p0, at(t1 + dt / 4.0), m), Seg::Arc(m, at(t1 + dt * 0.75), p1)];
+            return vec![
+                Seg::Arc(p0, at(t1 + dt / 4.0), m),
+                Seg::Arc(m, at(t1 + dt * 0.75), p1),
+            ];
         }
         return vec![Seg::Arc(p0, at(t1 + dt / 2.0), p1)];
     }
@@ -114,7 +142,11 @@ fn svg_arc(p0: [f64; 2], rx: f64, ry: f64, phi_deg: f64, large: bool, sweep: boo
     let mut prev = p0;
     (1..=n)
         .map(|i| {
-            let q = if i == n { p1 } else { at(t1 + dt * i as f64 / n as f64) };
+            let q = if i == n {
+                p1
+            } else {
+                at(t1 + dt * i as f64 / n as f64)
+            };
             let s = Seg::Line(prev, q);
             prev = q;
             s
@@ -255,7 +287,8 @@ pub fn parse(d: &str) -> Vec<Sub> {
             }
             'A' => {
                 let q = off(pos, v[5], v[6]);
-                cur.segs.extend(svg_arc(pos, v[0], v[1], v[2], v[3] != 0.0, v[4] != 0.0, q));
+                cur.segs
+                    .extend(svg_arc(pos, v[0], v[1], v[2], v[3] != 0.0, v[4] != 0.0, q));
                 pos = q;
             }
             _ => {}
@@ -288,7 +321,9 @@ mod tests {
         // From (0,0) to (10,0), radius 5, sweep 1: in y-down SVG, clockwise on screen, i.e.
         // through (5,-5).
         let s = parse("M 0 0 A 5 5 0 0 1 10 0");
-        let Seg::Arc(a, m, b) = s[0].segs[0] else { panic!("{s:?}") };
+        let Seg::Arc(a, m, b) = s[0].segs[0] else {
+            panic!("{s:?}")
+        };
         assert!(close(a, [0.0, 0.0]) && close(b, [10.0, 0.0]), "{a:?} {b:?}");
         assert!(close(m, [5.0, -5.0]), "{m:?}");
         let (c, r) = circle_through(a, m, b).unwrap();

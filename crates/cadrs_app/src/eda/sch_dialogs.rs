@@ -38,8 +38,20 @@ fn close_all(w: &mut World) {
 
 /// A labelled row: the label, then `f` spawns the field.
 fn row(p: &mut ChildSpawner, t: &Theme, label: &str, f: impl FnOnce(&mut ChildSpawner)) {
-    p.spawn(Node { align_items: AlignItems::Center, column_gap: Val::Px(10.0), height: Val::Px(34.0), ..default() }).with_children(|r| {
-        r.spawn((t.text(label, t.font_base, FontWeight::MEDIUM, t.muted_foreground), Node { width: Val::Px(110.0), ..default() }));
+    p.spawn(Node {
+        align_items: AlignItems::Center,
+        column_gap: Val::Px(10.0),
+        height: Val::Px(34.0),
+        ..default()
+    })
+    .with_children(|r| {
+        r.spawn((
+            t.text(label, t.font_base, FontWeight::MEDIUM, t.muted_foreground),
+            Node {
+                width: Val::Px(110.0),
+                ..default()
+            },
+        ));
         f(r);
     });
 }
@@ -47,20 +59,31 @@ fn row(p: &mut ChildSpawner, t: &Theme, label: &str, f: impl FnOnce(&mut ChildSp
 fn text_row(p: &mut ChildSpawner, t: &Theme, label: &str, name: &'static str, value: &str) {
     let value = value.to_string();
     row(p, t, label, |r| {
-        r.spawn(TextInput::new(name).value(value).width(Val::Px(300.0)).height(28.0).build(t));
+        r.spawn(
+            TextInput::new(name)
+                .value(value)
+                .width(Val::Px(300.0))
+                .height(28.0)
+                .build(t),
+        );
     });
 }
 
 /// OK / Cancel; OK runs `ok`.
 fn ok_cancel(f: &mut ChildSpawner, t: &Theme, ok_name: &'static str, ok: fn(&mut World)) {
     f.spawn((
-        cadrs_ui::Button::new(ok_name).label("OK").primary().build(t),
+        cadrs_ui::Button::new(ok_name)
+            .label("OK")
+            .primary()
+            .build(t),
         observe(move |_: On<Activate>, mut commands: Commands| {
             commands.queue(ok);
         }),
     ));
     f.spawn((
-        cadrs_ui::Button::new(format!("{ok_name}-cancel")).label("Cancel").build(t),
+        cadrs_ui::Button::new(format!("{ok_name}-cancel"))
+            .label("Cancel")
+            .build(t),
         observe(|_: On<Activate>, mut commands: Commands| {
             commands.queue(close_all);
         }),
@@ -69,7 +92,11 @@ fn ok_cancel(f: &mut ChildSpawner, t: &Theme, ok_name: &'static str, ok: fn(&mut
 
 fn spawn_dialog(w: &mut World, d: Dialog) {
     let theme = w.resource::<Theme>().clone();
-    w.spawn((d.build(&theme), EdaDialog, DespawnOnExit(AppState::Document)));
+    w.spawn((
+        d.build(&theme),
+        EdaDialog,
+        DespawnOnExit(AppState::Document),
+    ));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -95,7 +122,6 @@ fn accept_label(w: &mut World) {
         set_tool(w, Tool::Label(text));
     }
 }
-
 
 /// Ctrl+L: a global label's name (it joins every sheet's net of that name).
 pub fn open_global_label(w: &mut World) {
@@ -158,17 +184,24 @@ pub fn open_find(w: &mut World) {
 fn accept_find(w: &mut World) {
     let text = ui::text_value(w, "eda-find-text").trim().to_lowercase();
     close_all(w);
-    let Some((_, _, d)) = ui::current(w) else { return };
+    let Some((_, _, d)) = ui::current(w) else {
+        return;
+    };
     let sh = &d.schematic.sheets[0];
     let hit = sh
         .symbols
         .iter()
         .find(|s| s.reference().to_lowercase() == text)
-        .or_else(|| sh.symbols.iter().find(|s| s.value().to_lowercase().contains(&text)))
+        .or_else(|| {
+            sh.symbols
+                .iter()
+                .find(|s| s.value().to_lowercase().contains(&text))
+        })
         .map(|s| (s.id, s.placement.at));
     match hit {
         Some((id, at)) => {
-            w.resource_mut::<super::schematic_tools::SchState>().selection = vec![se::SchItem::Symbol(id)];
+            w.resource_mut::<super::schematic_tools::SchState>()
+                .selection = vec![se::SchItem::Symbol(id)];
             let key = w.resource::<super::Eda2d>().0;
             if let Some(k) = key
                 && let Some(v) = w.resource_mut::<super::EdaUi>().views.get_mut(&k)
@@ -186,13 +219,33 @@ fn accept_find(w: &mut World) {
 #[derive(Resource, Default)]
 struct PropsTarget(Option<Uuid>);
 
-const PROP_FIELDS: [(&str, &str); 4] = [(fields::REFERENCE, "eda-props-reference"), (fields::VALUE, "eda-props-value"), (fields::FOOTPRINT, "eda-props-footprint"), (fields::DATASHEET, "eda-props-datasheet")];
+const PROP_FIELDS: [(&str, &str); 4] = [
+    (fields::REFERENCE, "eda-props-reference"),
+    (fields::VALUE, "eda-props-value"),
+    (fields::FOOTPRINT, "eda-props-footprint"),
+    (fields::DATASHEET, "eda-props-datasheet"),
+];
 
 pub fn open_properties(w: &mut World, symbol: Uuid) {
-    let Some((_, _, d)) = ui::current(w) else { return };
-    let Some(s) = d.schematic.sheets.iter().flat_map(|x| &x.symbols).find(|x| x.id == symbol).cloned() else { return };
+    let Some((_, _, d)) = ui::current(w) else {
+        return;
+    };
+    let Some(s) = d
+        .schematic
+        .sheets
+        .iter()
+        .flat_map(|x| &x.symbols)
+        .find(|x| x.id == symbol)
+        .cloned()
+    else {
+        return;
+    };
     // The footprint browser narrows to the symbol's footprint filters (C_* for a capacitor).
-    let globs = d.schematic.symbol(&s.symbol).map(|def| def.footprint_filters.clone()).unwrap_or_default();
+    let globs = d
+        .schematic
+        .symbol(&s.symbol)
+        .map(|def| def.footprint_filters.clone())
+        .unwrap_or_default();
     w.insert_resource(PropsTarget(Some(symbol)));
     let t = w.resource::<Theme>().clone();
     let tf = t.clone();
@@ -211,12 +264,27 @@ pub fn open_properties(w: &mut World, symbol: Uuid) {
                     }
                     let globs = globs.clone();
                     row(b, &t, name, |r| {
-                        r.spawn(TextInput::new(field).value(value).placeholder("None: choose one").width(Val::Px(250.0)).height(28.0).build(&t));
+                        r.spawn(
+                            TextInput::new(field)
+                                .value(value)
+                                .placeholder("None: choose one")
+                                .width(Val::Px(250.0))
+                                .height(28.0)
+                                .build(&t),
+                        );
                         r.spawn((
-                            cadrs_ui::Button::new("eda-props-footprint-choose").label("Choose…").build(&t),
+                            cadrs_ui::Button::new("eda-props-footprint-choose")
+                                .label("Choose…")
+                                .build(&t),
                             observe(move |_: On<Activate>, mut commands: Commands| {
                                 let globs = globs.clone();
-                                commands.queue(move |w: &mut World| super::browser::open(w, super::browser::Kind::Footprints { globs }, super::browser::Purpose::PropsFootprint));
+                                commands.queue(move |w: &mut World| {
+                                    super::browser::open(
+                                        w,
+                                        super::browser::Kind::Footprints { globs },
+                                        super::browser::Purpose::PropsFootprint,
+                                    )
+                                });
                             }),
                         ));
                     });
@@ -227,12 +295,24 @@ pub fn open_properties(w: &mut World, symbol: Uuid) {
 }
 
 fn accept_properties(w: &mut World) {
-    let Some(id) = w.get_resource::<PropsTarget>().and_then(|t| t.0) else { return };
-    let values: Vec<(&str, String)> = PROP_FIELDS.iter().map(|(n, f)| (*n, ui::text_value(w, f))).collect();
+    let Some(id) = w.get_resource::<PropsTarget>().and_then(|t| t.0) else {
+        return;
+    };
+    let values: Vec<(&str, String)> = PROP_FIELDS
+        .iter()
+        .map(|(n, f)| (*n, ui::text_value(w, f)))
+        .collect();
     close_all(w);
     ui::commit(w, "Edit symbol properties", |d| {
         for (name, v) in &values {
-            let cur = d.schematic.sheets.iter().flat_map(|s| &s.symbols).find(|s| s.id == id).and_then(|s| s.field(name)).map(|f| f.value().to_string());
+            let cur = d
+                .schematic
+                .sheets
+                .iter()
+                .flat_map(|s| &s.symbols)
+                .find(|s| s.id == id)
+                .and_then(|s| s.field(name))
+                .map(|f| f.value().to_string());
             if cur.as_deref() != Some(v.as_str()) && !(cur.is_none() && v.is_empty()) {
                 se::set_field(&mut d.schematic, id, name, v);
             }
@@ -240,7 +320,6 @@ fn accept_properties(w: &mut World) {
         Ok(())
     });
 }
-
 
 // ---------------------------------------------------------------------------------------------
 // Wire colour (E or double-click on a wire)
@@ -256,10 +335,22 @@ struct WireTarget {
 /// document's custom colours, the mixer, Hex and RGB; Default is the theme's wire colour), for
 /// its whole run of connected wires unless "Only this wire".
 pub fn open_wire(w: &mut World, wire: Uuid) {
-    let Some((_, _, d)) = ui::current(w) else { return };
-    let Some(cur) = d.schematic.sheets[0].wires.iter().find(|x| x.id == wire).map(|x| x.stroke.color) else { return };
+    let Some((_, _, d)) = ui::current(w) else {
+        return;
+    };
+    let Some(cur) = d.schematic.sheets[0]
+        .wires
+        .iter()
+        .find(|x| x.id == wire)
+        .map(|x| x.stroke.color)
+    else {
+        return;
+    };
     let run = se::connected_wires(&d.schematic, 0, wire).len();
-    let custom: Vec<[u8; 3]> = w.get_resource::<crate::ActiveDocument>().map(|d| d.doc.custom_colors.iter().map(|c| c.rgb).collect()).unwrap_or_default();
+    let custom: Vec<[u8; 3]> = w
+        .get_resource::<crate::ActiveDocument>()
+        .map(|d| d.doc.custom_colors.iter().map(|c| c.rgb).collect())
+        .unwrap_or_default();
     w.insert_resource(WireTarget { wire, color: cur });
     let shown = cur.map_or(theme_wire(), |c| [c.r, c.g, c.b, 255]);
     let t = w.resource::<Theme>().clone();
@@ -278,9 +369,18 @@ pub fn open_wire(w: &mut World, wire: Uuid) {
                         .default_button()
                         .build(&t),
                 );
-                b.spawn((Node { margin: UiRect::top(Val::Px(8.0)), ..default() },)).with_children(|r| {
-                    r.spawn(Checkbox::new("eda-wire-only").label(format!("Only this wire (else all {run} connected)")).checked(false).build(&t));
-                });
+                b.spawn((Node {
+                    margin: UiRect::top(Val::Px(8.0)),
+                    ..default()
+                },))
+                    .with_children(|r| {
+                        r.spawn(
+                            Checkbox::new("eda-wire-only")
+                                .label(format!("Only this wire (else all {run} connected)"))
+                                .checked(false)
+                                .build(&t),
+                        );
+                    });
             })
             .footer(move |f| ok_cancel(f, &tf, "eda-wire-ok", accept_wire)),
     );
@@ -293,7 +393,10 @@ fn theme_wire() -> [u8; 4] {
 
 /// A colour picked in the wire dialog.
 fn on_wire_color(ev: On<cadrs_ui::ColorEditorChange>, q: Query<&Name>, mut commands: Commands) {
-    if !q.get(ev.entity).is_ok_and(|n| n.as_str() == "eda-wire-editor") {
+    if !q
+        .get(ev.entity)
+        .is_ok_and(|n| n.as_str() == "eda-wire-editor")
+    {
         return;
     }
     let [r, g, b, _] = ev.rgba;
@@ -305,8 +408,14 @@ fn on_wire_color(ev: On<cadrs_ui::ColorEditorChange>, q: Query<&Name>, mut comma
 }
 
 /// Default: the theme's wire colour.
-fn on_wire_default(ev: On<cadrs_ui::ColorEditorDefault>, mut q: Query<(&Name, &mut cadrs_ui::ColorEditorState)>, mut commands: Commands) {
-    let Ok((n, mut st)) = q.get_mut(ev.entity) else { return };
+fn on_wire_default(
+    ev: On<cadrs_ui::ColorEditorDefault>,
+    mut q: Query<(&Name, &mut cadrs_ui::ColorEditorState)>,
+    mut commands: Commands,
+) {
+    let Ok((n, mut st)) = q.get_mut(ev.entity) else {
+        return;
+    };
     if n.as_str() != "eda-wire-editor" {
         return;
     }
@@ -319,12 +428,18 @@ fn on_wire_default(ev: On<cadrs_ui::ColorEditorDefault>, mut q: Query<(&Name, &m
 }
 
 fn accept_wire(w: &mut World) {
-    let Some(t) = w.get_resource::<WireTarget>().cloned() else { return };
+    let Some(t) = w.get_resource::<WireTarget>().cloned() else {
+        return;
+    };
     let color = t.color;
     let only = checkbox(w, "eda-wire-only");
     close_all(w);
     ui::commit(w, "Wire colour", |d| {
-        let wires = if only { vec![t.wire] } else { se::connected_wires(&d.schematic, 0, t.wire) };
+        let wires = if only {
+            vec![t.wire]
+        } else {
+            se::connected_wires(&d.schematic, 0, t.wire)
+        };
         se::set_wire_color(&mut d.schematic, 0, &wires, color);
         Ok(())
     });
@@ -360,19 +475,74 @@ pub fn open_assign(w: &mut World) {
             .title("Assign footprints")
             .width(860.0)
             .body(move |b| {
-                b.spawn(Node { column_gap: Val::Px(14.0), align_items: AlignItems::Center, ..default() }).with_children(|r| {
-                    r.spawn(Checkbox::new("eda-assign-by-symbol").label("Symbol's filters").checked(true).build(&t));
-                    r.spawn(Checkbox::new("eda-assign-by-pins").label("Pin count").checked(true).build(&t));
-                    r.spawn(TextInput::new("eda-assign-filter").placeholder("Filter footprints").width(Val::Px(260.0)).height(28.0).build(&t));
+                b.spawn(Node {
+                    column_gap: Val::Px(14.0),
+                    align_items: AlignItems::Center,
+                    ..default()
+                })
+                .with_children(|r| {
+                    r.spawn(
+                        Checkbox::new("eda-assign-by-symbol")
+                            .label("Symbol's filters")
+                            .checked(true)
+                            .build(&t),
+                    );
+                    r.spawn(
+                        Checkbox::new("eda-assign-by-pins")
+                            .label("Pin count")
+                            .checked(true)
+                            .build(&t),
+                    );
+                    r.spawn(
+                        TextInput::new("eda-assign-filter")
+                            .placeholder("Filter footprints")
+                            .width(Val::Px(260.0))
+                            .height(28.0)
+                            .build(&t),
+                    );
                 });
-                b.spawn(Node { column_gap: Val::Px(10.0), height: Val::Px(360.0), margin: UiRect::top(Val::Px(8.0)), ..default() }).with_children(|r| {
-                    r.spawn((Name::new("eda-assign-symbols"), AssignSymbols, Node { width: Val::Px(330.0), flex_shrink: 0.0, flex_direction: FlexDirection::Column, overflow: Overflow { x: OverflowAxis::Clip, y: OverflowAxis::Scroll }, ..default() }));
-                    r.spawn((Name::new("eda-assign-candidates"), AssignCandidates, Node { flex_grow: 1.0, flex_direction: FlexDirection::Column, overflow: Overflow { x: OverflowAxis::Clip, y: OverflowAxis::Scroll }, ..default() }));
+                b.spawn(Node {
+                    column_gap: Val::Px(10.0),
+                    height: Val::Px(360.0),
+                    margin: UiRect::top(Val::Px(8.0)),
+                    ..default()
+                })
+                .with_children(|r| {
+                    r.spawn((
+                        Name::new("eda-assign-symbols"),
+                        AssignSymbols,
+                        Node {
+                            width: Val::Px(330.0),
+                            flex_shrink: 0.0,
+                            flex_direction: FlexDirection::Column,
+                            overflow: Overflow {
+                                x: OverflowAxis::Clip,
+                                y: OverflowAxis::Scroll,
+                            },
+                            ..default()
+                        },
+                    ));
+                    r.spawn((
+                        Name::new("eda-assign-candidates"),
+                        AssignCandidates,
+                        Node {
+                            flex_grow: 1.0,
+                            flex_direction: FlexDirection::Column,
+                            overflow: Overflow {
+                                x: OverflowAxis::Clip,
+                                y: OverflowAxis::Scroll,
+                            },
+                            ..default()
+                        },
+                    ));
                 });
             })
             .footer(move |f| {
                 f.spawn((
-                    cadrs_ui::Button::new("eda-assign-ok").label("Close").primary().build(&tf),
+                    cadrs_ui::Button::new("eda-assign-ok")
+                        .label("Close")
+                        .primary()
+                        .build(&tf),
                     observe(|_: On<Activate>, mut commands: Commands| {
                         commands.queue(close_all);
                     }),
@@ -383,7 +553,9 @@ pub fn open_assign(w: &mut World) {
 
 fn checkbox(w: &mut World, name: &str) -> bool {
     let mut q = w.query::<(&Name, &CheckboxState)>();
-    q.iter(w).find(|(n, _)| n.as_str() == name).is_some_and(|(_, s)| s.checked)
+    q.iter(w)
+        .find(|(n, _)| n.as_str() == name)
+        .is_some_and(|(_, s)| s.checked)
 }
 
 /// Rebuilds both lists when the selection, the filters or the design change.
@@ -391,7 +563,9 @@ pub fn refresh_assign(w: &mut World) {
     let mut q = w.query_filtered::<Entity, With<AssignSymbols>>();
     let Some(syms) = q.iter(w).next() else { return };
     let mut q2 = w.query_filtered::<Entity, With<AssignCandidates>>();
-    let Some(cands) = q2.iter(w).next() else { return };
+    let Some(cands) = q2.iter(w).next() else {
+        return;
+    };
     let by_symbol = checkbox(w, "eda-assign-by-symbol");
     let by_pins = checkbox(w, "eda-assign-by-pins");
     let text = ui::text_value(w, "eda-assign-filter");
@@ -402,35 +576,74 @@ pub fn refresh_assign(w: &mut World) {
         return;
     }
     w.resource_mut::<AssignState>().shown = Some(key);
-    let Some((_, _, d)) = ui::current(w) else { return };
+    let Some((_, _, d)) = ui::current(w) else {
+        return;
+    };
     let lib = ui::libraries(w);
     let theme = w.resource::<Theme>().clone();
-    let mut parts: Vec<_> = d.schematic.sheets.iter().flat_map(|s| &s.symbols).filter(|s| !s.reference().starts_with('#')).cloned().collect();
+    let mut parts: Vec<_> = d
+        .schematic
+        .sheets
+        .iter()
+        .flat_map(|s| &s.symbols)
+        .filter(|s| !s.reference().starts_with('#'))
+        .cloned()
+        .collect();
     parts.sort_by_key(|s| cadrs_eda::connectivity::natural(s.reference()));
     let chosen = state.symbol.or(parts.first().map(|s| s.id));
     let found: Vec<(String, String)> = chosen
         .and_then(|id| parts.iter().find(|s| s.id == id))
         .map(|s| {
-            candidates(&lib, &d.schematic, s, &Filters { symbol_filters: by_symbol, pin_count: by_pins, library: None, text: text.clone() })
-                .into_iter()
-                .take(200)
-                .map(|f| (f.id.clone(), f.description.clone()))
-                .collect()
+            candidates(
+                &lib,
+                &d.schematic,
+                s,
+                &Filters {
+                    symbol_filters: by_symbol,
+                    pin_count: by_pins,
+                    library: None,
+                    text: text.clone(),
+                },
+            )
+            .into_iter()
+            .take(200)
+            .map(|f| (f.id.clone(), f.description.clone()))
+            .collect()
         })
         .unwrap_or_default();
     let mut commands = w.commands();
     commands.entity(syms).despawn_children();
     commands.entity(syms).with_children(|l| {
         for s in &parts {
-            let label = format!("{} – {} : {}", s.reference(), s.value(), if s.footprint().is_empty() { "—" } else { s.footprint() });
-            l.spawn((ListItem::new(format!("eda-assign-sym-{}", s.reference())).label(label).height(24.0).selected(Some(s.id) == chosen).build(&theme), AssignSymbolRow(s.id)));
+            let label = format!(
+                "{} – {} : {}",
+                s.reference(),
+                s.value(),
+                if s.footprint().is_empty() {
+                    "—"
+                } else {
+                    s.footprint()
+                }
+            );
+            l.spawn((
+                ListItem::new(format!("eda-assign-sym-{}", s.reference()))
+                    .label(label)
+                    .height(24.0)
+                    .selected(Some(s.id) == chosen)
+                    .build(&theme),
+                AssignSymbolRow(s.id),
+            ));
         }
     });
     commands.entity(cands).despawn_children();
     commands.entity(cands).with_children(|l| {
         for (id, desc) in found {
             l.spawn((
-                ListItem::new(format!("eda-assign-fp-{}", crate::pcb::slug(&id))).label(id.clone()).detail(desc).height(24.0).build(&theme),
+                ListItem::new(format!("eda-assign-fp-{}", crate::pcb::slug(&id)))
+                    .label(id.clone())
+                    .detail(desc)
+                    .height(24.0)
+                    .build(&theme),
                 AssignFootprintRow(id),
                 cadrs_ui::DoubleClickable,
             ));
@@ -439,30 +652,63 @@ pub fn refresh_assign(w: &mut World) {
     w.flush();
 }
 
-fn on_assign_row(a: On<Activate>, q_sym: Query<&AssignSymbolRow>, mut state: Option<ResMut<AssignState>>) {
+fn on_assign_row(
+    a: On<Activate>,
+    q_sym: Query<&AssignSymbolRow>,
+    mut state: Option<ResMut<AssignState>>,
+) {
     if let (Ok(r), Some(state)) = (q_sym.get(a.entity), state.as_mut()) {
         state.symbol = Some(r.0);
     }
 }
 
 /// Double-click (or click) a footprint: it is assigned to the chosen symbol.
-fn on_assign_footprint(a: On<cadrs_ui::DoubleClick>, q: Query<&AssignFootprintRow>, mut commands: Commands) {
+fn on_assign_footprint(
+    a: On<cadrs_ui::DoubleClick>,
+    q: Query<&AssignFootprintRow>,
+    mut commands: Commands,
+) {
     let Ok(r) = q.get(a.entity) else { return };
     let fp = r.0.clone();
     commands.queue(move |w: &mut World| {
-        let Some((_, _, d)) = ui::current(w) else { return };
-        let mut parts: Vec<_> = d.schematic.sheets.iter().flat_map(|s| &s.symbols).filter(|s| !s.reference().starts_with('#')).cloned().collect();
+        let Some((_, _, d)) = ui::current(w) else {
+            return;
+        };
+        let mut parts: Vec<_> = d
+            .schematic
+            .sheets
+            .iter()
+            .flat_map(|s| &s.symbols)
+            .filter(|s| !s.reference().starts_with('#'))
+            .cloned()
+            .collect();
         parts.sort_by_key(|s| cadrs_eda::connectivity::natural(s.reference()));
-        let chosen = w.resource::<AssignState>().symbol.or(parts.first().map(|s| s.id));
+        let chosen = w
+            .resource::<AssignState>()
+            .symbol
+            .or(parts.first().map(|s| s.id));
         let Some(id) = chosen else { return };
-        let Some(r) = parts.iter().find(|s| s.id == id).map(|s| s.reference().to_string()) else { return };
+        let Some(r) = parts
+            .iter()
+            .find(|s| s.id == id)
+            .map(|s| s.reference().to_string())
+        else {
+            return;
+        };
         ui::commit(w, "Assign footprint", |d| {
             cadrs_eda::assign::assign(&mut d.schematic, &r, &fp);
             Ok(())
         });
         // On to the next symbol without a footprint.
         let next = ui::current(w).and_then(|(_, _, d)| {
-            let mut v: Vec<_> = d.schematic.sheets.iter().flat_map(|s| &s.symbols).filter(|s| !s.reference().starts_with('#') && s.footprint().is_empty()).cloned().collect();
+            let mut v: Vec<_> = d
+                .schematic
+                .sheets
+                .iter()
+                .flat_map(|s| &s.symbols)
+                .filter(|s| !s.reference().starts_with('#') && s.footprint().is_empty())
+                .cloned()
+                .collect();
             v.sort_by_key(|s| cadrs_eda::connectivity::natural(s.reference()));
             v.first().map(|s| s.id)
         });
@@ -487,18 +733,36 @@ pub fn open_erc(w: &mut World) {
             .title("Electrical rules checker")
             .width(620.0)
             .body(move |b| {
-                b.spawn((Name::new("eda-erc-summary"), t.text("", t.font_base, FontWeight::MEDIUM, t.foreground)));
-                b.spawn((Name::new("eda-erc-list"), ErcList, Node { flex_direction: FlexDirection::Column, height: Val::Px(300.0), overflow: Overflow::scroll_y(), margin: UiRect::top(Val::Px(8.0)), ..default() }));
+                b.spawn((
+                    Name::new("eda-erc-summary"),
+                    t.text("", t.font_base, FontWeight::MEDIUM, t.foreground),
+                ));
+                b.spawn((
+                    Name::new("eda-erc-list"),
+                    ErcList,
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        height: Val::Px(300.0),
+                        overflow: Overflow::scroll_y(),
+                        margin: UiRect::top(Val::Px(8.0)),
+                        ..default()
+                    },
+                ));
             })
             .footer(move |f| {
                 f.spawn((
-                    cadrs_ui::Button::new("eda-erc-run").label("Run ERC").primary().build(&tf),
+                    cadrs_ui::Button::new("eda-erc-run")
+                        .label("Run ERC")
+                        .primary()
+                        .build(&tf),
                     observe(|_: On<Activate>, mut commands: Commands| {
                         commands.queue(run_erc);
                     }),
                 ));
                 f.spawn((
-                    cadrs_ui::Button::new("eda-erc-close").label("Close").build(&tf),
+                    cadrs_ui::Button::new("eda-erc-close")
+                        .label("Close")
+                        .build(&tf),
                     observe(|_: On<Activate>, mut commands: Commands| {
                         commands.queue(close_all);
                     }),
@@ -509,11 +773,23 @@ pub fn open_erc(w: &mut World) {
 }
 
 fn run_erc(w: &mut World) {
-    let Some((_, _, d)) = ui::current(w) else { return };
+    let Some((_, _, d)) = ui::current(w) else {
+        return;
+    };
     let vs = cadrs_eda::erc::check(&d.schematic);
-    let errors = vs.iter().filter(|v| v.severity() == cadrs_eda::erc::Severity::Error).count();
+    let errors = vs
+        .iter()
+        .filter(|v| v.severity() == cadrs_eda::erc::Severity::Error)
+        .count();
     let warnings = vs.len() - errors;
-    let summary = if vs.is_empty() { "No violations".to_string() } else { format!("Violations ({}): {errors} errors, {warnings} warnings", vs.len()) };
+    let summary = if vs.is_empty() {
+        "No violations".to_string()
+    } else {
+        format!(
+            "Violations ({}): {errors} errors, {warnings} warnings",
+            vs.len()
+        )
+    };
     ui::set_label(w, "eda-erc-summary", &summary);
     let mut q = w.query_filtered::<Entity, With<ErcList>>();
     let Some(list) = q.iter(w).next() else { return };
@@ -522,10 +798,33 @@ fn run_erc(w: &mut World) {
     commands.entity(list).despawn_children();
     commands.entity(list).with_children(|l| {
         for (i, v) in vs.iter().enumerate() {
-            let sev = if v.severity() == cadrs_eda::erc::Severity::Error { "Error" } else { "Warning" };
-            l.spawn((Name::new(format!("eda-erc-{i}")), t.text(format!("{sev}: {}", v.rule.message()), t.font_base, FontWeight::SEMIBOLD, t.foreground)));
+            let sev = if v.severity() == cadrs_eda::erc::Severity::Error {
+                "Error"
+            } else {
+                "Warning"
+            };
+            l.spawn((
+                Name::new(format!("eda-erc-{i}")),
+                t.text(
+                    format!("{sev}: {}", v.rule.message()),
+                    t.font_base,
+                    FontWeight::SEMIBOLD,
+                    t.foreground,
+                ),
+            ));
             for item in &v.items {
-                l.spawn((t.text(format!("    {item}"), t.font_sm, FontWeight::NORMAL, t.muted_foreground), Node { margin: UiRect::left(Val::Px(14.0)), ..default() }));
+                l.spawn((
+                    t.text(
+                        format!("    {item}"),
+                        t.font_sm,
+                        FontWeight::NORMAL,
+                        t.muted_foreground,
+                    ),
+                    Node {
+                        margin: UiRect::left(Val::Px(14.0)),
+                        ..default()
+                    },
+                ));
             }
         }
     });
@@ -536,7 +835,9 @@ fn run_erc(w: &mut World) {
 // BOM (GS12)
 
 pub fn open_bom(w: &mut World) {
-    let Some((_, _, d)) = ui::current(w) else { return };
+    let Some((_, _, d)) = ui::current(w) else {
+        return;
+    };
     let rows = cadrs_eda::bom::rows(&d.schematic);
     let t = w.resource::<Theme>().clone();
     let tf = t.clone();
@@ -546,37 +847,86 @@ pub fn open_bom(w: &mut World) {
             .title("Bill of materials")
             .width(760.0)
             .body(move |b| {
-                b.spawn((Name::new("eda-bom-preview"), Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(2.0), ..default() })).with_children(|l| {
+                b.spawn((
+                    Name::new("eda-bom-preview"),
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(2.0),
+                        ..default()
+                    },
+                ))
+                .with_children(|l| {
                     let head = ["Reference", "Value", "Footprint", "Qty", "DNP"];
                     let widths = [120.0, 90.0, 430.0, 40.0, 40.0];
                     let line = |l: &mut ChildSpawner, cells: [String; 5], bold: bool| {
-                        l.spawn(Node { column_gap: Val::Px(6.0), ..default() }).with_children(|r| {
+                        l.spawn(Node {
+                            column_gap: Val::Px(6.0),
+                            ..default()
+                        })
+                        .with_children(|r| {
                             for (c, w) in cells.into_iter().zip(widths) {
-                                r.spawn((t.text(c, t.font_sm, if bold { FontWeight::SEMIBOLD } else { FontWeight::NORMAL }, t.foreground), Node { width: Val::Px(w), ..default() }));
+                                r.spawn((
+                                    t.text(
+                                        c,
+                                        t.font_sm,
+                                        if bold {
+                                            FontWeight::SEMIBOLD
+                                        } else {
+                                            FontWeight::NORMAL
+                                        },
+                                        t.foreground,
+                                    ),
+                                    Node {
+                                        width: Val::Px(w),
+                                        ..default()
+                                    },
+                                ));
                             }
                         });
                     };
                     line(l, head.map(String::from), true);
                     for r in &rows {
-                        line(l, [r.references.join(", "), r.value.clone(), r.footprint.clone(), r.qty().to_string(), if r.dnp { "DNP".into() } else { String::new() }], false);
+                        line(
+                            l,
+                            [
+                                r.references.join(", "),
+                                r.value.clone(),
+                                r.footprint.clone(),
+                                r.qty().to_string(),
+                                if r.dnp { "DNP".into() } else { String::new() },
+                            ],
+                            false,
+                        );
                     }
                 });
             })
             .footer(move |f| {
                 f.spawn((
-                    cadrs_ui::Button::new("eda-bom-export").label("Export…").primary().build(&tf),
+                    cadrs_ui::Button::new("eda-bom-export")
+                        .label("Export…")
+                        .primary()
+                        .build(&tf),
                     observe(|_: On<Activate>, mut commands: Commands| {
                         commands.queue(|w: &mut World| {
                             let theme = w.resource::<Theme>().clone();
                             let dir = std::env::current_dir().unwrap_or_default();
                             let mut c = w.commands();
-                            cadrs_ui::file_picker::open_folder_picker(&mut c, &theme, "eda-bom-folder", "Export the BOM to", "eda-bom", dir);
+                            cadrs_ui::file_picker::open_folder_picker(
+                                &mut c,
+                                &theme,
+                                "eda-bom-folder",
+                                "Export the BOM to",
+                                "eda-bom",
+                                dir,
+                            );
                             w.flush();
                         });
                     }),
                 ));
                 f.spawn((
-                    cadrs_ui::Button::new("eda-bom-close").label("Close").build(&tf),
+                    cadrs_ui::Button::new("eda-bom-close")
+                        .label("Close")
+                        .build(&tf),
                     observe(|_: On<Activate>, mut commands: Commands| {
                         commands.queue(close_all);
                     }),
@@ -588,7 +938,14 @@ pub fn open_bom(w: &mut World) {
 /// Writes the BOM CSV into `dir` as `<board>.csv`; returns the path.
 pub fn export_bom(w: &mut World, dir: &std::path::Path) -> Option<std::path::PathBuf> {
     let (el, b, d) = ui::current(w)?;
-    let name = w.resource::<crate::ActiveDocument>().doc.element(el)?.pcb()?.board(b)?.name().to_string();
+    let name = w
+        .resource::<crate::ActiveDocument>()
+        .doc
+        .element(el)?
+        .pcb()?
+        .board(b)?
+        .name()
+        .to_string();
     let path = dir.join(format!("{}.csv", cadrs_idf::safe_file_name(&name)));
     match std::fs::write(&path, cadrs_eda::bom::csv(&d.schematic)) {
         Ok(()) => {
@@ -602,7 +959,10 @@ pub fn export_bom(w: &mut World, dir: &std::path::Path) -> Option<std::path::Pat
     }
 }
 
-pub fn on_folder_picked(mut msgs: MessageReader<cadrs_ui::file_picker::FilePicked>, mut commands: Commands) {
+pub fn on_folder_picked(
+    mut msgs: MessageReader<cadrs_ui::file_picker::FilePicked>,
+    mut commands: Commands,
+) {
     for m in msgs.read() {
         if m.tag == "eda-bom" {
             let p = m.path.clone();
@@ -614,13 +974,15 @@ pub fn on_folder_picked(mut msgs: MessageReader<cadrs_ui::file_picker::FilePicke
 }
 
 pub fn register(app: &mut App) {
-    app.add_systems(Update, (refresh_assign, on_folder_picked).run_if(in_state(AppState::Document)))
-        .add_observer(on_assign_row)
-        .add_observer(on_assign_footprint)
-        .add_observer(on_wire_color)
-        .add_observer(on_wire_default);
+    app.add_systems(
+        Update,
+        (refresh_assign, on_folder_picked).run_if(in_state(AppState::Document)),
+    )
+    .add_observer(on_assign_row)
+    .add_observer(on_assign_footprint)
+    .add_observer(on_wire_color)
+    .add_observer(on_wire_default);
 }
-
 
 // ---------------------------------------------------------------------------------------------
 // Plot: the sheet as SVG or PDF, the netlist as CSV
@@ -629,22 +991,48 @@ pub fn register(app: &mut App) {
 pub fn schematic_pdf(d: &cadrs_eda::Design, title: &str) -> Vec<u8> {
     use cadrs_drawing::export::{Item, Layer, Page, Pen, Shape};
     use cadrs_eda::units::to_mm;
-    let list = cadrs_eda::render::schematic(&d.schematic, 0, &cadrs_eda::render::SchematicTheme::default(), &cadrs_eda::render::Highlight::default());
+    let list = cadrs_eda::render::schematic(
+        &d.schematic,
+        0,
+        &cadrs_eda::render::SchematicTheme::default(),
+        &cadrs_eda::render::Highlight::default(),
+    );
     // The sheet is unbounded: the page is what is drawn, with its margin.
-    let b = list.bounds.unwrap_or(cadrs_eda::units::Bounds { min: cadrs_eda::units::Pt::ZERO, max: cadrs_eda::units::Pt::mm(297.0, 210.0) });
+    let b = list.bounds.unwrap_or(cadrs_eda::units::Bounds {
+        min: cadrs_eda::units::Pt::ZERO,
+        max: cadrs_eda::units::Pt::mm(297.0, 210.0),
+    });
     let (x0, y0) = (to_mm(b.min.x), to_mm(b.min.y));
-    let mut page = Page { name: title.into(), width: to_mm(b.size().w), height: to_mm(b.size().h), items: vec![] };
+    let mut page = Page {
+        name: title.into(),
+        width: to_mm(b.size().w),
+        height: to_mm(b.size().h),
+        items: vec![],
+    };
     let mm2 = |p: &cadrs_eda::units::Pt| [to_mm(p.x) - x0, to_mm(p.y) - y0];
     for a in &list.areas {
         for t in a.tris.as_chunks::<3>().0 {
-            let points = t.iter().map(|q| [q[0] / 1e6 - x0, q[1] / 1e6 - y0]).collect();
-            page.items.push(Item::Fill { points, color: [a.color[0], a.color[1], a.color[2]], layer: Layer::Visible });
+            let points = t
+                .iter()
+                .map(|q| [q[0] / 1e6 - x0, q[1] / 1e6 - y0])
+                .collect();
+            page.items.push(Item::Fill {
+                points,
+                color: [a.color[0], a.color[1], a.color[2]],
+                layer: Layer::Visible,
+            });
         }
     }
     for l in &list.lines {
         let mut pen = Pen::new(to_mm(l.width).max(0.15), Layer::Visible);
         pen.color = [l.color[0], l.color[1], l.color[2]];
-        page.items.push(Item::Stroke(Shape::Polyline { points: l.pts.iter().map(mm2).collect(), closed: false }, pen));
+        page.items.push(Item::Stroke(
+            Shape::Polyline {
+                points: l.pts.iter().map(mm2).collect(),
+                closed: false,
+            },
+            pen,
+        ));
     }
     cadrs_drawing::pdf::write_pdf(&[page], &cadrs_drawing::pdf::PdfOptions::default())
 }
@@ -659,10 +1047,21 @@ pub fn open_plot(w: &mut World) {
             .width(560.0)
             .body(move |p| {
                 text_row(p, &t, "Output directory", "eda-splot-dir", "plots/");
-                p.spawn((Name::new("eda-splot-log"), t.text("", t.font_sm, FontWeight::NORMAL, t.muted_foreground), Node { margin: UiRect::top(Val::Px(6.0)), ..default() }));
+                p.spawn((
+                    Name::new("eda-splot-log"),
+                    t.text("", t.font_sm, FontWeight::NORMAL, t.muted_foreground),
+                    Node {
+                        margin: UiRect::top(Val::Px(6.0)),
+                        ..default()
+                    },
+                ));
             })
             .footer(move |f| {
-                for (name, label, kind) in [("eda-splot-svg", "SVG", "svg"), ("eda-splot-pdf", "PDF", "pdf"), ("eda-splot-netlist", "Netlist (CSV)", "net")] {
+                for (name, label, kind) in [
+                    ("eda-splot-svg", "SVG", "svg"),
+                    ("eda-splot-pdf", "PDF", "pdf"),
+                    ("eda-splot-netlist", "Netlist (CSV)", "net"),
+                ] {
                     f.spawn((
                         cadrs_ui::Button::new(name).label(label).build(&tf),
                         observe(move |_: On<Activate>, mut commands: Commands| {
@@ -671,7 +1070,9 @@ pub fn open_plot(w: &mut World) {
                     ));
                 }
                 f.spawn((
-                    cadrs_ui::Button::new("eda-splot-close").label("Close").build(&tf),
+                    cadrs_ui::Button::new("eda-splot-close")
+                        .label("Close")
+                        .build(&tf),
                     observe(|_: On<Activate>, mut commands: Commands| {
                         commands.queue(close_all);
                     }),
@@ -681,14 +1082,37 @@ pub fn open_plot(w: &mut World) {
 }
 
 /// Writes the sheet as SVG or PDF, or the netlist, into `dir`; returns the file written.
-pub fn plot_schematic_to(w: &mut World, dir: &std::path::Path, kind: &str) -> Result<std::path::PathBuf, String> {
+pub fn plot_schematic_to(
+    w: &mut World,
+    dir: &std::path::Path,
+    kind: &str,
+) -> Result<std::path::PathBuf, String> {
     let (el, b, d) = ui::current(w).ok_or("No board")?;
-    let name = w.resource::<crate::ActiveDocument>().doc.element(el).and_then(|e| e.pcb()).and_then(|s| s.board(b)).map(|x| cadrs_idf::safe_file_name(x.name())).unwrap_or_else(|| "schematic".into());
+    let name = w
+        .resource::<crate::ActiveDocument>()
+        .doc
+        .element(el)
+        .and_then(|e| e.pcb())
+        .and_then(|s| s.board(b))
+        .map(|x| cadrs_idf::safe_file_name(x.name()))
+        .unwrap_or_else(|| "schematic".into());
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let (file, bytes): (String, Vec<u8>) = match kind {
-        "svg" => (format!("{name}.svg"), cadrs_eda::render::to_svg(&cadrs_eda::render::schematic(&d.schematic, 0, &cadrs_eda::render::SchematicTheme::default(), &cadrs_eda::render::Highlight::default())).into_bytes()),
+        "svg" => (
+            format!("{name}.svg"),
+            cadrs_eda::render::to_svg(&cadrs_eda::render::schematic(
+                &d.schematic,
+                0,
+                &cadrs_eda::render::SchematicTheme::default(),
+                &cadrs_eda::render::Highlight::default(),
+            ))
+            .into_bytes(),
+        ),
         "pdf" => (format!("{name}.pdf"), schematic_pdf(&d, &name)),
-        _ => (format!("{name}-netlist.csv"), cadrs_eda::connectivity::netlist_csv(&d.schematic).into_bytes()),
+        _ => (
+            format!("{name}-netlist.csv"),
+            cadrs_eda::connectivity::netlist_csv(&d.schematic).into_bytes(),
+        ),
     };
     let path = dir.join(&file);
     std::fs::write(&path, bytes).map_err(|e| format!("{file}: {e}"))?;
@@ -697,7 +1121,11 @@ pub fn plot_schematic_to(w: &mut World, dir: &std::path::Path, kind: &str) -> Re
 
 fn run_plot(w: &mut World, kind: &str) {
     let dir = ui::text_value(w, "eda-splot-dir");
-    let dir = std::path::PathBuf::from(if dir.trim().is_empty() { "plots/".into() } else { dir });
+    let dir = std::path::PathBuf::from(if dir.trim().is_empty() {
+        "plots/".into()
+    } else {
+        dir
+    });
     let msg = match plot_schematic_to(w, &dir, kind) {
         Ok(p) => format!("Wrote {}", p.display()),
         Err(e) => format!("Error: {e}"),
@@ -712,7 +1140,9 @@ fn run_plot(w: &mut World, kind: &str) {
 struct FieldsTable(Vec<Uuid>);
 
 pub fn open_fields_table(w: &mut World) {
-    let Some((_, _, d)) = ui::current(w) else { return };
+    let Some((_, _, d)) = ui::current(w) else {
+        return;
+    };
     let mut rows: Vec<(Uuid, String, String, String, String, bool)> = d
         .schematic
         .sheets
@@ -720,8 +1150,18 @@ pub fn open_fields_table(w: &mut World) {
         .flat_map(|s| &s.symbols)
         .filter(|s| !s.reference().starts_with('#'))
         .map(|s| {
-            let lcsc = ["LCSC", "LCSC Part", "LCSC Part #"].iter().find_map(|n| s.field(n).map(|f| f.value().to_string())).unwrap_or_default();
-            (s.id, s.reference().to_string(), s.value().to_string(), s.footprint().to_string(), lcsc, s.dnp)
+            let lcsc = ["LCSC", "LCSC Part", "LCSC Part #"]
+                .iter()
+                .find_map(|n| s.field(n).map(|f| f.value().to_string()))
+                .unwrap_or_default();
+            (
+                s.id,
+                s.reference().to_string(),
+                s.value().to_string(),
+                s.footprint().to_string(),
+                lcsc,
+                s.dnp,
+            )
         })
         .collect();
     rows.sort_by_key(|r| cadrs_eda::connectivity::natural(&r.1));
@@ -734,19 +1174,75 @@ pub fn open_fields_table(w: &mut World) {
             .title("Symbol fields")
             .width(900.0)
             .body(move |p| {
-                p.spawn(Node { column_gap: Val::Px(6.0), ..default() }).with_children(|h| {
-                    for (label, wd) in [("Reference", 80.0), ("Value", 170.0), ("Footprint", 380.0), ("LCSC part", 110.0), ("DNP", 40.0)] {
-                        h.spawn((t.text(label, t.font_sm, FontWeight::MEDIUM, t.muted_foreground), Node { width: Val::Px(wd), ..default() }));
+                p.spawn(Node {
+                    column_gap: Val::Px(6.0),
+                    ..default()
+                })
+                .with_children(|h| {
+                    for (label, wd) in [
+                        ("Reference", 80.0),
+                        ("Value", 170.0),
+                        ("Footprint", 380.0),
+                        ("LCSC part", 110.0),
+                        ("DNP", 40.0),
+                    ] {
+                        h.spawn((
+                            t.text(label, t.font_sm, FontWeight::MEDIUM, t.muted_foreground),
+                            Node {
+                                width: Val::Px(wd),
+                                ..default()
+                            },
+                        ));
                     }
                 });
-                p.spawn(Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(2.0), max_height: Val::Px(420.0), overflow: Overflow::scroll_y(), ..default() }).with_children(|l| {
+                p.spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(2.0),
+                    max_height: Val::Px(420.0),
+                    overflow: Overflow::scroll_y(),
+                    ..default()
+                })
+                .with_children(|l| {
                     for (i, (_, r, v, fp, lcsc, dnp)) in rows.into_iter().enumerate() {
-                        l.spawn(Node { column_gap: Val::Px(6.0), align_items: AlignItems::Center, ..default() }).with_children(|row| {
-                            row.spawn(TextInput::new(format!("eda-fields-{i}-reference")).value(r).width(Val::Px(80.0)).height(24.0).build(&t));
-                            row.spawn(TextInput::new(format!("eda-fields-{i}-value")).value(v).width(Val::Px(170.0)).height(24.0).build(&t));
-                            row.spawn(TextInput::new(format!("eda-fields-{i}-footprint")).value(fp).width(Val::Px(380.0)).height(24.0).build(&t));
-                            row.spawn(TextInput::new(format!("eda-fields-{i}-lcsc")).value(lcsc).width(Val::Px(110.0)).height(24.0).build(&t));
-                            row.spawn(Checkbox::new(format!("eda-fields-{i}-dnp")).checked(dnp).build(&t));
+                        l.spawn(Node {
+                            column_gap: Val::Px(6.0),
+                            align_items: AlignItems::Center,
+                            ..default()
+                        })
+                        .with_children(|row| {
+                            row.spawn(
+                                TextInput::new(format!("eda-fields-{i}-reference"))
+                                    .value(r)
+                                    .width(Val::Px(80.0))
+                                    .height(24.0)
+                                    .build(&t),
+                            );
+                            row.spawn(
+                                TextInput::new(format!("eda-fields-{i}-value"))
+                                    .value(v)
+                                    .width(Val::Px(170.0))
+                                    .height(24.0)
+                                    .build(&t),
+                            );
+                            row.spawn(
+                                TextInput::new(format!("eda-fields-{i}-footprint"))
+                                    .value(fp)
+                                    .width(Val::Px(380.0))
+                                    .height(24.0)
+                                    .build(&t),
+                            );
+                            row.spawn(
+                                TextInput::new(format!("eda-fields-{i}-lcsc"))
+                                    .value(lcsc)
+                                    .width(Val::Px(110.0))
+                                    .height(24.0)
+                                    .build(&t),
+                            );
+                            row.spawn(
+                                Checkbox::new(format!("eda-fields-{i}-dnp"))
+                                    .checked(dnp)
+                                    .build(&t),
+                            );
                         });
                     }
                 });
@@ -756,18 +1252,34 @@ pub fn open_fields_table(w: &mut World) {
 }
 
 fn accept_fields_table(w: &mut World) {
-    let ids = w.get_resource::<FieldsTable>().map(|t| t.0.clone()).unwrap_or_default();
+    let ids = w
+        .get_resource::<FieldsTable>()
+        .map(|t| t.0.clone())
+        .unwrap_or_default();
     let rows: Vec<(Uuid, String, String, String, String, bool)> = ids
         .iter()
         .enumerate()
         .map(|(i, id)| {
-            let field = |w: &mut World, n: &str| ui::text_value(w, &format!("eda-fields-{i}-{n}")).trim().to_string();
+            let field = |w: &mut World, n: &str| {
+                ui::text_value(w, &format!("eda-fields-{i}-{n}"))
+                    .trim()
+                    .to_string()
+            };
             let dnp = {
                 let name = format!("eda-fields-{i}-dnp");
                 let mut q = w.query::<(&Name, &CheckboxState)>();
-                q.iter(w).find(|(n, _)| n.as_str() == name).is_some_and(|(_, s)| s.checked)
+                q.iter(w)
+                    .find(|(n, _)| n.as_str() == name)
+                    .is_some_and(|(_, s)| s.checked)
             };
-            (*id, field(w, "reference"), field(w, "value"), field(w, "footprint"), field(w, "lcsc"), dnp)
+            (
+                *id,
+                field(w, "reference"),
+                field(w, "value"),
+                field(w, "footprint"),
+                field(w, "lcsc"),
+                dnp,
+            )
         })
         .collect();
     close_all(w);
@@ -778,11 +1290,25 @@ fn accept_fields_table(w: &mut World) {
             se::set_field(s, *id, fields::REFERENCE, r);
             se::set_field(s, *id, fields::VALUE, v);
             se::set_field(s, *id, fields::FOOTPRINT, fp);
-            let has = s.sheets.iter().flat_map(|x| &x.symbols).find(|x| x.id == *id).and_then(|x| ["LCSC", "LCSC Part", "LCSC Part #"].into_iter().find(|n| x.field(n).is_some()));
+            let has = s
+                .sheets
+                .iter()
+                .flat_map(|x| &x.symbols)
+                .find(|x| x.id == *id)
+                .and_then(|x| {
+                    ["LCSC", "LCSC Part", "LCSC Part #"]
+                        .into_iter()
+                        .find(|n| x.field(n).is_some())
+                });
             if !lcsc.is_empty() || has.is_some() {
                 se::set_field(s, *id, has.unwrap_or("LCSC Part"), lcsc);
             }
-            if let Some(x) = s.sheets.iter_mut().flat_map(|x| &mut x.symbols).find(|x| x.id == *id) {
+            if let Some(x) = s
+                .sheets
+                .iter_mut()
+                .flat_map(|x| &mut x.symbols)
+                .find(|x| x.id == *id)
+            {
                 x.dnp = *dnp;
             }
         }

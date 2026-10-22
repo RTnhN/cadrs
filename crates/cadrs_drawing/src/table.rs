@@ -47,7 +47,12 @@ pub enum Corner {
 }
 
 impl Corner {
-    pub const ALL: [Corner; 4] = [Corner::TopLeft, Corner::TopRight, Corner::BottomLeft, Corner::BottomRight];
+    pub const ALL: [Corner; 4] = [
+        Corner::TopLeft,
+        Corner::TopRight,
+        Corner::BottomLeft,
+        Corner::BottomRight,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -131,7 +136,15 @@ pub type Cell = (usize, usize);
 impl Table {
     /// A table of `rows` × `cols` body cells, with a title row and a header row on top when
     /// asked, its fixed corner at `at` (the Table dialog, D10.1).
-    pub fn new(rows: usize, cols: usize, title: bool, header: bool, fixed: Corner, at: P2, style: &DrawingStyle) -> Self {
+    pub fn new(
+        rows: usize,
+        cols: usize,
+        title: bool,
+        header: bool,
+        fixed: Corner,
+        at: P2,
+        style: &DrawingStyle,
+    ) -> Self {
         let n = rows.max(1) + title as usize + header as usize;
         let cols = cols.max(1);
         let rh = style.table_row_height;
@@ -151,7 +164,12 @@ impl Table {
             bom: None,
         };
         if title && cols > 1 {
-            t.merges.push(Merge { row: 0, col: 0, rows: 1, cols });
+            t.merges.push(Merge {
+                row: 0,
+                col: 0,
+                rows: 1,
+                cols,
+            });
         }
         t
     }
@@ -166,7 +184,10 @@ impl Table {
         t.text_height = style.table_text_height * 0.75;
         t.cols = vec![rh * 1.6, rh * 5.0, rh * 3.0, rh * 3.4];
         t.cells[0][0] = RichText::plain("REVISIONS");
-        for (c, h) in ["REV", "DESCRIPTION", "DATE", "APPROVED"].iter().enumerate() {
+        for (c, h) in ["REV", "DESCRIPTION", "DATE", "APPROVED"]
+            .iter()
+            .enumerate()
+        {
             t.cells[1][c] = RichText::plain(h);
         }
         t.cells[2][0] = RichText::plain("A");
@@ -200,21 +221,35 @@ impl Table {
     fn top_left_with(&self, rows: &[f64]) -> P2 {
         let (w, h) = (self.width(), rows.iter().sum::<f64>());
         [
-            if self.fixed.right() { self.at[0] - w } else { self.at[0] },
-            if self.fixed.bottom() { self.at[1] + h } else { self.at[1] },
+            if self.fixed.right() {
+                self.at[0] - w
+            } else {
+                self.at[0]
+            },
+            if self.fixed.bottom() {
+                self.at[1] + h
+            } else {
+                self.at[1]
+            },
         ]
     }
 
     /// The table's box (min, max) with its stored row heights.
     pub fn rect(&self) -> (P2, P2) {
         let tl = self.top_left_with(&self.rows);
-        (([tl[0], tl[1] - self.height()]), [tl[0] + self.width(), tl[1]])
+        (
+            ([tl[0], tl[1] - self.height()]),
+            [tl[0] + self.width(), tl[1]],
+        )
     }
 
     /// Where a corner is now.
     pub fn corner(&self, c: Corner) -> P2 {
         let (lo, hi) = self.rect();
-        [if c.right() { hi[0] } else { lo[0] }, if c.bottom() { lo[1] } else { hi[1] }]
+        [
+            if c.right() { hi[0] } else { lo[0] },
+            if c.bottom() { lo[1] } else { hi[1] },
+        ]
     }
 
     /// The merge a cell is in.
@@ -234,7 +269,10 @@ impl Table {
 
     /// A cell's extent in rows and columns.
     pub fn span(&self, r: usize, c: usize) -> (usize, usize) {
-        self.merges.iter().find(|m| m.row == r && m.col == c).map_or((1, 1), |m| (m.rows, m.cols))
+        self.merges
+            .iter()
+            .find(|m| m.row == r && m.col == c)
+            .map_or((1, 1), |m| (m.rows, m.cols))
     }
 
     /// Tab (or Shift+Tab when `back`): the next cell a merged block counts once, wrapping.
@@ -369,7 +407,8 @@ impl Table {
         loop {
             let mut grown = false;
             for m in &self.merges {
-                let overlaps = m.row <= r1 && m.row + m.rows > r0 && m.col <= c1 && m.col + m.cols > c0;
+                let overlaps =
+                    m.row <= r1 && m.row + m.rows > r0 && m.col <= c1 && m.col + m.cols > c0;
                 if overlaps {
                     let (nr0, nr1) = (r0.min(m.row), r1.max(m.row + m.rows - 1));
                     let (nc0, nc1) = (c0.min(m.col), c1.max(m.col + m.cols - 1));
@@ -387,7 +426,8 @@ impl Table {
             return Err("select more than one cell to merge".into());
         }
         let mut t = self.clone();
-        t.merges.retain(|m| !(m.row >= r0 && m.row <= r1 && m.col >= c0 && m.col <= c1));
+        t.merges
+            .retain(|m| !(m.row >= r0 && m.row <= r1 && m.col >= c0 && m.col <= c1));
         // Join the texts into the top-left cell.
         let mut joined = t.cells[r0][c0].clone();
         for r in r0..=r1 {
@@ -407,13 +447,20 @@ impl Table {
             }
         }
         t.cells[r0][c0] = joined;
-        t.merges.push(Merge { row: r0, col: c0, rows: r1 - r0 + 1, cols: c1 - c0 + 1 });
+        t.merges.push(Merge {
+            row: r0,
+            col: c0,
+            rows: r1 - r0 + 1,
+            cols: c1 - c0 + 1,
+        });
         Ok(t)
     }
 
     /// Splits the merge a cell is in back into single cells.
     pub fn unmerge(&self, cell: Cell) -> Result<Table, String> {
-        let m = *self.merge_at(cell.0, cell.1).ok_or("the cell isn't merged")?;
+        let m = *self
+            .merge_at(cell.0, cell.1)
+            .ok_or("the cell isn't merged")?;
         let mut t = self.clone();
         t.merges.retain(|x| *x != m);
         Ok(t)
@@ -433,8 +480,16 @@ impl Table {
     /// The sides a midpoint grip resizes: the two away from the fixed corner.
     pub fn free_sides(&self) -> [Side; 2] {
         [
-            if self.fixed.right() { Side::Left } else { Side::Right },
-            if self.fixed.bottom() { Side::Top } else { Side::Bottom },
+            if self.fixed.right() {
+                Side::Left
+            } else {
+                Side::Right
+            },
+            if self.fixed.bottom() {
+                Side::Top
+            } else {
+                Side::Bottom
+            },
         ]
     }
 
@@ -511,9 +566,20 @@ impl Table {
                     .filter(|&r| !self.covered(r, c) && self.span(r, c).1 == 1)
                     .map(|r| {
                         let text = self.shown_text(r, c);
-                        let style = rich::CharStyle { bold: self.heading(r), ..Default::default() };
-                        let h = if self.title_row && r == 0 { 1.25 * self.text_height } else { self.text_height };
-                        let word = text.plain_text().split_whitespace().map(|w| rich::width(w, &style)).fold(0.0, f64::max);
+                        let style = rich::CharStyle {
+                            bold: self.heading(r),
+                            ..Default::default()
+                        };
+                        let h = if self.title_row && r == 0 {
+                            1.25 * self.text_height
+                        } else {
+                            self.text_height
+                        };
+                        let word = text
+                            .plain_text()
+                            .split_whitespace()
+                            .map(|w| rich::width(w, &style))
+                            .fold(0.0, f64::max);
                         word * h + 2.0 * PAD * self.text_height + 1e-6
                     })
                     .fold(floor, f64::max)
@@ -523,7 +589,11 @@ impl Table {
 
     /// Whether a row is the title or header row (bold, centred).
     pub fn heading(&self, r: usize) -> bool {
-        let header = if self.header_last { self.n_rows().saturating_sub(1) } else { self.title_row as usize };
+        let header = if self.header_last {
+            self.n_rows().saturating_sub(1)
+        } else {
+            self.title_row as usize
+        };
         (self.title_row && r == 0) || (self.header_row && r == header)
     }
 
@@ -549,8 +619,19 @@ impl Table {
 pub fn scale_columns(cols: &[f64], mins: &[f64], total: f64) -> Vec<f64> {
     let mut fixed = vec![false; cols.len()];
     loop {
-        let free: f64 = cols.iter().zip(&fixed).filter(|(_, f)| !**f).map(|(c, _)| *c).sum();
-        let left = total - mins.iter().zip(&fixed).filter(|(_, f)| **f).map(|(m, _)| *m).sum::<f64>();
+        let free: f64 = cols
+            .iter()
+            .zip(&fixed)
+            .filter(|(_, f)| !**f)
+            .map(|(c, _)| *c)
+            .sum();
+        let left = total
+            - mins
+                .iter()
+                .zip(&fixed)
+                .filter(|(_, f)| **f)
+                .map(|(m, _)| *m)
+                .sum::<f64>();
         let k = if free > 0.0 { left / free } else { 1.0 };
         let mut changed = false;
         for i in 0..cols.len() {
@@ -560,7 +641,9 @@ pub fn scale_columns(cols: &[f64], mins: &[f64], total: f64) -> Vec<f64> {
             }
         }
         if !changed || fixed.iter().all(|f| *f) {
-            return (0..cols.len()).map(|i| if fixed[i] { mins[i] } else { cols[i] * k }).collect();
+            return (0..cols.len())
+                .map(|i| if fixed[i] { mins[i] } else { cols[i] * k })
+                .collect();
         }
     }
 }
@@ -578,7 +661,9 @@ pub fn fit_rows(t: &Table, ctx: &FieldContext) -> Table {
     let t = &t;
     let g = table_graphics(t, ctx, false, None);
     let mut out = t.clone();
-    out.grown = (0..t.n_rows()).map(|r| (g.rows[r] - t.natural_row(r)).max(0.0)).collect();
+    out.grown = (0..t.n_rows())
+        .map(|r| (g.rows[r] - t.natural_row(r)).max(0.0))
+        .collect();
     if out.grown.iter().all(|x| *x == 0.0) {
         out.grown.clear();
     }
@@ -626,11 +711,17 @@ impl TableGraphics {
     }
 
     pub fn contains(&self, p: P2, tol: f64) -> bool {
-        p[0] >= self.min[0] - tol && p[0] <= self.max[0] + tol && p[1] >= self.min[1] - tol && p[1] <= self.max[1] + tol
+        p[0] >= self.min[0] - tol
+            && p[0] <= self.max[0] + tol
+            && p[1] >= self.min[1] - tol
+            && p[1] <= self.max[1] + tol
     }
 
     pub fn cell_box(&self, c: Cell) -> Option<(P2, P2)> {
-        self.cells.iter().find(|(x, _, _)| *x == c).map(|(_, lo, hi)| (*lo, *hi))
+        self.cells
+            .iter()
+            .find(|(x, _, _)| *x == c)
+            .map(|(_, lo, hi)| (*lo, *hi))
     }
 }
 
@@ -641,7 +732,12 @@ const VPAD: f64 = 0.25;
 #[allow(clippy::needless_range_loop)]
 /// A table on the sheet: its grid, cell texts (rows grown to fit them) and, when `grips`, its
 /// grips. `edited` replaces one cell's text (the cell being typed in).
-pub fn table_graphics(t: &Table, ctx: &FieldContext, grips: bool, edited: Option<(Cell, &RichText)>) -> TableGraphics {
+pub fn table_graphics(
+    t: &Table,
+    ctx: &FieldContext,
+    grips: bool,
+    edited: Option<(Cell, &RichText)>,
+) -> TableGraphics {
     let mut g = TableGraphics::default();
     let h = t.text_height;
     let pad = PAD * h;
@@ -679,21 +775,30 @@ pub fn table_graphics(t: &Table, ctx: &FieldContext, grips: bool, edited: Option
     g.rows = rows.clone();
     let total_h: f64 = rows.iter().sum();
     let total_w = t.width();
-    let xs: Vec<f64> = std::iter::once(0.0).chain(t.cols.iter().scan(0.0, |a, w| {
-        *a += w;
-        Some(*a)
-    })).collect();
-    let ys: Vec<f64> = std::iter::once(0.0).chain(rows.iter().scan(0.0, |a, w| {
-        *a += w;
-        Some(*a)
-    })).collect();
+    let xs: Vec<f64> = std::iter::once(0.0)
+        .chain(t.cols.iter().scan(0.0, |a, w| {
+            *a += w;
+            Some(*a)
+        }))
+        .collect();
+    let ys: Vec<f64> = std::iter::once(0.0)
+        .chain(rows.iter().scan(0.0, |a, w| {
+            *a += w;
+            Some(*a)
+        }))
+        .collect();
     let px = |x: f64| tl[0] + x;
     let py = |y: f64| tl[1] - y;
     g.min = [tl[0], tl[1] - total_h];
     g.max = [tl[0] + total_w, tl[1]];
     // Outline.
     let (x0, x1, y0, y1) = (px(0.0), px(total_w), py(0.0), py(total_h));
-    g.outline = vec![([x0, y0], [x1, y0]), ([x1, y0], [x1, y1]), ([x1, y1], [x0, y1]), ([x0, y1], [x0, y0])];
+    g.outline = vec![
+        ([x0, y0], [x1, y0]),
+        ([x1, y0], [x1, y1]),
+        ([x1, y1], [x0, y1]),
+        ([x0, y1], [x0, y0]),
+    ];
     // Inner lines, broken where a merge spans them.
     for r in 1..t.n_rows() {
         let mut start: Option<f64> = None;
@@ -746,13 +851,22 @@ pub fn table_graphics(t: &Table, ctx: &FieldContext, grips: bool, edited: Option
             });
         }
         for s in &l.strokes {
-            g.strokes.push(s.iter().map(|q| [origin[0] + q[0], origin[1] + q[1]]).collect());
+            g.strokes.push(
+                s.iter()
+                    .map(|q| [origin[0] + q[0], origin[1] + q[1]])
+                    .collect(),
+            );
         }
         g.layouts.push(((r, c), origin, l));
     }
     if grips {
         let (lo, hi) = (g.min, g.max);
-        let corner = |c: Corner| [if c.right() { hi[0] } else { lo[0] }, if c.bottom() { lo[1] } else { hi[1] }];
+        let corner = |c: Corner| {
+            [
+                if c.right() { hi[0] } else { lo[0] },
+                if c.bottom() { lo[1] } else { hi[1] },
+            ]
+        };
         for c in Corner::ALL {
             g.grips.push((corner(c), TableGrip::Corner(c)));
         }
@@ -788,7 +902,15 @@ mod tests {
     fn new_table_has_title_and_header_rows() {
         let t = table();
         assert_eq!((t.n_rows(), t.n_cols()), (5, 4));
-        assert_eq!(t.merges, vec![Merge { row: 0, col: 0, rows: 1, cols: 4 }]);
+        assert_eq!(
+            t.merges,
+            vec![Merge {
+                row: 0,
+                col: 0,
+                rows: 1,
+                cols: 4
+            }]
+        );
         assert!(t.heading(0) && t.heading(1) && !t.heading(2));
         assert_eq!(t.rect().1, [20.0 + t.width(), 180.0]);
     }
@@ -816,14 +938,34 @@ mod tests {
     #[test]
     fn merge_unmerge_and_rows() {
         let t = table();
-        let t1 = t.set_cell((2, 0), RichText::plain("A")).unwrap().set_cell((2, 1), RichText::plain("B")).unwrap();
+        let t1 = t
+            .set_cell((2, 0), RichText::plain("A"))
+            .unwrap()
+            .set_cell((2, 1), RichText::plain("B"))
+            .unwrap();
         let m = t1.merge((2, 0), (3, 1)).unwrap();
-        assert_eq!(m.merge_at(3, 1), Some(&Merge { row: 2, col: 0, rows: 2, cols: 2 }));
+        assert_eq!(
+            m.merge_at(3, 1),
+            Some(&Merge {
+                row: 2,
+                col: 0,
+                rows: 2,
+                cols: 2
+            })
+        );
         assert_eq!(m.cells[2][0].paragraphs.len(), 2, "texts joined");
         assert!(m.covered(3, 1) && !m.covered(2, 0));
         // Merging across part of a merge takes in the whole of it.
         let grown = m.merge((3, 1), (3, 2)).unwrap();
-        assert_eq!(grown.merge_at(2, 2), Some(&Merge { row: 2, col: 0, rows: 2, cols: 3 }));
+        assert_eq!(
+            grown.merge_at(2, 2),
+            Some(&Merge {
+                row: 2,
+                col: 0,
+                rows: 2,
+                cols: 3
+            })
+        );
         let un = m.unmerge((3, 1)).unwrap();
         assert!(un.merge_at(2, 0).is_none() && !un.covered(3, 1));
         assert!(t.merge((2, 2), (2, 2)).is_err());
@@ -832,7 +974,10 @@ mod tests {
         assert_eq!(r.merge_at(2, 0).unwrap().rows, 3);
         assert_eq!(r.n_rows(), 6);
         let r2 = r.remove_row(3).unwrap().remove_row(3).unwrap();
-        assert!(r2.merge_at(2, 0).is_none() || r2.merge_at(2, 0).unwrap().rows * r2.merge_at(2, 0).unwrap().cols > 1);
+        assert!(
+            r2.merge_at(2, 0).is_none()
+                || r2.merge_at(2, 0).unwrap().rows * r2.merge_at(2, 0).unwrap().cols > 1
+        );
         // Columns.
         let c = t.insert_col(4).unwrap();
         assert_eq!(c.n_cols(), 5);
@@ -845,7 +990,10 @@ mod tests {
     fn rows_grow_for_wrapped_text_and_shrink_back() {
         let r = crate::title_block::ReferenceProps::default();
         let d = crate::rich::DrawingContext::default();
-        let ctx = FieldContext { reference: &r, drawing: &d };
+        let ctx = FieldContext {
+            reference: &r,
+            drawing: &d,
+        };
         let t = fit_rows(&table(), &ctx);
         let base = t.rows[2];
         let long = "A long cell text that wraps onto several lines in its column";
@@ -854,7 +1002,11 @@ mod tests {
         assert!((tall.natural_row(2) - base).abs() < 1e-9);
         // The text unwraps: the row shrinks back to its own height (P3C.4's delta).
         let short = fit_rows(&tall.set_cell((2, 0), RichText::plain("A")).unwrap(), &ctx);
-        assert!((short.rows[2] - base).abs() < 1e-9, "{} vs {base}", short.rows[2]);
+        assert!(
+            (short.rows[2] - base).abs() < 1e-9,
+            "{} vs {base}",
+            short.rows[2]
+        );
         assert!(short.grown.is_empty());
         // Inserting a row next to a grown one gives it the row's own height.
         let ins = tall.insert_row(3).unwrap();
@@ -868,39 +1020,72 @@ mod tests {
     fn cells_wrap_between_words_and_columns_keep_their_longest_word() {
         let r = crate::title_block::ReferenceProps::default();
         let d = crate::rich::DrawingContext::default();
-        let ctx = FieldContext { reference: &r, drawing: &d };
+        let ctx = FieldContext {
+            reference: &r,
+            drawing: &d,
+        };
         let mut t = table();
         t.cells[1][1] = RichText::plain("Quantity");
         t.cells[2][2] = RichText::plain("MSB-0001xC");
         t.cells[3][0] = RichText::plain("Graphite Phosphor Bronze Bushes");
         let mins = t.column_mins();
         let h = t.text_height;
-        let bold = rich::CharStyle { bold: true, ..Default::default() };
+        let bold = rich::CharStyle {
+            bold: true,
+            ..Default::default()
+        };
         assert!(mins[1] >= rich::width("Quantity", &bold) * h);
         assert!(mins[2] >= rich::width("MSB-0001xC", &rich::CharStyle::default()) * h);
         // Narrowed as far as it goes: every column at least its minimum, the words whole.
         let (lo, hi) = t.rect();
-        let narrow = t.set_fixed(Corner::TopRight).resize(Side::Left, [hi[0] - 1.0, lo[1]]).unwrap();
+        let narrow = t
+            .set_fixed(Corner::TopRight)
+            .resize(Side::Left, [hi[0] - 1.0, lo[1]])
+            .unwrap();
         for (c, m) in narrow.cols.iter().zip(&mins) {
             assert!(*c >= m - 1e-9, "{c} < {m}");
         }
         assert!((narrow.width() - mins.iter().sum::<f64>()).abs() < 1e-6);
         let g = table_graphics(&narrow, &ctx, false, None);
         let words: Vec<&str> = g.texts.iter().map(|x| x.piece.text.trim()).collect();
-        for w in ["Quantity", "MSB-0001xC", "Graphite", "Phosphor", "Bronze", "Bushes"] {
-            assert!(words.iter().any(|x| x.split_whitespace().any(|y| y == w)), "{w} split: {words:?}");
+        for w in [
+            "Quantity",
+            "MSB-0001xC",
+            "Graphite",
+            "Phosphor",
+            "Bronze",
+            "Bushes",
+        ] {
+            assert!(
+                words.iter().any(|x| x.split_whitespace().any(|y| y == w)),
+                "{w} split: {words:?}"
+            );
         }
         // A column line stops at the neighbours' minimums.
         let x = narrow.rect().0[0] + narrow.cols[0] + narrow.cols[1] + narrow.cols[2] - 50.0;
-        assert!(narrow.set_column_edge(3, x).is_err() || narrow.set_column_edge(3, x).unwrap().cols[2] >= mins[2] - 1e-9);
+        assert!(
+            narrow.set_column_edge(3, x).is_err()
+                || narrow.set_column_edge(3, x).unwrap().cols[2] >= mins[2] - 1e-9
+        );
         // A long word typed in a narrow column widens it.
-        let typed = fit_rows(&table().set_cell((2, 0), RichText::plain("Supercalifragilistic")).unwrap(), &ctx);
-        assert!(typed.cols[0] >= rich::width("Supercalifragilistic", &rich::CharStyle::default()) * h);
+        let typed = fit_rows(
+            &table()
+                .set_cell((2, 0), RichText::plain("Supercalifragilistic"))
+                .unwrap(),
+            &ctx,
+        );
+        assert!(
+            typed.cols[0] >= rich::width("Supercalifragilistic", &rich::CharStyle::default()) * h
+        );
     }
 
     #[test]
     fn scaling_columns_keeps_minimums_and_the_total() {
-        let cols = scale_columns(&[20.0, 80.0, 20.0, 30.0, 95.0], &[13.0, 20.0, 21.0, 29.0, 20.0], 150.0);
+        let cols = scale_columns(
+            &[20.0, 80.0, 20.0, 30.0, 95.0],
+            &[13.0, 20.0, 21.0, 29.0, 20.0],
+            150.0,
+        );
         assert!((cols.iter().sum::<f64>() - 150.0).abs() < 1e-9);
         assert_eq!((cols[0], cols[2], cols[3]), (13.0, 21.0, 29.0));
         assert!((cols[1] / cols[4] - 80.0 / 95.0).abs() < 1e-9);
@@ -921,7 +1106,10 @@ mod tests {
                 };
                 let r = t.resize(side, to).unwrap();
                 let after = r.corner(fixed);
-                assert!((after[0] - before[0]).abs() < 1e-9 && (after[1] - before[1]).abs() < 1e-9, "{fixed:?} {side:?}");
+                assert!(
+                    (after[0] - before[0]).abs() < 1e-9 && (after[1] - before[1]).abs() < 1e-9,
+                    "{fixed:?} {side:?}"
+                );
                 // The dragged side followed the pointer.
                 let (rlo, rhi) = r.rect();
                 match side {
@@ -932,7 +1120,11 @@ mod tests {
                 }
             }
             // The fixed corner's sides don't resize.
-            let fixed_side = if t.free_sides()[0] == Side::Right { Side::Left } else { Side::Right };
+            let fixed_side = if t.free_sides()[0] == Side::Right {
+                Side::Left
+            } else {
+                Side::Right
+            };
             assert!(t.resize(fixed_side, [0.0, 0.0]).is_err());
         }
         // Changing the fixed corner keeps the table in place.

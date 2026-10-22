@@ -70,14 +70,24 @@ fn weld(m: &Mesh) -> Welded {
     let mut map = Vec::with_capacity(m.positions.len());
     for p in &m.positions {
         let q = v(*p);
-        let key = [(q.x / WELD).round() as i64, (q.y / WELD).round() as i64, (q.z / WELD).round() as i64];
+        let key = [
+            (q.x / WELD).round() as i64,
+            (q.y / WELD).round() as i64,
+            (q.z / WELD).round() as i64,
+        ];
         let i = *index.entry(key).or_insert_with(|| {
             pts.push(q);
             pts.len() - 1
         });
         map.push(i);
     }
-    let mut w = Welded { pts, tris: vec![], normals: vec![], areas: vec![], corner_normals: vec![] };
+    let mut w = Welded {
+        pts,
+        tris: vec![],
+        normals: vec![],
+        areas: vec![],
+        corner_normals: vec![],
+    };
     for t in m.indices.as_chunks::<3>().0 {
         let [a, b, c] = [map[t[0] as usize], map[t[1] as usize], map[t[2] as usize]];
         if a == b || b == c || a == c {
@@ -88,7 +98,13 @@ fn weld(m: &Mesh) -> Welded {
         if area < 1e-12 {
             continue;
         }
-        let cn = |i: u32| m.normals.get(i as usize).map(|q| v(*q)).filter(|q| q.norm() > 0.5).unwrap_or(n / (2.0 * area));
+        let cn = |i: u32| {
+            m.normals
+                .get(i as usize)
+                .map(|q| v(*q))
+                .filter(|q| q.norm() > 0.5)
+                .unwrap_or(n / (2.0 * area))
+        };
         w.corner_normals.push([cn(t[0]), cn(t[1]), cn(t[2])]);
         w.tris.push([a, b, c]);
         w.normals.push(n / (2.0 * area));
@@ -111,7 +127,13 @@ fn edge_map(tris: &[[usize; 3]]) -> HashMap<(usize, usize), Vec<usize>> {
 
 /// Groups triangles by flood fill over edges that `joins` accepts (`joins(from, to)`), each
 /// group grown from its first triangle.
-fn flood(n: usize, edges: &HashMap<(usize, usize), Vec<usize>>, tris: &[[usize; 3]], allowed: &[bool], mut joins: impl FnMut(usize, usize, usize) -> bool) -> Vec<Vec<usize>> {
+fn flood(
+    n: usize,
+    edges: &HashMap<(usize, usize), Vec<usize>>,
+    tris: &[[usize; 3]],
+    allowed: &[bool],
+    mut joins: impl FnMut(usize, usize, usize) -> bool,
+) -> Vec<Vec<usize>> {
     let mut seen = vec![false; n];
     let mut groups = vec![];
     for start in 0..n {
@@ -166,7 +188,12 @@ fn fit_circle(pts: &[(f64, f64)]) -> Option<((f64, f64), f64, f64)> {
         return None;
     }
     let r = r2.sqrt();
-    let rms = (pts.iter().map(|&(x, y)| ((x - cx).hypot(y - cy) - r).powi(2)).sum::<f64>() / pts.len() as f64).sqrt();
+    let rms = (pts
+        .iter()
+        .map(|&(x, y)| ((x - cx).hypot(y - cy) - r).powi(2))
+        .sum::<f64>()
+        / pts.len() as f64)
+        .sqrt();
     Some(((cx, cy), r, rms))
 }
 
@@ -183,18 +210,27 @@ fn cylinder(w: &Welded, g: &[usize]) -> Option<(V3, V3, f64)> {
         return None;
     }
     let e = SymmetricEigen::new(m / total);
-    let (i, _) = e.eigenvalues.iter().enumerate().min_by(|a, b| a.1.total_cmp(b.1))?;
+    let (i, _) = e
+        .eigenvalues
+        .iter()
+        .enumerate()
+        .min_by(|a, b| a.1.total_cmp(b.1))?;
     let dir = e.eigenvectors.column(i).normalize();
     // Every normal square to the axis.
     if g.iter().any(|&t| w.normals[t].dot(&dir).abs() > 0.05) {
         return None;
     }
-    let u = dir.cross(&if dir.x.abs() < 0.9 { V3::x() } else { V3::y() }).normalize();
+    let u = dir
+        .cross(&if dir.x.abs() < 0.9 { V3::x() } else { V3::y() })
+        .normalize();
     let vv = dir.cross(&u);
     let mut idx: Vec<usize> = g.iter().flat_map(|&t| w.tris[t]).collect();
     idx.sort_unstable();
     idx.dedup();
-    let pts: Vec<(f64, f64)> = idx.iter().map(|&i| (w.pts[i].dot(&u), w.pts[i].dot(&vv))).collect();
+    let pts: Vec<(f64, f64)> = idx
+        .iter()
+        .map(|&i| (w.pts[i].dot(&u), w.pts[i].dot(&vv)))
+        .collect();
     let ((cx, cy), r, rms) = fit_circle(&pts)?;
     if rms > (0.01 * r).max(0.002) || r > 1e4 {
         return None;
@@ -215,7 +251,11 @@ fn boundary(w: &Welded, g: &[usize]) -> Vec<Vec<usize>> {
             e.2 += 1;
         }
     }
-    let segs: Vec<(usize, usize)> = count.values().filter(|e| e.2 == 1).map(|e| (e.0, e.1)).collect();
+    let segs: Vec<(usize, usize)> = count
+        .values()
+        .filter(|e| e.2 == 1)
+        .map(|e| (e.0, e.1))
+        .collect();
     chain(&segs)
 }
 
@@ -229,14 +269,20 @@ fn chain(segs: &[(usize, usize)]) -> Vec<Vec<usize>> {
     let mut used = vec![false; segs.len()];
     let mut out = vec![];
     // Open chains first (from points with one segment), then the closed ones.
-    let mut starts: Vec<usize> = next.iter().filter(|(_, v)| v.len() == 1).map(|(p, _)| *p).collect();
+    let mut starts: Vec<usize> = next
+        .iter()
+        .filter(|(_, v)| v.len() == 1)
+        .map(|(p, _)| *p)
+        .collect();
     starts.sort_unstable();
     let mut order: Vec<usize> = starts;
     let mut rest: Vec<usize> = segs.iter().map(|s| s.0).collect();
     rest.sort_unstable();
     order.extend(rest);
     for start in order {
-        let Some(&first) = next[&start].iter().find(|&&i| !used[i]) else { continue };
+        let Some(&first) = next[&start].iter().find(|&&i| !used[i]) else {
+            continue;
+        };
         let mut line = vec![start];
         let mut at = start;
         let mut cur = Some(first);
@@ -261,7 +307,10 @@ pub const FACET_DEG: f64 = 46.0;
 /// Coarse cylinders (a pin of a few sides): triangles joined across edges that run along one
 /// direction, both square to it and bending at most [`FACET_DEG`], turning at least a quarter
 /// turn in all, that fit a circle. Each found is a face; the rest are `free`.
-fn prisms(w: &Welded, edges: &HashMap<(usize, usize), Vec<usize>>) -> (Vec<(Vec<usize>, Shape)>, Vec<bool>) {
+fn prisms(
+    w: &Welded,
+    edges: &HashMap<(usize, usize), Vec<usize>>,
+) -> (Vec<(Vec<usize>, Shape)>, Vec<bool>) {
     let n = w.tris.len();
     let bend = FACET_DEG.to_radians().cos();
     let mut free = vec![true; n];
@@ -287,7 +336,12 @@ fn prisms(w: &Welded, edges: &HashMap<(usize, usize), Vec<usize>>) -> (Vec<(Vec<
                     let along = axis.is_none_or(|ax| dir.dot(&ax).abs() > 0.999);
                     // Coplanar halves of one facet join too (their diagonal isn't along the axis).
                     let same = nt.dot(&nu) > 0.9999;
-                    if same || (along && nt.dot(&dir).abs() < 0.02 && nu.dot(&dir).abs() < 0.02 && nt.dot(&nu) >= bend) {
+                    if same
+                        || (along
+                            && nt.dot(&dir).abs() < 0.02
+                            && nu.dot(&dir).abs() < 0.02
+                            && nt.dot(&nu) >= bend)
+                    {
                         if !same && axis.is_none() {
                             axis = Some(dir);
                         }
@@ -303,7 +357,10 @@ fn prisms(w: &Welded, edges: &HashMap<(usize, usize), Vec<usize>>) -> (Vec<(Vec<
         if group.iter().any(|&t| w.normals[t].dot(&ax).abs() > 0.02) {
             continue;
         }
-        let spread = group.iter().map(|&t| w.normals[t].dot(&w.normals[group[0]])).fold(1.0f64, f64::min);
+        let spread = group
+            .iter()
+            .map(|&t| w.normals[t].dot(&w.normals[group[0]]))
+            .fold(1.0f64, f64::min);
         if spread > 0.0 {
             continue;
         }
@@ -321,7 +378,9 @@ fn faces_of(w: &Welded) -> Vec<(Vec<usize>, Shape)> {
     let edges = edge_map(&w.tris);
     let sharp = SHARP_DEG.to_radians().cos();
     let (mut out, free) = prisms(w, &edges);
-    let groups = flood(n, &edges, &w.tris, &free, |_, t, u| w.normals[t].dot(&w.normals[u]) >= sharp);
+    let groups = flood(n, &edges, &w.tris, &free, |_, t, u| {
+        w.normals[t].dot(&w.normals[u]) >= sharp
+    });
     let flat = PLANAR_DEG.to_radians().cos();
     for g in groups {
         let mut in_group = vec![false; n];
@@ -329,7 +388,9 @@ fn faces_of(w: &Welded) -> Vec<(Vec<usize>, Shape)> {
         let group_area: f64 = g.iter().map(|&t| w.areas[t]).sum();
         // A group that is one cylinder (a pin, a hole, a barrel) is one face, however coarse
         // its facets.
-        let coplanar = g.iter().all(|&t| w.normals[t].dot(&w.normals[g[0]]) >= flat);
+        let coplanar = g
+            .iter()
+            .all(|&t| w.normals[t].dot(&w.normals[g[0]]) >= flat);
         if !coplanar && let Some((point, dir, radius)) = cylinder(w, &g) {
             out.push((g, Shape::Cylinder { point, dir, radius }));
             continue;
@@ -337,7 +398,10 @@ fn faces_of(w: &Welded) -> Vec<(Vec<usize>, Shape)> {
         // Coplanar sets.
         let planes = flood(n, &edges, &w.tris, &in_group, |s, _, u| {
             let (ns, p0) = (w.normals[s], w.pts[w.tris[s][0]]);
-            w.normals[u].dot(&ns) >= flat && w.tris[u].iter().all(|&i| (w.pts[i] - p0).dot(&ns).abs() <= PLANE_TOL)
+            w.normals[u].dot(&ns) >= flat
+                && w.tris[u]
+                    .iter()
+                    .all(|&i| (w.pts[i] - p0).dot(&ns).abs() <= PLANE_TOL)
         });
         let mut curved = vec![false; n];
         for p in planes {
@@ -382,7 +446,13 @@ pub fn mesh_solid(meshes: &[Mesh], op: OpId, opacity: f64) -> Solid {
         let mut face_of = vec![usize::MAX; w.tris.len()];
         let base = s.faces.len();
         for (fi, (tris, shape)) in faces.iter().enumerate() {
-            let name = FaceName::new(op, FaceOrigin::Imported { body: mi as u32, face: fi as u32 });
+            let name = FaceName::new(
+                op,
+                FaceOrigin::Imported {
+                    body: mi as u32,
+                    face: fi as u32,
+                },
+            );
             let first = s.indices.len() / 3;
             let mut area = 0.0;
             let mut centroid = V3::zeros();
@@ -402,19 +472,59 @@ pub fn mesh_solid(meshes: &[Mesh], op: OpId, opacity: f64) -> Solid {
                 area += w.areas[t];
                 centroid += (w.pts[a] + w.pts[b] + w.pts[c]) / 3.0 * w.areas[t];
             }
-            let centroid = if area > 0.0 { centroid / area } else { w.pts[w.tris[tris[0]][0]] };
-            let loops = boundary(&w, tris).into_iter().map(|l| l.into_iter().map(|i| arr(w.pts[i])).collect()).collect();
+            let centroid = if area > 0.0 {
+                centroid / area
+            } else {
+                w.pts[w.tris[tris[0]][0]]
+            };
+            let loops = boundary(&w, tris)
+                .into_iter()
+                .map(|l| l.into_iter().map(|i| arr(w.pts[i])).collect())
+                .collect();
             let (plane, axis, kind, radius) = match shape {
                 Shape::Plane(n) => {
-                    let u = n.cross(&if n.x.abs() < 0.9 { V3::x() } else { V3::y() }).normalize();
+                    let u = n
+                        .cross(&if n.x.abs() < 0.9 { V3::x() } else { V3::y() })
+                        .normalize();
                     let vv = n.cross(&u);
-                    (Some(PlaneFrame { origin: arr(centroid), u: arr(u), v: arr(vv) }), None, Some(SurfaceKind::Plane), None)
+                    (
+                        Some(PlaneFrame {
+                            origin: arr(centroid),
+                            u: arr(u),
+                            v: arr(vv),
+                        }),
+                        None,
+                        Some(SurfaceKind::Plane),
+                        None,
+                    )
                 }
-                Shape::Cylinder { point, dir, radius } => (None, Some((arr(*point), arr(*dir))), Some(SurfaceKind::Cylinder), Some(*radius)),
+                Shape::Cylinder { point, dir, radius } => (
+                    None,
+                    Some((arr(*point), arr(*dir))),
+                    Some(SurfaceKind::Cylinder),
+                    Some(*radius),
+                ),
                 Shape::Other => (None, None, Some(SurfaceKind::Other), None),
             };
-            s.faces.push(SolidFace { name, plane, first_triangle: first, triangle_count: tris.len(), loops, center: Some(arr(centroid)), axis, area: Some(area), kind, radius });
-            s.looks.push((name, Appearance { rgb: m.color, alpha }));
+            s.faces.push(SolidFace {
+                name,
+                plane,
+                first_triangle: first,
+                triangle_count: tris.len(),
+                loops,
+                center: Some(arr(centroid)),
+                axis,
+                area: Some(area),
+                kind,
+                radius,
+            });
+            s.looks.push((
+                name,
+                Appearance {
+                    rgb: m.color,
+                    alpha,
+                },
+            ));
         }
         // Edges: per pair of faces (or a face and nothing), the segments between them.
         let sharp = SHARP_DEG.to_radians().cos();
@@ -424,7 +534,11 @@ pub fn mesh_solid(meshes: &[Mesh], op: OpId, opacity: f64) -> Solid {
         for (&(a, b), ts) in &edges {
             let (fa, fb, smooth) = match ts.as_slice() {
                 [t] => (face_of[*t], usize::MAX, false),
-                [t, u] if face_of[*t] != face_of[*u] => (face_of[*t].min(face_of[*u]), face_of[*t].max(face_of[*u]), w.normals[*t].dot(&w.normals[*u]) >= sharp),
+                [t, u] if face_of[*t] != face_of[*u] => (
+                    face_of[*t].min(face_of[*u]),
+                    face_of[*t].max(face_of[*u]),
+                    w.normals[*t].dot(&w.normals[*u]) >= sharp,
+                ),
                 _ => continue,
             };
             let e = by_pair.entry((fa, fb)).or_insert((vec![], smooth));
@@ -435,14 +549,29 @@ pub fn mesh_solid(meshes: &[Mesh], op: OpId, opacity: f64) -> Solid {
         pairs.sort_by_key(|(k, _)| *k);
         for ((fa, fb), (segs, smooth)) in pairs {
             let na = s.faces[fa].name;
-            let nb = if fb == usize::MAX { na } else { s.faces[fb].name };
+            let nb = if fb == usize::MAX {
+                na
+            } else {
+                s.faces[fb].name
+            };
             for (k, line) in chain(&segs).into_iter().enumerate() {
                 let mut points: Vec<[f64; 3]> = line.iter().map(|&i| arr(w.pts[i])).collect();
                 // A closed chain repeats its first point to draw the whole loop.
-                if line.len() > 2 && segs.iter().any(|&(a, b)| (a == line[0] && b == *line.last().unwrap()) || (b == line[0] && a == *line.last().unwrap())) {
+                if line.len() > 2
+                    && segs.iter().any(|&(a, b)| {
+                        (a == line[0] && b == *line.last().unwrap())
+                            || (b == line[0] && a == *line.last().unwrap())
+                    })
+                {
                     points.push(points[0]);
                 }
-                s.edges.push(SolidEdge { name: EdgeName::new(na, nb, k as u32), points, circle: None, tangent_group: None, smooth });
+                s.edges.push(SolidEdge {
+                    name: EdgeName::new(na, nb, k as u32),
+                    points,
+                    circle: None,
+                    tangent_group: None,
+                    smooth,
+                });
             }
         }
     }
@@ -463,9 +592,17 @@ mod tests {
         b.cuboid([0.0, 0.0, 0.0], [4.0, 2.0, 1.0], [10, 20, 30]);
         let s = mesh_solid(&mesh_of(&b), uuid::Uuid::nil(), 1.0);
         assert_eq!(s.faces.len(), 6);
-        assert!(s.faces.iter().all(|f| f.kind == Some(SurfaceKind::Plane) && f.plane.is_some()));
+        assert!(
+            s.faces
+                .iter()
+                .all(|f| f.kind == Some(SurfaceKind::Plane) && f.plane.is_some())
+        );
         // The top face: normal +z, through z = 1, area 8.
-        let top = s.faces.iter().find(|f| f.plane.unwrap().normal()[2] > 0.99).unwrap();
+        let top = s
+            .faces
+            .iter()
+            .find(|f| f.plane.unwrap().normal()[2] > 0.99)
+            .unwrap();
         assert!((top.plane.unwrap().origin[2] - 1.0).abs() < 1e-6);
         assert!((top.area.unwrap() - 8.0).abs() < 1e-6);
         // Its outline is one loop of 4 corners.
@@ -481,40 +618,82 @@ mod tests {
     #[test]
     fn a_pin_is_a_cylinder_with_its_axis_and_radius() {
         let mut b = cadrs_eda::model3d::Body::default();
-        b.cylinder([3.0, 4.0, -2.0], cadrs_eda::model3d::Axis::Z, 0.5, 6.0, [200, 200, 200]);
+        b.cylinder(
+            [3.0, 4.0, -2.0],
+            cadrs_eda::model3d::Axis::Z,
+            0.5,
+            6.0,
+            [200, 200, 200],
+        );
         let s = mesh_solid(&mesh_of(&b), uuid::Uuid::nil(), 1.0);
-        let side = s.faces.iter().find(|f| f.kind == Some(SurfaceKind::Cylinder)).expect("a cylindrical face");
+        let side = s
+            .faces
+            .iter()
+            .find(|f| f.kind == Some(SurfaceKind::Cylinder))
+            .expect("a cylindrical face");
         let (p, d) = side.axis.unwrap();
         assert!(d[2].abs() > 0.999, "{d:?}");
-        assert!((p[0] - 3.0).abs() < 1e-3 && (p[1] - 4.0).abs() < 1e-3, "{p:?}");
+        assert!(
+            (p[0] - 3.0).abs() < 1e-3 && (p[1] - 4.0).abs() < 1e-3,
+            "{p:?}"
+        );
         assert!((side.radius.unwrap() - 0.5).abs() < 5e-3);
         // Two planar ends.
-        assert_eq!(s.faces.iter().filter(|f| f.kind == Some(SurfaceKind::Plane)).count(), 2);
+        assert_eq!(
+            s.faces
+                .iter()
+                .filter(|f| f.kind == Some(SurfaceKind::Plane))
+                .count(),
+            2
+        );
     }
 
     #[test]
     fn an_eight_sided_pin_is_a_cylinder_too() {
         // A VRML-style pin: an octagonal prism, r = 0.32 across its corners, along x.
         let (r, len) = (0.32f32, 6.0f32);
-        let ring: Vec<(f32, f32)> = (0..8).map(|i| {
-            let t = std::f32::consts::TAU * i as f32 / 8.0;
-            (r * t.cos(), r * t.sin())
-        }).collect();
-        let mut m = Mesh { color: [200, 200, 200], ..Default::default() };
+        let ring: Vec<(f32, f32)> = (0..8)
+            .map(|i| {
+                let t = std::f32::consts::TAU * i as f32 / 8.0;
+                (r * t.cos(), r * t.sin())
+            })
+            .collect();
+        let mut m = Mesh {
+            color: [200, 200, 200],
+            ..Default::default()
+        };
         for i in 0..8 {
             let (a, b) = (ring[i], ring[(i + 1) % 8]);
             let base = m.positions.len() as u32;
-            m.positions.extend([[0.0, a.0, a.1], [0.0, b.0, b.1], [len, b.0, b.1], [len, a.0, a.1]]);
+            m.positions.extend([
+                [0.0, a.0, a.1],
+                [0.0, b.0, b.1],
+                [len, b.0, b.1],
+                [len, a.0, a.1],
+            ]);
             let mid = ((a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0);
             let l = (mid.0 * mid.0 + mid.1 * mid.1).sqrt();
             m.normals.extend([[0.0, mid.0 / l, mid.1 / l]; 4]);
-            m.indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+            m.indices
+                .extend([base, base + 1, base + 2, base, base + 2, base + 3]);
         }
         let s = mesh_solid(&[m], uuid::Uuid::nil(), 1.0);
-        let cyl: Vec<_> = s.faces.iter().filter(|f| f.kind == Some(SurfaceKind::Cylinder)).collect();
-        assert_eq!(cyl.len(), 1, "one cylinder, not eight strips: {:?}", s.faces.iter().map(|f| f.kind).collect::<Vec<_>>());
+        let cyl: Vec<_> = s
+            .faces
+            .iter()
+            .filter(|f| f.kind == Some(SurfaceKind::Cylinder))
+            .collect();
+        assert_eq!(
+            cyl.len(),
+            1,
+            "one cylinder, not eight strips: {:?}",
+            s.faces.iter().map(|f| f.kind).collect::<Vec<_>>()
+        );
         let (p, d) = cyl[0].axis.unwrap();
-        assert!(d[0].abs() > 0.999 && p[1].abs() < 1e-3 && p[2].abs() < 1e-3, "{p:?} {d:?}");
+        assert!(
+            d[0].abs() > 0.999 && p[1].abs() < 1e-3 && p[2].abs() < 1e-3,
+            "{p:?} {d:?}"
+        );
         assert!((cyl[0].radius.unwrap() - 0.32).abs() < 1e-3);
     }
 
@@ -523,39 +702,79 @@ mod tests {
         // The generated header's pins are square: each has a top face, centred on its pad, to
         // sketch on or mate to.
         let lib = cadrs_eda::library::LibraryTable::builtin();
-        let fp = lib.footprint("Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical").unwrap();
+        let fp = lib
+            .footprint("Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical")
+            .unwrap();
         let (meshes, _) = crate::pcb::model::footprint_meshes(fp).unwrap().unwrap();
         let s = mesh_solid(&meshes, uuid::Uuid::nil(), 1.0);
-        let top = s.faces.iter().filter_map(|f| f.plane.filter(|p| p.normal()[2] > 0.999)).map(|p| p.origin[2]).fold(f64::MIN, f64::max);
-        let tops: Vec<[f64; 3]> = s.faces.iter().filter_map(|f| f.plane).filter(|p| p.normal()[2] > 0.999 && (p.origin[2] - top).abs() < 1e-6).map(|p| p.origin).collect();
+        let top = s
+            .faces
+            .iter()
+            .filter_map(|f| f.plane.filter(|p| p.normal()[2] > 0.999))
+            .map(|p| p.origin[2])
+            .fold(f64::MIN, f64::max);
+        let tops: Vec<[f64; 3]> = s
+            .faces
+            .iter()
+            .filter_map(|f| f.plane)
+            .filter(|p| p.normal()[2] > 0.999 && (p.origin[2] - top).abs() < 1e-6)
+            .map(|p| p.origin)
+            .collect();
         for pad in &fp.pads {
-            let (x, y) = (cadrs_eda::units::to_mm(pad.at.x), cadrs_eda::units::to_mm(pad.at.y));
-            assert!(tops.iter().any(|p| (p[0] - x).abs() < 1e-3 && (p[1] - y).abs() < 1e-3), "pin {} at ({x}, {y}): {tops:?}", pad.number);
+            let (x, y) = (
+                cadrs_eda::units::to_mm(pad.at.x),
+                cadrs_eda::units::to_mm(pad.at.y),
+            );
+            assert!(
+                tops.iter()
+                    .any(|p| (p[0] - x).abs() < 1e-3 && (p[1] - y).abs() < 1e-3),
+                "pin {} at ({x}, {y}): {tops:?}",
+                pad.number
+            );
         }
     }
 
     #[test]
     fn face_names_follow_the_model_not_where_it_is() {
         let lib = cadrs_eda::library::LibraryTable::builtin();
-        let fp = lib.footprint("Package_SO:SOIC-8_3.9x4.9mm_P1.27mm").unwrap();
+        let fp = lib
+            .footprint("Package_SO:SOIC-8_3.9x4.9mm_P1.27mm")
+            .unwrap();
         let (meshes, _) = crate::pcb::model::footprint_meshes(fp).unwrap().unwrap();
         let a = mesh_solid(&meshes, uuid::Uuid::nil(), 1.0);
-        let m = cadrs_kernel::Motion { linear: Matrix3::identity(), translation: V3::new(50.0, -3.0, 1.6) };
-        let moved: Vec<Mesh> = meshes.iter().map(|g| crate::pcb::model::moved_mesh(g, &m)).collect();
+        let m = cadrs_kernel::Motion {
+            linear: Matrix3::identity(),
+            translation: V3::new(50.0, -3.0, 1.6),
+        };
+        let moved: Vec<Mesh> = meshes
+            .iter()
+            .map(|g| crate::pcb::model::moved_mesh(g, &m))
+            .collect();
         let b = mesh_solid(&moved, uuid::Uuid::nil(), 1.0);
         let names = |s: &Solid| s.faces.iter().map(|f| f.name).collect::<Vec<_>>();
         assert_eq!(names(&a), names(&b));
-        assert!(a.faces.len() >= 6 + 8, "body and 8 leads: {}", a.faces.len());
+        assert!(
+            a.faces.len() >= 6 + 8,
+            "body and 8 leads: {}",
+            a.faces.len()
+        );
     }
 
     #[test]
     fn circles_fit_exactly() {
-        let pts: Vec<(f64, f64)> = (0..12).map(|i| {
-            let t = i as f64 * 0.5;
-            (2.0 + 3.0 * t.cos(), -1.0 + 3.0 * t.sin())
-        }).collect();
+        let pts: Vec<(f64, f64)> = (0..12)
+            .map(|i| {
+                let t = i as f64 * 0.5;
+                (2.0 + 3.0 * t.cos(), -1.0 + 3.0 * t.sin())
+            })
+            .collect();
         let ((cx, cy), r, rms) = fit_circle(&pts).unwrap();
-        assert!((cx - 2.0).abs() < 1e-9 && (cy + 1.0).abs() < 1e-9 && (r - 3.0).abs() < 1e-9 && rms < 1e-9);
+        assert!(
+            (cx - 2.0).abs() < 1e-9
+                && (cy + 1.0).abs() < 1e-9
+                && (r - 3.0).abs() < 1e-9
+                && rms < 1e-9
+        );
     }
 }
 
@@ -593,7 +812,13 @@ pub fn mesh_mass(s: &Solid) -> Option<cadrs_kernel::MassProperties> {
     let com = first / volume;
     let c = cov - volume * com * com.transpose();
     let inertia = Matrix3::identity() * c.trace() - c;
-    Some(cadrs_kernel::MassProperties { volume, surface_area: area, center_of_mass: Point3::from(com), inertia, length: 0.0 })
+    Some(cadrs_kernel::MassProperties {
+        volume,
+        surface_area: area,
+        center_of_mass: Point3::from(com),
+        inertia,
+        length: 0.0,
+    })
 }
 
 #[cfg(test)]
@@ -611,6 +836,10 @@ mod mass_tests {
         assert!((m.surface_area - 52.0).abs() < 1e-9);
         assert!((m.center_of_mass - nalgebra::Point3::new(2.0, 3.5, 5.0)).norm() < 1e-9);
         // Ixx = V (b² + c²) / 12 = 24 (9 + 16) / 12 = 50.
-        assert!((m.inertia[(0, 0)] - 50.0).abs() < 1e-9 && m.inertia[(0, 1)].abs() < 1e-9, "{}", m.inertia);
+        assert!(
+            (m.inertia[(0, 0)] - 50.0).abs() < 1e-9 && m.inertia[(0, 1)].abs() < 1e-9,
+            "{}",
+            m.inertia
+        );
     }
 }

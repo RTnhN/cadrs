@@ -13,7 +13,10 @@ use cadrs_sketch::SketchOp;
 
 #[track_caller]
 fn rel(a: f64, b: f64, tol: f64) {
-    assert!(((a - b) / b).abs() <= tol, "got {a}, expected {b} (relative {tol})");
+    assert!(
+        ((a - b) / b).abs() <= tol,
+        "got {a}, expected {b} (relative {tol})"
+    );
 }
 
 struct Doc {
@@ -40,7 +43,11 @@ impl Doc {
     }
 
     fn volume_of(&self, b: &Build, part: cadrs_core::PartId) -> f64 {
-        b.part(part).unwrap_or_else(|| panic!("no part {part:?}: {:?}", b.errors)).mass.unwrap().volume
+        b.part(part)
+            .unwrap_or_else(|| panic!("no part {part:?}: {:?}", b.errors))
+            .mass
+            .unwrap()
+            .volume
     }
 
     fn variable(&self, f: FeatureId) -> VariableFeature {
@@ -51,9 +58,20 @@ impl Doc {
     }
 
     fn set_variable(&mut self, f: FeatureId, expr: &str) {
-        let v = VariableFeature { expr: expr.into(), ..self.variable(f) };
+        let v = VariableFeature {
+            expr: expr.into(),
+            ..self.variable(f)
+        };
         self.h
-            .execute(&mut self.d, &SetFeature { element: self.el, feature: f, kind: FeatureKind::Variable(v), label: "Variable".into() })
+            .execute(
+                &mut self.d,
+                &SetFeature {
+                    element: self.el,
+                    feature: f,
+                    kind: FeatureKind::Variable(v),
+                    label: "Variable".into(),
+                },
+            )
             .unwrap();
     }
 }
@@ -77,7 +95,10 @@ fn design_intent_body_follows_the_piston_diameter() {
     rel(d.volume_of(&b, di::PISTON_PART), q * 1600.0 * 30.0, 1e-6);
     rel(d.volume_of(&b, di::CLAMP_PART), clamp_volume(40.0), 1e-6);
     // The Variable table's values.
-    assert_eq!(d.variable(di::VAR_PISTON).display(&Default::default()), "40 mm");
+    assert_eq!(
+        d.variable(di::VAR_PISTON).display(&Default::default()),
+        "40 mm"
+    );
     // P5.6: one input changes; every child follows, with no feature errors.
     d.set_variable(di::VAR_PISTON, "50 mm");
     let b = d.build();
@@ -89,7 +110,12 @@ fn design_intent_body_follows_the_piston_diameter() {
     rel(d.volume_of(&b, di::CLAMP_PART), clamp_volume(50.0), 1e-6);
     // The bore dimension kept its expression and took the new value.
     let el = d.d.element(d.el).unwrap();
-    let g = &el.feature(di::MASTER_SKETCH).unwrap().sketch().unwrap().geometry;
+    let g = &el
+        .feature(di::MASTER_SKETCH)
+        .unwrap()
+        .sketch()
+        .unwrap()
+        .geometry;
     let (dim, expr) = g.expressions[0].clone();
     assert_eq!(expr, "#piston_d + #clearance");
     assert!((g.dimensions[dim].value - 50.5).abs() < 1e-9);
@@ -108,7 +134,11 @@ fn mixed_unit_variables() {
     assert!((v.value - 0.508).abs() < 1e-12);
     let b = d.build();
     assert!(b.errors.is_empty(), "{:?}", b.errors);
-    rel(d.volume_of(&b, di::BODY_PART), body_volume(40.0, 0.508), 1e-6);
+    rel(
+        d.volume_of(&b, di::BODY_PART),
+        body_volume(40.0, 0.508),
+        1e-6,
+    );
 }
 
 #[test]
@@ -116,28 +146,88 @@ fn a_variable_used_before_its_definition_is_an_error() {
     let mut d = Doc::design_intent();
     // Move #clearance below the master sketch: the sketch and the features naming #clearance
     // above it fail with why; below it, they are fine again.
-    let order: Vec<FeatureId> = d.d.element(d.el).unwrap().features().iter().map(|f| f.id).collect();
+    let order: Vec<FeatureId> =
+        d.d.element(d.el)
+            .unwrap()
+            .features()
+            .iter()
+            .map(|f| f.id)
+            .collect();
     let at = order.iter().position(|f| *f == di::BODY).unwrap();
-    d.h.execute(&mut d.d, &MoveFeatures { element: d.el, features: vec![di::VAR_CLEARANCE], to: at, folder: None, label: "Move".into() }).unwrap();
+    d.h.execute(
+        &mut d.d,
+        &MoveFeatures {
+            element: d.el,
+            features: vec![di::VAR_CLEARANCE],
+            to: at,
+            folder: None,
+            label: "Move".into(),
+        },
+    )
+    .unwrap();
     let b = d.build();
     let why = b.error(di::MASTER_SKETCH).expect("the master sketch fails");
-    assert!(why.contains("#clearance is used before it is defined"), "{why}");
-    assert!(b.error(di::GROOVE_SKETCH).is_none(), "the groove sketch is below #clearance now");
+    assert!(
+        why.contains("#clearance is used before it is defined"),
+        "{why}"
+    );
+    assert!(
+        b.error(di::GROOVE_SKETCH).is_none(),
+        "the groove sketch is below #clearance now"
+    );
     // The unit-level check says the same.
     let errs = variables::check(&d.features(), &Default::default());
-    assert!(errs.iter().any(|(f, w)| *f == di::MASTER_SKETCH && w.contains("before")), "{errs:?}");
+    assert!(
+        errs.iter()
+            .any(|(f, w)| *f == di::MASTER_SKETCH && w.contains("before")),
+        "{errs:?}"
+    );
     // A feature field naming an undefined variable fails its feature (P3D.1 red, with why).
-    let mut e = d.d.element(d.el).unwrap().feature(di::PISTON).unwrap().extrude().unwrap().clone();
+    let mut e =
+        d.d.element(d.el)
+            .unwrap()
+            .feature(di::PISTON)
+            .unwrap()
+            .extrude()
+            .unwrap()
+            .clone();
     e.depth_expr = "#stroke".into();
-    d.h.execute(&mut d.d, &SetExtrude { element: d.el, feature: di::PISTON, extrude: e.clone(), label: "Depth".into() }).unwrap();
+    d.h.execute(
+        &mut d.d,
+        &SetExtrude {
+            element: d.el,
+            feature: di::PISTON,
+            extrude: e.clone(),
+            label: "Depth".into(),
+        },
+    )
+    .unwrap();
     let b = d.build();
     assert_eq!(b.error(di::PISTON), Some("Depth: #stroke is not defined"));
     // Defining it (below the piston) is a forward use; above it, the depth follows it.
     let stroke = FeatureId::new();
-    d.h.execute(&mut d.d, &AddFeature::variable(d.el, stroke, VariableFeature::length("stroke", "45 mm"))).unwrap();
+    d.h.execute(
+        &mut d.d,
+        &AddFeature::variable(d.el, stroke, VariableFeature::length("stroke", "45 mm")),
+    )
+    .unwrap();
     let b = d.build();
-    assert!(b.error(di::PISTON).unwrap().contains("used before it is defined"));
-    d.h.execute(&mut d.d, &MoveFeatures { element: d.el, features: vec![stroke], to: 0, folder: None, label: "Move".into() }).unwrap();
+    assert!(
+        b.error(di::PISTON)
+            .unwrap()
+            .contains("used before it is defined")
+    );
+    d.h.execute(
+        &mut d.d,
+        &MoveFeatures {
+            element: d.el,
+            features: vec![stroke],
+            to: 0,
+            folder: None,
+            label: "Move".into(),
+        },
+    )
+    .unwrap();
     let b = d.build();
     assert!(b.error(di::PISTON).is_none(), "{:?}", b.errors);
     let q = std::f64::consts::FRAC_PI_4;
@@ -149,7 +239,10 @@ fn variable_types_and_uses() {
     let d = Doc::design_intent();
     let features = d.d.element(d.el).unwrap().features().to_vec();
     let master = features.iter().find(|f| f.id == di::MASTER_SKETCH).unwrap();
-    assert_eq!(variables::uses(master), vec!["piston_d".to_string(), "clearance".to_string()]);
+    assert_eq!(
+        variables::uses(master),
+        vec!["piston_d".to_string(), "clearance".to_string()]
+    );
     let piston = features.iter().find(|f| f.id == di::PISTON_SKETCH).unwrap();
     assert_eq!(variables::uses(piston), vec!["piston_d".to_string()]);
     let body = features.iter().find(|f| f.id == di::BODY).unwrap();
@@ -157,30 +250,83 @@ fn variable_types_and_uses() {
     // Types: an angle, a number, Any.
     let units = Default::default();
     let env = variables::defined(&features, &units);
-    let mut a = VariableFeature { name: "tilt".into(), var_type: VariableType::Angle, expr: "asin".into(), ..Default::default() };
+    let mut a = VariableFeature {
+        name: "tilt".into(),
+        var_type: VariableType::Angle,
+        expr: "asin".into(),
+        ..Default::default()
+    };
     assert!(a.evaluate(&units, &env).is_err());
     a.expr = "15 deg * 2".into();
     a.evaluate(&units, &env).unwrap();
     assert_eq!(a.display(&units), "30 deg");
-    let mut n = VariableFeature { name: "bolts".into(), var_type: VariableType::Number, expr: "2 * 3".into(), ..Default::default() };
+    let mut n = VariableFeature {
+        name: "bolts".into(),
+        var_type: VariableType::Number,
+        expr: "2 * 3".into(),
+        ..Default::default()
+    };
     n.evaluate(&units, &env).unwrap();
     assert_eq!(n.display(&units), "6");
-    let mut any = VariableFeature { name: "r".into(), var_type: VariableType::Any, expr: "#piston_d / 2".into(), ..Default::default() };
+    let mut any = VariableFeature {
+        name: "r".into(),
+        var_type: VariableType::Any,
+        expr: "#piston_d / 2".into(),
+        ..Default::default()
+    };
     any.evaluate(&units, &env).unwrap();
     assert_eq!(any.display(&units), "20 mm");
     // Names.
-    assert_eq!(VariableFeature { name: "2x".into(), ..Default::default() }.problem(), Some("A name is letters, digits and _ (starting with a letter)"));
+    assert_eq!(
+        VariableFeature {
+            name: "2x".into(),
+            ..Default::default()
+        }
+        .problem(),
+        Some("A name is letters, digits and _ (starting with a letter)")
+    );
     // A plain dimension typed over an expression drops it.
     let mut d = Doc::design_intent();
-    let g = d.d.element(d.el).unwrap().feature(di::PISTON_SKETCH).unwrap().sketch().unwrap().geometry.clone();
+    let g =
+        d.d.element(d.el)
+            .unwrap()
+            .feature(di::PISTON_SKETCH)
+            .unwrap()
+            .sketch()
+            .unwrap()
+            .geometry
+            .clone();
     let dim = g.expressions[0].0;
-    d.h.execute(&mut d.d, &EditSketch {
-        element: d.el,
-        feature: di::PISTON_SKETCH,
-        op: SketchOp::Batch(vec![SketchOp::SetDimensionValue { id: dim, value: 35.0 }, SketchOp::SetDimensionExpr { id: dim, expr: None }]),
-    })
+    d.h.execute(
+        &mut d.d,
+        &EditSketch {
+            element: d.el,
+            feature: di::PISTON_SKETCH,
+            op: SketchOp::Batch(vec![
+                SketchOp::SetDimensionValue {
+                    id: dim,
+                    value: 35.0,
+                },
+                SketchOp::SetDimensionExpr {
+                    id: dim,
+                    expr: None,
+                },
+            ]),
+        },
+    )
     .unwrap();
     d.set_variable(di::VAR_PISTON, "44 mm");
-    let g = d.d.element(d.el).unwrap().feature(di::PISTON_SKETCH).unwrap().sketch().unwrap().geometry.clone();
-    assert!((g.dimensions[dim].value - 35.0).abs() < 1e-12, "the plain value stays");
+    let g =
+        d.d.element(d.el)
+            .unwrap()
+            .feature(di::PISTON_SKETCH)
+            .unwrap()
+            .sketch()
+            .unwrap()
+            .geometry
+            .clone();
+    assert!(
+        (g.dimensions[dim].value - 35.0).abs() < 1e-12,
+        "the plain value stays"
+    );
 }

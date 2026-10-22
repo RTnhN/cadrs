@@ -30,20 +30,20 @@ pub mod annotations;
 pub mod bom_tools;
 pub mod create_dialog;
 pub mod dim_palette;
+pub mod export_dialog;
+pub mod flat_views;
 pub mod note_bar;
 pub mod notes;
 pub mod panels;
 pub mod sheet_dialog;
 pub mod sheet_items;
-pub mod export_dialog;
-pub mod flat_views;
+pub mod symbol_cards;
 pub mod toolbar;
 pub mod update;
-pub mod view_menu;
-pub mod view_tools;
 pub mod view_kind_tools;
 pub mod view_linked;
-pub mod symbol_cards;
+pub mod view_menu;
+pub mod view_tools;
 pub mod views;
 
 use cadrs_ui::ShortcutKey;
@@ -113,7 +113,10 @@ impl Plugin for DrawingPlugin {
                     .after(crate::viewport::apply_view_to_camera)
                     .run_if(in_state(AppState::Document)),
             )
-            .add_systems(Update, deactivate_outside_documents.run_if(not(in_state(AppState::Document))))
+            .add_systems(
+                Update,
+                deactivate_outside_documents.run_if(not(in_state(AppState::Document))),
+            )
             .add_plugins((
                 panels::DrawingPanelsPlugin,
                 create_dialog::CreateDrawingPlugin,
@@ -130,7 +133,12 @@ impl Plugin for DrawingPlugin {
                 note_bar::NoteBarPlugin,
                 update::UpdatePlugin,
             ))
-            .add_plugins((sheet_items::SheetItemsPlugin, export_dialog::DrawingExportPlugin, symbol_cards::SymbolCardsPlugin, flat_views::FlatViewsPlugin));
+            .add_plugins((
+                sheet_items::SheetItemsPlugin,
+                export_dialog::DrawingExportPlugin,
+                symbol_cards::SymbolCardsPlugin,
+                flat_views::FlatViewsPlugin,
+            ));
     }
 }
 
@@ -214,7 +222,10 @@ pub struct DrawingUi {
     /// What a view-kind tool previews (sheet mm): a cutting line, a circle, a rectangle.
     pub tool_strokes: Vec<Vec<[f64; 2]>>,
     /// A flat pattern view's settings while one of its bend notes is dragged (P3I.7).
-    pub flat_preview: Option<(cadrs_drawing::ViewId, cadrs_drawing::flat_view::FlatSettings)>,
+    pub flat_preview: Option<(
+        cadrs_drawing::ViewId,
+        cadrs_drawing::flat_view::FlatSettings,
+    )>,
 }
 
 /// A view pressed on: dragged once the pointer moves a few pixels.
@@ -303,7 +314,12 @@ fn configure_gizmos(mut store: ResMut<GizmoConfigStore>) {
     cfg.render_layers = RenderLayers::layer(DRAWING_LAYER);
 }
 
-fn reset_drawing_ui(mut ui: ResMut<DrawingUi>, mut scene: ResMut<SheetScene>, mut commands: Commands, q: Query<Entity, With<SheetEntity>>) {
+fn reset_drawing_ui(
+    mut ui: ResMut<DrawingUi>,
+    mut scene: ResMut<SheetScene>,
+    mut commands: Commands,
+    q: Query<Entity, With<SheetEntity>>,
+) {
     *ui = DrawingUi::default();
     *scene = SheetScene::default();
     for e in &q {
@@ -344,14 +360,19 @@ fn sync_drawing_chrome(
     for (name, mut node, mut vis) in &mut q_nodes {
         match name.as_str() {
             "feature-panel" => {
-                let d = if drawing { Display::None } else { Display::Flex };
+                let d = if drawing {
+                    Display::None
+                } else {
+                    Display::Flex
+                };
                 if node.display != d {
                     node.display = d;
                 }
             }
             "view-cube" | "right-panel-strip" | "viewport-tools" | "origin" => {
                 // P3H.3: a PCB Studio keeps the view cube and has its own right-edge toggles.
-                let pcb = *kind == ActiveKind::PcbStudio && (name.as_str() != "view-cube" || flat2d);
+                let pcb =
+                    *kind == ActiveKind::PcbStudio && (name.as_str() != "view-cube" || flat2d);
                 let v = if kind.is_flat() || pcb {
                     Visibility::Hidden
                 } else {
@@ -403,7 +424,11 @@ pub fn sheet_to_screen(view: SheetView, area: Rect, s: Vec2) -> Vec2 {
 }
 
 /// Gives a sheet shown for the first time a fitted view, and keeps a fitted view fitted.
-fn fit_new_sheets(doc: Option<Res<ActiveDocument>>, rect: Res<ViewportRect>, mut ui: ResMut<DrawingUi>) {
+fn fit_new_sheets(
+    doc: Option<Res<ActiveDocument>>,
+    rect: Res<ViewportRect>,
+    mut ui: ResMut<DrawingUi>,
+) {
     let Some(doc) = doc else {
         return;
     };
@@ -426,7 +451,10 @@ fn fit_new_sheets(doc: Option<Res<ActiveDocument>>, rect: Res<ViewportRect>, mut
 }
 
 /// The active sheet (drawing and sheet id) and its view, if a drawing is shown.
-pub fn current_view(doc: &ActiveDocument, ui: &DrawingUi) -> Option<((ElementId, SheetId), SheetView)> {
+pub fn current_view(
+    doc: &ActiveDocument,
+    ui: &DrawingUi,
+) -> Option<((ElementId, SheetId), SheetView)> {
     let (id, d) = active_drawing(doc)?;
     let sheet = d.sheets.get(ui.sheet_index(id, d))?;
     Some(((id, sheet.id), *ui.views.get(&(id, sheet.id))?))
@@ -451,7 +479,12 @@ fn apply_sheet_camera(
         .as_deref()
         .filter(|_| *kind == ActiveKind::Drawing)
         .and_then(|doc| current_view(doc, &ui))
-        .map(|(_, v)| (sheet_to_screen(v, sheet_area(&rect, &ui), Vec2::ZERO), v.ppm));
+        .map(|(_, v)| {
+            (
+                sheet_to_screen(v, sheet_area(&rect, &ui), Vec2::ZERO),
+                v.ppm,
+            )
+        });
     if screen.0 != current {
         screen.0 = current;
     }
@@ -500,7 +533,10 @@ fn drawing_pointer(
     hover: Res<HoverMap>,
     q_area: Query<Entity, With<ViewportArea>>,
     mut ui: ResMut<DrawingUi>,
-    (keys, prefs): (Res<ButtonInput<KeyCode>>, Res<crate::preferences_ui::LocalPreferences>),
+    (keys, prefs): (
+        Res<ButtonInput<KeyCode>>,
+        Res<crate::preferences_ui::LocalPreferences>,
+    ),
     mut commands: Commands,
 ) {
     use cadrs_core::preferences::SheetAction;
@@ -532,7 +568,10 @@ fn drawing_pointer(
                 drag.moved += delta.length();
                 // D2.2, P3E.3: the mouse preference's rotate and pan gestures pan the sheet,
                 // its zoom gestures zoom it about where the drag started.
-                let action = drag.panning.then_some(drag.button).flatten().and_then(|b| mouse.sheet_action(crate::preferences_ui::mouse_button(b), mods));
+                let action =
+                    drag.panning.then_some(drag.button).flatten().and_then(|b| {
+                        mouse.sheet_action(crate::preferences_ui::mouse_button(b), mods)
+                    });
                 if delta != Vec2::ZERO {
                     match action {
                         Some(SheetAction::Pan) => {
@@ -541,7 +580,9 @@ fn drawing_pointer(
                         }
                         Some(SheetAction::Zoom) => {
                             let before = screen_to_sheet(view, area, drag.start);
-                            view.ppm = (view.ppm * crate::viewport::DRAG_ZOOM_PER_PX.powf(-delta.y)).clamp(0.05, 400.0);
+                            view.ppm = (view.ppm
+                                * crate::viewport::DRAG_ZOOM_PER_PX.powf(-delta.y))
+                            .clamp(0.05, 400.0);
                             let after = screen_to_sheet(view, area, drag.start);
                             view.center += before - after;
                             view.fitted = false;
@@ -553,7 +594,10 @@ fn drawing_pointer(
             PointerAction::Press(b) => {
                 drag.pointer = pos;
                 drag.moved = 0.0;
-                if over && matches!(b, PointerButton::Secondary | PointerButton::Middle) && mouse.navigates_with(crate::preferences_ui::mouse_button(b)) {
+                if over
+                    && matches!(b, PointerButton::Secondary | PointerButton::Middle)
+                    && mouse.navigates_with(crate::preferences_ui::mouse_button(b))
+                {
                     drag.panning = true;
                     drag.button = Some(b);
                     drag.start = pos;
@@ -672,13 +716,16 @@ fn rebuild_sheet_scene(
     q: Query<Entity, With<SheetEntity>>,
     mut commands: Commands,
 ) {
-    let key = doc.as_deref().filter(|_| *kind == ActiveKind::Drawing).and_then(|doc| {
-        let (id, d) = active_drawing(doc)?;
-        let i = ui.sheet_index(id, d);
-        let sheet = d.sheets.get(i)?;
-        let props = reference_props(&doc.doc, sheet.reference);
-        Some((id, sheet.id, d.clone(), props))
-    });
+    let key = doc
+        .as_deref()
+        .filter(|_| *kind == ActiveKind::Drawing)
+        .and_then(|doc| {
+            let (id, d) = active_drawing(doc)?;
+            let i = ui.sheet_index(id, d);
+            let sheet = d.sheets.get(i)?;
+            let props = reference_props(&doc.doc, sheet.reference);
+            Some((id, sheet.id, d.clone(), props))
+        });
     if key == scene.key {
         return;
     }
@@ -779,7 +826,11 @@ pub(crate) fn size_sheet_texts(
 }
 
 /// Line widths follow the zoom: the ISO 128 width on paper, at least a pixel.
-fn size_sheet_lines(doc: Option<Res<ActiveDocument>>, ui: Res<DrawingUi>, mut store: ResMut<GizmoConfigStore>) {
+fn size_sheet_lines(
+    doc: Option<Res<ActiveDocument>>,
+    ui: Res<DrawingUi>,
+    mut store: ResMut<GizmoConfigStore>,
+) {
     let Some(doc) = doc else {
         return;
     };
@@ -811,8 +862,12 @@ fn draw_sheet_lines(
         }
     }
     for circle in &scene.graphics.circles {
-        thin.circle_2d(Isometry2d::from_translation(v(circle.center)), circle.radius as f32, c)
-            .resolution(48);
+        thin.circle_2d(
+            Isometry2d::from_translation(v(circle.center)),
+            circle.radius as f32,
+            c,
+        )
+        .resolution(48);
     }
 }
 

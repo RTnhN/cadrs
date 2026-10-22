@@ -14,7 +14,6 @@
 //! The component's symbol and footprint are its studio's project library: a symbol without a
 //! default footprint gets the component's own.
 
-use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
@@ -24,6 +23,7 @@ use cadrs_eda::graphics::{Fill, Geom};
 use cadrs_eda::layer::Layer;
 use cadrs_eda::lib_edit::{self as le, SymbolPart};
 use cadrs_eda::units::{MIL, Nm, Pt, mm};
+use cadrs_ui::ShortcutKey;
 
 use super::ui::{self, StripAction};
 use super::{EdaClick, EdaPointer, Mode, Preview, SceneInputs};
@@ -33,30 +33,65 @@ const SYMBOL_STRIP: ui::StripSpec = &[
     Some(("sym-select", "drag-handle", "Select (Esc)", "select")),
     None,
     Some(("sym-pin", "pin", "Add a pin", "pin")),
-    Some(("sym-repeat", "copy", "Repeat the last pin (Insert)", "repeat")),
+    Some((
+        "sym-repeat",
+        "copy",
+        "Repeat the last pin (Insert)",
+        "repeat",
+    )),
     Some(("sym-line", "line", "Draw a line", "line")),
     Some(("sym-circle", "center-circle", "Draw a circle", "circle")),
     Some(("sym-rect", "corner-rectangle", "Draw a rectangle", "rect")),
     Some(("sym-pin-table", "custom-table", "Pin table", "pintable")),
-    Some(("sym-arrange", "aligned-rectangle", "Arrange the pins round a box", "arrange")),
+    Some((
+        "sym-arrange",
+        "aligned-rectangle",
+        "Arrange the pins round a box",
+        "arrange",
+    )),
     None,
     Some(("sym-props", "properties", "Symbol properties", "props")),
-    Some(("sym-from-library", "books", "Start from a library symbol", "fromlib")),
+    Some((
+        "sym-from-library",
+        "books",
+        "Start from a library symbol",
+        "fromlib",
+    )),
 ];
 
 const FOOTPRINT_STRIP: ui::StripSpec = &[
     Some(("fp-select", "drag-handle", "Select (Esc)", "select")),
     None,
     Some(("fp-pad", "pad", "Add a pad", "pad")),
-    Some(("fp-push", "copy", "Push the selected pad's properties to the other pads", "push")),
+    Some((
+        "fp-push",
+        "copy",
+        "Push the selected pad's properties to the other pads",
+        "push",
+    )),
     Some(("fp-pad-array", "linear-pattern", "Pad array", "padarray")),
-    Some(("fp-renumber", "sort-descending", "Renumber pads", "renumber")),
+    Some((
+        "fp-renumber",
+        "sort-descending",
+        "Renumber pads",
+        "renumber",
+    )),
     Some(("fp-line", "line", "Draw a line", "line")),
     Some(("fp-rect", "corner-rectangle", "Draw a rectangle", "rect")),
-    Some(("fp-layer", "layers", "Drawing layer: Fab, Silkscreen, Courtyard", "layer")),
+    Some((
+        "fp-layer",
+        "layers",
+        "Drawing layer: Fab, Silkscreen, Courtyard",
+        "layer",
+    )),
     None,
     Some(("fp-props", "properties", "Footprint properties", "props")),
-    Some(("fp-from-library", "books", "Start from a library footprint", "fromlib")),
+    Some((
+        "fp-from-library",
+        "books",
+        "Start from a library footprint",
+        "fromlib",
+    )),
     Some(("fp-model", "board-3d", "3D model", "model")),
 ];
 
@@ -95,14 +130,22 @@ pub struct PartState {
 
 impl Default for PartState {
     fn default() -> Self {
-        PartState { tool: Tool::Select, sym_selection: vec![], fp_selection: vec![], layer: Layer::TopFab }
+        PartState {
+            tool: Tool::Select,
+            sym_selection: vec![],
+            fp_selection: vec![],
+            layer: Layer::TopFab,
+        }
     }
 }
 
 pub fn register(app: &mut App) {
     app.init_resource::<PartState>().add_systems(
         Update,
-        (strips, on_strip, on_click, on_keys, follow_pointer, publish).chain().after(super::navigate).run_if(in_state(AppState::Document)),
+        (strips, on_strip, on_click, on_keys, follow_pointer, publish)
+            .chain()
+            .after(super::navigate)
+            .run_if(in_state(AppState::Document)),
     );
     super::part_dialogs::register(app);
 }
@@ -122,24 +165,46 @@ fn mode(w: &World) -> Option<Mode> {
 /// The component being edited (a copy, its symbol and footprint started if missing).
 pub fn current(w: &World) -> Option<(cadrs_core::ElementId, ComponentId, Component)> {
     let (el, c, _) = w.resource::<super::Eda2d>().component()?;
-    let mut comp = w.resource::<ActiveDocument>().doc.element(el)?.pcb()?.component(c)?.component.clone();
+    let mut comp = w
+        .resource::<ActiveDocument>()
+        .doc
+        .element(el)?
+        .pcb()?
+        .component(c)?
+        .component
+        .clone();
     if comp.symbol.is_none() {
         comp.symbol = Some(le::new_symbol(&comp.name, "U", true));
     }
     if comp.footprint.is_none() {
-        comp.footprint = Some(le::new_footprint(&comp.name, &comp.name, cadrs_eda::footprint::MountKind::ThroughHole));
+        comp.footprint = Some(le::new_footprint(
+            &comp.name,
+            &comp.name,
+            cadrs_eda::footprint::MountKind::ThroughHole,
+        ));
     }
     Some((el, c, comp))
 }
 
 /// Applies `f` to the component and stores it as one undo step.
-pub fn commit(w: &mut World, label: &str, f: impl FnOnce(&mut Component) -> Result<(), String>) -> bool {
-    let Some((element, component, mut comp)) = current(w) else { return false };
+pub fn commit(
+    w: &mut World,
+    label: &str,
+    f: impl FnOnce(&mut Component) -> Result<(), String>,
+) -> bool {
+    let Some((element, component, mut comp)) = current(w) else {
+        return false;
+    };
     if let Err(e) = f(&mut comp) {
         ui::toast(w, &e);
         return false;
     }
-    let cmd = SetComponent { element, component, value: Box::new(comp), label: label.into() };
+    let cmd = SetComponent {
+        element,
+        component,
+        value: Box::new(comp),
+        label: label.into(),
+    };
     match w.resource_mut::<ActiveDocument>().execute(&cmd) {
         Ok(()) => true,
         Err(e) => {
@@ -162,7 +227,11 @@ fn snap(p: Pt, g: Nm) -> Pt {
 
 fn tolerance(w: &World) -> Nm {
     let ui = w.resource::<super::EdaUi>();
-    let scale = w.resource::<super::Eda2d>().0.and_then(|k| ui.views.get(&k)).map_or(4.0, |v| v.0.scale);
+    let scale = w
+        .resource::<super::Eda2d>()
+        .0
+        .and_then(|k| ui.views.get(&k))
+        .map_or(4.0, |v| v.0.scale);
     mm(4.0 / scale)
 }
 
@@ -202,7 +271,11 @@ pub fn run_action(w: &mut World, m: Mode, action: &str) {
             let sel = w.resource::<PartState>().fp_selection.clone();
             commit(w, "Push pad properties", |c| {
                 let f = c.footprint.as_mut().unwrap();
-                let i = f.pads.iter().position(|p| sel.contains(&p.id)).ok_or("Select the pad to copy from")?;
+                let i = f
+                    .pads
+                    .iter()
+                    .position(|p| sel.contains(&p.id))
+                    .ok_or("Select the pad to copy from")?;
                 le::push_pad_properties(f, i);
                 Ok(())
             });
@@ -227,11 +300,21 @@ pub fn run_action(w: &mut World, m: Mode, action: &str) {
         }
         (_, "padarray") => super::part_dialogs::open_pad_array(w),
         (_, "renumber") => super::part_dialogs::open_renumber(w),
-        (Mode::Symbol, "fromlib") => super::browser::open(w, super::browser::Kind::Symbols { power: false }, super::browser::Purpose::ComponentSymbol),
+        (Mode::Symbol, "fromlib") => super::browser::open(
+            w,
+            super::browser::Kind::Symbols { power: false },
+            super::browser::Purpose::ComponentSymbol,
+        ),
         (_, "fromlib") => {
             // Footprints the component's symbol allows, when it says.
-            let globs = current(w).and_then(|(_, _, c)| c.symbol.map(|s| s.footprint_filters)).unwrap_or_default();
-            super::browser::open(w, super::browser::Kind::Footprints { globs }, super::browser::Purpose::ComponentFootprint);
+            let globs = current(w)
+                .and_then(|(_, _, c)| c.symbol.map(|s| s.footprint_filters))
+                .unwrap_or_default();
+            super::browser::open(
+                w,
+                super::browser::Kind::Footprints { globs },
+                super::browser::Purpose::ComponentFootprint,
+            );
         }
         _ => {}
     }
@@ -264,7 +347,10 @@ fn shape_from(tool: Tool, a: Pt, b: Pt) -> Option<Geom> {
     match tool {
         Tool::Line(_) => Some(Geom::Line { a, b }),
         Tool::Rect(_) => Some(Geom::Rect { a, b }),
-        Tool::Circle(_) => Some(Geom::Circle { center: a, radius: a.dist(b).round() as Nm }),
+        Tool::Circle(_) => Some(Geom::Circle {
+            center: a,
+            radius: a.dist(b).round() as Nm,
+        }),
         _ => None,
     }
 }
@@ -288,14 +374,32 @@ fn press(w: &mut World, m: Mode, at: Pt, shift: bool) {
                 }
                 _ => {
                     let f = c.footprint.as_ref().unwrap();
-                    let pad = f.pads.iter().find(|p| cadrs_eda::poly::contains(&cadrs_eda::poly::pad_local(p, tol), at)).map(|p| p.id);
-                    let shape = || {
-                        f.shapes.iter().find(|sh| {
-                            let (pts, closed) = cadrs_eda::poly::geom_points(&sh.shape.geom);
-                            let r = if closed { cadrs_eda::poly::stroke_closed(&pts, sh.shape.stroke.width.max(1) + 2 * tol) } else { cadrs_eda::poly::stroke(&pts, sh.shape.stroke.width.max(1) + 2 * tol) };
-                            cadrs_eda::poly::contains(&r, at)
+                    let pad = f
+                        .pads
+                        .iter()
+                        .find(|p| {
+                            cadrs_eda::poly::contains(&cadrs_eda::poly::pad_local(p, tol), at)
                         })
-                        .map(|sh| sh.id)
+                        .map(|p| p.id);
+                    let shape = || {
+                        f.shapes
+                            .iter()
+                            .find(|sh| {
+                                let (pts, closed) = cadrs_eda::poly::geom_points(&sh.shape.geom);
+                                let r = if closed {
+                                    cadrs_eda::poly::stroke_closed(
+                                        &pts,
+                                        sh.shape.stroke.width.max(1) + 2 * tol,
+                                    )
+                                } else {
+                                    cadrs_eda::poly::stroke(
+                                        &pts,
+                                        sh.shape.stroke.width.max(1) + 2 * tol,
+                                    )
+                                };
+                                cadrs_eda::poly::contains(&r, at)
+                            })
+                            .map(|sh| sh.id)
                     };
                     match pad.or_else(shape) {
                         Some(h) if shift => s.fp_selection.push(h),
@@ -320,11 +424,18 @@ fn press(w: &mut World, m: Mode, at: Pt, shift: bool) {
             w.resource_mut::<PartState>().tool = next;
         }
         Tool::Line(Some(a)) | Tool::Circle(Some(a)) | Tool::Rect(Some(a)) => {
-            let Some(geom) = shape_from(tool, a, p) else { return };
+            let Some(geom) = shape_from(tool, a, p) else {
+                return;
+            };
             let layer = w.resource::<PartState>().layer;
             commit(w, "Draw", |c| {
                 match m {
-                    Mode::Symbol => le::add_symbol_shape(c.symbol.as_mut().unwrap(), geom, mm(0.254), Fill::None),
+                    Mode::Symbol => le::add_symbol_shape(
+                        c.symbol.as_mut().unwrap(),
+                        geom,
+                        mm(0.254),
+                        Fill::None,
+                    ),
                     _ => {
                         let width = match layer {
                             Layer::TopSilk => mm(0.12),
@@ -337,7 +448,11 @@ fn press(w: &mut World, m: Mode, at: Pt, shift: bool) {
                 Ok(())
             });
             // Lines chain on from where the last ended.
-            let next = if let Tool::Line(_) = tool { Tool::Line(Some(p)) } else { tool_reset(tool) };
+            let next = if let Tool::Line(_) = tool {
+                Tool::Line(Some(p))
+            } else {
+                tool_reset(tool)
+            };
             w.resource_mut::<PartState>().tool = next;
         }
     }
@@ -367,7 +482,11 @@ fn double(w: &mut World, m: Mode, at: Pt) {
         }
         _ => {
             let f = c.footprint.as_ref().unwrap();
-            if let Some(i) = f.pads.iter().position(|p| cadrs_eda::poly::contains(&cadrs_eda::poly::pad_local(p, tol), at)) {
+            if let Some(i) = f
+                .pads
+                .iter()
+                .position(|p| cadrs_eda::poly::contains(&cadrs_eda::poly::pad_local(p, tol), at))
+            {
                 super::part_dialogs::open_pad(w, i);
             }
         }
@@ -410,11 +529,15 @@ fn handle_keys(world: &mut World, keys: Vec<KeyboardInput>) {
                     },
                     _ => {
                         let sel = s.fp_selection.first().copied();
-                        let Some((_, _, c)) = current(world) else { return };
+                        let Some((_, _, c)) = current(world) else {
+                            return;
+                        };
                         let f = c.footprint.unwrap();
                         if let Some(i) = sel.and_then(|id| f.pads.iter().position(|p| p.id == id)) {
                             super::part_dialogs::open_pad(world, i);
-                        } else if let Some(i) = sel.and_then(|id| f.shapes.iter().position(|s| s.id == id)) {
+                        } else if let Some(i) =
+                            sel.and_then(|id| f.shapes.iter().position(|s| s.id == id))
+                        {
                             super::part_dialogs::open_rect(world, i);
                         } else {
                             super::part_dialogs::open_footprint_props(world);
@@ -464,11 +587,17 @@ fn follow_pointer(world: &mut World, mut last: Local<Option<Pt>>) {
         return;
     }
     *last = Some(p);
-    let Some((_, _, mut c)) = current(world) else { return };
-    let Some(geom) = shape_from(tool, a, p) else { return };
+    let Some((_, _, mut c)) = current(world) else {
+        return;
+    };
+    let Some(geom) = shape_from(tool, a, p) else {
+        return;
+    };
     let layer = world.resource::<PartState>().layer;
     match m {
-        Mode::Symbol => le::add_symbol_shape(c.symbol.as_mut().unwrap(), geom, mm(0.254), Fill::None),
+        Mode::Symbol => {
+            le::add_symbol_shape(c.symbol.as_mut().unwrap(), geom, mm(0.254), Fill::None)
+        }
         _ => {
             le::add_fp_shape(c.footprint.as_mut().unwrap(), geom, layer, mm(0.1));
         }

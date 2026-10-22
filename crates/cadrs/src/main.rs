@@ -74,7 +74,10 @@ fn main() -> AppExit {
     }
     // `--install`: installs this build for the user, with a launcher entry (`install.rs`;
     // `--install-desktop` is its older name).
-    if args.iter().any(|a| a == "--install" || a == "--install-desktop") {
+    if args
+        .iter()
+        .any(|a| a == "--install" || a == "--install-desktop")
+    {
         return match install::run() {
             Ok(dir) => {
                 println!("Installed cadrs to {}", dir.display());
@@ -113,7 +116,10 @@ fn main() -> AppExit {
         Ok(o) => o,
         Err(e) => {
             // The harness's own usage line knows only the app's options: point to all of them.
-            eprintln!("{}\ncadrs --help lists every option.", e.lines().next().unwrap_or(""));
+            eprintln!(
+                "{}\ncadrs --help lists every option.",
+                e.lines().next().unwrap_or("")
+            );
             return AppExit::from_code(2);
         }
     };
@@ -127,10 +133,12 @@ fn main() -> AppExit {
 
     let mut app = App::new();
     // The frame panel's CPU times: every system's and schedule's tracing span, added up.
-    app.add_plugins(cadrs_harness::default_plugins(&opts).set(bevy::log::LogPlugin {
-        custom_layer: cadrs_app::frame_profile::profiler_layer,
-        ..default()
-    }));
+    app.add_plugins(
+        cadrs_harness::default_plugins(&opts).set(bevy::log::LogPlugin {
+            custom_layer: cadrs_app::frame_profile::profiler_layer,
+            ..default()
+        }),
+    );
     if let Some(start) = scenario.as_ref().and_then(|s| s.start.clone()) {
         app.insert_resource(StartState(start));
     }
@@ -142,9 +150,15 @@ fn main() -> AppExit {
     // into the user's Downloads (Final part 3: golden runs had written there).
     // Nor do they see or add to the user's own libraries.
     // ($CADRS_USER_LIBRARIES still picks a folder: a run that uses the user's parts, read only.)
-    let user_libraries = (scripted || opts.headless).then(|| std::env::var_os("CADRS_USER_LIBRARIES").map(std::path::PathBuf::from).unwrap_or_else(|| opts.resolved_out_dir().join("libraries")));
+    let user_libraries = (scripted || opts.headless).then(|| {
+        std::env::var_os("CADRS_USER_LIBRARIES")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| opts.resolved_out_dir().join("libraries"))
+    });
     if scripted || opts.headless {
-        app.insert_resource(cadrs_app::ExportDirOverride(Some(opts.resolved_out_dir().join("exports"))));
+        app.insert_resource(cadrs_app::ExportDirOverride(Some(
+            opts.resolved_out_dir().join("exports"),
+        )));
     }
     // The harness plugin clears the scenario's output directory (and with it the scenario's
     // data dir), so seed documents after adding it.
@@ -181,7 +195,10 @@ fn main() -> AppExit {
     }
     let exit = app
         .add_plugins((CadrsUiPlugin, CadrsAppPlugin))
-        .add_systems(Last, (share_sketch_mapping, share_view_mapping, share_flat_mapping))
+        .add_systems(
+            Last,
+            (share_sketch_mapping, share_view_mapping, share_flat_mapping),
+        )
         .run();
     // The document histories still being written.
     cadrs_core::history_log::flush_saves();
@@ -243,15 +260,18 @@ fn share_flat_mapping(
         }
         return;
     }
-    let want = table.body.filter(|_| table.scene.is_some()).map(|(_, rect)| {
-        let v = table.view;
-        let z = table.scene.as_ref().map_or(0.0, |s| s.thickness as f32);
-        cadrs_harness::Affine {
-            origin: rect.center() + v.project(Vec3::new(0.0, 0.0, z)),
-            x_axis: v.project_vector(Vec3::X),
-            y_axis: v.project_vector(Vec3::Y),
-        }
-    });
+    let want = table
+        .body
+        .filter(|_| table.scene.is_some())
+        .map(|(_, rect)| {
+            let v = table.view;
+            let z = table.scene.as_ref().map_or(0.0, |s| s.thickness as f32);
+            cadrs_harness::Affine {
+                origin: rect.center() + v.project(Vec3::new(0.0, 0.0, z)),
+                x_axis: v.project_vector(Vec3::X),
+                y_axis: v.project_vector(Vec3::Y),
+            }
+        });
     if out.0 != want {
         out.0 = want;
     }
@@ -280,12 +300,23 @@ fn share_view_mapping(
 
 /// Runs a scenario an MCP client sent (`run_scenario`) in the running app: its RON is a list of
 /// steps or a whole `Scenario(...)`; screenshots go to a temporary folder.
-fn run_live_scenario(world: &mut World, ron_text: &str, done: cadrs_app::mcp::ScenarioDone) -> Result<(), String> {
+fn run_live_scenario(
+    world: &mut World,
+    ron_text: &str,
+    done: cadrs_app::mcp::ScenarioDone,
+) -> Result<(), String> {
     let text = ron_text.trim();
-    let text = if text.starts_with('[') { format!("Scenario(steps: {text})") } else { text.to_string() };
-    let scenario: cadrs_harness::Scenario = cadrs_harness::Scenario::parse(&text).map_err(|e| format!("bad scenario: {e}"))?;
+    let text = if text.starts_with('[') {
+        format!("Scenario(steps: {text})")
+    } else {
+        text.to_string()
+    };
+    let scenario: cadrs_harness::Scenario =
+        cadrs_harness::Scenario::parse(&text).map_err(|e| format!("bad scenario: {e}"))?;
     static RUNS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let n = RUNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let out = std::env::temp_dir().join(format!("cadrs-mcp-{}", std::process::id())).join(format!("run-{n}"));
+    let out = std::env::temp_dir()
+        .join(format!("cadrs-mcp-{}", std::process::id()))
+        .join(format!("run-{n}"));
     cadrs_harness::runner::start_live(world, scenario, out, done)
 }

@@ -15,9 +15,15 @@ pub struct YAxis {
 
 impl YAxis {
     /// Y already up (symbol libraries).
-    pub const UP: YAxis = YAxis { sign: 1.0, origin: 0.0 };
+    pub const UP: YAxis = YAxis {
+        sign: 1.0,
+        origin: 0.0,
+    };
     /// Y down about 0 (boards, footprints).
-    pub const DOWN: YAxis = YAxis { sign: -1.0, origin: 0.0 };
+    pub const DOWN: YAxis = YAxis {
+        sign: -1.0,
+        origin: 0.0,
+    };
 
     /// Y down from the top of a page `height` mm tall. The origin is the page height rounded up
     /// to the 50 mil schematic grid, so KiCad's grid (from the page's top-left corner) lands on
@@ -26,7 +32,10 @@ impl YAxis {
     /// higher on the page.)
     pub fn page(height: f64) -> YAxis {
         let grid = cadrs_eda::units::to_mm(cadrs_eda::units::SCHEMATIC_GRID);
-        YAxis { sign: -1.0, origin: (height / grid - 1e-9).ceil() * grid }
+        YAxis {
+            sign: -1.0,
+            origin: (height / grid - 1e-9).ceil() * grid,
+        }
     }
 
     pub fn pt(&self, x: f64, y: f64) -> Pt {
@@ -57,7 +66,9 @@ pub fn at_angle(s: &Sexp) -> f64 {
 /// `(pts (xy …) …)` as points. Arcs inside (`(arc (start)(mid)(end))`, board polygons) are
 /// flattened.
 pub fn pts(s: &Sexp, y: YAxis) -> Vec<Pt> {
-    let Some(p) = s.find("pts") else { return vec![] };
+    let Some(p) = s.find("pts") else {
+        return vec![];
+    };
     let mut out = vec![];
     for c in p.children() {
         match c.head() {
@@ -66,7 +77,10 @@ pub fn pts(s: &Sexp, y: YAxis) -> Vec<Pt> {
                 let (a, m, b) = (y.child(c, "start"), y.child(c, "mid"), y.child(c, "end"));
                 if let (Some(a), Some(m), Some(b)) = (a, m, b) {
                     let flat = cadrs_eda::geom::arc_points(a, m, b, mm(0.005));
-                    out.extend(flat.iter().map(|q| Pt::new(q[0].round() as i64, q[1].round() as i64)));
+                    out.extend(
+                        flat.iter()
+                            .map(|q| Pt::new(q[0].round() as i64, q[1].round() as i64)),
+                    );
                 }
             }
             _ => {}
@@ -84,7 +98,12 @@ pub fn color(s: &Sexp) -> Option<Color> {
         return None;
     }
     let a = v.get(3).copied().unwrap_or(1.0);
-    Some(Color { r: v[0] as u8, g: v[1] as u8, b: v[2] as u8, a: (a * 255.0).round() as u8 })
+    Some(Color {
+        r: v[0] as u8,
+        g: v[1] as u8,
+        b: v[2] as u8,
+        a: (a * 255.0).round() as u8,
+    })
 }
 
 pub fn stroke(s: &Sexp) -> Stroke {
@@ -100,13 +119,19 @@ pub fn stroke(s: &Sexp) -> Stroke {
         Some("dash_dot_dot") => LineStyle::DashDotDot,
         _ => LineStyle::Default,
     };
-    Stroke { width: st.get_f64("width").map(mm).unwrap_or(0), style, color: color(st) }
+    Stroke {
+        width: st.get_f64("width").map(mm).unwrap_or(0),
+        style,
+        color: color(st),
+    }
 }
 
 /// A shape's fill: `(fill (type none|outline|background|color) (color …))` (symbols),
 /// `(fill solid|none|yes|no)` (boards).
 pub fn fill(s: &Sexp) -> Fill {
-    let Some(f) = s.find("fill") else { return Fill::None };
+    let Some(f) = s.find("fill") else {
+        return Fill::None;
+    };
     match f.get("type").or_else(|| f.str_arg(0)) {
         Some("outline" | "solid" | "yes") => Fill::Outline,
         Some("background") => Fill::Background,
@@ -156,5 +181,8 @@ pub fn effects(parent: &Sexp) -> (TextStyle, bool) {
 
 /// `(uuid "…")` (or the old `(tstamp …)`), or a new one.
 pub fn uuid(s: &Sexp) -> uuid::Uuid {
-    s.get("uuid").or_else(|| s.get("tstamp")).and_then(|u| uuid::Uuid::parse_str(u).ok()).unwrap_or_else(uuid::Uuid::new_v4)
+    s.get("uuid")
+        .or_else(|| s.get("tstamp"))
+        .and_then(|u| uuid::Uuid::parse_str(u).ok())
+        .unwrap_or_else(uuid::Uuid::new_v4)
 }

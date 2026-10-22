@@ -38,8 +38,7 @@ use cadrs_ui::{DimEdit, DimEditBox, DimEditCancel, DimEditCommit, Theme};
 use crate::sketch::{ActiveSketchTool, PartStudioMode, SketchSession, SketchTool};
 use crate::sketch_glyphs::SketchOverlay;
 use crate::sketch_tools::{
-    QuickDimFlow, SVec2, SketchScreen, SketchToolsSet, over_viewport, session_sketch,
-    world_sketch,
+    QuickDimFlow, SVec2, SketchScreen, SketchToolsSet, over_viewport, session_sketch, world_sketch,
 };
 use crate::viewport::{ViewportArea, ViewportRect};
 use crate::{ActiveDocument, AppState};
@@ -142,7 +141,14 @@ pub fn dimension_text(d: &Dimension, live: bool, u: &units::Units) -> String {
 /// [`dimension_text`] of dimension `id` of `sketch`. With the sketch dialog's **Show
 /// expressions** on, one driven by variables shows its expression instead of its value (P3F.4:
 /// "Ø#piston_d + #clearance"), as Onshape does.
-pub fn dimension_text_of(sketch: &cadrs_sketch::Sketch, id: DimensionId, d: &Dimension, live: bool, u: &units::Units, expressions: bool) -> String {
+pub fn dimension_text_of(
+    sketch: &cadrs_sketch::Sketch,
+    id: DimensionId,
+    d: &Dimension,
+    live: bool,
+    u: &units::Units,
+    expressions: bool,
+) -> String {
     let v = dimension_text(d, live, u);
     match sketch.expression(id).filter(|_| expressions) {
         Some(e) => match d.kind {
@@ -201,7 +207,10 @@ fn dimension_pointer(
     };
     // Picks and proposals are made on the copy with the face's part edges (a sketch on a
     // face measures to them; `place` uses the ones measured).
-    let sketch: &cadrs_sketch::Sketch = session.as_deref().and_then(|s| external.get(s.feature)).map_or(sketch, |(_, e)| &e.sketch);
+    let sketch: &cadrs_sketch::Sketch = session
+        .as_deref()
+        .and_then(|s| external.get(s.feature))
+        .map_or(sketch, |(_, e)| &e.sketch);
     let active = tool.tool == SketchTool::Dimension;
     if !active && (!dim.picks.is_empty() || dim.preview.is_some()) {
         dim.picks.clear();
@@ -288,9 +297,7 @@ fn dimension_pointer(
                 })
                 .map(|h| h.entity)
                 .or_else(|| map.axis_at(pos));
-                let click = map
-                    .to_sketch(pos)
-                    .unwrap_or(SVec2::new(f64::NAN, f64::NAN));
+                let click = map.to_sketch(pos).unwrap_or(SVec2::new(f64::NAN, f64::NAN));
                 let mut with = dim.picks.clone();
                 let fits = hit.is_some_and(|e| {
                     !dim.picks.contains(&e) && dim.picks.len() < 2 && {
@@ -352,19 +359,30 @@ fn place(world: &mut World, mut d: Dimension) {
     // used first (construction, linked, as Onshape does), and the dimension measures to the
     // used curve. The two edits undo as one.
     let mut mark = None;
-    let ext = world.resource::<crate::sketch_tools::ExternalSnap>().get(feature).map(|(_, e)| e.clone());
+    let ext = world
+        .resource::<crate::sketch_tools::ExternalSnap>()
+        .get(feature)
+        .map(|(_, e)| e.clone());
     if let Some(ext) = ext
         && let Some(base) = world_sketch(world).cloned()
     {
         let items = ext.dimension_uses(&base, &d.kind);
         if !items.is_empty() {
-            let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else { return };
+            let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+                return;
+            };
             let m = doc.history.undo_len();
-            if let Err(e) = doc.execute(&EditSketch { element, feature, op: SketchOp::UseConstruction { items } }) {
+            if let Err(e) = doc.execute(&EditSketch {
+                element,
+                feature,
+                op: SketchOp::UseConstruction { items },
+            }) {
                 warn!("cannot use the part edge to dimension to: {e}");
                 return;
             }
-            let Some(kind) = world_sketch(world).and_then(|used| ext.relinked_dimension(&base, used, d.kind)) else {
+            let Some(kind) =
+                world_sketch(world).and_then(|used| ext.relinked_dimension(&base, used, d.kind))
+            else {
                 warn!("the part edge to dimension to was not used");
                 world.resource_mut::<ActiveDocument>().undo();
                 return;
@@ -405,7 +423,10 @@ fn place(world: &mut World, mut d: Dimension) {
         return;
     }
     if let Some(m) = mark {
-        world.resource_mut::<ActiveDocument>().history.squash_since(m, "Dimension");
+        world
+            .resource_mut::<ActiveDocument>()
+            .history
+            .squash_since(m, "Dimension");
     }
     let id = world_sketch(world).and_then(|s| {
         s.dimensions
@@ -439,8 +460,9 @@ pub fn open_dimension_menu(world: &mut World, id: DimensionId, at: Vec2) {
         })
         .unwrap_or_else(|| "sketch".into());
     let theme = world.resource::<Theme>().clone();
-    world.resource_mut::<crate::sketch_tools::SketchSelection>().0 =
-        vec![SketchEntity::Dimension(id)];
+    world
+        .resource_mut::<crate::sketch_tools::SketchSelection>()
+        .0 = vec![SketchEntity::Dimension(id)];
     use cadrs_ui::MenuItem as I;
     let mut menu = cadrs_ui::Menu::new("sketch-dimension-menu")
         .min_width(200.0)
@@ -448,20 +470,33 @@ pub fn open_dimension_menu(world: &mut World, id: DimensionId, at: Vec2) {
         .text_only();
     // Toggles driving <-> driven (S13.7).
     menu = if d.driven {
-        menu.item(I::new("dimension-make-driving", "Change to driving dimension"))
+        menu.item(I::new(
+            "dimension-make-driving",
+            "Change to driving dimension",
+        ))
     } else {
-        menu.item(I::new("dimension-make-driven", "Change to driven dimension"))
+        menu.item(I::new(
+            "dimension-make-driven",
+            "Change to driven dimension",
+        ))
     };
     menu = menu
         .item(I::new("dimension-escape", "Escape dimension"))
         .item(I::new("dimension-delete", "Delete"))
-        .item(I::new("dimension-confirm", format!("Confirm {sketch_name}")))
+        .item(I::new(
+            "dimension-confirm",
+            format!("Confirm {sketch_name}"),
+        ))
         .separator()
         .item(I::new("dimension-copy-sketch", "Copy sketch").disabled(true))
         .separator()
         .item(I::new("dimension-show-all", "Show all"))
         .separator()
-        .item(I::new("dimension-select", "Select").disabled(true).submenu(vec![]))
+        .item(
+            I::new("dimension-select", "Select")
+                .disabled(true)
+                .submenu(vec![]),
+        )
         .item(I::new("dimension-select-other", "Select other…").disabled(true))
         .separator()
         .item(I::new("dimension-comment", "Add comment").disabled(true))
@@ -558,7 +593,11 @@ pub fn open_editor(world: &mut World, id: DimensionId) {
     let u = world.resource::<crate::WorkspaceUnits>().0;
     let mut q = world.query_filtered::<Entity, With<ViewportArea>>();
     let viewport = q.iter(world).next();
-    let Some(area) = world.resource::<crate::sketch_tools::SketchArea>().host(viewport, world.resource::<ViewportRect>()).0 else {
+    let Some(area) = world
+        .resource::<crate::sketch_tools::SketchArea>()
+        .host(viewport, world.resource::<ViewportRect>())
+        .0
+    else {
         return;
     };
     let q = d.kind.quantity();
@@ -568,8 +607,11 @@ pub fn open_editor(world: &mut World, id: DimensionId) {
             // number and keeps the unit).
             // P3F.4: a dimension driven by variables opens on its expression, all selected.
             match world_sketch(world).and_then(|s| s.expression(id).map(str::to_string)) {
-                Some(e) => DimEdit::new("dimension-edit", e.clone()).select_prefix(e.chars().count()),
-                None => DimEdit::new("dimension-edit", u.with_unit(d.value, q)).select_prefix(u.live_value(d.value, q).chars().count()),
+                Some(e) => {
+                    DimEdit::new("dimension-edit", e.clone()).select_prefix(e.chars().count())
+                }
+                None => DimEdit::new("dimension-edit", u.with_unit(d.value, q))
+                    .select_prefix(u.live_value(d.value, q).chars().count()),
             }
             .build(&theme),
             Visibility::Hidden,
@@ -663,11 +705,18 @@ fn set_value(world: &mut World, id: DimensionId, value: f64, text: &str) {
     }
     let first = world.resource::<DimensionEditor>().first == Some(id);
     let op = match world_sketch(world) {
-        _ if same => SketchOp::SetDimensionExpr { id, expr: expr.clone() },
+        _ if same => SketchOp::SetDimensionExpr {
+            id,
+            expr: expr.clone(),
+        },
         Some(sk) if first => set_value_op(sk, id, value, true),
         _ => SketchOp::SetDimensionValue { id, value },
     };
-    let op = if same || expr == old_expr { op } else { SketchOp::Batch(vec![op, SketchOp::SetDimensionExpr { id, expr }]) };
+    let op = if same || expr == old_expr {
+        op
+    } else {
+        SketchOp::Batch(vec![op, SketchOp::SetDimensionExpr { id, expr }])
+    };
     if let Some(mut doc) = world.get_resource_mut::<ActiveDocument>()
         && let Err(e) = doc.execute(&EditSketch {
             element,
@@ -681,7 +730,12 @@ fn set_value(world: &mut World, id: DimensionId, value: f64, text: &str) {
 
 /// The edit that gives dimension `id` the value `value`, scaling the whole sketch for its first
 /// dimension (see [`cadrs_sketch::edit::set_value_op`]).
-pub fn set_value_op(s: &cadrs_sketch::Sketch, id: DimensionId, value: f64, first: bool) -> SketchOp {
+pub fn set_value_op(
+    s: &cadrs_sketch::Sketch,
+    id: DimensionId,
+    value: f64,
+    first: bool,
+) -> SketchOp {
     cadrs_sketch::edit::set_value_op(s, id, value, first)
 }
 
@@ -784,13 +838,22 @@ mod tests {
         let mut s = cadrs_sketch::Sketch::new();
         let c = s.add_line(SVec2::ZERO, SVec2::new(1.0, 0.0));
         let (a, b) = s.curve_ends(c).unwrap();
-        assert_eq!(dimension_text(&d(DimensionKind::Aligned { a, b }, 50.0), false, &mm), "50");
+        assert_eq!(
+            dimension_text(&d(DimensionKind::Aligned { a, b }, 50.0), false, &mm),
+            "50"
+        );
         assert_eq!(
             dimension_text(&d(DimensionKind::Aligned { a, b }, 33.173_891), true, &mm),
             "33.17389"
         );
-        assert_eq!(dimension_text(&d(DimensionKind::Diameter { curve: c }, 20.0), false, &mm), "Ø20");
-        assert_eq!(dimension_text(&d(DimensionKind::Radius { curve: c }, 8.5), false, &mm), "R8.5");
+        assert_eq!(
+            dimension_text(&d(DimensionKind::Diameter { curve: c }, 20.0), false, &mm),
+            "Ø20"
+        );
+        assert_eq!(
+            dimension_text(&d(DimensionKind::Radius { curve: c }, 8.5), false, &mm),
+            "R8.5"
+        );
         let cr = cadrs_sketch::CurveRef::Curve(c);
         assert_eq!(
             dimension_text(

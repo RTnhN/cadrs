@@ -85,7 +85,10 @@ pub fn on_plane(plane: PlaneRef, (origin, dir): (Vec3, Vec3)) -> Option<[f64; 2]
         return None;
     }
     let p = origin + dir * ((o - origin).dot(n) / d) - o;
-    Some([p.dot(v(f.u).normalize()) as f64, p.dot(v(f.v).normalize()) as f64])
+    Some([
+        p.dot(v(f.u).normalize()) as f64,
+        p.dot(v(f.v).normalize()) as f64,
+    ])
 }
 
 /// Where a drop lands in a Part Studio: the default plane facing the view most, and the point
@@ -94,18 +97,33 @@ pub fn drop_spot(world: &World, at: Option<Vec2>) -> (PlaneRef, [f64; 2]) {
     let view = world.resource::<ViewportView>();
     let rect = world.resource::<ViewportRect>();
     let plane = facing_plane(view.view.back());
-    let offset = at.filter(|c| rect.0.contains(*c)).map_or(Vec2::ZERO, |c| rect.offset(c));
-    (plane, on_plane(plane, view.view.ray(offset)).unwrap_or([0.0, 0.0]))
+    let offset = at
+        .filter(|c| rect.0.contains(*c))
+        .map_or(Vec2::ZERO, |c| rect.offset(c));
+    (
+        plane,
+        on_plane(plane, view.view.ray(offset)).unwrap_or([0.0, 0.0]),
+    )
 }
 
 /// Pictures dropped on a Part Studio (not sketching; [`crate::drop_import`] routes them here):
 /// each an "Insert image" step, the first centred at `at`, the next ones beside it.
 pub fn insert_pictures(world: &mut World, paths: Vec<std::path::PathBuf>, at: Option<Vec2>) {
-    let Some(element) = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element()).map(|e| e.id) else { return };
+    let Some(element) = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.active_element())
+        .map(|e| e.id)
+    else {
+        return;
+    };
     let (plane, mut center) = drop_spot(world, at);
     let mut notes = Vec::new();
     for path in paths {
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("picture").to_string();
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("picture")
+            .to_string();
         let bytes = match std::fs::read(&path) {
             Ok(b) => b,
             Err(e) => {
@@ -113,7 +131,14 @@ pub fn insert_pictures(world: &mut World, paths: Vec<std::path::PathBuf>, at: Op
                 continue;
             }
         };
-        let cmd = AddImage { element, feature: FeatureId::new(), file_name: name.clone(), bytes: std::sync::Arc::new(bytes), plane, center };
+        let cmd = AddImage {
+            element,
+            feature: FeatureId::new(),
+            file_name: name.clone(),
+            bytes: std::sync::Arc::new(bytes),
+            plane,
+            center,
+        };
         let mut doc = world.resource_mut::<ActiveDocument>();
         match doc.execute(&cmd) {
             // The next picture of this drop goes to the right of this one.
@@ -161,12 +186,19 @@ fn picture_material(
     let (w, h) = rgba.dimensions();
     if w.max(h) > MAX_TEXTURE {
         let k = MAX_TEXTURE as f64 / w.max(h) as f64;
-        let (nw, nh) = (((w as f64 * k).round() as u32).max(1), ((h as f64 * k).round() as u32).max(1));
+        let (nw, nh) = (
+            ((w as f64 * k).round() as u32).max(1),
+            ((h as f64 * k).round() as u32).max(1),
+        );
         rgba = image::imageops::resize(&rgba, nw, nh, image::imageops::FilterType::Triangle);
     }
     let (w, h) = rgba.dimensions();
     let texture = Image::new(
-        Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
         TextureDimension::D2,
         rgba.into_raw(),
         TextureFormat::Rgba8UnormSrgb,
@@ -183,7 +215,11 @@ fn picture_material(
         // the outline left out): blended, it was sorted against the board and the parts around,
         // and a translucent board drawn after it hid it. Other pictures' transparent pixels
         // show the part's surface.
-        alpha_mode: if one_sided { AlphaMode::Mask(0.5) } else { AlphaMode::Blend },
+        alpha_mode: if one_sided {
+            AlphaMode::Mask(0.5)
+        } else {
+            AlphaMode::Blend
+        },
         // Over the part's own face, which it lies on.
         depth_bias: SURFACE_BIAS,
         ..default()
@@ -209,11 +245,17 @@ fn picture_mesh(p: &SolidImage) -> Mesh {
     if p.facing.is_some() {
         c += n * SKIN_LIFT;
     }
-    Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
-        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vec![c, c + u, c + u + w, c + w])
-        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![n; 4])
-        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.0f32, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]])
-        .with_inserted_indices(Indices::U32(indices))
+    Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vec![c, c + u, c + u + w, c + w])
+    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![n; 4])
+    .with_inserted_attribute(
+        Mesh::ATTRIBUTE_UV_0,
+        vec![[0.0f32, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+    )
+    .with_inserted_indices(Indices::U32(indices))
 }
 
 /// Keeps a textured quad over every shown part's pictures.
@@ -273,10 +315,23 @@ mod tests {
             _ => panic!(),
         };
         // A board's bottom skin at z 0, facing down: just under it.
-        let pic = SolidImage { blob: String::new(), corner: [0.0, 0.0, 0.0], u: [10.0, 0.0, 0.0], v: [0.0, 5.0, 0.0], facing: Some([0.0, 0.0, -1.0]) };
-        assert!(corners(&picture_mesh(&pic)).iter().all(|p| (p[2] + SKIN_LIFT).abs() < 1e-6));
+        let pic = SolidImage {
+            blob: String::new(),
+            corner: [0.0, 0.0, 0.0],
+            u: [10.0, 0.0, 0.0],
+            v: [0.0, 5.0, 0.0],
+            facing: Some([0.0, 0.0, -1.0]),
+        };
+        assert!(
+            corners(&picture_mesh(&pic))
+                .iter()
+                .all(|p| (p[2] + SKIN_LIFT).abs() < 1e-6)
+        );
         // A picture seen from both sides stays on its face.
-        let pic = SolidImage { facing: None, ..pic };
+        let pic = SolidImage {
+            facing: None,
+            ..pic
+        };
         assert!(corners(&picture_mesh(&pic)).iter().all(|p| p[2] == 0.0));
     }
 

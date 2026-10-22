@@ -57,7 +57,12 @@ struct Writer {
 
 impl Writer {
     fn new() -> Writer {
-        Writer { out: String::new(), apertures: BTreeMap::new(), current: None, body: String::new() }
+        Writer {
+            out: String::new(),
+            apertures: BTreeMap::new(),
+            current: None,
+            body: String::new(),
+        }
     }
 
     fn aperture(&mut self, kind: char, d: Nm) -> u32 {
@@ -110,10 +115,22 @@ impl Writer {
     }
 
     fn finish(mut self, function: &str, polarity_negative: bool) -> String {
-        let _ = writeln!(self.out, "%TF.GenerationSoftware,cadrs,cadrs_eda,{}*%", env!("CARGO_PKG_VERSION"));
+        let _ = writeln!(
+            self.out,
+            "%TF.GenerationSoftware,cadrs,cadrs_eda,{}*%",
+            env!("CARGO_PKG_VERSION")
+        );
         let _ = writeln!(self.out, "%TF.SameCoordinates,Original*%");
         let _ = writeln!(self.out, "%TF.FileFunction,{function}*%");
-        let _ = writeln!(self.out, "%TF.FilePolarity,{}*%", if polarity_negative { "Negative" } else { "Positive" });
+        let _ = writeln!(
+            self.out,
+            "%TF.FilePolarity,{}*%",
+            if polarity_negative {
+                "Negative"
+            } else {
+                "Positive"
+            }
+        );
         let _ = writeln!(self.out, "%FSLAX46Y46*%");
         let _ = writeln!(self.out, "%MOMM*%");
         let _ = writeln!(self.out, "%LPD*%");
@@ -167,7 +184,11 @@ pub fn gerber(board: &Board, layer: Layer, function: &str) -> String {
                     w.region(&vec![pg.outer.clone()]);
                     if !pg.holes.is_empty() {
                         w.polarity(false);
-                        let holes: Region = pg.holes.iter().map(|h| h.iter().rev().copied().collect()).collect();
+                        let holes: Region = pg
+                            .holes
+                            .iter()
+                            .map(|h| h.iter().rev().copied().collect())
+                            .collect();
                         w.region(&holes);
                     }
                 }
@@ -176,7 +197,14 @@ pub fn gerber(board: &Board, layer: Layer, function: &str) -> String {
         w.polarity(true);
         for t in board.tracks.iter().filter(|t| t.layer == layer) {
             let pts: Vec<Pt> = match t.mid {
-                Some(m) => poly::geom_points(&Geom::Arc { start: t.a, mid: m, end: t.b }).0,
+                Some(m) => {
+                    poly::geom_points(&Geom::Arc {
+                        start: t.a,
+                        mid: m,
+                        end: t.b,
+                    })
+                    .0
+                }
                 None => vec![t.a, t.b],
             };
             w.stroke(&pts, t.width);
@@ -190,13 +218,25 @@ pub fn gerber(board: &Board, layer: Layer, function: &str) -> String {
     for (fi, f) in board.footprints.iter().enumerate() {
         for (pi, pad) in f.footprint.pads.iter().enumerate() {
             let layers = f.placement.layers(pad.layers);
-            let on = if layer.is_copper() { layers.contains(layer) && pad.kind != PadKind::NonPlated } else { layers.contains(layer) };
+            let on = if layer.is_copper() {
+                layers.contains(layer) && pad.kind != PadKind::NonPlated
+            } else {
+                layers.contains(layer)
+            };
             if !on {
                 continue;
             }
             let margin = match layer {
-                Layer::TopMask | Layer::BottomMask => pad.rules.mask_margin.unwrap_or(board.rules.mask_margin),
-                Layer::TopPaste | Layer::BottomPaste => pad.rules.paste_margin.unwrap_or(0) + pad.rules.paste_ratio.map_or(0, |r| (pad.size.w.min(pad.size.h) as f64 * r) as Nm),
+                Layer::TopMask | Layer::BottomMask => {
+                    pad.rules.mask_margin.unwrap_or(board.rules.mask_margin)
+                }
+                Layer::TopPaste | Layer::BottomPaste => {
+                    pad.rules.paste_margin.unwrap_or(0)
+                        + pad
+                            .rules
+                            .paste_ratio
+                            .map_or(0, |r| (pad.size.w.min(pad.size.h) as f64 * r) as Nm)
+                }
                 _ => 0,
             };
             if matches!(pad.shape, PadShape::Circle) {
@@ -205,15 +245,34 @@ pub fn gerber(board: &Board, layer: Layer, function: &str) -> String {
                 w.region(&crate::copper::pad_region(board, fi, pi, margin));
             }
         }
-        for s in f.footprint.shapes.iter().filter(|s| f.placement.layer(s.layer) == layer) {
-            geom_stroke(&mut w, &s.shape.geom, s.shape.stroke.width, s.shape.fill, &|p| f.placement.apply(p));
+        for s in f
+            .footprint
+            .shapes
+            .iter()
+            .filter(|s| f.placement.layer(s.layer) == layer)
+        {
+            geom_stroke(
+                &mut w,
+                &s.shape.geom,
+                s.shape.stroke.width,
+                s.shape.fill,
+                &|p| f.placement.apply(p),
+            );
         }
-        let texts = f.footprint.texts.iter().chain(f.footprint.fields.iter().map(|x| &x.text));
+        let texts = f
+            .footprint
+            .texts
+            .iter()
+            .chain(f.footprint.fields.iter().map(|x| &x.text));
         for t in texts.filter(|t| f.placement.layer(t.layer) == layer) {
             let mut tt = t.text.clone();
             tt.text = tt.text.replace("${REFERENCE}", f.reference());
             tt.at = f.placement.apply(t.text.at);
-            tt.angle = if t.keep_upright { crate::units::normalize_deg(t.text.angle + f.placement.angle) } else { f.placement.apply_angle(t.text.angle) };
+            tt.angle = if t.keep_upright {
+                crate::units::normalize_deg(t.text.angle + f.placement.angle)
+            } else {
+                f.placement.apply_angle(t.text.angle)
+            };
             if f.placement.side == Side::Bottom {
                 tt.style.mirrored = !tt.style.mirrored;
             }
@@ -221,8 +280,22 @@ pub fn gerber(board: &Board, layer: Layer, function: &str) -> String {
         }
     }
     for s in board.shapes.iter().filter(|s| s.layer == layer) {
-        let width = if layer == Layer::Outline && s.shape.stroke.width == 0 { crate::units::mm(0.1) } else { s.shape.stroke.width };
-        geom_stroke(&mut w, &s.shape.geom, width, if layer == Layer::Outline { Fill::None } else { s.shape.fill }, &|p| p);
+        let width = if layer == Layer::Outline && s.shape.stroke.width == 0 {
+            crate::units::mm(0.1)
+        } else {
+            s.shape.stroke.width
+        };
+        geom_stroke(
+            &mut w,
+            &s.shape.geom,
+            width,
+            if layer == Layer::Outline {
+                Fill::None
+            } else {
+                s.shape.fill
+            },
+            &|p| p,
+        );
     }
     for t in board.texts.iter().filter(|t| t.layer == layer) {
         text_strokes(&mut w, &t.text);
@@ -232,7 +305,10 @@ pub fn gerber(board: &Board, layer: Layer, function: &str) -> String {
 
 /// Every standard layer: (file name, contents). Zones should be filled first.
 pub fn gerbers(board: &Board, name: &str) -> Vec<(String, String)> {
-    standard_layers(board).into_iter().map(|(l, suffix, function)| (format!("{name}-{suffix}.gbr"), gerber(board, l, &function))).collect()
+    standard_layers(board)
+        .into_iter()
+        .map(|(l, suffix, function)| (format!("{name}-{suffix}.gbr"), gerber(board, l, &function)))
+        .collect()
 }
 
 /// The Gerber job file (JSON) describing the set.
@@ -242,7 +318,17 @@ pub fn job_file(board: &Board, name: &str) -> String {
         .map(|(_, suffix, function)| format!("    {{ \"Path\": \"{name}-{suffix}.gbr\", \"FileFunction\": \"{function}\", \"FilePolarity\": \"Positive\" }}"))
         .collect();
     let b = crate::outline::board_region(board);
-    let size = b.iter().flatten().fold(None, |acc: Option<crate::units::Bounds>, p| Some(crate::units::Bounds::union(acc, crate::units::Bounds::of(*p)))).map(|b| b.size()).unwrap_or_default();
+    let size = b
+        .iter()
+        .flatten()
+        .fold(None, |acc: Option<crate::units::Bounds>, p| {
+            Some(crate::units::Bounds::union(
+                acc,
+                crate::units::Bounds::of(*p),
+            ))
+        })
+        .map(|b| b.size())
+        .unwrap_or_default();
     format!(
         "{{\n  \"Header\": {{ \"GenerationSoftware\": {{ \"Vendor\": \"cadrs\", \"Application\": \"cadrs_eda\", \"Version\": \"{}\" }} }},\n  \"GeneralSpecs\": {{ \"ProjectId\": {{ \"Name\": \"{name}\" }}, \"Size\": {{ \"X\": {:.4}, \"Y\": {:.4} }}, \"LayerNumber\": {}, \"BoardThickness\": {:.4} }},\n  \"FilesAttributes\": [\n{}\n  ]\n}}\n",
         env!("CARGO_PKG_VERSION"),
@@ -269,12 +355,22 @@ pub fn holes(board: &Board) -> Vec<Hole> {
     for f in &board.footprints {
         for p in &f.footprint.pads {
             if let Some(d) = p.drill {
-                v.push(Hole { at: f.placement.apply(p.at + d.offset.rotated(p.angle)), size: d.size, angle: f.placement.apply_angle(p.angle), plated: p.kind != PadKind::NonPlated });
+                v.push(Hole {
+                    at: f.placement.apply(p.at + d.offset.rotated(p.angle)),
+                    size: d.size,
+                    angle: f.placement.apply_angle(p.angle),
+                    plated: p.kind != PadKind::NonPlated,
+                });
             }
         }
     }
     for via in &board.vias {
-        v.push(Hole { at: via.at, size: crate::units::Size::new(via.drill, via.drill), angle: 0.0, plated: true });
+        v.push(Hole {
+            at: via.at,
+            size: crate::units::Size::new(via.drill, via.drill),
+            angle: 0.0,
+            plated: true,
+        });
     }
     v
 }
@@ -282,7 +378,10 @@ pub fn holes(board: &Board) -> Vec<Hole> {
 /// An Excellon drill file (metric, decimal coordinates) for the plated or non-plated holes.
 /// Oval holes are routed slots (G85).
 pub fn excellon(board: &Board, plated: bool) -> String {
-    let hs: Vec<Hole> = holes(board).into_iter().filter(|h| h.plated == plated).collect();
+    let hs: Vec<Hole> = holes(board)
+        .into_iter()
+        .filter(|h| h.plated == plated)
+        .collect();
     let mut tools: Vec<Nm> = hs.iter().map(|h| h.size.w.min(h.size.h)).collect();
     tools.sort();
     tools.dedup();
@@ -290,7 +389,12 @@ pub fn excellon(board: &Board, plated: bool) -> String {
     let _ = writeln!(s, "M48");
     let _ = writeln!(s, "; DRILL file {{cadrs {}}}", env!("CARGO_PKG_VERSION"));
     let _ = writeln!(s, "; FORMAT={{-:-/ absolute / metric / decimal}}");
-    let _ = writeln!(s, "; #@! TF.FileFunction,{},1,{},PTH", if plated { "Plated" } else { "NonPlated" }, board.copper_layers);
+    let _ = writeln!(
+        s,
+        "; #@! TF.FileFunction,{},1,{},PTH",
+        if plated { "Plated" } else { "NonPlated" },
+        board.copper_layers
+    );
     let _ = writeln!(s, "FMAT,2");
     let _ = writeln!(s, "METRIC");
     for (i, t) in tools.iter().enumerate() {
@@ -307,7 +411,11 @@ pub fn excellon(board: &Board, plated: bool) -> String {
                 let _ = writeln!(s, "X{}Y{}", f(h.at.x), f(h.at.y));
             } else {
                 let half = (h.size.w.max(h.size.h) - t) / 2;
-                let along = if h.size.w > h.size.h { h.angle } else { h.angle + 90.0 };
+                let along = if h.size.w > h.size.h {
+                    h.angle
+                } else {
+                    h.angle + 90.0
+                };
                 let d = Pt::new(half, 0).rotated(along);
                 let (a, b) = (h.at - d, h.at + d);
                 let _ = writeln!(s, "X{}Y{}G85X{}Y{}", f(a.x), f(a.y), f(b.x), f(b.y));
@@ -339,13 +447,20 @@ pub fn positions(board: &Board, smd_only: bool) -> Vec<Position> {
     let mut v: Vec<Position> = board
         .footprints
         .iter()
-        .filter(|f| !f.footprint.attrs.exclude_from_pos && !f.footprint.attrs.dnp && !f.footprint.attrs.board_only)
+        .filter(|f| {
+            !f.footprint.attrs.exclude_from_pos
+                && !f.footprint.attrs.dnp
+                && !f.footprint.attrs.board_only
+        })
         .filter(|f| !smd_only || f.footprint.attrs.mount == MountKind::Smd)
         .map(|f| {
             let at = f.placement.at.to_mm();
             Position {
                 reference: f.reference().into(),
-                value: f.footprint.field(crate::symbol::fields::VALUE).map_or(String::new(), |x| x.text.text.text.clone()),
+                value: f
+                    .footprint
+                    .field(crate::symbol::fields::VALUE)
+                    .map_or(String::new(), |x| x.text.text.text.clone()),
                 package: f.footprint.name().into(),
                 x: at[0],
                 y: at[1],
@@ -363,7 +478,16 @@ pub fn jlcpcb_cpl(board: &Board) -> String {
     let mut out = String::from("Designator,Val,Package,Mid X,Mid Y,Rotation,Layer\n");
     for p in positions(board, true) {
         let q = |s: &str| format!("\"{}\"", s.replace('"', "\"\""));
-        out.push_str(&format!("{},{},{},{:.6},{:.6},{:.6},{}\n", q(&p.reference), q(&p.value), q(&p.package), p.x, p.y, p.rotation, if p.bottom { "bottom" } else { "top" }));
+        out.push_str(&format!(
+            "{},{},{},{:.6},{:.6},{:.6},{}\n",
+            q(&p.reference),
+            q(&p.value),
+            q(&p.package),
+            p.x,
+            p.y,
+            p.rotation,
+            if p.bottom { "bottom" } else { "top" }
+        ));
     }
     out
 }

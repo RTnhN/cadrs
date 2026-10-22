@@ -26,7 +26,10 @@ use cadrs_core::ElementId;
 use cadrs_core::drawing_assembly as da;
 use cadrs_drawing::DrawingOp;
 use cadrs_drawing::annotation::{Annotation, AnnotationId, AnnotationKind};
-use cadrs_drawing::assembly::{BomData, BomOrder, BomType, Border, Callout, CalloutFields, SIZES, bom_table, inference, refreshed_bom_table, snap_table_corner, fit_within, token};
+use cadrs_drawing::assembly::{
+    BomData, BomOrder, BomType, Border, Callout, CalloutFields, SIZES, bom_table, fit_within,
+    inference, refreshed_bom_table, snap_table_corner, token,
+};
 use cadrs_drawing::table::{Corner, Table, TableId};
 use cadrs_drawing::{SheetId, ViewId};
 use cadrs_ui::input::TextInputField;
@@ -50,16 +53,24 @@ impl Plugin for BomToolsPlugin {
             .init_resource::<CalloutUi>()
             .add_systems(
                 Update,
-                (read_bom_card, read_callout_card, track_callout_focus, callout_preview)
+                (
+                    read_bom_card,
+                    read_callout_card,
+                    track_callout_focus,
+                    callout_preview,
+                )
                     .chain()
                     .after(super::annotations::AnnotationInputSet)
                     .before(super::annotations::AnnotationDrawSet)
                     .run_if(in_state(AppState::Document)),
             )
-            .add_systems(OnExit(AppState::Document), |mut b: ResMut<BomUi>, mut c: ResMut<CalloutUi>| {
-                *b = BomUi::default();
-                *c = CalloutUi::default();
-            })
+            .add_systems(
+                OnExit(AppState::Document),
+                |mut b: ResMut<BomUi>, mut c: ResMut<CalloutUi>| {
+                    *b = BomUi::default();
+                    *c = CalloutUi::default();
+                },
+            )
             .add_observer(on_select)
             .add_observer(on_property_menu);
     }
@@ -94,17 +105,27 @@ fn assemblies(world: &World) -> (Vec<(ElementId, String)>, Option<ElementId>) {
     let Some(doc) = world.get_resource::<ActiveDocument>() else {
         return (Vec::new(), None);
     };
-    let list: Vec<(ElementId, String)> =
-        doc.doc.elements.iter().filter(|e| e.assembly_model().is_some()).map(|e| (e.id, e.name.clone())).collect();
+    let list: Vec<(ElementId, String)> = doc
+        .doc
+        .elements
+        .iter()
+        .filter(|e| e.assembly_model().is_some())
+        .map(|e| (e.id, e.name.clone()))
+        .collect();
     let shown = active_drawing(doc).and_then(|(id, d)| {
-        let s = d.sheets.get(world.resource::<DrawingUi>().sheet_index(id, d))?;
+        let s = d
+            .sheets
+            .get(world.resource::<DrawingUi>().sheet_index(id, d))?;
         s.reference
             .into_iter()
             .chain(s.views.iter().map(|v| v.reference))
             .map(|r| ElementId(r.element))
             .find(|e| list.iter().any(|(a, _)| a == e))
     });
-    (list.clone(), shown.or_else(|| list.first().map(|(e, _)| *e)))
+    (
+        list.clone(),
+        shown.or_else(|| list.first().map(|(e, _)| *e)),
+    )
 }
 
 /// Recomputes the rows the card's settings give.
@@ -119,7 +140,9 @@ fn refresh_data(world: &mut World) {
     };
     let data = asm.and_then(|a| {
         let doc = world.get_resource::<ActiveDocument>()?;
-        da::live_bom(&doc.doc, a, kind, order).map_err(|e| warn!("Insert BOM: {e}")).ok()
+        da::live_bom(&doc.doc, a, kind, order)
+            .map_err(|e| warn!("Insert BOM: {e}"))
+            .ok()
     });
     world.resource_mut::<BomUi>().data = data;
 }
@@ -144,14 +167,22 @@ pub fn open_bom_tool(world: &mut World) {
     spawn_bom_card(world, "Insert BOM", "bom-dialog", None);
 }
 
-fn spawn_bom_card(world: &mut World, title: &str, prefix: &'static str, accept: Option<fn(&mut World)>) {
+fn spawn_bom_card(
+    world: &mut World,
+    title: &str,
+    prefix: &'static str,
+    accept: Option<fn(&mut World)>,
+) {
     let b = world.resource::<BomUi>().clone();
     let area = {
         let ui = world.resource::<DrawingUi>();
         sheet_area(world.resource::<ViewportRect>(), ui)
     };
     let t = world.resource::<Theme>().clone();
-    let at = Vec2::new(area.max.x - 262.0, area.min.y + (area.height() * 0.3).min(240.0));
+    let at = Vec2::new(
+        area.max.x - 262.0,
+        area.min.y + (area.height() * 0.3).min(240.0),
+    );
     let mut commands = world.commands();
     commands
         .spawn((card_bundle(&t, prefix, at), BomCard))
@@ -229,7 +260,12 @@ fn cancel_bom(world: &mut World) {
 }
 
 /// The card closes when its tool ends (Esc, another tool).
-fn read_bom_card(ann: Res<AnnotationUi>, bom: Res<BomUi>, q: Query<Entity, With<BomCard>>, mut commands: Commands) {
+fn read_bom_card(
+    ann: Res<AnnotationUi>,
+    bom: Res<BomUi>,
+    q: Query<Entity, With<BomCard>>,
+    mut commands: Commands,
+) {
     if ann.tool != AnnTool::PlaceBom && bom.editing.is_none() {
         for e in &q {
             commands.entity(e).despawn();
@@ -247,7 +283,9 @@ fn on_select(ev: On<SelectChange>, q: Query<&Name>, mut commands: Commands) {
                 {
                     let mut b = w.resource_mut::<BomUi>();
                     match which.as_str() {
-                        "bom-assembly" => b.assembly = b.assemblies.get(i).map(|(e, _)| *e).or(b.assembly),
+                        "bom-assembly" => {
+                            b.assembly = b.assemblies.get(i).map(|(e, _)| *e).or(b.assembly)
+                        }
                         "bom-type" => b.kind = BomType::ALL.get(i).copied().unwrap_or(b.kind),
                         _ => b.order = BomOrder::ALL.get(i).copied().unwrap_or(b.order),
                     }
@@ -272,14 +310,25 @@ fn on_select(ev: On<SelectChange>, q: Query<&Name>, mut commands: Commands) {
 
 /// The BOM table the card's settings place with the cursor at `p` on `sheet` of `d` (snapped
 /// to the frame's corner or the title block).
-pub fn preview_table(b: &BomUi, d: &cadrs_drawing::Drawing, sheet: &cadrs_drawing::Sheet, p: [f64; 2]) -> Option<Table> {
+pub fn preview_table(
+    b: &BomUi,
+    d: &cadrs_drawing::Drawing,
+    sheet: &cadrs_drawing::Sheet,
+    p: [f64; 2],
+) -> Option<Table> {
     let data = b.data.clone()?;
     let f = cadrs_drawing::standard::frame(sheet.format).inner;
     // The frame's corner, or the title block (TD10.5: its left edge, P3E.5).
-    let block = sheet.title_block.then(|| cadrs_drawing::title_block::placement(f, sheet.format.size)).map(|r| (r.min, r.max));
+    let block = sheet
+        .title_block
+        .then(|| cadrs_drawing::title_block::placement(f, sheet.format.size))
+        .map(|r| (r.min, r.max));
     let at = snap_table_corner(p, b.fixed, (f.min, f.max), block, SNAP).unwrap_or(p);
     // Kept within the frame across, its cells wrapping (P3E.5 judge).
-    Some(fit_within(&bom_table(data, b.fixed, at, &d.style), (f.min, f.max)))
+    Some(fit_within(
+        &bom_table(data, b.fixed, at, &d.style),
+        (f.min, f.max),
+    ))
 }
 
 /// The BOM table that would be placed with the cursor at `p` (snapped to the frame's corner or
@@ -287,7 +336,9 @@ pub fn preview_table(b: &BomUi, d: &cadrs_drawing::Drawing, sheet: &cadrs_drawin
 pub fn bom_preview(world: &World, p: [f64; 2]) -> Option<Table> {
     let doc = world.get_resource::<ActiveDocument>()?;
     let (id, d) = active_drawing(doc)?;
-    let sheet = d.sheets.get(world.resource::<DrawingUi>().sheet_index(id, d))?;
+    let sheet = d
+        .sheets
+        .get(world.resource::<DrawingUi>().sheet_index(id, d))?;
     preview_table(world.resource::<BomUi>(), d, sheet, p)
 }
 
@@ -296,7 +347,9 @@ pub fn place_bom(w: &mut World, p: [f64; 2]) {
     let Some(t) = bom_preview(w, p) else { return };
     let Some(sheet) = w.get_resource::<ActiveDocument>().and_then(|doc| {
         let (id, d) = active_drawing(doc)?;
-        d.sheets.get(w.resource::<DrawingUi>().sheet_index(id, d)).map(|s| s.id)
+        d.sheets
+            .get(w.resource::<DrawingUi>().sheet_index(id, d))
+            .map(|s| s.id)
     }) else {
         return;
     };
@@ -333,13 +386,22 @@ pub fn open_bom_properties(world: &mut World, id: TableId) {
         b.editing = Some((sheet, id));
     }
     refresh_data(world);
-    spawn_bom_card(world, "BOM Table properties", "bom-properties", Some(apply_bom_properties));
+    spawn_bom_card(
+        world,
+        "BOM Table properties",
+        "bom-properties",
+        Some(apply_bom_properties),
+    );
 }
 
 /// Table `t` as BOM Table properties… would leave it (a live preview while the card is open
 /// on it): the card's type and order (the workspace's rows) and fixed corner; `None` when the
 /// card isn't open on `t`.
-pub fn properties_preview(b: &BomUi, t: &Table, style: &cadrs_drawing::DrawingStyle) -> Option<Table> {
+pub fn properties_preview(
+    b: &BomUi,
+    t: &Table,
+    style: &cadrs_drawing::DrawingStyle,
+) -> Option<Table> {
     let (_, id) = b.editing?;
     if id != t.id {
         return None;
@@ -347,7 +409,10 @@ pub fn properties_preview(b: &BomUi, t: &Table, style: &cadrs_drawing::DrawingSt
     let old = t.bom.as_ref()?;
     let mut table = t.clone();
     if (old.kind != b.kind || old.order != b.order)
-        && let Some(data) = b.data.clone().filter(|d| d.kind == b.kind && d.order == b.order && d.assembly == old.assembly)
+        && let Some(data) = b
+            .data
+            .clone()
+            .filter(|d| d.kind == b.kind && d.order == b.order && d.assembly == old.assembly)
     {
         table = refreshed_bom_table(&table, data, style);
     }
@@ -385,7 +450,14 @@ fn apply_bom_properties(world: &mut World) {
     }
     if table != t {
         let table = notes::fit(world, table);
-        edit_drawing(world, DrawingOp::SetTable { sheet, table, label: "BOM Table properties".into() });
+        edit_drawing(
+            world,
+            DrawingOp::SetTable {
+                sheet,
+                table,
+                label: "BOM Table properties".into(),
+            },
+        );
     }
     world.resource_mut::<NotesUi>().selected = vec![Item::Table(id)];
 }
@@ -405,7 +477,15 @@ pub struct CalloutSpec {
 
 impl Default for CalloutSpec {
     fn default() -> Self {
-        Self { border: Border::Circle, size: 0, text_height: 3.048, fields: CalloutFields { center: token(false, "Item No."), ..Default::default() } }
+        Self {
+            border: Border::Circle,
+            size: 0,
+            text_height: 3.048,
+            fields: CalloutFields {
+                center: token(false, "Item No."),
+                ..Default::default()
+            },
+        }
     }
 }
 
@@ -429,7 +509,13 @@ pub struct CalloutUi {
 struct CalloutCard;
 
 /// The five fields: (name, label as a placeholder).
-const FIELDS: [(&str, &str); 5] = [("callout-upper", "Upper"), ("callout-lower", "Lower"), ("callout-left", "Left"), ("callout-right", "Right"), ("callout-center", "Center")];
+const FIELDS: [(&str, &str); 5] = [
+    ("callout-upper", "Upper"),
+    ("callout-lower", "Lower"),
+    ("callout-left", "Left"),
+    ("callout-right", "Right"),
+    ("callout-center", "Center"),
+];
 
 /// The Callout tool (toolbar): the card, then pick a part and place.
 pub fn start_callout_tool(world: &mut World) {
@@ -440,7 +526,14 @@ pub fn start_callout_tool(world: &mut World) {
     }
     let (h, inch) = world
         .get_resource::<ActiveDocument>()
-        .and_then(|doc| active_drawing(doc).map(|(_, d)| (d.style.dim_text_height, d.units == cadrs_drawing::DrawingUnits::Inch)))
+        .and_then(|doc| {
+            active_drawing(doc).map(|(_, d)| {
+                (
+                    d.style.dim_text_height,
+                    d.units == cadrs_drawing::DrawingUnits::Inch,
+                )
+            })
+        })
         .unwrap_or((3.048, true));
     world.resource_mut::<CalloutUi>().inch = inch;
     {
@@ -466,12 +559,19 @@ pub fn edit_callout(world: &mut World, view: ViewId, id: AnnotationId) {
     close_callout_card(world);
     let inch = world
         .get_resource::<ActiveDocument>()
-        .and_then(|doc| active_drawing(doc).map(|(_, d)| d.units == cadrs_drawing::DrawingUnits::Inch))
+        .and_then(|doc| {
+            active_drawing(doc).map(|(_, d)| d.units == cadrs_drawing::DrawingUnits::Inch)
+        })
         .unwrap_or(true);
     {
         let mut ui = world.resource_mut::<CalloutUi>();
         ui.inch = inch;
-        ui.spec = CalloutSpec { border: c.border, size: c.size, text_height: c.text_height, fields: c.fields.clone() };
+        ui.spec = CalloutSpec {
+            border: c.border,
+            size: c.size,
+            text_height: c.text_height,
+            fields: c.fields.clone(),
+        };
         ui.editing = Some((view, id));
         ui.attach = None;
     }
@@ -482,7 +582,11 @@ pub fn edit_callout(world: &mut World, view: ViewId, id: AnnotationId) {
 
 fn spawn_callout_card(world: &mut World) {
     let spec = world.resource::<CalloutUi>().spec.clone();
-    let unit = if world.resource::<CalloutUi>().inch { 25.4 } else { 1.0 };
+    let unit = if world.resource::<CalloutUi>().inch {
+        25.4
+    } else {
+        1.0
+    };
     let area = {
         let ui = world.resource::<DrawingUi>();
         sheet_area(world.resource::<ViewportRect>(), ui)
@@ -504,52 +608,136 @@ fn spawn_callout_card(world: &mut World) {
             ..default()
         })
         .with_children(|c| {
-            header(c, &t, "Callout", "callout-dialog", Some(accept_callout), cancel_callout);
-            c.spawn(Node { flex_direction: FlexDirection::Column, padding: UiRect::all(Val::Px(8.0)), row_gap: Val::Px(6.0), ..default() })
-                .with_children(|b| {
-                    // The property menus: a part's, the BOM table's.
-                    b.spawn(Node { column_gap: Val::Px(4.0), ..default() }).with_children(|r| {
-                        for (name, ic, tip) in [("callout-part-property", "part", "Insert component property"), ("callout-table-property", "bill-of-materials", "Insert BOM table property")] {
-                            let n: &'static str = name;
-                            r.spawn((
-                                ToolButton::new(name, ic).dropdown(true).icon_size(16.0).tooltip(tip).build(&t),
-                                observe(move |a: On<Activate>, mut commands: Commands| {
-                                    let button = a.entity;
-                                    commands.queue(move |w: &mut World| open_property_menu(w, button, n));
-                                }),
-                            ));
-                        }
-                    });
-                    // The five fields: upper; left, centre, right; lower.
-                    let field = |p: &mut ChildSpawnerCommands, name: &str, label: &str, value: &str, w: f32| {
-                        p.spawn(TextInput::new(name.to_string()).placeholder(label).value(value.to_string()).width(Val::Px(w)).chips().build(&t));
-                    };
-                    let f = &spec.fields;
-                    b.spawn(Node { justify_content: JustifyContent::Center, ..default() }).with_children(|r| field(r, FIELDS[0].0, FIELDS[0].1, &f.upper, 120.0));
-                    b.spawn(Node { column_gap: Val::Px(4.0), align_items: AlignItems::Center, ..default() }).with_children(|r| {
-                        field(r, FIELDS[2].0, FIELDS[2].1, &f.left, 72.0);
-                        field(r, FIELDS[4].0, FIELDS[4].1, &f.center, 120.0);
-                        field(r, FIELDS[3].0, FIELDS[3].1, &f.right, 110.0);
-                    });
-                    b.spawn(Node { justify_content: JustifyContent::Center, ..default() }).with_children(|r| field(r, FIELDS[1].0, FIELDS[1].1, &f.lower, 120.0));
-                    // Text height, border, size.
-                    b.spawn(Node { column_gap: Val::Px(6.0), align_items: AlignItems::Center, margin: UiRect::top(Val::Px(4.0)), ..default() }).with_children(|r| {
-                        r.spawn(TextInput::new("callout-text-height").value(if unit > 1.0 { format!("{:.4}", spec.text_height / unit) } else { format!("{:.2}", spec.text_height) }).width(Val::Px(62.0)).select_all_on_focus().build(&t));
-                        let mut s = Select::new("callout-border").width(Val::Px(100.0));
-                        for bd in Border::ALL {
-                            s = s.option(bd.label(), true);
-                        }
-                        r.spawn(s.selected(Border::ALL.iter().position(|x| *x == spec.border).unwrap_or(0)).build(&t));
-                        let mut s = Select::new("callout-size").width(Val::Px(100.0));
-                        for (_, l) in SIZES {
-                            s = s.option(l, true);
-                        }
-                        r.spawn(s.selected(SIZES.iter().position(|x| x.0 == spec.size).unwrap_or(0)).build(&t));
-                    });
+            header(
+                c,
+                &t,
+                "Callout",
+                "callout-dialog",
+                Some(accept_callout),
+                cancel_callout,
+            );
+            c.spawn(Node {
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::all(Val::Px(8.0)),
+                row_gap: Val::Px(6.0),
+                ..default()
+            })
+            .with_children(|b| {
+                // The property menus: a part's, the BOM table's.
+                b.spawn(Node {
+                    column_gap: Val::Px(4.0),
+                    ..default()
+                })
+                .with_children(|r| {
+                    for (name, ic, tip) in [
+                        ("callout-part-property", "part", "Insert component property"),
+                        (
+                            "callout-table-property",
+                            "bill-of-materials",
+                            "Insert BOM table property",
+                        ),
+                    ] {
+                        let n: &'static str = name;
+                        r.spawn((
+                            ToolButton::new(name, ic)
+                                .dropdown(true)
+                                .icon_size(16.0)
+                                .tooltip(tip)
+                                .build(&t),
+                            observe(move |a: On<Activate>, mut commands: Commands| {
+                                let button = a.entity;
+                                commands
+                                    .queue(move |w: &mut World| open_property_menu(w, button, n));
+                            }),
+                        ));
+                    }
                 });
+                // The five fields: upper; left, centre, right; lower.
+                let field =
+                    |p: &mut ChildSpawnerCommands, name: &str, label: &str, value: &str, w: f32| {
+                        p.spawn(
+                            TextInput::new(name.to_string())
+                                .placeholder(label)
+                                .value(value.to_string())
+                                .width(Val::Px(w))
+                                .chips()
+                                .build(&t),
+                        );
+                    };
+                let f = &spec.fields;
+                b.spawn(Node {
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                })
+                .with_children(|r| field(r, FIELDS[0].0, FIELDS[0].1, &f.upper, 120.0));
+                b.spawn(Node {
+                    column_gap: Val::Px(4.0),
+                    align_items: AlignItems::Center,
+                    ..default()
+                })
+                .with_children(|r| {
+                    field(r, FIELDS[2].0, FIELDS[2].1, &f.left, 72.0);
+                    field(r, FIELDS[4].0, FIELDS[4].1, &f.center, 120.0);
+                    field(r, FIELDS[3].0, FIELDS[3].1, &f.right, 110.0);
+                });
+                b.spawn(Node {
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                })
+                .with_children(|r| field(r, FIELDS[1].0, FIELDS[1].1, &f.lower, 120.0));
+                // Text height, border, size.
+                b.spawn(Node {
+                    column_gap: Val::Px(6.0),
+                    align_items: AlignItems::Center,
+                    margin: UiRect::top(Val::Px(4.0)),
+                    ..default()
+                })
+                .with_children(|r| {
+                    r.spawn(
+                        TextInput::new("callout-text-height")
+                            .value(if unit > 1.0 {
+                                format!("{:.4}", spec.text_height / unit)
+                            } else {
+                                format!("{:.2}", spec.text_height)
+                            })
+                            .width(Val::Px(62.0))
+                            .select_all_on_focus()
+                            .build(&t),
+                    );
+                    let mut s = Select::new("callout-border").width(Val::Px(100.0));
+                    for bd in Border::ALL {
+                        s = s.option(bd.label(), true);
+                    }
+                    r.spawn(
+                        s.selected(
+                            Border::ALL
+                                .iter()
+                                .position(|x| *x == spec.border)
+                                .unwrap_or(0),
+                        )
+                        .build(&t),
+                    );
+                    let mut s = Select::new("callout-size").width(Val::Px(100.0));
+                    for (_, l) in SIZES {
+                        s = s.option(l, true);
+                    }
+                    r.spawn(
+                        s.selected(SIZES.iter().position(|x| x.0 == spec.size).unwrap_or(0))
+                            .build(&t),
+                    );
+                });
+            });
             c.spawn((
-                t.text("Pick an edge of a part, then click to place", t.font_sm, FontWeight::NORMAL, t.muted_foreground),
-                Node { margin: UiRect::new(Val::Px(8.0), Val::Px(8.0), Val::Px(0.0), Val::Px(8.0)), ..default() },
+                t.text(
+                    "Pick an edge of a part, then click to place",
+                    t.font_sm,
+                    FontWeight::NORMAL,
+                    t.muted_foreground,
+                ),
+                Node {
+                    margin: UiRect::new(Val::Px(8.0), Val::Px(8.0), Val::Px(0.0), Val::Px(8.0)),
+                    ..default()
+                },
             ));
         });
     world.resource_mut::<CalloutUi>().open = true;
@@ -597,7 +785,14 @@ fn accept_callout(world: &mut World) {
             c.size = spec.size;
             c.text_height = spec.text_height;
             c.fields = spec.fields.clone();
-            edit_drawing(world, DrawingOp::SetAnnotation { view, annotation: a, label: "Edit callout".into() });
+            edit_drawing(
+                world,
+                DrawingOp::SetAnnotation {
+                    view,
+                    annotation: a,
+                    label: "Edit callout".into(),
+                },
+            );
         }
     }
     cancel_callout(world);
@@ -645,7 +840,9 @@ fn read_callout_card(
     }
     for (n, st) in &q_select {
         match n.as_str() {
-            "callout-border" => s.border = Border::ALL.get(st.selected).copied().unwrap_or(s.border),
+            "callout-border" => {
+                s.border = Border::ALL.get(st.selected).copied().unwrap_or(s.border)
+            }
             "callout-size" => s.size = SIZES.get(st.selected).map(|x| x.0).unwrap_or(s.size),
             _ => {}
         }
@@ -656,10 +853,16 @@ fn read_callout_card(
 }
 
 /// The field last focused (where the property menus insert).
-fn track_callout_focus(focus: Res<bevy::input_focus::InputFocus>, q: Query<&Name, With<TextInputField>>, mut ui: ResMut<CalloutUi>) {
+fn track_callout_focus(
+    focus: Res<bevy::input_focus::InputFocus>,
+    q: Query<&Name, With<TextInputField>>,
+    mut ui: ResMut<CalloutUi>,
+) {
     if let Some(e) = focus.get()
         && let Ok(n) = q.get(e)
-        && FIELDS.iter().any(|(f, _)| n.as_str() == format!("{f}-field"))
+        && FIELDS
+            .iter()
+            .any(|(f, _)| n.as_str() == format!("{f}-field"))
         && ui.field.as_deref() != Some(n.as_str())
     {
         ui.field = Some(n.as_str().to_string());
@@ -670,35 +873,62 @@ fn track_callout_focus(focus: Res<bevy::input_focus::InputFocus>, q: Query<&Name
 struct PropertyMenuFor;
 
 fn open_property_menu(world: &mut World, button: Entity, which: &str) {
-    let Some((left, bottom)) = world.get::<ComputedNode>(button).zip(world.get::<bevy::ui::UiGlobalTransform>(button)).map(|(n, t)| {
-        let s = n.inverse_scale_factor();
-        ((t.translation.x - n.size().x / 2.0) * s, (t.translation.y + n.size().y / 2.0) * s)
-    }) else {
+    let Some((left, bottom)) = world
+        .get::<ComputedNode>(button)
+        .zip(world.get::<bevy::ui::UiGlobalTransform>(button))
+        .map(|(n, t)| {
+            let s = n.inverse_scale_factor();
+            (
+                (t.translation.x - n.size().x / 2.0) * s,
+                (t.translation.y + n.size().y / 2.0) * s,
+            )
+        })
+    else {
         return;
     };
     let theme = world.resource::<Theme>().clone();
     let mut menu = Menu::new(format!("{which}-menu")).min_width(170.0);
     if which == "callout-part-property" {
         for p in cadrs_drawing::assembly::PART_PROPERTIES {
-            menu = menu.item(MenuItem::new(format!("callout-part-{}", slug(p)), format!("Part: {p}")));
+            menu = menu.item(MenuItem::new(
+                format!("callout-part-{}", slug(p)),
+                format!("Part: {p}"),
+            ));
         }
     } else {
         for p in cadrs_drawing::assembly::TABLE_PROPERTIES {
-            menu = menu.item(MenuItem::new(format!("callout-table-{}", slug(p)), format!("Table: {p}")));
+            menu = menu.item(MenuItem::new(
+                format!("callout-table-{}", slug(p)),
+                format!("Table: {p}"),
+            ));
         }
     }
     let mut commands = world.commands();
-    let anchor = open_context_menu(&mut commands, Vec2::new(left, bottom + 2.0), menu.build(&theme));
-    commands.entity(anchor).insert((PropertyMenuFor, DespawnOnExit(AppState::Document)));
+    let anchor = open_context_menu(
+        &mut commands,
+        Vec2::new(left, bottom + 2.0),
+        menu.build(&theme),
+    );
+    commands
+        .entity(anchor)
+        .insert((PropertyMenuFor, DespawnOnExit(AppState::Document)));
     world.flush();
 }
 
 /// "Part number" → "part-number", "Item No." → "item-no".
 fn slug(s: &str) -> String {
-    s.to_lowercase().replace('.', "").split_whitespace().collect::<Vec<_>>().join("-")
+    s.to_lowercase()
+        .replace('.', "")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join("-")
 }
 
-fn on_property_menu(ev: On<MenuAction>, q: Query<(), With<PropertyMenuFor>>, mut commands: Commands) {
+fn on_property_menu(
+    ev: On<MenuAction>,
+    q: Query<(), With<PropertyMenuFor>>,
+    mut commands: Commands,
+) {
     if !q.contains(ev.entity) {
         return;
     }
@@ -707,10 +937,19 @@ fn on_property_menu(ev: On<MenuAction>, q: Query<(), With<PropertyMenuFor>>, mut
         .iter()
         .find(|p| item == format!("callout-part-{}", slug(p)))
         .map(|p| token(true, p))
-        .or_else(|| cadrs_drawing::assembly::TABLE_PROPERTIES.iter().find(|p| item == format!("callout-table-{}", slug(p))).map(|p| token(false, p)));
+        .or_else(|| {
+            cadrs_drawing::assembly::TABLE_PROPERTIES
+                .iter()
+                .find(|p| item == format!("callout-table-{}", slug(p)))
+                .map(|p| token(false, p))
+        });
     let Some(tok) = tok else { return };
     commands.queue(move |w: &mut World| {
-        let field = w.resource::<CalloutUi>().field.clone().unwrap_or_else(|| "callout-center-field".into());
+        let field = w
+            .resource::<CalloutUi>()
+            .field
+            .clone()
+            .unwrap_or_else(|| "callout-center-field".into());
         let mut q = w.query_filtered::<(&Name, &mut EditableText), With<TextInputField>>();
         if let Some((_, mut t)) = q.iter_mut(w).find(|(n, _)| n.as_str() == field) {
             // At the caret (after what was typed), else at the end.
@@ -729,13 +968,21 @@ fn on_property_menu(ev: On<MenuAction>, q: Query<(), With<PropertyMenuFor>>, mut
 }
 
 /// The other callouts' anchors on the active sheet (sheet mm), less `skip`.
-fn callout_anchors(d: &cadrs_drawing::Drawing, sheet: usize, skip: Option<(ViewId, AnnotationId)>) -> Vec<[f64; 2]> {
-    let Some(s) = d.sheets.get(sheet) else { return Vec::new() };
+fn callout_anchors(
+    d: &cadrs_drawing::Drawing,
+    sheet: usize,
+    skip: Option<(ViewId, AnnotationId)>,
+) -> Vec<[f64; 2]> {
+    let Some(s) = d.sheets.get(sheet) else {
+        return Vec::new();
+    };
     s.views
         .iter()
         .flat_map(|v| {
             v.annotations.iter().filter_map(move |a| match &a.kind {
-                AnnotationKind::Callout(c) if Some((v.id, a.id)) != skip => Some(v.to_sheet(c.text)),
+                AnnotationKind::Callout(c) if Some((v.id, a.id)) != skip => {
+                    Some(v.to_sheet(c.text))
+                }
                 _ => None,
             })
         })
@@ -750,7 +997,13 @@ pub type Guides = Vec<([f64; 2], [f64; 2])>;
 
 /// A callout of view `v` with its anchor at the sheet point `p`, snapped to the other callouts
 /// of the sheet: the callout's view-2D anchor and the guides (sheet mm).
-pub fn snapped_anchor(d: &cadrs_drawing::Drawing, sheet: usize, v: &cadrs_drawing::View, p: [f64; 2], skip: Option<(ViewId, AnnotationId)>) -> ([f64; 2], Guides) {
+pub fn snapped_anchor(
+    d: &cadrs_drawing::Drawing,
+    sheet: usize,
+    v: &cadrs_drawing::View,
+    p: [f64; 2],
+    skip: Option<(ViewId, AnnotationId)>,
+) -> ([f64; 2], Guides) {
     let others = callout_anchors(d, sheet, skip);
     let (q, lines) = inference(p, &others, INFER);
     (v.from_sheet(q), lines)
@@ -763,7 +1016,9 @@ pub fn callout_click(w: &mut World, hover: Option<Hover>, p: Vec2) {
     match attach {
         None => {
             let _ = hover;
-            let Some((vid, occ, at)) = part_under(w, p) else { return };
+            let Some((vid, occ, at)) = part_under(w, p) else {
+                return;
+            };
             w.resource_mut::<CalloutUi>().attach = Some((vid, occ, at));
             w.resource_mut::<AnnotationUi>().pick_view = Some(vid);
         }
@@ -771,7 +1026,13 @@ pub fn callout_click(w: &mut World, hover: Option<Hover>, p: Vec2) {
             let preview = w.resource::<AnnotationUi>().preview.clone();
             if let Some((vid, a)) = preview
                 && matches!(a.kind, AnnotationKind::Callout(_))
-                && edit_drawing(w, DrawingOp::AddAnnotation { view: vid, annotation: a })
+                && edit_drawing(
+                    w,
+                    DrawingOp::AddAnnotation {
+                        view: vid,
+                        annotation: a,
+                    },
+                )
             {
                 w.resource_mut::<CalloutUi>().attach = None;
                 let mut ann = w.resource_mut::<AnnotationUi>();
@@ -800,12 +1061,18 @@ fn part_under(w: &World, p: Vec2) -> Option<(ViewId, uuid::Uuid, [f64; 2])> {
             if e.visibility != cadrs_kernel::ProjVisibility::Visible {
                 continue;
             }
-            let Some(occ) = da::edge_occurrence(&g, i) else { continue };
+            let Some(occ) = da::edge_occurrence(&g, i) else {
+                continue;
+            };
             for s in e.points.windows(2) {
                 let (a, b) = ([s[0].x, s[0].y], [s[1].x, s[1].y]);
                 let dd = [b[0] - a[0], b[1] - a[1]];
                 let l2 = dd[0] * dd[0] + dd[1] * dd[1];
-                let t = if l2 > 1e-18 { (((local[0] - a[0]) * dd[0] + (local[1] - a[1]) * dd[1]) / l2).clamp(0.0, 1.0) } else { 0.0 };
+                let t = if l2 > 1e-18 {
+                    (((local[0] - a[0]) * dd[0] + (local[1] - a[1]) * dd[1]) / l2).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
                 let n = [a[0] + dd[0] * t, a[1] + dd[1] * t];
                 let dist = (n[0] - local[0]).hypot(n[1] - local[1]) * k;
                 if dist <= 2.0 && best.is_none_or(|(bd, ..)| dist < bd) {
@@ -819,14 +1086,23 @@ fn part_under(w: &World, p: Vec2) -> Option<(ViewId, uuid::Uuid, [f64; 2])> {
 
 /// The callout being placed follows the cursor (snapped to the others, D11.6); an edited one
 /// shows its card's settings live.
-fn callout_preview(doc: Option<Res<ActiveDocument>>, dui: Res<DrawingUi>, cui: Res<CalloutUi>, mut ann: ResMut<AnnotationUi>) {
+fn callout_preview(
+    doc: Option<Res<ActiveDocument>>,
+    dui: Res<DrawingUi>,
+    cui: Res<CalloutUi>,
+    mut ann: ResMut<AnnotationUi>,
+) {
     let Some(doc) = doc else { return };
-    let Some((id, d)) = active_drawing(&doc) else { return };
+    let Some((id, d)) = active_drawing(&doc) else {
+        return;
+    };
     let index = dui.sheet_index(id, d);
     // Edit…: the callout as the card would leave it.
     if let Some((view, aid)) = cui.editing {
         let want = super::annotations::find_annotation(d, view, aid).and_then(|(_, mut a)| {
-            let AnnotationKind::Callout(c) = &mut a.kind else { return None };
+            let AnnotationKind::Callout(c) = &mut a.kind else {
+                return None;
+            };
             c.border = cui.spec.border;
             c.size = cui.spec.size;
             c.text_height = cui.spec.text_height;

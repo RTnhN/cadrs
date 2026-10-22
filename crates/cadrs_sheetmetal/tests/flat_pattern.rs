@@ -10,7 +10,10 @@
 use std::f64::consts::{FRAC_PI_2, PI};
 
 use cadrs_sheetmetal::flat::{FlatError, FlatPart, PieceSource, ReliefCut, ReliefSource, flatten};
-use cadrs_sheetmetal::model::{BendEnd, CornerOverride, HemAlignment, JointId, JointKind, Model, P3, RipStyle, SharpBuilder, Surface, V3};
+use cadrs_sheetmetal::model::{
+    BendEnd, CornerOverride, HemAlignment, JointId, JointKind, Model, P3, RipStyle, SharpBuilder,
+    Surface, V3,
+};
 use cadrs_sheetmetal::params::{BendCalc, BendReliefKind, CornerReliefKind, Params};
 use cadrs_sheetmetal::poly::{P2, Polygon, V2, overlap_area};
 use cadrs_sheetmetal::table::{BendDirection, JointType, table};
@@ -45,7 +48,11 @@ fn rect(w: f64, h: f64) -> Polygon {
 /// A sample that must build and be consistent in 3D.
 fn ok(m: Result<Model, BuildError>) -> Model {
     let m = m.expect("sample builds");
-    assert!(m.validate().is_empty(), "consistent in 3D: {:?}", m.validate());
+    assert!(
+        m.validate().is_empty(),
+        "consistent in 3D: {:?}",
+        m.validate()
+    );
     m
 }
 
@@ -99,8 +106,14 @@ fn bend_allowance_mode() {
         bend_allowance: 7.0,
         ..params()
     };
-    assert!(close(size(&ok(samples::l_bracket(p, true))).0, 80.0 - 2.0 * OSSB + 7.0));
-    assert!(close(size(&ok(samples::u_channel(p))).0, 110.0 - 4.0 * OSSB + 14.0));
+    assert!(close(
+        size(&ok(samples::l_bracket(p, true))).0,
+        80.0 - 2.0 * OSSB + 7.0
+    ));
+    assert!(close(
+        size(&ok(samples::u_channel(p))).0,
+        110.0 - 4.0 * OSSB + 14.0
+    ));
     let (w, h) = size(&ok(samples::open_box(p, RipStyle::EdgeJoint)));
     assert!(close(w, 100.0 + 2.0 * (20.0 - 2.0 * OSSB + 7.0)), "{w}");
     assert!(close(h, 60.0 + 2.0 * (20.0 - 2.0 * OSSB + 7.0)), "{h}");
@@ -125,7 +138,9 @@ fn bend_deduction_mode() {
 #[test]
 fn per_bend_value_overrides_the_model() {
     let mut m = ok(samples::l_bracket(params(), true));
-    let JointKind::Bend(b) = &mut m.joints[0].kind else { panic!() };
+    let JointKind::Bend(b) = &mut m.joints[0].kind else {
+        panic!()
+    };
     b.value = Some(BendValue::KFactor(0.3));
     let expect = 80.0 - 2.0 * OSSB + bend::bend_allowance(R, T, FRAC_PI_2, 0.3);
     assert!(close(size(&m).0, expect));
@@ -142,7 +157,8 @@ fn obtuse_and_sharp_bends() {
         b.bend(a, f, (P3::new(50.0, 0.0, 0.0), P3::new(50.0, 40.0, 0.0)));
         let m = ok(b.build());
         assert!((m.joints[0].bend().unwrap().angle - theta).abs() < 1e-9);
-        let expect = 80.0 - 2.0 * bend::outside_setback(R, T, theta).unwrap() + bend::bend_allowance(R, T, theta, K);
+        let expect = 80.0 - 2.0 * bend::outside_setback(R, T, theta).unwrap()
+            + bend::bend_allowance(R, T, theta, K);
         assert!(close(size(&m).0, expect), "{deg}°");
     }
 }
@@ -155,8 +171,15 @@ fn u_channel_and_its_table() {
     assert!(close(h, 40.0));
     let t = table(&m);
     assert_eq!(t.bends.len(), 2);
-    assert_eq!((t.bends[0].name.as_str(), t.bends[1].name.as_str()), ("Bend A", "Bend B"));
-    assert!(t.bends.iter().all(|r| r.direction == BendDirection::Up && (r.angle_deg - 90.0).abs() < 1e-9));
+    assert_eq!(
+        (t.bends[0].name.as_str(), t.bends[1].name.as_str()),
+        ("Bend A", "Bend B")
+    );
+    assert!(
+        t.bends
+            .iter()
+            .all(|r| r.direction == BendDirection::Up && (r.angle_deg - 90.0).abs() < 1e-9)
+    );
     // The model's K factor, exactly as entered.
     assert_eq!(t.bends[0].value, Some(BendValue::KFactor(K)));
 }
@@ -165,7 +188,10 @@ fn u_channel_and_its_table() {
 fn hem_lays_flat_with_its_allowance() {
     let m = ok(samples::hem(params()));
     assert!(close(size(&m).0, 50.0 + PI * (R + K * T) + 10.0));
-    assert!(!table(&m).bends[0].editable, "hems aren't editable in the table");
+    assert!(
+        !table(&m).bends[0].editable,
+        "hems aren't editable in the table"
+    );
     // In bend deduction mode a hem has no deduction (undefined at 180°): the table shows "–" and
     // the flat uses the model's K factor.
     let mut d = m.clone();
@@ -173,9 +199,14 @@ fn hem_lays_flat_with_its_allowance() {
     assert!(flatten(&d).is_ok());
     assert_eq!(table(&d).bends[0].value, None, "shown as –");
     // A bend's own deduction there can't apply.
-    let JointKind::Bend(b) = &mut d.joints[0].kind else { panic!() };
+    let JointKind::Bend(b) = &mut d.joints[0].kind else {
+        panic!()
+    };
     b.value = Some(BendValue::Deduction(1.0));
-    assert!(matches!(flatten(&d).errors.as_slice(), [FlatError::BadJoint { .. }]));
+    assert!(matches!(
+        flatten(&d).errors.as_slice(),
+        [FlatError::BadJoint { .. }]
+    ));
 }
 
 #[test]
@@ -190,7 +221,10 @@ fn hem_alignments_and_sides() {
         let a = b.wall(P3::origin(), V3::x(), V3::y(), rect(50.0, 20.0));
         b.hem(a, edge, 10.0, toward, align);
         let m = ok(b.build());
-        assert!(close(size(&m).0, 50.0 - short + PI * (R + K * T) + 10.0), "{toward} {align:?}");
+        assert!(
+            close(size(&m).0, 50.0 - short + PI * (R + K * T) + 10.0),
+            "{toward} {align:?}"
+        );
         assert_eq!(table(&m).bends[0].direction == BendDirection::Up, toward);
     }
 }
@@ -219,7 +253,11 @@ fn planar_wall_runs_into_a_rolled_one() {
     let t = table(&m);
     assert!(t.bends.is_empty(), "rolled walls aren't bends");
     assert_eq!(t.joints[0].kind, JointType::Tangent);
-    assert_eq!(one_part(&m).bends.len(), 0, "no bend lines for a rolled wall");
+    assert_eq!(
+        one_part(&m).bends.len(),
+        0,
+        "no bend lines for a rolled wall"
+    );
 }
 
 #[test]
@@ -261,16 +299,31 @@ fn open_box_lays_flat_as_a_cross() {
     let part = one_part(&m);
     assert_eq!(part.outline.len(), 1);
     let (lo, hi) = part.bounds().unwrap();
-    assert!(close(hi.x - lo.x, 100.0 + 2.0 * (20.0 - 2.0 * OSSB + ba90())));
-    assert!(close(hi.y - lo.y, 60.0 + 2.0 * (20.0 - 2.0 * OSSB + ba90())));
+    assert!(close(
+        hi.x - lo.x,
+        100.0 + 2.0 * (20.0 - 2.0 * OSSB + ba90())
+    ));
+    assert!(close(
+        hi.y - lo.y,
+        60.0 + 2.0 * (20.0 - 2.0 * OSSB + ba90())
+    ));
     assert_eq!(part.corners.len(), 4);
     let t = table(&m);
     assert_eq!((t.bends.len(), t.joints.len()), (4, 4));
-    assert!(t.joints.iter().all(|j| j.kind == JointType::Rip && j.style == Some(RipStyle::EdgeJoint)));
+    assert!(
+        t.joints
+            .iter()
+            .all(|j| j.kind == JointType::Rip && j.style == Some(RipStyle::EdgeJoint))
+    );
     assert_eq!(t.joints[0].name, "Rip 1");
     // Edge joints: every wall stops T + gap/2 short of each corner, so every bend is that much
     // shorter than its edge at both ends.
-    let lens: Vec<f64> = m.joints.iter().filter_map(|j| j.bend()).map(|b| b.on_a.len()).collect();
+    let lens: Vec<f64> = m
+        .joints
+        .iter()
+        .filter_map(|j| j.bend())
+        .map(|b| b.on_a.len())
+        .collect();
     for (l, e) in lens.iter().zip([60.0, 100.0, 60.0, 100.0]) {
         assert!(close(*l, e - 2.0 * (T + GAP / 2.0)), "{l}");
     }
@@ -279,7 +332,14 @@ fn open_box_lays_flat_as_a_cross() {
 /// Bend lengths by wall (east, north, west, south: walls 1..4), whatever the joint order.
 fn bend_lengths(m: &Model) -> Vec<f64> {
     (1..=4)
-        .map(|w| m.joints.iter().find(|j| j.b == WallId(w)).and_then(|j| j.bend()).map(|b| b.on_a.len()).unwrap())
+        .map(|w| {
+            m.joints
+                .iter()
+                .find(|j| j.b == WallId(w))
+                .and_then(|j| j.bend())
+                .map(|b| b.on_a.len())
+                .unwrap()
+        })
         .collect()
 }
 
@@ -297,9 +357,24 @@ fn open_box_reversed(style: RipStyle) -> Result<Model, BuildError> {
     b.bend(base, north, (P3::new(x, y, 0.0), P3::new(0.0, y, 0.0)));
     b.bend(base, east, (P3::new(x, 0.0, 0.0), P3::new(x, y, 0.0)));
     b.rip(east, north, (P3::new(x, y, 0.0), P3::new(x, y, h)), style);
-    b.rip(north, west, (P3::new(0.0, y, 0.0), P3::new(0.0, y, h)), style);
-    b.rip(west, south, (P3::new(0.0, 0.0, 0.0), P3::new(0.0, 0.0, h)), style);
-    b.rip(south, east, (P3::new(x, 0.0, 0.0), P3::new(x, 0.0, h)), style);
+    b.rip(
+        north,
+        west,
+        (P3::new(0.0, y, 0.0), P3::new(0.0, y, h)),
+        style,
+    );
+    b.rip(
+        west,
+        south,
+        (P3::new(0.0, 0.0, 0.0), P3::new(0.0, 0.0, h)),
+        style,
+    );
+    b.rip(
+        south,
+        east,
+        (P3::new(x, 0.0, 0.0), P3::new(x, 0.0, h)),
+        style,
+    );
     b.build()
 }
 
@@ -323,7 +398,10 @@ fn butt_joint_bend_lengths_dont_depend_on_bend_order() {
 
 /// The NE corner zone of the box: where the east and north bend regions, extended, cross.
 fn ne_zone() -> (P2, P2) {
-    (P2::new(100.0 - OSSB, 60.0 - OSSB), P2::new(100.0 - OSSB + ba90(), 60.0 - OSSB + ba90()))
+    (
+        P2::new(100.0 - OSSB, 60.0 - OSSB),
+        P2::new(100.0 - OSSB + ba90(), 60.0 - OSSB + ba90()),
+    )
 }
 
 fn box_with_corner(kind: CornerReliefKind, size: f64, scale: f64) -> FlatPart {
@@ -342,17 +420,29 @@ fn m_base_has_no_corner(part: &FlatPart) -> bool {
 fn ne_cut(part: &FlatPart) -> &ReliefCut {
     part.cuts
         .iter()
-        .find(|c| c.source == ReliefSource::Corner { bends: (JointId(0), JointId(1)) })
+        .find(|c| {
+            c.source
+                == ReliefSource::Corner {
+                    bends: (JointId(0), JointId(1)),
+                }
+        })
         .expect("the east/north corner was cut")
 }
 
 #[test]
 fn corner_zone_is_where_the_bend_regions_cross() {
     let part = box_with_corner(CornerReliefKind::Simple, 0.0, 1.0);
-    let c = part.corners.iter().find(|c| c.bends == (JointId(0), JointId(1))).unwrap();
+    let c = part
+        .corners
+        .iter()
+        .find(|c| c.bends == (JointId(0), JointId(1)))
+        .unwrap();
     assert_eq!(c.ends, (BendEnd::End, BendEnd::Start));
     let (lo, hi) = bounds(&c.zone);
-    assert!(close_pt(lo, ne_zone().0) && close_pt(hi, ne_zone().1), "{lo:?} {hi:?}");
+    assert!(
+        close_pt(lo, ne_zone().0) && close_pt(hi, ne_zone().1),
+        "{lo:?} {hi:?}"
+    );
     // Simple: just the zone. (The base's corner past both tangent lines came off with the bend
     // trims: nothing held it to the base.)
     let cut = ne_cut(&part);
@@ -379,14 +469,34 @@ fn every_corner_relief_type_has_its_exact_shape() {
         // The zone, then the relief's own shape centred on it.
         assert_eq!(cut.shapes.len(), 2, "{kind:?}");
         let (lo, hi) = bounds(&cut.shapes[1]);
-        assert!(close_pt(P2::from((lo.coords + hi.coords) / 2.0), centre), "{kind:?} centre");
-        assert!((hi.x - lo.x - 2.0 * half).abs() < 1e-3, "{kind:?} size {}", hi.x - lo.x);
-        let round = matches!(kind, CornerReliefKind::RoundSized | CornerReliefKind::RoundScaled);
-        let expect_area = if round { PI * half * half } else { 4.0 * half * half };
-        assert!((cut.shapes[1].area() - expect_area).abs() / expect_area < 0.005, "{kind:?} area");
+        assert!(
+            close_pt(P2::from((lo.coords + hi.coords) / 2.0), centre),
+            "{kind:?} centre"
+        );
+        assert!(
+            (hi.x - lo.x - 2.0 * half).abs() < 1e-3,
+            "{kind:?} size {}",
+            hi.x - lo.x
+        );
+        let round = matches!(
+            kind,
+            CornerReliefKind::RoundSized | CornerReliefKind::RoundScaled
+        );
+        let expect_area = if round {
+            PI * half * half
+        } else {
+            4.0 * half * half
+        };
+        assert!(
+            (cut.shapes[1].area() - expect_area).abs() / expect_area < 0.005,
+            "{kind:?} area"
+        );
         // The cut only touches the pieces around the corner.
         assert!(cut.targets.contains(&PieceSource::Wall(WallId(0))));
-        assert!(!cut.targets.contains(&PieceSource::Wall(WallId(3))), "not the west wall");
+        assert!(
+            !cut.targets.contains(&PieceSource::Wall(WallId(3))),
+            "not the west wall"
+        );
     }
 }
 
@@ -398,7 +508,10 @@ fn closed_corner_mitres_the_bend_regions_with_the_minimal_gap() {
     assert!(closed.area() > simple.area());
     let east = &closed.piece(PieceSource::Bend(JointId(0))).unwrap().cut;
     let north = &closed.piece(PieceSource::Bend(JointId(1))).unwrap().cut;
-    let overlap: f64 = east.iter().flat_map(|a| north.iter().map(move |b| overlap_area(a, b))).sum();
+    let overlap: f64 = east
+        .iter()
+        .flat_map(|a| north.iter().map(move |b| overlap_area(a, b)))
+        .sum();
     assert!(overlap < 1e-9);
     // The diagonal itself stays open: the minimal gap runs along it.
     let (zlo, _) = ne_zone();
@@ -421,7 +534,10 @@ fn corner_override_changes_one_corner() {
     });
     let one = one_part(&m).area();
     // One corner of four: a quarter of the extra material.
-    assert!(((base - one) - (base - all) / 4.0).abs() < 1e-3, "{base} {one} {all}");
+    assert!(
+        ((base - one) - (base - all) / 4.0).abs() < 1e-3,
+        "{base} {one} {all}"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -448,15 +564,27 @@ fn every_bend_relief_type_has_its_exact_extent() {
     ] {
         let part = partial(kind, 4.0, false);
         assert_eq!(part.cuts.len(), 2, "{kind:?}: one at each end");
-        for (end, y0, y1) in [(BendEnd::End, 30.0, 30.0 + width), (BendEnd::Start, 10.0 - width, 10.0)] {
+        for (end, y0, y1) in [
+            (BendEnd::End, 30.0, 30.0 + width),
+            (BendEnd::Start, 10.0 - width, 10.0),
+        ] {
             let cut = part
                 .cuts
                 .iter()
-                .find(|c| c.source == ReliefSource::BendEnd { bend: JointId(0), end })
+                .find(|c| {
+                    c.source
+                        == ReliefSource::BendEnd {
+                            bend: JointId(0),
+                            end,
+                        }
+                })
                 .unwrap_or_else(|| panic!("{kind:?} {end:?}"));
             assert_eq!(cut.shapes.len(), 1);
             let (lo, hi) = bounds(&cut.shapes[0]);
-            assert!(close_pt(lo, P2::new(x0 - extra, y0)) && close_pt(hi, P2::new(x1, y1)), "{kind:?} {end:?}: {lo:?} {hi:?}");
+            assert!(
+                close_pt(lo, P2::new(x0 - extra, y0)) && close_pt(hi, P2::new(x1, y1)),
+                "{kind:?} {end:?}: {lo:?} {hi:?}"
+            );
             // It removes material from the base only, in the base's own coordinates: from the
             // relief's depth to the base's edge at x = 50 (the flange starts past x1).
             let removed: f64 = cut
@@ -467,9 +595,19 @@ fn every_bend_relief_type_has_its_exact_extent() {
                 .map(Polygon::area)
                 .sum();
             let square = (50.0 - (x0 - extra)) * width;
-            let rounded = matches!(kind, BendReliefKind::ObroundScaled | BendReliefKind::ObroundSized);
-            let corners = if rounded { width * width / 2.0 * (1.0 - PI / 4.0) } else { 0.0 };
-            assert!((removed - (square - corners)).abs() < 0.01, "{kind:?}: removed {removed}");
+            let rounded = matches!(
+                kind,
+                BendReliefKind::ObroundScaled | BendReliefKind::ObroundSized
+            );
+            let corners = if rounded {
+                width * width / 2.0 * (1.0 - PI / 4.0)
+            } else {
+                0.0
+            };
+            assert!(
+                (removed - (square - corners)).abs() < 0.01,
+                "{kind:?}: removed {removed}"
+            );
         }
     }
 }
@@ -492,13 +630,21 @@ fn tear_relief_removes_nothing_and_slits_the_end() {
 fn extended_relief_runs_to_the_edge_and_stays_on_its_own_pieces() {
     let part = partial(BendReliefKind::RectangleScaled, 4.0, true);
     for c in &part.cuts {
-        assert!(c.targets.iter().all(|t| matches!(t, PieceSource::Wall(w) if w.0 <= 1) || matches!(t, PieceSource::Bend(_))));
+        assert!(
+            c.targets
+                .iter()
+                .all(|t| matches!(t, PieceSource::Wall(w) if w.0 <= 1)
+                    || matches!(t, PieceSource::Bend(_)))
+        );
     }
     // The base loses a slot from each bend end right to its edge (y = 40 and y = 0).
     let base = &part.piece(PieceSource::Wall(WallId(0))).unwrap().cut;
     assert!(!base.iter().any(|q| q.contains(P2::new(46.0, 39.5))));
     assert!(!base.iter().any(|q| q.contains(P2::new(46.0, 0.5))));
-    assert!(base.iter().any(|q| q.contains(P2::new(20.0, 39.5))), "only along the bend");
+    assert!(
+        base.iter().any(|q| q.contains(P2::new(20.0, 39.5))),
+        "only along the bend"
+    );
 }
 
 #[test]
@@ -506,7 +652,11 @@ fn bend_lines_stop_at_corner_reliefs() {
     let part = box_with_corner(CornerReliefKind::RoundSized, 12.0, 1.5);
     let b = part.bend(JointId(0)).unwrap();
     let visible: f64 = b.center_visible.iter().map(|s| s.len()).sum();
-    assert!(visible < b.center.len() - 1.0, "{visible} of {}", b.center.len());
+    assert!(
+        visible < b.center.len() - 1.0,
+        "{visible} of {}",
+        b.center.len()
+    );
     assert!(!b.tangent_visible.is_empty());
 }
 
@@ -524,10 +674,16 @@ fn overlapping_walls_report_a_collision_with_its_region() {
             _ => None,
         })
         .expect("collision reported");
-    assert_eq!((a, b), (PieceSource::Wall(WallId(1)), PieceSource::Wall(WallId(2))));
+    assert_eq!(
+        (a, b),
+        (PieceSource::Wall(WallId(1)), PieceSource::Wall(WallId(2)))
+    );
     assert!(area > 10.0, "{area}");
     assert!((region.iter().map(Polygon::area).sum::<f64>() - area).abs() < 1e-9);
-    assert_eq!(f.errors[0].message(), "Collision in sheet metal flat pattern");
+    assert_eq!(
+        f.errors[0].message(),
+        "Collision in sheet metal flat pattern"
+    );
 }
 
 #[test]
@@ -541,7 +697,13 @@ fn walls_that_only_touch_dont_collide() {
 #[test]
 fn bends_closing_a_loop_are_reported() {
     let f = flatten(&ok(samples::bend_loop(params())));
-    assert!(f.errors.iter().any(|e| matches!(e, FlatError::BendLoop { .. })), "{:?}", f.errors);
+    assert!(
+        f.errors
+            .iter()
+            .any(|e| matches!(e, FlatError::BendLoop { .. })),
+        "{:?}",
+        f.errors
+    );
 }
 
 #[test]
@@ -549,11 +711,19 @@ fn inconsistent_material_sides_are_rejected() {
     let mut b = SharpBuilder::new(params());
     let a = b.wall(P3::origin(), V3::x(), V3::y(), rect(50.0, 40.0));
     // The flange's material side points the wrong way (outwards).
-    let f = b.wall(P3::new(50.0, 40.0, 0.0), V3::z(), -V3::y(), rect(30.0, 40.0));
+    let f = b.wall(
+        P3::new(50.0, 40.0, 0.0),
+        V3::z(),
+        -V3::y(),
+        rect(30.0, 40.0),
+    );
     b.bend(a, f, (P3::new(50.0, 0.0, 0.0), P3::new(50.0, 40.0, 0.0)));
     let e = b.build().unwrap_err();
     assert!(matches!(e, BuildError::InconsistentSide { .. }));
-    assert_eq!(e.to_string(), "The walls' material sides don't match across the joint");
+    assert_eq!(
+        e.to_string(),
+        "The walls' material sides don't match across the joint"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -564,13 +734,23 @@ fn bend_geometry_in_3d() {
     let m = ok(samples::l_bracket(params(), true));
     let g = m.bend_geometry(JointId(0)).unwrap();
     // The bend's axis sits R + T above the base's underside, over the tangent line x = 45.
-    assert!((g.ends.0 - P3::new(45.0, 0.0, 5.0)).norm() < 1e-9 && (g.ends.1 - P3::new(45.0, 40.0, 5.0)).norm() < 1e-9);
-    assert_eq!((g.inner_radius, g.outer_radius, g.def_radius), (R, R + T, R + T));
+    assert!(
+        (g.ends.0 - P3::new(45.0, 0.0, 5.0)).norm() < 1e-9
+            && (g.ends.1 - P3::new(45.0, 40.0, 5.0)).norm() < 1e-9
+    );
+    assert_eq!(
+        (g.inner_radius, g.outer_radius, g.def_radius),
+        (R, R + T, R + T)
+    );
     // Turning the base's tangent line by the sweep lands on the flange's (5 up the x = 50 face).
     assert!((g.rotate(P3::new(45.0, 0.0, 0.0), g.sweep) - P3::new(50.0, 0.0, 5.0)).norm() < 1e-9);
     let down = ok(samples::l_bracket(params(), false));
     let g = down.bend_geometry(JointId(0)).unwrap();
-    assert!((g.ends.0 - P3::new(47.0, 0.0, -3.0)).norm() < 1e-9, "{:?}", g.ends);
+    assert!(
+        (g.ends.0 - P3::new(47.0, 0.0, -3.0)).norm() < 1e-9,
+        "{:?}",
+        g.ends
+    );
     assert_eq!(g.def_radius, R);
 }
 
@@ -630,7 +810,10 @@ fn table_value_column_follows_the_calculation() {
     m.params.bend_calc = BendCalc::BendDeduction;
     let t = table(&m);
     assert_eq!(t.value_column, "Bend deduction (mm)");
-    assert_eq!(t.bends[0].value, Some(BendValue::Deduction(m.params.bend_deduction)));
+    assert_eq!(
+        t.bends[0].value,
+        Some(BendValue::Deduction(m.params.bend_deduction))
+    );
 }
 
 #[test]
@@ -641,7 +824,10 @@ fn trimmed_walls_keep_exact_coordinates() {
         for p in &w.outline.outer {
             for v in [p.x, p.y] {
                 let snapped = (v * 1000.0).round() / 1000.0;
-                assert!((v - snapped).abs() < 1e-12 || (v - snapped).abs() > 1e-4, "{v}");
+                assert!(
+                    (v - snapped).abs() < 1e-12 || (v - snapped).abs() > 1e-4,
+                    "{v}"
+                );
             }
         }
     }
@@ -668,9 +854,22 @@ fn north_and_short_east(east: f64) -> Model {
     let mut b = SharpBuilder::new(params());
     let base = b.wall(P3::origin(), V3::x(), V3::y(), rect(100.0, 60.0));
     let e = b.wall(P3::new(100.0, 0.0, 0.0), V3::z(), V3::y(), rect(20.0, east));
-    let n = b.wall(P3::new(100.0, 60.0, 0.0), V3::z(), -V3::x(), rect(20.0, 100.0));
-    b.bend(base, e, (P3::new(100.0, 0.0, 0.0), P3::new(100.0, east, 0.0)));
-    b.bend(base, n, (P3::new(100.0, 60.0, 0.0), P3::new(0.0, 60.0, 0.0)));
+    let n = b.wall(
+        P3::new(100.0, 60.0, 0.0),
+        V3::z(),
+        -V3::x(),
+        rect(20.0, 100.0),
+    );
+    b.bend(
+        base,
+        e,
+        (P3::new(100.0, 0.0, 0.0), P3::new(100.0, east, 0.0)),
+    );
+    b.bend(
+        base,
+        n,
+        (P3::new(100.0, 60.0, 0.0), P3::new(0.0, 60.0, 0.0)),
+    );
     ok(b.build())
 }
 
@@ -678,18 +877,38 @@ fn north_and_short_east(east: f64) -> Model {
 fn a_corner_needs_the_bends_to_meet() {
     for east in [10.0, 20.0, 30.0, 40.0, 50.0] {
         let part = one_part(&north_and_short_east(east));
-        assert!(part.corners.is_empty(), "east {east}: the east bend stops well short of the north one");
+        assert!(
+            part.corners.is_empty(),
+            "east {east}: the east bend stops well short of the north one"
+        );
         // The east bend's far end gets a bend relief instead; the north bend region is whole.
-        assert!(part.cuts.iter().any(|c| c.source == ReliefSource::BendEnd { bend: JointId(0), end: BendEnd::End }), "east {east}");
+        assert!(
+            part.cuts.iter().any(|c| c.source
+                == ReliefSource::BendEnd {
+                    bend: JointId(0),
+                    end: BendEnd::End
+                }),
+            "east {east}"
+        );
         let north = part.piece(PieceSource::Bend(JointId(1))).unwrap();
-        assert!((north.cut.iter().map(Polygon::area).sum::<f64>() - north.polygon.area()).abs() < 1e-6, "east {east}");
+        assert!(
+            (north.cut.iter().map(Polygon::area).sum::<f64>() - north.polygon.area()).abs() < 1e-6,
+            "east {east}"
+        );
     }
     // Close to the zone (it starts at 55) but with the base carrying on past the bend's end: still
     // a bend relief, not a corner.
     for east in [52.9, 53.0, 54.9] {
         let part = one_part(&north_and_short_east(east));
         assert!(part.corners.is_empty(), "east {east}");
-        assert!(part.cuts.iter().any(|c| c.source == ReliefSource::BendEnd { bend: JointId(0), end: BendEnd::End }), "east {east}");
+        assert!(
+            part.cuts.iter().any(|c| c.source
+                == ReliefSource::BendEnd {
+                    bend: JointId(0),
+                    end: BendEnd::End
+                }),
+            "east {east}"
+        );
     }
     // Running right up to the north wall (55 = where the north bend region begins) it is a corner.
     let part = one_part(&north_and_short_east(60.0));
@@ -721,7 +940,13 @@ fn ids_and_names_follow_creation_order_and_can_be_given() {
     // A hem made before a bend comes first in the table.
     let mut b = SharpBuilder::new(params());
     let base = b.wall(P3::origin(), V3::x(), V3::y(), rect(50.0, 40.0));
-    let h = b.hem(base, (P3::new(0.0, 40.0, 0.0), P3::new(0.0, 0.0, 0.0)), 8.0, true, HemAlignment::InPlace);
+    let h = b.hem(
+        base,
+        (P3::new(0.0, 40.0, 0.0), P3::new(0.0, 0.0, 0.0)),
+        8.0,
+        true,
+        HemAlignment::InPlace,
+    );
     let f = b.wall(P3::new(50.0, 0.0, 0.0), V3::z(), V3::y(), rect(30.0, 40.0));
     let j = b.bend(base, f, (P3::new(50.0, 0.0, 0.0), P3::new(50.0, 40.0, 0.0)));
     let m = ok(b.build());
@@ -734,12 +959,21 @@ fn ids_and_names_follow_creation_order_and_can_be_given() {
     b.set_hem_id(h, JointId(71), WallId(90), None);
     b.set_wall_id(f, WallId(80));
     let m = ok(b.build());
-    assert_eq!(m.joints.iter().map(|j| (j.id, j.name.as_str())).collect::<Vec<_>>(), [(JointId(71), "Bend A"), (JointId(70), "Flange 1 bend")]);
+    assert_eq!(
+        m.joints
+            .iter()
+            .map(|j| (j.id, j.name.as_str()))
+            .collect::<Vec<_>>(),
+        [(JointId(71), "Bend A"), (JointId(70), "Flange 1 bend")]
+    );
     let ids: Vec<WallId> = m.walls.iter().map(|w| w.id).collect();
     assert_eq!(ids, [WallId(0), WallId(80), WallId(90)]);
     // Duplicates are refused.
     b.set_wall_id(base, WallId(80));
-    assert_eq!(b.build().unwrap_err(), BuildError::DuplicateWallId { id: WallId(80) });
+    assert_eq!(
+        b.build().unwrap_err(),
+        BuildError::DuplicateWallId { id: WallId(80) }
+    );
 }
 
 #[test]
@@ -749,9 +983,19 @@ fn hems_stop_where_their_wall_does() {
     let base = b.wall(P3::origin(), V3::x(), V3::y(), rect(50.0, 40.0));
     let f = b.wall(P3::new(50.0, 0.0, 0.0), V3::z(), V3::y(), rect(30.0, 40.0));
     b.bend(base, f, (P3::new(50.0, 0.0, 0.0), P3::new(50.0, 40.0, 0.0)));
-    b.hem(base, (P3::new(0.0, 0.0, 0.0), P3::new(50.0, 0.0, 0.0)), 8.0, true, HemAlignment::InPlace);
+    b.hem(
+        base,
+        (P3::new(0.0, 0.0, 0.0), P3::new(50.0, 0.0, 0.0)),
+        8.0,
+        true,
+        HemAlignment::InPlace,
+    );
     let m = ok(b.build());
-    let hem = m.joints.iter().find_map(|j| j.bend().filter(|b| b.hem)).unwrap();
+    let hem = m
+        .joints
+        .iter()
+        .find_map(|j| j.bend().filter(|b| b.hem))
+        .unwrap();
     assert!(close(hem.on_a.len(), 50.0 - OSSB), "{}", hem.on_a.len());
 }
 
@@ -760,13 +1004,18 @@ fn validate_checks_joints_along_their_whole_length() {
     use cadrs_sheetmetal::model::ModelErrorKind;
     let mut m = ok(samples::l_bracket(params(), true));
     // Stretch the bend's tangent line far past the base's edge (the flange keeps up).
-    let JointKind::Bend(b) = &mut m.joints[0].kind else { panic!() };
+    let JointKind::Bend(b) = &mut m.joints[0].kind else {
+        panic!()
+    };
     b.on_a.b.y += 30.0;
     b.on_b.b.y += 30.0;
     let errs = m.validate();
     assert_eq!(errs.len(), 1);
     assert_eq!(errs[0].kind, ModelErrorKind::NotOnEdge { second: false });
-    assert_eq!(errs[0].to_string(), "The joint doesn't run along its wall's edge");
+    assert_eq!(
+        errs[0].to_string(),
+        "The joint doesn't run along its wall's edge"
+    );
 }
 
 #[test]
@@ -774,14 +1023,27 @@ fn flat_outputs_have_exact_coordinates() {
     let m = ok(samples::open_box(params(), RipStyle::EdgeJoint));
     let part = one_part(&m);
     // Every outline vertex is a piece corner or a cut corner, to the last bit.
-    let exact: Vec<P2> = part.pieces.iter().flat_map(|p| p.polygon.outer.clone()).chain(part.cuts.iter().flat_map(|c| c.shapes.iter().flat_map(|s| s.outer.clone()))).collect();
+    let exact: Vec<P2> = part
+        .pieces
+        .iter()
+        .flat_map(|p| p.polygon.outer.clone())
+        .chain(
+            part.cuts
+                .iter()
+                .flat_map(|c| c.shapes.iter().flat_map(|s| s.outer.clone())),
+        )
+        .collect();
     for o in &part.outline {
         for v in &o.outer {
             assert!(exact.iter().any(|e| e == v), "{v:?} isn't exact");
         }
     }
     let (lo, _) = part.bounds().unwrap();
-    assert!((lo.x + (20.0 - 2.0 * OSSB + ba90())).abs() < 1e-12, "{}", lo.x);
+    assert!(
+        (lo.x + (20.0 - 2.0 * OSSB + ba90())).abs() < 1e-12,
+        "{}",
+        lo.x
+    );
 }
 
 #[test]
@@ -794,11 +1056,22 @@ fn negative_allowances_are_reported_as_such() {
     let mut b = SharpBuilder::new(p);
     let a = b.wall(P3::origin(), V3::x(), V3::y(), rect(50.0, 40.0));
     let theta = 10f64.to_radians();
-    let f = b.wall(P3::new(50.0, 0.0, 0.0), V3::new(theta.cos(), 0.0, theta.sin()), V3::y(), rect(30.0, 40.0));
+    let f = b.wall(
+        P3::new(50.0, 0.0, 0.0),
+        V3::new(theta.cos(), 0.0, theta.sin()),
+        V3::y(),
+        rect(30.0, 40.0),
+    );
     b.bend(a, f, (P3::new(50.0, 0.0, 0.0), P3::new(50.0, 40.0, 0.0)));
     let errs = flatten(&ok(b.build())).errors;
     assert!(
-        matches!(errs.as_slice(), [FlatError::BadJoint { problem: cadrs_sheetmetal::flat::JointProblem::NegativeAllowance { .. }, .. }]),
+        matches!(
+            errs.as_slice(),
+            [FlatError::BadJoint {
+                problem: cadrs_sheetmetal::flat::JointProblem::NegativeAllowance { .. },
+                ..
+            }]
+        ),
         "{errs:?}"
     );
 }
@@ -810,12 +1083,23 @@ fn validate_tolerance_isnt_widened_by_hems() {
     let base = b.wall(P3::origin(), V3::x(), V3::y(), rect(50.0, 40.0));
     let f = b.wall(P3::new(50.0, 0.0, 0.0), V3::z(), V3::y(), rect(30.0, 40.0));
     b.bend(base, f, (P3::new(50.0, 0.0, 0.0), P3::new(50.0, 40.0, 0.0)));
-    b.hem(base, (P3::new(0.0, 40.0, 0.0), P3::new(0.0, 0.0, 0.0)), 8.0, true, HemAlignment::InPlace);
+    b.hem(
+        base,
+        (P3::new(0.0, 40.0, 0.0), P3::new(0.0, 0.0, 0.0)),
+        8.0,
+        true,
+        HemAlignment::InPlace,
+    );
     let mut m = ok(b.build());
-    let JointKind::Bend(bend) = &mut m.joints[0].kind else { panic!() };
+    let JointKind::Bend(bend) = &mut m.joints[0].kind else {
+        panic!()
+    };
     bend.on_a.b.y += 30.0;
     bend.on_b.b.y += 30.0;
-    assert_eq!(m.validate().first().map(|e| e.kind), Some(ModelErrorKind::NotOnEdge { second: false }));
+    assert_eq!(
+        m.validate().first().map(|e| e.kind),
+        Some(ModelErrorKind::NotOnEdge { second: false })
+    );
 }
 
 #[test]
@@ -826,5 +1110,8 @@ fn the_table_shows_what_the_flat_uses_for_hems() {
         ..params()
     };
     let m = ok(samples::hem(p));
-    assert_eq!(table(&m).bends[0].value, Some(BendValue::Allowance(PI * (R + K * T))));
+    assert_eq!(
+        table(&m).bends[0].value,
+        Some(BendValue::Allowance(PI * (R + K * T)))
+    );
 }

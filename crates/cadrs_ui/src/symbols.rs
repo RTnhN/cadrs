@@ -18,7 +18,12 @@ pub struct SymbolsPlugin;
 
 impl Plugin for SymbolsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PostUpdate, (split_symbol_text, follow_root_style).chain().before(bevy::ui::UiSystems::Prepare));
+        app.add_systems(
+            PostUpdate,
+            (split_symbol_text, follow_root_style)
+                .chain()
+                .before(bevy::ui::UiSystems::Prepare),
+        );
     }
 }
 
@@ -45,14 +50,26 @@ pub fn runs(s: &str) -> Vec<(String, bool)> {
 
 #[allow(clippy::type_complexity)]
 fn split_symbol_text(
-    mut q: Query<(Entity, &mut Text, &TextFont, &TextColor, Option<&SymbolSource>, Option<&Children>), (Changed<Text>, Without<TextSpan>)>,
+    mut q: Query<
+        (
+            Entity,
+            &mut Text,
+            &TextFont,
+            &TextColor,
+            Option<&SymbolSource>,
+            Option<&Children>,
+        ),
+        (Changed<Text>, Without<TextSpan>),
+    >,
     q_spans: Query<(), With<SymbolSpan>>,
     mut commands: Commands,
 ) {
     for (e, mut text, font, color, source, children) in &mut q {
         // Our own write of the first run.
         if let Some(src) = source
-            && runs(&src.0).first().is_some_and(|(r, sym)| !sym && *r == text.0)
+            && runs(&src.0)
+                .first()
+                .is_some_and(|(r, sym)| !sym && *r == text.0)
         {
             continue;
         }
@@ -73,7 +90,11 @@ fn split_symbol_text(
         let full = text.0.clone();
         let mut parts = runs(&full);
         // The root keeps the first plain run (empty if the text starts with a symbol).
-        let first = if parts.first().is_some_and(|(_, sym)| !sym) { parts.remove(0).0 } else { String::new() };
+        let first = if parts.first().is_some_and(|(_, sym)| !sym) {
+            parts.remove(0).0
+        } else {
+            String::new()
+        };
         text.0 = first;
         commands.entity(e).insert(SymbolSource(full));
         for (run, sym) in parts {
@@ -90,7 +111,13 @@ fn split_symbol_text(
 /// The spans follow their text's colour and size (hover, selection, errors).
 #[allow(clippy::type_complexity)]
 fn follow_root_style(
-    q: Query<(&TextColor, &TextFont, &Children), (With<SymbolSource>, Or<(Changed<TextColor>, Changed<TextFont>)>)>,
+    q: Query<
+        (&TextColor, &TextFont, &Children),
+        (
+            With<SymbolSource>,
+            Or<(Changed<TextColor>, Changed<TextFont>)>,
+        ),
+    >,
     mut q_spans: Query<(&mut TextColor, &mut TextFont), (With<SymbolSpan>, Without<SymbolSource>)>,
 ) {
     for (color, font, children) in &q {

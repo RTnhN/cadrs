@@ -8,9 +8,21 @@ use image::{Rgba, RgbaImage};
 use crate::solid::Solid;
 
 /// The isometric view (Onshape's: from front, right and top).
-const RIGHT: [f64; 3] = [std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2, 0.0];
-const UP: [f64; 3] = [-0.408_248_290_463_863, 0.408_248_290_463_863, 0.816_496_580_927_726];
-const BACK: [f64; 3] = [0.577_350_269_189_626, -0.577_350_269_189_626, 0.577_350_269_189_626];
+const RIGHT: [f64; 3] = [
+    std::f64::consts::FRAC_1_SQRT_2,
+    std::f64::consts::FRAC_1_SQRT_2,
+    0.0,
+];
+const UP: [f64; 3] = [
+    -0.408_248_290_463_863,
+    0.408_248_290_463_863,
+    0.816_496_580_927_726,
+];
+const BACK: [f64; 3] = [
+    0.577_350_269_189_626,
+    -0.577_350_269_189_626,
+    0.577_350_269_189_626,
+];
 
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
@@ -41,15 +53,28 @@ pub fn render(solids: &[(&Solid, [u8; 3])], size: u32) -> RgbaImage {
     let (cx, cy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
     let to_px = |p: [f64; 3]| {
         let (x, y, z) = proj(p);
-        (n as f64 / 2.0 + (x - cx) * scale, n as f64 / 2.0 - (y - cy) * scale, z * scale)
+        (
+            n as f64 / 2.0 + (x - cx) * scale,
+            n as f64 / 2.0 - (y - cy) * scale,
+            z * scale,
+        )
     };
     let mut depth = vec![f64::MIN; n * n];
     let mut color = vec![[0f32; 4]; n * n];
     for (s, base) in solids {
         for tri in s.indices.chunks_exact(3) {
-            let v: Vec<(f64, f64, f64)> = tri.iter().map(|i| to_px(s.positions[*i as usize])).collect();
-            let nrm = s.normals.get(tri[0] as usize).copied().unwrap_or([0.0, 0.0, 1.0]);
-            let b = (0.705 + 0.146 * dot(nrm, RIGHT) + 0.185 * dot(nrm, UP) + 0.25 * dot(nrm, BACK)).clamp(0.3, 1.1);
+            let v: Vec<(f64, f64, f64)> = tri
+                .iter()
+                .map(|i| to_px(s.positions[*i as usize]))
+                .collect();
+            let nrm = s
+                .normals
+                .get(tri[0] as usize)
+                .copied()
+                .unwrap_or([0.0, 0.0, 1.0]);
+            let b =
+                (0.705 + 0.146 * dot(nrm, RIGHT) + 0.185 * dot(nrm, UP) + 0.25 * dot(nrm, BACK))
+                    .clamp(0.3, 1.1);
             let c = [
                 (base[0] as f64 / 255.0 * b).min(1.0) as f32,
                 (base[1] as f64 / 255.0 * b).min(1.0) as f32,
@@ -93,7 +118,11 @@ pub fn render(solids: &[(&Solid, [u8; 3])], size: u32) -> RgbaImage {
                 let steps = ((b.0 - a.0).abs().max((b.1 - a.1).abs()).ceil() as usize).max(1);
                 for i in 0..=steps {
                     let t = i as f64 / steps as f64;
-                    let (x, y, z) = (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t, a.2 + (b.2 - a.2) * t);
+                    let (x, y, z) = (
+                        a.0 + (b.0 - a.0) * t,
+                        a.1 + (b.1 - a.1) * t,
+                        a.2 + (b.2 - a.2) * t,
+                    );
                     if x < 0.0 || y < 0.0 || x >= n as f64 || y >= n as f64 {
                         continue;
                     }
@@ -124,7 +153,11 @@ pub fn render(solids: &[(&Solid, [u8; 3])], size: u32) -> RgbaImage {
             } else {
                 [0.0; 4]
             };
-            out.put_pixel(x, y, Rgba(px.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)));
+            out.put_pixel(
+                x,
+                y,
+                Rgba(px.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)),
+            );
         }
     }
     out
@@ -142,8 +175,16 @@ struct View {
 /// The two views of a standard content preview (A19.4, `lesson-standard-content.png`): along
 /// the fastener's axis (its Z, from the head side), and from the side with the axis horizontal,
 /// head on the left.
-const END_VIEW: View = View { right: [1.0, 0.0, 0.0], up: [0.0, 1.0, 0.0], back: [0.0, 0.0, 1.0] };
-const SIDE_VIEW: View = View { right: [0.0, 0.0, -1.0], up: [1.0, 0.0, 0.0], back: [0.0, -1.0, 0.0] };
+const END_VIEW: View = View {
+    right: [1.0, 0.0, 0.0],
+    up: [0.0, 1.0, 0.0],
+    back: [0.0, 0.0, 1.0],
+};
+const SIDE_VIEW: View = View {
+    right: [0.0, 0.0, -1.0],
+    up: [1.0, 0.0, 0.0],
+    back: [0.0, -1.0, 0.0],
+};
 
 /// A fastener's preview as a drawing (P3B.5 judge, `lesson-standard-content.png`): two
 /// orthographic line views side by side, the end view and the side view, at one scale, with
@@ -158,10 +199,13 @@ pub fn line_views(solid: &Solid, width: u32, height: u32) -> RgbaImage {
     let ext: Vec<(f64, f64, f64, f64)> = views
         .iter()
         .map(|v| {
-            solid.positions.iter().fold((f64::MAX, f64::MIN, f64::MAX, f64::MIN), |a, p| {
-                let (x, y, _) = proj(v, *p);
-                (a.0.min(x), a.1.max(x), a.2.min(y), a.3.max(y))
-            })
+            solid
+                .positions
+                .iter()
+                .fold((f64::MAX, f64::MIN, f64::MAX, f64::MIN), |a, p| {
+                    let (x, y, _) = proj(v, *p);
+                    (a.0.min(x), a.1.max(x), a.2.min(y), a.3.max(y))
+                })
         })
         .collect();
     let mut out = RgbaImage::from_pixel(width, height, Rgba([0, 0, 0, 0]));
@@ -171,8 +215,12 @@ pub fn line_views(solid: &Solid, width: u32, height: u32) -> RgbaImage {
     let margin = 0.08 * nh as f64;
     let gap = 0.12 * nw as f64;
     let total_w: f64 = ext.iter().map(|e| (e.1 - e.0).max(1e-9)).sum();
-    let max_h = ext.iter().map(|e| (e.3 - e.2).max(1e-9)).fold(0.0, f64::max);
-    let scale = ((nw as f64 - 2.0 * margin - gap) / total_w).min((nh as f64 - 2.0 * margin) / max_h);
+    let max_h = ext
+        .iter()
+        .map(|e| (e.3 - e.2).max(1e-9))
+        .fold(0.0, f64::max);
+    let scale =
+        ((nw as f64 - 2.0 * margin - gap) / total_w).min((nh as f64 - 2.0 * margin) / max_h);
     let used = total_w * scale + gap;
     let mut left = (nw as f64 - used) / 2.0;
     let mut ink = vec![0f32; nw * nh];
@@ -181,12 +229,19 @@ pub fn line_views(solid: &Solid, width: u32, height: u32) -> RgbaImage {
         let x0 = left;
         let to_px = |p: [f64; 3]| {
             let (x, y, z) = proj(v, p);
-            (x0 + (x - e.0) * scale, nh as f64 / 2.0 - (y - cy) * scale, z * scale)
+            (
+                x0 + (x - e.0) * scale,
+                nh as f64 / 2.0 - (y - cy) * scale,
+                z * scale,
+            )
         };
         // The faces' depth.
         let mut depth = vec![f64::MIN; nw * nh];
         for tri in solid.indices.chunks_exact(3) {
-            let t: Vec<(f64, f64, f64)> = tri.iter().map(|i| to_px(solid.positions[*i as usize])).collect();
+            let t: Vec<(f64, f64, f64)> = tri
+                .iter()
+                .map(|i| to_px(solid.positions[*i as usize]))
+                .collect();
             let (a, b, c) = (t[0], t[1], t[2]);
             let area = (b.0 - a.0) * (c.1 - a.1) - (c.0 - a.0) * (b.1 - a.1);
             if area.abs() < 1e-12 {
@@ -228,17 +283,29 @@ pub fn line_views(solid: &Solid, width: u32, height: u32) -> RgbaImage {
                 continue;
             }
             let t = s0 / (s0 - s1);
-            let lerp = |a: [f64; 3], b: [f64; 3]| [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+            let lerp = |a: [f64; 3], b: [f64; 3]| {
+                [
+                    a[0] + (b[0] - a[0]) * t,
+                    a[1] + (b[1] - a[1]) * t,
+                    a[2] + (b[2] - a[2]) * t,
+                ]
+            };
             lines.push((lerp(r0.start, r1.start), lerp(r0.end, r1.end)));
         }
         let tol = 0.015 * nh as f64;
         let half = ss as f64 * 0.55;
         for (p, q) in lines {
             let (a, b) = (to_px(p), to_px(q));
-            let steps = ((b.0 - a.0).abs().max((b.1 - a.1).abs()) * 2.0).ceil().max(1.0) as usize;
+            let steps = ((b.0 - a.0).abs().max((b.1 - a.1).abs()) * 2.0)
+                .ceil()
+                .max(1.0) as usize;
             for i in 0..=steps {
                 let t = i as f64 / steps as f64;
-                let (x, y, z) = (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t, a.2 + (b.2 - a.2) * t);
+                let (x, y, z) = (
+                    a.0 + (b.0 - a.0) * t,
+                    a.1 + (b.1 - a.1) * t,
+                    a.2 + (b.2 - a.2) * t,
+                );
                 // Visible: not behind a face (the faces it bounds are at its depth).
                 let (xi, yi) = (x as isize, y as isize);
                 let r = half.ceil() as isize;
@@ -260,8 +327,14 @@ pub fn line_views(solid: &Solid, width: u32, height: u32) -> RgbaImage {
                 for dy in -r..=r {
                     for dx in -r..=r {
                         let (px, py) = (xi + dx, yi + dy);
-                        let d = ((px as f64 + 0.5 - x).powi(2) + (py as f64 + 0.5 - y).powi(2)).sqrt();
-                        if d <= half && px >= 0 && py >= 0 && (px as usize) < nw && (py as usize) < nh {
+                        let d =
+                            ((px as f64 + 0.5 - x).powi(2) + (py as f64 + 0.5 - y).powi(2)).sqrt();
+                        if d <= half
+                            && px >= 0
+                            && py >= 0
+                            && (px as usize) < nw
+                            && (py as usize) < nh
+                        {
                             ink[py as usize * nw + px as usize] = 1.0;
                         }
                     }
@@ -279,7 +352,11 @@ pub fn line_views(solid: &Solid, width: u32, height: u32) -> RgbaImage {
                 }
             }
             let a = a / (ss * ss) as f32;
-            out.put_pixel(x as u32, y as u32, Rgba([0x30, 0x33, 0x38, (a.clamp(0.0, 1.0) * 255.0).round() as u8]));
+            out.put_pixel(
+                x as u32,
+                y as u32,
+                Rgba([0x30, 0x33, 0x38, (a.clamp(0.0, 1.0) * 255.0).round() as u8]),
+            );
         }
     }
     out

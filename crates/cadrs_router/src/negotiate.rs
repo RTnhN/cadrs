@@ -55,7 +55,10 @@ pub fn disc(r: Nm, pitch: Nm) -> Vec<(i32, i32)> {
 pub fn claim(grid: &Grid, job: &Job, route: &NetRoute) -> Vec<u32> {
     let p = &grid.params;
     let track = disc(job.width + job.clearance + grid.pitch / 2, grid.pitch);
-    let via = disc(job.via / 2 + job.width.max(job.via) / 2 + job.clearance + grid.pitch / 2, grid.pitch);
+    let via = disc(
+        job.via / 2 + job.width.max(job.via) / 2 + job.clearance + grid.pitch / 2,
+        grid.pitch,
+    );
     let mut out = vec![];
     let put = |x: u32, y: u32, l: u32, d: &[(i32, i32)], out: &mut Vec<u32>| {
         for (dx, dy) in d {
@@ -104,7 +107,9 @@ pub fn copper_cells(grid: &Grid, route: &NetRoute) -> Vec<u32> {
 /// yet reached.
 pub fn route_net(search: &mut Searcher, costs: &Costs, job: &Job) -> NetRoute {
     let mut route = NetRoute::default();
-    let Some((first, rest)) = job.groups.split_first() else { return route };
+    let Some((first, rest)) = job.groups.split_first() else {
+        return route;
+    };
     let mut tree: Vec<u32> = first.clone();
     let mut left: Vec<&Vec<u32>> = rest.iter().collect();
     while !left.is_empty() {
@@ -150,7 +155,16 @@ impl<'a> Negotiation<'a> {
     pub fn new(grid: &'a Grid, jobs: Vec<Job>, pricing: &Pricing) -> Negotiation<'a> {
         let n = grid.params.cells() as usize;
         let k = jobs.len();
-        Negotiation { grid, jobs, routes: vec![NetRoute::default(); k], claims: vec![vec![]; k], occ: vec![0; n], hist: vec![0; n], present: pricing.present, passes: 0 }
+        Negotiation {
+            grid,
+            jobs,
+            routes: vec![NetRoute::default(); k],
+            claims: vec![vec![]; k],
+            occ: vec![0; n],
+            hist: vec![0; n],
+            present: pricing.present,
+            passes: 0,
+        }
     }
 
     /// Takes job `j`'s route off the board (its claim no longer counts).
@@ -173,7 +187,12 @@ impl<'a> Negotiation<'a> {
     }
 
     pub fn costs(&self) -> Costs<'_> {
-        Costs { grid: self.grid, occ: &self.occ, hist: &self.hist, present: self.present }
+        Costs {
+            grid: self.grid,
+            occ: &self.occ,
+            hist: &self.hist,
+            present: self.present,
+        }
     }
 
     /// The jobs in conflict (their copper on ground another claims), and the cells fought over.
@@ -208,23 +227,58 @@ impl<'a> Negotiation<'a> {
         loop {
             let over = |neg: &Self, j: usize, cells: Vec<u32>| {
                 let mine = &neg.claims[j];
-                cells.into_iter().filter(|&c| neg.occ[c as usize] > u16::from(mine.binary_search(&c).is_ok())).count()
+                cells
+                    .into_iter()
+                    .filter(|&c| neg.occ[c as usize] > u16::from(mine.binary_search(&c).is_ok()))
+                    .count()
             };
             let worst = (0..self.routes.len())
-                .map(|j| (over(self, j, copper_cells(self.grid, &self.routes[j])), std::cmp::Reverse(j)))
+                .map(|j| {
+                    (
+                        over(self, j, copper_cells(self.grid, &self.routes[j])),
+                        std::cmp::Reverse(j),
+                    )
+                })
                 .filter(|(n, _)| *n > 0)
                 .max();
-            let Some((_, std::cmp::Reverse(j))) = worst else { return out };
+            let Some((_, std::cmp::Reverse(j))) = worst else {
+                return out;
+            };
             let route = self.routes[j].clone();
             // Its connections in conflict, and those starting on one of them.
-            let mut gone: Vec<bool> = route.paths.iter().map(|p| over(self, j, copper_cells(self.grid, &NetRoute { paths: vec![p.clone()], missing: 0 })) > 0).collect();
+            let mut gone: Vec<bool> = route
+                .paths
+                .iter()
+                .map(|p| {
+                    over(
+                        self,
+                        j,
+                        copper_cells(
+                            self.grid,
+                            &NetRoute {
+                                paths: vec![p.clone()],
+                                missing: 0,
+                            },
+                        ),
+                    ) > 0
+                })
+                .collect();
             for k in 0..route.paths.len() {
                 let start = route.paths[k][0];
                 if !gone[k] && (0..k).any(|i| gone[i] && route.paths[i].contains(&start)) {
                     gone[k] = true;
                 }
             }
-            let kept = NetRoute { paths: route.paths.iter().zip(&gone).filter(|(_, g)| !**g).map(|(p, _)| p.clone()).collect(), missing: route.missing + gone.iter().filter(|g| **g).count() };
+            let kept = NetRoute {
+                paths: route
+                    .paths
+                    .iter()
+                    .zip(&gone)
+                    .filter(|(_, g)| !**g)
+                    .map(|(p, _)| p.clone())
+                    .collect(),
+                missing: route.missing + gone.iter().filter(|g| **g).count(),
+            };
             self.rip(j);
             self.put(j, kept);
             if !out.contains(&j) {
@@ -238,7 +292,8 @@ impl<'a> Negotiation<'a> {
         for &c in cells {
             self.hist[c as usize] = self.hist[c as usize].saturating_add(pricing.history);
         }
-        self.present = (self.present as u64 * pricing.growth as u64 / 100).min(u32::MAX as u64 / 4) as u32;
+        self.present =
+            (self.present as u64 * pricing.growth as u64 / 100).min(u32::MAX as u64 / 4) as u32;
     }
 
     /// The CPU passes: route every net, then reroute those in conflict until none is (or the
@@ -257,7 +312,14 @@ impl<'a> Negotiation<'a> {
             }
             let (nets, cells) = self.conflicts();
             if trace {
-                eprintln!("router: pass {} routed {} nets in {:.2} s, {} in conflict over {} cells", pass + 1, todo.len(), t.elapsed().as_secs_f64(), nets.len(), cells.len());
+                eprintln!(
+                    "router: pass {} routed {} nets in {:.2} s, {} in conflict over {} cells",
+                    pass + 1,
+                    todo.len(),
+                    t.elapsed().as_secs_f64(),
+                    nets.len(),
+                    cells.len()
+                );
             }
             if nets.is_empty() {
                 return vec![];

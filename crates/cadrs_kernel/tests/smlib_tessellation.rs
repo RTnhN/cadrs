@@ -13,12 +13,12 @@ use smlib_common::*;
 
 use rayon::prelude::*;
 
+use cadrs_kernel::native::NativeKernel;
 use cadrs_kernel::native::math::P3;
 use cadrs_kernel::native::surface::Surface;
 use cadrs_kernel::native::surfacing;
 use cadrs_kernel::native::tess;
 use cadrs_kernel::native::topo::Body;
-use cadrs_kernel::native::NativeKernel;
 
 const SUITE: &str = "tessellation";
 
@@ -53,7 +53,15 @@ fn dist(s: &Surface, p: &P3, hint: (f64, f64)) -> f64 {
 /// SMLib's `my_test_one_tess` on `file` (sewn first at `sew` tolerances, as SMLib's stitching
 /// example) with its driver parameters (chord, angle in degrees, maximum edge and aspect, 0 for
 /// none), checked against SMLib's mesh volume `volume`.
-fn tess(file: &str, sew: &[f64], chord: f64, angle_deg: f64, max_edge: f64, max_aspect: f64, volume: Option<f64>) -> Result<(), String> {
+fn tess(
+    file: &str,
+    sew: &[f64],
+    chord: f64,
+    angle_deg: f64,
+    max_edge: f64,
+    max_aspect: f64,
+    volume: Option<f64>,
+) -> Result<(), String> {
     let mut body: Body = model(SUITE, file)?.body;
     if let Some((last, first)) = sew.split_last() {
         for &t in first {
@@ -66,7 +74,9 @@ fn tess(file: &str, sew: &[f64], chord: f64, angle_deg: f64, max_edge: f64, max_
         body = (**k.get(r.bodies[0]).map_err(|e| format!("{e:?}"))?).clone();
     }
     let defl = if chord > 0.0 { chord } else { ANGLE_ONLY_CHORD };
-    let params = tess::TessParams::new(defl, angle_deg.to_radians()).and_then(|p| p.with_limits(max_edge, max_aspect)).map_err(|e| e.to_string())?;
+    let params = tess::TessParams::new(defl, angle_deg.to_radians())
+        .and_then(|p| p.with_limits(max_edge, max_aspect))
+        .map_err(|e| e.to_string())?;
     let t = std::time::Instant::now();
     let (faces, _) = tess::mesh(&body, &params).map_err(|e| e.to_string())?;
     let elapsed = t.elapsed();
@@ -75,7 +85,10 @@ fn tess(file: &str, sew: &[f64], chord: f64, angle_deg: f64, max_edge: f64, max_
     }
     let check = tess::check_faces(&faces);
     if !check.is_watertight() {
-        return Err(format!("not watertight: of {} mesh edges {} are open and {} have more than two triangles or two the same way round", check.edges, check.open, check.bad));
+        return Err(format!(
+            "not watertight: of {} mesh edges {} are open and {} have more than two triangles or two the same way round",
+            check.edges, check.open, check.bad
+        ));
     }
     // Per face: volume, area, deviation from the surface, longest side, worst aspect ratio.
     let per: Vec<[f64; 5]> = faces
@@ -92,10 +105,22 @@ fn tess(file: &str, sew: &[f64], chord: f64, angle_deg: f64, max_edge: f64, max_
                 let area = (b - a).cross(&(c - a)).norm() / 2.0;
                 r[1] += area;
                 // From each corner's (u, v) (a pole's is one of many), the nearest.
-                for p in [P3::from((a.coords + b.coords + c.coords) / 3.0), nalgebra::center(&a, &b), nalgebra::center(&b, &c), nalgebra::center(&c, &a)] {
-                    r[2] = r[2].max([ia, ib, ic].map(|h| dist(s, &p, uv[h])).into_iter().fold(f64::INFINITY, f64::min));
+                for p in [
+                    P3::from((a.coords + b.coords + c.coords) / 3.0),
+                    nalgebra::center(&a, &b),
+                    nalgebra::center(&b, &c),
+                    nalgebra::center(&c, &a),
+                ] {
+                    r[2] = r[2].max(
+                        [ia, ib, ic]
+                            .map(|h| dist(s, &p, uv[h]))
+                            .into_iter()
+                            .fold(f64::INFINITY, f64::min),
+                    );
                 }
-                let l = [(b - a).norm(), (c - b).norm(), (a - c).norm()].into_iter().fold(0.0, f64::max);
+                let l = [(b - a).norm(), (c - b).norm(), (a - c).norm()]
+                    .into_iter()
+                    .fold(0.0, f64::max);
                 r[3] = r[3].max(l);
                 if area > 0.0 {
                     r[4] = r[4].max(l * l / (2.0 * area));
@@ -108,17 +133,25 @@ fn tess(file: &str, sew: &[f64], chord: f64, angle_deg: f64, max_edge: f64, max_
     let area: f64 = per.iter().map(|r| r[1]).sum();
     let [dev, longest, aspect] = [2, 3, 4].map(|k| per.iter().map(|r| r[k]).fold(0.0, f64::max));
     let tris: usize = faces.iter().map(|m| m.indices.len()).sum();
-    eprintln!("{file}: {tris} triangles in {elapsed:?}, deviation {dev:.3e}, longest side {longest:.3}, worst aspect ratio {aspect:.1}");
+    eprintln!(
+        "{file}: {tris} triangles in {elapsed:?}, deviation {dev:.3e}, longest side {longest:.3}, worst aspect ratio {aspect:.1}"
+    );
     if dev > defl * (1.0 + 1e-6) + 1e-9 {
-        return Err(format!("the mesh is {dev:.3e} off the surfaces, the chord tolerance is {defl}"));
+        return Err(format!(
+            "the mesh is {dev:.3e} off the surfaces, the chord tolerance is {defl}"
+        ));
     }
     if max_edge > 0.0 && longest > max_edge * (1.0 + 1e-9) {
-        return Err(format!("a triangle side is {longest:.4} long, the maximum edge is {max_edge}"));
+        return Err(format!(
+            "a triangle side is {longest:.4} long, the maximum edge is {max_edge}"
+        ));
     }
     if let Some(v) = volume {
         let tol = 2.0 * dev.max(defl) * area;
         if (vol - v).abs() > tol {
-            return Err(format!("mesh volume {vol:.6}, SMLib's mesh {v:.6} (tolerance {tol:.3e})"));
+            return Err(format!(
+                "mesh volume {vol:.6}, SMLib's mesh {v:.6} (tolerance {tol:.3e})"
+            ));
         }
     }
     Ok(())
@@ -127,29 +160,74 @@ fn tess(file: &str, sew: &[f64], chord: f64, angle_deg: f64, max_edge: f64, max_
 /// SMLib tessellation 1: `nurb_fillet.smb`, chord 0, angle 30°, max edge 0, max aspect 0 (SMLib: no failed faces, mesh volume 1208.6). Chord 0 (angle only) meshes at 0.1 mm.
 #[test]
 fn tess_1_nurb_fillet() {
-    tess("nurb_fillet.smb", &[], 0.0, 30.0, 0.0, 0.0, Some(1208.59858942)).unwrap();
+    tess(
+        "nurb_fillet.smb",
+        &[],
+        0.0,
+        30.0,
+        0.0,
+        0.0,
+        Some(1208.59858942),
+    )
+    .unwrap();
 }
 
 /// SMLib tessellation 2: `nurb_fillet.smb`, chord 0.2, angle 30°, max edge 0, max aspect 0 (SMLib: no failed faces, mesh volume 1212.43).
 #[test]
 fn tess_2_nurb_fillet() {
-    tess("nurb_fillet.smb", &[], 0.2, 30.0, 0.0, 0.0, Some(1212.43295671)).unwrap();
+    tess(
+        "nurb_fillet.smb",
+        &[],
+        0.2,
+        30.0,
+        0.0,
+        0.0,
+        Some(1212.43295671),
+    )
+    .unwrap();
 }
 
 /// SMLib tessellation 3: `nurb_fillet.smb`, chord 0, angle 30°, max edge 3, max aspect 0 (SMLib: no failed faces, mesh volume 1209.47). Chord 0 (angle only) meshes at 0.1 mm.
 #[test]
 fn tess_3_nurb_fillet() {
-    tess("nurb_fillet.smb", &[], 0.0, 30.0, 3.0, 0.0, Some(1209.47013398)).unwrap();
+    tess(
+        "nurb_fillet.smb",
+        &[],
+        0.0,
+        30.0,
+        3.0,
+        0.0,
+        Some(1209.47013398),
+    )
+    .unwrap();
 }
 
 /// SMLib tessellation 4: `nurb_fillet.smb`, chord 0, angle 30°, max edge 0, max aspect 3 (SMLib: no failed faces, mesh volume 1208.48). Chord 0 (angle only) meshes at 0.1 mm.
 #[test]
 fn tess_4_nurb_fillet() {
-    tess("nurb_fillet.smb", &[], 0.0, 30.0, 0.0, 3.0, Some(1208.47672853)).unwrap();
+    tess(
+        "nurb_fillet.smb",
+        &[],
+        0.0,
+        30.0,
+        0.0,
+        3.0,
+        Some(1208.47672853),
+    )
+    .unwrap();
 }
 
 /// SMLib tessellation example: `fillet_ts.smb` stitched at 0.001 then 0.005 (`surfacing::sew_faces`), chord 0.6, angle 40°, max edge 4 and aspect 4; SMLib asserts no failed faces, its mesh volume (unstitched) 905.154.
 #[test]
 fn tess_stitched_fillet_ts() {
-    tess("fillet_ts.smb", &[0.001, 0.005], 0.6, 40.0, 4.0, 4.0, Some(905.154091053)).unwrap();
+    tess(
+        "fillet_ts.smb",
+        &[0.001, 0.005],
+        0.6,
+        40.0,
+        4.0,
+        4.0,
+        Some(905.154091053),
+    )
+    .unwrap();
 }

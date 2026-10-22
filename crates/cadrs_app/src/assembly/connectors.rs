@@ -11,7 +11,9 @@
 use bevy::camera::visibility::RenderLayers;
 use bevy::gizmos::config::GizmoLineJoint;
 use bevy::prelude::*;
-use cadrs_core::assembly::connector::{ConnectorFrame, EntityRef, ImplicitConnector, implicit_points};
+use cadrs_core::assembly::connector::{
+    ConnectorFrame, EntityRef, ImplicitConnector, implicit_points,
+};
 use cadrs_core::assembly::{InstanceId, Pose};
 
 use crate::ActiveDocument;
@@ -93,7 +95,12 @@ pub fn entity_points(
     let pose = parts.preview.get(&instance).copied().unwrap_or(pose);
     let build = parts.build(&doc.doc, element)?;
     let solid = build.part(part)?.solid.clone();
-    Some(EntityPoints { instance, entity, pose, points: implicit_points(&solid, &entity) })
+    Some(EntityPoints {
+        instance,
+        entity,
+        pose,
+        points: implicit_points(&solid, &entity),
+    })
 }
 
 /// Draws the dots of `points` and, at `glyph`, a connector glyph.
@@ -106,21 +113,37 @@ pub fn draw_points(
     let rot = Quat::from_rotation_arc(Vec3::Z, view.back());
     let s = view.scale;
     for p in points {
-        halo.circle(Isometry3d::new(*p, rot), 3.4 * s, Color::srgb_u8(0x22, 0x26, 0x2b)).resolution(16);
+        halo.circle(
+            Isometry3d::new(*p, rot),
+            3.4 * s,
+            Color::srgb_u8(0x22, 0x26, 0x2b),
+        )
+        .resolution(16);
         for r in [0.6, 1.3, 2.0, 2.7] {
-            line.circle(Isometry3d::new(*p, rot), r * s, Color::WHITE).resolution(14);
+            line.circle(Isometry3d::new(*p, rot), r * s, Color::WHITE)
+                .resolution(14);
         }
     }
 }
 
 /// Onshape's connector glyph: a small triad (X red, Y green, Z blue) with a ring about Z.
-pub fn draw_glyph(line: &mut Gizmos<ConnectorGizmos>, halo: &mut Gizmos<ConnectorHaloGizmos>, view: &ViewState, f: &ConnectorFrame, ring: Color) {
+pub fn draw_glyph(
+    line: &mut Gizmos<ConnectorGizmos>,
+    halo: &mut Gizmos<ConnectorHaloGizmos>,
+    view: &ViewState,
+    f: &ConnectorFrame,
+    ring: Color,
+) {
     let s = view.scale;
     let o = v3(f.origin);
     let (x, z) = (v3(f.x).normalize_or_zero(), v3(f.z).normalize_or_zero());
     let y = z.cross(x);
     let len = 17.0 * s;
-    for (a, c) in [(x, Color::srgb_u8(0xe0, 0x2a, 0x2a)), (y, Color::srgb_u8(0x1f, 0xa8, 0x3c)), (z, Color::srgb_u8(0x22, 0x55, 0xe0))] {
+    for (a, c) in [
+        (x, Color::srgb_u8(0xe0, 0x2a, 0x2a)),
+        (y, Color::srgb_u8(0x1f, 0xa8, 0x3c)),
+        (z, Color::srgb_u8(0x22, 0x55, 0xe0)),
+    ] {
         halo.line(o, o + a * len, Color::srgba(1.0, 1.0, 1.0, 0.9));
         line.line(o, o + a * len, c);
     }

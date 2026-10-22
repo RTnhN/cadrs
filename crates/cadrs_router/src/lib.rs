@@ -78,7 +78,15 @@ pub struct Options {
 
 impl Default for Options {
     fn default() -> Self {
-        Options { pitch: mm(0.1), via_cost: 80, directions: Directions::Any, wrong_way: 30, passes: 40, backend: Backend::Auto, nets: vec![] }
+        Options {
+            pitch: mm(0.1),
+            via_cost: 80,
+            directions: Directions::Any,
+            wrong_way: 30,
+            passes: 40,
+            backend: Backend::Auto,
+            nets: vec![],
+        }
     }
 }
 
@@ -108,7 +116,10 @@ pub fn jobs(board: &Board, grid: &Grid, nets: &[String]) -> (Vec<Job>, Vec<Strin
             continue;
         }
         let mine: Vec<copper::Copper> = items.iter().filter(|c| &c.net == name).cloned().collect();
-        let groups: Vec<Vec<usize>> = copper::islands(&mine).into_iter().filter(|g| g.iter().any(|&i| copper::needs_connection(board, &mine[i]))).collect();
+        let groups: Vec<Vec<usize>> = copper::islands(&mine)
+            .into_iter()
+            .filter(|g| g.iter().any(|&i| copper::needs_connection(board, &mine[i])))
+            .collect();
         if groups.len() < 2 {
             continue;
         }
@@ -119,8 +130,15 @@ pub fn jobs(board: &Board, grid: &Grid, nets: &[String]) -> (Vec<Job>, Vec<Strin
             for &i in g {
                 let c = &mine[i];
                 for (l, r) in &c.layers {
-                    let Some(li) = grid.layer_index(*l) else { continue };
-                    let on: Vec<u32> = grid.cells_in(r).into_iter().map(|(x, y)| grid.params.index(x, y, li as u32)).filter(|&cell| usable(grid, net, cell)).collect();
+                    let Some(li) = grid.layer_index(*l) else {
+                        continue;
+                    };
+                    let on: Vec<u32> = grid
+                        .cells_in(r)
+                        .into_iter()
+                        .map(|(x, y)| grid.params.index(x, y, li as u32))
+                        .filter(|&cell| usable(grid, net, cell))
+                        .collect();
                     // A pad smaller than a cell: the usable cells nearest its anchor.
                     if on.is_empty() && matches!(c.item, Item::Pad(..)) {
                         cells.extend(near_anchor(grid, net, li as u32, &c.anchors));
@@ -141,7 +159,13 @@ pub fn jobs(board: &Board, grid: &Grid, nets: &[String]) -> (Vec<Job>, Vec<Strin
             continue;
         }
         let class = board.rules.class_of(name);
-        jobs.push(Job { net, width: class.track_width.max(board.rules.min_track_width), via: class.via_diameter, clearance: grid.sizes.clearance, groups: terminals });
+        jobs.push(Job {
+            net,
+            width: class.track_width.max(board.rules.min_track_width),
+            via: class.via_diameter,
+            clearance: grid.sizes.clearance,
+            groups: terminals,
+        });
     }
     // Short nets first (they have the fewest ways round), then by name: the same order always.
     let span = |j: &Job| {
@@ -162,7 +186,9 @@ fn near_anchor(grid: &Grid, net: u32, l: u32, anchors: &[cadrs_eda::units::Pt]) 
     let p = &grid.params;
     let mut out = vec![];
     for a in anchors {
-        let Some((cx, cy)) = grid.cell_at(*a) else { continue };
+        let Some((cx, cy)) = grid.cell_at(*a) else {
+            continue;
+        };
         for r in 0..4i32 {
             for dy in -r..=r {
                 for dx in -r..=r {
@@ -211,7 +237,12 @@ pub fn tune(grid: &mut Grid, opts: &Options) {
 
 /// How contested ground is priced pass by pass.
 pub fn pricing(opts: &Options) -> Pricing {
-    Pricing { present: 20, growth: 160, history: 30, passes: opts.passes }
+    Pricing {
+        present: 20,
+        growth: 160,
+        history: 30,
+        passes: opts.passes,
+    }
 }
 
 /// Routes the board's unconnected nets (or `opts.nets`). The board is not changed: put the
@@ -225,7 +256,16 @@ pub fn route(board: &Board, opts: &Options) -> Outcome {
     let (jobs, cut_off) = jobs(board, &grid, &opts.nets);
     if trace {
         let p = &grid.params;
-        eprintln!("router: grid {}x{}x{} ({} cells) in {:.2} s, {} nets to route (jobs in {:.2} s)", p.nx, p.ny, p.nl, p.cells(), t_grid.as_secs_f64(), jobs.len(), (t0.elapsed() - t_grid).as_secs_f64());
+        eprintln!(
+            "router: grid {}x{}x{} ({} cells) in {:.2} s, {} nets to route (jobs in {:.2} s)",
+            p.nx,
+            p.ny,
+            p.nl,
+            p.cells(),
+            t_grid.as_secs_f64(),
+            jobs.len(),
+            (t0.elapsed() - t_grid).as_secs_f64()
+        );
     }
     let pricing = pricing(opts);
     let mut neg = Negotiation::new(&grid, jobs, &pricing);
@@ -236,7 +276,9 @@ pub fn route(board: &Board, opts: &Options) -> Outcome {
     let gpu = match opts.backend {
         Backend::Cpu => None,
         Backend::Auto if neg.jobs.len() < GPU_FROM => None,
-        _ => gpu::Gpu::shared().ok().filter(|g| g.slots(grid.params.cells()) > 0),
+        _ => gpu::Gpu::shared()
+            .ok()
+            .filter(|g| g.slots(grid.params.cells()) > 0),
     };
     #[cfg(not(feature = "gpu"))]
     let gpu: Option<()> = None;
@@ -251,7 +293,12 @@ pub fn route(board: &Board, opts: &Options) -> Outcome {
     out.passes = neg.passes;
     smooth::all(&mut neg);
     if trace {
-        eprintln!("router: {} passes, {} stuck, {:.2} s in all", neg.passes, stuck.len(), t0.elapsed().as_secs_f64());
+        eprintln!(
+            "router: {} passes, {} stuck, {:.2} s in all",
+            neg.passes,
+            stuck.len(),
+            t0.elapsed().as_secs_f64()
+        );
     }
     let drill = |net: &str| board.rules.class_of(net).via_drill;
     for (j, job) in neg.jobs.iter().enumerate() {

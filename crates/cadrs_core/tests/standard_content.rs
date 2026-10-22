@@ -5,12 +5,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use cadrs_core::assembly::mate::MateType;
+use cadrs_core::assembly::solver::SolveOptions;
 use cadrs_core::assembly::standard::{
-    self, EditStandardContent, HoleSite, Kind, LibUnit, PART, StandardPart, StandardSpec, Stacking, auto_size, library, plan_insert, same_configuration, site_of_edge, sites_of_face,
+    self, EditStandardContent, HoleSite, Kind, LibUnit, PART, Stacking, StandardPart, StandardSpec,
+    auto_size, library, plan_insert, same_configuration, site_of_edge, sites_of_face,
 };
 use cadrs_core::assembly::structure::{occurrences, solver_model};
-use cadrs_core::assembly::solver::SolveOptions;
-use cadrs_core::assembly::mate::MateType;
 use cadrs_core::assembly::{self, InstanceId};
 use cadrs_core::rebuild::Build;
 use cadrs_core::samples::pneumatic_ex2 as ex2;
@@ -42,7 +43,13 @@ const ANSI_HEX: &[(&str, &str, f64, f64, f64, f64)] = &[
 ];
 
 /// ASME B18.6.3-2013 Table 17, slotted pan head: (size, A max, H max), inch.
-const PAN_HEAD: &[(&str, f64, f64)] = &[("#4", 0.219, 0.068), ("#6", 0.270, 0.082), ("#8", 0.322, 0.096), ("#10", 0.373, 0.110), ("1/4", 0.492, 0.144)];
+const PAN_HEAD: &[(&str, f64, f64)] = &[
+    ("#4", 0.219, 0.068),
+    ("#6", 0.270, 0.082),
+    ("#8", 0.322, 0.096),
+    ("#10", 0.373, 0.110),
+    ("1/4", 0.492, 0.144),
+];
 
 /// ASME B18.22.1 Table 1A, Type A plain washers: (size, ID, OD, t), inch.
 const ANSI_WASHER: &[(&str, f64, f64, f64)] = &[
@@ -69,8 +76,26 @@ const ISO_4762: &[(&str, f64, f64, f64)] = &[
     ("M12", 18.0, 12.0, 10.0),
     ("M16", 24.0, 16.0, 14.0),
 ];
-const ISO_4032: &[(&str, f64, f64)] = &[("M3", 5.5, 2.4), ("M4", 7.0, 3.2), ("M5", 8.0, 4.7), ("M6", 10.0, 5.2), ("M8", 13.0, 6.8), ("M10", 16.0, 8.4), ("M12", 18.0, 10.8), ("M16", 24.0, 14.8)];
-const ISO_4035: &[(&str, f64, f64)] = &[("M3", 5.5, 1.8), ("M4", 7.0, 2.2), ("M5", 8.0, 2.7), ("M6", 10.0, 3.2), ("M8", 13.0, 4.0), ("M10", 16.0, 5.0), ("M12", 18.0, 6.0), ("M16", 24.0, 8.0)];
+const ISO_4032: &[(&str, f64, f64)] = &[
+    ("M3", 5.5, 2.4),
+    ("M4", 7.0, 3.2),
+    ("M5", 8.0, 4.7),
+    ("M6", 10.0, 5.2),
+    ("M8", 13.0, 6.8),
+    ("M10", 16.0, 8.4),
+    ("M12", 18.0, 10.8),
+    ("M16", 24.0, 14.8),
+];
+const ISO_4035: &[(&str, f64, f64)] = &[
+    ("M3", 5.5, 1.8),
+    ("M4", 7.0, 2.2),
+    ("M5", 8.0, 2.7),
+    ("M6", 10.0, 3.2),
+    ("M8", 13.0, 4.0),
+    ("M10", 16.0, 5.0),
+    ("M12", 18.0, 6.0),
+    ("M16", 24.0, 8.0),
+];
 const ISO_7089: &[(&str, f64, f64, f64)] = &[
     ("3", 3.2, 7.0, 0.5),
     ("4", 4.3, 9.0, 0.8),
@@ -83,7 +108,10 @@ const ISO_7089: &[(&str, f64, f64, f64)] = &[
 ];
 
 fn near(what: &str, got: f64, want: f64, tol: f64) {
-    assert!((got - want).abs() <= tol, "{what}: got {got}, want {want} (±{tol})");
+    assert!(
+        (got - want).abs() <= tol,
+        "{what}: got {got}, want {want} (±{tol})"
+    );
 }
 
 /// The nominal part of a size ("1/4-28" → "1/4", "#10-24" → "#10", "M6" → "M6").
@@ -105,41 +133,71 @@ fn every_bundled_size_matches_its_standard() {
                     for s in &comp.sizes {
                         rows += 1;
                         let what = format!("{} {} {}", st.name, comp.name, s.name);
-                        assert!(s.source.contains(&comp.standard), "{what}: its source doesn't cite {}", comp.standard);
+                        assert!(
+                            s.source.contains(&comp.standard),
+                            "{what}: its source doesn't cite {}",
+                            comp.standard
+                        );
                         match (st.unit, comp.kind) {
                             (LibUnit::Inch, Kind::HexCapScrew | Kind::HexNut) => {
-                                let &(_, _, f, g, hmin, hmax) = ANSI_HEX.iter().find(|r| r.0 == comp.name && r.1 == nominal(&s.name)).unwrap_or_else(|| panic!("{what}: not in the table"));
+                                let &(_, _, f, g, hmin, hmax) = ANSI_HEX
+                                    .iter()
+                                    .find(|r| r.0 == comp.name && r.1 == nominal(&s.name))
+                                    .unwrap_or_else(|| panic!("{what}: not in the table"));
                                 near(&format!("{what} F"), s.f, f, 0.0006);
                                 near(&format!("{what} G"), s.g, g, 0.0006);
-                                assert!(s.h >= hmin && s.h <= hmax, "{what}: H {} not in {hmin}..{hmax}", s.h);
+                                assert!(
+                                    s.h >= hmin && s.h <= hmax,
+                                    "{what}: H {} not in {hmin}..{hmax}",
+                                    s.h
+                                );
                             }
                             (LibUnit::Inch, Kind::PanHeadScrew) => {
-                                let &(_, a, h) = PAN_HEAD.iter().find(|r| r.0 == nominal(&s.name)).unwrap_or_else(|| panic!("{what}: not in the table"));
+                                let &(_, a, h) = PAN_HEAD
+                                    .iter()
+                                    .find(|r| r.0 == nominal(&s.name))
+                                    .unwrap_or_else(|| panic!("{what}: not in the table"));
                                 near(&format!("{what} A"), s.head.unwrap(), a, 1e-9);
                                 near(&format!("{what} H"), s.h, h, 1e-9);
                             }
                             (LibUnit::Inch, Kind::PlainWasher) => {
-                                let &(_, id, od, t) = ANSI_WASHER.iter().find(|r| r.0 == s.name).unwrap_or_else(|| panic!("{what}: not in the table"));
+                                let &(_, id, od, t) = ANSI_WASHER
+                                    .iter()
+                                    .find(|r| r.0 == s.name)
+                                    .unwrap_or_else(|| panic!("{what}: not in the table"));
                                 near(&format!("{what} ID"), s.inner.unwrap(), id, 1e-9);
                                 near(&format!("{what} OD"), s.head.unwrap(), od, 1e-9);
                                 near(&format!("{what} t"), s.h, t, 1e-9);
                             }
                             (LibUnit::Millimeter, Kind::SocketHeadCapScrew) => {
-                                let &(_, dk, k, sk) = ISO_4762.iter().find(|r| r.0 == s.name).unwrap_or_else(|| panic!("{what}: not in the table"));
+                                let &(_, dk, k, sk) = ISO_4762
+                                    .iter()
+                                    .find(|r| r.0 == s.name)
+                                    .unwrap_or_else(|| panic!("{what}: not in the table"));
                                 near(&format!("{what} dk"), s.head.unwrap(), dk, 1e-9);
                                 near(&format!("{what} k"), s.h, k, 1e-9);
                                 near(&format!("{what} s"), s.socket.unwrap(), sk, 1e-9);
                             }
                             (LibUnit::Millimeter, Kind::HexNut) => {
-                                let table = if comp.standard == "ISO 4035" { ISO_4035 } else { ISO_4032 };
-                                let &(_, sf, m) = table.iter().find(|r| r.0 == s.name).unwrap_or_else(|| panic!("{what}: not in the table"));
+                                let table = if comp.standard == "ISO 4035" {
+                                    ISO_4035
+                                } else {
+                                    ISO_4032
+                                };
+                                let &(_, sf, m) = table
+                                    .iter()
+                                    .find(|r| r.0 == s.name)
+                                    .unwrap_or_else(|| panic!("{what}: not in the table"));
                                 near(&format!("{what} s"), s.f, sf, 1e-9);
                                 near(&format!("{what} m"), s.h, m, 1e-9);
                                 // e min is below the exact hexagon's corners.
                                 assert!(s.g < s.f * 2.0 / 3f64.sqrt(), "{what}: e");
                             }
                             (LibUnit::Millimeter, Kind::PlainWasher) => {
-                                let &(_, d1, d2, h) = ISO_7089.iter().find(|r| r.0 == s.name).unwrap_or_else(|| panic!("{what}: not in the table"));
+                                let &(_, d1, d2, h) = ISO_7089
+                                    .iter()
+                                    .find(|r| r.0 == s.name)
+                                    .unwrap_or_else(|| panic!("{what}: not in the table"));
                                 near(&format!("{what} d1"), s.inner.unwrap(), d1, 1e-9);
                                 near(&format!("{what} d2"), s.head.unwrap(), d2, 1e-9);
                                 near(&format!("{what} h"), s.h, h, 1e-9);
@@ -184,13 +242,17 @@ fn every_bundled_size_generates_its_dimensions() {
             for class in &cat.classes {
                 for comp in &class.components {
                     for s in &comp.sizes {
-                        let mut spec = StandardSpec::new(&st.name, &cat.name, &class.name, &comp.name).unwrap();
+                        let mut spec =
+                            StandardSpec::new(&st.name, &cat.name, &class.name, &comp.name)
+                                .unwrap();
                         spec.size = s.name.clone();
                         spec.normalize();
                         let what = spec.part_name();
                         let b = build_of(&spec);
                         assert_eq!(b.parts.len(), 1, "{what}: {} parts", b.parts.len());
-                        let p = b.part(PART).unwrap_or_else(|| panic!("{what}: no part {PART:?}"));
+                        let p = b
+                            .part(PART)
+                            .unwrap_or_else(|| panic!("{what}: no part {PART:?}"));
                         let [x, y, z] = extents(&p.solid);
                         let h = s.h * u;
                         near(&format!("{what} top"), z.1, h, 1e-3);
@@ -206,14 +268,22 @@ fn every_bundled_size_generates_its_dimensions() {
                                 near(&format!("{what} corners"), x.1 - x.0, corners, 1e-3);
                                 if st.unit == LibUnit::Inch {
                                     // Within G max (and the table's tolerance below it).
-                                    assert!(corners <= s.g * u + 0.02 && corners >= s.g * u * 0.97, "{what}: corners {corners} vs G {}", s.g * u);
+                                    assert!(
+                                        corners <= s.g * u + 0.02 && corners >= s.g * u * 0.97,
+                                        "{what}: corners {corners} vs G {}",
+                                        s.g * u
+                                    );
                                 }
                             }
                             Kind::PanHeadScrew | Kind::SocketHeadCapScrew | Kind::PlainWasher => {
                                 let dia = s.head.unwrap() * u;
                                 // The mesh's vertices lie on the circle: its extent is the diameter
                                 // up to the tessellation's chord.
-                                assert!((x.1 - x.0) <= dia + 1e-3 && (x.1 - x.0) >= dia * 0.99, "{what}: diameter {} vs {dia}", x.1 - x.0);
+                                assert!(
+                                    (x.1 - x.0) <= dia + 1e-3 && (x.1 - x.0) >= dia * 0.99,
+                                    "{what}: diameter {} vs {dia}",
+                                    x.1 - x.0
+                                );
                             }
                         }
                         let m = p.mass.as_ref().unwrap_or_else(|| panic!("{what}: no mass"));
@@ -229,19 +299,58 @@ fn every_bundled_size_generates_its_dimensions() {
 #[test]
 fn auto_size_rounds_bolts_down_and_nuts_up() {
     let ansi = library().standard("ANSI inch").unwrap();
-    let hcs = ansi.category("Bolts & screws").unwrap().class("Hex bolts").unwrap().component("Hex cap screw").unwrap();
-    let nut = ansi.category("Nuts").unwrap().class("Hex nuts").unwrap().component("Hex nut").unwrap();
-    assert_eq!(auto_size(LibUnit::Inch, hcs, 0.266 * IN, "1/4-20").as_deref(), Some("1/4-20"));
+    let hcs = ansi
+        .category("Bolts & screws")
+        .unwrap()
+        .class("Hex bolts")
+        .unwrap()
+        .component("Hex cap screw")
+        .unwrap();
+    let nut = ansi
+        .category("Nuts")
+        .unwrap()
+        .class("Hex nuts")
+        .unwrap()
+        .component("Hex nut")
+        .unwrap();
+    assert_eq!(
+        auto_size(LibUnit::Inch, hcs, 0.266 * IN, "1/4-20").as_deref(),
+        Some("1/4-20")
+    );
     // The thread series is kept.
-    assert_eq!(auto_size(LibUnit::Inch, hcs, 0.266 * IN, "1/4-28").as_deref(), Some("1/4-28"));
-    assert_eq!(auto_size(LibUnit::Inch, hcs, 0.375 * IN, "1/4-28").as_deref(), Some("3/8-16"));
-    assert_eq!(auto_size(LibUnit::Inch, nut, 0.375 * IN, "1/4-20").as_deref(), Some("3/8-16"));
-    assert_eq!(auto_size(LibUnit::Inch, nut, 0.36 * IN, "1/4-20").as_deref(), Some("3/8-16"));
-    assert_eq!(auto_size(LibUnit::Inch, nut, 0.266 * IN, "1/4-20").as_deref(), Some("5/16-18"));
+    assert_eq!(
+        auto_size(LibUnit::Inch, hcs, 0.266 * IN, "1/4-28").as_deref(),
+        Some("1/4-28")
+    );
+    assert_eq!(
+        auto_size(LibUnit::Inch, hcs, 0.375 * IN, "1/4-28").as_deref(),
+        Some("3/8-16")
+    );
+    assert_eq!(
+        auto_size(LibUnit::Inch, nut, 0.375 * IN, "1/4-20").as_deref(),
+        Some("3/8-16")
+    );
+    assert_eq!(
+        auto_size(LibUnit::Inch, nut, 0.36 * IN, "1/4-20").as_deref(),
+        Some("3/8-16")
+    );
+    assert_eq!(
+        auto_size(LibUnit::Inch, nut, 0.266 * IN, "1/4-20").as_deref(),
+        Some("5/16-18")
+    );
     assert_eq!(auto_size(LibUnit::Inch, hcs, 0.2 * IN, "1/4-20"), None);
     let iso = library().standard("ISO").unwrap();
-    let shcs = iso.category("Bolts & screws").unwrap().class("Socket head screws").unwrap().component("Socket head cap screw").unwrap();
-    assert_eq!(auto_size(LibUnit::Millimeter, shcs, 6.6, "M3").as_deref(), Some("M6"));
+    let shcs = iso
+        .category("Bolts & screws")
+        .unwrap()
+        .class("Socket head screws")
+        .unwrap()
+        .component("Socket head cap screw")
+        .unwrap();
+    assert_eq!(
+        auto_size(LibUnit::Millimeter, shcs, 6.6, "M3").as_deref(),
+        Some("M6")
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -255,7 +364,11 @@ struct Asm {
 
 impl Asm {
     fn new() -> Self {
-        Self { doc: ex2::document().unwrap(), h: History::default(), builds: HashMap::new() }
+        Self {
+            doc: ex2::document().unwrap(),
+            h: History::default(),
+            builds: HashMap::new(),
+        }
     }
 
     fn build(&mut self, el: ElementId) -> Option<Arc<Build>> {
@@ -267,11 +380,18 @@ impl Asm {
     }
 
     fn model(&self) -> &cadrs_core::assembly::Assembly {
-        self.doc.element(ex2::ASSEMBLY).unwrap().assembly_model().unwrap()
+        self.doc
+            .element(ex2::ASSEMBLY)
+            .unwrap()
+            .assembly_model()
+            .unwrap()
     }
 
     fn solids(&mut self) -> HashMap<InstanceId, Arc<Solid>> {
-        let els: Vec<ElementId> = occurrences(&self.doc, self.model()).iter().map(|o| o.element).collect();
+        let els: Vec<ElementId> = occurrences(&self.doc, self.model())
+            .iter()
+            .map(|o| o.element)
+            .collect();
         for e in els {
             self.build(e);
         }
@@ -285,17 +405,36 @@ impl Asm {
         let mut out: Vec<HoleSite> = solid
             .edges
             .iter()
-            .filter(|e| e.circle.is_some_and(|c| (2.0 * c.radius - dia * IN).abs() < 1e-3 && (c.center[2] - z * IN).abs() < 1e-3))
+            .filter(|e| {
+                e.circle.is_some_and(|c| {
+                    (2.0 * c.radius - dia * IN).abs() < 1e-3 && (c.center[2] - z * IN).abs() < 1e-3
+                })
+            })
             .filter_map(|e| site_of_edge(&solid, instance, &e.name))
             .collect();
         out.sort_by_key(|a| a.edge.index);
         out
     }
 
-    fn insert(&mut self, spec: &StandardSpec, sites: &[HoleSite], flip: bool, stacking: Stacking) -> Vec<InstanceId> {
+    fn insert(
+        &mut self,
+        spec: &StandardSpec,
+        sites: &[HoleSite],
+        flip: bool,
+        stacking: Stacking,
+    ) -> Vec<InstanceId> {
         let solids = self.solids();
         let part = StandardPart::new(spec).unwrap();
-        let cmd = plan_insert(&self.doc, ex2::ASSEMBLY, part, sites, flip, stacking, &solids).unwrap();
+        let cmd = plan_insert(
+            &self.doc,
+            ex2::ASSEMBLY,
+            part,
+            sites,
+            flip,
+            stacking,
+            &solids,
+        )
+        .unwrap();
         let ids = cmd.inserts.iter().map(|i| i.instance).collect();
         self.h.execute(&mut self.doc, &cmd).unwrap();
         ids
@@ -313,7 +452,8 @@ impl Asm {
 }
 
 fn screw() -> StandardSpec {
-    let mut s = StandardSpec::new("ANSI inch", "Bolts & screws", "Hex bolts", "Hex cap screw").unwrap();
+    let mut s =
+        StandardSpec::new("ANSI inch", "Bolts & screws", "Hex bolts", "Hex cap screw").unwrap();
     s.size = "1/4-28".into();
     s.material = "Stainless Steel".into();
     s.normalize();
@@ -335,11 +475,18 @@ fn six_screws_on_the_retaining_plate() {
     let mut a = Asm::new();
     let sites = a.sites(ex2::RETAINING_PLATE, 0.266, 6.625);
     assert_eq!(sites.len(), 6);
-    assert!(sites.iter().all(|s| !s.shaft && (s.diameter - 0.266 * IN).abs() < 1e-6));
+    assert!(
+        sites
+            .iter()
+            .all(|s| !s.shaft && (s.diameter - 0.266 * IN).abs() < 1e-6)
+    );
     let (mates0, n0) = (a.model().mates.len(), a.model().instances.len());
     let ids = a.insert(&screw(), &sites, false, Stacking::Plain);
     assert_eq!(a.model().instances.len(), n0 + 6);
-    let fastened: Vec<_> = a.model().mates[mates0..].iter().filter(|m| m.mate().is_some_and(|m| m.mate_type == MateType::Fastened)).collect();
+    let fastened: Vec<_> = a.model().mates[mates0..]
+        .iter()
+        .filter(|m| m.mate().is_some_and(|m| m.mate_type == MateType::Fastened))
+        .collect();
     assert_eq!(fastened.len(), 6);
     assert_eq!(fastened[0].name, "Fastened 12");
     assert_eq!(a.doc.standard_content.len(), 1);
@@ -352,13 +499,27 @@ fn six_screws_on_the_retaining_plate() {
         // The bearing face on the plate's top, the axis vertical, on the hole circle r 0.55.
         let t = inst.pose.translation;
         near("screw z", t[2], 6.625 * IN, 1e-6);
-        near("screw r", (t[0] * t[0] + t[1] * t[1]).sqrt(), 0.55 * IN, 1e-6);
-        near("screw axis", inst.pose.rotate([0.0, 0.0, 1.0])[2], 1.0, 1e-9);
+        near(
+            "screw r",
+            (t[0] * t[0] + t[1] * t[1]).sqrt(),
+            0.55 * IN,
+            1e-6,
+        );
+        near(
+            "screw axis",
+            inst.pose.rotate([0.0, 0.0, 1.0])[2],
+            1.0,
+            1e-9,
+        );
     }
     a.assert_solved();
     // The instance's name, from the generated part.
     let b = a.build(a.doc.standard_content[0].element.id).unwrap();
-    let name = assembly::source_part_name(&a.doc, &a.model().instance(ids[0]).unwrap().source, Some(&b));
+    let name = assembly::source_part_name(
+        &a.doc,
+        &a.model().instance(ids[0]).unwrap().source,
+        Some(&b),
+    );
     assert_eq!(name, "Hex cap screw 1/4-28 x 0.75");
     // Select same configuration: the six.
     assert_eq!(same_configuration(a.model(), ids[2], true), ids);
@@ -393,7 +554,16 @@ fn nuts_go_out_of_the_part_on_either_side() {
     a.assert_solved();
     // A flips: the nut goes into the part instead.
     let flipped = a.insert(&nut(), &top[..1], true, Stacking::Plain);
-    near("flipped", a.model().instance(flipped[0]).unwrap().pose.rotate([0.0, 0.0, 1.0])[2], -1.0, 1e-9);
+    near(
+        "flipped",
+        a.model()
+            .instance(flipped[0])
+            .unwrap()
+            .pose
+            .rotate([0.0, 0.0, 1.0])[2],
+        -1.0,
+        1e-9,
+    );
 }
 
 /// A19.7: a washer inserted furthest from the selection goes on top of the nut; one inserted
@@ -403,15 +573,36 @@ fn stacking_closest_and_furthest() {
     let mut a = Asm::new();
     let site = a.sites(ex2::TOP_CAP, 0.375, 6.5)[..1].to_vec();
     let n = a.insert(&nut(), &site, false, Stacking::Plain)[0];
-    let mut washer = StandardSpec::new("ANSI inch", "Washers", "Plain washers", "Plain washer").unwrap();
+    let mut washer =
+        StandardSpec::new("ANSI inch", "Washers", "Plain washers", "Plain washer").unwrap();
     washer.size = "3/8 N".into();
     washer.normalize();
     let w1 = a.insert(&washer, &site, false, Stacking::Furthest)[0];
-    near("furthest", a.model().instance(w1).unwrap().pose.translation[2], (6.5 + 0.328) * IN, 1e-6);
+    near(
+        "furthest",
+        a.model().instance(w1).unwrap().pose.translation[2],
+        (6.5 + 0.328) * IN,
+        1e-6,
+    );
     let w2 = a.insert(&washer, &site, false, Stacking::Closest)[0];
-    near("closest", a.model().instance(w2).unwrap().pose.translation[2], 6.5 * IN, 1e-6);
-    near("nut moved out", a.model().instance(n).unwrap().pose.translation[2], (6.5 + 0.065) * IN, 1e-6);
-    near("washer moved out", a.model().instance(w1).unwrap().pose.translation[2], (6.5 + 0.065 + 0.328) * IN, 1e-6);
+    near(
+        "closest",
+        a.model().instance(w2).unwrap().pose.translation[2],
+        6.5 * IN,
+        1e-6,
+    );
+    near(
+        "nut moved out",
+        a.model().instance(n).unwrap().pose.translation[2],
+        (6.5 + 0.065) * IN,
+        1e-6,
+    );
+    near(
+        "washer moved out",
+        a.model().instance(w1).unwrap().pose.translation[2],
+        (6.5 + 0.065 + 0.328) * IN,
+        1e-6,
+    );
     a.assert_solved();
 }
 
@@ -420,7 +611,15 @@ fn stacking_closest_and_furthest() {
 fn a_face_gives_its_holes() {
     let mut a = Asm::new();
     let solid = a.solids()[&ex2::RETAINING_PLATE].clone();
-    let top = solid.faces.iter().find(|f| f.plane.is_some_and(|p| (p.origin[2] - 6.625 * IN).abs() < 1e-6 && p.u[0] * p.v[1] - p.u[1] * p.v[0] > 0.0)).expect("the plate's top face");
+    let top = solid
+        .faces
+        .iter()
+        .find(|f| {
+            f.plane.is_some_and(|p| {
+                (p.origin[2] - 6.625 * IN).abs() < 1e-6 && p.u[0] * p.v[1] - p.u[1] * p.v[0] > 0.0
+            })
+        })
+        .expect("the plate's top face");
     let sites = sites_of_face(&solid, ex2::RETAINING_PLATE, &top.name);
     // Six screw holes and the Ø0.5 centre hole.
     assert_eq!(sites.len(), 7);
@@ -434,7 +633,8 @@ fn bulk_edit_three_sizes() {
     let ids = a.insert(&screw(), &sites, false, Stacking::Plain);
     let mates = a.model().mates.len();
     let three = &ids[..3];
-    let cmd = EditStandardContent::new(&a.doc, ex2::ASSEMBLY, three, Some("5/16-18"), Some(1.0)).unwrap();
+    let cmd =
+        EditStandardContent::new(&a.doc, ex2::ASSEMBLY, three, Some("5/16-18"), Some(1.0)).unwrap();
     a.h.execute(&mut a.doc, &cmd).unwrap();
     assert_eq!(a.model().mates.len(), mates);
     assert_eq!(a.doc.standard_content.len(), 2);
@@ -445,7 +645,10 @@ fn bulk_edit_three_sizes() {
         assert_eq!(i.source, edited.source());
         assert_eq!(i.index, k as u32 + 1);
     }
-    assert_eq!(same_configuration(a.model(), ids[4], true), ids[3..].to_vec());
+    assert_eq!(
+        same_configuration(a.model(), ids[4], true),
+        ids[3..].to_vec()
+    );
     a.assert_solved();
     a.h.undo(&mut a.doc);
     assert_eq!(a.doc.standard_content.len(), 1);
@@ -476,17 +679,36 @@ fn screws_stay_at_the_top_when_the_plate_moves_into_a_subassembly() {
     )
     .unwrap();
     assert!(screws.iter().all(|s| a.model().instance(*s).is_some()));
-    let fastened_to_plate = a.model().mates.iter().filter(|m| m.mate().is_some_and(|m| screws.contains(&m.connectors[0].instance))).count();
+    let fastened_to_plate = a
+        .model()
+        .mates
+        .iter()
+        .filter(|m| {
+            m.mate()
+                .is_some_and(|m| screws.contains(&m.connectors[0].instance))
+        })
+        .count();
     assert_eq!(fastened_to_plate, 6);
     a.assert_solved();
-    let sub = a.doc.element(sub_el).unwrap().assembly_model().unwrap().clone();
+    let sub = a
+        .doc
+        .element(sub_el)
+        .unwrap()
+        .assembly_model()
+        .unwrap()
+        .clone();
     assert_eq!(sub.instances.len(), 4);
     let builds = a.builds.clone();
     let (parts, props) = assembly::instance_parts(&a.doc, &sub, |e| builds.get(&e).cloned());
     let ids: Vec<InstanceId> = sub.instances.iter().map(|i| i.id).collect();
     let m = assembly::mass_report(&parts, &props, &ids).unwrap();
     let mass = m.mass.unwrap();
-    let rel = |what: &str, got: f64, want: f64| assert!((got - want).abs() <= 1e-4 * want.abs().max(1.0), "{what}: {got} vs {want}");
+    let rel = |what: &str, got: f64, want: f64| {
+        assert!(
+            (got - want).abs() <= 1e-4 * want.abs().max(1.0),
+            "{what}: {got} vs {want}"
+        )
+    };
     rel("mass lb", mass.mass / 0.453_592_37, 0.48362);
     rel("volume in³", m.volume / IN.powi(3), 5.05843);
     rel("CoM z in", mass.center_of_mass.z / IN, 6.03294);
@@ -497,7 +719,13 @@ fn screws_stay_at_the_top_when_the_plate_moves_into_a_subassembly() {
 /// cylinder's less the recess (a hexagon of `s` across flats, down to half the head height).
 #[test]
 fn iso_4762_heads_have_the_hex_socket() {
-    let mut spec = StandardSpec::new("ISO", "Bolts & screws", "Socket head screws", "Socket head cap screw").unwrap();
+    let mut spec = StandardSpec::new(
+        "ISO",
+        "Bolts & screws",
+        "Socket head screws",
+        "Socket head cap screw",
+    )
+    .unwrap();
     spec.size = "M6".into();
     spec.length = Some(16.0);
     spec.normalize();
@@ -508,8 +736,20 @@ fn iso_4762_heads_have_the_hex_socket() {
     let solid = std::f64::consts::PI * (dk * dk / 4.0 * k + d * d / 4.0 * l);
     let hex = 3f64.sqrt() / 2.0 * s * s;
     let recess = hex * (k - 0.5 * k);
-    assert!((v - (solid - recess)).abs() < 0.02 * solid, "V {v} vs {} (no recess {solid})", solid - recess);
+    assert!(
+        (v - (solid - recess)).abs() < 0.02 * solid,
+        "V {v} vs {} (no recess {solid})",
+        solid - recess
+    );
     // The recess's floor is a face at half the head height.
-    let floor = p.solid.faces.iter().filter(|f| f.plane.is_some_and(|pl| (pl.origin[2] - 0.5 * k).abs() < 1e-6)).count();
+    let floor = p
+        .solid
+        .faces
+        .iter()
+        .filter(|f| {
+            f.plane
+                .is_some_and(|pl| (pl.origin[2] - 0.5 * k).abs() < 1e-6)
+        })
+        .count();
     assert!(floor >= 1, "no socket floor");
 }

@@ -18,24 +18,48 @@ fn p(x: f64, y: f64) -> Point2<f64> {
 
 fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Loop {
     let c = [p(x0, y0), p(x1, y0), p(x1, y1), p(x0, y1)];
-    Loop { curves: (0..4).map(|i| Curve2::Line { a: c[i], b: c[(i + 1) % 4], source: None }).collect() }
+    Loop {
+        curves: (0..4)
+            .map(|i| Curve2::Line {
+                a: c[i],
+                b: c[(i + 1) % 4],
+                source: None,
+            })
+            .collect(),
+    }
 }
 
 fn circle(x: f64, y: f64, r: f64) -> Loop {
-    Loop { curves: vec![Curve2::Circle { center: p(x, y), radius: r, source: None }] }
+    Loop {
+        curves: vec![Curve2::Circle {
+            center: p(x, y),
+            radius: r,
+            source: None,
+        }],
+    }
 }
 
 fn region(outer: Loop, holes: Vec<Loop>) -> Region {
-    Region { outer, holes, source: None }
+    Region {
+        outer,
+        holes,
+        source: None,
+    }
 }
 
 fn extrude(k: &mut NativeKernel, r: Region, depth: f64) -> BodyId {
-    k.extrude(&Profile::new(Plane::top(), vec![r]), Extent::Blind(depth)).unwrap().bodies[0]
+    k.extrude(&Profile::new(Plane::top(), vec![r]), Extent::Blind(depth))
+        .unwrap()
+        .bodies[0]
 }
 
 /// The XZ plane (normal −Y), for revolve profiles.
 fn front() -> Plane {
-    Plane { origin: Point3::origin(), x_dir: Vector3::x_axis(), normal: -Vector3::y_axis() }
+    Plane {
+        origin: Point3::origin(),
+        x_dir: Vector3::x_axis(),
+        normal: -Vector3::y_axis(),
+    }
 }
 
 fn body(k: &NativeKernel, id: BodyId) -> Body {
@@ -51,22 +75,34 @@ fn valid(b: &Body) {
 #[track_caller]
 fn finds(b: &Body, what: &str) {
     let issues = b.check_with(CheckLevel::Full);
-    assert!(issues.iter().any(|i| i.contains(what)), "expected {what:?} in {issues:?}");
+    assert!(
+        issues.iter().any(|i| i.contains(what)),
+        "expected {what:?} in {issues:?}"
+    );
 }
 
 /// A plate with a round hole: 10 × 10 × 2, hole of radius 2 at (5, 5).
 fn plate(k: &mut NativeKernel) -> BodyId {
-    extrude(k, region(rect(0.0, 0.0, 10.0, 10.0), vec![circle(5.0, 5.0, 2.0)]), 2.0)
+    extrude(
+        k,
+        region(rect(0.0, 0.0, 10.0, 10.0), vec![circle(5.0, 5.0, 2.0)]),
+        2.0,
+    )
 }
 
 /// A move by `du` along u (of p-curves).
 fn moved(du: f64) -> Affine {
-    Affine { m: nalgebra::Matrix3::identity(), t: Vector3::new(du, 0.0, 0.0) }
+    Affine {
+        m: nalgebra::Matrix3::identity(),
+        t: Vector3::new(du, 0.0, 0.0),
+    }
 }
 
 /// The planar face of `b` with the most loops (the plate's top or bottom).
 fn holed_face(b: &Body) -> usize {
-    (0..b.faces.len()).max_by_key(|&f| b.faces[f].loops.len()).unwrap()
+    (0..b.faces.len())
+        .max_by_key(|&f| b.faces[f].loops.len())
+        .unwrap()
 }
 
 #[test]
@@ -79,25 +115,64 @@ fn valid_models_pass_the_full_check() {
     let half = Region {
         outer: Loop {
             curves: vec![
-                Curve2::Arc { center: p(0.0, 0.0), radius: 2.0, start_angle: -PI / 2.0, sweep: PI, source: None },
-                Curve2::Line { a: p(0.0, 2.0), b: p(0.0, -2.0), source: None },
+                Curve2::Arc {
+                    center: p(0.0, 0.0),
+                    radius: 2.0,
+                    start_angle: -PI / 2.0,
+                    sweep: PI,
+                    source: None,
+                },
+                Curve2::Line {
+                    a: p(0.0, 2.0),
+                    b: p(0.0, -2.0),
+                    source: None,
+                },
             ],
         },
         holes: vec![],
         source: None,
     };
-    let z = Axis { origin: Point3::origin(), dir: Vector3::z_axis() };
-    let sphere = k.revolve(&Profile::new(front(), vec![half]), z, TAU).unwrap().bodies[0];
-    let torus = k.revolve(&Profile::new(front(), vec![region(circle(5.0, 0.0, 1.0), vec![])]), z, TAU).unwrap().bodies[0];
+    let z = Axis {
+        origin: Point3::origin(),
+        dir: Vector3::z_axis(),
+    };
+    let sphere = k
+        .revolve(&Profile::new(front(), vec![half]), z, TAU)
+        .unwrap()
+        .bodies[0];
+    let torus = k
+        .revolve(
+            &Profile::new(front(), vec![region(circle(5.0, 0.0, 1.0), vec![])]),
+            z,
+            TAU,
+        )
+        .unwrap()
+        .bodies[0];
     // A boolean with a curved cut, a fillet and a hollow shell (a solid with a void).
     let cut = k.boolean(BoolOp::Subtract, bx, &[cyl]).unwrap().bodies[0];
     let edge = k.edges(bx).unwrap()[0].id;
     let filleted = k.fillet(bx, &[edge], 1.0).unwrap().bodies[0];
-    let hollow = k.shell_with(bx, &ShellSpec { remove: vec![], thickness: 1.0, outward: false, hollow: true, sharp: true }).unwrap().bodies[0];
+    let hollow = k
+        .shell_with(
+            bx,
+            &ShellSpec {
+                remove: vec![],
+                thickness: 1.0,
+                outward: false,
+                hollow: true,
+                sharp: true,
+            },
+        )
+        .unwrap()
+        .bodies[0];
     for id in [bx, cyl, pl, sphere, torus, cut, filleted, hollow] {
         valid(&body(&k, id));
     }
-    assert_eq!(k.get(hollow).unwrap().solids[0].shells.len(), 2, "the hollow box has a void");
+    assert_eq!(
+        k.get(hollow).unwrap().solids[0].shells.len(),
+        2,
+        "the hollow box has a void"
+    );
 }
 
 #[test]
@@ -153,9 +228,16 @@ fn finds_disconnected_and_shared_shells() {
     // Both boxes' faces in one shell of one solid.
     let mut one = b.clone();
     let faces: Vec<usize> = (0..one.faces.len()).collect();
-    one.shells = vec![cadrs_kernel::native::topo::Shell { faces, closed: true }];
+    one.shells = vec![cadrs_kernel::native::topo::Shell {
+        faces,
+        closed: true,
+    }];
     one.solids = vec![Solid { shells: vec![0] }];
-    assert!(one.check().is_empty(), "the fast check doesn't look at connectivity: {:?}", one.check());
+    assert!(
+        one.check().is_empty(),
+        "the fast check doesn't look at connectivity: {:?}",
+        one.check()
+    );
     finds(&one, "isn't connected");
     // A face in both shells.
     let mut two = b.clone();
@@ -196,8 +278,16 @@ fn box_with_a_bumped_pcurve() -> Body {
         .faces
         .iter()
         .enumerate()
-        .flat_map(|(fi, f)| f.loops.iter().enumerate().flat_map(move |(li, l)| (0..l.len()).map(move |ci| (fi, li, ci))))
-        .find(|&(fi, li, ci)| matches!(b.faces[fi].loops[li][ci].pc, Curve::Line { .. }) && !b.edges[b.faces[fi].loops[li][ci].edge].degenerate)
+        .flat_map(|(fi, f)| {
+            f.loops
+                .iter()
+                .enumerate()
+                .flat_map(move |(li, l)| (0..l.len()).map(move |ci| (fi, li, ci)))
+        })
+        .find(|&(fi, li, ci)| {
+            matches!(b.faces[fi].loops[li][ci].pc, Curve::Line { .. })
+                && !b.edges[b.faces[fi].loops[li][ci].edge].degenerate
+        })
         .unwrap();
     let c = &b.faces[fi].loops[li][ci];
     let e = &b.edges[c.edge];
@@ -210,14 +300,22 @@ fn box_with_a_bumped_pcurve() -> Body {
     let t = |s: f64| t0 + (t1 - t0) * s;
     let knots = vec![t0, t0, t(0.12), t(0.17), t(0.22), t1, t1];
     let cps = vec![h(a), h(at(0.12)), h(bump), h(at(0.22)), h(z)];
-    b.faces[fi].loops[li][ci].pc = Curve::Nurbs(std::sync::Arc::new(NurbsCurve { degree: 1, knots, cps }));
+    b.faces[fi].loops[li][ci].pc = Curve::Nurbs(std::sync::Arc::new(NurbsCurve {
+        degree: 1,
+        knots,
+        cps,
+    }));
     b
 }
 
 #[test]
 fn finds_a_pcurve_off_its_edge_between_samples() {
     let b = box_with_a_bumped_pcurve();
-    assert!(b.check().is_empty(), "the fast check samples past the bump: {:?}", b.check());
+    assert!(
+        b.check().is_empty(),
+        "the fast check samples past the bump: {:?}",
+        b.check()
+    );
     finds(&b, "p-curve off the edge");
 }
 
@@ -247,8 +345,14 @@ fn a_hole_turned_a_whole_turn_is_a_void() {
     let pl = plate(&mut k);
     let fi = holed_face(&body(&k, pl));
     let sheet = sheet_of(&mut k, pl, &[fi]);
-    let axis = Axis { origin: Point3::new(-5.0, 0.0, 0.0), dir: Vector3::y_axis() };
-    let ring = k.sweep_body(sheet, &BodySweep::Rotate { axis, angle: TAU }).unwrap().bodies[0];
+    let axis = Axis {
+        origin: Point3::new(-5.0, 0.0, 0.0),
+        dir: Vector3::y_axis(),
+    };
+    let ring = k
+        .sweep_body(sheet, &BodySweep::Rotate { axis, angle: TAU })
+        .unwrap()
+        .bodies[0];
     let b = body(&k, ring);
     valid(&b);
     assert_eq!(b.solids.len(), 1);
@@ -262,12 +366,22 @@ fn a_hole_turned_a_whole_turn_is_a_void() {
 fn disjoint_wires_sweep_into_separate_shells() {
     let mut k = NativeKernel::new();
     let seg = |k: &mut NativeKernel, y: f64| {
-        let c = PathCurve::Sketch { plane: Plane::top(), curve: Curve2::Line { a: p(0.0, y), b: p(5.0, y), source: None } };
+        let c = PathCurve::Sketch {
+            plane: Plane::top(),
+            curve: Curve2::Line {
+                a: p(0.0, y),
+                b: p(5.0, y),
+                source: None,
+            },
+        };
         k.create_wire(&[c]).unwrap().bodies[0]
     };
     let (a, b) = (seg(&mut k, 0.0), seg(&mut k, 3.0));
     let both = k.compound(&[a, b]).unwrap().bodies[0];
-    let walls = k.sweep_body(both, &BodySweep::Translate(Vector3::new(0.0, 0.0, 2.0))).unwrap().bodies[0];
+    let walls = k
+        .sweep_body(both, &BodySweep::Translate(Vector3::new(0.0, 0.0, 2.0)))
+        .unwrap()
+        .bodies[0];
     let w = body(&k, walls);
     valid(&w);
     assert_eq!(w.shells.len(), 2);
@@ -281,9 +395,20 @@ fn sewing_rebuilds_the_shells() {
     let bx = extrude(&mut k, region(rect(0.0, 0.0, 1.0, 1.0), vec![]), 1.0);
     let b = body(&k, bx);
     let e = b.faces[0].loops[0][0].edge;
-    let other = (1..b.faces.len()).find(|&f| b.faces[f].loops.iter().flatten().any(|c| c.edge == e)).unwrap();
+    let other = (1..b.faces.len())
+        .find(|&f| b.faces[f].loops.iter().flatten().any(|c| c.edge == e))
+        .unwrap();
     let mut two = cadrs_kernel::native::kernel::subset(&b, &[0, other], false);
-    two.shells = vec![cadrs_kernel::native::topo::Shell { faces: vec![0, 0], closed: false }, cadrs_kernel::native::topo::Shell { faces: vec![1, 1], closed: false }];
+    two.shells = vec![
+        cadrs_kernel::native::topo::Shell {
+            faces: vec![0, 0],
+            closed: false,
+        },
+        cadrs_kernel::native::topo::Shell {
+            faces: vec![1, 1],
+            closed: false,
+        },
+    ];
     finds(&two, "listed twice");
     let sewn = cadrs_kernel::native::surfacing::sew_faces(two, 1e-6).unwrap();
     valid(&sewn);
@@ -296,19 +421,51 @@ fn a_sweep_round_a_sharp_corner_is_mitred() {
     // A 2 × 2 square square to an L-shaped path (10 along x, then 10 along y): the mitred bar,
     // volume A·L = 80 and area 168, valid at the full level.
     let mut k = NativeKernel::new();
-    let plane = Plane { origin: Point3::origin(), x_dir: Vector3::y_axis(), normal: Vector3::x_axis() };
+    let plane = Plane {
+        origin: Point3::origin(),
+        x_dir: Vector3::y_axis(),
+        normal: Vector3::x_axis(),
+    };
     let profile = Profile::new(plane, vec![region(rect(-1.0, -1.0, 1.0, 1.0), vec![])]);
     let path = vec![
-        PathCurve::Sketch { plane: Plane::top(), curve: Curve2::Line { a: p(0.0, 0.0), b: p(10.0, 0.0), source: None } },
-        PathCurve::Sketch { plane: Plane::top(), curve: Curve2::Line { a: p(10.0, 0.0), b: p(10.0, 10.0), source: None } },
+        PathCurve::Sketch {
+            plane: Plane::top(),
+            curve: Curve2::Line {
+                a: p(0.0, 0.0),
+                b: p(10.0, 0.0),
+                source: None,
+            },
+        },
+        PathCurve::Sketch {
+            plane: Plane::top(),
+            curve: Curve2::Line {
+                a: p(10.0, 0.0),
+                b: p(10.0, 10.0),
+                source: None,
+            },
+        },
     ];
-    let r = k.sweep_with(&profile, &SweepSpec { body: BodyKind::Solid, path, control: SweepControl::None, faces: vec![] }).unwrap();
+    let r = k
+        .sweep_with(
+            &profile,
+            &SweepSpec {
+                body: BodyKind::Solid,
+                path,
+                control: SweepControl::None,
+                faces: vec![],
+            },
+        )
+        .unwrap();
     let id = r.bodies[0];
     valid(&body(&k, id));
     let m = k.mass_properties(id).unwrap();
-    assert!((m.volume - 80.0).abs() < 1e-6 && (m.surface_area - 168.0).abs() < 1e-6, "{m:?}");
+    assert!(
+        (m.volume - 80.0).abs() < 1e-6 && (m.surface_area - 168.0).abs() < 1e-6,
+        "{m:?}"
+    );
     // Every face keeps a name: a side of a profile curve, or a cap.
-    let named: std::collections::HashSet<u64> = r.history.generated.iter().map(|(f, _)| f.0).collect();
+    let named: std::collections::HashSet<u64> =
+        r.history.generated.iter().map(|(f, _)| f.0).collect();
     assert_eq!(named.len(), k.faces(id).unwrap().len());
 }
 
@@ -318,13 +475,23 @@ fn a_whole_turn_of_a_holed_region_keeps_its_hole_as_a_void() {
     // no caps join the two loops' sweeps, so the hole's torus is a void shell of its own (one
     // shell holding both wasn't edge-connected). Volume by Pappus: (16 − π)·2π·7.
     let mut k = NativeKernel::new();
-    let z = Axis { origin: Point3::origin(), dir: Vector3::z_axis() };
+    let z = Axis {
+        origin: Point3::origin(),
+        dir: Vector3::z_axis(),
+    };
     let r = region(rect(5.0, -2.0, 9.0, 2.0), vec![circle(7.0, 0.0, 1.0)]);
-    let id = k.revolve(&Profile::new(front(), vec![r]), z, TAU).unwrap().bodies[0];
+    let id = k
+        .revolve(&Profile::new(front(), vec![r]), z, TAU)
+        .unwrap()
+        .bodies[0];
     let b = body(&k, id);
     valid(&b);
     assert_eq!(b.solids.len(), 1);
-    assert_eq!(b.solids[0].shells.len(), 2, "the outer shell and the hole's void");
+    assert_eq!(
+        b.solids[0].shells.len(),
+        2,
+        "the outer shell and the hole's void"
+    );
     let v = k.mass_properties(id).unwrap().volume;
     let want = (16.0 - PI) * TAU * 7.0;
     assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
@@ -334,8 +501,17 @@ fn a_whole_turn_of_a_holed_region_keeps_its_hole_as_a_void() {
 fn a_sheet_extrude_of_a_holed_region_has_a_shell_per_loop() {
     // The walls the outer loop and the hole sweep share no edge: two shells.
     let mut k = NativeKernel::new();
-    let p = Profile::new(Plane::top(), vec![region(rect(0.0, 0.0, 10.0, 10.0), vec![circle(5.0, 5.0, 2.0)])]);
-    let spec = ExtrudeSpec { body: BodyKind::Surface, ..ExtrudeSpec::blind(Vector3::z_axis(), 3.0) };
+    let p = Profile::new(
+        Plane::top(),
+        vec![region(
+            rect(0.0, 0.0, 10.0, 10.0),
+            vec![circle(5.0, 5.0, 2.0)],
+        )],
+    );
+    let spec = ExtrudeSpec {
+        body: BodyKind::Surface,
+        ..ExtrudeSpec::blind(Vector3::z_axis(), 3.0)
+    };
     let id = k.extrude_with(&p, &spec).unwrap().bodies[0];
     let b = body(&k, id);
     valid(&b);

@@ -65,7 +65,10 @@ pub struct BendLineStyle {
 
 impl Default for BendLineStyle {
     fn default() -> Self {
-        Self { weight: 0.25, color: INK }
+        Self {
+            weight: 0.25,
+            color: INK,
+        }
     }
 }
 
@@ -158,8 +161,16 @@ pub struct FlatBendInfo {
 /// round relief): they are drawn, dimensioned and exported as true arcs ([`find_arcs`]).
 #[derive(Debug, Clone, PartialEq)]
 pub enum FlatLoop {
-    Polygon { points: Vec<P2>, keys: Vec<u64>, arcs: Vec<FlatArc> },
-    Circle { center: P2, radius: f64, key: u64 },
+    Polygon {
+        points: Vec<P2>,
+        keys: Vec<u64>,
+        arcs: Vec<FlatArc>,
+    },
+    Circle {
+        center: P2,
+        radius: f64,
+        key: u64,
+    },
 }
 
 /// A run of a polygon loop's edges on one circle: edges `from`, `from + 1`, … (`edges` of them,
@@ -222,7 +233,11 @@ impl FlatData {
 
     /// The bend's visible centre line pieces in the view's 2D frame.
     pub fn lines_of(&self, joint: u32) -> &[[P2; 2]] {
-        self.lines.iter().find(|(j, _)| *j == joint).map(|(_, l)| l.as_slice()).unwrap_or(&[])
+        self.lines
+            .iter()
+            .find(|(j, _)| *j == joint)
+            .map(|(_, l)| l.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Whether the bend shows as up in this view.
@@ -291,7 +306,10 @@ pub fn bend_of(name: &EdgeName) -> Option<u32> {
 /// Whether a projected edge is a flat view's bend line (drawn by [`bend_lines`], not as a view
 /// line).
 pub fn is_bend_edge(e: &ProjEdge) -> bool {
-    e.source.as_ref().and_then(|s| s.edge_name.as_ref()).is_some_and(|n| kind_of(n) == Some(FlatEdgeKind::Bend))
+    e.source
+        .as_ref()
+        .and_then(|s| s.edge_name.as_ref())
+        .is_some_and(|n| kind_of(n) == Some(FlatEdgeKind::Bend))
 }
 
 /// A stable 64-bit key (FNV-1a) of some bytes: for naming keys.
@@ -311,11 +329,19 @@ pub fn key_of(parts: &[u64]) -> u64 {
 pub fn simplify_loop(points: &[P2], tol: f64) -> Vec<P2> {
     let mut pts: Vec<P2> = Vec::with_capacity(points.len());
     for p in points {
-        if pts.last().is_none_or(|q: &P2| (q[0] - p[0]).hypot(q[1] - p[1]) > tol) {
+        if pts
+            .last()
+            .is_none_or(|q: &P2| (q[0] - p[0]).hypot(q[1] - p[1]) > tol)
+        {
             pts.push(*p);
         }
     }
-    while pts.len() > 2 && pts.first().zip(pts.last()).is_some_and(|(a, b)| (a[0] - b[0]).hypot(a[1] - b[1]) <= tol) {
+    while pts.len() > 2
+        && pts
+            .first()
+            .zip(pts.last())
+            .is_some_and(|(a, b)| (a[0] - b[0]).hypot(a[1] - b[1]) <= tol)
+    {
         pts.pop();
     }
     loop {
@@ -352,18 +378,33 @@ pub fn circle_of(points: &[P2]) -> Option<(P2, f64)> {
     if n < 12 {
         return None;
     }
-    let c = points.iter().fold([0.0, 0.0], |a, p| [a[0] + p[0] / n as f64, a[1] + p[1] / n as f64]);
-    let r = points.iter().map(|p| (p[0] - c[0]).hypot(p[1] - c[1])).sum::<f64>() / n as f64;
-    if r < 1e-9 || points.iter().any(|p| ((p[0] - c[0]).hypot(p[1] - c[1]) - r).abs() > 1e-3 * r) {
+    let c = points.iter().fold([0.0, 0.0], |a, p| {
+        [a[0] + p[0] / n as f64, a[1] + p[1] / n as f64]
+    });
+    let r = points
+        .iter()
+        .map(|p| (p[0] - c[0]).hypot(p[1] - c[1]))
+        .sum::<f64>()
+        / n as f64;
+    if r < 1e-9
+        || points
+            .iter()
+            .any(|p| ((p[0] - c[0]).hypot(p[1] - c[1]) - r).abs() > 1e-3 * r)
+    {
         return None;
     }
     // The sides all about as long (a regular polygon, not a few points on an arc).
-    let sides: Vec<f64> = (0..n).map(|i| {
-        let (a, b) = (points[i], points[(i + 1) % n]);
-        (a[0] - b[0]).hypot(a[1] - b[1])
-    }).collect();
+    let sides: Vec<f64> = (0..n)
+        .map(|i| {
+            let (a, b) = (points[i], points[(i + 1) % n]);
+            (a[0] - b[0]).hypot(a[1] - b[1])
+        })
+        .collect();
     let mean = sides.iter().sum::<f64>() / n as f64;
-    sides.iter().all(|s| (s - mean).abs() <= 0.2 * mean).then_some((c, r))
+    sides
+        .iter()
+        .all(|s| (s - mean).abs() <= 0.2 * mean)
+        .then_some((c, r))
 }
 
 /// The circle through three points (`None` when they are in line).
@@ -372,7 +413,11 @@ fn circumcircle(a: P2, b: P2, c: P2) -> Option<(P2, f64)> {
     if d.abs() < 1e-12 {
         return None;
     }
-    let (a2, b2, c2) = (a[0] * a[0] + a[1] * a[1], b[0] * b[0] + b[1] * b[1], c[0] * c[0] + c[1] * c[1]);
+    let (a2, b2, c2) = (
+        a[0] * a[0] + a[1] * a[1],
+        b[0] * b[0] + b[1] * b[1],
+        c[0] * c[0] + c[1] * c[1],
+    );
     let x = (a2 * (b[1] - c[1]) + b2 * (c[1] - a[1]) + c2 * (a[1] - b[1])) / d;
     let y = (a2 * (c[0] - b[0]) + b2 * (a[0] - c[0]) + c2 * (b[0] - a[0])) / d;
     Some(([x, y], (a[0] - x).hypot(a[1] - y)))
@@ -405,7 +450,9 @@ pub fn find_arcs(points: &[P2]) -> Vec<FlatArc> {
         let t = turn(j).abs();
         t > 1e-9 && t <= step
     };
-    let Some(start) = (0..n).find(|j| !smooth(*j)) else { return Vec::new() };
+    let Some(start) = (0..n).find(|j| !smooth(*j)) else {
+        return Vec::new();
+    };
     let mut out = Vec::new();
     let mut i = 0;
     while i < n {
@@ -419,13 +466,19 @@ pub fn find_arcs(points: &[P2]) -> Vec<FlatArc> {
             k += 1;
         }
         if k >= 3
-            && let Some((c, r)) = circumcircle(points[a % n], points[(a + k / 2) % n], points[(a + k) % n])
+            && let Some((c, r)) =
+                circumcircle(points[a % n], points[(a + k / 2) % n], points[(a + k) % n])
             && (0..=k).all(|m| {
                 let p = points[(a + m) % n];
                 ((p[0] - c[0]).hypot(p[1] - c[1]) - r).abs() <= 1e-3 * r + 1e-6
             })
         {
-            out.push(FlatArc { from: a % n, edges: k, center: c, radius: r });
+            out.push(FlatArc {
+                from: a % n,
+                edges: k,
+                center: c,
+                radius: r,
+            });
         }
         i += k;
     }
@@ -436,7 +489,9 @@ pub fn find_arcs(points: &[P2]) -> Vec<FlatArc> {
 /// the way `via` (a point on the arc between them) says.
 fn arc_points(center: P2, radius: f64, from: P2, via: P2, to: P2) -> Vec<P2> {
     let ang = |p: P2| (p[1] - center[1]).atan2(p[0] - center[0]);
-    let wrap = |d: f64| (d + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+    let wrap = |d: f64| {
+        (d + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI
+    };
     let (a0, am, a1) = (ang(from), ang(via), ang(to));
     let sweep = wrap(am - a0) + wrap(a1 - am);
     let m = ((sweep.abs() / 3f64.to_radians()).ceil() as usize).max(8);
@@ -455,7 +510,10 @@ fn line_edge(name: EdgeName, a: P2, b: P2, class: ProjClass) -> ProjEdge {
         class,
         curve: ProjCurve::Line { start: a, end: b },
         points: vec![a, b],
-        source: Some(ProjSource { edge_name: Some(name), ..Default::default() }),
+        source: Some(ProjSource {
+            edge_name: Some(name),
+            ..Default::default()
+        }),
     }
 }
 
@@ -466,7 +524,11 @@ fn p3(p: P2, z: f64) -> [f64; 3] {
 /// The flat pattern seen through `frame`: its edges, the exact model geometry of each named
 /// edge (lines and circles at z = 0, the flat's plane, so dimensions measure true lengths), and
 /// the bends. `op` names the edges (the sheet metal model feature).
-pub fn flat_projection(op: uuid::Uuid, input: &FlatInput, frame: &Frame3) -> (Hlr, HashMap<EdgeName, ModelEdge>, FlatData) {
+pub fn flat_projection(
+    op: uuid::Uuid,
+    input: &FlatInput,
+    frame: &Frame3,
+) -> (Hlr, HashMap<EdgeName, ModelEdge>, FlatData) {
     let vf = frame.view_frame();
     let to2 = |p: P2, z: f64| {
         let q = vf.to_2d(&Point3::new(p[0], p[1], z));
@@ -476,7 +538,13 @@ pub fn flat_projection(op: uuid::Uuid, input: &FlatInput, frame: &Frame3) -> (Hl
     let flipped = face_on && vf.dir.z > 0.0;
     let mut hlr = Hlr::default();
     let mut edges = HashMap::new();
-    let mut data = FlatData { bends: input.bends.clone(), thickness: input.thickness, face_on, flipped, ..Default::default() };
+    let mut data = FlatData {
+        bends: input.bends.clone(),
+        thickness: input.thickness,
+        face_on,
+        flipped,
+        ..Default::default()
+    };
     // Several edges with one key get indices in order.
     let mut used: HashMap<(u8, u64), u32> = HashMap::new();
     let mut next = |kind: FlatEdgeKind, key: u64| {
@@ -516,12 +584,30 @@ pub fn flat_projection(op: uuid::Uuid, input: &FlatInput, frame: &Frame3) -> (Hl
     }
     // An arc (or a whole circle) of the flat as a named edge: its model geometry and its
     // projection (a true arc, so it dimensions and exports as one).
-    let arc_edge = |hlr: &mut Hlr, edges: &mut HashMap<EdgeName, ModelEdge>, outline: Option<&mut Vec<[P2; 2]>>, name: EdgeName, center: P2, radius: f64, ring: Vec<P2>, full: bool| {
-        edges.insert(name, ModelEdge::Circle { center: p3(center, 0.0), normal: [0.0, 0.0, 1.0], radius, points: ring.iter().map(|p| p3(*p, 0.0)).collect() });
-        let pts: Vec<Point2<f64>> = ring.iter().map(|p| {
-            let q = to2(*p, 0.0);
-            Point2::new(q[0], q[1])
-        }).collect();
+    let arc_edge = |hlr: &mut Hlr,
+                    edges: &mut HashMap<EdgeName, ModelEdge>,
+                    outline: Option<&mut Vec<[P2; 2]>>,
+                    name: EdgeName,
+                    center: P2,
+                    radius: f64,
+                    ring: Vec<P2>,
+                    full: bool| {
+        edges.insert(
+            name,
+            ModelEdge::Circle {
+                center: p3(center, 0.0),
+                normal: [0.0, 0.0, 1.0],
+                radius,
+                points: ring.iter().map(|p| p3(*p, 0.0)).collect(),
+            },
+        );
+        let pts: Vec<Point2<f64>> = ring
+            .iter()
+            .map(|p| {
+                let q = to2(*p, 0.0);
+                Point2::new(q[0], q[1])
+            })
+            .collect();
         if let Some(o) = outline {
             o.extend(pts.windows(2).map(|w| [[w[0].x, w[0].y], [w[1].x, w[1].y]]));
         }
@@ -530,9 +616,19 @@ pub fn flat_projection(op: uuid::Uuid, input: &FlatInput, frame: &Frame3) -> (Hl
         hlr.edges.push(ProjEdge {
             visibility: ProjVisibility::Visible,
             class: ProjClass::Sharp,
-            curve: ProjCurve::Arc { center: Point2::new(c[0], c[1]), radius, start: pts[0], mid: pts[m / 2], end: pts[m], full },
+            curve: ProjCurve::Arc {
+                center: Point2::new(c[0], c[1]),
+                radius,
+                start: pts[0],
+                mid: pts[m / 2],
+                end: pts[m],
+                full,
+            },
             points: pts,
-            source: Some(ProjSource { edge_name: Some(name), ..Default::default() }),
+            source: Some(ProjSource {
+                edge_name: Some(name),
+                ..Default::default()
+            }),
         });
     };
     let ring = |center: P2, radius: f64| -> Vec<P2> {
@@ -559,21 +655,61 @@ pub fn flat_projection(op: uuid::Uuid, input: &FlatInput, frame: &Frame3) -> (Hl
                     if covered[i] || (a[0] - b[0]).hypot(a[1] - b[1]) < 1e-9 {
                         continue;
                     }
-                    let name = next(FlatEdgeKind::Outline, keys.get(i).copied().unwrap_or(i as u64));
-                    edges.insert(name, ModelEdge::Line { a: p3(a, 0.0), b: p3(b, 0.0) });
+                    let name = next(
+                        FlatEdgeKind::Outline,
+                        keys.get(i).copied().unwrap_or(i as u64),
+                    );
+                    edges.insert(
+                        name,
+                        ModelEdge::Line {
+                            a: p3(a, 0.0),
+                            b: p3(b, 0.0),
+                        },
+                    );
                     let (a2, b2) = (to2(a, 0.0), to2(b, 0.0));
                     hlr.edges.push(line_edge(name, a2, b2, ProjClass::Sharp));
                     data.outline.push([a2, b2]);
                 }
                 for a in arcs {
-                    let name = next(FlatEdgeKind::Outline, keys.get(a.from).copied().unwrap_or(a.from as u64));
-                    let pts = arc_points(a.center, a.radius, points[a.from], points[(a.from + 1) % n], points[(a.from + a.edges) % n]);
-                    arc_edge(&mut hlr, &mut edges, Some(&mut data.outline), name, a.center, a.radius, pts, false);
+                    let name = next(
+                        FlatEdgeKind::Outline,
+                        keys.get(a.from).copied().unwrap_or(a.from as u64),
+                    );
+                    let pts = arc_points(
+                        a.center,
+                        a.radius,
+                        points[a.from],
+                        points[(a.from + 1) % n],
+                        points[(a.from + a.edges) % n],
+                    );
+                    arc_edge(
+                        &mut hlr,
+                        &mut edges,
+                        Some(&mut data.outline),
+                        name,
+                        a.center,
+                        a.radius,
+                        pts,
+                        false,
+                    );
                 }
             }
-            FlatLoop::Circle { center, radius, key } => {
+            FlatLoop::Circle {
+                center,
+                radius,
+                key,
+            } => {
                 let name = next(FlatEdgeKind::Hole, *key);
-                arc_edge(&mut hlr, &mut edges, Some(&mut data.outline), name, *center, *radius, ring(*center, *radius), true);
+                arc_edge(
+                    &mut hlr,
+                    &mut edges,
+                    Some(&mut data.outline),
+                    name,
+                    *center,
+                    *radius,
+                    ring(*center, *radius),
+                    true,
+                );
                 data.centers.push((to2(*center, 0.0), *radius));
             }
         }
@@ -581,9 +717,22 @@ pub fn flat_projection(op: uuid::Uuid, input: &FlatInput, frame: &Frame3) -> (Hl
     // Counterbores' and countersinks' outer diameters, and forms' outlines (SM16.3).
     for (center, radius, key) in &input.hole_marks {
         let name = next(FlatEdgeKind::HoleMark, *key);
-        arc_edge(&mut hlr, &mut edges, None, name, *center, *radius, ring(*center, *radius), true);
+        arc_edge(
+            &mut hlr,
+            &mut edges,
+            None,
+            name,
+            *center,
+            *radius,
+            ring(*center, *radius),
+            true,
+        );
         let c = to2(*center, 0.0);
-        match data.centers.iter_mut().find(|(q, _)| (q[0] - c[0]).hypot(q[1] - c[1]) < 1e-6) {
+        match data
+            .centers
+            .iter_mut()
+            .find(|(q, _)| (q[0] - c[0]).hypot(q[1] - c[1]) < 1e-6)
+        {
             Some((_, r)) => *r = r.max(*radius),
             None => data.centers.push((c, *radius)),
         }
@@ -603,8 +752,15 @@ pub fn flat_projection(op: uuid::Uuid, input: &FlatInput, frame: &Frame3) -> (Hl
                     continue;
                 }
                 let name = next(FlatEdgeKind::Form, f.key);
-                edges.insert(name, ModelEdge::Line { a: p3(a, 0.0), b: p3(b, 0.0) });
-                hlr.edges.push(line_edge(name, to2(a, 0.0), to2(b, 0.0), ProjClass::Sharp));
+                edges.insert(
+                    name,
+                    ModelEdge::Line {
+                        a: p3(a, 0.0),
+                        b: p3(b, 0.0),
+                    },
+                );
+                hlr.edges
+                    .push(line_edge(name, to2(a, 0.0), to2(b, 0.0), ProjClass::Sharp));
             }
         }
         data.centers.push((to2(f.center, 0.0), 0.0));
@@ -612,19 +768,47 @@ pub fn flat_projection(op: uuid::Uuid, input: &FlatInput, frame: &Frame3) -> (Hl
     for (s, key) in &input.slits {
         data.outline.push([to2(s[0], 0.0), to2(s[1], 0.0)]);
         let name = next(FlatEdgeKind::Slit, *key);
-        edges.insert(name, ModelEdge::Line { a: p3(s[0], 0.0), b: p3(s[1], 0.0) });
-        hlr.edges.push(line_edge(name, to2(s[0], 0.0), to2(s[1], 0.0), ProjClass::Sharp));
+        edges.insert(
+            name,
+            ModelEdge::Line {
+                a: p3(s[0], 0.0),
+                b: p3(s[1], 0.0),
+            },
+        );
+        hlr.edges.push(line_edge(
+            name,
+            to2(s[0], 0.0),
+            to2(s[1], 0.0),
+            ProjClass::Sharp,
+        ));
     }
     for b in &input.bends {
         for s in &b.tangent_visible {
             let name = next(FlatEdgeKind::Tangent, b.joint as u64);
-            edges.insert(name, ModelEdge::Line { a: p3(s[0], 0.0), b: p3(s[1], 0.0) });
-            hlr.edges.push(line_edge(name, to2(s[0], 0.0), to2(s[1], 0.0), ProjClass::Smooth));
+            edges.insert(
+                name,
+                ModelEdge::Line {
+                    a: p3(s[0], 0.0),
+                    b: p3(s[1], 0.0),
+                },
+            );
+            hlr.edges.push(line_edge(
+                name,
+                to2(s[0], 0.0),
+                to2(s[1], 0.0),
+                ProjClass::Smooth,
+            ));
         }
         let mut lines = Vec::new();
         for s in &b.center_visible {
             let name = next(FlatEdgeKind::Bend, b.joint as u64);
-            edges.insert(name, ModelEdge::Line { a: p3(s[0], 0.0), b: p3(s[1], 0.0) });
+            edges.insert(
+                name,
+                ModelEdge::Line {
+                    a: p3(s[0], 0.0),
+                    b: p3(s[1], 0.0),
+                },
+            );
             let (a2, b2) = (to2(s[0], 0.0), to2(s[1], 0.0));
             hlr.edges.push(line_edge(name, a2, b2, ProjClass::Sharp));
             lines.push([a2, b2]);
@@ -645,14 +829,16 @@ fn convex_hull(points: &[P2]) -> Vec<P2> {
     let cross = |o: P2, a: P2, b: P2| (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
     let mut lower: Vec<P2> = Vec::new();
     for q in &p {
-        while lower.len() >= 2 && cross(lower[lower.len() - 2], lower[lower.len() - 1], *q) <= 1e-12 {
+        while lower.len() >= 2 && cross(lower[lower.len() - 2], lower[lower.len() - 1], *q) <= 1e-12
+        {
             lower.pop();
         }
         lower.push(*q);
     }
     let mut upper: Vec<P2> = Vec::new();
     for q in p.iter().rev() {
-        while upper.len() >= 2 && cross(upper[upper.len() - 2], upper[upper.len() - 1], *q) <= 1e-12 {
+        while upper.len() >= 2 && cross(upper[upper.len() - 2], upper[upper.len() - 1], *q) <= 1e-12
+        {
             upper.pop();
         }
         upper.push(*q);
@@ -685,7 +871,9 @@ impl BendLine {
 
 /// The bend lines `view` shows (none when hidden, or seen edge on).
 pub fn bend_lines(view: &View, data: &FlatData) -> Vec<BendLine> {
-    let Some(fs) = &view.flat else { return Vec::new() };
+    let Some(fs) = &view.flat else {
+        return Vec::new();
+    };
     if fs.bend_lines_hidden || !data.face_on {
         return Vec::new();
     }
@@ -694,7 +882,12 @@ pub fn bend_lines(view: &View, data: &FlatData) -> Vec<BendLine> {
         let up = data.shown_up(b);
         let style = if up { fs.up } else { fs.down };
         for s in data.lines_of(b.joint) {
-            out.push(BendLine { bend: b.joint, up, points: vec![view.to_sheet(s[0]), view.to_sheet(s[1])], style });
+            out.push(BendLine {
+                bend: b.joint,
+                up,
+                points: vec![view.to_sheet(s[0]), view.to_sheet(s[1])],
+                style,
+            });
         }
     }
     out
@@ -703,7 +896,13 @@ pub fn bend_lines(view: &View, data: &FlatData) -> Vec<BendLine> {
 /// A bend note's text: "UP 90.0° R1.5" (the radius in the drawing's units and precision,
 /// without trailing zeros).
 pub fn bend_note_text(style: &DrawingStyle, b: &FlatBendInfo, up: bool) -> String {
-    let r = crate::style::format_number(b.radius / style.units.mm(), style.precision, style.length_leading_zeros, false, style.decimal_separator);
+    let r = crate::style::format_number(
+        b.radius / style.units.mm(),
+        style.precision,
+        style.length_leading_zeros,
+        false,
+        style.decimal_separator,
+    );
     let a = crate::style::format_number(b.angle_deg, 1, true, true, style.decimal_separator);
     format!("{} {a}° R{r}", if up { "UP" } else { "DOWN" })
 }
@@ -797,8 +996,18 @@ pub fn point_at(data: &FlatData, bend: u32, along: f64) -> Option<(P2, [P2; 2])>
     for (i, s) in lines.iter().enumerate() {
         let l = seg_len(s);
         if along <= run + l || i + 1 == lines.len() {
-            let t = if l < 1e-12 { 0.0 } else { ((along - run) / l).clamp(0.0, 1.0) };
-            return Some(([s[0][0] + (s[1][0] - s[0][0]) * t, s[0][1] + (s[1][1] - s[0][1]) * t], *s));
+            let t = if l < 1e-12 {
+                0.0
+            } else {
+                ((along - run) / l).clamp(0.0, 1.0)
+            };
+            return Some((
+                [
+                    s[0][0] + (s[1][0] - s[0][0]) * t,
+                    s[0][1] + (s[1][1] - s[0][1]) * t,
+                ],
+                *s,
+            ));
         }
         run += l;
     }
@@ -828,9 +1037,17 @@ fn attach_point(data: &FlatData, place: &BendNotePlace) -> Option<(P2, [P2; 2])>
 
 /// Where a bend note sits by default: the middle of the longest piece of its line (view 2D).
 pub fn default_place(data: &FlatData, bend: u32) -> Option<BendNotePlace> {
-    let s = data.lines_of(bend).iter().max_by(|a, b| seg_len(a).total_cmp(&seg_len(b)))?;
+    let s = data
+        .lines_of(bend)
+        .iter()
+        .max_by(|a, b| seg_len(a).total_cmp(&seg_len(b)))?;
     let at = [(s[0][0] + s[1][0]) / 2.0, (s[0][1] + s[1][1]) / 2.0];
-    Some(BendNotePlace { bend, at, attached: true, along: line_param(data, bend, at) })
+    Some(BendNotePlace {
+        bend,
+        at,
+        attached: true,
+        along: line_param(data, bend, at),
+    })
 }
 
 /// How near its bend line (sheet mm) a dropped note goes back onto it.
@@ -840,18 +1057,37 @@ pub const REATTACH: f64 = 4.0;
 /// the drop is within [`REATTACH`] of it (attached where it was dropped along the line), else
 /// off it there, its leader still ending where the note was attached (`current`, the note's
 /// place before the drag; its default place if it had none).
-pub fn place_note(view: &View, data: &FlatData, bend: u32, drop: P2, current: Option<BendNotePlace>) -> BendNotePlace {
+pub fn place_note(
+    view: &View,
+    data: &FlatData,
+    bend: u32,
+    drop: P2,
+    current: Option<BendNotePlace>,
+) -> BendNotePlace {
     let at = view.from_sheet(drop);
     let near = nearest_line(data, bend, at).map(|(q, _)| {
         let s = view.to_sheet(q);
         (s[0] - drop[0]).hypot(s[1] - drop[1])
     });
     match near {
-        Some(d) if d <= REATTACH => BendNotePlace { bend, at, attached: true, along: line_param(data, bend, at) },
+        Some(d) if d <= REATTACH => BendNotePlace {
+            bend,
+            at,
+            attached: true,
+            along: line_param(data, bend, at),
+        },
         _ => {
             let before = current.or_else(|| default_place(data, bend));
-            let along = before.and_then(|p| p.along.or_else(|| attach_point(data, &p).and_then(|(q, _)| line_param(data, bend, q))));
-            BendNotePlace { bend, at, attached: false, along }
+            let along = before.and_then(|p| {
+                p.along
+                    .or_else(|| attach_point(data, &p).and_then(|(q, _)| line_param(data, bend, q)))
+            });
+            BendNotePlace {
+                bend,
+                at,
+                attached: false,
+                along,
+            }
         }
     }
 }
@@ -864,7 +1100,10 @@ fn boxes_overlap(a: &[P2; 4], b: &[P2; 4]) -> bool {
             let n = [q[1] - p[1], p[0] - q[0]];
             let proj = |r: &[P2; 4]| {
                 let v: Vec<f64> = r.iter().map(|x| x[0] * n[0] + x[1] * n[1]).collect();
-                (v.iter().cloned().fold(f64::MAX, f64::min), v.iter().cloned().fold(f64::MIN, f64::max))
+                (
+                    v.iter().cloned().fold(f64::MAX, f64::min),
+                    v.iter().cloned().fold(f64::MIN, f64::max),
+                )
             };
             let ((a0, a1), (b0, b1)) = (proj(a), proj(b));
             if a1 <= b0 + 1e-9 || b1 <= a0 + 1e-9 {
@@ -906,7 +1145,17 @@ fn along_line(on: P2, u: P2, side: f64, w: f64, h: f64) -> (P2, f64, [P2; 4], P2
     let corner = |s: f64, t: f64| [mid[0] + u[0] * s - u[1] * t, mid[1] + u[1] * s + u[0] * t];
     let (hw, hh) = (w / 2.0 + pad, h / 2.0 + pad);
     // Counter-clockwise whatever the side.
-    (left, rotation, [corner(-hw, -hh), corner(hw, -hh), corner(hw, hh), corner(-hw, hh)], mid)
+    (
+        left,
+        rotation,
+        [
+            corner(-hw, -hh),
+            corner(hw, -hh),
+            corner(hw, hh),
+            corner(-hw, hh),
+        ],
+        mid,
+    )
 }
 
 /// A note along its line: its text's left end, its turn (degrees), its box and its node.
@@ -947,11 +1196,19 @@ fn note_range(t0: f64, t1: f64, w: f64, h: f64) -> (f64, f64) {
 /// alone, not on where other notes were dragged, so moving one note never moves another.
 fn auto_notes(style: &DrawingStyle, view: &View, data: &FlatData) -> Vec<(u32, NotePlace)> {
     let h = style.dim_text_height;
-    let outline: Vec<[P2; 2]> = data.outline.iter().map(|s| [view.to_sheet(s[0]), view.to_sheet(s[1])]).collect();
+    let outline: Vec<[P2; 2]> = data
+        .outline
+        .iter()
+        .map(|s| [view.to_sheet(s[0]), view.to_sheet(s[1])])
+        .collect();
     let mut out: Vec<(u32, NotePlace)> = Vec::new();
     for b in &data.bends {
-        let Some(place) = default_place(data, b.joint) else { continue };
-        let Some((on, seg)) = attach_point(data, &place) else { continue };
+        let Some(place) = default_place(data, b.joint) else {
+            continue;
+        };
+        let Some((on, seg)) = attach_point(data, &place) else {
+            continue;
+        };
         let w = text_width(&bend_note_text(style, b, data.shown_up(b))) * h;
         let at = view.to_sheet(on);
         let (u, t0, t1) = line_frame(view, seg, at);
@@ -960,9 +1217,15 @@ fn auto_notes(style: &DrawingStyle, view: &View, data: &FlatData) -> Vec<(u32, N
             .lines
             .iter()
             .filter(|(j, _)| *j != b.joint)
-            .flat_map(|(_, ls)| ls.iter().map(|s| [view.to_sheet(s[0]), view.to_sheet(s[1])]))
+            .flat_map(|(_, ls)| {
+                ls.iter()
+                    .map(|s| [view.to_sheet(s[0]), view.to_sheet(s[1])])
+            })
             .collect();
-        let clear = |bx: &[P2; 4]| !out.iter().any(|(_, n)| boxes_overlap(bx, &n.2)) && !outline.iter().chain(&others).any(|s| seg_hits_box(*s, bx));
+        let clear = |bx: &[P2; 4]| {
+            !out.iter().any(|(_, n)| boxes_overlap(bx, &n.2))
+                && !outline.iter().chain(&others).any(|s| seg_hits_box(*s, bx))
+        };
         let place_at = |k: f64| along_line([at[0] + u[0] * k, at[1] + u[1] * k], u, 1.0, w, h);
         let mid = (lo + hi) / 2.0;
         let mut best = place_at(mid);
@@ -994,7 +1257,9 @@ fn auto_notes(style: &DrawingStyle, view: &View, data: &FlatData) -> Vec<(u32, N
 /// than its line overhangs it, centred). Notes nobody placed are laid out by [`auto_notes`]; a
 /// note put back on its line sits where it was dropped along it, within the line's ends.
 pub fn bend_notes(style: &DrawingStyle, view: &View, data: &FlatData) -> Vec<NoteGraphics> {
-    let Some(fs) = &view.flat else { return Vec::new() };
+    let Some(fs) = &view.flat else {
+        return Vec::new();
+    };
     if fs.bend_notes_hidden || !data.face_on {
         return Vec::new();
     }
@@ -1007,19 +1272,48 @@ pub fn bend_notes(style: &DrawingStyle, view: &View, data: &FlatData) -> Vec<Not
         let text = bend_note_text(style, b, data.shown_up(b));
         let w = text_width(&text) * h;
         let Some(place) = placed else {
-            if let Some((_, (left, rotation, corners, node))) = auto.iter().find(|(j, _)| *j == b.joint) {
-                out.push(NoteGraphics { bend: b.joint, text: PlacedText { pos: *left, height: h, text }, rotation: *rotation, strokes: Vec::new(), fills: Vec::new(), corners: *corners, node: *node });
+            if let Some((_, (left, rotation, corners, node))) =
+                auto.iter().find(|(j, _)| *j == b.joint)
+            {
+                out.push(NoteGraphics {
+                    bend: b.joint,
+                    text: PlacedText {
+                        pos: *left,
+                        height: h,
+                        text,
+                    },
+                    rotation: *rotation,
+                    strokes: Vec::new(),
+                    fills: Vec::new(),
+                    corners: *corners,
+                    node: *node,
+                });
             }
             continue;
         };
-        let Some((on, seg)) = attach_point(data, &place) else { continue };
+        let Some((on, seg)) = attach_point(data, &place) else {
+            continue;
+        };
         if place.attached {
             let at = view.to_sheet(on);
             let (u, t0, t1) = line_frame(view, seg, at);
             let (lo, hi) = note_range(t0, t1, w, h);
             let k = 0f64.clamp(lo, hi);
-            let (left, rotation, corners, node) = along_line([at[0] + u[0] * k, at[1] + u[1] * k], u, 1.0, w, h);
-            out.push(NoteGraphics { bend: b.joint, text: PlacedText { pos: left, height: h, text }, rotation, strokes: Vec::new(), fills: Vec::new(), corners, node });
+            let (left, rotation, corners, node) =
+                along_line([at[0] + u[0] * k, at[1] + u[1] * k], u, 1.0, w, h);
+            out.push(NoteGraphics {
+                bend: b.joint,
+                text: PlacedText {
+                    pos: left,
+                    height: h,
+                    text,
+                },
+                rotation,
+                strokes: Vec::new(),
+                fills: Vec::new(),
+                corners,
+                node,
+            });
         } else {
             // Off the line: level text with a landing and a leader to its attach point.
             let t = view.to_sheet(place.at);
@@ -1027,7 +1321,11 @@ pub fn bend_notes(style: &DrawingStyle, view: &View, data: &FlatData) -> Vec<Not
             let right = t[0] >= tip[0];
             let pad = 0.35 * h;
             let left_x = t[0] - w / 2.0;
-            let land_end = if right { [left_x - pad, t[1]] } else { [left_x + w + pad, t[1]] };
+            let land_end = if right {
+                [left_x - pad, t[1]]
+            } else {
+                [left_x + w + pad, t[1]]
+            };
             let land_start = [land_end[0] + if right { -arrow } else { arrow }, t[1]];
             let d = [tip[0] - land_start[0], tip[1] - land_start[1]];
             let dl = d[0].hypot(d[1]).max(1e-12);
@@ -1038,11 +1336,24 @@ pub fn bend_notes(style: &DrawingStyle, view: &View, data: &FlatData) -> Vec<Not
             let hh = h / 2.0 + pad;
             out.push(NoteGraphics {
                 bend: b.joint,
-                text: PlacedText { pos: [left_x, t[1]], height: h, text },
+                text: PlacedText {
+                    pos: [left_x, t[1]],
+                    height: h,
+                    text,
+                },
                 rotation: 0.0,
                 strokes: vec![vec![tip, land_start, land_end]],
-                fills: vec![[tip, [base[0] + nn[0], base[1] + nn[1]], [base[0] - nn[0], base[1] - nn[1]]]],
-                corners: [[t[0] - hw, t[1] - hh], [t[0] + hw, t[1] - hh], [t[0] + hw, t[1] + hh], [t[0] - hw, t[1] + hh]],
+                fills: vec![[
+                    tip,
+                    [base[0] + nn[0], base[1] + nn[1]],
+                    [base[0] - nn[0], base[1] - nn[1]],
+                ]],
+                corners: [
+                    [t[0] - hw, t[1] - hh],
+                    [t[0] + hw, t[1] - hh],
+                    [t[0] + hw, t[1] + hh],
+                    [t[0] - hw, t[1] + hh],
+                ],
                 node: t,
             });
         }
@@ -1070,7 +1381,10 @@ pub fn centermarks(style: &DrawingStyle, view: &View, data: &FlatData) -> Vec<Ve
     }
     let half = style.centermark_size / 2.0;
     let k = view.scale.factor();
-    let (ax, ay) = (crate::view::rotate([1.0, 0.0], view.rotation), crate::view::rotate([0.0, 1.0], view.rotation));
+    let (ax, ay) = (
+        crate::view::rotate([1.0, 0.0], view.rotation),
+        crate::view::rotate([0.0, 1.0], view.rotation),
+    );
     let mut out = Vec::new();
     for (c, r) in &data.centers {
         let c = view.to_sheet(*c);
@@ -1107,11 +1421,24 @@ mod tests {
         FlatInput {
             loops: vec![
                 FlatLoop::Polygon {
-                    points: simplify_loop(&[[0.0, 0.0], [40.0, 0.0], [100.0, 0.0], [100.0, 50.0], [0.0, 50.0]], 1e-6),
+                    points: simplify_loop(
+                        &[
+                            [0.0, 0.0],
+                            [40.0, 0.0],
+                            [100.0, 0.0],
+                            [100.0, 50.0],
+                            [0.0, 50.0],
+                        ],
+                        1e-6,
+                    ),
                     keys: vec![1, 2, 3, 4],
                     arcs: Vec::new(),
                 },
-                FlatLoop::Circle { center: hole.0, radius: hole.1, key: 9 },
+                FlatLoop::Circle {
+                    center: hole.0,
+                    radius: hole.1,
+                    key: 9,
+                },
             ],
             slits: Vec::new(),
             bends: vec![FlatBendInfo {
@@ -1130,20 +1457,45 @@ mod tests {
     }
 
     fn view() -> View {
-        let mut v = View::base(ObjectRef { element: uuid::Uuid::nil(), part: None }, NamedView::Top, Scale::new(1, 2), [100.0, 100.0]);
+        let mut v = View::base(
+            ObjectRef {
+                element: uuid::Uuid::nil(),
+                part: None,
+            },
+            NamedView::Top,
+            Scale::new(1, 2),
+            [100.0, 100.0],
+        );
         v.flat = Some(FlatSettings::default());
         v
     }
 
     #[test]
     fn loops_simplify_and_circles_are_found() {
-        let s = simplify_loop(&[[0.0, 0.0], [40.0, 0.0], [100.0, 0.0], [100.0, 50.0], [0.0, 50.0]], 1e-6);
-        assert_eq!(s, vec![[0.0, 0.0], [100.0, 0.0], [100.0, 50.0], [0.0, 50.0]]);
+        let s = simplify_loop(
+            &[
+                [0.0, 0.0],
+                [40.0, 0.0],
+                [100.0, 0.0],
+                [100.0, 50.0],
+                [0.0, 50.0],
+            ],
+            1e-6,
+        );
+        assert_eq!(
+            s,
+            vec![[0.0, 0.0], [100.0, 0.0], [100.0, 50.0], [0.0, 50.0]]
+        );
         assert!(circle_of(&s).is_none());
-        let (c, r) = circle_of(&(0..24).map(|i| {
-            let t = std::f64::consts::TAU * i as f64 / 24.0;
-            [3.0 + 2.0 * t.cos(), -1.0 + 2.0 * t.sin()]
-        }).collect::<Vec<_>>()).unwrap();
+        let (c, r) = circle_of(
+            &(0..24)
+                .map(|i| {
+                    let t = std::f64::consts::TAU * i as f64 / 24.0;
+                    [3.0 + 2.0 * t.cos(), -1.0 + 2.0 * t.sin()]
+                })
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
         assert!((c[0] - 3.0).abs() < 1e-9 && (c[1] + 1.0).abs() < 1e-9 && (r - 2.0).abs() < 1e-9);
     }
 
@@ -1157,11 +1509,26 @@ mod tests {
         assert!(data.face_on && !data.flipped);
         let bends: Vec<&ProjEdge> = hlr.edges.iter().filter(|e| is_bend_edge(e)).collect();
         assert_eq!(bends.len(), 1);
-        assert_eq!(bend_of(bends[0].source.unwrap().edge_name.as_ref().unwrap()), Some(3));
-        assert_eq!(hlr.edges.iter().filter(|e| e.class == ProjClass::Smooth).count(), 2);
+        assert_eq!(
+            bend_of(bends[0].source.unwrap().edge_name.as_ref().unwrap()),
+            Some(3)
+        );
+        assert_eq!(
+            hlr.edges
+                .iter()
+                .filter(|e| e.class == ProjClass::Smooth)
+                .count(),
+            2
+        );
         // The hole is a whole circle with its exact radius.
-        let hole = hlr.edges.iter().find(|e| matches!(e.curve, ProjCurve::Arc { full: true, .. })).unwrap();
-        let ProjCurve::Arc { radius, .. } = hole.curve else { unreachable!() };
+        let hole = hlr
+            .edges
+            .iter()
+            .find(|e| matches!(e.curve, ProjCurve::Arc { full: true, .. }))
+            .unwrap();
+        let ProjCurve::Arc { radius, .. } = hole.curve else {
+            unreachable!()
+        };
         assert!((radius - 5.0).abs() < 1e-9);
         // Names are stable: the same input names the same edges.
         let (again, _, _) = flat_projection(op, &rect_input(), &NamedView::Top.frame());
@@ -1173,14 +1540,16 @@ mod tests {
 
     #[test]
     fn seen_from_the_side_the_flat_is_a_slab() {
-        let (hlr, _, data) = flat_projection(uuid::Uuid::nil(), &rect_input(), &NamedView::Front.frame());
+        let (hlr, _, data) =
+            flat_projection(uuid::Uuid::nil(), &rect_input(), &NamedView::Front.frame());
         assert!(!data.face_on);
         let (lo, hi) = hlr.bounds().unwrap();
         assert!((hi.x - lo.x - 100.0).abs() < 1e-9, "{lo:?} {hi:?}");
         assert!((hi.y - lo.y - 1.0).abs() < 1e-9, "{lo:?} {hi:?}");
         assert_eq!(hlr.edges.len(), 4);
         // Seen from below, up bends are down.
-        let (_, _, below) = flat_projection(uuid::Uuid::nil(), &rect_input(), &NamedView::Bottom.frame());
+        let (_, _, below) =
+            flat_projection(uuid::Uuid::nil(), &rect_input(), &NamedView::Bottom.frame());
         assert!(below.face_on && below.flipped && !below.shown_up(&below.bends[0]));
     }
 
@@ -1188,21 +1557,40 @@ mod tests {
     fn bend_notes_read_like_onshape() {
         let style = DrawingStyle::default();
         let b = &rect_input().bends[0];
-        let mm = DrawingStyle { units: cadrs_sketch::units::LengthUnit::Millimeter, precision: 2, ..style.clone() };
+        let mm = DrawingStyle {
+            units: cadrs_sketch::units::LengthUnit::Millimeter,
+            precision: 2,
+            ..style.clone()
+        };
         assert_eq!(bend_note_text(&mm, b, true), "UP 90.0° R1.5");
         assert_eq!(bend_note_text(&mm, b, false), "DOWN 90.0° R1.5");
-        let comma = DrawingStyle { decimal_separator: crate::style::DecimalSeparator::Comma, ..mm.clone() };
-        let b2 = FlatBendInfo { radius: 2.29, ..b.clone() };
+        let comma = DrawingStyle {
+            decimal_separator: crate::style::DecimalSeparator::Comma,
+            ..mm.clone()
+        };
+        let b2 = FlatBendInfo {
+            radius: 2.29,
+            ..b.clone()
+        };
         assert_eq!(bend_note_text(&comma, &b2, true), "UP 90,0° R2,29");
-        let inch = DrawingStyle { units: cadrs_sketch::units::LengthUnit::Inch, precision: 3, length_leading_zeros: false, ..mm };
-        let b3 = FlatBendInfo { radius: 0.0508, ..b.clone() };
+        let inch = DrawingStyle {
+            units: cadrs_sketch::units::LengthUnit::Inch,
+            precision: 3,
+            length_leading_zeros: false,
+            ..mm
+        };
+        let b3 = FlatBendInfo {
+            radius: 0.0508,
+            ..b.clone()
+        };
         assert_eq!(bend_note_text(&inch, &b3, true), "UP 90.0° R.002");
     }
 
     #[test]
     fn notes_sit_on_their_line_until_dragged_off_and_go_back_when_dropped_near_it() {
         let style = DrawingStyle::default();
-        let (_, _, data) = flat_projection(uuid::Uuid::nil(), &rect_input(), &NamedView::Top.frame());
+        let (_, _, data) =
+            flat_projection(uuid::Uuid::nil(), &rect_input(), &NamedView::Top.frame());
         let mut v = view();
         let notes = bend_notes(&style, &v, &data);
         assert_eq!(notes.len(), 1);
@@ -1223,31 +1611,56 @@ mod tests {
         let tip = n.strokes[0][0];
         assert!((tip[0] - 120.0).abs() < 1e-9, "{tip:?}");
         // Dropped near the line again: back on it, where it was dropped along it.
-        let p = place_note(&v, &data, 3, [121.5, 105.0], v.flat.as_ref().unwrap().note(3).copied());
+        let p = place_note(
+            &v,
+            &data,
+            3,
+            [121.5, 105.0],
+            v.flat.as_ref().unwrap().note(3).copied(),
+        );
         assert!(p.attached);
         v.flat.as_mut().unwrap().set_note(p);
         let n = &bend_notes(&style, &v, &data)[0];
         // There, as far along it as the note fits within the line's ends (it fills this short
         // line: its middle).
-        assert!((n.rotation - 90.0).abs() < 1e-9 && (100.0..=125.0).contains(&n.node[1]), "{:?}", n.node);
+        assert!(
+            (n.rotation - 90.0).abs() < 1e-9 && (100.0..=125.0).contains(&n.node[1]),
+            "{:?}",
+            n.node
+        );
         // Dragged off again, twice: the leader stays on the point it was attached at (y = 105
         // on the sheet), wherever the note goes, until it is reattached.
         for drop in [[170.0, 150.0], [60.0, 80.0]] {
             let cur = v.flat.as_ref().unwrap().note(3).copied();
             let p = place_note(&v, &data, 3, drop, cur);
-            assert!(!p.attached && (p.along.unwrap() - 2.5 * 4.0).abs() < 1e-9, "{p:?}");
+            assert!(
+                !p.attached && (p.along.unwrap() - 2.5 * 4.0).abs() < 1e-9,
+                "{p:?}"
+            );
             v.flat.as_mut().unwrap().set_note(p);
             let n = &bend_notes(&style, &v, &data)[0];
             let tip = n.strokes[0][0];
-            assert!((tip[0] - 120.0).abs() < 1e-9 && (tip[1] - 105.0).abs() < 1e-9, "{tip:?}");
+            assert!(
+                (tip[0] - 120.0).abs() < 1e-9 && (tip[1] - 105.0).abs() < 1e-9,
+                "{tip:?}"
+            );
         }
         // A note saved before the attach parameter: nearest the place.
-        let old = BendNotePlace { bend: 3, at: [10.0, 40.0], attached: false, along: None };
-        let back: BendNotePlace = ron::from_str("(bend: 3, at: (10.0, 40.0), attached: false)").unwrap();
+        let old = BendNotePlace {
+            bend: 3,
+            at: [10.0, 40.0],
+            attached: false,
+            along: None,
+        };
+        let back: BendNotePlace =
+            ron::from_str("(bend: 3, at: (10.0, 40.0), attached: false)").unwrap();
         assert_eq!(back, old);
         v.flat.as_mut().unwrap().set_note(old);
         let tip = bend_notes(&style, &v, &data)[0].strokes[0][0];
-        assert!((tip[0] - 120.0).abs() < 1e-9 && (tip[1] - 120.0).abs() < 1e-9, "{tip:?}");
+        assert!(
+            (tip[0] - 120.0).abs() < 1e-9 && (tip[1] - 120.0).abs() < 1e-9,
+            "{tip:?}"
+        );
         // Hidden.
         v.flat.as_mut().unwrap().bend_notes_hidden = true;
         assert!(bend_notes(&style, &v, &data).is_empty());
@@ -1257,14 +1670,47 @@ mod tests {
     fn notes_keep_their_side_and_size_and_dragging_one_moves_no_other() {
         // An open box's flat: a 200 × 125 base with a bend on each side and 150 walls.
         let (w, d, hgt) = (200.0, 125.0, 150.0);
-        let base: Vec<[P2; 2]> = vec![[[0.0, 0.0], [w, 0.0]], [[w, 0.0], [w, d]], [[w, d], [0.0, d]], [[0.0, d], [0.0, 0.0]]];
-        let bend = |j: u32, s: [P2; 2]| FlatBendInfo { joint: j, name: format!("Bend {j}"), up: false, angle_deg: 90.0, radius: 1.5, center: s, center_visible: vec![s], tangent_visible: Vec::new() };
+        let base: Vec<[P2; 2]> = vec![
+            [[0.0, 0.0], [w, 0.0]],
+            [[w, 0.0], [w, d]],
+            [[w, d], [0.0, d]],
+            [[0.0, d], [0.0, 0.0]],
+        ];
+        let bend = |j: u32, s: [P2; 2]| FlatBendInfo {
+            joint: j,
+            name: format!("Bend {j}"),
+            up: false,
+            angle_deg: 90.0,
+            radius: 1.5,
+            center: s,
+            center_visible: vec![s],
+            tangent_visible: Vec::new(),
+        };
         let outline = vec![
-            [-hgt, 0.0], [0.0, 0.0], [0.0, -hgt], [w, -hgt], [w, 0.0], [w + hgt, 0.0], [w + hgt, d], [w, d], [w, d + hgt], [0.0, d + hgt], [0.0, d], [-hgt, d],
+            [-hgt, 0.0],
+            [0.0, 0.0],
+            [0.0, -hgt],
+            [w, -hgt],
+            [w, 0.0],
+            [w + hgt, 0.0],
+            [w + hgt, d],
+            [w, d],
+            [w, d + hgt],
+            [0.0, d + hgt],
+            [0.0, d],
+            [-hgt, d],
         ];
         let input = FlatInput {
-            loops: vec![FlatLoop::Polygon { keys: (0..outline.len() as u64).collect(), points: outline, arcs: Vec::new() }],
-            bends: base.iter().enumerate().map(|(i, s)| bend(i as u32 + 1, *s)).collect(),
+            loops: vec![FlatLoop::Polygon {
+                keys: (0..outline.len() as u64).collect(),
+                points: outline,
+                arcs: Vec::new(),
+            }],
+            bends: base
+                .iter()
+                .enumerate()
+                .map(|(i, s)| bend(i as u32 + 1, *s))
+                .collect(),
             thickness: 1.5,
             ..Default::default()
         };
@@ -1284,21 +1730,35 @@ mod tests {
                 let len = seg_len(&[p, q]);
                 let (u, _, _) = line_frame(&v, s, p);
                 let side = (n.node[0] - p[0]) * -u[1] + (n.node[1] - p[1]) * u[0];
-                assert!((side - 0.9 * n.text.height).abs() < 1e-9, "note {} on the wrong side: {side}", n.bend);
-                let t = ((n.node[0] - p[0]) * (q[0] - p[0]) + (n.node[1] - p[1]) * (q[1] - p[1])) / len;
+                assert!(
+                    (side - 0.9 * n.text.height).abs() < 1e-9,
+                    "note {} on the wrong side: {side}",
+                    n.bend
+                );
+                let t =
+                    ((n.node[0] - p[0]) * (q[0] - p[0]) + (n.node[1] - p[1]) * (q[1] - p[1])) / len;
                 assert!((-1e-9..=len + 1e-9).contains(&t));
             }
             // At 1:2 the lines are long enough: the notes clear each other.
             if scale == Scale::new(1, 2) {
                 for (i, a) in notes.iter().enumerate() {
                     for b in &notes[i + 1..] {
-                        assert!(!boxes_overlap(&a.corners, &b.corners), "{} and {} overlap", a.bend, b.bend);
+                        assert!(
+                            !boxes_overlap(&a.corners, &b.corners),
+                            "{} and {} overlap",
+                            a.bend,
+                            b.bend
+                        );
                     }
                 }
             }
             // Dragging one note off its line leaves every other where it was.
             let mut moved = v.clone();
-            moved.flat.as_mut().unwrap().set_note(place_note(&v, &data, 2, [300.0, 300.0], None));
+            moved
+                .flat
+                .as_mut()
+                .unwrap()
+                .set_note(place_note(&v, &data, 2, [300.0, 300.0], None));
             let after = bend_notes(&style, &moved, &data);
             for (a, b) in notes.iter().zip(&after) {
                 if a.bend != 2 {
@@ -1321,35 +1781,117 @@ mod tests {
         let pts = simplify_loop(&pts, 1e-6);
         let arcs = find_arcs(&pts);
         assert_eq!(arcs.len(), 1, "{arcs:?}");
-        assert!((arcs[0].radius - 8.0).abs() < 1e-9 && (arcs[0].center[0] - 52.0).abs() < 1e-9 && arcs[0].edges == 12);
+        assert!(
+            (arcs[0].radius - 8.0).abs() < 1e-9
+                && (arcs[0].center[0] - 52.0).abs() < 1e-9
+                && arcs[0].edges == 12
+        );
         // A rectangle, a chamfered corner and an octagon have none.
-        assert!(find_arcs(&[[0.0, 0.0], [10.0, 0.0], [10.0, 8.0], [8.0, 10.0], [0.0, 10.0]]).is_empty());
-        let oct: Vec<P2> = (0..8).map(|i| [(i as f64 * std::f64::consts::FRAC_PI_4).cos(), (i as f64 * std::f64::consts::FRAC_PI_4).sin()]).collect();
+        assert!(
+            find_arcs(&[
+                [0.0, 0.0],
+                [10.0, 0.0],
+                [10.0, 8.0],
+                [8.0, 10.0],
+                [0.0, 10.0]
+            ])
+            .is_empty()
+        );
+        let oct: Vec<P2> = (0..8)
+            .map(|i| {
+                [
+                    (i as f64 * std::f64::consts::FRAC_PI_4).cos(),
+                    (i as f64 * std::f64::consts::FRAC_PI_4).sin(),
+                ]
+            })
+            .collect();
         assert!(find_arcs(&oct).is_empty());
-        let circle = |c: P2, r: f64| -> Vec<P2> { (0..32).map(|i| [c[0] + r * (i as f64 / 32.0 * std::f64::consts::TAU).cos(), c[1] + r * (i as f64 / 32.0 * std::f64::consts::TAU).sin()]).collect() };
+        let circle = |c: P2, r: f64| -> Vec<P2> {
+            (0..32)
+                .map(|i| {
+                    [
+                        c[0] + r * (i as f64 / 32.0 * std::f64::consts::TAU).cos(),
+                        c[1] + r * (i as f64 / 32.0 * std::f64::consts::TAU).sin(),
+                    ]
+                })
+                .collect()
+        };
         let input = FlatInput {
             loops: vec![
-                FlatLoop::Polygon { keys: (0..pts.len() as u64).collect(), points: pts.clone(), arcs: arcs.clone() },
-                FlatLoop::Circle { center: [15.0, 20.0], radius: 2.5, key: 40 },
+                FlatLoop::Polygon {
+                    keys: (0..pts.len() as u64).collect(),
+                    points: pts.clone(),
+                    arcs: arcs.clone(),
+                },
+                FlatLoop::Circle {
+                    center: [15.0, 20.0],
+                    radius: 2.5,
+                    key: 40,
+                },
             ],
-            forms: vec![FlatFormInfo { lines: vec![(circle([40.0, 15.0], 5.0), true), (vec![[30.0, 30.0], [40.0, 30.0]], false)], center: [40.0, 15.0], key: 77 }],
+            forms: vec![FlatFormInfo {
+                lines: vec![
+                    (circle([40.0, 15.0], 5.0), true),
+                    (vec![[30.0, 30.0], [40.0, 30.0]], false),
+                ],
+                center: [40.0, 15.0],
+                key: 77,
+            }],
             hole_marks: vec![([15.0, 20.0], 4.5, 41)],
             thickness: 1.0,
             ..Default::default()
         };
-        let (hlr, edges, data) = flat_projection(uuid::Uuid::nil(), &input, &NamedView::Top.frame());
+        let (hlr, edges, data) =
+            flat_projection(uuid::Uuid::nil(), &input, &NamedView::Top.frame());
         let kind = |e: &ProjEdge| kind_of(e.source.as_ref().unwrap().edge_name.as_ref().unwrap());
         // The round is one arc edge, R8, its ends where the straight edges end.
-        let rounds: Vec<&ProjEdge> = hlr.edges.iter().filter(|e| kind(e) == Some(FlatEdgeKind::Outline) && matches!(e.curve, ProjCurve::Arc { .. })).collect();
+        let rounds: Vec<&ProjEdge> = hlr
+            .edges
+            .iter()
+            .filter(|e| {
+                kind(e) == Some(FlatEdgeKind::Outline) && matches!(e.curve, ProjCurve::Arc { .. })
+            })
+            .collect();
         assert_eq!(rounds.len(), 1);
-        let ProjCurve::Arc { radius, start, end, full, .. } = rounds[0].curve else { unreachable!() };
+        let ProjCurve::Arc {
+            radius,
+            start,
+            end,
+            full,
+            ..
+        } = rounds[0].curve
+        else {
+            unreachable!()
+        };
         assert!(!full && (radius - 8.0).abs() < 1e-9);
-        assert!((start - Point2::new(60.0, 32.0)).norm() < 1e-9 && (end - Point2::new(52.0, 40.0)).norm() < 1e-9, "{start} {end}");
+        assert!(
+            (start - Point2::new(60.0, 32.0)).norm() < 1e-9
+                && (end - Point2::new(52.0, 40.0)).norm() < 1e-9,
+            "{start} {end}"
+        );
         // 4 straight outline edges and the arc.
-        assert_eq!(hlr.edges.iter().filter(|e| kind(e) == Some(FlatEdgeKind::Outline)).count(), 5);
-        assert_eq!(hlr.edges.iter().filter(|e| kind(e) == Some(FlatEdgeKind::Form)).count(), 2);
-        let mark = hlr.edges.iter().find(|e| kind(e) == Some(FlatEdgeKind::HoleMark)).unwrap();
-        assert!(matches!(mark.curve, ProjCurve::Arc { radius, full: true, .. } if (radius - 4.5).abs() < 1e-9));
+        assert_eq!(
+            hlr.edges
+                .iter()
+                .filter(|e| kind(e) == Some(FlatEdgeKind::Outline))
+                .count(),
+            5
+        );
+        assert_eq!(
+            hlr.edges
+                .iter()
+                .filter(|e| kind(e) == Some(FlatEdgeKind::Form))
+                .count(),
+            2
+        );
+        let mark = hlr
+            .edges
+            .iter()
+            .find(|e| kind(e) == Some(FlatEdgeKind::HoleMark))
+            .unwrap();
+        assert!(
+            matches!(mark.curve, ProjCurve::Arc { radius, full: true, .. } if (radius - 4.5).abs() < 1e-9)
+        );
         assert_eq!(edges.len(), hlr.edges.len());
         // Centermarks: the hole (and its counterbore, one mark) and the form.
         assert_eq!(data.centers.len(), 2);
@@ -1358,19 +1900,46 @@ mod tests {
         // The form's cross; the hole's cross and its arms out past the Ø9 counterbore's rim.
         assert_eq!(marks.len(), 8);
         let c = v.to_sheet([15.0, 20.0]);
-        let reach = marks.iter().flat_map(|m| m.iter()).map(|p| (p[0] - c[0]).hypot(p[1] - c[1])).filter(|d| *d < 20.0).fold(0.0, f64::max);
+        let reach = marks
+            .iter()
+            .flat_map(|m| m.iter())
+            .map(|p| (p[0] - c[0]).hypot(p[1] - c[1]))
+            .filter(|d| *d < 20.0)
+            .fold(0.0, f64::max);
         assert!(reach > 4.5 * v.scale.factor(), "{reach}");
-        assert!(marks.iter().any(|m| (m[0][1] - c[1]).abs() < 1e-9 && (m[0][0] + m[1][0]) / 2.0 - c[0] < 1e-9));
+        assert!(
+            marks
+                .iter()
+                .any(|m| (m[0][1] - c[1]).abs() < 1e-9 && (m[0][0] + m[1][0]) / 2.0 - c[0] < 1e-9)
+        );
         // The DXF has the round as an ARC and the hole and mark as CIRCLEs.
-        let mut d = crate::Drawing::from_template(&crate::template::builtin("ANSI_A_MM.dwt").unwrap(), None);
+        let mut d = crate::Drawing::from_template(
+            &crate::template::builtin("ANSI_A_MM.dwt").unwrap(),
+            None,
+        );
         let id = v.id;
         d.sheets[0].views.push(v);
         let m = FlatModel(hlr, edges, data);
         let r = crate::ReferenceProps::default();
         let f = crate::rich::DrawingContext::default();
         let mut views = HashMap::new();
-        views.insert(id, crate::export::ViewInput { model: &m, shaded: Vec::new(), sketches: Vec::new() });
-        let page = crate::export::sheet_page(&d, 0, &crate::export::PageContext { reference: &r, fields: &f, views });
+        views.insert(
+            id,
+            crate::export::ViewInput {
+                model: &m,
+                shaded: Vec::new(),
+                sketches: Vec::new(),
+            },
+        );
+        let page = crate::export::sheet_page(
+            &d,
+            0,
+            &crate::export::PageContext {
+                reference: &r,
+                fields: &f,
+                views,
+            },
+        );
         let dxf = crate::dxf::write_dxf(&page);
         let back = crate::dxf::read_dxf(&dxf).unwrap();
         let (_, arcs, circles) = crate::dxf::counts(&back);
@@ -1379,12 +1948,23 @@ mod tests {
 
     #[test]
     fn flat_views_start_with_their_tangent_lines_hidden() {
-        let (hlr, _, _) = flat_projection(uuid::Uuid::nil(), &rect_input(), &NamedView::Top.frame());
+        let (hlr, _, _) =
+            flat_projection(uuid::Uuid::nil(), &rect_input(), &NamedView::Top.frame());
         // A new flat view hides tangent edges: the bend lines' chain lines stay clean
         // (`ex3-drawings/goal.png`).
-        let mut v = View::flat_pattern(view().reference, NamedView::Top, Scale::new(1, 2), [100.0, 100.0]);
+        let mut v = View::flat_pattern(
+            view().reference,
+            NamedView::Top,
+            Scale::new(1, 2),
+            [100.0, 100.0],
+        );
         assert_eq!(v.tangent_edges, crate::style::TangentEdges::Hidden);
-        let tangents = |v: &View| crate::view::view_lines(v, &hlr).iter().filter(|l| l.kind == crate::view::LineKind::Tangent).count();
+        let tangents = |v: &View| {
+            crate::view::view_lines(v, &hlr)
+                .iter()
+                .filter(|l| l.kind == crate::view::LineKind::Tangent)
+                .count()
+        };
         assert_eq!(tangents(&v), 0);
         // Tangent edges → Solid shows them.
         v.tangent_edges = crate::style::TangentEdges::Solid;
@@ -1393,9 +1973,13 @@ mod tests {
 
     #[test]
     fn bend_lines_take_their_direction_pen_and_hide() {
-        let (_, _, data) = flat_projection(uuid::Uuid::nil(), &rect_input(), &NamedView::Top.frame());
+        let (_, _, data) =
+            flat_projection(uuid::Uuid::nil(), &rect_input(), &NamedView::Top.frame());
         let mut v = view();
-        v.flat.as_mut().unwrap().up = BendLineStyle { weight: 0.5, color: [0xd0, 0x30, 0x20] };
+        v.flat.as_mut().unwrap().up = BendLineStyle {
+            weight: 0.5,
+            color: [0xd0, 0x30, 0x20],
+        };
         let lines = bend_lines(&v, &data);
         assert_eq!(lines.len(), 1);
         assert!(lines[0].up && lines[0].style.weight == 0.5);
@@ -1425,21 +2009,48 @@ mod tests {
     #[test]
     fn the_dxf_export_has_the_bend_lines_and_notes() {
         use crate::export::{Item, Layer, PageContext, ViewInput, sheet_page};
-        let mut d = crate::Drawing::from_template(&crate::template::builtin("ANSI_A_MM.dwt").unwrap(), None);
+        let mut d = crate::Drawing::from_template(
+            &crate::template::builtin("ANSI_A_MM.dwt").unwrap(),
+            None,
+        );
         let mut v = view();
         v.flat.as_mut().unwrap().up.color = [0xd0, 0x30, 0x20];
         let id = v.id;
         d.sheets[0].views.push(v);
-        let (hlr, edges, data) = flat_projection(uuid::Uuid::nil(), &rect_input(), &NamedView::Top.frame());
+        let (hlr, edges, data) =
+            flat_projection(uuid::Uuid::nil(), &rect_input(), &NamedView::Top.frame());
         let m = FlatModel(hlr, edges, data);
         let r = crate::ReferenceProps::default();
         let f = crate::rich::DrawingContext::default();
         let mut views = HashMap::new();
-        views.insert(id, ViewInput { model: &m, shaded: Vec::new(), sketches: Vec::new() });
-        let page = sheet_page(&d, 0, &PageContext { reference: &r, fields: &f, views });
-        let bends: Vec<&Item> = page.items.iter().filter(|i| matches!(i, Item::Stroke(_, p) if p.layer == Layer::BendUp)).collect();
+        views.insert(
+            id,
+            ViewInput {
+                model: &m,
+                shaded: Vec::new(),
+                sketches: Vec::new(),
+            },
+        );
+        let page = sheet_page(
+            &d,
+            0,
+            &PageContext {
+                reference: &r,
+                fields: &f,
+                views,
+            },
+        );
+        let bends: Vec<&Item> = page
+            .items
+            .iter()
+            .filter(|i| matches!(i, Item::Stroke(_, p) if p.layer == Layer::BendUp))
+            .collect();
         assert_eq!(bends.len(), 1);
-        assert!(page.strings().contains(&"UP 90.0° R1.5"), "{:?}", page.strings());
+        assert!(
+            page.strings().contains(&"UP 90.0° R1.5"),
+            "{:?}",
+            page.strings()
+        );
         let dxf = crate::dxf::write_dxf(&page);
         assert!(dxf.contains("BEND_UP"));
         assert!(dxf.contains("CENTER"));

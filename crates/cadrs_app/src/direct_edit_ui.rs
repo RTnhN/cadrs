@@ -29,17 +29,35 @@ fn face_ref(cache: &PartCache, pick: Pick) -> Option<FaceRef> {
 }
 
 /// A new direct edit's base name, parameters and first field, from the selected faces.
-pub fn initial(world: &World, kind: AppliedKind, picked: &[Pick]) -> Option<(&'static str, FeatureKind, AppliedField)> {
-    let AppliedKind::DirectEdit(k) = kind else { return None };
+pub fn initial(
+    world: &World,
+    kind: AppliedKind,
+    picked: &[Pick],
+) -> Option<(&'static str, FeatureKind, AppliedField)> {
+    let AppliedKind::DirectEdit(k) = kind else {
+        return None;
+    };
     let cache = world.resource::<PartCache>();
-    let x = DirectEditFeature { kind: k, faces: picked.iter().filter_map(|p| face_ref(cache, *p)).collect(), ..DirectEditFeature::default() };
-    Some((k.label(), FeatureKind::DirectEdit(x), AppliedField::DirectEditFaces))
+    let x = DirectEditFeature {
+        kind: k,
+        faces: picked.iter().filter_map(|p| face_ref(cache, *p)).collect(),
+        ..DirectEditFeature::default()
+    };
+    Some((
+        k.label(),
+        FeatureKind::DirectEdit(x),
+        AppliedField::DirectEditFaces,
+    ))
 }
 
 /// A face picked into the faces field: added, or removed if it is there. False if it isn't a face.
 pub fn pick(world: &mut World, kind: &mut FeatureKind, field: AppliedField, pick: Pick) -> bool {
-    let (FeatureKind::DirectEdit(x), AppliedField::DirectEditFaces) = (kind, field) else { return false };
-    let Some(f) = face_ref(world.resource::<PartCache>(), pick) else { return false };
+    let (FeatureKind::DirectEdit(x), AppliedField::DirectEditFaces) = (kind, field) else {
+        return false;
+    };
+    let Some(f) = face_ref(world.resource::<PartCache>(), pick) else {
+        return false;
+    };
     match x.faces.iter().position(|g| g.face == f.face) {
         Some(i) => {
             x.faces.remove(i);
@@ -80,18 +98,28 @@ pub(crate) fn name(kind: &FeatureKind) -> Option<&'static str> {
 pub(crate) fn layout(kind: &FeatureKind) -> Option<String> {
     match kind {
         // The flip button's icon shows the direction, so a flip rebuilds the rows.
-        FeatureKind::DirectEdit(x) => Some(format!("direct-edit {:?} {}", x.kind, x.distance < 0.0)),
+        FeatureKind::DirectEdit(x) => {
+            Some(format!("direct-edit {:?} {}", x.kind, x.distance < 0.0))
+        }
         _ => None,
     }
 }
 
 fn op_name(features: &[Feature], op: cadrs_sketch::OpId) -> String {
-    features.iter().find(|f| f.id.0 == op).map_or("part".into(), |f| f.name.clone())
+    features
+        .iter()
+        .find(|f| f.id.0 == op)
+        .map_or("part".into(), |f| f.name.clone())
 }
 
 pub(crate) fn items(features: &[Feature], kind: &FeatureKind, role: Role) -> Option<Vec<String>> {
     match (kind, role) {
-        (FeatureKind::DirectEdit(x), Role::DirectEditFaces) => Some(x.faces.iter().map(|f| format!("Face of {}", op_name(features, f.face.op))).collect()),
+        (FeatureKind::DirectEdit(x), Role::DirectEditFaces) => Some(
+            x.faces
+                .iter()
+                .map(|f| format!("Face of {}", op_name(features, f.face.op)))
+                .collect(),
+        ),
         _ => None,
     }
 }
@@ -100,19 +128,59 @@ pub(crate) fn list_field(role: Role) -> Option<AppliedField> {
     (role == Role::DirectEditFaces).then_some(AppliedField::DirectEditFaces)
 }
 
-pub(crate) fn body(b: &mut ChildSpawner, t: &Theme, kind: &FeatureKind, field: AppliedField, items_of: &dyn Fn(Role) -> Vec<String>) {
-    let FeatureKind::DirectEdit(x) = kind else { return };
+pub(crate) fn body(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    kind: &FeatureKind,
+    field: AppliedField,
+    items_of: &dyn Fn(Role) -> Vec<String>,
+) {
+    let FeatureKind::DirectEdit(x) = kind else {
+        return;
+    };
     let active = field == AppliedField::DirectEditFaces;
     body_column(b, |b| match x.kind {
         DirectEditKind::MoveFace => {
-            list(b, t, "move-face-faces-field", "Faces to move", Role::DirectEditFaces, items_of(Role::DirectEditFaces), active);
-            number(b, t, "move-face-distance", "Distance", Role::DirectEditDistance, &x.distance_expr, Some(x.distance < 0.0));
+            list(
+                b,
+                t,
+                "move-face-faces-field",
+                "Faces to move",
+                Role::DirectEditFaces,
+                items_of(Role::DirectEditFaces),
+                active,
+            );
+            number(
+                b,
+                t,
+                "move-face-distance",
+                "Distance",
+                Role::DirectEditDistance,
+                &x.distance_expr,
+                Some(x.distance < 0.0),
+            );
         }
         DirectEditKind::DeleteFace => {
-            list(b, t, "delete-face-faces-field", "Faces to delete", Role::DirectEditFaces, items_of(Role::DirectEditFaces), active);
+            list(
+                b,
+                t,
+                "delete-face-faces-field",
+                "Faces to delete",
+                Role::DirectEditFaces,
+                items_of(Role::DirectEditFaces),
+                active,
+            );
         }
         DirectEditKind::Simplify => {
-            list(b, t, "simplify-faces-field", "Faces of the parts to simplify", Role::DirectEditFaces, items_of(Role::DirectEditFaces), active);
+            list(
+                b,
+                t,
+                "simplify-faces-field",
+                "Faces of the parts to simplify",
+                Role::DirectEditFaces,
+                items_of(Role::DirectEditFaces),
+                active,
+            );
         }
     });
 }

@@ -59,7 +59,10 @@ pub enum SketchEntity {
     /// one ended, and the last must end at `start`. For rounded corners and fillets: a corner
     /// rounded with radius r is an arc whose center lies r in from both edges, and its two ends are
     /// where it leaves each edge. Holes are circles inside the loop.
-    Outline { start: [f64; 2], segments: Vec<PathSegment> },
+    Outline {
+        start: [f64; 2],
+        segments: Vec<PathSegment>,
+    },
     /// An axis-aligned rectangle from corner (x0, y0) to the opposite corner (x1, y1), with
     /// horizontal and vertical constraints.
     Rectangle { x0: f64, y0: f64, x1: f64, y1: f64 },
@@ -70,7 +73,14 @@ pub enum SketchEntity {
     /// A line segment (lines whose ends meet close regions).
     Line { x0: f64, y0: f64, x1: f64, y1: f64 },
     /// An arc about (cx, cy), counter-clockwise from (sx, sy) to (ex, ey).
-    Arc { cx: f64, cy: f64, sx: f64, sy: f64, ex: f64, ey: f64 },
+    Arc {
+        cx: f64,
+        cy: f64,
+        sx: f64,
+        sy: f64,
+        ex: f64,
+        ey: f64,
+    },
     /// A sketch point.
     Point { x: f64, y: f64 },
 }
@@ -142,6 +152,37 @@ pub struct Screenshot {
     /// Omitted: the view as it is.
     #[serde(default)]
     pub view: Option<String>,
+}
+
+/// Renames a feature of the active (or named) Part Studio.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct RenameFeature {
+    /// The feature's current name ("Extrude 3").
+    pub name: String,
+    /// The new name.
+    pub to: String,
+    /// The Part Studio tab's name; omitted: the active tab.
+    #[serde(default)]
+    pub part_studio: Option<String>,
+}
+
+/// Renames a part and/or sets its colour.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SetPart {
+    /// The part's current name ("Part 3"), as get_document lists it.
+    pub part: String,
+    /// A new name for the part.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Its colour as [r, g, b] (0-255).
+    #[serde(default)]
+    pub color: Option<[u8; 3]>,
+    /// Its opacity, 0-255 (255: opaque, the default); with `color`.
+    #[serde(default)]
+    pub alpha: Option<u8>,
+    /// The Part Studio tab's name; omitted: the active tab.
+    #[serde(default)]
+    pub part_studio: Option<String>,
 }
 
 /// A feature of the active (or named) Part Studio, by name.
@@ -336,7 +377,9 @@ mod tests {
             ]
         }))
         .unwrap();
-        let SketchEntity::Outline { segments, .. } = e else { panic!("not an outline") };
+        let SketchEntity::Outline { segments, .. } = e else {
+            panic!("not an outline")
+        };
         assert!(matches!(segments[2], PathSegment::Arc { ccw: false, .. }));
     }
 }

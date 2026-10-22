@@ -19,7 +19,9 @@
 //! both. Every id is fixed.
 
 use cadrs_sketch::projection::Projected;
-use cadrs_sketch::{ConstraintOf, CurveRef, Dimension, DimensionKind, Link, PlaneRef, SketchOp, Vec2};
+use cadrs_sketch::{
+    ConstraintOf, CurveRef, Dimension, DimensionKind, Link, PlaneRef, SketchOp, Vec2,
+};
 
 use super::gear_cover::Studio;
 use crate::applied::{EdgeOrFace, FilletFeature};
@@ -51,16 +53,47 @@ pub const GAP: f64 = 0.508;
 /// Adds the stand-in (healthy, then Sketch 2 broken) to the Part Studio `el`.
 pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
     let v = Vec2::new;
-    let edit = |s: &mut dyn Studio, feature: FeatureId, op: SketchOp| s.run(&EditSketch { element: el, feature, op });
+    let edit = |s: &mut dyn Studio, feature: FeatureId, op: SketchOp| {
+        s.run(&EditSketch {
+            element: el,
+            feature,
+            op,
+        })
+    };
     // The ring.
-    s.run(&AddSketch { element: el, feature: SKETCH_1, plane: Some(PlaneRef::Top) })?;
+    s.run(&AddSketch {
+        element: el,
+        feature: SKETCH_1,
+        plane: Some(PlaneRef::Top),
+    })?;
     for r in [RING_OUT, RING_IN] {
-        edit(s, SKETCH_1, SketchOp::AddCircle { center: v(0.0, 0.0), radius: r, construction: false })?;
+        edit(
+            s,
+            SKETCH_1,
+            SketchOp::AddCircle {
+                center: v(0.0, 0.0),
+                radius: r,
+                construction: false,
+            },
+        )?;
     }
-    extrude(s, el, SKETCH_1, EXTRUDE_1, v((RING_OUT + RING_IN) / 2.0, 0.0), RING_H)?;
-    let features = s.document().element(el).map(|e| e.features().to_vec()).unwrap_or_default();
+    extrude(
+        s,
+        el,
+        SKETCH_1,
+        EXTRUDE_1,
+        v((RING_OUT + RING_IN) / 2.0, 0.0),
+        RING_H,
+    )?;
+    let features = s
+        .document()
+        .element(el)
+        .map(|e| e.features().to_vec())
+        .unwrap_or_default();
     let build = crate::rebuild::build(&features);
-    let ring = build.part(RING).ok_or_else(|| CommandError::Invalid("the ring didn't build".into()))?;
+    let ring = build
+        .part(RING)
+        .ok_or_else(|| CommandError::Invalid("the ring didn't build".into()))?;
     let p = [RING_OUT, 0.0, RING_H];
     let edge = ring
         .solid
@@ -69,13 +102,39 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
         .min_by(|a, b| a.distance(p).total_cmp(&b.distance(p)))
         .filter(|e| e.distance(p) < 1e-3)
         .ok_or_else(|| CommandError::Invalid("no top outer edge on the ring".into()))?;
-    let entities = vec![EdgeOrFace::Edge(EdgeRef { part: ring.id, edge: edge.name, seed: p })];
-    s.run(&AddFeature::fillet(el, FILLET_1, FilletFeature { entities, size: 1.0, size_expr: "1 mm".into(), ..FilletFeature::default() }))?;
+    let entities = vec![EdgeOrFace::Edge(EdgeRef {
+        part: ring.id,
+        edge: edge.name,
+        seed: p,
+    })];
+    s.run(&AddFeature::fillet(
+        el,
+        FILLET_1,
+        FilletFeature {
+            entities,
+            size: 1.0,
+            size_expr: "1 mm".into(),
+            ..FilletFeature::default()
+        },
+    ))?;
     // The tab, healthy: the spur first (its loose end is the first row, as in `ex1-step7.png`),
     // then the outline.
     let (x0, y0, x1, y1) = TAB;
-    s.run(&AddSketch { element: el, feature: SKETCH_2, plane: Some(PlaneRef::Top) })?;
-    edit(s, SKETCH_2, SketchOp::AddPolyline { points: vec![v(x1, y1), v(x1 + 4.0, y1 + 4.0)], closed: false, construction: false, label: "Add line" })?;
+    s.run(&AddSketch {
+        element: el,
+        feature: SKETCH_2,
+        plane: Some(PlaneRef::Top),
+    })?;
+    edit(
+        s,
+        SKETCH_2,
+        SketchOp::AddPolyline {
+            points: vec![v(x1, y1), v(x1 + 4.0, y1 + 4.0)],
+            closed: false,
+            construction: false,
+            label: "Add line",
+        },
+    )?;
     edit(
         s,
         SKETCH_2,
@@ -99,8 +158,26 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
             })
         })
         .ok_or_else(|| CommandError::Invalid("no left side on the tab".into()))?;
-    edit(s, SKETCH_2, SketchOp::Delete { curves: vec![left], points: vec![], dimensions: vec![], constraints: vec![] })?;
-    edit(s, SKETCH_2, SketchOp::AddPolyline { points: vec![v(x0, y1), v(x0, y0 + GAP)], closed: false, construction: false, label: "Add line" })?;
+    edit(
+        s,
+        SKETCH_2,
+        SketchOp::Delete {
+            curves: vec![left],
+            points: vec![],
+            dimensions: vec![],
+            constraints: vec![],
+        },
+    )?;
+    edit(
+        s,
+        SKETCH_2,
+        SketchOp::AddPolyline {
+            points: vec![v(x0, y1), v(x0, y0 + GAP)],
+            closed: false,
+            construction: false,
+            label: "Add line",
+        },
+    )?;
     // The ring's outer bottom edge used in Sketch 2 (external geometry, fixed where the ring
     // puts it), a circle over its bore dimensioned Ø18, the two concentric, then made equal:
     // the Equal and the Ø18 can't both hold (the course's Equal 1 on Extrude geometry).
@@ -112,33 +189,75 @@ pub fn build_in(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
         .min_by(|a, b| a.distance(p).total_cmp(&b.distance(p)))
         .filter(|e| e.distance(p) < 1e-3)
         .ok_or_else(|| CommandError::Invalid("no bottom edge on the ring".into()))?;
-    let items = vec![(Projected::Circle(v(0.0, 0.0), RING_OUT), Link::Edge { feature: EXTRUDE_1.0, edge: e.name })];
+    let items = vec![(
+        Projected::Circle(v(0.0, 0.0), RING_OUT),
+        Link::Edge {
+            feature: EXTRUDE_1.0,
+            edge: e.name,
+        },
+    )];
     edit(s, SKETCH_2, SketchOp::Use { items })?;
     let used = circle_ids(&sketch_of(s, el, SKETCH_2)?);
-    edit(s, SKETCH_2, SketchOp::AddCircle { center: v(0.0, 0.0), radius: RING_IN, construction: false })?;
-    let bore = circle_ids(&sketch_of(s, el, SKETCH_2)?).into_iter().find(|k| !used.contains(k));
+    edit(
+        s,
+        SKETCH_2,
+        SketchOp::AddCircle {
+            center: v(0.0, 0.0),
+            radius: RING_IN,
+            construction: false,
+        },
+    )?;
+    let bore = circle_ids(&sketch_of(s, el, SKETCH_2)?)
+        .into_iter()
+        .find(|k| !used.contains(k));
     if let (Some(&a), Some(b)) = (used.first(), bore) {
         edit(
             s,
             SKETCH_2,
             SketchOp::SetDimension {
-                dimension: Dimension::new(DimensionKind::Diameter { curve: b }, 2.0 * RING_IN, std::f64::consts::FRAC_PI_4),
+                dimension: Dimension::new(
+                    DimensionKind::Diameter { curve: b },
+                    2.0 * RING_IN,
+                    std::f64::consts::FRAC_PI_4,
+                ),
                 moves: vec![],
                 radii: vec![],
             },
         )?;
         let (a, b) = (CurveRef::Curve(a), CurveRef::Curve(b));
-        edit(s, SKETCH_2, SketchOp::AddConstraint { constraints: vec![ConstraintOf::Concentric(a, b)], label: "Add concentric" })?;
-        edit(s, SKETCH_2, SketchOp::AddConstraint { constraints: vec![ConstraintOf::Equal(a, b)], label: "Add equal" })?;
+        edit(
+            s,
+            SKETCH_2,
+            SketchOp::AddConstraint {
+                constraints: vec![ConstraintOf::Concentric(a, b)],
+                label: "Add concentric",
+            },
+        )?;
+        edit(
+            s,
+            SKETCH_2,
+            SketchOp::AddConstraint {
+                constraints: vec![ConstraintOf::Equal(a, b)],
+                label: "Add equal",
+            },
+        )?;
     }
     Ok(())
 }
 
 fn circle_ids(g: &cadrs_sketch::Sketch) -> Vec<cadrs_sketch::CurveId> {
-    g.curves.iter().filter(|(_, c)| matches!(c.kind, cadrs_sketch::CurveKind::Circle { .. })).map(|(k, _)| k).collect()
+    g.curves
+        .iter()
+        .filter(|(_, c)| matches!(c.kind, cadrs_sketch::CurveKind::Circle { .. }))
+        .map(|(k, _)| k)
+        .collect()
 }
 
-fn sketch_of(s: &dyn Studio, el: ElementId, sketch: FeatureId) -> Result<cadrs_sketch::Sketch, CommandError> {
+fn sketch_of(
+    s: &dyn Studio,
+    el: ElementId,
+    sketch: FeatureId,
+) -> Result<cadrs_sketch::Sketch, CommandError> {
     s.document()
         .element(el)
         .and_then(|e| e.feature(sketch))
@@ -147,14 +266,35 @@ fn sketch_of(s: &dyn Studio, el: ElementId, sketch: FeatureId) -> Result<cadrs_s
         .ok_or_else(|| CommandError::Invalid("sketch not found".into()))
 }
 
-fn extrude(s: &mut dyn Studio, el: ElementId, sketch: FeatureId, feature: FeatureId, seed: Vec2, depth: f64) -> Result<(), CommandError> {
+fn extrude(
+    s: &mut dyn Studio,
+    el: ElementId,
+    sketch: FeatureId,
+    feature: FeatureId,
+    seed: Vec2,
+    depth: f64,
+) -> Result<(), CommandError> {
     let g = sketch_of(s, el, sketch)?;
     let regions = super::region_refs(sketch, &g, &[seed]);
     if regions.len() != 1 {
-        return Err(CommandError::Invalid("a region of the stand-in is missing".into()));
+        return Err(CommandError::Invalid(
+            "a region of the stand-in is missing".into(),
+        ));
     }
-    let e = ExtrudeFeature { op: BooleanOp::New, ..super::extrude_of(regions, depth) };
-    s.run(&AddExtrude { element: el, feature, extrude: ExtrudeFeature::default() })?;
-    s.run(&SetExtrude { element: el, feature, extrude: e, label: "Extrude".into() })?;
+    let e = ExtrudeFeature {
+        op: BooleanOp::New,
+        ..super::extrude_of(regions, depth)
+    };
+    s.run(&AddExtrude {
+        element: el,
+        feature,
+        extrude: ExtrudeFeature::default(),
+    })?;
+    s.run(&SetExtrude {
+        element: el,
+        feature,
+        extrude: e,
+        label: "Extrude".into(),
+    })?;
     Ok(())
 }

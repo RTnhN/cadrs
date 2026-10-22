@@ -38,10 +38,29 @@ impl Sizes {
         let r = &board.rules;
         let classes = r.net_classes.iter();
         Sizes {
-            track: classes.clone().map(|c| c.track_width).max().unwrap_or(0).max(r.min_track_width),
-            clearance: classes.clone().map(|c| c.clearance).max().unwrap_or(0).max(r.min_clearance),
-            via: classes.clone().map(|c| c.via_diameter).max().unwrap_or(0).max(r.min_via_diameter),
-            drill: classes.map(|c| c.via_drill).max().unwrap_or(0).max(r.min_drill),
+            track: classes
+                .clone()
+                .map(|c| c.track_width)
+                .max()
+                .unwrap_or(0)
+                .max(r.min_track_width),
+            clearance: classes
+                .clone()
+                .map(|c| c.clearance)
+                .max()
+                .unwrap_or(0)
+                .max(r.min_clearance),
+            via: classes
+                .clone()
+                .map(|c| c.via_diameter)
+                .max()
+                .unwrap_or(0)
+                .max(r.min_via_diameter),
+            drill: classes
+                .map(|c| c.via_drill)
+                .max()
+                .unwrap_or(0)
+                .max(r.min_drill),
             edge: r.copper_edge_clearance,
             hole: r.hole_clearance,
             hole_to_hole: r.hole_to_hole,
@@ -86,7 +105,9 @@ fn merge(owner: u32, net: u32) -> u32 {
 }
 
 fn bounds_of(r: &Region) -> Option<Bounds> {
-    r.iter().flatten().fold(None, |acc, p| Some(Bounds::union(acc, Bounds::of(*p))))
+    r.iter()
+        .flatten()
+        .fold(None, |acc, p| Some(Bounds::union(acc, Bounds::of(*p))))
 }
 
 impl Grid {
@@ -97,19 +118,48 @@ impl Grid {
         let sizes = Sizes::of(board);
         let layers: Vec<Layer> = board.copper().collect();
         let items = cadrs_eda::copper::items(board);
-        let mut nets: Vec<String> = items.iter().map(|c| c.net.clone()).filter(|n| !n.is_empty()).collect();
+        let mut nets: Vec<String> = items
+            .iter()
+            .map(|c| c.net.clone())
+            .filter(|n| !n.is_empty())
+            .collect();
         nets.extend(board.nets.iter().filter(|n| !n.is_empty()).cloned());
         nets.sort();
         nets.dedup();
         let outline = cadrs_eda::outline::board_region(board);
-        let extent = bounds_of(&outline).or_else(|| items.iter().map(|c| c.bounds).reduce(|a, b| Bounds::union(Some(a), b))).unwrap_or(Bounds { min: Pt::ZERO, max: Pt::ZERO });
+        let extent = bounds_of(&outline)
+            .or_else(|| {
+                items
+                    .iter()
+                    .map(|c| c.bounds)
+                    .reduce(|a, b| Bounds::union(Some(a), b))
+            })
+            .unwrap_or(Bounds {
+                min: Pt::ZERO,
+                max: Pt::ZERO,
+            });
         let snap = |v: Nm| v.div_euclid(pitch) * pitch;
         let origin = Pt::new(snap(extent.min.x), snap(extent.min.y));
         let nx = ((extent.max.x - origin.x) / pitch + 1).max(1) as u32;
         let ny = ((extent.max.y - origin.y) / pitch + 1).max(1) as u32;
         let nl = layers.len().max(1) as u32;
-        let params = Params { nx, ny, nl, slots: 1, ..Default::default() };
-        let mut g = Grid { params, origin, pitch, layers, owner: vec![FREE; params.cells() as usize], via_owner: vec![FREE; (nx * ny) as usize], nets, sizes };
+        let params = Params {
+            nx,
+            ny,
+            nl,
+            slots: 1,
+            ..Default::default()
+        };
+        let mut g = Grid {
+            params,
+            origin,
+            pitch,
+            layers,
+            owner: vec![FREE; params.cells() as usize],
+            via_owner: vec![FREE; (nx * ny) as usize],
+            nets,
+            sizes,
+        };
         g.walls_off_board(&outline);
         for c in &items {
             g.stamp_item(c);
@@ -133,23 +183,31 @@ impl Grid {
     }
 
     pub fn center(&self, x: u32, y: u32) -> Pt {
-        Pt::new(self.origin.x + x as Nm * self.pitch, self.origin.y + y as Nm * self.pitch)
+        Pt::new(
+            self.origin.x + x as Nm * self.pitch,
+            self.origin.y + y as Nm * self.pitch,
+        )
     }
 
     /// The cell nearest `p`, if on the grid.
     pub fn cell_at(&self, p: Pt) -> Option<(u32, u32)> {
         let f = |v: Nm, o: Nm| ((v - o) as f64 / self.pitch as f64).round() as i64;
         let (x, y) = (f(p.x, self.origin.x), f(p.y, self.origin.y));
-        (x >= 0 && y >= 0 && x < self.params.nx as i64 && y < self.params.ny as i64).then_some((x as u32, y as u32))
+        (x >= 0 && y >= 0 && x < self.params.nx as i64 && y < self.params.ny as i64)
+            .then_some((x as u32, y as u32))
     }
 
     /// The id of net `name` (0: none).
     pub fn net_id(&self, name: &str) -> u32 {
-        self.nets.binary_search_by(|n| n.as_str().cmp(name)).map_or(0, |i| i as u32 + 1)
+        self.nets
+            .binary_search_by(|n| n.as_str().cmp(name))
+            .map_or(0, |i| i as u32 + 1)
     }
 
     pub fn net_name(&self, id: u32) -> &str {
-        id.checked_sub(1).and_then(|i| self.nets.get(i as usize)).map_or("", |s| s.as_str())
+        id.checked_sub(1)
+            .and_then(|i| self.nets.get(i as usize))
+            .map_or("", |s| s.as_str())
     }
 
     pub fn layer_index(&self, l: Layer) -> Option<usize> {
@@ -161,9 +219,16 @@ impl Grid {
         let Some(b) = bounds_of(r) else { return vec![] };
         let p = self.pitch;
         let lo = |v: Nm, o: Nm| (((v - o) as f64) / p as f64).ceil().max(0.0) as i64;
-        let hi = |v: Nm, o: Nm, n: u32| ((((v - o) as f64) / p as f64).floor() as i64).min(n as i64 - 1);
-        let (x0, x1) = (lo(b.min.x, self.origin.x), hi(b.max.x, self.origin.x, self.params.nx));
-        let (y0, y1) = (lo(b.min.y, self.origin.y), hi(b.max.y, self.origin.y, self.params.ny));
+        let hi =
+            |v: Nm, o: Nm, n: u32| ((((v - o) as f64) / p as f64).floor() as i64).min(n as i64 - 1);
+        let (x0, x1) = (
+            lo(b.min.x, self.origin.x),
+            hi(b.max.x, self.origin.x, self.params.nx),
+        );
+        let (y0, y1) = (
+            lo(b.min.y, self.origin.y),
+            hi(b.max.y, self.origin.y, self.params.ny),
+        );
         let mut out = vec![];
         for y in y0..=y1 {
             for x in x0..=x1 {
@@ -219,11 +284,17 @@ impl Grid {
         if matches!(c.item, Item::Zone(..)) {
             return;
         }
-        let net = if c.net.is_empty() { WALL } else { self.net_id(&c.net) };
+        let net = if c.net.is_empty() {
+            WALL
+        } else {
+            self.net_id(&c.net)
+        };
         let s = self.sizes;
         let mut on_any: Vec<Region> = vec![];
         for (l, r) in &c.layers {
-            let Some(li) = self.layer_index(*l) else { continue };
+            let Some(li) = self.layer_index(*l) else {
+                continue;
+            };
             self.stamp_layer(&poly::inflate(r, s.clearance + s.track / 2), li, net);
             on_any.push(r.clone());
         }
@@ -231,7 +302,10 @@ impl Grid {
             // No via on or beside a surface-mount pad, not even its own net's: a track leaves
             // the pad first (a via in the pad wicks its solder away).
             let smd = matches!(c.item, Item::Pad(..)) && c.hole.is_none();
-            self.stamp_sites(&poly::inflate(&poly::union_all(&on_any), s.clearance + s.via / 2 + SLACK), if smd { WALL } else { net });
+            self.stamp_sites(
+                &poly::inflate(&poly::union_all(&on_any), s.clearance + s.via / 2 + SLACK),
+                if smd { WALL } else { net },
+            );
         }
         if let Some(h) = &c.hole {
             // Other nets keep clear of a pad's hole; its own net's track may end on the pad.
@@ -239,7 +313,13 @@ impl Grid {
             for li in 0..self.layers.len() {
                 self.stamp_layer(&grown, li, net);
             }
-            self.stamp_sites(&poly::inflate(h, (s.hole + s.via / 2).max(s.hole_to_hole + s.drill / 2) + SLACK), WALL);
+            self.stamp_sites(
+                &poly::inflate(
+                    h,
+                    (s.hole + s.via / 2).max(s.hole_to_hole + s.drill / 2) + SLACK,
+                ),
+                WALL,
+            );
         }
     }
 }

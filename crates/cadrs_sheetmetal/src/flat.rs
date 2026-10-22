@@ -76,10 +76,17 @@ pub struct FlatCorner {
 /// What made a relief cut.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ReliefSource {
-    Corner { bends: (JointId, JointId) },
-    BendEnd { bend: JointId, end: BendEnd },
+    Corner {
+        bends: (JointId, JointId),
+    },
+    BendEnd {
+        bend: JointId,
+        end: BendEnd,
+    },
     /// P3I.6: the model's `index`-th flat cut (SM14, [`crate::flat_edit`]).
-    Flat { index: usize },
+    Flat {
+        index: usize,
+    },
 }
 
 /// One relief cut.
@@ -126,7 +133,10 @@ impl FlatPart {
     }
 
     pub fn placement(&self, w: WallId) -> Option<&Affine2> {
-        self.placements.iter().find(|(id, _)| *id == w).map(|(_, m)| m)
+        self.placements
+            .iter()
+            .find(|(id, _)| *id == w)
+            .map(|(_, m)| m)
     }
 
     pub fn piece(&self, s: PieceSource) -> Option<&FlatPiece> {
@@ -143,9 +153,15 @@ impl FlatPart {
 
     /// The outline's bounds.
     pub fn bounds(&self) -> Option<(P2, P2)> {
-        self.outline.iter().filter_map(Polygon::bounds).reduce(|(a, b), (c, d)| {
-            (P2::new(a.x.min(c.x), a.y.min(c.y)), P2::new(b.x.max(d.x), b.y.max(d.y)))
-        })
+        self.outline
+            .iter()
+            .filter_map(Polygon::bounds)
+            .reduce(|(a, b), (c, d)| {
+                (
+                    P2::new(a.x.min(c.x), a.y.min(c.y)),
+                    P2::new(b.x.max(d.x), b.y.max(d.y)),
+                )
+            })
     }
 }
 
@@ -153,11 +169,19 @@ impl FlatPart {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum FlatError {
     /// Two pieces' material overlaps once flat; `region` is the overlap, for the flat view.
-    Collision { a: PieceSource, b: PieceSource, area: f64, region: Vec<Polygon> },
+    Collision {
+        a: PieceSource,
+        b: PieceSource,
+        area: f64,
+        region: Vec<Polygon>,
+    },
     /// The joint closes a loop of bends that doesn't unfold consistently.
     BendLoop { joint: JointId },
     /// The joint can't be laid flat.
-    BadJoint { joint: JointId, problem: JointProblem },
+    BadJoint {
+        joint: JointId,
+        problem: JointProblem,
+    },
     /// The joint names a wall the model doesn't have.
     MissingWall { joint: JointId },
 }
@@ -167,9 +191,14 @@ impl FlatError {
     pub fn message(&self) -> String {
         match self {
             FlatError::Collision { .. } => "Collision in sheet metal flat pattern".into(),
-            FlatError::BendLoop { .. } => "The bends close a loop: the sheet can't be laid flat (make one of them a rip)".into(),
+            FlatError::BendLoop { .. } => {
+                "The bends close a loop: the sheet can't be laid flat (make one of them a rip)"
+                    .into()
+            }
             FlatError::BadJoint { problem, .. } => problem.message(),
-            FlatError::MissingWall { .. } => "A joint refers to a wall that no longer exists".into(),
+            FlatError::MissingWall { .. } => {
+                "A joint refers to a wall that no longer exists".into()
+            }
         }
     }
 }
@@ -201,12 +230,22 @@ pub enum JointProblem {
 impl JointProblem {
     pub fn message(&self) -> String {
         match self {
-            JointProblem::DeductionUndefined => "A bend deduction can't apply to a bend of 180° or more".into(),
-            JointProblem::TangentLengths { a, b } => format!("The bend's tangent lines are {a:.4} and {b:.4} long"),
-            JointProblem::NotOnEdge { second: false } => "The joint isn't on the edge of its first wall".into(),
-            JointProblem::NotOnEdge { second: true } => "The joint isn't on the edge of its second wall".into(),
+            JointProblem::DeductionUndefined => {
+                "A bend deduction can't apply to a bend of 180° or more".into()
+            }
+            JointProblem::TangentLengths { a, b } => {
+                format!("The bend's tangent lines are {a:.4} and {b:.4} long")
+            }
+            JointProblem::NotOnEdge { second: false } => {
+                "The joint isn't on the edge of its first wall".into()
+            }
+            JointProblem::NotOnEdge { second: true } => {
+                "The joint isn't on the edge of its second wall".into()
+            }
             JointProblem::NegativeAllowance { allowance } => {
-                format!("The bend's allowance is negative ({allowance:.4}): its deduction or K factor is too large for it")
+                format!(
+                    "The bend's allowance is negative ({allowance:.4}): its deduction or K factor is too large for it"
+                )
             }
             JointProblem::Degenerate => "The joint is degenerate".into(),
         }
@@ -238,15 +277,25 @@ fn local_outline(m: &Model, w: WallId) -> Option<Polygon> {
 
 fn local_seg(m: &Model, w: WallId, s: Seg2) -> Seg2 {
     let wall = m.wall(w).expect("checked");
-    Seg2::new(wall.flat_local(&m.params, s.a), wall.flat_local(&m.params, s.b))
+    Seg2::new(
+        wall.flat_local(&m.params, s.a),
+        wall.flat_local(&m.params, s.b),
+    )
 }
 
 /// The flat width of a connecting joint (bend allowance; 0 for a tangent joint).
 fn joint_width(m: &Model, j: &Joint) -> Result<f64, JointProblem> {
     match &j.kind {
         JointKind::Bend(b) => {
-            let w = b.allowance(&m.params).filter(|w| w.is_finite()).ok_or(JointProblem::DeductionUndefined)?;
-            if w < 0.0 { Err(JointProblem::NegativeAllowance { allowance: w }) } else { Ok(w) }
+            let w = b
+                .allowance(&m.params)
+                .filter(|w| w.is_finite())
+                .ok_or(JointProblem::DeductionUndefined)?;
+            if w < 0.0 {
+                Err(JointProblem::NegativeAllowance { allowance: w })
+            } else {
+                Ok(w)
+            }
         }
         JointKind::Tangent { .. } => Ok(0.0),
         JointKind::Rip { .. } => Err(JointProblem::Degenerate),
@@ -254,18 +303,35 @@ fn joint_width(m: &Model, j: &Joint) -> Result<f64, JointProblem> {
 }
 
 /// The placement of `child` laid beside `parent` (already placed) across joint `j`.
-fn place_child(m: &Model, j: &Joint, parent: WallId, pm: &Affine2, child: WallId) -> Result<Affine2, JointProblem> {
+fn place_child(
+    m: &Model,
+    j: &Joint,
+    parent: WallId,
+    pm: &Affine2,
+    child: WallId,
+) -> Result<Affine2, JointProblem> {
     let width = joint_width(m, j)?;
-    let sp = local_seg(m, parent, j.segment_on(parent).expect("joint touches parent"));
+    let sp = local_seg(
+        m,
+        parent,
+        j.segment_on(parent).expect("joint touches parent"),
+    );
     let sc = local_seg(m, child, j.segment_on(child).expect("joint touches child"));
     let tol = 1e-6 * sp.len().max(1.0);
     if (sp.len() - sc.len()).abs() > tol {
-        return Err(JointProblem::TangentLengths { a: sp.len(), b: sc.len() });
+        return Err(JointProblem::TangentLengths {
+            a: sp.len(),
+            b: sc.len(),
+        });
     }
     let lp = local_outline(m, parent).expect("wall");
     let lc = local_outline(m, child).expect("wall");
-    let ip = inward_normal(&lp, sp).ok_or(JointProblem::NotOnEdge { second: parent != j.a })?;
-    let ic = inward_normal(&lc, sc).ok_or(JointProblem::NotOnEdge { second: child != j.a })?;
+    let ip = inward_normal(&lp, sp).ok_or(JointProblem::NotOnEdge {
+        second: parent != j.a,
+    })?;
+    let ic = inward_normal(&lc, sc).ok_or(JointProblem::NotOnEdge {
+        second: child != j.a,
+    })?;
     let fa = pm.apply(sp.a);
     let e_p = pm.apply_vec(sp.dir());
     let out = -pm.apply_vec(ip); // away from the parent, flat
@@ -321,15 +387,23 @@ pub fn flatten(m: &Model) -> FlatPattern {
         let mut queue = VecDeque::from([root]);
         while let Some(w) = queue.pop_front() {
             let wm = placed[&w];
-            for j in usable.iter().filter(|j| j.connects() && (j.a == w || j.b == w)) {
+            for j in usable
+                .iter()
+                .filter(|j| j.connects() && (j.a == w || j.b == w))
+            {
                 if tree.iter().any(|(id, _)| *id == j.id) {
                     continue;
                 }
                 let other = j.other(w);
                 match place_child(m, j, w, &wm, other) {
                     Err(problem) => {
-                        if !errors.iter().any(|e| matches!(e, FlatError::BadJoint { joint, .. } if *joint == j.id)) {
-                            errors.push(FlatError::BadJoint { joint: j.id, problem });
+                        if !errors.iter().any(
+                            |e| matches!(e, FlatError::BadJoint { joint, .. } if *joint == j.id),
+                        ) {
+                            errors.push(FlatError::BadJoint {
+                                joint: j.id,
+                                problem,
+                            });
                         }
                     }
                     Ok(cm) => {
@@ -365,8 +439,12 @@ pub fn flatten(m: &Model) -> FlatPattern {
         }
         for (jid, parent) in &tree {
             let j = m.joint(*jid).expect("joint");
-            let JointKind::Bend(b) = &j.kind else { continue };
-            let Some(s) = strip_from(m, j, *parent, &placed) else { continue };
+            let JointKind::Bend(b) = &j.kind else {
+                continue;
+            };
+            let Some(s) = strip_from(m, j, *parent, &placed) else {
+                continue;
+            };
             let t_parent = s.line;
             let t_child = t_parent.offset(s.out * s.width);
             if s.width > 0.0 {
@@ -376,7 +454,11 @@ pub fn flatten(m: &Model) -> FlatPattern {
                     cut: Vec::new(),
                 });
             }
-            let (tangent_a, tangent_b) = if *parent == j.a { (t_parent, t_child) } else { (t_child, t_parent) };
+            let (tangent_a, tangent_b) = if *parent == j.a {
+                (t_parent, t_child)
+            } else {
+                (t_child, t_parent)
+            };
             part.bends.push(FlatBend {
                 joint: j.id,
                 name: j.name.clone(),
@@ -389,7 +471,12 @@ pub fn flatten(m: &Model) -> FlatPattern {
             });
         }
         // Keep bends in table order.
-        let rank: HashMap<JointId, usize> = m.joints.iter().enumerate().map(|(i, j)| (j.id, i)).collect();
+        let rank: HashMap<JointId, usize> = m
+            .joints
+            .iter()
+            .enumerate()
+            .map(|(i, j)| (j.id, i))
+            .collect();
         part.bends.sort_by_key(|b| rank[&b.joint]);
         apply_reliefs(m, &mut part, &tree, &placed);
         // What is left of each piece, the outline, and the visible bend lines.
@@ -402,16 +489,29 @@ pub fn flatten(m: &Model) -> FlatPattern {
                 .flat_map(|c| c.shapes.iter().cloned())
                 .collect();
             let piece = &part.pieces[i].polygon;
-            part.pieces[i].cut = if shapes.is_empty() { vec![piece.clone()] } else { poly::difference(std::slice::from_ref(piece), &shapes) };
+            part.pieces[i].cut = if shapes.is_empty() {
+                vec![piece.clone()]
+            } else {
+                poly::difference(std::slice::from_ref(piece), &shapes)
+            };
         }
         // The booleans round to a 1 nm grid: put their vertices back on the exact points (piece
         // and cut corners, and where their edges cross).
-        let exact = exact_points(part.pieces.iter().map(|p| &p.polygon).chain(part.cuts.iter().flat_map(|c| c.shapes.iter())));
+        let exact = exact_points(
+            part.pieces
+                .iter()
+                .map(|p| &p.polygon)
+                .chain(part.cuts.iter().flat_map(|c| c.shapes.iter())),
+        );
         let snap = |p: &Polygon| poly::snap_to(p, &exact, 10.0 * GRID);
         for pc in &mut part.pieces {
             pc.cut = pc.cut.iter().map(snap).collect();
         }
-        let all: Vec<Polygon> = part.pieces.iter().flat_map(|p| p.cut.iter().cloned()).collect();
+        let all: Vec<Polygon> = part
+            .pieces
+            .iter()
+            .flat_map(|p| p.cut.iter().cloned())
+            .collect();
         part.outline = poly::union(&all).iter().map(snap).collect();
         for b in &mut part.bends {
             let region: Vec<Polygon> = part
@@ -429,7 +529,9 @@ pub fn flatten(m: &Model) -> FlatPattern {
                 .flat_map(|t| {
                     let n = perp(t.dir());
                     let nudge = if (mid - t.a).dot(&n) >= 0.0 { n } else { -n } * (10.0 * GRID);
-                    poly::clip_segment(t.offset(nudge), &region).into_iter().map(move |s| s.offset(-nudge))
+                    poly::clip_segment(t.offset(nudge), &region)
+                        .into_iter()
+                        .map(move |s| s.offset(-nudge))
                 })
                 .collect();
         }
@@ -437,14 +539,28 @@ pub fn flatten(m: &Model) -> FlatPattern {
         for i in 0..part.pieces.len() {
             for k in i + 1..part.pieces.len() {
                 let (pa, pb) = (&part.pieces[i], &part.pieces[k]);
-                let rough: f64 = pa.cut.iter().flat_map(|a| pb.cut.iter().map(move |b| poly::overlap_area(a, b))).sum();
+                let rough: f64 = pa
+                    .cut
+                    .iter()
+                    .flat_map(|a| pb.cut.iter().map(move |b| poly::overlap_area(a, b)))
+                    .sum();
                 if rough <= 1e-12 {
                     continue;
                 }
-                let region: Vec<Polygon> = pa.cut.iter().flat_map(|a| pb.cut.iter().flat_map(move |b| poly::intersection(a, b))).map(|r| snap(&r)).collect();
+                let region: Vec<Polygon> = pa
+                    .cut
+                    .iter()
+                    .flat_map(|a| pb.cut.iter().flat_map(move |b| poly::intersection(a, b)))
+                    .map(|r| snap(&r))
+                    .collect();
                 let area: f64 = region.iter().map(Polygon::area).sum();
                 // Pieces that only share an edge leave slivers at most a grid step wide.
-                let perim = pa.cut.iter().chain(pb.cut.iter()).map(poly::perimeter).fold(0.0, f64::max);
+                let perim = pa
+                    .cut
+                    .iter()
+                    .chain(pb.cut.iter())
+                    .map(poly::perimeter)
+                    .fold(0.0, f64::max);
                 if area > 4.0 * GRID * perim + 1e-12 {
                     errors.push(FlatError::Collision {
                         a: pa.source,
@@ -494,9 +610,13 @@ fn exact_points<'a>(polys: impl Iterator<Item = &'a Polygon>) -> Vec<P2> {
 
 /// Whether two placements of a wall agree (checked on its outline's points).
 fn same_map(a: &Affine2, b: &Affine2, m: &Model, w: WallId) -> bool {
-    let Some(o) = local_outline(m, w) else { return true };
+    let Some(o) = local_outline(m, w) else {
+        return true;
+    };
     let size = o.bounds().map(|(lo, hi)| (hi - lo).norm()).unwrap_or(1.0);
-    o.outer.iter().all(|p| (a.apply(*p) - b.apply(*p)).norm() < 1e-6 * size.max(1.0))
+    o.outer
+        .iter()
+        .all(|p| (a.apply(*p) - b.apply(*p)).norm() < 1e-6 * size.max(1.0))
 }
 
 /// One bend's strip as seen from a wall it joins: the tangent line on that wall (flat), the unit
@@ -511,7 +631,9 @@ struct Strip {
 }
 
 fn strip_from(m: &Model, j: &Joint, w: WallId, placed: &HashMap<WallId, Affine2>) -> Option<Strip> {
-    let JointKind::Bend(b) = &j.kind else { return None };
+    let JointKind::Bend(b) = &j.kind else {
+        return None;
+    };
     let width = joint_width(m, j).ok()?;
     let pm = placed.get(&w)?;
     let s = local_seg(m, w, j.segment_on(w)?);
@@ -529,7 +651,10 @@ fn strip_from(m: &Model, j: &Joint, w: WallId, placed: &HashMap<WallId, Affine2>
 /// Where `(x − line.a)·out = o1` meets the other strip's `= o2`.
 fn band_point(a: &Strip, o1: f64, b: &Strip, o2: f64) -> Option<P2> {
     let mtx = nalgebra::Matrix2::new(a.out.x, a.out.y, b.out.x, b.out.y);
-    let rhs = nalgebra::Vector2::new(o1 + a.line.a.coords.dot(&a.out), o2 + b.line.a.coords.dot(&b.out));
+    let rhs = nalgebra::Vector2::new(
+        o1 + a.line.a.coords.dot(&a.out),
+        o2 + b.line.a.coords.dot(&b.out),
+    );
     mtx.try_inverse().map(|inv| P2::from(inv * rhs))
 }
 
@@ -540,10 +665,19 @@ fn along(s: &Strip, p: P2) -> f64 {
 
 /// The pieces around a bend: its region and its two walls.
 fn bend_pieces(j: &Joint) -> [PieceSource; 3] {
-    [PieceSource::Wall(j.a), PieceSource::Bend(j.id), PieceSource::Wall(j.b)]
+    [
+        PieceSource::Wall(j.a),
+        PieceSource::Bend(j.id),
+        PieceSource::Wall(j.b),
+    ]
 }
 
-fn apply_reliefs(m: &Model, part: &mut FlatPart, tree: &[(JointId, WallId)], placed: &HashMap<WallId, Affine2>) {
+fn apply_reliefs(
+    m: &Model,
+    part: &mut FlatPart,
+    tree: &[(JointId, WallId)],
+    placed: &HashMap<WallId, Affine2>,
+) {
     let p = &m.params;
     let size = part
         .pieces
@@ -554,21 +688,37 @@ fn apply_reliefs(m: &Model, part: &mut FlatPart, tree: &[(JointId, WallId)], pla
         .max(1.0);
     let mut cuts: Vec<ReliefCut> = Vec::new();
     let mut cornered: HashSet<(JointId, BendEnd)> = HashSet::new();
-    let bends: Vec<&Joint> = tree.iter().filter_map(|(id, _)| m.joint(*id)).filter(|j| j.bend().is_some()).collect();
+    let bends: Vec<&Joint> = tree
+        .iter()
+        .filter_map(|(id, _)| m.joint(*id))
+        .filter(|j| j.bend().is_some())
+        .collect();
     let piece_poly = |part: &FlatPart, s: PieceSource| part.piece(s).map(|pc| pc.polygon.clone());
 
     // Corners: two bends of the same wall whose regions cross near one end of each.
     for (i, j1) in bends.iter().enumerate() {
         for j2 in &bends[i + 1..] {
-            let Some(w) = [j1.a, j1.b].into_iter().find(|w| *w == j2.a || *w == j2.b) else { continue };
-            let (Some(s1), Some(s2)) = (strip_from(m, j1, w, placed), strip_from(m, j2, w, placed)) else {
+            let Some(w) = [j1.a, j1.b].into_iter().find(|w| *w == j2.a || *w == j2.b) else {
+                continue;
+            };
+            let (Some(s1), Some(s2)) = (strip_from(m, j1, w, placed), strip_from(m, j2, w, placed))
+            else {
                 continue;
             };
             if s1.out.perp(&s2.out).abs() < 1e-6 {
                 continue; // parallel bends never meet
             }
-            let corners = [(0.0, 0.0), (s1.width, 0.0), (s1.width, s2.width), (0.0, s2.width)];
-            let Some(pts) = corners.iter().map(|(o1, o2)| band_point(&s1, *o1, &s2, *o2)).collect::<Option<Vec<P2>>>() else {
+            let corners = [
+                (0.0, 0.0),
+                (s1.width, 0.0),
+                (s1.width, s2.width),
+                (0.0, s2.width),
+            ];
+            let Some(pts) = corners
+                .iter()
+                .map(|(o1, o2)| band_point(&s1, *o1, &s2, *o2))
+                .collect::<Option<Vec<P2>>>()
+            else {
                 continue;
             };
             let q = Polygon::new(pts.clone());
@@ -581,30 +731,50 @@ fn apply_reliefs(m: &Model, part: &mut FlatPart, tree: &[(JointId, WallId)], pla
             let probe = 1e-4 * size;
             let end_of = |s: &Strip| -> Option<BendEnd> {
                 let ts: Vec<f64> = pts.iter().map(|q| along(s, *q)).collect();
-                let (q0, q1) = (ts.iter().copied().fold(f64::INFINITY, f64::min), ts.iter().copied().fold(f64::NEG_INFINITY, f64::max));
+                let (q0, q1) = (
+                    ts.iter().copied().fold(f64::INFINITY, f64::min),
+                    ts.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+                );
                 let len = s.line.len();
-                let end = if along(s, c) >= len * 0.5 { BendEnd::End } else { BendEnd::Start };
+                let end = if along(s, c) >= len * 0.5 {
+                    BendEnd::End
+                } else {
+                    BendEnd::Start
+                };
                 let (point, outward) = match end {
                     BendEnd::End => (s.line.b, s.line.dir()),
                     BendEnd::Start => (s.line.a, -s.line.dir()),
                 };
-                let carries_on = wall_poly.as_ref().is_some_and(|wp| wp.contains(point + outward * probe - s.out * probe));
-                let slack = if carries_on { 0.0 } else { p.thickness + p.minimal_gap };
+                let carries_on = wall_poly
+                    .as_ref()
+                    .is_some_and(|wp| wp.contains(point + outward * probe - s.out * probe));
+                let slack = if carries_on {
+                    0.0
+                } else {
+                    p.thickness + p.minimal_gap
+                };
                 let gap = (q0 - len).max(-q1).max(0.0);
                 (gap <= slack + 1e-6 * size).then_some(end)
             };
-            let (Some(e1), Some(e2)) = (end_of(&s1), end_of(&s2)) else { continue };
+            let (Some(e1), Some(e2)) = (end_of(&s1), end_of(&s2)) else {
+                continue;
+            };
             cornered.insert((s1.joint, e1));
             cornered.insert((s2.joint, e2));
             let relief = m.corner_relief(s1.joint, s2.joint);
-            let source = ReliefSource::Corner { bends: (s1.joint, s2.joint) };
-            let mut targets: Vec<PieceSource> = bend_pieces(j1).into_iter().chain(bend_pieces(j2)).collect();
+            let source = ReliefSource::Corner {
+                bends: (s1.joint, s2.joint),
+            };
+            let mut targets: Vec<PieceSource> =
+                bend_pieces(j1).into_iter().chain(bend_pieces(j2)).collect();
             targets.sort();
             targets.dedup();
             let mut shapes = Vec::new();
             // The shared wall's material past both tangent lines would stick into the bends.
             if let Some(wall) = piece_poly(part, PieceSource::Wall(s1.wall)) {
-                let left = wall.clip_half_plane(s1.line.a, s1.out).clip_half_plane(s2.line.a, s2.out);
+                let left = wall
+                    .clip_half_plane(s1.line.a, s1.out)
+                    .clip_half_plane(s2.line.a, s2.out);
                 if left.area() > 1e-12 {
                     shapes.push(left);
                 }
@@ -615,13 +785,19 @@ fn apply_reliefs(m: &Model, part: &mut FlatPart, tree: &[(JointId, WallId)], pla
                 let (d0, d1) = (pts[0], pts[2]);
                 let dn = perp((d1 - d0).normalize());
                 for s in [&s1, &s2] {
-                    let mid = P2::from((s.line.a.coords + s.line.b.coords) / 2.0) + s.out * (s.width / 2.0);
+                    let mid = P2::from((s.line.a.coords + s.line.b.coords) / 2.0)
+                        + s.out * (s.width / 2.0);
                     let away = if (mid - d0).dot(&dn) >= 0.0 { -dn } else { dn };
                     // Everything on the other side of the diagonal, plus half the gap.
                     let reach = 4.0 * (s1.width + s2.width) + 1.0;
                     let o = d0 - away * (p.minimal_gap / 2.0);
                     let along_d = (d1 - d0).normalize();
-                    let half = Polygon::new(vec![o - along_d * reach, o + along_d * reach, o + along_d * reach + away * reach, o - along_d * reach + away * reach]);
+                    let half = Polygon::new(vec![
+                        o - along_d * reach,
+                        o + along_d * reach,
+                        o + along_d * reach + away * reach,
+                        o - along_d * reach + away * reach,
+                    ]);
                     if let Some(region) = piece_poly(part, PieceSource::Bend(s.joint)) {
                         shapes.extend(poly::intersection(&half, &region));
                     }
@@ -651,19 +827,30 @@ fn apply_reliefs(m: &Model, part: &mut FlatPart, tree: &[(JointId, WallId)], pla
 
     // Bend reliefs where one wall carries on past a bend's end.
     for j in &bends {
-        let Some((_, parent)) = tree.iter().find(|(id, _)| *id == j.id) else { continue };
-        let child = j.other(*parent);
-        let (Some(sp), Some(sc)) = (strip_from(m, j, *parent, placed), strip_from(m, j, child, placed)) else {
+        let Some((_, parent)) = tree.iter().find(|(id, _)| *id == j.id) else {
             continue;
         };
-        let (Some(pp), Some(cp)) = (piece_poly(part, PieceSource::Wall(*parent)), piece_poly(part, PieceSource::Wall(child))) else {
+        let child = j.other(*parent);
+        let (Some(sp), Some(sc)) = (
+            strip_from(m, j, *parent, placed),
+            strip_from(m, j, child, placed),
+        ) else {
+            continue;
+        };
+        let (Some(pp), Some(cp)) = (
+            piece_poly(part, PieceSource::Wall(*parent)),
+            piece_poly(part, PieceSource::Wall(child)),
+        ) else {
             continue;
         };
         let d = 1e-4 * size;
         let dir = sp.line.dir();
         // The parent's segment runs the same way as the bend's own (`a` ends match), so its
         // ends are the bend's Start and End.
-        for (end, point, outward) in [(BendEnd::Start, sp.line.a, -dir), (BendEnd::End, sp.line.b, dir)] {
+        for (end, point, outward) in [
+            (BendEnd::Start, sp.line.a, -dir),
+            (BendEnd::End, sp.line.b, dir),
+        ] {
             if cornered.contains(&(j.id, end)) {
                 continue;
             }
@@ -693,7 +880,9 @@ fn apply_reliefs(m: &Model, part: &mut FlatPart, tree: &[(JointId, WallId)], pla
                     x: outward,
                     y: sp.out,
                 };
-                shapes.push(relief::bend_relief_shape(&relief, p, sp.radius, sp.width, &f, size));
+                shapes.push(relief::bend_relief_shape(
+                    &relief, p, sp.radius, sp.width, &f, size,
+                ));
             }
             if child_on {
                 let f = Frame {
@@ -701,7 +890,9 @@ fn apply_reliefs(m: &Model, part: &mut FlatPart, tree: &[(JointId, WallId)], pla
                     x: outward,
                     y: sc.out,
                 };
-                shapes.push(relief::bend_relief_shape(&relief, p, sp.radius, sp.width, &f, size));
+                shapes.push(relief::bend_relief_shape(
+                    &relief, p, sp.radius, sp.width, &f, size,
+                ));
             }
             cuts.push(ReliefCut {
                 source,
@@ -717,11 +908,20 @@ fn apply_reliefs(m: &Model, part: &mut FlatPart, tree: &[(JointId, WallId)], pla
     cuts.extend(crate::flat_edit::part_cuts(m, part));
     // What each cut removes from each of its pieces, in the piece's own coordinates (snapped to
     // the exact points, mapped the same way).
-    let exact = exact_points(part.pieces.iter().map(|p| &p.polygon).chain(cuts.iter().flat_map(|c| c.shapes.iter())));
+    let exact = exact_points(
+        part.pieces
+            .iter()
+            .map(|p| &p.polygon)
+            .chain(cuts.iter().flat_map(|c| c.shapes.iter())),
+    );
     for cut in &mut cuts {
         for t in &cut.targets {
             let Some(pc) = part.piece(*t) else { continue };
-            let removed: Vec<Polygon> = cut.shapes.iter().flat_map(|s| poly::intersection(s, &pc.polygon)).collect();
+            let removed: Vec<Polygon> = cut
+                .shapes
+                .iter()
+                .flat_map(|s| poly::intersection(s, &pc.polygon))
+                .collect();
             if removed.is_empty() {
                 continue;
             }
@@ -737,18 +937,29 @@ fn apply_reliefs(m: &Model, part: &mut FlatPart, tree: &[(JointId, WallId)], pla
                         };
                         let mut local: Vec<P2> = exact.iter().map(|q| back(*q)).collect();
                         local.extend(wall.outline.outer.iter().copied());
-                        removed.iter().map(|r| poly::snap_to(&r.map(back), &local, 10.0 * GRID)).collect()
+                        removed
+                            .iter()
+                            .map(|r| poly::snap_to(&r.map(back), &local, 10.0 * GRID))
+                            .collect()
                     })
                 }
                 PieceSource::Bend(jid) => part.bend(*jid).map(|b| {
                     let e = b.tangent_a.dir();
                     let n = {
                         let n = perp(e);
-                        if (b.tangent_b.a - b.tangent_a.a).dot(&n) >= 0.0 { n } else { -n }
+                        if (b.tangent_b.a - b.tangent_a.a).dot(&n) >= 0.0 {
+                            n
+                        } else {
+                            -n
+                        }
                     };
-                    let to = |q: P2| P2::new((q - b.tangent_a.a).dot(&e), (q - b.tangent_a.a).dot(&n));
+                    let to =
+                        |q: P2| P2::new((q - b.tangent_a.a).dot(&e), (q - b.tangent_a.a).dot(&n));
                     let local: Vec<P2> = exact.iter().map(|q| to(*q)).collect();
-                    removed.iter().map(|r| poly::snap_to(&r.map(to), &local, 10.0 * GRID)).collect()
+                    removed
+                        .iter()
+                        .map(|r| poly::snap_to(&r.map(to), &local, 10.0 * GRID))
+                        .collect()
                 }),
             };
             if let Some(b) = back {

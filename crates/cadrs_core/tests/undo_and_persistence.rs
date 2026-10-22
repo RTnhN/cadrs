@@ -4,9 +4,9 @@
 
 use cadrs_core::commands::{
     AddElement, AddSketch, DeleteElement, DeleteFeature, DuplicateElement, EditSketch,
-    NewElementKind, RenameDocument, RenameElement, RenameFeature, ReplaceFeature, SetCurveAppearance, SetCustomColors,
-    SetFaceAppearance, SetFeatureAppearance, SetPartAppearance, SetPartMaterial, SetSketchImprinting,
-    SetSketchPlane,
+    NewElementKind, RenameDocument, RenameElement, RenameFeature, ReplaceFeature,
+    SetCurveAppearance, SetCustomColors, SetFaceAppearance, SetFeatureAppearance,
+    SetPartAppearance, SetPartMaterial, SetSketchImprinting, SetSketchPlane,
 };
 use cadrs_core::{Command, Document, DocumentMeta, ElementId, FeatureId, History, Store};
 use cadrs_sketch::constraint::{ConstraintOf, CurveSpec, Orient, rectangle_constraints};
@@ -25,7 +25,9 @@ fn first_sketch(doc: &Document, element: ElementId, feature: FeatureId) -> &Sket
 /// Runs `cmd`, then checks undo gives back the exact state before and redo the state after.
 fn check(doc: &mut Document, history: &mut History, cmd: &dyn Command) {
     let before = doc.clone();
-    history.execute(doc, cmd).unwrap_or_else(|e| panic!("{}: {e}", cmd.label()));
+    history
+        .execute(doc, cmd)
+        .unwrap_or_else(|e| panic!("{}: {e}", cmd.label()));
     let after = doc.clone();
     assert_ne!(before, after, "{} changed nothing", cmd.label());
     assert_eq!(history.undo_label(), Some(cmd.label().as_str()));
@@ -38,7 +40,13 @@ fn check(doc: &mut Document, history: &mut History, cmd: &dyn Command) {
 /// A document exercising every command, built through `history`.
 fn build(doc: &mut Document, history: &mut History) -> (ElementId, FeatureId) {
     let ps = doc.elements[0].id;
-    check(doc, history, &RenameDocument { name: "Bracket".into() });
+    check(
+        doc,
+        history,
+        &RenameDocument {
+            name: "Bracket".into(),
+        },
+    );
     let extra = ElementId::new();
     check(
         doc,
@@ -59,7 +67,14 @@ fn build(doc: &mut Document, history: &mut History) -> (ElementId, FeatureId) {
         },
     );
     let copy = ElementId::new();
-    check(doc, history, &DuplicateElement { source: extra, id: copy });
+    check(
+        doc,
+        history,
+        &DuplicateElement {
+            source: extra,
+            id: copy,
+        },
+    );
     check(doc, history, &DeleteElement { id: copy });
 
     let f = FeatureId::new();
@@ -214,7 +229,14 @@ fn build(doc: &mut Document, history: &mut History) -> (ElementId, FeatureId) {
         .iter()
         .find(|(_, d)| matches!(d.kind, DimensionKind::Horizontal { .. }))
         .unwrap();
-    check(doc, history, &edit(SketchOp::SetDimensionValue { id: width, value: 45.0 }));
+    check(
+        doc,
+        history,
+        &edit(SketchOp::SetDimensionValue {
+            id: width,
+            value: 45.0,
+        }),
+    );
     check(
         doc,
         history,
@@ -224,7 +246,14 @@ fn build(doc: &mut Document, history: &mut History) -> (ElementId, FeatureId) {
             along: 3.25,
         }),
     );
-    check(doc, history, &edit(SketchOp::SetDimensionDriven { id: width, driven: true }));
+    check(
+        doc,
+        history,
+        &edit(SketchOp::SetDimensionDriven {
+            id: width,
+            driven: true,
+        }),
+    );
     // A drag's end.
     let cadrs_sketch::CurveKind::Line { b: p, .. } = sk.curves[line].kind else {
         panic!("not a line");
@@ -238,7 +267,13 @@ fn build(doc: &mut Document, history: &mut History) -> (ElementId, FeatureId) {
         }),
     );
     // T3: the entity tools' geometry (points, ellipses, polygons, slots, fillets, chamfers).
-    check(doc, history, &edit(SketchOp::AddPoint { pos: Vec2::new(70.0, 70.0) }));
+    check(
+        doc,
+        history,
+        &edit(SketchOp::AddPoint {
+            pos: Vec2::new(70.0, 70.0),
+        }),
+    );
     check(
         doc,
         history,
@@ -267,15 +302,30 @@ fn build(doc: &mut Document, history: &mut History) -> (ElementId, FeatureId) {
         .find(|(_, d)| matches!(d.kind, DimensionKind::Sides { .. }))
         .map(|(k, _)| k)
         .unwrap();
-    check(doc, history, &edit(SketchOp::SetDimensionValue { id: sides, value: 7.0 }));
+    check(
+        doc,
+        history,
+        &edit(SketchOp::SetDimensionValue {
+            id: sides,
+            value: 7.0,
+        }),
+    );
     for (pts, construction) in [
         (vec![Vec2::new(0.0, -80.0), Vec2::new(40.0, -80.0)], true),
         (
-            vec![Vec2::new(-60.0, -60.0), Vec2::new(-20.0, -60.0), Vec2::new(-20.0, -30.0)],
+            vec![
+                Vec2::new(-60.0, -60.0),
+                Vec2::new(-20.0, -60.0),
+                Vec2::new(-20.0, -30.0),
+            ],
             false,
         ),
         (
-            vec![Vec2::new(60.0, -60.0), Vec2::new(100.0, -60.0), Vec2::new(100.0, -30.0)],
+            vec![
+                Vec2::new(60.0, -60.0),
+                Vec2::new(100.0, -60.0),
+                Vec2::new(100.0, -30.0),
+            ],
             false,
         ),
     ] {
@@ -332,7 +382,15 @@ fn build(doc: &mut Document, history: &mut History) -> (ElementId, FeatureId) {
     // document's custom colours are document state: undoable and saved.
     let part = cadrs_core::PartId::new(f, 0);
     let blue = cadrs_core::Appearance::rgb(41, 128, 185);
-    check(doc, history, &SetPartAppearance { element: ps, parts: vec![part], appearance: Some(blue.with_alpha(128)) });
+    check(
+        doc,
+        history,
+        &SetPartAppearance {
+            element: ps,
+            parts: vec![part],
+            appearance: Some(blue.with_alpha(128)),
+        },
+    );
     check(
         doc,
         history,
@@ -356,7 +414,11 @@ fn build(doc: &mut Document, history: &mut History) -> (ElementId, FeatureId) {
     check(
         doc,
         history,
-        &SetPartMaterial { element: ps, parts: vec![part], material: cadrs_core::material::library("Aluminum - 6061") },
+        &SetPartMaterial {
+            element: ps,
+            parts: vec![part],
+            material: cadrs_core::material::library("Aluminum - 6061"),
+        },
     );
     check(
         doc,
@@ -371,12 +433,37 @@ fn build(doc: &mut Document, history: &mut History) -> (ElementId, FeatureId) {
     check(
         doc,
         history,
-        &SetCurveAppearance { element: ps, sketch: f, curve, appearance: Some(cadrs_core::Appearance::rgb(241, 196, 15)) },
+        &SetCurveAppearance {
+            element: ps,
+            sketch: f,
+            curve,
+            appearance: Some(cadrs_core::Appearance::rgb(241, 196, 15)),
+        },
     );
-    check(doc, history, &SetCustomColors { colors: vec![blue, cadrs_core::Appearance::rgb(1, 2, 3)] });
+    check(
+        doc,
+        history,
+        &SetCustomColors {
+            colors: vec![blue, cadrs_core::Appearance::rgb(1, 2, 3)],
+        },
+    );
     // A material needs a positive density and a name.
-    for bad in [cadrs_core::Material::custom("Air", 0.0), cadrs_core::Material::custom(" ", 1.0)] {
-        assert!(history.execute(doc, &SetPartMaterial { element: ps, parts: vec![part], material: Some(bad) }).is_err());
+    for bad in [
+        cadrs_core::Material::custom("Air", 0.0),
+        cadrs_core::Material::custom(" ", 1.0),
+    ] {
+        assert!(
+            history
+                .execute(
+                    doc,
+                    &SetPartMaterial {
+                        element: ps,
+                        parts: vec![part],
+                        material: Some(bad)
+                    }
+                )
+                .is_err()
+        );
     }
     check(
         doc,
@@ -452,9 +539,21 @@ fn documents_survive_save_and_reload_exactly() {
     assert!(!sk.dimensions.is_empty() && !sk.constraints.is_empty());
     assert!(sk.dimensions.values().any(|d| d.driven && d.along != 0.0));
     // The T3 kinds are in it: an ellipse, a polygon's side count, a hidden constraint.
-    assert!(sk.curves.values().any(|c| matches!(c.kind, cadrs_sketch::CurveKind::Ellipse { .. })));
-    assert!(sk.dimensions.values().any(|d| matches!(d.kind, DimensionKind::Sides { .. }) && d.value == 7.0));
-    assert!(sk.constraints.values().any(|c| matches!(c, ConstraintOf::EqualDistance(..))));
+    assert!(
+        sk.curves
+            .values()
+            .any(|c| matches!(c.kind, cadrs_sketch::CurveKind::Ellipse { .. }))
+    );
+    assert!(
+        sk.dimensions
+            .values()
+            .any(|d| matches!(d.kind, DimensionKind::Sides { .. }) && d.value == 7.0)
+    );
+    assert!(
+        sk.constraints
+            .values()
+            .any(|c| matches!(c, ConstraintOf::EqualDistance(..)))
+    );
     let dir = std::env::temp_dir().join(format!("cadrs-roundtrip-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let store = Store::new(&dir);
@@ -486,6 +585,9 @@ fn documents_survive_save_and_reload_exactly() {
     // Saving the reloaded document again writes the same file.
     let text = std::fs::read_to_string(store.document_path(doc.id)).unwrap();
     store.save(&back.document, &back.meta).unwrap();
-    assert_eq!(std::fs::read_to_string(store.document_path(doc.id)).unwrap(), text);
+    assert_eq!(
+        std::fs::read_to_string(store.document_path(doc.id)).unwrap(),
+        text
+    );
     let _ = std::fs::remove_dir_all(dir);
 }

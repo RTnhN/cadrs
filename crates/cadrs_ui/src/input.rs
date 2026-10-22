@@ -36,7 +36,13 @@ impl Plugin for InputPlugin {
             .add_observer(on_clear_press)
             .add_systems(
                 PostUpdate,
-                (style_frames, apply_caret_blink, caret_home_when_unfocused, show_chips).before(bevy::ui::UiSystems::Prepare),
+                (
+                    style_frames,
+                    apply_caret_blink,
+                    caret_home_when_unfocused,
+                    show_chips,
+                )
+                    .before(bevy::ui::UiSystems::Prepare),
             )
             .add_systems(
                 PostUpdate,
@@ -215,9 +221,8 @@ impl TextInput {
     }
 
     pub fn build(self, theme: &Theme) -> impl Bundle {
-        let (focus_width, focus_color) = self
-            .focus_border
-            .unwrap_or((2.0, theme.input_border_focus));
+        let (focus_width, focus_color) =
+            self.focus_border.unwrap_or((2.0, theme.input_border_focus));
         let colors = FrameColors {
             background: theme.input_background,
             disabled_background: theme.input_disabled_background,
@@ -262,7 +267,12 @@ impl TextInput {
             cleanable,
         } = self;
         let chip_font = theme.font(font_size * 0.9, FontWeight::NORMAL);
-        let chip_colors = ChipColors { text: fg, chip: theme.secondary, chip_text: theme.foreground, background: theme.input_background };
+        let chip_colors = ChipColors {
+            text: fg,
+            chip: theme.secondary,
+            chip_text: theme.foreground,
+            background: theme.input_background,
+        };
 
         (
             Name::new(name.into_owned()),
@@ -309,7 +319,11 @@ impl TextInput {
                 ));
                 if chips {
                     p.spawn((
-                        TextInputChips { shown: None, font: chip_font, colors: chip_colors },
+                        TextInputChips {
+                            shown: None,
+                            font: chip_font,
+                            colors: chip_colors,
+                        },
                         Node {
                             position_type: PositionType::Absolute,
                             left: Val::Px(pad),
@@ -350,7 +364,11 @@ impl TextInput {
                             "close",
                             12.0,
                             clear_color,
-                            Node { margin: UiRect::left(Val::Px(4.0)), display: Display::None, ..default() },
+                            Node {
+                                margin: UiRect::left(Val::Px(4.0)),
+                                display: Display::None,
+                                ..default()
+                            },
                         ),
                     ));
                 }
@@ -518,7 +536,11 @@ fn style_frames(
                 });
             }
             if let Ok(mut n) = q_clear.get_mut(child) {
-                let d = if empty || disabled { Display::None } else { Display::Flex };
+                let d = if empty || disabled {
+                    Display::None
+                } else {
+                    Display::Flex
+                };
                 if n.display != d {
                     n.display = d;
                 }
@@ -601,9 +623,15 @@ fn show_chips(
     mut commands: Commands,
 ) {
     for (overlay, parent, mut chips, mut vis) in &mut q_overlay {
-        let Ok(children) = q_children.get(parent.parent()) else { continue };
-        let Some(field_e) = children.iter().find(|c| q_field.contains(*c)) else { continue };
-        let Ok((field, text, mut color)) = q_field.get_mut(field_e) else { continue };
+        let Ok(children) = q_children.get(parent.parent()) else {
+            continue;
+        };
+        let Some(field_e) = children.iter().find(|c| q_field.contains(*c)) else {
+            continue;
+        };
+        let Ok((field, text, mut color)) = q_field.get_mut(field_e) else {
+            continue;
+        };
         let value = text.value().to_string();
         let show = focus.get() != Some(field) && chip_runs(&value).iter().any(|(_, t)| *t);
         let want = show.then(|| value.clone());
@@ -612,7 +640,11 @@ fn show_chips(
         }
         let colors = chips.colors;
         color.set_if_neq(TextColor(if show { Color::NONE } else { colors.text }));
-        vis.set_if_neq(if show { Visibility::Inherited } else { Visibility::Hidden });
+        vis.set_if_neq(if show {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        });
         commands.entity(overlay).despawn_related::<Children>();
         if show {
             let font = chips.font.clone();
@@ -628,7 +660,13 @@ fn show_chips(
                             BackgroundColor(colors.chip),
                             Pickable::IGNORE,
                         ))
-                        .with_child((Text::new(run), font.clone(), TextColor(colors.chip_text), TextLayout::no_wrap(), Pickable::IGNORE));
+                        .with_child((
+                            Text::new(run),
+                            font.clone(),
+                            TextColor(colors.chip_text),
+                            TextLayout::no_wrap(),
+                            Pickable::IGNORE,
+                        ));
                     } else {
                         p.spawn((
                             Text::new(run),
@@ -690,10 +728,17 @@ mod tests {
 
     #[test]
     fn tokens_become_chip_runs() {
-        assert_eq!(chip_runs("{Part: Name}"), vec![("Part: Name".to_string(), true)]);
+        assert_eq!(
+            chip_runs("{Part: Name}"),
+            vec![("Part: Name".to_string(), true)]
+        );
         assert_eq!(
             chip_runs("x {Table: Qty.} pcs"),
-            vec![("x ".to_string(), false), ("Table: Qty.".to_string(), true), (" pcs".to_string(), false)]
+            vec![
+                ("x ".to_string(), false),
+                ("Table: Qty.".to_string(), true),
+                (" pcs".to_string(), false)
+            ]
         );
         // An unclosed brace is plain text.
         assert_eq!(chip_runs("a {b"), vec![("a {b".to_string(), false)]);

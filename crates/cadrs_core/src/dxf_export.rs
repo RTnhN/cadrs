@@ -40,7 +40,10 @@ pub fn fit(page: &mut Page) -> ([f64; 2], [f64; 2]) {
 
 /// A sketch's curves as a page, in the sketch plane's coordinates (mm).
 pub fn sketch_page(sketch: &Sketch, name: &str) -> Page {
-    let mut page = Page { name: name.to_string(), ..Page::default() };
+    let mut page = Page {
+        name: name.to_string(),
+        ..Page::default()
+    };
     for (id, c) in &sketch.curves {
         if c.construction {
             continue;
@@ -51,15 +54,27 @@ pub fn sketch_page(sketch: &Sketch, name: &str) -> Page {
         };
         let shape = match c.kind {
             CurveKind::Line { a, b } => Shape::Line { a: p(a), b: p(b) },
-            CurveKind::Circle { center, radius } => Shape::Circle { center: p(center), radius },
+            CurveKind::Circle { center, radius } => Shape::Circle {
+                center: p(center),
+                radius,
+            },
             CurveKind::Arc { .. } => {
-                let Some(g) = sketch.arc_geom(id) else { continue };
+                let Some(g) = sketch.arc_geom(id) else {
+                    continue;
+                };
                 let g = g.to_ccw();
                 let start = g.start_angle.to_degrees();
-                Shape::Arc { center: [g.center.x, g.center.y], radius: g.radius, start, end: start + g.sweep.to_degrees() }
+                Shape::Arc {
+                    center: [g.center.x, g.center.y],
+                    radius: g.radius,
+                    start,
+                    end: start + g.sweep.to_degrees(),
+                }
             }
             CurveKind::Ellipse { .. } | CurveKind::EllipseOffset { .. } => {
-                let Some(g) = sketch.ellipse_geom(id) else { continue };
+                let Some(g) = sketch.ellipse_geom(id) else {
+                    continue;
+                };
                 let n = 144;
                 let points = (0..n)
                     .map(|k| {
@@ -67,20 +82,42 @@ pub fn sketch_page(sketch: &Sketch, name: &str) -> Page {
                         [q.x, q.y]
                     })
                     .collect();
-                Shape::Polyline { points, closed: true }
+                Shape::Polyline {
+                    points,
+                    closed: true,
+                }
             }
             CurveKind::EllipseArc { .. } => {
-                let Some(g) = sketch.ellipse_arc_geom(id) else { continue };
-                let points = g.tessellate(std::f64::consts::TAU / 144.0, 8).into_iter().map(|q| [q.x, q.y]).collect();
-                Shape::Polyline { points, closed: false }
+                let Some(g) = sketch.ellipse_arc_geom(id) else {
+                    continue;
+                };
+                let points = g
+                    .tessellate(std::f64::consts::TAU / 144.0, 8)
+                    .into_iter()
+                    .map(|q| [q.x, q.y])
+                    .collect();
+                Shape::Polyline {
+                    points,
+                    closed: false,
+                }
             }
             CurveKind::Spline { start, end } => {
-                let Some(spans) = sketch.spline_spans(id) else { continue };
-                let points = cadrs_sketch::spline::tessellate(&spans, 16).into_iter().map(|q| [q.x, q.y]).collect();
-                Shape::Polyline { points, closed: start == end }
+                let Some(spans) = sketch.spline_spans(id) else {
+                    continue;
+                };
+                let points = cadrs_sketch::spline::tessellate(&spans, 16)
+                    .into_iter()
+                    .map(|q| [q.x, q.y])
+                    .collect();
+                Shape::Polyline {
+                    points,
+                    closed: start == end,
+                }
             }
             CurveKind::Bezier { .. } => {
-                let Some(g) = sketch.bezier_geom(id) else { continue };
+                let Some(g) = sketch.bezier_geom(id) else {
+                    continue;
+                };
                 let n = 64;
                 let points = (0..=n)
                     .map(|k| {
@@ -88,7 +125,10 @@ pub fn sketch_page(sketch: &Sketch, name: &str) -> Page {
                         [q.x, q.y]
                     })
                     .collect();
-                Shape::Polyline { points, closed: false }
+                Shape::Polyline {
+                    points,
+                    closed: false,
+                }
             }
         };
         page.items.push(Item::Stroke(shape, pen()));
@@ -107,7 +147,10 @@ pub fn face_page(solid: &Solid, face: &FaceName, name: &str) -> Option<Page> {
         let v = frame.to_sketch(q);
         [v.x, v.y]
     };
-    let mut page = Page { name: name.to_string(), ..Page::default() };
+    let mut page = Page {
+        name: name.to_string(),
+        ..Page::default()
+    };
     for e in solid.edges.iter().filter(|e| e.name.faces.contains(face)) {
         if e.points.len() < 2 {
             continue;
@@ -119,14 +162,21 @@ pub fn face_page(solid: &Solid, face: &FaceName, name: &str) -> Option<Page> {
         let shape = if let Some(c) = e.circle {
             let center = to2(c.center);
             if closed {
-                Shape::Circle { center, radius: c.radius }
+                Shape::Circle {
+                    center,
+                    radius: c.radius,
+                }
             } else {
                 let ang = |q: [f64; 2]| (q[1] - center[1]).atan2(q[0] - center[0]).to_degrees();
                 // The polyline runs counter-clockwise in the plane when the circle's normal is
                 // the plane's.
                 let ccw = c.normal[0] * n[0] + c.normal[1] * n[1] + c.normal[2] * n[2] >= 0.0;
                 let mid = pts[pts.len() / 2];
-                let (a0, a1) = if ccw { (ang(first), ang(last)) } else { (ang(last), ang(first)) };
+                let (a0, a1) = if ccw {
+                    (ang(first), ang(last))
+                } else {
+                    (ang(last), ang(first))
+                };
                 let mut end = a1;
                 while end <= a0 {
                     end += 360.0;
@@ -143,15 +193,28 @@ pub fn face_page(solid: &Solid, face: &FaceName, name: &str) -> Option<Page> {
                     while e2 <= s {
                         e2 += 360.0;
                     }
-                    Shape::Arc { center, radius: c.radius, start: s, end: e2 }
+                    Shape::Arc {
+                        center,
+                        radius: c.radius,
+                        start: s,
+                        end: e2,
+                    }
                 } else {
-                    Shape::Arc { center, radius: c.radius, start: a0, end }
+                    Shape::Arc {
+                        center,
+                        radius: c.radius,
+                        start: a0,
+                        end,
+                    }
                 }
             }
         } else if pts.len() == 2 || collinear(&pts) {
             Shape::Line { a: first, b: last }
         } else {
-            Shape::Polyline { points: pts, closed: false }
+            Shape::Polyline {
+                points: pts,
+                closed: false,
+            }
         };
         page.items.push(Item::Stroke(shape, pen()));
     }
@@ -163,7 +226,10 @@ fn collinear(pts: &[[f64; 2]]) -> bool {
     let (a, b) = (pts[0], pts[pts.len() - 1]);
     let d = [b[0] - a[0], b[1] - a[1]];
     let l = (d[0] * d[0] + d[1] * d[1]).sqrt();
-    l > 0.0 && pts.iter().all(|p| ((p[0] - a[0]) * d[1] - (p[1] - a[1]) * d[0]).abs() / l < 1e-6)
+    l > 0.0
+        && pts
+            .iter()
+            .all(|p| ((p[0] - a[0]) * d[1] - (p[1] - a[1]) * d[0]).abs() / l < 1e-6)
 }
 
 /// The page as an ASCII DXF file.
@@ -173,13 +239,21 @@ pub fn write_dxf(page: &Page, version: DxfVersion) -> String {
 
 /// Writes `page` into `dir` as `<stem>.dxf`, or as `<stem>.dwg` through the DWG converter
 /// (`dwg`); the path written.
-pub fn write_file(page: &Page, version: DxfVersion, dwg: bool, dir: &std::path::Path, stem: &str) -> Result<std::path::PathBuf, String> {
+pub fn write_file(
+    page: &Page,
+    version: DxfVersion,
+    dwg: bool,
+    dir: &std::path::Path,
+    stem: &str,
+) -> Result<std::path::PathBuf, String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let ext = if dwg { "dwg" } else { "dxf" };
     let path = crate::export::unique_path_ext(dir, stem, ext);
     let text = write_dxf(page, version);
     if dwg {
-        let conv = cadrs_drawing::dwg::find_converter().filter(|c| c.can_write()).ok_or(cadrs_drawing::dwg::INSTALL_HINT)?;
+        let conv = cadrs_drawing::dwg::find_converter()
+            .filter(|c| c.can_write())
+            .ok_or(cadrs_drawing::dwg::INSTALL_HINT)?;
         cadrs_drawing::dwg::dxf_to_dwg(&conv, &text, &path, version)?;
     } else {
         std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -197,12 +271,23 @@ mod tests {
     #[test]
     fn a_rectangle_and_a_circle_are_four_lines_and_a_circle() {
         let mut s = Sketch::new();
-        let c = [Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0), Vec2::new(100.0, 60.0), Vec2::new(0.0, 60.0)];
+        let c = [
+            Vec2::new(0.0, 0.0),
+            Vec2::new(100.0, 0.0),
+            Vec2::new(100.0, 60.0),
+            Vec2::new(0.0, 60.0),
+        ];
         for i in 0..4 {
             s.add_line(c[i], c[(i + 1) % 4]);
         }
         let center = s.add_point(Vec2::new(50.0, 30.0));
-        s.curves.insert(cadrs_sketch::Curve { kind: CurveKind::Circle { center, radius: 10.0 }, construction: false });
+        s.curves.insert(cadrs_sketch::Curve {
+            kind: CurveKind::Circle {
+                center,
+                radius: 10.0,
+            },
+            construction: false,
+        });
         // A construction line is left out.
         let l = s.add_line(Vec2::new(0.0, 0.0), Vec2::new(100.0, 60.0));
         s.curves[l].construction = true;
@@ -221,7 +306,9 @@ mod tests {
                 Entity::Line { a, b } => {
                     for p in [a, b] {
                         let q = [p[0].round() as i64, p[1].round() as i64];
-                        assert!((p[0] - q[0] as f64).abs() < 1e-9 && (p[1] - q[1] as f64).abs() < 1e-9);
+                        assert!(
+                            (p[0] - q[0] as f64).abs() < 1e-9 && (p[1] - q[1] as f64).abs() < 1e-9
+                        );
                         if !corners.contains(&q) {
                             corners.push(q);
                         }
@@ -242,12 +329,23 @@ mod tests {
     #[test]
     fn extents_reach_below_and_left_of_the_origin() {
         let mut s = Sketch::new();
-        let c = [Vec2::new(-40.0, -25.0), Vec2::new(60.0, -25.0), Vec2::new(60.0, 35.0), Vec2::new(-40.0, 35.0)];
+        let c = [
+            Vec2::new(-40.0, -25.0),
+            Vec2::new(60.0, -25.0),
+            Vec2::new(60.0, 35.0),
+            Vec2::new(-40.0, 35.0),
+        ];
         for i in 0..4 {
             s.add_line(c[i], c[(i + 1) % 4]);
         }
         let center = s.add_point(Vec2::new(-50.0, 0.0));
-        s.curves.insert(cadrs_sketch::Curve { kind: CurveKind::Circle { center, radius: 5.0 }, construction: false });
+        s.curves.insert(cadrs_sketch::Curve {
+            kind: CurveKind::Circle {
+                center,
+                radius: 5.0,
+            },
+            construction: false,
+        });
         let page = sketch_page(&s, "Sketch 1");
         let mut p = page.clone();
         assert_eq!(fit(&mut p), ([-55.0, -25.0], [60.0, 35.0]));
@@ -255,7 +353,14 @@ mod tests {
         let text = write_dxf(&page, DxfVersion::R2013);
         let header = |var: &str| -> [f64; 2] {
             let at = text.find(var).unwrap();
-            let v: Vec<f64> = text[at..].lines().skip(1).take(4).collect::<Vec<_>>().chunks(2).map(|c| c[1].trim().parse().unwrap()).collect();
+            let v: Vec<f64> = text[at..]
+                .lines()
+                .skip(1)
+                .take(4)
+                .collect::<Vec<_>>()
+                .chunks(2)
+                .map(|c| c[1].trim().parse().unwrap())
+                .collect();
             [v[0], v[1]]
         };
         assert_eq!(header("$EXTMIN"), [-55.0, -25.0]);

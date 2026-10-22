@@ -23,12 +23,12 @@
 
 use bevy::prelude::*;
 use bevy::text::FontWeight;
+use cadrs_core::document::{EdgeRef, FaceRef};
 use cadrs_core::repair::{Reference, ReplaceReference, chain_check, entity_edges, references};
 use cadrs_core::{ElementId, FeatureId, RegionRef};
-use cadrs_core::document::{EdgeRef, FaceRef};
 use cadrs_ui::{
-    CheckboxChange, FeatureDialog, FeatureDialogAccept, FeatureDialogCancel, OptionRow, SelectionList, SelectionListReplace,
-    SelectionListState, Theme,
+    CheckboxChange, FeatureDialog, FeatureDialogAccept, FeatureDialogCancel, OptionRow,
+    SelectionList, SelectionListReplace, SelectionListState, Theme,
 };
 
 use crate::parts::PartCache;
@@ -87,11 +87,18 @@ pub fn hovered_old(world: &World, list: &str) -> Option<(FeatureId, Reference)> 
 }
 
 fn feature_dialog_open(world: &World) -> bool {
-    world.contains_resource::<crate::extrude::ExtrudeSession>() || world.contains_resource::<crate::applied::AppliedSession>()
+    world.contains_resource::<crate::extrude::ExtrudeSession>()
+        || world.contains_resource::<crate::applied::AppliedSession>()
 }
 
-fn on_replace_icon(ev: On<SelectionListReplace>, q: Query<(&Name, &SelectionListState)>, mut commands: Commands) {
-    let Ok((name, state)) = q.get(ev.entity) else { return };
+fn on_replace_icon(
+    ev: On<SelectionListReplace>,
+    q: Query<(&Name, &SelectionListState)>,
+    mut commands: Commands,
+) {
+    let Ok((name, state)) = q.get(ev.entity) else {
+        return;
+    };
     let list = name.as_str().to_string();
     let index = ev.index;
     let label = state.items.get(index).cloned().unwrap_or_default();
@@ -104,18 +111,26 @@ pub fn start(world: &mut World, list: &str, index: usize, label: String, missing
     if !world.resource::<crate::repair::Repair>().open {
         return;
     }
-    let Some(feature) = crate::repair::list_feature(world, list) else { return };
-    let Some((element, f)) = world
-        .get_resource::<ActiveDocument>()
-        .and_then(|d| d.active_element().and_then(|e| Some((e.id, e.feature(feature)?.clone()))))
-    else {
+    let Some(feature) = crate::repair::list_feature(world, list) else {
         return;
     };
-    let Some(old) = references(&f).get(index).cloned() else { return };
+    let Some((element, f)) = world.get_resource::<ActiveDocument>().and_then(|d| {
+        d.active_element()
+            .and_then(|e| Some((e.id, e.feature(feature)?.clone())))
+    }) else {
+        return;
+    };
+    let Some(old) = references(&f).get(index).cloned() else {
+        return;
+    };
     // What the old reference stood for, in the Repair panel's state (IR4.7).
     let old_edges = {
         let mut r = world.resource_mut::<crate::repair::Repair>();
-        let i = r.features.iter().position(|x| x.id == feature).unwrap_or(r.features.len());
+        let i = r
+            .features
+            .iter()
+            .position(|x| x.id == feature)
+            .unwrap_or(r.features.len());
         let before = r.parts_before(i);
         entity_edges(&before.parts, &old)
     };
@@ -143,7 +158,11 @@ fn end_with_feature(world: &mut World) {
 }
 
 /// A pick is the replacement.
-fn replace_picks(mut picks: MessageReader<PickRequest>, session: Option<Res<ReplaceSession>>, mut commands: Commands) {
+fn replace_picks(
+    mut picks: MessageReader<PickRequest>,
+    session: Option<Res<ReplaceSession>>,
+    mut commands: Commands,
+) {
     if session.is_none() {
         return;
     }
@@ -157,30 +176,51 @@ fn replace_picks(mut picks: MessageReader<PickRequest>, session: Option<Res<Repl
 fn reference_of(cache: &PartCache, pick: Pick) -> Option<Reference> {
     match pick {
         Pick::Region(sketch, i) => {
-            let region = cache.sketch_regions(sketch)?.regions.get(i as usize)?.clone();
+            let region = cache
+                .sketch_regions(sketch)?
+                .regions
+                .get(i as usize)?
+                .clone();
             Some(Reference::Region(RegionRef::new(sketch, &region)))
         }
         Pick::Feature(sketch) => Some(Reference::Sketch(sketch)),
         Pick::Face(part, face) => {
             let solid = &cache.part(part)?.solid;
             let i = solid.faces.iter().position(|f| f.name == face)?;
-            Some(Reference::Face(FaceRef { part, face, seed: solid.face_point(i)? }))
+            Some(Reference::Face(FaceRef {
+                part,
+                face,
+                seed: solid.face_point(i)?,
+            }))
         }
         Pick::Edge(part, edge) => {
             let solid = &cache.part(part)?.solid;
-            Some(Reference::Edge(EdgeRef { part, edge, seed: solid.edge(&edge)?.midpoint() }))
+            Some(Reference::Edge(EdgeRef {
+                part,
+                edge,
+                seed: solid.edge(&edge)?.midpoint(),
+            }))
         }
         _ => None,
     }
 }
 
 fn take_pick(world: &mut World, pick: Pick) {
-    let Some(with) = reference_of(world.resource::<PartCache>(), pick) else { return };
-    let Some(s) = world.get_resource::<ReplaceSession>().cloned() else { return };
+    let Some(with) = reference_of(world.resource::<PartCache>(), pick) else {
+        return;
+    };
+    let Some(s) = world.get_resource::<ReplaceSession>().cloned() else {
+        return;
+    };
     // A list takes what it can hold: an extrude regions, sketches and faces; a fillet edges
     // and faces.
-    let fits = match world.get_resource::<ActiveDocument>().and_then(|d| d.active_element()?.feature(s.feature).cloned()) {
-        Some(f) if f.fillet().is_some() || f.chamfer().is_some() => matches!(with, Reference::Edge(_) | Reference::Face(_)),
+    let fits = match world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.active_element()?.feature(s.feature).cloned())
+    {
+        Some(f) if f.fillet().is_some() || f.chamfer().is_some() => {
+            matches!(with, Reference::Edge(_) | Reference::Face(_))
+        }
         Some(_) => !matches!(with, Reference::Edge(_)),
         None => false,
     };
@@ -192,39 +232,63 @@ fn take_pick(world: &mut World, pick: Pick) {
 
 /// Takes back the last replacement, then replaces with `with` (if any) as the session says.
 fn apply(world: &mut World, with: Option<Reference>) {
-    let Some(mut s) = world.get_resource::<ReplaceSession>().cloned() else { return };
+    let Some(mut s) = world.get_resource::<ReplaceSession>().cloned() else {
+        return;
+    };
     let mut doc = world.resource_mut::<ActiveDocument>();
     if s.applied {
         doc.undo();
         s.applied = false;
     }
     if let Some(w) = &with {
-        match doc.execute(&ReplaceReference { element: s.element, feature: s.feature, index: s.index, with: w.clone(), propagate: s.propagate }) {
+        match doc.execute(&ReplaceReference {
+            element: s.element,
+            feature: s.feature,
+            index: s.index,
+            with: w.clone(),
+            propagate: s.propagate,
+        }) {
             Ok(()) => s.applied = true,
             Err(e) => warn!("replace reference: {e}"),
         }
     }
-    let features: Vec<cadrs_core::Feature> = doc.doc.element(s.element).map(|e| e.features().to_vec()).unwrap_or_default();
-    s.with_label = with.as_ref().map(|w| w.label(&features)).unwrap_or_default();
+    let features: Vec<cadrs_core::Feature> = doc
+        .doc
+        .element(s.element)
+        .map(|e| e.features().to_vec())
+        .unwrap_or_default();
+    s.with_label = with
+        .as_ref()
+        .map(|w| w.label(&features))
+        .unwrap_or_default();
     // IR4.7: an edge or face replacement of a fillet or chamfer that propagates along tangents.
     s.note = None;
     if let (Some(w), Some(i)) = (&with, features.iter().position(|f| f.id == s.feature))
         && features[i].fillet().is_some_and(|x| x.tangent_propagation)
     {
         let before = cadrs_core::rebuild::build(&features[..i]);
-        s.note = chain_check(s.old_edges, entity_edges(&before.parts, w), matches!(w, Reference::Edge(_)));
+        s.note = chain_check(
+            s.old_edges,
+            entity_edges(&before.parts, w),
+            matches!(w, Reference::Edge(_)),
+        );
     }
     s.with = with;
     world.insert_resource(s);
 }
 
 fn on_propagate(ev: On<CheckboxChange>, q: Query<&Name>, mut commands: Commands) {
-    if !q.get(ev.entity).is_ok_and(|n| n.as_str() == "replace-propagate-checkbox") {
+    if !q
+        .get(ev.entity)
+        .is_ok_and(|n| n.as_str() == "replace-propagate-checkbox")
+    {
         return;
     }
     let checked = ev.checked;
     commands.queue(move |world: &mut World| {
-        let Some(mut s) = world.get_resource_mut::<ReplaceSession>() else { return };
+        let Some(mut s) = world.get_resource_mut::<ReplaceSession>() else {
+            return;
+        };
         s.propagate = checked;
         let with = s.with.clone();
         apply(world, with);
@@ -238,7 +302,11 @@ struct ReplaceDialog;
 #[derive(Component, PartialEq)]
 struct Shown(String, bool, String, bool, Option<String>, f32);
 
-fn on_accept(ev: On<FeatureDialogAccept>, q: Query<(), With<ReplaceDialog>>, mut commands: Commands) {
+fn on_accept(
+    ev: On<FeatureDialogAccept>,
+    q: Query<(), With<ReplaceDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(|world: &mut World| {
             world.remove_resource::<ReplaceSession>();
@@ -246,7 +314,11 @@ fn on_accept(ev: On<FeatureDialogAccept>, q: Query<(), With<ReplaceDialog>>, mut
     }
 }
 
-fn on_cancel(ev: On<FeatureDialogCancel>, q: Query<(), With<ReplaceDialog>>, mut commands: Commands) {
+fn on_cancel(
+    ev: On<FeatureDialogCancel>,
+    q: Query<(), With<ReplaceDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(|world: &mut World| {
             apply(world, None);
@@ -261,7 +333,10 @@ fn sync_dialog(
     session: Option<Res<ReplaceSession>>,
     theme: Res<Theme>,
     q_dialog: Query<(Entity, &Shown), With<ReplaceDialog>>,
-    q_feature: Query<(&Name, &ComputedNode), (With<cadrs_ui::FeatureDialogState>, Without<ReplaceDialog>)>,
+    q_feature: Query<
+        (&Name, &ComputedNode),
+        (With<cadrs_ui::FeatureDialogState>, Without<ReplaceDialog>),
+    >,
     q_area: Query<Entity, With<ViewportArea>>,
     mut commands: Commands,
 ) {
@@ -278,16 +353,31 @@ fn sync_dialog(
         .map(|(_, c)| c.size().x * c.inverse_scale_factor())
         .fold(0.0f32, f32::max)
         + 4.0;
-    let want = Shown(s.old_label.clone(), s.old_missing, s.with_label.clone(), s.propagate, s.note.clone(), left.round());
+    let want = Shown(
+        s.old_label.clone(),
+        s.old_missing,
+        s.with_label.clone(),
+        s.propagate,
+        s.note.clone(),
+        left.round(),
+    );
     if q_dialog.iter().any(|(_, sh)| *sh == want) {
         return;
     }
     for (e, _) in &q_dialog {
         commands.entity(e).try_despawn();
     }
-    let Some(area) = q_area.iter().next() else { return };
+    let Some(area) = q_area.iter().next() else {
+        return;
+    };
     let t = theme.clone();
-    let (old, missing, with, propagate, note) = (s.old_label.clone(), s.old_missing, s.with_label.clone(), s.propagate, s.note.clone());
+    let (old, missing, with, propagate, note) = (
+        s.old_label.clone(),
+        s.old_missing,
+        s.with_label.clone(),
+        s.propagate,
+        s.note.clone(),
+    );
     let d = commands
         .spawn((
             ReplaceDialog,
@@ -323,7 +413,11 @@ fn sync_dialog(
                         n.flex_grow = 0.0;
                         n.margin = UiRect::vertical(Val::Px(2.0));
                     });
-                    b.spawn(OptionRow::new("replace-propagate", "Propagate changes").checked(propagate).build(&t));
+                    b.spawn(
+                        OptionRow::new("replace-propagate", "Propagate changes")
+                            .checked(propagate)
+                            .build(&t),
+                    );
                     if let Some(note) = note {
                         // The dialog is sized before the text wraps: room for its lines (about
                         // 34 characters each at this size).
@@ -334,19 +428,38 @@ fn sync_dialog(
                                 width: Val::Px(188.0),
                                 min_height: Val::Px(lines * 13.5),
                                 flex_shrink: 0.0,
-                                margin: UiRect::new(Val::Px(4.0), Val::Px(4.0), Val::ZERO, Val::Px(4.0)),
+                                margin: UiRect::new(
+                                    Val::Px(4.0),
+                                    Val::Px(4.0),
+                                    Val::ZERO,
+                                    Val::Px(4.0),
+                                ),
                                 ..default()
                             },
                         ))
                         .with_children(|n| {
-                            n.spawn(t.text(note, 10.5, FontWeight::NORMAL, Color::srgb_u8(0x9a, 0x5b, 0x00)))
-                                .insert((TextLayout::default(), Node { max_width: Val::Px(186.0), ..default() }));
+                            n.spawn(t.text(
+                                note,
+                                10.5,
+                                FontWeight::NORMAL,
+                                Color::srgb_u8(0x9a, 0x5b, 0x00),
+                            ))
+                            .insert((
+                                TextLayout::default(),
+                                Node {
+                                    max_width: Val::Px(186.0),
+                                    ..default()
+                                },
+                            ));
                         });
                     }
                 })
                 .build(&theme),
         ))
         .id();
-    commands.entity(d).entry::<Node>().and_modify(move |mut n| n.left = Val::Px(left));
+    commands
+        .entity(d)
+        .entry::<Node>()
+        .and_modify(move |mut n| n.left = Val::Px(left));
     commands.entity(area).add_child(d);
 }

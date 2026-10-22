@@ -30,7 +30,9 @@ use std::collections::{HashMap, HashSet};
 use crate::assembly::{InstanceId, InstanceSource};
 use crate::command::{Command, CommandError, History, Scope};
 use crate::document::{Document, ElementKind};
-use crate::external::{LinkError, LinkSnapshot, LinkedElement, RefAt, Resolver, SourceRef, check_cycle, dependencies};
+use crate::external::{
+    LinkError, LinkSnapshot, LinkedElement, RefAt, Resolver, SourceRef, check_cycle, dependencies,
+};
 use crate::history_log::{HistoryLog, Origin, VersionId};
 use crate::ids::{DocumentId, ElementId};
 use crate::library::Timestamp;
@@ -40,19 +42,30 @@ use crate::store::Store;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RefSite {
     /// An instance of an assembly tab.
-    Instance { element: ElementId, instance: InstanceId },
+    Instance {
+        element: ElementId,
+        instance: InstanceId,
+    },
     /// Every view of `source` (a linked copy, or a Part Studio or assembly of this document at
     /// the workspace) in the Drawing tab `element`.
-    Drawing { element: ElementId, source: ElementId },
+    Drawing {
+        element: ElementId,
+        source: ElementId,
+    },
     /// P3G.4: a Derived feature of the Part Studio `element`.
-    Derived { element: ElementId, feature: crate::ids::FeatureId },
+    Derived {
+        element: ElementId,
+        feature: crate::ids::FeatureId,
+    },
 }
 
 impl RefSite {
     /// The tab the use is in.
     pub fn tab(&self) -> ElementId {
         match *self {
-            RefSite::Instance { element, .. } | RefSite::Drawing { element, .. } | RefSite::Derived { element, .. } => element,
+            RefSite::Instance { element, .. }
+            | RefSite::Drawing { element, .. }
+            | RefSite::Derived { element, .. } => element,
         }
     }
 }
@@ -82,7 +95,14 @@ pub fn uses(doc: &Document) -> Vec<RefUse> {
         if let Some(model) = el.assembly_model() {
             for i in &model.instances {
                 if let Some(r) = i.link {
-                    out.push(RefUse { site: RefSite::Instance { element: el.id, instance: i.id }, reference: r, source: i.source.element() });
+                    out.push(RefUse {
+                        site: RefSite::Instance {
+                            element: el.id,
+                            instance: i.id,
+                        },
+                        reference: r,
+                        source: i.source.element(),
+                    });
                 }
             }
         }
@@ -96,7 +116,14 @@ pub fn uses(doc: &Document) -> Vec<RefUse> {
                         r.document = None;
                     }
                     r.pinned = s.pinned;
-                    out.push(RefUse { site: RefSite::Drawing { element: el.id, source: id }, reference: r, source: id });
+                    out.push(RefUse {
+                        site: RefSite::Drawing {
+                            element: el.id,
+                            source: id,
+                        },
+                        reference: r,
+                        source: id,
+                    });
                 }
             }
         }
@@ -109,7 +136,14 @@ pub fn uses(doc: &Document) -> Vec<RefUse> {
                 if r.document == Some(doc.id) {
                     r.document = None;
                 }
-                out.push(RefUse { site: RefSite::Derived { element: el.id, feature: f.id }, reference: r, source: copy });
+                out.push(RefUse {
+                    site: RefSite::Derived {
+                        element: el.id,
+                        feature: f.id,
+                    },
+                    reference: r,
+                    source: copy,
+                });
             }
         }
     }
@@ -119,15 +153,38 @@ pub fn uses(doc: &Document) -> Vec<RefUse> {
 /// The same-document references of `doc` that follow the workspace (instances of its own Part
 /// Studios and assemblies, its drawings' views of its own tabs), in tab `tab` or everywhere.
 pub fn workspace_uses(doc: &Document, tab: Option<ElementId>) -> Vec<RefUse> {
-    let local = |e: ElementId| doc.elements.iter().any(|x| x.id == e && !matches!(x.kind, ElementKind::Drawing(_)));
+    let local = |e: ElementId| {
+        doc.elements
+            .iter()
+            .any(|x| x.id == e && !matches!(x.kind, ElementKind::Drawing(_)))
+    };
     let mut out = Vec::new();
-    for el in doc.elements.iter().filter(|e| tab.is_none_or(|t| t == e.id)) {
+    for el in doc
+        .elements
+        .iter()
+        .filter(|e| tab.is_none_or(|t| t == e.id))
+    {
         if let Some(model) = el.assembly_model() {
             for i in &model.instances {
                 let e = i.source.element();
-                if i.link.is_none() && local(e) && crate::assembly::standard::standard_of(doc, &i.source).is_none() {
-                    let r = SourceRef { document: None, at: RefAt::Workspace, element: e, pinned: false };
-                    out.push(RefUse { site: RefSite::Instance { element: el.id, instance: i.id }, reference: r, source: e });
+                if i.link.is_none()
+                    && local(e)
+                    && crate::assembly::standard::standard_of(doc, &i.source).is_none()
+                {
+                    let r = SourceRef {
+                        document: None,
+                        at: RefAt::Workspace,
+                        element: e,
+                        pinned: false,
+                    };
+                    out.push(RefUse {
+                        site: RefSite::Instance {
+                            element: el.id,
+                            instance: i.id,
+                        },
+                        reference: r,
+                        source: e,
+                    });
                 }
             }
         }
@@ -135,8 +192,20 @@ pub fn workspace_uses(doc: &Document, tab: Option<ElementId>) -> Vec<RefUse> {
             for s in &d.sources {
                 let e = ElementId(s.element);
                 if local(e) {
-                    let r = SourceRef { document: None, at: RefAt::Workspace, element: e, pinned: false };
-                    out.push(RefUse { site: RefSite::Drawing { element: el.id, source: e }, reference: r, source: e });
+                    let r = SourceRef {
+                        document: None,
+                        at: RefAt::Workspace,
+                        element: e,
+                        pinned: false,
+                    };
+                    out.push(RefUse {
+                        site: RefSite::Drawing {
+                            element: el.id,
+                            source: e,
+                        },
+                        reference: r,
+                        source: e,
+                    });
                 }
             }
         }
@@ -147,8 +216,20 @@ pub fn workspace_uses(doc: &Document, tab: Option<ElementId>) -> Vec<RefUse> {
                 && r.at == RefAt::Workspace
                 && r.document_or(doc.id) == doc.id
             {
-                let r = SourceRef { document: None, at: RefAt::Workspace, element: r.element, pinned: false };
-                out.push(RefUse { site: RefSite::Derived { element: el.id, feature: f.id }, reference: r, source: r.element });
+                let r = SourceRef {
+                    document: None,
+                    at: RefAt::Workspace,
+                    element: r.element,
+                    pinned: false,
+                };
+                out.push(RefUse {
+                    site: RefSite::Derived {
+                        element: el.id,
+                        feature: f.id,
+                    },
+                    reference: r,
+                    source: r.element,
+                });
             }
         }
     }
@@ -157,7 +238,10 @@ pub fn workspace_uses(doc: &Document, tab: Option<ElementId>) -> Vec<RefUse> {
 
 /// The use at `site` (a version reference or a workspace one), if there is one.
 pub fn use_at(doc: &Document, site: RefSite) -> Option<RefUse> {
-    uses(doc).into_iter().chain(workspace_uses(doc, Some(site.tab()))).find(|u| u.site == site)
+    uses(doc)
+        .into_iter()
+        .chain(workspace_uses(doc, Some(site.tab())))
+        .find(|u| u.site == site)
 }
 
 /// Every copy `root` needs (itself first), following the copies' instances.
@@ -198,7 +282,9 @@ impl Staleness {
 /// Whether `u` of `doc` is out of date, directly or further down (ER2.3, ER4.2). A workspace use
 /// never is.
 pub fn staleness(doc: &Document, u: &RefUse, latest: &mut Latest<'_>) -> Staleness {
-    let RefAt::Version(v) = u.reference.at else { return Staleness::default() };
+    let RefAt::Version(v) = u.reference.at else {
+        return Staleness::default();
+    };
     let newer = latest(u.reference.document_or(doc.id)).filter(|(l, _)| *l != v);
     let mut nested = false;
     for l in closure(doc, u.source).into_iter().skip(1) {
@@ -233,32 +319,62 @@ pub enum Target {
 
 /// The change that points `u` at `target` (`None` when it points there already). `log` is
 /// `doc`'s own history (same-document versions).
-pub fn change_for(res: &mut Resolver, doc: &Document, log: Option<&HistoryLog>, u: &RefUse, target: Target) -> Result<Option<Change>, LinkError> {
+pub fn change_for(
+    res: &mut Resolver,
+    doc: &Document,
+    log: Option<&HistoryLog>,
+    u: &RefUse,
+    target: Target,
+) -> Result<Option<Change>, LinkError> {
     let source_doc = u.reference.document_or(doc.id);
     let this = source_doc == doc.id;
     let v = match target {
         Target::Workspace => {
             if !this {
-                return Err(LinkError::NotLinkable("Another document's workspace".into()));
+                return Err(LinkError::NotLinkable(
+                    "Another document's workspace".into(),
+                ));
             }
             if u.reference.at == RefAt::Workspace {
                 return Ok(None);
             }
-            let to = SourceRef { document: None, at: RefAt::Workspace, element: u.reference.element, pinned: false };
-            return Ok(Some(Change { site: u.site, to, snapshot: None }));
+            let to = SourceRef {
+                document: None,
+                at: RefAt::Workspace,
+                element: u.reference.element,
+                pinned: false,
+            };
+            return Ok(Some(Change {
+                site: u.site,
+                to,
+                snapshot: None,
+            }));
         }
         Target::Version(v) => v,
         Target::Latest => {
-            let latest = if this { log.and_then(|l| l.versions().last().map(|v| v.id())) } else { res.latest(source_doc).map(|v| v.id()) };
+            let latest = if this {
+                log.and_then(|l| l.versions().last().map(|v| v.id()))
+            } else {
+                res.latest(source_doc).map(|v| v.id())
+            };
             latest.ok_or(LinkError::NoVersion)?
         }
     };
     if u.reference.at == RefAt::Version(v) {
         return Ok(None);
     }
-    let to = SourceRef { document: if this { None } else { Some(source_doc) }, at: RefAt::Version(v), element: u.reference.element, pinned: u.reference.pinned };
+    let to = SourceRef {
+        document: if this { None } else { Some(source_doc) },
+        at: RefAt::Version(v),
+        element: u.reference.element,
+        pinned: u.reference.pinned,
+    };
     let snapshot = res.resolve(to, doc, log)?;
-    Ok(Some(Change { site: u.site, to, snapshot: Some(snapshot) }))
+    Ok(Some(Change {
+        site: u.site,
+        to,
+        snapshot: Some(snapshot),
+    }))
 }
 
 fn with_element(s: InstanceSource, e: ElementId) -> InstanceSource {
@@ -291,7 +407,8 @@ impl Command for UpdateReferences {
         let mut old: Vec<ElementId> = Vec::new();
         for c in &self.changes {
             if let Some(s) = &c.snapshot {
-                if let RefSite::Instance { element, .. } | RefSite::Derived { element, .. } = c.site {
+                if let RefSite::Instance { element, .. } | RefSite::Derived { element, .. } = c.site
+                {
                     check_cycle(doc, element, &s.links, s.root_link())?;
                 }
                 for l in &s.links {
@@ -314,10 +431,17 @@ impl Command for UpdateReferences {
                     inst.link = version.then_some(c.to);
                 }
                 RefSite::Drawing { element, source } => {
-                    let mut src = crate::drawing_source::live_source(doc, new).ok_or_else(|| CommandError::Invalid("The referenced tab can't be shown".into()))?;
+                    let mut src =
+                        crate::drawing_source::live_source(doc, new).ok_or_else(|| {
+                            CommandError::Invalid("The referenced tab can't be shown".into())
+                        })?;
                     src.pinned = version && c.to.pinned;
-                    let el = doc.element_mut(element).ok_or(CommandError::ElementNotFound(element))?;
-                    let ElementKind::Drawing(d) = &mut el.kind else { return Err(CommandError::ElementNotFound(element)) };
+                    let el = doc
+                        .element_mut(element)
+                        .ok_or(CommandError::ElementNotFound(element))?;
+                    let ElementKind::Drawing(d) = &mut el.kind else {
+                        return Err(CommandError::ElementNotFound(element));
+                    };
                     for sheet in &mut d.sheets {
                         if let Some(r) = sheet.reference.as_mut()
                             && r.element == source.0
@@ -331,7 +455,8 @@ impl Command for UpdateReferences {
                             }
                         }
                     }
-                    d.sources.retain(|s| s.element != source.0 && s.element != new.0);
+                    d.sources
+                        .retain(|s| s.element != source.0 && s.element != new.0);
                     d.sources.push(src);
                     old.push(source);
                 }
@@ -339,8 +464,18 @@ impl Command for UpdateReferences {
                     // The source's features and settings at the new point; the host's own
                     // selection, locations and options stay.
                     let from = match &c.snapshot {
-                        Some(s) => s.root_link().map(|l| (l.element.clone(), l.document_name.clone(), l.version_name.clone())),
-                        None => doc.elements.iter().find(|e| e.id == c.to.element).map(|e| (e.clone(), String::new(), String::new())),
+                        Some(s) => s.root_link().map(|l| {
+                            (
+                                l.element.clone(),
+                                l.document_name.clone(),
+                                l.version_name.clone(),
+                            )
+                        }),
+                        None => doc
+                            .elements
+                            .iter()
+                            .find(|e| e.id == c.to.element)
+                            .map(|e| (e.clone(), String::new(), String::new())),
                     };
                     let (el, dn, vn) = from.ok_or(CommandError::ElementNotFound(c.to.element))?;
                     let d = derived_site(doc, element, feature)?;
@@ -370,10 +505,22 @@ impl Command for UpdateReferences {
 }
 
 /// The Derived feature at a site.
-fn derived_site(doc: &mut Document, element: ElementId, feature: crate::ids::FeatureId) -> Result<&mut crate::derived::DerivedFeature, CommandError> {
-    let el = doc.element_mut(element).ok_or(CommandError::ElementNotFound(element))?;
-    let ElementKind::PartStudio { features, .. } = &mut el.kind else { return Err(CommandError::ElementNotFound(element)) };
-    match features.iter_mut().find(|f| f.id == feature).map(|f| &mut f.kind) {
+fn derived_site(
+    doc: &mut Document,
+    element: ElementId,
+    feature: crate::ids::FeatureId,
+) -> Result<&mut crate::derived::DerivedFeature, CommandError> {
+    let el = doc
+        .element_mut(element)
+        .ok_or(CommandError::ElementNotFound(element))?;
+    let ElementKind::PartStudio { features, .. } = &mut el.kind else {
+        return Err(CommandError::ElementNotFound(element));
+    };
+    match features
+        .iter_mut()
+        .find(|f| f.id == feature)
+        .map(|f| &mut f.kind)
+    {
         Some(crate::document::FeatureKind::Derived(d)) => Ok(d),
         _ => Err(CommandError::Invalid("Derived feature not found".into())),
     }
@@ -410,7 +557,8 @@ pub(crate) fn prune(doc: &mut Document, candidates: &[ElementId]) {
     for c in candidates {
         drop.extend(closure(doc, *c).iter().map(|l| l.id()));
     }
-    doc.linked.retain(|l| !drop.contains(&l.id()) || keep.contains(&l.id()));
+    doc.linked
+        .retain(|l| !drop.contains(&l.id()) || keep.contains(&l.id()));
 }
 
 /// Pins or unpins references to versions (ER5.1, ER5.6, ER5.7): Update all skips pinned ones.
@@ -426,7 +574,11 @@ pub const PIN_WORKSPACE: &str = "Only a reference to a version can be pinned: a 
 
 impl Command for SetPinned {
     fn label(&self) -> String {
-        if self.pinned { "Pin reference".into() } else { "Unpin reference".into() }
+        if self.pinned {
+            "Pin reference".into()
+        } else {
+            "Unpin reference".into()
+        }
     }
     fn scope(&self) -> Scope {
         Scope::Whole
@@ -456,9 +608,17 @@ impl Command for SetPinned {
                     if doc.linked_element(source).is_none() {
                         return Err(CommandError::Invalid(PIN_WORKSPACE.into()));
                     }
-                    let el = doc.element_mut(element).ok_or(CommandError::ElementNotFound(element))?;
-                    let ElementKind::Drawing(d) = &mut el.kind else { return Err(CommandError::ElementNotFound(element)) };
-                    let s = d.sources.iter_mut().find(|s| s.element == source.0).ok_or(CommandError::ElementNotFound(source))?;
+                    let el = doc
+                        .element_mut(element)
+                        .ok_or(CommandError::ElementNotFound(element))?;
+                    let ElementKind::Drawing(d) = &mut el.kind else {
+                        return Err(CommandError::ElementNotFound(element));
+                    };
+                    let s = d
+                        .sources
+                        .iter_mut()
+                        .find(|s| s.element == source.0)
+                        .ok_or(CommandError::ElementNotFound(source))?;
                     s.pinned = self.pinned;
                 }
             }
@@ -502,9 +662,16 @@ impl PlanRow {
 }
 
 /// The newest version of `d` as the resolver reads it (its own log for `this`).
-fn latest_of(res: &mut Resolver, this: &Document, log: Option<&HistoryLog>, d: DocumentId) -> Option<(VersionId, String)> {
+fn latest_of(
+    res: &mut Resolver,
+    this: &Document,
+    log: Option<&HistoryLog>,
+    d: DocumentId,
+) -> Option<(VersionId, String)> {
     if d == this.id {
-        return log.and_then(|l| l.versions().last()).map(|v| (v.id(), v.name().to_string()));
+        return log
+            .and_then(|l| l.versions().last())
+            .map(|v| (v.id(), v.name().to_string()));
     }
     res.latest(d).map(|v| (v.id(), v.name().to_string()))
 }
@@ -519,7 +686,9 @@ fn needs_auto(res: &mut Resolver, d: DocumentId, seen: &mut HashSet<DocumentId>)
     if !seen.insert(d) {
         return false;
     }
-    let Ok(file) = res.store().load(d) else { return false };
+    let Ok(file) = res.store().load(d) else {
+        return false;
+    };
     let doc = file.document;
     let log = HistoryLog::load(res.store(), d).ok().flatten();
     for u in uses(&doc).into_iter().filter(|u| !u.reference.pinned) {
@@ -538,31 +707,53 @@ fn needs_auto(res: &mut Resolver, d: DocumentId, seen: &mut HashSet<DocumentId>)
 /// Update all's rows for `doc` (ER4.3, ER4.4): its unpinned version references (only those at
 /// `only`'s sites, when given) that are out of date, directly or further down, grouped by source
 /// document and version. A source whose workspace needs updating itself gets a new version.
-pub fn plan_update_all(res: &mut Resolver, doc: &Document, log: Option<&HistoryLog>, only: Option<&[RefSite]>) -> Vec<PlanRow> {
+pub fn plan_update_all(
+    res: &mut Resolver,
+    doc: &Document,
+    log: Option<&HistoryLog>,
+    only: Option<&[RefSite]>,
+) -> Vec<PlanRow> {
     let mut rows: Vec<PlanRow> = Vec::new();
     let mut auto: HashMap<DocumentId, bool> = HashMap::new();
     for u in uses(doc) {
         if u.reference.pinned || only.is_some_and(|o| !o.contains(&u.site)) {
             continue;
         }
-        let RefAt::Version(v) = u.reference.at else { continue };
+        let RefAt::Version(v) = u.reference.at else {
+            continue;
+        };
         let d = u.reference.document_or(doc.id);
         let latest = latest_of(res, doc, log, d);
         let copy = doc.linked_element(u.source);
         let from = copy.map(|l| l.version_name.clone()).unwrap_or_default();
-        let name = if d == doc.id { doc.name.clone() } else { copy.map(|l| l.document_name.clone()).unwrap_or_default() };
+        let name = if d == doc.id {
+            doc.name.clone()
+        } else {
+            copy.map(|l| l.document_name.clone()).unwrap_or_default()
+        };
         let needs = d != doc.id && *auto.entry(d).or_insert_with(|| needs_auto_version(res, d));
         let to = match latest {
             _ if needs => RowTarget::NewVersion,
             Some((l, n)) if l != v => RowTarget::Version(l, n),
             // Out of date only further down, with the source's workspace already up to date
             // (updated but not versioned): a new version of it carries the update.
-            _ if d != doc.id && staleness(doc, &u, &mut |x| latest_of(res, doc, log, x)).nested => RowTarget::NewVersion,
+            _ if d != doc.id && staleness(doc, &u, &mut |x| latest_of(res, doc, log, x)).nested => {
+                RowTarget::NewVersion
+            }
             _ => continue,
         };
-        match rows.iter_mut().find(|r| r.document == d && r.from == from && r.to == to) {
+        match rows
+            .iter_mut()
+            .find(|r| r.document == d && r.from == from && r.to == to)
+        {
             Some(r) => r.sites.push(u.site),
-            None => rows.push(PlanRow { document: d, name, from, to, sites: vec![u.site] }),
+            None => rows.push(PlanRow {
+                document: d,
+                name,
+                from,
+                to,
+                sites: vec![u.site],
+            }),
         }
     }
     rows
@@ -581,7 +772,14 @@ pub struct AutoVersion {
 /// workspace updated the same way, saved, and versioned, ER4.5), then the command that
 /// re-points `doc`'s references, to run through the undo history. The auto versions are written
 /// at once and stay whatever happens to the command (ER4.8).
-pub fn execute_update_all(res: &mut Resolver, doc: &Document, log: Option<&HistoryLog>, rows: &[PlanRow], now: Timestamp, user: &str) -> Result<(UpdateReferences, Vec<AutoVersion>), LinkError> {
+pub fn execute_update_all(
+    res: &mut Resolver,
+    doc: &Document,
+    log: Option<&HistoryLog>,
+    rows: &[PlanRow],
+    now: Timestamp,
+    user: &str,
+) -> Result<(UpdateReferences, Vec<AutoVersion>), LinkError> {
     let mut made: HashMap<DocumentId, VersionId> = HashMap::new();
     let mut autos = Vec::new();
     let cmd = execute_rows(res, doc, log, rows, now, user, &mut made, &mut autos, 0)?;
@@ -601,22 +799,39 @@ fn execute_rows(
     depth: usize,
 ) -> Result<UpdateReferences, LinkError> {
     if depth > 32 {
-        return Err(LinkError::Circular(format!("{} nests references too deeply", doc.name)));
+        return Err(LinkError::Circular(format!(
+            "{} nests references too deeply",
+            doc.name
+        )));
     }
     let mut changes = Vec::new();
     for row in rows {
         let v = match &row.to {
             RowTarget::Version(v, _) => *v,
-            RowTarget::NewVersion => auto_version(res, row.document, &doc.name, now, user, made, autos, depth + 1)?,
+            RowTarget::NewVersion => auto_version(
+                res,
+                row.document,
+                &doc.name,
+                now,
+                user,
+                made,
+                autos,
+                depth + 1,
+            )?,
         };
         for site in &row.sites {
-            let Some(u) = use_at(doc, *site) else { continue };
+            let Some(u) = use_at(doc, *site) else {
+                continue;
+            };
             if let Some(c) = change_for(res, doc, log, &u, Target::Version(v))? {
                 changes.push(c);
             }
         }
     }
-    Ok(UpdateReferences { changes, label: "Update all references".into() })
+    Ok(UpdateReferences {
+        changes,
+        label: "Update all references".into(),
+    })
 }
 
 /// Updates document `d`'s workspace references (recursively) and makes its auto version.
@@ -638,23 +853,54 @@ fn auto_version(
     let mut file = store.load(d).map_err(|_| LinkError::State(res.state(d)))?;
     let log = HistoryLog::load(&store, d).ok().flatten();
     let rows = plan_update_all(res, &file.document, log.as_ref(), None);
-    let cmd = execute_rows(res, &file.document, log.as_ref(), &rows, now, user, made, autos, depth)?;
+    let cmd = execute_rows(
+        res,
+        &file.document,
+        log.as_ref(),
+        &rows,
+        now,
+        user,
+        made,
+        autos,
+        depth,
+    )?;
     if !cmd.changes.is_empty() {
         let mut h = History::default();
-        h.execute(&mut file.document, &cmd).map_err(|e| LinkError::NotFound(e.to_string()))?;
+        h.execute(&mut file.document, &cmd)
+            .map_err(|e| LinkError::NotFound(e.to_string()))?;
         file.meta.modified = now;
-        store.save(&file.document, &file.meta).map_err(|e| LinkError::NotFound(format!("{} ({e})", file.document.name)))?;
+        store
+            .save(&file.document, &file.meta)
+            .map_err(|e| LinkError::NotFound(format!("{} ({e})", file.document.name)))?;
     }
     let mut log = log.unwrap_or_else(|| HistoryLog::start(&file.document, file.meta.created, user));
     if log.head() != &file.document {
-        log.record(&file.document, Origin::Command("Update all references".into()), now, user);
+        log.record(
+            &file.document,
+            Origin::Command("Update all references".into()),
+            now,
+            user,
+        );
     }
-    let v = log.create_auto_version(&format!("Created by Update all references in {consumer}"), now, user);
-    let name = log.version(v).map(|x| x.name().to_string()).unwrap_or_default();
-    log.save(&store).map_err(|e| LinkError::NotFound(format!("The history ({e})")))?;
+    let v = log.create_auto_version(
+        &format!("Created by Update all references in {consumer}"),
+        now,
+        user,
+    );
+    let name = log
+        .version(v)
+        .map(|x| x.name().to_string())
+        .unwrap_or_default();
+    log.save(&store)
+        .map_err(|e| LinkError::NotFound(format!("The history ({e})")))?;
     res.forget(d);
     made.insert(d, v);
-    autos.push(AutoVersion { document: d, document_name: file.document.name.clone(), version: v, name });
+    autos.push(AutoVersion {
+        document: d,
+        document_name: file.document.name.clone(),
+        version: v,
+        name,
+    });
     Ok(v)
 }
 
@@ -683,12 +929,27 @@ pub fn usages_in(doc: &Document, document: DocumentId) -> Vec<Usage> {
             continue;
         }
         let copy = doc.linked_element(u.source);
-        let tab = doc.elements.iter().find(|x| x.id == u.site.tab()).map(|x| x.name.clone()).unwrap_or_default();
+        let tab = doc
+            .elements
+            .iter()
+            .find(|x| x.id == u.site.tab())
+            .map(|x| x.name.clone())
+            .unwrap_or_default();
         let element = copy.map(|l| l.element.name.clone()).unwrap_or_default();
         let version = copy.map(|l| l.version_name.clone()).unwrap_or_default();
-        match out.iter_mut().find(|x| x.tab == tab && x.element == element && x.version == version) {
+        match out
+            .iter_mut()
+            .find(|x| x.tab == tab && x.element == element && x.version == version)
+        {
             Some(x) => x.count += 1,
-            None => out.push(Usage { document: doc.id, document_name: doc.name.clone(), tab, element, version, count: 1 }),
+            None => out.push(Usage {
+                document: doc.id,
+                document_name: doc.name.clone(),
+                tab,
+                element,
+                version,
+                count: 1,
+            }),
         }
     }
     out
@@ -699,10 +960,16 @@ pub fn usages_in(doc: &Document, document: DocumentId) -> Vec<Usage> {
 pub fn where_used(store: &Store, document: DocumentId) -> Vec<Usage> {
     let (lib, _) = store.list();
     let mut out: Vec<Usage> = Vec::new();
-    for e in lib.entries.iter().filter(|e| e.meta.trashed.is_none() && e.id != document) {
+    for e in lib
+        .entries
+        .iter()
+        .filter(|e| e.meta.trashed.is_none() && e.id != document)
+    {
         let Ok(file) = store.load(e.id) else { continue };
         out.extend(usages_in(&file.document, document));
     }
-    out.sort_by(|a, b| (&a.document_name, &a.tab, &a.version).cmp(&(&b.document_name, &b.tab, &b.version)));
+    out.sort_by(|a, b| {
+        (&a.document_name, &a.tab, &a.version).cmp(&(&b.document_name, &b.tab, &b.version))
+    });
     out
 }

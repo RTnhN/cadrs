@@ -5,9 +5,9 @@
 //! angles are absolute (the footprint's angle included), and a bottom-side footprint is stored
 //! already mirrored with bottom layers: it is turned back into its top-side definition.
 
+use crate::Error;
 use crate::common::{YAxis, at_angle, effects, fill, pts, stroke, uuid};
 use crate::sexpr::Sexp;
-use crate::Error;
 use cadrs_eda::board::*;
 use cadrs_eda::footprint::*;
 use cadrs_eda::graphics::{Geom, Shape, Text};
@@ -94,15 +94,22 @@ pub fn read_board(text: &str, warnings: &mut Vec<String>) -> Result<Board, Error
     if let Some(ls) = root.find("layers") {
         let copper = ls
             .children()
-            .filter(|l| l.str_arg(0).is_some_and(|n| n.ends_with(".Cu")) && !matches!(l.str_arg(1), Some("user")))
+            .filter(|l| {
+                l.str_arg(0).is_some_and(|n| n.ends_with(".Cu"))
+                    && !matches!(l.str_arg(1), Some("user"))
+            })
             .count();
         b.copper_layers = (copper.max(2) as u8 + 1) & !1;
     }
     // Net numbers → names.
-    let nets: BTreeMap<i64, String> =
-        root.all("net").filter_map(|n| Some((n.f64_arg(0)? as i64, n.str_arg(1)?.to_string()))).collect();
+    let nets: BTreeMap<i64, String> = root
+        .all("net")
+        .filter_map(|n| Some((n.f64_arg(0)? as i64, n.str_arg(1)?.to_string())))
+        .collect();
     let net = |s: &Sexp| -> String {
-        let Some(n) = s.find("net") else { return String::new() };
+        let Some(n) = s.find("net") else {
+            return String::new();
+        };
         match (n.str_arg(1), n.f64_arg(0)) {
             (Some(name), _) => name.to_string(),
             (None, Some(code)) => nets.get(&(code as i64)).cloned().unwrap_or_default(),
@@ -117,13 +124,19 @@ pub fn read_board(text: &str, warnings: &mut Vec<String>) -> Result<Board, Error
         match item.head() {
             "footprint" | "module" => b.footprints.push(read_footprint(item, &net, warnings)),
             "segment" | "arc" => {
-                let (Some(a), Some(e), Some(l)) = (y.child(item, "start"), y.child(item, "end"), layer_of(item)) else {
+                let (Some(a), Some(e), Some(l)) =
+                    (y.child(item, "start"), y.child(item, "end"), layer_of(item))
+                else {
                     continue;
                 };
                 b.tracks.push(Track {
                     id: uuid(item),
                     a,
-                    mid: if item.head() == "arc" { y.child(item, "mid") } else { None },
+                    mid: if item.head() == "arc" {
+                        y.child(item, "mid")
+                    } else {
+                        None
+                    },
                     b: e,
                     width: item.get_f64("width").map(mm).unwrap_or(mm(0.2)),
                     layer: l,
@@ -132,7 +145,16 @@ pub fn read_board(text: &str, warnings: &mut Vec<String>) -> Result<Board, Error
                 });
             }
             "via" => {
-                let ls: Vec<Layer> = item.find("layers").map(|l| l.items().iter().skip(1).filter_map(|x| x.text().and_then(layer)).collect()).unwrap_or_default();
+                let ls: Vec<Layer> = item
+                    .find("layers")
+                    .map(|l| {
+                        l.items()
+                            .iter()
+                            .skip(1)
+                            .filter_map(|x| x.text().and_then(layer))
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 b.vias.push(Via {
                     id: uuid(item),
                     at: y.child(item, "at").unwrap_or_default(),
@@ -149,20 +171,36 @@ pub fn read_board(text: &str, warnings: &mut Vec<String>) -> Result<Board, Error
                     to: ls.last().copied().unwrap_or(Layer::BottomCopper),
                     net: net(item),
                     locked: item.flag("locked") == Some(true),
-                    tented: item.find("tenting").map(|t| (t.has_atom("front"), t.has_atom("back"))),
+                    tented: item
+                        .find("tenting")
+                        .map(|t| (t.has_atom("front"), t.has_atom("back"))),
                 });
             }
             "zone" => b.zones.push(read_zone(item, y, &net)),
             "gr_line" | "gr_rect" | "gr_circle" | "gr_arc" | "gr_poly" | "gr_curve" => {
-                let (Some(shape), Some(l)) = (read_shape(item, y), layer_of(item)) else { continue };
-                b.shapes.push(BoardShape { id: uuid(item), shape, layer: l, locked: item.flag("locked") == Some(true), net: net(item) });
+                let (Some(shape), Some(l)) = (read_shape(item, y), layer_of(item)) else {
+                    continue;
+                };
+                b.shapes.push(BoardShape {
+                    id: uuid(item),
+                    shape,
+                    layer: l,
+                    locked: item.flag("locked") == Some(true),
+                    net: net(item),
+                });
             }
             "gr_text" => {
                 let Some(l) = layer_of(item) else { continue };
                 let (style, visible) = effects(item);
                 b.texts.push(BoardText {
                     id: uuid(item),
-                    text: Text { text: item.str_arg(0).unwrap_or_default().into(), at: y.child(item, "at").unwrap_or_default(), angle: at_angle(item), style, visible },
+                    text: Text {
+                        text: item.str_arg(0).unwrap_or_default().into(),
+                        at: y.child(item, "at").unwrap_or_default(),
+                        angle: at_angle(item),
+                        style,
+                        visible,
+                    },
                     layer: l,
                     locked: item.flag("locked") == Some(true),
                     knockout: item.find("layer").is_some_and(|l| l.has_atom("knockout")),
@@ -171,11 +209,20 @@ pub fn read_board(text: &str, warnings: &mut Vec<String>) -> Result<Board, Error
             "group" => b.groups.push(Group {
                 id: uuid(item),
                 name: item.str_arg(0).unwrap_or_default().into(),
-                members: item.find("members").map(|m| m.items().iter().skip(1).filter_map(|x| uuid::Uuid::parse_str(x.text()?).ok()).collect()).unwrap_or_default(),
+                members: item
+                    .find("members")
+                    .map(|m| {
+                        m.items()
+                            .iter()
+                            .skip(1)
+                            .filter_map(|x| uuid::Uuid::parse_str(x.text()?).ok())
+                            .collect()
+                    })
+                    .unwrap_or_default(),
                 locked: item.flag("locked") == Some(true),
             }),
-            "version" | "generator" | "generator_version" | "general" | "paper" | "title_block" | "layers" | "setup"
-            | "net" | "embedded_fonts" | "property" => {}
+            "version" | "generator" | "generator_version" | "general" | "paper" | "title_block"
+            | "layers" | "setup" | "net" | "embedded_fonts" | "property" => {}
             other => *skipped.entry(other).or_default() += 1,
         }
     }
@@ -195,21 +242,38 @@ pub fn read_board(text: &str, warnings: &mut Vec<String>) -> Result<Board, Error
 fn read_shape(s: &Sexp, y: YAxis) -> Option<Shape> {
     let kind = s.head().split_once('_').map(|(_, k)| k)?;
     let geom = match kind {
-        "line" => Geom::Line { a: y.child(s, "start")?, b: y.child(s, "end")? },
-        "rect" => Geom::Rect { a: y.child(s, "start")?, b: y.child(s, "end")? },
+        "line" => Geom::Line {
+            a: y.child(s, "start")?,
+            b: y.child(s, "end")?,
+        },
+        "rect" => Geom::Rect {
+            a: y.child(s, "start")?,
+            b: y.child(s, "end")?,
+        },
         "circle" => {
             let c = y.child(s, "center")?;
-            Geom::Circle { center: c, radius: c.dist(y.child(s, "end")?).round() as i64 }
+            Geom::Circle {
+                center: c,
+                radius: c.dist(y.child(s, "end")?).round() as i64,
+            }
         }
         "arc" => match y.child(s, "mid") {
-            Some(mid) => Geom::Arc { start: y.child(s, "start")?, mid, end: y.child(s, "end")? },
+            Some(mid) => Geom::Arc {
+                start: y.child(s, "start")?,
+                mid,
+                end: y.child(s, "end")?,
+            },
             // KiCad 5: (start = centre) (end = arc start) (angle sweep, clockwise as seen).
             None => {
                 let c = y.child(s, "start")?;
                 let a = y.child(s, "end")?;
                 let sweep = s.get_f64("angle")?;
                 let r = a - c;
-                Geom::Arc { start: a, mid: c + r.rotated(sweep / 2.0), end: c + r.rotated(sweep) }
+                Geom::Arc {
+                    start: a,
+                    mid: c + r.rotated(sweep / 2.0),
+                    end: c + r.rotated(sweep),
+                }
             }
         },
         "poly" => {
@@ -217,24 +281,40 @@ fn read_shape(s: &Sexp, y: YAxis) -> Option<Shape> {
             if p.len() < 2 {
                 return None;
             }
-            Geom::Polyline { pts: p, closed: true }
+            Geom::Polyline {
+                pts: p,
+                closed: true,
+            }
         }
         "curve" => {
             let p = pts(s, y);
             if p.len() != 4 {
                 return None;
             }
-            Geom::Bezier { pts: [p[0], p[1], p[2], p[3]] }
+            Geom::Bezier {
+                pts: [p[0], p[1], p[2], p[3]],
+            }
         }
         _ => return None,
     };
-    Some(Shape { geom, stroke: stroke(s), fill: fill(s) })
+    Some(Shape {
+        geom,
+        stroke: stroke(s),
+        fill: fill(s),
+    })
 }
 
 fn read_zone(z: &Sexp, y: YAxis, net: &impl Fn(&Sexp) -> String) -> Zone {
     let keepout = z.find("keepout").map(|k| {
         let no = |name: &str| k.get(name) == Some("not_allowed");
-        Keepout { tracks: no("tracks"), vias: no("vias"), pads: no("pads"), copper_pour: no("copperpour"), footprints: no("footprints"), max_height: None }
+        Keepout {
+            tracks: no("tracks"),
+            vias: no("vias"),
+            pads: no("pads"),
+            copper_pour: no("copperpour"),
+            footprints: no("footprints"),
+            max_height: None,
+        }
     });
     let mut fill = ZoneFill::default();
     if let Some(c) = z.find("connect_pads") {
@@ -259,13 +339,21 @@ fn read_zone(z: &Sexp, y: YAxis, net: &impl Fn(&Sexp) -> String) -> Zone {
         }
         fill.remove_islands = f.get("island_removal_mode") != Some("1");
         if f.get("mode") == Some("hatch") {
-            fill.hatched = Some((f.get_f64("hatch_thickness").map(mm).unwrap_or(mm(1.0)), f.get_f64("hatch_gap").map(mm).unwrap_or(mm(1.5))));
+            fill.hatched = Some((
+                f.get_f64("hatch_thickness").map(mm).unwrap_or(mm(1.0)),
+                f.get_f64("hatch_gap").map(mm).unwrap_or(mm(1.5)),
+            ));
         }
     }
     let mut filled: Vec<(Layer, Vec<Polygon>)> = vec![];
     for fp in z.all("filled_polygon") {
-        let Some(l) = fp.get("layer").and_then(layer) else { continue };
-        let poly = Polygon { outer: pts(fp, y), holes: vec![] };
+        let Some(l) = fp.get("layer").and_then(layer) else {
+            continue;
+        };
+        let poly = Polygon {
+            outer: pts(fp, y),
+            holes: vec![],
+        };
         match filled.iter_mut().find(|(x, _)| *x == l) {
             Some((_, v)) => v.push(poly),
             None => filled.push((l, vec![poly])),
@@ -274,7 +362,10 @@ fn read_zone(z: &Sexp, y: YAxis, net: &impl Fn(&Sexp) -> String) -> Zone {
     Zone {
         id: uuid(z),
         name: z.get("name").unwrap_or_default().into(),
-        net: z.get("net_name").map(str::to_string).unwrap_or_else(|| net(z)),
+        net: z
+            .get("net_name")
+            .map(str::to_string)
+            .unwrap_or_else(|| net(z)),
         layers: layer_set(z),
         priority: z.get_f64("priority").unwrap_or(0.0) as u32,
         outline: z.all("polygon").map(|p| pts(p, y)).collect(),
@@ -285,11 +376,19 @@ fn read_zone(z: &Sexp, y: YAxis, net: &impl Fn(&Sexp) -> String) -> Zone {
     }
 }
 
-fn read_footprint(f: &Sexp, net: &impl Fn(&Sexp) -> String, warnings: &mut Vec<String>) -> PlacedFootprint {
+fn read_footprint(
+    f: &Sexp,
+    net: &impl Fn(&Sexp) -> String,
+    warnings: &mut Vec<String>,
+) -> PlacedFootprint {
     let board_y = YAxis::DOWN;
     let at = board_y.child(f, "at").unwrap_or_default();
     let angle = at_angle(f);
-    let side = if f.get("layer") == Some("B.Cu") { Side::Bottom } else { Side::Top };
+    let side = if f.get("layer") == Some("B.Cu") {
+        Side::Bottom
+    } else {
+        Side::Top
+    };
     let bottom = side == Side::Bottom;
     // Local Y down → up; a bottom footprint's stored (mirrored) coordinates mirrored back.
     let y = if bottom { YAxis::UP } else { YAxis::DOWN };
@@ -305,9 +404,16 @@ fn read_footprint(f: &Sexp, net: &impl Fn(&Sexp) -> String, warnings: &mut Vec<S
         }
         Some(FpText {
             id: uuid(s),
-            text: Text { text: value.into(), at: y.child(s, "at").unwrap_or_default(), angle: local_angle(at_angle(s)), style, visible },
+            text: Text {
+                text: value.into(),
+                at: y.child(s, "at").unwrap_or_default(),
+                angle: local_angle(at_angle(s)),
+                style,
+                visible,
+            },
             layer: l,
-            keep_upright: s.find("at").is_none_or(|a| !a.has_atom("unlocked")) && s.flag("unlocked") != Some(true),
+            keep_upright: s.find("at").is_none_or(|a| !a.has_atom("unlocked"))
+                && s.flag("unlocked") != Some(true),
         })
     };
 
@@ -346,26 +452,52 @@ fn read_footprint(f: &Sexp, net: &impl Fn(&Sexp) -> String, warnings: &mut Vec<S
             "property" => {
                 let name = c.str_arg(0).unwrap_or_default();
                 if let Some(t) = text_of(c, c.str_arg(1).unwrap_or_default()) {
-                    fp.fields.push(FpField { name: name.into(), text: t });
+                    fp.fields.push(FpField {
+                        name: name.into(),
+                        text: t,
+                    });
                 } else if !name.starts_with("ki_") {
                     // Fields without a layer (KiCad 8 "Sheetfile" …) are kept hidden on Fab.
-                    let mut t = FpText { id: uuid(c), text: Text::new(c.str_arg(1).unwrap_or_default(), Pt::ZERO), layer: Layer::TopFab, keep_upright: true };
+                    let mut t = FpText {
+                        id: uuid(c),
+                        text: Text::new(c.str_arg(1).unwrap_or_default(), Pt::ZERO),
+                        layer: Layer::TopFab,
+                        keep_upright: true,
+                    };
                     t.text.visible = false;
-                    fp.fields.push(FpField { name: name.into(), text: t });
+                    fp.fields.push(FpField {
+                        name: name.into(),
+                        text: t,
+                    });
                 }
             }
             "fp_text" => {
                 let kind = c.str_arg(0).unwrap_or_default();
-                let Some(t) = text_of(c, c.str_arg(1).unwrap_or_default()) else { continue };
+                let Some(t) = text_of(c, c.str_arg(1).unwrap_or_default()) else {
+                    continue;
+                };
                 match kind {
-                    "reference" => fp.fields.push(FpField { name: "Reference".into(), text: t }),
-                    "value" => fp.fields.push(FpField { name: "Value".into(), text: t }),
+                    "reference" => fp.fields.push(FpField {
+                        name: "Reference".into(),
+                        text: t,
+                    }),
+                    "value" => fp.fields.push(FpField {
+                        name: "Value".into(),
+                        text: t,
+                    }),
                     _ => fp.texts.push(t),
                 }
             }
             "fp_line" | "fp_rect" | "fp_circle" | "fp_arc" | "fp_poly" | "fp_curve" => {
-                let (Some(shape), Some(l)) = (read_shape(c, y), c.get("layer").and_then(layer)) else { continue };
-                fp.shapes.push(FpShape { id: uuid(c), shape, layer: unflip(l) });
+                let (Some(shape), Some(l)) = (read_shape(c, y), c.get("layer").and_then(layer))
+                else {
+                    continue;
+                };
+                fp.shapes.push(FpShape {
+                    id: uuid(c),
+                    shape,
+                    layer: unflip(l),
+                });
             }
             "pad" => fp.pads.push(read_pad(c, y, bottom, &local_angle, net)),
             "model" => fp.models.push(Model3d {
@@ -392,15 +524,26 @@ fn read_footprint(f: &Sexp, net: &impl Fn(&Sexp) -> String, warnings: &mut Vec<S
                 z.filled.clear();
                 fp.zones.push(z);
             }
-            "fp_text_box" | "dimension" | "group" | "image" => warnings.push(format!("footprint {}: `{}` not imported yet", fp.id, c.head())),
+            "fp_text_box" | "dimension" | "group" | "image" => warnings.push(format!(
+                "footprint {}: `{}` not imported yet",
+                fp.id,
+                c.head()
+            )),
             _ => {}
         }
     }
     PlacedFootprint {
         id: uuid(f),
-        symbol: f.get("path").and_then(|p| p.rsplit('/').next()).and_then(|u| uuid::Uuid::parse_str(u).ok()),
+        symbol: f
+            .get("path")
+            .and_then(|p| p.rsplit('/').next())
+            .and_then(|u| uuid::Uuid::parse_str(u).ok()),
         footprint: fp,
-        placement: FootprintPlacement { at, angle: normalize_deg(angle), side },
+        placement: FootprintPlacement {
+            at,
+            angle: normalize_deg(angle),
+            side,
+        },
         locked: f.flag("locked") == Some(true),
     }
 }
@@ -410,27 +553,49 @@ fn xyz(m: &Sexp, name: &str) -> Option<[f64; 3]> {
     Some([x.f64_arg(0)?, x.f64_arg(1)?, x.f64_arg(2)?])
 }
 
-fn read_pad(p: &Sexp, y: YAxis, bottom: bool, local_angle: &impl Fn(f64) -> f64, net: &impl Fn(&Sexp) -> String) -> Pad {
+fn read_pad(
+    p: &Sexp,
+    y: YAxis,
+    bottom: bool,
+    local_angle: &impl Fn(f64) -> f64,
+    net: &impl Fn(&Sexp) -> String,
+) -> Pad {
     let kind = match p.str_arg(1) {
         Some("thru_hole") => PadKind::ThroughHole,
         Some("np_thru_hole") => PadKind::NonPlated,
         Some("connect") => PadKind::Connector,
         _ => PadKind::Smd,
     };
-    let size = p.find("size").map(|s| Size::mm(s.f64_arg(0).unwrap_or(0.0), s.f64_arg(1).unwrap_or(0.0))).unwrap_or_default();
+    let size = p
+        .find("size")
+        .map(|s| Size::mm(s.f64_arg(0).unwrap_or(0.0), s.f64_arg(1).unwrap_or(0.0)))
+        .unwrap_or_default();
     let shape = match p.str_arg(2) {
         Some("rect") => match p.get_f64("chamfer_ratio") {
             // KiCad 5 chamfered rects.
-            Some(r) if p.find("chamfer").is_some() => PadShape::Chamfered { ratio: r, corners: corners(p), round_ratio: 0.0 },
+            Some(r) if p.find("chamfer").is_some() => PadShape::Chamfered {
+                ratio: r,
+                corners: corners(p),
+                round_ratio: 0.0,
+            },
             _ => PadShape::Rect,
         },
         Some("oval") => PadShape::Oval,
         Some("roundrect") => match p.find("chamfer") {
-            Some(_) => PadShape::Chamfered { ratio: p.get_f64("chamfer_ratio").unwrap_or(0.0), corners: corners(p), round_ratio: p.get_f64("roundrect_rratio").unwrap_or(0.0) },
-            None => PadShape::RoundRect { ratio: p.get_f64("roundrect_rratio").unwrap_or(0.25) },
+            Some(_) => PadShape::Chamfered {
+                ratio: p.get_f64("chamfer_ratio").unwrap_or(0.0),
+                corners: corners(p),
+                round_ratio: p.get_f64("roundrect_rratio").unwrap_or(0.0),
+            },
+            None => PadShape::RoundRect {
+                ratio: p.get_f64("roundrect_rratio").unwrap_or(0.25),
+            },
         },
         Some("trapezoid") => PadShape::Trapezoid {
-            delta: p.find("rect_delta").map(|d| Size::mm(d.f64_arg(0).unwrap_or(0.0), d.f64_arg(1).unwrap_or(0.0))).unwrap_or_default(),
+            delta: p
+                .find("rect_delta")
+                .map(|d| Size::mm(d.f64_arg(0).unwrap_or(0.0), d.f64_arg(1).unwrap_or(0.0)))
+                .unwrap_or_default(),
         },
         Some("custom") => PadShape::Custom {
             anchor_rect: p.find("options").and_then(|o| o.get("anchor")) == Some("rect"),
@@ -441,7 +606,12 @@ fn read_pad(p: &Sexp, y: YAxis, bottom: bool, local_angle: &impl Fn(f64) -> f64,
                         .filter_map(|c| {
                             let mut s = read_shape(c, y)?;
                             // Primitives fill unless told otherwise (old files say nothing).
-                            if c.find("fill").is_none() && matches!(s.geom, Geom::Polyline { .. } | Geom::Circle { .. } | Geom::Rect { .. }) {
+                            if c.find("fill").is_none()
+                                && matches!(
+                                    s.geom,
+                                    Geom::Polyline { .. } | Geom::Circle { .. } | Geom::Rect { .. }
+                                )
+                            {
                                 s.fill = cadrs_eda::graphics::Fill::Outline;
                             }
                             Some(s)
@@ -454,10 +624,25 @@ fn read_pad(p: &Sexp, y: YAxis, bottom: bool, local_angle: &impl Fn(f64) -> f64,
     };
     let drill = p.find("drill").map(|d| {
         let oval = d.has_atom("oval");
-        let nums: Vec<f64> = d.items().iter().skip(1).filter_map(|x| x.text()?.parse().ok()).collect();
+        let nums: Vec<f64> = d
+            .items()
+            .iter()
+            .skip(1)
+            .filter_map(|x| x.text()?.parse().ok())
+            .collect();
         let w = nums.first().copied().unwrap_or(0.0);
-        let h = if oval { nums.get(1).copied().unwrap_or(w) } else { w };
-        Drill { size: Size::mm(w, h), offset: d.find("offset").map(|o| y.vec(o.f64_arg(0).unwrap_or(0.0), o.f64_arg(1).unwrap_or(0.0))).unwrap_or_default() }
+        let h = if oval {
+            nums.get(1).copied().unwrap_or(w)
+        } else {
+            w
+        };
+        Drill {
+            size: Size::mm(w, h),
+            offset: d
+                .find("offset")
+                .map(|o| y.vec(o.f64_arg(0).unwrap_or(0.0), o.f64_arg(1).unwrap_or(0.0)))
+                .unwrap_or_default(),
+        }
     });
     let mut shape = shape;
     let mut layers = layer_set(p);
@@ -478,7 +663,10 @@ fn read_pad(p: &Sexp, y: YAxis, bottom: bool, local_angle: &impl Fn(f64) -> f64,
             _ => ZoneConnection::Inherit,
         },
         thermal_gap: p.get_f64("thermal_gap").map(mm),
-        thermal_spoke: p.get_f64("thermal_bridge_width").or_else(|| p.get_f64("thermal_width")).map(mm),
+        thermal_spoke: p
+            .get_f64("thermal_bridge_width")
+            .or_else(|| p.get_f64("thermal_width"))
+            .map(mm),
     };
     Pad {
         id: uuid(p),
@@ -503,7 +691,12 @@ fn read_pad(p: &Sexp, y: YAxis, bottom: bool, local_angle: &impl Fn(f64) -> f64,
 fn corners(p: &Sexp) -> Corners {
     let c = p.find("chamfer");
     let has = |n: &str| c.is_some_and(|c| c.has_atom(n));
-    Corners { top_left: has("top_left"), top_right: has("top_right"), bottom_left: has("bottom_left"), bottom_right: has("bottom_right") }
+    Corners {
+        top_left: has("top_left"),
+        top_right: has("top_right"),
+        bottom_left: has("bottom_left"),
+        bottom_right: has("bottom_right"),
+    }
 }
 
 /// A bottom footprint's pad, stored mirrored: its corners and trapezoid swapped back.

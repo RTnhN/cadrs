@@ -18,7 +18,10 @@ use cadrs_sketch::{PlaneRef, SketchOp, Vec2};
 use crate::assembly::commands::{InsertInstance, SetInstancesFixed};
 use crate::assembly::{Instance, InstanceId, InstanceSource, Pose};
 use crate::command::{CommandError, History};
-use crate::commands::{AddElement, AddExtrude, AddSketch, EditSketch, NewElementKind, RenamePart, SetExtrude, SetPartMaterial};
+use crate::commands::{
+    AddElement, AddExtrude, AddSketch, EditSketch, NewElementKind, RenamePart, SetExtrude,
+    SetPartMaterial,
+};
 use crate::document::{BooleanOp, Document, ExtrudeFeature, Offset};
 use crate::external::{InsertLinked, SourceRef};
 use crate::history_log::VersionId;
@@ -47,11 +50,20 @@ fn v(x: f64, y: f64) -> Vec2 {
 }
 
 fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> SketchOp {
-    SketchOp::AddPolyline { points: vec![v(x0, y0), v(x1, y0), v(x1, y1), v(x0, y1)], closed: true, construction: false, label: "Add rectangle" }
+    SketchOp::AddPolyline {
+        points: vec![v(x0, y0), v(x1, y0), v(x1, y1), v(x0, y1)],
+        closed: true,
+        construction: false,
+        label: "Add rectangle",
+    }
 }
 
 fn circle(x: f64, y: f64, r: f64) -> SketchOp {
-    SketchOp::AddCircle { center: v(x, y), radius: r, construction: false }
+    SketchOp::AddCircle {
+        center: v(x, y),
+        radius: r,
+        construction: false,
+    }
 }
 
 fn studio(doc: &mut Document, el: ElementId, name: &str) {
@@ -63,11 +75,34 @@ fn studio(doc: &mut Document, el: ElementId, name: &str) {
 /// A sketch of `ops` on `plane` and its extrude from `z0` to `z1` (mm) along the plane's normal,
 /// New: one part, named.
 #[allow(clippy::too_many_arguments)]
-fn part(s: &mut dyn Studio, el: ElementId, n: u128, plane: PlaneRef, ops: Vec<SketchOp>, seed: Vec2, z: (f64, f64), name: &str) -> Result<PartId, CommandError> {
+fn part(
+    s: &mut dyn Studio,
+    el: ElementId,
+    n: u128,
+    plane: PlaneRef,
+    ops: Vec<SketchOp>,
+    seed: Vec2,
+    z: (f64, f64),
+    name: &str,
+) -> Result<PartId, CommandError> {
     let (sk, ex) = (fid(n), fid(n + 1));
-    s.run(&AddSketch { element: el, feature: sk, plane: Some(plane) })?;
-    s.run(&EditSketch { element: el, feature: sk, op: SketchOp::Batch(ops) })?;
-    let g = s.document().element(el).and_then(|x| x.feature(sk)).and_then(|f| f.sketch()).map(|s| s.geometry.clone()).ok_or_else(|| CommandError::Invalid("sketch not found".into()))?;
+    s.run(&AddSketch {
+        element: el,
+        feature: sk,
+        plane: Some(plane),
+    })?;
+    s.run(&EditSketch {
+        element: el,
+        feature: sk,
+        op: SketchOp::Batch(ops),
+    })?;
+    let g = s
+        .document()
+        .element(el)
+        .and_then(|x| x.feature(sk))
+        .and_then(|f| f.sketch())
+        .map(|s| s.geometry.clone())
+        .ok_or_else(|| CommandError::Invalid("sketch not found".into()))?;
     let regions = super::region_refs(sk, &g, &[seed]);
     if regions.len() != 1 {
         return Err(CommandError::Invalid(format!("no region for {name}")));
@@ -76,18 +111,60 @@ fn part(s: &mut dyn Studio, el: ElementId, n: u128, plane: PlaneRef, ops: Vec<Sk
     let mut x = super::extrude_of(regions, z1 - z0);
     x.op = BooleanOp::New;
     if z0 != 0.0 {
-        x.start_offset = Some(Offset { value: z0.abs(), expr: format!("{} mm", z0.abs()), flip: z0 < 0.0 });
+        x.start_offset = Some(Offset {
+            value: z0.abs(),
+            expr: format!("{} mm", z0.abs()),
+            flip: z0 < 0.0,
+        });
     }
-    s.run(&AddExtrude { element: el, feature: ex, extrude: ExtrudeFeature::default() })?;
-    s.run(&SetExtrude { element: el, feature: ex, extrude: x, label: "Extrude".into() })?;
+    s.run(&AddExtrude {
+        element: el,
+        feature: ex,
+        extrude: ExtrudeFeature::default(),
+    })?;
+    s.run(&SetExtrude {
+        element: el,
+        feature: ex,
+        extrude: x,
+        label: "Extrude".into(),
+    })?;
     let p = PartId::new(ex, 0);
-    s.run(&RenamePart { element: el, part: p, name: name.into() })?;
-    s.run(&SetPartMaterial { element: el, parts: vec![p], material: crate::material::library("Aluminum - 6061") })?;
+    s.run(&RenamePart {
+        element: el,
+        part: p,
+        name: name.into(),
+    })?;
+    s.run(&SetPartMaterial {
+        element: el,
+        parts: vec![p],
+        material: crate::material::library("Aluminum - 6061"),
+    })?;
     Ok(p)
 }
 
-fn insert(doc: &mut Document, h: &mut History, asm: ElementId, i: InstanceId, el: ElementId, p: PartId, pose: Pose) -> Result<(), CommandError> {
-    h.execute(doc, &InsertInstance { element: asm, instance: Instance::new(i, InstanceSource::Part { element: el, part: p }, pose) })
+fn insert(
+    doc: &mut Document,
+    h: &mut History,
+    asm: ElementId,
+    i: InstanceId,
+    el: ElementId,
+    p: PartId,
+    pose: Pose,
+) -> Result<(), CommandError> {
+    h.execute(
+        doc,
+        &InsertInstance {
+            element: asm,
+            instance: Instance::new(
+                i,
+                InstanceSource::Part {
+                    element: el,
+                    part: p,
+                },
+                pose,
+            ),
+        },
+    )
 }
 
 fn assembly_first(doc: &mut Document, asm: ElementId) {
@@ -122,14 +199,75 @@ pub fn slide_document() -> Result<Document, CommandError> {
     studio(&mut doc, CARRIAGE_STUDIO, "Carriage");
     {
         let s = &mut DocHistory(&mut doc, &mut h);
-        part(s, RAIL_STUDIO, 0x10, PlaneRef::Top, vec![rect(-100.0, -15.0, 100.0, 15.0), circle(-80.0, 0.0, 3.0), circle(80.0, 0.0, 3.0)], v(0.0, 0.0), (0.0, RAIL_TOP), "Rail")?;
-        part(s, CARRIAGE_STUDIO, 0x20, PlaneRef::Top, vec![rect(-20.0, -15.0, 20.0, 15.0)], v(0.0, 0.0), (0.0, 12.0), "Carriage")?;
+        part(
+            s,
+            RAIL_STUDIO,
+            0x10,
+            PlaneRef::Top,
+            vec![
+                rect(-100.0, -15.0, 100.0, 15.0),
+                circle(-80.0, 0.0, 3.0),
+                circle(80.0, 0.0, 3.0),
+            ],
+            v(0.0, 0.0),
+            (0.0, RAIL_TOP),
+            "Rail",
+        )?;
+        part(
+            s,
+            CARRIAGE_STUDIO,
+            0x20,
+            PlaneRef::Top,
+            vec![rect(-20.0, -15.0, 20.0, 15.0)],
+            v(0.0, 0.0),
+            (0.0, 12.0),
+            "Carriage",
+        )?;
     }
-    h.execute(&mut doc, &AddElement { id: SLIDE, kind: NewElementKind::Assembly, name: Some("Slide".into()), after: None })?;
-    insert(&mut doc, &mut h, SLIDE, RAIL, RAIL_STUDIO, RAIL_PART, Pose::IDENTITY)?;
-    insert(&mut doc, &mut h, SLIDE, CARRIAGE_1, CARRIAGE_STUDIO, CARRIAGE_PART, Pose::translation([CARRIAGE_X[0], 0.0, RAIL_TOP]))?;
-    insert(&mut doc, &mut h, SLIDE, CARRIAGE_2, CARRIAGE_STUDIO, CARRIAGE_PART, Pose::translation([CARRIAGE_X[1], 0.0, RAIL_TOP]))?;
-    h.execute(&mut doc, &SetInstancesFixed { element: SLIDE, instances: vec![RAIL], fixed: true })?;
+    h.execute(
+        &mut doc,
+        &AddElement {
+            id: SLIDE,
+            kind: NewElementKind::Assembly,
+            name: Some("Slide".into()),
+            after: None,
+        },
+    )?;
+    insert(
+        &mut doc,
+        &mut h,
+        SLIDE,
+        RAIL,
+        RAIL_STUDIO,
+        RAIL_PART,
+        Pose::IDENTITY,
+    )?;
+    insert(
+        &mut doc,
+        &mut h,
+        SLIDE,
+        CARRIAGE_1,
+        CARRIAGE_STUDIO,
+        CARRIAGE_PART,
+        Pose::translation([CARRIAGE_X[0], 0.0, RAIL_TOP]),
+    )?;
+    insert(
+        &mut doc,
+        &mut h,
+        SLIDE,
+        CARRIAGE_2,
+        CARRIAGE_STUDIO,
+        CARRIAGE_PART,
+        Pose::translation([CARRIAGE_X[1], 0.0, RAIL_TOP]),
+    )?;
+    h.execute(
+        &mut doc,
+        &SetInstancesFixed {
+            element: SLIDE,
+            instances: vec![RAIL],
+            fixed: true,
+        },
+    )?;
     assembly_first(&mut doc, SLIDE);
     Ok(doc)
 }
@@ -141,7 +279,9 @@ pub const FINGER_DOCUMENT: DocumentId = did(2);
 pub const FINGER_STUDIO: ElementId = eid(11);
 pub const FINGER_PART: PartId = PartId::new(fid(0x31), 0);
 /// The finger's V1 in `fixtures/mic_gripper_finger_standin.history.ron`.
-pub const FINGER_V1: VersionId = VersionId(uuid::Uuid::from_u128(0x4c00_0000_0000_0000_0000_0000_0000_0a01));
+pub const FINGER_V1: VersionId = VersionId(uuid::Uuid::from_u128(
+    0x4c00_0000_0000_0000_0000_0000_0000_0a01,
+));
 pub const GRIPPER_DOCUMENT: DocumentId = did(3);
 pub const PALM_STUDIO: ElementId = eid(21);
 pub const GRIPPER: ElementId = eid(22);
@@ -157,7 +297,16 @@ pub fn finger_document() -> Result<Document, CommandError> {
     doc.id = FINGER_DOCUMENT;
     let mut h = History::default();
     studio(&mut doc, FINGER_STUDIO, "Finger");
-    part(&mut DocHistory(&mut doc, &mut h), FINGER_STUDIO, 0x30, PlaneRef::Top, vec![rect(0.0, -5.0, 60.0, 5.0)], v(30.0, 0.0), (0.0, 30.0), "Finger")?;
+    part(
+        &mut DocHistory(&mut doc, &mut h),
+        FINGER_STUDIO,
+        0x30,
+        PlaneRef::Top,
+        vec![rect(0.0, -5.0, 60.0, 5.0)],
+        v(30.0, 0.0),
+        (0.0, 30.0),
+        "Finger",
+    )?;
     Ok(doc)
 }
 
@@ -173,15 +322,63 @@ pub fn gripper_document() -> Result<Document, CommandError> {
     doc.id = GRIPPER_DOCUMENT;
     let mut h = History::default();
     studio(&mut doc, PALM_STUDIO, "Palm");
-    part(&mut DocHistory(&mut doc, &mut h), PALM_STUDIO, 0x40, PlaneRef::Top, vec![rect(-50.0, -20.0, 50.0, 20.0)], v(0.0, 0.0), (-20.0, 0.0), "Palm")?;
-    h.execute(&mut doc, &AddElement { id: GRIPPER, kind: NewElementKind::Assembly, name: Some("Gripper".into()), after: None })?;
-    insert(&mut doc, &mut h, GRIPPER, PALM, PALM_STUDIO, PALM_PART, Pose::IDENTITY)?;
-    h.execute(&mut doc, &SetInstancesFixed { element: GRIPPER, instances: vec![PALM], fixed: true })?;
+    part(
+        &mut DocHistory(&mut doc, &mut h),
+        PALM_STUDIO,
+        0x40,
+        PlaneRef::Top,
+        vec![rect(-50.0, -20.0, 50.0, 20.0)],
+        v(0.0, 0.0),
+        (-20.0, 0.0),
+        "Palm",
+    )?;
+    h.execute(
+        &mut doc,
+        &AddElement {
+            id: GRIPPER,
+            kind: NewElementKind::Assembly,
+            name: Some("Gripper".into()),
+            after: None,
+        },
+    )?;
+    insert(
+        &mut doc,
+        &mut h,
+        GRIPPER,
+        PALM,
+        PALM_STUDIO,
+        PALM_PART,
+        Pose::IDENTITY,
+    )?;
+    h.execute(
+        &mut doc,
+        &SetInstancesFixed {
+            element: GRIPPER,
+            instances: vec![PALM],
+            fixed: true,
+        },
+    )?;
     // The finger at V1 of its document.
     let r = SourceRef::version(Some(FINGER_DOCUMENT), FINGER_STUDIO, FINGER_V1);
-    let snapshot = crate::external::snapshot(&finger, r, "V1").map_err(|e| CommandError::Invalid(e.to_string()))?;
-    let inst = Instance::new(FINGER, InstanceSource::Part { element: snapshot.root, part: FINGER_PART }, Pose::translation([FINGER_X, 0.0, 0.0]));
-    h.execute(&mut doc, &InsertLinked { element: GRIPPER, snapshot, instances: vec![inst], reference: r })?;
+    let snapshot = crate::external::snapshot(&finger, r, "V1")
+        .map_err(|e| CommandError::Invalid(e.to_string()))?;
+    let inst = Instance::new(
+        FINGER,
+        InstanceSource::Part {
+            element: snapshot.root,
+            part: FINGER_PART,
+        },
+        Pose::translation([FINGER_X, 0.0, 0.0]),
+    );
+    h.execute(
+        &mut doc,
+        &InsertLinked {
+            element: GRIPPER,
+            snapshot,
+            instances: vec![inst],
+            reference: r,
+        },
+    )?;
     assembly_first(&mut doc, GRIPPER);
     Ok(doc)
 }

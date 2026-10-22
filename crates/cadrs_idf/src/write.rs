@@ -18,14 +18,22 @@ pub fn fmt_num(v: f64) -> String {
         return "0".to_string();
     }
     let a = v.abs();
-    if !(1e-5..1e16).contains(&a) { format!("{v:e}") } else { format!("{v}") }
+    if !(1e-5..1e16).contains(&a) {
+        format!("{v:e}")
+    } else {
+        format!("{v}")
+    }
 }
 
 /// Quote a string value if it needs it (whitespace, empty, or a leading `"`, `#` or `.`).
 /// IDF can't escape `"` inside a string, so it is replaced with `'`.
 pub fn quote(s: &str) -> String {
     let s = clean(s);
-    if s.is_empty() || s.chars().any(char::is_whitespace) || s.starts_with('#') || s.starts_with('.') {
+    if s.is_empty()
+        || s.chars().any(char::is_whitespace)
+        || s.starts_with('#')
+        || s.starts_with('.')
+    {
         format!("\"{s}\"")
     } else {
         s
@@ -34,11 +42,25 @@ pub fn quote(s: &str) -> String {
 
 /// Replace what a record can't hold: `"` becomes `'`, line breaks become spaces.
 fn clean(s: &str) -> String {
-    s.chars().map(|c| if c == '"' { '\'' } else if c == '\n' || c == '\r' { ' ' } else { c }).collect()
+    s.chars()
+        .map(|c| {
+            if c == '"' {
+                '\''
+            } else if c == '\n' || c == '\r' {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect()
 }
 
 fn header_line(out: &mut String, h: &Header) {
-    let date = if h.date.is_empty() { DEFAULT_DATE } else { h.date.as_str() };
+    let date = if h.date.is_empty() {
+        DEFAULT_DATE
+    } else {
+        h.date.as_str()
+    };
     let _ = writeln!(
         out,
         "{} {} \"{}\" {} {}",
@@ -64,7 +86,14 @@ fn section_open(out: &mut String, name: &str, owner: Owner, v: IdfVersion) {
 fn write_loops(out: &mut String, loops: &[Loop]) {
     for l in loops {
         for p in &l.points {
-            let _ = writeln!(out, "{} {} {} {}", l.label, fmt_num(p.x), fmt_num(p.y), fmt_num(p.angle));
+            let _ = writeln!(
+                out,
+                "{} {} {} {}",
+                l.label,
+                fmt_num(p.x),
+                fmt_num(p.y),
+                fmt_num(p.angle)
+            );
         }
     }
 }
@@ -80,7 +109,11 @@ pub fn write_emn(board: &Board, version: IdfVersion) -> String {
     o.push_str(".END_HEADER\n");
 
     if let Some(ol) = &b.outline {
-        let name = if b.header.file_type == FileType::Panel { "PANEL_OUTLINE" } else { "BOARD_OUTLINE" };
+        let name = if b.header.file_type == FileType::Panel {
+            "PANEL_OUTLINE"
+        } else {
+            "BOARD_OUTLINE"
+        };
         section_open(&mut o, name, ol.owner, v);
         let _ = writeln!(o, "{}", fmt_num(ol.thickness));
         write_loops(&mut o, &ol.loops);
@@ -90,7 +123,13 @@ pub fn write_emn(board: &Board, version: IdfVersion) -> String {
         section_open(&mut o, "OTHER_OUTLINE", s.owner, v);
         match s.side {
             Some(side) => {
-                let _ = writeln!(o, "{} {} {}", quote(&s.id), fmt_num(s.thickness), side.keyword());
+                let _ = writeln!(
+                    o,
+                    "{} {} {}",
+                    quote(&s.id),
+                    fmt_num(s.thickness),
+                    side.keyword()
+                );
             }
             None => {
                 let _ = writeln!(o, "{} {}", quote(&s.id), fmt_num(s.thickness));
@@ -161,7 +200,15 @@ pub fn write_emn(board: &Board, version: IdfVersion) -> String {
             HoleAssoc::Panel => "PANEL".to_string(),
             HoleAssoc::Refdes(r) => quote(r),
         };
-        let _ = write!(o, "{} {} {} {} {}", fmt_num(h.dia), fmt_num(h.x), fmt_num(h.y), h.plating.keyword(), assoc);
+        let _ = write!(
+            o,
+            "{} {} {} {} {}",
+            fmt_num(h.dia),
+            fmt_num(h.x),
+            fmt_num(h.y),
+            h.plating.keyword(),
+            assoc
+        );
         if v == IdfVersion::V3 {
             let kind = match &h.kind {
                 Some(HoleKind::Pin) => "PIN".to_string(),
@@ -195,7 +242,13 @@ pub fn write_emn(board: &Board, version: IdfVersion) -> String {
 
     o.push_str(".PLACEMENT\n");
     for p in &b.placements {
-        let _ = writeln!(o, "{} {} {}", quote(&p.package), quote(&p.part_number), quote(&p.refdes));
+        let _ = writeln!(
+            o,
+            "{} {} {}",
+            quote(&p.package),
+            quote(&p.part_number),
+            quote(&p.refdes)
+        );
         match v {
             IdfVersion::V3 => {
                 let _ = writeln!(
@@ -239,7 +292,14 @@ pub fn write_emp(library: &Library, version: IdfVersion) -> String {
             PackageKind::Mechanical => "MECHANICAL",
         };
         let _ = writeln!(o, ".{name}");
-        let _ = writeln!(o, "{} {} {} {}", quote(&p.name), quote(&p.part_number), p.units.keyword(), fmt_num(p.height));
+        let _ = writeln!(
+            o,
+            "{} {} {} {}",
+            quote(&p.name),
+            quote(&p.part_number),
+            p.units.keyword(),
+            fmt_num(p.height)
+        );
         write_loops(&mut o, &p.loops);
         for (k, val) in &p.props {
             let _ = writeln!(o, "PROP {} {}", quote(k), quote(val));

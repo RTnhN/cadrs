@@ -104,8 +104,15 @@ impl ActionRow {
 
     /// A trailing icon button (`key` names it `<row>-<key>` and comes back in
     /// [`ActionRowAction`]).
-    pub fn action(mut self, key: impl Into<String>, icon: impl Into<Cow<'static, str>>, tooltip: impl Into<String>, enabled: bool) -> Self {
-        self.actions.push((key.into(), icon.into(), tooltip.into(), enabled));
+    pub fn action(
+        mut self,
+        key: impl Into<String>,
+        icon: impl Into<Cow<'static, str>>,
+        tooltip: impl Into<String>,
+        enabled: bool,
+    ) -> Self {
+        self.actions
+            .push((key.into(), icon.into(), tooltip.into(), enabled));
         self
     }
 
@@ -126,8 +133,13 @@ impl ActionRow {
         let prefix = name.to_string();
         let fg = if error { t.feature_error } else { t.foreground };
         let visuals = Visuals {
-            background: StateColors::new(Color::NONE, Color::srgba(0.0, 0.3, 0.7, 0.08), Color::srgba(0.0, 0.3, 0.7, 0.14), Color::NONE)
-                .with_selected(t.list_selected),
+            background: StateColors::new(
+                Color::NONE,
+                Color::srgba(0.0, 0.3, 0.7, 0.08),
+                Color::srgba(0.0, 0.3, 0.7, 0.14),
+                Color::NONE,
+            )
+            .with_selected(t.list_selected),
             border: StateColors::all(Color::NONE),
             foreground: StateColors::all(fg),
             focus_ring: t.focus_ring,
@@ -137,7 +149,11 @@ impl ActionRow {
             WidgetButton,
             Hovered::default(),
             visuals,
-            InitState { disabled: false, selected, force: None },
+            InitState {
+                disabled: false,
+                selected,
+                force: None,
+            },
             Node {
                 height: Val::Px(height),
                 flex_shrink: 0.0,
@@ -173,7 +189,13 @@ impl ActionRow {
                     Pickable::IGNORE,
                 ));
                 // The actions sit at the right edge.
-                p.spawn((Node { flex_grow: 1.0, ..default() }, Pickable::IGNORE));
+                p.spawn((
+                    Node {
+                        flex_grow: 1.0,
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ));
                 for (key, icon_name, tip, enabled) in actions {
                     let mut v = visuals_for(&t, crate::ButtonVariant::Ghost);
                     v.foreground = StateColors::new(
@@ -190,7 +212,10 @@ impl ActionRow {
                             .disabled(!enabled)
                             .build(&t),
                         observe(move |_: On<Activate>, mut commands: Commands| {
-                            commands.trigger(ActionRowAction { entity: row, action: k.clone() });
+                            commands.trigger(ActionRowAction {
+                                entity: row,
+                                action: k.clone(),
+                            });
                         }),
                     ))
                     .insert(v)

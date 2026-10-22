@@ -16,11 +16,16 @@ use cadrs_sheetmetal::{Params, flatten, samples};
 use cadrs_sketch::{PlaneRef, Vec2};
 
 fn params() -> Params {
-    Params { thickness: 1.0, bend_radius: 1.0, ..SheetMetalModelFeature::default_params() }
+    Params {
+        thickness: 1.0,
+        bend_radius: 1.0,
+        ..SheetMetalModelFeature::default_params()
+    }
 }
 
 fn fixture() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/sheetmetal/flat_pattern_e1.dxf")
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/sheetmetal/flat_pattern_e1.dxf")
 }
 
 #[test]
@@ -28,24 +33,41 @@ fn the_e1_fixture_is_our_tray_flat() {
     // Regenerate with `CADRS_WRITE_FIXTURES=1 cargo test -p cadrs_core --test flat_dxf`.
     let flat = flatten(&samples::e1_tray(params()).unwrap());
     assert!(flat.is_ok(), "{:?}", flat.errors);
-    let page = flat_page(&flat.parts[0], &[], &FlatExportOptions::default(), "Flat Pattern");
+    let page = flat_page(
+        &flat.parts[0],
+        &[],
+        &FlatExportOptions::default(),
+        "Flat Pattern",
+    );
     let text = write_dxf_version(&page, DxfVersion::R2000);
     if std::env::var("CADRS_WRITE_FIXTURES").is_ok() {
         std::fs::create_dir_all(fixture().parent().unwrap()).unwrap();
         std::fs::write(fixture(), &text).unwrap();
     }
     let stored = std::fs::read_to_string(fixture()).expect("the fixture exists");
-    assert_eq!(stored, text, "fixtures/sheetmetal/flat_pattern_e1.dxf is out of date");
+    assert_eq!(
+        stored, text,
+        "fixtures/sheetmetal/flat_pattern_e1.dxf is out of date"
+    );
     // Read back: the outline, 9 cut-outs and 6 bend lines.
     let d = read_dxf(&stored).unwrap();
     use cadrs_drawing::sheet_sketch::Entity;
     let on = |l: &str| d.layers.iter().filter(|x| *x == l).count();
-    let kind_on = |l: &str, f: fn(&Entity) -> bool| d.entities.iter().zip(&d.layers).filter(|(e, x)| *x == l && f(e)).count();
+    let kind_on = |l: &str, f: fn(&Entity) -> bool| {
+        d.entities
+            .iter()
+            .zip(&d.layers)
+            .filter(|(e, x)| *x == l && f(e))
+            .count()
+    };
     // The outline as lines and arcs (the end flanges' bend reliefs); the cut-outs: the fan hole
     // and four mounting holes as circles, three slots (two arcs and two lines each) and the
     // rectangular cut-out.
     assert!(on("OUTLINE") > 8);
-    assert_eq!(kind_on("CUTOUTS", |e| matches!(e, Entity::Circle { .. })), 5);
+    assert_eq!(
+        kind_on("CUTOUTS", |e| matches!(e, Entity::Circle { .. })),
+        5
+    );
     assert_eq!(kind_on("CUTOUTS", |e| matches!(e, Entity::Arc { .. })), 6);
     assert_eq!(kind_on("CUTOUTS", |e| matches!(e, Entity::Line { .. })), 10);
     assert_eq!(on("BEND_UP") + on("BEND_DOWN"), 6);
@@ -63,11 +85,33 @@ fn e1_import_closes_seven_sheet_regions_and_thickens() {
     let el = doc.elements[0].id;
     let mut h = History::default();
     let sk = FeatureId::new();
-    h.execute(&mut doc, &AddSketch { element: el, feature: sk, plane: Some(PlaneRef::Top) }).unwrap();
-    h.execute(&mut doc, &InsertDxf { element: el, feature: sk, geometry }).unwrap();
+    h.execute(
+        &mut doc,
+        &AddSketch {
+            element: el,
+            feature: sk,
+            plane: Some(PlaneRef::Top),
+        },
+    )
+    .unwrap();
+    h.execute(
+        &mut doc,
+        &InsertDxf {
+            element: el,
+            feature: sk,
+            geometry,
+        },
+    )
+    .unwrap();
     assert_eq!(h.undo_label(), Some("Insert DXF/DWG"));
     let features = doc.element(el).unwrap().features().to_vec();
-    let sketch = &features.iter().find(|f| f.id == sk).unwrap().sketch().unwrap().geometry;
+    let sketch = &features
+        .iter()
+        .find(|f| f.id == sk)
+        .unwrap()
+        .sketch()
+        .unwrap()
+        .geometry;
     let regions = cadrs_sketch::region::regions(sketch);
     // The sheet regions: the ones with material inside (not a cut-out's inside).
     let flat = flatten(&samples::e1_tray(params()).unwrap());
@@ -92,12 +136,25 @@ fn e1_import_closes_seven_sheet_regions_and_thickens() {
                 ((b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y)).abs() / 2.0
             })
             .sum();
-        let poly = cadrs_sketch::geom::polygon_area(&r.outer).abs() - r.holes.iter().map(|h| cadrs_sketch::geom::polygon_area(h).abs()).sum::<f64>();
-        assert!((tri - poly).abs() < 1e-6 * poly.max(1.0), "region fill {tri} vs {poly} ({} holes, {} outer points)", r.holes.len(), r.outer.len());
+        let poly = cadrs_sketch::geom::polygon_area(&r.outer).abs()
+            - r.holes
+                .iter()
+                .map(|h| cadrs_sketch::geom::polygon_area(h).abs())
+                .sum::<f64>();
+        assert!(
+            (tri - poly).abs() < 1e-6 * poly.max(1.0),
+            "region fill {tri} vs {poly} ({} holes, {} outer points)",
+            r.holes.len(),
+            r.outer.len()
+        );
     }
     let area: f64 = sheet.iter().map(|r| r.area()).sum();
     // The DXF's round holes are true circles in the sketch; the flat's are 64-sided polygons.
-    assert!((area - flat.parts[0].area()).abs() < 2e-4 * area, "{area} vs {}", flat.parts[0].area());
+    assert!(
+        (area - flat.parts[0].area()).abs() < 2e-4 * area,
+        "{area} vs {}",
+        flat.parts[0].area()
+    );
     // Sheet metal model, Thicken of the 7 regions, 1 mm.
     let p = params();
     let x = SheetMetalModelFeature {
@@ -107,7 +164,16 @@ fn e1_import_closes_seven_sheet_regions_and_thickens() {
         exprs: cadrs_core::sheetmetal::SheetMetalExprs::of(&p),
         ..Default::default()
     };
-    h.execute(&mut doc, &AddFeature { element: el, feature: FeatureId::new(), base_name: "Sheet metal model".into(), kind: FeatureKind::SheetMetalModel(x) }).unwrap();
+    h.execute(
+        &mut doc,
+        &AddFeature {
+            element: el,
+            feature: FeatureId::new(),
+            base_name: "Sheet metal model".into(),
+            kind: FeatureKind::SheetMetalModel(x),
+        },
+    )
+    .unwrap();
     let b = rebuild::build(doc.element(el).unwrap().features());
     assert!(b.errors.is_empty(), "{:?}", b.errors);
     assert_eq!(b.parts.len(), 1);

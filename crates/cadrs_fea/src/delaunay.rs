@@ -25,7 +25,9 @@ const NONE: u32 = u32::MAX;
 /// independent points give no tetrahedra.
 pub fn tetrahedralize(points: &[V3]) -> Vec<[u32; 4]> {
     let mut t = Triangulation::new(points);
-    let Some(order) = t.start() else { return Vec::new() };
+    let Some(order) = t.start() else {
+        return Vec::new();
+    };
     for p in order {
         t.insert(p);
     }
@@ -73,7 +75,8 @@ impl<'a> Triangulation<'a> {
         if n < 4 {
             return None;
         }
-        let d2 = |a: V3, b: V3| (a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2);
+        let d2 =
+            |a: V3, b: V3| (a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2);
         let i0 = 0u32;
         let p0 = self.p(i0);
         let i1 = (0..n as u32).max_by(|&a, &b| d2(self.p(a), p0).total_cmp(&d2(self.p(b), p0)))?;
@@ -82,18 +85,27 @@ impl<'a> Triangulation<'a> {
             return None;
         }
         let e = crate::geom::sub(p1, p0);
-        let area = |i: u32| crate::geom::len(crate::geom::cross(e, crate::geom::sub(self.p(i), p0)));
+        let area =
+            |i: u32| crate::geom::len(crate::geom::cross(e, crate::geom::sub(self.p(i), p0)));
         let i2 = (0..n as u32).max_by(|&a, &b| area(a).total_cmp(&area(b)))?;
         if area(i2) == 0.0 {
             return None;
         }
         let p2 = self.p(i2);
-        let i3 = (0..n as u32).max_by(|&a, &b| orient(p0, p1, p2, self.p(a)).abs().total_cmp(&orient(p0, p1, p2, self.p(b)).abs()))?;
+        let i3 = (0..n as u32).max_by(|&a, &b| {
+            orient(p0, p1, p2, self.p(a))
+                .abs()
+                .total_cmp(&orient(p0, p1, p2, self.p(b)).abs())
+        })?;
         let o = orient(p0, p1, p2, self.p(i3));
         if o == 0.0 {
             return None;
         }
-        let first = if o > 0.0 { [i0, i1, i2, i3] } else { [i0, i2, i1, i3] };
+        let first = if o > 0.0 {
+            [i0, i1, i2, i3]
+        } else {
+            [i0, i2, i1, i3]
+        };
         let t0 = self.alloc(first);
         for i in 0..4 {
             // The ghost on the face opposite vertex i: the face ordered so the ghost is on its
@@ -113,7 +125,15 @@ impl<'a> Triangulation<'a> {
             for k in 0..3 {
                 let v = self.tets[g as usize];
                 let (a, b) = edge_without(v, k);
-                let other = ghosts.iter().copied().find(|&h| h != g && self.tets[h as usize][..3].contains(&a) && self.tets[h as usize][..3].contains(&b)).unwrap();
+                let other = ghosts
+                    .iter()
+                    .copied()
+                    .find(|&h| {
+                        h != g
+                            && self.tets[h as usize][..3].contains(&a)
+                            && self.tets[h as usize][..3].contains(&b)
+                    })
+                    .unwrap();
                 self.nbr[g as usize][k] = other;
             }
         }
@@ -138,9 +158,13 @@ impl<'a> Triangulation<'a> {
                 hi[k] = hi[k].max(p[k]);
             }
         }
-        let span = (0..3).map(|k| hi[k] - lo[k]).fold(0.0, f64::max).max(1e-300);
+        let span = (0..3)
+            .map(|k| hi[k] - lo[k])
+            .fold(0.0, f64::max)
+            .max(1e-300);
         let key = |p: V3| -> u64 {
-            let q = |k: usize| (((p[k] - lo[k]) / span) * 1_048_575.0).clamp(0.0, 1_048_575.0) as u64;
+            let q =
+                |k: usize| (((p[k] - lo[k]) / span) * 1_048_575.0).clamp(0.0, 1_048_575.0) as u64;
             morton(q(0), q(1), q(2))
         };
         let mut out = Vec::with_capacity(idx.len());
@@ -197,7 +221,8 @@ impl<'a> Triangulation<'a> {
         let p = self.p(pi);
         let mut t = self.last;
         if !self.alive[t as usize] || self.is_ghost(t) {
-            t = (0..self.tets.len() as u32).find(|&k| self.alive[k as usize] && !self.is_ghost(k))?;
+            t = (0..self.tets.len() as u32)
+                .find(|&k| self.alive[k as usize] && !self.is_ghost(k))?;
         }
         let limit = 4 * self.tets.len() + 64;
         for _ in 0..limit {
@@ -296,7 +321,10 @@ impl<'a> Triangulation<'a> {
     }
 
     fn real_tets(&self) -> Vec<[u32; 4]> {
-        (0..self.tets.len()).filter(|&t| self.alive[t] && self.tets[t][3] != GHOST).map(|t| self.tets[t]).collect()
+        (0..self.tets.len())
+            .filter(|&t| self.alive[t] && self.tets[t][3] != GHOST)
+            .map(|t| self.tets[t])
+            .collect()
     }
 }
 
@@ -347,7 +375,10 @@ mod tests {
             assert!(o > 0.0, "non-positive tetrahedron {t:?}");
             v += vol6(a, b, c, d) / 6.0;
         }
-        assert!((v - hull_volume).abs() < 1e-9 * hull_volume.max(1.0), "volume {v} vs hull {hull_volume}");
+        assert!(
+            (v - hull_volume).abs() < 1e-9 * hull_volume.max(1.0),
+            "volume {v} vs hull {hull_volume}"
+        );
         // Delaunay: no point strictly inside any circumsphere.
         if points.len() <= 400 {
             for t in &tets {
@@ -356,7 +387,10 @@ mod tests {
                     if t.contains(&(k as u32)) {
                         continue;
                     }
-                    assert!(insphere(a, b, c, d, p) <= 0.0, "point {k} inside the sphere of {t:?}");
+                    assert!(
+                        insphere(a, b, c, d, p) <= 0.0,
+                        "point {k} inside the sphere of {t:?}"
+                    );
                 }
             }
         }
@@ -393,7 +427,11 @@ mod tests {
             }
         }
         for _ in 0..150 {
-            pts.push([rng.next_f64() * 10.0, rng.next_f64() * 2.0, rng.next_f64() * 3.0]);
+            pts.push([
+                rng.next_f64() * 10.0,
+                rng.next_f64() * 2.0,
+                rng.next_f64() * 3.0,
+            ]);
         }
         // Duplicates are skipped.
         pts.push([0.0, 0.0, 0.0]);

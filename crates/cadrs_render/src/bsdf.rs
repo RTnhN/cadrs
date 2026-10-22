@@ -21,7 +21,12 @@ pub struct Material {
 
 impl Default for Material {
     fn default() -> Self {
-        Material { base_color: [0.6, 0.6, 0.6], metallic: 0.0, roughness: 0.5, opacity: 1.0 }
+        Material {
+            base_color: [0.6, 0.6, 0.6],
+            metallic: 0.0,
+            roughness: 0.5,
+            opacity: 1.0,
+        }
     }
 }
 
@@ -29,7 +34,12 @@ impl Material {
     /// From an sRGB colour.
     pub fn from_srgb(rgb: [u8; 3], metallic: f32, roughness: f32, opacity: f32) -> Self {
         let c = crate::math::rgb8(rgb[0], rgb[1], rgb[2]);
-        Material { base_color: c.to_array(), metallic, roughness, opacity }
+        Material {
+            base_color: c.to_array(),
+            metallic,
+            roughness,
+            opacity,
+        }
     }
 }
 
@@ -58,8 +68,17 @@ impl Bsdf {
         let alpha = r * r;
         let ws = schlick(f0, n_dot_o).luminance();
         let wd = diffuse.luminance();
-        let p_spec = if wd <= 1e-6 { 1.0 } else { (ws / (ws + wd)).clamp(0.15, 0.9) };
-        Bsdf { diffuse, f0, alpha, p_spec }
+        let p_spec = if wd <= 1e-6 {
+            1.0
+        } else {
+            (ws / (ws + wd)).clamp(0.15, 0.9)
+        };
+        Bsdf {
+            diffuse,
+            f0,
+            alpha,
+            p_spec,
+        }
     }
 
     fn d(&self, n_dot_h: f32) -> f32 {
@@ -94,7 +113,8 @@ impl Bsdf {
             return 0.0;
         }
         let h = (wo + wi).normalize();
-        let spec = self.d(n.dot(h).max(0.0)) * n.dot(h).max(0.0) / (4.0 * wo.dot(h).abs().max(1e-6));
+        let spec =
+            self.d(n.dot(h).max(0.0)) * n.dot(h).max(0.0) / (4.0 * wo.dot(h).abs().max(1e-6));
         let diff = ni / PI;
         self.p_spec * spec + (1.0 - self.p_spec) * diff
     }
@@ -137,8 +157,18 @@ mod tests {
     fn conserves_energy_and_samples_consistently() {
         let n = V3::Z;
         for m in [
-            Material { base_color: [0.8, 0.8, 0.8], metallic: 0.0, roughness: 0.5, opacity: 1.0 },
-            Material { base_color: [0.9, 0.9, 0.9], metallic: 1.0, roughness: 0.3, opacity: 1.0 },
+            Material {
+                base_color: [0.8, 0.8, 0.8],
+                metallic: 0.0,
+                roughness: 0.5,
+                opacity: 1.0,
+            },
+            Material {
+                base_color: [0.9, 0.9, 0.9],
+                metallic: 1.0,
+                roughness: 0.3,
+                opacity: 1.0,
+            },
         ] {
             let wo = v3(0.3, 0.0, 1.0).normalize();
             let bsdf = Bsdf::new(&m, wo.z);
@@ -161,7 +191,10 @@ mod tests {
             }
             uniform /= n_samples as f32;
             assert!(importance <= 1.02, "{importance}");
-            assert!((importance - uniform).abs() < 0.03, "{importance} vs {uniform}");
+            assert!(
+                (importance - uniform).abs() < 0.03,
+                "{importance} vs {uniform}"
+            );
         }
     }
 }

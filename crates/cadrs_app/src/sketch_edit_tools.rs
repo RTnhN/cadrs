@@ -33,14 +33,16 @@ use bevy::prelude::*;
 use cadrs_sketch::edit::{OffsetShape, chain_of, offset_geometry};
 use cadrs_sketch::geom::dist_point_segment;
 use cadrs_sketch::hit::hit_test;
-use cadrs_sketch::{CurveId, CurveKind, CurveRef, DimensionKind, PlaneFrame, Sketch, SketchEntity, SketchOp};
+use cadrs_sketch::{
+    CurveId, CurveKind, CurveRef, DimensionKind, PlaneFrame, Sketch, SketchEntity, SketchOp,
+};
 use cadrs_ui::input::TextInputField;
 
 use crate::sketch::{ActiveSketchTool, PartStudioMode, SketchSession, SketchTool};
 use crate::sketch_draw::SketchRubberGizmos;
 use crate::sketch_tools::{
-    QuickDimFlow, QuickDimTarget, SVec2, ScreenMap, SketchScreen, SketchSelection,
-    SketchToolsSet, execute, over_viewport, session_sketch,
+    QuickDimFlow, QuickDimTarget, SVec2, ScreenMap, SketchScreen, SketchSelection, SketchToolsSet,
+    execute, over_viewport, session_sketch,
 };
 use crate::viewport::ViewportArea;
 use crate::{ActiveDocument, AppState};
@@ -125,22 +127,39 @@ impl OffsetTool {
 /// Partition only the picked curves, keeping the caller's first curve as the stable anchor.
 /// Running chain_of on the selected subgraph avoids accidentally selecting an entire sketch
 /// or joining unrelated profiles. A branch has no unambiguous offset corner.
-fn selected_chains(sketch: &Sketch, picked: &[CurveId]) -> Result<Vec<Vec<(CurveId, bool)>>, String> {
+fn selected_chains(
+    sketch: &Sketch,
+    picked: &[CurveId],
+) -> Result<Vec<Vec<(CurveId, bool)>>, String> {
     let mut subset = sketch.clone();
     subset.curves.retain(|id, _| picked.contains(&id));
     for &id in picked {
-        let Some((a, b)) = subset.curve_ends(id) else { continue };
+        let Some((a, b)) = subset.curve_ends(id) else {
+            continue;
+        };
         for p in [a, b] {
-            let count = subset.curves.keys().filter(|c| subset.curve_ends(*c).is_some_and(|(x, y)| {
-                subset.curves[*c].construction == subset.curves[id].construction &&
-                [x, y].iter().any(|q| subset.pos(*q).distance(subset.pos(p)) < 1e-7)
-            })).count();
-            if count > 2 { return Err("Offset selection branches. Select a chain without a junction.".into()); }
+            let count = subset
+                .curves
+                .keys()
+                .filter(|c| {
+                    subset.curve_ends(*c).is_some_and(|(x, y)| {
+                        subset.curves[*c].construction == subset.curves[id].construction
+                            && [x, y]
+                                .iter()
+                                .any(|q| subset.pos(*q).distance(subset.pos(p)) < 1e-7)
+                    })
+                })
+                .count();
+            if count > 2 {
+                return Err("Offset selection branches. Select a chain without a junction.".into());
+            }
         }
     }
     let mut groups: Vec<Vec<(CurveId, bool)>> = Vec::new();
     for &id in picked {
-        if !subset.curves.contains_key(id) || groups.iter().flatten().any(|(c, _)| *c == id) { continue; }
+        if !subset.curves.contains_key(id) || groups.iter().flatten().any(|(c, _)| *c == id) {
+            continue;
+        }
         groups.push(chain_of(&subset, id).0);
     }
     Ok(groups)
@@ -153,23 +172,47 @@ impl OffsetTool {
             .filter(|(c, _)| !c.is_empty())
     }
 
-    fn pick(&mut self, sketch: &Sketch, curves: &[CurveId], toggle: bool, at: SVec2) -> Result<(), String> {
+    fn pick(
+        &mut self,
+        sketch: &Sketch,
+        curves: &[CurveId],
+        toggle: bool,
+        at: SVec2,
+    ) -> Result<(), String> {
         let old: Vec<_> = self.groups().map(|(c, l)| (c.to_vec(), l)).collect();
-        let mut picked: Vec<_> = old.iter().flat_map(|(c, _)| c.iter().map(|(id, _)| *id)).collect();
+        let mut picked: Vec<_> = old
+            .iter()
+            .flat_map(|(c, _)| c.iter().map(|(id, _)| *id))
+            .collect();
         for &c in curves {
-            if !sketch.curves.contains_key(c) { continue; }
-            if toggle && picked.contains(&c) { picked.retain(|p| *p != c); }
-            else if !picked.contains(&c) { picked.push(c); }
+            if !sketch.curves.contains_key(c) {
+                continue;
+            }
+            if toggle && picked.contains(&c) {
+                picked.retain(|p| *p != c);
+            } else if !picked.contains(&c) {
+                picked.push(c);
+            }
         }
         let chains = selected_chains(sketch, &picked)?;
-        let mut groups: Vec<_> = chains.into_iter().map(|chain| {
-            // Preserve the physical side when adding a preceding or reversed segment changes
-            // which way the ordered chain runs.
-            let left = old.iter().find_map(|(prev, left)| chain.iter().find_map(|(c, rev)|
-                prev.iter().find(|(p, _)| p == c).map(|(_, was_rev)| *left ^ *rev ^ *was_rev)))
-                .unwrap_or_else(|| side_at(sketch, &chain, at));
-            (chain, left)
-        }).collect();
+        let mut groups: Vec<_> = chains
+            .into_iter()
+            .map(|chain| {
+                // Preserve the physical side when adding a preceding or reversed segment changes
+                // which way the ordered chain runs.
+                let left = old
+                    .iter()
+                    .find_map(|(prev, left)| {
+                        chain.iter().find_map(|(c, rev)| {
+                            prev.iter()
+                                .find(|(p, _)| p == c)
+                                .map(|(_, was_rev)| *left ^ *rev ^ *was_rev)
+                        })
+                    })
+                    .unwrap_or_else(|| side_at(sketch, &chain, at));
+                (chain, left)
+            })
+            .collect();
         self.chain.clear();
         self.additional.clear();
         if !groups.is_empty() {
@@ -203,32 +246,91 @@ fn offset_operation(
     // Offsetting an existing copy starts a new dimension instead of creating a dependency
     // back onto itself (which would hold the copy still when its parent dimension changes).
     if let Some(id) = dim {
-        let DimensionKind::Offset { source, target } = trial.dimensions[id].kind else { return Err("not an offset dimension".into()) };
-        let targets: Vec<_> = std::iter::once(target).chain(trial.constraints.values().filter_map(|c| match c {
-            ConstraintOf::EqualOffset(CurveRef::Curve(s), _, _, CurveRef::Curve(t)) if *s == source => Some(*t),
-            _ => None,
-        })).collect();
-        if groups.iter().flat_map(|(c, _)| c).any(|(c, _)| targets.contains(c)) { dim = None; }
+        let DimensionKind::Offset { source, target } = trial.dimensions[id].kind else {
+            return Err("not an offset dimension".into());
+        };
+        let targets: Vec<_> = std::iter::once(target)
+            .chain(trial.constraints.values().filter_map(|c| match c {
+                ConstraintOf::EqualOffset(CurveRef::Curve(s), _, _, CurveRef::Curve(t))
+                    if *s == source =>
+                {
+                    Some(*t)
+                }
+                _ => None,
+            }))
+            .collect();
+        if groups
+            .iter()
+            .flat_map(|(c, _)| c)
+            .any(|(c, _)| targets.contains(c))
+        {
+            dim = None;
+        }
     }
     for (chain, left) in groups {
-        if chain.is_empty() { continue; }
+        if chain.is_empty() {
+            continue;
+        }
         let before: Vec<_> = trial.constraints.keys().collect();
         let made = cadrs_sketch::edit::offset(&mut trial, chain, distance, *left, (0.0, 0.0))?;
-        let own = trial.dimensions.iter().find_map(|(id, d)|
-            matches!(d.kind, DimensionKind::Offset { target, .. } if target == made[0]).then_some(id)).ok_or("missing offset dimension")?;
-        ops.push(SketchOp::Offset { chain: chain.clone(), distance, left: *left, label: (0.0, 0.0) });
+        let own = trial
+            .dimensions
+            .iter()
+            .find_map(|(id, d)| {
+                matches!(d.kind, DimensionKind::Offset { target, .. } if target == made[0])
+                    .then_some(id)
+            })
+            .ok_or("missing offset dimension")?;
+        ops.push(SketchOp::Offset {
+            chain: chain.clone(),
+            distance,
+            left: *left,
+            label: (0.0, 0.0),
+        });
         if let Some(master) = dim {
-            let DimensionKind::Offset { source, target } = trial.dimensions[master].kind else { return Err("not an offset dimension".into()) };
-            let constraints: Vec<_> = trial.constraints.iter().filter_map(|(id, c)|
-                (!before.contains(&id) && matches!(c, ConstraintOf::EqualOffset(..))).then_some(id)).collect();
+            let DimensionKind::Offset { source, target } = trial.dimensions[master].kind else {
+                return Err("not an offset dimension".into());
+            };
+            let constraints: Vec<_> = trial
+                .constraints
+                .iter()
+                .filter_map(|(id, c)| {
+                    (!before.contains(&id) && matches!(c, ConstraintOf::EqualOffset(..)))
+                        .then_some(id)
+                })
+                .collect();
             trial.dimensions.remove(own);
-            for c in &constraints { trial.constraints.remove(*c); }
-            ops.push(SketchOp::Delete { curves: vec![], points: vec![], dimensions: vec![own], constraints });
-            let constraints: Vec<_> = chain.iter().zip(&made).map(|((c, _), made)|
-                ConstraintOf::EqualOffset(CurveRef::Curve(source), CurveRef::Curve(target), CurveRef::Curve(*c), CurveRef::Curve(*made))).collect();
-            for c in &constraints { trial.add_constraint(*c); }
-            ops.push(SketchOp::AddConstraint { constraints, label: "Offset" });
-        } else { dim = Some(own); }
+            for c in &constraints {
+                trial.constraints.remove(*c);
+            }
+            ops.push(SketchOp::Delete {
+                curves: vec![],
+                points: vec![],
+                dimensions: vec![own],
+                constraints,
+            });
+            let constraints: Vec<_> = chain
+                .iter()
+                .zip(&made)
+                .map(|((c, _), made)| {
+                    ConstraintOf::EqualOffset(
+                        CurveRef::Curve(source),
+                        CurveRef::Curve(target),
+                        CurveRef::Curve(*c),
+                        CurveRef::Curve(*made),
+                    )
+                })
+                .collect();
+            for c in &constraints {
+                trial.add_constraint(*c);
+            }
+            ops.push(SketchOp::AddConstraint {
+                constraints,
+                label: "Offset",
+            });
+        } else {
+            dim = Some(own);
+        }
     }
     Ok((SketchOp::Batch(ops), dim.ok_or("nothing to offset")?))
 }
@@ -236,22 +338,40 @@ fn offset_operation(
 fn offset_selection_error(commands: &mut Commands, message: String) {
     commands.queue(move |world: &mut World| {
         let theme = world.resource::<cadrs_ui::Theme>().clone();
-        cadrs_ui::show_notification(&mut world.commands(), &theme,
-            cadrs_ui::Notification::warning(message).name("sketch-offset-toast"));
+        cadrs_ui::show_notification(
+            &mut world.commands(),
+            &theme,
+            cadrs_ui::Notification::warning(message).name("sketch-offset-toast"),
+        );
     });
 }
 
 /// Freeze the distance at the confirmation point, not at the previous mouse-move frame.
-fn confirm_offset(sketch: &Sketch, map: &ScreenMap, off: &mut OffsetTool, pos: Vec2, commands: &mut Commands, target: (cadrs_core::ElementId, cadrs_core::FeatureId)) {
-    if off.cursor.is_some() { update_cursor_preview(sketch, map, off, pos); }
-    else {
-        off.distance = off.reference(sketch).and_then(|id| sketch.dimensions.get(id)).map(|d| d.value)
+fn confirm_offset(
+    sketch: &Sketch,
+    map: &ScreenMap,
+    off: &mut OffsetTool,
+    pos: Vec2,
+    commands: &mut Commands,
+    target: (cadrs_core::ElementId, cadrs_core::FeatureId),
+) {
+    if off.cursor.is_some() {
+        update_cursor_preview(sketch, map, off, pos);
+    } else {
+        off.distance = off
+            .reference(sketch)
+            .and_then(|id| sketch.dimensions.get(id))
+            .map(|d| d.value)
             .unwrap_or(off.distance.max(0.01));
     }
     let placed = if let Some(face) = off.face.clone() {
         place_face_offset(sketch, &face, map, off, pos, commands, target)
-    } else { place_offset(sketch, map, off, pos, commands, target) };
-    if placed { off.clear(); }
+    } else {
+        place_offset(sketch, map, off, pos, commands, target)
+    };
+    if placed {
+        off.clear();
+    }
 }
 
 /// The Mirror tool's prompt toast.
@@ -272,10 +392,12 @@ fn mirror_prompt(
     mut commands: Commands,
 ) {
     let want = match session_sketch(session.as_deref(), doc.as_deref()) {
-        Some(sketch) if tool.tool == SketchTool::Mirror => Some(match mirror_axis(sketch, &selection) {
-            None => "Select a mirror line.",
-            Some(_) => "Select entities to be mirrored. Enter or Esc to finish.",
-        }),
+        Some(sketch) if tool.tool == SketchTool::Mirror => {
+            Some(match mirror_axis(sketch, &selection) {
+                None => "Select a mirror line.",
+                Some(_) => "Select entities to be mirrored. Enter or Esc to finish.",
+            })
+        }
         _ => None,
     };
     if want == *shown {
@@ -289,7 +411,9 @@ fn mirror_prompt(
         let toast = cadrs_ui::show_notification(
             &mut commands,
             &theme,
-            cadrs_ui::Notification::info(text).name("mirror-prompt").autohide(false),
+            cadrs_ui::Notification::info(text)
+                .name("mirror-prompt")
+                .autohide(false),
         );
         commands.entity(toast).insert(MirrorPrompt);
     }
@@ -319,7 +443,10 @@ fn edit_tools_keys(
     focus: Res<InputFocus>,
     q_fields: Query<(), With<TextInputField>>,
     keys: Res<ButtonInput<KeyCode>>,
-    dialogs: (Query<(), With<cadrs_ui::DialogRoot>>, Query<(), With<cadrs_ui::menu::MenuDismissLayer>>),
+    dialogs: (
+        Query<(), With<cadrs_ui::DialogRoot>>,
+        Query<(), With<cadrs_ui::menu::MenuDismissLayer>>,
+    ),
     tool: Res<ActiveSketchTool>,
     mut off: ResMut<OffsetTool>,
     mut selection: ResMut<SketchSelection>,
@@ -331,17 +458,52 @@ fn edit_tools_keys(
     frame: Res<bevy::diagnostic::FrameCount>,
 ) {
     let typing = focus.get().is_some_and(|e| q_fields.contains(e));
-    if typing || !dialogs.0.is_empty() || !dialogs.1.is_empty() || keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight, KeyCode::AltLeft, KeyCode::AltRight, KeyCode::SuperLeft, KeyCode::SuperRight]) { keys_in.clear(); return; }
+    if typing
+        || !dialogs.0.is_empty()
+        || !dialogs.1.is_empty()
+        || keys.any_pressed([
+            KeyCode::ControlLeft,
+            KeyCode::ControlRight,
+            KeyCode::AltLeft,
+            KeyCode::AltRight,
+            KeyCode::SuperLeft,
+            KeyCode::SuperRight,
+        ])
+    {
+        keys_in.clear();
+        return;
+    }
     for k in keys_in.read() {
-        if k.state != ButtonState::Pressed || k.repeat || typing || flow.consumed(&frame) { continue; }
-        if tool.tool != SketchTool::Offset || off.chain.is_empty() { continue; }
+        if k.state != ButtonState::Pressed || k.repeat || typing || flow.consumed(&frame) {
+            continue;
+        }
+        if tool.tool != SketchTool::Offset || off.chain.is_empty() {
+            continue;
+        }
         match k.shortcut_code() {
-            KeyCode::Escape => { off.clear(); selection.0.clear(); flow.consumed_frame = Some(frame.0); }
+            KeyCode::Escape => {
+                off.clear();
+                selection.0.clear();
+                flow.consumed_frame = Some(frame.0);
+            }
             KeyCode::Enter | KeyCode::NumpadEnter => {
-                if let (Some(sketch), Some(map), Some(session)) = (session_sketch(session.as_deref(), doc.as_deref()), screen.active, session.as_deref()) {
+                if let (Some(sketch), Some(map), Some(session)) = (
+                    session_sketch(session.as_deref(), doc.as_deref()),
+                    screen.active,
+                    session.as_deref(),
+                ) {
                     let pos = off.cursor.unwrap_or(map.origin);
-                    confirm_offset(sketch, &map, &mut off, pos, &mut commands, (session.element, session.feature));
-                    if off.chain.is_empty() { selection.0.clear(); }
+                    confirm_offset(
+                        sketch,
+                        &map,
+                        &mut off,
+                        pos,
+                        &mut commands,
+                        (session.element, session.feature),
+                    );
+                    if off.chain.is_empty() {
+                        selection.0.clear();
+                    }
                 }
                 flow.consumed_frame = Some(frame.0);
             }
@@ -386,42 +548,69 @@ fn edit_tools_pointer(
             selection.0.clear();
         }
         match tool.tool {
-            SketchTool::Mirror => {
-                match mirror_axis(sketch, &selection) {
-                    Some(axis) if selection.0.len() > 1 => {
-                        let curves: Vec<CurveId> = selection.0[1..]
-                            .iter()
-                            .filter_map(|e| match *e {
-                                SketchEntity::Curve(c) => Some(c),
-                                _ => None,
-                            })
-                            .collect();
-                        selection.0.clear();
-                        if !curves.is_empty() {
-                            execute(&mut commands, target, SketchOp::Mirror { axis, curves });
-                        }
-                        tool.tool = SketchTool::Select;
-                        off.last_tool = SketchTool::Select;
+            SketchTool::Mirror => match mirror_axis(sketch, &selection) {
+                Some(axis) if selection.0.len() > 1 => {
+                    let curves: Vec<CurveId> = selection.0[1..]
+                        .iter()
+                        .filter_map(|e| match *e {
+                            SketchEntity::Curve(c) => Some(c),
+                            _ => None,
+                        })
+                        .collect();
+                    selection.0.clear();
+                    if !curves.is_empty() {
+                        execute(&mut commands, target, SketchOp::Mirror { axis, curves });
                     }
-                    Some(_) => {}
-                    None => selection.0.clear(),
+                    tool.tool = SketchTool::Select;
+                    off.last_tool = SketchTool::Select;
                 }
-            }
+                Some(_) => {}
+                None => selection.0.clear(),
+            },
             SketchTool::Offset => {
                 off.distance_dimension = None;
-                let picked: Vec<_> = selection.0.iter().filter_map(|e| match e { SketchEntity::Curve(c) => Some(*c), _ => None }).collect();
-                let at = off.cursor.and_then(|p| map.to_sketch(p)).unwrap_or_default();
-                if let Err(e) = off.pick(sketch, &picked, false, at) { offset_selection_error(&mut commands, e); }
-                selection.0 = off.groups().flat_map(|(c, _)| c.iter().map(|(c, _)| SketchEntity::Curve(*c))).collect();
-            },
+                let picked: Vec<_> = selection
+                    .0
+                    .iter()
+                    .filter_map(|e| match e {
+                        SketchEntity::Curve(c) => Some(*c),
+                        _ => None,
+                    })
+                    .collect();
+                let at = off
+                    .cursor
+                    .and_then(|p| map.to_sketch(p))
+                    .unwrap_or_default();
+                if let Err(e) = off.pick(sketch, &picked, false, at) {
+                    offset_selection_error(&mut commands, e);
+                }
+                selection.0 = off
+                    .groups()
+                    .flat_map(|(c, _)| c.iter().map(|(c, _)| SketchEntity::Curve(*c)))
+                    .collect();
+            }
             _ => {}
         }
     }
-    if flow.open.is_some() { inputs.clear(); return; }
-    if tool.tool == SketchTool::Offset && off.face.is_none() && off.groups().any(|(c, _)| c.iter().any(|(id, _)| !sketch.curves.contains_key(*id))) {
-        let at = off.cursor.and_then(|p| map.to_sketch(p)).unwrap_or_default();
+    if flow.open.is_some() {
+        inputs.clear();
+        return;
+    }
+    if tool.tool == SketchTool::Offset
+        && off.face.is_none()
+        && off
+            .groups()
+            .any(|(c, _)| c.iter().any(|(id, _)| !sketch.curves.contains_key(*id)))
+    {
+        let at = off
+            .cursor
+            .and_then(|p| map.to_sketch(p))
+            .unwrap_or_default();
         let _ = off.pick(sketch, &[], false, at);
-        selection.0 = off.groups().flat_map(|(c, _)| c.iter().map(|(c, _)| SketchEntity::Curve(*c))).collect();
+        selection.0 = off
+            .groups()
+            .flat_map(|(c, _)| c.iter().map(|(c, _)| SketchEntity::Curve(*c)))
+            .collect();
     }
     let active = matches!(tool.tool, SketchTool::Mirror | SketchTool::Offset);
     let over = over_viewport(&hover_map, &q_area);
@@ -431,7 +620,11 @@ fn edit_tools_pointer(
         })
         .map(|h| h.entity)
         // The Mirror tool mirrors in an edge-on default plane too (#31).
-        .or_else(|| (tool.tool == SketchTool::Mirror).then(|| map.axis_at(pos)).flatten())
+        .or_else(|| {
+            (tool.tool == SketchTool::Mirror)
+                .then(|| map.axis_at(pos))
+                .flatten()
+        })
     };
     for input in inputs.read() {
         if input.pointer_id != PointerId::Mouse || !active {
@@ -441,7 +634,9 @@ fn edit_tools_pointer(
         match input.action {
             PointerAction::Move { .. } if over => off.cursor = Some(pos),
             PointerAction::Press(PointerButton::Primary) => {
-                if over { off.cursor = Some(pos); }
+                if over {
+                    off.cursor = Some(pos);
+                }
                 off.press = over.then(|| (pos, hit_at(pos)));
             }
             PointerAction::Release(PointerButton::Primary) => {
@@ -449,7 +644,9 @@ fn edit_tools_pointer(
                 let Some((down, hit)) = off.press.take() else {
                     continue;
                 };
-                if !over { continue; }
+                if !over {
+                    continue;
+                }
                 let moved = down.distance(pos) > crate::sketch_tools::DRAG_THRESHOLD;
                 if tool.tool == SketchTool::Mirror {
                     if !moved {
@@ -458,16 +655,32 @@ fn edit_tools_pointer(
                     continue;
                 }
                 // Source curves always edit the selection; they never place an offset.
-                if off.face.is_none() && let Some(SketchEntity::Curve(c)) = hit {
-                    let curves = if moved { chain_of(sketch, c).0.into_iter().map(|(id, _)| id).collect() } else { vec![c] };
+                if off.face.is_none()
+                    && let Some(SketchEntity::Curve(c)) = hit
+                {
+                    let curves = if moved {
+                        chain_of(sketch, c)
+                            .0
+                            .into_iter()
+                            .map(|(id, _)| id)
+                            .collect()
+                    } else {
+                        vec![c]
+                    };
                     let at = map.to_sketch(pos).unwrap_or_default();
-                    if let Err(e) = off.pick(sketch, &curves, !moved, at) { offset_selection_error(&mut commands, e); }
-                    selection.0 = off.groups().flat_map(|(c, _)| c.iter().map(|(c, _)| SketchEntity::Curve(*c))).collect();
+                    if let Err(e) = off.pick(sketch, &curves, !moved, at) {
+                        offset_selection_error(&mut commands, e);
+                    }
+                    selection.0 = off
+                        .groups()
+                        .flat_map(|(c, _)| c.iter().map(|(c, _)| SketchEntity::Curve(*c)))
+                        .collect();
                     continue;
                 }
                 if off.chain.is_empty() {
                     let at = map.to_sketch(pos).unwrap_or_default();
-                    if !moved && hit.is_none()
+                    if !moved
+                        && hit.is_none()
                         && let Some(items) = face_loop_items(doc.as_deref(), s, &cache)
                         && cadrs_sketch::face_offset::loop_contains(&items, at)
                     {
@@ -475,52 +688,94 @@ fn edit_tools_pointer(
                         if let Ok(chain) = cadrs_sketch::face_offset::use_loop(&mut temp, &items) {
                             off.left = side_at(&temp, &chain, at);
                             off.chain = chain;
-                            off.face = Some(FaceLoop { items, sketch: temp });
+                            off.face = Some(FaceLoop {
+                                items,
+                                sketch: temp,
+                            });
                             selection.0.clear();
                         }
                     }
                     continue;
                 }
-                if moved || hit.is_some() { continue; }
+                if moved || hit.is_some() {
+                    continue;
+                }
                 confirm_offset(sketch, &map, &mut off, pos, &mut commands, target);
-                if off.chain.is_empty() { selection.0.clear(); }
+                if off.chain.is_empty() {
+                    selection.0.clear();
+                }
             }
-            PointerAction::Cancel => { off.clear(); selection.0.clear(); }
+            PointerAction::Cancel => {
+                off.clear();
+                selection.0.clear();
+            }
             _ => {}
         }
     }
     if tool.tool == SketchTool::Offset && !off.chain.is_empty() {
-        if let Some(pos) = off.cursor { update_cursor_preview(sketch, &map, &mut off, pos); }
-    } else { off.arrow = None; }
+        if let Some(pos) = off.cursor {
+            update_cursor_preview(sketch, &map, &mut off, pos);
+        }
+    } else {
+        off.arrow = None;
+    }
 }
 
 /// The cursor chooses direction on every profile. Distance comes from the nearest selected
 /// profile (or the shared driving dimension), so moving near a disconnected selection does
 /// not measure from a distant, first-picked line. Arrow geometry is purely informational.
 fn update_cursor_preview(sketch: &Sketch, map: &ScreenMap, off: &mut OffsetTool, pos: Vec2) {
-    let Some(cursor) = map.to_sketch(pos) else { return };
+    let Some(cursor) = map.to_sketch(pos) else {
+        return;
+    };
     let sketch_for_chain = off.chain_sketch(sketch);
     let groups: Vec<_> = off.groups().collect();
-    if groups.is_empty() { off.arrow = None; return; }
-    let nearest = |chain: &[(CurveId, bool)]| chain.iter().map(|(c, _)| piece_distance(sketch_for_chain, *c, cursor, true))
-        .fold(f64::INFINITY, f64::min);
-    let active = groups.iter().min_by(|(a, _), (b, _)| nearest(a).total_cmp(&nearest(b))).unwrap().0;
-    let distance = off.reference(sketch).and_then(|id| sketch.dimensions.get(id)).map(|d| d.value)
+    if groups.is_empty() {
+        off.arrow = None;
+        return;
+    }
+    let nearest = |chain: &[(CurveId, bool)]| {
+        chain
+            .iter()
+            .map(|(c, _)| piece_distance(sketch_for_chain, *c, cursor, true))
+            .fold(f64::INFINITY, f64::min)
+    };
+    let active = groups
+        .iter()
+        .min_by(|(a, _), (b, _)| nearest(a).total_cmp(&nearest(b)))
+        .unwrap()
+        .0;
+    let distance = off
+        .reference(sketch)
+        .and_then(|id| sketch.dimensions.get(id))
+        .map(|d| d.value)
         .unwrap_or_else(|| distance_to_chain(sketch_for_chain, active, cursor).max(0.01));
-    let sides: Vec<_> = groups.iter().map(|(chain, left)| {
-        if distance_to_chain(sketch_for_chain, chain, cursor) * map.px_per_mm() as f64 <= SIDE_DEAD_ZONE { *left }
-        else { side_at(sketch_for_chain, chain, cursor) }
-    }).collect();
+    let sides: Vec<_> = groups
+        .iter()
+        .map(|(chain, left)| {
+            if distance_to_chain(sketch_for_chain, chain, cursor) * map.px_per_mm() as f64
+                <= SIDE_DEAD_ZONE
+            {
+                *left
+            } else {
+                side_at(sketch_for_chain, chain, cursor)
+            }
+        })
+        .collect();
     let arrow = arrow_for(sketch_for_chain, map, &off.chain, distance, sides[0]);
     off.left = sides[0];
-    for ((_, left), side) in off.additional.iter_mut().zip(sides.into_iter().skip(1)) { *left = side; }
+    for ((_, left), side) in off.additional.iter_mut().zip(sides.into_iter().skip(1)) {
+        *left = side;
+    }
     off.distance = distance;
     off.arrow = arrow;
 }
 
-
 fn is_line(s: &Sketch, c: CurveId) -> bool {
-    matches!(s.curves.get(c).map(|c| c.kind), Some(CurveKind::Line { .. }))
+    matches!(
+        s.curves.get(c).map(|c| c.kind),
+        Some(CurveKind::Line { .. })
+    )
 }
 
 /// The mirror line `e` gives: a line, or a sketch axis (an edge-on default plane).
@@ -570,7 +825,12 @@ pub fn mirror_targets(sketch: &Sketch, axis: CurveRef, found: &[SketchEntity]) -
     found
         .iter()
         .filter_map(|e| match *e {
-            SketchEntity::Curve(c) if CurveRef::Curve(c) != axis && !cadrs_sketch::edit::mirrored_in(sketch, axis, c) => Some(c),
+            SketchEntity::Curve(c)
+                if CurveRef::Curve(c) != axis
+                    && !cadrs_sketch::edit::mirrored_in(sketch, axis, c) =>
+            {
+                Some(c)
+            }
             _ => None,
         })
         .collect()
@@ -598,7 +858,10 @@ pub fn mirror_box(
 /// running counter-clockwise, or a circle, the inside).
 pub fn side_at(s: &Sketch, chain: &[(CurveId, bool)], p: SVec2) -> bool {
     if chain.len() > 1
-        && let (Some((a, b)), Some((c, d))) = (s.curve_ends(chain[0].0), s.curve_ends(chain[chain.len() - 1].0))
+        && let (Some((a, b)), Some((c, d))) = (
+            s.curve_ends(chain[0].0),
+            s.curve_ends(chain[chain.len() - 1].0),
+        )
     {
         let start = if chain[0].1 { b } else { a };
         let end = if chain[chain.len() - 1].1 { c } else { d };
@@ -606,7 +869,9 @@ pub fn side_at(s: &Sketch, chain: &[(CurveId, bool)], p: SVec2) -> bool {
             let mut polygon = Vec::new();
             for &(curve, reversed) in chain {
                 let mut points = cadrs_sketch::hit::curve_polyline(s, curve);
-                if reversed { points.reverse(); }
+                if reversed {
+                    points.reverse();
+                }
                 polygon.extend(points);
             }
             let area = cadrs_sketch::geom::polygon_area(&polygon);
@@ -617,9 +882,7 @@ pub fn side_at(s: &Sketch, chain: &[(CurveId, bool)], p: SVec2) -> bool {
     }
     let nearest = chain
         .iter()
-        .min_by(|a, b| {
-            piece_distance(s, a.0, p, true).total_cmp(&piece_distance(s, b.0, p, true))
-        })
+        .min_by(|a, b| piece_distance(s, a.0, p, true).total_cmp(&piece_distance(s, b.0, p, true)))
         .copied();
     let Some((c, reversed)) = nearest else {
         return true;
@@ -678,8 +941,12 @@ fn piece_distance(s: &Sketch, c: CurveId, p: SVec2, bounded: bool) -> f64 {
             }
         }
         Some(CurveKind::Circle { center, radius }) => (p.distance(s.pos(center)) - radius).abs(),
-        Some(CurveKind::Ellipse { .. } | CurveKind::EllipseOffset { .. }) => s.ellipse_geom(c).map_or(f64::INFINITY, |g| g.distance(p)),
-        Some(CurveKind::EllipseArc { .. }) => s.ellipse_arc_geom(c).map_or(f64::INFINITY, |g| g.distance(p)),
+        Some(CurveKind::Ellipse { .. } | CurveKind::EllipseOffset { .. }) => {
+            s.ellipse_geom(c).map_or(f64::INFINITY, |g| g.distance(p))
+        }
+        Some(CurveKind::EllipseArc { .. }) => s
+            .ellipse_arc_geom(c)
+            .map_or(f64::INFINITY, |g| g.distance(p)),
         Some(CurveKind::Spline { .. }) => s
             .spline_spans(c)
             .and_then(|sp| cadrs_sketch::spline::nearest(&sp, p))
@@ -694,9 +961,7 @@ fn piece_distance(s: &Sketch, c: CurveId, p: SVec2, bounded: bool) -> f64 {
 pub fn distance_to_chain(s: &Sketch, chain: &[(CurveId, bool)], p: SVec2) -> f64 {
     let nearest = chain
         .iter()
-        .min_by(|a, b| {
-            piece_distance(s, a.0, p, true).total_cmp(&piece_distance(s, b.0, p, true))
-        })
+        .min_by(|a, b| piece_distance(s, a.0, p, true).total_cmp(&piece_distance(s, b.0, p, true)))
         .copied();
     nearest.map_or(0.0, |(c, _)| piece_distance(s, c, p, false))
 }
@@ -707,7 +972,9 @@ fn shape_mid(s: &Sketch, sh: &OffsetShape) -> SVec2 {
     match *sh {
         OffsetShape::Line(a, b) => a.midpoint(b),
         OffsetShape::Arc { geom, .. } => geom.mid(),
-        OffsetShape::Circle { .. } | OffsetShape::Ellipse { .. } => pts.first().copied().unwrap_or_default(),
+        OffsetShape::Circle { .. } | OffsetShape::Ellipse { .. } => {
+            pts.first().copied().unwrap_or_default()
+        }
     }
 }
 
@@ -735,7 +1002,9 @@ fn arrow_for(
             let o = s.pos(center);
             o + (mid - o).normalize() * radius
         }
-        CurveKind::Ellipse { .. } | CurveKind::EllipseOffset { .. } => s.ellipse_geom(c)?.closest(mid),
+        CurveKind::Ellipse { .. } | CurveKind::EllipseOffset { .. } => {
+            s.ellipse_geom(c)?.closest(mid)
+        }
         CurveKind::Spline { .. } | CurveKind::EllipseArc { .. } => return None,
         CurveKind::Bezier { .. } => {
             let g = s.bezier_geom(c)?;
@@ -764,18 +1033,34 @@ fn place_offset(
     let result = offset_operation(sketch, &groups, off.distance, off.reference(sketch));
     let (mut op, dim) = match result {
         Ok(r) => r,
-        Err(e) => { offset_selection_error(commands, e); return false; }
+        Err(e) => {
+            offset_selection_error(commands, e);
+            return false;
+        }
     };
     let mut trial = sketch.clone();
-    if let Err(e) = op.apply(&mut trial) { offset_selection_error(commands, e); return false; }
+    if let Err(e) = op.apply(&mut trial) {
+        offset_selection_error(commands, e);
+        return false;
+    }
     if off.reference(sketch) != Some(dim) {
         let cursor = map.to_sketch(pos).unwrap_or_default();
-        let label = cadrs_sketch::dimension::label_params(&trial, trial.dimensions[dim].kind, cursor).unwrap_or_default();
-        op = SketchOp::Batch(vec![op, SketchOp::MoveDimensionLabel { id: dim, offset: label.0, along: label.1 }]);
+        let label =
+            cadrs_sketch::dimension::label_params(&trial, trial.dimensions[dim].kind, cursor)
+                .unwrap_or_default();
+        op = SketchOp::Batch(vec![
+            op,
+            SketchOp::MoveDimensionLabel {
+                id: dim,
+                offset: label.0,
+                along: label.1,
+            },
+        ]);
     }
     execute(commands, target, op);
     commands.queue(move |world: &mut World| {
-        if crate::sketch_tools::world_sketch(world).is_some_and(|s| s.dimensions.contains_key(dim)) {
+        if crate::sketch_tools::world_sketch(world).is_some_and(|s| s.dimensions.contains_key(dim))
+        {
             world.resource_mut::<OffsetTool>().distance_dimension = Some(dim);
             crate::sketch_tools::open_quick_dims(world, VecDeque::from([QuickDimTarget::Dim(dim)]));
         }
@@ -812,7 +1097,8 @@ fn place_face_offset(
     let (distance, left) = (off.distance, off.left);
     let cursor = map.to_sketch(pos).unwrap_or_default();
     let mut trial = face.sketch.clone();
-    let label = match cadrs_sketch::edit::offset(&mut trial, &off.chain, distance, left, (0.0, 0.0)) {
+    let label = match cadrs_sketch::edit::offset(&mut trial, &off.chain, distance, left, (0.0, 0.0))
+    {
         Ok(made) => trial
             .dimensions
             .values()
@@ -826,15 +1112,23 @@ fn place_face_offset(
         }
     };
     let before: Vec<cadrs_sketch::DimensionId> = sketch.dimensions.keys().collect();
-    execute(commands, target, SketchOp::OffsetLoop { items: face.items.clone(), distance, left, label });
+    execute(
+        commands,
+        target,
+        SketchOp::OffsetLoop {
+            items: face.items.clone(),
+            distance,
+            left,
+            label,
+        },
+    );
     commands.queue(move |world: &mut World| {
         let Some(s) = crate::sketch_tools::world_sketch(world) else {
             return;
         };
-        let id = s
-            .dimensions
-            .iter()
-            .find_map(|(k, d)| (matches!(d.kind, DimensionKind::Offset { .. }) && !before.contains(&k)).then_some(k));
+        let id = s.dimensions.iter().find_map(|(k, d)| {
+            (matches!(d.kind, DimensionKind::Offset { .. }) && !before.contains(&k)).then_some(k)
+        });
         if let Some(id) = id {
             world.resource_mut::<OffsetTool>().distance_dimension = Some(id);
             crate::sketch_tools::open_quick_dims(world, VecDeque::from([QuickDimTarget::Dim(id)]));
@@ -863,14 +1157,24 @@ pub(crate) fn offset_failed_toast(world: &mut World) {
 /// that can't exist: the solve can't hold the dimension, or an offset circle, arc or ellipse
 /// would have no radius left (offset inward past its center).
 pub(crate) fn offset_value_fails(s: &Sketch, id: cadrs_sketch::DimensionId, op: &SketchOp) -> bool {
-    let Some(DimensionKind::Offset { source, target }) = s.dimensions.get(id).map(|d| d.kind) else {
+    let Some(DimensionKind::Offset { source, target }) = s.dimensions.get(id).map(|d| d.kind)
+    else {
         return false;
     };
     use cadrs_sketch::{ConstraintOf, CurveRef};
     let mut pairs = vec![(source, target)];
     for c in s.constraints.values() {
-        if let ConstraintOf::EqualOffset(CurveRef::Curve(a), CurveRef::Curve(b), CurveRef::Curve(c), CurveRef::Curve(d)) = *c
-            && a == source && b == target { pairs.push((c, d)); }
+        if let ConstraintOf::EqualOffset(
+            CurveRef::Curve(a),
+            CurveRef::Curve(b),
+            CurveRef::Curve(c),
+            CurveRef::Curve(d),
+        ) = *c
+            && a == source
+            && b == target
+        {
+            pairs.push((c, d));
+        }
     }
     let radius = |g: &Sketch, c: CurveId| match g.curves.get(c).map(|c| c.kind) {
         Some(CurveKind::Circle { radius, .. }) => Some(radius),
@@ -878,11 +1182,20 @@ pub(crate) fn offset_value_fails(s: &Sketch, id: cadrs_sketch::DimensionId, op: 
         _ => None,
     };
     let mut trial = s.clone();
-    if op.apply(&mut trial).is_err() { return true; }
-    if cadrs_sketch::solve::conflicts(&trial).contains(&cadrs_sketch::solve::Source::Dimension(id)) { return true; }
+    if op.apply(&mut trial).is_err() {
+        return true;
+    }
+    if cadrs_sketch::solve::conflicts(&trial).contains(&cadrs_sketch::solve::Source::Dimension(id))
+    {
+        return true;
+    }
     pairs.into_iter().any(|(source, target)| {
         let side = |g: &Sketch| Some((radius(g, target)? - radius(g, source)?).signum());
-        if let (Some(a), Some(b)) = (side(s), side(&trial)) && a != b { return true; }
+        if let (Some(a), Some(b)) = (side(s), side(&trial))
+            && a != b
+        {
+            return true;
+        }
         let bad = |r: f64| !(r.is_finite() && r > 1e-9);
         match trial.curves.get(target).map(|c| c.kind) {
             Some(CurveKind::Circle { radius, .. }) => bad(radius),
@@ -918,14 +1231,23 @@ fn draw_offset_preview(
     let color = Color::srgb_u8(0x44, 0x9c, 0xcd);
     for (chain, left) in off.groups() {
         if let Ok(shapes) = offset_geometry(sketch, chain, off.distance, left) {
-            for sh in &shapes { gizmos.linestrip(sh.polyline(sketch).into_iter().map(|p| world(&frame, p)), color); }
+            for sh in &shapes {
+                gizmos.linestrip(
+                    sh.polyline(sketch).into_iter().map(|p| world(&frame, p)),
+                    color,
+                );
+            }
         }
     }
     // The arrow: a shaft and a head, drawn on the sketch plane from its screen position.
     if let Some((base, tip)) = off.arrow {
         let dir = (tip - base).normalize_or_zero();
         let side = dir.perp();
-        let head = [tip - dir * 9.0 + side * 5.0, tip, tip - dir * 9.0 - side * 5.0];
+        let head = [
+            tip - dir * 9.0 + side * 5.0,
+            tip,
+            tip - dir * 9.0 - side * 5.0,
+        ];
         let to_w = |p: Vec2| map.to_sketch(p).map(|q| world(&frame, q));
         if let (Some(a), Some(b)) = (to_w(base), to_w(tip)) {
             gizmos.line(a, b, Color::srgb_u8(0x33, 0x33, 0x33));
@@ -951,16 +1273,46 @@ mod tests {
     #[test]
     fn an_impossible_offset_distance_is_refused() {
         let mut s = Sketch::new();
-        SketchOp::AddCircle { center: SVec2::new(0.0, 0.0), radius: 6.0, construction: false }.apply(&mut s).unwrap();
+        SketchOp::AddCircle {
+            center: SVec2::new(0.0, 0.0),
+            radius: 6.0,
+            construction: false,
+        }
+        .apply(&mut s)
+        .unwrap();
         let c = s.curves.keys().next().unwrap();
         let chain = vec![(c, false)];
         let left = side_at(&s, &chain, SVec2::new(3.0, 0.0));
-        SketchOp::Offset { chain, distance: 3.0, left, label: (0.0, 0.0) }.apply(&mut s).unwrap();
-        let (id, _) = s.dimensions.iter().find(|(_, d)| matches!(d.kind, DimensionKind::Offset { .. })).unwrap();
-        let inner = s.curves.iter().find(|(k, _)| *k != c).map(|(_, v)| v.kind.scalar().unwrap()).unwrap();
+        SketchOp::Offset {
+            chain,
+            distance: 3.0,
+            left,
+            label: (0.0, 0.0),
+        }
+        .apply(&mut s)
+        .unwrap();
+        let (id, _) = s
+            .dimensions
+            .iter()
+            .find(|(_, d)| matches!(d.kind, DimensionKind::Offset { .. }))
+            .unwrap();
+        let inner = s
+            .curves
+            .iter()
+            .find(|(k, _)| *k != c)
+            .map(|(_, v)| v.kind.scalar().unwrap())
+            .unwrap();
         assert!((inner - 3.0).abs() < 1e-6, "{inner}");
-        assert!(!offset_value_fails(&s, id, &SketchOp::SetDimensionValue { id, value: 2.0 }));
-        assert!(offset_value_fails(&s, id, &SketchOp::SetDimensionValue { id, value: 10.0 }));
+        assert!(!offset_value_fails(
+            &s,
+            id,
+            &SketchOp::SetDimensionValue { id, value: 2.0 }
+        ));
+        assert!(offset_value_fails(
+            &s,
+            id,
+            &SketchOp::SetDimensionValue { id, value: 10.0 }
+        ));
     }
 
     /// #37: a box dragged over a mirror line and two circles mirrors the circles in one
@@ -977,8 +1329,20 @@ mod tests {
         .apply(&mut s)
         .unwrap();
         let line = s.curves.keys().next().unwrap();
-        SketchOp::AddCircle { center: SVec2::new(-10.0, 5.0), radius: 2.0, construction: false }.apply(&mut s).unwrap();
-        SketchOp::AddCircle { center: SVec2::new(-10.0, -5.0), radius: 2.0, construction: false }.apply(&mut s).unwrap();
+        SketchOp::AddCircle {
+            center: SVec2::new(-10.0, 5.0),
+            radius: 2.0,
+            construction: false,
+        }
+        .apply(&mut s)
+        .unwrap();
+        SketchOp::AddCircle {
+            center: SVec2::new(-10.0, -5.0),
+            radius: 2.0,
+            construction: false,
+        }
+        .apply(&mut s)
+        .unwrap();
         let selection = SketchSelection(vec![SketchEntity::Curve(line)]);
         let axis = mirror_axis(&s, &selection).unwrap();
         assert_eq!(axis, CurveRef::Curve(line));
@@ -1041,7 +1405,10 @@ mod tests {
     fn line(s: &mut Sketch, a: (f64, f64), b: (f64, f64)) -> CurveId {
         let a = s.add_point(SVec2::new(a.0, a.1));
         let b = s.add_point(SVec2::new(b.0, b.1));
-        s.curves.insert(cadrs_sketch::Curve { kind: CurveKind::Line { a, b }, construction: false })
+        s.curves.insert(cadrs_sketch::Curve {
+            kind: CurveKind::Line { a, b },
+            construction: false,
+        })
     }
 
     fn profile() -> (Sketch, [CurveId; 3]) {
@@ -1063,7 +1430,11 @@ mod tests {
         assert_eq!(off.chain.len(), 2);
         assert!(!off.chain.iter().any(|(id, _)| *id == extension));
         let reversed = off.chain.iter().find(|(id, _)| *id == b).unwrap().1;
-        assert_eq!(off.left ^ reversed, original_left, "reordering the chain must preserve its physical side");
+        assert_eq!(
+            off.left ^ reversed,
+            original_left,
+            "reordering the chain must preserve its physical side"
+        );
         let shapes = offset_geometry(&s, &off.chain, 5.0, off.left).unwrap();
         assert_eq!(end_of(&shapes[0]), start_of(&shapes[1]));
         off.pick(&s, &[c], true, SVec2::new(90.0, 1.0)).unwrap();
@@ -1072,8 +1443,18 @@ mod tests {
         assert_eq!(off.groups().flat_map(|(c, _)| c).count(), 2);
         off.pick(&s, &[b, c], true, SVec2::ZERO).unwrap();
         assert!(off.chain.is_empty());
-        fn start_of(s: &OffsetShape) -> SVec2 { match *s { OffsetShape::Line(a, _) => a, _ => panic!("line") } }
-        fn end_of(s: &OffsetShape) -> SVec2 { match *s { OffsetShape::Line(_, b) => b, _ => panic!("line") } }
+        fn start_of(s: &OffsetShape) -> SVec2 {
+            match *s {
+                OffsetShape::Line(a, _) => a,
+                _ => panic!("line"),
+            }
+        }
+        fn end_of(s: &OffsetShape) -> SVec2 {
+            match *s {
+                OffsetShape::Line(_, b) => b,
+                _ => panic!("line"),
+            }
+        }
     }
 
     #[test]
@@ -1105,12 +1486,28 @@ mod tests {
         assert_eq!(s.curves.len(), 6);
         assert_eq!(s.dimensions.len(), 1);
         assert!(cadrs_sketch::solve::conflicts(&s).is_empty());
-        SketchOp::SetDimensionValue { id: dim, value: 8.0 }.apply(&mut s).unwrap();
-        for (p, old) in &before.points { assert!(s.pos(p).distance(old.pos) < 1e-6, "a source point moved"); }
+        SketchOp::SetDimensionValue {
+            id: dim,
+            value: 8.0,
+        }
+        .apply(&mut s)
+        .unwrap();
+        for (p, old) in &before.points {
+            assert!(s.pos(p).distance(old.pos) < 1e-6, "a source point moved");
+        }
         assert!(cadrs_sketch::solve::conflicts(&s).is_empty());
         for constraint in s.constraints.values() {
-            if let cadrs_sketch::ConstraintOf::EqualOffset(_, _, cadrs_sketch::CurveRef::Curve(src), cadrs_sketch::CurveRef::Curve(dst)) = *constraint {
-                let kind = DimensionKind::Offset { source: src, target: dst };
+            if let cadrs_sketch::ConstraintOf::EqualOffset(
+                _,
+                _,
+                cadrs_sketch::CurveRef::Curve(src),
+                cadrs_sketch::CurveRef::Curve(dst),
+            ) = *constraint
+            {
+                let kind = DimensionKind::Offset {
+                    source: src,
+                    target: dst,
+                };
                 assert!((cadrs_sketch::dimension::measure(&s, kind).unwrap() - 8.0).abs() < 1e-5);
             }
         }
@@ -1125,8 +1522,11 @@ mod tests {
         assert_eq!(dim, same);
         op.apply(&mut s).unwrap();
         assert_eq!(s.dimensions.len(), 1);
-        let DimensionKind::Offset { target, .. } = s.dimensions[dim].kind else { panic!("offset") };
-        let (op, next) = offset_operation(&s, &[(vec![(target, false)], true)], 4.0, Some(dim)).unwrap();
+        let DimensionKind::Offset { target, .. } = s.dimensions[dim].kind else {
+            panic!("offset")
+        };
+        let (op, next) =
+            offset_operation(&s, &[(vec![(target, false)], true)], 4.0, Some(dim)).unwrap();
         assert_ne!(next, dim);
         op.apply(&mut s).unwrap();
         assert_eq!(s.dimensions.len(), 2);
@@ -1137,61 +1537,144 @@ mod tests {
     fn shared_distance_rejects_an_impossible_secondary_circle() {
         let mut s = Sketch::new();
         let a = line(&mut s, (0.0, 20.0), (40.0, 20.0));
-        SketchOp::AddCircle { center: SVec2::new(80.0, 0.0), radius: 6.0, construction: false }.apply(&mut s).unwrap();
+        SketchOp::AddCircle {
+            center: SVec2::new(80.0, 0.0),
+            radius: 6.0,
+            construction: false,
+        }
+        .apply(&mut s)
+        .unwrap();
         let c = s.curves.keys().find(|id| *id != a).unwrap();
-        let (op, dim) = offset_operation(&s, &[(vec![(a, false)], true), (vec![(c, false)], true)], 3.0, None).unwrap();
+        let (op, dim) = offset_operation(
+            &s,
+            &[(vec![(a, false)], true), (vec![(c, false)], true)],
+            3.0,
+            None,
+        )
+        .unwrap();
         op.apply(&mut s).unwrap();
-        assert!(!offset_value_fails(&s, dim, &SketchOp::SetDimensionValue { id: dim, value: 2.0 }));
-        assert!(offset_value_fails(&s, dim, &SketchOp::SetDimensionValue { id: dim, value: 10.0 }));
+        assert!(!offset_value_fails(
+            &s,
+            dim,
+            &SketchOp::SetDimensionValue {
+                id: dim,
+                value: 2.0
+            }
+        ));
+        assert!(offset_value_fails(
+            &s,
+            dim,
+            &SketchOp::SetDimensionValue {
+                id: dim,
+                value: 10.0
+            }
+        ));
         let before = s.clone();
-        assert!(offset_operation(&s, &[(vec![(a, false)], true), (vec![(c, false)], true)], 10.0, None).is_err());
+        assert!(
+            offset_operation(
+                &s,
+                &[(vec![(a, false)], true), (vec![(c, false)], true)],
+                10.0,
+                None
+            )
+            .is_err()
+        );
         assert_eq!(s, before, "invalid preview must leave the sketch unchanged");
     }
 
     fn pointer_app() -> (App, Entity, [CurveId; 3]) {
-        use cadrs_core::{Document, Feature, FeatureId, FeatureKind, document::SketchFeature};
         use crate::sketch_tools::{SketchArea, SketchDraw};
+        use cadrs_core::{Document, Feature, FeatureId, FeatureKind, document::SketchFeature};
         let (geometry, ids) = profile();
         let mut doc = Document::new("Offset interaction");
         let element = doc.elements[0].id;
         let feature = FeatureId::new();
-        doc.elements[0].features_mut().unwrap().push(Feature::new(feature, "Sketch", FeatureKind::Sketch(SketchFeature {
-            plane: Some(cadrs_sketch::PlaneRef::Top), disable_imprinting: true, geometry,
-        })));
+        doc.elements[0].features_mut().unwrap().push(Feature::new(
+            feature,
+            "Sketch",
+            FeatureKind::Sketch(SketchFeature {
+                plane: Some(cadrs_sketch::PlaneRef::Top),
+                disable_imprinting: true,
+                geometry,
+            }),
+        ));
         let mut app = App::new();
-        app.add_message::<PointerInput>().add_message::<KeyboardInput>()
+        app.add_message::<PointerInput>()
+            .add_message::<KeyboardInput>()
             .insert_resource(ActiveDocument::new(doc))
-            .insert_resource(SketchSession { element, feature, is_new: false, mark: 0, before: None, waiting_for_plane: false,
-                plane_extent: Vec2::splat(100.0), prompted: false, show_final: false })
-            .insert_resource(ActiveSketchTool { tool: SketchTool::Offset, construction: false })
-            .insert_resource(SketchScreen { active: Some(ScreenMap { plane: cadrs_sketch::PlaneRef::Top,
-                origin: Vec2::splat(200.0), x: Vec2::new(5.0, 0.0), y: Vec2::new(0.0, -5.0), w: Vec2::ZERO }), fallback: None })
-            .init_resource::<OffsetTool>().init_resource::<SketchSelection>().init_resource::<QuickDimFlow>()
-            .init_resource::<InputFocus>().init_resource::<ButtonInput<KeyCode>>()
-            .init_resource::<bevy::diagnostic::FrameCount>().init_resource::<crate::parts::PartCache>()
-            .init_resource::<cadrs_ui::Theme>().init_resource::<crate::WorkspaceUnits>()
-            .init_resource::<SketchArea>().init_resource::<SketchDraw>()
+            .insert_resource(SketchSession {
+                element,
+                feature,
+                is_new: false,
+                mark: 0,
+                before: None,
+                waiting_for_plane: false,
+                plane_extent: Vec2::splat(100.0),
+                prompted: false,
+                show_final: false,
+            })
+            .insert_resource(ActiveSketchTool {
+                tool: SketchTool::Offset,
+                construction: false,
+            })
+            .insert_resource(SketchScreen {
+                active: Some(ScreenMap {
+                    plane: cadrs_sketch::PlaneRef::Top,
+                    origin: Vec2::splat(200.0),
+                    x: Vec2::new(5.0, 0.0),
+                    y: Vec2::new(0.0, -5.0),
+                    w: Vec2::ZERO,
+                }),
+                fallback: None,
+            })
+            .init_resource::<OffsetTool>()
+            .init_resource::<SketchSelection>()
+            .init_resource::<QuickDimFlow>()
+            .init_resource::<InputFocus>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<bevy::diagnostic::FrameCount>()
+            .init_resource::<crate::parts::PartCache>()
+            .init_resource::<cadrs_ui::Theme>()
+            .init_resource::<crate::WorkspaceUnits>()
+            .init_resource::<SketchArea>()
+            .init_resource::<SketchDraw>()
             .init_resource::<crate::viewport::ViewportRect>()
             .add_systems(Update, (edit_tools_keys, edit_tools_pointer).chain());
         let area = app.world_mut().spawn(ViewportArea).id();
         let mut hover = HoverMap::default();
-        hover.entry(PointerId::Mouse).or_default().insert(area, bevy::picking::backend::HitData::new(area, 0.0, None, None));
+        hover.entry(PointerId::Mouse).or_default().insert(
+            area,
+            bevy::picking::backend::HitData::new(area, 0.0, None, None),
+        );
         app.insert_resource(hover);
         (app, area, ids)
     }
 
     fn pointer(app: &mut App, area: Entity, action: PointerAction, xy: (f32, f32)) {
         use bevy::picking::pointer::Location;
-        let target = bevy::camera::RenderTarget::Window(bevy::window::WindowRef::Entity(area)).normalize(None).unwrap();
+        let target = bevy::camera::RenderTarget::Window(bevy::window::WindowRef::Entity(area))
+            .normalize(None)
+            .unwrap();
         let position = Vec2::new(200.0 + xy.0 * 5.0, 200.0 - xy.1 * 5.0);
-        app.world_mut().write_message(PointerInput::new(PointerId::Mouse, Location { target, position }, action));
-        app.world_mut().resource_mut::<bevy::diagnostic::FrameCount>().0 += 1;
+        app.world_mut().write_message(PointerInput::new(
+            PointerId::Mouse,
+            Location { target, position },
+            action,
+        ));
+        app.world_mut()
+            .resource_mut::<bevy::diagnostic::FrameCount>()
+            .0 += 1;
         app.update();
     }
 
     fn click(app: &mut App, area: Entity, xy: (f32, f32)) {
         pointer(app, area, PointerAction::Press(PointerButton::Primary), xy);
-        pointer(app, area, PointerAction::Release(PointerButton::Primary), xy);
+        pointer(
+            app,
+            area,
+            PointerAction::Release(PointerButton::Primary),
+            xy,
+        );
     }
 
     #[test]
@@ -1201,10 +1684,16 @@ mod tests {
         click(&mut app, area, (20.0, 0.0));
         click(&mut app, area, (40.0, 15.0));
         assert_eq!(app.world().resource::<OffsetTool>().chain.len(), 2);
-        assert_eq!(app.world().resource::<ActiveDocument>().history.undo_len(), 0);
+        assert_eq!(
+            app.world().resource::<ActiveDocument>().history.undo_len(),
+            0
+        );
         assert!(app.world().resource::<QuickDimFlow>().open.is_none());
         click(&mut app, area, (20.0, 0.0));
-        assert_eq!(app.world().resource::<OffsetTool>().chain, vec![(ids[1], false)]);
+        assert_eq!(
+            app.world().resource::<OffsetTool>().chain,
+            vec![(ids[1], false)]
+        );
         click(&mut app, area, (20.0, 0.0));
         click(&mut app, area, (30.0, 8.0));
         assert!(app.world().resource::<OffsetTool>().chain.is_empty());
@@ -1212,43 +1701,91 @@ mod tests {
         let mut doc = app.world_mut().resource_mut::<ActiveDocument>();
         assert_eq!(doc.history.undo_len(), 1);
         let after = doc.doc.clone();
-        assert_eq!(after.elements[0].features()[0].sketch().unwrap().geometry.curves.len(), 5);
-        doc.undo().unwrap(); assert_eq!(doc.doc, before);
-        doc.redo().unwrap(); assert_eq!(doc.doc, after);
+        assert_eq!(
+            after.elements[0].features()[0]
+                .sketch()
+                .unwrap()
+                .geometry
+                .curves
+                .len(),
+            5
+        );
+        doc.undo().unwrap();
+        assert_eq!(doc.doc, before);
+        doc.redo().unwrap();
+        assert_eq!(doc.doc, after);
     }
 
     #[test]
     fn preselection_drag_chain_and_escape_are_supported() {
         let (mut app, area, ids) = pointer_app();
-        app.world_mut().resource_mut::<SketchSelection>().0 = vec![SketchEntity::Curve(ids[0]), SketchEntity::Curve(ids[2])];
+        app.world_mut().resource_mut::<SketchSelection>().0 =
+            vec![SketchEntity::Curve(ids[0]), SketchEntity::Curve(ids[2])];
         app.update();
         assert_eq!(app.world().resource::<OffsetTool>().groups().count(), 2);
         pointer(&mut app, area, PointerAction::Cancel, (30.0, 8.0));
         assert!(app.world().resource::<OffsetTool>().chain.is_empty());
-        pointer(&mut app, area, PointerAction::Press(PointerButton::Primary), (20.0, 0.0));
-        pointer(&mut app, area, PointerAction::Release(PointerButton::Primary), (20.0, 2.0));
+        pointer(
+            &mut app,
+            area,
+            PointerAction::Press(PointerButton::Primary),
+            (20.0, 0.0),
+        );
+        pointer(
+            &mut app,
+            area,
+            PointerAction::Release(PointerButton::Primary),
+            (20.0, 2.0),
+        );
         assert_eq!(app.world().resource::<OffsetTool>().chain.len(), 2);
-        app.world_mut().write_message(KeyboardInput { key_code: KeyCode::Escape, logical_key: bevy::input::keyboard::Key::Escape,
-            state: ButtonState::Pressed, text: None, repeat: false, window: area });
-        app.world_mut().resource_mut::<bevy::diagnostic::FrameCount>().0 += 1;
+        app.world_mut().write_message(KeyboardInput {
+            key_code: KeyCode::Escape,
+            logical_key: bevy::input::keyboard::Key::Escape,
+            state: ButtonState::Pressed,
+            text: None,
+            repeat: false,
+            window: area,
+        });
+        app.world_mut()
+            .resource_mut::<bevy::diagnostic::FrameCount>()
+            .0 += 1;
         app.update();
         assert!(app.world().resource::<OffsetTool>().chain.is_empty());
-        assert_eq!(app.world().resource::<ActiveDocument>().history.undo_len(), 0);
+        assert_eq!(
+            app.world().resource::<ActiveDocument>().history.undo_len(),
+            0
+        );
     }
 
     #[test]
     fn enter_confirms_the_offset_and_consumes_the_sketch_accept_key() {
         let (mut app, area, _) = pointer_app();
         click(&mut app, area, (20.0, 0.0));
-        pointer(&mut app, area, PointerAction::Move { delta: Vec2::ZERO }, (20.0, 8.0));
-        app.world_mut().write_message(KeyboardInput { key_code: KeyCode::Enter, logical_key: bevy::input::keyboard::Key::Enter,
-            state: ButtonState::Pressed, text: None, repeat: false, window: area });
-        app.world_mut().resource_mut::<bevy::diagnostic::FrameCount>().0 += 1;
+        pointer(
+            &mut app,
+            area,
+            PointerAction::Move { delta: Vec2::ZERO },
+            (20.0, 8.0),
+        );
+        app.world_mut().write_message(KeyboardInput {
+            key_code: KeyCode::Enter,
+            logical_key: bevy::input::keyboard::Key::Enter,
+            state: ButtonState::Pressed,
+            text: None,
+            repeat: false,
+            window: area,
+        });
+        app.world_mut()
+            .resource_mut::<bevy::diagnostic::FrameCount>()
+            .0 += 1;
         app.update();
         assert!(app.world().resource::<QuickDimFlow>().open.is_some());
         let frame = app.world().resource::<bevy::diagnostic::FrameCount>();
         assert!(app.world().resource::<QuickDimFlow>().consumed(frame));
-        assert_eq!(app.world().resource::<ActiveDocument>().history.undo_len(), 1);
+        assert_eq!(
+            app.world().resource::<ActiveDocument>().history.undo_len(),
+            1
+        );
     }
 
     #[test]
@@ -1258,30 +1795,62 @@ mod tests {
         app.update();
         let dialog = app.world_mut().spawn(cadrs_ui::DialogRoot).id();
         let enter = |app: &mut App| {
-            app.world_mut().write_message(KeyboardInput { key_code: KeyCode::Enter, logical_key: bevy::input::keyboard::Key::Enter,
-                state: ButtonState::Pressed, text: None, repeat: false, window: area });
-            app.world_mut().resource_mut::<bevy::diagnostic::FrameCount>().0 += 1;
+            app.world_mut().write_message(KeyboardInput {
+                key_code: KeyCode::Enter,
+                logical_key: bevy::input::keyboard::Key::Enter,
+                state: ButtonState::Pressed,
+                text: None,
+                repeat: false,
+                window: area,
+            });
+            app.world_mut()
+                .resource_mut::<bevy::diagnostic::FrameCount>()
+                .0 += 1;
             app.update();
         };
         enter(&mut app);
-        assert_eq!(app.world().resource::<ActiveDocument>().history.undo_len(), 0);
+        assert_eq!(
+            app.world().resource::<ActiveDocument>().history.undo_len(),
+            0
+        );
         app.world_mut().despawn(dialog);
         enter(&mut app);
         assert!(app.world().resource::<QuickDimFlow>().open.is_some());
-        assert_eq!(app.world().resource::<ActiveDocument>().history.undo_len(), 1);
+        assert_eq!(
+            app.world().resource::<ActiveDocument>().history.undo_len(),
+            1
+        );
     }
 
     #[test]
     fn moving_across_a_line_changes_direction_without_an_arrow_click() {
         let (mut app, area, _) = pointer_app();
         click(&mut app, area, (20.0, 0.0));
-        for (y, expected) in [(5.0, true), (0.1, true), (-5.0, false), (-0.1, false), (8.0, true)] {
-            pointer(&mut app, area, PointerAction::Move { delta: Vec2::ZERO }, (20.0, y));
-            assert_eq!(app.world().resource::<OffsetTool>().left, expected, "cursor at y={y}");
+        for (y, expected) in [
+            (5.0, true),
+            (0.1, true),
+            (-5.0, false),
+            (-0.1, false),
+            (8.0, true),
+        ] {
+            pointer(
+                &mut app,
+                area,
+                PointerAction::Move { delta: Vec2::ZERO },
+                (20.0, y),
+            );
+            assert_eq!(
+                app.world().resource::<OffsetTool>().left,
+                expected,
+                "cursor at y={y}"
+            );
         }
         // This lies on the old clickable arrow shaft. It must place the offset now.
         click(&mut app, area, (20.0, 10.0));
-        assert_eq!(app.world().resource::<ActiveDocument>().history.undo_len(), 1);
+        assert_eq!(
+            app.world().resource::<ActiveDocument>().history.undo_len(),
+            1
+        );
         assert!(app.world().resource::<QuickDimFlow>().open.is_some());
     }
 
@@ -1289,10 +1858,18 @@ mod tests {
     fn final_click_determines_direction_even_without_a_move_event() {
         let (mut app, area, _) = pointer_app();
         click(&mut app, area, (20.0, 0.0));
-        pointer(&mut app, area, PointerAction::Move { delta: Vec2::ZERO }, (20.0, 5.0));
+        pointer(
+            &mut app,
+            area,
+            PointerAction::Move { delta: Vec2::ZERO },
+            (20.0, 5.0),
+        );
         click(&mut app, area, (20.0, -8.0));
         let sketch = crate::sketch_tools::world_sketch(app.world()).unwrap();
-        let DimensionKind::Offset { target, .. } = sketch.dimensions.values().next().unwrap().kind else { panic!("offset") };
+        let DimensionKind::Offset { target, .. } = sketch.dimensions.values().next().unwrap().kind
+        else {
+            panic!("offset")
+        };
         let (a, b) = sketch.curve_ends(target).unwrap();
         assert!((sketch.pos(a).y + 8.0).abs() < 1e-5);
         assert!((sketch.pos(b).y + 8.0).abs() < 1e-5);
@@ -1308,7 +1885,10 @@ mod tests {
         let (app, _, _) = pointer_app();
         let map = app.world().resource::<SketchScreen>().active.unwrap();
         update_cursor_preview(&s, &map, &mut off, map.to_screen(SVec2::new(20.0, 23.0)));
-        assert!((off.distance - 3.0).abs() < 1e-6, "distance must be measured from the upper profile");
+        assert!(
+            (off.distance - 3.0).abs() < 1e-6,
+            "distance must be measured from the upper profile"
+        );
         update_cursor_preview(&s, &map, &mut off, map.to_screen(SVec2::new(20.0, 10.0)));
         let groups: Vec<_> = off.groups().collect();
         assert!(groups[0].1, "lower line moves up toward cursor");
@@ -1317,23 +1897,40 @@ mod tests {
         op.apply(&mut s).unwrap();
         off.distance_dimension = Some(dim);
         update_cursor_preview(&s, &map, &mut off, map.to_screen(SVec2::new(20.0, -8.0)));
-        assert_eq!(off.distance, 4.0, "crossing a source must preserve the session's typed distance");
+        assert_eq!(
+            off.distance, 4.0,
+            "crossing a source must preserve the session's typed distance"
+        );
         assert!(!off.left);
     }
 
     #[test]
     fn closed_loops_follow_containment_regardless_of_winding_or_concavity() {
-        let outline = [(0.0, 0.0), (30.0, 0.0), (30.0, 30.0), (20.0, 30.0),
-            (20.0, 10.0), (10.0, 10.0), (10.0, 30.0), (0.0, 30.0)];
+        let outline = [
+            (0.0, 0.0),
+            (30.0, 0.0),
+            (30.0, 30.0),
+            (20.0, 30.0),
+            (20.0, 10.0),
+            (10.0, 10.0),
+            (10.0, 30.0),
+            (0.0, 30.0),
+        ];
         let mut s = Sketch::new();
-        let ids: Vec<_> = (0..outline.len()).map(|i| line(&mut s, outline[i], outline[(i + 1) % outline.len()])).collect();
+        let ids: Vec<_> = (0..outline.len())
+            .map(|i| line(&mut s, outline[i], outline[(i + 1) % outline.len()]))
+            .collect();
         let forward = selected_chains(&s, &ids).unwrap().remove(0);
         let reverse: Vec<_> = forward.iter().rev().map(|(c, rev)| (*c, !rev)).collect();
         for p in [SVec2::new(5.0, 20.0), SVec2::new(15.0, 5.0)] {
             assert!(side_at(&s, &forward, p));
             assert!(!side_at(&s, &reverse, p));
         }
-        for p in [SVec2::new(15.0, 20.0), SVec2::new(15.0, 35.0), SVec2::new(-5.0, 15.0)] {
+        for p in [
+            SVec2::new(15.0, 20.0),
+            SVec2::new(15.0, 35.0),
+            SVec2::new(-5.0, 15.0),
+        ] {
             assert!(!side_at(&s, &forward, p));
             assert!(side_at(&s, &reverse, p));
         }
@@ -1342,14 +1939,25 @@ mod tests {
     #[test]
     fn circle_and_face_loop_previews_switch_between_cursor_sides() {
         let mut s = Sketch::new();
-        SketchOp::AddCircle { center: SVec2::ZERO, radius: 6.0, construction: false }.apply(&mut s).unwrap();
+        SketchOp::AddCircle {
+            center: SVec2::ZERO,
+            radius: 6.0,
+            construction: false,
+        }
+        .apply(&mut s)
+        .unwrap();
         let c = s.curves.keys().next().unwrap();
         let mut off = OffsetTool::default();
         off.pick(&s, &[c], false, SVec2::new(0.0, 7.0)).unwrap();
         let (app, _, _) = pointer_app();
         let map = app.world().resource::<SketchScreen>().active.unwrap();
         for face in [false, true] {
-            if face { off.face = Some(FaceLoop { items: vec![], sketch: s.clone() }); }
+            if face {
+                off.face = Some(FaceLoop {
+                    items: vec![],
+                    sketch: s.clone(),
+                });
+            }
             update_cursor_preview(&s, &map, &mut off, map.to_screen(SVec2::new(0.0, 2.0)));
             assert!(off.left);
             assert!((off.distance - 4.0).abs() < 1e-6);
@@ -1358,5 +1966,4 @@ mod tests {
             assert!((off.distance - 2.0).abs() < 1e-6);
         }
     }
-
 }

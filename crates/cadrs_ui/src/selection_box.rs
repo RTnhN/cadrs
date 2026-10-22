@@ -40,7 +40,13 @@ pub type Boxes<'w, 's> = Query<'w, 's, (Entity, &'static Name, &'static mut Sele
 
 /// Shows the box named `name` from `start` to `end` (`span`, in `host`'s logical px) as a child
 /// of `host`, or (`span` `None`, or no host) removes it.
-pub fn sync(commands: &mut Commands, boxes: &mut Boxes, name: &str, host: Option<Entity>, span: Option<(Vec2, Vec2)>) {
+pub fn sync(
+    commands: &mut Commands,
+    boxes: &mut Boxes,
+    name: &str,
+    host: Option<Entity>,
+    span: Option<(Vec2, Vec2)>,
+) {
     let mut found = None;
     for (e, n, b) in boxes.iter_mut() {
         if n.as_str() == name {
@@ -55,7 +61,21 @@ pub fn sync(commands: &mut Commands, boxes: &mut Boxes, name: &str, host: Option
             }
         }
         (Some((start, end)), Some(host), None) => {
-            let e = commands.spawn((Name::new(name.to_string()), SelectionBox { start, end, built: None }, Node { position_type: PositionType::Absolute, ..default() }, Pickable::IGNORE)).id();
+            let e = commands
+                .spawn((
+                    Name::new(name.to_string()),
+                    SelectionBox {
+                        start,
+                        end,
+                        built: None,
+                    },
+                    Node {
+                        position_type: PositionType::Absolute,
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ))
+                .id();
             commands.entity(host).add_child(e);
         }
         (_, _, Some((e, _))) => {
@@ -68,9 +88,15 @@ pub fn sync(commands: &mut Commands, boxes: &mut Boxes, name: &str, host: Option
 /// The window's and the crossing's (fill, outline).
 fn colors(cross: bool) -> (Color, Color) {
     if cross {
-        (Color::srgba_u8(0xff, 0xe0, 0x45, 102), Color::srgb_u8(0xf0, 0xb4, 0x00))
+        (
+            Color::srgba_u8(0xff, 0xe0, 0x45, 102),
+            Color::srgb_u8(0xf0, 0xb4, 0x00),
+        )
     } else {
-        (Color::srgba_u8(0x24, 0x93, 0xcc, 94), Color::srgb_u8(0x5a, 0x8c, 0xcb))
+        (
+            Color::srgba_u8(0x24, 0x93, 0xcc, 94),
+            Color::srgb_u8(0x5a, 0x8c, 0xcb),
+        )
     }
 }
 
@@ -96,7 +122,10 @@ fn dashes(size: Vec2) -> Vec<(f32, f32, f32, f32)> {
 }
 
 #[allow(clippy::type_complexity)]
-fn draw(mut q: Query<(Entity, &mut SelectionBox, &mut Node), Changed<SelectionBox>>, mut commands: Commands) {
+fn draw(
+    mut q: Query<(Entity, &mut SelectionBox, &mut Node), Changed<SelectionBox>>,
+    mut commands: Commands,
+) {
     for (e, mut b, mut node) in &mut q {
         let cross = crossing(b.start, b.end);
         let (lo, hi) = (b.start.min(b.end).round(), b.start.max(b.end).round());
@@ -107,7 +136,11 @@ fn draw(mut q: Query<(Entity, &mut SelectionBox, &mut Node), Changed<SelectionBo
             top: Val::Px(lo.y),
             width: Val::Px(size.x),
             height: Val::Px(size.y),
-            border: if cross { UiRect::ZERO } else { UiRect::all(Val::Px(1.0)) },
+            border: if cross {
+                UiRect::ZERO
+            } else {
+                UiRect::all(Val::Px(1.0))
+            },
             ..default()
         };
         if *node != want {
@@ -126,7 +159,14 @@ fn draw(mut q: Query<(Entity, &mut SelectionBox, &mut Node), Changed<SelectionBo
                 for (x, y, w, h) in dashes(size) {
                     p.spawn((
                         Dash,
-                        Node { position_type: PositionType::Absolute, left: Val::Px(x), top: Val::Px(y), width: Val::Px(w), height: Val::Px(h), ..default() },
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(x),
+                            top: Val::Px(y),
+                            width: Val::Px(w),
+                            height: Val::Px(h),
+                            ..default()
+                        },
                         BackgroundColor(stroke),
                         Pickable::IGNORE,
                     ));
@@ -148,23 +188,42 @@ mod tests {
         let host = app.world_mut().spawn(Node::default()).id();
         let show = move |app: &mut App, span: Option<(Vec2, Vec2)>| {
             app.world_mut()
-                .run_system_once(move |mut commands: Commands, mut boxes: Boxes| sync(&mut commands, &mut boxes, "test-box", Some(host), span))
+                .run_system_once(move |mut commands: Commands, mut boxes: Boxes| {
+                    sync(&mut commands, &mut boxes, "test-box", Some(host), span)
+                })
                 .unwrap();
             app.update();
         };
         // Dragged left to right: a window, outlined, no dashes.
-        show(&mut app, Some((Vec2::new(10.0, 20.0), Vec2::new(50.0, 40.0))));
+        show(
+            &mut app,
+            Some((Vec2::new(10.0, 20.0), Vec2::new(50.0, 40.0))),
+        );
         let w = app.world_mut();
-        let (e, node, kids) = w.query::<(Entity, &Node, Option<&Children>)>().iter(w).find(|(e, ..)| w.get::<SelectionBox>(*e).is_some()).map(|(e, n, c)| (e, n.clone(), c.map_or(0, |c| c.len()))).unwrap();
-        assert_eq!((node.left, node.top, node.width, node.height), (Val::Px(10.0), Val::Px(20.0), Val::Px(40.0), Val::Px(20.0)));
+        let (e, node, kids) = w
+            .query::<(Entity, &Node, Option<&Children>)>()
+            .iter(w)
+            .find(|(e, ..)| w.get::<SelectionBox>(*e).is_some())
+            .map(|(e, n, c)| (e, n.clone(), c.map_or(0, |c| c.len())))
+            .unwrap();
+        assert_eq!(
+            (node.left, node.top, node.width, node.height),
+            (Val::Px(10.0), Val::Px(20.0), Val::Px(40.0), Val::Px(20.0))
+        );
         assert_eq!(node.border, UiRect::all(Val::Px(1.0)));
         assert_eq!(kids, 0);
         assert_eq!(w.get::<ChildOf>(e).map(|c| c.parent()), Some(host));
         // Back past its start: a crossing, from the pointer, dashed.
-        show(&mut app, Some((Vec2::new(10.0, 20.0), Vec2::new(0.0, 40.0))));
+        show(
+            &mut app,
+            Some((Vec2::new(10.0, 20.0), Vec2::new(0.0, 40.0))),
+        );
         let w = app.world_mut();
         let node = w.get::<Node>(e).unwrap().clone();
-        assert_eq!((node.left, node.width, node.border), (Val::Px(0.0), Val::Px(10.0), UiRect::ZERO));
+        assert_eq!(
+            (node.left, node.width, node.border),
+            (Val::Px(0.0), Val::Px(10.0), UiRect::ZERO)
+        );
         assert!(w.get::<Children>(e).is_some_and(|c| c.len() > 4));
         // Ended: gone.
         show(&mut app, None);

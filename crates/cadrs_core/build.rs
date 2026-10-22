@@ -10,14 +10,24 @@ fn main() {
     let crates = manifest.parent().unwrap();
     let workspace = crates.parent().unwrap();
     let mut h = Fnv(0xcbf2_9ce4_8422_2325);
-    for dir in ["cadrs_core/src", "cadrs_kernel/src", "cadrs_sketch/src", "cadrs_sheetmetal/src"] {
+    for dir in [
+        "cadrs_core/src",
+        "cadrs_kernel/src",
+        "cadrs_sketch/src",
+        "cadrs_sheetmetal/src",
+    ] {
         let dir = crates.join(dir);
         println!("cargo:rerun-if-changed={}", dir.display());
         let mut files = Vec::new();
         collect(&dir, &mut files);
         files.sort();
         for f in files {
-            h.write(f.strip_prefix(crates).unwrap_or(&f).to_string_lossy().as_bytes());
+            h.write(
+                f.strip_prefix(crates)
+                    .unwrap_or(&f)
+                    .to_string_lossy()
+                    .as_bytes(),
+            );
             h.write(&std::fs::read(&f).unwrap_or_default());
         }
     }
@@ -30,7 +40,9 @@ fn main() {
 }
 
 fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for e in entries.flatten() {
         let p = e.path();
         if p.is_dir() {

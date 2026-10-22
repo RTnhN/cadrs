@@ -11,7 +11,9 @@ use cadrs_pcb::*;
 use nalgebra::{Point2, Point3, Vector3};
 
 fn fixture(dir: &str, name: &str) -> PcbBoard {
-    let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/idf").join(dir);
+    let d = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/idf")
+        .join(dir);
     let emn = std::fs::read_to_string(d.join(format!("{name}.emn"))).unwrap();
     let emp = std::fs::read_to_string(d.join(format!("{name}.emp"))).unwrap();
     PcbBoard::read(&emn, &emp).unwrap()
@@ -54,7 +56,12 @@ fn board_volume_is_area_times_thickness_minus_holes() {
         let expect = (101.6 * 76.2 - 4.0 * PI * (3.175f64 / 2.0).powi(2)) * t;
         assert!(close(v, expect, 1e-9), "{v} vs {expect}");
         // The holes are cylinders through the board.
-        let cyl = k.faces(g.board().unwrap().body).unwrap().iter().filter(|f| f.kind == SurfaceKind::Cylinder).count();
+        let cyl = k
+            .faces(g.board().unwrap().body)
+            .unwrap()
+            .iter()
+            .filter(|f| f.kind == SurfaceKind::Cylinder)
+            .count();
         assert_eq!(cyl, 4);
     }
 }
@@ -86,13 +93,26 @@ fn components_keep_areas_and_colours() {
     assert!((top.center.x - 50.8).abs() < 1e-9 && (top.center.y - 38.1).abs() < 1e-9);
     // Colours: green board, tan passives, silver crystal, blue headers.
     assert_eq!(g.board().unwrap().color, colors::BOARD_GREEN);
-    assert_eq!(g.named("R1 0603R").unwrap().class, BodyClass::Component(ComponentKind::Passive));
-    assert_eq!(g.named("Y1 CRYSTAL_HC49").unwrap().class, BodyClass::Component(ComponentKind::Crystal));
-    assert_eq!(g.named("J1 HDR_1X20").unwrap().class, BodyClass::Component(ComponentKind::Connector));
+    assert_eq!(
+        g.named("R1 0603R").unwrap().class,
+        BodyClass::Component(ComponentKind::Passive)
+    );
+    assert_eq!(
+        g.named("Y1 CRYSTAL_HC49").unwrap().class,
+        BodyClass::Component(ComponentKind::Crystal)
+    );
+    assert_eq!(
+        g.named("J1 HDR_1X20").unwrap().class,
+        BodyClass::Component(ComponentKind::Connector)
+    );
     // Four round route keep-outs on both sides: 8 thin translucent markers.
     let keeps: Vec<_> = g.keeps().collect();
     assert_eq!(keeps.len(), 8);
-    assert!(keeps.iter().all(|b| b.class == BodyClass::KeepOut && b.color[3] < 255));
+    assert!(
+        keeps
+            .iter()
+            .all(|b| b.class == BodyClass::KeepOut && b.color[3] < 255)
+    );
     let m = k.mass_properties(keeps[0].body).unwrap().volume;
     assert!(close(m, PI * 3.175 * 3.175 * geometry::MARKER, 1e-9), "{m}");
 }
@@ -102,10 +122,16 @@ fn keepouts_below_the_cell_phone_board() {
     let mut k = DefaultKernel::new();
     let g = board_geometry(&mut k, &cell_phone()).unwrap();
     let keeps: Vec<_> = g.keeps().collect();
-    assert_eq!(keeps.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(), ["Keep-out 1", "Keep-out 2"]);
+    assert_eq!(
+        keeps.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(),
+        ["Keep-out 1", "Keep-out 2"]
+    );
     for (b, area) in keeps.iter().zip([5400.0, 900.0]) {
         let bb = k.bounding_box(b.body).unwrap();
-        assert!(bb.min.z.abs() - 1.0 < 1e-6 && bb.max.z.abs() < 1e-6, "{bb:?}");
+        assert!(
+            bb.min.z.abs() - 1.0 < 1e-6 && bb.max.z.abs() < 1e-6,
+            "{bb:?}"
+        );
         assert!(close(k.mass_properties(b.body).unwrap().volume, area, 1e-9));
     }
 }
@@ -131,7 +157,10 @@ fn rotated_component_footprint() {
     let x2 = g.bodies.iter().find(|b| b.name.starts_with("X2 ")).unwrap();
     let t = pcb.thickness();
     let x = 4.064182376174947;
-    assert_box(bbox_xy(&k, x2.body), [x - 3.55, -20.2, t, x + 3.55, -12.8, t + 1.2]);
+    assert_box(
+        bbox_xy(&k, x2.body),
+        [x - 3.55, -20.2, t, x + 3.55, -12.8, t + 1.2],
+    );
 }
 
 #[test]
@@ -195,11 +224,18 @@ fn rounded_rect_projects_to_lines_and_90_degree_arcs() {
     let mut k = DefaultKernel::new();
     let g = board_geometry(&mut k, &cell_phone()).unwrap();
     let b = g.board().unwrap();
-    let parts = [McadPart { name: "Mainboard".into(), body: b.body }];
+    let parts = [McadPart {
+        name: "Mainboard".into(),
+        body: b.body,
+    }];
     let m = board_from_mcad(&k, "Cell phone", &parts, &[], &SyncPlane::Top.plane()).unwrap();
     let o = m.board.outline.as_ref().unwrap();
     assert!(close(o.thickness, 0.062, 1e-12));
-    let pts: Vec<(f64, f64, f64)> = o.loops[0].points.iter().map(|q| (q.x, q.y, q.angle)).collect();
+    let pts: Vec<(f64, f64, f64)> = o.loops[0]
+        .points
+        .iter()
+        .map(|q| (q.x, q.y, q.angle))
+        .collect();
     // PCB6's exported .emn (the course's 9 points; the masked fifth is (−32.5, 73, 0)).
     let course = [
         (32.5, -73.0, 0.0),
@@ -226,19 +262,50 @@ fn keepout_corner_profile_area() {
         curves: vec![
             l(p(x0, y0), p(x1, y0)),
             l(p(x1, y0), p(x1, c.y)),
-            Curve2::Arc { center: c, radius: r, start_angle: 0.0, sweep: PI / 2.0, source: None },
+            Curve2::Arc {
+                center: c,
+                radius: r,
+                start_angle: 0.0,
+                sweep: PI / 2.0,
+                source: None,
+            },
             l(p(c.x, y1), p(x0, y1)),
             l(p(x0, y1), p(x0, y0)),
         ],
     };
     let t = 0.84;
-    let plane = Plane { origin: Point3::new(0.0, 0.0, t), ..Plane::top() };
-    let body = k.extrude(&Profile::new(plane, vec![Region { outer, holes: vec![], source: None }]), Extent::Blind(3.0)).unwrap().bodies[0];
+    let plane = Plane {
+        origin: Point3::new(0.0, 0.0, t),
+        ..Plane::top()
+    };
+    let body = k
+        .extrude(
+            &Profile::new(
+                plane,
+                vec![Region {
+                    outer,
+                    holes: vec![],
+                    source: None,
+                }],
+            ),
+            Extent::Blind(3.0),
+        )
+        .unwrap()
+        .bodies[0];
     let board = board_geometry(&mut k, &secondary()).unwrap();
     let parts = [
-        McadPart { name: "Board [secondary board]".into(), body: board.board().unwrap().body },
-        McadPart { name: "Keep-out corner".into(), body },
-        McadPart { name: "Enclosure".into(), body },
+        McadPart {
+            name: "Board [secondary board]".into(),
+            body: board.board().unwrap().body,
+        },
+        McadPart {
+            name: "Keep-out corner".into(),
+            body,
+        },
+        McadPart {
+            name: "Enclosure".into(),
+            body,
+        },
     ];
     let m = board_from_mcad(&k, "secondary board", &parts, &[], &SyncPlane::Top.plane()).unwrap();
     assert_eq!(m.unrecognised, ["Enclosure"]);
@@ -248,7 +315,12 @@ fn keepout_corner_profile_area() {
     let area = ko.loops[0].area();
     assert!((area - 112.314).abs() < 5e-4, "{area}");
     assert!(close(area, 12.7 * 9.525 - (1.0 - PI / 4.0) * r * r, 1e-9));
-    let arcs: Vec<f64> = ko.loops[0].points.iter().map(|q| q.angle).filter(|a| *a != 0.0).collect();
+    let arcs: Vec<f64> = ko.loops[0]
+        .points
+        .iter()
+        .map(|q| q.angle)
+        .filter(|a| *a != 0.0)
+        .collect();
     assert_eq!(arcs, [90.0]);
 }
 
@@ -259,7 +331,11 @@ fn round_trip(pcb: &PcbBoard, plane: SyncPlane) {
     // Everything in the board frame, then moved to the sync plane's frame (x, y in the plane).
     let pl = plane.plane();
     let to_model = Motion {
-        linear: nalgebra::Matrix3::from_columns(&[pl.x_dir.into_inner(), pl.y_dir().into_inner(), pl.normal.into_inner()]),
+        linear: nalgebra::Matrix3::from_columns(&[
+            pl.x_dir.into_inner(),
+            pl.y_dir().into_inner(),
+            pl.normal.into_inner(),
+        ]),
         translation: pl.origin.coords + Vector3::new(1.0, 2.0, 3.0),
     };
     let moved = |k: &mut DefaultKernel, b| k.transform_motion(b, &to_model).unwrap().bodies[0];
@@ -267,12 +343,21 @@ fn round_trip(pcb: &PcbBoard, plane: SyncPlane) {
     let mut instances = Vec::new();
     for b in &g.bodies {
         match b.class {
-            BodyClass::Board => parts.push(McadPart { name: b.name.clone(), body: moved(&mut k, b.body) }),
+            BodyClass::Board => parts.push(McadPart {
+                name: b.name.clone(),
+                body: moved(&mut k, b.body),
+            }),
             BodyClass::KeepOut | BodyClass::KeepIn if b.name.starts_with("Keep-") => {
-                parts.push(McadPart { name: b.name.clone(), body: moved(&mut k, b.body) })
+                parts.push(McadPart {
+                    name: b.name.clone(),
+                    body: moved(&mut k, b.body),
+                })
             }
             BodyClass::Component(_) | BodyClass::Placeholder => {
-                let (_, pl) = pcb.components().find(|(id, _)| Some(*id) == b.item).unwrap();
+                let (_, pl) = pcb
+                    .components()
+                    .find(|(id, _)| Some(*id) == b.item)
+                    .unwrap();
                 instances.push(McadInstance {
                     refdes: pl.refdes.clone(),
                     package: pl.package.clone(),
@@ -284,20 +369,43 @@ fn round_trip(pcb: &PcbBoard, plane: SyncPlane) {
         }
     }
     // The course's Enclosure isn't translated.
-    parts.push(McadPart { name: "Enclosure".into(), body: parts[0].body });
+    parts.push(McadPart {
+        name: "Enclosure".into(),
+        body: parts[0].body,
+    });
     // Sync's plane: the same plane moved to the offset origin.
-    let sync = Plane { origin: pl.origin + Vector3::new(1.0, 2.0, 3.0), ..pl };
+    let sync = Plane {
+        origin: pl.origin + Vector3::new(1.0, 2.0, 3.0),
+        ..pl
+    };
     let m = board_from_mcad(&k, pcb.name(), &parts, &instances, &sync).unwrap();
     assert_eq!(m.unrecognised, ["Enclosure"]);
     assert!(m.warnings.is_empty(), "{:?}", m.warnings);
-    let (a, b) = (pcb.board.outline.as_ref().unwrap(), m.board.outline.as_ref().unwrap());
-    assert!(close(a.thickness, b.thickness, 1e-9), "{} vs {}", a.thickness, b.thickness);
-    assert!(loops_equivalent(&a.loops, &b.loops, 1e-7), "{:?}\nvs\n{:?}", a.loops, b.loops);
+    let (a, b) = (
+        pcb.board.outline.as_ref().unwrap(),
+        m.board.outline.as_ref().unwrap(),
+    );
+    assert!(
+        close(a.thickness, b.thickness, 1e-9),
+        "{} vs {}",
+        a.thickness,
+        b.thickness
+    );
+    assert!(
+        loops_equivalent(&a.loops, &b.loops, 1e-7),
+        "{:?}\nvs\n{:?}",
+        a.loops,
+        b.loops
+    );
     // Holes.
     assert_eq!(pcb.board.holes.len(), m.board.holes.len());
     for h in &pcb.board.holes {
         assert!(
-            m.board.holes.iter().any(|q| (q.x - h.x).abs() < 1e-7 && (q.y - h.y).abs() < 1e-7 && (q.dia - h.dia).abs() < 1e-7 && q.plating == h.plating && q.assoc == h.assoc),
+            m.board.holes.iter().any(|q| (q.x - h.x).abs() < 1e-7
+                && (q.y - h.y).abs() < 1e-7
+                && (q.dia - h.dia).abs() < 1e-7
+                && q.plating == h.plating
+                && q.assoc == h.assoc),
             "{h:?} in {:?}",
             m.board.holes
         );
@@ -306,14 +414,26 @@ fn round_trip(pcb: &PcbBoard, plane: SyncPlane) {
     assert_eq!(pcb.board.place_keepouts.len(), m.board.place_keepouts.len());
     for (a, b) in pcb.board.place_keepouts.iter().zip(&m.board.place_keepouts) {
         assert_eq!(a.side, b.side);
-        assert!(close(a.height.unwrap_or(geometry::MARKER), b.height.unwrap(), 1e-9));
+        assert!(close(
+            a.height.unwrap_or(geometry::MARKER),
+            b.height.unwrap(),
+            1e-9
+        ));
         assert!(loops_equivalent(&a.loops, &b.loops, 1e-7));
     }
     // Placements.
     assert_eq!(pcb.board.placements.len(), m.board.placements.len());
     for (a, b) in pcb.board.placements.iter().zip(&m.board.placements) {
-        assert_eq!((&a.refdes, &a.package, &a.part_number, a.side), (&b.refdes, &b.package, &b.part_number, b.side));
-        for (x, y) in [(a.x, b.x), (a.y, b.y), (placement::normalize_deg(a.rotation), b.rotation), (a.mount_offset, b.mount_offset)] {
+        assert_eq!(
+            (&a.refdes, &a.package, &a.part_number, a.side),
+            (&b.refdes, &b.package, &b.part_number, b.side)
+        );
+        for (x, y) in [
+            (a.x, b.x),
+            (a.y, b.y),
+            (placement::normalize_deg(a.rotation), b.rotation),
+            (a.mount_offset, b.mount_offset),
+        ] {
             assert!((x - y).abs() < 1e-9, "{}: {a:?} vs {b:?}", a.refdes);
         }
     }
@@ -343,11 +463,44 @@ fn keep_in_is_a_place_region() {
     let g = board_geometry(&mut k, &cell_phone()).unwrap();
     let sq = |x0: f64, y0: f64, x1: f64, y1: f64| {
         let pts = [p(x0, y0), p(x1, y0), p(x1, y1), p(x0, y1)];
-        Loop { curves: (0..4).map(|i| Curve2::Line { a: pts[i], b: pts[(i + 1) % 4], source: None }).collect() }
+        Loop {
+            curves: (0..4)
+                .map(|i| Curve2::Line {
+                    a: pts[i],
+                    b: pts[(i + 1) % 4],
+                    source: None,
+                })
+                .collect(),
+        }
     };
-    let plane = Plane { origin: Point3::new(0.0, 0.0, 0.062), ..Plane::top() };
-    let body = k.extrude(&Profile::new(plane, vec![Region { outer: sq(-10.0, -10.0, 10.0, 10.0), holes: vec![], source: None }]), Extent::Blind(2.0)).unwrap().bodies[0];
-    let parts = [McadPart { name: "PCB".into(), body: g.board().unwrap().body }, McadPart { name: "Keep-in memory".into(), body }];
+    let plane = Plane {
+        origin: Point3::new(0.0, 0.0, 0.062),
+        ..Plane::top()
+    };
+    let body = k
+        .extrude(
+            &Profile::new(
+                plane,
+                vec![Region {
+                    outer: sq(-10.0, -10.0, 10.0, 10.0),
+                    holes: vec![],
+                    source: None,
+                }],
+            ),
+            Extent::Blind(2.0),
+        )
+        .unwrap()
+        .bodies[0];
+    let parts = [
+        McadPart {
+            name: "PCB".into(),
+            body: g.board().unwrap().body,
+        },
+        McadPart {
+            name: "Keep-in memory".into(),
+            body,
+        },
+    ];
     let m = board_from_mcad(&k, "Cell phone", &parts, &[], &SyncPlane::Top.plane()).unwrap();
     let r = &m.board.place_regions[0];
     assert_eq!((r.side, r.group.as_str()), (cadrs_idf::Side::Top, "memory"));
@@ -368,13 +521,35 @@ fn v2_sample_cutout_and_every_keep_kind() {
     let th = 62.0 * 0.0254;
     let v = k.mass_properties(g.board().unwrap().body).unwrap().volume;
     let r = |thou: f64| thou / 2.0 * 0.0254;
-    let expect = (50.8 * 38.1 - PI * (2.54f64.powi(2) + 2.0 * r(125.0).powi(2) + 2.0 * r(40.0).powi(2))) * th;
+    let expect = (50.8 * 38.1
+        - PI * (2.54f64.powi(2) + 2.0 * r(125.0).powi(2) + 2.0 * r(40.0).powi(2)))
+        * th;
     assert!(close(v, expect, 1e-9), "{v} vs {expect}");
-    let kinds: std::collections::HashSet<KeepKind> = pcb.keep_areas().iter().map(|a| a.kind).collect();
+    let kinds: std::collections::HashSet<KeepKind> =
+        pcb.keep_areas().iter().map(|a| a.kind).collect();
     assert!(kinds.len() >= 6, "{kinds:?}");
     // Every keep area made a body (BOTH areas two).
-    let want: usize = pcb.keep_areas().iter().map(|a| if a.side == cadrs_idf::Side::Both { 2 } else { 1 }).sum();
-    let made = g.bodies.iter().filter(|b| matches!(b.class, BodyClass::KeepIn | BodyClass::KeepOut | BodyClass::Other)).count();
+    let want: usize = pcb
+        .keep_areas()
+        .iter()
+        .map(|a| {
+            if a.side == cadrs_idf::Side::Both {
+                2
+            } else {
+                1
+            }
+        })
+        .sum();
+    let made = g
+        .bodies
+        .iter()
+        .filter(|b| {
+            matches!(
+                b.class,
+                BodyClass::KeepIn | BodyClass::KeepOut | BodyClass::Other
+            )
+        })
+        .count();
     assert_eq!(made, want, "{:?}", g.warnings);
     assert!(g.bodies.iter().any(|b| b.name == "Other outline HEATSINK"));
 }
@@ -393,7 +568,15 @@ fn l_package() -> cadrs_idf::Package {
         height: 1.0,
         loops: vec![cadrs_idf::Loop::from_triples(
             0,
-            &[(0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 1.0, 0.0), (1.0, 1.0, 0.0), (1.0, 3.0, 0.0), (0.0, 3.0, 0.0), (0.0, 0.0, 0.0)],
+            &[
+                (0.0, 0.0, 0.0),
+                (4.0, 0.0, 0.0),
+                (4.0, 1.0, 0.0),
+                (1.0, 1.0, 0.0),
+                (1.0, 3.0, 0.0),
+                (0.0, 3.0, 0.0),
+                (0.0, 0.0, 0.0),
+            ],
         )],
         props: vec![],
     }
@@ -406,14 +589,22 @@ fn vertices_at(k: &DefaultKernel, b: cadrs_kernel::BodyId, z: f64) -> Vec<(i64, 
         .unwrap()
         .iter()
         .filter(|v| (v.point.z - z).abs() < 1e-9)
-        .map(|v| ((v.point.x * 1e6).round() as i64, (v.point.y * 1e6).round() as i64))
+        .map(|v| {
+            (
+                (v.point.x * 1e6).round() as i64,
+                (v.point.y * 1e6).round() as i64,
+            )
+        })
         .collect();
     v.sort();
     v
 }
 
 fn mm_pts(pts: &[(f64, f64)]) -> Vec<(i64, i64)> {
-    let mut v: Vec<(i64, i64)> = pts.iter().map(|(x, y)| ((x * 1e6).round() as i64, (y * 1e6).round() as i64)).collect();
+    let mut v: Vec<(i64, i64)> = pts
+        .iter()
+        .map(|(x, y)| ((x * 1e6).round() as i64, (y * 1e6).round() as i64))
+        .collect();
     v.sort();
     v
 }
@@ -448,22 +639,55 @@ fn asymmetric_footprint_rotation_direction() {
     let g = board_geometry(&mut k, &pcb).unwrap();
     let top = g.named("LT L_TEST").unwrap();
     let bottom = g.named("LB L_TEST").unwrap();
-    let shift = |pts: &[(f64, f64)]| pts.iter().map(|(x, y)| (x + 10.0, y + 20.0)).collect::<Vec<_>>();
-    let top_want = mm_pts(&shift(&[(0.0, 0.0), (0.0, 4.0), (-1.0, 4.0), (-1.0, 1.0), (-3.0, 1.0), (-3.0, 0.0)]));
-    let bottom_want = mm_pts(&shift(&[(0.0, 0.0), (0.0, 4.0), (1.0, 4.0), (1.0, 1.0), (3.0, 1.0), (3.0, 0.0)]));
+    let shift = |pts: &[(f64, f64)]| {
+        pts.iter()
+            .map(|(x, y)| (x + 10.0, y + 20.0))
+            .collect::<Vec<_>>()
+    };
+    let top_want = mm_pts(&shift(&[
+        (0.0, 0.0),
+        (0.0, 4.0),
+        (-1.0, 4.0),
+        (-1.0, 1.0),
+        (-3.0, 1.0),
+        (-3.0, 0.0),
+    ]));
+    let bottom_want = mm_pts(&shift(&[
+        (0.0, 0.0),
+        (0.0, 4.0),
+        (1.0, 4.0),
+        (1.0, 1.0),
+        (3.0, 1.0),
+        (3.0, 0.0),
+    ]));
     // Both faces of each body: the mounting face and the far face.
     assert_eq!(vertices_at(&k, top.body, t), top_want);
     assert_eq!(vertices_at(&k, top.body, t + 1.0), top_want);
     assert_eq!(vertices_at(&k, bottom.body, 0.0), bottom_want);
     assert_eq!(vertices_at(&k, bottom.body, -1.0), bottom_want);
     assert_box(bbox_xy(&k, top.body), [7.0, 20.0, t, 10.0, 24.0, t + 1.0]);
-    assert_box(bbox_xy(&k, bottom.body), [10.0, 20.0, -1.0, 13.0, 24.0, 0.0]);
+    assert_box(
+        bbox_xy(&k, bottom.body),
+        [10.0, 20.0, -1.0, 13.0, 24.0, 0.0],
+    );
     // The notch of the L is empty: the top body's inside corner region (−2, 2) is outside.
     let p = |x: f64, y: f64, z: f64| Point3::new(x + 10.0, y + 20.0, z);
-    assert_eq!(k.classify(top.body, p(-2.0, 2.0, t + 0.5), 1e-7).unwrap(), cadrs_kernel::PointClass::Outside);
-    assert_eq!(k.classify(top.body, p(-0.5, 3.0, t + 0.5), 1e-7).unwrap(), cadrs_kernel::PointClass::Inside);
-    assert_eq!(k.classify(bottom.body, p(2.0, 2.0, -0.5), 1e-7).unwrap(), cadrs_kernel::PointClass::Outside);
-    assert_eq!(k.classify(bottom.body, p(2.0, 0.5, -0.5), 1e-7).unwrap(), cadrs_kernel::PointClass::Inside);
+    assert_eq!(
+        k.classify(top.body, p(-2.0, 2.0, t + 0.5), 1e-7).unwrap(),
+        cadrs_kernel::PointClass::Outside
+    );
+    assert_eq!(
+        k.classify(top.body, p(-0.5, 3.0, t + 0.5), 1e-7).unwrap(),
+        cadrs_kernel::PointClass::Inside
+    );
+    assert_eq!(
+        k.classify(bottom.body, p(2.0, 2.0, -0.5), 1e-7).unwrap(),
+        cadrs_kernel::PointClass::Outside
+    );
+    assert_eq!(
+        k.classify(bottom.body, p(2.0, 0.5, -0.5), 1e-7).unwrap(),
+        cadrs_kernel::PointClass::Inside
+    );
     // And IDF's own plan map agrees.
     for (refdes, want) in [("LT", &top_want), ("LB", &bottom_want)] {
         let pl = pcb.board.placement(refdes).unwrap();
@@ -483,12 +707,20 @@ fn loop_circle(l: &cadrs_idf::Loop) -> Option<(f64, f64, f64)> {
     let arcs: Vec<([f64; 2], f64, f64)> = segs
         .iter()
         .filter_map(|s| match s {
-            cadrs_idf::Segment::Arc { center, radius, sweep, .. } => Some((*center, *radius, *sweep)),
+            cadrs_idf::Segment::Arc {
+                center,
+                radius,
+                sweep,
+                ..
+            } => Some((*center, *radius, *sweep)),
             _ => None,
         })
         .collect();
     let (c, r, _) = *arcs.first()?;
-    let same = arcs.len() == segs.len() && arcs.iter().all(|(c2, r2, _)| (c2[0] - c[0]).abs() < 1e-7 && (c2[1] - c[1]).abs() < 1e-7 && (r2 - r).abs() < 1e-7);
+    let same = arcs.len() == segs.len()
+        && arcs.iter().all(|(c2, r2, _)| {
+            (c2[0] - c[0]).abs() < 1e-7 && (c2[1] - c[1]).abs() < 1e-7 && (r2 - r).abs() < 1e-7
+        });
     let total: f64 = arcs.iter().map(|a| a.2.abs()).sum();
     (same && (total - 360.0).abs() < 1e-6).then_some((c[0], c[1], r))
 }
@@ -498,7 +730,11 @@ fn loop_circle(l: &cadrs_idf::Loop) -> Option<(f64, f64, f64)> {
 /// may return either.
 fn openings(b: &cadrs_idf::Board) -> Vec<(i64, i64, i64)> {
     let um = |v: f64| (v * 1e3).round() as i64;
-    let mut out: Vec<(i64, i64, i64)> = b.holes.iter().map(|h| (um(h.x), um(h.y), um(h.dia))).collect();
+    let mut out: Vec<(i64, i64, i64)> = b
+        .holes
+        .iter()
+        .map(|h| (um(h.x), um(h.y), um(h.dia)))
+        .collect();
     for l in b.outline.iter().flat_map(|o| o.loops.iter().skip(1)) {
         if let Some((x, y, r)) = loop_circle(l) {
             out.push((um(x), um(y), um(2.0 * r)));
@@ -511,7 +747,15 @@ fn openings(b: &cadrs_idf::Board) -> Vec<(i64, i64, i64)> {
 /// The outline loops that aren't circular openings (the outer loop and shaped cut-outs).
 fn shaped_loops(b: &cadrs_idf::Board) -> Vec<cadrs_idf::Loop> {
     let o = b.outline.as_ref().unwrap();
-    std::iter::once(o.loops[0].clone()).chain(o.loops.iter().skip(1).filter(|l| loop_circle(l).is_none()).cloned()).collect()
+    std::iter::once(o.loops[0].clone())
+        .chain(
+            o.loops
+                .iter()
+                .skip(1)
+                .filter(|l| loop_circle(l).is_none())
+                .cloned(),
+        )
+        .collect()
 }
 
 /// B-rep → MCAD (Sync) → IDF text → parsed board: the board that comes back has the same outline,
@@ -523,11 +767,27 @@ fn round_trip_through_idf(pcb: &PcbBoard) {
     let mut instances = Vec::new();
     for b in &g.bodies {
         match b.class {
-            BodyClass::Board => parts.push(McadPart { name: b.name.clone(), body: b.body }),
-            BodyClass::KeepOut | BodyClass::KeepIn if b.name.starts_with("Keep-") => parts.push(McadPart { name: b.name.clone(), body: b.body }),
+            BodyClass::Board => parts.push(McadPart {
+                name: b.name.clone(),
+                body: b.body,
+            }),
+            BodyClass::KeepOut | BodyClass::KeepIn if b.name.starts_with("Keep-") => {
+                parts.push(McadPart {
+                    name: b.name.clone(),
+                    body: b.body,
+                })
+            }
             BodyClass::Component(_) | BodyClass::Placeholder => {
-                let (_, pl) = pcb.components().find(|(id, _)| Some(*id) == b.item).unwrap();
-                instances.push(McadInstance { refdes: pl.refdes.clone(), package: pl.package.clone(), part_number: pl.part_number.clone(), motion: b.motion.unwrap() });
+                let (_, pl) = pcb
+                    .components()
+                    .find(|(id, _)| Some(*id) == b.item)
+                    .unwrap();
+                instances.push(McadInstance {
+                    refdes: pl.refdes.clone(),
+                    package: pl.package.clone(),
+                    part_number: pl.part_number.clone(),
+                    motion: b.motion.unwrap(),
+                });
             }
             _ => {}
         }
@@ -535,11 +795,24 @@ fn round_trip_through_idf(pcb: &PcbBoard) {
     let m = board_from_mcad(&k, pcb.name(), &parts, &instances, &SyncPlane::Top.plane()).unwrap();
     assert!(m.warnings.is_empty(), "{:?}", m.warnings);
     let text = cadrs_idf::write_emn(&m.board, cadrs_idf::IdfVersion::V3);
-    let back = cadrs_idf::parse_emn(&text).unwrap().value.converted(cadrs_idf::Units::Mm);
+    let back = cadrs_idf::parse_emn(&text)
+        .unwrap()
+        .value
+        .converted(cadrs_idf::Units::Mm);
     let (a, b) = (&pcb.board, &back);
     let (oa, ob) = (a.outline.as_ref().unwrap(), b.outline.as_ref().unwrap());
-    assert!(close(oa.thickness, ob.thickness, 1e-9), "{} vs {}", oa.thickness, ob.thickness);
-    assert!(loops_equivalent(&shaped_loops(a), &shaped_loops(b), 1e-6), "{:?}\nvs\n{:?}", shaped_loops(a), shaped_loops(b));
+    assert!(
+        close(oa.thickness, ob.thickness, 1e-9),
+        "{} vs {}",
+        oa.thickness,
+        ob.thickness
+    );
+    assert!(
+        loops_equivalent(&shaped_loops(a), &shaped_loops(b), 1e-6),
+        "{:?}\nvs\n{:?}",
+        shaped_loops(a),
+        shaped_loops(b)
+    );
     assert_eq!(openings(a), openings(b));
     assert_eq!(a.place_keepouts.len(), b.place_keepouts.len());
     for (x, y) in a.place_keepouts.iter().zip(&b.place_keepouts) {
@@ -548,8 +821,15 @@ fn round_trip_through_idf(pcb: &PcbBoard) {
     }
     assert_eq!(a.placements.len(), b.placements.len());
     for (x, y) in a.placements.iter().zip(&b.placements) {
-        assert_eq!((&x.refdes, &x.package, x.side), (&y.refdes, &y.package, y.side));
-        for (p, q) in [(x.x, y.x), (x.y, y.y), (placement::normalize_deg(x.rotation), y.rotation)] {
+        assert_eq!(
+            (&x.refdes, &x.package, x.side),
+            (&y.refdes, &y.package, y.side)
+        );
+        for (p, q) in [
+            (x.x, y.x),
+            (x.y, y.y),
+            (placement::normalize_deg(x.rotation), y.rotation),
+        ] {
             assert!((p - q).abs() < 1e-6, "{}: {x:?} vs {y:?}", x.refdes);
         }
     }
@@ -561,7 +841,14 @@ fn v2_sample_round_trips_through_idf() {
     let pcb = fixture("v2 sample", "v2 sample");
     let o = pcb.board.outline.as_ref().unwrap();
     assert_eq!(o.loops.len(), 2);
-    assert_eq!(o.loops[1].points.iter().filter(|p| p.angle == -180.0).count(), 2);
+    assert_eq!(
+        o.loops[1]
+            .points
+            .iter()
+            .filter(|p| p.angle == -180.0)
+            .count(),
+        2
+    );
     round_trip_through_idf(&pcb);
 }
 
@@ -569,14 +856,23 @@ fn v2_sample_round_trips_through_idf() {
 fn concave_notch_arc_round_trips_through_idf() {
     // 60 × 40 with a R10 semicircular notch cut down into the top edge (a concave arc: the
     // outline turns clockwise, −180°, around its centre (30, 40)), and a rectangular cut-out.
-    let mut board = cadrs_idf::Board::new("Notched", cadrs_idf::Units::Mm, cadrs_idf::IdfVersion::V3);
+    let mut board =
+        cadrs_idf::Board::new("Notched", cadrs_idf::Units::Mm, cadrs_idf::IdfVersion::V3);
     board.outline = Some(cadrs_idf::BoardOutline {
         owner: cadrs_idf::Owner::Mcad,
         thickness: 1.6,
         loops: vec![
             cadrs_idf::Loop::from_triples(
                 0,
-                &[(0.0, 0.0, 0.0), (60.0, 0.0, 0.0), (60.0, 40.0, 0.0), (40.0, 40.0, 0.0), (20.0, 40.0, -180.0), (0.0, 40.0, 0.0), (0.0, 0.0, 0.0)],
+                &[
+                    (0.0, 0.0, 0.0),
+                    (60.0, 0.0, 0.0),
+                    (60.0, 40.0, 0.0),
+                    (40.0, 40.0, 0.0),
+                    (20.0, 40.0, -180.0),
+                    (0.0, 40.0, 0.0),
+                    (0.0, 0.0, 0.0),
+                ],
             ),
             cadrs_idf::Loop::rect(1, 45.0, 5.0, 55.0, 12.0),
         ],

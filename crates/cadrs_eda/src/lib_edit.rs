@@ -101,12 +101,20 @@ pub fn add_pin(s: &mut Symbol, p: &PinProps) -> usize {
 
 /// Sets a pin's properties.
 pub fn set_pin(s: &mut Symbol, i: usize, p: &PinProps) {
-    s.pins[i] = Pin { unit: s.pins[i].unit, style: s.pins[i].style, ..pin_from(p) };
+    s.pins[i] = Pin {
+        unit: s.pins[i].unit,
+        style: s.pins[i].style,
+        ..pin_from(p)
+    };
 }
 
 /// The next of a series: "2" → "3", "D7" → "D8", "A" stays "A".
 pub fn increment(text: &str) -> String {
-    let digits = text.chars().rev().take_while(|c| c.is_ascii_digit()).count();
+    let digits = text
+        .chars()
+        .rev()
+        .take_while(|c| c.is_ascii_digit())
+        .count();
     if digits == 0 {
         return text.to_string();
     }
@@ -127,12 +135,24 @@ pub fn repeat_pin(s: &mut Symbol) -> Option<usize> {
 
 /// Pins off the 50 mil grid (they couldn't connect to wires).
 pub fn off_grid_pins(s: &Symbol) -> Vec<String> {
-    s.pins.iter().filter(|p| p.at.x % SCHEMATIC_GRID != 0 || p.at.y % SCHEMATIC_GRID != 0).map(|p| p.number.clone()).collect()
+    s.pins
+        .iter()
+        .filter(|p| p.at.x % SCHEMATIC_GRID != 0 || p.at.y % SCHEMATIC_GRID != 0)
+        .map(|p| p.number.clone())
+        .collect()
 }
 
 /// Draws a shape on the symbol (all units, all styles).
 pub fn add_symbol_shape(s: &mut Symbol, geom: Geom, width: Nm, fill: Fill) {
-    s.graphics.push(SymbolGraphic { item: SymbolItem::Shape(Shape { geom, stroke: Stroke::width(width), fill }), unit: 0, style: 0 });
+    s.graphics.push(SymbolGraphic {
+        item: SymbolItem::Shape(Shape {
+            geom,
+            stroke: Stroke::width(width),
+            fill,
+        }),
+        unit: 0,
+        style: 0,
+    });
 }
 
 /// Symbol properties: a field's value (adding the field if new), keywords.
@@ -154,7 +174,14 @@ pub fn set_symbol_field(s: &mut Symbol, name: &str, value: &str) {
 
 /// File → New footprint, then its properties: name, value, mount type.
 pub fn new_footprint(name: &str, value: &str, mount: MountKind) -> Footprint {
-    let mut f = crate::footprint::new_footprint(name, "", mount, Pt::new(0, mm(2.0)), Pt::new(0, -mm(2.0)), Pt::ZERO);
+    let mut f = crate::footprint::new_footprint(
+        name,
+        "",
+        mount,
+        Pt::new(0, mm(2.0)),
+        Pt::new(0, -mm(2.0)),
+        Pt::ZERO,
+    );
     if let Some(v) = f.field_mut(fields::VALUE) {
         v.text.text.text = value.into();
     }
@@ -165,9 +192,18 @@ pub fn new_footprint(name: &str, value: &str, mount: MountKind) -> Footprint {
 /// ones copy the previous pad's properties with the next number. Returns its index.
 pub fn add_pad(f: &mut Footprint, at: Pt) -> usize {
     let pad = match f.pads.last() {
-        Some(last) => Pad { id: uuid::Uuid::new_v4(), number: increment(&last.number), at, ..last.clone() },
+        Some(last) => Pad {
+            id: uuid::Uuid::new_v4(),
+            number: increment(&last.number),
+            at,
+            ..last.clone()
+        },
         None => {
-            let drill = if f.attrs.mount == MountKind::Smd { None } else { Some(mm(0.8)) };
+            let drill = if f.attrs.mount == MountKind::Smd {
+                None
+            } else {
+                Some(mm(0.8))
+            };
             crate::footprint::new_pad("1", PadShape::Circle, at, Size::mm(1.6, 1.6), drill)
         }
     };
@@ -193,7 +229,15 @@ pub fn push_pad_properties(f: &mut Footprint, from: usize) {
 
 /// Draws a shape on a layer of the footprint; returns its index.
 pub fn add_fp_shape(f: &mut Footprint, geom: Geom, layer: Layer, width: Nm) -> usize {
-    f.shapes.push(FpShape { id: uuid::Uuid::new_v4(), shape: Shape { geom, stroke: Stroke::width(width), fill: Fill::None }, layer });
+    f.shapes.push(FpShape {
+        id: uuid::Uuid::new_v4(),
+        shape: Shape {
+            geom,
+            stroke: Stroke::width(width),
+            fill: Fill::None,
+        },
+        layer,
+    });
     f.shapes.len() - 1
 }
 
@@ -241,18 +285,35 @@ pub fn check_footprint(f: &Footprint) -> Vec<String> {
 }
 
 /// Sets a footprint's 3D model (the 3D Models tab), adding it if there is none.
-pub fn set_model(f: &mut Footprint, source: &str, offset: [f64; 3], rotation: [f64; 3], scale: [f64; 3], opacity: f64) {
+pub fn set_model(
+    f: &mut Footprint,
+    source: &str,
+    offset: [f64; 3],
+    rotation: [f64; 3],
+    scale: [f64; 3],
+    opacity: f64,
+) {
     // The generated body stays; so does the stored file while the source names it.
     let old = f.models.first();
     let body = old.and_then(|m| m.body.clone());
-    let blob = old.filter(|m| m.source == source).and_then(|m| m.blob.clone());
-    let m = Model3d { source: source.into(), blob, offset, rotation, scale, visible: true, opacity, body };
+    let blob = old
+        .filter(|m| m.source == source)
+        .and_then(|m| m.blob.clone());
+    let m = Model3d {
+        source: source.into(),
+        blob,
+        offset,
+        rotation,
+        scale,
+        visible: true,
+        opacity,
+        body,
+    };
     match f.models.first_mut() {
         Some(x) => *x = m,
         None => f.models.push(m),
     }
 }
-
 
 // ---------------------------------------------------------------------------------------------
 // Bulk editing: arrange a box symbol, pad arrays, renumbering
@@ -271,7 +332,9 @@ pub fn arrange_box(s: &mut Symbol, min_width: Nm) {
         270 => 2, // from the top
         _ => 3,   // from the bottom
     };
-    let counts: Vec<i64> = (0..4).map(|k| s.pins.iter().filter(|p| side(p.angle) == k).count() as i64).collect();
+    let counts: Vec<i64> = (0..4)
+        .map(|k| s.pins.iter().filter(|p| side(p.angle) == k).count() as i64)
+        .collect();
     let count = |k: i32| counts[k as usize];
     let rows = count(0).max(count(1)).max(1);
     let cols = count(2).max(count(3));
@@ -294,14 +357,32 @@ pub fn arrange_box(s: &mut Symbol, min_width: Nm) {
             _ => Pt::new(-first + i * step, -half_h - step),
         };
     }
-    let rect = Geom::Rect { a: Pt::new(-half_w, half_h), b: Pt::new(half_w, -half_h) };
-    match s.graphics.iter_mut().find(|g| matches!(&g.item, SymbolItem::Shape(sh) if matches!(sh.geom, Geom::Rect { .. }))) {
+    let rect = Geom::Rect {
+        a: Pt::new(-half_w, half_h),
+        b: Pt::new(half_w, -half_h),
+    };
+    match s
+        .graphics
+        .iter_mut()
+        .find(|g| matches!(&g.item, SymbolItem::Shape(sh) if matches!(sh.geom, Geom::Rect { .. })))
+    {
         Some(g) => {
             if let SymbolItem::Shape(sh) = &mut g.item {
                 sh.geom = rect;
             }
         }
-        None => s.graphics.insert(0, SymbolGraphic { item: SymbolItem::Shape(Shape { geom: rect, stroke: Stroke::width(mm(0.254)), fill: Fill::Background }), unit: 0, style: 0 }),
+        None => s.graphics.insert(
+            0,
+            SymbolGraphic {
+                item: SymbolItem::Shape(Shape {
+                    geom: rect,
+                    stroke: Stroke::width(mm(0.254)),
+                    fill: Fill::Background,
+                }),
+                unit: 0,
+                style: 0,
+            },
+        ),
     }
     if let Some(f) = s.fields.get_mut(0) {
         f.text.at = Pt::new(0, half_h + step + 2 * SCHEMATIC_GRID);
@@ -324,7 +405,9 @@ pub enum ArrayShape {
 /// pads' indices.
 pub fn pad_array(f: &mut Footprint, from: usize, count: usize, shape: ArrayShape) -> Vec<usize> {
     let mut out = vec![];
-    let Some(src) = f.pads.get(from).cloned() else { return out };
+    let Some(src) = f.pads.get(from).cloned() else {
+        return out;
+    };
     let mut number = src.number.clone();
     for i in 1..count {
         number = increment(&number);
@@ -332,7 +415,9 @@ pub fn pad_array(f: &mut Footprint, from: usize, count: usize, shape: ArrayShape
         p.id = uuid::Uuid::new_v4();
         p.number = number.clone();
         match shape {
-            ArrayShape::Line { step } => p.at = src.at + Pt::new(step.x * i as Nm, step.y * i as Nm),
+            ArrayShape::Line { step } => {
+                p.at = src.at + Pt::new(step.x * i as Nm, step.y * i as Nm)
+            }
             ArrayShape::Circle { center, angle } => {
                 let a = angle * i as f64;
                 p.at = center + (src.at - center).rotated(a);
@@ -348,7 +433,9 @@ pub fn pad_array(f: &mut Footprint, from: usize, count: usize, shape: ArrayShape
 /// Numbers the numbered pads from `first` on: row by row from the top left, or (`ccw`)
 /// counter-clockwise round the centre from the top of the left side, as ICs are.
 pub fn renumber_pads(f: &mut Footprint, first: u32, ccw: bool) {
-    let idx: Vec<usize> = (0..f.pads.len()).filter(|&i| !f.pads[i].number.is_empty()).collect();
+    let idx: Vec<usize> = (0..f.pads.len())
+        .filter(|&i| !f.pads[i].number.is_empty())
+        .collect();
     if idx.is_empty() {
         return;
     }
@@ -357,7 +444,10 @@ pub fn renumber_pads(f: &mut Footprint, first: u32, ccw: bool) {
         sx += f.pads[i].at.x as i128;
         sy += f.pads[i].at.y as i128;
     }
-    let c = Pt::new((sx / idx.len() as i128) as Nm, (sy / idx.len() as i128) as Nm);
+    let c = Pt::new(
+        (sx / idx.len() as i128) as Nm,
+        (sy / idx.len() as i128) as Nm,
+    );
     let key = |p: Pt| -> (i64, i64) {
         if ccw {
             // From straight left-and-up (just past 90° from +x), going counter-clockwise.
@@ -401,32 +491,47 @@ pub fn symbol_hit(s: &Symbol, p: Pt, tol: Nm) -> Option<SymbolPart> {
     let near_seg = |a: Pt, b: Pt| {
         let (dx, dy) = ((b.x - a.x) as f64, (b.y - a.y) as f64);
         let l2 = dx * dx + dy * dy;
-        let t = if l2 == 0.0 { 0.0 } else { (((p.x - a.x) as f64 * dx + (p.y - a.y) as f64 * dy) / l2).clamp(0.0, 1.0) };
+        let t = if l2 == 0.0 {
+            0.0
+        } else {
+            (((p.x - a.x) as f64 * dx + (p.y - a.y) as f64 * dy) / l2).clamp(0.0, 1.0)
+        };
         (p.x as f64 - (a.x as f64 + t * dx)).hypot(p.y as f64 - (a.y as f64 + t * dy)) <= tol as f64
     };
-    if let Some(i) = s.pins.iter().position(|pin| near_seg(pin.at, pin.inner_end())) {
+    if let Some(i) = s
+        .pins
+        .iter()
+        .position(|pin| near_seg(pin.at, pin.inner_end()))
+    {
         return Some(SymbolPart::Pin(i));
     }
-    if let Some(i) = s.fields.iter().position(|f| f.text.visible && crate::font::bounds(&f.text).is_some_and(|b| b.grow(tol).contains(p))) {
+    if let Some(i) = s.fields.iter().position(|f| {
+        f.text.visible && crate::font::bounds(&f.text).is_some_and(|b| b.grow(tol).contains(p))
+    }) {
         return Some(SymbolPart::Field(i));
     }
-    s.graphics.iter().position(|g| match &g.item {
-        SymbolItem::Shape(sh) => {
-            let (pts, closed) = crate::poly::geom_points(&sh.geom);
-            let n = pts.len();
-            (0..n.saturating_sub(if closed { 0 } else { 1 })).any(|i| near_seg(pts[i], pts[(i + 1) % n]))
-        }
-        SymbolItem::Text(t) => crate::font::bounds(t).is_some_and(|b| b.grow(tol).contains(p)),
-    })
-    .map(SymbolPart::Graphic)
+    s.graphics
+        .iter()
+        .position(|g| match &g.item {
+            SymbolItem::Shape(sh) => {
+                let (pts, closed) = crate::poly::geom_points(&sh.geom);
+                let n = pts.len();
+                (0..n.saturating_sub(if closed { 0 } else { 1 }))
+                    .any(|i| near_seg(pts[i], pts[(i + 1) % n]))
+            }
+            SymbolItem::Text(t) => crate::font::bounds(t).is_some_and(|b| b.grow(tol).contains(p)),
+        })
+        .map(SymbolPart::Graphic)
 }
 
 /// Deletes parts of a symbol (highest indices first so the others stay valid).
 pub fn delete_symbol_parts(s: &mut Symbol, parts: &[SymbolPart]) {
     let mut v = parts.to_vec();
-    v.sort_by_key(|p| std::cmp::Reverse(match p {
-        SymbolPart::Pin(i) | SymbolPart::Graphic(i) | SymbolPart::Field(i) => *i,
-    }));
+    v.sort_by_key(|p| {
+        std::cmp::Reverse(match p {
+            SymbolPart::Pin(i) | SymbolPart::Graphic(i) | SymbolPart::Field(i) => *i,
+        })
+    });
     for p in v {
         match p {
             SymbolPart::Pin(i) if i < s.pins.len() => {
@@ -453,33 +558,69 @@ mod bulk_tests {
     fn arrange_pad_array_and_renumber() {
         // A box symbol: 3 pins in from the left, 2 from the right, then arranged.
         let mut s = new_symbol("MODULE", "U", true);
-        for (n, o) in [("1", Orientation::Right), ("2", Orientation::Right), ("3", Orientation::Right), ("4", Orientation::Left), ("5", Orientation::Left)] {
+        for (n, o) in [
+            ("1", Orientation::Right),
+            ("2", Orientation::Right),
+            ("3", Orientation::Right),
+            ("4", Orientation::Left),
+            ("5", Orientation::Left),
+        ] {
             add_pin(&mut s, &PinProps::new("P", n, Pt::ZERO, o));
         }
         arrange_box(&mut s, mm(10.16));
         let at = |n: &str| s.pins.iter().find(|p| p.number == n).unwrap().at;
         assert_eq!(at("1").x, at("2").x);
-        assert!(at("1").y > at("2").y && at("2").y > at("3").y, "down the left side");
+        assert!(
+            at("1").y > at("2").y && at("2").y > at("3").y,
+            "down the left side"
+        );
         assert_eq!(at("2").y, 0, "centred");
         assert!(at("4").x > 0 && at("4").y > at("5").y);
-        assert!(off_grid_pins(&s).is_empty(), "{:?}", s.pins.iter().map(|p| p.at.to_mm()).collect::<Vec<_>>());
-        assert!(s.graphics.iter().any(|g| matches!(&g.item, SymbolItem::Shape(sh) if matches!(sh.geom, Geom::Rect { .. }))));
+        assert!(
+            off_grid_pins(&s).is_empty(),
+            "{:?}",
+            s.pins.iter().map(|p| p.at.to_mm()).collect::<Vec<_>>()
+        );
+        assert!(s.graphics.iter().any(
+            |g| matches!(&g.item, SymbolItem::Shape(sh) if matches!(sh.geom, Geom::Rect { .. }))
+        ));
 
         // A row of four pads from one, 2.54 mm apart.
         let mut f = new_footprint("Row", "Row", MountKind::ThroughHole);
         add_pad(&mut f, Pt::ZERO);
-        let made = pad_array(&mut f, 0, 4, ArrayShape::Line { step: Pt::mm(2.54, 0.0) });
+        let made = pad_array(
+            &mut f,
+            0,
+            4,
+            ArrayShape::Line {
+                step: Pt::mm(2.54, 0.0),
+            },
+        );
         assert_eq!(made.len(), 3);
-        assert_eq!((f.pads[3].number.as_str(), f.pads[3].at), ("4", Pt::mm(7.62, 0.0)));
+        assert_eq!(
+            (f.pads[3].number.as_str(), f.pads[3].at),
+            ("4", Pt::mm(7.62, 0.0))
+        );
         // Eight round a circle.
         let mut c = new_footprint("Ring", "Ring", MountKind::ThroughHole);
         add_pad(&mut c, Pt::mm(5.0, 0.0));
-        pad_array(&mut c, 0, 8, ArrayShape::Circle { center: Pt::ZERO, angle: 45.0 });
+        pad_array(
+            &mut c,
+            0,
+            8,
+            ArrayShape::Circle {
+                center: Pt::ZERO,
+                angle: 45.0,
+            },
+        );
         assert_eq!(c.pads[2].at, Pt::mm(0.0, 5.0));
 
         // SOIC-8 numbers shuffled, renumbered counter-clockwise: back to KiCad's order.
         let lib = crate::library::LibraryTable::builtin();
-        let mut so = lib.footprint("Package_SO:SOIC-8_3.9x4.9mm_P1.27mm").unwrap().clone();
+        let mut so = lib
+            .footprint("Package_SO:SOIC-8_3.9x4.9mm_P1.27mm")
+            .unwrap()
+            .clone();
         let want: Vec<(String, Pt)> = so.pads.iter().map(|p| (p.number.clone(), p.at)).collect();
         so.pads.reverse();
         so.pads.iter_mut().for_each(|p| p.number = "?".into());

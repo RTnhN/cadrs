@@ -16,7 +16,11 @@ use super::mate::{MateId, MateKind, OffsetSlot};
 use crate::variables::eval_variable;
 
 fn slot_quantity(s: OffsetSlot) -> Quantity {
-    if s == OffsetSlot::Angle { Quantity::Angle } else { Quantity::Length }
+    if s == OffsetSlot::Angle {
+        Quantity::Angle
+    } else {
+        Quantity::Length
+    }
 }
 
 /// The assembly's variables, top to bottom, each evaluated with those above it.
@@ -27,7 +31,10 @@ pub fn defined(asm: &Assembly, units: &Units) -> Vec<(String, VarValue)> {
             && v.problem().is_none()
         {
             let value = eval_variable(v.var_type, &v.expr, units, &env)
-                .map(|(value, kind)| VarValue { value, quantity: kind.quantity() })
+                .map(|(value, kind)| VarValue {
+                    value,
+                    quantity: kind.quantity(),
+                })
                 .unwrap_or_else(|_| v.var_value());
             env.push((v.name.clone(), value));
         }
@@ -38,7 +45,11 @@ pub fn defined(asm: &Assembly, units: &Units) -> Vec<(String, VarValue)> {
 /// Re-evaluates the variables and the offsets typed as expressions naming them, writing the
 /// values (translation mm, rotation radians). Returns whether anything changed.
 pub fn refresh(asm: &mut Assembly, units: &Units) -> bool {
-    if !asm.mates.iter().any(|f| matches!(f.kind, MateKind::Variable(_)) || !f.exprs.is_empty()) {
+    if !asm
+        .mates
+        .iter()
+        .any(|f| matches!(f.kind, MateKind::Variable(_)) || !f.exprs.is_empty())
+    {
         return false;
     }
     let mut changed = false;
@@ -56,14 +67,20 @@ pub fn refresh(asm: &mut Assembly, units: &Units) -> bool {
             MateKind::Mate(m) => {
                 let Some(o) = &mut m.offset else { continue };
                 for (slot, e) in &exprs {
-                    let Ok(v) = units.eval_vars(e, slot_quantity(*slot), &env) else { continue };
+                    let Ok(v) = units.eval_vars(e, slot_quantity(*slot), &env) else {
+                        continue;
+                    };
                     let target = match slot {
                         OffsetSlot::X => &mut o.translation[0],
                         OffsetSlot::Y => &mut o.translation[1],
                         OffsetSlot::Z => &mut o.translation[2],
                         OffsetSlot::Angle => &mut o.angle,
                     };
-                    let v = if *slot == OffsetSlot::Angle { v.to_radians() } else { v };
+                    let v = if *slot == OffsetSlot::Angle {
+                        v.to_radians()
+                    } else {
+                        v
+                    };
                     if (*target - v).abs() > 1e-12 {
                         *target = v;
                         changed = true;
@@ -83,16 +100,29 @@ pub fn check(asm: &Assembly, units: &Units) -> Vec<(MateId, String)> {
     let mut env: Vec<(String, VarValue)> = Vec::new();
     let live: Vec<&super::mate::MateFeature> = asm.mates.iter().filter(|f| !f.suppressed).collect();
     for (i, f) in live.iter().enumerate() {
-        let later = |n: &str| live[i + 1..].iter().any(|g| matches!(&g.kind, MateKind::Variable(v) if v.name == n));
+        let later = |n: &str| {
+            live[i + 1..]
+                .iter()
+                .any(|g| matches!(&g.kind, MateKind::Variable(v) if v.name == n))
+        };
         let texts: Vec<(&str, String, Quantity)> = match &f.kind {
             MateKind::Variable(v) => vec![("Value", v.expr.clone(), Quantity::Count)],
-            _ => f.exprs.iter().map(|(s, e)| ("Offset", e.clone(), slot_quantity(*s))).collect(),
+            _ => f
+                .exprs
+                .iter()
+                .map(|(s, e)| ("Offset", e.clone(), slot_quantity(*s)))
+                .collect(),
         };
         let mut why = None;
         for (label, e, q) in texts {
-            if let Some(n) = units::variable_names(&e).into_iter().find(|n| !env.iter().any(|(k, _)| k == n)) {
+            if let Some(n) = units::variable_names(&e)
+                .into_iter()
+                .find(|n| !env.iter().any(|(k, _)| k == n))
+            {
                 why = Some(if later(&n) {
-                    format!("{label}: #{n} is used before it is defined; move its Variable above this feature")
+                    format!(
+                        "{label}: #{n} is used before it is defined; move its Variable above this feature"
+                    )
                 } else {
                     format!("{label}: #{n} is not defined")
                 });
@@ -112,7 +142,10 @@ pub fn check(asm: &Assembly, units: &Units) -> Vec<(MateId, String)> {
             && v.problem().is_none()
         {
             let value = eval_variable(v.var_type, &v.expr, units, &env)
-                .map(|(value, kind)| VarValue { value, quantity: kind.quantity() })
+                .map(|(value, kind)| VarValue {
+                    value,
+                    quantity: kind.quantity(),
+                })
                 .unwrap_or_else(|_| v.var_value());
             env.push((v.name.clone(), value));
         }

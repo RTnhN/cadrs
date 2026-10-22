@@ -63,28 +63,48 @@ impl Online {
 }
 
 pub fn register(app: &mut App) {
-    let fixtures = std::env::var_os("CADRS_LCSC_FIXTURES").filter(|d| !d.is_empty()).map(PathBuf::from);
-    app.insert_resource(Online { fixtures, ..default() });
+    let fixtures = std::env::var_os("CADRS_LCSC_FIXTURES")
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from);
+    app.insert_resource(Online {
+        fixtures,
+        ..default()
+    });
 }
 
 /// The saved answer for a part, from the fixtures folder.
 fn fixture(dir: &std::path::Path, lcsc: &str) -> Result<cadrs_easyeda::serde_json::Value, String> {
-    let text = std::fs::read_to_string(dir.join(format!("{lcsc}.json"))).map_err(|_| format!("{lcsc}: not in the saved parts"))?;
-    let v: cadrs_easyeda::serde_json::Value = cadrs_easyeda::serde_json::from_str(&text).map_err(|e| e.to_string())?;
-    Ok(if v["result"].is_object() { v["result"].clone() } else { v })
+    let text = std::fs::read_to_string(dir.join(format!("{lcsc}.json")))
+        .map_err(|_| format!("{lcsc}: not in the saved parts"))?;
+    let v: cadrs_easyeda::serde_json::Value =
+        cadrs_easyeda::serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    Ok(if v["result"].is_object() {
+        v["result"].clone()
+    } else {
+        v
+    })
 }
 
 /// The saved parts matching every word of `query`.
 fn fixture_search(dir: &std::path::Path, query: &str) -> Result<(Vec<Hit>, u64), String> {
     let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
-    let mut files: Vec<PathBuf> = std::fs::read_dir(dir).map_err(|e| e.to_string())?.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "json")).collect();
+    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
+        .map_err(|e| e.to_string())?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "json"))
+        .collect();
     files.sort();
     let hits: Vec<Hit> = files
         .iter()
         .filter_map(|p| fixture(dir, &p.file_stem()?.to_string_lossy()).ok())
         .map(|v| cadrs_easyeda::hit_of(&v))
         .filter(|h| {
-            let hay = format!("{} {} {} {} {}", h.lcsc, h.mpn, h.manufacturer, h.package, h.category).to_lowercase();
+            let hay = format!(
+                "{} {} {} {} {}",
+                h.lcsc, h.mpn, h.manufacturer, h.package, h.category
+            )
+            .to_lowercase();
             words.iter().all(|w| hay.contains(w))
         })
         .collect();
@@ -129,7 +149,12 @@ pub fn choose(w: &mut World, lcsc: &str) {
 }
 
 fn info_of(h: Option<&Hit>) -> PartInfo {
-    h.map(|h| PartInfo { description: h.description.clone(), datasheet: h.datasheet.clone(), category: h.category.clone() }).unwrap_or_default()
+    h.map(|h| PartInfo {
+        description: h.description.clone(),
+        datasheet: h.datasheet.clone(),
+        category: h.category.clone(),
+    })
+    .unwrap_or_default()
 }
 
 /// Adds the chosen part to the user library; `then_accept`: then use it as the browser's choice.
@@ -167,7 +192,9 @@ pub enum Done {
 
 /// Picks up finished jobs.
 pub fn poll(w: &mut World) -> Done {
-    let Some(mut o) = w.get_resource_mut::<Online>() else { return Done::Nothing };
+    let Some(mut o) = w.get_resource_mut::<Online>() else {
+        return Done::Nothing;
+    };
     let mut done = Done::Nothing;
     if let Some(r) = take(&o.search) {
         o.search = None;
@@ -199,7 +226,10 @@ pub fn poll(w: &mut World) -> Done {
         match r {
             Ok(i) => {
                 o.status = match i.warnings.as_slice() {
-                    [] => format!("Added {} to {ONLINE_LIBRARY}", i.symbol.split_once(':').map_or(i.symbol.as_str(), |s| s.1)),
+                    [] => format!(
+                        "Added {} to {ONLINE_LIBRARY}",
+                        i.symbol.split_once(':').map_or(i.symbol.as_str(), |s| s.1)
+                    ),
                     w => format!("Added, but: {}", w.join("; ")),
                 };
                 done = Done::Added(i.symbol, i.footprint, o.then_accept);
@@ -218,7 +248,14 @@ pub fn poll(w: &mut World) -> Done {
 pub fn describe(h: &Hit) -> (String, String) {
     let class = if h.basic { "Basic" } else { "Extended" };
     let price = h.price.map(|p| format!(" · ${p:.4}")).unwrap_or_default();
-    let detail = format!("{} · {class}{price}", if h.package.is_empty() { h.manufacturer.as_str() } else { h.package.as_str() });
+    let detail = format!(
+        "{} · {class}{price}",
+        if h.package.is_empty() {
+            h.manufacturer.as_str()
+        } else {
+            h.package.as_str()
+        }
+    );
     let mut text = format!("{} · {} {}\n", h.lcsc, h.manufacturer, h.mpn);
     if !h.description.is_empty() {
         text += &format!("{}\n", h.description);
@@ -230,6 +267,9 @@ pub fn describe(h: &Hit) -> (String, String) {
         text += &format!("Stock {} · {class} part{price}\n", h.stock);
     }
     // The source on two lines: one is too wide to wrap.
-    text += &cadrs_easyeda::SOURCE.replacen(" (", "\n(", 1).replacen("JLCEDA", "From the JLCEDA", 1);
+    text +=
+        &cadrs_easyeda::SOURCE
+            .replacen(" (", "\n(", 1)
+            .replacen("JLCEDA", "From the JLCEDA", 1);
     (detail, text)
 }

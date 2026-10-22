@@ -58,7 +58,11 @@ pub fn sanitize(name: &str) -> String {
         .collect();
     // Windows drops trailing dots and spaces.
     let s = s.trim_end_matches(['.', ' ']).trim_start();
-    if s.is_empty() { "Export".into() } else { s.into() }
+    if s.is_empty() {
+        "Export".into()
+    } else {
+        s.into()
+    }
 }
 
 /// `<dir>/<stem>.step`, or `<dir>/<stem> (2).step`, … if that file already exists.
@@ -209,7 +213,10 @@ mod tests {
 
     #[test]
     fn file_names_append_the_part() {
-        assert_eq!(file_name("Part Studio 1", Some("Part 1")), "Part Studio 1 - Part 1");
+        assert_eq!(
+            file_name("Part Studio 1", Some("Part 1")),
+            "Part Studio 1 - Part 1"
+        );
         assert_eq!(file_name("Part Studio 1", None), "Part Studio 1");
         assert_eq!(file_name("  ", Some("Part 1")), "Part 1");
         assert_eq!(file_name("", None), "Export");
@@ -245,7 +252,10 @@ mod tests {
              #30 = PRODUCT_RELATED_PRODUCT_CATEGORY('part',$,(#7));\n"
         );
         // Extra products keep their names.
-        assert_eq!(name_products(step, &["A"]).matches("Open CASCADE").count(), 2);
+        assert_eq!(
+            name_products(step, &["A"]).matches("Open CASCADE").count(),
+            2
+        );
     }
 
     #[test]

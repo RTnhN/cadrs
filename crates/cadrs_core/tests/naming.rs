@@ -41,14 +41,28 @@ impl Doc {
     fn sketch(&mut self, plane: PlaneRef) -> FeatureId {
         let f = FeatureId::new();
         self.h
-            .execute(&mut self.d, &AddSketch { element: self.el, feature: f, plane: Some(plane) })
+            .execute(
+                &mut self.d,
+                &AddSketch {
+                    element: self.el,
+                    feature: f,
+                    plane: Some(plane),
+                },
+            )
             .unwrap();
         f
     }
 
     fn edit(&mut self, f: FeatureId, op: SketchOp) {
         self.h
-            .execute(&mut self.d, &EditSketch { element: self.el, feature: f, op })
+            .execute(
+                &mut self.d,
+                &EditSketch {
+                    element: self.el,
+                    feature: f,
+                    op,
+                },
+            )
             .unwrap();
     }
 
@@ -56,7 +70,12 @@ impl Doc {
         self.h
             .execute(
                 &mut self.d,
-                &SetExtrude { element: self.el, feature: ex, extrude, label: "Edit".into() },
+                &SetExtrude {
+                    element: self.el,
+                    feature: ex,
+                    extrude,
+                    label: "Edit".into(),
+                },
             )
             .unwrap();
     }
@@ -66,7 +85,11 @@ impl Doc {
         self.h
             .execute(
                 &mut self.d,
-                &AddExtrude { element: self.el, feature: ex, extrude: ExtrudeFeature::default() },
+                &AddExtrude {
+                    element: self.el,
+                    feature: ex,
+                    extrude: ExtrudeFeature::default(),
+                },
             )
             .unwrap();
         let refs = samples::region_refs(sketch, &self.g(sketch), seeds);
@@ -77,7 +100,12 @@ impl Doc {
 
     /// The solid of the part an extrude made or added to.
     fn solid(&self, extrude: FeatureId) -> Solid {
-        (*parts(&self.features()).into_iter().find(|p| p.features.contains(&extrude)).unwrap().solid).clone()
+        (*parts(&self.features())
+            .into_iter()
+            .find(|p| p.features.contains(&extrude))
+            .unwrap()
+            .solid)
+            .clone()
     }
 
     fn depth(&self, extrude: FeatureId) -> f64 {
@@ -137,12 +165,21 @@ fn level(points: &[Vec3], depth: f64) -> Level {
 
 fn place(points: &[Vec3], mid: Vec3, depth: f64, hole_r: f64) -> Place {
     let lv = level(points, depth);
-    if points.iter().all(|p| close((p[0] - EYE_X).hypot(p[1]), hole_r)) {
+    if points
+        .iter()
+        .all(|p| close((p[0] - EYE_X).hypot(p[1]), hole_r))
+    {
         return Place::Hole(lv);
     }
     Place::At {
         level: lv,
-        y_sign: if mid[1] > 1e-6 { 1 } else if mid[1] < -1e-6 { -1 } else { 0 },
+        y_sign: if mid[1] > 1e-6 {
+            1
+        } else if mid[1] < -1e-6 {
+            -1
+        } else {
+            0
+        },
         x: mid[0].round() as i64,
     }
 }
@@ -153,7 +190,9 @@ fn hole_radius(doc: &Doc, s1: FeatureId) -> f64 {
     g.curves
         .values()
         .find_map(|c| match c.kind {
-            CurveKind::Circle { center, radius } if g.pos(center).distance(Vec2::new(EYE_X, 0.0)) < 1e-9 && radius < 17.0 => {
+            CurveKind::Circle { center, radius }
+                if g.pos(center).distance(Vec2::new(EYE_X, 0.0)) < 1e-9 && radius < 17.0 =>
+            {
                 Some(radius)
             }
             _ => None,
@@ -169,7 +208,11 @@ fn control_arm() -> Arm {
 fn control_arm_with(op2: BooleanOp) -> Arm {
     let d = Document::new("Control Arm");
     let el = d.elements[0].id;
-    let mut doc = Doc { d, h: History::default(), el };
+    let mut doc = Doc {
+        d,
+        h: History::default(),
+        el,
+    };
     let s1 = doc.sketch(PlaneRef::Top);
     doc.edit(s1, samples::control_arm_geometry());
     let dim = samples::eye_hole_dimension(&doc.g(s1)).unwrap();
@@ -187,16 +230,27 @@ fn control_arm_with(op2: BooleanOp) -> Arm {
     // Sketch 3 on the hub's top, using the right eye ring's top edges. (The hub's, the web's and
     // the eye's tops are one face, merged as Onshape merges them: its edges round the eye.)
     let s3 = doc.sketch(face_plane(&doc.features(), e1, cap(&doc, e1, 0)).unwrap());
-    let use_face = |doc: &mut Doc, sketch: FeatureId, ex: FeatureId, solid: &Solid, face: FaceName, keep: &dyn Fn(&[Vec3]) -> bool| {
+    let use_face = |doc: &mut Doc,
+                    sketch: FeatureId,
+                    ex: FeatureId,
+                    solid: &Solid,
+                    face: FaceName,
+                    keep: &dyn Fn(&[Vec3]) -> bool| {
         let f = doc.features();
         let frame = doc.feature(sketch).sketch().unwrap().plane.unwrap().frame();
-        let ctx = LinkContext { solids: vec![(ex, solid)], features: &f };
+        let ctx = LinkContext {
+            solids: vec![(ex, solid)],
+            features: &f,
+        };
         let items: Vec<_> = solid
             .face_edges(&face)
             .into_iter()
             .filter(|edge| keep(&solid.edge(edge).unwrap().points))
             .map(|edge| {
-                let link = Link::Edge { feature: ex.0, edge };
+                let link = Link::Edge {
+                    feature: ex.0,
+                    edge,
+                };
                 (ctx.shape(link, &frame).unwrap(), link)
             })
             .collect();
@@ -204,7 +258,10 @@ fn control_arm_with(op2: BooleanOp) -> Arm {
         doc.edit(sketch, SketchOp::Use { items });
     };
     let eye = cap(&doc, e1, 2);
-    let round_eye = |pts: &[Vec3]| pts.iter().all(|p| (p[0] - EYE_X).hypot(p[1]) < samples::EYE_R + 1e-6);
+    let round_eye = |pts: &[Vec3]| {
+        pts.iter()
+            .all(|p| (p[0] - EYE_X).hypot(p[1]) < samples::EYE_R + 1e-6)
+    };
     use_face(&mut doc, s3, e1, &solid1, eye, &round_eye);
     // Sketch 4 on the left web's top.
     let s4 = doc.sketch(face_plane(&doc.features(), e2, cap(&doc, e2, 0)).unwrap());
@@ -218,15 +275,30 @@ fn control_arm_with(op2: BooleanOp) -> Arm {
         .find(|f| {
             matches!(f.name.origin, FaceOrigin::Side { .. })
                 && f.plane.is_none()
-                && f.loops.iter().flatten().all(|p| (p[0].hypot(p[1]) - samples::HUB_R).abs() < 1e-3)
+                && f.loops
+                    .iter()
+                    .flatten()
+                    .all(|p| (p[0].hypot(p[1]) - samples::HUB_R).abs() < 1e-3)
         })
         .unwrap()
         .name;
     let f = doc.features();
-    let ctx = LinkContext { solids: vec![(e1, &solid1)], features: &f };
+    let ctx = LinkContext {
+        solids: vec![(e1, &solid1)],
+        features: &f,
+    };
     let front = PlaneRef::Front.frame();
-    let sil = Link::Silhouette { feature: e1.0, face: hub, index: 0 };
-    doc.edit(s5, SketchOp::Use { items: vec![(ctx.shape(sil, &front).unwrap(), sil)] });
+    let sil = Link::Silhouette {
+        feature: e1.0,
+        face: hub,
+        index: 0,
+    };
+    doc.edit(
+        s5,
+        SketchOp::Use {
+            items: vec![(ctx.shape(sil, &front).unwrap(), sil)],
+        },
+    );
     doc.edit(
         s5,
         SketchOp::AddPolyline {
@@ -242,7 +314,13 @@ fn control_arm_with(op2: BooleanOp) -> Arm {
     doc.edit(
         s5,
         SketchOp::AddConstraint {
-            constraints: vec![ConstraintOf::Pierce(PointRef::Point(p), Link::Edge { feature: e1.0, edge: hub_top })],
+            constraints: vec![ConstraintOf::Pierce(
+                PointRef::Point(p),
+                Link::Edge {
+                    feature: e1.0,
+                    edge: hub_top,
+                },
+            )],
             label: "Add pierce",
         },
     );
@@ -250,7 +328,11 @@ fn control_arm_with(op2: BooleanOp) -> Arm {
     // edge. (Not by the web's caps: the hub's, the web's and the eye's caps are merged into one
     // face at each end, which may take the web cap's name.)
     let web_key = doc.feature(e1).extrude().unwrap().regions[1].key();
-    let web = |n: &EdgeName| n.faces.iter().any(|f| matches!(f.origin, FaceOrigin::Side { region, .. } if region == web_key));
+    let web = |n: &EdgeName| {
+        n.faces
+            .iter()
+            .any(|f| matches!(f.origin, FaceOrigin::Side { region, .. } if region == web_key))
+    };
     let mut names: Vec<EdgeName> = solid1.edges.iter().map(|e| e.name).filter(web).collect();
     names.sort();
     names.dedup();
@@ -291,18 +373,35 @@ fn control_arm_with(op2: BooleanOp) -> Arm {
         .flat_map(|s: &f64| {
             [
                 Vec2::new(samples::HUB_R * t.cos(), s * samples::HUB_R * t.sin()),
-                Vec2::new(EYE_X + samples::EYE_R * t.cos(), s * samples::EYE_R * t.sin()),
+                Vec2::new(
+                    EYE_X + samples::EYE_R * t.cos(),
+                    s * samples::EYE_R * t.sin(),
+                ),
             ]
         })
         .collect();
     let vertices: Vec<(VertexName, Place)> = solid1
         .vertices
         .iter()
-        .filter(|v| corners.iter().any(|c| c.distance(Vec2::new(v.point[0], v.point[1])) < 1e-6))
+        .filter(|v| {
+            corners
+                .iter()
+                .any(|c| c.distance(Vec2::new(v.point[0], v.point[1])) < 1e-6)
+        })
         .map(|v| (v.name, place(&[v.point], v.point, d1, samples::EYE_HOLE_R)))
         .collect();
     assert!(vertices.len() >= 4, "{}", vertices.len());
-    Arm { doc, s1, e1, e2, s3, s4, s5, stored, vertices }
+    Arm {
+        doc,
+        s1,
+        e1,
+        e2,
+        s3,
+        s4,
+        s5,
+        stored,
+        vertices,
+    }
 }
 
 fn close(a: f64, b: f64) -> bool {
@@ -320,17 +419,37 @@ fn check(arm: &Arm, what: &str) {
     let hole_r = hole_radius(doc, arm.s1);
 
     // Sketches on faces: on the face they name (exactly), which is where it should be.
-    for (s, ex, solid, depth, region) in [(arm.s3, arm.e1, &solid1, d1, 0), (arm.s4, arm.e2, &solid2, d2, 0)] {
+    for (s, ex, solid, depth, region) in [
+        (arm.s3, arm.e1, &solid1, d1, 0),
+        (arm.s4, arm.e2, &solid2, d2, 0),
+    ] {
         let i = features.iter().position(|f| f.id == s).unwrap();
-        assert!(!sketch_face_lost_in(&features, i, &all), "{what}: sketch on a face lost");
-        let PlaneRef::Face(fp) = doc.feature(s).sketch().unwrap().plane.unwrap() else { panic!() };
+        assert!(
+            !sketch_face_lost_in(&features, i, &all),
+            "{what}: sketch on a face lost"
+        );
+        let PlaneRef::Face(fp) = doc.feature(s).sketch().unwrap().plane.unwrap() else {
+            panic!()
+        };
         assert_eq!(fp.face, cap(doc, ex, region), "{what}");
-        let (fi, m) = solid.resolve_face(&fp.face, Some(&fp.frame()), fp.seed).unwrap();
+        let (fi, m) = solid
+            .resolve_face(&fp.face, Some(&fp.frame()), fp.seed)
+            .unwrap();
         assert_eq!(m, Match::Exact, "{what}");
         let face = &solid.faces[fi];
-        assert_eq!(face.plane, Some(fp.frame()), "{what}: the sketch follows its face");
-        assert!(close(fp.origin[2], depth) && close(fp.frame().normal()[2], 1.0), "{what}: {fp:?}");
-        assert!(face.loops.iter().flatten().all(|p| close(p[2], depth)), "{what}");
+        assert_eq!(
+            face.plane,
+            Some(fp.frame()),
+            "{what}: the sketch follows its face"
+        );
+        assert!(
+            close(fp.origin[2], depth) && close(fp.frame().normal()[2], 1.0),
+            "{what}: {fp:?}"
+        );
+        assert!(
+            face.loops.iter().flatten().all(|p| close(p[2], depth)),
+            "{what}"
+        );
     }
 
     // Use and Pierce links: unbroken, by their exact names, lying on the named edge.
@@ -341,8 +460,14 @@ fn check(arm: &Arm, what: &str) {
         for (_, target, link) in g.links() {
             match (link, target) {
                 (Link::Edge { feature, edge }, target) => {
-                    let solid = if feature == arm.e1.0 { &solid1 } else { &solid2 };
-                    let e = solid.edge(&edge).unwrap_or_else(|| panic!("{what}: {edge:?} gone"));
+                    let solid = if feature == arm.e1.0 {
+                        &solid1
+                    } else {
+                        &solid2
+                    };
+                    let e = solid
+                        .edge(&edge)
+                        .unwrap_or_else(|| panic!("{what}: {edge:?} gone"));
                     let curve = cadrs_core::links::curve_of_polyline(&e.points).unwrap();
                     match target {
                         LinkTarget::Curve(c) => {
@@ -355,7 +480,10 @@ fn check(arm: &Arm, what: &str) {
                         LinkTarget::Point(p) => {
                             // The hub's top circle crosses Front at (−35, depth).
                             let at = g.pos(p);
-                            assert!(close(at.x, -samples::HUB_R) && close(at.y, d1), "{what}: pierced at {at:?}");
+                            assert!(
+                                close(at.x, -samples::HUB_R) && close(at.y, d1),
+                                "{what}: pierced at {at:?}"
+                            );
                         }
                     }
                 }
@@ -366,10 +494,15 @@ fn check(arm: &Arm, what: &str) {
                     // web is left of the hub's side there: d2 ≤ z ≤ d1.
                     let pts = curve_samples(&g, c);
                     // (From the mesh's rulings, 5° apart: within 0.05 mm.)
-                    assert!(pts.iter().all(|p| (p.x + samples::HUB_R).abs() < 0.05), "{what}: {pts:?}");
+                    assert!(
+                        pts.iter().all(|p| (p.x + samples::HUB_R).abs() < 0.05),
+                        "{what}: {pts:?}"
+                    );
                     let merged = solid1.faces.iter().any(|f| f.name.op == arm.e2.0);
                     let bottom = if merged { d2 } else { 0.0 };
-                    let (lo, hi) = pts.iter().fold((f64::MAX, f64::MIN), |(l, h), p| (l.min(p.y), h.max(p.y)));
+                    let (lo, hi) = pts
+                        .iter()
+                        .fold((f64::MAX, f64::MIN), |(l, h), p| (l.min(p.y), h.max(p.y)));
                     assert!(close(lo, bottom) && close(hi, d1), "{what}: {lo}..{hi}");
                 }
                 other => panic!("{what}: unexpected link {other:?}"),
@@ -379,7 +512,9 @@ fn check(arm: &Arm, what: &str) {
     // The eye ring's top edges in Sketch 3 include the hole, at its current size.
     let g3 = doc.g(arm.s3);
     assert!(
-        g3.curves.values().any(|c| matches!(c.kind, CurveKind::Circle { radius, .. } if close(radius, hole_r))),
+        g3.curves
+            .values()
+            .any(|c| matches!(c.kind, CurveKind::Circle { radius, .. } if close(radius, hole_r))),
         "{what}: the used hole circle is not Ø{}",
         2.0 * hole_r
     );
@@ -389,16 +524,27 @@ fn check(arm: &Arm, what: &str) {
     let on_web_line = |p: Vec3| {
         [1.0, -1.0].iter().any(|s: &f64| {
             let a = Vec2::new(samples::HUB_R * t.cos(), s * samples::HUB_R * t.sin());
-            let b = Vec2::new(EYE_X + samples::EYE_R * t.cos(), s * samples::EYE_R * t.sin());
+            let b = Vec2::new(
+                EYE_X + samples::EYE_R * t.cos(),
+                s * samples::EYE_R * t.sin(),
+            );
             cadrs_sketch::geom::dist_point_segment(Vec2::new(p[0], p[1]), a, b) < 1e-6
         })
     };
     for (name, was) in &arm.stored {
-        let (i, m) = solid1.resolve_edge(name, |_| None).unwrap_or_else(|_| panic!("{what}: {name:?} lost"));
+        let (i, m) = solid1
+            .resolve_edge(name, |_| None)
+            .unwrap_or_else(|_| panic!("{what}: {name:?} lost"));
         assert_eq!(m, Match::Exact, "{what}");
         let e = &solid1.edges[i];
-        let hole = e.points.iter().all(|p| close((p[0] - EYE_X).hypot(p[1]), hole_r) && close(p[2], d1));
-        let web = e.points.iter().all(|p| on_web_line(*p) && (p[2] > -1e-9 && p[2] < d1 + 1e-9));
+        let hole = e
+            .points
+            .iter()
+            .all(|p| close((p[0] - EYE_X).hypot(p[1]), hole_r) && close(p[2], d1));
+        let web = e
+            .points
+            .iter()
+            .all(|p| on_web_line(*p) && (p[2] > -1e-9 && p[2] < d1 + 1e-9));
         assert!(hole || web, "{what}: {name:?} is at {:?}", e.points);
         // The same edge as before: same side, same end, same x.
         let now = place(&e.points, e.midpoint(), d1, hole_r);
@@ -406,9 +552,14 @@ fn check(arm: &Arm, what: &str) {
     }
     // Stored vertex names: exact, at their counterpart.
     for (name, was) in &arm.vertices {
-        let v = solid1.vertex(name).unwrap_or_else(|| panic!("{what}: vertex {name:?} lost"));
+        let v = solid1
+            .vertex(name)
+            .unwrap_or_else(|| panic!("{what}: vertex {name:?} lost"));
         let now = place(&[v.point], v.point, d1, hole_r);
-        assert_eq!(now, *was, "{what}: vertex {name:?} moved from {was:?} to {now:?}");
+        assert_eq!(
+            now, *was,
+            "{what}: vertex {name:?} moved from {was:?} to {now:?}"
+        );
     }
     // Silhouettes lie on their faces (none across the gap between two pieces of a face, as a
     // stray line inside the eye hole once did): every one starts at a ruling's run of its face.
@@ -436,7 +587,8 @@ fn references_survive_a_sketch_dimension_change() {
     // The right eye's hole: Ø20 → Ø24.
     let g = arm.doc.g(arm.s1);
     let (id, _) = g.dimensions.iter().next().unwrap();
-    arm.doc.edit(arm.s1, SketchOp::SetDimensionValue { id, value: 24.0 });
+    arm.doc
+        .edit(arm.s1, SketchOp::SetDimensionValue { id, value: 24.0 });
     check(&arm, "after Ø24");
     // Undo puts it back.
     arm.doc.h.undo(&mut arm.doc.d).expect("undo");
@@ -465,12 +617,22 @@ fn references_survive_an_extrude_depth_change() {
 #[test]
 fn references_survive_reordering_two_independent_extrudes() {
     let mut arm = control_arm();
-    let before = arm.doc.features().iter().position(|f| f.id == arm.e1).unwrap();
+    let before = arm
+        .doc
+        .features()
+        .iter()
+        .position(|f| f.id == arm.e1)
+        .unwrap();
     arm.doc
         .h
         .execute(
             &mut arm.doc.d,
-            &MoveFeature { element: arm.doc.el, feature: arm.e2, to: before, label: "Reorder".into() },
+            &MoveFeature {
+                element: arm.doc.el,
+                feature: arm.e2,
+                to: before,
+                label: "Reorder".into(),
+            },
         )
         .unwrap();
     let order: Vec<FeatureId> = arm.doc.features().iter().map(|f| f.id).collect();
@@ -495,7 +657,8 @@ fn references_survive_edits_when_extrude_2_adds() {
     // Ø20 → Ø24 and back.
     let g = arm.doc.g(arm.s1);
     let (id, _) = g.dimensions.iter().next().unwrap();
-    arm.doc.edit(arm.s1, SketchOp::SetDimensionValue { id, value: 24.0 });
+    arm.doc
+        .edit(arm.s1, SketchOp::SetDimensionValue { id, value: 24.0 });
     check(&arm, "added: after Ø24");
     arm.doc.h.undo(&mut arm.doc.d).expect("undo");
     check(&arm, "added: after undo");
@@ -510,12 +673,22 @@ fn references_survive_edits_when_extrude_2_adds() {
     arm.doc.h.undo(&mut arm.doc.d).expect("undo");
     arm.doc.h.undo(&mut arm.doc.d).expect("undo");
     // Reorder: Extrude 2 first.
-    let before = arm.doc.features().iter().position(|f| f.id == arm.e1).unwrap();
+    let before = arm
+        .doc
+        .features()
+        .iter()
+        .position(|f| f.id == arm.e1)
+        .unwrap();
     arm.doc
         .h
         .execute(
             &mut arm.doc.d,
-            &MoveFeature { element: arm.doc.el, feature: arm.e2, to: before, label: "Reorder".into() },
+            &MoveFeature {
+                element: arm.doc.el,
+                feature: arm.e2,
+                to: before,
+                label: "Reorder".into(),
+            },
         )
         .unwrap();
     let ps = parts(&arm.doc.features());
@@ -535,19 +708,44 @@ fn lost_references_and_the_geometric_fallback() {
         .curves
         .iter()
         .find_map(|(id, c)| match c.kind {
-            CurveKind::Circle { center, radius } if g.pos(center).distance(Vec2::new(EYE_X, 0.0)) < 1e-9 && radius < 17.0 => Some(id),
+            CurveKind::Circle { center, radius }
+                if g.pos(center).distance(Vec2::new(EYE_X, 0.0)) < 1e-9 && radius < 17.0 =>
+            {
+                Some(id)
+            }
             _ => None,
         })
         .unwrap();
-    arm.doc.edit(arm.s1, SketchOp::Delete { curves: vec![hole], points: vec![], dimensions: vec![], constraints: vec![] });
     arm.doc.edit(
         arm.s1,
-        SketchOp::AddCircle { center: Vec2::new(EYE_X, 0.0), radius: samples::EYE_HOLE_R, construction: false },
+        SketchOp::Delete {
+            curves: vec![hole],
+            points: vec![],
+            dimensions: vec![],
+            constraints: vec![],
+        },
+    );
+    arm.doc.edit(
+        arm.s1,
+        SketchOp::AddCircle {
+            center: Vec2::new(EYE_X, 0.0),
+            radius: samples::EYE_HOLE_R,
+            construction: false,
+        },
     );
     let g3 = arm.doc.g(arm.s3);
-    assert!(g3.broken.is_empty(), "the redrawn hole's edge is found by where it is");
+    assert!(
+        g3.broken.is_empty(),
+        "the redrawn hole's edge is found by where it is"
+    );
     let renamed = g3.links().iter().any(|(_, _, l)| match l {
-        Link::Edge { edge, .. } => !arm.stored.iter().any(|(n, _)| n == edge) && edge.faces.iter().any(|f| matches!(f.origin, FaceOrigin::Side { .. })),
+        Link::Edge { edge, .. } => {
+            !arm.stored.iter().any(|(n, _)| n == edge)
+                && edge
+                    .faces
+                    .iter()
+                    .any(|f| matches!(f.origin, FaceOrigin::Side { .. }))
+        }
         _ => false,
     });
     assert!(renamed, "the link names the new side face");
@@ -566,12 +764,28 @@ fn lost_references_and_the_geometric_fallback() {
     // Without the hub ring and the web (the eye ring alone), the face Sketch 3 is on is lost:
     // the sketch reports it and stays. (With the web still there, the hub's and web's tops are
     // one face, which the sketch stays on.)
-    let frame = arm.doc.feature(arm.s3).sketch().unwrap().plane.unwrap().frame();
+    let frame = arm
+        .doc
+        .feature(arm.s3)
+        .sketch()
+        .unwrap()
+        .plane
+        .unwrap()
+        .frame();
     e.regions = vec![all_regions[2].clone()];
     arm.doc.set_extrude(arm.e1, e);
     let fs = arm.doc.features();
     assert!(sketch_face_lost_in(&fs, i, &parts(&fs)));
-    assert_eq!(arm.doc.feature(arm.s3).sketch().unwrap().plane.unwrap().frame(), frame);
+    assert_eq!(
+        arm.doc
+            .feature(arm.s3)
+            .sketch()
+            .unwrap()
+            .plane
+            .unwrap()
+            .frame(),
+        frame
+    );
     let _ = arm.s4;
 }
 
@@ -580,16 +794,27 @@ fn lost_references_and_the_geometric_fallback() {
 /// same geometry: regenerating it changes nothing.
 #[test]
 fn a_v3_document_loads_and_resolves() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/v3_control_arm.ron");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/v3_control_arm.ron"
+    );
     let text = std::fs::read_to_string(path).unwrap();
-    assert!(text.contains("version: 3") && text.contains("face: End("), "not a v3 file");
+    assert!(
+        text.contains("version: 3") && text.contains("face: End("),
+        "not a v3 file"
+    );
     let file = cadrs_core::Store::load_path(std::path::Path::new(path)).unwrap();
     assert_eq!(file.version, cadrs_core::store::SCHEMA_VERSION);
     let features = file.document.elements[0].features().to_vec();
     let e1 = FeatureId(uuid::Uuid::from_u128(2));
     // The face plane's name: Extrude 1's end cap of region 0.
-    let sk2 = features.iter().find(|f| f.id.0 == uuid::Uuid::from_u128(4)).unwrap();
-    let PlaneRef::Face(fp) = sk2.sketch().unwrap().plane.unwrap() else { panic!() };
+    let sk2 = features
+        .iter()
+        .find(|f| f.id.0 == uuid::Uuid::from_u128(4))
+        .unwrap();
+    let PlaneRef::Face(fp) = sk2.sketch().unwrap().plane.unwrap() else {
+        panic!()
+    };
     assert_eq!(fp.face, cap_name(&features, e1, 0, true).unwrap());
     // Every link names Extrude 1's faces.
     let mut links = 0;
@@ -610,18 +835,33 @@ fn a_v3_document_loads_and_resolves() {
     let mut regenerated = features.clone();
     cadrs_core::parts::refresh_face_planes(&mut regenerated);
     for (a, b) in features.iter().zip(&regenerated) {
-        let (Some(sa), Some(sb)) = (a.sketch(), b.sketch()) else { continue };
+        let (Some(sa), Some(sb)) = (a.sketch(), b.sketch()) else {
+            continue;
+        };
         assert!(sb.geometry.broken.is_empty(), "{}: broken links", b.name);
         // The same plane and face (regenerating adds the face's seed point).
-        assert_eq!(sa.plane.map(|p| p.frame()), sb.plane.map(|p| p.frame()), "{}", b.name);
-        assert_eq!(sa.plane.and_then(|p| p.face()).map(|f| f.face), sb.plane.and_then(|p| p.face()).map(|f| f.face));
+        assert_eq!(
+            sa.plane.map(|p| p.frame()),
+            sb.plane.map(|p| p.frame()),
+            "{}",
+            b.name
+        );
+        assert_eq!(
+            sa.plane.and_then(|p| p.face()).map(|f| f.face),
+            sb.plane.and_then(|p| p.face()).map(|f| f.face)
+        );
         // Sketch 3's first line is the hub's silhouette seen from Front, from the mesh's rulings:
         // the hub's side is one face now (merged from the pieces of its circle), meshed a little
         // differently, and the line is within 0.01 mm of where it was (x = −35 exactly now).
         let tol = if b.name == "Sketch 3" { 0.01 } else { 1e-6 };
         for (k, p) in &sa.geometry.points {
             let q = sb.geometry.points[k].pos;
-            assert!(p.pos.distance(q) < tol, "{}: a point moved from {:?} to {q:?}", b.name, p.pos);
+            assert!(
+                p.pos.distance(q) < tol,
+                "{}: a point moved from {:?} to {q:?}",
+                b.name,
+                p.pos
+            );
         }
     }
     // Saved again, it is a current (version 5, P3G.1) file that loads back the same.

@@ -27,7 +27,10 @@ use cadrs_core::pcb::{BoardId, CreatePcbAssembly};
 use cadrs_core::rebuild::PendingJob;
 use cadrs_pcb::component_docs::ComponentDocuments;
 use cadrs_pcb::create_assembly::{CreateOptions, generate, generate_linked};
-use cadrs_ui::{Button, Checkbox, CheckboxState, Dialog, DialogClose, Notification, Spinner, Theme, show_notification};
+use cadrs_ui::{
+    Button, Checkbox, CheckboxState, Dialog, DialogClose, Notification, Spinner, Theme,
+    show_notification,
+};
 
 use crate::viewport::ViewportArea;
 use crate::{ActiveDocument, AppState};
@@ -45,7 +48,12 @@ pub struct CreateHold(pub u32);
 
 /// Scripted steps wait while a generation runs, but not while a scenario's hold keeps its
 /// progress card up (the scenario photographs it).
-fn flag_creating(q: Query<&RunningCreate>, hold: Res<CreateHold>, mut pending: ResMut<cadrs_ui::PendingWork>, mut why: ResMut<cadrs_ui::PendingWhy>) {
+fn flag_creating(
+    q: Query<&RunningCreate>,
+    hold: Res<CreateHold>,
+    mut pending: ResMut<cadrs_ui::PendingWork>,
+    mut why: ResMut<cadrs_ui::PendingWhy>,
+) {
     if q.iter().any(|r| r.frames >= hold.0) {
         pending.0 = true;
         why.add("PCB create assembly");
@@ -96,7 +104,9 @@ pub fn open_create_dialog(world: &mut World) {
     if q.iter(world).next().is_some() {
         return;
     }
-    let Some((element, board, b)) = super::shown(world) else { return };
+    let Some((element, board, b)) = super::shown(world) else {
+        return;
+    };
     let theme = world.resource::<Theme>().clone();
     let (tb, tf) = (theme.clone(), theme.clone());
     world.spawn((
@@ -151,16 +161,24 @@ pub fn open_create_dialog(world: &mut World) {
 
 fn checked(world: &mut World, name: &str) -> bool {
     let mut q = world.query::<(&Name, &CheckboxState)>();
-    q.iter(world).find(|(n, _)| n.as_str() == name).is_some_and(|(_, s)| s.checked)
+    q.iter(world)
+        .find(|(n, _)| n.as_str() == name)
+        .is_some_and(|(_, s)| s.checked)
 }
 
 fn accept(world: &mut World) {
     let (element, board) = {
         let mut q = world.query::<&CreateDialog>();
-        let Some(d) = q.iter(world).next() else { return };
+        let Some(d) = q.iter(world).next() else {
+            return;
+        };
         (d.element, d.board)
     };
-    let opts = CreateOptions { board: checked(world, "pcb-create-board"), components: checked(world, "pcb-create-components"), keep_areas: checked(world, "pcb-create-keeps") };
+    let opts = CreateOptions {
+        board: checked(world, "pcb-create-board"),
+        components: checked(world, "pcb-create-components"),
+        keep_areas: checked(world, "pcb-create-keeps"),
+    };
     close_dialog(world);
     start(world, element, board, opts);
 }
@@ -170,25 +188,57 @@ fn accept(world: &mut World) {
 /// stored document per new package in the settings' component folder, versioned, referenced by
 /// version; the store work runs in the background too.
 pub fn start(world: &mut World, element: ElementId, board: BoardId, opts: CreateOptions) {
-    let Some(doc) = world.get_resource::<ActiveDocument>().map(|d| d.doc.clone()) else { return };
-    let Some(name) = doc.element(element).and_then(|e| e.pcb()).and_then(|s| s.board(board)).map(|b| b.name().to_string()) else { return };
-    let store = world.get_resource::<crate::DocumentStore>().map(|s| s.0.clone());
-    let folder = doc.element(element).and_then(|e| e.pcb()).and_then(|s| s.settings.component_folder.clone());
+    let Some(doc) = world
+        .get_resource::<ActiveDocument>()
+        .map(|d| d.doc.clone())
+    else {
+        return;
+    };
+    let Some(name) = doc
+        .element(element)
+        .and_then(|e| e.pcb())
+        .and_then(|s| s.board(board))
+        .map(|b| b.name().to_string())
+    else {
+        return;
+    };
+    let store = world
+        .get_resource::<crate::DocumentStore>()
+        .map(|s| s.0.clone());
+    let folder = doc
+        .element(element)
+        .and_then(|e| e.pcb())
+        .and_then(|s| s.settings.component_folder.clone());
     let now = world.resource::<crate::AppClock>().now();
     let user = world.resource::<crate::UserProfile>().id.clone();
     let board_name = name.clone();
     let pending = cadrs_core::rebuild::run_in_background(move || {
         let (cmd, docs) = match &store {
             Some(store) => {
-                let mut docs = ComponentDocuments::new(store, folder.as_ref(), doc.id, &board_name, &user, now)?;
-                let cmd = generate_linked(&doc, element, board, &opts, &mut docs).map_err(|e| e.to_string())?;
+                let mut docs = ComponentDocuments::new(
+                    store,
+                    folder.as_ref(),
+                    doc.id,
+                    &board_name,
+                    &user,
+                    now,
+                )?;
+                let cmd = generate_linked(&doc, element, board, &opts, &mut docs)
+                    .map_err(|e| e.to_string())?;
                 (cmd, Some(docs))
             }
-            None => (generate(&doc, element, board, &opts).map_err(|e| e.to_string())?, None),
+            None => (
+                generate(&doc, element, board, &opts).map_err(|e| e.to_string())?,
+                None,
+            ),
         };
         // Rebuild the new Part Studios (and the component copies) once, so their parts are cached
         // when the tabs are shown.
-        for e in cmd.elements.iter().chain(cmd.links.iter().map(|l| &l.element)) {
+        for e in cmd
+            .elements
+            .iter()
+            .chain(cmd.links.iter().map(|l| &l.element))
+        {
             if matches!(e.kind, cadrs_core::document::ElementKind::PartStudio { .. }) {
                 cadrs_core::rebuild::build(&e.active_features());
             }
@@ -196,28 +246,67 @@ pub fn start(world: &mut World, element: ElementId, board: BoardId, opts: Create
         // The new component documents' thumbnails for the documents page (their part).
         if let (Some(store), Some(docs)) = (&store, &docs) {
             for u in docs.used.iter().filter(|u| u.created) {
-                let Some(l) = cmd.links.iter().find(|l| l.source.document == Some(u.document) && matches!(l.element.kind, cadrs_core::document::ElementKind::PartStudio { .. })) else { continue };
+                let Some(l) = cmd.links.iter().find(|l| {
+                    l.source.document == Some(u.document)
+                        && matches!(
+                            l.element.kind,
+                            cadrs_core::document::ElementKind::PartStudio { .. }
+                        )
+                }) else {
+                    continue;
+                };
                 let build = cadrs_core::rebuild::build(&l.element.active_features());
-                let list: Vec<(&cadrs_core::Solid, [u8; 3])> = build.parts.iter().map(|p| (&*p.solid, cadrs_core::appearance::part_appearance(p, l.element.part_props()).rgb)).collect();
+                let list: Vec<(&cadrs_core::Solid, [u8; 3])> = build
+                    .parts
+                    .iter()
+                    .map(|p| {
+                        (
+                            &*p.solid,
+                            cadrs_core::appearance::part_appearance(p, l.element.part_props()).rgb,
+                        )
+                    })
+                    .collect();
                 if !list.is_empty() {
-                    let _ = store.write_thumbnail(u.document, &cadrs_core::assembly::thumb::render(&list, 96));
+                    let _ = store.write_thumbnail(
+                        u.document,
+                        &cadrs_core::assembly::thumb::render(&list, 96),
+                    );
                 }
             }
         }
         let (created, reused, folder) = match &docs {
-            Some(d) => (d.created(), d.used.len() - d.created(), d.folder().name.clone()),
+            Some(d) => (
+                d.created(),
+                d.used.len() - d.created(),
+                d.folder().name.clone(),
+            ),
             None => (0, 0, String::new()),
         };
-        Ok(Created { command: cmd, created, reused, folder })
+        Ok(Created {
+            command: cmd,
+            created,
+            reused,
+            folder,
+        })
     });
-    world.spawn((Name::new("pcb-create-running"), RunningCreate { board_name: name.clone(), frames: 0, pending }, DespawnOnExit(AppState::Document)));
+    world.spawn((
+        Name::new("pcb-create-running"),
+        RunningCreate {
+            board_name: name.clone(),
+            frames: 0,
+            pending,
+        },
+        DespawnOnExit(AppState::Document),
+    ));
     show_progress(world, &name);
 }
 
 /// The card at the bottom of the view while the tabs are built.
 fn show_progress(world: &mut World, board: &str) {
     let mut q = world.query_filtered::<Entity, With<ViewportArea>>();
-    let Some(area) = q.iter(world).next() else { return };
+    let Some(area) = q.iter(world).next() else {
+        return;
+    };
     let theme = world.resource::<Theme>().clone();
     let t = &theme;
     let card = world
@@ -241,20 +330,39 @@ fn show_progress(world: &mut World, board: &str) {
             Pickable::IGNORE,
         ))
         .with_children(|c| {
-            c.spawn(Spinner::new("pcb-create-spinner").size(18.0).thickness(2.5).build(t));
-            c.spawn((t.text(format!("Creating assembly from '{board}'…"), t.font_sm, FontWeight::MEDIUM, t.foreground), Pickable::IGNORE));
+            c.spawn(
+                Spinner::new("pcb-create-spinner")
+                    .size(18.0)
+                    .thickness(2.5)
+                    .build(t),
+            );
+            c.spawn((
+                t.text(
+                    format!("Creating assembly from '{board}'…"),
+                    t.font_sm,
+                    FontWeight::MEDIUM,
+                    t.foreground,
+                ),
+                Pickable::IGNORE,
+            ));
         })
         .id();
     world.entity_mut(area).add_child(card);
 }
 
-fn finish_create(mut q: Query<(Entity, &mut RunningCreate)>, hold: Res<CreateHold>, mut commands: Commands) {
+fn finish_create(
+    mut q: Query<(Entity, &mut RunningCreate)>,
+    hold: Res<CreateHold>,
+    mut commands: Commands,
+) {
     for (e, mut run) in &mut q {
         run.frames += 1;
         if run.frames < hold.0 {
             continue;
         }
-        let Some(result) = run.pending.poll() else { continue };
+        let Some(result) = run.pending.poll() else {
+            continue;
+        };
         let result = result.unwrap_or_else(|| Err("The kernel thread stopped".into()));
         let name = run.board_name.clone();
         commands.entity(e).despawn();
@@ -267,12 +375,24 @@ fn finish_create(mut q: Query<(Entity, &mut RunningCreate)>, hold: Res<CreateHol
 /// Components" (and how many were reused: "… with 1 new component document in PCB Components,
 /// 6 reused").
 pub fn created_message(board: &str, created: usize, reused: usize, folder: &str) -> String {
-    let docs = |n: usize| format!("{n} {}component document{}", if reused > 0 { "new " } else { "" }, if n == 1 { "" } else { "s" });
+    let docs = |n: usize| {
+        format!(
+            "{n} {}component document{}",
+            if reused > 0 { "new " } else { "" },
+            if n == 1 { "" } else { "s" }
+        )
+    };
     match (created, reused) {
         (0, 0) => format!("Created the Part Studio and Assembly \"{board}\""),
         (c, 0) => format!("Created \"{board}\" with {} in {folder}", docs(c)),
-        (0, r) => format!("Created \"{board}\" with its {r} component document{}", if r == 1 { "" } else { "s" }),
-        (c, r) => format!("Created \"{board}\" with {} in {folder}, {r} reused", docs(c)),
+        (0, r) => format!(
+            "Created \"{board}\" with its {r} component document{}",
+            if r == 1 { "" } else { "s" }
+        ),
+        (c, r) => format!(
+            "Created \"{board}\" with {} in {folder}, {r} reused",
+            docs(c)
+        ),
     }
 }
 
@@ -293,29 +413,54 @@ fn finish(world: &mut World, board: &str, result: Result<Created, String>) {
     let made = match result {
         Ok(c) => c,
         Err(e) => {
-            toast(world, Notification::warning(format!("Couldn't create the assembly from {board}: {e}")).name("pcb-create-toast").max_width(640.0));
+            toast(
+                world,
+                Notification::warning(format!("Couldn't create the assembly from {board}: {e}"))
+                    .name("pcb-create-toast")
+                    .max_width(640.0),
+            );
             return;
         }
     };
     let cmd = made.command;
     let assembly = cmd.generated.assembly;
     if let Err(e) = world.resource_mut::<ActiveDocument>().execute(&cmd) {
-        toast(world, Notification::warning(format!("Couldn't create the assembly from {board}: {e}")).name("pcb-create-toast").max_width(640.0));
+        toast(
+            world,
+            Notification::warning(format!("Couldn't create the assembly from {board}: {e}"))
+                .name("pcb-create-toast")
+                .max_width(640.0),
+        );
         return;
     }
     // The linked documents' states and update badges (P3H.7).
-    world.resource_mut::<crate::linked::LinkStatus>().invalidate();
-    let t = toast(world, Notification::info(created_message(board, made.created, made.reused, &made.folder)).seconds(8.0).name("pcb-create-toast").max_width(760.0));
+    world
+        .resource_mut::<crate::linked::LinkStatus>()
+        .invalidate();
+    let t = toast(
+        world,
+        Notification::info(created_message(
+            board,
+            made.created,
+            made.reused,
+            &made.folder,
+        ))
+        .seconds(8.0)
+        .name("pcb-create-toast")
+        .max_width(760.0),
+    );
     let theme = world.resource::<Theme>().clone();
     let mut commands = world.commands();
     let open = cadrs_ui::toast_action(&mut commands, &theme, t, "pcb-create-open", "Open assembly");
-    commands.entity(open).insert(observe(move |_: On<Activate>, mut commands: Commands| {
-        commands.queue(move |world: &mut World| {
-            cadrs_ui::close_toasts(world);
-            if let Some(mut d) = world.get_resource_mut::<ActiveDocument>() {
-                d.set_active(assembly);
-            }
-        });
-    }));
+    commands
+        .entity(open)
+        .insert(observe(move |_: On<Activate>, mut commands: Commands| {
+            commands.queue(move |world: &mut World| {
+                cadrs_ui::close_toasts(world);
+                if let Some(mut d) = world.get_resource_mut::<ActiveDocument>() {
+                    d.set_active(assembly);
+                }
+            });
+        }));
     world.flush();
 }

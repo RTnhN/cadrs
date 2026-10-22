@@ -19,7 +19,10 @@ pub struct Paper {
 
 impl Default for Paper {
     fn default() -> Self {
-        Paper { name: "A4".into(), size: Size::mm(297.0, 210.0) }
+        Paper {
+            name: "A4".into(),
+            size: Size::mm(297.0, 210.0),
+        }
     }
 }
 
@@ -237,7 +240,10 @@ impl Schematic {
     }
 
     /// A placed symbol's pins in sheet coordinates: the pin and where wires connect to it.
-    pub fn placed_pins<'a>(&'a self, s: &'a PlacedSymbol) -> impl Iterator<Item = (&'a Pin, Pt)> + 'a {
+    pub fn placed_pins<'a>(
+        &'a self,
+        s: &'a PlacedSymbol,
+    ) -> impl Iterator<Item = (&'a Pin, Pt)> + 'a {
         self.symbol(&s.symbol)
             .into_iter()
             .flat_map(move |sym| sym.unit_pins(s.unit, s.style))
@@ -252,7 +258,11 @@ mod tests {
     #[test]
     fn placement_mirrors_then_rotates() {
         let p = Pt::mm(2.54, 1.27);
-        let pl = |angle, mirror| Placement { at: Pt::mm(10.0, 20.0), angle, mirror };
+        let pl = |angle, mirror| Placement {
+            at: Pt::mm(10.0, 20.0),
+            angle,
+            mirror,
+        };
         assert_eq!(pl(0.0, Mirror::None).apply(p), Pt::mm(12.54, 21.27));
         assert_eq!(pl(90.0, Mirror::None).apply(p), Pt::mm(10.0 - 1.27, 22.54));
         assert_eq!(pl(0.0, Mirror::Y).apply(p), Pt::mm(10.0 - 2.54, 21.27));

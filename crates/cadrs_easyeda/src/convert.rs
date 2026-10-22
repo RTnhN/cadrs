@@ -65,7 +65,10 @@ struct Frame {
 impl Frame {
     fn of(head: &Value) -> Frame {
         let n = |v: &Value| v.as_f64().or_else(|| v.as_str().map(num)).unwrap_or(0.0);
-        Frame { ox: n(&head["x"]), oy: n(&head["y"]) }
+        Frame {
+            ox: n(&head["x"]),
+            oy: n(&head["y"]),
+        }
     }
 
     fn xy(&self, x: f64, y: f64) -> [f64; 2] {
@@ -86,7 +89,11 @@ impl Frame {
 
 /// Space-separated `x y x y …` points.
 fn points(s: &str) -> Vec<[f64; 2]> {
-    let v: Vec<f64> = s.split([' ', ',']).filter(|t| !t.is_empty()).map(num).collect();
+    let v: Vec<f64> = s
+        .split([' ', ','])
+        .filter(|t| !t.is_empty())
+        .map(num)
+        .collect();
     v.as_chunks::<2>().0.to_vec()
 }
 
@@ -96,7 +103,10 @@ fn sub_geoms(f: &Frame, sub: &Sub) -> Vec<Geom> {
     let mut run: Vec<Pt> = vec![];
     let flush = |run: &mut Vec<Pt>, out: &mut Vec<Geom>| {
         if run.len() >= 2 {
-            out.push(Geom::Polyline { pts: std::mem::take(run), closed: false });
+            out.push(Geom::Polyline {
+                pts: std::mem::take(run),
+                closed: false,
+            });
         }
         run.clear();
     };
@@ -117,7 +127,11 @@ fn sub_geoms(f: &Frame, sub: &Sub) -> Vec<Geom> {
             }
             Seg::Arc(a, m, b) => {
                 flush(&mut run, &mut out);
-                out.push(Geom::Arc { start: f.p(a), mid: f.p(m), end: f.p(b) });
+                out.push(Geom::Arc {
+                    start: f.p(a),
+                    mid: f.p(m),
+                    end: f.p(b),
+                });
             }
         }
     }
@@ -158,20 +172,44 @@ fn symbol_pin(f: &Frame, s: &str) -> Option<Pin> {
     let at_e = [num(field(&conn, 0)), num(field(&conn, 1))];
     let at = f.p(at_e);
     // The pin line runs from the connection point to the body: its far end.
-    let line = parts.get(2).map(|p| p.split('~').next().unwrap_or("")).unwrap_or("");
+    let line = parts
+        .get(2)
+        .map(|p| p.split('~').next().unwrap_or(""))
+        .unwrap_or("");
     let ends: Vec<[f64; 2]> = path::parse(line).iter().flat_map(|s| s.points(1)).collect();
     let far = ends.into_iter().max_by(|a, b| {
         let d = |q: &[f64; 2]| (q[0] - at_e[0]).hypot(q[1] - at_e[1]);
         d(a).total_cmp(&d(b))
     });
     let (angle, length) = match far.map(|q| f.p(q) - at) {
-        Some(d) if d.x != 0 || d.y != 0 => ((d.y as f64).atan2(d.x as f64).to_degrees().rem_euclid(360.0).round() % 360.0, (d.x as f64).hypot(d.y as f64).round() as i64),
+        Some(d) if d.x != 0 || d.y != 0 => (
+            (d.y as f64)
+                .atan2(d.x as f64)
+                .to_degrees()
+                .rem_euclid(360.0)
+                .round()
+                % 360.0,
+            (d.x as f64).hypot(d.y as f64).round() as i64,
+        ),
         // No line: EasyEDA's rotation (0 = the pin points right, away from the body).
-        _ => ((180.0 - num(field(&set, 6))).rem_euclid(360.0), mm(10.0 * U)),
+        _ => (
+            (180.0 - num(field(&set, 6))).rem_euclid(360.0),
+            mm(10.0 * U),
+        ),
     };
-    let name: Vec<&str> = parts.get(3).map(|p| p.split('~').collect()).unwrap_or_default();
-    let number: Vec<&str> = parts.get(4).map(|p| p.split('~').collect()).unwrap_or_default();
-    let flag = |i: usize| parts.get(i).is_some_and(|p| p.split('~').next() == Some("1"));
+    let name: Vec<&str> = parts
+        .get(3)
+        .map(|p| p.split('~').collect())
+        .unwrap_or_default();
+    let number: Vec<&str> = parts
+        .get(4)
+        .map(|p| p.split('~').collect())
+        .unwrap_or_default();
+    let flag = |i: usize| {
+        parts
+            .get(i)
+            .is_some_and(|p| p.split('~').next() == Some("1"))
+    };
     let shape = match (flag(5), flag(6)) {
         (true, true) => PinShape::InvertedClock,
         (true, false) => PinShape::Inverted,
@@ -179,7 +217,18 @@ fn symbol_pin(f: &Frame, s: &str) -> Option<Pin> {
         _ => PinShape::Line,
     };
     let num_text = field(&number, 4).trim();
-    let mut p = pin(if num_text.is_empty() { field(&set, 3) } else { num_text }, field(&name, 4).trim(), pin_kind(field(&set, 2)), (0.0, 0.0), angle, 0.0);
+    let mut p = pin(
+        if num_text.is_empty() {
+            field(&set, 3)
+        } else {
+            num_text
+        },
+        field(&name, 4).trim(),
+        pin_kind(field(&set, 2)),
+        (0.0, 0.0),
+        angle,
+        0.0,
+    );
     p.at = at;
     p.length = length;
     p.shape = shape;
@@ -191,15 +240,28 @@ fn symbol_pin(f: &Frame, s: &str) -> Option<Pin> {
 }
 
 fn graphic(item: SymbolItem) -> SymbolGraphic {
-    SymbolGraphic { item, unit: 0, style: 0 }
+    SymbolGraphic {
+        item,
+        unit: 0,
+        style: 0,
+    }
 }
 
 fn shape_item(geom: Geom, w: f64, fill: Fill) -> SymbolGraphic {
-    graphic(SymbolItem::Shape(Shape { geom, stroke: stroke(w), fill }))
+    graphic(SymbolItem::Shape(Shape {
+        geom,
+        stroke: stroke(w),
+        fill,
+    }))
 }
 
 /// The symbol's drawing, pins and the text marks for its reference and value.
-fn symbol_shapes(f: &Frame, shapes: &[Value], s: &mut Symbol, warnings: &mut Vec<String>) -> (Option<Pt>, Option<Pt>) {
+fn symbol_shapes(
+    f: &Frame,
+    shapes: &[Value],
+    s: &mut Symbol,
+    warnings: &mut Vec<String>,
+) -> (Option<Pt>, Option<Pt>) {
     let (mut ref_at, mut value_at) = (None, None);
     for v in shapes {
         let Some(str) = v.as_str() else { continue };
@@ -216,30 +278,75 @@ fn symbol_shapes(f: &Frame, shapes: &[Value], s: &mut Symbol, warnings: &mut Vec
             "R" => {
                 let (x, y, w, h) = (n(1), n(2), n(5), n(6));
                 // A body box is filled as KiCad's symbols are (EasyEDA leaves them empty).
-                let fill = if fill_of(field(&t, 10)) == Fill::None { Fill::Background } else { fill_of(field(&t, 10)) };
-                s.graphics.push(shape_item(Geom::Rect { a: f.pt(x, y), b: f.pt(x + w, y + h) }, n(8), fill));
+                let fill = if fill_of(field(&t, 10)) == Fill::None {
+                    Fill::Background
+                } else {
+                    fill_of(field(&t, 10))
+                };
+                s.graphics.push(shape_item(
+                    Geom::Rect {
+                        a: f.pt(x, y),
+                        b: f.pt(x + w, y + h),
+                    },
+                    n(8),
+                    fill,
+                ));
             }
             "E" | "C" => {
-                let (cx, cy, rx, ry, (w, fill)) = if t[0] == "E" { (n(1), n(2), n(3), n(4), (n(6), field(&t, 8))) } else { (n(1), n(2), n(3), n(3), (n(5), field(&t, 7))) };
-                if (rx - ry).abs() < 1e-6 {
-                    s.graphics.push(shape_item(Geom::Circle { center: f.pt(cx, cy), radius: mm(rx * U) }, w, fill_of(fill)));
+                let (cx, cy, rx, ry, (w, fill)) = if t[0] == "E" {
+                    (n(1), n(2), n(3), n(4), (n(6), field(&t, 8)))
                 } else {
-                    let pts = (0..32).map(|i| i as f64 * std::f64::consts::TAU / 32.0).map(|a| f.pt(cx + rx * a.cos(), cy + ry * a.sin())).collect();
-                    s.graphics.push(shape_item(Geom::Polyline { pts, closed: true }, w, fill_of(fill)));
+                    (n(1), n(2), n(3), n(3), (n(5), field(&t, 7)))
+                };
+                if (rx - ry).abs() < 1e-6 {
+                    s.graphics.push(shape_item(
+                        Geom::Circle {
+                            center: f.pt(cx, cy),
+                            radius: mm(rx * U),
+                        },
+                        w,
+                        fill_of(fill),
+                    ));
+                } else {
+                    let pts = (0..32)
+                        .map(|i| i as f64 * std::f64::consts::TAU / 32.0)
+                        .map(|a| f.pt(cx + rx * a.cos(), cy + ry * a.sin()))
+                        .collect();
+                    s.graphics.push(shape_item(
+                        Geom::Polyline { pts, closed: true },
+                        w,
+                        fill_of(fill),
+                    ));
                 }
             }
             "PL" | "PG" => {
                 let pts: Vec<Pt> = points(field(&t, 1)).into_iter().map(|q| f.p(q)).collect();
                 if pts.len() >= 2 {
                     let closed = t[0] == "PG";
-                    s.graphics.push(shape_item(Geom::Polyline { pts, closed }, n(3), if closed { fill_of(field(&t, 5)) } else { Fill::None }));
+                    s.graphics.push(shape_item(
+                        Geom::Polyline { pts, closed },
+                        n(3),
+                        if closed {
+                            fill_of(field(&t, 5))
+                        } else {
+                            Fill::None
+                        },
+                    ));
                 }
             }
             "PT" | "A" => {
                 // PT~path~stroke~width~style~fill; A~path~helper~stroke~width~style~fill.
-                let (w, fill) = if t[0] == "PT" { (n(3), field(&t, 5)) } else { (n(4), field(&t, 6)) };
+                let (w, fill) = if t[0] == "PT" {
+                    (n(3), field(&t, 5))
+                } else {
+                    (n(4), field(&t, 6))
+                };
                 for sub in path::parse(field(&t, 1)) {
-                    let fill = if sub.closed { fill_of(fill) } else { Fill::None };
+                    let fill = if sub.closed {
+                        fill_of(fill)
+                    } else {
+                        Fill::None
+                    };
                     for g in sub_geoms(f, &sub) {
                         s.graphics.push(shape_item(g, w, fill));
                     }
@@ -257,7 +364,16 @@ fn symbol_shapes(f: &Frame, shapes: &[Value], s: &mut Symbol, warnings: &mut Vec
                             "end" => HAlign::Right,
                             _ => HAlign::Center,
                         };
-                        let text = Text { text: field(&t, 12).into(), at, angle: -n(4), style: TextStyle { h_align, ..Default::default() }, visible: true };
+                        let text = Text {
+                            text: field(&t, 12).into(),
+                            at,
+                            angle: -n(4),
+                            style: TextStyle {
+                                h_align,
+                                ..Default::default()
+                            },
+                            visible: true,
+                        };
                         s.graphics.push(graphic(SymbolItem::Text(text)));
                     }
                     _ => {}
@@ -301,7 +417,10 @@ fn geom_points(g: &Geom) -> Vec<Pt> {
     match g {
         Geom::Line { a, b } | Geom::Rect { a, b } => vec![*a, *b],
         Geom::Polyline { pts, .. } => pts.clone(),
-        Geom::Circle { center, radius } => vec![*center - Pt::new(*radius, *radius), *center + Pt::new(*radius, *radius)],
+        Geom::Circle { center, radius } => vec![
+            *center - Pt::new(*radius, *radius),
+            *center + Pt::new(*radius, *radius),
+        ],
         Geom::Arc { start, mid, end } => vec![*start, *mid, *end],
         Geom::Bezier { pts } => pts.to_vec(),
     }
@@ -349,13 +468,22 @@ fn fp_layer(id: &str) -> Option<Layer> {
 }
 
 fn fp_shape(geom: Geom, layer: Layer, width: f64, fill: Fill) -> FpShape {
-    FpShape { id: uuid::Uuid::new_v4(), shape: Shape { geom, stroke: Stroke::width(mm(width)), fill }, layer }
+    FpShape {
+        id: uuid::Uuid::new_v4(),
+        shape: Shape {
+            geom,
+            stroke: Stroke::width(mm(width)),
+            fill,
+        },
+        layer,
+    }
 }
 
 /// The four corners of a rotated `w` × `h` box at `c` (mm).
 fn corners(c: [f64; 2], w: f64, h: f64, deg: f64) -> [[f64; 2]; 4] {
     let (s, co) = deg.to_radians().sin_cos();
-    [[-w, -h], [w, -h], [w, h], [-w, h]].map(|[x, y]| [c[0] + (x * co - y * s) / 2.0, c[1] + (x * s + y * co) / 2.0])
+    [[-w, -h], [w, -h], [w, h], [-w, h]]
+        .map(|[x, y]| [c[0] + (x * co - y * s) / 2.0, c[1] + (x * s + y * co) / 2.0])
 }
 
 /// `PAD~shape~x~y~w~h~layer~net~number~holeR~points~rot~id~holeLength~holePoints~plated~…`
@@ -372,8 +500,18 @@ fn pad(f: &Frame, t: &[&str]) -> Option<Pad> {
         "ELLIPSE" | "OVAL" => PadShape::Oval,
         "RECT" => PadShape::Rect,
         "POLYGON" => {
-            let pts: Vec<Pt> = points(field(t, 10)).into_iter().map(|q| f.p(q) - at).collect();
-            PadShape::Custom { anchor_rect: false, shapes: vec![Shape { geom: Geom::Polyline { pts, closed: true }, stroke: Stroke::width(0), fill: Fill::Outline }] }
+            let pts: Vec<Pt> = points(field(t, 10))
+                .into_iter()
+                .map(|q| f.p(q) - at)
+                .collect();
+            PadShape::Custom {
+                anchor_rect: false,
+                shapes: vec![Shape {
+                    geom: Geom::Polyline { pts, closed: true },
+                    stroke: Stroke::width(0),
+                    fill: Fill::Outline,
+                }],
+            }
         }
         _ => return None,
     };
@@ -396,22 +534,36 @@ fn pad(f: &Frame, t: &[&str]) -> Option<Pad> {
         (_, Some(_)) => {
             if hole_len > 0.0 {
                 // A slot along the pad's long side.
-                let (sw, sh) = if w >= h { (hole_len, 2.0 * hole_r) } else { (2.0 * hole_r, hole_len) };
-                p.drill = Some(Drill { size: Size::mm(sw, sh), offset: Pt::ZERO });
+                let (sw, sh) = if w >= h {
+                    (hole_len, 2.0 * hole_r)
+                } else {
+                    (2.0 * hole_r, hole_len)
+                };
+                p.drill = Some(Drill {
+                    size: Size::mm(sw, sh),
+                    offset: Pt::ZERO,
+                });
             }
             if field(t, 15).trim() == "N" {
                 p.kind = PadKind::NonPlated;
                 p.layers = LayerSet::of(&[Layer::TopMask, Layer::BottomMask]);
             }
         }
-        ("2", None) => p.layers = LayerSet::of(&[Layer::BottomCopper, Layer::BottomMask, Layer::BottomPaste]),
+        ("2", None) => {
+            p.layers = LayerSet::of(&[Layer::BottomCopper, Layer::BottomMask, Layer::BottomPaste])
+        }
         _ => {}
     }
     Some(p)
 }
 
 /// The footprint, its 3D model reference, and the box of its body (for the courtyard).
-fn footprint_shapes(f: &Frame, shapes: &[Value], fp: &mut Footprint, warnings: &mut Vec<String>) -> (Option<ModelRef>, Option<Pt>, Option<Pt>) {
+fn footprint_shapes(
+    f: &Frame,
+    shapes: &[Value],
+    fp: &mut Footprint,
+    warnings: &mut Vec<String>,
+) -> (Option<ModelRef>, Option<Pt>, Option<Pt>) {
     let mut model = None;
     let (mut ref_at, mut value_at) = (None, None);
     for v in shapes {
@@ -427,31 +579,68 @@ fn footprint_shapes(f: &Frame, shapes: &[Value], fp: &mut Footprint, warnings: &
         match t[0] {
             "PAD" => match pad(f, &t) {
                 Some(p) => fp.pads.push(p),
-                None => warnings.push(format!("pad {} has a shape cadrs doesn't read ({})", field(&t, 8), field(&t, 1))),
+                None => warnings.push(format!(
+                    "pad {} has a shape cadrs doesn't read ({})",
+                    field(&t, 8),
+                    field(&t, 1)
+                )),
             },
             "HOLE" => {
                 let d = 2.0 * n(3) * U;
-                let mut p = new_pad("", PadShape::Circle, f.pt(n(1), n(2)), Size::mm(d, d), Some(mm(d)));
+                let mut p = new_pad(
+                    "",
+                    PadShape::Circle,
+                    f.pt(n(1), n(2)),
+                    Size::mm(d, d),
+                    Some(mm(d)),
+                );
                 p.kind = PadKind::NonPlated;
                 p.layers = LayerSet::of(&[Layer::TopMask, Layer::BottomMask]);
                 fp.pads.push(p);
             }
             "VIA" => {
                 let d = n(3) * U;
-                fp.pads.push(new_pad("", PadShape::Circle, f.pt(n(1), n(2)), Size::mm(d, d), Some(mm(2.0 * n(5) * U))));
+                fp.pads.push(new_pad(
+                    "",
+                    PadShape::Circle,
+                    f.pt(n(1), n(2)),
+                    Size::mm(d, d),
+                    Some(mm(2.0 * n(5) * U)),
+                ));
             }
             "TRACK" => {
-                let Some(layer) = fp_layer(field(&t, 2)) else { continue };
+                let Some(layer) = fp_layer(field(&t, 2)) else {
+                    continue;
+                };
                 let pts: Vec<Pt> = points(field(&t, 4)).into_iter().map(|q| f.p(q)).collect();
-                let geom = if pts.len() == 2 { Geom::Line { a: pts[0], b: pts[1] } } else { Geom::Polyline { pts, closed: false } };
+                let geom = if pts.len() == 2 {
+                    Geom::Line {
+                        a: pts[0],
+                        b: pts[1],
+                    }
+                } else {
+                    Geom::Polyline { pts, closed: false }
+                };
                 fp.shapes.push(fp_shape(geom, layer, n(1) * U, Fill::None));
             }
             "CIRCLE" => {
-                let Some(layer) = fp_layer(field(&t, 5)) else { continue };
-                fp.shapes.push(fp_shape(Geom::Circle { center: f.pt(n(1), n(2)), radius: mm(n(3) * U) }, layer, n(4) * U, Fill::None));
+                let Some(layer) = fp_layer(field(&t, 5)) else {
+                    continue;
+                };
+                fp.shapes.push(fp_shape(
+                    Geom::Circle {
+                        center: f.pt(n(1), n(2)),
+                        radius: mm(n(3) * U),
+                    },
+                    layer,
+                    n(4) * U,
+                    Fill::None,
+                ));
             }
             "ARC" => {
-                let Some(layer) = fp_layer(field(&t, 2)) else { continue };
+                let Some(layer) = fp_layer(field(&t, 2)) else {
+                    continue;
+                };
                 for sub in path::parse(field(&t, 4)) {
                     for g in sub_geoms(f, &sub) {
                         fp.shapes.push(fp_shape(g, layer, n(1) * U, Fill::None));
@@ -460,19 +649,40 @@ fn footprint_shapes(f: &Frame, shapes: &[Value], fp: &mut Footprint, warnings: &
             }
             "RECT" => {
                 // RECT~x~y~w~h~layer~id~locked~strokeWidth
-                let Some(layer) = fp_layer(field(&t, 5)) else { continue };
+                let Some(layer) = fp_layer(field(&t, 5)) else {
+                    continue;
+                };
                 let (x, y) = (n(1), n(2));
                 let width = if t.len() > 8 { n(8) * U } else { 0.1 };
-                fp.shapes.push(fp_shape(Geom::Rect { a: f.pt(x, y), b: f.pt(x + n(3), y + n(4)) }, layer, width, Fill::None));
+                fp.shapes.push(fp_shape(
+                    Geom::Rect {
+                        a: f.pt(x, y),
+                        b: f.pt(x + n(3), y + n(4)),
+                    },
+                    layer,
+                    width,
+                    Fill::None,
+                ));
             }
             "SOLIDREGION" => {
                 // SOLIDREGION~layer~net~path~type: the body outline on 99, copper on 1/2.
-                let Some(layer) = fp_layer(field(&t, 1)) else { continue };
-                let fill = if layer.is_copper() { Fill::Outline } else { Fill::None };
+                let Some(layer) = fp_layer(field(&t, 1)) else {
+                    continue;
+                };
+                let fill = if layer.is_copper() {
+                    Fill::Outline
+                } else {
+                    Fill::None
+                };
                 for sub in path::parse(field(&t, 3)) {
                     let pts: Vec<Pt> = sub.points(8).into_iter().map(|q| f.p(q)).collect();
                     if pts.len() >= 3 {
-                        fp.shapes.push(fp_shape(Geom::Polyline { pts, closed: true }, layer, if fill == Fill::None { 0.1 } else { 0.0 }, fill));
+                        fp.shapes.push(fp_shape(
+                            Geom::Polyline { pts, closed: true },
+                            layer,
+                            if fill == Fill::None { 0.1 } else { 0.0 },
+                            fill,
+                        ));
                     }
                 }
             }
@@ -483,10 +693,13 @@ fn footprint_shapes(f: &Frame, shapes: &[Value], fp: &mut Footprint, warnings: &
                     "P" => ref_at = Some(at),
                     "N" => value_at = Some(at),
                     _ => {
-                        let Some(layer) = fp_layer(field(&t, 7)) else { continue };
+                        let Some(layer) = fp_layer(field(&t, 7)) else {
+                            continue;
+                        };
                         if field(&t, 12) != "none" && !field(&t, 10).trim().is_empty() {
                             let size = (n(9) * U).max(0.5);
-                            let mut text = fp_text(field(&t, 10), at, layer, size, (n(4) * U).max(0.1));
+                            let mut text =
+                                fp_text(field(&t, 10), at, layer, size, (n(4) * U).max(0.1));
                             text.text.angle = -n(5);
                             fp.texts.push(text);
                         }
@@ -513,8 +726,15 @@ fn model_ref(f: &Frame, node: &Value) -> Option<ModelRef> {
     let mut lo = [f64::MAX; 2];
     let mut hi = [f64::MIN; 2];
     for c in node["childNodes"].as_array().into_iter().flatten() {
-        let d = c["attrs"]["points"].as_str().or_else(|| c["attrs"]["d"].as_str()).unwrap_or("");
-        for sub in path::parse(&if c["attrs"]["points"].is_string() { format!("M {d}") } else { d.to_string() }) {
+        let d = c["attrs"]["points"]
+            .as_str()
+            .or_else(|| c["attrs"]["d"].as_str())
+            .unwrap_or("");
+        for sub in path::parse(&if c["attrs"]["points"].is_string() {
+            format!("M {d}")
+        } else {
+            d.to_string()
+        }) {
             for q in sub.points(4) {
                 for i in 0..2 {
                     lo[i] = lo[i].min(q[i]);
@@ -523,14 +743,22 @@ fn model_ref(f: &Frame, node: &Value) -> Option<ModelRef> {
             }
         }
     }
-    let center = if lo[0] <= hi[0] { [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0] } else { [*origin.first()?, *origin.get(1)?] };
+    let center = if lo[0] <= hi[0] {
+        [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0]
+    } else {
+        [*origin.first()?, *origin.get(1)?]
+    };
     let rot = nums("c_rotation");
     Some(ModelRef {
         uuid,
         name: s("title").to_string(),
         center: f.xy(center[0], center[1]),
         z: (num(s("z")) * U * 1e4).round() / 1e4 + 0.0,
-        rotation: [rot.first().copied().unwrap_or(0.0), rot.get(1).copied().unwrap_or(0.0), rot.get(2).copied().unwrap_or(0.0)],
+        rotation: [
+            rot.first().copied().unwrap_or(0.0),
+            rot.get(1).copied().unwrap_or(0.0),
+            rot.get(2).copied().unwrap_or(0.0),
+        ],
     })
 }
 
@@ -547,12 +775,23 @@ fn footprint_box(fp: &Footprint) -> Option<([f64; 2], [f64; 2])> {
     for p in &fp.pads {
         let c = [to_mm(p.at.x), to_mm(p.at.y)];
         match &p.shape {
-            PadShape::Custom { shapes, .. } => shapes.iter().flat_map(|s| geom_points(&s.geom)).for_each(|q| add([c[0] + to_mm(q.x), c[1] + to_mm(q.y)])),
-            _ => corners(c, to_mm(p.size.w), to_mm(p.size.h), p.angle).into_iter().for_each(&mut add),
+            PadShape::Custom { shapes, .. } => shapes
+                .iter()
+                .flat_map(|s| geom_points(&s.geom))
+                .for_each(|q| add([c[0] + to_mm(q.x), c[1] + to_mm(q.y)])),
+            _ => corners(c, to_mm(p.size.w), to_mm(p.size.h), p.angle)
+                .into_iter()
+                .for_each(&mut add),
         }
     }
-    for s in fp.shapes.iter().filter(|s| matches!(s.layer, Layer::TopFab | Layer::TopSilk)) {
-        geom_points(&s.shape.geom).into_iter().for_each(|q| add([to_mm(q.x), to_mm(q.y)]));
+    for s in fp
+        .shapes
+        .iter()
+        .filter(|s| matches!(s.layer, Layer::TopFab | Layer::TopSilk))
+    {
+        geom_points(&s.shape.geom)
+            .into_iter()
+            .for_each(|q| add([to_mm(q.x), to_mm(q.y)]));
     }
     (lo[0] <= hi[0]).then_some((lo, hi))
 }
@@ -575,17 +814,33 @@ pub fn convert(result: &Value, lib: &str, info: &PartInfo) -> Result<Converted, 
     let head = &sym_data["head"];
     let para = &head["c_para"];
     let p = |k: &str| latin(para[k].as_str().unwrap_or(""));
-    let lcsc = result["lcsc"]["number"].as_str().map(str::to_string).unwrap_or_else(|| p("Supplier Part"));
+    let lcsc = result["lcsc"]["number"]
+        .as_str()
+        .map(str::to_string)
+        .unwrap_or_else(|| p("Supplier Part"));
     let fp_data = &result["packageDetail"]["dataStr"];
     if !fp_data.is_object() {
         return Err(format!("{lcsc}: EasyEDA has no footprint for this part"));
     }
     let fp_para = &fp_data["head"]["c_para"];
-    let package = fp_para["package"].as_str().or_else(|| result["packageDetail"]["title"].as_str()).unwrap_or("").trim().to_string();
-    let package = if package.is_empty() { format!("{lcsc}_footprint") } else { package };
+    let package = fp_para["package"]
+        .as_str()
+        .or_else(|| result["packageDetail"]["title"].as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let package = if package.is_empty() {
+        format!("{lcsc}_footprint")
+    } else {
+        package
+    };
     let name = {
         let n = p("name");
-        let n = if n.is_empty() { result["title"].as_str().unwrap_or(&lcsc).trim().to_string() } else { n };
+        let n = if n.is_empty() {
+            result["title"].as_str().unwrap_or(&lcsc).trim().to_string()
+        } else {
+            n
+        };
         n.replace(['/', '\\', ':'], "_")
     };
     let prefix = {
@@ -594,10 +849,29 @@ pub fn convert(result: &Value, lib: &str, info: &PartInfo) -> Result<Converted, 
     };
 
     // The symbol.
-    let description = if info.description.is_empty() { format!("{} {} ({})", p("Manufacturer"), p("Manufacturer Part"), package).trim().to_string() } else { info.description.clone() };
+    let description = if info.description.is_empty() {
+        format!(
+            "{} {} ({})",
+            p("Manufacturer"),
+            p("Manufacturer Part"),
+            package
+        )
+        .trim()
+        .to_string()
+    } else {
+        info.description.clone()
+    };
     let mut s = new_symbol(&name, &prefix, &description);
     let f = Frame::of(head);
-    let (ref_at, value_at) = symbol_shapes(&f, sym_data["shape"].as_array().map(Vec::as_slice).unwrap_or_default(), &mut s, &mut warnings);
+    let (ref_at, value_at) = symbol_shapes(
+        &f,
+        sym_data["shape"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default(),
+        &mut s,
+        &mut warnings,
+    );
     if s.pins.is_empty() {
         warnings.push("the symbol has no pins".into());
     }
@@ -606,12 +880,25 @@ pub fn convert(result: &Value, lib: &str, info: &PartInfo) -> Result<Converted, 
     s.fields[0].text.at = ref_at.unwrap_or_else(|| Pt::mm(snap(lo[0], g), snap(hi[1], g) + g));
     s.fields[1].text.at = value_at.unwrap_or_else(|| Pt::mm(snap(lo[0], g), snap(lo[1], g) - g));
     s.show_pin_names = s.pins.iter().any(|p| p.name != "~");
-    s.keywords = [p("Manufacturer Part"), info.category.clone(), lcsc.clone()].iter().filter(|w| !w.is_empty()).cloned().collect::<Vec<_>>().join(" ");
+    s.keywords = [p("Manufacturer Part"), info.category.clone(), lcsc.clone()]
+        .iter()
+        .filter(|w| !w.is_empty())
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(" ");
     set_field(&mut s, fields::FOOTPRINT, &format!("{lib}:{package}"));
-    let datasheet = if info.datasheet.is_empty() { format!("https://www.lcsc.com/product-detail/{lcsc}.html") } else { info.datasheet.clone() };
+    let datasheet = if info.datasheet.is_empty() {
+        format!("https://www.lcsc.com/product-detail/{lcsc}.html")
+    } else {
+        info.datasheet.clone()
+    };
     set_field(&mut s, fields::DATASHEET, &datasheet);
     set_field(&mut s, field_names::LCSC, &lcsc);
-    for (k, v) in [(field_names::MANUFACTURER, p("Manufacturer")), (field_names::MPN, p("Manufacturer Part")), (field_names::JLCPCB_CLASS, p("JLCPCB Part Class"))] {
+    for (k, v) in [
+        (field_names::MANUFACTURER, p("Manufacturer")),
+        (field_names::MPN, p("Manufacturer Part")),
+        (field_names::JLCPCB_CLASS, p("JLCPCB Part Class")),
+    ] {
         if !v.is_empty() {
             set_field(&mut s, k, &v);
         }
@@ -620,9 +907,24 @@ pub fn convert(result: &Value, lib: &str, info: &PartInfo) -> Result<Converted, 
 
     // The footprint.
     let ff = Frame::of(&fp_data["head"]);
-    let mut fp = new_footprint(&format!("{lib}:{package}"), &format!("{package} (LCSC {lcsc}). From the {}.", crate::SOURCE), MountKind::Smd, Pt::ZERO, Pt::ZERO, Pt::ZERO);
+    let mut fp = new_footprint(
+        &format!("{lib}:{package}"),
+        &format!("{package} (LCSC {lcsc}). From the {}.", crate::SOURCE),
+        MountKind::Smd,
+        Pt::ZERO,
+        Pt::ZERO,
+        Pt::ZERO,
+    );
     fp.keywords = [package.clone(), lcsc.clone()].join(" ");
-    let (model, fp_ref, fp_value) = footprint_shapes(&ff, fp_data["shape"].as_array().map(Vec::as_slice).unwrap_or_default(), &mut fp, &mut warnings);
+    let (model, fp_ref, fp_value) = footprint_shapes(
+        &ff,
+        fp_data["shape"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default(),
+        &mut fp,
+        &mut warnings,
+    );
     if fp.pads.iter().any(|p| p.kind == PadKind::ThroughHole) {
         fp.attrs.mount = MountKind::ThroughHole;
     }
@@ -631,10 +933,27 @@ pub fn convert(result: &Value, lib: &str, info: &PartInfo) -> Result<Converted, 
     }
     // A courtyard round the pads and body, 0.25 mm out (EasyEDA footprints have none).
     if let Some((lo, hi)) = footprint_box(&fp) {
-        let r = |v: f64, up: bool| if up { (v * 100.0).ceil() / 100.0 } else { (v * 100.0).floor() / 100.0 };
-        let (a, b) = (Pt::mm(r(lo[0] - 0.25, false), r(lo[1] - 0.25, false)), Pt::mm(r(hi[0] + 0.25, true), r(hi[1] + 0.25, true)));
-        fp.shapes.push(fp_shape(Geom::Rect { a, b }, Layer::TopCourtyard, 0.05, Fill::None));
-        let center = Pt::mm(((lo[0] + hi[0]) / 2.0 * 100.0).round() / 100.0, ((lo[1] + hi[1]) / 2.0 * 100.0).round() / 100.0);
+        let r = |v: f64, up: bool| {
+            if up {
+                (v * 100.0).ceil() / 100.0
+            } else {
+                (v * 100.0).floor() / 100.0
+            }
+        };
+        let (a, b) = (
+            Pt::mm(r(lo[0] - 0.25, false), r(lo[1] - 0.25, false)),
+            Pt::mm(r(hi[0] + 0.25, true), r(hi[1] + 0.25, true)),
+        );
+        fp.shapes.push(fp_shape(
+            Geom::Rect { a, b },
+            Layer::TopCourtyard,
+            0.05,
+            Fill::None,
+        ));
+        let center = Pt::mm(
+            ((lo[0] + hi[0]) / 2.0 * 100.0).round() / 100.0,
+            ((lo[1] + hi[1]) / 2.0 * 100.0).round() / 100.0,
+        );
         fp.fields[0].text.text.at = fp_ref.unwrap_or(Pt::new(center.x, b.y + mm(1.0)));
         fp.fields[1].text.text.at = fp_value.unwrap_or(Pt::new(center.x, a.y - mm(1.0)));
         fp.texts[0].text.at = center;
@@ -642,18 +961,45 @@ pub fn convert(result: &Value, lib: &str, info: &PartInfo) -> Result<Converted, 
     // Pads take their symbol pin's name and type (as the board's netlist would).
     for pad in &mut fp.pads {
         if let Some(pin) = s.pins.iter().find(|p| p.number == pad.number) {
-            pad.pin_function = if pin.name == "~" { String::new() } else { pin.name.clone() };
+            pad.pin_function = if pin.name == "~" {
+                String::new()
+            } else {
+                pin.name.clone()
+            };
         }
     }
-    Ok(Converted { symbol: s, footprint: fp, model, warnings })
+    Ok(Converted {
+        symbol: s,
+        footprint: fp,
+        model,
+        warnings,
+    })
 }
 
 /// Rotates `v` as the 3D view will (Z · Y · X, degrees).
 fn rotate(v: [f64; 3], deg: [f64; 3]) -> [f64; 3] {
     let [rx, ry, rz] = deg.map(f64::to_radians);
-    let x = |v: [f64; 3]| [v[0], v[1] * rx.cos() - v[2] * rx.sin(), v[1] * rx.sin() + v[2] * rx.cos()];
-    let y = |v: [f64; 3]| [v[0] * ry.cos() + v[2] * ry.sin(), v[1], -v[0] * ry.sin() + v[2] * ry.cos()];
-    let z = |v: [f64; 3]| [v[0] * rz.cos() - v[1] * rz.sin(), v[0] * rz.sin() + v[1] * rz.cos(), v[2]];
+    let x = |v: [f64; 3]| {
+        [
+            v[0],
+            v[1] * rx.cos() - v[2] * rx.sin(),
+            v[1] * rx.sin() + v[2] * rx.cos(),
+        ]
+    };
+    let y = |v: [f64; 3]| {
+        [
+            v[0] * ry.cos() + v[2] * ry.sin(),
+            v[1],
+            -v[0] * ry.sin() + v[2] * ry.cos(),
+        ]
+    };
+    let z = |v: [f64; 3]| {
+        [
+            v[0] * rz.cos() - v[1] * rz.sin(),
+            v[0] * rz.sin() + v[1] * rz.cos(),
+            v[2],
+        ]
+    };
     z(y(x(v)))
 }
 
@@ -662,7 +1008,9 @@ pub fn obj_extent(obj: &str, rotation: [f64; 3]) -> Option<([f64; 3], [f64; 3])>
     let mut lo = [f64::MAX; 3];
     let mut hi = [f64::MIN; 3];
     for line in obj.lines() {
-        let Some(rest) = line.strip_prefix("v ") else { continue };
+        let Some(rest) = line.strip_prefix("v ") else {
+            continue;
+        };
         let c: Vec<f64> = rest.split_whitespace().take(3).map(num).collect();
         if c.len() < 3 {
             continue;
@@ -682,19 +1030,38 @@ pub fn obj_extent(obj: &str, rotation: [f64; 3]) -> Option<([f64; 3], [f64; 3])>
 /// that extent, shown when the file can't be.
 pub fn place_model(m: &ModelRef, source: &str, obj: Option<&str>) -> Model3d {
     let r3 = |v: f64| (v * 1000.0).round() / 1000.0;
-    let (offset, body) = match obj.and_then(|o| Some((obj_extent(o, m.rotation)?, obj_extent(o, [0.0; 3])?))) {
-        Some(((lo, hi), (own_lo, own_hi))) => {
-            let c = [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0];
-            let mut body = cadrs_eda::model3d::Body::default();
-            // In the model's own frame: the view turns and moves it with the file.
-            body.cuboid(own_lo, own_hi, cadrs_eda::model3d::colors::PLASTIC);
-            ([r3(m.center[0] - c[0]), r3(m.center[1] - c[1]), r3(m.z - lo[2])], Some(body))
-        }
-        None => ([m.center[0], m.center[1], m.z], None),
-    };
+    let (offset, body) =
+        match obj.and_then(|o| Some((obj_extent(o, m.rotation)?, obj_extent(o, [0.0; 3])?))) {
+            Some(((lo, hi), (own_lo, own_hi))) => {
+                let c = [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0];
+                let mut body = cadrs_eda::model3d::Body::default();
+                // In the model's own frame: the view turns and moves it with the file.
+                body.cuboid(own_lo, own_hi, cadrs_eda::model3d::colors::PLASTIC);
+                (
+                    [
+                        r3(m.center[0] - c[0]),
+                        r3(m.center[1] - c[1]),
+                        r3(m.z - lo[2]),
+                    ],
+                    Some(body),
+                )
+            }
+            None => ([m.center[0], m.center[1], m.z], None),
+        };
     // The 3D view turns by minus these (KiCad's sense); EasyEDA's are the other way.
-    let rotation = m.rotation.map(|a| if a == 0.0 { 0.0 } else { (-a).rem_euclid(360.0) });
-    Model3d { offset, rotation, body, ..Model3d::file(source) }
+    let rotation = m.rotation.map(|a| {
+        if a == 0.0 {
+            0.0
+        } else {
+            (-a).rem_euclid(360.0)
+        }
+    });
+    Model3d {
+        offset,
+        rotation,
+        body,
+        ..Model3d::file(source)
+    }
 }
 
 /// A name without its bracketed parts in other scripts ("Ai-Thinker(安信可)" → "Ai-Thinker"):
@@ -703,7 +1070,9 @@ pub fn latin(s: &str) -> String {
     let mut out = String::new();
     let mut rest = s;
     while let Some(open) = rest.find(['(', '（']) {
-        let close = rest[open..].find([')', '）']).map(|c| open + c + rest[open + c..].chars().next().map_or(1, char::len_utf8));
+        let close = rest[open..]
+            .find([')', '）'])
+            .map(|c| open + c + rest[open + c..].chars().next().map_or(1, char::len_utf8));
         let Some(close) = close else { break };
         out += &rest[..open];
         if rest[open..close].is_ascii() {
@@ -720,7 +1089,10 @@ mod tests {
     #[test]
     fn latin_names() {
         assert_eq!(super::latin("Ai-Thinker(安信可)"), "Ai-Thinker");
-        assert_eq!(super::latin("UNI-ROYAL(Uniroyal Elec)"), "UNI-ROYAL(Uniroyal Elec)");
+        assert_eq!(
+            super::latin("UNI-ROYAL(Uniroyal Elec)"),
+            "UNI-ROYAL(Uniroyal Elec)"
+        );
         assert_eq!(super::latin("TI（德州仪器） x"), "TI x");
     }
 }

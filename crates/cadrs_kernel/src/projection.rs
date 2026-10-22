@@ -25,8 +25,8 @@ use nalgebra::{Point2, Point3, Vector3};
 use serde::{Deserialize, Serialize};
 
 use crate::naming::{EdgeName, FaceName};
-use crate::{EdgeId, FaceId, FaceInfo, SurfaceKind};
 use crate::native::tol;
+use crate::{EdgeId, FaceId, FaceInfo, SurfaceKind};
 
 /// Where a view looks from.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -206,7 +206,11 @@ impl Projection {
     }
 
     /// The edges of one visibility and class.
-    pub fn of(&self, visibility: ProjVisibility, class: ProjClass) -> impl Iterator<Item = &ProjEdge> {
+    pub fn of(
+        &self,
+        visibility: ProjVisibility,
+        class: ProjClass,
+    ) -> impl Iterator<Item = &ProjEdge> {
         self.edges
             .iter()
             .filter(move |e| e.visibility == visibility && e.class == class)
@@ -237,7 +241,13 @@ pub struct SourceBody<'a> {
 
 /// Whether the straight 2D segment `start..end` is an outline of the cylinder `f`: parallel to
 /// its projected axis, the radius away from it, and along the face.
-fn cylinder_outline(frame: &ViewFrame, f: &FaceInfo, start: Point2<f64>, end: Point2<f64>, tol: f64) -> bool {
+fn cylinder_outline(
+    frame: &ViewFrame,
+    f: &FaceInfo,
+    start: Point2<f64>,
+    end: Point2<f64>,
+    tol: f64,
+) -> bool {
     let (SurfaceKind::Cylinder, Some(axis), Some(r)) = (f.kind, f.axis, f.radius) else {
         return false;
     };
@@ -286,7 +296,10 @@ pub fn attach_sources(proj: &mut Projection, frame: &ViewFrame, bodies: &[Source
             if poly.len() < 2 {
                 continue;
             }
-            let pts: Vec<(Point2<f64>, f64)> = poly.iter().map(|p| (frame.to_2d(p), frame.depth(p))).collect();
+            let pts: Vec<(Point2<f64>, f64)> = poly
+                .iter()
+                .map(|p| (frame.to_2d(p), frame.depth(p)))
+                .collect();
             let mut min = pts[0].0;
             let mut max = pts[0].0;
             for (p, _) in &pts {
@@ -304,7 +317,8 @@ pub fn attach_sources(proj: &mut Projection, frame: &ViewFrame, bodies: &[Source
     }
     // The depth where `p` is within `tol` of a candidate's projection.
     let near = |c: &Cand, p: Point2<f64>| -> Option<f64> {
-        if p.x < c.min.x - tol || p.y < c.min.y - tol || p.x > c.max.x + tol || p.y > c.max.y + tol {
+        if p.x < c.min.x - tol || p.y < c.min.y - tol || p.x > c.max.x + tol || p.y > c.max.y + tol
+        {
             return None;
         }
         let mut best: Option<(f64, f64)> = None;
@@ -354,7 +368,11 @@ pub fn attach_sources(proj: &mut Projection, frame: &ViewFrame, bodies: &[Source
                     continue;
                 };
                 let c = &cands[ci];
-                let seam = bodies[c.body].seams.iter().find(|(id, _)| *id == c.edge).map(|(_, f)| *f);
+                let seam = bodies[c.body]
+                    .seams
+                    .iter()
+                    .find(|(id, _)| *id == c.edge)
+                    .map(|(_, f)| *f);
                 match seam {
                     None => {
                         e.source = Some(ProjSource {
@@ -364,10 +382,13 @@ pub fn attach_sources(proj: &mut Projection, frame: &ViewFrame, bodies: &[Source
                         });
                     }
                     Some(face) => {
-                        let on_outline = match (e.curve, bodies[c.body].faces.iter().find(|f| f.id == face)) {
-                            (ProjCurve::Line { start, end }, Some(f)) => cylinder_outline(frame, f, start, end, tol),
-                            _ => false,
-                        };
+                        let on_outline =
+                            match (e.curve, bodies[c.body].faces.iter().find(|f| f.id == face)) {
+                                (ProjCurve::Line { start, end }, Some(f)) => {
+                                    cylinder_outline(frame, f, start, end, tol)
+                                }
+                                _ => false,
+                            };
                         if on_outline {
                             e.class = ProjClass::Outline;
                             e.source = Some(ProjSource {
@@ -431,7 +452,11 @@ pub fn reveal_unoccluded(
     tol: f64,
     skin: f64,
 ) {
-    if !proj.edges.iter().any(|e| e.visibility == ProjVisibility::Hidden) {
+    if !proj
+        .edges
+        .iter()
+        .any(|e| e.visibility == ProjVisibility::Hidden)
+    {
         return;
     }
     struct Cand {
@@ -451,7 +476,12 @@ pub fn reveal_unoccluded(
                 min = Point2::new(min.x.min(p.x), min.y.min(p.y));
                 max = Point2::new(max.x.max(p.x), max.y.max(p.y));
             }
-            Cand { p2, p3: poly.clone(), min, max }
+            Cand {
+                p2,
+                p3: poly.clone(),
+                min,
+                max,
+            }
         })
         .collect();
     // The triangles that can hide anything (not seen edge-on), with their 2D bounds.
@@ -467,8 +497,14 @@ pub fn reveal_unoccluded(
         })
         .map(|t| {
             let q = t.map(|p| frame.to_2d(&p));
-            let min = Point2::new(q[0].x.min(q[1].x).min(q[2].x), q[0].y.min(q[1].y).min(q[2].y));
-            let max = Point2::new(q[0].x.max(q[1].x).max(q[2].x), q[0].y.max(q[1].y).max(q[2].y));
+            let min = Point2::new(
+                q[0].x.min(q[1].x).min(q[2].x),
+                q[0].y.min(q[1].y).min(q[2].y),
+            );
+            let max = Point2::new(
+                q[0].x.max(q[1].x).max(q[2].x),
+                q[0].y.max(q[1].y).max(q[2].y),
+            );
             (*t, min, max)
         })
         .collect();
@@ -477,7 +513,11 @@ pub fn reveal_unoccluded(
         let q = frame.to_2d(&p);
         let rd = -dir;
         for (t, min, max) in &tris {
-            if q.x < min.x - tol::ROUNDOFF || q.y < min.y - tol::ROUNDOFF || q.x > max.x + tol::ROUNDOFF || q.y > max.y + tol::ROUNDOFF {
+            if q.x < min.x - tol::ROUNDOFF
+                || q.y < min.y - tol::ROUNDOFF
+                || q.x > max.x + tol::ROUNDOFF
+                || q.y > max.y + tol::ROUNDOFF
+            {
                 continue;
             }
             let (e1, e2) = (t[1] - t[0], t[2] - t[0]);
@@ -507,7 +547,11 @@ pub fn reveal_unoccluded(
     // crosses there doesn't count) is seen from the eye there.
     let seen = |q: Point2<f64>, along: nalgebra::Vector2<f64>| -> bool {
         for c in &cands {
-            if q.x < c.min.x - tol || q.y < c.min.y - tol || q.x > c.max.x + tol || q.y > c.max.y + tol {
+            if q.x < c.min.x - tol
+                || q.y < c.min.y - tol
+                || q.x > c.max.x + tol
+                || q.y > c.max.y + tol
+            {
                 continue;
             }
             for (i, w) in c.p2.windows(2).enumerate() {
@@ -515,7 +559,10 @@ pub fn reveal_unoccluded(
                 let sd = w[1] - w[0];
                 let sl = sd.norm();
                 // Parallel to within about 17°: a mesh's chords of a small circle turn that much.
-                if d > tol || sl < tol::DEGENERATE || (sd.x * along.y - sd.y * along.x).abs() > 0.3 * sl {
+                if d > tol
+                    || sl < tol::DEGENERATE
+                    || (sd.x * along.y - sd.y * along.x).abs() > 0.3 * sl
+                {
                     continue;
                 }
                 if clear(c.p3[i] + (c.p3[i + 1] - c.p3[i]) * t) {
@@ -535,7 +582,10 @@ pub fn reveal_unoccluded(
                 let (d, t) = segment_distance(q, w[0], w[1]);
                 // Beside the segment, not past its end: a line ending short of `q` leaves it bare.
                 let beside = (t > tol::REL && t < 1.0 - tol::REL) || d < tol::POINT;
-                sl > tol::DEGENERATE && d <= tol && beside && (sd.x * along.y - sd.y * along.x).abs() <= 0.3 * sl
+                sl > tol::DEGENERATE
+                    && d <= tol
+                    && beside
+                    && (sd.x * along.y - sd.y * along.x).abs() <= 0.3 * sl
             })
         })
     };
@@ -549,9 +599,16 @@ pub fn reveal_unoccluded(
         Hidden,
     }
     let originals = std::mem::take(&mut proj.edges);
-    let mut visible: Vec<ProjEdge> = originals.iter().filter(|e| e.visibility == ProjVisibility::Visible).cloned().collect();
+    let mut visible: Vec<ProjEdge> = originals
+        .iter()
+        .filter(|e| e.visibility == ProjVisibility::Visible)
+        .cloned()
+        .collect();
     let mut hidden: Vec<ProjEdge> = Vec::new();
-    for e in originals.into_iter().filter(|e| e.visibility == ProjVisibility::Hidden) {
+    for e in originals
+        .into_iter()
+        .filter(|e| e.visibility == ProjVisibility::Hidden)
+    {
         let len = e.length();
         if e.class == ProjClass::Outline || len <= 2.0 * tol {
             hidden.push(e);
@@ -639,7 +696,11 @@ fn sub_piece(e: &ProjEdge, t0: f64, t1: f64, visible: bool) -> ProjEdge {
         _ => ProjCurve::Polyline,
     };
     ProjEdge {
-        visibility: if visible { ProjVisibility::Visible } else { ProjVisibility::Hidden },
+        visibility: if visible {
+            ProjVisibility::Visible
+        } else {
+            ProjVisibility::Hidden
+        },
         class: e.class,
         curve,
         points,
@@ -660,8 +721,16 @@ mod tests {
         let p = |x: f64, y: f64, z: f64| Point3::new(x, y, z);
         let edges = vec![(EdgeId(0), vec![p(-36.0, 35.0, 6.0), p(36.0, 35.0, 6.0)])];
         let triangles = vec![
-            [p(-15.0, 22.0, 75.0), p(15.0, 22.0, 75.0), p(15.0, 35.0, 75.0)],
-            [p(-15.0, 22.0, 75.0), p(15.0, 35.0, 75.0), p(-15.0, 35.0, 75.0)],
+            [
+                p(-15.0, 22.0, 75.0),
+                p(15.0, 22.0, 75.0),
+                p(15.0, 35.0, 75.0),
+            ],
+            [
+                p(-15.0, 22.0, 75.0),
+                p(15.0, 35.0, 75.0),
+                p(-15.0, 35.0, 75.0),
+            ],
             [p(-36.0, 35.0, 0.0), p(36.0, 35.0, 0.0), p(36.0, 35.0, 6.0)],
             [p(-36.0, 35.0, 0.0), p(36.0, 35.0, 6.0), p(-36.0, 35.0, 6.0)],
         ];
@@ -687,9 +756,24 @@ mod tests {
         spans.sort_by(|a, b| a.1.total_cmp(&b.1));
         assert_eq!(spans.len(), 3, "{spans:?}");
         let near = |a: f64, b: f64| (a - b).abs() < 1e-3;
-        assert!(spans[0].0 == ProjVisibility::Visible && near(spans[0].1, -36.0) && near(spans[0].2, -15.0), "{spans:?}");
-        assert!(spans[1].0 == ProjVisibility::Hidden && near(spans[1].1, -15.0) && near(spans[1].2, 15.0), "{spans:?}");
-        assert!(spans[2].0 == ProjVisibility::Visible && near(spans[2].1, 15.0) && near(spans[2].2, 36.0), "{spans:?}");
+        assert!(
+            spans[0].0 == ProjVisibility::Visible
+                && near(spans[0].1, -36.0)
+                && near(spans[0].2, -15.0),
+            "{spans:?}"
+        );
+        assert!(
+            spans[1].0 == ProjVisibility::Hidden
+                && near(spans[1].1, -15.0)
+                && near(spans[1].2, 15.0),
+            "{spans:?}"
+        );
+        assert!(
+            spans[2].0 == ProjVisibility::Visible
+                && near(spans[2].1, 15.0)
+                && near(spans[2].2, 36.0),
+            "{spans:?}"
+        );
     }
 
     #[test]
@@ -708,8 +792,14 @@ mod tests {
         let f = ViewFrame::new(Vector3::y(), Vector3::x());
         // Two parallel edges at y = 0 (near) and y = 10 (far) project onto the same line.
         let edges = vec![
-            (EdgeId(0), vec![Point3::new(0.0, 10.0, 0.0), Point3::new(10.0, 10.0, 0.0)]),
-            (EdgeId(1), vec![Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 0.0, 0.0)]),
+            (
+                EdgeId(0),
+                vec![Point3::new(0.0, 10.0, 0.0), Point3::new(10.0, 10.0, 0.0)],
+            ),
+            (
+                EdgeId(1),
+                vec![Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 0.0, 0.0)],
+            ),
         ];
         let line = |v| ProjEdge {
             visibility: v,
@@ -724,7 +814,16 @@ mod tests {
         let mut p = Projection {
             edges: vec![line(ProjVisibility::Visible), line(ProjVisibility::Hidden)],
         };
-        attach_sources(&mut p, &f, &[SourceBody { edges: &edges, faces: &[], seams: &[] }], 0.01);
+        attach_sources(
+            &mut p,
+            &f,
+            &[SourceBody {
+                edges: &edges,
+                faces: &[],
+                seams: &[],
+            }],
+            0.01,
+        );
         assert_eq!(p.edges[0].source.unwrap().edge, Some(EdgeId(1)));
         assert_eq!(p.edges[1].source.unwrap().edge, Some(EdgeId(0)));
     }

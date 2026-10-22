@@ -35,10 +35,10 @@ use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use std::time::{Duration, Instant};
 
 use cadrs_kernel::BodyId;
-use serde::{Deserialize, Serialize};
 use cadrs_sketch::geom::BezierGeom;
 use cadrs_sketch::region::{Piece, Region};
 use cadrs_sketch::{CurveId, CurveKind, Sketch, Vec2, Vec3};
+use serde::{Deserialize, Serialize};
 
 use crate::brep::{ChainGeom, ProfileGroup};
 use crate::document::{BodyType, ExtrudeFeature, Feature, FeatureKind, RegionRef};
@@ -48,14 +48,14 @@ use crate::parts::{Part, PartKind};
 
 /// Import and export jobs on the worker (P3F.2).
 pub mod exchange;
-/// The kernel in a process of its own, so a crash in it isn't the app's.
-pub mod process;
-/// Work on the kernel session as named requests, which can run in the kernel process.
-pub mod task;
 #[cfg(feature = "brep")]
 pub mod persist;
+/// The kernel in a process of its own, so a crash in it isn't the app's.
+pub mod process;
 #[cfg(feature = "brep")]
 pub mod session;
+/// Work on the kernel session as named requests, which can run in the kernel process.
+pub mod task;
 
 /// The result of rebuilding a feature list.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -168,7 +168,10 @@ impl Build {
 
     /// Why a feature built with a warning (P3.10, PS11.1), if it did.
     pub fn warning(&self, feature: FeatureId) -> Option<&str> {
-        self.warnings.iter().find(|(f, _)| *f == feature).map(|(_, e)| e.as_str())
+        self.warnings
+            .iter()
+            .find(|(f, _)| *f == feature)
+            .map(|(_, e)| e.as_str())
     }
 
     /// P3D.1: the feature's status: failed, built with a warning, or fine.
@@ -243,12 +246,19 @@ struct State {
 /// Why a feature can't change a part with no kernel body: a derived board's component is a mesh
 /// (`docs/PCB_IN_PART_STUDIO.md` Q1), which modelling features leave alone.
 fn no_body(p: &PartState) -> String {
-    format!("{} is a board component (a mesh, no solid): modelling features can't change it", p.part.name)
+    format!(
+        "{} is a board component (a mesh, no solid): modelling features can't change it",
+        p.part.name
+    )
 }
 
 /// A placed component mesh (`Rebuilder::placed_components`): the unplaced mesh it was made from,
 /// the placed one and its volume properties.
-type PlacedComponent = (Arc<crate::solid::Solid>, Arc<crate::solid::Solid>, Option<cadrs_kernel::MassProperties>);
+type PlacedComponent = (
+    Arc<crate::solid::Solid>,
+    Arc<crate::solid::Solid>,
+    Option<cadrs_kernel::MassProperties>,
+);
 
 impl Rebuilder {
     /// A part's kernel body; a board component (a mesh) has none, and is noted as left alone
@@ -265,16 +275,32 @@ impl Rebuilder {
 
     /// [`Self::compute`], and the board components it left alone: a warning when it built,
     /// the reason when it failed (nothing else was picked).
-    fn compute_noting_meshes(&mut self, before: &[Feature], f: &Feature, state: &Arc<State>) -> Output {
+    fn compute_noting_meshes(
+        &mut self,
+        before: &[Feature],
+        f: &Feature,
+        state: &Arc<State>,
+    ) -> Output {
         self.skipped_meshes.borrow_mut().clear();
         let mut o = self.compute(before, f, state);
         let skipped = std::mem::take(&mut *self.skipped_meshes.borrow_mut());
         if !skipped.is_empty() {
             let (one, names) = (skipped.len() == 1, skipped.join(", "));
             // Nothing but components picked: nothing changed, which is a failure.
-            let unchanged = o.state.parts.len() == state.parts.len() && o.state.parts.iter().zip(&state.parts).all(|(a, b)| a.part.id == b.part.id && Arc::ptr_eq(&a.part.solid, &b.part.solid));
+            let unchanged = o.state.parts.len() == state.parts.len()
+                && o.state.parts.iter().zip(&state.parts).all(|(a, b)| {
+                    a.part.id == b.part.id && Arc::ptr_eq(&a.part.solid, &b.part.solid)
+                });
             if o.error.is_some() || unchanged {
-                o.error = Some(if one { format!("{names} is a board component (a mesh, no solid): modelling features can't change it") } else { format!("{names} are board components (meshes, no solids): modelling features can't change them") });
+                o.error = Some(if one {
+                    format!(
+                        "{names} is a board component (a mesh, no solid): modelling features can't change it"
+                    )
+                } else {
+                    format!(
+                        "{names} are board components (meshes, no solids): modelling features can't change them"
+                    )
+                });
             } else {
                 let why = format!("Left alone (board components are meshes): {names}");
                 o.warning = Some(match o.warning.take() {
@@ -375,7 +401,12 @@ pub struct Rebuilder {
     skipped_meshes: std::cell::RefCell<Vec<String>>,
     /// Derived boards' solids, newest first: (outline key, body, its curves, warnings)
     /// (`kernel_ops::derived`'s `board_body_cached`).
-    board_bodies: Vec<(u64, BodyId, Vec<crate::pcb::board3d::TaggedCurve>, Vec<String>)>,
+    board_bodies: Vec<(
+        u64,
+        BodyId,
+        Vec<crate::pcb::board3d::TaggedCurve>,
+        Vec<String>,
+    )>,
     /// Derived boards' placed component meshes, by feature, copy, footprint and place, with
     /// the unplaced mesh they were made from.
     placed_components: HashMap<u64, PlacedComponent>,
@@ -395,7 +426,10 @@ impl Default for Rebuilder {
 /// for the app's "Rebuilding…" indicator. Only rebuilds on that thread count, and only the
 /// top-level one (not a Derived feature's source rebuilt inside it).
 pub fn progress() -> (usize, usize) {
-    (PROGRESS_DONE.load(Ordering::Relaxed), PROGRESS_TOTAL.load(Ordering::Relaxed))
+    (
+        PROGRESS_DONE.load(Ordering::Relaxed),
+        PROGRESS_TOTAL.load(Ordering::Relaxed),
+    )
 }
 
 static PROGRESS_DONE: AtomicUsize = AtomicUsize::new(0);
@@ -429,9 +463,15 @@ pub fn chain_keys(features: &[Feature]) -> Vec<u64> {
         if !f.is_part_feature() {
             continue;
         }
-        let below = parent_below(features, i).or_else(|| var_errors.iter().find(|(id, _)| *id == f.id).map(|(_, w)| w.clone()));
+        let below = parent_below(features, i).or_else(|| {
+            var_errors
+                .iter()
+                .find(|(id, _)| *id == f.id)
+                .map(|(_, w)| w.clone())
+        });
         // As the rebuild: a feature that crashed the kernel process fails without being computed.
-        let below = below.or_else(|| process::is_poisoned(key).then(|| process::CRASHED.to_string()));
+        let below =
+            below.or_else(|| process::is_poisoned(key).then(|| process::CRASHED.to_string()));
         if let Some(why) = &below {
             key = chain_key_str(key, why);
         }
@@ -546,7 +586,9 @@ impl Rebuilder {
         self.rebuild(&features[..i]);
         let before = self.last.clone();
         let stage_for = self.stage_for.replace(id);
-        let output = catch_unwind(AssertUnwindSafe(|| self.compute(&features[..i], &features[i], &before)));
+        let output = catch_unwind(AssertUnwindSafe(|| {
+            self.compute(&features[..i], &features[i], &before)
+        }));
         self.stage_for = stage_for;
         // The parts it made are nobody's: only the stage is kept.
         if let Ok(o) = &output {
@@ -585,7 +627,10 @@ impl Rebuilder {
         let var_errors = crate::variables::check(features, &cadrs_sketch::units::Units::default());
         let report = self.depth == 0 && REPORTS_PROGRESS.with(|r| r.get());
         if report {
-            let total = features[..last.map_or(0, |l| l + 1)].iter().filter(|f| f.is_part_feature()).count();
+            let total = features[..last.map_or(0, |l| l + 1)]
+                .iter()
+                .filter(|f| f.is_part_feature())
+                .count();
             PROGRESS_DONE.store(0, Ordering::Relaxed);
             PROGRESS_TOTAL.store(total, Ordering::Relaxed);
             process::emit(&process::Event::Progress(0, total));
@@ -600,17 +645,28 @@ impl Rebuilder {
             // A parent below it in the list (PS11.3): it fails, and leaves the parts alone. The
             // chain key covers only what is above, so this outcome gets a key of its own (a
             // result cached while the parent was missing altogether must not stand for it).
-            let below = parent_below(features, i).or_else(|| var_errors.iter().find(|(id, _)| *id == f.id).map(|(_, w)| w.clone()));
+            let below = parent_below(features, i).or_else(|| {
+                var_errors
+                    .iter()
+                    .find(|(id, _)| *id == f.id)
+                    .map(|(_, w)| w.clone())
+            });
             // A feature that crashed the kernel process isn't computed again (until it, or a
             // feature above it, changes: its key changes).
-            let below = below.or_else(|| process::is_poisoned(key).then(|| process::CRASHED.to_string()));
+            let below =
+                below.or_else(|| process::is_poisoned(key).then(|| process::CRASHED.to_string()));
             if let Some(why) = &below {
                 key = chain_key_str(key, why);
             }
             // A cached output showing a board's skin that has left the blob cache is made again
             // (an older layout's, or another document's with the same feature ids).
-            if self.entries.get(&key).is_some_and(|e| e.output.state.parts.iter().any(|p| crate::pcb::board3d::shows_forgotten_skin(&p.part.solid)))
-                && let Some(e) = self.entries.remove(&key)
+            if self.entries.get(&key).is_some_and(|e| {
+                e.output
+                    .state
+                    .parts
+                    .iter()
+                    .any(|p| crate::pcb::board3d::shows_forgotten_skin(&p.part.solid))
+            }) && let Some(e) = self.entries.remove(&key)
             {
                 self.release_unheld(e.output.owned);
             }
@@ -653,7 +709,10 @@ impl Rebuilder {
             }
             if report {
                 let done = PROGRESS_DONE.fetch_add(1, Ordering::Relaxed) + 1;
-                process::emit(&process::Event::Progress(done, PROGRESS_TOTAL.load(Ordering::Relaxed)));
+                process::emit(&process::Event::Progress(
+                    done,
+                    PROGRESS_TOTAL.load(Ordering::Relaxed),
+                ));
             }
             let entry = self.entries.get_mut(&key).expect("just inserted");
             entry.last_used = generation;
@@ -676,10 +735,14 @@ impl Rebuilder {
             }
             if let Some(e) = &entry.output.error {
                 out.errors.push((f.id, e.clone()));
-            } else if pattern_seeds(f).iter().any(|s| out.errors.iter().any(|(e, _)| e == s)) {
+            } else if pattern_seeds(f)
+                .iter()
+                .any(|s| out.errors.iter().any(|(e, _)| e == s))
+            {
                 // P3D.4 (IR6.1, `ex1-step1.png`): a feature pattern or mirror of a feature
                 // that failed fails too.
-                out.errors.push((f.id, "A feature to pattern failed".into()));
+                out.errors
+                    .push((f.id, "A feature to pattern failed".into()));
             }
             if let Some(w) = &entry.output.warning {
                 out.warnings.push((f.id, w.clone()));
@@ -732,41 +795,83 @@ impl Rebuilder {
             };
             out.sketch_times.push((f.id, t));
         }
-        self.sketch_times.retain(|id, _| features.iter().any(|f| f.id == *id));
-        out.composites = state.composites.iter().filter(|c| state.part(c.part).is_some()).cloned().collect();
+        self.sketch_times
+            .retain(|id, _| features.iter().any(|f| f.id == *id));
+        out.composites = state
+            .composites
+            .iter()
+            .filter(|c| state.part(c.part).is_some())
+            .cloned()
+            .collect();
         for (id, why) in &var_errors {
-            if !out.errors.iter().any(|(e, _)| e == id) && features.iter().any(|f| f.id == *id && !f.is_part_feature()) {
+            if !out.errors.iter().any(|(e, _)| e == id)
+                && features.iter().any(|f| f.id == *id && !f.is_part_feature())
+            {
                 out.errors.push((*id, why.clone()));
             }
         }
         // P3H.6 (PCB7.9): a closed composite part is one part: its members aren't listed, shown,
         // picked or inserted on their own (they stay in the rebuild state for later features).
-        let absorbed: HashSet<PartId> = out.composites.iter().filter(|c| c.closed).flat_map(|c| c.members.iter().copied()).collect();
-        out.parts = state.parts.iter().filter(|p| !absorbed.contains(&p.part.id)).map(|p| p.part.clone()).collect();
+        let absorbed: HashSet<PartId> = out
+            .composites
+            .iter()
+            .filter(|c| c.closed)
+            .flat_map(|c| c.members.iter().copied())
+            .collect();
+        out.parts = state
+            .parts
+            .iter()
+            .filter(|p| !absorbed.contains(&p.part.id))
+            .map(|p| p.part.clone())
+            .collect();
         out.planes = state.planes.clone();
         out.curves = state.curves.clone();
         out.connectors = state.connectors.clone();
         // P3B.7 (A22.2): each part carries the explicit connectors it owns, in list order.
         for f in features {
-            let (Some(owner), Some(frame)) = (state.connector_owners.get(&f.id), state.connectors.get(&f.id)) else { continue };
+            let (Some(owner), Some(frame)) = (
+                state.connector_owners.get(&f.id),
+                state.connectors.get(&f.id),
+            ) else {
+                continue;
+            };
             if let Some(p) = out.parts.iter_mut().find(|p| p.id == *owner) {
-                std::sync::Arc::make_mut(&mut p.solid).connectors.push(crate::solid::SolidConnector { feature: f.id, frame: *frame });
+                std::sync::Arc::make_mut(&mut p.solid).connectors.push(
+                    crate::solid::SolidConnector {
+                        feature: f.id,
+                        frame: *frame,
+                    },
+                );
             }
         }
         // P3G.4: the mate connectors Derived features brought in go with their derived parts.
         for f in features {
-            let Some(d) = state.derived.get(&f.id) else { continue };
+            let Some(d) = state.derived.get(&f.id) else {
+                continue;
+            };
             for (c, _) in &d.connectors {
-                let (Some(owner), Some(frame)) = (state.connector_owners.get(c), state.connectors.get(c)) else { continue };
+                let (Some(owner), Some(frame)) =
+                    (state.connector_owners.get(c), state.connectors.get(c))
+                else {
+                    continue;
+                };
                 if let Some(p) = out.parts.iter_mut().find(|p| p.id == *owner) {
-                    std::sync::Arc::make_mut(&mut p.solid).connectors.push(crate::solid::SolidConnector { feature: *c, frame: *frame });
+                    std::sync::Arc::make_mut(&mut p.solid).connectors.push(
+                        crate::solid::SolidConnector {
+                            feature: *c,
+                            frame: *frame,
+                        },
+                    );
                 }
             }
         }
         out.derived = (*state.derived).clone();
         out.derived_sketches = (*state.derived_sketches).clone();
         out.sheet_metal = (*state.sheet_metal).clone();
-        debug_assert!(self.depth != 0 || key == final_key(features), "final_key must follow the rebuild's keys");
+        debug_assert!(
+            self.depth != 0 || key == final_key(features),
+            "final_key must follow the rebuild's keys"
+        );
         self.trail.clear();
         self.last = state;
         self.evict();
@@ -776,7 +881,11 @@ impl Rebuilder {
 
     /// The cache keys of the outputs the last top-level rebuild used.
     pub fn used_keys(&self) -> Vec<u64> {
-        self.entries.iter().filter(|(_, e)| e.last_used >= self.top_generation).map(|(k, _)| *k).collect()
+        self.entries
+            .iter()
+            .filter(|(_, e)| e.last_used >= self.top_generation)
+            .map(|(k, _)| *k)
+            .collect()
     }
 
     /// What a snapshot of rebuilding `features` holds: the outputs the last rebuild used, and
@@ -795,14 +904,24 @@ impl Rebuilder {
         let mut stale: Vec<u64> = self
             .entries
             .iter()
-            .filter(|(_, e)| e.last_used.saturating_add(KEEP_UNUSED.load(Ordering::Relaxed)) < generation)
+            .filter(|(_, e)| {
+                e.last_used
+                    .saturating_add(KEEP_UNUSED.load(Ordering::Relaxed))
+                    < generation
+            })
             .map(|(k, _)| *k)
             .collect();
         if self.entries.len() - stale.len() > MAX_ENTRIES {
-            let mut all: Vec<(u64, u64)> =
-                self.entries.iter().map(|(k, e)| (*k, e.last_used)).collect();
+            let mut all: Vec<(u64, u64)> = self
+                .entries
+                .iter()
+                .map(|(k, e)| (*k, e.last_used))
+                .collect();
             all.sort_by_key(|(_, used)| *used);
-            stale = all[..self.entries.len() - MAX_ENTRIES].iter().map(|(k, _)| *k).collect();
+            stale = all[..self.entries.len() - MAX_ENTRIES]
+                .iter()
+                .map(|(k, _)| *k)
+                .collect();
         }
         if stale.is_empty() {
             return;
@@ -842,7 +961,11 @@ impl Rebuilder {
     /// Rebuilds `features` and writes the requested parts (as they are after the last feature)
     /// to STEP: one file per part, or one file with them all (see [`crate::export`]).
     #[cfg(feature = "brep")]
-    pub fn export_step(&mut self, features: &[Feature], req: &StepRequest) -> Result<Vec<StepFile>, String> {
+    pub fn export_step(
+        &mut self,
+        features: &[Feature],
+        req: &StepRequest,
+    ) -> Result<Vec<StepFile>, String> {
         use cadrs_kernel::Kernel;
         if req.parts.is_empty() {
             return Err("No parts to export".into());
@@ -856,7 +979,9 @@ impl Rebuilder {
         for (id, name) in &req.parts {
             match state.part(*id).and_then(|p| p.body) {
                 Some(body) => bodies.push((body, name.as_str())),
-                None if build.part(*id).is_none() => return Err(format!("{name} no longer exists")),
+                None if build.part(*id).is_none() => {
+                    return Err(format!("{name} no longer exists"));
+                }
                 None => match self.component_solids(features, &state, *id) {
                     Ok(made) if !made.is_empty() => {
                         for b in made {
@@ -876,10 +1001,20 @@ impl Rebuilder {
         }
         // Y up: turn -90° about X, so +Z (the Top plane's normal) becomes +Y.
         if req.y_up {
-            let turn = cadrs_kernel::Transform::rotation(nalgebra::Vector3::x() * -std::f64::consts::FRAC_PI_2);
+            let turn = cadrs_kernel::Transform::rotation(
+                nalgebra::Vector3::x() * -std::f64::consts::FRAC_PI_2,
+            );
             for (body, _) in &mut bodies {
-                let r = self.kernel.transform(*body, &turn).map_err(|e| e.to_string());
-                let new = r.and_then(|r| r.bodies.first().copied().ok_or_else(|| "turning a part failed".into()));
+                let r = self
+                    .kernel
+                    .transform(*body, &turn)
+                    .map_err(|e| e.to_string());
+                let new = r.and_then(|r| {
+                    r.bodies
+                        .first()
+                        .copied()
+                        .ok_or_else(|| "turning a part failed".into())
+                });
                 match new {
                     Ok(b) => {
                         turned.push(b);
@@ -919,9 +1054,17 @@ impl Rebuilder {
     /// Solids for a drawing view of the board components among `parts` (one body each, the
     /// caller releases them); a component whose model can't be made is left out.
     #[cfg(feature = "brep")]
-    fn view_solids(&mut self, features: &[Feature], state: &State, parts: &[&Part]) -> HashMap<PartId, BodyId> {
+    fn view_solids(
+        &mut self,
+        features: &[Feature],
+        state: &State,
+        parts: &[&Part],
+    ) -> HashMap<PartId, BodyId> {
         let mut made = HashMap::new();
-        for p in parts.iter().filter(|p| state.part(p.id).is_some_and(|s| s.body.is_none())) {
+        for p in parts
+            .iter()
+            .filter(|p| state.part(p.id).is_some_and(|s| s.body.is_none()))
+        {
             if let Ok(b) = self.component_body(features, state, p.id) {
                 made.insert(p.id, b);
             }
@@ -932,14 +1075,23 @@ impl Rebuilder {
     /// A board component's model as one body (its solids made one compound), the caller's to
     /// release ([`Self::component_solids`]).
     #[cfg(feature = "brep")]
-    fn component_body(&mut self, features: &[Feature], state: &State, part: PartId) -> Result<BodyId, String> {
+    fn component_body(
+        &mut self,
+        features: &[Feature],
+        state: &State,
+        part: PartId,
+    ) -> Result<BodyId, String> {
         use cadrs_kernel::Kernel;
         let bodies = self.component_solids(features, state, part)?;
         match bodies.len() {
             0 => Err("its model has no solids".into()),
             1 => Ok(bodies[0]),
             _ => {
-                let r = self.kernel.compound(&bodies).map_err(|e| e.to_string()).and_then(|r| r.bodies.first().copied().ok_or_else(|| "no body".into()));
+                let r = self
+                    .kernel
+                    .compound(&bodies)
+                    .map_err(|e| e.to_string())
+                    .and_then(|r| r.bodies.first().copied().ok_or_else(|| "no body".into()));
                 bodies.iter().for_each(|b| self.kernel.release(*b));
                 r
             }
@@ -947,7 +1099,12 @@ impl Rebuilder {
     }
 
     #[cfg(not(feature = "brep"))]
-    fn view_solids(&mut self, _features: &[Feature], _state: &State, _parts: &[&Part]) -> HashMap<PartId, BodyId> {
+    fn view_solids(
+        &mut self,
+        _features: &[Feature],
+        _state: &State,
+        _parts: &[&Part],
+    ) -> HashMap<PartId, BodyId> {
         HashMap::new()
     }
 
@@ -955,25 +1112,59 @@ impl Rebuilder {
     /// a STEP export carries real solids, not the mesh the Part Studio shows), where the board
     /// copy puts it now. The caller releases them.
     #[cfg(feature = "brep")]
-    fn component_solids(&mut self, features: &[Feature], state: &State, part: PartId) -> Result<Vec<BodyId>, String> {
+    fn component_solids(
+        &mut self,
+        features: &[Feature],
+        state: &State,
+        part: PartId,
+    ) -> Result<Vec<BodyId>, String> {
         use cadrs_kernel::Kernel;
         for (fid, out) in state.derived.iter() {
-            let Some(fp) = out.footprints.iter().find(|(p, _)| *p == part).map(|(_, f)| *f) else { continue };
+            let Some(fp) = out
+                .footprints
+                .iter()
+                .find(|(p, _)| *p == part)
+                .map(|(_, f)| *f)
+            else {
+                continue;
+            };
             // (Its board left out, a derive taking the components alone: its mesh, faceted.)
-            let Some(copy) = out.boards.iter().find(|b| out.components_of(b.part).contains(&part)) else { return self.mesh_body(state, part).map(|b| vec![b]) };
+            let Some(copy) = out
+                .boards
+                .iter()
+                .find(|b| out.components_of(b.part).contains(&part))
+            else {
+                return self.mesh_body(state, part).map(|b| vec![b]);
+            };
             // (A board that came in with a derived Part Studio: its layout is in that studio's
             // features, as the Derived feature keeps them, at any depth.)
-            let layout = features.iter().find(|f| f.id == *fid).and_then(|f| match &f.kind {
-                FeatureKind::Derived(d) => d.board.as_ref().map(|b| &b.layout).or_else(|| layout_with(&d.studio, fp)),
-                _ => None,
-            });
+            let layout = features
+                .iter()
+                .find(|f| f.id == *fid)
+                .and_then(|f| match &f.kind {
+                    FeatureKind::Derived(d) => d
+                        .board
+                        .as_ref()
+                        .map(|b| &b.layout)
+                        .or_else(|| layout_with(&d.studio, fp)),
+                    _ => None,
+                });
             // (Not found: the mesh, faceted.)
-            let Some(layout) = layout else { return self.mesh_body(state, part).map(|b| vec![b]) };
-            let f = layout.footprints.iter().find(|f| f.id == fp).ok_or("its footprint is gone")?;
-            let m = crate::pcb::model::shown_model(&f.footprint).ok_or("its footprint shows no model")?;
+            let Some(layout) = layout else {
+                return self.mesh_body(state, part).map(|b| vec![b]);
+            };
+            let f = layout
+                .footprints
+                .iter()
+                .find(|f| f.id == fp)
+                .ok_or("its footprint is gone")?;
+            let m = crate::pcb::model::shown_model(&f.footprint)
+                .ok_or("its footprint shows no model")?;
             let (made, unit) = self.model_bodies_cached(m)?;
             // (Then as a Transform of its own moved it.)
-            let mut motion = crate::pcb::model::model_motion(m, unit).then(&crate::pcb::frames::footprint_world(&copy.frame, copy.thickness, &f.placement));
+            let mut motion = crate::pcb::model::model_motion(m, unit).then(
+                &crate::pcb::frames::footprint_world(&copy.frame, copy.thickness, &f.placement),
+            );
             if let Some(apart) = out.moved_apart(part) {
                 motion = motion.then(&apart);
             }
@@ -981,7 +1172,12 @@ impl Rebuilder {
             for b in made {
                 // (Copies: the cache keeps its bodies.)
                 let r = self.kernel.transform_motion(b, &motion);
-                match r.map_err(|e| e.to_string()).and_then(|r| r.bodies.into_iter().next().ok_or_else(|| "no body".to_string())) {
+                match r.map_err(|e| e.to_string()).and_then(|r| {
+                    r.bodies
+                        .into_iter()
+                        .next()
+                        .ok_or_else(|| "no body".to_string())
+                }) {
                     Ok(b) => out_bodies.push(b),
                     Err(e) => {
                         out_bodies.iter().for_each(|b| self.kernel.release(*b));
@@ -997,11 +1193,16 @@ impl Rebuilder {
     /// A model's solids, unplaced, made once (by the model) and kept for later views and exports
     /// of its components: copy them, don't release them.
     #[cfg(feature = "brep")]
-    fn model_bodies_cached(&mut self, m: &cadrs_eda::footprint::Model3d) -> Result<(Vec<BodyId>, f64), String> {
+    fn model_bodies_cached(
+        &mut self,
+        m: &cadrs_eda::footprint::Model3d,
+    ) -> Result<(Vec<BodyId>, f64), String> {
         use cadrs_kernel::Kernel;
         // (Whether its file is loaded too: until it is, the generated body stands in.)
         let loaded = m.blob.as_ref().is_some_and(|h| crate::blobs::contains(h));
-        let key = cadrs_kernel::naming::stable_hash(format!("{:?}|{loaded}|{}|{:?}", m.blob, m.source, m.body).as_bytes());
+        let key = cadrs_kernel::naming::stable_hash(
+            format!("{:?}|{loaded}|{}|{:?}", m.blob, m.source, m.body).as_bytes(),
+        );
         if let Some((_, bodies, unit)) = self.model_bodies.iter().find(|x| x.0 == key) {
             return Ok((bodies.clone(), *unit));
         }
@@ -1023,12 +1224,24 @@ impl Rebuilder {
             let q = s.positions[i as usize];
             nalgebra::Point3::new(q[0], q[1], q[2])
         };
-        let tris: Vec<[nalgebra::Point3<f64>; 3]> = s.indices.as_chunks::<3>().0.iter().map(|t| [p(t[0]), p(t[1]), p(t[2])]).collect();
-        self.kernel.mesh_solid(&tris, 1e-4).map_err(|e| format!("its mesh doesn't make a solid: {e}"))
+        let tris: Vec<[nalgebra::Point3<f64>; 3]> = s
+            .indices
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .map(|t| [p(t[0]), p(t[1]), p(t[2])])
+            .collect();
+        self.kernel
+            .mesh_solid(&tris, 1e-4)
+            .map_err(|e| format!("its mesh doesn't make a solid: {e}"))
     }
 
     #[cfg(not(feature = "brep"))]
-    pub fn export_step(&mut self, _features: &[Feature], _req: &StepRequest) -> Result<Vec<StepFile>, String> {
+    pub fn export_step(
+        &mut self,
+        _features: &[Feature],
+        _req: &StepRequest,
+    ) -> Result<Vec<StepFile>, String> {
         Err("STEP export needs the solid-modelling kernel".into())
     }
 
@@ -1050,10 +1263,16 @@ impl Rebuilder {
         // A derived board shown as its layout: its components stay out (as in the Part Studio).
         for f in features {
             if let FeatureKind::Derived(d) = &f.kind
-                && d.board.as_ref().is_some_and(|b| b.options.view == crate::pcb::board3d::BoardView::Layout)
+                && d.board
+                    .as_ref()
+                    .is_some_and(|b| b.options.view == crate::pcb::board3d::BoardView::Layout)
                 && let Some(out) = build.derived.get(&f.id)
             {
-                let hidden: Vec<PartId> = out.boards.iter().flat_map(|b| out.components_of(b.part)).collect();
+                let hidden: Vec<PartId> = out
+                    .boards
+                    .iter()
+                    .flat_map(|b| out.components_of(b.part))
+                    .collect();
                 parts.retain(|p| !hidden.contains(&p.id));
             }
         }
@@ -1077,7 +1296,11 @@ impl Rebuilder {
             out.shaded = crate::views::shade(&parts, &req.frame, &req.props, &req.appearances);
         }
         // Pictures (a board's layout) hidden by solids only: a board's components stand on it.
-        let solids: Vec<&Part> = parts.iter().copied().filter(|p| state.part(p.id).is_some_and(|s| s.body.is_some())).collect();
+        let solids: Vec<&Part> = parts
+            .iter()
+            .copied()
+            .filter(|p| state.part(p.id).is_some_and(|s| s.body.is_some()))
+            .collect();
         // (Not in a section: the cut would have to cut the picture too.)
         if req.cut.is_none() {
             out.pictures = crate::views::pictures(&parts, &solids, &req.frame, !req.shaded);
@@ -1086,7 +1309,12 @@ impl Rebuilder {
         // the view (one body each) and released after.
         let made = self.view_solids(features, &state, &parts);
         // (A component whose model can't be made stays out of the view.)
-        let parts: Vec<&Part> = parts.into_iter().filter(|p| state.part(p.id).is_some_and(|s| s.body.is_some()) || made.contains_key(&p.id)).collect();
+        let parts: Vec<&Part> = parts
+            .into_iter()
+            .filter(|p| {
+                state.part(p.id).is_some_and(|s| s.body.is_some()) || made.contains_key(&p.id)
+            })
+            .collect();
         out.parts = parts.iter().map(|p| p.id).collect();
         let r = self.project_parts(&state, &parts, req, &made);
         for b in made.values() {
@@ -1116,8 +1344,11 @@ impl Rebuilder {
         #[cfg(feature = "brep")]
         let mut bodies: Vec<(BodyId, Arc<cadrs_kernel::BodyNames>)> = Vec::new();
         for (el, studio) in &st.studios {
-            let occs: Vec<&crate::drawing_assembly::OccState> =
-                st.occurrences.iter().filter(|o| o.element == *el && !o.hidden).collect();
+            let occs: Vec<&crate::drawing_assembly::OccState> = st
+                .occurrences
+                .iter()
+                .filter(|o| o.element == *el && !o.hidden)
+                .collect();
             if occs.is_empty() {
                 continue;
             }
@@ -1125,12 +1356,15 @@ impl Rebuilder {
             #[cfg(feature = "brep")]
             let kstate = self.last.clone();
             for o in occs {
-                let Some(p) = build.part(o.part) else { continue };
+                let Some(p) = build.part(o.part) else {
+                    continue;
+                };
                 let mut q = p.clone();
                 q.solid = Arc::new(crate::assembly::transform_solid(&p.solid, &o.pose));
                 // The triangles shade a shaded view, and give every assembly view the depths
                 // that check its edges' visibility (`hide_occluded_pieces`).
-                let shaded = crate::views::shade(&[&q], &req.frame, &studio.props, &studio.appearances);
+                let shaded =
+                    crate::views::shade(&[&q], &req.frame, &studio.props, &studio.appearances);
                 // Owned by the body pushed below, if it is.
                 #[cfg(feature = "brep")]
                 let first = tris.len();
@@ -1139,13 +1373,29 @@ impl Rebuilder {
                 #[cfg(feature = "brep")]
                 {
                     use cadrs_kernel::Kernel;
-                    let Some(s) = kstate.part(o.part) else { continue };
+                    let Some(s) = kstate.part(o.part) else {
+                        continue;
+                    };
                     let Some(body) = s.body else { continue };
                     let r = o.pose.rotation_matrix();
-                    let rot = nalgebra::UnitQuaternion::from_rotation_matrix(&nalgebra::Rotation3::from_matrix_unchecked(r));
+                    let rot = nalgebra::UnitQuaternion::from_rotation_matrix(
+                        &nalgebra::Rotation3::from_matrix_unchecked(r),
+                    );
                     let t = o.pose.translation;
-                    let iso = cadrs_kernel::Transform::from_parts(nalgebra::Translation3::new(t[0], t[1], t[2]), rot);
-                    match self.kernel.transform(body, &iso).map_err(|e| e.to_string()).and_then(|r| r.bodies.first().copied().ok_or_else(|| "moving a part failed".to_string())) {
+                    let iso = cadrs_kernel::Transform::from_parts(
+                        nalgebra::Translation3::new(t[0], t[1], t[2]),
+                        rot,
+                    );
+                    match self
+                        .kernel
+                        .transform(body, &iso)
+                        .map_err(|e| e.to_string())
+                        .and_then(|r| {
+                            r.bodies
+                                .first()
+                                .copied()
+                                .ok_or_else(|| "moving a part failed".to_string())
+                        }) {
                         Ok(b) => {
                             owners[first..].fill(Some(bodies.len()));
                             bodies.push((b, s.names.clone()));
@@ -1172,20 +1422,26 @@ impl Rebuilder {
             out.pictures = crate::views::pictures(&refs, &refs, &req.frame, !req.shaded);
         }
         // Farthest first, over every studio's triangles (with their owners).
-        let mean = |t: &crate::views::ShadedTriangle| (t.depths[0] + t.depths[1] + t.depths[2]) / 3.0;
-        let mut paired: Vec<(crate::views::ShadedTriangle, Option<usize>)> = tris.into_iter().zip(owners).collect();
+        let mean =
+            |t: &crate::views::ShadedTriangle| (t.depths[0] + t.depths[1] + t.depths[2]) / 3.0;
+        let mut paired: Vec<(crate::views::ShadedTriangle, Option<usize>)> =
+            tris.into_iter().zip(owners).collect();
         paired.sort_by(|a, b| mean(&b.0).total_cmp(&mean(&a.0)));
         let (tris, owners): (Vec<_>, Vec<_>) = paired.into_iter().unzip();
         #[cfg(feature = "brep")]
         {
             use cadrs_kernel::Kernel;
             let ids: Vec<BodyId> = bodies.iter().map(|(b, _)| *b).collect();
-            let projected = self.kernel.project(&ids, &req.frame, &req.options).map_err(|e| e.to_string());
+            let projected = self
+                .kernel
+                .project(&ids, &req.frame, &req.options)
+                .map_err(|e| e.to_string());
             let mut projected = projected;
             if let Ok(p) = &mut projected {
                 hide_occluded_pieces(&self.kernel, &ids, &req.frame, &tris, Some(&owners), p);
                 if req.intersections {
-                    let extra = part_intersections(&mut self.kernel, &ids, &req.frame, &req.options, &tris);
+                    let extra =
+                        part_intersections(&mut self.kernel, &ids, &req.frame, &req.options, &tris);
                     p.edges.extend(extra);
                 }
             }
@@ -1222,7 +1478,11 @@ impl Rebuilder {
         let mut names = Vec::new();
         for p in parts {
             let s = state.part(p.id).ok_or("a part has no solid model")?;
-            bodies.push(s.body.or_else(|| made.get(&p.id).copied()).ok_or_else(|| format!("{} has no solid model", p.name))?);
+            bodies.push(
+                s.body
+                    .or_else(|| made.get(&p.id).copied())
+                    .ok_or_else(|| format!("{} has no solid model", p.name))?,
+            );
             names.push(s.names.clone());
         }
         // Section and broken-out views: project the bodies with the cut material removed
@@ -1230,15 +1490,21 @@ impl Rebuilder {
         let mut hatch = Vec::new();
         let mut temps = Vec::new();
         if let Some(cut) = &req.cut {
-            let named: Vec<(cadrs_kernel::BodyId, &cadrs_kernel::naming::BodyNames)> =
-                bodies.iter().copied().zip(names.iter().map(|n| &**n)).collect();
+            let named: Vec<(cadrs_kernel::BodyId, &cadrs_kernel::naming::BodyNames)> = bodies
+                .iter()
+                .copied()
+                .zip(names.iter().map(|n| &**n))
+                .collect();
             let c = crate::section::cut_bodies(&mut self.kernel, &named, &req.frame, cut)?;
             bodies = c.bodies;
             names = c.names.into_iter().map(Arc::new).collect();
             hatch = c.hatch;
             temps = c.temps;
         }
-        let projected = self.kernel.project(&bodies, &req.frame, &req.options).map_err(|e| e.to_string());
+        let projected = self
+            .kernel
+            .project(&bodies, &req.frame, &req.options)
+            .map_err(|e| e.to_string());
         for b in temps {
             self.kernel.release(b);
         }
@@ -1320,7 +1586,9 @@ impl Rebuilder {
                 }
             }
             // P3I.6 (SM14.3): an ordinary Extrude can't take a flat-pattern sketch.
-            FeatureKind::Extrude(e) if crate::sheetmetal_flat::on_flat(before, &e.sketches()) => fail(crate::sheetmetal_flat::MODEL_SPACE.into()),
+            FeatureKind::Extrude(e) if crate::sheetmetal_flat::on_flat(before, &e.sketches()) => {
+                fail(crate::sheetmetal_flat::MODEL_SPACE.into())
+            }
             #[cfg(feature = "brep")]
             FeatureKind::Extrude(e) => match self.extrude(before, f.id, e, state) {
                 Ok(o) => o,
@@ -1353,8 +1621,12 @@ impl Rebuilder {
             #[cfg(feature = "brep")]
             FeatureKind::Loft(x) => self.loft(before, f.id, x, state).unwrap_or_else(fail),
             #[cfg(feature = "brep")]
-            FeatureKind::Split(x) => self.split_parts(before, f.id, x, state).unwrap_or_else(fail),
-            FeatureKind::MateConnector(x) => self.mate_connector(before, f.id, x, state).unwrap_or_else(fail),
+            FeatureKind::Split(x) => self
+                .split_parts(before, f.id, x, state)
+                .unwrap_or_else(fail),
+            FeatureKind::MateConnector(x) => self
+                .mate_connector(before, f.id, x, state)
+                .unwrap_or_else(fail),
             #[cfg(feature = "brep")]
             FeatureKind::Pattern(x) => self.pattern(before, f.id, x, state).unwrap_or_else(fail),
             #[cfg(feature = "brep")]
@@ -1365,7 +1637,9 @@ impl Rebuilder {
             FeatureKind::Derived(x) => self.derived(before, f.id, x, state).unwrap_or_else(fail),
             #[cfg(not(feature = "brep"))]
             FeatureKind::Derived(_) => fail("This feature needs the solid-modelling kernel".into()),
-            FeatureKind::Transform(x) => self.transform(before, f.id, x, state).unwrap_or_else(fail),
+            FeatureKind::Transform(x) => {
+                self.transform(before, f.id, x, state).unwrap_or_else(fail)
+            }
             #[cfg(feature = "brep")]
             FeatureKind::Composite(x) => self.composite(f.id, x, state).unwrap_or_else(fail),
             #[cfg(feature = "brep")]
@@ -1379,55 +1653,95 @@ impl Rebuilder {
             #[cfg(feature = "brep")]
             FeatureKind::Fill(x) => self.fill(before, f.id, x, state).unwrap_or_else(fail),
             #[cfg(feature = "brep")]
-            FeatureKind::SheetMetalModel(x) => self.sheet_metal_model(before, f.id, &f.name, x, state).unwrap_or_else(fail),
+            FeatureKind::SheetMetalModel(x) => self
+                .sheet_metal_model(before, f.id, &f.name, x, state)
+                .unwrap_or_else(fail),
             #[cfg(not(feature = "brep"))]
-            FeatureKind::SheetMetalModel(_) => fail("Sheet metal needs the solid-modelling kernel".into()),
+            FeatureKind::SheetMetalModel(_) => {
+                fail("Sheet metal needs the solid-modelling kernel".into())
+            }
             #[cfg(feature = "brep")]
-            FeatureKind::ModifyJoint(x) => self.modify_joint(f.id, &f.name, x, state).unwrap_or_else(fail),
+            FeatureKind::ModifyJoint(x) => self
+                .modify_joint(f.id, &f.name, x, state)
+                .unwrap_or_else(fail),
             #[cfg(not(feature = "brep"))]
-            FeatureKind::ModifyJoint(_) => fail("Sheet metal needs the solid-modelling kernel".into()),
+            FeatureKind::ModifyJoint(_) => {
+                fail("Sheet metal needs the solid-modelling kernel".into())
+            }
             // P3I.9.
             #[cfg(feature = "brep")]
-            FeatureKind::SheetMetalLoft(x) => self.sheet_metal_loft(before, f.id, &f.name, x, state).unwrap_or_else(fail),
+            FeatureKind::SheetMetalLoft(x) => self
+                .sheet_metal_loft(before, f.id, &f.name, x, state)
+                .unwrap_or_else(fail),
             #[cfg(feature = "brep")]
-            FeatureKind::Form(x) => self.sheet_metal_form(before, f.id, &f.name, x, state).unwrap_or_else(fail),
+            FeatureKind::Form(x) => self
+                .sheet_metal_form(before, f.id, &f.name, x, state)
+                .unwrap_or_else(fail),
             #[cfg(feature = "brep")]
             FeatureKind::TagForm(x) => self.tag_form(f.id, x, state).unwrap_or_else(fail),
             #[cfg(not(feature = "brep"))]
-            FeatureKind::SheetMetalLoft(_) | FeatureKind::Form(_) | FeatureKind::TagForm(_) => fail("Sheet metal needs the solid-modelling kernel".into()),
+            FeatureKind::SheetMetalLoft(_) | FeatureKind::Form(_) | FeatureKind::TagForm(_) => {
+                fail("Sheet metal needs the solid-modelling kernel".into())
+            }
             // P3I.4.
             #[cfg(feature = "brep")]
-            FeatureKind::SheetMetal(x) => self.sheet_metal_feature(before, f.id, &f.name, x, state).unwrap_or_else(fail),
+            FeatureKind::SheetMetal(x) => self
+                .sheet_metal_feature(before, f.id, &f.name, x, state)
+                .unwrap_or_else(fail),
             #[cfg(not(feature = "brep"))]
-            FeatureKind::SheetMetal(_) => fail("Sheet metal needs the solid-modelling kernel".into()),
+            FeatureKind::SheetMetal(_) => {
+                fail("Sheet metal needs the solid-modelling kernel".into())
+            }
             // P3I.5.
             #[cfg(feature = "brep")]
-            FeatureKind::SheetMetalTool(x) => self.sheet_metal_tool(before, f.id, &f.name, x, state).unwrap_or_else(fail),
+            FeatureKind::SheetMetalTool(x) => self
+                .sheet_metal_tool(before, f.id, &f.name, x, state)
+                .unwrap_or_else(fail),
             #[cfg(not(feature = "brep"))]
-            FeatureKind::SheetMetalTool(_) => fail("Sheet metal needs the solid-modelling kernel".into()),
+            FeatureKind::SheetMetalTool(_) => {
+                fail("Sheet metal needs the solid-modelling kernel".into())
+            }
             // P3I.6.
             #[cfg(feature = "brep")]
-            FeatureKind::FlatExtrude(x) => self.flat_extrude(before, f.id, &f.name, x, state).unwrap_or_else(fail),
+            FeatureKind::FlatExtrude(x) => self
+                .flat_extrude(before, f.id, &f.name, x, state)
+                .unwrap_or_else(fail),
             #[cfg(not(feature = "brep"))]
-            FeatureKind::FlatExtrude(_) => fail("Sheet metal needs the solid-modelling kernel".into()),
+            FeatureKind::FlatExtrude(_) => {
+                fail("Sheet metal needs the solid-modelling kernel".into())
+            }
             #[cfg(not(feature = "brep"))]
-            FeatureKind::Thicken(_) | FeatureKind::Helix(_) | FeatureKind::Fill(_) | FeatureKind::Image(_) => {
+            FeatureKind::Thicken(_)
+            | FeatureKind::Helix(_)
+            | FeatureKind::Fill(_)
+            | FeatureKind::Image(_) => fail("This feature needs the solid-modelling kernel".into()),
+            #[cfg(not(feature = "brep"))]
+            FeatureKind::Composite(_) => {
                 fail("This feature needs the solid-modelling kernel".into())
             }
             #[cfg(not(feature = "brep"))]
-            FeatureKind::Composite(_) => fail("This feature needs the solid-modelling kernel".into()),
-            #[cfg(not(feature = "brep"))]
-            FeatureKind::Draft(_) | FeatureKind::Transform(_) => fail("This feature needs the solid-modelling kernel".into()),
-            #[cfg(not(feature = "brep"))]
-            FeatureKind::Import(_) | FeatureKind::Derived(_) => fail("Imports need the solid-modelling kernel".into()),
-            #[cfg(not(feature = "brep"))]
-            FeatureKind::Pattern(_) | FeatureKind::Mirror(_) => fail("This feature needs the solid-modelling kernel".into()),
-            #[cfg(not(feature = "brep"))]
-            FeatureKind::Plane(_) | FeatureKind::Sweep(_) | FeatureKind::Loft(_) | FeatureKind::Split(_) => {
+            FeatureKind::Draft(_) | FeatureKind::Transform(_) => {
                 fail("This feature needs the solid-modelling kernel".into())
             }
             #[cfg(not(feature = "brep"))]
-            FeatureKind::Fillet(_) | FeatureKind::Chamfer(_) | FeatureKind::Shell(_) | FeatureKind::Hole(_) | FeatureKind::DirectEdit(_) => {
+            FeatureKind::Import(_) | FeatureKind::Derived(_) => {
+                fail("Imports need the solid-modelling kernel".into())
+            }
+            #[cfg(not(feature = "brep"))]
+            FeatureKind::Pattern(_) | FeatureKind::Mirror(_) => {
+                fail("This feature needs the solid-modelling kernel".into())
+            }
+            #[cfg(not(feature = "brep"))]
+            FeatureKind::Plane(_)
+            | FeatureKind::Sweep(_)
+            | FeatureKind::Loft(_)
+            | FeatureKind::Split(_) => fail("This feature needs the solid-modelling kernel".into()),
+            #[cfg(not(feature = "brep"))]
+            FeatureKind::Fillet(_)
+            | FeatureKind::Chamfer(_)
+            | FeatureKind::Shell(_)
+            | FeatureKind::Hole(_)
+            | FeatureKind::DirectEdit(_) => {
                 fail("This feature needs the solid-modelling kernel".into())
             }
             #[cfg(not(feature = "brep"))]
@@ -1480,7 +1794,11 @@ impl Rebuilder {
 }
 
 /// The frame of a mate connector a feature refers to, among the parts and connectors so far.
-fn connector_frame(before: &[Feature], state: &State, c: &crate::mate::ConnectorRef) -> Result<cadrs_sketch::PlaneFrame, String> {
+fn connector_frame(
+    before: &[Feature],
+    state: &State,
+    c: &crate::mate::ConnectorRef,
+) -> Result<cadrs_sketch::PlaneFrame, String> {
     let parts: Vec<Part> = state.parts.iter().map(|p| p.part.clone()).collect();
     crate::mate::frame(c, before, &parts, &state.connectors)
 }
@@ -1491,13 +1809,23 @@ fn parent_below(features: &[Feature], i: usize) -> Option<String> {
     let f = &features[i];
     f.parents().into_iter().find_map(|p| {
         let j = features.iter().position(|g| g.id == p)?;
-        (j > i).then(|| format!("{} is below this feature in the list; move it back above", features[j].name))
+        (j > i).then(|| {
+            format!(
+                "{} is below this feature in the list; move it back above",
+                features[j].name
+            )
+        })
     })
 }
 
 /// Without a kernel: a blind New extrude as the prism mesh.
 #[cfg(not(feature = "brep"))]
-fn prism_fallback(before: &[Feature], id: FeatureId, e: &ExtrudeFeature, state: &Arc<State>) -> Result<Output, String> {
+fn prism_fallback(
+    before: &[Feature],
+    id: FeatureId,
+    e: &ExtrudeFeature,
+    state: &Arc<State>,
+) -> Result<Output, String> {
     if let Some(p) = e.problem() {
         return Err(p.into());
     }
@@ -1513,7 +1841,9 @@ fn prism_fallback(before: &[Feature], id: FeatureId, e: &ExtrudeFeature, state: 
             None => out = Some(s),
         }
     }
-    let solid = out.filter(|s| !s.indices.is_empty()).ok_or("nothing to extrude")?;
+    let solid = out
+        .filter(|s| !s.indices.is_empty())
+        .ok_or("nothing to extrude")?;
     let mut next = (**state).clone();
     next.next_part += 1;
     next.parts.push(PartState {
@@ -1587,8 +1917,12 @@ fn missing_inputs(before: &[Feature], f: &Feature, state: &State) -> Vec<usize> 
             flags.extend(r.sketches.iter().map(sketch_gone));
             flags.extend(r.faces.iter().map(|x| !face_resolves(state, x)));
         }
-        FeatureKind::Fillet(x) => flags.extend(x.entities.iter().map(|e| !entity_resolves(state, e))),
-        FeatureKind::Chamfer(x) => flags.extend(x.entities.iter().map(|e| !entity_resolves(state, e))),
+        FeatureKind::Fillet(x) => {
+            flags.extend(x.entities.iter().map(|e| !entity_resolves(state, e)))
+        }
+        FeatureKind::Chamfer(x) => {
+            flags.extend(x.entities.iter().map(|e| !entity_resolves(state, e)))
+        }
         _ => {}
     }
     for (i, gone) in flags.into_iter().enumerate() {
@@ -1606,7 +1940,10 @@ fn face_resolves(state: &State, f: &crate::document::FaceRef) -> bool {
 
 #[cfg(not(feature = "brep"))]
 fn face_resolves(state: &State, f: &crate::document::FaceRef) -> bool {
-    state.parts.iter().any(|p| p.part.solid.faces.iter().any(|x| x.name == f.face))
+    state
+        .parts
+        .iter()
+        .any(|p| p.part.solid.faces.iter().any(|x| x.name == f.face))
 }
 
 #[cfg(feature = "brep")]
@@ -1617,9 +1954,10 @@ fn entity_resolves(state: &State, e: &crate::applied::EdgeOrFace) -> bool {
 #[cfg(not(feature = "brep"))]
 fn entity_resolves(state: &State, e: &crate::applied::EdgeOrFace) -> bool {
     match e {
-        crate::applied::EdgeOrFace::Edge(r) => {
-            state.parts.iter().any(|p| p.part.solid.edges.iter().any(|x| x.name == r.edge))
-        }
+        crate::applied::EdgeOrFace::Edge(r) => state
+            .parts
+            .iter()
+            .any(|p| p.part.solid.edges.iter().any(|x| x.name == r.edge)),
         crate::applied::EdgeOrFace::Face(f) => face_resolves(state, f),
     }
 }
@@ -1631,11 +1969,14 @@ fn entity_resolves(state: &State, e: &crate::applied::EdgeOrFace) -> bool {
 mod kernel_ops {
     use super::*;
     use cadrs_kernel::naming::{self, BodyNames};
-    use cadrs_kernel::{BoolOp, ExtrudeEnd, ExtrudeSpec, FaceInput, Kernel, OpResult, RevolveEnd, RevolveSpec};
+    use cadrs_kernel::{
+        BoolOp, ExtrudeEnd, ExtrudeSpec, FaceInput, Kernel, OpResult, RevolveEnd, RevolveSpec,
+    };
     use nalgebra::{Point3, Unit, Vector3};
 
     use crate::document::{
-        AxisRef, BooleanFeature, BooleanKind, BooleanOp, DirectionRef, EndType, Offset, RevolveFeature, RevolveType, UpTo,
+        AxisRef, BooleanFeature, BooleanKind, BooleanOp, DirectionRef, EndType, Offset,
+        RevolveFeature, RevolveType, UpTo,
     };
 
     /// A body a boolean made, split into its solids: each piece with its names and the input
@@ -1666,13 +2007,13 @@ mod kernel_ops {
     mod import;
     mod linked;
     mod pattern;
+    mod picture;
     mod sheetmetal;
-    mod sheetmetal_joint;
-    mod sheetmetal_form;
-    mod sheetmetal_loft;
     mod sheetmetal_features;
     mod sheetmetal_flat;
-    mod picture;
+    mod sheetmetal_form;
+    mod sheetmetal_joint;
+    mod sheetmetal_loft;
     mod surfacing;
     mod transform;
     pub(super) use advanced::plane_of;
@@ -1790,7 +2131,9 @@ mod kernel_ops {
                     scene: scene.clone(),
                     faces: inputs.clone(),
                 };
-                let names_of = |k: &mut dyn Kernel, r: &OpResult| -> cadrs_kernel::Result<(BodyId, BodyNames)> {
+                let names_of = |k: &mut dyn Kernel,
+                                r: &OpResult|
+                 -> cadrs_kernel::Result<(BodyId, BodyNames)> {
                     let body = r.bodies[0];
                     let inputs: Vec<(BodyId, &BodyNames)> = state
                         .parts
@@ -1819,7 +2162,12 @@ mod kernel_ops {
             // Where the first sweep starts and the way it goes (after the flip), for the
             // dialog's arrow: a Remove consumes the faces it starts from, so the parts after it
             // can't tell.
-            let along = sweeps.first().zip(dir0).map(|((p, _), d)| ([p.plane.origin.x, p.plane.origin.y, p.plane.origin.z], [d.x, d.y, d.z]));
+            let along = sweeps.first().zip(dir0).map(|((p, _), d)| {
+                (
+                    [p.plane.origin.x, p.plane.origin.y, p.plane.origin.z],
+                    [d.x, d.y, d.z],
+                )
+            });
             let mut geoms = (*state.geoms).clone();
             geoms.insert(op, Arc::new(crate::brep::OpGeom::new(&groups, n0, e.depth)));
             let geoms = Arc::new(geoms);
@@ -1829,11 +2177,18 @@ mod kernel_ops {
                 _ => {
                     let (first_b, _) = made[0];
                     let rest: Vec<BodyId> = made[1..].iter().map(|(b, _)| *b).collect();
-                    let merged = self.kernel.boolean(BoolOp::Union, first_b, &rest).and_then(|r| {
-                        let body = r.bodies[0];
-                        let inputs: Vec<(BodyId, &BodyNames)> = made.iter().map(|(b, n)| (*b, n)).collect();
-                        Ok((body, naming::name_body(&self.kernel, body, op, &r.history, &inputs)?))
-                    });
+                    let merged = self
+                        .kernel
+                        .boolean(BoolOp::Union, first_b, &rest)
+                        .and_then(|r| {
+                            let body = r.bodies[0];
+                            let inputs: Vec<(BodyId, &BodyNames)> =
+                                made.iter().map(|(b, n)| (*b, n)).collect();
+                            Ok((
+                                body,
+                                naming::name_body(&self.kernel, body, op, &r.history, &inputs)?,
+                            ))
+                        });
                     for (b, _) in &made {
                         self.kernel.release(*b);
                     }
@@ -1869,14 +2224,22 @@ mod kernel_ops {
             // touches a part), and they cost a boolean with each part near it (10 s by a
             // 265 000-facet mesh, issue #11).
             let wanted = !surface && (e.op != BooleanOp::New || self.stage_for == Some(id));
-            let contacts = if wanted { self.contacts(tool.0, state, e.op == BooleanOp::New) } else { Contacts::default() };
+            let contacts = if wanted {
+                self.contacts(tool.0, state, e.op == BooleanOp::New)
+            } else {
+                Contacts::default()
+            };
             // The dialog's preview of a Remove: the material it takes out of the parts.
             let removed = (self.stage_for == Some(id) && e.op == BooleanOp::Remove && !surface)
-                .then(|| self.removed_volume(id, &tool, &Self::scope(e, state, &contacts), state, &geoms));
+                .then(|| {
+                    self.removed_volume(id, &tool, &Self::scope(e, state, &contacts), state, &geoms)
+                });
             // The dialog's preview of an Add: the new body over the parts as they were.
             let joins = e.merge_all || !e.scope.is_empty() || !contacts.touches.is_empty();
             let stage = (self.stage_for == Some(id) && e.op == BooleanOp::Add && !surface && joins)
-                .then(|| crate::brep::solid_of(&self.kernel, tool.0, &tool.1, &geoms, Some(op)).ok())
+                .then(|| {
+                    crate::brep::solid_of(&self.kernel, tool.0, &tool.1, &geoms, Some(op)).ok()
+                })
                 .flatten()
                 .map(|s| Stage {
                     before: state.parts.iter().map(|p| p.part.clone()).collect(),
@@ -1913,7 +2276,11 @@ mod kernel_ops {
             if e.merge_all {
                 solids
             } else if !e.scope.is_empty() {
-                e.scope.iter().copied().filter(|p| solids.contains(p)).collect()
+                e.scope
+                    .iter()
+                    .copied()
+                    .filter(|p| solids.contains(p))
+                    .collect()
             } else {
                 match e.op {
                     BooleanOp::Add => contacts.touches.clone(),
@@ -1936,12 +2303,16 @@ mod kernel_ops {
             for part in scope {
                 let Some(p) = state.part(*part) else { continue };
                 let Some(body) = p.body else { continue };
-                let Ok(r) = self.kernel.boolean(BoolOp::Intersect, body, &[tool.0]) else { continue };
+                let Ok(r) = self.kernel.boolean(BoolOp::Intersect, body, &[tool.0]) else {
+                    continue;
+                };
                 let inputs = [(body, &*p.names), (tool.0, &tool.1)];
                 for b in r.bodies {
                     let solid = naming::name_body(&self.kernel, b, id.0, &r.history, &inputs)
                         .map_err(|e| e.to_string())
-                        .and_then(|names| crate::brep::solid_of(&self.kernel, b, &names, geoms, Some(id.0)));
+                        .and_then(|names| {
+                            crate::brep::solid_of(&self.kernel, b, &names, geoms, Some(id.0))
+                        });
                     if let Ok(s) = solid
                         && !s.faces.is_empty()
                     {
@@ -1951,7 +2322,8 @@ mod kernel_ops {
                 }
             }
             if out.is_empty()
-                && let Ok(s) = crate::brep::solid_of(&self.kernel, tool.0, &tool.1, geoms, Some(id.0))
+                && let Ok(s) =
+                    crate::brep::solid_of(&self.kernel, tool.0, &tool.1, geoms, Some(id.0))
             {
                 out.push(Arc::new(s));
             }
@@ -1991,7 +2363,11 @@ mod kernel_ops {
                                 "Nothing to intersect: the extrude doesn't reach a part".into()
                             });
                         }
-                        let kind = if e.op == BooleanOp::Remove { BoolOp::Subtract } else { BoolOp::Intersect };
+                        let kind = if e.op == BooleanOp::Remove {
+                            BoolOp::Subtract
+                        } else {
+                            BoolOp::Intersect
+                        };
                         let mut placed = Vec::new();
                         for part in &scope {
                             placed.extend(self.cut(id, *part, kind, &[&tool], &mut next)?);
@@ -2002,7 +2378,18 @@ mod kernel_ops {
             })();
             self.kernel.release(tool.0);
             let placed = result?;
-            self.finish(id, placed, next, op, geoms, if surface { PartKind::Surface } else { PartKind::Solid })
+            self.finish(
+                id,
+                placed,
+                next,
+                op,
+                geoms,
+                if surface {
+                    PartKind::Surface
+                } else {
+                    PartKind::Solid
+                },
+            )
         }
 
         /// Turns placed pieces into parts (meshes, mass properties) in `next`.
@@ -2018,8 +2405,12 @@ mod kernel_ops {
             let mut owned = Vec::new();
             let mut built = Vec::new();
             for (pid, piece) in placed {
-                let solid = crate::brep::solid_of(&self.kernel, piece.body, &piece.names, &geoms, Some(op));
-                let mass = self.kernel.mass_properties(piece.body).map_err(|e| e.to_string());
+                let solid =
+                    crate::brep::solid_of(&self.kernel, piece.body, &piece.names, &geoms, Some(op));
+                let mass = self
+                    .kernel
+                    .mass_properties(piece.body)
+                    .map_err(|e| e.to_string());
                 match (solid, mass) {
                     (Ok(s), Ok(m)) => {
                         owned.push(piece.body);
@@ -2086,10 +2477,10 @@ mod kernel_ops {
                 contacts: None,
                 owned,
                 stage: None,
-            axis: None,
-            arrows: Vec::new(),
-            dots: None,
-            uses: Vec::new(),
+                axis: None,
+                arrows: Vec::new(),
+                dots: None,
+                uses: Vec::new(),
             })
         }
 
@@ -2106,7 +2497,12 @@ mod kernel_ops {
         }
 
         /// New: one part per solid of the tool (a surface stays one body).
-        fn new_parts(&mut self, id: FeatureId, tool: &(BodyId, BodyNames), next: &mut State) -> Result<Vec<Placed>, String> {
+        fn new_parts(
+            &mut self,
+            id: FeatureId,
+            tool: &(BodyId, BodyNames),
+            next: &mut State,
+        ) -> Result<Vec<Placed>, String> {
             let pieces = self.split(tool.0, id.0, &[(tool.0, &tool.1)])?;
             let mut placed: Vec<Placed> = Vec::new();
             for p in pieces {
@@ -2151,7 +2547,10 @@ mod kernel_ops {
             for piece in pieces {
                 let owner = parts
                     .iter()
-                    .find(|p| p.body.is_some_and(|b| piece.from.contains(&b)) && !used.contains(&p.part.id))
+                    .find(|p| {
+                        p.body.is_some_and(|b| piece.from.contains(&b))
+                            && !used.contains(&p.part.id)
+                    })
                     .map(|p| p.part.id);
                 let pid = match owner {
                     Some(o) => o,
@@ -2164,7 +2563,8 @@ mod kernel_ops {
                 placed.push((pid, piece));
             }
             // The parts it absorbed.
-            next.parts.retain(|p| !scope.contains(&p.part.id) || used.contains(&p.part.id));
+            next.parts
+                .retain(|p| !scope.contains(&p.part.id) || used.contains(&p.part.id));
             Ok(placed)
         }
 
@@ -2187,7 +2587,11 @@ mod kernel_ops {
             let tool_bodies: Vec<BodyId> = tools.iter().map(|t| t.0).collect();
             let mut inputs: Vec<(BodyId, &BodyNames)> = vec![(body, &*p.names)];
             inputs.extend(tools.iter().map(|t| (t.0, &t.1)));
-            let what = if kind == BoolOp::Subtract { "Remove" } else { "Intersect" };
+            let what = if kind == BoolOp::Subtract {
+                "Remove"
+            } else {
+                "Intersect"
+            };
             let r = match self.kernel.boolean(kind, body, &tool_bodies) {
                 Ok(r) => r,
                 // Nothing left of the part (an empty result).
@@ -2224,7 +2628,8 @@ mod kernel_ops {
             inputs: &[(BodyId, &BodyNames)],
         ) -> Result<Vec<Piece>, String> {
             let body = r.bodies[0];
-            let names = naming::name_body(&self.kernel, body, op, &r.history, inputs).map_err(|e| e.to_string());
+            let names = naming::name_body(&self.kernel, body, op, &r.history, inputs)
+                .map_err(|e| e.to_string());
             let names = match names {
                 Ok(n) => n,
                 Err(e) => {
@@ -2256,7 +2661,11 @@ mod kernel_ops {
             for r in parts {
                 let b = r.bodies[0];
                 let named = naming::name_body(&self.kernel, b, op, &r.history, &[(body, names)]);
-                let volume = self.kernel.mass_properties(b).map(|m| m.volume).unwrap_or(0.0);
+                let volume = self
+                    .kernel
+                    .mass_properties(b)
+                    .map(|m| m.volume)
+                    .unwrap_or(0.0);
                 match named {
                     Ok(n) => {
                         let from = r
@@ -2307,8 +2716,11 @@ mod kernel_ops {
                 let (Some(b), PartKind::Solid) = (p.body, p.part.kind) else {
                     continue;
                 };
-                let Ok(pb) = self.kernel.bounding_box(b) else { continue };
-                let apart = (0..3).any(|i| tb.min[i] > pb.max[i] + tol || pb.min[i] > tb.max[i] + tol);
+                let Ok(pb) = self.kernel.bounding_box(b) else {
+                    continue;
+                };
+                let apart =
+                    (0..3).any(|i| tb.min[i] > pb.max[i] + tol || pb.min[i] > tb.max[i] + tol);
                 if apart {
                     continue;
                 }
@@ -2347,7 +2759,10 @@ mod kernel_ops {
                     let Some(UpTo::Part(pid)) = up_to else {
                         return Err("Select a part to extrude up to".into());
                     };
-                    let body = state.part(*pid).and_then(|p| p.body).ok_or_else(|| lost("part"))?;
+                    let body = state
+                        .part(*pid)
+                        .and_then(|p| p.body)
+                        .ok_or_else(|| lost("part"))?;
                     ExtrudeEnd::UpToPart { body, offset }
                 }
                 EndType::UpToFace => {
@@ -2362,7 +2777,9 @@ mod kernel_ops {
                         .iter()
                         .copied()
                         .max_by(|a, b| {
-                            let area = |f: &cadrs_kernel::FaceId| infos.iter().find(|i| i.id == *f).map_or(0.0, |i| i.area);
+                            let area = |f: &cadrs_kernel::FaceId| {
+                                infos.iter().find(|i| i.id == *f).map_or(0.0, |i| i.area)
+                            };
                             area(a).total_cmp(&area(b))
                         })
                         .ok_or_else(|| lost("face"))?;
@@ -2397,7 +2814,11 @@ mod kernel_ops {
         }
 
         /// The picked faces as kernel inputs, each with its plane (the face's own frame).
-        fn face_inputs(&self, faces: &[crate::document::FaceRef], state: &State) -> Result<Vec<(cadrs_kernel::Plane, FaceInput)>, String> {
+        fn face_inputs(
+            &self,
+            faces: &[crate::document::FaceRef],
+            state: &State,
+        ) -> Result<Vec<(cadrs_kernel::Plane, FaceInput)>, String> {
             let mut out = Vec::new();
             for f in faces {
                 let Some((part, ids)) = face_ids(state, f) else {
@@ -2421,7 +2842,12 @@ mod kernel_ops {
         }
 
         /// The unit direction a Direction reference gives.
-        pub(super) fn direction(&self, before: &[Feature], state: &State, d: &DirectionRef) -> Result<Unit<Vector3<f64>>, String> {
+        pub(super) fn direction(
+            &self,
+            before: &[Feature],
+            state: &State,
+            d: &DirectionRef,
+        ) -> Result<Unit<Vector3<f64>>, String> {
             let lost = || "The extrude direction no longer exists".to_string();
             let v: [f64; 3] = match d {
                 DirectionRef::Edge(r) => {
@@ -2432,7 +2858,8 @@ mod kernel_ops {
                         let ab = crate::solid::sub3(b, a);
                         let ap = crate::solid::sub3(*p, a);
                         let c = crate::solid::cross3(ab, ap);
-                        crate::solid::dot3(c, c).sqrt() < 1e-6 * crate::solid::dot3(ab, ab).max(1e-12)
+                        crate::solid::dot3(c, c).sqrt()
+                            < 1e-6 * crate::solid::dot3(ab, ab).max(1e-12)
                     });
                     if !straight {
                         return Err("The extrude direction must be a straight edge".into());
@@ -2440,12 +2867,21 @@ mod kernel_ops {
                     crate::solid::sub3(b, a)
                 }
                 DirectionRef::SketchLine { sketch, curve } => {
-                    let sk = before.iter().find(|f| f.id == *sketch).and_then(|f| f.sketch()).ok_or_else(lost)?;
+                    let sk = before
+                        .iter()
+                        .find(|f| f.id == *sketch)
+                        .and_then(|f| f.sketch())
+                        .ok_or_else(lost)?;
                     let frame = sk.plane.ok_or_else(lost)?.frame();
-                    let CurveKind::Line { a, b } = sk.geometry.curves.get(*curve).ok_or_else(lost)?.kind else {
+                    let CurveKind::Line { a, b } =
+                        sk.geometry.curves.get(*curve).ok_or_else(lost)?.kind
+                    else {
                         return Err("The extrude direction must be a line".into());
                     };
-                    crate::solid::sub3(frame.to_world(sk.geometry.pos(b)), frame.to_world(sk.geometry.pos(a)))
+                    crate::solid::sub3(
+                        frame.to_world(sk.geometry.pos(b)),
+                        frame.to_world(sk.geometry.pos(a)),
+                    )
                 }
                 DirectionRef::FaceNormal(f) => {
                     let part = state.part(f.part).ok_or_else(lost)?;
@@ -2511,7 +2947,10 @@ mod kernel_ops {
             let op = id.0;
             let axis = self.axis(before, state, &r.axis.ok_or("Select a revolve axis")?)?;
             let axis = if r.flip {
-                cadrs_kernel::Axis { dir: -axis.dir, ..axis }
+                cadrs_kernel::Axis {
+                    dir: -axis.dir,
+                    ..axis
+                }
             } else {
                 axis
             };
@@ -2529,13 +2968,21 @@ mod kernel_ops {
                     cadrs_kernel::BodyKind::Thin { left, right }
                 }
             };
-            let to_end = |this: &Self, end: EndType, angle: f64, up_to: &Option<UpTo>, offset: &Option<Offset>| {
+            let to_end = |this: &Self,
+                          end: EndType,
+                          angle: f64,
+                          up_to: &Option<UpTo>,
+                          offset: &Option<Offset>| {
                 let offset = offset.as_ref().map_or(0.0, |o| rad(o.signed()));
                 Ok::<_, String>(match this.end_of(ends, end, 1.0, up_to, &None)? {
                     ExtrudeEnd::UpToNext { .. } => RevolveEnd::UpToNext { offset },
-                    ExtrudeEnd::UpToFace { body, face, .. } => RevolveEnd::UpToFace { body, face, offset },
+                    ExtrudeEnd::UpToFace { body, face, .. } => {
+                        RevolveEnd::UpToFace { body, face, offset }
+                    }
                     ExtrudeEnd::UpToPart { body, .. } => RevolveEnd::UpToPart { body, offset },
-                    ExtrudeEnd::UpToVertex { point, .. } => RevolveEnd::UpToVertex { point, offset },
+                    ExtrudeEnd::UpToVertex { point, .. } => {
+                        RevolveEnd::UpToVertex { point, offset }
+                    }
                     ExtrudeEnd::Blind(_) | ExtrudeEnd::ThroughAll => RevolveEnd::Angle(rad(angle)),
                 })
             };
@@ -2555,19 +3002,30 @@ mod kernel_ops {
                 faces: Vec::new(),
             };
             // One revolve per sketch (and one per picked face), fused.
-            let mut sweeps: Vec<(cadrs_kernel::Profile, Vec<FaceInput>)> =
-                groups.iter().map(|g| (crate::brep::profile(g), Vec::new())).collect();
+            let mut sweeps: Vec<(cadrs_kernel::Profile, Vec<FaceInput>)> = groups
+                .iter()
+                .map(|g| (crate::brep::profile(g), Vec::new()))
+                .collect();
             for (plane, input) in faces {
                 sweeps.push((cadrs_kernel::Profile::new(plane, vec![]), vec![input]));
             }
             let mut made: Vec<(BodyId, BodyNames)> = Vec::new();
             for (profile, inputs) in &sweeps {
-                let spec = RevolveSpec { faces: inputs.clone(), ..spec.clone() };
+                let spec = RevolveSpec {
+                    faces: inputs.clone(),
+                    ..spec.clone()
+                };
                 let named = self.kernel.revolve_with(profile, &spec).and_then(|res| {
                     let body = res.bodies[0];
-                    let inputs: Vec<(BodyId, &BodyNames)> =
-                        state.parts.iter().filter_map(|p| Some((p.body?, &*p.names))).collect();
-                    Ok((body, naming::name_body(&self.kernel, body, op, &res.history, &inputs)?))
+                    let inputs: Vec<(BodyId, &BodyNames)> = state
+                        .parts
+                        .iter()
+                        .filter_map(|p| Some((p.body?, &*p.names)))
+                        .collect();
+                    Ok((
+                        body,
+                        naming::name_body(&self.kernel, body, op, &res.history, &inputs)?,
+                    ))
                 });
                 match named {
                     Ok(b) => made.push(b),
@@ -2598,7 +3056,13 @@ mod kernel_ops {
             let o_ = o;
             geoms.insert(
                 op,
-                Arc::new(crate::brep::OpGeom::revolve(&groups, [o.x, o.y, o.z], [d.x, d.y, d.z], start, sweep)),
+                Arc::new(crate::brep::OpGeom::revolve(
+                    &groups,
+                    [o.x, o.y, o.z],
+                    [d.x, d.y, d.z],
+                    start,
+                    sweep,
+                )),
             );
             let geoms = Arc::new(geoms);
             let tool = match made.len() {
@@ -2606,11 +3070,24 @@ mod kernel_ops {
                 _ => {
                     let (first_b, _) = made[0];
                     let rest: Vec<BodyId> = made[1..].iter().map(|(b, _)| *b).collect();
-                    let merged = self.kernel.boolean(BoolOp::Union, first_b, &rest).and_then(|res| {
-                        let body = res.bodies[0];
-                        let inputs: Vec<(BodyId, &BodyNames)> = made.iter().map(|(b, n)| (*b, n)).collect();
-                        Ok((body, naming::name_body(&self.kernel, body, op, &res.history, &inputs)?))
-                    });
+                    let merged =
+                        self.kernel
+                            .boolean(BoolOp::Union, first_b, &rest)
+                            .and_then(|res| {
+                                let body = res.bodies[0];
+                                let inputs: Vec<(BodyId, &BodyNames)> =
+                                    made.iter().map(|(b, n)| (*b, n)).collect();
+                                Ok((
+                                    body,
+                                    naming::name_body(
+                                        &self.kernel,
+                                        body,
+                                        op,
+                                        &res.history,
+                                        &inputs,
+                                    )?,
+                                ))
+                            });
                     for (b, _) in &made {
                         self.kernel.release(*b);
                     }
@@ -2631,7 +3108,12 @@ mod kernel_ops {
         }
 
         /// The axis a revolve axis reference gives (exact, from the sketch or the kernel).
-        fn axis(&self, before: &[Feature], state: &State, a: &AxisRef) -> Result<cadrs_kernel::Axis, String> {
+        fn axis(
+            &self,
+            before: &[Feature],
+            state: &State,
+            a: &AxisRef,
+        ) -> Result<cadrs_kernel::Axis, String> {
             let lost = || "The revolve axis no longer exists".to_string();
             let make = |o: [f64; 3], d: [f64; 3]| -> Result<cadrs_kernel::Axis, String> {
                 let d = Vector3::from(d);
@@ -2645,7 +3127,11 @@ mod kernel_ops {
             };
             match a {
                 AxisRef::SketchCurve { sketch, curve } => {
-                    let sk = before.iter().find(|f| f.id == *sketch).and_then(|f| f.sketch()).ok_or_else(lost)?;
+                    let sk = before
+                        .iter()
+                        .find(|f| f.id == *sketch)
+                        .and_then(|f| f.sketch())
+                        .ok_or_else(lost)?;
                     let frame = sk.plane.ok_or_else(lost)?.frame();
                     let g = &sk.geometry;
                     match g.curves.get(*curve).ok_or_else(lost)?.kind {
@@ -2656,11 +3142,15 @@ mod kernel_ops {
                         CurveKind::Circle { center, .. } | CurveKind::Arc { center, .. } => {
                             make(frame.to_world(g.pos(center)), frame.normal())
                         }
-                        CurveKind::Ellipse { .. } | CurveKind::EllipseOffset { .. } | CurveKind::EllipseArc { .. } => {
+                        CurveKind::Ellipse { .. }
+                        | CurveKind::EllipseOffset { .. }
+                        | CurveKind::EllipseArc { .. } => {
                             Err("An ellipse can't be a revolve axis".into())
                         }
                         CurveKind::Spline { .. } => Err("A spline can't be a revolve axis".into()),
-                        CurveKind::Bezier { .. } => Err("A Bézier curve can't be a revolve axis".into()),
+                        CurveKind::Bezier { .. } => {
+                            Err("A Bézier curve can't be a revolve axis".into())
+                        }
                     }
                 }
                 AxisRef::Edge(r) => {
@@ -2668,13 +3158,21 @@ mod kernel_ops {
                     let part = state
                         .part(r.part)
                         .filter(|p| p.part.solid.edge(&r.edge).is_some())
-                        .or_else(|| state.parts.iter().find(|p| p.part.solid.edge(&r.edge).is_some()))
+                        .or_else(|| {
+                            state
+                                .parts
+                                .iter()
+                                .find(|p| p.part.solid.edge(&r.edge).is_some())
+                        })
                         .ok_or_else(lost)?;
                     // The exact edge from the kernel.
                     if let Some(body) = part.body {
                         let ids = part.names.edges_named(&r.edge);
                         let infos = self.kernel.edges(body).map_err(|e| e.to_string())?;
-                        if let Some(info) = ids.first().and_then(|id| infos.iter().find(|i| i.id == *id)) {
+                        if let Some(info) = ids
+                            .first()
+                            .and_then(|id| infos.iter().find(|i| i.id == *id))
+                        {
                             if let Some(c) = info.circle {
                                 let (o, n) = (c.center, c.normal.into_inner());
                                 return make([o.x, o.y, o.z], [n.x, n.y, n.z]);
@@ -2683,7 +3181,9 @@ mod kernel_ops {
                                 let (s, e) = (info.start, info.end);
                                 return make([s.x, s.y, s.z], [e.x - s.x, e.y - s.y, e.z - s.z]);
                             }
-                            return Err("The revolve axis must be a straight or circular edge".into());
+                            return Err(
+                                "The revolve axis must be a straight or circular edge".into()
+                            );
                         }
                     }
                     // Else from its polyline.
@@ -2693,7 +3193,9 @@ mod kernel_ops {
                         crate::links::Curve3::Circle { center, normal, .. }
                         | crate::links::Curve3::Arc { center, normal, .. } => make(center, normal),
                         crate::links::Curve3::Ellipse { .. } => Err(lost()),
-                        crate::links::Curve3::Sampled { .. } => Err("Only a straight or circular edge can be a revolve axis".into()),
+                        crate::links::Curve3::Sampled { .. } => {
+                            Err("Only a straight or circular edge can be a revolve axis".into())
+                        }
                     }
                 }
                 AxisRef::Connector(c) => {
@@ -2714,7 +3216,12 @@ mod kernel_ops {
         }
 
         /// The Boolean feature (PS5.5).
-        pub(super) fn boolean(&mut self, id: FeatureId, b: &BooleanFeature, state: &Arc<State>) -> Result<Output, String> {
+        pub(super) fn boolean(
+            &mut self,
+            id: FeatureId,
+            b: &BooleanFeature,
+            state: &Arc<State>,
+        ) -> Result<Output, String> {
             if let Some(p) = b.problem() {
                 return Err(p.into());
             }
@@ -2724,15 +3231,25 @@ mod kernel_ops {
             }
             let op = id.0;
             let mut next = (**state).clone();
-            let tools: Vec<PartState> = b.tools.iter().filter_map(|p| state.part(*p).cloned()).collect();
+            let tools: Vec<PartState> = b
+                .tools
+                .iter()
+                .filter_map(|p| state.part(*p).cloned())
+                .collect();
             let mut nothing_to_union = false;
             let placed = match b.op {
                 BooleanKind::Union | BooleanKind::Intersect => {
-                    let kind = if b.op == BooleanKind::Union { BoolOp::Union } else { BoolOp::Intersect };
+                    let kind = if b.op == BooleanKind::Union {
+                        BoolOp::Union
+                    } else {
+                        BoolOp::Intersect
+                    };
                     let first = &tools[0];
                     let rest: Vec<BodyId> = tools[1..].iter().filter_map(|t| t.body).collect();
-                    let inputs: Vec<(BodyId, &BodyNames)> =
-                        tools.iter().filter_map(|t| Some((t.body?, &*t.names))).collect();
+                    let inputs: Vec<(BodyId, &BodyNames)> = tools
+                        .iter()
+                        .filter_map(|t| Some((t.body?, &*t.names)))
+                        .collect();
                     let r = self
                         .kernel
                         .boolean(kind, first.body.ok_or_else(|| no_body(first))?, &rest)
@@ -2748,15 +3265,24 @@ mod kernel_ops {
                     let mut placed: Vec<Placed> = Vec::new();
                     let mut merged = false;
                     for piece in pieces {
-                        let owners: Vec<PartId> = tools.iter().filter(|t| t.body.is_some_and(|b| piece.from.contains(&b))).map(|t| t.part.id).collect();
+                        let owners: Vec<PartId> = tools
+                            .iter()
+                            .filter(|t| t.body.is_some_and(|b| piece.from.contains(&b)))
+                            .map(|t| t.part.id)
+                            .collect();
                         merged |= owners.len() > 1;
                         let taken: Vec<PartId> = placed.iter().map(|(p, _)| *p).collect();
-                        let pid = owners.iter().copied().find(|p| !taken.contains(p)).unwrap_or_else(|| Self::new_id(id, &next, &taken));
+                        let pid = owners
+                            .iter()
+                            .copied()
+                            .find(|p| !taken.contains(p))
+                            .unwrap_or_else(|| Self::new_id(id, &next, &taken));
                         placed.push((pid, piece));
                     }
                     if !b.keep_tools {
                         let kept: Vec<PartId> = placed.iter().map(|(p, _)| *p).collect();
-                        next.parts.retain(|p| !b.tools.contains(&p.part.id) || kept.contains(&p.part.id));
+                        next.parts
+                            .retain(|p| !b.tools.contains(&p.part.id) || kept.contains(&p.part.id));
                     }
                     if b.op == BooleanKind::Union && !merged && tools.len() > 1 {
                         nothing_to_union = true;
@@ -2787,10 +3313,23 @@ mod kernel_ops {
                             if !o.all && faces.is_empty() {
                                 continue;
                             }
-                            let spec = cadrs_kernel::OffsetSpec { distance: if o.all { o.signed() } else { 0.0 }, faces, sharp: true };
+                            let spec = cadrs_kernel::OffsetSpec {
+                                distance: if o.all { o.signed() } else { 0.0 },
+                                faces,
+                                sharp: true,
+                            };
                             let made = self.kernel.offset(*body, &spec).and_then(|r| {
                                 let nb = r.bodies[0];
-                                Ok((nb, naming::name_body(&self.kernel, nb, op, &r.history, &[(*body, names)])?))
+                                Ok((
+                                    nb,
+                                    naming::name_body(
+                                        &self.kernel,
+                                        nb,
+                                        op,
+                                        &r.history,
+                                        &[(*body, names)],
+                                    )?,
+                                ))
                             });
                             match made {
                                 Ok(x) => {
@@ -2808,7 +3347,11 @@ mod kernel_ops {
                         if !o.all {
                             // Tools with no picked face cut as they are.
                             for (t, r) in tools.iter().zip(tool_refs.iter()) {
-                                let picked = o.faces.iter().filter_map(|f| face_ids(state, f)).any(|(p, _)| p.part.id == t.part.id);
+                                let picked = o
+                                    .faces
+                                    .iter()
+                                    .filter_map(|f| face_ids(state, f))
+                                    .any(|(p, _)| p.part.id == t.part.id);
                                 if !picked {
                                     grown.push(r.clone());
                                 }
@@ -2839,17 +3382,21 @@ mod kernel_ops {
                 }
             };
             let geoms = state.geoms.clone();
-            self.finish(id, placed, next, op, geoms, PartKind::Solid).map(|mut o| {
-                if nothing_to_union {
-                    o.warning = Some("The parts don't touch: nothing was joined".into());
-                }
-                o
-            })
+            self.finish(id, placed, next, op, geoms, PartKind::Solid)
+                .map(|mut o| {
+                    if nothing_to_union {
+                        o.warning = Some("The parts don't touch: nothing was joined".into());
+                    }
+                    o
+                })
         }
     }
 
     /// The part a face reference is on and the face's kernel ids (by its current name).
-    fn face_ids<'a>(state: &'a State, f: &crate::document::FaceRef) -> Option<(&'a PartState, Vec<cadrs_kernel::FaceId>)> {
+    fn face_ids<'a>(
+        state: &'a State,
+        f: &crate::document::FaceRef,
+    ) -> Option<(&'a PartState, Vec<cadrs_kernel::FaceId>)> {
         let candidates: Vec<&PartState> = state
             .part(f.part)
             .into_iter()
@@ -2882,7 +3429,10 @@ mod kernel_ops {
     }
 
     /// A planar face's frame (u × v is its outward normal).
-    fn face_frame(part: &PartState, f: &crate::document::FaceRef) -> Option<cadrs_sketch::PlaneFrame> {
+    fn face_frame(
+        part: &PartState,
+        f: &crate::document::FaceRef,
+    ) -> Option<cadrs_sketch::PlaneFrame> {
         let solid = &part.part.solid;
         let (i, _) = solid.resolve_face(&f.face, None, Some(f.seed)).ok()?;
         let pl = solid.faces[i].plane?;
@@ -2890,7 +3440,18 @@ mod kernel_ops {
         // tool that made them (a pocket's wall faces into the part), so it is checked against
         // the mesh.
         Some(match solid.face_normal(i) {
-            Some(n) if { let m = pl.normal(); n[0] * m[0] + n[1] * m[1] + n[2] * m[2] } < 0.0 => cadrs_sketch::PlaneFrame { origin: pl.origin, u: pl.u, v: [-pl.v[0], -pl.v[1], -pl.v[2]] },
+            Some(n)
+                if {
+                    let m = pl.normal();
+                    n[0] * m[0] + n[1] * m[1] + n[2] * m[2]
+                } < 0.0 =>
+            {
+                cadrs_sketch::PlaneFrame {
+                    origin: pl.origin,
+                    u: pl.u,
+                    v: [-pl.v[0], -pl.v[1], -pl.v[2]],
+                }
+            }
             _ => pl,
         })
     }
@@ -2911,11 +3472,15 @@ pub fn extrude_groups(features: &[Feature], e: &ExtrudeFeature) -> (Vec<ProfileG
 pub fn loft_profile_is_one_contour(features: &[Feature], p: &crate::advanced::LoftProfile) -> bool {
     use crate::advanced::LoftProfile;
     let groups = match p {
-        LoftProfile::Regions { regions, .. } => sweep_groups(features, regions, &[], BodyType::Solid).0,
+        LoftProfile::Regions { regions, .. } => {
+            sweep_groups(features, regions, &[], BodyType::Solid).0
+        }
         LoftProfile::Sketch(s) => sweep_groups(features, &[], &[*s], BodyType::Solid).0,
         _ => return true,
     };
-    groups.first().is_none_or(|g| cadrs_kernel::loft::section_loop(&crate::brep::profile(g)).is_ok())
+    groups
+        .first()
+        .is_none_or(|g| cadrs_kernel::loft::section_loop(&crate::brep::profile(g)).is_ok())
 }
 
 /// [`extrude_groups`] for any feature that takes sketch regions and whole sketches (an extrude
@@ -2931,7 +3496,11 @@ pub fn sweep_groups(
         sketches: &'a [FeatureId],
         body: BodyType,
     }
-    let e = E { regions, sketches, body };
+    let e = E {
+        regions,
+        sketches,
+        body,
+    };
     let mut out: Vec<(FeatureId, ProfileGroup)> = Vec::new();
     let mut missing = 0;
     let group = |out: &mut Vec<(FeatureId, ProfileGroup)>, sketch: FeatureId, frame| -> usize {
@@ -2944,7 +3513,11 @@ pub fn sweep_groups(
         }
     };
     for r in e.regions {
-        let Some(sk) = features.iter().find(|f| f.id == r.sketch).and_then(|f| f.sketch()) else {
+        let Some(sk) = features
+            .iter()
+            .find(|f| f.id == r.sketch)
+            .and_then(|f| f.sketch())
+        else {
             missing += 1;
             continue;
         };
@@ -3062,18 +3635,35 @@ pub fn sketch_chains(sketch: FeatureId, g: &Sketch) -> Vec<ChainGeom> {
                 if let Some(e) = g.ellipse_geom(id) {
                     out.push(ChainGeom {
                         source: key(id),
-                        pieces: vec![(Piece::Ellipse { g: e, t0: 0.0, sweep: tau }, id)],
+                        pieces: vec![(
+                            Piece::Ellipse {
+                                g: e,
+                                t0: 0.0,
+                                sweep: tau,
+                            },
+                            id,
+                        )],
                         closed: true,
                     });
                 }
             }
             CurveKind::Line { a, b } | CurveKind::Bezier { a, b, .. } => open.push((id, a, b)),
-            CurveKind::Arc { start, end, .. } | CurveKind::EllipseArc { start, end, .. } => open.push((id, start, end)),
+            CurveKind::Arc { start, end, .. } | CurveKind::EllipseArc { start, end, .. } => {
+                open.push((id, start, end))
+            }
             CurveKind::Spline { start, end } if start == end => {
-                let pieces: Vec<(Piece, CurveId)> =
-                    g.spline_spans(id).unwrap_or_default().into_iter().map(|b| (Piece::Bezier(BezierGeom::new(b)), id)).collect();
+                let pieces: Vec<(Piece, CurveId)> = g
+                    .spline_spans(id)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|b| (Piece::Bezier(BezierGeom::new(b)), id))
+                    .collect();
                 if !pieces.is_empty() {
-                    out.push(ChainGeom { source: key(id), pieces, closed: true });
+                    out.push(ChainGeom {
+                        source: key(id),
+                        pieces,
+                        closed: true,
+                    });
                 }
             }
             CurveKind::Spline { start, end } => open.push((id, start, end)),
@@ -3085,13 +3675,25 @@ pub fn sketch_chains(sketch: FeatureId, g: &Sketch) -> Vec<ChainGeom> {
             CurveKind::Arc { .. } => vec![Piece::Arc(g.arc_geom(id)?)],
             CurveKind::EllipseArc { .. } => {
                 let e = g.ellipse_arc_geom(id)?;
-                vec![Piece::Ellipse { g: e.e, t0: e.t0, sweep: e.sweep }]
+                vec![Piece::Ellipse {
+                    g: e.e,
+                    t0: e.t0,
+                    sweep: e.sweep,
+                }]
             }
-            CurveKind::Spline { .. } => g.spline_spans(id)?.into_iter().map(|b| Piece::Bezier(BezierGeom::new(b))).collect(),
+            CurveKind::Spline { .. } => g
+                .spline_spans(id)?
+                .into_iter()
+                .map(|b| Piece::Bezier(BezierGeom::new(b)))
+                .collect(),
             CurveKind::Bezier { .. } => vec![Piece::Bezier(g.bezier_geom(id)?)],
             _ => return None,
         };
-        Some(if forward { p } else { p.iter().rev().map(Piece::reversed).collect() })
+        Some(if forward {
+            p
+        } else {
+            p.iter().rev().map(Piece::reversed).collect()
+        })
     };
     while let Some((first, a, b)) = open.pop() {
         let mut ids = vec![(first, true)];
@@ -3127,7 +3729,12 @@ pub fn sketch_chains(sketch: FeatureId, g: &Sketch) -> Vec<ChainGeom> {
         }
         let pieces: Vec<(Piece, CurveId)> = ids
             .iter()
-            .flat_map(|(id, fwd)| piece(*id, *fwd).unwrap_or_default().into_iter().map(|p| (p, *id)))
+            .flat_map(|(id, fwd)| {
+                piece(*id, *fwd)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|p| (p, *id))
+            })
             .collect();
         if !pieces.is_empty() {
             out.push(ChainGeom {
@@ -3188,7 +3795,13 @@ fn worker() -> &'static Mutex<mpsc::Sender<Job>> {
         std::thread::Builder::new()
             .name("cadrs-rebuild".into())
             // With the kernel in its own process, this thread hands the jobs to it.
-            .spawn(move || if process::enabled() { process::run_remote(rx) } else { run(rx) })
+            .spawn(move || {
+                if process::enabled() {
+                    process::run_remote(rx)
+                } else {
+                    run(rx)
+                }
+            })
             .expect("failed to start the rebuild thread");
         Mutex::new(tx)
     })
@@ -3215,13 +3828,19 @@ fn run(rx: mpsc::Receiver<Job>) {
         #[cfg(not(feature = "brep"))]
         let Ok(job) = rx.recv() else { break };
         match job {
-            Job::Rebuild { features, reply, cancelled, persist } => {
+            Job::Rebuild {
+                features,
+                reply,
+                cancelled,
+                persist,
+            } => {
                 if cancelled.load(Ordering::Relaxed) {
                     continue;
                 }
                 #[cfg(feature = "brep")]
                 if persist {
-                    let _ = catch_unwind(AssertUnwindSafe(|| rebuilder.restore_snapshot(&features)));
+                    let _ =
+                        catch_unwind(AssertUnwindSafe(|| rebuilder.restore_snapshot(&features)));
                 }
                 #[cfg(not(feature = "brep"))]
                 let _ = persist;
@@ -3240,8 +3859,14 @@ fn run(rx: mpsc::Receiver<Job>) {
                 }
                 let _ = reply.send(Arc::new(build));
             }
-            Job::Export { features, request, reply } => {
-                let result = catch_unwind(AssertUnwindSafe(|| rebuilder.export_step(&features, &request)));
+            Job::Export {
+                features,
+                request,
+                reply,
+            } => {
+                let result = catch_unwind(AssertUnwindSafe(|| {
+                    rebuilder.export_step(&features, &request)
+                }));
                 let files = result.unwrap_or_else(|_| {
                     rebuilder = Rebuilder::new();
                     Err("Internal error while exporting".into())
@@ -3254,7 +3879,9 @@ fn run(rx: mpsc::Receiver<Job>) {
                 }
             }
             Job::Task { name, input, done } => {
-                match catch_unwind(AssertUnwindSafe(|| task::run_named(name, &input, &mut rebuilder))) {
+                match catch_unwind(AssertUnwindSafe(|| {
+                    task::run_named(name, &input, &mut rebuilder)
+                })) {
                     Ok(out) => done(out.ok()),
                     Err(_) => {
                         rebuilder = Rebuilder::new();
@@ -3262,23 +3889,37 @@ fn run(rx: mpsc::Receiver<Job>) {
                     }
                 }
             }
-            Job::Project { features, request, reply, cancelled } => {
+            Job::Project {
+                features,
+                request,
+                reply,
+                cancelled,
+            } => {
                 // Nobody waits for it any more (the view was deleted or changed again).
                 if cancelled.load(Ordering::Relaxed) {
                     continue;
                 }
-                let result = catch_unwind(AssertUnwindSafe(|| rebuilder.project_view(&features, &request)));
+                let result = catch_unwind(AssertUnwindSafe(|| {
+                    rebuilder.project_view(&features, &request)
+                }));
                 let view = result.unwrap_or_else(|_| {
                     rebuilder = Rebuilder::new();
                     Err("Internal error while projecting the view".into())
                 });
                 let _ = reply.send(view.map(Arc::new));
             }
-            Job::ProjectAssembly { state, request, reply, cancelled } => {
+            Job::ProjectAssembly {
+                state,
+                request,
+                reply,
+                cancelled,
+            } => {
                 if cancelled.load(Ordering::Relaxed) {
                     continue;
                 }
-                let result = catch_unwind(AssertUnwindSafe(|| rebuilder.project_assembly(&state, &request)));
+                let result = catch_unwind(AssertUnwindSafe(|| {
+                    rebuilder.project_assembly(&state, &request)
+                }));
                 let view = result.unwrap_or_else(|_| {
                     rebuilder = Rebuilder::new();
                     Err("Internal error while projecting the assembly".into())
@@ -3312,7 +3953,9 @@ impl<T> PendingJob<T> {
 
 /// Runs `f` on the kernel thread, with the rebuild session (its cached parts and kernel bodies),
 /// after the jobs queued before it (P3B.9: Check interference, assembly export).
-pub fn run_on_worker<T: Send + 'static>(f: impl FnOnce(&mut Rebuilder) -> T + Send + 'static) -> PendingJob<T> {
+pub fn run_on_worker<T: Send + 'static>(
+    f: impl FnOnce(&mut Rebuilder) -> T + Send + 'static,
+) -> PendingJob<T> {
     let (reply, rx) = mpsc::channel();
     let job = Job::Run(Box::new(move |r: &mut Rebuilder| {
         let _ = reply.send(f(r));
@@ -3323,7 +3966,9 @@ pub fn run_on_worker<T: Send + 'static>(f: impl FnOnce(&mut Rebuilder) -> T + Se
 
 /// Runs `f` on a thread of its own, for work that only needs rebuilds ([`build`]) besides its own
 /// (they queue on the worker, wherever the kernel runs).
-pub fn run_in_background<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> PendingJob<T> {
+pub fn run_in_background<T: Send + 'static>(
+    f: impl FnOnce() -> T + Send + 'static,
+) -> PendingJob<T> {
     let (reply, rx) = mpsc::channel();
     std::thread::spawn(move || {
         let _ = reply.send(f());
@@ -3334,7 +3979,10 @@ pub fn run_in_background<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'stat
 /// Works out the stage of feature `id` (an Add's or a Remove's change, [`Rebuilder::stage_of`])
 /// on the kernel thread: the feature list's hover shows it.
 pub fn request_stage(features: Vec<Feature>, id: FeatureId) -> PendingJob<Option<Stage>> {
-    task::run(StageOf { features: process::Features::of(features), id })
+    task::run(StageOf {
+        features: process::Features::of(features),
+        id,
+    })
 }
 
 /// [`request_stage`] as a [`task::Task`].
@@ -3411,24 +4059,42 @@ impl task::Task for SaveSnapshotNow {
 impl Rebuilder {
     /// A copy of the part `part` of the Part Studio `features` (rebuilt, mostly from the cache)
     /// moved by the rotation `rotation` (rows) and `translation` (mm).
-    pub fn placed_body(&mut self, features: &[Feature], part: PartId, rotation: [[f64; 3]; 3], translation: [f64; 3]) -> Result<BodyId, String> {
+    pub fn placed_body(
+        &mut self,
+        features: &[Feature],
+        part: PartId,
+        rotation: [[f64; 3]; 3],
+        translation: [f64; 3],
+    ) -> Result<BodyId, String> {
         use cadrs_kernel::Kernel;
         self.rebuild(features);
         let state = self.last.clone();
-        let p = state.part(part).ok_or_else(|| "the part no longer exists".to_string())?;
+        let p = state
+            .part(part)
+            .ok_or_else(|| "the part no longer exists".to_string())?;
         // A derived board's component (a mesh): its model's solids, made for this.
         let (body, temp) = match p.body {
             Some(b) => (b, false),
-            None => (self.component_body(features, &state, part).map_err(|e| format!("{}: {e}", p.part.name))?, true),
+            None => (
+                self.component_body(features, &state, part)
+                    .map_err(|e| format!("{}: {e}", p.part.name))?,
+                true,
+            ),
         };
         let r = nalgebra::Matrix3::from_row_slice(&rotation.concat());
         let q = nalgebra::UnitQuaternion::from_matrix(&r);
-        let iso = nalgebra::Isometry3::from_parts(nalgebra::Translation3::new(translation[0], translation[1], translation[2]), q);
+        let iso = nalgebra::Isometry3::from_parts(
+            nalgebra::Translation3::new(translation[0], translation[1], translation[2]),
+            q,
+        );
         let out = self.kernel.transform(body, &iso).map_err(|e| e.to_string());
         if temp {
             self.kernel.release(body);
         }
-        out?.bodies.first().copied().ok_or_else(|| "moving the part failed".to_string())
+        out?.bodies
+            .first()
+            .copied()
+            .ok_or_else(|| "moving the part failed".to_string())
     }
 
     /// The kernel, for queries on bodies from [`Rebuilder::placed_body`] (P3H.5: PCB Studio's
@@ -3446,28 +4112,52 @@ impl Rebuilder {
     pub fn common_volume(&mut self, a: BodyId, b: BodyId) -> Result<f64, String> {
         use cadrs_kernel::Kernel;
         // Bodies that don't meet (or only touch) give no solid: an error, which is no volume.
-        let Ok(out) = self.kernel.boolean(cadrs_kernel::BoolOp::Intersect, a, &[b]) else {
+        let Ok(out) = self
+            .kernel
+            .boolean(cadrs_kernel::BoolOp::Intersect, a, &[b])
+        else {
             return Ok(0.0);
         };
         let mut v = 0.0;
         for body in &out.bodies {
-            v += self.kernel.mass_properties(*body).map(|m| m.volume).unwrap_or(0.0);
+            v += self
+                .kernel
+                .mass_properties(*body)
+                .map(|m| m.volume)
+                .unwrap_or(0.0);
             self.kernel.release(*body);
         }
         Ok(v)
     }
 
     /// [`Self::common_volume`] and the shared volume's triangles (to draw it).
-    pub fn common_volume_mesh(&mut self, a: BodyId, b: BodyId) -> Result<(f64, Vec<Triangle32>), String> {
+    pub fn common_volume_mesh(
+        &mut self,
+        a: BodyId,
+        b: BodyId,
+    ) -> Result<(f64, Vec<Triangle32>), String> {
         use cadrs_kernel::Kernel;
-        let Ok(out) = self.kernel.boolean(cadrs_kernel::BoolOp::Intersect, a, &[b]) else {
+        let Ok(out) = self
+            .kernel
+            .boolean(cadrs_kernel::BoolOp::Intersect, a, &[b])
+        else {
             return Ok((0.0, Vec::new()));
         };
         let mut v = 0.0;
         let mut tris = Vec::new();
         for body in &out.bodies {
-            v += self.kernel.mass_properties(*body).map(|m| m.volume).unwrap_or(0.0);
-            if let Ok(m) = self.kernel.tessellate(*body, cadrs_kernel::Tessellation { deflection: 0.05, angle: std::f64::consts::PI / 36.0 }) {
+            v += self
+                .kernel
+                .mass_properties(*body)
+                .map(|m| m.volume)
+                .unwrap_or(0.0);
+            if let Ok(m) = self.kernel.tessellate(
+                *body,
+                cadrs_kernel::Tessellation {
+                    deflection: 0.05,
+                    angle: std::f64::consts::PI / 36.0,
+                },
+            ) {
                 let p = |i: u32| {
                     let q = m.positions[i as usize];
                     [q.x as f32, q.y as f32, q.z as f32]
@@ -3556,7 +4246,10 @@ fn request_with(features: Vec<Feature>, persist: bool) -> Pending {
         cancelled: cancelled.clone(),
         persist,
     };
-    let sent = worker().lock().map(|tx| tx.send(job).is_ok()).unwrap_or(false);
+    let sent = worker()
+        .lock()
+        .map(|tx| tx.send(job).is_ok())
+        .unwrap_or(false);
     let mut pending = Pending {
         rx: Mutex::new(rx),
         cancelled,
@@ -3596,8 +4289,12 @@ impl PendingExport {
 
     /// Waits for the files.
     pub fn wait(self) -> Result<Vec<StepFile>, String> {
-        let rx = self.rx.into_inner().map_err(|_| "The rebuild thread stopped".to_string())?;
-        rx.recv().unwrap_or_else(|_| Err("The rebuild thread stopped".into()))
+        let rx = self
+            .rx
+            .into_inner()
+            .map_err(|_| "The rebuild thread stopped".to_string())?;
+        rx.recv()
+            .unwrap_or_else(|_| Err("The rebuild thread stopped".into()))
     }
 }
 
@@ -3605,7 +4302,11 @@ impl PendingExport {
 /// requested before it).
 pub fn export_step(features: Vec<Feature>, request: StepRequest) -> PendingExport {
     let (reply, rx) = mpsc::channel();
-    let job = Job::Export { features, request, reply };
+    let job = Job::Export {
+        features,
+        request,
+        reply,
+    };
     // If the worker is gone, the reply sender is dropped and `poll` reports it.
     let _ = worker().lock().map(|tx| tx.send(job));
     PendingExport { rx: Mutex::new(rx) }
@@ -3636,7 +4337,12 @@ pub(crate) fn project_assembly_view(
     cancelled: Arc<AtomicBool>,
 ) -> mpsc::Receiver<Result<Arc<crate::views::ViewGeometry>, String>> {
     let (reply, rx) = mpsc::channel();
-    let job = Job::ProjectAssembly { state: Box::new(state), request: Box::new(request), reply, cancelled };
+    let job = Job::ProjectAssembly {
+        state: Box::new(state),
+        request: Box::new(request),
+        reply,
+        cancelled,
+    };
     let _ = worker().lock().map(|tx| tx.send(job));
     rx
 }
@@ -3681,13 +4387,22 @@ fn hide_occluded_pieces(
         }
     }
     let cell = 2.0f64;
-    let (nx, ny) = ((((hi[0] - lo[0]) / cell).ceil() as usize).clamp(1, 2048), (((hi[1] - lo[1]) / cell).ceil() as usize).clamp(1, 2048));
+    let (nx, ny) = (
+        (((hi[0] - lo[0]) / cell).ceil() as usize).clamp(1, 2048),
+        (((hi[1] - lo[1]) / cell).ceil() as usize).clamp(1, 2048),
+    );
     let ix = |x: f64| (((x - lo[0]) / cell).floor().max(0.0) as usize).min(nx - 1);
     let iy = |y: f64| (((y - lo[1]) / cell).floor().max(0.0) as usize).min(ny - 1);
     let mut grid: Vec<Vec<u32>> = vec![Vec::new(); nx * ny];
     for (i, t) in tris.iter().enumerate() {
-        let (x0, x1) = (t.points.iter().map(|p| p[0]).fold(f64::MAX, f64::min), t.points.iter().map(|p| p[0]).fold(f64::MIN, f64::max));
-        let (y0, y1) = (t.points.iter().map(|p| p[1]).fold(f64::MAX, f64::min), t.points.iter().map(|p| p[1]).fold(f64::MIN, f64::max));
+        let (x0, x1) = (
+            t.points.iter().map(|p| p[0]).fold(f64::MAX, f64::min),
+            t.points.iter().map(|p| p[0]).fold(f64::MIN, f64::max),
+        );
+        let (y0, y1) = (
+            t.points.iter().map(|p| p[1]).fold(f64::MAX, f64::min),
+            t.points.iter().map(|p| p[1]).fold(f64::MIN, f64::max),
+        );
         for gy in iy(y0)..=iy(y1) {
             for gx in ix(x0)..=ix(x1) {
                 grid[gy * nx + gx].push(i as u32);
@@ -3712,13 +4427,19 @@ fn hide_occluded_pieces(
             let l2 = ((c[1] - a[1]) * (q.x - c[0]) + (a[0] - c[0]) * (q.y - c[1])) / det;
             let l3 = 1.0 - l1 - l2;
             let e = -1e-9;
-            l1 >= e && l2 >= e && l3 >= e && l1 * t.depths[0] + l2 * t.depths[1] + l3 * t.depths[2] < depth - 0.05
+            l1 >= e
+                && l2 >= e
+                && l3 >= e
+                && l1 * t.depths[0] + l2 * t.depths[1] + l3 * t.depths[2] < depth - 0.05
         })
     };
     let mut polys: HashMap<usize, HashMap<cadrs_kernel::EdgeId, Vec<Point3<f64>>>> = HashMap::new();
     let mut out: Vec<ProjEdge> = Vec::with_capacity(proj.edges.len());
     for e in std::mem::take(&mut proj.edges) {
-        let src = e.source.as_ref().and_then(|s| s.edge.map(|id| (s.body, id)));
+        let src = e
+            .source
+            .as_ref()
+            .and_then(|s| s.edge.map(|id| (s.body, id)));
         let (true, Some((body, eid))) = (e.visibility == ProjVisibility::Visible, src) else {
             out.push(e);
             continue;
@@ -3728,9 +4449,15 @@ fn hide_occluded_pieces(
             continue;
         };
         let edges = polys.entry(body).or_insert_with(|| {
-            k.tessellate(bid, cadrs_kernel::Tessellation { deflection: 0.02, angle: std::f64::consts::PI / 72.0 })
-                .map(|m| m.edges.into_iter().collect())
-                .unwrap_or_default()
+            k.tessellate(
+                bid,
+                cadrs_kernel::Tessellation {
+                    deflection: 0.02,
+                    angle: std::f64::consts::PI / 72.0,
+                },
+            )
+            .map(|m| m.edges.into_iter().collect())
+            .unwrap_or_default()
         });
         let Some(poly) = edges.get(&eid).filter(|p| p.len() >= 2) else {
             out.push(e);
@@ -3742,7 +4469,11 @@ fn hide_occluded_pieces(
                 let (a, b) = (frame.to_2d(&w[0]), frame.to_2d(&w[1]));
                 let d = b - a;
                 let l2 = d.norm_squared();
-                let t = if l2 > 1e-18 { ((q - a).dot(&d) / l2).clamp(0.0, 1.0) } else { 0.0 };
+                let t = if l2 > 1e-18 {
+                    ((q - a).dot(&d) / l2).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
                 let dist = (a + d * t - q).norm();
                 if dist < best.0 {
                     best = (dist, w[0] + (w[1] - w[0]) * t);
@@ -3809,27 +4540,42 @@ fn part_intersections(
     tris: &[crate::views::ShadedTriangle],
 ) -> Vec<cadrs_kernel::ProjEdge> {
     use cadrs_kernel::{BoolOp, Kernel, ProjVisibility};
-    let boxes: Vec<Option<cadrs_kernel::Aabb>> = ids.iter().map(|b| k.bounding_box(*b).ok()).collect();
+    let boxes: Vec<Option<cadrs_kernel::Aabb>> =
+        ids.iter().map(|b| k.bounding_box(*b).ok()).collect();
     let tol = 1e-3;
-    let overlap = |a: &cadrs_kernel::Aabb, b: &cadrs_kernel::Aabb| (0..3).all(|i| a.min[i] < b.max[i] - tol && b.min[i] < a.max[i] - tol);
+    let overlap = |a: &cadrs_kernel::Aabb, b: &cadrs_kernel::Aabb| {
+        (0..3).all(|i| a.min[i] < b.max[i] - tol && b.min[i] < a.max[i] - tol)
+    };
     let mut out = Vec::new();
     for i in 0..ids.len() {
         for j in i + 1..ids.len() {
-            let (Some(a), Some(b)) = (boxes[i], boxes[j]) else { continue };
+            let (Some(a), Some(b)) = (boxes[i], boxes[j]) else {
+                continue;
+            };
             if !overlap(&a, &b) {
                 continue;
             }
-            let Ok(r) = k.boolean(BoolOp::Intersect, ids[i], &[ids[j]]) else { continue };
+            let Ok(r) = k.boolean(BoolOp::Intersect, ids[i], &[ids[j]]) else {
+                continue;
+            };
             for c in r.bodies {
                 if k.solid_count(c).unwrap_or(0) > 0
                     && let Ok(mut p) = k.project(&[c], frame, opts)
                 {
-                    p.edges.retain(|e| e.visibility == ProjVisibility::Visible && e.source.as_ref().is_some_and(|s| s.edge.is_some()));
+                    p.edges.retain(|e| {
+                        e.visibility == ProjVisibility::Visible
+                            && e.source.as_ref().is_some_and(|s| s.edge.is_some())
+                    });
                     hide_occluded_pieces(k, &[c], frame, tris, None, &mut p);
-                    out.extend(p.edges.into_iter().filter(|e| e.visibility == ProjVisibility::Visible).map(|mut e| {
-                        e.source = None;
-                        e
-                    }));
+                    out.extend(
+                        p.edges
+                            .into_iter()
+                            .filter(|e| e.visibility == ProjVisibility::Visible)
+                            .map(|mut e| {
+                                e.source = None;
+                                e
+                            }),
+                    );
                 }
                 k.release(c);
             }
@@ -3866,7 +4612,12 @@ type ProjectedParts = (cadrs_kernel::Projection, Vec<Vec<[f64; 2]>>);
 #[cfg(feature = "brep")]
 fn layout_with(features: &[Feature], fp: uuid::Uuid) -> Option<&cadrs_eda::board::Board> {
     features.iter().find_map(|f| match &f.kind {
-        FeatureKind::Derived(d) => d.board.as_ref().map(|b| &b.layout).filter(|l| l.footprints.iter().any(|x| x.id == fp)).or_else(|| layout_with(&d.studio, fp)),
+        FeatureKind::Derived(d) => d
+            .board
+            .as_ref()
+            .map(|b| &b.layout)
+            .filter(|l| l.footprints.iter().any(|x| x.id == fp))
+            .or_else(|| layout_with(&d.studio, fp)),
         _ => None,
     })
 }

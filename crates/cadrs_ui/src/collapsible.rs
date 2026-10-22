@@ -21,8 +21,10 @@ pub struct CollapsiblePlugin;
 
 impl Plugin for CollapsiblePlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(on_header_activate)
-            .add_systems(PostUpdate, sync_collapsibles.before(crate::icon::resolve_icons));
+        app.add_observer(on_header_activate).add_systems(
+            PostUpdate,
+            sync_collapsibles.before(crate::icon::resolve_icons),
+        );
     }
 }
 
@@ -154,7 +156,11 @@ impl Collapsible {
             },
             Children::spawn(SpawnWith(move |p: &mut ChildSpawner| {
                 let root = p.target_entity();
-                let fg = if error { theme.feature_error } else { theme.foreground };
+                let fg = if error {
+                    theme.feature_error
+                } else {
+                    theme.foreground
+                };
                 let base_bg = if highlight {
                     theme.list_hover
                 } else {
@@ -174,7 +180,11 @@ impl Collapsible {
                         },
                         align_items: AlignItems::Center,
                         column_gap: Val::Px(if section { 2.0 } else { theme.space[4] }),
-                        border_radius: BorderRadius::all(Val::Px(if section { 0.0 } else { theme.radius_lg })),
+                        border_radius: BorderRadius::all(Val::Px(if section {
+                            0.0
+                        } else {
+                            theme.radius_lg
+                        })),
                         ..default()
                     },
                     Visuals {
@@ -192,7 +202,11 @@ impl Collapsible {
                 .with_children(|h| {
                     h.spawn((
                         icon(
-                            if open { "chevron-down" } else { "chevron-right" },
+                            if open {
+                                "chevron-down"
+                            } else {
+                                "chevron-right"
+                            },
                             // P3I.2 judge: 12 px read far smaller than Onshape's chevrons.
                             if section { 20.0 } else { 14.0 },
                             fg,
@@ -219,7 +233,11 @@ impl Collapsible {
                             h.spawn((icon(i, 16.0, fg), InheritFg, Pickable::IGNORE));
                         }
                     }
-                    let weight = if section { FontWeight::NORMAL } else { FontWeight::BOLD };
+                    let weight = if section {
+                        FontWeight::NORMAL
+                    } else {
+                        FontWeight::BOLD
+                    };
                     h.spawn((
                         theme.text(label, theme.font_base, weight, fg),
                         InheritFg,
@@ -251,8 +269,17 @@ impl Collapsible {
                         ..default()
                     }
                 };
-                let line = if section { Color::srgb_u8(0xd4, 0xd4, 0xd8) } else { Color::NONE };
-                let mut c = p.spawn((Name::new(content_name), CollapsibleContent(root), node, BorderColor::all(line)));
+                let line = if section {
+                    Color::srgb_u8(0xd4, 0xd4, 0xd8)
+                } else {
+                    Color::NONE
+                };
+                let mut c = p.spawn((
+                    Name::new(content_name),
+                    CollapsibleContent(root),
+                    node,
+                    BorderColor::all(line),
+                ));
                 if let Some(f) = content {
                     c.with_children(|c| f(c));
                 }

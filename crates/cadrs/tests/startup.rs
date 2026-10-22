@@ -10,14 +10,23 @@ use std::process::Command;
 
 fn looks_like_missing_gpu(stderr: &str) -> bool {
     let s = stderr.to_ascii_lowercase();
-    ["unable to find a gpu", "no suitable adapter", "failed to create wgpu adapter", "requestadaptererror", "no adapter", "failed to create device"]
-        .iter()
-        .any(|p| s.contains(p))
+    [
+        "unable to find a gpu",
+        "no suitable adapter",
+        "failed to create wgpu adapter",
+        "requestadaptererror",
+        "no adapter",
+        "failed to create device",
+    ]
+    .iter()
+    .any(|p| s.contains(p))
 }
 
 #[test]
 fn app_starts_and_opens_a_document() {
-    let out = Path::new(env!("CARGO_TARGET_TMPDIR")).join("startup").join("document_new");
+    let out = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join("startup")
+        .join("document_new");
     let output = Command::new(env!("CARGO_BIN_EXE_cadrs"))
         .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
         .args(["--headless", "--scenario", "document_new", "--out"])
@@ -30,5 +39,9 @@ fn app_starts_and_opens_a_document() {
         eprintln!("startup: SKIPPED, no GPU renderer available:\n{stderr}");
         return;
     }
-    assert!(output.status.success(), "the app failed to start or run `document_new` ({}):\n{stderr}", output.status);
+    assert!(
+        output.status.success(),
+        "the app failed to start or run `document_new` ({}):\n{stderr}",
+        output.status
+    );
 }

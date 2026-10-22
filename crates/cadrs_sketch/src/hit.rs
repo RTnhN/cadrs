@@ -84,7 +84,10 @@ pub fn curve_polyline(s: &Sketch, id: CurveId) -> Vec<Vec2> {
             .ellipse_arc_geom(id)
             .map(|g| g.tessellate(PICK_STEP, 4))
             .unwrap_or_default(),
-        CurveKind::Spline { .. } => s.spline_spans(id).map(|sp| crate::spline::tessellate(&sp, 8)).unwrap_or_default(),
+        CurveKind::Spline { .. } => s
+            .spline_spans(id)
+            .map(|sp| crate::spline::tessellate(&sp, 8))
+            .unwrap_or_default(),
         CurveKind::Bezier { .. } => s
             .bezier_geom(id)
             .map(|g| g.tessellate(PICK_STEP, 32))
@@ -145,10 +148,12 @@ pub fn hit_test(s: &Sketch, cursor: Vec2, to_screen: impl Fn(Vec2) -> Vec2) -> O
             distance: origin,
         });
     }
-    let curve = s
-        .curves
-        .keys()
-        .map(|k| (Entity::Curve(k), curve_distance_px(s, k, cursor, &to_screen)));
+    let curve = s.curves.keys().map(|k| {
+        (
+            Entity::Curve(k),
+            curve_distance_px(s, k, cursor, &to_screen),
+        )
+    });
     let text = s
         .texts
         .keys()
@@ -219,9 +224,8 @@ pub fn box_select(
             .map(|c| c.iter().map(|p| to_screen(*p)).collect())
             .collect();
         let hit = if crossing {
-            pts.iter().any(|c| {
-                (0..c.len()).any(|i| segment_hits_box(c[i], c[(i + 1) % c.len()], lo, hi))
-            })
+            pts.iter()
+                .any(|c| (0..c.len()).any(|i| segment_hits_box(c[i], c[(i + 1) % c.len()], lo, hi)))
         } else {
             !pts.is_empty() && pts.iter().flatten().all(|p| inside(*p))
         };
@@ -323,7 +327,9 @@ mod tests {
         // The circle's center point is hit as a point.
         let c = s.point_at(Vec2::new(40.0, 0.0), 1e-9).unwrap();
         assert_eq!(
-            hit_test(&s, Vec2::new(901.0, 500.0), screen).unwrap().entity,
+            hit_test(&s, Vec2::new(901.0, 500.0), screen)
+                .unwrap()
+                .entity,
             Entity::Point(c)
         );
         // The arc runs ccw from (5,30) over the top to (-5,30): its top (0,35) is at (500, 150).
@@ -351,11 +357,23 @@ mod tests {
         assert!(crossing.contains(&Entity::Curve(line)));
         assert!(!crossing.contains(&Entity::Curve(circle)));
         // A box around the whole line and circle selects both in window mode.
-        let all = box_select(&s, Vec2::new(480.0, 400.0), Vec2::new(960.0, 600.0), false, screen);
+        let all = box_select(
+            &s,
+            Vec2::new(480.0, 400.0),
+            Vec2::new(960.0, 600.0),
+            false,
+            screen,
+        );
         assert!(all.contains(&Entity::Curve(line)));
         assert!(all.contains(&Entity::Curve(circle)));
         // The origin is picked when nothing else is near it.
-        let away = box_select(&s, Vec2::new(-50.0, 480.0), Vec2::new(-40.0, 490.0), false, screen);
+        let away = box_select(
+            &s,
+            Vec2::new(-50.0, 480.0),
+            Vec2::new(-40.0, 490.0),
+            false,
+            screen,
+        );
         assert!(away.is_empty());
         let mut s2 = Sketch::new();
         SketchOp::AddCircle {
@@ -365,9 +383,20 @@ mod tests {
         }
         .apply(&mut s2)
         .unwrap();
-        assert_eq!(hit_test(&s2, Vec2::new(502.0, 501.0), screen).unwrap().entity, Entity::Origin);
+        assert_eq!(
+            hit_test(&s2, Vec2::new(502.0, 501.0), screen)
+                .unwrap()
+                .entity,
+            Entity::Origin
+        );
         // A small box inside the circle (not touching it) selects nothing, even crossing.
-        let inner = box_select(&s, Vec2::new(880.0, 480.0), Vec2::new(890.0, 490.0), true, screen);
+        let inner = box_select(
+            &s,
+            Vec2::new(880.0, 480.0),
+            Vec2::new(890.0, 490.0),
+            true,
+            screen,
+        );
         assert!(inner.is_empty());
     }
 }

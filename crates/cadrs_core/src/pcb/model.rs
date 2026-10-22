@@ -26,7 +26,10 @@ pub type ModelMeshes = Arc<(Vec<Mesh>, f64)>;
 
 /// How finely STEP models are tessellated for display: 0.02 mm and 5°.
 pub fn tessellation() -> cadrs_kernel::Tessellation {
-    cadrs_kernel::Tessellation { deflection: 0.02, angle: std::f64::consts::PI / 36.0 }
+    cadrs_kernel::Tessellation {
+        deflection: 0.02,
+        angle: std::f64::consts::PI / 36.0,
+    }
 }
 
 /// A model file's meshes (`ext`: `wrl`/`vrml`, `obj`, `step`/`stp`) and its unit in mm: KiCad's
@@ -53,9 +56,17 @@ pub fn file_meshes(bytes: &[u8], ext: &str) -> Result<(Vec<Mesh>, f64), String> 
                 out.push(Mesh {
                     color: [150, 150, 156],
                     positions: t.positions.iter().map(f).collect(),
-                    normals: t.normals.iter().map(|n| [n.x as f32, n.y as f32, n.z as f32]).collect(),
+                    normals: t
+                        .normals
+                        .iter()
+                        .map(|n| [n.x as f32, n.y as f32, n.z as f32])
+                        .collect(),
                     indices: t.indices.iter().flatten().copied().collect(),
-                    edges: t.edges.iter().map(|(_, pts)| pts.iter().map(f).collect()).collect(),
+                    edges: t
+                        .edges
+                        .iter()
+                        .map(|(_, pts)| pts.iter().map(f).collect())
+                        .collect(),
                 });
             }
             if out.iter().all(|m| m.indices.is_empty()) {
@@ -63,7 +74,9 @@ pub fn file_meshes(bytes: &[u8], ext: &str) -> Result<(Vec<Mesh>, f64), String> 
             }
             Ok((out, 1.0))
         }
-        other => Err(format!("3D models of type .{other} aren't supported (use STEP, VRML or OBJ)")),
+        other => Err(format!(
+            "3D models of type .{other} aren't supported (use STEP, VRML or OBJ)"
+        )),
     }
 }
 
@@ -71,9 +84,14 @@ pub fn file_meshes(bytes: &[u8], ext: &str) -> Result<(Vec<Mesh>, f64), String> 
 #[cfg(not(feature = "brep"))]
 pub fn file_meshes(bytes: &[u8], ext: &str) -> Result<(Vec<Mesh>, f64), String> {
     match ext.to_ascii_lowercase().as_str() {
-        "wrl" | "vrml" => Ok((cadrs_eda::wrl::read(&String::from_utf8_lossy(bytes))?, cadrs_eda::wrl::KICAD_UNIT_MM)),
+        "wrl" | "vrml" => Ok((
+            cadrs_eda::wrl::read(&String::from_utf8_lossy(bytes))?,
+            cadrs_eda::wrl::KICAD_UNIT_MM,
+        )),
         "obj" => Ok((cadrs_eda::obj::read(&String::from_utf8_lossy(bytes))?, 1.0)),
-        other => Err(format!("3D models of type .{other} need the solid-modelling kernel")),
+        other => Err(format!(
+            "3D models of type .{other} need the solid-modelling kernel"
+        )),
     }
 }
 
@@ -88,7 +106,9 @@ pub fn cached_file_meshes(hash: &str, ext: &str) -> Result<ModelMeshes, String> 
     if let Some(r) = model_cache().read().ok().and_then(|c| c.get(hash).cloned()) {
         return r;
     }
-    let Some(bytes) = crate::blobs::get(hash) else { return Err("its file isn't loaded".into()) };
+    let Some(bytes) = crate::blobs::get(hash) else {
+        return Err("its file isn't loaded".into());
+    };
     let r = file_meshes(&bytes, ext).map(Arc::new);
     if let Ok(mut c) = model_cache().write() {
         c.insert(hash.to_string(), r.clone());
@@ -98,7 +118,10 @@ pub fn cached_file_meshes(hash: &str, ext: &str) -> Result<ModelMeshes, String> 
 
 /// The file type of a model (its source's extension).
 pub fn model_ext(m: &Model3d) -> String {
-    std::path::Path::new(&m.source).extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default()
+    std::path::Path::new(&m.source)
+        .extension()
+        .map(|e| e.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 /// The motion a footprint's 3D model sits by in its footprint's (package) frame, as KiCad
@@ -107,24 +130,40 @@ pub fn model_ext(m: &Model3d) -> String {
 pub fn model_motion(m: &Model3d, unit: f64) -> Motion {
     let [sx, sy, sz] = m.scale.map(|s| s * unit);
     let [rx, ry, rz] = m.rotation.map(|a| -a.to_radians());
-    let r = Rotation3::from_axis_angle(&Vector3::z_axis(), rz) * Rotation3::from_axis_angle(&Vector3::y_axis(), ry) * Rotation3::from_axis_angle(&Vector3::x_axis(), rx);
-    Motion { linear: r.matrix() * Matrix3::from_diagonal(&Vector3::new(sx, sy, sz)), translation: Vector3::new(m.offset[0], m.offset[1], m.offset[2]) }
+    let r = Rotation3::from_axis_angle(&Vector3::z_axis(), rz)
+        * Rotation3::from_axis_angle(&Vector3::y_axis(), ry)
+        * Rotation3::from_axis_angle(&Vector3::x_axis(), rx);
+    Motion {
+        linear: r.matrix() * Matrix3::from_diagonal(&Vector3::new(sx, sy, sz)),
+        translation: Vector3::new(m.offset[0], m.offset[1], m.offset[2]),
+    }
 }
 
 /// `m` moved by `motion` (positions, normals and edges; normals renormalised, so a scale is
 /// fine).
 pub fn moved_mesh(m: &Mesh, motion: &Motion) -> Mesh {
     let p = |q: &[f32; 3]| {
-        let r = motion.linear * Vector3::new(q[0] as f64, q[1] as f64, q[2] as f64) + motion.translation;
+        let r = motion.linear * Vector3::new(q[0] as f64, q[1] as f64, q[2] as f64)
+            + motion.translation;
         [r.x as f32, r.y as f32, r.z as f32]
     };
     // Normals go by the inverse transpose (a non-uniform scale bends them).
-    let nmat = motion.linear.try_inverse().map(|i| i.transpose()).unwrap_or(motion.linear);
+    let nmat = motion
+        .linear
+        .try_inverse()
+        .map(|i| i.transpose())
+        .unwrap_or(motion.linear);
     let n = |q: &[f32; 3]| {
         let r = (nmat * Vector3::new(q[0] as f64, q[1] as f64, q[2] as f64)).normalize();
         [r.x as f32, r.y as f32, r.z as f32]
     };
-    let mut out = Mesh { color: m.color, positions: m.positions.iter().map(p).collect(), normals: m.normals.iter().map(n).collect(), indices: m.indices.clone(), edges: m.edges.iter().map(|e| e.iter().map(p).collect()).collect() };
+    let mut out = Mesh {
+        color: m.color,
+        positions: m.positions.iter().map(p).collect(),
+        normals: m.normals.iter().map(n).collect(),
+        indices: m.indices.clone(),
+        edges: m.edges.iter().map(|e| e.iter().map(p).collect()).collect(),
+    };
     // A mirroring motion turns the triangles inside out: wind them back.
     if motion.linear.determinant() < 0.0 {
         for t in out.indices.chunks_mut(3) {
@@ -136,7 +175,9 @@ pub fn moved_mesh(m: &Mesh, motion: &Motion) -> Mesh {
 
 /// The visible model of a footprint (the first one with a file or a generated body).
 pub fn shown_model(fp: &Footprint) -> Option<&Model3d> {
-    fp.models.iter().find(|m| m.visible && (m.body.is_some() || m.blob.is_some()))
+    fp.models
+        .iter()
+        .find(|m| m.visible && (m.body.is_some() || m.blob.is_some()))
 }
 
 /// The meshes of a footprint's visible model in its footprint frame (z up from the board
@@ -144,13 +185,18 @@ pub fn shown_model(fp: &Footprint) -> Option<&Model3d> {
 /// generated body. `Ok(None)`: the footprint shows no model (as in KiCad). `Err`: its file
 /// can't be read and it has no generated body.
 pub fn footprint_meshes(fp: &Footprint) -> Result<Option<(Vec<Mesh>, f64)>, String> {
-    let Some(m) = shown_model(fp) else { return Ok(None) };
+    let Some(m) = shown_model(fp) else {
+        return Ok(None);
+    };
     let mut why = None;
     if let Some(h) = &m.blob {
         match cached_file_meshes(h, &model_ext(m)) {
             Ok(file) if !file.0.is_empty() => {
                 let motion = model_motion(m, file.1);
-                return Ok(Some((file.0.iter().map(|g| moved_mesh(g, &motion)).collect(), m.opacity)));
+                return Ok(Some((
+                    file.0.iter().map(|g| moved_mesh(g, &motion)).collect(),
+                    m.opacity,
+                )));
             }
             Ok(_) => why = Some("its model file is empty".to_string()),
             Err(e) => why = Some(e),
@@ -159,9 +205,19 @@ pub fn footprint_meshes(fp: &Footprint) -> Result<Option<(Vec<Mesh>, f64)>, Stri
     match &m.body {
         Some(body) => {
             let motion = model_motion(m, 1.0);
-            Ok(Some((cadrs_eda::model3d::mesh(body).iter().map(|g| moved_mesh(g, &motion)).collect(), m.opacity)))
+            Ok(Some((
+                cadrs_eda::model3d::mesh(body)
+                    .iter()
+                    .map(|g| moved_mesh(g, &motion))
+                    .collect(),
+                m.opacity,
+            )))
         }
-        None => Err(format!("its 3D model {}: {}", m.source, why.unwrap_or_else(|| "no file".into()))),
+        None => Err(format!(
+            "its 3D model {}: {}",
+            m.source,
+            why.unwrap_or_else(|| "no file".into())
+        )),
     }
 }
 
@@ -183,11 +239,19 @@ mod tests {
     fn footprints_sit_on_their_face_where_the_layout_has_their_pads() {
         // A pad at (1, 2) mm of a footprint at (10, 20) turned 90°.
         for side in [Side::Top, Side::Bottom] {
-            let pl = FootprintPlacement { at: Pt::mm(10.0, 20.0), angle: 90.0, side };
+            let pl = FootprintPlacement {
+                at: Pt::mm(10.0, 20.0),
+                angle: 90.0,
+                side,
+            };
             let on_layout = pl.apply(Pt::mm(1.0, 2.0));
             let m = footprint_motion(&pl, 1.6);
             let q = apply(&m, [1.0, 2.0, 0.0]);
-            assert!((q[0] - to_mm(on_layout.x)).abs() < 1e-9 && (q[1] - to_mm(on_layout.y)).abs() < 1e-9, "{side:?} {q:?} {on_layout:?}");
+            assert!(
+                (q[0] - to_mm(on_layout.x)).abs() < 1e-9
+                    && (q[1] - to_mm(on_layout.y)).abs() < 1e-9,
+                "{side:?} {q:?} {on_layout:?}"
+            );
             // Up from the footprint is away from its face.
             let up = apply(&m, [1.0, 2.0, 1.0]);
             match side {
@@ -200,10 +264,25 @@ mod tests {
 
     #[test]
     fn a_mirroring_motion_keeps_triangles_facing_out() {
-        let m = Mesh { color: [1, 2, 3], positions: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], normals: vec![[0.0, 0.0, 1.0]; 3], indices: vec![0, 1, 2], edges: vec![] };
-        let mirror = Motion { linear: Matrix3::from_diagonal(&Vector3::new(-1.0, 1.0, 1.0)), translation: Vector3::zeros() };
+        let m = Mesh {
+            color: [1, 2, 3],
+            positions: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            normals: vec![[0.0, 0.0, 1.0]; 3],
+            indices: vec![0, 1, 2],
+            edges: vec![],
+        };
+        let mirror = Motion {
+            linear: Matrix3::from_diagonal(&Vector3::new(-1.0, 1.0, 1.0)),
+            translation: Vector3::zeros(),
+        };
         let r = moved_mesh(&m, &mirror);
-        let p = |i: u32| Vector3::new(r.positions[i as usize][0] as f64, r.positions[i as usize][1] as f64, r.positions[i as usize][2] as f64);
+        let p = |i: u32| {
+            Vector3::new(
+                r.positions[i as usize][0] as f64,
+                r.positions[i as usize][1] as f64,
+                r.positions[i as usize][2] as f64,
+            )
+        };
         let n = (p(r.indices[1]) - p(r.indices[0])).cross(&(p(r.indices[2]) - p(r.indices[0])));
         assert!(n.z > 0.0);
     }
@@ -214,8 +293,14 @@ mod tests {
         let fp = lib.footprint("Resistor_SMD:R_0805_2012Metric").unwrap();
         let (meshes, opacity) = footprint_meshes(fp).unwrap().unwrap();
         assert_eq!(opacity, 1.0);
-        let zs: Vec<f32> = meshes.iter().flat_map(|m| m.positions.iter().map(|p| p[2])).collect();
-        let (lo, hi) = (zs.iter().cloned().fold(f32::MAX, f32::min), zs.iter().cloned().fold(f32::MIN, f32::max));
+        let zs: Vec<f32> = meshes
+            .iter()
+            .flat_map(|m| m.positions.iter().map(|p| p[2]))
+            .collect();
+        let (lo, hi) = (
+            zs.iter().cloned().fold(f32::MAX, f32::min),
+            zs.iter().cloned().fold(f32::MIN, f32::max),
+        );
         assert!(lo.abs() < 0.05 && hi > 0.3 && hi < 1.0, "{lo} {hi}");
     }
 }

@@ -32,7 +32,10 @@ use cadrs_core::{Feature, FeatureId, FeatureKind};
 use cadrs_sheetmetal::params::{BendCalc, BendReliefKind, CornerReliefKind};
 use cadrs_sketch::units::Quantity;
 use cadrs_ui::prelude::*;
-use cadrs_ui::{Collapsible, CollapsibleToggled, NumberField, NumberFieldState, OptionRow, Select, SelectionList, TabStrip};
+use cadrs_ui::{
+    Collapsible, CollapsibleToggled, NumberField, NumberFieldState, OptionRow, Select,
+    SelectionList, TabStrip,
+};
 
 use crate::ActiveDocument;
 use crate::applied::{AppliedField, AppliedSession};
@@ -41,12 +44,21 @@ use crate::parts::PartCache;
 use crate::viewport::Pick;
 
 /// The sections' names, in order (their open state is kept in the session).
-pub const SECTIONS: [(&str, &str); 4] = [("sm-selections", "Selections"), ("sm-general", "General"), ("sm-material", "Material"), ("sm-relief", "Relief")];
+pub const SECTIONS: [(&str, &str); 4] = [
+    ("sm-selections", "Selections"),
+    ("sm-general", "General"),
+    ("sm-material", "Material"),
+    ("sm-relief", "Relief"),
+];
 
 /// The other sheet metal tools, in Onshape's order (the ▾ of the toolbar's Sheet metal model
 /// button): name, label, icon.
 pub const OTHER_TOOLS: [(&str, &str, &str); 12] = [
-    ("sheet-metal-finish", "Finish sheet metal model", "sheet-metal-finish"),
+    (
+        "sheet-metal-finish",
+        "Finish sheet metal model",
+        "sheet-metal-finish",
+    ),
     ("sheet-metal-flange", "Flange", "sheet-metal-flange"),
     ("sheet-metal-hem", "Hem", "sheet-metal-hem"),
     ("sheet-metal-tab", "Tab", "sheet-metal-tab"),
@@ -54,17 +66,31 @@ pub const OTHER_TOOLS: [(&str, &str, &str); 12] = [
     ("sheet-metal-jog", "Jog", "sheet-metal-jog"),
     ("sheet-metal-form", "Form", "sheet-metal-form"),
     ("sheet-metal-loft", "Loft", "sheet-metal-loft"),
-    ("sheet-metal-make-joint", "Make joint", "sheet-metal-make-joint"),
+    (
+        "sheet-metal-make-joint",
+        "Make joint",
+        "sheet-metal-make-joint",
+    ),
     ("sheet-metal-corner", "Corner", "sheet-metal-corner"),
-    ("sheet-metal-bend-relief", "Bend relief", "sheet-metal-bend-relief"),
-    ("sheet-metal-corner-break", "Corner break", "sheet-metal-corner-break"),
+    (
+        "sheet-metal-bend-relief",
+        "Bend relief",
+        "sheet-metal-bend-relief",
+    ),
+    (
+        "sheet-metal-corner-break",
+        "Corner break",
+        "sheet-metal-corner-break",
+    ),
 ];
 
 /// Whether a tool of the Sheet metal model's ▾ is built (P3I.4, P3I.5, P3I.9): by its id
 /// (`sheet-metal-flange`) or its menu item (`sheet-metal-menu-flange`).
 pub fn tool_built(name: &str) -> bool {
     let name = tool_id(name);
-    crate::sheetmetal_p3i9_ui::built(&name) || crate::sheetmetal_features_ui::built(&name) || crate::sheetmetal_tools_ui::built(&name)
+    crate::sheetmetal_p3i9_ui::built(&name)
+        || crate::sheetmetal_features_ui::built(&name)
+        || crate::sheetmetal_tools_ui::built(&name)
 }
 
 /// A ▾ menu item's tool id (`sheet-metal-menu-flange` → `sheet-metal-flange`).
@@ -103,7 +129,11 @@ fn is_sketch(features: &[Feature], f: FeatureId) -> bool {
 }
 
 fn region_of(cache: &PartCache, sketch: FeatureId, index: u32) -> Option<RegionRef> {
-    let r = cache.sketch_regions(sketch)?.regions.get(index as usize)?.clone();
+    let r = cache
+        .sketch_regions(sketch)?
+        .regions
+        .get(index as usize)?
+        .clone();
     Some(RegionRef::new(sketch, &r))
 }
 
@@ -125,11 +155,21 @@ pub fn first_field(op: SheetMetalOp) -> AppliedField {
 
 /// A new model from the selection: parts → Convert, sketch curves → Extrude, faces or regions →
 /// Thicken (Convert, empty, otherwise: Onshape's default tab).
-pub fn initial(world: &World, picked: &[Pick]) -> Option<(&'static str, FeatureKind, AppliedField)> {
-    let features = world.get_resource::<ActiveDocument>()?.active_element()?.features().to_vec();
+pub fn initial(
+    world: &World,
+    picked: &[Pick],
+) -> Option<(&'static str, FeatureKind, AppliedField)> {
+    let features = world
+        .get_resource::<ActiveDocument>()?
+        .active_element()?
+        .features()
+        .to_vec();
     let cache = world.resource::<PartCache>();
     let mut x = SheetMetalModelFeature::default();
-    let units = world.get_resource::<crate::WorkspaceUnits>().map(|u| u.0).unwrap_or_default();
+    let units = world
+        .get_resource::<crate::WorkspaceUnits>()
+        .map(|u| u.0)
+        .unwrap_or_default();
     // The lengths as the document shows them.
     let p = x.params;
     x.exprs.thickness = units.with_unit(p.thickness, Quantity::Length);
@@ -176,20 +216,34 @@ fn toggle<T: PartialEq>(list: &mut Vec<T>, x: T) {
 
 /// A pick into the dialog's fields. Returns false if it doesn't fit.
 pub fn pick(world: &mut World, kind: &mut FeatureKind, field: AppliedField, pick: Pick) -> bool {
-    let FeatureKind::SheetMetalModel(x) = kind else { return false };
-    let Some(features) = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element()).map(|e| e.features().to_vec()) else {
+    let FeatureKind::SheetMetalModel(x) = kind else {
+        return false;
+    };
+    let Some(features) = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.active_element())
+        .map(|e| e.features().to_vec())
+    else {
         return false;
     };
     let cache = world.resource::<PartCache>();
     match field {
         AppliedField::SmParts => match pick.part() {
             // Not a part this model made (its own result).
-            Some(p) if world.get_resource::<AppliedSession>().is_some_and(|s| s.feature == p.feature) => return false,
+            Some(p)
+                if world
+                    .get_resource::<AppliedSession>()
+                    .is_some_and(|s| s.feature == p.feature) =>
+            {
+                return false;
+            }
             Some(p) => toggle(&mut x.parts, p),
             None => return false,
         },
         AppliedField::SmExclude => {
-            let Some(f) = face_ref(cache, pick) else { return false };
+            let Some(f) = face_ref(cache, pick) else {
+                return false;
+            };
             match x.exclude.iter().position(|g| g.face == f.face) {
                 Some(i) => {
                     x.exclude.remove(i);
@@ -199,10 +253,17 @@ pub fn pick(world: &mut World, kind: &mut FeatureKind, field: AppliedField, pick
         }
         AppliedField::SmBends => {
             // Pick order matters (SM2.2): a new pick goes last; picking it again removes it.
-            let Some(e) = crate::applied::entity_of(cache, pick) else { return false };
+            let Some(e) = crate::applied::entity_of(cache, pick) else {
+                return false;
+            };
             if let EdgeOrFace::Face(f) = &e {
                 // Only cylinders bend.
-                let cyl = cache.parts.iter().find_map(|p| p.solid.face(&f.face)).and_then(|g| g.kind) == Some(cadrs_kernel::SurfaceKind::Cylinder);
+                let cyl = cache
+                    .parts
+                    .iter()
+                    .find_map(|p| p.solid.face(&f.face))
+                    .and_then(|g| g.kind)
+                    == Some(cadrs_kernel::SurfaceKind::Cylinder);
                 if !cyl {
                     return false;
                 }
@@ -241,8 +302,14 @@ pub fn pick(world: &mut World, kind: &mut FeatureKind, field: AppliedField, pick
         },
         AppliedField::SmFaces => match pick {
             Pick::Region(s, i) => {
-                let Some(r) = region_of(cache, s, i) else { return false };
-                match x.regions.iter().position(|y| y.sketch == r.sketch && y.curves == r.curves) {
+                let Some(r) = region_of(cache, s, i) else {
+                    return false;
+                };
+                match x
+                    .regions
+                    .iter()
+                    .position(|y| y.sketch == r.sketch && y.curves == r.curves)
+                {
                     Some(k) => {
                         x.regions.remove(k);
                     }
@@ -251,7 +318,9 @@ pub fn pick(world: &mut World, kind: &mut FeatureKind, field: AppliedField, pick
             }
             Pick::Feature(f) if is_sketch(&features, f) => toggle(&mut x.region_sketches, f),
             Pick::Face(..) => {
-                let Some(f) = face_ref(cache, pick) else { return false };
+                let Some(f) = face_ref(cache, pick) else {
+                    return false;
+                };
                 match x.faces.iter().position(|g| g.face == f.face) {
                     Some(i) => {
                         x.faces.remove(i);
@@ -262,14 +331,24 @@ pub fn pick(world: &mut World, kind: &mut FeatureKind, field: AppliedField, pick
             _ => return false,
         },
         AppliedField::SmUpTo | AppliedField::SmSecondUpTo => {
-            let end = if field == AppliedField::SmUpTo { x.end } else { x.second.as_ref().map_or(EndType::Blind, |s| s.end) };
+            let end = if field == AppliedField::SmUpTo {
+                x.end
+            } else {
+                x.second.as_ref().map_or(EndType::Blind, |s| s.end)
+            };
             let target = match (end, pick) {
                 (EndType::UpToFace, _) => face_ref(cache, pick).map(UpTo::Face),
                 (EndType::UpToPart, _) => pick.part().map(UpTo::Part),
                 (EndType::UpToVertex, Pick::Vertex(part, vertex)) => cache
                     .part(part)
                     .and_then(|p| p.solid.vertex(&vertex))
-                    .map(|v| UpTo::Vertex(VertexRef { part, vertex, point: v.point })),
+                    .map(|v| {
+                        UpTo::Vertex(VertexRef {
+                            part,
+                            vertex,
+                            point: v.point,
+                        })
+                    }),
                 _ => None,
             };
             let Some(t) = target else { return false };
@@ -289,18 +368,47 @@ pub fn pick(world: &mut World, kind: &mut FeatureKind, field: AppliedField, pick
 }
 
 /// What a pick of `field` may be.
-pub fn pick_filter(field: AppliedField, end: EndType, none: crate::parts::PickFilter) -> Option<crate::parts::PickFilter> {
+pub fn pick_filter(
+    field: AppliedField,
+    end: EndType,
+    none: crate::parts::PickFilter,
+) -> Option<crate::parts::PickFilter> {
     use crate::parts::PickFilter;
     Some(match field {
         // A part is picked by any of its faces or edges (or in the Parts list).
-        AppliedField::SmParts => PickFilter { faces: true, edges: true, ..none },
-        AppliedField::SmExclude => PickFilter { faces: true, ..none },
-        AppliedField::SmBends => PickFilter { faces: true, edges: true, ..none },
-        AppliedField::SmCurves | AppliedField::SmArcs => PickFilter { sketch_curves: true, ..none },
-        AppliedField::SmFaces => PickFilter { faces: true, regions: true, ..none },
+        AppliedField::SmParts => PickFilter {
+            faces: true,
+            edges: true,
+            ..none
+        },
+        AppliedField::SmExclude => PickFilter {
+            faces: true,
+            ..none
+        },
+        AppliedField::SmBends => PickFilter {
+            faces: true,
+            edges: true,
+            ..none
+        },
+        AppliedField::SmCurves | AppliedField::SmArcs => PickFilter {
+            sketch_curves: true,
+            ..none
+        },
+        AppliedField::SmFaces => PickFilter {
+            faces: true,
+            regions: true,
+            ..none
+        },
         AppliedField::SmUpTo | AppliedField::SmSecondUpTo => match end {
-            EndType::UpToVertex => PickFilter { edges: true, ..none },
-            _ => PickFilter { faces: true, edges: true, ..none },
+            EndType::UpToVertex => PickFilter {
+                edges: true,
+                ..none
+            },
+            _ => PickFilter {
+                faces: true,
+                edges: true,
+                ..none
+            },
         },
         _ => return None,
     })
@@ -308,8 +416,16 @@ pub fn pick_filter(field: AppliedField, end: EndType, none: crate::parts::PickFi
 
 /// What its fields refer to, shown selected in the view while the dialog is open.
 pub fn references(kind: &FeatureKind, cache: &PartCache) -> Vec<Pick> {
-    let FeatureKind::SheetMetalModel(x) = kind else { return Vec::new() };
-    let face = |f: &FaceRef| cache.parts.iter().find(|p| p.solid.face(&f.face).is_some()).map(|p| Pick::Face(p.id, f.face));
+    let FeatureKind::SheetMetalModel(x) = kind else {
+        return Vec::new();
+    };
+    let face = |f: &FaceRef| {
+        cache
+            .parts
+            .iter()
+            .find(|p| p.solid.face(&f.face).is_some())
+            .map(|p| Pick::Face(p.id, f.face))
+    };
     let mut v: Vec<Pick> = Vec::new();
     match x.operation {
         SheetMetalOp::Convert => {
@@ -318,19 +434,35 @@ pub fn references(kind: &FeatureKind, cache: &PartCache) -> Vec<Pick> {
         SheetMetalOp::Thicken if x.tangent_propagation => {
             // SM17: the whole skin the pick takes, not only the picked face.
             for f in &x.faces {
-                let Some(p) = cache.parts.iter().find(|p| p.solid.face(&f.face).is_some()) else { continue };
-                let Some(i) = p.solid.faces.iter().position(|g| g.name == f.face) else { continue };
+                let Some(p) = cache.parts.iter().find(|p| p.solid.face(&f.face).is_some()) else {
+                    continue;
+                };
+                let Some(i) = p.solid.faces.iter().position(|g| g.name == f.face) else {
+                    continue;
+                };
                 let mut chosen = vec![i];
                 cadrs_core::sheetmetal::tangent_faces(&p.solid, &mut chosen);
-                v.extend(chosen.into_iter().map(|k| Pick::Face(p.id, p.solid.faces[k].name)));
+                v.extend(
+                    chosen
+                        .into_iter()
+                        .map(|k| Pick::Face(p.id, p.solid.faces[k].name)),
+                );
             }
         }
         SheetMetalOp::Thicken => {
             v.extend(x.faces.iter().filter_map(face));
         }
         SheetMetalOp::Extrude => {
-            v.extend(x.curves.iter().map(|c| Pick::SketchCurve(c.sketch, c.curve)));
-            v.extend(x.arcs_as_bends.iter().map(|c| Pick::SketchCurve(c.sketch, c.curve)));
+            v.extend(
+                x.curves
+                    .iter()
+                    .map(|c| Pick::SketchCurve(c.sketch, c.curve)),
+            );
+            v.extend(
+                x.arcs_as_bends
+                    .iter()
+                    .map(|c| Pick::SketchCurve(c.sketch, c.curve)),
+            );
         }
     }
     if x.operation != SheetMetalOp::Extrude {
@@ -351,7 +483,9 @@ pub fn references(kind: &FeatureKind, cache: &PartCache) -> Vec<Pick> {
 /// The edges and faces to draw where they were before the feature (amber): the edges to bend
 /// and the faces left out, which a Convert consumes with its part.
 pub fn drawn_references(kind: &FeatureKind) -> Vec<EdgeOrFace> {
-    let FeatureKind::SheetMetalModel(x) = kind else { return Vec::new() };
+    let FeatureKind::SheetMetalModel(x) = kind else {
+        return Vec::new();
+    };
     let mut v: Vec<EdgeOrFace> = Vec::new();
     if x.operation == SheetMetalOp::Extrude {
         return v;
@@ -388,11 +522,17 @@ pub fn layout(x: &SheetMetalModelFeature) -> String {
 }
 
 fn op_name(features: &[Feature], op: cadrs_sketch::OpId) -> String {
-    features.iter().find(|f| f.id.0 == op).map_or("part".into(), |f| f.name.clone())
+    features
+        .iter()
+        .find(|f| f.id.0 == op)
+        .map_or("part".into(), |f| f.name.clone())
 }
 
 fn name_of(features: &[Feature], id: FeatureId) -> String {
-    features.iter().find(|f| f.id == id).map_or("sketch".into(), |f| f.name.clone())
+    features
+        .iter()
+        .find(|f| f.id == id)
+        .map_or("sketch".into(), |f| f.name.clone())
 }
 
 fn curve_label(features: &[Feature], c: &CurveRef) -> String {
@@ -419,15 +559,27 @@ fn up_to_label(features: &[Feature], cache: &PartCache, u: &UpTo) -> String {
 }
 
 /// The items of the dialog's lists.
-pub(crate) fn items(features: &[Feature], cache: &PartCache, x: &SheetMetalModelFeature, role: Role) -> Option<Vec<String>> {
+pub(crate) fn items(
+    features: &[Feature],
+    cache: &PartCache,
+    x: &SheetMetalModelFeature,
+    role: Role,
+) -> Option<Vec<String>> {
     Some(match role {
         Role::SmParts => crate::applied::part_names(cache, &x.parts),
-        Role::SmExclude => x.exclude.iter().map(|f| format!("Face of {}", op_name(features, f.face.op))).collect(),
+        Role::SmExclude => x
+            .exclude
+            .iter()
+            .map(|f| format!("Face of {}", op_name(features, f.face.op)))
+            .collect(),
         Role::SmBends => x
             .bends
             .iter()
             .map(|b| match b {
-                EdgeOrFace::Edge(e) => format!("Edge of {}", op_name(features, crate::parts::edge_maker(features, &e.edge))),
+                EdgeOrFace::Edge(e) => format!(
+                    "Edge of {}",
+                    op_name(features, crate::parts::edge_maker(features, &e.edge))
+                ),
                 EdgeOrFace::Face(f) => format!("Face of {}", op_name(features, f.face.op)),
             })
             .collect(),
@@ -436,15 +588,36 @@ pub(crate) fn items(features: &[Feature], cache: &PartCache, x: &SheetMetalModel
             v.extend(x.sketches.iter().map(|s| name_of(features, *s)));
             v
         }
-        Role::SmArcs => x.arcs_as_bends.iter().map(|c| curve_label(features, c)).collect(),
+        Role::SmArcs => x
+            .arcs_as_bends
+            .iter()
+            .map(|c| curve_label(features, c))
+            .collect(),
         Role::SmFaces => {
-            let mut v: Vec<String> = x.faces.iter().map(|f| format!("Face of {}", op_name(features, f.face.op))).collect();
-            v.extend(x.regions.iter().map(|r| format!("Face of {}", name_of(features, r.sketch))));
+            let mut v: Vec<String> = x
+                .faces
+                .iter()
+                .map(|f| format!("Face of {}", op_name(features, f.face.op)))
+                .collect();
+            v.extend(
+                x.regions
+                    .iter()
+                    .map(|r| format!("Face of {}", name_of(features, r.sketch))),
+            );
             v.extend(x.region_sketches.iter().map(|s| name_of(features, *s)));
             v
         }
-        Role::SmUpTo => x.up_to.iter().map(|u| up_to_label(features, cache, u)).collect(),
-        Role::SmSecondUpTo => x.second.iter().filter_map(|s| s.up_to.as_ref()).map(|u| up_to_label(features, cache, u)).collect(),
+        Role::SmUpTo => x
+            .up_to
+            .iter()
+            .map(|u| up_to_label(features, cache, u))
+            .collect(),
+        Role::SmSecondUpTo => x
+            .second
+            .iter()
+            .filter_map(|s| s.up_to.as_ref())
+            .map(|u| up_to_label(features, cache, u))
+            .collect(),
         _ => return None,
     })
 }
@@ -465,51 +638,133 @@ pub(crate) fn list_field(role: Role) -> Option<AppliedField> {
     LISTS.iter().find(|(r, _)| *r == role).map(|(_, f)| *f)
 }
 
-fn list(b: &mut ChildSpawner, t: &Theme, name: &str, placeholder: &str, role: Role, items: Vec<String>, active: bool) {
-    b.spawn((role, SelectionList::new(name.to_string()).placeholder(placeholder).items(items).active(active).build(t)))
-        .entry::<Node>()
-        .and_modify(|mut n| {
-            n.flex_grow = 0.0;
-            n.margin = UiRect::new(Val::ZERO, Val::Px(2.0), Val::Px(3.0), Val::Px(3.0));
-        });
+fn list(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    name: &str,
+    placeholder: &str,
+    role: Role,
+    items: Vec<String>,
+    active: bool,
+) {
+    b.spawn((
+        role,
+        SelectionList::new(name.to_string())
+            .placeholder(placeholder)
+            .items(items)
+            .active(active)
+            .build(t),
+    ))
+    .entry::<Node>()
+    .and_modify(|mut n| {
+        n.flex_grow = 0.0;
+        n.margin = UiRect::new(Val::ZERO, Val::Px(2.0), Val::Px(3.0), Val::Px(3.0));
+    });
 }
 
 /// A labelled number field, with an opposite-direction arrow after it if `flip` is given.
-fn number(b: &mut ChildSpawner, t: &Theme, name: &str, label: &str, num: SmNum, text: &str, flip: Option<(Role, bool)>) {
+fn number(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    name: &str,
+    label: &str,
+    num: SmNum,
+    text: &str,
+    flip: Option<(Role, bool)>,
+) {
     // The number field keeps room for a chevron on its left: its label lines up with the
     // checkboxes' boxes when pulled back over it (Depth stays indented under its end type).
-    let left = if matches!(num, SmNum::Depth | SmNum::SecondDepth) { -4.0 } else { -16.0 };
-    b.spawn(Node { align_items: AlignItems::Center, column_gap: Val::Px(2.0), margin: UiRect::new(Val::Px(left), Val::ZERO, Val::Px(1.0), Val::Px(1.0)), ..default() }).with_children(|r| {
-        r.spawn((Role::SmNumber(num), NumberField::new(name.to_string(), label.to_string()).text(text.to_string()).label_width(112.0).build(t)))
-            .entry::<Node>()
-            .and_modify(|mut n| n.flex_grow = 1.0);
+    let left = if matches!(num, SmNum::Depth | SmNum::SecondDepth) {
+        -4.0
+    } else {
+        -16.0
+    };
+    b.spawn(Node {
+        align_items: AlignItems::Center,
+        column_gap: Val::Px(2.0),
+        margin: UiRect::new(Val::Px(left), Val::ZERO, Val::Px(1.0), Val::Px(1.0)),
+        ..default()
+    })
+    .with_children(|r| {
+        r.spawn((
+            Role::SmNumber(num),
+            NumberField::new(name.to_string(), label.to_string())
+                .text(text.to_string())
+                .label_width(112.0)
+                .build(t),
+        ))
+        .entry::<Node>()
+        .and_modify(|mut n| n.flex_grow = 1.0);
         match flip {
-            Some((role, on)) => crate::extrude_dialog::flip_button_any(r, t, &format!("{name}-flip"), role, on, "Opposite direction"),
+            Some((role, on)) => crate::extrude_dialog::flip_button_any(
+                r,
+                t,
+                &format!("{name}-flip"),
+                role,
+                on,
+                "Opposite direction",
+            ),
             // Keep the values in line with the ones that have an arrow.
             None => {
-                r.spawn(Node { width: Val::Px(22.0), flex_shrink: 0.0, ..default() });
+                r.spawn(Node {
+                    width: Val::Px(22.0),
+                    flex_shrink: 0.0,
+                    ..default()
+                });
             }
         }
     });
 }
 
 /// A labelled select ("Bend calculation  K Factor ▾").
-fn select(b: &mut ChildSpawner, t: &Theme, name: &str, label: &str, role: Role, options: &[(String, bool)], selected: usize) {
+fn select(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    name: &str,
+    label: &str,
+    role: Role,
+    options: &[(String, bool)],
+    selected: usize,
+) {
     let mut s = Select::new(name.to_string());
     for (o, enabled) in options {
         s = s.option(o.clone(), *enabled);
     }
-    b.spawn(Node { height: Val::Px(28.0), margin: UiRect::new(Val::Px(2.0), Val::Px(2.0), Val::Px(1.0), Val::Px(1.0)), align_items: AlignItems::Center, column_gap: Val::Px(4.0), ..default() })
-        .with_children(|r| {
-            if !label.is_empty() {
-                r.spawn((t.text(label, 11.0, bevy::text::FontWeight::NORMAL, t.muted_foreground), Node { width: Val::Px(90.0), flex_shrink: 0.0, ..default() }));
-            }
-            r.spawn((role, s.selected(selected).build(t))).entry::<Node>().and_modify(|mut n| n.flex_grow = 1.0);
-        });
+    b.spawn(Node {
+        height: Val::Px(28.0),
+        margin: UiRect::new(Val::Px(2.0), Val::Px(2.0), Val::Px(1.0), Val::Px(1.0)),
+        align_items: AlignItems::Center,
+        column_gap: Val::Px(4.0),
+        ..default()
+    })
+    .with_children(|r| {
+        if !label.is_empty() {
+            r.spawn((
+                t.text(
+                    label,
+                    11.0,
+                    bevy::text::FontWeight::NORMAL,
+                    t.muted_foreground,
+                ),
+                Node {
+                    width: Val::Px(90.0),
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+            ));
+        }
+        r.spawn((role, s.selected(selected).build(t)))
+            .entry::<Node>()
+            .and_modify(|mut n| n.flex_grow = 1.0);
+    });
 }
 
 fn check(b: &mut ChildSpawner, t: &Theme, name: &str, label: &str, on: bool) {
-    b.spawn(OptionRow::new(name.to_string(), label.to_string()).checked(on).build(t));
+    b.spawn(
+        OptionRow::new(name.to_string(), label.to_string())
+            .checked(on)
+            .build(t),
+    );
 }
 
 fn opts<T: Copy>(all: &[T], label: impl Fn(T) -> &'static str) -> Vec<(String, bool)> {
@@ -521,17 +776,44 @@ fn index_of<T: PartialEq>(all: &[T], x: &T) -> usize {
 }
 
 /// The end type row: the select and the opposite-direction arrow.
-fn end_row(b: &mut ChildSpawner, t: &Theme, name: &str, role: Role, end: EndType, flip: Option<(Role, bool)>) {
+fn end_row(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    name: &str,
+    role: Role,
+    end: EndType,
+    flip: Option<(Role, bool)>,
+) {
     let mut s = Select::new(name.to_string());
     for e in EXTRUDE_ENDS {
         s = s.option(e.label(), true);
     }
-    b.spawn(Node { height: Val::Px(30.0), margin: UiRect::vertical(Val::Px(2.0)), align_items: AlignItems::Center, column_gap: Val::Px(2.0), ..default() }).with_children(|r| {
-        r.spawn((role, s.selected(index_of(&EXTRUDE_ENDS, &end)).build(t))).entry::<Node>().and_modify(|mut n| n.flex_grow = 1.0);
+    b.spawn(Node {
+        height: Val::Px(30.0),
+        margin: UiRect::vertical(Val::Px(2.0)),
+        align_items: AlignItems::Center,
+        column_gap: Val::Px(2.0),
+        ..default()
+    })
+    .with_children(|r| {
+        r.spawn((role, s.selected(index_of(&EXTRUDE_ENDS, &end)).build(t)))
+            .entry::<Node>()
+            .and_modify(|mut n| n.flex_grow = 1.0);
         match flip {
-            Some((fr, on)) => crate::extrude_dialog::flip_button_any(r, t, &format!("{name}-flip"), fr, on, "Opposite direction"),
+            Some((fr, on)) => crate::extrude_dialog::flip_button_any(
+                r,
+                t,
+                &format!("{name}-flip"),
+                fr,
+                on,
+                "Opposite direction",
+            ),
             None => {
-                r.spawn(Node { width: Val::Px(22.0), flex_shrink: 0.0, ..default() });
+                r.spawn(Node {
+                    width: Val::Px(22.0),
+                    flex_shrink: 0.0,
+                    ..default()
+                });
             }
         }
     });
@@ -539,25 +821,84 @@ fn end_row(b: &mut ChildSpawner, t: &Theme, name: &str, role: Role, end: EndType
 
 /// The rows under an end type: its depth, or the entity it goes up to.
 #[allow(clippy::too_many_arguments)]
-fn end_rows(b: &mut ChildSpawner, t: &Theme, prefix: &str, end: EndType, depth: (SmNum, &str), list_role: Role, items: Vec<String>, active: bool) {
+fn end_rows(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    prefix: &str,
+    end: EndType,
+    depth: (SmNum, &str),
+    list_role: Role,
+    items: Vec<String>,
+    active: bool,
+) {
     match end {
-        EndType::Blind | EndType::ThroughAll => number(b, t, &format!("{prefix}-depth"), "Depth", depth.0, depth.1, None),
+        EndType::Blind | EndType::ThroughAll => number(
+            b,
+            t,
+            &format!("{prefix}-depth"),
+            "Depth",
+            depth.0,
+            depth.1,
+            None,
+        ),
         EndType::UpToNext => {}
-        EndType::UpToFace => list(b, t, &format!("{prefix}-up-to-field"), "Up to face", list_role, items, active),
-        EndType::UpToPart => list(b, t, &format!("{prefix}-up-to-field"), "Up to part", list_role, items, active),
-        EndType::UpToVertex => list(b, t, &format!("{prefix}-up-to-field"), "Up to vertex", list_role, items, active),
+        EndType::UpToFace => list(
+            b,
+            t,
+            &format!("{prefix}-up-to-field"),
+            "Up to face",
+            list_role,
+            items,
+            active,
+        ),
+        EndType::UpToPart => list(
+            b,
+            t,
+            &format!("{prefix}-up-to-field"),
+            "Up to part",
+            list_role,
+            items,
+            active,
+        ),
+        EndType::UpToVertex => list(
+            b,
+            t,
+            &format!("{prefix}-up-to-field"),
+            "Up to vertex",
+            list_role,
+            items,
+            active,
+        ),
     }
 }
 
 /// The dialog's body: the tabs and the four sections.
-pub(crate) fn body(b: &mut ChildSpawner, t: &Theme, x: &SheetMetalModelFeature, field: AppliedField, items_of: &dyn Fn(Role) -> Vec<String>, open: [bool; 4]) {
+pub(crate) fn body(
+    b: &mut ChildSpawner,
+    t: &Theme,
+    x: &SheetMetalModelFeature,
+    field: AppliedField,
+    items_of: &dyn Fn(Role) -> Vec<String>,
+    open: [bool; 4],
+) {
     let mut strip = TabStrip::new("sheet-metal-model-operation").compact();
     for op in SheetMetalOp::ALL {
         strip = strip.tab(op.label());
     }
-    b.spawn((Role::SmOpTab, strip.selected(index_of(&SheetMetalOp::ALL, &x.operation)).build(t)));
+    b.spawn((
+        Role::SmOpTab,
+        strip
+            .selected(index_of(&SheetMetalOp::ALL, &x.operation))
+            .build(t),
+    ));
     let lists: Vec<(Role, Vec<String>)> = LISTS.iter().map(|(r, _)| (*r, items_of(*r))).collect();
-    let item = move |r: Role| lists.iter().find(|(x, _)| *x == r).map(|(_, v)| v.clone()).unwrap_or_default();
+    let item = move |r: Role| {
+        lists
+            .iter()
+            .find(|(x, _)| *x == r)
+            .map(|(_, v)| v.clone())
+            .unwrap_or_default()
+    };
     let x1 = x.clone();
     let t1 = t.clone();
     let selections = Collapsible::new(SECTIONS[0].0, SECTIONS[0].1)
@@ -568,34 +909,150 @@ pub(crate) fn body(b: &mut ChildSpawner, t: &Theme, x: &SheetMetalModelFeature, 
             let (x, t) = (&x1, &t1);
             match x.operation {
                 SheetMetalOp::Convert => {
-                    list(c, t, "sm-parts-field", "Parts and surfaces to convert", Role::SmParts, item(Role::SmParts), field == AppliedField::SmParts);
-                    list(c, t, "sm-exclude-field", "Faces to exclude", Role::SmExclude, item(Role::SmExclude), field == AppliedField::SmExclude);
-                    list(c, t, "sm-bends-field", "Edges or cylinders to bend", Role::SmBends, item(Role::SmBends), field == AppliedField::SmBends);
-                    number(c, t, "sm-clearance", "Clearance from input", SmNum::Clearance, &x.clearance_expr, None);
+                    list(
+                        c,
+                        t,
+                        "sm-parts-field",
+                        "Parts and surfaces to convert",
+                        Role::SmParts,
+                        item(Role::SmParts),
+                        field == AppliedField::SmParts,
+                    );
+                    list(
+                        c,
+                        t,
+                        "sm-exclude-field",
+                        "Faces to exclude",
+                        Role::SmExclude,
+                        item(Role::SmExclude),
+                        field == AppliedField::SmExclude,
+                    );
+                    list(
+                        c,
+                        t,
+                        "sm-bends-field",
+                        "Edges or cylinders to bend",
+                        Role::SmBends,
+                        item(Role::SmBends),
+                        field == AppliedField::SmBends,
+                    );
+                    number(
+                        c,
+                        t,
+                        "sm-clearance",
+                        "Clearance from input",
+                        SmNum::Clearance,
+                        &x.clearance_expr,
+                        None,
+                    );
                     check(c, t, "sm-include-bends", "Include bends", x.include_bends);
                     check(c, t, "sm-keep-input", "Keep input parts", x.keep_input);
                 }
                 SheetMetalOp::Extrude => {
-                    list(c, t, "sm-curves-field", "Sketch curves to extrude", Role::SmCurves, item(Role::SmCurves), field == AppliedField::SmCurves);
-                    list(c, t, "sm-arcs-field", "Arcs to extrude as bends", Role::SmArcs, item(Role::SmArcs), field == AppliedField::SmArcs);
-                    end_row(c, t, "sm-end-type", Role::SmEndType, x.end, Some((Role::SmExtrudeFlip, x.flip_extrude)));
-                    end_rows(c, t, "sm", x.end, (SmNum::Depth, &x.depth_expr), Role::SmUpTo, item(Role::SmUpTo), field == AppliedField::SmUpTo);
+                    list(
+                        c,
+                        t,
+                        "sm-curves-field",
+                        "Sketch curves to extrude",
+                        Role::SmCurves,
+                        item(Role::SmCurves),
+                        field == AppliedField::SmCurves,
+                    );
+                    list(
+                        c,
+                        t,
+                        "sm-arcs-field",
+                        "Arcs to extrude as bends",
+                        Role::SmArcs,
+                        item(Role::SmArcs),
+                        field == AppliedField::SmArcs,
+                    );
+                    end_row(
+                        c,
+                        t,
+                        "sm-end-type",
+                        Role::SmEndType,
+                        x.end,
+                        Some((Role::SmExtrudeFlip, x.flip_extrude)),
+                    );
+                    end_rows(
+                        c,
+                        t,
+                        "sm",
+                        x.end,
+                        (SmNum::Depth, &x.depth_expr),
+                        Role::SmUpTo,
+                        item(Role::SmUpTo),
+                        field == AppliedField::SmUpTo,
+                    );
                     if x.end == EndType::Blind {
                         check(c, t, "sm-symmetric", "Symmetric", x.symmetric);
                     }
                     if !x.symmetric || x.end != EndType::Blind {
-                        check(c, t, "sm-second-end", "Second end position", x.second.is_some());
+                        check(
+                            c,
+                            t,
+                            "sm-second-end",
+                            "Second end position",
+                            x.second.is_some(),
+                        );
                         if let Some(s) = &x.second {
-                            end_row(c, t, "sm-second-end-type", Role::SmSecondEndType, s.end, None);
-                            end_rows(c, t, "sm-second", s.end, (SmNum::SecondDepth, &s.depth_expr), Role::SmSecondUpTo, item(Role::SmSecondUpTo), field == AppliedField::SmSecondUpTo);
+                            end_row(
+                                c,
+                                t,
+                                "sm-second-end-type",
+                                Role::SmSecondEndType,
+                                s.end,
+                                None,
+                            );
+                            end_rows(
+                                c,
+                                t,
+                                "sm-second",
+                                s.end,
+                                (SmNum::SecondDepth, &s.depth_expr),
+                                Role::SmSecondUpTo,
+                                item(Role::SmSecondUpTo),
+                                field == AppliedField::SmSecondUpTo,
+                            );
                         }
                     }
                 }
                 SheetMetalOp::Thicken => {
-                    list(c, t, "sm-faces-field", "Faces or sketch regions to thicken", Role::SmFaces, item(Role::SmFaces), field == AppliedField::SmFaces);
-                    check(c, t, "sm-tangent-propagation", "Tangent propagation", x.tangent_propagation);
-                    list(c, t, "sm-bends-field", "Edges or cylinders to bend", Role::SmBends, item(Role::SmBends), field == AppliedField::SmBends);
-                    number(c, t, "sm-clearance", "Clearance from input", SmNum::Clearance, &x.clearance_expr, None);
+                    list(
+                        c,
+                        t,
+                        "sm-faces-field",
+                        "Faces or sketch regions to thicken",
+                        Role::SmFaces,
+                        item(Role::SmFaces),
+                        field == AppliedField::SmFaces,
+                    );
+                    check(
+                        c,
+                        t,
+                        "sm-tangent-propagation",
+                        "Tangent propagation",
+                        x.tangent_propagation,
+                    );
+                    list(
+                        c,
+                        t,
+                        "sm-bends-field",
+                        "Edges or cylinders to bend",
+                        Role::SmBends,
+                        item(Role::SmBends),
+                        field == AppliedField::SmBends,
+                    );
+                    number(
+                        c,
+                        t,
+                        "sm-clearance",
+                        "Clearance from input",
+                        SmNum::Clearance,
+                        &x.clearance_expr,
+                        None,
+                    );
                     check(c, t, "sm-include-bends", "Include bends", x.include_bends);
                 }
             }
@@ -608,9 +1065,31 @@ pub(crate) fn body(b: &mut ChildSpawner, t: &Theme, x: &SheetMetalModelFeature, 
         .open(open[1])
         .content(move |c| {
             let (x, t) = (&x2, &t2);
-            number(c, t, "sm-thickness", "Thickness", SmNum::Thickness, &x.exprs.thickness, Some((Role::SmThicknessFlip, x.flip_thickness)));
-            number(c, t, "sm-bend-radius", "Bend radius", SmNum::BendRadius, &x.exprs.bend_radius, None);
-            check(c, t, "sm-flip-direction-up", "Flip direction up", x.params.flip_direction_up);
+            number(
+                c,
+                t,
+                "sm-thickness",
+                "Thickness",
+                SmNum::Thickness,
+                &x.exprs.thickness,
+                Some((Role::SmThicknessFlip, x.flip_thickness)),
+            );
+            number(
+                c,
+                t,
+                "sm-bend-radius",
+                "Bend radius",
+                SmNum::BendRadius,
+                &x.exprs.bend_radius,
+                None,
+            );
+            check(
+                c,
+                t,
+                "sm-flip-direction-up",
+                "Flip direction up",
+                x.params.flip_direction_up,
+            );
         })
         .build(t);
     let x3 = x.clone();
@@ -621,13 +1100,53 @@ pub(crate) fn body(b: &mut ChildSpawner, t: &Theme, x: &SheetMetalModelFeature, 
         .content(move |c| {
             let (x, t) = (&x3, &t3);
             let p = &x.params;
-            select(c, t, "sm-bend-calculation", "Bend calculation", Role::SmBendCalc, &opts(&BendCalc::ALL, BendCalc::label), index_of(&BendCalc::ALL, &p.bend_calc));
+            select(
+                c,
+                t,
+                "sm-bend-calculation",
+                "Bend calculation",
+                Role::SmBendCalc,
+                &opts(&BendCalc::ALL, BendCalc::label),
+                index_of(&BendCalc::ALL, &p.bend_calc),
+            );
             match p.bend_calc {
-                BendCalc::KFactor => number(c, t, "sm-k-factor", "Default bend K Factor", SmNum::KFactor, &x.exprs.k_factor, None),
-                BendCalc::BendAllowance => number(c, t, "sm-bend-allowance", "Default bend allowance", SmNum::Allowance, &x.exprs.bend_allowance, None),
-                BendCalc::BendDeduction => number(c, t, "sm-bend-deduction", "Default bend deduction", SmNum::Deduction, &x.exprs.bend_deduction, None),
+                BendCalc::KFactor => number(
+                    c,
+                    t,
+                    "sm-k-factor",
+                    "Default bend K Factor",
+                    SmNum::KFactor,
+                    &x.exprs.k_factor,
+                    None,
+                ),
+                BendCalc::BendAllowance => number(
+                    c,
+                    t,
+                    "sm-bend-allowance",
+                    "Default bend allowance",
+                    SmNum::Allowance,
+                    &x.exprs.bend_allowance,
+                    None,
+                ),
+                BendCalc::BendDeduction => number(
+                    c,
+                    t,
+                    "sm-bend-deduction",
+                    "Default bend deduction",
+                    SmNum::Deduction,
+                    &x.exprs.bend_deduction,
+                    None,
+                ),
             }
-            number(c, t, "sm-rolled-k-factor", "Rolled K Factor", SmNum::RolledK, &x.exprs.rolled_k_factor, None);
+            number(
+                c,
+                t,
+                "sm-rolled-k-factor",
+                "Rolled K Factor",
+                SmNum::RolledK,
+                &x.exprs.rolled_k_factor,
+                None,
+            );
         })
         .build(t);
     let x4 = x.clone();
@@ -638,35 +1157,109 @@ pub(crate) fn body(b: &mut ChildSpawner, t: &Theme, x: &SheetMetalModelFeature, 
         .content(move |c| {
             let (x, t) = (&x4, &t4);
             let p = &x.params;
-            number(c, t, "sm-minimal-gap", "Minimal gap", SmNum::MinimalGap, &x.exprs.minimal_gap, None);
-            select(c, t, "sm-corner-relief-type", "Corner relief type", Role::SmCornerType, &opts(&CornerReliefKind::ALL, CornerReliefKind::label), index_of(&CornerReliefKind::ALL, &p.corner_relief.kind));
+            number(
+                c,
+                t,
+                "sm-minimal-gap",
+                "Minimal gap",
+                SmNum::MinimalGap,
+                &x.exprs.minimal_gap,
+                None,
+            );
+            select(
+                c,
+                t,
+                "sm-corner-relief-type",
+                "Corner relief type",
+                Role::SmCornerType,
+                &opts(&CornerReliefKind::ALL, CornerReliefKind::label),
+                index_of(&CornerReliefKind::ALL, &p.corner_relief.kind),
+            );
             match p.corner_relief.kind {
-                k if k.is_scaled() => number(c, t, "sm-corner-relief-scale", "Corner relief scale", SmNum::CornerScale, &x.exprs.corner_relief_scale, None),
-                CornerReliefKind::SquareSized => number(c, t, "sm-corner-relief-size", "Corner relief width", SmNum::CornerSize, &x.exprs.corner_relief_size, None),
-                CornerReliefKind::RoundSized => number(c, t, "sm-corner-relief-size", "Corner relief diameter", SmNum::CornerSize, &x.exprs.corner_relief_size, None),
+                k if k.is_scaled() => number(
+                    c,
+                    t,
+                    "sm-corner-relief-scale",
+                    "Corner relief scale",
+                    SmNum::CornerScale,
+                    &x.exprs.corner_relief_scale,
+                    None,
+                ),
+                CornerReliefKind::SquareSized => number(
+                    c,
+                    t,
+                    "sm-corner-relief-size",
+                    "Corner relief width",
+                    SmNum::CornerSize,
+                    &x.exprs.corner_relief_size,
+                    None,
+                ),
+                CornerReliefKind::RoundSized => number(
+                    c,
+                    t,
+                    "sm-corner-relief-size",
+                    "Corner relief diameter",
+                    SmNum::CornerSize,
+                    &x.exprs.corner_relief_size,
+                    None,
+                ),
                 _ => {}
             }
-            select(c, t, "sm-bend-relief-type", "Bend relief type", Role::SmBendReliefType, &opts(&BendReliefKind::MODEL, BendReliefKind::label), index_of(&BendReliefKind::MODEL, &p.bend_relief.kind));
+            select(
+                c,
+                t,
+                "sm-bend-relief-type",
+                "Bend relief type",
+                Role::SmBendReliefType,
+                &opts(&BendReliefKind::MODEL, BendReliefKind::label),
+                index_of(&BendReliefKind::MODEL, &p.bend_relief.kind),
+            );
             if p.bend_relief.kind.is_scaled() {
-                number(c, t, "sm-bend-relief-depth-scale", "Bend relief depth scale", SmNum::BendDepthScale, &x.exprs.bend_relief_depth_scale, None);
-                number(c, t, "sm-bend-relief-width-scale", "Bend relief width scale", SmNum::BendWidthScale, &x.exprs.bend_relief_width_scale, None);
+                number(
+                    c,
+                    t,
+                    "sm-bend-relief-depth-scale",
+                    "Bend relief depth scale",
+                    SmNum::BendDepthScale,
+                    &x.exprs.bend_relief_depth_scale,
+                    None,
+                );
+                number(
+                    c,
+                    t,
+                    "sm-bend-relief-width-scale",
+                    "Bend relief width scale",
+                    SmNum::BendWidthScale,
+                    &x.exprs.bend_relief_width_scale,
+                    None,
+                );
             }
         })
         .build(t);
-    b.spawn(Node { flex_direction: FlexDirection::Column, padding: UiRect::new(Val::Px(2.0), Val::Px(4.0), Val::Px(4.0), Val::ZERO), ..default() })
-        .with_children(|s| {
-            s.spawn(selections);
-            s.spawn(general);
-            s.spawn(material);
-            s.spawn(relief);
-        });
+    b.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        padding: UiRect::new(Val::Px(2.0), Val::Px(4.0), Val::Px(4.0), Val::ZERO),
+        ..default()
+    })
+    .with_children(|s| {
+        s.spawn(selections);
+        s.spawn(general);
+        s.spawn(material);
+        s.spawn(relief);
+    });
 }
 
 /// A section opened or closed: remembered while the dialog is open (it is rebuilt as its rows
 /// change).
-pub fn on_section_toggled(ev: On<CollapsibleToggled>, q: Query<&Name>, mut session: Option<ResMut<AppliedSession>>) {
+pub fn on_section_toggled(
+    ev: On<CollapsibleToggled>,
+    q: Query<&Name>,
+    mut session: Option<ResMut<AppliedSession>>,
+) {
     let Ok(name) = q.get(ev.entity) else { return };
-    let Some(i) = SECTIONS.iter().position(|(n, _)| *n == name.as_str()) else { return };
+    let Some(i) = SECTIONS.iter().position(|(n, _)| *n == name.as_str()) else {
+        return;
+    };
     if let Some(s) = session.as_mut()
         && s.sections[i] != ev.open
     {
@@ -682,7 +1275,10 @@ pub(crate) fn select_index(x: &SheetMetalModelFeature, role: Role) -> Option<usi
     let p = &x.params;
     Some(match role {
         Role::SmEndType => index_of(&EXTRUDE_ENDS, &x.end),
-        Role::SmSecondEndType => index_of(&EXTRUDE_ENDS, &x.second.as_ref().map_or(EndType::Blind, |s| s.end)),
+        Role::SmSecondEndType => index_of(
+            &EXTRUDE_ENDS,
+            &x.second.as_ref().map_or(EndType::Blind, |s| s.end),
+        ),
         Role::SmBendCalc => index_of(&BendCalc::ALL, &p.bend_calc),
         Role::SmCornerType => index_of(&CornerReliefKind::ALL, &p.corner_relief.kind),
         Role::SmBendReliefType => index_of(&BendReliefKind::MODEL, &p.bend_relief.kind),
@@ -691,11 +1287,22 @@ pub(crate) fn select_index(x: &SheetMetalModelFeature, role: Role) -> Option<usi
 }
 
 pub(crate) fn owns_select(role: Role) -> bool {
-    matches!(role, Role::SmEndType | Role::SmSecondEndType | Role::SmBendCalc | Role::SmCornerType | Role::SmBendReliefType)
+    matches!(
+        role,
+        Role::SmEndType
+            | Role::SmSecondEndType
+            | Role::SmBendCalc
+            | Role::SmCornerType
+            | Role::SmBendReliefType
+    )
 }
 
 /// A select changed: the label of the change and the field that takes the next picks.
-pub(crate) fn set_select(x: &mut SheetMetalModelFeature, role: Role, i: usize) -> (&'static str, Option<AppliedField>) {
+pub(crate) fn set_select(
+    x: &mut SheetMetalModelFeature,
+    role: Role,
+    i: usize,
+) -> (&'static str, Option<AppliedField>) {
     let p = &mut x.params;
     match role {
         Role::SmEndType => {
@@ -714,7 +1321,10 @@ pub(crate) fn set_select(x: &mut SheetMetalModelFeature, role: Role, i: usize) -
                 s.end = e;
                 s.up_to = None;
             }
-            ("Second end type", e.needs_target().then_some(AppliedField::SmSecondUpTo))
+            (
+                "Second end type",
+                e.needs_target().then_some(AppliedField::SmSecondUpTo),
+            )
         }
         Role::SmBendCalc => {
             p.bend_calc = BendCalc::ALL[i.min(2)];
@@ -737,7 +1347,11 @@ pub fn is_checkbox(name: &str) -> bool {
 }
 
 /// A checkbox changed: the label of the change and the field that takes the next picks.
-pub fn checkbox(x: &mut SheetMetalModelFeature, name: &str, on: bool) -> Option<(&'static str, Option<AppliedField>)> {
+pub fn checkbox(
+    x: &mut SheetMetalModelFeature,
+    name: &str,
+    on: bool,
+) -> Option<(&'static str, Option<AppliedField>)> {
     Some(match name {
         "sm-include-bends-checkbox" => {
             x.include_bends = on;
@@ -755,7 +1369,11 @@ pub fn checkbox(x: &mut SheetMetalModelFeature, name: &str, on: bool) -> Option<
             ("Symmetric", None)
         }
         "sm-second-end-checkbox" => {
-            x.second = on.then(|| EndCondition { depth: x.depth, depth_expr: x.depth_expr.clone(), ..Default::default() });
+            x.second = on.then(|| EndCondition {
+                depth: x.depth,
+                depth_expr: x.depth_expr.clone(),
+                ..Default::default()
+            });
             ("Second end position", None)
         }
         "sm-tangent-propagation-checkbox" => {
@@ -830,7 +1448,14 @@ fn text_of(x: &SheetMetalModelFeature, n: SmNum) -> (String, Quantity) {
     let (s, q) = match n {
         SmNum::Clearance => (&x.clearance_expr, Quantity::Length),
         SmNum::Depth => (&x.depth_expr, Quantity::Length),
-        SmNum::SecondDepth => return (x.second.as_ref().map_or(String::new(), |s| s.depth_expr.clone()), Quantity::Length),
+        SmNum::SecondDepth => {
+            return (
+                x.second
+                    .as_ref()
+                    .map_or(String::new(), |s| s.depth_expr.clone()),
+                Quantity::Length,
+            );
+        }
         SmNum::Thickness => (&e.thickness, Quantity::Length),
         SmNum::BendRadius => (&e.bend_radius, Quantity::Length),
         SmNum::KFactor => (&e.k_factor, Quantity::Count),
@@ -866,8 +1491,14 @@ pub fn set_number(x: &mut SheetMetalModelFeature, n: SmNum, v: f64, expr: String
         SmNum::MinimalGap => (&mut p.minimal_gap, &mut e.minimal_gap),
         SmNum::CornerScale => (&mut p.corner_relief.scale, &mut e.corner_relief_scale),
         SmNum::CornerSize => (&mut p.corner_relief.size, &mut e.corner_relief_size),
-        SmNum::BendDepthScale => (&mut p.bend_relief.depth_scale, &mut e.bend_relief_depth_scale),
-        SmNum::BendWidthScale => (&mut p.bend_relief.width_scale, &mut e.bend_relief_width_scale),
+        SmNum::BendDepthScale => (
+            &mut p.bend_relief.depth_scale,
+            &mut e.bend_relief_depth_scale,
+        ),
+        SmNum::BendWidthScale => (
+            &mut p.bend_relief.width_scale,
+            &mut e.bend_relief_width_scale,
+        ),
     };
     *value = v;
     *text = expr;
@@ -896,8 +1527,10 @@ pub fn number_label(n: SmNum) -> &'static str {
 pub fn range_error(x: &SheetMetalModelFeature, n: SmNum) -> Option<String> {
     match n {
         // (NaN counts as out of range too.)
-        SmNum::Clearance => (x.clearance.is_nan() || x.clearance < 0.0).then(|| "Clearance from input must be at least 0".into()),
-        SmNum::Depth => (x.end == EndType::Blind && (x.depth.is_nan() || x.depth <= 0.0)).then(|| "Depth must be greater than 0".into()),
+        SmNum::Clearance => (x.clearance.is_nan() || x.clearance < 0.0)
+            .then(|| "Clearance from input must be at least 0".into()),
+        SmNum::Depth => (x.end == EndType::Blind && (x.depth.is_nan() || x.depth <= 0.0))
+            .then(|| "Depth must be greater than 0".into()),
         SmNum::SecondDepth => x
             .second
             .as_ref()
@@ -905,13 +1538,22 @@ pub fn range_error(x: &SheetMetalModelFeature, n: SmNum) -> Option<String> {
             .map(|_| "Depth must be greater than 0".into()),
         n => {
             let label = number_label(n);
-            x.params.validate().into_iter().find(|e| e.field == label).map(|e| e.message())
+            x.params
+                .validate()
+                .into_iter()
+                .find(|e| e.field == label)
+                .map(|e| e.message())
         }
     }
 }
 
 /// Parses a typed number: its value (in mm for lengths) and the expression to keep.
-pub fn parse(text: &str, q: Quantity, units: &cadrs_sketch::units::Units, vars: &crate::variables_ui::ActiveVariables) -> Option<(f64, String)> {
+pub fn parse(
+    text: &str,
+    q: Quantity,
+    units: &cadrs_sketch::units::Units,
+    vars: &crate::variables_ui::ActiveVariables,
+) -> Option<(f64, String)> {
     let text = text.trim();
     let v = vars.eval(units, text, q).ok().filter(|v| v.is_finite())?;
     let expr = if text.parse::<f64>().is_ok() {
@@ -942,7 +1584,11 @@ pub(crate) fn sync_numbers(
     mut commands: Commands,
 ) {
     let Some(s) = session else { return };
-    let Some(FeatureKind::SheetMetalModel(x)) = doc.as_ref().and_then(|d| d.doc.element(s.element)?.feature(s.feature)).map(|f| &f.kind) else {
+    let Some(FeatureKind::SheetMetalModel(x)) = doc
+        .as_ref()
+        .and_then(|d| d.doc.element(s.element)?.feature(s.feature))
+        .map(|f| &f.kind)
+    else {
         return;
     };
     let editing = focus.get().and_then(|f| q_edit.get(f).ok()).map(|e| e.0);
@@ -954,13 +1600,18 @@ pub(crate) fn sync_numbers(
             // A typed value that didn't parse stays as typed, red, until the next edit.
             let unparsed = st.error && err.is_none() && st.text != text;
             if !unparsed {
-                let want = NumberFieldState { text, error: err.is_some() };
+                let want = NumberFieldState {
+                    text,
+                    error: err.is_some(),
+                };
                 if *st != want {
                     *st = want;
                 }
             }
         }
-        let want_tip = err.clone().or_else(|| (st.error).then(|| "Not a valid value".to_string()));
+        let want_tip = err
+            .clone()
+            .or_else(|| (st.error).then(|| "Not a valid value".to_string()));
         match (want_tip, tip) {
             (Some(m), Some(t)) if t.text == m => {}
             (Some(m), _) => {
@@ -977,7 +1628,12 @@ pub(crate) fn sync_numbers(
 /// A number typed: parsed and set (out-of-range values too: the field shows why).
 pub fn commit_number(world: &mut World, entity: Entity, n: SmNum, text: String, enter: bool) {
     let units = world.resource::<crate::WorkspaceUnits>().0;
-    let parsed = parse(&text, quantity(n), &units, world.resource::<crate::variables_ui::ActiveVariables>());
+    let parsed = parse(
+        &text,
+        quantity(n),
+        &units,
+        world.resource::<crate::variables_ui::ActiveVariables>(),
+    );
     if let Some(mut st) = world.get_mut::<NumberFieldState>(entity) {
         st.error = parsed.is_none();
         if parsed.is_none() {
@@ -1001,7 +1657,11 @@ pub fn commit_number(world: &mut World, entity: Entity, n: SmNum, text: String, 
 
 /// Where the Extrude's depth arrow stands: on the first picked curve's middle, at the depth,
 /// pointing along the extrude.
-pub fn depth_arrow(features: &[Feature], x: &SheetMetalModelFeature, depth: f64) -> Option<(Vec3, Vec3)> {
+pub fn depth_arrow(
+    features: &[Feature],
+    x: &SheetMetalModelFeature,
+    depth: f64,
+) -> Option<(Vec3, Vec3)> {
     if x.operation != SheetMetalOp::Extrude || x.end != EndType::Blind {
         return None;
     }
@@ -1013,7 +1673,12 @@ pub fn depth_arrow(features: &[Feature], x: &SheetMetalModelFeature, depth: f64)
     let sk = features.iter().find(|f| f.id == sketch)?.sketch()?;
     let frame = sk.plane?.frame();
     let g = &sk.geometry;
-    let id = curve.or_else(|| g.curves.iter().find(|(_, c)| !c.construction).map(|(id, _)| id))?;
+    let id = curve.or_else(|| {
+        g.curves
+            .iter()
+            .find(|(_, c)| !c.construction)
+            .map(|(id, _)| id)
+    })?;
     let mid = match g.curves.get(id)?.kind {
         cadrs_sketch::CurveKind::Line { a, b } => {
             let (a, b) = (g.pos(a), g.pos(b));
@@ -1022,7 +1687,10 @@ pub fn depth_arrow(features: &[Feature], x: &SheetMetalModelFeature, depth: f64)
         cadrs_sketch::CurveKind::Arc { .. } => {
             let a = g.arc_geom(id)?;
             let m = a.start_angle + a.sweep / 2.0;
-            cadrs_sketch::Vec2::new(a.center.x + a.radius * m.cos(), a.center.y + a.radius * m.sin())
+            cadrs_sketch::Vec2::new(
+                a.center.x + a.radius * m.cos(),
+                a.center.y + a.radius * m.sin(),
+            )
         }
         _ => return None,
     };
@@ -1060,7 +1728,13 @@ pub fn thickness_arrow(cache: &PartCache, feature: FeatureId, back: Vec3) -> Opt
     let area = |w: &cadrs_sheetmetal::model::Wall| w.outline.area().abs();
     let largest = ctx.model.walls.iter().map(area).fold(0.0, f64::max);
     let facing = |w: &cadrs_sheetmetal::model::Wall| {
-        let p = w.surface.point(w.outline.bounds().map_or(cadrs_sheetmetal::poly::P2::origin(), |(lo, hi)| nalgebra::center(&lo, &hi)));
+        let p = w.surface.point(
+            w.outline
+                .bounds()
+                .map_or(cadrs_sheetmetal::poly::P2::origin(), |(lo, hi)| {
+                    nalgebra::center(&lo, &hi)
+                }),
+        );
         Vec3::new(p.x as f32, p.y as f32, p.z as f32).dot(back)
     };
     let wall = ctx
@@ -1068,7 +1742,11 @@ pub fn thickness_arrow(cache: &PartCache, feature: FeatureId, back: Vec3) -> Opt
         .walls
         .iter()
         .filter(|w| area(w) >= 0.9 * largest)
-        .max_by(|a, b| facing(a).partial_cmp(&facing(b)).unwrap_or(std::cmp::Ordering::Equal))?;
+        .max_by(|a, b| {
+            facing(a)
+                .partial_cmp(&facing(b))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })?;
     // The outline's area centroid (the bounds' middle if it is degenerate), kept inside it.
     let ring = &wall.outline.outer;
     let (mut a, mut cx, mut cy) = (0.0, 0.0, 0.0);
@@ -1104,7 +1782,10 @@ pub(crate) fn sm_flip_arrow_pointer(
     mut commands: Commands,
 ) {
     use bevy::picking::pointer::{PointerAction, PointerButton, PointerId};
-    if session.filter(|s| s.kind == crate::applied::AppliedKind::SheetMetal).is_none() {
+    if session
+        .filter(|s| s.kind == crate::applied::AppliedKind::SheetMetal)
+        .is_none()
+    {
         inputs.clear();
         arrow.pressed = false;
         return;
@@ -1129,7 +1810,9 @@ pub(crate) fn sm_flip_arrow_pointer(
                 }
             }
             PointerAction::Release(PointerButton::Primary) => {
-                if std::mem::take(&mut arrow.pressed) && arrow.base_tip.is_some_and(|bt| near(pos, bt)) {
+                if std::mem::take(&mut arrow.pressed)
+                    && arrow.base_tip.is_some_and(|bt| near(pos, bt))
+                {
                     commands.queue(|world: &mut World| {
                         crate::applied::change_kind(world, "Flip thickness direction", |k| {
                             if let FeatureKind::SheetMetalModel(x) = k {
@@ -1160,7 +1843,15 @@ pub(crate) fn place_sm_flip_arrow(
     rect: Res<crate::viewport::ViewportRect>,
     mut arrow: ResMut<SmFlipArrow>,
     q_area: Query<Entity, With<crate::viewport::ViewportArea>>,
-    mut q: Query<(Entity, &mut Node, &mut bevy::ui::UiTransform, &mut Visibility), With<SmFlipArrowNode>>,
+    mut q: Query<
+        (
+            Entity,
+            &mut Node,
+            &mut bevy::ui::UiTransform,
+            &mut Visibility,
+        ),
+        With<SmFlipArrowNode>,
+    >,
     mut q_line: Query<&mut ImageNode, With<SmFlipArrowLine>>,
     mut commands: Commands,
 ) {
@@ -1183,12 +1874,19 @@ pub(crate) fn place_sm_flip_arrow(
         return;
     };
     if q.is_empty() {
-        let Some(area) = q_area.iter().next() else { return };
+        let Some(area) = q_area.iter().next() else {
+            return;
+        };
         let e = commands
             .spawn((
                 Name::new("sm-thickness-arrow"),
                 SmFlipArrowNode,
-                Node { position_type: PositionType::Absolute, width: Val::Px(FLIP_ARROW_LEN), height: Val::Px(FLIP_ARROW_LEN), ..default() },
+                Node {
+                    position_type: PositionType::Absolute,
+                    width: Val::Px(FLIP_ARROW_LEN),
+                    height: Val::Px(FLIP_ARROW_LEN),
+                    ..default()
+                },
                 bevy::ui::UiTransform::default(),
                 Visibility::Hidden,
                 Pickable::IGNORE,
@@ -1200,13 +1898,24 @@ pub(crate) fn place_sm_flip_arrow(
                             "manipulator-arrow-halo",
                             FLIP_ARROW_LEN,
                             Color::srgba_u8(0x3c, 0x46, 0x4e, 0xb0),
-                            Node { position_type: PositionType::Absolute, ..default() },
+                            Node {
+                                position_type: PositionType::Absolute,
+                                ..default()
+                            },
                         ),
                         Pickable::IGNORE,
                     ),
                     (
                         SmFlipArrowLine,
-                        cadrs_ui::icon::icon_in("manipulator-arrow-line", FLIP_ARROW_LEN, Color::WHITE, Node { position_type: PositionType::Absolute, ..default() }),
+                        cadrs_ui::icon::icon_in(
+                            "manipulator-arrow-line",
+                            FLIP_ARROW_LEN,
+                            Color::WHITE,
+                            Node {
+                                position_type: PositionType::Absolute,
+                                ..default()
+                            }
+                        ),
                         Pickable::IGNORE,
                     ),
                 ],
@@ -1218,18 +1927,28 @@ pub(crate) fn place_sm_flip_arrow(
     let u = (tip - base).normalize_or_zero();
     let center = (base + tip) / 2.0 - rect.0.min;
     for (_, mut node, mut transform, mut vis) in &mut q {
-        let (l, t) = (Val::Px(center.x - FLIP_ARROW_LEN / 2.0), Val::Px(center.y - FLIP_ARROW_LEN / 2.0));
+        let (l, t) = (
+            Val::Px(center.x - FLIP_ARROW_LEN / 2.0),
+            Val::Px(center.y - FLIP_ARROW_LEN / 2.0),
+        );
         if node.left != l || node.top != t {
             node.left = l;
             node.top = t;
         }
-        let want = bevy::ui::UiTransform { rotation: Rot2::radians(u.x.atan2(-u.y)), ..default() };
+        let want = bevy::ui::UiTransform {
+            rotation: Rot2::radians(u.x.atan2(-u.y)),
+            ..default()
+        };
         if *transform != want {
             *transform = want;
         }
         vis.set_if_neq(Visibility::Inherited);
     }
-    let c = if arrow.hovered { Color::srgb_u8(0xff, 0xb4, 0x5a) } else { Color::WHITE };
+    let c = if arrow.hovered {
+        Color::srgb_u8(0xff, 0xb4, 0x5a)
+    } else {
+        Color::WHITE
+    };
     for mut img in &mut q_line {
         if img.color != c {
             img.color = c;

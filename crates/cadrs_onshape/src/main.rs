@@ -29,12 +29,16 @@ fn main() -> ExitCode {
     cadrs_core::rebuild::keep_unused_for(u64::MAX);
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut raw_dir = default_raw();
-    let mut data_dir = std::env::var_os("CADRS_DATA_DIR").map(PathBuf::from).or_else(Store::default_root);
+    let mut data_dir = std::env::var_os("CADRS_DATA_DIR")
+        .map(PathBuf::from)
+        .or_else(Store::default_root);
     let mut dry_run = false;
     let mut skip = Vec::new();
     let mut timeout = Duration::from_secs(300);
     // Imported documents belong to the local user, as the app identifies them.
-    let mut user = std::env::var("USER").or_else(|_| std::env::var("USERNAME")).unwrap_or_else(|_| "user".into());
+    let mut user = std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_else(|_| "user".into());
     let mut rest = Vec::new();
     let mut it = args.into_iter();
     while let Some(a) = it.next() {
@@ -43,8 +47,19 @@ fn main() -> ExitCode {
             "--data-dir" => data_dir = it.next().map(PathBuf::from),
             "--dry-run" => dry_run = true,
             "--user" => user = it.next().unwrap_or(user),
-            "--skip" => skip = it.next().map(|s| s.split(',').map(String::from).collect()).unwrap_or_default(),
-            "--timeout" => timeout = it.next().and_then(|s| s.parse().ok()).map(Duration::from_secs).unwrap_or(timeout),
+            "--skip" => {
+                skip = it
+                    .next()
+                    .map(|s| s.split(',').map(String::from).collect())
+                    .unwrap_or_default()
+            }
+            "--timeout" => {
+                timeout = it
+                    .next()
+                    .and_then(|s| s.parse().ok())
+                    .map(Duration::from_secs)
+                    .unwrap_or(timeout)
+            }
             _ => rest.push(a),
         }
     }
@@ -58,11 +73,20 @@ fn main() -> ExitCode {
             if cmd == "import" {
                 import(&raw_dir, &data_dir, &rest[1..], dry_run, timeout, &user)
             } else {
-                import_one(&raw_dir, &Store::new(data_dir), rest.get(1).map_or("", String::as_str), &skip, dry_run, &user)
+                import_one(
+                    &raw_dir,
+                    &Store::new(data_dir),
+                    rest.get(1).map_or("", String::as_str),
+                    &skip,
+                    dry_run,
+                    &user,
+                )
             }
         }
         _ => {
-            eprintln!("usage: cadrs-onshape (import [<name or id>…] [--dry-run] | check-queries) [--raw <dir>] [--data-dir <dir>]");
+            eprintln!(
+                "usage: cadrs-onshape (import [<name or id>…] [--dry-run] | check-queries) [--raw <dir>] [--data-dir <dir>]"
+            );
             ExitCode::from(2)
         }
     }
@@ -72,10 +96,22 @@ fn main() -> ExitCode {
 /// each in a child process (`import-one`) with a time limit: a rebuild that hangs in the
 /// kernel can't be interrupted, so the child is killed and the document imported again
 /// without the feature it was on.
-fn import(raw_dir: &Path, data_dir: &Path, filters: &[String], dry_run: bool, timeout: Duration, user: &str) -> ExitCode {
+fn import(
+    raw_dir: &Path,
+    data_dir: &Path,
+    filters: &[String],
+    dry_run: bool,
+    timeout: Duration,
+    user: &str,
+) -> ExitCode {
     let docs: Vec<_> = raw::documents(raw_dir)
         .into_iter()
-        .filter(|d| filters.is_empty() || filters.iter().any(|f| d.id == *f || d.name.to_lowercase().contains(&f.to_lowercase())))
+        .filter(|d| {
+            filters.is_empty()
+                || filters
+                    .iter()
+                    .any(|f| d.id == *f || d.name.to_lowercase().contains(&f.to_lowercase()))
+        })
         .collect();
     if docs.is_empty() {
         eprintln!("no scraped documents match under {}", raw_dir.display());
@@ -83,7 +119,8 @@ fn import(raw_dir: &Path, data_dir: &Path, filters: &[String], dry_run: bool, ti
     }
     let docs = raw::derive_order(docs);
     let exe = std::env::current_exe().expect("own path");
-    let progress = std::env::temp_dir().join(format!("cadrs-onshape-progress-{}", std::process::id()));
+    let progress =
+        std::env::temp_dir().join(format!("cadrs-onshape-progress-{}", std::process::id()));
     let mut text = String::new();
     let mut failed = 0;
     for d in &docs {
@@ -91,15 +128,26 @@ fn import(raw_dir: &Path, data_dir: &Path, filters: &[String], dry_run: bool, ti
         let out = loop {
             std::fs::remove_file(&progress).ok();
             let mut cmd = Command::new(&exe);
-            cmd.arg("import-one").arg(&d.id).arg("--raw").arg(raw_dir).arg("--data-dir").arg(data_dir).arg("--user").arg(user);
+            cmd.arg("import-one")
+                .arg(&d.id)
+                .arg("--raw")
+                .arg(raw_dir)
+                .arg("--data-dir")
+                .arg(data_dir)
+                .arg("--user")
+                .arg(user);
             if dry_run {
                 cmd.arg("--dry-run");
             }
             if !skip.is_empty() {
                 cmd.arg("--skip").arg(skip.join(","));
             }
-            cmd.env("CADRS_ONSHAPE_PROGRESS", &progress).stdout(Stdio::piped()).stderr(Stdio::inherit());
-            let Ok(mut child) = cmd.spawn() else { break None };
+            cmd.env("CADRS_ONSHAPE_PROGRESS", &progress)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit());
+            let Ok(mut child) = cmd.spawn() else {
+                break None;
+            };
             let mut stdout = child.stdout.take().expect("piped");
             let reader = std::thread::spawn(move || {
                 let mut s = String::new();
@@ -134,7 +182,10 @@ fn import(raw_dir: &Path, data_dir: &Path, filters: &[String], dry_run: bool, ti
             }
             match std::fs::read_to_string(&progress) {
                 Ok(f) if !skip.contains(&f) && skip.len() < 8 => {
-                    eprintln!("  {}: feature {f} hung or crashed; importing again without it", d.name);
+                    eprintln!(
+                        "  {}: feature {f} hung or crashed; importing again without it",
+                        d.name
+                    );
                     skip.push(f);
                 }
                 _ => break (!s.is_empty()).then_some(s),
@@ -142,7 +193,10 @@ fn import(raw_dir: &Path, data_dir: &Path, filters: &[String], dry_run: bool, ti
         };
         let line = out.unwrap_or_else(|| {
             failed += 1;
-            format!("# {} ({})\n  ! import failed or kept hanging\n", d.name, d.id)
+            format!(
+                "# {} ({})\n  ! import failed or kept hanging\n",
+                d.name, d.id
+            )
         });
         print!("{line}");
         text += &line;
@@ -152,11 +206,22 @@ fn import(raw_dir: &Path, data_dir: &Path, filters: &[String], dry_run: bool, ti
     if let Some(parent) = raw_dir.parent().filter(|_| filters.is_empty() || !dry_run) {
         std::fs::write(parent.join("import-report.txt"), &text).ok();
     }
-    if failed == 0 { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+    if failed == 0 {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
 }
 
 /// Imports one document (by Onshape id) and prints its report.
-fn import_one(raw_dir: &Path, store: &Store, id: &str, skip: &[String], dry_run: bool, user: &str) -> ExitCode {
+fn import_one(
+    raw_dir: &Path,
+    store: &Store,
+    id: &str,
+    skip: &[String],
+    dry_run: bool,
+    user: &str,
+) -> ExitCode {
     let Some(d) = raw::documents(raw_dir).into_iter().find(|d| d.id == id) else {
         eprintln!("no scraped document {id}");
         return ExitCode::FAILURE;
@@ -168,7 +233,9 @@ fn import_one(raw_dir: &Path, store: &Store, id: &str, skip: &[String], dry_run:
         store: Some(store.clone()),
     };
     // Derived features read other documents from the store.
-    cadrs_core::derived::set_document_loader(Some(cadrs_core::derived::store_loader(store.clone())));
+    cadrs_core::derived::set_document_loader(Some(cadrs_core::derived::store_loader(
+        store.clone(),
+    )));
     // Rebuild snapshots next to the documents, where the app keeps them: a Derived feature
     // restores its source document's Part Studio from one instead of rebuilding it.
     if let Some(dir) = store.root().parent() {
@@ -181,7 +248,9 @@ fn import_one(raw_dir: &Path, store: &Store, id: &str, skip: &[String], dry_run:
     // the app opening it).
     for el in &imported.doc.elements {
         let features = el.features().to_vec();
-        if el.assembly_model().is_none() && features.iter().any(cadrs_core::Feature::is_part_feature) {
+        if el.assembly_model().is_none()
+            && features.iter().any(cadrs_core::Feature::is_part_feature)
+        {
             cadrs_core::rebuild::save_snapshot_now(features);
         }
     }
@@ -195,7 +264,8 @@ fn import_one(raw_dir: &Path, store: &Store, id: &str, skip: &[String], dry_run:
                     std::fs::copy(&thumb, store.thumbnail_path(imported.doc.id)).ok();
                 }
                 // Onshape's versions other documents may pin (those scraped), as its history.
-                if let Some(log) = cadrs_onshape::history_with_versions(&d, &imported.doc, &imported.meta, user)
+                if let Some(log) =
+                    cadrs_onshape::history_with_versions(&d, &imported.doc, &imported.meta, user)
                     && let Err(e) = log.save(store)
                 {
                     line += &format!("  ! versions not saved: {e}\n");
@@ -214,7 +284,11 @@ fn import_one(raw_dir: &Path, store: &Store, id: &str, skip: &[String], dry_run:
     }
     line += &format!("  ({:.1} s)\n", started.elapsed().as_secs_f64());
     print!("{line}");
-    if ok { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+    if ok {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
 }
 
 fn default_raw() -> PathBuf {
@@ -232,13 +306,18 @@ fn check_queries(raw_dir: &std::path::Path) -> ExitCode {
             for feat in f["features"].as_array().into_iter().flatten() {
                 for p in feat["parameters"].as_array().into_iter().flatten() {
                     for q in p["queries"].as_array().into_iter().flatten() {
-                        let Some(s) = q["queryString"].as_str() else { continue };
+                        let Some(s) = q["queryString"].as_str() else {
+                            continue;
+                        };
                         match query::decode(s) {
                             Ok(Some(_)) => ok += 1,
                             Ok(None) => other += 1,
                             Err(e) => {
                                 failed += 1;
-                                eprintln!("{} / {} / {}: {e}", doc.name, feat["name"], p["parameterId"]);
+                                eprintln!(
+                                    "{} / {} / {}: {e}",
+                                    doc.name, feat["name"], p["parameterId"]
+                                );
                             }
                         }
                     }
@@ -247,5 +326,9 @@ fn check_queries(raw_dir: &std::path::Path) -> ExitCode {
         }
     }
     println!("decoded {ok}, other forms {other}, failed {failed}");
-    if failed == 0 { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+    if failed == 0 {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
 }

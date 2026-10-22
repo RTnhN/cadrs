@@ -10,7 +10,10 @@ use cadrs_core::assembly::InstanceId;
 use cadrs_core::assembly::commands::{AddMateFeature, SetMateFeature};
 use cadrs_core::assembly::mate::{MateFeature, MateId, MateKind, next_name};
 use cadrs_ui::prelude::*;
-use cadrs_ui::{FeatureDialogAccept, FeatureDialogCancel, FeatureDialogState, SelectionList, SelectionListRemove, SelectionListState};
+use cadrs_ui::{
+    FeatureDialogAccept, FeatureDialogCancel, FeatureDialogState, SelectionList,
+    SelectionListRemove, SelectionListState,
+};
 
 use crate::parts::PartCache;
 use crate::viewport::{Pick, Selection, ViewportArea};
@@ -22,9 +25,14 @@ impl Plugin for GroupDialogPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (follow_selection, sync_group_dialog).chain().after(crate::parts::PartsSet).run_if(in_state(AppState::Document)),
+            (follow_selection, sync_group_dialog)
+                .chain()
+                .after(crate::parts::PartsSet)
+                .run_if(in_state(AppState::Document)),
         )
-        .add_systems(OnExit(AppState::Document), |mut commands: Commands| commands.remove_resource::<GroupSession>())
+        .add_systems(OnExit(AppState::Document), |mut commands: Commands| {
+            commands.remove_resource::<GroupSession>()
+        })
         .add_observer(on_accept)
         .add_observer(on_cancel)
         .add_observer(on_remove);
@@ -48,23 +56,53 @@ struct GroupDialog;
 pub fn open_group_dialog(world: &mut World) {
     world.remove_resource::<super::relation_dialog::RelationSession>();
     world.remove_resource::<super::mate_dialog::MateSession>();
-    let Some(doc) = world.get_resource::<ActiveDocument>() else { return };
-    let Some(element) = super::active_assembly(doc) else { return };
-    let Some(model) = doc.active_element().and_then(|e| e.assembly_model()) else { return };
+    let Some(doc) = world.get_resource::<ActiveDocument>() else {
+        return;
+    };
+    let Some(element) = super::active_assembly(doc) else {
+        return;
+    };
+    let Some(model) = doc.active_element().and_then(|e| e.assembly_model()) else {
+        return;
+    };
     let name = next_name(&model.mates, "Group");
     let instances = super::selected_instances(world.resource::<Selection>());
-    world.insert_resource(GroupSession { element, id: MateId::new(), name, editing: false, instances });
+    world.insert_resource(GroupSession {
+        element,
+        id: MateId::new(),
+        name,
+        editing: false,
+        instances,
+    });
 }
 
 /// Opens it on an existing group (Edit…).
 pub fn edit_group(world: &mut World, id: MateId) {
     world.remove_resource::<super::mate_dialog::MateSession>();
-    let Some(doc) = world.get_resource::<ActiveDocument>() else { return };
-    let Some(element) = super::active_assembly(doc) else { return };
-    let Some(f) = doc.active_element().and_then(|e| e.assembly_model()?.mate(id).cloned()) else { return };
-    let MateKind::Group { instances } = f.kind else { return };
-    world.resource_mut::<Selection>().0 = instances.iter().map(|i| Pick::Part(i.part_id())).collect();
-    world.insert_resource(GroupSession { element, id, name: f.name, editing: true, instances });
+    let Some(doc) = world.get_resource::<ActiveDocument>() else {
+        return;
+    };
+    let Some(element) = super::active_assembly(doc) else {
+        return;
+    };
+    let Some(f) = doc
+        .active_element()
+        .and_then(|e| e.assembly_model()?.mate(id).cloned())
+    else {
+        return;
+    };
+    let MateKind::Group { instances } = f.kind else {
+        return;
+    };
+    world.resource_mut::<Selection>().0 =
+        instances.iter().map(|i| Pick::Part(i.part_id())).collect();
+    world.insert_resource(GroupSession {
+        element,
+        id,
+        name: f.name,
+        editing: true,
+        instances,
+    });
 }
 
 /// The field shows the selected instances.
@@ -85,22 +123,52 @@ fn on_remove(ev: On<SelectionListRemove>, q: Query<&Name>, mut commands: Command
     }
     let i = ev.index;
     commands.queue(move |world: &mut World| {
-        let Some(id) = world.get_resource::<GroupSession>().and_then(|s| s.instances.get(i).copied()) else { return };
-        world.resource_mut::<Selection>().0.retain(|p| super::instance_of(p) != Some(id));
+        let Some(id) = world
+            .get_resource::<GroupSession>()
+            .and_then(|s| s.instances.get(i).copied())
+        else {
+            return;
+        };
+        world
+            .resource_mut::<Selection>()
+            .0
+            .retain(|p| super::instance_of(p) != Some(id));
     });
 }
 
 pub fn accept(world: &mut World) {
-    let Some(s) = world.get_resource::<GroupSession>().cloned() else { return };
+    let Some(s) = world.get_resource::<GroupSession>().cloned() else {
+        return;
+    };
     if s.instances.len() < 2 {
         return;
     }
-    let feature = MateFeature::new(s.id, s.name.clone(), MateKind::Group { instances: s.instances.clone() });
+    let feature = MateFeature::new(
+        s.id,
+        s.name.clone(),
+        MateKind::Group {
+            instances: s.instances.clone(),
+        },
+    );
     let element = s.element;
     let ok = if s.editing {
-        super::run(world, &SetMateFeature { element, feature, poses: Vec::new() })
+        super::run(
+            world,
+            &SetMateFeature {
+                element,
+                feature,
+                poses: Vec::new(),
+            },
+        )
     } else {
-        super::run(world, &AddMateFeature { element, feature, poses: Vec::new() })
+        super::run(
+            world,
+            &AddMateFeature {
+                element,
+                feature,
+                poses: Vec::new(),
+            },
+        )
     };
     if ok {
         world.remove_resource::<GroupSession>();
@@ -133,15 +201,25 @@ fn group_dialog(t: &Theme, name: &str, items: Vec<String>) -> impl Bundle {
             .valid(valid)
             .width(214.0)
             .body(move |b| {
-                b.spawn(SelectionList::new("group-instances").placeholder("Instances").items(items).active(true).build(&tb))
-                    .entry::<Node>()
-                    .and_modify(|mut n| {
-                        n.flex_grow = 0.0;
-                        n.margin = UiRect::new(Val::ZERO, Val::Px(2.0), Val::Px(2.0), Val::Px(2.0));
-                    });
+                b.spawn(
+                    SelectionList::new("group-instances")
+                        .placeholder("Instances")
+                        .items(items)
+                        .active(true)
+                        .build(&tb),
+                )
+                .entry::<Node>()
+                .and_modify(|mut n| {
+                    n.flex_grow = 0.0;
+                    n.margin = UiRect::new(Val::ZERO, Val::Px(2.0), Val::Px(2.0), Val::Px(2.0));
+                });
             })
             .footer(move |f| {
-                f.spawn((Name::new("group-help"), icon("help-filled", 14.0, Color::srgb_u8(0xa8, 0xa8, 0xa8)), Tooltip::new("Help")));
+                f.spawn((
+                    Name::new("group-help"),
+                    icon("help-filled", 14.0, Color::srgb_u8(0xa8, 0xa8, 0xa8)),
+                    Tooltip::new("Help"),
+                ));
                 let _ = &tf;
             })
             .build(t),
@@ -164,9 +242,20 @@ fn sync_group_dialog(
         }
         return;
     };
-    let items: Vec<String> = s.instances.iter().map(|i| cache.part_name(i.part_id()).unwrap_or("instance").to_string()).collect();
+    let items: Vec<String> = s
+        .instances
+        .iter()
+        .map(|i| {
+            cache
+                .part_name(i.part_id())
+                .unwrap_or("instance")
+                .to_string()
+        })
+        .collect();
     let Some((_, mut st)) = q_dialog.iter_mut().next() else {
-        let Some(area) = q_area.iter().next() else { return };
+        let Some(area) = q_area.iter().next() else {
+            return;
+        };
         let d = commands.spawn(group_dialog(&theme, &s.name, items)).id();
         commands.entity(area).add_child(d);
         return;

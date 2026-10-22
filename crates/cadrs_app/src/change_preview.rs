@@ -69,11 +69,18 @@ fn update_hover_change(
 ) {
     // Not while a dialog edits a feature (its own preview shows) or a rebuild runs.
     let target = match (highlight.list, doc.as_deref()) {
-        (Some(Pick::Feature(id)), Some(doc)) if over.editing.is_none() && cache.assembly.is_none() && !cache.errors.contains_key(&id) => {
+        (Some(Pick::Feature(id)), Some(doc))
+            if over.editing.is_none()
+                && cache.assembly.is_none()
+                && !cache.errors.contains_key(&id) =>
+        {
             doc.active_element().and_then(|el| {
                 let change = hovered_change(el.feature(id)?)?;
                 let features = crate::parts::effective_features(&el.active_features(), &over);
-                features.iter().any(|f| f.id == id).then_some((id, change, features))
+                features
+                    .iter()
+                    .any(|f| f.id == id)
+                    .then_some((id, change, features))
             })
         }
         _ => None,
@@ -99,8 +106,16 @@ fn update_hover_change(
     let shown = done.flatten().and_then(|st| {
         let id = hc.key.as_ref()?.0;
         // A hovered Add that joins nothing has no stage; a Sheet metal model's isn't a change.
-        let change = if st.remove { Change::Remove } else { Change::Add };
-        let want = doc.as_deref()?.active_element()?.feature(id).and_then(hovered_change)?;
+        let change = if st.remove {
+            Change::Remove
+        } else {
+            Change::Add
+        };
+        let want = doc
+            .as_deref()?
+            .active_element()?
+            .feature(id)
+            .and_then(hovered_change)?;
         (change == want).then(|| (change, crate::parts::stage_bodies(id, &st, u32::MAX - 1000)))
     });
     hc.show(shown);
@@ -130,7 +145,9 @@ fn sync_hover_meshes(
     let Some((change, parts)) = &hc.shown else {
         return;
     };
-    let material = material.get_or_insert_with(|| materials.add(PartShading::new(true, true))).clone();
+    let material = material
+        .get_or_insert_with(|| materials.add(PartShading::new(true, true)))
+        .clone();
     for part in parts {
         let bases = vec![change.base(); part.solid.faces.len()];
         commands.spawn((
@@ -152,7 +169,12 @@ fn draw_hover_edges(hc: Res<HoverChange>, mut g: Gizmos<ChangeEdgeGizmos>) {
     };
     for part in parts {
         for e in part.solid.edges.iter().filter(|e| !e.smooth) {
-            g.linestrip(e.points.iter().map(|p| Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32)), change.edge());
+            g.linestrip(
+                e.points
+                    .iter()
+                    .map(|p| Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32)),
+                change.edge(),
+            );
         }
     }
 }

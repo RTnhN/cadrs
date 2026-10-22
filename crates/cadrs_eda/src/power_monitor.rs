@@ -40,7 +40,15 @@ fn p(x: f64, y: f64) -> Pt {
 // Symbols (the symbol editor)
 
 /// A pin as the Pin Properties dialog makes it.
-fn pin(s: &mut Symbol, number: &str, name: &str, kind: PinType, at: (f64, f64), o: Orientation, length: f64) {
+fn pin(
+    s: &mut Symbol,
+    number: &str,
+    name: &str,
+    kind: PinType,
+    at: (f64, f64),
+    o: Orientation,
+    length: f64,
+) {
     let mut props = PinProps::new(name, number, p(at.0, at.1), o);
     props.kind = kind;
     props.length = mm(length);
@@ -51,17 +59,51 @@ fn pin(s: &mut Symbol, number: &str, name: &str, kind: PinType, at: (f64, f64), 
 pub fn ra01sh_symbol() -> Symbol {
     let mut s = le::new_symbol("RA-01SH", "U", true);
     le::set_symbol_field(&mut s, fields::VALUE, "RA-01SH");
-    le::set_symbol_field(&mut s, fields::FOOTPRINT, &format!("{LIB}:WIRELM-SMD_RA-01SH"));
-    le::set_symbol_field(&mut s, fields::DESCRIPTION, "Ai-Thinker Ra-01SH 868 MHz LoRa module, SPI interface, external antenna");
+    le::set_symbol_field(
+        &mut s,
+        fields::FOOTPRINT,
+        &format!("{LIB}:WIRELM-SMD_RA-01SH"),
+    );
+    le::set_symbol_field(
+        &mut s,
+        fields::DESCRIPTION,
+        "Ai-Thinker Ra-01SH 868 MHz LoRa module, SPI interface, external antenna",
+    );
     s.keywords = "LoRa SX1262 module".into();
-    le::add_symbol_shape(&mut s, Geom::Rect { a: p(-8.89, 11.43), b: p(8.89, -11.43) }, mm(0.254), Fill::Background);
-    let left = ["ANT", "GND", "3.3V", "RESET", "TXEN", "DIO1", "DIO2", "DIO3"];
+    le::add_symbol_shape(
+        &mut s,
+        Geom::Rect {
+            a: p(-8.89, 11.43),
+            b: p(8.89, -11.43),
+        },
+        mm(0.254),
+        Fill::Background,
+    );
+    let left = [
+        "ANT", "GND", "3.3V", "RESET", "TXEN", "DIO1", "DIO2", "DIO3",
+    ];
     for (i, name) in left.iter().enumerate() {
-        pin(&mut s, &(i + 1).to_string(), name, PinType::Unspecified, (-11.43, 8.89 - 2.54 * i as f64), Orientation::Right, 2.54);
+        pin(
+            &mut s,
+            &(i + 1).to_string(),
+            name,
+            PinType::Unspecified,
+            (-11.43, 8.89 - 2.54 * i as f64),
+            Orientation::Right,
+            2.54,
+        );
     }
     let right = ["GND", "NSS", "MOSI", "MISO", "SCK", "RXEN", "BUSY", "GND"];
     for (i, name) in right.iter().enumerate() {
-        pin(&mut s, &(16 - i).to_string(), name, PinType::Unspecified, (11.43, 8.89 - 2.54 * i as f64), Orientation::Left, 2.54);
+        pin(
+            &mut s,
+            &(16 - i).to_string(),
+            name,
+            PinType::Unspecified,
+            (11.43, 8.89 - 2.54 * i as f64),
+            Orientation::Left,
+            2.54,
+        );
     }
     s.fields[0].text.at = p(0.0, 13.97);
     s.fields[1].text.at = p(0.0, -13.97);
@@ -73,29 +115,104 @@ type PinColumn = [(&'static str, PinType); 10];
 
 /// One of the ESP32 mini module's two 2×10 headers: odd pins left, even pins right.
 pub fn esp32_header_symbol(right: bool) -> Symbol {
-    use PinType::{Bidirectional as Bi, Input, NoConnect as Nc, Output, Passive as Pa, PowerIn as Pi, PowerOut as Po};
+    use PinType::{
+        Bidirectional as Bi, Input, NoConnect as Nc, Output, Passive as Pa, PowerIn as Pi,
+        PowerOut as Po,
+    };
     let (name, odd, even): (&str, PinColumn, PinColumn) = if right {
         (
             "esp32-pins-header-right",
-            [("TXD", Output), ("RXD", Input), ("IO22", Bi), ("IO21", Bi), ("IO17", Bi), ("IO16", Bi), ("GND", Pi), ("VCC", Pi), ("TD0", Bi), ("SD0", Bi)],
-            [("GND", Pi), ("IO27", Bi), ("IO25", Bi), ("IO32", Bi), ("TDI", Pa), ("IO4", Bi), ("IO0", Bi), ("IO2", Bi), ("SD1", Bi), ("CLK", Pa)],
+            [
+                ("TXD", Output),
+                ("RXD", Input),
+                ("IO22", Bi),
+                ("IO21", Bi),
+                ("IO17", Bi),
+                ("IO16", Bi),
+                ("GND", Pi),
+                ("VCC", Pi),
+                ("TD0", Bi),
+                ("SD0", Bi),
+            ],
+            [
+                ("GND", Pi),
+                ("IO27", Bi),
+                ("IO25", Bi),
+                ("IO32", Bi),
+                ("TDI", Pa),
+                ("IO4", Bi),
+                ("IO0", Bi),
+                ("IO2", Bi),
+                ("SD1", Bi),
+                ("CLK", Pa),
+            ],
         )
     } else {
         (
             "esp32-pins-header-left",
-            [("GND", Pi), ("NC", Nc), ("SVN", Pa), ("IO35", Bi), ("IO33", Bi), ("IO34", Bi), ("TMS", Pa), ("NC", Nc), ("SD2", Pa), ("CMD", Pa)],
-            [("RST", Input), ("SVP", Pa), ("IO26", Bi), ("IO18", Bi), ("IO19", Bi), ("IO23", Bi), ("IO5", Bi), ("3V3", Po), ("TCK", Pa), ("SD3", Pa)],
+            [
+                ("GND", Pi),
+                ("NC", Nc),
+                ("SVN", Pa),
+                ("IO35", Bi),
+                ("IO33", Bi),
+                ("IO34", Bi),
+                ("TMS", Pa),
+                ("NC", Nc),
+                ("SD2", Pa),
+                ("CMD", Pa),
+            ],
+            [
+                ("RST", Input),
+                ("SVP", Pa),
+                ("IO26", Bi),
+                ("IO18", Bi),
+                ("IO19", Bi),
+                ("IO23", Bi),
+                ("IO5", Bi),
+                ("3V3", Po),
+                ("TCK", Pa),
+                ("SD3", Pa),
+            ],
         )
     };
     let mut s = le::new_symbol(name, "J", true);
-    le::set_symbol_field(&mut s, fields::FOOTPRINT, "Connector_PinHeader_2.54mm:PinHeader_2x10_P2.54mm_Vertical");
+    le::set_symbol_field(
+        &mut s,
+        fields::FOOTPRINT,
+        "Connector_PinHeader_2.54mm:PinHeader_2x10_P2.54mm_Vertical",
+    );
     le::set_symbol_field(&mut s, fields::DESCRIPTION, name);
     s.keywords = "ESP32 mini header".into();
-    le::add_symbol_shape(&mut s, Geom::Rect { a: p(-1.27, 11.43), b: p(15.24, -13.97) }, mm(0.254), Fill::Background);
+    le::add_symbol_shape(
+        &mut s,
+        Geom::Rect {
+            a: p(-1.27, 11.43),
+            b: p(15.24, -13.97),
+        },
+        mm(0.254),
+        Fill::Background,
+    );
     for i in 0..10 {
         let y = 10.16 - 2.54 * i as f64;
-        pin(&mut s, &(2 * i + 1).to_string(), odd[i].0, odd[i].1, (-5.08, y), Orientation::Right, 3.81);
-        pin(&mut s, &(2 * i + 2).to_string(), even[i].0, even[i].1, (19.05, y), Orientation::Left, 3.81);
+        pin(
+            &mut s,
+            &(2 * i + 1).to_string(),
+            odd[i].0,
+            odd[i].1,
+            (-5.08, y),
+            Orientation::Right,
+            3.81,
+        );
+        pin(
+            &mut s,
+            &(2 * i + 2).to_string(),
+            even[i].0,
+            even[i].1,
+            (19.05, y),
+            Orientation::Left,
+            3.81,
+        );
     }
     s.fields[0].text.at = p(6.985, 16.51);
     s.fields[1].text.at = p(6.985, 13.97);
@@ -106,7 +223,22 @@ pub fn esp32_header_symbol(right: bool) -> Symbol {
 // Footprints (the footprint editor)
 
 fn fp_text(text: &str, at: Pt, layer: Layer) -> FpText {
-    FpText { id: Uuid::new_v4(), text: Text { text: text.into(), at, angle: 0.0, style: TextStyle { size: Size::mm(1.0, 1.0), thickness: Some(mm(0.15)), ..Default::default() }, visible: true }, layer, keep_upright: true }
+    FpText {
+        id: Uuid::new_v4(),
+        text: Text {
+            text: text.into(),
+            at,
+            angle: 0.0,
+            style: TextStyle {
+                size: Size::mm(1.0, 1.0),
+                thickness: Some(mm(0.15)),
+                ..Default::default()
+            },
+            visible: true,
+        },
+        layer,
+        keep_upright: true,
+    }
 }
 
 /// The Ra-01SH's land pattern: 16 castellated pads on a 2 mm pitch, 16 mm apart.
@@ -120,7 +252,10 @@ pub fn ra01sh_footprint() -> Footprint {
         pd.shape = PadShape::Rect;
         pd.size = Size::mm(3.0, 1.2);
     }
-    let rest: Vec<(f64, f64)> = (1..8).map(|i| (-8.0, 7.0 - 2.0 * i as f64)).chain((0..8).map(|i| (8.0, -7.0 + 2.0 * i as f64))).collect();
+    let rest: Vec<(f64, f64)> = (1..8)
+        .map(|i| (-8.0, 7.0 - 2.0 * i as f64))
+        .chain((0..8).map(|i| (8.0, -7.0 + 2.0 * i as f64)))
+        .collect();
     for (x, y) in rest {
         let i = le::add_pad(&mut f, p(x, y));
         f.pads[i].size = Size::mm(2.4, 1.2);
@@ -128,19 +263,75 @@ pub fn ra01sh_footprint() -> Footprint {
     // Silkscreen: the module's edge, broken at each pad.
     let w = mm(0.25);
     for x in [-8.0, 8.0] {
-        le::add_fp_shape(&mut f, Geom::Line { a: p(x, 8.51), b: p(x, 7.83) }, Layer::TopSilk, w);
-        le::add_fp_shape(&mut f, Geom::Line { a: p(x, -8.51), b: p(x, -7.83) }, Layer::TopSilk, w);
+        le::add_fp_shape(
+            &mut f,
+            Geom::Line {
+                a: p(x, 8.51),
+                b: p(x, 7.83),
+            },
+            Layer::TopSilk,
+            w,
+        );
+        le::add_fp_shape(
+            &mut f,
+            Geom::Line {
+                a: p(x, -8.51),
+                b: p(x, -7.83),
+            },
+            Layer::TopSilk,
+            w,
+        );
         for k in 0..7 {
             let y = 5.83 - 2.0 * k as f64;
-            le::add_fp_shape(&mut f, Geom::Line { a: p(x, y), b: p(x, y + 0.34) }, Layer::TopSilk, w);
+            le::add_fp_shape(
+                &mut f,
+                Geom::Line {
+                    a: p(x, y),
+                    b: p(x, y + 0.34),
+                },
+                Layer::TopSilk,
+                w,
+            );
         }
     }
     for y in [8.51, -8.51] {
-        le::add_fp_shape(&mut f, Geom::Line { a: p(-8.0, y), b: p(8.0, y) }, Layer::TopSilk, w);
+        le::add_fp_shape(
+            &mut f,
+            Geom::Line {
+                a: p(-8.0, y),
+                b: p(8.0, y),
+            },
+            Layer::TopSilk,
+            w,
+        );
     }
-    le::add_fp_shape(&mut f, Geom::Circle { center: p(-8.76, 8.25), radius: mm(0.38) }, Layer::TopSilk, w);
-    le::add_fp_shape(&mut f, Geom::Rect { a: p(-8.0, -8.5), b: p(8.0, 8.5) }, Layer::TopFab, mm(0.1));
-    le::add_fp_shape(&mut f, Geom::Rect { a: p(-9.45, -8.85), b: p(9.45, 8.85) }, Layer::TopCourtyard, mm(0.05));
+    le::add_fp_shape(
+        &mut f,
+        Geom::Circle {
+            center: p(-8.76, 8.25),
+            radius: mm(0.38),
+        },
+        Layer::TopSilk,
+        w,
+    );
+    le::add_fp_shape(
+        &mut f,
+        Geom::Rect {
+            a: p(-8.0, -8.5),
+            b: p(8.0, 8.5),
+        },
+        Layer::TopFab,
+        mm(0.1),
+    );
+    le::add_fp_shape(
+        &mut f,
+        Geom::Rect {
+            a: p(-9.45, -8.85),
+            b: p(9.45, 8.85),
+        },
+        Layer::TopCourtyard,
+        mm(0.05),
+    );
     // The module in 3D: its board, the shield can, gold castellations.
     let mut b = Body::default();
     b.cuboid([-8.0, -8.5, 0.0], [8.0, 8.5, 0.8], colors::PLASTIC);
@@ -148,9 +339,20 @@ pub fn ra01sh_footprint() -> Footprint {
     for pd in &f.pads {
         let (x, y) = (crate::units::to_mm(pd.at.x), crate::units::to_mm(pd.at.y));
         let x0 = if x < 0.0 { -8.0 } else { 7.4 };
-        b.cuboid([x0, y - 0.45, 0.0], [x0 + 0.6, y + 0.45, 0.82], colors::GOLD);
+        b.cuboid(
+            [x0, y - 0.45, 0.0],
+            [x0 + 0.6, y + 0.45, 0.82],
+            colors::GOLD,
+        );
     }
-    le::set_model(&mut f, "WIRELM-SMD_RA-01SH.step", [0.0; 3], [0.0; 3], [1.0; 3], 1.0);
+    le::set_model(
+        &mut f,
+        "WIRELM-SMD_RA-01SH.step",
+        [0.0; 3],
+        [0.0; 3],
+        [1.0; 3],
+        1.0,
+    );
     f.models[0].body = Some(b);
     f
 }
@@ -158,7 +360,11 @@ pub fn ra01sh_footprint() -> Footprint {
 /// TI's SWRA416 868/915 MHz helical PCB antenna: front and back copper strips joined through
 /// plated holes, fed at pad 1, inside a keep-out.
 pub fn swra416_footprint() -> Footprint {
-    let mut f = le::new_footprint("Texas_SWRA416_868MHz_915MHz", "Texas_SWRA416_868MHz_915MHz", MountKind::Smd);
+    let mut f = le::new_footprint(
+        "Texas_SWRA416_868MHz_915MHz",
+        "Texas_SWRA416_868MHz_915MHz",
+        MountKind::Smd,
+    );
     f.description = "TI SWRA416 868 MHz / 915 MHz helical PCB antenna".into();
     // Copper only: nothing to pick and place.
     f.attrs.exclude_from_pos = true;
@@ -168,7 +374,9 @@ pub fn swra416_footprint() -> Footprint {
     {
         let pd = &mut f.pads[feed];
         pd.kind = PadKind::Smd;
-        pd.shape = PadShape::Trapezoid { delta: Size::mm(0.0, 0.3) };
+        pd.shape = PadShape::Trapezoid {
+            delta: Size::mm(0.0, 0.3),
+        };
         pd.angle = 180.0;
         pd.size = Size::mm(0.4, 0.8);
         pd.drill = None;
@@ -176,28 +384,87 @@ pub fn swra416_footprint() -> Footprint {
     }
     // The helix: strips on the front, diagonals on the back, plated holes at the turns.
     let w = mm(1.0);
-    le::add_fp_shape(&mut f, Geom::Line { a: p(-9.0, -5.2), b: p(-9.0, 5.8) }, Layer::TopCopper, w);
+    le::add_fp_shape(
+        &mut f,
+        Geom::Line {
+            a: p(-9.0, -5.2),
+            b: p(-9.0, 5.8),
+        },
+        Layer::TopCopper,
+        w,
+    );
     let mut holes = vec![(-9.0, 5.8)];
     for x in [-7.0, -5.0, -3.0, -1.0, 1.0, 3.0, 5.0, 7.0, 9.0] {
-        le::add_fp_shape(&mut f, Geom::Line { a: p(x, 5.8), b: p(x, 0.8) }, Layer::TopCopper, w);
+        le::add_fp_shape(
+            &mut f,
+            Geom::Line {
+                a: p(x, 5.8),
+                b: p(x, 0.8),
+            },
+            Layer::TopCopper,
+            w,
+        );
         holes.extend([(x, 5.8), (x, 0.8)]);
     }
     for x in [9.0, 7.0, 5.0, 3.0, 1.0, -1.0, -3.0, -5.0, -7.0] {
-        le::add_fp_shape(&mut f, Geom::Line { a: p(x - 1.0, 1.8), b: p(x, 0.8) }, Layer::BottomCopper, w);
-        le::add_fp_shape(&mut f, Geom::Line { a: p(x - 1.0, 4.8), b: p(x - 1.0, 1.8) }, Layer::BottomCopper, w);
-        le::add_fp_shape(&mut f, Geom::Line { a: p(x - 2.0, 5.8), b: p(x - 1.0, 4.8) }, Layer::BottomCopper, w);
+        le::add_fp_shape(
+            &mut f,
+            Geom::Line {
+                a: p(x - 1.0, 1.8),
+                b: p(x, 0.8),
+            },
+            Layer::BottomCopper,
+            w,
+        );
+        le::add_fp_shape(
+            &mut f,
+            Geom::Line {
+                a: p(x - 1.0, 4.8),
+                b: p(x - 1.0, 1.8),
+            },
+            Layer::BottomCopper,
+            w,
+        );
+        le::add_fp_shape(
+            &mut f,
+            Geom::Line {
+                a: p(x - 2.0, 5.8),
+                b: p(x - 1.0, 4.8),
+            },
+            Layer::BottomCopper,
+            w,
+        );
     }
     for (x, y) in holes {
-        let mut h = crate::footprint::new_pad("", PadShape::Circle, p(x, y), Size::mm(1.0, 1.0), Some(mm(0.4)));
+        let mut h = crate::footprint::new_pad(
+            "",
+            PadShape::Circle,
+            p(x, y),
+            Size::mm(1.0, 1.0),
+            Some(mm(0.4)),
+        );
         h.kind = PadKind::ThroughHole;
         // Copper only: tented, under the solder mask.
         h.layers = LayerSet::ALL_COPPER;
         f.pads.push(h);
     }
     for layer in [Layer::TopCourtyard, Layer::BottomCourtyard] {
-        le::add_fp_shape(&mut f, Geom::Rect { a: p(-9.9, -5.9), b: p(9.9, 6.7) }, layer, mm(0.05));
+        le::add_fp_shape(
+            &mut f,
+            Geom::Rect {
+                a: p(-9.9, -5.9),
+                b: p(9.9, 6.7),
+            },
+            layer,
+            mm(0.05),
+        );
     }
-    for (t, y) in [("KEEP-OUT ZONE", 2.8), ("No metal, traces or ", -0.2), ("any components on", -2.2), (" any PCB layer.", -4.2)] {
+    for (t, y) in [
+        ("KEEP-OUT ZONE", 2.8),
+        ("No metal, traces or ", -0.2),
+        ("any components on", -2.2),
+        (" any PCB layer.", -4.2),
+    ] {
         f.texts.push(fp_text(t, p(1.0, y), Layer::Comments));
     }
     // Nothing poured, nothing placed over it.
@@ -209,7 +476,11 @@ pub fn swra416_footprint() -> Footprint {
         priority: 0,
         outline: vec![vec![p(-9.7, -5.7), p(9.7, -5.7), p(9.7, 6.5), p(-9.7, 6.5)]],
         fill: ZoneFill::default(),
-        keepout: Some(Keepout { copper_pour: true, footprints: true, ..Default::default() }),
+        keepout: Some(Keepout {
+            copper_pour: true,
+            footprints: true,
+            ..Default::default()
+        }),
         locked: false,
         filled: vec![],
     });
@@ -232,7 +503,8 @@ pub fn libraries_with(module: Option<(Symbol, Footprint)>) -> LibraryTable {
     if substituted {
         // The project's module footprint (EasyEDA's, as easyeda2kicad wrote it) has no
         // courtyard; this board keeps it so.
-        fp.shapes.retain(|s| !matches!(s.layer, Layer::TopCourtyard | Layer::BottomCourtyard));
+        fp.shapes
+            .retain(|s| !matches!(s.layer, Layer::TopCourtyard | Layer::BottomCourtyard));
     }
     // A module is a U here, whatever its source called it (LCSC's says L).
     le::set_symbol_field(&mut sym, fields::REFERENCE, "U?");
@@ -250,20 +522,100 @@ pub fn libraries_with(module: Option<(Symbol, Footprint)>) -> LibraryTable {
 
 /// A symbol to place: library id, x, y (mm), quarter turns, footprint, reference and value
 /// positions.
-type Placed = (&'static str, f64, f64, u32, &'static str, (f64, f64), (f64, f64));
+type Placed = (
+    &'static str,
+    f64,
+    f64,
+    u32,
+    &'static str,
+    (f64, f64),
+    (f64, f64),
+);
 
 /// Where each symbol goes: library id, position (mm), turns of 90° counter-clockwise,
 /// footprint, and where its reference and value sit.
 const PLACED: [Placed; 9] = [
-    ("power:GNDREF", 50.8, 93.98, 0, "", (50.8, 87.63), (50.8, 88.9)),
-    ("Device:C", 90.17, 157.48, 3, "Capacitor_SMD:C_0805_2012Metric", (90.17, 165.1), (90.17, 162.56)),
-    ("power_monitor:esp32-pins-header-left", 63.5, 120.65, 0, "Connector_PinHeader_2.54mm:PinHeader_2x10_P2.54mm_Vertical", (70.485, 137.16), (70.485, 134.62)),
-    ("power_monitor:esp32-pins-header-right", 156.21, 120.65, 0, "Connector_PinHeader_2.54mm:PinHeader_2x10_P2.54mm_Vertical", (163.195, 137.16), (163.195, 134.62)),
-    ("Device:C", 82.55, 151.13, 0, "Capacitor_SMD:C_0805_2012Metric", (86.36, 152.4), (86.36, 149.86)),
-    ("Device:C", 69.85, 151.13, 0, "Capacitor_SMD:C_0805_2012Metric", (73.66, 152.4), (73.66, 149.86)),
-    ("Device:Antenna", 67.31, 167.64, 0, "power_monitor:Texas_SWRA416_868MHz_915MHz", (69.85, 168.28), (69.85, 165.74)),
-    ("Device:L", 76.2, 157.48, 1, "Inductor_SMD:L_0805_2012Metric", (76.2, 162.56), (76.2, 160.02)),
-    ("power_monitor:RA-01SH", 119.38, 120.65, 0, "power_monitor:WIRELM-SMD_RA-01SH", (119.38, 137.16), (119.38, 134.62)),
+    (
+        "power:GNDREF",
+        50.8,
+        93.98,
+        0,
+        "",
+        (50.8, 87.63),
+        (50.8, 88.9),
+    ),
+    (
+        "Device:C",
+        90.17,
+        157.48,
+        3,
+        "Capacitor_SMD:C_0805_2012Metric",
+        (90.17, 165.1),
+        (90.17, 162.56),
+    ),
+    (
+        "power_monitor:esp32-pins-header-left",
+        63.5,
+        120.65,
+        0,
+        "Connector_PinHeader_2.54mm:PinHeader_2x10_P2.54mm_Vertical",
+        (70.485, 137.16),
+        (70.485, 134.62),
+    ),
+    (
+        "power_monitor:esp32-pins-header-right",
+        156.21,
+        120.65,
+        0,
+        "Connector_PinHeader_2.54mm:PinHeader_2x10_P2.54mm_Vertical",
+        (163.195, 137.16),
+        (163.195, 134.62),
+    ),
+    (
+        "Device:C",
+        82.55,
+        151.13,
+        0,
+        "Capacitor_SMD:C_0805_2012Metric",
+        (86.36, 152.4),
+        (86.36, 149.86),
+    ),
+    (
+        "Device:C",
+        69.85,
+        151.13,
+        0,
+        "Capacitor_SMD:C_0805_2012Metric",
+        (73.66, 152.4),
+        (73.66, 149.86),
+    ),
+    (
+        "Device:Antenna",
+        67.31,
+        167.64,
+        0,
+        "power_monitor:Texas_SWRA416_868MHz_915MHz",
+        (69.85, 168.28),
+        (69.85, 165.74),
+    ),
+    (
+        "Device:L",
+        76.2,
+        157.48,
+        1,
+        "Inductor_SMD:L_0805_2012Metric",
+        (76.2, 162.56),
+        (76.2, 160.02),
+    ),
+    (
+        "power_monitor:RA-01SH",
+        119.38,
+        120.65,
+        0,
+        "power_monitor:WIRELM-SMD_RA-01SH",
+        (119.38, 137.16),
+        (119.38, 134.62),
+    ),
 ];
 
 /// Every wire, end to end (mm), and its colour (0xRRGGBB).
@@ -336,7 +688,15 @@ const WIRES: [(f64, f64, f64, f64, u32); 65] = [
 ];
 
 /// The net labels.
-const LABELS: [(&str, f64, f64); 7] = [("3v3", 104.14, 124.46), ("NSS", 133.35, 127.0), ("MOSI", 133.35, 124.46), ("RESET", 101.6, 121.92), ("SCK", 133.35, 119.38), ("DIO1", 102.87, 116.84), ("MISO", 133.35, 121.92)];
+const LABELS: [(&str, f64, f64); 7] = [
+    ("3v3", 104.14, 124.46),
+    ("NSS", 133.35, 127.0),
+    ("MOSI", 133.35, 124.46),
+    ("RESET", 101.6, 121.92),
+    ("SCK", 133.35, 119.38),
+    ("DIO1", 102.87, 116.84),
+    ("MISO", 133.35, 121.92),
+];
 
 /// The schematic: symbols placed (annotated as they go: C1, C2, C3 …), turned, given their
 /// footprints; the wires, junctions where three meet, labels and a note.
@@ -353,7 +713,11 @@ pub fn schematic(lib: &LibraryTable) -> Design {
         if !footprint.is_empty() {
             se::set_field(s, placed, fields::FOOTPRINT, footprint);
         }
-        let ps = s.sheets[0].symbols.iter_mut().find(|x| x.id == placed).unwrap();
+        let ps = s.sheets[0]
+            .symbols
+            .iter_mut()
+            .find(|x| x.id == placed)
+            .unwrap();
         for (name, (fx, fy)) in [(fields::REFERENCE, r), (fields::VALUE, v)] {
             if let Some(f) = ps.field_mut(name) {
                 f.text.at = p(fx, fy);
@@ -363,14 +727,29 @@ pub fn schematic(lib: &LibraryTable) -> Design {
     }
     for (x0, y0, x1, y1, rgb) in WIRES {
         let ids = se::add_wire(s, 0, &[p(x0, y0), p(x1, y1)]);
-        let color = crate::graphics::Color { r: (rgb >> 16) as u8, g: (rgb >> 8) as u8, b: rgb as u8, a: 255 };
+        let color = crate::graphics::Color {
+            r: (rgb >> 16) as u8,
+            g: (rgb >> 8) as u8,
+            b: rgb as u8,
+            a: 255,
+        };
         se::set_wire_color(s, 0, &ids, Some(color));
     }
     se::fix_junctions(s, 0);
     // Junctions coloured by hand (the rest the theme's).
-    for (x, y, rgb) in [(82.55, 157.48, 0x00C2C2), (69.85, 157.48, 0x00C2C2), (69.85, 146.05, 0x000000), (146.05, 104.14, 0x000000)] {
+    for (x, y, rgb) in [
+        (82.55, 157.48, 0x00C2C2),
+        (69.85, 157.48, 0x00C2C2),
+        (69.85, 146.05, 0x000000),
+        (146.05, 104.14, 0x000000),
+    ] {
         if let Some(j) = s.sheets[0].junctions.iter_mut().find(|j| j.at == p(x, y)) {
-            j.color = Some(crate::graphics::Color { r: (rgb >> 16) as u8, g: (rgb >> 8) as u8, b: rgb as u8, a: 255 });
+            j.color = Some(crate::graphics::Color {
+                r: (rgb >> 16) as u8,
+                g: (rgb >> 8) as u8,
+                b: rgb as u8,
+                a: 255,
+            });
         }
     }
     for (text, x, y) in LABELS {
@@ -497,7 +876,15 @@ const TRACKS: [(Side, f64, f64, f64, f64, f64, &str); 91] = [
     (F, 94.187, -83.613, 94.87, -83.613, 0.2, "/NSS"),
     (F, 92.964, -85.772, 92.964, -84.836, 0.2, "/NSS"),
     (F, 91.446, -87.29, 92.964, -85.772, 0.2, "/NSS"),
-    (F, 107.95, -88.3455, 107.97325, -88.36875, 0.2, "Net-(C1-Pad2)"),
+    (
+        F,
+        107.95,
+        -88.3455,
+        107.97325,
+        -88.36875,
+        0.2,
+        "Net-(C1-Pad2)",
+    ),
     (F, 108.1235, -88.519, 107.95, -88.3455, 0.2, "Net-(C1-Pad2)"),
     (F, 109.667, -88.519, 108.1235, -88.519, 0.2, "Net-(C1-Pad2)"),
     (F, 105.852, -88.519, 107.7765, -88.519, 0.2, "Net-(C1-Pad2)"),
@@ -538,11 +925,32 @@ pub fn design_from(lib: LibraryTable) -> (Design, LibraryTable) {
     d.board.thickness = mm(1.6);
     d.board.shapes.clear();
     for (x0, y0, x1, y1) in OUTLINE {
-        d.board.shapes.push(BoardShape { id: Uuid::new_v4(), shape: Shape { geom: Geom::Line { a: p(x0, y0), b: p(x1, y1) }, stroke: Stroke::width(mm(0.05)), fill: Fill::None }, layer: Layer::Outline, locked: false, net: String::new() });
+        d.board.shapes.push(BoardShape {
+            id: Uuid::new_v4(),
+            shape: Shape {
+                geom: Geom::Line {
+                    a: p(x0, y0),
+                    b: p(x1, y1),
+                },
+                stroke: Stroke::width(mm(0.05)),
+                fill: Fill::None,
+            },
+            layer: Layer::Outline,
+            locked: false,
+            net: String::new(),
+        });
     }
     d.board.shapes.push(BoardShape {
         id: Uuid::new_v4(),
-        shape: Shape { geom: Geom::Arc { start: p(88.648737, -97.00672), mid: p(89.584975, -97.397022), end: p(89.966737, -98.336775) }, stroke: Stroke::width(mm(0.05)), fill: Fill::None },
+        shape: Shape {
+            geom: Geom::Arc {
+                start: p(88.648737, -97.00672),
+                mid: p(89.584975, -97.397022),
+                end: p(89.966737, -98.336775),
+            },
+            stroke: Stroke::width(mm(0.05)),
+            fill: Fill::None,
+        },
         layer: Layer::Outline,
         locked: false,
         net: String::new(),
@@ -564,7 +972,13 @@ pub fn design_from(lib: LibraryTable) -> (Design, LibraryTable) {
             f.text.layer = Layer::TopSilk;
         }
     }
-    let gnd = b.footprints.iter().flat_map(|f| f.footprint.pads.iter()).filter_map(|pd| pd.net.clone()).find(|n| n == "GNDREF").unwrap_or_default();
+    let gnd = b
+        .footprints
+        .iter()
+        .flat_map(|f| f.footprint.pads.iter())
+        .filter_map(|pd| pd.net.clone())
+        .find(|n| n == "GNDREF")
+        .unwrap_or_default();
     for (x, y) in VIAS {
         be::add_via(b, p(x, y), &gnd);
     }
@@ -583,7 +997,10 @@ pub fn design_from(lib: LibraryTable) -> (Design, LibraryTable) {
                 continue;
             }
             let (a, z, layer) = (b.tracks[i].a, b.tracks[i].b, b.tracks[i].layer);
-            let net = [a, z].into_iter().map(|q| be::net_at(b, q, layer)).find(|n| !n.is_empty());
+            let net = [a, z]
+                .into_iter()
+                .map(|q| be::net_at(b, q, layer))
+                .find(|n| !n.is_empty());
             if let Some(n) = net {
                 b.tracks[i].net = n;
                 changed = true;
@@ -595,16 +1012,33 @@ pub fn design_from(lib: LibraryTable) -> (Design, LibraryTable) {
     }
     b.shapes.push(BoardShape {
         id: Uuid::new_v4(),
-        shape: Shape { geom: Geom::Rect { a: p(98.044, -71.501), b: p(108.204, -85.852) }, stroke: Stroke::width(mm(0.2)), fill: Fill::Outline },
+        shape: Shape {
+            geom: Geom::Rect {
+                a: p(98.044, -71.501),
+                b: p(108.204, -85.852),
+            },
+            stroke: Stroke::width(mm(0.2)),
+            fill: Fill::Outline,
+        },
         layer: Layer::BottomCopper,
         locked: false,
         net: gnd,
     });
     // The silkscreen: the logo (artwork from an SVG), the board's name and version, the
     // module's name; left- and bottom-aligned, as KiCad's.
-    let logo = crate::graphic_import::svg_polygons(include_str!("../../../fixtures/eda/d4_logo.svg")).expect("the logo");
-    be::add_artwork(b, &crate::graphic_import::placed_at(&logo, p(93.995875, -91.667542)), Layer::TopSilk);
-    for (text, x, y, size, thickness) in [("LoRa 868MHz", 93.98, -96.139, 0.75, 0.15), ("RA-01SH", 99.314, -74.93, 1.0, 0.15), ("v1.0.0", 100.584, -94.615, 0.75, 0.09375)] {
+    let logo =
+        crate::graphic_import::svg_polygons(include_str!("../../../fixtures/eda/d4_logo.svg"))
+            .expect("the logo");
+    be::add_artwork(
+        b,
+        &crate::graphic_import::placed_at(&logo, p(93.995875, -91.667542)),
+        Layer::TopSilk,
+    );
+    for (text, x, y, size, thickness) in [
+        ("LoRa 868MHz", 93.98, -96.139, 0.75, 0.15),
+        ("RA-01SH", 99.314, -74.93, 1.0, 0.15),
+        ("v1.0.0", 100.584, -94.615, 0.75, 0.09375),
+    ] {
         let id = be::add_text(b, text, p(x, y), Layer::TopSilk);
         let t = b.texts.iter_mut().find(|t| t.id == id).unwrap();
         t.text.style.size = Size::mm(size, size);
@@ -614,8 +1048,15 @@ pub fn design_from(lib: LibraryTable) -> (Design, LibraryTable) {
     }
     // The headers and two of the capacitors are drawn without their 3D models (KiCad's
     // "hide" on them): only the module, L1 and C1 show.
-    for f in b.footprints.iter_mut().filter(|f| ["J1", "J2", "C2", "C3"].contains(&f.reference())) {
-        f.footprint.models.iter_mut().for_each(|m| m.visible = false);
+    for f in b
+        .footprints
+        .iter_mut()
+        .filter(|f| ["J1", "J2", "C2", "C3"].contains(&f.reference()))
+    {
+        f.footprint
+            .models
+            .iter_mut()
+            .for_each(|m| m.visible = false);
     }
     (d, lib)
 }
@@ -627,19 +1068,40 @@ mod tests {
     #[test]
     fn redrawn_board_is_complete() {
         let (d, lib) = design();
-        assert!(le::check_footprint(lib.footprint(&format!("{LIB}:WIRELM-SMD_RA-01SH")).unwrap()).is_empty());
+        assert!(
+            le::check_footprint(lib.footprint(&format!("{LIB}:WIRELM-SMD_RA-01SH")).unwrap())
+                .is_empty()
+        );
         assert_eq!(d.schematic.sheets[0].symbols.len(), 9);
         assert_eq!(d.schematic.sheets[0].junctions.len(), 9);
-        let refs: Vec<&str> = d.schematic.sheets[0].symbols.iter().map(|s| s.reference()).collect();
+        let refs: Vec<&str> = d.schematic.sheets[0]
+            .symbols
+            .iter()
+            .map(|s| s.reference())
+            .collect();
         for r in ["C1", "C2", "C3", "L1", "J1", "J2", "U1", "AE1"] {
             assert!(refs.contains(&r), "{r} in {refs:?}");
         }
         // No wire end in the air.
         let erc = crate::erc::check(&d.schematic);
-        assert!(erc.iter().all(|v| v.rule != crate::erc::Rule::DanglingWire), "{erc:?}");
+        assert!(
+            erc.iter().all(|v| v.rule != crate::erc::Rule::DanglingWire),
+            "{erc:?}"
+        );
         let b = &d.board;
-        assert_eq!((b.footprints.len(), b.tracks.len(), b.vias.len()), (8, 91, 3));
-        assert!(b.tracks.iter().all(|t| !t.net.is_empty()), "{:?}", b.tracks.iter().filter(|t| t.net.is_empty()).map(|t| (t.a.to_mm(), t.b.to_mm())).collect::<Vec<_>>());
+        assert_eq!(
+            (b.footprints.len(), b.tracks.len(), b.vias.len()),
+            (8, 91, 3)
+        );
+        assert!(
+            b.tracks.iter().all(|t| !t.net.is_empty()),
+            "{:?}",
+            b.tracks
+                .iter()
+                .filter(|t| t.net.is_empty())
+                .map(|t| (t.a.to_mm(), t.b.to_mm()))
+                .collect::<Vec<_>>()
+        );
         assert_eq!(crate::outline::loops(b).len(), 1);
         // Everything that should be is connected.
         let r = crate::drc::check(b);
@@ -655,9 +1117,17 @@ mod outputs {
         let bom = crate::bom::jlcpcb_csv(&d.schematic);
         assert!(bom.starts_with("Comment,Designator,Footprint,LCSC Part #\n"));
         // The three 0805 capacitors share a row; the module keeps its LCSC part number.
-        assert!(bom.contains("\"C\",\"C1,C2,C3\",\"C_0805_2012Metric\",\"\""), "{bom}");
+        assert!(
+            bom.contains("\"C\",\"C1,C2,C3\",\"C_0805_2012Metric\",\"\""),
+            "{bom}"
+        );
         let cpl = crate::fab::jlcpcb_cpl(&d.board);
-        assert!(cpl.contains("\"U1\",\"RA-01SH\",\"WIRELM-SMD_RA-01SH\",102.870000,-78.613000,180.000000,top"), "{cpl}");
+        assert!(
+            cpl.contains(
+                "\"U1\",\"RA-01SH\",\"WIRELM-SMD_RA-01SH\",102.870000,-78.613000,180.000000,top"
+            ),
+            "{cpl}"
+        );
         // Through-hole headers are left to the hand.
         assert!(!cpl.contains("\"J1\""));
     }

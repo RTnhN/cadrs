@@ -33,9 +33,21 @@ fn one(arg: &str) -> Result<String, String> {
         smb::read_brep(&bytes)?
     };
     let edges: Vec<String> = b.edge_mids.iter().map(p).collect();
-    let ends: Vec<String> = b.edge_ends.iter().map(|(a, c)| format!("[{}, {}]", p(a), p(c))).collect();
-    let faces: Vec<String> = b.face_centroids.iter().map(|c| c.as_ref().map_or("null".into(), p)).collect();
-    let planar = b.body.faces.iter().all(|f| matches!(f.surf, Surface::Plane { .. }));
+    let ends: Vec<String> = b
+        .edge_ends
+        .iter()
+        .map(|(a, c)| format!("[{}, {}]", p(a), p(c)))
+        .collect();
+    let faces: Vec<String> = b
+        .face_centroids
+        .iter()
+        .map(|c| c.as_ref().map_or("null".into(), p))
+        .collect();
+    let planar = b
+        .body
+        .faces
+        .iter()
+        .all(|f| matches!(f.surf, Surface::Plane { .. }));
     Ok(format!(
         "\"edges\": [{}], \"ends\": [{}], \"faces\": [{}], \"planar\": {planar}, \"solid\": {}",
         edges.join(", "),
@@ -49,7 +61,11 @@ fn main() {
     for arg in std::env::args().skip(1) {
         match one(&arg) {
             Ok(body) => println!("{{\"file\": {}, {body}}}", json_str(&arg)),
-            Err(e) => println!("{{\"file\": {}, \"error\": {}}}", json_str(&arg), json_str(&e)),
+            Err(e) => println!(
+                "{{\"file\": {}, \"error\": {}}}",
+                json_str(&arg),
+                json_str(&e)
+            ),
         }
     }
 }

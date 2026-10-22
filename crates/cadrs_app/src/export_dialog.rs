@@ -34,7 +34,10 @@ use cadrs_core::{FeatureId, PartId};
 use cadrs_drawing::dxf::DxfVersion;
 use cadrs_sketch::FaceName;
 use cadrs_ui::prelude::*;
-use cadrs_ui::{Button, CheckboxState, DialogClose, Notification, Select, SelectState, TextInputField, show_notification};
+use cadrs_ui::{
+    Button, CheckboxState, DialogClose, Notification, Select, SelectState, TextInputField,
+    show_notification,
+};
 
 use crate::parts::PartCache;
 use crate::{ActiveDocument, AppState};
@@ -43,8 +46,18 @@ pub struct ExportDialogPlugin;
 
 impl Plugin for ExportDialogPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (open_tab_export, sync_rows, validate_tolerances, on_folder_picked, finish_exports).run_if(in_state(AppState::Document)))
-            .add_observer(on_name_submit);
+        app.add_systems(
+            Update,
+            (
+                open_tab_export,
+                sync_rows,
+                validate_tolerances,
+                on_folder_picked,
+                finish_exports,
+            )
+                .run_if(in_state(AppState::Document)),
+        )
+        .add_observer(on_name_submit);
     }
 }
 
@@ -152,10 +165,20 @@ const WIDTH: f32 = 560.0;
 const FIELD_H: f32 = 26.0;
 
 /// Units for meshes: the label and file units per mm.
-const UNITS: [(&str, f64); 5] = [("Millimeter", 1.0), ("Centimeter", 0.1), ("Meter", 0.001), ("Inch", 1.0 / 25.4), ("Foot", 1.0 / 304.8)];
+const UNITS: [(&str, f64); 5] = [
+    ("Millimeter", 1.0),
+    ("Centimeter", 0.1),
+    ("Meter", 0.001),
+    ("Inch", 1.0 / 25.4),
+    ("Foot", 1.0 / 304.8),
+];
 
 /// Mesh resolutions: the label, chord tolerance (mm) and angle tolerance (degrees).
-const RESOLUTIONS: [(&str, f64, f64); 3] = [("Coarse (0.5 mm, 30°)", 0.5, 30.0), ("Medium (0.1 mm, 15°)", 0.1, 15.0), ("Fine (0.02 mm, 5°)", 0.02, 5.0)];
+const RESOLUTIONS: [(&str, f64, f64); 3] = [
+    ("Coarse (0.5 mm, 30°)", 0.5, 30.0),
+    ("Medium (0.1 mm, 15°)", 0.1, 15.0),
+    ("Fine (0.02 mm, 5°)", 0.02, 5.0),
+];
 
 fn label(p: &mut ChildSpawner, t: &Theme, text: &str) {
     p.spawn(t.text(text, t.font_base, FontWeight::BOLD, t.foreground));
@@ -179,8 +202,15 @@ fn row(name: &str) -> impl Bundle {
 #[derive(Resource, Debug, Clone, Copy)]
 pub struct PendingTabExport(pub cadrs_core::ElementId, pub u32);
 
-fn open_tab_export(pending: Option<ResMut<PendingTabExport>>, cache: Res<PartCache>, doc: Option<Res<ActiveDocument>>, mut commands: Commands) {
-    let (Some(mut p), Some(doc)) = (pending, doc) else { return };
+fn open_tab_export(
+    pending: Option<ResMut<PendingTabExport>>,
+    cache: Res<PartCache>,
+    doc: Option<Res<ActiveDocument>>,
+    mut commands: Commands,
+) {
+    let (Some(mut p), Some(doc)) = (pending, doc) else {
+        return;
+    };
     // A few frames for the tab's parts to come in.
     if p.1 > 0 {
         p.1 -= 1;
@@ -192,7 +222,9 @@ fn open_tab_export(pending: Option<ResMut<PendingTabExport>>, cache: Res<PartCac
         return;
     };
     let asm = el.assembly_model().is_some();
-    let ready = doc.active == Some(id) && !cache.rebuilding && (asm || cache.settled().is_some_and(|(e, ..)| e == id));
+    let ready = doc.active == Some(id)
+        && !cache.rebuilding
+        && (asm || cache.settled().is_some_and(|(e, ..)| e == id));
     if !ready {
         return;
     }
@@ -201,52 +233,98 @@ fn open_tab_export(pending: Option<ResMut<PendingTabExport>>, cache: Res<PartCac
         // The whole tab is exported: nothing stays selected as if only it went (Final regression
         // judge: tips_export_assembly 05 kept Shaft <1> from the instance export).
         w.resource_mut::<crate::viewport::Selection>().0.clear();
-        open(w, if asm { ExportSource::Assembly(Vec::new()) } else { ExportSource::Parts(Vec::new()) })
+        open(
+            w,
+            if asm {
+                ExportSource::Assembly(Vec::new())
+            } else {
+                ExportSource::Parts(Vec::new())
+            },
+        )
     });
 }
 
 /// Opens the dialog for the Parts list's Export… (`parts` of the active Part Studio) or an
 /// instance's Export… (`parts` of the active assembly's view).
 pub fn open_export_dialog(world: &mut World, parts: Vec<PartId>) {
-    let asm = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element()).is_some_and(|e| e.assembly_model().is_some());
-    let source = if asm { ExportSource::Assembly(parts) } else { ExportSource::Parts(parts) };
+    let asm = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.active_element())
+        .is_some_and(|e| e.assembly_model().is_some());
+    let source = if asm {
+        ExportSource::Assembly(parts)
+    } else {
+        ExportSource::Parts(parts)
+    };
     open(world, source);
 }
 
 /// A part name without an instance's number: "Shaft <1>" → "Shaft".
 fn strip_instance_number(name: &str) -> String {
     match name.rsplit_once(" <") {
-        Some((stem, n)) if n.ends_with('>') && n[..n.len() - 1].chars().all(|c| c.is_ascii_digit()) => stem.to_string(),
+        Some((stem, n))
+            if n.ends_with('>') && n[..n.len() - 1].chars().all(|c| c.is_ascii_digit()) =>
+        {
+            stem.to_string()
+        }
         _ => name.to_string(),
     }
 }
 
 /// Opens the dialog for `source`.
 pub fn open(world: &mut World, source: ExportSource) {
-    let Some(tab) = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element().map(|e| e.name.clone())) else {
+    let Some(tab) = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.active_element().map(|e| e.name.clone()))
+    else {
         return;
     };
     let cache = world.resource::<PartCache>();
     // P3F.5 (P3F.3–P3F.4 judge): a part's or an instance's Export… is named after it ("Shaft",
     // an instance's " <n>" dropped) and says what it exports.
-    let names = |p: &[PartId]| p.iter().map(|id| cache.part_name(*id).unwrap_or("Part").to_string()).collect::<Vec<_>>();
-    let plural = |n: usize| if n == 1 { "1 part".to_string() } else { format!("{n} parts") };
+    let names = |p: &[PartId]| {
+        p.iter()
+            .map(|id| cache.part_name(*id).unwrap_or("Part").to_string())
+            .collect::<Vec<_>>()
+    };
+    let plural = |n: usize| {
+        if n == 1 {
+            "1 part".to_string()
+        } else {
+            format!("{n} parts")
+        }
+    };
     let (count, base, what) = match &source {
-        ExportSource::Parts(p) | ExportSource::Assembly(p) if p.is_empty() => (cache.parts.len(), tab.clone(), format!("{tab} ({})", plural(cache.parts.len()))),
+        ExportSource::Parts(p) | ExportSource::Assembly(p) if p.is_empty() => (
+            cache.parts.len(),
+            tab.clone(),
+            format!("{tab} ({})", plural(cache.parts.len())),
+        ),
         ExportSource::Parts(p) | ExportSource::Assembly(p) => {
             let n = names(p);
             let base = match n.as_slice() {
                 [one] => strip_instance_number(one),
                 _ => tab.clone(),
             };
-            let listed = if n.len() > 3 { format!("{}, …", n[..3].join(", ")) } else { n.join(", ") };
+            let listed = if n.len() > 3 {
+                format!("{}, …", n[..3].join(", "))
+            } else {
+                n.join(", ")
+            };
             (p.len(), base, format!("{listed} ({})", plural(p.len())))
         }
         ExportSource::Sketch(s) => {
-            let name = world.get_resource::<ActiveDocument>().and_then(|d| Some(d.active_element()?.feature(*s)?.name.clone())).unwrap_or_default();
+            let name = world
+                .get_resource::<ActiveDocument>()
+                .and_then(|d| Some(d.active_element()?.feature(*s)?.name.clone()))
+                .unwrap_or_default();
             (1, format!("{tab} - {name}"), name)
         }
-        ExportSource::Face(p, _) => (1, format!("{tab} - {} face", cache.part_name(*p).unwrap_or("Part")), format!("a face of {}", cache.part_name(*p).unwrap_or("Part"))),
+        ExportSource::Face(p, _) => (
+            1,
+            format!("{tab} - {} face", cache.part_name(*p).unwrap_or("Part")),
+            format!("a face of {}", cache.part_name(*p).unwrap_or("Part")),
+        ),
     };
     if count == 0 {
         return;
@@ -256,11 +334,17 @@ pub fn open(world: &mut World, source: ExportSource) {
     // A whole assembly (the tab's Export…) keeps its structure by default; single instances don't.
     let whole = matches!(&source, ExportSource::Assembly(v) if v.is_empty());
     let format = if flat { Fmt::Dxf } else { Fmt::Step };
-    let dir = crate::export_dir(world).map(|d| d.display().to_string()).unwrap_or_default();
+    let dir = crate::export_dir(world)
+        .map(|d| d.display().to_string())
+        .unwrap_or_default();
     let converter = cadrs_drawing::dwg::find_converter().filter(|c| c.can_write());
     let theme = world.resource::<Theme>().clone();
     let (tb, tf) = (theme.clone(), theme.clone());
-    let formats: Vec<Fmt> = if flat { Fmt::FLAT.to_vec() } else { Fmt::MODELS.to_vec() };
+    let formats: Vec<Fmt> = if flat {
+        Fmt::FLAT.to_vec()
+    } else {
+        Fmt::MODELS.to_vec()
+    };
     let mut commands = world.commands();
     commands.spawn((
         Dialog::new("export-dialog")
@@ -447,10 +531,21 @@ pub fn open(world: &mut World, source: ExportSource) {
 fn browse_folder(world: &mut World) {
     let typed = field(world, "export-folder-field");
     let dir = PathBuf::from(typed.trim());
-    let dir = if dir.is_dir() { dir } else { std::env::current_dir().unwrap_or_default() };
+    let dir = if dir.is_dir() {
+        dir
+    } else {
+        std::env::current_dir().unwrap_or_default()
+    };
     let theme = world.resource::<Theme>().clone();
     let mut commands = world.commands();
-    cadrs_ui::file_picker::open_folder_picker(&mut commands, &theme, "folder-picker", "Choose a folder", "export3d-folder", dir);
+    cadrs_ui::file_picker::open_folder_picker(
+        &mut commands,
+        &theme,
+        "folder-picker",
+        "Choose a folder",
+        "export3d-folder",
+        dir,
+    );
     world.flush();
 }
 
@@ -488,11 +583,15 @@ fn sync_rows(
             }
         }
     }
-    let custom = q_sel.iter().any(|(n, s)| n.as_str() == "export-resolution" && s.selected == RESOLUTIONS.len());
+    let custom = q_sel
+        .iter()
+        .any(|(n, s)| n.as_str() == "export-resolution" && s.selected == RESOLUTIONS.len());
     for (n, mut node) in &mut q_rows {
         let show = match n.as_str() {
             "export-brep-warning" => d.format == Fmt::Brep,
-            "export-assembly" => matches!(d.source, ExportSource::Assembly(_)) && d.format.is_brep(),
+            "export-assembly" => {
+                matches!(d.source, ExportSource::Assembly(_)) && d.format.is_brep()
+            }
             "export-version-row" => d.format.is_brep(),
             "export-stl-row" => d.format == Fmt::Stl,
             "export-mesh-row" => d.format.is_mesh(),
@@ -519,7 +618,9 @@ fn sync_rows(
 
 /// Enter in the file name exports.
 fn on_name_submit(ev: On<TextSubmit>, q: Query<&Name>, mut commands: Commands) {
-    if q.get(ev.entity).is_ok_and(|n| n.as_str() == "export-name-field") {
+    if q.get(ev.entity)
+        .is_ok_and(|n| n.as_str() == "export-name-field")
+    {
         commands.queue(start_export);
     }
 }
@@ -552,19 +653,40 @@ fn validate_tolerances(
     q_ok: Query<(Entity, &Name, Has<bevy::ui::InteractionDisabled>)>,
     mut commands: Commands,
 ) {
-    let shown = q_rows.iter().any(|(n, node)| n.as_str() == "export-tolerance-row" && node.display != Display::None);
-    let text = |name: &str| q_fields.iter().find(|(n, _)| n.as_str() == name).map(|(_, t)| t.value().to_string());
-    let (Some(chord), Some(angle)) = (text("export-chord-field"), text("export-angle-field")) else { return };
-    let errs = [("export-chord-error", tolerance_error(&chord, false)), ("export-angle-error", tolerance_error(&angle, true))];
+    let shown = q_rows
+        .iter()
+        .any(|(n, node)| n.as_str() == "export-tolerance-row" && node.display != Display::None);
+    let text = |name: &str| {
+        q_fields
+            .iter()
+            .find(|(n, _)| n.as_str() == name)
+            .map(|(_, t)| t.value().to_string())
+    };
+    let (Some(chord), Some(angle)) = (text("export-chord-field"), text("export-angle-field"))
+    else {
+        return;
+    };
+    let errs = [
+        ("export-chord-error", tolerance_error(&chord, false)),
+        ("export-angle-error", tolerance_error(&angle, true)),
+    ];
     let mut bad = false;
     for (n, mut t, mut node) in &mut q_err {
-        let e = errs.iter().find(|(k, _)| *k == n.as_str()).and_then(|(_, e)| *e).filter(|_| shown);
+        let e = errs
+            .iter()
+            .find(|(k, _)| *k == n.as_str())
+            .and_then(|(_, e)| *e)
+            .filter(|_| shown);
         bad |= e.is_some();
         let want = e.unwrap_or("");
         if t.0 != want {
             t.0 = want.to_string();
         }
-        let d = if e.is_some() { Display::Flex } else { Display::None };
+        let d = if e.is_some() {
+            Display::Flex
+        } else {
+            Display::None
+        };
         if node.display != d {
             node.display = d;
         }
@@ -576,14 +698,19 @@ fn validate_tolerances(
         if bad {
             commands.entity(e).try_insert(bevy::ui::InteractionDisabled);
         } else {
-            commands.entity(e).try_remove::<bevy::ui::InteractionDisabled>();
+            commands
+                .entity(e)
+                .try_remove::<bevy::ui::InteractionDisabled>();
         }
     }
 }
 
 fn field(w: &mut World, name: &str) -> String {
     let mut q = w.query_filtered::<(&Name, &EditableText), With<TextInputField>>();
-    q.iter(w).find(|(n, _)| n.as_str() == name).map(|(_, t)| t.value().to_string()).unwrap_or_default()
+    q.iter(w)
+        .find(|(n, _)| n.as_str() == name)
+        .map(|(_, t)| t.value().to_string())
+        .unwrap_or_default()
 }
 
 fn set_field(w: &mut World, name: &str, value: &str) {
@@ -596,7 +723,10 @@ fn set_field(w: &mut World, name: &str, value: &str) {
 
 fn select(w: &mut World, name: &str) -> usize {
     let mut q = w.query::<(&Name, &SelectState)>();
-    q.iter(w).find(|(n, _)| n.as_str() == name).map(|(_, s)| s.selected).unwrap_or(0)
+    q.iter(w)
+        .find(|(n, _)| n.as_str() == name)
+        .map(|(_, s)| s.selected)
+        .unwrap_or(0)
 }
 
 fn checked(w: &mut World, name: &str) -> bool {
@@ -613,19 +743,32 @@ fn toast(world: &mut World, note: Notification) {
 
 /// The export items of a Part Studio's or an assembly's parts.
 fn items(world: &mut World, source: &ExportSource) -> Result<Vec<ExportItem>, String> {
-    let doc = world.get_resource::<ActiveDocument>().ok_or("no document")?;
+    let doc = world
+        .get_resource::<ActiveDocument>()
+        .ok_or("no document")?;
     let el = doc.active_element().ok_or("no tab")?.clone();
     let docs = doc.doc.clone();
     match source {
         ExportSource::Parts(parts) => {
             let cache = world.resource::<PartCache>();
-            let parts: Vec<PartId> = if parts.is_empty() { cache.parts.iter().map(|p| p.id).collect() } else { parts.clone() };
+            let parts: Vec<PartId> = if parts.is_empty() {
+                cache.parts.iter().map(|p| p.id).collect()
+            } else {
+                parts.clone()
+            };
             let features = Arc::new(el.active_features());
             Ok(parts
                 .iter()
                 .filter_map(|p| {
                     let name = cache.part_name(*p)?.to_string();
-                    Some(ExportItem { features: features.clone(), part: *p, name: name.clone(), pose: None, source: (el.id, *p), source_name: name })
+                    Some(ExportItem {
+                        features: features.clone(),
+                        part: *p,
+                        name: name.clone(),
+                        pose: None,
+                        source: (el.id, *p),
+                        source_name: name,
+                    })
                 })
                 .collect())
         }
@@ -634,7 +777,9 @@ fn items(world: &mut World, source: &ExportSource) -> Result<Vec<ExportItem>, St
             let occ = cadrs_core::assembly::structure::occurrences(&docs, asm);
             let names: Vec<(PartId, String)> = {
                 let cache = world.resource::<PartCache>();
-                occ.iter().filter_map(|o| Some((o.view_part, cache.part_name(o.view_part)?.to_string()))).collect()
+                occ.iter()
+                    .filter_map(|o| Some((o.view_part, cache.part_name(o.view_part)?.to_string())))
+                    .collect()
             };
             let mut parts_of = world.resource_mut::<crate::assembly::AssemblyParts>();
             let mut out = Vec::new();
@@ -642,11 +787,21 @@ fn items(world: &mut World, source: &ExportSource) -> Result<Vec<ExportItem>, St
                 if !view.is_empty() && !view.contains(&o.view_part) {
                     continue;
                 }
-                let Some(studio) = docs.element(o.element) else { continue };
-                let src = cadrs_core::assembly::InstanceSource::Part { element: o.element, part: o.part };
+                let Some(studio) = docs.element(o.element) else {
+                    continue;
+                };
+                let src = cadrs_core::assembly::InstanceSource::Part {
+                    element: o.element,
+                    part: o.part,
+                };
                 let build = parts_of.build(&docs, o.element);
-                let source_name = cadrs_core::assembly::source_part_name(&docs, &src, build.as_deref());
-                let name = names.iter().find(|(p, _)| *p == o.view_part).map(|(_, n)| n.clone()).unwrap_or_else(|| source_name.clone());
+                let source_name =
+                    cadrs_core::assembly::source_part_name(&docs, &src, build.as_deref());
+                let name = names
+                    .iter()
+                    .find(|(p, _)| *p == o.view_part)
+                    .map(|(_, n)| n.clone())
+                    .unwrap_or_else(|| source_name.clone());
                 out.push(ExportItem {
                     features: Arc::new(studio.active_part_features()),
                     part: o.part,
@@ -679,17 +834,24 @@ fn start_export(world: &mut World) {
         Some((_, c, a)) => (*c, *a),
         None if !spec.format.is_mesh() => (0.1, 15.0),
         None => {
-            let (c, a) = (field(world, "export-chord-field"), field(world, "export-angle-field"));
+            let (c, a) = (
+                field(world, "export-chord-field"),
+                field(world, "export-angle-field"),
+            );
             // Shown under the fields and Export disabled (`validate_tolerances`); never a
             // silent default.
             if tolerance_error(&c, false).is_some() || tolerance_error(&a, true).is_some() {
                 return;
             }
-            (c.trim().parse::<f64>().unwrap_or(0.1), a.trim().parse::<f64>().unwrap_or(15.0))
+            (
+                c.trim().parse::<f64>().unwrap_or(0.1),
+                a.trim().parse::<f64>().unwrap_or(15.0),
+            )
         }
     };
     let binary = select(world, "export-stl-format") == 0;
-    let dxf_version = DxfVersion::ALL[select(world, "export-dxf-version").min(DxfVersion::ALL.len() - 1)];
+    let dxf_version =
+        DxfVersion::ALL[select(world, "export-dxf-version").min(DxfVersion::ALL.len() - 1)];
     world.trigger(DialogClose { entity: dialog });
     if folder.is_empty() {
         toast(world, Notification::warning("Nowhere to save the export"));
@@ -699,15 +861,29 @@ fn start_export(world: &mut World) {
     match (&spec.source, spec.format) {
         (ExportSource::Sketch(_) | ExportSource::Face(..), f) => {
             let page = match &spec.source {
-                ExportSource::Sketch(s) => world
-                    .get_resource::<ActiveDocument>()
-                    .and_then(|d| Some(cadrs_core::dxf_export::sketch_page(&d.active_element()?.feature(*s)?.sketch()?.geometry, &base))),
-                ExportSource::Face(p, face) => world.resource::<PartCache>().part(*p).and_then(|part| cadrs_core::dxf_export::face_page(&part.solid, face, &base)),
+                ExportSource::Sketch(s) => world.get_resource::<ActiveDocument>().and_then(|d| {
+                    Some(cadrs_core::dxf_export::sketch_page(
+                        &d.active_element()?.feature(*s)?.sketch()?.geometry,
+                        &base,
+                    ))
+                }),
+                ExportSource::Face(p, face) => world
+                    .resource::<PartCache>()
+                    .part(*p)
+                    .and_then(|part| cadrs_core::dxf_export::face_page(&part.solid, face, &base)),
                 _ => None,
             };
             let result = page
                 .ok_or_else(|| "the sketch or face is gone".to_string())
-                .and_then(|page| cadrs_core::dxf_export::write_file(&page, dxf_version, f == Fmt::Dwg, &dir, &cadrs_core::export::sanitize(&base)));
+                .and_then(|page| {
+                    cadrs_core::dxf_export::write_file(
+                        &page,
+                        dxf_version,
+                        f == Fmt::Dwg,
+                        &dir,
+                        &cadrs_core::export::sanitize(&base),
+                    )
+                });
             let note = match result {
                 Ok(path) => {
                     info!("exported {}", path.display());
@@ -720,8 +896,18 @@ fn start_export(world: &mut World) {
         (source, f) => {
             let items = match items(world, source) {
                 Ok(i) if !i.is_empty() => i,
-                Ok(_) => return toast(world, Notification::warning("Export failed: nothing to export")),
-                Err(why) => return toast(world, Notification::warning(format!("Export failed: {why}"))),
+                Ok(_) => {
+                    return toast(
+                        world,
+                        Notification::warning("Export failed: nothing to export"),
+                    );
+                }
+                Err(why) => {
+                    return toast(
+                        world,
+                        Notification::warning(format!("Export failed: {why}")),
+                    );
+                }
             };
             let format = match f {
                 Fmt::Step => ModelFormat::Step,
@@ -730,7 +916,11 @@ fn start_export(world: &mut World) {
                 Fmt::Stl => ModelFormat::Stl { binary },
                 _ => ModelFormat::Obj,
             };
-            let name = if base.is_empty() { "Export".to_string() } else { base.clone() };
+            let name = if base.is_empty() {
+                "Export".to_string()
+            } else {
+                base.clone()
+            };
             let mut req = ExportRequest::new(format, name, items);
             req.y_up = y_up;
             req.individual = individual;
@@ -739,7 +929,11 @@ fn start_export(world: &mut World) {
             req.angle = angle.to_radians();
             req.scale = units;
             let pending = cadrs_core::rebuild::exchange::export_files(req);
-            world.spawn((Name::new("running-export"), RunningExport { pending, dir, base }, DespawnOnExit(AppState::Document)));
+            world.spawn((
+                Name::new("running-export"),
+                RunningExport { pending, dir, base },
+                DespawnOnExit(AppState::Document),
+            ));
         }
     }
 }

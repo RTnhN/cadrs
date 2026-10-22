@@ -3,8 +3,8 @@
 //! `tests/data/docs/`, or the geometry rebuilt in code. Every result must be a valid closed
 //! solid (`CheckLevel::Full`) of the volume the case gives.
 
-use cadrs_kernel::native::topo::{Body, CheckLevel};
 use cadrs_kernel::native::NativeKernel;
+use cadrs_kernel::native::topo::{Body, CheckLevel};
 use cadrs_kernel::*;
 use nalgebra::{Point2, Point3, Vector3};
 use std::f64::consts::{PI, TAU};
@@ -20,13 +20,19 @@ fn run(target: &str, tools: &[&str], op: BoolOp, want: f64) -> BodyId {
     let mut k = NativeKernel::new();
     let a = k.insert(body(target));
     let ts: Vec<BodyId> = tools.iter().map(|t| k.insert(body(t))).collect();
-    let r = k.boolean(op, a, &ts).unwrap_or_else(|e| panic!("{target} {op:?} {tools:?}: {e}")).bodies[0];
+    let r = k
+        .boolean(op, a, &ts)
+        .unwrap_or_else(|e| panic!("{target} {op:?} {tools:?}: {e}"))
+        .bodies[0];
     let b = k.get(r).unwrap();
     let issues = b.check_with(CheckLevel::Full);
     assert!(issues.is_empty(), "{target}: {issues:?}");
     assert!(!b.solids.is_empty(), "{target}: no solid");
     let v = k.mass_properties(r).unwrap().volume;
-    assert!((v - want).abs() <= 1e-6 * want, "{target}: volume {v}, expected {want}");
+    assert!(
+        (v - want).abs() <= 1e-6 * want,
+        "{target}: volume {v}, expected {want}"
+    );
     r
 }
 
@@ -56,7 +62,10 @@ fn merged_cylinder_seam_then_slot() {
             for c in l {
                 *uses.entry(c.edge).or_insert(0) += 1;
             }
-            assert!(uses.values().all(|&n| n <= 2), "an edge used three times in a loop");
+            assert!(
+                uses.values().all(|&n| n <= 2),
+                "an edge used three times in a loop"
+            );
         }
     }
     assert!((k.mass_properties(u).unwrap().volume - 82914.2917352884).abs() < 1e-6 * 82914.3);
@@ -71,7 +80,12 @@ fn merged_cylinder_seam_then_slot() {
 /// away), and a plane through its axis meets it in rulings that open down the axis.
 #[test]
 fn slot_through_flat_cone() {
-    run("weller_cone", &["weller_slot"], BoolOp::Intersect, 3.4996247875427877);
+    run(
+        "weller_cone",
+        &["weller_slot"],
+        BoolOp::Intersect,
+        3.4996247875427877,
+    );
 }
 
 /// babygatefix, Boolean 1: clip arms touching along an edge (several solids in one body)
@@ -79,13 +93,25 @@ fn slot_through_flat_cone() {
 /// largest input's and their sum.)
 #[test]
 fn union_of_solids_touching_along_an_edge() {
-    let names = ["babygate_000", "babygate_001", "babygate_002", "babygate_003", "babygate_004"];
+    let names = [
+        "babygate_000",
+        "babygate_001",
+        "babygate_002",
+        "babygate_003",
+        "babygate_004",
+    ];
     let mut k = NativeKernel::new();
-    let vols: Vec<f64> = names.iter().map(|n| {
-        let b = k.insert(body(n));
-        k.mass_properties(b).unwrap().volume
-    }).collect();
-    let (max, sum) = (vols.iter().copied().fold(0.0, f64::max), vols.iter().sum::<f64>());
+    let vols: Vec<f64> = names
+        .iter()
+        .map(|n| {
+            let b = k.insert(body(n));
+            k.mass_properties(b).unwrap().volume
+        })
+        .collect();
+    let (max, sum) = (
+        vols.iter().copied().fold(0.0, f64::max),
+        vols.iter().sum::<f64>(),
+    );
     let v = 13851.357294478015;
     assert!(v > max && v < sum, "{vols:?}");
     run(names[0], &names[1..], BoolOp::Union, v);
@@ -104,17 +130,50 @@ fn merged_faces_share_a_split_edge() {
 fn tool_of_solids_touching_face_to_face() {
     let mut k = NativeKernel::new();
     let rect = |x0: f64, y0: f64, x1: f64, y1: f64| {
-        let c = [Point2::new(x0, y0), Point2::new(x1, y0), Point2::new(x1, y1), Point2::new(x0, y1)];
-        let curves = (0..4).map(|i| Curve2::Line { a: c[i], b: c[(i + 1) % 4], source: None }).collect();
-        Profile::new(Plane::top(), vec![Region { outer: Loop { curves }, holes: vec![], source: None }])
+        let c = [
+            Point2::new(x0, y0),
+            Point2::new(x1, y0),
+            Point2::new(x1, y1),
+            Point2::new(x0, y1),
+        ];
+        let curves = (0..4)
+            .map(|i| Curve2::Line {
+                a: c[i],
+                b: c[(i + 1) % 4],
+                source: None,
+            })
+            .collect();
+        Profile::new(
+            Plane::top(),
+            vec![Region {
+                outer: Loop { curves },
+                holes: vec![],
+                source: None,
+            }],
+        )
     };
-    let part = k.extrude(&rect(0.0, 0.0, 40.0, 10.0), Extent::Blind(2.0)).unwrap().bodies[0];
-    let left = k.extrude(&rect(5.0, -5.0, 20.0, 15.0), Extent::Blind(4.0)).unwrap().bodies[0];
-    let right = k.extrude(&rect(20.0, -5.0, 35.0, 15.0), Extent::Blind(4.0)).unwrap().bodies[0];
+    let part = k
+        .extrude(&rect(0.0, 0.0, 40.0, 10.0), Extent::Blind(2.0))
+        .unwrap()
+        .bodies[0];
+    let left = k
+        .extrude(&rect(5.0, -5.0, 20.0, 15.0), Extent::Blind(4.0))
+        .unwrap()
+        .bodies[0];
+    let right = k
+        .extrude(&rect(20.0, -5.0, 35.0, 15.0), Extent::Blind(4.0))
+        .unwrap()
+        .bodies[0];
     let mut tool = (**k.get(left).unwrap()).clone();
     tool.append(k.get(right).unwrap());
     let tool = k.insert(tool);
-    for (op, want) in [(BoolOp::Intersect, 30.0 * 10.0 * 2.0), (BoolOp::Union, 40.0 * 10.0 * 2.0 + 2.0 * 15.0 * 20.0 * 4.0 - 30.0 * 10.0 * 2.0)] {
+    for (op, want) in [
+        (BoolOp::Intersect, 30.0 * 10.0 * 2.0),
+        (
+            BoolOp::Union,
+            40.0 * 10.0 * 2.0 + 2.0 * 15.0 * 20.0 * 4.0 - 30.0 * 10.0 * 2.0,
+        ),
+    ] {
         let r = k.boolean(op, part, &[tool]).unwrap().bodies[0];
         let issues = k.get(r).unwrap().check_with(CheckLevel::Full);
         assert!(issues.is_empty(), "{op:?}: {issues:?}");
@@ -136,14 +195,46 @@ fn revolve_arc_centred_behind_the_axis() {
     let top = (h / r).asin();
     let xa = |z: f64| cx + (r * r - z * z).sqrt();
     let curves = vec![
-        Curve2::Line { a: Point2::new(2.0, 0.0), b: Point2::new(xa(0.0), 0.0), source: None },
-        Curve2::Arc { center: Point2::new(cx, 0.0), radius: r, start_angle: 0.0, sweep: top, source: None },
-        Curve2::Line { a: Point2::new(xa(h), h), b: Point2::new(2.0, h), source: None },
-        Curve2::Line { a: Point2::new(2.0, h), b: Point2::new(2.0, 0.0), source: None },
+        Curve2::Line {
+            a: Point2::new(2.0, 0.0),
+            b: Point2::new(xa(0.0), 0.0),
+            source: None,
+        },
+        Curve2::Arc {
+            center: Point2::new(cx, 0.0),
+            radius: r,
+            start_angle: 0.0,
+            sweep: top,
+            source: None,
+        },
+        Curve2::Line {
+            a: Point2::new(xa(h), h),
+            b: Point2::new(2.0, h),
+            source: None,
+        },
+        Curve2::Line {
+            a: Point2::new(2.0, h),
+            b: Point2::new(2.0, 0.0),
+            source: None,
+        },
     ];
-    let xz = Plane { origin: Point3::origin(), x_dir: Vector3::x_axis(), normal: -Vector3::y_axis() };
-    let profile = Profile::new(xz, vec![Region { outer: Loop { curves }, holes: vec![], source: None }]);
-    let z = Axis { origin: Point3::origin(), dir: Vector3::z_axis() };
+    let xz = Plane {
+        origin: Point3::origin(),
+        x_dir: Vector3::x_axis(),
+        normal: -Vector3::y_axis(),
+    };
+    let profile = Profile::new(
+        xz,
+        vec![Region {
+            outer: Loop { curves },
+            holes: vec![],
+            source: None,
+        }],
+    );
+    let z = Axis {
+        origin: Point3::origin(),
+        dir: Vector3::z_axis(),
+    };
     let b = k.revolve(&profile, z, TAU).unwrap().bodies[0];
     let issues = k.get(b).unwrap().check_with(CheckLevel::Full);
     assert!(issues.is_empty(), "{issues:?}");
@@ -151,13 +242,37 @@ fn revolve_arc_centred_behind_the_axis() {
     let n = 2000;
     let f = |z: f64| PI * (xa(z) * xa(z) - 4.0);
     let dz = h / n as f64;
-    let want = (0..=n).map(|i| f(i as f64 * dz) * if i == 0 || i == n { 1.0 } else if i % 2 == 1 { 4.0 } else { 2.0 }).sum::<f64>() * dz / 3.0;
+    let want = (0..=n)
+        .map(|i| {
+            f(i as f64 * dz)
+                * if i == 0 || i == n {
+                    1.0
+                } else if i % 2 == 1 {
+                    4.0
+                } else {
+                    2.0
+                }
+        })
+        .sum::<f64>()
+        * dz
+        / 3.0;
     let v = k.mass_properties(b).unwrap().volume;
     assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
     // And it unites with a cylinder through it (the document's next step).
     let disk = {
-        let c = Curve2::Circle { center: Point2::origin(), radius: 4.0, source: None };
-        Profile::new(Plane::top(), vec![Region { outer: Loop { curves: vec![c] }, holes: vec![], source: None }])
+        let c = Curve2::Circle {
+            center: Point2::origin(),
+            radius: 4.0,
+            source: None,
+        };
+        Profile::new(
+            Plane::top(),
+            vec![Region {
+                outer: Loop { curves: vec![c] },
+                holes: vec![],
+                source: None,
+            }],
+        )
     };
     let post = k.extrude(&disk, Extent::Blind(5.0)).unwrap().bodies[0];
     let u = k.boolean(BoolOp::Union, b, &[post]).unwrap().bodies[0];
@@ -170,7 +285,12 @@ fn revolve_arc_centred_behind_the_axis() {
 /// heights along the axis.
 #[test]
 fn walls_nearly_along_a_cylinder_axis() {
-    run("gridfinity_knob", &["gridfinity_wall"], BoolOp::Intersect, 552.188828679068);
+    run(
+        "gridfinity_knob",
+        &["gridfinity_wall"],
+        BoolOp::Intersect,
+        552.188828679068,
+    );
 }
 
 /// Dr Browns cap, Boolean 3: a post through the cap's wall, a spindle torus. The torus's
@@ -180,11 +300,17 @@ fn walls_nearly_along_a_cylinder_axis() {
 #[test]
 fn post_through_a_spindle_torus_wall() {
     let mut k = NativeKernel::new();
-    let vols: Vec<f64> = ["drbrowns_cap", "drbrowns_post"].iter().map(|n| {
-        let b = k.insert(body(n));
-        k.mass_properties(b).unwrap().volume
-    }).collect();
+    let vols: Vec<f64> = ["drbrowns_cap", "drbrowns_post"]
+        .iter()
+        .map(|n| {
+            let b = k.insert(body(n));
+            k.mass_properties(b).unwrap().volume
+        })
+        .collect();
     let v = 25903.21270796864;
-    assert!(v < vols[0] + vols[1] - 100.0 && v > vols[0].max(vols[1]), "{vols:?}");
+    assert!(
+        v < vols[0] + vols[1] - 100.0 && v > vols[0].max(vols[1]),
+        "{vols:?}"
+    );
     run("drbrowns_cap", &["drbrowns_post"], BoolOp::Union, v);
 }

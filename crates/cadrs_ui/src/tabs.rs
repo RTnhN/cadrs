@@ -80,7 +80,12 @@ impl Tab {
                 theme.tab_inactive,
             )
             .with_selected(theme.background),
-            border: StateColors::all(if self.marked { theme.tab_underline.with_alpha(0.55) } else { Color::NONE }).with_selected(theme.tab_underline),
+            border: StateColors::all(if self.marked {
+                theme.tab_underline.with_alpha(0.55)
+            } else {
+                Color::NONE
+            })
+            .with_selected(theme.tab_underline),
             foreground: StateColors::new(
                 theme.tool_foreground,
                 theme.foreground,
@@ -91,7 +96,14 @@ impl Tab {
             focus_ring: theme.focus_ring,
         };
         let fg = visuals.foreground.normal;
-        let font = theme.font(theme.font_base, if self.marked { FontWeight::SEMIBOLD } else { FontWeight::MEDIUM });
+        let font = theme.font(
+            theme.font_base,
+            if self.marked {
+                FontWeight::SEMIBOLD
+            } else {
+                FontWeight::MEDIUM
+            },
+        );
         let icon_name = self.icon;
         let label = self.label;
         (

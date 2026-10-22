@@ -9,7 +9,10 @@ use cadrs_eda::footprint::Footprint;
 use cadrs_eda::layer::{Layer, Side};
 use cadrs_eda::units::{Bounds, Pt, to_mm};
 use cadrs_idf::geom::Loop;
-use cadrs_idf::{Board, BoardOutline, IdfVersion, Library, MountSide, Owner, Package, PackageKind, Placement, Status, Units};
+use cadrs_idf::{
+    Board, BoardOutline, IdfVersion, Library, MountSide, Owner, Package, PackageKind, Placement,
+    Status, Units,
+};
 
 use super::PcbBoard;
 
@@ -37,7 +40,10 @@ pub fn board_outline_loops(board: &cadrs_eda::board::Board) -> Vec<Loop> {
             for (k, e) in edges.iter().enumerate() {
                 // The last edge ends exactly on the first point.
                 let p = if k + 1 == n { start } else { mm2(e.b) };
-                let sweep = e.mid.and_then(|m| cadrs_eda::geom::arc_params(e.a, m, e.b)).map_or(0.0, |(_, _, _, s)| s.to_degrees());
+                let sweep = e
+                    .mid
+                    .and_then(|m| cadrs_eda::geom::arc_params(e.a, m, e.b))
+                    .map_or(0.0, |(_, _, _, s)| s.to_degrees());
                 t.push((p[0], p[1], sweep));
             }
             Loop::from_triples(0, &t)
@@ -91,34 +97,58 @@ fn footprint_box(f: &Footprint) -> Option<Bounds> {
 pub fn footprint_patch(fp: &Footprint) -> Design {
     use cadrs_eda::board::{BoardShape, PlacedFootprint};
     use cadrs_eda::graphics::{Fill, Geom, Shape, Stroke};
-    let b = footprint_box(fp).unwrap_or_else(|| Bounds::of(Pt::ZERO).grow(cadrs_eda::units::mm(2.0))).grow(cadrs_eda::units::mm(2.0));
+    let b = footprint_box(fp)
+        .unwrap_or_else(|| Bounds::of(Pt::ZERO).grow(cadrs_eda::units::mm(2.0)))
+        .grow(cadrs_eda::units::mm(2.0));
     let mut d = Design::new();
     d.board.shapes.push(BoardShape {
         id: uuid::Uuid::new_v4(),
-        shape: Shape { geom: Geom::Rect { a: b.min, b: b.max }, stroke: Stroke::width(cadrs_eda::units::mm(0.05)), fill: Fill::None },
+        shape: Shape {
+            geom: Geom::Rect { a: b.min, b: b.max },
+            stroke: Stroke::width(cadrs_eda::units::mm(0.05)),
+            fill: Fill::None,
+        },
         layer: Layer::Outline,
         locked: false,
         net: String::new(),
     });
     let mut f = fp.clone();
-    if let Some(r) = f.fields.iter_mut().find(|x| x.name == cadrs_eda::symbol::fields::REFERENCE) {
+    if let Some(r) = f
+        .fields
+        .iter_mut()
+        .find(|x| x.name == cadrs_eda::symbol::fields::REFERENCE)
+    {
         r.text.text.text = "REF".into();
     }
-    d.board.footprints.push(PlacedFootprint { id: uuid::Uuid::new_v4(), footprint: f, placement: Default::default(), locked: false, symbol: None });
+    d.board.footprints.push(PlacedFootprint {
+        id: uuid::Uuid::new_v4(),
+        footprint: f,
+        placement: Default::default(),
+        locked: false,
+        symbol: None,
+    });
     d
 }
 
 /// The studio board for a design named `name`.
 pub fn pcb_board(name: &str, design: &Design) -> PcbBoard {
     let mut board = Board::new(name, Units::Mm, IdfVersion::V3);
-    board.outline = Some(BoardOutline { owner: Owner::Ecad, thickness: to_mm(design.board.thickness), loops: outline_loops(design) });
+    board.outline = Some(BoardOutline {
+        owner: Owner::Ecad,
+        thickness: to_mm(design.board.thickness),
+        loops: outline_loops(design),
+    });
     let mut library = Library::new(IdfVersion::V3);
     for f in &design.board.footprints {
         let fp = &f.footprint;
         let package = fp.id.clone();
-        let part_number = fp.field(cadrs_eda::symbol::fields::VALUE).map(|v| v.text.text.text.clone()).unwrap_or_default();
+        let part_number = fp
+            .field(cadrs_eda::symbol::fields::VALUE)
+            .map(|v| v.text.text.text.clone())
+            .unwrap_or_default();
         if library.package(&package, &part_number).is_none() {
-            let b = footprint_box(fp).unwrap_or_else(|| Bounds::of(Pt::ZERO).grow(cadrs_eda::units::mm(0.5)));
+            let b = footprint_box(fp)
+                .unwrap_or_else(|| Bounds::of(Pt::ZERO).grow(cadrs_eda::units::mm(0.5)));
             let (lo, hi) = (mm2(b.min), mm2(b.max));
             library.packages.push(Package {
                 kind: PackageKind::Electrical,
@@ -140,8 +170,16 @@ pub fn pcb_board(name: &str, design: &Design) -> PcbBoard {
             y: at[1],
             mount_offset: 0.0,
             // IDF mirrors bottom parts about their Y axis, cadrs about X: 180° apart.
-            rotation: if bottom { cadrs_eda::units::normalize_deg(180.0 - f.placement.angle) } else { f.placement.angle },
-            side: if bottom { MountSide::Bottom } else { MountSide::Top },
+            rotation: if bottom {
+                cadrs_eda::units::normalize_deg(180.0 - f.placement.angle)
+            } else {
+                f.placement.angle
+            },
+            side: if bottom {
+                MountSide::Bottom
+            } else {
+                MountSide::Top
+            },
             status: Status::Placed,
         });
     }
@@ -158,25 +196,46 @@ mod tests {
     #[test]
     fn footprint_patch_is_a_board_under_the_part() {
         let lib = cadrs_eda::library::LibraryTable::builtin();
-        let fp = lib.footprint("Package_SO:SOIC-8_3.9x4.9mm_P1.27mm").unwrap();
+        let fp = lib
+            .footprint("Package_SO:SOIC-8_3.9x4.9mm_P1.27mm")
+            .unwrap();
         let d = footprint_patch(fp);
         let b = pcb_board("part", &d);
         assert_eq!(b.board.placements.len(), 1);
         assert_eq!(b.board.placements[0].refdes, "REF");
         let o = &b.board.outline.as_ref().unwrap().loops[0];
         let xs: Vec<f64> = o.points.iter().map(|p| p.x).collect();
-        let (lo, hi) = (xs.iter().cloned().fold(f64::MAX, f64::min), xs.iter().cloned().fold(f64::MIN, f64::max));
+        let (lo, hi) = (
+            xs.iter().cloned().fold(f64::MAX, f64::min),
+            xs.iter().cloned().fold(f64::MIN, f64::max),
+        );
         // The courtyard (±3.70 mm across the pads) and 2 mm more.
-        assert!((hi - 5.7).abs() < 0.02 && (lo + 5.7).abs() < 0.02, "{lo} {hi}");
+        assert!(
+            (hi - 5.7).abs() < 0.02 && (lo + 5.7).abs() < 0.02,
+            "{lo} {hi}"
+        );
     }
 
     fn shape(geom: Geom) -> BoardShape {
-        BoardShape { id: uuid::Uuid::new_v4(), shape: Shape { geom, stroke: Stroke::default(), fill: Default::default() }, layer: Layer::Outline, locked: false, net: String::new() }
+        BoardShape {
+            id: uuid::Uuid::new_v4(),
+            shape: Shape {
+                geom,
+                stroke: Stroke::default(),
+                fill: Default::default(),
+            },
+            layer: Layer::Outline,
+            locked: false,
+            net: String::new(),
+        }
     }
 
     #[test]
     fn new_board_outline_is_its_rectangle() {
-        let d = Design { board: Layout::with_rect_outline(mm(100.0), mm(80.0)), ..Default::default() };
+        let d = Design {
+            board: Layout::with_rect_outline(mm(100.0), mm(80.0)),
+            ..Default::default()
+        };
         let b = pcb_board("Board 1", &d);
         let o = b.board.outline.as_ref().unwrap();
         assert_eq!(o.loops.len(), 1);
@@ -192,19 +251,42 @@ mod tests {
         let c = 2.0 - 2.0 * std::f64::consts::FRAC_1_SQRT_2;
         let mut d = Design::default();
         d.board.shapes = vec![
-            shape(Geom::Line { a: p(10.0, 8.0), b: p(10.0, 0.0) }),
-            shape(Geom::Line { a: p(0.0, 0.0), b: p(0.0, 10.0) }),
-            shape(Geom::Arc { start: p(8.0, 10.0), mid: p(10.0 - c, 10.0 - c), end: p(10.0, 8.0) }),
-            shape(Geom::Line { a: p(10.0, 0.0), b: p(0.0, 0.0) }),
+            shape(Geom::Line {
+                a: p(10.0, 8.0),
+                b: p(10.0, 0.0),
+            }),
+            shape(Geom::Line {
+                a: p(0.0, 0.0),
+                b: p(0.0, 10.0),
+            }),
+            shape(Geom::Arc {
+                start: p(8.0, 10.0),
+                mid: p(10.0 - c, 10.0 - c),
+                end: p(10.0, 8.0),
+            }),
+            shape(Geom::Line {
+                a: p(10.0, 0.0),
+                b: p(0.0, 0.0),
+            }),
             // Misses the arc's start by 8 µm, as drawn outlines do.
-            shape(Geom::Line { a: p(0.0, 10.0), b: p(7.994167, 10.005833) }),
-            shape(Geom::Circle { center: p(5.0, 5.0), radius: mm(1.0) }),
+            shape(Geom::Line {
+                a: p(0.0, 10.0),
+                b: p(7.994167, 10.005833),
+            }),
+            shape(Geom::Circle {
+                center: p(5.0, 5.0),
+                radius: mm(1.0),
+            }),
         ];
         let loops = outline_loops(&d);
         assert_eq!(loops.len(), 2);
         let corner = 4.0 - std::f64::consts::PI;
         // (The 8 µm miss tilts the top edge: about 0.03 mm² more.)
-        assert!((loops[0].area() - (100.0 - corner)).abs() < 0.05, "{}", loops[0].area());
+        assert!(
+            (loops[0].area() - (100.0 - corner)).abs() < 0.05,
+            "{}",
+            loops[0].area()
+        );
         assert!(loops[0].signed_area() > 0.0);
         assert_eq!(loops[1].label, 1);
     }
@@ -226,7 +308,12 @@ mod course {
         assert_eq!(o.loops.len(), 1);
         assert!((o.loops[0].area() - 2250.0).abs() < 1e-6);
         assert!((o.thickness - 1.6).abs() < 1e-12);
-        let refs: Vec<&str> = b.board.placements.iter().map(|p| p.refdes.as_str()).collect();
+        let refs: Vec<&str> = b
+            .board
+            .placements
+            .iter()
+            .map(|p| p.refdes.as_str())
+            .collect();
         assert_eq!(refs, ["BT1", "D1", "R1"]);
         let bt = b.board.placement("BT1").unwrap();
         assert_eq!(bt.side, MountSide::Bottom);
@@ -237,9 +324,22 @@ mod course {
             let placed = p.place_loops(pkg, Units::Mm);
             let bb = cadrs_idf::loops_bbox(&placed);
             let fb = footprint_box(&f.footprint).unwrap();
-            let corners = [fb.min, fb.max, Pt::new(fb.min.x, fb.max.y), Pt::new(fb.max.x, fb.min.y)].map(|c| mm2(f.placement.apply(c)));
+            let corners = [
+                fb.min,
+                fb.max,
+                Pt::new(fb.min.x, fb.max.y),
+                Pt::new(fb.max.x, fb.min.y),
+            ]
+            .map(|c| mm2(f.placement.apply(c)));
             for c in corners {
-                assert!(c[0] >= bb.min[0] - 1e-6 && c[0] <= bb.max[0] + 1e-6 && c[1] >= bb.min[1] - 1e-6 && c[1] <= bb.max[1] + 1e-6, "{} {c:?} {bb:?}", f.reference());
+                assert!(
+                    c[0] >= bb.min[0] - 1e-6
+                        && c[0] <= bb.max[0] + 1e-6
+                        && c[1] >= bb.min[1] - 1e-6
+                        && c[1] <= bb.max[1] + 1e-6,
+                    "{} {c:?} {bb:?}",
+                    f.reference()
+                );
             }
         }
     }
@@ -259,36 +359,94 @@ pub fn idf_layout(pcb: &PcbBoard) -> cadrs_eda::board::Board {
     // Ids from what they are, so deriving the board again gives the same layout (and parts).
     let id_of = |key: String| {
         let h = cadrs_kernel::naming::stable_hash(key.as_bytes());
-        uuid::Uuid::from_u128((u128::from(h) << 64) | u128::from(cadrs_kernel::naming::stable_hash(format!("{key}/2").as_bytes())))
+        uuid::Uuid::from_u128(
+            (u128::from(h) << 64)
+                | u128::from(cadrs_kernel::naming::stable_hash(
+                    format!("{key}/2").as_bytes(),
+                )),
+        )
     };
-    let shape = |geom: Geom| BoardShape { id: id_of(format!("shape {geom:?}")), shape: Shape { geom, stroke: Stroke::width(mm(0.05)), fill: Fill::None }, layer: Layer::Outline, locked: true, net: String::new() };
+    let shape = |geom: Geom| BoardShape {
+        id: id_of(format!("shape {geom:?}")),
+        shape: Shape {
+            geom,
+            stroke: Stroke::width(mm(0.05)),
+            fill: Fill::None,
+        },
+        layer: Layer::Outline,
+        locked: true,
+        net: String::new(),
+    };
     if let Some(o) = &pcb.board.outline {
         b.thickness = mm(o.thickness);
         b.stackup = cadrs_eda::board::Stackup::standard(b.copper_layers, b.thickness);
         for l in &o.loops {
             for s in l.segments() {
                 b.shapes.push(shape(match s {
-                    cadrs_idf::Segment::Line { start, end } => Geom::Line { a: pt(start), b: pt(end) },
-                    cadrs_idf::Segment::Circle { center, radius } => Geom::Circle { center: pt(center), radius: mm(radius) },
-                    cadrs_idf::Segment::Arc { start, end, center, radius, sweep } => {
-                        let a0 = (start[1] - center[1]).atan2(start[0] - center[0]) + sweep.to_radians() / 2.0;
-                        Geom::Arc { start: pt(start), mid: pt([center[0] + radius * a0.cos(), center[1] + radius * a0.sin()]), end: pt(end) }
+                    cadrs_idf::Segment::Line { start, end } => Geom::Line {
+                        a: pt(start),
+                        b: pt(end),
+                    },
+                    cadrs_idf::Segment::Circle { center, radius } => Geom::Circle {
+                        center: pt(center),
+                        radius: mm(radius),
+                    },
+                    cadrs_idf::Segment::Arc {
+                        start,
+                        end,
+                        center,
+                        radius,
+                        sweep,
+                    } => {
+                        let a0 = (start[1] - center[1]).atan2(start[0] - center[0])
+                            + sweep.to_radians() / 2.0;
+                        Geom::Arc {
+                            start: pt(start),
+                            mid: pt([center[0] + radius * a0.cos(), center[1] + radius * a0.sin()]),
+                            end: pt(end),
+                        }
                     }
                 }));
             }
         }
     }
     for h in &pcb.board.holes {
-        b.shapes.push(shape(Geom::Circle { center: pt([h.x, h.y]), radius: mm(h.dia / 2.0) }));
+        b.shapes.push(shape(Geom::Circle {
+            center: pt([h.x, h.y]),
+            radius: mm(h.dia / 2.0),
+        }));
     }
     for (k, p) in pcb.board.placements.iter().enumerate() {
-        let Some(pkg) = pcb.library.package(&p.package, &p.part_number) else { continue };
-        let pts: Vec<[f64; 2]> = pkg.loops.iter().flat_map(|l| l.points.iter().map(|q| [q.x, q.y])).collect();
-        let Some((lo, hi)) = pts.iter().fold(None, |acc: Option<([f64; 2], [f64; 2])>, q| Some(match acc {
-            None => (*q, *q),
-            Some((lo, hi)) => ([lo[0].min(q[0]), lo[1].min(q[1])], [hi[0].max(q[0]), hi[1].max(q[1])]),
-        })) else { continue };
-        let mut f = cadrs_eda::footprint::new_footprint(&p.package, "IDF package", MountKind::Unspecified, Pt::ZERO, Pt::ZERO, Pt::ZERO);
+        let Some(pkg) = pcb.library.package(&p.package, &p.part_number) else {
+            continue;
+        };
+        let pts: Vec<[f64; 2]> = pkg
+            .loops
+            .iter()
+            .flat_map(|l| l.points.iter().map(|q| [q.x, q.y]))
+            .collect();
+        let Some((lo, hi)) = pts
+            .iter()
+            .fold(None, |acc: Option<([f64; 2], [f64; 2])>, q| {
+                Some(match acc {
+                    None => (*q, *q),
+                    Some((lo, hi)) => (
+                        [lo[0].min(q[0]), lo[1].min(q[1])],
+                        [hi[0].max(q[0]), hi[1].max(q[1])],
+                    ),
+                })
+            })
+        else {
+            continue;
+        };
+        let mut f = cadrs_eda::footprint::new_footprint(
+            &p.package,
+            "IDF package",
+            MountKind::Unspecified,
+            Pt::ZERO,
+            Pt::ZERO,
+            Pt::ZERO,
+        );
         if let Some(r) = f.field_mut(cadrs_eda::symbol::fields::REFERENCE) {
             r.text.text.text = p.refdes.clone();
         }
@@ -296,16 +454,43 @@ pub fn idf_layout(pcb: &PcbBoard) -> cadrs_eda::board::Board {
             v.text.text.text = p.part_number.clone();
         }
         // (Its texts' ids too.)
-        for (i, t) in f.fields.iter_mut().map(|x| &mut x.text).chain(f.texts.iter_mut()).enumerate() {
+        for (i, t) in f
+            .fields
+            .iter_mut()
+            .map(|x| &mut x.text)
+            .chain(f.texts.iter_mut())
+            .enumerate()
+        {
             t.id = id_of(format!("placement {k} text {i}"));
         }
         let mut body = cadrs_eda::model3d::Body::default();
-        body.cuboid([lo[0], lo[1], p.mount_offset], [hi[0], hi[1], p.mount_offset + pkg.height.max(0.1)], [120, 130, 140]);
-        f.models.push(Model3d { body: Some(body), ..Model3d::file("") });
+        body.cuboid(
+            [lo[0], lo[1], p.mount_offset],
+            [hi[0], hi[1], p.mount_offset + pkg.height.max(0.1)],
+            [120, 130, 140],
+        );
+        f.models.push(Model3d {
+            body: Some(body),
+            ..Model3d::file("")
+        });
         let bottom = matches!(p.side, cadrs_idf::MountSide::Bottom);
         // IDF mirrors bottom parts about their Y axis, cadrs about X: 180° apart ([`pcb_board`]).
-        let angle = if bottom { cadrs_eda::units::normalize_deg(180.0 - p.rotation) } else { p.rotation };
-        b.footprints.push(PlacedFootprint { id: id_of(format!("placement {k} {} {}", p.refdes, p.package)), footprint: f, placement: FootprintPlacement { at: Pt::mm(p.x, p.y), angle, side: if bottom { Side::Bottom } else { Side::Top } }, locked: true, symbol: None });
+        let angle = if bottom {
+            cadrs_eda::units::normalize_deg(180.0 - p.rotation)
+        } else {
+            p.rotation
+        };
+        b.footprints.push(PlacedFootprint {
+            id: id_of(format!("placement {k} {} {}", p.refdes, p.package)),
+            footprint: f,
+            placement: FootprintPlacement {
+                at: Pt::mm(p.x, p.y),
+                angle,
+                side: if bottom { Side::Bottom } else { Side::Top },
+            },
+            locked: true,
+            symbol: None,
+        });
     }
     b
 }

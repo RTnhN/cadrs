@@ -28,7 +28,10 @@ use std::f64::consts::PI;
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::{BuildError, Joint, JointId, JointKind, JointNamer, Model, P3, RipStyle, SharpBuilder, Surface, V3, Wall, WallId};
+use crate::model::{
+    BuildError, Joint, JointId, JointKind, JointNamer, Model, P3, RipStyle, SharpBuilder, Surface,
+    V3, Wall, WallId,
+};
 use crate::params::Params;
 use crate::poly::{self, P2, Polygon, Seg2, inward_normal};
 
@@ -59,7 +62,10 @@ pub struct ProfileIn {
 
 impl ProfileIn {
     pub fn point(p: P3) -> ProfileIn {
-        ProfileIn { points: vec![p], closed: false }
+        ProfileIn {
+            points: vec![p],
+            closed: false,
+        }
     }
 
     pub fn is_point(&self) -> bool {
@@ -74,7 +80,11 @@ impl ProfileIn {
     /// Newell's vector area of a loop.
     fn vector_area(&self) -> V3 {
         let n = self.points.len();
-        (0..n).fold(V3::zeros(), |acc, i| acc + self.points[i].coords.cross(&self.points[(i + 1) % n].coords)) / 2.0
+        (0..n).fold(V3::zeros(), |acc, i| {
+            acc + self.points[i]
+                .coords
+                .cross(&self.points[(i + 1) % n].coords)
+        }) / 2.0
     }
 }
 
@@ -214,7 +224,9 @@ fn dedup(points: &[P3], closed: bool, tol: f64) -> Vec<P3> {
 }
 
 fn nearest(points: &[P3], p: P3) -> usize {
-    (0..points.len()).min_by(|a, b| (points[*a] - p).norm().total_cmp(&(points[*b] - p).norm())).unwrap_or(0)
+    (0..points.len())
+        .min_by(|a, b| (points[*a] - p).norm().total_cmp(&(points[*b] - p).norm()))
+        .unwrap_or(0)
 }
 
 /// The least-area strip between chains `a` and `b` (each from one connection to the next): the
@@ -249,7 +261,13 @@ fn least_area(a: &[P3], b: &[P3]) -> Vec<bool> {
     let (mut i, mut j) = (na - 1, nb - 1);
     let mut moves = Vec::with_capacity(na + nb);
     while i > 0 || j > 0 {
-        let step_a = if i == 0 { false } else if j == 0 { true } else { from_a[i][j] };
+        let step_a = if i == 0 {
+            false
+        } else if j == 0 {
+            true
+        } else {
+            from_a[i][j]
+        };
         moves.push(step_a);
         if step_a {
             i -= 1;
@@ -262,14 +280,23 @@ fn least_area(a: &[P3], b: &[P3]) -> Vec<bool> {
 }
 
 /// The tessellated surface between two profiles (see the module docs).
-pub fn strip(p1: &ProfileIn, p2: &ProfileIn, connections: &[ConnectionIn]) -> Result<Strip, LoftError> {
+pub fn strip(
+    p1: &ProfileIn,
+    p2: &ProfileIn,
+    connections: &[ConnectionIn],
+) -> Result<Strip, LoftError> {
     if p1.points.is_empty() || p2.points.is_empty() {
         return Err(LoftError::EmptyProfile);
     }
     if p1.is_point() && p2.is_point() {
         return Err(LoftError::TwoPoints);
     }
-    let size = p1.points.iter().chain(&p2.points).map(|p| p.coords.norm()).fold(1.0, f64::max);
+    let size = p1
+        .points
+        .iter()
+        .chain(&p2.points)
+        .map(|p| p.coords.norm())
+        .fold(1.0, f64::max);
     let tol = 1e-9 * size;
     // A point stands in for a profile like the other (closed or open).
     let closed = if p1.is_point() {
@@ -281,15 +308,37 @@ pub fn strip(p1: &ProfileIn, p2: &ProfileIn, connections: &[ConnectionIn]) -> Re
     } else {
         p1.closed
     };
-    let mut a = if p1.is_point() { p1.points.clone() } else { dedup(&p1.points, closed, tol) };
-    let mut b = if p2.is_point() { p2.points.clone() } else { dedup(&p2.points, closed, tol) };
-    if (!p1.is_point() && a.len() < 2) || (!p2.is_point() && b.len() < 2) || (closed && (a.len().max(b.len()) < 3)) {
+    let mut a = if p1.is_point() {
+        p1.points.clone()
+    } else {
+        dedup(&p1.points, closed, tol)
+    };
+    let mut b = if p2.is_point() {
+        p2.points.clone()
+    } else {
+        dedup(&p2.points, closed, tol)
+    };
+    if (!p1.is_point() && a.len() < 2)
+        || (!p2.is_point() && b.len() < 2)
+        || (closed && (a.len().max(b.len()) < 3))
+    {
         return Err(LoftError::Degenerate);
     }
     // Both the same way round.
     if !p1.is_point() && !p2.is_point() {
         if closed {
-            let (va, vb) = (ProfileIn { points: a.clone(), closed }.vector_area(), ProfileIn { points: b.clone(), closed }.vector_area());
+            let (va, vb) = (
+                ProfileIn {
+                    points: a.clone(),
+                    closed,
+                }
+                .vector_area(),
+                ProfileIn {
+                    points: b.clone(),
+                    closed,
+                }
+                .vector_area(),
+            );
             if va.dot(&vb) < 0.0 {
                 b.reverse();
             }
@@ -301,12 +350,32 @@ pub fn strip(p1: &ProfileIn, p2: &ProfileIn, connections: &[ConnectionIn]) -> Re
         }
     }
     // The connections as index pairs.
-    let mut pairs: Vec<(usize, usize, bool)> = connections.iter().map(|c| (nearest(&a, c.a), nearest(&b, c.b), c.rip)).collect();
+    let mut pairs: Vec<(usize, usize, bool)> = connections
+        .iter()
+        .map(|c| (nearest(&a, c.a), nearest(&b, c.b), c.rip))
+        .collect();
     if closed {
         if pairs.is_empty() {
             // Matched by proximity, from the centroids.
-            let (ca, cb) = (ProfileIn { points: a.clone(), closed }.centroid(), ProfileIn { points: b.clone(), closed }.centroid());
-            let j = (0..b.len()).min_by(|x, y| ((b[*x] - cb) - (a[0] - ca)).norm().total_cmp(&((b[*y] - cb) - (a[0] - ca)).norm())).unwrap_or(0);
+            let (ca, cb) = (
+                ProfileIn {
+                    points: a.clone(),
+                    closed,
+                }
+                .centroid(),
+                ProfileIn {
+                    points: b.clone(),
+                    closed,
+                }
+                .centroid(),
+            );
+            let j = (0..b.len())
+                .min_by(|x, y| {
+                    ((b[*x] - cb) - (a[0] - ca))
+                        .norm()
+                        .total_cmp(&((b[*y] - cb) - (a[0] - ca)).norm())
+                })
+                .unwrap_or(0);
             pairs.push((0, j, false));
         }
         // Start both loops at the first connection.
@@ -325,13 +394,18 @@ pub fn strip(p1: &ProfileIn, p2: &ProfileIn, connections: &[ConnectionIn]) -> Re
     }
     // In order along the first profile (then the second), each strictly after the last.
     let first = if closed { Some(pairs[0]) } else { None };
-    let mut rest: Vec<(usize, usize, bool)> = pairs.iter().copied().skip(usize::from(closed)).collect();
+    let mut rest: Vec<(usize, usize, bool)> =
+        pairs.iter().copied().skip(usize::from(closed)).collect();
     rest.sort_by_key(|p| (p.0, p.1));
     rest.dedup_by_key(|p| (p.0, p.1));
     let mut cuts: Vec<(usize, usize, bool)> = Vec::new();
     let (na, nb) = (a.len(), b.len());
     // The unrolled ends: a closed loop comes back to its start.
-    let (ea, eb) = if closed { (if na > 1 { na } else { 0 }, if nb > 1 { nb } else { 0 }) } else { (na - 1, nb - 1) };
+    let (ea, eb) = if closed {
+        (if na > 1 { na } else { 0 }, if nb > 1 { nb } else { 0 })
+    } else {
+        (na - 1, nb - 1)
+    };
     match first {
         Some(f) => cuts.push(f),
         None => cuts.push((0, 0, false)),
@@ -356,17 +430,42 @@ pub fn strip(p1: &ProfileIn, p2: &ProfileIn, connections: &[ConnectionIn]) -> Re
     cuts.push((ea, eb, end_rip));
     let at_a = |i: usize| a[if na > 1 { i % na } else { 0 }];
     let at_b = |j: usize| b[if nb > 1 { j % nb } else { 0 }];
-    let mut out = Strip { closed, ..Default::default() };
+    let mut out = Strip {
+        closed,
+        ..Default::default()
+    };
     // A closed loft's connections (its matched start first); an open one's inner ones (its ends
     // aren't connections anyone placed).
-    let placed = if closed { &cuts[..cuts.len() - 1] } else { &cuts[1..cuts.len() - 1] };
-    out.connections = placed.iter().map(|(i, j, rip)| ConnectionIn { a: at_a(*i), b: at_b(*j), rip: *rip }).collect();
+    let placed = if closed {
+        &cuts[..cuts.len() - 1]
+    } else {
+        &cuts[1..cuts.len() - 1]
+    };
+    out.connections = placed
+        .iter()
+        .map(|(i, j, rip)| ConnectionIn {
+            a: at_a(*i),
+            b: at_b(*j),
+            rip: *rip,
+        })
+        .collect();
     for (k, w) in cuts.windows(2).enumerate() {
         let ((i0, j0, rip0), (i1, j1, _)) = (w[0], w[1]);
         let sa: Vec<P3> = (i0..=i1).map(at_a).collect();
         let sb: Vec<P3> = (j0..=j1).map(at_b).collect();
-        let conn = if closed { Some(k) } else if k == 0 { None } else { Some(k - 1) };
-        out.rungs.push(Rung { a: sa[0], b: sb[0], connection: conn, rip: rip0 });
+        let conn = if closed {
+            Some(k)
+        } else if k == 0 {
+            None
+        } else {
+            Some(k - 1)
+        };
+        out.rungs.push(Rung {
+            a: sa[0],
+            b: sb[0],
+            connection: conn,
+            rip: rip0,
+        });
         let (mut i, mut j) = (0, 0);
         for step_a in least_area(&sa, &sb) {
             if step_a {
@@ -376,14 +475,24 @@ pub fn strip(p1: &ProfileIn, p2: &ProfileIn, connections: &[ConnectionIn]) -> Re
                 out.triangles.push([sa[i], sb[j + 1], sb[j]]);
                 j += 1;
             }
-            out.rungs.push(Rung { a: sa[i], b: sb[j], connection: None, rip: false });
+            out.rungs.push(Rung {
+                a: sa[i],
+                b: sb[j],
+                connection: None,
+                rip: false,
+            });
         }
         // The last rung of a section is the next section's first.
         out.rungs.pop();
     }
     if !closed {
         let (i, j, _) = cuts[cuts.len() - 1];
-        out.rungs.push(Rung { a: at_a(i), b: at_b(j), connection: None, rip: false });
+        out.rungs.push(Rung {
+            a: at_a(i),
+            b: at_b(j),
+            connection: None,
+            rip: false,
+        });
     }
     if out.triangles.is_empty() || out.area() <= 1e-12 * size * size {
         return Err(LoftError::Degenerate);
@@ -421,7 +530,10 @@ struct Group {
 
 impl Group {
     fn local(&self, p: P3) -> P2 {
-        P2::new((p - self.origin).dot(&self.u), (p - self.origin).dot(&self.v))
+        P2::new(
+            (p - self.origin).dot(&self.u),
+            (p - self.origin).dot(&self.v),
+        )
     }
 }
 
@@ -451,7 +563,10 @@ fn on_line(outline: &Polygon, la: P2, lb: P2, tol: f64) -> Option<(f64, f64)> {
 /// The outline's edges with an end at `e`.
 fn incident(outline: &Polygon, e: P2, tol: f64) -> Vec<(P2, P2)> {
     let l = &outline.outer;
-    (0..l.len()).map(|i| (l[i], l[(i + 1) % l.len()])).filter(|(p, q)| (p - e).norm() < tol || (q - e).norm() < tol).collect()
+    (0..l.len())
+        .map(|i| (l[i], l[(i + 1) % l.len()]))
+        .filter(|(p, q)| (p - e).norm() < tol || (q - e).norm() < tol)
+        .collect()
 }
 
 /// Where a closed loft rips when no connection says: the rung whose corners in the triangles
@@ -459,16 +574,29 @@ fn incident(outline: &Polygon, e: P2, tol: f64) -> Vec<(P2, P2)> {
 fn auto_rip(s: &Strip) -> usize {
     let n = s.triangles.len();
     let angle = |t: &[P3; 3], at: P3| {
-        let k = (0..3).min_by(|a, b| (t[*a] - at).norm().total_cmp(&(t[*b] - at).norm())).unwrap_or(0);
+        let k = (0..3)
+            .min_by(|a, b| (t[*a] - at).norm().total_cmp(&(t[*b] - at).norm()))
+            .unwrap_or(0);
         let (u, v) = (t[(k + 1) % 3] - t[k], t[(k + 2) % 3] - t[k]);
-        if u.norm() < 1e-12 || v.norm() < 1e-12 { 0.0 } else { (u.dot(&v) / (u.norm() * v.norm())).clamp(-1.0, 1.0).acos() }
+        if u.norm() < 1e-12 || v.norm() < 1e-12 {
+            0.0
+        } else {
+            (u.dot(&v) / (u.norm() * v.norm())).clamp(-1.0, 1.0).acos()
+        }
     };
     (0..s.rungs.len().min(n))
         .max_by(|a, b| {
             let score = |k: usize| {
                 let r = s.rungs[k];
                 let (before, after) = (&s.triangles[(k + n - 1) % n], &s.triangles[k]);
-                [angle(before, r.a), angle(before, r.b), angle(after, r.a), angle(after, r.b)].into_iter().fold(f64::INFINITY, f64::min)
+                [
+                    angle(before, r.a),
+                    angle(before, r.b),
+                    angle(after, r.a),
+                    angle(after, r.b),
+                ]
+                .into_iter()
+                .fold(f64::INFINITY, f64::min)
             };
             score(*a).total_cmp(&score(*b)).then(b.cmp(a))
         })
@@ -478,23 +606,51 @@ fn auto_rip(s: &Strip) -> usize {
 /// Lays the loft out as sheet metal (see the module docs). Bends that would make the flat
 /// pattern fail (their regions colliding with facets) are left sharp instead, quietly: the
 /// facets alone lay flat.
-pub fn loft(params: Params, p1: &ProfileIn, p2: &ProfileIn, opts: &LoftOpts) -> Result<LoftBuilt, LoftError> {
+pub fn loft(
+    params: Params,
+    p1: &ProfileIn,
+    p2: &ProfileIn,
+    opts: &LoftOpts,
+) -> Result<LoftBuilt, LoftError> {
     let built = loft_once(params, p1, p2, opts)?;
-    if opts.bends && built.model.joints.iter().any(|j| j.bend().is_some()) && !crate::flat::flatten(&built.model).is_ok() {
-        let mut sharp = loft_once(params, p1, p2, &LoftOpts { bends: false, ..opts.clone() })?;
+    if opts.bends
+        && built.model.joints.iter().any(|j| j.bend().is_some())
+        && !crate::flat::flatten(&built.model).is_ok()
+    {
+        let mut sharp = loft_once(
+            params,
+            p1,
+            p2,
+            &LoftOpts {
+                bends: false,
+                ..opts.clone()
+            },
+        )?;
         // Facets throughout are a sound layout of their own (the loft's tessellation, as
         // Onshape lays it): no warning.
         if crate::flat::flatten(&sharp.model).is_ok() {
-            sharp.warnings.retain(|w| !w.starts_with("The loft's steep edges stay sharp"));
+            sharp
+                .warnings
+                .retain(|w| !w.starts_with("The loft's steep edges stay sharp"));
             return Ok(sharp);
         }
     }
     Ok(built)
 }
 
-fn loft_once(params: Params, p1: &ProfileIn, p2: &ProfileIn, opts: &LoftOpts) -> Result<LoftBuilt, LoftError> {
+fn loft_once(
+    params: Params,
+    p1: &ProfileIn,
+    p2: &ProfileIn,
+    opts: &LoftOpts,
+) -> Result<LoftBuilt, LoftError> {
     let s = strip(p1, p2, &opts.connections)?;
-    let size = s.triangles.iter().flatten().map(|p| p.coords.norm()).fold(1.0, f64::max);
+    let size = s
+        .triangles
+        .iter()
+        .flatten()
+        .map(|p| p.coords.norm())
+        .fold(1.0, f64::max);
     let lin = 1e-7 * size;
     let tris = &s.triangles;
     let normal = |t: &[P3; 3]| (t[1] - t[0]).cross(&(t[2] - t[0]));
@@ -503,7 +659,9 @@ fn loft_once(params: Params, p1: &ProfileIn, p2: &ProfileIn, opts: &LoftOpts) ->
     // the thickness arrow turns it round.
     let mut sign = 1.0;
     if s.closed {
-        let mid = P3::from(tris.iter().flatten().fold(V3::zeros(), |a, p| a + p.coords) / (3 * tris.len()) as f64);
+        let mid = P3::from(
+            tris.iter().flatten().fold(V3::zeros(), |a, p| a + p.coords) / (3 * tris.len()) as f64,
+        );
         let outward: f64 = tris
             .iter()
             .map(|t| normal(t).dot(&((t[0].coords + t[1].coords + t[2].coords) / 3.0 - mid.coords)))
@@ -556,7 +714,10 @@ fn loft_once(params: Params, p1: &ProfileIn, p2: &ProfileIn, opts: &LoftOpts) ->
     };
     for (k, t) in tris.iter().enumerate() {
         let joins = groups.last().is_some_and(|g: &Group| {
-            !rips[k] && (degenerate(t) || (normal(t).normalize() * sign).dot(&g.n) > 1.0 - 1e-10 && t.iter().all(|p| (p - g.origin).dot(&g.n).abs() <= lin))
+            !rips[k]
+                && (degenerate(t)
+                    || (normal(t).normalize() * sign).dot(&g.n) > 1.0 - 1e-10
+                        && t.iter().all(|p| (p - g.origin).dot(&g.n).abs() <= lin))
         });
         if joins {
             groups.last_mut().expect("joins").tris.push(k);
@@ -565,7 +726,13 @@ fn loft_once(params: Params, p1: &ProfileIn, p2: &ProfileIn, opts: &LoftOpts) ->
             continue;
         } else {
             let (origin, u, v, n) = plane_of(t);
-            groups.push(Group { tris: vec![k], origin, u, v, n });
+            groups.push(Group {
+                tris: vec![k],
+                origin,
+                u,
+                v,
+                n,
+            });
         }
     }
     // A sliver skipped at the start belongs to the first wall.
@@ -577,7 +744,11 @@ fn loft_once(params: Params, p1: &ProfileIn, p2: &ProfileIn, opts: &LoftOpts) ->
     // A closed loft's last wall runs on into its first when in one plane and not ripped there.
     if s.closed && groups.len() > 1 && !rips[0] {
         let (f, l) = (&groups[0], &groups[groups.len() - 1]);
-        if f.n.dot(&l.n) > 1.0 - 1e-10 && tris[l.tris[0]].iter().all(|p| (p - f.origin).dot(&f.n).abs() <= lin) {
+        if f.n.dot(&l.n) > 1.0 - 1e-10
+            && tris[l.tris[0]]
+                .iter()
+                .all(|p| (p - f.origin).dot(&f.n).abs() <= lin)
+        {
             let last = groups.pop().expect("two");
             groups[0].tris.splice(0..0, last.tris);
         }
@@ -592,10 +763,22 @@ fn loft_once(params: Params, p1: &ProfileIn, p2: &ProfileIn, opts: &LoftOpts) ->
     // Outlines.
     let mut outlines: Vec<Polygon> = Vec::new();
     for g in &groups {
-        let pieces: Vec<Polygon> = g.tris.iter().map(|k| Polygon::new(tris[*k].iter().map(|p| g.local(*p)).collect())).filter(|p| p.area() > 1e-14 * size * size).collect();
+        let pieces: Vec<Polygon> = g
+            .tris
+            .iter()
+            .map(|k| Polygon::new(tris[*k].iter().map(|p| g.local(*p)).collect()))
+            .filter(|p| p.area() > 1e-14 * size * size)
+            .collect();
         let u = poly::union(&pieces);
-        let exact: Vec<P2> = g.tris.iter().flat_map(|k| tris[*k].iter().map(|p| g.local(*p))).collect();
-        let best = u.into_iter().max_by(|a, b| a.area().total_cmp(&b.area())).ok_or(LoftError::Degenerate)?;
+        let exact: Vec<P2> = g
+            .tris
+            .iter()
+            .flat_map(|k| tris[*k].iter().map(|p| g.local(*p)))
+            .collect();
+        let best = u
+            .into_iter()
+            .max_by(|a, b| a.area().total_cmp(&b.area()))
+            .ok_or(LoftError::Degenerate)?;
         outlines.push(poly::snap_to(&best, &exact, 10.0 * poly::GRID));
     }
     // Joints: the rung between each wall and the next (and round a closed loft).
@@ -618,16 +801,35 @@ fn loft_once(params: Params, p1: &ProfileIn, p2: &ProfileIn, opts: &LoftOpts) ->
         }
         let rung = groups[nb].tris[0] % s.rungs.len();
         // The rung before wall nb's first triangle (a sliver may lead it).
-        joints.push(J { a: gi, b: nb, rung, rip: rips[rung], bend: false });
+        joints.push(J {
+            a: gi,
+            b: nb,
+            rung,
+            rip: rips[rung],
+            bend: false,
+        });
     }
     // Bends: steep, and not fanning into a point with another.
     if opts.bends {
-        let steep: Vec<usize> = (0..joints.len()).filter(|i| !joints[*i].rip && groups[joints[*i].a].n.dot(&groups[joints[*i].b].n).clamp(-1.0, 1.0).acos() >= BEND_MIN_ANGLE).collect();
+        let steep: Vec<usize> = (0..joints.len())
+            .filter(|i| {
+                !joints[*i].rip
+                    && groups[joints[*i].a]
+                        .n
+                        .dot(&groups[joints[*i].b].n)
+                        .clamp(-1.0, 1.0)
+                        .acos()
+                        >= BEND_MIN_ANGLE
+            })
+            .collect();
         for &i in &steep {
             let r = s.rungs[joints[i].rung];
             let shares = steep.iter().any(|&k| {
                 let o = s.rungs[joints[k].rung];
-                k != i && [o.a, o.b].iter().any(|p| (p - r.a).norm() <= lin || (p - r.b).norm() <= lin)
+                k != i
+                    && [o.a, o.b]
+                        .iter()
+                        .any(|p| (p - r.a).norm() <= lin || (p - r.b).norm() <= lin)
             });
             joints[i].bend = !shares;
         }
@@ -643,7 +845,10 @@ fn loft_once(params: Params, p1: &ProfileIn, p2: &ProfileIn, opts: &LoftOpts) ->
             if let Some(into) = inward_normal(&outlines[w], seg) {
                 let cut = outlines[w].clip_half_plane(seg.a + into * (gap / 2.0), into);
                 if cut.is_empty() {
-                    return Err(LoftError::Build(BuildError::WallTrimmedAway { joint: j.rung, wall: w }));
+                    return Err(LoftError::Build(BuildError::WallTrimmedAway {
+                        joint: j.rung,
+                        wall: w,
+                    }));
                 }
                 outlines[w] = cut;
             }
@@ -660,8 +865,13 @@ fn loft_once(params: Params, p1: &ProfileIn, p2: &ProfileIn, opts: &LoftOpts) ->
                 let g = &groups[w];
                 let e = g.local(e3);
                 for (p, q) in incident(&untrimmed[w], e, lin * 10.0) {
-                    let other = if (p - e).norm() < (q - e).norm() { q } else { p };
-                    let on_rung = ((other - g.local(r.a)).norm() < lin * 10.0) || ((other - g.local(r.b)).norm() < lin * 10.0);
+                    let other = if (p - e).norm() < (q - e).norm() {
+                        q
+                    } else {
+                        p
+                    };
+                    let on_rung = ((other - g.local(r.a)).norm() < lin * 10.0)
+                        || ((other - g.local(r.b)).norm() < lin * 10.0);
                     if on_rung {
                         continue;
                     }
@@ -681,7 +891,13 @@ fn loft_once(params: Params, p1: &ProfileIn, p2: &ProfileIn, opts: &LoftOpts) ->
                 }
                 let ends: Vec<P2> = incident(&untrimmed[w], e, lin * 10.0)
                     .into_iter()
-                    .map(|(p, q)| if (p - e).norm() < (q - e).norm() { q } else { p })
+                    .map(|(p, q)| {
+                        if (p - e).norm() < (q - e).norm() {
+                            q
+                        } else {
+                            p
+                        }
+                    })
                     .collect();
                 if ends.len() != 2 {
                     continue;
@@ -705,14 +921,26 @@ fn loft_once(params: Params, p1: &ProfileIn, p2: &ProfileIn, opts: &LoftOpts) ->
     // (collinear pieces in one), bent or (in one plane) tangent.
     let mut links: Vec<Link> = Vec::new();
     for &(k, a, b, ai) in &attach_edges {
-        let Some(gi) = groups.iter().position(|g| g.tris.contains(&k)) else { continue };
+        let Some(gi) = groups.iter().position(|g| g.tris.contains(&k)) else {
+            continue;
+        };
         let (pa, pb) = (tris[k][a], tris[k][b]);
         let d = (pb - pa).normalize();
-        match links.iter_mut().find(|l| l.attach == ai && l.wall == gi && (l.b - l.a).normalize().cross(&d).norm() < 1e-9 && ((pa - l.a).cross(&d)).norm() <= lin) {
+        match links.iter_mut().find(|l| {
+            l.attach == ai
+                && l.wall == gi
+                && (l.b - l.a).normalize().cross(&d).norm() < 1e-9
+                && ((pa - l.a).cross(&d)).norm() <= lin
+        }) {
             Some(l) => {
                 // Extend along the common line.
                 let dir = (l.b - l.a).normalize();
-                let ts = [0.0, (l.b - l.a).dot(&dir), (pa - l.a).dot(&dir), (pb - l.a).dot(&dir)];
+                let ts = [
+                    0.0,
+                    (l.b - l.a).dot(&dir),
+                    (pa - l.a).dot(&dir),
+                    (pb - l.a).dot(&dir),
+                ];
                 let lo = ts.iter().cloned().fold(f64::INFINITY, f64::min);
                 let hi = ts.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
                 let base = l.a;
@@ -723,7 +951,13 @@ fn loft_once(params: Params, p1: &ProfileIn, p2: &ProfileIn, opts: &LoftOpts) ->
                 let w = &opts.attach[ai];
                 let nw = w.u.cross(&w.v).normalize();
                 let tangent = groups[gi].n.dot(&nw) > ATTACH_MIN_ANGLE.cos();
-                links.push(Link { attach: ai, wall: gi, a: pa, b: pb, tangent });
+                links.push(Link {
+                    attach: ai,
+                    wall: gi,
+                    a: pa,
+                    b: pb,
+                    tangent,
+                });
             }
         }
     }
@@ -753,13 +987,20 @@ fn loft_once(params: Params, p1: &ProfileIn, p2: &ProfileIn, opts: &LoftOpts) ->
             sb.bend(j.a, j.b, (r.a, r.b));
         }
         for l in links.iter().filter(|l| !l.tangent) {
-            let k = at.iter().find(|(ai, _)| *ai == l.attach).map(|(_, k)| *k).expect("used");
+            let k = at
+                .iter()
+                .find(|(ai, _)| *ai == l.attach)
+                .map(|(_, k)| *k)
+                .expect("used");
             sb.bend(k, l.wall, (l.a, l.b));
         }
         match sb.build() {
             Ok(m) => Some(m),
             Err(e) => {
-                warnings.push(format!("The loft's steep edges stay sharp: {}", e.message()));
+                warnings.push(format!(
+                    "The loft's steep edges stay sharp: {}",
+                    e.message()
+                ));
                 for j in &mut joints {
                     j.bend = false;
                 }
@@ -775,34 +1016,74 @@ fn loft_once(params: Params, p1: &ProfileIn, p2: &ProfileIn, opts: &LoftOpts) ->
         walls: groups
             .iter()
             .enumerate()
-            .map(|(i, g)| Wall { id: wall_ids[i], surface: Surface::Planar { origin: g.origin, u: g.u, v: g.v }, outline: outlines[i].clone() })
-            .chain(links.iter().map(|l| l.attach).collect::<std::collections::BTreeSet<_>>().into_iter().map(|ai| {
-                let w = &opts.attach[ai];
-                Wall { id: attached_id(ai), surface: Surface::Planar { origin: w.origin, u: w.u, v: w.v }, outline: w.outline.clone() }
-            }))
+            .map(|(i, g)| Wall {
+                id: wall_ids[i],
+                surface: Surface::Planar {
+                    origin: g.origin,
+                    u: g.u,
+                    v: g.v,
+                },
+                outline: outlines[i].clone(),
+            })
+            .chain(
+                links
+                    .iter()
+                    .map(|l| l.attach)
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .into_iter()
+                    .map(|ai| {
+                        let w = &opts.attach[ai];
+                        Wall {
+                            id: attached_id(ai),
+                            surface: Surface::Planar {
+                                origin: w.origin,
+                                u: w.u,
+                                v: w.v,
+                            },
+                            outline: w.outline.clone(),
+                        }
+                    }),
+            )
             .collect(),
         ..Default::default()
     });
     // The model walls joined in one plane: tangent joints along the shared edge.
-    let used: Vec<usize> = used.into_iter().filter(|ai| model.wall(attached_id(*ai)).is_some()).collect();
+    let used: Vec<usize> = used
+        .into_iter()
+        .filter(|ai| model.wall(attached_id(*ai)).is_some())
+        .collect();
     // Rips and facet joints, on what is left of the walls.
     let mut namer = JointNamer::default();
     namer.taken = model.joints.iter().map(|j| j.name.clone()).collect();
     let mut next_id = model.joints.iter().map(|j| j.id.0 + 1).max().unwrap_or(0);
     for j in joints.iter().filter(|j| !j.bend) {
         let r = s.rungs[j.rung];
-        let (Some(wa), Some(wb)) = (model.wall(wall_ids[j.a]).cloned(), model.wall(wall_ids[j.b]).cloned()) else { continue };
+        let (Some(wa), Some(wb)) = (
+            model.wall(wall_ids[j.a]).cloned(),
+            model.wall(wall_ids[j.b]).cloned(),
+        ) else {
+            continue;
+        };
         let kind = if j.rip {
             let seg_on = |w: usize| {
                 let g = &groups[w];
                 let seg = Seg2::new(g.local(r.a), g.local(r.b));
-                inward_normal(&untrimmed[w], seg).map(|i| seg.offset(i * (gap / 2.0))).unwrap_or(seg)
+                inward_normal(&untrimmed[w], seg)
+                    .map(|i| seg.offset(i * (gap / 2.0)))
+                    .unwrap_or(seg)
             };
-            JointKind::Rip { on_a: seg_on(j.a), on_b: seg_on(j.b), style: RipStyle::EdgeJoint }
+            JointKind::Rip {
+                on_a: seg_on(j.a),
+                on_b: seg_on(j.b),
+                style: RipStyle::EdgeJoint,
+            }
         } else {
             let (la, lb) = (wa.surface.local(r.a), wa.surface.local(r.b));
             let (ma, mb) = (wb.surface.local(r.a), wb.surface.local(r.b));
-            let (Some((a0, a1)), Some((b0, b1))) = (on_line(&wa.outline, la, lb, lin * 10.0), on_line(&wb.outline, ma, mb, lin * 10.0)) else {
+            let (Some((a0, a1)), Some((b0, b1))) = (
+                on_line(&wa.outline, la, lb, lin * 10.0),
+                on_line(&wb.outline, ma, mb, lin * 10.0),
+            ) else {
                 warnings.push("A loft edge was trimmed away".into());
                 continue;
             };
@@ -812,26 +1093,71 @@ fn loft_once(params: Params, p1: &ProfileIn, p2: &ProfileIn, opts: &LoftOpts) ->
             }
             let at = |t: f64| r.a + (r.b - r.a) * t;
             let (p, q) = (at(t0), at(t1));
-            JointKind::Tangent { on_a: Seg2::new(wa.surface.local(p), wa.surface.local(q)), on_b: Seg2::new(wb.surface.local(p), wb.surface.local(q)) }
+            JointKind::Tangent {
+                on_a: Seg2::new(wa.surface.local(p), wa.surface.local(q)),
+                on_b: Seg2::new(wb.surface.local(p), wb.surface.local(q)),
+            }
         };
         let name = namer.name(&kind);
-        model.joints.push(Joint { id: JointId(next_id), name, a: wall_ids[j.a], b: wall_ids[j.b], kind });
+        model.joints.push(Joint {
+            id: JointId(next_id),
+            name,
+            a: wall_ids[j.a],
+            b: wall_ids[j.b],
+            kind,
+        });
         next_id += 1;
     }
     for l in links.iter().filter(|l| l.tangent) {
-        let (Some(wa), Some(wb)) = (model.wall(attached_id(l.attach)).cloned(), model.wall(wall_ids[l.wall]).cloned()) else { continue };
-        let kind = JointKind::Tangent { on_a: Seg2::new(wa.surface.local(l.a), wa.surface.local(l.b)), on_b: Seg2::new(wb.surface.local(l.a), wb.surface.local(l.b)) };
+        let (Some(wa), Some(wb)) = (
+            model.wall(attached_id(l.attach)).cloned(),
+            model.wall(wall_ids[l.wall]).cloned(),
+        ) else {
+            continue;
+        };
+        let kind = JointKind::Tangent {
+            on_a: Seg2::new(wa.surface.local(l.a), wa.surface.local(l.b)),
+            on_b: Seg2::new(wb.surface.local(l.a), wb.surface.local(l.b)),
+        };
         let name = namer.name(&kind);
-        model.joints.push(Joint { id: JointId(next_id), name, a: wa.id, b: wb.id, kind });
+        model.joints.push(Joint {
+            id: JointId(next_id),
+            name,
+            a: wa.id,
+            b: wb.id,
+            kind,
+        });
         next_id += 1;
     }
-    let walls = wall_ids.iter().enumerate().map(|(i, w)| (mix(opts.key, 1, i), *w)).collect();
-    let joint_keys = model.joints.iter().enumerate().map(|(i, j)| (mix(opts.key, 2, i), j.id)).collect();
+    let walls = wall_ids
+        .iter()
+        .enumerate()
+        .map(|(i, w)| (mix(opts.key, 1, i), *w))
+        .collect();
+    let joint_keys = model
+        .joints
+        .iter()
+        .enumerate()
+        .map(|(i, j)| (mix(opts.key, 2, i), j.id))
+        .collect();
     let attached = used
         .iter()
-        .filter_map(|&ai| model.wall(attached_id(ai)).map(|w| Attached { stand_in: w.id, wall: opts.attach[ai].wall, outline: w.outline.clone() }))
+        .filter_map(|&ai| {
+            model.wall(attached_id(ai)).map(|w| Attached {
+                stand_in: w.id,
+                wall: opts.attach[ai].wall,
+                outline: w.outline.clone(),
+            })
+        })
         .collect();
-    Ok(LoftBuilt { model, strip: s, walls, joints: joint_keys, warnings, attached })
+    Ok(LoftBuilt {
+        model,
+        strip: s,
+        walls,
+        joints: joint_keys,
+        warnings,
+        attached,
+    })
 }
 
 /// Below this angle a loft wall joins a model wall with a tangent joint, not a bend.
@@ -848,9 +1174,18 @@ struct Link {
 
 /// The direction (3D) into attached wall `w` from its edge `a`–`b`, if that is a free edge of it.
 fn attach_into(w: &Attach, a: P3, b: P3) -> Option<V3> {
-    let s = Surface::Planar { origin: w.origin, u: w.u, v: w.v };
+    let s = Surface::Planar {
+        origin: w.origin,
+        u: w.u,
+        v: w.v,
+    };
     let (la, lb) = (s.local(a), s.local(b));
-    let size = w.outline.bounds().map(|(lo, hi)| (hi - lo).norm()).unwrap_or(1.0).max(1e-9);
+    let size = w
+        .outline
+        .bounds()
+        .map(|(lo, hi)| (hi - lo).norm())
+        .unwrap_or(1.0)
+        .max(1e-9);
     let mid = P2::from((la.coords + lb.coords) / 2.0);
     let nrm = poly::perp((lb - la).normalize());
     let step = 1e-4 * size;
@@ -866,19 +1201,31 @@ fn attach_into(w: &Attach, a: P3, b: P3) -> Option<V3> {
 
 /// The triangle edges lying along a free edge of an attached wall, on its definition plane:
 /// (triangle, corner, corner, attached wall).
-fn attach_edges(tris: &[[P3; 3]], attach: &[Attach], lin: f64) -> Vec<(usize, usize, usize, usize)> {
+fn attach_edges(
+    tris: &[[P3; 3]],
+    attach: &[Attach],
+    lin: f64,
+) -> Vec<(usize, usize, usize, usize)> {
     let mut out = Vec::new();
     for (ai, w) in attach.iter().enumerate() {
         let n = w.u.cross(&w.v).normalize();
-        let s = Surface::Planar { origin: w.origin, u: w.u, v: w.v };
+        let s = Surface::Planar {
+            origin: w.origin,
+            u: w.u,
+            v: w.v,
+        };
         let tol = 10.0 * lin;
         for (k, t) in tris.iter().enumerate() {
             for (a, b) in [(0, 1), (1, 2), (0, 2)] {
                 let (pa, pb) = (t[a], t[b]);
-                if (pb - pa).norm() <= tol || (pa - w.origin).dot(&n).abs() > tol || (pb - w.origin).dot(&n).abs() > tol {
+                if (pb - pa).norm() <= tol
+                    || (pa - w.origin).dot(&n).abs() > tol
+                    || (pb - w.origin).dot(&n).abs() > tol
+                {
                     continue;
                 }
-                let covered = on_line(&w.outline, s.local(pa), s.local(pb), tol).is_some_and(|(t0, t1)| t0 <= 1e-6 && t1 >= 1.0 - 1e-6);
+                let covered = on_line(&w.outline, s.local(pa), s.local(pb), tol)
+                    .is_some_and(|(t0, t1)| t0 <= 1e-6 && t1 >= 1.0 - 1e-6);
                 if covered && attach_into(w, pa, pb).is_some() {
                     out.push((k, a, b, ai));
                 }
@@ -891,10 +1238,18 @@ fn attach_edges(tris: &[[P3; 3]], attach: &[Attach], lin: f64) -> Vec<(usize, us
 /// Whether a joint is a facet joint: a tangent joint between two planar walls that meet at an
 /// angle (a sheet metal loft's tessellation).
 pub fn is_facet(m: &Model, j: &Joint) -> bool {
-    let JointKind::Tangent { .. } = j.kind else { return false };
-    match (m.wall(j.a).map(|w| w.surface), m.wall(j.b).map(|w| w.surface)) {
+    let JointKind::Tangent { .. } = j.kind else {
+        return false;
+    };
+    match (
+        m.wall(j.a).map(|w| w.surface),
+        m.wall(j.b).map(|w| w.surface),
+    ) {
         (Some(a @ Surface::Planar { .. }), Some(b @ Surface::Planar { .. })) => {
-            let (na, nb) = (a.normal().unwrap_or_default(), b.normal().unwrap_or_default());
+            let (na, nb) = (
+                a.normal().unwrap_or_default(),
+                b.normal().unwrap_or_default(),
+            );
             na.dot(&nb) < 1.0 - 1e-12
         }
         _ => false,
@@ -943,7 +1298,9 @@ pub fn triangulate(l: &[P2]) -> Vec<[usize; 3]> {
             let m = idx.len();
             let k = (0..m)
                 .min_by(|x, y| {
-                    let f = |k: usize| cross(l[idx[(k + m - 1) % m]], l[idx[k]], l[idx[(k + 1) % m]]).abs();
+                    let f = |k: usize| {
+                        cross(l[idx[(k + m - 1) % m]], l[idx[k]], l[idx[(k + 1) % m]]).abs()
+                    };
                     f(*x).total_cmp(&f(*y))
                 })
                 .unwrap_or(0);
@@ -963,13 +1320,20 @@ pub fn triangulate(l: &[P2]) -> Vec<[usize; 3]> {
 /// caller extrudes those).
 pub fn wall_slab(m: &Model, wall: WallId, removed: &[Polygon]) -> Option<Vec<[P3; 3]>> {
     let w = m.wall(wall)?;
-    let Surface::Planar { u, v, .. } = w.surface else { return None };
+    let Surface::Planar { u, v, .. } = w.surface else {
+        return None;
+    };
     if !w.outline.holes.is_empty() || !removed.is_empty() {
         return None;
     }
     let t = m.params.thickness;
     let n = u.cross(&v).normalize();
-    let size = w.outline.bounds().map(|(lo, hi)| (hi - lo).norm()).unwrap_or(1.0).max(1e-9);
+    let size = w
+        .outline
+        .bounds()
+        .map(|(lo, hi)| (hi - lo).norm())
+        .unwrap_or(1.0)
+        .max(1e-9);
     let tol = 1e-6 * size;
     // No repeated points and no points in the middle of a straight edge (they'd make side
     // faces of no area).
@@ -981,7 +1345,10 @@ pub fn wall_slab(m: &Model, wall: WallId, removed: &[Polygon]) -> Option<Vec<[P3
         }
         let drop = (0..n).find(|&i| {
             let (a, b, c) = (pts[(i + n - 1) % n], pts[i], pts[(i + 1) % n]);
-            (b - a).norm() < tol || ((c - a).norm() > tol && (b - a).perp(&(c - a)).abs() / (c - a).norm() < tol && (b - a).dot(&(c - b)) > 0.0)
+            (b - a).norm() < tol
+                || ((c - a).norm() > tol
+                    && (b - a).perp(&(c - a)).abs() / (c - a).norm() < tol
+                    && (b - a).dot(&(c - b)) > 0.0)
         });
         match drop {
             Some(i) => {
@@ -995,9 +1362,17 @@ pub fn wall_slab(m: &Model, wall: WallId, removed: &[Polygon]) -> Option<Vec<[P3
     // Each edge's side direction (in the side plane, away from the definition surface).
     let pt = |q: P2| w.surface.point(q);
     let mut side: Vec<V3> = vec![n; k];
-    for j in m.joints.iter().filter(|j| (j.a == wall || j.b == wall) && is_facet(m, j)) {
-        let Some(seg) = j.segment_on(wall) else { continue };
-        let Some(other) = m.wall(j.other(wall)).and_then(|o| o.surface.normal()) else { continue };
+    for j in m
+        .joints
+        .iter()
+        .filter(|j| (j.a == wall || j.b == wall) && is_facet(m, j))
+    {
+        let Some(seg) = j.segment_on(wall) else {
+            continue;
+        };
+        let Some(other) = m.wall(j.other(wall)).and_then(|o| o.surface.normal()) else {
+            continue;
+        };
         let d = seg.b - seg.a;
         let len = d.norm();
         if len < tol {
@@ -1029,11 +1404,17 @@ pub fn wall_slab(m: &Model, wall: WallId, removed: &[Polygon]) -> Option<Vec<[P3
                 d.cross(&side[e]).normalize()
             };
             let (s0, s1) = (plane(prev), plane(next));
-            let mtx = nalgebra::Matrix3::from_rows(&[n.transpose(), s0.transpose(), s1.transpose()]);
-            let rhs = nalgebra::Vector3::new(n.dot(&p.coords) + t, s0.dot(&p.coords), s1.dot(&p.coords));
+            let mtx =
+                nalgebra::Matrix3::from_rows(&[n.transpose(), s0.transpose(), s1.transpose()]);
+            let rhs =
+                nalgebra::Vector3::new(n.dot(&p.coords) + t, s0.dot(&p.coords), s1.dot(&p.coords));
             let fallback = || {
                 // In line: along the side direction the edges share.
-                let sd = if side[prev] != n { side[prev] } else { side[next] };
+                let sd = if side[prev] != n {
+                    side[prev]
+                } else {
+                    side[next]
+                };
                 p + sd * (t / sd.dot(&n))
             };
             if mtx.determinant().abs() < 1e-9 {
@@ -1043,7 +1424,11 @@ pub fn wall_slab(m: &Model, wall: WallId, removed: &[Polygon]) -> Option<Vec<[P3
                 Some(inv) => {
                     let x = P3::from(inv * rhs);
                     // A mitre this far out is a numerical accident.
-                    if (x - p).norm() > 50.0 * t { fallback() } else { x }
+                    if (x - p).norm() > 50.0 * t {
+                        fallback()
+                    } else {
+                        x
+                    }
                 }
                 None => fallback(),
             }
@@ -1064,7 +1449,10 @@ pub fn wall_slab(m: &Model, wall: WallId, removed: &[Polygon]) -> Option<Vec<[P3
 
 /// The volume a closed, outward-facing triangle mesh encloses.
 pub fn mesh_volume(tris: &[[P3; 3]]) -> f64 {
-    tris.iter().map(|t| t[0].coords.dot(&t[1].coords.cross(&t[2].coords))).sum::<f64>() / 6.0
+    tris.iter()
+        .map(|t| t[0].coords.dot(&t[1].coords.cross(&t[2].coords)))
+        .sum::<f64>()
+        / 6.0
 }
 
 #[cfg(test)]
@@ -1074,7 +1462,12 @@ mod tests {
 
     fn rect(z: f64, w: f64, h: f64) -> ProfileIn {
         ProfileIn {
-            points: vec![P3::new(-w / 2.0, -h / 2.0, z), P3::new(w / 2.0, -h / 2.0, z), P3::new(w / 2.0, h / 2.0, z), P3::new(-w / 2.0, h / 2.0, z)],
+            points: vec![
+                P3::new(-w / 2.0, -h / 2.0, z),
+                P3::new(w / 2.0, -h / 2.0, z),
+                P3::new(w / 2.0, h / 2.0, z),
+                P3::new(-w / 2.0, h / 2.0, z),
+            ],
             closed: true,
         }
     }
@@ -1082,10 +1475,13 @@ mod tests {
     fn circle(z: f64, r: f64, tol: f64) -> ProfileIn {
         let n = arc_pieces(r, std::f64::consts::TAU, tol);
         ProfileIn {
-            points: (0..n).map(|i| {
-                let a = i as f64 / n as f64 * std::f64::consts::TAU + std::f64::consts::FRAC_PI_4;
-                P3::new(r * a.cos(), r * a.sin(), z)
-            }).collect(),
+            points: (0..n)
+                .map(|i| {
+                    let a =
+                        i as f64 / n as f64 * std::f64::consts::TAU + std::f64::consts::FRAC_PI_4;
+                    P3::new(r * a.cos(), r * a.sin(), z)
+                })
+                .collect(),
             closed: true,
         }
     }
@@ -1102,23 +1498,53 @@ mod tests {
     fn square_to_round_has_one_triangle_per_side_and_fans_at_corners() {
         let s = strip(&rect(0.0, 100.0, 100.0), &circle(60.0, 40.0, 0.5), &[]).unwrap();
         // Each rectangle side (long, straight) meets a single circle point.
-        let long = s.triangles.iter().filter(|t| (t[0] - t[1]).norm() > 99.0 || (t[1] - t[2]).norm() > 99.0 || (t[0] - t[2]).norm() > 99.0).count();
+        let long = s
+            .triangles
+            .iter()
+            .filter(|t| {
+                (t[0] - t[1]).norm() > 99.0
+                    || (t[1] - t[2]).norm() > 99.0
+                    || (t[0] - t[2]).norm() > 99.0
+            })
+            .count();
         assert_eq!(long, 4);
         assert_eq!(s.triangles.len(), 4 + circle(60.0, 40.0, 0.5).points.len());
     }
 
     #[test]
     fn rectangle_to_circle_flattens_and_its_slabs_match_the_flat() {
-        let p = Params { thickness: 1.0, ..Default::default() };
-        let b = loft(p, &rect(0.0, 100.0, 80.0), &circle(60.0, 30.0, 1.0), &LoftOpts::default()).unwrap();
+        let p = Params {
+            thickness: 1.0,
+            ..Default::default()
+        };
+        let b = loft(
+            p,
+            &rect(0.0, 100.0, 80.0),
+            &circle(60.0, 30.0, 1.0),
+            &LoftOpts::default(),
+        )
+        .unwrap();
         let flat = flatten(&b.model);
         assert!(flat.is_ok(), "{:?}", flat.errors);
         assert_eq!(flat.parts.len(), 1);
-        let rips = b.model.joints.iter().filter(|j| matches!(j.kind, JointKind::Rip { .. })).count();
+        let rips = b
+            .model
+            .joints
+            .iter()
+            .filter(|j| matches!(j.kind, JointKind::Rip { .. }))
+            .count();
         assert_eq!(rips, 1);
         let area = flat.parts[0].area();
-        let volume: f64 = b.model.walls.iter().map(|w| mesh_volume(&wall_slab(&b.model, w.id, &[]).unwrap())).sum();
-        assert!(((area * p.thickness) - volume).abs() / volume < 0.02, "flat {area} × T vs folded {volume}");
+        let volume: f64 = b
+            .model
+            .walls
+            .iter()
+            .map(|w| mesh_volume(&wall_slab(&b.model, w.id, &[]).unwrap()))
+            .sum();
+        assert!(
+            ((area * p.thickness) - volume).abs() / volume < 0.02,
+            "flat {area} × T vs folded {volume}"
+        );
         // Mitred slabs meet face to face: every slab is a proper solid.
         for w in &b.model.walls {
             assert!(mesh_volume(&wall_slab(&b.model, w.id, &[]).unwrap()) > 0.0);
@@ -1127,21 +1553,66 @@ mod tests {
 
     #[test]
     fn a_frustum_bends_at_its_corners() {
-        let p = Params { thickness: 1.0, bend_radius: 2.0, ..Default::default() };
-        let b = loft(p, &rect(0.0, 100.0, 100.0), &rect(50.0, 50.0, 50.0), &LoftOpts { bends: true, ..Default::default() }).unwrap();
+        let p = Params {
+            thickness: 1.0,
+            bend_radius: 2.0,
+            ..Default::default()
+        };
+        let b = loft(
+            p,
+            &rect(0.0, 100.0, 100.0),
+            &rect(50.0, 50.0, 50.0),
+            &LoftOpts {
+                bends: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(b.model.walls.len(), 4);
         let bends = b.model.joints.iter().filter(|j| j.bend().is_some()).count();
-        assert_eq!(bends, 3, "{:?}", b.model.joints.iter().map(|j| &j.name).collect::<Vec<_>>());
+        assert_eq!(
+            bends,
+            3,
+            "{:?}",
+            b.model.joints.iter().map(|j| &j.name).collect::<Vec<_>>()
+        );
         assert!(b.model.validate().is_empty(), "{:?}", b.model.validate());
         assert!(flatten(&b.model).is_ok());
     }
 
     #[test]
     fn open_profiles_and_a_ripped_connection() {
-        let a = ProfileIn { points: vec![P3::new(0.0, 0.0, 0.0), P3::new(50.0, 0.0, 0.0), P3::new(50.0, 50.0, 0.0)], closed: false };
-        let b = ProfileIn { points: vec![P3::new(0.0, 0.0, 40.0), P3::new(30.0, 0.0, 40.0), P3::new(30.0, 30.0, 40.0)], closed: false };
-        let c = ConnectionIn { a: P3::new(50.0, 0.0, 0.0), b: P3::new(30.0, 0.0, 40.0), rip: true };
-        let built = loft(Params::default(), &a, &b, &LoftOpts { connections: vec![c], ..Default::default() }).unwrap();
+        let a = ProfileIn {
+            points: vec![
+                P3::new(0.0, 0.0, 0.0),
+                P3::new(50.0, 0.0, 0.0),
+                P3::new(50.0, 50.0, 0.0),
+            ],
+            closed: false,
+        };
+        let b = ProfileIn {
+            points: vec![
+                P3::new(0.0, 0.0, 40.0),
+                P3::new(30.0, 0.0, 40.0),
+                P3::new(30.0, 30.0, 40.0),
+            ],
+            closed: false,
+        };
+        let c = ConnectionIn {
+            a: P3::new(50.0, 0.0, 0.0),
+            b: P3::new(30.0, 0.0, 40.0),
+            rip: true,
+        };
+        let built = loft(
+            Params::default(),
+            &a,
+            &b,
+            &LoftOpts {
+                connections: vec![c],
+                ..Default::default()
+            },
+        )
+        .unwrap();
         let flat = flatten(&built.model);
         assert!(flat.is_ok());
         assert_eq!(flat.parts.len(), 2, "the rip cuts it in two");
@@ -1149,36 +1620,89 @@ mod tests {
 
     #[test]
     fn crossing_connections_are_refused() {
-        let a = ProfileIn { points: (0..5).map(|i| P3::new(i as f64 * 10.0, 0.0, 0.0)).collect(), closed: false };
-        let b = ProfileIn { points: (0..5).map(|i| P3::new(i as f64 * 10.0, 0.0, 30.0)).collect(), closed: false };
+        let a = ProfileIn {
+            points: (0..5).map(|i| P3::new(i as f64 * 10.0, 0.0, 0.0)).collect(),
+            closed: false,
+        };
+        let b = ProfileIn {
+            points: (0..5)
+                .map(|i| P3::new(i as f64 * 10.0, 0.0, 30.0))
+                .collect(),
+            closed: false,
+        };
         let cs = vec![
-            ConnectionIn { a: P3::new(10.0, 0.0, 0.0), b: P3::new(30.0, 0.0, 30.0), rip: false },
-            ConnectionIn { a: P3::new(30.0, 0.0, 0.0), b: P3::new(10.0, 0.0, 30.0), rip: false },
+            ConnectionIn {
+                a: P3::new(10.0, 0.0, 0.0),
+                b: P3::new(30.0, 0.0, 30.0),
+                rip: false,
+            },
+            ConnectionIn {
+                a: P3::new(30.0, 0.0, 0.0),
+                b: P3::new(10.0, 0.0, 30.0),
+                rip: false,
+            },
         ];
         assert_eq!(strip(&a, &b, &cs).unwrap_err(), LoftError::ConnectionsCross);
     }
 
     #[test]
     fn a_cone_to_a_point() {
-        let b = loft(Params::default(), &circle(0.0, 30.0, 0.5), &ProfileIn::point(P3::new(0.0, 0.0, 40.0)), &LoftOpts::default()).unwrap();
+        let b = loft(
+            Params::default(),
+            &circle(0.0, 30.0, 0.5),
+            &ProfileIn::point(P3::new(0.0, 0.0, 40.0)),
+            &LoftOpts::default(),
+        )
+        .unwrap();
         assert!(flatten(&b.model).is_ok());
     }
     #[test]
     fn rectangle_to_circle_with_bends_on_flattens() {
-        for (offset, tol, bends) in [(0.0, 1.0, true), (std::f64::consts::FRAC_PI_4, 1.0, true), (0.0, 4.0, false), (0.0, 4.0, true)] {
+        for (offset, tol, bends) in [
+            (0.0, 1.0, true),
+            (std::f64::consts::FRAC_PI_4, 1.0, true),
+            (0.0, 4.0, false),
+            (0.0, 4.0, true),
+        ] {
             let n = arc_pieces(30.0, std::f64::consts::TAU, tol);
             let c = ProfileIn {
-                points: (0..n).map(|i| {
-                    let a = i as f64 / n as f64 * std::f64::consts::TAU + offset;
-                    P3::new(30.0 * a.cos(), 30.0 * a.sin(), 60.0)
-                }).collect(),
+                points: (0..n)
+                    .map(|i| {
+                        let a = i as f64 / n as f64 * std::f64::consts::TAU + offset;
+                        P3::new(30.0 * a.cos(), 30.0 * a.sin(), 60.0)
+                    })
+                    .collect(),
                 closed: true,
             };
-            let p = Params { thickness: 1.5, bend_radius: 2.0, ..Default::default() };
-            let b = loft(p, &rect(0.0, 100.0, 80.0), &c, &LoftOpts { bends, ..Default::default() }).unwrap();
+            let p = Params {
+                thickness: 1.5,
+                bend_radius: 2.0,
+                ..Default::default()
+            };
+            let b = loft(
+                p,
+                &rect(0.0, 100.0, 80.0),
+                &c,
+                &LoftOpts {
+                    bends,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
             let flat = flatten(&b.model);
-            let names: Vec<_> = b.model.joints.iter().filter(|j| !matches!(j.kind, JointKind::Tangent { .. })).map(|j| j.name.clone()).collect();
-            assert!(flat.is_ok(), "offset {offset} tol {tol} bends {bends}: {:?} joints {names:?} warnings {:?}", flat.errors.iter().map(|e| e.message()).collect::<Vec<_>>(), b.warnings);
+            let names: Vec<_> = b
+                .model
+                .joints
+                .iter()
+                .filter(|j| !matches!(j.kind, JointKind::Tangent { .. }))
+                .map(|j| j.name.clone())
+                .collect();
+            assert!(
+                flat.is_ok(),
+                "offset {offset} tol {tol} bends {bends}: {:?} joints {names:?} warnings {:?}",
+                flat.errors.iter().map(|e| e.message()).collect::<Vec<_>>(),
+                b.warnings
+            );
         }
     }
 
@@ -1187,23 +1711,50 @@ mod tests {
         for (tol, conn) in [(1.0, false), (4.0, false), (1.0, true), (4.0, true)] {
             let n = arc_pieces(30.0, std::f64::consts::TAU, tol);
             let c = ProfileIn {
-                points: (0..n).map(|i| {
-                    let a = i as f64 / n as f64 * std::f64::consts::TAU;
-                    P3::new(30.0 * a.cos(), 30.0 * a.sin(), 60.0)
-                }).collect(),
+                points: (0..n)
+                    .map(|i| {
+                        let a = i as f64 / n as f64 * std::f64::consts::TAU;
+                        P3::new(30.0 * a.cos(), 30.0 * a.sin(), 60.0)
+                    })
+                    .collect(),
                 closed: true,
             };
             let r = rect(0.0, 100.0, 80.0);
             let connections = if conn {
                 let s = strip(&r, &c, &[]).unwrap();
                 let m = s.connections[0];
-                vec![m, ConnectionIn { a: r.points[2], b: c.points[n / 2], rip: true }]
+                vec![
+                    m,
+                    ConnectionIn {
+                        a: r.points[2],
+                        b: c.points[n / 2],
+                        rip: true,
+                    },
+                ]
             } else {
                 Vec::new()
             };
-            let p = Params { thickness: 1.5, bend_radius: 2.0, ..Default::default() };
-            let b = loft(p, &r, &c, &LoftOpts { bends: true, connections, ..Default::default() }).unwrap();
-            assert!(b.warnings.is_empty(), "tol {tol} connections {conn}: {:?}", b.warnings);
+            let p = Params {
+                thickness: 1.5,
+                bend_radius: 2.0,
+                ..Default::default()
+            };
+            let b = loft(
+                p,
+                &r,
+                &c,
+                &LoftOpts {
+                    bends: true,
+                    connections,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            assert!(
+                b.warnings.is_empty(),
+                "tol {tol} connections {conn}: {:?}",
+                b.warnings
+            );
             assert!(flatten(&b.model).is_ok());
         }
     }

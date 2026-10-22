@@ -52,11 +52,20 @@ pub struct Segmented {
 
 impl Segmented {
     pub fn new(name: impl Into<Cow<'static, str>>) -> Self {
-        Self { name: name.into(), options: Vec::new(), selected: 0 }
+        Self {
+            name: name.into(),
+            options: Vec::new(),
+            selected: 0,
+        }
     }
 
     /// A segment: its label, an icon (or none) and a tooltip.
-    pub fn option(mut self, label: impl Into<String>, icon: Option<&'static str>, tooltip: impl Into<String>) -> Self {
+    pub fn option(
+        mut self,
+        label: impl Into<String>,
+        icon: Option<&'static str>,
+        tooltip: impl Into<String>,
+    ) -> Self {
         self.options.push((label.into(), icon, tooltip.into()));
         self
     }
@@ -74,27 +83,48 @@ impl Segmented {
         (
             Name::new(name.clone()),
             SegmentedState { selected },
-            Node { column_gap: Val::Px(1.0), padding: UiRect::all(Val::Px(1.0)), border: UiRect::all(Val::Px(1.0)), border_radius: BorderRadius::all(Val::Px(t.radius)), flex_shrink: 0.0, align_items: AlignItems::Center, ..default() },
+            Node {
+                column_gap: Val::Px(1.0),
+                padding: UiRect::all(Val::Px(1.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(t.radius)),
+                flex_shrink: 0.0,
+                align_items: AlignItems::Center,
+                ..default()
+            },
             BorderColor::all(t.border),
             Children::spawn(SpawnWith(move |p: &mut ChildSpawner| {
                 let row = p.target_entity();
                 for (i, (label, icon, tip)) in options.into_iter().enumerate() {
-                    let mut b = Button::new(format!("{name}-{i}")).label(label).small().ghost().selected(i == selected).tooltip(tip);
+                    let mut b = Button::new(format!("{name}-{i}"))
+                        .label(label)
+                        .small()
+                        .ghost()
+                        .selected(i == selected)
+                        .tooltip(tip);
                     if let Some(icon) = icon {
                         b = b.icon(icon).icon_size(12.0);
                     }
-                    p.spawn((b.build(&t), Segment { row, index: i })).entry::<Node>().and_modify(|mut n| {
-                        n.height = Val::Px(18.0);
-                        n.border = UiRect::ZERO;
-                        n.padding = UiRect::horizontal(Val::Px(6.0));
-                    });
+                    p.spawn((b.build(&t), Segment { row, index: i }))
+                        .entry::<Node>()
+                        .and_modify(|mut n| {
+                            n.height = Val::Px(18.0);
+                            n.border = UiRect::ZERO;
+                            n.padding = UiRect::horizontal(Val::Px(6.0));
+                        });
                 }
             })),
         )
     }
 }
 
-fn on_segment(a: On<Activate>, q: Query<&Segment>, mut rows: Query<(&mut SegmentedState, &Children)>, segments: Query<&Segment>, mut commands: Commands) {
+fn on_segment(
+    a: On<Activate>,
+    q: Query<&Segment>,
+    mut rows: Query<(&mut SegmentedState, &Children)>,
+    segments: Query<&Segment>,
+    mut commands: Commands,
+) {
     let Ok(seg) = q.get(a.entity) else { return };
     if let Ok((mut state, children)) = rows.get_mut(seg.row) {
         if state.selected != seg.index {
@@ -110,5 +140,8 @@ fn on_segment(a: On<Activate>, q: Query<&Segment>, mut rows: Query<(&mut Segment
             }
         }
     }
-    commands.trigger(SegmentedSelect { entity: seg.row, index: seg.index });
+    commands.trigger(SegmentedSelect {
+        entity: seg.row,
+        index: seg.index,
+    });
 }

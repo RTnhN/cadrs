@@ -52,7 +52,13 @@ pub struct SplitterMoved {
 
 /// A horizontal divider for `target` (the pane before it in their parent's column). Name it with
 /// `name`; each pane keeps at least `min_before` / `min_after` px.
-pub fn horizontal_splitter(theme: &Theme, name: &str, target: Entity, min_before: f32, min_after: f32) -> impl Bundle {
+pub fn horizontal_splitter(
+    theme: &Theme,
+    name: &str,
+    target: Entity,
+    min_before: f32,
+    min_after: f32,
+) -> impl Bundle {
     (
         Name::new(name.to_string()),
         Splitter {
@@ -126,7 +132,9 @@ fn on_drag(
         return;
     };
     let room = p.size().y * p.inverse_scale_factor() - 1.0 - s.min_after;
-    let h = (s.start + ev.distance.y).clamp(s.min_before, room.max(s.min_before)).round();
+    let h = (s.start + ev.distance.y)
+        .clamp(s.min_before, room.max(s.min_before))
+        .round();
     if let Ok(mut n) = q_node.get_mut(s.target)
         && n.height != Val::Px(h)
     {
@@ -134,7 +142,12 @@ fn on_drag(
     }
 }
 
-fn on_drag_end(mut ev: On<Pointer<DragEnd>>, mut q: Query<&mut Splitter>, q_node: Query<&Node>, mut commands: Commands) {
+fn on_drag_end(
+    mut ev: On<Pointer<DragEnd>>,
+    mut q: Query<&mut Splitter>,
+    q_node: Query<&Node>,
+    mut commands: Commands,
+) {
     let Ok(mut s) = q.get_mut(ev.entity) else {
         return;
     };
@@ -143,7 +156,10 @@ fn on_drag_end(mut ev: On<Pointer<DragEnd>>, mut q: Query<&mut Splitter>, q_node
         return;
     }
     s.dragging = false;
-    if let Ok(Node { height: Val::Px(h), .. }) = q_node.get(s.target) {
+    if let Ok(Node {
+        height: Val::Px(h), ..
+    }) = q_node.get(s.target)
+    {
         commands.trigger(SplitterMoved {
             entity: ev.entity,
             target: s.target,

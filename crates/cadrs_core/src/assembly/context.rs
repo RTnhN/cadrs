@@ -48,8 +48,15 @@ pub type ContextNo = u32;
 /// The feature id of the context part standing for the assembly occurrence `occurrence` in the
 /// context `context` of a Part Studio.
 pub fn context_id(context: ContextNo, occurrence: InstanceId) -> FeatureId {
-    let mix = if context == 0 { 0 } else { (cadrs_kernel::naming::stable_hash(format!("context {context}").as_bytes()) as u128) << 32 | context as u128 };
-    FeatureId(Uuid::from_u128(((occurrence.0.as_u128() ^ mix) & LOW96) | (MAGIC << 96)))
+    let mix = if context == 0 {
+        0
+    } else {
+        (cadrs_kernel::naming::stable_hash(format!("context {context}").as_bytes()) as u128) << 32
+            | context as u128
+    };
+    FeatureId(Uuid::from_u128(
+        ((occurrence.0.as_u128() ^ mix) & LOW96) | (MAGIC << 96),
+    ))
 }
 
 /// Whether a feature id is a context part's.
@@ -62,7 +69,8 @@ pub fn is_context(feature: FeatureId) -> bool {
 /// sees it ([`solids`]), but it is not in the document. The app commits it with the command that
 /// first references it ([`pending_to_commit`], [`AddContext`]), in the same undo step. Kept per
 /// document and Part Studio.
-static PENDING: std::sync::RwLock<Vec<((DocumentId, ElementId), StudioContext)>> = std::sync::RwLock::new(Vec::new());
+static PENDING: std::sync::RwLock<Vec<((DocumentId, ElementId), StudioContext)>> =
+    std::sync::RwLock::new(Vec::new());
 
 /// Sets (or, `None`, drops) the pending context of the Part Studio `studio` of the document
 /// `doc` (see [`pending`]).
@@ -76,17 +84,30 @@ pub fn set_pending(doc: DocumentId, studio: ElementId, ctx: Option<StudioContext
 
 /// The pending context of the Part Studio `studio` of the document `doc` (MC2.5).
 pub fn pending(doc: DocumentId, studio: ElementId) -> Option<StudioContext> {
-    PENDING.read().ok()?.iter().find(|(k, _)| *k == (doc, studio)).map(|(_, c)| c.clone())
+    PENDING
+        .read()
+        .ok()?
+        .iter()
+        .find(|(k, _)| *k == (doc, studio))
+        .map(|(_, c)| c.clone())
 }
 
 /// The id of the pending context of a Part Studio, without copying it.
 pub fn pending_id(doc: DocumentId, studio: ElementId) -> Option<ContextNo> {
-    PENDING.read().ok()?.iter().find(|(k, _)| *k == (doc, studio)).map(|(_, c)| c.id)
+    PENDING
+        .read()
+        .ok()?
+        .iter()
+        .find(|(k, _)| *k == (doc, studio))
+        .map(|(_, c)| c.id)
 }
 
 /// The contexts of the Part Studio `studio` with its pending one (unless the document has it).
 pub fn with_pending(doc: &Document, studio: ElementId) -> Vec<StudioContext> {
-    let mut out: Vec<StudioContext> = doc.element(studio).map(|e| e.contexts.clone()).unwrap_or_default();
+    let mut out: Vec<StudioContext> = doc
+        .element(studio)
+        .map(|e| e.contexts.clone())
+        .unwrap_or_default();
     if pending_id(doc.id, studio).is_some_and(|id| !out.iter().any(|c| c.id == id))
         && let Some(p) = pending(doc.id, studio)
     {
@@ -96,7 +117,11 @@ pub fn with_pending(doc: &Document, studio: ElementId) -> Vec<StudioContext> {
 }
 
 /// The context (pending one included) a context part's feature id belongs to, and the part.
-pub fn find_part(doc: &Document, studio: ElementId, feature: FeatureId) -> Option<(StudioContext, ContextPart)> {
+pub fn find_part(
+    doc: &Document,
+    studio: ElementId,
+    feature: FeatureId,
+) -> Option<(StudioContext, ContextPart)> {
     if !is_context(feature) {
         return None;
     }
@@ -112,10 +137,22 @@ pub fn find_part(doc: &Document, studio: ElementId, feature: FeatureId) -> Optio
 
 /// A pending context of this document a feature now references, to commit (MC2.5).
 pub fn pending_to_commit(doc: &Document) -> Option<(ElementId, StudioContext)> {
-    let all: Vec<(ElementId, StudioContext)> = PENDING.read().ok()?.iter().filter(|((d, _), _)| *d == doc.id).map(|((_, s), c)| (*s, c.clone())).collect();
+    let all: Vec<(ElementId, StudioContext)> = PENDING
+        .read()
+        .ok()?
+        .iter()
+        .filter(|((d, _), _)| *d == doc.id)
+        .map(|((_, s), c)| (*s, c.clone()))
+        .collect();
     all.into_iter().find(|(studio, ctx)| {
-        let Some(el) = doc.element(*studio) else { return false };
-        el.context(ctx.id).is_none() && el.features().iter().any(|f| context_refs(f).iter().any(|r| ctx.part(*r).is_some()))
+        let Some(el) = doc.element(*studio) else {
+            return false;
+        };
+        el.context(ctx.id).is_none()
+            && el
+                .features()
+                .iter()
+                .any(|f| context_refs(f).iter().any(|r| ctx.part(*r).is_some()))
     })
 }
 
@@ -181,7 +218,11 @@ fn is_identity(p: &Pose) -> bool {
 impl StudioContext {
     /// Its name as shown ("Context 1" until renamed).
     pub fn label(&self) -> String {
-        if self.name.trim().is_empty() { format!("Context {}", self.id + 1) } else { self.name.clone() }
+        if self.name.trim().is_empty() {
+            format!("Context {}", self.id + 1)
+        } else {
+            self.name.clone()
+        }
     }
 
     /// The context part with the feature id `feature`.
@@ -192,7 +233,10 @@ impl StudioContext {
     /// The features the context part's source studio had (frozen), or `None` for a context from
     /// before frozen contexts.
     pub fn frozen(&self, element: ElementId) -> Option<&[Feature]> {
-        self.studios.iter().find(|s| s.element == element).map(|s| s.features.as_slice())
+        self.studios
+            .iter()
+            .find(|s| s.element == element)
+            .map(|s| s.features.as_slice())
     }
 }
 
@@ -231,7 +275,11 @@ pub fn sources_fingerprint(doc: &Document, parts: &[ContextPart]) -> u64 {
         let Some(el) = doc.element(e) else { continue };
         // A PCB Studio's boards by their layouts' hashes (the layouts themselves are big).
         let text = match el.pcb() {
-            Some(p) => p.boards.iter().map(|b| format!("{:?}:{};", b.id, b.derived_layout().1)).collect(),
+            Some(p) => p
+                .boards
+                .iter()
+                .map(|b| format!("{:?}:{};", b.id, b.derived_layout().1))
+                .collect(),
             None => ron::to_string(el.features()).unwrap_or_default(),
         };
         for b in e.to_string().bytes().chain(text.bytes()) {
@@ -245,9 +293,14 @@ pub fn sources_fingerprint(doc: &Document, parts: &[ContextPart]) -> u64 {
 /// The Part Studio an instance's part comes from (for Edit in context), if it is a part or
 /// rigid Part Studio instance.
 pub fn studio_of(doc: &Document, assembly: ElementId, instance: InstanceId) -> Option<ElementId> {
-    let i = doc.element(assembly)?.assembly_model()?.instance(instance)?;
+    let i = doc
+        .element(assembly)?
+        .assembly_model()?
+        .instance(instance)?;
     match i.source {
-        InstanceSource::Part { element, .. } | InstanceSource::Studio { element, .. } => Some(element),
+        InstanceSource::Part { element, .. } | InstanceSource::Studio { element, .. } => {
+            Some(element)
+        }
         InstanceSource::Assembly { .. } => None,
     }
 }
@@ -255,60 +308,147 @@ pub fn studio_of(doc: &Document, assembly: ElementId, instance: InstanceId) -> O
 /// The snapshot of `assembly` for the Part Studio `studio` as context `id`, placed by
 /// `to_studio` (assembly coordinates to the studio's): every part at any depth that isn't from
 /// `studio` and isn't hidden, with its Part Studio's features as they are now.
-pub fn snapshot_with(doc: &Document, assembly: ElementId, studio: ElementId, instance: InstanceId, to_studio: Pose, id: ContextNo) -> Result<StudioContext, CommandError> {
-    let asm = doc.element(assembly).and_then(|e| e.assembly_model()).ok_or(CommandError::ElementNotFound(assembly))?;
+pub fn snapshot_with(
+    doc: &Document,
+    assembly: ElementId,
+    studio: ElementId,
+    instance: InstanceId,
+    to_studio: Pose,
+    id: ContextNo,
+) -> Result<StudioContext, CommandError> {
+    let asm = doc
+        .element(assembly)
+        .and_then(|e| e.assembly_model())
+        .ok_or(CommandError::ElementNotFound(assembly))?;
     let mut studios: Vec<ContextSource> = Vec::new();
     let mut parts = Vec::new();
-    for o in occurrences(doc, asm).into_iter().filter(|o| o.element != studio && !o.hidden) {
-        let Some(src) = doc.element(o.element) else { continue };
+    for o in occurrences(doc, asm)
+        .into_iter()
+        .filter(|o| o.element != studio && !o.hidden)
+    {
+        let Some(src) = doc.element(o.element) else {
+            continue;
+        };
         if !studios.iter().any(|s| s.element == o.element) {
             // A board's PCB Studio: its boards as Derived features.
             let features = src.active_part_features();
-            studios.push(ContextSource { element: o.element, features });
+            studios.push(ContextSource {
+                element: o.element,
+                features,
+            });
         }
         parts.push(ContextPart {
             id: context_id(id, o.id),
             element: o.element,
             part: o.part,
             pose: o.pose.then(&to_studio),
-            name: format!("{} <{}>", super::source_part_name(doc, &InstanceSource::Part { element: o.element, part: o.part }, None), o.index),
+            name: format!(
+                "{} <{}>",
+                super::source_part_name(
+                    doc,
+                    &InstanceSource::Part {
+                        element: o.element,
+                        part: o.part
+                    },
+                    None
+                ),
+                o.index
+            ),
             appearance: src.part_prop(o.part).and_then(|p| p.appearance),
         });
     }
     let sources = sources_fingerprint(doc, &parts);
-    Ok(StudioContext { id, name: String::new(), assembly, document: None, instance, origin: if instance == InstanceId::ORIGIN { to_studio.inverse() } else { Pose::IDENTITY }, parts, studios, hidden: false, sources })
+    Ok(StudioContext {
+        id,
+        name: String::new(),
+        assembly,
+        document: None,
+        instance,
+        origin: if instance == InstanceId::ORIGIN {
+            to_studio.inverse()
+        } else {
+            Pose::IDENTITY
+        },
+        parts,
+        studios,
+        hidden: false,
+        sources,
+    })
 }
 
 /// The context of the Part Studio of `instance` in `assembly` as the assembly is now, numbered
 /// 0 (see [`snapshot_as`]).
-pub fn snapshot(doc: &Document, assembly: ElementId, instance: InstanceId) -> Result<StudioContext, CommandError> {
+pub fn snapshot(
+    doc: &Document,
+    assembly: ElementId,
+    instance: InstanceId,
+) -> Result<StudioContext, CommandError> {
     snapshot_as(doc, assembly, instance, 0)
 }
 
 /// The context `id` of the Part Studio of `instance` (its primary instance) in `assembly` as the
 /// assembly is now: every other part placed relative to the instance.
-pub fn snapshot_as(doc: &Document, assembly: ElementId, instance: InstanceId, id: ContextNo) -> Result<StudioContext, CommandError> {
-    let asm = doc.element(assembly).and_then(|e| e.assembly_model()).ok_or(CommandError::ElementNotFound(assembly))?;
-    let inst = asm.instance(instance).ok_or(CommandError::Invalid(NO_PRIMARY.into()))?;
+pub fn snapshot_as(
+    doc: &Document,
+    assembly: ElementId,
+    instance: InstanceId,
+    id: ContextNo,
+) -> Result<StudioContext, CommandError> {
+    let asm = doc
+        .element(assembly)
+        .and_then(|e| e.assembly_model())
+        .ok_or(CommandError::ElementNotFound(assembly))?;
+    let inst = asm
+        .instance(instance)
+        .ok_or(CommandError::Invalid(NO_PRIMARY.into()))?;
     let studio = match inst.source {
         InstanceSource::Part { element, .. } | InstanceSource::Studio { element, .. } => element,
-        InstanceSource::Assembly { .. } => return Err(CommandError::Invalid("a subassembly is edited in its own tab".into())),
+        InstanceSource::Assembly { .. } => {
+            return Err(CommandError::Invalid(
+                "a subassembly is edited in its own tab".into(),
+            ));
+        }
     };
     snapshot_with(doc, assembly, studio, instance, inst.pose.inverse(), id)
 }
 
 /// Why a context can't be updated without its primary instance (MC3.4).
-pub const NO_PRIMARY: &str = "The context has no primary instance: set one in the assembly (Set as primary instance)";
+pub const NO_PRIMARY: &str =
+    "The context has no primary instance: set one in the assembly (Set as primary instance)";
 
 /// The context `ctx` of the Part Studio `studio` as the assembly is now (Update context): the
 /// same number, name and eye. Fails without a primary instance (MC3.4).
-pub fn resnapshot(doc: &Document, studio: ElementId, ctx: &StudioContext) -> Result<StudioContext, CommandError> {
+pub fn resnapshot(
+    doc: &Document,
+    studio: ElementId,
+    ctx: &StudioContext,
+) -> Result<StudioContext, CommandError> {
     let mut now = if ctx.instance == InstanceId::ORIGIN {
-        snapshot_with(doc, ctx.assembly, studio, InstanceId::ORIGIN, ctx.origin.inverse(), ctx.id)?
+        snapshot_with(
+            doc,
+            ctx.assembly,
+            studio,
+            InstanceId::ORIGIN,
+            ctx.origin.inverse(),
+            ctx.id,
+        )?
     } else {
-        let asm = doc.element(ctx.assembly).and_then(|e| e.assembly_model()).ok_or(CommandError::ElementNotFound(ctx.assembly))?;
-        let inst = asm.instance(ctx.instance).filter(|i| !i.suppressed).ok_or(CommandError::Invalid(NO_PRIMARY.into()))?;
-        snapshot_with(doc, ctx.assembly, studio, ctx.instance, inst.pose.inverse(), ctx.id)?
+        let asm = doc
+            .element(ctx.assembly)
+            .and_then(|e| e.assembly_model())
+            .ok_or(CommandError::ElementNotFound(ctx.assembly))?;
+        let inst = asm
+            .instance(ctx.instance)
+            .filter(|i| !i.suppressed)
+            .ok_or(CommandError::Invalid(NO_PRIMARY.into()))?;
+        snapshot_with(
+            doc,
+            ctx.assembly,
+            studio,
+            ctx.instance,
+            inst.pose.inverse(),
+            ctx.id,
+        )?
     };
     now.name = ctx.name.clone();
     now.hidden = ctx.hidden;
@@ -331,14 +471,31 @@ pub enum ContextStatus {
 
 /// See [`ContextStatus`].
 pub fn status(doc: &Document, studio: ElementId, ctx: &StudioContext) -> ContextStatus {
-    if ctx.document.is_some() || doc.element(ctx.assembly).and_then(|e| e.assembly_model()).is_none() {
+    if ctx.document.is_some()
+        || doc
+            .element(ctx.assembly)
+            .and_then(|e| e.assembly_model())
+            .is_none()
+    {
         return ContextStatus::Unknown;
     }
     match resnapshot(doc, studio, ctx) {
         Ok(now) => {
-            let moved = now.parts.iter().map(|p| (p.id, p.element, p.part, p.pose)).ne(ctx.parts.iter().map(|p| (p.id, p.element, p.part, p.pose)));
-            let edited = if ctx.studios.is_empty() { ctx.sources != 0 && now.sources != ctx.sources } else { now.studios != ctx.studios };
-            if moved || edited { ContextStatus::OutOfDate } else { ContextStatus::UpToDate }
+            let moved = now
+                .parts
+                .iter()
+                .map(|p| (p.id, p.element, p.part, p.pose))
+                .ne(ctx.parts.iter().map(|p| (p.id, p.element, p.part, p.pose)));
+            let edited = if ctx.studios.is_empty() {
+                ctx.sources != 0 && now.sources != ctx.sources
+            } else {
+                now.studios != ctx.studios
+            };
+            if moved || edited {
+                ContextStatus::OutOfDate
+            } else {
+                ContextStatus::UpToDate
+            }
         }
         Err(CommandError::Invalid(m)) if m == NO_PRIMARY => ContextStatus::NoPrimary,
         Err(_) => ContextStatus::Unknown,
@@ -347,7 +504,11 @@ pub fn status(doc: &Document, studio: ElementId, ctx: &StudioContext) -> Context
 
 /// The features a context part's source studio is built from: the frozen ones, or (an old
 /// context) the studio's current ones.
-pub fn source_features(doc: &Document, ctx: &StudioContext, element: ElementId) -> Option<Vec<Feature>> {
+pub fn source_features(
+    doc: &Document,
+    ctx: &StudioContext,
+    element: ElementId,
+) -> Option<Vec<Feature>> {
     match ctx.frozen(element) {
         Some(f) => Some(f.to_vec()),
         None if ctx.studios.is_empty() => doc.element(element).map(|e| e.active_part_features()),
@@ -358,14 +519,24 @@ pub fn source_features(doc: &Document, ctx: &StudioContext, element: ElementId) 
 /// The parts of the context `ctx` as parts of the studio's view (studio coordinates), with their
 /// settings (appearance): each is its source part, from the snapshot's features, moved to where
 /// the context has it. `build_of` rebuilds a source studio's features.
-pub fn parts_of(doc: &Document, ctx: &StudioContext, mut build_of: impl FnMut(ElementId, &[Feature]) -> Option<Arc<Build>>) -> (Vec<Part>, Vec<PartProps>) {
+pub fn parts_of(
+    doc: &Document,
+    ctx: &StudioContext,
+    mut build_of: impl FnMut(ElementId, &[Feature]) -> Option<Arc<Build>>,
+) -> (Vec<Part>, Vec<PartProps>) {
     let mut builds: HashMap<ElementId, Option<Arc<Build>>> = HashMap::new();
     let mut parts = Vec::new();
     let mut props = Vec::new();
     for c in &ctx.parts {
-        let build = builds.entry(c.element).or_insert_with(|| source_features(doc, ctx, c.element).and_then(|f| build_of(c.element, &f)));
-        let Some(build) = build.as_ref() else { continue };
-        let Some(src) = build.part(c.part) else { continue };
+        let build = builds.entry(c.element).or_insert_with(|| {
+            source_features(doc, ctx, c.element).and_then(|f| build_of(c.element, &f))
+        });
+        let Some(build) = build.as_ref() else {
+            continue;
+        };
+        let Some(src) = build.part(c.part) else {
+            continue;
+        };
         let id = PartId::new(c.id, 0);
         let mut p = PartProps::new(id);
         p.name = Some(c.name.clone());
@@ -396,7 +567,11 @@ pub fn parts_of(doc: &Document, ctx: &StudioContext, mut build_of: impl FnMut(El
 }
 
 /// The parts of every context of the Part Studio `studio` (see [`parts_of`]).
-pub fn parts(doc: &Document, studio: ElementId, mut build_of: impl FnMut(ElementId, &[Feature]) -> Option<Arc<Build>>) -> (Vec<Part>, Vec<PartProps>) {
+pub fn parts(
+    doc: &Document,
+    studio: ElementId,
+    mut build_of: impl FnMut(ElementId, &[Feature]) -> Option<Arc<Build>>,
+) -> (Vec<Part>, Vec<PartProps>) {
     let mut out = (Vec::new(), Vec::new());
     for ctx in &with_pending(doc, studio) {
         let (p, q) = parts_of(doc, ctx, &mut build_of);
@@ -409,7 +584,9 @@ pub fn parts(doc: &Document, studio: ElementId, mut build_of: impl FnMut(Element
 /// The context solids of every context of the Part Studio `studio`, by feature id (for
 /// regenerating its sketches, [`crate::parts::regenerate_with`]).
 pub fn solids(doc: &Document, studio: ElementId) -> Vec<(FeatureId, Arc<crate::solid::Solid>)> {
-    if doc.element(studio).is_none_or(|e| e.contexts.is_empty()) && pending_id(doc.id, studio).is_none() {
+    if doc.element(studio).is_none_or(|e| e.contexts.is_empty())
+        && pending_id(doc.id, studio).is_none()
+    {
         return Vec::new();
     }
     let (parts, _) = parts(doc, studio, |_, f| Some(crate::rebuild::build(f)));
@@ -418,13 +595,22 @@ pub fn solids(doc: &Document, studio: ElementId) -> Vec<(FeatureId, Arc<crate::s
 
 /// [`solids`] with the number of the context each is in (a sketch on a context face imprints
 /// only its own context's geometry).
-pub fn solids_by_context(doc: &Document, studio: ElementId) -> Vec<(FeatureId, ContextNo, Arc<crate::solid::Solid>)> {
-    if doc.element(studio).is_none_or(|e| e.contexts.is_empty()) && pending_id(doc.id, studio).is_none() {
+pub fn solids_by_context(
+    doc: &Document,
+    studio: ElementId,
+) -> Vec<(FeatureId, ContextNo, Arc<crate::solid::Solid>)> {
+    if doc.element(studio).is_none_or(|e| e.contexts.is_empty())
+        && pending_id(doc.id, studio).is_none()
+    {
         return Vec::new();
     }
     let mut out = Vec::new();
     for ctx in &with_pending(doc, studio) {
-        out.extend(context_solids(doc, ctx).iter().map(|(f, s)| (*f, ctx.id, s.clone())));
+        out.extend(
+            context_solids(doc, ctx)
+                .iter()
+                .map(|(f, s)| (*f, ctx.id, s.clone())),
+        );
     }
     out
 }
@@ -434,12 +620,20 @@ pub fn solids_by_context(doc: &Document, studio: ElementId) -> Vec<(FeatureId, C
 /// import's time). A snapshot is identified by its fingerprint of the frozen features and its
 /// parts' ids and poses; an old context (no frozen features) follows the studios and isn't
 /// cached.
-fn context_solids(doc: &Document, ctx: &StudioContext) -> Arc<Vec<(FeatureId, Arc<crate::solid::Solid>)>> {
+fn context_solids(
+    doc: &Document,
+    ctx: &StudioContext,
+) -> Arc<Vec<(FeatureId, Arc<crate::solid::Solid>)>> {
     type Cache = HashMap<u64, Arc<Vec<(FeatureId, Arc<crate::solid::Solid>)>>>;
     static CACHE: std::sync::Mutex<Option<Cache>> = std::sync::Mutex::new(None);
     let make = || {
         let (parts, _) = parts_of(doc, ctx, |_, f| Some(crate::rebuild::build(f)));
-        Arc::new(parts.into_iter().map(|p| (p.feature, p.solid)).collect::<Vec<_>>())
+        Arc::new(
+            parts
+                .into_iter()
+                .map(|p| (p.feature, p.solid))
+                .collect::<Vec<_>>(),
+        )
     };
     if ctx.studios.is_empty() || ctx.sources == 0 {
         return make();
@@ -453,7 +647,11 @@ fn context_solids(doc: &Document, ctx: &StudioContext) -> Arc<Vec<(FeatureId, Ar
         }
     }
     let key = std::hash::Hasher::finish(&h);
-    if let Some(hit) = CACHE.lock().ok().and_then(|c| c.as_ref()?.get(&key).cloned()) {
+    if let Some(hit) = CACHE
+        .lock()
+        .ok()
+        .and_then(|c| c.as_ref()?.get(&key).cloned())
+    {
         return hit;
     }
     let solids = make();
@@ -511,12 +709,18 @@ pub fn context_refs(f: &Feature) -> Vec<FeatureId> {
 /// The contexts of the Part Studio `el` a feature uses (MC2.6), in the studio's order.
 pub fn feature_contexts(el: &Element, f: &Feature) -> Vec<ContextNo> {
     let refs = context_refs(f);
-    el.contexts.iter().filter(|c| refs.iter().any(|r| c.part(*r).is_some())).map(|c| c.id).collect()
+    el.contexts
+        .iter()
+        .filter(|c| refs.iter().any(|r| c.part(*r).is_some()))
+        .map(|c| c.id)
+        .collect()
 }
 
 /// Whether any feature of the Part Studio `el` uses the context `id`.
 pub fn is_referenced(el: &Element, id: ContextNo) -> bool {
-    el.features().iter().any(|f| feature_contexts(el, f).contains(&id))
+    el.features()
+        .iter()
+        .any(|f| feature_contexts(el, f).contains(&id))
 }
 
 /// Adds a context to a Part Studio, numbered as given, and regenerates its sketches: one undo
@@ -537,7 +741,10 @@ impl Command for AddContext {
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
         let el = studio_mut(doc, self.studio)?;
         if el.context(self.context.id).is_some() {
-            return Err(CommandError::Invalid(format!("context {} already exists", self.context.id)));
+            return Err(CommandError::Invalid(format!(
+                "context {} already exists",
+                self.context.id
+            )));
         }
         el.contexts.push(self.context.clone());
         crate::commands::refresh_studio(doc, self.studio);
@@ -562,7 +769,9 @@ impl Command for UpdateContext {
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
         let el = studio_mut(doc, self.studio)?;
-        let c = el.context_mut(self.context.id).ok_or_else(|| CommandError::Invalid("no such context".into()))?;
+        let c = el
+            .context_mut(self.context.id)
+            .ok_or_else(|| CommandError::Invalid("no such context".into()))?;
         *c = self.context.clone();
         crate::commands::refresh_studio(doc, self.studio);
         Ok(())
@@ -612,7 +821,9 @@ impl Command for RenameContext {
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
         let el = studio_mut(doc, self.studio)?;
-        let c = el.context_mut(self.id).ok_or_else(|| CommandError::Invalid("no such context".into()))?;
+        let c = el
+            .context_mut(self.id)
+            .ok_or_else(|| CommandError::Invalid("no such context".into()))?;
         c.name = self.name.trim().to_string();
         Ok(())
     }
@@ -636,9 +847,15 @@ impl Command for SetPrimaryInstance {
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
         for id in &self.contexts {
-            let assembly = doc.element(self.studio).and_then(|e| e.context(*id)).map(|c| c.assembly).ok_or_else(|| CommandError::Invalid("no such context".into()))?;
+            let assembly = doc
+                .element(self.studio)
+                .and_then(|e| e.context(*id))
+                .map(|c| c.assembly)
+                .ok_or_else(|| CommandError::Invalid("no such context".into()))?;
             if studio_of(doc, assembly, self.instance) != Some(self.studio) {
-                return Err(CommandError::Invalid("the primary instance must be a part of this Part Studio".into()));
+                return Err(CommandError::Invalid(
+                    "the primary instance must be a part of this Part Studio".into(),
+                ));
             }
             let el = studio_mut(doc, self.studio)?;
             el.context_mut(*id).expect("checked").instance = self.instance;
@@ -658,7 +875,11 @@ pub struct SetStudioContext {
 
 impl Command for SetStudioContext {
     fn label(&self) -> String {
-        if self.context.is_some() { "Update context".into() } else { "Remove context".into() }
+        if self.context.is_some() {
+            "Update context".into()
+        } else {
+            "Remove context".into()
+        }
     }
     fn scope(&self) -> Scope {
         Scope::Element(self.studio)
@@ -683,7 +904,9 @@ impl Command for SetStudioContext {
 /// where the context has the parts now), matched by context id; a part the context no longer
 /// has is dropped from the Transform. Part of the same undo step.
 fn resnapshot_context_copies(doc: &mut Document, studio: ElementId) {
-    let Some(features) = doc.element(studio).map(|e| e.features()) else { return };
+    let Some(features) = doc.element(studio).map(|e| e.features()) else {
+        return;
+    };
     let updated: Vec<(usize, crate::transform::TransformFeature)> = features
         .iter()
         .enumerate()
@@ -696,7 +919,9 @@ fn resnapshot_context_copies(doc: &mut Document, studio: ElementId) {
             _ => None,
         })
         .collect();
-    let Some(features) = doc.element_mut(studio).and_then(|e| e.features_mut()) else { return };
+    let Some(features) = doc.element_mut(studio).and_then(|e| e.features_mut()) else {
+        return;
+    };
     for (i, y) in updated {
         if let Some(f) = features.get_mut(i) {
             f.kind = crate::document::FeatureKind::Transform(y);
@@ -714,21 +939,29 @@ pub struct SetContextHidden {
 
 impl Command for SetContextHidden {
     fn label(&self) -> String {
-        if self.hidden { "Hide context".into() } else { "Show context".into() }
+        if self.hidden {
+            "Hide context".into()
+        } else {
+            "Show context".into()
+        }
     }
     fn scope(&self) -> Scope {
         Scope::Element(self.studio)
     }
     fn apply(&self, doc: &mut Document) -> Result<(), CommandError> {
         let el = studio_mut(doc, self.studio)?;
-        let c = el.context_mut(self.id).ok_or_else(|| CommandError::Invalid("no context".into()))?;
+        let c = el
+            .context_mut(self.id)
+            .ok_or_else(|| CommandError::Invalid("no context".into()))?;
         c.hidden = self.hidden;
         Ok(())
     }
 }
 
 fn studio_mut(doc: &mut Document, studio: ElementId) -> Result<&mut Element, CommandError> {
-    let el = doc.element_mut(studio).ok_or(CommandError::ElementNotFound(studio))?;
+    let el = doc
+        .element_mut(studio)
+        .ok_or(CommandError::ElementNotFound(studio))?;
     if el.features_mut().is_none() {
         return Err(CommandError::Invalid("not a Part Studio".into()));
     }
@@ -740,7 +973,12 @@ pub fn contexts_in(doc: &Document, assembly: ElementId) -> Vec<(ElementId, Vec<C
     doc.elements
         .iter()
         .filter_map(|e| {
-            let ids: Vec<ContextNo> = e.contexts.iter().filter(|c| c.assembly == assembly && c.document.is_none()).map(|c| c.id).collect();
+            let ids: Vec<ContextNo> = e
+                .contexts
+                .iter()
+                .filter(|c| c.assembly == assembly && c.document.is_none())
+                .map(|c| c.id)
+                .collect();
             (!ids.is_empty()).then_some((e.id, ids))
         })
         .collect()
@@ -749,11 +987,20 @@ pub fn contexts_in(doc: &Document, assembly: ElementId) -> Vec<(ElementId, Vec<C
 /// **Where used** (X15): the Assembly tabs that use the Part Studio `element` (only its part
 /// `part`, when given), each with how many of its parts at any depth come from it and whether any
 /// is a direct instance (else through a subassembly).
-pub fn where_used(doc: &Document, element: ElementId, part: Option<PartId>) -> Vec<(ElementId, usize, bool)> {
+pub fn where_used(
+    doc: &Document,
+    element: ElementId,
+    part: Option<PartId>,
+) -> Vec<(ElementId, usize, bool)> {
     let mut out = Vec::new();
     for e in &doc.elements {
-        let Some(asm) = e.assembly_model() else { continue };
-        let occ: Vec<_> = occurrences(doc, asm).into_iter().filter(|o| o.element == element && part.is_none_or(|p| o.part == p)).collect();
+        let Some(asm) = e.assembly_model() else {
+            continue;
+        };
+        let occ: Vec<_> = occurrences(doc, asm)
+            .into_iter()
+            .filter(|o| o.element == element && part.is_none_or(|p| o.part == p))
+            .collect();
         if occ.is_empty() {
             continue;
         }
@@ -768,7 +1015,12 @@ pub fn assembly_used_in(doc: &Document, element: ElementId) -> Vec<(ElementId, u
     doc.elements
         .iter()
         .filter_map(|e| {
-            let n = e.assembly_model()?.instances.iter().filter(|i| i.source == InstanceSource::Assembly { element }).count();
+            let n = e
+                .assembly_model()?
+                .instances
+                .iter()
+                .filter(|i| i.source == InstanceSource::Assembly { element })
+                .count();
             (n > 0).then_some((e.id, n, true))
         })
         .collect()
@@ -776,7 +1028,11 @@ pub fn assembly_used_in(doc: &Document, element: ElementId) -> Vec<(ElementId, u
 
 /// A sketch plane on the planar face `face` of the solid `s`, a part made by `feature` (a
 /// context part's, [`context_id`]): the face's frame turned upright and a point on it now.
-pub fn face_plane_on(s: &crate::solid::Solid, feature: FeatureId, face: cadrs_sketch::FaceName) -> Option<cadrs_sketch::PlaneRef> {
+pub fn face_plane_on(
+    s: &crate::solid::Solid,
+    feature: FeatureId,
+    face: cadrs_sketch::FaceName,
+) -> Option<cadrs_sketch::PlaneRef> {
     let i = s.faces.iter().position(|f| f.name == face)?;
     let frame = s.faces[i].plane?.upright();
     Some(cadrs_sketch::PlaneRef::Face(cadrs_sketch::FacePlane {
@@ -792,7 +1048,9 @@ pub fn face_plane_on(s: &crate::solid::Solid, feature: FeatureId, face: cadrs_sk
 
 /// Reads `Element::contexts`: a list, or the single `context: Some(...)` / `None` of documents
 /// from before several contexts.
-pub(crate) fn deserialize_contexts<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<StudioContext>, D::Error> {
+pub(crate) fn deserialize_contexts<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Vec<StudioContext>, D::Error> {
     struct V;
     impl<'de> serde::de::Visitor<'de> for V {
         type Value = Vec<StudioContext>;
@@ -808,7 +1066,10 @@ pub(crate) fn deserialize_contexts<'de, D: serde::Deserializer<'de>>(d: D) -> Re
         fn visit_some<D2: serde::Deserializer<'de>>(self, d: D2) -> Result<Self::Value, D2::Error> {
             Ok(vec![StudioContext::deserialize(d)?])
         }
-        fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(
+            self,
+            mut seq: A,
+        ) -> Result<Self::Value, A::Error> {
             let mut out = Vec::new();
             while let Some(c) = seq.next_element()? {
                 out.push(c);
@@ -854,32 +1115,56 @@ fn up_to_context_parts(ends: &[&Option<crate::document::UpTo>]) -> Vec<FeatureId
 fn target(doc: &Document, el: &Element, part: FeatureId) -> Option<ContextTarget> {
     let (ctx, cp) = find_part(doc, el.id, part)?;
     let features = source_features(doc, &ctx, cp.element)?;
-    Some(ContextTarget { part, source: ContextSource { element: cp.element, features }, source_part: cp.part, pose: cp.pose })
+    Some(ContextTarget {
+        part,
+        source: ContextSource {
+            element: cp.element,
+            features,
+        },
+        source_part: cp.part,
+        pose: cp.pose,
+    })
 }
 
 /// Brings the [`ContextTarget`]s of the Part Studio `studio`'s features in line with its
 /// contexts: an end up to a context part gets the part as its context has it; one whose
 /// context is gone keeps what it had (MC1.6: nothing changes until the user says so).
 pub fn refresh_targets(doc: &mut Document, studio: ElementId) {
-    let Some(el) = doc.element(studio) else { return };
+    let Some(el) = doc.element(studio) else {
+        return;
+    };
     let mut updates: Vec<(FeatureId, Vec<ContextTarget>)> = Vec::new();
     for f in el.features() {
         let (wanted, have) = match &f.kind {
-            crate::document::FeatureKind::Extrude(e) => (up_to_context_parts(&[&e.up_to, &e.second.as_ref().and_then(|s| s.up_to)]), &e.context),
-            crate::document::FeatureKind::Revolve(r) => (up_to_context_parts(&[&r.up_to, &r.second.as_ref().and_then(|s| s.up_to)]), &r.context),
+            crate::document::FeatureKind::Extrude(e) => (
+                up_to_context_parts(&[&e.up_to, &e.second.as_ref().and_then(|s| s.up_to)]),
+                &e.context,
+            ),
+            crate::document::FeatureKind::Revolve(r) => (
+                up_to_context_parts(&[&r.up_to, &r.second.as_ref().and_then(|s| s.up_to)]),
+                &r.context,
+            ),
             _ => continue,
         };
         let now: Vec<ContextTarget> = wanted
             .iter()
-            .filter_map(|p| target(doc, el, *p).or_else(|| have.iter().find(|t| t.part == *p).cloned()))
+            .filter_map(|p| {
+                target(doc, el, *p).or_else(|| have.iter().find(|t| t.part == *p).cloned())
+            })
             .collect();
         if &now != have {
             updates.push((f.id, now));
         }
     }
-    let Some(features) = doc.element_mut(studio).and_then(|e| e.features_mut()) else { return };
+    let Some(features) = doc.element_mut(studio).and_then(|e| e.features_mut()) else {
+        return;
+    };
     for (id, now) in updates {
-        match features.iter_mut().find(|f| f.id == id).map(|f| &mut f.kind) {
+        match features
+            .iter_mut()
+            .find(|f| f.id == id)
+            .map(|f| &mut f.kind)
+        {
             Some(crate::document::FeatureKind::Extrude(e)) => e.context = now,
             Some(crate::document::FeatureKind::Revolve(r)) => r.context = now,
             _ => {}
@@ -892,8 +1177,15 @@ pub fn refresh_targets(doc: &mut Document, studio: ElementId) {
 
 /// The Part Studio in another document a linked instance of `assembly` comes from: (its
 /// document, its element there).
-pub fn linked_studio_of(doc: &Document, assembly: ElementId, instance: InstanceId) -> Option<(DocumentId, ElementId)> {
-    let inst = doc.element(assembly)?.assembly_model()?.instance(instance)?;
+pub fn linked_studio_of(
+    doc: &Document,
+    assembly: ElementId,
+    instance: InstanceId,
+) -> Option<(DocumentId, ElementId)> {
+    let inst = doc
+        .element(assembly)?
+        .assembly_model()?
+        .instance(instance)?;
     let r = inst.link?;
     if !r.is_external(doc.id) || inst.source.is_assembly() {
         return None;
@@ -903,7 +1195,12 @@ pub fn linked_studio_of(doc: &Document, assembly: ElementId, instance: InstanceI
 
 /// A context `id` of the linked Part Studio of `instance` (MC5.1): the snapshot taken in the
 /// assembly's document, naming it.
-pub fn snapshot_linked(asm_doc: &Document, assembly: ElementId, instance: InstanceId, id: ContextNo) -> Result<StudioContext, CommandError> {
+pub fn snapshot_linked(
+    asm_doc: &Document,
+    assembly: ElementId,
+    instance: InstanceId,
+    id: ContextNo,
+) -> Result<StudioContext, CommandError> {
     let mut c = snapshot_as(asm_doc, assembly, instance, id)?;
     c.document = Some(asm_doc.id);
     Ok(c)
@@ -912,11 +1209,28 @@ pub fn snapshot_linked(asm_doc: &Document, assembly: ElementId, instance: Instan
 /// A context whose assembly is in another document, as that document (`asm_doc`) has the
 /// assembly now (Update context, MC5.8): anchored on the primary instance, the linked studio's
 /// own parts left out.
-pub fn resnapshot_external(asm_doc: &Document, ctx: &StudioContext) -> Result<StudioContext, CommandError> {
-    let asm = asm_doc.element(ctx.assembly).and_then(|e| e.assembly_model()).ok_or(CommandError::ElementNotFound(ctx.assembly))?;
-    let inst = asm.instance(ctx.instance).filter(|i| !i.suppressed).ok_or(CommandError::Invalid(NO_PRIMARY.into()))?;
-    let studio = studio_of(asm_doc, ctx.assembly, ctx.instance).ok_or(CommandError::Invalid(NO_PRIMARY.into()))?;
-    let mut now = snapshot_with(asm_doc, ctx.assembly, studio, ctx.instance, inst.pose.inverse(), ctx.id)?;
+pub fn resnapshot_external(
+    asm_doc: &Document,
+    ctx: &StudioContext,
+) -> Result<StudioContext, CommandError> {
+    let asm = asm_doc
+        .element(ctx.assembly)
+        .and_then(|e| e.assembly_model())
+        .ok_or(CommandError::ElementNotFound(ctx.assembly))?;
+    let inst = asm
+        .instance(ctx.instance)
+        .filter(|i| !i.suppressed)
+        .ok_or(CommandError::Invalid(NO_PRIMARY.into()))?;
+    let studio = studio_of(asm_doc, ctx.assembly, ctx.instance)
+        .ok_or(CommandError::Invalid(NO_PRIMARY.into()))?;
+    let mut now = snapshot_with(
+        asm_doc,
+        ctx.assembly,
+        studio,
+        ctx.instance,
+        inst.pose.inverse(),
+        ctx.id,
+    )?;
     now.name = ctx.name.clone();
     now.hidden = ctx.hidden;
     now.document = ctx.document;
@@ -927,8 +1241,16 @@ pub fn resnapshot_external(asm_doc: &Document, ctx: &StudioContext) -> Result<St
 pub fn external_status(asm_doc: &Document, ctx: &StudioContext) -> ContextStatus {
     match resnapshot_external(asm_doc, ctx) {
         Ok(now) => {
-            let moved = now.parts.iter().map(|p| (p.id, p.element, p.part, p.pose)).ne(ctx.parts.iter().map(|p| (p.id, p.element, p.part, p.pose)));
-            if moved || now.studios != ctx.studios { ContextStatus::OutOfDate } else { ContextStatus::UpToDate }
+            let moved = now
+                .parts
+                .iter()
+                .map(|p| (p.id, p.element, p.part, p.pose))
+                .ne(ctx.parts.iter().map(|p| (p.id, p.element, p.part, p.pose)));
+            if moved || now.studios != ctx.studios {
+                ContextStatus::OutOfDate
+            } else {
+                ContextStatus::UpToDate
+            }
         }
         Err(CommandError::Invalid(m)) if m == NO_PRIMARY => ContextStatus::NoPrimary,
         Err(_) => ContextStatus::Unknown,
@@ -953,21 +1275,53 @@ pub fn update_linked_context(
     use crate::external::LinkError;
     use crate::history_log::{HistoryLog, Origin};
     let store = res.store().clone();
-    let mut file = store.load(part_doc).map_err(|_| LinkError::State(res.state(part_doc)))?;
-    let ctx = file.document.element(studio).and_then(|e| e.context(id)).cloned().ok_or_else(|| LinkError::NotFound("The context is gone from the linked Part Studio".into()))?;
-    let fresh = resnapshot_external(asm_doc, &ctx).map_err(|e| LinkError::NotFound(e.to_string()))?;
+    let mut file = store
+        .load(part_doc)
+        .map_err(|_| LinkError::State(res.state(part_doc)))?;
+    let ctx = file
+        .document
+        .element(studio)
+        .and_then(|e| e.context(id))
+        .cloned()
+        .ok_or_else(|| {
+            LinkError::NotFound("The context is gone from the linked Part Studio".into())
+        })?;
+    let fresh =
+        resnapshot_external(asm_doc, &ctx).map_err(|e| LinkError::NotFound(e.to_string()))?;
     let mut h = crate::command::History::default();
     if fresh != ctx {
-        h.execute(&mut file.document, &UpdateContext { studio, context: fresh }).map_err(|e| LinkError::NotFound(e.to_string()))?;
+        h.execute(
+            &mut file.document,
+            &UpdateContext {
+                studio,
+                context: fresh,
+            },
+        )
+        .map_err(|e| LinkError::NotFound(e.to_string()))?;
         file.meta.modified = now;
-        store.save(&file.document, &file.meta).map_err(|e| LinkError::NotFound(format!("{} ({e})", file.document.name)))?;
+        store
+            .save(&file.document, &file.meta)
+            .map_err(|e| LinkError::NotFound(format!("{} ({e})", file.document.name)))?;
     }
-    let mut log = HistoryLog::load(&store, part_doc).ok().flatten().unwrap_or_else(|| HistoryLog::start(&file.document, file.meta.created, user));
+    let mut log = HistoryLog::load(&store, part_doc)
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| HistoryLog::start(&file.document, file.meta.created, user));
     if log.head() != &file.document {
-        log.record(&file.document, Origin::Command("Update context".into()), now, user);
+        log.record(
+            &file.document,
+            Origin::Command("Update context".into()),
+            now,
+            user,
+        );
     }
-    let v = log.create_auto_version(&format!("Created by Update context in {}", asm_doc.name), now, user);
-    log.save(&store).map_err(|e| LinkError::NotFound(format!("The history ({e})")))?;
+    let v = log.create_auto_version(
+        &format!("Created by Update context in {}", asm_doc.name),
+        now,
+        user,
+    );
+    log.save(&store)
+        .map_err(|e| LinkError::NotFound(format!("The history ({e})")))?;
     res.forget(part_doc);
     Ok(v)
 }

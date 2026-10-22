@@ -116,24 +116,58 @@ mod tests {
         let (mut doc, id) = doc_with_drawing();
         let mut h = History::default();
         let s = SheetId::new();
-        h.execute(&mut doc, &EditDrawing { element: id, op: DrawingOp::InsertSheet { id: s, after: None } })
-            .unwrap();
+        h.execute(
+            &mut doc,
+            &EditDrawing {
+                element: id,
+                op: DrawingOp::InsertSheet { id: s, after: None },
+            },
+        )
+        .unwrap();
         assert_eq!(h.undo_label(), Some("Insert sheet"));
-        assert_eq!(doc.element(id).unwrap().drawing_data().unwrap().sheets.len(), 2);
+        assert_eq!(
+            doc.element(id)
+                .unwrap()
+                .drawing_data()
+                .unwrap()
+                .sheets
+                .len(),
+            2
+        );
         h.undo(&mut doc);
-        assert_eq!(doc.element(id).unwrap().drawing_data().unwrap().sheets.len(), 1);
+        assert_eq!(
+            doc.element(id)
+                .unwrap()
+                .drawing_data()
+                .unwrap()
+                .sheets
+                .len(),
+            1
+        );
         // A refused edit changes nothing and records nothing.
         let only = doc.element(id).unwrap().drawing_data().unwrap().sheets[0].id;
         assert!(
-            h.execute(&mut doc, &EditDrawing { element: id, op: DrawingOp::DeleteSheet { id: only } })
-                .is_err()
+            h.execute(
+                &mut doc,
+                &EditDrawing {
+                    element: id,
+                    op: DrawingOp::DeleteSheet { id: only }
+                }
+            )
+            .is_err()
         );
         assert!(!h.can_undo());
         // Not a drawing.
         let ps = doc.elements[0].id;
         assert!(
-            h.execute(&mut doc, &EditDrawing { element: ps, op: DrawingOp::SetLocked(true) })
-                .is_err()
+            h.execute(
+                &mut doc,
+                &EditDrawing {
+                    element: ps,
+                    op: DrawingOp::SetLocked(true)
+                }
+            )
+            .is_err()
         );
     }
 
@@ -144,19 +178,64 @@ mod tests {
         let (mut doc, id) = doc_with_drawing();
         let mut h = History::default();
         let sheet = doc.element(id).unwrap().drawing_data().unwrap().sheets[0].id;
-        let r = ObjectRef { element: doc.elements[0].id.0, part: None };
+        let r = ObjectRef {
+            element: doc.elements[0].id.0,
+            part: None,
+        };
         let v = View::base(r, NamedView::Front, Scale::new(1, 1), [100.0, 100.0]);
         let vid = v.id;
-        h.execute(&mut doc, &EditDrawing { element: id, op: DrawingOp::InsertView { sheet, view: v } }).unwrap();
-        let edge = EdgeRef { edge: None, face: None, shape: Shape::Circle { center: [0.0, 0.0], radius: 5.0, arc: None } };
+        h.execute(
+            &mut doc,
+            &EditDrawing {
+                element: id,
+                op: DrawingOp::InsertView { sheet, view: v },
+            },
+        )
+        .unwrap();
+        let edge = EdgeRef {
+            edge: None,
+            face: None,
+            shape: Shape::Circle {
+                center: [0.0, 0.0],
+                radius: 5.0,
+                arc: None,
+            },
+        };
         let a = Annotation::new(AnnotationKind::Centermark(edge));
-        let annotations = |doc: &Document| doc.element(id).unwrap().drawing_data().unwrap().view(vid).unwrap().1.annotations.clone();
-        h.execute(&mut doc, &EditDrawing { element: id, op: DrawingOp::AddAnnotation { view: vid, annotation: a.clone() } })
-            .unwrap();
+        let annotations = |doc: &Document| {
+            doc.element(id)
+                .unwrap()
+                .drawing_data()
+                .unwrap()
+                .view(vid)
+                .unwrap()
+                .1
+                .annotations
+                .clone()
+        };
+        h.execute(
+            &mut doc,
+            &EditDrawing {
+                element: id,
+                op: DrawingOp::AddAnnotation {
+                    view: vid,
+                    annotation: a.clone(),
+                },
+            },
+        )
+        .unwrap();
         assert_eq!(h.undo_label(), Some("Insert centermark"));
         assert_eq!(annotations(&doc), vec![a.clone()]);
-        h.execute(&mut doc, &EditDrawing { element: id, op: DrawingOp::DeleteAnnotations { ids: vec![(vid, a.id)] } })
-            .unwrap();
+        h.execute(
+            &mut doc,
+            &EditDrawing {
+                element: id,
+                op: DrawingOp::DeleteAnnotations {
+                    ids: vec![(vid, a.id)],
+                },
+            },
+        )
+        .unwrap();
         assert!(annotations(&doc).is_empty());
         h.undo(&mut doc);
         assert_eq!(annotations(&doc), vec![a.clone()]);
@@ -176,18 +255,47 @@ mod tests {
         let sheet = d.sheets[0].id;
         let t = Table::new(3, 4, true, true, Corner::TopLeft, [20.0, 180.0], &d.style);
         let tid = t.id;
-        let table = |doc: &Document| doc.element(id).unwrap().drawing_data().unwrap().sheets[0].tables[0].clone();
-        let run = |h: &mut History, doc: &mut Document, table: Table, label: &str| {
-            h.execute(doc, &EditDrawing { element: id, op: DrawingOp::SetTable { sheet, table, label: label.into() } })
-                .unwrap();
+        let table = |doc: &Document| {
+            doc.element(id).unwrap().drawing_data().unwrap().sheets[0].tables[0].clone()
         };
-        h.execute(&mut doc, &EditDrawing { element: id, op: DrawingOp::AddTable { sheet, table: t.clone() } }).unwrap();
+        let run = |h: &mut History, doc: &mut Document, table: Table, label: &str| {
+            h.execute(
+                doc,
+                &EditDrawing {
+                    element: id,
+                    op: DrawingOp::SetTable {
+                        sheet,
+                        table,
+                        label: label.into(),
+                    },
+                },
+            )
+            .unwrap();
+        };
+        h.execute(
+            &mut doc,
+            &EditDrawing {
+                element: id,
+                op: DrawingOp::AddTable {
+                    sheet,
+                    table: t.clone(),
+                },
+            },
+        )
+        .unwrap();
         assert_eq!(h.undo_label(), Some("Insert table"));
-        let filled = table(&doc).set_cell((2, 0), RichText::plain("Bolt")).unwrap();
+        let filled = table(&doc)
+            .set_cell((2, 0), RichText::plain("Bolt"))
+            .unwrap();
         run(&mut h, &mut doc, filled, "Edit cell");
         let merged = table(&doc).merge((2, 0), (2, 1)).unwrap();
         run(&mut h, &mut doc, merged, "Merge cells");
-        let m = Merge { row: 2, col: 0, rows: 1, cols: 2 };
+        let m = Merge {
+            row: 2,
+            col: 0,
+            rows: 1,
+            cols: 2,
+        };
         assert_eq!(table(&doc).merge_at(2, 1), Some(&m));
         let unmerged = table(&doc).unmerge((2, 1)).unwrap();
         run(&mut h, &mut doc, unmerged, "Unmerge cell");

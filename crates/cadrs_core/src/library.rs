@@ -61,7 +61,9 @@ pub struct DocumentMeta {
 impl DocumentMeta {
     /// The last-opened workspace's name ("Main" unless a branch was).
     pub fn workspace_name(&self) -> &str {
-        self.workspace.as_deref().unwrap_or(crate::history_log::MAIN_NAME)
+        self.workspace
+            .as_deref()
+            .unwrap_or(crate::history_log::MAIN_NAME)
     }
 
     /// Metadata for a document `user` creates at `now`.
@@ -166,14 +168,24 @@ impl Library {
     /// The live (not trashed) documents with `label` (P3E.1, ER1.2: the Other documents
     /// browser's Labels location), by name.
     pub fn with_label(&self, label: LabelId) -> Vec<DocumentEntry> {
-        let mut v: Vec<DocumentEntry> = self.entries.iter().filter(|e| e.meta.trashed.is_none() && e.meta.labels.contains(&label)).cloned().collect();
+        let mut v: Vec<DocumentEntry> = self
+            .entries
+            .iter()
+            .filter(|e| e.meta.trashed.is_none() && e.meta.labels.contains(&label))
+            .cloned()
+            .collect();
         sort_entries(&mut v, SortKey::Name, SortDir::Ascending);
         v
     }
 
     /// The live (not trashed) documents in `folder` (P3G.1), by name.
     pub fn in_folder(&self, folder: FolderId) -> Vec<DocumentEntry> {
-        let mut v: Vec<DocumentEntry> = self.entries.iter().filter(|e| e.meta.trashed.is_none() && e.meta.folder == Some(folder)).cloned().collect();
+        let mut v: Vec<DocumentEntry> = self
+            .entries
+            .iter()
+            .filter(|e| e.meta.trashed.is_none() && e.meta.folder == Some(folder))
+            .cloned()
+            .collect();
         sort_entries(&mut v, SortKey::Name, SortDir::Ascending);
         v
     }
@@ -434,7 +446,9 @@ impl LibraryCommand for TrashEntry {
     fn apply(&self, lib: &mut Library) -> Result<(), CommandError> {
         let e = entry_mut(lib, self.id)?;
         if e.meta.trashed.is_some() {
-            return Err(CommandError::Invalid("document is already in the trash".into()));
+            return Err(CommandError::Invalid(
+                "document is already in the trash".into(),
+            ));
         }
         e.meta.trashed = Some(self.now);
         Ok(())
@@ -573,12 +587,22 @@ pub struct CreateLabel {
     pub assign: Vec<DocumentId>,
 }
 
-fn check_label_name(lib: &Library, name: &str, except: Option<LabelId>) -> Result<(), CommandError> {
+fn check_label_name(
+    lib: &Library,
+    name: &str,
+    except: Option<LabelId>,
+) -> Result<(), CommandError> {
     if name.is_empty() {
         return Err(CommandError::Invalid("name must not be empty".into()));
     }
-    if lib.labels.iter().any(|l| Some(l.id) != except && l.name.to_lowercase() == name.to_lowercase()) {
-        return Err(CommandError::Invalid(format!("a label named {name} already exists")));
+    if lib
+        .labels
+        .iter()
+        .any(|l| Some(l.id) != except && l.name.to_lowercase() == name.to_lowercase())
+    {
+        return Err(CommandError::Invalid(format!(
+            "a label named {name} already exists"
+        )));
     }
     Ok(())
 }
@@ -593,7 +617,11 @@ impl LibraryCommand for CreateLabel {
         if lib.label(self.id).is_some() {
             return Err(CommandError::Invalid("label id already in use".into()));
         }
-        lib.labels.push(LabelEntry { id: self.id, name: name.to_string(), colour: self.colour });
+        lib.labels.push(LabelEntry {
+            id: self.id,
+            name: name.to_string(),
+            colour: self.colour,
+        });
         for d in &self.assign {
             let e = entry_mut(lib, *d)?;
             if !e.meta.labels.contains(&self.id) {
@@ -618,7 +646,11 @@ impl LibraryCommand for RenameLabel {
     fn apply(&self, lib: &mut Library) -> Result<(), CommandError> {
         let name = self.name.trim();
         check_label_name(lib, name, Some(self.id))?;
-        let l = lib.labels.iter_mut().find(|l| l.id == self.id).ok_or_else(|| CommandError::Invalid("label not found".into()))?;
+        let l = lib
+            .labels
+            .iter_mut()
+            .find(|l| l.id == self.id)
+            .ok_or_else(|| CommandError::Invalid("label not found".into()))?;
         l.name = name.to_string();
         Ok(())
     }
@@ -635,7 +667,11 @@ impl LibraryCommand for DeleteLabel {
         "Delete label".into()
     }
     fn apply(&self, lib: &mut Library) -> Result<(), CommandError> {
-        let i = lib.labels.iter().position(|l| l.id == self.id).ok_or_else(|| CommandError::Invalid("label not found".into()))?;
+        let i = lib
+            .labels
+            .iter()
+            .position(|l| l.id == self.id)
+            .ok_or_else(|| CommandError::Invalid("label not found".into()))?;
         lib.labels.remove(i);
         for e in &mut lib.entries {
             e.meta.labels.retain(|l| *l != self.id);
@@ -873,7 +909,10 @@ mod tests {
         .unwrap();
         assert_eq!(l.get(id).unwrap().name, "Bracket v2");
         assert_eq!(l.get(id).unwrap().meta.modified, 999);
-        assert_eq!(h.undo(&mut l).as_deref(), Some("Rename document to Bracket v2"));
+        assert_eq!(
+            h.undo(&mut l).as_deref(),
+            Some("Rename document to Bracket v2")
+        );
         assert_eq!(l.get(id).unwrap().name, "bracket");
         assert_eq!(l.get(id).unwrap().meta.modified, 300);
         h.redo(&mut l);
@@ -985,15 +1024,60 @@ mod tests {
         let mut h = LibraryHistory::default();
         let fixtures = LabelId::from_u128(1);
         let (a, b) = (DocumentId::from_u128(1), DocumentId::from_u128(2));
-        h.execute(&mut l, &CreateLabel { id: fixtures, name: " Fixtures ".into(), colour: LABEL_COLOURS[0], assign: vec![a] }).unwrap();
+        h.execute(
+            &mut l,
+            &CreateLabel {
+                id: fixtures,
+                name: " Fixtures ".into(),
+                colour: LABEL_COLOURS[0],
+                assign: vec![a],
+            },
+        )
+        .unwrap();
         assert_eq!(l.label(fixtures).unwrap().name, "Fixtures");
         assert_eq!(l.get(a).unwrap().meta.labels, [fixtures]);
         // Names are unique (case-insensitive) and not empty.
-        assert!(h.execute(&mut l, &CreateLabel { id: LabelId::from_u128(2), name: "fixtures".into(), colour: [0; 3], assign: vec![] }).is_err());
-        assert!(h.execute(&mut l, &CreateLabel { id: LabelId::from_u128(2), name: "  ".into(), colour: [0; 3], assign: vec![] }).is_err());
-        h.execute(&mut l, &SetLabels { id: b, labels: vec![fixtures, fixtures] }).unwrap();
+        assert!(
+            h.execute(
+                &mut l,
+                &CreateLabel {
+                    id: LabelId::from_u128(2),
+                    name: "fixtures".into(),
+                    colour: [0; 3],
+                    assign: vec![]
+                }
+            )
+            .is_err()
+        );
+        assert!(
+            h.execute(
+                &mut l,
+                &CreateLabel {
+                    id: LabelId::from_u128(2),
+                    name: "  ".into(),
+                    colour: [0; 3],
+                    assign: vec![]
+                }
+            )
+            .is_err()
+        );
+        h.execute(
+            &mut l,
+            &SetLabels {
+                id: b,
+                labels: vec![fixtures, fixtures],
+            },
+        )
+        .unwrap();
         assert_eq!(l.get(b).unwrap().meta.labels, [fixtures]);
-        h.execute(&mut l, &RenameLabel { id: fixtures, name: "Jigs".into() }).unwrap();
+        h.execute(
+            &mut l,
+            &RenameLabel {
+                id: fixtures,
+                name: "Jigs".into(),
+            },
+        )
+        .unwrap();
         assert_eq!(l.label(fixtures).unwrap().name, "Jigs");
         h.execute(&mut l, &DeleteLabel { id: fixtures }).unwrap();
         assert!(l.labels.is_empty());
@@ -1011,7 +1095,16 @@ mod tests {
         h.redo(&mut l);
         assert_eq!(l.get(a).unwrap().meta.labels, [fixtures]);
         // An unknown label can't be assigned.
-        assert!(h.execute(&mut l, &SetLabels { id: b, labels: vec![LabelId::from_u128(9)] }).is_err());
+        assert!(
+            h.execute(
+                &mut l,
+                &SetLabels {
+                    id: b,
+                    labels: vec![LabelId::from_u128(9)]
+                }
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -1020,16 +1113,58 @@ mod tests {
         let mut h = LibraryHistory::default();
         let hw = LabelId::from_u128(7);
         let tagged = [1u128, 3, 5].map(DocumentId::from_u128);
-        h.execute(&mut l, &CreateLabel { id: hw, name: "Hardware".into(), colour: [1, 2, 3], assign: tagged.to_vec() }).unwrap();
-        assert_eq!(l.view(Filter::OwnedByMe, "me", "", SortKey::Name, SortDir::Ascending).len(), 5);
-        let v = l.view(Filter::Label(hw), "me", "", SortKey::Name, SortDir::Ascending);
+        h.execute(
+            &mut l,
+            &CreateLabel {
+                id: hw,
+                name: "Hardware".into(),
+                colour: [1, 2, 3],
+                assign: tagged.to_vec(),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            l.view(
+                Filter::OwnedByMe,
+                "me",
+                "",
+                SortKey::Name,
+                SortDir::Ascending
+            )
+            .len(),
+            5
+        );
+        let v = l.view(
+            Filter::Label(hw),
+            "me",
+            "",
+            SortKey::Name,
+            SortDir::Ascending,
+        );
         assert_eq!(names(&v), ["Axle 2", "bracket", "hinge"]);
         assert_eq!(v.len(), 3);
         assert!(v.iter().all(|e| tagged.contains(&e.id)));
         assert_eq!(names(&l.with_label(hw)), ["Axle 2", "bracket", "hinge"]);
         // Trashed documents leave the label's list.
-        h.execute(&mut l, &TrashEntry { id: tagged[0], now: 1 }).unwrap();
-        assert_eq!(l.view(Filter::Label(hw), "me", "", SortKey::Name, SortDir::Ascending).len(), 2);
+        h.execute(
+            &mut l,
+            &TrashEntry {
+                id: tagged[0],
+                now: 1,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            l.view(
+                Filter::Label(hw),
+                "me",
+                "",
+                SortKey::Name,
+                SortDir::Ascending
+            )
+            .len(),
+            2
+        );
     }
 
     #[test]
@@ -1037,7 +1172,14 @@ mod tests {
         let mut l = lib();
         let mut h = LibraryHistory::default();
         let id = DocumentId::from_u128(4);
-        h.execute(&mut l, &SetDescription { id, description: " Extended hubcap ".into() }).unwrap();
+        h.execute(
+            &mut l,
+            &SetDescription {
+                id,
+                description: " Extended hubcap ".into(),
+            },
+        )
+        .unwrap();
         assert_eq!(l.get(id).unwrap().meta.description, "Extended hubcap");
         h.undo(&mut l);
         assert_eq!(l.get(id).unwrap().meta.description, "");

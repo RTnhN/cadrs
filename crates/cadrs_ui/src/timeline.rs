@@ -129,7 +129,18 @@ impl TimelineRow {
     pub fn build(self, theme: &Theme) -> impl Bundle {
         let t = theme.clone();
         let line = Color::srgb_u8(0x2f, 0x5f, 0xb3);
-        let TimelineRow { name, title, subtitle, marker, first, last, selected, chevron, indent, muted } = self;
+        let TimelineRow {
+            name,
+            title,
+            subtitle,
+            marker,
+            first,
+            last,
+            selected,
+            chevron,
+            indent,
+            muted,
+        } = self;
         let two_lines = subtitle.is_some();
         (
             Name::new(name.into_owned()),
@@ -138,13 +149,22 @@ impl TimelineRow {
             Hovered::default(),
             bevy::ui_widgets::Button,
             crate::style::Visuals {
-                background: crate::style::StateColors::new(Color::NONE, t.list_hover, t.list_active, Color::NONE)
-                    .with_selected(Color::srgb_u8(0xcf, 0xe3, 0xf7)),
+                background: crate::style::StateColors::new(
+                    Color::NONE,
+                    t.list_hover,
+                    t.list_active,
+                    Color::NONE,
+                )
+                .with_selected(Color::srgb_u8(0xcf, 0xe3, 0xf7)),
                 border: crate::style::StateColors::all(Color::NONE),
                 foreground: crate::style::StateColors::all(t.foreground),
                 focus_ring: t.focus_ring,
             },
-            crate::style::InitState { disabled: false, selected, force: None },
+            crate::style::InitState {
+                disabled: false,
+                selected,
+                force: None,
+            },
             Node {
                 min_height: Val::Px(if two_lines { 34.0 } else { 22.0 }),
                 align_items: AlignItems::Stretch,
@@ -167,7 +187,11 @@ impl TimelineRow {
                                 width: Val::Px(2.0),
                                 left: Val::Px(RAIL / 2.0 - 1.0),
                                 top: if first { Val::Px(11.0) } else { Val::Px(0.0) },
-                                bottom: if last { Val::Percent(100.0) } else { Val::Px(0.0) },
+                                bottom: if last {
+                                    Val::Percent(100.0)
+                                } else {
+                                    Val::Px(0.0)
+                                },
                                 ..default()
                             },
                             BackgroundColor(if first && last { Color::NONE } else { line }),
@@ -182,24 +206,57 @@ impl TimelineRow {
                         min_width: Val::Px(0.0),
                         flex_direction: FlexDirection::Column,
                         justify_content: JustifyContent::Center,
-                        padding: UiRect::new(Val::Px(if indent { 14.0 } else { 2.0 }), Val::Px(6.0), Val::Px(2.0), Val::Px(2.0)),
+                        padding: UiRect::new(
+                            Val::Px(if indent { 14.0 } else { 2.0 }),
+                            Val::Px(6.0),
+                            Val::Px(2.0),
+                            Val::Px(2.0)
+                        ),
                         overflow: Overflow::clip(),
                         ..default()
                     },
                     Pickable::IGNORE,
                     children![
                         (
-                            Node { align_items: AlignItems::Center, column_gap: Val::Px(3.0), ..default() },
+                            Node {
+                                align_items: AlignItems::Center,
+                                column_gap: Val::Px(3.0),
+                                ..default()
+                            },
                             Pickable::IGNORE,
                             Children::spawn(bevy::ecs::spawn::SpawnWith({
                                 let t = t.clone();
                                 move |p: &mut ChildSpawner| {
                                     if let Some(open) = chevron {
-                                        p.spawn((icon(if open { "chevron-down" } else { "chevron-right" }, 11.0, t.muted_foreground), Pickable::IGNORE))
-                                            .insert(Node { width: Val::Px(11.0), height: Val::Px(11.0), flex_shrink: 0.0, ..default() });
+                                        p.spawn((
+                                            icon(
+                                                if open {
+                                                    "chevron-down"
+                                                } else {
+                                                    "chevron-right"
+                                                },
+                                                11.0,
+                                                t.muted_foreground,
+                                            ),
+                                            Pickable::IGNORE,
+                                        ))
+                                        .insert(Node {
+                                            width: Val::Px(11.0),
+                                            height: Val::Px(11.0),
+                                            flex_shrink: 0.0,
+                                            ..default()
+                                        });
                                     }
-                                    let color = if muted { t.muted_foreground } else { t.foreground };
-                                    let weight = if chevron.is_some() || muted { FontWeight::NORMAL } else { FontWeight::MEDIUM };
+                                    let color = if muted {
+                                        t.muted_foreground
+                                    } else {
+                                        t.foreground
+                                    };
+                                    let weight = if chevron.is_some() || muted {
+                                        FontWeight::NORMAL
+                                    } else {
+                                        FontWeight::MEDIUM
+                                    };
                                     p.spawn((
                                         t.text(title, 11.5, weight, color),
                                         crate::ellipsis::Ellipsis::node(),
@@ -211,7 +268,14 @@ impl TimelineRow {
                             })),
                         ),
                         (
-                            Node { display: if two_lines { Display::Flex } else { Display::None }, ..default() },
+                            Node {
+                                display: if two_lines {
+                                    Display::Flex
+                                } else {
+                                    Display::None
+                                },
+                                ..default()
+                            },
                             Pickable::IGNORE,
                             Children::spawn(bevy::ecs::spawn::SpawnWith({
                                 let t = t.clone();
@@ -254,7 +318,14 @@ fn marker_node(marker: TimelineMarker, line: Color) -> impl Bundle {
             width: Val::Px(size),
             height: Val::Px(size),
             border: UiRect::all(Val::Px(border)),
-            border_radius: if matches!(marker, TimelineMarker::Version | TimelineMarker::AutoVersion) { BorderRadius::all(Val::Px(1.5)) } else { BorderRadius::MAX },
+            border_radius: if matches!(
+                marker,
+                TimelineMarker::Version | TimelineMarker::AutoVersion
+            ) {
+                BorderRadius::all(Val::Px(1.5))
+            } else {
+                BorderRadius::MAX
+            },
             ..default()
         },
         BackgroundColor(fill),

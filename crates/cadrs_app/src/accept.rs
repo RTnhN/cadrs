@@ -38,14 +38,23 @@ struct Built {
 /// Whether `feature` builds among `features` (the active ones): `Some` once known, `None`
 /// while the worker builds them, `retry` being called again when it is done. A quick rebuild
 /// answers at once. `key` names the dialog.
-pub fn builds(world: &mut World, key: &'static str, features: Vec<Feature>, feature: FeatureId, retry: fn(&mut World)) -> Option<bool> {
+pub fn builds(
+    world: &mut World,
+    key: &'static str,
+    features: Vec<Feature>,
+    feature: FeatureId,
+    retry: fn(&mut World),
+) -> Option<bool> {
     if let Some(b) = world.get_resource::<Built>()
         && b.key == key
         && b.features == features
     {
         return Some(b.build.error(feature).is_none());
     }
-    if world.get_resource::<Waiting>().is_some_and(|w| w.key == key && w.features == features) {
+    if world
+        .get_resource::<Waiting>()
+        .is_some_and(|w| w.key == key && w.features == features)
+    {
         return None;
     }
     // Anything older is dropped (a queued rebuild of it is cancelled).
@@ -54,17 +63,28 @@ pub fn builds(world: &mut World, key: &'static str, features: Vec<Feature>, feat
     if let Some(build) = job.wait(Some(Duration::from_millis(50))) {
         return Some(build.error(feature).is_none());
     }
-    world.insert_resource(Waiting { key, features, job, retry });
+    world.insert_resource(Waiting {
+        key,
+        features,
+        job,
+        retry,
+    });
     None
 }
 
 fn retry_when_built(world: &mut World) {
-    let Some(mut w) = world.remove_resource::<Waiting>() else { return };
+    let Some(mut w) = world.remove_resource::<Waiting>() else {
+        return;
+    };
     let Some(build) = w.job.poll() else {
         world.insert_resource(w);
         return;
     };
-    world.insert_resource(Built { key: w.key, features: w.features, build });
+    world.insert_resource(Built {
+        key: w.key,
+        features: w.features,
+        build,
+    });
     (w.retry)(world);
     world.remove_resource::<Built>();
 }

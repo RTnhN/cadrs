@@ -11,8 +11,8 @@ pub mod convert;
 mod path;
 
 pub use api::{Hit, search};
-pub use serde_json;
 pub use convert::{Converted, PartInfo, convert};
+pub use serde_json;
 
 use std::path::{Path, PathBuf};
 
@@ -41,14 +41,19 @@ pub fn lcsc_number(s: &str) -> Option<String> {
 /// folder `dir` (made if missing; the library is named after the folder). `info` adds what the
 /// catalogue search knew (description, datasheet).
 pub fn import(lcsc: &str, dir: &Path, info: &PartInfo) -> Result<Imported, String> {
-    let lcsc = lcsc_number(lcsc).ok_or_else(|| format!("\"{lcsc}\" isn't an LCSC part number (C followed by digits)"))?;
+    let lcsc = lcsc_number(lcsc)
+        .ok_or_else(|| format!("\"{lcsc}\" isn't an LCSC part number (C followed by digits)"))?;
     let result = api::component(&lcsc)?;
     let lib = library_name(dir)?;
     let mut warnings = vec![];
     let mut models = None;
     if let Some(m) = convert(&result, &lib, info)?.model {
-        let obj = api::model_obj(&m.uuid).map_err(|e| warnings.push(format!("3D model extent: {e}"))).ok();
-        let step = api::model_step(&m.uuid).map_err(|e| warnings.push(format!("3D model: {e}"))).ok();
+        let obj = api::model_obj(&m.uuid)
+            .map_err(|e| warnings.push(format!("3D model extent: {e}")))
+            .ok();
+        let step = api::model_step(&m.uuid)
+            .map_err(|e| warnings.push(format!("3D model: {e}")))
+            .ok();
         models = Some((obj, step));
     }
     let mut r = write_part(&result, dir, info, models)?;
@@ -57,15 +62,25 @@ pub fn import(lcsc: &str, dir: &Path, info: &PartInfo) -> Result<Imported, Strin
 }
 
 fn library_name(dir: &Path) -> Result<String, String> {
-    dir.file_name().map(|n| n.to_string_lossy().into_owned()).ok_or_else(|| "the library folder has no name".into())
+    dir.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .ok_or_else(|| "the library folder has no name".into())
 }
 
 /// Writes a part (EasyEDA's data, already fetched) into the library folder `dir`, with its 3D
 /// model when given (the OBJ for its extent, the STEP file).
-pub fn write_part(result: &serde_json::Value, dir: &Path, info: &PartInfo, models: Option<(Option<String>, Option<Vec<u8>>)>) -> Result<Imported, String> {
+pub fn write_part(
+    result: &serde_json::Value,
+    dir: &Path,
+    info: &PartInfo,
+    models: Option<(Option<String>, Option<Vec<u8>>)>,
+) -> Result<Imported, String> {
     let lib = library_name(dir)?;
     let mut c = convert(result, &lib, info)?;
-    cadrs_eda::library::ensure_library(dir, "Parts from the JLCPCB/LCSC catalogue (JLCEDA/EasyEDA official library)")?;
+    cadrs_eda::library::ensure_library(
+        dir,
+        "Parts from the JLCPCB/LCSC catalogue (JLCEDA/EasyEDA official library)",
+    )?;
     let mut model_file = None;
     if let (Some(m), Some((obj, step))) = (&c.model, models) {
         let stem = cadrs_eda::library::file_stem(c.footprint.name());
@@ -74,7 +89,11 @@ pub fn write_part(result: &serde_json::Value, dir: &Path, info: &PartInfo, model
         if let Some(text) = &obj {
             let path = dir.join(format!("{stem}.obj"));
             std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
-            c.footprint.models.push(convert::place_model(m, &path.to_string_lossy(), obj.as_deref()));
+            c.footprint.models.push(convert::place_model(
+                m,
+                &path.to_string_lossy(),
+                obj.as_deref(),
+            ));
             model_file = Some(path);
         }
         if let Some(bytes) = step {
@@ -88,7 +107,12 @@ pub fn write_part(result: &serde_json::Value, dir: &Path, info: &PartInfo, model
     }
     cadrs_eda::library::write_symbol(dir, &c.symbol)?;
     cadrs_eda::library::write_footprint(dir, &c.footprint)?;
-    Ok(Imported { symbol: format!("{lib}:{}", c.symbol.name()), footprint: format!("{lib}:{}", c.footprint.name()), model: model_file, warnings: c.warnings })
+    Ok(Imported {
+        symbol: format!("{lib}:{}", c.symbol.name()),
+        footprint: format!("{lib}:{}", c.footprint.name()),
+        model: model_file,
+        warnings: c.warnings,
+    })
 }
 
 /// A catalogue entry from a part's EasyEDA data (what an offline search lists).
@@ -96,12 +120,20 @@ pub fn hit_of(result: &serde_json::Value) -> Hit {
     let para = &result["dataStr"]["head"]["c_para"];
     let p = |k: &str| convert::latin(para[k].as_str().unwrap_or(""));
     Hit {
-        lcsc: result["lcsc"]["number"].as_str().map(str::to_string).unwrap_or_else(|| p("Supplier Part")),
+        lcsc: result["lcsc"]["number"]
+            .as_str()
+            .map(str::to_string)
+            .unwrap_or_else(|| p("Supplier Part")),
         mpn: p("Manufacturer Part"),
         manufacturer: p("Manufacturer"),
         package: p("package"),
         description: result["description"].as_str().unwrap_or("").to_string(),
-        category: result["tags"].as_array().and_then(|t| t.first()).and_then(|t| t.as_str()).unwrap_or("").to_string(),
+        category: result["tags"]
+            .as_array()
+            .and_then(|t| t.first())
+            .and_then(|t| t.as_str())
+            .unwrap_or("")
+            .to_string(),
         basic: p("JLCPCB Part Class") == "Basic Part",
         ..Default::default()
     }

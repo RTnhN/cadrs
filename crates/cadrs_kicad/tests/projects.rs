@@ -12,7 +12,8 @@ use cadrs_eda::units::Pt;
 use std::path::{Path, PathBuf};
 
 fn reference_project() -> Option<PathBuf> {
-    let p = PathBuf::from(std::env::var("HOME").ok()?).join("work/desk_power_monitor/hardware/desk_power_monitor_mini32_lora");
+    let p = PathBuf::from(std::env::var("HOME").ok()?)
+        .join("work/desk_power_monitor/hardware/desk_power_monitor_mini32_lora");
     p.is_dir().then_some(p)
 }
 
@@ -26,7 +27,8 @@ fn on_segment(p: Pt, a: Pt, b: Pt) -> bool {
     // Within 1 µm of the line, and between the ends.
     (cross as f64 / len).abs() <= 1000.0
         && (ap.x as i128 * ab.x as i128 + ap.y as i128 * ab.y as i128) >= 0
-        && (ap.x as i128 * ab.x as i128 + ap.y as i128 * ab.y as i128) <= ab.x as i128 * ab.x as i128 + ab.y as i128 * ab.y as i128
+        && (ap.x as i128 * ab.x as i128 + ap.y as i128 * ab.y as i128)
+            <= ab.x as i128 * ab.x as i128 + ab.y as i128 * ab.y as i128
 }
 
 /// Wire ends that touch nothing.
@@ -42,7 +44,11 @@ fn dangling_wire_ends(sch: &Schematic, sheet: &Sheet) -> Vec<Pt> {
     for (i, w) in sheet.wires.iter().enumerate() {
         for end in [w.a, w.b] {
             let touches = anchors.contains(&end)
-                || sheet.wires.iter().enumerate().any(|(j, o)| j != i && on_segment(end, o.a, o.b))
+                || sheet
+                    .wires
+                    .iter()
+                    .enumerate()
+                    .any(|(j, o)| j != i && on_segment(end, o.a, o.b))
                 || sheet.buses.iter().any(|o| on_segment(end, o.a, o.b));
             if !touches {
                 out.push(end);
@@ -56,7 +62,10 @@ fn dangling_wire_ends(sch: &Schematic, sheet: &Sheet) -> Vec<Pt> {
 fn unconnected_pins(sch: &Schematic, sheet: &Sheet) -> Vec<(String, String)> {
     let mut points: Vec<(Pt, String)> = vec![];
     for s in &sheet.symbols {
-        points.extend(sch.placed_pins(s).map(|(p, at)| (at, format!("{}.{}", s.reference(), p.number))));
+        points.extend(
+            sch.placed_pins(s)
+                .map(|(p, at)| (at, format!("{}.{}", s.reference(), p.number))),
+        );
     }
     let mut out = vec![];
     for (at, name) in &points {
@@ -77,21 +86,34 @@ fn dangling_track_ends(b: &Board) -> Vec<(String, [f64; 2])> {
         .footprints
         .iter()
         .flat_map(|f| {
-            f.footprint.pads.iter().filter(|p| p.kind != PadKind::NonPlated).map(move |p| {
-                let r = match &p.shape {
-                    PadShape::Circle => p.size.w / 2,
-                    _ => p.size.w.max(p.size.h) / 2,
-                };
-                (f.placement.apply(p.at), r, p.net.as_deref().unwrap_or(""))
-            })
+            f.footprint
+                .pads
+                .iter()
+                .filter(|p| p.kind != PadKind::NonPlated)
+                .map(move |p| {
+                    let r = match &p.shape {
+                        PadShape::Circle => p.size.w / 2,
+                        _ => p.size.w.max(p.size.h) / 2,
+                    };
+                    (f.placement.apply(p.at), r, p.net.as_deref().unwrap_or(""))
+                })
         })
         .collect();
     let mut out = vec![];
     for (i, t) in b.tracks.iter().enumerate() {
         for end in [t.a, t.b] {
-            let on_pad = pads.iter().any(|(c, r, n)| *n == t.net && c.dist(end) <= *r as f64 + 1000.0);
-            let on_via = b.vias.iter().any(|v| v.net == t.net && v.at.dist(end) <= v.diameter as f64 / 2.0);
-            let on_track = b.tracks.iter().enumerate().any(|(j, o)| j != i && o.layer == t.layer && (o.a == end || o.b == end || (o.mid.is_none() && on_segment(end, o.a, o.b))));
+            let on_pad = pads
+                .iter()
+                .any(|(c, r, n)| *n == t.net && c.dist(end) <= *r as f64 + 1000.0);
+            let on_via = b
+                .vias
+                .iter()
+                .any(|v| v.net == t.net && v.at.dist(end) <= v.diameter as f64 / 2.0);
+            let on_track = b.tracks.iter().enumerate().any(|(j, o)| {
+                j != i
+                    && o.layer == t.layer
+                    && (o.a == end || o.b == end || (o.mid.is_none() && on_segment(end, o.a, o.b)))
+            });
             if !(on_pad || on_via || on_track) {
                 out.push((t.net.clone(), end.to_mm()));
             }
@@ -127,10 +149,18 @@ fn reference_project_reads_and_joins_up() {
     // The headers' unused pins (and two of U1's) have no wire, as in KiCad.
     let loose = unconnected_pins(&p.design.schematic, sheet);
     assert_eq!(loose.len(), 35, "{loose:?}");
-    assert!(loose.iter().all(|(_, n)| n.starts_with('J') || n.starts_with("U1.")), "{loose:?}");
+    assert!(
+        loose
+            .iter()
+            .all(|(_, n)| n.starts_with('J') || n.starts_with("U1.")),
+        "{loose:?}"
+    );
     // KiCad's DRC reports these two GNDREF tracks on B.Cu as unconnected too.
     let gnd = |x: f64, y: f64| ("GNDREF".to_string(), [x, y]);
-    assert_eq!(dangling_track_ends(b), vec![gnd(108.0135, -83.566), gnd(106.645, -79.629)]);
+    assert_eq!(
+        dangling_track_ends(b),
+        vec![gnd(108.0135, -83.566), gnd(106.645, -79.629)]
+    );
     // The outline is closed: the board's Edge.Cuts plus nothing from footprints.
     assert!(b.outline_shapes().len() >= 9);
     // Every 3D model resolves (the RA-01SH's is another machine's absolute path).
@@ -141,7 +171,8 @@ fn reference_project_reads_and_joins_up() {
         }
     }
     let ra = b.footprint("U1").unwrap();
-    let path = cadrs_kicad::resolve_model(&ra.footprint.models[0].source, &dir).expect("RA-01SH model");
+    let path =
+        cadrs_kicad::resolve_model(&ra.footprint.models[0].source, &dir).expect("RA-01SH model");
     assert_eq!(path.extension().unwrap(), "step");
     eprintln!("warnings: {:#?}", p.warnings);
 }
@@ -175,19 +206,33 @@ fn demo_schematics_join_up() {
     for f in &files {
         let text = std::fs::read_to_string(f).unwrap();
         let mut w = vec![];
-        let sch = cadrs_kicad::read_schematic(&text, &mut w).unwrap_or_else(|e| panic!("{}: {e}", f.display()));
+        let sch = cadrs_kicad::read_schematic(&text, &mut w)
+            .unwrap_or_else(|e| panic!("{}: {e}", f.display()));
         let sheet = &sch.sheets[0];
         let d = dangling_wire_ends(&sch, sheet);
         let u = unconnected_pins(&sch, sheet);
         wires += sheet.wires.len() * 2;
         dangling += d.len();
-        pins += sheet.symbols.iter().map(|s| sch.placed_pins(s).count()).sum::<usize>();
+        pins += sheet
+            .symbols
+            .iter()
+            .map(|s| sch.placed_pins(s).count())
+            .sum::<usize>();
         loose += u.len();
         if !d.is_empty() || u.len() > 20 {
-            eprintln!("{}: {} dangling wire ends {:?}, {} loose pins", f.display(), d.len(), &d[..d.len().min(3)], u.len());
+            eprintln!(
+                "{}: {} dangling wire ends {:?}, {} loose pins",
+                f.display(),
+                d.len(),
+                &d[..d.len().min(3)],
+                u.len()
+            );
         }
     }
-    eprintln!("{} files: {dangling}/{wires} wire ends dangling, {loose}/{pins} pins unconnected", files.len());
+    eprintln!(
+        "{} files: {dangling}/{wires} wire ends dangling, {loose}/{pins} pins unconnected",
+        files.len()
+    );
     // The demos have stub wires and sub-sheet pins (not imported yet), so wire ends are only
     // reported; pins are the check: a wrong mirror or rotation leaves most of them loose.
     assert!(loose * 30 < pins, "{loose} of {pins} pins unconnected");
@@ -205,14 +250,27 @@ fn demo_boards_join_up() {
     for f in &files {
         let text = std::fs::read_to_string(f).unwrap();
         let mut w = vec![];
-        let b = cadrs_kicad::read_board(&text, &mut w).unwrap_or_else(|e| panic!("{}: {e}", f.display()));
+        let b = cadrs_kicad::read_board(&text, &mut w)
+            .unwrap_or_else(|e| panic!("{}: {e}", f.display()));
         let d = dangling_track_ends(&b);
         ends += b.tracks.len() * 2;
         dangling += d.len();
         if d.len() > 2 {
-            eprintln!("{}: {} of {} track ends dangle, e.g. {:?}", f.display(), d.len(), b.tracks.len() * 2, &d[..d.len().min(3)]);
+            eprintln!(
+                "{}: {} of {} track ends dangle, e.g. {:?}",
+                f.display(),
+                d.len(),
+                b.tracks.len() * 2,
+                &d[..d.len().min(3)]
+            );
         }
     }
-    eprintln!("{} boards: {dangling}/{ends} track ends dangling", files.len());
-    assert!(dangling * 100 < ends, "{dangling} of {ends} track ends dangle");
+    eprintln!(
+        "{} boards: {dangling}/{ends} track ends dangling",
+        files.len()
+    );
+    assert!(
+        dangling * 100 < ends,
+        "{dangling} of {ends} track ends dangle"
+    );
 }

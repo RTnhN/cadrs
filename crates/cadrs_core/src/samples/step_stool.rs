@@ -35,11 +35,18 @@ use std::sync::Arc;
 use cadrs_sketch::{PlaneRef, SketchOp, Vec2};
 
 use crate::assembly::commands::{AddMateFeature, InsertInstance, SetInstancesFixed};
-use crate::assembly::connector::{ConnectorFrame, EntityRef, ImplicitPoint, MateConnector, implicit_points};
-use crate::assembly::mate::{Mate, MateFeature, MateId, MateKind, MateLimits, MateOffset, MateType};
+use crate::assembly::connector::{
+    ConnectorFrame, EntityRef, ImplicitPoint, MateConnector, implicit_points,
+};
+use crate::assembly::mate::{
+    Mate, MateFeature, MateId, MateKind, MateLimits, MateOffset, MateType,
+};
 use crate::assembly::{self, Instance, InstanceId, InstanceSource, Pose};
 use crate::command::{CommandError, History};
-use crate::commands::{AddElement, AddExtrude, AddFeature, AddSketch, EditSketch, NewElementKind, RenameFeature, RenamePart, SetExtrude, SetPartMaterial};
+use crate::commands::{
+    AddElement, AddExtrude, AddFeature, AddSketch, EditSketch, NewElementKind, RenameFeature,
+    RenamePart, SetExtrude, SetPartMaterial,
+};
 use crate::document::{BooleanOp, Document, ExtrudeFeature, FeatureKind, Offset};
 use crate::ids::{ElementId, FeatureId, PartId};
 use crate::mate::{ConnectorOrigin, MateConnectorFeature, OriginType};
@@ -90,16 +97,39 @@ pub(crate) fn v(x: f64, y: f64) -> Vec2 {
 }
 
 pub(crate) fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> SketchOp {
-    SketchOp::AddPolyline { points: vec![v(x0, y0), v(x1, y0), v(x1, y1), v(x0, y1)], closed: true, construction: false, label: "Add rectangle" }
+    SketchOp::AddPolyline {
+        points: vec![v(x0, y0), v(x1, y0), v(x1, y1), v(x0, y1)],
+        closed: true,
+        construction: false,
+        label: "Add rectangle",
+    }
 }
 
 pub(crate) fn circle(x: f64, y: f64, d: f64) -> SketchOp {
-    SketchOp::AddCircle { center: v(x, y), radius: d / 2.0 * IN, construction: false }
+    SketchOp::AddCircle {
+        center: v(x, y),
+        radius: d / 2.0 * IN,
+        construction: false,
+    }
 }
 
-pub(crate) fn sketch(s: &mut dyn Studio, el: ElementId, sketch: FeatureId, plane: PlaneRef, ops: Vec<SketchOp>) -> Result<cadrs_sketch::Sketch, CommandError> {
-    s.run(&AddSketch { element: el, feature: sketch, plane: Some(plane) })?;
-    s.run(&EditSketch { element: el, feature: sketch, op: SketchOp::Batch(ops) })?;
+pub(crate) fn sketch(
+    s: &mut dyn Studio,
+    el: ElementId,
+    sketch: FeatureId,
+    plane: PlaneRef,
+    ops: Vec<SketchOp>,
+) -> Result<cadrs_sketch::Sketch, CommandError> {
+    s.run(&AddSketch {
+        element: el,
+        feature: sketch,
+        plane: Some(plane),
+    })?;
+    s.run(&EditSketch {
+        element: el,
+        feature: sketch,
+        op: SketchOp::Batch(ops),
+    })?;
     s.document()
         .element(el)
         .and_then(|x| x.feature(sketch))
@@ -125,7 +155,9 @@ pub(crate) fn extrude(
 ) -> Result<(), CommandError> {
     let regions = super::region_refs(sketch, g, seeds);
     if regions.len() != seeds.len() {
-        return Err(CommandError::Invalid(format!("a region of the step stool stand-in is missing ({feature:?})")));
+        return Err(CommandError::Invalid(format!(
+            "a region of the step stool stand-in is missing ({feature:?})"
+        )));
     }
     let (z0, z1) = z;
     let mut x = super::extrude_of(regions, (z1 - z0) * IN);
@@ -134,41 +166,182 @@ pub(crate) fn extrude(
     x.merge_scope = scope.to_vec();
     x.symmetric = symmetric;
     if z0 != 0.0 {
-        x.start_offset = Some(Offset { value: z0.abs() * IN, expr: format!("{} in", z0.abs()), flip: z0 < 0.0 });
+        x.start_offset = Some(Offset {
+            value: z0.abs() * IN,
+            expr: format!("{} in", z0.abs()),
+            flip: z0 < 0.0,
+        });
     }
-    s.run(&AddExtrude { element: el, feature, extrude: ExtrudeFeature::default() })?;
-    s.run(&SetExtrude { element: el, feature, extrude: x, label: "Extrude".into() })?;
+    s.run(&AddExtrude {
+        element: el,
+        feature,
+        extrude: ExtrudeFeature::default(),
+    })?;
+    s.run(&SetExtrude {
+        element: el,
+        feature,
+        extrude: x,
+        label: "Extrude".into(),
+    })?;
     Ok(())
 }
 
 /// The Large Frame Bar studio's features.
 pub fn build_large(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
-    let g = sketch(s, el, id(0x11), PlaneRef::Top, vec![rect(-6.0, 0.0, 6.0, 1.0)])?;
-    extrude(s, el, id(0x11), &g, id(0x12), &[v(0.0, 0.5)], (0.0, 24.0), BooleanOp::New, &[], false)?;
+    let g = sketch(
+        s,
+        el,
+        id(0x11),
+        PlaneRef::Top,
+        vec![rect(-6.0, 0.0, 6.0, 1.0)],
+    )?;
+    extrude(
+        s,
+        el,
+        id(0x11),
+        &g,
+        id(0x12),
+        &[v(0.0, 0.5)],
+        (0.0, 24.0),
+        BooleanOp::New,
+        &[],
+        false,
+    )?;
     // Right: sketch x = model Y, y = model Z.
-    sketch(s, el, HOLE_POSITIONS, PlaneRef::Right, vec![circle(HINGE_AXIS[0], HINGE_AXIS[1], 0.5)])?;
-    s.run(&RenameFeature { element: el, feature: HOLE_POSITIONS, name: "Hole Positions".into() })?;
-    s.run(&RenamePart { element: el, part: LARGE_FRAME_BAR, name: "Large Frame Bar".into() })?;
-    s.run(&SetPartMaterial { element: el, parts: vec![LARGE_FRAME_BAR], material: crate::material::library("Aluminum - 6061") })?;
+    sketch(
+        s,
+        el,
+        HOLE_POSITIONS,
+        PlaneRef::Right,
+        vec![circle(HINGE_AXIS[0], HINGE_AXIS[1], 0.5)],
+    )?;
+    s.run(&RenameFeature {
+        element: el,
+        feature: HOLE_POSITIONS,
+        name: "Hole Positions".into(),
+    })?;
+    s.run(&RenamePart {
+        element: el,
+        part: LARGE_FRAME_BAR,
+        name: "Large Frame Bar".into(),
+    })?;
+    s.run(&SetPartMaterial {
+        element: el,
+        parts: vec![LARGE_FRAME_BAR],
+        material: crate::material::library("Aluminum - 6061"),
+    })?;
     Ok(())
 }
 
 /// The Base Frame Bar studio's features (Base Frame Bar, Cross Bar, Back Foot).
 pub fn build_base(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError> {
     use BooleanOp::{Add, New, Remove};
-    let g = sketch(s, el, id(0x21), PlaneRef::Top, vec![rect(-5.0, -1.5, 5.0, -1.0)])?;
-    extrude(s, el, id(0x21), &g, id(0x22), &[v(0.0, -1.25)], (0.0, 22.0), New, &[], false)?;
-    let g = sketch(s, el, id(0x23), PlaneRef::Top, vec![rect(-5.0, -1.5, -4.5, 0.0), rect(4.5, -1.5, 5.0, 0.0)])?;
-    extrude(s, el, id(0x23), &g, id(0x24), &[v(-4.75, -0.75), v(4.75, -0.75)], (22.0, 24.0), Add, &[BASE_FRAME_BAR], false)?;
+    let g = sketch(
+        s,
+        el,
+        id(0x21),
+        PlaneRef::Top,
+        vec![rect(-5.0, -1.5, 5.0, -1.0)],
+    )?;
+    extrude(
+        s,
+        el,
+        id(0x21),
+        &g,
+        id(0x22),
+        &[v(0.0, -1.25)],
+        (0.0, 22.0),
+        New,
+        &[],
+        false,
+    )?;
+    let g = sketch(
+        s,
+        el,
+        id(0x23),
+        PlaneRef::Top,
+        vec![rect(-5.0, -1.5, -4.5, 0.0), rect(4.5, -1.5, 5.0, 0.0)],
+    )?;
+    extrude(
+        s,
+        el,
+        id(0x23),
+        &g,
+        id(0x24),
+        &[v(-4.75, -0.75), v(4.75, -0.75)],
+        (22.0, 24.0),
+        Add,
+        &[BASE_FRAME_BAR],
+        false,
+    )?;
     // The hinge holes: a Right sketch cut symmetric through both lugs.
-    let g = sketch(s, el, id(0x25), PlaneRef::Right, vec![circle(HINGE_AXIS[0], HINGE_AXIS[1], 0.5)])?;
-    extrude(s, el, id(0x25), &g, id(0x26), &[v(HINGE_AXIS[0], HINGE_AXIS[1])], (0.0, 12.0), Remove, &[BASE_FRAME_BAR], true)?;
-    let g = sketch(s, el, id(0x31), PlaneRef::Top, vec![rect(-4.5, -2.5, 4.5, -1.5)])?;
-    extrude(s, el, id(0x31), &g, id(0x32), &[v(0.0, -2.0)], (4.0, 5.0), New, &[], false)?;
-    let g = sketch(s, el, id(0x41), PlaneRef::Top, vec![rect(-5.5, -2.0, 5.5, -0.5)])?;
-    extrude(s, el, id(0x41), &g, id(0x42), &[v(0.0, -1.25)], (-0.5, 0.0), New, &[], false)?;
-    for (part, name) in [(BASE_FRAME_BAR, "Base Frame Bar"), (CROSS_BAR, "Cross Bar"), (BACK_FOOT, "Back Foot")] {
-        s.run(&RenamePart { element: el, part, name: name.into() })?;
+    let g = sketch(
+        s,
+        el,
+        id(0x25),
+        PlaneRef::Right,
+        vec![circle(HINGE_AXIS[0], HINGE_AXIS[1], 0.5)],
+    )?;
+    extrude(
+        s,
+        el,
+        id(0x25),
+        &g,
+        id(0x26),
+        &[v(HINGE_AXIS[0], HINGE_AXIS[1])],
+        (0.0, 12.0),
+        Remove,
+        &[BASE_FRAME_BAR],
+        true,
+    )?;
+    let g = sketch(
+        s,
+        el,
+        id(0x31),
+        PlaneRef::Top,
+        vec![rect(-4.5, -2.5, 4.5, -1.5)],
+    )?;
+    extrude(
+        s,
+        el,
+        id(0x31),
+        &g,
+        id(0x32),
+        &[v(0.0, -2.0)],
+        (4.0, 5.0),
+        New,
+        &[],
+        false,
+    )?;
+    let g = sketch(
+        s,
+        el,
+        id(0x41),
+        PlaneRef::Top,
+        vec![rect(-5.5, -2.0, 5.5, -0.5)],
+    )?;
+    extrude(
+        s,
+        el,
+        id(0x41),
+        &g,
+        id(0x42),
+        &[v(0.0, -1.25)],
+        (-0.5, 0.0),
+        New,
+        &[],
+        false,
+    )?;
+    for (part, name) in [
+        (BASE_FRAME_BAR, "Base Frame Bar"),
+        (CROSS_BAR, "Cross Bar"),
+        (BACK_FOOT, "Back Foot"),
+    ] {
+        s.run(&RenamePart {
+            element: el,
+            part,
+            name: name.into(),
+        })?;
     }
     s.run(&SetPartMaterial {
         element: el,
@@ -179,13 +352,19 @@ pub fn build_base(s: &mut dyn Studio, el: ElementId) -> Result<(), CommandError>
 }
 
 /// The implicit connector of the planar face of `s` whose centroid is at `c` (in).
-fn face_centroid(s: &Solid, c: [f64; 3]) -> Result<crate::assembly::connector::ImplicitConnector, CommandError> {
+fn face_centroid(
+    s: &Solid,
+    c: [f64; 3],
+) -> Result<crate::assembly::connector::ImplicitConnector, CommandError> {
     s.faces
         .iter()
         .find_map(|f| {
             implicit_points(s, &EntityRef::Face(f.name))
                 .into_iter()
-                .find(|p| matches!(p.point, ImplicitPoint::FaceCentroid(_)) && (0..3).all(|i| (p.frame.origin[i] / IN - c[i]).abs() < 1e-6))
+                .find(|p| {
+                    matches!(p.point, ImplicitPoint::FaceCentroid(_))
+                        && (0..3).all(|i| (p.frame.origin[i] / IN - c[i]).abs() < 1e-6)
+                })
         })
         .ok_or_else(|| CommandError::Invalid(format!("no face centred at {c:?}")))
 }
@@ -196,7 +375,11 @@ pub fn solids(doc: &Document) -> HashMap<InstanceId, Arc<Solid>> {
         .into_iter()
         .filter_map(|e| Some((e, crate::rebuild::build(doc.element(e)?.features()))))
         .collect();
-    let asm = doc.element(ASSEMBLY).and_then(|e| e.assembly_model()).cloned().unwrap_or_default();
+    let asm = doc
+        .element(ASSEMBLY)
+        .and_then(|e| e.assembly_model())
+        .cloned()
+        .unwrap_or_default();
     assembly::source_solids(&asm, |e| builds.get(&e).cloned())
 }
 
@@ -205,21 +388,49 @@ pub fn solids(doc: &Document) -> HashMap<InstanceId, Arc<Solid>> {
 /// snaps it into place.
 pub fn base_start() -> Pose {
     let axis = [0.0, HINGE_AXIS[0] * IN, HINGE_AXIS[1] * IN];
-    Pose::rotation_about(axis, [1.0, 0.0, 0.0], 8f64.to_radians()).then(&Pose::translation([0.0, -1.5 * IN, -IN]))
+    Pose::rotation_about(axis, [1.0, 0.0, 0.0], 8f64.to_radians()).then(&Pose::translation([
+        0.0,
+        -1.5 * IN,
+        -IN,
+    ]))
 }
 
 /// Adds "Step Stool Assembly" (A24.2: pre-mated except the hinge).
 pub fn build_assembly(doc: &mut Document, h: &mut History) -> Result<(), CommandError> {
-    h.execute(doc, &AddElement { id: ASSEMBLY, kind: NewElementKind::Assembly, name: Some("Step Stool Assembly".into()), after: None })?;
+    h.execute(
+        doc,
+        &AddElement {
+            id: ASSEMBLY,
+            kind: NewElementKind::Assembly,
+            name: Some("Step Stool Assembly".into()),
+            after: None,
+        },
+    )?;
     for (i, el, p, pose) in [
         (LARGE, LARGE_STUDIO, LARGE_FRAME_BAR, Pose::IDENTITY),
         (BASE, BASE_STUDIO, BASE_FRAME_BAR, base_start()),
         (CROSS, BASE_STUDIO, CROSS_BAR, base_start()),
     ] {
-        let source = InstanceSource::Part { element: el, part: p };
-        h.execute(doc, &InsertInstance { element: ASSEMBLY, instance: Instance::new(i, source, pose) })?;
+        let source = InstanceSource::Part {
+            element: el,
+            part: p,
+        };
+        h.execute(
+            doc,
+            &InsertInstance {
+                element: ASSEMBLY,
+                instance: Instance::new(i, source, pose),
+            },
+        )?;
     }
-    h.execute(doc, &SetInstancesFixed { element: ASSEMBLY, instances: vec![LARGE], fixed: true })?;
+    h.execute(
+        doc,
+        &SetInstancesFixed {
+            element: ASSEMBLY,
+            instances: vec![LARGE],
+            fixed: true,
+        },
+    )?;
     // Fastened 1: the Cross Bar's face against the frame (y −1.5, Z +Y), flipped, on the
     // centroid of the frame's back face (y −1.5, Z −Y), offset to where the Cross Bar is.
     let s = solids(doc);
@@ -229,9 +440,14 @@ pub fn build_assembly(doc: &mut Document, h: &mut History) -> Result<(), Command
         .faces
         .iter()
         .enumerate()
-        .filter(|(i, f)| f.plane.is_some() && s[&BASE].face_normal(*i).is_some_and(|n| n[1] < -0.999))
+        .filter(|(i, f)| {
+            f.plane.is_some() && s[&BASE].face_normal(*i).is_some_and(|n| n[1] < -0.999)
+        })
         .flat_map(|(_, f)| implicit_points(&s[&BASE], &EntityRef::Face(f.name)))
-        .find(|p| matches!(p.point, ImplicitPoint::FaceCentroid(_)) && (p.frame.origin[1] / IN + 1.5).abs() < 1e-6)
+        .find(|p| {
+            matches!(p.point, ImplicitPoint::FaceCentroid(_))
+                && (p.frame.origin[1] / IN + 1.5).abs() < 1e-6
+        })
         .ok_or_else(|| CommandError::Invalid("no back face on the Base Frame Bar".into()))?;
     let c2 = MateConnector::implicit(BASE, &back);
     let f2 = c2.local_frame(Some(&s[&BASE]));
@@ -240,16 +456,33 @@ pub fn build_assembly(doc: &mut Document, h: &mut History) -> Result<(), Command
     let mut m = Mate::new(MateType::Fastened, c1, c2);
     // (Both frames are in their parts' own coordinates; the two instances start at the same
     // placement, so the offset is the same in the assembly.)
-    m.offset = Some(MateOffset { translation: [along(f2.x), along(f2.y()), along(f2.z)], ..Default::default() });
+    m.offset = Some(MateOffset {
+        translation: [along(f2.x), along(f2.y()), along(f2.z)],
+        ..Default::default()
+    });
     let f = MateFeature::new(FASTENED_1, "Fastened 1", MateKind::Mate(m));
     // Check that it holds where the parts are.
-    let mut model = doc.element(ASSEMBLY).and_then(|e| e.assembly_model()).cloned().unwrap_or_default();
+    let mut model = doc
+        .element(ASSEMBLY)
+        .and_then(|e| e.assembly_model())
+        .cloned()
+        .unwrap_or_default();
     model.mates.push(f.clone());
     let sol = assembly::solve(&model, &s, &Default::default());
     if !sol.converged || !sol.changed(&model).is_empty() {
-        return Err(CommandError::Invalid(format!("Fastened 1 doesn't hold where the parts are ({})", sol.residual)));
+        return Err(CommandError::Invalid(format!(
+            "Fastened 1 doesn't hold where the parts are ({})",
+            sol.residual
+        )));
     }
-    h.execute(doc, &AddMateFeature { element: ASSEMBLY, feature: f, poses: Vec::new() })
+    h.execute(
+        doc,
+        &AddMateFeature {
+            element: ASSEMBLY,
+            feature: f,
+            poses: Vec::new(),
+        },
+    )
 }
 
 /// The stand-in document (`fixtures/step_stool_standin.cadrs`): "Creating Mate Connectors
@@ -263,7 +496,10 @@ pub fn document() -> Result<Document, CommandError> {
         ..Default::default()
     };
     let mut h = History::default();
-    for (el, name) in [(LARGE_STUDIO, "Large Frame Bar"), (BASE_STUDIO, "Base Frame Bar")] {
+    for (el, name) in [
+        (LARGE_STUDIO, "Large Frame Bar"),
+        (BASE_STUDIO, "Base Frame Bar"),
+    ] {
         let mut e = crate::document::Element::part_studio(name);
         e.id = el;
         doc.elements.push(e);
@@ -288,7 +524,12 @@ pub fn file(document: Document) -> crate::store::DocumentFile {
 pub fn circle_edge(s: &Solid, c: [f64; 3], d: f64) -> Option<cadrs_sketch::EdgeName> {
     s.edges
         .iter()
-        .find(|e| e.circle.is_some_and(|k| (k.radius * 2.0 / IN - d).abs() < 1e-6 && (0..3).all(|i| (k.center[i] / IN - c[i]).abs() < 1e-6)))
+        .find(|e| {
+            e.circle.is_some_and(|k| {
+                (k.radius * 2.0 / IN - d).abs() < 1e-6
+                    && (0..3).all(|i| (k.center[i] / IN - c[i]).abs() < 1e-6)
+            })
+        })
         .map(|e| e.name)
 }
 
@@ -301,7 +542,10 @@ pub fn x_face(s: &Solid, x0: f64, sign: f64) -> Option<cadrs_sketch::FaceName> {
         .find(|(i, f)| {
             f.plane.is_some()
                 && s.face_normal(*i).is_some_and(|n| n[0] * sign > 0.999)
-                && f.loops.iter().flatten().all(|p| (p[0] / IN - x0).abs() < 1e-6)
+                && f.loops
+                    .iter()
+                    .flatten()
+                    .all(|p| (p[0] / IN - x0).abs() < 1e-6)
         })
         .map(|(_, f)| f.name)
 }
@@ -311,21 +555,49 @@ pub fn x_face(s: &Solid, x0: f64, sign: f64) -> Option<cadrs_sketch::FaceName> {
 pub fn add_connectors_and_hinge(doc: &mut Document, h: &mut History) -> Result<(), CommandError> {
     use crate::document::{EdgeRef, FaceRef};
     // A24.5: Between entities in the Base Frame Bar studio.
-    let base_build = crate::rebuild::build(doc.element(BASE_STUDIO).ok_or(CommandError::ElementNotFound(BASE_STUDIO))?.features());
-    let bar = &base_build.part(BASE_FRAME_BAR).ok_or_else(|| CommandError::Invalid("no Base Frame Bar".into()))?.solid;
-    let rim = circle_edge(bar, [-4.5, HINGE_AXIS[0], HINGE_AXIS[1]], 0.5).ok_or_else(|| CommandError::Invalid("no hinge hole rim".into()))?;
-    let face = x_face(bar, 4.5, -1.0).ok_or_else(|| CommandError::Invalid("no inner lug face".into()))?;
-    let seed = bar.face(&face).and_then(|f| f.loops.first()?.first().copied()).unwrap_or([0.0; 3]);
+    let base_build = crate::rebuild::build(
+        doc.element(BASE_STUDIO)
+            .ok_or(CommandError::ElementNotFound(BASE_STUDIO))?
+            .features(),
+    );
+    let bar = &base_build
+        .part(BASE_FRAME_BAR)
+        .ok_or_else(|| CommandError::Invalid("no Base Frame Bar".into()))?
+        .solid;
+    let rim = circle_edge(bar, [-4.5, HINGE_AXIS[0], HINGE_AXIS[1]], 0.5)
+        .ok_or_else(|| CommandError::Invalid("no hinge hole rim".into()))?;
+    let face =
+        x_face(bar, 4.5, -1.0).ok_or_else(|| CommandError::Invalid("no inner lug face".into()))?;
+    let seed = bar
+        .face(&face)
+        .and_then(|f| f.loops.first()?.first().copied())
+        .unwrap_or([0.0; 3]);
     let between = MateConnectorFeature {
         origin_type: OriginType::BetweenEntities,
-        origin: Some(ConnectorOrigin::Edge(EdgeRef { part: BASE_FRAME_BAR, edge: rim, seed: bar.edge(&rim).map(|e| e.midpoint()).unwrap_or([0.0; 3]) })),
-        between: Some(ConnectorOrigin::Face(FaceRef { part: BASE_FRAME_BAR, face, seed })),
+        origin: Some(ConnectorOrigin::Edge(EdgeRef {
+            part: BASE_FRAME_BAR,
+            edge: rim,
+            seed: bar.edge(&rim).map(|e| e.midpoint()).unwrap_or([0.0; 3]),
+        })),
+        between: Some(ConnectorOrigin::Face(FaceRef {
+            part: BASE_FRAME_BAR,
+            face,
+            seed,
+        })),
         owner_on: true,
         owner: Some(BASE_FRAME_BAR),
         move_on: false,
         ..MateConnectorFeature::default()
     };
-    h.execute(doc, &AddFeature { element: BASE_STUDIO, feature: BASE_CONNECTOR, base_name: "Mate connector".into(), kind: FeatureKind::MateConnector(between) })?;
+    h.execute(
+        doc,
+        &AddFeature {
+            element: BASE_STUDIO,
+            feature: BASE_CONNECTOR,
+            base_name: "Mate connector".into(),
+            kind: FeatureKind::MateConnector(between),
+        },
+    )?;
     // A24.8: On entity, the Hole Positions circle.
     let curve = doc
         .element(LARGE_STUDIO)
@@ -334,32 +606,76 @@ pub fn add_connectors_and_hinge(doc: &mut Document, h: &mut History) -> Result<(
         .and_then(|s| s.geometry.curves.keys().next())
         .ok_or_else(|| CommandError::Invalid("no Hole Positions circle".into()))?;
     let on = MateConnectorFeature {
-        origin: Some(ConnectorOrigin::SketchCurve { sketch: HOLE_POSITIONS, curve }),
+        origin: Some(ConnectorOrigin::SketchCurve {
+            sketch: HOLE_POSITIONS,
+            curve,
+        }),
         owner_on: true,
         owner: Some(LARGE_FRAME_BAR),
         move_on: false,
         ..MateConnectorFeature::default()
     };
-    h.execute(doc, &AddFeature { element: LARGE_STUDIO, feature: LARGE_CONNECTOR, base_name: "Mate connector".into(), kind: FeatureKind::MateConnector(on) })?;
+    h.execute(
+        doc,
+        &AddFeature {
+            element: LARGE_STUDIO,
+            feature: LARGE_CONNECTOR,
+            base_name: "Mate connector".into(),
+            kind: FeatureKind::MateConnector(on),
+        },
+    )?;
     // A24.10: Revolute 1 between them, the Large Frame Bar's first.
     let s = solids(doc);
     let frame = |i: InstanceId, f: FeatureId| -> Result<ConnectorFrame, CommandError> {
-        let c = s[&i].connectors.iter().find(|c| c.feature == f).ok_or_else(|| CommandError::Invalid(format!("{f:?} isn't on its part")))?;
-        Ok(ConnectorFrame::new(c.frame.origin, c.frame.normal(), c.frame.u))
+        let c = s[&i]
+            .connectors
+            .iter()
+            .find(|c| c.feature == f)
+            .ok_or_else(|| CommandError::Invalid(format!("{f:?} isn't on its part")))?;
+        Ok(ConnectorFrame::new(
+            c.frame.origin,
+            c.frame.normal(),
+            c.frame.u,
+        ))
     };
     let a = MateConnector::explicit(LARGE, LARGE_CONNECTOR, frame(LARGE, LARGE_CONNECTOR)?);
     let b = MateConnector::explicit(BASE, BASE_CONNECTOR, frame(BASE, BASE_CONNECTOR)?);
     let mut m = Mate::new(MateType::Revolute, a, b);
-    m.limits = Some(MateLimits { angle: Some((OPEN_ANGLE.to_radians(), 0.0)), ..Default::default() });
+    m.limits = Some(MateLimits {
+        angle: Some((OPEN_ANGLE.to_radians(), 0.0)),
+        ..Default::default()
+    });
     let f = MateFeature::new(HINGE, "Revolute 1", MateKind::Mate(m));
-    let mut model = doc.element(ASSEMBLY).and_then(|e| e.assembly_model()).cloned().unwrap_or_default();
+    let mut model = doc
+        .element(ASSEMBLY)
+        .and_then(|e| e.assembly_model())
+        .cloned()
+        .unwrap_or_default();
     model.mates.push(f.clone());
-    let sol = assembly::solve(&model, &s, &crate::assembly::solver::SolveOptions { movers: vec![BASE], snap: Some(HINGE), ..Default::default() });
+    let sol = assembly::solve(
+        &model,
+        &s,
+        &crate::assembly::solver::SolveOptions {
+            movers: vec![BASE],
+            snap: Some(HINGE),
+            ..Default::default()
+        },
+    );
     if !sol.converged {
-        return Err(CommandError::Invalid(format!("the hinge doesn't solve ({})", sol.residual)));
+        return Err(CommandError::Invalid(format!(
+            "the hinge doesn't solve ({})",
+            sol.residual
+        )));
     }
     let poses = sol.changed(&model);
-    h.execute(doc, &AddMateFeature { element: ASSEMBLY, feature: f, poses })
+    h.execute(
+        doc,
+        &AddMateFeature {
+            element: ASSEMBLY,
+            feature: f,
+            poses,
+        },
+    )
 }
 
 /// The stand-in after A24.4–A24.10 (`fixtures/step_stool_hinged.cadrs`): both connectors and

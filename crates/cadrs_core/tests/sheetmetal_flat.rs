@@ -25,7 +25,11 @@ impl Studio {
     fn new() -> Self {
         let d = Document::new("Flat");
         let el = d.elements[0].id;
-        Self { d, h: History::default(), el }
+        Self {
+            d,
+            h: History::default(),
+            el,
+        }
     }
 
     fn features(&self) -> Vec<Feature> {
@@ -34,16 +38,44 @@ impl Studio {
 
     fn sketch(&mut self, plane: PlaneRef, ops: Vec<SketchOp>) -> FeatureId {
         let f = FeatureId::new();
-        self.h.execute(&mut self.d, &AddSketch { element: self.el, feature: f, plane: Some(plane) }).unwrap();
+        self.h
+            .execute(
+                &mut self.d,
+                &AddSketch {
+                    element: self.el,
+                    feature: f,
+                    plane: Some(plane),
+                },
+            )
+            .unwrap();
         for op in ops {
-            self.h.execute(&mut self.d, &EditSketch { element: self.el, feature: f, op }).unwrap();
+            self.h
+                .execute(
+                    &mut self.d,
+                    &EditSketch {
+                        element: self.el,
+                        feature: f,
+                        op,
+                    },
+                )
+                .unwrap();
         }
         f
     }
 
     fn add(&mut self, base: &str, kind: FeatureKind) -> FeatureId {
         let feature = FeatureId::new();
-        self.h.execute(&mut self.d, &AddFeature { element: self.el, feature, base_name: base.into(), kind }).unwrap();
+        self.h
+            .execute(
+                &mut self.d,
+                &AddFeature {
+                    element: self.el,
+                    feature,
+                    base_name: base.into(),
+                    kind,
+                },
+            )
+            .unwrap();
         feature
     }
 
@@ -60,8 +92,18 @@ impl Studio {
     /// A U channel: a sheet metal Extrude of an open U (30 up, 60 across, 30 up) on Front, 100
     /// deep, 2 thick, bend radius 3.
     fn channel(&mut self) -> FeatureId {
-        let s = self.sketch(PlaneRef::Front, vec![poly(&[(0.0, 30.0), (0.0, 0.0), (60.0, 0.0), (60.0, 30.0)], false)]);
-        let p = Params { thickness: 2.0, bend_radius: 3.0, ..SheetMetalModelFeature::default_params() };
+        let s = self.sketch(
+            PlaneRef::Front,
+            vec![poly(
+                &[(0.0, 30.0), (0.0, 0.0), (60.0, 0.0), (60.0, 30.0)],
+                false,
+            )],
+        );
+        let p = Params {
+            thickness: 2.0,
+            bend_radius: 3.0,
+            ..SheetMetalModelFeature::default_params()
+        };
         let x = SheetMetalModelFeature {
             operation: SheetMetalOp::Extrude,
             sketches: vec![s],
@@ -78,13 +120,21 @@ impl Studio {
     fn flat_sketch(&mut self, model: FeatureId, ops: Vec<SketchOp>) -> FeatureId {
         let b = self.ok();
         let id = flat_plane_id(model, 0);
-        let frame = *b.planes.get(&FeatureId(id)).expect("the flat pattern plane");
+        let frame = *b
+            .planes
+            .get(&FeatureId(id))
+            .expect("the flat pattern plane");
         self.sketch(PlaneRef::Feature(FeaturePlane::new(id, frame)), ops)
     }
 }
 
 fn poly(pts: &[(f64, f64)], closed: bool) -> SketchOp {
-    SketchOp::AddPolyline { points: pts.iter().map(|(x, y)| Vec2::new(*x, *y)).collect(), closed, construction: false, label: "Add line" }
+    SketchOp::AddPolyline {
+        points: pts.iter().map(|(x, y)| Vec2::new(*x, *y)).collect(),
+        closed,
+        construction: false,
+        label: "Add line",
+    }
 }
 
 fn volume(p: &Part) -> f64 {
@@ -130,21 +180,44 @@ fn a_flat_cut_across_a_bend_keeps_its_flat_size_folded() {
     let c = P2::from((bend.center.a.coords + bend.center.b.coords) / 2.0);
     let (d, n) = (bend.center.dir(), perp(bend.center.dir()));
     let (w, l) = (12.7, 50.0);
-    let corners = [c - d * (w / 2.0) - n * (l / 2.0), c + d * (w / 2.0) - n * (l / 2.0), c + d * (w / 2.0) + n * (l / 2.0), c - d * (w / 2.0) + n * (l / 2.0)];
+    let corners = [
+        c - d * (w / 2.0) - n * (l / 2.0),
+        c + d * (w / 2.0) - n * (l / 2.0),
+        c + d * (w / 2.0) + n * (l / 2.0),
+        c - d * (w / 2.0) + n * (l / 2.0),
+    ];
     let s = st.flat_sketch(model, vec![poly(&corners.map(|q| (q.x, q.y)), true)]);
-    st.add("Extrude", FeatureKind::FlatExtrude(FlatExtrudeFeature { remove: true, sketches: vec![s], ..Default::default() }));
+    st.add(
+        "Extrude",
+        FeatureKind::FlatExtrude(FlatExtrudeFeature {
+            remove: true,
+            sketches: vec![s],
+            ..Default::default()
+        }),
+    );
     let b = st.ok();
     assert_eq!(b.parts.len(), 1);
     let flat = &b.sheet_metal[0].flat.parts[0];
     // The flat loses exactly the slot, as one hole w × l.
-    assert!((area0 - flat.area() - w * l).abs() < 1e-6, "{}", area0 - flat.area());
+    assert!(
+        (area0 - flat.area() - w * l).abs() < 1e-6,
+        "{}",
+        area0 - flat.area()
+    );
     assert_eq!(flat.outline.len(), 1);
     let holes: Vec<&Vec<P2>> = flat.outline.iter().flat_map(|o| o.holes.iter()).collect();
     assert_eq!(holes.len(), 1);
     let along: Vec<f64> = holes[0].iter().map(|q| (q - c).dot(&d)).collect();
     let across: Vec<f64> = holes[0].iter().map(|q| (q - c).dot(&n)).collect();
-    let span = |v: &[f64]| v.iter().copied().fold(f64::MIN, f64::max) - v.iter().copied().fold(f64::MAX, f64::min);
-    assert!((span(&along) - w).abs() < 1e-6 && (span(&across) - l).abs() < 1e-6, "{} × {}", span(&along), span(&across));
+    let span = |v: &[f64]| {
+        v.iter().copied().fold(f64::MIN, f64::max) - v.iter().copied().fold(f64::MAX, f64::min)
+    };
+    assert!(
+        (span(&along) - w).abs() < 1e-6 && (span(&across) - l).abs() < 1e-6,
+        "{} × {}",
+        span(&along),
+        span(&across)
+    );
     // Folded: the part loses that material, wrapped round the bend (walls flat, the bend region
     // at its mid-thickness radius).
     let v1 = volume(&b.parts[0]);
@@ -164,8 +237,26 @@ fn a_tab_added_in_the_flat_appears_folded() {
     let (lo, hi) = flat.bounds().unwrap();
     // A 20 × 8 tab on the flat's edge at its lowest y, in the middle of x.
     let mx = (lo.x + hi.x) / 2.0;
-    let s = st.flat_sketch(model, vec![poly(&[(mx - 10.0, lo.y - 8.0), (mx + 10.0, lo.y - 8.0), (mx + 10.0, lo.y), (mx - 10.0, lo.y)], true)]);
-    st.add("Extrude", FeatureKind::FlatExtrude(FlatExtrudeFeature { remove: false, sketches: vec![s], ..Default::default() }));
+    let s = st.flat_sketch(
+        model,
+        vec![poly(
+            &[
+                (mx - 10.0, lo.y - 8.0),
+                (mx + 10.0, lo.y - 8.0),
+                (mx + 10.0, lo.y),
+                (mx - 10.0, lo.y),
+            ],
+            true,
+        )],
+    );
+    st.add(
+        "Extrude",
+        FeatureKind::FlatExtrude(FlatExtrudeFeature {
+            remove: false,
+            sketches: vec![s],
+            ..Default::default()
+        }),
+    );
     let b = st.ok();
     let v1 = volume(&b.parts[0]);
     assert!(close(v1 - v0, 20.0 * 8.0 * 2.0, 1e-6), "{}", v1 - v0);
@@ -178,15 +269,63 @@ fn an_ordinary_extrude_of_a_flat_sketch_fails() {
     let model = st.channel();
     let (lo, hi) = st.ok().sheet_metal[0].flat.parts[0].bounds().unwrap();
     let (cx, cy) = ((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0);
-    let s = st.flat_sketch(model, vec![poly(&[(cx - 5.0, cy - 5.0), (cx + 5.0, cy - 5.0), (cx + 5.0, cy + 5.0), (cx - 5.0, cy + 5.0)], true)]);
+    let s = st.flat_sketch(
+        model,
+        vec![poly(
+            &[
+                (cx - 5.0, cy - 5.0),
+                (cx + 5.0, cy - 5.0),
+                (cx + 5.0, cy + 5.0),
+                (cx - 5.0, cy + 5.0),
+            ],
+            true,
+        )],
+    );
     let f = FeatureId::new();
-    st.h.execute(&mut st.d, &AddExtrude { element: st.el, feature: f, extrude: ExtrudeFeature::default() }).unwrap();
-    let e = ExtrudeFeature { sketches: vec![s], depth: 5.0, depth_expr: "5 mm".into(), ..Default::default() };
-    st.h.execute(&mut st.d, &SetExtrude { element: st.el, feature: f, extrude: e, label: "Extrude".into() }).unwrap();
+    st.h.execute(
+        &mut st.d,
+        &AddExtrude {
+            element: st.el,
+            feature: f,
+            extrude: ExtrudeFeature::default(),
+        },
+    )
+    .unwrap();
+    let e = ExtrudeFeature {
+        sketches: vec![s],
+        depth: 5.0,
+        depth_expr: "5 mm".into(),
+        ..Default::default()
+    };
+    st.h.execute(
+        &mut st.d,
+        &SetExtrude {
+            element: st.el,
+            feature: f,
+            extrude: e,
+            label: "Extrude".into(),
+        },
+    )
+    .unwrap();
     let b = st.build();
-    assert_eq!(b.errors.iter().find(|(id, _)| *id == f).map(|(_, e)| e.as_str()), Some(MODEL_SPACE), "{:?}", b.errors);
+    assert_eq!(
+        b.errors
+            .iter()
+            .find(|(id, _)| *id == f)
+            .map(|(_, e)| e.as_str()),
+        Some(MODEL_SPACE),
+        "{:?}",
+        b.errors
+    );
     // A flat pattern extrude of the same sketch rebuilds.
-    let g = st.add("Extrude", FeatureKind::FlatExtrude(FlatExtrudeFeature { remove: true, sketches: vec![s], ..Default::default() }));
+    let g = st.add(
+        "Extrude",
+        FeatureKind::FlatExtrude(FlatExtrudeFeature {
+            remove: true,
+            sketches: vec![s],
+            ..Default::default()
+        }),
+    );
     let b = st.build();
     assert!(!b.errors.iter().any(|(id, _)| *id == g), "{:?}", b.errors);
 }
@@ -203,28 +342,77 @@ fn a_flat_sketch_uses_the_flat_lines_and_they_follow_the_flat() {
     // The two bend centre lines, and the outline's edge furthest along +x (the free edge of the
     // second wall).
     let lines = flat_lines(&flat);
-    let mut items: Vec<(Projected, Link)> = lines.iter().filter(|(_, j)| j.is_some()).map(|((a, b), j)| (Projected::Line(*a, *b), Link::FlatLine { model: model.0, part: 0, bend: *j })).collect();
+    let mut items: Vec<(Projected, Link)> = lines
+        .iter()
+        .filter(|(_, j)| j.is_some())
+        .map(|((a, b), j)| {
+            (
+                Projected::Line(*a, *b),
+                Link::FlatLine {
+                    model: model.0,
+                    part: 0,
+                    bend: *j,
+                },
+            )
+        })
+        .collect();
     assert_eq!(items.len(), 2);
-    let ((ea, eb), _) = *lines.iter().filter(|(_, j)| j.is_none()).max_by(|x, y| (x.0.0.x + x.0.1.x).total_cmp(&(y.0.0.x + y.0.1.x))).unwrap();
-    items.push((Projected::Line(ea, eb), Link::FlatLine { model: model.0, part: 0, bend: None }));
+    let ((ea, eb), _) = *lines
+        .iter()
+        .filter(|(_, j)| j.is_none())
+        .max_by(|x, y| (x.0.0.x + x.0.1.x).total_cmp(&(y.0.0.x + y.0.1.x)))
+        .unwrap();
+    items.push((
+        Projected::Line(ea, eb),
+        Link::FlatLine {
+            model: model.0,
+            part: 0,
+            bend: None,
+        },
+    ));
     let s = st.flat_sketch(model, vec![SketchOp::UseConstruction { items }]);
-    let sketch = |st: &Studio| st.features().into_iter().find(|f| f.id == s).unwrap().sketch().unwrap().geometry.clone();
-    let segs = |g: &cadrs_sketch::Sketch| -> Vec<(Vec2, Vec2)> {
-        g.curves.values().filter_map(|c| match c.kind {
-            cadrs_sketch::CurveKind::Line { a, b } => Some((g.pos(a), g.pos(b))),
-            _ => None,
-        }).collect()
+    let sketch = |st: &Studio| {
+        st.features()
+            .into_iter()
+            .find(|f| f.id == s)
+            .unwrap()
+            .sketch()
+            .unwrap()
+            .geometry
+            .clone()
     };
-    let same = |p: (Vec2, Vec2), q: (Vec2, Vec2)| (p.0.distance(q.0) < 1e-6 && p.1.distance(q.1) < 1e-6) || (p.0.distance(q.1) < 1e-6 && p.1.distance(q.0) < 1e-6);
+    let segs = |g: &cadrs_sketch::Sketch| -> Vec<(Vec2, Vec2)> {
+        g.curves
+            .values()
+            .filter_map(|c| match c.kind {
+                cadrs_sketch::CurveKind::Line { a, b } => Some((g.pos(a), g.pos(b))),
+                _ => None,
+            })
+            .collect()
+    };
+    let same = |p: (Vec2, Vec2), q: (Vec2, Vec2)| {
+        (p.0.distance(q.0) < 1e-6 && p.1.distance(q.1) < 1e-6)
+            || (p.0.distance(q.1) < 1e-6 && p.1.distance(q.0) < 1e-6)
+    };
     let g = sketch(&st);
     assert!(g.broken.is_empty() && g.curves.values().all(|c| c.construction));
     assert_eq!(segs(&g).len(), 3);
     // A larger bend radius: the flat changes and the used lines go with it.
     let mut f = st.features().into_iter().find(|f| f.id == model).unwrap();
-    let FeatureKind::SheetMetalModel(x) = &mut f.kind else { unreachable!() };
+    let FeatureKind::SheetMetalModel(x) = &mut f.kind else {
+        unreachable!()
+    };
     x.params.bend_radius = 8.0;
     x.exprs = cadrs_core::sheetmetal::SheetMetalExprs::of(&x.params);
-    st.h.execute(&mut st.d, &cadrs_core::commands::ReplaceFeature { element: st.el, feature: f, label: "Edit".into() }).unwrap();
+    st.h.execute(
+        &mut st.d,
+        &cadrs_core::commands::ReplaceFeature {
+            element: st.el,
+            feature: f,
+            label: "Edit".into(),
+        },
+    )
+    .unwrap();
     let b = st.ok();
     let now = flat_lines(&b.sheet_metal[0].flat.parts[0]);
     let g = sketch(&st);
@@ -232,12 +420,22 @@ fn a_flat_sketch_uses_the_flat_lines_and_they_follow_the_flat() {
     let mine = segs(&g);
     for ((a, b), j) in &now {
         if j.is_some() {
-            assert!(mine.iter().any(|m| same(*m, (*a, *b))), "bend {j:?} at {a:?}–{b:?} not followed: {mine:?}");
+            assert!(
+                mine.iter().any(|m| same(*m, (*a, *b))),
+                "bend {j:?} at {a:?}–{b:?} not followed: {mine:?}"
+            );
         }
     }
-    let ((na, nb), _) = *now.iter().filter(|(_, j)| j.is_none()).max_by(|x, y| (x.0.0.x + x.0.1.x).total_cmp(&(y.0.0.x + y.0.1.x))).unwrap();
+    let ((na, nb), _) = *now
+        .iter()
+        .filter(|(_, j)| j.is_none())
+        .max_by(|x, y| (x.0.0.x + x.0.1.x).total_cmp(&(y.0.0.x + y.0.1.x)))
+        .unwrap();
     assert!((na.x - ea.x).abs() > 1e-3, "the free edge moved");
-    assert!(mine.iter().any(|m| same(*m, (na, nb))), "the free edge not followed: {mine:?}");
+    assert!(
+        mine.iter().any(|m| same(*m, (na, nb))),
+        "the free edge not followed: {mine:?}"
+    );
 }
 
 #[test]
@@ -253,11 +451,36 @@ fn visible_flat_sketches_reach_the_dxf_on_their_layer() {
     let shown = st.flat_sketch(
         model,
         vec![
-            poly(&[(cx - 5.0, cy - 5.0), (cx + 5.0, cy - 5.0), (cx + 5.0, cy + 5.0), (cx - 5.0, cy + 5.0)], true),
-            SketchOp::AddSpline { points: vec![Vec2::new(cx - 20.0, cy), Vec2::new(cx - 15.0, cy + 6.0), Vec2::new(cx - 10.0, cy)], periodic: false, start_tangent: None, end_tangent: None, construction: false },
+            poly(
+                &[
+                    (cx - 5.0, cy - 5.0),
+                    (cx + 5.0, cy - 5.0),
+                    (cx + 5.0, cy + 5.0),
+                    (cx - 5.0, cy + 5.0),
+                ],
+                true,
+            ),
+            SketchOp::AddSpline {
+                points: vec![
+                    Vec2::new(cx - 20.0, cy),
+                    Vec2::new(cx - 15.0, cy + 6.0),
+                    Vec2::new(cx - 10.0, cy),
+                ],
+                periodic: false,
+                start_tangent: None,
+                end_tangent: None,
+                construction: false,
+            },
         ],
     );
-    let hidden = st.flat_sketch(model, vec![SketchOp::AddCircle { center: Vec2::new(cx, cy + 20.0), radius: 3.0, construction: false }]);
+    let hidden = st.flat_sketch(
+        model,
+        vec![SketchOp::AddCircle {
+            center: Vec2::new(cx, cy + 20.0),
+            radius: 3.0,
+            construction: false,
+        }],
+    );
     let _ = hidden;
     let b = st.ok();
     let features = st.features();
@@ -271,31 +494,86 @@ fn visible_flat_sketches_reach_the_dxf_on_their_layer() {
     for v in DxfVersion::WRITTEN {
         let (text, d) = read(&FlatExportOptions::default(), v);
         assert!(text.contains(v.acadver()));
-        let on: Vec<&Entity> = d.entities.iter().zip(&d.layers).filter(|(_, l)| *l == "FLAT_SKETCH").map(|(e, _)| e).collect();
+        let on: Vec<&Entity> = d
+            .entities
+            .iter()
+            .zip(&d.layers)
+            .filter(|(_, l)| *l == "FLAT_SKETCH")
+            .map(|(e, _)| e)
+            .collect();
         // The square's four lines and the spline as a SPLINE; nothing of the hidden sketch.
-        assert_eq!(on.iter().filter(|e| matches!(e, Entity::Line { .. })).count(), 4, "{v:?}");
-        assert_eq!(on.iter().filter(|e| matches!(e, Entity::Spline { .. })).count(), 1, "{v:?}");
+        assert_eq!(
+            on.iter()
+                .filter(|e| matches!(e, Entity::Line { .. }))
+                .count(),
+            4,
+            "{v:?}"
+        );
+        assert_eq!(
+            on.iter()
+                .filter(|e| matches!(e, Entity::Spline { .. }))
+                .count(),
+            1,
+            "{v:?}"
+        );
         assert!(!on.iter().any(|e| matches!(e, Entity::Circle { .. })));
         // The spline reads back through its fit points.
-        let Some(Entity::Spline { control, knots, .. }) = on.iter().find(|e| matches!(e, Entity::Spline { .. })) else { unreachable!() };
+        let Some(Entity::Spline { control, knots, .. }) =
+            on.iter().find(|e| matches!(e, Entity::Spline { .. }))
+        else {
+            unreachable!()
+        };
         assert_eq!(knots.len(), control.len() + 4);
         // The layer table: the flat's own layers in use, none of the drawings'.
         let start = text.find("  2\nLAYER\n").unwrap();
         let table = &text[start..start + text[start..].find("ENDTAB").unwrap()];
         for l in ["OUTLINE", "BEND_UP", "FLAT_SKETCH"] {
-            assert!(table.contains(&format!("\n{l}\n")), "{l} missing from the layer table");
+            assert!(
+                table.contains(&format!("\n{l}\n")),
+                "{l} missing from the layer table"
+            );
         }
-        for l in ["BORDER", "VISIBLE", "HIDDEN", "VIEW_SKETCH", "ANNOTATION", "HATCH", "CUTOUTS", "BEND_TANGENT"] {
-            assert!(!table.contains(&format!("\n{l}\n")), "{l} in the layer table");
+        for l in [
+            "BORDER",
+            "VISIBLE",
+            "HIDDEN",
+            "VIEW_SKETCH",
+            "ANNOTATION",
+            "HATCH",
+            "CUTOUTS",
+            "BEND_TANGENT",
+        ] {
+            assert!(
+                !table.contains(&format!("\n{l}\n")),
+                "{l} in the layer table"
+            );
         }
     }
     // Splines as polylines.
-    let (_, d) = read(&FlatExportOptions { splines_as_polylines: true, ..Default::default() }, DxfVersion::R2000);
-    let on: Vec<&Entity> = d.entities.iter().zip(&d.layers).filter(|(_, l)| *l == "FLAT_SKETCH").map(|(e, _)| e).collect();
+    let (_, d) = read(
+        &FlatExportOptions {
+            splines_as_polylines: true,
+            ..Default::default()
+        },
+        DxfVersion::R2000,
+    );
+    let on: Vec<&Entity> = d
+        .entities
+        .iter()
+        .zip(&d.layers)
+        .filter(|(_, l)| *l == "FLAT_SKETCH")
+        .map(|(e, _)| e)
+        .collect();
     assert!(!on.iter().any(|e| matches!(e, Entity::Spline { .. })));
     assert!(on.iter().any(|e| matches!(e, Entity::Polyline { .. })));
     // Without visible sketches: nothing on the layer.
-    let (_, d) = read(&FlatExportOptions { sketches: false, ..Default::default() }, DxfVersion::R2013);
+    let (_, d) = read(
+        &FlatExportOptions {
+            sketches: false,
+            ..Default::default()
+        },
+        DxfVersion::R2013,
+    );
     assert!(!d.layers.iter().any(|l| l == "FLAT_SKETCH"));
 }
 
@@ -306,13 +584,27 @@ fn a_renamed_part_names_its_flat_export() {
     st.channel();
     let b = st.ok();
     let part = b.parts[0].id;
-    st.h.execute(&mut st.d, &cadrs_core::commands::RenamePart { element: st.el, part, name: "Sheet Metal Box".into() }).unwrap();
+    st.h.execute(
+        &mut st.d,
+        &cadrs_core::commands::RenamePart {
+            element: st.el,
+            part,
+            name: "Sheet Metal Box".into(),
+        },
+    )
+    .unwrap();
     let props = st.d.element(st.el).unwrap().part_props().to_vec();
     let b = st.ok();
     let all = flat_parts_named(&b, &props);
     assert_eq!(all[0].name, "Sheet Metal Box");
-    assert_eq!(scope_parts(&b, &props, part, FlatScope::Single)[0].name, "Sheet Metal Box");
-    assert_eq!(default_file_name("Doc", &all[0].name), "Doc - Flat pattern of Sheet Metal Box");
+    assert_eq!(
+        scope_parts(&b, &props, part, FlatScope::Single)[0].name,
+        "Sheet Metal Box"
+    );
+    assert_eq!(
+        default_file_name("Doc", &all[0].name),
+        "Doc - Flat pattern of Sheet Metal Box"
+    );
 }
 
 #[test]
@@ -326,19 +618,60 @@ fn counterbore_outer_circles_reach_the_flat_dxf() {
     let b = st.ok();
     let v0 = volume(&b.parts[0]);
     // The base wall lies on Top: a point in its middle.
-    let ys: Vec<f64> = b.parts[0].solid.faces.iter().flat_map(|f| f.loops.iter().flatten().map(|p| p[1])).collect();
-    let ymid = (ys.iter().copied().fold(f64::MAX, f64::min) + ys.iter().copied().fold(f64::MIN, f64::max)) / 2.0;
-    let s = st.sketch(PlaneRef::Top, vec![SketchOp::AddPoint { pos: Vec2::new(30.0, ymid) }]);
-    let point = st.features().into_iter().find(|f| f.id == s).unwrap().sketch().unwrap().geometry.points.keys().next().unwrap();
+    let ys: Vec<f64> = b.parts[0]
+        .solid
+        .faces
+        .iter()
+        .flat_map(|f| f.loops.iter().flatten().map(|p| p[1]))
+        .collect();
+    let ymid = (ys.iter().copied().fold(f64::MAX, f64::min)
+        + ys.iter().copied().fold(f64::MIN, f64::max))
+        / 2.0;
+    let s = st.sketch(
+        PlaneRef::Top,
+        vec![SketchOp::AddPoint {
+            pos: Vec2::new(30.0, ymid),
+        }],
+    );
+    let point = st
+        .features()
+        .into_iter()
+        .find(|f| f.id == s)
+        .unwrap()
+        .sketch()
+        .unwrap()
+        .geometry
+        .points
+        .keys()
+        .next()
+        .unwrap();
     // A counterbored through hole Ø5, counterbore Ø10 × 1 (in the 2 mm sheet).
-    let spec = HoleSpec { style: HoleStyle::Counterbore, end: HoleEnd::ThroughAll, cbore_diameter: Length::mm(10.0), cbore_depth: Length::mm(1.0), ..HoleSpec::default() };
-    let x = HoleFeature { points: vec![HolePoint { sketch: s, point }], spec, ..HoleFeature::default() };
+    let spec = HoleSpec {
+        style: HoleStyle::Counterbore,
+        end: HoleEnd::ThroughAll,
+        cbore_diameter: Length::mm(10.0),
+        cbore_depth: Length::mm(1.0),
+        ..HoleSpec::default()
+    };
+    let x = HoleFeature {
+        points: vec![HolePoint { sketch: s, point }],
+        spec,
+        ..HoleFeature::default()
+    };
     let h = st.add("Hole", FeatureKind::Hole(x.clone()));
     if volume(&st.ok().parts[0]) >= v0 - 1.0 {
         // Drilled away from the sheet: the other way.
         let mut f = st.features().into_iter().find(|f| f.id == h).unwrap();
         f.kind = FeatureKind::Hole(HoleFeature { flip: true, ..x });
-        st.h.execute(&mut st.d, &cadrs_core::commands::ReplaceFeature { element: st.el, feature: f, label: "Flip".into() }).unwrap();
+        st.h.execute(
+            &mut st.d,
+            &cadrs_core::commands::ReplaceFeature {
+                element: st.el,
+                feature: f,
+                label: "Flip".into(),
+            },
+        )
+        .unwrap();
     }
     let b = st.ok();
     assert!(volume(&b.parts[0]) < v0 - 1.0, "the hole cuts the base");
@@ -351,13 +684,32 @@ fn counterbore_outer_circles_reach_the_flat_dxf() {
     let (c, radius) = marks[0];
     assert!((radius - 5.0).abs() < 1e-6);
     let (lo, hi) = b.sheet_metal[0].flat.parts[0].bounds().unwrap();
-    assert!((c.x - (lo.x + hi.x) / 2.0).abs() < 1e-3 && c.y > lo.y && c.y < hi.y, "{c:?} in {lo:?}–{hi:?}");
+    assert!(
+        (c.x - (lo.x + hi.x) / 2.0).abs() < 1e-3 && c.y > lo.y && c.y < hi.y,
+        "{c:?} in {lo:?}–{hi:?}"
+    );
     // In the DXF on CBORE_CSINK with the option, not without.
     let shown = |_: FeatureId| true;
     let on = |o: FlatExportOptions| {
-        let d = cadrs_drawing::dxf::read_dxf(&cadrs_drawing::dxf::write_dxf(&part_page(&b, &features, &r, &o, &shown).unwrap())).unwrap();
-        d.entities.iter().zip(&d.layers).filter(|(e, l)| *l == "CBORE_CSINK" && matches!(e, Entity::Circle { radius, .. } if (radius - 5.0).abs() < 1e-6)).count()
+        let d = cadrs_drawing::dxf::read_dxf(&cadrs_drawing::dxf::write_dxf(
+            &part_page(&b, &features, &r, &o, &shown).unwrap(),
+        ))
+        .unwrap();
+        d.entities
+            .iter()
+            .zip(&d.layers)
+            .filter(|(e, l)| {
+                *l == "CBORE_CSINK"
+                    && matches!(e, Entity::Circle { radius, .. } if (radius - 5.0).abs() < 1e-6)
+            })
+            .count()
     };
-    assert_eq!(on(FlatExportOptions { cbore_lines: true, ..Default::default() }), 1);
+    assert_eq!(
+        on(FlatExportOptions {
+            cbore_lines: true,
+            ..Default::default()
+        }),
+        1
+    );
     assert_eq!(on(FlatExportOptions::default()), 0);
 }

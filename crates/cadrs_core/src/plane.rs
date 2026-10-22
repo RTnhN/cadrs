@@ -99,7 +99,9 @@ impl PlaneEntity {
             PlaneEntity::Face(f) => Some(FeatureId(f.face.op)),
             PlaneEntity::Edge(e) => Some(FeatureId(e.edge.op())),
             PlaneEntity::Vertex(v) => Some(v.part.feature),
-            PlaneEntity::SketchPoint { sketch, .. } | PlaneEntity::SketchCurve { sketch, .. } => Some(*sketch),
+            PlaneEntity::SketchPoint { sketch, .. } | PlaneEntity::SketchCurve { sketch, .. } => {
+                Some(*sketch)
+            }
         }
     }
 }
@@ -168,15 +170,28 @@ pub enum RefGeom {
     Plane(PlaneFrame),
     /// A straight line: a point on it and its unit direction (from its first point to its
     /// last).
-    Line { point: Vec3, dir: Vec3 },
+    Line {
+        point: Vec3,
+        dir: Vec3,
+    },
     /// A circle or arc: its axis is a line, and it is a curve (from `start`, counter-clockwise
     /// about `normal`).
-    Circle { center: Vec3, normal: Vec3, radius: f64, start: Vec3 },
+    Circle {
+        center: Vec3,
+        normal: Vec3,
+        radius: f64,
+        start: Vec3,
+    },
     /// Another curve, as points along it.
     Curve(Vec<Vec3>),
     /// A cylindrical or conical face: a point on its axis, the axis (unit), the radius there
     /// and how fast the radius grows along the axis (0 for a cylinder).
-    Cone { point: Vec3, axis: Vec3, radius: f64, slope: f64 },
+    Cone {
+        point: Vec3,
+        axis: Vec3,
+        radius: f64,
+        slope: f64,
+    },
     Point(Vec3),
 }
 
@@ -194,7 +209,11 @@ fn dot(a: Vec3, b: Vec3) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 fn cross(a: Vec3, b: Vec3) -> Vec3 {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
 }
 fn norm(a: Vec3) -> f64 {
     dot(a, a).sqrt()
@@ -209,27 +228,45 @@ fn unit(a: Vec3) -> Option<Vec3> {
 pub fn frame_with_normal(origin: Vec3, n: Vec3) -> Option<PlaneFrame> {
     let n = unit(n)?;
     let x = [1.0, 0.0, 0.0];
-    let axis = if dot(x, n).abs() > 0.99 { [0.0, 1.0, 0.0] } else { x };
+    let axis = if dot(x, n).abs() > 0.99 {
+        [0.0, 1.0, 0.0]
+    } else {
+        x
+    };
     let u = unit(sub(axis, scale(n, dot(axis, n))))?;
-    Some(PlaneFrame { origin, u, v: cross(n, u) })
+    Some(PlaneFrame {
+        origin,
+        u,
+        v: cross(n, u),
+    })
 }
 
 /// The frame with normal `n` and in-plane `u` (made square to `n`).
 fn frame_nu(origin: Vec3, n: Vec3, u: Vec3) -> Option<PlaneFrame> {
     let n = unit(n)?;
     let u = unit(sub(u, scale(n, dot(u, n))))?;
-    Some(PlaneFrame { origin, u, v: cross(n, u) })
+    Some(PlaneFrame {
+        origin,
+        u,
+        v: cross(n, u),
+    })
 }
 
 /// Turns `v` about the unit axis `k` by `a` radians (Rodrigues).
 fn rotate(v: Vec3, k: Vec3, a: f64) -> Vec3 {
     let (s, c) = a.sin_cos();
-    add(add(scale(v, c), scale(cross(k, v), s)), scale(k, dot(k, v) * (1.0 - c)))
+    add(
+        add(scale(v, c), scale(cross(k, v), s)),
+        scale(k, dot(k, v) * (1.0 - c)),
+    )
 }
 
 /// The same plane facing the other way (its `v` reversed).
 pub fn flipped(f: PlaneFrame) -> PlaneFrame {
-    PlaneFrame { v: scale(f.v, -1.0), ..f }
+    PlaneFrame {
+        v: scale(f.v, -1.0),
+        ..f
+    }
 }
 
 /// A point an entity stands for (a vertex, a sketch point, a circle's centre).
@@ -255,10 +292,17 @@ fn line_of(g: &RefGeom) -> Option<(Vec3, Vec3)> {
 fn curve_at(g: &RefGeom, p: Option<Vec3>) -> Option<(Vec3, Vec3)> {
     match g {
         RefGeom::Line { point, dir } => {
-            let q = p.map_or(*point, |p| add(*point, scale(*dir, dot(sub(p, *point), *dir))));
+            let q = p.map_or(*point, |p| {
+                add(*point, scale(*dir, dot(sub(p, *point), *dir)))
+            });
             Some((q, *dir))
         }
-        RefGeom::Circle { center, normal, radius, start } => {
+        RefGeom::Circle {
+            center,
+            normal,
+            radius,
+            start,
+        } => {
             let n = unit(*normal)?;
             let target = p.unwrap_or(*start);
             let r = sub(target, *center);
@@ -287,7 +331,11 @@ fn curve_at(g: &RefGeom, p: Option<Vec3>) -> Option<(Vec3, Vec3)> {
             let (a, b) = (pts[i], pts[i + 1]);
             let d = sub(b, a);
             let prev = if i > 0 { sub(a, pts[i - 1]) } else { d };
-            let next = if i + 2 < pts.len() { sub(pts[i + 2], b) } else { d };
+            let next = if i + 2 < pts.len() {
+                sub(pts[i + 2], b)
+            } else {
+                d
+            };
             Some((q, unit(add(add(prev, next), scale(d, 2.0)))?))
         }
         _ => None,
@@ -300,15 +348,27 @@ fn fit_points(g: &RefGeom) -> Vec<Vec3> {
     match g {
         RefGeom::Point(p) => vec![*p],
         RefGeom::Line { point, dir } => vec![*point, add(*point, *dir)],
-        RefGeom::Circle { center, normal, radius, start } => {
-            let Some(n) = unit(*normal) else { return vec![*center] };
+        RefGeom::Circle {
+            center,
+            normal,
+            radius,
+            start,
+        } => {
+            let Some(n) = unit(*normal) else {
+                return vec![*center];
+            };
             let r = sub(*start, *center);
-            let Some(r) = unit(sub(r, scale(n, dot(r, n)))) else { return vec![*center] };
+            let Some(r) = unit(sub(r, scale(n, dot(r, n)))) else {
+                return vec![*center];
+            };
             let s = cross(n, r);
             (0..8)
                 .map(|k| {
                     let t = k as f64 * std::f64::consts::TAU / 8.0;
-                    add(*center, add(scale(r, radius * t.cos()), scale(s, radius * t.sin())))
+                    add(
+                        *center,
+                        add(scale(r, radius * t.cos()), scale(s, radius * t.sin())),
+                    )
                 })
                 .collect()
         }
@@ -332,28 +392,41 @@ pub fn frame(p: &PlaneFeature, geoms: &[RefGeom]) -> Result<PlaneFrame, String> 
     let sign = if p.flip { -1.0 } else { 1.0 };
     let f = match p.kind {
         PlaneType::Offset => {
-            let [base] = planes[..] else { return bad("Select one plane or planar face") };
+            let [base] = planes[..] else {
+                return bad("Select one plane or planar face");
+            };
             let n = unit(base.normal()).ok_or("The plane has no normal")?;
-            PlaneFrame { origin: add(base.origin, scale(n, sign * p.offset)), ..base }
+            PlaneFrame {
+                origin: add(base.origin, scale(n, sign * p.offset)),
+                ..base
+            }
         }
         PlaneType::PlanePoint => {
-            let (Some(base), Some(q)) = (planes.first(), geoms.iter().find_map(|g| match g {
-                RefGeom::Point(q) => Some(*q),
-                _ => None,
-            })) else {
+            let (Some(base), Some(q)) = (
+                planes.first(),
+                geoms.iter().find_map(|g| match g {
+                    RefGeom::Point(q) => Some(*q),
+                    _ => None,
+                }),
+            ) else {
                 return bad("Select a plane and a point");
             };
             PlaneFrame { origin: q, ..*base }
         }
         PlaneType::LineAngle => {
-            let Some((q, d)) = geoms.iter().find_map(line_of) else { return bad("Select a line") };
+            let Some((q, d)) = geoms.iter().find_map(line_of) else {
+                return bad("Select a line");
+            };
             // The plane through the line nearest the reference: its normal is the reference's
             // component square to the line.
-            let reference = geoms.iter().filter(|g| line_of(g).is_none_or(|l| l != (q, d))).find_map(|g| match g {
-                RefGeom::Plane(f) => Some(f.normal()),
-                RefGeom::Point(r) => Some(cross(d, sub(*r, q))),
-                _ => None,
-            });
+            let reference = geoms
+                .iter()
+                .filter(|g| line_of(g).is_none_or(|l| l != (q, d)))
+                .find_map(|g| match g {
+                    RefGeom::Plane(f) => Some(f.normal()),
+                    RefGeom::Point(r) => Some(cross(d, sub(*r, q))),
+                    _ => None,
+                });
             let square = |n: Vec3| unit(sub(n, scale(d, dot(n, d))));
             let n0 = reference
                 .and_then(square)
@@ -364,7 +437,9 @@ pub fn frame(p: &PlaneFeature, geoms: &[RefGeom]) -> Result<PlaneFrame, String> 
             frame_nu(q, n, d).ok_or("The line has no direction")?
         }
         PlaneType::PointNormal => {
-            let Some((_, d)) = geoms.iter().find_map(line_of) else { return bad("Select a line") };
+            let Some((_, d)) = geoms.iter().find_map(line_of) else {
+                return bad("Select a line");
+            };
             let q = geoms
                 .iter()
                 .find_map(|g| match g {
@@ -375,21 +450,33 @@ pub fn frame(p: &PlaneFeature, geoms: &[RefGeom]) -> Result<PlaneFrame, String> 
             frame_with_normal(q, d).ok_or("The line has no direction")?
         }
         PlaneType::ThreePoint => {
-            let [a, b, c] = points[..] else { return bad("Select three points") };
+            let [a, b, c] = points[..] else {
+                return bad("Select three points");
+            };
             let n = unit(cross(sub(b, a), sub(c, a))).ok_or("The three points lie on one line")?;
             frame_nu(a, n, sub(b, a)).ok_or("The points coincide")?
         }
         PlaneType::MidPlane => match (&planes[..], &points[..]) {
             ([a, b], _) => {
-                let (n1, n2) = (unit(a.normal()).ok_or("bad plane")?, unit(b.normal()).ok_or("bad plane")?);
+                let (n1, n2) = (
+                    unit(a.normal()).ok_or("bad plane")?,
+                    unit(b.normal()).ok_or("bad plane")?,
+                );
                 if norm(cross(n1, n2)) < 1e-9 {
                     // Parallel: halfway along the first's normal.
                     let h = dot(sub(b.origin, a.origin), n1);
-                    PlaneFrame { origin: add(a.origin, scale(n1, h / 2.0)), ..*a }
+                    PlaneFrame {
+                        origin: add(a.origin, scale(n1, h / 2.0)),
+                        ..*a
+                    }
                 } else {
                     // The bisector (the other one with Flip alignment), through the line where
                     // they meet (at its point nearest the first plane's origin).
-                    let n = if p.flip_alignment { sub(n1, n2) } else { add(n1, n2) };
+                    let n = if p.flip_alignment {
+                        sub(n1, n2)
+                    } else {
+                        add(n1, n2)
+                    };
                     let line = unit(cross(n1, n2)).ok_or("bad planes")?;
                     // A point on both planes: solve n1·x = d1, n2·x = d2 in span(n1, n2) from
                     // the first plane's origin.
@@ -413,7 +500,12 @@ pub fn frame(p: &PlaneFeature, geoms: &[RefGeom]) -> Result<PlaneFrame, String> 
         PlaneType::CurvePoint => {
             let curve = geoms
                 .iter()
-                .find(|g| matches!(g, RefGeom::Line { .. } | RefGeom::Circle { .. } | RefGeom::Curve(_)))
+                .find(|g| {
+                    matches!(
+                        g,
+                        RefGeom::Line { .. } | RefGeom::Circle { .. } | RefGeom::Curve(_)
+                    )
+                })
                 .ok_or("Select a curve")?;
             let q = geoms.iter().find_map(|g| match g {
                 RefGeom::Point(q) => Some(*q),
@@ -428,19 +520,38 @@ pub fn frame(p: &PlaneFeature, geoms: &[RefGeom]) -> Result<PlaneFrame, String> 
         }
         PlaneType::Tangent => {
             let Some((c, a, r0, k)) = geoms.iter().find_map(|g| match g {
-                RefGeom::Cone { point, axis, radius, slope } => Some((*point, unit(*axis)?, *radius, *slope)),
+                RefGeom::Cone {
+                    point,
+                    axis,
+                    radius,
+                    slope,
+                } => Some((*point, unit(*axis)?, *radius, *slope)),
                 _ => None,
             }) else {
                 return bad("Select a cylindrical or conical face");
             };
             // A face's axis may point either way: angles turn counter-clockwise about it pointing
             // up (+Z, else +Y, else +X), whichever way the kernel gives it.
-            let key = if a[2].abs() > 1e-9 { a[2] } else if a[1].abs() > 1e-9 { a[1] } else { a[0] };
-            let (a, k) = if key < 0.0 { (scale(a, -1.0), -k) } else { (a, k) };
+            let key = if a[2].abs() > 1e-9 {
+                a[2]
+            } else if a[1].abs() > 1e-9 {
+                a[1]
+            } else {
+                a[0]
+            };
+            let (a, k) = if key < 0.0 {
+                (scale(a, -1.0), -k)
+            } else {
+                (a, k)
+            };
             // Angles round the axis from the world X projected square to it (Y when the axis
             // is along X).
             let x = [1.0, 0.0, 0.0];
-            let base = if dot(x, a).abs() > 0.99 { [0.0, 1.0, 0.0] } else { x };
+            let base = if dot(x, a).abs() > 0.99 {
+                [0.0, 1.0, 0.0]
+            } else {
+                x
+            };
             let e1 = unit(sub(base, scale(a, dot(base, a)))).ok_or("The face has no axis")?;
             let e2 = cross(a, e1);
             let (phi, h) = match points.first() {
@@ -453,7 +564,11 @@ pub fn frame(p: &PlaneFeature, geoms: &[RefGeom]) -> Result<PlaneFrame, String> 
                     let phi_q = dot(radial, e2).atan2(dot(radial, e1));
                     // Outside a cylinder: the plane through the point touching it (two of them;
                     // Flip alignment takes the other).
-                    let turn = if k.abs() < 1e-12 && dist > r * (1.0 + 1e-9) { (r / dist).acos() } else { 0.0 };
+                    let turn = if k.abs() < 1e-12 && dist > r * (1.0 + 1e-9) {
+                        (r / dist).acos()
+                    } else {
+                        0.0
+                    };
                     (phi_q + if p.flip_alignment { -turn } else { turn }, h)
                 }
                 None => (sign * p.angle.to_radians(), 0.0),
@@ -461,7 +576,8 @@ pub fn frame(p: &PlaneFeature, geoms: &[RefGeom]) -> Result<PlaneFrame, String> 
             let e = add(scale(e1, phi.cos()), scale(e2, phi.sin()));
             let at = add(add(c, scale(a, h)), scale(e, r0 + k * h));
             // The surface's normal there (r = r0 + k·h grows along the axis) and its ruling.
-            frame_nu(at, sub(e, scale(a, k)), add(a, scale(e, k))).ok_or("The face has no tangent plane there")?
+            frame_nu(at, sub(e, scale(a, k)), add(a, scale(e, k)))
+                .ok_or("The face has no tangent plane there")?
         }
     };
     Ok(if p.flip_normal { flipped(f) } else { f })
@@ -487,9 +603,21 @@ pub fn fit(pts: &[Vec3]) -> Option<PlaneFrame> {
     if e.eigenvalues[idx[1]] <= 1e-18 * e.eigenvalues[idx[2]].max(1e-300) {
         return None;
     }
-    let col = |i: usize| -> Vec3 { [e.eigenvectors[(0, i)], e.eigenvectors[(1, i)], e.eigenvectors[(2, i)]] };
+    let col = |i: usize| -> Vec3 {
+        [
+            e.eigenvectors[(0, i)],
+            e.eigenvectors[(1, i)],
+            e.eigenvectors[(2, i)],
+        ]
+    };
     let mut normal = col(idx[0]);
-    let key = if normal[2].abs() > 1e-9 { normal[2] } else if normal[1].abs() > 1e-9 { normal[1] } else { normal[0] };
+    let key = if normal[2].abs() > 1e-9 {
+        normal[2]
+    } else if normal[1].abs() > 1e-9 {
+        normal[1]
+    } else {
+        normal[0]
+    };
     if key < 0.0 {
         normal = scale(normal, -1.0);
     }
@@ -511,7 +639,10 @@ mod tests {
     }
 
     fn feature(kind: PlaneType) -> PlaneFeature {
-        PlaneFeature { kind, ..PlaneFeature::default() }
+        PlaneFeature {
+            kind,
+            ..PlaneFeature::default()
+        }
     }
 
     fn top() -> PlaneFrame {
@@ -524,66 +655,219 @@ mod tests {
         let s2 = std::f64::consts::FRAC_1_SQRT_2;
         // Offset: Top 76.2 down (the Funnel's Lower Plane, 3 in towards −Z): origin (0, 0, −76.2),
         // Top's axes. Flip normal turns it over.
-        let mut p = PlaneFeature { offset: 76.2, flip: true, ..feature(PlaneType::Offset) };
+        let mut p = PlaneFeature {
+            offset: 76.2,
+            flip: true,
+            ..feature(PlaneType::Offset)
+        };
         let lower = frame(&p, &[RefGeom::Plane(top())]).unwrap();
-        same(lower, PlaneFrame { origin: [0.0, 0.0, -76.2], u: [1.0, 0.0, 0.0], v: [0.0, 1.0, 0.0] });
+        same(
+            lower,
+            PlaneFrame {
+                origin: [0.0, 0.0, -76.2],
+                u: [1.0, 0.0, 0.0],
+                v: [0.0, 1.0, 0.0],
+            },
+        );
         p.flip_normal = true;
-        same(frame(&p, &[RefGeom::Plane(top())]).unwrap(), PlaneFrame { origin: [0.0, 0.0, -76.2], u: [1.0, 0.0, 0.0], v: [0.0, -1.0, 0.0] });
+        same(
+            frame(&p, &[RefGeom::Plane(top())]).unwrap(),
+            PlaneFrame {
+                origin: [0.0, 0.0, -76.2],
+                u: [1.0, 0.0, 0.0],
+                v: [0.0, -1.0, 0.0],
+            },
+        );
         // Offset from Front (normal −Y) 10: y = −10.
-        let p = PlaneFeature { offset: 10.0, ..feature(PlaneType::Offset) };
-        same(frame(&p, &[RefGeom::Plane(PlaneRef::Front.frame())]).unwrap(), PlaneFrame { origin: [0.0, -10.0, 0.0], u: [1.0, 0.0, 0.0], v: [0.0, 0.0, 1.0] });
+        let p = PlaneFeature {
+            offset: 10.0,
+            ..feature(PlaneType::Offset)
+        };
+        same(
+            frame(&p, &[RefGeom::Plane(PlaneRef::Front.frame())]).unwrap(),
+            PlaneFrame {
+                origin: [0.0, -10.0, 0.0],
+                u: [1.0, 0.0, 0.0],
+                v: [0.0, 0.0, 1.0],
+            },
+        );
         // Plane point: Right's axes through (5, 6, 7).
         let p = feature(PlaneType::PlanePoint);
         same(
-            frame(&p, &[RefGeom::Plane(PlaneRef::Right.frame()), RefGeom::Point([5.0, 6.0, 7.0])]).unwrap(),
-            PlaneFrame { origin: [5.0, 6.0, 7.0], u: [0.0, 1.0, 0.0], v: [0.0, 0.0, 1.0] },
+            frame(
+                &p,
+                &[
+                    RefGeom::Plane(PlaneRef::Right.frame()),
+                    RefGeom::Point([5.0, 6.0, 7.0]),
+                ],
+            )
+            .unwrap(),
+            PlaneFrame {
+                origin: [5.0, 6.0, 7.0],
+                u: [0.0, 1.0, 0.0],
+                v: [0.0, 0.0, 1.0],
+            },
         );
         // Line angle: the X axis line, 45° from Top: normal Z turned 45° about X, (0, −s2, s2);
         // u along the line, v = n × u = (0, s2, s2).
-        let p = PlaneFeature { angle: 45.0, ..feature(PlaneType::LineAngle) };
-        let x_line = RefGeom::Line { point: [0.0, 0.0, 0.0], dir: [1.0, 0.0, 0.0] };
-        same(frame(&p, &[x_line.clone(), RefGeom::Plane(top())]).unwrap(), PlaneFrame { origin: [0.0; 3], u: [1.0, 0.0, 0.0], v: [0.0, s2, s2] });
+        let p = PlaneFeature {
+            angle: 45.0,
+            ..feature(PlaneType::LineAngle)
+        };
+        let x_line = RefGeom::Line {
+            point: [0.0, 0.0, 0.0],
+            dir: [1.0, 0.0, 0.0],
+        };
+        same(
+            frame(&p, &[x_line.clone(), RefGeom::Plane(top())]).unwrap(),
+            PlaneFrame {
+                origin: [0.0; 3],
+                u: [1.0, 0.0, 0.0],
+                v: [0.0, s2, s2],
+            },
+        );
         // 0°: Top itself; flipped 45°: the other way, v = (0, s2, −s2).
-        let zero = PlaneFeature { angle: 0.0, ..p.clone() };
-        same(frame(&zero, &[x_line.clone(), RefGeom::Plane(top())]).unwrap(), top());
-        let back = PlaneFeature { flip: true, ..p.clone() };
-        same(frame(&back, &[x_line.clone(), RefGeom::Plane(top())]).unwrap(), PlaneFrame { origin: [0.0; 3], u: [1.0, 0.0, 0.0], v: [0.0, s2, -s2] });
+        let zero = PlaneFeature {
+            angle: 0.0,
+            ..p.clone()
+        };
+        same(
+            frame(&zero, &[x_line.clone(), RefGeom::Plane(top())]).unwrap(),
+            top(),
+        );
+        let back = PlaneFeature {
+            flip: true,
+            ..p.clone()
+        };
+        same(
+            frame(&back, &[x_line.clone(), RefGeom::Plane(top())]).unwrap(),
+            PlaneFrame {
+                origin: [0.0; 3],
+                u: [1.0, 0.0, 0.0],
+                v: [0.0, s2, -s2],
+            },
+        );
         // Point normal: square to a line along Z through (1, 2, 3): Top's axes there.
         let p = feature(PlaneType::PointNormal);
-        let z_line = RefGeom::Line { point: [9.0, 9.0, 0.0], dir: [0.0, 0.0, 1.0] };
-        same(frame(&p, &[z_line, RefGeom::Point([1.0, 2.0, 3.0])]).unwrap(), PlaneFrame { origin: [1.0, 2.0, 3.0], u: [1.0, 0.0, 0.0], v: [0.0, 1.0, 0.0] });
+        let z_line = RefGeom::Line {
+            point: [9.0, 9.0, 0.0],
+            dir: [0.0, 0.0, 1.0],
+        };
+        same(
+            frame(&p, &[z_line, RefGeom::Point([1.0, 2.0, 3.0])]).unwrap(),
+            PlaneFrame {
+                origin: [1.0, 2.0, 3.0],
+                u: [1.0, 0.0, 0.0],
+                v: [0.0, 1.0, 0.0],
+            },
+        );
         // Three point: (0,0,0), (10,0,0), (0,0,10): the XZ plane facing −Y (Front's frame).
         let p = feature(PlaneType::ThreePoint);
-        let pts = [RefGeom::Point([0.0; 3]), RefGeom::Point([10.0, 0.0, 0.0]), RefGeom::Point([0.0, 0.0, 10.0])];
+        let pts = [
+            RefGeom::Point([0.0; 3]),
+            RefGeom::Point([10.0, 0.0, 0.0]),
+            RefGeom::Point([0.0, 0.0, 10.0]),
+        ];
         same(frame(&p, &pts).unwrap(), PlaneRef::Front.frame());
-        let line3 = [RefGeom::Point([0.0; 3]), RefGeom::Point([1.0, 0.0, 0.0]), RefGeom::Point([2.0, 0.0, 0.0])];
+        let line3 = [
+            RefGeom::Point([0.0; 3]),
+            RefGeom::Point([1.0, 0.0, 0.0]),
+            RefGeom::Point([2.0, 0.0, 0.0]),
+        ];
         assert!(frame(&p, &line3).is_err());
         // Mid plane between Top and the Lower Plane: z = −38.1 (the Funnel's Middle Plane).
         let p = feature(PlaneType::MidPlane);
-        same(frame(&p, &[RefGeom::Plane(top()), RefGeom::Plane(lower)]).unwrap(), PlaneFrame { origin: [0.0, 0.0, -38.1], u: [1.0, 0.0, 0.0], v: [0.0, 1.0, 0.0] });
+        same(
+            frame(&p, &[RefGeom::Plane(top()), RefGeom::Plane(lower)]).unwrap(),
+            PlaneFrame {
+                origin: [0.0, 0.0, -38.1],
+                u: [1.0, 0.0, 0.0],
+                v: [0.0, 1.0, 0.0],
+            },
+        );
         // Between Top (n = Z) and Right (n = X), which meet along the Y axis: the bisector with
         // normal (X + Z)/√2 through the origin (u along Y, their common line: v = n × u);
         // Flip alignment the other one, normal (Z − X)/√2... (n1 − n2 = Z − X).
-        let mid = frame(&p, &[RefGeom::Plane(top()), RefGeom::Plane(PlaneRef::Right.frame())]).unwrap();
+        let mid = frame(
+            &p,
+            &[
+                RefGeom::Plane(top()),
+                RefGeom::Plane(PlaneRef::Right.frame()),
+            ],
+        )
+        .unwrap();
         close3(mid.origin, [0.0; 3]);
         close3(mid.normal(), [s2, 0.0, s2]);
-        let alt = PlaneFeature { flip_alignment: true, ..p.clone() };
-        close3(frame(&alt, &[RefGeom::Plane(top()), RefGeom::Plane(PlaneRef::Right.frame())]).unwrap().normal(), [-s2, 0.0, s2]);
+        let alt = PlaneFeature {
+            flip_alignment: true,
+            ..p.clone()
+        };
+        close3(
+            frame(
+                &alt,
+                &[
+                    RefGeom::Plane(top()),
+                    RefGeom::Plane(PlaneRef::Right.frame()),
+                ],
+            )
+            .unwrap()
+            .normal(),
+            [-s2, 0.0, s2],
+        );
         // Between two points: square to the segment at its middle.
-        let two = frame(&p, &[RefGeom::Point([0.0, 0.0, 0.0]), RefGeom::Point([0.0, 0.0, 8.0])]).unwrap();
-        same(two, PlaneFrame { origin: [0.0, 0.0, 4.0], u: [1.0, 0.0, 0.0], v: [0.0, 1.0, 0.0] });
+        let two = frame(
+            &p,
+            &[
+                RefGeom::Point([0.0, 0.0, 0.0]),
+                RefGeom::Point([0.0, 0.0, 8.0]),
+            ],
+        )
+        .unwrap();
+        same(
+            two,
+            PlaneFrame {
+                origin: [0.0, 0.0, 4.0],
+                u: [1.0, 0.0, 0.0],
+                v: [0.0, 1.0, 0.0],
+            },
+        );
         // Curve point: on a circle r 10 about Z (from (10, 0, 0)) at (0, 10, 0): the tangent
         // there is −X, so the plane is square to X facing −X: u = Y projected = (0, 1, 0),
         // v = n × u = (−1, 0, 0) × (0, 1, 0) = (0, 0, −1).
         let p = feature(PlaneType::CurvePoint);
-        let circle = RefGeom::Circle { center: [0.0; 3], normal: [0.0, 0.0, 1.0], radius: 10.0, start: [10.0, 0.0, 0.0] };
-        same(frame(&p, &[circle.clone(), RefGeom::Point([0.0, 10.0, 0.0])]).unwrap(), PlaneFrame { origin: [0.0, 10.0, 0.0], u: [0.0, 1.0, 0.0], v: [0.0, 0.0, -1.0] });
+        let circle = RefGeom::Circle {
+            center: [0.0; 3],
+            normal: [0.0, 0.0, 1.0],
+            radius: 10.0,
+            start: [10.0, 0.0, 0.0],
+        };
+        same(
+            frame(&p, &[circle.clone(), RefGeom::Point([0.0, 10.0, 0.0])]).unwrap(),
+            PlaneFrame {
+                origin: [0.0, 10.0, 0.0],
+                u: [0.0, 1.0, 0.0],
+                v: [0.0, 0.0, -1.0],
+            },
+        );
         // Without a point: at the circle's start (10, 0, 0), tangent +Y (Front turned over).
-        same(frame(&p, &[circle]).unwrap(), PlaneFrame { origin: [10.0, 0.0, 0.0], u: [1.0, 0.0, 0.0], v: [0.0, 0.0, -1.0] });
+        same(
+            frame(&p, &[circle]).unwrap(),
+            PlaneFrame {
+                origin: [10.0, 0.0, 0.0],
+                u: [1.0, 0.0, 0.0],
+                v: [0.0, 0.0, -1.0],
+            },
+        );
         // Fit: four points of the plane z = 2 x (normal (−2, 0, 1)/√5, towards +Z), centroid
         // (1, 1, 2); the largest spread is along (1, 0, 2)/√5 (x from 0 to 2 is 2√5 long, y 2).
         let p = feature(PlaneType::Fit);
-        let pts = [[0.0, 0.0, 0.0], [2.0, 0.0, 4.0], [2.0, 2.0, 4.0], [0.0, 2.0, 0.0]].map(RefGeom::Point);
+        let pts = [
+            [0.0, 0.0, 0.0],
+            [2.0, 0.0, 4.0],
+            [2.0, 2.0, 4.0],
+            [0.0, 2.0, 0.0],
+        ]
+        .map(RefGeom::Point);
         let f = frame(&p, &pts).unwrap();
         let r5 = 5f64.sqrt();
         close3(f.origin, [1.0, 1.0, 2.0]);
@@ -594,13 +878,38 @@ mod tests {
     /// The Tangent type on a cylinder r 10 about Z and a cone narrowing up it.
     #[test]
     fn tangent_planes() {
-        let cyl = RefGeom::Cone { point: [0.0; 3], axis: [0.0, 0.0, 1.0], radius: 10.0, slope: 0.0 };
+        let cyl = RefGeom::Cone {
+            point: [0.0; 3],
+            axis: [0.0, 0.0, 1.0],
+            radius: 10.0,
+            slope: 0.0,
+        };
         // At angle 0 (from X): touching at (10, 0, 0), facing X, u along the ruling Z, v = X × Z.
-        let p = PlaneFeature { angle: 0.0, ..feature(PlaneType::Tangent) };
-        same(frame(&p, std::slice::from_ref(&cyl)).unwrap(), PlaneFrame { origin: [10.0, 0.0, 0.0], u: [0.0, 0.0, 1.0], v: [0.0, -1.0, 0.0] });
+        let p = PlaneFeature {
+            angle: 0.0,
+            ..feature(PlaneType::Tangent)
+        };
+        same(
+            frame(&p, std::slice::from_ref(&cyl)).unwrap(),
+            PlaneFrame {
+                origin: [10.0, 0.0, 0.0],
+                u: [0.0, 0.0, 1.0],
+                v: [0.0, -1.0, 0.0],
+            },
+        );
         // At 90°: touching at (0, 10, 0), facing Y, v = Y × Z = X.
-        let p = PlaneFeature { angle: 90.0, ..feature(PlaneType::Tangent) };
-        same(frame(&p, std::slice::from_ref(&cyl)).unwrap(), PlaneFrame { origin: [0.0, 10.0, 0.0], u: [0.0, 0.0, 1.0], v: [1.0, 0.0, 0.0] });
+        let p = PlaneFeature {
+            angle: 90.0,
+            ..feature(PlaneType::Tangent)
+        };
+        same(
+            frame(&p, std::slice::from_ref(&cyl)).unwrap(),
+            PlaneFrame {
+                origin: [0.0, 10.0, 0.0],
+                u: [0.0, 0.0, 1.0],
+                v: [1.0, 0.0, 0.0],
+            },
+        );
         // Through (20, 0, 5), outside: it touches where cos φ = r / d = 1/2, φ = 60°, at
         // (5, 5√3, 5); the plane holds the point: (15, −5√3, 0) · (1/2, √3/2, 0) = 0. Flip
         // alignment: the other tangent, φ = −60°.
@@ -609,13 +918,33 @@ mod tests {
         let f = frame(&p, &[cyl.clone(), RefGeom::Point([20.0, 0.0, 5.0])]).unwrap();
         close3(f.origin, [5.0, 10.0 * h3, 5.0]);
         close3(f.normal(), [0.5, h3, 0.0]);
-        let alt = PlaneFeature { flip_alignment: true, ..feature(PlaneType::Tangent) };
-        close3(frame(&alt, &[cyl, RefGeom::Point([20.0, 0.0, 5.0])]).unwrap().normal(), [0.5, -h3, 0.0]);
+        let alt = PlaneFeature {
+            flip_alignment: true,
+            ..feature(PlaneType::Tangent)
+        };
+        close3(
+            frame(&alt, &[cyl, RefGeom::Point([20.0, 0.0, 5.0])])
+                .unwrap()
+                .normal(),
+            [0.5, -h3, 0.0],
+        );
         // A cone r = 10 − h/2 (apex at (0, 0, 20)): at angle 0 it touches (10, 0, 0), normal
         // (X + Z/2)/|…| = (2, 0, 1)/√5, and the plane holds the apex: (−10, 0, 20) · (2, 0, 1) = 0.
-        let cone = RefGeom::Cone { point: [0.0; 3], axis: [0.0, 0.0, 1.0], radius: 10.0, slope: -0.5 };
+        let cone = RefGeom::Cone {
+            point: [0.0; 3],
+            axis: [0.0, 0.0, 1.0],
+            radius: 10.0,
+            slope: -0.5,
+        };
         let r5 = 5f64.sqrt();
-        let f = frame(&PlaneFeature { angle: 0.0, ..feature(PlaneType::Tangent) }, &[cone]).unwrap();
+        let f = frame(
+            &PlaneFeature {
+                angle: 0.0,
+                ..feature(PlaneType::Tangent)
+            },
+            &[cone],
+        )
+        .unwrap();
         close3(f.origin, [10.0, 0.0, 0.0]);
         close3(f.normal(), [2.0 / r5, 0.0, 1.0 / r5]);
         assert!(dot(sub([0.0, 0.0, 20.0], f.origin), f.normal()).abs() < 1e-9);

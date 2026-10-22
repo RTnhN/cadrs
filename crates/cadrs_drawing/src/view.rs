@@ -16,15 +16,15 @@
 //! orthographic projected views (`n` = right, up, left, down) and auxiliary views (`n` normal to
 //! an edge, D4.6). Its 2D x and y stay along the sheet's, so a folded view is never rotated.
 
-use cadrs_kernel::{Projection as Hlr, ProjClass, ProjCurve, ProjVisibility, ViewFrame};
+use cadrs_kernel::{ProjClass, ProjCurve, ProjVisibility, Projection as Hlr, ViewFrame};
 use nalgebra::{Point3, Vector3};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::ObjectRef;
 use crate::graphics::Weight;
 use crate::standard::{Projection, Scale};
 use crate::style::TangentEdges;
-use crate::ObjectRef;
 
 /// Identifies a view within a drawing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -319,7 +319,12 @@ pub struct View {
 
 impl View {
     /// A base view.
-    pub fn base(reference: ObjectRef, orientation: NamedView, scale: Scale, anchor: [f64; 2]) -> Self {
+    pub fn base(
+        reference: ObjectRef,
+        orientation: NamedView,
+        scale: Scale,
+        anchor: [f64; 2],
+    ) -> Self {
         Self {
             id: ViewId::new(),
             name: orientation.label().to_string(),
@@ -353,7 +358,12 @@ impl View {
 
     /// A flat pattern view of a sheet metal part (P3I.7, SM16.2): only the Insert view dialog's
     /// Flat patterns filter makes one.
-    pub fn flat_pattern(reference: ObjectRef, orientation: NamedView, scale: Scale, anchor: [f64; 2]) -> Self {
+    pub fn flat_pattern(
+        reference: ObjectRef,
+        orientation: NamedView,
+        scale: Scale,
+        anchor: [f64; 2],
+    ) -> Self {
         let mut v = Self::base(reference, orientation, scale, anchor);
         v.name = "Flat pattern".to_string();
         v.flat = Some(crate::flat_view::FlatSettings::default());
@@ -370,7 +380,12 @@ impl View {
 
     /// A model point on the sheet (through the view's breaks, P3C.8).
     pub fn to_sheet(&self, p2: [f64; 2]) -> [f64; 2] {
-        to_sheet(self.anchor, self.rotation, self.scale.factor(), crate::view_kinds::break_forward(self, p2))
+        to_sheet(
+            self.anchor,
+            self.rotation,
+            self.scale.factor(),
+            crate::view_kinds::break_forward(self, p2),
+        )
     }
 
     /// A sheet point in the view's 2D frame (model mm).
@@ -386,7 +401,12 @@ impl View {
         if let Some(c) = &self.cut {
             return Some(c.clone());
         }
-        self.broken_out.as_ref().map(|b| crate::view_kinds::ViewCut { depth: b.depth, polygon: b.boundary.polygon() })
+        self.broken_out
+            .as_ref()
+            .map(|b| crate::view_kinds::ViewCut {
+                depth: b.depth,
+                polygon: b.boundary.polygon(),
+            })
     }
 
     /// Whether only part of the projection is shown (crop, detail, breaks): lines are then
@@ -470,7 +490,10 @@ pub fn projected_view(
             v.frame = iso_frame(&parent.frame, sx, sy);
             v.fold = None;
             let c = center2d.unwrap_or([0.0, 0.0]);
-            let off = rotate([c[0] * v.scale.factor(), c[1] * v.scale.factor()], v.rotation);
+            let off = rotate(
+                [c[0] * v.scale.factor(), c[1] * v.scale.factor()],
+                v.rotation,
+            );
             v.anchor = [cursor[0] - off[0], cursor[1] - off[1]];
         }
     }
@@ -480,7 +503,12 @@ pub fn projected_view(
 
 /// The auxiliary view folded out of `parent` about an edge with 2D direction `edge` (in the
 /// parent's frame) on the side of `cursor` (D4.6).
-pub fn auxiliary_view(parent: &View, edge: [f64; 2], projection: Projection, cursor: [f64; 2]) -> View {
+pub fn auxiliary_view(
+    parent: &View,
+    edge: [f64; 2],
+    projection: Projection,
+    cursor: [f64; 2],
+) -> View {
     let len = (edge[0] * edge[0] + edge[1] * edge[1]).sqrt().max(1e-12);
     let e = [edge[0] / len, edge[1] / len];
     // The normal on the cursor's side.
@@ -544,7 +572,10 @@ pub fn four_views(
     let col2 = w(bs).max(w(bi));
     let row_front = h(bf).max(h(bs));
     let row_other = h(bt).max(h(bi));
-    let fits = |s: f64| s * (col1 + col2) + 3.0 * gap <= area.width() && s * (row_front + row_other) + 3.0 * gap <= area.height();
+    let fits = |s: f64| {
+        s * (col1 + col2) + 3.0 * gap <= area.width()
+            && s * (row_front + row_other) + 3.0 * gap <= area.height()
+    };
     let mut candidates: Vec<Scale> = Scale::COMMON.to_vec();
     candidates.sort_by(|a, b| b.factor().total_cmp(&a.factor()));
     let scale = candidates
@@ -562,29 +593,41 @@ pub fn four_views(
     let cx2 = x0 + s * col1 + gap + s * col2 / 2.0;
     let (front_row_y, other_row_y) = match projection {
         // Third angle: the front row at the bottom.
-        Projection::Third => (y0 + s * row_front / 2.0, y0 + s * row_front + gap + s * row_other / 2.0),
+        Projection::Third => (
+            y0 + s * row_front / 2.0,
+            y0 + s * row_front + gap + s * row_other / 2.0,
+        ),
         // First angle: the front row on top.
-        Projection::First => (y0 + s * row_other + gap + s * row_front / 2.0, y0 + s * row_other / 2.0),
+        Projection::First => (
+            y0 + s * row_other + gap + s * row_front / 2.0,
+            y0 + s * row_other / 2.0,
+        ),
     };
     let place = |center: [f64; 2], b: ([f64; 2], [f64; 2])| {
         let cc = c(b);
         [center[0] - s * cc[0], center[1] - s * cc[1]]
     };
-    let mut front = View::base(reference, NamedView::Front, scale, place([cx1, front_row_y], bf));
+    let mut front = View::base(
+        reference,
+        NamedView::Front,
+        scale,
+        place([cx1, front_row_y], bf),
+    );
     front.hidden_lines = hidden_lines;
     front.tangent_edges = tangent;
-    let child = |frame: Frame3, fold: Option<[f64; 2]>, center: [f64; 2], bb: ([f64; 2], [f64; 2])| {
-        let mut v = front.clone();
-        v.id = ViewId::new();
-        v.kind = ViewKind::Projected;
-        v.parent = Some(front.id);
-        v.fold = fold;
-        v.frame = frame;
-        v.scale_inherited = true;
-        v.name = projected_name(&frame);
-        v.anchor = place(center, bb);
-        v
-    };
+    let child =
+        |frame: Frame3, fold: Option<[f64; 2]>, center: [f64; 2], bb: ([f64; 2], [f64; 2])| {
+            let mut v = front.clone();
+            v.id = ViewId::new();
+            v.kind = ViewKind::Projected;
+            v.parent = Some(front.id);
+            v.fold = fold;
+            v.frame = frame;
+            v.scale_inherited = true;
+            v.name = projected_name(&frame);
+            v.anchor = place(center, bb);
+            v
+        };
     let mut top = child(top_frame, Some(up), [cx1, other_row_y], bt);
     // Aligned: exactly on the front view's fold lines.
     top.anchor[0] = front.anchor[0];
@@ -676,12 +719,20 @@ pub fn view_lines(view: &View, hlr: &Hlr) -> Vec<ViewLine> {
         };
         if clip.is_empty() {
             let points = e.points.iter().map(|p| view.to_sheet([p.x, p.y])).collect();
-            out.push(ViewLine { kind, points, edge: i });
+            out.push(ViewLine {
+                kind,
+                points,
+                edge: i,
+            });
         } else {
             let pts: Vec<[f64; 2]> = e.points.iter().map(|p| [p.x, p.y]).collect();
             for piece in clip.apply(&pts) {
                 let points = piece.iter().map(|p| view.to_sheet(*p)).collect();
-                out.push(ViewLine { kind, points, edge: i });
+                out.push(ViewLine {
+                    kind,
+                    points,
+                    edge: i,
+                });
             }
         }
     }
@@ -716,7 +767,9 @@ fn merge_collinear(lines: Vec<ViewLine>) -> Vec<ViewLine> {
             let d = [b[0] - a[0], b[1] - a[1]];
             let len = d[0].hypot(d[1]);
             len > TOL
-                && l.points.iter().all(|p| ((p[0] - a[0]) * d[1] - (p[1] - a[1]) * d[0]).abs() / len < TOL)
+                && l.points
+                    .iter()
+                    .all(|p| ((p[0] - a[0]) * d[1] - (p[1] - a[1]) * d[0]).abs() / len < TOL)
         };
         if !straight {
             keep.push(Some(l.clone()));
@@ -736,7 +789,11 @@ fn merge_collinear(lines: Vec<ViewLine>) -> Vec<ViewLine> {
         let gi = match groups.iter().position(on) {
             Some(g) => g,
             None => {
-                groups.push(Group { o: a, u, members: Vec::new() });
+                groups.push(Group {
+                    o: a,
+                    u,
+                    members: Vec::new(),
+                });
                 groups.len() - 1
             }
         };
@@ -794,7 +851,11 @@ fn merge_collinear(lines: Vec<ViewLine>) -> Vec<ViewLine> {
                 let kind = lines[*i].kind;
                 for (pa, pb) in pieces {
                     let p = |t: f64| [g.o[0] + g.u[0] * t, g.o[1] + g.u[1] * t];
-                    out.push(ViewLine { kind, points: vec![p(pa), p(pb)], edge: lines[*i].edge });
+                    out.push(ViewLine {
+                        kind,
+                        points: vec![p(pa), p(pb)],
+                        edge: lines[*i].edge,
+                    });
                 }
             }
             covered.extend(merged.iter().map(|(a, b, _)| (*a, *b)));
@@ -815,7 +876,9 @@ fn covered(e: &cadrs_kernel::ProjEdge, others: &[&cadrs_kernel::ProjEdge]) -> bo
         (p - (a + d * t)).norm()
     };
     let on = |p: &nalgebra::Point2<f64>| {
-        others.iter().any(|o| o.points.windows(2).any(|w| seg(p, &w[0], &w[1]) < 1e-3))
+        others
+            .iter()
+            .any(|o| o.points.windows(2).any(|w| seg(p, &w[0], &w[1]) < 1e-3))
     };
     !others.is_empty() && e.points.len() >= 2 && e.points.iter().all(on) && on(&e.point_at(0.5))
 }
@@ -823,7 +886,8 @@ fn covered(e: &cadrs_kernel::ProjEdge, others: &[&cadrs_kernel::ProjEdge]) -> bo
 /// The sheet-space bounding box of a view's projection, `(min, max)`.
 pub fn view_bounds(view: &View, hlr: &Hlr) -> Option<([f64; 2], [f64; 2])> {
     let (lo, hi) = hlr.bounds()?;
-    let corners = [[lo.x, lo.y], [hi.x, lo.y], [hi.x, hi.y], [lo.x, hi.y]].map(|p| view.to_sheet(p));
+    let corners =
+        [[lo.x, lo.y], [hi.x, lo.y], [hi.x, hi.y], [lo.x, hi.y]].map(|p| view.to_sheet(p));
     let mut min = corners[0];
     let mut max = corners[0];
     for c in corners {
@@ -909,18 +973,36 @@ mod tests {
         assert_eq!(NamedView::of(&right), Some(NamedView::Right));
         let top = fold_frame(&front, [0.0, 1.0], Projection::Third);
         assert_eq!(NamedView::of(&top), Some(NamedView::Top));
-        assert_eq!(NamedView::of(&fold_frame(&front, [-1.0, 0.0], Projection::Third)), Some(NamedView::Left));
-        assert_eq!(NamedView::of(&fold_frame(&front, [0.0, -1.0], Projection::Third)), Some(NamedView::Bottom));
+        assert_eq!(
+            NamedView::of(&fold_frame(&front, [-1.0, 0.0], Projection::Third)),
+            Some(NamedView::Left)
+        );
+        assert_eq!(
+            NamedView::of(&fold_frame(&front, [0.0, -1.0], Projection::Third)),
+            Some(NamedView::Bottom)
+        );
     }
 
     #[test]
     fn first_angle_places_views_opposite() {
         let front = NamedView::Front.frame();
         // The left view goes on the right, the top view below (P6.2).
-        assert_eq!(NamedView::of(&fold_frame(&front, [1.0, 0.0], Projection::First)), Some(NamedView::Left));
-        assert_eq!(NamedView::of(&fold_frame(&front, [0.0, -1.0], Projection::First)), Some(NamedView::Top));
-        assert_eq!(NamedView::of(&fold_frame(&front, [-1.0, 0.0], Projection::First)), Some(NamedView::Right));
-        assert_eq!(NamedView::of(&fold_frame(&front, [0.0, 1.0], Projection::First)), Some(NamedView::Bottom));
+        assert_eq!(
+            NamedView::of(&fold_frame(&front, [1.0, 0.0], Projection::First)),
+            Some(NamedView::Left)
+        );
+        assert_eq!(
+            NamedView::of(&fold_frame(&front, [0.0, -1.0], Projection::First)),
+            Some(NamedView::Top)
+        );
+        assert_eq!(
+            NamedView::of(&fold_frame(&front, [-1.0, 0.0], Projection::First)),
+            Some(NamedView::Right)
+        );
+        assert_eq!(
+            NamedView::of(&fold_frame(&front, [0.0, 1.0], Projection::First)),
+            Some(NamedView::Bottom)
+        );
     }
 
     #[test]
@@ -944,10 +1026,19 @@ mod tests {
 
     #[test]
     fn cursor_directions_pick_views() {
-        assert_eq!(placement_for([50.0, 3.0]), Some(Placement::Ortho([1.0, 0.0])));
-        assert_eq!(placement_for([-2.0, 40.0]), Some(Placement::Ortho([0.0, 1.0])));
+        assert_eq!(
+            placement_for([50.0, 3.0]),
+            Some(Placement::Ortho([1.0, 0.0]))
+        );
+        assert_eq!(
+            placement_for([-2.0, 40.0]),
+            Some(Placement::Ortho([0.0, 1.0]))
+        );
         assert_eq!(placement_for([40.0, 40.0]), Some(Placement::Iso(1.0, 1.0)));
-        assert_eq!(placement_for([-40.0, -35.0]), Some(Placement::Iso(-1.0, -1.0)));
+        assert_eq!(
+            placement_for([-40.0, -35.0]),
+            Some(Placement::Iso(-1.0, -1.0))
+        );
         assert_eq!(placement_for([0.2, 0.2]), None);
         // The default iso from the front view is Onshape's Isometric.
         let iso = iso_frame(&NamedView::Front.frame(), 1.0, 1.0);
@@ -957,12 +1048,21 @@ mod tests {
     #[test]
     fn projected_views_align_with_their_parent() {
         let parent = View::base(
-            ObjectRef { element: Uuid::nil(), part: None },
+            ObjectRef {
+                element: Uuid::nil(),
+                part: None,
+            },
             NamedView::Front,
             Scale::new(1, 2),
             [100.0, 60.0],
         );
-        let right = projected_view(&parent, Placement::Ortho([1.0, 0.0]), Projection::Third, [180.0, 75.0], None);
+        let right = projected_view(
+            &parent,
+            Placement::Ortho([1.0, 0.0]),
+            Projection::Third,
+            [180.0, 75.0],
+            None,
+        );
         assert_eq!(right.anchor, [180.0, 60.0]);
         assert_eq!(right.name, "Right");
         assert_eq!(right.scale, Scale::new(1, 2));
@@ -994,9 +1094,23 @@ mod tests {
             Some((lo, hi))
         };
         let area = crate::standard::Rect::new(12.7, 60.0, 266.7, 203.2);
-        let r = ObjectRef { element: Uuid::nil(), part: None };
-        let v = four_views(r, Projection::Third, area, 12.0, true, TangentEdges::Phantom, block);
-        assert_eq!(v.iter().map(|v| v.name.as_str()).collect::<Vec<_>>(), ["Front", "Top", "Right", "Isometric"]);
+        let r = ObjectRef {
+            element: Uuid::nil(),
+            part: None,
+        };
+        let v = four_views(
+            r,
+            Projection::Third,
+            area,
+            12.0,
+            true,
+            TangentEdges::Phantom,
+            block,
+        );
+        assert_eq!(
+            v.iter().map(|v| v.name.as_str()).collect::<Vec<_>>(),
+            ["Front", "Top", "Right", "Isometric"]
+        );
         // 1:1 doesn't fit a 254 × 143 mm area (the grid is 200 + ~150 wide): 1:2 does.
         assert_eq!(v[0].scale, Scale::new(1, 2));
         // Third angle: Top above Front, Right right of it, both aligned.
@@ -1005,16 +1119,35 @@ mod tests {
         assert_eq!(v[2].anchor[1], v[0].anchor[1]);
         assert!(v[2].anchor[0] > v[0].anchor[0]);
         assert!(v[3].shaded && v[3].fold.is_none());
-        assert!(v[..3].iter().all(|v| v.hidden_lines && v.tangent_edges == TangentEdges::Phantom));
-        let first = four_views(r, Projection::First, area, 12.0, false, TangentEdges::Solid, block);
+        assert!(
+            v[..3]
+                .iter()
+                .all(|v| v.hidden_lines && v.tangent_edges == TangentEdges::Phantom)
+        );
+        let first = four_views(
+            r,
+            Projection::First,
+            area,
+            12.0,
+            false,
+            TangentEdges::Solid,
+            block,
+        );
         assert_eq!(first[1].name, "Top");
-        assert!(first[1].anchor[1] < first[0].anchor[1], "first angle: Top below Front");
+        assert!(
+            first[1].anchor[1] < first[0].anchor[1],
+            "first angle: Top below Front"
+        );
         assert_eq!(first[2].name, "Left");
     }
 
     #[test]
     fn collinear_lines_merge_by_kind_and_precedence() {
-        let l = |kind, a: [f64; 2], b: [f64; 2], edge| ViewLine { kind, points: vec![a, b], edge };
+        let l = |kind, a: [f64; 2], b: [f64; 2], edge| ViewLine {
+            kind,
+            points: vec![a, b],
+            edge,
+        };
         let out = merge_collinear(vec![
             // Two overlapping hidden pieces of one floor line: one dashed line 0–30.
             l(LineKind::Hidden, [0.0, 5.0], [20.0, 5.0], 0),
@@ -1030,13 +1163,22 @@ mod tests {
             let mut v: Vec<(f64, f64, f64)> = out
                 .iter()
                 .filter(|x| x.kind == k)
-                .map(|x| (x.points[0][0].min(x.points[1][0]), x.points[0][0].max(x.points[1][0]), x.points[0][1]))
+                .map(|x| {
+                    (
+                        x.points[0][0].min(x.points[1][0]),
+                        x.points[0][0].max(x.points[1][0]),
+                        x.points[0][1],
+                    )
+                })
                 .collect();
             v.sort_by(|a, b| a.partial_cmp(b).unwrap());
             v
         };
         assert_eq!(of(LineKind::Visible), vec![(12.0, 18.0, 5.0)]);
-        assert_eq!(of(LineKind::Hidden), vec![(0.0, 5.0, 7.0), (0.0, 12.0, 5.0), (18.0, 30.0, 5.0)]);
+        assert_eq!(
+            of(LineKind::Hidden),
+            vec![(0.0, 5.0, 7.0), (0.0, 12.0, 5.0), (18.0, 30.0, 5.0)]
+        );
         assert_eq!(of(LineKind::Phantom), vec![(30.0, 40.0, 5.0)]);
     }
 

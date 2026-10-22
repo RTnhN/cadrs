@@ -63,7 +63,12 @@ pub struct TreeRowToggled {
 }
 
 /// A row toggle as built: its name, on and off icons, and whether it is on.
-type RowToggleSpec = (Cow<'static, str>, Cow<'static, str>, Cow<'static, str>, bool);
+type RowToggleSpec = (
+    Cow<'static, str>,
+    Cow<'static, str>,
+    Cow<'static, str>,
+    bool,
+);
 
 /// Builder for a tree row.
 pub struct TreeItem {
@@ -408,7 +413,11 @@ impl TreeItem {
                     InheritFg,
                     Pickable::IGNORE,
                     crate::ellipsis::Ellipsis::node(),
-                    if middle { crate::ellipsis::Ellipsis::middle() } else { crate::ellipsis::Ellipsis::default() },
+                    if middle {
+                        crate::ellipsis::Ellipsis::middle()
+                    } else {
+                        crate::ellipsis::Ellipsis::default()
+                    },
                 ));
                 if editable {
                     text.insert(crate::InlineEditLabel);
@@ -434,7 +443,11 @@ impl TreeItem {
                     ));
                 }
                 if let Some((name, on_icon, off_icon, on)) = toggle {
-                    let current = if on { on_icon.clone() } else { off_icon.clone() };
+                    let current = if on {
+                        on_icon.clone()
+                    } else {
+                        off_icon.clone()
+                    };
                     let mut toggle_entity = p.spawn((
                         Name::new(name.into_owned()),
                         TreeRowToggle {
@@ -509,11 +522,7 @@ fn sync_row_toggles(
     }
 }
 
-fn on_chevron_press(
-    mut click: On<Pointer<Click>>,
-    q: Query<&TreeChevron>,
-    mut commands: Commands,
-) {
+fn on_chevron_press(mut click: On<Pointer<Click>>, q: Query<&TreeChevron>, mut commands: Commands) {
     if let Ok(c) = q.get(click.entity) {
         click.propagate(false);
         commands.trigger(TreeToggle { entity: c.0 });

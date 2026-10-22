@@ -27,7 +27,11 @@ pub fn grad_l(x: &[V3; 4]) -> ([V3; 4], f64) {
     let g2 = crate::geom::scale(cross(e2, e3), 1.0 / det);
     let g3 = crate::geom::scale(cross(e3, e1), 1.0 / det);
     let g4 = crate::geom::scale(cross(e1, e2), 1.0 / det);
-    let g1 = [-(g2[0] + g3[0] + g4[0]), -(g2[1] + g3[1] + g4[1]), -(g2[2] + g3[2] + g4[2])];
+    let g1 = [
+        -(g2[0] + g3[0] + g4[0]),
+        -(g2[1] + g3[1] + g4[1]),
+        -(g2[2] + g3[2] + g4[2]),
+    ];
     ([g1, g2, g3, g4], det / 6.0)
 }
 
@@ -61,7 +65,12 @@ pub fn shape(l: [f64; 4]) -> [f64; 10] {
 const GA: f64 = 0.585_410_196_624_968_5;
 const GB: f64 = 0.138_196_601_125_010_5;
 /// The 4-point rule's points (volume coordinates).
-pub const GAUSS4: [[f64; 4]; 4] = [[GA, GB, GB, GB], [GB, GA, GB, GB], [GB, GB, GA, GB], [GB, GB, GB, GA]];
+pub const GAUSS4: [[f64; 4]; 4] = [
+    [GA, GB, GB, GB],
+    [GB, GA, GB, GB],
+    [GB, GB, GA, GB],
+    [GB, GB, GB, GA],
+];
 
 /// The natural coordinates of the ten nodes.
 pub const NODE_L: [[f64; 4]; 10] = [
@@ -119,7 +128,14 @@ pub fn strain(gl: &[V3; 4], l: [f64; 4], u: &[V3; 10]) -> [f64; 6] {
             }
         }
     }
-    [h[0][0], h[1][1], h[2][2], h[0][1] + h[1][0], h[1][2] + h[2][1], h[2][0] + h[0][2]]
+    [
+        h[0][0],
+        h[1][1],
+        h[2][2],
+        h[0][1] + h[1][0],
+        h[1][2] + h[2][1],
+        h[2][0] + h[0][2],
+    ]
 }
 
 /// Stress (xx, yy, zz, xy, yz, zx) from engineering strain.
@@ -138,14 +154,21 @@ pub fn stress(eps: [f64; 6], lambda: f64, mu: f64) -> [f64; 6] {
 /// The von Mises equivalent stress.
 pub fn von_mises(s: [f64; 6]) -> f64 {
     let [xx, yy, zz, xy, yz, zx] = s;
-    (0.5 * ((xx - yy).powi(2) + (yy - zz).powi(2) + (zz - xx).powi(2)) + 3.0 * (xy * xy + yz * yz + zx * zx)).sqrt()
+    (0.5 * ((xx - yy).powi(2) + (yy - zz).powi(2) + (zz - xx).powi(2))
+        + 3.0 * (xy * xy + yz * yz + zx * zx))
+        .sqrt()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const UNIT: [V3; 4] = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    const UNIT: [V3; 4] = [
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ];
 
     #[test]
     fn shape_functions_partition_unity_and_are_nodal() {
@@ -161,7 +184,12 @@ mod tests {
 
     #[test]
     fn rigid_motions_are_stress_free_and_the_stiffness_is_symmetric() {
-        let x = [[0.0, 0.0, 0.0], [2.0, 0.1, 0.0], [0.3, 1.5, 0.2], [0.1, 0.4, 1.7]];
+        let x = [
+            [0.0, 0.0, 0.0],
+            [2.0, 0.1, 0.0],
+            [0.3, 1.5, 0.2],
+            [0.1, 0.4, 1.7],
+        ];
         let (lambda, mu) = lame(200_000.0, 0.3);
         let k = stiffness(&x, lambda, mu);
         for a in 0..30 {
@@ -173,12 +201,21 @@ mod tests {
         let nodes: Vec<V3> = (0..10)
             .map(|n| {
                 let l = NODE_L[n];
-                (0..4).fold([0.0; 3], |acc, i| crate::geom::add(acc, crate::geom::scale(x[i], l[i])))
+                (0..4).fold([0.0; 3], |acc, i| {
+                    crate::geom::add(acc, crate::geom::scale(x[i], l[i]))
+                })
             })
             .collect();
-        for motion in [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]].iter().map(|t| nodes.iter().map(|_| *t).collect::<Vec<V3>>()).chain(std::iter::once(
-            nodes.iter().map(|p| cross([0.3, -0.2, 0.5], *p)).collect::<Vec<V3>>(),
-        )) {
+        for motion in [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+            .iter()
+            .map(|t| nodes.iter().map(|_| *t).collect::<Vec<V3>>())
+            .chain(std::iter::once(
+                nodes
+                    .iter()
+                    .map(|p| cross([0.3, -0.2, 0.5], *p))
+                    .collect::<Vec<V3>>(),
+            ))
+        {
             for a in 0..30 {
                 let f: f64 = (0..30).map(|b| k[a * 30 + b] * motion[b / 3][b % 3]).sum();
                 assert!(f.abs() < 1e-6 * k[a * 30 + a], "row {a}: {f}");
@@ -193,7 +230,9 @@ mod tests {
         assert!((v - 1.0 / 6.0).abs() < 1e-15);
         let u: [V3; 10] = std::array::from_fn(|n| {
             let l = NODE_L[n];
-            let p = (0..4).fold([0.0; 3], |acc, i| crate::geom::add(acc, crate::geom::scale(UNIT[i], l[i])));
+            let p = (0..4).fold([0.0; 3], |acc, i| {
+                crate::geom::add(acc, crate::geom::scale(UNIT[i], l[i]))
+            });
             [0.001 * p[0], -0.0003 * p[1], 0.002 * p[2] + 0.001 * p[0]]
         });
         let e = strain(&gl, [0.25; 4], &u);

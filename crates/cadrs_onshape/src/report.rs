@@ -39,7 +39,8 @@ pub struct PartCheck {
 impl PartCheck {
     /// The relative volume difference (0 = identical), if a part matched.
     pub fn error(&self) -> Option<f64> {
-        self.cadrs_volume.map(|v| (v - self.onshape_volume).abs() / self.onshape_volume.abs().max(1e-9))
+        self.cadrs_volume
+            .map(|v| (v - self.onshape_volume).abs() / self.onshape_volume.abs().max(1e-9))
     }
 
     /// Matched: within 0.1 % of Onshape's volume, and where Onshape has it (its box).
@@ -110,7 +111,11 @@ impl fmt::Display for DocumentReport {
                 }
             }
             if let Some(a) = el.assembly {
-                write!(f, ": instances {}/{} placed; mates {}/{}", a.instances.0, a.instances.1, a.mates.0, a.mates.1)?;
+                write!(
+                    f,
+                    ": instances {}/{} placed; mates {}/{}",
+                    a.instances.0, a.instances.1, a.mates.0, a.mates.1
+                )?;
             }
             if !el.imported {
                 write!(f, " (not imported)")?;
@@ -142,12 +147,23 @@ impl fmt::Display for DocumentReport {
                         }
                     }
                     Some(e) => {
-                        writeln!(f, "      volume     {}: {:.1} % off ({:.1} vs {:.1} mm³)", p.name, e * 100.0, p.cadrs_volume.unwrap_or(0.0), p.onshape_volume)?;
+                        writeln!(
+                            f,
+                            "      volume     {}: {:.1} % off ({:.1} vs {:.1} mm³)",
+                            p.name,
+                            e * 100.0,
+                            p.cadrs_volume.unwrap_or(0.0),
+                            p.onshape_volume
+                        )?;
                         if let Some(n) = &p.bbox_note {
                             writeln!(f, "                 {n}")?;
                         }
                     }
-                    None => writeln!(f, "      missing    part {} ({:.1} mm³)", p.name, p.onshape_volume)?,
+                    None => writeln!(
+                        f,
+                        "      missing    part {} ({:.1} mm³)",
+                        p.name, p.onshape_volume
+                    )?,
                 }
             }
         }

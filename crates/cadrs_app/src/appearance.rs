@@ -15,7 +15,6 @@
 //!   row each with its swatch; double-click a row, or right-click → Edit appearance, to change
 //!   it.
 
-use cadrs_ui::ShortcutKey;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
@@ -26,11 +25,12 @@ use cadrs_core::commands::{
 };
 use cadrs_core::{ElementId, FeatureId, PartId};
 use cadrs_sketch::{CurveId, FaceName};
+use cadrs_ui::ShortcutKey;
 use cadrs_ui::menu::ContextMenuAnchor;
 use cadrs_ui::prelude::*;
 use cadrs_ui::{
-    ColorEditor, ColorEditorChange, ColorEditorCustom, ColorEditorDefault, ColorEditorSaveCustom, ColorEditorState, CustomColorSwatch,
-    FeatureDialogAccept, FeatureDialogCancel,
+    ColorEditor, ColorEditorChange, ColorEditorCustom, ColorEditorDefault, ColorEditorSaveCustom,
+    ColorEditorState, CustomColorSwatch, FeatureDialogAccept, FeatureDialogCancel,
 };
 
 use crate::parts::PartCache;
@@ -44,7 +44,15 @@ impl Plugin for AppearancePlugin {
         app.init_resource::<SidePanel>()
             .add_systems(
                 Update,
-                (appearance_keys, sync_appearance_dialog, sync_custom_colors, sync_appearance_panel, sync_variables_panel, sync_custom_tables_panel, sync_panel_buttons)
+                (
+                    appearance_keys,
+                    sync_appearance_dialog,
+                    sync_custom_colors,
+                    sync_appearance_panel,
+                    sync_variables_panel,
+                    sync_custom_tables_panel,
+                    sync_panel_buttons,
+                )
                     .chain()
                     .after(crate::parts::PartsSet)
                     .run_if(in_state(AppState::Document)),
@@ -94,7 +102,11 @@ pub const SKETCH_GREY: Appearance = Appearance::rgb(0xa8, 0xac, 0xaf);
 
 /// Applies `a` to `target` in copies of a Part Studio's appearance settings (the live preview).
 pub fn apply_to(target: &AppearanceTarget, a: Option<Appearance>, looks: &mut Looks) {
-    let Looks { props, features, curves } = looks;
+    let Looks {
+        props,
+        features,
+        curves,
+    } = looks;
     let prop = |props: &mut Vec<cadrs_core::PartProps>, part: PartId| -> usize {
         if let Some(i) = props.iter().position(|p| p.part == part) {
             return i;
@@ -150,8 +162,13 @@ struct AppearanceDialog;
 /// The appearance a target has now.
 fn current(world: &World, element: ElementId, target: &AppearanceTarget) -> Appearance {
     let cache = world.resource::<PartCache>();
-    let el = world.get_resource::<ActiveDocument>().and_then(|d| d.doc.element(element).cloned());
-    let features = el.as_ref().map(|e| e.feature_appearances().to_vec()).unwrap_or_default();
+    let el = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.doc.element(element).cloned());
+    let features = el
+        .as_ref()
+        .map(|e| e.feature_appearances().to_vec())
+        .unwrap_or_default();
     match target {
         AppearanceTarget::Parts(parts) => parts
             .first()
@@ -168,12 +185,25 @@ fn current(world: &World, element: ElementId, target: &AppearanceTarget) -> Appe
             .find(|(x, _)| x == f)
             .map(|(_, a)| *a)
             // Its first part's palette colour (opaque) until it has one of its own.
-            .or_else(|| cache.part_of_feature(*f).map(|p| appearance::palette(p.palette)))
+            .or_else(|| {
+                cache
+                    .part_of_feature(*f)
+                    .map(|p| appearance::palette(p.palette))
+            })
             .unwrap_or(appearance::PALETTE[0]),
-        AppearanceTarget::Sketch(f) => features.iter().find(|(x, _)| x == f).map(|(_, a)| *a).unwrap_or(SKETCH_GREY),
+        AppearanceTarget::Sketch(f) => features
+            .iter()
+            .find(|(x, _)| x == f)
+            .map(|(_, a)| *a)
+            .unwrap_or(SKETCH_GREY),
         AppearanceTarget::Curve(s, c) => el
             .as_ref()
-            .and_then(|e| e.curve_appearances().iter().find(|(x, y, _)| x == s && y == c).map(|(_, _, a)| *a))
+            .and_then(|e| {
+                e.curve_appearances()
+                    .iter()
+                    .find(|(x, y, _)| x == s && y == c)
+                    .map(|(_, _, a)| *a)
+            })
             .or_else(|| features.iter().find(|(x, _)| x == s).map(|(_, a)| *a))
             .unwrap_or(SKETCH_GREY),
     }
@@ -190,7 +220,10 @@ fn describe(world: &World, element: ElementId, target: &AppearanceTarget) -> (St
     };
     match target {
         AppearanceTarget::Parts(parts) => {
-            let names: Vec<String> = parts.iter().filter_map(|p| cache.part_name(*p).map(str::to_string)).collect();
+            let names: Vec<String> = parts
+                .iter()
+                .filter_map(|p| cache.part_name(*p).map(str::to_string))
+                .collect();
             ("Edit appearance".into(), names.join(", "))
         }
         AppearanceTarget::Faces(part, faces) => {
@@ -198,19 +231,29 @@ fn describe(world: &World, element: ElementId, target: &AppearanceTarget) -> (St
             let name = cache.part_name(*part).unwrap_or("part").to_string();
             (
                 "Face appearance".into(),
-                if n == 1 { format!("Face of {name}") } else { format!("{n} faces of {name}") },
+                if n == 1 {
+                    format!("Face of {name}")
+                } else {
+                    format!("{n} faces of {name}")
+                },
             )
         }
         AppearanceTarget::Feature(f) => ("Feature appearance".into(), feature_name(*f)),
         AppearanceTarget::Sketch(f) => ("Sketch appearance".into(), feature_name(*f)),
-        AppearanceTarget::Curve(s, _) => ("Curve appearance".into(), format!("Curve of {}", feature_name(*s))),
+        AppearanceTarget::Curve(s, _) => (
+            "Curve appearance".into(),
+            format!("Curve of {}", feature_name(*s)),
+        ),
     }
 }
 
 /// Opens the Edit appearance dialog for `target` in the active Part Studio (closing the Mass
 /// properties panel, which sits in the same place).
 pub fn open_appearance_dialog(world: &mut World, target: AppearanceTarget) {
-    let Some(element) = world.get_resource::<ActiveDocument>().and_then(|d| d.active_element().map(|e| e.id)) else {
+    let Some(element) = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.active_element().map(|e| e.id))
+    else {
         return;
     };
     close_dialogs(world);
@@ -231,7 +274,9 @@ pub fn open_appearance_dialog(world: &mut World, target: AppearanceTarget) {
 pub fn close_dialogs(world: &mut World) {
     world.remove_resource::<AppearanceSession>();
     crate::material_dialog::close(world);
-    world.resource_mut::<PartCache>().set_appearance_preview(None);
+    world
+        .resource_mut::<PartCache>()
+        .set_appearance_preview(None);
 }
 
 /// The target's live preview in the view while the dialog is open.
@@ -254,9 +299,16 @@ fn with_session(commands: &mut Commands, f: impl FnOnce(&mut AppearanceSession) 
 
 /// A colour picked in the dialog's editor shows live.
 fn on_color(ev: On<ColorEditorChange>, q: Query<&Name>, mut commands: Commands) {
-    if q.get(ev.entity).is_ok_and(|n| n.as_str() == "appearance-editor") {
+    if q.get(ev.entity)
+        .is_ok_and(|n| n.as_str() == "appearance-editor")
+    {
         let [r, g, b, a] = ev.rgba;
-        with_session(&mut commands, move |s| s.color = Appearance { rgb: [r, g, b], alpha: a });
+        with_session(&mut commands, move |s| {
+            s.color = Appearance {
+                rgb: [r, g, b],
+                alpha: a,
+            }
+        });
     }
 }
 
@@ -277,7 +329,9 @@ fn on_save_custom(ev: On<ColorEditorSaveCustom>, mut commands: Commands) {
 
 /// Every colour editor shows the document's custom colours.
 fn sync_custom_colors(doc: Option<Res<ActiveDocument>>, mut q: Query<&mut ColorEditorCustom>) {
-    let custom: Vec<[u8; 3]> = doc.map(|d| d.doc.custom_colors.iter().map(|c| c.rgb).collect()).unwrap_or_default();
+    let custom: Vec<[u8; 3]> = doc
+        .map(|d| d.doc.custom_colors.iter().map(|c| c.rgb).collect())
+        .unwrap_or_default();
     for mut c in &mut q {
         if c.0 != custom {
             c.0 = custom.clone();
@@ -286,7 +340,11 @@ fn sync_custom_colors(doc: Option<Res<ActiveDocument>>, mut q: Query<&mut ColorE
 }
 
 /// ✓: the colour becomes the target's appearance (one undo step).
-fn on_accept(ev: On<FeatureDialogAccept>, q: Query<(), With<AppearanceDialog>>, mut commands: Commands) {
+fn on_accept(
+    ev: On<FeatureDialogAccept>,
+    q: Query<(), With<AppearanceDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(accept);
     }
@@ -296,15 +354,26 @@ pub fn accept(world: &mut World) {
     let Some(s) = world.remove_resource::<AppearanceSession>() else {
         return;
     };
-    world.resource_mut::<PartCache>().set_appearance_preview(None);
+    world
+        .resource_mut::<PartCache>()
+        .set_appearance_preview(None);
     let a = (!s.reset).then_some(s.color);
     let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
         return;
     };
     let element = s.element;
     let r = match s.target {
-        AppearanceTarget::Parts(parts) => doc.execute(&SetPartAppearance { element, parts, appearance: a }),
-        AppearanceTarget::Faces(part, faces) => doc.execute(&SetFaceAppearance { element, part, faces, appearance: a }),
+        AppearanceTarget::Parts(parts) => doc.execute(&SetPartAppearance {
+            element,
+            parts,
+            appearance: a,
+        }),
+        AppearanceTarget::Faces(part, faces) => doc.execute(&SetFaceAppearance {
+            element,
+            part,
+            faces,
+            appearance: a,
+        }),
         AppearanceTarget::Feature(feature) => doc.execute(&SetFeatureAppearance {
             element,
             feature,
@@ -317,14 +386,23 @@ pub fn accept(world: &mut World) {
             appearance: a,
             label: "Sketch appearance".into(),
         }),
-        AppearanceTarget::Curve(sketch, curve) => doc.execute(&SetCurveAppearance { element, sketch, curve, appearance: a }),
+        AppearanceTarget::Curve(sketch, curve) => doc.execute(&SetCurveAppearance {
+            element,
+            sketch,
+            curve,
+            appearance: a,
+        }),
     };
     if let Err(e) = r {
         warn!("appearance: {e}");
     }
 }
 
-fn on_cancel(ev: On<FeatureDialogCancel>, q: Query<(), With<AppearanceDialog>>, mut commands: Commands) {
+fn on_cancel(
+    ev: On<FeatureDialogCancel>,
+    q: Query<(), With<AppearanceDialog>>,
+    mut commands: Commands,
+) {
     if q.contains(ev.entity) {
         commands.queue(close_dialogs);
     }
@@ -353,45 +431,54 @@ fn appearance_keys(
 
 /// **Default** takes the appearance off.
 fn on_default(ev: On<ColorEditorDefault>, q: Query<&Name>, mut commands: Commands) {
-    if !q.get(ev.entity).is_ok_and(|n| n.as_str() == "appearance-editor") {
+    if !q
+        .get(ev.entity)
+        .is_ok_and(|n| n.as_str() == "appearance-editor")
+    {
         return;
     }
     commands.queue(|world: &mut World| {
-            let default = world.get_resource::<AppearanceSession>().map(|s| {
-                let mut looks = world.resource::<PartCache>().looks();
-                apply_to(&s.target, None, &mut looks);
-                (s.element, s.target.clone(), looks.props, looks.features)
-            });
-            let Some((element, target, props, feats)) = default else {
-                return;
-            };
-            // The colour it goes back to.
-            let color = {
-                let cache = world.resource::<PartCache>();
-                match &target {
-                    AppearanceTarget::Parts(p) => p
-                        .first()
-                        .and_then(|p| cache.part(*p))
-                        .map(|p| appearance::part_appearance(p, &props)),
-                    AppearanceTarget::Faces(p, f) => cache
-                        .part(*p)
-                        .zip(f.first())
-                        .map(|(p, f)| appearance::face_appearance(p, f, &props, &feats).0),
-                    AppearanceTarget::Feature(f) => cache.part_of_feature(*f).map(|p| appearance::part_appearance(p, &props)),
-                    AppearanceTarget::Sketch(_) => Some(SKETCH_GREY),
-                    AppearanceTarget::Curve(s, _) => {
-                        Some(feats.iter().find(|(x, _)| x == s).map(|(_, a)| *a).unwrap_or(SKETCH_GREY))
-                    }
-                }
-            };
-            let _ = element;
-            if let Some(mut s) = world.get_resource_mut::<AppearanceSession>() {
-                if let Some(c) = color {
-                    s.color = c;
-                }
-                s.reset = true;
+        let default = world.get_resource::<AppearanceSession>().map(|s| {
+            let mut looks = world.resource::<PartCache>().looks();
+            apply_to(&s.target, None, &mut looks);
+            (s.element, s.target.clone(), looks.props, looks.features)
+        });
+        let Some((element, target, props, feats)) = default else {
+            return;
+        };
+        // The colour it goes back to.
+        let color = {
+            let cache = world.resource::<PartCache>();
+            match &target {
+                AppearanceTarget::Parts(p) => p
+                    .first()
+                    .and_then(|p| cache.part(*p))
+                    .map(|p| appearance::part_appearance(p, &props)),
+                AppearanceTarget::Faces(p, f) => cache
+                    .part(*p)
+                    .zip(f.first())
+                    .map(|(p, f)| appearance::face_appearance(p, f, &props, &feats).0),
+                AppearanceTarget::Feature(f) => cache
+                    .part_of_feature(*f)
+                    .map(|p| appearance::part_appearance(p, &props)),
+                AppearanceTarget::Sketch(_) => Some(SKETCH_GREY),
+                AppearanceTarget::Curve(s, _) => Some(
+                    feats
+                        .iter()
+                        .find(|(x, _)| x == s)
+                        .map(|(_, a)| *a)
+                        .unwrap_or(SKETCH_GREY),
+                ),
             }
-            preview(world);
+        };
+        let _ = element;
+        if let Some(mut s) = world.get_resource_mut::<AppearanceSession>() {
+            if let Some(c) = color {
+                s.color = c;
+            }
+            s.reset = true;
+        }
+        preview(world);
     });
 }
 
@@ -399,7 +486,12 @@ fn on_default(ev: On<ColorEditorDefault>, q: Query<&Name>, mut commands: Command
 #[derive(Component, Debug, Clone, Copy)]
 struct CustomMenuFor(CustomColorSwatch);
 
-fn on_custom_menu(ev: On<ContextMenuRequested>, q: Query<&CustomColorSwatch>, theme: Res<Theme>, mut commands: Commands) {
+fn on_custom_menu(
+    ev: On<ContextMenuRequested>,
+    q: Query<&CustomColorSwatch>,
+    theme: Res<Theme>,
+    mut commands: Commands,
+) {
     let Ok(c) = q.get(ev.entity) else {
         return;
     };
@@ -412,10 +504,16 @@ fn on_custom_menu(ev: On<ContextMenuRequested>, q: Query<&CustomColorSwatch>, th
         .item(MenuItem::new("custom-color-update", "Update color"))
         .item(MenuItem::new("custom-color-delete", "Delete"));
     let anchor = open_context_menu(&mut commands, ev.position, menu.build(&theme));
-    commands.entity(anchor).insert((CustomMenuFor(*c), DespawnOnExit(AppState::Document)));
+    commands
+        .entity(anchor)
+        .insert((CustomMenuFor(*c), DespawnOnExit(AppState::Document)));
 }
 
-fn on_custom_menu_action(ev: On<MenuAction>, q: Query<&CustomMenuFor, With<ContextMenuAnchor>>, mut commands: Commands) {
+fn on_custom_menu_action(
+    ev: On<MenuAction>,
+    q: Query<&CustomMenuFor, With<ContextMenuAnchor>>,
+    mut commands: Commands,
+) {
     let Ok(target) = q.get(ev.entity) else {
         return;
     };
@@ -423,7 +521,9 @@ fn on_custom_menu_action(ev: On<MenuAction>, q: Query<&CustomMenuFor, With<Conte
     let item = ev.item.clone();
     commands.queue(move |world: &mut World| {
         // Update takes the colour of the editor the swatch is in.
-        let current = world.get(editor).map(|s: &ColorEditorState| Appearance::rgb(s.rgba[0], s.rgba[1], s.rgba[2]));
+        let current = world
+            .get(editor)
+            .map(|s: &ColorEditorState| Appearance::rgb(s.rgba[0], s.rgba[1], s.rgba[2]));
         let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
             return;
         };
@@ -462,8 +562,16 @@ fn appearance_dialog(t: &Theme, s: &AppearanceSession, custom: Vec<Appearance>) 
             .width(292.0)
             .body(move |b| {
                 let t = &tb;
-                b.spawn(Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(6.0), ..default() }).with_children(|c| {
-                    c.spawn((Name::new("appearance-target"), t.text(caption.clone(), 12.0, FontWeight::MEDIUM, t.foreground)));
+                b.spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(6.0),
+                    ..default()
+                })
+                .with_children(|c| {
+                    c.spawn((
+                        Name::new("appearance-target"),
+                        t.text(caption.clone(), 12.0, FontWeight::MEDIUM, t.foreground),
+                    ));
                     c.spawn(
                         ColorEditor::new("appearance")
                             .presets(SWATCHES.iter().map(|a| a.rgb))
@@ -500,7 +608,10 @@ fn sync_appearance_dialog(
         let Some(area) = q_area.iter().next() else {
             return;
         };
-        let custom = doc.as_ref().map(|d| d.doc.custom_colors.clone()).unwrap_or_default();
+        let custom = doc
+            .as_ref()
+            .map(|d| d.doc.custom_colors.clone())
+            .unwrap_or_default();
         let d = commands.spawn(appearance_dialog(&theme, &s, custom)).id();
         commands.entity(area).add_child(d);
         return;
@@ -560,7 +671,8 @@ fn on_panel_button(a: On<Activate>, q: Query<&Name>, mut open: ResMut<SidePanel>
     let Ok(n) = q.get(a.entity) else {
         return;
     };
-    let toggle = |open: &mut SidePanel, p: SidePanel| *open = if *open == p { SidePanel::None } else { p };
+    let toggle =
+        |open: &mut SidePanel, p: SidePanel| *open = if *open == p { SidePanel::None } else { p };
     match n.as_str() {
         "panel-appearance" => toggle(&mut open, SidePanel::Appearances),
         "panel-variables" => toggle(&mut open, SidePanel::Variables),
@@ -598,7 +710,11 @@ pub(crate) fn side_panel_node(t: &Theme) -> impl Bundle {
 }
 
 /// The strip's button of the open panel shows pressed (P3.6).
-fn sync_panel_buttons(open: Res<SidePanel>, q: Query<(Entity, &Name, Has<cadrs_ui::style::Selected>)>, mut commands: Commands) {
+fn sync_panel_buttons(
+    open: Res<SidePanel>,
+    q: Query<(Entity, &Name, Has<cadrs_ui::style::Selected>)>,
+    mut commands: Commands,
+) {
     if !open.is_changed() {
         return;
     }
@@ -622,7 +738,12 @@ fn sync_panel_buttons(open: Res<SidePanel>, q: Query<(Entity, &Name, Has<cadrs_u
     }
 }
 
-pub(crate) fn side_panel_header(p: &mut ChildSpawnerCommands, t: &Theme, title: &str, close: &'static str) {
+pub(crate) fn side_panel_header(
+    p: &mut ChildSpawnerCommands,
+    t: &Theme,
+    title: &str,
+    close: &'static str,
+) {
     p.spawn(Node {
         height: Val::Px(32.0),
         padding: UiRect::new(Val::Px(10.0), Val::Px(4.0), Val::ZERO, Val::ZERO),
@@ -660,7 +781,12 @@ fn sync_variables_panel(
     };
     let t = theme.clone();
     let panel = commands
-        .spawn((Name::new("variables-panel"), VariablesPanel, DespawnOnExit(AppState::Document), side_panel_node(&t)))
+        .spawn((
+            Name::new("variables-panel"),
+            VariablesPanel,
+            DespawnOnExit(AppState::Document),
+            side_panel_node(&t),
+        ))
         .with_children(|p| {
             side_panel_header(p, &t, "Variables", "variables-panel-close");
             p.spawn((
@@ -689,7 +815,10 @@ fn sync_variables_panel(
             p.spawn((
                 Name::new("variables-panel-rows"),
                 crate::variables_ui::VariableTableRows,
-                Node { flex_direction: FlexDirection::Column, ..default() },
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    ..default()
+                },
             ));
         })
         .id();
@@ -747,7 +876,12 @@ fn sync_custom_tables_panel(
 }
 
 /// Puts a side panel right after the viewport area in its row.
-pub(crate) fn dock_beside_viewport(commands: &mut Commands, area: (Entity, &ChildOf), q_children: &Query<&Children>, panel: Entity) {
+pub(crate) fn dock_beside_viewport(
+    commands: &mut Commands,
+    area: (Entity, &ChildOf),
+    q_children: &Query<&Children>,
+    panel: Entity,
+) {
     let (area, parent) = (area.0, area.1.parent());
     let at = q_children
         .get(parent)
@@ -767,7 +901,12 @@ fn on_panel_row_double_click(ev: On<DoubleClick>, q: Query<&PanelRow>, mut comma
 #[derive(Component, Debug, Clone)]
 struct PanelMenuFor(AppearanceTarget);
 
-fn on_panel_row_menu(ev: On<ContextMenuRequested>, q: Query<&PanelRow>, theme: Res<Theme>, mut commands: Commands) {
+fn on_panel_row_menu(
+    ev: On<ContextMenuRequested>,
+    q: Query<&PanelRow>,
+    theme: Res<Theme>,
+    mut commands: Commands,
+) {
     let Ok(row) = q.get(ev.entity) else {
         return;
     };
@@ -777,10 +916,17 @@ fn on_panel_row_menu(ev: On<ContextMenuRequested>, q: Query<&PanelRow>, theme: R
         .text_only()
         .item(MenuItem::new("appearance-row-edit", "Edit appearance…"));
     let anchor = open_context_menu(&mut commands, ev.position, menu.build(&theme));
-    commands.entity(anchor).insert((PanelMenuFor(row.0.clone()), DespawnOnExit(AppState::Document)));
+    commands.entity(anchor).insert((
+        PanelMenuFor(row.0.clone()),
+        DespawnOnExit(AppState::Document),
+    ));
 }
 
-fn on_panel_menu_action(ev: On<MenuAction>, q: Query<&PanelMenuFor, With<ContextMenuAnchor>>, mut commands: Commands) {
+fn on_panel_menu_action(
+    ev: On<MenuAction>,
+    q: Query<&PanelMenuFor, With<ContextMenuAnchor>>,
+    mut commands: Commands,
+) {
     if let Ok(t) = q.get(ev.entity)
         && ev.item == "appearance-row-edit"
     {
@@ -803,19 +949,38 @@ fn panel_entries(doc: &ActiveDocument, cache: &PartCache) -> Vec<PanelEntry> {
     let mut out = Vec::new();
     for p in &cache.parts {
         let name = cache.part_name(p.id).unwrap_or(&p.name).to_string();
-        out.push((0, name.clone(), appearance::part_appearance(p, &props), AppearanceTarget::Parts(vec![p.id])));
+        out.push((
+            0,
+            name.clone(),
+            appearance::part_appearance(p, &props),
+            AppearanceTarget::Parts(vec![p.id]),
+        ));
         if let Some(pp) = props.iter().find(|x| x.part == p.id) {
             for (f, a) in &pp.faces {
-                out.push((0, format!("    Face of {name}"), *a, AppearanceTarget::Faces(p.id, vec![*f])));
+                out.push((
+                    0,
+                    format!("    Face of {name}"),
+                    *a,
+                    AppearanceTarget::Faces(p.id, vec![*f]),
+                ));
             }
         }
     }
     for f in el.features() {
         if f.sketch().is_some() {
-            let a = features.iter().find(|(x, _)| *x == f.id).map(|(_, a)| *a).unwrap_or(SKETCH_GREY);
+            let a = features
+                .iter()
+                .find(|(x, _)| *x == f.id)
+                .map(|(_, a)| *a)
+                .unwrap_or(SKETCH_GREY);
             out.push((2, f.name.clone(), a, AppearanceTarget::Sketch(f.id)));
             for (_, c, a) in cache.curves_now().iter().filter(|(s, _, _)| *s == f.id) {
-                out.push((2, format!("    Curve of {}", f.name), *a, AppearanceTarget::Curve(f.id, *c)));
+                out.push((
+                    2,
+                    format!("    Curve of {}", f.name),
+                    *a,
+                    AppearanceTarget::Curve(f.id, *c),
+                ));
             }
         } else if let Some((_, a)) = features.iter().find(|(x, _)| *x == f.id) {
             out.push((1, f.name.clone(), *a, AppearanceTarget::Feature(f.id)));
@@ -848,7 +1013,10 @@ fn sync_appearance_panel(
             return;
         }
     };
-    let key: Vec<(usize, String, Appearance)> = entries.iter().map(|(g, l, a, _)| (*g, l.clone(), *a)).collect();
+    let key: Vec<(usize, String, Appearance)> = entries
+        .iter()
+        .map(|(g, l, a, _)| (*g, l.clone(), *a))
+        .collect();
     if last.as_ref() == Some(&key) && !q_panel.is_empty() {
         return;
     }
@@ -884,7 +1052,12 @@ fn sync_appearance_panel(
                         list.spawn((
                             t.text(titles[g], 11.0, FontWeight::MEDIUM, t.muted_foreground),
                             Node {
-                                margin: UiRect::new(Val::Px(10.0), Val::ZERO, Val::Px(6.0), Val::Px(2.0)),
+                                margin: UiRect::new(
+                                    Val::Px(10.0),
+                                    Val::ZERO,
+                                    Val::Px(6.0),
+                                    Val::Px(2.0),
+                                ),
                                 ..default()
                             },
                         ));
@@ -902,7 +1075,12 @@ fn sync_appearance_panel(
                                     Node {
                                         width: Val::Px(16.0),
                                         height: Val::Px(16.0),
-                                        margin: UiRect::new(Val::Auto, Val::Px(8.0), Val::ZERO, Val::ZERO),
+                                        margin: UiRect::new(
+                                            Val::Auto,
+                                            Val::Px(8.0),
+                                            Val::ZERO,
+                                            Val::ZERO,
+                                        ),
                                         flex_shrink: 0.0,
                                         border: UiRect::all(Val::Px(1.0)),
                                         border_radius: BorderRadius::all(Val::Px(2.0)),
