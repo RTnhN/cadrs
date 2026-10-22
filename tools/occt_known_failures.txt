@@ -13,8 +13,6 @@ blend complex_b2  # the area differs from OCCT's
 blend complex_b3  # a boolean's result has an edge used by three faces (refused, not manifold)
 blend complex_b5  # blends of edges the kernel sees on one face only (seams, sheet edges)
 blend complex_c1  # a boolean leaves an open shell
-blend complex_c6  # a boolean builds a face that doesn't close (a p-curve gap)
-blend complex_d6  # a boolean leaves an open shell
 blend complex_d8  # the blends of two edges overlap: the size is too large for the face between them (OCCT builds it)
 blend complex_e7  # the blend's section degenerates along the edge
 blend complex_f1  # a boolean leaves an open shell
@@ -25,11 +23,8 @@ blend simple_c8  # the blend tool's path needs more than 4000 sections (the loca
 blend simple_d1  # the blend tool runs out of its budget of sections
 blend simple_h9  # a boolean leaves an open shell
 blend simple_k4  # the area differs from OCCT's
-blend simple_p4  # a boolean builds a face that doesn't close (a p-curve gap)
 blend simple_p5  # a boolean builds a face that doesn't close (a p-curve gap)
-blend simple_q2  # a boolean leaves an open shell
 blend simple_q3  # the area differs from OCCT's
-blend simple_q6  # the area differs from OCCT's
 blend simple_q7  # the area differs from OCCT's
 blend simple_q8  # the area differs from OCCT's
 blend simple_t8  # the area differs from OCCT's
@@ -55,14 +50,9 @@ blend tolblend_simple_c2  # the blend's section degenerates along the edge
 blend tolblend_simple_c3  # the blend's section degenerates along the edge
 blend tolblend_simple_c5  # the blend's section degenerates along the edge
 blend tolblend_simple_d2  # a boolean's result has an edge used by three faces (refused, not manifold)
-blend tolblend_simple_e3  # the blend tool runs out of its budget of sections
-blend tolblend_simple_e4  # the blend tool runs out of its budget of sections
 blend tolblend_simple_e5  # the blend tool runs out of its budget of sections
 blend tolblend_simple_f2  # the area differs from OCCT's
-blend tolblend_simple_f6  # the area differs from OCCT's
 blend tolblend_simple_f7  # a boolean leaves an open shell
-blend tolblend_simple_f9  # the area differs from OCCT's
-blend tolblend_simple_g1  # the area differs from OCCT's
 boolean bcut_2d_a8  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
 boolean bcut_2d_n5  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
 boolean bcut_complex_e4  # a boolean builds a face that doesn't close (a p-curve gap)
@@ -72,8 +62,6 @@ boolean bcut_complex_i2  # the area differs from OCCT's
 boolean bcut_complex_k4  # a boolean builds a face that doesn't close (a p-curve gap)
 boolean bcut_complex_l4  # a boolean builds a face that doesn't close (a p-curve gap)
 boolean bcut_complex_o5  # a boolean's result has an edge used by three faces (refused, not manifold)
-boolean bfuse_complex_e1  # a boolean leaves an open shell
-boolean bfuse_complex_i3  # a boolean leaves an open shell
 boolean bfuse_complex_q7  # the area differs from OCCT's
 boolean bopcommon_complex_e3  # the area differs from OCCT's
 boolean bopcommon_complex_e4  # the area differs from OCCT's
@@ -365,11 +353,7 @@ draft angle_h5
 # blend: a boolean of the feature fails (open shell).
 blend bfuseblend_a6
 blend encoderegularity_a2
-blend encoderegularity_a4
 blend simple_r1
-blend simple_r2
-blend simple_r6
-blend simple_y9
 blend tolblend_simple_f3
 blend tolblend_simple_f8
 # blend: the measured property differs from OCCT's.
@@ -381,14 +365,6 @@ blend buildevol_f2
 blend buildevol_f5
 blend buildevol_f9
 blend buildevol_g1
-blend buildevol_h7
-blend buildevol_h9
-blend buildevol_i3
-blend buildevol_i6
-blend buildevol_i9
-blend buildevol_j3
-blend buildevol_j6
-blend buildevol_j9
 blend buildevol_k3
 blend buildevol_k6
 blend buildevol_k8
@@ -398,13 +374,9 @@ blend buildevol_b3  # the area differs from OCCT's (by 1.02 %)
 blend buildevol_d6  # unsupported: variable fillets between curved faces (the local fillet's result doesn't close)
 blend complex_h4
 blend encoderegularity_a5  # the loft's surface isn't valid (a weight along v isn't positive)
-blend simple_r4
-blend simple_r5
 blend tolblend_simple_a6
 blend tolblend_simple_e2
-blend tolblend_simple_f1
 blend tolblend_simple_f4
-blend tolblend_simple_f5
 # blend: unsupported: faces bounded by rational or high-degree B-splines.
 blend buildevol_d1
 blend buildevol_d2

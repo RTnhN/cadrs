@@ -143,7 +143,9 @@ def flatten(arg):
 def convert_body(body):
     """A generated test's statements as bench lines, or None when one has no bench command."""
     lines = []
-    for st in re.findall(r"^\s*(.+?;)\s*$", body, re.M):
+    # One statement a line whether or not rustfmt spread it over several.
+    flat = re.sub(r",\s*([)\]}])", r"\1", re.sub(r"([(\[{])\s+", r"\1", re.sub(r"\s*\n\s*", " ", body)))
+    for st in (x.strip() + ";" for x in flat.split(";") if x.strip()):
         if st.startswith(("k.check", "draw::check", "#[allow", "let mut k", "Ok(", "eprintln")):
             continue
         m = re.fullmatch(r"let (?:mut )?(\w+) = k\.(\w+)\((.*)\)\??;", st)
@@ -213,12 +215,14 @@ def smlib_cases(with_known=False):
         src = open(os.path.join(TESTS, f"smlib_{suite}.rs")).read()
         for t in re.split(r"\n#\[test\]\n", src)[1:]:
             name = re.search(r"fn (\w+)\(", t).group(1)
-            m = re.search(r"\n    " + pat, t)
-            if m:
+            # One line per statement whether or not rustfmt spread the call over several.
+            flat = re.sub(r",\s*([)\]}])", r"\1", re.sub(r"([(\[{])\s+", r"\1", re.sub(r"\s*\n\s*", " ", t)))
+            m = re.search(r"(?<!known_failure\()" + pat, flat)
+            if m and not flat.startswith("known_failure("):
                 if not t.lstrip().startswith("#[ignore"):
                     yield name, m, ""
                 continue
-            m = re.search(r"\n    known_failure\(" + pat, t)
+            m = re.search(r"known_failure\(" + pat, flat)
             if m and with_known:
                 yield name, m, "known_"
 

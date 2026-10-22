@@ -575,11 +575,16 @@ pub fn exact_strip(kind: Exact, b: &Ball, spine: &Spine) -> Option<Strip> {
             let axis_pt = c + z * h;
             let rho = b.c - axis_pt;
             let rmaj = rho.norm();
-            if rmaj <= r * (1.0 + tol::REL) {
+            // The ball's centre on the axis (a radius as large as a cylinder's whose end is
+            // rounded): every ball is the same, the strip a sphere, one rail the point where the
+            // axis meets that face (the face goes whole).
+            let sphere = rmaj <= tol::REL_POINT * (1.0 + r);
+            if rmaj <= r * (1.0 + tol::REL) && !sphere {
                 return None;
             }
             // The torus's frame and rails share the spine's x and y so their angles agree.
-            let surf = Surface::Torus { f: Frame { o: axis_pt, x: *x, y: z.cross(x), z }, rmaj, rmin: r };
+            let f = Frame { o: axis_pt, x: *x, y: z.cross(x), z };
+            let surf = if sphere { Surface::Sphere { f, r } } else { Surface::Torus { f, rmaj, rmin: r } };
             let rail = |q: &P3| {
                 let hq = (q - c).dot(&z);
                 let cq = c + z * hq;

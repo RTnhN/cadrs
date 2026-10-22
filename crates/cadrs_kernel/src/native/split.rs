@@ -228,30 +228,65 @@ pub fn split_face(surf: &Surface, flip: bool, boundary: &[Vec<Arc>], cuts: &[Arc
             eprintln!("arc {k}: edge {} fwd {} cut {} alive {} nodes {:?} uv {:?} -> {:?}", a.edge, a.fwd, a.cut, alive[k], ends[k], a.uv_at(0.0), a.uv_at(1.0));
         }
     }
-    // Departure direction of each arc at its start, and arrival direction at its end.
-    let dir_at = |a: &Arc, s: f64| -> V2 {
+    // Departure direction of each arc at its start, and arrival direction at its end: towards
+    // its point a set distance along it, the same for every arc at the node (a small part of the
+    // shortest there), so that arcs leaving tangent to each other are told apart by how they
+    // curve, not by how long they are (a cut leaving along a long boundary arc it touches).
+    let length = |a: &Arc| -> f64 { (1..=16).map(|i| (o(a.uv_at(i as f64 / 16.0)) - o(a.uv_at((i - 1) as f64 / 16.0))).norm()).sum() };
+    let mut scale = vec![f64::INFINITY; nodes.len()];
+    for (k, a) in arcs.iter().enumerate() {
+        if alive[k] {
+            let l = length(a);
+            for n in ends[k] {
+                scale[n] = scale[n].min(l);
+            }
+        }
+    }
+    // The fraction along `a` from its start (its end when `back`) where it lies `d` from there:
+    // the first such point, by bisection.
+    let at_dist = |a: &Arc, back: bool, d: f64| -> f64 {
+        let at = |m: f64| a.uv_at(if back { 1.0 - m } else { m });
+        let p0 = o(at(0.0));
+        let n = 64;
+        let mut lo = 0.0;
+        let mut hi = 1.0;
+        for i in 1..=n {
+            let m = i as f64 / n as f64;
+            if (o(at(m)) - p0).norm() >= d {
+                hi = m;
+                break;
+            }
+            lo = m;
+        }
+        for _ in 0..50 {
+            let m = 0.5 * (lo + hi);
+            if (o(at(m)) - p0).norm() < d { lo = m } else { hi = m }
+        }
+        let m = 0.5 * (lo + hi);
+        if back { 1.0 - m } else { m }
+    };
+    let dir_at = |a: &Arc, s: f64, node: usize, frac: f64| -> V2 {
         let p0 = o(a.uv_at(s));
-        let e = if s < 0.5 { 1e-4 } else { -1e-4 };
-        let p1 = o(a.uv_at(s + e));
-        let d = (p1 - p0) * if s < 0.5 { 1.0 } else { -1.0 };
+        let d = scale[node] * frac;
+        let s1 = if d.is_finite() && d > ntol { at_dist(a, s > 0.5, d) } else if s < 0.5 { 1e-4 } else { 1.0 - 1e-4 };
+        let p1 = o(a.uv_at(s1));
+        let d = p1 - p0;
         let l = d.norm();
         if l > 0.0 { d / l } else { d }
     };
-    let dep: Vec<V2> = arcs.iter().map(|a| dir_at(a, 0.0)).collect();
-    let arr: Vec<V2> = arcs.iter().map(|a| dir_at(a, 1.0)).collect();
+    let dep: Vec<V2> = arcs.iter().enumerate().map(|(k, a)| dir_at(a, 0.0, ends[k][0], 1e-3)).collect();
+    let arr: Vec<V2> = arcs.iter().enumerate().map(|(k, a)| -dir_at(a, 1.0, ends[k][1], 1e-3)).collect();
     // Secondary directions (further along) for ties.
-    let dep2: Vec<V2> = arcs.iter().map(|a| {
-        let p0 = o(a.uv_at(0.0));
-        let p1 = o(a.uv_at(0.05));
-        let d = p1 - p0;
-        if d.norm() > 0.0 { d.normalize() } else { d }
-    }).collect();
+    let dep2: Vec<V2> = arcs.iter().enumerate().map(|(k, a)| dir_at(a, 0.0, ends[k][0], 0.05)).collect();
     let mut out_at: Vec<Vec<usize>> = vec![Vec::new(); nodes.len()];
     for k in 0..arcs.len() {
         if alive[k] {
             out_at[ends[k][0]].push(k);
         }
     }
+    // Directions closer than this (radians) are told apart further along (the arcs tangent,
+    // their first steps within the p-curves' own error of each other).
+    const TANGENT: f64 = 1e-4;
     let next = |k: usize| -> Option<usize> {
         let n = ends[k][1];
         let din = arr[k];
@@ -260,14 +295,19 @@ pub fn split_face(surf: &Surface, flip: bool, boundary: &[Vec<Arc>], cuts: &[Arc
             let d = dep[c];
             // Turning angle from the incoming direction, in (−π, π]; the reverse is π.
             let mut ang = cross2(&din, &d).atan2(din.dot(&d));
+            let d2 = dep2[c];
+            let ang2 = cross2(&din, &d2).atan2(din.dot(&d2));
+            // Leaving back along the way in (a cut tangent to the arc it meets): the side it
+            // turns to is the one further along.
+            if ang.abs() > PI - TANGENT {
+                ang = PI.copysign(ang2);
+            }
             let is_twin = arcs[c].edge == arcs[k].edge && arcs[c].fwd != arcs[k].fwd && ends[c][1] == ends[k][0];
             if is_twin {
                 ang = -10.0; // only if nothing else
             }
-            let d2 = dep2[c];
-            let ang2 = cross2(&din, &d2).atan2(din.dot(&d2));
             let key = (ang, ang2);
-            if best.is_none_or(|(a, b, _)| key.0 > a + tol::ROUNDOFF || ((key.0 - a).abs() <= tol::ROUNDOFF && key.1 > b)) {
+            if best.is_none_or(|(a, b, _)| key.0 > a + TANGENT || ((key.0 - a).abs() <= TANGENT && key.1 > b)) {
                 best = Some((key.0, key.1, c));
             }
         }

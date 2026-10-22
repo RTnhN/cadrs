@@ -723,17 +723,28 @@ impl Body {
     /// problems found (empty when valid). [`CheckLevel::Full`] reports everything
     /// [`CheckLevel::Fast`] does and more, never less.
     pub fn check_with(&self, level: CheckLevel) -> Vec<String> {
-        self.check_parts(level, true)
+        self.check_parts(level, true, None)
     }
 
     /// [`Body::check`] without its last test, the solids' volumes: for a caller that has them
     /// already (a boolean, which computes them to drop empty solids).
     pub fn check_structure(&self) -> Vec<String> {
-        self.check_parts(CheckLevel::Fast, false)
+        self.check_parts(CheckLevel::Fast, false, None)
     }
 
-    fn check_parts(&self, level: CheckLevel, volumes: bool) -> Vec<String> {
+    /// [`CheckLevel::Full`] for a body made from a valid one by changing the faces `changed`
+    /// marks (a local operation's result): everything [`CheckLevel::Fast`] checks over the
+    /// whole body, and the full check's per-face tests (p-curves searched against their edges,
+    /// p-curve ends on the faces, the faces' domains, faces crossing) on the changed faces and
+    /// on the pairs with a changed face; the faces left as they were passed them before.
+    pub fn check_changed(&self, changed: &[bool]) -> Vec<String> {
+        self.check_parts(CheckLevel::Full, true, Some(changed))
+    }
+
+    fn check_parts(&self, level: CheckLevel, volumes: bool, only: Option<&[bool]>) -> Vec<String> {
         let full = level == CheckLevel::Full;
+        // The faces the full check's per-face tests cover.
+        let fully = |fi: usize| full && only.is_none_or(|c| c.get(fi).copied().unwrap_or(true));
         let refs = self.check_refs();
         if !refs.is_empty() {
             return refs;
@@ -765,7 +776,7 @@ impl Body {
                     // p-curves stray by it): 7 points, or the largest gap searched for (Full).
                     if !ea.degenerate {
                         let allowed = ea.tol.max(super::tol::POINT);
-                        let gap = if full {
+                        let gap = if fully(fi) {
                             pcurve_gap(ea, &a.pc, &f.surf)
                         } else {
                             [0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 0.9]
@@ -859,13 +870,13 @@ impl Body {
         }
         errs.extend(self.check_kinds(&uses));
         if full {
-            errs.extend(self.check_ends_on_faces());
+            errs.extend(self.check_ends_on_faces(&fully));
             errs.extend(self.check_shells());
-            for fi in 0..self.faces.len() {
+            for fi in (0..self.faces.len()).filter(|&fi| fully(fi)) {
                 errs.extend(self.check_face_domain(fi));
             }
             if errs.is_empty() {
-                errs.extend(super::check_faces::face_crossings(self));
+                errs.extend(super::check_faces::face_crossings_of(self, only));
             }
         }
         // Solids enclose a positive volume (their faces point out).
@@ -1213,9 +1224,9 @@ impl Body {
 impl Body {
     /// Each p-curve's ends on the face at the edge's vertices, and a degenerate edge's whole
     /// p-curve on its point, within the vertex's tolerance (or the edge's, if larger).
-    fn check_ends_on_faces(&self) -> Vec<String> {
+    fn check_ends_on_faces(&self, fully: &dyn Fn(usize) -> bool) -> Vec<String> {
         let mut errs = Vec::new();
-        for (fi, f) in self.faces.iter().enumerate() {
+        for (fi, f) in self.faces.iter().enumerate().filter(|(fi, _)| fully(*fi)) {
             for (li, l) in f.loops.iter().enumerate() {
                 for (k, c) in l.iter().enumerate() {
                     let e = &self.edges[c.edge];

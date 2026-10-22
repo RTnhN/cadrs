@@ -33,7 +33,13 @@ const SAMPLES: usize = 24;
 /// The faces of a shell that cross each other away from their shared edges, one problem per
 /// pair (at most the first crossing point found).
 pub fn face_crossings(b: &Body) -> Vec<String> {
+    face_crossings_of(b, None)
+}
+
+/// [`face_crossings`] of the pairs with a face `changed` marks (all pairs for `None`).
+pub fn face_crossings_of(b: &Body, changed: Option<&[bool]>) -> Vec<String> {
     let n = b.faces.len();
+    let marked = |f: usize| changed.is_none_or(|c| c.get(f).copied().unwrap_or(true));
     if n < 2 || b.shells.is_empty() {
         return Vec::new();
     }
@@ -66,13 +72,19 @@ pub fn face_crossings(b: &Body) -> Vec<String> {
     let mut pairs: Vec<(usize, usize)> = bvh
         .pairs(&bvh)
         .into_iter()
-        .filter(|&(i, j)| i < j && shell_of[i] == shell_of[j] && edges[i].is_disjoint(&edges[j]))
+        .filter(|&(i, j)| i < j && shell_of[i] == shell_of[j] && (marked(i) || marked(j)) && edges[i].is_disjoint(&edges[j]))
         .collect();
     if pairs.is_empty() {
         return Vec::new();
     }
     pairs.sort_unstable();
-    let polys: Vec<Vec<Vec<P2>>> = b.faces.iter().map(|f| face_polygons(b, f)).collect();
+    // The polygons of the faces in a pair only.
+    let mut paired = vec![false; n];
+    for &(i, j) in &pairs {
+        paired[i] = true;
+        paired[j] = true;
+    }
+    let polys: Vec<Vec<Vec<P2>>> = b.faces.iter().enumerate().map(|(fi, f)| if paired[fi] { face_polygons(b, f) } else { Vec::new() }).collect();
     pairs
         .par_iter()
         .filter_map(|&(i, j)| {
@@ -264,6 +276,11 @@ mod tests {
         let errs = face_crossings(&two);
         assert!(!errs.is_empty());
         assert!(errs.iter().all(|e| e.contains("cross away from their edges")), "{errs:?}");
+        // Only pairs with a marked face: the first cube's faces marked, crossings still found;
+        // none marked, none tested.
+        let first: Vec<bool> = (0..two.faces.len()).map(|f| f < 6).collect();
+        assert_eq!(face_crossings_of(&two, Some(&first)).len(), errs.len());
+        assert!(face_crossings_of(&two, Some(&vec![false; two.faces.len()])).is_empty());
         // Apart, they don't cross.
         b.append(&cube(3.0));
         b.shells = vec![Shell { faces: (0..b.faces.len()).collect(), closed: false }];

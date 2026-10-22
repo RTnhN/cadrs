@@ -1324,12 +1324,48 @@ fn merge_edges(b: &mut Body) {
 /// itself doesn't pass the full one (its own defects carry over into the result).
 fn local_problem(input: &Body, out: &Body) -> Option<String> {
     use super::topo::CheckLevel;
-    // The input checked only when the result fails (its check computes its volumes too).
-    let full = out.check_with(CheckLevel::Full).into_iter().next()?;
+    // The full check on the faces the blend changed (the others are the input's, as they were),
+    // the fast one everywhere; the input checked only when the result fails (its check computes
+    // its volumes too).
+    let full = out.check_changed(&changed_faces(input, out)).into_iter().next()?;
     if input.check_with(CheckLevel::Full).is_empty() {
         return Some(full);
     }
     out.check_with(CheckLevel::Fast).into_iter().next()
+}
+
+/// Which faces of `out` aren't faces of `input` as they were: same surface, sense, loops,
+/// vertices, edge ends and p-curves (bit for bit: a local operation copies the faces it leaves).
+fn changed_faces(input: &Body, out: &Body) -> Vec<bool> {
+    use std::hash::{Hash, Hasher};
+    let print = |b: &Body, fi: usize| -> u64 {
+        let f = &b.faces[fi];
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        let mut put = |p: &P3| p.coords.iter().for_each(|x| x.to_bits().hash(&mut h));
+        put(&f.surf.eval(0.31, 0.67));
+        put(&f.surf.eval(-0.43, 1.29));
+        let mut h2 = std::collections::hash_map::DefaultHasher::new();
+        f.sense.hash(&mut h2);
+        for l in &f.loops {
+            l.len().hash(&mut h2);
+            for c in l {
+                let e = &b.edges[c.edge];
+                let (t0, t1) = super::topo::co_range(e, c.fwd);
+                let tm = 0.5 * (t0 + t1);
+                for p in [b.verts[b.co_start(c)].p, e.point(tm)] {
+                    p.coords.iter().for_each(|x| x.to_bits().hash(&mut h2));
+                }
+                for t in [t0, tm] {
+                    let q = c.pc.point(t);
+                    [q.x, q.y].iter().for_each(|x| x.to_bits().hash(&mut h2));
+                }
+                e.degenerate.hash(&mut h2);
+            }
+        }
+        h.finish() ^ h2.finish().rotate_left(17)
+    };
+    let before: std::collections::HashSet<u64> = (0..input.faces.len()).map(|fi| print(input, fi)).collect();
+    (0..out.faces.len()).map(|fi| !before.contains(&print(out, fi))).collect()
 }
 
 /// Flat faces two of `edges` bound on opposite sides, parallel lines exactly two radii `r`
@@ -1629,17 +1665,34 @@ fn full_round_corners(k: &mut NativeKernel, body: BodyId, all: &[EdgeId], spec: 
     if corners.is_empty() {
         return Ok(None);
     }
-    // The rounds, then the corners (each corner's tool meets its rounds' flush on their ends).
-    let mut cur = Tracked::of(b.clone());
+    // The rounds' and corners' tools (each corner's tool meets its rounds' flush on their
+    // ends), subtracted in as few booleans as keep the tools of one boolean apart: each tool
+    // joins the first batch none of whose tools' boxes it comes near.
+    let mut tools: Vec<(Body, Vec<Vec<FaceSrc>>)> = Vec::new();
     for (rf, range) in rounds.iter().zip(&ranges) {
-        let (tool, src) = round_prism(rf, r, *range, FaceSrc::Input(rf.face))?;
-        cur = cur.apply(&tool, &src, BoolOp::Subtract)?;
+        tools.push(round_prism(rf, r, *range, FaceSrc::Input(rf.face))?);
     }
     for &(i, end, e, centre) in &corners {
         let rf = &rounds[i];
         let out = if end == 0 { -rf.d } else { rf.d };
-        let (tool, src) = round_corner(centre, rf.n, out, r, FaceSrc::New(Origin::FromEdge { body, edge: EdgeId(e as u64) }))?;
-        cur = cur.apply(&tool, &src, BoolOp::Subtract)?;
+        tools.push(round_corner(centre, rf.n, out, r, FaceSrc::New(Origin::FromEdge { body, edge: EdgeId(e as u64) }))?);
+    }
+    let gap = r * 0.1 + close;
+    let mut batches: Vec<(Vec<super::math::Bbox>, Body, Vec<Vec<FaceSrc>>)> = Vec::new();
+    for (tool, src) in tools {
+        let bb = tool.bbox().grow(gap);
+        match batches.iter_mut().find(|(boxes, _, _)| boxes.iter().all(|x| !x.overlaps(&bb))) {
+            Some((boxes, body, s)) => {
+                boxes.push(bb);
+                body.append(&tool);
+                s.extend(src);
+            }
+            None => batches.push((vec![bb], tool, src)),
+        }
+    }
+    let mut cur = Tracked::of(b.clone());
+    for (_, tool, src) in &batches {
+        cur = cur.apply(tool, src, BoolOp::Subtract)?;
     }
     if cur.body.solids.len() != b.solids.len() {
         return Err(KernelError::InvalidResult { op: "fillet", why: "the full rounds split the solid".into() });
