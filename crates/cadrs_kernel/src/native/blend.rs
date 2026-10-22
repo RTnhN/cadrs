@@ -1257,8 +1257,12 @@ fn merge_edges(b: &mut Body) {
 /// itself doesn't pass the full one (its own defects carry over into the result).
 fn local_problem(input: &Body, out: &Body) -> Option<String> {
     use super::topo::CheckLevel;
-    let level = if input.check_with(CheckLevel::Full).is_empty() { CheckLevel::Full } else { CheckLevel::Fast };
-    out.check_with(level).into_iter().next()
+    // The input checked only when the result fails (its check computes its volumes too).
+    let full = out.check_with(CheckLevel::Full).into_iter().next()?;
+    if input.check_with(CheckLevel::Full).is_empty() {
+        return Some(full);
+    }
+    out.check_with(CheckLevel::Fast).into_iter().next()
 }
 
 pub fn fillet(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], spec: &FilletSpec) -> Result<OpResult> {
@@ -1288,12 +1292,24 @@ pub fn fillet(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], spec: &Fille
         }
     }
     // A circular section of constant radius: by local trimming (no boolean) where that applies.
-    if matches!(spec.profile, FilletProfile::Circular) && matches!(spec.size, FilletSize::Radius(_)) && std::env::var_os("CADRS_NO_LOCAL_FILLET").is_none() {
-        let b = (**k.get(body)?).clone();
-        let picked: Vec<usize> = all.iter().map(|e| e.0 as usize).collect();
+    // A width: the radius whose contacts lie that far apart, on each edge whose faces meet at
+    // one angle (normals φ apart: r = w / (2 sin(φ/2))).
+    let b = (**k.get(body)?).clone();
+    let laws: Option<Vec<super::fillet::RadiusLaw>> = all
+        .iter()
+        .map(|e| {
+            let e = e.0 as usize;
+            let r = match spec.size {
+                FilletSize::Radius(r) => r,
+                FilletSize::Width(w) => w / (2.0 * ((PI - super::fillet::chamfer_angle(&b, e)?) / 2.0).sin()),
+            };
+            Some((e, vec![(0.0, r), (1.0, r)]))
+        })
+        .collect();
+    if let Some(laws) = laws.filter(|_| matches!(spec.profile, FilletProfile::Circular) && std::env::var_os("CADRS_NO_LOCAL_FILLET").is_none()) {
         // The result's edges merge where the trimming split them for nothing (as every blend's
         // do): it must stay valid.
-        let local = super::fillet::fillet_edges(&b, body, &picked, r).and_then(|(out, src)| {
+        let local = super::fillet::fillet_edges_laws(&b, body, &laws, false).and_then(|(out, src)| {
             let mut merged = out.clone();
             merge_edges(&mut merged);
             match local_problem(&b, &merged) {
@@ -1410,6 +1426,68 @@ pub fn chamfer(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], opts: &Cham
             }
         }
     }
+    // The other specs and measures: by local trimming too, each edge with its distances along
+    // its two faces (tangent ones as chords where a face curves across the edge, as below). Two
+    // distances that differ only along straight edges between flat faces; equal ones wherever
+    // the faces meet at one angle (as the equal-distance chamfer above).
+    if !matches!((spec, opts.measurement), (ChamferSpec::EqualDistance(_), ChamferMeasure::Offset)) && std::env::var_os("CADRS_NO_LOCAL_FILLET").is_none() {
+        let dists: Option<Vec<(usize, [f64; 2])>> = edges
+            .iter()
+            .map(|&e| {
+                let ei = e.0 as usize;
+                let ed = b.edges.get(ei)?;
+                let sides = edge_sides(&b, ei).ok()?;
+                let chord = |side: usize, d: f64| -> f64 {
+                    if opts.measurement != ChamferMeasure::Tangent {
+                        return d;
+                    }
+                    let across = match (&b.faces[sides[side].0].surf, &ed.curve) {
+                        (Surface::Cylinder { f: fr, r }, Curve::Line { d: dl, .. }) if dl.normalize().cross(&fr.z).norm() < 1e-9 => Some(*r),
+                        (Surface::Sphere { r, .. }, _) => Some(*r),
+                        _ => None,
+                    };
+                    across.map_or(d, |r| 2.0 * r * ((d / r).atan() / 2.0).sin())
+                };
+                let flip = opts.flip != opts.flipped.contains(&e);
+                let (s0, s1) = if flip { (1, 0) } else { (0, 1) };
+                let (d1, d2) = match spec {
+                    ChamferSpec::EqualDistance(d) => (chord(s0, d), chord(s1, d)),
+                    ChamferSpec::TwoDistances(a, c) => (chord(s0, a), chord(s1, c)),
+                    ChamferSpec::DistanceAngle { distance, angle } => {
+                        // As the blend tool's section: d₂ = d sin(a) / sin(π − a − θ).
+                        let theta = super::fillet::chamfer_angle(&b, ei)?;
+                        (distance, distance * angle.sin() / (PI - angle - theta).sin())
+                    }
+                };
+                let flat = sides.iter().all(|s| matches!(b.faces[s.0].surf, Surface::Plane { .. })) && matches!(ed.curve, Curve::Line { .. });
+                let mut d = [0.0; 2];
+                d[s0] = d1;
+                d[s1] = d2;
+                (d1 > 0.0 && d2 > 0.0 && (flat || d1 == d2)).then_some((ei, d))
+            })
+            .collect();
+        if let Some(dists) = dists {
+            let local = super::fillet::chamfer_edges(&b, body, &dists).and_then(|(out, src)| {
+                let mut merged = out.clone();
+                merge_edges(&mut merged);
+                match local_problem(&b, &merged) {
+                    Some(e) => Err(KernelError::OperationFailed(format!("the local chamfer isn't valid: {e}"))),
+                    None => Ok((out, src)),
+                }
+            });
+            match local {
+                Ok((out, src)) => return Ok(Tracked { body: out, src }.into_result(k, body)),
+                Err(e) => {
+                    if std::env::var_os("CADRS_LOCAL_FILLET_ONLY").is_some() {
+                        return Err(e);
+                    }
+                    if std::env::var_os("CADRS_BLEND_DEBUG").is_some() {
+                        eprintln!("local chamfer: {e}; falling back to the blend tool");
+                    }
+                }
+            }
+        }
+    }
     let mut list: Vec<EdgeBlend> = Vec::new();
     for &e in edges {
         let flip = opts.flip != opts.flipped.contains(&e);
@@ -1476,6 +1554,23 @@ pub fn full_round(k: &mut NativeKernel, body: BodyId, side1: FaceId, center: Fac
     }
     let width = (o2 - o1).dot(&n1).abs();
     let r = width / 2.0;
+    // Each side face must reach r below the middle face, else the round would cut through
+    // what lies under it: its boundary's deepest point, from points along its edges.
+    let depth = |f: FaceId| -> f64 {
+        b.faces[f.0 as usize]
+            .loops
+            .iter()
+            .flatten()
+            .flat_map(|c| {
+                let e = &b.edges[c.edge];
+                (0..=8).map(move |i| e.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 8.0))
+            })
+            .map(|p| (om - p).dot(&nm))
+            .fold(f64::NEG_INFINITY, f64::max)
+    };
+    if depth(side1).min(depth(side2)) < r - 1e-9 * (1.0 + r) {
+        return Err(KernelError::InvalidParameter("The side faces are too shallow for the full round".into()));
+    }
     // The round's axis: in the middle face's plane moved r into the material, midway between
     // the sides, along the sides' and middle face's common direction.
     let along = n1.cross(&nm).normalize();
@@ -1524,13 +1619,6 @@ pub fn full_round(k: &mut NativeKernel, body: BodyId, side1: FaceId, center: Fac
     }
     let cur = Tracked::of(b.clone());
     let out = cur.apply(&built.body, &src, BoolOp::Subtract)?;
-    // The removed volume must be the two corner slivers: (2 − π/2) r² per unit length.
-    let v0 = super::mass::body_mass(&b).volume;
-    let v1 = super::mass::body_mass(&out.body).volume;
-    let len = hi - lo;
-    if v0 - v1 > (2.0 - PI / 2.0) * r * r * len * 1.5 + 1e-6 {
-        return Err(KernelError::InvalidParameter("The side faces are too shallow for the full round".into()));
-    }
     Ok(out.into_result(k, body))
 }
 
@@ -1924,4 +2012,29 @@ fn chain_tool_lofted(b: &Body, input: BodyId, chain: &[(usize, bool)], kind: &dy
 enum Curve2Section {
     Line,
     Arc(P3, f64),
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::native::draw::Shape;
+    use crate::native::kernel::NativeKernel;
+    use crate::*;
+
+    /// A full round whose side face doesn't reach the round's radius below the middle face is
+    /// refused before any boolean (it would cut through what lies under the side).
+    #[test]
+    fn a_full_round_needs_deep_enough_sides() {
+        let mut k = NativeKernel::new();
+        let bx = k.box_(10.0, 20.0, 30.0).unwrap();
+        let step = k.box_at(-1.0, -1.0, -1.0, 3.0, 22.0, 28.0).unwrap();
+        let Shape::Body(b) = k.bcut(&bx, &step).unwrap() else { unreachable!() };
+        let faces = k.faces(b).unwrap();
+        let find = |n: [f64; 3], at: f64| -> FaceId {
+            let n = nalgebra::Vector3::new(n[0], n[1], n[2]);
+            faces.iter().find(|f| f.plane.is_some_and(|pl| pl.normal.dot(&n) > 0.999999 && (pl.origin.coords.dot(&n) - at).abs() < 1e-9)).unwrap().id
+        };
+        let (left, top, right) = (find([-1.0, 0.0, 0.0], 0.0), find([0.0, 0.0, 1.0], 30.0), find([1.0, 0.0, 0.0], 10.0));
+        let err = k.full_round(b, left, top, right).unwrap_err();
+        assert!(err.to_string().contains("too shallow"), "{err}");
+    }
 }

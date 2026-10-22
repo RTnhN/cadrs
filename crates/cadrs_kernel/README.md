@@ -260,9 +260,10 @@ otherwise):
   planes and cylinders before a boolean.
 - `CADRS_DEBUG_NO_PROPAGATE=1` (`boolean.rs`): each split face is classified on its own, without
   the in/out propagation through its connected group.
-- `CADRS_NO_LOCAL_FILLET=1` (`blend.rs`): circular constant-radius fillets skip the local
-  (boolean-free) fillet and go straight to the blend tool. `CADRS_LOCAL_FILLET_ONLY=1`: the
-  opposite, a local fillet's failure is the result instead of falling back to the blend tool.
+- `CADRS_NO_LOCAL_FILLET=1` (`blend.rs`): circular fillets (by radius or width) and chamfers
+  skip the local (boolean-free) blend and go straight to the blend tool.
+  `CADRS_LOCAL_FILLET_ONLY=1`: the opposite, the blend tool is never used (a local blend's
+  failure is the result), for measuring what local trimming covers.
 - `CADRS_NO_RECOG_S=1`, `CADRS_NO_RECOG_C=1` (`xbuild.rs`): imported B-spline surfaces and
   curves are kept as B-splines instead of being recognised as planes, cylinders, cones, spheres,
   lines and circles.

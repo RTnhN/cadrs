@@ -585,7 +585,6 @@ draft angle_k9
 # blend: a boolean of the feature fails (open shell).
 blend bfuseblend_a6
 blend complex_d2
-blend complex_e2
 blend encoderegularity_a2
 blend encoderegularity_a4
 blend encoderegularity_a7
