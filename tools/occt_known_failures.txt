@@ -144,8 +144,6 @@ boolean bopcommon_complex_e3  # the area differs from OCCT's
 boolean bopcommon_complex_e4  # the area differs from OCCT's
 boolean bopcommon_complex_g9  # a boolean leaves an open shell
 boolean bopcommon_complex_i2  # a boolean leaves an open shell
-boolean bopcommon_complex_k2  # the OCCT BRep reader reads no faces or edges from the dataset file (OCCT reads it)
-boolean bopcommon_complex_k3  # the OCCT BRep reader reads no faces or edges from the dataset file (OCCT reads it)
 boolean bopcommon_complex_k5  # a boolean leaves an open shell
 boolean bopcut_2d_b9  # the length differs from OCCT's
 boolean bopcut_2d_c2  # the length differs from OCCT's
@@ -160,7 +158,6 @@ boolean bopcut_complex_h8  # the area differs from OCCT's
 boolean bopcut_complex_h9  # a boolean leaves an open shell
 boolean bopcut_complex_i7  # a boolean leaves an open shell
 boolean bopcut_complex_j2  # the area differs from OCCT's
-boolean bopcut_complex_k9  # the OCCT BRep reader reads no faces or edges from the dataset file (OCCT reads it)
 boolean bopcut_complex_m6  # a boolean leaves an open shell
 boolean bopfuse_2d_a7  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
 boolean bopfuse_2d_a9  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
@@ -357,9 +354,6 @@ sewing tol_1_f5  # the result fails checkshape: a solid inside out
 sewing tol_1_q5  # the result fails checkshape: a face loop crosses itself in (u, v)
 boolean bsection_a5  # the length differs from OCCT's
 boolean bsection_c2  # the length differs from OCCT's
-boolean bsection_d1  # the OCCT BRep reader reads no faces or edges from the dataset file (OCCT reads it)
-boolean bsection_e1  # the OCCT BRep reader reads no faces or edges from the dataset file (OCCT reads it)
-boolean bsection_f6  # unsupported: booleans of shapes other than solids
 boolean bsection_f9  # the length differs from OCCT's
 boolean bsection_i2  # the length differs from OCCT's
 boolean bsection_i3  # the length differs from OCCT's
@@ -463,7 +457,7 @@ feat featdprism_d9
 # feat: the operation fails.
 feat featprism_c3
 feat featprism_d3
-feat featprism_m4
+feat featprism_m4  # the area differs from OCCT's: the until face is an unbounded plane (read as a large square), the feature up to it is built whole
 feat featprism_n1
 feat featprism_r7
 feat featprism_r8

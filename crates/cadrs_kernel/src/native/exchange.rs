@@ -385,8 +385,8 @@ mod tests {
         }
         let (read, _) = crate::native::brep_occt::read(&bytes).unwrap();
         assert_eq!((read.faces.len(), read.solids.len(), read.shells.len()), (3, 0, 1));
-        // (Our reader leaves loose edges and vertices out: the wire's edges and the points are
-        // in the file, under the compound with the sheet. OCCT reads all of them.)
+        // The wire's edges and the points, under the compound with the sheet, are read too.
+        assert_eq!((read.wires.len(), read.wires[0].edges.len(), read.points.len()), (1, 2, 2));
         let text = String::from_utf8(bytes).unwrap();
         assert_eq!((text.matches("\nVe\n").count(), text.matches("\nEd\n").count()), (8 + 3 + 2, 10 + 2));
     }
