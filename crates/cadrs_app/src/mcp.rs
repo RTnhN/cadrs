@@ -208,6 +208,7 @@ fn run(world: &mut World, call: &Call) -> Result<Value, String> {
         Call::DeleteFeature(p) => delete_feature(world, p),
         Call::RenameFeature(p) => rename_feature(world, p),
         Call::SetPart(p) => set_part(world, p),
+        Call::SetFeatureVisible(p) => set_feature_visible(world, p),
         Call::ListFaces(p) => list_faces(world, p.part_studio.as_deref()),
         Call::ListEdges(p) => list_edges(world, p.part_studio.as_deref()),
         Call::Undo => {
@@ -783,7 +784,7 @@ fn describe(world: &World) -> Result<Value, String> {
         .active_element()
         .filter(|e| matches!(e.kind, ElementKind::PartStudio { .. }))
     {
-        out["part_studio"] = studio_state(e.name.as_str(), e.features());
+        out["part_studio"] = studio_state(e.name.as_str(), e.features(), e.part_props());
     }
     if d.meta.is_some() {
         out["id"] = json!(d.doc.id.to_string());
@@ -792,7 +793,11 @@ fn describe(world: &World) -> Result<Value, String> {
 }
 
 /// A Part Studio's features (with their rebuild errors and warnings) and parts.
-fn studio_state(name: &str, features: &[cadrs_core::Feature]) -> Value {
+fn studio_state(
+    name: &str,
+    features: &[cadrs_core::Feature],
+    props: &[cadrs_core::PartProps],
+) -> Value {
     let build = cadrs_core::rebuild::build(features);
     let problem = |id: FeatureId, list: &[(FeatureId, String)]| {
         list.iter().find(|(f, _)| *f == id).map(|(_, m)| m.clone())
@@ -815,7 +820,7 @@ fn studio_state(name: &str, features: &[cadrs_core::Feature]) -> Value {
         .parts
         .iter()
         .map(|p| {
-            let mut v = json!({ "name": p.name, "id": p.id });
+            let mut v = json!({ "name": cadrs_core::parts::display_name(p, props), "id": p.id });
             if let Some(m) = &p.mass {
                 v["volume_mm3"] = json!(round(m.volume));
             }
@@ -1182,7 +1187,7 @@ fn outcome(world: &World, element: ElementId, feature: FeatureId) -> Result<Valu
         .feature(feature)
         .map(|f| f.name.clone())
         .unwrap_or_default();
-    let state = studio_state(e.name.as_str(), e.features());
+    let state = studio_state(e.name.as_str(), e.features(), e.part_props());
     let mut out = json!({ "feature": name, "parts": state["parts"] });
     if let Some(f) = state["features"]
         .as_array()
@@ -1456,11 +1461,33 @@ fn rename_feature(world: &mut World, p: &tools::RenameFeature) -> Result<Value, 
     Ok(json!({ "renamed": p.name, "to": p.to }))
 }
 
+/// Shows or hides a sketch or plane with its eye.
+fn set_feature_visible(world: &mut World, p: &tools::SetFeatureVisible) -> Result<Value, String> {
+    let mut d = doc_mut(world)?;
+    let element = part_studio(&d, p.part_studio.as_deref())?;
+    let f = feature_named(&d, element, &p.name)?;
+    d.execute(&cadrs_core::commands::SetSketchVisibility {
+        element,
+        sketch: f.id,
+        visible: Some(p.visible),
+    })
+    .map_err(|e| e.to_string())?;
+    Ok(json!({ "feature": p.name, "visible": p.visible }))
+}
+
 /// Renames a part and/or sets its colour.
 fn set_part(world: &mut World, p: &tools::SetPart) -> Result<Value, String> {
+    let props = {
+        let d = doc(world)?;
+        let element = part_studio(d, p.part_studio.as_deref())?;
+        d.doc
+            .element(element)
+            .map(|e| e.part_props().to_vec())
+            .unwrap_or_default()
+    };
     let part = parts_of(world, p.part_studio.as_deref())?
         .into_iter()
-        .find(|q| q.name == p.part)
+        .find(|q| cadrs_core::parts::display_name(q, &props) == p.part || q.name == p.part)
         .ok_or_else(|| format!("no part named {:?}", p.part))?
         .id;
     let mut d = doc_mut(world)?;
@@ -1698,7 +1725,7 @@ fn extrude(world: &mut World, p: &tools::Extrude) -> Result<Value, String> {
         .feature(feature)
         .map(|f| f.name.clone())
         .unwrap_or_default();
-    let state = studio_state(e.name.as_str(), e.features());
+    let state = studio_state(e.name.as_str(), e.features(), e.part_props());
     let error = state["features"]
         .as_array()
         .and_then(|fs| fs.iter().find(|f| f["name"] == name.as_str()))

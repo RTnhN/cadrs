@@ -166,6 +166,18 @@ pub struct RenameFeature {
     pub part_studio: Option<String>,
 }
 
+/// Shows or hides a sketch or Plane feature with its eye.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SetFeatureVisible {
+    /// The sketch's or plane's name.
+    pub name: String,
+    /// Shown (true) or hidden (false).
+    pub visible: bool,
+    /// The Part Studio tab's name; omitted: the active tab.
+    #[serde(default)]
+    pub part_studio: Option<String>,
+}
+
 /// Renames a part and/or sets its colour.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct SetPart {

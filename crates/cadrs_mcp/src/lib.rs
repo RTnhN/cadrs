@@ -55,6 +55,7 @@ pub enum Call {
     DeleteFeature(FeatureName),
     RenameFeature(RenameFeature),
     SetPart(SetPart),
+    SetFeatureVisible(SetFeatureVisible),
     ListFaces(PartStudio),
     ListEdges(PartStudio),
     Undo,
@@ -427,6 +428,14 @@ impl Cadrs {
         Parameters(p): Parameters<RenameFeature>,
     ) -> Result<CallToolResult, ErrorData> {
         self.call(Call::RenameFeature(p)).await
+    }
+
+    #[tool(description = "Show or hide a sketch or a Plane feature (its eye in the feature list).")]
+    async fn set_feature_visible(
+        &self,
+        Parameters(p): Parameters<SetFeatureVisible>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.call(Call::SetFeatureVisible(p)).await
     }
 
     #[tool(
