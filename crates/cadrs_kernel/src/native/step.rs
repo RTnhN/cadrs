@@ -997,6 +997,8 @@ struct TopoReader<'a> {
     /// POLY_LOOP segments by their (ordered) point records.
     segs: HashMap<(u64, u64), Option<usize>>,
     errors: Vec<String>,
+    /// The builder faces of each face, shell and item record read (for their styles).
+    faces_of: HashMap<u64, Vec<usize>>,
 }
 
 impl<'a> TopoReader<'a> {
@@ -1074,7 +1076,9 @@ impl<'a> TopoReader<'a> {
         match r.kind() {
             "ORIENTED_FACE" => {
                 let o = ps.get(3).and_then(|p| p.as_bool()).unwrap_or(true);
-                self.face(self.g.rf(ps, 2)?, flip ^ !o)
+                let f = self.face(self.g.rf(ps, 2)?, flip ^ !o)?;
+                self.faces_of.insert(id, f.into_iter().collect());
+                Ok(f)
             }
             "ADVANCED_FACE" | "FACE_SURFACE" | "FACE" => {
                 let surf = match r.kind() {
@@ -1140,7 +1144,9 @@ impl<'a> TopoReader<'a> {
                     let l = loops.remove(i);
                     loops.insert(0, l);
                 }
-                Ok(Some(self.xb.face(XFace { surf, sense: same ^ flip, loops })))
+                let fi = self.xb.face(XFace { surf, sense: same ^ flip, loops });
+                self.faces_of.insert(id, vec![fi]);
+                Ok(Some(fi))
             }
             k => Err(format!("#{id}: expected a face, found {k}")),
         }
@@ -1152,7 +1158,11 @@ impl<'a> TopoReader<'a> {
         match r.kind() {
             "ORIENTED_CLOSED_SHELL" | "ORIENTED_OPEN_SHELL" => {
                 let o = ps.get(3).and_then(|p| p.as_bool()).unwrap_or(true);
-                self.shell(self.g.rf(ps, 2)?, flip ^ !o)
+                let inner = self.g.rf(ps, 2)?;
+                let s = self.shell(inner, flip ^ !o)?;
+                let faces = self.faces_of.get(&inner).cloned().unwrap_or_default();
+                self.faces_of.insert(id, faces);
+                Ok(s)
             }
             "CLOSED_SHELL" | "OPEN_SHELL" => {
                 let mut faces = Vec::new();
@@ -1161,6 +1171,7 @@ impl<'a> TopoReader<'a> {
                         faces.push(fi);
                     }
                 }
+                self.faces_of.insert(id, faces.clone());
                 Ok(self.xb.shell(faces, r.kind() == "CLOSED_SHELL"))
             }
             k => Err(format!("#{id}: expected a shell, found {k}")),
@@ -1169,6 +1180,14 @@ impl<'a> TopoReader<'a> {
 
     /// One representation item (a solid or a surface model). Returns whether it held a shape.
     fn item(&mut self, id: u64) -> R<bool> {
+        let first = self.xb.faces.len();
+        let r = self.item_shapes(id);
+        let n = self.xb.faces.len();
+        self.faces_of.entry(id).or_insert_with(|| (first..n).collect());
+        r
+    }
+
+    fn item_shapes(&mut self, id: u64) -> R<bool> {
         let r = self.g.rec(id)?;
         let ps = r.params();
         match r.kind() {
@@ -1217,6 +1236,179 @@ fn is_shape_item(kind: &str) -> bool {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Colours
+
+/// An sRGB colour with alpha, as the kernel's face colours hold it.
+pub type Rgba = [u8; 4];
+
+/// The surface colours a file's presentation gives (as OCCT's XDE reader takes them):
+/// `STYLED_ITEM`s (and `OVER_RIDING_STYLED_ITEM`s, applied after them) of solids, shells and
+/// faces, through `PRESENTATION_STYLE_ASSIGNMENT` → `SURFACE_STYLE_USAGE` →
+/// `SURFACE_SIDE_STYLE` → `SURFACE_STYLE_FILL_AREA` → `FILL_AREA_STYLE` →
+/// `FILL_AREA_STYLE_COLOUR` → `COLOUR_RGB` or `DRAUGHTING_PRE_DEFINED_COLOUR` (or a
+/// `SURFACE_STYLE_RENDERING`'s colour), with `SURFACE_STYLE_TRANSPARENT` as the alpha. A style
+/// that holds only in a context (`PRESENTATION_STYLE_BY_CONTEXT` of an occurrence's
+/// representation, or a `CONTEXT_DEPENDENT_OVER_RIDING_STYLED_ITEM`) colours that occurrence.
+#[derive(Debug, Default)]
+struct Styles {
+    /// A colour by styled representation item (solid, shell, face).
+    items: HashMap<u64, Rgba>,
+    /// A colour by assembly occurrence (`NEXT_ASSEMBLY_USAGE_OCCURRENCE`).
+    occurrences: HashMap<u64, Rgba>,
+}
+
+/// What a style tree says of a surface: its fill colour, a rendering colour (used without a
+/// fill) and its transparency.
+#[derive(Debug, Default)]
+struct Paint {
+    fill: Option<[f64; 3]>,
+    render: Option<[f64; 3]>,
+    transparency: Option<f64>,
+}
+
+impl Paint {
+    fn rgba(&self) -> Option<Rgba> {
+        let [r, g, b] = self.fill.or(self.render)?;
+        let byte = |x: f64| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
+        Some([byte(r), byte(g), byte(b), byte(1.0 - self.transparency.unwrap_or(0.0))])
+    }
+}
+
+/// A `COLOUR_RGB` (components 0 to 1) or `DRAUGHTING_PRE_DEFINED_COLOUR`.
+fn colour(f: &StepFile, id: u64) -> Option<[f64; 3]> {
+    let r = f.records.get(&id)?;
+    if let Some(ps) = r.part("COLOUR_RGB") {
+        // (name,) red, green, blue: the last three (a complex record leaves the name out).
+        let xs: Vec<f64> = ps.iter().filter_map(Param::as_f64).collect();
+        let [.., red, green, blue] = xs[..] else { return None };
+        return Some([red, green, blue]);
+    }
+    let name = r.part("DRAUGHTING_PRE_DEFINED_COLOUR")?.first()?.as_str()?;
+    Some(match name.to_ascii_lowercase().as_str() {
+        "red" => [1.0, 0.0, 0.0],
+        "green" => [0.0, 1.0, 0.0],
+        "blue" => [0.0, 0.0, 1.0],
+        "yellow" => [1.0, 1.0, 0.0],
+        "magenta" => [1.0, 0.0, 1.0],
+        "cyan" => [0.0, 1.0, 1.0],
+        "black" => [0.0, 0.0, 0.0],
+        "white" => [1.0, 1.0, 1.0],
+        _ => return None,
+    })
+}
+
+/// Reads a surface style tree into `paint` (curve and other styles add nothing).
+fn paint(f: &StepFile, id: u64, depth: usize, out: &mut Paint) {
+    let Some(r) = f.records.get(&id).filter(|_| depth < 16) else { return };
+    let ps = r.params();
+    let refs = |i: usize| -> Vec<u64> {
+        match ps.get(i) {
+            Some(Param::List(l)) => l.iter().filter_map(Param::as_ref).collect(),
+            Some(Param::Ref(x)) => vec![*x],
+            _ => Vec::new(),
+        }
+    };
+    let children = match r.kind() {
+        "PRESENTATION_STYLE_ASSIGNMENT" | "PRESENTATION_STYLE_BY_CONTEXT" | "SURFACE_STYLE_FILL_AREA" => refs(0),
+        "SURFACE_STYLE_USAGE" | "SURFACE_SIDE_STYLE" | "FILL_AREA_STYLE" => refs(1),
+        "FILL_AREA_STYLE_COLOUR" => {
+            if out.fill.is_none() {
+                out.fill = refs(1).first().and_then(|&c| colour(f, c));
+            }
+            Vec::new()
+        }
+        "SURFACE_STYLE_RENDERING" | "SURFACE_STYLE_RENDERING_WITH_PROPERTIES" => {
+            if out.render.is_none() {
+                out.render = refs(1).first().and_then(|&c| colour(f, c));
+            }
+            refs(2)
+        }
+        "SURFACE_STYLE_TRANSPARENT" => {
+            out.transparency = ps.first().and_then(Param::as_f64).filter(|t| t.is_finite());
+            Vec::new()
+        }
+        _ => Vec::new(),
+    };
+    for c in children {
+        paint(f, c, depth + 1, out);
+    }
+}
+
+impl Styles {
+    fn read(f: &StepFile) -> Styles {
+        let mut out = Styles::default();
+        let kinds = ["STYLED_ITEM", "OVER_RIDING_STYLED_ITEM", "CONTEXT_DEPENDENT_OVER_RIDING_STYLED_ITEM"];
+        let mut ids: Vec<u64> = kinds.iter().flat_map(|k| f.by_kind.get(*k).into_iter().flatten().copied()).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        // Plain styles first: the overriding ones replace them.
+        ids.sort_by_key(|id| f.records.get(id).is_some_and(|r| r.parts.iter().any(|p| p.0.starts_with("OVER_RIDING") || p.0.starts_with("CONTEXT_DEPENDENT"))));
+        for id in ids {
+            let Some(r) = f.records.get(&id) else { continue };
+            let ps = kinds.iter().rev().find_map(|k| r.part(k)).unwrap_or(r.params());
+            let Some(item) = ps.get(2).and_then(Param::as_ref) else { continue };
+            let styles: Vec<u64> = ps.get(1).and_then(Param::as_list).unwrap_or(&[]).iter().filter_map(Param::as_ref).collect();
+            let mut p = Paint::default();
+            let mut context = None;
+            for st in styles {
+                if let Some(sr) = f.records.get(&st)
+                    && sr.kind() == "PRESENTATION_STYLE_BY_CONTEXT" {
+                        context = sr.params().get(1).and_then(Param::as_ref);
+                    }
+                paint(f, st, 0, &mut p);
+            }
+            let Some(c) = p.rgba() else { continue };
+            // The occurrence a contextual style belongs to (the last of a chain of contexts).
+            let chain: Vec<u64> = match (context, r.part("CONTEXT_DEPENDENT_OVER_RIDING_STYLED_ITEM").and_then(|ps| ps.last()?.as_list())) {
+                (Some(c), _) => vec![c],
+                (None, Some(l)) => l.iter().filter_map(Param::as_ref).collect(),
+                (None, None) => Vec::new(),
+            };
+            if chain.is_empty() {
+                out.items.insert(item, c);
+            } else if let Some(nauo) = chain.iter().rev().find_map(|&x| occurrence_of(f, x, 0))
+                && !f.records.get(&item).is_some_and(|r| matches!(r.kind(), "ADVANCED_FACE" | "FACE_SURFACE" | "ORIENTED_FACE")) {
+                    // A whole occurrence's colour (a face's in one occurrence isn't kept).
+                    out.occurrences.insert(nauo, c);
+                }
+        }
+        out
+    }
+}
+
+/// The assembly occurrence (`NEXT_ASSEMBLY_USAGE_OCCURRENCE`) a style context names: the
+/// occurrence itself, its product definition shape, its context-dependent representation (or
+/// that one's relationship), or a representation of its shape.
+fn occurrence_of(f: &StepFile, id: u64, depth: usize) -> Option<u64> {
+    let r = f.records.get(&id).filter(|_| depth < 4)?;
+    let ids = |k: &str| f.by_kind.get(k).map_or(&[][..], |v| v.as_slice());
+    let first_ref = |r: &Record, i: usize| r.params().get(i).and_then(Param::as_ref);
+    if r.has("NEXT_ASSEMBLY_USAGE_OCCURRENCE") {
+        return Some(id);
+    }
+    if r.kind() == "PRODUCT_DEFINITION_SHAPE" {
+        return occurrence_of(f, first_ref(r, 2)?, depth + 1);
+    }
+    if r.kind() == "CONTEXT_DEPENDENT_SHAPE_REPRESENTATION" {
+        return occurrence_of(f, first_ref(r, 1)?, depth + 1);
+    }
+    if r.has("REPRESENTATION_RELATIONSHIP") {
+        let cdsr = ids("CONTEXT_DEPENDENT_SHAPE_REPRESENTATION").iter().find(|&&c| f.records.get(&c).and_then(|cr| first_ref(cr, 0)) == Some(id))?;
+        return occurrence_of(f, *cdsr, depth + 1);
+    }
+    // A representation: the occurrence whose shape it represents.
+    ids("SHAPE_DEFINITION_REPRESENTATION").iter().find_map(|&sdr| {
+        let sr = f.records.get(&sdr)?;
+        if first_ref(sr, 1)? != id {
+            return None;
+        }
+        let pds = f.records.get(&first_ref(sr, 0)?)?;
+        let def = first_ref(pds, 2)?;
+        f.records.get(&def)?.has("NEXT_ASSEMBLY_USAGE_OCCURRENCE").then_some(def)
+    })
+}
+
+// ---------------------------------------------------------------------------------------------
 // Products
 
 /// A part read from a file: its body (in its own coordinates, mm) and product name.
@@ -1224,14 +1416,18 @@ fn is_shape_item(kind: &str) -> bool {
 pub struct ReadPart {
     pub body: Body,
     pub name: String,
+    /// The file's surface colour of each face, in face order (empty when it gives none).
+    pub colors: Vec<Option<Rgba>>,
 }
 
-/// An occurrence: which part, where, and its instance name.
+/// An occurrence: which part, where, its instance name, and the colour the file gives the
+/// occurrence (or an assembly holding it) over the part's own.
 #[derive(Debug, Clone)]
 pub struct ReadOccurrence {
     pub part: usize,
     pub placement: Affine,
     pub name: String,
+    pub color: Option<Rgba>,
 }
 
 /// A file's parts and occurrences (a file without assemblies has each part once at the
@@ -1265,6 +1461,7 @@ struct Model<'a> {
     f: &'a StepFile,
     /// Unit factors by context record.
     units: HashMap<u64, (f64, f64)>,
+    styles: Styles,
 }
 
 impl<'a> Model<'a> {
@@ -1492,7 +1689,7 @@ impl<'a> Model<'a> {
         out
     }
 
-    fn build_part(&mut self, reps: &[u64], warnings: &mut Vec<String>) -> Option<Body> {
+    fn build_part(&mut self, reps: &[u64], warnings: &mut Vec<String>) -> Option<(Body, Vec<Option<Rgba>>)> {
         let mut shapes = Vec::new();
         let mut seen = HashSet::new();
         for &rep in reps {
@@ -1502,12 +1699,14 @@ impl<'a> Model<'a> {
     }
 }
 
-/// Builds shape items (each with the representation holding it and a placement) into one body.
-fn build_shapes(m: &mut Model, shapes: &[(u64, u64, Affine)], warnings: &mut Vec<String>) -> Option<Body> {
+/// Builds shape items (each with the representation holding it and a placement) into one body,
+/// with its faces' colours (empty when the file styles none).
+fn build_shapes(m: &mut Model, shapes: &[(u64, u64, Affine)], warnings: &mut Vec<String>) -> Option<(Body, Vec<Option<Rgba>>)> {
     if shapes.is_empty() {
         return None;
     }
     let mut body = Body::default();
+    let mut colors: Vec<Option<Rgba>> = Vec::new();
     // Curves and points (wireframes), read only for a part with nothing else.
     let mut wires = Body::default();
     let is_wire: Vec<bool> = shapes.iter().map(|(it, ..)| m.rec(*it).is_some_and(|r| is_wire_item(r.kind()))).collect();
@@ -1527,16 +1726,39 @@ fn build_shapes(m: &mut Model, shapes: &[(u64, u64, Affine)], warnings: &mut Vec
     let groups: Vec<(u64, Affine, Vec<u64>)> = shapes.iter().zip(&is_wire).filter(|(_, w)| !**w).map(|((it, rep, at), _)| (*rep, *at, vec![*it])).collect();
     for (rep, at, items) in groups {
         let g = m.geo(rep);
-        let mut tr = TopoReader { g, xb: XBuilder::new(), verts: HashMap::new(), edges: HashMap::new(), segs: HashMap::new(), errors: Vec::new() };
-        for it in items {
+        let mut tr = TopoReader { g, xb: XBuilder::new(), verts: HashMap::new(), edges: HashMap::new(), segs: HashMap::new(), errors: Vec::new(), faces_of: HashMap::new() };
+        for &it in &items {
             if let Err(e) = tr.item(it) {
                 tr.errors.push(e);
             }
         }
         let errors = std::mem::take(&mut tr.errors);
         warnings.extend(errors);
-        let (mut b, w) = tr.xb.finish();
+        let faces_of = std::mem::take(&mut tr.faces_of);
+        let (mut b, w, map) = tr.xb.finish_mapped();
         warnings.extend(w);
+        // Styles of the items, then of their shells, then of their faces: the most specific wins.
+        let mut cols: Vec<Option<Rgba>> = vec![None; b.faces.len()];
+        let mut styled: Vec<(u8, u64, Rgba)> = faces_of
+            .keys()
+            .filter_map(|id| {
+                let c = *m.styles.items.get(id)?;
+                let rank = match m.rec(*id)?.kind() {
+                    "ADVANCED_FACE" | "FACE_SURFACE" | "FACE" | "ORIENTED_FACE" => 2,
+                    "CLOSED_SHELL" | "OPEN_SHELL" | "ORIENTED_CLOSED_SHELL" | "ORIENTED_OPEN_SHELL" => 1,
+                    _ => 0,
+                };
+                Some((rank, *id, c))
+            })
+            .collect();
+        styled.sort_unstable();
+        for (_, id, c) in styled {
+            for &xf in &faces_of[&id] {
+                if let Some(&Some(bf)) = map.get(xf) {
+                    cols[bf] = Some(c);
+                }
+            }
+        }
         // The file's precision is its entities' tolerance (OCCT's reader does the same).
         if let Some(u) = m.rep_uncertainty(rep).filter(|u| *u > super::topo::TOL_MIN) {
             for v in &mut b.verts {
@@ -1548,17 +1770,21 @@ fn build_shapes(m: &mut Model, shapes: &[(u64, u64, Affine)], warnings: &mut Vec
         }
         let b = if at == Affine::identity() { b } else { b.transformed(&at) };
         body.append(&b);
+        colors.extend(cols);
     }
     if body.faces.is_empty() {
         body.append(&wires);
     }
-    if body.faces.is_empty() && body.wires.is_empty() && body.points.is_empty() { None } else { Some(body) }
+    if colors.iter().all(Option::is_none) {
+        colors.clear();
+    }
+    if body.faces.is_empty() && body.wires.is_empty() && body.points.is_empty() { None } else { Some((body, colors)) }
 }
 
 /// Reads a STEP file's parts and assembly structure.
 pub fn read(bytes: &[u8]) -> Result<ReadModel, String> {
     let f = parse(bytes)?;
-    let mut m = Model { f: &f, units: HashMap::new() };
+    let mut m = Model { f: &f, units: HashMap::new(), styles: Styles::read(&f) };
     let mut out = ReadModel::default();
     let mut warnings = Vec::new();
     let mut pds: Vec<u64> = Vec::new();
@@ -1579,9 +1805,9 @@ pub fn read(bytes: &[u8]) -> Result<ReadModel, String> {
     let mut part_of: HashMap<u64, Option<usize>> = HashMap::new();
     let roots: Vec<u64> = pds.iter().copied().filter(|p| !is_child.contains(p)).collect();
     // Depth-first from the roots.
-    let mut stack: Vec<(u64, Affine, String, usize)> = roots.iter().rev().map(|&r| (r, Affine::identity(), m.product_name(r), 0)).collect();
+    let mut stack: Vec<(u64, Affine, String, usize, Option<Rgba>)> = roots.iter().rev().map(|&r| (r, Affine::identity(), m.product_name(r), 0, None)).collect();
     let mut useful_roots = Vec::new();
-    while let Some((pd, at, name, depth)) = stack.pop() {
+    while let Some((pd, at, name, depth, color)) = stack.pop() {
         if depth > 32 {
             continue;
         }
@@ -1589,8 +1815,8 @@ pub fn read(bytes: &[u8]) -> Result<ReadModel, String> {
         let part = match part_of.get(&pd) {
             Some(p) => *p,
             None => {
-                let p = m.build_part(&reps, &mut warnings).map(|body| {
-                    out.parts.push(ReadPart { body, name: m.product_name(pd) });
+                let p = m.build_part(&reps, &mut warnings).map(|(body, colors)| {
+                    out.parts.push(ReadPart { body, name: m.product_name(pd), colors });
                     out.parts.len() - 1
                 });
                 part_of.insert(pd, p);
@@ -1601,7 +1827,7 @@ pub fn read(bytes: &[u8]) -> Result<ReadModel, String> {
             useful_roots.push(pd);
         }
         if let Some(p) = part {
-            out.occurrences.push(ReadOccurrence { part: p, placement: at, name: name.clone() });
+            out.occurrences.push(ReadOccurrence { part: p, placement: at, name: name.clone(), color });
         }
         if let Some(ch) = children.get(&pd).cloned() {
             for &(nauo, c) in ch.iter().rev() {
@@ -1609,7 +1835,9 @@ pub fn read(bytes: &[u8]) -> Result<ReadModel, String> {
                 let pl = m.nauo_placement(nauo, &creps);
                 let ps = m.rec(nauo).map(|r| r.params()).unwrap_or(&[]);
                 let nm = ps.get(1).and_then(|x| x.as_str()).filter(|s| !s.is_empty()).or_else(|| ps.first().and_then(|x| x.as_str())).unwrap_or("").to_string();
-                stack.push((c, compose(&at, &pl), nm, depth + 1));
+                // An occurrence's own colour, else the one it inherits from its assembly's.
+                let c_color = m.styles.occurrences.get(&nauo).copied().or(color);
+                stack.push((c, compose(&at, &pl), nm, depth + 1, c_color));
             }
         }
     }
@@ -1632,9 +1860,9 @@ pub fn read(bytes: &[u8]) -> Result<ReadModel, String> {
                 }
             }
         }
-        if let Some(body) = build_shapes(&mut m, &shapes, &mut warnings) {
-            out.parts.push(ReadPart { body, name: String::new() });
-            out.occurrences.push(ReadOccurrence { part: 0, placement: Affine::identity(), name: String::new() });
+        if let Some((body, colors)) = build_shapes(&mut m, &shapes, &mut warnings) {
+            out.parts.push(ReadPart { body, name: String::new(), colors });
+            out.occurrences.push(ReadOccurrence { part: 0, placement: Affine::identity(), name: String::new(), color: None });
         }
     }
     if out.parts.is_empty() {
@@ -1707,6 +1935,8 @@ pub fn same_sense(b: &Body, f: &Face, written: &Surface) -> bool {
 struct Writer {
     out: String,
     next: u64,
+    /// The `ADVANCED_FACE` written for each face of the last body ([`Self::body`]).
+    faces: Vec<Option<u64>>,
 }
 
 impl Writer {
@@ -1898,9 +2128,18 @@ impl Writer {
         let in_solid: HashSet<usize> = b.solids.iter().flat_map(|s| s.shells.iter().copied()).collect();
         let voids: HashSet<usize> = b.solids.iter().flat_map(|s| s.shells.iter().skip(1).copied()).collect();
         let mut shell_ids = vec![0u64; b.shells.len()];
+        self.faces = vec![None; b.faces.len()];
         for (si, sh) in b.shells.iter().enumerate() {
             let rev = voids.contains(&si);
-            let faces: Vec<u64> = sh.faces.iter().filter_map(|&fi| self.face(b, &b.faces[fi], &eid, rev)).collect();
+            let faces: Vec<u64> = sh
+                .faces
+                .iter()
+                .filter_map(|&fi| {
+                    let id = self.face(b, &b.faces[fi], &eid, rev)?;
+                    self.faces[fi] = Some(id);
+                    Some(id)
+                })
+                .collect();
             let kind = if sh.closed && in_solid.contains(&si) { "CLOSED_SHELL" } else { "OPEN_SHELL" };
             shell_ids[si] = self.add(&format!("{kind}('',({}))", Self::refs(&faces)));
         }
@@ -1972,7 +2211,15 @@ pub struct WriteInstance {
 /// Writes parts (bodies with product names) as a STEP file, as one assembly `name` of
 /// `instances` when there are any.
 pub fn write(name: &str, parts: &[(&Body, &str)], instances: &[WriteInstance]) -> Vec<u8> {
-    let mut w = Writer { out: String::new(), next: 1 };
+    write_colored(name, parts, &[], instances)
+}
+
+/// [`write`], with each part's face colours (in face order; missing parts and faces are left
+/// unstyled), written as OCCT writes them: a `STYLED_ITEM` per coloured face in one
+/// `MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION`, its `COLOUR_RGB` filling the
+/// surface and a `SURFACE_STYLE_TRANSPARENT` for an alpha under 255.
+pub fn write_colored(name: &str, parts: &[(&Body, &str)], colors: &[&[Option<Rgba>]], instances: &[WriteInstance]) -> Vec<u8> {
+    let mut w = Writer { out: String::new(), next: 1, faces: Vec::new() };
     let mut s = String::new();
     s.push_str("ISO-10303-21;\nHEADER;\n");
     let _ = writeln!(s, "FILE_DESCRIPTION(('cadrs model'),'2;1');");
@@ -2024,9 +2271,14 @@ pub fn write(name: &str, parts: &[(&Body, &str)], instances: &[WriteInstance]) -
         }
     }
     let all_parts: Vec<(&Body, &str)> = parts.iter().copied().chain(bodies.iter().map(|(b, n)| (b, n.as_str()))).collect();
+    // A mirrored copy's colours are its part's (the same faces in the same order).
+    let mirror_of: HashMap<usize, usize> = mirrored.iter().map(|(&p, &k)| (k, p)).collect();
     let mut written: Vec<(u64, u64, u64)> = Vec::new();
-    for (b, pname) in &all_parts {
+    let mut styled: Vec<(u64, Rgba)> = Vec::new();
+    for (pi, (b, pname)) in all_parts.iter().enumerate() {
         let (solids, sheets) = w.body(b);
+        let cs = colors.get(*mirror_of.get(&pi).unwrap_or(&pi)).copied().unwrap_or(&[]);
+        styled.extend(w.faces.iter().zip(cs).filter_map(|(f, c)| Some(((*f)?, (*c)?))));
         let wires = w.wireframe(b);
         let ax = origin(&mut w);
         // The first kind present is the part's representation; the others are related to it.
@@ -2078,6 +2330,30 @@ pub fn write(name: &str, parts: &[(&Body, &str)], instances: &[WriteInstance]) -
             let rr = w.add(&format!("(REPRESENTATION_RELATIONSHIP('','',#{prep},#{arep}) REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION(#{idt}) SHAPE_REPRESENTATION_RELATIONSHIP())"));
             w.add(&format!("CONTEXT_DEPENDENT_SHAPE_REPRESENTATION(#{rr},#{npds})"));
         }
+    }
+    if !styled.is_empty() {
+        // One style per colour, shared by the faces of that colour.
+        let mut styles: HashMap<Rgba, u64> = HashMap::new();
+        let mut items = Vec::new();
+        for (face, c) in styled {
+            let psa = *styles.entry(c).or_insert_with(|| {
+                let [r, g, b, a] = c.map(|x| f64::from(x) / 255.0);
+                let rgb = w.add(&format!("COLOUR_RGB('',{},{},{})", real(r), real(g), real(b)));
+                let fasc = w.add(&format!("FILL_AREA_STYLE_COLOUR('',#{rgb})"));
+                let fas = w.add(&format!("FILL_AREA_STYLE('',(#{fasc}))"));
+                let ssfa = w.add(&format!("SURFACE_STYLE_FILL_AREA(#{fas})"));
+                let mut elems = vec![ssfa];
+                if c[3] < 255 {
+                    let t = w.add(&format!("SURFACE_STYLE_TRANSPARENT({})", real(1.0 - a)));
+                    elems.push(w.add(&format!("SURFACE_STYLE_RENDERING_WITH_PROPERTIES(.NORMAL_SHADING.,#{rgb},(#{t}))")));
+                }
+                let sss = w.add(&format!("SURFACE_SIDE_STYLE('',({}))", Writer::refs(&elems)));
+                let ssu = w.add(&format!("SURFACE_STYLE_USAGE(.BOTH.,#{sss})"));
+                w.add(&format!("PRESENTATION_STYLE_ASSIGNMENT((#{ssu}))"))
+            });
+            items.push(w.add(&format!("STYLED_ITEM('color',(#{psa}),#{face})")));
+        }
+        w.add(&format!("MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION('',({}),#{ctx})", Writer::refs(&items)));
     }
     s.push_str(&w.out);
     s.push_str("ENDSEC;\nEND-ISO-10303-21;\n");

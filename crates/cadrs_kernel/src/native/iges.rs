@@ -1239,8 +1239,8 @@ fn read_trimmed(f: &File, out: &mut ReadModel) {
     // Each solid a part; the loose sheets together.
     for piece in super::exchange::split_into_solids(&body) {
         if !piece.faces.is_empty() {
-            out.occurrences.push(ReadOccurrence { part: out.parts.len(), placement: Affine::identity(), name: String::new() });
-            out.parts.push(ReadPart { body: piece, name: String::new() });
+            out.occurrences.push(ReadOccurrence { part: out.parts.len(), placement: Affine::identity(), name: String::new(), color: None });
+            out.parts.push(ReadPart { body: piece, name: String::new(), colors: Vec::new() });
         }
     }
 }
@@ -1295,8 +1295,8 @@ fn read_wires(f: &File, out: &mut ReadModel) {
         }
         let body = super::step::wire_body(&segs, &pts, tol);
         if !body.wires.is_empty() || !body.points.is_empty() {
-            out.occurrences.push(ReadOccurrence { part: out.parts.len(), placement: Affine::identity(), name: name.clone() });
-            out.parts.push(ReadPart { body, name });
+            out.occurrences.push(ReadOccurrence { part: out.parts.len(), placement: Affine::identity(), name: name.clone(), color: None });
+            out.parts.push(ReadPart { body, name, colors: Vec::new() });
         }
     }
 }
@@ -1333,8 +1333,8 @@ pub fn read(bytes: &[u8]) -> Result<ReadModel, String> {
                 let (body, w) = r.xb.finish();
                 out.warnings.extend(w);
                 if !body.faces.is_empty() {
-                    out.occurrences.push(ReadOccurrence { part: out.parts.len(), placement: Affine::identity(), name: name.clone() });
-                    out.parts.push(ReadPart { body, name });
+                    out.occurrences.push(ReadOccurrence { part: out.parts.len(), placement: Affine::identity(), name: name.clone(), color: None });
+                    out.parts.push(ReadPart { body, name, colors: Vec::new() });
                 }
             }
             Err(err) => out.warnings.push(err),
@@ -1356,8 +1356,8 @@ pub fn read(bytes: &[u8]) -> Result<ReadModel, String> {
                 let (body, w) = r.xb.finish();
                 out.warnings.extend(w);
                 if !body.faces.is_empty() {
-                    out.occurrences.push(ReadOccurrence { part: out.parts.len(), placement: Affine::identity(), name: name.clone() });
-                    out.parts.push(ReadPart { body, name });
+                    out.occurrences.push(ReadOccurrence { part: out.parts.len(), placement: Affine::identity(), name: name.clone(), color: None });
+                    out.parts.push(ReadPart { body, name, colors: Vec::new() });
                 }
             }
             Err(err) => out.warnings.push(err),

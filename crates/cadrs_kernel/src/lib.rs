@@ -870,7 +870,9 @@ pub trait Kernel {
         Err(KernelError::Unsupported("OpenCASCADE BREP export"))
     }
     /// Imported surface colors, in face order; absent entries keep the application's palette.
-    /// Empty when the backend keeps no colors.
+    /// Empty when the body has none or the backend keeps no colors. The native kernel keeps
+    /// them per body and passes them on to the faces an operation's history says continue
+    /// colored faces (moves, copies, compounds, splits, booleans, local operations).
     fn face_colors(&self, _body: BodyId) -> Vec<Option<[u8; 4]>> {
         Vec::new()
     }

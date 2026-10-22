@@ -3,6 +3,10 @@
 //! `export_step`, `mesh_solid` ([`super::meshsolid`]) and `write_body` / `read_body`
 //! ([`super::bodyio`]).
 //!
+//! **Colours.** STEP surface styles become the parts' face colours (kept by the session:
+//! [`crate::Kernel::face_colors`]) and occurrence colours; `export_model` and `export_step`
+//! write the bodies' face colours back as styles.
+//!
 //! - **Export.** Without instances each body is its own part (product), named as given. With
 //!   instances, STEP writes one assembly product holding them; IGES has no assemblies, so each
 //!   instance is written as its part moved into place (named after the instance).
@@ -67,7 +71,8 @@ pub fn export_model(k: &NativeKernel, format: ExchangeFormat, name: &str, parts:
     Ok(match format {
         ExchangeFormat::Step => {
             let insts: Vec<WriteInstance> = instances.iter().map(|i| WriteInstance { part: i.part, placement: motion_affine(&i.placement), name: i.name.clone() }).collect();
-            super::step::write(name, &named, &insts)
+            let colors: Vec<&[Option<[u8; 4]>]> = parts.iter().map(|(b, _)| k.colors(*b)).collect();
+            super::step::write_colored(name, &named, &colors, &insts)
         }
         ExchangeFormat::Iges => {
             if instances.is_empty() {
@@ -86,9 +91,10 @@ pub fn import_model(k: &mut NativeKernel, format: ExchangeFormat, bytes: &[u8]) 
     let mut parts = Vec::with_capacity(m.parts.len());
     for p in m.parts {
         let id = k.insert(p.body);
+        k.set_colors(id, p.colors);
         parts.push(ImportedPart { body: id, name: p.name });
     }
-    let occurrences = m.occurrences.into_iter().map(|o| ImportedOccurrence { color: None, part: o.part, placement: Motion { linear: o.placement.m, translation: o.placement.t }, name: o.name }).collect();
+    let occurrences = m.occurrences.into_iter().map(|o| ImportedOccurrence { color: o.color, part: o.part, placement: Motion { linear: o.placement.m, translation: o.placement.t }, name: o.name }).collect();
     Ok(ImportedModel { name: m.name, parts, occurrences })
 }
 
@@ -97,12 +103,18 @@ pub fn export_step(k: &NativeKernel, bodies: &[BodyId]) -> Result<Vec<u8>> {
     writable(&bs)?;
     let names: Vec<String> = (1..=bs.len()).map(|i| format!("Body {i}")).collect();
     let named: Vec<(&Body, &str)> = bs.iter().zip(&names).map(|(b, n)| (*b, n.as_str())).collect();
-    Ok(super::step::write("cadrs", &named, &[]))
+    let colors: Vec<&[Option<[u8; 4]>]> = bodies.iter().map(|b| k.colors(*b)).collect();
+    Ok(super::step::write_colored("cadrs", &named, &colors, &[]))
 }
 
 /// One body per solid of `b` (with its void shells), the shells of no solid together as one
 /// surface body, and its wires and points as one more.
 pub fn split_into_solids(b: &Body) -> Vec<Body> {
+    split_into_solids_mapped(b).into_iter().map(|(b, _)| b).collect()
+}
+
+/// [`split_into_solids`], with the face of `b` each piece's face is.
+pub fn split_into_solids_mapped(b: &Body) -> Vec<(Body, Vec<usize>)> {
     let mut out = Vec::new();
     for s in &b.solids {
         let faces: Vec<usize> = s.shells.iter().flat_map(|&sh| b.shells[sh].faces.iter().copied()).collect();
@@ -118,7 +130,7 @@ pub fn split_into_solids(b: &Body) -> Vec<Body> {
             k += n;
         }
         nb.solids.push(Solid { shells });
-        out.push(nb);
+        out.push((nb, faces));
     }
     let in_solid: std::collections::HashSet<usize> = b.solids.iter().flat_map(|s| s.shells.iter().copied()).collect();
     let free: Vec<usize> = (0..b.shells.len()).filter(|s| !in_solid.contains(s)).collect();
@@ -132,30 +144,36 @@ pub fn split_into_solids(b: &Body) -> Vec<Body> {
             nb.shells.push(Shell { faces: (k..k + n).collect(), closed: b.shells[s].closed });
             k += n;
         }
-        out.push(nb);
+        out.push((nb, faces));
     }
-    out.extend(super::kernel::loose_part(b));
+    out.extend(super::kernel::loose_part(b).map(|l| (l, Vec::new())));
     out
 }
 
 pub fn import_step(k: &mut NativeKernel, bytes: &[u8]) -> Result<Vec<BodyId>> {
     let m = read(ExchangeFormat::Step, bytes)?;
     let mut solids = Vec::new();
-    let mut sheets = Body::default();
+    let mut sheets = (Body::default(), Vec::new());
     for o in &m.occurrences {
-        let b = &m.parts[o.part].body;
-        let placed = if o.placement == Affine::identity() { b.clone() } else { b.transformed(&o.placement) };
-        for piece in split_into_solids(&placed) {
+        let p = &m.parts[o.part];
+        let placed = if o.placement == Affine::identity() { p.body.clone() } else { p.body.transformed(&o.placement) };
+        // The occurrence's colour over the part's own.
+        let color = |f: usize| o.color.or_else(|| p.colors.get(f).copied().flatten());
+        for (piece, faces) in split_into_solids_mapped(&placed) {
+            let colors: Vec<_> = faces.iter().map(|&f| color(f)).collect();
             if piece.solids.is_empty() && !piece.faces.is_empty() {
-                sheets.append(&piece);
+                sheets.0.append(&piece);
+                sheets.1.extend(colors);
             } else {
-                solids.push(piece);
+                solids.push((piece, colors));
             }
         }
     }
-    let mut out: Vec<BodyId> = solids.into_iter().map(|b| k.insert(b)).collect();
-    if !sheets.faces.is_empty() {
-        out.push(k.insert(sheets));
+    let mut out = Vec::new();
+    for (b, colors) in solids.into_iter().chain((!sheets.0.faces.is_empty()).then_some(sheets)) {
+        let id = k.insert(b);
+        k.set_colors(id, colors);
+        out.push(id);
     }
     if out.is_empty() {
         return Err(failed("STEP import", "the file has no geometry".into()));
@@ -505,6 +523,88 @@ mod tests {
         assert_eq!(m.parts[1].name, "b");
         let c = k.mass_properties(m.parts[1].body).unwrap().center_of_mass;
         assert!((c - Point3::new(45.0, 5.0, 5.0)).norm() < 1e-9, "{c}");
+    }
+
+    /// OCCT's XDE writer's colours (main's fixture: a red box with one green face, used twice,
+    /// the second occurrence blue) reach the parts' faces and the occurrences.
+    #[test]
+    fn step_colors_of_parts_faces_and_occurrences() {
+        const RED: Option<[u8; 4]> = Some([255, 0, 0, 255]);
+        const GREEN: Option<[u8; 4]> = Some([0, 255, 0, 255]);
+        const BLUE: Option<[u8; 4]> = Some([0, 0, 255, 255]);
+        let bytes = include_bytes!("../../tests/data/colored_assembly.step");
+        let mut k = NativeKernel::new();
+        let m = k.import_model(ExchangeFormat::Step, bytes).unwrap();
+        assert_eq!(m.parts.len(), 1);
+        let colors = k.face_colors(m.parts[0].body);
+        assert_eq!(colors.len(), 6);
+        assert_eq!(colors.iter().filter(|c| **c == RED).count(), 5, "{colors:?}");
+        assert_eq!(colors.iter().filter(|c| **c == GREEN).count(), 1, "{colors:?}");
+        let occ: Vec<_> = m.occurrences.iter().map(|o| o.color).collect();
+        assert_eq!(occ, [None, BLUE]);
+        // One body per placed solid, the occurrence's colour over the part's.
+        let bs = k.import_step(bytes).unwrap();
+        assert_eq!(bs.len(), 2);
+        let by_x = |k: &NativeKernel, b: BodyId| k.mass_properties(b).unwrap().center_of_mass.x;
+        let (first, second) = if by_x(&k, bs[0]) < by_x(&k, bs[1]) { (bs[0], bs[1]) } else { (bs[1], bs[0]) };
+        assert_eq!(k.face_colors(first).iter().filter(|c| **c == GREEN).count(), 1);
+        assert!(k.face_colors(second).iter().all(|c| *c == BLUE));
+    }
+
+    /// Colours follow faces through copies, moves, compounds, splits and booleans; a face an
+    /// operation makes has none, and a released body's colours go with it.
+    #[test]
+    fn face_colors_follow_the_faces() {
+        let mut k = NativeKernel::new();
+        let a = extrude(&mut k, vec![region(poly(&[p(0., 0.), p(10., 0.), p(10., 10.), p(0., 10.)]), vec![])], 10.0);
+        assert!(k.face_colors(a).is_empty());
+        let n = k.faces(a).unwrap().len();
+        let top = k.faces(a).unwrap().iter().position(|f| f.plane.is_some_and(|pl| pl.normal.z > 0.9)).unwrap();
+        let mut colors = vec![Some([10, 20, 30, 255]); n];
+        colors[top] = Some([200, 0, 0, 128]);
+        k.set_face_colors(a, colors.clone());
+        assert_eq!(k.face_colors(a), colors);
+        let colour_at_top = |k: &NativeKernel, b: BodyId| {
+            let fs = k.faces(b).unwrap();
+            let i = fs.iter().enumerate().filter(|(_, f)| f.plane.is_some_and(|pl| pl.normal.z > 0.9)).max_by(|x, y| x.1.center.z.total_cmp(&y.1.center.z)).unwrap().0;
+            k.face_colors(b).get(i).copied().flatten()
+        };
+        let moved = k.transform_motion(a, &Motion::translation(Vector3::new(5.0, 0.0, 0.0))).unwrap().bodies[0];
+        assert_eq!(k.face_colors(moved), colors);
+        let both = k.compound(&[a, moved]).unwrap().bodies[0];
+        assert_eq!(k.face_colors(both).len(), 2 * n);
+        let pieces = k.split_solids(both).unwrap();
+        assert_eq!(k.face_colors(pieces[1].bodies[0]), colors);
+        // A cut keeps the target's colours on what is left of its faces; the new walls have none.
+        let tool = extrude(&mut k, vec![region(poly(&[p(2., 2.), p(4., 2.), p(4., 4.), p(2., 4.)]), vec![])], 20.0);
+        let cut = k.boolean(BoolOp::Subtract, a, &[tool]).unwrap().bodies[0];
+        assert_eq!(colour_at_top(&k, cut), Some([200, 0, 0, 128]));
+        assert!(k.face_colors(cut).iter().any(Option::is_none));
+        k.release(moved);
+        assert!(k.face_colors(moved).is_empty());
+        // Clearing.
+        k.set_face_colors(a, vec![None; n]);
+        assert!(k.face_colors(a).is_empty());
+    }
+
+    /// The STEP writer's styles read back face for face, alpha included.
+    #[test]
+    fn step_colors_round_trip() {
+        let mut k = NativeKernel::new();
+        let a = extrude(&mut k, vec![region(poly(&[p(0., 0.), p(10., 0.), p(10., 10.), p(0., 10.)]), vec![])], 10.0);
+        let n = k.faces(a).unwrap().len();
+        let colors: Vec<Option<[u8; 4]>> = (0..n).map(|i| (i != 2).then(|| [40 * i as u8, 255 - 30 * i as u8, 7, if i == 0 { 100 } else { 255 }])).collect();
+        k.set_face_colors(a, colors.clone());
+        let centers = |k: &NativeKernel, b: BodyId| k.faces(b).unwrap().iter().map(|f| f.center).collect::<Vec<_>>();
+        let want = centers(&k, a);
+        for bytes in [k.export_step(&[a]).unwrap(), k.export_model(ExchangeFormat::Step, "x", &[(a, "box".into())], &[]).unwrap()] {
+            let b = k.import_step(&bytes).unwrap()[0];
+            let got = k.face_colors(b);
+            for (c, color) in centers(&k, b).iter().zip(&got) {
+                let i = want.iter().position(|w| (w - c).norm() < 1e-9).unwrap();
+                assert_eq!(*color, colors[i]);
+            }
+        }
     }
 
     /// Non-finite numbers never reach a file, and never panic the writer (regression:

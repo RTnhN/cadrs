@@ -37,6 +37,9 @@ pub struct NativeKernel {
     bodies: HashMap<u64, Entry>,
     next: u64,
     tol: super::tol::Tolerances,
+    /// Face colours (sRGB and alpha) by body, in face order: an imported file's, or what the
+    /// application set. Operations pass them on through their history ([`Self::carry_colors`]).
+    colors: HashMap<u64, Vec<Option<[u8; 4]>>>,
     /// The DRAW layer's last offset: its input body, result and history (`savehistory`).
     pub(crate) draw_history: Option<(BodyId, BodyId, crate::History)>,
 }
@@ -85,6 +88,52 @@ impl NativeKernel {
         }
         let id = self.insert(b.body);
         OpResult { bodies: vec![id], history }
+    }
+
+    /// A body's face colours, in face order (empty when it has none).
+    pub fn colors(&self, id: BodyId) -> &[Option<[u8; 4]>] {
+        self.colors.get(&id.0).map_or(&[], Vec::as_slice)
+    }
+
+    /// Sets a body's face colours, in face order (cut or padded to its faces; none at all
+    /// clears them).
+    pub fn set_colors(&mut self, id: BodyId, mut colors: Vec<Option<[u8; 4]>>) {
+        let Ok(n) = self.get(id).map(|b| b.faces.len()) else { return };
+        colors.resize(n, None);
+        if colors.iter().all(Option::is_none) {
+            self.colors.remove(&id.0);
+        } else {
+            self.colors.insert(id.0, colors);
+        }
+    }
+
+    /// Gives an operation's result the colours of the input faces its faces continue (the
+    /// history's `modified` faces); new faces have none. Only for a result of one body (the
+    /// history's face ids are that body's).
+    pub(crate) fn carry_colors(&mut self, r: &OpResult) {
+        if self.colors.is_empty() || r.bodies.len() != 1 {
+            return;
+        }
+        let colors: Vec<Option<[u8; 4]>> = {
+            let Ok(n) = self.get(r.bodies[0]).map(|b| b.faces.len()) else { return };
+            let mut out = vec![None; n];
+            for (f, from) in &r.history.modified {
+                let c = self.colors.get(&from.body.0).and_then(|v| v.get(from.face.0 as usize)).copied().flatten();
+                if let (Some(c), Some(slot)) = (c, out.get_mut(f.0 as usize)) {
+                    *slot = Some(c);
+                }
+            }
+            out
+        };
+        self.set_colors(r.bodies[0], colors);
+    }
+
+    /// [`Self::carry_colors`] for an operation's outcome.
+    fn colored(&mut self, r: Result<OpResult>) -> Result<OpResult> {
+        if let Ok(o) = &r {
+            self.carry_colors(o);
+        }
+        r
     }
 
     /// Extent of a body along a unit direction from a point: (min, max) of (p − o)·d.
@@ -476,25 +525,28 @@ impl Kernel for NativeKernel {
             }
             let _ = self.dumped(&r);
         }
-        r
+        self.colored(r)
     }
 
     fn fillet(&mut self, body: BodyId, edges: &[EdgeId], radius: f64) -> Result<OpResult> {
         dump("fillet", self.get(body)?, &format!("edges {edges:?} radius {radius}"));
         let r = super::blend::fillet(self, body, edges, &FilletSpec::radius(radius));
-        self.dumped(&r)
+        let r = self.dumped(&r);
+        self.colored(r)
     }
 
     fn fillet_with(&mut self, body: BodyId, edges: &[EdgeId], spec: &FilletSpec) -> Result<OpResult> {
         dump("fillet", self.get(body)?, &format!("edges {edges:?} {spec:?}"));
         let r = super::blend::fillet(self, body, edges, spec);
-        self.dumped(&r)
+        let r = self.dumped(&r);
+        self.colored(r)
     }
 
     fn fillet_smooth(&mut self, body: BodyId, edges: &[EdgeId], spec: &FilletSpec, setback: f64) -> Result<OpResult> {
         dump("fillet", self.get(body)?, &format!("edges {edges:?} {spec:?} smooth {setback}"));
         let r = super::blend_corner::fillet_smooth(self, body, edges, spec, setback);
-        self.dumped(&r)
+        let r = self.dumped(&r);
+        self.colored(r)
     }
 
     fn thicken_surfaces(&mut self, spec: &ThickenSpec) -> Result<OpResult> {
@@ -506,77 +558,93 @@ impl Kernel for NativeKernel {
     }
 
     fn sew_solid(&mut self, bodies: &[BodyId], tol: f64) -> Result<OpResult> {
-        super::surfacing::sew(self, bodies, tol)
+        let r = super::surfacing::sew(self, bodies, tol);
+        self.colored(r)
     }
 
     fn simplify(&mut self, body: BodyId) -> Result<OpResult> {
-        super::surfacing::simplify(self, body)
+        let r = super::surfacing::simplify(self, body);
+        self.colored(r)
     }
 
     fn heal(&mut self, body: BodyId, ops: &[HealOp]) -> Result<OpResult> {
-        super::heal::heal_op(self, body, ops)
+        let r = super::heal::heal_op(self, body, ops);
+        self.colored(r)
     }
 
     fn delete_faces(&mut self, body: BodyId, faces: &[FaceId]) -> Result<OpResult> {
-        super::surfacing::delete_faces(self, body, faces)
+        let r = super::surfacing::delete_faces(self, body, faces);
+        self.colored(r)
     }
 
     fn offset(&mut self, body: BodyId, spec: &OffsetSpec) -> Result<OpResult> {
-        super::local::offset(self, body, spec)
+        let r = super::local::offset(self, body, spec);
+        self.colored(r)
     }
 
     fn draft(&mut self, body: BodyId, spec: &DraftSpec) -> Result<OpResult> {
-        super::local::draft(self, body, spec)
+        let r = super::local::draft(self, body, spec);
+        self.colored(r)
     }
 
     fn replace_faces(&mut self, body: BodyId, faces: &[FaceReplacement]) -> Result<OpResult> {
-        super::local::replace_faces(self, body, faces)
+        let r = super::local::replace_faces(self, body, faces);
+        self.colored(r)
     }
 
     fn shell(&mut self, body: BodyId, remove: &[FaceId], thickness: f64) -> Result<OpResult> {
         dump("shell", self.get(body)?, &format!("remove {remove:?} thickness {thickness}"));
         let r = super::offset_round::shell(self, body, &ShellSpec { remove: remove.to_vec(), thickness, outward: false, hollow: false, sharp: false });
-        self.dumped(&r)
+        let r = self.dumped(&r);
+        self.colored(r)
     }
 
     fn shell_with(&mut self, body: BodyId, spec: &ShellSpec) -> Result<OpResult> {
         dump("shell", self.get(body)?, &format!("{spec:?}"));
         let r = super::offset_round::shell(self, body, spec);
-        self.dumped(&r)
+        let r = self.dumped(&r);
+        self.colored(r)
     }
 
     fn fillet_partial(&mut self, body: BodyId, edge: EdgeId, spec: &FilletSpec, from: f64, to: f64) -> Result<OpResult> {
-        super::blend::fillet_partial(self, body, edge, spec, from, to)
+        let r = super::blend::fillet_partial(self, body, edge, spec, from, to);
+        self.colored(r)
     }
 
     fn fillet_variable(&mut self, body: BodyId, laws: &[FilletLaw], allow_overflow: bool) -> Result<OpResult> {
         dump("fillet_variable", self.get(body)?, &format!("{laws:?} overflow {allow_overflow}"));
         let r = super::blend::fillet_variable(self, body, laws, allow_overflow);
-        self.dumped(&r)
+        let r = self.dumped(&r);
+        self.colored(r)
     }
 
     fn full_round(&mut self, body: BodyId, side1: FaceId, center: FaceId, side2: FaceId) -> Result<OpResult> {
-        super::blend::full_round(self, body, side1, center, side2)
+        let r = super::blend::full_round(self, body, side1, center, side2);
+        self.colored(r)
     }
 
     fn chamfer(&mut self, body: BodyId, edges: &[EdgeId], spec: ChamferSpec) -> Result<OpResult> {
         dump("chamfer", self.get(body)?, &format!("edges {edges:?} {spec:?}"));
         let r = super::blend::chamfer(self, body, edges, &ChamferOpts::new(spec));
-        self.dumped(&r)
+        let r = self.dumped(&r);
+        self.colored(r)
     }
 
     fn chamfer_with(&mut self, body: BodyId, edges: &[EdgeId], opts: &ChamferOpts) -> Result<OpResult> {
         dump("chamfer", self.get(body)?, &format!("edges {edges:?} {opts:?}"));
         let r = super::blend::chamfer(self, body, edges, opts);
-        self.dumped(&r)
+        let r = self.dumped(&r);
+        self.colored(r)
     }
 
     fn split(&mut self, body: BodyId, tool: &SplitTool, source: u64) -> Result<OpResult> {
-        super::ops::split(self, body, tool, source)
+        let r = super::ops::split(self, body, tool, source);
+        self.colored(r)
     }
 
     fn split_faces(&mut self, body: BodyId, faces: &[FaceId], tool: &SplitTool) -> Result<OpResult> {
-        super::ops::split_faces(self, body, faces, tool)
+        let r = super::ops::split_faces(self, body, faces, tool);
+        self.colored(r)
     }
 
     fn face_tool(&mut self, body: BodyId, faces: &[FaceId], source: u64) -> Result<OpResult> {
@@ -600,7 +668,7 @@ impl Kernel for NativeKernel {
         let nf = b.faces.len();
         let id = self.insert(b);
         let history = History { modified: (0..nf).map(|i| (FaceId(i as u64), InputFace { body, face: FaceId(i as u64) })).collect(), ..Default::default() };
-        Ok(OpResult { bodies: vec![id], history })
+        self.colored(Ok(OpResult { bodies: vec![id], history }))
     }
 
     fn scale(&mut self, body: BodyId, center: Point3<f64>, factor: f64) -> Result<OpResult> {
@@ -612,7 +680,7 @@ impl Kernel for NativeKernel {
         let nf = b.faces.len();
         let id = self.insert(b);
         let history = History { modified: (0..nf).map(|i| (FaceId(i as u64), InputFace { body, face: FaceId(i as u64) })).collect(), ..Default::default() };
-        Ok(OpResult { bodies: vec![id], history })
+        self.colored(Ok(OpResult { bodies: vec![id], history }))
     }
 
     fn compound(&mut self, bodies: &[BodyId]) -> Result<OpResult> {
@@ -629,7 +697,7 @@ impl Kernel for NativeKernel {
             }
         }
         let id = self.insert(out);
-        Ok(OpResult { bodies: vec![id], history })
+        self.colored(Ok(OpResult { bodies: vec![id], history }))
     }
 
     fn split_solids(&mut self, body: BodyId) -> Result<Vec<OpResult>> {
@@ -661,7 +729,9 @@ impl Kernel for NativeKernel {
                 ..Default::default()
             };
             let id = self.insert(nb);
-            out.push(OpResult { bodies: vec![id], history });
+            let r = OpResult { bodies: vec![id], history };
+            self.carry_colors(&r);
+            out.push(r);
         }
         // The wires and points, as one more body.
         if let Some(loose) = loose_part(&b) {
@@ -678,6 +748,7 @@ impl Kernel for NativeKernel {
 
     fn release(&mut self, body: BodyId) {
         self.bodies.remove(&body.0);
+        self.colors.remove(&body.0);
     }
 
     fn body_class(&self, body: BodyId) -> Result<BodyClass> {
@@ -873,6 +944,14 @@ impl Kernel for NativeKernel {
 
     fn export_model(&self, format: exchange::ExchangeFormat, name: &str, parts: &[(BodyId, String)], instances: &[exchange::ExportInstance]) -> Result<Vec<u8>> {
         super::exchange::export_model(self, format, name, parts, instances)
+    }
+
+    fn face_colors(&self, body: BodyId) -> Vec<Option<[u8; 4]>> {
+        self.colors(body).to_vec()
+    }
+
+    fn set_face_colors(&mut self, body: BodyId, colors: Vec<Option<[u8; 4]>>) {
+        self.set_colors(body, colors);
     }
 
     fn mesh_solid(&mut self, triangles: &[[Point3<f64>; 3]], tol: f64) -> Result<BodyId> {
