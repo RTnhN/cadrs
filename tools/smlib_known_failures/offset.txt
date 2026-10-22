@@ -5,7 +5,6 @@
 # (a pipe round a spline edge, balls at extrusion corners; the boolean, not the pieces).
 offset_04_off_extrusion slow
 offset_07_off_extrusion slow
-offset_12_offset_bracket2 slow
 offset_13_offset_bracket2 slow
 offset_14_offset_bracket2 slow
 # Rounded offset 2.2 of off_extrusion: the edges curved tighter than 2.2 (the B-splines, down to

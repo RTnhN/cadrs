@@ -71,11 +71,21 @@ pub struct BoolOptions {
     /// Faces on one surface are merged after the run (true by default); OCCT's booleans (the
     /// DRAW harness's) keep them apart.
     pub merge_coplanar: bool,
+    /// The most work a run may do before it fails ([`KernelError::OperationFailed`]): the
+    /// surface intersections' cell pairs and traced points, each split face's arcs squared,
+    /// and the classified and assembled faces (counts of the inputs, so the same run always
+    /// spends the same). [`DEFAULT_WORK_BUDGET`] by default; a caller may pass less.
+    pub work_budget: u64,
 }
+
+/// The default work budget of a boolean run ([`BoolOptions::work_budget`]): about three times
+/// the most a passing case of the test suites spends (7.1 million units, an OCCT boolean case);
+/// the runaway runs it stops spend 30 million and more over minutes.
+pub const DEFAULT_WORK_BUDGET: u64 = 20_000_000;
 
 impl Default for BoolOptions {
     fn default() -> Self {
-        BoolOptions { tol: super::tol::Tolerances::default(), flush: false, merge_coplanar: true }
+        BoolOptions { tol: super::tol::Tolerances::default(), flush: false, merge_coplanar: true, work_budget: DEFAULT_WORK_BUDGET }
     }
 }
 
@@ -86,11 +96,29 @@ struct RunOpts {
     tol: f64,
     flush: bool,
     merge_coplanar: bool,
+    work_budget: u64,
+}
+
+/// A run's work so far against its budget ([`BoolOptions::work_budget`]).
+struct Work {
+    done: u64,
+    budget: u64,
+}
+
+impl Work {
+    /// Counts `w` more; fails once the budget is spent.
+    fn spend(&mut self, w: u64, stage: &str) -> Result<()> {
+        self.done = self.done.saturating_add(w);
+        if self.done > self.budget {
+            return Err(KernelError::OperationFailed(format!("the boolean ran out of its work budget ({} units) in its {stage} stage", self.budget)));
+        }
+        Ok(())
+    }
 }
 
 impl RunOpts {
     /// Section and imprint runs: a boolean's defaults.
-    const PLAIN: RunOpts = RunOpts { tol: VTOL, flush: false, merge_coplanar: true };
+    const PLAIN: RunOpts = RunOpts { tol: VTOL, flush: false, merge_coplanar: true, work_budget: DEFAULT_WORK_BUDGET };
 }
 
 #[derive(Debug, Clone)]
@@ -592,7 +620,7 @@ pub fn boolean_bodies_with(a: &Body, b: &Body, op: BoolOp, opts: BoolOptions) ->
         Some((x, y)) => (x, y),
         None => (a, b),
     };
-    let at = |tol: f64| RunOpts { tol, flush: opts.flush, merge_coplanar: opts.merge_coplanar };
+    let at = |tol: f64| RunOpts { tol, flush: opts.flush, merge_coplanar: opts.merge_coplanar, work_budget: opts.work_budget };
     let first = run(a, b, Mode::Bool(op), at(opts.tol.point));
     // (Retried: an open shell, a face that doesn't close, an invalid result.)
     let broken = |m: &str| ["open shell", "left", "doesn't close", "is invalid"].iter().any(|w| m.contains(w));
@@ -798,7 +826,9 @@ pub fn imprint(a: &Body, b: &Body, faces: Option<Vec<usize>>) -> Result<BoolOut>
 
 /// One run of the boolean.
 fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
-    let RunOpts { tol: run_tol, flush, merge_coplanar } = opts;
+    let RunOpts { tol: run_tol, flush, merge_coplanar, work_budget } = opts;
+    // The work done so far, against the budget.
+    let mut work = Work { done: 0, budget: work_budget };
     // B-spline faces lying on an analytic face of the other body (within the tolerance:
     // approximated sweeps along helices, lofts of circles) take its exact surface, so the two
     // are imprinted as coincident instead of intersected nearly tangentially.
@@ -1073,16 +1103,22 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
     }
     // Their intersections, each a function of the two faces alone: computed in parallel and
     // used below in the pairs' order, so the result doesn't depend on the scheduling.
-    let ssis: Vec<(Vec<ssi::IntCurve>, Vec<P3>, std::time::Duration)> = pairs
-        .par_iter()
-        .map(|&(fa, fb)| {
-            let t = std::time::Instant::now();
-            // (The curves the surfaces only touch along are left out: the faces' tangent
-            // contact is found from their boundaries, as for faces tangent along an edge.)
-            let r = ssi::surface_surface_tol(&faces[fa].surf, uvbox(&faces[fa]), &faces[fb].surf, uvbox(&faces[fb]), &overlap(fa, fb), run_tol);
-            (r.curves, r.singular, t.elapsed())
-        })
-        .collect();
+    // (In chunks of pairs, the budget checked after each: a run past it stops within a chunk.)
+    let mut ssis: Vec<(Vec<ssi::IntCurve>, Vec<P3>, std::time::Duration)> = Vec::with_capacity(pairs.len());
+    for chunk in pairs.chunks(64) {
+        let done: Vec<(Vec<ssi::IntCurve>, Vec<P3>, std::time::Duration, u64)> = chunk
+            .par_iter()
+            .map(|&(fa, fb)| {
+                let t = std::time::Instant::now();
+                // (The curves the surfaces only touch along are left out: the faces' tangent
+                // contact is found from their boundaries, as for faces tangent along an edge.)
+                let r = ssi::surface_surface_tol(&faces[fa].surf, uvbox(&faces[fa]), &faces[fb].surf, uvbox(&faces[fb]), &overlap(fa, fb), run_tol);
+                (r.curves, r.singular, t.elapsed(), r.work)
+            })
+            .collect();
+        work.spend(done.iter().map(|d| d.3).sum(), "surface intersection")?;
+        ssis.extend(done.into_iter().map(|(c, s, t, _)| (c, s, t)));
+    }
     for (&(fa, fb), (curves, singular, el)) in pairs.iter().zip(ssis) {
         let ob = overlap(fa, fb);
         if std::env::var("CADRS_BOOL_DEBUG").is_ok() {
@@ -1518,6 +1554,8 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
             subs.push((fi, boundary));
             continue;
         }
+        let arcs = (boundary.iter().map(|l| l.len()).sum::<usize>() + cut_arcs.len()) as u64;
+        work.spend(arcs * arcs, "face splitting")?;
         let res = split::split_face(&f.surf, !f.sense, &boundary, &cut_arcs);
         if std::env::var("CADRS_BOOL_DEBUG").is_ok() {
             eprintln!("face {fi} (owner {} orig {}): {} cuts -> {} faces {:?}", f.owner, f.orig, cut_arcs.len(), res.faces.len(), res.faces.iter().map(|l| l.len()).collect::<Vec<_>>());
@@ -1594,6 +1632,7 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
     let mut group_class: HashMap<usize, (Class, bool)> = HashMap::new();
     let mut unreliable: std::collections::HashSet<usize> = std::collections::HashSet::new();
     let propagate = std::env::var_os("CADRS_DEBUG_NO_PROPAGATE").is_none();
+    work.spend(subs.len() as u64 * (a.faces.len() + b.faces.len()) as u64, "classification")?;
     for (sk, (fi, loops)) in subs.into_iter().enumerate() {
         let f = &faces[fi];
         if imprinting {
@@ -1749,6 +1788,10 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
     // The run merged within its tolerance: the result's entities say so.
     out.fit_tolerances(run_tol * 10.0);
     prof.mark("unify");
+    work.spend((out.faces.len() as u64).pow(2), "shell assembly")?;
+    if std::env::var_os("CADRS_BOOL_WORK").is_some() {
+        eprintln!("boolean work: {}", work.done);
+    }
     assemble_shells(&mut out)?;
     // Faces of the two inputs on one surface (by input face): only a solid holding both of a
     // pair can enclose nothing.
@@ -2142,6 +2185,24 @@ pub fn boolean_with(k: &mut NativeKernel, op: BoolOp, target: BodyId, tools: &[B
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A boolean past its work budget fails (deterministically, at the same stage every
+    /// time), and the default budget holds a plain one easily.
+    #[test]
+    fn work_budget() {
+        let cube = |x: f64| {
+            let mut k = NativeKernel::new();
+            let super::super::draw::Shape::Body(id) = k.box_at(x, 0.0, 0.0, 1.0, 1.0, 1.0).unwrap() else { unreachable!() };
+            (**k.get(id).unwrap()).clone()
+        };
+        let (a, b) = (cube(0.0), cube(0.5));
+        assert!(boolean_bodies(&a, &b, BoolOp::Union).is_ok());
+        let tight = BoolOptions { work_budget: 10, ..BoolOptions::default() };
+        let fail = || boolean_bodies_with(&a, &b, BoolOp::Union, tight).err().map(|e| e.to_string());
+        let err = fail().unwrap_or_default();
+        assert!(err.contains("work budget"), "{err}");
+        assert_eq!(fail(), Some(err));
+    }
 
     /// Booleans merge faces on one surface by default, and keep them apart with
     /// `merge_coplanar: false` (the DRAW harness's, as OCCT's).

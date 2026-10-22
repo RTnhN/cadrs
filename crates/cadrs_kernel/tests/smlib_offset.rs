@@ -151,9 +151,8 @@ fn offset_11_offset_bracket2() {
 
 /// SMLib offset demo 12 (smOffsetTest.cpp:929, `my_test_offset`): `offset_bracket2.smb` offset by 3.5.
 #[test]
-#[ignore = "known failure, slow (tools/smlib_known_failures/offset.txt)"]
 fn offset_12_offset_bracket2() {
-    known_failure(offset("offset_bracket2.smb", 3.5, None, None, &Expect { volume: Some(23935.4781103), area: Some(6349.76654618), faces: Some(151), edges: Some(348), solid: Some(true), ..Expect::default() }), "offset", "offset_12_offset_bracket2");
+    offset("offset_bracket2.smb", 3.5, None, None, &Expect { volume: Some(23935.4781103), area: Some(6349.76654618), faces: Some(151), edges: Some(348), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib offset demo 13 (smOffsetTest.cpp:940, `my_test_offset`): `offset_bracket2.smb` offset by 5.1.

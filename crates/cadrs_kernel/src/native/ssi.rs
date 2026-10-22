@@ -53,6 +53,9 @@ pub struct Ssi {
     pub coincident: Vec<IntCurve>,
     /// Isolated points where the surfaces touch.
     pub points: Vec<P3>,
+    /// The work it took, deterministic for the inputs: the numeric engine's cell pairs searched
+    /// and points traced (1 for a closed form). What a boolean's work budget counts.
+    pub work: u64,
 }
 
 /// How near two surfaces must be to coincide (within a part in 10⁹ of the problem's size,
@@ -69,7 +72,7 @@ pub fn surface_surface_full(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surfa
 /// [`surface_surface_full`] for a boolean merging points within `tol`: surfaces touching
 /// within it touch (two spheres meet in a point, not a circle that small).
 pub fn surface_surface_tol(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, ub: ((f64, f64), (f64, f64)), bb: &Bbox, tol: f64) -> Ssi {
-    let closed = |curves| Ssi { curves, ..Ssi::default() };
+    let closed = |curves| Ssi { curves, work: 1, ..Ssi::default() };
     let tc = coincidence_tol(bb);
     if a.same_domain(b, tc).is_some() {
         return Ssi { coincident: super::ssi_coincident::region_boundary(a, ua, b, ub, tc), ..Ssi::default() };
@@ -712,7 +715,7 @@ pub fn sdist(s: &Surface, p: &P3) -> f64 {
 /// The intersection by the numeric engine ([`super::ssi_numeric`]): its traced curves fitted
 /// with B-splines through exact points (tangent curves through the touching points found).
 fn numeric(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, ub: ((f64, f64), (f64, f64)), bb: &Bbox) -> Ssi {
-    use super::ssi_numeric::{intersect, UvBox};
+    use super::ssi_numeric::{intersect_stats, UvBox};
     // A box that isn't finite (a face without p-curves) falls back on the surface's own.
     let uvbox = |s: &Surface, x: ((f64, f64), (f64, f64))| {
         let ok = [x.0 .0, x.0 .1, x.1 .0, x.1 .1].iter().all(|v| v.is_finite()) && x.0 .1 > x.0 .0 && x.1 .1 > x.1 .0;
@@ -731,7 +734,8 @@ fn numeric(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, ub: ((f64, f6
     if super::ssi_coincident::lies_on(a, ua, b, tc) || super::ssi_coincident::lies_on(b, ub, a, tc) {
         return Ssi { coincident: super::ssi_coincident::region_boundary(a, ua, b, ub, tc), ..Ssi::default() };
     }
-    let res = intersect(a, uvbox(a, ua), b, uvbox(b, ub), bb);
+    let (res, stats) = intersect_stats(a, uvbox(a, ua), b, uvbox(b, ub), bb);
+    let work = (stats.pairs + res.curves.iter().map(|c| c.pts.len()).sum::<usize>()) as u64;
     let res_singular: Vec<P3> = res.singular.iter().map(|q| q.p).collect();
     let h = bb.diagonal().max(1e-9) / 96.0;
     let mut polys: Vec<(Vec<super::ssi_numeric::Pt>, bool)> = Vec::new();
@@ -780,7 +784,7 @@ fn numeric(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, ub: ((f64, f6
     // boundary stands for them.)
     let tangent = if res.coincident { Vec::new() } else { tangent };
     let points = res.points.iter().map(|q| q.p).collect();
-    Ssi { curves, tangent, singular: res_singular, coincident, points }
+    Ssi { curves, tangent, singular: res_singular, coincident, points, work }
 }
 
 /// A cubic B-spline through points as they are (a tangent curve's touching points, which
