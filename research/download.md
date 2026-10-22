@@ -1,20 +1,16 @@
 # Papers to download by hand
 
-These papers matter to the research but couldn't be fetched by script. Some are paywalled. Others sit behind a "verify you are human" check that refuses an automated browser.
+These 12 papers matter to the research, and no free copy turned up on 2026-10-22. Publisher sites, author homepages, university repositories, OpenAlex and the Wayback Machine were all searched. They need a library login.
 
 Open each link in your normal browser and save the PDF in the folder of its heading, under the file name given. When some are in, ask Claude to convert them (`.md` with docling, `.txt` with pdftotext) and commit them.
 
-**Free** means it should open without a login. ScienceDirect links (`sciencedirect.com/.../pdfft`) show the PDF only if the article is open access or your library subscribes. Older CAGD papers are often in Elsevier's free archive. The links go straight to the PDF; if one shows an article page instead, use its "View PDF" button.
-
-Already fetched automatically are 20 papers, listed at the end.
+ScienceDirect links (`sciencedirect.com/.../pdfft`) show the PDF only if the article is open access or your library subscribes. Older CAGD papers are often in Elsevier's free archive. The links go straight to the PDF; if one shows an article page instead, use its "View PDF" button.
 
 ## `research/papers/intersection/`
 
 | Paper | Link | Save as |
 |---|---|---|
 | Grandine & Klein 1997, a new approach to the surface intersection problem | https://www.sciencedirect.com/science/article/pii/S0167839696000246/pdfft | `Grandine-Klein-1997-new-approach-surface-intersection.pdf` |
-| Wang, Goldman & Tu 2003, enhancing Levin's method | https://www.sciencedirect.com/science/article/pii/S0167839603000815/pdfft | `Wang-Goldman-Tu-2003-enhancing-Levins-method-quadric-intersections.pdf` |
-| Lin et al. 2014, affine-arithmetic B-spline intersection on the GPU (IEEE) | https://doi.org/10.1109/TVCG.2013.237 | `Lin-Qin-Liao-Xiong-2014-affine-arithmetic-BSpline-intersection-GPU.pdf` |
 
 ## `research/papers/blends/`
 
@@ -26,16 +22,13 @@ Already fetched automatically are 20 papers, listed at the end.
 | Klass & Kuhn 1992, fillet and surface intersections by rolling balls | https://www.sciencedirect.com/science/article/pii/016783969290016I/pdfft | `Klass-Kuhn-1992-fillet-surface-intersections-rolling-balls.pdf` |
 | Farouki & Sverrisson 1996, approximating rolling-ball blends | https://www.sciencedirect.com/science/article/pii/0010448596000085/pdfft | `Farouki-Sverrisson-1996-approximation-rolling-ball-blends.pdf` |
 | Lukács 1998, G1 variable-radius rolling-ball blends | https://www.sciencedirect.com/science/article/pii/S0167839698000065/pdfft | `Lukacs-1998-differential-geometry-G1-variable-radius-rolling-ball-blends.pdf` |
-| Dahl & Krasauskas 2012, rational rolling-ball blends between quadrics | https://www.sciencedirect.com/science/article/pii/S0167839612000982/pdfft | `Dahl-Krasauskas-2012-rational-rolling-ball-blends-natural-quadrics.pdf` |
 | Chuang, Lin & Hwang 1995, variable-radius blending (Springer) | https://link.springer.com/content/pdf/10.1007/BF02434038.pdf | `Chuang-Lin-Hwang-1995-variable-radius-blending-parametric-surfaces.pdf` |
-| Chuang & Hwang 1997, variable-radius blending by spine generation (Springer) | https://link.springer.com/content/pdf/10.1007/s003710050106.pdf | `Chuang-Hwang-1997-variable-radius-blending-constrained-spine.pdf` |
 | Pegna & Wolter 1992, curvature continuity of blends (ASME) | https://doi.org/10.1115/1.2916918 | `Pegna-Wolter-1992-curvature-continuity-blend-surfaces.pdf` |
 
 ## `research/papers/offsets_sweeps_lofts/`
 
 | Paper | Link | Save as |
 |---|---|---|
-| **free** Forsyth 1995, shelling and offsetting bodies (ACM) | https://dl.acm.org/doi/pdf/10.1145/218013.218088 | `Forsyth-1995-shelling-and-offsetting-bodies.pdf` |
 | Piegl & Tiller 2002, surface skinning revisited (Springer) | https://link.springer.com/content/pdf/10.1007/s003710100156.pdf | `Piegl-Tiller-2002-surface-skinning-revisited.pdf` |
 
 ## `research/papers/tessellation_mass_queries/`
@@ -43,30 +36,30 @@ Already fetched automatically are 20 papers, listed at the end.
 | Paper | Link | Save as |
 |---|---|---|
 | Filip, Magedson & Markot 1986, surface algorithms using derivative bounds | https://www.sciencedirect.com/science/article/pii/0167839686900051/pdfft | `Filip-Magedson-Markot-1986-surface-algorithms-bounds-on-derivatives.pdf` |
-| Hughes, Reali & Sangalli 2010, efficient quadrature for NURBS | https://www.sciencedirect.com/science/article/pii/S0045782508004295/pdfft | `Hughes-Reali-Sangalli-2010-efficient-quadrature-NURBS-IGA.pdf` |
 
 ## `research/papers/booleans/`
 
 | Paper | Link | Save as |
 |---|---|---|
-| **free** Trettner, Nehring-Wirxel & Kobbelt 2022, EMBER (server refused connections on 2026-10-22) | https://www.graphics.rwth-aachen.de/media/papers/339/ember_exact_mesh_booleans_via_efficient_and_robust_local_arrangements.pdf | `Trettner-Nehring-Wirxel-Kobbelt-2022-EMBER-exact-mesh-booleans.pdf` |
 | Urick et al. 2019, watertight Boolean operations | https://www.sciencedirect.com/science/article/pii/S0010448519302106/pdfft | `Urick-2019-watertight-boolean-operations.pdf` |
-
-## `research/papers/exchange_healing_naming/`
-
-| Paper | Link | Save as |
-|---|---|---|
-| **free** Farjana & Han 2018, persistent identification review (open access) | https://www.sciencedirect.com/science/article/pii/S1110016818300814/pdfft | `Farjana-Han-2018-persistent-identification-topological-entities-review.pdf` |
-| **free** Marcheix & Pierra 2002, survey of the persistent naming problem (ACM) | https://dl.acm.org/doi/pdf/10.1145/566282.566288 | `Marcheix-Pierra-2002-survey-persistent-naming-problem.pdf` |
-| Capoyleas, Chen & Hoffmann 1996, generic naming in generative design | https://www.sciencedirect.com/science/article/pii/0010448595000143/pdfft | `Capoyleas-Chen-Hoffmann-1996-generic-naming-generative-design.pdf` |
-| Kripac 1997, persistently naming topological entities | https://www.sciencedirect.com/science/article/pii/S0010448596000401/pdfft | `Kripac-1997-persistently-naming-topological-entities.pdf` |
-| Benkő, Martin & Várady 2001, algorithms for reverse engineering B-rep models | https://www.sciencedirect.com/science/article/pii/S0010448501001002/pdfft | `Benko-Martin-Varady-2001-reverse-engineering-brep-models.pdf` |
 
 ## Already fetched
 
-These came through `~/tools/playwright/fetch_pdf.sh` on 2026-10-22. It drives a visible Chrome window, which gets past challenges that block curl and wget, but not a "verify you are human" checkbox. The MIT theses came by opening their DSpace item page and clicking its Download link; MIT rate-limits direct requests to the file.
+32 papers from the original list were fetched on 2026-10-22, some as an earlier or preprint version:
 
-- **intersection:** Krishnan & Manocha 1997, Manocha & Canny 1991, Sederberg & Zundel 1996, Dupont et al. 2008 I–III, Mourrain & Pavone 2009, Sherbrooke 1993 MIT thesis, Mukundan 2005 MIT thesis, Hu & Wallner 2005 (preprint from Shi-Min Hu's Tsinghua page)
-- **tessellation_mass_queries:** Gonzalez-Ochoa et al. 1998, Chen et al. 2006, Elber & Cohen 1990, Appel 1967, Johnson & Cohen 2005, Bénard, Hertzmann & Kass 2014
-- **booleans:** Attene 2020
-- **exchange_healing_naming:** Bi et al. 2023, Marussig & Hughes 2018, Shen 2000 MIT thesis
+- **intersection:** Krishnan & Manocha 1997, Manocha & Canny 1991, Sederberg & Zundel 1996, Dupont et al. 2008 I–III, Mourrain & Pavone 2009, Sherbrooke 1993 MIT thesis, Mukundan 2005 MIT thesis, Hu & Wallner 2005 (article-in-press copy, Tsinghua), Wang, Goldman & Tu 2003 (Wayback copy of the HKU file), Lin et al. 2014 (author's page, Zhejiang)
+- **blends:** Chuang & Hwang 1997 (NYCU repository); Dahl & Krasauskas 2012 as chapter 2 of Heidi Dahl's 2014 Oslo PhD thesis
+- **offsets_sweeps_lofts:** Forsyth 1995
+- **tessellation_mass_queries:** Gonzalez-Ochoa et al. 1998, Chen et al. 2006, Elber & Cohen 1990, Appel 1967, Johnson & Cohen 2005, Bénard, Hertzmann & Kass 2014, Hughes, Reali & Sangalli 2010 (as ICES Report 08-27)
+- **booleans:** Attene 2020, EMBER 2022 (Wayback copy of the RWTH file)
+- **exchange_healing_naming:** Bi et al. 2023, Marussig & Hughes 2018, Shen 2000 MIT thesis, Marcheix & Pierra 2002, Farjana & Han 2018 (images only, OCR'd), Capoyleas, Chen & Hoffmann 1996 (as Purdue tech report 94-011), Kripac 1997 (as its 1995 Solid Modeling version, same title), Benkő, Martin & Várady 2001 (accepted manuscript, Cardiff ORCA)
+
+How they were found, for next time:
+- **Chrome downloader:** `~/tools/playwright/fetch_pdf.sh` drives a visible Chrome window. It gets past the challenges ACM, BYU and Springer show to curl, but not a "verify you are human" checkbox such as ScienceDirect's.
+- **MIT DSpace:** open the item page and click Download, because MIT rate-limits direct file requests.
+- **Author copies:** search the exact title. Author homepages and university repositories often have a copy, and OpenAlex (`api.openalex.org/works/doi:<doi>`) lists repository copies.
+- **Dead links:** the Wayback Machine (`web.archive.org/web/<year>id_/<url>`) often still has an author PDF whose link is now dead.
+
+Alternatives for two papers still missing:
+- **Urick et al. 2019:** Marussig et al. 2019, "Analysis-suitable CAD models based on watertight Boolean operations", is open access (https://onlinelibrary.wiley.com/doi/pdfdirect/10.1002/pamm.201900275).
+- **Pegna & Wolter 1992:** the Filkins 1991 MIT thesis in `papers/blends/` covers its linkage-curve criterion.

@@ -192,6 +192,7 @@ These are the important items the notes list as paywalled, bot-blocked or thrott
 | Naming | Farjana & Han 2018, Persistent identification mechanisms review (open access) | https://doi.org/10.1016/j.aej.2018.01.007 |
 
 ## About this folder
+- `FINDINGS.md` is the short version: the most valuable leads, the corrections, and the state of the paper collection. `download.md` lists the papers still missing.
 - `README.md` is this report. `notes/` holds the per-area research notes it was written from, one file per area, each with a ranked reading list.
 - `algorithms/` holds the implementation cards distilled from the research, with a cross-area build order in `algorithms/README.md`. Where a card corrects this report, the card is right: inertia Gauss counts, sum versus max tolerances, and OCCT's fillet constants.
 - `papers/<area>/` holds the open-access papers the notes cite. The PDFs are git-ignored; each has a Markdown conversion beside it with the same name, made with docling (`~/tools/docling`), and a plain-text extraction (`.txt`, `pdftotext -layout`). The `.md` has clean reading order, headings and tables, but its display equations are `<!-- formula-not-decoded -->` placeholders. The `.txt` keeps the equation symbols, laid out as on the page, with two-column text side by side. Use the `.md` to read and the `.txt` for the maths.

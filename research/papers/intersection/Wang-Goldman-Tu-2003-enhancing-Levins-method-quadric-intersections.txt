@@ -1,0 +1,892 @@
+                                   Computer Aided Geometric Design 20 (2003) 401–422
+                                                                                            www.elsevier.com/locate/cagd
+
+
+
+
+                       Enhancing Levin’s method for computing
+                            quadric-surface intersections
+                        Wenping Wang a,∗ , Ronald Goldman b , Changhe Tu c
+                      a Department of Computer Science, University of Hong Kong, Hong Kong, China
+                        b Department of Computer Science, Rice University, Houston, TX 77251, USA
+                           c Department of Computer Science, Shandong University, Jinan, China
+
+                   Received 22 May 2003; received in revised form 22 May 2003; accepted 26 May 2003
+
+
+
+Abstract
+  Levin’s method produces a parameterization of the intersection curve of two quadrics in the form
+
+                        
+      p(u) = a(u) ± d(u) s(u),
+
+
+where a(u) and d(u) are vector valued polynomials, and s(u) is a quartic polynomial. This method, however, is
+incapable of classifying the morphology of the intersection curve, in terms of reducibility, singularity, and the
+number of connected components, which is critical structural information required by solid modeling applications.
+We study the theoretical foundation of Levin’s method, as well as the parameterization p(u) it produces. The
+following contributions are presented in this paper: (1) It is shown how the roots of s(u) can be used to classify
+the morphology of an irreducible intersection curve of two quadric surfaces. (2) An enhanced version of Levin’s
+method is proposed that, besides classifying the morphology of the intersection curve of two quadrics, produces
+a rational parameterization of the curve if the curve is singular. (3) A simple geometric proof is given for the
+existence of a real ruled quadric in any quadric pencil, which is the key result on which Levin’s method is based.
+These results enhance the capability of Levin’s method in processing the intersection curve of two general quadrics
+within its own self-contained framework.
+ 2003 Published by Elsevier B.V.
+
+Keywords: Quadric surface; Intersection; Stereographic projection
+
+
+
+
+  * Corresponding author.
+    E-mail address: wenping@csis.hku.hk (W. Wang).
+
+0167-8396/$ – see front matter  2003 Published by Elsevier B.V.
+doi:10.1016/S0167-8396(03)00081-5
+402                     W. Wang et al. / Computer Aided Geometric Design 20 (2003) 401–422
+
+
+1. Introduction
+
+   Quadric surfaces are the simplest curved surfaces and are widely used in computer graphics and solid
+modeling. Computing quadric surface intersection curves (QSIC) is an important operation in computing
+the boundary representation of a solid. The goal of this paper is to enhance Levin’s method for computing
+a QSIC so as to make it capable of computing the structural information of the QSIC. Specifically, we
+show how the roots of a discriminant polynomial s(u) computed by Levin’s method can be used to
+classify the morphology of an irreducible intersection curve of two quadric surfaces, in terms of its
+reducibility, singularity, and the number of connected components. Based on this result, we present
+an enhanced version of Levin’s method that is capable of classifying the morphology of a QSIC and
+producing a rational parameterization if the QSIC is singular. Furthermore, we give a concise geometric
+proof for the existence of a real ruled quadric in any real quadric pencil, which is the key result on which
+Levin’s method is based.
+   The remainder of the paper is organized as follows. In the rest of this section we discuss the basic
+properties of the QSIC and review Levin’s method as well as other related work. In Section 2, procedures
+are described for detecting and processing a reducible QSIC, focusing on a remedy to make Levin’s
+method capable of detecting and parameterizing properly a reducible but nonplanar QSIC, comprising
+a line and a space cubic curve. In Section 3, with the aid of a stereographic projection, we obtain
+characterizations of different morphologies of irreducible QSIC’s in terms of the roots of a discriminant
+polynomial computed by Levin’s method. In Section 4, based on the preceding analysis, we present
+an enhanced version of Levin’s method for classifying and parameterizing a general QSIC. The paper
+concludes in Section 5 with a summary of our work. In Appendix A we give a concise geometric proof
+for the existence of a real ruled quadric in any real quadric pencil.
+
+1.1. Morphologies of QSIC’s
+
+    Let CP3 , RP3 , and RA3 denote, respectively, 3D complex projective space, 3D real projective space,
+and 3D real affine space. Every quadric discussed in this paper is assumed to be defined by the zero
+set of a quadratic form X T AX in CP3 , where X is a 4D column vector consisting of the homogeneous
+coordinates of a point and A is a 4 × 4 real symmetric matrix. The intersection curve of two quadrics
+X T AX = 0 and X T BX = 0 comprises all the points in CP3 that satisfy both of these equations.
+    The full classification of the morphology of a QSIC in CP3 can be found in classical texts on algebraic
+geometry and solid geometry (Baker, 1923; Sommerville, 1947; Semple and Kneebone, 1952). The
+intersection curve of two quadrics (QSIC) is a space quartic curve of the first species. A QSIC is reducible
+if it contains some linear, quadratic (conic), or cubic components, whose degrees sum to 4; otherwise it
+is called irreducible. The linear or conic components of a reducible QSIC can be real or imaginary, but
+in the case where the QSIC consists of a line and a space cubic, the line and the space cubic are real.
+A QSIC is planar if its components lie on one or two planes. All planar QSIC’s are reducible. Nonplanar
+QSIC’s include all irreducible QSIC’s and those reducible QSIC’s that comprise a line and a space cubic.
+    A QSIC is called singular if it has a singular point, i.e., a point at which the tangent line is not uniquely
+defined; otherwise it is nonsingular. A reducible QSIC is always singular, but an irreducible QSIC can be
+singular or nonsingular. A singular but irreducible QSIC has exactly one double singular point of three
+possible types, i.e., acnode, crunode, or cusp, and is a rational curve of degree 4. Such a QSIC may have
+only one real acnode without any other real regular point. A nonsingular QSIC can have zero, one, or two
+                        W. Wang et al. / Computer Aided Geometric Design 20 (2003) 401–422                403
+
+
+connected components in RP3 . A nonsingular QSIC does not permit a rational parameterization, but can
+be parameterized with a square root or an elliptic function (Farouki et al., 1989). The following diagram
+shows a hierarchy of all QSIC’s with respect to their reducibility, planarity, and singularity:
+                            
+           
+                               planar QSIC: comprising lines or conics;
+            reducible QSIC
+     QSIC                      reducible but nonplanar QSIC: a real line and a real space cubic;
+           
+                                 singular QSIC with a real acnode, crunode, or cusp;
+            irreducible QSIC
+                                  nonsingular QSIC with zero, one, or two components in RP3 .
+
+1.2. Related work
+
+    The Segre characteristic provides a useful characterization of different morphologies of a QSIC in CP3
+(Bromwich, 1906; Farouki et al., 1989). However, such classical results are often not sufficient because
+CAD and graphics applications often require the classification and representation of the QSIC to take
+place in real (projective, affine, or Euclidean) space. For instance, the single Segre characteristic [(11)11]
+is assigned to a QSIC comprising two conics touching at two distinct points, but there are four different
+morphologies in RP3 in this case, depending on whether the two conics are real or imaginary and whether
+the two common points are real or imaginary. Similarly, nonsingular QSIC’s with different numbers of
+connected components in RP3 all correspond to the same Segre characteristic [1111]. Some recent results
+are reported in (Tu et al., 2002) that use the roots of the characteristic equation |λA−B| = 0 to distinguish
+different types of nonsingular QSIC’s.
+    Computational requirements for QSIC’s vary from tracing the curve for graphics display to deriving
+geometric and topological information for geometric processing. A variety of methods can be found in the
+literature for computing QSIC’s. These methods provide different levels of information or have different
+assumptions on the kinds of quadrics or QSIC’s that can be handled. There are notably two different
+approaches to computing the QSIC: the geometric approach and the algebraic approach. Methods using
+the geometric approach normally exploit special geometric properties of a special class of quadrics to
+yield robust procedures for computing the QSIC (Miller, 1987; Piegl, 1989; Shene and Johnstone, 1994;
+Miller and Goldman, 1995). Such a special class usually includes natural quadrics, i.e., spheres, circular
+cones and cylinders, plus pairs of planes. The focus on natural quadrics is justified by their frequent
+occurrence in engineering applications. In the following we review only methods using the algebraic
+approach, since these methods normally accept arbitrary quadrics.
+    Levin’s method is one of the early methods for computing the general QSIC of two arbitrary quadrics.
+It produces a parameterization of the QSIC with a square-root function but does not yield information
+about the reducibility or singularity of the QSIC. Hence, this method is mainly a technique for tracing
+the intersection curve. Since the goal of the present paper is to improve Levin’s method, we will review
+Levin’s method in more detail in Section 1.3.
+    Levin’s method is implemented by Sarraga in GMSOLID for computing the intersection curves of
+natural quadrics (Sarraga, 1983). Sarraga also attempts to give a geometric interpretation of the zeros
+of a quartic discriminant polynomial s(u) generated in Levin’s method for segmenting a QSIC but does
+not provide a complete analysis regarding the reducibility, the singularity, and the number of connected
+components of a QSIC. Ocken, Schwartz, and Sharir (1987) propose to use a projective transformation
+to reduce two input quadrics to simple canonical forms whose intersection curve can easily be found.
+It is not clear whether a complete classification of a QSIC can be accomplished by their results, since
+404                    W. Wang et al. / Computer Aided Geometric Design 20 (2003) 401–422
+
+
+their procedures are not thoroughly analyzed and some cases are missing; for instance, the case of two
+quadrics intersecting in a line and a space cubic is not accounted for.
+   Degenerate QSIC’s of arbitrary quadrics are studied in (Farouki et al., 1989). A degenerate QSIC is
+detected by the vanishing of the discriminant of the equation |λA + B| = 0 of two quadrics X T AX = 0
+and X T BX = 0, and is further classified by projecting the QSIC to a planar quartic curve and analyzing
+this quartic curve. Wilf and Manor use the Segre characteristic to assist with classifying a QSIC before
+invoking Levin’s method to yield a proper parameterization of the QSIC (Wilf and Manor, 1993). Using
+the Segre characteristic allows them to properly generate all linear components of a QSIC that might be
+missed by Levin’s method and to generate a rational parameterization for a singular QSIC. However, this
+method still cannot count the number of connected components of a nonsingular QSIC.
+   More recently, Wang, Joe, and Goldman (2002) compute the QSIC by first obtaining and analyzing a
+planar cubic curve that is the image of the QSIC under a general stereographic projection. This method
+accepts arbitrary input quadrics, classifies the morphology of a general QSIC, and yields a rational
+parameterization for a singular QSIC; however, an initial point on the QSIC needs to be computed first
+in order to invoke the method.
+   Other methods for computing the intersection curves of general parametric or algebraic surfaces can
+also be applied to computing the QSIC; see, for example, (Abhyankar and Bajaj, 1989; Garrity and
+Warren, 1989). However, since these methods are typically devised for more general classes of surfaces,
+they normally do not take into account the specific algebraic properties of quadric surfaces. Therefore
+they provide an algebraic representation of a QSIC that is usually more complicated than the one given
+by Levin’s method.
+
+1.3. Levin’s method
+
+  Levin’s method is a procedure for parameterizing an arbitrary QSIC with a square root in the form
+                        
+    p(u) = a(u) ± d(u) s(u),
+where a(u) and d(u) are vector valued polynomials and s(u) is a quartic polynomial. Levin published
+two papers on this method (Levin 1976, 1978). The first paper presents the basic idea of using a real
+ruled quadric, called the parameterization surface, in the pencil of two quadrics to find the QSIC and
+proves the existence of such a parameterization surface. The second paper discusses implementation
+issues and describes the procedure in detail. Levin’s method has inspired several subsequent papers on
+its application and improvement (Sarraga, 1983; Wilf and Manor, 1993), as well as the present paper.
+    Two distinct quadrics A: X T AX = 0 and B: X T BX = 0, i.e., their coefficient matrices are linearly
+independent, span a pencil of quadrics: X T (λA + B)X = 0. The intersection curve of A and B is called
+the base curve of the pencil. It is evident that any member of the pencil passes through the base curve
+and any two distinct members of the pencil intersect at the base curve. Hence, the intersection curve of
+A and B can be computed by intersecting any two distinct quadrics in the pencil X T (λA + B)X = 0.
+    Levin’s method is based on the critical observation that there exists a real ruled quadric S: X T SX = 0
+in the pencil X T (λA + B)X = 0. This surface is called a parameterization surface. The quadric S
+can be a pair of planes, a singly ruled quadric (i.e., a cone or a cylinder), or a doubly ruled quadric
+(i.e., a one-sheet hyperboloid or a hyperbolic paraboloid). There is only one family of straight lines
+on a singly ruled quadric S, all passing though the vertex of S; the vertex is a point at infinity if
+S is a cylinder. There are two reguli on a doubly ruled quadric S (Semple and Kneebone, 1952;
+                        W. Wang et al. / Computer Aided Geometric Design 20 (2003) 401–422             405
+
+
+Pottmann and Wallner, 2001); two distinct lines from the same regulus are skew and two lines from
+different reguli intersect.
+   Recall that linear combinations of the homogeneous coordinates of two distinct points X0 and X1
+generate all points on the line connecting X0 and X1 . So a ruled quadric S can be parameterized by
+     q(u, v) = b(u) + vd(u),                                                                            (1)
+where q(u, v), b(u), and d(u) are vector valued polynomials in homogeneous coordinates. If S is singly
+ruled, b(u) is the vertex of S and d(u) is a proper conic on S, i.e., b(u) has degree 0 and d(u) has
+degree 2. (Note that when S is a cylinder, b(u) is not a direction, but a 4D vector for the homogeneous
+coordinates of the singular point of S at infinity.) If S is doubly ruled, b(u) and d(u) are two skew lines
+from the same regulus, so both are of degree 1. In general, b(u) and d(u) are called the generating curves
+for parameterizing the ruled surface S through (1).
+   Since A or B are distinct surfaces, we can assume, without loss of generality, that the ruled surface S
+is distinct from A. To find the base curve of the pencil X T (λA + B)X = 0, we substitute q(u, v) for X
+in X T AX = 0 and obtain
+     c2 (u)v 2 + 2c1 (u)v + c0 (u) = 0,                                                                 (2)
+where
+     c2 (u) = d(u)T Ad(u),           c1 (u) = b(u)T Ad(u),      c0 (u) = b(u)T Ab(u).
+This equation has the solution
+                    √
+         −c1 (u) ± s(u)
+     v=                    ,
+               c2 (u)
+where
+     s(u) = c12 (u) − c2 (u)c0 (u)                                                                      (3)
+is the discriminant of (2) and a quartic polynomial in u. Substituting the above solution for v in q(u, v)
+yields the following homogeneous parameterization of the QSIC
+                                                         
+      p(u) = c2 (u)b(u) + −c1 (u) ± s(u) d(u) = a(u) ± s(u)d(u),                                       (4)
+where
+     a(u) = c2 (u)b(u) − c1 (u)d(u).
+   Levin’s method, as originally proposed, is mainly a technique for tracing a QSIC and is incapable
+of providing the structural information of the QSIC, such as reducibility, singularity, and the number of
+connected components. See also (Farouki et al., 1989; Wilf and Manor, 1993) for their remarks about the
+difficulties with Levin’s method. Specifically, Levin’s method has the following problems:
+
+(1) The reducibility of a QSIC is not detected properly. For example, as pointed out in (Wilf and Manor,
+    1993), if a QSIC consists of a line 1 and a space cubic, the linear component 1 may be missed
+    by Levin’s method. We provide a detailed analysis of, as well as a remedy for, this problem in
+    Section 2.2.
+(2) The singularity of a QSIC is not detected and classified. As a consequence, Levin’s method may fail
+    to yield a rational parameterization for a singular QSIC, which is a rational curve.
+406                     W. Wang et al. / Computer Aided Geometric Design 20 (2003) 401–422
+
+
+(3) The number of connected components of a nonsingular QSIC in RP3 is not computed. The
+    enumeration and identification of different connected components of a QSIC is useful topological
+    information; for instance, when combined with the points at infinity on the QSIC, this information
+    can be used for segmenting the QSIC in AR3 , the 3D real affine space, since only finite segments of a
+    curve are used in practice (Sarraga, 1983). Note that none of the existing methods for processing the
+    QSIC has addressed the problem of counting or identifying the number of connected components of
+    a nonsingular QSIC.
+
+    In addition, the algebraic proof by Levin for the existence of a real ruled surface in any quadric pencil
+is lengthy and involved (Levin, 1976); it takes four lemmas and fills nearly two double-columned pages.
+We give a much shorter and more accessible geometric proof of this fact in Appendix A.
+
+
+2. Reducible intersection curves
+
+2.1. Planar QSIC’s
+
+   There exist well-studied solutions to the problem of computing planar QSIC’s (Levin, 1978; Sarraga,
+1983; Miller and Goldman, 1995); the problem is basically reduced to computing the intersection
+between a quadric and two planes. Hence, we turn our attention to the case of nonplanar reducible QSIC’s
+for which, in general, Levin’s method is known to fail.
+
+2.2. Nonplanar and reducible QSIC’s
+
+   A reducible but nonplanar QSIC consists a real space cubic curve and a real line. The line may
+intersect the space cubic in two distinct real or complex conjugate points, or may be tangent to the space
+cubic. It is first pointed out in (Wilf and Manor, 1993) that Levin’s method cannot, in general, produce a
+proper parameterization of the QSIC in this case, and that the linear component may be missing from the
+parameterization entirely.
+   Consider a QSIC consisting of a line 1 and a space cubic. Suppose that S is doubly ruled. Let the
+generating curve b(u) for parameterizing S by q(u, v) (1) be a line r0 in the regulus R on S. Suppose
+further that the linear component 1 lies in the other regulus L on S. Then 1 is given by q(u0 , v) for
+some value u0 . Thus Eq. (2) is satisfied by all v, with u = u0 . It follows that the three coefficients ci (u)
+of Eq. (2) vanish simultaneously at u0 . This means that, with the parameterization p(u) of the QSIC
+given by (4), the single point p(u0 ) corresponds to the entire line 1 ; that is, the line 1 is not represented
+properly by the parameterization p(u).
+   A similar analysis shows that the same problem also arises when S is singly ruled. Hence, instead of
+attempting to analyze the parameterization p(u) in this case, a QSIC consisting of a line and space cubic
+should be detected before p(u) is computed. And, if such a QSIC is detected, one should first extract the
+linear component and then proceed to parameterize the residual cubic space curve.
+   A QSIC consisting of a space cubic and a line can be detected as follows. Suppose first that the
+parameterization surface S is singly ruled. Form the quadratic equation (2). Then the QSIC has a linear
+component if and only if the three coefficients ci (u) of Eq. (2) vanish simultaneously for some u0 .
+Since c0 (u) = b(u)T Ab(u) is a constant, one may check if it is zero. If it is nonzero, then the QSIC
+                       W. Wang et al. / Computer Aided Geometric Design 20 (2003) 401–422              407
+
+
+does not have a linear component; if it is zero, then the QSIC has a linear component if and only if the
+other two coefficients c1 (u) and c2 (u) have a common nonconstant factor. Note that c1 (u) and c2 (u) are
+polynomials of degree 2 and degree 4, respectively. They have a common nonconstant factor if and only
+if Res(c1 (u), c2 (u)) = 0, or equivalently, if and only if GCD(c1 (u), c2 (u)) is not constant.
+   When S is doubly ruled, one may first derive two parameterizations of S, with the generating line
+b(u) chosen from each of the two reguli on S. Then the QSIC contains a linear component if and
+only if the three coefficients c0 (u), c1 (u), and c2 (u) of Eq. (2) have a common nonconstant factor for
+either of these two parameterizations of S. Note that in this case the ci (u) are quadratic polynomials.
+It is easy to show that the ci (u), i = 0, 1, 2, have a common factor if and only if the three resultants
+Res(c0 (u), c2 (u)), Res(c1 (u), c2 (u)), and Res(c0 (u) + c1 (u), c2 (u)) are zero. Alternatively, one may
+compute GCD(GCD(c0 (u), c1 (u)), c2 (u)) to detect if the ci (u), i = 0, 1, 2, have a common nonconstant
+factor.
+
+
+3. Irreducible intersection curves
+
+3.1. Stereographic projection
+
+   The main idea in the analysis of an irreducible QSIC is to use a stereographic projection to project the
+QSIC to a planar cubic curve that has the same structure as the QSIC. To facilitate the construction of
+the stereographic projection, we first give two conditions that characterize a QSIC devoid of real regular
+points. Note that an irreducible QSIC cannot have more than one singular point.
+   The following two results are obvious.
+
+Theorem 1. If a QSIC is devoid of real points then s(u) < 0 for all u.
+
+Theorem 2. If an irreducible QSIC has one real singular point but no other real points then s(u) < 0 for
+all u except for one value u0 at which s(u0 ) = 0.
+
+   Since the case of an irreducible QSIC with no real regular points can be characterized by Theorems 1
+and 2, in the following we will consider only QSIC’s with real regular points. Let S denote a parame-
+terization surface used in Levin’s method, which is a ruled quadric in the pencil of two input quadrics A
+and B. We define a stereographic projection M from the ruled quadric S that maps the QSIC to a planar
+cubic curve H on a plane P in RP3 . (See (Sommerville, 1947; Wang et al., 1997) for a stereographic
+projection on a general quadric surface and its properties.) We will see that this projection preserves a
+number of algebraic and topological properties of the QSIC, i.e., the QSIC and H have the same re-
+ducibility, the same type of singularity, and the same number of connected components. In addition, the
+projection M maps a regulus on S to a pencil of lines centered at a point on H. These properties of M
+are critical in performing a rigorous analysis of the geometric meaning of the polynomial s(u), since the
+problem is translated to studying the intersection of a planar cubic curve with a pencil of lines.
+   First suppose that S is a doubly ruled quadric. See Fig. 1. Let R and L denote the two reguli on S. Let
+N0 be a real regular point on the QSIC. Let r0 ∈ R and l0 ∈ L be the two lines passing through the point
+N0 , and let r0 be the line q(u, 0) = b(u) used in the parameterization (1) of S. Take N0 as the center of
+a stereographic projection M from S to a plane P in RP3 not passing through N0 . Suppose that the line
+408                    W. Wang et al. / Computer Aided Geometric Design 20 (2003) 401–422
+
+
+
+
+                                     Fig. 1. A stereographic projection on S.
+
+
+
+r0 is projected by M to a point R̃0 in the plane P. Then, since the center N0 of M is a regular point of
+the QSIC, the QSIC is mapped by M to a planar cubic curve H passing through R̃0 on P (Baker, 1923;
+Sommerville, 1947). That H is a cubic curve can easily be seen as follows. Let P be a generic plane
+passing through the point N0 ; thus the intersection between P and P is a generic line, denoted by  ,
+on P. Since the QSIC is a space quartic curve, P intersects the QSIC at N0 and three other free points.
+Clearly, the three free intersection points are in one-to-one correspondence with intersections between
+the line  and the curve H. Hence, H is a planar cubic curve since it is intersected three times by a
+generic line  in the plane. Furthermore, all the lines in L are mapped to a pencil of lines L̃ centered at
+the point R̃0 ∈ H in the plane P (see Fig. 1).
+   When S is singly ruled, in a similar manner we may also define a stereographic projection M on S. In
+this case, the base curve d(u) in (1) for parameterizing S is a conic, and b(u) is a constant vector for the
+vertex of S (see Section 1.3). Suppose that the conic d(u) passes through a real regular point N0 on the
+QSIC. Take N0 as the center of a stereographic projection M from S to a plane P in RP 3 not passing
+through N0 . Let the vertex b(u) of S be projected through N0 to a point R̃0 on P. Then the QSIC is again
+projected by M to a planar cubic curve H passing through R̃0 and all the lines on S, denoted as a group
+by L, are projected to a pencil of lines L̃ centered at the point R̃0 in the plane P. Hence, we have defined
+a stereographic projection on the parameterization surface S when S is doubly ruled or singly ruled.
+
+Assumption. (a) When the parameterization surface S is doubly ruled, the line b(u) in the parameter-
+ization of S given by (1) passes through the center N0 of the stereographic projection M; or (b) when
+the parameterization surface S is singly ruled, the conic d(u) in the parameterization of S given by (1)
+passes through the center N0 of the stereographic projection M.
+                        W. Wang et al. / Computer Aided Geometric Design 20 (2003) 401–422                409
+
+
+Remark. The above assumption facilitates the subsequent discussion in this subsection. But this
+assumption will be dropped as a consequence of Lemma 3 in Section 3.2, since it is not essential to
+the validity of the final results listed in Theorem 11 in Section 3.4.
+
+  To recap, the projection M preserves the following algebraic and topological properties of the QSIC:
+
+(1) The QSIC is nonsingular if and only if the cubic H is nonsingular;
+(2) When they are nonsingular, the QSIC and the cubic H have the same number of connected
+    components;
+(3) When they are singular but irreducible, the QSIC and the cubic H both have one double point;
+    furthermore, their double points have the same type, i.e., either an acnode, a crunode, or a cusp.
+
+  The parameterization (4) of the QSIC is mapped by M to the following parameterization of the planar
+cubic H:
+                                                                         
+     p̃(u) ≡ M p(u) = c2 (u)M b(u) + −c1 (u) ± s(u) M d(u) = ã(u) ± s(u)d̃(u),                   (5)
+where
+     ã(u) = c2 (u)M b(u) − c1 (u)M d(u)           and    d̃(u) = M d(u) .
+When the parameterization surface S is doubly ruled, M(b(u)), which is the projection of the line r0 ∈ R,
+is the fixed point R̃0 , and M(d(u)), which is the projection of another line r1 ∈ R, is a line not passing
+through R̃0 in the plane P, since r0 and r1 are two skew lines in the same regulus R; that is, M(b(u)) has
+degree 0 and M(d(u)) has degree 1. When S is singly ruled, M(b(u)) is also a fixed point, since it is the
+projection of the vertex of S, and M(d(u)) is also a line, since it is the projection of the conic d(u) with
+the projection center N0 located on d(u); hence, again, M(b(u)) has degree 0 and M(d(u)) has degree 1.
+    The above parameterization p̃(u) (5) of the cubic H is actually the same parameterization of H that
+can be obtained by intersecting H with the pencil of the lines L̃: R̃0 + vM(d(u)) centered at the point R̃0 .
+Let ˜ ∈ L̃ denote a line that is the image of a line  ∈ L under the projection M. Then the two intersection
+points I0 and I1 between a line in  ∈ L and the QSIC correspond under the projection M to the two
+intersection points I˜0 and I˜1 between ˜ and the cubic curve H. Moreover, (i) I0 and I1 are two distinct
+real points if and only if I˜0 and I˜1 are two distinct real points; and (ii) I0 and I1 collapse into a double
+real point if and only if I˜0 and I˜1 collapse into a double real point. Further, from (5) we see that the
+sign of s(u) determines whether the two intersection points I˜0 and I˜1 of a line ˜ ∈ L̃ and the cubic H
+are two distinct real points or two complex conjugate points. In particular, the vanishing of s(u), as the
+discriminant of (2), signals that the points I˜0 and I˜1 form a double real point, a case that occurs when the
+line ˜ is tangent to the cubic H at a point other than R̃0 or when the line ˜ passes through a double point
+of a singular planar cubic H.
+    Since planar cubic curves are well understood (Salmon, 1934; Bix, 1998), the intersection configura-
+tions between a planar cubic and a pencil of lines centered on the cubic can be studied in an exhaustive
+and rigorous manner. This investigation can then lead to a thorough analysis of the geometric interpre-
+tation of the zeros of s(u) in connection with the planar cubic H , and hence also in connection with the
+QSIC through the stereographic projection M that relates the cubic H to the QSIC.
+    Because the intersection properties we are concerned with here are not affected by projective
+transformations in the plane P, we may simplify our discussion by considering only the normal form
+410                     W. Wang et al. / Computer Aided Geometric Design 20 (2003) 401–422
+
+
+of an irreducible planar cubic under projective transformations. The normal form of an irreducible planar
+cubic curve under projective transformation is y 2 = x 3 + px + q (Bix, 1998). There are five topologically
+different species of an irreducible planar cubic in the normal form. Figs. 2–7 show singular but irreducible
+cubics with three different types of double singular points. Figs. 8–10 show two kinds of nonsingular
+cubics with one and two connected components, respectively. In the next two subsections we consider
+the intersection between the pencil L̃ and the planar cubic H, assuming in turn that H is of each of these
+five types.
+
+3.2. Singular and irreducible intersection curves
+
+  In this section we consider a singular and irreducible QSIC. Since the center of the projection M is
+chosen to be at a regular point of a QSIC, a singular QSIC is projected to a planar cubic curve with one
+double point, which is an acnode, a crunode, or a cusp.
+
+Lemma 3. Given two quadrics A and B, suppose the parameterization surface S in Levin’s method has
+two parameterizations
+      q(u, v) = b(u) + vd(u)
+and
+      q̄(u, v) = (γ v + µ)b(u) + (αv + β)d(u),
+where α, β, γ , and µ are real constants with δ ≡ αµ − βγ = 0. Let s(u) and s̄(u) be the discriminant
+polynomials resulting from using q(u, v) and q̄(u, v), respectively (see Section 1.3). Then s(u) = δ 2 s̄(u).
+
+Proof. Substituting the two parameterizations q(u, v) and q̄(u, v) of S into X T AX = 0 yields the
+following two different quadratic equations, in place of (2):
+      c2 (u)v 2 + 2c1 (u)v + c0 (u) = 0,
+and
+      c2 (u)(αv + β)2 + 2c1 (u)(αv + β)(γ v + µ) + c0 (u)(γ v + µ)2 = 0.                                 (6)
+Then s(u) = c12 (u) − c0 (u)c2 (u) and s̄(u) is the discriminant of the quadratic equation (6) in v. It is
+straightforward to verify that s(u) = δ 2 s̄(u). This completes the proof. ✷
+
+Theorem 4. If the QSIC is singular with an acnode plus a connected component, then either (a) s(u)
+has a double root u0 with s (u0 ) < 0 and two simple real roots; or (b) s(u) = c12 (u) where c1 (u) is a
+quadratic polynomial with two complex conjugate roots. Furthermore, the parameterization p(u) of the
+QSIC given by (4) is rational if and only if case (b) occurs.
+
+Proof. We first show that, without loss of generality, it may be assumed that either (i) the generating line
+b(u) of S passes through a real regular point N0 of the QSIC when the parameterization surface S is
+doubly ruled; or (ii) the generating conic d(u) of S passes through a real regular point N0 of the QSIC
+when the parameterization surface S is singly ruled. For otherwise, if S is doubly ruled, we may choose
+                         W. Wang et al. / Computer Aided Geometric Design 20 (2003) 401–422                      411
+
+
+an appropriate v0 such that the line b̄(u) = b(u) + v0 d(u) passes through a real regular point N0 of the
+QSIC, and then use the following parameterization for S (see Fig. 1):
+     q̄(u, v) = b̄(u) + vd(u) = b(u) + (v + v0 )d(u).
+By Lemma 3, the same s(u) will result from using q̄(u, v) or q(u, v). If S is singly ruled and the conic
+d(u) does not pass through any real regular point of the QSIC, we may choose an appropriate γ0 such
+that the conic d̄(u) = γ0 b(u) + d(u) passes through a real regular point N0 of the QSIC, and then use the
+following parameterization for S:
+     q̄(u, v) = b(u) + v d̄(u) = (γ0 v + 1)b(u) + vd(u).
+By Lemma 3, again, the same s(u) will result from using q̄(u, v) or q(u, v). Thus, in both cases where
+S is doubly ruled or singly ruled, the discriminant polynomial s(u) remains the same with or without the
+assumption made at the start of this proof.
+   Consider the stereographic projection M : S → P, centered at N0 . Suppose that the QSIC is mapped
+by M to the planar cubic H, its acnode X0 mapped to the acnode X̃0 of H, and the lines in L on S
+mapped to the pencil of lines centered at a point R̃0 on the cubic H in the plane P.
+   There are two subcases: (a) R̃0 is a regular point of H and therefore R̃0 = X̃0 ; and (b) R̃0 = X̃0 . In
+case (a), the line R̃0 X̃0 has a double intersection with H at X̃0 . (See Fig. 2.) Thus s(u) has a multiple
+root u0 which gives rise to the line R̃0 X̃0 . Since X̃0 is an isolated real point, we have s(u0 ± ε) < 0 for a
+sufficiently small ε > 0. It follows that u0 is a double root with s (u0 ) < 0. Moreover, since two tangents
+can be drawn from the point R̃0 to the cubic H (Salmon, 1934), s(u) has two simple real roots.
+   In case (b), a line ˜ ∈ L̃ has two fixed intersection points with the cubic H at X̃0 and only one variable
+intersection point with H, or equivalently, a line  ∈ L on the ruled quadric S has, in general, only one
+variable intersection with the QSIC. This implies that S is a singly ruled quadric with its vertex at the
+double point X0 of the QSIC; for otherwise, if S was doubly ruled, then a line  ∈ L would have, in
+general, two variable intersections with the QSIC (which is irreducible); this is a contradiction. Recall
+that the two solutions for v of Eq. (2) give the two intersections of  with the QSIC, or equivalently, the
+two intersections I˜0 and I˜1 of ˜ with the cubic H. Thus the last coefficient c0 (u) ≡ 0, accounting for the
+
+
+
+
+     Fig. 2. A singular cubic with an acnode X̃0 and           Fig. 3. A singular cubic with an acnode X̃0 and
+     R̃0 = X̃0 .                                              R̃0 = X̃0 .
+412                      W. Wang et al. / Computer Aided Geometric Design 20 (2003) 401–422
+
+
+fact that v = 0 is always a solution of Eq. (2), i.e., one of I˜0 and I˜1 is always at R̃0 and the other is a
+variable intersection given by v = −2c1 (u)/c2 (u). So
+      s(u) = c12 (u) − 4c0 (u)c2 (u) = c12 (u).
+   Furthermore, since R̃0 = X̃0 is an isolated singular point, the only variable intersection point between
+the pencil L̃ and the cubic H cannot be at R̃0 for any real value of u. (See Fig. 3.) It follows that
+v = −2c1 (u)/c2 (u) does not vanish for any real value of u. Hence, c1 (u) has two complex conjugate
+roots. In this case no real tangent can be drawn from R̃0 = X̃0 to H and the parameterization (4) becomes
+rational, given by p(u) = c2 (u)b(u) − 2c1 d(u). This completes the proof. ✷
+
+Remark. When counting the tangents that can be drawn from R̃0 to H, we are concerned only with
+whether or not the two variable intersection points I˜0 and I˜1 between a line ˜ ∈ L̃ and H coincide.
+Therefore, unless R̃0 is an inflection point of H, the tangent of H at R̃0 is not counted, since in this case
+I˜0 and I˜1 are distinct and only one of them coincides with R̃0 . This convention on counting the number
+of tangents from R̃0 to H is followed throughout this section.
+
+   We can also prove the following results regarding a QSIC with a crunode or a cusp. The proofs are
+similar to the proof of Theorem 4, so are omitted.
+
+Theorem 5. If the QSIC is singular with a crunode, then either (a) s(u) has a double root u0 with
+s (u0 ) > 0 plus two simple real roots; or (b) s(u) = c12 (u) where c1 (u) has two distinct real roots.
+Furthermore, the parameterization p(u) of the QSIC given by (4) is rational if and only if case (b)
+occurs.
+
+Remark. In case (a) the double root of s(u) is generated by a line drawn from a regular point R̃0 on H
+to its crunode X̃0 , and the other two simple roots correspond to two real tangents that can be drawn from
+R̃0 to H (Salmon, 1934). (See Fig. 4.) In case (b), the two simple roots of c1 (u) correspond to the two
+tangents of H at its crunode. (See Fig. 5.)
+
+
+
+
+      Fig. 4. A singular cubic with a crunode X̃0 and           Fig. 5. A singular cubic with a crunode X̃0 and
+      R̃0 = X̃0 .                                              R̃0 = X̃0 .
+                       W. Wang et al. / Computer Aided Geometric Design 20 (2003) 401–422                   413
+
+
+
+
+     Fig. 6. A singular cubic with a cusp X̃0 and            Fig. 7. A singular cubic with a cusp X̃0 and
+     R̃0 = X̃0 .                                            R̃0 = X̃0 .
+
+
+Theorem 6. If the QSIC is singular with a cusp, then either (a) s(u) has a triple root u0 plus
+another simple real root; or (b) s(u) = c12 (u), where c1 (u) has a real double root. Furthermore, the
+parameterization p(u) of the QSIC given by (4) is rational if and only if case (b) occurs.
+
+Remark. In case (a) the triple root of s(u) is generated by a line drawn from a regular point R̃0 on H
+to its cusp, and the simple root of s(u) corresponds to a real tangent that can be drawn from R̃0 to H
+(Salmon, 1934). (See Fig. 6.) In case (b), the double root of c1 (u) corresponds to the unique tangent of
+H at its cusp. (See Fig. 7.)
+
+   By Theorems 4–6, in particular the argument in the proof for case (b) of Theorem 4, we obtain the
+following theorem.
+
+Theorem 7. For a QSIC with one singular point X0 , the parameterization p(u) by (4) is rational if and
+only if the parameterization surface S used in Levin’s method is a singly ruled quadric with its vertex
+at X0 . Furthermore, when such a parameterization surface is used, a rational parameterization of the
+QSIC is given by
+     p(u) = c2 (u)b(u) − 2c1 d(u).
+
+Theorem 8. Let A: X T AX = 0 and B: X T BX = 0 be two quadrics whose intersection curve is singular
+but nonplanar. Then there exists a singly ruled quadric in the pencil of A and B whose vertex is at a
+singular point of the intersection curve of A and B.
+
+Proof. Let X0 be a singular point of the QSIC of A and B. Suppose that neither A nor B is singly ruled
+with its vertex at X0 , for otherwise we are done. Then the respective tangent planes X0T AX = 0 and
+X0T BX = 0 of A and B at X0 are well-defined and identical, i.e., X0T A = ρX0T B for some real constant ρ.
+Hence, the quadric S0 : X T (A − ρB)X = 0 in the pencil of A or B is a singly ruled quadric with its vertex
+at X0 , since X0T (A − ρB) = 0. Note that S0 cannot be a pair of planes, since the QSIC is nonplanar. This
+completes the proof. ✷
+414                   W. Wang et al. / Computer Aided Geometric Design 20 (2003) 401–422
+
+
+
+
+                                Fig. 8. A nonsingular cubic with one component.
+
+
+  Note that Theorem 8 also covers the case where a QSIC consists of a line and a space cubic.
+
+Corollary 9. Any singular QSIC is rational.
+
+3.3. Nonsingular intersection curves
+
+Theorem 10. If the QSIC is nonsingular with one connected component, then s(u) has two simple real
+roots and two complex conjugate roots.
+
+Proof. Similar to the proof of Theorem 4, with the aid of the stereographic projection M, the argument is
+reduced to counting the number of real tangents that can be drawn to a nonplanar cubic H from a regular
+point R̃0 on H, since each of these tangents is accounted for by a simple real root of s(u). Since H has
+one connected component, we know that exactly two tangents can be drawn from R̃0 to H (Salmon,
+1934). (See Fig. 8.) Hence, s(u) has two simple real roots and two other complex conjugate roots. This
+completes the proof. ✷
+
+Theorem 11. If the QSIC is nonsingular with two connected components, then either (a) s(u) has four
+simple real roots; or (b) s(u) has no real roots and s(u) > 0 for all u.
+
+   The proof of Theorem 11 is similar to that of Theorem 10, so is omitted. The two cases in Theorem 11
+correspond to whether the pencil center R̃0 is on the infinite branch or the oval branch of the cubic H.
+When R̃0 is on the infinite branch, four tangents can be drawn from R̃0 to H (see Fig. 9); when R̃0 is on
+the oval branch, no tangent can be drawn from R̃0 to H (Salmon, 1934) (see Fig. 10).
+
+3.4. Complete characterization of irreducible QSIC’s
+
+   In Sections 3.2 and 3.3 we obtained necessary conditions in terms of the roots of s(u) for all
+morphologies of irreducible QSIC’s. Because these necessary conditions are distinct from each other,
+they are therefore also sufficient for the respective morphologies. We summarize these necessary and
+sufficient conditions for different cases in the following theorem.
+                         W. Wang et al. / Computer Aided Geometric Design 20 (2003) 401–422                       415
+
+
+
+
+     Fig. 9. A nonsingular cubic with two components           Fig. 10. A nonsingular cubic with two components
+     and R̃0 on the infinite branch.                           and R̃0 on the oval branch.
+
+
+
+Theorem 12. Let Q be an irreducible QSIC.
+
+(1) Q has one real singular point but no other real points if and only if s(u) < 0 for all u except for one
+    value u0 at which s(u0 ) = 0.
+(2) Q is singular with an acnode plus a connected component if and only if either (a) s(u) has a double
+    root u0 with s (u0 ) < 0 and two simple real roots; or (b) s(u) = c12 (u) where c1 (u) has two complex
+    conjugate roots. The parameterization p(u) of Q given by (4) is rational in case (b).
+(3) Q is singular with a crunode if and only if either (a) s(u) has a double root u0 with s (u0 ) > 0
+    plus two simple real roots; or (b) s(u) = c12 (u) where c1 (u) has two distinct real roots. The
+    parameterization p(u) of Q given by (4) is rational in case (b).
+(4) Q is singular with a cusp if and only if either (a) s(u) has a triple root u0 plus another simple real
+    root; or (b) s(u) = c12 (u) where c1 (u) has a real double root. The parameterization p(u) of Q given
+    by (4) is rational in case (b).
+(5) Q is devoid of real points if and only if s(u) < 0 for all u.
+(6) Q is nonsingular with one connected component if and only if s(u) has two simple real roots and
+    two complex conjugate roots.
+(7) Q is nonsingular with two connected components if and only if either (a) s(u) has four simple real
+    roots; or (b) s(u) has no real roots and s(u) > 0 for all u.
+
+
+4. Enhanced Levin’s method
+
+   Based on the procedure in Section 2 and the results summarized in Section 3.4, we are now
+able to present an enhanced Levin’s method, to be referred to as ELM, that is capable of detecting
+reducibility and singularity, as well as counting the connected components of a QSIC. In addition, the
+method produces a rational parameterization for a singular QSIC through a special selection of the
+parameterization surface.
+416                      W. Wang et al. / Computer Aided Geometric Design 20 (2003) 401–422
+
+
+Procedure ELM
+Input: Two quadrics A: X T AX = 0 and B: X T BX = 0.
+Output: A parameterization p(u) given by (4) of the QSIC of A and B, together with its reducibility, the
+type of singularity, or the number of connected components. p(u) is rational if the QSIC is singular.
+Begin
+
+(1) (For a planar QSIC.) Detect if there is a pair of planes in the pencil of A and B. If yes, compute the
+    planar QSIC, and quit; otherwise go to step (2).
+(2) (For a QSIC consisting of a line 1 and a space cubic C.) Find a real ruled quadric S in the pencil of
+    A and B. Use the resultant-based procedure in Section 2.2 to detect whether the QSIC has a linear
+    component. If not, go to step (3). If yes, extract the linear component 1 , and then go to step (3) to
+    compute a rational parameterization of the remaining cubic component of the QSIC.
+(3) (For a singular QSIC with one real singular point or the cubic component of a nonplanar reducible
+    QSIC.) Find all singly ruled quadrics S in the pencil of A and B. If there is no such surface, go to
+    step (4). For each singly ruled surface in the pencil, compute its vertex and check whether or not
+    the vertex is on A. If any of the singly ruled quadrics, say S0 , has its vertex X0 on A, then X0 is a
+    singular point of the QSIC, and the parameterization p(u) of the QSIC constructed with S0 as the
+    parameterization surface is rational (by Theorem 7). If none of the singly ruled quadrics in the pencil
+    has its vertex on A, go to step (4).
+(4) (For a nonsingular QSIC.) Use any real ruled quadric S in the pencil of A and B to generate a
+    parameterization p(u) of the QSIC by (4). Use the conditions in Theorem 12 to compute the number
+    of connected components of the QSIC.
+
+End
+   Finding a pair of planes or a parameterization surface S in a quadric pencil X T (λA + B)X = 0
+entails solving for the roots of the quartic equation |λA + B| = 0, as well as determining the
+multiplicities of these roots. The need for solving or analyzing a quartic equation also arises from
+analyzing the discriminant polynomial s(u) (3), as required in ELM. We will not discuss here in detail
+techniques for solving quartic equations, but instead refer the interested reader to (Dickson, 1914;
+Uspensky, 1948).
+   The following three examples of computing QSIC’s using ELM verify some of the conditions listed
+in Theorem 12.
+
+Example 1. (Reducible intersection of two cones, comprising a line and a space cubic. See Fig. 11.) The
+matrices of the input quadrics are
+                                                                                   
+              1.0     0.0    0.0 −0.5                  0.75 0.0 −0.5          0.125
+           0.0      0.75 −0.5 −0.5                 0.0      1.0 0.0          0.0 
+     A=                                ,      B =                                  .
+              0.0 −0.5 0.0         0.0                −0.5 0.0 0.0             0.25
+             −0.5 −0.5 0.0         0.25               0.125 0.0 0.25 −0.3125
+Using ELM, the parameterization surface S is a cone (see Fig. 12), and
+                     2
+      s(u) = u2 − 1 .
+                          W. Wang et al. / Computer Aided Geometric Design 20 (2003) 401–422                        417
+
+
+
+
+      Fig. 11. The reducible intersection of two cones.      Fig. 12. The same intersection curve as in Fig. 11 with the
+                                                             parameterization surface S derived by ELM.
+
+
+The roots of s(u) are: u1 = 1.0, u2 = 1.0, u3 = −1.0, u4 = −1.0. The linear component is
+     (0.5, 0, −1, 1)T + v(0, 0, 3.46, 0)T .
+A rational parameterization of the cubic component is
+                                                
+                0.09u3 − 2.76u2 − 4.49u + 1.82
+              −6.92u + 6.92u − 6.92u + 2.3 
+                       3          2
+      p(u) =                                    .
+                0.36u3 + 4.97u2 + 1.53u + 3.81
+               −3.82u3 − 1.51u2 − 4.99u − 0.34
+
+
+Example 2. (Singular intersection with a cusp of a sphere and a cone. See Fig. 13.) The matrices of the
+input quadrics are
+                                                     
+            1 0 0 0                        1 0 0 0
+           0 1 0 −1                    0 0 1 0
+      A=                           B =
+            0 0 1 0                       0 1 0 0
+                              ,                           .
+            0 −1 0 0                       0 0 0 0
+Using ELM, the parameterization surface S is a cone (see Fig. 14), and
+     s(u) = (u − 1)4 .
+The roots of s(u) are: u1 = 1.0, u2 = 1.0, u3 = 1.0, u4 = 1.0 (ref. condition 4(b) in Theorem 12).
+A rational parameterization of the QSIC is
+                                                   
+               −1.414u4 + 2.828u3 − 2.828u + 1.414
+              −u4 + 4.0u3 − 6.0u2 + 4.0u − 1.0 
+      p(u) =                                       .
+                            u4 − 2u2 + 1
+                           −2u4 − 4u2 − 2
+418                    W. Wang et al. / Computer Aided Geometric Design 20 (2003) 401–422
+
+
+
+
+                         Fig. 13. The singular intersection of a sphere and a cone with a cusp.
+
+
+
+
+        Fig. 14. The same intersection curve as in Fig. 13 with the parameterization surface S derived by ELM.
+
+
+Example 3. (Nonsingular intersection of an ellipsoid and a two-sheeted hyperboloid with two compo-
+nents. See Figures 15 and 16.) The matrices of the input quadrics are
+                                                                                         
+              3.993 −0.448 −2.606 0.0                        2.778 0.008 0.050 0.528
+           −0.448 −3.381 −3.356 0.0                       0.008 2.662 0.047 −0.764 
+     A=                                      ,       B =                                 .
+             −2.606 −3.356 4.177 0.0                         0.050 0.047 2.847 0.972
+                0        0         0       1                 0.528 −0.764 0.972 −0.845
+                           W. Wang et al. / Computer Aided Geometric Design 20 (2003) 401–422                            419
+
+
+
+
+   Fig. 15. The nonsingular intersection of an ellipsoid and   Fig. 16. The same intersection curve as in Fig. 15 with the
+   a two-sheeted hyperboloid with two components.              parameterization surface S.
+
+
+
+Using ELM, the parameterization surface S is a hyperbolic paraboloid, and
+
+      s(u) = −2.39u4 − 2.41u3 + 3.48u2 + 3.17u − 0.14.
+
+The roots of s(u) are:
+
+      u1 = −1.324,           u2 = −0.897,            u3 = 0.043,          u4 = 1.169
+
+(ref. condition 7(a) in Theorem 12). A parameterization of the QSIC is
+                                                                           
+                 0.84u3 + 0.19u2 − 0.62u − 0.09                 −0.74u − 0.49
+               1.11u3 + 2.11u2 + 1.72u + 0.39               0.34u + 0.29 
+       p(u) =                                       ± s(u) 
+                −0.53u3 − 1.15u2 + 0.09u + 0.35                   −0.48u     .
+                         2.51u2 + 2.54u + 0.88                                        0
+
+
+5. Conclusions
+
+   We have presented an analysis of Levin’s method for computing the intersection curve of two
+quadric surfaces (QSIC). We have introduced additional tests in order to make this method capable of
+computing geometric and structural information—irreducibility, singularity, and the number of connected
+components—for the QSIC. We have also provided an enhanced version of Levin’s method that generates
+a rational parameterization for any singular QSIC. Further research is still required to examine the
+numerical accuracy of Levin’s method in order to insure that this method is numerically robust.
+420                    W. Wang et al. / Computer Aided Geometric Design 20 (2003) 401–422
+
+
+Acknowledgements
+
+  Wenping Wang’s research is supported by RGC grant HKU 7032/00E of Hong Kong SAR. Ron
+Goldman is supported by NSF grant CCR0203315.
+  We thank Professor Helmut Pottmann and the referee for their helpful comments. We also thank Barry
+Joe for commenting on an earlier version of the paper.
+
+
+Appendix A
+
+   Levin’ method is based on the existence of a real ruled quadric in any quadric pencil. The proof given
+by Levin (1976) for this result is involved and lengthy, filling nearly two double-columned pages. In this
+appendix we present a geometric proof, which is not only shorter, but also provides useful insight into
+this geometric fact.
+
+Theorem A.1. There exists a real ruled quadric in the pencil of any two distinct real quadrics.
+
+Proof. Let A: X T AX = 0 and B: X T BX = 0 be two distinct quadrics, with real coefficient matrices A
+and B. Let X0 and X1 be two distinct real points on the QSIC of A and B, then the line passing through
+X0 and X1 , denoted by X0 X1 , is a real line. If there do not exist two real points on the QSIC, then we
+choose X0 and X1 to be two complex conjugate points on the QSIC. We now show that the line X0 X1 is
+also real. Let X0 = U + iV and X1 = U − iV , where U and V are two linear independent real 4D vectors
+(i.e., two distinct real points). Then U = (X0 + X1 )/2 and V = (X0 − X1 )/(2i), as linear combinations
+of X0 and X1 , are two distinct real points on the line X0 X1 . Hence, X0 X1 is a real line.
+    Next we choose a real point X ∗ on the line X0 X1 such that X ∗ is distinct from X0 or X1 . Obviously
+there exists λ0 such that X ∗ is on the quadric S: X T SX ≡ X T (λ0 A + B)X = 0; note that, if X ∗ is also on
+the QSIC, i.e., X ∗ is on both A and B, then X ∗ is on X T (λA + B)X = 0 for any λ. Hence, by Bézout’s
+theorem, S contains the real line X0 X1 since it contains three distinct points X0 , X1 , and X ∗ on the line.
+It follows that S is a real ruled quadric, for otherwise S would be an ellipsoid, an elliptic paraboloid, or
+a two-sheet hyperboloid, which could not contain any real line. This completes the proof. ✷
+
+   Although Levin’s method works as long as there exists a real ruled quadric in the pencil of two input
+quadrics, one might prefer to use some special ruled quadrics for the parameterization surface S that
+have relatively simple parameterizations in affine space; this viewpoint is espoused in Levin’s paper
+(1976). For this reason, the ruled quadric S that is allowed as the parameterization surface in Levin’s
+original method can only be a pair of planes, a hyperbolic paraboloid, or a cylinder (Levin, 1976, p. 560).
+(Incidentally, Levin adds the cone into the list of allowable parameterization surfaces in his other paper
+(Levin, 1978, Table 1, p. 75).) The next theorem is the specific result stated and proved by Levin, for
+which we now give a more concise proof.
+
+Theorem A.2 (Levin, 1976, p. 561). The intersection curve of two quadric surfaces lies in a plane, pair
+of planes, hyperbolic or parabolic cylinder, or a hyperbolic paraboloid.
+
+Proof. Let A: X T AX = 0 and B: X T BX = 0 be two distinct quadrics, where X = (x, y, z, w)T are
+homogeneous coordinates with w = 0 representing the plane at infinity. Let the upper 3 × 3 submatrices
+                            W. Wang et al. / Computer Aided Geometric Design 20 (2003) 401–422                              421
+
+
+of A and B be denoted by Au and Bu , respectively. The intersection of the pencil of X T (λA + B)X = 0
+with the plane at infinity w = 0 is the pencil of conics X̄ T (λAu + Bu )X̄ = 0, where X̄ = (x, y, z). We
+may assume that the conics Ā: X̄ T Au X̄ = 0 and B̄: X̄ T Bu X̄ = 0 are distinct, for otherwise the QSIC of A
+and B is planar and the proof is done. Clearly, all the special quadrics X T SX = 0 listed in Theorem A.2
+are characterized by the fact that their intersection with the plane w = 0 is a degenerate conic containing
+a real line.
+    Now the proof proceeds with much the same idea as the proof of Theorem A.1; we need to find a
+conic in the pencil X̄ T (λAu + Bu )X̄ = 0 that contains a real line. First choose two points X̄0 and X̄1
+to be either (1) two distinct real intersection points of Ā and B̄; or (2) two distinct complex conjugate
+intersection points of Ā and B̄; or (3) both at the only intersection point I¯0 of Ā and B̄ if Ā and B̄
+intersect at I¯0 with multiplicity 4. In cases (1) and (2), we have a unique real line X̄0 X̄1 connecting X̄0
+and X̄1 . In case (3) there exists a line that has at least double contact with both Ā and B̄ at I¯0 and thus
+also has at least double contact at I¯0 with any conic in the pencil of Ā and B̄; in this case the line is still
+denoted by X̄0 X̄1 for notational uniformity. Now choose another real point X̄ ∗ on the line X̄0 X̄1 that is
+distinct from X̄0 or X̄1 . Then there exists λ0 such that the conic X̄ T (λ0 Au + Bu )X̄ = 0 contains X̄ ∗ . It
+follows, by Bézout’s theorem, that the conic X̄ T (λ0 Au + Bu )X̄ = 0 contains the real line X̄0 X̄1 , since it
+contains X̄ ∗ and two other points X̄0 and X̄1 (with multiplicity counted) on the line. Hence, the QSIC
+of A and B lies on the corresponding quadric X T (λ0 A + B)X = 0, which is one of the special quadrics
+listed in Theorem A.2. This completes the proof. ✷
+
+
+References
+
+Abhyankar, S.S., Bajaj, C., 1989. Automatic parameterization of rational curves and surfaces III: Algebraic space curves. ACM
+   Trans. Graph. 8 (4), 325–334.
+Baker, H.F., 1923. Principle of Geometry, Vol. III. Cambridge Press.
+Bix, R., 1998. Conics and Cubics—A Concrete Introduction to Algebraic Curves. Springer, New York.
+Bromwich, T.J., 1906. Quadratic forms and their classification by means of invariant-factors. Cambridge Tracts in Mathematics
+   and Mathematical Physics 3, 1906.
+Dickson, L.E., 1914. Elementary Theory of Equations. Wiley, New York.
+Farouki, R.T., Neff, C.A., O’Connor, M.A., 1989. Automatic parsing of degenerate quadric-surface intersections. ACM Trans.
+   Graph. 8 (3), 174–203.
+Garrity, T., Warren, J., 1989. On computing the intersection of a pair of algebraic surfaces. Computer Aided Geometric
+   Design 6 (2), 132–153.
+Levin, J.Z., 1976. A parametric algorithm for drawing pictures of solid objects composed of quadrics. Comm. ACM 19 (10),
+   555–563.
+Levin, J.Z., 1978. Mathematical models for determining the intersections of quadric surfaces. Comput. Graph. Image Process. 1,
+   73–87.
+Miller, J.R., 1987. Geometric approaches to nonplanar quadric surface intersection curves. ACM Trans. Graph. 6, 274–307.
+Miller, J.R., Goldman, R.N., 1995. Geometric algorithms for detecting and calculating all conics sections in the intersection of
+   any two natural quadric surfaces. Graphical Models and Image Processing 57 (1), 55–66.
+Ocken, S., Schwartz, J.T., Sharir, M., 1987. Precise implementation of CAD primitives using rational parameterizations of
+   standard surfaces. In: Schwartz, Hopcroft, Sharir (Eds.), Planning, Geometry, and Complexity of Robot Motion. Ablex,
+   pp. 245–266.
+Piegl, L., 1989. Geometric method of intersecting natural quadrics represented in trimmed surface form. Computer-Aided
+   Design 21 (4), 201–212.
+Pottmann, H., Wallner, J., 2001. Computational Line Geometry. Springer, Berlin.
+Salmon, G., 1934. Higher Plane Curves. Stechert, New York.
+422                       W. Wang et al. / Computer Aided Geometric Design 20 (2003) 401–422
+
+
+Sarraga, R.F., 1983. Algebraic methods for intersections of quadric surfaces in GMSOLID. Computer Vision, Graphics and
+   Image Processing 22 (2), 222–238.
+Semple, G.J., Kneebone, G.K., 1952. Algebraic Projective Geometry. Oxford University Press, London.
+Shene, C.H., Johnstone, J.K., 1994. On the lower degree intersections of two natural quadrics. ACM Trans. Graph. 13 (4),
+   400–424.
+Sommerville, D.M.Y., 1947. Analytical Geometry of Three Dimensions. Cambridge University Press.
+Tu, C.H., Wang, W., Wang, J.Y., 2002. Classifying the morphology of the nonsingular intersection curves of two quadric
+   surfaces. In: Proceedings of Geometric Modeling and Processing 2002, pp. 23–32.
+Uspensky, J.V., 1948. Theory of Equations. McGraw-Hill, New York.
+Wang, W., Joe, B., Goldman, R.N., 1997. Rational quadratic parameterizations of quadrics. Internat. J. Comput. Geom.
+   Appl. 7 (6), 599–619.
+Wang, W., Joe, B., Goldman, R., 2002. Computing quadric surface intersections based on an analysis of plane cubic curves.
+   Graphical Models 64 (6), 335–367.
+Wilf, I., Manor, Y., 1993. Quadric surface intersection: shape and structure. Computer-Aided Design 25 (10), 633–643.
+
