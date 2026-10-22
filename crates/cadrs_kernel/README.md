@@ -79,7 +79,10 @@ let step = k.export_step(&round.bodies)?;               // and import_step / imp
   `read_body` are the exact native body format (`native::bodyio`), which keeps every face,
   edge and vertex in order, so names stay valid across a cache or the network.
 - **Determinism.** The same inputs are to give the same bytes (bodies, meshes, STEP text)
-  whatever the number of rayon threads; `tests/determinism.rs` checks it.
+  whatever the number of rayon threads; `tests/determinism.rs` checks it for every family of
+  operation (extrude, revolve, the three booleans, fillet, chamfer, shell, offsets, draft, sweep,
+  loft, sew, heal, tessellation, mass properties, STEP export and import), run twice and on 1
+  and 4 threads.
 - `Profile` is built from `cadrs_sketch` regions using **exact** boundary curves (lines, arcs,
   circles, ellipses, Béziers) on a sketch `Plane`, never the polyline used for display.
 - About 45 trait methods default to `Unsupported` so a backend can start small; the native
