@@ -3,12 +3,12 @@
 the gate. Normally started by tools/kernel_gate.sh, which exports a clean tree first.
 
 usage: tools/kernel_gate.py --tree DIR --out DIR [--commit SHA] [--only a,b] [--skip a,b]
-                            [--hang S] [--binary-timeout S] [--slow S] [--no-build] [--known-only]
+                            [--sample BIN=N,...] [--hang S] [--binary-timeout S] [--slow S] [--no-build] [--known-only]
                             [--baseline FILE] [--write-baseline FILE]
-       tools/kernel_gate.py --make-baseline RESULTS FILE
+       tools/kernel_gate.py --make-baseline RESULTS FILE [--commit SHA]
 
-Builds the tree's tests (`cargo test --profile kernel -p cadrs_kernel --no-run`; the target dir
-is $CARGO_TARGET_DIR), lists each binary's tests (libtest JSON, `-Z unstable-options`), and runs
+Builds the tree's tests (`cargo test --profile kernel -p cadrs_kernel --no-run`, only the --only
+binaries when given; the target dir is $CARGO_TARGET_DIR), lists each binary's tests (libtest JSON, `-Z unstable-options`), and runs
 them $RUST_TEST_THREADS at a time (3 by default): the ones that aren't ignored, and the ignored
 ones of every kind but three, which are listed, not run:
   - the OCCT suites' cases waiting for a command (`needs …`, Tcl, nothing measured): their body
@@ -17,6 +17,8 @@ ones of every kind but three, which are listed, not run:
     (`replays …`, `needs a usd-brep checkout`, `needs the data file …`, and smlib_oracle's
     without $CADRS_SMLIB_ORACLE): they return early without it.
 --known-only runs only the ignored known failures (`#[ignore = "known failure…"]`).
+--sample occt_boolean=8 runs every 8th of that binary's cases (by name, the same ones each run;
+the others are "ignored", "not in the sample"): CI's per-push subset.
 
 A test that runs longer than --hang seconds is killed as a hang, and the binary goes on with the
 tests it hadn't finished; a binary that dies (a stack overflow, an abort) has the tests it was
@@ -25,6 +27,9 @@ running retried one at a time to find the one that crashes. Each case is classif
   known       a known failure (tools/occt_known_failures.txt, tools/smlib_known_failures/) that
               still fails
   STALE       a known failure that now passes: take it off the list and regenerate the suite
+  PANIC       a known failure that panicked (an index out of bounds, an unwrap) instead of
+              returning its error: the generated wrappers turn the error a known failure is
+              listed for into a pass, so any other failure is a bug the list would hide
   STALE-IGNORE  a test ignored with a reason (not a listed known failure, not "slow") that now
               passes: un-ignore it
   REGRESSION  a failure that isn't listed (or an ignored "slow" test that fails)
@@ -38,15 +43,21 @@ scaled by the run's load: the median ratio of this run's durations to the baseli
 cases of at least 1 s, when that is above 1. (libtest reports wall time only, per test; the tests share one process,
 so a test's CPU time isn't measurable, and the median ratio stands in for the load.)
 --write-baseline FILE writes this run's durations as the next baseline when the gate passes;
---make-baseline RESULTS FILE writes one from an earlier results.json.
+--make-baseline RESULTS FILE writes one from an earlier results.json; the baseline records the
+commit measured (the results' own, else --commit: one is required).
+
+--commit SHA is the commit the tree is (tools/kernel_gate.sh passes it: the exported revision, or
+for --tree the tree's git HEAD, "+dirty" with uncommitted changes, or $CADRS_GATE_COMMIT); it is
+written into results.json and the summary, and the run warns without one.
 
 Writes <out>/results.json (one record per case) and <out>/summary.txt (a table per suite, the
 STALE, STALE-IGNORE, REGRESSION, HANG, CRASH and SLOW-REGRESSION lists, the slowest 20 cases),
 and exits 1 when any of those lists isn't empty (2 on a setup error).
 
 First it runs the CHECKS (`cargo check -p cadrs_kernel` with no features, so the library builds
-without the tests' `testkit` feature; `cargo check -p cadrs_core`, its real consumer); a failed
-check also exits 1 (--no-checks skips them).
+without the tests' `testkit` feature; `cargo check -p cadrs_core`, its real consumer;
+tools/kernel_clippy.sh, clippy on every kernel target with warnings denied); a failed check also
+exits 1 (--no-checks skips them).
 """
 import argparse
 import datetime
@@ -59,7 +70,7 @@ import sys
 import threading
 import time
 
-BAD = ("STALE", "STALE-IGNORE", "REGRESSION", "HANG", "CRASH")
+BAD = ("STALE", "STALE-IGNORE", "PANIC", "REGRESSION", "HANG", "CRASH")
 # Ignore reasons of tests that need an input from the environment and return early without it.
 INPUT_IGNORES = ("replays ", "needs a usd-brep checkout", "needs the data file")
 # Binaries whose tests return early without a program an environment variable names: their
@@ -85,11 +96,12 @@ def log(msg):
 
 
 # Builds that must pass besides the tests: the library without the test-only `testkit` feature
-# (every test enables it, so no test sees code that only compiles with it), and cadrs_core, the
-# kernel's real consumer.
+# (every test enables it, so no test sees code that only compiles with it), cadrs_core, the
+# kernel's real consumer, and the kernel's clippy gate (what CI runs per push).
 CHECKS = [
     ("cargo check -p cadrs_kernel (no features)", ["cargo", "check", "-p", "cadrs_kernel"]),
     ("cargo check -p cadrs_core", ["cargo", "check", "-p", "cadrs_core"]),
+    ("tools/kernel_clippy.sh", ["sh", "tools/kernel_clippy.sh"]),
 ]
 
 
@@ -111,9 +123,12 @@ def checks(tree):
     return out
 
 
-def build(tree, profile):
-    """{binary name: executable} of the kernel's test targets ("lib" for the unit tests)."""
+def build(tree, profile, only=()):
+    """{binary name: executable} of the kernel's test targets ("lib" for the unit tests): all of
+    them, or those named in `only`."""
     cmd = ["cargo", "test", "--profile", profile, "-p", "cadrs_kernel", "--no-run", "--message-format=json-render-diagnostics"]
+    for b in sorted(only):
+        cmd += ["--lib"] if b == "lib" else ["--test", b]
     log("build: " + " ".join(cmd))
     r = subprocess.run(cmd, cwd=tree, stdout=subprocess.PIPE, text=True)
     if r.returncode != 0:
@@ -301,7 +316,9 @@ def classify(rec, listed, kind):
     if listed:
         if o == "ok":
             return "known"
-        return "STALE" if STALE_MARK in rec.get("stdout", "") else "known"
+        # The wrapper (draw::known_failure, smlib_common::known_failure) passes on the failure
+        # the case is listed for: failing otherwise, it now passes (STALE) or it panicked.
+        return "STALE" if STALE_MARK in rec.get("stdout", "") else "PANIC"
     if kind in ("known", "waiting"):
         # An ignored test asserts success: passing, it shouldn't be ignored any more.
         return "STALE-IGNORE" if o == "ok" else "known"
@@ -312,10 +329,11 @@ def key(t):
     return "%s %s" % (t["binary"], t["name"])
 
 
-def make_baseline(res):
-    """{"binary name": seconds} of the cases a results file ran (hangs and crashes left out)."""
+def make_baseline(res, commit=""):
+    """{"binary name": seconds} of the cases a results file ran (hangs and crashes left out),
+    with the commit measured (the results' own, else `commit`)."""
     return {
-        "commit": res.get("commit", ""),
+        "commit": res.get("commit") or commit,
         "finished": res.get("finished", ""),
         "durations": {key(t): t["duration"] for t in res["tests"] if t["class"] not in ("ignored", "HANG", "CRASH")},
     }
@@ -349,10 +367,10 @@ def summary(res):
     out = []
     out.append("kernel gate: %s, tree %s, %s; hang limit %d s, %d test threads" % (res["commit"] or "?", res["tree"], res["finished"], res["hang_limit"], res["threads"]))
     out.append("")
-    cols = ("suite", "cases", "run", "pass", "known", "STALE", "ST-IGN", "REGR", "HANG", "CRASH", "SLOWR", "ignored", "slow", "pass %", "wall s")
-    row = "%-26s %6s %6s %6s %6s %6s %6s %6s %6s %6s %6s %8s %5s %7s %8s"
+    cols = ("suite", "cases", "run", "pass", "known", "STALE", "ST-IGN", "PANIC", "REGR", "HANG", "CRASH", "SLOWR", "ignored", "slow", "pass %", "wall s")
+    row = "%-26s %6s %6s %6s %6s %6s %6s %6s %6s %6s %6s %6s %8s %5s %7s %8s"
     out.append(row % cols)
-    tot = dict.fromkeys(("cases", "run", "pass", "known", "STALE", "STALE-IGNORE", "REGRESSION", "HANG", "CRASH", "SLOWR", "ignored", "slow"), 0)
+    tot = dict.fromkeys(("cases", "run", "pass", "known", "STALE", "STALE-IGNORE", "PANIC", "REGRESSION", "HANG", "CRASH", "SLOWR", "ignored", "slow"), 0)
     tot_wall = 0.0
     for b in sorted(res["binaries"]):
         ts = [t for t in tests if t["binary"] == b]
@@ -372,7 +390,7 @@ def summary(res):
         tot_wall += wall
         out.append(row % (b, *[c[k] for k in tot], rate_of(c), "%.0f" % wall))
     out.append(row % ("TOTAL", *[tot[k] for k in tot], rate_of(tot), "%.0f" % tot_wall))
-    out.append("(pass % = (pass + STALE + STALE-IGNORE) / run: known failures, regressions, hangs and crashes count as failures)")
+    out.append("(pass % = (pass + STALE + STALE-IGNORE) / run: known failures, panics, regressions, hangs and crashes count as failures)")
     for cls in BAD:
         bad = [t for t in tests if t["class"] == cls]
         out.append("")
@@ -412,6 +430,7 @@ def main():
     ap.add_argument("--profile", default="kernel")
     ap.add_argument("--only", default="", help="comma-separated binaries to run (default: all)")
     ap.add_argument("--skip", default="", help="comma-separated binaries to leave out")
+    ap.add_argument("--sample", default="", help="BIN=N,...: run every Nth case of these binaries")
     ap.add_argument("--hang", type=float, default=900.0, help="seconds after which a test is a hang")
     ap.add_argument("--binary-timeout", type=float, default=4 * 3600.0, help="seconds for a whole binary")
     ap.add_argument("--slow", type=float, default=60.0, help="seconds above which a case is slow")
@@ -424,10 +443,15 @@ def main():
     ap.add_argument("--make-baseline", nargs=2, metavar=("RESULTS", "FILE"), help="write a baseline from a results.json and exit")
     a = ap.parse_args()
     if a.make_baseline:
-        json.dump(make_baseline(json.load(open(a.make_baseline[0]))), open(a.make_baseline[1], "w"), indent=0, sort_keys=True)
+        base = make_baseline(json.load(open(a.make_baseline[0])), a.commit)
+        if not base["commit"]:
+            ap.error("%s records no commit: give the commit it measured with --commit" % a.make_baseline[0])
+        json.dump(base, open(a.make_baseline[1], "w"), indent=0, sort_keys=True)
         return
     if not a.tree or not a.out:
         ap.error("--tree and --out are required")
+    if not a.commit:
+        log("kernel_gate: no commit for this tree (not a git checkout, and no --commit or $CADRS_GATE_COMMIT): results.json won't say what it measured")
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
 
@@ -436,13 +460,14 @@ def main():
     os.makedirs(a.out, exist_ok=True)
     threads = int(os.environ.get("RUST_TEST_THREADS", "3"))
     checked = [] if a.no_checks else checks(tree)
+    only = set(filter(None, a.only.split(",")))
+    skip = set(filter(None, a.skip.split(",")))
+    sample = {b: int(n) for b, n in (x.split("=") for x in filter(None, a.sample.split(",")))}
     if a.no_build:
         exes = json.load(open(a.binaries))
     else:
-        exes = build(tree, a.profile)
+        exes = build(tree, a.profile, only)
         json.dump(exes, open(os.path.join(a.out, "binaries.json"), "w"), indent=1)
-    only = set(filter(None, a.only.split(",")))
-    skip = set(filter(None, a.skip.split(",")))
     names = sorted(b for b in exes if (not only or b in only) and b not in skip)
     if only - set(exes):
         log("no such test binary: " + ", ".join(sorted(only - set(exes))))
@@ -452,6 +477,7 @@ def main():
     res = {
         "schema": 1,
         "commit": a.commit,
+        "sample": sample,
         "tree": tree,
         "started": datetime.datetime.now().isoformat(timespec="seconds"),
         "finished": "",
@@ -476,6 +502,10 @@ def main():
         kn = known.get(b, set())
         kinds = {n: ignored_kind(b, why, a.known_only) for n, ign, why in listed if ign}
         run = [n for n, ign, why in listed if not ign or kinds[n]]
+        if b in sample:
+            keep = set(sorted(run)[::sample[b]])
+            listed = [(n, ign or n not in keep, why if n in keep else "not in the sample (--sample)") for n, ign, why in listed]
+            run = sorted(keep)
         errlog.write("==== %s\n" % b)
         errlog.flush()
         got = Runner(exes[b], crate, env, threads, a.hang, a.binary_timeout, errlog).run(run) if run else {}
@@ -489,7 +519,7 @@ def main():
             listed_known = n.split("::")[-1] in kn or why.startswith("known failure, slow (tools/")
             rec = {"binary": b, "name": n, "outcome": r["outcome"], "duration": round(r["duration"], 3), "known": listed_known, "ignore": why if ign else None}
             rec["class"] = classify(dict(r), listed_known, kinds.get(n))
-            if rec["class"] in ("REGRESSION", "HANG", "CRASH", "known") and r["outcome"] != "ok":
+            if rec["class"] in ("REGRESSION", "PANIC", "HANG", "CRASH", "known") and r["outcome"] != "ok":
                 rec["message"] = short_message(r.get("stdout", ""))
             res["tests"].append(rec)
         wall = time.time() - t0
@@ -512,7 +542,7 @@ def main():
     errors = any(i.get("error") for i in res["binaries"].values()) or not all(c["ok"] for c in checked)
     failed = errors or any(t["class"] in BAD or t.get("slow_regression") for t in res["tests"])
     if a.write_baseline and not failed:
-        json.dump(make_baseline(res), open(a.write_baseline, "w"), indent=0, sort_keys=True)
+        json.dump(make_baseline(res, a.commit), open(a.write_baseline, "w"), indent=0, sort_keys=True)
         log("baseline written to %s" % a.write_baseline)
     sys.exit(1 if failed else 0)
 

@@ -1,427 +1,434 @@
-# OCCT test cases (tools/occt_to_rust.py) that fail on the native kernel today: emitted as
-# #[ignore = "known failure"] so the default test run stays green. Remove a line once its case passes.
+# OCCT test cases (tools/occt_to_rust.py) that fail on the native kernel today: each is generated
+# to assert that it still fails, by returning its error (a panic fails it; the blend and offset
+# ones are #[ignore]d as slow). Remove a line once its case passes. Every line gives its reason:
+# inline (`group case  # why`), or the comment lines just above its group of lines (a blank line
+# ends a group's comment); `[panic: text]` in a reason lets the case panic with that text.
+
 # case_9 2d cases: a line and a B-spline coincide within 5e-13 over 143 mm; OCCT finds one crossing, we an overlap.
-blend complex_a2
-blend complex_a3
-blend complex_a4
-blend complex_a7
-blend complex_b2
-blend complex_b3
-blend complex_b5
-blend complex_c1
-blend complex_c6
-blend complex_d6
-blend complex_d8
-blend complex_e7
-blend complex_f1
-blend complex_f2
-blend complex_g8
-blend complex_g9
-blend simple_c7
-blend simple_c8
-blend simple_c9
-blend simple_d1
-blend simple_e1
-blend simple_e2
-blend simple_e4
-blend simple_h7
-blend simple_h9
-blend simple_k4
-blend simple_p4
-blend simple_p5
-blend simple_p7
-blend simple_q2
-blend simple_q3
-blend simple_q6
-blend simple_q7
-blend simple_q8
-blend simple_t8
-blend simple_u2
-blend simple_u5
-blend simple_u7
-blend simple_v7
-blend simple_w3
-blend simple_w7
-blend simple_x1
-blend simple_x2
-blend simple_x4
-blend simple_y6
-blend simple_y7
-blend simple_z1
-blend tolblend_simple_a3
-blend tolblend_simple_b4
-blend tolblend_simple_b5
-blend tolblend_simple_b6
-blend tolblend_simple_b7
-blend tolblend_simple_b8
-blend tolblend_simple_c1
-blend tolblend_simple_c2
-blend tolblend_simple_c3
-blend tolblend_simple_c5
-blend tolblend_simple_d2
-blend tolblend_simple_d6
-blend tolblend_simple_d7
-blend tolblend_simple_d8
-blend tolblend_simple_d9
-blend tolblend_simple_e1
-blend tolblend_simple_e3
-blend tolblend_simple_e4
-blend tolblend_simple_e5
-blend tolblend_simple_f2
-blend tolblend_simple_f6
-blend tolblend_simple_f7
-blend tolblend_simple_f9
-blend tolblend_simple_g1
-boolean bcommon_2d_o4
-boolean bcommon_2d_o6
-boolean bcommon_2d_o8
-boolean bcommon_2d_o9
-boolean bcommon_2d_p3
-boolean bcommon_2d_p5
-boolean bcommon_2d_p7
-boolean bcommon_2d_p8
-boolean bcut_2d_a8
-boolean bcut_2d_n5
-boolean bcut_2d_p8
-boolean bcut_2d_p9
-boolean bcut_2d_q3
-boolean bcut_2d_q4
-boolean bcut_2d_q7
-boolean bcut_2d_q8
-boolean bcut_2d_q9
-boolean bcut_2d_r1
-boolean bcut_2d_r6
-boolean bcut_2d_r7
-boolean bcut_2d_s1
-boolean bcut_2d_s2
-boolean bcut_2d_s5
-boolean bcut_2d_s6
-boolean bcut_2d_s7
-boolean bcut_2d_s8
-boolean bcut_complex_e4
-boolean bcut_complex_f1
-boolean bcut_complex_f9
-boolean bcut_complex_h4
-boolean bcut_complex_i2
-boolean bcut_complex_k4
-boolean bcut_complex_l4
-boolean bcut_complex_o5
-boolean bfuse_2d_a7
-boolean bfuse_2d_a9
-boolean bfuse_2d_b2
-boolean bfuse_2d_b3
-boolean bfuse_2d_b6
-boolean bfuse_2d_b8
-boolean bfuse_2d_c1
-boolean bfuse_2d_c2
-boolean bfuse_2d_c5
-boolean bfuse_2d_c7
-boolean bfuse_2d_c8
-boolean bfuse_2d_c9
-boolean bfuse_2d_d1
-boolean bfuse_complex_e1
-boolean bfuse_complex_i3
-boolean bfuse_complex_k6
-boolean bfuse_complex_q7
-boolean bopcommon_2d_n5
-boolean bopcommon_2d_n7
-boolean bopcommon_2d_n9
-boolean bopcommon_2d_o1
-boolean bopcommon_2d_o4
-boolean bopcommon_2d_o6
-boolean bopcommon_2d_o8
-boolean bopcommon_2d_o9
-boolean bopcommon_2d_p3
-boolean bopcommon_2d_p5
-boolean bopcommon_2d_p7
-boolean bopcommon_2d_p8
-boolean bopcommon_complex_e3
-boolean bopcommon_complex_e4
-boolean bopcommon_complex_g9
-boolean bopcommon_complex_i2
-boolean bopcommon_complex_k2
-boolean bopcommon_complex_k3
-boolean bopcommon_complex_k5
-boolean bopcut_2d_b9
-boolean bopcut_2d_c2
-boolean bopcut_2d_c4
-boolean bopcut_2d_c5
-boolean bopcut_2d_c8
-boolean bopcut_2d_d1
-boolean bopcut_2d_d3
-boolean bopcut_2d_d4
-boolean bopcut_complex_e6
-boolean bopcut_complex_h8
-boolean bopcut_complex_h9
-boolean bopcut_complex_i7
-boolean bopcut_complex_j2
-boolean bopcut_complex_k9
-boolean bopcut_complex_m6
-boolean bopfuse_2d_a7
-boolean bopfuse_2d_a9
-boolean bopfuse_2d_b2
-boolean bopfuse_2d_b3
-boolean bopfuse_2d_b6
-boolean bopfuse_2d_b8
-boolean bopfuse_2d_c1
-boolean bopfuse_2d_c2
-boolean bopfuse_2d_c5
-boolean bopfuse_2d_c7
-boolean bopfuse_2d_c8
-boolean bopfuse_2d_c9
-boolean bopfuse_2d_d1
-boolean bopfuse_complex_g2
-boolean bopfuse_complex_h4
-boolean bopfuse_complex_j6
-boolean bopfuse_complex_k8
-boolean bopfuse_complex_l1
-boolean bopfuse_complex_m1
-boolean bopfuse_complex_n2
-boolean bopfuse_complex_n5
-boolean bopfuse_complex_n6
-boolean bopfuse_complex_o1
-boolean bopfuse_complex_o4
-boolean bopfuse_simple_zp6
-boolean boptuc_2d_a8
-boolean boptuc_2d_m8
-boolean boptuc_2d_o1
-boolean boptuc_2d_o3
-boolean boptuc_2d_o5
-boolean boptuc_2d_o6
-boolean boptuc_2d_o9
-boolean boptuc_2d_p2
-boolean boptuc_2d_p4
-boolean boptuc_2d_p5
-boolean boptuc_complex_c6
-boolean boptuc_complex_c7
-boolean boptuc_complex_d8
-sewing tol_0_01_e5
-sewing tol_0_01_e7
-sewing tol_0_01_f5
-sewing tol_0_01_q8
-sewing tol_0_01_z2
-sewing tol_100_c3
-sewing tol_100_c5
-sewing tol_100_d3
-sewing tol_100_g8
-sewing tol_100_i5
-sewing tol_100_i6
-sewing tol_100_j5
-sewing tol_100_y7
-boolean bcut_simple_g6
-thrusection not_solids_w7
-blend simple_g3
-blend simple_g4
-blend simple_g5
-blend simple_g6
-blend simple_h3
-blend simple_h4
-blend simple_h5
-blend simple_j6
-boolean bopcut_2d_d5
-offset wire_closed_inside_0_005_a4
-offset wire_closed_inside_0_005_a5
-offset wire_closed_inside_0_005_a8
-offset wire_closed_inside_0_005_b2
-offset wire_closed_inside_0_005_b7
-offset wire_closed_inside_0_005_c5
-offset wire_closed_inside_0_005_c6
-offset wire_closed_inside_0_005_c7
-offset wire_closed_inside_0_005_d2
-offset wire_closed_inside_0_005_e4
-offset wire_closed_inside_0_005_f5
-offset wire_closed_inside_0_005_f6
-offset wire_closed_inside_0_005_g1
-offset wire_closed_inside_0_005_g2
-offset wire_closed_inside_0_005_g4
-offset wire_closed_inside_0_005_h3
-offset wire_closed_inside_0_005_h6
-offset wire_closed_inside_0_005_i8
-offset wire_closed_inside_0_025_a4
-offset wire_closed_inside_0_025_a5
-offset wire_closed_inside_0_025_a6
-offset wire_closed_inside_0_025_a8
-offset wire_closed_inside_0_025_b2
-offset wire_closed_inside_0_025_c5
-offset wire_closed_inside_0_025_c6
-offset wire_closed_inside_0_025_c7
-offset wire_closed_inside_0_025_d2
-offset wire_closed_inside_0_025_e4
-offset wire_closed_inside_0_025_f5
-offset wire_closed_inside_0_025_f6
-offset wire_closed_inside_0_025_g1
-offset wire_closed_inside_0_025_g2
-offset wire_closed_inside_0_025_g4
-offset wire_closed_inside_0_025_h3
-offset wire_closed_inside_0_025_h6
-offset wire_closed_inside_0_025_i8
-offset wire_closed_inside_0_075_a5
-offset wire_closed_inside_0_075_a6
-offset wire_closed_inside_0_075_b2
-offset wire_closed_inside_0_075_c5
-offset wire_closed_inside_0_075_c6
-offset wire_closed_inside_0_075_c7
-offset wire_closed_inside_0_075_c8
-offset wire_closed_inside_0_075_e4
-offset wire_closed_inside_0_075_f6
-offset wire_closed_inside_0_075_g2
-offset wire_closed_inside_0_075_h6
-offset wire_closed_inside_0_075_i8
-offset wire_closed_outside_0_005_a4
-offset wire_closed_outside_0_005_a5
-offset wire_closed_outside_0_005_a6
-offset wire_closed_outside_0_005_a8
-offset wire_closed_outside_0_005_a9
-offset wire_closed_outside_0_005_b2
-offset wire_closed_outside_0_005_c5
-offset wire_closed_outside_0_005_c6
-offset wire_closed_outside_0_005_c7
-offset wire_closed_outside_0_005_d2
-offset wire_closed_outside_0_005_e4
-offset wire_closed_outside_0_005_f5
-offset wire_closed_outside_0_005_f6
-offset wire_closed_outside_0_005_g1
-offset wire_closed_outside_0_005_g2
-offset wire_closed_outside_0_005_g4
-offset wire_closed_outside_0_005_g5
-offset wire_closed_outside_0_005_h6
-offset wire_closed_outside_0_005_i8
-offset wire_closed_outside_0_025_a4
-offset wire_closed_outside_0_025_a5
-offset wire_closed_outside_0_025_a6
-offset wire_closed_outside_0_025_a9
-offset wire_closed_outside_0_025_b2
-offset wire_closed_outside_0_025_c5
-offset wire_closed_outside_0_025_c7
-offset wire_closed_outside_0_025_d2
-offset wire_closed_outside_0_025_e4
-offset wire_closed_outside_0_025_f5
-offset wire_closed_outside_0_025_f6
-offset wire_closed_outside_0_025_g1
-offset wire_closed_outside_0_025_g4
-offset wire_closed_outside_0_025_g5
-offset wire_closed_outside_0_025_h3
-offset wire_closed_outside_0_025_h6
-offset wire_closed_outside_0_025_i8
-offset wire_closed_outside_0_075_a4
-offset wire_closed_outside_0_075_a5
-offset wire_closed_outside_0_075_a6
-offset wire_closed_outside_0_075_a9
-offset wire_closed_outside_0_075_b2
-offset wire_closed_outside_0_075_c5
-offset wire_closed_outside_0_075_c7
-offset wire_closed_outside_0_075_d2
-offset wire_closed_outside_0_075_e4
-offset wire_closed_outside_0_075_f5
-offset wire_closed_outside_0_075_f6
-offset wire_closed_outside_0_075_g1
-offset wire_closed_outside_0_075_g4
-offset wire_closed_outside_0_075_g5
-offset wire_closed_outside_0_075_h3
-offset wire_closed_outside_0_075_h6
-offset wire_unclosed_outside_0_005_a3
-offset wire_unclosed_outside_0_005_a9
-offset wire_unclosed_outside_0_005_b3
-offset wire_unclosed_outside_0_005_b4
-offset wire_unclosed_outside_0_005_b6
-offset wire_unclosed_outside_0_005_c4
-offset wire_unclosed_outside_0_025_a1
-offset wire_unclosed_outside_0_025_a2
-offset wire_unclosed_outside_0_025_a3
-offset wire_unclosed_outside_0_025_a9
-offset wire_unclosed_outside_0_025_b2
-offset wire_unclosed_outside_0_025_b3
-offset wire_unclosed_outside_0_025_b6
-offset wire_unclosed_outside_0_025_c4
-offset wire_unclosed_outside_0_075_a2
-offset wire_unclosed_outside_0_075_a3
-offset wire_unclosed_outside_0_075_a9
-offset wire_unclosed_outside_0_075_b1
-offset wire_unclosed_outside_0_075_b2
-offset wire_unclosed_outside_0_075_b3
-offset wire_unclosed_outside_0_075_b4
-offset wire_unclosed_outside_0_075_b5
-offset wire_unclosed_outside_0_075_b6
-offset wire_unclosed_outside_0_075_c4
-offset faces_type_a_a3
-offset faces_type_a_b1
-offset faces_type_i_a9
-offset faces_type_i_b4
-offset faces_type_i_b5
-offset faces_type_i_b6
-offset faces_type_i_c1
-offset faces_type_i_c2
-offset faces_type_i_c5
-offset faces_type_i_d1
-offset faces_type_i_d7
-offset faces_type_i_e5
-offset faces_type_i_e7
-offset faces_type_i_e8
-offset faces_type_i_e9
-offset faces_type_i_f1
-offset faces_type_i_f2
-offset faces_type_i_f3
-offset faces_type_i_f4
-offset faces_type_i_f5
-offset faces_type_i_g4
-offset faces_type_i_g5
-offset faces_type_i_i5
-offset faces_type_i_j5
-offset faces_type_i_l1
-offset faces_type_i_l3
-offset faces_type_i_l5
-offset faces_type_i_l7
-offset faces_type_i_l8
-offset faces_type_i_l9
-offset faces_type_i_m1
-offset faces_type_i_m2
-offset faces_type_i_m3
-offset shape_type_a_a8
-offset shape_type_i_a5
-offset shape_type_i_a9
-offset shape_type_i_b4
-offset shape_type_i_b6
-offset shape_type_i_c6
-offset shape_type_i_c_i4
-offset shape_type_i_c_i5
-offset shape_type_i_c_v2
-offset shape_type_i_c_w1
-offset shape_type_i_d4
-offset shape_type_i_d5
-offset shape_type_i_d6
-offset shape_type_i_d7
-offset shape_type_i_e3
-offset shape_type_i_e4
-offset shape_type_i_g2
-offset shape_type_i_g4
-offset faces_type_i_k6
-boolean bfuse_complex_k5
-sewing tol_0_01_q4
-sewing tol_100_b2
-sewing tol_100_e7
-sewing tol_100_r7
-sewing tol_1_a2
-sewing tol_1_f4
-sewing tol_1_f5
-sewing tol_1_q5
-boolean bsection_a5
-boolean bsection_c2
-boolean bsection_d1
-boolean bsection_e1
-boolean bsection_f6
-boolean bsection_f9
-boolean bsection_i2
-boolean bsection_i3
-boolean bsection_m2
-boolean bsection_n8
-boolean bsection_r9
-draft angle_j8
-draft angle_k7
-draft angle_m4
+
+blend complex_a2  # topology mismatch before the blend: our `explode s e` leaves out CCH_indushem.rle's degenerated edge, which OCCT's lists, so the script's s_26 is past our 25 edges (W1d)
+blend complex_a3  # the loft's surface isn't valid (a weight along v isn't positive)
+blend complex_a4  # the area differs from OCCT's
+blend complex_a7  # the edges blended aren't the shape's (the script's edges come from another shape)
+blend complex_b2  # the area differs from OCCT's
+blend complex_b3  # a boolean's result has an edge used by three faces (refused, not manifold)
+blend complex_b5  # blends of edges the kernel sees on one face only (seams, sheet edges)
+blend complex_c1  # a boolean leaves an open shell
+blend complex_c6  # a boolean builds a face that doesn't close (a p-curve gap)
+blend complex_d6  # a boolean leaves an open shell
+blend complex_d8  # the blends of two edges overlap: the size is too large for the face between them (OCCT builds it)
+blend complex_e7  # the blend's section degenerates along the edge
+blend complex_f1  # a boolean leaves an open shell
+blend complex_f2  # the blends of two edges overlap: the size is too large for the face between them (OCCT builds it)
+blend complex_g8  # a boolean leaves an open shell
+blend complex_g9  # the blend is too large for the faces at the edge (OCCT builds it)
+blend simple_c7  # topology mismatch before the blend: our `explode s e` leaves out the degenerated edge at the partial cone's apex, which OCCT's lists, so the script's s_7 is past our 6 edges (W1d)
+blend simple_c8  # topology mismatch before the blend: our `explode s e` leaves out the degenerated edge at the partial cone's apex, which OCCT's lists, so the script's s_7 is past our 6 edges (W1d)
+blend simple_c9  # the area differs from OCCT's
+blend simple_d1  # the blend tool runs out of its budget of sections
+blend simple_e1  # topology mismatch before the blend: our `explode s e` leaves out the degenerated edge at the sphere zone's pole, which OCCT's lists, so the script's s_7 is past our 6 edges (W1d)
+blend simple_e2  # topology mismatch before the blend: our `explode s e` leaves out the degenerated edge at the sphere zone's pole, which OCCT's lists, so the script's s_7 is past our 6 edges (W1d)
+blend simple_e4  # topology mismatch before the blend: our `explode s e` leaves out the degenerated edge at the sphere zone's pole, which OCCT's lists, so the script's s_7 is past our 6 edges (W1d)
+blend simple_h7  # the blend tool runs out of its budget of sections
+blend simple_h9  # a boolean leaves an open shell
+blend simple_k4  # the area differs from OCCT's
+blend simple_p4  # a boolean builds a face that doesn't close (a p-curve gap)
+blend simple_p5  # a boolean builds a face that doesn't close (a p-curve gap)
+blend simple_p7  # a boolean leaves an open shell
+blend simple_q2  # a boolean leaves an open shell
+blend simple_q3  # the area differs from OCCT's
+blend simple_q6  # the area differs from OCCT's
+blend simple_q7  # the area differs from OCCT's
+blend simple_q8  # the area differs from OCCT's
+blend simple_t8  # the area differs from OCCT's
+blend simple_u2  # the area differs from OCCT's
+blend simple_u5  # a boolean leaves an open shell
+blend simple_u7  # the area differs from OCCT's
+blend simple_v7  # a boolean's result has a face loop that crosses itself in (u, v)
+blend simple_w3  # the blend is too large for the faces at the edge (OCCT builds it)
+blend simple_w7  # the area differs from OCCT's
+blend simple_x1  # the area differs from OCCT's
+blend simple_x2  # the blend is too large for the faces at the edge (OCCT builds it)
+blend simple_x4  # a boolean leaves an open shell
+blend simple_y6  # the blends of two edges overlap: the size is too large for the face between them (OCCT builds it)
+blend simple_y7  # the blend is too large for the faces at the edge (OCCT builds it)
+blend simple_z1  # the edges blended aren't the shape's (the script's edges come from another shape)
+blend tolblend_simple_a3  # topology mismatch before the blend: our OCCT BRep reader reads CFI_5_b12fgg.rle with 7 edges (none degenerated) where OCCT's explode lists at least 8, so the script's s_8 is past ours (W2d reader, W1d)
+blend tolblend_simple_b4  # the blend's section degenerates along the edge
+blend tolblend_simple_b5  # the blend's section degenerates along the edge
+blend tolblend_simple_b6  # the blend's section degenerates along the edge
+blend tolblend_simple_b7  # the profile is refused: a degenerate arc
+blend tolblend_simple_b8  # the blend's section degenerates along the edge
+blend tolblend_simple_c1  # the blend's section degenerates along the edge
+blend tolblend_simple_c2  # the blend's section degenerates along the edge
+blend tolblend_simple_c3  # the blend's section degenerates along the edge
+blend tolblend_simple_c5  # the blend's section degenerates along the edge
+blend tolblend_simple_d2  # a boolean's result has an edge used by three faces (refused, not manifold)
+blend tolblend_simple_d6  # topology mismatch before the blend: our OCCT BRep reader reads CFI_5_b12fgg.rle with 7 edges (none degenerated) where OCCT's explode lists at least 8, so the script's s_8 is past ours (W2d reader, W1d)
+blend tolblend_simple_d7  # blends of edges the kernel sees on one face only (seams, sheet edges)
+blend tolblend_simple_d8  # topology mismatch before the blend: our OCCT BRep reader reads CFI_5_b12fgg.rle with 7 edges (none degenerated) where OCCT's explode lists at least 8, so the script's s_8 is past ours (W2d reader, W1d)
+blend tolblend_simple_d9  # a boolean leaves an open shell
+blend tolblend_simple_e1  # a boolean leaves an open shell
+blend tolblend_simple_e3  # the blend tool runs out of its budget of sections
+blend tolblend_simple_e4  # the blend tool runs out of its budget of sections
+blend tolblend_simple_e5  # the blend tool runs out of its budget of sections
+blend tolblend_simple_f2  # the area differs from OCCT's
+blend tolblend_simple_f6  # the area differs from OCCT's
+blend tolblend_simple_f7  # a boolean leaves an open shell
+blend tolblend_simple_f9  # the area differs from OCCT's
+blend tolblend_simple_g1  # the area differs from OCCT's
+boolean bcommon_2d_o4  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bcommon_2d_o6  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bcommon_2d_o8  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bcommon_2d_o9  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bcommon_2d_p3  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bcommon_2d_p5  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bcommon_2d_p7  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bcommon_2d_p8  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bcut_2d_a8  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bcut_2d_n5  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bcut_2d_p8  # the length differs from OCCT's
+boolean bcut_2d_p9  # the length differs from OCCT's
+boolean bcut_2d_q3  # the length differs from OCCT's
+boolean bcut_2d_q4  # the length differs from OCCT's
+boolean bcut_2d_q7  # the length differs from OCCT's
+boolean bcut_2d_q8  # the length differs from OCCT's
+boolean bcut_2d_q9  # the length differs from OCCT's
+boolean bcut_2d_r1  # the length differs from OCCT's
+boolean bcut_2d_r6  # the length differs from OCCT's
+boolean bcut_2d_r7  # the length differs from OCCT's
+boolean bcut_2d_s1  # the length differs from OCCT's
+boolean bcut_2d_s2  # the length differs from OCCT's
+boolean bcut_2d_s5  # the length differs from OCCT's
+boolean bcut_2d_s6  # the length differs from OCCT's
+boolean bcut_2d_s7  # the length differs from OCCT's
+boolean bcut_2d_s8  # the length differs from OCCT's
+boolean bcut_complex_e4  # a boolean builds a face that doesn't close (a p-curve gap)
+boolean bcut_complex_f1  # a boolean builds a face that doesn't close (a p-curve gap)
+boolean bcut_complex_f9  # a boolean leaves an open shell
+boolean bcut_complex_h4  # a boolean builds a face that doesn't close (a p-curve gap)
+boolean bcut_complex_i2  # the area differs from OCCT's
+boolean bcut_complex_k4  # a boolean builds a face that doesn't close (a p-curve gap)
+boolean bcut_complex_l4  # a boolean builds a face that doesn't close (a p-curve gap)
+boolean bcut_complex_o5  # a boolean's result has an edge used by three faces (refused, not manifold)
+boolean bfuse_2d_a7  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bfuse_2d_a9  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bfuse_2d_b2  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bfuse_2d_b3  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bfuse_2d_b6  # the length differs from OCCT's
+boolean bfuse_2d_b8  # the length differs from OCCT's
+boolean bfuse_2d_c1  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bfuse_2d_c2  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bfuse_2d_c5  # the length differs from OCCT's
+boolean bfuse_2d_c7  # the length differs from OCCT's
+boolean bfuse_2d_c8  # the length differs from OCCT's
+boolean bfuse_2d_c9  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bfuse_2d_d1  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bfuse_complex_e1  # a boolean leaves an open shell
+boolean bfuse_complex_i3  # a boolean leaves an open shell
+boolean bfuse_complex_k6  # a boolean's result has an edge used by three faces (refused, not manifold)
+boolean bfuse_complex_q7  # the area differs from OCCT's
+boolean bopcommon_2d_n5  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bopcommon_2d_n7  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bopcommon_2d_n9  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bopcommon_2d_o1  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bopcommon_2d_o4  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bopcommon_2d_o6  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bopcommon_2d_o8  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bopcommon_2d_o9  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bopcommon_2d_p3  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bopcommon_2d_p5  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bopcommon_2d_p7  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bopcommon_2d_p8  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bopcommon_complex_e3  # the area differs from OCCT's
+boolean bopcommon_complex_e4  # the area differs from OCCT's
+boolean bopcommon_complex_g9  # a boolean leaves an open shell
+boolean bopcommon_complex_i2  # a boolean leaves an open shell
+boolean bopcommon_complex_k2  # the OCCT BRep reader reads no faces or edges from the dataset file (OCCT reads it)
+boolean bopcommon_complex_k3  # the OCCT BRep reader reads no faces or edges from the dataset file (OCCT reads it)
+boolean bopcommon_complex_k5  # a boolean leaves an open shell
+boolean bopcut_2d_b9  # the length differs from OCCT's
+boolean bopcut_2d_c2  # the length differs from OCCT's
+boolean bopcut_2d_c4  # the length differs from OCCT's
+boolean bopcut_2d_c5  # the length differs from OCCT's
+boolean bopcut_2d_c8  # the length differs from OCCT's
+boolean bopcut_2d_d1  # the length differs from OCCT's
+boolean bopcut_2d_d3  # the length differs from OCCT's
+boolean bopcut_2d_d4  # the length differs from OCCT's
+boolean bopcut_complex_e6  # the area differs from OCCT's
+boolean bopcut_complex_h8  # the area differs from OCCT's
+boolean bopcut_complex_h9  # a boolean leaves an open shell
+boolean bopcut_complex_i7  # a boolean leaves an open shell
+boolean bopcut_complex_j2  # the area differs from OCCT's
+boolean bopcut_complex_k9  # the OCCT BRep reader reads no faces or edges from the dataset file (OCCT reads it)
+boolean bopcut_complex_m6  # a boolean leaves an open shell
+boolean bopfuse_2d_a7  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bopfuse_2d_a9  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bopfuse_2d_b2  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bopfuse_2d_b3  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bopfuse_2d_b6  # the length differs from OCCT's
+boolean bopfuse_2d_b8  # the length differs from OCCT's
+boolean bopfuse_2d_c1  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bopfuse_2d_c2  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bopfuse_2d_c5  # the length differs from OCCT's
+boolean bopfuse_2d_c7  # the length differs from OCCT's
+boolean bopfuse_2d_c8  # the length differs from OCCT's
+boolean bopfuse_2d_c9  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bopfuse_2d_d1  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean bopfuse_complex_g2  # a boolean leaves an open shell
+boolean bopfuse_complex_h4  # the area differs from OCCT's
+boolean bopfuse_complex_j6  # a boolean's result has an edge used by three faces (refused, not manifold)
+boolean bopfuse_complex_k8  # a boolean leaves an open shell
+boolean bopfuse_complex_l1  # a boolean leaves an open shell
+boolean bopfuse_complex_m1  # a boolean leaves an open shell
+boolean bopfuse_complex_n2  # the area differs from OCCT's
+boolean bopfuse_complex_n5  # the area differs from OCCT's
+boolean bopfuse_complex_n6  # the area differs from OCCT's
+boolean bopfuse_complex_o1  # the area differs from OCCT's
+boolean bopfuse_complex_o4  # the area differs from OCCT's
+boolean boptuc_2d_a8  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean boptuc_2d_m8  # the result's vertex and edge counts differ from OCCT's (checknbshapes: faces split or merged differently)
+boolean boptuc_2d_o1  # the length differs from OCCT's
+boolean boptuc_2d_o3  # the length differs from OCCT's
+boolean boptuc_2d_o5  # the length differs from OCCT's
+boolean boptuc_2d_o6  # the length differs from OCCT's
+boolean boptuc_2d_o9  # the length differs from OCCT's
+boolean boptuc_2d_p2  # the length differs from OCCT's
+boolean boptuc_2d_p4  # the length differs from OCCT's
+boolean boptuc_2d_p5  # the length differs from OCCT's
+boolean boptuc_complex_c6  # a boolean leaves an open shell
+boolean boptuc_complex_c7  # the area differs from OCCT's
+boolean boptuc_complex_d8  # a boolean leaves an open shell
+sewing tol_0_01_e5  # the result's free edges differ from OCCT's
+sewing tol_0_01_e7  # the result's free edges differ from OCCT's
+sewing tol_0_01_f5  # the result's free edges differ from OCCT's
+sewing tol_0_01_q8  # the result's free edges differ from OCCT's
+sewing tol_0_01_z2  # the result's free edges differ from OCCT's
+sewing tol_100_c3  # the result's free edges differ from OCCT's
+sewing tol_100_c5  # the result's free edges differ from OCCT's
+sewing tol_100_d3  # the result's free edges differ from OCCT's
+sewing tol_100_g8  # the result's free edges differ from OCCT's
+sewing tol_100_i5  # the result's free edges differ from OCCT's
+sewing tol_100_i6  # the result's free edges differ from OCCT's
+sewing tol_100_j5  # the result's free edges differ from OCCT's
+sewing tol_100_y7  # the result's free edges differ from OCCT's
+boolean bcut_simple_g6  # a boolean leaves an open shell
+thrusection not_solids_w7  # the area differs from OCCT's
+blend simple_g3  # unsupported: faces bounded by rational or high-degree B-splines
+blend simple_g4  # unsupported: faces bounded by rational or high-degree B-splines
+blend simple_g5  # unsupported: faces bounded by rational or high-degree B-splines
+blend simple_g6  # unsupported: faces bounded by rational or high-degree B-splines
+blend simple_h3  # a boolean's result has an edge used by three faces (refused, not manifold)
+blend simple_h4  # topology mismatch before the blend: our `explode s e` leaves out the degenerated edges where the revolved profile touches its axis, which OCCT's lists, so the script's s_10 is past our 9 edges (W1d)
+blend simple_h5  # topology mismatch before the blend: our `explode s e` leaves out the degenerated edges where the revolved profile touches its axis, which OCCT's lists, so the script's s_10 is past our 9 edges (W1d)
+blend simple_j6  # the area differs from OCCT's
+boolean bopcut_2d_d5  # the length differs from OCCT's
+offset wire_closed_inside_0_005_a4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_005_a5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_005_a8  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_005_b2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_005_b7  # the length differs from OCCT's
+offset wire_closed_inside_0_005_c5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_005_c6  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_005_c7  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_005_d2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_005_e4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_005_f5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_005_f6  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_005_g1  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_005_g2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_005_g4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_005_h3  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_005_h6  # the result's wire count differs from OCCT's
+offset wire_closed_inside_0_005_i8  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_025_a4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_025_a5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_025_a6  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_025_a8  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_025_b2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_025_c5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_025_c6  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_025_c7  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_025_d2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_025_e4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_025_f5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_025_f6  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_025_g1  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_025_g2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_025_g4  # the length differs from OCCT's
+offset wire_closed_inside_0_025_h3  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_025_h6  # the result's wire count differs from OCCT's
+offset wire_closed_inside_0_025_i8  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_075_a5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_075_a6  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_075_b2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_075_c5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_075_c6  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_075_c7  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_075_c8  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_075_e4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_075_f6  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_inside_0_075_g2  # the length differs from OCCT's
+offset wire_closed_inside_0_075_h6  # the result's wire count differs from OCCT's
+offset wire_closed_inside_0_075_i8  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_005_a4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_005_a5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_005_a6  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_005_a8  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_005_a9  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_005_b2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_005_c5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_005_c6  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_005_c7  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_005_d2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_005_e4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_005_f5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_005_f6  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_005_g1  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_005_g2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_005_g4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_005_g5  # the length differs from OCCT's
+offset wire_closed_outside_0_005_h6  # the result's wire count differs from OCCT's
+offset wire_closed_outside_0_005_i8  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_025_a4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_025_a5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_025_a6  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_025_a9  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_025_b2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_025_c5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_025_c7  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_025_d2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_025_e4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_025_f5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_025_f6  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_025_g1  # the result's edge count differs from OCCT's
+offset wire_closed_outside_0_025_g4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_025_g5  # the length differs from OCCT's
+offset wire_closed_outside_0_025_h3  # the length differs from OCCT's
+offset wire_closed_outside_0_025_h6  # the result's wire count differs from OCCT's
+offset wire_closed_outside_0_025_i8  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_075_a4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_075_a5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_075_a6  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_075_a9  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_075_b2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_075_c5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_075_c7  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_075_d2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_075_e4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_075_f5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_075_f6  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_075_g1  # the result's edge count differs from OCCT's
+offset wire_closed_outside_0_075_g4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_075_g5  # the length differs from OCCT's
+offset wire_closed_outside_0_075_h3  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_closed_outside_0_075_h6  # the result's wire count differs from OCCT's
+offset wire_unclosed_outside_0_005_a3  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_unclosed_outside_0_005_a9  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_unclosed_outside_0_005_b3  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_unclosed_outside_0_005_b4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_unclosed_outside_0_005_b6  # the length differs from OCCT's
+offset wire_unclosed_outside_0_005_c4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_unclosed_outside_0_025_a1  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_unclosed_outside_0_025_a2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_unclosed_outside_0_025_a3  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_unclosed_outside_0_025_a9  # the length differs from OCCT's
+offset wire_unclosed_outside_0_025_b2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_unclosed_outside_0_025_b3  # the length differs from OCCT's
+offset wire_unclosed_outside_0_025_b6  # the length differs from OCCT's
+offset wire_unclosed_outside_0_025_c4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_unclosed_outside_0_075_a2  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_unclosed_outside_0_075_a3  # the length differs from OCCT's
+offset wire_unclosed_outside_0_075_a9  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_unclosed_outside_0_075_b1  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_unclosed_outside_0_075_b2  # the length differs from OCCT's
+offset wire_unclosed_outside_0_075_b3  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_unclosed_outside_0_075_b4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_unclosed_outside_0_075_b5  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset wire_unclosed_outside_0_075_b6  # the length differs from OCCT's
+offset wire_unclosed_outside_0_075_c4  # the result's vertex count differs from OCCT's (a B-spline wire's offset is split at other points)
+offset faces_type_a_a3  # the volume differs from OCCT's
+offset faces_type_a_b1  # the inset is empty (OCCT builds it)
+offset faces_type_i_a9  # the face's slab isn't valid
+offset faces_type_i_b4  # the moved faces don't close: a face's loop crosses itself in (u, v)
+offset faces_type_i_b5  # the volume differs from OCCT's
+offset faces_type_i_b6  # a boolean leaves an open shell
+offset faces_type_i_c1  # a boolean leaves an open shell
+offset faces_type_i_c2  # the volume differs from OCCT's
+offset faces_type_i_c5  # the face's slab encloses another volume than its ends make
+offset faces_type_i_d1  # the volume differs from OCCT's
+offset faces_type_i_d7  # moved faces no longer meet along an edge
+offset faces_type_i_e5  # the volume differs from OCCT's
+offset faces_type_i_e7  # a boolean leaves an open shell
+offset faces_type_i_e8  # the moved faces don't close: a face's loop crosses itself in (u, v)
+offset faces_type_i_e9  # a boolean leaves an open shell
+offset faces_type_i_f1  # the moved faces don't close: a face's loop crosses itself in (u, v)
+offset faces_type_i_f2  # the volume differs from OCCT's
+offset faces_type_i_f3  # the moved faces don't close: a face's loop crosses itself in (u, v)
+offset faces_type_i_f4  # a boolean leaves an open shell
+offset faces_type_i_f5  # the moved faces don't close: a face's loop crosses itself in (u, v)
+offset faces_type_i_g4  # the volume differs from OCCT's
+offset faces_type_i_g5  # a boolean leaves an open shell
+offset faces_type_i_i5  # the volume differs from OCCT's
+offset faces_type_i_j5  # the volume differs from OCCT's
+offset faces_type_i_l1  # the volume differs from OCCT's
+offset faces_type_i_l3  # the volume differs from OCCT's
+offset faces_type_i_l5  # the volume differs from OCCT's
+offset faces_type_i_l7  # unsupported: faces bounded by rational or high-degree B-splines
+offset faces_type_i_l8  # unsupported: faces bounded by rational or high-degree B-splines
+offset faces_type_i_l9  # unsupported: faces bounded by rational or high-degree B-splines
+offset faces_type_i_m1  # unsupported: faces bounded by rational or high-degree B-splines
+offset faces_type_i_m2  # unsupported: faces bounded by rational or high-degree B-splines
+offset faces_type_i_m3  # unsupported: faces bounded by rational or high-degree B-splines
+offset shape_type_a_a8  # the offset turned the body inside out (OCCT builds it)
+offset shape_type_i_a5  # the moved faces don't close: a face's loop crosses itself in (u, v)
+offset shape_type_i_a9  # the moved faces don't close: a p-curve gap
+offset shape_type_i_b4  # the moved faces don't close: a solid inside out
+offset shape_type_i_b6  # the moved faces don't close: a solid inside out
+offset shape_type_i_c6  # the volume differs from OCCT's
+offset shape_type_i_c_i4  # the moved faces don't close: a face's loop crosses itself in (u, v)
+offset shape_type_i_c_i5  # the volume differs from OCCT's
+offset shape_type_i_c_v2  # the moved faces don't close: a face's loop crosses itself in (u, v)
+offset shape_type_i_c_w1  # the moved faces don't close: a face's loop crosses itself in (u, v)
+offset shape_type_i_d4  # the moved faces don't close: a p-curve gap
+offset shape_type_i_d5  # the moved faces don't close: a p-curve gap
+offset shape_type_i_d6  # moved faces no longer meet along an edge
+offset shape_type_i_d7  # moved faces no longer meet along an edge
+offset shape_type_i_e3  # the moved faces don't close: a solid inside out
+offset shape_type_i_e4  # the moved faces don't close: a solid inside out
+offset shape_type_i_g2  # the moved faces no longer meet at a corner
+offset shape_type_i_g4  # unsupported: faces bounded by rational or high-degree B-splines
+offset faces_type_i_k6  # the volume differs from OCCT's
+boolean bfuse_complex_k5  # a boolean builds a face that doesn't close (a p-curve gap)
+sewing tol_0_01_q4  # the result fails checkshape: p-curve gaps
+sewing tol_100_b2  # the result fails checkshape: p-curve gaps
+sewing tol_100_e7  # the result fails checkshape: p-curve gaps
+sewing tol_100_r7  # the result fails checkshape: p-curve gaps
+sewing tol_1_a2  # the result fails checkshape: p-curve gaps
+sewing tol_1_f4  # the result fails checkshape: a solid inside out
+sewing tol_1_f5  # the result fails checkshape: a solid inside out
+sewing tol_1_q5  # the result fails checkshape: a face loop crosses itself in (u, v)
+boolean bsection_a5  # the length differs from OCCT's
+boolean bsection_c2  # the length differs from OCCT's
+boolean bsection_d1  # the OCCT BRep reader reads no faces or edges from the dataset file (OCCT reads it)
+boolean bsection_e1  # the OCCT BRep reader reads no faces or edges from the dataset file (OCCT reads it)
+boolean bsection_f6  # unsupported: booleans of shapes other than solids
+boolean bsection_f9  # the length differs from OCCT's
+boolean bsection_i2  # the length differs from OCCT's
+boolean bsection_i3  # the length differs from OCCT's
+boolean bsection_m2  # the length differs from OCCT's
+boolean bsection_n8  # the length differs from OCCT's
+boolean bsection_r9  # the length differs from OCCT's
+draft angle_j8  # topology mismatch before the draft: the fuse of the cone and the box has 3 faces where OCCT's has at least 4 (the script drafts f_4) (W2d)
+draft angle_k7  # the moved faces don't close: a p-curve gap
+draft angle_m4  # the moved faces don't close: a face's loop crosses itself in (u, v)
+
 # bsection_k3: with exact (sub-net) B-spline face boxes the finer SSI grid finds a small loop near
 # the open branch and the open curve detours through it (63.5 long between ends 23.3 apart).
+
 # W10: cases the DRAW commands added for pipes, sweeps, form features, evolutive and
 # multi-radius blends, surfaces and wedges made runnable, failing today (by cause).
+
 # pipe: a boolean of the feature fails (open shell).
 pipe bugs_bug32807
 pipe bugs_bug32809
@@ -589,16 +596,16 @@ blend buildevol_k6
 blend buildevol_k8
 # blend: the operation fails.
 blend bfuseblend_b6
-blend buildevol_b3
-blend buildevol_b9
-blend buildevol_d6
+blend buildevol_b3  # topology mismatch before the blend: our `explode s e` leaves out the degenerated edge at the partial cone's apex, which OCCT's lists, so the script's s_7 is past our 6 edges (W1d)
+blend buildevol_b9  # topology mismatch before the blend: our `explode s e` leaves out the degenerated edge at the sphere zone's pole, which OCCT's lists, so the script's s_7 is past our 6 edges (W1d)
+blend buildevol_d6  # topology mismatch before the blend: our `explode s e` leaves out the degenerated edges where the revolved profile touches its axis, which OCCT's lists, so the script's s_10 is past our 9 edges (W1d)
 blend complex_c2
 blend complex_h4
-blend encoderegularity_a1
-blend encoderegularity_a5
+blend encoderegularity_a1  # topology mismatch before the blend: our `explode m e` leaves out CFI901_congefjw.rle's 2 degenerated edges, which OCCT's lists, so the script's m_41 is past our 40 edges (W1d)
+blend encoderegularity_a5  # topology mismatch before the blend: our `explode m e` leaves out CFI901_congefkc.rle's 2 degenerated edges, which OCCT's lists, so the script's m_31 is past our 30 edges (W1d)
 blend simple_r4
 blend simple_r5
-blend tolblend_simple_a4
+blend tolblend_simple_a4  # topology mismatch before the blend: our OCCT BRep reader reads CFI_5_b12fgg.rle with 7 edges (none degenerated) where OCCT's explode lists at least 8, so the script's s_8 is past ours (W2d reader, W1d)
 blend tolblend_simple_a6
 blend tolblend_simple_b2
 blend tolblend_simple_e2
@@ -617,7 +624,6 @@ blend simple_j7
 blend simple_j8
 blend simple_j9
 blend tolblend_simple_e9
-# blend: the result is invalid (checkshape).
 # blend: radius laws reaching 0 (OCCT ends evolutive blends at a point).
 blend tolblend_buildvol_a3
 blend tolblend_buildvol_a4
@@ -727,7 +733,6 @@ offset shape_type_i_c_v5
 offset shape_type_i_c_v9
 # feat: with OCCT's unmerged booleans the fused base's faces split, and the profile's face isn't the one OCCT's numbering gives.
 feat featrevol_h2
-# offset: unifysamedom after offsetonface, whose offset the kernel fails (W6).
 # tolblend_simple_c9: the blend tool's subtraction leaves the box face under the tool in two
 # pieces whose seam edges three or four faces share (a non-manifold result, refused); pair 7x15
 # finds three near-identical curves along the tool's spring edge (W2).
@@ -741,6 +746,7 @@ blend simple_t9
 # W15 heal: the healing commands (fixshape, fixwgaps, directfaces, DT_*) made runnable, failing
 # today (by cause). Most are inputs the reader leaves invalid that the command isn't meant to
 # repair (OCCT's own reading of them is sound).
+
 # heal: directfaces leaves a p-curve (refitted on the direct frame) 6e-5 off its edge.
 heal direct_faces_a6
 # heal: newFS.rle's B-spline conversion of its rotated plane gives a loop that crosses itself in (u, v).
@@ -754,6 +760,7 @@ heal fix_gaps_b1
 boolean bopfuse_complex_h1
 # W15: cases that pass the fast check and fail the full one (CheckLevel::Full in every suite),
 # by cause and owner.
+
 # Full check: a face's loops cross in (u, v), W1b.
 blend complex_a5
 # Full check: the input's faces cross (RevolutionFG.rle's panels interpenetrate): the input, not the command (W6b reader).

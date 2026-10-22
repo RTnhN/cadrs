@@ -10,10 +10,12 @@ uses a command the API doesn't have yet (or Tcl control flow, or OCCT's data fil
 left to do.
 """
 
+import json
 import math
 import os
 import re
 import sys
+import textwrap
 
 KEYWORDS = {
     "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn", "for", "if", "impl", "in", "let", "loop",
@@ -67,6 +69,13 @@ def split_commands(text):
                 continue
             out.append(part)
     return out
+
+
+# The sub-shapes an explode's kind names, in words (draw::sub's message).
+KIND_WORDS = {
+    "": "sub-shapes", "e": "edges", "edge": "edges", "f": "faces", "face": "faces", "v": "vertices", "vertex": "vertices",
+    "w": "wires", "wire": "wires", "sh": "shells", "shell": "shells", "so": "solids", "solid": "solids",
+}
 
 
 class Case:
@@ -134,9 +143,16 @@ class Case:
             return "&" + self.vars[name]
         m = re.fullmatch(r"(.+)_(\d+)", name)
         if m and m.group(1) in self.exploded:
-            vec, _ = self.exploded[m.group(1)]
-            return f"&{vec}[{int(m.group(2)) - 1}]"
+            # Checked: the shape exploded may have other topology than OCCT's (fewer edges),
+            # a failure that says so rather than an index out of bounds.
+            vec, kind = self.exploded[m.group(1)]
+            return f"draw::sub(&{vec}, {int(m.group(2))}, \"{m.group(1)}\", \"{KIND_WORDS[kind]}\")?"
         raise Unsupported(f"the shape {name}")
+
+    def owned(self, name):
+        """A Rust expression for a copy of a DRAW shape (see shape)."""
+        e = self.shape(name)
+        return f"{e[1:]}.clone()" if e.startswith("&") else f"{e}.clone()"
 
     def bind(self, name, expr):
         r = ident(name)
@@ -564,7 +580,8 @@ class Case:
         elif c == "mkface" and len(a) == 2 and a[1] in self.surfaces:
             # The face's whole surface: the face itself stands for it (as a limit of a feature,
             # only its surface counts).
-            self.bind(a[0], f"{self.surfaces[a[1]][1:]}.clone()")
+            e = self.surfaces[a[1]]
+            self.bind(a[0], f"{e[1:]}.clone()" if e.startswith("&") else f"{e}.clone()")
         elif c in ("featprism", "featrevol", "featdprism") and len(a) in (6, 8, 11):
             kind = c[4:]
             want = {"prism": 8, "revol": 11, "dprism": 6}[kind]
@@ -621,7 +638,7 @@ class Case:
                 for k in kinds:
                     k.add(a[1])
             else:
-                self.bind(a[1], f"{self.shape(a[0])[1:]}.clone()")
+                self.bind(a[1], self.owned(a[0]))
         elif c == "revol" and len(a) == 9:
             self.bind(a[0], f"k.revol({self.shape(a[1])}, {', '.join(L(x) for x in a[2:])})?")
         elif c in ("bfuse", "bcut", "bcommon") and len(a) == 3:
@@ -724,10 +741,10 @@ class Case:
             for s in shapes:
                 self.bind(s, f"k.{c}({self.shape(s)}, {', '.join(L(x) for x in nums)})?")
         elif c in ("copy", "tcopy") and len(a) == 2:
-            self.bind(a[1], f"{self.shape(a[0])[1:]}.clone()")
+            self.bind(a[1], self.owned(a[0]))
         elif c == "nurbsconvert" and len(a) == 2:
             # The same geometry (our surfaces stay exact): a copy.
-            self.bind(a[0], f"{self.shape(a[1])[1:]}.clone()")
+            self.bind(a[0], self.owned(a[1]))
         elif c == "explode" and (len(a) == 1 or (len(a) == 2 and a[1].lower() in ("v", "vertex", "w", "wire", "sh", "shell", "so", "solid", "edge", "face"))):
             kind = a[1].lower() if len(a) == 2 else ""
             vec = ident(a[0]) + "_x" + (kind or "sub")
@@ -999,15 +1016,42 @@ def group_consts(tests, group):
 
 
 def known_failures():
+    """{(group, case): reason} of tools/occt_known_failures.txt. Each line is `group case`,
+    with its reason inline (`group case  # why`) or in the comment lines just above its group of
+    lines (a blank line ends a group's comment); a reason may hold `[panic: text]`, a panic the
+    case is expected to raise (its message containing the text). A line without a reason is an
+    error."""
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "occt_known_failures.txt")
-    out = set()
-    if os.path.exists(path):
-        for line in open(path):
-            line = line.strip()
-            if line and not line.startswith("#"):
-                g, n = line.split()
-                out.add((g, n))
+    out = {}
+    if not os.path.exists(path):
+        return out
+    block, last_entry, missing = [], False, []
+    for i, line in enumerate(open(path), 1):
+        line = line.strip()
+        if not line:
+            block, last_entry = [], False
+            continue
+        if line.startswith("#"):
+            if last_entry:
+                block, last_entry = [], False
+            block.append(line[1:].strip())
+            continue
+        entry, _, inline = line.partition("#")
+        g, n = entry.split()
+        why = inline.strip() or " ".join(block)
+        if not why:
+            missing.append(f"{path}:{i}: {g} {n}")
+        out[(g, n)] = why
+        last_entry = True
+    if missing:
+        sys.exit("known failures without a reason (add `# why` to the line or a comment above its group):\n  " + "\n  ".join(missing))
     return out
+
+
+def expected_panic(why):
+    """The text of a known failure's `[panic: text]` (None without one)."""
+    m = re.search(r"\[panic: ([^\]]+)\]", why)
+    return m.group(1).strip() if m else None
 
 
 # Groups whose end script's `checkshape result` is a case's check when it measures nothing else
@@ -1086,6 +1130,7 @@ def main():
         grids = [g for g in sorted(os.listdir(gdir)) if os.path.isdir(os.path.join(gdir, g))]
         body = []
         n_ok = n_ign = 0
+        converted = set()
         seen = set()
         for grid in grids:
             gconsts = dict(consts)
@@ -1113,6 +1158,7 @@ def main():
                     body.append("}")
                 else:
                     n_ok += 1
+                    converted.add(name)
                     body.append(f"/// OCCT `tests/{group}/{grid}/{case}`.")
                     body.append("#[test]")
                     if (group, name) in WRONG_REFERENCE:
@@ -1128,8 +1174,12 @@ def main():
                             fixed.append(l)
                         lines = fixed
                     if (group, name) in known:
-                        # Two-sided: a known failure must still fail (and says so when it
-                        # passes). Slow groups run them only with --ignored.
+                        # Two-sided: a known failure must still fail, by returning its error
+                        # (draw::known_failure says when it passes or panics). Slow groups run
+                        # them only with --ignored.
+                        reason = known[(group, name)]
+                        for i, l in enumerate(textwrap.wrap("Known failure: " + reason, 96)):
+                            body.append(("// " if i == 0 else "//   ") + l)
                         if group in SLOW_GROUPS:
                             body.append('#[ignore = "known failure, slow (tools/occt_known_failures.txt)"]')
                         body.append(f"fn {name}() {{")
@@ -1141,11 +1191,8 @@ def main():
                         body.append("        Ok(())")
                         body.append("    };")
                         body.append("    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(run));")
-                        body.append("    if let Ok(Err(e)) = &r {")
-                        body.append(f'        eprintln!("known failure {group} {name}: {{e:?}}");')
-                        body.append("    }")
-                        body.append("    let passed = matches!(r, Ok(Ok(())));")
-                        body.append(f'    assert!(!passed, "a known failure now passes: remove `{group} {name}` from tools/occt_known_failures.txt");')
+                        panic = expected_panic(reason)
+                        body.append(f'    draw::known_failure("{group} {name}", r, {"Some(" + json.dumps(panic) + ")" if panic else "None"});')
                         body.append("}")
                         continue
                     body.append(f"fn {name}() -> Result<()> {{")
@@ -1183,6 +1230,9 @@ def main():
         with open(os.path.join(out, f"occt_{group}.rs"), "w") as f:
             f.write("\n".join(head + body) + "\n")
         print(f"{group}: {n_ok} converted, {n_ign} waiting")
+        dead = sorted(n for g, n in known if g == group and n not in converted)
+        if dead:
+            print(f"{group}: known failures that aren't converted cases (take them off the list): {', '.join(dead)}", file=sys.stderr)
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ Measured (the default when a result file exists): reads the result file of tools
 (--results, else $KERNEL_GATE_RESULTS, else $CARGO_TARGET_DIR/kernel_gate/results.json, else
 target/kernel_gate/results.json) and gives, per test binary, the cases run and how they ended:
 passing, known failures still failing, STALE known failures (they pass now), STALE-IGNOREs
-(ignored tests that pass now), REGRESSIONs, HANGs, CRASHes and SLOW-REGRESSIONs (much slower
+(ignored tests that pass now), PANICs (known failures that panicked), REGRESSIONs, HANGs, CRASHes and SLOW-REGRESSIONs (much slower
 than the gate's baseline), the cases not run and why (the top ignore reasons), and the slow ones.
 
 Static (--static, or no result file): reads the generated suites' source only and runs nothing.
@@ -71,7 +71,7 @@ def measured(path):
     by = collections.defaultdict(list)
     for t in res["tests"]:
         by[t["binary"]].append(t)
-    print(f"{'binary':26} {'cases':>6} {'run':>6} {'pass':>6} {'known':>6} {'stale':>6} {'st-ign':>6} {'regr':>5} {'hang':>5} {'crash':>5} {'slowr':>5} {'not run':>8} {'slow':>5} {'pass %':>7}  top reasons not run")
+    print(f"{'binary':26} {'cases':>6} {'run':>6} {'pass':>6} {'known':>6} {'stale':>6} {'st-ign':>6} {'panic':>5} {'regr':>5} {'hang':>5} {'crash':>5} {'slowr':>5} {'not run':>8} {'slow':>5} {'pass %':>7}  top reasons not run")
     total = collections.Counter()
     for b in sorted(by):
         c = collections.Counter()
@@ -89,17 +89,17 @@ def measured(path):
                 c["SLOWR"] += 1
         total.update(c)
         top = ", ".join(f"{k} {v}" for k, v in why.most_common(50 if detail else 3))
-        print(f"{b:26} {c['cases']:6} {c['run']:6} {c['pass']:6} {c['known']:6} {c['STALE']:6} {c['STALE-IGNORE']:6} {c['REGRESSION']:5} {c['HANG']:5} {c['CRASH']:5} {c['SLOWR']:5} {c['ignored']:8} {c['slow']:5} {rate(c):>7}  {top}")
-    print(f"{'TOTAL':26} {total['cases']:6} {total['run']:6} {total['pass']:6} {total['known']:6} {total['STALE']:6} {total['STALE-IGNORE']:6} {total['REGRESSION']:5} {total['HANG']:5} {total['CRASH']:5} {total['SLOWR']:5} {total['ignored']:8} {total['slow']:5} {rate(total):>7}")
-    print("(pass % = (pass + stale + stale-ignore) / run; known failures, regressions, hangs and crashes count as failures)")
+        print(f"{b:26} {c['cases']:6} {c['run']:6} {c['pass']:6} {c['known']:6} {c['STALE']:6} {c['STALE-IGNORE']:6} {c['PANIC']:5} {c['REGRESSION']:5} {c['HANG']:5} {c['CRASH']:5} {c['SLOWR']:5} {c['ignored']:8} {c['slow']:5} {rate(c):>7}  {top}")
+    print(f"{'TOTAL':26} {total['cases']:6} {total['run']:6} {total['pass']:6} {total['known']:6} {total['STALE']:6} {total['STALE-IGNORE']:6} {total['PANIC']:5} {total['REGRESSION']:5} {total['HANG']:5} {total['CRASH']:5} {total['SLOWR']:5} {total['ignored']:8} {total['slow']:5} {rate(total):>7}")
+    print("(pass % = (pass + stale + stale-ignore) / run; known failures, panics, regressions, hangs and crashes count as failures)")
     for c in res.get("checks", []):
         print(f"\ncheck {'ok' if c['ok'] else 'FAILED'}: {c['name']}")
-    for cls in ("STALE", "STALE-IGNORE", "REGRESSION", "HANG", "CRASH"):
+    for cls in ("STALE", "STALE-IGNORE", "PANIC", "REGRESSION", "HANG", "CRASH"):
         bad = [t for t in res["tests"] if t["class"] == cls]
         if bad:
             print(f"\n{cls}:")
             for t in bad:
-                print(f"  {t['binary']} {t['name']}" + (f": {t['message']}" if t.get("message") and cls in ("REGRESSION", "HANG", "CRASH") else ""))
+                print(f"  {t['binary']} {t['name']}" + (f": {t['message']}" if t.get("message") and cls in ("PANIC", "REGRESSION", "HANG", "CRASH") else ""))
     regs = [t for t in res["tests"] if t.get("slow_regression")]
     if regs:
         print(f"\nSLOW-REGRESSION (baseline {res.get('baseline')}, load ratio {res.get('load_ratio')}):")

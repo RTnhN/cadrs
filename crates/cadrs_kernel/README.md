@@ -296,8 +296,15 @@ results, or with `--static`, it falls back to reading the suites' source, which 
 - Unit tests in the modules (`cargo test -r -p cadrs_kernel --lib`), the conformance suite, and
   the suites generated from OCCT's DRAW scripts (`tests/occt_*.rs`, `tools/occt_to_rust.py`) and
   SMLib's tests (`tests/smlib_*.rs`). A generated case listed in `tools/occt_known_failures.txt`
-  or `tools/smlib_known_failures*` asserts that it still fails; when it passes, remove the line
-  and regenerate the file.
+  or `tools/smlib_known_failures*` asserts that it still fails, and that it fails by returning
+  its error: a panic (an index out of bounds in the test code, an unwrap) fails the test, and
+  the gate calls it a PANIC. When it passes, remove the line and regenerate the file. Every line
+  of `tools/occt_known_failures.txt` gives its reason, inline (`group case  # why`) or in the
+  comment just above its group of lines (a blank line ends a group); the generator refuses a
+  line without one, copies the reason above the generated case, and warns about lines that
+  aren't a converted case. A reason holding `[panic: text]` lets the case panic with that text.
+  The DRAW harness reports a script's sub-shape past the end of an `explode` as a "topology
+  mismatch" failure (`draw::sub`): the shape exploded has other topology than OCCT's.
 - The generated suites run on a DRAW-style harness (`native::draw`) and the SMLib oracle's body
   writer (`native::oracle`): test code, built only for tests and with the `testkit` feature
   (the crate's own tests turn it on through a dev-dependency on itself), not kernel API.
@@ -315,23 +322,32 @@ results, or with `--static`, it falls back to reading the suites' source, which 
   tree (`git archive HEAD`, or `--rev`; `--tree DIR` tests a tree as it is) and regenerates the
   gitignored OCCT suites there (`OCCT_TESTS`: OCCT 7.8.1's `tests/`; `CADRS_OCCT_DATA`). It
   checks that the library builds without features (`cargo check -p cadrs_kernel`: every test
-  turns `testkit` on) and that `cargo check -p cadrs_core`, the kernel's consumer, passes. Then
+  turns `testkit` on), that `cargo check -p cadrs_core`, the kernel's consumer, passes, and that
+  `tools/kernel_clippy.sh` is clean. Then
   it builds with `--profile kernel` and runs every test binary, `RUST_TEST_THREADS` (3) at a
   time, with every kind of ignored test that can run: the known failures, `slow`, and the ones
   ignored with a reason (not the OCCT suites' cases waiting for a command, whose bodies are
   comments, nor debugging tools and tests that need a file, a checkout or the SMLib oracle they
   aren't given). Each case is a pass, a known failure still failing, STALE (a listed known
   failure that passes: take it off the list), STALE-IGNORE (an ignored test that passes:
-  un-ignore it), a REGRESSION (an unlisted failure), a HANG (over `--hang`, 900 s; the binary
+  un-ignore it), a PANIC (a listed known failure that panicked instead of returning its
+  error), a REGRESSION (an unlisted failure), a HANG (over `--hang`, 900 s; the binary
   goes on without it) or a CRASH; slow over 60 s is flagged. With a baseline (`--baseline`, the
   durations of an earlier run; `--write-baseline` writes one when the gate passes), a case more
   than 3× and 5 s slower than its baseline, scaled by the run's load (the median ratio of the
   durations), is a SLOW-REGRESSION. It writes `results.json` and `summary.txt` (a table per
   suite, the lists, the slowest 20 cases) to `$CARGO_TARGET_DIR/kernel_gate/` and exits 1 when
-  any list or check fails. `--only occt_blend,smlib_fillets` runs some binaries. CI runs the
-  checks, clippy and the fast kernel tests on every push and pull request (the merge
-  requirement), and the gate nightly on main and kernel-10 against the branch's last passing
-  run (delete its `kernel-gate-baseline-<branch>-*` Actions cache to accept a slowdown).
+  any list or check fails. `results.json` records the commit measured: the exported revision,
+  or for `--tree` the tree's git HEAD (`+dirty` with uncommitted changes), `--commit SHA` or
+  `$CADRS_GATE_COMMIT`; a baseline records the commit of the run it came from
+  (`kernel_gate.py --make-baseline RESULTS FILE [--commit SHA]`). `--only
+  occt_blend,smlib_fillets` builds and runs some binaries; `--sample occt_boolean=4` runs every
+  4th case of a binary. CI runs the checks, clippy and a fast subset of the gate on every push
+  and pull request (the merge requirement: the unit tests, conformance, smlib_booleans,
+  validity, determinism and every 4th runnable case of the OCCT boolean suite, generated
+  without the dataset), and the whole gate nightly on main and kernel-10 against the branch's
+  last passing run (delete its `kernel-gate-baseline-<branch>-*` Actions cache to accept a
+  slowdown).
 
 **GPU** (spike, `crates/cadrs_gpu_kernels`, `crates/cadrs_gpu`; see `bench/gpu_spike.md` in the
 working notes): kernels written in Rust compile to SPIR-V with rust-gpu (f64 included) and run

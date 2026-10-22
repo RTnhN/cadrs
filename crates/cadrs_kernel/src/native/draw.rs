@@ -291,6 +291,41 @@ pub fn check_rel(what: &str, got: f64, want: f64) -> Result<()> {
     if ok { Ok(()) } else { Err(err(&format!("the {what} is {got}, expected {want}"))) }
 }
 
+/// The marker of [`sub`]'s error: the shape exploded has other topology than OCCT's.
+pub const TOPOLOGY_MISMATCH: &str = "topology mismatch";
+
+/// Sub-shape `n` (1-based, as DRAW names it: `s_7`) of the `subs` that exploding the shape
+/// `of` into `kind` gave. When there are fewer, the shape's topology differs from OCCT's (an
+/// edge or face split or merged differently before this command): a failure that says so,
+/// not an index out of bounds.
+pub fn sub<'a>(subs: &'a [Shape], n: usize, of: &str, kind: &str) -> Result<&'a Shape> {
+    n.checked_sub(1).and_then(|i| subs.get(i)).ok_or_else(|| {
+        err(&format!("{TOPOLOGY_MISMATCH}: explode {of} gave {} {kind}, the script expects at least {n} ({of}_{n})", subs.len()))
+    })
+}
+
+/// The marker of [`known_failure`]'s panic for a known failure that panicked.
+pub const KNOWN_FAILURE_PANICKED: &str = "a known failure panicked";
+
+/// Ends a generated known failure (`tools/occt_known_failures.txt`): `r` is the case's run
+/// under `catch_unwind`. A known failure must still fail, and fail by returning its error:
+/// this panics (failing the test) when the case passes ("a known failure now passes", the
+/// gate's STALE) or when it panicked, unless the panic's message contains `expected_panic`
+/// (the list's `[panic: …]`; the gate's PANIC otherwise, a bug the known failure would hide).
+pub fn known_failure(case: &str, r: std::thread::Result<Result<()>>, expected_panic: Option<&str>) {
+    match r {
+        Ok(Ok(())) => panic!("a known failure now passes: remove `{case}` from tools/occt_known_failures.txt"),
+        Ok(Err(e)) => eprintln!("known failure {case}: {e:?}"),
+        Err(payload) => {
+            let msg = payload.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| payload.downcast_ref::<String>().cloned()).unwrap_or_default();
+            match expected_panic {
+                Some(want) if msg.contains(want) => eprintln!("known failure {case}: panicked as expected: {msg}"),
+                _ => panic!("{KNOWN_FAILURE_PANICKED}: {case}: {msg}"),
+            }
+        }
+    }
+}
+
 impl NativeKernel {
     // --- Geometry ---------------------------------------------------------------------------
 
@@ -4025,4 +4060,39 @@ fn foot_param(e: &DEdge, p: &P3) -> Option<f64> {
         _ => return None,
     };
     (t >= lo - 1e-9 && t <= hi + 1e-9).then_some(t.clamp(lo, hi))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A script's sub-shape past the end of an explode is a "topology mismatch" failure, not an
+    /// index out of bounds (review 4: 17 blend known failures panicked in their test code).
+    #[test]
+    fn sub_past_the_end_is_a_topology_mismatch() {
+        let subs = vec![Shape::Vertex(P3::origin()), Shape::Empty];
+        assert!(matches!(sub(&subs, 2, "s", "edges"), Ok(Shape::Empty)));
+        let e = sub(&subs, 7, "s", "edges").unwrap_err().to_string();
+        assert!(e.contains("topology mismatch: explode s gave 2 edges, the script expects at least 7 (s_7)"), "{e}");
+        assert!(sub(&subs, 0, "s", "edges").is_err());
+    }
+
+    /// A known failure passes the test by failing with its error, or with the panic it lists.
+    #[test]
+    fn known_failure_that_fails_or_panics_as_listed() {
+        known_failure("g c", Ok(Err(err("the area differs"))), None);
+        known_failure("g c", Err(Box::new("index out of bounds: the len is 6")), Some("index out of bounds"));
+    }
+
+    #[test]
+    #[should_panic(expected = "a known failure now passes: remove `g c`")]
+    fn known_failure_that_passes_is_stale() {
+        known_failure("g c", Ok(Ok(())), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "a known failure panicked: g c: index out of bounds")]
+    fn known_failure_that_panics_fails_loudly() {
+        known_failure("g c", Err(Box::new(String::from("index out of bounds: the len is 6"))), None);
+    }
 }
