@@ -1155,7 +1155,7 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
         for i in 0..curves.len() {
             for j in i + 1..curves.len() {
                 let (ci, cj) = (&curves[i], &curves[j]);
-                for (t, _) in ssi::curve_curve(&ci.c, ci.t0, ci.t1, &cj.c, cj.t0, cj.t1, tf) {
+                for t in overlap_runs(&ci.c, &cj.c, ssi::curve_curve(&ci.c, ci.t0, ci.t1, &cj.c, cj.t0, cj.t1, tf), tf) {
                     let p = ci.c.point(t);
                     if ob.grow(tf * 10.0).contains(&p) {
                         let v = pool.vertex_tol(p, ft);
@@ -1832,6 +1832,37 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
     Ok(BoolOut { body: out, from })
 }
 
+/// The points where two curves meet (`hits`: (t on `a`, t on `b`), as [`ssi::curve_curve`]
+/// gives them) with each stretch where the curves run within `tol` of each other reduced to its
+/// two ends: two intersection curves along one contact (pieces of a near tangent or partly
+/// coincident contact) touch at every wiggle within the tolerance, and each touch would cut
+/// both. Two hits are on one stretch when `a` stays within `tol` of `b` at three points between
+/// them. The parameters on `a`, in order.
+fn overlap_runs(a: &Curve, b: &Curve, mut hits: Vec<(f64, f64)>, tol: f64) -> Vec<f64> {
+    hits.sort_by(|x, y| x.0.total_cmp(&y.0));
+    let close = |s: f64, t: f64, s2: f64, t2: f64| {
+        [0.25, 0.5, 0.75].iter().all(|k| {
+            let p = a.point(s + (s2 - s) * k);
+            let tb = b.closest(&p, t.min(t2), t.max(t2));
+            (b.point(tb) - p).norm() <= 2.0 * tol
+        })
+    };
+    let mut out: Vec<f64> = Vec::new();
+    let mut k = 0;
+    while k < hits.len() {
+        let mut e = k;
+        while e + 1 < hits.len() && close(hits[e].0, hits[e].1, hits[e + 1].0, hits[e + 1].1) {
+            e += 1;
+        }
+        out.push(hits[k].0);
+        if e > k {
+            out.push(hits[e].0);
+        }
+        k = e + 1;
+    }
+    out
+}
+
 /// Drops the solids of `b` that enclose no volume (to 1e-9 of the body's box, cubed): a closed
 /// shell of faces of the two inputs that met face to face, both kept, is a sheet-thin sliver,
 /// not a solid, as are two faces closing on each other. Only solids of a few faces, or holding
@@ -2208,6 +2239,18 @@ mod tests {
         let err = fail().unwrap_or_default();
         assert!(err.contains("work budget"), "{err}");
         assert_eq!(fail(), Some(err));
+    }
+
+    /// Curves running along each other within the tolerance meet in one stretch, its two ends,
+    /// however many touches the intersection reports along it; separate crossings stay.
+    #[test]
+    fn overlap_runs_keep_the_ends() {
+        let a = Curve::Line { o: P3::origin(), d: V3::x() };
+        let b = Curve::Line { o: P3::new(0.0, 4e-7, 0.0), d: V3::x() };
+        assert_eq!(overlap_runs(&a, &b, vec![(3.0, 3.0), (1.0, 1.0), (2.0, 2.0)], 1e-6), vec![1.0, 3.0]);
+        let c = Curve::Line { o: P3::new(0.0, -1.0, 0.0), d: V3::new(1.0, 1.0, 0.0) };
+        assert_eq!(overlap_runs(&a, &c, vec![(1.0, 1.0), (5.0, 5.0)], 1e-6), vec![1.0, 5.0]);
+        assert_eq!(overlap_runs(&a, &c, vec![(1.0, 1.0)], 1e-6), vec![1.0]);
     }
 
     /// Booleans merge faces on one surface by default, and keep them apart with
