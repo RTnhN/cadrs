@@ -45,9 +45,11 @@ pub fn face_polygons(body: &Body, f: &Face) -> Vec<Vec<P2>> {
 /// surface metric).
 pub fn in_face(polys: &[Vec<P2>], surf: &Surface, uv: P2, tol: f64) -> InFace {
     let (mu, mv) = surf.metric();
-    let q = P2::new(uv.x * mu, uv.y * mv);
     let mut inside = false;
     for p in polys {
+        let (lo, hi) = uv_range(std::slice::from_ref(p));
+        let uv = shifted_into(surf, uv, lo, hi);
+        let q = P2::new(uv.x * mu, uv.y * mv);
         let n = p.len();
         for i in 0..n {
             let (a, b) = (p[i], p[(i + 1) % n]);
@@ -101,9 +103,10 @@ impl<'a> FacePolys<'a> {
     /// are even) can neither hold it on its boundary nor flip its parity, and is skipped.
     pub fn in_face(&self, surf: &Surface, uv: P2, tol: f64) -> InFace {
         let (mu, mv) = surf.metric();
-        let q = P2::new(uv.x * mu, uv.y * mv);
         let mut inside = false;
         for (p, (b, m)) in self.polys.iter().zip(&self.boxes) {
+            let uv = shifted_into(surf, uv, (b[0], b[1]), (b[2], b[3]));
+            let q = P2::new(uv.x * mu, uv.y * mv);
             let gm = tol * (1.0 + tol::REL) + tol::REL_FINE * (1.0 + q.x.abs().max(q.y.abs()) + m[1].abs().max(m[0].abs()).max(m[3].abs()).max(m[2].abs()));
             let gb = tol::REL_FINE * (1.0 + uv.x.abs().max(uv.y.abs()) + b[1].abs().max(b[0].abs()).max(b[3].abs()).max(b[2].abs()));
             let far_m = q.x < m[0] - gm || q.x > m[1] + gm || q.y < m[2] - gm || q.y > m[3] + gm;
@@ -347,6 +350,21 @@ pub fn ray_hits(body: &Body, polys: &[Vec<Vec<P2>>], o: &P3, d: &V3) -> Vec<(f64
 /// The (u, v) shifted by whole periods into the face's uv box.
 pub fn periodic_candidates(s: &Surface, u: f64, v: f64, polys: &[Vec<P2>]) -> Vec<P2> {
     periodic_candidates_in(s, u, v, uv_range(polys))
+}
+
+/// `uv` moved by whole turns along the surface's periodic directions into the box (lo: the u
+/// range, hi: the v range) of one loop's polygon, where a turn brings it there: a loop of a
+/// periodic face may lie across the u range of another (a hole straddling the seam, its polygon
+/// running below u = 0 while the outer loop's runs from 0 to 2π), and a point is in it when any
+/// of its turns is.
+fn shifted_into(s: &Surface, uv: P2, (ulo, uhi): (f64, f64), (vlo, vhi): (f64, f64)) -> P2 {
+    let fit = |x: f64, lo: f64, hi: f64, periodic: bool| {
+        if !periodic || (x >= lo - tol::ROUNDOFF && x <= hi + tol::ROUNDOFF) {
+            return x;
+        }
+        (-2..=2).map(|k| x + TAU * k as f64).find(|y| *y >= lo - tol::ROUNDOFF && *y <= hi + tol::ROUNDOFF).unwrap_or(x)
+    };
+    P2::new(fit(uv.x, ulo, uhi, s.u_periodic()), fit(uv.y, vlo, vhi, s.v_periodic()))
 }
 
 /// The (u, v) ranges the polygons span.
@@ -640,6 +658,23 @@ mod tests {
                 }
                 assert_eq!(fp.candidates(&surf, uv.x, uv.y), periodic_candidates(&surf, uv.x, uv.y, &polys));
             }
+        }
+    }
+
+    /// A hole of a cylinder's face straddling its seam: its polygon runs from u = −0.5 to 0.5
+    /// while the outer loop's runs from 0 to 2π. Points in the hole on either side of the seam
+    /// are outside the face, by either in-face test; points away from it inside.
+    #[test]
+    fn hole_across_the_seam() {
+        let surf = Surface::Cylinder { f: Frame::world(), r: 1.0 };
+        let outer = vec![P2::new(0.0, 0.0), P2::new(TAU, 0.0), P2::new(TAU, 1.0), P2::new(0.0, 1.0)];
+        let hole = vec![P2::new(-0.5, 0.4), P2::new(-0.5, 0.6), P2::new(0.5, 0.6), P2::new(0.5, 0.4)];
+        let polys = vec![outer, hole];
+        let fp = FacePolys::new(&polys, &surf);
+        for (uv, want) in [((0.2, 0.5), InFace::Outside), ((TAU - 0.2, 0.5), InFace::Outside), ((PI, 0.5), InFace::Inside), ((0.2, 0.2), InFace::Inside), ((TAU - 0.2, 0.8), InFace::Inside)] {
+            let uv = P2::new(uv.0, uv.1);
+            assert_eq!(in_face(&polys, &surf, uv, 1e-9), want, "{uv:?}");
+            assert_eq!(fp.in_face(&surf, uv, 1e-9), want, "{uv:?}");
         }
     }
 }

@@ -675,9 +675,12 @@ fn per_target_solid(a: &Body, b: &Body, op: BoolOp, opts: BoolOptions) -> Option
     let run_all = || -> Result<BoolOut> {
         if op == BoolOp::Union {
             let mut cur = BoolOut { body: b.clone(), from: (0..b.faces.len()).map(|f| vec![(1, f)]).collect() };
+            // Each piece is the target of its union, as in a single run: where its faces and the
+            // tool's coincide, the piece's are kept and come first, and their names with them
+            // (kids cart's pedal sketched on such a face).
             for (p, map) in &pieces {
-                let r = boolean_bodies_with(&cur.body, p, op, opts)?;
-                let from = r.from.iter().map(|srcs| srcs.iter().flat_map(|&(o, f)| if o == 0 { cur.from[f].clone() } else { vec![(0, map[f])] }).collect()).collect();
+                let r = boolean_bodies_with(p, &cur.body, op, opts)?;
+                let from = r.from.iter().map(|srcs| srcs.iter().flat_map(|&(o, f)| if o == 0 { vec![(0, map[f])] } else { cur.from[f].clone() }).collect()).collect();
                 cur = BoolOut { body: r.body, from };
             }
             return Ok(cur);
@@ -2527,6 +2530,26 @@ mod tests {
         let err = fail().unwrap_or_default();
         assert!(err.contains("work budget"), "{err}");
         assert_eq!(fail(), Some(err));
+    }
+
+    /// A union retried one target solid at a time keeps the target's faces first where they
+    /// merge with the tool's (a face's first source names it, as in a single run).
+    #[test]
+    fn per_target_solid_union_keeps_target_faces_first() {
+        let cube = |x: f64, z: f64, h: f64| {
+            let mut k = NativeKernel::new();
+            let super::super::draw::Shape::Body(id) = k.box_at(x, 0.0, z, 1.0, 1.0, h).unwrap() else { unreachable!() };
+            (**k.get(id).unwrap()).clone()
+        };
+        let two = boolean_bodies(&cube(0.0, 0.0, 1.0), &cube(3.0, 0.0, 1.0), BoolOp::Union).unwrap().body;
+        assert_eq!(two.solids.len(), 2);
+        let tool = cube(0.0, 0.5, 1.5);
+        let r = per_target_solid(&two, &tool, BoolOp::Union, BoolOptions::default()).unwrap().unwrap();
+        assert_eq!(r.body.solids.len(), 2);
+        // The sides at x = 0, x = 1, y = 0 and y = 1 of the first cube merge with the tool's.
+        let merged: Vec<&Vec<(usize, usize)>> = r.from.iter().filter(|s| s.iter().any(|x| x.0 == 0) && s.iter().any(|x| x.0 == 1)).collect();
+        assert_eq!(merged.len(), 4, "{:?}", r.from);
+        assert!(merged.iter().all(|s| s[0].0 == 0), "{:?}", r.from);
     }
 
     /// Curves running along each other within the tolerance meet in one stretch, its two ends,
