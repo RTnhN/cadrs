@@ -13,9 +13,21 @@ build parts from features, put them together in assemblies, and make drawings fr
 
 *From sketch to part to PCB, in one document. [Watch the 90-second demo](https://youtu.be/qT1FKZqUAxA).*
 
-> **Status: early and moving fast.** cadrs works through the Onshape Learning Center's CAD
-> Basics courses exercise by exercise, but it is not yet a finished tool. Expect rough edges,
-> and file formats that may still change.
+## Install
+
+Prebuilt Linux and Windows builds are on [GitHub Releases](https://github.com/rvdende/cadrs/releases).
+To install from source, with the [build prerequisites](#building) in place:
+
+```sh
+git clone https://github.com/rvdende/cadrs
+cd cadrs
+cargo install-local
+```
+
+This builds in release and copies the app and its libraries to `~/.local/opt/cadrs` with
+`~/.local/bin/cadrs` and a `cadrs.desktop` entry (Linux), to `~/Applications/cadrs.app` (macOS),
+or to `%LOCALAPPDATA%\Programs\cadrs` with a Start Menu shortcut (Windows). Run it again to
+update the installed copy.
 
 ## Features
 
@@ -84,16 +96,7 @@ cd cadrs
 cargo run --release
 ```
 
-To install the checkout for your user, with a launcher entry and the app icon:
-
-```sh
-cargo install-local
-```
-
-This builds in release and copies the app and its libraries to `~/.local/opt/cadrs` with
-`~/.local/bin/cadrs` and a `cadrs.desktop` entry (Linux), to `~/Applications/cadrs.app` (macOS),
-or to `%LOCALAPPDATA%\Programs\cadrs` with a Start Menu shortcut (Windows). Run it again to
-update the installed copy.
+To install it instead, with a launcher entry, see [Install](#install).
 
 On macOS, the Xcode command line tools (`xcode-select --install`) are enough; it builds and runs natively on Apple Silicon (Metal).
 

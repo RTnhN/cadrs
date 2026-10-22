@@ -27,6 +27,8 @@ Onshape-style CAD in Rust + Bevy 0.19.1. Local notes in `docs/` (git-ignored: `P
   failing shells/fillets, replayed by `crates/cadrs_kernel/tests/native_debug.rs`); see the
   kernel README. The kernel is pure Rust (`cadrs_kernel::native`); there is no OCCT any more.
 - Cold builds take 4+ minutes. Never run two cargo builds at once.
+- Project site: `site/` is a Proa app of its own (stable toolchain, built with `RUSTFLAGS=`),
+  exported to GitHub Pages by `.github/workflows/pages.yml`; see `site/README.md`.
 
 ## Layout
 - Crates in `crates/*`; shared versions in root `[workspace.dependencies]`.
