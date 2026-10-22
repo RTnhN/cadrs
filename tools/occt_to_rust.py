@@ -955,6 +955,22 @@ def group_of(path):
     return os.path.basename(os.path.dirname(os.path.dirname(os.path.abspath(path))))
 
 
+# Cases whose reference value OCCT itself doesn't have: the volume their script checks is the
+# input's own ("real volume of result shape is unknown yet"), which no thick solid can have. They
+# run without that check (the result must still be built, and be valid where the script checks
+# its shape); why each reference is wrong, and what ours is checked against, is noted here.
+WRONG_REFERENCE = {
+    # A 100-cube with a 10 × 10 lip, its x = 0 face open, walls 10 thick: the cavity is
+    # 90 × 80 × 80 (the lip lies within 10 of its faces; the tube round its concave edge only
+    # touches the cavity), so 1010000 − 576000 = 434000; the reference is the input's 1.01e+06.
+    ("offset", "compshape_a1"): "the input's volume (ours: 434000, the closed form)",
+    # OCCT's offset fails inside a `catch`; the reference is the input's 534256 (ours 67007).
+    ("offset", "compshape_a4"): "the input's volume, after OCCT's command fails (ours: 67007)",
+    # Walls 5 thick round a solid of 2.8e+07: the reference is the input's 28031240; ours,
+    # 2128159, is 2.6 % under the faces kept × 5 (2185475), the walls' overlap at its corners.
+    ("offset", "shape_a1"): "the input's volume (ours: 2128159, the kept faces' area × 5 less the corners' overlap)",
+}
+
 # Groups whose known failures are slow to run: they run only with --ignored.
 SLOW_GROUPS = {"blend", "offset"}
 
@@ -1008,6 +1024,9 @@ def main():
                     n_ok += 1
                     body.append(f"/// OCCT `tests/{group}/{grid}/{case}`.")
                     body.append("#[test]")
+                    if (group, name) in WRONG_REFERENCE:
+                        note = WRONG_REFERENCE[(group, name)]
+                        lines = [f"// (Not checked: OCCT's reference volume is {note}.)" if "checkprops_v(" in l else l for l in lines]
                     if (group, name) in known:
                         # Two-sided: a known failure must still fail (and says so when it
                         # passes). Slow groups run them only with --ignored.

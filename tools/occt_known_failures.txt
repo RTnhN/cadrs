@@ -725,14 +725,9 @@ feat featrevol_i9
 feat featrf_b2
 # feat: unsupported: revolved features up to a face and an angle.
 feat featrevol_a8
-# offsetcompshape / offsetonface / thickshell cases made runnable by those commands: thick solids
-# whose expected volume is the input's ("real volume of result shape is unknown yet": compshape a1,
-# ours 434000; a4, where OCCT's command fails inside a catch, ours 67007; offsetshape's shape a1,
-# 2.80312e+07 the input's 28031240, ours 2128159), booleans (a2).
-offset compshape_a1
+# offsetcompshape: a thick solid whose booleans fail (compshape a2). (Those whose reference volume
+# is the input's own run without it: WRONG_REFERENCE in tools/occt_to_rust.py.)
 offset compshape_a2
-offset compshape_a4
-offset shape_a1
 # boolean: topology counts differ from OCCT's (faces split or merged differently).
 boolean bopcut_complex_e5
 boolean cells_test_j1

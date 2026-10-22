@@ -133,6 +133,20 @@ fn rounded_shell_keeps_a_thin_fin_solid() {
     assert!(err.to_string().contains("reduce the thickness"), "{err}");
 }
 
+/// OCCT's compshape A1 (its reference volume is the input's own): a 100-cube with a 10 × 10 lip
+/// along one edge, a face square to the lip open, shelled inward 10 thick with rounded joins. The
+/// lip lies within 10 of its own faces and the tube round its concave edge only touches the
+/// cavity, so the cavity is 90 × 80 × 80: 1010000 − 576000 = 434000.
+#[test]
+fn rounded_shell_of_a_cube_with_a_lip() {
+    let mut k = NativeKernel::new();
+    let b = prism(&mut k, polygon(&[(0.0, 0.0), (90.0, 0.0), (90.0, -10.0), (100.0, -10.0), (100.0, 100.0), (0.0, 100.0)]), vec![], 100.0);
+    let open = face_at(&k, b, -Vector3::z(), 0.0);
+    let spec = ShellSpec { remove: vec![open], thickness: 10.0, outward: false, hollow: false, sharp: false };
+    let out = one(k.shell_with(b, &spec).unwrap());
+    close(volume(&k, out), 1_010_000.0 - 90.0 * 80.0 * 80.0, 1e-9);
+}
+
 /// A cube's top replaced by a cylinder across it whose axis lies above the top: the side
 /// planes cut the cylinder twice, and the domain (the upper half) picks the arcs. The result
 /// is the 10 × 10 × 12 block under a half round of radius 5 (SMLib's local operation 3).
