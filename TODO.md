@@ -89,8 +89,21 @@ Rebuild a single document with `cadrs --document "<name>" --check`.
   Built from exact helix curves and ruled surfaces. The Pali Ijo kernel's design
   (`packages/pali_ijo/doc/brep_threads.md` in github.com/braydennilsen/PaliCAD, MIT; the rest of
   PaliCAD is PolyForm Internal Use, so don't use it) is a good reference.
-- [ ] Mesh tools, also with Pali Ijo as a reference: repair (weld, stitch, seal), convex hull,
-  3MF/OBJ export.
+- [ ] Ideas from the Pali Ijo kernel (`packages/pali_ijo` only, MIT; credit "adapted from Pali Ijo,
+  MIT, Copyright (c) 2026 Brayden Nilsen" wherever an algorithm is followed closely):
+  - Mesh repair for imported meshes: vertex welding, removing degenerate faces, stitching
+    junctions, sealing open boundaries, splitting connected components (`lib/src/mesh/mesh_build.dart`,
+    `mesh_regions.dart`, `lib/src/brep/heal.dart`). This also helps the mirror_test import above.
+  - Mesh tools for STL/3MF bodies: mesh booleans, convex hull and convexity check, Minkowski
+    sums and differences (round offsets of meshes), plane cuts.
+  - Exchange: 3MF and OBJ read and write, next to STEP, IGES and STL.
+  - Chamfer by distance and angle: the second setback is `d1·sin(angle)/sin(beta + angle)`, where
+    beta is the section angle between the faces; reject values that don't fit the section.
+    Check it against ours.
+  - Tessellation: keep patch boundaries watertight when the faces on either side need different
+    sample counts (shared boundary samples), and use derivative bounds with aligned knots to
+    avoid over-subdividing cubic spans.
+  - Measurement: sphericity, next to volume, area, centre of mass and bounds.
 - [ ] Feature gaps from review 4:
   - OCCT form features between non-planar faces;
   - draft on freeform faces;
