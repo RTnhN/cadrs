@@ -25,19 +25,19 @@ pvc and rianatest blends, references (mate connectors, pibox thicken, t20, trimm
 faces), mirror_test's mesh import.
 
 Still new against main:
-- [ ] kids cart / pedal, Sketch 5 ("the face this sketch is on no longer exists"): a regression
-  from f81316d's boolean changes.
 - [ ] squish_bottle_adapter, Extrude 6: the union leaves an open shell. The tool sits 7e-5 mm off
   the thread faces; the boolean must honour the edge tolerance the profile now carries.
-- [ ] Dr Browns cap, Fillet 1: the blend's boolean against a spindle torus whose hole loop
-  straddles the face's seam.
+- [ ] Dr Browns cap, Fillet 1: two r 4 rounds on either side of the same 1.2 mm wall cut into each
+  other. The fillet builds them one after the other, and the second tool crosses the first's
+  face; main builds all four edges in one operation. The first round's boolean issues (touching
+  caps, a seam through a hole) are being fixed.
 - [ ] cable organizer Copy 2, Fillet 2: two full rounds meeting at a corner (R = half a 3 mm rib).
   It now fails with a clear error; supporting meeting full rounds is real fillet work.
   (Main fails this studio's Fillet 1, which kernel-10 builds.)
 
 Differences without errors, still to check:
 - [ ] Part counts that differ from main (garbage_cabinet 7 vs 3, TubeAdapter 3 vs 1 from chamfer
-  slivers, racingrigrumble 10 vs 8, trimmer's Boolean 1 13 vs 12, and others in compare runs).
+  slivers, racingrigrumble 10 vs 8, and others in compare runs).
 - [ ] Small volume differences (pibox mount 1802.4 vs 1800.1 mm³, stroller chamfer 1429 vs 762 mm³).
 - [ ] Rebuild time: 896 s locally against main's 423 s on gray. pico2, nightlight_sphere,
   ekgpulse, squish and trimmer are still 2–5× slower.
