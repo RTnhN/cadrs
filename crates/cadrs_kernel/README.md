@@ -90,8 +90,10 @@ let step = k.export_step(&round.bodies)?;               // and import_step / imp
 
 ### Curated API
 `native/mod.rs` declares the kernel's modules `pub(crate)` and re-exports a small stable set:
-`NativeKernel`; the B-rep data model (`Body`, `Vertex`, `Edge`, `Coedge`, `Face`, `Shell`,
-`Solid`, `Wire`, `CheckLevel`); its geometry (`Curve`, `Surface`, `NurbsCurve`, `NurbsSurface`)
+`NativeKernel`; the B-rep data model (`Body`, `BodyBuilder`, `Vertex`, `Edge`, `Coedge`, `Face`,
+`Shell`, `Solid`, `Wire`, `CheckLevel`: a `Body`'s entity lists are read through `Body::verts`,
+`edges`, `faces`, … and a body is built with `BodyBuilder`, which checks it; the lists are
+`pub` only under `testkit`); its geometry (`Curve`, `Surface`, `NurbsCurve`, `NurbsSurface`)
 and vector types (`P3`, `V3`, `Frame`, `Affine`); and the modules `tol` (the tolerance model)
 and `bodyio` (the body format). That, `Kernel`, `DefaultKernel` and the types are the public
 surface, all documented (`#![warn(missing_docs)]` holds for the whole crate without features).
@@ -239,8 +241,9 @@ size box), `InvalidParameter` and `InvalidProfile` (the caller's values), `Unsup
 `TooLarge { op }` (a radius, distance or thickness the geometry can't hold: a smaller one may
 work), `InvalidGeometry { op }` (tangent faces at a blended edge, a degenerate section, faces
 that no longer meet), `BooleanFailed { stage }` (`"face closure"`, `"validity"`, `"sheet
-union"`), `BudgetExhausted { stage }` (a boolean's or a blend's deterministic work budget ran
-out), `InvalidResult { op }` (a built body failed its check and was not returned), and
+union"`), `BlendFailed { stage }` (a local fillet or chamfer that gave up: `"rolling ball"`,
+`"corner"`, `"end"`, `"surface"`, `"trimming"`), `BudgetExhausted { stage }` (a boolean's or a
+blend's deterministic work budget ran out), `InvalidResult { op }` (a built body failed its check and was not returned), and
 `OperationFailed` for the rest. The enum is `#[non_exhaustive]`. `KernelError::message` gives
 the words without the kind's prefix; `Display` is "operation failed: ..." for every failure.
 
@@ -264,6 +267,7 @@ Debug output (on stderr; results don't change):
   the local fillet's progress, with times; the blend tool's chains, stations and corners (and why
   a local fillet fell back to it); a draft's edges and unsupported faces; a sweep's path and
   helix fits.
+- `CADRS_BOOL_WORK=1` (`boolean.rs`): each boolean's work count against its budget.
 - `CADRS_EXCHANGE_DEBUG=1`: the warnings of a STEP, IGES or BRep import. `CADRS_ORDER_DEBUG=1`:
   the DRAW harness's edge order (`explode e`, test code).
 - `CADRS_DUMP_DIR=<dir>`: shells, fillets and chamfers write their input body (exact bytes) and
@@ -296,7 +300,7 @@ default `../occt-dataset/opencascade-dataset-7.8.0` beside the checkout), `CADRS
 `PROPTEST_CASES`, `FUZZ_TRACE`, `FUZZ_REPRO` (`tests/fuzz_readers.rs`) and the `CADRS_REPRO*`
 inputs of `tests/native_debug.rs`'s replays.
 
-**Status.** All 83 conformance cases pass (`cargo test -r -p cadrs_kernel --test conformance`,
+**Status.** All 84 conformance cases pass (`cargo test -r -p cadrs_kernel --test conformance`,
 about 3 s). The measured state of every suite is the gate's: `tools/kernel_gate.sh` (below).
 `python3 -I tools/kernel_scoreboard.py` shows its last results per test binary (cases run,
 passing, known failures, stale ones, regressions, hangs, and why the rest don't run yet); with no
@@ -318,12 +322,11 @@ results, or with `--static`, it falls back to reading the suites' source, which 
 - The generated suites run on a DRAW-style harness (`native::draw`) and the SMLib oracle's body
   writer (`native::oracle`): test code, built only for tests and with the `testkit` feature
   (the crate's own tests turn it on through a dev-dependency on itself), not kernel API.
-- `tests/fuzz_readers.rs`: property tests (proptest) that feed the STEP, IGES, OCCT BRep and
-  body readers edited files (numbers swapped for extreme ones, bytes flipped, cut short) and
+- `tests/fuzz_readers.rs`: property tests (proptest) that feed the STEP, IGES, OCCT BRep, SMLib
+  and body readers edited files (numbers swapped for extreme ones, bytes flipped, cut short) and
   random bytes, and the B-spline constructors random knots, degrees, weights and points; nothing
   may panic. `PROPTEST_CASES=<n>` runs more cases, `FUZZ_TRACE=1` prints each, and the ignored
-  `replay` test reads the file `FUZZ_REPRO` names with every reader. (The SMLib reader's case is
-  ignored until that reader stops panicking on bad face references.)
+  `replay` test reads the file `FUZZ_REPRO` names with every reader (the one ignored test).
 - Clippy is a gate: `tools/kernel_clippy.sh` (all targets, warnings denied; CI runs it). The lint
   levels are in the crate's `Cargo.toml` (`unsafe_code` denied).
 - The full `cargo test -r -p cadrs_kernel` takes about 12 minutes; run the suites a change

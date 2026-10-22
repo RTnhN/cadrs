@@ -229,24 +229,192 @@ pub struct Wire {
     pub edges: Vec<(usize, bool)>,
 }
 
-/// A boundary representation: its entities in flat lists, referring to each other by index
-/// ([`Body::check_refs`] checks the indices, [`Body::check_with`] the rest).
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct Body {
+/// Declares [`Body`] with its entity lists `pub` under the `testkit` feature (the crate's tests
+/// and tools build and edit bodies directly) and `pub(crate)` otherwise: a user of the crate
+/// reads them through [`Body::verts`], [`Body::edges`], … and builds a body with a checked
+/// [`BodyBuilder`].
+macro_rules! body {
+    ($vis:vis) => {
+        /// A boundary representation: its entities in flat lists, referring to each other by
+        /// index ([`Body::check_refs`] checks the indices, [`Body::check_with`] the rest). Read
+        /// them with [`Body::verts`], [`Body::edges`], [`Body::faces`], [`Body::shells`],
+        /// [`Body::solids`], [`Body::wires`] and [`Body::points`]; build one with
+        /// [`BodyBuilder`], which checks it.
+        #[derive(Debug, Clone, PartialEq, Default)]
+        pub struct Body {
+            /// The vertices.
+            $vis verts: Vec<Vertex>,
+            /// The edges (of faces, of wires, and degenerate ones at poles and apexes).
+            $vis edges: Vec<Edge>,
+            /// The faces.
+            $vis faces: Vec<Face>,
+            /// The shells: closed ones bound solids, open ones are sheets.
+            $vis shells: Vec<Shell>,
+            /// The solids.
+            $vis solids: Vec<Solid>,
+            /// Wire bodies' edge chains (Phase 1b). Edges of faces are never in a wire.
+            $vis wires: Vec<Wire>,
+            /// Acorn points: vertices no edge uses (a point body's points).
+            $vis points: Vec<usize>,
+        }
+    };
+}
+
+#[cfg(feature = "testkit")]
+body!(pub);
+#[cfg(not(feature = "testkit"))]
+body!(pub(crate));
+
+impl Body {
     /// The vertices.
-    pub verts: Vec<Vertex>,
+    pub fn verts(&self) -> &[Vertex] {
+        &self.verts
+    }
     /// The edges (of faces, of wires, and degenerate ones at poles and apexes).
-    pub edges: Vec<Edge>,
+    pub fn edges(&self) -> &[Edge] {
+        &self.edges
+    }
     /// The faces.
-    pub faces: Vec<Face>,
+    pub fn faces(&self) -> &[Face] {
+        &self.faces
+    }
     /// The shells: closed ones bound solids, open ones are sheets.
-    pub shells: Vec<Shell>,
+    pub fn shells(&self) -> &[Shell] {
+        &self.shells
+    }
     /// The solids.
-    pub solids: Vec<Solid>,
-    /// Wire bodies' edge chains (Phase 1b). Edges of faces are never in a wire.
-    pub wires: Vec<Wire>,
-    /// Acorn points: vertices no edge uses (a point body's points).
-    pub points: Vec<usize>,
+    pub fn solids(&self) -> &[Solid] {
+        &self.solids
+    }
+    /// Wire bodies' edge chains. Edges of faces are never in a wire.
+    pub fn wires(&self) -> &[Wire] {
+        &self.wires
+    }
+    /// Acorn points: vertices no edge uses (a point body's points), as vertex indices.
+    pub fn points(&self) -> &[usize] {
+        &self.points
+    }
+}
+
+/// Builds a [`Body`] entity by entity, each referring to the earlier ones by the index its
+/// method returned, and checks it on [`BodyBuilder::build`]: a body the kernel's operations can
+/// take, or the problems that keep it from being one.
+///
+/// # Examples
+///
+/// A wire body: a closed triangle of three line edges.
+///
+/// ```
+/// use cadrs_kernel::native::{BodyBuilder, Curve, P3, V3};
+///
+/// let mut b = BodyBuilder::new();
+/// let p = [P3::new(0.0, 0.0, 0.0), P3::new(10.0, 0.0, 0.0), P3::new(0.0, 10.0, 0.0)];
+/// let v: Vec<usize> = p.iter().map(|&q| b.vertex(q)).collect();
+/// let e: Vec<usize> = (0..3)
+///     .map(|i| {
+///         let (a, z) = (p[i], p[(i + 1) % 3]);
+///         let len = (z - a).norm();
+///         b.edge(Curve::Line { o: a, d: (z - a) / len }, 0.0, len, v[i], v[(i + 1) % 3])
+///     })
+///     .collect();
+/// b.wire(e.iter().map(|&x| (x, true)).collect());
+/// let body = b.build().unwrap();
+/// assert_eq!((body.verts().len(), body.edges().len(), body.wires().len()), (3, 3, 1));
+///
+/// // An edge to a vertex that doesn't exist is refused.
+/// let mut bad = BodyBuilder::new();
+/// let v0 = bad.vertex(P3::origin());
+/// bad.edge(Curve::Line { o: P3::origin(), d: V3::x() }, 0.0, 1.0, v0, 7);
+/// assert!(bad.build().is_err());
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct BodyBuilder {
+    body: Body,
+}
+
+impl BodyBuilder {
+    /// An empty body.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Adds a vertex at `p` of tolerance [`TOL_MIN`]; returns its index.
+    pub fn vertex(&mut self, p: P3) -> usize {
+        self.body.add_vertex(p)
+    }
+
+    /// Adds a vertex at `p` standing for the ball of radius `tol` about it (at least
+    /// [`TOL_MIN`]); returns its index.
+    pub fn vertex_with_tol(&mut self, p: P3, tol: f64) -> usize {
+        self.body.verts.push(Vertex { p, tol: tol.max(TOL_MIN) });
+        self.body.verts.len() - 1
+    }
+
+    /// Adds the edge of `curve` from `t0` at vertex `v0` to `t1` at vertex `v1`; returns its
+    /// index.
+    pub fn edge(&mut self, curve: Curve, t0: f64, t1: f64, v0: usize, v1: usize) -> usize {
+        self.body.add_edge(curve, t0, t1, v0, v1)
+    }
+
+    /// Adds a degenerate edge at `at` (a pole or apex) at vertex `v`, for the p-curve range
+    /// `t0..t1`; returns its index.
+    pub fn degenerate_edge(&mut self, at: P3, t0: f64, t1: f64, v: usize) -> usize {
+        self.body.add_degenerate(at, t0, t1, v)
+    }
+
+    /// Adds the face of `surf` bounded by `loops` (the outer loop first, see [`Face`]), its
+    /// outward normal the surface's natural one when `sense`; returns its index.
+    pub fn face(&mut self, surf: Surface, sense: bool, loops: Vec<Vec<Coedge>>) -> usize {
+        self.body.faces.push(Face { surf, sense, loops });
+        self.body.faces.len() - 1
+    }
+
+    /// Adds a shell of `faces`, closed when it encloses a volume; returns its index.
+    pub fn shell(&mut self, faces: Vec<usize>, closed: bool) -> usize {
+        self.body.shells.push(Shell { faces, closed });
+        self.body.shells.len() - 1
+    }
+
+    /// Adds a solid bounded by `shells` (the outer one first, then voids); returns its index.
+    pub fn solid(&mut self, shells: Vec<usize>) -> usize {
+        self.body.solids.push(Solid { shells });
+        self.body.solids.len() - 1
+    }
+
+    /// Adds a wire: a chain of free edges, each with whether the chain runs along it; returns
+    /// its index.
+    pub fn wire(&mut self, edges: Vec<(usize, bool)>) -> usize {
+        self.body.wires.push(Wire { edges });
+        self.body.wires.len() - 1
+    }
+
+    /// Makes vertex `v` an acorn point (a vertex no edge uses).
+    pub fn point(&mut self, v: usize) {
+        self.body.points.push(v);
+    }
+
+    /// The body, checked with [`Body::check`] ([`CheckLevel::Fast`]).
+    ///
+    /// # Errors
+    ///
+    /// [`crate::KernelError::InvalidInput`] naming the first problem found (an index out of
+    /// range, a loop that doesn't close, an open shell marked closed, …) and how many there are.
+    pub fn build(self) -> crate::Result<Body> {
+        self.build_with(CheckLevel::Fast)
+    }
+
+    /// The body, checked at `level`.
+    ///
+    /// # Errors
+    ///
+    /// As [`BodyBuilder::build`].
+    pub fn build_with(self, level: CheckLevel) -> crate::Result<Body> {
+        let errs = self.body.check_with(level);
+        match errs.first() {
+            None => Ok(self.body),
+            Some(e) => Err(crate::KernelError::InvalidInput(format!("the body isn't valid: {e} ({} problems)", errs.len()))),
+        }
+    }
 }
 
 pub use crate::BodyClass;
