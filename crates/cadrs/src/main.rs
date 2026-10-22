@@ -126,7 +126,11 @@ fn main() -> AppExit {
     };
 
     let mut app = App::new();
-    app.add_plugins(cadrs_harness::default_plugins(&opts));
+    // The frame panel's CPU times: every system's and schedule's tracing span, added up.
+    app.add_plugins(cadrs_harness::default_plugins(&opts).set(bevy::log::LogPlugin {
+        custom_layer: cadrs_app::frame_profile::profiler_layer,
+        ..default()
+    }));
     if let Some(start) = scenario.as_ref().and_then(|s| s.start.clone()) {
         app.insert_resource(StartState(start));
     }

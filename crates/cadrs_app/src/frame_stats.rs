@@ -1,7 +1,9 @@
 //! Frame rate: the real time between frames over the last couple of seconds ([`FrameStats`]),
-//! shown as a small "60 fps · 16.7 ms" label at the bottom left of the 3D view (F12 shows or
-//! hides it) and returned by the MCP tool `get_frame_stats` ([`crate::mcp`]), so a slow view
-//! can be measured at any time.
+//! shown at the bottom left of the 3D view with where the frame's time goes
+//! ([`crate::frame_profile`]): the main thread's schedules as one bar, the slowest systems and
+//! the slowest GPU passes as bars of the frame. F12 steps through the whole panel, the
+//! "60 fps · 16.7 ms" line alone, and nothing. The MCP tool `get_frame_stats` ([`crate::mcp`])
+//! returns the same, so a slow view can be measured at any time.
 
 use std::collections::VecDeque;
 
@@ -14,11 +16,17 @@ use cadrs_ui::{ShortcutKey, Theme};
 use serde_json::{Value, json};
 
 use crate::AppState;
+use crate::frame_profile::{FrameProfile, Row, short_name};
 
 /// How far back the stats look.
 const WINDOW_SECS: f64 = 2.0;
-/// How often the label's text changes (a number that changes every frame can't be read).
+/// How often the panel changes (a number that changes every frame can't be read).
 const LABEL_EVERY_SECS: f32 = 0.5;
+/// The panel's bars at a whole frame (px).
+const BAR_PX: f32 = 260.0;
+/// The system and GPU rows shown.
+const SYSTEM_ROWS: usize = 8;
+const GPU_ROWS: usize = 4;
 
 pub struct FrameStatsPlugin;
 
@@ -26,7 +34,28 @@ impl Plugin for FrameStatsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<FrameStats>()
             .add_systems(First, record_frame)
-            .add_systems(Update, (toggle_on_key, sync_label).chain().run_if(in_state(AppState::Document)));
+            .add_systems(Update, (toggle_on_key, sync_panel).chain().run_if(in_state(AppState::Document)));
+    }
+}
+
+/// What the panel shows; F12 steps to the next.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PanelMode {
+    /// The frame rate and where the frame's time goes.
+    #[default]
+    Profile,
+    /// The frame rate line alone.
+    Fps,
+    Hidden,
+}
+
+impl PanelMode {
+    fn next(self) -> Self {
+        match self {
+            PanelMode::Profile => PanelMode::Fps,
+            PanelMode::Fps => PanelMode::Hidden,
+            PanelMode::Hidden => PanelMode::Profile,
+        }
     }
 }
 
@@ -34,8 +63,7 @@ impl Plugin for FrameStatsPlugin {
 #[derive(Resource, Debug, Default)]
 pub struct FrameStats {
     frames: VecDeque<(f64, f32)>,
-    /// The label is shown.
-    pub shown: bool,
+    pub mode: PanelMode,
 }
 
 impl FrameStats {
@@ -89,29 +117,47 @@ fn record_frame(time: Res<Time<Real>>, mut stats: ResMut<FrameStats>) {
 }
 
 #[derive(Component)]
-struct FrameStatsLabel;
+struct FrameStatsPanel;
 
-/// Spawns the (hidden) label into the viewport area.
+#[derive(Component)]
+struct FrameStatsText;
+
+/// The bars under the frame rate, rebuilt as they change.
+#[derive(Component)]
+struct FrameProfileRows;
+
+/// Spawns the panel into the viewport area (shown by [`sync_panel`]).
 pub fn spawn_frame_stats(p: &mut ChildSpawnerCommands, t: &Theme) {
     p.spawn((
         Name::new("frame-stats"),
-        FrameStatsLabel,
+        FrameStatsPanel,
         Node {
             position_type: PositionType::Absolute,
             bottom: Val::Px(t.space[3]),
             left: Val::Px(t.space[3]),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(2.0),
             padding: UiRect::axes(Val::Px(t.space[2]), Val::Px(t.space[1])),
             border_radius: BorderRadius::all(Val::Px(t.radius_lg)),
+            max_width: Val::Px(BAR_PX + 2.0 * t.space[2]),
             display: Display::None,
             ..default()
         },
-        BackgroundColor(t.popover),
+        BackgroundColor(t.popover.with_alpha(0.9)),
         Pickable::IGNORE,
     ))
-    .with_child((t.text("", t.font_sm, FontWeight::NORMAL, t.muted_foreground), Pickable::IGNORE));
+    .with_children(|panel| {
+        panel.spawn((FrameStatsText, t.text("", t.font_sm, FontWeight::NORMAL, t.foreground), Pickable::IGNORE));
+        panel.spawn((
+            Name::new("frame-profile"),
+            FrameProfileRows,
+            Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(1.0), ..default() },
+            Pickable::IGNORE,
+        ));
+    });
 }
 
-/// F12 shows or hides the label (not while typing in a field).
+/// F12 steps through the panel's modes (not while typing in a field).
 fn toggle_on_key(
     mut keys_in: MessageReader<KeyboardInput>,
     focus: Res<InputFocus>,
@@ -121,33 +167,112 @@ fn toggle_on_key(
     let typing = focus.get().is_some_and(|e| q_fields.contains(e));
     for k in keys_in.read() {
         if k.state == ButtonState::Pressed && !k.repeat && k.shortcut_code() == KeyCode::F12 && !typing {
-            stats.shown = !stats.shown;
+            stats.mode = stats.mode.next();
         }
     }
 }
 
-fn sync_label(
+/// Colours for the main loop's schedules, in turn.
+const SCHEDULE_COLORS: [(u8, u8, u8); 6] =
+    [(0x4e, 0x79, 0xa7), (0xf2, 0x8e, 0x2b), (0x59, 0xa1, 0x4f), (0xe1, 0x57, 0x59), (0x76, 0xb7, 0xb2), (0xb0, 0x7a, 0xa1)];
+
+#[allow(clippy::too_many_arguments)]
+fn sync_panel(
     stats: Res<FrameStats>,
+    profile: Res<FrameProfile>,
     time: Res<Time<Real>>,
-    mut last: Local<f32>,
-    mut q: Query<(&mut Node, &Children), With<FrameStatsLabel>>,
-    mut q_text: Query<&mut Text>,
+    theme: Res<Theme>,
+    mut last: Local<(f32, Option<PanelMode>)>,
+    mut commands: Commands,
+    mut q_panel: Query<&mut Node, With<FrameStatsPanel>>,
+    mut q_text: Query<&mut Text, With<FrameStatsText>>,
+    q_rows: Query<Entity, With<FrameProfileRows>>,
 ) {
-    let display = if stats.shown { Display::Flex } else { Display::None };
-    let now = time.elapsed_secs();
-    let update = stats.is_changed() || now - *last >= LABEL_EVERY_SECS;
-    for (mut node, children) in &mut q {
+    let display = if stats.mode == PanelMode::Hidden { Display::None } else { Display::Flex };
+    for mut node in &mut q_panel {
         if node.display != display {
             node.display = display;
         }
-        if stats.shown && update {
-            *last = now;
-            for c in children.iter() {
-                if let Ok(mut text) = q_text.get_mut(c) {
-                    text.0 = stats.label();
+    }
+    // Not on `stats` changing: the frame's time is written to it every frame.
+    let now = time.elapsed_secs();
+    if last.1 == Some(stats.mode) && now - last.0 < LABEL_EVERY_SECS {
+        return;
+    }
+    *last = (now, Some(stats.mode));
+    for mut text in &mut q_text {
+        text.0 = stats.label();
+    }
+    let t = &*theme;
+    for rows in &q_rows {
+        commands.entity(rows).despawn_children();
+        if stats.mode != PanelMode::Profile {
+            continue;
+        }
+        let s = profile.summary();
+        let frame = s.frame_ms.max(1e-3);
+        let px = |ms: f32| (ms / frame * BAR_PX).clamp(1.0, BAR_PX);
+        let small = |text: String, color: Color| (t.text(text, t.font_sm - 1.0, FontWeight::NORMAL, color), Pickable::IGNORE);
+        commands.entity(rows).with_children(|r| {
+            // The main thread: one bar of the loop's schedules, then their names.
+            r.spawn(small("CPU · main loop".into(), t.muted_foreground));
+            r.spawn((Node { width: Val::Px(BAR_PX), height: Val::Px(8.0), ..default() }, BackgroundColor(t.secondary), Pickable::IGNORE))
+                .with_children(|bar| {
+                    for (i, row) in s.main.iter().enumerate() {
+                        let (cr, cg, cb) = SCHEDULE_COLORS[i % SCHEDULE_COLORS.len()];
+                        bar.spawn((
+                            Node { width: Val::Px(px(row.ms)), height: Val::Percent(100.0), ..default() },
+                            BackgroundColor(Color::srgb_u8(cr, cg, cb)),
+                            Pickable::IGNORE,
+                        ));
+                    }
+                });
+            let mut by_time: Vec<(usize, &Row)> = s.main.iter().enumerate().collect();
+            by_time.sort_by(|a, b| b.1.ms.total_cmp(&a.1.ms));
+            r.spawn(Node { column_gap: Val::Px(6.0), flex_wrap: FlexWrap::Wrap, max_width: Val::Px(BAR_PX), ..default() })
+                .insert(Pickable::IGNORE)
+                .with_children(|legend| {
+                    for (i, row) in by_time.into_iter().take(4) {
+                        let (cr, cg, cb) = SCHEDULE_COLORS[i % SCHEDULE_COLORS.len()];
+                        legend.spawn(small(format!("{} {:.1}", row.name, row.ms), Color::srgb_u8(cr, cg, cb)));
+                    }
+                });
+            // The render thread, on the same scale.
+            let render_ms: f32 = s.render.iter().map(|r| r.ms).sum();
+            r.spawn((Node { column_gap: Val::Px(6.0), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|line| {
+                line.spawn((Node { width: Val::Px(BAR_PX * 0.7), height: Val::Px(6.0), ..default() }, BackgroundColor(t.secondary), Pickable::IGNORE))
+                    .with_child((Node { width: Val::Px(px(render_ms) * 0.7), height: Val::Percent(100.0), ..default() }, BackgroundColor(Color::srgb_u8(0x9c, 0x75, 0x5f)), Pickable::IGNORE));
+                line.spawn(small(format!("render thread {render_ms:.1}"), t.muted_foreground));
+            });
+            let bar_row = |r: &mut ChildSpawnerCommands, row: &Row, name: String, color: Color| {
+                r.spawn((Node { column_gap: Val::Px(6.0), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE))
+                    .with_children(|line| {
+                        line.spawn((Node { width: Val::Px(BAR_PX / 4.0), height: Val::Px(6.0), flex_shrink: 0.0, ..default() }, BackgroundColor(t.secondary), Pickable::IGNORE))
+                            .with_child((Node { width: Val::Px(px(row.ms) / 4.0), height: Val::Percent(100.0), ..default() }, BackgroundColor(color), Pickable::IGNORE));
+                        line.spawn(small(format!("{:>6.1} {name}", row.ms), t.foreground));
+                    });
+            };
+            if s.systems.is_empty() {
+                r.spawn(small("systems: not traced (build without bevy/trace)".into(), t.muted_foreground));
+            } else {
+                r.spawn(small("CPU · systems (ms a frame)".into(), t.muted_foreground));
+                for row in s.systems.iter().take(SYSTEM_ROWS) {
+                    bar_row(r, row, short_name(&row.name), t.primary);
                 }
             }
-        }
+            let verts: f32 = s.gizmos.iter().map(|g| g.ms).sum();
+            if let Some(top) = s.gizmos.first() {
+                r.spawn(small(format!("gizmos {:.0}k vertices, most {} {:.0}k", verts / 1e3, short_name(&top.name).rsplit("::").next().unwrap_or_default(), top.ms / 1e3), t.muted_foreground));
+            }
+            if s.gpu.is_empty() {
+                r.spawn(small("GPU: not measured".into(), t.muted_foreground));
+            } else {
+                r.spawn(small(format!("GPU · {:.1} ms", s.gpu.iter().filter(|g| !g.name.contains('/')).map(|g| g.ms).sum::<f32>()), t.muted_foreground));
+                for row in s.gpu.iter().take(GPU_ROWS) {
+                    bar_row(r, row, row.name.clone(), Color::srgb_u8(0x59, 0xa1, 0x4f));
+                }
+            }
+        });
     }
 }
 

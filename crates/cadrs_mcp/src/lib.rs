@@ -211,7 +211,10 @@ impl Cadrs {
     }
 
     #[tool(description = "The app's frame rate over the last two seconds: fps, the number of frames, and \
-        frame times in ms (mean, median, 95th percentile, max). F12 shows the same in the 3D view.")]
+        frame times in ms (mean, median, 95th percentile, max); and where the last second's frames went \
+        (profile): CPU ms a frame of the main loop's schedules, the slowest schedules and systems (with \
+        their most in one frame and runs a frame), and the GPU ms of the slowest render passes. The panel \
+        at the bottom left of the 3D view shows the same (F12 steps through it, the fps line, nothing).")]
     async fn get_frame_stats(&self) -> Result<CallToolResult, ErrorData> {
         self.call(Call::GetFrameStats).await
     }
