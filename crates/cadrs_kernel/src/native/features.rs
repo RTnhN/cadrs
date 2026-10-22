@@ -478,7 +478,15 @@ pub fn extrude_with(k: &mut NativeKernel, profile: &Profile, spec: &ExtrudeSpec)
         let start = spec.start_offset - b;
         let kind = sweep::Prism { plane, dir: d };
         let ch = chains(&profile_used)?;
-        let t = Tagged::from_built(sweep::sweep_full(&faces, &ch, &kind, start, start + f + b, false, false)?);
+        let mut built = sweep::sweep_full(&faces, &ch, &kind, start, start + f + b, false, false)?;
+        // A surface's faces face the sweep direction crossed with its curves (an outer loop's
+        // walls inwards, holes' outwards, a chain's to the left of the way it runs about the
+        // direction), as OCCT's extruded wires did: a thicken or an offset of them goes the way
+        // the documents made with it expect.
+        for face in &mut built.body.faces {
+            Body::reverse_face(face);
+        }
+        let t = Tagged::from_built(built);
         return Ok(t.into_result(k));
     }
     let t = match (&first, &second) {

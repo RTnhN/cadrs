@@ -151,9 +151,14 @@ fn thicken_sheet(k: &mut NativeKernel, sheets: &[Body], spec: &ThickenSpec) -> O
     if comp.contains(&usize::MAX) {
         return None;
     }
-    // Orienting may have flipped faces: "along" follows the majority of the picked normals.
+    // Orienting may have flipped faces. Picked faces whose normals don't agree on a side of the
+    // sheet (a box's walls facing out and its lid in) are each thickened along their own normal,
+    // as OCCT did, by the slabs below.
     let agree: usize = (0..sewn.faces.len()).filter(|&f| face_normal(&sewn, f).is_some_and(|(_, n)| n.dot(&normals[f].1) > 0.0)).count();
-    let along_is_sewn = 2 * agree >= sewn.faces.len();
+    if agree != 0 && agree != sewn.faces.len() {
+        return None;
+    }
+    let along_is_sewn = agree == sewn.faces.len();
     let n = sewn.faces.len();
     let id = k.insert(sewn);
     let tool = super::ops::face_tool(k, id, &(0..n as u64).map(FaceId).collect::<Vec<_>>(), spec.source).ok()?;
