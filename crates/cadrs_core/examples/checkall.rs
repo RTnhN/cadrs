@@ -27,7 +27,9 @@ fn main() {
         }
         return;
     };
-    cadrs_core::derived::set_document_loader(Some(cadrs_core::derived::store_loader(store.clone())));
+    cadrs_core::derived::set_document_loader(Some(cadrs_core::derived::store_loader(
+        store.clone(),
+    )));
     let Some(entry) = lib.entries.iter().find(|e| e.id.to_string() == *id) else {
         println!("{{\"doc\":\"{id}\",\"load_error\":\"not found\"}}");
         return;
@@ -35,7 +37,11 @@ fn main() {
     let file = match store.load(entry.id) {
         Ok(f) => f,
         Err(e) => {
-            println!("{{\"doc\":\"{id}\",\"name\":\"{}\",\"load_error\":\"{}\"}}", esc(&entry.name), esc(&e.to_string()));
+            println!(
+                "{{\"doc\":\"{id}\",\"name\":\"{}\",\"load_error\":\"{}\"}}",
+                esc(&entry.name),
+                esc(&e.to_string())
+            );
             return;
         }
     };
@@ -44,8 +50,16 @@ fn main() {
             .issues
             .iter()
             .map(|i| {
-                let sev = if matches!(i.severity, Severity::Error) { "error" } else { "warning" };
-                format!("{{\"feature\":\"{}\",\"severity\":\"{sev}\",\"detail\":\"{}\"}}", esc(&i.feature), esc(&i.detail))
+                let sev = if matches!(i.severity, Severity::Error) {
+                    "error"
+                } else {
+                    "warning"
+                };
+                format!(
+                    "{{\"feature\":\"{}\",\"severity\":\"{sev}\",\"detail\":\"{}\"}}",
+                    esc(&i.feature),
+                    esc(&i.detail)
+                )
             })
             .collect();
         println!(
