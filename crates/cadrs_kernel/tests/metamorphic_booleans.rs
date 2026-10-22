@@ -1,0 +1,552 @@
+//! Metamorphic booleans (research/PAPER_SCAN.md item 18): relations every correct boolean keeps,
+//! checked on generated solids without a reference kernel.
+//!
+//! For each random pair A, B (boxes, cylinders along an axis, spheres, some rotated, half their
+//! coordinates on a grid so faces and edges coincide):
+//! - vol(A ∪ B) + vol(A ∩ B) = vol(A) + vol(B), and vol(A − B) + vol(A ∩ B) = vol(A);
+//! - tool order: vol(B ∪ A) = vol(A ∪ B), vol(B ∩ A) = vol(A ∩ B);
+//! - every result valid (`CheckLevel::Full`) and a solid;
+//! - the union written to STEP and read back keeps its volume and validity.
+//!
+//! For each shape on its own: A − A = ∅, A ∪ A = A, A ∩ A = A.
+//!
+//! `CADRS_META_CASES` sets the number of pairs (default 16, a few seconds), `CADRS_META_SEED` the
+//! seed (`random` for a fresh one, printed), `CADRS_META_CASE=i` runs case i alone. A failing case prints its seed, index and shapes;
+//! a failure the kernel has today is pinned below as its own `#[ignore = "known failure…"]` test
+//! and skipped by the random run (`KNOWN`).
+
+mod meta_common;
+
+use cadrs_kernel::native::NativeKernel;
+use cadrs_kernel::*;
+use meta_common::*;
+
+/// Relative volume tolerance: mass properties are exact for these surfaces to about 1e-12.
+const REL: f64 = 1e-7;
+
+/// (seed, case) pairs of the default run that fail today: each has a pinned test below.
+const KNOWN: &[(u64, usize)] = &[];
+
+/// A random shape about the cube [0, 10]³.
+fn shape(r: &mut Rng) -> Placed {
+    let s = match r.below(3) {
+        0 => Shape::Box {
+            min: [
+                r.snapped(-2.0, 8.0, 1.0),
+                r.snapped(-2.0, 8.0, 1.0),
+                r.snapped(-2.0, 8.0, 1.0),
+            ],
+            size: [
+                r.snapped(1.0, 8.0, 1.0),
+                r.snapped(1.0, 8.0, 1.0),
+                r.snapped(1.0, 8.0, 1.0),
+            ],
+        },
+        1 => Shape::Cyl {
+            axis: r.below(3),
+            base: [
+                r.snapped(0.0, 10.0, 1.0),
+                r.snapped(0.0, 10.0, 1.0),
+                r.snapped(-2.0, 4.0, 1.0),
+            ],
+            r: r.snapped(0.5, 4.0, 0.5),
+            len: r.snapped(1.0, 10.0, 1.0),
+        },
+        _ => Shape::Sphere {
+            c: [
+                r.snapped(0.0, 10.0, 1.0),
+                r.snapped(0.0, 10.0, 1.0),
+                r.snapped(0.0, 10.0, 1.0),
+            ],
+            r: r.snapped(0.5, 5.0, 0.5),
+        },
+    };
+    let mut p = Placed::fixed(s);
+    // A third of them rotated about a random axis through the middle of the cube.
+    if r.below(3) == 0 {
+        p.axis = [r.range(-1.0, 1.0), r.range(-1.0, 1.0), r.range(-1.0, 1.0)];
+        p.angle = r.range(-3.0, 3.0);
+        p.about = [5.0; 3];
+    }
+    p
+}
+
+fn close(a: f64, b: f64, scale: f64) -> bool {
+    (a - b).abs() <= REL * scale.max(1.0)
+}
+
+/// The failures of the relations on one pair (empty when they all hold).
+fn check_pair(a: &Placed, b: &Placed) -> Vec<String> {
+    let mut k = NativeKernel::new();
+    let mut bad = Vec::new();
+    let (ia, ib) = match (build(&mut k, a), build(&mut k, b)) {
+        (Ok(x), Ok(y)) => (x, y),
+        (x, y) => return vec![format!("build: {:?} {:?}", x.err(), y.err())],
+    };
+    let va = volume(&k, &[ia]).unwrap_or(f64::NAN);
+    let vb = volume(&k, &[ib]).unwrap_or(f64::NAN);
+    let scale = va + vb;
+    for (v, s) in [(va, &a.shape), (vb, &b.shape)] {
+        if !close(v, exact_volume(s), scale) {
+            bad.push(format!("vol({s:?}) = {v}, closed form {}", exact_volume(s)));
+        }
+    }
+    let mut run = |op: BoolOp, x: BodyId, y: BodyId, what: &str| -> Option<(Vec<BodyId>, f64)> {
+        match boolean(&mut k, op, x, &[y]) {
+            Ok(r) => {
+                if let Some(why) = invalid(&k, &r) {
+                    bad.push(format!("{what}: invalid: {why}"));
+                }
+                match volume(&k, &r) {
+                    Ok(v) => Some((r, v)),
+                    Err(e) => {
+                        bad.push(format!("{what}: volume: {e:?}"));
+                        None
+                    }
+                }
+            }
+            Err(e) => {
+                bad.push(format!("{what}: {e:?}"));
+                None
+            }
+        }
+    };
+    let u = run(BoolOp::Union, ia, ib, "A ∪ B");
+    let i = run(BoolOp::Intersect, ia, ib, "A ∩ B");
+    let d = run(BoolOp::Subtract, ia, ib, "A − B");
+    let u2 = run(BoolOp::Union, ib, ia, "B ∪ A");
+    let i2 = run(BoolOp::Intersect, ib, ia, "B ∩ A");
+    if let (Some(u), Some(i)) = (&u, &i)
+        && !close(u.1 + i.1, va + vb, scale)
+    {
+        bad.push(format!(
+            "vol(A∪B) + vol(A∩B) = {} + {} = {}, vol(A) + vol(B) = {}",
+            u.1,
+            i.1,
+            u.1 + i.1,
+            va + vb
+        ));
+    }
+    if let (Some(d), Some(i)) = (&d, &i)
+        && !close(d.1 + i.1, va, scale)
+    {
+        bad.push(format!(
+            "vol(A−B) + vol(A∩B) = {}, vol(A) = {va}",
+            d.1 + i.1
+        ));
+    }
+    if let (Some(x), Some(y)) = (&u, &u2)
+        && !close(x.1, y.1, scale)
+    {
+        bad.push(format!("vol(A∪B) = {} but vol(B∪A) = {}", x.1, y.1));
+    }
+    if let (Some(x), Some(y)) = (&i, &i2)
+        && !close(x.1, y.1, scale)
+    {
+        bad.push(format!("vol(A∩B) = {} but vol(B∩A) = {}", x.1, y.1));
+    }
+    // The union through STEP and back.
+    if let Some((r, v)) = &u {
+        let parts: Vec<(BodyId, String)> = r.iter().map(|&b| (b, format!("u{}", b.0))).collect();
+        let back = k
+            .export_model(exchange::ExchangeFormat::Step, "metamorphic", &parts, &[])
+            .and_then(|s| k.import_model(exchange::ExchangeFormat::Step, &s));
+        match back {
+            Ok(m) => {
+                let ids: Vec<BodyId> = m.parts.iter().map(|p| p.body).collect();
+                if ids.len() != r.len() {
+                    bad.push(format!(
+                        "STEP: {} bodies read back of {}",
+                        ids.len(),
+                        r.len()
+                    ));
+                }
+                if let Some(why) = invalid(&k, &ids) {
+                    bad.push(format!("STEP: read back invalid: {why}"));
+                }
+                match volume(&k, &ids) {
+                    Ok(w) if close(w, *v, scale) => {}
+                    w => bad.push(format!("STEP: volume {w:?} read back, {v} written")),
+                }
+            }
+            Err(e) => bad.push(format!("STEP round trip: {e:?}")),
+        }
+    }
+    bad
+}
+
+/// The failures of A − A = ∅, A ∪ A = A, A ∩ A = A.
+fn check_self(a: &Placed) -> Vec<String> {
+    let mut k = NativeKernel::new();
+    let mut bad = Vec::new();
+    let Ok(ia) = build(&mut k, a) else {
+        return vec!["build failed".into()];
+    };
+    // A second, separate body of the same shape.
+    let Ok(ib) = build(&mut k, a) else {
+        return vec!["build failed".into()];
+    };
+    let va = volume(&k, &[ia]).unwrap_or(f64::NAN);
+    match boolean(&mut k, BoolOp::Subtract, ia, &[ib]) {
+        Ok(r) => {
+            let v = volume(&k, &r).unwrap_or(f64::NAN);
+            if !(v.abs() <= REL * va) {
+                bad.push(format!("A − A has volume {v} ({} bodies)", r.len()));
+            }
+        }
+        Err(e) => bad.push(format!("A − A: {e:?}")),
+    }
+    for (op, what) in [(BoolOp::Union, "A ∪ A"), (BoolOp::Intersect, "A ∩ A")] {
+        match boolean(&mut k, op, ia, &[ib]) {
+            Ok(r) => {
+                if let Some(why) = invalid(&k, &r) {
+                    bad.push(format!("{what}: invalid: {why}"));
+                }
+                let v = volume(&k, &r).unwrap_or(f64::NAN);
+                if !close(v, va, va) || r.len() != 1 {
+                    bad.push(format!(
+                        "{what}: volume {v} in {} bodies, vol(A) = {va}",
+                        r.len()
+                    ));
+                }
+            }
+            Err(e) => bad.push(format!("{what}: {e:?}")),
+        }
+    }
+    bad
+}
+
+/// Runs `n` random cases from `seed`, skipping `KNOWN`; panics listing every failure.
+fn random_cases(seed: u64, n: usize) {
+    let mut fails = Vec::new();
+    let only: Option<usize> = std::env::var("CADRS_META_CASE")
+        .ok()
+        .and_then(|v| v.parse().ok());
+    for case in 0..n {
+        if only.is_some_and(|o| o != case) {
+            continue;
+        }
+        // Each case its own stream, so a case reruns alone from (seed, case).
+        let mut r = Rng::new(seed ^ (case as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15));
+        let a = shape(&mut r);
+        let b = shape(&mut r);
+        if KNOWN.contains(&(seed, case)) {
+            continue;
+        }
+        let mut bad = check_self(&a);
+        bad.extend(check_pair(&a, &b));
+        if !bad.is_empty() {
+            fails.push(format!(
+                "seed {seed} case {case}:\n  A = {a:?}\n  B = {b:?}\n  {}",
+                bad.join("\n  ")
+            ));
+        }
+    }
+    assert!(
+        fails.is_empty(),
+        "{} of {n} cases fail:\n{}",
+        fails.len(),
+        fails.join("\n")
+    );
+}
+
+#[test]
+fn random_pairs() {
+    let only = env_num("CADRS_META_CASE", 0usize);
+    random_cases(seed(1), env_num("CADRS_META_CASES", 16).max(only + 1));
+}
+
+/// Pairs that share faces exactly: a box and the same box moved by a whole step along each axis
+/// and diagonal (faces, edges and corners in contact), and boxes overlapping by half.
+#[test]
+fn touching_boxes() {
+    let a = Placed::fixed(Shape::Box {
+        min: [0.0; 3],
+        size: [4.0, 4.0, 4.0],
+    });
+    let mut fails = Vec::new();
+    for d in [
+        [4.0, 0.0, 0.0],
+        [4.0, 4.0, 0.0],
+        [4.0, 4.0, 4.0],
+        [2.0, 0.0, 0.0],
+        [2.0, 2.0, 2.0],
+        [0.0, 0.0, 2.0],
+    ] {
+        let b = Placed::fixed(Shape::Box {
+            min: d,
+            size: [4.0, 4.0, 4.0],
+        });
+        let bad = check_pair(&a, &b);
+        if !bad.is_empty() {
+            fails.push(format!("B at {d:?}: {}", bad.join("; ")));
+        }
+    }
+    assert!(fails.is_empty(), "{}", fails.join("\n"));
+}
+
+/// One extrude-sequence step: the shape and how it combines with the model so far.
+#[derive(Debug, Clone, Copy)]
+struct Step {
+    op: BoolOp,
+    shape: Shape,
+}
+
+/// A random axis-aligned sketch extruded from one of the three planes, as a CAD model's
+/// features are (Fusion 360 Gallery's reconstruction sequences: sketch, extrude, join / cut /
+/// intersect), on a grid of 0.5 so faces of different steps coincide.
+fn prism(r: &mut Rng) -> Shape {
+    let g = |r: &mut Rng, lo: f64, hi: f64| (r.range(lo, hi) * 2.0).round() / 2.0;
+    let (x0, y0) = (g(r, 0.0, 6.0), g(r, 0.0, 6.0));
+    let (x1, y1) = (x0 + g(r, 1.5, 6.0), y0 + g(r, 1.5, 6.0));
+    // A third with a hole: a rectangle well inside (a wall at least 0.5 thick).
+    let hole = (r.below(3) == 0 && x1 - x0 >= 2.0 && y1 - y0 >= 2.0).then(|| {
+        let (hx0, hy0) = (x0 + 0.5, y0 + 0.5);
+        [
+            hx0,
+            hy0,
+            (hx0 + g(r, 0.5, x1 - x0 - 1.0)).min(x1 - 0.5),
+            (hy0 + g(r, 0.5, y1 - y0 - 1.0)).min(y1 - 0.5),
+        ]
+    });
+    let axis = r.below(3);
+    let mut o = [0.0; 3];
+    o[axis] = g(r, 0.0, 6.0);
+    Shape::Prism {
+        axis,
+        o,
+        outer: [x0, y0, x1, y1],
+        hole: hole.filter(|h| h[2] > h[0] && h[3] > h[1]),
+        depth: g(r, 1.0, 6.0),
+    }
+}
+
+/// The exact volume of the model a sequence of steps builds: over the cells of the grid its
+/// faces make, each cell's centre classified through the steps.
+fn sequence_volume(steps: &[Step]) -> f64 {
+    let mut axes: [Vec<f64>; 3] = Default::default();
+    for s in steps {
+        for (i, c) in s.shape.planes().into_iter().enumerate() {
+            axes[i].extend(c);
+        }
+    }
+    for a in &mut axes {
+        a.sort_by(f64::total_cmp);
+        a.dedup();
+    }
+    let mut v = 0.0;
+    for x in axes[0].windows(2) {
+        for y in axes[1].windows(2) {
+            for z in axes[2].windows(2) {
+                let c = [
+                    (x[0] + x[1]) / 2.0,
+                    (y[0] + y[1]) / 2.0,
+                    (z[0] + z[1]) / 2.0,
+                ];
+                let inside = steps.iter().fold(false, |acc, s| {
+                    let p = s.shape.contains(c);
+                    match s.op {
+                        BoolOp::Union => acc || p,
+                        BoolOp::Subtract => acc && !p,
+                        BoolOp::Intersect => acc && p,
+                    }
+                });
+                if inside {
+                    v += (x[1] - x[0]) * (y[1] - y[0]) * (z[1] - z[0]);
+                }
+            }
+        }
+    }
+    v
+}
+
+/// The failures of one extrude sequence: after each step the model is valid and has the exact
+/// volume (an empty model ends the sequence).
+fn check_sequence(steps: &[Step], done: &mut usize) -> Vec<String> {
+    let mut k = NativeKernel::new();
+    let mut bad = Vec::new();
+    let mut model: Vec<BodyId> = Vec::new();
+    for (i, s) in steps.iter().enumerate() {
+        let tool = match build(&mut k, &Placed::fixed(s.shape)) {
+            Ok(t) => t,
+            Err(e) => return vec![format!("step {i}: build: {e:?}")],
+        };
+        model = if i == 0 {
+            vec![tool]
+        } else {
+            // A model of several solids: each combined with the tool (a union joins them all).
+            let r = match s.op {
+                BoolOp::Union => {
+                    let (first, rest) = model
+                        .split_first()
+                        .map(|(f, r)| (*f, r.to_vec()))
+                        .unwrap_or((tool, vec![]));
+                    let mut tools = rest;
+                    tools.push(tool);
+                    boolean(&mut k, BoolOp::Union, first, &tools)
+                }
+                op => model.iter().try_fold(Vec::new(), |mut acc, &m| {
+                    acc.extend(boolean(&mut k, op, m, &[tool])?);
+                    Ok(acc)
+                }),
+            };
+            match r {
+                Ok(r) => r,
+                Err(e) => {
+                    bad.push(format!("step {i} ({:?}): {e:?}", s.op));
+                    break;
+                }
+            }
+        };
+        if let Some(why) = invalid(&k, &model) {
+            bad.push(format!("step {i} ({:?}): invalid: {why}", s.op));
+            break;
+        }
+        let want = sequence_volume(&steps[..=i]);
+        let v = volume(&k, &model).unwrap_or(f64::NAN);
+        if !((v - want).abs() <= 1e-9 * want.max(1.0)) {
+            bad.push(format!("step {i} ({:?}): volume {v}, exact {want}", s.op));
+            break;
+        }
+        *done += 1;
+        if model.is_empty() {
+            break;
+        }
+    }
+    bad
+}
+
+/// Random extrude sequences (3 to 8 steps of join, cut and intersect) checked against their
+/// exact volumes after every step. `CADRS_META_CASES` scales the count as for `random_pairs`.
+#[test]
+fn extrude_sequences() {
+    let s = seed(1);
+    let n = env_num("CADRS_META_CASES", 16usize);
+    let mut fails = Vec::new();
+    let mut done = 0;
+    for case in 0..n {
+        let mut r = Rng::new(s ^ (case as u64).wrapping_mul(0xd1b5_4a32_d192_ed03));
+        let len = 3 + r.below(6);
+        let steps: Vec<Step> = (0..len)
+            .map(|i| Step {
+                op: match (i, r.below(20)) {
+                    (0, _) => BoolOp::Union,
+                    (_, 0..=9) => BoolOp::Union,
+                    (_, 10..=17) => BoolOp::Subtract,
+                    _ => BoolOp::Intersect,
+                },
+                shape: prism(&mut r),
+            })
+            .collect();
+        let bad = check_sequence(&steps, &mut done);
+        if !bad.is_empty() {
+            fails.push(format!(
+                "seed {s} sequence {case}: {steps:?}\n  {}",
+                bad.join("\n  ")
+            ));
+        }
+    }
+    assert!(
+        fails.is_empty(),
+        "{} of {n} sequences fail:\n{}",
+        fails.len(),
+        fails.join("\n")
+    ); // (Not vacuous: most sequences run several steps before an intersection can empty them.)
+    println!("extrude_sequences: {done} steps checked");
+    assert!(done >= 3 * n, "only {done} steps checked");
+}
+
+/// Runs the pair relations on one pinned pair, panicking with its failures.
+fn pinned(a: Placed, b: Placed) {
+    let bad = check_pair(&a, &b);
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+}
+
+/// Two cylinders crossing at skew angles (seed 12345 case 2): every boolean of the pair leaves
+/// an open shell.
+#[test]
+#[ignore = "known failure: booleans of two skew cylinders leave an open shell"]
+fn skew_cylinders() {
+    pinned(
+        Placed {
+            shape: Shape::Cyl {
+                axis: 2,
+                base: [7.0, 7.0, -0.3707804499725267],
+                r: 1.1004411956127174,
+                len: 2.269831665071858,
+            },
+            axis: [-0.8516050882627577, -0.978177783068829, -0.3816516819404845],
+            angle: 1.3877809304771738,
+            about: [5.0; 3],
+        },
+        Placed {
+            shape: Shape::Cyl {
+                axis: 2,
+                base: [7.0, 3.817329177849694, 3.5352404522767253],
+                r: 3.753280953966347,
+                len: 6.782899416459303,
+            },
+            axis: [
+                0.19230537965956995,
+                -0.9084555615490686,
+                -0.3459386681894472,
+            ],
+            angle: -1.1134832725489603,
+            about: [5.0; 3],
+        },
+    );
+}
+
+/// A tilted box and a tilted cylinder (seed 12345 case 75): every boolean leaves an open shell.
+#[test]
+#[ignore = "known failure: booleans of a tilted box and a tilted cylinder leave an open shell"]
+fn tilted_box_and_cylinder() {
+    pinned(
+        Placed {
+            shape: Shape::Box {
+                min: [-1.7287351321660231, 2.0, 7.0],
+                size: [6.524599352812511, 5.962324057922664, 2.308564273937577],
+            },
+            axis: [0.5530960115474062, 0.6896281828475401, 0.3117214767784895],
+            angle: -2.9200964712114432,
+            about: [5.0; 3],
+        },
+        Placed {
+            shape: Shape::Cyl {
+                axis: 2,
+                base: [6.5860680206798445, 6.931195387961152, -1.418602229435946],
+                r: 3.0,
+                len: 4.0,
+            },
+            axis: [
+                -0.6386842108454478,
+                0.14934690994994448,
+                0.21526908347248686,
+            ],
+            angle: -1.8272343669399191,
+            about: [5.0; 3],
+        },
+    );
+}
+
+/// Two crossing cylinders on the axes (seed 12345 case 142): the union's STEP file read back
+/// without one of the small cylinder's faces. An edge of the closed intersection curve ends where
+/// the curve closes; the reader took that point as the curve's start, ran the edge the other,
+/// long way round, and the face's loop then wrapped round the cylinder.
+#[test]
+fn step_round_trip_seamed_cylinder() {
+    pinned(
+        Placed::fixed(Shape::Cyl {
+            axis: 1,
+            base: [1.1684983475486566, 0.5293421570789636, 2.0824245633488534],
+            r: 2.736774377748768,
+            len: 7.323229369549773,
+        }),
+        Placed::fixed(Shape::Cyl {
+            axis: 2,
+            base: [0.0, 3.0790339291622146, -0.019167617471158582],
+            r: 1.2504993337665509,
+            len: 5.269151724617697,
+        }),
+    );
+}

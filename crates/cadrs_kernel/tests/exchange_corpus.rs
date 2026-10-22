@@ -163,10 +163,6 @@ const KNOWN_BAD: &[(&str, &str)] = &[
         "24 check errors (face 12 loop 0: coedge 0 doesn't meet the next); 3 faces dropped (face 0: a loop doesn't c…",
     ),
     (
-        "step/trj3_s1-ct-203.stp",
-        "3 faces dropped (face 15: loops wrap around the surface and no seam could be added)",
-    ),
-    (
         "step/trj3_s1-ct-214.stp",
         "1 check errors (face 9 loop 0 coedge 3 (edge 7): p-curve off the edge by 2.822e-3); 3 faces dropped (face 15: loops wrap around the surface and no seam could be added)",
     ),
@@ -241,24 +237,12 @@ const KNOWN_BAD: &[(&str, &str)] = &[
         "1 faces dropped (face 17: loops wrap around the surface and no seam could be added)",
     ),
     (
-        "step/trj6_k1-sd-214.stp",
-        "1 check errors (face 46 loop 0 crosses itself in (u, v) (segments 15 and 27))",
-    ),
-    (
         "step/trj6_pm4-ec-203.stp",
         "8 check errors (face 16 loop 0: p-curve gap after coedge 1: (-1.491e0, 1.307e-1))",
     ),
     (
-        "step/trj7_b1-ec-214.stp",
-        "4 check errors (face 200 loop 0: coedge 43 doesn't meet the next)",
-    ),
-    (
         "step/trj7_k1-al-214.stp",
         "3 check errors (face 4 loop 0: p-curve gap after coedge 5: (-1.007e-1, 5.599e-11))",
-    ),
-    (
-        "step/trj7_k1-sd-214.stp",
-        "1 check errors (face 47 loop 0 crosses itself in (u, v) (segments 15 and 27))",
     ),
     ("step/xr1-db-214_0.stp", "read: the file holds no shapes"),
     ("step/xr1-db-214_1.stp", "read: the file holds no shapes"),

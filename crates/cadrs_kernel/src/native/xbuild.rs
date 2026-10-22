@@ -266,6 +266,24 @@ pub fn edge_range(c: &Curve, p0: &P3, p1: &P3, closed: bool) -> Option<(f64, f64
             Some((t0, t1))
         }
         Curve::Nurbs(n) if closed => Some(n.range()),
+        Curve::Nurbs(n) => {
+            let (a, b) = n.range();
+            let (mut t0, mut t1) = (param_of(c, p0), param_of(c, p1));
+            // A closed spline's closing point is both ends of its range: an edge from there starts
+            // at the range's start and one to there ends at its end. (Taking the nearest end
+            // instead, an edge that ends there ran backwards, and the caller turned the curve
+            // round: the edge then went the other, long way round.)
+            let (pa, pb) = (n.point(a), n.point(b));
+            if (pa - pb).norm() < JOIN {
+                if (p0 - pa).norm() < JOIN {
+                    t0 = a;
+                }
+                if (p1 - pb).norm() < JOIN {
+                    t1 = b;
+                }
+            }
+            if t1 > t0 + tol::ROUNDOFF_FINE { Some((t0, t1)) } else { None }
+        }
         _ => {
             let (t0, t1) = (param_of(c, p0), param_of(c, p1));
             if t1 > t0 + tol::ROUNDOFF_FINE { Some((t0, t1)) } else { None }
