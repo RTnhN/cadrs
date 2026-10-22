@@ -1498,24 +1498,21 @@ fn case_229_loft_brick() {
 /// SMLib fillet test 230: `box_extrusion1.smb`, radius 0.5, edges [(12, 12), (14, 17)].
 #[test]
 fn case_230_box_extrusion1() {
-    known_failure(
-        blend(
-            "box_extrusion1.smb",
-            &[(12, 12), (14, 17)],
-            true,
-            Op::Fillet(0.5),
-            &Expect {
-                volume: Some(3739.29439904),
-                area: Some(1932.76605327),
-                faces: Some(18),
-                edges: Some(43),
-                solid: Some(true),
-                ..Expect::default()
-            },
-        ),
-        "fillets",
-        "case_230_box_extrusion1",
-    );
+    blend(
+        "box_extrusion1.smb",
+        &[(12, 12), (14, 17)],
+        true,
+        Op::Fillet(0.5),
+        &Expect {
+            volume: Some(3739.29439904),
+            area: Some(1932.76605327),
+            faces: Some(18),
+            edges: Some(43),
+            solid: Some(true),
+            ..Expect::default()
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib fillet test 231: `box_extrusion2.smb`, radius 0.5, edges [(13, 17)].
@@ -1938,24 +1935,21 @@ fn case_406_2cyls_on_box() {
 /// SMLib fillet test 407: `cyl_on_box_w_fillet.smb`, radius 1.0, edges [(2, 2)].
 #[test]
 fn case_407_cyl_on_box_w_fillet() {
-    known_failure(
-        blend(
-            "cyl_on_box_w_fillet.smb",
-            &[(2, 2)],
-            true,
-            Op::Fillet(1.0),
-            &Expect {
-                volume: Some(135.461935847),
-                area: Some(162.494584967),
-                faces: Some(12),
-                edges: Some(27),
-                solid: Some(true),
-                ..Expect::default()
-            },
-        ),
-        "fillets",
-        "case_407_cyl_on_box_w_fillet",
-    );
+    blend(
+        "cyl_on_box_w_fillet.smb",
+        &[(2, 2)],
+        true,
+        Op::Fillet(1.0),
+        &Expect {
+            volume: Some(135.461935847),
+            area: Some(162.494584967),
+            faces: Some(12),
+            edges: Some(27),
+            solid: Some(true),
+            ..Expect::default()
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib fillet test 408: `cyl_on_box_w_fillet1.smb`, radius 1.0, edges [(2, 2)].
@@ -2128,20 +2122,17 @@ fn case_415_cyl_on_box_w_hole() {
 /// SMLib's own result isn't a manifold solid (volume 0, 12 faces): not compared.
 #[test]
 fn case_416_rollover_corner() {
-    known_failure(
-        blend(
-            "rollover_corner.smb",
-            &[(10, 10)],
-            true,
-            Op::Fillet(13.0),
-            &Expect {
-                edges: Some(24),
-                ..Expect::default()
-            },
-        ),
-        "fillets",
-        "case_416_rollover_corner",
-    );
+    blend(
+        "rollover_corner.smb",
+        &[(10, 10)],
+        true,
+        Op::Fillet(13.0),
+        &Expect {
+            edges: Some(24),
+            ..Expect::default()
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib fillet test 417: `cyl_on_box_w_tan_hole.smb`, radius 10.0, edges [(17, 17)].

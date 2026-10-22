@@ -46,7 +46,6 @@ case_226_blade_hub slow
 case_227_fillet1018 slow
 case_228_crown
 case_229_loft_brick
-case_230_box_extrusion1
 case_231_box_extrusion2 slow
 case_233_coons_01_03_29
 case_234_nurb_cone
@@ -57,9 +56,7 @@ case_306_extrusion0210
 case_401_extrusion_old
 case_403_fillet1019
 case_405_cyl_on_box1
-case_407_cyl_on_box_w_fillet
 case_410_blade_hub_1 slow
 case_411_blade_hub_2 slow
 case_412_blade_hub_3 slow
-case_416_rollover_corner
 case_421_blade_fillet_fails slow

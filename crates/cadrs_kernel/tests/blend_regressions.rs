@@ -1425,3 +1425,85 @@ fn fillet_over_a_bosss_foot_grows_the_boss() {
         m.surface_area
     );
 }
+
+/// A 5 mm cube's top edge at x = 0 rounded R1 and a boss (radius 1.118) standing on its top in
+/// the middle, the boss's foot filleted R1 (SMLib's cyl_on_box_w_fillet, test 407): the rail
+/// on the top reaches x = 0.382, over the round's tangent edge (x = 1), so the closed edge
+/// opens at its vertex and the ball rolls onto the round and back. The edge's middle, where the
+/// reference ball starts, is on the round's side: the reference moves to a station on the top
+/// first (from there the ball rolls off and back on). Against OCCT (SMLib: 135.461936,
+/// 162.494585).
+#[test]
+fn fillet_round_a_boss_whose_middle_is_on_a_round() {
+    let mut k = NativeKernel::new();
+    let bx = k.box_(5.0, 5.0, 5.0).unwrap();
+    let draw::Shape::Body(bx) = bx else {
+        panic!("not a body")
+    };
+    let edge = edge_at(&k, bx, [0.0, 2.5, 5.0]);
+    let rounded = local_fillet(&mut k, bx, edge, 1.0);
+    let r = 1.118033988749895;
+    let boss = k.pcylinder(r, 2.5).unwrap();
+    let boss = k.ttranslate(&boss, 2.5, 2.5, 5.0).unwrap();
+    let draw::Shape::Body(b) = k.bfuse(&draw::Shape::Body(rounded), &boss).unwrap() else {
+        panic!("not a body")
+    };
+    let got = local_fillet_law(
+        &mut k,
+        b,
+        &|es: &[EdgeInfo]| foot_circle(es, r, 5.0),
+        &[(0.0, 1.0), (1.0, 1.0)],
+    );
+    near_occt(got, 135.461681312, 162.501577499, 1e-5);
+}
+
+/// A block (223 by 129) with a blind hole (radius 23.9) whose rim is rounded R15, and a boss
+/// (radius 18.9) on its top near a corner and the hole, its foot filleted R10 (SMLib's
+/// cyl_on_box_w_tan_hole, test 417): the rail on the top rolls onto the hole's round and back
+/// (the closed edge opens at its vertex) and runs off over the block's two sides by the
+/// corner. Each strip's cliffs are looked for between its own ends: the strip from the second
+/// roll on to the vertex ends a turn on from where the edge starts. OCCT fails; SMLib's result
+/// isn't a solid. Checked against the tool-and-boolean blend (0.01% in volume, 0.3% in area:
+/// its sections over the round are coarser) and pinned.
+#[test]
+fn fillet_round_a_boss_rolling_over_a_hole_round_and_off_a_corner() {
+    let mut k = NativeKernel::new();
+    let bx = k
+        .box_at(
+            -111.4043197631836,
+            -64.5198745727539,
+            -58.498023986816406,
+            222.8086395263672,
+            129.0397491455078,
+            58.498023986816406,
+        )
+        .unwrap();
+    let (rh, dh) = (23.902366638183587, 43.87351608276367);
+    let hole = k.pcylinder(rh, dh).unwrap();
+    let hole = k
+        .ttranslate(&hole, -41.72284698486328, -4.301324844360352, -dh)
+        .unwrap();
+    let draw::Shape::Body(b) = k.bcut(&bx, &hole).unwrap() else {
+        panic!("not a body")
+    };
+    let rim = foot_circle(&k.edges(b).unwrap(), rh, 0.0)[0];
+    let rounded = local_fillet(&mut k, b, rim, 15.0);
+    let rb = 18.94536972045897;
+    let boss = k.pcylinder(rb, 80.0).unwrap();
+    let boss = k
+        .ttranslate(&boss, -86.45662689208984, 40.43245315551758, 0.0)
+        .unwrap();
+    let draw::Shape::Body(b) = k.bfuse(&draw::Shape::Body(rounded), &boss).unwrap() else {
+        panic!("not a body")
+    };
+    let got = local_fillet_law(
+        &mut k,
+        b,
+        &|es: &[EdgeInfo]| foot_circle(es, rb, 0.0),
+        &[(0.0, 10.0), (1.0, 10.0)],
+    );
+    near_occt(got, 1688028.079073282, 113814.188352180, 3e-3);
+    let (v, a) = got;
+    assert!((v - 1687855.613231097).abs() < 1e-6 * v, "volume {v}");
+    assert!((a - 113478.325943454).abs() < 1e-6 * a, "area {a}");
+}

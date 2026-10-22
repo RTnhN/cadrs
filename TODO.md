@@ -21,17 +21,11 @@ Rebuild a single document with `cadrs --document "<name>" --check`.
 
 Fixed (dropped from the list): open sketch loops (d4 desk device v2/v3, d4_desk_device_test, emax,
 squish's profile), the open-shell and 3-face booleans, plant_pot's extrude direction, the stroller,
-pvc and rianatest blends, references (mate connectors, pibox thicken, t20, trimmer's unnamed
+pvc and rianatest blends, Dr Browns cap's Fillet 1 (rounds round a window across the dome's seam)
+and the cable organizer's Fillet 2 (full rounds meeting at a corner), references (mate connectors, pibox thicken, t20, trimmer's unnamed
 faces), mirror_test's mesh import.
 
 Still new against main:
-- [ ] Dr Browns cap, Fillet 1: two r 4 rounds on either side of the same 1.2 mm wall cut into each
-  other. The fillet builds them one after the other, and the second tool crosses the first's
-  face; main builds all four edges in one operation. The first round's boolean issues (touching
-  caps, a seam through a hole) are being fixed.
-- [ ] cable organizer Copy 2, Fillet 2: two full rounds meeting at a corner (R = half a 3 mm rib).
-  It now fails with a clear error; supporting meeting full rounds is real fillet work.
-  (Main fails this studio's Fillet 1, which kernel-10 builds.)
 
 Differences without errors, still to check:
 - [ ] Part counts that differ from main (garbage_cabinet 7 vs 3, TubeAdapter 3 vs 1 from chamfer
@@ -46,9 +40,11 @@ Differences without errors, still to check:
 ### Kernel correctness (independent review 4, 7.45/10 at `b589424`)
 
 - [ ] Fillets and blends:
-  - occt_blend: 173 known failures (40 wrong areas, 21 open shells, 16 variable fillets of curved edges, 11 degenerate sections, …);
-  - SMLib fillets: 34/100 pass;
-  - 16 cases still need the tool-and-boolean fallback.
+  - occt_blend: 96 known failures (most "area differs" ones pick another edge than OCCT's
+    explode order, and five expect OCCT's own failure);
+  - SMLib fillets: 36/100 pass;
+  - no occt_blend case needs the tool-and-boolean fallback any more; four SMLib cases still do
+    (case_407, 416, 417, 419).
 - [ ] Booleans: 166 occt_boolean known failures (section lengths, sub-shape counts, open shells, areas).
 - [ ] Offsets: 193 occt_offset known failures (101 of them B-spline wire offsets); smlib_offset 23/29.
 - [ ] A merged face's new seam can run through one of its holes. The boolean merges the
@@ -72,7 +68,8 @@ Differences without errors, still to check:
   - loose edges and vertices next to faces;
   - wire-only files.
 - [ ] STEP/IGES: 128 of OCCT's 389 dataset files don't read clean (`tests/exchange_corpus.rs`).
-- [ ] Performance outliers: fillets are about 10× slower than OCCT; a few cases are 100–180× slower.
+- [ ] Fillet speed: 1.55× OCCT on occt_blend and 1.94× on smlib_fillet (PERF.md); the goal is at or
+  below OCCT.
 
 ### Release mechanics
 
@@ -81,6 +78,12 @@ Differences without errors, still to check:
 - [ ] Merge `kernel-10` into main once the document check matches or beats main.
 
 ## 2. After the release
+
+- [ ] An optional G2 corner mode for fillets: where three edges of different radii meet, ease each
+  strip's radius to one vertex sphere's (Dahl §3.5.2) instead of the patched C0 corner (18° kink
+  on a box with radii 1/2/3). Built and parked (`h3_corners.patch` in agent A's scratchpad): it
+  makes each eased strip a B-spline, 2–5× slower on complex_e3/d2, with areas a little further
+  from OCCT's, so it stays out of the default path.
 
 - [ ] Native B-rep threads: external and internal, multi-start, taper, partial length, run-outs.
   Built from exact helix curves and ruled surfaces. The Pali Ijo kernel's design

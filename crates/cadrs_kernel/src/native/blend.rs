@@ -1841,9 +1841,8 @@ pub fn fillet(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], spec: &Fille
         // The result's edges merge where the trimming split them for nothing (as every blend's
         // do): it must stay valid.
         let local = super::fillet::fillet_edges_laws(&b, body, &laws, false).and_then(|(out, src)| {
-            let mut merged = out.clone();
-            merge_edges(&mut merged);
-            match local_problem(&b, &merged) {
+            // (The local result's edges are merged and its tolerances fitted already.)
+            match local_problem(&b, &out) {
                 Some(e) => Err(KernelError::InvalidResult { op: "fillet", why: format!("the local fillet isn't valid: {e}") }),
                 None => Ok((out, src)),
             }
@@ -1963,9 +1962,8 @@ pub fn chamfer(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], opts: &Cham
             .collect();
         if let Some(laws) = laws {
             let local = super::fillet::fillet_edges_laws(&b, body, &laws, true).and_then(|(out, src)| {
-                let mut merged = out.clone();
-                merge_edges(&mut merged);
-                match local_problem(&b, &merged) {
+                // (The local result's edges are merged and its tolerances fitted already.)
+                match local_problem(&b, &out) {
                     Some(e) => Err(KernelError::InvalidResult { op: "chamfer", why: format!("the local chamfer isn't valid: {e}") }),
                     None => Ok((out, src)),
                 }
@@ -2026,9 +2024,8 @@ pub fn chamfer(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], opts: &Cham
             .collect();
         if let Some(dists) = dists {
             let local = super::fillet::chamfer_edges(&b, body, &dists).and_then(|(out, src)| {
-                let mut merged = out.clone();
-                merge_edges(&mut merged);
-                match local_problem(&b, &merged) {
+                // (The local result's edges are merged and its tolerances fitted already.)
+                match local_problem(&b, &out) {
                     Some(e) => Err(KernelError::InvalidResult { op: "chamfer", why: format!("the local chamfer isn't valid: {e}") }),
                     None => Ok((out, src)),
                 }
@@ -2254,9 +2251,8 @@ pub fn fillet_laws_local(k: &mut NativeKernel, body: BodyId, laws: &[FilletLaw])
         })
         .collect();
     let (out, src) = super::fillet::fillet_edges_laws(&b, body, &edges, false)?;
-    let mut merged = out.clone();
-    merge_edges(&mut merged);
-    if let Some(e) = local_problem(&b, &merged) {
+    // (The local result's edges are merged and its tolerances fitted already.)
+    if let Some(e) = local_problem(&b, &out) {
         return Err(KernelError::InvalidResult { op: "fillet", why: format!("the local fillet isn't valid: {e}") });
     }
     Ok(Tracked { body: out, src }.into_result(k, body))

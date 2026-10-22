@@ -73,12 +73,9 @@ fn parity_orientation(shell: &Body) -> Option<bool> {
         for i in 1..n {
             for j in 1..n {
                 let uv = P2::new(lo.x + (hi.x - lo.x) * i as f64 / n as f64, lo.y + (hi.y - lo.y) * j as f64 / n as f64);
-                let inside = ps.first().is_some_and(|o| point_in_polygon(&uv, o)) && !ps.iter().skip(1).any(|h| point_in_polygon(&uv, h));
-                if !inside {
-                    continue;
-                }
                 // Its distance from the loops, given up as soon as it can't beat the best so
-                // far (the same choice as the full minimum).
+                // far (the same choice as the full minimum); whether it lies inside only asked
+                // of a point that would be the best.
                 let floor = best.map_or(f64::NEG_INFINITY, |b| b.0);
                 let mut d = f64::INFINITY;
                 'segs: for l in ps {
@@ -94,7 +91,10 @@ fn parity_orientation(shell: &Body) -> Option<bool> {
                     }
                 }
                 if best.is_none_or(|b| d > b.0) {
-                    best = Some((d, uv));
+                    let inside = ps.first().is_some_and(|o| point_in_polygon(&uv, o)) && !ps.iter().skip(1).any(|h| point_in_polygon(&uv, h));
+                    if inside {
+                        best = Some((d, uv));
+                    }
                 }
             }
         }
