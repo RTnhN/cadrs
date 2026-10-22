@@ -1301,7 +1301,11 @@ pub fn fillet(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], spec: &Fille
             let e = e.0 as usize;
             let r = match spec.size {
                 FilletSize::Radius(r) => r,
-                FilletSize::Width(w) => w / (2.0 * ((PI - super::fillet::chamfer_angle(&b, e)?) / 2.0).sin()),
+                // (Where the faces' angle varies along the edge, a law of radii.)
+                FilletSize::Width(w) => match super::fillet::chamfer_angle(&b, e) {
+                    Some(th) => w / (2.0 * ((PI - th) / 2.0).sin()),
+                    None => return Some((e, super::fillet::width_law(&b, e, w)?)),
+                },
             };
             Some((e, vec![(0.0, r), (1.0, r)]))
         })
@@ -1464,7 +1468,8 @@ pub fn chamfer(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], opts: &Cham
                 let mut d = [0.0; 2];
                 d[s0] = d1;
                 d[s1] = d2;
-                (d1 > 0.0 && d2 > 0.0 && (flat || d1 == d2)).then_some((ei, d))
+                // (Unequal on a curved face: where its section doesn't change along the edge.)
+                (d1 > 0.0 && d2 > 0.0 && (flat || d1 == d2 || super::fillet::chamfer_offsets_along(&b, ei, d).is_some())).then_some((ei, d))
             })
             .collect();
         if let Some(dists) = dists {

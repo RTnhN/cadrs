@@ -26,10 +26,7 @@ blend simple_e2
 blend simple_e4
 blend simple_h7
 blend simple_h9
-blend simple_k2
-blend simple_k3
 blend simple_k4
-blend simple_o2
 blend simple_p4
 blend simple_p5
 blend simple_p7
@@ -38,9 +35,6 @@ blend simple_q3
 blend simple_q6
 blend simple_q7
 blend simple_q8
-blend simple_r8
-blend simple_s2
-blend simple_t2
 blend simple_t8
 blend simple_u2
 blend simple_u5
@@ -216,7 +210,6 @@ sewing tol_100_j5
 sewing tol_100_y7
 boolean bcut_simple_g6
 thrusection not_solids_w7
-blend simple_g2
 blend simple_g3
 blend simple_g4
 blend simple_g5
@@ -554,7 +547,6 @@ blend complex_d2
 blend encoderegularity_a2
 blend encoderegularity_a4
 blend encoderegularity_a7
-blend simple_i8
 blend simple_r1
 blend simple_r2
 blend simple_r6
@@ -574,19 +566,14 @@ blend simple_i1
 blend simple_i2
 blend simple_i4
 blend simple_i6
-blend tolblend_buildvol_a6
-blend tolblend_buildvol_a7
 blend tolblend_simple_a1
 # blend: the kernel's variable fillet (fillet_variable) takes only straight edges between planes.
 blend buildevol_c8
 blend buildevol_d9
 blend buildevol_e2
-blend buildevol_e9
 blend buildevol_f1
 blend buildevol_f2
 blend buildevol_f5
-blend buildevol_f7
-blend buildevol_f8
 blend buildevol_f9
 blend buildevol_g1
 blend buildevol_h7
@@ -606,7 +593,6 @@ blend buildevol_b3
 blend buildevol_b9
 blend buildevol_d6
 blend complex_c2
-blend complex_e3
 blend complex_h4
 blend encoderegularity_a1
 blend encoderegularity_a5
@@ -752,8 +738,6 @@ blend tolblend_simple_c9
 blend buildevol_i5
 blend simple_s4
 blend simple_t9
-blend simple_u3
-blend simple_u4
 # W15 heal: the healing commands (fixshape, fixwgaps, directfaces, DT_*) made runnable, failing
 # today (by cause). Most are inputs the reader leaves invalid that the command isn't meant to
 # repair (OCCT's own reading of them is sound).

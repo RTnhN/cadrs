@@ -42,7 +42,6 @@ case_219_fillet0227 slow
 case_221_vase1
 case_223_vase3 slow
 case_224_0311
-case_225_box_diff_cyl
 case_226_blade_hub slow
 case_227_fillet1018 slow
 case_228_crown
@@ -57,7 +56,6 @@ case_304_box
 case_306_extrusion0210
 case_401_extrusion_old
 case_403_fillet1019
-case_404_cyl_on_box1
 case_405_cyl_on_box1
 case_407_cyl_on_box_w_fillet
 case_408_cyl_on_box_w_fillet1

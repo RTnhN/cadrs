@@ -464,7 +464,7 @@ fn case_224_0311() {
 /// SMLib fillet test 225: `box_diff_cyl.smb`, radius 1.0, edges [(12, 15)].
 #[test]
 fn case_225_box_diff_cyl() {
-    known_failure(blend("box_diff_cyl.smb", &[(12, 15)], true, Op::Fillet(1.0), &Expect { volume: Some(947.240675802), area: Some(627.034242421), faces: Some(17), edges: Some(38), solid: Some(true), ..Expect::default() }), "fillets", "case_225_box_diff_cyl");
+    blend("box_diff_cyl.smb", &[(12, 15)], true, Op::Fillet(1.0), &Expect { volume: Some(947.240675802), area: Some(627.034242421), faces: Some(17), edges: Some(38), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib fillet test 226: `blade_hub.smb`, radius 0.1, edges [(5, 5), (7, 8), (10, 12), (14, 17)].
@@ -622,7 +622,7 @@ fn case_403_fillet1019() {
 /// SMLib fillet test 404: `cyl_on_box1.smb`, radius 2.0, edges [(12, 12)].
 #[test]
 fn case_404_cyl_on_box1() {
-    known_failure(blend("cyl_on_box1.smb", &[(12, 12)], true, Op::Fillet(2.0), &Expect { volume: Some(1425.07404527), area: Some(784.338233208), faces: Some(12), edges: Some(29), solid: Some(true), ..Expect::default() }), "fillets", "case_404_cyl_on_box1");
+    blend("cyl_on_box1.smb", &[(12, 12)], true, Op::Fillet(2.0), &Expect { volume: Some(1425.07404527), area: Some(784.338233208), faces: Some(12), edges: Some(29), solid: Some(true), ..Expect::default() }).unwrap();
 }
 
 /// SMLib fillet test 405: `cyl_on_box1.smb`, radius 4.0, edges [(12, 12)].
