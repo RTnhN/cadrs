@@ -1,0 +1,107 @@
+name: Pages
+
+# The project site (site/), rendered to static files with `proa export` and published to
+# GitHub Pages. Pull requests build it as a check; main and new releases deploy it.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - ".github/images/**"
+      - "assets/icons/**"
+      - ".github/workflows/pages.yml"
+  pull_request:
+    paths:
+      - "site/**"
+      - ".github/images/**"
+      - "assets/icons/**"
+      - ".github/workflows/pages.yml"
+  # The download links point at the latest release.
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.event.pull_request.number || 'deploy' }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  # The repo's .cargo/config.toml adds nightly-only rustflags for the app; the site builds on
+  # the stable toolchain in site/rust-toolchain.toml.
+  RUSTFLAGS: ""
+  # Static export is on our Proa fork until it lands upstream.
+  PROA_REPO: https://github.com/rvdende/proa
+  PROA_BRANCH: feat/static-export
+  TAILWIND_VERSION: "4.3.3"
+  TAILWIND_SHA256: dc61b3ac6b8c9ca874c0cc4c57b2409791a64c5540404ca5f5367360babc313a
+
+jobs:
+  build:
+    name: Build the site
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # A release event checks out its tag; the site always comes from main.
+          ref: ${{ github.event_name == 'release' && 'main' || '' }}
+
+      - name: Tailwind CLI
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSL -o "$RUNNER_TEMP/bin/tailwindcss" \
+            "https://github.com/tailwindlabs/tailwindcss/releases/download/v$TAILWIND_VERSION/tailwindcss-linux-x64"
+          echo "$TAILWIND_SHA256  $RUNNER_TEMP/bin/tailwindcss" | sha256sum --check --strict
+          chmod +x "$RUNNER_TEMP/bin/tailwindcss"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Proa CLI revision
+        id: proa
+        run: echo "rev=$(git ls-remote "$PROA_REPO" "refs/heads/$PROA_BRANCH" | cut -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the Proa CLI
+        id: proa-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/proa
+          key: proa-cli-${{ steps.proa.outputs.rev }}
+
+      - name: Install the Proa CLI
+        if: steps.proa-cache.outputs.cache-hit != 'true'
+        # From site/, so cargo uses the site's stable toolchain.
+        working-directory: site
+        run: cargo install --locked --git "$PROA_REPO" --rev "${{ steps.proa.outputs.rev }}" proa-cli --bin proa
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: site -> target
+
+      - name: Build and export
+        run: site/export.sh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/dist
+
+  deploy:
+    name: Deploy to GitHub Pages
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
