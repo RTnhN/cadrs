@@ -88,6 +88,19 @@ pub fn surface_surface_full(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surfa
     surface_surface_tol(a, ua, b, ub, bb, super::boolean::VTOL)
 }
 
+/// [`surface_surface`] where it has a closed form (coincident surfaces' region, a plane and an
+/// extrusion, the analytic pairs), else `None`: the curves the numeric engine would trace (fitted
+/// B-splines) not traced, for a caller that only takes exact ones.
+pub(crate) fn surface_surface_closed(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, ub: ((f64, f64), (f64, f64)), bb: &Bbox) -> Option<Vec<IntCurve>> {
+    let tc = coincidence_tol(bb);
+    let closed = a.same_domain(b, tc).is_some()
+        || plane_extrusion(a, b, ub, bb).is_some()
+        || plane_extrusion(b, a, ua, bb).is_some()
+        || analytic(a, b, bb, super::boolean::VTOL).is_some()
+        || analytic(b, a, bb, super::boolean::VTOL).is_some();
+    closed.then(|| surface_surface(a, ua, b, ub, bb))
+}
+
 /// [`surface_surface_full`] for a boolean merging points within `tol`: surfaces touching
 /// within it touch (two spheres meet in a point, not a circle that small).
 pub fn surface_surface_tol(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, ub: ((f64, f64), (f64, f64)), bb: &Bbox, tol: f64) -> Ssi {

@@ -3407,7 +3407,8 @@ fn exact_end_curve(s: &Surface, g: &Surface, a: &P3, bp: &P3, towards: &P3) -> O
         let ((u0, u1), (v0, v1)) = s.param_box();
         ((u0, u1), (v0.max(-1e4), v1.min(1e4)))
     };
-    let cs = super::ssi::surface_surface(s, box_of(s), g, box_of(g), &bb);
+    // (Only closed forms are taken: none traced numerically.)
+    let cs = super::ssi::surface_surface_closed(s, box_of(s), g, box_of(g), &bb)?;
     let tol = tol::REL_POINT * (1.0 + bb.diagonal());
     for ic in cs {
         // Only closed-form curves (a fitted one is no better than the marched end).
