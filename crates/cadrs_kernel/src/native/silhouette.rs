@@ -36,9 +36,9 @@ use rayon::prelude::*;
 use super::curve::Curve;
 use super::math::*;
 use super::surface::Surface;
+use super::tol;
 use super::topo::Body;
 use super::uvdomain::FaceDomain;
-use super::tol;
 
 /// How a face is seen.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -97,12 +97,17 @@ impl Silhouette {
     pub fn samples(&self, surf: &Surface, tol: f64) -> (Vec<P3>, Vec<P2>) {
         match &self.geom {
             SilGeom::Exact { curve, t } => {
-                let pts: Vec<P3> = curve.sample_params(t.0, t.1, tol, 0.1).into_iter().map(|s| curve.point(s)).collect();
+                let pts: Vec<P3> = curve
+                    .sample_params(t.0, t.1, tol, 0.1)
+                    .into_iter()
+                    .map(|s| curve.point(s))
+                    .collect();
                 let mut hint = None;
                 let uv = pts
                     .iter()
                     .map(|p| {
-                        let (u, v) = surf.project(p, hint.or_else(|| Some(surf.project_coarse(p, 16))));
+                        let (u, v) =
+                            surf.project(p, hint.or_else(|| Some(surf.project_coarse(p, 16))));
                         hint = Some((u, v));
                         P2::new(u, v)
                     })
@@ -125,7 +130,10 @@ pub struct SilOptions {
 
 impl Default for SilOptions {
     fn default() -> Self {
-        Self { tol: 1e-4, grid: 160 }
+        Self {
+            tol: 1e-4,
+            grid: 160,
+        }
     }
 }
 
@@ -138,18 +146,39 @@ pub enum Found {
 }
 
 /// The silhouettes of every face of `body` (`polys`: its faces' uv polygons).
-pub fn body_silhouettes(body: &Body, polys: &[Vec<Vec<P2>>], view: &View, opts: &SilOptions) -> Vec<Silhouette> {
-    (0..body.faces.len()).into_par_iter().flat_map_iter(|fi| face_silhouettes(body, fi, &polys[fi], view, opts)).collect()
+pub fn body_silhouettes(
+    body: &Body,
+    polys: &[Vec<Vec<P2>>],
+    view: &View,
+    opts: &SilOptions,
+) -> Vec<Silhouette> {
+    (0..body.faces.len())
+        .into_par_iter()
+        .flat_map_iter(|fi| face_silhouettes(body, fi, &polys[fi], view, opts))
+        .collect()
 }
 
 /// The silhouettes of face `fi` of `body` (`polys`: its uv polygons).
-pub fn face_silhouettes(body: &Body, fi: usize, polys: &[Vec<P2>], view: &View, opts: &SilOptions) -> Vec<Silhouette> {
+pub fn face_silhouettes(
+    body: &Body,
+    fi: usize,
+    polys: &[Vec<P2>],
+    view: &View,
+    opts: &SilOptions,
+) -> Vec<Silhouette> {
     let dom = FaceDomain::new(&body.faces[fi].surf, polys);
     let curves = match domain_silhouettes(&dom, view, opts) {
         Found::Curves(cs) => cs,
         Found::Whole => box_sides(&dom),
     };
-    curves.into_iter().map(|(geom, closed)| Silhouette { face: fi, geom, closed }).collect()
+    curves
+        .into_iter()
+        .map(|(geom, closed)| Silhouette {
+            face: fi,
+            geom,
+            closed,
+        })
+        .collect()
 }
 
 /// The sides of the face's uv box, as iso-curves, where they lie in the face (a seen edge-on
@@ -160,12 +189,29 @@ fn box_sides(dom: &FaceDomain) -> Vec<(SilGeom, bool)> {
     let full = |a: f64, b: f64, periodic: bool| periodic && ((b - a) - TAU).abs() < tol::ANGULAR;
     let mut out = Vec::new();
     let mut side = |fixed_u: bool, at: f64| {
-        let Some(c) = super::face_build::iso_curve(s, fixed_u, at) else { return };
+        let Some(c) = super::face_build::iso_curve(s, fixed_u, at) else {
+            return;
+        };
         let (t0, t1) = if fixed_u { (v0, v1) } else { (u0, u1) };
-        let inside = |t: f64| if fixed_u { dom.contains(at, t, false) } else { dom.contains(t, at, false) };
+        let inside = |t: f64| {
+            if fixed_u {
+                dom.contains(at, t, false)
+            } else {
+                dom.contains(t, at, false)
+            }
+        };
         // Runs where a side only touches the face (a disc's box) are the boundary band's width.
-        for run in clip(t0, t1, 64, inside).into_iter().filter(|r| r.1 - r.0 > 1e-2 * (t1 - t0)) {
-            out.push((SilGeom::Exact { curve: c.clone(), t: run }, false));
+        for run in clip(t0, t1, 64, inside)
+            .into_iter()
+            .filter(|r| r.1 - r.0 > 1e-2 * (t1 - t0))
+        {
+            out.push((
+                SilGeom::Exact {
+                    curve: c.clone(),
+                    t: run,
+                },
+                false,
+            ));
         }
     };
     side(false, v0);
@@ -189,9 +235,15 @@ pub fn domain_silhouettes(dom: &FaceDomain, view: &View, opts: &SilOptions) -> F
             let n = f.x.cross(&f.y).normalize();
             let edge_on = match view {
                 View::Parallel(d) => n.dot(&d.normalize()).abs() < tol::ANGULAR,
-                View::Perspective(e) => n.dot(&(f.o - e)).abs() < tol::REL * (1.0 + (f.o - e).norm()),
+                View::Perspective(e) => {
+                    n.dot(&(f.o - e)).abs() < tol::REL * (1.0 + (f.o - e).norm())
+                }
             };
-            if edge_on { Found::Whole } else { Found::Curves(vec![]) }
+            if edge_on {
+                Found::Whole
+            } else {
+                Found::Curves(vec![])
+            }
         }
         Surface::Cylinder { .. } | Surface::Cone { .. } => generators(dom, view),
         Surface::Sphere { f, r } => {
@@ -209,12 +261,23 @@ pub fn domain_silhouettes(dom: &FaceDomain, view: &View, opts: &SilOptions) -> F
                     }
                     let wn = w / dd;
                     let a = any_perpendicular(&wn);
-                    (f.o + wn * (r * r / dd), a, wn.cross(&a).normalize(), r * (dd * dd - r * r).sqrt() / dd)
+                    (
+                        f.o + wn * (r * r / dd),
+                        a,
+                        wn.cross(&a).normalize(),
+                        r * (dd * dd - r * r).sqrt() / dd,
+                    )
                 }
             };
-            Found::Curves(exact_runs(dom, Curve::Circle { c, x, y, r: rad }, (0.0, TAU), true))
+            Found::Curves(exact_runs(
+                dom,
+                Curve::Circle { c, x, y, r: rad },
+                (0.0, TAU),
+                true,
+            ))
         }
-        Surface::Torus { f, .. } if matches!(view, View::Parallel(d) if d.normalize().dot(&f.z).abs() > 1.0 - tol::ANGULAR_FINE) => {
+        Surface::Torus { f, .. } if matches!(view, View::Parallel(d) if d.normalize().dot(&f.z).abs() > 1.0 - tol::ANGULAR_FINE) =>
+        {
             let mut out = Vec::new();
             for v in [0.0, PI] {
                 if let Some(c) = dom.surf.iso_v(v) {
@@ -249,7 +312,11 @@ fn generators(dom: &FaceDomain, view: &View) -> Found {
     let (a, b) = (0.5 * (g0 - g2), g1 - c);
     let r = a.hypot(b);
     if r < tol::REL * scale {
-        return if c.abs() < tol::REL * scale { Found::Whole } else { Found::Curves(vec![]) };
+        return if c.abs() < tol::REL * scale {
+            Found::Whole
+        } else {
+            Found::Curves(vec![])
+        };
     }
     if c.abs() > r {
         return Found::Curves(vec![]);
@@ -264,7 +331,13 @@ fn generators(dom: &FaceDomain, view: &View) -> Found {
     for u0 in us {
         let Some(line) = s.iso_u(u0) else { continue };
         for run in clip(dom.vb.0, dom.vb.1, 32, |v| dom.contains(u0, v, false)) {
-            out.push((SilGeom::Exact { curve: line.clone(), t: run }, false));
+            out.push((
+                SilGeom::Exact {
+                    curve: line.clone(),
+                    t: run,
+                },
+                false,
+            ));
         }
     }
     Found::Curves(out)
@@ -283,7 +356,17 @@ fn exact_runs(dom: &FaceDomain, c: Curve, t: (f64, f64), periodic: bool) -> Vec<
         runs[0] = (last.0, runs[0].1 + (t.1 - t.0));
     }
     let full = periodic && runs.len() == 1 && runs[0] == t;
-    runs.into_iter().map(|run| (SilGeom::Exact { curve: c.clone(), t: run }, full)).collect()
+    runs.into_iter()
+        .map(|run| {
+            (
+                SilGeom::Exact {
+                    curve: c.clone(),
+                    t: run,
+                },
+                full,
+            )
+        })
+        .collect()
 }
 
 /// The runs of [a, b] where `inside` holds, found on `n` samples and refined by bisection.
@@ -345,7 +428,14 @@ impl Axis {
         } else {
             (a, cells + 1)
         };
-        Self { lo, step, nodes, wrap, base: a, period: b - a }
+        Self {
+            lo,
+            step,
+            nodes,
+            wrap,
+            base: a,
+            period: b - a,
+        }
     }
 
     fn at(&self, i: usize) -> f64 {
@@ -353,22 +443,38 @@ impl Axis {
     }
 
     fn cells(&self) -> usize {
-        if self.wrap { self.nodes } else { self.nodes - 1 }
+        if self.wrap {
+            self.nodes
+        } else {
+            self.nodes - 1
+        }
     }
 
     fn next(&self, i: usize) -> usize {
-        if self.wrap { (i + 1) % self.nodes } else { i + 1 }
+        if self.wrap {
+            (i + 1) % self.nodes
+        } else {
+            i + 1
+        }
     }
 
     /// `x` brought into the period (wrapping axes only).
     fn fold(&self, x: f64) -> f64 {
-        if self.wrap { self.base + (x - self.base).rem_euclid(self.period) } else { x }
+        if self.wrap {
+            self.base + (x - self.base).rem_euclid(self.period)
+        } else {
+            x
+        }
     }
 
     /// `b − a` the short way round.
     fn delta(&self, a: f64, b: f64) -> f64 {
         let d = b - a;
-        if self.wrap { d - self.period * (d / self.period).round() } else { d }
+        if self.wrap {
+            d - self.period * (d / self.period).round()
+        } else {
+            d
+        }
     }
 }
 
@@ -390,7 +496,9 @@ impl<'a> Tracer<'a> {
             (0..3)
                 .map(|k| {
                     let c = 0.2 + 0.3 * k as f64;
-                    (0..16).map(|i| (f(i as f64 / 16.0, c) - f((i + 1) as f64 / 16.0, c)).norm()).sum::<f64>()
+                    (0..16)
+                        .map(|i| (f(i as f64 / 16.0, c) - f((i + 1) as f64 / 16.0, c)).norm())
+                        .sum::<f64>()
                 })
                 .fold(0.0, f64::max)
         };
@@ -403,7 +511,13 @@ impl<'a> Tracer<'a> {
         let (wu, wv) = closed_dirs(s, ub, vb, size);
         let au = Axis::new(ub.0, ub.1, cells(lu), wu, !wu && s.u_periodic());
         let av = Axis::new(vb.0, vb.1, cells(lv), wv, !wv && s.v_periodic());
-        Self { dom, view: *view, tol: opts.tol.max(tol::ROUNDOFF), au, av }
+        Self {
+            dom,
+            view: *view,
+            tol: opts.tol.max(tol::ROUNDOFF),
+            au,
+            av,
+        }
     }
 
     /// The point at (u, v), folded into the period.
@@ -418,24 +532,36 @@ impl<'a> Tracer<'a> {
         let d = s.d2(u, v);
         let n = d[1].cross(&d[2]);
         let l = n.norm();
-        let scale = (d[1].norm() * d[2].norm()).max(d[1].norm_squared()).max(d[2].norm_squared());
+        let scale = (d[1].norm() * d[2].norm())
+            .max(d[1].norm_squared())
+            .max(d[2].norm_squared());
         let n = if l > tol::REL * scale && l > tol::TINY {
             n / l
         } else {
             // A pole or apex (a collapsed row of a B-spline too): the normal just inside the face,
             // a step towards the middle of its box.
-            let (cu, cv) = (0.5 * (self.dom.ub.0 + self.dom.ub.1), 0.5 * (self.dom.vb.0 + self.dom.vb.1));
+            let (cu, cv) = (
+                0.5 * (self.dom.ub.0 + self.dom.ub.1),
+                0.5 * (self.dom.vb.0 + self.dom.vb.1),
+            );
             let (qu, qv) = (u + (cu - u) * tol::DIFF_STEP, v + (cv - v) * tol::DIFF_STEP);
             let e = s.d2(qu, qv);
             let m = e[1].cross(&e[2]);
-            if m.norm() > tol::TINY { m.normalize() } else { s.normal(u, v) }
+            if m.norm() > tol::TINY {
+                m.normalize()
+            } else {
+                s.normal(u, v)
+            }
         };
         n.dot(&self.view.sight(&P3::from(d[0])))
     }
 
     /// The midpoint of a and b (the short way round on wrapping axes).
     fn mid(&self, a: P2, b: P2) -> P2 {
-        P2::new(self.au.fold(a.x + 0.5 * self.au.delta(a.x, b.x)), self.av.fold(a.y + 0.5 * self.av.delta(a.y, b.y)))
+        P2::new(
+            self.au.fold(a.x + 0.5 * self.au.delta(a.x, b.x)),
+            self.av.fold(a.y + 0.5 * self.av.delta(a.y, b.y)),
+        )
     }
 
     /// b − a the short way round.
@@ -448,7 +574,10 @@ impl<'a> Tracer<'a> {
         let (nu, nv) = (au.nodes, av.nodes);
         let node = |i: usize, j: usize| j * nu + i;
         let uv = |i: usize, j: usize| P2::new(au.at(i), av.at(j));
-        let vals: Vec<f64> = (0..nu * nv).into_par_iter().map(|k| self.g(uv(k % nu, k / nu))).collect();
+        let vals: Vec<f64> = (0..nu * nv)
+            .into_par_iter()
+            .map(|k| self.g(uv(k % nu, k / nu)))
+            .collect();
         if vals.iter().all(|x| x.abs() < tol::ROUNDOFF) {
             return Found::Whole;
         }
@@ -460,10 +589,25 @@ impl<'a> Tracer<'a> {
         for j in 0..av.cells() {
             for i in 0..au.cells() {
                 let (i1, j1) = (au.next(i), av.next(j));
-                let c = [vals[node(i, j)], vals[node(i1, j)], vals[node(i1, j1)], vals[node(i, j1)]];
+                let c = [
+                    vals[node(i, j)],
+                    vals[node(i1, j)],
+                    vals[node(i1, j1)],
+                    vals[node(i, j1)],
+                ];
                 let sg = c.map(pos);
-                let keys = [2 * node(i, j), 2 * node(i1, j) + 1, 2 * node(i, j1), 2 * node(i, j) + 1];
-                let cross = [sg[0] != sg[1], sg[1] != sg[2], sg[3] != sg[2], sg[0] != sg[3]];
+                let keys = [
+                    2 * node(i, j),
+                    2 * node(i1, j) + 1,
+                    2 * node(i, j1),
+                    2 * node(i, j) + 1,
+                ];
+                let cross = [
+                    sg[0] != sg[1],
+                    sg[1] != sg[2],
+                    sg[3] != sg[2],
+                    sg[0] != sg[3],
+                ];
                 let list: Vec<usize> = (0..4).filter(|&k| cross[k]).collect();
                 match list.len() {
                     2 => segs.push((keys[list[0]], keys[list[1]])),
@@ -505,7 +649,11 @@ impl<'a> Tracer<'a> {
             }
             let nd = key / 2;
             let a = uv(nd % nu, nd / nu);
-            let b = if key.is_multiple_of(2) { P2::new(a.x + au.step, a.y) } else { P2::new(a.x, a.y + av.step) };
+            let b = if key.is_multiple_of(2) {
+                P2::new(a.x + au.step, a.y)
+            } else {
+                P2::new(a.x, a.y + av.step)
+            };
             let (mut lo, mut hi) = (a, b);
             let slo = pos(self.g(lo));
             for _ in 0..50 {
@@ -597,7 +745,9 @@ impl<'a> Tracer<'a> {
             return;
         }
         let reach = self.diff(a, b).norm();
-        let Some(m) = self.to_zero(self.mid(a, b), reach) else { return };
+        let Some(m) = self.to_zero(self.mid(a, b), reach) else {
+            return;
+        };
         let pm = self.eval(m);
         if (pm - nalgebra::center(&pa, &pb)).norm() <= self.tol {
             return;
@@ -651,7 +801,15 @@ impl<'a> Tracer<'a> {
         }
         runs.into_iter()
             .filter(|r| r.len() >= 2)
-            .map(|r| (SilGeom::Poly { pts: r.iter().map(|q| self.eval(*q)).collect(), uv: r }, closed && whole))
+            .map(|r| {
+                (
+                    SilGeom::Poly {
+                        pts: r.iter().map(|q| self.eval(*q)).collect(),
+                        uv: r,
+                    },
+                    closed && whole,
+                )
+            })
             .collect()
     }
 }
@@ -659,7 +817,10 @@ impl<'a> Tracer<'a> {
 /// Whether the face's box spans the whole of a closed direction of its surface: a periodic one's
 /// period, or a B-spline's range whose ends meet (within 1e-7 of the patch's size).
 fn closed_dirs(s: &Surface, ub: (f64, f64), vb: (f64, f64), size: f64) -> (bool, bool) {
-    let full = |(a, b): (f64, f64), (r0, r1): (f64, f64)| (a - r0).abs() <= tol::REL * (1.0 + r0.abs()) && (b - r1).abs() <= tol::REL * (1.0 + r1.abs());
+    let full = |(a, b): (f64, f64), (r0, r1): (f64, f64)| {
+        (a - r0).abs() <= tol::REL * (1.0 + r0.abs())
+            && (b - r1).abs() <= tol::REL * (1.0 + r1.abs())
+    };
     let ((u0, u1), (v0, v1)) = s.param_box();
     let meets = |along_u: bool| {
         (0..5).all(|k| {
@@ -674,8 +835,16 @@ fn closed_dirs(s: &Surface, ub: (f64, f64), vb: (f64, f64), size: f64) -> (bool,
             (p - q).norm() <= 1e-7 * size
         })
     };
-    let wu = if s.u_periodic() { ((ub.1 - ub.0) - TAU).abs() < tol::ANGULAR } else { full(ub, (u0, u1)) && meets(true) };
-    let wv = if s.v_periodic() { ((vb.1 - vb.0) - TAU).abs() < tol::ANGULAR } else { full(vb, (v0, v1)) && meets(false) };
+    let wu = if s.u_periodic() {
+        ((ub.1 - ub.0) - TAU).abs() < tol::ANGULAR
+    } else {
+        full(ub, (u0, u1)) && meets(true)
+    };
+    let wv = if s.v_periodic() {
+        ((vb.1 - vb.0) - TAU).abs() < tol::ANGULAR
+    } else {
+        full(vb, (v0, v1)) && meets(false)
+    };
     (wu, wv)
 }
 
@@ -710,23 +879,46 @@ fn chains(segs: &[(usize, usize)]) -> Vec<Vec<usize>> {
 }
 
 /// [`crate::Kernel::silhouettes`] for the native kernel.
-pub fn kernel_silhouettes(k: &super::NativeKernel, body: crate::BodyId, view: &crate::SilhouetteView, tolerance: f64) -> crate::Result<Vec<crate::SilhouetteCurve>> {
+pub fn kernel_silhouettes(
+    k: &super::NativeKernel,
+    body: crate::BodyId,
+    view: &crate::SilhouetteView,
+    tolerance: f64,
+) -> crate::Result<Vec<crate::SilhouetteCurve>> {
     use crate::{KernelError, SilhouetteView};
     if !(tolerance > 0.0 && tolerance.is_finite()) {
-        return Err(KernelError::InvalidParameter(format!("a silhouette tolerance of {tolerance} mm")));
+        return Err(KernelError::InvalidParameter(format!(
+            "a silhouette tolerance of {tolerance} mm"
+        )));
     }
     let v = match view {
-        SilhouetteView::Parallel(d) if d.iter().all(|x| x.is_finite()) && d.norm() > tol::DEGENERATE => View::Parallel(*d),
+        SilhouetteView::Parallel(d)
+            if d.iter().all(|x| x.is_finite()) && d.norm() > tol::DEGENERATE =>
+        {
+            View::Parallel(*d)
+        }
         SilhouetteView::Perspective(e) if e.iter().all(|x| x.is_finite()) => View::Perspective(*e),
-        _ => return Err(KernelError::InvalidParameter("a view direction must be a finite non-zero vector, an eye point finite".into())),
+        _ => {
+            return Err(KernelError::InvalidParameter(
+                "a view direction must be a finite non-zero vector, an eye point finite".into(),
+            ));
+        }
     };
     let e = k.entry(body)?;
-    let opts = SilOptions { tol: tolerance, ..SilOptions::default() };
+    let opts = SilOptions {
+        tol: tolerance,
+        ..SilOptions::default()
+    };
     Ok(body_silhouettes(&e.body, e.polys(), &v, &opts)
         .into_iter()
         .map(|s| {
             let (points, uv) = s.samples(&e.body.faces[s.face].surf, tolerance);
-            crate::SilhouetteCurve { face: crate::FaceId(s.face as u64), points, uv, closed: s.closed }
+            crate::SilhouetteCurve {
+                face: crate::FaceId(s.face as u64),
+                points,
+                uv,
+                closed: s.closed,
+            }
         })
         .collect())
 }
@@ -737,15 +929,27 @@ mod tests {
     use crate::native::math::Frame;
 
     fn whole_face(ub: (f64, f64), vb: (f64, f64)) -> Vec<Vec<P2>> {
-        vec![vec![P2::new(ub.0, vb.0), P2::new(ub.1, vb.0), P2::new(ub.1, vb.1), P2::new(ub.0, vb.1)]]
+        vec![vec![
+            P2::new(ub.0, vb.0),
+            P2::new(ub.1, vb.0),
+            P2::new(ub.1, vb.1),
+            P2::new(ub.0, vb.1),
+        ]]
     }
 
     fn total(found: Found) -> (usize, f64) {
         match found {
-            Found::Curves(cs) => (cs.len(), cs.iter().map(|(g, _)| match g {
-                SilGeom::Exact { curve, t } => curve.length(t.0, t.1),
-                SilGeom::Poly { pts, .. } => pts.windows(2).map(|w| (w[1] - w[0]).norm()).sum(),
-            }).sum()),
+            Found::Curves(cs) => (
+                cs.len(),
+                cs.iter()
+                    .map(|(g, _)| match g {
+                        SilGeom::Exact { curve, t } => curve.length(t.0, t.1),
+                        SilGeom::Poly { pts, .. } => {
+                            pts.windows(2).map(|w| (w[1] - w[0]).norm()).sum()
+                        }
+                    })
+                    .sum(),
+            ),
             Found::Whole => (usize::MAX, 0.0),
         }
     }
@@ -755,7 +959,11 @@ mod tests {
     /// the seam. Seen from above: the equators, 4πR.
     #[test]
     fn torus_side_on_and_from_above() {
-        let s = Surface::Torus { f: Frame::world(), rmaj: 10.0, rmin: 5.0 };
+        let s = Surface::Torus {
+            f: Frame::world(),
+            rmaj: 10.0,
+            rmin: 5.0,
+        };
         let polys = whole_face((0.0, TAU), (-PI, PI));
         let dom = FaceDomain::new(&s, &polys);
         let opts = SilOptions::default();
@@ -768,10 +976,14 @@ mod tests {
         assert!((len - 2.0 * TAU * 10.0).abs() < 1e-9, "{len}");
         // A NURBS-free general direction: every point on the silhouette.
         let d = V3::new(0.3, 0.5, 1.0).normalize();
-        let Found::Curves(cs) = domain_silhouettes(&dom, &View::Parallel(d), &opts) else { panic!() };
+        let Found::Curves(cs) = domain_silhouettes(&dom, &View::Parallel(d), &opts) else {
+            panic!()
+        };
         assert!(!cs.is_empty());
         for (g, _) in &cs {
-            let SilGeom::Poly { pts, .. } = g else { panic!() };
+            let SilGeom::Poly { pts, .. } = g else {
+                panic!()
+            };
             for q in pts {
                 let (u, v) = s.project(q, None);
                 assert!(s.normal(u, v).dot(&d).abs() < 1e-6 && (s.eval(u, v) - q).norm() < 1e-9);
@@ -782,37 +994,68 @@ mod tests {
     /// A sphere from an eye point 13 from its centre (r 5): the circle of radius 5·12/13.
     #[test]
     fn sphere_in_perspective() {
-        let s = Surface::Sphere { f: Frame::world(), r: 5.0 };
+        let s = Surface::Sphere {
+            f: Frame::world(),
+            r: 5.0,
+        };
         let polys = whole_face((0.0, TAU), (-PI / 2.0, PI / 2.0));
         let dom = FaceDomain::new(&s, &polys);
-        let (_, len) = total(domain_silhouettes(&dom, &View::Perspective(P3::new(0.0, 13.0, 0.0)), &SilOptions::default()));
+        let (_, len) = total(domain_silhouettes(
+            &dom,
+            &View::Perspective(P3::new(0.0, 13.0, 0.0)),
+            &SilOptions::default(),
+        ));
         assert!((len - TAU * 60.0 / 13.0).abs() < 1e-6, "{len}");
         // The same traced (the sphere as a revolution) agrees.
-        let m = Curve::Circle { c: P3::origin(), x: V3::x(), y: V3::z(), r: 5.0 };
-        let rev = Surface::Revolution { f: Frame::world(), m };
+        let m = Curve::Circle {
+            c: P3::origin(),
+            x: V3::x(),
+            y: V3::z(),
+            r: 5.0,
+        };
+        let rev = Surface::Revolution {
+            f: Frame::world(),
+            m,
+        };
         let polys = whole_face((0.0, TAU), (-PI / 2.0, PI / 2.0));
         let dom = FaceDomain::new(&rev, &polys);
-        let (_, len2) = total(domain_silhouettes(&dom, &View::Perspective(P3::new(0.0, 13.0, 0.0)), &SilOptions::default()));
+        let (_, len2) = total(domain_silhouettes(
+            &dom,
+            &View::Perspective(P3::new(0.0, 13.0, 0.0)),
+            &SilOptions::default(),
+        ));
         assert!((len2 - len).abs() < 1e-3, "{len2} vs {len}");
     }
 
     /// A cylinder from an eye point: the two generators whose tangent planes pass through it.
     #[test]
     fn cylinder_in_perspective() {
-        let s = Surface::Cylinder { f: Frame::world(), r: 3.0 };
+        let s = Surface::Cylinder {
+            f: Frame::world(),
+            r: 3.0,
+        };
         let polys = whole_face((0.0, TAU), (0.0, 10.0));
         let dom = FaceDomain::new(&s, &polys);
         let eye = P3::new(6.0, 0.0, 5.0);
-        let Found::Curves(cs) = domain_silhouettes(&dom, &View::Perspective(eye), &SilOptions::default()) else { panic!() };
+        let Found::Curves(cs) =
+            domain_silhouettes(&dom, &View::Perspective(eye), &SilOptions::default())
+        else {
+            panic!()
+        };
         assert_eq!(cs.len(), 2);
         for (g, _) in &cs {
-            let SilGeom::Exact { curve, t } = g else { panic!() };
+            let SilGeom::Exact { curve, t } = g else {
+                panic!()
+            };
             let p = curve.point(0.5 * (t.0 + t.1));
             // Tangent from (6, 0) to the circle r 3: the touching point is at x = 9/6.
             assert!((p.x - 1.5).abs() < 1e-9, "{p:?}");
             assert!((t.1 - t.0 - 10.0).abs() < 1e-9);
         }
         // Seen along its axis: wholly on its silhouette.
-        assert!(matches!(domain_silhouettes(&dom, &View::Parallel(V3::z()), &SilOptions::default()), Found::Whole));
+        assert!(matches!(
+            domain_silhouettes(&dom, &View::Parallel(V3::z()), &SilOptions::default()),
+            Found::Whole
+        ));
     }
 }

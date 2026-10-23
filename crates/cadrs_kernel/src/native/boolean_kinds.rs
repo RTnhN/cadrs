@@ -42,11 +42,11 @@
 
 use super::boolean::{self, BoolOut};
 use super::classify::{self, InFace};
-use super::edge_bop::{edge_boolean, Other, Piece};
+use super::edge_bop::{Other, Piece, edge_boolean};
 use super::kernel::NativeKernel;
 use super::math::*;
 use super::pcurve;
-use super::topo::{co_range, Body, Coedge};
+use super::topo::{Body, Coedge, co_range};
 use crate::*;
 
 /// The distance under which two points of the kinds' booleans are one: the boolean's default
@@ -57,33 +57,66 @@ fn tol() -> f64 {
 
 /// The kernel operation when an input isn't a solid: the target combined with each tool in
 /// turn (as [`boolean::boolean`]), None when every input is a solid.
-pub fn boolean(k: &mut NativeKernel, op: BoolOp, target: BodyId, tools: &[BodyId], opts: boolean::BoolOptions) -> Option<Result<OpResult>> {
+pub fn boolean(
+    k: &mut NativeKernel,
+    op: BoolOp,
+    target: BodyId,
+    tools: &[BodyId],
+    opts: boolean::BoolOptions,
+) -> Option<Result<OpResult>> {
     let mut inputs = vec![target];
     inputs.extend_from_slice(tools);
-    let all_solid = inputs.iter().all(|&b| k.get(b).map(|x| kind(x) == BodyClass::Solid).unwrap_or(true));
+    let all_solid = inputs.iter().all(|&b| {
+        k.get(b)
+            .map(|x| kind(x) == BodyClass::Solid)
+            .unwrap_or(true)
+    });
     if all_solid {
         return None;
     }
     Some(run(k, op, target, tools, opts))
 }
 
-fn run(k: &mut NativeKernel, op: BoolOp, target: BodyId, tools: &[BodyId], opts: boolean::BoolOptions) -> Result<OpResult> {
+fn run(
+    k: &mut NativeKernel,
+    op: BoolOp,
+    target: BodyId,
+    tools: &[BodyId],
+    opts: boolean::BoolOptions,
+) -> Result<OpResult> {
     let mut cur = (**k.get(target)?).clone();
-    let mut origin: Vec<Vec<(BodyId, usize)>> = (0..cur.faces.len()).map(|i| vec![(target, i)]).collect();
+    let mut origin: Vec<Vec<(BodyId, usize)>> =
+        (0..cur.faces.len()).map(|i| vec![(target, i)]).collect();
     for &t in tools {
         let tb = (**k.get(t)?).clone();
         let r = combine(&cur, &tb, op, opts)?;
         origin = r
             .from
             .iter()
-            .map(|srcs| srcs.iter().flat_map(|&(o, f)| if o == 0 { origin[f].clone() } else { vec![(t, f)] }).collect())
+            .map(|srcs| {
+                srcs.iter()
+                    .flat_map(|&(o, f)| {
+                        if o == 0 {
+                            origin[f].clone()
+                        } else {
+                            vec![(t, f)]
+                        }
+                    })
+                    .collect()
+            })
             .collect();
         cur = r.body;
     }
     let mut history = History::default();
     for (i, srcs) in origin.iter().enumerate() {
         for (bd, f) in srcs {
-            history.modified.push((FaceId(i as u64), InputFace { body: *bd, face: FaceId(*f as u64) }));
+            history.modified.push((
+                FaceId(i as u64),
+                InputFace {
+                    body: *bd,
+                    face: FaceId(*f as u64),
+                },
+            ));
         }
     }
     let mut inputs = vec![target];
@@ -92,12 +125,18 @@ fn run(k: &mut NativeKernel, op: BoolOp, target: BodyId, tools: &[BodyId], opts:
         let n = k.get(ib)?.faces.len();
         for f in 0..n {
             if !origin.iter().flatten().any(|(b, g)| *b == ib && *g == f) {
-                history.deleted.push(InputFace { body: ib, face: FaceId(f as u64) });
+                history.deleted.push(InputFace {
+                    body: ib,
+                    face: FaceId(f as u64),
+                });
             }
         }
     }
     let id = k.insert(cur);
-    Ok(OpResult { bodies: vec![id], history })
+    Ok(OpResult {
+        bodies: vec![id],
+        history,
+    })
 }
 
 /// `a op b` for bodies of any kinds; `from` as [`boolean::boolean_bodies`] gives it (owner 0
@@ -105,10 +144,15 @@ fn run(k: &mut NativeKernel, op: BoolOp, target: BodyId, tools: &[BodyId], opts:
 pub fn combine(a: &Body, b: &Body, op: BoolOp, opts: boolean::BoolOptions) -> Result<BoolOut> {
     use BodyClass as C;
     let (ca, cb) = (kind(a), kind(b));
-    let same = |body: &Body| BoolOut { body: body.clone(), from: (0..body.faces.len()).map(|i| vec![(0, i)]).collect() };
+    let same = |body: &Body| BoolOut {
+        body: body.clone(),
+        from: (0..body.faces.len()).map(|i| vec![(0, i)]).collect(),
+    };
     let empty = || Err(KernelError::EmptyResult("the result is empty".into()));
     if ca == C::Mixed || cb == C::Mixed {
-        return Err(KernelError::Unsupported("booleans of bodies holding several kinds of pieces (split them first)"));
+        return Err(KernelError::Unsupported(
+            "booleans of bodies holding several kinds of pieces (split them first)",
+        ));
     }
     match (ca, cb) {
         (C::Solid, C::Solid) => boolean::boolean_bodies_with(a, b, op, opts),
@@ -117,16 +161,32 @@ pub fn combine(a: &Body, b: &Body, op: BoolOp, opts: boolean::BoolOptions) -> Re
             _ => Ok(same(a)),
         },
         (C::Empty, _) => match op {
-            BoolOp::Union => Ok(BoolOut { body: b.clone(), from: (0..b.faces.len()).map(|i| vec![(1, i)]).collect() }),
+            BoolOp::Union => Ok(BoolOut {
+                body: b.clone(),
+                from: (0..b.faces.len()).map(|i| vec![(1, i)]).collect(),
+            }),
             _ => empty(),
         },
-        (x, y) if op == BoolOp::Union && x != y => Err(KernelError::Unsupported("a union of bodies of different kinds (a solid with a sheet, a sheet with a wire, …)")),
+        (x, y) if op == BoolOp::Union && x != y => Err(KernelError::Unsupported(
+            "a union of bodies of different kinds (a solid with a sheet, a sheet with a wire, …)",
+        )),
         // A cut by a body of a lower kind leaves the target alone.
-        (x, y) if op == BoolOp::Subtract && rank(y) < rank(x) && !(x == C::Solid && y == C::Sheet) => Ok(same(a)),
+        (x, y)
+            if op == BoolOp::Subtract && rank(y) < rank(x) && !(x == C::Solid && y == C::Sheet) =>
+        {
+            Ok(same(a))
+        }
         // A common with a body of a lower kind is that body's common with it.
         (x, y) if op == BoolOp::Intersect && rank(y) < rank(x) => {
             let r = combine(b, a, op, opts)?;
-            Ok(BoolOut { body: r.body, from: r.from.into_iter().map(|s| s.into_iter().map(|(o, f)| (1 - o, f)).collect()).collect() })
+            Ok(BoolOut {
+                body: r.body,
+                from: r
+                    .from
+                    .into_iter()
+                    .map(|s| s.into_iter().map(|(o, f)| (1 - o, f)).collect())
+                    .collect(),
+            })
         }
         (C::Solid, C::Sheet) => solid_minus_sheet(a, b),
         (C::Sheet, C::Solid) => sheet_with(a, b, op, true),
@@ -134,7 +194,9 @@ pub fn combine(a: &Body, b: &Body, op: BoolOp, opts: boolean::BoolOptions) -> Re
         (C::Sheet, C::Sheet) => sheet_with(a, b, op, false),
         (C::Wire, _) => wire_with(a, b, op),
         (C::Point, _) => points_with(a, b, op),
-        _ => Err(KernelError::Unsupported("this boolean of bodies of different kinds")),
+        _ => Err(KernelError::Unsupported(
+            "this boolean of bodies of different kinds",
+        )),
     }
 }
 
@@ -155,8 +217,13 @@ fn kind(b: &Body) -> BodyClass {
         uses[c.edge] += if c.fwd { 1 } else { -1 };
         count[c.edge] += 1;
     }
-    let closed = (0..b.edges.len()).all(|e| b.edges[e].degenerate || count[e] == 0 || (count[e] == 2 && uses[e] == 0));
-    if closed { BodyClass::Solid } else { BodyClass::Sheet }
+    let closed = (0..b.edges.len())
+        .all(|e| b.edges[e].degenerate || count[e] == 0 || (count[e] == 2 && uses[e] == 0));
+    if closed {
+        BodyClass::Solid
+    } else {
+        BodyClass::Sheet
+    }
 }
 
 /// The dimension of a kind's pieces.
@@ -171,21 +238,31 @@ fn rank(c: BodyClass) -> u8 {
 
 /// Every face's sampled loops.
 fn polys_of(b: &Body) -> Vec<Vec<Vec<P2>>> {
-    b.faces.iter().map(|f| classify::face_polygons(b, f)).collect()
+    b.faces
+        .iter()
+        .map(|f| classify::face_polygons(b, f))
+        .collect()
 }
 
 /// A few points inside face `f`, farthest from its boundary first.
 fn inside_points(b: &Body, f: usize) -> Vec<P3> {
     let face = &b.faces[f];
     let polys = classify::face_polygons(b, face);
-    boolean::interior_points_of_polys(&polys).into_iter().take(6).map(|q| face.surf.eval(q.x, q.y)).collect()
+    boolean::interior_points_of_polys(&polys)
+        .into_iter()
+        .take(6)
+        .map(|q| face.surf.eval(q.x, q.y))
+        .collect()
 }
 
 /// Whether `p` lies on a face of `b` (within `tol`).
 fn on_faces(b: &Body, polys: &[Vec<Vec<P2>>], p: &P3, tol: f64) -> bool {
     b.faces.iter().enumerate().any(|(fi, f)| {
         let (u, v) = f.surf.project(p, None);
-        (f.surf.eval(u, v) - p).norm() <= tol && classify::periodic_candidates(&f.surf, u, v, &polys[fi]).into_iter().any(|uv| classify::in_face(&polys[fi], &f.surf, uv, tol) != InFace::Outside)
+        (f.surf.eval(u, v) - p).norm() <= tol
+            && classify::periodic_candidates(&f.surf, u, v, &polys[fi])
+                .into_iter()
+                .any(|uv| classify::in_face(&polys[fi], &f.surf, uv, tol) != InFace::Outside)
     })
 }
 
@@ -232,12 +309,19 @@ fn keep_faces(b: &Body, from: &[Vec<(usize, usize)>], keep: &[usize]) -> Result<
 /// A sheet's last steps: with `unify`, faces on one surface merged where the rule allows
 /// ([`super::unify::unify_boolean`]); edges on one curve merged; shells assembled anew.
 fn finish_sheet(out: &mut Body, from: Vec<Vec<(usize, usize)>>, unify: bool) -> Result<BoolOut> {
-    let from = if unify { super::unify::unify_boolean(out, from, false) } else { from };
+    let from = if unify {
+        super::unify::unify_boolean(out, from, false)
+    } else {
+        from
+    };
     super::unify::merge_edges(out);
     out.shells.clear();
     out.solids.clear();
     boolean::assemble_shells(out)?;
-    Ok(BoolOut { body: std::mem::take(out), from })
+    Ok(BoolOut {
+        body: std::mem::take(out),
+        from,
+    })
 }
 
 /// Sheet `a` ∩ / − `b` (a solid when `solid`, else a sheet): `a`'s pieces split along `b`,
@@ -268,10 +352,16 @@ fn sheet_union(a: &Body, b: &Body) -> Result<BoolOut> {
     let polys_a = polys_of(a);
     let mut out = ia.body.clone();
     let mut from = ia.from.clone();
-    let keep_b: Vec<usize> = (0..ib.body.faces.len()).filter(|&f| side_of(&ib.body, f, a, &polys_a, false) == Side::Out).collect();
+    let keep_b: Vec<usize> = (0..ib.body.faces.len())
+        .filter(|&f| side_of(&ib.body, f, a, &polys_a, false) == Side::Out)
+        .collect();
     let part = super::kernel::subset(&ib.body, &keep_b, false);
     out.append(&part);
-    from.extend(keep_b.iter().map(|&f| ib.from[f].iter().map(|&(_, g)| (1, g)).collect::<Vec<_>>()));
+    from.extend(
+        keep_b
+            .iter()
+            .map(|&f| ib.from[f].iter().map(|&(_, g)| (1, g)).collect::<Vec<_>>()),
+    );
     out.shells.clear();
     fuse(&mut out, tol());
     let owner: Vec<usize> = from.iter().map(|f| f[0].0).collect();
@@ -298,10 +388,15 @@ fn sheet_union(a: &Body, b: &Body) -> Result<BoolOut> {
         return Err(KernelError::BooleanFailed { stage: "sheet union", why: "a sheet of the union has three or more faces meeting at an edge (not a manifold sheet)".into() });
     }
     // Faces split along a crossing stay split.
-    let split: std::collections::HashSet<(usize, usize)> = (0..out.edges.len()).filter(|&e| crossing[e] && ef[e].len() == 2).map(|e| (ef[e][0].min(ef[e][1]), ef[e][0].max(ef[e][1]))).collect();
+    let split: std::collections::HashSet<(usize, usize)> = (0..out.edges.len())
+        .filter(|&e| crossing[e] && ef[e].len() == 2)
+        .map(|e| (ef[e][0].min(ef[e][1]), ef[e][0].max(ef[e][1])))
+        .collect();
     super::surfacing::orient(&mut out)?;
     let src: Vec<(usize, usize)> = from.iter().map(|f| f[0]).collect();
-    let from = super::unify::unify_faces(&mut out, from, &|f, g| (src[f].0 != src[g].0 || src[f] == src[g]) && !split.contains(&(f.min(g), f.max(g))));
+    let from = super::unify::unify_faces(&mut out, from, &|f, g| {
+        (src[f].0 != src[g].0 || src[f] == src[g]) && !split.contains(&(f.min(g), f.max(g)))
+    });
     finish_sheet(&mut out, from, false)
 }
 
@@ -310,8 +405,13 @@ fn solid_minus_sheet(a: &Body, b: &Body) -> Result<BoolOut> {
     let ia = boolean::imprint(a, b, None)?;
     let is = boolean::imprint(b, a, None)?;
     let polys_a = polys_of(a);
-    let inside: Vec<usize> = (0..is.body.faces.len()).filter(|&f| side_of(&is.body, f, a, &polys_a, true) == Side::In).collect();
-    let unchanged = || BoolOut { body: a.clone(), from: (0..a.faces.len()).map(|i| vec![(0, i)]).collect() };
+    let inside: Vec<usize> = (0..is.body.faces.len())
+        .filter(|&f| side_of(&is.body, f, a, &polys_a, true) == Side::In)
+        .collect();
+    let unchanged = || BoolOut {
+        body: a.clone(),
+        from: (0..a.faces.len()).map(|i| vec![(0, i)]).collect(),
+    };
     if inside.is_empty() {
         return Ok(unchanged());
     }
@@ -329,7 +429,11 @@ fn solid_minus_sheet(a: &Body, b: &Body) -> Result<BoolOut> {
     let n = inside.len();
     for part in [&sheet, &flipped] {
         out.append(part);
-        from.extend(inside.iter().map(|&f| is.from[f].iter().map(|&(_, g)| (1, g)).collect::<Vec<_>>()));
+        from.extend(
+            inside
+                .iter()
+                .map(|&f| is.from[f].iter().map(|&(_, g)| (1, g)).collect::<Vec<_>>()),
+        );
     }
     out.shells.clear();
     fuse(&mut out, tol());
@@ -379,10 +483,20 @@ fn solid_minus_sheet(a: &Body, b: &Body) -> Result<BoolOut> {
     super::unify::split_shared_vertices(&mut out);
     if std::env::var_os("CADRS_BOOL_DEBUG").is_some() {
         let ef = out.edge_faces();
-        eprintln!("split by a sheet: {} faces, shells {:?}, edge uses {:?}", out.faces.len(), out.shells.iter().map(|s| (s.faces.len(), s.closed)).collect::<Vec<_>>(), ef.iter().map(|f| f.len()).collect::<Vec<_>>());
+        eprintln!(
+            "split by a sheet: {} faces, shells {:?}, edge uses {:?}",
+            out.faces.len(),
+            out.shells
+                .iter()
+                .map(|s| (s.faces.len(), s.closed))
+                .collect::<Vec<_>>(),
+            ef.iter().map(|f| f.len()).collect::<Vec<_>>()
+        );
     }
     if out.shells.iter().any(|s| !s.closed) || out.solids.is_empty() {
-        return Err(KernelError::OpenResult("the split by the sheet left an open shell".into()));
+        return Err(KernelError::OpenResult(
+            "the split by the sheet left an open shell".into(),
+        ));
     }
     Ok(BoolOut { body: out, from })
 }
@@ -397,7 +511,8 @@ fn pair_at_cuts(b: &mut Body, from: &[Vec<(usize, usize)>]) {
         if users.len() != 4 || b.edges[e].degenerate {
             continue;
         }
-        let (solid, sheet): (Vec<usize>, Vec<usize>) = users.iter().partition(|&&f| from[f][0].0 == 0);
+        let (solid, sheet): (Vec<usize>, Vec<usize>) =
+            users.iter().partition(|&&f| from[f][0].0 == 0);
         if solid.len() != 2 || sheet.len() != 2 {
             continue;
         }
@@ -416,7 +531,12 @@ fn pair_at_cuts(b: &mut Body, from: &[Vec<(usize, usize)>]) {
         b.edges.push(b.edges[e].clone());
         let ne = b.edges.len() - 1;
         for g in [copy, mate] {
-            for c in b.faces[g].loops.iter_mut().flatten().filter(|c| c.edge == e) {
+            for c in b.faces[g]
+                .loops
+                .iter_mut()
+                .flatten()
+                .filter(|c| c.edge == e)
+            {
                 c.edge = ne;
             }
         }
@@ -459,7 +579,10 @@ pub fn fuse(b: &mut Body, tol: f64) {
     let mut groups: std::collections::HashMap<(usize, usize), Vec<usize>> = Default::default();
     for (i, e) in b.edges.iter().enumerate() {
         if !e.degenerate {
-            groups.entry((e.v[0].min(e.v[1]), e.v[0].max(e.v[1]))).or_default().push(i);
+            groups
+                .entry((e.v[0].min(e.v[1]), e.v[0].max(e.v[1])))
+                .or_default()
+                .push(i);
         }
     }
     let mut emap: Vec<(usize, bool)> = (0..ne).map(|i| (i, true)).collect();
@@ -507,11 +630,25 @@ pub fn fuse(b: &mut Body, tol: f64) {
             let fwd = if same { c.fwd } else { !c.fwd };
             let (ot0, _) = co_range(old, c.fwd);
             let sp = c.pc.point(ot0);
-            let mut pc = pcurve::pcurve(&surf, &ed.curve, ed.t[0], ed.t[1], Some(P2::new(sp.x, sp.y)));
+            let mut pc = pcurve::pcurve(
+                &surf,
+                &ed.curve,
+                ed.t[0],
+                ed.t[1],
+                Some(P2::new(sp.x, sp.y)),
+            );
             let (nt0, _) = co_range(ed, fwd);
             let q = pc.point(nt0);
-            let du = if surf.u_periodic() { ((sp.x - q.x) / TAU).round() * TAU } else { 0.0 };
-            let dv = if surf.v_periodic() { ((sp.y - q.y) / TAU).round() * TAU } else { 0.0 };
+            let du = if surf.u_periodic() {
+                ((sp.x - q.x) / TAU).round() * TAU
+            } else {
+                0.0
+            };
+            let dv = if surf.v_periodic() {
+                ((sp.y - q.y) / TAU).round() * TAU
+            } else {
+                0.0
+            };
             if du != 0.0 || dv != 0.0 {
                 pc = pc.transformed(&Affine::translation(V3::new(du, dv, 0.0)));
             }
@@ -526,7 +663,14 @@ pub fn fuse(b: &mut Body, tol: f64) {
 
 /// The edges of a wire body as pieces.
 fn pieces_of(b: &Body) -> Vec<Piece> {
-    b.free_edges().into_iter().map(|e| Piece { curve: b.edges[e].curve.clone(), t0: b.edges[e].t[0], t1: b.edges[e].t[1] }).collect()
+    b.free_edges()
+        .into_iter()
+        .map(|e| Piece {
+            curve: b.edges[e].curve.clone(),
+            t0: b.edges[e].t[0],
+            t1: b.edges[e].t[1],
+        })
+        .collect()
 }
 
 /// A wire-and-point body: `pieces` (ends within `tol` one vertex) chained into wires, and the
@@ -568,7 +712,10 @@ fn wire_body(pieces: &[Piece], points: &[P3], tol: f64) -> Result<BoolOut> {
     }
     b.chain_wires();
     b.fit_tolerances(tol);
-    Ok(BoolOut { body: b, from: Vec::new() })
+    Ok(BoolOut {
+        body: b,
+        from: Vec::new(),
+    })
 }
 
 /// Where the pieces cross the faces of `other` (the points inside the faces).
@@ -584,7 +731,10 @@ fn crossings_with_faces(pieces: &[Piece], other: &Body, tol: f64) -> Vec<P3> {
                 if (f.surf.eval(u, v) - p).norm() > tol {
                     continue;
                 }
-                if classify::periodic_candidates(&f.surf, u, v, &polys[fi]).into_iter().any(|uv| classify::in_face(&polys[fi], &f.surf, uv, tol) != InFace::Outside) {
+                if classify::periodic_candidates(&f.surf, u, v, &polys[fi])
+                    .into_iter()
+                    .any(|uv| classify::in_face(&polys[fi], &f.surf, uv, tol) != InFace::Outside)
+                {
                     out.push(p);
                 }
             }
@@ -625,7 +775,9 @@ fn wire_with(a: &Body, b: &Body, op: BoolOp) -> Result<BoolOut> {
         }
         _ => Other::Body(b),
     };
-    let kept = edge_boolean(op, &mine, &other, false).ok_or(KernelError::Unsupported("a union of a wire with a solid or sheet"))?;
+    let kept = edge_boolean(op, &mine, &other, false).ok_or(KernelError::Unsupported(
+        "a union of a wire with a solid or sheet",
+    ))?;
     let points = match (op, kind(b)) {
         (BoolOp::Intersect, BodyClass::Sheet) => crossings_with_faces(&mine, b, t),
         (BoolOp::Intersect, BodyClass::Wire) => crossings_with_pieces(&mine, &pieces_of(b), t),
@@ -673,7 +825,11 @@ mod tests {
 
     /// A square sheet `size` across through `o` square to `n`.
     fn sheet(k: &mut NativeKernel, o: [f64; 3], n: [f64; 3], size: f64) -> BodyId {
-        k.insert(super::super::ops::plane_sheet(P3::from(o), V3::from(n), size))
+        k.insert(super::super::ops::plane_sheet(
+            P3::from(o),
+            V3::from(n),
+            size,
+        ))
     }
 
     fn wire(k: &mut NativeKernel, pts: &[[f64; 3]]) -> BodyId {
@@ -693,7 +849,14 @@ mod tests {
 
     fn length(k: &NativeKernel, b: BodyId) -> f64 {
         let body = k.get(b).unwrap();
-        body.free_edges().iter().map(|&e| body.edges[e].curve.length(body.edges[e].t[0], body.edges[e].t[1])).sum()
+        body.free_edges()
+            .iter()
+            .map(|&e| {
+                body.edges[e]
+                    .curve
+                    .length(body.edges[e].t[0], body.edges[e].t[1])
+            })
+            .sum()
     }
 
     fn valid(k: &NativeKernel, b: BodyId) -> &Body {
@@ -718,7 +881,10 @@ mod tests {
         let d = k.boolean(BoolOp::Subtract, sh, &[bx]).unwrap().bodies[0];
         assert_eq!(valid(&k, d).class(), BodyClass::Sheet);
         assert!((area(&k, d) - 300.0).abs() < 1e-6, "{}", area(&k, d));
-        assert!(matches!(k.boolean(BoolOp::Union, sh, &[bx]), Err(KernelError::Unsupported(_))));
+        assert!(matches!(
+            k.boolean(BoolOp::Union, sh, &[bx]),
+            Err(KernelError::Unsupported(_))
+        ));
     }
 
     /// A solid less a sheet crossing it all the way: two solids, the volume kept.
@@ -732,7 +898,10 @@ mod tests {
         assert_eq!(body.solids.len(), 2);
         assert_eq!(body.faces.len(), 12);
         let m = super::super::mass::body_mass(body);
-        assert!((m.volume - 1000.0).abs() < 1e-6 && (m.surface_area - 800.0).abs() < 1e-6, "{m:?}");
+        assert!(
+            (m.volume - 1000.0).abs() < 1e-6 && (m.surface_area - 800.0).abs() < 1e-6,
+            "{m:?}"
+        );
         // A sheet reaching only partly in cuts nothing through: the box comes back.
         let part = sheet(&mut k, [0.0, 0.0, 4.0], [0.0, 0.0, 1.0], 5.0);
         let r = k.boolean(BoolOp::Subtract, bx, &[part]).unwrap();
@@ -801,7 +970,14 @@ mod tests {
     fn points() {
         let mut k = NativeKernel::new();
         let bx = boxed(&mut k, [0.0, 0.0, 0.0], [10.0, 10.0, 10.0]);
-        let pts = k.create_points(&[P3::new(1.0, 1.0, 1.0), P3::new(20.0, 0.0, 0.0), P3::new(10.0, 5.0, 5.0)]).unwrap().bodies[0];
+        let pts = k
+            .create_points(&[
+                P3::new(1.0, 1.0, 1.0),
+                P3::new(20.0, 0.0, 0.0),
+                P3::new(10.0, 5.0, 5.0),
+            ])
+            .unwrap()
+            .bodies[0];
         let i = k.boolean(BoolOp::Intersect, pts, &[bx]).unwrap().bodies[0];
         assert_eq!(valid(&k, i).points.len(), 2);
         let d = k.boolean(BoolOp::Subtract, pts, &[bx]).unwrap().bodies[0];

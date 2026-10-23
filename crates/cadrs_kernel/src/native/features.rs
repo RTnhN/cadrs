@@ -11,13 +11,13 @@
 
 use super::boolean::boolean_bodies;
 use super::build::Built;
-use super::kernel::{subset, NativeKernel};
+use super::kernel::{NativeKernel, subset};
 use super::math::*;
 use super::profile::{self, MergedFace, Piece, Src};
 use super::sweep::{self, SweepKind};
-use super::topo::{co_range, Body};
-use crate::*;
 use super::tol;
+use super::topo::{Body, co_range};
+use crate::*;
 
 /// A body with the origins of each face.
 #[derive(Debug, Clone)]
@@ -42,7 +42,10 @@ impl Tagged {
             }
         }
         let id = k.insert(self.body);
-        OpResult { bodies: vec![id], history }
+        OpResult {
+            bodies: vec![id],
+            history,
+        }
     }
     fn has(&self, f: usize, pred: impl Fn(&Origin) -> bool) -> bool {
         self.tags[f].iter().any(pred)
@@ -97,7 +100,11 @@ fn take_solids(t: &Tagged, keep: impl Fn(&[usize]) -> bool) -> Option<Tagged> {
 /// Profile inputs: the merged regions (and faces of bodies) as pieces in the sketch plane.
 fn inputs(k: &NativeKernel, profile: &Profile, faces: &[FaceInput]) -> Result<Vec<MergedFace>> {
     let regions = profile::regions(profile)?;
-    let mut out = if regions.is_empty() { Vec::new() } else { profile::merge_regions(&regions)? };
+    let mut out = if regions.is_empty() {
+        Vec::new()
+    } else {
+        profile::merge_regions(&regions)?
+    };
     for fi in faces {
         out.push(face_as_profile(k, profile, fi)?);
     }
@@ -105,22 +112,36 @@ fn inputs(k: &NativeKernel, profile: &Profile, faces: &[FaceInput]) -> Result<Ve
 }
 
 /// A planar face of a body as a profile face in the sketch plane's coordinates.
-pub fn face_as_profile(k: &NativeKernel, profile: &Profile, input: &FaceInput) -> Result<MergedFace> {
+pub fn face_as_profile(
+    k: &NativeKernel,
+    profile: &Profile,
+    input: &FaceInput,
+) -> Result<MergedFace> {
     let b = k.get(input.body)?;
-    let f = b.faces.get(input.face.0 as usize).ok_or_else(|| KernelError::InvalidParameter(format!("unknown {:?}", input.face)))?;
+    let f = b
+        .faces
+        .get(input.face.0 as usize)
+        .ok_or_else(|| KernelError::InvalidParameter(format!("unknown {:?}", input.face)))?;
     let super::surface::Surface::Plane { f: fr } = &f.surf else {
-        return Err(KernelError::InvalidParameter("Only planar faces can be extruded or revolved".into()));
+        return Err(KernelError::InvalidParameter(
+            "Only planar faces can be extruded or revolved".into(),
+        ));
     };
     let n = fr.x.cross(&fr.y) * if f.sense { 1.0 } else { -1.0 };
     let pn = profile.plane.normal.into_inner();
     if n.cross(&pn).norm() > tol::ANGULAR {
-        return Err(KernelError::InvalidParameter("The face is not parallel to the sketch plane".into()));
+        return Err(KernelError::InvalidParameter(
+            "The face is not parallel to the sketch plane".into(),
+        ));
     }
     // Model → sketch coordinates.
     let x = profile.plane.x_dir.into_inner();
     let y = profile.plane.y_dir().into_inner();
     let m = nalgebra::Matrix3::from_rows(&[x.transpose(), y.transpose(), pn.transpose()]);
-    let to2 = Affine { m, t: -(m * profile.plane.origin.coords) };
+    let to2 = Affine {
+        m,
+        t: -(m * profile.plane.origin.coords),
+    };
     let flip = n.dot(&pn) < 0.0;
     let mut loops: Vec<Vec<Piece>> = Vec::new();
     for l in &f.loops {
@@ -128,7 +149,17 @@ pub fn face_as_profile(k: &NativeKernel, profile: &Profile, input: &FaceInput) -
         for c in l {
             let e = &b.edges[c.edge];
             let c2 = flatten(e.curve.transformed(&to2));
-            lp.push(Piece { c: c2, t0: e.t[0], t1: e.t[1], rev: !c.fwd, src: Src::Edge { body: input.body.0, edge: c.edge as u64 }, more: vec![] });
+            lp.push(Piece {
+                c: c2,
+                t0: e.t[0],
+                t1: e.t[1],
+                rev: !c.fwd,
+                src: Src::Edge {
+                    body: input.body.0,
+                    edge: c.edge as u64,
+                },
+                more: vec![],
+            });
         }
         if flip {
             lp = profile::reverse_loop(&lp);
@@ -136,15 +167,33 @@ pub fn face_as_profile(k: &NativeKernel, profile: &Profile, input: &FaceInput) -
         loops.push(lp);
     }
     let _ = co_range;
-    Ok(MergedFace { outer: loops.remove(0), holes: loops, regions: vec![input.source] })
+    Ok(MergedFace {
+        outer: loops.remove(0),
+        holes: loops,
+        regions: vec![input.source],
+    })
 }
 
 fn flatten(c: super::curve::Curve) -> super::curve::Curve {
     use super::curve::Curve;
     match c {
-        Curve::Line { o, d } => Curve::Line { o: P3::new(o.x, o.y, 0.0), d: V3::new(d.x, d.y, 0.0) },
-        Curve::Circle { c, x, y, r } => Curve::Circle { c: P3::new(c.x, c.y, 0.0), x: V3::new(x.x, x.y, 0.0), y: V3::new(y.x, y.y, 0.0), r },
-        Curve::Ellipse { c, x, y, a, b } => Curve::Ellipse { c: P3::new(c.x, c.y, 0.0), x: V3::new(x.x, x.y, 0.0), y: V3::new(y.x, y.y, 0.0), a, b },
+        Curve::Line { o, d } => Curve::Line {
+            o: P3::new(o.x, o.y, 0.0),
+            d: V3::new(d.x, d.y, 0.0),
+        },
+        Curve::Circle { c, x, y, r } => Curve::Circle {
+            c: P3::new(c.x, c.y, 0.0),
+            x: V3::new(x.x, x.y, 0.0),
+            y: V3::new(y.x, y.y, 0.0),
+            r,
+        },
+        Curve::Ellipse { c, x, y, a, b } => Curve::Ellipse {
+            c: P3::new(c.x, c.y, 0.0),
+            x: V3::new(x.x, x.y, 0.0),
+            y: V3::new(y.x, y.y, 0.0),
+            a,
+            b,
+        },
         Curve::Nurbs(n) => {
             let mut n = (*n).clone();
             for h in &mut n.cps {
@@ -188,21 +237,36 @@ fn profile_points(faces: &[MergedFace], m: &Affine) -> Vec<P3> {
 #[derive(Debug, Clone)]
 enum Reach {
     Depth(f64),
-    Plane { point: P3, normal: V3, far: f64 },
-    Conform { bodies: Vec<BodyId>, shift: f64, far: f64 },
+    Plane {
+        point: P3,
+        normal: V3,
+        far: f64,
+    },
+    Conform {
+        bodies: Vec<BodyId>,
+        shift: f64,
+        far: f64,
+    },
 }
 
 fn too_short(what: &str, depth: f64) -> KernelError {
     if depth.abs() < super::build::MIN_DEPTH {
-        KernelError::InvalidParameter(format!("the depth ({:e} mm) is below the kernel's modelling tolerance", depth.abs()))
+        KernelError::InvalidParameter(format!(
+            "the depth ({:e} mm) is below the kernel's modelling tolerance",
+            depth.abs()
+        ))
     } else {
-        KernelError::InvalidParameter(format!("{what} is behind the start of the extrude (try the opposite direction)"))
+        KernelError::InvalidParameter(format!(
+            "{what} is behind the start of the extrude (try the opposite direction)"
+        ))
     }
 }
 
 fn depth(what: &str, d: f64) -> Result<Reach> {
     if !d.is_finite() {
-        return Err(KernelError::InvalidParameter(format!("{what} is not a number")));
+        return Err(KernelError::InvalidParameter(format!(
+            "{what} is not a number"
+        )));
     }
     if d < super::build::MIN_DEPTH {
         return Err(too_short(what, d));
@@ -219,31 +283,56 @@ fn far_extent(k: &NativeKernel, bodies: &[BodyId], o: &P3, d: &V3) -> Result<Opt
     Ok(far)
 }
 
-fn resolve(k: &NativeKernel, faces: &[MergedFace], m: &Affine, spec: &ExtrudeSpec, o: P3, dir: V3, end: ExtrudeEnd) -> Result<Reach> {
+fn resolve(
+    k: &NativeKernel,
+    faces: &[MergedFace],
+    m: &Affine,
+    spec: &ExtrudeSpec,
+    o: P3,
+    dir: V3,
+    end: ExtrudeEnd,
+) -> Result<Reach> {
     match end {
         ExtrudeEnd::Blind(x) => depth("the depth", x),
-        ExtrudeEnd::UpToVertex { point, offset } => depth("the vertex", (point - o).dot(&dir) - offset),
+        ExtrudeEnd::UpToVertex { point, offset } => {
+            depth("the vertex", (point - o).dot(&dir) - offset)
+        }
         ExtrudeEnd::ThroughAll => match far_extent(k, &spec.scene, &o, &dir)? {
             Some(f) if f > super::build::MIN_DEPTH => Ok(Reach::Depth(f)),
-            _ => Err(KernelError::InvalidParameter("Through all: no part lies in the extrude direction".into())),
+            _ => Err(KernelError::InvalidParameter(
+                "Through all: no part lies in the extrude direction".into(),
+            )),
         },
         ExtrudeEnd::UpToFace { body, face, offset } => {
-            let info = k.faces(body)?.into_iter().find(|f| f.id == face).ok_or_else(|| KernelError::InvalidParameter(format!("unknown {face:?}")))?;
+            let info = k
+                .faces(body)?
+                .into_iter()
+                .find(|f| f.id == face)
+                .ok_or_else(|| KernelError::InvalidParameter(format!("unknown {face:?}")))?;
             if let Some(pl) = info.plane {
                 let mn = pl.normal.into_inner();
                 if mn.dot(&dir).abs() > 1.0 - tol::ANGULAR {
                     return depth("the face", (pl.origin - o).dot(&dir) - offset);
                 }
                 if mn.dot(&dir).abs() < tol::ANGULAR_POINT {
-                    return Err(KernelError::InvalidParameter("the face is parallel to the extrude direction".into()));
+                    return Err(KernelError::InvalidParameter(
+                        "the face is parallel to the extrude direction".into(),
+                    ));
                 }
                 let point = pl.origin - dir * offset;
                 let pts = profile_points(faces, m);
-                let far = pts.iter().map(|p| (point - p).dot(&mn) / dir.dot(&mn)).fold(f64::NEG_INFINITY, f64::max);
+                let far = pts
+                    .iter()
+                    .map(|p| (point - p).dot(&mn) / dir.dot(&mn))
+                    .fold(f64::NEG_INFINITY, f64::max);
                 if far.is_nan() || far <= super::build::MIN_DEPTH {
                     return Err(too_short("the face", far));
                 }
-                Ok(Reach::Plane { point, normal: mn, far: far * 1.1 + 1.0 })
+                Ok(Reach::Plane {
+                    point,
+                    normal: mn,
+                    far: far * 1.1 + 1.0,
+                })
             } else {
                 conform(k, vec![body], o, dir, offset, "the face")
             }
@@ -265,14 +354,23 @@ fn resolve(k: &NativeKernel, faces: &[MergedFace], m: &Affine, spec: &ExtrudeSpe
                 }
             }
             if ahead.is_empty() {
-                return Err(KernelError::InvalidParameter("Up to next: nothing lies in the extrude direction".into()));
+                return Err(KernelError::InvalidParameter(
+                    "Up to next: nothing lies in the extrude direction".into(),
+                ));
             }
             conform(k, ahead, o, dir, offset, "the next part")
         }
     }
 }
 
-fn conform(k: &NativeKernel, bodies: Vec<BodyId>, o: P3, dir: V3, offset: f64, what: &str) -> Result<Reach> {
+fn conform(
+    k: &NativeKernel,
+    bodies: Vec<BodyId>,
+    o: P3,
+    dir: V3,
+    offset: f64,
+    what: &str,
+) -> Result<Reach> {
     let far = far_extent(k, &bodies, &o, &dir)?.unwrap_or(f64::NEG_INFINITY) - offset;
     if far.is_nan() || far <= super::build::MIN_DEPTH {
         return Err(too_short(what, far));
@@ -281,21 +379,49 @@ fn conform(k: &NativeKernel, bodies: Vec<BodyId>, o: P3, dir: V3, offset: f64, w
     for b in &bodies {
         diag = diag.max(k.bounding_box(*b)?.diagonal());
     }
-    Ok(Reach::Conform { bodies, shift: -offset, far: far + 0.1 * diag + 1.0 })
+    Ok(Reach::Conform {
+        bodies,
+        shift: -offset,
+        far: far + 0.1 * diag + 1.0,
+    })
 }
 
 /// A box on the far side of the plane through `point` (normal `normal`), towards `away`.
 fn half_space(point: P3, normal: V3, away: V3, size: f64) -> Result<Body> {
-    let n = if normal.dot(&away) > 0.0 { normal } else { -normal };
+    let n = if normal.dot(&away) > 0.0 {
+        normal
+    } else {
+        -normal
+    };
     let f = Frame::from_z(point, n);
-    let plane = Plane { origin: point, x_dir: nalgebra::Unit::new_normalize(f.x), normal: nalgebra::Unit::new_normalize(n) };
+    let plane = Plane {
+        origin: point,
+        x_dir: nalgebra::Unit::new_normalize(f.x),
+        normal: nalgebra::Unit::new_normalize(n),
+    };
     let sq = Region {
         outer: Loop {
             curves: vec![
-                Curve2::Line { a: nalgebra::Point2::new(-size, -size), b: nalgebra::Point2::new(size, -size), source: None },
-                Curve2::Line { a: nalgebra::Point2::new(size, -size), b: nalgebra::Point2::new(size, size), source: None },
-                Curve2::Line { a: nalgebra::Point2::new(size, size), b: nalgebra::Point2::new(-size, size), source: None },
-                Curve2::Line { a: nalgebra::Point2::new(-size, size), b: nalgebra::Point2::new(-size, -size), source: None },
+                Curve2::Line {
+                    a: nalgebra::Point2::new(-size, -size),
+                    b: nalgebra::Point2::new(size, -size),
+                    source: None,
+                },
+                Curve2::Line {
+                    a: nalgebra::Point2::new(size, -size),
+                    b: nalgebra::Point2::new(size, size),
+                    source: None,
+                },
+                Curve2::Line {
+                    a: nalgebra::Point2::new(size, size),
+                    b: nalgebra::Point2::new(-size, size),
+                    source: None,
+                },
+                Curve2::Line {
+                    a: nalgebra::Point2::new(-size, size),
+                    b: nalgebra::Point2::new(-size, -size),
+                    source: None,
+                },
             ],
         },
         holes: vec![],
@@ -309,10 +435,22 @@ fn half_space(point: P3, normal: V3, away: V3, size: f64) -> Result<Body> {
 }
 
 /// The region whose face lies under `p` (mapped onto the profile plane by `to2`).
-fn region_under<'a>(faces: &'a [MergedFace], to2: impl Fn(&P3) -> P2 + 'a) -> impl Fn(&P3) -> u64 + 'a {
+fn region_under<'a>(
+    faces: &'a [MergedFace],
+    to2: impl Fn(&P3) -> P2 + 'a,
+) -> impl Fn(&P3) -> u64 + 'a {
     let polys: Vec<(Vec<P2>, Vec<Vec<P2>>, u64)> = faces
         .iter()
-        .map(|f| (profile::loop_polygon(&f.outer, 1e-3), f.holes.iter().map(|h| profile::loop_polygon(h, 1e-3)).collect(), f.regions.first().copied().unwrap_or(0)))
+        .map(|f| {
+            (
+                profile::loop_polygon(&f.outer, 1e-3),
+                f.holes
+                    .iter()
+                    .map(|h| profile::loop_polygon(h, 1e-3))
+                    .collect(),
+                f.regions.first().copied().unwrap_or(0),
+            )
+        })
         .collect();
     move |p: &P3| {
         let q = to2(p);
@@ -328,7 +466,15 @@ fn region_under<'a>(faces: &'a [MergedFace], to2: impl Fn(&P3) -> P2 + 'a) -> im
 /// One end's piece: the sweep, trimmed if the end asks for it. `first`: the end along the
 /// direction (else the second end, whose far cap is the body's start cap).
 #[allow(clippy::too_many_arguments)]
-fn piece(k: &NativeKernel, faces: &[MergedFace], plane: &Plane, o: P3, dir: V3, reach: Reach, first: bool) -> Result<Tagged> {
+fn piece(
+    k: &NativeKernel,
+    faces: &[MergedFace],
+    plane: &Plane,
+    o: P3,
+    dir: V3,
+    reach: Reach,
+    first: bool,
+) -> Result<Tagged> {
     let len = match &reach {
         Reach::Depth(d) => *d,
         Reach::Plane { far, .. } | Reach::Conform { far, .. } => *far,
@@ -361,16 +507,35 @@ fn piece(k: &NativeKernel, faces: &[MergedFace], plane: &Plane, o: P3, dir: V3, 
             let side = match (above, below) {
                 (true, false) => 1.0,
                 (false, true) => -1.0,
-                (true, true) => return Err(KernelError::InvalidParameter("the face's plane crosses the profile".into())),
-                (false, false) => return Err(KernelError::InvalidParameter("the face's plane passes through the start of the extrude".into())),
+                (true, true) => {
+                    return Err(KernelError::InvalidParameter(
+                        "the face's plane crosses the profile".into(),
+                    ));
+                }
+                (false, false) => {
+                    return Err(KernelError::InvalidParameter(
+                        "the face's plane passes through the start of the extrude".into(),
+                    ));
+                }
             };
             let bb = t.body.bbox();
             let size = 4.0 * (far + bb.diagonal()) + 10.0;
-            let cutter = Tagged { tags: Vec::new(), body: half_space(point, normal, -normal * side, size)? };
-            let cutter = Tagged { tags: vec![Vec::new(); cutter.body.faces.len()], ..cutter };
+            let cutter = Tagged {
+                tags: Vec::new(),
+                body: half_space(point, normal, -normal * side, size)?,
+            };
+            let cutter = Tagged {
+                tags: vec![Vec::new(); cutter.body.faces.len()],
+                ..cutter
+            };
             let cut = tagged_bool(&t, &cutter, BoolOp::Subtract)?;
-            let near = take_solids(&cut, |fs| fs.iter().any(|&f| cut.has(f, |o| matches!(o, Origin::StartCap { .. }))));
-            near.ok_or_else(|| KernelError::InvalidParameter("the face leaves nothing to extrude".into()))?
+            let near = take_solids(&cut, |fs| {
+                fs.iter()
+                    .any(|&f| cut.has(f, |o| matches!(o, Origin::StartCap { .. })))
+            });
+            near.ok_or_else(|| {
+                KernelError::InvalidParameter("the face leaves nothing to extrude".into())
+            })?
         }
         Reach::Conform { bodies, shift, far } => {
             let mut tool: Option<Body> = None;
@@ -381,23 +546,46 @@ fn piece(k: &NativeKernel, faces: &[MergedFace], plane: &Plane, o: P3, dir: V3, 
                     Some(t0) => boolean_bodies(&t0, &moved, BoolOp::Union)?.body,
                 });
             }
-            let tool = tool.ok_or_else(|| KernelError::InvalidParameter("Up to part: no part to extrude up to".into()))?;
-            let tool = Tagged { tags: vec![Vec::new(); tool.faces.len()], body: tool };
-            let is_start = |x: &Tagged, fs: &[usize]| fs.iter().any(|&f| x.has(f, |o| matches!(o, Origin::StartCap { .. })));
+            let tool = tool.ok_or_else(|| {
+                KernelError::InvalidParameter("Up to part: no part to extrude up to".into())
+            })?;
+            let tool = Tagged {
+                tags: vec![Vec::new(); tool.faces.len()],
+                body: tool,
+            };
+            let is_start = |x: &Tagged, fs: &[usize]| {
+                fs.iter()
+                    .any(|&f| x.has(f, |o| matches!(o, Origin::StartCap { .. })))
+            };
             let out = tagged_bool(&t, &tool, BoolOp::Subtract).ok();
             let inn = tagged_bool(&t, &tool, BoolOp::Intersect).ok();
-            let a = out.as_ref().and_then(|x| take_solids(x, |fs| is_start(x, fs)));
-            let b = inn.as_ref().and_then(|x| take_solids(x, |fs| is_start(x, fs)));
+            let a = out
+                .as_ref()
+                .and_then(|x| take_solids(x, |fs| is_start(x, fs)));
+            let b = inn
+                .as_ref()
+                .and_then(|x| take_solids(x, |fs| is_start(x, fs)));
             let kept = match (a, b) {
                 (Some(a), Some(b)) => tagged_bool(&a, &b, BoolOp::Union)?,
                 (Some(a), None) => a,
                 (None, Some(b)) => b,
-                (None, None) => return Err(KernelError::InvalidParameter("the target leaves nothing to extrude".into())),
+                (None, None) => {
+                    return Err(KernelError::InvalidParameter(
+                        "the target leaves nothing to extrude".into(),
+                    ));
+                }
             };
             // A piece still at the far end: part of the profile met nothing.
             let (_, hi) = super::kernel::extent_along(&kept.body, &o, &dir);
-            if hi > far - tol::REL_POINT * far.max(1.0) || kept.tags.iter().any(|ts| ts.iter().any(|o| matches!(o, Origin::EndCap { .. }))) {
-                return Err(KernelError::InvalidParameter("part of the profile doesn't meet the target".into()));
+            if hi > far - tol::REL_POINT * far.max(1.0)
+                || kept
+                    .tags
+                    .iter()
+                    .any(|ts| ts.iter().any(|o| matches!(o, Origin::EndCap { .. })))
+            {
+                return Err(KernelError::InvalidParameter(
+                    "part of the profile doesn't meet the target".into(),
+                ));
             }
             kept
         }
@@ -428,17 +616,27 @@ fn piece(k: &NativeKernel, faces: &[MergedFace], plane: &Plane, o: P3, dir: V3, 
     Ok(t)
 }
 
-pub fn extrude_with(k: &mut NativeKernel, profile: &Profile, spec: &ExtrudeSpec) -> Result<OpResult> {
+pub fn extrude_with(
+    k: &mut NativeKernel,
+    profile: &Profile,
+    spec: &ExtrudeSpec,
+) -> Result<OpResult> {
     let d = spec.direction.into_inner();
     let n = profile.plane.normal.into_inner();
     if d.dot(&n).abs() < tol::ANGULAR_POINT {
-        return Err(KernelError::InvalidParameter("the extrude direction lies in the sketch plane".into()));
+        return Err(KernelError::InvalidParameter(
+            "the extrude direction lies in the sketch plane".into(),
+        ));
     }
     if profile.regions.is_empty() && spec.faces.is_empty() && profile.chains.is_empty() {
-        return Err(KernelError::InvalidProfile("the profile has no regions".into()));
+        return Err(KernelError::InvalidProfile(
+            "the profile has no regions".into(),
+        ));
     }
     if spec.body == BodyKind::Surface && !spec.faces.is_empty() {
-        return Err(KernelError::InvalidParameter("Surface extrudes take sketch curves, not faces".into()));
+        return Err(KernelError::InvalidParameter(
+            "Surface extrudes take sketch curves, not faces".into(),
+        ));
     }
     let (profile_used, faces) = match spec.body {
         BodyKind::Thin { left, right } => {
@@ -459,21 +657,41 @@ pub fn extrude_with(k: &mut NativeKernel, profile: &Profile, spec: &ExtrudeSpec)
                 let half = depth("the depth", t / 2.0)?;
                 (half.clone(), Some(half))
             }
-            ExtrudeEnd::ThroughAll => (resolve(k, &faces, &m, spec, o, d, ExtrudeEnd::ThroughAll)?, Some(resolve(k, &faces, &m, spec, o, -d, ExtrudeEnd::ThroughAll)?)),
-            _ => return Err(KernelError::InvalidParameter("Symmetric works with Blind and Through all".into())),
+            ExtrudeEnd::ThroughAll => (
+                resolve(k, &faces, &m, spec, o, d, ExtrudeEnd::ThroughAll)?,
+                Some(resolve(k, &faces, &m, spec, o, -d, ExtrudeEnd::ThroughAll)?),
+            ),
+            _ => {
+                return Err(KernelError::InvalidParameter(
+                    "Symmetric works with Blind and Through all".into(),
+                ));
+            }
         }
     } else {
         let first = resolve(k, &faces, &m, spec, o, d, spec.end)?;
-        let second = spec.second.map(|e| resolve(k, &faces, &m, spec, o, -d, e)).transpose()?;
+        let second = spec
+            .second
+            .map(|e| resolve(k, &faces, &m, spec, o, -d, e))
+            .transpose()?;
         (first, second)
     };
     let plane = profile.plane;
     if spec.body == BodyKind::Surface {
-        let (Reach::Depth(f), b) = (first, second.map(|s| match s {
-            Reach::Depth(b) => Ok(b),
-            _ => Err(KernelError::Unsupported("Up to next, part or face for surfaces")),
-        }).transpose()?.unwrap_or(0.0)) else {
-            return Err(KernelError::Unsupported("Up to next, part or face for surfaces"));
+        let (Reach::Depth(f), b) = (
+            first,
+            second
+                .map(|s| match s {
+                    Reach::Depth(b) => Ok(b),
+                    _ => Err(KernelError::Unsupported(
+                        "Up to next, part or face for surfaces",
+                    )),
+                })
+                .transpose()?
+                .unwrap_or(0.0),
+        ) else {
+            return Err(KernelError::Unsupported(
+                "Up to next, part or face for surfaces",
+            ));
         };
         let start = spec.start_offset - b;
         let kind = sweep::Prism { plane, dir: d };
@@ -509,7 +727,11 @@ pub fn extrude_with(k: &mut NativeKernel, profile: &Profile, spec: &ExtrudeSpec)
         }
     };
     // Several input faces and regions: one body.
-    let t = if faces.len() > 1 && t.body.solids.len() > 1 && !spec.faces.is_empty() { unite_solids(t)? } else { t };
+    let t = if faces.len() > 1 && t.body.solids.len() > 1 && !spec.faces.is_empty() {
+        unite_solids(t)?
+    } else {
+        t
+    };
     Ok(t.into_result(k))
 }
 
@@ -518,14 +740,25 @@ pub fn extrude_with(k: &mut NativeKernel, profile: &Profile, spec: &ExtrudeSpec)
 pub fn prism_along(k: &mut NativeKernel, profile: &Profile, v: V3) -> Result<OpResult> {
     let len = v.norm();
     if len < tol::DEGENERATE || v.dot(&profile.plane.normal).abs() < tol::REL * len {
-        return Err(KernelError::InvalidParameter("A prism needs a direction off the profile's plane".into()));
+        return Err(KernelError::InvalidParameter(
+            "A prism needs a direction off the profile's plane".into(),
+        ));
     }
     let faces = inputs(k, profile, &[])?;
-    let kind = sweep::Prism { plane: profile.plane, dir: v / len };
+    let kind = sweep::Prism {
+        plane: profile.plane,
+        dir: v / len,
+    };
     Ok(sweep_united(&faces, &kind, 0.0, len, false)?.into_result(k))
 }
 
-fn sweep_united(faces: &[MergedFace], kind: &dyn SweepKind, s0: f64, s1: f64, whole: bool) -> Result<Tagged> {
+fn sweep_united(
+    faces: &[MergedFace],
+    kind: &dyn SweepKind,
+    s0: f64,
+    s1: f64,
+    whole: bool,
+) -> Result<Tagged> {
     let t = Tagged::from_built(sweep::sweep_full(faces, &[], kind, s0, s1, whole, true)?);
     if faces.len() < 2 {
         return Ok(t);
@@ -544,7 +777,11 @@ fn sweep_united(faces: &[MergedFace], kind: &dyn SweepKind, s0: f64, s1: f64, wh
     for i in 0..boxes.len() {
         for j in i + 1..boxes.len() {
             let (a, b) = (&boxes[i], &boxes[j]);
-            if a.min.x < b.max.x - tol::POINT && b.min.x < a.max.x - tol::POINT && a.min.y < b.max.y - tol::POINT && b.min.y < a.max.y - tol::POINT {
+            if a.min.x < b.max.x - tol::POINT
+                && b.min.x < a.max.x - tol::POINT
+                && a.min.y < b.max.y - tol::POINT
+                && b.min.y < a.max.y - tol::POINT
+            {
                 overlap = true;
             }
         }
@@ -570,14 +807,23 @@ fn unite_solids(t: Tagged) -> Result<Tagged> {
 
 /// The revolve frame: z along the axis, x from the axis towards the profile (which must lie on
 /// one side of it, in a plane through it).
-pub fn revolve_frame(profile: &Profile, faces: &[MergedFace], chains: &[Vec<Piece>], axis: &Axis) -> Result<Frame> {
+pub fn revolve_frame(
+    profile: &Profile,
+    faces: &[MergedFace],
+    chains: &[Vec<Piece>],
+    axis: &Axis,
+) -> Result<Frame> {
     let n = profile.plane.normal.into_inner();
     let z = axis.dir.into_inner();
     if z.dot(&n).abs() > tol::ANGULAR {
-        return Err(KernelError::InvalidParameter("The revolve axis must lie in the sketch plane".into()));
+        return Err(KernelError::InvalidParameter(
+            "The revolve axis must lie in the sketch plane".into(),
+        ));
     }
     if (axis.origin - profile.plane.origin).dot(&n).abs() > tol::POINT {
-        return Err(KernelError::InvalidParameter("The revolve axis must lie in the sketch plane".into()));
+        return Err(KernelError::InvalidParameter(
+            "The revolve axis must lie in the sketch plane".into(),
+        ));
     }
     let x = z.cross(&n).normalize();
     let m = super::build::plane_map(&profile.plane, &V3::zeros(), 0.0);
@@ -602,25 +848,42 @@ pub fn revolve_frame(profile: &Profile, faces: &[MergedFace], chains: &[Vec<Piec
         add(c);
     }
     let x = if hi > tol::POINT && lo < -tol::POINT {
-        return Err(KernelError::InvalidParameter("The profile crosses the revolve axis".into()));
+        return Err(KernelError::InvalidParameter(
+            "The profile crosses the revolve axis".into(),
+        ));
     } else if hi > tol::POINT {
         x
     } else {
         -x
     };
-    Ok(Frame { o: axis.origin, x, y: z.cross(&x), z })
+    Ok(Frame {
+        o: axis.origin,
+        x,
+        y: z.cross(&x),
+        z,
+    })
 }
 
-pub fn revolve_with(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec) -> Result<OpResult> {
+pub fn revolve_with(
+    k: &mut NativeKernel,
+    profile: &Profile,
+    spec: &RevolveSpec,
+) -> Result<OpResult> {
     if spec.body == BodyKind::Surface && !spec.faces.is_empty() {
-        return Err(KernelError::InvalidParameter("Surface revolves take sketch curves, not faces".into()));
+        return Err(KernelError::InvalidParameter(
+            "Surface revolves take sketch curves, not faces".into(),
+        ));
     }
     let used = match spec.body {
         BodyKind::Thin { left, right } => crate::thin::thin_profile(profile, left, right)?,
         _ => profile.clone(),
     };
     let faces = inputs(k, &used, &spec.faces)?;
-    let ch = if spec.body == BodyKind::Surface { chains(&used)? } else { Vec::new() };
+    let ch = if spec.body == BodyKind::Surface {
+        chains(&used)?
+    } else {
+        Vec::new()
+    };
     if faces.is_empty() && ch.is_empty() {
         return Err(KernelError::InvalidProfile("no regions".into()));
     }
@@ -628,7 +891,10 @@ pub fn revolve_with(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec)
         return revolve_off_plane(k, profile, spec, &faces, &ch);
     }
     let f = revolve_frame(profile, &faces, &ch, &spec.axis)?;
-    let kind = sweep::Revolve { plane: profile.plane, f };
+    let kind = sweep::Revolve {
+        plane: profile.plane,
+        f,
+    };
     let solid = spec.body != BodyKind::Surface;
     // An end's angle, or None for a conforming end.
     enum End {
@@ -644,17 +910,31 @@ pub fn revolve_with(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec)
             RevolveEnd::Angle(a) => End::Angle(a),
             RevolveEnd::UpToVertex { point, offset } => End::Angle(ang_of(&point) - offset),
             RevolveEnd::UpToFace { body, face, offset } => {
-                let info = k.faces(body)?.into_iter().find(|x| x.id == face).ok_or_else(|| KernelError::InvalidParameter(format!("unknown {face:?}")))?;
+                let info = k
+                    .faces(body)?
+                    .into_iter()
+                    .find(|x| x.id == face)
+                    .ok_or_else(|| KernelError::InvalidParameter(format!("unknown {face:?}")))?;
                 match info.plane {
-                    Some(pl) if pl.normal.dot(&f.z).abs() < tol::ANGULAR && (pl.origin - f.o).dot(&pl.normal).abs() < tol::POINT => End::Angle(ang_of(&info.center) - offset),
+                    Some(pl)
+                        if pl.normal.dot(&f.z).abs() < tol::ANGULAR
+                            && (pl.origin - f.o).dot(&pl.normal).abs() < tol::POINT =>
+                    {
+                        End::Angle(ang_of(&info.center) - offset)
+                    }
                     _ => End::Conform(vec![body], offset),
                 }
             }
             RevolveEnd::UpToPart { body, offset } => End::Conform(vec![body], offset),
             RevolveEnd::UpToNext { offset } => {
                 // The scene bodies the almost-whole turn overlaps.
-                let pts = profile_points(&faces, &super::build::plane_map(&profile.plane, &V3::zeros(), 0.0));
-                let sweep_all = sweep::sweep_full(&faces, &[], &kind, 0.0, TAU * (1.0 - 1e-4), false, true)?.body;
+                let pts = profile_points(
+                    &faces,
+                    &super::build::plane_map(&profile.plane, &V3::zeros(), 0.0),
+                );
+                let sweep_all =
+                    sweep::sweep_full(&faces, &[], &kind, 0.0, TAU * (1.0 - 1e-4), false, true)?
+                        .body;
                 let _ = pts;
                 let mut ahead = Vec::new();
                 for &b in &spec.scene {
@@ -664,7 +944,9 @@ pub fn revolve_with(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec)
                     }
                 }
                 if ahead.is_empty() {
-                    return Err(KernelError::InvalidParameter("Up to next: nothing lies in the way of the revolve".into()));
+                    return Err(KernelError::InvalidParameter(
+                        "Up to next: nothing lies in the way of the revolve".into(),
+                    ));
                 }
                 End::Conform(ahead, offset)
             }
@@ -674,7 +956,9 @@ pub fn revolve_with(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec)
         (0.0, TAU, true, None)
     } else if spec.symmetric {
         let End::Angle(a) = end_of(k, &spec.end, 1.0)? else {
-            return Err(KernelError::InvalidParameter("Symmetric works with an angle".into()));
+            return Err(KernelError::InvalidParameter(
+                "Symmetric works with an angle".into(),
+            ));
         };
         (-a.abs() / 2.0, a.abs() / 2.0, false, None)
     } else {
@@ -682,7 +966,11 @@ pub fn revolve_with(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec)
         let a0 = match &spec.second {
             Some(e) => match end_of(k, e, -1.0)? {
                 End::Angle(a) => -a,
-                End::Conform(..) => return Err(KernelError::Unsupported("a conforming second end of a revolve")),
+                End::Conform(..) => {
+                    return Err(KernelError::Unsupported(
+                        "a conforming second end of a revolve",
+                    ));
+                }
             },
             None => 0.0,
         };
@@ -695,13 +983,23 @@ pub fn revolve_with(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec)
         }
     };
     if s1 - s0 > TAU + tol::ANGULAR {
-        return Err(KernelError::InvalidParameter("The revolve turns more than a whole turn".into()));
+        return Err(KernelError::InvalidParameter(
+            "The revolve turns more than a whole turn".into(),
+        ));
     }
     let whole = whole || (s1 - s0) >= TAU - tol::ANGULAR_FINE;
     let mut t = if solid {
         sweep_united(&faces, &kind, s0, if whole { s0 + TAU } else { s1 }, whole)?
     } else {
-        Tagged::from_built(sweep::sweep_full(&faces, &ch, &kind, s0, if whole { s0 + TAU } else { s1 }, whole, false)?)
+        Tagged::from_built(sweep::sweep_full(
+            &faces,
+            &ch,
+            &kind,
+            s0,
+            if whole { s0 + TAU } else { s1 },
+            whole,
+            false,
+        )?)
     };
     // A whole turn of a segment square to the axis is a disc or an annulus: no slit seam (and no
     // edges left over on the axis).
@@ -712,12 +1010,18 @@ pub fn revolve_with(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec)
         return Ok(t.into_result(k));
     };
     if !solid {
-        return Err(KernelError::Unsupported("Up to next, part or face for surface revolves"));
+        return Err(KernelError::Unsupported(
+            "Up to next, part or face for surface revolves",
+        ));
     }
     // Conform: split the almost-whole turn by the targets turned back by the offset.
     let rot = |a: f64| {
-        let r = nalgebra::Rotation3::from_axis_angle(&nalgebra::Unit::new_normalize(f.z), a).into_inner();
-        Affine { m: r, t: f.o.coords - r * f.o.coords }
+        let r = nalgebra::Rotation3::from_axis_angle(&nalgebra::Unit::new_normalize(f.z), a)
+            .into_inner();
+        Affine {
+            m: r,
+            t: f.o.coords - r * f.o.coords,
+        }
     };
     let mut tool: Option<Body> = None;
     for b in &bodies {
@@ -727,21 +1031,43 @@ pub fn revolve_with(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec)
             Some(t0) => boolean_bodies(&t0, &moved, BoolOp::Union)?.body,
         });
     }
-    let tool = tool.ok_or_else(|| KernelError::InvalidParameter("Up to part: no part to extrude up to".into()))?;
-    let tool = Tagged { tags: vec![Vec::new(); tool.faces.len()], body: tool };
-    let is_start = |x: &Tagged, fs: &[usize]| fs.iter().any(|&f| x.has(f, |o| matches!(o, Origin::StartCap { .. })));
+    let tool = tool.ok_or_else(|| {
+        KernelError::InvalidParameter("Up to part: no part to extrude up to".into())
+    })?;
+    let tool = Tagged {
+        tags: vec![Vec::new(); tool.faces.len()],
+        body: tool,
+    };
+    let is_start = |x: &Tagged, fs: &[usize]| {
+        fs.iter()
+            .any(|&f| x.has(f, |o| matches!(o, Origin::StartCap { .. })))
+    };
     let out = tagged_bool(&t, &tool, BoolOp::Subtract).ok();
     let inn = tagged_bool(&t, &tool, BoolOp::Intersect).ok();
-    let a = out.as_ref().and_then(|x| take_solids(x, |fs| is_start(x, fs)));
-    let b = inn.as_ref().and_then(|x| take_solids(x, |fs| is_start(x, fs)));
+    let a = out
+        .as_ref()
+        .and_then(|x| take_solids(x, |fs| is_start(x, fs)));
+    let b = inn
+        .as_ref()
+        .and_then(|x| take_solids(x, |fs| is_start(x, fs)));
     let mut kept = match (a, b) {
         (Some(a), Some(b)) => tagged_bool(&a, &b, BoolOp::Union)?,
         (Some(a), None) => a,
         (None, Some(b)) => b,
-        (None, None) => return Err(KernelError::InvalidParameter("the target leaves nothing to revolve".into())),
+        (None, None) => {
+            return Err(KernelError::InvalidParameter(
+                "the target leaves nothing to revolve".into(),
+            ));
+        }
     };
-    if kept.tags.iter().any(|ts| ts.iter().any(|o| matches!(o, Origin::EndCap { .. }))) {
-        return Err(KernelError::InvalidParameter("part of the profile doesn't meet the target".into()));
+    if kept
+        .tags
+        .iter()
+        .any(|ts| ts.iter().any(|o| matches!(o, Origin::EndCap { .. })))
+    {
+        return Err(KernelError::InvalidParameter(
+            "part of the profile doesn't meet the target".into(),
+        ));
     }
     // New faces: the end cap of the region under them (turned back onto the profile plane).
     let x = profile.plane.x_dir.into_inner();
@@ -766,25 +1092,42 @@ pub fn revolve_with(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec)
 /// Whether a revolve axis leaves the sketch plane (or is parallel to it off it).
 fn axis_off_plane(profile: &Profile, axis: &Axis) -> bool {
     let n = profile.plane.normal.into_inner();
-    axis.dir.dot(&n).abs() > tol::ANGULAR || (axis.origin - profile.plane.origin).dot(&n).abs() > tol::POINT
+    axis.dir.dot(&n).abs() > tol::ANGULAR
+        || (axis.origin - profile.plane.origin).dot(&n).abs() > tol::POINT
 }
 
 /// A revolve about an axis off the sketch plane (SMLib's rotational sweep of a face about any
 /// axis, [`sweep::Turn`]): angle ends only (an angle, symmetric, a second angle, or a whole
 /// turn). Every point of the profile must leave the plane the same way: the profile lies on one
 /// side of the plane through the axis along the plane's normal.
-fn revolve_off_plane(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec, faces: &[MergedFace], ch: &[Vec<Piece>]) -> Result<OpResult> {
+fn revolve_off_plane(
+    k: &mut NativeKernel,
+    profile: &Profile,
+    spec: &RevolveSpec,
+    faces: &[MergedFace],
+    ch: &[Vec<Piece>],
+) -> Result<OpResult> {
     let n = profile.plane.normal.into_inner();
     let z = spec.axis.dir.into_inner();
     let o = spec.axis.origin;
     if z.cross(&n).norm() < tol::ANGULAR {
-        return Err(KernelError::InvalidParameter("The revolve axis must not be square to the sketch plane".into()));
+        return Err(KernelError::InvalidParameter(
+            "The revolve axis must not be square to the sketch plane".into(),
+        ));
     }
     let m = super::build::plane_map(&profile.plane, &V3::zeros(), 0.0);
     let mut pts: Vec<P3> = Vec::new();
-    for l in faces.iter().flat_map(|f| std::iter::once(&f.outer).chain(f.holes.iter())).chain(ch.iter()) {
+    for l in faces
+        .iter()
+        .flat_map(|f| std::iter::once(&f.outer).chain(f.holes.iter()))
+        .chain(ch.iter())
+    {
         for p in l {
-            pts.extend(p.sample(1e-3).into_iter().map(|q| m.point(&P3::new(q.x, q.y, 0.0))));
+            pts.extend(
+                p.sample(1e-3)
+                    .into_iter()
+                    .map(|q| m.point(&P3::new(q.x, q.y, 0.0))),
+            );
         }
     }
     let size = pts.iter().map(|p| (p - o).norm()).fold(1.0, f64::max);
@@ -797,10 +1140,14 @@ fn revolve_off_plane(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec
     }
     let eps = tol::REL * size;
     if hi > eps && lo < -eps {
-        return Err(KernelError::InvalidParameter("The profile lies on both sides of the revolve axis".into()));
+        return Err(KernelError::InvalidParameter(
+            "The profile lies on both sides of the revolve axis".into(),
+        ));
     }
     if !(hi > eps || lo < -eps) {
-        return Err(KernelError::InvalidParameter("The profile turns within its plane about this axis".into()));
+        return Err(KernelError::InvalidParameter(
+            "The profile turns within its plane about this axis".into(),
+        ));
     }
     // x towards the profile's middle (any square to the axis when that is on it).
     let mid = pts.iter().fold(V3::zeros(), |s, p| s + (p - o)) / pts.len().max(1) as f64;
@@ -809,13 +1156,24 @@ fn revolve_off_plane(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec
         x = n - z * n.dot(&z);
     }
     let x = x.normalize();
-    let kind = sweep::Turn { plane: profile.plane, f: Frame { o, x, y: z.cross(&x), z }, up: hi > eps };
+    let kind = sweep::Turn {
+        plane: profile.plane,
+        f: Frame {
+            o,
+            x,
+            y: z.cross(&x),
+            z,
+        },
+        up: hi > eps,
+    };
     let (s0, s1) = if spec.full {
         (0.0, TAU)
     } else {
         let angle = |e: &RevolveEnd| match *e {
             RevolveEnd::Angle(a) => Ok(a),
-            _ => Err(KernelError::Unsupported("up-to ends for a revolve about an axis off the sketch plane")),
+            _ => Err(KernelError::Unsupported(
+                "up-to ends for a revolve about an axis off the sketch plane",
+            )),
         };
         let a1 = angle(&spec.end)?;
         if spec.symmetric {
@@ -829,7 +1187,9 @@ fn revolve_off_plane(k: &mut NativeKernel, profile: &Profile, spec: &RevolveSpec
         }
     };
     if s1 - s0 > TAU + tol::ANGULAR {
-        return Err(KernelError::InvalidParameter("The revolve turns more than a whole turn".into()));
+        return Err(KernelError::InvalidParameter(
+            "The revolve turns more than a whole turn".into(),
+        ));
     }
     let whole = (s1 - s0) >= TAU - tol::ANGULAR_FINE;
     let s1 = if whole { s0 + TAU } else { s1 };

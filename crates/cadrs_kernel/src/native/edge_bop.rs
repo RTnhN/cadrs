@@ -10,12 +10,12 @@
 //! the face) and the closest approaches to other edges that reach them (crossings, and other
 //! edges' ends lying on it).
 
-use super::classify::{classify_point, face_polygons, in_face, periodic_candidates, InFace};
+use super::classify::{InFace, classify_point, face_polygons, in_face, periodic_candidates};
 use super::curve::Curve;
 use super::math::*;
+use super::tol;
 use super::topo::Body;
 use crate::{BoolOp, PointClass};
-use super::tol;
 
 /// An edge: its curve on [t0, t1].
 #[derive(Debug, Clone)]
@@ -30,7 +30,8 @@ impl Piece {
         self.curve.point(t)
     }
     fn length(&self) -> f64 {
-        self.curve.length(self.t0.min(self.t1), self.t0.max(self.t1))
+        self.curve
+            .length(self.t0.min(self.t1), self.t0.max(self.t1))
     }
 }
 
@@ -61,16 +62,26 @@ struct Ctx<'a> {
 impl Ctx<'_> {
     fn side(&self, p: &P3) -> Side {
         match self.other {
-            Other::Body(b) if !b.solids.is_empty() => match classify_point(b, &self.polys, p, self.tol) {
-                PointClass::Inside => Side::In,
-                PointClass::OnBoundary => Side::On,
-                PointClass::Outside => Side::Out,
-            },
+            Other::Body(b) if !b.solids.is_empty() => {
+                match classify_point(b, &self.polys, p, self.tol) {
+                    PointClass::Inside => Side::In,
+                    PointClass::OnBoundary => Side::On,
+                    PointClass::Outside => Side::Out,
+                }
+            }
             Other::Body(b) => {
-                if (0..b.faces.len()).any(|fi| self.on_face(b, fi, p)) { Side::On } else { Side::Out }
+                if (0..b.faces.len()).any(|fi| self.on_face(b, fi, p)) {
+                    Side::On
+                } else {
+                    Side::Out
+                }
             }
             Other::Edges(es) => {
-                if es.iter().any(|e| dist_to(e, p) <= self.tol) { Side::On } else { Side::Out }
+                if es.iter().any(|e| dist_to(e, p) <= self.tol) {
+                    Side::On
+                } else {
+                    Side::Out
+                }
             }
         }
     }
@@ -106,7 +117,9 @@ impl Ctx<'_> {
                 let (_, z) = (ed.t[0].min(ed.t[1]), ed.t[0].max(ed.t[1]));
                 let (a, _) = (ed.t[0].min(ed.t[1]), z);
                 // Not at the edge's ends (a corner: the polygon decides).
-                if (t - a).abs() > tol::REL * (1.0 + a.abs()) && (z - t).abs() > tol::REL * (1.0 + z.abs()) {
+                if (t - a).abs() > tol::REL * (1.0 + a.abs())
+                    && (z - t).abs() > tol::REL * (1.0 + z.abs())
+                {
                     let (qu, qv) = f.surf.project(&q, Some((u, v)));
                     let n = f.surf.normal(qu, qv) * if f.sense { 1.0 } else { -1.0 };
                     let tan = ed.curve.tangent(t) * if fwd { 1.0 } else { -1.0 };
@@ -114,7 +127,9 @@ impl Ctx<'_> {
                 }
             }
         }
-        periodic_candidates(&f.surf, u, v, &self.polys[fi]).into_iter().any(|uv| in_face(&self.polys[fi], &f.surf, uv, self.tol) != InFace::Outside)
+        periodic_candidates(&f.surf, u, v, &self.polys[fi])
+            .into_iter()
+            .any(|uv| in_face(&self.polys[fi], &f.surf, uv, self.tol) != InFace::Outside)
     }
 }
 
@@ -194,15 +209,30 @@ fn tangent_touch(e: &Piece, ra: f64, rb: f64, tol: f64, df: impl Fn(f64) -> f64)
         return Some(tm);
     }
     let on = |t: f64| df(t) <= tight;
-    let a2 = if on(ra) { ra } else { bisect(ra, tm, false, on) };
+    let a2 = if on(ra) {
+        ra
+    } else {
+        bisect(ra, tm, false, on)
+    };
     let b2 = if on(rb) { rb } else { bisect(tm, rb, true, on) };
-    let (l1, l2) = ((e.point(rb) - e.point(ra)).norm(), (e.point(b2) - e.point(a2)).norm());
+    let (l1, l2) = (
+        (e.point(rb) - e.point(ra)).norm(),
+        (e.point(b2) - e.point(a2)).norm(),
+    );
     (l2 < 0.5 * l1).then_some(tm)
 }
 
 /// Where `e` meets one edge `o`: where it starts and stops running along it, and the points
 /// where it only touches it (crossings, `o`'s ends on it, tangential touches).
-fn edge_meets(e: &Piece, ts: &[f64], o: &Piece, tol: f64, size: f64, touches: bool, out: &mut Vec<f64>) {
+fn edge_meets(
+    e: &Piece,
+    ts: &[f64],
+    o: &Piece,
+    tol: f64,
+    size: f64,
+    touches: bool,
+    out: &mut Vec<f64>,
+) {
     let df = |t: f64| dist_to(o, &e.point(t));
     let d: Vec<f64> = ts.iter().map(|&t| df(t)).collect();
     // Each run of samples within the tolerance: where it starts and stops (bisected), or, for
@@ -230,7 +260,11 @@ fn edge_meets(e: &Piece, ts: &[f64], o: &Piece, tol: f64, size: f64, touches: bo
     }
     for i in 0..ts.len() {
         let l = if i > 0 { d[i - 1] } else { f64::INFINITY };
-        let r = if i + 1 < ts.len() { d[i + 1] } else { f64::INFINITY };
+        let r = if i + 1 < ts.len() {
+            d[i + 1]
+        } else {
+            f64::INFINITY
+        };
         if !(d[i] <= l && d[i] <= r) || d[i] > size * 0.05 {
             continue;
         }
@@ -258,18 +292,30 @@ fn handovers(e: &Piece, ts: &[f64], edges: &[Piece], tol: f64, size: f64) -> Vec
         }
     }
     let fwd = e.t1 >= e.t0;
-    events.sort_by(|a, b| if fwd { a.0.total_cmp(&b.0) } else { b.0.total_cmp(&a.0) });
+    events.sort_by(|a, b| {
+        if fwd {
+            a.0.total_cmp(&b.0)
+        } else {
+            b.0.total_cmp(&a.0)
+        }
+    });
     let any = |t: f64| edges.iter().any(|o| on(o, t));
     let gap = size * 1e-5;
     let mut out = Vec::new();
     let mut i = 0;
     while i < events.len() {
         let mut j = i + 1;
-        while j < events.len() && (e.point(events[j].0) - e.point(events[i].0)).norm() <= gap && (events[j].0 - events[i].0).abs() <= 1e-3 * (e.t1 - e.t0).abs() {
+        while j < events.len()
+            && (e.point(events[j].0) - e.point(events[i].0)).norm() <= gap
+            && (events[j].0 - events[i].0).abs() <= 1e-3 * (e.t1 - e.t0).abs()
+        {
             j += 1;
         }
         let cluster = &events[i..j];
-        let (enters, leaves) = (cluster.iter().filter(|x| x.1).count(), cluster.iter().filter(|x| !x.1).count());
+        let (enters, leaves) = (
+            cluster.iter().filter(|x| x.1).count(),
+            cluster.iter().filter(|x| !x.1).count(),
+        );
         let (a, b) = (cluster[0].0, cluster[cluster.len() - 1].0);
         let d = tol::DIFF_STEP * (e.t1 - e.t0);
         if any(a - d) != any(b + d) || (enters > 0 && leaves > 0) {
@@ -313,7 +359,9 @@ fn face_meets(cx: &Ctx, b: &Body, fi: usize, e: &Piece, ts: &[f64], out: &mut Ve
             continue;
         }
         // The feet must move with the curve (not jump across the surface).
-        if (g[i - 1].1 - g[i].1).norm() > 10.0 * (e.point(ts[i]) - e.point(ts[i - 1])).norm() + cx.tol {
+        if (g[i - 1].1 - g[i].1).norm()
+            > 10.0 * (e.point(ts[i]) - e.point(ts[i - 1])).norm() + cx.tol
+        {
             continue;
         }
         let (mut lo, mut hi) = (ts[i - 1], ts[i]);
@@ -333,7 +381,11 @@ fn face_meets(cx: &Ctx, b: &Body, fi: usize, e: &Piece, ts: &[f64], out: &mut Ve
             continue;
         }
         let t = argmin(ts[i - 1], ts[i + 1], |t| gd(t).abs());
-        if gd(t).abs() <= cx.tol * 10.0 && on(t) && !on(t - tol::DIFF_STEP * (ts[i + 1] - ts[i - 1])) && !on(t + tol::DIFF_STEP * (ts[i + 1] - ts[i - 1])) {
+        if gd(t).abs() <= cx.tol * 10.0
+            && on(t)
+            && !on(t - tol::DIFF_STEP * (ts[i + 1] - ts[i - 1]))
+            && !on(t + tol::DIFF_STEP * (ts[i + 1] - ts[i - 1]))
+        {
             out.push(t);
         }
     }
@@ -354,7 +406,10 @@ fn splits(cx: &Ctx, e: &Piece, size: f64) -> Vec<f64> {
                 let n = out.len();
                 face_meets(cx, b, fi, e, &ts, &mut out);
                 if std::env::var("CADRS_EBOP_DEBUG").is_ok() && out.len() > n {
-                    eprintln!("face {fi}: splits {:?}", out[n..].iter().map(|&t| e.point(t)).collect::<Vec<_>>());
+                    eprintln!(
+                        "face {fi}: splits {:?}",
+                        out[n..].iter().map(|&t| e.point(t)).collect::<Vec<_>>()
+                    );
                 }
             }
             // Where it starts or stops running along one of the body's edges (pieces of one
@@ -372,11 +427,18 @@ fn splits(cx: &Ctx, e: &Piece, size: f64) -> Vec<f64> {
     let (t0, t1) = (e.t0, e.t1);
     let fwd = t1 >= t0;
     let gap = size * 1e-5;
-    out.retain(|&t| (e.point(t) - e.point(t0)).norm() > gap && (e.point(t) - e.point(t1)).norm() > gap && (t - t0) * (t1 - t) > 0.0);
+    out.retain(|&t| {
+        (e.point(t) - e.point(t0)).norm() > gap
+            && (e.point(t) - e.point(t1)).norm() > gap
+            && (t - t0) * (t1 - t) > 0.0
+    });
     out.sort_by(|a, b| if fwd { a.total_cmp(b) } else { b.total_cmp(a) });
     let mut kept: Vec<f64> = Vec::new();
     for t in out {
-        if kept.last().is_none_or(|&l| (e.point(l) - e.point(t)).norm() > gap) {
+        if kept
+            .last()
+            .is_none_or(|&l| (e.point(l) - e.point(t)).norm() > gap)
+        {
             kept.push(t);
         }
     }
@@ -388,13 +450,21 @@ fn joined_edges(b: &Body, tol: f64) -> Vec<Piece> {
     let mut out: Vec<Piece> = Vec::new();
     for ed in b.edges.iter().filter(|x| !x.degenerate) {
         let (t0, t1) = (ed.t[0].min(ed.t[1]), ed.t[0].max(ed.t[1]));
-        if let Some(p) = out.iter_mut().find(|p| p.curve == ed.curve && ((p.t1 - t0).abs() < tol::ROUNDOFF_FINE || (t1 - p.t0).abs() < tol::ROUNDOFF_FINE)) {
+        if let Some(p) = out.iter_mut().find(|p| {
+            p.curve == ed.curve
+                && ((p.t1 - t0).abs() < tol::ROUNDOFF_FINE
+                    || (t1 - p.t0).abs() < tol::ROUNDOFF_FINE)
+        }) {
             p.t0 = p.t0.min(t0);
             p.t1 = p.t1.max(t1);
             continue;
         }
         let _ = tol;
-        out.push(Piece { curve: ed.curve.clone(), t0, t1 });
+        out.push(Piece {
+            curve: ed.curve.clone(),
+            t0,
+            t1,
+        });
     }
     out
 }
@@ -409,14 +479,24 @@ fn pieces(edges: &[Piece], other: &Other, size: f64, tol: f64) -> Vec<(Piece, Si
         Other::Body(b) => joined_edges(b, tol),
         Other::Edges(_) => Vec::new(),
     };
-    let cx = Ctx { other, body_edges, polys, tol, band: size * 1e-3 };
+    let cx = Ctx {
+        other,
+        body_edges,
+        polys,
+        tol,
+        band: size * 1e-3,
+    };
     let mut out = Vec::new();
     for e in edges {
         let mut cuts = vec![e.t0];
         cuts.extend(splits(&cx, e, size));
         cuts.push(e.t1);
         for w in cuts.windows(2) {
-            let p = Piece { curve: e.curve.clone(), t0: w[0], t1: w[1] };
+            let p = Piece {
+                curve: e.curve.clone(),
+                t0: w[0],
+                t1: w[1],
+            };
             if p.length() <= size * 1e-5 {
                 continue;
             }
@@ -451,20 +531,40 @@ fn size_of(edges: &[Piece], other: &Other) -> f64 {
 /// `edges` op `other`: the pieces of the edges (common: inside or on the other argument; cut:
 /// outside it; union with edges: both sets' pieces, shared stretches once). None for a union
 /// with a solid or sheet (arguments of different dimensions).
-pub fn edge_boolean(op: BoolOp, edges: &[Piece], other: &Other, keep_shared: bool) -> Option<Vec<Piece>> {
+pub fn edge_boolean(
+    op: BoolOp,
+    edges: &[Piece],
+    other: &Other,
+    keep_shared: bool,
+) -> Option<Vec<Piece>> {
     let size = size_of(edges, other);
     let tol = (size * 1e-10).max(1e-7);
     let mine = pieces(edges, other, size, tol);
     Some(match op {
-        BoolOp::Intersect => mine.into_iter().filter(|(_, s)| *s != Side::Out).map(|(p, _)| p).collect(),
-        BoolOp::Subtract => mine.into_iter().filter(|(_, s)| *s == Side::Out).map(|(p, _)| p).collect(),
+        BoolOp::Intersect => mine
+            .into_iter()
+            .filter(|(_, s)| *s != Side::Out)
+            .map(|(p, _)| p)
+            .collect(),
+        BoolOp::Subtract => mine
+            .into_iter()
+            .filter(|(_, s)| *s == Side::Out)
+            .map(|(p, _)| p)
+            .collect(),
         BoolOp::Union => {
-            let Other::Edges(theirs) = other else { return None };
+            let Other::Edges(theirs) = other else {
+                return None;
+            };
             let mut out: Vec<Piece> = mine.into_iter().map(|(p, _)| p).collect();
             let back = Other::Edges(edges);
             // Both sets' pieces; a stretch they share is there twice when `keep_shared` (OCCT's
             // result holds the shared edge in both wires: its length counts twice, its edge once).
-            out.extend(pieces(theirs, &back, size, tol).into_iter().filter(|(_, s)| keep_shared || *s == Side::Out).map(|(p, _)| p));
+            out.extend(
+                pieces(theirs, &back, size, tol)
+                    .into_iter()
+                    .filter(|(_, s)| keep_shared || *s == Side::Out)
+                    .map(|(p, _)| p),
+            );
             out
         }
     })
@@ -483,7 +583,6 @@ pub fn vertex_count(edges: &[(P3, P3)], tol: f64) -> usize {
     pts.len()
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -493,16 +592,54 @@ mod tests {
     /// is split there but at the point of touch.
     #[test]
     fn tangent_arc_touches_a_line() {
-        let line = Piece { curve: Curve::Line { o: P3::new(-10.0, 0.0, 0.0), d: V3::x() }, t0: 0.0, t1: 20.0 };
-        let arc = Piece { curve: Curve::Circle { c: P3::new(0.0, 500.0, 0.0), x: V3::x(), y: V3::y(), r: 500.0 }, t0: -PI / 2.0, t1: -PI / 2.0 + 0.17 };
-        let r = edge_boolean(BoolOp::Union, std::slice::from_ref(&line), &Other::Edges(std::slice::from_ref(&arc)), false).unwrap();
+        let line = Piece {
+            curve: Curve::Line {
+                o: P3::new(-10.0, 0.0, 0.0),
+                d: V3::x(),
+            },
+            t0: 0.0,
+            t1: 20.0,
+        };
+        let arc = Piece {
+            curve: Curve::Circle {
+                c: P3::new(0.0, 500.0, 0.0),
+                x: V3::x(),
+                y: V3::y(),
+                r: 500.0,
+            },
+            t0: -PI / 2.0,
+            t1: -PI / 2.0 + 0.17,
+        };
+        let r = edge_boolean(
+            BoolOp::Union,
+            std::slice::from_ref(&line),
+            &Other::Edges(std::slice::from_ref(&arc)),
+            false,
+        )
+        .unwrap();
         // The line in two at the touch, the arc whole.
         assert_eq!(r.len(), 3, "{r:?}");
-        let on_line = r.iter().filter(|p| matches!(p.curve, Curve::Line { .. })).count();
+        let on_line = r
+            .iter()
+            .filter(|p| matches!(p.curve, Curve::Line { .. }))
+            .count();
         assert_eq!(on_line, 2);
         // Two lines running together still overlap end to end.
-        let half = Piece { curve: Curve::Line { o: P3::new(-10.0, 0.0, 0.0), d: V3::x() }, t0: 5.0, t1: 30.0 };
-        let common = edge_boolean(BoolOp::Intersect, std::slice::from_ref(&line), &Other::Edges(std::slice::from_ref(&half)), false).unwrap();
+        let half = Piece {
+            curve: Curve::Line {
+                o: P3::new(-10.0, 0.0, 0.0),
+                d: V3::x(),
+            },
+            t0: 5.0,
+            t1: 30.0,
+        };
+        let common = edge_boolean(
+            BoolOp::Intersect,
+            std::slice::from_ref(&line),
+            &Other::Edges(std::slice::from_ref(&half)),
+            false,
+        )
+        .unwrap();
         assert_eq!(common.len(), 1);
         assert!((common[0].length() - 15.0).abs() < 1e-6, "{common:?}");
     }

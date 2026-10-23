@@ -21,11 +21,11 @@
 
 use super::curve::Curve;
 use super::math::*;
-use super::nurbs::{hom, NurbsCurve, NurbsSurface, H};
+use super::nurbs::{H, NurbsCurve, NurbsSurface, hom};
 use super::surface::Surface;
+use super::tol;
 use super::topo::Face;
 use nalgebra::{Matrix3, Matrix4, SMatrix, SVector, Vector2};
-use super::tol;
 
 /// A point where the ball touches a face: (u, v) on the face's surface, the point and the
 /// face's outward unit normal there.
@@ -91,7 +91,8 @@ impl Ball {
         if self.flat {
             let chord = self.q[1].p - self.q[0].p;
             let out = (self.q[0].p - self.c) + (self.q[1].p - self.c);
-            let n = (out - chord * (out.dot(&chord) / chord.norm_squared().max(tol::TINY))).normalize();
+            let n =
+                (out - chord * (out.dot(&chord) / chord.norm_squared().max(tol::TINY))).normalize();
             return (x - self.q[0].p).dot(&n);
         }
         (x - self.c).norm() - (self.q[0].p - self.c).norm()
@@ -106,7 +107,11 @@ impl Ball {
         }
         let (a, o) = (a - self.c, o - self.c);
         let whole = a.angle(&o);
-        if whole < tol::ANGULAR_FINE { 0.0 } else { a.angle(&(x - self.c)) / whole }
+        if whole < tol::ANGULAR_FINE {
+            0.0
+        } else {
+            a.angle(&(x - self.c)) / whole
+        }
     }
 }
 
@@ -137,7 +142,12 @@ fn offset(f: &Face, k: f64, uv: P2) -> Option<Offset> {
     let dn = |x: V3| (x - n * n.dot(&x)) / l;
     let (nu, nv) = (dn(dnu) * sg, dn(dnv) * sg);
     let n = n * sg;
-    Some(Offset { o: s + n * k, du: d[1] + nu * k, dv: d[2] + nv * k, contact: Contact { uv, p: s, n } })
+    Some(Offset {
+        o: s + n * k,
+        du: d[1] + nu * k,
+        dv: d[2] + nv * k,
+        contact: Contact { uv, p: s, n },
+    })
 }
 
 /// The contact of face `f` at (u, v) (its point and outward normal).
@@ -194,24 +204,44 @@ pub fn ball_in_plane(f: [&Face; 2], k: [f64; 2], p0: &P3, t: &V3, guess: [P2; 2]
         let a = offset(f[0], k[0], x[0])?;
         let b = offset(f[1], k[1], x[1])?;
         if it == 0 {
-            lim = lim.max(2.0 * (a.contact.p - b.contact.p).norm()).max(tol::REL * sc);
+            lim = lim
+                .max(2.0 * (a.contact.p - b.contact.p).norm())
+                .max(tol::REL * sc);
         }
         let r3 = a.o - b.o;
         let rp = (a.o - p0).dot(t);
         let res = SVector::<f64, 4>::new(r3.x, r3.y, r3.z, rp);
         if res.norm() < 1e-11 * sc {
-            return Some(Ball { c: P3::from((a.o.coords + b.o.coords) * 0.5), q: [a.contact, b.contact], flat: false });
+            return Some(Ball {
+                c: P3::from((a.o.coords + b.o.coords) * 0.5),
+                q: [a.contact, b.contact],
+                flat: false,
+            });
         }
         let m = Matrix4::new(
-            a.du.x, a.dv.x, -b.du.x, -b.dv.x, //
-            a.du.y, a.dv.y, -b.du.y, -b.dv.y, //
-            a.du.z, a.dv.z, -b.du.z, -b.dv.z, //
-            t.dot(&a.du), t.dot(&a.dv), 0.0, 0.0,
+            a.du.x,
+            a.dv.x,
+            -b.du.x,
+            -b.dv.x, //
+            a.du.y,
+            a.dv.y,
+            -b.du.y,
+            -b.dv.y, //
+            a.du.z,
+            a.dv.z,
+            -b.du.z,
+            -b.dv.z, //
+            t.dot(&a.du),
+            t.dot(&a.dv),
+            0.0,
+            0.0,
         );
         let dx = m.lu().solve(&(-res))?;
         let (da, db) = (Vector2::new(dx[0], dx[1]), Vector2::new(dx[2], dx[3]));
         // Newton overshoots on curved faces.
-        let len = (a.du * da.x + a.dv * da.y).norm().max((b.du * db.x + b.dv * db.y).norm());
+        let len = (a.du * da.x + a.dv * da.y)
+            .norm()
+            .max((b.du * db.x + b.dv * db.y).norm());
         let g = damp(len, lim);
         x = [step(f[0], &a, x[0], da, g), step(f[1], &b, x[1], db, g)];
     }
@@ -226,14 +256,35 @@ pub fn ball_in_plane(f: [&Face; 2], k: [f64; 2], p0: &P3, t: &V3, guess: [P2; 2]
 /// on the ball's own Newton matrix. `None` where that matrix is singular (the faces tangent:
 /// the contacts coincide).
 #[allow(clippy::too_many_arguments)]
-pub fn ball_tangent(f: [&Face; 2], k: [f64; 2], dk: [f64; 2], ball: &Ball, p0: &P3, t: &V3, dp0: &V3, dt: &V3) -> Option<[(V3, Vector2<f64>); 2]> {
+pub fn ball_tangent(
+    f: [&Face; 2],
+    k: [f64; 2],
+    dk: [f64; 2],
+    ball: &Ball,
+    p0: &P3,
+    t: &V3,
+    dp0: &V3,
+    dt: &V3,
+) -> Option<[(V3, Vector2<f64>); 2]> {
     let a = offset(f[0], k[0], ball.q[0].uv)?;
     let b = offset(f[1], k[1], ball.q[1].uv)?;
     let m = Matrix4::new(
-        a.du.x, a.dv.x, -b.du.x, -b.dv.x, //
-        a.du.y, a.dv.y, -b.du.y, -b.dv.y, //
-        a.du.z, a.dv.z, -b.du.z, -b.dv.z, //
-        t.dot(&a.du), t.dot(&a.dv), 0.0, 0.0,
+        a.du.x,
+        a.dv.x,
+        -b.du.x,
+        -b.dv.x, //
+        a.du.y,
+        a.dv.y,
+        -b.du.y,
+        -b.dv.y, //
+        a.du.z,
+        a.dv.z,
+        -b.du.z,
+        -b.dv.z, //
+        t.dot(&a.du),
+        t.dot(&a.dv),
+        0.0,
+        0.0,
     );
     // The residual's derivative along the spine at fixed (u, v): the offsets grow with the
     // radius, the plane moves and turns.
@@ -249,7 +300,10 @@ pub fn ball_tangent(f: [&Face; 2], k: [f64; 2], dk: [f64; 2], ball: &Ball, p0: &
         let (_, su, sv) = fc.surf.d1(uv.x, uv.y);
         (su * du + sv * dv, Vector2::new(du, dv))
     };
-    Some([vel(f[0], ball.q[0].uv, x[0], x[1]), vel(f[1], ball.q[1].uv, x[2], x[3])])
+    Some([
+        vel(f[0], ball.q[0].uv, x[0], x[1]),
+        vel(f[1], ball.q[1].uv, x[2], x[3]),
+    ])
 }
 
 /// The ball touching three faces (offsets `k`): its centre and the contacts, from contacts
@@ -282,10 +336,21 @@ pub fn ball3(f: [&Face; 3], k: [f64; 3], guess: [P2; 3]) -> Option<(P3, [Contact
             m[(i + 3, 5)] = -c.dv[i];
         }
         let dx = m.lu().solve(&(-res))?;
-        let d: [Vector2<f64>; 3] = [Vector2::new(dx[0], dx[1]), Vector2::new(dx[2], dx[3]), Vector2::new(dx[4], dx[5])];
-        let len = [(&a, d[0]), (&b, d[1]), (&c, d[2])].iter().map(|(o, s)| (o.du * s.x + o.dv * s.y).norm()).fold(0.0, f64::max);
+        let d: [Vector2<f64>; 3] = [
+            Vector2::new(dx[0], dx[1]),
+            Vector2::new(dx[2], dx[3]),
+            Vector2::new(dx[4], dx[5]),
+        ];
+        let len = [(&a, d[0]), (&b, d[1]), (&c, d[2])]
+            .iter()
+            .map(|(o, s)| (o.du * s.x + o.dv * s.y).norm())
+            .fold(0.0, f64::max);
         let g = damp(len, (2.0 * k[0].abs()).max(tol::REL * sc));
-        x = [step(f[0], &a, x[0], d[0], g), step(f[1], &b, x[1], d[1], g), step(f[2], &c, x[2], d[2], g)];
+        x = [
+            step(f[0], &a, x[0], d[0], g),
+            step(f[1], &b, x[1], d[1], g),
+            step(f[2], &c, x[2], d[2], g),
+        ];
     }
     None
 }
@@ -302,7 +367,14 @@ pub struct Boundary<'a> {
 /// there. Found from the sign changes of the other offset's signed distance along the boundary
 /// (sampled), each refined by Newton on (t, u, v of the other face) as SMLib's
 /// `SmFilletSolver::RailEdgeuseIntersect` (SmFilletSolver.cpp) does.
-pub fn rail_crossings(f: [&Face; 2], k: [f64; 2], side: usize, bd: &Boundary, near: &P3, reach: f64) -> Vec<(f64, Ball)> {
+pub fn rail_crossings(
+    f: [&Face; 2],
+    k: [f64; 2],
+    side: usize,
+    bd: &Boundary,
+    near: &P3,
+    reach: f64,
+) -> Vec<(f64, Ball)> {
     let other = 1 - side;
     let (fs, fo) = (f[side], f[other]);
     // The ball centre the contact at boundary parameter t would have, and its derivative.
@@ -345,9 +417,10 @@ pub fn rail_crossings(f: [&Face; 2], k: [f64; 2], side: usize, bd: &Boundary, ne
         }
         let (g, _) = sd(&c, &mut hint);
         if let Some((tp, gp)) = prev
-            && (g == 0.0 || (gp < 0.0) != (g < 0.0)) {
-                brackets.push((tp, t));
-            }
+            && (g == 0.0 || (gp < 0.0) != (g < 0.0))
+        {
+            brackets.push((tp, t));
+        }
         prev = Some((t, g));
     }
     let mut out: Vec<(f64, Ball)> = Vec::new();
@@ -356,7 +429,9 @@ pub fn rail_crossings(f: [&Face; 2], k: [f64; 2], side: usize, bd: &Boundary, ne
         let (mut lo, mut hi) = (a, b);
         let mut h2: Option<P2> = None;
         let g_at = |t: f64, h: &mut Option<P2>| centre(t).map(|(c, _, _)| sd(&c, h).0);
-        let (Some(glo), Some(_)) = (g_at(lo, &mut h2), g_at(hi, &mut h2)) else { continue };
+        let (Some(glo), Some(_)) = (g_at(lo, &mut h2), g_at(hi, &mut h2)) else {
+            continue;
+        };
         let slo = glo < 0.0;
         for _ in 0..30 {
             let m = 0.5 * (lo + hi);
@@ -364,16 +439,31 @@ pub fn rail_crossings(f: [&Face; 2], k: [f64; 2], side: usize, bd: &Boundary, ne
             if (gm < 0.0) == slo { lo = m } else { hi = m }
         }
         let mut t = 0.5 * (lo + hi);
-        let Some((c0, _, _)) = centre(t) else { continue };
+        let Some((c0, _, _)) = centre(t) else {
+            continue;
+        };
         let mut uvo = foot(fo, &c0, h2);
         let mut ok = None;
         let sc = scale(&c0, k[0].abs());
         for _ in 0..40 {
-            let (Some((c, dc, cs)), Some(o)) = (centre(t), offset(fo, k[other], uvo)) else { break };
+            let (Some((c, dc, cs)), Some(o)) = (centre(t), offset(fo, k[other], uvo)) else {
+                break;
+            };
             let r = c - o.o;
             if r.norm() < 1e-11 * sc {
-                let q = if side == 0 { [cs, o.contact] } else { [o.contact, cs] };
-                ok = Some((t, Ball { c: P3::from((c.coords + o.o.coords) * 0.5), q, flat: false }));
+                let q = if side == 0 {
+                    [cs, o.contact]
+                } else {
+                    [o.contact, cs]
+                };
+                ok = Some((
+                    t,
+                    Ball {
+                        c: P3::from((c.coords + o.o.coords) * 0.5),
+                        q,
+                        flat: false,
+                    },
+                ));
                 break;
             }
             let m = Matrix3::from_columns(&[dc, -o.du, -o.dv]);
@@ -382,9 +472,12 @@ pub fn rail_crossings(f: [&Face; 2], k: [f64; 2], side: usize, bd: &Boundary, ne
             uvo = clamp_uv(fo, uvo + Vector2::new(dx[1], dx[2]));
         }
         if let Some(x) = ok
-            && !out.iter().any(|(t2, _)| (t2 - x.0).abs() < tol::REL * (1.0 + x.0.abs())) {
-                out.push(x);
-            }
+            && !out
+                .iter()
+                .any(|(t2, _)| (t2 - x.0).abs() < tol::REL * (1.0 + x.0.abs()))
+        {
+            out.push(x);
+        }
     }
     out
 }
@@ -512,7 +605,9 @@ pub fn exact_kind(f: [&Face; 2], spine: &Spine) -> Option<Exact> {
             let z = x.cross(y).normalize();
             let coaxial = |s: &Surface| match s {
                 Surface::Plane { f } => f.x.cross(&f.y).cross(&z).norm() < tol::ANGULAR,
-                _ => s.axis().is_some_and(|(o, a)| a.cross(&z).norm() < tol::ANGULAR && (o - c).cross(&z).norm() < 1e-7),
+                _ => s.axis().is_some_and(|(o, a)| {
+                    a.cross(&z).norm() < tol::ANGULAR && (o - c).cross(&z).norm() < 1e-7
+                }),
             };
             (coaxial(&f[0].surf) && coaxial(&f[1].surf)).then_some(Exact::Torus)
         }
@@ -565,9 +660,25 @@ pub fn exact_strip(kind: Exact, b: &Ball, spine: &Spine) -> Option<Strip> {
         (Exact::Cylinder, Curve::Line { d, .. }) => {
             let d = d.normalize();
             let x = (b.q[0].p - b.c).normalize();
-            let surf = Surface::Cylinder { f: Frame { o: b.c, x, y: d.cross(&x), z: d }, r };
-            let rails = [Curve::Line { o: b.q[0].p, d }, Curve::Line { o: b.q[1].p, d }];
-            Some(Strip { surf, rails, kind: StripKind::Exact(kind), on_faces: None })
+            let surf = Surface::Cylinder {
+                f: Frame {
+                    o: b.c,
+                    x,
+                    y: d.cross(&x),
+                    z: d,
+                },
+                r,
+            };
+            let rails = [
+                Curve::Line { o: b.q[0].p, d },
+                Curve::Line { o: b.q[1].p, d },
+            ];
+            Some(Strip {
+                surf,
+                rails,
+                kind: StripKind::Exact(kind),
+                on_faces: None,
+            })
         }
         (Exact::Torus, Curve::Circle { c, x, y, .. }) => {
             let z = x.cross(y).normalize();
@@ -583,15 +694,34 @@ pub fn exact_strip(kind: Exact, b: &Ball, spine: &Spine) -> Option<Strip> {
                 return None;
             }
             // The torus's frame and rails share the spine's x and y so their angles agree.
-            let f = Frame { o: axis_pt, x: *x, y: z.cross(x), z };
-            let surf = if sphere { Surface::Sphere { f, r } } else { Surface::Torus { f, rmaj, rmin: r } };
+            let f = Frame {
+                o: axis_pt,
+                x: *x,
+                y: z.cross(x),
+                z,
+            };
+            let surf = if sphere {
+                Surface::Sphere { f, r }
+            } else {
+                Surface::Torus { f, rmaj, rmin: r }
+            };
             let rail = |q: &P3| {
                 let hq = (q - c).dot(&z);
                 let cq = c + z * hq;
                 let rr = (q - cq).norm();
-                Curve::Circle { c: cq, x: *x, y: z.cross(x), r: rr }
+                Curve::Circle {
+                    c: cq,
+                    x: *x,
+                    y: z.cross(x),
+                    r: rr,
+                }
             };
-            Some(Strip { surf, rails: [rail(&b.q[0].p), rail(&b.q[1].p)], kind: StripKind::Exact(kind), on_faces: None })
+            Some(Strip {
+                surf,
+                rails: [rail(&b.q[0].p), rail(&b.q[1].p)],
+                kind: StripKind::Exact(kind),
+                on_faces: None,
+            })
         }
         _ => None,
     }
@@ -606,9 +736,21 @@ fn exact_flat(kind: Exact, b: &Ball, spine: &Spine) -> Option<Strip> {
         (Exact::Cylinder, Curve::Line { d, .. }) => {
             let d = d.normalize();
             let x = (q1 - q0).normalize();
-            let surf = Surface::Plane { f: Frame { o: q0, x, y: d, z: x.cross(&d) } };
+            let surf = Surface::Plane {
+                f: Frame {
+                    o: q0,
+                    x,
+                    y: d,
+                    z: x.cross(&d),
+                },
+            };
             let rails = [Curve::Line { o: q0, d }, Curve::Line { o: q1, d }];
-            Some(Strip { surf, rails, kind: StripKind::Exact(kind), on_faces: None })
+            Some(Strip {
+                surf,
+                rails,
+                kind: StripKind::Exact(kind),
+                on_faces: None,
+            })
         }
         (Exact::Torus, Curve::Circle { c, x, y, .. }) => {
             let z = x.cross(y).normalize();
@@ -618,18 +760,52 @@ fn exact_flat(kind: Exact, b: &Ball, spine: &Spine) -> Option<Strip> {
                 (h, (q - (c + z * h)).norm())
             };
             let ((h0, r0), (h1, r1)) = (ring(&q0), ring(&q1));
-            let rail = |h: f64, rr: f64| Curve::Circle { c: c + z * h, x: *x, y: yy, r: rr };
+            let rail = |h: f64, rr: f64| Curve::Circle {
+                c: c + z * h,
+                x: *x,
+                y: yy,
+                r: rr,
+            };
             let rails = [rail(h0, r0), rail(h1, r1)];
             let tol = tol::REL_FINE * (1.0 + r0.max(r1));
             let surf = if (h1 - h0).abs() < tol {
-                Surface::Plane { f: Frame { o: c + z * h0, x: *x, y: yy, z } }
+                Surface::Plane {
+                    f: Frame {
+                        o: c + z * h0,
+                        x: *x,
+                        y: yy,
+                        z,
+                    },
+                }
             } else if (r1 - r0).abs() < tol {
-                Surface::Cylinder { f: Frame { o: c + z * h0, x: *x, y: yy, z }, r: r0 }
+                Surface::Cylinder {
+                    f: Frame {
+                        o: c + z * h0,
+                        x: *x,
+                        y: yy,
+                        z,
+                    },
+                    r: r0,
+                }
             } else {
                 let a = (r1 - r0).atan2(h1 - h0);
-                Surface::Cone { f: Frame { o: c + z * h0, x: *x, y: yy, z }, r: r0, a }
+                Surface::Cone {
+                    f: Frame {
+                        o: c + z * h0,
+                        x: *x,
+                        y: yy,
+                        z,
+                    },
+                    r: r0,
+                    a,
+                }
             };
-            Some(Strip { surf, rails, kind: StripKind::Exact(kind), on_faces: None })
+            Some(Strip {
+                surf,
+                rails,
+                kind: StripKind::Exact(kind),
+                on_faces: None,
+            })
         }
         _ => None,
     }
@@ -668,14 +844,25 @@ fn interp_h(hs: &[H], params: &[f64], closed: bool) -> Option<(Vec<f64>, Vec<H>,
     let (a, b) = if closed {
         // The last point repeats the first: periodic over the m distinct ones.
         let m = hs.len() - 1;
-        (NurbsCurve::interpolate_periodic(&xyz[..m], params, p)?, NurbsCurve::interpolate_periodic(&ww[..m], params, p)?)
+        (
+            NurbsCurve::interpolate_periodic(&xyz[..m], params, p)?,
+            NurbsCurve::interpolate_periodic(&ww[..m], params, p)?,
+        )
     } else {
-        (NurbsCurve::interpolate(&xyz, params, p, None, None), NurbsCurve::interpolate(&ww, params, p, None, None))
+        (
+            NurbsCurve::interpolate(&xyz, params, p, None, None),
+            NurbsCurve::interpolate(&ww, params, p, None, None),
+        )
     };
     if a.knots != b.knots || a.cps.len() != b.cps.len() {
         return None;
     }
-    let cps: Vec<H> = a.cps.iter().zip(&b.cps).map(|(x, w)| H::new(x.x / x.w, x.y / x.w, x.z / x.w, w.x / w.w)).collect();
+    let cps: Vec<H> = a
+        .cps
+        .iter()
+        .zip(&b.cps)
+        .map(|(x, w)| H::new(x.x / x.w, x.y / x.w, x.z / x.w, w.x / w.w))
+        .collect();
     if cps.iter().any(|c| !(c.w > 0.0)) {
         return None;
     }
@@ -702,7 +889,11 @@ pub fn nurbs_strip(balls: &[Ball], ts: &[f64], closed: bool, kinks: &[usize]) ->
         for (j, row) in rows3.iter_mut().enumerate() {
             let col: Vec<H> = secs[a..=z].iter().map(|s| s[j]).collect();
             let (k, cps, d) = interp_h(&col, &ts[a..=z], closed && cuts.len() == 2)?;
-            let mut c = NurbsCurve { degree: d, knots: k, cps };
+            let mut c = NurbsCurve {
+                degree: d,
+                knots: k,
+                cps,
+            };
             // A short piece interpolates with a lower degree: raise it to the others'.
             while c.degree < 3 && cuts.len() > 2 {
                 c = c.elevated();
@@ -714,13 +905,21 @@ pub fn nurbs_strip(balls: &[Ball], ts: &[f64], closed: bool, kinks: &[usize]) ->
             });
         }
     }
-    let [Some(r0), Some(r1), Some(r2)] = rows3 else { return None };
+    let [Some(r0), Some(r1), Some(r2)] = rows3 else {
+        return None;
+    };
     if r0.knots != r1.knots || r0.knots != r2.knots {
         return None;
     }
     let (du, ku) = (r0.degree, r0.knots.clone());
-    let rows: Vec<Vec<H>> = (0..r0.cps.len()).map(|i| vec![r0.cps[i], r1.cps[i], r2.cps[i]]).collect();
-    let rail = |c: &NurbsCurve| -> Option<Curve> { Some(Curve::nurbs(NurbsCurve::new(c.degree, c.knots.clone(), c.cps.clone()).ok()?)) };
+    let rows: Vec<Vec<H>> = (0..r0.cps.len())
+        .map(|i| vec![r0.cps[i], r1.cps[i], r2.cps[i]])
+        .collect();
+    let rail = |c: &NurbsCurve| -> Option<Curve> {
+        Some(Curve::nurbs(
+            NurbsCurve::new(c.degree, c.knots.clone(), c.cps.clone()).ok()?,
+        ))
+    };
     let rails = [rail(&r0)?, rail(&r2)?];
     let surf = NurbsSurface::new(du, 2, ku, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], rows).ok()?;
     // The rails on their faces, where the faces' curvature doesn't jump along them.
@@ -728,18 +927,30 @@ pub fn nurbs_strip(balls: &[Ball], ts: &[f64], closed: bool, kinks: &[usize]) ->
     // there wherever the march round brought them.)
     let on_faces = (kinks.is_empty() && balls.len() >= 4).then(|| -> Option<[Curve; 2]> {
         let on = |k: usize| -> Option<Curve> {
-            let pts: Vec<P3> = balls.iter().map(|b| P3::new(b.q[k].uv.x, b.q[k].uv.y, 0.0)).collect();
-            Some(Curve::nurbs(NurbsCurve::interpolate(&pts, ts, 3, None, None)))
+            let pts: Vec<P3> = balls
+                .iter()
+                .map(|b| P3::new(b.q[k].uv.x, b.q[k].uv.y, 0.0))
+                .collect();
+            Some(Curve::nurbs(NurbsCurve::interpolate(
+                &pts, ts, 3, None, None,
+            )))
         };
         Some([on(0)?, on(1)?])
     });
-    Some(Strip { surf: Surface::Nurbs(std::sync::Arc::new(surf)), rails, kind: StripKind::Nurbs, on_faces: on_faces.flatten() })
+    Some(Strip {
+        surf: Surface::Nurbs(std::sync::Arc::new(surf)),
+        rails,
+        kind: StripKind::Nurbs,
+        on_faces: on_faces.flatten(),
+    })
 }
 
 /// How far the B-spline strip strays from the true sections `truth` at the parameters `ts`
 /// (between its stations): the largest distance of its rails and its middle line.
 pub fn strip_error(s: &Strip, truth: &[(f64, Ball)]) -> Vec<f64> {
-    let Surface::Nurbs(n) = &s.surf else { return vec![0.0; truth.len()] };
+    let Surface::Nurbs(n) = &s.surf else {
+        return vec![0.0; truth.len()];
+    };
     truth
         .iter()
         .map(|(t, b)| {

@@ -2,7 +2,7 @@
 //! their box, with the point and box tests the face queries (silhouettes, hidden lines,
 //! distances) clip and prune by.
 
-use super::classify::{in_face, InFace};
+use super::classify::{InFace, in_face};
 use super::math::*;
 use super::surface::Surface;
 use super::tol;
@@ -29,7 +29,13 @@ impl<'a> FaceDomain<'a> {
         let area: f64 = polys.iter().map(|p| polygon_area(p)).sum();
         let boxed = (ub.1 - ub.0) * (vb.1 - vb.0);
         let whole = boxed > 0.0 && area.abs() < tol::REL_FINE * boxed;
-        Self { surf, polys, ub, vb, whole }
+        Self {
+            surf,
+            polys,
+            ub,
+            vb,
+            whole,
+        }
     }
 
     /// No area: no loops, or loops that are all one line.
@@ -46,14 +52,28 @@ impl<'a> FaceDomain<'a> {
         }
         if self.whole {
             let inb = |x: f64, (lo, hi): (f64, f64), periodic: bool| {
-                let x = if periodic { lo + (x - lo).rem_euclid(TAU) } else { x };
-                x >= lo - tol::ROUNDOFF && x <= hi + tol::ROUNDOFF && !(strict && (x - lo < tol::ROUNDOFF || hi - x < tol::ROUNDOFF))
+                let x = if periodic {
+                    lo + (x - lo).rem_euclid(TAU)
+                } else {
+                    x
+                };
+                x >= lo - tol::ROUNDOFF
+                    && x <= hi + tol::ROUNDOFF
+                    && !(strict && (x - lo < tol::ROUNDOFF || hi - x < tol::ROUNDOFF))
             };
-            return inb(u, self.ub, self.surf.u_periodic()) && inb(v, self.vb, self.surf.v_periodic());
+            return inb(u, self.ub, self.surf.u_periodic())
+                && inb(v, self.vb, self.surf.v_periodic());
         }
         let shifts = |x: f64, (lo, hi): (f64, f64), periodic: bool| -> Vec<f64> {
-            let ks: &[f64] = if periodic { &[0.0, -1.0, 1.0, -2.0, 2.0] } else { &[0.0] };
-            ks.iter().map(|k| x + TAU * k).filter(|y| *y >= lo - tol::ROUNDOFF && *y <= hi + tol::ROUNDOFF).collect()
+            let ks: &[f64] = if periodic {
+                &[0.0, -1.0, 1.0, -2.0, 2.0]
+            } else {
+                &[0.0]
+            };
+            ks.iter()
+                .map(|k| x + TAU * k)
+                .filter(|y| *y >= lo - tol::ROUNDOFF && *y <= hi + tol::ROUNDOFF)
+                .collect()
         };
         for u in shifts(u, self.ub, self.surf.u_periodic()) {
             for v in shifts(v, self.vb, self.surf.v_periodic()) {
@@ -93,7 +113,12 @@ impl<'a> FaceDomain<'a> {
 fn segment_meets_box(a: &P2, b: &P2, u0: f64, u1: f64, v0: f64, v1: f64) -> bool {
     let d = b - a;
     let (mut t0, mut t1) = (0.0f64, 1.0f64);
-    for (p, q) in [(-d.x, a.x - u0), (d.x, u1 - a.x), (-d.y, a.y - v0), (d.y, v1 - a.y)] {
+    for (p, q) in [
+        (-d.x, a.x - u0),
+        (d.x, u1 - a.x),
+        (-d.y, a.y - v0),
+        (d.y, v1 - a.y),
+    ] {
         if p.abs() < tol::TINY {
             if q < 0.0 {
                 return false;

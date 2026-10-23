@@ -1,7 +1,7 @@
 //! Small numeric helpers for the native kernel: vector aliases, frames, tolerances, quadrature.
 
-use nalgebra::{Matrix3, Point2, Point3, Vector2, Vector3};
 use super::tol;
+use nalgebra::{Matrix3, Point2, Point3, Vector2, Vector3};
 
 /// A point in model space (mm).
 pub type P3 = Point3<f64>;
@@ -36,7 +36,12 @@ pub struct Frame {
 impl Frame {
     /// The world frame: the origin and the coordinate axes.
     pub fn world() -> Self {
-        Self { o: P3::origin(), x: V3::x(), y: V3::y(), z: V3::z() }
+        Self {
+            o: P3::origin(),
+            x: V3::x(),
+            y: V3::y(),
+            z: V3::z(),
+        }
     }
 
     /// A right-handed frame with `z` along `dir` and `x` along `x_hint` made square to it.
@@ -74,7 +79,12 @@ impl Frame {
 
     /// The frame moved by `m` (its axes scaled with it if `m` scales).
     pub fn transformed(&self, m: &Affine) -> Self {
-        Self { o: m.point(&self.o), x: m.vector(&self.x), y: m.vector(&self.y), z: m.vector(&self.z) }
+        Self {
+            o: m.point(&self.o),
+            x: m.vector(&self.x),
+            y: m.vector(&self.y),
+            z: m.vector(&self.z),
+        }
     }
 
     /// True when x × y = z (not mirrored).
@@ -85,7 +95,13 @@ impl Frame {
 
 /// A unit vector square to `v`.
 pub fn any_perpendicular(v: &V3) -> V3 {
-    let a = if v.x.abs() < 0.6 { V3::x() } else if v.y.abs() < 0.6 { V3::y() } else { V3::z() };
+    let a = if v.x.abs() < 0.6 {
+        V3::x()
+    } else if v.y.abs() < 0.6 {
+        V3::y()
+    } else {
+        V3::z()
+    };
     v.cross(&a).normalize()
 }
 
@@ -101,11 +117,17 @@ pub struct Affine {
 impl Affine {
     /// The map that moves nothing.
     pub fn identity() -> Self {
-        Self { m: Matrix3::identity(), t: V3::zeros() }
+        Self {
+            m: Matrix3::identity(),
+            t: V3::zeros(),
+        }
     }
     /// A translation by `t`.
     pub fn translation(t: V3) -> Self {
-        Self { m: Matrix3::identity(), t }
+        Self {
+            m: Matrix3::identity(),
+            t,
+        }
     }
     /// The image of a point.
     pub fn point(&self, p: &P3) -> P3 {
@@ -259,7 +281,11 @@ pub fn point_in_polygon(p: &P2, pts: &[P2]) -> bool {
 pub fn seg_dist2(p: &P2, a: &P2, b: &P2) -> f64 {
     let ab = b - a;
     let l = ab.norm_squared();
-    let t = if l < tol::TINY { 0.0 } else { ((p - a).dot(&ab) / l).clamp(0.0, 1.0) };
+    let t = if l < tol::TINY {
+        0.0
+    } else {
+        ((p - a).dot(&ab) / l).clamp(0.0, 1.0)
+    };
     (a + ab * t - p).norm()
 }
 
@@ -309,7 +335,10 @@ pub struct Bbox {
 
 impl Bbox {
     pub fn empty() -> Self {
-        Self { min: P3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY), max: P3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY) }
+        Self {
+            min: P3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY),
+            max: P3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY),
+        }
     }
     pub fn add(&mut self, p: &P3) {
         self.min = self.min.inf(p);
@@ -320,10 +349,18 @@ impl Bbox {
         self.max = self.max.sup(&o.max);
     }
     pub fn grow(&self, d: f64) -> Bbox {
-        Bbox { min: self.min - V3::repeat(d), max: self.max + V3::repeat(d) }
+        Bbox {
+            min: self.min - V3::repeat(d),
+            max: self.max + V3::repeat(d),
+        }
     }
     pub fn overlaps(&self, o: &Bbox) -> bool {
-        self.min.x <= o.max.x && o.min.x <= self.max.x && self.min.y <= o.max.y && o.min.y <= self.max.y && self.min.z <= o.max.z && o.min.z <= self.max.z
+        self.min.x <= o.max.x
+            && o.min.x <= self.max.x
+            && self.min.y <= o.max.y
+            && o.min.y <= self.max.y
+            && self.min.z <= o.max.z
+            && o.min.z <= self.max.z
     }
     pub fn is_empty(&self) -> bool {
         self.min.x > self.max.x
@@ -332,10 +369,19 @@ impl Bbox {
         nalgebra::center(&self.min, &self.max)
     }
     pub fn diagonal(&self) -> f64 {
-        if self.is_empty() { 0.0 } else { (self.max - self.min).norm() }
+        if self.is_empty() {
+            0.0
+        } else {
+            (self.max - self.min).norm()
+        }
     }
     pub fn contains(&self, p: &P3) -> bool {
-        p.x >= self.min.x && p.x <= self.max.x && p.y >= self.min.y && p.y <= self.max.y && p.z >= self.min.z && p.z <= self.max.z
+        p.x >= self.min.x
+            && p.x <= self.max.x
+            && p.y >= self.min.y
+            && p.y <= self.max.y
+            && p.z >= self.min.z
+            && p.z <= self.max.z
     }
 }
 

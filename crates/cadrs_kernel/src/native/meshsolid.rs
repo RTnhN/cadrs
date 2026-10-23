@@ -24,8 +24,8 @@ use super::curve::Curve;
 use super::math::*;
 use super::pcurve;
 use super::surface::Surface;
-use super::topo::*;
 use super::tol;
+use super::topo::*;
 
 /// Welds points within `tol` (looking in neighbouring grid cells).
 struct Weld {
@@ -61,8 +61,16 @@ impl Weld {
 }
 
 pub fn mesh_solid(triangles: &[[P3; 3]], tol: f64) -> Result<Body, String> {
-    let tol = if tol.is_finite() && tol > 0.0 { tol } else { tol::POINT };
-    let mut weld = Weld { tol, cells: HashMap::new(), pts: Vec::new() };
+    let tol = if tol.is_finite() && tol > 0.0 {
+        tol
+    } else {
+        tol::POINT
+    };
+    let mut weld = Weld {
+        tol,
+        cells: HashMap::new(),
+        pts: Vec::new(),
+    };
     let mut tris: Vec<[usize; 3]> = Vec::with_capacity(triangles.len());
     for t in triangles {
         let ix = [weld.add(t[0]), weld.add(t[1]), weld.add(t[2])];
@@ -97,7 +105,11 @@ pub fn mesh_solid(triangles: &[[P3; 3]], tol: f64) -> Result<Body, String> {
             return Err("the mesh is not closed (an edge is used by one triangle only)".into());
         }
     }
-    let normal = |t: &[usize; 3]| (pts[t[1]] - pts[t[0]]).cross(&(pts[t[2]] - pts[t[0]])).normalize();
+    let normal = |t: &[usize; 3]| {
+        (pts[t[1]] - pts[t[0]])
+            .cross(&(pts[t[2]] - pts[t[0]]))
+            .normalize()
+    };
     let normals: Vec<V3> = tris.iter().map(normal).collect();
     // Planar regions.
     let mut region = vec![usize::MAX; tris.len()];
@@ -167,7 +179,10 @@ pub fn mesh_solid(triangles: &[[P3; 3]], tol: f64) -> Result<Body, String> {
                 if end == hs[s].0 {
                     break;
                 }
-                match from.get(&end).and_then(|v| v.iter().copied().find(|&i| !used[i])) {
+                match from
+                    .get(&end)
+                    .and_then(|v| v.iter().copied().find(|&i| !used[i]))
+                {
                     Some(n) => cur = n,
                     None => return Err("a face boundary doesn't close".into()),
                 }
@@ -184,7 +199,10 @@ pub fn mesh_solid(triangles: &[[P3; 3]], tol: f64) -> Result<Body, String> {
                     }
                     let (pa, pv, pb) = (pts[a], pts[v], pts[b]);
                     let ab = pb - pa;
-                    if (pv - pa).cross(&ab).norm() <= tol * ab.norm() && (pv - pa).dot(&ab) > 0.0 && (pb - pv).dot(&ab) > 0.0 {
+                    if (pv - pa).cross(&ab).norm() <= tol * ab.norm()
+                        && (pv - pa).dot(&ab) > 0.0
+                        && (pb - pv).dot(&ab) > 0.0
+                    {
                         l.remove(k);
                         changed = true;
                         break;
@@ -201,16 +219,23 @@ pub fn mesh_solid(triangles: &[[P3; 3]], tol: f64) -> Result<Body, String> {
                 n += p.coords.cross(&q.coords);
             }
         }
-        let n = if n.norm() > tol::TINY { n.normalize() } else { normals[regions[ri][0]] };
+        let n = if n.norm() > tol::TINY {
+            n.normalize()
+        } else {
+            normals[regions[ri][0]]
+        };
         let l0 = &loops[0];
         let o = pts[l0[0]];
         let f = Frame::from_xz(o, pts[l0[1]] - o, n);
         let surf = Surface::Plane { f };
         let area = |l: &[usize]| -> f64 {
-            let q: Vec<P2> = l.iter().map(|&v| {
-                let lp = f.local(&pts[v]);
-                P2::new(lp.x, lp.y)
-            }).collect();
+            let q: Vec<P2> = l
+                .iter()
+                .map(|&v| {
+                    let lp = f.local(&pts[v]);
+                    P2::new(lp.x, lp.y)
+                })
+                .collect();
             polygon_area(&q)
         };
         let mut ls: Vec<(f64, Vec<usize>)> = loops.into_iter().map(|l| (area(&l), l)).collect();
@@ -231,14 +256,25 @@ pub fn mesh_solid(triangles: &[[P3; 3]], tol: f64) -> Result<Body, String> {
                 });
                 let ed = &body.edges[e];
                 let pc = pcurve::pcurve(&surf, &ed.curve, ed.t[0], ed.t[1], None);
-                co.push(Coedge { edge: e, fwd: key.0 == a, pc });
+                co.push(Coedge {
+                    edge: e,
+                    fwd: key.0 == a,
+                    pc,
+                });
             }
             face_loops.push(co);
         }
-        body.faces.push(Face { surf, sense: true, loops: face_loops });
+        body.faces.push(Face {
+            surf,
+            sense: true,
+            loops: face_loops,
+        });
     }
     let nf = body.faces.len();
-    body.shells.push(Shell { faces: (0..nf).collect(), closed: true });
+    body.shells.push(Shell {
+        faces: (0..nf).collect(),
+        closed: true,
+    });
     body.solids.push(Solid { shells: vec![0] });
     if super::mass::body_volume(&body) < 0.0 {
         for f in &mut body.faces {
@@ -267,13 +303,21 @@ fn drop_repeats(tris: Vec<[usize; 3]>) -> Vec<[usize; 3]> {
     if net.len() == tris.len() {
         return tris;
     }
-    let mut keep: Vec<usize> = net.values().filter(|(w, _)| *w != 0).map(|&(_, i)| i).collect();
+    let mut keep: Vec<usize> = net
+        .values()
+        .filter(|(w, _)| *w != 0)
+        .map(|&(_, i)| i)
+        .collect();
     keep.sort_unstable();
     keep.into_iter()
         .map(|i| {
             let (c, w) = canon(&tris[i]);
             let net_w = net[&c].0;
-            if (net_w > 0) == (w > 0) { tris[i] } else { [tris[i][0], tris[i][2], tris[i][1]] }
+            if (net_w > 0) == (w > 0) {
+                tris[i]
+            } else {
+                [tris[i][0], tris[i][2], tris[i][1]]
+            }
         })
         .collect()
 }
@@ -289,7 +333,10 @@ fn orient(mut tris: Vec<[usize; 3]>) -> Result<Vec<[usize; 3]>, String> {
             *directed.entry((t[k], t[(k + 1) % 3])).or_default() += 1;
         }
     }
-    if directed.iter().all(|(&(a, b), n)| directed.get(&(b, a)) == Some(n)) {
+    if directed
+        .iter()
+        .all(|(&(a, b), n)| directed.get(&(b, a)) == Some(n))
+    {
         return Ok(tris);
     }
     let mut uses: HashMap<(usize, usize), Vec<usize>> = HashMap::with_capacity(tris.len() * 3);
@@ -311,7 +358,9 @@ fn orient(mut tris: Vec<[usize; 3]>) -> Result<Vec<[usize; 3]>, String> {
             for k in 0..3 {
                 let (a, b) = (t[k], t[(k + 1) % 3]);
                 // Only across edges of exactly two triangles (a manifold edge).
-                let [x, y] = uses[&(a.min(b), a.max(b))][..] else { continue };
+                let [x, y] = uses[&(a.min(b), a.max(b))][..] else {
+                    continue;
+                };
                 let j = if x == i { y } else { x };
                 if seen[j] {
                     continue;
@@ -336,7 +385,8 @@ fn orient(mut tris: Vec<[usize; 3]>) -> Result<Vec<[usize; 3]>, String> {
 /// the copies).
 fn split_touching(mut tris: Vec<[usize; 3]>, pts: &mut Vec<P3>) -> Result<Vec<[usize; 3]>, String> {
     // The triangles (and the corner the edge starts at) using each directed edge.
-    let mut half: HashMap<(usize, usize), Vec<(usize, usize)>> = HashMap::with_capacity(tris.len() * 3);
+    let mut half: HashMap<(usize, usize), Vec<(usize, usize)>> =
+        HashMap::with_capacity(tris.len() * 3);
     for (i, t) in tris.iter().enumerate() {
         for k in 0..3 {
             half.entry((t[k], t[(k + 1) % 3])).or_default().push((i, k));
@@ -348,7 +398,9 @@ fn split_touching(mut tris: Vec<[usize; 3]>, pts: &mut Vec<P3>) -> Result<Vec<[u
     // across[i][k]: the triangle across triangle i's edge k (from corner k).
     let mut across: Vec<[usize; 3]> = vec![[usize::MAX; 3]; tris.len()];
     for (&(a, b), fwd) in &half {
-        let Some(back) = half.get(&(b, a)) else { continue };
+        let Some(back) = half.get(&(b, a)) else {
+            continue;
+        };
         if fwd.len() != back.len() {
             return Err("the mesh is not consistently oriented or not manifold (an edge is used more often one way than the other)".into());
         }
@@ -369,7 +421,11 @@ fn split_touching(mut tris: Vec<[usize; 3]>, pts: &mut Vec<P3>) -> Result<Vec<[u
             let c = pts[tris[i][(k + 2) % 3]] - pa;
             c.dot(&y).atan2(c.dot(&x))
         };
-        let mut around: Vec<(f64, bool, usize)> = fwd.iter().map(|h| (angle(h), true, h.0)).chain(back.iter().map(|h| (angle(h), false, h.0))).collect();
+        let mut around: Vec<(f64, bool, usize)> = fwd
+            .iter()
+            .map(|h| (angle(h), true, h.0))
+            .chain(back.iter().map(|h| (angle(h), false, h.0)))
+            .collect();
         around.sort_by(|p, q| p.0.total_cmp(&q.0));
         // A triangle running a → b has its outside turning positively about the edge, so the
         // material (and its partner) is the next one turning back.
@@ -412,7 +468,9 @@ fn split_touching(mut tris: Vec<[usize; 3]>, pts: &mut Vec<P3>) -> Result<Vec<[u
             let (a, b) = (tris[i][k], tris[i][(k + 1) % 3]);
             for v in [a, b] {
                 let ci = 3 * i + (0..3).find(|&m| tris[i][m] == v).unwrap_or(0);
-                let Some(m) = (0..3).find(|&m| tris[j][m] == v) else { continue };
+                let Some(m) = (0..3).find(|&m| tris[j][m] == v) else {
+                    continue;
+                };
                 let (r1, r2) = (find(&mut parent, ci), find(&mut parent, 3 * j + m));
                 if r1 != r2 {
                     parent[r1.max(r2)] = r1.min(r2);
@@ -469,7 +527,10 @@ mod tests {
         assert!((super::super::mass::body_volume(&b) - 1000.0).abs() < 1e-9);
         // Inside out: reversed back.
         let inv: Vec<[P3; 3]> = tris.iter().map(|t| [t[0], t[2], t[1]]).collect();
-        assert!((super::super::mass::body_volume(&mesh_solid(&inv, 1e-6).unwrap()) - 1000.0).abs() < 1e-9);
+        assert!(
+            (super::super::mass::body_volume(&mesh_solid(&inv, 1e-6).unwrap()) - 1000.0).abs()
+                < 1e-9
+        );
         assert!(mesh_solid(&tris[..20], 1e-6).is_err());
     }
 
@@ -484,7 +545,10 @@ mod tests {
             [c(0., 0., 0.), c(0., 0., 1.), c(0., 1., 1.), c(0., 1., 0.)],
             [c(1., 0., 0.), c(1., 1., 0.), c(1., 1., 1.), c(1., 0., 1.)],
         ];
-        quads.iter().flat_map(|q| [[q[0], q[1], q[2]], [q[0], q[2], q[3]]]).collect()
+        quads
+            .iter()
+            .flat_map(|q| [[q[0], q[1], q[2]], [q[0], q[2], q[3]]])
+            .collect()
     }
 
     /// mirror_test's STL: two parts of the surface touch along an edge (four triangles there,
@@ -507,7 +571,11 @@ mod tests {
         tris[3] = [tris[3][0], tris[3][2], tris[3][1]];
         tris[7] = [tris[7][1], tris[7][0], tris[7][2]];
         tris.push(tris[0]);
-        let fin = [P3::new(0.0, 0.0, 0.0), P3::new(10.0, 0.0, 0.0), P3::new(5.0, 5.0, 5.0)];
+        let fin = [
+            P3::new(0.0, 0.0, 0.0),
+            P3::new(10.0, 0.0, 0.0),
+            P3::new(5.0, 5.0, 5.0),
+        ];
         tris.push(fin);
         tris.push([fin[0], fin[2], fin[1]]);
         let b = mesh_solid(&tris, tol::POINT).unwrap();

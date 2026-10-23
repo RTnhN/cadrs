@@ -16,12 +16,24 @@ pub const MIN_DEPTH: f64 = 1e-6;
 
 /// The map from sketch coordinates (z = 0) to model space at `s` along `dir`.
 pub fn plane_map(plane: &crate::Plane, dir: &V3, s: f64) -> Affine {
-    let (x, y, n) = (plane.x_dir.into_inner(), plane.y_dir().into_inner(), plane.normal.into_inner());
-    Affine { m: nalgebra::Matrix3::from_columns(&[x, y, n]), t: plane.origin.coords + dir * s }
+    let (x, y, n) = (
+        plane.x_dir.into_inner(),
+        plane.y_dir().into_inner(),
+        plane.normal.into_inner(),
+    );
+    Affine {
+        m: nalgebra::Matrix3::from_columns(&[x, y, n]),
+        t: plane.origin.coords + dir * s,
+    }
 }
 
 pub fn plane_frame(plane: &crate::Plane, offset: V3) -> Frame {
-    Frame { o: plane.origin + offset, x: plane.x_dir.into_inner(), y: plane.y_dir().into_inner(), z: plane.normal.into_inner() }
+    Frame {
+        o: plane.origin + offset,
+        x: plane.x_dir.into_inner(),
+        y: plane.y_dir().into_inner(),
+        z: plane.normal.into_inner(),
+    }
 }
 
 /// Signed area in uv of a face's first loop, by sampling its p-curves.
@@ -48,4 +60,3 @@ pub fn fix_senses(body: &mut Body, faces: impl IntoIterator<Item = usize>) {
         body.faces[fi].sense = a > 0.0;
     }
 }
-

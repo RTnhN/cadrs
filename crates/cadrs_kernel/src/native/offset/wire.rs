@@ -39,7 +39,9 @@ impl Piece2 {
     }
     fn dir(&self, t: f64) -> V2 {
         let d = self.c.tangent(t);
-        V2::new(d.x, d.y).try_normalize(tol::TINY).unwrap_or(V2::new(1.0, 0.0))
+        V2::new(d.x, d.y)
+            .try_normalize(tol::TINY)
+            .unwrap_or(V2::new(1.0, 0.0))
     }
 }
 
@@ -62,7 +64,11 @@ fn p2(p: &P3) -> V2 {
 /// The edge run forwards (`t0 < t1`).
 fn forward(c: &Curve, t0: f64, t1: f64) -> Piece2 {
     if t1 >= t0 {
-        Piece2 { c: c.clone(), t0, t1 }
+        Piece2 {
+            c: c.clone(),
+            t0,
+            t1,
+        }
     } else {
         // `reversed` maps an increasing range: the edge's [t1, t0] run the other way.
         let (c, a, b) = c.reversed(t1, t0);
@@ -79,7 +85,14 @@ fn offset_edge(e: &Piece2, l: f64, size: f64) -> Option<(Piece2, f64)> {
             let n = left(e.dir(e.t0));
             let sh = V3::new(n.x, n.y, 0.0) * l;
             let (c, len) = Curve::line(e.start() + sh, e.end() + sh);
-            Some((Piece2 { c, t0: 0.0, t1: len }, 0.0))
+            Some((
+                Piece2 {
+                    c,
+                    t0: 0.0,
+                    t1: len,
+                },
+                0.0,
+            ))
         }
         Curve::Circle { c, x, y, r } => {
             // Run counter-clockwise the left is the centre's side.
@@ -88,12 +101,26 @@ fn offset_edge(e: &Piece2, l: f64, size: f64) -> Option<(Piece2, f64)> {
             if r2 <= tol::REL * size {
                 return None;
             }
-            Some((Piece2 { c: Curve::Circle { c: *c, x: *x, y: *y, r: r2 }, t0: e.t0, t1: e.t1 }, 0.0))
+            Some((
+                Piece2 {
+                    c: Curve::Circle {
+                        c: *c,
+                        x: *x,
+                        y: *y,
+                        r: r2,
+                    },
+                    t0: e.t0,
+                    t1: e.t1,
+                },
+                0.0,
+            ))
         }
         _ => {
             let mut ts = e.c.sample_params(e.t0, e.t1, size * 1e-7, 0.05);
             if ts.len() < 65 {
-                ts = (0..=64).map(|i| e.t0 + (e.t1 - e.t0) * i as f64 / 64.0).collect();
+                ts = (0..=64)
+                    .map(|i| e.t0 + (e.t1 - e.t0) * i as f64 / 64.0)
+                    .collect();
             }
             let at = |t: f64| {
                 let n = left(e.dir(t));
@@ -109,13 +136,24 @@ fn offset_edge(e: &Piece2, l: f64, size: f64) -> Option<(Piece2, f64)> {
                 .map(|(t, s)| {
                     let d = c.ders(0.5 * (s[0] + s[1]), 1);
                     let (q, d1) = (P3::from(d[0]), d[1]);
-                    let n = left(V2::new(d1.x, d1.y).try_normalize(tol::TINY).unwrap_or(V2::new(1.0, 0.0)));
+                    let n = left(
+                        V2::new(d1.x, d1.y)
+                            .try_normalize(tol::TINY)
+                            .unwrap_or(V2::new(1.0, 0.0)),
+                    );
                     let w = at(0.5 * (t[0] + t[1])) - q;
                     (w.x * n.x + w.y * n.y).abs()
                 })
                 .fold(0.0, f64::max);
             let (a, b) = c.range();
-            Some((Piece2 { c: Curve::Nurbs(std::sync::Arc::new(c)), t0: a, t1: b }, err))
+            Some((
+                Piece2 {
+                    c: Curve::Nurbs(std::sync::Arc::new(c)),
+                    t0: a,
+                    t1: b,
+                },
+                err,
+            ))
         }
     }
 }
@@ -124,7 +162,16 @@ fn offset_edge(e: &Piece2, l: f64, size: f64) -> Option<(Piece2, f64)> {
 fn join_arc(v: P3, n1: V2, phi: f64, l: f64) -> Piece2 {
     let u0 = n1 * l.signum();
     let y = left(u0) * phi.signum();
-    Piece2 { c: Curve::Circle { c: v, x: V3::new(u0.x, u0.y, 0.0), y: V3::new(y.x, y.y, 0.0), r: l.abs() }, t0: 0.0, t1: phi.abs() }
+    Piece2 {
+        c: Curve::Circle {
+            c: v,
+            x: V3::new(u0.x, u0.y, 0.0),
+            y: V3::new(y.x, y.y, 0.0),
+            r: l.abs(),
+        },
+        t0: 0.0,
+        t1: phi.abs(),
+    }
 }
 
 /// The plane through `pts` fitting them best (least squares): its centroid and normal, when
@@ -143,7 +190,9 @@ pub fn best_plane(pts: &[P3], rel: f64) -> Option<(P3, V3)> {
     let n: V3 = eig.eigenvectors.column(k).into();
     let n = n.try_normalize(tol::TINY)?;
     let size = pts.iter().map(|p| (p - o).norm()).fold(0.0, f64::max);
-    pts.iter().all(|p| (p - o).dot(&n).abs() <= rel * size).then_some((o, n))
+    pts.iter()
+        .all(|p| (p - o).dot(&n).abs() <= rel * size)
+        .then_some((o, n))
 }
 
 /// The curve projected onto the plane z = 0 (a wire only nearly planar, fitted to that plane),
@@ -160,20 +209,55 @@ fn flattened(c: &Curve, t0: f64, t1: f64) -> (Curve, f64, f64) {
         Curve::Line { o, d } if d.z != 0.0 || o.z != 0.0 => {
             let (a, b) = (c.point(t0), c.point(t1));
             let (l, len) = Curve::line(P3::new(a.x, a.y, 0.0), P3::new(b.x, b.y, 0.0));
-            if t1 >= t0 { (l, 0.0, len) } else { (l, len, 0.0) }
+            if t1 >= t0 {
+                (l, 0.0, len)
+            } else {
+                (l, len, 0.0)
+            }
         }
-        Curve::Circle { c: o, x, y, r } if x.z.abs() < tol::ROUNDOFF_FINE && y.z.abs() < tol::ROUNDOFF_FINE && o.z != 0.0 => {
-            (Curve::Circle { c: P3::new(o.x, o.y, 0.0), x: *x, y: *y, r: *r }, t0, t1)
+        Curve::Circle { c: o, x, y, r }
+            if x.z.abs() < tol::ROUNDOFF_FINE && y.z.abs() < tol::ROUNDOFF_FINE && o.z != 0.0 =>
+        {
+            (
+                Curve::Circle {
+                    c: P3::new(o.x, o.y, 0.0),
+                    x: *x,
+                    y: *y,
+                    r: *r,
+                },
+                t0,
+                t1,
+            )
         }
-        Curve::Ellipse { c: o, x, y, a, b } if x.z.abs() < tol::ROUNDOFF_FINE && y.z.abs() < tol::ROUNDOFF_FINE && o.z != 0.0 => {
-            (Curve::Ellipse { c: P3::new(o.x, o.y, 0.0), x: *x, y: *y, a: *a, b: *b }, t0, t1)
+        Curve::Ellipse { c: o, x, y, a, b }
+            if x.z.abs() < tol::ROUNDOFF_FINE && y.z.abs() < tol::ROUNDOFF_FINE && o.z != 0.0 =>
+        {
+            (
+                Curve::Ellipse {
+                    c: P3::new(o.x, o.y, 0.0),
+                    x: *x,
+                    y: *y,
+                    a: *a,
+                    b: *b,
+                },
+                t0,
+                t1,
+            )
         }
-        Curve::Circle { x, y, .. } | Curve::Ellipse { x, y, .. } if x.z.abs() >= tol::ROUNDOFF_FINE || y.z.abs() >= tol::ROUNDOFF_FINE => {
+        Curve::Circle { x, y, .. } | Curve::Ellipse { x, y, .. }
+            if x.z.abs() >= tol::ROUNDOFF_FINE || y.z.abs() >= tol::ROUNDOFF_FINE =>
+        {
             let (lo, hi) = (t0.min(t1), t0.max(t1));
             let n = flat(&c.to_nurbs(lo, hi));
-            if t1 >= t0 { (Curve::Nurbs(std::sync::Arc::new(n)), lo, hi) } else { (Curve::Nurbs(std::sync::Arc::new(n)), hi, lo) }
+            if t1 >= t0 {
+                (Curve::Nurbs(std::sync::Arc::new(n)), lo, hi)
+            } else {
+                (Curve::Nurbs(std::sync::Arc::new(n)), hi, lo)
+            }
         }
-        Curve::Nurbs(n) if n.cps.iter().any(|h| h.z != 0.0) => (Curve::Nurbs(std::sync::Arc::new(flat(n))), t0, t1),
+        Curve::Nurbs(n) if n.cps.iter().any(|h| h.z != 0.0) => {
+            (Curve::Nurbs(std::sync::Arc::new(flat(n))), t0, t1)
+        }
         _ => (c.clone(), t0, t1),
     }
 }
@@ -247,7 +331,11 @@ fn bspline_curvature_points(n: &NurbsCurve, t0: f64, t1: f64) -> Vec<f64> {
     breaks.push(t1);
     let d123 = |u: f64| {
         let d = n.ders(u, 3);
-        (V2::new(d[1].x, d[1].y), V2::new(d[2].x, d[2].y), V2::new(d[3].x, d[3].y))
+        (
+            V2::new(d[1].x, d[1].y),
+            V2::new(d[2].x, d[2].y),
+            V2::new(d[3].x, d[3].y),
+        )
     };
     // κ'·|D1| (Geom2dLProp_FuncCurExt::Value).
     let cur_ext = |u: f64| -> Option<f64> {
@@ -270,15 +358,22 @@ fn bspline_curvature_points(n: &NurbsCurve, t0: f64, t1: f64) -> Vec<f64> {
     for w in breaks.windows(2) {
         let (a, b) = (w[0], w[1]);
         let eps_h = CUR_EXT_EPS * (b - a);
-        let func = CurExt { f: &cur_ext, eps: eps_h, last: t1 };
+        let func = CurExt {
+            f: &cur_ext,
+            eps: eps_h,
+            last: t1,
+        };
         for r in function_roots(&func, a, b, 100, eps_h, eps_h, eps_h).unwrap_or_default() {
-            let polished = bracketed_root(&cur_ext, r - eps_h, r + eps_h, P_CONFUSION).map_or(r, |(x, _)| x);
+            let polished =
+                bracketed_root(&cur_ext, r - eps_h, r + eps_h, P_CONFUSION).map_or(r, |(x, _)| x);
             add(&mut out, polished);
         }
     }
     let nul = CurNul(d123);
     for w in breaks.windows(2) {
-        for r in function_roots(&nul, w[0], w[1], 30, CUR_NUL_EPS, CUR_NUL_EPS, CUR_NUL_EPS).unwrap_or_default() {
+        for r in function_roots(&nul, w[0], w[1], 30, CUR_NUL_EPS, CUR_NUL_EPS, CUR_NUL_EPS)
+            .unwrap_or_default()
+        {
             add(&mut out, r);
         }
     }
@@ -339,7 +434,8 @@ impl<F: Fn(f64) -> (V2, V2, V2)> RootFn for CurNul<F> {
             None
         } else {
             let f = cp1 / (nv1 * nv2);
-            let d = (cp2 - cp1 * v1.dot(&v2) / (nv1 * nv1) - cp1 * v2.dot(&v3) / (nv2 * nv2)) / (nv1 * nv2);
+            let d = (cp2 - cp1 * v1.dot(&v2) / (nv1 * nv1) - cp1 * v2.dot(&v3) / (nv2 * nv2))
+                / (nv1 * nv2);
             Some((f, d))
         }
     }
@@ -352,7 +448,15 @@ impl<F: Fn(f64) -> (V2, V2, V2)> RootFn for CurNul<F> {
 /// minimum searched ([`refine_minimum`]) and taken when within `eps_f`. Roots closer than 1e-10
 /// of the range's magnitude are one. None when `f` isn't defined at a sample; empty when every
 /// sample lies within `eps_null` of zero.
-fn function_roots<F: RootFn>(f: &F, a: f64, b: f64, nsample: usize, eps_x_in: f64, eps_f: f64, eps_null: f64) -> Option<Vec<f64>> {
+fn function_roots<F: RootFn>(
+    f: &F,
+    a: f64,
+    b: f64,
+    nsample: usize,
+    eps_x_in: f64,
+    eps_f: f64,
+    eps_null: f64,
+) -> Option<Vec<f64>> {
     let (x0, xn) = if b < a { (b, a) } else { (a, b) };
     let n = (nsample * 2).max(20);
     let neps_x = ROOTS_SAME * (x0.abs() + xn.abs());
@@ -419,7 +523,22 @@ fn function_roots<F: RootFn>(f: &F, a: f64, b: f64, nsample: usize, eps_x_in: f6
             false
         };
         if rediscr {
-            refine_minimum(f, MinSearch { xm, dx, lo: x0, hi: xn, f0, f3, eps_x: eps_x_in, eps_f, tol, neps_x }, &mut sol);
+            refine_minimum(
+                f,
+                MinSearch {
+                    xm,
+                    dx,
+                    lo: x0,
+                    hi: xn,
+                    f0,
+                    f3,
+                    eps_x: eps_x_in,
+                    eps_f,
+                    tol,
+                    neps_x,
+                },
+                &mut sol,
+            );
         }
         xm += dx;
     }
@@ -445,7 +564,18 @@ struct MinSearch {
 /// derivative's root by [`bracketed_root`] and a golden-section search (solving on any sign
 /// change it meets), the one nearer zero kept when within `eps_f`.
 fn refine_minimum<F: RootFn>(f: &F, s: MinSearch, sol: &mut Vec<f64>) {
-    let MinSearch { xm, dx, lo, hi, mut f0, mut f3, eps_x, eps_f, tol, neps_x } = s;
+    let MinSearch {
+        xm,
+        dx,
+        lo,
+        hi,
+        mut f0,
+        mut f3,
+        eps_x,
+        eps_f,
+        tol,
+        neps_x,
+    } = s;
     let mut x0 = (xm - dx).max(lo);
     let mut x3 = (xm + dx).min(hi);
     let val = |x: f64| f.value(x).unwrap_or(0.0);
@@ -460,13 +590,20 @@ fn refine_minimum<F: RootFn>(f: &F, s: MinSearch, sol: &mut Vec<f64>) {
     const C: f64 = 1.0 - R;
     let tol_cr = neps_x * 10.0;
     let minimum = f0 > 0.0;
-    let (mut x1, mut x2) = if (x3 - xm).abs() > (x0 - xm).abs() { (xm, xm + C * (x3 - xm)) } else { (xm - C * (xm - x0), xm) };
+    let (mut x1, mut x2) = if (x3 - xm).abs() > (x0 - xm).abs() {
+        (xm, xm + C * (x3 - xm))
+    } else {
+        (xm - C * (xm - x0), xm)
+    };
     let (mut f1, mut f2) = (val(x1), val(x2));
     let tol_x = 0.001 * neps_x;
     // (A cap OCCT doesn't have: the interval shrinks by 0.618 a step, so 2000 steps are far
     // more than a double needs.)
     let mut steps = 0;
-    while (x3 - x0).abs() > tol_cr * (x1.abs() + x2.abs()) && (x1 - x2).abs() > tol_x && steps < 2000 {
+    while (x3 - x0).abs() > tol_cr * (x1.abs() + x2.abs())
+        && (x1 - x2).abs() > tol_x
+        && steps < 2000
+    {
         steps += 1;
         let right = if minimum { f2 < f1 } else { f2 > f1 };
         if right {
@@ -537,7 +674,16 @@ fn append_root(sol: &mut Vec<f64>, x: f64, dx: f64) {
 /// polished by up to six Newton steps that stay inside and get nearer zero, then added by
 /// [`append_root`] within `dx` (OCCT's `Solve` in `math_FunctionRoots`).
 #[allow(clippy::too_many_arguments)]
-fn brent<F: RootFn>(f: &F, x1: f64, y1: f64, x2: f64, y2: f64, tol: f64, dx: f64, sol: &mut Vec<f64>) {
+fn brent<F: RootFn>(
+    f: &F,
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+    tol: f64,
+    dx: f64,
+    sol: &mut Vec<f64>,
+) {
     const ITMAX: usize = 100;
     const EPSEPS: f64 = 2e-14;
     let tols2 = 0.5 * tol;
@@ -596,7 +742,18 @@ fn brent<F: RootFn>(f: &F, x1: f64, y1: f64, x2: f64, y2: f64, tol: f64, dx: f64
 /// One step of Brent's method from the root `b` (other end `c`, last point `a`): the inverse
 /// quadratic (or secant) step when it falls well inside, else bisection; the new (d, e).
 #[allow(clippy::too_many_arguments)]
-fn brent_step(a: f64, b: f64, c: f64, fa: f64, fb: f64, fc: f64, d: f64, e: f64, xm: f64, tol1: f64) -> (f64, f64) {
+fn brent_step(
+    a: f64,
+    b: f64,
+    c: f64,
+    fa: f64,
+    fb: f64,
+    fc: f64,
+    d: f64,
+    e: f64,
+    xm: f64,
+    tol1: f64,
+) -> (f64, f64) {
     if e.abs() < tol1 || fa.abs() <= fb.abs() {
         return (xm, xm);
     }
@@ -617,13 +774,22 @@ fn brent_step(a: f64, b: f64, c: f64, fa: f64, fb: f64, fc: f64, d: f64, e: f64,
     p = p.abs();
     let min1 = 3.0 * xm * q - (tol1 * q).abs();
     let min2 = (e * q).abs();
-    if 2.0 * p < min1.min(min2) { (p / q, d) } else { (xm, xm) }
+    if 2.0 * p < min1.min(min2) {
+        (p / q, d)
+    } else {
+        (xm, xm)
+    }
 }
 
 /// The root of `g` between `b1` and `b2` (values of opposite signs) to `tolerance`, with `g`
 /// there, by OCCT's `math_BracketedRoot` (Brent's method in at most 100 steps); None when the
 /// ends' values have the same sign or it doesn't converge.
-fn bracketed_root(g: &dyn Fn(f64) -> Option<f64>, b1: f64, b2: f64, tolerance: f64) -> Option<(f64, f64)> {
+fn bracketed_root(
+    g: &dyn Fn(f64) -> Option<f64>,
+    b1: f64,
+    b2: f64,
+    tolerance: f64,
+) -> Option<(f64, f64)> {
     const ZEPS: f64 = 1e-12;
     let mut a = b1;
     let mut root = b2;
@@ -682,20 +848,30 @@ fn cut_at(e: &Piece2, ts: &[f64]) -> Vec<Piece2> {
             if ul - uc < ptol || (pl - pc).norm() < tol {
                 continue;
             }
-            out.push(Piece2 { c: e.c.clone(), t0: uf, t1: uc });
+            out.push(Piece2 {
+                c: e.c.clone(),
+                t0: uf,
+                t1: uc,
+            });
             uf = uc;
             pf = pc;
         }
     }
     if !out.is_empty() {
-        out.push(Piece2 { c: e.c.clone(), t0: uf, t1: ul });
+        out.push(Piece2 {
+            c: e.c.clone(),
+            t0: uf,
+            t1: ul,
+        });
     }
     out
 }
 
 /// `e` cut into `n` pieces of equal parameter span (OCCT's `CutCurve`).
 fn cut_even(e: &Piece2, n: usize) -> Vec<Piece2> {
-    let ts: Vec<f64> = (1..n).map(|i| e.t0 + (e.t1 - e.t0) * i as f64 / n as f64).collect();
+    let ts: Vec<f64> = (1..n)
+        .map(|i| e.t0 + (e.t1 - e.t0) * i as f64 / n as f64)
+        .collect();
     cut_at(e, &ts)
 }
 
@@ -713,8 +889,17 @@ struct SpineEdge {
 impl SpineEdge {
     /// The edge (c run from `a` to `b`, either way round) on [lo, hi].
     fn new(c: &Curve, a: f64, b: f64, lo: f64, hi: f64) -> Self {
-        let p = if a <= b { forward(c, lo, hi) } else { forward(c, hi, lo) };
-        SpineEdge { p, src: c.clone(), lo, hi }
+        let p = if a <= b {
+            forward(c, lo, hi)
+        } else {
+            forward(c, hi, lo)
+        };
+        SpineEdge {
+            p,
+            src: c.clone(),
+            lo,
+            hi,
+        }
     }
 
     /// Whether `p` runs the source curve backwards.
@@ -725,7 +910,10 @@ impl SpineEdge {
 
     fn reversed(&self) -> Self {
         let (c, a, b) = self.p.c.reversed(self.p.t0, self.p.t1);
-        SpineEdge { p: Piece2 { c, t0: a, t1: b }, ..self.clone() }
+        SpineEdge {
+            p: Piece2 { c, t0: a, t1: b },
+            ..self.clone()
+        }
     }
 }
 
@@ -742,9 +930,17 @@ fn prepare_spine(wire: &[(Curve, f64, f64)]) -> Vec<SpineEdge> {
     let mut first_cut = 0;
     for (i, (c, a, b)) in wire.iter().enumerate() {
         let (lo, hi) = (a.min(*b), a.max(*b));
-        let e = Piece2 { c: c.clone(), t0: lo, t1: hi };
+        let e = Piece2 {
+            c: c.clone(),
+            t0: lo,
+            t1: hi,
+        };
         let half_circle = n > 1 && matches!(c, Curve::Circle { .. }) && hi - lo >= PI;
-        let cuts = if half_circle { Vec::new() } else { cut_at(&e, &curvature_points(c, lo, hi)) };
+        let cuts = if half_circle {
+            Vec::new()
+        } else {
+            cut_at(&e, &curvature_points(c, lo, hi))
+        };
         let force = if half_circle {
             0
         } else if n == 1 {
@@ -773,7 +969,10 @@ fn prepare_spine(wire: &[(Curve, f64, f64)]) -> Vec<SpineEdge> {
             first_cut = pieces.len();
         }
         let pieces = if pieces.is_empty() { vec![e] } else { pieces };
-        let mut edges: Vec<SpineEdge> = pieces.iter().map(|p| SpineEdge::new(c, *a, *b, p.t0, p.t1)).collect();
+        let mut edges: Vec<SpineEdge> = pieces
+            .iter()
+            .map(|p| SpineEdge::new(c, *a, *b, p.t0, p.t1))
+            .collect();
         if a > b {
             edges.reverse();
         }
@@ -800,7 +999,11 @@ fn is_bad_edge(e: &Piece2, side: f64, dist: f64) -> bool {
         }
         let (dd1, dd2) = (d1.norm_squared(), d2.norm_squared());
         let nn = cross2(d1, d2);
-        let crv = if dd2 <= eps * eps || nn.abs() / (dd1 * dd2) <= eps * eps { 0.0 } else { nn.abs() / (dd1 * dd1.sqrt()) };
+        let crv = if dd2 <= eps * eps || nn.abs() / (dd1 * dd2) <= eps * eps {
+            0.0
+        } else {
+            nn.abs() / (dd1 * dd1.sqrt())
+        };
         crv >= eps && nn * side > 0.0 && 1.0 / dist <= crv + eps
     })
 }
@@ -815,7 +1018,16 @@ fn polyline_points(c: &Curve, lo: f64, hi: f64, defl: f64) -> Vec<P3> {
     let mut pts = vec![pdeb];
     // (OCCT's guard against a curve whose ends coincide however long its range.)
     if (hi - lo) / (pfin - pdeb).norm() > 5e-14 {
-        quasi_fleche(c, defl * defl, (lo, pdeb, ddeb), (hi, pfin, dfin), 2, eps, &mut pts, 0);
+        quasi_fleche(
+            c,
+            defl * defl,
+            (lo, pdeb, ddeb),
+            (hi, pfin, dfin),
+            2,
+            eps,
+            &mut pts,
+            0,
+        );
     }
     pts
 }
@@ -824,7 +1036,16 @@ fn polyline_points(c: &Curve, lo: f64, hi: f64, defl: f64) -> Vec<P3> {
 /// `nbmin` > 2 the span is split in `nbmin − 1`, else whole; a span whose sag (from its end
 /// tangents, or its midpoint) exceeds √`defl2` is halved.
 #[allow(clippy::too_many_arguments)]
-fn quasi_fleche(c: &Curve, defl2: f64, deb: (f64, P3, V3), fin: (f64, P3, V3), nbmin: i64, eps: f64, pts: &mut Vec<P3>, depth: usize) {
+fn quasi_fleche(
+    c: &Curve,
+    defl2: f64,
+    deb: (f64, P3, V3),
+    fin: (f64, P3, V3),
+    nbmin: i64,
+    eps: f64,
+    pts: &mut Vec<P3>,
+    depth: usize,
+) {
     let (udeb, pdeb, vdeb) = deb;
     let (ufin, pfin, vfin) = fin;
     let start_len = pts.len() as i64;
@@ -844,15 +1065,36 @@ fn quasi_fleche(c: &Curve, defl2: f64, deb: (f64, P3, V3), fin: (f64, P3, V3), n
             fleche = Some(diff * norme / 64.0);
         }
     }
-    let fleche = fleche.unwrap_or_else(|| (P3::from((pdeb.coords + pdelta.coords) / 2.0) - c.point(udeb + udelta / 2.0)).norm_squared());
+    let fleche = fleche.unwrap_or_else(|| {
+        (P3::from((pdeb.coords + pdelta.coords) / 2.0) - c.point(udeb + udelta / 2.0))
+            .norm_squared()
+    });
     // (A depth cap OCCT doesn't have, against a curve that never flattens: 2⁴⁰ pieces.)
     if fleche < defl2 || depth > 40 {
         pts.push(pdelta);
     } else {
-        quasi_fleche(c, defl2, deb, (udeb + udelta, pdelta, vdelta), 3, eps, pts, depth + 1);
+        quasi_fleche(
+            c,
+            defl2,
+            deb,
+            (udeb + udelta, pdelta, vdelta),
+            3,
+            eps,
+            pts,
+            depth + 1,
+        );
     }
     if nbmin > 2 {
-        quasi_fleche(c, defl2, (udeb + udelta, pdelta, vdelta), fin, nbmin - (pts.len() as i64 - start_len), eps, pts, depth + 1);
+        quasi_fleche(
+            c,
+            defl2,
+            (udeb + udelta, pdelta, vdelta),
+            fin,
+            nbmin - (pts.len() as i64 - start_len),
+            eps,
+            pts,
+            depth + 1,
+        );
     }
 }
 
@@ -880,7 +1122,16 @@ fn polyline_bad_edges(spine: Vec<SpineEdge>, side: f64, dist: f64) -> Vec<SpineE
         }
         for w in corners.windows(2) {
             let (c, len) = Curve::line(w[0], w[1]);
-            out.push(SpineEdge { p: Piece2 { c: c.clone(), t0: 0.0, t1: len }, src: c, lo: 0.0, hi: len });
+            out.push(SpineEdge {
+                p: Piece2 {
+                    c: c.clone(),
+                    t0: 0.0,
+                    t1: len,
+                },
+                src: c,
+                lo: 0.0,
+                hi: len,
+            });
         }
     }
     out
@@ -890,7 +1141,9 @@ fn polyline_bad_edges(spine: Vec<SpineEdge>, side: f64, dist: f64) -> Vec<SpineE
 /// wire outwards for d > 0, an open one on both sides with round ends.
 pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2>>> {
     if edges.is_empty() || d == 0.0 {
-        return Err(KernelError::InvalidParameter("an offset needs edges and a distance".into()));
+        return Err(KernelError::InvalidParameter(
+            "an offset needs edges and a distance".into(),
+        ));
     }
     let clock = std::time::Instant::now();
     let flat: Vec<(Curve, f64, f64)> = edges.iter().map(|(c, a, b)| flattened(c, *a, *b)).collect();
@@ -900,22 +1153,33 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
     let mut lens = Vec::with_capacity(flat.len());
     for (c, a, b) in &flat {
         let e = forward(c, *a, *b);
-        let pts: Vec<P3> = (0..=8).map(|k| e.c.point(e.t0 + (e.t1 - e.t0) * k as f64 / 8.0)).collect();
-        if !(e.t0.is_finite() && e.t1.is_finite()) || pts.iter().any(|p| !(p.x.is_finite() && p.y.is_finite())) {
-            return Err(KernelError::InvalidParameter("an offset of a wire with an edge of no length in its plane".into()));
+        let pts: Vec<P3> = (0..=8)
+            .map(|k| e.c.point(e.t0 + (e.t1 - e.t0) * k as f64 / 8.0))
+            .collect();
+        if !(e.t0.is_finite() && e.t1.is_finite())
+            || pts.iter().any(|p| !(p.x.is_finite() && p.y.is_finite()))
+        {
+            return Err(KernelError::InvalidParameter(
+                "an offset of a wire with an edge of no length in its plane".into(),
+            ));
         }
         lens.push(pts.windows(2).map(|w| (w[1] - w[0]).norm()).sum::<f64>());
         pts.iter().for_each(|p| bb.add(p));
     }
     if lens.iter().any(|l| *l <= bb.diagonal() * tol::REL_FINE) {
-        return Err(KernelError::InvalidParameter("an offset of a wire with an edge of no length in its plane".into()));
+        return Err(KernelError::InvalidParameter(
+            "an offset of a wire with an edge of no length in its plane".into(),
+        ));
     }
     let size = bb.diagonal().max(d.abs());
     let tol = size * 1e-7;
     // (Edges however short are kept: OCCT offsets them to edges of their own.)
     let spine = chained(prepare_spine(&flat));
     // The wire's own gaps between edges (vertex tolerances) set the closure and chaining.
-    let gap = spine.windows(2).map(|w| (w[0].p.end() - w[1].p.start()).norm()).fold(0.0, f64::max);
+    let gap = spine
+        .windows(2)
+        .map(|w| (w[0].p.end() - w[1].p.start()).norm())
+        .fold(0.0, f64::max);
     let (first, last) = (spine[0].p.start(), spine[spine.len() - 1].p.end());
     let closing = (first - last).norm();
     let closed = closing < (tol * 10.0).max(size * 1e-4).max(gap * 3.0);
@@ -925,7 +1189,10 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
         let mut area = 0.0;
         for e in spine.iter().map(|s| &s.p) {
             for k in 0..32 {
-                let (a, b) = (e.c.point(e.t0 + (e.t1 - e.t0) * k as f64 / 32.0), e.c.point(e.t0 + (e.t1 - e.t0) * (k + 1) as f64 / 32.0));
+                let (a, b) = (
+                    e.c.point(e.t0 + (e.t1 - e.t0) * k as f64 / 32.0),
+                    e.c.point(e.t0 + (e.t1 - e.t0) * (k + 1) as f64 / 32.0),
+                );
                 area += a.x * b.y - b.x * a.y;
             }
         }
@@ -936,7 +1203,10 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
     // OCCT checks the edges of an open wire on one side only, which depends on how the wire
     // and its plane are oriented: as OCCT's mostly, the right of the wire as chained.
     let side = if closed { l.signum() } else { -1.0 };
-    let wire: Vec<Piece2> = polyline_bad_edges(spine, side, d.abs()).into_iter().map(|s| s.p).collect();
+    let wire: Vec<Piece2> = polyline_bad_edges(spine, side, d.abs())
+        .into_iter()
+        .map(|s| s.p)
+        .collect();
     if std::env::var_os("CADRS_OFFSET_DEBUG").is_some() {
         eprintln!("spine: {} pieces", wire.len());
     }
@@ -950,7 +1220,10 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
         }));
         s
     };
-    let chain_tol = (size * tol::REL_POINT).max(l.abs() * tol::REL_POINT).max(gap * 3.0).max(if closed { closing * 3.0 } else { 0.0 });
+    let chain_tol = (size * tol::REL_POINT)
+        .max(l.abs() * tol::REL_POINT)
+        .max(gap * 3.0)
+        .max(if closed { closing * 3.0 } else { 0.0 });
     let n = seq.len();
     let tick = |what: &str| {
         if std::env::var_os("CADRS_OFFSET_DEBUG").is_some() {
@@ -990,7 +1263,10 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
         if !convex && !concave_after[i] {
             slight_concave.push((i, raw.len(), e.end()));
         }
-        raw.push(Raw { p: join_arc(e.end(), left(t1), phi, l), err: 0.0 });
+        raw.push(Raw {
+            p: join_arc(e.end(), left(t1), phi, l),
+            err: 0.0,
+        });
     }
     tick("raw");
     // Where the raw loop crosses itself.
@@ -999,11 +1275,15 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
         .map(|r| {
             let k = match &r.p.c {
                 Curve::Line { .. } => 1,
-                Curve::Circle { .. } | Curve::Ellipse { .. } => ((r.p.t1 - r.p.t0).abs() / 0.05).ceil() as usize,
+                Curve::Circle { .. } | Curve::Ellipse { .. } => {
+                    ((r.p.t1 - r.p.t0).abs() / 0.05).ceil() as usize
+                }
                 Curve::Nurbs(n) => (8 * n.cps.len()).max(64),
             }
             .clamp(1, 4096);
-            let mut ts: Vec<f64> = (0..=k).map(|i| r.p.t0 + (r.p.t1 - r.p.t0) * i as f64 / k as f64).collect();
+            let mut ts: Vec<f64> = (0..=k)
+                .map(|i| r.p.t0 + (r.p.t1 - r.p.t0) * i as f64 / k as f64)
+                .collect();
             if ts.len() < 2 {
                 ts = vec![r.p.t0, r.p.t1];
             }
@@ -1021,8 +1301,18 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
     let mut segs: Vec<Seg> = Vec::new();
     for (el, ts) in polys.iter().enumerate() {
         for k in 0..ts.len() - 1 {
-            let (a, b) = (p2(&raw[el].p.c.point(ts[k])), p2(&raw[el].p.c.point(ts[k + 1])));
-            segs.push(Seg { el, k, a, b, lo: a.x.min(b.x), hi: a.x.max(b.x) });
+            let (a, b) = (
+                p2(&raw[el].p.c.point(ts[k])),
+                p2(&raw[el].p.c.point(ts[k + 1])),
+            );
+            segs.push(Seg {
+                el,
+                k,
+                a,
+                b,
+                lo: a.x.min(b.x),
+                hi: a.x.max(b.x),
+            });
         }
     }
     tick(&format!("{} segments", segs.len()));
@@ -1042,18 +1332,24 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
             if o.lo > s.hi + slack {
                 break;
             }
-            if s.a.y.max(s.b.y) + slack < o.a.y.min(o.b.y) || o.a.y.max(o.b.y) + slack < s.a.y.min(s.b.y) {
+            if s.a.y.max(s.b.y) + slack < o.a.y.min(o.b.y)
+                || o.a.y.max(o.b.y) + slack < s.a.y.min(s.b.y)
+            {
                 continue;
             }
             // Neighbouring segments of one curve meet at their shared point.
             if s.el == o.el && (s.k as i64 - o.k as i64).abs() <= 1 {
                 continue;
             }
-            let Some((u, v)) = seg_cross(&s.a, &s.b, &o.a, &o.b, slack) else { continue };
+            let Some((u, v)) = seg_cross(&s.a, &s.b, &o.a, &o.b, slack) else {
+                continue;
+            };
             let (ts, to) = (&polys[s.el], &polys[o.el]);
             let ta = ts[s.k] + (ts[s.k + 1] - ts[s.k]) * u;
             let tb = to[o.k] + (to[o.k + 1] - to[o.k]) * v;
-            let Some((ta, tb)) = refine(&raw[s.el].p, &raw[o.el].p, ta, tb, tol) else { continue };
+            let Some((ta, tb)) = refine(&raw[s.el].p, &raw[o.el].p, ta, tb, tol) else {
+                continue;
+            };
             // A curve meets itself only at two different parameters.
             if s.el == o.el {
                 let p = &raw[s.el].p;
@@ -1079,7 +1375,9 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
     // (a polyline's chord after an arc, say) that the polygons above miss it: Newton from the
     // corner.
     for i in 0..n {
-        let (Some(a), Some(b)) = (edge_raw[i], edge_raw[(i + 1) % n]) else { continue };
+        let (Some(a), Some(b)) = (edge_raw[i], edge_raw[(i + 1) % n]) else {
+            continue;
+        };
         if !concave_after[i] || a == b {
             continue;
         }
@@ -1105,12 +1403,17 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
     // Per element, the parameter it ends at and the one it starts from.
     let mut trim: Vec<(f64, f64)> = raw.iter().map(|r| (r.p.t1, r.p.t0)).collect();
     for (i, k, v) in &slight_concave {
-        let (Some(a), Some(b)) = (edge_raw[*i], edge_raw[(i + 1) % n]) else { continue };
-        let near = crossed.iter().filter(|c| (c.4 - v).norm() < 2.0 * l.abs()).find_map(|&(x, tx, y, ty, _)| match (x, y) {
-            _ if x == a && y == b => Some((tx, ty)),
-            _ if x == b && y == a => Some((ty, tx)),
-            _ => None,
-        });
+        let (Some(a), Some(b)) = (edge_raw[*i], edge_raw[(i + 1) % n]) else {
+            continue;
+        };
+        let near = crossed
+            .iter()
+            .filter(|c| (c.4 - v).norm() < 2.0 * l.abs())
+            .find_map(|&(x, tx, y, ty, _)| match (x, y) {
+                _ if x == a && y == b => Some((tx, ty)),
+                _ if x == b && y == a => Some((ty, tx)),
+                _ => None,
+            });
         if let Some((ta, tb)) = near {
             dropped.push(*k);
             trim[a].0 = trim[a].0.min(ta);
@@ -1121,7 +1424,10 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
     // The pieces between cuts, kept where they stay the distance from the wire.
     // (Less the wire's gaps: an arc about one edge's end lies that much nearer the next.)
     // (Within 1e-9 of the distance: a swallowtail of an offset curve lies very little nearer.)
-    let keep_at = l.abs() * (1.0 - tol::REL) - (tol * 0.01).max(gap * 2.0).max(if closed { closing * 2.0 } else { 0.0 });
+    let keep_at = l.abs() * (1.0 - tol::REL)
+        - (tol * 0.01)
+            .max(gap * 2.0)
+            .max(if closed { closing * 2.0 } else { 0.0 });
     // Boxes round the wire's edges (a B-spline's control points, else samples with a margin)
     // rule most edges out without a closest-point search.
     let boxes: Vec<Bbox> = wire.iter().map(edge_box).collect();
@@ -1155,7 +1461,9 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
         for (i, &t) in ts.iter().enumerate() {
             let last = i + 1 == ts.len();
             match merged.last() {
-                Some(&m) if near(t, m) && [0.25, 0.5, 0.75].iter().all(|f| near(m + (t - m) * f, m)) => {
+                Some(&m)
+                    if near(t, m) && [0.25, 0.5, 0.75].iter().all(|f| near(m + (t - m) * f, m)) =>
+                {
                     if last {
                         *merged.last_mut().unwrap() = t;
                     }
@@ -1170,7 +1478,8 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
         // cut merged nearest it moves there.
         for t in [t_end, t_start] {
             if t > r.p.t0 && t < r.p.t1 {
-                let k = (1..merged.len() - 1).min_by(|&i, &j| (merged[i] - t).abs().total_cmp(&(merged[j] - t).abs()));
+                let k = (1..merged.len() - 1)
+                    .min_by(|&i, &j| (merged[i] - t).abs().total_cmp(&(merged[j] - t).abs()));
                 match k {
                     Some(k) if near(merged[k], t) => merged[k] = t,
                     _ => {
@@ -1190,10 +1499,19 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
             // (By the piece's middle: a trim may have merged with a cut close by.)
             let mid = 0.5 * (a + b);
             let inside = mid >= t_start && mid <= t_end;
-            let good = inside && [0.25, 0.5, 0.75].iter().all(|f| far(&r.p.c.point(a + (b - a) * f), r.err));
+            let good = inside
+                && [0.25, 0.5, 0.75]
+                    .iter()
+                    .all(|f| far(&r.p.c.point(a + (b - a) * f), r.err));
             match (&mut run, good) {
                 (Some(p), true) => p.t1 = b,
-                (None, true) => run = Some(Piece2 { c: r.p.c.clone(), t0: a, t1: b }),
+                (None, true) => {
+                    run = Some(Piece2 {
+                        c: r.p.c.clone(),
+                        t0: a,
+                        t1: b,
+                    })
+                }
                 (Some(_), false) => kept.push((el, run.take().unwrap())),
                 (None, false) => {}
             }
@@ -1205,12 +1523,26 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
     // Slivers (bits of an element between near cuts) close up in the chaining; a whole element
     // stays however short (the offset of a short edge, or of a corner).
     let sliver = chain_tol.min(tol::POINT);
-    kept.retain(|(el, p)| (p.t0 == raw[*el].p.t0 && p.t1 == raw[*el].p.t1) || (p.end() - p.start()).norm() > sliver || polyline_len(p, 16) > sliver * 2.0);
+    kept.retain(|(el, p)| {
+        (p.t0 == raw[*el].p.t0 && p.t1 == raw[*el].p.t1)
+            || (p.end() - p.start()).norm() > sliver
+            || polyline_len(p, 16) > sliver * 2.0
+    });
     tick("kept");
     if std::env::var_os("CADRS_OFFSET_DEBUG").is_some() {
-        eprintln!("offset l {l} closed {closed} size {size}: {} raw, {} cuts, {} kept", raw.len(), cuts.iter().map(Vec::len).sum::<usize>(), kept.len());
+        eprintln!(
+            "offset l {l} closed {closed} size {size}: {} raw, {} cuts, {} kept",
+            raw.len(),
+            cuts.iter().map(Vec::len).sum::<usize>(),
+            kept.len()
+        );
         for (i, r) in raw.iter().enumerate() {
-            eprintln!("  raw {i}: {:?} -> {:?} cuts {:?}", p2(&r.p.start()), p2(&r.p.end()), cuts[i]);
+            eprintln!(
+                "  raw {i}: {:?} -> {:?} cuts {:?}",
+                p2(&r.p.start()),
+                p2(&r.p.end()),
+                cuts[i]
+            );
         }
         for (el, p) in &kept {
             eprintln!("  kept {el}: {:?} -> {:?}", p2(&p.start()), p2(&p.end()));
@@ -1250,14 +1582,27 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
             }
         }
         // (A sliver closing on itself is a leftover of a corner, not a loop.)
-        if ok && lp.iter().map(|&j| polyline_len(&kept[j].1, 16)).sum::<f64>() > chain_tol * 10.0 {
+        if ok
+            && lp
+                .iter()
+                .map(|&j| polyline_len(&kept[j].1, 16))
+                .sum::<f64>()
+                > chain_tol * 10.0
+        {
             // A piece split where its own curve's loop closes is one edge again.
             let mut pieces: Vec<Piece2> = lp.iter().map(|&j| kept[j].1.clone()).collect();
             let els: Vec<usize> = lp.iter().map(|&j| kept[j].0).collect();
-            if pieces.len() > 1 && els[0] == *els.last().unwrap() && (pieces.last().unwrap().t1 - pieces[0].t0).abs() > 0.0 {
+            if pieces.len() > 1
+                && els[0] == *els.last().unwrap()
+                && (pieces.last().unwrap().t1 - pieces[0].t0).abs() > 0.0
+            {
                 let (a, b) = (&pieces[pieces.len() - 1], &pieces[0]);
                 if (a.t1 - b.t0).abs() < tol::REL_FINE * (1.0 + a.t1.abs()) {
-                    let merged = Piece2 { c: a.c.clone(), t0: a.t0, t1: b.t1 };
+                    let merged = Piece2 {
+                        c: a.c.clone(),
+                        t0: a.t0,
+                        t1: b.t1,
+                    };
                     pieces.pop();
                     pieces[0] = merged;
                 }
@@ -1271,7 +1616,13 @@ pub fn offset_wire(edges: &[(Curve, f64, f64)], d: f64) -> Result<Vec<Vec<Piece2
 
 /// The length of the polyline through `n + 1` points of the piece (a lower bound).
 fn polyline_len(p: &Piece2, n: usize) -> f64 {
-    (0..n).map(|i| (p.c.point(p.t0 + (p.t1 - p.t0) * (i + 1) as f64 / n as f64) - p.c.point(p.t0 + (p.t1 - p.t0) * i as f64 / n as f64)).norm()).sum()
+    (0..n)
+        .map(|i| {
+            (p.c.point(p.t0 + (p.t1 - p.t0) * (i + 1) as f64 / n as f64)
+                - p.c.point(p.t0 + (p.t1 - p.t0) * i as f64 / n as f64))
+            .norm()
+        })
+        .sum()
 }
 
 /// A box holding the piece: a B-spline's control points (a valid hull with positive weights),
@@ -1298,7 +1649,11 @@ fn edge_box(e: &Piece2) -> Bbox {
 fn chained(mut rest: Vec<SpineEdge>) -> Vec<SpineEdge> {
     // Start at an end no other edge reaches (an open wire's), else at the first edge.
     let free = |p: P3, skip: usize, all: &[SpineEdge]| {
-        all.iter().enumerate().filter(|(j, _)| *j != skip).map(|(_, e)| (e.p.start() - p).norm().min((e.p.end() - p).norm())).fold(f64::INFINITY, f64::min)
+        all.iter()
+            .enumerate()
+            .filter(|(j, _)| *j != skip)
+            .map(|(_, e)| (e.p.start() - p).norm().min((e.p.end() - p).norm()))
+            .fold(f64::INFINITY, f64::min)
     };
     let mut start = (0, false, 0.0);
     for (i, e) in rest.iter().enumerate() {
@@ -1312,12 +1667,21 @@ fn chained(mut rest: Vec<SpineEdge>) -> Vec<SpineEdge> {
     let lens: f64 = rest.iter().map(|e| (e.p.end() - e.p.start()).norm()).sum();
     let mut out = Vec::new();
     let first = rest.remove(start.0);
-    out.push(if start.1 && start.2 > lens * 1e-4 { first.reversed() } else { first });
+    out.push(if start.1 && start.2 > lens * 1e-4 {
+        first.reversed()
+    } else {
+        first
+    });
     while let Some(end) = out.last().map(|e: &SpineEdge| e.p.end()) {
         let Some((j, flip, _)) = rest
             .iter()
             .enumerate()
-            .flat_map(|(j, e)| [(j, false, (e.p.start() - end).norm()), (j, true, (e.p.end() - end).norm())])
+            .flat_map(|(j, e)| {
+                [
+                    (j, false, (e.p.start() - end).norm()),
+                    (j, true, (e.p.end() - end).norm()),
+                ]
+            })
             .min_by(|a, b| a.2.total_cmp(&b.2))
         else {
             break;
@@ -1356,7 +1720,9 @@ fn refine(a: &Piece2, b: &Piece2, mut t: f64, mut u: f64, tol: f64) -> Option<(f
             break;
         }
         let (j00, j01, j10, j11) = (da.x, -db.x, da.y, -db.y);
-        let Some((dt, du)) = solve2(j00, j01, j10, j11, -f.x, -f.y) else { break };
+        let Some((dt, du)) = solve2(j00, j01, j10, j11, -f.x, -f.y) else {
+            break;
+        };
         t = (t + dt).clamp(a.t0, a.t1);
         u = (u + du).clamp(b.t0, b.t1);
     }
@@ -1378,7 +1744,13 @@ mod tests {
 
     #[test]
     fn ellipse_cut_at_its_vertices() {
-        let c = Curve::Ellipse { c: P3::origin(), x: V3::x(), y: V3::y(), a: 3.0, b: 1.0 };
+        let c = Curve::Ellipse {
+            c: P3::origin(),
+            x: V3::x(),
+            y: V3::y(),
+            a: 3.0,
+            b: 1.0,
+        };
         let ts = curvature_points(&c, 0.0, 2.0 * PI);
         assert_eq!(ts.len(), 5);
         let spine = prepare_spine(&[(c, 0.0, 2.0 * PI)]);
@@ -1388,7 +1760,12 @@ mod tests {
     #[test]
     fn single_closed_circle_cut_in_three() {
         // OCCT's ForcedCut: a closed wire of one uncut edge is cut in three.
-        let c = Curve::Circle { c: P3::origin(), x: V3::x(), y: V3::y(), r: 2.0 };
+        let c = Curve::Circle {
+            c: P3::origin(),
+            x: V3::x(),
+            y: V3::y(),
+            r: 2.0,
+        };
         let loops = offset_wire(&[(c, 0.0, 2.0 * PI)], 0.5).unwrap();
         assert_eq!(loops.len(), 1);
         assert_eq!(loops[0].len(), 3);
@@ -1398,7 +1775,15 @@ mod tests {
     #[test]
     fn b_spline_cut_at_curvature_extremum() {
         // A symmetric cubic arch: curvature peaks at its middle.
-        let n = NurbsCurve::bezier(&[P3::new(0.0, 0.0, 0.0), P3::new(1.0, 2.0, 0.0), P3::new(3.0, 2.0, 0.0), P3::new(4.0, 0.0, 0.0)], &[1.0; 4]);
+        let n = NurbsCurve::bezier(
+            &[
+                P3::new(0.0, 0.0, 0.0),
+                P3::new(1.0, 2.0, 0.0),
+                P3::new(3.0, 2.0, 0.0),
+                P3::new(4.0, 0.0, 0.0),
+            ],
+            &[1.0; 4],
+        );
         let ts = curvature_points(&Curve::nurbs(n), 0.0, 1.0);
         assert!(ts.iter().any(|t| (t - 0.5).abs() < 1e-6), "{ts:?}");
     }
@@ -1406,14 +1791,28 @@ mod tests {
     /// The quadratic B-spline through (0,0) … (6,1) with simple knots at 1 and 2.
     fn quadratic() -> NurbsCurve {
         let poles = [(0.0, 0.0), (1.0, 2.0), (3.0, 2.0), (4.0, 0.0), (6.0, 1.0)];
-        let cps = poles.iter().map(|&(x, y)| crate::native::nurbs::hom(&P3::new(x, y, 0.0), 1.0)).collect();
+        let cps = poles
+            .iter()
+            .map(|&(x, y)| crate::native::nurbs::hom(&P3::new(x, y, 0.0), 1.0))
+            .collect();
         NurbsCurve::new(2, vec![0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 3.0, 3.0], cps).unwrap()
     }
 
     /// A quarter of the unit circle as a rational quadratic, counter-clockwise from (1, 0).
     fn quarter_circle() -> Curve {
         let h = |x: f64, y: f64, w: f64| crate::native::nurbs::hom(&P3::new(x, y, 0.0), w);
-        Curve::nurbs(NurbsCurve::new(2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], vec![h(1.0, 0.0, 1.0), h(1.0, 1.0, 0.5f64.sqrt()), h(0.0, 1.0, 1.0)]).unwrap())
+        Curve::nurbs(
+            NurbsCurve::new(
+                2,
+                vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+                vec![
+                    h(1.0, 0.0, 1.0),
+                    h(1.0, 1.0, 0.5f64.sqrt()),
+                    h(0.0, 1.0, 1.0),
+                ],
+            )
+            .unwrap(),
+        )
     }
 
     #[test]
@@ -1432,7 +1831,16 @@ mod tests {
     fn polyline_points_as_occt() {
         // OCCT's PerformCurve (QuasiFleche) on the quarter circle: its parameters.
         let c = quarter_circle();
-        for (defl, occt) in [(0.02, vec![0.0, 0.25, 0.375, 0.5, 0.625, 0.75, 1.0]), (0.005, vec![0.0, 0.125, 0.25, 0.3125, 0.375, 0.4375, 0.5, 0.5625, 0.625, 0.6875, 0.75, 0.875, 1.0])] {
+        for (defl, occt) in [
+            (0.02, vec![0.0, 0.25, 0.375, 0.5, 0.625, 0.75, 1.0]),
+            (
+                0.005,
+                vec![
+                    0.0, 0.125, 0.25, 0.3125, 0.375, 0.4375, 0.5, 0.5625, 0.625, 0.6875, 0.75,
+                    0.875, 1.0,
+                ],
+            ),
+        ] {
             let pts = polyline_points(&c, 0.0, 1.0, defl);
             assert_eq!(pts.len(), occt.len());
             for (p, t) in pts.iter().zip(occt) {
@@ -1465,7 +1873,13 @@ mod tests {
     fn slight_convex_corner_gets_an_arc() {
         // A square whose top edge is tilted by 1e-6 rad: outwards the corner is convex and gets
         // a (tiny) arc as OCCT's, inwards none.
-        let pts = [P3::new(0.0, 0.0, 0.0), P3::new(10.0, 0.0, 0.0), P3::new(10.0, 10.0, 0.0), P3::new(5.0, 10.0, 0.0), P3::new(0.0, 10.0 - 5e-6, 0.0)];
+        let pts = [
+            P3::new(0.0, 0.0, 0.0),
+            P3::new(10.0, 0.0, 0.0),
+            P3::new(10.0, 10.0, 0.0),
+            P3::new(5.0, 10.0, 0.0),
+            P3::new(0.0, 10.0 - 5e-6, 0.0),
+        ];
         let edges: Vec<(Curve, f64, f64)> = (0..5)
             .map(|i| {
                 let (c, l) = Curve::line(pts[i], pts[(i + 1) % 5]);
@@ -1481,7 +1895,9 @@ mod tests {
 
     #[test]
     fn nearly_planar_points_fit_a_plane() {
-        let pts: Vec<P3> = (0..20).map(|i| P3::new(i as f64, (i * i) as f64 * 0.1, 1e-4 * (i % 3) as f64)).collect();
+        let pts: Vec<P3> = (0..20)
+            .map(|i| P3::new(i as f64, (i * i) as f64 * 0.1, 1e-4 * (i % 3) as f64))
+            .collect();
         let (_, n) = best_plane(&pts, 1e-2).unwrap();
         assert!(n.z.abs() > 0.999);
         assert!(best_plane(&pts, 1e-9).is_none());

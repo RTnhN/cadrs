@@ -31,7 +31,9 @@ impl SweepKind for Prism {
                 let z = x.cross(&y);
                 let (a, b) = (V2::new(d.norm(), 0.0), V2::new(x.dot(&dir), y.dot(&dir)));
                 SideGeo {
-                    surf: Surface::Plane { f: Frame { o: *o, x, y, z } },
+                    surf: Surface::Plane {
+                        f: Frame { o: *o, x, y, z },
+                    },
                     along: Box::new(move |s| line2(P2::origin() + b * s, a)),
                     across: Box::new(move |t| line2(P2::origin() + a * t, b)),
                 }
@@ -40,13 +42,24 @@ impl SweepKind for Prism {
                 let z = x.cross(y);
                 let k = z.dot(&dir);
                 SideGeo {
-                    surf: Surface::Cylinder { f: Frame { o: *c, x: *x, y: *y, z }, r: *r },
+                    surf: Surface::Cylinder {
+                        f: Frame {
+                            o: *c,
+                            x: *x,
+                            y: *y,
+                            z,
+                        },
+                        r: *r,
+                    },
                     along: Box::new(move |s| line2(P2::new(0.0, k * s), V2::new(1.0, 0.0))),
                     across: Box::new(move |t| line2(P2::new(t, 0.0), V2::new(0.0, k))),
                 }
             }
             _ => SideGeo {
-                surf: Surface::Extrusion { c: c3.clone(), d: dir },
+                surf: Surface::Extrusion {
+                    c: c3.clone(),
+                    d: dir,
+                },
                 along: Box::new(|s| line2(P2::new(0.0, s), V2::new(1.0, 0.0))),
                 across: Box::new(|t| line2(P2::new(t, 0.0), V2::new(0.0, 1.0))),
             },
@@ -66,12 +79,16 @@ pub struct Revolve {
 }
 
 pub fn line2(o: P2, d: V2) -> Curve {
-    Curve::Line { o: P3::new(o.x, o.y, 0.0), d: V3::new(d.x, d.y, 0.0) }
+    Curve::Line {
+        o: P3::new(o.x, o.y, 0.0),
+        d: V3::new(d.x, d.y, 0.0),
+    }
 }
 
 impl Revolve {
     fn rot(&self, s: f64) -> Affine {
-        let r = nalgebra::Rotation3::from_axis_angle(&nalgebra::Unit::new_normalize(self.f.z), s).into_inner();
+        let r = nalgebra::Rotation3::from_axis_angle(&nalgebra::Unit::new_normalize(self.f.z), s)
+            .into_inner();
         let o = self.f.o.coords;
         Affine { m: r, t: o - r * o }
     }
@@ -86,7 +103,10 @@ impl SweepKind for Revolve {
     fn place(&self, s: f64) -> Affine {
         let base = crate::native::build::plane_map(&self.plane, &V3::zeros(), 0.0);
         let r = self.rot(s);
-        Affine { m: r.m * base.m, t: r.m * base.t + r.t }
+        Affine {
+            m: r.m * base.m,
+            t: r.m * base.t + r.t,
+        }
     }
     fn rail(&self, q: P2) -> Option<Curve> {
         let p = self.place(0.0).point(&P3::new(q.x, q.y, 0.0));
@@ -94,7 +114,12 @@ impl SweepKind for Revolve {
         if rho < TOL {
             return None;
         }
-        Some(Curve::Circle { c: self.f.o + self.f.z * h, x: self.f.x, y: self.f.y, r: rho })
+        Some(Curve::Circle {
+            c: self.f.o + self.f.z * h,
+            x: self.f.x,
+            y: self.f.y,
+            r: rho,
+        })
     }
     fn side(&self, piece: &Piece, c3: &Curve) -> Option<SideGeo> {
         let f = self.f;
@@ -116,11 +141,18 @@ impl SweepKind for Revolve {
                     Some(SideGeo {
                         surf: Surface::Cylinder { f, r: r0 },
                         along: Box::new(move |s| line2(P2::new(s, h0), V2::new(0.0, k))),
-                        across: Box::new(move |t| line2(P2::new(0.0, h0 + k * t), V2::new(1.0, 0.0))),
+                        across: Box::new(move |t| {
+                            line2(P2::new(0.0, h0 + k * t), V2::new(1.0, 0.0))
+                        }),
                     })
                 } else if dh.abs() < tol::DEGENERATE {
                     // Plane square to the axis at h0: uv = ρ(t)(cos s, sin s).
-                    let fr = Frame { o: f.o + f.z * h0, x: f.x, y: f.y, z: f.z };
+                    let fr = Frame {
+                        o: f.o + f.z * h0,
+                        x: f.x,
+                        y: f.y,
+                        z: f.z,
+                    };
                     let k = dr * len;
                     Some(SideGeo {
                         surf: Surface::Plane { f: fr },
@@ -130,13 +162,23 @@ impl SweepKind for Revolve {
                         }),
                         across: Box::new(move |t| {
                             let r = r0 + k * t;
-                            Curve::Circle { c: P3::origin(), x: V3::x(), y: V3::y(), r: r.abs().max(tol::TINY) }
+                            Curve::Circle {
+                                c: P3::origin(),
+                                x: V3::x(),
+                                y: V3::y(),
+                                r: r.abs().max(tol::TINY),
+                            }
                         }),
                     })
                 } else {
                     // Cone through C(0): r = r0, sin a = dr, cos a = dh, v = len·t.
                     let a = dr.atan2(dh);
-                    let fr = Frame { o: f.o + f.z * h0, x: f.x, y: f.y, z: f.z };
+                    let fr = Frame {
+                        o: f.o + f.z * h0,
+                        x: f.x,
+                        y: f.y,
+                        z: f.z,
+                    };
                     Some(SideGeo {
                         surf: Surface::Cone { f: fr, r: r0, a },
                         along: Box::new(move |s| line2(P2::new(s, 0.0), V2::new(0.0, len))),
@@ -150,34 +192,61 @@ impl SweepKind for Revolve {
                 let lx = f.local(&(c + x)) - f.local(c);
                 let ly = f.local(&(c + y)) - f.local(c);
                 let ax = lx.z.atan2(lx.x);
-                let sig = if lx.x * ly.z - lx.z * ly.x > 0.0 { 1.0 } else { -1.0 };
+                let sig = if lx.x * ly.z - lx.z * ly.x > 0.0 {
+                    1.0
+                } else {
+                    -1.0
+                };
                 // Unwrap φ0 so φ at the piece's middle lies in (−π, π].
                 let tm = (piece.t0 + piece.t1) * 0.5;
                 let phim = wrap(sig * tm + ax, -PI, TAU);
                 let phi0 = phim - sig * tm;
-                let fr = Frame { o: f.o + f.z * hc, x: f.x, y: f.y, z: f.z };
+                let fr = Frame {
+                    o: f.o + f.z * hc,
+                    x: f.x,
+                    y: f.y,
+                    z: f.z,
+                };
                 if rc < TOL {
                     return Some(SideGeo {
                         surf: Surface::Sphere { f: fr, r: *r },
                         along: Box::new(move |s| line2(P2::new(s, phi0), V2::new(0.0, sig))),
-                        across: Box::new(move |t| line2(P2::new(0.0, sig * t + phi0), V2::new(1.0, 0.0))),
+                        across: Box::new(move |t| {
+                            line2(P2::new(0.0, sig * t + phi0), V2::new(1.0, 0.0))
+                        }),
                     });
                 }
                 // An arc whose centre lies behind the axis (ρ = −rc + r cos φ: a spindle torus's
                 // part past its axis) is on the torus of the frame turned half round, whose
                 // meridian at u = s has that centre: along its x, ρ' = rc − r cos φ, so v = π − φ.
                 if f.local(c).x < 0.0 {
-                    let fr = Frame { x: -f.x, y: -f.y, ..fr };
+                    let fr = Frame {
+                        x: -f.x,
+                        y: -f.y,
+                        ..fr
+                    };
                     return Some(SideGeo {
-                        surf: Surface::Torus { f: fr, rmaj: rc, rmin: *r },
+                        surf: Surface::Torus {
+                            f: fr,
+                            rmaj: rc,
+                            rmin: *r,
+                        },
                         along: Box::new(move |s| line2(P2::new(s, PI - phi0), V2::new(0.0, -sig))),
-                        across: Box::new(move |t| line2(P2::new(0.0, PI - (sig * t + phi0)), V2::new(1.0, 0.0))),
+                        across: Box::new(move |t| {
+                            line2(P2::new(0.0, PI - (sig * t + phi0)), V2::new(1.0, 0.0))
+                        }),
                     });
                 }
                 Some(SideGeo {
-                    surf: Surface::Torus { f: fr, rmaj: rc, rmin: *r },
+                    surf: Surface::Torus {
+                        f: fr,
+                        rmaj: rc,
+                        rmin: *r,
+                    },
                     along: Box::new(move |s| line2(P2::new(s, phi0), V2::new(0.0, sig))),
-                    across: Box::new(move |t| line2(P2::new(0.0, sig * t + phi0), V2::new(1.0, 0.0))),
+                    across: Box::new(move |t| {
+                        line2(P2::new(0.0, sig * t + phi0), V2::new(1.0, 0.0))
+                    }),
                 })
             }
             _ => Some(SideGeo {
@@ -213,7 +282,11 @@ pub struct Turn {
 impl Turn {
     /// The turn by s about the axis.
     pub fn rot(&self, s: f64) -> Affine {
-        Revolve { plane: self.plane, f: self.f }.rot(s)
+        Revolve {
+            plane: self.plane,
+            f: self.f,
+        }
+        .rot(s)
     }
 
     /// The circle a model point travels on (parametrized by s), or None on the axis.
@@ -225,23 +298,37 @@ impl Turn {
             return None;
         }
         let x = (f.x * l.x + f.y * l.y) / rho;
-        Some(Curve::Circle { c: f.o + f.z * l.z, x, y: f.z.cross(&x), r: rho })
+        Some(Curve::Circle {
+            c: f.o + f.z * l.z,
+            x,
+            y: f.z.cross(&x),
+            r: rho,
+        })
     }
 
     /// The side face a model-space curve (a piece's curve at s = 0) sweeps, or None for a piece
     /// on the axis.
     pub fn side_of(&self, piece: &Piece, c3: &Curve) -> Option<SideGeo> {
         let f = self.f;
-        let pts: Vec<V3> = (0..=8).map(|i| f.local(&c3.point(piece.t0 + (piece.t1 - piece.t0) * i as f64 / 8.0))).collect();
+        let pts: Vec<V3> = (0..=8)
+            .map(|i| f.local(&c3.point(piece.t0 + (piece.t1 - piece.t0) * i as f64 / 8.0)))
+            .collect();
         let scale = pts.iter().map(|l| l.norm()).fold(1.0, f64::max);
-        let far = pts.iter().max_by(|a, b| a.x.hypot(a.y).total_cmp(&b.x.hypot(b.y)))?;
+        let far = pts
+            .iter()
+            .max_by(|a, b| a.x.hypot(a.y).total_cmp(&b.x.hypot(b.y)))?;
         if far.x.hypot(far.y) < TOL {
             return None;
         }
         // In the half plane at the azimuth of its point farthest from the axis?
         let phi = far.y.atan2(far.x);
         let (c, s) = (phi.cos(), phi.sin());
-        let half = Frame { o: f.o, x: f.x * c + f.y * s, y: f.y * c - f.x * s, z: f.z };
+        let half = Frame {
+            o: f.o,
+            x: f.x * c + f.y * s,
+            y: f.y * c - f.x * s,
+            z: f.z,
+        };
         let in_half = pts.iter().all(|l| {
             let (x, y) = (l.x * c + l.y * s, l.y * c - l.x * s);
             y.abs() <= tol::REL * scale && x >= -tol::REL * scale
@@ -249,11 +336,18 @@ impl Turn {
         let in_half = in_half
             && match c3 {
                 Curve::Line { d, .. } => half.y.dot(d).abs() <= tol::REL_FINE * d.norm(),
-                Curve::Circle { x, y, .. } | Curve::Ellipse { x, y, .. } => half.y.dot(x).abs() <= tol::REL_FINE * x.norm() && half.y.dot(y).abs() <= tol::REL_FINE * y.norm(),
+                Curve::Circle { x, y, .. } | Curve::Ellipse { x, y, .. } => {
+                    half.y.dot(x).abs() <= tol::REL_FINE * x.norm()
+                        && half.y.dot(y).abs() <= tol::REL_FINE * y.norm()
+                }
                 Curve::Nurbs(_) => true,
             };
         if in_half {
-            return Revolve { plane: self.plane, f: half }.side(piece, c3);
+            return Revolve {
+                plane: self.plane,
+                f: half,
+            }
+            .side(piece, c3);
         }
         if let Curve::Line { o, d } = c3
             && f.z.dot(d).abs() <= tol::REL_FINE * d.norm()
@@ -263,15 +357,36 @@ impl Turn {
             let l0 = f.local(o);
             let dl = V2::new(f.x.dot(d), f.y.dot(d));
             let q0 = V2::new(l0.x, l0.y);
-            let rot = |s: f64, v: V2| V2::new(v.x * s.cos() - v.y * s.sin(), v.x * s.sin() + v.y * s.cos());
+            let rot = |s: f64, v: V2| {
+                V2::new(v.x * s.cos() - v.y * s.sin(), v.x * s.sin() + v.y * s.cos())
+            };
             return Some(SideGeo {
-                surf: Surface::Plane { f: Frame { o: f.o + f.z * l0.z, x: f.x, y: f.y, z: f.z } },
+                surf: Surface::Plane {
+                    f: Frame {
+                        o: f.o + f.z * l0.z,
+                        x: f.x,
+                        y: f.y,
+                        z: f.z,
+                    },
+                },
                 along: Box::new(move |s| line2(P2::origin() + rot(s, q0), rot(s, dl))),
                 across: Box::new(move |t| {
                     let q = q0 + dl * t;
                     let r = q.norm();
-                    let (x, y) = if r > tol::TINY { (V3::new(q.x / r, q.y / r, 0.0), V3::new(-q.y / r, q.x / r, 0.0)) } else { (V3::x(), V3::y()) };
-                    Curve::Circle { c: P3::origin(), x, y, r: r.max(tol::TINY) }
+                    let (x, y) = if r > tol::TINY {
+                        (
+                            V3::new(q.x / r, q.y / r, 0.0),
+                            V3::new(-q.y / r, q.x / r, 0.0),
+                        )
+                    } else {
+                        (V3::x(), V3::y())
+                    };
+                    Curve::Circle {
+                        c: P3::origin(),
+                        x,
+                        y,
+                        r: r.max(tol::TINY),
+                    }
                 }),
             });
         }
@@ -285,7 +400,11 @@ impl Turn {
 
 impl SweepKind for Turn {
     fn place(&self, s: f64) -> Affine {
-        Revolve { plane: self.plane, f: self.f }.place(s)
+        Revolve {
+            plane: self.plane,
+            f: self.f,
+        }
+        .place(s)
     }
     fn rail(&self, q: P2) -> Option<Curve> {
         let p = self.place(0.0).point(&P3::new(q.x, q.y, 0.0));

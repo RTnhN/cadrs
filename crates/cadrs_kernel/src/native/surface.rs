@@ -20,15 +20,18 @@ use std::sync::{Arc, Weak};
 
 use super::curve::Curve;
 use super::math::*;
-use super::nurbs::{NurbsCurve, NurbsSurface, H};
-use crate::SurfaceKind;
+use super::nurbs::{H, NurbsCurve, NurbsSurface};
 use super::tol;
+use crate::SurfaceKind;
 
 /// An exact surface with its parametrization `(u, v) ↦ point`. The analytic ones are placed by
 /// a frame `f` (origin `o`, axes `x`, `y`, `z`); u is the angle about `f.z` for the surfaces of
 /// revolution.
 #[derive(Debug, Clone, PartialEq)]
-#[allow(missing_docs, reason = "the fields are the symbols of each variant's formula")]
+#[allow(
+    missing_docs,
+    reason = "the fields are the symbols of each variant's formula"
+)]
 pub enum Surface {
     /// `o + u·x + v·y`.
     Plane { f: Frame },
@@ -67,7 +70,12 @@ impl Surface {
     /// The placing frame of an analytic surface or a surface of revolution.
     pub fn frame(&self) -> Option<&Frame> {
         match self {
-            Surface::Plane { f } | Surface::Cylinder { f, .. } | Surface::Cone { f, .. } | Surface::Sphere { f, .. } | Surface::Torus { f, .. } | Surface::Revolution { f, .. } => Some(f),
+            Surface::Plane { f }
+            | Surface::Cylinder { f, .. }
+            | Surface::Cone { f, .. }
+            | Surface::Sphere { f, .. }
+            | Surface::Torus { f, .. }
+            | Surface::Revolution { f, .. } => Some(f),
             _ => None,
         }
     }
@@ -91,9 +99,16 @@ impl Surface {
         match self {
             Surface::Plane { f } => f.o + f.x * u + f.y * v,
             Surface::Cylinder { f, r } => f.o + (f.x * u.cos() + f.y * u.sin()) * *r + f.z * v,
-            Surface::Cone { f, r, a } => f.o + (f.x * u.cos() + f.y * u.sin()) * (r + v * a.sin()) + f.z * (v * a.cos()),
-            Surface::Sphere { f, r } => f.o + (f.x * u.cos() + f.y * u.sin()) * (r * v.cos()) + f.z * (r * v.sin()),
-            Surface::Torus { f, rmaj, rmin } => f.o + (f.x * u.cos() + f.y * u.sin()) * (rmaj + rmin * v.cos()) + f.z * (rmin * v.sin()),
+            Surface::Cone { f, r, a } => {
+                f.o + (f.x * u.cos() + f.y * u.sin()) * (r + v * a.sin()) + f.z * (v * a.cos())
+            }
+            Surface::Sphere { f, r } => {
+                f.o + (f.x * u.cos() + f.y * u.sin()) * (r * v.cos()) + f.z * (r * v.sin())
+            }
+            Surface::Torus { f, rmaj, rmin } => {
+                f.o + (f.x * u.cos() + f.y * u.sin()) * (rmaj + rmin * v.cos())
+                    + f.z * (rmin * v.sin())
+            }
             Surface::Nurbs(n) => n.point(u, v),
             _ => P3::from(self.d2(u, v)[0]),
         }
@@ -111,12 +126,26 @@ impl Surface {
     /// The point and the first and second derivatives ([`D2`]).
     pub fn d2(&self, u: f64, v: f64) -> D2 {
         match self {
-            Surface::Plane { f } => [(f.o + f.x * u + f.y * v).coords, f.x, f.y, V3::zeros(), V3::zeros(), V3::zeros()],
+            Surface::Plane { f } => [
+                (f.o + f.x * u + f.y * v).coords,
+                f.x,
+                f.y,
+                V3::zeros(),
+                V3::zeros(),
+                V3::zeros(),
+            ],
             Surface::Cylinder { f, r } => {
                 let (s, c) = u.sin_cos();
                 let rho = f.x * c + f.y * s;
                 let phi = f.y * c - f.x * s;
-                [(f.o + rho * *r + f.z * v).coords, phi * *r, f.z, -rho * *r, V3::zeros(), V3::zeros()]
+                [
+                    (f.o + rho * *r + f.z * v).coords,
+                    phi * *r,
+                    f.z,
+                    -rho * *r,
+                    V3::zeros(),
+                    V3::zeros(),
+                ]
             }
             Surface::Cone { f, r, a } => {
                 let (s, c) = u.sin_cos();
@@ -124,7 +153,14 @@ impl Surface {
                 let phi = f.y * c - f.x * s;
                 let (sa, ca) = a.sin_cos();
                 let rr = r + v * sa;
-                [(f.o + rho * rr + f.z * (v * ca)).coords, phi * rr, rho * sa + f.z * ca, -rho * rr, phi * sa, V3::zeros()]
+                [
+                    (f.o + rho * rr + f.z * (v * ca)).coords,
+                    phi * rr,
+                    rho * sa + f.z * ca,
+                    -rho * rr,
+                    phi * sa,
+                    V3::zeros(),
+                ]
             }
             Surface::Sphere { f, r } => {
                 let (s, c) = u.sin_cos();
@@ -243,7 +279,10 @@ impl Surface {
                 // across the axis: half a turn round. (Only for a point well off this side's
                 // generator and much nearer that one: a point near this side, or inside the cone
                 // by its axis, keeps this side's foot, as faces expect.)
-                let (d_here, d_across) = (((rho - r) * ca - l.z * sa).abs(), ((-rho - r) * ca - l.z * sa).abs());
+                let (d_here, d_across) = (
+                    ((rho - r) * ca - l.z * sa).abs(),
+                    ((-rho - r) * ca - l.z * sa).abs(),
+                );
                 if d_here > tol::REL_POINT * (1.0 + p.coords.norm()) && d_across < 0.5 * d_here {
                     let u = ang(f) + PI;
                     let u = match hint {
@@ -259,7 +298,11 @@ impl Surface {
                 let l = f.local(p);
                 let rho = (l.x * l.x + l.y * l.y).sqrt();
                 let v = l.z.atan2(rho);
-                let u = if rho < tol::ROUNDOFF_FINE { hint.map(|h| h.0).unwrap_or(0.0) } else { ang(f) };
+                let u = if rho < tol::ROUNDOFF_FINE {
+                    hint.map(|h| h.0).unwrap_or(0.0)
+                } else {
+                    ang(f)
+                };
                 (u, v)
             }
             Surface::Torus { f, rmaj, rmin } => {
@@ -272,7 +315,9 @@ impl Surface {
                 if rmin > rmaj {
                     let near = ((rho - rmaj).hypot(l.z) - rmin).abs();
                     let far = ((-rho - rmaj).hypot(l.z) - rmin).abs();
-                    let hint_far = hint.is_some_and(|(hu, _)| (unwrap_near(u + PI, hu, TAU) - hu).abs() < (u - hu).abs());
+                    let hint_far = hint.is_some_and(|(hu, _)| {
+                        (unwrap_near(u + PI, hu, TAU) - hu).abs() < (u - hu).abs()
+                    });
                     if far < near - tol::CONFUSION || (far <= near + tol::CONFUSION && hint_far) {
                         u = match hint {
                             Some((hu, _)) => unwrap_near(u + PI, hu, TAU),
@@ -287,7 +332,9 @@ impl Surface {
                 };
                 (u, v)
             }
-            Surface::Revolution { f, m } if meridian_off_plane(f, m) => project_off_plane(f, m, p, hint),
+            Surface::Revolution { f, m } if meridian_off_plane(f, m) => {
+                project_off_plane(f, m, p, hint)
+            }
             Surface::Revolution { f, m } => {
                 let u = ang(f);
                 let l = f.local(p);
@@ -354,12 +401,26 @@ impl Surface {
         let (u, v) = match hint {
             Some(h) => h,
             None => {
-                let at = |i: usize, j: usize| (u0 + (u1 - u0) * i as f64 / n as f64, v0 + (v1 - v0) * j as f64 / n as f64);
+                let at = |i: usize, j: usize| {
+                    (
+                        u0 + (u1 - u0) * i as f64 / n as f64,
+                        v0 + (v1 - v0) * j as f64 / n as f64,
+                    )
+                };
                 let grid = self.grid_points(n, &at);
-                let d: Vec<Vec<f64>> = (0..=n).map(|i| grid[i * (n + 1)..(i + 1) * (n + 1)].iter().map(|g| (g - p).norm_squared()).collect()).collect();
+                let d: Vec<Vec<f64>> = (0..=n)
+                    .map(|i| {
+                        grid[i * (n + 1)..(i + 1) * (n + 1)]
+                            .iter()
+                            .map(|g| (g - p).norm_squared())
+                            .collect()
+                    })
+                    .collect();
                 for i in 0..=n {
                     for j in 0..=n {
-                        let lowest = (i.saturating_sub(1)..=(i + 1).min(n)).all(|a| (j.saturating_sub(1)..=(j + 1).min(n)).all(|b| d[a][b] >= d[i][j]));
+                        let lowest = (i.saturating_sub(1)..=(i + 1).min(n)).all(|a| {
+                            (j.saturating_sub(1)..=(j + 1).min(n)).all(|b| d[a][b] >= d[i][j])
+                        });
                         if lowest {
                             others.push((d[i][j], at(i, j)));
                         }
@@ -383,8 +444,13 @@ impl Surface {
                 let a = d[1].norm_squared() + r.dot(&d[3]);
                 let b = d[1].dot(&d[2]) + r.dot(&d[4]);
                 let c = d[2].norm_squared() + r.dot(&d[5]);
-                let Some((du, dv)) = solve2(a, b, b, c, -fu, -fv) else { break };
-                let (mut nu, mut nv) = (self.clamp_u(u + du, u0, u1), (v + dv).clamp(v0.min(v1), v1.max(v0)));
+                let Some((du, dv)) = solve2(a, b, b, c, -fu, -fv) else {
+                    break;
+                };
+                let (mut nu, mut nv) = (
+                    self.clamp_u(u + du, u0, u1),
+                    (v + dv).clamp(v0.min(v1), v1.max(v0)),
+                );
                 // Held at a u end (or a v end): the joint step's other half aimed past it, so
                 // step the free direction alone (the closest point along the boundary).
                 if nu != u + du && c > tol::TINY {
@@ -409,8 +475,14 @@ impl Surface {
                     tries += 1;
                 }
                 if tries == 30 {
-                    let (su, sv) = (d[1].norm_squared().max(tol::TINY), d[2].norm_squared().max(tol::TINY));
-                    (nu, nv) = (self.clamp_u(u - fu / su, u0, u1), (v - fv / sv).clamp(v0.min(v1), v1.max(v0)));
+                    let (su, sv) = (
+                        d[1].norm_squared().max(tol::TINY),
+                        d[2].norm_squared().max(tol::TINY),
+                    );
+                    (nu, nv) = (
+                        self.clamp_u(u - fu / su, u0, u1),
+                        (v - fv / sv).clamp(v0.min(v1), v1.max(v0)),
+                    );
                     tries = 0;
                     while !closer(nu, nv) && tries < 30 {
                         (nu, nv) = (u + (nu - u) * 0.5, v + (nv - v) * 0.5);
@@ -457,7 +529,10 @@ impl Surface {
         }
         // The same across a u seam (a B-spline tube closed in u but not periodic: Newton
         // clamped at one end of u where the point lies just past the other).
-        if (u == u0 || u == u1) && !self.u_periodic() && (self.eval(u, v) - p).norm() > tol::ROUNDOFF {
+        if (u == u0 || u == u1)
+            && !self.u_periodic()
+            && (self.eval(u, v) - p).norm() > tol::ROUNDOFF
+        {
             let closed = (0..3).all(|i| {
                 let b = v0 + (v1 - v0) * (0.2 + 0.3 * i as f64);
                 (self.eval(u0, b) - self.eval(u1, b)).norm() < tol::ROUNDOFF
@@ -475,8 +550,20 @@ impl Surface {
         let off_at_seam = || {
             let closed_at = |a: P3, b: P3| (a - b).norm() < tol::ROUNDOFF;
             let probe = [0.2, 0.5, 0.8];
-            let at_u = (u == u0 || u == u1) && probe.iter().all(|f| closed_at(self.eval(u0, v0 + (v1 - v0) * f), self.eval(u1, v0 + (v1 - v0) * f)));
-            let at_v = (v == v0 || v == v1) && probe.iter().all(|f| closed_at(self.eval(u0 + (u1 - u0) * f, v0), self.eval(u0 + (u1 - u0) * f, v1)));
+            let at_u = (u == u0 || u == u1)
+                && probe.iter().all(|f| {
+                    closed_at(
+                        self.eval(u0, v0 + (v1 - v0) * f),
+                        self.eval(u1, v0 + (v1 - v0) * f),
+                    )
+                });
+            let at_v = (v == v0 || v == v1)
+                && probe.iter().all(|f| {
+                    closed_at(
+                        self.eval(u0 + (u1 - u0) * f, v0),
+                        self.eval(u0 + (u1 - u0) * f, v1),
+                    )
+                });
             (at_u || at_v) && (self.eval(u, v) - p).norm() > near_enough
         };
         if let Some((gd, guv)) = grid_best
@@ -510,7 +597,9 @@ impl Surface {
                 })
                 .collect()
         };
-        let Surface::Nurbs(ns) = self else { return compute() };
+        let Surface::Nurbs(ns) = self else {
+            return compute();
+        };
         /// The grids kept per thread.
         const KEPT: usize = 8;
         type Kept = Vec<(Weak<NurbsSurface>, usize, Rc<[P3]>)>;
@@ -518,7 +607,11 @@ impl Surface {
             static GRIDS: RefCell<(Kept, usize)> = const { RefCell::new((Vec::new(), 0)) };
         }
         let key = Arc::as_ptr(ns);
-        if let Some(g) = GRIDS.with_borrow(|(kept, _)| kept.iter().find(|(w, m, _)| *m == n && std::ptr::eq(w.as_ptr(), key)).map(|k| k.2.clone())) {
+        if let Some(g) = GRIDS.with_borrow(|(kept, _)| {
+            kept.iter()
+                .find(|(w, m, _)| *m == n && std::ptr::eq(w.as_ptr(), key))
+                .map(|k| k.2.clone())
+        }) {
             return g;
         }
         let g = compute();
@@ -535,7 +628,11 @@ impl Surface {
     }
 
     fn clamp_u(&self, u: f64, u0: f64, u1: f64) -> f64 {
-        if self.u_periodic() { u } else { u.clamp(u0, u1) }
+        if self.u_periodic() {
+            u
+        } else {
+            u.clamp(u0, u1)
+        }
     }
 
     /// The parameter box used for sampling (NURBS: its range; extrusions: curve range × ±1e4).
@@ -551,8 +648,16 @@ impl Surface {
                 // across its seam) covers the whole range that way.
                 let ((ru0, ru1), (rv0, rv1)) = n.range();
                 let (eu, ev) = ((ru1 - ru0) * tol::REL, (rv1 - rv0) * tol::REL);
-                let u = if u.0 < ru0 - eu || u.1 > ru1 + eu { (ru0, ru1) } else { u };
-                let v = if v.0 < rv0 - ev || v.1 > rv1 + ev { (rv0, rv1) } else { v };
+                let u = if u.0 < ru0 - eu || u.1 > ru1 + eu {
+                    (ru0, ru1)
+                } else {
+                    u
+                };
+                let v = if v.0 < rv0 - ev || v.1 > rv1 + ev {
+                    (rv0, rv1)
+                } else {
+                    v
+                };
                 for h in n.sub_net(u, v).iter().flatten() {
                     bb.add(&P3::new(h.x / h.w, h.y / h.w, h.z / h.w));
                 }
@@ -570,7 +675,11 @@ impl Surface {
                 let mb = super::boolean::curve_bbox(m, v.0, v.1);
                 let (mut rho, mut h) = (0.0f64, (f64::MAX, f64::MIN));
                 for i in 0..8 {
-                    let c = P3::new(if i & 1 == 0 { mb.min.x } else { mb.max.x }, if i & 2 == 0 { mb.min.y } else { mb.max.y }, if i & 4 == 0 { mb.min.z } else { mb.max.z });
+                    let c = P3::new(
+                        if i & 1 == 0 { mb.min.x } else { mb.max.x },
+                        if i & 2 == 0 { mb.min.y } else { mb.max.y },
+                        if i & 4 == 0 { mb.min.z } else { mb.max.z },
+                    );
                     let l = f.local(&c);
                     rho = rho.max((l.x * l.x + l.y * l.y).sqrt());
                     h = (h.0.min(l.z), h.1.max(l.z));
@@ -588,7 +697,10 @@ impl Surface {
         let (auu, avv) = match self {
             Surface::Plane { .. } => (0.0, 0.0),
             Surface::Cylinder { r, .. } => (r.abs(), 0.0),
-            Surface::Cone { r, a, .. } => ((r + v.0 * a.sin()).abs().max((r + v.1 * a.sin()).abs()), 0.0),
+            Surface::Cone { r, a, .. } => (
+                (r + v.0 * a.sin()).abs().max((r + v.1 * a.sin()).abs()),
+                0.0,
+            ),
             Surface::Sphere { r, .. } => (r.abs(), r.abs()),
             Surface::Torus { rmaj, rmin, .. } => (rmaj.abs() + rmin.abs(), rmin.abs()),
             _ => unreachable!(),
@@ -623,27 +735,59 @@ impl Surface {
                         .iter()
                         .map(|q| {
                             let (mx, my, mz, wm) = (q.x / q.w, q.y / q.w, q.z / q.w, q.w);
-                            let p = f.o + f.x * (mx * ax - my * ay) + f.y * (mx * ay + my * ax) + f.z * mz;
+                            let p = f.o
+                                + f.x * (mx * ax - my * ay)
+                                + f.y * (mx * ay + my * ax)
+                                + f.z * mz;
                             h(p, wa * wm)
                         })
                         .collect()
                 })
                 .collect();
-            NurbsSurface { du: arc.degree, dv: m.degree, ku: arc.knots.clone(), kv: m.knots.clone(), cps }
+            NurbsSurface {
+                du: arc.degree,
+                dv: m.degree,
+                ku: arc.knots.clone(),
+                kv: m.knots.clone(),
+                cps,
+            }
         };
         let o = P3::origin();
         match self {
             Surface::Plane { .. } => {
                 let c = |a: f64, b: f64| h(self.eval(a, b), 1.0);
-                NurbsSurface { du: 1, dv: 1, ku: vec![u.0, u.0, u.1, u.1], kv: vec![v.0, v.0, v.1, v.1], cps: vec![vec![c(u.0, v.0), c(u.0, v.1)], vec![c(u.1, v.0), c(u.1, v.1)]] }
+                NurbsSurface {
+                    du: 1,
+                    dv: 1,
+                    ku: vec![u.0, u.0, u.1, u.1],
+                    kv: vec![v.0, v.0, v.1, v.1],
+                    cps: vec![
+                        vec![c(u.0, v.0), c(u.0, v.1)],
+                        vec![c(u.1, v.0), c(u.1, v.1)],
+                    ],
+                }
             }
-            Surface::Cylinder { f, r } => revolve(f, &line(P3::new(*r, 0.0, v.0), P3::new(*r, 0.0, v.1))),
+            Surface::Cylinder { f, r } => {
+                revolve(f, &line(P3::new(*r, 0.0, v.0), P3::new(*r, 0.0, v.1)))
+            }
             Surface::Cone { f, r, a } => {
                 let m = |t: f64| P3::new(r + t * a.sin(), 0.0, t * a.cos());
                 revolve(f, &line(m(v.0), m(v.1)))
             }
-            Surface::Sphere { f, r } => revolve(f, &super::curve::conic_nurbs(o, V3::x() * *r, V3::z() * *r, v.0, v.1)),
-            Surface::Torus { f, rmaj, rmin } => revolve(f, &super::curve::conic_nurbs(P3::new(*rmaj, 0.0, 0.0), V3::x() * *rmin, V3::z() * *rmin, v.0, v.1)),
+            Surface::Sphere { f, r } => revolve(
+                f,
+                &super::curve::conic_nurbs(o, V3::x() * *r, V3::z() * *r, v.0, v.1),
+            ),
+            Surface::Torus { f, rmaj, rmin } => revolve(
+                f,
+                &super::curve::conic_nurbs(
+                    P3::new(*rmaj, 0.0, 0.0),
+                    V3::x() * *rmin,
+                    V3::z() * *rmin,
+                    v.0,
+                    v.1,
+                ),
+            ),
             Surface::Revolution { f, m } => {
                 let mut mc = m.to_nurbs(v.0, v.1);
                 for q in mc.cps.iter_mut() {
@@ -662,7 +806,13 @@ impl Surface {
                         vec![h(p + d * v.0, q.w), h(p + d * v.1, q.w)]
                     })
                     .collect();
-                NurbsSurface { du: cn.degree, dv: 1, ku: cn.knots.clone(), kv: vec![v.0, v.0, v.1, v.1], cps }
+                NurbsSurface {
+                    du: cn.degree,
+                    dv: 1,
+                    ku: cn.knots.clone(),
+                    kv: vec![v.0, v.0, v.1, v.1],
+                    cps,
+                }
             }
             Surface::Nurbs(n) => (**n).clone(),
         }
@@ -674,10 +824,18 @@ impl Surface {
         match self {
             Surface::Nurbs(n) => n.range(),
             Surface::Plane { .. } => (open, open),
-            Surface::Extrusion { c, .. } => (c.nurbs_range().unwrap_or(if c.is_periodic() { (0.0, TAU) } else { open }), open),
+            Surface::Extrusion { c, .. } => (
+                c.nurbs_range()
+                    .unwrap_or(if c.is_periodic() { (0.0, TAU) } else { open }),
+                open,
+            ),
             Surface::Sphere { .. } => ((0.0, TAU), (-PI / 2.0, PI / 2.0)),
             Surface::Torus { .. } => ((0.0, TAU), (-PI, PI)),
-            Surface::Revolution { m, .. } => ((0.0, TAU), m.nurbs_range().unwrap_or(if m.is_periodic() { (0.0, TAU) } else { open })),
+            Surface::Revolution { m, .. } => (
+                (0.0, TAU),
+                m.nurbs_range()
+                    .unwrap_or(if m.is_periodic() { (0.0, TAU) } else { open }),
+            ),
             Surface::Cylinder { .. } | Surface::Cone { .. } => ((0.0, TAU), open),
         }
     }
@@ -705,7 +863,11 @@ impl Surface {
                 // A spindle torus (minor radius past the major) is also the far meridian's
                 // turn, at radius −ρ: the nearer of the two.
                 let far = (rho + rmaj).hypot(l.z) - rmin;
-                if rmin > rmaj && far.abs() < near.abs() { far } else { near }
+                if rmin > rmaj && far.abs() < near.abs() {
+                    far
+                } else {
+                    near
+                }
             }
             _ => return None,
         })
@@ -725,16 +887,35 @@ impl Surface {
         let s = m.scale();
         let tf = |f: &Frame| {
             let g = f.transformed(m);
-            Frame { o: g.o, x: g.x / s, y: g.y / s, z: g.z / s }
+            Frame {
+                o: g.o,
+                x: g.x / s,
+                y: g.y / s,
+                z: g.z / s,
+            }
         };
         match self {
             Surface::Plane { f } => Surface::Plane { f: tf(f) },
             Surface::Cylinder { f, r } => Surface::Cylinder { f: tf(f), r: r * s },
-            Surface::Cone { f, r, a } => Surface::Cone { f: tf(f), r: r * s, a: *a },
+            Surface::Cone { f, r, a } => Surface::Cone {
+                f: tf(f),
+                r: r * s,
+                a: *a,
+            },
             Surface::Sphere { f, r } => Surface::Sphere { f: tf(f), r: r * s },
-            Surface::Torus { f, rmaj, rmin } => Surface::Torus { f: tf(f), rmaj: rmaj * s, rmin: rmin * s },
-            Surface::Revolution { f, m: c } => Surface::Revolution { f: tf(f), m: c.transformed(m) },
-            Surface::Extrusion { c, d } => Surface::Extrusion { c: c.transformed(m), d: m.vector(d) },
+            Surface::Torus { f, rmaj, rmin } => Surface::Torus {
+                f: tf(f),
+                rmaj: rmaj * s,
+                rmin: rmin * s,
+            },
+            Surface::Revolution { f, m: c } => Surface::Revolution {
+                f: tf(f),
+                m: c.transformed(m),
+            },
+            Surface::Extrusion { c, d } => Surface::Extrusion {
+                c: c.transformed(m),
+                d: m.vector(d),
+            },
             Surface::Nurbs(n) => Surface::Nurbs(Arc::new(n.transformed(m))),
         }
     }
@@ -754,7 +935,11 @@ impl Surface {
     /// The axis of a surface of revolution.
     pub fn axis(&self) -> Option<(P3, V3)> {
         match self {
-            Surface::Cylinder { f, .. } | Surface::Cone { f, .. } | Surface::Sphere { f, .. } | Surface::Torus { f, .. } | Surface::Revolution { f, .. } => Some((f.o, f.z)),
+            Surface::Cylinder { f, .. }
+            | Surface::Cone { f, .. }
+            | Surface::Sphere { f, .. }
+            | Surface::Torus { f, .. }
+            | Surface::Revolution { f, .. } => Some((f.o, f.z)),
             _ => None,
         }
     }
@@ -762,16 +947,35 @@ impl Surface {
     /// The u = const iso curve, parametrized by v.
     pub fn iso_u(&self, u: f64) -> Option<Curve> {
         Some(match self {
-            Surface::Plane { f } => Curve::Line { o: f.o + f.x * u, d: f.y },
-            Surface::Cylinder { f, r } => Curve::Line { o: f.o + (f.x * u.cos() + f.y * u.sin()) * *r, d: f.z },
+            Surface::Plane { f } => Curve::Line {
+                o: f.o + f.x * u,
+                d: f.y,
+            },
+            Surface::Cylinder { f, r } => Curve::Line {
+                o: f.o + (f.x * u.cos() + f.y * u.sin()) * *r,
+                d: f.z,
+            },
             Surface::Cone { f, r, a } => {
                 let rho = f.x * u.cos() + f.y * u.sin();
-                Curve::Line { o: f.o + rho * *r, d: rho * a.sin() + f.z * a.cos() }
+                Curve::Line {
+                    o: f.o + rho * *r,
+                    d: rho * a.sin() + f.z * a.cos(),
+                }
             }
-            Surface::Sphere { f, r } => Curve::Circle { c: f.o, x: f.x * u.cos() + f.y * u.sin(), y: f.z, r: *r },
+            Surface::Sphere { f, r } => Curve::Circle {
+                c: f.o,
+                x: f.x * u.cos() + f.y * u.sin(),
+                y: f.z,
+                r: *r,
+            },
             Surface::Torus { f, rmaj, rmin } => {
                 let rho = f.x * u.cos() + f.y * u.sin();
-                Curve::Circle { c: f.o + rho * *rmaj, x: rho, y: f.z, r: *rmin }
+                Curve::Circle {
+                    c: f.o + rho * *rmaj,
+                    x: rho,
+                    y: f.z,
+                    r: *rmin,
+                }
             }
             _ => return None,
         })
@@ -780,11 +984,34 @@ impl Surface {
     /// The v = const iso curve, parametrized by u.
     pub fn iso_v(&self, v: f64) -> Option<Curve> {
         Some(match self {
-            Surface::Plane { f } => Curve::Line { o: f.o + f.y * v, d: f.x },
-            Surface::Cylinder { f, r } => Curve::Circle { c: f.o + f.z * v, x: f.x, y: f.y, r: *r },
-            Surface::Cone { f, r, a } => Curve::Circle { c: f.o + f.z * (v * a.cos()), x: f.x, y: f.y, r: r + v * a.sin() },
-            Surface::Sphere { f, r } => Curve::Circle { c: f.o + f.z * (r * v.sin()), x: f.x, y: f.y, r: r * v.cos() },
-            Surface::Torus { f, rmaj, rmin } => Curve::Circle { c: f.o + f.z * (rmin * v.sin()), x: f.x, y: f.y, r: rmaj + rmin * v.cos() },
+            Surface::Plane { f } => Curve::Line {
+                o: f.o + f.y * v,
+                d: f.x,
+            },
+            Surface::Cylinder { f, r } => Curve::Circle {
+                c: f.o + f.z * v,
+                x: f.x,
+                y: f.y,
+                r: *r,
+            },
+            Surface::Cone { f, r, a } => Curve::Circle {
+                c: f.o + f.z * (v * a.cos()),
+                x: f.x,
+                y: f.y,
+                r: r + v * a.sin(),
+            },
+            Surface::Sphere { f, r } => Curve::Circle {
+                c: f.o + f.z * (r * v.sin()),
+                x: f.x,
+                y: f.y,
+                r: r * v.cos(),
+            },
+            Surface::Torus { f, rmaj, rmin } => Curve::Circle {
+                c: f.o + f.z * (rmin * v.sin()),
+                x: f.x,
+                y: f.y,
+                r: rmaj + rmin * v.cos(),
+            },
             Surface::Extrusion { c, d } => c.transformed(&Affine::translation(d * v)),
             _ => return None,
         })
@@ -811,7 +1038,11 @@ impl Surface {
             (Surface::Plane { f: a }, Surface::Plane { f: b }) => {
                 let (na, nb) = (a.x.cross(&a.y), b.x.cross(&b.y));
                 let same = par(&na, &nb)?;
-                if (b.o - a.o).dot(&na).abs() < tol { Some(same) } else { None }
+                if (b.o - a.o).dot(&na).abs() < tol {
+                    Some(same)
+                } else {
+                    None
+                }
             }
             (Surface::Cylinder { f: a, r: ra }, Surface::Cylinder { f: b, r: rb }) => {
                 par(&a.z, &b.z)?;
@@ -830,7 +1061,18 @@ impl Surface {
                     None
                 }
             }
-            (Surface::Torus { f: a, rmaj: ra, rmin: sa }, Surface::Torus { f: b, rmaj: rb, rmin: sb }) => {
+            (
+                Surface::Torus {
+                    f: a,
+                    rmaj: ra,
+                    rmin: sa,
+                },
+                Surface::Torus {
+                    f: b,
+                    rmaj: rb,
+                    rmin: sb,
+                },
+            ) => {
                 par(&a.z, &b.z)?;
                 if (ra - rb).abs() < tol && (sa - sb).abs() < tol && (a.o - b.o).norm() < tol {
                     Some(a.right_handed() == b.right_handed())
@@ -849,7 +1091,9 @@ impl Surface {
                 let _ = da;
                 let open_a = if aa.sin() > 0.0 { a.z } else { -a.z };
                 let open_b = if ab.sin() > 0.0 { b.z } else { -b.z };
-                if open_a.dot(&open_b) < 1.0 - tol::ANGULAR || (aa.sin().abs() - ab.sin().abs()).abs() > tol::ANGULAR {
+                if open_a.dot(&open_b) < 1.0 - tol::ANGULAR
+                    || (aa.sin().abs() - ab.sin().abs()).abs() > tol::ANGULAR
+                {
                     return None;
                 }
                 Some(a.right_handed() == b.right_handed())
@@ -863,8 +1107,13 @@ impl Surface {
                 }
                 let samples = |m: &Curve| -> Vec<f64> {
                     match (m.nurbs_range(), m) {
-                        (Some((t0, t1)), _) => (0..=8).map(|i| t0 + (t1 - t0) * i as f64 / 8.0).collect(),
-                        (None, Curve::Line { d, .. }) => [-10.0, -3.0, -1.0, 0.0, 1.0, 3.0, 10.0].iter().map(|x| x / d.norm().max(tol::TINY)).collect(),
+                        (Some((t0, t1)), _) => {
+                            (0..=8).map(|i| t0 + (t1 - t0) * i as f64 / 8.0).collect()
+                        }
+                        (None, Curve::Line { d, .. }) => [-10.0, -3.0, -1.0, 0.0, 1.0, 3.0, 10.0]
+                            .iter()
+                            .map(|x| x / d.norm().max(tol::TINY))
+                            .collect(),
                         _ => (0..8).map(|i| TAU * i as f64 / 8.0).collect(),
                     }
                 };
@@ -897,10 +1146,15 @@ fn sampled_kind(s: &Surface) -> bool {
 fn curve_samples(c: &Curve, n: usize) -> Vec<f64> {
     let (t0, t1) = match (c.nurbs_range(), c) {
         (Some(r), _) => r,
-        (None, Curve::Line { d, .. }) => (-10.0 / d.norm().max(tol::TINY), 10.0 / d.norm().max(tol::TINY)),
+        (None, Curve::Line { d, .. }) => (
+            -10.0 / d.norm().max(tol::TINY),
+            10.0 / d.norm().max(tol::TINY),
+        ),
         _ => (0.0, TAU),
     };
-    (0..=n).map(|i| t0 + (t1 - t0) * i as f64 / n as f64).collect()
+    (0..=n)
+        .map(|i| t0 + (t1 - t0) * i as f64 / n as f64)
+        .collect()
 }
 
 /// Points of a B-spline or an extrusion to test against another surface, by rows (each row a
@@ -914,7 +1168,9 @@ fn coincidence_rows(s: &Surface) -> Vec<Vec<(f64, f64)>> {
             (0..=k)
                 .map(|i| {
                     let v = v0 + (v1 - v0) * i as f64 / k as f64;
-                    (0..=k).map(|j| (u0 + (u1 - u0) * j as f64 / k as f64, v)).collect()
+                    (0..=k)
+                        .map(|j| (u0 + (u1 - u0) * j as f64 / k as f64, v))
+                        .collect()
                 })
                 .collect()
         }
@@ -928,7 +1184,10 @@ fn coincidence_rows(s: &Surface) -> Vec<Vec<(f64, f64)>> {
                 bb.diagonal().max(1.0)
             };
             let h = size / d.norm().max(tol::TINY);
-            [-h, 0.0, h].iter().map(|&v| ts.iter().map(|&u| (u, v)).collect()).collect()
+            [-h, 0.0, h]
+                .iter()
+                .map(|&v| ts.iter().map(|&u| (u, v)).collect())
+                .collect()
         }
         _ => Vec::new(),
     }
@@ -943,14 +1202,24 @@ fn coincidence_rows(s: &Surface) -> Vec<Vec<(f64, f64)>> {
 fn points_on(a: &Surface, b: &Surface, tol: f64) -> Option<(usize, Option<P3>)> {
     let range = match b {
         Surface::Nurbs(n) => Some(n.range()),
-        Surface::Extrusion { c, .. } => c.nurbs_range().map(|r| (r, (f64::NEG_INFINITY, f64::INFINITY))),
+        Surface::Extrusion { c, .. } => c
+            .nurbs_range()
+            .map(|r| (r, (f64::NEG_INFINITY, f64::INFINITY))),
         _ => None,
     };
     let bbox = range.map(|((u0, u1), (v0, v1))| {
-        let v = if v0.is_finite() { (v0, v1) } else { (-1e4, 1e4) };
+        let v = if v0.is_finite() {
+            (v0, v1)
+        } else {
+            (-1e4, 1e4)
+        };
         b.patch_bbox((u0, u1), v).grow(tol)
     });
-    let at_edge = |x: f64, lo: f64, hi: f64| lo.is_finite() && ((x - lo).abs() <= (hi - lo).abs() * tol::REL || (x - hi).abs() <= (hi - lo).abs() * tol::REL);
+    let at_edge = |x: f64, lo: f64, hi: f64| {
+        lo.is_finite()
+            && ((x - lo).abs() <= (hi - lo).abs() * tol::REL
+                || (x - hi).abs() <= (hi - lo).abs() * tol::REL)
+    };
     let mut on = 0;
     let mut first: Option<P3> = None;
     for row in coincidence_rows(a) {
@@ -962,14 +1231,19 @@ fn points_on(a: &Surface, b: &Surface, tol: f64) -> Option<(usize, Option<P3>)> 
                 continue;
             }
             let q = b.project(&p, hint);
-            let q = if (b.eval(q.0, q.1) - p).norm() > tol && hint.is_some() { b.project(&p, None) } else { q };
+            let q = if (b.eval(q.0, q.1) - p).norm() > tol && hint.is_some() {
+                b.project(&p, None)
+            } else {
+                q
+            };
             hint = Some(q);
             if (b.eval(q.0, q.1) - p).norm() <= tol {
                 on += 1;
                 first.get_or_insert(p);
                 continue;
             }
-            let beyond = range.is_some_and(|((u0, u1), (v0, v1))| at_edge(q.0, u0, u1) || at_edge(q.1, v0, v1));
+            let beyond = range
+                .is_some_and(|((u0, u1), (v0, v1))| at_edge(q.0, u0, u1) || at_edge(q.1, v0, v1));
             if !beyond {
                 return None;
             }
@@ -1030,7 +1304,9 @@ pub fn meridian_off_plane(f: &Frame, m: &Curve) -> bool {
     let off_v = |d: &V3| f.y.dot(d).abs() > tol::REL_FINE * d.norm();
     match m {
         Curve::Line { o, d } => off(o) || off_v(d),
-        Curve::Circle { c, x, y, .. } | Curve::Ellipse { c, x, y, .. } => off(c) || off_v(x) || off_v(y),
+        Curve::Circle { c, x, y, .. } | Curve::Ellipse { c, x, y, .. } => {
+            off(c) || off_v(x) || off_v(y)
+        }
         Curve::Nurbs(n) => n.cps.iter().any(|h| off(&super::nurbs::dehom(h))),
     }
 }
@@ -1039,7 +1315,11 @@ pub fn meridian_off_plane(f: &Frame, m: &Curve) -> bool {
 /// `v`: 0 for a meridian in the xz half plane.
 pub fn meridian_azimuth(f: &Frame, m: &Curve, v: f64) -> f64 {
     let l = f.local(&m.point(v));
-    if l.x.hypot(l.y) < tol::TINY { 0.0 } else { l.y.atan2(l.x) }
+    if l.x.hypot(l.y) < tol::TINY {
+        0.0
+    } else {
+        l.y.atan2(l.x)
+    }
 }
 
 /// [`Surface::project`] on a surface of revolution whose meridian is off its frame's xz plane:
@@ -1060,12 +1340,20 @@ fn project_off_plane(f: &Frame, m: &Curve, p: &P3, hint: Option<(f64, f64)>) -> 
     // derivative.
     let at = |v: f64| {
         let (q, d1, d2) = m.d2(v);
-        let (q, d1, d2) = (f.local(&q), V3::new(d1.dot(&f.x), d1.dot(&f.y), d1.dot(&f.z)), V3::new(d2.dot(&f.x), d2.dot(&f.y), d2.dot(&f.z)));
+        let (q, d1, d2) = (
+            f.local(&q),
+            V3::new(d1.dot(&f.x), d1.dot(&f.y), d1.dot(&f.z)),
+            V3::new(d2.dot(&f.x), d2.dot(&f.y), d2.dot(&f.z)),
+        );
         let r = q.x.hypot(q.y).max(tol::TINY);
         let r1 = (q.x * d1.x + q.y * d1.y) / r;
         let r2 = (d1.x * d1.x + d1.y * d1.y + q.x * d2.x + q.y * d2.y) / r - r1 * r1 / r;
         let (dr, dh) = (r - rho, q.z - h);
-        (dr * dr + dh * dh, dr * r1 + dh * d1.z, r1 * r1 + dr * r2 + d1.z * d1.z + dh * d2.z)
+        (
+            dr * dr + dh * dh,
+            dr * r1 + dh * d1.z,
+            r1 * r1 + dr * r2 + d1.z * d1.z + dh * d2.z,
+        )
     };
     let newton = |s: f64| {
         let mut v = s.clamp(a, b);
@@ -1111,7 +1399,11 @@ fn project_off_plane(f: &Frame, m: &Curve, p: &P3, hint: Option<(f64, f64)>) -> 
             if ld.z.abs() > tol::TINY {
                 starts.push((h - lo.z) / ld.z);
             }
-            let (qa, qb, qc) = (ld.x * ld.x + ld.y * ld.y, 2.0 * (lo.x * ld.x + lo.y * ld.y), lo.x * lo.x + lo.y * lo.y - rho * rho);
+            let (qa, qb, qc) = (
+                ld.x * ld.x + ld.y * ld.y,
+                2.0 * (lo.x * ld.x + lo.y * ld.y),
+                lo.x * lo.x + lo.y * lo.y - rho * rho,
+            );
             if qa > tol::TINY {
                 let disc = qb * qb - 4.0 * qa * qc;
                 let sq = disc.max(0.0).sqrt();
@@ -1140,11 +1432,20 @@ mod tests {
     #[test]
     fn projection_onto_a_cone_past_its_apex() {
         let f = Frame::from_z(P3::origin(), V3::z());
-        let cone = Surface::Cone { f, r: 0.0, a: -std::f64::consts::FRAC_PI_4 };
+        let cone = Surface::Cone {
+            f,
+            r: 0.0,
+            a: -std::f64::consts::FRAC_PI_4,
+        };
         for (u, v) in [(0.3, 2.0), (2.0, -1.5), (4.0, 0.7)] {
             let p = cone.eval(u, v);
             let (pu, pv) = cone.project(&p, None);
-            assert!((cone.eval(pu, pv) - p).norm() < 1e-12, "({u}, {v}): {:?} projects to {:?}", p, cone.eval(pu, pv));
+            assert!(
+                (cone.eval(pu, pv) - p).norm() < 1e-12,
+                "({u}, {v}): {:?} projects to {:?}",
+                p,
+                cone.eval(pu, pv)
+            );
         }
     }
 
@@ -1162,13 +1463,23 @@ mod tests {
         }
         let t: Vec<f64> = (0..pts.len()).map(|i| i as f64).collect();
         let c = NurbsCurve::interpolate(&pts, &t, 3, None, None);
-        let cps: Vec<Vec<H>> = c.cps.iter().map(|h| vec![*h, h + H::new(0.0, 0.0, h.w, 0.0)]).collect();
-        let s = Surface::Nurbs(Arc::new(NurbsSurface::new(c.degree, 1, c.knots.clone(), vec![0.0, 0.0, 1.0, 1.0], cps).unwrap()));
+        let cps: Vec<Vec<H>> = c
+            .cps
+            .iter()
+            .map(|h| vec![*h, h + H::new(0.0, 0.0, h.w, 0.0)])
+            .collect();
+        let s = Surface::Nurbs(Arc::new(
+            NurbsSurface::new(c.degree, 1, c.knots.clone(), vec![0.0, 0.0, 1.0, 1.0], cps).unwrap(),
+        ));
         let ((u0, u1), _) = s.param_box();
         for i in 0..=200 {
             let p = s.eval(u0 + (u1 - u0) * i as f64 / 200.0, 0.37);
             let (u, v) = s.project(&p, None);
-            assert!((s.eval(u, v) - p).norm() < 1e-9, "{p:?} projects {:.3e} away", (s.eval(u, v) - p).norm());
+            assert!(
+                (s.eval(u, v) - p).norm() < 1e-9,
+                "{p:?} projects {:.3e} away",
+                (s.eval(u, v) - p).norm()
+            );
         }
     }
 
@@ -1178,24 +1489,54 @@ mod tests {
     /// near each other, or crossing, aren't.
     #[test]
     fn sampled_same_domain() {
-        let pts: Vec<P3> = [(0.0, 0.0), (1.0, 2.0), (3.0, 2.5), (5.0, 1.0)].iter().map(|&(x, y)| P3::new(x, y, 0.0)).collect();
-        let c = Curve::Nurbs(Arc::new(NurbsCurve::interpolate(&pts, &[0.0, 1.0, 2.0, 3.0], 3, None, None)));
-        let e1 = Surface::Extrusion { c: c.clone(), d: V3::new(0.0, 0.0, 1.0) };
-        let e2 = Surface::Extrusion { c: c.clone(), d: V3::new(0.0, 0.0, 2.0) };
+        let pts: Vec<P3> = [(0.0, 0.0), (1.0, 2.0), (3.0, 2.5), (5.0, 1.0)]
+            .iter()
+            .map(|&(x, y)| P3::new(x, y, 0.0))
+            .collect();
+        let c = Curve::Nurbs(Arc::new(NurbsCurve::interpolate(
+            &pts,
+            &[0.0, 1.0, 2.0, 3.0],
+            3,
+            None,
+            None,
+        )));
+        let e1 = Surface::Extrusion {
+            c: c.clone(),
+            d: V3::new(0.0, 0.0, 1.0),
+        };
+        let e2 = Surface::Extrusion {
+            c: c.clone(),
+            d: V3::new(0.0, 0.0, 2.0),
+        };
         assert_eq!(e1.same_domain(&e2, 1e-7), Some(true));
-        let off = Surface::Extrusion { c: c.transformed(&Affine::translation(V3::new(0.0, 0.01, 0.0))), d: V3::new(0.0, 0.0, 1.0) };
+        let off = Surface::Extrusion {
+            c: c.transformed(&Affine::translation(V3::new(0.0, 0.01, 0.0))),
+            d: V3::new(0.0, 0.0, 1.0),
+        };
         assert_eq!(e1.same_domain(&off, 1e-7), None);
-        let tilted = Surface::Extrusion { c, d: V3::new(0.0, 0.3, 1.0) };
+        let tilted = Surface::Extrusion {
+            c,
+            d: V3::new(0.0, 0.3, 1.0),
+        };
         assert_eq!(e1.same_domain(&tilted, 1e-7), None);
         let f = Frame::from_z(P3::new(1.0, 2.0, 3.0), V3::new(0.0, 0.0, 1.0));
         let cyl = Surface::Cylinder { f, r: 4.0 };
         let patch = Surface::Nurbs(Arc::new(cyl.to_nurbs((0.0, PI), (0.0, 5.0))));
         assert_eq!(patch.same_domain(&cyl, 1e-7), Some(true));
         assert_eq!(cyl.same_domain(&patch, 1e-7), Some(true));
-        assert_eq!(patch.same_domain(&Surface::Cylinder { f, r: 4.01 }, 1e-7), None);
+        assert_eq!(
+            patch.same_domain(&Surface::Cylinder { f, r: 4.01 }, 1e-7),
+            None
+        );
         let other = Surface::Nurbs(Arc::new(cyl.to_nurbs((PI / 2.0, 1.5 * PI), (2.0, 8.0))));
         assert_eq!(patch.same_domain(&other, 1e-7), Some(true));
-        let crossing = Surface::Nurbs(Arc::new(Surface::Cylinder { f: Frame::from_z(P3::new(4.0, 2.0, 3.0), V3::new(0.0, 0.0, 1.0)), r: 4.0 }.to_nurbs((0.0, TAU), (0.0, 5.0))));
+        let crossing = Surface::Nurbs(Arc::new(
+            Surface::Cylinder {
+                f: Frame::from_z(P3::new(4.0, 2.0, 3.0), V3::new(0.0, 0.0, 1.0)),
+                r: 4.0,
+            }
+            .to_nurbs((0.0, TAU), (0.0, 5.0)),
+        ));
         assert_eq!(patch.same_domain(&crossing, 1e-7), None);
         let plane = Surface::Plane { f };
         let flat = Surface::Nurbs(Arc::new(plane.to_nurbs((-1.0, 1.0), (-1.0, 1.0))));
@@ -1216,21 +1557,46 @@ mod tests {
         assert!((duv - d[4]).norm() < 1e-5, "{s:?} Suv");
         assert!((dvv - d[5]).norm() < 1e-5, "{s:?} Svv");
         let (pu, pv) = s.project(&s.eval(u, v), Some((u, v)));
-        assert!((s.eval(pu, pv) - s.eval(u, v)).norm() < 1e-9, "{s:?} project");
+        assert!(
+            (s.eval(pu, pv) - s.eval(u, v)).norm() < 1e-9,
+            "{s:?} project"
+        );
     }
 
     #[test]
     fn analytic_derivatives_and_projection() {
-        let f = Frame::from_xz(P3::new(1.0, 2.0, 3.0), V3::new(1.0, 1.0, 0.0), V3::new(0.0, 0.3, 1.0));
-        let m = Curve::Circle { c: f.o + f.x * 5.0, x: f.x, y: f.z, r: 2.0 };
+        let f = Frame::from_xz(
+            P3::new(1.0, 2.0, 3.0),
+            V3::new(1.0, 1.0, 0.0),
+            V3::new(0.0, 0.3, 1.0),
+        );
+        let m = Curve::Circle {
+            c: f.o + f.x * 5.0,
+            x: f.x,
+            y: f.z,
+            r: 2.0,
+        };
         for s in [
             Surface::Plane { f },
             Surface::Cylinder { f, r: 3.0 },
             Surface::Cone { f, r: 3.0, a: 0.4 },
             Surface::Sphere { f, r: 3.0 },
-            Surface::Torus { f, rmaj: 5.0, rmin: 2.0 },
+            Surface::Torus {
+                f,
+                rmaj: 5.0,
+                rmin: 2.0,
+            },
             Surface::Revolution { f, m },
-            Surface::Extrusion { c: Curve::Ellipse { c: P3::origin(), x: V3::x(), y: V3::y(), a: 3.0, b: 2.0 }, d: V3::new(0.1, 0.0, 1.0) },
+            Surface::Extrusion {
+                c: Curve::Ellipse {
+                    c: P3::origin(),
+                    x: V3::x(),
+                    y: V3::y(),
+                    a: 3.0,
+                    b: 2.0,
+                },
+                d: V3::new(0.1, 0.0, 1.0),
+            },
         ] {
             check_derivs(&s, 0.7, 0.4);
             if let Some(d) = s.signed_distance(&(s.eval(0.7, 0.4) + s.normal(0.7, 0.4) * 0.5)) {
@@ -1241,18 +1607,39 @@ mod tests {
 
     #[test]
     fn nurbs_forms_match_the_surfaces() {
-        let f = Frame { o: P3::new(1.0, -2.0, 0.5), x: V3::new(0.6, 0.8, 0.0), y: V3::new(-0.8, 0.6, 0.0), z: V3::z() };
+        let f = Frame {
+            o: P3::new(1.0, -2.0, 0.5),
+            x: V3::new(0.6, 0.8, 0.0),
+            y: V3::new(-0.8, 0.6, 0.0),
+            z: V3::z(),
+        };
         // (A revolution's meridian lies in its frame's x–z half plane.)
         let m = |r: f64, z: f64| f.o + f.x * r + f.z * z;
-        let meridian = Curve::nurbs(NurbsCurve::bezier(&[m(3.0, 0.0), m(5.0, 1.5), m(3.4, 3.5)], &[1.0, 1.0, 1.0]));
+        let meridian = Curve::nurbs(NurbsCurve::bezier(
+            &[m(3.0, 0.0), m(5.0, 1.5), m(3.4, 3.5)],
+            &[1.0, 1.0, 1.0],
+        ));
         let surfs = [
             Surface::Plane { f },
             Surface::Cylinder { f, r: 2.0 },
             Surface::Cone { f, r: 2.0, a: 0.3 },
             Surface::Sphere { f, r: 3.0 },
-            Surface::Torus { f, rmaj: 5.0, rmin: 1.5 },
+            Surface::Torus {
+                f,
+                rmaj: 5.0,
+                rmin: 1.5,
+            },
             Surface::Revolution { f, m: meridian },
-            Surface::Extrusion { c: Curve::Ellipse { c: P3::new(0.0, 0.0, 0.0), x: V3::x(), y: V3::y(), a: 3.0, b: 2.0 }, d: V3::new(0.1, 0.0, 1.0) },
+            Surface::Extrusion {
+                c: Curve::Ellipse {
+                    c: P3::new(0.0, 0.0, 0.0),
+                    x: V3::x(),
+                    y: V3::y(),
+                    a: 3.0,
+                    b: 2.0,
+                },
+                d: V3::new(0.1, 0.0, 1.0),
+            },
         ];
         for s in &surfs {
             let (u, v) = match s {
@@ -1263,15 +1650,27 @@ mod tests {
             let n = s.to_nurbs(u, v);
             for i in 0..=8 {
                 for j in 0..=8 {
-                    let (a, b) = (u.0 + (u.1 - u.0) * i as f64 / 8.0, v.0 + (v.1 - v.0) * j as f64 / 8.0);
+                    let (a, b) = (
+                        u.0 + (u.1 - u.0) * i as f64 / 8.0,
+                        v.0 + (v.1 - v.0) * j as f64 / 8.0,
+                    );
                     let want = s.eval(a, b);
                     // The NURBS form's parameters differ inside an arc (rational): compare points
                     // by distance to the surface and the corners exactly.
                     let got = n.ders2(a, b)[0];
                     let p = P3::from(got);
-                    assert!(s.distance(&p) < 1e-9, "{} off the surface by {} at {i} {j}: {p:?} vs {want:?}", format!("{s:?}").chars().take(12).collect::<String>(), s.distance(&p));
+                    assert!(
+                        s.distance(&p) < 1e-9,
+                        "{} off the surface by {} at {i} {j}: {p:?} vs {want:?}",
+                        format!("{s:?}").chars().take(12).collect::<String>(),
+                        s.distance(&p)
+                    );
                     if (i == 0 || i == 8) && (j == 0 || j == 8) {
-                        assert!((p - want).norm() < 1e-9, "{:?} corner {p:?} vs {want:?}", s.kind());
+                        assert!(
+                            (p - want).norm() < 1e-9,
+                            "{:?} corner {p:?} vs {want:?}",
+                            s.kind()
+                        );
                     }
                 }
             }

@@ -36,12 +36,12 @@ use std::sync::Arc;
 
 use super::curve::Curve;
 use super::math::*;
-use super::nurbs::{dehom, hom, NurbsCurve, NurbsSurface, H};
-use super::step::{canonical, same_sense, ReadModel, ReadOccurrence, ReadPart};
+use super::nurbs::{H, NurbsCurve, NurbsSurface, dehom, hom};
+use super::step::{ReadModel, ReadOccurrence, ReadPart, canonical, same_sense};
 use super::surface::Surface;
+use super::tol;
 use super::topo::*;
 use super::xbuild::{XBuilder, XFace};
-use super::tol;
 
 // ---------------------------------------------------------------------------------------------
 // Writing
@@ -52,7 +52,17 @@ fn real(x: f64) -> String {
 }
 
 fn hollerith(s: &str) -> String {
-    let s: String = s.chars().map(|c| if c.is_ascii() && !c.is_ascii_control() { c } else { '?' }).take(200).collect();
+    let s: String = s
+        .chars()
+        .map(|c| {
+            if c.is_ascii() && !c.is_ascii_control() {
+                c
+            } else {
+                '?'
+            }
+        })
+        .take(200)
+        .collect();
     format!("{}H{}", s.len(), s)
 }
 
@@ -74,7 +84,14 @@ struct Writer {
 impl Writer {
     /// Adds an entity; returns its directory pointer (the line number of its first D record).
     fn add(&mut self, kind: u32, form: u32, params: Vec<String>) -> usize {
-        self.ents.push(Ent { kind, form, params, transform: 0, label: String::new(), status: "00010000" });
+        self.ents.push(Ent {
+            kind,
+            form,
+            params,
+            transform: 0,
+            label: String::new(),
+            status: "00010000",
+        });
         2 * self.ents.len() - 1
     }
     fn ent(&mut self, de: usize) -> &mut Ent {
@@ -106,10 +123,25 @@ impl Writer {
                 let (p, q) = (pts[i].coords - c, pts[(i + 1) % pts.len()].coords - c);
                 nrm += p.cross(&q);
             }
-            if nrm.norm() > tol::DEGENERATE && pts.iter().all(|p| (p.coords - c).dot(&nrm.normalize()).abs() < tol::ROUNDOFF) { Some(nrm.normalize()) } else { None }
+            if nrm.norm() > tol::DEGENERATE
+                && pts
+                    .iter()
+                    .all(|p| (p.coords - c).dot(&nrm.normalize()).abs() < tol::ROUNDOFF)
+            {
+                Some(nrm.normalize())
+            } else {
+                None
+            }
         };
         let closed = (pts[0] - pts[k]).norm() < tol::ROUNDOFF;
-        let mut p = vec![k.to_string(), m.to_string(), (planar.is_some() as u8).to_string(), (closed as u8).to_string(), (!n.is_rational() as u8).to_string(), "0".into()];
+        let mut p = vec![
+            k.to_string(),
+            m.to_string(),
+            (planar.is_some() as u8).to_string(),
+            (closed as u8).to_string(),
+            (!n.is_rational() as u8).to_string(),
+            "0".into(),
+        ];
         p.extend(n.knots.iter().map(|x| real(*x)));
         p.extend(n.cps.iter().map(|h| real(h.w)));
         for q in &pts {
@@ -126,7 +158,18 @@ impl Writer {
         match c {
             Curve::Line { .. } => {
                 let (a, b) = (c.point(t0), c.point(t1));
-                self.add(110, 0, vec![real(a.x), real(a.y), real(a.z), real(b.x), real(b.y), real(b.z)])
+                self.add(
+                    110,
+                    0,
+                    vec![
+                        real(a.x),
+                        real(a.y),
+                        real(a.z),
+                        real(b.x),
+                        real(b.y),
+                        real(b.z),
+                    ],
+                )
             }
             Curve::Circle { c: cc, x, y, r } => {
                 let z = x.cross(y);
@@ -134,7 +177,19 @@ impl Writer {
                 let (s, e) = ((t0.cos() * r, t0.sin() * r), (t1.cos() * r, t1.sin() * r));
                 let full = (t1 - t0 - TAU).abs() < tol::ANGULAR_FINE;
                 let e = if full { s } else { e };
-                let de = self.add(100, 0, vec!["0.".into(), "0.".into(), "0.".into(), real(s.0), real(s.1), real(e.0), real(e.1)]);
+                let de = self.add(
+                    100,
+                    0,
+                    vec![
+                        "0.".into(),
+                        "0.".into(),
+                        "0.".into(),
+                        real(s.0),
+                        real(s.1),
+                        real(e.0),
+                        real(e.1),
+                    ],
+                );
                 self.ent(de).transform = tm;
                 de
             }
@@ -152,7 +207,17 @@ impl Writer {
             let w0 = n.cps[0][0].w;
             n.cps.iter().flatten().any(|h| (h.w - w0).abs() > 1e-14)
         };
-        let mut p = vec![k1.to_string(), k2.to_string(), n.du.to_string(), n.dv.to_string(), "0".into(), "0".into(), (!rational as u8).to_string(), "0".into(), "0".into()];
+        let mut p = vec![
+            k1.to_string(),
+            k2.to_string(),
+            n.du.to_string(),
+            n.dv.to_string(),
+            "0".into(),
+            "0".into(),
+            (!rational as u8).to_string(),
+            "0".into(),
+            "0".into(),
+        ];
         p.extend(n.ku.iter().map(|x| real(*x)));
         p.extend(n.kv.iter().map(|x| real(*x)));
         // The first index varies fastest: column by column.
@@ -180,25 +245,57 @@ impl Writer {
             }
             Surface::Cylinder { f, r } => {
                 let (o, a, x) = (self.point(&f.o), self.dir(&f.z), self.dir(&f.x));
-                self.add(192, 1, vec![o.to_string(), a.to_string(), real(*r), x.to_string()])
+                self.add(
+                    192,
+                    1,
+                    vec![o.to_string(), a.to_string(), real(*r), x.to_string()],
+                )
             }
             Surface::Cone { f, r, a } => {
                 let (o, ax, x) = (self.point(&f.o), self.dir(&f.z), self.dir(&f.x));
-                self.add(194, 1, vec![o.to_string(), ax.to_string(), real(*r), real(a.to_degrees()), x.to_string()])
+                self.add(
+                    194,
+                    1,
+                    vec![
+                        o.to_string(),
+                        ax.to_string(),
+                        real(*r),
+                        real(a.to_degrees()),
+                        x.to_string(),
+                    ],
+                )
             }
             Surface::Sphere { f, r } => {
                 let (o, ax, x) = (self.point(&f.o), self.dir(&f.z), self.dir(&f.x));
-                self.add(196, 1, vec![o.to_string(), real(*r), ax.to_string(), x.to_string()])
+                self.add(
+                    196,
+                    1,
+                    vec![o.to_string(), real(*r), ax.to_string(), x.to_string()],
+                )
             }
             Surface::Torus { f, rmaj, rmin } => {
                 let (o, ax, x) = (self.point(&f.o), self.dir(&f.z), self.dir(&f.x));
-                self.add(198, 1, vec![o.to_string(), ax.to_string(), real(*rmaj), real(*rmin), x.to_string()])
+                self.add(
+                    198,
+                    1,
+                    vec![
+                        o.to_string(),
+                        ax.to_string(),
+                        real(*rmaj),
+                        real(*rmin),
+                        x.to_string(),
+                    ],
+                )
             }
             Surface::Revolution { f, m } => {
                 let axis = self.curve(&Curve::Line { o: f.o, d: f.z }, 0.0, 1.0);
                 let (a, b) = m.nurbs_range().unwrap_or((0.0, TAU));
                 let g = self.curve(m, a, b);
-                self.add(120, 0, vec![axis.to_string(), g.to_string(), "0.".into(), real(TAU)])
+                self.add(
+                    120,
+                    0,
+                    vec![axis.to_string(), g.to_string(), "0.".into(), real(TAU)],
+                )
             }
             Surface::Extrusion { c: cv, d } => {
                 let (a, b) = cv.nurbs_range().unwrap_or((0.0, TAU));
@@ -234,7 +331,11 @@ impl Writer {
         let de = self.add(402, 7, p);
         let e = self.ent(de);
         e.status = "00000000";
-        e.label = name.chars().filter(|c| c.is_ascii_graphic()).take(8).collect();
+        e.label = name
+            .chars()
+            .filter(|c| c.is_ascii_graphic())
+            .take(8)
+            .collect();
         Some(de)
     }
 
@@ -243,10 +344,19 @@ impl Writer {
         if b.faces.is_empty() {
             return wire.into_iter().collect();
         }
-        let in_wire: std::collections::HashSet<usize> = b.wires.iter().flat_map(|w| w.edges.iter().map(|e| e.0)).collect();
+        let in_wire: std::collections::HashSet<usize> = b
+            .wires
+            .iter()
+            .flat_map(|w| w.edges.iter().map(|e| e.0))
+            .collect();
         let used: Vec<usize> = {
             let mut u = vec![false; b.verts.len()];
-            for (_, e) in b.edges.iter().enumerate().filter(|(i, e)| !e.degenerate && !in_wire.contains(i)) {
+            for (_, e) in b
+                .edges
+                .iter()
+                .enumerate()
+                .filter(|(i, e)| !e.degenerate && !in_wire.contains(i))
+            {
                 u[e.v[0]] = true;
                 u[e.v[1]] = true;
             }
@@ -260,14 +370,22 @@ impl Writer {
             vp.extend([real(p.x), real(p.y), real(p.z)]);
         }
         let vl = self.add(502, 1, vp);
-        let edges: Vec<usize> = (0..b.edges.len()).filter(|&e| !b.edges[e].degenerate && !in_wire.contains(&e)).collect();
+        let edges: Vec<usize> = (0..b.edges.len())
+            .filter(|&e| !b.edges[e].degenerate && !in_wire.contains(&e))
+            .collect();
         let mut eidx = vec![0usize; b.edges.len()];
         let mut ep = vec![edges.len().to_string()];
         for (k, &ei) in edges.iter().enumerate() {
             eidx[ei] = k + 1;
             let e = &b.edges[ei];
             let c = self.curve(&e.curve, e.t[0], e.t[1]);
-            ep.extend([c.to_string(), vl.to_string(), vidx[e.v[0]].to_string(), vl.to_string(), vidx[e.v[1]].to_string()]);
+            ep.extend([
+                c.to_string(),
+                vl.to_string(),
+                vidx[e.v[0]].to_string(),
+                vl.to_string(),
+                vidx[e.v[1]].to_string(),
+            ]);
         }
         let el = self.add(504, 1, ep);
         let mut face_de = vec![(0usize, true); b.faces.len()];
@@ -281,10 +399,20 @@ impl Writer {
                 if cs.is_empty() {
                     continue;
                 }
-                let order: Vec<(usize, bool)> = if same { cs.iter().map(|c| (c.edge, c.fwd)).collect() } else { cs.iter().rev().map(|c| (c.edge, !c.fwd)).collect() };
+                let order: Vec<(usize, bool)> = if same {
+                    cs.iter().map(|c| (c.edge, c.fwd)).collect()
+                } else {
+                    cs.iter().rev().map(|c| (c.edge, !c.fwd)).collect()
+                };
                 let mut lp = vec![order.len().to_string()];
                 for (e, fwd) in order {
-                    lp.extend(["0".into(), el.to_string(), eidx[e].to_string(), (fwd as u8).to_string(), "0".into()]);
+                    lp.extend([
+                        "0".into(),
+                        el.to_string(),
+                        eidx[e].to_string(),
+                        (fwd as u8).to_string(),
+                        "0".into(),
+                    ]);
                 }
                 loops.push(self.add(508, 1, lp));
             }
@@ -301,10 +429,22 @@ impl Writer {
             shells.push(self.add(514, if sh.closed { 1 } else { 2 }, p));
         }
         let mut tops = Vec::new();
-        let label: String = name.chars().filter(|c| c.is_ascii_graphic()).take(8).collect();
-        let in_solid: std::collections::HashSet<usize> = b.solids.iter().flat_map(|s| s.shells.iter().copied()).collect();
+        let label: String = name
+            .chars()
+            .filter(|c| c.is_ascii_graphic())
+            .take(8)
+            .collect();
+        let in_solid: std::collections::HashSet<usize> = b
+            .solids
+            .iter()
+            .flat_map(|s| s.shells.iter().copied())
+            .collect();
         for s in &b.solids {
-            let mut p = vec![shells[s.shells[0]].to_string(), "1".into(), (s.shells.len() - 1).to_string()];
+            let mut p = vec![
+                shells[s.shells[0]].to_string(),
+                "1".into(),
+                (s.shells.len() - 1).to_string(),
+            ];
             for &v in &s.shells[1..] {
                 p.extend([shells[v].to_string(), "1".into()]);
             }
@@ -338,7 +478,15 @@ impl Writer {
         let now = {
             // YYYYMMDD.HHNNSS from the STEP writer's timestamp.
             let t = super::step::timestamp();
-            format!("{}{}{}.{}{}{}", &t[0..4], &t[5..7], &t[8..10], &t[11..13], &t[14..16], &t[17..19])
+            format!(
+                "{}{}{}.{}{}{}",
+                &t[0..4],
+                &t[5..7],
+                &t[8..10],
+                &t[11..13],
+                &t[14..16],
+                &t[17..19]
+            )
         };
         let g = [
             "1H,".to_string(),
@@ -411,13 +559,36 @@ impl Writer {
         }
         for (k, e) in self.ents.iter().enumerate() {
             let seq = 2 * k + 1;
-            let _ = writeln!(out, "{:>8}{:>8}{:>8}{:>8}{:>8}{:>8}{:>8}{:>8}{:>8}D{:>7}", e.kind, pinfo[k].0, 0, 0, 0, 0, e.transform, 0, e.status, seq);
-            let _ = writeln!(out, "{:>8}{:>8}{:>8}{:>8}{:>8}{:>8}{:>8}{:>8}{:>8}D{:>7}", e.kind, 0, 0, pinfo[k].1, e.form, "", "", e.label, 0, seq + 1);
+            let _ = writeln!(
+                out,
+                "{:>8}{:>8}{:>8}{:>8}{:>8}{:>8}{:>8}{:>8}{:>8}D{:>7}",
+                e.kind, pinfo[k].0, 0, 0, 0, 0, e.transform, 0, e.status, seq
+            );
+            let _ = writeln!(
+                out,
+                "{:>8}{:>8}{:>8}{:>8}{:>8}{:>8}{:>8}{:>8}{:>8}D{:>7}",
+                e.kind,
+                0,
+                0,
+                pinfo[k].1,
+                e.form,
+                "",
+                "",
+                e.label,
+                0,
+                seq + 1
+            );
         }
         for (i, (l, de)) in plines.iter().enumerate() {
             let _ = writeln!(out, "{l:<64} {de:>7}P{:>7}", i + 1);
         }
-        let t = format!("S{:>7}G{:>7}D{:>7}P{:>7}", 1, gl.len(), self.ents.len() * 2, plines.len());
+        let t = format!(
+            "S{:>7}G{:>7}D{:>7}P{:>7}",
+            1,
+            gl.len(),
+            self.ents.len() * 2,
+            plines.len()
+        );
         line(&mut out, &t, 'T', 1);
         out.into_bytes()
     }
@@ -467,7 +638,14 @@ fn tokens(s: &str, pd: char, rd: char) -> Vec<Tok> {
         let c = b[i];
         if c == pd || c == rd {
             let t = cur.trim();
-            out.push(if t.is_empty() { Tok::Empty } else { t.replace(['D', 'd'], "E").parse().map(Tok::Num).unwrap_or(Tok::Empty) });
+            out.push(if t.is_empty() {
+                Tok::Empty
+            } else {
+                t.replace(['D', 'd'], "E")
+                    .parse()
+                    .map(Tok::Num)
+                    .unwrap_or(Tok::Empty)
+            });
             cur.clear();
             if c == rd {
                 return out;
@@ -496,7 +674,13 @@ fn tokens(s: &str, pd: char, rd: char) -> Vec<Tok> {
         i += 1;
     }
     if !cur.trim().is_empty() {
-        out.push(cur.trim().replace(['D', 'd'], "E").parse().map(Tok::Num).unwrap_or(Tok::Empty));
+        out.push(
+            cur.trim()
+                .replace(['D', 'd'], "E")
+                .parse()
+                .map(Tok::Num)
+                .unwrap_or(Tok::Empty),
+        );
     }
     out
 }
@@ -547,7 +731,14 @@ fn parse(bytes: &[u8]) -> R<File> {
     if !sec.contains_key(&'D') || !sec.contains_key(&'P') {
         return Err("not an IGES file (no directory or parameter section)".into());
     }
-    let g: String = sec.get(&'G').map(|v| v.iter().map(|l| l.get(..72).unwrap_or("").to_string()).collect()).unwrap_or_default();
+    let g: String = sec
+        .get(&'G')
+        .map(|v| {
+            v.iter()
+                .map(|l| l.get(..72).unwrap_or("").to_string())
+                .collect()
+        })
+        .unwrap_or_default();
     // The delimiters: "1H," style, or defaults.
     let (mut pd, mut rd) = (',', ';');
     let gc: Vec<char> = g.chars().collect();
@@ -578,7 +769,9 @@ fn parse(bytes: &[u8]) -> R<File> {
         10 => 10.0,
         11 => 2.54e-5,
         3 => match gt.get(14) {
-            Some(Tok::Str(s)) if s.eq_ignore_ascii_case("IN") || s.eq_ignore_ascii_case("INCH") => 25.4,
+            Some(Tok::Str(s)) if s.eq_ignore_ascii_case("IN") || s.eq_ignore_ascii_case("INCH") => {
+                25.4
+            }
             Some(Tok::Str(s)) if s.eq_ignore_ascii_case("M") => 1000.0,
             Some(Tok::Str(s)) if s.eq_ignore_ascii_case("CM") => 10.0,
             _ => 1.0,
@@ -590,7 +783,10 @@ fn parse(bytes: &[u8]) -> R<File> {
     let mut pdata: HashMap<usize, String> = HashMap::new();
     for l in &sec[&'P'] {
         let de: usize = l.get(64..72).unwrap_or("").trim().parse().unwrap_or(0);
-        pdata.entry(de).or_default().push_str(l.get(..64).unwrap_or(""));
+        pdata
+            .entry(de)
+            .or_default()
+            .push_str(l.get(..64).unwrap_or(""));
     }
     let d = &sec[&'D'];
     let mut ents = HashMap::new();
@@ -602,13 +798,39 @@ fn parse(bytes: &[u8]) -> R<File> {
         let form: u32 = field(b, 4).parse().unwrap_or(0);
         let label = field(b, 7).to_string();
         let independent = field(a, 8).get(2..4).is_none_or(|sw| sw == "00");
-        let params = pdata.get(&de).map(|s| tokens(s, pd, rd)).unwrap_or_default();
+        let params = pdata
+            .get(&de)
+            .map(|s| tokens(s, pd, rd))
+            .unwrap_or_default();
         // The first parameter repeats the entity type.
-        let params = if params.is_empty() { params } else { params[1..].to_vec() };
-        ents.insert(de, DirEnt { kind, form, transform, label, params, independent });
+        let params = if params.is_empty() {
+            params
+        } else {
+            params[1..].to_vec()
+        };
+        ents.insert(
+            de,
+            DirEnt {
+                kind,
+                form,
+                transform,
+                label,
+                params,
+                independent,
+            },
+        );
     }
-    let resolution = gt.get(18).and_then(|t| t.f()).filter(|r| *r > 0.0).unwrap_or(tol::POINT) * scale;
-    Ok(File { ents, scale, resolution })
+    let resolution = gt
+        .get(18)
+        .and_then(|t| t.f())
+        .filter(|r| *r > 0.0)
+        .unwrap_or(tol::POINT)
+        * scale;
+    Ok(File {
+        ents,
+        scale,
+        resolution,
+    })
 }
 
 struct Reader<'a> {
@@ -620,10 +842,16 @@ struct Reader<'a> {
 
 impl<'a> Reader<'a> {
     fn ent(&self, de: usize) -> R<&'a DirEnt> {
-        self.f.ents.get(&de).ok_or_else(|| format!("directory entry {de} is missing"))
+        self.f
+            .ents
+            .get(&de)
+            .ok_or_else(|| format!("directory entry {de} is missing"))
     }
     fn num(e: &DirEnt, i: usize) -> R<f64> {
-        e.params.get(i).and_then(|t| t.f()).ok_or_else(|| format!("entity {} has too few parameters", e.kind))
+        e.params
+            .get(i)
+            .and_then(|t| t.f())
+            .ok_or_else(|| format!("entity {} has too few parameters", e.kind))
     }
     /// A count or degree: a whole number no larger than the entity's parameter list (a larger
     /// one can't describe data the entity holds, and would overflow the index arithmetic).
@@ -650,16 +878,25 @@ impl<'a> Reader<'a> {
         }
         let v: Vec<f64> = (0..12).map(|i| Self::num(e, i)).collect::<R<_>>()?;
         let m = nalgebra::Matrix3::new(v[0], v[1], v[2], v[4], v[5], v[6], v[8], v[9], v[10]);
-        let a = Affine { m, t: V3::new(v[3], v[7], v[11]) };
+        let a = Affine {
+            m,
+            t: V3::new(v[3], v[7], v[11]),
+        };
         let parent = self.transform(e.transform, depth + 1)?;
-        Ok(Affine { m: parent.m * a.m, t: parent.m * a.t + parent.t })
+        Ok(Affine {
+            m: parent.m * a.m,
+            t: parent.m * a.t + parent.t,
+        })
     }
 
     /// An entity's placement into mm.
     fn place(&self, e: &DirEnt) -> R<Affine> {
         let t = self.transform(e.transform, 0)?;
         let s = self.f.scale;
-        Ok(Affine { m: t.m * s, t: t.t * s })
+        Ok(Affine {
+            m: t.m * s,
+            t: t.t * s,
+        })
     }
 
     fn point(&self, de: usize) -> R<P3> {
@@ -667,7 +904,11 @@ impl<'a> Reader<'a> {
         if e.kind != 116 {
             return Err(format!("entity {de} is not a point"));
         }
-        Ok(self.place(e)?.point(&P3::new(Self::num(e, 0)?, Self::num(e, 1)?, Self::num(e, 2)?)))
+        Ok(self.place(e)?.point(&P3::new(
+            Self::num(e, 0)?,
+            Self::num(e, 1)?,
+            Self::num(e, 2)?,
+        )))
     }
 
     fn dir(&self, de: usize) -> R<V3> {
@@ -694,7 +935,11 @@ impl<'a> Reader<'a> {
         let mut cps = Vec::with_capacity(k + 1);
         for i in 0..=k {
             let w = Self::num(e, wb + i)?;
-            let p = P3::new(Self::num(e, cb + 3 * i)?, Self::num(e, cb + 3 * i + 1)?, Self::num(e, cb + 3 * i + 2)?);
+            let p = P3::new(
+                Self::num(e, cb + 3 * i)?,
+                Self::num(e, cb + 3 * i + 1)?,
+                Self::num(e, cb + 3 * i + 2)?,
+            );
             cps.push(hom(&p, if w > 0.0 { w } else { 1.0 }));
         }
         if m == 0 || k + 1 < m + 1 {
@@ -709,7 +954,10 @@ impl<'a> Reader<'a> {
         let n = |i| Self::num(e, i);
         Ok(match e.kind {
             110 => {
-                let (a, b) = (pl.point(&P3::new(n(0)?, n(1)?, n(2)?)), pl.point(&P3::new(n(3)?, n(4)?, n(5)?)));
+                let (a, b) = (
+                    pl.point(&P3::new(n(0)?, n(1)?, n(2)?)),
+                    pl.point(&P3::new(n(3)?, n(4)?, n(5)?)),
+                );
                 let (c, _) = Curve::line(a, b);
                 c
             }
@@ -732,11 +980,24 @@ impl<'a> Reader<'a> {
                 }
                 let s = pl.m.determinant().abs().cbrt();
                 let (ra, rb) = ((-f / a).sqrt() * s, (-f / c).sqrt() * s);
-                Curve::Ellipse { c: pl.point(&P3::new(0.0, 0.0, zt)), x: pl.m * V3::x() / s, y: pl.m * V3::y() / s, a: ra, b: rb }
+                Curve::Ellipse {
+                    c: pl.point(&P3::new(0.0, 0.0, zt)),
+                    x: pl.m * V3::x() / s,
+                    y: pl.m * V3::y() / s,
+                    a: ra,
+                    b: rb,
+                }
             }
             126 => {
                 let c = Self::nurbs_curve(e)?;
-                Curve::Nurbs(Arc::new(NurbsCurve { cps: c.cps.iter().map(|h| hom(&pl.point(&dehom(h)), h.w)).collect(), ..c }))
+                Curve::Nurbs(Arc::new(NurbsCurve {
+                    cps: c
+                        .cps
+                        .iter()
+                        .map(|h| hom(&pl.point(&dehom(h)), h.w))
+                        .collect(),
+                    ..c
+                }))
             }
             k => return Err(format!("unsupported IGES curve type {k}")),
         })
@@ -746,7 +1007,10 @@ impl<'a> Reader<'a> {
     /// mm): the parent's matrix, its translation scaled to mm.
     fn child_map(&self, e: &DirEnt) -> R<Affine> {
         let t = self.transform(e.transform, 0)?;
-        Ok(Affine { m: t.m, t: t.t * self.f.scale })
+        Ok(Affine {
+            m: t.m,
+            t: t.t * self.f.scale,
+        })
     }
 
     fn surface(&self, de: usize) -> R<Surface> {
@@ -768,7 +1032,9 @@ impl<'a> Reader<'a> {
         };
         let sc = pl.m.determinant().abs().cbrt();
         Ok(match e.kind {
-            190 => Surface::Plane { f: frame(p(0)?, p(1)?, if e.form == 1 { Some(p(2)?) } else { None })? },
+            190 => Surface::Plane {
+                f: frame(p(0)?, p(1)?, if e.form == 1 { Some(p(2)?) } else { None })?,
+            },
             108 => {
                 // A x + B y + C z = D.
                 let (a, b, c, d) = (n(0)?, n(1)?, n(2)?, n(3)?);
@@ -778,10 +1044,19 @@ impl<'a> Reader<'a> {
                     return Err("a plane with a zero normal".into());
                 }
                 let o = pl.point(&P3::from(nn * (d / (l * l))));
-                Surface::Plane { f: Frame::from_z(o, (pl.m * nn).normalize()) }
+                Surface::Plane {
+                    f: Frame::from_z(o, (pl.m * nn).normalize()),
+                }
             }
-            192 => Surface::Cylinder { f: frame(p(0)?, p(1)?, if e.form == 1 { Some(p(3)?) } else { None })?, r: n(2)? * sc },
-            194 => Surface::Cone { f: frame(p(0)?, p(1)?, if e.form == 1 { Some(p(4)?) } else { None })?, r: n(2)? * sc, a: n(3)?.to_radians() },
+            192 => Surface::Cylinder {
+                f: frame(p(0)?, p(1)?, if e.form == 1 { Some(p(3)?) } else { None })?,
+                r: n(2)? * sc,
+            },
+            194 => Surface::Cone {
+                f: frame(p(0)?, p(1)?, if e.form == 1 { Some(p(4)?) } else { None })?,
+                r: n(2)? * sc,
+                a: n(3)?.to_radians(),
+            },
             196 => {
                 let f = if e.form == 1 {
                     frame(p(0)?, p(2)?, Some(p(3)?))?
@@ -791,9 +1066,15 @@ impl<'a> Reader<'a> {
                 };
                 Surface::Sphere { f, r: n(1)? * sc }
             }
-            198 => Surface::Torus { f: frame(p(0)?, p(1)?, if e.form == 1 { Some(p(4)?) } else { None })?, rmaj: n(2)? * sc, rmin: n(3)? * sc },
+            198 => Surface::Torus {
+                f: frame(p(0)?, p(1)?, if e.form == 1 { Some(p(4)?) } else { None })?,
+                rmaj: n(2)? * sc,
+                rmin: n(3)? * sc,
+            },
             120 => {
-                let Curve::Line { o, d } = self.curve(p(0)?)?.transformed(&ch) else { return Err("a surface of revolution's axis is not a line".into()) };
+                let Curve::Line { o, d } = self.curve(p(0)?)?.transformed(&ch) else {
+                    return Err("a surface of revolution's axis is not a line".into());
+                };
                 let d = d.normalize();
                 let m = self.curve(p(1)?)?.transformed(&ch);
                 let mid = match m.nurbs_range() {
@@ -801,7 +1082,10 @@ impl<'a> Reader<'a> {
                     None => m.point(0.0),
                 };
                 let w = mid - o;
-                Surface::Revolution { f: Frame::from_xz(o, w - d * w.dot(&d), d), m }
+                Surface::Revolution {
+                    f: Frame::from_xz(o, w - d * w.dot(&d), d),
+                    m,
+                }
             }
             122 => {
                 let c = self.curve(p(0)?)?.transformed(&ch);
@@ -827,11 +1111,17 @@ impl<'a> Reader<'a> {
                         // The first index varies fastest.
                         let idx = j * (k1 + 1) + i;
                         let w = n(wb + idx)?;
-                        let q = pl.point(&P3::new(n(cb + 3 * idx)?, n(cb + 3 * idx + 1)?, n(cb + 3 * idx + 2)?));
+                        let q = pl.point(&P3::new(
+                            n(cb + 3 * idx)?,
+                            n(cb + 3 * idx + 1)?,
+                            n(cb + 3 * idx + 2)?,
+                        ));
                         row[j] = hom(&q, if w > 0.0 { w } else { 1.0 });
                     }
                 }
-                Surface::Nurbs(Arc::new(NurbsSurface::new(m1, m2, ku, kv, cps).map_err(|e| e.message())?))
+                Surface::Nurbs(Arc::new(
+                    NurbsSurface::new(m1, m2, ku, kv, cps).map_err(|e| e.message())?,
+                ))
             }
             k => return Err(format!("unsupported IGES surface type {k}")),
         })
@@ -847,8 +1137,17 @@ impl<'a> Reader<'a> {
         }
         let pl = self.place(e)?;
         // (1-based; an index no list holds is an error, not an overflow.)
-        let k = idx.checked_sub(1).and_then(|i| i.checked_mul(3)).map(|i| i + 1).filter(|&k| k < e.params.len()).ok_or_else(|| format!("vertex {idx} of list {list} doesn't exist"))?;
-        let p = pl.point(&P3::new(Self::num(e, k)?, Self::num(e, k + 1)?, Self::num(e, k + 2)?));
+        let k = idx
+            .checked_sub(1)
+            .and_then(|i| i.checked_mul(3))
+            .map(|i| i + 1)
+            .filter(|&k| k < e.params.len())
+            .ok_or_else(|| format!("vertex {idx} of list {list} doesn't exist"))?;
+        let p = pl.point(&P3::new(
+            Self::num(e, k)?,
+            Self::num(e, k + 1)?,
+            Self::num(e, k + 2)?,
+        ));
         let v = self.xb.vertex(p);
         self.verts.insert((list, idx), v);
         Ok(v)
@@ -888,7 +1187,13 @@ impl<'a> Reader<'a> {
             let mut i = 1;
             let mut cs = Vec::new();
             for _ in 0..ne {
-                let (ty, list, idx, of, k) = (Self::ptr(l, i)?, Self::ptr(l, i + 1)?, Self::ptr(l, i + 2)?, Self::num(l, i + 3)?, Self::ptr(l, i + 4)?);
+                let (ty, list, idx, of, k) = (
+                    Self::ptr(l, i)?,
+                    Self::ptr(l, i + 1)?,
+                    Self::ptr(l, i + 2)?,
+                    Self::num(l, i + 3)?,
+                    Self::ptr(l, i + 4)?,
+                );
                 i += 5 + 2 * k;
                 if ty != 0 {
                     continue; // a vertex: a singular point
@@ -907,7 +1212,11 @@ impl<'a> Reader<'a> {
             }
             loops.push(cs);
         }
-        Ok(self.xb.face(XFace { surf, sense: agrees, loops }))
+        Ok(self.xb.face(XFace {
+            surf,
+            sense: agrees,
+            loops,
+        }))
     }
 
     fn shell(&mut self, de: usize, flip: bool) -> R<usize> {
@@ -933,17 +1242,25 @@ impl<'a> Reader<'a> {
 fn name_of(f: &File, e: &DirEnt, nparams: usize) -> String {
     let p = &e.params;
     // (Counts beyond the list can't be right: they stop the search, never overflow it.)
-    let get = |i: usize| p.get(i).and_then(|t| t.f()).map(|x| x as usize).filter(|&x| x <= p.len());
+    let get = |i: usize| {
+        p.get(i)
+            .and_then(|t| t.f())
+            .map(|x| x as usize)
+            .filter(|&x| x <= p.len())
+    };
     if let Some(na) = get(nparams)
-        && let Some(np) = get(nparams + 1 + na) {
-            for k in 0..np {
-                if let Some(pe) = get(nparams + 2 + na + k).and_then(|d| f.ents.get(&d))
-                    && pe.kind == 406 && pe.form == 15
-                        && let Some(Tok::Str(s)) = pe.params.get(1) {
-                            return s.clone();
-                        }
+        && let Some(np) = get(nparams + 1 + na)
+    {
+        for k in 0..np {
+            if let Some(pe) = get(nparams + 2 + na + k).and_then(|d| f.ents.get(&d))
+                && pe.kind == 406
+                && pe.form == 15
+                && let Some(Tok::Str(s)) = pe.params.get(1)
+            {
+                return s.clone();
             }
         }
+    }
     e.label.clone()
 }
 
@@ -963,20 +1280,41 @@ impl<'a> Reader<'a> {
                 }
             }
             110 => {
-                let (a, b) = (pl.point(&P3::new(n(0)?, n(1)?, n(2)?)), pl.point(&P3::new(n(3)?, n(4)?, n(5)?)));
+                let (a, b) = (
+                    pl.point(&P3::new(n(0)?, n(1)?, n(2)?)),
+                    pl.point(&P3::new(n(3)?, n(4)?, n(5)?)),
+                );
                 if (b - a).norm() > tol::DEGENERATE {
-                    out.push(Seg { c: Curve::line(a, b).0, a, b });
+                    out.push(Seg {
+                        c: Curve::line(a, b).0,
+                        a,
+                        b,
+                    });
                 }
             }
             100 => {
                 let zt = n(0)?;
-                let (a, b) = (pl.point(&P3::new(n(3)?, n(4)?, zt)), pl.point(&P3::new(n(5)?, n(6)?, zt)));
-                out.push(Seg { c: self.curve(de)?, a, b });
+                let (a, b) = (
+                    pl.point(&P3::new(n(3)?, n(4)?, zt)),
+                    pl.point(&P3::new(n(5)?, n(6)?, zt)),
+                );
+                out.push(Seg {
+                    c: self.curve(de)?,
+                    a,
+                    b,
+                });
             }
             104 => {
                 let zt = n(6)?;
-                let (a, b) = (pl.point(&P3::new(n(7)?, n(8)?, zt)), pl.point(&P3::new(n(9)?, n(10)?, zt)));
-                out.push(Seg { c: self.curve(de)?, a, b });
+                let (a, b) = (
+                    pl.point(&P3::new(n(7)?, n(8)?, zt)),
+                    pl.point(&P3::new(n(9)?, n(10)?, zt)),
+                );
+                out.push(Seg {
+                    c: self.curve(de)?,
+                    a,
+                    b,
+                });
             }
             126 => {
                 let k = Self::count(e, 0)?;
@@ -984,10 +1322,19 @@ impl<'a> Reader<'a> {
                 let vb = 6 + (k + m + 2) + (k + 1) + 3 * (k + 1);
                 let c = self.curve(de)?;
                 let (r0, r1) = c.nurbs_range().unwrap_or((0.0, 1.0));
-                let (v0, v1) = (n(vb).unwrap_or(r0).clamp(r0, r1), n(vb + 1).unwrap_or(r1).clamp(r0, r1));
+                let (v0, v1) = (
+                    n(vb).unwrap_or(r0).clamp(r0, r1),
+                    n(vb + 1).unwrap_or(r1).clamp(r0, r1),
+                );
                 let c = match &c {
                     // A sub-range of the spline: trim it, so its ends are the segment's.
-                    Curve::Nurbs(nc) if v0 > r0 + tol::ROUNDOFF_FINE || v1 < r1 - tol::ROUNDOFF_FINE => Curve::Nurbs(Arc::new(Curve::Nurbs(nc.clone()).to_nurbs(v0.min(v1), v0.max(v1)))),
+                    Curve::Nurbs(nc)
+                        if v0 > r0 + tol::ROUNDOFF_FINE || v1 < r1 - tol::ROUNDOFF_FINE =>
+                    {
+                        Curve::Nurbs(Arc::new(
+                            Curve::Nurbs(nc.clone()).to_nurbs(v0.min(v1), v0.max(v1)),
+                        ))
+                    }
                     _ => c,
                 };
                 let (a, b) = (c.point(v0), c.point(v1));
@@ -1009,7 +1356,9 @@ impl<'a> Reader<'a> {
                 if cptr != 0 {
                     self.segments(cptr, &mut out, 0)?;
                 } else if bptr != 0 {
-                    let Surface::Nurbs(_) = surf else { return Err("a parameter space boundary on a non-spline surface".into()) };
+                    let Surface::Nurbs(_) = surf else {
+                        return Err("a parameter space boundary on a non-spline surface".into());
+                    };
                     let mut uv = Vec::new();
                     // Parameter curves are in the surface's own space: no unit scale.
                     self.segments(bptr, &mut uv, 0)?;
@@ -1017,15 +1366,32 @@ impl<'a> Reader<'a> {
                         let s = self.f.scale;
                         let unscale = |p: &P3| P3::new(p.x / s, p.y / s, 0.0);
                         let (pa, pb) = (unscale(&sg.a), unscale(&sg.b));
-                        let c2 = sg.c.transformed(&Affine { m: nalgebra::Matrix3::identity() / s, t: V3::zeros() });
-                        let (t0, t1) = super::xbuild::edge_range(&c2, &pa, &pb, (pa - pb).norm() < tol::DEGENERATE).unwrap_or((0.0, 1.0));
-                        let ts: Vec<f64> = (0..=32).map(|i| t0 + (t1 - t0) * i as f64 / 32.0).collect();
-                        let pts: Vec<P3> = ts.iter().map(|&t| {
-                            let q = c2.point(t);
-                            surf.eval(q.x, q.y)
-                        }).collect();
+                        let c2 = sg.c.transformed(&Affine {
+                            m: nalgebra::Matrix3::identity() / s,
+                            t: V3::zeros(),
+                        });
+                        let (t0, t1) = super::xbuild::edge_range(
+                            &c2,
+                            &pa,
+                            &pb,
+                            (pa - pb).norm() < tol::DEGENERATE,
+                        )
+                        .unwrap_or((0.0, 1.0));
+                        let ts: Vec<f64> =
+                            (0..=32).map(|i| t0 + (t1 - t0) * i as f64 / 32.0).collect();
+                        let pts: Vec<P3> = ts
+                            .iter()
+                            .map(|&t| {
+                                let q = c2.point(t);
+                                surf.eval(q.x, q.y)
+                            })
+                            .collect();
                         let fit = NurbsCurve::interpolate(&pts, &ts, 3, None, None);
-                        out.push(Seg { a: pts[0], b: pts[32], c: Curve::Nurbs(Arc::new(fit)) });
+                        out.push(Seg {
+                            a: pts[0],
+                            b: pts[32],
+                            c: Curve::Nurbs(Arc::new(fit)),
+                        });
                     }
                 } else {
                     return Err("a boundary with no curve".into());
@@ -1036,7 +1402,8 @@ impl<'a> Reader<'a> {
                 let nc = Self::ptr(e, 3)?;
                 let mut i = 4;
                 for _ in 0..nc {
-                    let (cv, sense, k) = (Self::ptr(e, i)?, Self::ptr(e, i + 1)?, Self::ptr(e, i + 2)?);
+                    let (cv, sense, k) =
+                        (Self::ptr(e, i)?, Self::ptr(e, i + 1)?, Self::ptr(e, i + 2)?);
                     i += 3 + k;
                     let mut segs = Vec::new();
                     self.segments(cv, &mut segs, 0)?;
@@ -1060,7 +1427,12 @@ impl<'a> Reader<'a> {
 /// each connected group of faces a shell (a solid when closed). The faces' orientation is then
 /// made consistent and outward ([`super::xbuild::orient_shells`]).
 fn read_trimmed(f: &File, out: &mut ReadModel) {
-    let mut des: Vec<usize> = f.ents.iter().filter(|(_, e)| e.kind == 144 || e.kind == 143).map(|(d, _)| *d).collect();
+    let mut des: Vec<usize> = f
+        .ents
+        .iter()
+        .filter(|(_, e)| e.kind == 144 || e.kind == 143)
+        .map(|(d, _)| *d)
+        .collect();
     if des.is_empty() {
         return;
     }
@@ -1071,15 +1443,36 @@ fn read_trimmed(f: &File, out: &mut ReadModel) {
         .iter()
         .filter_map(|d| {
             let e = &f.ents[d];
-            let r = Reader { f, xb: XBuilder::new(), verts: HashMap::new(), edges: HashMap::new() };
+            let r = Reader {
+                f,
+                xb: XBuilder::new(),
+                verts: HashMap::new(),
+                edges: HashMap::new(),
+            };
             let mut segs = Vec::new();
-            r.boundary(Reader::ptr(e, 3).ok()?, &Surface::Plane { f: Frame::world() }).ok().map(|s| segs = s)?;
-            Some(segs.iter().map(|s| s.a.coords.amax().max(-s.a.coords.min())).fold(0.0, f64::max))
+            r.boundary(
+                Reader::ptr(e, 3).ok()?,
+                &Surface::Plane { f: Frame::world() },
+            )
+            .ok()
+            .map(|s| segs = s)?;
+            Some(
+                segs.iter()
+                    .map(|s| s.a.coords.amax().max(-s.a.coords.min()))
+                    .fold(0.0, f64::max),
+            )
         })
         .fold(0.0, f64::max)
         .max(1e-3);
-    let tol = (f.resolution * 10.0).clamp(tol::REL * size, 1e-4 * size).max(tol::ROUNDOFF);
-    let r = Reader { f, xb: XBuilder::new(), verts: HashMap::new(), edges: HashMap::new() };
+    let tol = (f.resolution * 10.0)
+        .clamp(tol::REL * size, 1e-4 * size)
+        .max(tol::ROUNDOFF);
+    let r = Reader {
+        f,
+        xb: XBuilder::new(),
+        verts: HashMap::new(),
+        edges: HashMap::new(),
+    };
     let mut loose = Vec::new();
     for de in des {
         let e = &f.ents[&de];
@@ -1088,7 +1481,11 @@ fn read_trimmed(f: &File, out: &mut ReadModel) {
             let mut loops = Vec::new();
             if e.kind == 144 {
                 let (n1, n2, pto) = (Reader::ptr(e, 1)?, Reader::ptr(e, 2)?, Reader::ptr(e, 3)?);
-                loops.push(if n1 == 0 || pto == 0 { super::xbuild::natural_boundary(&surf)? } else { r.boundary(pto, &surf)? });
+                loops.push(if n1 == 0 || pto == 0 {
+                    super::xbuild::natural_boundary(&surf)?
+                } else {
+                    r.boundary(pto, &surf)?
+                });
                 for k in 0..n2 {
                     loops.push(r.boundary(Reader::ptr(e, 4 + k)?, &surf)?);
                 }
@@ -1112,8 +1509,17 @@ fn read_trimmed(f: &File, out: &mut ReadModel) {
     // Each solid a part; the loose sheets together.
     for piece in super::exchange::split_into_solids(&body) {
         if !piece.faces.is_empty() {
-            out.occurrences.push(ReadOccurrence { part: out.parts.len(), placement: Affine::identity(), name: String::new(), color: None });
-            out.parts.push(ReadPart { body: piece, name: String::new(), colors: Vec::new() });
+            out.occurrences.push(ReadOccurrence {
+                part: out.parts.len(),
+                placement: Affine::identity(),
+                name: String::new(),
+                color: None,
+            });
+            out.parts.push(ReadPart {
+                body: piece,
+                name: String::new(),
+                colors: Vec::new(),
+            });
         }
     }
 }
@@ -1135,19 +1541,39 @@ fn read_wires(f: &File, out: &mut ReadModel) {
             continue;
         }
         let n = Reader::count(e, 0).unwrap_or(0);
-        let members: Vec<usize> = (0..n).filter_map(|k| Reader::ptr(e, 1 + k).ok()).filter(|m| f.ents.get(m).is_some_and(|x| is_curve(x.kind) || x.kind == 116)).collect();
+        let members: Vec<usize> = (0..n)
+            .filter_map(|k| Reader::ptr(e, 1 + k).ok())
+            .filter(|m| {
+                f.ents
+                    .get(m)
+                    .is_some_and(|x| is_curve(x.kind) || x.kind == 116)
+            })
+            .collect();
         if !members.is_empty() {
             grouped.extend(members.iter().copied());
             groups.push((name_of(f, e, 1 + n), members));
         }
     }
-    let loose: Vec<usize> = des.iter().copied().filter(|d| !grouped.contains(d) && f.ents[d].independent && (is_curve(f.ents[d].kind) || f.ents[d].kind == 116)).collect();
+    let loose: Vec<usize> = des
+        .iter()
+        .copied()
+        .filter(|d| {
+            !grouped.contains(d)
+                && f.ents[d].independent
+                && (is_curve(f.ents[d].kind) || f.ents[d].kind == 116)
+        })
+        .collect();
     if !loose.is_empty() {
         groups.push((String::new(), loose));
     }
     let tol = (f.resolution * 10.0).max(tol::ROUNDOFF);
     for (name, members) in groups {
-        let r = Reader { f, xb: XBuilder::new(), verts: HashMap::new(), edges: HashMap::new() };
+        let r = Reader {
+            f,
+            xb: XBuilder::new(),
+            verts: HashMap::new(),
+            edges: HashMap::new(),
+        };
         let (mut segs, mut pts) = (Vec::new(), Vec::new());
         for de in members {
             if f.ents[&de].kind == 116 {
@@ -1163,13 +1589,27 @@ fn read_wires(f: &File, out: &mut ReadModel) {
             }
             for s in ss {
                 let closed = (s.a - s.b).norm() <= tol && s.c.is_periodic();
-                segs.push(super::step::WireSeg { c: s.c, a: s.a, b: s.b, closed });
+                segs.push(super::step::WireSeg {
+                    c: s.c,
+                    a: s.a,
+                    b: s.b,
+                    closed,
+                });
             }
         }
         let body = super::step::wire_body(&segs, &pts, tol);
         if !body.wires.is_empty() || !body.points.is_empty() {
-            out.occurrences.push(ReadOccurrence { part: out.parts.len(), placement: Affine::identity(), name: name.clone(), color: None });
-            out.parts.push(ReadPart { body, name, colors: Vec::new() });
+            out.occurrences.push(ReadOccurrence {
+                part: out.parts.len(),
+                placement: Affine::identity(),
+                name: name.clone(),
+                color: None,
+            });
+            out.parts.push(ReadPart {
+                body,
+                name,
+                colors: Vec::new(),
+            });
         }
     }
 }
@@ -1185,7 +1625,12 @@ pub fn read(bytes: &[u8]) -> Result<ReadModel, String> {
         if e.kind != 186 {
             continue;
         }
-        let mut r = Reader { f: &f, xb: XBuilder::new(), verts: HashMap::new(), edges: HashMap::new() };
+        let mut r = Reader {
+            f: &f,
+            xb: XBuilder::new(),
+            verts: HashMap::new(),
+            edges: HashMap::new(),
+        };
         let res = (|| -> R<String> {
             let sh = Reader::ptr(e, 0)?;
             let sof = Reader::num(e, 1)? != 0.0;
@@ -1206,8 +1651,17 @@ pub fn read(bytes: &[u8]) -> Result<ReadModel, String> {
                 let (body, w) = r.xb.finish();
                 out.warnings.extend(w);
                 if !body.faces.is_empty() {
-                    out.occurrences.push(ReadOccurrence { part: out.parts.len(), placement: Affine::identity(), name: name.clone(), color: None });
-                    out.parts.push(ReadPart { body, name, colors: Vec::new() });
+                    out.occurrences.push(ReadOccurrence {
+                        part: out.parts.len(),
+                        placement: Affine::identity(),
+                        name: name.clone(),
+                        color: None,
+                    });
+                    out.parts.push(ReadPart {
+                        body,
+                        name,
+                        colors: Vec::new(),
+                    });
                 }
             }
             Err(err) => out.warnings.push(err),
@@ -1219,7 +1673,12 @@ pub fn read(bytes: &[u8]) -> Result<ReadModel, String> {
         if e.kind != 514 || used_shells.contains(&de) {
             continue;
         }
-        let mut r = Reader { f: &f, xb: XBuilder::new(), verts: HashMap::new(), edges: HashMap::new() };
+        let mut r = Reader {
+            f: &f,
+            xb: XBuilder::new(),
+            verts: HashMap::new(),
+            edges: HashMap::new(),
+        };
         match r.shell(de, false) {
             Ok(s) => {
                 if e.form == 1 {
@@ -1229,8 +1688,17 @@ pub fn read(bytes: &[u8]) -> Result<ReadModel, String> {
                 let (body, w) = r.xb.finish();
                 out.warnings.extend(w);
                 if !body.faces.is_empty() {
-                    out.occurrences.push(ReadOccurrence { part: out.parts.len(), placement: Affine::identity(), name: name.clone(), color: None });
-                    out.parts.push(ReadPart { body, name, colors: Vec::new() });
+                    out.occurrences.push(ReadOccurrence {
+                        part: out.parts.len(),
+                        placement: Affine::identity(),
+                        name: name.clone(),
+                        color: None,
+                    });
+                    out.parts.push(ReadPart {
+                        body,
+                        name,
+                        colors: Vec::new(),
+                    });
                 }
             }
             Err(err) => out.warnings.push(err),
@@ -1271,18 +1739,60 @@ mod tests {
         ];
         let mut w = Writer::default();
         for (k, q) in quads.iter().enumerate() {
-            let q: Vec<P3> = if k % 2 == 0 { q.to_vec() } else { q.iter().rev().copied().collect() };
+            let q: Vec<P3> = if k % 2 == 0 {
+                q.to_vec()
+            } else {
+                q.iter().rev().copied().collect()
+            };
             let n = (q[1] - q[0]).cross(&(q[2] - q[0])).normalize();
             let d = n.dot(&q[0].coords);
-            let plane = w.add(108, 0, [n.x, n.y, n.z, d].iter().map(|x| real(*x)).chain(["0".into(), "0.".into(), "0.".into(), "0.".into(), "0.".into()]).collect());
+            let plane = w.add(
+                108,
+                0,
+                [n.x, n.y, n.z, d]
+                    .iter()
+                    .map(|x| real(*x))
+                    .chain([
+                        "0".into(),
+                        "0.".into(),
+                        "0.".into(),
+                        "0.".into(),
+                        "0.".into(),
+                    ])
+                    .collect(),
+            );
             let mut comp = vec!["4".to_string()];
             for i in 0..4 {
                 let (a, b) = (q[i], q[(i + 1) % 4]);
-                comp.push(w.add(110, 0, [a.x, a.y, a.z, b.x, b.y, b.z].iter().map(|x| real(*x)).collect()).to_string());
+                comp.push(
+                    w.add(
+                        110,
+                        0,
+                        [a.x, a.y, a.z, b.x, b.y, b.z]
+                            .iter()
+                            .map(|x| real(*x))
+                            .collect(),
+                    )
+                    .to_string(),
+                );
             }
             let comp = w.add(102, 0, comp);
-            let bnd = w.add(142, 0, vec!["0".into(), plane.to_string(), "0".into(), comp.to_string(), "2".into()]);
-            w.add(144, 0, vec![plane.to_string(), "1".into(), "0".into(), bnd.to_string()]);
+            let bnd = w.add(
+                142,
+                0,
+                vec![
+                    "0".into(),
+                    plane.to_string(),
+                    "0".into(),
+                    comp.to_string(),
+                    "2".into(),
+                ],
+            );
+            w.add(
+                144,
+                0,
+                vec![plane.to_string(), "1".into(), "0".into(), bnd.to_string()],
+            );
         }
         let m = read(&w.finish(10.0)).unwrap();
         assert_eq!(m.parts.len(), 1);
@@ -1290,12 +1800,24 @@ mod tests {
         assert!(b.check().is_empty(), "{:?}", b.check());
         assert_eq!((b.solids.len(), b.faces.len(), b.edges.len()), (1, 6, 12));
         let mp = super::super::mass::body_mass(b);
-        assert!((mp.volume - 1000.0).abs() < 1e-9 && (mp.surface_area - 600.0).abs() < 1e-9, "{mp:?}");
+        assert!(
+            (mp.volume - 1000.0).abs() < 1e-9 && (mp.surface_area - 600.0).abs() < 1e-9,
+            "{mp:?}"
+        );
     }
 
     #[test]
     fn tokens_with_hollerith_and_d_exponents() {
         let t = tokens("110,1.5D0,,3HA,B,2.E-3;ignored", ',', ';');
-        assert_eq!(t, vec![Tok::Num(110.0), Tok::Num(1.5), Tok::Empty, Tok::Str("A,B".into()), Tok::Num(0.002)]);
+        assert_eq!(
+            t,
+            vec![
+                Tok::Num(110.0),
+                Tok::Num(1.5),
+                Tok::Empty,
+                Tok::Str("A,B".into()),
+                Tok::Num(0.002)
+            ]
+        );
     }
 }

@@ -1,13 +1,13 @@
 //! Body sweeps: points, wires and sheets swept one kind higher (Phase 1b).
 
-use super::{side_loop, Prism, SideGeo, SweepKind, Turn};
-use crate::native::build::{fix_senses, Built, MIN_DEPTH};
+use super::{Prism, SideGeo, SweepKind, Turn, side_loop};
+use crate::native::build::{Built, MIN_DEPTH, fix_senses};
 use crate::native::curve::Curve;
 use crate::native::math::*;
 use crate::native::profile::{Piece, Src};
+use crate::native::tol;
 use crate::native::topo::*;
 use crate::{BodyClass, KernelError, Origin, Result};
-use crate::native::tol;
 
 /// How [`sweep_body`] moves a body: s runs from 0 along `Straight`'s unit direction (mm) or
 /// about a [`Turn`]'s axis (radians).
@@ -19,7 +19,10 @@ pub enum BodyMove<'a> {
 impl BodyMove<'_> {
     fn place(&self, s: f64) -> Affine {
         match self {
-            BodyMove::Straight(d) => Affine { m: nalgebra::Matrix3::identity(), t: d * s },
+            BodyMove::Straight(d) => Affine {
+                m: nalgebra::Matrix3::identity(),
+                t: d * s,
+            },
             BodyMove::Turn(t) => t.rot(s),
         }
     }
@@ -38,7 +41,11 @@ impl BodyMove<'_> {
                 {
                     return None;
                 }
-                Prism { plane: crate::Plane::top(), dir: *d }.side(piece, c3)
+                Prism {
+                    plane: crate::Plane::top(),
+                    dir: *d,
+                }
+                .side(piece, c3)
             }
             BodyMove::Turn(t) => t.side_of(piece, c3),
         }
@@ -63,7 +70,9 @@ impl BodyMove<'_> {
 /// of it), else the solid would fold through itself: an `InvalidParameter` error.
 pub fn sweep_body(b: &Body, mv: &BodyMove, s1: f64, whole: bool, source: u64) -> Result<Built> {
     if !whole && s1 < MIN_DEPTH {
-        return Err(KernelError::InvalidParameter(format!("The sweep's length {s1:e} is below the modelling tolerance ({MIN_DEPTH:e} mm)")));
+        return Err(KernelError::InvalidParameter(format!(
+            "The sweep's length {s1:e} is below the modelling tolerance ({MIN_DEPTH:e} mm)"
+        )));
     }
     let class = b.class();
     let m1 = mv.place(s1);
@@ -73,18 +82,39 @@ pub fn sweep_body(b: &Body, mv: &BodyMove, s1: f64, whole: bool, source: u64) ->
             let o = &mut out.body;
             for &v in &b.points {
                 let p = b.verts[v].p;
-                let rail = mv.rail(&p).ok_or_else(|| KernelError::InvalidParameter("A point on the axis sweeps nothing".into()))?;
+                let rail = mv.rail(&p).ok_or_else(|| {
+                    KernelError::InvalidParameter("A point on the axis sweeps nothing".into())
+                })?;
                 let v0 = o.add_vertex(p);
-                let v1 = if whole { v0 } else { o.add_vertex(m1.point(&p)) };
+                let v1 = if whole {
+                    v0
+                } else {
+                    o.add_vertex(m1.point(&p))
+                };
                 let e = o.add_edge(rail, 0.0, s1, v0, v1);
-                o.wires.push(Wire { edges: vec![(e, true)] });
+                o.wires.push(Wire {
+                    edges: vec![(e, true)],
+                });
             }
             return Ok(out);
         }
         BodyClass::Wire | BodyClass::Sheet => {}
-        BodyClass::Solid => return Err(KernelError::InvalidParameter("A solid can't be swept one kind higher (sweep its faces, or unite its copies)".into())),
-        BodyClass::Empty => return Err(KernelError::InvalidParameter("The body to sweep is empty".into())),
-        BodyClass::Mixed => return Err(KernelError::InvalidParameter("A sweep takes one kind of body: points, wires or a sheet".into())),
+        BodyClass::Solid => {
+            return Err(KernelError::InvalidParameter(
+                "A solid can't be swept one kind higher (sweep its faces, or unite its copies)"
+                    .into(),
+            ));
+        }
+        BodyClass::Empty => {
+            return Err(KernelError::InvalidParameter(
+                "The body to sweep is empty".into(),
+            ));
+        }
+        BodyClass::Mixed => {
+            return Err(KernelError::InvalidParameter(
+                "A sweep takes one kind of body: points, wires or a sheet".into(),
+            ));
+        }
     }
     let sheet = class == BodyClass::Sheet;
     // The edges swept, each with the way its wire (or its sheet's face) runs along it.
@@ -93,9 +123,15 @@ pub fn sweep_body(b: &Body, mv: &BodyMove, s1: f64, whole: bool, source: u64) ->
         for c in b.faces.iter().flat_map(|f| f.loops.iter().flatten()) {
             uses[c.edge].push(c.fwd);
         }
-        (0..b.edges.len()).filter(|&e| uses[e].len() == 1 && !b.edges[e].degenerate).map(|e| (e, uses[e][0])).collect()
+        (0..b.edges.len())
+            .filter(|&e| uses[e].len() == 1 && !b.edges[e].degenerate)
+            .map(|e| (e, uses[e][0]))
+            .collect()
     } else {
-        b.wires.iter().flat_map(|w| w.edges.iter().copied()).collect()
+        b.wires
+            .iter()
+            .flat_map(|w| w.edges.iter().copied())
+            .collect()
     };
     if sheet {
         check_transversal(b, mv)?;
@@ -154,25 +190,62 @@ pub fn sweep_body(b: &Body, mv: &BodyMove, s1: f64, whole: bool, source: u64) ->
     let mut faces = Vec::new();
     for &(e, fwd) in &swept {
         let ed = &b.edges[e];
-        let piece = Piece { c: ed.curve.clone(), t0: ed.t[0], t1: ed.t[1], rev: false, src: Src::Edge { body: source, edge: e as u64 }, more: Vec::new() };
-        let Some(side) = mv.side(&piece, &ed.curve) else { continue };
-        let (vs, ve) = if fwd { (ed.v[0], ed.v[1]) } else { (ed.v[1], ed.v[0]) };
-        let (ts, te) = if fwd { (ed.t[0], ed.t[1]) } else { (ed.t[1], ed.t[0]) };
-        let (Some(rs), Some(re)) = (rail_e[vs], rail_e[ve]) else { continue };
+        let piece = Piece {
+            c: ed.curve.clone(),
+            t0: ed.t[0],
+            t1: ed.t[1],
+            rev: false,
+            src: Src::Edge {
+                body: source,
+                edge: e as u64,
+            },
+            more: Vec::new(),
+        };
+        let Some(side) = mv.side(&piece, &ed.curve) else {
+            continue;
+        };
+        let (vs, ve) = if fwd {
+            (ed.v[0], ed.v[1])
+        } else {
+            (ed.v[1], ed.v[0])
+        };
+        let (ts, te) = if fwd {
+            (ed.t[0], ed.t[1])
+        } else {
+            (ed.t[1], ed.t[0])
+        };
+        let (Some(rs), Some(re)) = (rail_e[vs], rail_e[ve]) else {
+            continue;
+        };
         let sl = side_loop(&side, (e, top_e[e]), fwd, (rs, re), (0.0, s1), (ts, te));
-        o.faces.push(Face { surf: side.surf, sense: true, loops: vec![sl] });
+        o.faces.push(Face {
+            surf: side.surf,
+            sense: true,
+            loops: vec![sl],
+        });
         let fi = o.faces.len() - 1;
         faces.push(fi);
-        out.origins.push((fi, Origin::FromEdge { body: crate::BodyId(source), edge: crate::EdgeId(e as u64) }));
+        out.origins.push((
+            fi,
+            Origin::FromEdge {
+                body: crate::BodyId(source),
+                edge: crate::EdgeId(e as u64),
+            },
+        ));
     }
     fix_senses(o, faces.clone());
     if faces.is_empty() {
-        return Err(KernelError::InvalidParameter("The sweep makes no faces (every edge lies along it)".into()));
+        return Err(KernelError::InvalidParameter(
+            "The sweep makes no faces (every edge lies along it)".into(),
+        ));
     }
     if !sheet {
         // One open shell per piece of edge-connected faces (disjoint wires sweep apart).
         for piece in o.face_components(&faces) {
-            o.shells.push(Shell { faces: piece, closed: false });
+            o.shells.push(Shell {
+                faces: piece,
+                closed: false,
+            });
         }
         out.origins.sort_by_key(|(f, _)| *f);
         return Ok(out);
@@ -183,7 +256,8 @@ pub fn sweep_body(b: &Body, mv: &BodyMove, s1: f64, whole: bool, source: u64) ->
             Body::reverse_face(&mut bottom);
             o.faces.push(bottom);
             faces.push(o.faces.len() - 1);
-            out.origins.push((o.faces.len() - 1, Origin::StartCap { region: 0 }));
+            out.origins
+                .push((o.faces.len() - 1, Origin::StartCap { region: 0 }));
             let mut top = f.clone();
             top.surf = f.surf.transformed(&m1);
             for c in top.loops.iter_mut().flatten() {
@@ -191,7 +265,8 @@ pub fn sweep_body(b: &Body, mv: &BodyMove, s1: f64, whole: bool, source: u64) ->
             }
             o.faces.push(top);
             faces.push(o.faces.len() - 1);
-            out.origins.push((o.faces.len() - 1, Origin::EndCap { region: 0 }));
+            out.origins
+                .push((o.faces.len() - 1, Origin::EndCap { region: 0 }));
         }
     }
     // Built facing the way the sheet faces at the start: turn it out.
@@ -212,29 +287,51 @@ pub fn sweep_body(b: &Body, mv: &BodyMove, s1: f64, whole: bool, source: u64) ->
 /// whole turn about an axis outside it sweeps a tunnel, not a hole).
 fn assemble_solids(o: &mut Body, faces: &[usize]) -> Result<()> {
     let pieces = o.face_components(faces);
-    let vols: Vec<f64> = pieces.iter().map(|p| crate::native::mass::body_volume(&crate::native::kernel::subset(o, p, true))).collect();
+    let vols: Vec<f64> = pieces
+        .iter()
+        .map(|p| crate::native::mass::body_volume(&crate::native::kernel::subset(o, p, true)))
+        .collect();
     let mut outers: Vec<usize> = (0..pieces.len()).filter(|&k| vols[k] > 0.0).collect();
     outers.sort_by(|&a, &b| vols[a].total_cmp(&vols[b]));
     let mut solids: Vec<Vec<usize>> = outers.iter().map(|&k| vec![k]).collect();
     for k in (0..pieces.len()).filter(|&k| !(vols[k] > 0.0)) {
-        let Some(p) = pieces[k].iter().flat_map(|&f| o.faces[f].loops.iter().flatten()).next().map(|c| o.verts[o.co_start(c)].p) else { continue };
+        let Some(p) = pieces[k]
+            .iter()
+            .flat_map(|&f| o.faces[f].loops.iter().flatten())
+            .next()
+            .map(|c| o.verts[o.co_start(c)].p)
+        else {
+            continue;
+        };
         // The smallest solid holding it.
         let home = outers.iter().position(|&s| {
             let sub = crate::native::kernel::subset(o, &pieces[s], true);
-            let polys: Vec<_> = sub.faces.iter().map(|f| crate::native::classify::face_polygons(&sub, f)).collect();
+            let polys: Vec<_> = sub
+                .faces
+                .iter()
+                .map(|f| crate::native::classify::face_polygons(&sub, f))
+                .collect();
             crate::native::classify::parity_inside(&sub, &polys, &p)
         });
         let Some(h) = home else {
-            return Err(KernelError::InvalidGeometry { op: "sweep", why: "The sweep makes a cavity outside its solid".into() });
+            return Err(KernelError::InvalidGeometry {
+                op: "sweep",
+                why: "The sweep makes a cavity outside its solid".into(),
+            });
         };
         solids[h].push(k);
     }
     for sol in solids {
         let first = o.shells.len();
         for &k in &sol {
-            o.shells.push(Shell { faces: pieces[k].clone(), closed: true });
+            o.shells.push(Shell {
+                faces: pieces[k].clone(),
+                closed: true,
+            });
         }
-        o.solids.push(Solid { shells: (first..first + sol.len()).collect() });
+        o.solids.push(Solid {
+            shells: (first..first + sol.len()).collect(),
+        });
     }
     Ok(())
 }
@@ -258,10 +355,14 @@ fn check_transversal(b: &Body, mv: &BodyMove) -> Result<()> {
     }
     const EPS: f64 = 1e-6;
     if hi > EPS && lo < -EPS {
-        return Err(KernelError::InvalidParameter("The sheet folds back across the sweep: its solid would cross itself".into()));
+        return Err(KernelError::InvalidParameter(
+            "The sheet folds back across the sweep: its solid would cross itself".into(),
+        ));
     }
     if !(hi > EPS || lo < -EPS) {
-        return Err(KernelError::InvalidParameter("The sheet lies along the sweep: it sweeps no volume".into()));
+        return Err(KernelError::InvalidParameter(
+            "The sheet lies along the sweep: it sweeps no volume".into(),
+        ));
     }
     Ok(())
 }

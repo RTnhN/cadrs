@@ -18,8 +18,8 @@ pub mod wire;
 
 use crate::native::kernel::NativeKernel;
 use crate::native::surface::Surface;
-use crate::*;
 use crate::native::tol;
+use crate::*;
 
 pub fn offset(k: &mut NativeKernel, body: BodyId, spec: &OffsetSpec) -> Result<OpResult> {
     let b = (**k.get(body)?).clone();
@@ -33,17 +33,32 @@ pub fn offset(k: &mut NativeKernel, body: BodyId, spec: &OffsetSpec) -> Result<O
     // topology isn't one the sharp offset makes (a hole's wall moved onto or past its axis, a
     // face run into one it doesn't border): refused cleanly rather than a wrong body.
     let moving = spec.distance == 0.0 && spec.faces.iter().any(|(_, d)| *d != 0.0);
-    let too_far = |why: &str| KernelError::InvalidParameter(format!("The faces can't move that far: {why}"));
+    let too_far =
+        |why: &str| KernelError::InvalidParameter(format!("The faces can't move that far: {why}"));
     if moving
         && spec.faces.iter().any(|(f, d)| {
-            b.faces.get(f.0 as usize).is_some_and(|face| *d != 0.0 && matches!(face.surf, Surface::Cylinder { .. } | Surface::Cone { .. } | Surface::Sphere { .. } | Surface::Torus { .. }) && sharp::offset_surface(&face.surf, face.sense, *d).is_none())
+            b.faces.get(f.0 as usize).is_some_and(|face| {
+                *d != 0.0
+                    && matches!(
+                        face.surf,
+                        Surface::Cylinder { .. }
+                            | Surface::Cone { .. }
+                            | Surface::Sphere { .. }
+                            | Surface::Torus { .. }
+                    )
+                    && sharp::offset_surface(&face.surf, face.sense, *d).is_none()
+            })
         })
     {
         return Err(too_far("a face would shrink to nothing"));
     }
     let out = if spec.sharp || dist.iter().all(|d| *d == 0.0) {
         let out = sharp::offset_sharp(&b, &dist)?;
-        if moving && !out.check_with(crate::native::topo::CheckLevel::Full).is_empty() {
+        if moving
+            && !out
+                .check_with(crate::native::topo::CheckLevel::Full)
+                .is_empty()
+        {
             return Err(too_far("a face would run into another face"));
         }
         out
@@ -56,12 +71,24 @@ pub fn offset(k: &mut NativeKernel, body: BodyId, spec: &OffsetSpec) -> Result<O
     let v1 = crate::native::mass::body_volume(&out);
     let grow = dist.iter().any(|d| *d > 0.0);
     let shrink = dist.iter().any(|d| *d < 0.0);
-    if (grow && !shrink && v1 < v0 - tol::ROUNDOFF) || (shrink && !grow && v1 > v0 + tol::ROUNDOFF) || v1 <= 0.0 {
-        return Err(KernelError::TooLarge { op: "offset", why: "the offset turned the body inside out".into() });
+    if (grow && !shrink && v1 < v0 - tol::ROUNDOFF)
+        || (shrink && !grow && v1 > v0 + tol::ROUNDOFF)
+        || v1 <= 0.0
+    {
+        return Err(KernelError::TooLarge {
+            op: "offset",
+            why: "the offset turned the body inside out".into(),
+        });
     }
     // History: each face the offset of input faces (modified) or a round of an edge or vertex
     // (generated); an input face with no offset left (vanished, or inside the rounds) deleted.
-    let srcs = round::offset_sources(&b, body, &out, &dist, !(spec.sharp || dist.iter().all(|d| *d == 0.0)));
+    let srcs = round::offset_sources(
+        &b,
+        body,
+        &out,
+        &dist,
+        !(spec.sharp || dist.iter().all(|d| *d == 0.0)),
+    );
     let id = k.insert(out);
     let mut history = History::default();
     let mut kept = vec![false; b.faces.len()];
@@ -70,13 +97,29 @@ pub fn offset(k: &mut NativeKernel, body: BodyId, spec: &OffsetSpec) -> Result<O
             match s {
                 crate::native::blend::FaceSrc::Input(i) => {
                     kept[*i] = true;
-                    history.modified.push((FaceId(f as u64), InputFace { body, face: FaceId(*i as u64) }));
+                    history.modified.push((
+                        FaceId(f as u64),
+                        InputFace {
+                            body,
+                            face: FaceId(*i as u64),
+                        },
+                    ));
                 }
-                crate::native::blend::FaceSrc::New(o) => history.generated.push((FaceId(f as u64), *o)),
+                crate::native::blend::FaceSrc::New(o) => {
+                    history.generated.push((FaceId(f as u64), *o))
+                }
             }
         }
     }
-    history.deleted = (0..b.faces.len()).filter(|&i| !kept[i]).map(|i| InputFace { body, face: FaceId(i as u64) }).collect();
-    Ok(OpResult { bodies: vec![id], history })
+    history.deleted = (0..b.faces.len())
+        .filter(|&i| !kept[i])
+        .map(|i| InputFace {
+            body,
+            face: FaceId(i as u64),
+        })
+        .collect();
+    Ok(OpResult {
+        bodies: vec![id],
+        history,
+    })
 }
-

@@ -8,8 +8,15 @@ use super::tol;
 
 #[derive(Debug, Clone)]
 enum Node {
-    Leaf { bb: Bbox, items: Vec<usize> },
-    Inner { bb: Bbox, l: Box<Node>, r: Box<Node> },
+    Leaf {
+        bb: Bbox,
+        items: Vec<usize>,
+    },
+    Inner {
+        bb: Bbox,
+        l: Box<Node>,
+        r: Box<Node>,
+    },
 }
 
 impl Node {
@@ -43,12 +50,22 @@ fn build(boxes: &[Bbox], mut items: Vec<usize>) -> Node {
         cb.add(&boxes[i].center());
     }
     let ext = cb.max - cb.min;
-    let axis = if ext.x >= ext.y && ext.x >= ext.z { 0 } else if ext.y >= ext.z { 1 } else { 2 };
+    let axis = if ext.x >= ext.y && ext.x >= ext.z {
+        0
+    } else if ext.y >= ext.z {
+        1
+    } else {
+        2
+    };
     let key = |i: &usize| boxes[*i].center()[axis];
     let mid = items.len() / 2;
     items.select_nth_unstable_by(mid, |a, b| key(a).total_cmp(&key(b)));
     let right = items.split_off(mid);
-    Node::Inner { bb, l: Box::new(build(boxes, items)), r: Box::new(build(boxes, right)) }
+    Node::Inner {
+        bb,
+        l: Box::new(build(boxes, items)),
+        r: Box::new(build(boxes, right)),
+    }
 }
 
 impl Bvh {
@@ -81,7 +98,9 @@ impl Bvh {
                 continue;
             }
             match n {
-                Node::Leaf { items, .. } => out.extend(items.iter().copied().filter(|&i| self.boxes[i].overlaps(q))),
+                Node::Leaf { items, .. } => {
+                    out.extend(items.iter().copied().filter(|&i| self.boxes[i].overlaps(q)))
+                }
                 Node::Inner { l, r, .. } => {
                     stack.push(l);
                     stack.push(r);
@@ -102,7 +121,9 @@ impl Bvh {
                 continue;
             }
             match n {
-                Node::Leaf { items, .. } => out.extend(items.iter().copied().filter(|&i| hits(&self.boxes[i]))),
+                Node::Leaf { items, .. } => {
+                    out.extend(items.iter().copied().filter(|&i| hits(&self.boxes[i])))
+                }
                 Node::Inner { l, r, .. } => {
                     stack.push(l);
                     stack.push(r);
@@ -115,7 +136,9 @@ impl Bvh {
     /// Every pair (i in self, j in other) whose boxes overlap.
     pub fn pairs(&self, other: &Bvh) -> Vec<(usize, usize)> {
         let mut out = Vec::new();
-        let (Some(a), Some(b)) = (&self.root, &other.root) else { return out };
+        let (Some(a), Some(b)) = (&self.root, &other.root) else {
+            return out;
+        };
         let mut stack = vec![(a, b)];
         while let Some((x, y)) = stack.pop() {
             if !x.bb().overlaps(y.bb()) {
@@ -139,7 +162,18 @@ impl Bvh {
                     stack.push((x, l));
                     stack.push((x, r));
                 }
-                (Node::Inner { l: xl, r: xr, bb: xb }, Node::Inner { l: yl, r: yr, bb: yb }) => {
+                (
+                    Node::Inner {
+                        l: xl,
+                        r: xr,
+                        bb: xb,
+                    },
+                    Node::Inner {
+                        l: yl,
+                        r: yr,
+                        bb: yb,
+                    },
+                ) => {
                     // Descend the bigger box first.
                     if xb.diagonal() >= yb.diagonal() {
                         stack.push((xl, y));
@@ -189,18 +223,33 @@ mod tests {
 
     #[test]
     fn queries_match_brute_force() {
-        let boxes: Vec<Bbox> = (0..300).map(|i| {
-            let f = i as f64;
-            cube((f * 7.3) % 50.0, (f * 3.1) % 40.0, (f * 1.7) % 30.0, 1.0 + (f % 5.0))
-        }).collect();
+        let boxes: Vec<Bbox> = (0..300)
+            .map(|i| {
+                let f = i as f64;
+                cube(
+                    (f * 7.3) % 50.0,
+                    (f * 3.1) % 40.0,
+                    (f * 1.7) % 30.0,
+                    1.0 + (f % 5.0),
+                )
+            })
+            .collect();
         let t = Bvh::new(boxes.clone());
-        for q in [cube(10.0, 10.0, 10.0, 5.0), cube(-3.0, 0.0, 0.0, 2.0), cube(0.0, 0.0, 0.0, 60.0)] {
+        for q in [
+            cube(10.0, 10.0, 10.0, 5.0),
+            cube(-3.0, 0.0, 0.0, 2.0),
+            cube(0.0, 0.0, 0.0, 60.0),
+        ] {
             let mut got = t.query(&q);
             got.sort();
-            let want: Vec<usize> = (0..boxes.len()).filter(|&i| boxes[i].overlaps(&q)).collect();
+            let want: Vec<usize> = (0..boxes.len())
+                .filter(|&i| boxes[i].overlaps(&q))
+                .collect();
             assert_eq!(got, want);
         }
-        let other: Vec<Bbox> = (0..120).map(|i| cube((i as f64 * 5.9) % 45.0, (i as f64 * 2.3) % 35.0, 5.0, 2.0)).collect();
+        let other: Vec<Bbox> = (0..120)
+            .map(|i| cube((i as f64 * 5.9) % 45.0, (i as f64 * 2.3) % 35.0, 5.0, 2.0))
+            .collect();
         let u = Bvh::new(other.clone());
         let mut got = t.pairs(&u);
         got.sort();
@@ -216,7 +265,9 @@ mod tests {
         let (o, d) = (P3::new(-5.0, 20.0, 15.0), V3::new(1.0, 0.0, 0.0));
         let mut got = t.ray(&o, &d, 0.0, 100.0);
         got.sort();
-        let want: Vec<usize> = (0..boxes.len()).filter(|&i| ray_box(&boxes[i], &o, &d, 0.0, 100.0)).collect();
+        let want: Vec<usize> = (0..boxes.len())
+            .filter(|&i| ray_box(&boxes[i], &o, &d, 0.0, 100.0))
+            .collect();
         assert_eq!(got, want);
     }
 }

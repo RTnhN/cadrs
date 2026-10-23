@@ -21,11 +21,11 @@
 use rayon::prelude::*;
 
 use super::bvh::Bvh;
-use super::classify::{face_polygons, in_face, periodic_candidates, InFace};
+use super::classify::{InFace, face_polygons, in_face, periodic_candidates};
 use super::math::*;
 use super::surface::Surface;
-use super::topo::Body;
 use super::tol;
+use super::topo::Body;
 
 /// Points sampled along each crossing curve.
 const SAMPLES: usize = 24;
@@ -43,14 +43,21 @@ pub fn face_crossings_of(b: &Body, changed: Option<&[bool]>) -> Vec<String> {
 }
 
 /// [`face_crossings`] of the pairs `(i, j)`, `i < j`, that `wanted` takes.
-pub fn face_crossings_where(b: &Body, wanted: &(dyn Fn(usize, usize) -> bool + Sync)) -> Vec<String> {
+pub fn face_crossings_where(
+    b: &Body,
+    wanted: &(dyn Fn(usize, usize) -> bool + Sync),
+) -> Vec<String> {
     face_crossings_in(b, wanted, &mut vec![None; b.faces.len()])
 }
 
 /// [`face_crossings_where`] with the faces' polygons ([`face_polygons`]) kept in `polys` (one
 /// per face, those it has already used, the others made as needed): for the check's later
 /// tests.
-pub(crate) fn face_crossings_in(b: &Body, wanted: &(dyn Fn(usize, usize) -> bool + Sync), polys: &mut [Option<Vec<Vec<P2>>>]) -> Vec<String> {
+pub(crate) fn face_crossings_in(
+    b: &Body,
+    wanted: &(dyn Fn(usize, usize) -> bool + Sync),
+    polys: &mut [Option<Vec<Vec<P2>>>],
+) -> Vec<String> {
     let n = b.faces.len();
     if n < 2 || b.shells.is_empty() {
         return Vec::new();
@@ -76,15 +83,35 @@ pub(crate) fn face_crossings_in(b: &Body, wanted: &(dyn Fn(usize, usize) -> bool
                 .fold(super::tol::POINT, f64::max)
         })
         .collect();
-    let edges: Vec<std::collections::BTreeSet<usize>> =
-        b.faces.iter().map(|f| f.loops.iter().flatten().filter(|c| !b.edges[c.edge].degenerate).map(|c| c.edge).collect()).collect();
-    let boxes: Vec<Bbox> = (0..n).map(|fi| if shell_of[fi].is_some() { b.face_bbox(fi).grow(tol[fi]) } else { Bbox::empty() }).collect();
+    let edges: Vec<std::collections::BTreeSet<usize>> = b
+        .faces
+        .iter()
+        .map(|f| {
+            f.loops
+                .iter()
+                .flatten()
+                .filter(|c| !b.edges[c.edge].degenerate)
+                .map(|c| c.edge)
+                .collect()
+        })
+        .collect();
+    let boxes: Vec<Bbox> = (0..n)
+        .map(|fi| {
+            if shell_of[fi].is_some() {
+                b.face_bbox(fi).grow(tol[fi])
+            } else {
+                Bbox::empty()
+            }
+        })
+        .collect();
     let size = b.bbox().diagonal().max(1.0);
     let bvh = Bvh::new(boxes.clone());
     let mut pairs: Vec<(usize, usize)> = bvh
         .pairs(&bvh)
         .into_iter()
-        .filter(|&(i, j)| i < j && shell_of[i] == shell_of[j] && wanted(i, j) && edges[i].is_disjoint(&edges[j]))
+        .filter(|&(i, j)| {
+            i < j && shell_of[i] == shell_of[j] && wanted(i, j) && edges[i].is_disjoint(&edges[j])
+        })
         .collect();
     if pairs.is_empty() {
         return Vec::new();
@@ -108,11 +135,17 @@ pub(crate) fn face_crossings_in(b: &Body, wanted: &(dyn Fn(usize, usize) -> bool
     pairs
         .par_iter()
         .filter_map(|&(i, j)| {
-            let ov = Bbox { min: boxes[i].min.sup(&boxes[j].min), max: boxes[i].max.inf(&boxes[j].max) };
+            let ov = Bbox {
+                min: boxes[i].min.sup(&boxes[j].min),
+                max: boxes[i].max.inf(&boxes[j].max),
+            };
             // Clear of the boundaries by the faces' tolerances, and by a part in 10⁶ of the body.
             let margin = 2.0 * tol[i].max(tol[j]) + tol::REL_POINT * size;
             let p = crossing(b, polys, (i, j), &ov, margin, &roots)?;
-            Some(format!("faces {i} and {j} cross away from their edges near ({:.6}, {:.6}, {:.6})", p.x, p.y, p.z))
+            Some(format!(
+                "faces {i} and {j} cross away from their edges near ({:.6}, {:.6}, {:.6})",
+                p.x, p.y, p.z
+            ))
         })
         .collect()
 }
@@ -130,7 +163,14 @@ fn uv_box(polys: &[Vec<P2>]) -> Option<((f64, f64), (f64, f64))> {
 
 /// Whether a surface is elementary (its intersections have closed forms).
 fn elementary(s: &Surface) -> bool {
-    matches!(s, Surface::Plane { .. } | Surface::Cylinder { .. } | Surface::Cone { .. } | Surface::Sphere { .. } | Surface::Torus { .. })
+    matches!(
+        s,
+        Surface::Plane { .. }
+            | Surface::Cylinder { .. }
+            | Surface::Cone { .. }
+            | Surface::Sphere { .. }
+            | Surface::Torus { .. }
+    )
 }
 
 /// The stretch of edge `e` that can meet surface `s` inside `region`, from samples: the
@@ -139,16 +179,24 @@ fn elementary(s: &Surface) -> bool {
 /// the stretch by more than the curve can travel between samples.
 fn near_stretch(e: &super::topo::Edge, region: &Bbox, s: &Surface) -> Option<(f64, f64)> {
     const N: usize = 32;
-    let ts: Vec<f64> = (0..=N).map(|k| e.t[0] + (e.t[1] - e.t[0]) * k as f64 / N as f64).collect();
+    let ts: Vec<f64> = (0..=N)
+        .map(|k| e.t[0] + (e.t[1] - e.t[0]) * k as f64 / N as f64)
+        .collect();
     let ps: Vec<P3> = ts.iter().map(|&t| e.point(t)).collect();
     // (A chord under-measures the arc between samples: half as much again covers the curves
     // of edges sampled this finely.)
-    let step = ps.windows(2).map(|w| (w[1] - w[0]).norm()).fold(0.0, f64::max) * 1.5;
+    let step = ps
+        .windows(2)
+        .map(|w| (w[1] - w[0]).norm())
+        .fold(0.0, f64::max)
+        * 1.5;
     let grown = region.grow(step);
     let inside: Vec<usize> = (0..=N).filter(|&k| grown.contains(&ps[k])).collect();
     let (&first, &last) = (inside.first()?, inside.last()?);
     let (k0, k1) = (first.saturating_sub(1), (last + 1).min(N));
-    if let Some(d) = (k0..=k1).map(|k| s.signed_distance(&ps[k])).collect::<Option<Vec<f64>>>()
+    if let Some(d) = (k0..=k1)
+        .map(|k| s.signed_distance(&ps[k]))
+        .collect::<Option<Vec<f64>>>()
         && (d.iter().all(|&x| x > step) || d.iter().all(|&x| x < -step))
     {
         return None;
@@ -173,14 +221,19 @@ fn sided_roots(e: &super::topo::Edge, t0: f64, t1: f64, s: &Surface) -> Vec<f64>
         let n = n / n.norm().max(1e-300);
         ((p - q).dot(&n), (p - q).norm())
     };
-    let ts: Vec<f64> = (0..=N).map(|k| t0 + (t1 - t0) * k as f64 / N as f64).collect();
+    let ts: Vec<f64> = (0..=N)
+        .map(|k| t0 + (t1 - t0) * k as f64 / N as f64)
+        .collect();
     let ds: Vec<(f64, f64)> = ts.iter().map(|&t| side(t, &mut hint)).collect();
     let mut out = Vec::new();
     for k in 0..N {
         let ((da, ga), (db, gb)) = (ds[k], ds[k + 1]);
         // A sign change of the offset where the feet are true (the point's distance is its
         // offset along the normal), not a jump between two feet on different sheets.
-        if !(da * db < 0.0) || ga > 1.01 * da.abs() + tol::ROUNDOFF || gb > 1.01 * db.abs() + tol::ROUNDOFF {
+        if !(da * db < 0.0)
+            || ga > 1.01 * da.abs() + tol::ROUNDOFF
+            || gb > 1.01 * db.abs() + tol::ROUNDOFF
+        {
             continue;
         }
         let (mut lo, mut hi, mut dlo) = (ts[k], ts[k + 1], da);
@@ -205,7 +258,14 @@ fn sided_roots(e: &super::topo::Edge, t0: f64, t1: f64, s: &Surface) -> Vec<f64>
 /// range's bits).
 type Roots = std::sync::Mutex<std::collections::HashMap<(usize, usize, u64, u64), Vec<f64>>>;
 
-fn crossing(b: &Body, polys: &[Option<Vec<Vec<P2>>>], (i, j): (usize, usize), ov: &Bbox, margin: f64, cache: &Roots) -> Option<P3> {
+fn crossing(
+    b: &Body,
+    polys: &[Option<Vec<Vec<P2>>>],
+    (i, j): (usize, usize),
+    ov: &Bbox,
+    margin: f64,
+    cache: &Roots,
+) -> Option<P3> {
     let polys = |f: usize| polys.get(f).and_then(|p| p.as_deref()).unwrap_or(&[]);
     let region = ov.grow(margin);
     // Edges of one face piercing the other.
@@ -213,10 +273,14 @@ fn crossing(b: &Body, polys: &[Option<Vec<Vec<P2>>>], (i, j): (usize, usize), ov
         let fy = &b.faces[y];
         for c in b.faces[x].loops.iter().flatten() {
             let e = &b.edges[c.edge];
-            if e.degenerate || !super::boolean::curve_bbox(&e.curve, e.t[0], e.t[1]).overlaps(&region) {
+            if e.degenerate
+                || !super::boolean::curve_bbox(&e.curve, e.t[0], e.t[1]).overlaps(&region)
+            {
                 continue;
             }
-            let Some((t0, t1)) = near_stretch(e, &region, &fy.surf) else { continue };
+            let Some((t0, t1)) = near_stretch(e, &region, &fy.surf) else {
+                continue;
+            };
             let roots = if elementary(&fy.surf) {
                 super::ssi::curve_surface(&e.curve, t0, t1, &fy.surf)
             } else {
@@ -225,7 +289,12 @@ fn crossing(b: &Body, polys: &[Option<Vec<Vec<P2>>>], (i, j): (usize, usize), ov
                 if let Some(k) = &known
                     && super::topo::check_compare()
                 {
-                    assert_eq!(*k, sided_roots(e, t0, t1, &fy.surf), "edge {} on face {y}: the roots kept differ from the roots found again", c.edge);
+                    assert_eq!(
+                        *k,
+                        sided_roots(e, t0, t1, &fy.surf),
+                        "edge {} on face {y}: the roots kept differ from the roots found again",
+                        c.edge
+                    );
                 }
                 known.unwrap_or_else(|| {
                     let r = sided_roots(e, t0, t1, &fy.surf);
@@ -240,7 +309,9 @@ fn crossing(b: &Body, polys: &[Option<Vec<Vec<P2>>>], (i, j): (usize, usize), ov
                 // (An edge ending on the other face touches it there, as where a wall ends
                 // on a face it doesn't split: a crossing pierces the face with the edge's
                 // middle.)
-                let at_end = e.v.iter().any(|&v| (b.verts[v].p - p).norm() <= margin + b.verts[v].tol);
+                let at_end =
+                    e.v.iter()
+                        .any(|&v| (b.verts[v].p - p).norm() <= margin + b.verts[v].tol);
                 if at_end || !region.contains(&p) || !inside(b, polys(y), y, &p, margin) {
                     continue;
                 }
@@ -266,7 +337,10 @@ fn crossing(b: &Body, polys: &[Option<Vec<Vec<P2>>>], (i, j): (usize, usize), ov
         for k in 0..SAMPLES {
             let t = c.t0 + (c.t1 - c.t0) * (k as f64 + 0.5) / SAMPLES as f64;
             let p = c.c.point(t);
-            if region.contains(&p) && inside(b, polys(i), i, &p, margin) && inside(b, polys(j), j, &p, margin) {
+            if region.contains(&p)
+                && inside(b, polys(i), i, &p, margin)
+                && inside(b, polys(j), j, &p, margin)
+            {
                 return Some(p);
             }
         }
@@ -283,7 +357,10 @@ fn inside(b: &Body, polys: &[Vec<P2>], fi: usize, p: &P3, margin: f64) -> bool {
         return false;
     }
     // (`in_face` compares squared distances in the surface's scaled (u, v).)
-    if !periodic_candidates(&f.surf, u, v, polys).into_iter().any(|q| in_face(polys, &f.surf, q, margin * margin) == InFace::Inside) {
+    if !periodic_candidates(&f.surf, u, v, polys)
+        .into_iter()
+        .any(|q| in_face(polys, &f.surf, q, margin * margin) == InFace::Inside)
+    {
         return false;
     }
     f.loops.iter().flatten().all(|c| {
@@ -313,11 +390,18 @@ mod tests {
         // Merge the faces of two overlapping cubes into one shell.
         let mut two: Body = cube(0.0);
         two.append(&cube(0.5));
-        two.shells = vec![Shell { faces: (0..two.faces.len()).collect(), closed: false }];
+        two.shells = vec![Shell {
+            faces: (0..two.faces.len()).collect(),
+            closed: false,
+        }];
         two.solids.clear();
         let errs = face_crossings(&two);
         assert!(!errs.is_empty());
-        assert!(errs.iter().all(|e| e.contains("cross away from their edges")), "{errs:?}");
+        assert!(
+            errs.iter()
+                .all(|e| e.contains("cross away from their edges")),
+            "{errs:?}"
+        );
         // Only pairs with a marked face: the first cube's faces marked, crossings still found;
         // none marked, none tested.
         let first: Vec<bool> = (0..two.faces.len()).map(|f| f < 6).collect();
@@ -325,7 +409,10 @@ mod tests {
         assert!(face_crossings_of(&two, Some(&vec![false; two.faces.len()])).is_empty());
         // Apart, they don't cross.
         b.append(&cube(3.0));
-        b.shells = vec![Shell { faces: (0..b.faces.len()).collect(), closed: false }];
+        b.shells = vec![Shell {
+            faces: (0..b.faces.len()).collect(),
+            closed: false,
+        }];
         b.solids.clear();
         assert!(face_crossings(&b).is_empty());
     }

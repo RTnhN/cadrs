@@ -33,7 +33,12 @@ fn piece(c: &Curve, t0: f64, t1: f64) -> Piece {
     }
     let h = (t1 - t0) / N as f64;
     let bb = bb.grow(2.0 * h * h * m2 / 8.0 + 1e-15 * (1.0 + bb.max.coords.abs().max()));
-    Piece { t0, t1, bb, size: bb.diagonal() }
+    Piece {
+        t0,
+        t1,
+        bb,
+        size: bb.diagonal(),
+    }
 }
 
 fn halves(c: &Curve, p: &Piece) -> [Piece; 2] {
@@ -45,14 +50,29 @@ fn halves(c: &Curve, p: &Piece) -> [Piece; 2] {
 /// distance, clamped to the ranges (an end of one curve, then the nearest point of the other).
 /// (`sa`, `sb`: the curves' [`Curve::closest_samples`] over those ranges, taken once.)
 #[allow(clippy::too_many_arguments)]
-fn nearest(a: &Curve, (a0, a1): (f64, f64), b: &Curve, (b0, b1): (f64, f64), mut s: f64, mut t: f64, sa: &[P3], sb: &[P3]) -> (f64, f64) {
+fn nearest(
+    a: &Curve,
+    (a0, a1): (f64, f64),
+    b: &Curve,
+    (b0, b1): (f64, f64),
+    mut s: f64,
+    mut t: f64,
+    sa: &[P3],
+    sb: &[P3],
+) -> (f64, f64) {
     for _ in 0..60 {
         let (p, pa, paa) = a.d2(s);
         let (q, qb, qbb) = b.d2(t);
         let r = p - q;
         let (fs, ft) = (r.dot(&pa), -r.dot(&qb));
-        let (j11, j12, j22) = (pa.dot(&pa) + r.dot(&paa), -pa.dot(&qb), qb.dot(&qb) - r.dot(&qbb));
-        let Some((ds, dt)) = solve2(j11, j12, j12, j22, -fs, -ft) else { break };
+        let (j11, j12, j22) = (
+            pa.dot(&pa) + r.dot(&paa),
+            -pa.dot(&qb),
+            qb.dot(&qb) - r.dot(&qbb),
+        );
+        let Some((ds, dt)) = solve2(j11, j12, j12, j22, -fs, -ft) else {
+            break;
+        };
         let (ns, nt) = ((s + ds).clamp(a0, a1), (t + dt).clamp(b0, b1));
         // Clamped on one curve's end: the other's nearest point to it.
         let (ns, nt) = if ns != s + ds && nt == t + dt {
@@ -78,7 +98,15 @@ fn nearest(a: &Curve, (a0, a1): (f64, f64), b: &Curve, (b0, b1): (f64, f64), mut
 /// samples recur (and each costs a closest-point search over the whole of `o`).
 /// (`samples`: `o`'s [`Curve::closest_samples`] over its range, taken once.)
 #[allow(clippy::too_many_arguments)]
-fn lies_on(c: &Curve, p: &Piece, o: &Curve, (o0, o1): (f64, f64), tol: f64, memo: &mut HashMap<u64, bool>, samples: &[P3]) -> bool {
+fn lies_on(
+    c: &Curve,
+    p: &Piece,
+    o: &Curve,
+    (o0, o1): (f64, f64),
+    tol: f64,
+    memo: &mut HashMap<u64, bool>,
+    samples: &[P3],
+) -> bool {
     (0..=4).all(|i| {
         let t = p.t0 + (p.t1 - p.t0) * i as f64 / 4.0;
         *memo.entry(t.to_bits()).or_insert_with(|| {
@@ -90,10 +118,26 @@ fn lies_on(c: &Curve, p: &Piece, o: &Curve, (o0, o1): (f64, f64), tol: f64, memo
 
 /// Where `a` on [a0, a1] and `b` on [b0, b1] come within `tol`: (t on a, t on b) for each
 /// crossing or near miss, and the two ends of each overlap.
-pub fn curve_curve(a: &Curve, a0: f64, a1: f64, b: &Curve, b0: f64, b1: f64, tol: f64) -> Vec<(f64, f64)> {
+pub fn curve_curve(
+    a: &Curve,
+    a0: f64,
+    a1: f64,
+    b: &Curve,
+    b0: f64,
+    b1: f64,
+    tol: f64,
+) -> Vec<(f64, f64)> {
     let (ra, rb) = ((a0.min(a1), a0.max(a1)), (b0.min(b1), b0.max(b1)));
-    let pa: Vec<Piece> = a.pieces(ra.0, ra.1).windows(2).map(|w| piece(a, w[0], w[1])).collect();
-    let pb: Vec<Piece> = b.pieces(rb.0, rb.1).windows(2).map(|w| piece(b, w[0], w[1])).collect();
+    let pa: Vec<Piece> = a
+        .pieces(ra.0, ra.1)
+        .windows(2)
+        .map(|w| piece(a, w[0], w[1]))
+        .collect();
+    let pb: Vec<Piece> = b
+        .pieces(rb.0, rb.1)
+        .windows(2)
+        .map(|w| piece(b, w[0], w[1]))
+        .collect();
     let mut size = 0.0f64;
     for p in pa.iter().chain(&pb) {
         size = size.max(p.size);
@@ -116,12 +160,23 @@ pub fn curve_curve(a: &Curve, a0: f64, a1: f64, b: &Curve, b0: f64, b1: f64, tol
         }
         budget = budget.saturating_sub(1);
         // An overlap: each piece on the other curve.
-        if lies_on(a, &x, b, rb, tol, &mut memo_a, &samples_b) && lies_on(b, &y, a, ra, tol, &mut memo_b, &samples_a) {
+        if lies_on(a, &x, b, rb, tol, &mut memo_a, &samples_b)
+            && lies_on(b, &y, a, ra, tol, &mut memo_b, &samples_a)
+        {
             overlap = true;
             continue;
         }
         if (x.size <= small && y.size <= small) || budget == 0 {
-            let (s, t) = nearest(a, ra, b, rb, 0.5 * (x.t0 + x.t1), 0.5 * (y.t0 + y.t1), &samples_a, &samples_b);
+            let (s, t) = nearest(
+                a,
+                ra,
+                b,
+                rb,
+                0.5 * (x.t0 + x.t1),
+                0.5 * (y.t0 + y.t1),
+                &samples_a,
+                &samples_b,
+            );
             // (A gap of exactly the tolerance counts: the rounding of its computation aside.)
             if (a.point(s) - b.point(t)).norm() <= tol * (1.0 + tol::REL) {
                 out.push((s, t));

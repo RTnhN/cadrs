@@ -27,9 +27,9 @@ use nalgebra::{DMatrix, DVector};
 
 use super::curve::Curve;
 use super::math::*;
+use super::tol;
 use super::topo::Body;
 use super::uvdomain::FaceDomain;
-use super::tol;
 
 /// Where on an entity an extremum is reached.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -63,50 +63,117 @@ pub enum Sense {
 
 /// A piece of an entity.
 pub enum Piece<'a> {
-    Point { p: P3, at: Where },
+    Point {
+        p: P3,
+        at: Where,
+    },
     /// An edge's curve over its range, with its end vertices.
-    Curve { c: &'a Curve, t: (f64, f64), edge: usize, ends: [usize; 2] },
-    Face { dom: FaceDomain<'a>, face: usize },
+    Curve {
+        c: &'a Curve,
+        t: (f64, f64),
+        edge: usize,
+        ends: [usize; 2],
+    },
+    Face {
+        dom: FaceDomain<'a>,
+        face: usize,
+    },
 }
 
 /// A free point.
 pub fn point_pieces<'a>(p: P3) -> Vec<Piece<'a>> {
-    vec![Piece::Point { p, at: Where::Point }]
+    vec![Piece::Point {
+        p,
+        at: Where::Point,
+    }]
 }
 
 /// Edge `ei` of `b`: its curve and its vertices.
 pub fn edge_pieces(b: &Body, ei: usize) -> Vec<Piece<'_>> {
     let e = &b.edges[ei];
     if e.degenerate {
-        return vec![Piece::Point { p: b.verts[e.v[0]].p, at: Where::Vertex(e.v[0]) }];
+        return vec![Piece::Point {
+            p: b.verts[e.v[0]].p,
+            at: Where::Vertex(e.v[0]),
+        }];
     }
-    let mut out = vec![Piece::Curve { c: &e.curve, t: (e.t[0], e.t[1]), edge: ei, ends: e.v }];
-    out.push(Piece::Point { p: b.verts[e.v[0]].p, at: Where::Vertex(e.v[0]) });
+    let mut out = vec![Piece::Curve {
+        c: &e.curve,
+        t: (e.t[0], e.t[1]),
+        edge: ei,
+        ends: e.v,
+    }];
+    out.push(Piece::Point {
+        p: b.verts[e.v[0]].p,
+        at: Where::Vertex(e.v[0]),
+    });
     if e.v[1] != e.v[0] {
-        out.push(Piece::Point { p: b.verts[e.v[1]].p, at: Where::Vertex(e.v[1]) });
+        out.push(Piece::Point {
+            p: b.verts[e.v[1]].p,
+            at: Where::Vertex(e.v[1]),
+        });
     }
     out
 }
 
 /// Face `fi` of `b` (`polys`: its uv polygons): its surface, its edges and its vertices.
 pub fn face_pieces<'a>(b: &'a Body, fi: usize, polys: &'a [Vec<P2>]) -> Vec<Piece<'a>> {
-    let mut edges: Vec<usize> = b.faces[fi].loops.iter().flatten().map(|c| c.edge).filter(|&e| !b.edges[e].degenerate).collect();
+    let mut edges: Vec<usize> = b.faces[fi]
+        .loops
+        .iter()
+        .flatten()
+        .map(|c| c.edge)
+        .filter(|&e| !b.edges[e].degenerate)
+        .collect();
     edges.sort_unstable();
     edges.dedup();
-    let mut verts: Vec<usize> = b.faces[fi].loops.iter().flatten().flat_map(|c| b.edges[c.edge].v).collect();
+    let mut verts: Vec<usize> = b.faces[fi]
+        .loops
+        .iter()
+        .flatten()
+        .flat_map(|c| b.edges[c.edge].v)
+        .collect();
     verts.sort_unstable();
     verts.dedup();
-    let mut out = vec![Piece::Face { dom: FaceDomain::new(&b.faces[fi].surf, polys), face: fi }];
-    out.extend(edges.into_iter().map(|e| Piece::Curve { c: &b.edges[e].curve, t: (b.edges[e].t[0], b.edges[e].t[1]), edge: e, ends: b.edges[e].v }));
-    out.extend(verts.into_iter().map(|v| Piece::Point { p: b.verts[v].p, at: Where::Vertex(v) }));
+    let mut out = vec![Piece::Face {
+        dom: FaceDomain::new(&b.faces[fi].surf, polys),
+        face: fi,
+    }];
+    out.extend(edges.into_iter().map(|e| Piece::Curve {
+        c: &b.edges[e].curve,
+        t: (b.edges[e].t[0], b.edges[e].t[1]),
+        edge: e,
+        ends: b.edges[e].v,
+    }));
+    out.extend(verts.into_iter().map(|v| Piece::Point {
+        p: b.verts[v].p,
+        at: Where::Vertex(v),
+    }));
     out
 }
 
 /// Every face, edge and vertex of `b` (`polys`: its faces' uv polygons).
 pub fn body_pieces<'a>(b: &'a Body, polys: &'a [Vec<Vec<P2>>]) -> Vec<Piece<'a>> {
-    let mut out: Vec<Piece> = (0..b.faces.len()).map(|fi| Piece::Face { dom: FaceDomain::new(&b.faces[fi].surf, &polys[fi]), face: fi }).collect();
-    out.extend((0..b.edges.len()).filter(|&e| !b.edges[e].degenerate).map(|e| Piece::Curve { c: &b.edges[e].curve, t: (b.edges[e].t[0], b.edges[e].t[1]), edge: e, ends: b.edges[e].v }));
-    out.extend((0..b.verts.len()).map(|v| Piece::Point { p: b.verts[v].p, at: Where::Vertex(v) }));
+    let mut out: Vec<Piece> = (0..b.faces.len())
+        .map(|fi| Piece::Face {
+            dom: FaceDomain::new(&b.faces[fi].surf, &polys[fi]),
+            face: fi,
+        })
+        .collect();
+    out.extend(
+        (0..b.edges.len())
+            .filter(|&e| !b.edges[e].degenerate)
+            .map(|e| Piece::Curve {
+                c: &b.edges[e].curve,
+                t: (b.edges[e].t[0], b.edges[e].t[1]),
+                edge: e,
+                ends: b.edges[e].v,
+            }),
+    );
+    out.extend((0..b.verts.len()).map(|v| Piece::Point {
+        p: b.verts[v].p,
+        at: Where::Vertex(v),
+    }));
     out
 }
 
@@ -126,7 +193,9 @@ impl Cell {
         match p {
             Piece::Point { .. } => Some(Cell::Point),
             Piece::Curve { t, .. } => Some(Cell::Curve(t.0, t.1)),
-            Piece::Face { dom, .. } => (!dom.is_empty()).then_some(Cell::Face(dom.ub.0, dom.ub.1, dom.vb.0, dom.vb.1)),
+            Piece::Face { dom, .. } => {
+                (!dom.is_empty()).then_some(Cell::Face(dom.ub.0, dom.ub.1, dom.vb.0, dom.vb.1))
+            }
         }
     }
 
@@ -147,7 +216,12 @@ impl Cell {
             }
             Cell::Face(u0, u1, v0, v1) => {
                 let (um, vm) = (0.5 * (u0 + u1), 0.5 * (v0 + v1));
-                vec![Cell::Face(u0, um, v0, vm), Cell::Face(um, u1, v0, vm), Cell::Face(u0, um, vm, v1), Cell::Face(um, u1, vm, v1)]
+                vec![
+                    Cell::Face(u0, um, v0, vm),
+                    Cell::Face(um, u1, v0, vm),
+                    Cell::Face(u0, um, vm, v1),
+                    Cell::Face(um, u1, vm, v1),
+                ]
             }
         }
     }
@@ -168,7 +242,9 @@ fn cell_box(p: &Piece, c: &Cell) -> Bbox {
             let h = (b - a) / 4.0;
             bb = bb.grow(1.5 * h * h / 8.0 * k2 + tol::ROUNDOFF_FINE);
         }
-        (Piece::Face { dom, .. }, Cell::Face(u0, u1, v0, v1)) => bb = dom.surf.patch_bbox((*u0, *u1), (*v0, *v1)),
+        (Piece::Face { dom, .. }, Cell::Face(u0, u1, v0, v1)) => {
+            bb = dom.surf.patch_bbox((*u0, *u1), (*v0, *v1))
+        }
         _ => {}
     }
     bb
@@ -198,14 +274,29 @@ struct Jet {
 fn jet(p: &Piece, x: &X) -> Jet {
     let z = V3::zeros();
     match p {
-        Piece::Point { p, .. } => Jet { p: *p, n: 0, d1: [z; 2], d2: [[z; 2]; 2] },
+        Piece::Point { p, .. } => Jet {
+            p: *p,
+            n: 0,
+            d1: [z; 2],
+            d2: [[z; 2]; 2],
+        },
         Piece::Curve { c, .. } => {
             let (q, d1, d2) = c.d2(x[0]);
-            Jet { p: q, n: 1, d1: [d1, z], d2: [[d2, z], [z, z]] }
+            Jet {
+                p: q,
+                n: 1,
+                d1: [d1, z],
+                d2: [[d2, z], [z, z]],
+            }
         }
         Piece::Face { dom, .. } => {
             let d = dom.surf.d2(x[0], x[1]);
-            Jet { p: P3::from(d[0]), n: 2, d1: [d[1], d[2]], d2: [[d[3], d[4]], [d[4], d[5]]] }
+            Jet {
+                p: P3::from(d[0]),
+                n: 2,
+                d1: [d[1], d[2]],
+                d2: [[d[3], d[4]], [d[4], d[5]]],
+            }
         }
     }
 }
@@ -225,7 +316,10 @@ fn clamp(p: &Piece, x: &X) -> X {
     match p {
         Piece::Point { .. } => *x,
         Piece::Curve { t, .. } => [x[0].clamp(t.0.min(t.1), t.0.max(t.1)), 0.0],
-        Piece::Face { dom, .. } => [x[0].clamp(dom.ub.0, dom.ub.1), x[1].clamp(dom.vb.0, dom.vb.1)],
+        Piece::Face { dom, .. } => [
+            x[0].clamp(dom.ub.0, dom.ub.1),
+            x[1].clamp(dom.vb.0, dom.vb.1),
+        ],
     }
 }
 
@@ -274,7 +368,10 @@ fn polish(pa: &Piece, xa: X, pb: &Piece, xb: X, sense: Sense) -> Option<(f64, X,
         };
         let g = DVector::from_fn(n, |k, _| sg * r.dot(&col(k)));
         let h = DMatrix::from_fn(n, n, |k, l| sg * (col(k).dot(&col(l)) + r.dot(&sec(k, l))));
-        let scale = (0..n).map(|k| h[(k, k)].abs()).fold(0.0, f64::max).max(tol::TINY);
+        let scale = (0..n)
+            .map(|k| h[(k, k)].abs())
+            .fold(0.0, f64::max)
+            .max(tol::TINY);
         let mut moved = false;
         for _ in 0..12 {
             let m = &h + DMatrix::identity(n, n) * (lambda * scale);
@@ -294,7 +391,10 @@ fn polish(pa: &Piece, xa: X, pb: &Piece, xb: X, sense: Sense) -> Option<(f64, X,
             let (na, nb) = (clamp(pa, &na), clamp(pb, &nb));
             let fn_ = f(&na, &nb);
             if fn_ <= fx {
-                let tiny = (0..2).all(|k| (na[k] - xa[k]).abs() <= 1e-15 * (1.0 + xa[k].abs()) && (nb[k] - xb[k]).abs() <= 1e-15 * (1.0 + xb[k].abs()));
+                let tiny = (0..2).all(|k| {
+                    (na[k] - xa[k]).abs() <= 1e-15 * (1.0 + xa[k].abs())
+                        && (nb[k] - xb[k]).abs() <= 1e-15 * (1.0 + xb[k].abs())
+                });
                 xa = na;
                 xb = nb;
                 fx = fn_;
@@ -343,8 +443,14 @@ impl Ord for Node {
 /// The minimum or maximum distance between two entities given as pieces; `None` when either
 /// has none (or only empty faces).
 pub fn extremum(a: &[Piece], b: &[Piece], sense: Sense) -> Option<Extremum> {
-    let boxes_a: Vec<Option<(Cell, Bbox)>> = a.iter().map(|p| Cell::root(p).map(|c| (c, cell_box(p, &c)))).collect();
-    let boxes_b: Vec<Option<(Cell, Bbox)>> = b.iter().map(|p| Cell::root(p).map(|c| (c, cell_box(p, &c)))).collect();
+    let boxes_a: Vec<Option<(Cell, Bbox)>> = a
+        .iter()
+        .map(|p| Cell::root(p).map(|c| (c, cell_box(p, &c))))
+        .collect();
+    let boxes_b: Vec<Option<(Cell, Bbox)>> = b
+        .iter()
+        .map(|p| Cell::root(p).map(|c| (c, cell_box(p, &c))))
+        .collect();
     let mut all = Bbox::empty();
     for (_, bb) in boxes_a.iter().chain(&boxes_b).flatten() {
         all.union(bb);
@@ -365,7 +471,13 @@ pub fn extremum(a: &[Piece], b: &[Piece], sense: Sense) -> Option<Extremum> {
         if let Some((d, xa, xb)) = polish(&a[ia], xa, &b[ib], xb, sense)
             && better(d, best)
         {
-            *best = Some(Extremum { distance: d, a: jet(&a[ia], &xa).p, b: jet(&b[ib], &xb).p, wa: where_of(&a[ia], &xa), wb: where_of(&b[ib], &xb) });
+            *best = Some(Extremum {
+                distance: d,
+                a: jet(&a[ia], &xa).p,
+                b: jet(&b[ib], &xb).p,
+                wa: where_of(&a[ia], &xa),
+                wb: where_of(&b[ib], &xb),
+            });
         }
     };
     let key = |bd: f64| if sense == Sense::Min { -bd } else { bd };
@@ -375,12 +487,27 @@ pub fn extremum(a: &[Piece], b: &[Piece], sense: Sense) -> Option<Extremum> {
         for (ib, rb) in boxes_b.iter().enumerate() {
             let Some((cb, bb)) = rb else { continue };
             let bd = bound(ba, bb, sense);
-            heap.push(Node { key: key(bd), bound: bd, ia, ca: *ca, ib, cb: *cb, ba: *ba, bb: *bb });
+            heap.push(Node {
+                key: key(bd),
+                bound: bd,
+                ia,
+                ca: *ca,
+                ib,
+                cb: *cb,
+                ba: *ba,
+                bb: *bb,
+            });
         }
     }
     // Each piece's cells stop splitting at a fiftieth of the piece.
-    let root_a: Vec<f64> = boxes_a.iter().map(|r| r.as_ref().map_or(0.0, |(_, bb)| bb.diagonal())).collect();
-    let root_b: Vec<f64> = boxes_b.iter().map(|r| r.as_ref().map_or(0.0, |(_, bb)| bb.diagonal())).collect();
+    let root_a: Vec<f64> = boxes_a
+        .iter()
+        .map(|r| r.as_ref().map_or(0.0, |(_, bb)| bb.diagonal()))
+        .collect();
+    let root_b: Vec<f64> = boxes_b
+        .iter()
+        .map(|r| r.as_ref().map_or(0.0, |(_, bb)| bb.diagonal()))
+        .collect();
     let mut pops = 0usize;
     while let Some(nd) = heap.pop() {
         pops += 1;
@@ -413,9 +540,17 @@ pub fn extremum(a: &[Piece], b: &[Piece], sense: Sense) -> Option<Extremum> {
             continue;
         }
         let along_a = split_a && (!split_b || sa >= sb);
-        let kids: Vec<(Cell, Cell)> = if along_a { nd.ca.split().into_iter().map(|c| (c, nd.cb)).collect() } else { nd.cb.split().into_iter().map(|c| (nd.ca, c)).collect() };
+        let kids: Vec<(Cell, Cell)> = if along_a {
+            nd.ca.split().into_iter().map(|c| (c, nd.cb)).collect()
+        } else {
+            nd.cb.split().into_iter().map(|c| (nd.ca, c)).collect()
+        };
         for (ca, cb) in kids {
-            let (cut, piece, cell) = if along_a { (true, pa, ca) } else { (false, pb, cb) };
+            let (cut, piece, cell) = if along_a {
+                (true, pa, ca)
+            } else {
+                (false, pb, cb)
+            };
             if let (Piece::Face { dom, .. }, Cell::Face(u0, u1, v0, v1)) = (piece, cell)
                 && !dom.meets_box(u0, u1, v0, v1)
             {
@@ -433,21 +568,37 @@ pub fn extremum(a: &[Piece], b: &[Piece], sense: Sense) -> Option<Extremum> {
                     continue;
                 }
             }
-            heap.push(Node { key: key(bd), bound: bd, ia: nd.ia, ca, ib: nd.ib, cb, ba, bb });
+            heap.push(Node {
+                key: key(bd),
+                bound: bd,
+                ia: nd.ia,
+                ca,
+                ib: nd.ib,
+                cb,
+                ba,
+                bb,
+            });
         }
     }
     best
 }
 
 /// [`crate::Kernel::min_distance`] and [`crate::Kernel::max_distance`] for the native kernel.
-pub fn kernel_distance(k: &super::NativeKernel, a: &crate::DistanceTarget, b: &crate::DistanceTarget, sense: Sense) -> crate::Result<crate::DistanceResult> {
+pub fn kernel_distance(
+    k: &super::NativeKernel,
+    a: &crate::DistanceTarget,
+    b: &crate::DistanceTarget,
+    sense: Sense,
+) -> crate::Result<crate::DistanceResult> {
     use crate::{DistanceLocation, DistanceTarget, KernelError};
     type Side<'a> = (Vec<Piece<'a>>, Option<&'a Body>);
     let side = |t: &DistanceTarget| -> crate::Result<Side<'_>> {
         Ok(match *t {
             DistanceTarget::Point(p) => {
                 if !p.iter().all(|x| x.is_finite()) {
-                    return Err(KernelError::InvalidParameter("a point that isn't finite".into()));
+                    return Err(KernelError::InvalidParameter(
+                        "a point that isn't finite".into(),
+                    ));
                 }
                 (point_pieces(p), None)
             }
@@ -455,7 +606,10 @@ pub fn kernel_distance(k: &super::NativeKernel, a: &crate::DistanceTarget, b: &c
                 let b = &k.entry(id)?.body;
                 let ei = e.0 as usize;
                 if ei >= b.edges.len() {
-                    return Err(KernelError::InvalidParameter(format!("{id:?} has no edge {}", e.0)));
+                    return Err(KernelError::InvalidParameter(format!(
+                        "{id:?} has no edge {}",
+                        e.0
+                    )));
                 }
                 (edge_pieces(b, ei), Some(b))
             }
@@ -463,7 +617,10 @@ pub fn kernel_distance(k: &super::NativeKernel, a: &crate::DistanceTarget, b: &c
                 let en = k.entry(id)?;
                 let fi = f.0 as usize;
                 if fi >= en.body.faces.len() {
-                    return Err(KernelError::InvalidParameter(format!("{id:?} has no face {}", f.0)));
+                    return Err(KernelError::InvalidParameter(format!(
+                        "{id:?} has no face {}",
+                        f.0
+                    )));
                 }
                 (face_pieces(&en.body, fi, &en.polys()[fi]), Some(&*en.body))
             }
@@ -476,20 +633,30 @@ pub fn kernel_distance(k: &super::NativeKernel, a: &crate::DistanceTarget, b: &c
     let (pa, ba) = side(a)?;
     let (pb, bb) = side(b)?;
     let Some(x) = extremum(&pa, &pb, sense) else {
-        return Err(KernelError::EmptyResult("nothing to measure from: no faces, edges or vertices".into()));
+        return Err(KernelError::EmptyResult(
+            "nothing to measure from: no faces, edges or vertices".into(),
+        ));
     };
     let loc = |w: Where, b: Option<&Body>| -> DistanceLocation {
         match w {
             Where::Point => DistanceLocation::Point,
             Where::Vertex(v) => {
                 let ids = b.map(super::kernel::vertex_ids).unwrap_or_default();
-                DistanceLocation::Vertex(crate::VertexId(ids.get(v).copied().flatten().unwrap_or(v) as u64))
+                DistanceLocation::Vertex(crate::VertexId(
+                    ids.get(v).copied().flatten().unwrap_or(v) as u64,
+                ))
             }
             Where::Edge(e, t) => DistanceLocation::Edge(crate::EdgeId(e as u64), t),
             Where::Face(f, u, v) => DistanceLocation::Face(crate::FaceId(f as u64), u, v),
         }
     };
-    Ok(crate::DistanceResult { distance: x.distance, a: x.a, b: x.b, a_at: loc(x.wa, ba), b_at: loc(x.wb, bb) })
+    Ok(crate::DistanceResult {
+        distance: x.distance,
+        a: x.a,
+        b: x.b,
+        a_at: loc(x.wa, ba),
+        b_at: loc(x.wb, bb),
+    })
 }
 
 #[cfg(test)]
@@ -499,21 +666,44 @@ mod tests {
     use crate::native::surface::Surface;
 
     fn polys(b: &Body) -> Vec<Vec<Vec<P2>>> {
-        b.faces.iter().map(|f| crate::native::classify::face_polygons(b, f)).collect()
+        b.faces
+            .iter()
+            .map(|f| crate::native::classify::face_polygons(b, f))
+            .collect()
     }
 
     /// A sphere r 2 at (10, 2, 2) and the square x = 5, 0 ≤ y, z ≤ 5: nearest 3 apart at
     /// (8, 2, 2) and (5, 2, 2); farthest from the square's corners to the sphere's far side.
     #[test]
     fn sphere_and_square() {
-        let sphere = face_from_surface(&Surface::Sphere { f: Frame { o: P3::new(10.0, 2.0, 2.0), ..Frame::world() }, r: 2.0 }, None).unwrap();
-        let f = Frame { o: P3::new(5.0, 0.0, 0.0), x: V3::y(), y: V3::z(), z: V3::x() };
-        let square = face_from_surface(&Surface::Plane { f }, Some(((0.0, 5.0), (0.0, 5.0)))).unwrap();
+        let sphere = face_from_surface(
+            &Surface::Sphere {
+                f: Frame {
+                    o: P3::new(10.0, 2.0, 2.0),
+                    ..Frame::world()
+                },
+                r: 2.0,
+            },
+            None,
+        )
+        .unwrap();
+        let f = Frame {
+            o: P3::new(5.0, 0.0, 0.0),
+            x: V3::y(),
+            y: V3::z(),
+            z: V3::x(),
+        };
+        let square =
+            face_from_surface(&Surface::Plane { f }, Some(((0.0, 5.0), (0.0, 5.0)))).unwrap();
         let (ps, pq) = (polys(&sphere), polys(&square));
         let (a, b) = (body_pieces(&sphere, &ps), body_pieces(&square, &pq));
         let m = extremum(&a, &b, Sense::Min).unwrap();
         assert!((m.distance - 3.0).abs() < 1e-9, "{m:?}");
-        assert!((m.a - P3::new(8.0, 2.0, 2.0)).norm() < 1e-6 && (m.b - P3::new(5.0, 2.0, 2.0)).norm() < 1e-6, "{m:?}");
+        assert!(
+            (m.a - P3::new(8.0, 2.0, 2.0)).norm() < 1e-6
+                && (m.b - P3::new(5.0, 2.0, 2.0)).norm() < 1e-6,
+            "{m:?}"
+        );
         let x = extremum(&a, &b, Sense::Max).unwrap();
         // The corners (5, 5, 5) and (5, 5, 0) or (5, 0, 5)... farthest from the centre: |(5, 3, 3)|.
         let want = (25.0f64 + 9.0 + 9.0).sqrt() + 2.0;
@@ -530,29 +720,92 @@ mod tests {
     fn kernel_queries() {
         use crate::{DistanceLocation, DistanceTarget, EdgeId, FaceId, Kernel};
         let mut k = crate::native::NativeKernel::new();
-        let s = k.face_from_bare_surface(&Surface::Sphere { f: Frame::world(), r: 2.0 }, None).unwrap();
-        let f = Frame { o: P3::new(0.0, 0.0, 5.0), ..Frame::world() };
-        let r = k.face_from_bare_surface(&Surface::Plane { f }, Some(((3.0, 4.0), (-1.0, 1.0)))).unwrap();
+        let s = k
+            .face_from_bare_surface(
+                &Surface::Sphere {
+                    f: Frame::world(),
+                    r: 2.0,
+                },
+                None,
+            )
+            .unwrap();
+        let f = Frame {
+            o: P3::new(0.0, 0.0, 5.0),
+            ..Frame::world()
+        };
+        let r = k
+            .face_from_bare_surface(&Surface::Plane { f }, Some(((3.0, 4.0), (-1.0, 1.0))))
+            .unwrap();
         let rb = k.get(r).unwrap().clone();
-        let e = (0..rb.edges.len()).find(|&e| (rb.edges[e].point(rb.edges[e].mid_t()).x - 3.0).abs() < 1e-12).unwrap();
-        let m = k.min_distance(&DistanceTarget::Edge(r, EdgeId(e as u64)), &DistanceTarget::Face(s, FaceId(0))).unwrap();
+        let e = (0..rb.edges.len())
+            .find(|&e| (rb.edges[e].point(rb.edges[e].mid_t()).x - 3.0).abs() < 1e-12)
+            .unwrap();
+        let m = k
+            .min_distance(
+                &DistanceTarget::Edge(r, EdgeId(e as u64)),
+                &DistanceTarget::Face(s, FaceId(0)),
+            )
+            .unwrap();
         assert!((m.distance - (34f64.sqrt() - 2.0)).abs() < 1e-9, "{m:?}");
         // On the edge; on the sphere at (2/√34)(3, 0, 5), which is on its seam (y = 0).
-        assert!(matches!(m.a_at, DistanceLocation::Edge(..)) && (m.b - P3::new(3.0, 0.0, 5.0) * (2.0 / 34f64.sqrt())).norm() < 1e-6, "{m:?}");
-        let m = k.min_distance(&DistanceTarget::Point(P3::new(0.0, 0.0, -7.0)), &DistanceTarget::Body(s)).unwrap();
-        assert!((m.distance - 5.0).abs() < 1e-9 && (m.b - P3::new(0.0, 0.0, -2.0)).norm() < 1e-6, "{m:?}");
-        let x = k.max_distance(&DistanceTarget::Body(r), &DistanceTarget::Point(P3::origin())).unwrap();
-        assert!((x.distance - 42f64.sqrt()).abs() < 1e-9 && matches!(x.a_at, DistanceLocation::Vertex(_)), "{x:?}");
-        assert!(k.min_distance(&DistanceTarget::Face(s, FaceId(7)), &DistanceTarget::Body(r)).is_err());
+        assert!(
+            matches!(m.a_at, DistanceLocation::Edge(..))
+                && (m.b - P3::new(3.0, 0.0, 5.0) * (2.0 / 34f64.sqrt())).norm() < 1e-6,
+            "{m:?}"
+        );
+        let m = k
+            .min_distance(
+                &DistanceTarget::Point(P3::new(0.0, 0.0, -7.0)),
+                &DistanceTarget::Body(s),
+            )
+            .unwrap();
+        assert!(
+            (m.distance - 5.0).abs() < 1e-9 && (m.b - P3::new(0.0, 0.0, -2.0)).norm() < 1e-6,
+            "{m:?}"
+        );
+        let x = k
+            .max_distance(
+                &DistanceTarget::Body(r),
+                &DistanceTarget::Point(P3::origin()),
+            )
+            .unwrap();
+        assert!(
+            (x.distance - 42f64.sqrt()).abs() < 1e-9
+                && matches!(x.a_at, DistanceLocation::Vertex(_)),
+            "{x:?}"
+        );
+        assert!(
+            k.min_distance(
+                &DistanceTarget::Face(s, FaceId(7)),
+                &DistanceTarget::Body(r)
+            )
+            .is_err()
+        );
     }
 
     /// Two faces that cross: distance 0.
     #[test]
     fn crossing_faces() {
-        let cyl = face_from_surface(&Surface::Cylinder { f: Frame::world(), r: 1.0 }, Some(((0.0, TAU), (-1.0, 1.0)))).unwrap();
-        let plane = face_from_surface(&Surface::Plane { f: Frame::world() }, Some(((-3.0, 3.0), (-3.0, 3.0)))).unwrap();
+        let cyl = face_from_surface(
+            &Surface::Cylinder {
+                f: Frame::world(),
+                r: 1.0,
+            },
+            Some(((0.0, TAU), (-1.0, 1.0))),
+        )
+        .unwrap();
+        let plane = face_from_surface(
+            &Surface::Plane { f: Frame::world() },
+            Some(((-3.0, 3.0), (-3.0, 3.0))),
+        )
+        .unwrap();
         let (pc, pp) = (polys(&cyl), polys(&plane));
-        let m = extremum(&face_pieces(&cyl, 0, &pc[0]), &face_pieces(&plane, 0, &pp[0]), Sense::Min).unwrap();
+        let m = extremum(
+            &face_pieces(&cyl, 0, &pc[0]),
+            &face_pieces(&plane, 0, &pp[0]),
+            Sense::Min,
+        )
+        .unwrap();
         assert!(m.distance < 1e-9, "{m:?}");
     }
 }

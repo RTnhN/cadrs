@@ -107,3 +107,26 @@ Differences without errors, still to check:
   - draft on freeform faces;
   - an N-argument cell decomposition;
   - booleans of mixed body kinds.
+
+## Open from the 2026-10-23 session
+
+Unfinished patches are kept outside the repository in `../cadrs-wip-2026-10-23/`.
+
+- Booleans (WIP `fbwip/`, ungated): fb24 (retry empty or crossing results of near-coincident
+  operands) and fb25 (periodic fit of closed traced curves) cut the soak classes a lot
+  (pcurve_off 21->1, open_shell 23->2), but fb25 makes faces_type_i_f2, e9, offset_03 and
+  bfuseblend_b7 10-50x slower. Fix that and regate; fb26-fb29 stack on them.
+- Soak classes still failing: loop_crosses_itself 26, crossing_faces 17, tilt_first_order 26,
+  tilt_tolerance_growth 24, step_round_trip 3 (`tests/metamorphic_booleans.rs`,
+  `stress_booleans.rs`).
+- Fallback-only document fillets: 11 of 16 build locally. fa47 (garbage_cabinet Chamfer 1,
+  TubeAdapter Chamfer 2) passes locally but is ungated, and its volumes are below the
+  fallback's (traced to the fallback's own errors). Still open: ESP32 Fillet 1, alu_extrusion
+  Fillet 1 (`fa/alu_free_end_wip.diff`), piboxv7 Fillet 3, gridfinity Chamfer 2, breadboard
+  Chamfer 1. Inputs are in `doc_fixtures`.
+- Equal-distance chamfers on a curved face put their contacts at 1.07 and 1.2 instead of 1;
+  settle the convention against an OCCT chamfer.
+- fb20's curve-surface refinement costs about 4% on fillets (in the result check); keep the
+  check exact.
+- Three older tests embed user-document bodies (`tests/data/docs/cross_hole_fillet.body`,
+  `pipe_snap_chamfer.body`, `wheel_window_chamfer.body`); move them to `$CADRS_DOC_FIXTURES`.

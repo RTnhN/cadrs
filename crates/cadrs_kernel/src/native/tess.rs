@@ -21,14 +21,17 @@ use std::f64::consts::{FRAC_PI_2, TAU};
 
 use rayon::prelude::*;
 use spade::handles::FixedVertexHandle;
-use spade::{AngleLimit, ConstrainedDelaunayTriangulation, HasPosition, Point2 as SPoint, PositionInTriangulation, RefinementParameters, Triangulation};
+use spade::{
+    AngleLimit, ConstrainedDelaunayTriangulation, HasPosition, Point2 as SPoint,
+    PositionInTriangulation, RefinementParameters, Triangulation,
+};
 
-use super::kernel::{vertex_ids, NativeKernel};
+use super::kernel::{NativeKernel, vertex_ids};
 use super::math::*;
-use super::surface::{Surface, D2};
-use super::topo::{co_range, Body, Coedge, Face};
-use crate::{BodyId, EdgeId, FaceId, KernelError, Result, Tessellation, TriMesh, VertexId};
+use super::surface::{D2, Surface};
 use super::tol;
+use super::topo::{Body, Coedge, Face, co_range};
+use crate::{BodyId, EdgeId, FaceId, KernelError, Result, Tessellation, TriMesh, VertexId};
 
 /// A fast hasher (FxHash's mix) for the mesher's sets of vertex indices and coordinates, probed
 /// for every triangle in every refinement round: SipHash's guard against chosen keys isn't
@@ -109,7 +112,12 @@ impl TessParams {
     /// [`KernelError::InvalidInput`] when the chord or the angle isn't positive and finite (a
     /// chord of 0 isn't "angle only": it would ask for an infinitely fine mesh).
     pub fn new(chord: f64, angle: f64) -> Result<Self> {
-        let p = Self { chord, angle, max_edge: 0.0, max_aspect: 0.0 };
+        let p = Self {
+            chord,
+            angle,
+            max_edge: 0.0,
+            max_aspect: 0.0,
+        };
         p.validate()?;
         Ok(p)
     }
@@ -120,7 +128,11 @@ impl TessParams {
     /// [`KernelError::InvalidInput`] for a negative or non-finite limit, or an aspect ratio
     /// below [`MIN_ASPECT`].
     pub fn with_limits(self, max_edge: f64, max_aspect: f64) -> Result<Self> {
-        let p = Self { max_edge, max_aspect, ..self };
+        let p = Self {
+            max_edge,
+            max_aspect,
+            ..self
+        };
         p.validate()?;
         Ok(p)
     }
@@ -130,7 +142,11 @@ impl TessParams {
     /// # Errors
     /// [`KernelError::InvalidInput`] naming the bad control.
     pub fn validate(&self) -> Result<()> {
-        let bad = |what: &str, v: f64| Err(KernelError::InvalidInput(format!("tessellation {what} {v} is invalid")));
+        let bad = |what: &str, v: f64| {
+            Err(KernelError::InvalidInput(format!(
+                "tessellation {what} {v} is invalid"
+            )))
+        };
         if !(self.chord.is_finite() && self.chord > 0.0) {
             return bad("chord deviation (must be positive)", self.chord);
         }
@@ -140,8 +156,13 @@ impl TessParams {
         if !(self.max_edge.is_finite() && self.max_edge >= 0.0) {
             return bad("maximum edge length (must be 0 or positive)", self.max_edge);
         }
-        if !(self.max_aspect.is_finite() && (self.max_aspect == 0.0 || self.max_aspect >= MIN_ASPECT)) {
-            return bad("maximum aspect ratio (must be 0 or at least 2/√3)", self.max_aspect);
+        if !(self.max_aspect.is_finite()
+            && (self.max_aspect == 0.0 || self.max_aspect >= MIN_ASPECT))
+        {
+            return bad(
+                "maximum aspect ratio (must be 0 or at least 2/√3)",
+                self.max_aspect,
+            );
         }
         Ok(())
     }
@@ -151,8 +172,16 @@ impl TessParams {
     pub fn lenient(chord: f64, angle: f64) -> Self {
         let d = Tessellation::default();
         Self {
-            chord: if chord.is_finite() && chord > 0.0 { chord } else { d.deflection },
-            angle: if angle.is_finite() && angle > 0.0 { angle } else { d.angle },
+            chord: if chord.is_finite() && chord > 0.0 {
+                chord
+            } else {
+                d.deflection
+            },
+            angle: if angle.is_finite() && angle > 0.0 {
+                angle
+            } else {
+                d.angle
+            },
             max_edge: 0.0,
             max_aspect: 0.0,
         }
@@ -187,7 +216,10 @@ pub fn edge_samples_with(body: &Body, p: &TessParams) -> EdgeSamples {
         .par_iter()
         .map(|e| {
             if e.degenerate {
-                return (vec![e.t[0], e.t[1]], vec![body.verts[e.v[0]].p, body.verts[e.v[1]].p]);
+                return (
+                    vec![e.t[0], e.t[1]],
+                    vec![body.verts[e.v[0]].p, body.verts[e.v[1]].p],
+                );
             }
             let ts = e.curve.sample_params(e.t[0], e.t[1], p.chord, p.ang());
             let ts = refine_polyline(|t| e.point(t), &ts, p);
@@ -217,9 +249,20 @@ pub fn edge_samples_with(body: &Body, p: &TessParams) -> EdgeSamples {
 fn refine_polyline(c: impl Fn(f64) -> P3, ts: &[f64], p: &TessParams) -> Vec<f64> {
     // Enough for a 1 km edge at 0.1 mm segments; past it the curve's sampling stands.
     const MAX_SAMPLES: usize = 1 << 16;
-    fn split(c: &impl Fn(f64) -> P3, p: &TessParams, (a, pa): (f64, P3), (b, pb): (f64, P3), depth: u32, out: &mut Vec<f64>) {
+    fn split(
+        c: &impl Fn(f64) -> P3,
+        p: &TessParams,
+        (a, pa): (f64, P3),
+        (b, pb): (f64, P3),
+        depth: u32,
+        out: &mut Vec<f64>,
+    ) {
         let long = p.max_edge > 0.0 && (pb - pa).norm() > p.max_edge;
-        let off = || [0.25, 0.5, 0.75].iter().any(|&s| seg_dist3(&c(a + (b - a) * s), &pa, &pb) > p.chord);
+        let off = || {
+            [0.25, 0.5, 0.75]
+                .iter()
+                .any(|&s| seg_dist3(&c(a + (b - a) * s), &pa, &pb) > p.chord)
+        };
         if depth < 24 && out.len() < MAX_SAMPLES && (long || off()) {
             let m = 0.5 * (a + b);
             let pm = c(m);
@@ -229,7 +272,9 @@ fn refine_polyline(c: impl Fn(f64) -> P3, ts: &[f64], p: &TessParams) -> Vec<f64
             out.push(b);
         }
     }
-    let Some(&t0) = ts.first() else { return Vec::new() };
+    let Some(&t0) = ts.first() else {
+        return Vec::new();
+    };
     let mut out = vec![t0];
     let mut prev = (t0, c(t0));
     for &t in &ts[1..] {
@@ -244,7 +289,11 @@ fn refine_polyline(c: impl Fn(f64) -> P3, ts: &[f64], p: &TessParams) -> Vec<f64
 fn seg_dist3(q: &P3, a: &P3, b: &P3) -> f64 {
     let ab = b - a;
     let l = ab.norm_squared();
-    let t = if l < tol::TINY { 0.0 } else { ((q - a).dot(&ab) / l).clamp(0.0, 1.0) };
+    let t = if l < tol::TINY {
+        0.0
+    } else {
+        ((q - a).dot(&ab) / l).clamp(0.0, 1.0)
+    };
     (a + ab * t - q).norm()
 }
 
@@ -273,10 +322,14 @@ impl<'a> Domain<'a> {
         if let Surface::Nurbs(n) = s {
             // A B-spline closed on itself (its two ends the same row of points).
             let at = |k: usize, a: f64, b: f64| a + (b - a) * k as f64 / 6.0;
-            if (0..=6).all(|k| (n.point(u0, at(k, v0, v1)) - n.point(u1, at(k, v0, v1))).norm() <= tol) {
+            if (0..=6)
+                .all(|k| (n.point(u0, at(k, v0, v1)) - n.point(u1, at(k, v0, v1))).norm() <= tol)
+            {
                 per[0] = Some((u0, u1 - u0));
             }
-            if (0..=6).all(|k| (n.point(at(k, u0, u1), v0) - n.point(at(k, u0, u1), v1)).norm() <= tol) {
+            if (0..=6)
+                .all(|k| (n.point(at(k, u0, u1), v0) - n.point(at(k, u0, u1), v1)).norm() <= tol)
+            {
                 per[1] = Some((v0, v1 - v0));
             }
         }
@@ -291,7 +344,9 @@ impl<'a> Domain<'a> {
 
     fn wrap(&self, u: f64, v: f64) -> (f64, f64) {
         let w = |x: f64, p: Option<(f64, f64)>| match p {
-            Some((a, w)) if matches!(self.s, Surface::Nurbs(_) | Surface::Extrusion { .. }) => a + (x - a).rem_euclid(w),
+            Some((a, w)) if matches!(self.s, Surface::Nurbs(_) | Surface::Extrusion { .. }) => {
+                a + (x - a).rem_euclid(w)
+            }
             _ => x,
         };
         (w(u, self.per[0]), w(v, self.per[1]))
@@ -347,7 +402,9 @@ impl<'a> Domain<'a> {
 
     /// Whether the iso-line through `q` along closed direction `dir` is a single point (a pole).
     fn is_pole(&self, q: P2, dir: usize, tol: f64) -> bool {
-        let Some((_, w)) = self.per[dir] else { return false };
+        let Some((_, w)) = self.per[dir] else {
+            return false;
+        };
         let p = self.eval(q);
         [0.25, 0.5, 0.75].iter().all(|&s| {
             let mut r = q;
@@ -399,7 +456,14 @@ fn fix_uv(dom: &Domain, uv: P2, p: &P3, tol: f64) -> P2 {
 
 /// A coedge's boundary points in its direction, both ends included, unwrapped along closed
 /// directions so consecutive points are less than half a period apart.
-fn coedge_points(body: &Body, c: &Coedge, es: &[(Vec<f64>, Vec<P3>)], dom: &Domain, p: &TessParams, fix_tol: f64) -> Vec<BPt> {
+fn coedge_points(
+    body: &Body,
+    c: &Coedge,
+    es: &[(Vec<f64>, Vec<P3>)],
+    dom: &Domain,
+    p: &TessParams,
+    fix_tol: f64,
+) -> Vec<BPt> {
     let e = &body.edges[c.edge];
     let (ts, ps) = &es[c.edge];
     let uv_at = |t: f64| {
@@ -409,26 +473,49 @@ fn coedge_points(body: &Body, c: &Coedge, es: &[(Vec<f64>, Vec<P3>)], dom: &Doma
     // A point edge, flagged or not (an apex's or a pole's edge sampled down to its two ends at
     // one point): along the p-curve across the pole, all at its point (the last at the end
     // vertex, should it be a hair off).
-    let collapsed = e.degenerate || (ps.len() == 2 && (ps[0] - ps[1]).norm() <= e.tol.max(super::topo::TOL_MIN));
+    let collapsed = e.degenerate
+        || (ps.len() == 2 && (ps[0] - ps[1]).norm() <= e.tol.max(super::topo::TOL_MIN));
     // The points with the p-curve's own (u, v) at each.
     let (mut out, own): (Vec<BPt>, Vec<P2>) = if collapsed {
         let (a, b) = co_range(e, c.fwd);
-        let (pa, pb) = if c.fwd { (ps[0], ps[ps.len() - 1]) } else { (ps[ps.len() - 1], ps[0]) };
+        let (pa, pb) = if c.fwd {
+            (ps[0], ps[ps.len() - 1])
+        } else {
+            (ps[ps.len() - 1], ps[0])
+        };
         let (qa, qb) = (uv_at(a), uv_at(b));
-        let turns = (0..2).filter_map(|d| dom.per[d].map(|(_, per)| ((qb[d] - qa[d]) / per).abs())).fold(0.0, f64::max);
+        let turns = (0..2)
+            .filter_map(|d| dom.per[d].map(|(_, per)| ((qb[d] - qa[d]) / per).abs()))
+            .fold(0.0, f64::max);
         let n = pole_points(turns, (b - a).abs() / p.ang().max(0.05));
         (0..=n)
             .map(|i| {
                 let uv = uv_at(a + (b - a) * i as f64 / n as f64);
-                (BPt { uv, p: if i == n { pb } else { pa } }, uv)
+                (
+                    BPt {
+                        uv,
+                        p: if i == n { pb } else { pa },
+                    },
+                    uv,
+                )
             })
             .unzip()
     } else {
         let at = |i: usize| {
             let uv = uv_at(ts[i]);
-            (BPt { uv: fix_uv(dom, uv, &ps[i], fix_tol), p: ps[i] }, uv)
+            (
+                BPt {
+                    uv: fix_uv(dom, uv, &ps[i], fix_tol),
+                    p: ps[i],
+                },
+                uv,
+            )
         };
-        if c.fwd { (0..ts.len()).map(at).unzip() } else { (0..ts.len()).rev().map(at).unzip() }
+        if c.fwd {
+            (0..ts.len()).map(at).unzip()
+        } else {
+            (0..ts.len()).rev().map(at).unzip()
+        }
     };
     // Exactly on a seam or a B-spline's range end when within rounding of it (a projection's
     // 1e-13 off a seam makes slivers along it).
@@ -505,9 +592,14 @@ fn chain_loop(mut parts: Vec<Vec<BPt>>, dom: &Domain, tol: f64, ang: f64) -> Vec
         // A jump between coedges at one point in space: along a pole.
         let gap = b.uv - a.uv;
         if gap.norm() > tol::REL_FINE * (1.0 + a.uv.coords.norm()) && (a.p - b.p).norm() <= tol {
-            let turns: f64 = (0..2).filter_map(|d| dom.per[d].map(|(_, per)| (gap[d] / per).abs())).fold(0.0, f64::max);
+            let turns: f64 = (0..2)
+                .filter_map(|d| dom.per[d].map(|(_, per)| (gap[d] / per).abs()))
+                .fold(0.0, f64::max);
             let m = pole_points(turns, turns * TAU / ang.max(0.05));
-            out.extend((1..m).map(|i| BPt { uv: a.uv + gap * (i as f64 / m as f64), p: a.p }));
+            out.extend((1..m).map(|i| BPt {
+                uv: a.uv + gap * (i as f64 / m as f64),
+                p: a.p,
+            }));
         }
     }
     // Neighbours at one point in space and a hair apart in (u, v) are one point: a degenerate
@@ -516,7 +608,9 @@ fn chain_loop(mut parts: Vec<Vec<BPt>>, dom: &Domain, tol: f64, ang: f64) -> Vec
     // triangulation then lost half the face. (Not a pole's run: its points are far apart in
     // (u, v).)
     let (mu, mv) = dom.s.metric();
-    let near = |a: &BPt, b: &BPt| (a.p - b.p).norm() <= tol && ((a.uv.x - b.uv.x) * mu).hypot((a.uv.y - b.uv.y) * mv) <= tol;
+    let near = |a: &BPt, b: &BPt| {
+        (a.p - b.p).norm() <= tol && ((a.uv.x - b.uv.x) * mu).hypot((a.uv.y - b.uv.y) * mv) <= tol
+    };
     out.dedup_by(|b, a| near(a, b));
     while out.len() > 3 && near(&out[out.len() - 1], &out[0]) {
         out.pop();
@@ -526,19 +620,52 @@ fn chain_loop(mut parts: Vec<Vec<BPt>>, dom: &Domain, tol: f64, ang: f64) -> Vec
 
 /// The face's boundary loops in (u, v), inner loops moved to the copy of the period inside the
 /// outer one.
-fn boundary(body: &Body, f: &Face, es: &[(Vec<f64>, Vec<P3>)], dom: &Domain, p: &TessParams, tol: f64) -> Vec<Vec<BPt>> {
+fn boundary(
+    body: &Body,
+    f: &Face,
+    es: &[(Vec<f64>, Vec<P3>)],
+    dom: &Domain,
+    p: &TessParams,
+    tol: f64,
+) -> Vec<Vec<BPt>> {
     let fix_tol = (1e-3 * p.chord).max(tol);
     let mut loops: Vec<Vec<BPt>> = f
         .loops
         .iter()
-        .map(|l| chain_loop(l.iter().map(|c| coedge_points(body, c, es, dom, p, fix_tol)).collect(), dom, tol, p.ang()))
+        .map(|l| {
+            chain_loop(
+                l.iter()
+                    .map(|c| coedge_points(body, c, es, dom, p, fix_tol))
+                    .collect(),
+                dom,
+                tol,
+                p.ang(),
+            )
+        })
         .collect();
     if loops.len() > 1 && dom.per.iter().any(Option::is_some) {
         let bx = |l: &[BPt]| {
-            l.iter().fold([f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY], |b, q| [b[0].min(q.uv.x), b[1].max(q.uv.x), b[2].min(q.uv.y), b[3].max(q.uv.y)])
+            l.iter().fold(
+                [
+                    f64::INFINITY,
+                    f64::NEG_INFINITY,
+                    f64::INFINITY,
+                    f64::NEG_INFINITY,
+                ],
+                |b, q| {
+                    [
+                        b[0].min(q.uv.x),
+                        b[1].max(q.uv.x),
+                        b[2].min(q.uv.y),
+                        b[3].max(q.uv.y),
+                    ]
+                },
+            )
         };
         let area = |b: [f64; 4]| (b[1] - b[0]).max(0.0) * (b[3] - b[2]).max(0.0);
-        let outer = (0..loops.len()).max_by(|&a, &b| area(bx(&loops[a])).total_cmp(&area(bx(&loops[b])))).unwrap_or(0);
+        let outer = (0..loops.len())
+            .max_by(|&a, &b| area(bx(&loops[a])).total_cmp(&area(bx(&loops[b]))))
+            .unwrap_or(0);
         let ob = bx(&loops[outer]);
         for (k, l) in loops.iter_mut().enumerate() {
             if k == outer || l.is_empty() {
@@ -547,7 +674,8 @@ fn boundary(body: &Body, f: &Face, es: &[(Vec<f64>, Vec<P3>)], dom: &Domain, p: 
             let b = bx(l);
             for d in 0..2 {
                 if let Some((_, per)) = dom.per[d] {
-                    let m = (((ob[2 * d] + ob[2 * d + 1]) - (b[2 * d] + b[2 * d + 1])) * 0.5 / per).round();
+                    let m = (((ob[2 * d] + ob[2 * d + 1]) - (b[2 * d] + b[2 * d + 1])) * 0.5 / per)
+                        .round();
                     l.iter_mut().for_each(|q| q.uv[d] += m * per);
                 }
             }
@@ -565,14 +693,24 @@ fn surface_loops(body: &Body, f: &Face, loops: &[Vec<BPt>], dom: &Domain) -> Vec
         *uses.entry(c.edge).or_insert(0) += 1;
     }
     let ((u0, u1), (v0, v1)) = dom.s.param_box();
-    let full = (dom.per[0].map_or(u1 - u0, |(_, w)| w) * dom.per[1].map_or(v1 - v0, |(_, w)| w)).abs();
+    let full =
+        (dom.per[0].map_or(u1 - u0, |(_, w)| w) * dom.per[1].map_or(v1 - v0, |(_, w)| w)).abs();
     f.loops
         .iter()
         .zip(loops)
         .map(|(l, pts)| {
             let n = pts.len();
-            let area = 0.5 * (0..n).map(|i| pts[i].uv.x * pts[(i + 1) % n].uv.y - pts[i].uv.y * pts[(i + 1) % n].uv.x).sum::<f64>().abs();
-            (dom.per[0].is_some() || dom.per[1].is_some()) && l.iter().all(|c| body.edges[c.edge].degenerate || uses[&c.edge] == 2) && area <= tol::REL_POINT * full
+            let area = 0.5
+                * (0..n)
+                    .map(|i| {
+                        pts[i].uv.x * pts[(i + 1) % n].uv.y - pts[i].uv.y * pts[(i + 1) % n].uv.x
+                    })
+                    .sum::<f64>()
+                    .abs();
+            (dom.per[0].is_some() || dom.per[1].is_some())
+                && l.iter()
+                    .all(|c| body.edges[c.edge].degenerate || uses[&c.edge] == 2)
+                && area <= tol::REL_POINT * full
         })
         .collect()
 }
@@ -588,12 +726,24 @@ fn whole_boundary(dom: &Domain, p: &TessParams, tol: f64) -> Option<Vec<BPt>> {
         return None;
     }
     let (hu, hv) = steps(dom, (u0, u0 + wu), (v0, v0 + wv), p.chord, p.ang());
-    let count = |w: f64, h: f64, lo: usize| if h.is_finite() && h > 0.0 { ((w.abs() / h).ceil() as usize).clamp(lo, 400) } else { lo };
+    let count = |w: f64, h: f64, lo: usize| {
+        if h.is_finite() && h > 0.0 {
+            ((w.abs() / h).ceil() as usize).clamp(lo, 400)
+        } else {
+            lo
+        }
+    };
     let (nu, nv) = (count(wu, hu, 8), count(wv, hv, 4));
-    let (u, v) = (|i: usize| u0 + wu * i as f64 / nu as f64, |j: usize| v0 + wv * j as f64 / nv as f64);
+    let (u, v) = (
+        |i: usize| u0 + wu * i as f64 / nu as f64,
+        |j: usize| v0 + wv * j as f64 / nv as f64,
+    );
     // Each side not closed must be a pole row.
     let pole = |j: usize, d: usize| dom.is_pole(P2::new(u(0), v(j)), d, tol);
-    let (pole0, pole1) = (dom.per[1].is_none() && pole(0, 0), dom.per[1].is_none() && pole(nv, 0));
+    let (pole0, pole1) = (
+        dom.per[1].is_none() && pole(0, 0),
+        dom.per[1].is_none() && pole(nv, 0),
+    );
     if dom.per[0].is_none() || (dom.per[1].is_none() && !(pole0 && pole1)) {
         return None;
     }
@@ -601,14 +751,30 @@ fn whole_boundary(dom: &Domain, p: &TessParams, tol: f64) -> Option<Vec<BPt>> {
     let at = |i: usize, j: usize| {
         let i = i % nu;
         let j = if dom.per[1].is_some() { j % nv } else { j };
-        let q = if (j == 0 && pole0) || (j == nv && pole1) { P2::new(u(0), v(j)) } else { P2::new(u(i), v(j)) };
+        let q = if (j == 0 && pole0) || (j == nv && pole1) {
+            P2::new(u(0), v(j))
+        } else {
+            P2::new(u(i), v(j))
+        };
         dom.eval(q)
     };
     let mut out = Vec::with_capacity(2 * (nu + nv));
-    out.extend((0..nu).map(|i| BPt { uv: P2::new(u(i), v(0)), p: at(i, 0) }));
-    out.extend((0..nv).map(|j| BPt { uv: P2::new(u(nu), v(j)), p: at(nu, j) }));
-    out.extend((1..=nu).rev().map(|i| BPt { uv: P2::new(u(i), v(nv)), p: at(i, nv) }));
-    out.extend((1..=nv).rev().map(|j| BPt { uv: P2::new(u(0), v(j)), p: at(0, j) }));
+    out.extend((0..nu).map(|i| BPt {
+        uv: P2::new(u(i), v(0)),
+        p: at(i, 0),
+    }));
+    out.extend((0..nv).map(|j| BPt {
+        uv: P2::new(u(nu), v(j)),
+        p: at(nu, j),
+    }));
+    out.extend((1..=nu).rev().map(|i| BPt {
+        uv: P2::new(u(i), v(nv)),
+        p: at(i, nv),
+    }));
+    out.extend((1..=nv).rev().map(|j| BPt {
+        uv: P2::new(u(0), v(j)),
+        p: at(0, j),
+    }));
     Some(out)
 }
 
@@ -650,7 +816,11 @@ fn steps(dom: &Domain, ub: (f64, f64), vb: (f64, f64), defl: f64, ang: f64) -> (
         }
         let by_defl = (8.0 * defl / c).sqrt();
         // The same angular step as the edges (`curve::arc_step`): half of `ang`.
-        let by_ang = if k > tol::DEGENERATE { 0.5 * ang / k } else { f64::INFINITY };
+        let by_ang = if k > tol::DEGENERATE {
+            0.5 * ang / k
+        } else {
+            f64::INFINITY
+        };
         by_defl.min(by_ang)
     };
     (step(cu, ku), step(cv, kv))
@@ -662,7 +832,10 @@ fn mean_speeds(dom: &Domain, ub: (f64, f64), vb: (f64, f64)) -> Option<(f64, f64
     let (mut su, mut sv, mut k) = (0.0, 0.0, 0usize);
     for i in 0..=n {
         for j in 0..=n {
-            let q = P2::new(ub.0 + (ub.1 - ub.0) * i as f64 / n as f64, vb.0 + (vb.1 - vb.0) * j as f64 / n as f64);
+            let q = P2::new(
+                ub.0 + (ub.1 - ub.0) * i as f64 / n as f64,
+                vb.0 + (vb.1 - vb.0) * j as f64 / n as f64,
+            );
             let (_, du, dv) = dom.d1(q);
             su += du.norm();
             sv += dv.norm();
@@ -670,24 +843,49 @@ fn mean_speeds(dom: &Domain, ub: (f64, f64), vb: (f64, f64)) -> Option<(f64, f64
         }
     }
     let (su, sv) = (su / k as f64, sv / k as f64);
-    (su > tol::DEGENERATE && sv > tol::DEGENERATE && su.is_finite() && sv.is_finite()).then_some((su, sv))
+    (su > tol::DEGENERATE && sv > tol::DEGENERATE && su.is_finite() && sv.is_finite())
+        .then_some((su, sv))
 }
 
 /// Interior points on a grid stepped by the surface's curvature, inside the loops and clear of
 /// the boundary. `pts` is the boundary, `loops` ranges into it; `(mu, mv)` scales (u, v) to
 /// about true lengths.
 #[allow(clippy::too_many_arguments)]
-fn seed_grid(dom: &Domain, pts: &[P2], loops: &[(usize, usize)], ubox: (f64, f64), vbox: (f64, f64), (mu, mv): (f64, f64), p: &TessParams) -> Vec<P2> {
+fn seed_grid(
+    dom: &Domain,
+    pts: &[P2],
+    loops: &[(usize, usize)],
+    ubox: (f64, f64),
+    vbox: (f64, f64),
+    (mu, mv): (f64, f64),
+    p: &TessParams,
+) -> Vec<P2> {
     let (hu, hv) = steps(dom, ubox, vbox, p.chord, p.ang());
     // A step longer than the face is no step (straight to rounding: a loft along a line).
-    let hu = if hu >= ubox.1 - ubox.0 { f64::INFINITY } else { hu };
-    let hv = if hv >= vbox.1 - vbox.0 { f64::INFINITY } else { hv };
+    let hu = if hu >= ubox.1 - ubox.0 {
+        f64::INFINITY
+    } else {
+        hu
+    };
+    let hv = if hv >= vbox.1 - vbox.0 {
+        f64::INFINITY
+    } else {
+        hv
+    };
     let mut grid: Vec<P2> = Vec::new();
     if !(hu.is_finite() || hv.is_finite()) {
         return grid;
     }
-    let nu = if hu.is_finite() { (((ubox.1 - ubox.0) / hu).ceil() as usize).clamp(1, 400) } else { 1 };
-    let mut nv = if hv.is_finite() { (((vbox.1 - vbox.0) / hv).ceil() as usize).clamp(1, 400) } else { 1 };
+    let nu = if hu.is_finite() {
+        (((ubox.1 - ubox.0) / hu).ceil() as usize).clamp(1, 400)
+    } else {
+        1
+    };
+    let mut nv = if hv.is_finite() {
+        (((vbox.1 - vbox.0) / hv).ceil() as usize).clamp(1, 400)
+    } else {
+        1
+    };
     // Straight along v (cylinders, cones, extrusions): long triangles from one end to the other
     // are exact there and keep the rulings whole; only very long ones are cut.
     if !hv.is_finite() && hu.is_finite() {
@@ -712,7 +910,11 @@ fn seed_grid(dom: &Domain, pts: &[P2], loops: &[(usize, usize)], ubox: (f64, f64
     if nu > 1 {
         nv = nv.max(((wv / (0.5 * wu)).ceil() as usize).clamp(1, 400));
     }
-    let nu = if nv > 1 { nu.max(((wu / (0.5 * wv)).ceil() as usize).clamp(1, 400)) } else { nu };
+    let nu = if nv > 1 {
+        nu.max(((wu / (0.5 * wv)).ceil() as usize).clamp(1, 400))
+    } else {
+        nu
+    };
     if nu <= 1 && nv <= 1 {
         return grid;
     }
@@ -724,18 +926,29 @@ fn seed_grid(dom: &Domain, pts: &[P2], loops: &[(usize, usize)], ubox: (f64, f64
         .flat_map(|&(a, b)| {
             (a..b).map(move |i| {
                 let j = if i + 1 == b { a } else { i + 1 };
-                (P2::new(pts[i].x * mu, pts[i].y * mv), P2::new(pts[j].x * mu, pts[j].y * mv))
+                (
+                    P2::new(pts[i].x * mu, pts[i].y * mv),
+                    P2::new(pts[j].x * mu, pts[j].y * mv),
+                )
             })
         })
         .collect();
     // The boundary's segments bucketed by grid cell (scaled space), for the distance test.
     let (cw, chh) = (du * mu, dv * mv);
     let (ox, oy) = (ubox.0 * mu, vbox.0 * mv);
-    let cell = |x: f64, y: f64| -> (i64, i64) { (((x - ox) / cw).floor() as i64, ((y - oy) / chh).floor() as i64) };
+    let cell = |x: f64, y: f64| -> (i64, i64) {
+        (
+            ((x - ox) / cw).floor() as i64,
+            ((y - oy) / chh).floor() as i64,
+        )
+    };
     let mut buckets: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
     let mut always: Vec<usize> = Vec::new();
     for (k, (a, b)) in segs.iter().enumerate() {
-        let (c0, c1) = (cell(a.x.min(b.x) - min_d, a.y.min(b.y) - min_d), cell(a.x.max(b.x) + min_d, a.y.max(b.y) + min_d));
+        let (c0, c1) = (
+            cell(a.x.min(b.x) - min_d, a.y.min(b.y) - min_d),
+            cell(a.x.max(b.x) + min_d, a.y.max(b.y) + min_d),
+        );
         if (c1.0 - c0.0 + 1) * (c1.1 - c0.1 + 1) > 4096 {
             // A very long segment: in every cell of its rows would be too many; test it
             // against every point instead.
@@ -770,8 +983,12 @@ fn seed_grid(dom: &Domain, pts: &[P2], loops: &[(usize, usize)], ubox: (f64, f64
             }
             let qs = P2::new(u * mu, v * mv);
             let c = cell(qs.x, qs.y);
-            let near = buckets.get(&c).is_some_and(|ks| ks.iter().any(|&k| seg_dist2(&qs, &segs[k].0, &segs[k].1) < min_d))
-                || always.iter().any(|&k| seg_dist2(&qs, &segs[k].0, &segs[k].1) < min_d);
+            let near = buckets.get(&c).is_some_and(|ks| {
+                ks.iter()
+                    .any(|&k| seg_dist2(&qs, &segs[k].0, &segs[k].1) < min_d)
+            }) || always
+                .iter()
+                .any(|&k| seg_dist2(&qs, &segs[k].0, &segs[k].1) < min_d);
             if !near {
                 grid.push(P2::new(u, v));
             }
@@ -801,7 +1018,14 @@ struct Vx {
 
 impl From<SPoint<f64>> for Vx {
     fn from(at: SPoint<f64>) -> Self {
-        Self { at, uv: P2::origin(), p: P3::origin(), n: V3::z(), smooth: false, fresh: true }
+        Self {
+            at,
+            uv: P2::origin(),
+            p: P3::origin(),
+            n: V3::z(),
+            smooth: false,
+            fresh: true,
+        }
     }
 }
 
@@ -823,17 +1047,23 @@ fn vx(dom: &Domain, uv: P2, p: Option<P3>, (mu, mv): (f64, f64)) -> Vx {
     // 1e-15 long and may point either way, its normal the other nappe's (turned by π against its
     // neighbours', which the angle refinement then splits for ever). Against the face's mean
     // speeds, such a point has no normal of its own.
-    let smooth = l > 1e-10 * su.norm() * sv.norm() && l > tol::TINY && su.norm() > tol::REL * mu && sv.norm() > tol::REL * mv;
+    let smooth = l > 1e-10 * su.norm() * sv.norm()
+        && l > tol::TINY
+        && su.norm() > tol::REL * mu
+        && sv.norm() > tol::REL * mv;
     let n = if smooth { n / l } else { dom.normal(uv) };
-    Vx { at: SPoint::new(tiny(uv.x * mu), tiny(uv.y * mv)), uv, p: p.unwrap_or(q), n, smooth, fresh: false }
+    Vx {
+        at: SPoint::new(tiny(uv.x * mu), tiny(uv.y * mv)),
+        uv,
+        p: p.unwrap_or(q),
+        n,
+        smooth,
+        fresh: false,
+    }
 }
 
 fn tiny(x: f64) -> f64 {
-    if x.abs() < 1e-30 {
-        0.0
-    } else {
-        x
-    }
+    if x.abs() < 1e-30 { 0.0 } else { x }
 }
 
 fn pair(a: usize, b: usize) -> (usize, usize) {
@@ -850,7 +1080,10 @@ fn classify(cdt: &Cdt, flip: &FastSet<(usize, usize)>) -> Vec<bool> {
         for e in face.adjacent_edges() {
             if e.rev().face().is_outer() {
                 let idx = face.fix().index();
-                let s = i8::from(e.is_constraint_edge() && flip.contains(&pair(e.from().fix().index(), e.to().fix().index())));
+                let s = i8::from(
+                    e.is_constraint_edge()
+                        && flip.contains(&pair(e.from().fix().index(), e.to().fix().index())),
+                );
                 if state[idx] == -1 {
                     state[idx] = s;
                     queue.push_back(face.fix());
@@ -865,7 +1098,8 @@ fn classify(cdt: &Cdt, flip: &FastSet<(usize, usize)>) -> Vec<bool> {
             if let Some(o) = e.rev().face().as_inner() {
                 let idx = o.fix().index();
                 if state[idx] == -1 {
-                    let crosses = e.is_constraint_edge() && flip.contains(&pair(e.from().fix().index(), e.to().fix().index()));
+                    let crosses = e.is_constraint_edge()
+                        && flip.contains(&pair(e.from().fix().index(), e.to().fix().index()));
                     state[idx] = if crosses { 1 - s } else { s };
                     queue.push_back(o.fix());
                 }
@@ -881,10 +1115,21 @@ fn classify_winding(cdt: &Cdt, verts: &[Vx], cons: &[[usize; 2]]) -> Vec<bool> {
     let mut inside = vec![false; cdt.num_inner_faces() + 1];
     // The segments by the band of y they span, in buckets: a centroid's count runs over the
     // segments of its bucket (only a segment spanning its y can count), not every segment.
-    let (ylo, yhi) = cons.iter().flat_map(|c| c.map(|i| verts[i].at.y)).fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), y| (l.min(y), h.max(y)));
+    let (ylo, yhi) = cons
+        .iter()
+        .flat_map(|c| c.map(|i| verts[i].at.y))
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), y| {
+            (l.min(y), h.max(y))
+        });
     let nb = (cons.len() / 2).clamp(1, 1024);
     let width = (yhi - ylo) / nb as f64;
-    let bucket = |y: f64| -> usize { if width > 0.0 { (((y - ylo) / width).floor().max(0.0) as usize).min(nb - 1) } else { 0 } };
+    let bucket = |y: f64| -> usize {
+        if width > 0.0 {
+            (((y - ylo) / width).floor().max(0.0) as usize).min(nb - 1)
+        } else {
+            0
+        }
+    };
     let mut buckets: Vec<Vec<usize>> = vec![Vec::new(); nb];
     for (k, &[i, j]) in cons.iter().enumerate() {
         let (a, b) = (verts[i].at.y, verts[j].at.y);
@@ -892,7 +1137,11 @@ fn classify_winding(cdt: &Cdt, verts: &[Vx], cons: &[[usize; 2]]) -> Vec<bool> {
         if a.is_nan() || b.is_nan() {
             continue;
         }
-        for bk in buckets.iter_mut().take(bucket(a.max(b)) + 1).skip(bucket(a.min(b))) {
+        for bk in buckets
+            .iter_mut()
+            .take(bucket(a.max(b)) + 1)
+            .skip(bucket(a.min(b)))
+        {
             bk.push(k);
         }
     }
@@ -923,7 +1172,13 @@ fn classify_winding(cdt: &Cdt, verts: &[Vx], cons: &[[usize; 2]]) -> Vec<bool> {
 /// corners, `cons[i]` whether side i (corner i to i + 1) is on the boundary (never split: it
 /// is the neighbouring face's too). Interior sides are split at their middle (both triangles on
 /// them are inside), else the centroid is added.
-fn split_point(dom: &Domain, v: &[Vx; 3], cons: [bool; 3], p: &TessParams, min_len: f64) -> Option<P2> {
+fn split_point(
+    dom: &Domain,
+    v: &[Vx; 3],
+    cons: [bool; 3],
+    p: &TessParams,
+    min_len: f64,
+) -> Option<P2> {
     let len = |i: usize| (v[(i + 1) % 3].p - v[i].p).norm();
     let l = [len(0), len(1), len(2)];
     let longest = (0..3).max_by(|&a, &b| l[a].total_cmp(&l[b])).unwrap_or(0);
@@ -934,12 +1189,17 @@ fn split_point(dom: &Domain, v: &[Vx; 3], cons: [bool; 3], p: &TessParams, min_l
     // triangles beside its long side split that side if it needs it.
     let (a, b, c) = (v[0].at, v[1].at, v[2].at);
     let area2 = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-    let side2 = [(a, b), (b, c), (c, a)].iter().map(|(x, y)| (x.x - y.x).powi(2) + (x.y - y.y).powi(2)).fold(0.0, f64::max);
+    let side2 = [(a, b), (b, c), (c, a)]
+        .iter()
+        .map(|(x, y)| (x.x - y.x).powi(2) + (x.y - y.y).powi(2))
+        .fold(0.0, f64::max);
     if !(area2.abs() > tol::REL * side2) {
         return None;
     }
     let mid = |i: usize| P2::from((v[i].uv.coords + v[(i + 1) % 3].uv.coords) * 0.5);
-    let interior_longest = (0..3).filter(|&i| !cons[i]).max_by(|&a, &b| l[a].total_cmp(&l[b]));
+    let interior_longest = (0..3)
+        .filter(|&i| !cons[i])
+        .max_by(|&a, &b| l[a].total_cmp(&l[b]));
     if p.max_edge > 0.0 && l[longest] > p.max_edge && !cons[longest] {
         return Some(mid(longest));
     }
@@ -960,7 +1220,13 @@ fn split_point(dom: &Domain, v: &[Vx; 3], cons: [bool; 3], p: &TessParams, min_l
         }
     };
     let centroid = P2::from((v[0].uv.coords + v[1].uv.coords + v[2].uv.coords) / 3.0);
-    let mut worst = (off(centroid, P3::from((v[0].p.coords + v[1].p.coords + v[2].p.coords) / 3.0)), centroid);
+    let mut worst = (
+        off(
+            centroid,
+            P3::from((v[0].p.coords + v[1].p.coords + v[2].p.coords) / 3.0),
+        ),
+        centroid,
+    );
     for i in (0..3).filter(|&i| !cons[i]) {
         let q = mid(i);
         let d = off(q, nalgebra::center(&v[i].p, &v[(i + 1) % 3].p));
@@ -974,7 +1240,9 @@ fn split_point(dom: &Domain, v: &[Vx; 3], cons: [bool; 3], p: &TessParams, min_l
     // Angle between the corners' normals, on triangles over a tenth of the chord (the normals
     // swing round without end by a pole or an apex, where the triangles are tiny anyway).
     if v.iter().all(|x| x.smooth) && l[longest] > 0.1 * p.chord {
-        let turn = (0..3).map(|i| v[i].n.angle(&v[(i + 1) % 3].n)).fold(0.0, f64::max);
+        let turn = (0..3)
+            .map(|i| v[i].n.angle(&v[(i + 1) % 3].n))
+            .fold(0.0, f64::max);
         if turn > p.ang() {
             return Some(interior_longest.map(mid).unwrap_or(centroid));
         }
@@ -984,18 +1252,32 @@ fn split_point(dom: &Domain, v: &[Vx; 3], cons: [bool; 3], p: &TessParams, min_l
 
 /// Triangulates one face (see [`mesh_face_with`]); a chord or angle that isn't positive takes
 /// the default's.
-pub fn mesh_face(body: &Body, f: &Face, es: &[(Vec<f64>, Vec<P3>)], defl: f64, ang: f64) -> FaceMesh {
+pub fn mesh_face(
+    body: &Body,
+    f: &Face,
+    es: &[(Vec<f64>, Vec<P3>)],
+    defl: f64,
+    ang: f64,
+) -> FaceMesh {
     mesh_face_with(body, f, es, &TessParams::lenient(defl, ang))
 }
 
 /// Triangulates one face. `es` holds each edge's samples ([`edge_samples_with`] with the same
 /// controls); the face's boundary vertices are exactly those samples, so faces meshed from the
 /// same samples join without gaps.
-pub fn mesh_face_with(body: &Body, f: &Face, es: &[(Vec<f64>, Vec<P3>)], p: &TessParams) -> FaceMesh {
+pub fn mesh_face_with(
+    body: &Body,
+    f: &Face,
+    es: &[(Vec<f64>, Vec<P3>)],
+    p: &TessParams,
+) -> FaceMesh {
     let t_start = std::time::Instant::now();
     let prof = std::env::var("CADRS_TESS_PROFILE").is_ok();
     // The face's size, for its tolerances.
-    let mut bb = (P3::from(V3::repeat(f64::INFINITY)), P3::from(V3::repeat(f64::NEG_INFINITY)));
+    let mut bb = (
+        P3::from(V3::repeat(f64::INFINITY)),
+        P3::from(V3::repeat(f64::NEG_INFINITY)),
+    );
     for c in f.loops.iter().flatten() {
         for q in &es[c.edge].1 {
             bb = (bb.0.inf(q), bb.1.sup(q));
@@ -1009,14 +1291,24 @@ pub fn mesh_face_with(body: &Body, f: &Face, es: &[(Vec<f64>, Vec<P3>)], p: &Tes
     let dom = Domain::new(&f.surf, tol);
     let mut bloops = boundary(body, f, es, &dom, p, tol);
     let whole = surface_loops(body, f, &bloops, &dom);
-    let covers = whole.iter().any(|&w| w) || (f.loops.is_empty() && dom.per.iter().any(Option::is_some));
+    let covers =
+        whole.iter().any(|&w| w) || (f.loops.is_empty() && dom.per.iter().any(Option::is_some));
     if let Some(rect) = covers.then(|| whole_boundary(&dom, p, tol)).flatten() {
         // The holes into the rectangle's copy of the periods.
-        let mut kept: Vec<Vec<BPt>> = bloops.into_iter().zip(whole).filter(|(l, w)| !w && l.len() >= 3).map(|(l, _)| l).collect();
+        let mut kept: Vec<Vec<BPt>> = bloops
+            .into_iter()
+            .zip(whole)
+            .filter(|(l, w)| !w && l.len() >= 3)
+            .map(|(l, _)| l)
+            .collect();
         for l in &mut kept {
             for d in 0..2 {
                 if let Some((a, w)) = dom.per[d] {
-                    let (lo, hi) = l.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), q| (lo.min(q.uv[d]), hi.max(q.uv[d])));
+                    let (lo, hi) = l
+                        .iter()
+                        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), q| {
+                            (lo.min(q.uv[d]), hi.max(q.uv[d]))
+                        });
                     let k = ((0.5 * (lo + hi) - a) / w).floor();
                     l.iter_mut().for_each(|q| q.uv[d] -= k * w);
                 }
@@ -1036,9 +1328,18 @@ pub fn mesh_face_with(body: &Body, f: &Face, es: &[(Vec<f64>, Vec<P3>)], p: &Tes
     if nb < 3 {
         return FaceMesh::default();
     }
-    let (ubox, vbox) = pts.iter().fold(((f64::INFINITY, f64::NEG_INFINITY), (f64::INFINITY, f64::NEG_INFINITY)), |(u, v), q| {
-        ((u.0.min(q.uv.x), u.1.max(q.uv.x)), (v.0.min(q.uv.y), v.1.max(q.uv.y)))
-    });
+    let (ubox, vbox) = pts.iter().fold(
+        (
+            (f64::INFINITY, f64::NEG_INFINITY),
+            (f64::INFINITY, f64::NEG_INFINITY),
+        ),
+        |(u, v), q| {
+            (
+                (u.0.min(q.uv.x), u.1.max(q.uv.x)),
+                (v.0.min(q.uv.y), v.1.max(q.uv.y)),
+            )
+        },
+    );
     // B-spline parameters carry no length: scale them by the surface's mean speeds over the
     // face's box, so the grid's steps and the triangulation work in about true lengths (a long
     // straight-along-v fillet strip with v in [0, 1] would otherwise get no interior rows).
@@ -1046,11 +1347,22 @@ pub fn mesh_face_with(body: &Body, f: &Face, es: &[(Vec<f64>, Vec<P3>)], p: &Tes
     // of revolution's along its meridian: unscaled, a 0.02 mm extrusion of a spline over a
     // parameter range of 0.0016 took a 14 000-point grid.
     let scale = f.surf.metric();
-    let scale = if matches!(f.surf, Surface::Nurbs(_) | Surface::Extrusion { .. } | Surface::Revolution { .. }) { mean_speeds(&dom, ubox, vbox).unwrap_or(scale) } else { scale };
+    let scale = if matches!(
+        f.surf,
+        Surface::Nurbs(_) | Surface::Extrusion { .. } | Surface::Revolution { .. }
+    ) {
+        mean_speeds(&dom, ubox, vbox).unwrap_or(scale)
+    } else {
+        scale
+    };
     let pts_uv: Vec<P2> = pts.iter().map(|b| b.uv).collect();
     let grid = seed_grid(&dom, &pts_uv, &loops, ubox, vbox, scale, p);
     if prof {
-        eprintln!("tess face: boundary {nb}, grid {} in {:?}, scale {scale:?}, box {ubox:?} {vbox:?}", grid.len(), t_start.elapsed());
+        eprintln!(
+            "tess face: boundary {nb}, grid {} in {:?}, scale {scale:?}, box {ubox:?} {vbox:?}",
+            grid.len(),
+            t_start.elapsed()
+        );
     }
     // Constrained Delaunay in scaled uv, bulk loaded (boundary points at the same (u, v) merged
     // first, so the triangulation's vertices are ours in order).
@@ -1062,15 +1374,21 @@ pub fn mesh_face_with(body: &Body, f: &Face, es: &[(Vec<f64>, Vec<P3>)], p: &Tes
         if !(v.at.x.is_finite() && v.at.y.is_finite()) {
             return FaceMesh::default();
         }
-        let k = *seen.entry((v.at.x.to_bits(), v.at.y.to_bits())).or_insert_with(|| {
-            verts.push(v);
-            verts.len() - 1
-        });
+        let k = *seen
+            .entry((v.at.x.to_bits(), v.at.y.to_bits()))
+            .or_insert_with(|| {
+                verts.push(v);
+                verts.len() - 1
+            });
         handle.push(k);
     }
     let n_boundary = verts.len();
     // The grid keeps clear of the boundary, so its points are new.
-    verts.extend(grid.iter().map(|&q| vx(&dom, q, None, scale)).filter(|v| v.at.x.is_finite() && v.at.y.is_finite()));
+    verts.extend(
+        grid.iter()
+            .map(|&q| vx(&dom, q, None, scale))
+            .filter(|v| v.at.x.is_finite() && v.at.y.is_finite()),
+    );
     let mut cons: Vec<[usize; 2]> = Vec::new();
     let mut count: HashMap<(usize, usize), usize> = HashMap::new();
     for &(a, b) in &loops {
@@ -1083,11 +1401,30 @@ pub fn mesh_face_with(body: &Body, f: &Face, es: &[(Vec<f64>, Vec<P3>)], p: &Tes
             }
         }
     }
-    let flip: FastSet<(usize, usize)> = count.into_iter().filter(|&(_, n)| n % 2 == 1).map(|(k, _)| k).collect();
-    let setup = Setup { dom: &dom, f, verts, cons, flip, n_boundary, scale, extent, tol, prof: prof.then_some(t_start) };
+    let flip: FastSet<(usize, usize)> = count
+        .into_iter()
+        .filter(|&(_, n)| n % 2 == 1)
+        .map(|(k, _)| k)
+        .collect();
+    let setup = Setup {
+        dom: &dom,
+        f,
+        verts,
+        cons,
+        flip,
+        n_boundary,
+        scale,
+        extent,
+        tol,
+        prof: prof.then_some(t_start),
+    };
     let m = triangulate(&setup, p, true);
     if prof {
-        eprintln!("tess face: {} triangles at {:?}", m.indices.len(), t_start.elapsed());
+        eprintln!(
+            "tess face: {} triangles at {:?}",
+            m.indices.len(),
+            t_start.elapsed()
+        );
     }
     let bad = check_faces(std::slice::from_ref(&m)).bad;
     if bad == 0 {
@@ -1121,9 +1458,24 @@ struct Setup<'a> {
 
 /// The constrained Delaunay triangulation of a face, refined to the controls when `refine`.
 fn triangulate(s: &Setup, p: &TessParams, refine: bool) -> FaceMesh {
-    let Setup { dom, f, ref verts, ref cons, ref flip, n_boundary, scale, extent, tol, .. } = *s;
+    let Setup {
+        dom,
+        f,
+        ref verts,
+        ref cons,
+        ref flip,
+        n_boundary,
+        scale,
+        extent,
+        tol,
+        ..
+    } = *s;
     let mut conflicts: Vec<[usize; 2]> = Vec::new();
-    let Ok(mut cdt): std::result::Result<Cdt, _> = ConstrainedDelaunayTriangulation::try_bulk_load_cdt(verts.clone(), cons.clone(), |c| conflicts.push(c)) else {
+    let Ok(mut cdt): std::result::Result<Cdt, _> =
+        ConstrainedDelaunayTriangulation::try_bulk_load_cdt(verts.clone(), cons.clone(), |c| {
+            conflicts.push(c)
+        })
+    else {
         return FaceMesh::default();
     };
     // The refinement's budget: as many points again as the seeding gave, at least 10 000 and at
@@ -1132,9 +1484,21 @@ fn triangulate(s: &Setup, p: &TessParams, refine: bool) -> FaceMesh {
     // Inside by parity across the boundary, or, when boundary segments cross (a p-curve astray)
     // and one is missing from the triangulation so parity would leak, by the boundary's winding
     // number at each triangle's centroid.
-    let sides = |cdt: &Cdt| if conflicts.is_empty() { classify(cdt, flip) } else { classify_winding(cdt, verts, cons) };
+    let sides = |cdt: &Cdt| {
+        if conflicts.is_empty() {
+            classify(cdt, flip)
+        } else {
+            classify_winding(cdt, verts, cons)
+        }
+    };
     if s.prof.is_some() && !conflicts.is_empty() {
-        eprintln!("tess face: boundary segments crossing: {:?}", conflicts.iter().map(|c| (c, verts[c[0]].uv, verts[c[1]].uv)).collect::<Vec<_>>());
+        eprintln!(
+            "tess face: boundary segments crossing: {:?}",
+            conflicts
+                .iter()
+                .map(|c| (c, verts[c[0]].uv, verts[c[1]].uv))
+                .collect::<Vec<_>>()
+        );
     }
     let max_verts = cdt.num_vertices() + cdt.num_vertices().clamp(10_000, 100_000);
     // Aspect ratio: Ruppert/Chew refinement to the matching smallest angle (a needle's aspect
@@ -1155,7 +1519,11 @@ fn triangulate(s: &Setup, p: &TessParams, refine: bool) -> FaceMesh {
         );
         if cdt.num_constraints() != k0 {
             // A boundary segment was split after all: start again without it.
-            match ConstrainedDelaunayTriangulation::try_bulk_load_cdt(verts.clone(), cons.clone(), |_| {}) {
+            match ConstrainedDelaunayTriangulation::try_bulk_load_cdt(
+                verts.clone(),
+                cons.clone(),
+                |_| {},
+            ) {
                 Ok(c) => cdt = c,
                 Err(_) => return FaceMesh::default(),
             }
@@ -1164,7 +1532,12 @@ fn triangulate(s: &Setup, p: &TessParams, refine: bool) -> FaceMesh {
                 let h = FixedVertexHandle::from_index(i);
                 let d = *cdt.vertex(h).data();
                 if d.fresh {
-                    *cdt.vertex_data_mut(h) = vx(dom, P2::new(d.at.x / scale.0, d.at.y / scale.1), None, scale);
+                    *cdt.vertex_data_mut(h) = vx(
+                        dom,
+                        P2::new(d.at.x / scale.0, d.at.y / scale.1),
+                        None,
+                        scale,
+                    );
                 }
             }
         }
@@ -1204,7 +1577,9 @@ fn triangulate(s: &Setup, p: &TessParams, refine: bool) -> FaceMesh {
                 for e in face.adjacent_edges() {
                     if e.is_constraint_edge() {
                         let (x, y) = (e.from().fix().index(), e.to().fix().index());
-                        if let Some(i) = (0..3).find(|&i| pair(ids[i], ids[(i + 1) % 3]) == pair(x, y)) {
+                        if let Some(i) =
+                            (0..3).find(|&i| pair(ids[i], ids[(i + 1) % 3]) == pair(x, y))
+                        {
                             cons[i] = true;
                         }
                     }
@@ -1212,7 +1587,10 @@ fn triangulate(s: &Setup, p: &TessParams, refine: bool) -> FaceMesh {
                 Some((key, fi, vs.map(|v| *v.data()), cons))
             })
             .collect();
-        let splits: Vec<Option<P2>> = todo.par_iter().map(|(_, _, v, cons)| split_point(dom, v, *cons, p, min_len)).collect();
+        let splits: Vec<Option<P2>> = todo
+            .par_iter()
+            .map(|(_, _, v, cons)| split_point(dom, v, *cons, p, min_len))
+            .collect();
         let mut proposed: FastSet<(u64, u64)> = FastSet::default();
         let mut at: Vec<P2> = Vec::new();
         for ((key, fi, _, _), q) in todo.iter().zip(splits) {
@@ -1230,7 +1608,12 @@ fn triangulate(s: &Setup, p: &TessParams, refine: bool) -> FaceMesh {
         }
         let mut adds: Vec<Vx> = at.par_iter().map(|&q| vx(dom, q, None, scale)).collect();
         if let Some(t) = s.prof {
-            eprintln!("tess face: refinement round at {} vertices, {} to add, {:?}", cdt.num_vertices(), adds.len(), t.elapsed());
+            eprintln!(
+                "tess face: refinement round at {} vertices, {} to add, {:?}",
+                cdt.num_vertices(),
+                adds.len(),
+                t.elapsed()
+            );
         }
         if adds.is_empty() {
             break;
@@ -1240,7 +1623,11 @@ fn triangulate(s: &Setup, p: &TessParams, refine: bool) -> FaceMesh {
         let row = (extent * 1e-2).max(tol::DEGENERATE);
         adds.sort_by(|a, b| {
             let (ra, rb) = ((a.at.y / row).floor(), (b.at.y / row).floor());
-            ra.total_cmp(&rb).then(if ra as i64 % 2 == 0 { a.at.x.total_cmp(&b.at.x) } else { b.at.x.total_cmp(&a.at.x) })
+            ra.total_cmp(&rb).then(if ra as i64 % 2 == 0 {
+                a.at.x.total_cmp(&b.at.x)
+            } else {
+                b.at.x.total_cmp(&a.at.x)
+            })
         });
         for v in adds {
             if !(v.at.x.is_finite() && v.at.y.is_finite()) || cdt.num_vertices() >= max_verts {
@@ -1251,14 +1638,22 @@ fn triangulate(s: &Setup, p: &TessParams, refine: bool) -> FaceMesh {
             let clear = |f: spade::handles::FixedFaceHandle<spade::handles::InnerTag>| {
                 cdt.face(f).adjacent_edges().iter().all(|e| {
                     let [a, b] = e.positions();
-                    !e.is_constraint_edge() || seg_dist2(&P2::new(v.at.x, v.at.y), &P2::new(a.x, a.y), &P2::new(b.x, b.y)) > snap
+                    !e.is_constraint_edge()
+                        || seg_dist2(
+                            &P2::new(v.at.x, v.at.y),
+                            &P2::new(a.x, a.y),
+                            &P2::new(b.x, b.y),
+                        ) > snap
                 })
             };
             let free = match cdt.locate(v.at) {
                 PositionInTriangulation::OnFace(f) => clear(f),
                 PositionInTriangulation::OnEdge(e) => {
                     let e = cdt.directed_edge(e);
-                    !e.is_constraint_edge() && [e.face(), e.rev().face()].iter().all(|f| f.as_inner().is_none_or(|f| clear(f.fix())))
+                    !e.is_constraint_edge()
+                        && [e.face(), e.rev().face()]
+                            .iter()
+                            .all(|f| f.as_inner().is_none_or(|f| clear(f.fix())))
                 }
                 _ => false,
             };
@@ -1290,7 +1685,13 @@ fn triangulate(s: &Setup, p: &TessParams, refine: bool) -> FaceMesh {
                     out.uvs.push(P2::new(u, v));
                     (out.positions.len() - 1) as u32
                 };
-                map[hi] = if hi < n_boundary { *weld.entry([d.p.x.to_bits(), d.p.y.to_bits(), d.p.z.to_bits()]).or_insert_with(push) } else { push() };
+                map[hi] = if hi < n_boundary {
+                    *weld
+                        .entry([d.p.x.to_bits(), d.p.y.to_bits(), d.p.z.to_bits()])
+                        .or_insert_with(push)
+                } else {
+                    push()
+                };
             }
             tri[t] = map[hi];
         }
@@ -1321,7 +1722,9 @@ fn drop_pillows(tris: &mut Vec<[u32; 3]>) {
     let mut uses: HashMap<(u32, u32), usize> = HashMap::new();
     for t in tris.iter() {
         for i in 0..3 {
-            *uses.entry((t[i].min(t[(i + 1) % 3]), t[i].max(t[(i + 1) % 3]))).or_insert(0) += 1;
+            *uses
+                .entry((t[i].min(t[(i + 1) % 3]), t[i].max(t[(i + 1) % 3])))
+                .or_insert(0) += 1;
         }
     }
     let mut gone = vec![false; tris.len()];
@@ -1365,7 +1768,11 @@ pub fn mesh(body: &Body, p: &TessParams) -> Result<(Vec<FaceMesh>, EdgeSamples)>
 
 fn mesh_all(body: &Body, p: &TessParams) -> (Vec<FaceMesh>, EdgeSamples) {
     let es = edge_samples_with(body, p);
-    let faces: Vec<FaceMesh> = body.faces.par_iter().map(|f| mesh_face_with(body, f, &es, p)).collect();
+    let faces: Vec<FaceMesh> = body
+        .faces
+        .par_iter()
+        .map(|f| mesh_face_with(body, f, &es, p))
+        .collect();
     (faces, es)
 }
 
@@ -1395,7 +1802,11 @@ impl NativeKernel {
         }
         if !b.points.is_empty() {
             let ids = vertex_ids(b);
-            m.points = b.points.iter().map(|&v| (VertexId(ids[v].unwrap_or(0) as u64), b.verts[v].p)).collect();
+            m.points = b
+                .points
+                .iter()
+                .map(|&v| (VertexId(ids[v].unwrap_or(0) as u64), b.verts[v].p))
+                .collect();
         }
         Ok(m)
     }
@@ -1426,7 +1837,11 @@ impl MeshCheck {
 
 /// [`MeshCheck`] of a body's face meshes.
 pub fn check_faces(meshes: &[FaceMesh]) -> MeshCheck {
-    check_triangles(meshes.iter().flat_map(|m| m.indices.iter().map(|t| t.map(|i| m.positions[i as usize]))))
+    check_triangles(
+        meshes
+            .iter()
+            .flat_map(|m| m.indices.iter().map(|t| t.map(|i| m.positions[i as usize]))),
+    )
 }
 
 /// [`MeshCheck`] of a [`TriMesh`].
@@ -1442,7 +1857,8 @@ pub fn check_triangles(tris: impl IntoIterator<Item = [P3; 3]>) -> MeshCheck {
     for t in tris {
         let v = t.map(|p| {
             let n = ids.len();
-            *ids.entry([p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]).or_insert(n)
+            *ids.entry([p.x.to_bits(), p.y.to_bits(), p.z.to_bits()])
+                .or_insert(n)
         });
         for i in 0..3 {
             let (a, b) = (v[i], v[(i + 1) % 3]);
@@ -1457,7 +1873,10 @@ pub fn check_triangles(tris: impl IntoIterator<Item = [P3; 3]>) -> MeshCheck {
             }
         }
     }
-    let mut c = MeshCheck { edges: sides.len(), ..MeshCheck::default() };
+    let mut c = MeshCheck {
+        edges: sides.len(),
+        ..MeshCheck::default()
+    };
     for &(f, b) in sides.values() {
         match (f, b) {
             (1, 1) => {}
@@ -1479,15 +1898,27 @@ mod tests {
     /// 0.3 to 0.7 s a face. A point whose derivative vanishes has no normal of its own.
     #[test]
     fn cone_apex_rows_dont_refine_for_ever() {
-        let p = format!("{}/tests/data/smlib/booleans/box_cone_grid.smp", env!("CARGO_MANIFEST_DIR"));
+        let p = format!(
+            "{}/tests/data/smlib/booleans/box_cone_grid.smp",
+            env!("CARGO_MANIFEST_DIR")
+        );
         let part = super::super::smb::read_part(&std::fs::read(p).unwrap()).unwrap();
         let mut cones = 0;
         for b in &part.breps {
             let es = edge_samples(&b.body, 0.1, 0.5);
-            for f in b.body.faces.iter().filter(|f| matches!(f.surf, Surface::Cone { .. })) {
+            for f in b
+                .body
+                .faces
+                .iter()
+                .filter(|f| matches!(f.surf, Surface::Cone { .. }))
+            {
                 cones += 1;
                 let m = mesh_face(&b.body, f, &es, 0.1, 0.5);
-                assert!(!m.indices.is_empty() && m.indices.len() < 500, "{} triangles on a cone of radius 10 at most", m.indices.len());
+                assert!(
+                    !m.indices.is_empty() && m.indices.len() < 500,
+                    "{} triangles on a cone of radius 10 at most",
+                    m.indices.len()
+                );
             }
         }
         assert!(cones > 0);
@@ -1500,25 +1931,68 @@ mod tests {
     /// nearest copy of the period is then the other way round the pole.
     fn hemisphere(r: f64, far: bool) -> Body {
         use super::super::curve::Curve;
-        use super::super::nurbs::{hom, NurbsCurve};
+        use super::super::nurbs::{NurbsCurve, hom};
         use super::super::topo::BodyBuilder;
         use std::f64::consts::PI;
         let h = PI / 2.0;
-        let circle = Curve::Circle { c: P3::origin(), x: V3::x(), y: V3::z(), r };
+        let circle = Curve::Circle {
+            c: P3::origin(),
+            x: V3::x(),
+            y: V3::z(),
+            r,
+        };
         // The meridian's leg at u = 0 is on the copy of the period that makes the loop run
         // counter-clockwise in (u, v) about the material (u in (π, 2π) for the near half).
         let u0 = if far { -1e-7 } else { 2.0 * PI + 1e-7 };
         let mut bb = BodyBuilder::new();
         let v = bb.vertex(circle.point(0.0));
         let e = bb.edge(circle, 0.0, 4.0 * h, v, v);
-        let cps = [(u0, 0.0), (u0, h), (PI, h), (PI, -h), (u0, -h), (u0, 0.0)].map(|(u, v)| hom(&P3::new(u, v, 0.0), 1.0));
-        let pc = Curve::nurbs(NurbsCurve::new(1, vec![0.0, 0.0, h, h, 3.0 * h, 3.0 * h, 4.0 * h, 4.0 * h], cps.to_vec()).unwrap());
+        let cps = [(u0, 0.0), (u0, h), (PI, h), (PI, -h), (u0, -h), (u0, 0.0)]
+            .map(|(u, v)| hom(&P3::new(u, v, 0.0), 1.0));
+        let pc = Curve::nurbs(
+            NurbsCurve::new(
+                1,
+                vec![0.0, 0.0, h, h, 3.0 * h, 3.0 * h, 4.0 * h, 4.0 * h],
+                cps.to_vec(),
+            )
+            .unwrap(),
+        );
         // The disc's plane: its normal out of the solid, its p-curve the circle in its (u, v).
-        let (n, y) = if far { (-V3::y(), 1.0) } else { (V3::y(), -1.0) };
-        let disc = Surface::Plane { f: Frame::from_xz(P3::origin(), V3::x(), n) };
-        let disc_pc = Curve::Circle { c: P3::origin(), x: V3::x(), y: V3::new(0.0, y, 0.0), r };
-        let f0 = bb.face(Surface::Sphere { f: Frame::world(), r }, true, vec![vec![Coedge { edge: e, fwd: !far, pc }]]);
-        let f1 = bb.face(disc, true, vec![vec![Coedge { edge: e, fwd: far, pc: disc_pc }]]);
+        let (n, y) = if far {
+            (-V3::y(), 1.0)
+        } else {
+            (V3::y(), -1.0)
+        };
+        let disc = Surface::Plane {
+            f: Frame::from_xz(P3::origin(), V3::x(), n),
+        };
+        let disc_pc = Curve::Circle {
+            c: P3::origin(),
+            x: V3::x(),
+            y: V3::new(0.0, y, 0.0),
+            r,
+        };
+        let f0 = bb.face(
+            Surface::Sphere {
+                f: Frame::world(),
+                r,
+            },
+            true,
+            vec![vec![Coedge {
+                edge: e,
+                fwd: !far,
+                pc,
+            }]],
+        );
+        let f1 = bb.face(
+            disc,
+            true,
+            vec![vec![Coedge {
+                edge: e,
+                fwd: far,
+                pc: disc_pc,
+            }]],
+        );
         let sh = bb.shell(vec![f0, f1], true);
         bb.solid(vec![sh]);
         bb.build().unwrap()
@@ -1531,28 +2005,58 @@ mod tests {
     #[test]
     fn tiny_extrusion_meshes_coarsely() {
         use super::super::curve::Curve;
-        use super::super::nurbs::{hom, NurbsCurve};
+        use super::super::nurbs::{NurbsCurve, hom};
         use super::super::topo::BodyBuilder;
         let (a, b) = (-0.0016, 0.0);
-        let pts = [(6.0823, -26.3369), (6.0841, -26.3348), (6.0876, -26.3307), (6.0931, -26.3301), (6.0958, -26.3298)];
-        let cps: Vec<_> = pts.iter().map(|&(x, y)| hom(&P3::new(x, y, 1.95), 1.0)).collect();
-        let c = Curve::nurbs(NurbsCurve::new(3, vec![a, a, a, a, -0.0008, b, b, b, b], cps).unwrap());
+        let pts = [
+            (6.0823, -26.3369),
+            (6.0841, -26.3348),
+            (6.0876, -26.3307),
+            (6.0931, -26.3301),
+            (6.0958, -26.3298),
+        ];
+        let cps: Vec<_> = pts
+            .iter()
+            .map(|&(x, y)| hom(&P3::new(x, y, 1.95), 1.0))
+            .collect();
+        let c =
+            Curve::nurbs(NurbsCurve::new(3, vec![a, a, a, a, -0.0008, b, b, b, b], cps).unwrap());
         let d = V3::new(0.0, 0.0, 0.01);
         let top = c.transformed(&Affine::translation(d));
         let mut bb = BodyBuilder::new();
-        let [v0, v1, v2, v3] = [c.point(a), c.point(b), top.point(b), top.point(a)].map(|p| bb.vertex(p));
+        let [v0, v1, v2, v3] =
+            [c.point(a), c.point(b), top.point(b), top.point(a)].map(|p| bb.vertex(p));
         let e0 = bb.edge(c.clone(), a, b, v0, v1);
         let (s1, _) = Curve::line(c.point(b), top.point(b));
         let e1 = bb.edge(s1, 0.0, 0.01, v1, v2);
         let (s3, _) = Curve::line(c.point(a), top.point(a));
         let e2 = bb.edge(top, a, b, v3, v2);
         let e3 = bb.edge(s3, 0.0, 0.01, v0, v3);
-        let line = |o: (f64, f64), dir: (f64, f64)| Curve::Line { o: P3::new(o.0, o.1, 0.0), d: V3::new(dir.0, dir.1, 0.0) };
+        let line = |o: (f64, f64), dir: (f64, f64)| Curve::Line {
+            o: P3::new(o.0, o.1, 0.0),
+            d: V3::new(dir.0, dir.1, 0.0),
+        };
         let lp = vec![
-            Coedge { edge: e0, fwd: true, pc: line((0.0, 0.0), (1.0, 0.0)) },
-            Coedge { edge: e1, fwd: true, pc: line((b, 0.0), (0.0, 100.0)) },
-            Coedge { edge: e2, fwd: false, pc: line((0.0, 1.0), (1.0, 0.0)) },
-            Coedge { edge: e3, fwd: false, pc: line((a, 0.0), (0.0, 100.0)) },
+            Coedge {
+                edge: e0,
+                fwd: true,
+                pc: line((0.0, 0.0), (1.0, 0.0)),
+            },
+            Coedge {
+                edge: e1,
+                fwd: true,
+                pc: line((b, 0.0), (0.0, 100.0)),
+            },
+            Coedge {
+                edge: e2,
+                fwd: false,
+                pc: line((0.0, 1.0), (1.0, 0.0)),
+            },
+            Coedge {
+                edge: e3,
+                fwd: false,
+                pc: line((a, 0.0), (0.0, 100.0)),
+            },
         ];
         let f = bb.face(Surface::Extrusion { c, d }, true, vec![lp]);
         bb.shell(vec![f], false);
@@ -1571,20 +2075,61 @@ mod tests {
         for far in [false, true] {
             let b = hemisphere(r, far);
             let m = super::super::mass::body_mass(&b);
-            assert!((m.volume - 2.0 / 3.0 * PI * r.powi(3)).abs() < 1e-6 * m.volume, "far {far}: volume {}", m.volume);
-            assert!((m.surface_area - 3.0 * PI * r * r).abs() < 1e-6 * m.surface_area, "far {far}: area {}", m.surface_area);
+            assert!(
+                (m.volume - 2.0 / 3.0 * PI * r.powi(3)).abs() < 1e-6 * m.volume,
+                "far {far}: volume {}",
+                m.volume
+            );
+            assert!(
+                (m.surface_area - 3.0 * PI * r * r).abs() < 1e-6 * m.surface_area,
+                "far {far}: area {}",
+                m.surface_area
+            );
             // The centre of mass is on the solid's side: y = ∓3r/8.
             let cy = if far { 3.0 * r / 8.0 } else { -3.0 * r / 8.0 };
-            assert!((m.center_of_mass.y - cy).abs() < 1e-6 * r, "far {far}: centre {:?}", m.center_of_mass);
+            assert!(
+                (m.center_of_mass.y - cy).abs() < 1e-6 * r,
+                "far {far}: centre {:?}",
+                m.center_of_mass
+            );
             let (fm, _) = mesh_body(&b, 0.01, 0.1);
-            let tris: Vec<[P3; 3]> = fm.iter().flat_map(|f| f.indices.iter().map(|t| t.map(|i| f.positions[i as usize]))).collect();
-            let vol: f64 = tris.iter().map(|[a, b, c]| a.coords.dot(&b.coords.cross(&c.coords)) / 6.0).sum();
-            let area: f64 = tris.iter().map(|[a, b, c]| (b - a).cross(&(c - a)).norm() / 2.0).sum();
-            let cy_mesh: f64 = tris.iter().map(|[a, b, c]| a.coords.dot(&b.coords.cross(&c.coords)) / 6.0 * (a.y + b.y + c.y) / 4.0).sum::<f64>() / vol;
-            assert!((vol - m.volume).abs() < 1e-2 * m.volume, "far {far}: mesh volume {vol} vs {}", m.volume);
-            assert!((area - m.surface_area).abs() < 1e-2 * m.surface_area, "far {far}: mesh area {area} vs {}", m.surface_area);
-            assert!((cy_mesh - cy).abs() < 1e-2 * r, "far {far}: mesh centre y {cy_mesh}");
-            assert!(check_triangles(tris).is_watertight(), "far {far}: mesh not watertight");
+            let tris: Vec<[P3; 3]> = fm
+                .iter()
+                .flat_map(|f| f.indices.iter().map(|t| t.map(|i| f.positions[i as usize])))
+                .collect();
+            let vol: f64 = tris
+                .iter()
+                .map(|[a, b, c]| a.coords.dot(&b.coords.cross(&c.coords)) / 6.0)
+                .sum();
+            let area: f64 = tris
+                .iter()
+                .map(|[a, b, c]| (b - a).cross(&(c - a)).norm() / 2.0)
+                .sum();
+            let cy_mesh: f64 = tris
+                .iter()
+                .map(|[a, b, c]| {
+                    a.coords.dot(&b.coords.cross(&c.coords)) / 6.0 * (a.y + b.y + c.y) / 4.0
+                })
+                .sum::<f64>()
+                / vol;
+            assert!(
+                (vol - m.volume).abs() < 1e-2 * m.volume,
+                "far {far}: mesh volume {vol} vs {}",
+                m.volume
+            );
+            assert!(
+                (area - m.surface_area).abs() < 1e-2 * m.surface_area,
+                "far {far}: mesh area {area} vs {}",
+                m.surface_area
+            );
+            assert!(
+                (cy_mesh - cy).abs() < 1e-2 * r,
+                "far {far}: mesh centre y {cy_mesh}"
+            );
+            assert!(
+                check_triangles(tris).is_watertight(),
+                "far {far}: mesh not watertight"
+            );
         }
     }
 
@@ -1598,7 +2143,12 @@ mod tests {
         use super::super::topo::BodyBuilder;
         let (w, h, gap) = (5000.0, 2000.0, 1.5e-6);
         let mut bb = BodyBuilder::new();
-        let c = [P3::new(0.0, 0.0, 0.0), P3::new(w, 0.0, 0.0), P3::new(w, h, 0.0), P3::new(0.0, h, 0.0)];
+        let c = [
+            P3::new(0.0, 0.0, 0.0),
+            P3::new(w, 0.0, 0.0),
+            P3::new(w, h, 0.0),
+            P3::new(0.0, h, 0.0),
+        ];
         let v: Vec<usize> = c.iter().map(|&p| bb.vertex_with_tol(p, 1e-5)).collect();
         let mut lp = Vec::new();
         for k in 0..4 {
@@ -1607,15 +2157,30 @@ mod tests {
             let e = bb.edge(l.clone(), 0.0, len, v[k], v[(k + 1) % 4]);
             if k == 1 {
                 let de = bb.degenerate_edge(c[1], 0.0, gap, v[1]);
-                lp.push(Coedge { edge: de, fwd: true, pc: Curve::Line { o: c[1], d: -V3::y() } });
+                lp.push(Coedge {
+                    edge: de,
+                    fwd: true,
+                    pc: Curve::Line {
+                        o: c[1],
+                        d: -V3::y(),
+                    },
+                });
             }
-            lp.push(Coedge { edge: e, fwd: true, pc: l });
+            lp.push(Coedge {
+                edge: e,
+                fwd: true,
+                pc: l,
+            });
         }
         let f = bb.face(Surface::Plane { f: Frame::world() }, true, vec![lp]);
         bb.shell(vec![f], false);
         let b = bb.build().unwrap();
         let (fm, _) = mesh_body(&b, 1.0, 0.1);
-        let area: f64 = fm.iter().flat_map(|f| f.indices.iter().map(|t| t.map(|i| f.positions[i as usize]))).map(|[a, b, c]| (b - a).cross(&(c - a)).norm() / 2.0).sum();
+        let area: f64 = fm
+            .iter()
+            .flat_map(|f| f.indices.iter().map(|t| t.map(|i| f.positions[i as usize])))
+            .map(|[a, b, c]| (b - a).cross(&(c - a)).norm() / 2.0)
+            .sum();
         assert!((area - w * h).abs() < 1e-6 * w * h, "mesh area {area}");
         assert!((super::super::mass::face_area(&b, 0).0 - w * h).abs() < 1e-6 * w * h);
     }
@@ -1631,16 +2196,28 @@ mod tests {
         assert!(p.with_limits(1.0, 1.0).is_err());
         assert!(p.with_limits(1.0, f64::INFINITY).is_err());
         assert_eq!(p.with_limits(2.0, 4.0).unwrap().max_aspect, 4.0);
-        assert!(TessParams::try_from(Tessellation { deflection: 0.0, angle: 0.1 }).is_err());
+        assert!(
+            TessParams::try_from(Tessellation {
+                deflection: 0.0,
+                angle: 0.1
+            })
+            .is_err()
+        );
         // The lenient form (internal callers) falls back to the default instead.
-        assert_eq!(TessParams::lenient(0.0, 0.0).chord, Tessellation::default().deflection);
+        assert_eq!(
+            TessParams::lenient(0.0, 0.0).chord,
+            Tessellation::default().deflection
+        );
     }
 
     #[test]
     fn polyline_meets_chord_and_length() {
         // A circle of radius 10 sampled at only its ends and middle.
         let c = |t: f64| P3::new(10.0 * t.cos(), 10.0 * t.sin(), 0.0);
-        let p = TessParams::new(0.01, 1.0).unwrap().with_limits(0.5, 0.0).unwrap();
+        let p = TessParams::new(0.01, 1.0)
+            .unwrap()
+            .with_limits(0.5, 0.0)
+            .unwrap();
         let ts = refine_polyline(c, &[0.0, 1.5, 3.0], &p);
         for w in ts.windows(2) {
             let (a, b) = (c(w[0]), c(w[1]));
@@ -1654,7 +2231,12 @@ mod tests {
     fn mesh_check_counts() {
         let p = |x: f64, y: f64, z: f64| P3::new(x, y, z);
         // A tetrahedron: closed.
-        let (a, b, c, d) = (p(0.0, 0.0, 0.0), p(1.0, 0.0, 0.0), p(0.0, 1.0, 0.0), p(0.0, 0.0, 1.0));
+        let (a, b, c, d) = (
+            p(0.0, 0.0, 0.0),
+            p(1.0, 0.0, 0.0),
+            p(0.0, 1.0, 0.0),
+            p(0.0, 0.0, 1.0),
+        );
         let tet = [[a, c, b], [a, b, d], [b, c, d], [c, a, d]];
         let k = check_triangles(tet);
         assert_eq!((k.edges, k.open, k.bad), (6, 0, 0));

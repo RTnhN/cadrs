@@ -9,12 +9,12 @@ use crate::native::curve::Curve;
 use crate::native::math::*;
 use crate::native::nurbs::NurbsCurve;
 use crate::native::surface::Surface;
+use crate::native::tol;
 use crate::native::topo::Body;
 use crate::native::xbuild::{XBuilder, XFace};
 use crate::{KernelError, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
-use crate::native::tol;
 
 fn unsupported(m: &'static str) -> KernelError {
     KernelError::Unsupported(m)
@@ -28,7 +28,14 @@ fn normal_at(s: &Surface, sense: bool, p: &P3) -> V3 {
 
 /// The curve `c` moved by `d` along the face's normal, with the same parameters where that is
 /// exact (lines, circles), else a cubic through samples on [t0, t1].
-fn offset_curve(normal: &dyn Fn(f64) -> V3, c: &Curve, t0: f64, t1: f64, d: f64, fit: f64) -> Curve {
+fn offset_curve(
+    normal: &dyn Fn(f64) -> V3,
+    c: &Curve,
+    t0: f64,
+    t1: f64,
+    d: f64,
+    fit: f64,
+) -> Curve {
     let at = |t: f64| c.point(t) + end_normal(normal, t, t0, t1) * d;
     let tol = tol::REL * (1.0 + d.abs() + (c.point(t0) - c.point(t1)).norm());
     match c {
@@ -36,13 +43,22 @@ fn offset_curve(normal: &dyn Fn(f64) -> V3, c: &Curve, t0: f64, t1: f64, d: f64,
             let (a, b) = (at(t0), at(t1));
             let mid = at(0.5 * (t0 + t1));
             let shift = a - c.point(t0);
-            if (b - c.point(t1) - shift).norm() < tol && (mid - c.point(0.5 * (t0 + t1)) - shift).norm() < tol {
-                return Curve::Line { o: o + shift, d: *dir };
+            if (b - c.point(t1) - shift).norm() < tol
+                && (mid - c.point(0.5 * (t0 + t1)) - shift).norm() < tol
+            {
+                return Curve::Line {
+                    o: o + shift,
+                    d: *dir,
+                };
             }
         }
         Curve::Circle { .. } => {
             // A circle again when three offset points' circle holds the others.
-            let (p0, p1, p2) = (at(t0), at(t0 + (t1 - t0) / 3.0), at(t0 + 2.0 * (t1 - t0) / 3.0));
+            let (p0, p1, p2) = (
+                at(t0),
+                at(t0 + (t1 - t0) / 3.0),
+                at(t0 + 2.0 * (t1 - t0) / 3.0),
+            );
             if let Some((cc, nn, r)) = circle3(&p0, &p1, &p2) {
                 // (The axes from points at 0 and π/2, which may lie off the edge.)
                 let x = (at(0.0) - cc) / r;
@@ -63,10 +79,17 @@ fn offset_curve(normal: &dyn Fn(f64) -> V3, c: &Curve, t0: f64, t1: f64, d: f64,
     // between them too, to `fit` (a spline edge's knots, or a spline face's, kink the offset).
     let mut n = 32;
     loop {
-        let params: Vec<f64> = (0..=n).map(|i| t0 + (t1 - t0) * i as f64 / n as f64).collect();
+        let params: Vec<f64> = (0..=n)
+            .map(|i| t0 + (t1 - t0) * i as f64 / n as f64)
+            .collect();
         let pts: Vec<P3> = params.iter().map(|&t| at(t)).collect();
-        let c = Curve::Nurbs(Arc::new(NurbsCurve::interpolate(&pts, &params, 3, None, None)));
-        let err = params.windows(2).map(|w| (c.point(0.5 * (w[0] + w[1])) - at(0.5 * (w[0] + w[1]))).norm()).fold(0.0, f64::max);
+        let c = Curve::Nurbs(Arc::new(NurbsCurve::interpolate(
+            &pts, &params, 3, None, None,
+        )));
+        let err = params
+            .windows(2)
+            .map(|w| (c.point(0.5 * (w[0] + w[1])) - at(0.5 * (w[0] + w[1]))).norm())
+            .fold(0.0, f64::max);
         if err < fit || n >= 256 {
             return c;
         }
@@ -97,7 +120,9 @@ const FIT: f64 = 1e-9;
 
 /// How far the curve strays from the surface over [t0, t1] (sampled).
 fn stray(s: &Surface, c: &Curve, t0: f64, t1: f64) -> f64 {
-    (0..=64).map(|i| s.distance(&c.point(t0 + (t1 - t0) * i as f64 / 64.0))).fold(0.0, f64::max)
+    (0..=64)
+        .map(|i| s.distance(&c.point(t0 + (t1 - t0) * i as f64 / 64.0)))
+        .fold(0.0, f64::max)
 }
 
 /// The circle through three points: centre, normal, radius.
@@ -114,19 +139,40 @@ fn circle3(a: &P3, b: &P3, c: &P3) -> Option<(P3, V3, f64)> {
 
 /// The side surface between an edge and its offset: a plane when they lie in one, else ruled.
 fn side_surface(c: &Curve, t0: f64, t1: f64, o: &Curve) -> Surface {
-    let pts: Vec<P3> = (0..=8).flat_map(|i| {
-        let t = t0 + (t1 - t0) * i as f64 / 8.0;
-        [c.point(t), o.point(t)]
-    }).collect();
+    let pts: Vec<P3> = (0..=8)
+        .flat_map(|i| {
+            let t = t0 + (t1 - t0) * i as f64 / 8.0;
+            [c.point(t), o.point(t)]
+        })
+        .collect();
     let p0 = pts[0];
-    let far = pts.iter().max_by(|a, b| (*a - p0).norm().total_cmp(&(*b - p0).norm())).copied().unwrap_or(p0);
+    let far = pts
+        .iter()
+        .max_by(|a, b| (*a - p0).norm().total_cmp(&(*b - p0).norm()))
+        .copied()
+        .unwrap_or(p0);
     if let Some(x) = (far - p0).try_normalize(tol::DEGENERATE)
-        && let Some(n) = pts.iter().map(|p| x.cross(&(p - p0))).max_by(|a, b| a.norm().total_cmp(&b.norm())).and_then(|n| n.try_normalize(tol::DEGENERATE)) {
-            let size = (far - p0).norm();
-            if pts.iter().all(|p| (p - p0).dot(&n).abs() < tol::REL * (1.0 + size)) {
-                return Surface::Plane { f: Frame { o: p0, x, y: n.cross(&x), z: n } };
-            }
+        && let Some(n) = pts
+            .iter()
+            .map(|p| x.cross(&(p - p0)))
+            .max_by(|a, b| a.norm().total_cmp(&b.norm()))
+            .and_then(|n| n.try_normalize(tol::DEGENERATE))
+    {
+        let size = (far - p0).norm();
+        if pts
+            .iter()
+            .all(|p| (p - p0).dot(&n).abs() < tol::REL * (1.0 + size))
+        {
+            return Surface::Plane {
+                f: Frame {
+                    o: p0,
+                    x,
+                    y: n.cross(&x),
+                    z: n,
+                },
+            };
         }
+    }
     let (mut a, mut b) = (c.to_nurbs(t0, t1), o.to_nurbs(t0, t1));
     while a.degree < b.degree {
         a = a.elevated();
@@ -139,12 +185,22 @@ fn side_surface(c: &Curve, t0: f64, t1: f64, o: &Curve) -> Surface {
     if !crate::native::loft_build::make_compatible(&mut curves) {
         // Different knots that won't merge: sample both.
         let n = 32;
-        let pa: Vec<P3> = (0..=n).map(|i| c.point(t0 + (t1 - t0) * i as f64 / n as f64)).collect();
-        let pb: Vec<P3> = (0..=n).map(|i| o.point(t0 + (t1 - t0) * i as f64 / n as f64)).collect();
+        let pa: Vec<P3> = (0..=n)
+            .map(|i| c.point(t0 + (t1 - t0) * i as f64 / n as f64))
+            .collect();
+        let pb: Vec<P3> = (0..=n)
+            .map(|i| o.point(t0 + (t1 - t0) * i as f64 / n as f64))
+            .collect();
         let prm: Vec<f64> = (0..=n).map(|i| i as f64 / n as f64).collect();
-        curves = vec![NurbsCurve::interpolate(&pa, &prm, 3, None, None), NurbsCurve::interpolate(&pb, &prm, 3, None, None)];
+        curves = vec![
+            NurbsCurve::interpolate(&pa, &prm, 3, None, None),
+            NurbsCurve::interpolate(&pb, &prm, 3, None, None),
+        ];
     }
-    Surface::Nurbs(Arc::new(crate::native::loft_build::skin(&curves, &[0.0, 1.0])))
+    Surface::Nurbs(Arc::new(crate::native::loft_build::skin(
+        &curves,
+        &[0.0, 1.0],
+    )))
 }
 
 /// The slab of face `fi` of `b` swept by `d` along its outward normals.
@@ -160,9 +216,19 @@ pub fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
         // (Through its poles only when no edge is the B-spline's seam: a recognised surface's own
         // seam lies elsewhere, and a loop running out along the B-spline's and back would be a
         // slit on it.)
-        Surface::Nurbs(n) => match if seamless { crate::native::recognize::surface_through_poles(n) } else { crate::native::recognize::surface(n) } {
+        Surface::Nurbs(n) => match if seamless {
+            crate::native::recognize::surface_through_poles(n)
+        } else {
+            crate::native::recognize::surface(n)
+        } {
             Some(a) => {
-                let at = f.loops.iter().flatten().map(|c| &b.edges[c.edge]).find(|e| !e.degenerate).map(|e| e.point(e.mid_t()));
+                let at = f
+                    .loops
+                    .iter()
+                    .flatten()
+                    .map(|c| &b.edges[c.edge])
+                    .find(|e| !e.degenerate)
+                    .map(|e| e.point(e.mid_t()));
                 match at {
                     Some(p) => {
                         let ((u, v), (ua, va)) = (f.surf.project(&p, None), a.project(&p, None));
@@ -176,7 +242,8 @@ pub fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
         },
         s => (s.clone(), f.sense),
     };
-    let top_surf = super::sharp::offset_surface(&surf, sense, d).ok_or(unsupported("slabs of this kind of face"))?;
+    let top_surf = super::sharp::offset_surface(&surf, sense, d)
+        .ok_or(unsupported("slabs of this kind of face"))?;
     // The outward normal along a coedge at t: from its p-curve on the face's own surface (where
     // a projection near a pole could land on any meridian), else projected on the recognised one.
     let own = !matches!(f.surf, Surface::Nurbs(_)) || matches!(surf, Surface::Nurbs(_));
@@ -225,8 +292,17 @@ pub fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
             continue;
         }
         let (v0, v1) = (e.v[0], e.v[1]);
-        let oc = offset_curve(&|t| normal_on(c, t), &e.curve, e.t[0], e.t[1], d, (FIT * (1.0 + d.abs())).max(0.1 * e.tol));
-        let a = xb.edge(e.curve.clone(), vb[&v0], vb[&v1]).ok_or(unsupported("an empty edge in a slab"))?;
+        let oc = offset_curve(
+            &|t| normal_on(c, t),
+            &e.curve,
+            e.t[0],
+            e.t[1],
+            d,
+            (FIT * (1.0 + d.abs())).max(0.1 * e.tol),
+        );
+        let a = xb
+            .edge(e.curve.clone(), vb[&v0], vb[&v1])
+            .ok_or(unsupported("an empty edge in a slab"))?;
         // A seam of a B-spline face (used twice, along an iso line) offsets onto the offset
         // surface's seam: that iso line itself, so its two uses lie on the seam's two sides
         // (a fit strays off it, most near a pole, where its p-curve can't say which side).
@@ -234,10 +310,22 @@ pub fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
             Surface::Nurbs(tn) if own && uses[&ei] > 1 && matches!(f.surf, Surface::Nurbs(_)) => {
                 let (q0, q1) = (c.pc.point(e.t[0]), c.pc.point(e.t[1]));
                 let tol = tol::REL_FINE * (1.0 + q0.coords.norm() + q1.coords.norm());
-                let iso = |along_v: bool, at: f64| Curve::Nurbs(Arc::new(crate::native::local::nurbs_iso(tn, at, along_v)));
-                if (q0.y - q1.y).abs() < tol && (0..=8).all(|i| (c.pc.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 8.0).y - q0.y).abs() < tol) {
+                let iso = |along_v: bool, at: f64| {
+                    Curve::Nurbs(Arc::new(crate::native::local::nurbs_iso(tn, at, along_v)))
+                };
+                if (q0.y - q1.y).abs() < tol
+                    && (0..=8).all(|i| {
+                        (c.pc.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 8.0).y - q0.y).abs()
+                            < tol
+                    })
+                {
                     Some(iso(false, q0.y))
-                } else if (q0.x - q1.x).abs() < tol && (0..=8).all(|i| (c.pc.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 8.0).x - q0.x).abs() < tol) {
+                } else if (q0.x - q1.x).abs() < tol
+                    && (0..=8).all(|i| {
+                        (c.pc.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 8.0).x - q0.x).abs()
+                            < tol
+                    })
+                {
                     Some(iso(true, q0.x))
                 } else {
                     None
@@ -245,16 +333,22 @@ pub fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
             }
             _ => None,
         };
-        let (t, oc) = match seam_iso.and_then(|iso| xb.edge(iso.clone(), vt[&v0], vt[&v1]).map(|t| (t, iso))) {
+        let (t, oc) = match seam_iso
+            .and_then(|iso| xb.edge(iso.clone(), vt[&v0], vt[&v1]).map(|t| (t, iso)))
+        {
             Some((t, iso)) => {
                 // Its ends off the slab's offset vertices by the offset surface's fit.
                 let ed = &xb.body.edges[t];
-                let gap = (ed.point(ed.t[0]) - xb.body.verts[ed.v[0]].p).norm().max((ed.point(ed.t[1]) - xb.body.verts[ed.v[1]].p).norm());
+                let gap = (ed.point(ed.t[0]) - xb.body.verts[ed.v[0]].p)
+                    .norm()
+                    .max((ed.point(ed.t[1]) - xb.body.verts[ed.v[1]].p).norm());
                 xb.body.edges[t].tol = e.tol.max(1.5 * gap);
                 (t, iso)
             }
             None => {
-                let t = xb.edge(oc.clone(), vt[&v0], vt[&v1]).ok_or(unsupported("an empty offset edge in a slab"))?;
+                let t = xb
+                    .edge(oc.clone(), vt[&v0], vt[&v1])
+                    .ok_or(unsupported("an empty offset edge in a slab"))?;
                 // Its offset strays from the offset surface by as much as the face's edge, or by
                 // the offset surface's fit where that is approximate.
                 xb.body.edges[t].tol = e.tol.max(1.5 * stray(&top_surf, &oc, e.t[0], e.t[1]));
@@ -271,7 +365,8 @@ pub fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
         }
         let surf = side_surface(&e.curve, e.t[0], e.t[1], &oc);
         // A side sampled where the curves' knots won't merge strays by its fit.
-        let side = 1.5 * stray(&surf, &e.curve, e.t[0], e.t[1]).max(stray(&surf, &oc, e.t[0], e.t[1]));
+        let side =
+            1.5 * stray(&surf, &e.curve, e.t[0], e.t[1]).max(stray(&surf, &oc, e.t[0], e.t[1]));
         for x in [a, t] {
             xb.body.edges[x].tol = xb.body.edges[x].tol.max(side);
         }
@@ -281,7 +376,9 @@ pub fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
             }
             let (p, q) = (xb.body.verts[vb[&v]].p, xb.body.verts[vt[&v]].p);
             let (line, _) = Curve::line(p, q);
-            let r = xb.edge(line, vb[&v], vt[&v]).ok_or(unsupported("a slab of no thickness"))?;
+            let r = xb
+                .edge(line, vb[&v], vt[&v])
+                .ok_or(unsupported("a slab of no thickness"))?;
             xb.body.edges[r].tol = b.verts[v].tol;
             rails.insert(v, r);
             Ok(r)
@@ -291,15 +388,27 @@ pub fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
             // round the ruled surface, closed by a seam along the rail at its vertex (the
             // surface is closed but not periodic, so its loops can't wrap round it).
             if matches!(surf, Surface::Plane { .. }) {
-                sides.push(XFace { surf, sense: true, loops: vec![vec![(a, true)], vec![(t, false)]] });
+                sides.push(XFace {
+                    surf,
+                    sense: true,
+                    loops: vec![vec![(a, true)], vec![(t, false)]],
+                });
             } else {
                 let r = rail(v0, &mut xb)?;
-                sides.push(XFace { surf, sense: true, loops: vec![vec![(a, true), (r, true), (t, false), (r, false)]] });
+                sides.push(XFace {
+                    surf,
+                    sense: true,
+                    loops: vec![vec![(a, true), (r, true), (t, false), (r, false)]],
+                });
             }
             continue;
         }
         let (r0, r1) = (rail(v0, &mut xb)?, rail(v1, &mut xb)?);
-        sides.push(XFace { surf, sense: true, loops: vec![vec![(a, true), (r1, true), (t, false), (r0, false)]] });
+        sides.push(XFace {
+            surf,
+            sense: true,
+            loops: vec![vec![(a, true), (r1, true), (t, false), (r0, false)]],
+        });
     }
     // A pole where the face's normals turn round (a B-spline closing to a cone-like apex): the
     // normals there sweep a fan, so the offset of the point is a closed curve, an edge of the
@@ -310,7 +419,9 @@ pub fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
             continue;
         }
         let v = e.v[0];
-        let (Some(&apex), Some(&top)) = (vb.get(&v), vt.get(&v)) else { continue };
+        let (Some(&apex), Some(&top)) = (vb.get(&v), vt.get(&v)) else {
+            continue;
+        };
         let p = b.verts[v].p;
         // Along the pole's p-curve, the normal from just inside the face.
         let at = |t: f64| {
@@ -319,7 +430,9 @@ pub fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
         };
         let (t0, t1) = (e.t[0], e.t[1]);
         let n = 64;
-        let params: Vec<f64> = (0..=n).map(|i| t0 + (t1 - t0) * i as f64 / n as f64).collect();
+        let params: Vec<f64> = (0..=n)
+            .map(|i| t0 + (t1 - t0) * i as f64 / n as f64)
+            .collect();
         let pts: Vec<P3> = params.iter().map(|&t| at(t)).collect();
         let q = xb.body.verts[top].p;
         let size = (pts[n / 2] - q).norm();
@@ -328,35 +441,60 @@ pub fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
         if size < tol || (pts[0] - q).norm() > tol || (pts[n] - q).norm() > tol {
             continue;
         }
-        let fan_top = Curve::Nurbs(Arc::new(NurbsCurve::interpolate(&pts, &params, 3, None, None)));
-        let Some(t) = xb.edge(fan_top.clone(), top, top) else { continue };
+        let fan_top = Curve::Nurbs(Arc::new(NurbsCurve::interpolate(
+            &pts, &params, 3, None, None,
+        )));
+        let Some(t) = xb.edge(fan_top.clone(), top, top) else {
+            continue;
+        };
         // (The offset surface is a fit, loosest where the normals turn fastest: its distance
         // from the fan's curve searched finely.)
-        let off = (0..=256).map(|i| top_surf.distance(&fan_top.point(t0 + (t1 - t0) * i as f64 / 256.0))).fold(0.0, f64::max);
+        let off = (0..=256)
+            .map(|i| top_surf.distance(&fan_top.point(t0 + (t1 - t0) * i as f64 / 256.0)))
+            .fold(0.0, f64::max);
         xb.body.edges[t].tol = b.verts[v].tol.max(2.0 * off);
         et.insert(ei, t);
         let r = match rails.get(&v) {
             Some(r) => *r,
             None => {
                 let (line, _) = Curve::line(p, q);
-                let r = xb.edge(line, apex, top).ok_or(unsupported("a slab of no thickness"))?;
+                let r = xb
+                    .edge(line, apex, top)
+                    .ok_or(unsupported("a slab of no thickness"))?;
                 rails.insert(v, r);
                 r
             }
         };
         let surf = side_surface(&e.curve, t0, t1, &fan_top);
-        sides.push(XFace { surf, sense: true, loops: vec![vec![(r, true), (t, false), (r, false)]] });
+        sides.push(XFace {
+            surf,
+            sense: true,
+            loops: vec![vec![(r, true), (t, false), (r, false)]],
+        });
     }
     let map_loops = |m: &HashMap<usize, usize>| -> Vec<Vec<(usize, bool)>> {
         f.loops
             .iter()
-            .map(|l| l.iter().filter(|c| m.contains_key(&c.edge)).map(|c| (m[&c.edge], c.fwd)).collect())
+            .map(|l| {
+                l.iter()
+                    .filter(|c| m.contains_key(&c.edge))
+                    .map(|c| (m[&c.edge], c.fwd))
+                    .collect()
+            })
             .filter(|l: &Vec<(usize, bool)>| !l.is_empty())
             .collect()
     };
     let mut faces = vec![
-        XFace { surf: surf.clone(), sense: if d > 0.0 { !sense } else { sense }, loops: map_loops(&eb) },
-        XFace { surf: top_surf, sense: if d > 0.0 { sense } else { !sense }, loops: map_loops(&et) },
+        XFace {
+            surf: surf.clone(),
+            sense: if d > 0.0 { !sense } else { sense },
+            loops: map_loops(&eb),
+        },
+        XFace {
+            surf: top_surf,
+            sense: if d > 0.0 { sense } else { !sense },
+            loops: map_loops(&et),
+        },
     ];
     faces.extend(sides);
     // The faces in groups joined by their edges: one closed shell, or for a face with no side
@@ -391,7 +529,10 @@ pub fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
     // The outer shell (the largest box) first.
     for (size, members) in shells.iter_mut() {
         let mut bb = Bbox::empty();
-        for &(e, _) in members.iter().flat_map(|&i| faces[i].loops.iter().flatten()) {
+        for &(e, _) in members
+            .iter()
+            .flat_map(|&i| faces[i].loops.iter().flatten())
+        {
             let ed = &xb.body.edges[e];
             (0..=4).for_each(|k| bb.add(&ed.point(ed.t[0] + (ed.t[1] - ed.t[0]) * k as f64 / 4.0)));
         }
@@ -424,7 +565,10 @@ pub fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
     let size = body.bbox().diagonal();
     body.fit_tolerances_searched(1e-5 * (1.0 + size));
     if std::env::var_os("CADRS_SLAB_DEBUG").is_some() {
-        eprintln!("slab of face {fi} ({:?}) by {d}: {warnings:?}", f.surf.kind());
+        eprintln!(
+            "slab of face {fi} ({:?}) by {d}: {warnings:?}",
+            f.surf.kind()
+        );
     }
     let mut issues = body.check();
     // A slab whose faces all point in (its closed shell oriented the wrong way round): turned
@@ -434,19 +578,38 @@ pub fn face_slab(b: &Body, fi: usize, d: f64) -> Result<Body> {
         issues = body.check();
     }
     if !issues.is_empty() || body.solids.is_empty() {
-        return Err(KernelError::InvalidResult { op: "slab", why: format!("the face's slab isn't valid: {}", issues.first().map_or("no solid", |s| s.as_str())) });
+        return Err(KernelError::InvalidResult {
+            op: "slab",
+            why: format!(
+                "the face's slab isn't valid: {}",
+                issues.first().map_or("no solid", |s| s.as_str())
+            ),
+        });
     }
     let volume = crate::native::mass::body_volume(&body);
     if volume <= 0.0 {
-        return Err(KernelError::InvalidResult { op: "slab", why: "the face's slab has no volume".into() });
+        return Err(KernelError::InvalidResult {
+            op: "slab",
+            why: "the face's slab has no volume".into(),
+        });
     }
     // Its volume the prismoid's, d × the mean of its two ends' areas, but for the faces' curving
     // (exact on a cylinder, 4/3 of it at most on a sphere offset by its radius): far off, the
     // offset face's loops bound another region than the face's (a wrong body, not an error).
-    let area = |k: usize| map.get(ends[k]).copied().flatten().map_or(0.0, |x| crate::native::mass::face_area(&body, x).0.abs());
+    let area = |k: usize| {
+        map.get(ends[k])
+            .copied()
+            .flatten()
+            .map_or(0.0, |x| crate::native::mass::face_area(&body, x).0.abs())
+    };
     let prismoid = d.abs() * 0.5 * (area(0) + area(1));
     if !(volume < 2.0 * prismoid && volume > 0.5 * prismoid) {
-        return Err(KernelError::InvalidResult { op: "slab", why: format!("the face's slab encloses {volume:.6e}, not about its ends' {prismoid:.6e}") });
+        return Err(KernelError::InvalidResult {
+            op: "slab",
+            why: format!(
+                "the face's slab encloses {volume:.6e}, not about its ends' {prismoid:.6e}"
+            ),
+        });
     }
     Ok(body)
 }

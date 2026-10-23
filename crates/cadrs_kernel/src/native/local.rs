@@ -10,9 +10,9 @@ use super::kernel::NativeKernel;
 use super::math::*;
 use super::nurbs::NurbsCurve;
 use super::surface::Surface;
+use super::tol;
 use super::topo::{Body, Coedge};
 use crate::*;
-use super::tol;
 
 /// The faces around each vertex (distinct).
 fn vertex_faces(b: &Body) -> Vec<Vec<usize>> {
@@ -40,9 +40,15 @@ fn meet(surfs: &[&Surface], p: P3) -> Option<P3> {
             let d = super::ssi::sdist(s, &x);
             let e = tol::DIFF_STEP;
             let g = V3::new(
-                (super::ssi::sdist(s, &(x + V3::x() * e)) - super::ssi::sdist(s, &(x - V3::x() * e))) / (2.0 * e),
-                (super::ssi::sdist(s, &(x + V3::y() * e)) - super::ssi::sdist(s, &(x - V3::y() * e))) / (2.0 * e),
-                (super::ssi::sdist(s, &(x + V3::z() * e)) - super::ssi::sdist(s, &(x - V3::z() * e))) / (2.0 * e),
+                (super::ssi::sdist(s, &(x + V3::x() * e))
+                    - super::ssi::sdist(s, &(x - V3::x() * e)))
+                    / (2.0 * e),
+                (super::ssi::sdist(s, &(x + V3::y() * e))
+                    - super::ssi::sdist(s, &(x - V3::y() * e)))
+                    / (2.0 * e),
+                (super::ssi::sdist(s, &(x + V3::z() * e))
+                    - super::ssi::sdist(s, &(x - V3::z() * e)))
+                    / (2.0 * e),
             );
             jt[(i, 0)] = g.x;
             jt[(i, 1)] = g.y;
@@ -74,8 +80,14 @@ fn tangent_lines(b: &Body, surfs: &[Surface], ef: &[Vec<usize>]) -> Vec<(usize, 
     let mut out = Vec::new();
     for (e, ed) in b.edges.iter().enumerate() {
         let fs = &ef[e];
-        let Curve::Line { d, .. } = ed.curve else { continue };
-        if ed.degenerate || fs.len() != 2 || fs[0] == fs[1] || fs.iter().all(|&f| surfs[f] == b.faces[f].surf) {
+        let Curve::Line { d, .. } = ed.curve else {
+            continue;
+        };
+        if ed.degenerate
+            || fs.len() != 2
+            || fs[0] == fs[1]
+            || fs.iter().all(|&f| surfs[f] == b.faces[f].surf)
+        {
             continue;
         }
         let (fa, fb) = (&b.faces[fs[0]], &b.faces[fs[1]]);
@@ -84,7 +96,10 @@ fn tangent_lines(b: &Body, surfs: &[Surface], ef: &[Vec<usize>]) -> Vec<(usize, 
         let mut moved = Vec::new();
         for &t in &ts {
             let q = ed.point(t);
-            let (na, nb) = (normal(&fa.surf, fa.sense, &q), normal(&fb.surf, fb.sense, &q));
+            let (na, nb) = (
+                normal(&fa.surf, fa.sense, &q),
+                normal(&fb.surf, fb.sense, &q),
+            );
             if na.dot(&nb) < 1.0 - tol::ANGULAR {
                 break;
             }
@@ -93,7 +108,9 @@ fn tangent_lines(b: &Body, surfs: &[Surface], ef: &[Vec<usize>]) -> Vec<(usize, 
             for _ in 0..30 {
                 let f = super::ssi::sdist(&surfs[fs[0]], &(q + na * s));
                 let h = tol::DIFF_STEP * (1.0 + len);
-                let g = (super::ssi::sdist(&surfs[fs[0]], &(q + na * (s + h))) - super::ssi::sdist(&surfs[fs[0]], &(q + na * (s - h)))) / (2.0 * h);
+                let g = (super::ssi::sdist(&surfs[fs[0]], &(q + na * (s + h)))
+                    - super::ssi::sdist(&surfs[fs[0]], &(q + na * (s - h))))
+                    / (2.0 * h);
                 if g.abs() < tol::DEGENERATE {
                     break;
                 }
@@ -108,15 +125,25 @@ fn tangent_lines(b: &Body, surfs: &[Surface], ef: &[Vec<usize>]) -> Vec<(usize, 
         if moved.len() != 3 {
             continue;
         }
-        let Some(dir) = (moved[2] - moved[0]).try_normalize(tol::DEGENERATE) else { continue };
+        let Some(dir) = (moved[2] - moved[0]).try_normalize(tol::DEGENERATE) else {
+            continue;
+        };
         let dir = if dir.dot(&d) < 0.0 { -dir } else { dir };
-        let line = Curve::Line { o: moved[0], d: dir };
+        let line = Curve::Line {
+            o: moved[0],
+            d: dir,
+        };
         // Still a line on both new surfaces, and still tangent there.
         let ok = moved.iter().all(|p| {
             let off = (p - moved[0]) - dir * (p - moved[0]).dot(&dir);
             off.norm() < tol::REL * (1.0 + len)
-                && fs.iter().all(|&f| surfs[f].distance(p) < tol::REL * (1.0 + len))
-                && normal(&surfs[fs[0]], true, p).cross(&normal(&surfs[fs[1]], true, p)).norm() < 1e-7
+                && fs
+                    .iter()
+                    .all(|&f| surfs[f].distance(p) < tol::REL * (1.0 + len))
+                && normal(&surfs[fs[0]], true, p)
+                    .cross(&normal(&surfs[fs[1]], true, p))
+                    .norm()
+                    < 1e-7
         });
         if ok {
             out.push((e, line));
@@ -137,7 +164,9 @@ fn line_meet(c: &Curve, surfs: &[&Surface], p: P3) -> Option<P3> {
             let (mut num, mut den) = (0.0, 0.0);
             for s in surfs {
                 let d = super::ssi::sdist(s, &c.point(t));
-                let g = (super::ssi::sdist(s, &c.point(t + h)) - super::ssi::sdist(s, &c.point(t - h))) / (2.0 * h);
+                let g = (super::ssi::sdist(s, &c.point(t + h))
+                    - super::ssi::sdist(s, &c.point(t - h)))
+                    / (2.0 * h);
                 num += d * g;
                 den += g * g;
             }
@@ -196,7 +225,28 @@ fn closed_spline_shift(s: &Surface, pc: &Curve, t0: f64, t1: f64, at: [f64; 2]) 
     let (q, r) = (pc.point(t0), pc.point(t1));
     let (q, r) = ([q.x, q.y], [r.x, r.y]);
     let mut shift = [0.0; 2];
-    for (k, (a, b), closed) in [(0, (u0, u1), (0..=4).all(|j| (s.eval(u0, v0 + (v1 - v0) * j as f64 / 4.0) - s.eval(u1, v0 + (v1 - v0) * j as f64 / 4.0)).norm() < tol::ROUNDOFF)), (1, (v0, v1), (0..=4).all(|i| (s.eval(u0 + (u1 - u0) * i as f64 / 4.0, v0) - s.eval(u0 + (u1 - u0) * i as f64 / 4.0, v1)).norm() < tol::ROUNDOFF))] {
+    for (k, (a, b), closed) in [
+        (
+            0,
+            (u0, u1),
+            (0..=4).all(|j| {
+                (s.eval(u0, v0 + (v1 - v0) * j as f64 / 4.0)
+                    - s.eval(u1, v0 + (v1 - v0) * j as f64 / 4.0))
+                .norm()
+                    < tol::ROUNDOFF
+            }),
+        ),
+        (
+            1,
+            (v0, v1),
+            (0..=4).all(|i| {
+                (s.eval(u0 + (u1 - u0) * i as f64 / 4.0, v0)
+                    - s.eval(u0 + (u1 - u0) * i as f64 / 4.0, v1))
+                .norm()
+                    < tol::ROUNDOFF
+            }),
+        ),
+    ] {
         let w = b - a;
         if !closed || w <= 0.0 {
             continue;
@@ -208,29 +258,48 @@ fn closed_spline_shift(s: &Surface, pc: &Curve, t0: f64, t1: f64, at: [f64; 2]) 
             shift[k] = m * w;
         }
     }
-    (shift != [0.0; 2]).then(|| pc.transformed(&Affine::translation(V3::new(shift[0], shift[1], 0.0))))
+    (shift != [0.0; 2])
+        .then(|| pc.transformed(&Affine::translation(V3::new(shift[0], shift[1], 0.0))))
 }
 
 /// The exact iso curve of a B-spline surface: u = `t` (running along v) when `along_v`, else
 /// v = `t` (along u). Its poles are the surface's rows blended by the other direction's basis
 /// at `t`, in homogeneous coordinates.
 pub(super) fn nurbs_iso(n: &super::nurbs::NurbsSurface, t: f64, along_v: bool) -> NurbsCurve {
-    let (deg, knots, count) = if along_v { (n.du, &n.ku, n.cps.len()) } else { (n.dv, &n.kv, n.cps[0].len()) };
+    let (deg, knots, count) = if along_v {
+        (n.du, &n.ku, n.cps.len())
+    } else {
+        (n.dv, &n.kv, n.cps[0].len())
+    };
     let span = super::nurbs::find_span(count - 1, deg, t, knots);
     let basis = &super::nurbs::basis_ders(span, t, deg, 0, knots)[0];
     if along_v {
-        let cps = (0..n.cps[0].len()).map(|j| (0..=deg).map(|k| n.cps[span - deg + k][j] * basis[k]).sum()).collect();
-        NurbsCurve { degree: n.dv, knots: n.kv.clone(), cps }
+        let cps = (0..n.cps[0].len())
+            .map(|j| (0..=deg).map(|k| n.cps[span - deg + k][j] * basis[k]).sum())
+            .collect();
+        NurbsCurve {
+            degree: n.dv,
+            knots: n.kv.clone(),
+            cps,
+        }
     } else {
-        let cps = (0..n.cps.len()).map(|i| (0..=deg).map(|k| n.cps[i][span - deg + k] * basis[k]).sum()).collect();
-        NurbsCurve { degree: n.du, knots: n.ku.clone(), cps }
+        let cps = (0..n.cps.len())
+            .map(|i| (0..=deg).map(|k| n.cps[i][span - deg + k] * basis[k]).sum())
+            .collect();
+        NurbsCurve {
+            degree: n.du,
+            knots: n.ku.clone(),
+            cps,
+        }
     }
 }
 
 /// The points where a surface collapses: a cone's apex, a sphere's poles.
 fn singular_points(s: &Surface) -> Vec<P3> {
     match s {
-        Surface::Cone { f, r, a } if a.sin().abs() > tol::ANGULAR_FINE => vec![f.o + f.z * (-r / a.tan())],
+        Surface::Cone { f, r, a } if a.sin().abs() > tol::ANGULAR_FINE => {
+            vec![f.o + f.z * (-r / a.tan())]
+        }
         Surface::Sphere { f, r } => vec![f.o + f.z * *r, f.o - f.z * *r],
         _ => vec![],
     }
@@ -248,7 +317,9 @@ pub fn replace_surfaces(b: &Body, surfs: &[Surface]) -> Result<Body> {
 /// planes along it) stays a line along it: the one through the new end (exact; marching along
 /// two parallel sweeps finds nothing to follow when their profiles cross at a point).
 fn swept_line(surfs: &[Surface], fs: &[usize], old: &Curve, p0: &P3, p1: &P3) -> Option<Curve> {
-    let Curve::Line { d, .. } = old else { return None };
+    let Curve::Line { d, .. } = old else {
+        return None;
+    };
     let d = d.try_normalize(tol::DEGENERATE)?;
     let along = |s: &Surface| match s {
         Surface::Extrusion { d: e, .. } => e.normalize().cross(&d).norm() < tol::ANGULAR_FINE,
@@ -256,13 +327,22 @@ fn swept_line(surfs: &[Surface], fs: &[usize], old: &Curve, p0: &P3, p1: &P3) ->
         Surface::Plane { f } => f.x.cross(&f.y).dot(&d).abs() < tol::ANGULAR_FINE,
         _ => false,
     };
-    if fs.len() != 2 || fs[0] == fs[1] || !fs.iter().all(|&f| along(&surfs[f])) || fs.iter().all(|&f| matches!(surfs[f], Surface::Plane { .. })) {
+    if fs.len() != 2
+        || fs[0] == fs[1]
+        || !fs.iter().all(|&f| along(&surfs[f]))
+        || fs
+            .iter()
+            .all(|&f| matches!(surfs[f], Surface::Plane { .. }))
+    {
         return None;
     }
     let line = Curve::Line { o: *p0, d };
     let w = p1 - p0;
     let size = 1.0 + w.norm() + p0.coords.norm();
-    let on = (w - d * w.dot(&d)).norm() < tol::REL * size && fs.iter().all(|&f| [p0, p1].iter().all(|p| surfs[f].distance(p) < 1e-7 * size));
+    let on = (w - d * w.dot(&d)).norm() < tol::REL * size
+        && fs
+            .iter()
+            .all(|&f| [p0, p1].iter().all(|p| surfs[f].distance(p) < 1e-7 * size));
     on.then_some(line)
 }
 
@@ -281,13 +361,28 @@ fn reseat_seam(out: &mut Body, fi: usize) {
     let wrap = |x: f64| x - (x / TAU).floor() * TAU;
     let u_of = |e: usize| -> Option<f64> {
         let se = &out.edges[e];
-        let us: Vec<f64> = (0..=4).map(|i| s.project(&se.point(se.t[0] + (se.t[1] - se.t[0]) * i as f64 / 4.0), None).0).collect();
-        us.iter().all(|u| { let d = wrap(u - us[0]); d.min(TAU - d) < 1e-7 }).then_some(us[0])
+        let us: Vec<f64> = (0..=4)
+            .map(|i| {
+                s.project(
+                    &se.point(se.t[0] + (se.t[1] - se.t[0]) * i as f64 / 4.0),
+                    None,
+                )
+                .0
+            })
+            .collect();
+        us.iter()
+            .all(|u| {
+                let d = wrap(u - us[0]);
+                d.min(TAU - d) < 1e-7
+            })
+            .then_some(us[0])
     };
     let Some((seam, u0)) = out.faces[fi].loops[0]
         .iter()
         .map(|c| c.edge)
-        .filter(|&e| !out.edges[e].degenerate && ef[e].len() == 2 && ef[e][0] == fi && ef[e][1] == fi)
+        .filter(|&e| {
+            !out.edges[e].degenerate && ef[e].len() == 2 && ef[e][0] == fi && ef[e][1] == fi
+        })
         .find_map(|e| u_of(e).map(|u| (e, u)))
     else {
         return;
@@ -304,7 +399,9 @@ fn reseat_seam(out: &mut Body, fi: usize) {
                 continue;
             }
             for i in 0..=16 {
-                let mut u = s.project(&e.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 16.0), None).0;
+                let mut u = s
+                    .project(&e.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 16.0), None)
+                    .0;
                 if let Some(p) = prev {
                     u = p + ((u - p + PI).rem_euclid(TAU) - PI);
                 }
@@ -330,8 +427,15 @@ fn reseat_seam(out: &mut Body, fi: usize) {
     ends.sort_by(|x, y| x.0.total_cmp(&y.0));
     let mut best = (0.0, None);
     for i in 0..ends.len() {
-        let end = ends[..=i].iter().map(|x| x.1).fold(f64::NEG_INFINITY, f64::max);
-        let next = if i + 1 < ends.len() { ends[i + 1].0 } else { ends[0].0 + TAU };
+        let end = ends[..=i]
+            .iter()
+            .map(|x| x.1)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let next = if i + 1 < ends.len() {
+            ends[i + 1].0
+        } else {
+            ends[0].0 + TAU
+        };
         if next - end > best.0 {
             best = (next - end, Some(0.5 * (end + next)));
         }
@@ -346,15 +450,21 @@ fn reseat_seam(out: &mut Body, fi: usize) {
         if moved.iter().any(|(w, _)| *w == v) {
             continue;
         }
-        let others: Vec<usize> = (0..out.edges.len()).filter(|&e| e != seam && !out.edges[e].degenerate && out.edges[e].v.contains(&v)).collect();
-        if others.iter().any(|&e| out.edges[e].v[0] != out.edges[e].v[1] || !matches!(out.edges[e].curve, Curve::Circle { .. })) {
+        let others: Vec<usize> = (0..out.edges.len())
+            .filter(|&e| e != seam && !out.edges[e].degenerate && out.edges[e].v.contains(&v))
+            .collect();
+        if others.iter().any(|&e| {
+            out.edges[e].v[0] != out.edges[e].v[1]
+                || !matches!(out.edges[e].curve, Curve::Circle { .. })
+        }) {
             return;
         }
         let (_, vv) = s.project(&out.verts[v].p, None);
         // On the closed edges exactly (the surface's projection is good only to its tolerance).
         let q = others.iter().fold(s.eval(u_new, vv), |q, &e| {
             let ed = &out.edges[e];
-            ed.curve.point(ed.curve.closest(&q, ed.t[0] - PI, ed.t[1] + PI))
+            ed.curve
+                .point(ed.curve.closest(&q, ed.t[0] - PI, ed.t[1] + PI))
         });
         moved.push((v, q));
     }
@@ -381,23 +491,31 @@ fn reseat_seam(out: &mut Body, fi: usize) {
             _ => return,
         }
     } else {
-        let (a, z) = if matches!(iso, Curve::Circle { .. }) { (-PI, PI) } else { (-1e12, 1e12) };
+        let (a, z) = if matches!(iso, Curve::Circle { .. }) {
+            (-PI, PI)
+        } else {
+            (-1e12, 1e12)
+        };
         (iso.closest(&p0, a, z), iso.closest(&p1, a, z))
     };
-    let (iso, t0, t1) = if t1 < t0 || iso.tangent(0.5 * (t0 + t1)).dot(&old_dir) < 0.0 && ed.v[0] == ed.v[1] {
-        let (c, a, b) = iso.reversed(t0, t1);
-        (c, a.min(b), a.max(b))
-    } else {
-        (iso, t0, t1)
-    };
+    let (iso, t0, t1) =
+        if t1 < t0 || iso.tangent(0.5 * (t0 + t1)).dot(&old_dir) < 0.0 && ed.v[0] == ed.v[1] {
+            let (c, a, b) = iso.reversed(t0, t1);
+            (c, a.min(b), a.max(b))
+        } else {
+            (iso, t0, t1)
+        };
     out.edges[seam].curve = iso;
     out.edges[seam].t = [t0, t1];
     // A pole's point edge spans the turn from the seam: it turns with it.
     let du = u_new - u0;
     for l in out.faces[fi].loops.iter_mut() {
         for c in l.iter_mut() {
-            if out.edges[c.edge].degenerate && out.edges[c.edge].v.iter().any(|v| ends_v.contains(v)) {
-                c.pc = c.pc.transformed(&Affine::translation(V3::new(du, 0.0, 0.0)));
+            if out.edges[c.edge].degenerate
+                && out.edges[c.edge].v.iter().any(|v| ends_v.contains(v))
+            {
+                c.pc =
+                    c.pc.transformed(&Affine::translation(V3::new(du, 0.0, 0.0)));
             }
         }
     }
@@ -430,30 +548,67 @@ fn slide_seam_ends(b: &Body, out: &mut Body, surfs: &[Surface], ef: &[Vec<usize>
         let poles = singular_points(surf);
         let at_pole = |p: &P3| poles.iter().any(|q| (q - p).norm() < tol::REL * size);
         // An iso-u line round u, or an iso-v line round v (a torus's other seam).
-        let uv: Vec<(f64, f64)> = (0..=4).map(|i| surf.project(&se.point(se.t[0] + (se.t[1] - se.t[0]) * i as f64 / 4.0), None)).collect();
-        let flat = |x: &dyn Fn(&(f64, f64)) -> f64| uv.iter().all(|q| { let d = (x(q) - x(&uv[0])).rem_euclid(TAU); d.min(TAU - d) <= 1e-7 });
+        let uv: Vec<(f64, f64)> = (0..=4)
+            .map(|i| {
+                surf.project(
+                    &se.point(se.t[0] + (se.t[1] - se.t[0]) * i as f64 / 4.0),
+                    None,
+                )
+            })
+            .collect();
+        let flat = |x: &dyn Fn(&(f64, f64)) -> f64| {
+            uv.iter().all(|q| {
+                let d = (x(q) - x(&uv[0])).rem_euclid(TAU);
+                d.min(TAU - d) <= 1e-7
+            })
+        };
         let along_u = surf.u_periodic() && flat(&|q| q.0);
         if !along_u && !(surf.v_periodic() && flat(&|q| q.1)) {
             continue;
         }
-        let iso_at = |x: f64| if along_u { surf.iso_u(x) } else { surf.iso_v(x) };
-        let coord = |p: &P3| { let (u, v) = surf.project(p, None); if along_u { u } else { v } };
+        let iso_at = |x: f64| {
+            if along_u {
+                surf.iso_u(x)
+            } else {
+                surf.iso_v(x)
+            }
+        };
+        let coord = |p: &P3| {
+            let (u, v) = surf.project(p, None);
+            if along_u { u } else { v }
+        };
         let x0 = if along_u { uv[0].0 } else { uv[0].1 };
         // An end the moved faces carried off the seam (their corner no longer on its iso
         // line): the seam moves to the iso line through it, and its other end, when it lies
         // only on closed circles (a cylinder's or cone's rim), slides round them onto it.
-        let near_on = |c: &Curve, p: &P3| c.point(if c.is_periodic() { c.closest(p, -PI, PI) } else { c.closest(p, -1e12, 1e12) });
+        let near_on = |c: &Curve, p: &P3| {
+            c.point(if c.is_periodic() {
+                c.closest(p, -PI, PI)
+            } else {
+                c.closest(p, -1e12, 1e12)
+            })
+        };
         let iso_dist = |p: &P3| iso_at(x0).map_or(0.0, |c| (near_on(&c, p) - p).norm());
-        let off = (0..2).find(|&k| se.v[0] != se.v[1] && iso_dist(&out.verts[se.v[k]].p) > 1e-7 * size);
+        let off =
+            (0..2).find(|&k| se.v[0] != se.v[1] && iso_dist(&out.verts[se.v[k]].p) > 1e-7 * size);
         if let Some(k) = off {
             let (v, o) = (se.v[k], se.v[1 - k]);
             let x_new = coord(&out.verts[v].p);
-            let rims: Vec<usize> = (0..b.edges.len()).filter(|&e| e != s && !b.edges[e].degenerate && b.edges[e].v.contains(&o)).collect();
-            let closed = !rims.is_empty() && rims.iter().all(|&e| b.edges[e].v == [o, o] && matches!(b.edges[e].curve, Curve::Circle { .. }) && kept(e));
+            let rims: Vec<usize> = (0..b.edges.len())
+                .filter(|&e| e != s && !b.edges[e].degenerate && b.edges[e].v.contains(&o))
+                .collect();
+            let closed = !rims.is_empty()
+                && rims.iter().all(|&e| {
+                    b.edges[e].v == [o, o]
+                        && matches!(b.edges[e].curve, Curve::Circle { .. })
+                        && kept(e)
+                });
             if at_pole(&b.verts[o].p) {
                 seams.push(s);
             } else if closed && let Some(iso) = iso_at(x_new) {
-                let q = rims.iter().fold(near_on(&iso, &out.verts[o].p), |q, &e| near_on(&b.edges[e].curve, &q));
+                let q = rims.iter().fold(near_on(&iso, &out.verts[o].p), |q, &e| {
+                    near_on(&b.edges[e].curve, &q)
+                });
                 if (near_on(&iso, &q) - q).norm() < 1e-7 * size {
                     out.verts[o].p = q;
                     seams.push(s);
@@ -467,11 +622,25 @@ fn slide_seam_ends(b: &Body, out: &mut Body, surfs: &[Surface], ef: &[Vec<usize>
             if at_pole(&b.verts[v].p) || !(o == v || at_pole(&b.verts[o].p)) {
                 continue;
             }
-            let others: Vec<usize> = (0..b.edges.len()).filter(|&e| e != s && !b.edges[e].degenerate && b.edges[e].v.contains(&v)).collect();
+            let others: Vec<usize> = (0..b.edges.len())
+                .filter(|&e| e != s && !b.edges[e].degenerate && b.edges[e].v.contains(&v))
+                .collect();
             let [x, y] = others[..] else { continue };
-            let (a, z) = if b.edges[x].v[1] == v && b.edges[y].v[0] == v { (x, y) } else if b.edges[y].v[1] == v && b.edges[x].v[0] == v { (y, x) } else { continue };
+            let (a, z) = if b.edges[x].v[1] == v && b.edges[y].v[0] == v {
+                (x, y)
+            } else if b.edges[y].v[1] == v && b.edges[x].v[0] == v {
+                (y, x)
+            } else {
+                continue;
+            };
             let (ea, ez) = (&b.edges[a], &b.edges[z]);
-            if ea.v[0] == v || ez.v[1] == v || ea.curve != ez.curve || !matches!(ea.curve, Curve::Circle { .. }) || !kept(a) || !kept(z) {
+            if ea.v[0] == v
+                || ez.v[1] == v
+                || ea.curve != ez.curve
+                || !matches!(ea.curve, Curve::Circle { .. })
+                || !kept(a)
+                || !kept(z)
+            {
                 continue;
             }
             // The arc the two now span, from a's start round to z's end.
@@ -484,7 +653,11 @@ fn slide_seam_ends(b: &Body, out: &mut Body, surfs: &[Surface], ef: &[Vec<usize>
             }
             let q = c.point(0.5 * (t0 + t1));
             let dx = coord(&q) - coord(&b.verts[v].p);
-            let shift = if along_u { V3::new(dx, 0.0, 0.0) } else { V3::new(0.0, dx, 0.0) };
+            let shift = if along_u {
+                V3::new(dx, 0.0, 0.0)
+            } else {
+                V3::new(0.0, dx, 0.0)
+            };
             out.verts[v].p = q;
             seams.push(s);
             for l in out.faces[f].loops.iter_mut() {
@@ -524,7 +697,9 @@ fn swallow_poles(out: &mut Body) -> Vec<(usize, usize)> {
 fn swallow_pole(out: &mut Body, fi: usize, li: usize) -> Option<(usize, usize)> {
     let surf = out.faces[fi].surf.clone();
     let poles = singular_points(&surf);
-    let [hc] = &out.faces[fi].loops[li][..] else { return None };
+    let [hc] = &out.faces[fi].loops[li][..] else {
+        return None;
+    };
     let h = hc.edge;
     let he = out.edges[h].clone();
     if poles.is_empty() || !surf.u_periodic() || he.degenerate || he.v[0] != he.v[1] {
@@ -532,19 +707,29 @@ fn swallow_pole(out: &mut Body, fi: usize, li: usize) -> Option<(usize, usize)> 
     }
     // The turn the hole makes round the surface's axis, and its middle.
     const N: usize = 64;
-    let pts: Vec<P3> = (0..=N).map(|i| he.point(he.t[0] + (he.t[1] - he.t[0]) * i as f64 / N as f64)).collect();
+    let pts: Vec<P3> = (0..=N)
+        .map(|i| he.point(he.t[0] + (he.t[1] - he.t[0]) * i as f64 / N as f64))
+        .collect();
     let us: Vec<f64> = pts.iter().map(|p| surf.project(p, None).0).collect();
-    let turn: f64 = us.windows(2).map(|w| (w[1] - w[0] + PI).rem_euclid(TAU) - PI).sum();
+    let turn: f64 = us
+        .windows(2)
+        .map(|w| (w[1] - w[0] + PI).rem_euclid(TAU) - PI)
+        .sum();
     if turn.abs() < PI {
         return None;
     }
     let mid = P3::from(pts.iter().fold(V3::zeros(), |a, p| a + p.coords) / pts.len() as f64);
-    let pole = poles.into_iter().min_by(|a, c| (a - mid).norm().total_cmp(&(c - mid).norm()))?;
+    let pole = poles
+        .into_iter()
+        .min_by(|a, c| (a - mid).norm().total_cmp(&(c - mid).norm()))?;
     let size = 1.0 + pole.coords.norm() + (pts[0] - pole).norm();
     // The outer loop's point edge at that pole, between the two uses of the seam.
     let outer = &out.faces[fi].loops[0];
     let n = outer.len();
-    let kd = outer.iter().position(|c| out.edges[c.edge].degenerate && (out.verts[out.edges[c.edge].v[0]].p - pole).norm() < 1e-7 * size)?;
+    let kd = outer.iter().position(|c| {
+        out.edges[c.edge].degenerate
+            && (out.verts[out.edges[c.edge].v[0]].p - pole).norm() < 1e-7 * size
+    })?;
     let pv = out.edges[outer[kd].edge].v[0];
     let s = outer[(kd + n - 1) % n].edge;
     if s != outer[(kd + 1) % n].edge || out.edges[s].degenerate || !out.edges[s].v.contains(&pv) {
@@ -554,8 +739,13 @@ fn swallow_pole(out: &mut Body, fi: usize, li: usize) -> Option<(usize, usize)> 
     // Where the seam's line crosses the hole's edge: the hole's point at the seam's u.
     let (us_seam, _) = surf.project(&se.point(se.mid_t()), None);
     let off = |t: f64| (surf.project(&he.point(t), None).0 - us_seam + PI).rem_euclid(TAU) - PI;
-    let ts: Vec<f64> = (0..=4 * N).map(|i| he.t[0] + (he.t[1] - he.t[0]) * i as f64 / (4 * N) as f64).collect();
-    let k = ts.windows(2).position(|w| { let (a, z) = (off(w[0]), off(w[1])); a * z <= 0.0 && (a - z).abs() < PI })?;
+    let ts: Vec<f64> = (0..=4 * N)
+        .map(|i| he.t[0] + (he.t[1] - he.t[0]) * i as f64 / (4 * N) as f64)
+        .collect();
+    let k = ts.windows(2).position(|w| {
+        let (a, z) = (off(w[0]), off(w[1]));
+        a * z <= 0.0 && (a - z).abs() < PI
+    })?;
     let (mut a, mut z) = (ts[k], ts[k + 1]);
     for _ in 0..80 {
         let m = 0.5 * (a + z);
@@ -564,7 +754,11 @@ fn swallow_pole(out: &mut Body, fi: usize, li: usize) -> Option<(usize, usize)> 
     let th = 0.5 * (a + z);
     let q = he.point(th);
     let tq = match se.curve {
-        Curve::Circle { .. } => unwrap_near(se.curve.closest(&q, -PI, PI), se.t[if se.v[0] == pv { 0 } else { 1 }], TAU),
+        Curve::Circle { .. } => unwrap_near(
+            se.curve.closest(&q, -PI, PI),
+            se.t[if se.v[0] == pv { 0 } else { 1 }],
+            TAU,
+        ),
         _ => se.curve.closest(&q, -1e12, 1e12),
     };
     if (se.curve.point(tq) - q).norm() > 1e-7 * size || th <= he.t[0] || th >= he.t[1] {
@@ -572,12 +766,19 @@ fn swallow_pole(out: &mut Body, fi: usize, li: usize) -> Option<(usize, usize)> 
     }
     // The new vertex, the hole's edge cut there.
     let nv = out.verts.len();
-    out.verts.push(super::topo::Vertex { p: q, tol: out.verts[he.v[0]].tol });
+    out.verts.push(super::topo::Vertex {
+        p: q,
+        tol: out.verts[he.v[0]].tol,
+    });
     let hv = he.v[0];
     out.edges[h].t = [he.t[0], th];
     out.edges[h].v = [hv, nv];
     let h2 = out.edges.len();
-    out.edges.push(super::topo::Edge { t: [th, he.t[1]], v: [nv, hv], ..he.clone() });
+    out.edges.push(super::topo::Edge {
+        t: [th, he.t[1]],
+        v: [nv, hv],
+        ..he.clone()
+    });
     for g in out.faces.iter_mut() {
         for l in g.loops.iter_mut() {
             let mut nl = Vec::with_capacity(l.len() + 1);
@@ -586,9 +787,15 @@ fn swallow_pole(out: &mut Body, fi: usize, li: usize) -> Option<(usize, usize)> 
                     nl.push(c.clone());
                 } else if c.fwd {
                     nl.push(c.clone());
-                    nl.push(Coedge { edge: h2, ..c.clone() });
+                    nl.push(Coedge {
+                        edge: h2,
+                        ..c.clone()
+                    });
                 } else {
-                    nl.push(Coedge { edge: h2, ..c.clone() });
+                    nl.push(Coedge {
+                        edge: h2,
+                        ..c.clone()
+                    });
                     nl.push(c.clone());
                 }
             }
@@ -604,8 +811,14 @@ fn swallow_pole(out: &mut Body, fi: usize, li: usize) -> Option<(usize, usize)> 
     }
     // The hole, from the new vertex round to it, in the pole's place.
     let hole = out.faces[fi].loops.remove(li);
-    let start = hole.iter().position(|c| out.edges[c.edge].v[if c.fwd { 0 } else { 1 }] == nv)?;
-    let ring: Vec<Coedge> = hole[start..].iter().chain(hole[..start].iter()).cloned().collect();
+    let start = hole
+        .iter()
+        .position(|c| out.edges[c.edge].v[if c.fwd { 0 } else { 1 }] == nv)?;
+    let ring: Vec<Coedge> = hole[start..]
+        .iter()
+        .chain(hole[..start].iter())
+        .cloned()
+        .collect();
     out.faces[fi].loops[0].splice(kd..=kd, ring);
     Some((h2, h))
 }
@@ -615,7 +828,11 @@ fn in_domain(s: &Surface, dom: &UvBox, p: &P3) -> bool {
     let (u, v) = s.project(p, None);
     let inside = |x: f64, (a, b): (f64, f64), periodic: bool| {
         let tol = tol::REL * (1.0 + (b - a).abs() + a.abs());
-        let x = if periodic { a + (x - a).rem_euclid(TAU) } else { x };
+        let x = if periodic {
+            a + (x - a).rem_euclid(TAU)
+        } else {
+            x
+        };
         x >= a - tol && x <= b + tol || (periodic && x - TAU >= a - tol && x - TAU <= b + tol)
     };
     inside(u, dom.0, s.u_periodic()) && inside(v, dom.1, s.v_periodic())
@@ -643,38 +860,75 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
         }
         // On a line where two faces stay tangent: where it crosses the other faces (the
         // tangent pair alone pins nothing along the line).
-        let on_line = tangent.iter().find(|(e, _)| b.edges[*e].v.contains(&v)).and_then(|(e, c)| {
-            let others: Vec<&Surface> = vf[v].iter().filter(|f| !ef[*e].contains(f)).map(|&f| &surfs[f]).collect();
-            let p = line_meet(c, &others, b.verts[v].p)?;
-            fs.iter().all(|s| s.distance(&p) < 1e-7).then_some(p)
-        });
+        let on_line = tangent
+            .iter()
+            .find(|(e, _)| b.edges[*e].v.contains(&v))
+            .and_then(|(e, c)| {
+                let others: Vec<&Surface> = vf[v]
+                    .iter()
+                    .filter(|f| !ef[*e].contains(f))
+                    .map(|&f| &surfs[f])
+                    .collect();
+                let p = line_meet(c, &others, b.verts[v].p)?;
+                fs.iter().all(|s| s.distance(&p) < 1e-7).then_some(p)
+            });
         // On a seam: on the new surface's seam line (the faces around pin it only to their
         // intersection curve).
         let on_seam = || {
-            let e = (0..b.edges.len()).find(|&e| b.edges[e].v.contains(&v) && !b.edges[e].degenerate && ef[e].len() == 2 && ef[e][0] == ef[e][1])?;
+            let e = (0..b.edges.len()).find(|&e| {
+                b.edges[e].v.contains(&v)
+                    && !b.edges[e].degenerate
+                    && ef[e].len() == 2
+                    && ef[e][0] == ef[e][1]
+            })?;
             let f = ef[e][0];
             let (u, _) = b.faces[f].surf.project(&b.verts[v].p, None);
             let iso = surfs[f].iso_u(u)?;
-            let others: Vec<&Surface> = vf[v].iter().filter(|&&g| g != f).map(|&g| &surfs[g]).collect();
+            let others: Vec<&Surface> = vf[v]
+                .iter()
+                .filter(|&&g| g != f)
+                .map(|&g| &surfs[g])
+                .collect();
             let p = line_meet(&iso, &others, b.verts[v].p)?;
             fs.iter().all(|s| s.distance(&p) < 1e-7).then_some(p)
         };
         // On an edge whose faces all stay: on that edge's curve, where it crosses the moved
         // faces.
         let on_kept = || {
-            let e = (0..b.edges.len()).find(|&e| b.edges[e].v.contains(&v) && !b.edges[e].degenerate && ef[e].iter().all(|&f| surfs[f] == b.faces[f].surf))?;
-            let others: Vec<&Surface> = vf[v].iter().filter(|&&g| surfs[g] != b.faces[g].surf).map(|&g| &surfs[g]).collect();
+            let e = (0..b.edges.len()).find(|&e| {
+                b.edges[e].v.contains(&v)
+                    && !b.edges[e].degenerate
+                    && ef[e].iter().all(|&f| surfs[f] == b.faces[f].surf)
+            })?;
+            let others: Vec<&Surface> = vf[v]
+                .iter()
+                .filter(|&&g| surfs[g] != b.faces[g].surf)
+                .map(|&g| &surfs[g])
+                .collect();
             let p = line_meet(&b.edges[e].curve, &others, b.verts[v].p)?;
             fs.iter().all(|s| s.distance(&p) < 1e-7).then_some(p)
         };
         // At a pole or apex (the end of a point edge): the new surface's own, nearest.
         let on_pole = || {
-            let f = (0..b.edges.len()).filter(|&e| b.edges[e].degenerate && b.edges[e].v.contains(&v)).flat_map(|e| ef[e].iter().copied()).next()?;
+            let f = (0..b.edges.len())
+                .filter(|&e| b.edges[e].degenerate && b.edges[e].v.contains(&v))
+                .flat_map(|e| ef[e].iter().copied())
+                .next()?;
             let old = b.verts[v].p;
-            let p = singular_points(&surfs[f]).into_iter().min_by(|x, y| (x - old).norm().total_cmp(&(y - old).norm()))?;
+            let p = singular_points(&surfs[f])
+                .into_iter()
+                .min_by(|x, y| (x - old).norm().total_cmp(&(y - old).norm()))?;
             fs.iter().all(|s| s.distance(&p) < 1e-7).then_some(p)
         };
-        let p = on_pole().or(on_line).or_else(on_seam).or_else(on_kept).or_else(|| meet(&fs, b.verts[v].p)).ok_or_else(|| KernelError::InvalidGeometry { op: "local operation", why: "the moved faces no longer meet at a corner".into() })?;
+        let p = on_pole()
+            .or(on_line)
+            .or_else(on_seam)
+            .or_else(on_kept)
+            .or_else(|| meet(&fs, b.verts[v].p))
+            .ok_or_else(|| KernelError::InvalidGeometry {
+                op: "local operation",
+                why: "the moved faces no longer meet at a corner".into(),
+            })?;
         out.verts[v].p = p;
     }
     let seams = slide_seam_ends(b, &mut out, surfs, &ef);
@@ -687,7 +941,10 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
         let (p0, p1) = (out.verts[ed.v[0]].p, out.verts[ed.v[1]].p);
         if !moved {
             // Same curve; the ends may have moved along it.
-            if ed.degenerate || ((p0 - b.verts[ed.v[0]].p).norm() <= tol::DEGENERATE && (p1 - b.verts[ed.v[1]].p).norm() <= tol::DEGENERATE) {
+            if ed.degenerate
+                || ((p0 - b.verts[ed.v[0]].p).norm() <= tol::DEGENERATE
+                    && (p1 - b.verts[ed.v[1]].p).norm() <= tol::DEGENERATE)
+            {
                 continue;
             }
             if let Some(t) = slide_range(ed, &p0, &p1) {
@@ -700,14 +957,21 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
             // curve gets.
             if fs.len() != 2 {
                 let q = ed.point(ed.t[0] + (ed.t[1] - ed.t[0]) * 0.25);
-                let dir0 = ed.curve.tangent(ed.t[0]).try_normalize(tol::DEGENERATE).unwrap_or_else(V3::zeros);
+                let dir0 = ed
+                    .curve
+                    .tangent(ed.t[0])
+                    .try_normalize(tol::DEGENERATE)
+                    .unwrap_or_else(V3::zeros);
                 let (t0, t1) = param_range(&ed.curve, &p0, &p1, ed.v[0] == ed.v[1], &q, &dir0);
                 out.edges[e].t = if t0 <= t1 { [t0, t1] } else { [t1, t0] };
                 continue;
             }
         }
         if ed.degenerate {
-            out.edges[e].curve = Curve::Line { o: p0, d: V3::zeros() };
+            out.edges[e].curve = Curve::Line {
+                o: p0,
+                d: V3::zeros(),
+            };
             continue;
         }
         let old_mid = ed.point(ed.mid_t());
@@ -727,21 +991,47 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
                     let along_v = (ua - ub).abs() <= (va - vb).abs();
                     let (u, v) = s.project(&p0, None);
                     let ((u0, u1), (v0, v1)) = n.range();
-                    let snap = |x: f64, a: f64, b: f64| if (x - a).abs() < tol::REL_POINT * (b - a) { a } else if (x - b).abs() < tol::REL_POINT * (b - a) { b } else { x };
-                    let iso = if along_v { nurbs_iso(n, snap(u, u0, u1), true) } else { nurbs_iso(n, snap(v, v0, v1), false) };
+                    let snap = |x: f64, a: f64, b: f64| {
+                        if (x - a).abs() < tol::REL_POINT * (b - a) {
+                            a
+                        } else if (x - b).abs() < tol::REL_POINT * (b - a) {
+                            b
+                        } else {
+                            x
+                        }
+                    };
+                    let iso = if along_v {
+                        nurbs_iso(n, snap(u, u0, u1), true)
+                    } else {
+                        nurbs_iso(n, snap(v, v0, v1), false)
+                    };
                     Curve::Nurbs(std::sync::Arc::new(iso))
                 }
                 _ => {
                     // (Through the end that isn't a pole: every iso line passes a pole. An
                     // iso-v line where the old seam ran round u: a torus's other seam.)
                     let size = 1.0 + p0.coords.norm();
-                    let p = if singular_points(s).iter().any(|q| (q - p0).norm() < tol::REL * size) { p1 } else { p0 };
+                    let p = if singular_points(s)
+                        .iter()
+                        .any(|q| (q - p0).norm() < tol::REL * size)
+                    {
+                        p1
+                    } else {
+                        p0
+                    };
                     let old = &b.faces[fs[0]].surf;
                     let (ua, va) = old.project(&ed.point(ed.t[0]), None);
                     let (ub, vb) = old.project(&ed.point(ed.mid_t()), None);
-                    let turn = |d: f64| { let d = d.rem_euclid(TAU); d.min(TAU - d) };
+                    let turn = |d: f64| {
+                        let d = d.rem_euclid(TAU);
+                        d.min(TAU - d)
+                    };
                     let (u, v) = s.project(&p, None);
-                    let iso = if s.v_periodic() && turn(ua - ub) > turn(va - vb) { s.iso_v(v) } else { s.iso_u(u) };
+                    let iso = if s.v_periodic() && turn(ua - ub) > turn(va - vb) {
+                        s.iso_v(v)
+                    } else {
+                        s.iso_u(u)
+                    };
                     iso.ok_or(KernelError::Unsupported("moving a seam of this surface"))?
                 }
             }
@@ -764,7 +1054,11 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
                 let (mut au, mut av) = ((f64::MAX, f64::MIN), (f64::MAX, f64::MIN));
                 let mut first: Option<(f64, f64)> = None;
                 for i in 0..8 {
-                    let c = P3::new(if i & 1 == 0 { bb.min.x } else { bb.max.x }, if i & 2 == 0 { bb.min.y } else { bb.max.y }, if i & 4 == 0 { bb.min.z } else { bb.max.z });
+                    let c = P3::new(
+                        if i & 1 == 0 { bb.min.x } else { bb.max.x },
+                        if i & 2 == 0 { bb.min.y } else { bb.max.y },
+                        if i & 4 == 0 { bb.min.z } else { bb.max.z },
+                    );
                     let (u, v) = s.project(&c, None);
                     lu = (lu.0.min(u), lu.1.max(u));
                     lv = (lv.0.min(v), lv.1.max(v));
@@ -778,9 +1072,27 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
                 // Round a periodic direction, the part the box sees when it sees under a
                 // quarter turn (a huge drafted cylinder's edge spans a sliver of it, which a
                 // grid over the whole turn steps over), else all of it.
-                let turn = |(a, b): (f64, f64), whole: (f64, f64)| if b - a < 0.5 * PI { (a - 0.25 * (b - a) - 1e-3, b + 0.25 * (b - a) + 1e-3) } else { whole };
-                let u = if s.u_periodic() { turn(au, (u0, u1)) } else if u1 - u0 < 1e3 { (u0, u1) } else { (u0.max(lu.0), u1.min(lu.1)) };
-                let v = if s.v_periodic() { turn(av, (v0, v1)) } else if v1 - v0 < 1e3 { (v0, v1) } else { (v0.max(lv.0), v1.min(lv.1)) };
+                let turn = |(a, b): (f64, f64), whole: (f64, f64)| {
+                    if b - a < 0.5 * PI {
+                        (a - 0.25 * (b - a) - 1e-3, b + 0.25 * (b - a) + 1e-3)
+                    } else {
+                        whole
+                    }
+                };
+                let u = if s.u_periodic() {
+                    turn(au, (u0, u1))
+                } else if u1 - u0 < 1e3 {
+                    (u0, u1)
+                } else {
+                    (u0.max(lu.0), u1.min(lu.1))
+                };
+                let v = if s.v_periodic() {
+                    turn(av, (v0, v1))
+                } else if v1 - v0 < 1e3 {
+                    (v0, v1)
+                } else {
+                    (v0.max(lv.0), v1.min(lv.1))
+                };
                 (u, v)
             };
             let cs = super::ssi::surface_surface(sa, box_of(sa), sb, box_of(sb), &bb);
@@ -795,22 +1107,40 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
                 }
             }
             if std::env::var_os("CADRS_DRAFT_DEBUG").is_some() {
-                eprintln!("edge {e} faces {fs:?} ({:?} × {:?}): {:?}", sa.kind(), sb.kind(), best.as_ref().map(|b| (b.0, format!("{:?}", b.1).chars().take(12).collect::<String>())));
+                eprintln!(
+                    "edge {e} faces {fs:?} ({:?} × {:?}): {:?}",
+                    sa.kind(),
+                    sb.kind(),
+                    best.as_ref().map(|b| (
+                        b.0,
+                        format!("{:?}", b.1).chars().take(12).collect::<String>()
+                    ))
+                );
             }
             match best {
                 Some((d, c)) if d <= tol::POINT => c,
                 // None through both ends (the general intersection's sampling stepped over a
                 // sliver of it: a huge drafted cylinder's arc): traced between them.
-                _ => trace_between(sa, sb, ed, (b.verts[ed.v[0]].p, b.verts[ed.v[1]].p), p0, p1).ok_or_else(|| KernelError::InvalidGeometry { op: "local operation", why: "moved faces no longer meet along an edge".into() })?,
+                _ => trace_between(sa, sb, ed, (b.verts[ed.v[0]].p, b.verts[ed.v[1]].p), p0, p1)
+                    .ok_or_else(|| KernelError::InvalidGeometry {
+                        op: "local operation",
+                        why: "moved faces no longer meet along an edge".into(),
+                    })?,
             }
         } else {
-            return Err(KernelError::Unsupported("moving faces of a non-manifold edge"));
+            return Err(KernelError::Unsupported(
+                "moving faces of a non-manifold edge",
+            ));
         };
         // Parameters at the new ends, in the old edge's direction.
         let quarter = ed.point(ed.t[0] + (ed.t[1] - ed.t[0]) * 0.25);
         // The way the old edge left its start (its direction survives the move better than
         // any of its points).
-        let dir0 = ed.curve.tangent(ed.t[0]).try_normalize(tol::DEGENERATE).unwrap_or_else(V3::zeros);
+        let dir0 = ed
+            .curve
+            .tangent(ed.t[0])
+            .try_normalize(tol::DEGENERATE)
+            .unwrap_or_else(V3::zeros);
         let (curve, (t0, t1)) = match closed_arc(&curve, &p0, &p1, ed.v[0] == ed.v[1], &dir0) {
             Some((c, t0, t1)) => (c, (t0, t1)),
             None => {
@@ -818,24 +1148,49 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
                     Curve::Nurbs(_) => nurbs_arc(&curve, &p0, &p1, &dir0),
                     _ => None,
                 };
-                let r = r.unwrap_or_else(|| param_range(&curve, &p0, &p1, ed.v[0] == ed.v[1], &quarter, &dir0));
+                let r = r.unwrap_or_else(|| {
+                    param_range(&curve, &p0, &p1, ed.v[0] == ed.v[1], &quarter, &dir0)
+                });
                 (curve, r)
             }
         };
         // The arc must lie in its faces' domains: else the other way round (a circle crossing
         // a plane twice runs both ways between the crossings).
         let inside = |c: &Curve, t0: f64, t1: f64| {
-            fs.iter().all(|&f| dom(f).is_none_or(|d| [0.25, 0.5, 0.75].iter().all(|s| in_domain(&surfs[f], &d, &c.point(t0 + (t1 - t0) * s)))))
+            fs.iter().all(|&f| {
+                dom(f).is_none_or(|d| {
+                    [0.25, 0.5, 0.75]
+                        .iter()
+                        .all(|s| in_domain(&surfs[f], &d, &c.point(t0 + (t1 - t0) * s)))
+                })
+            })
         };
         let (t0, t1) = match &curve {
-            Curve::Circle { .. } | Curve::Ellipse { .. } if ed.v[0] != ed.v[1] && !inside(&curve, t0, t1) => {
-                let other = if t1 > t0 { (t0, t1 - TAU) } else { (t0, t1 + TAU) };
-                if inside(&curve, other.0, other.1) { other } else { (t0, t1) }
+            Curve::Circle { .. } | Curve::Ellipse { .. }
+                if ed.v[0] != ed.v[1] && !inside(&curve, t0, t1) =>
+            {
+                let other = if t1 > t0 {
+                    (t0, t1 - TAU)
+                } else {
+                    (t0, t1 + TAU)
+                };
+                if inside(&curve, other.0, other.1) {
+                    other
+                } else {
+                    (t0, t1)
+                }
             }
-            Curve::Nurbs(_) if !inside(&curve, t0, t1) => nurbs_arc(&curve, &p0, &p1, &-dir0).filter(|(a, z)| inside(&curve, *a, *z)).unwrap_or((t0, t1)),
+            Curve::Nurbs(_) if !inside(&curve, t0, t1) => nurbs_arc(&curve, &p0, &p1, &-dir0)
+                .filter(|(a, z)| inside(&curve, *a, *z))
+                .unwrap_or((t0, t1)),
             _ => (t0, t1),
         };
-        let (curve, t0, t1) = if t1 < t0 { let (c, a, b2) = curve.reversed(t0, t1); (c, b2.min(a), a.max(b2)) } else { (curve, t0, t1) };
+        let (curve, t0, t1) = if t1 < t0 {
+            let (c, a, b2) = curve.reversed(t0, t1);
+            (c, b2.min(a), a.max(b2))
+        } else {
+            (curve, t0, t1)
+        };
         let (t0, t1) = if t1 < t0 { (t1, t0) } else { (t0, t1) };
         out.edges[e].curve = curve;
         out.edges[e].t = [t0, t1];
@@ -866,13 +1221,26 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
                 // curve's parameter, and projecting can land on another of the surface's
                 // parameters for a point, on a torus's axis.)
                 let within = e.t == old.t || (e.t[0] >= old.t[0] && e.t[1] <= old.t[1]);
-                let same = surf == b.faces[fi].surf && (old.degenerate || (within && e.curve == old.curve));
-                let mut pc = if same { c.pc.clone() } else { super::pcurve::pcurve(&surf, &e.curve, e.t[0], e.t[1], None) };
+                let same = surf == b.faces[fi].surf
+                    && (old.degenerate || (within && e.curve == old.curve));
+                let mut pc = if same {
+                    c.pc.clone()
+                } else {
+                    super::pcurve::pcurve(&surf, &e.curve, e.t[0], e.t[1], None)
+                };
                 let (t0, t1) = super::topo::co_range(e, c.fwd);
                 if let Some(a) = at {
                     let q = pc.point(t0);
-                    let du = if surf.u_periodic() { ((a.x - q.x) / TAU).round() * TAU } else { 0.0 };
-                    let dv = if surf.v_periodic() { ((a.y - q.y) / TAU).round() * TAU } else { 0.0 };
+                    let du = if surf.u_periodic() {
+                        ((a.x - q.x) / TAU).round() * TAU
+                    } else {
+                        0.0
+                    };
+                    let dv = if surf.v_periodic() {
+                        ((a.y - q.y) / TAU).round() * TAU
+                    } else {
+                        0.0
+                    };
                     if du != 0.0 || dv != 0.0 {
                         pc = pc.transformed(&Affine::translation(V3::new(du, dv, 0.0)));
                     }
@@ -883,23 +1251,42 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
                 let (_, t1) = super::topo::co_range(e, c.fwd);
                 let q = pc.point(t1);
                 at = Some(P2::new(q.x, q.y));
-                nl.push(Coedge { edge: c.edge, fwd: c.fwd, pc });
+                nl.push(Coedge {
+                    edge: c.edge,
+                    fwd: c.fwd,
+                    pc,
+                });
             }
             // On a periodic surface changed in place (its frame kept: an offset, not a turn), each
             // p-curve a whole number of periods from where it was, so the loop keeps the old
             // one's layout (projections land a seam's two uses on the same side of it).
-            let in_place = surf != b.faces[fi].surf && std::mem::discriminant(&surf) == std::mem::discriminant(&b.faces[fi].surf) && surf.frame().is_some() && surf.frame() == b.faces[fi].surf.frame();
+            let in_place = surf != b.faces[fi].surf
+                && std::mem::discriminant(&surf) == std::mem::discriminant(&b.faces[fi].surf)
+                && surf.frame().is_some()
+                && surf.frame() == b.faces[fi].surf.frame();
             if in_place && (surf.u_periodic() || surf.v_periodic()) && nl.len() == lp.len() {
                 for i in 0..nl.len() {
                     let e = nl[i].edge;
                     if e >= b.edges.len() || out.edges[e].degenerate || b.edges[e].degenerate {
                         continue;
                     }
-                    let d = lp[i].pc.point(b.edges[e].mid_t()) - nl[i].pc.point(out.edges[e].mid_t());
-                    let period = |x: f64, periodic: bool| if periodic { (x / TAU).round() * TAU } else { 0.0 };
-                    let (du, dv) = (period(d.x, surf.u_periodic()), period(d.y, surf.v_periodic()));
+                    let d =
+                        lp[i].pc.point(b.edges[e].mid_t()) - nl[i].pc.point(out.edges[e].mid_t());
+                    let period = |x: f64, periodic: bool| {
+                        if periodic {
+                            (x / TAU).round() * TAU
+                        } else {
+                            0.0
+                        }
+                    };
+                    let (du, dv) = (
+                        period(d.x, surf.u_periodic()),
+                        period(d.y, surf.v_periodic()),
+                    );
                     if du != 0.0 || dv != 0.0 {
-                        nl[i].pc = nl[i].pc.transformed(&Affine::translation(V3::new(du, dv, 0.0)));
+                        nl[i].pc = nl[i]
+                            .pc
+                            .transformed(&Affine::translation(V3::new(du, dv, 0.0)));
                     }
                 }
             }
@@ -907,8 +1294,16 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
             // on a face whose seam moved: no projection gives its p-curve. It runs from where
             // the loop arrives at the pole to where it leaves, across the turn the loop needs to
             // close (the coedges after it a period on).
-            let seam_moved = nl.iter().any(|c| c.edge < ef.len() && ef[c.edge].len() == 2 && ef[c.edge][0] == fi && ef[c.edge][1] == fi && !out.edges[c.edge].degenerate && out.edges[c.edge].curve != b.edges[c.edge].curve);
-            if (surf != b.faces[fi].surf || seam_moved) && (surf.u_periodic() || surf.v_periodic())
+            let seam_moved = nl.iter().any(|c| {
+                c.edge < ef.len()
+                    && ef[c.edge].len() == 2
+                    && ef[c.edge][0] == fi
+                    && ef[c.edge][1] == fi
+                    && !out.edges[c.edge].degenerate
+                    && out.edges[c.edge].curve != b.edges[c.edge].curve
+            });
+            if (surf != b.faces[fi].surf || seam_moved)
+                && (surf.u_periodic() || surf.v_periodic())
                 && let Some(k) = nl.iter().position(|c| out.edges[c.edge].degenerate)
             {
                 let n = nl.len();
@@ -920,24 +1315,46 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
                     let (t0, _) = super::topo::co_range(&out.edges[c.edge], c.fwd);
                     c.pc.point(t0)
                 };
-                let period = |d: f64, periodic: bool| if periodic { (d / TAU).round() * TAU } else { 0.0 };
+                let period = |d: f64, periodic: bool| {
+                    if periodic {
+                        (d / TAU).round() * TAU
+                    } else {
+                        0.0
+                    }
+                };
                 let g = start_of(&nl[0]) - end_of(&nl[n - 1]);
-                let (gu, gv) = (period(g.x, surf.u_periodic()), period(g.y, surf.v_periodic()));
+                let (gu, gv) = (
+                    period(g.x, surf.u_periodic()),
+                    period(g.y, surf.v_periodic()),
+                );
                 if gu != 0.0 || gv != 0.0 {
                     for c in nl.iter_mut().skip(k + 1) {
                         c.pc = c.pc.transformed(&Affine::translation(V3::new(gu, gv, 0.0)));
                     }
                 }
                 // (Every pole of the loop: a sphere's face can reach both.)
-                let poles: Vec<usize> = (k..n).filter(|&j| out.edges[nl[j].edge].degenerate).collect();
+                let poles: Vec<usize> = (k..n)
+                    .filter(|&j| out.edges[nl[j].edge].degenerate)
+                    .collect();
                 for k in poles {
-                    let a = if k > 0 { end_of(&nl[k - 1]) } else { end_of(&nl[n - 1]) - V3::new(gu, gv, 0.0) };
-                    let z = if k + 1 < n { start_of(&nl[k + 1]) } else { start_of(&nl[0]) };
+                    let a = if k > 0 {
+                        end_of(&nl[k - 1])
+                    } else {
+                        end_of(&nl[n - 1]) - V3::new(gu, gv, 0.0)
+                    };
+                    let z = if k + 1 < n {
+                        start_of(&nl[k + 1])
+                    } else {
+                        start_of(&nl[0])
+                    };
                     let e = &out.edges[nl[k].edge];
                     let (t0, t1) = super::topo::co_range(e, nl[k].fwd);
                     if (t1 - t0).abs() > 0.0 {
                         let d = (z - a) / (t1 - t0);
-                        nl[k].pc = Curve::Line { o: P3::new(a.x - d.x * t0, a.y - d.y * t0, 0.0), d: V3::new(d.x, d.y, 0.0) };
+                        nl[k].pc = Curve::Line {
+                            o: P3::new(a.x - d.x * t0, a.y - d.y * t0, 0.0),
+                            d: V3::new(d.x, d.y, 0.0),
+                        };
                     }
                 }
             }
@@ -956,7 +1373,10 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
                     let cur = out.faces[fi].loops[li][k].clone();
                     let (_, pt1) = super::topo::co_range(&out.edges[prev.edge], prev.fwd);
                     let (ct0, ct1) = super::topo::co_range(&out.edges[cur.edge], cur.fwd);
-                    if let Some(shifted) = closed_spline_shift(&surf, &cur.pc, ct0, ct1, { let a = prev.pc.point(pt1); [a.x, a.y] }) {
+                    if let Some(shifted) = closed_spline_shift(&surf, &cur.pc, ct0, ct1, {
+                        let a = prev.pc.point(pt1);
+                        [a.x, a.y]
+                    }) {
                         out.faces[fi].loops[li][k].pc = shifted;
                     }
                 }
@@ -976,7 +1396,9 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
                 let q = cur.pc.point(ct0);
                 let du = ((a.x - q.x) / TAU).round() * TAU;
                 if du != 0.0 {
-                    out.faces[fi].loops[li][k].pc = cur.pc.transformed(&Affine::translation(V3::new(du, 0.0, 0.0)));
+                    out.faces[fi].loops[li][k].pc = cur
+                        .pc
+                        .transformed(&Affine::translation(V3::new(du, 0.0, 0.0)));
                 }
             }
         }
@@ -988,12 +1410,18 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
             continue;
         }
         let range = |l: &[Coedge], edges: &[super::topo::Edge]| {
-            let mut r = ((f64::INFINITY, f64::NEG_INFINITY), (f64::INFINITY, f64::NEG_INFINITY));
+            let mut r = (
+                (f64::INFINITY, f64::NEG_INFINITY),
+                (f64::INFINITY, f64::NEG_INFINITY),
+            );
             for c in l {
                 let e = &edges[c.edge];
                 for i in 0..=8 {
                     let q = c.pc.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 8.0);
-                    r = ((r.0.0.min(q.x), r.0.1.max(q.x)), (r.1.0.min(q.y), r.1.1.max(q.y)));
+                    r = (
+                        (r.0.0.min(q.x), r.0.1.max(q.x)),
+                        (r.1.0.min(q.y), r.1.1.max(q.y)),
+                    );
                 }
             }
             r
@@ -1006,9 +1434,16 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
                     return 0.0;
                 }
                 let mid = 0.5 * (ha + hb);
-                if mid >= a && mid <= b { 0.0 } else { ((0.5 * (a + b) - mid) / TAU).round() * TAU }
+                if mid >= a && mid <= b {
+                    0.0
+                } else {
+                    ((0.5 * (a + b) - mid) / TAU).round() * TAU
+                }
             };
-            let (du, dv) = (shift(outer.0, hole.0, f.surf.u_periodic()), shift(outer.1, hole.1, f.surf.v_periodic()));
+            let (du, dv) = (
+                shift(outer.0, hole.0, f.surf.u_periodic()),
+                shift(outer.1, hole.1, f.surf.v_periodic()),
+            );
             if du != 0.0 || dv != 0.0 {
                 for c in f.loops[li].iter_mut() {
                     c.pc = c.pc.transformed(&Affine::translation(V3::new(du, dv, 0.0)));
@@ -1021,7 +1456,9 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
     // Tolerances: an edge between moved faces is a new intersection curve, its p-curves fits
     // on the new surfaces: its tolerance is how far they stray from one another (not the old
     // edge's, which a read model sets for its own geometry); likewise a moved vertex's.
-    let changed: Vec<bool> = (0..b.faces.len()).map(|f| surfs[f] != b.faces[f].surf).collect();
+    let changed: Vec<bool> = (0..b.faces.len())
+        .map(|f| surfs[f] != b.faces[f].surf)
+        .collect();
     let mut stray = vec![0.0f64; out.edges.len()];
     for f in out.faces.iter() {
         for c in f.loops.iter().flatten() {
@@ -1033,7 +1470,9 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
                 let t = e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 8.0;
                 let uv = c.pc.point(t);
                 let p = e.point(t);
-                stray[c.edge] = stray[c.edge].max((f.surf.eval(uv.x, uv.y) - p).norm()).max(f.surf.distance(&p));
+                stray[c.edge] = stray[c.edge]
+                    .max((f.surf.eval(uv.x, uv.y) - p).norm())
+                    .max(f.surf.distance(&p));
             }
         }
     }
@@ -1048,7 +1487,10 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
             continue;
         }
         let p = out.verts[v].p;
-        let mut d = fs.iter().map(|&f| out.faces[f].surf.distance(&p)).fold(0.0, f64::max);
+        let mut d = fs
+            .iter()
+            .map(|&f| out.faces[f].surf.distance(&p))
+            .fold(0.0, f64::max);
         for e in out.edges.iter().filter(|e| !e.degenerate) {
             for k in 0..2 {
                 if e.v[k] == v {
@@ -1074,26 +1516,48 @@ pub fn replace_surfaces_in(b: &Body, surfs: &[Surface], domains: &[Option<UvBox>
                         let e = &out.edges[c.edge];
                         let (a, z) = super::topo::co_range(e, c.fwd);
                         let old = b.edges.get(c.edge).map(|x| x.t);
-                        eprintln!("face {fi} edge {} fwd {} t {:?} (old {:?}) pc {:?} -> {:?} {}", c.edge, c.fwd, e.t, old, c.pc.point(a), c.pc.point(z), format!("{:?}", e.curve).chars().take(60).collect::<String>());
+                        eprintln!(
+                            "face {fi} edge {} fwd {} t {:?} (old {:?}) pc {:?} -> {:?} {}",
+                            c.edge,
+                            c.fwd,
+                            e.t,
+                            old,
+                            c.pc.point(a),
+                            c.pc.point(z),
+                            format!("{:?}", e.curve)
+                                .chars()
+                                .take(60)
+                                .collect::<String>()
+                        );
                     }
                 }
             }
         }
-        return Err(KernelError::InvalidResult { op: "local operation", why: format!("the moved faces don't close: {}", errs[0]) });
+        return Err(KernelError::InvalidResult {
+            op: "local operation",
+            why: format!("the moved faces don't close: {}", errs[0]),
+        });
     }
     Ok(out)
 }
 
 /// `Kernel::replace_faces`: faces given new surfaces, each keeping the side its material is
 /// on (SMLib's `SmBrep::LocalOperation` keeps the face's use).
-pub fn replace_faces(k: &mut NativeKernel, body: BodyId, faces: &[FaceReplacement]) -> Result<OpResult> {
+pub fn replace_faces(
+    k: &mut NativeKernel,
+    body: BodyId,
+    faces: &[FaceReplacement],
+) -> Result<OpResult> {
     let b = (**k.get(body)?).clone();
     let mut surfs: Vec<Surface> = b.faces.iter().map(|f| f.surf.clone()).collect();
     let mut domains: Vec<Option<UvBox>> = vec![None; b.faces.len()];
     for r in faces {
         let fi = r.face.0 as usize;
         if fi >= b.faces.len() {
-            return Err(KernelError::InvalidParameter(format!("unknown {:?}", r.face)));
+            return Err(KernelError::InvalidParameter(format!(
+                "unknown {:?}",
+                r.face
+            )));
         }
         surfs[fi] = r.surface.clone();
         domains[fi] = r.domain;
@@ -1107,8 +1571,14 @@ pub fn replace_faces(k: &mut NativeKernel, body: BodyId, faces: &[FaceReplacemen
     };
     for r in faces {
         let fi = r.face.0 as usize;
-        let middle = |body: &Body| super::smb::face_centroids(&super::kernel::subset(body, &[fi], false)).first().copied();
-        let (Some(was), Some(now)) = (middle(&b), middle(&out)) else { continue };
+        let middle = |body: &Body| {
+            super::smb::face_centroids(&super::kernel::subset(body, &[fi], false))
+                .first()
+                .copied()
+        };
+        let (Some(was), Some(now)) = (middle(&b), middle(&out)) else {
+            continue;
+        };
         let before = outward(&b, fi, &was);
         if outward(&out, fi, &now).dot(&before) < 0.0 {
             out.faces[fi].sense = !out.faces[fi].sense;
@@ -1116,15 +1586,37 @@ pub fn replace_faces(k: &mut NativeKernel, body: BodyId, faces: &[FaceReplacemen
     }
     let errs = out.check();
     if let Some(e) = errs.first() {
-        return Err(KernelError::InvalidResult { op: "replace faces", why: format!("the replaced faces don't close: {e}") });
+        return Err(KernelError::InvalidResult {
+            op: "replace faces",
+            why: format!("the replaced faces don't close: {e}"),
+        });
     }
     if super::mass::body_volume(&out) <= 0.0 {
-        return Err(KernelError::InvalidResult { op: "replace faces", why: "the replaced faces turn the body inside out".into() });
+        return Err(KernelError::InvalidResult {
+            op: "replace faces",
+            why: "the replaced faces turn the body inside out".into(),
+        });
     }
     let nf = out.faces.len();
     let id = k.insert(out);
-    let history = History { modified: (0..nf).map(|i| (FaceId(i as u64), InputFace { body, face: FaceId(i as u64) })).collect(), ..Default::default() };
-    Ok(OpResult { bodies: vec![id], history })
+    let history = History {
+        modified: (0..nf)
+            .map(|i| {
+                (
+                    FaceId(i as u64),
+                    InputFace {
+                        body,
+                        face: FaceId(i as u64),
+                    },
+                )
+            })
+            .collect(),
+        ..Default::default()
+    };
+    Ok(OpResult {
+        bodies: vec![id],
+        history,
+    })
 }
 
 /// `Kernel::move_faces`: Move face's Translate and Rotate. The faces' surfaces moved by the
@@ -1132,35 +1624,62 @@ pub fn replace_faces(k: &mut NativeKernel, body: BodyId, faces: &[FaceReplacemen
 /// neighbours ([`replace_surfaces_in`]), each moved face keeping the side its material is on.
 /// A move that changes the topology is refused (`InvalidParameter`), as Move face's offset in
 /// [`super::offset::offset`].
-pub fn move_faces(k: &mut NativeKernel, body: BodyId, faces: &[FaceId], motion: &Motion) -> Result<OpResult> {
+pub fn move_faces(
+    k: &mut NativeKernel,
+    body: BodyId,
+    faces: &[FaceId],
+    motion: &Motion,
+) -> Result<OpResult> {
     let b = (**k.get(body)?).clone();
     if faces.is_empty() {
-        return Err(KernelError::InvalidParameter("Move face needs faces to move".into()));
+        return Err(KernelError::InvalidParameter(
+            "Move face needs faces to move".into(),
+        ));
     }
     if let Some(f) = faces.iter().find(|f| f.0 as usize >= b.faces.len()) {
         return Err(KernelError::InvalidParameter(format!("unknown {f:?}")));
     }
     // A rigid motion: orthonormal, no reflection (a reflected face would turn inside out).
     let lin = motion.linear;
-    let finite = lin.iter().chain(motion.translation.iter()).all(|x| x.is_finite());
-    if !finite || (lin.transpose() * lin - nalgebra::Matrix3::identity()).norm() > tol::ANGULAR.sqrt() || motion.is_reflection() {
-        return Err(KernelError::InvalidParameter("Move face takes a translation or a rotation".into()));
+    let finite = lin
+        .iter()
+        .chain(motion.translation.iter())
+        .all(|x| x.is_finite());
+    if !finite
+        || (lin.transpose() * lin - nalgebra::Matrix3::identity()).norm() > tol::ANGULAR.sqrt()
+        || motion.is_reflection()
+    {
+        return Err(KernelError::InvalidParameter(
+            "Move face takes a translation or a rotation".into(),
+        ));
     }
-    let m = Affine { m: lin, t: motion.translation };
+    let m = Affine {
+        m: lin,
+        t: motion.translation,
+    };
     let mut surfs: Vec<Surface> = b.faces.iter().map(|f| f.surf.clone()).collect();
     for f in faces {
         surfs[f.0 as usize] = b.faces[f.0 as usize].surf.transformed(&m);
     }
-    let too_far = |why: &str| KernelError::InvalidParameter(format!("The faces can't move that far: {why}"));
+    let too_far =
+        |why: &str| KernelError::InvalidParameter(format!("The faces can't move that far: {why}"));
     let mut out = replace_surfaces_in(&b, &surfs, &[]).map_err(|e| match e {
-        KernelError::InvalidGeometry { .. } | KernelError::InvalidResult { .. } => too_far("the faces round them no longer meet them"),
+        KernelError::InvalidGeometry { .. } | KernelError::InvalidResult { .. } => {
+            too_far("the faces round them no longer meet them")
+        }
         e => e,
     })?;
     // Each moved face keeps its material on the side it was (its outward normal moved along).
     for f in faces {
         let fi = f.0 as usize;
-        let middle = |body: &Body| super::smb::face_centroids(&super::kernel::subset(body, &[fi], false)).first().copied();
-        let (Some(was), Some(now)) = (middle(&b), middle(&out)) else { continue };
+        let middle = |body: &Body| {
+            super::smb::face_centroids(&super::kernel::subset(body, &[fi], false))
+                .first()
+                .copied()
+        };
+        let (Some(was), Some(now)) = (middle(&b), middle(&out)) else {
+            continue;
+        };
         let outward = |body: &Body, p: &P3| {
             let face = &body.faces[fi];
             let (u, v) = face.surf.project(p, None);
@@ -1178,8 +1697,24 @@ pub fn move_faces(k: &mut NativeKernel, body: BodyId, faces: &[FaceId], motion: 
     }
     let nf = out.faces.len();
     let id = k.insert(out);
-    let history = History { modified: (0..nf).map(|i| (FaceId(i as u64), InputFace { body, face: FaceId(i as u64) })).collect(), ..Default::default() };
-    Ok(OpResult { bodies: vec![id], history })
+    let history = History {
+        modified: (0..nf)
+            .map(|i| {
+                (
+                    FaceId(i as u64),
+                    InputFace {
+                        body,
+                        face: FaceId(i as u64),
+                    },
+                )
+            })
+            .collect(),
+        ..Default::default()
+    };
+    Ok(OpResult {
+        bodies: vec![id],
+        history,
+    })
 }
 
 /// The intersection of two surfaces between the moved ends `p0` and `p1` of the edge `ed`
@@ -1187,7 +1722,14 @@ pub fn move_faces(k: &mut NativeKernel, body: BodyId, faces: &[FaceId], motion: 
 /// points carried along with its ends, a cubic through them, their number doubled until the
 /// cubic lies on both surfaces between them too. None for a closed edge, or where the
 /// surfaces don't meet across the old edge's way.
-fn trace_between(sa: &Surface, sb: &Surface, ed: &super::topo::Edge, old: (P3, P3), p0: P3, p1: P3) -> Option<Curve> {
+fn trace_between(
+    sa: &Surface,
+    sb: &Surface,
+    ed: &super::topo::Edge,
+    old: (P3, P3),
+    p0: P3,
+    p1: P3,
+) -> Option<Curve> {
     if ed.v[0] == ed.v[1] {
         return None;
     }
@@ -1199,7 +1741,9 @@ fn trace_between(sa: &Surface, sb: &Surface, ed: &super::topo::Edge, old: (P3, P
             let f = i as f64 / n as f64;
             let t = ed.t[0] + (ed.t[1] - ed.t[0]) * f;
             let q = ed.point(t) + (p0 - old.0) * (1.0 - f) + (p1 - old.1) * f;
-            let cut = Surface::Plane { f: Frame::from_z(q, ed.curve.tangent(t).try_normalize(tol::DEGENERATE)?) };
+            let cut = Surface::Plane {
+                f: Frame::from_z(q, ed.curve.tangent(t).try_normalize(tol::DEGENERATE)?),
+            };
             pts.push(meet(&[sa, sb, &cut], q)?);
         }
         pts.push(p1);
@@ -1210,7 +1754,9 @@ fn trace_between(sa: &Surface, sb: &Surface, ed: &super::topo::Edge, old: (P3, P
         if ts[n] < tol::REL * size {
             return None;
         }
-        let c = Curve::Nurbs(std::sync::Arc::new(NurbsCurve::interpolate(&pts, &ts, 3, None, None)));
+        let c = Curve::Nurbs(std::sync::Arc::new(NurbsCurve::interpolate(
+            &pts, &ts, 3, None, None,
+        )));
         let on = ts.windows(2).all(|w| {
             let m = c.point(0.5 * (w[0] + w[1]));
             sa.distance(&m) < 1e-7 * size && sb.distance(&m) < 1e-7 * size
@@ -1228,14 +1774,23 @@ fn trace_between(sa: &Surface, sb: &Surface, ed: &super::topo::Edge, old: (P3, P
 /// On a closed B-spline (an intersection loop), the arc from `p0` to `p1` leaving `p0` along
 /// `dir0` (the whole loop for a closed edge) as one parameter range: the curve restarted at
 /// `p0`, so the arc never runs through its start.
-fn closed_arc(c: &Curve, p0: &P3, p1: &P3, closed_edge: bool, dir0: &V3) -> Option<(Curve, f64, f64)> {
+fn closed_arc(
+    c: &Curve,
+    p0: &P3,
+    p1: &P3,
+    closed_edge: bool,
+    dir0: &V3,
+) -> Option<(Curve, f64, f64)> {
     let Curve::Nurbs(n) = c else { return None };
     let (a, b) = n.range();
     let (s, e) = (n.point(a), n.point(b));
     if (s - e).norm() > tol::REL * (1.0 + s.coords.norm()) {
         return None;
     }
-    let t0 = nurbs_passes(c, p0).into_iter().next().unwrap_or_else(|| c.closest(p0, a, b));
+    let t0 = nurbs_passes(c, p0)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| c.closest(p0, a, b));
     let r = n.restarted(t0).ok()?;
     let (a, b) = r.range();
     let rc = Curve::Nurbs(std::sync::Arc::new(r));
@@ -1265,7 +1820,11 @@ fn slide_range(ed: &super::topo::Edge, p0: &P3, p1: &P3) -> Option<[f64; 2]> {
         }
         Curve::Circle { .. } | Curve::Ellipse { .. } => {
             let t0 = unwrap_near(conic_closest(c, p0, -PI, PI), ed.t[0], TAU);
-            let t1 = if ed.v[0] == ed.v[1] { t0 + (ed.t[1] - ed.t[0]) } else { t0 + (conic_closest(c, p1, -PI, PI) - t0).rem_euclid(TAU) };
+            let t1 = if ed.v[0] == ed.v[1] {
+                t0 + (ed.t[1] - ed.t[0])
+            } else {
+                t0 + (conic_closest(c, p1, -PI, PI) - t0).rem_euclid(TAU)
+            };
             (t1 > t0 && on(t0, p0) && on(t1, p1)).then_some([t0, t1])
         }
         Curve::Nurbs(n) => {
@@ -1274,12 +1833,27 @@ fn slide_range(ed: &super::topo::Edge, p0: &P3, p1: &P3) -> Option<[f64; 2]> {
             let passes = |p: &P3| {
                 let mut ts = nurbs_passes(c, p);
                 if loop_ {
-                    let ends: Vec<f64> = ts.iter().filter_map(|&x| if (x - a).abs() < tol::REL * (z - a) { Some(z) } else if (z - x).abs() < tol::REL * (z - a) { Some(a) } else { None }).collect();
+                    let ends: Vec<f64> = ts
+                        .iter()
+                        .filter_map(|&x| {
+                            if (x - a).abs() < tol::REL * (z - a) {
+                                Some(z)
+                            } else if (z - x).abs() < tol::REL * (z - a) {
+                                Some(a)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
                     ts.extend(ends);
                 }
                 ts
             };
-            let nearest = |ts: Vec<f64>, old: f64, after: f64| ts.into_iter().filter(|&x| x > after).min_by(|x, y| (x - old).abs().total_cmp(&(y - old).abs()));
+            let nearest = |ts: Vec<f64>, old: f64, after: f64| {
+                ts.into_iter()
+                    .filter(|&x| x > after)
+                    .min_by(|x, y| (x - old).abs().total_cmp(&(y - old).abs()))
+            };
             let t0 = nearest(passes(p0), ed.t[0], f64::NEG_INFINITY)?;
             let t1 = nearest(passes(p1), ed.t[1], t0)?;
             Some([t0, t1])
@@ -1313,13 +1887,21 @@ fn param_range(c: &Curve, p0: &P3, p1: &P3, closed: bool, quarter: &P3, dir0: &V
             if closed {
                 // The direction from the old edge's quarter point.
                 let tq = conic_closest(c, quarter, t0 - PI, t0 + PI);
-                if tq >= t0 { (t0, t0 + TAU) } else { (t0, t0 - TAU) }
+                if tq >= t0 {
+                    (t0, t0 + TAU)
+                } else {
+                    (t0, t0 - TAU)
+                }
             } else {
                 let t1 = conic_closest(c, p1, t0 - PI, t0 + PI);
                 let tan = c.tangent(t0);
                 let along = tan.dot(dir0) / tan.norm().max(1e-300);
                 if along.abs() > 0.5 {
-                    return if along > 0.0 { (t0, t0 + (t1 - t0).rem_euclid(TAU)) } else { (t0, t0 - (t0 - t1).rem_euclid(TAU)) };
+                    return if along > 0.0 {
+                        (t0, t0 + (t1 - t0).rem_euclid(TAU))
+                    } else {
+                        (t0, t0 - (t0 - t1).rem_euclid(TAU))
+                    };
                 }
                 // Else the way round through the old quarter point.
                 let tq = conic_closest(c, quarter, t0 - TAU, t0 + TAU);
@@ -1344,7 +1926,9 @@ fn param_range(c: &Curve, p0: &P3, p1: &P3, closed: bool, quarter: &P3, dir0: &V
 /// itself).
 fn nurbs_passes(c: &Curve, p: &P3) -> Vec<f64> {
     const N: usize = 400;
-    let Some((a, b)) = c.nurbs_range() else { return vec![] };
+    let Some((a, b)) = c.nurbs_range() else {
+        return vec![];
+    };
     let ts: Vec<f64> = (0..=N).map(|i| a + (b - a) * i as f64 / N as f64).collect();
     let pts: Vec<P3> = ts.iter().map(|&t| c.point(t)).collect();
     let scale = 1.0 + pts.iter().map(|q| q.coords.norm()).fold(0.0, f64::max);
@@ -1355,7 +1939,9 @@ fn nurbs_passes(c: &Curve, p: &P3) -> Vec<f64> {
         let right = if i == N { f64::MAX } else { d[i + 1] };
         if d[i] <= left && d[i] <= right {
             let t = c.closest(p, ts[i.saturating_sub(1)], ts[(i + 1).min(N)]);
-            if (c.point(t) - p).norm() < tol::REL_POINT * scale && !out.iter().any(|x| (x - t).abs() < (b - a) * tol::REL_POINT) {
+            if (c.point(t) - p).norm() < tol::REL_POINT * scale
+                && !out.iter().any(|x| (x - t).abs() < (b - a) * tol::REL_POINT)
+            {
                 out.push(t);
             }
         }
@@ -1406,7 +1992,13 @@ pub fn tangent_closure(b: &Body, mut seed: Vec<usize>) -> Vec<usize> {
     while i < seed.len() {
         let f = seed[i];
         for &(x, y) in &pairs {
-            let o = if x == f { y } else if y == f { x } else { continue };
+            let o = if x == f {
+                y
+            } else if y == f {
+                x
+            } else {
+                continue;
+            };
             if !seed.contains(&o) {
                 seed.push(o);
             }
@@ -1425,7 +2017,9 @@ pub fn draft(k: &mut NativeKernel, body: BodyId, spec: &DraftSpec) -> Result<OpR
     let mut faces: Vec<usize> = Vec::new();
     for fid in &spec.faces {
         let fi = fid.0 as usize;
-        b.faces.get(fi).ok_or_else(|| KernelError::InvalidParameter(format!("unknown {fid:?}")))?;
+        b.faces
+            .get(fi)
+            .ok_or_else(|| KernelError::InvalidParameter(format!("unknown {fid:?}")))?;
         if !faces.contains(&fi) {
             faces.push(fi);
         }
@@ -1439,14 +2033,20 @@ pub fn draft(k: &mut NativeKernel, body: BodyId, spec: &DraftSpec) -> Result<OpR
             Surface::Plane { f: fr } => {
                 let n = fr.x.cross(&fr.y) * if f.sense { 1.0 } else { -1.0 };
                 if n.cross(&pull).norm() < tol::ANGULAR {
-                    return Err(KernelError::InvalidParameter("A face square to the pull direction can't be drafted".into()));
+                    return Err(KernelError::InvalidParameter(
+                        "A face square to the pull direction can't be drafted".into(),
+                    ));
                 }
                 // The line where the face meets the neutral plane (the hinge), and the face
                 // turned about it to make the angle with the pull (OCCT's: absolute, so a face
                 // already inclined takes the angle given), its outward normal tipping towards
                 // the pull (the face leans in as it rises).
                 let nn = spec.neutral_normal.map_or(pull, |x| x.into_inner());
-                let t = nn.cross(&n).try_normalize(tol::ANGULAR).ok_or_else(|| KernelError::InvalidParameter("A face parallel to the neutral plane can't be drafted".into()))?;
+                let t = nn.cross(&n).try_normalize(tol::ANGULAR).ok_or_else(|| {
+                    KernelError::InvalidParameter(
+                        "A face parallel to the neutral plane can't be drafted".into(),
+                    )
+                })?;
                 let m = t.cross(&n);
                 let alpha = -(fr.o - spec.neutral).dot(&nn) / m.dot(&nn);
                 let on = fr.o + m * alpha;
@@ -1455,7 +2055,9 @@ pub fn draft(k: &mut NativeKernel, body: BodyId, spec: &DraftSpec) -> Result<OpR
                 let (ca, cb) = (n.dot(&pull), m.dot(&pull));
                 let r = (ca * ca + cb * cb).sqrt();
                 if r < spec.angle.sin().abs() - tol::ANGULAR_FINE {
-                    return Err(KernelError::InvalidParameter("the face can't reach that angle turning about its hinge".into()));
+                    return Err(KernelError::InvalidParameter(
+                        "the face can't reach that angle turning about its hinge".into(),
+                    ));
                 }
                 let phi = cb.atan2(ca);
                 let delta = (spec.angle.sin() / r).clamp(-1.0, 1.0).acos();
@@ -1464,14 +2066,25 @@ pub fn draft(k: &mut NativeKernel, body: BodyId, spec: &DraftSpec) -> Result<OpR
                 let th = if th1.abs() <= th2.abs() { th1 } else { th2 };
                 let n2 = n * th.cos() + m * th.sin();
                 let natural = if f.sense { n2 } else { -n2 };
-                Surface::Plane { f: Frame { o: on, x: t, y: natural.cross(&t), z: natural } }
+                Surface::Plane {
+                    f: Frame {
+                        o: on,
+                        x: t,
+                        y: natural.cross(&t),
+                        z: natural,
+                    },
+                }
             }
             Surface::Cylinder { f: fr, .. } | Surface::Cone { f: fr, .. } => {
                 if spec.neutral_normal.is_some() {
-                    return Err(KernelError::Unsupported("drafting a cylinder or cone about a neutral plane at an angle to the pull"));
+                    return Err(KernelError::Unsupported(
+                        "drafting a cylinder or cone about a neutral plane at an angle to the pull",
+                    ));
                 }
                 if fr.z.cross(&pull).norm() > tol::ANGULAR {
-                    return Err(KernelError::Unsupported("drafting a cylinder or cone not along the pull"));
+                    return Err(KernelError::Unsupported(
+                        "drafting a cylinder or cone not along the pull",
+                    ));
                 }
                 let (r, a0) = match &f.surf {
                     Surface::Cone { r, a, .. } => (*r, *a),
@@ -1484,7 +2097,10 @@ pub fn draft(k: &mut NativeKernel, body: BodyId, spec: &DraftSpec) -> Result<OpR
                 let h0 = (spec.neutral - fr.o).dot(&fr.z);
                 let r0 = r + h0 / a0.cos() * a0.sin();
                 if r0 <= 0.0 {
-                    return Err(KernelError::InvalidGeometry { op: "draft", why: "the cone's apex is on the far side of the neutral plane".into() });
+                    return Err(KernelError::InvalidGeometry {
+                        op: "draft",
+                        why: "the cone's apex is on the far side of the neutral plane".into(),
+                    });
                 }
                 // (A cone's natural normal points away from its axis while its half-angle's
                 // cosine is positive: a read cone can have |a| past a right angle.)
@@ -1493,7 +2109,14 @@ pub fn draft(k: &mut NativeKernel, body: BodyId, spec: &DraftSpec) -> Result<OpR
                 let s_pull = fr.z.dot(&pull).signum();
                 // v along the generator; radius r + v sin a with a negative to narrow as z rises.
                 let a = -spec.angle * s_pull * if outward { 1.0 } else { -1.0 };
-                Surface::Cone { f: Frame { o: fr.o + fr.z * h0, ..*fr }, r: r0, a }
+                Surface::Cone {
+                    f: Frame {
+                        o: fr.o + fr.z * h0,
+                        ..*fr
+                    },
+                    r: r0,
+                    a,
+                }
             }
             other => {
                 if std::env::var_os("CADRS_DRAFT_DEBUG").is_some() {
@@ -1506,6 +2129,22 @@ pub fn draft(k: &mut NativeKernel, body: BodyId, spec: &DraftSpec) -> Result<OpR
     let out = replace_surfaces(&b, &surfs)?;
     let nf = out.faces.len();
     let id = k.insert(out);
-    let history = History { modified: (0..nf).map(|i| (FaceId(i as u64), InputFace { body, face: FaceId(i as u64) })).collect(), ..Default::default() };
-    Ok(OpResult { bodies: vec![id], history })
+    let history = History {
+        modified: (0..nf)
+            .map(|i| {
+                (
+                    FaceId(i as u64),
+                    InputFace {
+                        body,
+                        face: FaceId(i as u64),
+                    },
+                )
+            })
+            .collect(),
+        ..Default::default()
+    };
+    Ok(OpResult {
+        bodies: vec![id],
+        history,
+    })
 }

@@ -11,9 +11,9 @@
 
 use super::curve::Curve;
 use super::math::*;
-use super::topo::{co_range, Body, Coedge};
-use crate::{KernelError, Result};
 use super::tol;
+use super::topo::{Body, Coedge, co_range};
+use crate::{KernelError, Result};
 
 /// OCCT's `Precision::Confusion()`.
 const CONFUSION: f64 = 1e-7;
@@ -31,7 +31,11 @@ impl Side {
         let e = &b.edges[c.edge];
         let (s, t) = co_range(e, c.fwd);
         let (near, far) = if at_end { (t, s) } else { (s, t) };
-        Side { curve: e.curve.clone(), near, far }
+        Side {
+            curve: e.curve.clone(),
+            near,
+            far,
+        }
     }
     /// The distance from `p` to the side's whole edge.
     fn dist(&self, p: &P3) -> f64 {
@@ -56,7 +60,10 @@ fn check_tail(sides: &[Side; 2], max_sine: Option<f64>, max_width: f64) -> Optio
     let tol2 = max_width + 0.5 * CONFUSION;
     let tol3 = max_width + CONFUSION;
     let tol4 = max_width + 1.5 * CONFUSION;
-    let p = [sides[0].curve.point(sides[0].near), sides[1].curve.point(sides[1].near)];
+    let p = [
+        sides[0].curve.point(sides[0].near),
+        sides[1].curve.point(sides[1].near),
+    ];
     if (p[0] - p[1]).norm() > tol2 {
         return None;
     }
@@ -117,8 +124,13 @@ fn check_tail(sides: &[Side; 2], max_sine: Option<f64>, max_width: f64) -> Optio
             }
         }
     }
-    if whole[0] && whole[1] && (sides[0].curve.point(bound[0]) - sides[1].curve.point(bound[1])).norm() <= tol3 {
-        return Some(Cut { at: [sides[0].far, sides[1].far] });
+    if whole[0]
+        && whole[1]
+        && (sides[0].curve.point(bound[0]) - sides[1].curve.point(bound[1])).norm() <= tol3
+    {
+        return Some(Cut {
+            at: [sides[0].far, sides[1].far],
+        });
     }
     // One side cut at its stretch's end, the other at that point's foot.
     let mut fi = 0;
@@ -138,7 +150,9 @@ fn check_tail(sides: &[Side; 2], max_sine: Option<f64>, max_width: f64) -> Optio
         if (at[k] - s.far).abs() <= pconf {
             at[k] = s.far;
             changed = true;
-        } else if (at[k] - s.near).abs() <= pconf || s.curve.length(s.near.min(at[k]), s.near.max(at[k])) <= CONFUSION {
+        } else if (at[k] - s.near).abs() <= pconf
+            || s.curve.length(s.near.min(at[k]), s.near.max(at[k])) <= CONFUSION
+        {
             at[k] = s.near;
         } else if s.curve.length(at[k].min(s.far), at[k].max(s.far)) <= CONFUSION {
             at[k] = s.far;
@@ -175,28 +189,37 @@ pub fn fix_tails(b: &mut Body, max_angle: f64, max_width: f64) -> Result<bool> {
                 }
                 guard += 1;
                 let (ia, ib) = ((i + n - 1) % n, i);
-                let (ca, cb) = (b.faces[fi].loops[li][ia].clone(), b.faces[fi].loops[li][ib].clone());
-                if ca.edge == cb.edge || b.edges[ca.edge].degenerate || b.edges[cb.edge].degenerate {
+                let (ca, cb) = (
+                    b.faces[fi].loops[li][ia].clone(),
+                    b.faces[fi].loops[li][ib].clone(),
+                );
+                if ca.edge == cb.edge || b.edges[ca.edge].degenerate || b.edges[cb.edge].degenerate
+                {
                     i += 1;
                     check_angle = true;
                     continue;
                 }
                 let sides = [Side::of(b, &ca, true), Side::of(b, &cb, false)];
-                let Some(cut) = check_tail(&sides, check_angle.then_some(max_sine), max_width) else {
+                let Some(cut) = check_tail(&sides, check_angle.then_some(max_sine), max_width)
+                else {
                     i += 1;
                     check_angle = true;
                     continue;
                 };
                 // At least one edge must stay in the loop.
                 let whole = (0..2).filter(|&k| cut.at[k] == sides[k].far).count();
-                let split = (0..2).filter(|&k| cut.at[k] != sides[k].far && cut.at[k] != sides[k].near).count();
+                let split = (0..2)
+                    .filter(|&k| cut.at[k] != sides[k].far && cut.at[k] != sides[k].near)
+                    .count();
                 if n + split < 1 + whole + split {
                     i += 1;
                     check_angle = true;
                     continue;
                 }
                 if uses[ca.edge] > 1 || uses[cb.edge] > 1 {
-                    return Err(KernelError::Unsupported("tails along edges other faces use"));
+                    return Err(KernelError::Unsupported(
+                        "tails along edges other faces use",
+                    ));
                 }
                 done = true;
                 // The new ends: a vertex between the two cut points.
@@ -226,7 +249,13 @@ pub fn fix_tails(b: &mut Body, max_angle: f64, max_width: f64) -> Result<bool> {
                 for &r in &remove {
                     let c = &b.faces[fi].loops[li][r];
                     let e = &b.edges[c.edge];
-                    let fv = if r == ia { b.co_start(c) } else if c.fwd { e.v[1] } else { e.v[0] };
+                    let fv = if r == ia {
+                        b.co_start(c)
+                    } else if c.fwd {
+                        e.v[1]
+                    } else {
+                        e.v[0]
+                    };
                     let fp = b.verts[fv].p;
                     for e2 in b.edges.iter_mut() {
                         for ev in e2.v.iter_mut() {

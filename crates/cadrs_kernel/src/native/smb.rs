@@ -35,11 +35,11 @@ use std::sync::Arc;
 
 use super::curve::Curve;
 use super::math::*;
-use super::nurbs::{NurbsCurve, NurbsSurface, H};
+use super::nurbs::{H, NurbsCurve, NurbsSurface};
 use super::surface::Surface;
+use super::tol;
 use super::topo::{Body, TOL_MIN};
 use super::xbuild::{XBuilder, XFace};
-use super::tol;
 
 /// The largest gap (mm) between a read model's curves and the p-curves read or fitted for them
 /// that its tolerances are raised to cover (OCCT's readers record the gaps they find the same
@@ -85,7 +85,11 @@ impl<'a> Stream<'a> {
     }
 
     fn line_no(&self) -> usize {
-        self.s[..self.i.min(self.s.len())].bytes().filter(|&b| b == b'\n').count() + 1
+        self.s[..self.i.min(self.s.len())]
+            .bytes()
+            .filter(|&b| b == b'\n')
+            .count()
+            + 1
     }
 
     fn skip_ws(&mut self) {
@@ -117,7 +121,10 @@ impl<'a> Stream<'a> {
 
     fn num(&mut self) -> R<f64> {
         let t = self.tok()?;
-        t.parse().ok().filter(|v: &f64| v.is_finite()).ok_or_else(|| format!("line {}: expected a number, found {t:?}", self.line_no()))
+        t.parse()
+            .ok()
+            .filter(|v: &f64| v.is_finite())
+            .ok_or_else(|| format!("line {}: expected a number, found {t:?}", self.line_no()))
     }
 
     fn nums(&mut self, n: usize) -> R<Vec<f64>> {
@@ -127,7 +134,10 @@ impl<'a> Stream<'a> {
     fn int(&mut self) -> R<i64> {
         let v = self.num()?;
         if v.fract() != 0.0 || v.abs() > 9.0e15 {
-            return Err(format!("line {}: expected an integer, found {v}", self.line_no()));
+            return Err(format!(
+                "line {}: expected an integer, found {v}",
+                self.line_no()
+            ));
         }
         Ok(v as i64)
     }
@@ -136,7 +146,16 @@ impl<'a> Stream<'a> {
     /// corrupt count can't ask for more memory than the file justifies.
     fn count(&mut self) -> R<usize> {
         let v = self.int()?;
-        usize::try_from(v).ok().filter(|&n| n <= self.s.len()).ok_or_else(|| format!("line {}: a count of {v} in a file of {} bytes", self.line_no(), self.s.len()))
+        usize::try_from(v)
+            .ok()
+            .filter(|&n| n <= self.s.len())
+            .ok_or_else(|| {
+                format!(
+                    "line {}: a count of {v} in a file of {} bytes",
+                    self.line_no(),
+                    self.s.len()
+                )
+            })
     }
 
     fn p3(&mut self) -> R<V3> {
@@ -173,16 +192,26 @@ impl<'a> Stream<'a> {
     /// for a curve of a version over 32, a `Curve Dim N` line.
     fn read_type(&mut self, dim: bool) -> R<(i64, usize)> {
         let ty = self.last_int_of_line()?;
-        let d = if dim { self.last_int_of_line()? as usize } else { 3 };
+        let d = if dim {
+            self.last_int_of_line()? as usize
+        } else {
+            3
+        };
         Ok((ty, d))
     }
 
     fn last_int_of_line(&mut self) -> R<i64> {
         self.skip_ws();
-        let end = self.s[self.i..].find('\n').map_or(self.s.len(), |k| self.i + k);
+        let end = self.s[self.i..]
+            .find('\n')
+            .map_or(self.s.len(), |k| self.i + k);
         let line = &self.s[self.i..end];
-        let n = line.split(|c: char| c.is_whitespace() || c == ':').rfind(|w| !w.is_empty()).and_then(|w| w.parse::<i64>().ok());
-        let n = n.ok_or_else(|| format!("line {}: expected a type, found {line:?}", self.line_no()))?;
+        let n = line
+            .split(|c: char| c.is_whitespace() || c == ':')
+            .rfind(|w| !w.is_empty())
+            .and_then(|w| w.parse::<i64>().ok());
+        let n =
+            n.ok_or_else(|| format!("line {}: expected a type, found {line:?}", self.line_no()))?;
         self.nl();
         Ok(n)
     }
@@ -238,7 +267,11 @@ fn bspline_curve(st: &mut Stream, fmt: Fmt) -> R<NurbsCurve> {
     for _ in 0..=n {
         let v = st.nums(dim + rational as usize)?;
         st.nl();
-        let (x, y, z) = (v[0], *v.get(1).unwrap_or(&0.0), if dim >= 3 { v[2] } else { 0.0 });
+        let (x, y, z) = (
+            v[0],
+            *v.get(1).unwrap_or(&0.0),
+            if dim >= 3 { v[2] } else { 0.0 },
+        );
         let w = if rational { v[dim] } else { 1.0 };
         cps.push(H::new(x, y, z, w));
     }
@@ -332,17 +365,32 @@ fn curve_of(st: &mut Stream, fmt: Fmt, ty: i64) -> R<NurbsCurve> {
 /// control points; elsewhere a cubic interpolation of 65 points of it at the uv curve's
 /// parameters.
 fn curve_on_surface(uv: &NurbsCurve, s: &NurbsSurface) -> NurbsCurve {
-    let affine = s.du == 1 && s.dv == 1 && s.cps.len() == 2 && s.cps[0].len() == 2 && s.cps.iter().flatten().all(|h| (h.w - 1.0).abs() < 1e-14) && {
-        let c = |i: usize, j: usize| s.cps[i][j].xyz();
-        (c(1, 1) - c(1, 0) - c(0, 1) + c(0, 0)).norm() < tol::REL_FINE * (1.0 + c(0, 0).norm())
-    };
+    let affine = s.du == 1
+        && s.dv == 1
+        && s.cps.len() == 2
+        && s.cps[0].len() == 2
+        && s.cps.iter().flatten().all(|h| (h.w - 1.0).abs() < 1e-14)
+        && {
+            let c = |i: usize, j: usize| s.cps[i][j].xyz();
+            (c(1, 1) - c(1, 0) - c(0, 1) + c(0, 0)).norm() < tol::REL_FINE * (1.0 + c(0, 0).norm())
+        };
     let ((su0, su1), (sv0, sv1)) = s.range();
     let on = |q: P3| s.point(q.x.clamp(su0, su1), q.y.clamp(sv0, sv1));
     if affine {
         let (o, a, b) = (s.point(su0, sv0), s.point(su1, sv0), s.point(su0, sv1));
-        let map = |q: P3| o + (a - o) * ((q.x - su0) / (su1 - su0)) + (b - o) * ((q.y - sv0) / (sv1 - sv0));
-        let cps = uv.cps.iter().map(|h| super::nurbs::hom(&map(super::nurbs::dehom(h)), h.w)).collect();
-        return NurbsCurve { degree: uv.degree, knots: uv.knots.clone(), cps };
+        let map = |q: P3| {
+            o + (a - o) * ((q.x - su0) / (su1 - su0)) + (b - o) * ((q.y - sv0) / (sv1 - sv0))
+        };
+        let cps = uv
+            .cps
+            .iter()
+            .map(|h| super::nurbs::hom(&map(super::nurbs::dehom(h)), h.w))
+            .collect();
+        return NurbsCurve {
+            degree: uv.degree,
+            knots: uv.knots.clone(),
+            cps,
+        };
     }
     let (t0, t1) = uv.range();
     let ts: Vec<f64> = (0..=64).map(|i| t0 + (t1 - t0) * i as f64 / 64.0).collect();
@@ -379,11 +427,20 @@ fn bspline_surface(st: &mut Stream, fmt: Fmt) -> R<NurbsSurface> {
         st.nl();
     }
     let idx = |x: f64| -> R<usize> {
-        if x >= 0.0 && x.fract() == 0.0 && x <= st.s.len() as f64 { Ok(x as usize) } else { Err(format!("a surface size of {x}")) }
+        if x >= 0.0 && x.fract() == 0.0 && x <= st.s.len() as f64 {
+            Ok(x as usize)
+        } else {
+            Err(format!("a surface size of {x}"))
+        }
     };
     let (nu, nv, pu, pv) = (idx(ns[0])?, idx(ns[1])?, idx(ds[0])?, idx(ds[1])?);
     if (nu + 1).saturating_mul(nv + 1) > st.s.len() {
-        return Err(format!("{} × {} poles in a file of {} bytes", nu + 1, nv + 1, st.s.len()));
+        return Err(format!(
+            "{} × {} poles in a file of {} bytes",
+            nu + 1,
+            nv + 1,
+            st.s.len()
+        ));
     }
     let mut cps = vec![Vec::with_capacity(nv + 1); nu + 1];
     for row in cps.iter_mut() {
@@ -421,17 +478,26 @@ fn offset_approx(base: NurbsSurface, d: f64) -> Surface {
     let ((u0, u1), (v0, v1)) = base.range();
     let s = Surface::Nurbs(Arc::new(base));
     let m = 24;
-    let us: Vec<f64> = (0..=m).map(|i| u0 + (u1 - u0) * i as f64 / m as f64).collect();
-    let vs: Vec<f64> = (0..=m).map(|j| v0 + (v1 - v0) * j as f64 / m as f64).collect();
+    let us: Vec<f64> = (0..=m)
+        .map(|i| u0 + (u1 - u0) * i as f64 / m as f64)
+        .collect();
+    let vs: Vec<f64> = (0..=m)
+        .map(|j| v0 + (v1 - v0) * j as f64 / m as f64)
+        .collect();
     // Interpolate each row in v, then the columns of poles in u.
     let rows: Vec<NurbsCurve> = us
         .iter()
         .map(|&u| {
-            let r: Vec<P3> = vs.iter().map(|&v| s.eval(u, v) + s.normal(u, v).normalize() * d).collect();
+            let r: Vec<P3> = vs
+                .iter()
+                .map(|&v| s.eval(u, v) + s.normal(u, v).normalize() * d)
+                .collect();
             NurbsCurve::interpolate(&r, &vs, 3, None, None)
         })
         .collect();
-    Surface::Nurbs(Arc::new(NurbsSurface::through_curves(&rows, &us, 3, None, None)))
+    Surface::Nurbs(Arc::new(NurbsSurface::through_curves(
+        &rows, &us, 3, None, None,
+    )))
 }
 
 /// `SmSurface::ReadFromDB` for type `ty` (a version over 32).
@@ -447,7 +513,9 @@ fn surface_of(st: &mut Stream, fmt: Fmt, ty: i64) -> R<SurfRec> {
             st.nl();
             st.nums(2)?;
             st.nl();
-            Some(Surface::Plane { f: Frame::from_xz(P3::from(o), x, x.cross(&y)) })
+            Some(Surface::Plane {
+                f: Frame::from_xz(P3::from(o), x, x.cross(&y)),
+            })
         }
         // Cone (base radius, semi-angle, inside-out flag) over a surface of revolution.
         15012 => {
@@ -477,7 +545,10 @@ fn surface_of(st: &mut Stream, fmt: Fmt, ty: i64) -> R<SurfRec> {
             st.nl();
             polar_conversion(st, fmt)?;
             let m = super::recognize::curve(&generator).unwrap_or_else(|| Curve::nurbs(generator));
-            Some(Surface::Revolution { f: Frame::from_xz(P3::from(o), x, x.cross(&y)), m })
+            Some(Surface::Revolution {
+                f: Frame::from_xz(P3::from(o), x, x.cross(&y)),
+                m,
+            })
         }
         // Extrusion: origin, vector, domain, orientation, swap flag, the curve's plane (point,
         // normal), then the generating curve: c(u) + v·vector.
@@ -500,7 +571,10 @@ fn surface_of(st: &mut Stream, fmt: Fmt, ty: i64) -> R<SurfRec> {
         }
         _ => return Err(format!("a surface of type {ty}")),
     };
-    Ok(SurfRec { nurbs: bspline_surface(st, fmt)?, exact })
+    Ok(SurfRec {
+        nurbs: bspline_surface(st, fmt)?,
+        exact,
+    })
 }
 
 /// `SmBrepData::ReadSurfaceFromDB` (without the attributes).
@@ -510,12 +584,18 @@ fn read_surface_record(st: &mut Stream, fmt: Fmt) -> R<SurfRec> {
         return surface_of(st, fmt, ty);
     }
     match ty {
-        15002 => Ok(SurfRec { nurbs: bspline_surface(st, fmt)?, exact: None }),
+        15002 => Ok(SurfRec {
+            nurbs: bspline_surface(st, fmt)?,
+            exact: None,
+        }),
         15400 => {
             let d = st.num()?;
             st.nl();
             let base = bspline_surface(st, fmt)?;
-            Ok(SurfRec { nurbs: base.clone(), exact: Some(offset_approx(base, d)) })
+            Ok(SurfRec {
+                nurbs: base.clone(),
+                exact: Some(offset_approx(base, d)),
+            })
         }
         _ => Err(format!("a surface of type {ty}")),
     }
@@ -526,8 +606,13 @@ fn face_surface(rec: &SurfRec, warnings: &mut Vec<String>, k: usize) -> (Surface
     let nurbs = Surface::Nurbs(Arc::new(rec.nurbs.clone()));
     // A B-spline cone (a side collapsed to its apex) is the analytic one
     // (`recognize::surface_through_poles`); the other kinds are recognised after the build.
-    let poled = || super::recognize::surface_through_poles(&rec.nurbs).filter(|s| matches!(s, Surface::Cone { .. }));
-    let Some(exact) = &rec.exact.clone().or_else(poled) else { return (nurbs, false) };
+    let poled = || {
+        super::recognize::surface_through_poles(&rec.nurbs)
+            .filter(|s| matches!(s, Surface::Cone { .. }))
+    };
+    let Some(exact) = &rec.exact.clone().or_else(poled) else {
+        return (nurbs, false);
+    };
     if matches!(exact, Surface::Nurbs(_)) {
         // The legacy offset: its own normal is the base's.
         return (exact.clone(), false);
@@ -540,9 +625,18 @@ fn face_surface(rec: &SurfRec, warnings: &mut Vec<String>, k: usize) -> (Surface
         let (eu, ev) = exact.project(&p, None);
         let q = exact.eval(eu, ev);
         let n2 = exact.normal(eu, ev);
-        let size = rec.nurbs.cps.iter().flatten().map(|h| super::nurbs::dehom(h).coords.norm()).fold(1.0, f64::max);
+        let size = rec
+            .nurbs
+            .cps
+            .iter()
+            .flatten()
+            .map(|h| super::nurbs::dehom(h).coords.norm())
+            .fold(1.0, f64::max);
         if (q - p).norm() > tol::REL_POINT * size {
-            warnings.push(format!("surface {k}: the analytic surface misses its B-spline form by {:.2e}", (q - p).norm()));
+            warnings.push(format!(
+                "surface {k}: the analytic surface misses its B-spline form by {:.2e}",
+                (q - p).norm()
+            ));
             return (nurbs, false);
         }
         let d = n1.dot(&n2);
@@ -557,7 +651,10 @@ fn face_surface(rec: &SurfRec, warnings: &mut Vec<String>, k: usize) -> (Surface
 /// `[Brep #i]` block) to its end.
 fn brep(text: &str, fmt: Fmt) -> R<Brep> {
     if fmt.version > 43 {
-        return Err(format!("version {} (the new tolerance model) isn't supported", fmt.version));
+        return Err(format!(
+            "version {} (the new tolerance model) isn't supported",
+            fmt.version
+        ));
     }
     let mut st = Stream::new(text);
     let ids = fmt.ids();
@@ -652,7 +749,13 @@ fn brep(text: &str, fmt: Fmt) -> R<Brep> {
         let v = st.nums(7)?;
         st.nl();
         fmt.skip_attrs(&mut st, 1)?;
-        edges.push((v[0], v[1] as usize, v[2] as usize, v[3] as usize, (v[5], v[6])));
+        edges.push((
+            v[0],
+            v[1] as usize,
+            v[2] as usize,
+            v[3] as usize,
+            (v[5], v[6]),
+        ));
     }
     let nv = sec(&mut st, "//Vertex Data", "// Vertex Data")?;
     let mut verts = Vec::new();
@@ -686,7 +789,20 @@ fn brep(text: &str, fmt: Fmt) -> R<Brep> {
         surfs.push(read_surface_record(&mut st, fmt).map_err(|e| format!("surface {k}: {e}"))?);
         fmt.skip_attrs(&mut st, 1)?;
     }
-    build(Topo { regions, shells, faceuses, faces, loops, eus, edges, verts }, curves, surfs)
+    build(
+        Topo {
+            regions,
+            shells,
+            faceuses,
+            faces,
+            loops,
+            eus,
+            edges,
+            verts,
+        },
+        curves,
+        surfs,
+    )
 }
 
 /// An edge record: tolerance, curve, start and end vertex, parameter range.
@@ -712,9 +828,22 @@ struct Topo {
 }
 
 fn build(t: Topo, curves: Vec<NurbsCurve>, surfs: Vec<SurfRec>) -> R<Brep> {
-    let Topo { regions, shells, faceuses, faces, loops, eus, edges, verts } = t;
+    let Topo {
+        regions,
+        shells,
+        faceuses,
+        faces,
+        loops,
+        eus,
+        edges,
+        verts,
+    } = t;
     let mut warnings = Vec::new();
-    let surfs: Vec<(Surface, bool)> = surfs.iter().enumerate().map(|(k, s)| face_surface(s, &mut warnings, k)).collect();
+    let surfs: Vec<(Surface, bool)> = surfs
+        .iter()
+        .enumerate()
+        .map(|(k, s)| face_surface(s, &mut warnings, k))
+        .collect();
     let mut xb = XBuilder::new();
     // SMLib turns its solids outward on reading (some files' face uses point in).
     xb.unoriented = true;
@@ -724,14 +853,19 @@ fn build(t: Topo, curves: Vec<NurbsCurve>, surfs: Vec<SurfRec>) -> R<Brep> {
     // Earlier vertices by grid cell (cells as large as the largest tolerance).
     let cell = verts.iter().map(|v| v.0).fold(TOL_MIN, f64::max) * 2.0;
     let key = |p: &P3| [p.x, p.y, p.z].map(|x| (x / cell).floor() as i64);
-    let mut grid: std::collections::HashMap<[i64; 3], Vec<usize>> = std::collections::HashMap::new();
+    let mut grid: std::collections::HashMap<[i64; 3], Vec<usize>> =
+        std::collections::HashMap::new();
     for (k, &(t, p)) in verts.iter().enumerate() {
         let c = key(&p);
         let mut same = None;
         'near: for dx in -1..=1 {
             for dy in -1..=1 {
                 for dz in -1..=1 {
-                    for &j in grid.get(&[c[0] + dx, c[1] + dy, c[2] + dz]).into_iter().flatten() {
+                    for &j in grid
+                        .get(&[c[0] + dx, c[1] + dy, c[2] + dz])
+                        .into_iter()
+                        .flatten()
+                    {
                         if (verts[j].1 - p).norm() <= verts[j].0.max(t).max(TOL_MIN) {
                             same = Some(j);
                             break 'near;
@@ -751,14 +885,23 @@ fn build(t: Topo, curves: Vec<NurbsCurve>, surfs: Vec<SurfRec>) -> R<Brep> {
     let mut eids: Vec<Option<usize>> = Vec::new();
     let mut stretches: Vec<Curve> = Vec::new();
     for (k, &(t, c, a, b, (p0, p1))) in edges.iter().enumerate() {
-        let cur = curves.get(c).ok_or_else(|| format!("edge {k}: no curve {c}"))?;
-        let (&va, &vb) = (vids.get(a).ok_or_else(|| format!("edge {k}: no vertex {a}"))?, vids.get(b).ok_or_else(|| format!("edge {k}: no vertex {b}"))?);
+        let cur = curves
+            .get(c)
+            .ok_or_else(|| format!("edge {k}: no curve {c}"))?;
+        let (&va, &vb) = (
+            vids.get(a)
+                .ok_or_else(|| format!("edge {k}: no vertex {a}"))?,
+            vids.get(b)
+                .ok_or_else(|| format!("edge {k}: no vertex {b}"))?,
+        );
         // The edge's stretch of its curve (the vertices' projections on the whole curve can land
         // on another stretch of a long or closed one).
         let (lo, hi) = cur.range();
         let (p0, p1) = (p0.max(lo), p1.min(hi));
         let span = hi - lo;
-        let cur = if p1 > p0 + span * tol::REL && (p0 > lo + span * tol::REL || p1 < hi - span * tol::REL) {
+        let cur = if p1 > p0 + span * tol::REL
+            && (p0 > lo + span * tol::REL || p1 < hi - span * tol::REL)
+        {
             Curve::Nurbs(Arc::new(cur.clone())).to_nurbs(p0, p1)
         } else {
             cur.clone()
@@ -796,7 +939,11 @@ fn build(t: Topo, curves: Vec<NurbsCurve>, surfs: Vec<SurfRec>) -> R<Brep> {
             }
         }
         let (surf, flip) = surfs.get(s)?.clone();
-        let id = xb.face(XFace { surf, sense: orient != flip, loops: lps });
+        let id = xb.face(XFace {
+            surf,
+            sense: orient != flip,
+            loops: lps,
+        });
         face_ids[fi] = Some(id); // (fi checked above)
         Some(id)
     };
@@ -808,7 +955,9 @@ fn build(t: Topo, curves: Vec<NurbsCurve>, surfs: Vec<SurfRec>) -> R<Brep> {
         }
         let mut shell_ids = Vec::new();
         for si in first..first.saturating_add(cnt).min(shells.len()) {
-            let Some(Some((n, start))) = shells.get(si).copied() else { continue };
+            let Some(Some((n, start))) = shells.get(si).copied() else {
+                continue;
+            };
             // A lamina face has a face use each way in the one shell: listed once.
             let mut fs: Vec<usize> = Vec::new();
             for &(f, o) in faceuses.iter().take(start.saturating_add(n)).skip(start) {
@@ -832,7 +981,12 @@ fn build(t: Topo, curves: Vec<NurbsCurve>, surfs: Vec<SurfRec>) -> R<Brep> {
     body.fit_tolerances_searched(READ_GAP);
     // Wire edges (edge uses of kind 2): a wire body's edges, or free edges beside the faces,
     // their ends merged with the faces' vertices where they meet.
-    let mut wire_edges: Vec<usize> = eus.iter().filter(|u| u.0 == 2).map(|u| u.1).filter(|&e| e < edges.len()).collect();
+    let mut wire_edges: Vec<usize> = eus
+        .iter()
+        .filter(|u| u.0 == 2)
+        .map(|u| u.1)
+        .filter(|&e| e < edges.len())
+        .collect();
     wire_edges.sort_unstable();
     wire_edges.dedup();
     if !wire_edges.is_empty() {
@@ -857,7 +1011,9 @@ fn build(t: Topo, curves: Vec<NurbsCurve>, surfs: Vec<SurfRec>) -> R<Brep> {
         // Ends on a face vertex become that vertex.
         for vi in vo..body.verts.len() {
             let p = body.verts[vi].p;
-            if let Some(same) = (0..vo).find(|&u| (body.verts[u].p - p).norm() <= body.verts[u].tol.max(body.verts[vi].tol)) {
+            if let Some(same) = (0..vo).find(|&u| {
+                (body.verts[u].p - p).norm() <= body.verts[u].tol.max(body.verts[vi].tol)
+            }) {
                 for e in &mut body.edges[eo..] {
                     for v in &mut e.v {
                         if *v == vi {
@@ -871,7 +1027,15 @@ fn build(t: Topo, curves: Vec<NurbsCurve>, surfs: Vec<SurfRec>) -> R<Brep> {
         body.chain_wires();
     }
     if body.faces.is_empty() && !faces.is_empty() {
-        return Err(format!("no faces read: {}", warnings.iter().take(3).cloned().collect::<Vec<_>>().join("; ")));
+        return Err(format!(
+            "no faces read: {}",
+            warnings
+                .iter()
+                .take(3)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("; ")
+        ));
     }
     let edge_mids = edges
         .iter()
@@ -881,10 +1045,25 @@ fn build(t: Topo, curves: Vec<NurbsCurve>, surfs: Vec<SurfRec>) -> R<Brep> {
             n.point((0.5 * (t0 + t1)).clamp(a, b))
         })
         .collect();
-    let edge_ends = edges.iter().map(|&(_, _, a, b, _)| (verts[a].1, verts[b].1)).collect();
+    let edge_ends = edges
+        .iter()
+        .map(|&(_, _, a, b, _)| (verts[a].1, verts[b].1))
+        .collect();
     let cents = face_centroids(&body);
-    let face_centroids = face_ids.iter().map(|x| x.and_then(|x| map.get(x).copied().flatten()).map(|f| cents[f])).collect();
-    Ok(Brep { body, edge_mids, edge_ends, face_centroids, warnings })
+    let face_centroids = face_ids
+        .iter()
+        .map(|x| {
+            x.and_then(|x| map.get(x).copied().flatten())
+                .map(|f| cents[f])
+        })
+        .collect();
+    Ok(Brep {
+        body,
+        edge_mids,
+        edge_ends,
+        face_centroids,
+        warnings,
+    })
 }
 
 /// The area centroid of each face of `body`, from a fine tessellation (deflection 1e-3 of the
@@ -896,7 +1075,11 @@ pub fn face_centroids(body: &Body) -> Vec<P3> {
     for fi in 0..body.faces.len() {
         bb.union(&body.face_bbox(fi));
     }
-    let defl = if bb.is_empty() { 1e-3 } else { (bb.diagonal() * 1e-3).max(tol::POINT) };
+    let defl = if bb.is_empty() {
+        1e-3
+    } else {
+        (bb.diagonal() * 1e-3).max(tol::POINT)
+    };
     let es = super::tess::edge_samples(body, defl, 0.3);
     body.faces
         .iter()
@@ -913,7 +1096,17 @@ pub fn face_centroids(body: &Body) -> Vec<P3> {
                 return P3::from(c / a);
             }
             // No triangles: the middle of its edges' middles.
-            let ms: Vec<V3> = f.loops.iter().flatten().filter(|co| !body.edges[co.edge].degenerate).map(|co| body.edges[co.edge].point(body.edges[co.edge].mid_t()).coords).collect();
+            let ms: Vec<V3> = f
+                .loops
+                .iter()
+                .flatten()
+                .filter(|co| !body.edges[co.edge].degenerate)
+                .map(|co| {
+                    body.edges[co.edge]
+                        .point(body.edges[co.edge].mid_t())
+                        .coords
+                })
+                .collect();
             P3::from(ms.iter().sum::<V3>() / ms.len().max(1) as f64)
         })
         .collect()
@@ -923,17 +1116,29 @@ pub fn face_centroids(body: &Body) -> Vec<P3> {
 fn smb_format(text: &str) -> R<(Fmt, &str)> {
     let t = text.trim_start();
     let version = match t.strip_prefix("Version") {
-        Some(rest) => rest.split_whitespace().next().and_then(|v| v.parse().ok()).ok_or("a bad Version line")?,
+        Some(rest) => rest
+            .split_whitespace()
+            .next()
+            .and_then(|v| v.parse().ok())
+            .ok_or("a bad Version line")?,
         None => 30,
     };
-    let at = text.find("//Brep Starts").ok_or("not an SMLib B-rep file")?;
+    let at = text
+        .find("//Brep Starts")
+        .ok_or("not an SMLib B-rep file")?;
     if text[..at].lines().any(|l| {
         let l = l.trim();
         !l.is_empty() && !l.starts_with("Version") && !l.starts_with("Healer Version")
     }) {
         return Err("not an SMLib B-rep file".into());
     }
-    Ok((Fmt { version, attrs: false }, &text[at..]))
+    Ok((
+        Fmt {
+            version,
+            attrs: false,
+        },
+        &text[at..],
+    ))
 }
 
 /// Reads an SMLib `.smb` file: the body, its edges' middle points and ends and its faces'
@@ -980,13 +1185,29 @@ pub fn read_part(bytes: &[u8]) -> R<Part> {
     let mut counts = [0u64; 4];
     for (k, c) in counts.iter_mut().enumerate() {
         let tag = format!("({})", k + 1);
-        let line = text.lines().find(|l| l.contains(&tag)).ok_or_else(|| format!("no count {tag}"))?;
-        *c = line.split_whitespace().find_map(|w| w.parse().ok()).ok_or_else(|| format!("a bad count line {line:?}"))?;
+        let line = text
+            .lines()
+            .find(|l| l.contains(&tag))
+            .ok_or_else(|| format!("no count {tag}"))?;
+        *c = line
+            .split_whitespace()
+            .find_map(|w| w.parse().ok())
+            .ok_or_else(|| format!("a bad count line {line:?}"))?;
     }
-    let (version, ncurves) = if counts[0] > 1_000_000 { ((counts[0] / 1_000_000) as u32, (counts[0] % 1_000_000) as usize) } else { (30, counts[0] as usize) };
+    let (version, ncurves) = if counts[0] > 1_000_000 {
+        (
+            (counts[0] / 1_000_000) as u32,
+            (counts[0] % 1_000_000) as usize,
+        )
+    } else {
+        (30, counts[0] as usize)
+    };
     let nsurfs = (counts[1] % 1_000_000) as usize;
     let nbreps = counts[3] as usize;
-    let fmt = Fmt { version, attrs: true };
+    let fmt = Fmt {
+        version,
+        attrs: true,
+    };
     let mut st = Stream::new(&text);
     let mut curves = Vec::new();
     for k in 0..ncurves {
@@ -1009,14 +1230,21 @@ pub fn read_part(bytes: &[u8]) -> R<Part> {
     // B-reps: each from its `[Brep #i]` line to the next.
     let starts: Vec<usize> = text.match_indices("[Brep #").map(|(i, _)| i).collect();
     if starts.len() != nbreps {
-        return Err(format!("{} B-rep blocks, the summary says {nbreps}", starts.len()));
+        return Err(format!(
+            "{} B-rep blocks, the summary says {nbreps}",
+            starts.len()
+        ));
     }
     let mut breps = Vec::new();
     for (k, &a) in starts.iter().enumerate() {
         let b = starts.get(k + 1).copied().unwrap_or(text.len());
         breps.push(brep(&text[a..b], fmt).map_err(|e| format!("brep {k}: {e}"))?);
     }
-    Ok(Part { curves, surfaces, breps })
+    Ok(Part {
+        curves,
+        surfaces,
+        breps,
+    })
 }
 
 /// The format of a bare curve or surface file: the current one when it starts with `Object
@@ -1028,7 +1256,13 @@ fn bare(text: &str) -> (Fmt, Stream<'_>) {
     if version == 30 && (t.starts_with('C') || t.starts_with('S')) {
         st.nl();
     }
-    (Fmt { version, attrs: false }, st)
+    (
+        Fmt {
+            version,
+            attrs: false,
+        },
+        st,
+    )
 }
 
 /// Reads a bare SMLib curve file (`.smc`, `SmCurve::ReadFromFile`): the curve in SMLib's
@@ -1076,7 +1310,10 @@ mod tests {
         assert!(issues.is_empty(), "{name}: {issues:?}");
         assert!(!b.body.solids.is_empty(), "{name}: no solid");
         // (check() also says when a solid encloses a negative volume.)
-        assert!(b.face_centroids.iter().all(|c| c.is_some()), "{name}: a face dropped");
+        assert!(
+            b.face_centroids.iter().all(|c| c.is_some()),
+            "{name}: a face dropped"
+        );
         assert_eq!(b.edge_mids.len(), b.edge_ends.len());
     }
 
@@ -1116,8 +1353,14 @@ mod tests {
         // SMLib's (its props of the file): volume 1197773.92576, the face 12187.311.
         let v = super::super::mass::body_volume(&b.body);
         assert!((v - 1197773.92576).abs() < 1e-6 * v, "volume {v}");
-        let big = (0..b.body.faces.len()).filter(|&f| matches!(b.body.faces[f].surf, Surface::Nurbs(_))).map(|f| super::super::mass::face_area(&b.body, f).0).fold(0.0, f64::max);
-        assert!((big - 12187.311).abs() < 1e-4 * big, "the corner face's area {big}");
+        let big = (0..b.body.faces.len())
+            .filter(|&f| matches!(b.body.faces[f].surf, Surface::Nurbs(_)))
+            .map(|f| super::super::mass::face_area(&b.body, f).0)
+            .fold(0.0, f64::max);
+        assert!(
+            (big - 12187.311).abs() < 1e-4 * big,
+            "the corner face's area {big}"
+        );
     }
 
     /// Files the checks used to refuse: two solids sharing an edge (each closed shell uses it
@@ -1126,7 +1369,12 @@ mod tests {
     /// gaps between its curves and our p-curves need, raised to cover them.
     #[test]
     fn shared_edges_curved_loops_and_gaps() {
-        for f in ["reader/boxes_share_one_edge.smb", "reader/Mouse.smb", "fillets/vase2.smb", "offset/OffsetBoxSphOnCorner.smb"] {
+        for f in [
+            "reader/boxes_share_one_edge.smb",
+            "reader/Mouse.smb",
+            "fillets/vase2.smb",
+            "offset/OffsetBoxSphOnCorner.smb",
+        ] {
             let b = read_brep(&fixture(f)).unwrap_or_else(|e| panic!("{f}: {e}"));
             solid(&b, f);
             let full = b.body.check_with(super::super::topo::CheckLevel::Full);
@@ -1181,7 +1429,10 @@ mod tests {
     #[test]
     fn huge_counts_are_errors() {
         let text = String::from_utf8(fixture("fillets/box_on_box.smb")).unwrap();
-        for (from, to) in [("24 Edges In Brep", "4000000000000000000 Edges In Brep"), ("48 Edgeuses In Brep", "99999999999 Edgeuses In Brep")] {
+        for (from, to) in [
+            ("24 Edges In Brep", "4000000000000000000 Edges In Brep"),
+            ("48 Edgeuses In Brep", "99999999999 Edgeuses In Brep"),
+        ] {
             let bad = text.replacen(from, to, 1);
             assert_ne!(bad, text, "{from}");
             assert!(read_brep(bad.as_bytes()).is_err(), "{from}");
@@ -1241,11 +1492,19 @@ mod tests {
         ] {
             let bytes = fixture(f);
             let p = read_part(&bytes).unwrap_or_else(|e| panic!("{f}: {e}"));
-            assert_eq!((p.curves.len(), p.surfaces.len(), p.breps.len()), (nc, ns, nb), "{f}");
+            assert_eq!(
+                (p.curves.len(), p.surfaces.len(), p.breps.len()),
+                (nc, ns, nb),
+                "{f}"
+            );
             for (k, b) in p.breps.iter().enumerate() {
                 let issues = b.body.check();
                 assert!(issues.is_empty(), "{f} brep {k}: {issues:?}");
-                assert!(!b.warnings.iter().any(|w| w.contains("doesn't close")), "{f} brep {k}: {:?}", b.warnings);
+                assert!(
+                    !b.warnings.iter().any(|w| w.contains("doesn't close")),
+                    "{f} brep {k}: {:?}",
+                    b.warnings
+                );
             }
         }
     }
@@ -1259,7 +1518,12 @@ mod tests {
             return;
         };
         let dir = std::path::Path::new(&root).join("TestFiles/pt_TestFiles");
-        let mut names: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).filter(|n| (n.starts_with("ssi_") || n.starts_with("ss_")) && n.ends_with(".smp")).collect();
+        let mut names: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|n| (n.starts_with("ssi_") || n.starts_with("ss_")) && n.ends_with(".smp"))
+            .collect();
         names.sort();
         let mut bad = Vec::new();
         for n in &names {
@@ -1302,12 +1566,25 @@ mod tests {
             ("reader/boolean_trees.smp", 5, 3, 1, -1.0),
         ] {
             let bytes = fixture(f);
-            let b = if f.ends_with(".smp") { read_part(&bytes).unwrap().breps.swap_remove(k) } else { read_brep(&bytes).unwrap_or_else(|e| panic!("{f}: {e}")) };
+            let b = if f.ends_with(".smp") {
+                read_part(&bytes).unwrap().breps.swap_remove(k)
+            } else {
+                read_brep(&bytes).unwrap_or_else(|e| panic!("{f}: {e}"))
+            };
             assert!(b.body.check().is_empty(), "{f} {k}: {:?}", b.body.check());
-            assert_eq!((b.body.faces.len(), b.body.solids.len()), (nf, ns), "{f} {k}: {:?}", b.warnings);
+            assert_eq!(
+                (b.body.faces.len(), b.body.solids.len()),
+                (nf, ns),
+                "{f} {k}: {:?}",
+                b.warnings
+            );
             let m = super::super::mass::body_mass(&b.body);
             if area > 0.0 {
-                assert!((m.surface_area - area).abs() < 1e-6 * area, "{f}: area {} want {area}", m.surface_area);
+                assert!(
+                    (m.surface_area - area).abs() < 1e-6 * area,
+                    "{f}: area {} want {area}",
+                    m.surface_area
+                );
             }
             if ns > 0 {
                 assert!(m.volume > 0.0, "{f} {k}: volume {}", m.volume);
@@ -1327,8 +1604,18 @@ mod tests {
         assert_eq!(b.class(), crate::BodyClass::Wire);
         let e = &b.edges[0];
         let (p, q) = (e.point(e.t[0]), e.point(e.t[1]));
-        assert!(((p - P3::new(25.0, 15.0, 0.0)).norm() < 1e-9 && (q - P3::new(25.0, 20.0, 0.0)).norm() < 1e-9) || ((q - P3::new(25.0, 15.0, 0.0)).norm() < 1e-9 && (p - P3::new(25.0, 20.0, 0.0)).norm() < 1e-9), "{p:?} {q:?}");
-        let b = read_brep(&fixture("reader/box_with_attached_wire_edge_and_detached_wire_edge.smb")).unwrap().body;
+        assert!(
+            ((p - P3::new(25.0, 15.0, 0.0)).norm() < 1e-9
+                && (q - P3::new(25.0, 20.0, 0.0)).norm() < 1e-9)
+                || ((q - P3::new(25.0, 15.0, 0.0)).norm() < 1e-9
+                    && (p - P3::new(25.0, 20.0, 0.0)).norm() < 1e-9),
+            "{p:?} {q:?}"
+        );
+        let b = read_brep(&fixture(
+            "reader/box_with_attached_wire_edge_and_detached_wire_edge.smb",
+        ))
+        .unwrap()
+        .body;
         assert!(b.check().is_empty(), "{:?}", b.check());
         assert_eq!((b.faces.len(), b.wires.len()), (6, 2));
         assert_eq!(b.class(), crate::BodyClass::Mixed);
@@ -1337,14 +1624,22 @@ mod tests {
     #[test]
     fn bare_curves_and_surfaces() {
         let bytes = fixture("reader/offset_nurb.sms");
-        let Surface::Nurbs(s) = read_surface(&bytes).unwrap() else { panic!() };
+        let Surface::Nurbs(s) = read_surface(&bytes).unwrap() else {
+            panic!()
+        };
         assert_eq!((s.cps.len(), s.cps[0].len(), s.du, s.dv), (6, 2, 3, 1));
         let ((u0, _), (v0, _)) = s.range();
         let p = s.point(u0, v0);
         assert!((p - P3::new(10.0, 12.0, 0.0)).norm() < 1e-9, "{p:?}");
-        for (f, n, p) in [("reader/curve0.smc", 1389, 4), ("reader/closedCurve.smc", 10, 3), ("reader/crvToOffset.smc", 95, 2)] {
+        for (f, n, p) in [
+            ("reader/curve0.smc", 1389, 4),
+            ("reader/closedCurve.smc", 10, 3),
+            ("reader/crvToOffset.smc", 95, 2),
+        ] {
             let bytes = fixture(f);
-            let Curve::Nurbs(c) = read_curve(&bytes).unwrap_or_else(|e| panic!("{f}: {e}")) else { panic!() };
+            let Curve::Nurbs(c) = read_curve(&bytes).unwrap_or_else(|e| panic!("{f}: {e}")) else {
+                panic!()
+            };
             assert_eq!((c.cps.len(), c.degree), (n, p), "{f}");
         }
         let bytes = fixture("reader/Surface.sms");

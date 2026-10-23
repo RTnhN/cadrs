@@ -28,9 +28,9 @@
 use super::curve::Curve;
 use super::math::*;
 use super::surface::Surface;
-use super::topo::{co_range, Body, Coedge, TOL_MIN};
-use crate::{BodyId, FaceId, HealOp, History, InputFace, KernelError, OpResult, Result};
 use super::tol;
+use super::topo::{Body, Coedge, TOL_MIN, co_range};
+use crate::{BodyId, FaceId, HealOp, History, InputFace, KernelError, OpResult, Result};
 
 /// A body being healed, with the input faces each of its faces continues.
 pub struct Healing {
@@ -49,14 +49,20 @@ impl Healing {
 
     /// Composes a step's face map (each new face's face before the step) into `from`.
     fn mapped(&mut self, step: &[usize]) {
-        self.from = step.iter().map(|&f| self.from.get(f).cloned().unwrap_or_default()).collect();
+        self.from = step
+            .iter()
+            .map(|&f| self.from.get(f).cloned().unwrap_or_default())
+            .collect();
     }
 
     /// Runs one operation.
     pub fn apply(&mut self, op: &HealOp) -> Result<()> {
         let b = &mut self.body;
         match *op {
-            HealOp::Fix { precision, max_tolerance } => {
+            HealOp::Fix {
+                precision,
+                max_tolerance,
+            } => {
                 let step = fix(b, precision, max_tolerance)?;
                 self.mapped(&step);
             }
@@ -94,7 +100,11 @@ impl Healing {
                 self.mapped(&step);
             }
             HealOp::Unify => {
-                let from: Vec<Vec<(usize, usize)>> = self.from.iter().map(|s| s.iter().map(|&f| (0, f)).collect()).collect();
+                let from: Vec<Vec<(usize, usize)>> = self
+                    .from
+                    .iter()
+                    .map(|s| s.iter().map(|&f| (0, f)).collect())
+                    .collect();
                 let from = super::unify::unify_faces(b, from, &|_, _| true);
                 super::unify::merge_edges(b);
                 let solid = !b.solids.is_empty();
@@ -104,14 +114,27 @@ impl Healing {
                 if !solid {
                     b.solids.clear();
                 }
-                self.from = from.into_iter().map(|s| s.into_iter().map(|(_, f)| f).collect()).collect();
+                self.from = from
+                    .into_iter()
+                    .map(|s| s.into_iter().map(|(_, f)| f).collect())
+                    .collect();
             }
-            HealOp::Tails { max_angle, max_width } => {
+            HealOp::Tails {
+                max_angle,
+                max_width,
+            } => {
                 super::tails::fix_tails(b, max_angle, max_width)?;
             }
         }
         if self.from.len() != self.body.faces.len() {
-            return Err(KernelError::InvalidResult { op: "heal", why: format!("healing lost track of its faces ({} faces, {} origins)", self.body.faces.len(), self.from.len()) });
+            return Err(KernelError::InvalidResult {
+                op: "heal",
+                why: format!(
+                    "healing lost track of its faces ({} faces, {} origins)",
+                    self.body.faces.len(),
+                    self.from.len()
+                ),
+            });
         }
         Ok(())
     }
@@ -131,21 +154,39 @@ pub fn heal(b: &Body, ops: &[HealOp]) -> Result<Healing> {
 pub fn heal_op(k: &mut super::NativeKernel, body: BodyId, ops: &[HealOp]) -> Result<OpResult> {
     let h = heal(k.get(body)?, ops)?;
     if let Some(e) = h.body.check().first() {
-        return Err(KernelError::InvalidResult { op: "heal", why: format!("healing left an invalid body: {e}") });
+        return Err(KernelError::InvalidResult {
+            op: "heal",
+            why: format!("healing left an invalid body: {e}"),
+        });
     }
     let mut history = History::default();
     let mut used = vec![false; k.get(body)?.faces.len()];
     for (fi, src) in h.from.iter().enumerate() {
         for &f in src {
-            history.modified.push((FaceId(fi as u64), InputFace { body, face: FaceId(f as u64) }));
+            history.modified.push((
+                FaceId(fi as u64),
+                InputFace {
+                    body,
+                    face: FaceId(f as u64),
+                },
+            ));
             if let Some(u) = used.get_mut(f) {
                 *u = true;
             }
         }
     }
-    history.deleted = (0..used.len()).filter(|&f| !used[f]).map(|f| InputFace { body, face: FaceId(f as u64) }).collect();
+    history.deleted = (0..used.len())
+        .filter(|&f| !used[f])
+        .map(|f| InputFace {
+            body,
+            face: FaceId(f as u64),
+        })
+        .collect();
     let id = k.insert(h.body);
-    Ok(OpResult { bodies: vec![id], history })
+    Ok(OpResult {
+        bodies: vec![id],
+        history,
+    })
 }
 
 /// A union–find over vertices; the smallest index of a set stands for it.
@@ -188,7 +229,8 @@ fn apply_merge(b: &mut Body, m: &mut Merge, drop: &[bool]) -> Vec<usize> {
         e.v = [m.root(e.v[0]), m.root(e.v[1])];
     }
     for w in &mut b.wires {
-        w.edges.retain(|&(e, _)| !drop.get(e).copied().unwrap_or(false));
+        w.edges
+            .retain(|&(e, _)| !drop.get(e).copied().unwrap_or(false));
     }
     b.wires.retain(|w| !w.edges.is_empty());
     for p in &mut b.points {
@@ -212,9 +254,15 @@ fn apply_merge(b: &mut Body, m: &mut Merge, drop: &[bool]) -> Vec<usize> {
         newidx[fi] = Some(k);
     }
     for s in &mut b.shells {
-        s.faces = s.faces.iter().filter_map(|&f| newidx.get(f).copied().flatten()).collect();
+        s.faces = s
+            .faces
+            .iter()
+            .filter_map(|&f| newidx.get(f).copied().flatten())
+            .collect();
     }
-    let gone: Vec<usize> = (0..b.shells.len()).filter(|&s| b.shells[s].faces.is_empty()).collect();
+    let gone: Vec<usize> = (0..b.shells.len())
+        .filter(|&s| b.shells[s].faces.is_empty())
+        .collect();
     if !gone.is_empty() {
         let mut smap = vec![None; b.shells.len()];
         let mut shells = Vec::new();
@@ -243,7 +291,10 @@ pub fn fix_gaps(b: &mut Body, tolerance: f64) -> Vec<usize> {
         for l in &f.loops {
             for k in 0..l.len() {
                 let (x, y) = (b.co_end(&l[k]), b.co_start(&l[(k + 1) % l.len()]));
-                if x != y && (b.verts[x].p - b.verts[y].p).norm() <= tolerance.max(b.verts[x].tol + b.verts[y].tol) {
+                if x != y
+                    && (b.verts[x].p - b.verts[y].p).norm()
+                        <= tolerance.max(b.verts[x].tol + b.verts[y].tol)
+                {
                     any |= m.join(x, y);
                 }
             }
@@ -260,7 +311,9 @@ pub fn fix_gaps(b: &mut Body, tolerance: f64) -> Vec<usize> {
 
 /// The joints of a loop whose coedges don't meet at one vertex.
 fn breaks(b: &Body, l: &[Coedge]) -> usize {
-    (0..l.len()).filter(|&k| b.co_end(&l[k]) != b.co_start(&l[(k + 1) % l.len()])).count()
+    (0..l.len())
+        .filter(|&k| b.co_end(&l[k]) != b.co_start(&l[(k + 1) % l.len()]))
+        .count()
 }
 
 /// Puts each loop's coedges in chain order (OCCT's `ShapeFix_Wire::FixReorder`): from the
@@ -340,7 +393,10 @@ pub fn fit_edge_ends(b: &mut Body) {
         let curve = match &e.curve {
             Curve::Line { .. } if (e.t[1] - e.t[0]).abs() > 1e-300 && (p1 - p0).norm() > 0.0 => {
                 let d = (p1 - p0) / (e.t[1] - e.t[0]);
-                Some(Curve::Line { o: p0 - d * e.t[0], d })
+                Some(Curve::Line {
+                    o: p0 - d * e.t[0],
+                    d,
+                })
             }
             Curve::Nurbs(n) => {
                 let (lo, hi) = n.range();
@@ -376,7 +432,13 @@ pub fn fit_edge_ends(b: &mut Body) {
             }
             let e = &b.edges[c.edge];
             let near = c.pc.point(e.mid_t());
-            c.pc = super::pcurve::pcurve(&f.surf, &e.curve, e.t[0], e.t[1], Some(P2::new(near.x, near.y)));
+            c.pc = super::pcurve::pcurve(
+                &f.surf,
+                &e.curve,
+                e.t[0],
+                e.t[1],
+                Some(P2::new(near.x, near.y)),
+            );
         }
     }
 }
@@ -405,9 +467,17 @@ pub fn fix_gaps_2d(b: &mut Body) {
                     continue;
                 }
                 let near = c.pc.point(e.mid_t());
-                let pc = super::pcurve::pcurve(&f.surf, &e.curve, e.t[0], e.t[1], Some(P2::new(near.x, near.y)));
+                let pc = super::pcurve::pcurve(
+                    &f.surf,
+                    &e.curve,
+                    e.t[0],
+                    e.t[1],
+                    Some(P2::new(near.x, near.y)),
+                );
                 let better = Coedge { pc, ..c.clone() };
-                if pc_gap(b, &f.surf, &better) < pc_gap(b, &f.surf, c) || pc_gap(b, &f.surf, &better) <= e.tol.max(super::tol::POINT) {
+                if pc_gap(b, &f.surf, &better) < pc_gap(b, &f.surf, c)
+                    || pc_gap(b, &f.surf, &better) <= e.tol.max(super::tol::POINT)
+                {
                     b.faces[fi].loops[li][k] = better;
                 }
             }
@@ -425,7 +495,9 @@ pub fn fix_gaps_2d(b: &mut Body) {
                 let step = |d: f64, per: Option<f64>| per.map_or(0.0, |p| (d / p).round() * p);
                 let (du, dv) = (step(a.x - z.x, periods[0]), step(a.y - z.y, periods[1]));
                 if du != 0.0 || dv != 0.0 {
-                    let pc = cur.pc.transformed(&Affine::translation(V3::new(du, dv, 0.0)));
+                    let pc = cur
+                        .pc
+                        .transformed(&Affine::translation(V3::new(du, dv, 0.0)));
                     b.faces[fi].loops[li][k].pc = pc;
                 }
             }
@@ -441,7 +513,9 @@ pub fn fix_gaps_2d(b: &mut Body) {
 pub fn fix_missing_seams(b: &mut Body) {
     for fi in 0..b.faces.len() {
         let f = &b.faces[fi];
-        let Some(per) = super::pcurve::closed_periods(&f.surf)[0] else { continue };
+        let Some(per) = super::pcurve::closed_periods(&f.surf)[0] else {
+            continue;
+        };
         if f.loops.len() != 2 {
             continue;
         }
@@ -456,7 +530,10 @@ pub fn fix_missing_seams(b: &mut Body) {
                 .sum()
         };
         let (ta, tb) = (travel(&f.loops[0]), travel(&f.loops[1]));
-        if !((ta.abs() - per).abs() < tol::REL_POINT * per && (tb.abs() - per).abs() < tol::REL_POINT * per && ta * tb < 0.0) {
+        if !((ta.abs() - per).abs() < tol::REL_POINT * per
+            && (tb.abs() - per).abs() < tol::REL_POINT * per
+            && ta * tb < 0.0)
+        {
             continue;
         }
         let start = |l: &[Coedge]| {
@@ -469,7 +546,10 @@ pub fn fix_missing_seams(b: &mut Body) {
             continue;
         }
         let u = pa.x;
-        let Some(curve) = super::heal_split::iso_curve(&f.surf, super::heal_split::Dir::U, u) else { continue };
+        let Some(curve) = super::heal_split::iso_curve(&f.surf, super::heal_split::Dir::U, u)
+        else {
+            continue;
+        };
         // Loop a runs in u by ta; the seam goes from a's start (after a's run, at u + ta) to
         // b's start on that side, and back down at u.
         let (lo, hi) = (pa.y.min(pb.y), pa.y.max(pb.y));
@@ -477,19 +557,41 @@ pub fn fix_missing_seams(b: &mut Body) {
             continue;
         }
         let (v0, v1) = if pa.y < pb.y { (va, vb) } else { (vb, va) };
-        b.edges.push(super::topo::Edge { curve, t: [lo, hi], v: [v0, v1], degenerate: false, tol: TOL_MIN });
+        b.edges.push(super::topo::Edge {
+            curve,
+            t: [lo, hi],
+            v: [v0, v1],
+            degenerate: false,
+            tol: TOL_MIN,
+        });
         let se = b.edges.len() - 1;
-        let line = |uu: f64| Curve::Line { o: P3::new(uu, 0.0, 0.0), d: V3::y() };
+        let line = |uu: f64| Curve::Line {
+            o: P3::new(uu, 0.0, 0.0),
+            d: V3::y(),
+        };
         let up = pa.y < pb.y;
         // After loop a (ending at its start vertex, at u + ta): seam a → b; loop b shifted to
         // start there; then seam b → a at u.
-        let shift = |c: &Coedge, du: f64| Coedge { pc: c.pc.transformed(&Affine::translation(V3::new(du, 0.0, 0.0))), ..c.clone() };
+        let shift = |c: &Coedge, du: f64| Coedge {
+            pc: c
+                .pc
+                .transformed(&Affine::translation(V3::new(du, 0.0, 0.0))),
+            ..c.clone()
+        };
         let la = f.loops[0].clone();
         let lb: Vec<Coedge> = f.loops[1].iter().map(|c| shift(c, u + ta - pb.x)).collect();
         let mut l = la;
-        l.push(Coedge { edge: se, fwd: up, pc: line(u + ta) });
+        l.push(Coedge {
+            edge: se,
+            fwd: up,
+            pc: line(u + ta),
+        });
         l.extend(lb);
-        l.push(Coedge { edge: se, fwd: !up, pc: line(u) });
+        l.push(Coedge {
+            edge: se,
+            fwd: !up,
+            pc: line(u),
+        });
         b.faces[fi].loops = vec![l];
     }
 }
@@ -576,7 +678,13 @@ pub fn refit_pcurves(b: &mut Body, tolerance: f64) {
                     continue;
                 }
                 let near = c.pc.point(e.mid_t());
-                let pc = super::pcurve::pcurve(&f.surf, &e.curve, e.t[0], e.t[1], Some(P2::new(near.x, near.y)));
+                let pc = super::pcurve::pcurve(
+                    &f.surf,
+                    &e.curve,
+                    e.t[0],
+                    e.t[1],
+                    Some(P2::new(near.x, near.y)),
+                );
                 let better = Coedge { pc, ..c.clone() };
                 if pc_gap(b, &f.surf, &better) < gap {
                     b.faces[fi].loops[li][k] = better;
@@ -597,7 +705,10 @@ fn cover_loop_gaps(b: &mut Body) {
             for k in 0..l.len() {
                 let (x, y) = (&l[k], &l[(k + 1) % l.len()]);
                 let (ex, ey) = (&b.edges[x.edge], &b.edges[y.edge]);
-                let (p, q) = (x.pc.point(co_range(ex, x.fwd).1), y.pc.point(co_range(ey, y.fwd).0));
+                let (p, q) = (
+                    x.pc.point(co_range(ex, x.fwd).1),
+                    y.pc.point(co_range(ey, y.fwd).0),
+                );
                 let d = ((p.x - q.x).abs() * mu).max((p.y - q.y).abs() * mv);
                 let v = b.co_end(x);
                 if d.is_finite() && d > need[v] {
@@ -638,7 +749,11 @@ pub fn update_tolerance(b: &mut Body) {
 /// Whether a surface lies on a mirrored frame (OCCT's indirect elementary surface).
 pub fn indirect(s: &Surface) -> bool {
     match s {
-        Surface::Plane { f } | Surface::Cylinder { f, .. } | Surface::Cone { f, .. } | Surface::Sphere { f, .. } | Surface::Torus { f, .. } => !f.right_handed(),
+        Surface::Plane { f }
+        | Surface::Cylinder { f, .. }
+        | Surface::Cone { f, .. }
+        | Surface::Sphere { f, .. }
+        | Surface::Torus { f, .. } => !f.right_handed(),
         _ => false,
     }
 }
@@ -654,10 +769,24 @@ pub fn direct_faces(b: &mut Body) {
         let plane = matches!(f.surf, Surface::Plane { .. });
         let flip = |fr: &mut Frame| fr.y = -fr.y;
         match &mut f.surf {
-            Surface::Plane { f } | Surface::Cylinder { f, .. } | Surface::Cone { f, .. } | Surface::Sphere { f, .. } | Surface::Torus { f, .. } => flip(f),
+            Surface::Plane { f }
+            | Surface::Cylinder { f, .. }
+            | Surface::Cone { f, .. }
+            | Surface::Sphere { f, .. }
+            | Surface::Torus { f, .. } => flip(f),
             _ => continue,
         }
-        let m = if plane { Affine { m: nalgebra::Matrix3::from_diagonal(&V3::new(1.0, -1.0, 1.0)), t: V3::zeros() } } else { Affine { m: nalgebra::Matrix3::from_diagonal(&V3::new(-1.0, 1.0, 1.0)), t: V3::new(TAU, 0.0, 0.0) } };
+        let m = if plane {
+            Affine {
+                m: nalgebra::Matrix3::from_diagonal(&V3::new(1.0, -1.0, 1.0)),
+                t: V3::zeros(),
+            }
+        } else {
+            Affine {
+                m: nalgebra::Matrix3::from_diagonal(&V3::new(-1.0, 1.0, 1.0)),
+                t: V3::new(TAU, 0.0, 0.0),
+            }
+        };
         for c in f.loops.iter_mut().flatten() {
             c.pc = c.pc.transformed(&m);
         }
@@ -679,10 +808,38 @@ pub fn to_revolution(b: &mut Body) {
 /// The surface of revolution a cylinder, cone, sphere or torus is (parametrized alike).
 pub fn as_revolution(s: &Surface) -> Option<Surface> {
     let (f, m) = match s {
-        Surface::Cylinder { f, r } => (f, Curve::Line { o: f.o + f.x * *r, d: f.z }),
-        Surface::Cone { f, r, a } => (f, Curve::Line { o: f.o + f.x * *r, d: f.x * a.sin() + f.z * a.cos() }),
-        Surface::Sphere { f, r } => (f, Curve::Circle { c: f.o, x: f.x, y: f.z, r: *r }),
-        Surface::Torus { f, rmaj, rmin } => (f, Curve::Circle { c: f.o + f.x * *rmaj, x: f.x, y: f.z, r: *rmin }),
+        Surface::Cylinder { f, r } => (
+            f,
+            Curve::Line {
+                o: f.o + f.x * *r,
+                d: f.z,
+            },
+        ),
+        Surface::Cone { f, r, a } => (
+            f,
+            Curve::Line {
+                o: f.o + f.x * *r,
+                d: f.x * a.sin() + f.z * a.cos(),
+            },
+        ),
+        Surface::Sphere { f, r } => (
+            f,
+            Curve::Circle {
+                c: f.o,
+                x: f.x,
+                y: f.z,
+                r: *r,
+            },
+        ),
+        Surface::Torus { f, rmaj, rmin } => (
+            f,
+            Curve::Circle {
+                c: f.o + f.x * *rmaj,
+                x: f.x,
+                y: f.z,
+                r: *rmin,
+            },
+        ),
         _ => return None,
     };
     Some(Surface::Revolution { f: *f, m })
@@ -697,11 +854,15 @@ pub fn to_bspline(b: &mut Body) {
         if matches!(b.faces[fi].surf, Surface::Plane { .. } | Surface::Nurbs(_)) {
             continue;
         }
-        let Some(((u0, u1), (v0, v1))) = super::heal_split::face_uv_box(b, fi) else { continue };
+        let Some(((u0, u1), (v0, v1))) = super::heal_split::face_uv_box(b, fi) else {
+            continue;
+        };
         if !(u1 > u0 && v1 > v0) {
             continue;
         }
-        let ns = Surface::Nurbs(std::sync::Arc::new(b.faces[fi].surf.to_nurbs((u0, u1), (v0, v1))));
+        let ns = Surface::Nurbs(std::sync::Arc::new(
+            b.faces[fi].surf.to_nurbs((u0, u1), (v0, v1)),
+        ));
         if let Some(loops) = reproject(b, fi, &ns) {
             b.faces[fi].surf = ns;
             b.faces[fi].loops = loops;
@@ -726,7 +887,8 @@ fn reproject(b: &Body, fi: usize, s: &Surface) -> Option<Vec<Vec<Coedge>>> {
                 continue;
             }
             let near = c.pc.point(e.mid_t());
-            let pc = super::pcurve::pcurve(s, &e.curve, e.t[0], e.t[1], Some(P2::new(near.x, near.y)));
+            let pc =
+                super::pcurve::pcurve(s, &e.curve, e.t[0], e.t[1], Some(P2::new(near.x, near.y)));
             let nc = Coedge { pc, ..c.clone() };
             if !(pc_gap(b, s, &nc) <= e.tol.max(tol::REL_POINT * size)) {
                 return None;
@@ -775,7 +937,8 @@ pub fn fix(b: &mut Body, precision: f64, max_tolerance: f64) -> Result<Vec<usize
             continue;
         }
         let areas: Vec<f64> = f.loops.iter().map(|l| loop_area(&b.edges, l)).collect();
-        if let Some(outer) = (0..areas.len()).max_by(|&x, &y| areas[x].abs().total_cmp(&areas[y].abs()))
+        if let Some(outer) =
+            (0..areas.len()).max_by(|&x, &y| areas[x].abs().total_cmp(&areas[y].abs()))
             && outer != 0
         {
             f.loops.swap(0, outer);
@@ -805,7 +968,11 @@ fn loop_area(edges: &[super::topo::Edge], l: &[Coedge]) -> f64 {
     for c in l {
         let e = &edges[c.edge];
         let (a, z) = co_range(e, c.fwd);
-        let n = if matches!(c.pc, Curve::Line { .. }) { 1 } else { 32 };
+        let n = if matches!(c.pc, Curve::Line { .. }) {
+            1
+        } else {
+            32
+        };
         for i in 0..n {
             let q = c.pc.point(a + (z - a) * i as f64 / n as f64);
             pts.push(P2::new(q.x, q.y));
@@ -824,13 +991,22 @@ fn orient_shells(b: &mut Body) {
         if faces.is_empty() {
             continue;
         }
-        let mut by_edge: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
+        let mut by_edge: std::collections::HashMap<usize, Vec<usize>> =
+            std::collections::HashMap::new();
         for &f in &faces {
             for c in b.faces[f].loops.iter().flatten() {
                 by_edge.entry(c.edge).or_default().push(f);
             }
         }
-        let uses = |b: &Body, f: usize, e: usize| -> Vec<bool> { b.faces[f].loops.iter().flatten().filter(|c| c.edge == e).map(|c| c.fwd).collect() };
+        let uses = |b: &Body, f: usize, e: usize| -> Vec<bool> {
+            b.faces[f]
+                .loops
+                .iter()
+                .flatten()
+                .filter(|c| c.edge == e)
+                .map(|c| c.fwd)
+                .collect()
+        };
         let mut done: std::collections::HashSet<usize> = std::collections::HashSet::new();
         for &start in &faces {
             if !done.insert(start) {
@@ -843,7 +1019,9 @@ fn orient_shells(b: &mut Body) {
                     if b.edges[e].degenerate {
                         continue;
                     }
-                    let Some(nbrs) = by_edge.get(&e) else { continue };
+                    let Some(nbrs) = by_edge.get(&e) else {
+                        continue;
+                    };
                     if nbrs.len() != 2 || nbrs[0] == nbrs[1] {
                         continue;
                     }
@@ -861,7 +1039,8 @@ fn orient_shells(b: &mut Body) {
             }
         }
         // Closed: each edge used once each way.
-        let mut count: std::collections::HashMap<usize, (u32, u32)> = std::collections::HashMap::new();
+        let mut count: std::collections::HashMap<usize, (u32, u32)> =
+            std::collections::HashMap::new();
         for &f in &faces {
             for c in b.faces[f].loops.iter().flatten() {
                 let u = count.entry(c.edge).or_default();
@@ -872,7 +1051,9 @@ fn orient_shells(b: &mut Body) {
                 }
             }
         }
-        b.shells[si].closed = count.iter().all(|(&e, &u)| u == (1, 1) || b.edges[e].degenerate);
+        b.shells[si].closed = count
+            .iter()
+            .all(|(&e, &u)| u == (1, 1) || b.edges[e].degenerate);
     }
     for so in 0..b.solids.len() {
         let shells = b.solids[so].shells.clone();
@@ -901,8 +1082,8 @@ pub fn count_indirect(b: &Body) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::native::topo::CheckLevel;
     use crate::native::NativeKernel;
+    use crate::native::topo::CheckLevel;
 
     fn body_of(k: &NativeKernel, s: crate::native::draw::Shape) -> Body {
         match s {
@@ -929,9 +1110,19 @@ mod tests {
         let b = body_of(&k, s);
         let v0 = volume(&b);
         valid(&b);
-        let ncurved = |b: &Body| b.faces.iter().filter(|f| !matches!(f.surf, Surface::Plane { .. })).count();
+        let ncurved = |b: &Body| {
+            b.faces
+                .iter()
+                .filter(|f| !matches!(f.surf, Surface::Plane { .. }))
+                .count()
+        };
         for (op, curved) in [
-            (HealOp::SplitAngle { max_angle: 95f64.to_radians() }, 4),
+            (
+                HealOp::SplitAngle {
+                    max_angle: 95f64.to_radians(),
+                },
+                4,
+            ),
             (HealOp::SplitClosed, 2),
             (HealOp::ToRevolution, 1),
             (HealOp::ToBSpline, 1),
@@ -939,7 +1130,11 @@ mod tests {
             let h = heal(&b, &[op]).unwrap();
             valid(&h.body);
             assert_eq!(ncurved(&h.body), curved, "{op:?}");
-            assert!((volume(&h.body) - v0).abs() < 1e-6 * v0, "{op:?}: {} vs {v0}", volume(&h.body));
+            assert!(
+                (volume(&h.body) - v0).abs() < 1e-6 * v0,
+                "{op:?}: {} vs {v0}",
+                volume(&h.body)
+            );
             assert_eq!(h.from.len(), h.body.faces.len());
         }
     }
@@ -951,10 +1146,18 @@ mod tests {
         let s = k.psphere(3.0).unwrap();
         let b = body_of(&k, s);
         let v0 = volume(&b);
-        for op in [HealOp::SplitAngle { max_angle: 1.0 }, HealOp::SplitClosed, HealOp::ToBSpline] {
+        for op in [
+            HealOp::SplitAngle { max_angle: 1.0 },
+            HealOp::SplitClosed,
+            HealOp::ToBSpline,
+        ] {
             let h = heal(&b, &[op]).unwrap();
             valid(&h.body);
-            assert!((volume(&h.body) - v0).abs() < 1e-6 * v0, "{op:?}: {} vs {v0}", volume(&h.body));
+            assert!(
+                (volume(&h.body) - v0).abs() < 1e-6 * v0,
+                "{op:?}: {} vs {v0}",
+                volume(&h.body)
+            );
         }
     }
 
@@ -964,7 +1167,10 @@ mod tests {
     fn direct_faces_of_a_mirrored_box() {
         let mut k = NativeKernel::new();
         let s = k.pcylinder(1.0, 2.0).unwrap();
-        let m = Affine { m: nalgebra::Matrix3::from_diagonal(&V3::new(1.0, -1.0, 1.0)), t: V3::zeros() };
+        let m = Affine {
+            m: nalgebra::Matrix3::from_diagonal(&V3::new(1.0, -1.0, 1.0)),
+            t: V3::zeros(),
+        };
         let b = body_of(&k, s).transformed(&m);
         assert!(count_indirect(&b) > 0);
         valid(&b);
@@ -980,7 +1186,18 @@ mod tests {
         let mut k = NativeKernel::new();
         let s = k.pcylinder(2.0, 5.0).unwrap();
         let b = body_of(&k, s);
-        let h = heal(&b, &[HealOp::Fix { precision: 1e-3, max_tolerance: 5e-3 }, HealOp::SameParameter { tolerance: 1e-3 }, HealOp::UpdateTolerance]).unwrap();
+        let h = heal(
+            &b,
+            &[
+                HealOp::Fix {
+                    precision: 1e-3,
+                    max_tolerance: 5e-3,
+                },
+                HealOp::SameParameter { tolerance: 1e-3 },
+                HealOp::UpdateTolerance,
+            ],
+        )
+        .unwrap();
         valid(&h.body);
         assert_eq!(h.body.faces.len(), b.faces.len());
         assert!((volume(&h.body) - volume(&b)).abs() < 1e-9);

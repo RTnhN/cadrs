@@ -12,7 +12,10 @@ use super::surface::Surface;
 use super::tol;
 
 fn line2(o: P2, d: V2) -> Curve {
-    Curve::Line { o: P3::new(o.x, o.y, 0.0), d: V3::new(d.x, d.y, 0.0) }
+    Curve::Line {
+        o: P3::new(o.x, o.y, 0.0),
+        d: V3::new(d.x, d.y, 0.0),
+    }
 }
 
 /// P-curves fitted (projected and interpolated) and the time it took (ns), counted with
@@ -28,16 +31,29 @@ pub fn pcurve(s: &Surface, c: &Curve, t0: f64, t1: f64, near: Option<P2>) -> Cur
 
 /// [`pcurve`], with `fit` (a p-curve already known, an intersection curve's from its tracer)
 /// in place of fitting projections where no exact p-curve applies.
-pub fn pcurve_or(s: &Surface, c: &Curve, t0: f64, t1: f64, near: Option<P2>, fit: Option<Curve>) -> Curve {
-    let pc = exact(s, c, t0, t1).or_else(|| iso_line(s, c, t0, t1)).or(fit).unwrap_or_else(|| {
-        let t = super::boolean::profiling().then(std::time::Instant::now);
-        let pc = fitted(s, c, t0, t1);
-        if let Some(t) = t {
-            FITTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            FITTED_NS.fetch_add(t.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
-        }
-        pc
-    });
+pub fn pcurve_or(
+    s: &Surface,
+    c: &Curve,
+    t0: f64,
+    t1: f64,
+    near: Option<P2>,
+    fit: Option<Curve>,
+) -> Curve {
+    let pc = exact(s, c, t0, t1)
+        .or_else(|| iso_line(s, c, t0, t1))
+        .or(fit)
+        .unwrap_or_else(|| {
+            let t = super::boolean::profiling().then(std::time::Instant::now);
+            let pc = fitted(s, c, t0, t1);
+            if let Some(t) = t {
+                FITTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                FITTED_NS.fetch_add(
+                    t.elapsed().as_nanos() as u64,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+            }
+            pc
+        });
     let pc = into_closed_range(s, pc, t0, t1, near);
     shift_into(s, pc, (t0 + t1) * 0.5, near)
 }
@@ -56,8 +72,18 @@ pub fn closed_periods(s: &Surface) -> [Option<f64>; 2] {
             (p - q).norm() <= tol::REL * (1.0 + p.coords.norm())
         })
     };
-    let uc = meets(&|f| (s.eval(u0, v0 + (v1 - v0) * f), s.eval(u1, v0 + (v1 - v0) * f)));
-    let vc = meets(&|f| (s.eval(u0 + (u1 - u0) * f, v0), s.eval(u0 + (u1 - u0) * f, v1)));
+    let uc = meets(&|f| {
+        (
+            s.eval(u0, v0 + (v1 - v0) * f),
+            s.eval(u1, v0 + (v1 - v0) * f),
+        )
+    });
+    let vc = meets(&|f| {
+        (
+            s.eval(u0 + (u1 - u0) * f, v0),
+            s.eval(u0 + (u1 - u0) * f, v1),
+        )
+    });
     [uc.then_some(u1 - u0), vc.then_some(v1 - v0)]
 }
 
@@ -66,7 +92,12 @@ pub fn closed_periods(s: &Surface) -> [Option<f64>; 2] {
 /// [`closed_periods`] gives them). A hinted projection that doesn't reach the point (held
 /// at the end of a closed B-spline's range while the curve goes on across its seam, or in
 /// another local minimum) is redone from the whole surface.
-pub fn project_along(s: &Surface, p: &P3, hint: Option<(f64, f64)>, periods: [Option<f64>; 2]) -> P2 {
+pub fn project_along(
+    s: &Surface,
+    p: &P3,
+    hint: Option<(f64, f64)>,
+    periods: [Option<f64>; 2],
+) -> P2 {
     let (u, v) = s.project(p, hint);
     let mut q = P2::new(u, v);
     let near_enough = 1e-7 * (1.0 + p.coords.norm());
@@ -77,7 +108,9 @@ pub fn project_along(s: &Surface, p: &P3, hint: Option<(f64, f64)>, periods: [Op
         let (x, su, sv) = s.d1(q.x, q.y);
         let d = p - x;
         let n = d.norm();
-        n <= 1e-4 * (1.0 + p.coords.norm()) && d.dot(&su).abs() <= tol::REL_POINT * n * su.norm() && d.dot(&sv).abs() <= tol::REL_POINT * n * sv.norm()
+        n <= 1e-4 * (1.0 + p.coords.norm())
+            && d.dot(&su).abs() <= tol::REL_POINT * n * su.norm()
+            && d.dot(&sv).abs() <= tol::REL_POINT * n * sv.norm()
     };
     if hint.is_some() && (s.eval(q.x, q.y) - p).norm() > near_enough && !foot(q) {
         let (u2, v2) = s.project(p, None);
@@ -118,7 +151,9 @@ pub fn project_along(s: &Surface, p: &P3, hint: Option<(f64, f64)>, periods: [Op
 fn beyond_range(s: &Surface, p: &P3, q: P2) -> Option<P2> {
     let Surface::Nurbs(n) = s else { return None };
     let ((u0, u1), (v0, v1)) = n.range();
-    let at_end = |x: f64, a: f64, b: f64| (x - a).abs() <= (b - a) * tol::REL || (x - b).abs() <= (b - a) * tol::REL;
+    let at_end = |x: f64, a: f64, b: f64| {
+        (x - a).abs() <= (b - a) * tol::REL || (x - b).abs() <= (b - a) * tol::REL
+    };
     if !at_end(q.x, u0, u1) && !at_end(q.y, v0, v1) {
         return None;
     }
@@ -142,9 +177,11 @@ fn beyond_range(s: &Surface, p: &P3, q: P2) -> Option<P2> {
         }
     }
     let (eu, ev) = ((u1 - u0) * 0.2, (v1 - v0) * 0.2);
-    let ok = u.is_finite() && v.is_finite() && u > u0 - eu && u < u1 + eu && v > v0 - ev && v < v1 + ev;
+    let ok =
+        u.is_finite() && v.is_finite() && u > u0 - eu && u < u1 + eu && v > v0 - ev && v < v1 + ev;
     // It must reach the point (the extension merely passing nearer isn't the surface).
-    (ok && (s.eval(u, v) - p).norm() <= tol::REL_POINT * (1.0 + p.coords.norm())).then_some(P2::new(u, v))
+    (ok && (s.eval(u, v) - p).norm() <= tol::REL_POINT * (1.0 + p.coords.norm()))
+        .then_some(P2::new(u, v))
 }
 
 /// Whether u (first) and v (second) are free at `q`: the surface doesn't move along them
@@ -182,7 +219,10 @@ fn into_closed_range(s: &Surface, pc: Curve, t0: f64, t1: f64, near: Option<P2>)
         return pc;
     }
     let ((u0, u1), (v0, v1)) = n.range();
-    let pts: Vec<P2> = (0..=16).map(|i| pc.point(t0 + (t1 - t0) * i as f64 / 16.0)).map(|q| P2::new(q.x, q.y)).collect();
+    let pts: Vec<P2> = (0..=16)
+        .map(|i| pc.point(t0 + (t1 - t0) * i as f64 / 16.0))
+        .map(|q| P2::new(q.x, q.y))
+        .collect();
     // The shift (in whole periods) putting [lo, hi] most inside [a, b].
     let best = |lo: f64, hi: f64, a: f64, b: f64, per: f64, at: Option<f64>| -> f64 {
         let eps = (b - a) * tol::REL;
@@ -199,11 +239,19 @@ fn into_closed_range(s: &Surface, pc: Curve, t0: f64, t1: f64, near: Option<P2>)
     let mut du = 0.0;
     let mut dv = 0.0;
     if let Some(pu) = periods[0] {
-        let (lo, hi) = pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| (a.min(q.x), b.max(q.x)));
+        let (lo, hi) = pts
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| {
+                (a.min(q.x), b.max(q.x))
+            });
         du = best(lo, hi, u0, u1, pu, near.map(|q| q.x));
     }
     if let Some(pv) = periods[1] {
-        let (lo, hi) = pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| (a.min(q.y), b.max(q.y)));
+        let (lo, hi) = pts
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| {
+                (a.min(q.y), b.max(q.y))
+            });
         dv = best(lo, hi, v0, v1, pv, near.map(|q| q.y));
     }
     if du == 0.0 && dv == 0.0 {
@@ -224,7 +272,11 @@ pub fn shift_into(s: &Surface, pc: Curve, tm: f64, near: Option<P2>) -> Curve {
         return pc;
     }
     let Some(near) = near else { return pc };
-    let du = if s.u_periodic() { ((near.x - m.x) / TAU).round() * TAU } else { 0.0 };
+    let du = if s.u_periodic() {
+        ((near.x - m.x) / TAU).round() * TAU
+    } else {
+        0.0
+    };
     let dv = if s.v_periodic() {
         ((near.y - m.y) / TAU).round() * TAU
     } else if matches!(s, Surface::Sphere { .. }) {
@@ -247,16 +299,40 @@ fn exact(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve> {
     match s {
         Surface::Plane { f } => {
             // Model → plane coordinates is affine (rows x, y, z).
-            let m = nalgebra::Matrix3::from_rows(&[f.x.transpose(), f.y.transpose(), f.x.cross(&f.y).transpose()]);
-            let a = Affine { m, t: -(m * f.o.coords) };
+            let m = nalgebra::Matrix3::from_rows(&[
+                f.x.transpose(),
+                f.y.transpose(),
+                f.x.cross(&f.y).transpose(),
+            ]);
+            let a = Affine {
+                m,
+                t: -(m * f.o.coords),
+            };
             let pc = match c {
                 Curve::Circle { c: cc, x, y, r } => {
                     let (xl, yl) = (m * x, m * y);
-                    Curve::Circle { c: a.point(cc), x: V3::new(xl.x, xl.y, 0.0), y: V3::new(yl.x, yl.y, 0.0), r: *r }
+                    Curve::Circle {
+                        c: a.point(cc),
+                        x: V3::new(xl.x, xl.y, 0.0),
+                        y: V3::new(yl.x, yl.y, 0.0),
+                        r: *r,
+                    }
                 }
-                Curve::Ellipse { c: cc, x, y, a: ra, b: rb } => {
+                Curve::Ellipse {
+                    c: cc,
+                    x,
+                    y,
+                    a: ra,
+                    b: rb,
+                } => {
                     let (xl, yl) = (m * x, m * y);
-                    Curve::Ellipse { c: a.point(cc), x: V3::new(xl.x, xl.y, 0.0), y: V3::new(yl.x, yl.y, 0.0), a: *ra, b: *rb }
+                    Curve::Ellipse {
+                        c: a.point(cc),
+                        x: V3::new(xl.x, xl.y, 0.0),
+                        y: V3::new(yl.x, yl.y, 0.0),
+                        a: *ra,
+                        b: *rb,
+                    }
                 }
                 _ => c.transformed(&a),
             };
@@ -265,9 +341,14 @@ fn exact(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve> {
         Surface::Cylinder { f, r } => match c {
             Curve::Line { o, d } if d.cross(&f.z).norm() < tol::REL_FINE * d.norm() => {
                 let l = f.local(o);
-                Some(line2(P2::new(l.y.atan2(l.x), l.z), V2::new(0.0, d.dot(&f.z))))
+                Some(line2(
+                    P2::new(l.y.atan2(l.x), l.z),
+                    V2::new(0.0, d.dot(&f.z)),
+                ))
             }
-            Curve::Circle { c: cc, x, y, r: rc } if coaxial_circle(f, cc, x, y) && (rc - r).abs() < 1e-7 => {
+            Curve::Circle { c: cc, x, y, r: rc }
+                if coaxial_circle(f, cc, x, y) && (rc - r).abs() < 1e-7 =>
+            {
                 let sgn = x.cross(y).dot(&f.x.cross(&f.y)).signum();
                 Some(line2(P2::new(ang(f, x), f.local(cc).z), V2::new(sgn, 0.0)))
             }
@@ -283,7 +364,9 @@ fn exact(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve> {
                 // A ruling: in a plane through the axis, along the cone's slope.
                 let l = f.local(o);
                 let rho = (l.x * l.x + l.y * l.y).sqrt();
-                let u = if rho > tol::ROUNDOFF { l.y.atan2(l.x) } else {
+                let u = if rho > tol::ROUNDOFF {
+                    l.y.atan2(l.x)
+                } else {
                     let ld = V3::new(d.dot(&f.x), d.dot(&f.y), 0.0);
                     ld.y.atan2(ld.x)
                 };
@@ -305,7 +388,10 @@ fn exact(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve> {
                 let v = l.z.atan2((l.x * l.x + l.y * l.y).sqrt());
                 Some(line2(P2::new(ang(f, x), v), V2::new(sgn, 0.0)))
             }
-            Curve::Circle { c: cc, x, y, .. } if (cc - f.o).norm() < tol::ROUNDOFF && x.cross(y).dot(&f.z).abs() < tol::ANGULAR_FINE => {
+            Curve::Circle { c: cc, x, y, .. }
+                if (cc - f.o).norm() < tol::ROUNDOFF
+                    && x.cross(y).dot(&f.z).abs() < tol::ANGULAR_FINE =>
+            {
                 // A meridian: u const, v = ±t + v0, in the half plane holding the arc.
                 let m = c.point((t0 + t1) * 0.5) - f.o;
                 let side = m - f.z * m.dot(&f.z);
@@ -330,13 +416,21 @@ fn exact(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve> {
                 let rho = (l.x * l.x + l.y * l.y).sqrt();
                 // On a spindle torus (minor radius past the major) a circle of the part past
                 // the axis lies on the far meridian: u + π, at radius −ρ.
-                let far = rmin > rmaj && ((-rho - rmaj).hypot(l.z) - rmin).abs() < ((rho - rmaj).hypot(l.z) - rmin).abs();
-                let (u, v) = if far { (ang(f, x) + PI, l.z.atan2(-rho - rmaj)) } else { (ang(f, x), l.z.atan2(rho - rmaj)) };
+                let far = rmin > rmaj
+                    && ((-rho - rmaj).hypot(l.z) - rmin).abs()
+                        < ((rho - rmaj).hypot(l.z) - rmin).abs();
+                let (u, v) = if far {
+                    (ang(f, x) + PI, l.z.atan2(-rho - rmaj))
+                } else {
+                    (ang(f, x), l.z.atan2(rho - rmaj))
+                };
                 Some(line2(P2::new(u, v), V2::new(sgn, 0.0)))
             }
             Curve::Circle { c: cc, x, y, .. } if x.cross(y).dot(&f.z).abs() < tol::ANGULAR_FINE => {
                 let l = f.local(cc);
-                if l.z.abs() > tol::ROUNDOFF || ((l.x * l.x + l.y * l.y).sqrt() - rmaj).abs() > tol::ROUNDOFF {
+                if l.z.abs() > tol::ROUNDOFF
+                    || ((l.x * l.x + l.y * l.y).sqrt() - rmaj).abs() > tol::ROUNDOFF
+                {
                     return None;
                 }
                 // The half plane of the circle's centre.
@@ -351,7 +445,11 @@ fn exact(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve> {
                 let sgn = x.cross(y).dot(&f.x.cross(&f.y)).signum();
                 let (_, v) = s.project(&c.point(0.0), None);
                 // A meridian off the frame's xz plane sits at its own azimuth.
-                let az = if super::surface::meridian_off_plane(f, m) { super::surface::meridian_azimuth(f, m, v) } else { 0.0 };
+                let az = if super::surface::meridian_off_plane(f, m) {
+                    super::surface::meridian_azimuth(f, m, v)
+                } else {
+                    0.0
+                };
                 Some(line2(P2::new(ang(f, x) - az, v), V2::new(sgn, 0.0)))
             }
             _ => None,
@@ -360,7 +458,10 @@ fn exact(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve> {
             Curve::Line { o, d: dl } if dl.cross(d).norm() < tol::REL_FINE * dl.norm() => {
                 let (u, v) = s.project(o, None);
                 let _ = base;
-                Some(line2(P2::new(u, v), V2::new(0.0, dl.dot(d) / d.norm_squared())))
+                Some(line2(
+                    P2::new(u, v),
+                    V2::new(0.0, dl.dot(d) / d.norm_squared()),
+                ))
             }
             _ => None,
         },
@@ -390,7 +491,10 @@ fn coaxial_circle(f: &Frame, cc: &P3, x: &V3, y: &V3) -> bool {
 /// Drops the z coordinate of a 2D curve (numerical noise from projecting into a plane).
 fn flatten(c: Curve) -> Curve {
     match c {
-        Curve::Line { o, d } => Curve::Line { o: P3::new(o.x, o.y, 0.0), d: V3::new(d.x, d.y, 0.0) },
+        Curve::Line { o, d } => Curve::Line {
+            o: P3::new(o.x, o.y, 0.0),
+            d: V3::new(d.x, d.y, 0.0),
+        },
         Curve::Nurbs(n) => {
             let mut n = (*n).clone();
             for h in &mut n.cps {
@@ -405,7 +509,10 @@ fn flatten(c: Curve) -> Curve {
 /// A curve that runs along an iso-line of a B-spline or general surface with its parameter an
 /// affine function of the iso-line's (a sweep's rails, a loft's rails): a straight p-curve.
 pub(super) fn iso_line(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve> {
-    if !matches!(s, Surface::Nurbs(_) | Surface::Extrusion { .. } | Surface::Revolution { .. }) {
+    if !matches!(
+        s,
+        Surface::Nurbs(_) | Surface::Extrusion { .. } | Surface::Revolution { .. }
+    ) {
         return None;
     }
     let n = 8;
@@ -426,9 +533,14 @@ pub(super) fn iso_line(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve
     settle_poles(s, &mut uv);
     let (a, b) = (uv[0], uv[n]);
     let d = (b - a) / (t1 - t0);
-    let line = Curve::Line { o: P3::new(a.x - d.x * t0, a.y - d.y * t0, 0.0), d: V3::new(d.x, d.y, 0.0) };
+    let line = Curve::Line {
+        o: P3::new(a.x - d.x * t0, a.y - d.y * t0, 0.0),
+        d: V3::new(d.x, d.y, 0.0),
+    };
     // Straight in uv and affine in t, and an iso-line (u or v constant).
-    if d.x.abs() > tol::REL_FINE * d.y.abs().max(tol::TINY) && d.y.abs() > tol::REL_FINE * d.x.abs().max(tol::TINY) {
+    if d.x.abs() > tol::REL_FINE * d.y.abs().max(tol::TINY)
+        && d.y.abs() > tol::REL_FINE * d.x.abs().max(tol::TINY)
+    {
         return None;
     }
     let tol = 1e-10 * (1.0 + a.coords.norm() + b.coords.norm());
@@ -465,7 +577,8 @@ fn fitted(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Curve {
     // Followed continuously across the surface's seams (brought back into a closed
     // B-spline's range after: `into_closed_range`).
     let periods = closed_periods(s);
-    let project = |t: f64, hint: Option<(f64, f64)>| -> P2 { project_along(s, &c.point(t), hint, periods) };
+    let project =
+        |t: f64, hint: Option<(f64, f64)>| -> P2 { project_along(s, &c.point(t), hint, periods) };
     // The samples' projections, each hinted by its neighbour's and kept across the rounds
     // (only the samples a round adds are projected).
     let mut uvs: Vec<P2> = Vec::with_capacity(ts.len());
@@ -507,7 +620,11 @@ fn fitted(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Curve {
         }
         if ins.is_empty() || ts.len() > 4096 {
             if !ins.is_empty() && std::env::var("CADRS_PCURVE_DEBUG").is_ok() {
-                eprintln!("pcurve: no fit after {} points ({} off) of {c:?} on {s:?}", ts.len(), ins.len());
+                eprintln!(
+                    "pcurve: no fit after {} points ({} off) of {c:?} on {s:?}",
+                    ts.len(),
+                    ins.len()
+                );
             }
             return Curve::Nurbs(Arc::new(fit));
         }
@@ -529,7 +646,11 @@ mod tests {
             let t = t0 + (t1 - t0) * i as f64 / 20.0;
             let q = pc.point(t);
             let p = s.eval(q.x, q.y);
-            assert!((p - c.point(t)).norm() < 1e-8, "{s:?} {c:?} at {t}: {}", (p - c.point(t)).norm());
+            assert!(
+                (p - c.point(t)).norm() < 1e-8,
+                "{s:?} {c:?} at {t}: {}",
+                (p - c.point(t)).norm()
+            );
         }
     }
 
@@ -539,30 +660,66 @@ mod tests {
     #[test]
     fn closed_bspline_seam_ends() {
         let f = Frame::from_z(P3::new(1.0, 2.0, 3.0), V3::new(0.0, 0.0, 1.0));
-        let s = Surface::Nurbs(Arc::new(Surface::Cylinder { f, r: 5.0 }.to_nurbs((0.0, TAU), (0.0, 10.0))));
+        let s = Surface::Nurbs(Arc::new(
+            Surface::Cylinder { f, r: 5.0 }.to_nurbs((0.0, TAU), (0.0, 10.0)),
+        ));
         let periods = closed_periods(&s);
-        assert!(periods[0].is_some_and(|p| (p - TAU).abs() < 1e-9) && periods[1].is_none(), "{periods:?}");
+        assert!(
+            periods[0].is_some_and(|p| (p - TAU).abs() < 1e-9) && periods[1].is_none(),
+            "{periods:?}"
+        );
         let ((u0, u1), _) = s.param_box();
-        let arc = Curve::Circle { c: f.o + f.z * 3.0, x: f.x, y: f.y, r: 5.0 };
-        for (t0, t1, start, end) in [(PI, TAU, None, Some(u1)), (0.0, PI, Some(u0), None), (0.5, TAU, None, Some(u1))] {
+        let arc = Curve::Circle {
+            c: f.o + f.z * 3.0,
+            x: f.x,
+            y: f.y,
+            r: 5.0,
+        };
+        for (t0, t1, start, end) in [
+            (PI, TAU, None, Some(u1)),
+            (0.0, PI, Some(u0), None),
+            (0.5, TAU, None, Some(u1)),
+        ] {
             check(&s, &arc, t0, t1);
             let pc = pcurve(&s, &arc, t0, t1, None);
             for i in 0..=20 {
                 let q = pc.point(t0 + (t1 - t0) * i as f64 / 20.0);
-                assert!(q.x >= u0 - 1e-9 && q.x <= u1 + 1e-9, "{t0}..{t1}: u {} out of the range", q.x);
+                assert!(
+                    q.x >= u0 - 1e-9 && q.x <= u1 + 1e-9,
+                    "{t0}..{t1}: u {} out of the range",
+                    q.x
+                );
             }
             if let Some(u) = start {
-                assert!((pc.point(t0).x - u).abs() < 1e-7, "{t0}..{t1}: starts at {}", pc.point(t0).x);
+                assert!(
+                    (pc.point(t0).x - u).abs() < 1e-7,
+                    "{t0}..{t1}: starts at {}",
+                    pc.point(t0).x
+                );
             }
             if let Some(u) = end {
-                assert!((pc.point(t1).x - u).abs() < 1e-7, "{t0}..{t1}: ends at {}", pc.point(t1).x);
+                assert!(
+                    (pc.point(t1).x - u).abs() < 1e-7,
+                    "{t0}..{t1}: ends at {}",
+                    pc.point(t1).x
+                );
             }
         }
         // Clockwise from the seam: it starts at the range's end and runs back into it.
-        let cw = Curve::Circle { c: f.o + f.z * 3.0, x: f.x, y: -f.y, r: 5.0 };
+        let cw = Curve::Circle {
+            c: f.o + f.z * 3.0,
+            x: f.x,
+            y: -f.y,
+            r: 5.0,
+        };
         check(&s, &cw, 0.0, PI);
         let pc = pcurve(&s, &cw, 0.0, PI, None);
-        assert!((pc.point(0.0).x - u1).abs() < 1e-7 && (pc.point(PI).x - PI).abs() < 1e-6, "{:?} .. {:?}", pc.point(0.0), pc.point(PI));
+        assert!(
+            (pc.point(0.0).x - u1).abs() < 1e-7 && (pc.point(PI).x - PI).abs() < 1e-6,
+            "{:?} .. {:?}",
+            pc.point(0.0),
+            pc.point(PI)
+        );
     }
 
     /// A ruling of a B-spline cone up to its apex keeps one u to the end (regression: the apex,
@@ -580,35 +737,85 @@ mod tests {
         let u = pc.point(0.0).x;
         for i in 0..=20 {
             let q = pc.point(len * i as f64 / 20.0);
-            assert!((q.x - u).abs() < 1e-6, "u {} at {i}/20, {} at the base", q.x, u);
+            assert!(
+                (q.x - u).abs() < 1e-6,
+                "u {} at {i}/20, {} at the base",
+                q.x,
+                u
+            );
             assert!((s.eval(q.x, q.y) - line.point(len * i as f64 / 20.0)).norm() < 1e-8);
         }
     }
 
     #[test]
     fn pcurves_lie_on_their_curves() {
-        let f = Frame::from_xz(P3::new(1.0, 2.0, 3.0), V3::new(1.0, 0.2, 0.0), V3::new(0.1, 0.0, 1.0));
+        let f = Frame::from_xz(
+            P3::new(1.0, 2.0, 3.0),
+            V3::new(1.0, 0.2, 0.0),
+            V3::new(0.1, 0.0, 1.0),
+        );
         let cyl = Surface::Cylinder { f, r: 5.0 };
-        let rim = Curve::Circle { c: f.o + f.z * 2.0, x: f.y, y: -f.x, r: 5.0 };
+        let rim = Curve::Circle {
+            c: f.o + f.z * 2.0,
+            x: f.y,
+            y: -f.x,
+            r: 5.0,
+        };
         check(&cyl, &rim, 0.3, 4.0);
-        let ruling = Curve::Line { o: f.o + f.x * 5.0, d: -f.z };
+        let ruling = Curve::Line {
+            o: f.o + f.x * 5.0,
+            d: -f.z,
+        };
         check(&cyl, &ruling, -3.0, 2.0);
         // An oblique ellipse: fitted.
-        let pl = Surface::Plane { f: Frame::from_z(f.o, V3::new(0.3, 0.1, 1.0)) };
-        let e = super::super::ssi::surface_surface(&pl, ((0.0, 1.0), (0.0, 1.0)), &cyl, ((0.0, TAU), (-10.0, 10.0)), &Bbox { min: P3::new(-20.0, -20.0, -20.0), max: P3::new(20.0, 20.0, 20.0) });
+        let pl = Surface::Plane {
+            f: Frame::from_z(f.o, V3::new(0.3, 0.1, 1.0)),
+        };
+        let e = super::super::ssi::surface_surface(
+            &pl,
+            ((0.0, 1.0), (0.0, 1.0)),
+            &cyl,
+            ((0.0, TAU), (-10.0, 10.0)),
+            &Bbox {
+                min: P3::new(-20.0, -20.0, -20.0),
+                max: P3::new(20.0, 20.0, 20.0),
+            },
+        );
         assert_eq!(e.len(), 1);
         check(&cyl, &e[0].c, 0.0, TAU);
         check(&pl, &e[0].c, 0.0, TAU);
         let sph = Surface::Sphere { f, r: 5.0 };
-        let lat = Curve::Circle { c: f.o + f.z * 3.0, x: f.x, y: f.y, r: 4.0 };
+        let lat = Curve::Circle {
+            c: f.o + f.z * 3.0,
+            x: f.x,
+            y: f.y,
+            r: 4.0,
+        };
         check(&sph, &lat, 0.0, TAU);
-        let mer = Curve::Circle { c: f.o, x: f.x, y: f.z, r: 5.0 };
+        let mer = Curve::Circle {
+            c: f.o,
+            x: f.x,
+            y: f.z,
+            r: 5.0,
+        };
         check(&sph, &mer, -1.0, 1.0);
-        let tor = Surface::Torus { f, rmaj: 10.0, rmin: 2.0 };
-        let m2 = Curve::Circle { c: f.o + f.y * 10.0, x: f.y, y: f.z, r: 2.0 };
+        let tor = Surface::Torus {
+            f,
+            rmaj: 10.0,
+            rmin: 2.0,
+        };
+        let m2 = Curve::Circle {
+            c: f.o + f.y * 10.0,
+            x: f.y,
+            y: f.z,
+            r: 2.0,
+        };
         check(&tor, &m2, 0.0, TAU);
         let cone = Surface::Cone { f, r: 3.0, a: 0.3 };
-        let ruling = Curve::Line { o: cone.eval(1.0, 0.0), d: cone.d1(1.0, 0.0).2 };
+        let ruling = Curve::Line {
+            o: cone.eval(1.0, 0.0),
+            d: cone.d1(1.0, 0.0).2,
+        };
         check(&cone, &ruling, -2.0, 2.0);
     }
 }

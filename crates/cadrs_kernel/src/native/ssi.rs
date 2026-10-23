@@ -6,10 +6,10 @@ use std::sync::Arc;
 
 use super::curve::Curve;
 use super::math::*;
-use rayon::prelude::*;
 use super::nurbs::NurbsCurve;
 use super::surface::Surface;
 use super::tol;
+use rayon::prelude::*;
 
 /// A piece of an intersection curve.
 #[derive(Debug, Clone)]
@@ -27,32 +27,70 @@ pub struct IntCurve {
 
 /// The p-curve on `s` among `ic`'s fitted ones that puts `s` on the curve (within 1e-7 of its
 /// size at 9 points over [t0, t1]), if any.
-pub fn pcurve_from(pcs: &[Option<Curve>; 2], s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve> {
+pub fn pcurve_from(
+    pcs: &[Option<Curve>; 2],
+    s: &Surface,
+    c: &Curve,
+    t0: f64,
+    t1: f64,
+) -> Option<Curve> {
     let size = 1.0 + c.point(t0).coords.amax().max(c.point(t1).coords.amax());
-    pcs.iter().flatten().find(|pc| {
-        (0..=8).all(|k| {
-            let t = t0 + (t1 - t0) * k as f64 / 8.0;
-            let q = pc.point(t);
-            (s.eval(q.x, q.y) - c.point(t)).norm() <= 1e-7 * size
+    pcs.iter()
+        .flatten()
+        .find(|pc| {
+            (0..=8).all(|k| {
+                let t = t0 + (t1 - t0) * k as f64 / 8.0;
+                let q = pc.point(t);
+                (s.eval(q.x, q.y) - c.point(t)).norm() <= 1e-7 * size
+            })
         })
-    }).cloned()
+        .cloned()
 }
 
 /// The intersection of two surfaces near the box `bb` (the overlap of the two faces' boxes),
 /// given the uv boxes of the faces for the numeric fallback: the crossing curves, the curves
 /// along which the surfaces touch, the boundary of a region where they coincide, and isolated
 /// points of contact as curves of no length (t0 = t1).
-pub fn surface_surface(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, ub: ((f64, f64), (f64, f64)), bb: &Bbox) -> Vec<IntCurve> {
+pub fn surface_surface(
+    a: &Surface,
+    ua: ((f64, f64), (f64, f64)),
+    b: &Surface,
+    ub: ((f64, f64), (f64, f64)),
+    bb: &Bbox,
+) -> Vec<IntCurve> {
     let r = surface_surface_full(a, ua, b, ub, bb);
     if std::env::var_os("CADRS_SSI_DEBUG").is_some() {
-        eprintln!("surface_surface: {} crossing (length {:.4}), {} tangent, {} coincident, points {:?}", r.curves.len(), r.curves.iter().map(|c| c.c.length(c.t0, c.t1)).sum::<f64>(), r.tangent.len(), r.coincident.len(), r.points);
+        eprintln!(
+            "surface_surface: {} crossing (length {:.4}), {} tangent, {} coincident, points {:?}",
+            r.curves.len(),
+            r.curves.iter().map(|c| c.c.length(c.t0, c.t1)).sum::<f64>(),
+            r.tangent.len(),
+            r.coincident.len(),
+            r.points
+        );
         for c in &r.tangent {
-            eprintln!("  tangent {:?} .. {:?} length {}", c.c.point(c.t0), c.c.point(c.t1), c.c.length(c.t0, c.t1));
+            eprintln!(
+                "  tangent {:?} .. {:?} length {}",
+                c.c.point(c.t0),
+                c.c.point(c.t1),
+                c.c.length(c.t0, c.t1)
+            );
         }
     }
     // (A point of contact as a curve of no length.)
-    let points = r.points.into_iter().map(|p| IntCurve { c: Curve::Line { o: p, d: V3::x() }, t0: 0.0, t1: 0.0, closed: false, pcs: None });
-    r.curves.into_iter().chain(r.tangent).chain(r.coincident).chain(points).collect()
+    let points = r.points.into_iter().map(|p| IntCurve {
+        c: Curve::Line { o: p, d: V3::x() },
+        t0: 0.0,
+        t1: 0.0,
+        closed: false,
+        pcs: None,
+    });
+    r.curves
+        .into_iter()
+        .chain(r.tangent)
+        .chain(r.coincident)
+        .chain(points)
+        .collect()
 }
 
 /// A surface–surface intersection in parts.
@@ -84,14 +122,26 @@ fn coincidence_tol(bb: &Bbox) -> f64 {
 }
 
 /// [`surface_surface`] in parts.
-pub fn surface_surface_full(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, ub: ((f64, f64), (f64, f64)), bb: &Bbox) -> Ssi {
+pub fn surface_surface_full(
+    a: &Surface,
+    ua: ((f64, f64), (f64, f64)),
+    b: &Surface,
+    ub: ((f64, f64), (f64, f64)),
+    bb: &Bbox,
+) -> Ssi {
     surface_surface_tol(a, ua, b, ub, bb, super::boolean::VTOL)
 }
 
 /// [`surface_surface`] where it has a closed form (coincident surfaces' region, a plane and an
 /// extrusion, the analytic pairs), else `None`: the curves the numeric engine would trace (fitted
 /// B-splines) not traced, for a caller that only takes exact ones.
-pub(crate) fn surface_surface_closed(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, ub: ((f64, f64), (f64, f64)), bb: &Bbox) -> Option<Vec<IntCurve>> {
+pub(crate) fn surface_surface_closed(
+    a: &Surface,
+    ua: ((f64, f64), (f64, f64)),
+    b: &Surface,
+    ub: ((f64, f64), (f64, f64)),
+    bb: &Bbox,
+) -> Option<Vec<IntCurve>> {
     let tc = coincidence_tol(bb);
     let closed = a.same_domain(b, tc).is_some()
         || plane_extrusion(a, b, ub, bb).is_some()
@@ -103,11 +153,25 @@ pub(crate) fn surface_surface_closed(a: &Surface, ua: ((f64, f64), (f64, f64)), 
 
 /// [`surface_surface_full`] for a boolean merging points within `tol`: surfaces touching
 /// within it touch (two spheres meet in a point, not a circle that small).
-pub fn surface_surface_tol(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, ub: ((f64, f64), (f64, f64)), bb: &Bbox, tol: f64) -> Ssi {
-    let closed = |curves| Ssi { curves, work: 1, ..Ssi::default() };
+pub fn surface_surface_tol(
+    a: &Surface,
+    ua: ((f64, f64), (f64, f64)),
+    b: &Surface,
+    ub: ((f64, f64), (f64, f64)),
+    bb: &Bbox,
+    tol: f64,
+) -> Ssi {
+    let closed = |curves| Ssi {
+        curves,
+        work: 1,
+        ..Ssi::default()
+    };
     let tc = coincidence_tol(bb);
     if a.same_domain(b, tc).is_some() {
-        return Ssi { coincident: super::ssi_coincident::region_boundary(a, ua, b, ub, tc), ..Ssi::default() };
+        return Ssi {
+            coincident: super::ssi_coincident::region_boundary(a, ua, b, ub, tc),
+            ..Ssi::default()
+        };
     }
     if let Some(r) = plane_extrusion(a, b, ub, bb) {
         return closed(r);
@@ -132,8 +196,15 @@ pub fn surface_surface_tol(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surfac
 
 /// A plane and an extrusion: rulings where the plane contains the direction, otherwise the
 /// base curve projected along the direction onto the plane (an affine image: exact).
-fn plane_extrusion(p: &Surface, e: &Surface, ue: ((f64, f64), (f64, f64)), bb: &Bbox) -> Option<Vec<IntCurve>> {
-    let (Surface::Plane { f }, Surface::Extrusion { c, d }) = (p, e) else { return None };
+fn plane_extrusion(
+    p: &Surface,
+    e: &Surface,
+    ue: ((f64, f64), (f64, f64)),
+    bb: &Bbox,
+) -> Option<Vec<IntCurve>> {
+    let (Surface::Plane { f }, Surface::Extrusion { c, d }) = (p, e) else {
+        return None;
+    };
     let n = f.x.cross(&f.y);
     let (u0, u1) = ue.0;
     let pad = (u1 - u0).abs() * tol::REL_POINT;
@@ -155,7 +226,10 @@ fn plane_extrusion(p: &Surface, e: &Surface, ue: ((f64, f64), (f64, f64)), bb: &
     }
     // x ↦ x − d (n·(x − o)) / (n·d): the projection along d onto the plane.
     let m = nalgebra::Matrix3::identity() - d * n.transpose() / dn;
-    let aff = Affine { m, t: d * (n.dot(&f.o.coords) / dn) };
+    let aff = Affine {
+        m,
+        t: d * (n.dot(&f.o.coords) / dn),
+    };
     let (lo, hi) = match c.nurbs_range() {
         Some((a, b)) => (u0.max(a), u1.min(b)),
         None => (u0, u1),
@@ -169,11 +243,19 @@ fn plane_extrusion(p: &Surface, e: &Surface, ue: ((f64, f64), (f64, f64)), bb: &
             let d2 = m * dl;
             Curve::Line { o: o2, d: d2 }
         }
-        Curve::Circle { .. } | Curve::Ellipse { .. } => Curve::Nurbs(Arc::new(c.to_nurbs(lo, hi).transformed(&aff))),
+        Curve::Circle { .. } | Curve::Ellipse { .. } => {
+            Curve::Nurbs(Arc::new(c.to_nurbs(lo, hi).transformed(&aff)))
+        }
         Curve::Nurbs(nc) => Curve::Nurbs(Arc::new(nc.transformed(&aff))),
     };
     let closed = c.is_periodic() && (hi - lo) >= TAU - tol::ANGULAR;
-    Some(vec![IntCurve { c: curve, t0: lo, t1: hi, closed, pcs: None }])
+    Some(vec![IntCurve {
+        c: curve,
+        t0: lo,
+        t1: hi,
+        closed,
+        pcs: None,
+    }])
 }
 
 /// A plane and a cone meet in a conic: in the cone's frame, with g(u) = n_x cos u + n_y sin u,
@@ -183,7 +265,7 @@ fn plane_extrusion(p: &Surface, e: &Surface, ue: ((f64, f64), (f64, f64)), bb: &
 /// The pieces cover the parts of the curve inside `bb`. None when the plane passes through the
 /// apex (A = 0: lines, handled elsewhere or numerically).
 fn plane_cone(fp: &Frame, fc: &Frame, r: f64, ang: f64, bb: &Bbox) -> Option<Vec<IntCurve>> {
-    use super::nurbs::{NurbsCurve, H};
+    use super::nurbs::{H, NurbsCurve};
     let n = plane_n(fp);
     let nl = V3::new(n.dot(&fc.x), n.dot(&fc.y), n.dot(&fc.z));
     let c = n.dot(&(fp.o - fc.o));
@@ -218,7 +300,11 @@ fn plane_cone(fp: &Frame, fc: &Frame, r: f64, ang: f64, bb: &Bbox) -> Option<Vec
     let (gr, phi) = (nl.x.hypot(nl.y), nl.y.atan2(nl.x));
     if k.abs() > tol::ANGULAR_FINE && gr > tol::ANGULAR_FINE {
         for kx in 0..8 {
-            let corner = P3::new(if kx & 1 == 0 { bb.min.x } else { bb.max.x }, if kx & 2 == 0 { bb.min.y } else { bb.max.y }, if kx & 4 == 0 { bb.min.z } else { bb.max.z });
+            let corner = P3::new(
+                if kx & 1 == 0 { bb.min.x } else { bb.max.x },
+                if kx & 2 == 0 { bb.min.y } else { bb.max.y },
+                if kx & 4 == 0 { bb.min.z } else { bb.max.z },
+            );
             let v = (corner - fc.o).dot(&fc.z) / k;
             // v(u) = (c − r g) / (s g + q) at that v: g = (c − v q) / (v s + r), g = gr cos(u − φ).
             let den = v * s + r;
@@ -232,7 +318,11 @@ fn plane_cone(fp: &Frame, fc: &Frame, r: f64, ang: f64, bb: &Bbox) -> Option<Vec
                     let u = u.rem_euclid(TAU);
                     // Either side of it too (the conic's part in the box may be thinner than
                     // the even step).
-                    us.extend([u, (u - tol::REL_POINT).rem_euclid(TAU), (u + tol::REL_POINT).rem_euclid(TAU)]);
+                    us.extend([
+                        u,
+                        (u - tol::REL_POINT).rem_euclid(TAU),
+                        (u + tol::REL_POINT).rem_euclid(TAU),
+                    ]);
                 }
             }
         }
@@ -306,7 +396,15 @@ fn plane_cone(fp: &Frame, fc: &Frame, r: f64, ang: f64, bb: &Bbox) -> Option<Vec
         // Pieces of at most π/4 whose weights share one sign.
         let mut spans: Vec<(f64, f64)> = Vec::new();
         let n0 = ((ub - ua) / (PI / 4.0)).ceil().max(1.0) as usize;
-        let mut stack: Vec<(f64, f64)> = (0..n0).rev().map(|i| (ua + (ub - ua) * i as f64 / n0 as f64, ua + (ub - ua) * (i + 1) as f64 / n0 as f64)).collect();
+        let mut stack: Vec<(f64, f64)> = (0..n0)
+            .rev()
+            .map(|i| {
+                (
+                    ua + (ub - ua) * i as f64 / n0 as f64,
+                    ua + (ub - ua) * (i + 1) as f64 / n0 as f64,
+                )
+            })
+            .collect();
         while let Some((x, y)) = stack.pop() {
             let b = piece(x, y);
             let pos = b.iter().all(|h| h.w > tol::TINY);
@@ -345,9 +443,19 @@ fn plane_cone(fp: &Frame, fc: &Frame, r: f64, ang: f64, bb: &Bbox) -> Option<Vec
                 knots.extend([kv; 3]);
             }
         }
-        let nc = NurbsCurve { degree: 2, knots, cps };
+        let nc = NurbsCurve {
+            degree: 2,
+            knots,
+            cps,
+        };
         let (t0, t1) = nc.range();
-        out.push(IntCurve { c: Curve::Nurbs(std::sync::Arc::new(nc)), t0, t1, closed, pcs: None });
+        out.push(IntCurve {
+            c: Curve::Nurbs(std::sync::Arc::new(nc)),
+            t0,
+            t1,
+            closed,
+            pcs: None,
+        });
     }
     Some(out)
 }
@@ -371,12 +479,29 @@ fn bound_line(o: P3, d: V3, bb: &Bbox) -> Option<IntCurve> {
     if t1 - t0 < tol::ROUNDOFF {
         return None;
     }
-    Some(IntCurve { c: Curve::Line { o, d }, t0, t1, closed: false, pcs: None })
+    Some(IntCurve {
+        c: Curve::Line { o, d },
+        t0,
+        t1,
+        closed: false,
+        pcs: None,
+    })
 }
 
 fn circle(c: P3, n: V3, r: f64) -> IntCurve {
     let f = Frame::from_z(c, n);
-    IntCurve { c: Curve::Circle { c, x: f.x, y: f.y, r }, t0: 0.0, t1: TAU, closed: true, pcs: None }
+    IntCurve {
+        c: Curve::Circle {
+            c,
+            x: f.x,
+            y: f.y,
+            r,
+        },
+        t0: 0.0,
+        t1: TAU,
+        closed: true,
+        pcs: None,
+    }
 }
 
 fn plane_n(f: &Frame) -> V3 {
@@ -413,16 +538,38 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox, run_tol: f64) -> Option<Vec<Int
                 // Square to the axis: a circle.
                 let t = (fp.o - fc.o).dot(&n) / cz;
                 let c = fc.o + z * t;
-                return Some(vec![IntCurve { c: Curve::Circle { c, x: fc.x, y: fc.y, r: *r }, t0: 0.0, t1: TAU, closed: true, pcs: None }]);
+                return Some(vec![IntCurve {
+                    c: Curve::Circle {
+                        c,
+                        x: fc.x,
+                        y: fc.y,
+                        r: *r,
+                    },
+                    t0: 0.0,
+                    t1: TAU,
+                    closed: true,
+                    pcs: None,
+                }]);
             }
             // Nearly parallel (single-precision data tilt a plane by 1e-8): the ellipse is huge
             // and its parts in the region are straight to second order in the tilt; each is the
             // chord between where the plane cuts the cross-section circles at the region's
             // lowest and highest points along the axis.
             if cz.abs() >= tol::ANGULAR_FINE && cz.abs() * bbig.diagonal() < 1e-3 {
-                let corners: Vec<P3> = (0..8).map(|k| P3::new(if k & 1 == 0 { bbig.min.x } else { bbig.max.x }, if k & 2 == 0 { bbig.min.y } else { bbig.max.y }, if k & 4 == 0 { bbig.min.z } else { bbig.max.z })).collect();
+                let corners: Vec<P3> = (0..8)
+                    .map(|k| {
+                        P3::new(
+                            if k & 1 == 0 { bbig.min.x } else { bbig.max.x },
+                            if k & 2 == 0 { bbig.min.y } else { bbig.max.y },
+                            if k & 4 == 0 { bbig.min.z } else { bbig.max.z },
+                        )
+                    })
+                    .collect();
                 let hs: Vec<f64> = corners.iter().map(|c| (c - fc.o).dot(&z)).collect();
-                let (h0, h1) = (hs.iter().copied().fold(f64::INFINITY, f64::min), hs.iter().copied().fold(f64::NEG_INFINITY, f64::max));
+                let (h0, h1) = (
+                    hs.iter().copied().fold(f64::INFINITY, f64::min),
+                    hs.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+                );
                 // At height h: the cross-section's centre, the plane's line in it (direction
                 // w = z × n, offset d from the centre), and its two crossings.
                 let cuts = |h: f64| -> Option<[P3; 2]> {
@@ -484,7 +631,19 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox, run_tol: f64) -> Option<Vec<Int
             if a_len > 4.0 * bbig.diagonal() {
                 return plane_cone(fp, fc, *r, 0.0, &bbig);
             }
-            Some(vec![IntCurve { c: Curve::Ellipse { c, x: major, y: minor, a: a_len, b: *r }, t0: 0.0, t1: TAU, closed: true, pcs: None }])
+            Some(vec![IntCurve {
+                c: Curve::Ellipse {
+                    c,
+                    x: major,
+                    y: minor,
+                    a: a_len,
+                    b: *r,
+                },
+                t0: 0.0,
+                t1: TAU,
+                closed: true,
+                pcs: None,
+            }])
         }
         (Surface::Plane { f: fp }, Surface::Sphere { f: fs, r }) => {
             let n = plane_n(fp);
@@ -506,7 +665,18 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox, run_tol: f64) -> Option<Vec<Int
                     return Some(vec![]);
                 }
                 let c = fc.o + fc.z * h;
-                return Some(vec![IntCurve { c: Curve::Circle { c, x: fc.x, y: fc.y, r: rr }, t0: 0.0, t1: TAU, closed: true, pcs: None }]);
+                return Some(vec![IntCurve {
+                    c: Curve::Circle {
+                        c,
+                        x: fc.x,
+                        y: fc.y,
+                        r: rr,
+                    },
+                    t0: 0.0,
+                    t1: TAU,
+                    closed: true,
+                    pcs: None,
+                }]);
             }
             // Through the apex: the rulings in the plane, none (the apex alone), one (the plane
             // tangent along it) or two. A ruling at angle u runs from the apex along
@@ -516,7 +686,9 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox, run_tol: f64) -> Option<Vec<Int
             let (s, k) = ang.sin_cos();
             let nl = V3::new(n.dot(&fc.x), n.dot(&fc.y), cz);
             let c = n.dot(&(fp.o - fc.o));
-            if (r * nl.z * k + s * c).abs() < tol::REL * (1.0 + r.abs() + c.abs()) && s.abs() > tol::ANGULAR_FINE {
+            if (r * nl.z * k + s * c).abs() < tol::REL * (1.0 + r.abs() + c.abs())
+                && s.abs() > tol::ANGULAR_FINE
+            {
                 let apex = fc.o - fc.z * (r * k / s);
                 let m = nl.x.hypot(nl.y);
                 let g = -k * nl.z / s;
@@ -562,20 +734,75 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox, run_tol: f64) -> Option<Vec<Int
                 let c = ft.o + ft.z * h;
                 if h.abs() >= *rmin - tol {
                     // Tangent (a blend's plane): the circle the tube touches it along.
-                    return Some(vec![IntCurve { c: Curve::Circle { c, x: ft.x, y: ft.y, r: *rmaj }, t0: 0.0, t1: TAU, closed: true, pcs: None }]);
+                    return Some(vec![IntCurve {
+                        c: Curve::Circle {
+                            c,
+                            x: ft.x,
+                            y: ft.y,
+                            r: *rmaj,
+                        },
+                        t0: 0.0,
+                        t1: TAU,
+                        closed: true,
+                        pcs: None,
+                    }]);
                 }
                 let w = (rmin * rmin - h * h).sqrt();
                 return Some(vec![
-                    IntCurve { c: Curve::Circle { c, x: ft.x, y: ft.y, r: rmaj + w }, t0: 0.0, t1: TAU, closed: true, pcs: None },
-                    IntCurve { c: Curve::Circle { c, x: ft.x, y: ft.y, r: rmaj - w }, t0: 0.0, t1: TAU, closed: true, pcs: None },
+                    IntCurve {
+                        c: Curve::Circle {
+                            c,
+                            x: ft.x,
+                            y: ft.y,
+                            r: rmaj + w,
+                        },
+                        t0: 0.0,
+                        t1: TAU,
+                        closed: true,
+                        pcs: None,
+                    },
+                    IntCurve {
+                        c: Curve::Circle {
+                            c,
+                            x: ft.x,
+                            y: ft.y,
+                            r: rmaj - w,
+                        },
+                        t0: 0.0,
+                        t1: TAU,
+                        closed: true,
+                        pcs: None,
+                    },
                 ]);
             }
             if cz.abs() < tol::ANGULAR_FINE && (ft.o - fp.o).dot(&n).abs() < tol::ROUNDOFF {
                 // A plane through the axis: two meridian circles.
                 let w = ft.z.cross(&n).normalize();
                 return Some(vec![
-                    IntCurve { c: Curve::Circle { c: ft.o + w * *rmaj, x: w, y: ft.z, r: *rmin }, t0: 0.0, t1: TAU, closed: true, pcs: None },
-                    IntCurve { c: Curve::Circle { c: ft.o - w * *rmaj, x: -w, y: ft.z, r: *rmin }, t0: 0.0, t1: TAU, closed: true, pcs: None },
+                    IntCurve {
+                        c: Curve::Circle {
+                            c: ft.o + w * *rmaj,
+                            x: w,
+                            y: ft.z,
+                            r: *rmin,
+                        },
+                        t0: 0.0,
+                        t1: TAU,
+                        closed: true,
+                        pcs: None,
+                    },
+                    IntCurve {
+                        c: Curve::Circle {
+                            c: ft.o - w * *rmaj,
+                            x: -w,
+                            y: ft.z,
+                            r: *rmin,
+                        },
+                        t0: 0.0,
+                        t1: TAU,
+                        closed: true,
+                        pcs: None,
+                    },
                 ]);
             }
             None
@@ -620,12 +847,18 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox, run_tol: f64) -> Option<Vec<Int
                 return Some(vec![]);
             }
             let x = (l * l + r1 * r1 - r2 * r2) / (2.0 * l);
-            Some(vec![circle(f1.o + d / l * x, d / l, (r1 * r1 - x * x).max(0.0).sqrt())])
+            Some(vec![circle(
+                f1.o + d / l * x,
+                d / l,
+                (r1 * r1 - x * x).max(0.0).sqrt(),
+            )])
         }
         _ => {
             // Coaxial surfaces of revolution: circles where the meridians cross. A sphere is
             // symmetric about any axis through its centre.
-            let (Some((mut oa, mut za)), Some((ob, zb))) = (a.axis(), b.axis()) else { return None };
+            let (Some((mut oa, mut za)), Some((ob, zb))) = (a.axis(), b.axis()) else {
+                return None;
+            };
             if let Surface::Sphere { f, .. } = a {
                 let w = f.o - ob;
                 if (w - zb * w.dot(&zb)).norm() < tol::ROUNDOFF {
@@ -635,14 +868,30 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox, run_tol: f64) -> Option<Vec<Int
             }
             let (ob, zb) = if let Surface::Sphere { f, .. } = b {
                 let w = f.o - oa;
-                if (w - za * w.dot(&za)).norm() < tol::ROUNDOFF { (oa, za) } else { (ob, zb) }
+                if (w - za * w.dot(&za)).norm() < tol::ROUNDOFF {
+                    (oa, za)
+                } else {
+                    (ob, zb)
+                }
             } else {
                 (ob, zb)
             };
-            if !matches!(a, Surface::Cylinder { .. } | Surface::Cone { .. } | Surface::Sphere { .. } | Surface::Torus { .. }) {
+            if !matches!(
+                a,
+                Surface::Cylinder { .. }
+                    | Surface::Cone { .. }
+                    | Surface::Sphere { .. }
+                    | Surface::Torus { .. }
+            ) {
                 return None;
             }
-            if !matches!(b, Surface::Cylinder { .. } | Surface::Cone { .. } | Surface::Sphere { .. } | Surface::Torus { .. }) {
+            if !matches!(
+                b,
+                Surface::Cylinder { .. }
+                    | Surface::Cone { .. }
+                    | Surface::Sphere { .. }
+                    | Surface::Torus { .. }
+            ) {
                 return None;
             }
             if za.cross(&zb).norm() > tol::ANGULAR_FINE {
@@ -662,26 +911,47 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox, run_tol: f64) -> Option<Vec<Int
 #[derive(Debug, Clone, Copy)]
 enum Meridian {
     /// Points p + s·d.
-    Line { p: (f64, f64), d: (f64, f64) },
-    Circle { c: (f64, f64), r: f64 },
+    Line {
+        p: (f64, f64),
+        d: (f64, f64),
+    },
+    Circle {
+        c: (f64, f64),
+        r: f64,
+    },
 }
 
 fn meridian(s: &Surface, o: &P3, z: &V3) -> Option<Meridian> {
     let h_of = |p: &P3| (p - o).dot(z);
     Some(match s {
-        Surface::Cylinder { r, .. } => Meridian::Line { p: (*r, 0.0), d: (0.0, 1.0) },
+        Surface::Cylinder { r, .. } => Meridian::Line {
+            p: (*r, 0.0),
+            d: (0.0, 1.0),
+        },
         Surface::Cone { f, r, a } => {
             let s = f.z.dot(z).signum();
-            Meridian::Line { p: (*r, h_of(&f.o)), d: (a.sin(), a.cos() * s) }
+            Meridian::Line {
+                p: (*r, h_of(&f.o)),
+                d: (a.sin(), a.cos() * s),
+            }
         }
-        Surface::Sphere { f, r } => Meridian::Circle { c: (0.0, h_of(&f.o)), r: *r },
-        Surface::Torus { f, rmaj, rmin } => Meridian::Circle { c: (*rmaj, h_of(&f.o)), r: *rmin },
+        Surface::Sphere { f, r } => Meridian::Circle {
+            c: (0.0, h_of(&f.o)),
+            r: *r,
+        },
+        Surface::Torus { f, rmaj, rmin } => Meridian::Circle {
+            c: (*rmaj, h_of(&f.o)),
+            r: *rmin,
+        },
         Surface::Plane { f } => {
             let n = f.x.cross(&f.y);
             if n.cross(z).norm() > tol::ANGULAR_FINE {
                 return None;
             }
-            Meridian::Line { p: (0.0, h_of(&f.o)), d: (1.0, 0.0) }
+            Meridian::Line {
+                p: (0.0, h_of(&f.o)),
+                d: (1.0, 0.0),
+            }
         }
         _ => return None,
     })
@@ -700,7 +970,8 @@ fn meridian_points(a: Meridian, b: Meridian, tol: f64) -> Vec<(f64, f64)> {
             let s = (wx * d2.1 - wy * d2.0) / den;
             out.push((p1.0 + d1.0 * s, p1.1 + d1.1 * s));
         }
-        (Meridian::Line { p, d }, Meridian::Circle { c, r }) | (Meridian::Circle { c, r }, Meridian::Line { p, d }) => {
+        (Meridian::Line { p, d }, Meridian::Circle { c, r })
+        | (Meridian::Circle { c, r }, Meridian::Line { p, d }) => {
             let l = (d.0 * d.0 + d.1 * d.1).sqrt();
             let (dx, dy) = (d.0 / l, d.1 / l);
             let (wx, wy) = (p.0 - c.0, p.1 - c.1);
@@ -746,13 +1017,26 @@ fn meridian_points(a: Meridian, b: Meridian, tol: f64) -> Vec<(f64, f64)> {
 }
 
 fn coaxial(a: &Surface, b: &Surface, o: &P3, z: &V3, bb: &Bbox) -> Vec<IntCurve> {
-    let (Some(ma), Some(mb)) = (meridian(a, o, z), meridian(b, o, z)) else { return vec![] };
+    let (Some(ma), Some(mb)) = (meridian(a, o, z), meridian(b, o, z)) else {
+        return vec![];
+    };
     let f = Frame::from_z(*o, *z);
     let _ = bb;
     meridian_points(ma, mb, 1e-7)
         .into_iter()
         .filter(|(r, _)| *r > tol::ROUNDOFF)
-        .map(|(r, h)| IntCurve { c: Curve::Circle { c: o + z * h, x: f.x, y: f.y, r }, t0: 0.0, t1: TAU, closed: true, pcs: None })
+        .map(|(r, h)| IntCurve {
+            c: Curve::Circle {
+                c: o + z * h,
+                x: f.x,
+                y: f.y,
+                r,
+            },
+            t0: 0.0,
+            t1: TAU,
+            closed: true,
+            pcs: None,
+        })
         .collect()
 }
 
@@ -766,7 +1050,8 @@ pub fn sdist_hint(s: &Surface, p: &P3, hint: &mut Option<(f64, f64)>) -> f64 {
     // A hinted Newton may stall on the wrong side of a fold or on the domain's edge: when the
     // foot isn't square to the surface, check against a projection from a coarse grid.
     let r = p - q;
-    let tang = (r.dot(&su) / su.norm().max(tol::TINY)).abs() + (r.dot(&sv) / sv.norm().max(tol::TINY)).abs();
+    let tang = (r.dot(&su) / su.norm().max(tol::TINY)).abs()
+        + (r.dot(&sv) / sv.norm().max(tol::TINY)).abs();
     if hint.is_some() && tang > 1e-7 * (1.0 + r.norm()) {
         let (u2, v2) = s.project_coarse(p, 8);
         let (q2, su2, sv2) = s.d1(u2, v2);
@@ -800,16 +1085,30 @@ pub fn sdist(s: &Surface, p: &P3) -> f64 {
 
 /// The intersection by the numeric engine ([`super::ssi_numeric`]): its traced curves fitted
 /// with B-splines through exact points (tangent curves through the touching points found).
-fn numeric(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, ub: ((f64, f64), (f64, f64)), bb: &Bbox) -> Ssi {
-    use super::ssi_numeric::{intersect_stats, UvBox};
+fn numeric(
+    a: &Surface,
+    ua: ((f64, f64), (f64, f64)),
+    b: &Surface,
+    ub: ((f64, f64), (f64, f64)),
+    bb: &Bbox,
+) -> Ssi {
+    use super::ssi_numeric::{UvBox, intersect_stats};
     // A box that isn't finite (a face without p-curves) falls back on the surface's own.
     let uvbox = |s: &Surface, x: ((f64, f64), (f64, f64))| {
-        let ok = [x.0 .0, x.0 .1, x.1 .0, x.1 .1].iter().all(|v| v.is_finite()) && x.0 .1 > x.0 .0 && x.1 .1 > x.1 .0;
+        let ok = [x.0.0, x.0.1, x.1.0, x.1.1].iter().all(|v| v.is_finite())
+            && x.0.1 > x.0.0
+            && x.1.1 > x.1.0;
         let ((u0, u1), (v0, v1)) = if ok { x } else { s.param_box() };
         // Within the surface's own range where it has one (a B-spline evaluated past its ends
         // is a continuation the face isn't on).
         let ((pu0, pu1), (pv0, pv1)) = s.param_box();
-        let clamp = |(a, b): (f64, f64), (lo, hi): (f64, f64), periodic: bool| if periodic { (a.max(-1e4), b.min(1e4)) } else { (a.max(lo).max(-1e4), b.min(hi).min(1e4)) };
+        let clamp = |(a, b): (f64, f64), (lo, hi): (f64, f64), periodic: bool| {
+            if periodic {
+                (a.max(-1e4), b.min(1e4))
+            } else {
+                (a.max(lo).max(-1e4), b.min(hi).min(1e4))
+            }
+        };
         let (u0, u1) = clamp((u0, u1), (pu0, pu1), s.u_periodic());
         let (v0, v1) = clamp((v0, v1), (pv0, pv1), s.v_periodic());
         UvBox::new((u0, u1), (v0, v1))
@@ -817,8 +1116,12 @@ fn numeric(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, ub: ((f64, f6
     // One surface lying all on the other (a copy with another domain, or another form of it):
     // no crossing to search for, only the shared region's boundary.
     let tc = coincidence_tol(bb);
-    if super::ssi_coincident::lies_on(a, ua, b, tc) || super::ssi_coincident::lies_on(b, ub, a, tc) {
-        return Ssi { coincident: super::ssi_coincident::region_boundary(a, ua, b, ub, tc), ..Ssi::default() };
+    if super::ssi_coincident::lies_on(a, ua, b, tc) || super::ssi_coincident::lies_on(b, ub, a, tc)
+    {
+        return Ssi {
+            coincident: super::ssi_coincident::region_boundary(a, ua, b, ub, tc),
+            ..Ssi::default()
+        };
     }
     let (box_a, box_b) = (uvbox(a, ua), uvbox(b, ub));
     let (res, stats) = intersect_stats(a, box_a, b, box_b, bb);
@@ -852,12 +1155,16 @@ fn numeric(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, ub: ((f64, f6
     // A curve traced twice (from seeds the first march didn't pass): the copy goes.
     let on = |q: &super::ssi_numeric::Pt, line: &[super::ssi_numeric::Pt], closed: bool| {
         let n = line.len();
-        (0..if closed { n } else { n - 1 }).any(|k| seg_dist3(&q.p, &line[k].p, &line[(k + 1) % n].p) < h * 0.25)
+        (0..if closed { n } else { n - 1 })
+            .any(|k| seg_dist3(&q.p, &line[k].p, &line[(k + 1) % n].p) < h * 0.25)
     };
     let mut keep = vec![true; polys.len()];
     for j in 0..polys.len() {
         for i in 0..j {
-            if keep[i] && polys[i].0.len() >= 2 && polys[j].0.iter().all(|q| on(q, &polys[i].0, polys[i].1)) {
+            if keep[i]
+                && polys[i].0.len() >= 2
+                && polys[j].0.iter().all(|q| on(q, &polys[i].0, polys[i].1))
+            {
                 keep[j] = false;
                 break;
             }
@@ -870,18 +1177,36 @@ fn numeric(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, ub: ((f64, f6
     });
     let dbg = std::env::var("CADRS_SSI_DEBUG").is_ok();
     if dbg {
-        eprintln!("numeric: {} polylines before joining: {:?}", polys.len(), polys.iter().map(|(p, c)| (p.len(), *c, p[0].p, p[p.len() - 1].p)).collect::<Vec<_>>());
+        eprintln!(
+            "numeric: {} polylines before joining: {:?}",
+            polys.len(),
+            polys
+                .iter()
+                .map(|(p, c)| (p.len(), *c, p[0].p, p[p.len() - 1].p))
+                .collect::<Vec<_>>()
+        );
     }
     join_polylines(&mut polys, h * 1e-3, |q| q.p);
     // Crossings on both sides of a periodic seam are one point in space: a polyline made only of
     // such (all its points at one place) is no curve.
     polys.retain(|(p, _)| p.iter().any(|q| (q.p - p[0].p).norm() > h * 1e-3));
     if dbg {
-        eprintln!("numeric: {} after: {:?}", polys.len(), polys.iter().map(|(p, c)| (p.len(), *c)).collect::<Vec<_>>());
+        eprintln!(
+            "numeric: {} after: {:?}",
+            polys.len(),
+            polys.iter().map(|(p, c)| (p.len(), *c)).collect::<Vec<_>>()
+        );
     }
-    let mut curves: Vec<IntCurve> = polys.into_iter().filter(|(p, _)| p.len() >= 2).map(|(p, closed)| fit_curve(a, b, p, closed, &side_ends)).collect();
+    let mut curves: Vec<IntCurve> = polys
+        .into_iter()
+        .filter(|(p, _)| p.len() >= 2)
+        .map(|(p, closed)| fit_curve(a, b, p, closed, &side_ends))
+        .collect();
     curves.extend(side_curves);
-    let tangent: Vec<IntCurve> = tangents.into_iter().filter_map(|(p, closed)| fit_points(p, closed)).collect();
+    let tangent: Vec<IntCurve> = tangents
+        .into_iter()
+        .filter_map(|(p, closed)| fit_points(p, closed))
+        .collect();
     // Where the surfaces coincide over an area: its boundary, the sides of either box on the
     // other surface and where the two part inside a's box.
     let coincident = if res.coincident {
@@ -901,25 +1226,51 @@ fn numeric(a: &Surface, ua: ((f64, f64), (f64, f64)), b: &Surface, ub: ((f64, f6
     // boundary stands for them.)
     let tangent = if res.coincident { Vec::new() } else { tangent };
     let points = res.points.iter().map(|q| q.p).collect();
-    Ssi { curves, tangent, singular: res_singular, coincident, points, work }
+    Ssi {
+        curves,
+        tangent,
+        singular: res_singular,
+        coincident,
+        points,
+        work,
+    }
 }
 
 /// The traced polylines without their points along the sides (each within `near` of its side):
 /// the runs between, each ended on the side where it leaves it (those ends added to `ends`). A
 /// run that stays within twenty times `near` of a side all along is the side's rounding, not a
 /// branch: it goes too.
-fn off_sides(polys: Vec<(Vec<super::ssi_numeric::Pt>, bool)>, sides: &[super::ssi_coincident::Side], a: &Surface, b: &Surface, near: f64, ends: &mut Vec<P3>) -> Vec<(Vec<super::ssi_numeric::Pt>, bool)> {
+fn off_sides(
+    polys: Vec<(Vec<super::ssi_numeric::Pt>, bool)>,
+    sides: &[super::ssi_coincident::Side],
+    a: &Surface,
+    b: &Surface,
+    near: f64,
+    ends: &mut Vec<P3>,
+) -> Vec<(Vec<super::ssi_numeric::Pt>, bool)> {
     use super::ssi_numeric::Pt;
     // The nearest side's point at the same parameter along it, and how far.
     let to_side = |q: &Pt| -> Option<(f64, Pt)> {
         sides
             .iter()
             .filter_map(|sd| {
-                let (s, o, uv, ouv) = if sd.on_a { (a, b, q.a, q.b) } else { (b, a, q.b, q.a) };
-                let (along, periodic) = if sd.fix_u { (uv.1, s.v_periodic()) } else { (uv.0, s.u_periodic()) };
+                let (s, o, uv, ouv) = if sd.on_a {
+                    (a, b, q.a, q.b)
+                } else {
+                    (b, a, q.b, q.a)
+                };
+                let (along, periodic) = if sd.fix_u {
+                    (uv.1, s.v_periodic())
+                } else {
+                    (uv.0, s.u_periodic())
+                };
                 let (lo, hi) = (sd.range.0.min(sd.range.1), sd.range.0.max(sd.range.1));
                 let e = tol::DIFF_STEP * (hi - lo);
-                let t = if periodic { wrap(along, lo - e, TAU) } else { along };
+                let t = if periodic {
+                    wrap(along, lo - e, TAU)
+                } else {
+                    along
+                };
                 if t < lo - e || t > hi + e {
                     return None;
                 }
@@ -927,7 +1278,19 @@ fn off_sides(polys: Vec<(Vec<super::ssi_numeric::Pt>, bool)>, sides: &[super::ss
                 let own = if sd.fix_u { (sd.val, t) } else { (t, sd.val) };
                 let p = s.eval(own.0, own.1);
                 let other = o.project(&p, Some(ouv));
-                let pt = if sd.on_a { Pt { p, a: own, b: other } } else { Pt { p, a: other, b: own } };
+                let pt = if sd.on_a {
+                    Pt {
+                        p,
+                        a: own,
+                        b: other,
+                    }
+                } else {
+                    Pt {
+                        p,
+                        a: other,
+                        b: own,
+                    }
+                };
                 Some(((p - q.p).norm(), pt))
             })
             .min_by(|x, y| x.0.total_cmp(&y.0))
@@ -935,13 +1298,19 @@ fn off_sides(polys: Vec<(Vec<super::ssi_numeric::Pt>, bool)>, sides: &[super::ss
     let mut out = Vec::new();
     for (mut pts, closed) in polys {
         let near_side: Vec<Option<(f64, Pt)>> = pts.iter().map(to_side).collect();
-        let mut flags: Vec<bool> = near_side.iter().map(|x| x.as_ref().is_some_and(|x| x.0 <= near)).collect();
+        let mut flags: Vec<bool> = near_side
+            .iter()
+            .map(|x| x.as_ref().is_some_and(|x| x.0 <= near))
+            .collect();
         if !flags.iter().any(|&f| f) {
             out.push((pts, closed));
             continue;
         }
         let mut feet: Vec<Option<Pt>> = near_side.iter().map(|x| x.as_ref().map(|x| x.1)).collect();
-        let mut dist: Vec<f64> = near_side.iter().map(|x| x.as_ref().map_or(f64::INFINITY, |x| x.0)).collect();
+        let mut dist: Vec<f64> = near_side
+            .iter()
+            .map(|x| x.as_ref().map_or(f64::INFINITY, |x| x.0))
+            .collect();
         if closed {
             // Opened at a point on a side (and back to it).
             let k = flags.iter().position(|&f| f).unwrap_or(0);
@@ -1016,7 +1385,13 @@ fn fit_points(mut pts: Vec<P3>, closed: bool) -> Option<IntCurve> {
     let t = chord(&pts);
     let c = NurbsCurve::interpolate(&pts, &t, 3.min(pts.len() - 1), None, None);
     let n = c.range();
-    Some(IntCurve { c: Curve::Nurbs(Arc::new(c)), t0: n.0, t1: n.1, closed, pcs: None })
+    Some(IntCurve {
+        c: Curve::Nurbs(Arc::new(c)),
+        t0: n.0,
+        t1: n.1,
+        closed,
+        pcs: None,
+    })
 }
 
 /// A point on both surfaces near a's (u, v): Newton on a's parameters for sd_b = 0, with the
@@ -1024,7 +1399,11 @@ fn fit_points(mut pts: Vec<P3>, closed: bool) -> Option<IntCurve> {
 pub fn refine_point_uv(a: &Surface, b: &Surface, uv: P2) -> (P3, P2) {
     let (mut u, mut v) = (uv.x, uv.y);
     let e = 1e-7;
-    let mut hint: Option<(f64, f64)> = if b.signed_distance(&P3::origin()).is_some() { None } else { Some(b.project(&a.eval(u, v), None)) };
+    let mut hint: Option<(f64, f64)> = if b.signed_distance(&P3::origin()).is_some() {
+        None
+    } else {
+        Some(b.project(&a.eval(u, v), None))
+    };
     for _ in 0..30 {
         let p = a.eval(u, v);
         let g0 = sdist_hint(b, &p, &mut hint);
@@ -1037,8 +1416,10 @@ pub fn refine_point_uv(a: &Surface, b: &Surface, uv: P2) -> (P3, P2) {
         let mut h2 = hint;
         let mut h3 = hint;
         let mut h4 = hint;
-        let gu = (sdist_hint(b, &(p + su * e), &mut h1) - sdist_hint(b, &(p - su * e), &mut h2)) / (2.0 * e);
-        let gv = (sdist_hint(b, &(p + sv * e), &mut h3) - sdist_hint(b, &(p - sv * e), &mut h4)) / (2.0 * e);
+        let gu = (sdist_hint(b, &(p + su * e), &mut h1) - sdist_hint(b, &(p - su * e), &mut h2))
+            / (2.0 * e);
+        let gv = (sdist_hint(b, &(p + sv * e), &mut h3) - sdist_hint(b, &(p - sv * e), &mut h4))
+            / (2.0 * e);
         let l = gu * gu + gv * gv;
         if l < tol::TINY {
             break;
@@ -1053,7 +1434,11 @@ pub fn refine_point_uv(a: &Surface, b: &Surface, uv: P2) -> (P3, P2) {
 fn seg_dist3(p: &P3, a: &P3, b: &P3) -> f64 {
     let d = b - a;
     let l = d.norm_squared();
-    let t = if l < tol::TINY { 0.0 } else { ((p - a).dot(&d) / l).clamp(0.0, 1.0) };
+    let t = if l < tol::TINY {
+        0.0
+    } else {
+        ((p - a).dot(&d) / l).clamp(0.0, 1.0)
+    };
     (a + d * t - p).norm()
 }
 
@@ -1071,7 +1456,14 @@ fn join_polylines<T: Clone>(polys: &mut Vec<(Vec<T>, bool)>, tol: f64, at: impl 
                 if i == j || polys[j].1 {
                     continue;
                 }
-                let (Some(ai), Some(bi), Some(aj), Some(bj)) = (polys[i].0.first().map(&at), polys[i].0.last().map(&at), polys[j].0.first().map(&at), polys[j].0.last().map(&at)) else { continue };
+                let (Some(ai), Some(bi), Some(aj), Some(bj)) = (
+                    polys[i].0.first().map(&at),
+                    polys[i].0.last().map(&at),
+                    polys[j].0.first().map(&at),
+                    polys[j].0.last().map(&at),
+                ) else {
+                    continue;
+                };
                 // The direction a polyline leaves by at its end (or start): two pieces join only
                 // where they run on smoothly (not at a kink: two generators of a cone through
                 // its apex are two curves).
@@ -1080,13 +1472,24 @@ fn join_polylines<T: Clone>(polys: &mut Vec<(Vec<T>, bool)>, tol: f64, at: impl 
                     if n < 2 {
                         return V3::zeros();
                     }
-                    let (x, y) = if end { (at(&p[n - 2]), at(&p[n - 1])) } else { (at(&p[1]), at(&p[0])) };
+                    let (x, y) = if end {
+                        (at(&p[n - 2]), at(&p[n - 1]))
+                    } else {
+                        (at(&p[1]), at(&p[0]))
+                    };
                     (y - x).try_normalize(tol::TINY).unwrap_or_else(V3::zeros)
                 };
-                let smooth = |ei: bool, ej: bool| out_dir(&polys[i].0, ei).dot(&out_dir(&polys[j].0, ej)) < -0.85;
+                let smooth = |ei: bool, ej: bool| {
+                    out_dir(&polys[i].0, ei).dot(&out_dir(&polys[j].0, ej)) < -0.85
+                };
                 let mut pj = polys[j].0.clone();
                 let mut pi = polys[i].0.clone();
-                let (bi_aj, bi_bj, ai_bj, ai_aj) = ((bi - aj).norm() < tol && smooth(true, false), (bi - bj).norm() < tol && smooth(true, true), (ai - bj).norm() < tol && smooth(false, true), (ai - aj).norm() < tol && smooth(false, false));
+                let (bi_aj, bi_bj, ai_bj, ai_aj) = (
+                    (bi - aj).norm() < tol && smooth(true, false),
+                    (bi - bj).norm() < tol && smooth(true, true),
+                    (ai - bj).norm() < tol && smooth(false, true),
+                    (ai - aj).norm() < tol && smooth(false, false),
+                );
                 let joined = if bi_aj {
                     pi.extend(pj.drain(1..));
                     true
@@ -1133,7 +1536,13 @@ fn join_polylines<T: Clone>(polys: &mut Vec<(Vec<T>, bool)>, tol: f64, at: impl 
 /// intersection by more than 1e-9 (relative on a big curve). An end among `fixed` (where the
 /// curve meets a side the intersection runs along: two branches there, a refined point may
 /// land on either) keeps its first span as it is.
-fn fit_curve(a: &Surface, b: &Surface, mut pts: Vec<super::ssi_numeric::Pt>, closed: bool, fixed: &[P3]) -> IntCurve {
+fn fit_curve(
+    a: &Surface,
+    b: &Surface,
+    mut pts: Vec<super::ssi_numeric::Pt>,
+    closed: bool,
+    fixed: &[P3],
+) -> IntCurve {
     if closed {
         pts.push(pts[0]);
     }
@@ -1159,7 +1568,10 @@ fn fit_curve(a: &Surface, b: &Surface, mut pts: Vec<super::ssi_numeric::Pt>, clo
     let fit = |pts: &[super::ssi_numeric::Pt]| {
         let xs: Vec<P3> = pts.iter().map(|q| q.p).collect();
         let t = chord(&xs);
-        (NurbsCurve::interpolate(&xs, &t, 3.min(xs.len() - 1), None, None), t)
+        (
+            NurbsCurve::interpolate(&xs, &t, 3.min(xs.len() - 1), None, None),
+            t,
+        )
     };
     // How near the fit keeps to the intersection: 1e-9, or 2e-10 of the curve's size on a big
     // model (a fit to 1e-9 over a metre takes thousands of points, all carried downstream).
@@ -1169,7 +1581,10 @@ fn fit_curve(a: &Surface, b: &Surface, mut pts: Vec<super::ssi_numeric::Pt>, clo
         1e-9f64.max(2e-10 * bb.diagonal())
     };
     let is_fixed = |q: &super::ssi_numeric::Pt| fixed.contains(&q.p);
-    let fixed_ends = [!closed && pts.first().is_some_and(is_fixed), !closed && pts.last().is_some_and(is_fixed)];
+    let fixed_ends = [
+        !closed && pts.first().is_some_and(is_fixed),
+        !closed && pts.last().is_some_and(is_fixed),
+    ];
     for _round in 0..6 {
         let (c, t) = fit(&pts);
         let last = pts.len() - 2;
@@ -1188,12 +1603,22 @@ fn fit_curve(a: &Surface, b: &Surface, mut pts: Vec<super::ssi_numeric::Pt>, clo
             .collect();
         let ins: Vec<(usize, super::ssi_numeric::Pt)> = found.into_iter().flatten().collect();
         if std::env::var_os("CADRS_SSI_DEBUG").is_some() {
-            eprintln!("fit round {_round}: {} points, {} to insert", pts.len(), ins.len());
+            eprintln!(
+                "fit round {_round}: {} points, {} to insert",
+                pts.len(),
+                ins.len()
+            );
         }
         if ins.is_empty() || pts.len() > 20000 {
             let n = c.range();
             let pcs = uv_fits(a, b, &pts, &t, &c, 4.0 * tol);
-            return IntCurve { c: Curve::Nurbs(Arc::new(c)), t0: n.0, t1: n.1, closed, pcs };
+            return IntCurve {
+                c: Curve::Nurbs(Arc::new(c)),
+                t0: n.0,
+                t1: n.1,
+                closed,
+                pcs,
+            };
         }
         for (k, p) in ins.into_iter().rev() {
             pts.insert(k, p);
@@ -1202,7 +1627,13 @@ fn fit_curve(a: &Surface, b: &Surface, mut pts: Vec<super::ssi_numeric::Pt>, clo
     let (c, t) = fit(&pts);
     let n = c.range();
     let pcs = uv_fits(a, b, &pts, &t, &c, 4.0 * tol);
-    IntCurve { c: Curve::Nurbs(Arc::new(c)), t0: n.0, t1: n.1, closed, pcs }
+    IntCurve {
+        c: Curve::Nurbs(Arc::new(c)),
+        t0: n.0,
+        t1: n.1,
+        closed,
+        pcs,
+    }
 }
 
 /// The p-curves of a fitted intersection curve `c` on `a` and `b`: the tracer's (u, v) on each
@@ -1211,13 +1642,26 @@ fn fit_curve(a: &Surface, b: &Surface, mut pts: Vec<super::ssi_numeric::Pt>, clo
 /// `GeomInt_WLApprox`). Each is kept when its surface point stays within `tol` of the curve
 /// midway along every span, and none runs through a pole of its surface (where the tracer's
 /// free coordinate is arbitrary); else None for it (its consumers project).
-fn uv_fits(a: &Surface, b: &Surface, pts: &[super::ssi_numeric::Pt], t: &[f64], c: &NurbsCurve, tol: f64) -> Option<Arc<[Option<Curve>; 2]>> {
+fn uv_fits(
+    a: &Surface,
+    b: &Surface,
+    pts: &[super::ssi_numeric::Pt],
+    t: &[f64],
+    c: &NurbsCurve,
+    tol: f64,
+) -> Option<Arc<[Option<Curve>; 2]>> {
     if pts.len() < 2 {
         return None;
     }
     let deg = 3.min(pts.len() - 1);
     let one = |s: &Surface, uv: &dyn Fn(&super::ssi_numeric::Pt) -> (f64, f64)| -> Option<Curve> {
-        let qs: Vec<P3> = pts.iter().map(|q| { let (u, v) = uv(q); P3::new(u, v, 0.0) }).collect();
+        let qs: Vec<P3> = pts
+            .iter()
+            .map(|q| {
+                let (u, v) = uv(q);
+                P3::new(u, v, 0.0)
+            })
+            .collect();
         // (At a pole or an apex the surface's derivatives along one direction vanish.)
         let pole = qs.iter().any(|q| {
             let (_, su, sv) = s.d1(q.x, q.y);
@@ -1279,7 +1723,10 @@ pub fn curve_surface(c: &Curve, t0: f64, t1: f64, s: &Surface) -> Vec<f64> {
         for t in ts {
             for k in -2..=2 {
                 let tt = t + TAU * k as f64;
-                if tt >= t0 - tol::ROUNDOFF_FINE && tt <= t1 + tol::ROUNDOFF_FINE && !out.iter().any(|x| (x - tt).abs() < tol::ROUNDOFF_FINE) {
+                if tt >= t0 - tol::ROUNDOFF_FINE
+                    && tt <= t1 + tol::ROUNDOFF_FINE
+                    && !out.iter().any(|x| (x - tt).abs() < tol::ROUNDOFF_FINE)
+                {
                     out.push(tt.clamp(t0, t1));
                 }
             }
@@ -1291,25 +1738,57 @@ pub fn curve_surface(c: &Curve, t0: f64, t1: f64, s: &Surface) -> Vec<f64> {
     // Exact cases.
     let mut searched: Vec<f64> = Vec::new();
     if let Curve::Line { o, d } = c {
-        let ts: Vec<f64> = super::classify::ray_surface(s, o, d, t0 - 1.0, t1 + 1.0).into_iter().map(|(t, _, _)| t).collect();
-        if s.signed_distance(&P3::origin()).is_some() && !matches!(s, Surface::Torus { .. } | Surface::Revolution { .. } | Surface::Extrusion { .. } | Surface::Nurbs(_)) {
-            return ts.into_iter().map(|t| touching_root(c, s, t)).filter(|t| *t >= t0 - tol::ROUNDOFF && *t <= t1 + tol::ROUNDOFF).map(|t| t.clamp(t0, t1)).collect();
+        let ts: Vec<f64> = super::classify::ray_surface(s, o, d, t0 - 1.0, t1 + 1.0)
+            .into_iter()
+            .map(|(t, _, _)| t)
+            .collect();
+        if s.signed_distance(&P3::origin()).is_some()
+            && !matches!(
+                s,
+                Surface::Torus { .. }
+                    | Surface::Revolution { .. }
+                    | Surface::Extrusion { .. }
+                    | Surface::Nurbs(_)
+            )
+        {
+            return ts
+                .into_iter()
+                .map(|t| touching_root(c, s, t))
+                .filter(|t| *t >= t0 - tol::ROUNDOFF && *t <= t1 + tol::ROUNDOFF)
+                .map(|t| t.clamp(t0, t1))
+                .collect();
         }
         // On these the line's hits come from a search over the surface (refined by Newton):
         // they join the sampled sign changes below, which a few samples along a line can step
         // over (two crossings of a revolved arc's patch between two samples).
-        searched = ts.into_iter().filter(|t| *t >= t0 - tol::ROUNDOFF && *t <= t1 + tol::ROUNDOFF && s.distance(&c.point(*t)) <= tol::CONFUSION).map(|t| t.clamp(t0, t1)).collect();
+        searched = ts
+            .into_iter()
+            .filter(|t| {
+                *t >= t0 - tol::ROUNDOFF
+                    && *t <= t1 + tol::ROUNDOFF
+                    && s.distance(&c.point(*t)) <= tol::CONFUSION
+            })
+            .map(|t| t.clamp(t0, t1))
+            .collect();
     }
     let n = match c {
         Curve::Line { .. } => 8,
-        Curve::Circle { .. } | Curve::Ellipse { .. } => (((t1 - t0) / (PI / 32.0)).ceil() as usize).max(8),
+        Curve::Circle { .. } | Curve::Ellipse { .. } => {
+            (((t1 - t0) / (PI / 32.0)).ceil() as usize).max(8)
+        }
         Curve::Nurbs(nc) => (nc.cps.len() * 8).clamp(16, 2000),
     };
     // The signed distance, its projection hinted (on B-spline and other non-implicit surfaces
     // a fresh projection is a global search): along the samples from the previous one, inside
     // a bracket from the bracket's own sample.
     let implicit = s.signed_distance(&P3::origin()).is_some();
-    let fh = |t: f64, hint: &mut Option<(f64, f64)>| -> f64 { if implicit { sdist(s, &c.point(t)) } else { sdist_hint(s, &c.point(t), hint) } };
+    let fh = |t: f64, hint: &mut Option<(f64, f64)>| -> f64 {
+        if implicit {
+            sdist(s, &c.point(t))
+        } else {
+            sdist_hint(s, &c.point(t), hint)
+        }
+    };
     let mut out: Vec<f64> = Vec::new();
     let mut hints: Vec<Option<(f64, f64)>> = Vec::with_capacity(n + 1);
     let mut h: Option<(f64, f64)> = None;
@@ -1341,7 +1820,13 @@ pub fn curve_surface(c: &Curve, t0: f64, t1: f64, s: &Surface) -> Vec<f64> {
                 // (Not near a touch: both samples well off the surface; a midpoint that comes
                 // near it is the touching search's below.)
                 let near = 1e-6 * (1.0 + c.point(a.0).coords.norm());
-                if budget == 0 || a.1.signum() != b.1.signum() || a.1.abs() + b.1.abs() > reach || a.1.abs().min(b.1.abs()) < near || depth >= 24 || reach < tol::ROUNDOFF {
+                if budget == 0
+                    || a.1.signum() != b.1.signum()
+                    || a.1.abs() + b.1.abs() > reach
+                    || a.1.abs().min(b.1.abs()) < near
+                    || depth >= 24
+                    || reach < tol::ROUNDOFF
+                {
                     continue;
                 }
                 budget -= 1;
@@ -1362,7 +1847,9 @@ pub fn curve_surface(c: &Curve, t0: f64, t1: f64, s: &Surface) -> Vec<f64> {
     let mut prev: (f64, f64);
     let f = |t: f64| -> f64 {
         // Hinted from the nearest sample.
-        let i = (((t - t0) / (t1 - t0)) * n as f64).round().clamp(0.0, n as f64) as usize;
+        let i = (((t - t0) / (t1 - t0)) * n as f64)
+            .round()
+            .clamp(0.0, n as f64) as usize;
         let mut hh = hints[i];
         fh(t, &mut hh)
     };
@@ -1371,7 +1858,11 @@ pub fn curve_surface(c: &Curve, t0: f64, t1: f64, s: &Surface) -> Vec<f64> {
         // A sample on the surface, unless it is inside the zone round a point of touch (the
         // samples either side off it on one side): the touch's minimum is found below, and the
         // sample would be a second vertex a hair from it.
-        let touch_zone = i > 0 && i + 1 < vals.len() && vals[i - 1].1.abs() >= 1e-10 && vals[i + 1].1.abs() >= 1e-10 && vals[i - 1].1.signum() == vals[i + 1].1.signum();
+        let touch_zone = i > 0
+            && i + 1 < vals.len()
+            && vals[i - 1].1.abs() >= 1e-10
+            && vals[i + 1].1.abs() >= 1e-10
+            && vals[i - 1].1.signum() == vals[i + 1].1.signum();
         if ft.abs() < 1e-10 && !touch_zone {
             out.push(t);
         }
@@ -1424,14 +1915,21 @@ pub fn curve_surface(c: &Curve, t0: f64, t1: f64, s: &Surface) -> Vec<f64> {
     }
     for t in searched {
         let p = c.point(t);
-        if !out.iter().any(|&x| (c.point(x) - p).norm() <= tol::CONFUSION) {
+        if !out
+            .iter()
+            .any(|&x| (c.point(x) - p).norm() <= tol::CONFUSION)
+        {
             out.push(t);
         }
     }
     // Stretches where the curve lies on the surface (three samples or more in a row within a
     // hair of it: an edge along a face it is tangent to): the distance's noise there gives no
     // crossings, only the stretch's ends do.
-    let scale = 1.0 + vals.iter().map(|(t, _)| c.point(*t).coords.norm()).fold(0.0, f64::max);
+    let scale = 1.0
+        + vals
+            .iter()
+            .map(|(t, _)| c.point(*t).coords.norm())
+            .fold(0.0, f64::max);
     let on: Vec<bool> = vals.iter().map(|(_, v)| v.abs() <= 1e-8 * scale).collect();
     let mut i = 0;
     while i < on.len() {
@@ -1459,9 +1957,15 @@ pub fn curve_surface(c: &Curve, t0: f64, t1: f64, s: &Surface) -> Vec<f64> {
 /// On a curve closed over [t0, t1] (a full circle), a crossing at its seam is one point: found
 /// at both t0 and t1, the copy at t1 goes.
 fn drop_seam_twin(c: &Curve, t0: f64, t1: f64, out: &mut Vec<f64>) {
-    let (Some(&first), Some(&last)) = (out.first(), out.last()) else { return };
+    let (Some(&first), Some(&last)) = (out.first(), out.last()) else {
+        return;
+    };
     let span = (t1 - t0).abs();
-    if out.len() > 1 && (first - t0).abs() <= tol::ROUNDOFF * (1.0 + span) && (last - t1).abs() <= tol::ROUNDOFF * (1.0 + span) && (c.point(t0) - c.point(t1)).norm() <= tol::ROUNDOFF * (1.0 + c.point(t0).coords.norm()) {
+    if out.len() > 1
+        && (first - t0).abs() <= tol::ROUNDOFF * (1.0 + span)
+        && (last - t1).abs() <= tol::ROUNDOFF * (1.0 + span)
+        && (c.point(t0) - c.point(t1)).norm() <= tol::ROUNDOFF * (1.0 + c.point(t0).coords.norm())
+    {
         out.pop();
     }
 }
@@ -1484,7 +1988,8 @@ fn touching_root(c: &Curve, s: &Surface, t: f64) -> f64 {
     let mut x = t;
     for _ in 0..20 {
         let g = slope(x);
-        let g2 = (f(x + h).unwrap_or(0.0) - 2.0 * f(x).unwrap_or(0.0) + f(x - h).unwrap_or(0.0)) / (h * h);
+        let g2 = (f(x + h).unwrap_or(0.0) - 2.0 * f(x).unwrap_or(0.0) + f(x - h).unwrap_or(0.0))
+            / (h * h);
         if g2.abs() < tol::TINY {
             break;
         }
@@ -1494,14 +1999,29 @@ fn touching_root(c: &Curve, s: &Surface, t: f64) -> f64 {
             break;
         }
     }
-    let (ft, fx) = (f(t).unwrap_or(f64::INFINITY).abs(), f(x).unwrap_or(f64::INFINITY).abs());
-    if x.is_finite() && (x - t).abs() * speed < tol::POINT && fx <= ft + tol::ROUNDOFF_FINE { x } else { t }
+    let (ft, fx) = (
+        f(t).unwrap_or(f64::INFINITY).abs(),
+        f(x).unwrap_or(f64::INFINITY).abs(),
+    );
+    if x.is_finite() && (x - t).abs() * speed < tol::POINT && fx <= ft + tol::ROUNDOFF_FINE {
+        x
+    } else {
+        t
+    }
 }
 
 /// Points where two bounded curves meet (within `tol`): (t on a, t on b). Lines and circles in
 /// closed form; when those find nothing (a near miss off the plane or past an end, or an
 /// overlap: its ends), and for other curves, by subdivision ([`super::ssi_cci`]).
-pub fn curve_curve(a: &Curve, a0: f64, a1: f64, b: &Curve, b0: f64, b1: f64, tol: f64) -> Vec<(f64, f64)> {
+pub fn curve_curve(
+    a: &Curve,
+    a0: f64,
+    a1: f64,
+    b: &Curve,
+    b0: f64,
+    b1: f64,
+    tol: f64,
+) -> Vec<(f64, f64)> {
     let closed_form = |c: &Curve| matches!(c, Curve::Line { .. } | Curve::Circle { .. });
     if closed_form(a) && closed_form(b) {
         let r = curve_curve_closed(a, a0, a1, b, b0, b1, tol);
@@ -1513,7 +2033,15 @@ pub fn curve_curve(a: &Curve, a0: f64, a1: f64, b: &Curve, b0: f64, b1: f64, tol
 }
 
 /// [`curve_curve`] for lines and circles in closed form.
-fn curve_curve_closed(a: &Curve, a0: f64, a1: f64, b: &Curve, b0: f64, b1: f64, tol: f64) -> Vec<(f64, f64)> {
+fn curve_curve_closed(
+    a: &Curve,
+    a0: f64,
+    a1: f64,
+    b: &Curve,
+    b0: f64,
+    b1: f64,
+    tol: f64,
+) -> Vec<(f64, f64)> {
     let mut out = Vec::new();
     // Line–line in closed form.
     if let (Curve::Line { o: oa, d: da }, Curve::Line { o: ob, d: db }) = (a, b) {
@@ -1526,7 +2054,11 @@ fn curve_curve_closed(a: &Curve, a0: f64, a1: f64, b: &Curve, b0: f64, b1: f64, 
         }
         let s = (bb * ee - cc * dd) / den;
         let t = (aa * ee - bb * dd) / den;
-        if s >= a0 - tol::ROUNDOFF && s <= a1 + tol::ROUNDOFF && t >= b0 - tol::ROUNDOFF && t <= b1 + tol::ROUNDOFF {
+        if s >= a0 - tol::ROUNDOFF
+            && s <= a1 + tol::ROUNDOFF
+            && t >= b0 - tol::ROUNDOFF
+            && t <= b1 + tol::ROUNDOFF
+        {
             let (p, q) = (a.point(s), b.point(t));
             if (p - q).norm() < tol {
                 out.push((s.clamp(a0, a1), t.clamp(b0, b1)));
@@ -1535,49 +2067,55 @@ fn curve_curve_closed(a: &Curve, a0: f64, a1: f64, b: &Curve, b0: f64, b1: f64, 
         return out;
     }
     // A line and a circle in closed form (either order).
-    let line_circle = |l: &Curve, l0: f64, l1: f64, c: &Curve, c0: f64, c1: f64| -> Option<Vec<(f64, f64)>> {
-        let (Curve::Line { o, d }, Curve::Circle { c: cc, x, y, r }) = (l, c) else { return None };
-        let n = x.cross(y);
-        let dd = d.norm();
-        let du = d / dd;
-        let mut hits: Vec<P3> = Vec::new();
-        if du.dot(&n).abs() < tol::ANGULAR_FINE {
-            // In a plane parallel to the circle's: only meets it in the circle's plane.
-            if (o - cc).dot(&n).abs() > tol {
-                return Some(vec![]);
-            }
-            let w = o - cc;
-            let b = w.dot(&du);
-            let disc = b * b - (w.norm_squared() - r * r);
-            if disc < -2.0 * r * tol {
-                return Some(vec![]);
-            }
-            if disc.abs() <= 2.0 * r * tol * 1e-3 || disc <= 0.0 {
-                hits.push(o + du * (-b));
+    let line_circle =
+        |l: &Curve, l0: f64, l1: f64, c: &Curve, c0: f64, c1: f64| -> Option<Vec<(f64, f64)>> {
+            let (Curve::Line { o, d }, Curve::Circle { c: cc, x, y, r }) = (l, c) else {
+                return None;
+            };
+            let n = x.cross(y);
+            let dd = d.norm();
+            let du = d / dd;
+            let mut hits: Vec<P3> = Vec::new();
+            if du.dot(&n).abs() < tol::ANGULAR_FINE {
+                // In a plane parallel to the circle's: only meets it in the circle's plane.
+                if (o - cc).dot(&n).abs() > tol {
+                    return Some(vec![]);
+                }
+                let w = o - cc;
+                let b = w.dot(&du);
+                let disc = b * b - (w.norm_squared() - r * r);
+                if disc < -2.0 * r * tol {
+                    return Some(vec![]);
+                }
+                if disc.abs() <= 2.0 * r * tol * 1e-3 || disc <= 0.0 {
+                    hits.push(o + du * (-b));
+                } else {
+                    let q = disc.sqrt();
+                    hits.push(o + du * (-b - q));
+                    hits.push(o + du * (-b + q));
+                }
             } else {
-                let q = disc.sqrt();
-                hits.push(o + du * (-b - q));
-                hits.push(o + du * (-b + q));
+                let s = (cc - o).dot(&n) / du.dot(&n);
+                hits.push(o + du * s);
             }
-        } else {
-            let s = (cc - o).dot(&n) / du.dot(&n);
-            hits.push(o + du * s);
-        }
-        let mut out = Vec::new();
-        for p in hits {
-            let w = p - cc;
-            if (w.norm() - r).abs() > tol {
-                continue;
+            let mut out = Vec::new();
+            for p in hits {
+                let w = p - cc;
+                if (w.norm() - r).abs() > tol {
+                    continue;
+                }
+                let tl = (p - o).dot(d) / (dd * dd);
+                let ang = w.dot(y).atan2(w.dot(x));
+                let tc = super::curve::clamp_periodic(ang, c0, c1);
+                if tl >= l0 - tol::ROUNDOFF
+                    && tl <= l1 + tol::ROUNDOFF
+                    && (c.point(tc) - p).norm() < tol
+                {
+                    out.push((tl.clamp(l0, l1), tc));
+                }
             }
-            let tl = (p - o).dot(d) / (dd * dd);
-            let ang = w.dot(y).atan2(w.dot(x));
-            let tc = super::curve::clamp_periodic(ang, c0, c1);
-            if tl >= l0 - tol::ROUNDOFF && tl <= l1 + tol::ROUNDOFF && (c.point(tc) - p).norm() < tol {
-                out.push((tl.clamp(l0, l1), tc));
-            }
-        }
-        Some(out)
-    };
+            Some(out)
+        };
     if let Some(r) = line_circle(a, a0, a1, b, b0, b1) {
         return r;
     }
@@ -1585,7 +2123,21 @@ fn curve_curve_closed(a: &Curve, a0: f64, a1: f64, b: &Curve, b0: f64, b1: f64, 
         return r.into_iter().map(|(x, y)| (y, x)).collect();
     }
     // Two circles in closed form.
-    if let (&Curve::Circle { c: ca, x: xa, y: ya, r: ra }, &Curve::Circle { c: cb, x: xb, y: yb, r: rb }) = (a, b) {
+    if let (
+        &Curve::Circle {
+            c: ca,
+            x: xa,
+            y: ya,
+            r: ra,
+        },
+        &Curve::Circle {
+            c: cb,
+            x: xb,
+            y: yb,
+            r: rb,
+        },
+    ) = (a, b)
+    {
         let (na, nb) = (xa.cross(&ya), xb.cross(&yb));
         let mut hits: Vec<P3> = Vec::new();
         if na.cross(&nb).norm() < tol::ANGULAR_FINE {
@@ -1619,8 +2171,11 @@ fn curve_curve_closed(a: &Curve, a0: f64, a1: f64, b: &Curve, b0: f64, b1: f64, 
             let dir = na.cross(&nb).normalize();
             // A point on both planes.
             let (da, db) = (na.dot(&ca.coords), nb.dot(&cb.coords));
-            let m = nalgebra::Matrix3::from_rows(&[na.transpose(), nb.transpose(), dir.transpose()]);
-            let Some(inv) = m.try_inverse() else { return out };
+            let m =
+                nalgebra::Matrix3::from_rows(&[na.transpose(), nb.transpose(), dir.transpose()]);
+            let Some(inv) = m.try_inverse() else {
+                return out;
+            };
             let o = P3::from(inv * V3::new(da, db, dir.dot(&ca.coords)));
             let w = o - ca;
             let bq = w.dot(&dir);
@@ -1662,22 +2217,46 @@ mod tests {
     /// marcher took ~40 ms over the tangent one).
     #[test]
     fn plane_through_a_cone_apex() {
-        let bb = Bbox { min: P3::new(-10.0, -10.0, -10.0), max: P3::new(10.0, 10.0, 10.0) };
+        let bb = Bbox {
+            min: P3::new(-10.0, -10.0, -10.0),
+            max: P3::new(10.0, 10.0, 10.0),
+        };
         for ang in [PI / 4.0, -3.0 * PI / 4.0] {
             // Radius 2 at the frame's origin: the apex 2 along the axis the way the radius falls.
-            let cone = Surface::Cone { f: Frame::world(), r: 2.0, a: ang };
+            let cone = Surface::Cone {
+                f: Frame::world(),
+                r: 2.0,
+                a: ang,
+            };
             let apex = P3::new(0.0, 0.0, -2.0 * ang.cos() / ang.sin());
             for (tilt, want) in [(PI / 4.0, 1), (0.0, 2), (0.3, 2), (1.2, 0)] {
                 let n = V3::new(tilt.cos(), 0.0, tilt.sin());
-                let plane = Surface::Plane { f: Frame::from_z(apex, n) };
-                let r = surface_surface_tol(&plane, ((-20.0, 20.0), (-20.0, 20.0)), &cone, ((0.0, TAU), (-20.0, 20.0)), &bb, tol::POINT);
+                let plane = Surface::Plane {
+                    f: Frame::from_z(apex, n),
+                };
+                let r = surface_surface_tol(
+                    &plane,
+                    ((-20.0, 20.0), (-20.0, 20.0)),
+                    &cone,
+                    ((0.0, TAU), (-20.0, 20.0)),
+                    &bb,
+                    tol::POINT,
+                );
                 let curves: Vec<&IntCurve> = r.curves.iter().chain(&r.tangent).collect();
-                assert_eq!(curves.len(), want, "angle {ang}, tilt {tilt}: {} curves", curves.len());
+                assert_eq!(
+                    curves.len(),
+                    want,
+                    "angle {ang}, tilt {tilt}: {} curves",
+                    curves.len()
+                );
                 assert_eq!(r.work, 1, "angle {ang}, tilt {tilt}: marched");
                 for c in curves {
                     for i in 0..=8 {
                         let p = c.c.point(c.t0 + (c.t1 - c.t0) * i as f64 / 8.0);
-                        assert!(plane.distance(&p) < 1e-9 && cone.distance(&p) < 1e-9, "angle {ang}, tilt {tilt}: {p:?} off");
+                        assert!(
+                            plane.distance(&p) < 1e-9 && cone.distance(&p) < 1e-9,
+                            "angle {ang}, tilt {tilt}: {p:?} off"
+                        );
                     }
                 }
             }
@@ -1690,13 +2269,33 @@ mod tests {
     /// crossed the face's outer loop in (u, v)).
     #[test]
     fn circle_clipping_a_thin_cylinder() {
-        let c = Curve::Circle { c: P3::new(0.0, 0.0, 34.0), x: V3::new(1.0, 0.0, 0.0), y: V3::new(0.0, 0.0, 1.0), r: 50.0 };
-        let (x, z) = (V3::new(0.6156614753256583, 0.0, -0.788010753606722), V3::new(-0.788010753606722, 0.0, -0.6156614753256583));
-        let cyl = Surface::Cylinder { f: Frame { o: P3::new(44.71834918036447, -1.0471735180964408, 59.600854680724225), x, y: V3::new(0.0, -1.0, 0.0), z }, r: 1.25 };
+        let c = Curve::Circle {
+            c: P3::new(0.0, 0.0, 34.0),
+            x: V3::new(1.0, 0.0, 0.0),
+            y: V3::new(0.0, 0.0, 1.0),
+            r: 50.0,
+        };
+        let (x, z) = (
+            V3::new(0.6156614753256583, 0.0, -0.788010753606722),
+            V3::new(-0.788010753606722, 0.0, -0.6156614753256583),
+        );
+        let cyl = Surface::Cylinder {
+            f: Frame {
+                o: P3::new(44.71834918036447, -1.0471735180964408, 59.600854680724225),
+                x,
+                y: V3::new(0.0, -1.0, 0.0),
+                z,
+            },
+            r: 1.25,
+        };
         let ts = curve_surface(&c, 0.0, PI / 2.0, &cyl);
         assert_eq!(ts.len(), 2, "{ts:?}");
         for t in ts {
-            assert!(cyl.distance(&c.point(t)) < 1e-9, "{t}: {:e} off", cyl.distance(&c.point(t)));
+            assert!(
+                cyl.distance(&c.point(t)) < 1e-9,
+                "{t}: {:e} off",
+                cyl.distance(&c.point(t))
+            );
         }
     }
 
@@ -1704,10 +2303,20 @@ mod tests {
     /// closed form and by the search (a cylinder through the seam).
     #[test]
     fn full_circle_crossing_at_its_seam() {
-        let c = Curve::Circle { c: P3::origin(), x: V3::x(), y: V3::y(), r: 2.0 };
-        let plane = Surface::Plane { f: Frame::from_z(P3::new(2.0, 0.0, 0.0), V3::x()) };
+        let c = Curve::Circle {
+            c: P3::origin(),
+            x: V3::x(),
+            y: V3::y(),
+            r: 2.0,
+        };
+        let plane = Surface::Plane {
+            f: Frame::from_z(P3::new(2.0, 0.0, 0.0), V3::x()),
+        };
         assert_eq!(curve_surface(&c, 0.0, TAU, &plane), vec![0.0]);
-        let cyl = Surface::Cylinder { f: Frame::from_z(P3::new(2.0, 0.0, 0.0), V3::z()), r: 0.5 };
+        let cyl = Surface::Cylinder {
+            f: Frame::from_z(P3::new(2.0, 0.0, 0.0), V3::z()),
+            r: 0.5,
+        };
         let ts = curve_surface(&c, 0.0, TAU, &cyl);
         assert_eq!(ts.len(), 2, "{ts:?}");
     }
@@ -1720,10 +2329,31 @@ mod tests {
     fn band_a_hair_off_a_cylinder() {
         let f = Frame::world();
         let cyl = Surface::Cylinder { f, r: 18.375 };
-        let band = Surface::Nurbs(Arc::new(Surface::Cylinder { f, r: 18.375 - 7e-5 }.to_nurbs((0.0, 1.2), (-3.0, -1.0))));
-        let bb = Bbox { min: P3::new(-20.0, -20.0, -4.0), max: P3::new(20.0, 20.0, 0.0) };
-        let r = surface_surface_tol(&band, ((0.0, 1.2), (-3.0, -1.0)), &cyl, ((0.0, TAU), (-5.0, 1.0)), &bb, tol::POINT);
-        assert!(r.curves.is_empty() && r.coincident.is_empty(), "{} curves, {} coincident", r.curves.len(), r.coincident.len());
+        let band = Surface::Nurbs(Arc::new(
+            Surface::Cylinder {
+                f,
+                r: 18.375 - 7e-5,
+            }
+            .to_nurbs((0.0, 1.2), (-3.0, -1.0)),
+        ));
+        let bb = Bbox {
+            min: P3::new(-20.0, -20.0, -4.0),
+            max: P3::new(20.0, 20.0, 0.0),
+        };
+        let r = surface_surface_tol(
+            &band,
+            ((0.0, 1.2), (-3.0, -1.0)),
+            &cyl,
+            ((0.0, TAU), (-5.0, 1.0)),
+            &bb,
+            tol::POINT,
+        );
+        assert!(
+            r.curves.is_empty() && r.coincident.is_empty(),
+            "{} curves, {} coincident",
+            r.curves.len(),
+            r.coincident.len()
+        );
         assert!(r.work < 20_000, "{} cell pairs", r.work);
     }
 
@@ -1734,12 +2364,40 @@ mod tests {
     #[test]
     fn thin_cylinder_through_a_spline_plate() {
         let f = Frame::world();
-        let plate = Surface::Nurbs(Arc::new(Surface::Plane { f }.to_nurbs((-10.0, 10.0), (-10.0, 10.0))));
-        let bb = Bbox { min: P3::new(-11.0, -11.0, -2.0), max: P3::new(11.0, 11.0, 2.0) };
-        for (x, y) in [(1.3, 0.7), (0.3125, 0.3125), (5.3125, -2.8125), (-0.15625, 0.46875)] {
-            let cyl = Surface::Cylinder { f: Frame { o: P3::new(x, y, 0.0), ..f }, r: 0.02 };
-            let r = surface_surface_tol(&plate, ((-10.0, 10.0), (-10.0, 10.0)), &cyl, ((0.0, TAU), (-1.0, 1.0)), &bb, tol::POINT);
-            assert_eq!(r.curves.len(), 1, "axis at ({x}, {y}): {} curves", r.curves.len());
+        let plate = Surface::Nurbs(Arc::new(
+            Surface::Plane { f }.to_nurbs((-10.0, 10.0), (-10.0, 10.0)),
+        ));
+        let bb = Bbox {
+            min: P3::new(-11.0, -11.0, -2.0),
+            max: P3::new(11.0, 11.0, 2.0),
+        };
+        for (x, y) in [
+            (1.3, 0.7),
+            (0.3125, 0.3125),
+            (5.3125, -2.8125),
+            (-0.15625, 0.46875),
+        ] {
+            let cyl = Surface::Cylinder {
+                f: Frame {
+                    o: P3::new(x, y, 0.0),
+                    ..f
+                },
+                r: 0.02,
+            };
+            let r = surface_surface_tol(
+                &plate,
+                ((-10.0, 10.0), (-10.0, 10.0)),
+                &cyl,
+                ((0.0, TAU), (-1.0, 1.0)),
+                &bb,
+                tol::POINT,
+            );
+            assert_eq!(
+                r.curves.len(),
+                1,
+                "axis at ({x}, {y}): {} curves",
+                r.curves.len()
+            );
         }
     }
 
@@ -1747,13 +2405,28 @@ mod tests {
     /// its samples: both crossings, from the search over the surface.
     #[test]
     fn line_crosses_a_revolved_patch_twice_close_together() {
-        let m = Curve::Circle { c: P3::new(5.0, 0.0, 0.0), x: V3::x(), y: V3::z(), r: 1.0 };
-        let s = Surface::Revolution { f: Frame::world(), m };
-        let line = Curve::Line { o: P3::new(0.0, 0.0, 0.99), d: V3::x() };
+        let m = Curve::Circle {
+            c: P3::new(5.0, 0.0, 0.0),
+            x: V3::x(),
+            y: V3::z(),
+            r: 1.0,
+        };
+        let s = Surface::Revolution {
+            f: Frame::world(),
+            m,
+        };
+        let line = Curve::Line {
+            o: P3::new(0.0, 0.0, 0.99),
+            d: V3::x(),
+        };
         let ts = curve_surface(&line, 0.0, 4.9, &s);
         assert_eq!(ts.len(), 1, "{ts:?}");
         let ts = curve_surface(&line, 0.0, 10.0, &s);
-        let near: Vec<f64> = ts.iter().copied().filter(|t| (t - 5.0).abs() < 1.0).collect();
+        let near: Vec<f64> = ts
+            .iter()
+            .copied()
+            .filter(|t| (t - 5.0).abs() < 1.0)
+            .collect();
         assert_eq!(near.len(), 2, "{ts:?}");
         for t in near {
             assert!(s.distance(&line.point(t)) < 1e-9);
@@ -1764,13 +2437,24 @@ mod tests {
     /// lies on both surfaces.
     #[test]
     fn plane_cone_conics_lie_on_both() {
-        let fc = Frame { o: P3::new(1.0, -2.0, 0.5), x: V3::x(), y: V3::y(), z: V3::z() };
+        let fc = Frame {
+            o: P3::new(1.0, -2.0, 0.5),
+            x: V3::x(),
+            y: V3::y(),
+            z: V3::z(),
+        };
         let (r, a) = (3.0, -0.4);
-        let bb = Bbox { min: P3::new(-40.0, -40.0, -40.0), max: P3::new(40.0, 40.0, 40.0) };
+        let bb = Bbox {
+            min: P3::new(-40.0, -40.0, -40.0),
+            max: P3::new(40.0, 40.0, 40.0),
+        };
         for (n, o) in [
             (V3::new(0.2, 0.1, 1.0), P3::new(0.0, 0.0, 1.0)),
             (V3::new(0.0, 1.0, 0.0), P3::new(0.0, -1.5, 0.0)),
-            (V3::new((PI / 2.0 - 0.4).cos(), 0.0, (PI / 2.0 - 0.4).sin()), P3::new(2.0, 0.0, 0.0)),
+            (
+                V3::new((PI / 2.0 - 0.4).cos(), 0.0, (PI / 2.0 - 0.4).sin()),
+                P3::new(2.0, 0.0, 0.0),
+            ),
             (V3::new(1.0, 0.3, 0.6), P3::new(1.5, -2.0, 1.0)),
         ] {
             let fp = Frame::from_z(o, n.normalize());
@@ -1780,11 +2464,17 @@ mod tests {
                 for i in 0..=200 {
                     let t = ic.t0 + (ic.t1 - ic.t0) * i as f64 / 200.0;
                     let p = ic.c.point(t);
-                    assert!((p - fp.o).dot(&n.normalize()).abs() < 1e-9, "off the plane {n:?}");
+                    assert!(
+                        (p - fp.o).dot(&n.normalize()).abs() < 1e-9,
+                        "off the plane {n:?}"
+                    );
                     // Either nappe: (±ρ − r)·cos a = z·sin a.
                     let l = fc.local(&p);
                     let rho = l.x.hypot(l.y);
-                    let off = [1.0, -1.0].map(|sg: f64| ((sg * rho - r) * a.cos() - l.z * a.sin()).abs()).into_iter().fold(f64::INFINITY, f64::min);
+                    let off = [1.0, -1.0]
+                        .map(|sg: f64| ((sg * rho - r) * a.cos() - l.z * a.sin()).abs())
+                        .into_iter()
+                        .fold(f64::INFINITY, f64::min);
                     assert!(off < 1e-9, "off the cone {n:?}: {off}");
                 }
             }

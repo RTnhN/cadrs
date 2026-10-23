@@ -18,10 +18,10 @@ use super::kernel::NativeKernel;
 use super::math::*;
 use super::nurbs::{NurbsCurve, NurbsSurface};
 use super::surface::Surface;
-use super::sweep::path::{chain, path_segments, Seg};
+use super::sweep::path::{Seg, chain, path_segments};
+use super::tol;
 use super::topo::{Body, Coedge, Edge, Face, Shell};
 use crate::*;
-use super::tol;
 
 fn invalid(why: &str) -> KernelError {
     KernelError::InvalidParameter(why.into())
@@ -38,10 +38,22 @@ fn slab(face: &Body, d: f64) -> Result<Body> {
     match &f.surf {
         Surface::Plane { f: fr } => {
             let n = fr.x.cross(&fr.y) * if f.sense { 1.0 } else { -1.0 };
-            let plane = Plane { origin: fr.o, x_dir: nalgebra::Unit::new_normalize(fr.x), normal: nalgebra::Unit::new_normalize(n) };
+            let plane = Plane {
+                origin: fr.o,
+                x_dir: nalgebra::Unit::new_normalize(fr.x),
+                normal: nalgebra::Unit::new_normalize(n),
+            };
             let mut k = NativeKernel::new();
             let id = k.insert(face.clone());
-            let mf = super::features::face_as_profile(&k, &Profile::new(plane, vec![]), &FaceInput { body: id, face: FaceId(0), source: 0 })?;
+            let mf = super::features::face_as_profile(
+                &k,
+                &Profile::new(plane, vec![]),
+                &FaceInput {
+                    body: id,
+                    face: FaceId(0),
+                    source: 0,
+                },
+            )?;
             let dir = if d >= 0.0 { n } else { -n };
             let kind = super::sweep::Prism { plane, dir };
             Ok(super::sweep::sweep_full(&[mf], &[], &kind, 0.0, d.abs(), false, true)?.body)
@@ -72,7 +84,10 @@ pub fn thicken(k: &mut NativeKernel, spec: &ThickenSpec) -> Result<OpResult> {
         let regions = super::profile::regions(p)?;
         let mf = super::profile::merge_regions(&regions)?;
         // The region's face: the start cap of a thin prism.
-        let kind = super::sweep::Prism { plane: p.plane, dir: p.plane.normal.into_inner() };
+        let kind = super::sweep::Prism {
+            plane: p.plane,
+            dir: p.plane.normal.into_inner(),
+        };
         let built = super::sweep::sweep_full(&mf, &[], &kind, 0.0, 1.0, false, true)?;
         for (f, o) in &built.origins {
             if let Origin::StartCap { .. } = o {
@@ -88,9 +103,10 @@ pub fn thicken(k: &mut NativeKernel, spec: &ThickenSpec) -> Result<OpResult> {
     }
     // Faces that sew into one sheet with flat open ends: shelled as the solid they bound.
     if sheets.len() > 1
-        && let Some(r) = thicken_sheet(k, &sheets, spec) {
-            return Ok(r);
-        }
+        && let Some(r) = thicken_sheet(k, &sheets, spec)
+    {
+        return Ok(r);
+    }
     let mut acc: Option<Body> = None;
     for s in &sheets {
         for d in [spec.along, -spec.against] {
@@ -106,7 +122,17 @@ pub fn thicken(k: &mut NativeKernel, spec: &ThickenSpec) -> Result<OpResult> {
     }
     let body = acc.ok_or_else(|| invalid("The thickness must be greater than zero"))?;
     let n = body.faces.len();
-    let t = Tagged { body, tags: (0..n).map(|i| vec![Origin::ProfileCurve { region: spec.source, curve: i as u64 }]).collect() };
+    let t = Tagged {
+        body,
+        tags: (0..n)
+            .map(|i| {
+                vec![Origin::ProfileCurve {
+                    region: spec.source,
+                    curve: i as u64,
+                }]
+            })
+            .collect(),
+    };
     Ok(t.into_result(k))
 }
 
@@ -154,16 +180,30 @@ fn thicken_sheet(k: &mut NativeKernel, sheets: &[Body], spec: &ThickenSpec) -> O
     // Orienting may have flipped faces. Picked faces whose normals don't agree on a side of the
     // sheet (a box's walls facing out and its lid in) are each thickened along their own normal,
     // as OCCT did, by the slabs below.
-    let agree: usize = (0..sewn.faces.len()).filter(|&f| face_normal(&sewn, f).is_some_and(|(_, n)| n.dot(&normals[f].1) > 0.0)).count();
+    let agree: usize = (0..sewn.faces.len())
+        .filter(|&f| face_normal(&sewn, f).is_some_and(|(_, n)| n.dot(&normals[f].1) > 0.0))
+        .count();
     if agree != 0 && agree != sewn.faces.len() {
         return None;
     }
     let along_is_sewn = agree == sewn.faces.len();
     let n = sewn.faces.len();
     let id = k.insert(sewn);
-    let tool = super::ops::face_tool(k, id, &(0..n as u64).map(FaceId).collect::<Vec<_>>(), spec.source).ok()?;
+    let tool = super::ops::face_tool(
+        k,
+        id,
+        &(0..n as u64).map(FaceId).collect::<Vec<_>>(),
+        spec.source,
+    )
+    .ok()?;
     let tid = tool.bodies[0];
-    let caps: Vec<FaceId> = tool.history.generated.iter().filter(|(_, o)| matches!(o, Origin::StartCap { .. })).map(|(f, _)| *f).collect();
+    let caps: Vec<FaceId> = tool
+        .history
+        .generated
+        .iter()
+        .filter(|(_, o)| matches!(o, Origin::StartCap { .. }))
+        .map(|(f, _)| *f)
+        .collect();
     if caps.is_empty() {
         return None;
     }
@@ -171,7 +211,12 @@ fn thicken_sheet(k: &mut NativeKernel, sheets: &[Body], spec: &ThickenSpec) -> O
     let solid = k.get(tid).ok()?.clone();
     let sewn_b = k.get(id).ok()?.clone();
     let (p, nsheet) = face_normal(&sewn_b, 0)?;
-    let fi = (0..solid.faces.len()).find(|&f| !caps.contains(&FaceId(f as u64)) && face_normal(&solid, f).is_some_and(|(q, _)| (q - p).norm() < tol::POINT)).unwrap_or(0);
+    let fi = (0..solid.faces.len())
+        .find(|&f| {
+            !caps.contains(&FaceId(f as u64))
+                && face_normal(&solid, f).is_some_and(|(q, _)| (q - p).norm() < tol::POINT)
+        })
+        .unwrap_or(0);
     let (_, nsolid) = face_normal(&solid, fi)?;
     let sheet_out = nsheet.dot(&nsolid) > 0.0;
     let along_out = sheet_out == along_is_sewn;
@@ -180,19 +225,44 @@ fn thicken_sheet(k: &mut NativeKernel, sheets: &[Body], spec: &ThickenSpec) -> O
         if d < tol::ROUNDOFF {
             continue;
         }
-        let r = super::offset::round::shell(k, tid, &ShellSpec { remove: caps.clone(), thickness: d, outward: out, hollow: false, sharp: false }).ok()?;
+        let r = super::offset::round::shell(
+            k,
+            tid,
+            &ShellSpec {
+                remove: caps.clone(),
+                thickness: d,
+                outward: out,
+                hollow: false,
+                sharp: false,
+            },
+        )
+        .ok()?;
         parts.push(r.bodies[0]);
     }
     let body = match parts.as_slice() {
         [a] => k.get(*a).ok()?.as_ref().clone(),
-        [a, b] => super::boolean::boolean_bodies(k.get(*a).ok()?, k.get(*b).ok()?, BoolOp::Union).ok()?.body,
+        [a, b] => {
+            super::boolean::boolean_bodies(k.get(*a).ok()?, k.get(*b).ok()?, BoolOp::Union)
+                .ok()?
+                .body
+        }
         _ => return None,
     };
     if body.solids.len() != 1 {
         return None;
     }
     let nf = body.faces.len();
-    let t = Tagged { body, tags: (0..nf).map(|i| vec![Origin::ProfileCurve { region: spec.source, curve: i as u64 }]).collect() };
+    let t = Tagged {
+        body,
+        tags: (0..nf)
+            .map(|i| {
+                vec![Origin::ProfileCurve {
+                    region: spec.source,
+                    curve: i as u64,
+                }]
+            })
+            .collect(),
+    };
     Some(t.into_result(k))
 }
 
@@ -208,7 +278,9 @@ fn best_plane(pts: &[P3]) -> Option<(P3, V3)> {
     }
     let n = n.normalize();
     let size = pts.iter().map(|p| (p - c).norm()).fold(0.0, f64::max);
-    pts.iter().all(|p| (p - c).dot(&n).abs() < tol::REL_POINT * (1.0 + size)).then_some((c, n))
+    pts.iter()
+        .all(|p| (p - c).dot(&n).abs() < tol::REL_POINT * (1.0 + size))
+        .then_some((c, n))
 }
 
 pub fn fill(k: &mut NativeKernel, spec: &FillSpec) -> Result<OpResult> {
@@ -216,31 +288,57 @@ pub fn fill(k: &mut NativeKernel, spec: &FillSpec) -> Result<OpResult> {
         .curves
         .iter()
         .map(|c| match c {
-            FillCurve::Edge { body, edge } => PathCurve::Edge { body: *body, edge: *edge },
-            FillCurve::Sketch { plane, curve } => PathCurve::Sketch { plane: *plane, curve: curve.clone() },
+            FillCurve::Edge { body, edge } => PathCurve::Edge {
+                body: *body,
+                edge: *edge,
+            },
+            FillCurve::Sketch { plane, curve } => PathCurve::Sketch {
+                plane: *plane,
+                curve: curve.clone(),
+            },
         })
         .collect();
     if pcs.is_empty() {
         return Err(invalid("Select edges or curves to fill"));
     }
     let segs = path_segments(k, &pcs)?;
-    let (path, closed) = chain(segs).map_err(|_| invalid("The boundary must be one chain of connected curves"))?;
+    let (path, closed) =
+        chain(segs).map_err(|_| invalid("The boundary must be one chain of connected curves"))?;
     if !closed {
         return Err(invalid("The boundary is not closed"));
     }
-    let samples: Vec<Vec<P3>> = path.iter().map(|s| (0..=32).map(|i| point_at(s, i as f64 / 32.0)).collect()).collect();
-    let pts: Vec<P3> = samples.iter().flat_map(|v| v[..v.len() - 1].iter().copied()).collect();
+    let samples: Vec<Vec<P3>> = path
+        .iter()
+        .map(|s| (0..=32).map(|i| point_at(s, i as f64 / 32.0)).collect())
+        .collect();
+    let pts: Vec<P3> = samples
+        .iter()
+        .flat_map(|v| v[..v.len() - 1].iter().copied())
+        .collect();
     let body = match best_plane(&pts) {
         Some((c, n)) => planar_face(&path, c, n)?,
         None => coons(&path)?,
     };
     let n = body.faces.len();
-    let t = Tagged { body, tags: (0..n).map(|_| vec![Origin::StartCap { region: spec.source }]).collect() };
+    let t = Tagged {
+        body,
+        tags: (0..n)
+            .map(|_| {
+                vec![Origin::StartCap {
+                    region: spec.source,
+                }]
+            })
+            .collect(),
+    };
     Ok(t.into_result(k))
 }
 
 fn point_at(s: &Seg, f: f64) -> P3 {
-    let t = if s.rev { s.t1 + (s.t0 - s.t1) * f } else { s.t0 + (s.t1 - s.t0) * f };
+    let t = if s.rev {
+        s.t1 + (s.t0 - s.t1) * f
+    } else {
+        s.t0 + (s.t1 - s.t0) * f
+    };
     s.c.point(t)
 }
 
@@ -257,15 +355,26 @@ fn planar_face(path: &[Seg], c: P3, n: V3) -> Result<Body> {
         let (a, bb) = if s.rev { (v1, v0) } else { (v0, v1) };
         let e = b.add_edge(s.c.clone(), s.t0, s.t1, a, bb);
         let pc = super::pcurve::pcurve(&surf, &s.c, s.t0, s.t1, None);
-        lp.push(Coedge { edge: e, fwd: !s.rev, pc });
+        lp.push(Coedge {
+            edge: e,
+            fwd: !s.rev,
+            pc,
+        });
     }
-    b.faces.push(Face { surf, sense: true, loops: vec![lp] });
+    b.faces.push(Face {
+        surf,
+        sense: true,
+        loops: vec![lp],
+    });
     fix_senses(&mut b, 0..1);
     // Outward along the plane's normal by convention: flip if the loop ran the other way.
     if !b.faces[0].sense {
         Body::reverse_face(&mut b.faces[0]);
     }
-    b.shells.push(Shell { faces: vec![0], closed: false });
+    b.shells.push(Shell {
+        faces: vec![0],
+        closed: false,
+    });
     Ok(b)
 }
 
@@ -273,7 +382,9 @@ fn planar_face(path: &[Seg], c: P3, n: V3) -> Result<Body> {
 fn coons(path: &[Seg]) -> Result<Body> {
     let m = path.len();
     if m != 4 && m != 3 {
-        return Err(invalid("Fill takes a planar boundary or four (or three) curves"));
+        return Err(invalid(
+            "Fill takes a planar boundary or four (or three) curves",
+        ));
     }
     let side = |i: usize, s: f64| -> P3 { point_at(&path[i], s) };
     // c0(u) bottom, c1(v) right, c2(u) top reversed, c3(v) left reversed; with three curves the
@@ -281,54 +392,129 @@ fn coons(path: &[Seg]) -> Result<Body> {
     let c0 = |u: f64| side(0, u);
     let c1 = |v: f64| side(1, v);
     let c2 = |u: f64| side(2, 1.0 - u);
-    let c3 = |v: f64| if m == 4 { side(3, 1.0 - v) } else { side(0, 0.0) };
+    let c3 = |v: f64| {
+        if m == 4 {
+            side(3, 1.0 - v)
+        } else {
+            side(0, 0.0)
+        }
+    };
     let (p00, p10, p11, p01) = (c0(0.0), c0(1.0), c2(1.0), c2(0.0));
     let s = |u: f64, v: f64| -> P3 {
         let a = c0(u).coords * (1.0 - v) + c2(u).coords * v;
         let b = c3(v).coords * (1.0 - u) + c1(v).coords * u;
-        let c = p00.coords * ((1.0 - u) * (1.0 - v)) + p10.coords * (u * (1.0 - v)) + p11.coords * (u * v) + p01.coords * ((1.0 - u) * v);
+        let c = p00.coords * ((1.0 - u) * (1.0 - v))
+            + p10.coords * (u * (1.0 - v))
+            + p11.coords * (u * v)
+            + p01.coords * ((1.0 - u) * v);
         P3::from(a + b - c)
     };
     let n = 24;
     let params: Vec<f64> = (0..=n).map(|i| i as f64 / n as f64).collect();
-    let rows: Vec<NurbsCurve> = params.iter().map(|&v| NurbsCurve::interpolate(&params.iter().map(|&u| s(u, v)).collect::<Vec<_>>(), &params, 3, None, None)).collect();
+    let rows: Vec<NurbsCurve> = params
+        .iter()
+        .map(|&v| {
+            NurbsCurve::interpolate(
+                &params.iter().map(|&u| s(u, v)).collect::<Vec<_>>(),
+                &params,
+                3,
+                None,
+                None,
+            )
+        })
+        .collect();
     // Columns through the rows' poles (all rows share their knots).
     let ncp = rows[0].cps.len();
     let mut cols: Vec<Vec<super::nurbs::H>> = Vec::new();
     let mut kv = Vec::new();
     for i in 0..ncp {
-        let col: Vec<P3> = rows.iter().map(|r| super::nurbs::dehom(&r.cps[i])).collect();
+        let col: Vec<P3> = rows
+            .iter()
+            .map(|r| super::nurbs::dehom(&r.cps[i]))
+            .collect();
         let c = NurbsCurve::interpolate(&col, &params, 3, None, None);
         kv = c.knots.clone();
         cols.push(c.cps);
     }
-    let surf = NurbsSurface { du: 3, dv: 3, ku: rows[0].knots.clone(), kv, cps: cols };
+    let surf = NurbsSurface {
+        du: 3,
+        dv: 3,
+        ku: rows[0].knots.clone(),
+        kv,
+        cps: cols,
+    };
     // Edges: the surface's boundary iso-curves (exact on the patch).
-    let iso_u = |at_v1: bool| NurbsCurve { degree: 3, knots: surf.ku.clone(), cps: surf.cps.iter().map(|c| if at_v1 { c[c.len() - 1] } else { c[0] }).collect() };
-    let iso_v = |at_u1: bool| NurbsCurve { degree: 3, knots: surf.kv.clone(), cps: if at_u1 { surf.cps[surf.cps.len() - 1].clone() } else { surf.cps[0].clone() } };
+    let iso_u = |at_v1: bool| NurbsCurve {
+        degree: 3,
+        knots: surf.ku.clone(),
+        cps: surf
+            .cps
+            .iter()
+            .map(|c| if at_v1 { c[c.len() - 1] } else { c[0] })
+            .collect(),
+    };
+    let iso_v = |at_u1: bool| NurbsCurve {
+        degree: 3,
+        knots: surf.kv.clone(),
+        cps: if at_u1 {
+            surf.cps[surf.cps.len() - 1].clone()
+        } else {
+            surf.cps[0].clone()
+        },
+    };
     let mut b = Body::default();
     let v00 = b.add_vertex(p00);
     let v10 = b.add_vertex(p10);
     let v11 = b.add_vertex(p11);
     let v01 = if m == 4 { b.add_vertex(p01) } else { v00 };
-    let line2 = |o: P2, d: V2| Curve::Line { o: P3::new(o.x, o.y, 0.0), d: V3::new(d.x, d.y, 0.0) };
+    let line2 = |o: P2, d: V2| Curve::Line {
+        o: P3::new(o.x, o.y, 0.0),
+        d: V3::new(d.x, d.y, 0.0),
+    };
     let e0 = b.add_edge(Curve::Nurbs(Arc::new(iso_u(false))), 0.0, 1.0, v00, v10);
     let e1 = b.add_edge(Curve::Nurbs(Arc::new(iso_v(true))), 0.0, 1.0, v10, v11);
     let e2 = b.add_edge(Curve::Nurbs(Arc::new(iso_u(true))), 0.0, 1.0, v01, v11);
     let mut lp = vec![
-        Coedge { edge: e0, fwd: true, pc: line2(P2::new(0.0, 0.0), V2::new(1.0, 0.0)) },
-        Coedge { edge: e1, fwd: true, pc: line2(P2::new(1.0, 0.0), V2::new(0.0, 1.0)) },
-        Coedge { edge: e2, fwd: false, pc: line2(P2::new(0.0, 1.0), V2::new(1.0, 0.0)) },
+        Coedge {
+            edge: e0,
+            fwd: true,
+            pc: line2(P2::new(0.0, 0.0), V2::new(1.0, 0.0)),
+        },
+        Coedge {
+            edge: e1,
+            fwd: true,
+            pc: line2(P2::new(1.0, 0.0), V2::new(0.0, 1.0)),
+        },
+        Coedge {
+            edge: e2,
+            fwd: false,
+            pc: line2(P2::new(0.0, 1.0), V2::new(1.0, 0.0)),
+        },
     ];
     if m == 4 {
         let e3 = b.add_edge(Curve::Nurbs(Arc::new(iso_v(false))), 0.0, 1.0, v00, v01);
-        lp.push(Coedge { edge: e3, fwd: false, pc: line2(P2::new(0.0, 0.0), V2::new(0.0, 1.0)) });
+        lp.push(Coedge {
+            edge: e3,
+            fwd: false,
+            pc: line2(P2::new(0.0, 0.0), V2::new(0.0, 1.0)),
+        });
     } else {
         let e3 = b.add_degenerate(p00, 0.0, 1.0, v00);
-        lp.push(Coedge { edge: e3, fwd: false, pc: line2(P2::new(0.0, 0.0), V2::new(0.0, 1.0)) });
+        lp.push(Coedge {
+            edge: e3,
+            fwd: false,
+            pc: line2(P2::new(0.0, 0.0), V2::new(0.0, 1.0)),
+        });
     }
-    b.faces.push(Face { surf: Surface::Nurbs(Arc::new(surf)), sense: true, loops: vec![lp] });
-    b.shells.push(Shell { faces: vec![0], closed: false });
+    b.faces.push(Face {
+        surf: Surface::Nurbs(Arc::new(surf)),
+        sense: true,
+        loops: vec![lp],
+    });
+    b.shells.push(Shell {
+        faces: vec![0],
+        closed: false,
+    });
     Ok(b)
 }
 
@@ -356,7 +542,17 @@ pub fn sew(k: &mut NativeKernel, bodies: &[BodyId], tol: f64) -> Result<OpResult
         return Err(invalid("The surfaces don't enclose a volume"));
     }
     let n = b.faces.len();
-    let t = Tagged { body: b, tags: (0..n).map(|i| vec![Origin::ProfileCurve { region: u64::MAX, curve: i as u64 }]).collect() };
+    let t = Tagged {
+        body: b,
+        tags: (0..n)
+            .map(|i| {
+                vec![Origin::ProfileCurve {
+                    region: u64::MAX,
+                    curve: i as u64,
+                }]
+            })
+            .collect(),
+    };
     Ok(t.into_result(k))
 }
 
@@ -393,12 +589,18 @@ pub fn sew_faces(mut b: Body, tol: f64) -> Result<Body> {
     // edge against two of its neighbour's) is split there, at that vertex.
     for _ in 0..10_000 {
         let ef = b.edge_faces();
-        let free: Vec<usize> = (0..b.edges.len()).filter(|&e| ef[e].len() == 1 && !b.edges[e].degenerate).collect();
+        let free: Vec<usize> = (0..b.edges.len())
+            .filter(|&e| ef[e].len() == 1 && !b.edges[e].degenerate)
+            .collect();
         let mut ends: Vec<usize> = free.iter().flat_map(|&e| b.edges[e].v).collect();
         ends.sort_unstable();
         ends.dedup();
         let mut hit = None;
-        let etree = super::bvh::Bvh::new(ends.iter().map(|&w| point_box(&b.verts[w].p, 0.0)).collect());
+        let etree = super::bvh::Bvh::new(
+            ends.iter()
+                .map(|&w| point_box(&b.verts[w].p, 0.0))
+                .collect(),
+        );
         'find: for &e in &free {
             let ed = &b.edges[e];
             let (lo, hi) = (ed.t[0].min(ed.t[1]), ed.t[0].max(ed.t[1]));
@@ -411,7 +613,10 @@ pub fn sew_faces(mut b: Body, tol: f64) -> Result<Body> {
                 let p = b.verts[w].p;
                 let t = ed.curve.closest(&p, lo, hi);
                 let q = ed.curve.point(t);
-                if (q - p).norm() < tol && (q - ed.point(ed.t[0])).norm() > tol && (q - ed.point(ed.t[1])).norm() > tol {
+                if (q - p).norm() < tol
+                    && (q - ed.point(ed.t[0])).norm() > tol
+                    && (q - ed.point(ed.t[1])).norm() > tol
+                {
                     hit = Some((e, t, w));
                     break 'find;
                 }
@@ -453,7 +658,11 @@ pub fn sew_faces(mut b: Body, tol: f64) -> Result<Body> {
             if dmax < tol {
                 let m = c.point(c.mid_t());
                 let t = a.curve.closest(&m, a.t[0], a.t[1]);
-                let fwd = if a.v[0] != a.v[1] { a.v == c.v } else { a.curve.tangent(t).dot(&c.curve.tangent(c.mid_t())) > 0.0 };
+                let fwd = if a.v[0] != a.v[1] {
+                    a.v == c.v
+                } else {
+                    a.curve.tangent(t).dot(&c.curve.tangent(c.mid_t())) > 0.0
+                };
                 cands.push((dmax, i, j, fwd));
             }
         }
@@ -485,8 +694,16 @@ pub fn sew_faces(mut b: Body, tol: f64) -> Result<Body> {
                 let mut pc = super::pcurve::pcurve(&surf, &ed.curve, ed.t[0], ed.t[1], None);
                 let (nt0, _) = super::topo::co_range(&ed, fwd);
                 let q = pc.point(nt0);
-                let du = if surf.u_periodic() { ((sp.x - q.x) / TAU).round() * TAU } else { 0.0 };
-                let dv = if surf.v_periodic() { ((sp.y - q.y) / TAU).round() * TAU } else { 0.0 };
+                let du = if surf.u_periodic() {
+                    ((sp.x - q.x) / TAU).round() * TAU
+                } else {
+                    0.0
+                };
+                let dv = if surf.v_periodic() {
+                    ((sp.y - q.y) / TAU).round() * TAU
+                } else {
+                    0.0
+                };
                 if du != 0.0 || dv != 0.0 {
                     pc = pc.transformed(&Affine::translation(V3::new(du, dv, 0.0)));
                 }
@@ -505,8 +722,12 @@ pub fn sew_faces(mut b: Body, tol: f64) -> Result<Body> {
     b.shells = pieces
         .into_iter()
         .map(|faces| {
-            let mut uses: std::collections::HashMap<usize, (u32, u32)> = std::collections::HashMap::new();
-            for c in faces.iter().flat_map(|&f| b.faces[f].loops.iter().flatten()) {
+            let mut uses: std::collections::HashMap<usize, (u32, u32)> =
+                std::collections::HashMap::new();
+            for c in faces
+                .iter()
+                .flat_map(|&f| b.faces[f].loops.iter().flatten())
+            {
                 let u = uses.entry(c.edge).or_default();
                 if c.fwd {
                     u.0 += 1;
@@ -514,7 +735,9 @@ pub fn sew_faces(mut b: Body, tol: f64) -> Result<Body> {
                     u.1 += 1;
                 }
             }
-            let closed = uses.iter().all(|(&e, &u)| u == (1, 1) || b.edges[e].degenerate);
+            let closed = uses
+                .iter()
+                .all(|(&e, &u)| u == (1, 1) || b.edges[e].degenerate);
             Shell { faces, closed }
         })
         .collect();
@@ -542,13 +765,24 @@ pub(crate) fn orient(b: &mut Body) -> Result<()> {
         done[start] = true;
         let mut queue = vec![start];
         while let Some(f) = queue.pop() {
-            let uses: Vec<(usize, bool)> = b.faces[f].loops.iter().flatten().map(|c| (c.edge, c.fwd)).collect();
+            let uses: Vec<(usize, bool)> = b.faces[f]
+                .loops
+                .iter()
+                .flatten()
+                .map(|c| (c.edge, c.fwd))
+                .collect();
             for (e, fwd) in uses {
                 for &g in &ef[e] {
                     if g == f || done[g] {
                         continue;
                     }
-                    let gfwd = b.faces[g].loops.iter().flatten().find(|c| c.edge == e).map(|c| c.fwd).unwrap_or(!fwd);
+                    let gfwd = b.faces[g]
+                        .loops
+                        .iter()
+                        .flatten()
+                        .find(|c| c.edge == e)
+                        .map(|c| c.fwd)
+                        .unwrap_or(!fwd);
                     if gfwd == fwd {
                         Body::reverse_face(&mut b.faces[g]);
                     }
@@ -570,16 +804,28 @@ pub fn simplify(k: &mut NativeKernel, body: BodyId) -> Result<OpResult> {
     super::unify::merge_edges(&mut b);
     super::boolean::assemble_shells(&mut b)?;
     if b.solids.len() != 1 {
-        return Err(KernelError::InvalidResult { op: "simplify", why: "the simplified body is not a valid solid".into() });
+        return Err(KernelError::InvalidResult {
+            op: "simplify",
+            why: "the simplified body is not a valid solid".into(),
+        });
     }
     let mut history = History::default();
     for (i, srcs) in from.iter().enumerate() {
         for &(_, f) in srcs {
-            history.modified.push((FaceId(i as u64), InputFace { body, face: FaceId(f as u64) }));
+            history.modified.push((
+                FaceId(i as u64),
+                InputFace {
+                    body,
+                    face: FaceId(f as u64),
+                },
+            ));
         }
     }
     let id = k.insert(b);
-    Ok(OpResult { bodies: vec![id], history })
+    Ok(OpResult {
+        bodies: vec![id],
+        history,
+    })
 }
 
 /// Delete face (defeaturing): faces whose whole boundary runs along inner loops of the faces
@@ -596,7 +842,11 @@ pub fn delete_faces(k: &mut NativeKernel, body: BodyId, remove: &[FaceId]) -> Re
     }
     let ef = b.edge_faces();
     // Edges between a deleted face and a kept one.
-    let boundary: Vec<usize> = (0..b.edges.len()).filter(|&e| ef[e].iter().any(|f| gone.contains(f)) && ef[e].iter().any(|f| !gone.contains(f))).collect();
+    let boundary: Vec<usize> = (0..b.edges.len())
+        .filter(|&e| {
+            ef[e].iter().any(|f| gone.contains(f)) && ef[e].iter().any(|f| !gone.contains(f))
+        })
+        .collect();
     let mut out = b.clone();
     for fi in 0..out.faces.len() {
         if gone.contains(&fi) {
@@ -612,7 +862,9 @@ pub fn delete_faces(k: &mut NativeKernel, body: BodyId, remove: &[FaceId]) -> Re
             }
             let all = l.iter().all(|c| boundary.contains(&c.edge));
             if li == 0 || !all {
-                return Err(KernelError::Unsupported("deleting faces that aren't closed off by whole inner loops (a fillet or a chamfer between faces)"));
+                return Err(KernelError::Unsupported(
+                    "deleting faces that aren't closed off by whole inner loops (a fillet or a chamfer between faces)",
+                ));
             }
         }
         out.faces[fi].loops = kept;
@@ -624,31 +876,58 @@ pub fn delete_faces(k: &mut NativeKernel, body: BodyId, remove: &[FaceId]) -> Re
     out.solids.clear();
     super::boolean::assemble_shells(&mut out)?;
     if out.solids.len() != 1 {
-        return Err(KernelError::InvalidResult { op: "delete face", why: "the faces can't be deleted: the healed body is not a valid solid".into() });
+        return Err(KernelError::InvalidResult {
+            op: "delete face",
+            why: "the faces can't be deleted: the healed body is not a valid solid".into(),
+        });
     }
     let mut history = History::default();
     for (i, f) in keep.iter().enumerate() {
-        history.modified.push((FaceId(i as u64), InputFace { body, face: FaceId(*f as u64) }));
+        history.modified.push((
+            FaceId(i as u64),
+            InputFace {
+                body,
+                face: FaceId(*f as u64),
+            },
+        ));
     }
     for f in &gone {
-        history.deleted.push(InputFace { body, face: FaceId(*f as u64) });
+        history.deleted.push(InputFace {
+            body,
+            face: FaceId(*f as u64),
+        });
     }
     let id = k.insert(out);
-    Ok(OpResult { bodies: vec![id], history })
+    Ok(OpResult {
+        bodies: vec![id],
+        history,
+    })
 }
 
 /// Splits edge `e` at parameter `t` at the existing vertex `w`, in every face using it.
 fn split_edge_at(b: &mut Body, e: usize, t: f64, w: usize) {
     let old = b.edges[e].clone();
-    b.edges[e] = Edge { t: [old.t[0], t], v: [old.v[0], w], ..old.clone() };
-    b.edges.push(Edge { t: [t, old.t[1]], v: [w, old.v[1]], ..old });
+    b.edges[e] = Edge {
+        t: [old.t[0], t],
+        v: [old.v[0], w],
+        ..old.clone()
+    };
+    b.edges.push(Edge {
+        t: [t, old.t[1]],
+        v: [w, old.v[1]],
+        ..old
+    });
     let e2 = b.edges.len() - 1;
     for f in &mut b.faces {
         for l in &mut f.loops {
             let mut nl = Vec::with_capacity(l.len() + 1);
             for c in l.drain(..) {
                 if c.edge == e {
-                    let second = Coedge { edge: e2, fwd: c.fwd, pc: c.pc.clone() };
+                    let second = Coedge {
+                        edge: e2,
+                        fwd: c.fwd,
+                        pc: c.pc.clone(),
+                    };
                     if c.fwd {
                         nl.push(c);
                         nl.push(second);

@@ -9,9 +9,9 @@
 
 use super::curve::Curve;
 use super::math::*;
+use super::tol;
 use crate::{KernelError, Plane, Result};
 use std::f64::consts::TAU;
-use super::tol;
 
 /// A piece in a plane's (x, y): a segment or an arc (centre, radius, start angle, signed sweep).
 #[derive(Debug, Clone, Copy)]
@@ -70,7 +70,9 @@ pub type PlaneFace = (Plane, Vec<Vec<Edge3>>);
 pub fn edges_to_faces(edges: &[Edge3]) -> Result<Vec<PlaneFace>> {
     for (c, _, _) in edges {
         if !matches!(c, Curve::Line { .. } | Curve::Circle { .. }) {
-            return Err(KernelError::Unsupported("faces from edges other than lines and circles"));
+            return Err(KernelError::Unsupported(
+                "faces from edges other than lines and circles",
+            ));
         }
     }
     let mut bb = Bbox::empty();
@@ -85,7 +87,10 @@ pub fn edges_to_faces(edges: &[Edge3]) -> Result<Vec<PlaneFace>> {
     let mut planes: Vec<(P3, V3)> = Vec::new();
     let mut add_plane = |o: P3, n: V3| {
         let n = n.normalize();
-        if !planes.iter().any(|(po, pn)| pn.cross(&n).norm() < tol::ANGULAR && (o - po).dot(pn).abs() < tol) {
+        if !planes
+            .iter()
+            .any(|(po, pn)| pn.cross(&n).norm() < tol::ANGULAR && (o - po).dot(pn).abs() < tol)
+        {
             planes.push((o, n));
         }
     };
@@ -96,7 +101,11 @@ pub fn edges_to_faces(edges: &[Edge3]) -> Result<Vec<PlaneFace>> {
     }
     for i in 0..edges.len() {
         for j in i + 1..edges.len() {
-            let (Curve::Line { o: oa, d: da }, Curve::Line { o: ob, d: db }) = (&edges[i].0, &edges[j].0) else { continue };
+            let (Curve::Line { o: oa, d: da }, Curve::Line { o: ob, d: db }) =
+                (&edges[i].0, &edges[j].0)
+            else {
+                continue;
+            };
             let n = da.cross(db);
             if n.norm() < tol::REL * da.norm() * db.norm() {
                 continue;
@@ -148,14 +157,33 @@ pub fn edges_to_faces(edges: &[Edge3]) -> Result<Vec<PlaneFace>> {
                                 (c, 0.0, len)
                             }
                             Piece2::Arc(c, r, a0, sw) => {
-                                let (x, y) = (xd * a0.cos() + yd * a0.sin(), (n.cross(&(xd * a0.cos() + yd * a0.sin()))) * sw.signum());
-                                (Curve::Circle { c: to3(&c), x, y, r }, 0.0, sw.abs())
+                                let (x, y) = (
+                                    xd * a0.cos() + yd * a0.sin(),
+                                    (n.cross(&(xd * a0.cos() + yd * a0.sin()))) * sw.signum(),
+                                );
+                                (
+                                    Curve::Circle {
+                                        c: to3(&c),
+                                        x,
+                                        y,
+                                        r,
+                                    },
+                                    0.0,
+                                    sw.abs(),
+                                )
                             }
                         })
                         .collect()
                 })
                 .collect();
-            out.push((Plane { origin: o, x_dir: nalgebra::Unit::new_normalize(xd), normal: nalgebra::Unit::new_normalize(n) }, loops));
+            out.push((
+                Plane {
+                    origin: o,
+                    x_dir: nalgebra::Unit::new_normalize(xd),
+                    normal: nalgebra::Unit::new_normalize(n),
+                },
+                loops,
+            ));
         }
     }
     Ok(out)
@@ -176,7 +204,8 @@ fn meets(a: &Piece2, b: &Piece2, tol: f64) -> Vec<f64> {
                 pts.push(p + d1 * t);
             }
         }
-        (Piece2::Seg(p, q), Piece2::Arc(c, rr, ..)) | (Piece2::Arc(c, rr, ..), Piece2::Seg(p, q)) => {
+        (Piece2::Seg(p, q), Piece2::Arc(c, rr, ..))
+        | (Piece2::Arc(c, rr, ..), Piece2::Seg(p, q)) => {
             let d = (q - p).normalize();
             let w = p - c;
             let bq = w.dot(&d);
@@ -236,7 +265,11 @@ fn frac_on(a: &Piece2, p: &P2, tol: f64) -> Option<f64> {
                 let s = rel / sw.abs();
                 if s > 1.0 {
                     // Past the end: the nearer end.
-                    if (rel - sw.abs()) < (TAU - rel) { 1.0 } else { 0.0 }
+                    if (rel - sw.abs()) < (TAU - rel) {
+                        1.0
+                    } else {
+                        0.0
+                    }
                 } else {
                     s
                 }
@@ -270,7 +303,9 @@ fn faces_in_plane(curves: &[Piece2], tol: f64) -> Vec<Vec<Vec<Piece2>>> {
             }
         }
         ss.sort_by(|x, y| x.total_cmp(y));
-        let len = |s0: f64, s1: f64| (a.at(s1) - a.at(s0)).norm() + (a.at(0.5 * (s0 + s1)) - a.at(s0)).norm();
+        let len = |s0: f64, s1: f64| {
+            (a.at(s1) - a.at(s0)).norm() + (a.at(0.5 * (s0 + s1)) - a.at(s0)).norm()
+        };
         let mut keep = vec![ss[0]];
         for &s in &ss[1..] {
             if len(*keep.last().unwrap_or(&0.0), s) > 4.0 * tol {
@@ -300,7 +335,9 @@ fn faces_in_plane(curves: &[Piece2], tol: f64) -> Vec<Vec<Vec<Piece2>>> {
         let (a, b) = (vid(p.at(0.0), &mut verts), vid(p.at(1.0), &mut verts));
         let mid = p.at(0.5);
         // The same piece twice (shared or overlapping edges): once.
-        if edges.iter().any(|(x, y, q)| ((*x == a && *y == b) || (*x == b && *y == a)) && (q.at(0.5) - mid).norm() <= 10.0 * tol) {
+        if edges.iter().any(|(x, y, q)| {
+            ((*x == a && *y == b) || (*x == b && *y == a)) && (q.at(0.5) - mid).norm() <= 10.0 * tol
+        }) {
             continue;
         }
         if a == b && matches!(p, Piece2::Seg(..)) {
@@ -324,7 +361,11 @@ fn faces_in_plane(curves: &[Piece2], tol: f64) -> Vec<Vec<Vec<Piece2>>> {
     // Half-edges h = 2e (forwards) and 2e + 1, sorted about their start vertices.
     let half = |h: usize| -> (usize, usize, Piece2) {
         let (a, b, p) = edges[h / 2];
-        if h.is_multiple_of(2) { (a, b, p) } else { (b, a, p.reversed()) }
+        if h.is_multiple_of(2) {
+            (a, b, p)
+        } else {
+            (b, a, p.reversed())
+        }
     };
     let nh = 2 * edges.len();
     let mut around: Vec<Vec<usize>> = vec![Vec::new(); verts.len()];
@@ -340,7 +381,11 @@ fn faces_in_plane(curves: &[Piece2], tol: f64) -> Vec<Vec<Vec<Piece2>>> {
         v.sort_by(|&x, &y| {
             let (ax, tx) = key(x);
             let (ay, ty) = key(y);
-            if (ax - ay).abs() > tol::ROUNDOFF { ax.total_cmp(&ay) } else { tx.total_cmp(&ty) }
+            if (ax - ay).abs() > tol::ROUNDOFF {
+                ax.total_cmp(&ay)
+            } else {
+                tx.total_cmp(&ty)
+            }
         });
     }
     // The next half-edge round a region: at the end, the one just clockwise of the way back.
@@ -368,10 +413,12 @@ fn faces_in_plane(curves: &[Piece2], tol: f64) -> Vec<Vec<Vec<Piece2>>> {
             .iter()
             .map(|&h| {
                 let p = half(h).2;
-                (0..16).map(|i| {
-                    let (a, b) = (p.at(i as f64 / 16.0), p.at((i + 1) as f64 / 16.0));
-                    a.x * b.y - b.x * a.y
-                }).sum::<f64>()
+                (0..16)
+                    .map(|i| {
+                        let (a, b) = (p.at(i as f64 / 16.0), p.at((i + 1) as f64 / 16.0));
+                        a.x * b.y - b.x * a.y
+                    })
+                    .sum::<f64>()
                     + match p {
                         // The arc's segments beyond their chords.
                         Piece2::Arc(_, r, _, sw) => {
@@ -385,19 +432,29 @@ fn faces_in_plane(curves: &[Piece2], tol: f64) -> Vec<Vec<Vec<Piece2>>> {
             * 0.5;
         cycles.push((cyc, area));
     }
-    let poly = |cyc: &[usize]| -> Vec<P2> { cyc.iter().flat_map(|&h| (0..16).map(move |i| half(h).2.at(i as f64 / 16.0))).collect() };
+    let poly = |cyc: &[usize]| -> Vec<P2> {
+        cyc.iter()
+            .flat_map(|&h| (0..16).map(move |i| half(h).2.at(i as f64 / 16.0)))
+            .collect()
+    };
     let inside = |pt: &P2, poly: &[P2]| {
         let mut c = false;
         for i in 0..poly.len() {
             let (a, b) = (poly[i], poly[(i + 1) % poly.len()]);
-            if (a.y > pt.y) != (b.y > pt.y) && pt.x < a.x + (pt.y - a.y) * (b.x - a.x) / (b.y - a.y) {
+            if (a.y > pt.y) != (b.y > pt.y) && pt.x < a.x + (pt.y - a.y) * (b.x - a.x) / (b.y - a.y)
+            {
                 c = !c;
             }
         }
         c
     };
-    let regions: Vec<usize> = (0..cycles.len()).filter(|&i| cycles[i].1 > tol * tol).collect();
-    let mut faces: Vec<Vec<Vec<Piece2>>> = regions.iter().map(|&i| vec![cycles[i].0.iter().map(|&h| half(h).2).collect()]).collect();
+    let regions: Vec<usize> = (0..cycles.len())
+        .filter(|&i| cycles[i].1 > tol * tol)
+        .collect();
+    let mut faces: Vec<Vec<Vec<Piece2>>> = regions
+        .iter()
+        .map(|&i| vec![cycles[i].0.iter().map(|&h| half(h).2).collect()])
+        .collect();
     // Outer boundaries (clockwise) are holes of the smallest region around them.
     for (ci, (cyc, area)) in cycles.iter().enumerate() {
         if *area > -tol * tol || regions.contains(&ci) {
@@ -408,7 +465,10 @@ fn faces_in_plane(curves: &[Piece2], tol: f64) -> Vec<Vec<Vec<Piece2>>> {
         let host = regions
             .iter()
             .enumerate()
-            .filter(|&(_, &r)| !cycles[r].0.iter().any(|h| own.contains(&(h / 2))) && inside(&pt, &poly(&cycles[r].0)))
+            .filter(|&(_, &r)| {
+                !cycles[r].0.iter().any(|h| own.contains(&(h / 2)))
+                    && inside(&pt, &poly(&cycles[r].0))
+            })
             .min_by(|a, b| cycles[*a.1].1.total_cmp(&cycles[*b.1].1));
         if let Some((k, _)) = host {
             faces[k].push(cyc.iter().map(|&h| half(h).2).collect());

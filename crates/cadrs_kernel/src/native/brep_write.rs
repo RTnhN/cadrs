@@ -28,11 +28,11 @@ use std::fmt::Write as _;
 
 use super::curve::Curve;
 use super::math::*;
-use super::nurbs::{dehom, NurbsCurve};
+use super::nurbs::{NurbsCurve, dehom};
 use super::surface::Surface;
+use super::tol;
 use super::topo::{Body, Coedge, TOL_MIN};
 use super::xbuild::knot_mults;
-use super::tol;
 
 /// A real as the file holds it: the shortest digits that read back to the same value.
 fn num(x: f64) -> String {
@@ -40,7 +40,11 @@ fn num(x: f64) -> String {
         return "0".into();
     }
     let a = x.abs();
-    if a == 0.0 || (1e-5..1e15).contains(&a) { format!("{x}") } else { format!("{x:e}") }
+    if a == 0.0 || (1e-5..1e15).contains(&a) {
+        format!("{x}")
+    } else {
+        format!("{x:e}")
+    }
 }
 
 fn p3(p: &P3) -> String {
@@ -59,10 +63,20 @@ fn unit(v: &V3) -> bool {
 fn bspline(n: &NurbsCurve, dim2: bool) -> String {
     let rational = n.cps.iter().any(|h| (h.w - 1.0).abs() > 1e-15);
     let (k, m) = knot_mults(&n.knots);
-    let mut s = format!("7 {} 0 {} {} {}", u8::from(rational), n.degree, n.cps.len(), k.len());
+    let mut s = format!(
+        "7 {} 0 {} {} {}",
+        u8::from(rational),
+        n.degree,
+        n.cps.len(),
+        k.len()
+    );
     for h in &n.cps {
         let p = dehom(h);
-        let _ = if dim2 { write!(s, " {} {}", num(p.x), num(p.y)) } else { write!(s, " {}", p3(&p)) };
+        let _ = if dim2 {
+            write!(s, " {} {}", num(p.x), num(p.y))
+        } else {
+            write!(s, " {}", p3(&p))
+        };
         if rational {
             let _ = write!(s, " {}", num(h.w));
         }
@@ -76,7 +90,11 @@ fn bspline(n: &NurbsCurve, dim2: bool) -> String {
 /// The degree-1 B-spline that is `c` on [t0, t1] (a line).
 fn linear(c: &Curve, t0: f64, t1: f64) -> NurbsCurve {
     let h = |p: P3| super::nurbs::hom(&p, 1.0);
-    NurbsCurve { degree: 1, knots: vec![t0, t0, t1, t1], cps: vec![h(c.point(t0)), h(c.point(t1))] }
+    NurbsCurve {
+        degree: 1,
+        knots: vec![t0, t0, t1, t1],
+        cps: vec![h(c.point(t0)), h(c.point(t1))],
+    }
 }
 
 /// A C1 cubic B-spline through `segs` Hermite pieces of `f` (point and derivative) on [t0, t1],
@@ -85,7 +103,9 @@ fn hermite(f: impl Fn(f64) -> (P3, V3), t0: f64, t1: f64, segs: usize) -> NurbsC
     let h = |p: P3| super::nurbs::hom(&p, 1.0);
     let mut knots = vec![t0; 4];
     let mut cps = Vec::with_capacity(3 * segs + 1);
-    let ts: Vec<f64> = (0..=segs).map(|i| t0 + (t1 - t0) * i as f64 / segs as f64).collect();
+    let ts: Vec<f64> = (0..=segs)
+        .map(|i| t0 + (t1 - t0) * i as f64 / segs as f64)
+        .collect();
     for (i, w) in ts.windows(2).enumerate() {
         let (a, b) = (w[0], w[1]);
         let ((pa, da), (pb, db)) = (f(a), f(b));
@@ -96,19 +116,37 @@ fn hermite(f: impl Fn(f64) -> (P3, V3), t0: f64, t1: f64, segs: usize) -> NurbsC
         cps.extend([h(pa + da * k), h(pb - db * k), h(pb)]);
         knots.extend(std::iter::repeat_n(b, if i + 1 == segs { 4 } else { 3 }));
     }
-    NurbsCurve { degree: 3, knots, cps }
+    NurbsCurve {
+        degree: 3,
+        knots,
+        cps,
+    }
 }
 
 /// `c` as `c'(t) = c(t + h)` (h a quarter turn for conics; any shift for lines and splines).
 fn shifted(c: &Curve, h: f64) -> Curve {
     match c {
-        Curve::Line { o, d } => Curve::Line { o: o + d * h, d: *d },
+        Curve::Line { o, d } => Curve::Line {
+            o: o + d * h,
+            d: *d,
+        },
         Curve::Circle { c, x, y, r } => {
             let (s, k) = h.sin_cos();
-            Curve::Circle { c: *c, x: x * k + y * s, y: y * k - x * s, r: *r }
+            Curve::Circle {
+                c: *c,
+                x: x * k + y * s,
+                y: y * k - x * s,
+                r: *r,
+            }
         }
         // h = π/2: a cos(t + π/2) x + b sin(t + π/2) y = b cos t y + a sin t (−x).
-        Curve::Ellipse { c, x, y, a, b } => Curve::Ellipse { c: *c, x: *y, y: -x, a: *b, b: *a },
+        Curve::Ellipse { c, x, y, a, b } => Curve::Ellipse {
+            c: *c,
+            x: *y,
+            y: -x,
+            a: *b,
+            b: *a,
+        },
         Curve::Nurbs(n) => {
             let mut n = NurbsCurve::clone(n);
             n.knots.iter_mut().for_each(|k| *k -= h);
@@ -127,7 +165,12 @@ struct UvMap {
 }
 
 impl UvMap {
-    const SAME: UvMap = UvMap { uk: 1.0, uo: 0.0, vk: 1.0, vo: 0.0 };
+    const SAME: UvMap = UvMap {
+        uk: 1.0,
+        uo: 0.0,
+        vk: 1.0,
+        vo: 0.0,
+    };
     fn p(&self, p: &P3) -> P3 {
         P3::new(self.uk * p.x + self.uo, self.vk * p.y + self.vo, 0.0)
     }
@@ -153,11 +196,30 @@ fn curve2d(pc: &Curve, t0: f64, t1: f64, m: &UvMap) -> String {
         }
         Curve::Circle { c, x, y, r } if m.rigid() => {
             let c = m.p(c);
-            format!("2 {} {} {} {} {} {} {}", num(c.x), num(c.y), num(x.x), num(x.y), num(y.x), num(y.y), num(*r))
+            format!(
+                "2 {} {} {} {} {} {} {}",
+                num(c.x),
+                num(c.y),
+                num(x.x),
+                num(x.y),
+                num(y.x),
+                num(y.y),
+                num(*r)
+            )
         }
         Curve::Ellipse { c, x, y, a, b } if m.rigid() && a >= b => {
             let c = m.p(c);
-            format!("3 {} {} {} {} {} {} {} {}", num(c.x), num(c.y), num(x.x), num(x.y), num(y.x), num(y.y), num(*a), num(*b))
+            format!(
+                "3 {} {} {} {} {} {} {} {}",
+                num(c.x),
+                num(c.y),
+                num(x.x),
+                num(x.y),
+                num(y.x),
+                num(y.y),
+                num(*a),
+                num(*b)
+            )
         }
         Curve::Nurbs(n) => {
             let mut n = NurbsCurve::clone(n);
@@ -180,8 +242,23 @@ fn curve2d(pc: &Curve, t0: f64, t1: f64, m: &UvMap) -> String {
 fn curve3d(c: &Curve) -> String {
     match c {
         Curve::Line { o, d } => format!("1 {} {}", p3(o), v3(d)),
-        Curve::Circle { c, x, y, r } => format!("2 {} {} {} {} {}", p3(c), v3(&x.cross(y).normalize()), v3(x), v3(y), num(*r)),
-        Curve::Ellipse { c, x, y, a, b } => format!("3 {} {} {} {} {} {}", p3(c), v3(&x.cross(y).normalize()), v3(x), v3(y), num(*a), num(*b)),
+        Curve::Circle { c, x, y, r } => format!(
+            "2 {} {} {} {} {}",
+            p3(c),
+            v3(&x.cross(y).normalize()),
+            v3(x),
+            v3(y),
+            num(*r)
+        ),
+        Curve::Ellipse { c, x, y, a, b } => format!(
+            "3 {} {} {} {} {} {}",
+            p3(c),
+            v3(&x.cross(y).normalize()),
+            v3(x),
+            v3(y),
+            num(*a),
+            num(*b)
+        ),
         Curve::Nurbs(n) => bspline(n, false),
     }
 }
@@ -191,7 +268,10 @@ fn curve3d(c: &Curve) -> String {
 fn edge_curve(c: &Curve, t0: f64, t1: f64) -> (Curve, f64) {
     match c {
         Curve::Line { d, .. } if !unit(d) => (Curve::nurbs(linear(c, t0, t1)), 0.0),
-        Curve::Ellipse { a, b, .. } if b > a => (shifted(c, std::f64::consts::FRAC_PI_2), std::f64::consts::FRAC_PI_2),
+        Curve::Ellipse { a, b, .. } if b > a => (
+            shifted(c, std::f64::consts::FRAC_PI_2),
+            std::f64::consts::FRAC_PI_2,
+        ),
         _ => (c.clone(), 0.0),
     }
 }
@@ -200,8 +280,19 @@ fn edge_curve(c: &Curve, t0: f64, t1: f64) -> (Curve, f64) {
 /// along a unit vector, an ellipse's first axis the longer.
 fn basis_curve(c: &Curve) -> (Curve, f64, f64) {
     match c {
-        Curve::Line { o, d } if !unit(d) => (Curve::Line { o: *o, d: d.normalize() }, d.norm(), 0.0),
-        Curve::Ellipse { a, b, .. } if b > a => (shifted(c, std::f64::consts::FRAC_PI_2), 1.0, -std::f64::consts::FRAC_PI_2),
+        Curve::Line { o, d } if !unit(d) => (
+            Curve::Line {
+                o: *o,
+                d: d.normalize(),
+            },
+            d.norm(),
+            0.0,
+        ),
+        Curve::Ellipse { a, b, .. } if b > a => (
+            shifted(c, std::f64::consts::FRAC_PI_2),
+            1.0,
+            -std::f64::consts::FRAC_PI_2,
+        ),
         _ => (c.clone(), 1.0, 0.0),
     }
 }
@@ -215,16 +306,38 @@ fn surface(s: &Surface) -> (String, UvMap) {
         Surface::Cylinder { f, r } => (format!("2 {} {}", ax(f), num(*r)), same),
         Surface::Cone { f, r, a } => (format!("3 {} {} {}", ax(f), num(*r), num(*a)), same),
         Surface::Sphere { f, r } => (format!("4 {} {}", ax(f), num(*r)), same),
-        Surface::Torus { f, rmaj, rmin } => (format!("5 {} {} {}", ax(f), num(*rmaj), num(*rmin)), same),
+        Surface::Torus { f, rmaj, rmin } => {
+            (format!("5 {} {} {}", ax(f), num(*rmaj), num(*rmin)), same)
+        }
         // Turned about x × y (the way u turns the meridian).
         Surface::Revolution { f, m } => {
             let (m, k, o) = basis_curve(m);
-            (format!("7 {} {} {}", p3(&f.o), v3(&f.x.cross(&f.y).normalize()), curve3d(&m)), UvMap { vk: k, vo: o, ..same })
+            (
+                format!(
+                    "7 {} {} {}",
+                    p3(&f.o),
+                    v3(&f.x.cross(&f.y).normalize()),
+                    curve3d(&m)
+                ),
+                UvMap {
+                    vk: k,
+                    vo: o,
+                    ..same
+                },
+            )
         }
         Surface::Extrusion { c, d } => {
             let (c, k, o) = basis_curve(c);
             let len = d.norm();
-            (format!("6 {} {}", v3(&(d / len)), curve3d(&c)), UvMap { uk: k, uo: o, vk: len, vo: 0.0 })
+            (
+                format!("6 {} {}", v3(&(d / len)), curve3d(&c)),
+                UvMap {
+                    uk: k,
+                    uo: o,
+                    vk: len,
+                    vo: 0.0,
+                },
+            )
         }
         Surface::Nurbs(n) => {
             let rational = n.cps.iter().flatten().any(|h| (h.w - 1.0).abs() > 1e-15);
@@ -232,7 +345,15 @@ fn surface(s: &Surface) -> (String, UvMap) {
             let (kv, mv) = knot_mults(&n.kv);
             let r = u8::from(rational);
             let nv = n.cps.first().map_or(0, Vec::len);
-            let mut s = format!("9 {r} {r} 0 0 {} {} {} {} {} {}", n.du, n.dv, n.cps.len(), nv, ku.len(), kv.len());
+            let mut s = format!(
+                "9 {r} {r} 0 0 {} {} {} {} {} {}",
+                n.du,
+                n.dv,
+                n.cps.len(),
+                nv,
+                ku.len(),
+                kv.len()
+            );
             for h in n.cps.iter().flatten() {
                 let _ = write!(s, " {}", p3(&dehom(h)));
                 if rational {
@@ -293,14 +414,23 @@ impl Writer {
             .verts
             .iter()
             .zip(&vtol)
-            .map(|(v, t)| self.shape(format!("Ve\n{}\n{}\n0 0\n\n0101101", num(*t), p3(&v.p)), Vec::new()))
+            .map(|(v, t)| {
+                self.shape(
+                    format!("Ve\n{}\n{}\n0 0\n\n0101101", num(*t), p3(&v.p)),
+                    Vec::new(),
+                )
+            })
             .collect();
         let mut eid = Vec::with_capacity(b.edges.len());
         for (ei, e) in b.edges.iter().enumerate() {
             let (t0, t1) = (e.t[0], e.t[1]);
             let (curve, h) = edge_curve(&e.curve, t0, t1);
             let (a, z) = (t0 - h, t1 - h);
-            let mut head = format!("Ed\n {} 1 1 {}\n", num(e.tol.max(TOL_MIN)), u8::from(e.degenerate));
+            let mut head = format!(
+                "Ed\n {} 1 1 {}\n",
+                num(e.tol.max(TOL_MIN)),
+                u8::from(e.degenerate)
+            );
             if !e.degenerate {
                 self.curves.push(curve3d(&curve));
                 let _ = writeln!(head, "1 {} 0 {} {}", self.curves.len(), num(a), num(z));
@@ -319,7 +449,11 @@ impl Writer {
                 let sense = b.faces[fi].sense;
                 cs.sort_by_key(|c| c.fwd != sense);
                 let mut pc = |c: &Coedge| {
-                    let pc = if h != 0.0 { shifted(&c.pc, h) } else { c.pc.clone() };
+                    let pc = if h != 0.0 {
+                        shifted(&c.pc, h)
+                    } else {
+                        c.pc.clone()
+                    };
                     self.curves2d.push(curve2d(&pc, a, z, &map));
                     self.curves2d.len()
                 };
@@ -339,27 +473,52 @@ impl Writer {
             let mut wires = Vec::new();
             for l in &f.loops {
                 // As OCCT's face holds it: about the surface's natural normal.
-                let subs: Vec<(bool, usize)> = if f.sense { l.iter().map(|c| (c.fwd, eid[c.edge])).collect() } else { l.iter().rev().map(|c| (!c.fwd, eid[c.edge])).collect() };
+                let subs: Vec<(bool, usize)> = if f.sense {
+                    l.iter().map(|c| (c.fwd, eid[c.edge])).collect()
+                } else {
+                    l.iter().rev().map(|c| (!c.fwd, eid[c.edge])).collect()
+                };
                 wires.push((true, self.shape("Wi\n\n0101100".into(), subs)));
             }
-            fid.push(self.shape(format!("Fa\n0 {} {} 0\n\n0101000", num(TOL_MIN), surf_of[fi].0), wires));
+            fid.push(self.shape(
+                format!("Fa\n0 {} {} 0\n\n0101000", num(TOL_MIN), surf_of[fi].0),
+                wires,
+            ));
         }
-        let in_solid: std::collections::HashSet<usize> = b.solids.iter().flat_map(|s| s.shells.iter().copied()).collect();
+        let in_solid: std::collections::HashSet<usize> = b
+            .solids
+            .iter()
+            .flat_map(|s| s.shells.iter().copied())
+            .collect();
         let sid: Vec<usize> = b
             .shells
             .iter()
             .map(|s| {
-                let subs = s.faces.iter().map(|&fi| (b.faces[fi].sense, fid[fi])).collect();
+                let subs = s
+                    .faces
+                    .iter()
+                    .map(|&fi| (b.faces[fi].sense, fid[fi]))
+                    .collect();
                 self.shape(format!("Sh\n\n0101{}00", u8::from(s.closed)), subs)
             })
             .collect();
         let mut out = Vec::new();
         for s in &b.solids {
-            out.push(self.shape("So\n\n0100000".into(), s.shells.iter().map(|&si| (true, sid[si])).collect()));
+            out.push(self.shape(
+                "So\n\n0100000".into(),
+                s.shells.iter().map(|&si| (true, sid[si])).collect(),
+            ));
         }
-        out.extend((0..b.shells.len()).filter(|s| !in_solid.contains(s)).map(|s| sid[s]));
+        out.extend(
+            (0..b.shells.len())
+                .filter(|s| !in_solid.contains(s))
+                .map(|s| sid[s]),
+        );
         for w in &b.wires {
-            out.push(self.shape("Wi\n\n0101000".into(), w.edges.iter().map(|&(e, fwd)| (fwd, eid[e])).collect()));
+            out.push(self.shape(
+                "Wi\n\n0101000".into(),
+                w.edges.iter().map(|&(e, fwd)| (fwd, eid[e])).collect(),
+            ));
         }
         out.extend(b.points.iter().map(|&v| vid[v]));
         out
@@ -375,7 +534,14 @@ pub fn write(bodies: &[&Body]) -> String {
     }
     let root = w.shape("Co\n\n1100000".into(), top);
     let mut s = String::from("CASCADE Topology V1, (c) Matra-Datavision\nLocations 0\n");
-    for (name, table) in [("Curve2ds", &w.curves2d), ("Curves", &w.curves), ("Polygon3D", &Vec::new()), ("PolygonOnTriangulations", &Vec::new()), ("Surfaces", &w.surfaces), ("Triangulations", &Vec::new())] {
+    for (name, table) in [
+        ("Curve2ds", &w.curves2d),
+        ("Curves", &w.curves),
+        ("Polygon3D", &Vec::new()),
+        ("PolygonOnTriangulations", &Vec::new()),
+        ("Surfaces", &w.surfaces),
+        ("Triangulations", &Vec::new()),
+    ] {
         let _ = writeln!(s, "{name} {}", table.len());
         for r in table {
             s.push_str(r);
@@ -403,15 +569,40 @@ mod tests {
 
     #[test]
     fn numbers_read_back_exactly() {
-        for x in [0.0, -0.0, 1.0, -2.5, 1e-7, 0.1 + 0.2, 1e300, -1e-300, std::f64::consts::PI, 123456789.123] {
+        for x in [
+            0.0,
+            -0.0,
+            1.0,
+            -2.5,
+            1e-7,
+            0.1 + 0.2,
+            1e300,
+            -1e-300,
+            std::f64::consts::PI,
+            123456789.123,
+        ] {
             assert_eq!(num(x).parse::<f64>().unwrap(), x, "{x}");
         }
     }
 
     #[test]
     fn hermite_pieces_follow_the_curve() {
-        let e = Curve::Ellipse { c: P3::new(1.0, 2.0, 0.0), x: V3::x(), y: V3::y(), a: 1.0, b: 3.0 };
-        let n = hermite(|t| { let (p, d, _) = e.d2(t); (p, d) }, 0.5, 4.0, 64);
+        let e = Curve::Ellipse {
+            c: P3::new(1.0, 2.0, 0.0),
+            x: V3::x(),
+            y: V3::y(),
+            a: 1.0,
+            b: 3.0,
+        };
+        let n = hermite(
+            |t| {
+                let (p, d, _) = e.d2(t);
+                (p, d)
+            },
+            0.5,
+            4.0,
+            64,
+        );
         for i in 0..=100 {
             let t = 0.5 + 3.5 * i as f64 / 100.0;
             assert!((n.point(t) - e.point(t)).norm() < 1e-7, "{t}");
@@ -422,9 +613,23 @@ mod tests {
     fn shifted_curves_are_the_same_points() {
         let h = std::f64::consts::FRAC_PI_2;
         let cs = [
-            Curve::Ellipse { c: P3::new(1.0, 2.0, 3.0), x: V3::x(), y: V3::z(), a: 1.0, b: 3.0 },
-            Curve::Circle { c: P3::origin(), x: V3::x(), y: V3::y(), r: 2.0 },
-            Curve::Line { o: P3::new(1.0, 0.0, 0.0), d: V3::new(0.6, 0.8, 0.0) },
+            Curve::Ellipse {
+                c: P3::new(1.0, 2.0, 3.0),
+                x: V3::x(),
+                y: V3::z(),
+                a: 1.0,
+                b: 3.0,
+            },
+            Curve::Circle {
+                c: P3::origin(),
+                x: V3::x(),
+                y: V3::y(),
+                r: 2.0,
+            },
+            Curve::Line {
+                o: P3::new(1.0, 0.0, 0.0),
+                d: V3::new(0.6, 0.8, 0.0),
+            },
         ];
         for c in cs {
             let s = shifted(&c, h);

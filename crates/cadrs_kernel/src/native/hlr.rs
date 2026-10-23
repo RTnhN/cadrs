@@ -37,14 +37,17 @@ use rayon::prelude::*;
 use super::classify::ray_surface;
 use super::curve::Curve;
 use super::math::*;
-use super::silhouette::{domain_silhouettes, Found, SilGeom, SilOptions, View};
+use super::silhouette::{Found, SilGeom, SilOptions, View, domain_silhouettes};
 use super::surface::Surface;
 use super::tess;
+use super::tol;
 use super::topo::Body;
 use super::uvdomain::FaceDomain as Domain;
-use crate::projection::{ProjClass, ProjCurve, ProjEdge, ProjSource, ProjVisibility, Projection, ProjectOptions, ViewFrame};
+use crate::projection::{
+    ProjClass, ProjCurve, ProjEdge, ProjSource, ProjVisibility, ProjectOptions, Projection,
+    ViewFrame,
+};
 use crate::{EdgeId, FaceId};
-use super::tol;
 
 /// A body to project and its faces' uv polygons (`classify::face_polygons`, cached by the
 /// kernel's entry).
@@ -184,7 +187,14 @@ fn shape_of(frame: &ViewFrame, c: &Curve, t0: f64, t1: f64) -> (Shape, Vec<f64>,
             let n = x.cross(y).normalize();
             let nd = n.dot(&dir);
             if nd.abs() > 1.0 - tol::ANGULAR {
-                (Shape::Arc { center: frame.to_2d(c), radius: *r }, vec![], false)
+                (
+                    Shape::Arc {
+                        center: frame.to_2d(c),
+                        radius: *r,
+                    },
+                    vec![],
+                    false,
+                )
             } else if nd.abs() < tol::ANGULAR {
                 edge_on(n, x * *r, y * *r)
             } else {
@@ -204,12 +214,37 @@ fn shape_of(frame: &ViewFrame, c: &Curve, t0: f64, t1: f64) -> (Shape, Vec<f64>,
 }
 
 #[allow(clippy::too_many_arguments)]
-fn make_src(frame: &ViewFrame, body: usize, class: ProjClass, edge: Option<usize>, face: Option<usize>, own: Vec<usize>, geo: Geo, t: (f64, f64), closed: bool, tol: f64) -> Option<Src> {
+fn make_src(
+    frame: &ViewFrame,
+    body: usize,
+    class: ProjClass,
+    edge: Option<usize>,
+    face: Option<usize>,
+    own: Vec<usize>,
+    geo: Geo,
+    t: (f64, f64),
+    closed: bool,
+    tol: f64,
+) -> Option<Src> {
     let (shape, turns, turn_at_start) = match &geo {
         Geo::Exact(c) => shape_of(frame, c, t.0, t.1),
         Geo::Poly(_) => (Shape::Other, vec![], false),
     };
-    let mut s = Src { body, class, edge, face, own, geo, t, closed, shape, turns, turn_at_start, ts: vec![], p2: vec![] };
+    let mut s = Src {
+        body,
+        class,
+        edge,
+        face,
+        own,
+        geo,
+        t,
+        closed,
+        shape,
+        turns,
+        turn_at_start,
+        ts: vec![],
+        p2: vec![],
+    };
     let mut bps = vec![t.0];
     bps.extend(s.turns.iter().copied());
     bps.push(t.1);
@@ -258,9 +293,26 @@ fn edge_srcs(frame: &ViewFrame, b: &Body, bi: usize, tol: f64) -> Vec<Src> {
                     n(faces[0]).dot(&n(faces[1])) > SMOOTH_COS
                 })
             };
-            let class = if smooth { ProjClass::Smooth } else { ProjClass::Sharp };
-            let closed = e.closed() && matches!(e.curve, Curve::Circle { .. } | Curve::Ellipse { .. }) && (e.t[1] - e.t[0] - TAU).abs() < tol::ANGULAR;
-            make_src(frame, bi, class, Some(ei), None, faces.clone(), Geo::Exact(e.curve.clone()), (e.t[0], e.t[1]), closed, tol)
+            let class = if smooth {
+                ProjClass::Smooth
+            } else {
+                ProjClass::Sharp
+            };
+            let closed = e.closed()
+                && matches!(e.curve, Curve::Circle { .. } | Curve::Ellipse { .. })
+                && (e.t[1] - e.t[0] - TAU).abs() < tol::ANGULAR;
+            make_src(
+                frame,
+                bi,
+                class,
+                Some(ei),
+                None,
+                faces.clone(),
+                Geo::Exact(e.curve.clone()),
+                (e.t[0], e.t[1]),
+                closed,
+                tol,
+            )
         })
         .collect()
 }
@@ -268,11 +320,26 @@ fn edge_srcs(frame: &ViewFrame, b: &Body, bi: usize, tol: f64) -> Vec<Src> {
 /// The outlines of one face as lines of the view.
 fn face_outlines(frame: &ViewFrame, bi: usize, fi: usize, dom: &Domain, tol: f64) -> Vec<Src> {
     let opts = SilOptions { tol, grid: 96 };
-    let Found::Curves(curves) = domain_silhouettes(dom, &View::Parallel(frame.dir), &opts) else { return vec![] };
+    let Found::Curves(curves) = domain_silhouettes(dom, &View::Parallel(frame.dir), &opts) else {
+        return vec![];
+    };
     curves
         .into_iter()
         .filter_map(|(geo, closed)| {
-            let mk = |geo: Geo, t: (f64, f64), closed: bool| make_src(frame, bi, ProjClass::Outline, None, Some(fi), vec![fi], geo, t, closed, tol);
+            let mk = |geo: Geo, t: (f64, f64), closed: bool| {
+                make_src(
+                    frame,
+                    bi,
+                    ProjClass::Outline,
+                    None,
+                    Some(fi),
+                    vec![fi],
+                    geo,
+                    t,
+                    closed,
+                    tol,
+                )
+            };
             match geo {
                 SilGeom::Exact { curve, t } => mk(Geo::Exact(curve), t, closed),
                 SilGeom::Poly { pts, .. } if pts.len() >= 2 => {
@@ -296,13 +363,22 @@ struct Grid {
 
 impl Grid {
     fn new(lo: P2, hi: P2, items: usize) -> Self {
-        let (w, h) = ((hi.x - lo.x).max(tol::ROUNDOFF), (hi.y - lo.y).max(tol::ROUNDOFF));
+        let (w, h) = (
+            (hi.x - lo.x).max(tol::ROUNDOFF),
+            (hi.y - lo.y).max(tol::ROUNDOFF),
+        );
         let k = ((items as f64).sqrt().ceil() as usize).clamp(1, 256);
         let cell = (w.max(h) / k as f64).max(tol::ROUNDOFF);
         let nx = ((w / cell).ceil() as usize).clamp(1, 512);
         let ny = ((h / cell).ceil() as usize).clamp(1, 512);
         let cell = (w / nx as f64).max(h / ny as f64);
-        Self { lo, cell, nx, ny, cells: vec![Vec::new(); nx * ny] }
+        Self {
+            lo,
+            cell,
+            nx,
+            ny,
+            cells: vec![Vec::new(); nx * ny],
+        }
     }
 
     fn ij(&self, p: P2) -> (usize, usize) {
@@ -364,7 +440,13 @@ struct Occluders<'a> {
 }
 
 impl<'a> Occluders<'a> {
-    fn new(bodies: &'a [HlrBody<'a>], doms: &'a [Vec<Domain<'a>>], frame: &ViewFrame, defl: f64, tol: f64) -> Self {
+    fn new(
+        bodies: &'a [HlrBody<'a>],
+        doms: &'a [Vec<Domain<'a>>],
+        frame: &ViewFrame,
+        defl: f64,
+        tol: f64,
+    ) -> Self {
         let dir = frame.dir;
         let per_body: Vec<Vec<OccItem>> = bodies
             .par_iter()
@@ -415,11 +497,24 @@ impl<'a> Occluders<'a> {
             .collect();
         let items: Vec<_> = per_body.into_iter().flatten().collect();
         let (lo, hi) = bounds(items.iter().flat_map(|it| [it.3, it.4]));
-        let mut grid = Grid::new(if items.is_empty() { P2::origin() } else { lo }, if items.is_empty() { P2::origin() } else { hi }, items.len());
+        let mut grid = Grid::new(
+            if items.is_empty() { P2::origin() } else { lo },
+            if items.is_empty() { P2::origin() } else { hi },
+            items.len(),
+        );
         for (k, it) in items.iter().enumerate() {
             grid.insert(k as u32, it.3, it.4);
         }
-        Self { items, bodies, grid, doms, dir, frame: *frame, skin_tri: 2.0 * defl + tol, skin_own: 20.0 * defl + tol }
+        Self {
+            items,
+            bodies,
+            grid,
+            doms,
+            dir,
+            frame: *frame,
+            skin_tri: 2.0 * defl + tol,
+            skin_own: 20.0 * defl + tol,
+        }
     }
 
     /// Whether a ray from `p` (on body `body`'s faces `own`) towards the eye leaves without
@@ -445,10 +540,14 @@ impl<'a> Occluders<'a> {
                         if t > 1e-5 && dom.contains(u, v, false) {
                             // Through an edge of two faces, having crossed material on the way
                             // (a hole's wall grazed lengthwise is not material).
-                            if rim.iter().any(|&(t2, b2, f2)| (t2 - t).abs() < tol::POINT && (b2, f2) != (*bi, *fi)) {
+                            if rim.iter().any(|&(t2, b2, f2)| {
+                                (t2 - t).abs() < tol::POINT && (b2, f2) != (*bi, *fi)
+                            }) {
                                 let hb = &self.bodies[*bi];
                                 let mid = p + rd * (0.5 * t);
-                                if super::classify::classify_point(hb.body, hb.polys, &mid, 1e-7) == crate::PointClass::Inside {
+                                if super::classify::classify_point(hb.body, hb.polys, &mid, 1e-7)
+                                    == crate::PointClass::Inside
+                                {
                                     return false;
                                 }
                             }
@@ -457,7 +556,11 @@ impl<'a> Occluders<'a> {
                     }
                 }
                 Occ::Tri(t) => {
-                    let skin = if *bi == body && own.contains(fi) { self.skin_own } else { self.skin_tri };
+                    let skin = if *bi == body && own.contains(fi) {
+                        self.skin_own
+                    } else {
+                        self.skin_tri
+                    };
                     let (e1, e2) = (t[1] - t[0], t[2] - t[0]);
                     let h = rd.cross(&e2);
                     let det = e1.dot(&h);
@@ -538,22 +641,35 @@ fn refine(frame: &ViewFrame, a: &Src, ta: f64, b: &Src, tb: f64) -> Option<(f64,
         tb += db;
     }
     let f = frame.to_2d(&a.point(ta)) - frame.to_2d(&b.point(tb));
-    (f.norm() < tol::ROUNDOFF && ta >= a.t.0 && ta <= a.t.1 && tb >= b.t.0 && tb <= b.t.1).then_some((ta, tb))
+    (f.norm() < tol::ROUNDOFF && ta >= a.t.0 && ta <= a.t.1 && tb >= b.t.0 && tb <= b.t.1)
+        .then_some((ta, tb))
 }
 
 /// The split parameters of every line where it meets another in 2D.
 fn crossings(frame: &ViewFrame, srcs: &[Src]) -> Vec<Vec<f64>> {
-    let segs: Vec<(u32, u32)> = srcs.iter().enumerate().flat_map(|(s, src)| (0..src.p2.len() - 1).map(move |k| (s as u32, k as u32))).collect();
+    let segs: Vec<(u32, u32)> = srcs
+        .iter()
+        .enumerate()
+        .flat_map(|(s, src)| (0..src.p2.len() - 1).map(move |k| (s as u32, k as u32)))
+        .collect();
     let mut out = vec![Vec::new(); srcs.len()];
     if segs.is_empty() {
         return out;
     }
-    let seg = |&(s, k): &(u32, u32)| (srcs[s as usize].p2[k as usize], srcs[s as usize].p2[k as usize + 1]);
-    let boxes: Vec<(P2, P2)> = segs.iter().map(|sk| {
-        let (a, b) = seg(sk);
-        let g = V2::repeat(EPS2);
-        (a.inf(&b) - g, a.sup(&b) + g)
-    }).collect();
+    let seg = |&(s, k): &(u32, u32)| {
+        (
+            srcs[s as usize].p2[k as usize],
+            srcs[s as usize].p2[k as usize + 1],
+        )
+    };
+    let boxes: Vec<(P2, P2)> = segs
+        .iter()
+        .map(|sk| {
+            let (a, b) = seg(sk);
+            let g = V2::repeat(EPS2);
+            (a.inf(&b) - g, a.sup(&b) + g)
+        })
+        .collect();
     let (lo, hi) = bounds(boxes.iter().flat_map(|b| [b.0, b.1]));
     let mut grid = Grid::new(lo, hi, segs.len());
     for (k, b) in boxes.iter().enumerate() {
@@ -596,8 +712,11 @@ fn crossings(frame: &ViewFrame, srcs: &[Src]) -> Vec<Vec<f64>> {
                         let mut ta = fa.map(|f| param(si, ki, f));
                         let mut tb = fb.map(|f| param(sj, kj, f));
                         if let (true, Some(x), Some(y)) = (proper, ta, tb) {
-                            let both_lines = matches!((a.shape, b.shape), (Shape::Line, Shape::Line));
-                            if a.is_exact() && b.is_exact() && !both_lines
+                            let both_lines =
+                                matches!((a.shape, b.shape), (Shape::Line, Shape::Line));
+                            if a.is_exact()
+                                && b.is_exact()
+                                && !both_lines
                                 && let Some((x, y)) = refine(frame, a, x, b, y)
                             {
                                 ta = Some(x);
@@ -633,7 +752,14 @@ struct Piece {
 }
 
 /// Splits a piece where its visibility changes (tested at three points, then bisected).
-fn piece_visibility(frame: &ViewFrame, occ: &Occluders, src: &Src, a: f64, b: f64, tol: f64) -> Vec<(f64, f64, bool)> {
+fn piece_visibility(
+    frame: &ViewFrame,
+    occ: &Occluders,
+    src: &Src,
+    a: f64,
+    b: f64,
+    tol: f64,
+) -> Vec<(f64, f64, bool)> {
     let vis = |t: f64| occ.visible(&src.point(t), src.body, &src.own);
     let at = |f: f64| a + (b - a) * f;
     let len = (frame.to_2d(&src.point(a)) - frame.to_2d(&src.point(b))).norm();
@@ -670,12 +796,25 @@ fn piece_visibility(frame: &ViewFrame, occ: &Occluders, src: &Src, a: f64, b: f6
 pub fn project(bodies: &[HlrBody], frame: &ViewFrame, opts: &ProjectOptions) -> Projection {
     let tol = opts.tolerance.max(1e-4);
     let defl = (2.0 * tol).clamp(0.005, 0.05);
-    let doms: Vec<Vec<Domain>> = bodies.iter().map(|hb| hb.body.faces.iter().zip(hb.polys).map(|(f, p)| Domain::new(&f.surf, p)).collect()).collect();
+    let doms: Vec<Vec<Domain>> = bodies
+        .iter()
+        .map(|hb| {
+            hb.body
+                .faces
+                .iter()
+                .zip(hb.polys)
+                .map(|(f, p)| Domain::new(&f.surf, p))
+                .collect()
+        })
+        .collect();
     // The lines: edges and outlines.
     let mut srcs: Vec<Src> = Vec::new();
     for (bi, hb) in bodies.iter().enumerate() {
         srcs.extend(edge_srcs(frame, hb.body, bi, tol));
-        let outl: Vec<Src> = (0..hb.body.faces.len()).into_par_iter().flat_map_iter(|fi| face_outlines(frame, bi, fi, &doms[bi][fi], tol)).collect();
+        let outl: Vec<Src> = (0..hb.body.faces.len())
+            .into_par_iter()
+            .flat_map_iter(|fi| face_outlines(frame, bi, fi, &doms[bi][fi], tol))
+            .collect();
         srcs.extend(outl);
     }
     if srcs.is_empty() {
@@ -690,7 +829,11 @@ pub fn project(bodies: &[HlrBody], frame: &ViewFrame, opts: &ProjectOptions) -> 
         .zip(splits)
         .enumerate()
         .flat_map_iter(|(si, (s, mut sp))| {
-            let mut cuts: Vec<(f64, bool)> = sp.drain(..).map(|t| (t, false)).chain(s.turns.iter().map(|&t| (t, true))).collect();
+            let mut cuts: Vec<(f64, bool)> = sp
+                .drain(..)
+                .map(|t| (t, false))
+                .chain(s.turns.iter().map(|&t| (t, true)))
+                .collect();
             cuts.sort_by(|a, b| a.0.total_cmp(&b.0));
             let mut bps: Vec<(f64, bool)> = vec![(s.t.0, false)];
             let end = p2(s, s.t.1);
@@ -713,7 +856,13 @@ pub fn project(bodies: &[HlrBody], frame: &ViewFrame, opts: &ProjectOptions) -> 
                 let parts = piece_visibility(frame, &occ, s, w[0].0, w[1].0, tol);
                 let n = parts.len();
                 for (k, (a, b, visible)) in parts.into_iter().enumerate() {
-                    out.push(Piece { src: si, a, b, visible, turn_end: k + 1 == n && w[1].1 });
+                    out.push(Piece {
+                        src: si,
+                        a,
+                        b,
+                        visible,
+                        turn_end: k + 1 == n && w[1].1,
+                    });
                 }
             }
             out
@@ -726,17 +875,28 @@ pub fn project(bodies: &[HlrBody], frame: &ViewFrame, opts: &ProjectOptions) -> 
             let s = &srcs[pc.src];
             let ts = s.params(pc.a, pc.b, tol);
             let pts: Vec<P3> = ts.iter().map(|&t| s.point(t)).collect();
-            (pts.iter().map(|p| frame.to_2d(p)).collect(), pts.iter().map(|p| frame.depth(p)).collect())
+            (
+                pts.iter().map(|p| frame.to_2d(p)).collect(),
+                pts.iter().map(|p| frame.depth(p)).collect(),
+            )
         })
         .collect();
     let cov = 2.0 * tol + tol::POINT;
-    let segs: Vec<(u32, u32)> = polys.iter().enumerate().flat_map(|(i, (p, _))| (0..p.len() - 1).map(move |k| (i as u32, k as u32))).collect();
+    let segs: Vec<(u32, u32)> = polys
+        .iter()
+        .enumerate()
+        .flat_map(|(i, (p, _))| (0..p.len() - 1).map(move |k| (i as u32, k as u32)))
+        .collect();
     let (lo, hi) = bounds(polys.iter().flat_map(|(p, _)| p.iter().copied()));
     let mut grid = Grid::new(lo - V2::repeat(cov), hi + V2::repeat(cov), segs.len());
     for (k, &(i, j)) in segs.iter().enumerate() {
         let p = &polys[i as usize].0;
         let (a, b) = (p[j as usize], p[j as usize + 1]);
-        grid.insert(k as u32, a.inf(&b) - V2::repeat(cov), a.sup(&b) + V2::repeat(cov));
+        grid.insert(
+            k as u32,
+            a.inf(&b) - V2::repeat(cov),
+            a.sup(&b) + V2::repeat(cov),
+        );
     }
     let rank = |c: ProjClass| u8::from(c == ProjClass::Outline);
     // A piece lying along a visible one (hidden), or along a nearer one of its own visibility.
@@ -806,7 +966,12 @@ pub fn project(bodies: &[HlrBody], frame: &ViewFrame, opts: &ProjectOptions) -> 
         while k < pieces.len() && pieces[k].src == si {
             let pc = &pieces[k];
             if !dropped[k] {
-                let joins = prev.is_some_and(|p| !dropped[p] && pieces[p].visible == pc.visible && !pieces[p].turn_end && k == p + 1);
+                let joins = prev.is_some_and(|p| {
+                    !dropped[p]
+                        && pieces[p].visible == pc.visible
+                        && !pieces[p].turn_end
+                        && k == p + 1
+                });
                 match runs.last_mut().filter(|_| joins) {
                     Some(run) => run.2 = pc.b,
                     None => runs.push((si, pc.a, pc.b, pc.visible, false)),
@@ -838,11 +1003,25 @@ pub fn project(bodies: &[HlrBody], frame: &ViewFrame, opts: &ProjectOptions) -> 
             let (start, end) = (points[0], points[points.len() - 1]);
             let (curve, points) = match s.shape {
                 Shape::Line => (ProjCurve::Line { start, end }, vec![start, end]),
-                Shape::Arc { center, radius } => (ProjCurve::Arc { center, radius, start, mid: p2(s, 0.5 * (a + b)), end, full }, points),
+                Shape::Arc { center, radius } => (
+                    ProjCurve::Arc {
+                        center,
+                        radius,
+                        start,
+                        mid: p2(s, 0.5 * (a + b)),
+                        end,
+                        full,
+                    },
+                    points,
+                ),
                 Shape::Other => (ProjCurve::Polyline, points),
             };
             ProjEdge {
-                visibility: if visible { ProjVisibility::Visible } else { ProjVisibility::Hidden },
+                visibility: if visible {
+                    ProjVisibility::Visible
+                } else {
+                    ProjVisibility::Hidden
+                },
                 class: s.class,
                 curve,
                 points,
@@ -866,12 +1045,35 @@ mod tests {
     use std::f64::consts::{PI, TAU};
 
     fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Loop {
-        let p = [Point2::new(x0, y0), Point2::new(x1, y0), Point2::new(x1, y1), Point2::new(x0, y1)];
-        Loop { curves: (0..4).map(|i| Curve2::Line { a: p[i], b: p[(i + 1) % 4], source: None }).collect() }
+        let p = [
+            Point2::new(x0, y0),
+            Point2::new(x1, y0),
+            Point2::new(x1, y1),
+            Point2::new(x0, y1),
+        ];
+        Loop {
+            curves: (0..4)
+                .map(|i| Curve2::Line {
+                    a: p[i],
+                    b: p[(i + 1) % 4],
+                    source: None,
+                })
+                .collect(),
+        }
     }
 
     fn extrude(k: &mut dyn Kernel, outer: Loop, z0: f64, h: f64) -> BodyId {
-        let profile = Profile::new(Plane { origin: Point3::new(0.0, 0.0, z0), ..Plane::top() }, vec![Region { outer, holes: vec![], source: None }]);
+        let profile = Profile::new(
+            Plane {
+                origin: Point3::new(0.0, 0.0, z0),
+                ..Plane::top()
+            },
+            vec![Region {
+                outer,
+                holes: vec![],
+                source: None,
+            }],
+        );
         k.extrude(&profile, Extent::Blind(h)).unwrap().bodies[0]
     }
 
@@ -887,9 +1089,21 @@ mod tests {
     fn box_from_the_front() {
         let mut k = native::NativeKernel::new();
         let b = extrude(&mut k, rect(0.0, 0.0, 10.0, 20.0), 0.0, 30.0);
-        let p = k.project(&[b], &front(), &ProjectOptions::default()).unwrap();
-        assert_eq!(count(&p, ProjVisibility::Visible, ProjClass::Sharp), 4, "{p:#?}");
-        assert!(p.edges.iter().all(|e| e.visibility == ProjVisibility::Visible && matches!(e.curve, ProjCurve::Line { .. })), "{p:#?}");
+        let p = k
+            .project(&[b], &front(), &ProjectOptions::default())
+            .unwrap();
+        assert_eq!(
+            count(&p, ProjVisibility::Visible, ProjClass::Sharp),
+            4,
+            "{p:#?}"
+        );
+        assert!(
+            p.edges
+                .iter()
+                .all(|e| e.visibility == ProjVisibility::Visible
+                    && matches!(e.curve, ProjCurve::Line { .. })),
+            "{p:#?}"
+        );
         let len: f64 = p.edges.iter().map(|e| e.length()).sum();
         assert!((len - 80.0).abs() < 1e-9, "{len}");
         // Each visible edge is one of the front face's (y = 0).
@@ -903,14 +1117,25 @@ mod tests {
     #[test]
     fn cylinder_from_the_side() {
         let mut k = native::NativeKernel::new();
-        let disc = Loop { curves: vec![Curve2::Circle { center: Point2::new(0.0, 0.0), radius: 5.0, source: None }] };
+        let disc = Loop {
+            curves: vec![Curve2::Circle {
+                center: Point2::new(0.0, 0.0),
+                radius: 5.0,
+                source: None,
+            }],
+        };
         let c = extrude(&mut k, disc, 0.0, 20.0);
-        let p = k.project(&[c], &front(), &ProjectOptions::default()).unwrap();
+        let p = k
+            .project(&[c], &front(), &ProjectOptions::default())
+            .unwrap();
         let outlines: Vec<&ProjEdge> = p.of(ProjVisibility::Visible, ProjClass::Outline).collect();
         assert_eq!(outlines.len(), 2, "{p:#?}");
         let mut xs: Vec<f64> = outlines.iter().map(|e| e.points[0].x).collect();
         xs.sort_by(f64::total_cmp);
-        assert!((xs[0] + 5.0).abs() < 1e-9 && (xs[1] - 5.0).abs() < 1e-9, "{xs:?}");
+        assert!(
+            (xs[0] + 5.0).abs() < 1e-9 && (xs[1] - 5.0).abs() < 1e-9,
+            "{xs:?}"
+        );
         for e in &outlines {
             assert!((e.length() - 20.0).abs() < 1e-9);
             assert!(e.source.unwrap().face.is_some());
@@ -922,11 +1147,25 @@ mod tests {
             assert!(matches!(e.curve, ProjCurve::Line { .. }));
             assert!((e.length() - 10.0).abs() < 1e-6, "{}", e.length());
         }
-        assert!(!p.edges.iter().any(|e| e.visibility == ProjVisibility::Hidden), "{p:#?}");
+        assert!(
+            !p.edges
+                .iter()
+                .any(|e| e.visibility == ProjVisibility::Hidden),
+            "{p:#?}"
+        );
         // From above: one full circle, no outline.
-        let top = k.project(&[c], &ViewFrame::new(-Vector3::z(), Vector3::x()), &ProjectOptions::default()).unwrap();
+        let top = k
+            .project(
+                &[c],
+                &ViewFrame::new(-Vector3::z(), Vector3::x()),
+                &ProjectOptions::default(),
+            )
+            .unwrap();
         assert_eq!(top.edges.len(), 1, "{top:#?}");
-        assert!(matches!(top.edges[0].curve, ProjCurve::Arc { full: true, .. }));
+        assert!(matches!(
+            top.edges[0].curve,
+            ProjCurve::Arc { full: true, .. }
+        ));
     }
 
     #[test]
@@ -934,25 +1173,58 @@ mod tests {
         let mut k = native::NativeKernel::new();
         let near = extrude(&mut k, rect(0.0, 0.0, 20.0, 20.0), 0.0, 20.0);
         let far = extrude(&mut k, rect(5.0, 30.0, 15.0, 40.0), 5.0, 10.0);
-        let p = k.project(&[near, far], &front(), &ProjectOptions::default()).unwrap();
-        let of = |b: usize, v: ProjVisibility| p.edges.iter().filter(|e| e.visibility == v && e.source.unwrap().body == b).count();
+        let p = k
+            .project(&[near, far], &front(), &ProjectOptions::default())
+            .unwrap();
+        let of = |b: usize, v: ProjVisibility| {
+            p.edges
+                .iter()
+                .filter(|e| e.visibility == v && e.source.unwrap().body == b)
+                .count()
+        };
         assert_eq!(of(1, ProjVisibility::Visible), 0, "{p:#?}");
         // Its front square (the back one lies right behind it).
         assert_eq!(of(1, ProjVisibility::Hidden), 4, "{p:#?}");
         assert_eq!(of(0, ProjVisibility::Visible), 4, "{p:#?}");
         // Seen from behind, the small box is in front and nothing of the big one is hidden.
-        let back = k.project(&[near, far], &ViewFrame::new(-Vector3::y(), -Vector3::x()), &ProjectOptions::default()).unwrap();
-        assert_eq!(back.edges.iter().filter(|e| e.visibility == ProjVisibility::Visible && e.source.unwrap().body == 1).count(), 4, "{back:#?}");
-        assert!(!back.edges.iter().any(|e| e.visibility == ProjVisibility::Hidden && e.source.unwrap().body == 0), "{back:#?}");
+        let back = k
+            .project(
+                &[near, far],
+                &ViewFrame::new(-Vector3::y(), -Vector3::x()),
+                &ProjectOptions::default(),
+            )
+            .unwrap();
+        assert_eq!(
+            back.edges
+                .iter()
+                .filter(|e| e.visibility == ProjVisibility::Visible && e.source.unwrap().body == 1)
+                .count(),
+            4,
+            "{back:#?}"
+        );
+        assert!(
+            !back
+                .edges
+                .iter()
+                .any(|e| e.visibility == ProjVisibility::Hidden && e.source.unwrap().body == 0),
+            "{back:#?}"
+        );
     }
 
     /// The XZ plane (in-plane y along +Z).
     fn xz() -> Plane {
-        Plane { origin: Point3::origin(), x_dir: Vector3::x_axis(), normal: -Vector3::y_axis() }
+        Plane {
+            origin: Point3::origin(),
+            x_dir: Vector3::x_axis(),
+            normal: -Vector3::y_axis(),
+        }
     }
 
     fn z_axis() -> Axis {
-        Axis { origin: Point3::origin(), dir: Vector3::z_axis() }
+        Axis {
+            origin: Point3::origin(),
+            dir: Vector3::z_axis(),
+        }
     }
 
     #[test]
@@ -961,33 +1233,106 @@ mod tests {
         // A ball of radius 6: a half disc turned about Z. Its outline from anywhere is a circle.
         let half = Loop {
             curves: vec![
-                Curve2::Arc { center: Point2::new(0.0, 0.0), radius: 6.0, start_angle: -PI / 2.0, sweep: PI, source: None },
-                Curve2::Line { a: Point2::new(0.0, 6.0), b: Point2::new(0.0, -6.0), source: None },
+                Curve2::Arc {
+                    center: Point2::new(0.0, 0.0),
+                    radius: 6.0,
+                    start_angle: -PI / 2.0,
+                    sweep: PI,
+                    source: None,
+                },
+                Curve2::Line {
+                    a: Point2::new(0.0, 6.0),
+                    b: Point2::new(0.0, -6.0),
+                    source: None,
+                },
             ],
         };
-        let ball = k.revolve(&Profile::new(xz(), vec![Region { outer: half, holes: vec![], source: None }]), z_axis(), TAU).unwrap().bodies[0];
+        let ball = k
+            .revolve(
+                &Profile::new(
+                    xz(),
+                    vec![Region {
+                        outer: half,
+                        holes: vec![],
+                        source: None,
+                    }],
+                ),
+                z_axis(),
+                TAU,
+            )
+            .unwrap()
+            .bodies[0];
         let view = ViewFrame::new(Vector3::new(1.0, 2.0, -0.5), Vector3::z());
-        let p = k.project(&[ball], &view, &ProjectOptions::default()).unwrap();
+        let p = k
+            .project(&[ball], &view, &ProjectOptions::default())
+            .unwrap();
         let arcs: Vec<&ProjEdge> = p.of(ProjVisibility::Visible, ProjClass::Outline).collect();
         let len: f64 = arcs.iter().map(|e| e.length()).sum();
         assert!((len - TAU * 6.0).abs() < 0.05, "{len} {p:#?}");
         for e in &arcs {
-            let ProjCurve::Arc { radius, center, .. } = e.curve else { panic!("{e:?}") };
+            let ProjCurve::Arc { radius, center, .. } = e.curve else {
+                panic!("{e:?}")
+            };
             assert!((radius - 6.0).abs() < 1e-9 && center.coords.norm() < 1e-9);
         }
         // A torus R10 r3 from the front: its outline spans x −13..13, z −3..3.
-        let ring = Loop { curves: vec![Curve2::Circle { center: Point2::new(10.0, 0.0), radius: 3.0, source: None }] };
-        let torus = k.revolve(&Profile::new(xz(), vec![Region { outer: ring, holes: vec![], source: None }]), z_axis(), TAU).unwrap().bodies[0];
-        let p = k.project(&[torus], &front(), &ProjectOptions::default()).unwrap();
-        assert!(p.of(ProjVisibility::Visible, ProjClass::Outline).count() > 0, "{p:#?}");
+        let ring = Loop {
+            curves: vec![Curve2::Circle {
+                center: Point2::new(10.0, 0.0),
+                radius: 3.0,
+                source: None,
+            }],
+        };
+        let torus = k
+            .revolve(
+                &Profile::new(
+                    xz(),
+                    vec![Region {
+                        outer: ring,
+                        holes: vec![],
+                        source: None,
+                    }],
+                ),
+                z_axis(),
+                TAU,
+            )
+            .unwrap()
+            .bodies[0];
+        let p = k
+            .project(&[torus], &front(), &ProjectOptions::default())
+            .unwrap();
+        assert!(
+            p.of(ProjVisibility::Visible, ProjClass::Outline).count() > 0,
+            "{p:#?}"
+        );
         let (lo, hi) = p.bounds().unwrap();
-        assert!((lo.x + 13.0).abs() < 0.02 && (hi.x - 13.0).abs() < 0.02, "{lo} {hi}");
-        assert!((lo.y + 3.0).abs() < 0.02 && (hi.y - 3.0).abs() < 0.02, "{lo} {hi}");
+        assert!(
+            (lo.x + 13.0).abs() < 0.02 && (hi.x - 13.0).abs() < 0.02,
+            "{lo} {hi}"
+        );
+        assert!(
+            (lo.y + 3.0).abs() < 0.02 && (hi.y - 3.0).abs() < 0.02,
+            "{lo} {hi}"
+        );
         // From above: the outer and inner circles (r 13 and 7) are outlines.
-        let p = k.project(&[torus], &ViewFrame::new(-Vector3::z(), Vector3::x()), &ProjectOptions::default()).unwrap();
+        let p = k
+            .project(
+                &[torus],
+                &ViewFrame::new(-Vector3::z(), Vector3::x()),
+                &ProjectOptions::default(),
+            )
+            .unwrap();
         let (lo, hi) = p.bounds().unwrap();
-        assert!((hi.x - 13.0).abs() < 0.02 && (lo.y + 13.0).abs() < 0.02, "{lo} {hi}");
-        assert!(!p.edges.iter().any(|e| e.visibility == ProjVisibility::Hidden), "{p:#?}");
+        assert!(
+            (hi.x - 13.0).abs() < 0.02 && (lo.y + 13.0).abs() < 0.02,
+            "{lo} {hi}"
+        );
+        assert!(
+            !p.edges
+                .iter()
+                .any(|e| e.visibility == ProjVisibility::Hidden),
+            "{p:#?}"
+        );
     }
 
     /// Regressions from SMLib's silhouette models: a sphere whose loop is only slits (a seam
@@ -998,29 +1343,65 @@ mod tests {
     #[test]
     fn smlib_sphere_and_torus_outlines() {
         let read = |bytes: &[u8]| native::smb::read_brep(bytes).unwrap().body;
-        let sphere = read(include_bytes!("../../tests/data/smlib/silhouette/sphere.smb"));
+        let sphere = read(include_bytes!(
+            "../../tests/data/smlib/silhouette/sphere.smb"
+        ));
         let mut k = native::NativeKernel::new();
         let s = k.insert(sphere);
-        for d in [Vector3::x(), Vector3::y(), Vector3::z(), Vector3::new(1.0, 1.0, 1.0)] {
-            let p = k.project(&[s], &ViewFrame::new(d, native::math::any_perpendicular(&d)), &ProjectOptions::default()).unwrap();
+        for d in [
+            Vector3::x(),
+            Vector3::y(),
+            Vector3::z(),
+            Vector3::new(1.0, 1.0, 1.0),
+        ] {
+            let p = k
+                .project(
+                    &[s],
+                    &ViewFrame::new(d, native::math::any_perpendicular(&d)),
+                    &ProjectOptions::default(),
+                )
+                .unwrap();
             // The visible lines on the outline circle (r 5 about the centre): all of it.
             let on_circle: f64 = p
                 .edges
                 .iter()
-                .filter(|e| e.visibility == ProjVisibility::Visible && e.points.iter().all(|q| (q.coords.norm() - 5.0).abs() < 0.02))
+                .filter(|e| {
+                    e.visibility == ProjVisibility::Visible
+                        && e.points
+                            .iter()
+                            .all(|q| (q.coords.norm() - 5.0).abs() < 0.02)
+                })
                 .map(|e| e.length())
                 .sum();
-            assert!((on_circle - TAU * 5.0).abs() < 0.05, "{d:?}: {on_circle} {p:#?}");
-            assert!(p.of(ProjVisibility::Visible, ProjClass::Outline).count() > 0, "{d:?}");
+            assert!(
+                (on_circle - TAU * 5.0).abs() < 0.05,
+                "{d:?}: {on_circle} {p:#?}"
+            );
+            assert!(
+                p.of(ProjVisibility::Visible, ProjClass::Outline).count() > 0,
+                "{d:?}"
+            );
         }
         // The B-spline torus R 10 r 5 from the front: the outer half meridians and the top and
         // bottom lines (2·5π + 2·20) visible, the inner half meridians hidden.
-        let torus = read(include_bytes!("../../tests/data/smlib/silhouette/torus.smb"));
+        let torus = read(include_bytes!(
+            "../../tests/data/smlib/silhouette/torus.smb"
+        ));
         let t = k.insert(torus);
-        let p = k.project(&[t], &front(), &ProjectOptions::default()).unwrap();
+        let p = k
+            .project(&[t], &front(), &ProjectOptions::default())
+            .unwrap();
         let len = |v: ProjVisibility| p.of(v, ProjClass::Outline).map(|e| e.length()).sum::<f64>();
-        assert!((len(ProjVisibility::Visible) - (10.0 * PI + 40.0)).abs() < 0.05, "{} {p:#?}", len(ProjVisibility::Visible));
-        assert!((len(ProjVisibility::Hidden) - 10.0 * PI).abs() < 0.05, "{}", len(ProjVisibility::Hidden));
+        assert!(
+            (len(ProjVisibility::Visible) - (10.0 * PI + 40.0)).abs() < 0.05,
+            "{} {p:#?}",
+            len(ProjVisibility::Visible)
+        );
+        assert!(
+            (len(ProjVisibility::Hidden) - 10.0 * PI).abs() < 0.05,
+            "{}",
+            len(ProjVisibility::Hidden)
+        );
     }
 
     /// A 10 × 10 grid of holes in a plate, seen from the front and from a corner.
@@ -1028,18 +1409,52 @@ mod tests {
     fn many_holes_quickly() {
         let mut k = native::NativeKernel::new();
         let holes: Vec<Loop> = (0..100)
-            .map(|i| Loop { curves: vec![Curve2::Circle { center: Point2::new(5.0 + 10.0 * (i % 10) as f64, 5.0 + 10.0 * (i / 10) as f64), radius: 3.0, source: None }] })
+            .map(|i| Loop {
+                curves: vec![Curve2::Circle {
+                    center: Point2::new(5.0 + 10.0 * (i % 10) as f64, 5.0 + 10.0 * (i / 10) as f64),
+                    radius: 3.0,
+                    source: None,
+                }],
+            })
             .collect();
-        let profile = Profile::new(Plane::top(), vec![Region { outer: rect(0.0, 0.0, 100.0, 100.0), holes, source: None }]);
+        let profile = Profile::new(
+            Plane::top(),
+            vec![Region {
+                outer: rect(0.0, 0.0, 100.0, 100.0),
+                holes,
+                source: None,
+            }],
+        );
         let b = k.extrude(&profile, Extent::Blind(10.0)).unwrap().bodies[0];
         let t = std::time::Instant::now();
-        let p = k.project(&[b], &front(), &ProjectOptions::default()).unwrap();
-        let iso = k.project(&[b], &ViewFrame::new(Vector3::new(-1.0, 1.0, -1.0), Vector3::new(1.0, 1.0, 0.0)), &ProjectOptions::default()).unwrap();
+        let p = k
+            .project(&[b], &front(), &ProjectOptions::default())
+            .unwrap();
+        let iso = k
+            .project(
+                &[b],
+                &ViewFrame::new(Vector3::new(-1.0, 1.0, -1.0), Vector3::new(1.0, 1.0, 0.0)),
+                &ProjectOptions::default(),
+            )
+            .unwrap();
         let dt = t.elapsed();
-        eprintln!("100 holes: {} + {} edges in {dt:?}", p.edges.len(), iso.edges.len());
+        eprintln!(
+            "100 holes: {} + {} edges in {dt:?}",
+            p.edges.len(),
+            iso.edges.len()
+        );
         // Front: 10 columns of hidden hole sides (two each), the plate's outline visible.
-        assert_eq!(p.of(ProjVisibility::Hidden, ProjClass::Outline).count(), 20, "{p:#?}");
-        let len: f64 = p.edges.iter().filter(|e| e.visibility == ProjVisibility::Visible).map(|e| e.length()).sum();
+        assert_eq!(
+            p.of(ProjVisibility::Hidden, ProjClass::Outline).count(),
+            20,
+            "{p:#?}"
+        );
+        let len: f64 = p
+            .edges
+            .iter()
+            .filter(|e| e.visibility == ProjVisibility::Visible)
+            .map(|e| e.length())
+            .sum();
         assert!((len - 220.0).abs() < 1e-6, "{len}");
         assert!(dt.as_secs_f64() < 5.0, "{dt:?}");
     }

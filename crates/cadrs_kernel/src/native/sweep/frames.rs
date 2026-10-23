@@ -7,17 +7,17 @@
 //! so they are exactly the side surfaces' boundary iso-curves. The generic sweep builder
 //! assembles the faces and caps.
 
+use super::path::Seg;
+use super::{Frames, SideGeo, SweepKind};
 use crate::native::build::Built;
 use crate::native::curve::Curve;
 use crate::native::math::*;
-use crate::native::nurbs::{NurbsCurve, NurbsSurface, H};
+use crate::native::nurbs::{H, NurbsCurve, NurbsSurface};
 use crate::native::profile::{MergedFace, Piece};
 use crate::native::surface::Surface;
-use super::{Frames, SideGeo, SweepKind};
-use super::path::Seg;
+use crate::native::tol;
 use crate::*;
 use std::sync::Arc;
-use crate::native::tol;
 
 /// Rotation-minimizing steps per segment (the frames between them are interpolated).
 const FINE: usize = 256;
@@ -75,7 +75,13 @@ struct ExactFrames {
 
 impl ExactFrames {
     /// The frame at s (point `p` of the path there, after fine step `i`) relative to the start's.
-    fn frame(&self, sweep: &PathSweep, i: usize, p: &P3, s: f64) -> Option<nalgebra::Rotation3<f64>> {
+    fn frame(
+        &self,
+        sweep: &PathSweep,
+        i: usize,
+        p: &P3,
+        s: f64,
+    ) -> Option<nalgebra::Rotation3<f64>> {
         let t = sweep.dir(s);
         let r = match self.lock {
             Some(d) => d - t * d.dot(&t),
@@ -93,7 +99,11 @@ impl ExactFrames {
                     let tl = t0 - v1 * (2.0 / c1) * v1.dot(&t0);
                     let v2 = t - tl;
                     let c2 = v2.norm_squared();
-                    if c2 < 1e-24 { rl } else { rl - v2 * (2.0 / c2) * v2.dot(&rl) }
+                    if c2 < 1e-24 {
+                        rl
+                    } else {
+                        rl - v2 * (2.0 / c2) * v2.dot(&rl)
+                    }
                 }
             }
         };
@@ -131,13 +141,21 @@ impl Helix {
     fn angle_of(&self, p: &P3, near: f64) -> f64 {
         let w = p - self.o;
         let a = w.dot(&self.e2).atan2(w.dot(&self.e1));
-        let guess = if self.c.abs() > tol::DEGENERATE { w.dot(&self.a) / self.c } else { near };
+        let guess = if self.c.abs() > tol::DEGENERATE {
+            w.dot(&self.a) / self.c
+        } else {
+            near
+        };
         a + ((guess - a) / TAU).round() * TAU
     }
     /// The screw motion that turns the helix by `phi` along itself.
     fn screw(&self, phi: f64) -> Affine {
-        let m = nalgebra::Rotation3::from_axis_angle(&nalgebra::Unit::new_normalize(self.a), phi).into_inner();
-        Affine { m, t: self.o.coords - m * self.o.coords + self.a * (self.c * phi) }
+        let m = nalgebra::Rotation3::from_axis_angle(&nalgebra::Unit::new_normalize(self.a), phi)
+            .into_inner();
+        Affine {
+            m,
+            t: self.o.coords - m * self.o.coords + self.a * (self.c * phi),
+        }
     }
 }
 
@@ -178,10 +196,18 @@ fn fit_helix(pts: &[P3], tans: &[V3], tol: f64) -> Option<Helix> {
         m += d * d.transpose();
     }
     let eig = m.symmetric_eigen();
-    let k = (0..3).min_by(|&x, &y| eig.eigenvalues[x].total_cmp(&eig.eigenvalues[y])).unwrap();
+    let k = (0..3)
+        .min_by(|&x, &y| eig.eigenvalues[x].total_cmp(&eig.eigenvalues[y]))
+        .unwrap();
     let mut a = eig.eigenvectors.column(k).into_owned().normalize();
     // The tangents must turn round it (not a straight line or a plane curve's single direction).
-    if eig.eigenvalues.iter().filter(|e| **e > tol::REL_POINT * n as f64).count() < 2 {
+    if eig
+        .eigenvalues
+        .iter()
+        .filter(|e| **e > tol::REL_POINT * n as f64)
+        .count()
+        < 2
+    {
         return None;
     }
     if mean.dot(&a) < 0.0 {
@@ -204,7 +230,15 @@ fn fit_helix(pts: &[P3], tans: &[V3], tol: f64) -> Option<Helix> {
         return None;
     }
     let o0 = P3::from(fr.x * cx + fr.y * cy);
-    let h0 = Helix { o: o0, a, e1: fr.x, e2: fr.y, r, c: 0.0, th0: 0.0 };
+    let h0 = Helix {
+        o: o0,
+        a,
+        e1: fr.x,
+        e2: fr.y,
+        r,
+        c: 0.0,
+        th0: 0.0,
+    };
     // Angles (unwrapped) and heights: z = c θ + z0 by least squares.
     let mut ths = Vec::with_capacity(n);
     let mut prev = h0.angle(&pts[0], 0.0);
@@ -213,7 +247,10 @@ fn fit_helix(pts: &[P3], tans: &[V3], tol: f64) -> Option<Helix> {
         ths.push(prev);
     }
     let zs: Vec<f64> = pts.iter().map(|p| (p - o0).dot(&a)).collect();
-    let (st, sz) = (ths.iter().sum::<f64>() / n as f64, zs.iter().sum::<f64>() / n as f64);
+    let (st, sz) = (
+        ths.iter().sum::<f64>() / n as f64,
+        zs.iter().sum::<f64>() / n as f64,
+    );
     let (mut num, mut den) = (0.0, 0.0);
     for (t, z) in ths.iter().zip(&zs) {
         num += (t - st) * (z - sz);
@@ -225,7 +262,15 @@ fn fit_helix(pts: &[P3], tans: &[V3], tol: f64) -> Option<Helix> {
     let c = num / den;
     let z0 = sz - c * st;
     let o = o0 + a * z0;
-    let h = Helix { o, a, e1: fr.x, e2: fr.y, r, c, th0: ths[0] };
+    let h = Helix {
+        o,
+        a,
+        e1: fr.x,
+        e2: fr.y,
+        r,
+        c,
+        th0: ths[0],
+    };
     for (p, t) in pts.iter().zip(&ths) {
         if (h.point(*t) - p).norm() > tol {
             return None;
@@ -237,7 +282,11 @@ fn fit_helix(pts: &[P3], tans: &[V3], tol: f64) -> Option<Helix> {
 fn frame_of(t: &V3, r: &V3) -> nalgebra::Rotation3<f64> {
     let t = t.normalize();
     let r = (r - t * r.dot(&t)).normalize();
-    nalgebra::Rotation3::from_matrix_unchecked(nalgebra::Matrix3::from_columns(&[t, r, t.cross(&r)]))
+    nalgebra::Rotation3::from_matrix_unchecked(nalgebra::Matrix3::from_columns(&[
+        t,
+        r,
+        t.cross(&r),
+    ]))
 }
 
 /// Any unit vector square to `t`.
@@ -247,26 +296,49 @@ fn square_to(t: &V3) -> V3 {
 }
 
 impl PathSweep {
-    pub fn new(plane: Plane, segs: &[Seg], frames: Frames, reach: f64, helix: Option<Helix>) -> Result<Self> {
+    pub fn new(
+        plane: Plane,
+        segs: &[Seg],
+        frames: Frames,
+        reach: f64,
+        helix: Option<Helix>,
+    ) -> Result<Self> {
         let control = frames.control();
         let any_spread = frames == Frames::Frenet;
         let arc: Vec<ArcTable> = segs.iter().map(ArcTable::new).collect();
         let lens: Vec<f64> = arc.iter().map(ArcTable::total).collect();
         let total: f64 = lens.iter().sum();
         let mut at = 0.0;
-        let mut cum: Vec<f64> = std::iter::once(0.0).chain(lens.iter().map(|l| {
-            at += l / total;
-            at
-        })).collect();
+        let mut cum: Vec<f64> = std::iter::once(0.0)
+            .chain(lens.iter().map(|l| {
+                at += l / total;
+                at
+            }))
+            .collect();
         if let Some(end) = cum.last_mut() {
             *end = 1.0;
         }
         let fine = FINE * segs.len();
-        let mut me = Self { plane, segs: segs.to_vec(), cum, arc, pts: vec![], rots: vec![], exact: None, v: vec![], deg: 3, reach, helix: None, angles: vec![] };
+        let mut me = Self {
+            plane,
+            segs: segs.to_vec(),
+            cum,
+            arc,
+            pts: vec![],
+            rots: vec![],
+            exact: None,
+            v: vec![],
+            deg: 3,
+            reach,
+            helix: None,
+            angles: vec![],
+        };
         let pts: Vec<P3> = (0..=fine).map(|i| me.at(i as f64 / fine as f64)).collect();
         let tans: Vec<V3> = (0..=fine).map(|i| me.dir(i as f64 / fine as f64)).collect();
         if tans.iter().any(|t| !t.iter().all(|x| x.is_finite())) {
-            return Err(KernelError::InvalidParameter("The sweep path has a point with no direction".into()));
+            return Err(KernelError::InvalidParameter(
+                "The sweep path has a point with no direction".into(),
+            ));
         }
         let mut frames: Vec<nalgebra::Rotation3<f64>> = Vec::with_capacity(fine + 1);
         // A helix (within its Bézier approximation): the exact screw motion, of the helix the
@@ -277,7 +349,12 @@ impl PathSweep {
                     let th0 = h.angle_of(&pts[0], h.th0);
                     if std::env::var("CADRS_SWEEP_DEBUG").is_ok() {
                         let end = &pts[fine];
-                        eprintln!("run of {} segments: th0 {th0} (end angle {}), start {:?}", segs.len(), h.angle_of(end, th0), pts[0]);
+                        eprintln!(
+                            "run of {} segments: th0 {th0} (end angle {}), start {:?}",
+                            segs.len(),
+                            h.angle_of(end, th0),
+                            pts[0]
+                        );
                     }
                     Some(Helix { th0, ..h })
                 }
@@ -309,16 +386,26 @@ impl PathSweep {
                 let mut prev = h.th0;
                 for p in &pts {
                     prev = h.angle(p, prev);
-                    frames.push(nalgebra::Rotation3::from_axis_angle(&nalgebra::Unit::new_normalize(h.a), prev - h.th0));
+                    frames.push(nalgebra::Rotation3::from_axis_angle(
+                        &nalgebra::Unit::new_normalize(h.a),
+                        prev - h.th0,
+                    ));
                 }
             }
             (SweepControl::KeepOrientation, _) => {}
             (SweepControl::LockDirection(d), _) => {
-                me.exact = Some(ExactFrames { lock: Some(d.into_inner()), refs: Vec::new(), tans: Vec::new(), start: nalgebra::Rotation3::identity() });
+                me.exact = Some(ExactFrames {
+                    lock: Some(d.into_inner()),
+                    refs: Vec::new(),
+                    tans: Vec::new(),
+                    start: nalgebra::Rotation3::identity(),
+                });
                 for t in &tans {
                     let r = d.into_inner() - t * d.dot(t);
                     if r.norm() < tol::ANGULAR {
-                        return Err(KernelError::InvalidParameter("The sweep path runs along the locked direction".into()));
+                        return Err(KernelError::InvalidParameter(
+                            "The sweep path runs along the locked direction".into(),
+                        ));
                     }
                     frames.push(frame_of(t, &r));
                 }
@@ -346,11 +433,23 @@ impl PathSweep {
                         let tl = tans[i] - v1 * (2.0 / c1) * v1.dot(&tans[i]);
                         let v2 = tans[i + 1] - tl;
                         let c2 = v2.norm_squared();
-                        r = if c2 < 1e-24 { rl } else { rl - v2 * (2.0 / c2) * v2.dot(&rl) };
+                        r = if c2 < 1e-24 {
+                            rl
+                        } else {
+                            rl - v2 * (2.0 / c2) * v2.dot(&rl)
+                        };
                         frames.push(frame_of(&tans[i + 1], &r));
                     }
-                    let refs = frames.iter().map(|f| f.matrix().column(1).into_owned()).collect();
-                    me.exact = Some(ExactFrames { lock: None, refs, tans: tans.clone(), start: nalgebra::Rotation3::identity() });
+                    let refs = frames
+                        .iter()
+                        .map(|f| f.matrix().column(1).into_owned())
+                        .collect();
+                    me.exact = Some(ExactFrames {
+                        lock: None,
+                        refs,
+                        tans: tans.clone(),
+                        start: nalgebra::Rotation3::identity(),
+                    });
                 }
             },
         }
@@ -361,7 +460,10 @@ impl PathSweep {
             if let Some(x) = me.exact.as_mut() {
                 x.start = f0;
             }
-            frames.iter().map(|f| nalgebra::UnitQuaternion::from_rotation_matrix(&(f * f0))).collect()
+            frames
+                .iter()
+                .map(|f| nalgebra::UnitQuaternion::from_rotation_matrix(&(f * f0)))
+                .collect()
         };
         // Sections spaced by the local bend (research/algorithms/offsets_sweeps_import.md card 1):
         // cubic interpolation of a rail of curvature κ (the path's, grown by the profile's reach)
@@ -379,7 +481,11 @@ impl PathSweep {
             let by_err = if ds > tol::ROUNDOFF_FINE {
                 let k = bend / ds;
                 let k_rail = k * (1.0 + reach * k);
-                if k_rail > tol::ROUNDOFF_FINE { ds / (384.0 * tol / k_rail.powi(3)).powf(0.25) } else { 0.0 }
+                if k_rail > tol::ROUNDOFF_FINE {
+                    ds / (384.0 * tol / k_rail.powi(3)).powf(0.25)
+                } else {
+                    0.0
+                }
             } else {
                 0.0
             };
@@ -401,7 +507,11 @@ impl PathSweep {
                 i += 1;
             }
             let (a, b) = (at(i), at(i + 1));
-            let f = if b > a { ((target - a) / (b - a)).clamp(0.0, 1.0) } else { 0.0 };
+            let f = if b > a {
+                ((target - a) / (b - a)).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
             v.push((i as f64 + f) / fine as f64);
         }
         v.push(1.0);
@@ -450,18 +560,28 @@ impl PathSweep {
     /// path; a turn within its plane only twists the sampled frames, which are approximate
     /// anyway).
     fn rail_errors(&self, v: &[f64]) -> Vec<f64> {
-        let (x, y) = (self.plane.x_dir.into_inner(), self.plane.y_dir().into_inner());
+        let (x, y) = (
+            self.plane.x_dir.into_inner(),
+            self.plane.y_dir().into_inner(),
+        );
         let p0 = self.pts[0];
         let r = self.reach.max(tol::ROUNDOFF);
         let deg = self.deg.min(v.len() - 1);
         let mut worst = vec![0.0f64; v.len() - 1];
-        for (k, q) in [p0, p0 + x * r, p0 - x * r, p0 + y * r, p0 - y * r].into_iter().enumerate() {
+        for (k, q) in [p0, p0 + x * r, p0 - x * r, p0 + y * r, p0 - y * r]
+            .into_iter()
+            .enumerate()
+        {
             let at: Vec<P3> = v.iter().map(|&s| self.motion(s).point(&q)).collect();
             let rail = NurbsCurve::interpolate(&at, v, deg, None, None);
             for (w, e) in v.windows(2).zip(worst.iter_mut()) {
                 let m = 0.5 * (w[0] + w[1]);
                 let d = rail.point(m) - self.motion(m).point(&q);
-                *e = e.max(if k == 0 { d.norm() } else { d.dot(&self.dir(m)).abs() });
+                *e = e.max(if k == 0 {
+                    d.norm()
+                } else {
+                    d.dot(&self.dir(m)).abs()
+                });
             }
         }
         worst
@@ -511,9 +631,17 @@ impl PathSweep {
     /// The segment and its travel fraction at s (s by length along the run).
     fn seg_at(&self, s: f64) -> (usize, f64) {
         let s = s.clamp(0.0, 1.0);
-        let k = self.cum.partition_point(|c| *c <= s).saturating_sub(1).min(self.segs.len() - 1);
+        let k = self
+            .cum
+            .partition_point(|c| *c <= s)
+            .saturating_sub(1)
+            .min(self.segs.len() - 1);
         let (a, b) = (self.cum[k], self.cum[k + 1]);
-        let frac = if b > a { ((s - a) / (b - a)).clamp(0.0, 1.0) } else { 0.0 };
+        let frac = if b > a {
+            ((s - a) / (b - a)).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
         (k, self.arc[k].frac_at(frac * self.arc[k].total()))
     }
     fn path_at(&self, s: f64) -> P3 {
@@ -543,7 +671,11 @@ impl PathSweep {
                 let (k, f) = self.seg_at(s);
                 let t = h.tangent(self.helix_angle(h, s));
                 // In the direction of travel.
-                if t.dot(&self.segs[k].dir(f)) < 0.0 { -t } else { t }
+                if t.dot(&self.segs[k].dir(f)) < 0.0 {
+                    -t
+                } else {
+                    t
+                }
             }
             None => {
                 let (k, f) = self.seg_at(s);
@@ -564,38 +696,70 @@ impl PathSweep {
         let p = self.at(s);
         let m = match self.exact.as_ref().and_then(|e| e.frame(self, i, &p, s)) {
             Some(r) => r.into_inner(),
-            None => self.rots[i].slerp(&self.rots[i + 1], f).to_rotation_matrix().into_inner(),
+            None => self.rots[i]
+                .slerp(&self.rots[i + 1], f)
+                .to_rotation_matrix()
+                .into_inner(),
         };
-        Affine { m, t: p.coords - m * self.pts[0].coords }
+        Affine {
+            m,
+            t: p.coords - m * self.pts[0].coords,
+        }
     }
 
     /// The profile's plane where the segment ends.
     pub fn end_plane(&self) -> Plane {
         let m = self.motion(1.0);
-        Plane { origin: m.point(&self.plane.origin), x_dir: nalgebra::Unit::new_normalize(m.vector(&self.plane.x_dir)), normal: nalgebra::Unit::new_normalize(m.vector(&self.plane.normal)) }
+        Plane {
+            origin: m.point(&self.plane.origin),
+            x_dir: nalgebra::Unit::new_normalize(m.vector(&self.plane.x_dir)),
+            normal: nalgebra::Unit::new_normalize(m.vector(&self.plane.normal)),
+        }
     }
 
     fn rail_nurbs(&self, q: P2) -> NurbsCurve {
-        let pts: Vec<P3> = self.v.iter().map(|&s| self.place(s).point(&P3::new(q.x, q.y, 0.0))).collect();
+        let pts: Vec<P3> = self
+            .v
+            .iter()
+            .map(|&s| self.place(s).point(&P3::new(q.x, q.y, 0.0)))
+            .collect();
         NurbsCurve::interpolate(&pts, &self.v, self.deg.min(pts.len() - 1), None, None)
     }
 
     /// The side surface of a piece: its NURBS placed at the sections, skinned.
     fn skin(&self, piece: &Piece) -> NurbsSurface {
         let n0 = piece.c.to_nurbs(piece.t0, piece.t1);
-        let curves: Vec<NurbsCurve> = self.v.iter().map(|&s| n0.transformed(&self.place(s))).collect();
+        let curves: Vec<NurbsCurve> = self
+            .v
+            .iter()
+            .map(|&s| n0.transformed(&self.place(s)))
+            .collect();
         let q = self.deg.min(curves.len() - 1);
         let ncp = n0.cps.len();
         let mut cols: Vec<Vec<H>> = Vec::with_capacity(ncp);
         let mut kv = Vec::new();
         for i in 0..ncp {
-            let xyz: Vec<P3> = curves.iter().map(|c| P3::new(c.cps[i].x, c.cps[i].y, c.cps[i].z)).collect();
+            let xyz: Vec<P3> = curves
+                .iter()
+                .map(|c| P3::new(c.cps[i].x, c.cps[i].y, c.cps[i].z))
+                .collect();
             let a = NurbsCurve::interpolate(&xyz, &self.v, q, None, None);
             let w = n0.cps[i].w;
             kv = a.knots.clone();
-            cols.push(a.cps.iter().map(|p| H::new(p.x, p.y, p.z, p.w * w)).collect());
+            cols.push(
+                a.cps
+                    .iter()
+                    .map(|p| H::new(p.x, p.y, p.z, p.w * w))
+                    .collect(),
+            );
         }
-        NurbsSurface { du: n0.degree, dv: q, ku: n0.knots.clone(), kv, cps: cols }
+        NurbsSurface {
+            du: n0.degree,
+            dv: q,
+            ku: n0.knots.clone(),
+            kv,
+            cps: cols,
+        }
     }
 }
 
@@ -636,7 +800,13 @@ fn speed(seg: &Seg, f: f64) -> f64 {
 /// A segment's length from its start to fraction `f1` from fraction `f0` (8-point Gauss).
 fn length_between(seg: &Seg, f0: f64, f1: f64) -> f64 {
     let (m, r) = ((f0 + f1) * 0.5, (f1 - f0) * 0.5);
-    GAUSS8.x.iter().zip(GAUSS8.w).map(|(x, w)| w * speed(seg, m + r * x)).sum::<f64>() * r
+    GAUSS8
+        .x
+        .iter()
+        .zip(GAUSS8.w)
+        .map(|(x, w)| w * speed(seg, m + r * x))
+        .sum::<f64>()
+        * r
 }
 
 /// A segment's length table: its length from its start and its speed at travel fractions
@@ -651,10 +821,15 @@ impl ArcTable {
     fn new(seg: &Seg) -> Self {
         let mut len = vec![0.0];
         for i in 0..ARC_STEPS {
-            let (f0, f1) = (i as f64 / ARC_STEPS as f64, (i + 1) as f64 / ARC_STEPS as f64);
+            let (f0, f1) = (
+                i as f64 / ARC_STEPS as f64,
+                (i + 1) as f64 / ARC_STEPS as f64,
+            );
             len.push(len[i] + length_between(seg, f0, f1));
         }
-        let speed = (0..=ARC_STEPS).map(|i| speed(seg, i as f64 / ARC_STEPS as f64)).collect();
+        let speed = (0..=ARC_STEPS)
+            .map(|i| speed(seg, i as f64 / ARC_STEPS as f64))
+            .collect();
         Self { len, speed }
     }
 
@@ -666,10 +841,17 @@ impl ArcTable {
     /// the fraction against length through the table (the fraction's slope is 1 / speed), so
     /// the motion stays smooth, O(h⁴) from the exact inverse and with no curve evaluations.
     fn frac_at(&self, len: f64) -> f64 {
-        let i = self.len.partition_point(|l| *l <= len).saturating_sub(1).min(ARC_STEPS - 1);
+        let i = self
+            .len
+            .partition_point(|l| *l <= len)
+            .saturating_sub(1)
+            .min(ARC_STEPS - 1);
         let (la, lb) = (self.len[i], self.len[i + 1]);
         let h = lb - la;
-        let (fa, fb) = (i as f64 / ARC_STEPS as f64, (i + 1) as f64 / ARC_STEPS as f64);
+        let (fa, fb) = (
+            i as f64 / ARC_STEPS as f64,
+            (i + 1) as f64 / ARC_STEPS as f64,
+        );
         if !(h > tol::TINY) {
             return fa;
         }
@@ -677,21 +859,31 @@ impl ArcTable {
         let slope = |v: f64| if v > tol::TINY { h / v } else { fb - fa };
         let (ma, mb) = (slope(self.speed[i]), slope(self.speed[i + 1]));
         let (x2, x3) = (x * x, x * x * x);
-        let f = (2.0 * x3 - 3.0 * x2 + 1.0) * fa + (x3 - 2.0 * x2 + x) * ma + (-2.0 * x3 + 3.0 * x2) * fb + (x3 - x2) * mb;
+        let f = (2.0 * x3 - 3.0 * x2 + 1.0) * fa
+            + (x3 - 2.0 * x2 + x) * ma
+            + (-2.0 * x3 + 3.0 * x2) * fb
+            + (x3 - x2) * mb;
         f.clamp(fa, fb)
     }
 }
 
 /// The curve parameter at travel fraction s of a segment.
 fn travel_t(seg: &Seg, s: f64) -> f64 {
-    if seg.rev { seg.t1 + (seg.t0 - seg.t1) * s } else { seg.t0 + (seg.t1 - seg.t0) * s }
+    if seg.rev {
+        seg.t1 + (seg.t0 - seg.t1) * s
+    } else {
+        seg.t0 + (seg.t1 - seg.t0) * s
+    }
 }
 
 impl SweepKind for PathSweep {
     fn place(&self, s: f64) -> Affine {
         let base = crate::native::build::plane_map(&self.plane, &V3::zeros(), 0.0);
         let m = self.motion(s);
-        Affine { m: m.m * base.m, t: m.m * base.t + m.t }
+        Affine {
+            m: m.m * base.m,
+            t: m.m * base.t + m.t,
+        }
     }
     fn rail(&self, q: P2) -> Option<Curve> {
         Some(Curve::Nurbs(Arc::new(self.rail_nurbs(q))))
@@ -701,7 +893,13 @@ impl SweepKind for PathSweep {
         let (ua, ub) = (sk.ku[0], sk.ku[sk.ku.len() - 1]);
         // The surface's u runs from the piece's t0 to its t1.
         let n0 = piece.c.to_nurbs(piece.t0, piece.t1);
-        let (ua, ub) = if (n0.point(n0.range().0) - piece.c.point(piece.t0)).norm() <= (n0.point(n0.range().0) - piece.c.point(piece.t1)).norm() { (ua, ub) } else { (ub, ua) };
+        let (ua, ub) = if (n0.point(n0.range().0) - piece.c.point(piece.t0)).norm()
+            <= (n0.point(n0.range().0) - piece.c.point(piece.t1)).norm()
+        {
+            (ua, ub)
+        } else {
+            (ub, ua)
+        };
         let linear = n0.degree == 1 && !n0.is_rational() && n0.cps.len() == 2;
         let surf = Surface::Nurbs(Arc::new(sk));
         let c = piece.c.clone();
@@ -718,7 +916,11 @@ impl SweepKind for PathSweep {
                 iso_pcurve(&n0c, &c, t0, t1, ua, ub, v)
             }),
             across: Box::new(move |t| {
-                let u = if (t - t0).abs() <= (t - t1).abs() { ua } else { ub };
+                let u = if (t - t0).abs() <= (t - t1).abs() {
+                    ua
+                } else {
+                    ub
+                };
                 super::line2(P2::new(u, 0.0), V2::new(0.0, 1.0))
             }),
         })
@@ -779,7 +981,9 @@ fn iso_pcurve(n0: &NurbsCurve, c: &Curve, t0: f64, t1: f64, ua: f64, ub: f64, v:
         for k in 0..ts.len() - 1 {
             let tm = 0.5 * (ts[k] + ts[k + 1]);
             let q = fit.point(tm);
-            if (n0.point(q.x) - c.point(tm)).norm() > tol::REL_FINE * (1.0 + c.point(tm).coords.norm()) {
+            if (n0.point(q.x) - c.point(tm)).norm()
+                > tol::REL_FINE * (1.0 + c.point(tm).coords.norm())
+            {
                 ins.push(tm);
             }
         }
@@ -796,12 +1000,25 @@ fn iso_pcurve(n0: &NurbsCurve, c: &Curve, t0: f64, t1: f64, ua: f64, ub: f64, v:
 
 /// Sweeps the profile along a run of tangent-continuous segments; the profile's plane where it
 /// ends.
-pub fn sweep_seg(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, segs: &[Seg], frames: Frames, solid: bool, helix: Option<Helix>) -> Result<(Built, Plane)> {
+pub fn sweep_seg(
+    faces: &[MergedFace],
+    chains: &[Vec<Piece>],
+    plane: Plane,
+    segs: &[Seg],
+    frames: Frames,
+    solid: bool,
+    helix: Option<Helix>,
+) -> Result<(Built, Plane)> {
     // The profile's reach from the path's start.
     let m = crate::native::build::plane_map(&plane, &V3::zeros(), 0.0);
     let start = segs[0].start();
     let mut reach: f64 = 0.0;
-    for p in faces.iter().flat_map(|f| std::iter::once(&f.outer).chain(f.holes.iter())).flatten().chain(chains.iter().flatten()) {
+    for p in faces
+        .iter()
+        .flat_map(|f| std::iter::once(&f.outer).chain(f.holes.iter()))
+        .flatten()
+        .chain(chains.iter().flatten())
+    {
         for k in 0..=4 {
             let q = p.at(k as f64 / 4.0);
             reach = reach.max((m.point(&P3::new(q.x, q.y, 0.0)) - start).norm());
@@ -810,8 +1027,12 @@ pub fn sweep_seg(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, segs
     let t0 = std::time::Instant::now();
     let kind = PathSweep::new(plane, segs, frames, reach, helix)?;
     let t1 = t0.elapsed();
-    if (kind.pts[1] - kind.pts[0]).dot(&plane.normal).abs() < tol::REL * (kind.pts[1] - kind.pts[0]).norm().max(tol::TINY) {
-        return Err(KernelError::InvalidParameter("The sweep path runs in the profile's plane".into()));
+    if (kind.pts[1] - kind.pts[0]).dot(&plane.normal).abs()
+        < tol::REL * (kind.pts[1] - kind.pts[0]).norm().max(tol::TINY)
+    {
+        return Err(KernelError::InvalidParameter(
+            "The sweep path runs in the profile's plane".into(),
+        ));
     }
     let mut b = super::sweep_full(faces, chains, &kind, 0.0, 1.0, false, solid)?;
     let t2 = t0.elapsed();
@@ -820,7 +1041,12 @@ pub fn sweep_seg(faces: &[MergedFace], chains: &[Vec<Piece>], plane: Plane, segs
     crate::native::unify::planarize(&mut b.body);
     crate::native::unify::cylindrize(&mut b.body);
     if std::env::var("CADRS_PROFILE").is_ok() {
-        eprintln!("[profile] sweep piece: frames {t1:?}, faces {:?}, recognise {:?} ({} sections)", t2 - t1, t0.elapsed() - t2, kind.v.len());
+        eprintln!(
+            "[profile] sweep piece: frames {t1:?}, faces {:?}, recognise {:?} ({} sections)",
+            t2 - t1,
+            t0.elapsed() - t2,
+            kind.v.len()
+        );
     }
     Ok((b, kind.end_plane()))
 }
@@ -835,10 +1061,32 @@ mod tests {
     /// took about 950), and the rails between them stay within the section tolerance.
     #[test]
     fn sections_gather_where_the_path_bends() {
-        let ellipse = Curve::Ellipse { c: P3::origin(), x: V3::x(), y: V3::y(), a: 40.0, b: 8.0 };
-        let seg = Seg { c: ellipse, t0: 0.0, t1: FRAC_PI_2, rev: false };
-        let plane = Plane { origin: P3::new(40.0, 0.0, 0.0), x_dir: nalgebra::Unit::new_normalize(V3::x()), normal: nalgebra::Unit::new_normalize(V3::y()) };
-        let sweep = PathSweep::new(plane, &[seg], Frames::Control(SweepControl::None), 1.0, None).unwrap();
+        let ellipse = Curve::Ellipse {
+            c: P3::origin(),
+            x: V3::x(),
+            y: V3::y(),
+            a: 40.0,
+            b: 8.0,
+        };
+        let seg = Seg {
+            c: ellipse,
+            t0: 0.0,
+            t1: FRAC_PI_2,
+            rev: false,
+        };
+        let plane = Plane {
+            origin: P3::new(40.0, 0.0, 0.0),
+            x_dir: nalgebra::Unit::new_normalize(V3::x()),
+            normal: nalgebra::Unit::new_normalize(V3::y()),
+        };
+        let sweep = PathSweep::new(
+            plane,
+            &[seg],
+            Frames::Control(SweepControl::None),
+            1.0,
+            None,
+        )
+        .unwrap();
         let n = sweep.v.len() - 1;
         assert!((8..300).contains(&n), "{n} sections");
         // Its first fifth (by length) bends the most and holds most of the sections.

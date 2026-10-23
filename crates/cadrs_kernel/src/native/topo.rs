@@ -47,7 +47,14 @@ pub(crate) fn points_in(shell: &Body) -> bool {
 /// when every one says the opposite, else `None` (a thin wall or grazing rays: the volume
 /// decides).
 fn parity_orientation(shell: &Body) -> Option<bool> {
-    parity_orientation_with(shell, shell.faces.iter().map(|f| super::classify::face_polygons(shell, f)).collect())
+    parity_orientation_with(
+        shell,
+        shell
+            .faces
+            .iter()
+            .map(|f| super::classify::face_polygons(shell, f))
+            .collect(),
+    )
 }
 
 /// [`parity_orientation`] with the faces' polygons made already.
@@ -63,7 +70,10 @@ fn parity_orientation_with(shell: &Body, polys: Vec<Vec<Vec<P2>>>) -> Option<boo
         // A point well inside the face's domain: of a grid over its (u, v) box, the one
         // farthest from the loops (by the metric-scaled polygon).
         let ps = &polys[fi];
-        let (mut lo, mut hi) = (P2::new(f64::INFINITY, f64::INFINITY), P2::new(f64::NEG_INFINITY, f64::NEG_INFINITY));
+        let (mut lo, mut hi) = (
+            P2::new(f64::INFINITY, f64::INFINITY),
+            P2::new(f64::NEG_INFINITY, f64::NEG_INFINITY),
+        );
         for q in ps.iter().flatten() {
             lo = P2::new(lo.x.min(q.x), lo.y.min(q.y));
             hi = P2::new(hi.x.max(q.x), hi.y.max(q.y));
@@ -88,7 +98,10 @@ fn parity_orientation_with(shell: &Body, polys: Vec<Vec<Vec<P2>>>) -> Option<boo
         let mut best: Option<(f64, P2)> = None;
         for i in 1..n {
             for j in 1..n {
-                let uv = P2::new(lo.x + (hi.x - lo.x) * i as f64 / n as f64, lo.y + (hi.y - lo.y) * j as f64 / n as f64);
+                let uv = P2::new(
+                    lo.x + (hi.x - lo.x) * i as f64 / n as f64,
+                    lo.y + (hi.y - lo.y) * j as f64 / n as f64,
+                );
                 // Its distance from the loops, given up as soon as it can't beat the best so
                 // far (the same choice as the full minimum); whether it lies inside only asked
                 // of a point that would be the best.
@@ -103,7 +116,8 @@ fn parity_orientation_with(shell: &Body, polys: Vec<Vec<Vec<P2>>>) -> Option<boo
                     }
                 }
                 if best.is_none_or(|b| d > b.0) {
-                    let inside = ps.first().is_some_and(|o| point_in_polygon(&uv, o)) && !ps.iter().skip(1).any(|h| point_in_polygon(&uv, h));
+                    let inside = ps.first().is_some_and(|o| point_in_polygon(&uv, o))
+                        && !ps.iter().skip(1).any(|h| point_in_polygon(&uv, h));
                     if inside {
                         best = Some((d, uv));
                     }
@@ -116,7 +130,12 @@ fn parity_orientation_with(shell: &Body, polys: Vec<Vec<Vec<P2>>>) -> Option<boo
             continue;
         }
         let Some(outer) = ps.first() else { continue };
-        let twice: f64 = (0..outer.len()).map(|k| { let (a, b) = (outer[k], outer[(k + 1) % outer.len()]); a.x * b.y - b.x * a.y }).sum();
+        let twice: f64 = (0..outer.len())
+            .map(|k| {
+                let (a, b) = (outer[k], outer[(k + 1) % outer.len()]);
+                a.x * b.y - b.x * a.y
+            })
+            .sum();
         if twice == 0.0 {
             continue;
         }
@@ -126,7 +145,10 @@ fn parity_orientation_with(shell: &Body, polys: Vec<Vec<Vec<P2>>>) -> Option<boo
         if !(eps > tol::REL * size) {
             continue;
         }
-        let (behind, front) = (cls.parity_inside(&(p - out * eps)), cls.parity_inside(&(p + out * eps)));
+        let (behind, front) = (
+            cls.parity_inside(&(p - out * eps)),
+            cls.parity_inside(&(p + out * eps)),
+        );
         let this = match (behind, front) {
             (true, false) => true,
             (false, true) => false,
@@ -375,7 +397,10 @@ impl BodyBuilder {
     /// Adds a vertex at `p` standing for the ball of radius `tol` about it (at least
     /// [`TOL_MIN`]); returns its index.
     pub fn vertex_with_tol(&mut self, p: P3, tol: f64) -> usize {
-        self.body.verts.push(Vertex { p, tol: tol.max(TOL_MIN) });
+        self.body.verts.push(Vertex {
+            p,
+            tol: tol.max(TOL_MIN),
+        });
         self.body.verts.len() - 1
     }
 
@@ -441,7 +466,10 @@ impl BodyBuilder {
         let errs = self.body.check_with(level);
         match errs.first() {
             None => Ok(self.body),
-            Some(e) => Err(crate::KernelError::InvalidInput(format!("the body isn't valid: {e} ({} problems)", errs.len()))),
+            Some(e) => Err(crate::KernelError::InvalidInput(format!(
+                "the body isn't valid: {e} ({} problems)",
+                errs.len()
+            ))),
         }
     }
 }
@@ -450,7 +478,11 @@ pub use crate::BodyClass;
 
 /// A coedge's start and end parameters in its direction of travel.
 pub fn co_range(e: &Edge, fwd: bool) -> (f64, f64) {
-    if fwd { (e.t[0], e.t[1]) } else { (e.t[1], e.t[0]) }
+    if fwd {
+        (e.t[0], e.t[1])
+    } else {
+        (e.t[1], e.t[0])
+    }
 }
 
 impl Body {
@@ -463,14 +495,29 @@ impl Body {
     /// Adds the edge of `curve` from `t0` at vertex `v0` to `t1` at `v1`, of tolerance
     /// [`TOL_MIN`](super::tol::CONFUSION); returns its index.
     pub fn add_edge(&mut self, curve: Curve, t0: f64, t1: f64, v0: usize, v1: usize) -> usize {
-        self.edges.push(Edge { curve, t: [t0, t1], v: [v0, v1], degenerate: false, tol: TOL_MIN });
+        self.edges.push(Edge {
+            curve,
+            t: [t0, t1],
+            v: [v0, v1],
+            degenerate: false,
+            tol: TOL_MIN,
+        });
         self.edges.len() - 1
     }
 
     /// Adds a degenerate edge at `at` (a pole or apex) at vertex `v` for the p-curve range
     /// `t0..t1`; returns its index.
     pub fn add_degenerate(&mut self, at: P3, t0: f64, t1: f64, v: usize) -> usize {
-        self.edges.push(Edge { curve: Curve::Line { o: at, d: V3::zeros() }, t: [t0, t1], v: [v, v], degenerate: true, tol: TOL_MIN });
+        self.edges.push(Edge {
+            curve: Curve::Line {
+                o: at,
+                d: V3::zeros(),
+            },
+            t: [t0, t1],
+            v: [v, v],
+            degenerate: true,
+            tol: TOL_MIN,
+        });
         self.edges.len() - 1
     }
 
@@ -501,12 +548,21 @@ impl Body {
 
     /// Faces of each solid (and the free faces of sheets as a last group).
     pub fn solid_faces(&self, s: usize) -> Vec<usize> {
-        self.solids[s].shells.iter().flat_map(|&sh| self.shells[sh].faces.iter().copied()).collect()
+        self.solids[s]
+            .shells
+            .iter()
+            .flat_map(|&sh| self.shells[sh].faces.iter().copied())
+            .collect()
     }
 
     /// Appends another body (indices shifted). Returns the offsets (verts, edges, faces).
     pub fn append(&mut self, o: &Body) -> (usize, usize, usize) {
-        let (vo, eo, fo, so) = (self.verts.len(), self.edges.len(), self.faces.len(), self.shells.len());
+        let (vo, eo, fo, so) = (
+            self.verts.len(),
+            self.edges.len(),
+            self.faces.len(),
+            self.shells.len(),
+        );
         self.verts.extend(o.verts.iter().cloned());
         for e in &o.edges {
             let mut e = e.clone();
@@ -523,13 +579,20 @@ impl Body {
             self.faces.push(f);
         }
         for s in &o.shells {
-            self.shells.push(Shell { faces: s.faces.iter().map(|x| x + fo).collect(), closed: s.closed });
+            self.shells.push(Shell {
+                faces: s.faces.iter().map(|x| x + fo).collect(),
+                closed: s.closed,
+            });
         }
         for s in &o.solids {
-            self.solids.push(Solid { shells: s.shells.iter().map(|x| x + so).collect() });
+            self.solids.push(Solid {
+                shells: s.shells.iter().map(|x| x + so).collect(),
+            });
         }
         for w in &o.wires {
-            self.wires.push(Wire { edges: w.edges.iter().map(|&(e, f)| (e + eo, f)).collect() });
+            self.wires.push(Wire {
+                edges: w.edges.iter().map(|&(e, f)| (e + eo, f)).collect(),
+            });
         }
         self.points.extend(o.points.iter().map(|v| v + vo));
         (vo, eo, fo)
@@ -555,7 +618,10 @@ impl Body {
                     _ => None,
                 };
                 if let Some(d) = uv {
-                    let a = Affine { m: nalgebra::Matrix3::from_diagonal(&d), t: V3::zeros() };
+                    let a = Affine {
+                        m: nalgebra::Matrix3::from_diagonal(&d),
+                        t: V3::zeros(),
+                    };
                     for l in &mut f.loops {
                         for c in l.iter_mut() {
                             c.pc = c.pc.transformed(&a);
@@ -611,7 +677,10 @@ impl Body {
             uv.union(&super::boolean::curve_bbox(&c.pc, e.t[0], e.t[1]));
         }
         if !matches!(f.surf, Surface::Plane { .. }) && !uv.is_empty() {
-            bb.union(&f.surf.patch_bbox((uv.min.x, uv.max.x), (uv.min.y, uv.max.y)));
+            bb.union(
+                &f.surf
+                    .patch_bbox((uv.min.x, uv.max.x), (uv.min.y, uv.max.y)),
+            );
         }
         bb
     }
@@ -698,7 +767,10 @@ impl Body {
                 }
                 for c in l {
                     if c.edge >= self.edges.len() {
-                        errs.push(format!("face {fi} loop {li}: edge {} doesn't exist", c.edge));
+                        errs.push(format!(
+                            "face {fi} loop {li}: edge {} doesn't exist",
+                            c.edge
+                        ));
                     }
                     if let Some(why) = curve_issue(&c.pc) {
                         errs.push(format!("face {fi} loop {li}: p-curve: {why}"));
@@ -775,7 +847,9 @@ impl Body {
                 for k in 0..l.len() {
                     let (a, b) = (&l[k], &l[(k + 1) % l.len()]);
                     if self.co_end(a) != self.co_start(b) {
-                        errs.push(format!("face {fi} loop {li}: coedge {k} doesn't meet the next"));
+                        errs.push(format!(
+                            "face {fi} loop {li}: coedge {k} doesn't meet the next"
+                        ));
                     }
                     // p-curve ends meet in uv (modulo periods).
                     let ea = &self.edges[a.edge];
@@ -788,9 +862,17 @@ impl Body {
                     let dv = (pa.y - pb.y).abs();
                     let (mu, mv) = f.surf.metric();
                     // Within the shared vertex's tolerance (LOOP_GAP for exact geometry).
-                    let gap_tol = self.verts.get(self.co_end(a)).map_or(0.0, |v| v.tol).max(super::tol::LOOP_GAP);
+                    let gap_tol = self
+                        .verts
+                        .get(self.co_end(a))
+                        .map_or(0.0, |v| v.tol)
+                        .max(super::tol::LOOP_GAP);
                     if du * mu > gap_tol || dv * mv > gap_tol {
-                        errs.push(format!("face {fi} loop {li}: p-curve gap after coedge {k}: ({:.3e}, {:.3e})", pa.x - pb.x, pa.y - pb.y));
+                        errs.push(format!(
+                            "face {fi} loop {li}: p-curve gap after coedge {k}: ({:.3e}, {:.3e})",
+                            pa.x - pb.x,
+                            pa.y - pb.y
+                        ));
                     }
                     // p-curve on the edge in 3D, within the edge's tolerance (a read model's
                     // p-curves stray by it): 7 points, or the largest gap searched for (Full).
@@ -848,9 +930,14 @@ impl Body {
                 // they show stands only if the loop's polyline within LOOP_GAP of its p-curves
                 // crosses itself too (the full check's test).
                 if let Some((i, j)) = self_crossing(&poly)
-                    && self.check_face_domain(fi).iter().any(|e| e.starts_with(&format!("face {fi} loop {li} crosses itself")))
+                    && self
+                        .check_face_domain(fi)
+                        .iter()
+                        .any(|e| e.starts_with(&format!("face {fi} loop {li} crosses itself")))
                 {
-                    errs.push(format!("face {fi} loop {li} crosses itself in (u, v) (segments {i} and {j})"));
+                    errs.push(format!(
+                        "face {fi} loop {li} crosses itself in (u, v) (segments {i} and {j})"
+                    ));
                 }
             }
         }
@@ -873,8 +960,13 @@ impl Body {
             if !s.closed {
                 continue;
             }
-            let mut shell_uses: std::collections::BTreeMap<usize, (i32, i32)> = std::collections::BTreeMap::new();
-            for c in s.faces.iter().flat_map(|&fi| self.faces[fi].loops.iter().flatten()) {
+            let mut shell_uses: std::collections::BTreeMap<usize, (i32, i32)> =
+                std::collections::BTreeMap::new();
+            for c in s
+                .faces
+                .iter()
+                .flat_map(|&fi| self.faces[fi].loops.iter().flatten())
+            {
                 let u = shell_uses.entry(c.edge).or_default();
                 if c.fwd {
                     u.0 += 1;
@@ -894,12 +986,26 @@ impl Body {
             errs.extend(self.check_shells());
             // (Each face's on its own, in parallel; their problems in face order.)
             use rayon::prelude::*;
-            let one = |fi: usize| if fully(fi) { self.check_face_domain(fi) } else { Vec::new() };
-            let domain: Vec<Vec<String>> = if super::fillet::parallel(self.faces.len()) { (0..self.faces.len()).into_par_iter().map(one).collect() } else { (0..self.faces.len()).map(one).collect() };
+            let one = |fi: usize| {
+                if fully(fi) {
+                    self.check_face_domain(fi)
+                } else {
+                    Vec::new()
+                }
+            };
+            let domain: Vec<Vec<String>> = if super::fillet::parallel(self.faces.len()) {
+                (0..self.faces.len()).into_par_iter().map(one).collect()
+            } else {
+                (0..self.faces.len()).map(one).collect()
+            };
             errs.extend(domain.into_iter().flatten());
             if errs.is_empty() {
                 let marked = |f: usize| only.is_none_or(|c| c.get(f).copied().unwrap_or(true));
-                errs.extend(super::check_faces::face_crossings_in(self, &|i, j| marked(i) || marked(j), &mut polys));
+                errs.extend(super::check_faces::face_crossings_in(
+                    self,
+                    &|i, j| marked(i) || marked(j),
+                    &mut polys,
+                ));
             }
         }
         // Solids enclose a positive volume (their faces point out).
@@ -909,10 +1015,23 @@ impl Body {
                 let sub = super::kernel::subset(self, &faces, true);
                 // (The subset's faces are the solid's, with their edges as they are: their
                 // polygons the same.)
-                let sp: Vec<Vec<Vec<P2>>> = faces.iter().zip(&sub.faces).map(|(&fi, f)| polys.get_mut(fi).and_then(Option::take).unwrap_or_else(|| super::classify::face_polygons(&sub, f))).collect();
+                let sp: Vec<Vec<Vec<P2>>> = faces
+                    .iter()
+                    .zip(&sub.faces)
+                    .map(|(&fi, f)| {
+                        polys
+                            .get_mut(fi)
+                            .and_then(Option::take)
+                            .unwrap_or_else(|| super::classify::face_polygons(&sub, f))
+                    })
+                    .collect();
                 if check_compare() {
                     for (k, f) in sub.faces.iter().enumerate() {
-                        assert_eq!(sp[k], super::classify::face_polygons(&sub, f), "solid {si}: face {k}'s polygons differ from the subset's");
+                        assert_eq!(
+                            sp[k],
+                            super::classify::face_polygons(&sub, f),
+                            "solid {si}: face {k}'s polygons differ from the subset's"
+                        );
                     }
                 }
                 // Ray parity settles the orientation where it can; else the exact volume.
@@ -921,7 +1040,9 @@ impl Body {
                 }
                 let v = super::mass::body_volume(&sub);
                 if !(v > 0.0) {
-                    errs.push(format!("solid {si} encloses a volume of {v:.3e} (its faces point in)"));
+                    errs.push(format!(
+                        "solid {si} encloses a volume of {v:.3e} (its faces point in)"
+                    ));
                 }
             }
             if full && errs.is_empty() {
@@ -937,11 +1058,20 @@ impl Body {
     /// (`Mixed`, a compound), or nothing. Free edges left in no wire don't count (they are
     /// construction leftovers, as before Phase 1b).
     pub fn class(&self) -> BodyClass {
-        let in_solid: std::collections::HashSet<usize> = self.solids.iter().flat_map(|s| s.shells.iter().copied()).collect();
-        let in_shell: std::collections::HashSet<usize> = self.shells.iter().flat_map(|s| s.faces.iter().copied()).collect();
+        let in_solid: std::collections::HashSet<usize> = self
+            .solids
+            .iter()
+            .flat_map(|s| s.shells.iter().copied())
+            .collect();
+        let in_shell: std::collections::HashSet<usize> = self
+            .shells
+            .iter()
+            .flat_map(|s| s.faces.iter().copied())
+            .collect();
         let solid = !self.solids.is_empty();
         // Faces of a shell of no solid, or of no shell at all.
-        let sheet = (0..self.shells.len()).any(|s| !in_solid.contains(&s) && !self.shells[s].faces.is_empty())
+        let sheet = (0..self.shells.len())
+            .any(|s| !in_solid.contains(&s) && !self.shells[s].faces.is_empty())
             || (0..self.faces.len()).any(|f| !in_shell.contains(&f));
         let wire = !self.wires.is_empty();
         let point = !self.points.is_empty();
@@ -957,7 +1087,9 @@ impl Body {
 
     /// Whether wire `w` ends where it starts.
     pub fn wire_closed(&self, w: &Wire) -> bool {
-        let (Some(&(e0, f0)), Some(&(e1, f1))) = (w.edges.first(), w.edges.last()) else { return false };
+        let (Some(&(e0, f0)), Some(&(e1, f1))) = (w.edges.first(), w.edges.last()) else {
+            return false;
+        };
         let start = self.edges[e0].v[if f0 { 0 } else { 1 }];
         let end = self.edges[e1].v[if f1 { 1 } else { 0 }];
         start == end
@@ -976,7 +1108,9 @@ impl Body {
         for c in self.faces.iter().flat_map(|f| f.loops.iter().flatten()) {
             used[c.edge] = true;
         }
-        (0..self.edges.len()).filter(|&e| !used[e] && !self.edges[e].degenerate).collect()
+        (0..self.edges.len())
+            .filter(|&e| !used[e] && !self.edges[e].degenerate)
+            .collect()
     }
 
     /// Gathers the free edges in no wire into wires: each chain of edges meeting at vertices
@@ -990,7 +1124,11 @@ impl Body {
                 taken[e] = true;
             }
         }
-        let free: Vec<usize> = self.free_edges().into_iter().filter(|&e| !taken[e]).collect();
+        let free: Vec<usize> = self
+            .free_edges()
+            .into_iter()
+            .filter(|&e| !taken[e])
+            .collect();
         let mut at: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
         for &e in &free {
             at.entry(self.edges[e].v[0]).or_default().push(e);
@@ -1016,7 +1154,9 @@ impl Body {
                 continue;
             }
             taken[e0] = true;
-            let mut w = Wire { edges: vec![(e0, fwd0)] };
+            let mut w = Wire {
+                edges: vec![(e0, fwd0)],
+            };
             let first = self.edges[e0].v[if fwd0 { 0 } else { 1 }];
             loop {
                 let &(e, f) = w.edges.last().unwrap_or(&(e0, fwd0));
@@ -1024,7 +1164,9 @@ impl Body {
                 if end == first || degree(end) != 2 {
                     break;
                 }
-                let Some(&next) = at[&end].iter().find(|&&n| !taken[n]) else { break };
+                let Some(&next) = at[&end].iter().find(|&&n| !taken[n]) else {
+                    break;
+                };
                 taken[next] = true;
                 w.edges.push((next, self.edges[next].v[0] == end));
             }
@@ -1064,7 +1206,10 @@ impl Body {
                 continue;
             }
             if f + r > 2 {
-                errs.push(format!("edge {ei} is used by {} faces (a sheet must be manifold)", f + r));
+                errs.push(format!(
+                    "edge {ei} is used by {} faces (a sheet must be manifold)",
+                    f + r
+                ));
             }
         }
         let mut in_wire = vec![0usize; self.edges.len()];
@@ -1127,21 +1272,29 @@ impl Body {
             Curve::Nurbs(n) => n.cps.iter().any(|h| pt(&super::nurbs::dehom(h))),
         };
         if let Some(i) = self.verts.iter().position(|v| pt(&v.p)) {
-            return Some(format!("vertex {i} lies outside the size box (±{max:e} mm)"));
+            return Some(format!(
+                "vertex {i} lies outside the size box (±{max:e} mm)"
+            ));
         }
         if let Some(i) = self.edges.iter().position(|e| curve(&e.curve)) {
-            return Some(format!("edge {i}'s curve reaches outside the size box (±{max:e} mm)"));
+            return Some(format!(
+                "edge {i}'s curve reaches outside the size box (±{max:e} mm)"
+            ));
         }
         let surf = |s: &Surface| match s {
             Surface::Plane { f } => pt(&f.o),
-            Surface::Cylinder { f, r } | Surface::Sphere { f, r } | Surface::Cone { f, r, .. } => pt(&f.o) || out(*r),
+            Surface::Cylinder { f, r } | Surface::Sphere { f, r } | Surface::Cone { f, r, .. } => {
+                pt(&f.o) || out(*r)
+            }
             Surface::Torus { f, rmaj, rmin } => pt(&f.o) || out(*rmaj) || out(*rmin),
             Surface::Revolution { f, m } => pt(&f.o) || curve(m),
             Surface::Extrusion { c, .. } => curve(c),
             Surface::Nurbs(n) => n.cps.iter().flatten().any(|h| pt(&super::nurbs::dehom(h))),
         };
         let i = self.faces.iter().position(|f| surf(&f.surf))?;
-        Some(format!("face {i}'s surface reaches outside the size box (±{max:e} mm)"))
+        Some(format!(
+            "face {i}'s surface reaches outside the size box (±{max:e} mm)"
+        ))
     }
 }
 
@@ -1188,8 +1341,19 @@ fn curve_issue(c: &Curve) -> Option<String> {
     let finite = |v: &[f64]| v.iter().all(|x| x.is_finite());
     let ok = match c {
         Curve::Line { o, d } => finite(o.coords.as_slice()) && finite(d.as_slice()),
-        Curve::Circle { c, x, y, r } => finite(c.coords.as_slice()) && finite(x.as_slice()) && finite(y.as_slice()) && r.is_finite(),
-        Curve::Ellipse { c, x, y, a, b } => finite(c.coords.as_slice()) && finite(x.as_slice()) && finite(y.as_slice()) && a.is_finite() && b.is_finite(),
+        Curve::Circle { c, x, y, r } => {
+            finite(c.coords.as_slice())
+                && finite(x.as_slice())
+                && finite(y.as_slice())
+                && r.is_finite()
+        }
+        Curve::Ellipse { c, x, y, a, b } => {
+            finite(c.coords.as_slice())
+                && finite(x.as_slice())
+                && finite(y.as_slice())
+                && a.is_finite()
+                && b.is_finite()
+        }
         Curve::Nurbs(n) => return n.validate().err().map(|e| e.message()),
     };
     (!ok).then(|| "a curve isn't finite".to_string())
@@ -1198,14 +1362,31 @@ fn curve_issue(c: &Curve) -> Option<String> {
 /// Why a surface can't be evaluated, if it can't.
 fn surface_issue(s: &Surface) -> Option<String> {
     let finite = |v: &[f64]| v.iter().all(|x| x.is_finite());
-    let frame = |f: &Frame| finite(f.o.coords.as_slice()) && finite(f.x.as_slice()) && finite(f.y.as_slice()) && finite(f.z.as_slice());
+    let frame = |f: &Frame| {
+        finite(f.o.coords.as_slice())
+            && finite(f.x.as_slice())
+            && finite(f.y.as_slice())
+            && finite(f.z.as_slice())
+    };
     let ok = match s {
         Surface::Plane { f } => frame(f),
         Surface::Cylinder { f, r } | Surface::Sphere { f, r } => frame(f) && r.is_finite(),
         Surface::Cone { f, r, a } => frame(f) && r.is_finite() && a.is_finite(),
         Surface::Torus { f, rmaj, rmin } => frame(f) && rmaj.is_finite() && rmin.is_finite(),
-        Surface::Revolution { f, m } => return if frame(f) { curve_issue(m) } else { Some("a surface isn't finite".into()) },
-        Surface::Extrusion { c, d } => return if finite(d.as_slice()) { curve_issue(c) } else { Some("a surface isn't finite".into()) },
+        Surface::Revolution { f, m } => {
+            return if frame(f) {
+                curve_issue(m)
+            } else {
+                Some("a surface isn't finite".into())
+            };
+        }
+        Surface::Extrusion { c, d } => {
+            return if finite(d.as_slice()) {
+                curve_issue(c)
+            } else {
+                Some("a surface isn't finite".into())
+            };
+        }
         Surface::Nurbs(n) => return n.validate().err().map(|e| e.message()),
     };
     (!ok).then(|| "a surface isn't finite".to_string())
@@ -1273,7 +1454,9 @@ impl Body {
                         }
                     }
                     if e.degenerate {
-                        let worst = (1..8).map(|i| on(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 8.0, e.v[0])).fold(0.0, f64::max);
+                        let worst = (1..8)
+                            .map(|i| on(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 8.0, e.v[0]))
+                            .fold(0.0, f64::max);
                         if !(worst <= allowed(e.v[0])) {
                             errs.push(format!("face {fi} loop {li} coedge {k} (degenerate edge {}): p-curve strays {worst:.3e} from its point", c.edge));
                         }
@@ -1296,14 +1479,18 @@ impl Body {
             }
             for &f in &s.faces {
                 match owner[f] {
-                    Some(o) if o == si => errs.push(format!("face {f} is listed twice in shell {si}")),
+                    Some(o) if o == si => {
+                        errs.push(format!("face {f} is listed twice in shell {si}"))
+                    }
                     Some(o) => errs.push(format!("face {f} is in shells {o} and {si}")),
                     None => owner[f] = Some(si),
                 }
             }
             let pieces = self.face_components(&s.faces).len();
             if pieces > 1 {
-                errs.push(format!("shell {si} isn't connected: its faces make {pieces} pieces that share no edge"));
+                errs.push(format!(
+                    "shell {si} isn't connected: its faces make {pieces} pieces that share no edge"
+                ));
             }
         }
         errs
@@ -1356,14 +1543,30 @@ impl Body {
                     for c in l {
                         let e = &self.edges[c.edge];
                         let (t0, t1) = co_range(e, c.fwd);
-                        flatten_ref(&c.pc, t0, t1, (su, sv), flat, e.tol.max(super::tol::LOOP_GAP), &mut r);
+                        flatten_ref(
+                            &c.pc,
+                            t0,
+                            t1,
+                            (su, sv),
+                            flat,
+                            e.tol.max(super::tol::LOOP_GAP),
+                            &mut r,
+                        );
                     }
                     r
                 })
                 .collect();
             // (The verdicts, not the points they name, which may differ in their last digits.)
-            let gist = |x: &[String]| -> Vec<String> { x.iter().map(|m| m.split(" near ").next().unwrap_or(m).to_string()).collect() };
-            assert_eq!(gist(&errs), gist(&self.domain_errors(fi, &old, (su, sv))), "face {fi}: the domain check differs from the reference flattening's");
+            let gist = |x: &[String]| -> Vec<String> {
+                x.iter()
+                    .map(|m| m.split(" near ").next().unwrap_or(m).to_string())
+                    .collect()
+            };
+            assert_eq!(
+                gist(&errs),
+                gist(&self.domain_errors(fi, &old, (su, sv))),
+                "face {fi}: the domain check differs from the reference flattening's"
+            );
         }
         errs
     }
@@ -1377,9 +1580,13 @@ impl Body {
         for &(a, b, p) in &crossings {
             let (u, v) = (p.x / su, p.y / sv);
             if a == b {
-                errs.push(format!("face {fi} loop {a} crosses itself in (u, v) near ({u:.6}, {v:.6})"));
+                errs.push(format!(
+                    "face {fi} loop {a} crosses itself in (u, v) near ({u:.6}, {v:.6})"
+                ));
             } else {
-                errs.push(format!("face {fi}: loops {a} and {b} cross in (u, v) near ({u:.6}, {v:.6})"));
+                errs.push(format!(
+                    "face {fi}: loops {a} and {b} cross in (u, v) near ({u:.6}, {v:.6})"
+                ));
             }
         }
         if !crossings.is_empty() {
@@ -1396,13 +1603,24 @@ impl Body {
         let shifts = period_shifts(&f.surf, (su, sv));
         for i in 1..rings.len() {
             if significant(i) && areas[i] * sign > 0.0 {
-                errs.push(format!("face {fi} loop {i}: a hole running the same way as the outer loop"));
+                errs.push(format!(
+                    "face {fi} loop {i}: a hole running the same way as the outer loop"
+                ));
             }
-            if rings[i].pts.len() >= 2 && rings[0].pts.len() >= 3 && !shifts.iter().any(|d| rings[0].holds(&rings[i], *d) != Some(false)) {
+            if rings[i].pts.len() >= 2
+                && rings[0].pts.len() >= 3
+                && !shifts
+                    .iter()
+                    .any(|d| rings[0].holds(&rings[i], *d) != Some(false))
+            {
                 errs.push(format!("face {fi} loop {i}: a hole outside the outer loop"));
             }
             for j in 1..rings.len() {
-                if i != j && rings[j].pts.len() >= 3 && rings[j].bbox_holds(&rings[i]) && rings[j].holds(&rings[i], V2::zeros()) == Some(true) {
+                if i != j
+                    && rings[j].pts.len() >= 3
+                    && rings[j].bbox_holds(&rings[i])
+                    && rings[j].holds(&rings[i], V2::zeros()) == Some(true)
+                {
                     errs.push(format!("face {fi}: hole {i} lies inside hole {j}"));
                 }
             }
@@ -1416,28 +1634,53 @@ impl Body {
     fn check_voids(&self) -> Vec<String> {
         let mut errs = Vec::new();
         for (si, s) in self.solids.iter().enumerate() {
-            let [outer, voids @ ..] = s.shells.as_slice() else { continue };
+            let [outer, voids @ ..] = s.shells.as_slice() else {
+                continue;
+            };
             if voids.is_empty() {
                 continue;
             }
             let shell = |sh: usize| super::kernel::subset(self, &self.shells[sh].faces, true);
             let out = shell(*outer);
-            let v = if parity_orientation(&out) == Some(true) { 1.0 } else { super::mass::body_volume(&out) };
+            let v = if parity_orientation(&out) == Some(true) {
+                1.0
+            } else {
+                super::mass::body_volume(&out)
+            };
             if !(v > 0.0) {
-                errs.push(format!("solid {si}: its outer shell {outer} encloses a volume of {v:.3e}"));
+                errs.push(format!(
+                    "solid {si}: its outer shell {outer} encloses a volume of {v:.3e}"
+                ));
                 continue;
             }
-            let polys: Vec<Vec<Vec<P2>>> = out.faces.iter().map(|f| super::classify::face_polygons(&out, f)).collect();
+            let polys: Vec<Vec<Vec<P2>>> = out
+                .faces
+                .iter()
+                .map(|f| super::classify::face_polygons(&out, f))
+                .collect();
             for &sh in voids {
                 let void = shell(sh);
-                let v = if parity_orientation(&void) == Some(false) { -1.0 } else { super::mass::body_volume(&void) };
+                let v = if parity_orientation(&void) == Some(false) {
+                    -1.0
+                } else {
+                    super::mass::body_volume(&void)
+                };
                 if !(v < 0.0) {
                     errs.push(format!("solid {si}: void shell {sh} encloses a volume of {v:.3e} (its faces must point into the void)"));
                 }
                 // A void may touch its outer shell (its vertices on it); none may lie outside.
-                let outside = void.verts.iter().any(|v| super::classify::classify_point(&out, &polys, &v.p, v.tol.max(super::tol::POINT)) == crate::PointClass::Outside);
+                let outside = void.verts.iter().any(|v| {
+                    super::classify::classify_point(
+                        &out,
+                        &polys,
+                        &v.p,
+                        v.tol.max(super::tol::POINT),
+                    ) == crate::PointClass::Outside
+                });
                 if outside {
-                    errs.push(format!("solid {si}: void shell {sh} lies outside the outer shell {outer}"));
+                    errs.push(format!(
+                        "solid {si}: void shell {sh} lies outside the outer shell {outer}"
+                    ));
                 }
             }
         }
@@ -1487,10 +1730,20 @@ pub(super) fn pcurve_gap(e: &Edge, pc: &Curve, surf: &Surface) -> f64 {
 /// The lengths on `surf` of a unit step in u and in v over the box `u` × `v`: the surface's own
 /// metric for planes and quadrics, else the median of central differences on a 5 × 5 grid.
 fn uv_scale(surf: &Surface, u: (f64, f64), v: (f64, f64)) -> (f64, f64) {
-    if matches!(surf, Surface::Plane { .. } | Surface::Cylinder { .. } | Surface::Cone { .. } | Surface::Sphere { .. } | Surface::Torus { .. }) {
+    if matches!(
+        surf,
+        Surface::Plane { .. }
+            | Surface::Cylinder { .. }
+            | Surface::Cone { .. }
+            | Surface::Sphere { .. }
+            | Surface::Torus { .. }
+    ) {
         return surf.metric();
     }
-    let (hu, hv) = (((u.1 - u.0) * 1e-4).max(tol::ROUNDOFF), ((v.1 - v.0) * 1e-4).max(tol::ROUNDOFF));
+    let (hu, hv) = (
+        ((u.1 - u.0) * 1e-4).max(tol::ROUNDOFF),
+        ((v.1 - v.0) * 1e-4).max(tol::ROUNDOFF),
+    );
     let (mut du, mut dv) = (Vec::with_capacity(25), Vec::with_capacity(25));
     for i in 0..5 {
         for j in 0..5 {
@@ -1511,9 +1764,17 @@ fn uv_scale(surf: &Surface, u: (f64, f64), v: (f64, f64)) -> (f64, f64) {
 /// The shifts by whole periods (scaled as the rings are) worth trying to bring a hole into the
 /// outer loop's range of a periodic surface: none first.
 fn period_shifts(surf: &Surface, (su, sv): (f64, f64)) -> Vec<V2> {
-    let periodic = |p: bool| if p && !matches!(surf, Surface::Extrusion { .. }) { vec![0.0, -TAU, TAU] } else { vec![0.0] };
+    let periodic = |p: bool| {
+        if p && !matches!(surf, Surface::Extrusion { .. }) {
+            vec![0.0, -TAU, TAU]
+        } else {
+            vec![0.0]
+        }
+    };
     let (us, vs) = (periodic(surf.u_periodic()), periodic(surf.v_periodic()));
-    us.iter().flat_map(|&a| vs.iter().map(move |&b| V2::new(a * su, b * sv))).collect()
+    us.iter()
+        .flat_map(|&a| vs.iter().map(move |&b| V2::new(a * su, b * sv)))
+        .collect()
 }
 
 /// A loop as a closed polyline in scaled (u, v): `pts[i]` starts segment i (to `pts[i + 1]`,
@@ -1532,20 +1793,22 @@ impl Ring {
 
     /// Twice-halved shoelace: the signed area (counter-clockwise positive).
     fn area(&self) -> f64 {
-        (0..self.pts.len()).map(|i| {
-            let (a, b) = self.seg(i);
-            a.x * b.y - b.x * a.y
-        })
-        .sum::<f64>()
+        (0..self.pts.len())
+            .map(|i| {
+                let (a, b) = self.seg(i);
+                a.x * b.y - b.x * a.y
+            })
+            .sum::<f64>()
             * 0.5
     }
 
     fn perimeter(&self) -> f64 {
-        (0..self.pts.len()).map(|i| {
-            let (a, b) = self.seg(i);
-            (b - a).norm()
-        })
-        .sum()
+        (0..self.pts.len())
+            .map(|i| {
+                let (a, b) = self.seg(i);
+                (b - a).norm()
+            })
+            .sum()
     }
 
     fn tol_max(&self) -> f64 {
@@ -1607,14 +1870,48 @@ fn flatten(pc: &Curve, t0: f64, t1: f64, scale: (f64, f64), flat: f64, tol: f64,
     // Each span's three samples (at a quarter, the middle and three quarters) are its halves'
     // middles and its split point, so a split evaluates the curve four times, not eight.
     #[allow(clippy::too_many_arguments, reason = "a recursion's state")]
-    fn split(at: &dyn Fn(f64) -> P2, ta: f64, tb: f64, pa: P2, pb: P2, s: [P2; 3], depth: u32, flat: f64, tol: f64, r: &mut Ring) {
+    fn split(
+        at: &dyn Fn(f64) -> P2,
+        ta: f64,
+        tb: f64,
+        pa: P2,
+        pb: P2,
+        s: [P2; 3],
+        depth: u32,
+        flat: f64,
+        tol: f64,
+        r: &mut Ring,
+    ) {
         let stray = s.iter().map(|q| seg_dist2(q, &pa, &pb)).fold(0.0, f64::max);
         if stray > flat && depth < 10 {
             let tm = 0.5 * (ta + tb);
             let pm = s[1];
-            let quarters = |a: f64, b: f64, mid: P2| [at(a + (b - a) * 0.25), mid, at(a + (b - a) * 0.75)];
-            split(at, ta, tm, pa, pm, quarters(ta, tm, s[0]), depth + 1, flat, tol, r);
-            split(at, tm, tb, pm, pb, quarters(tm, tb, s[2]), depth + 1, flat, tol, r);
+            let quarters =
+                |a: f64, b: f64, mid: P2| [at(a + (b - a) * 0.25), mid, at(a + (b - a) * 0.75)];
+            split(
+                at,
+                ta,
+                tm,
+                pa,
+                pm,
+                quarters(ta, tm, s[0]),
+                depth + 1,
+                flat,
+                tol,
+                r,
+            );
+            split(
+                at,
+                tm,
+                tb,
+                pm,
+                pb,
+                quarters(tm, tb, s[2]),
+                depth + 1,
+                flat,
+                tol,
+                r,
+            );
         } else {
             r.pts.push(pa);
             r.tol.push(tol + stray.max(flat));
@@ -1622,8 +1919,15 @@ fn flatten(pc: &Curve, t0: f64, t1: f64, scale: (f64, f64), flat: f64, tol: f64,
     }
     const N0: usize = 4;
     for i in 0..N0 {
-        let (ta, tb) = (t0 + (t1 - t0) * i as f64 / N0 as f64, t0 + (t1 - t0) * (i + 1) as f64 / N0 as f64);
-        let s = [at(ta + (tb - ta) * 0.25), at(0.5 * (ta + tb)), at(ta + (tb - ta) * 0.75)];
+        let (ta, tb) = (
+            t0 + (t1 - t0) * i as f64 / N0 as f64,
+            t0 + (t1 - t0) * (i + 1) as f64 / N0 as f64,
+        );
+        let s = [
+            at(ta + (tb - ta) * 0.25),
+            at(0.5 * (ta + tb)),
+            at(ta + (tb - ta) * 0.75),
+        ];
         split(&at, ta, tb, at(ta), at(tb), s, 0, flat, tol, r);
     }
 }
@@ -1648,8 +1952,21 @@ fn flatten_ref(pc: &Curve, t0: f64, t1: f64, scale: (f64, f64), flat: f64, tol: 
         return;
     }
     #[allow(clippy::too_many_arguments, reason = "a recursion's state")]
-    fn split(at: &dyn Fn(f64) -> P2, ta: f64, tb: f64, pa: P2, pb: P2, depth: u32, flat: f64, tol: f64, r: &mut Ring) {
-        let stray = [0.25, 0.5, 0.75].into_iter().map(|s| seg_dist2(&at(ta + (tb - ta) * s), &pa, &pb)).fold(0.0, f64::max);
+    fn split(
+        at: &dyn Fn(f64) -> P2,
+        ta: f64,
+        tb: f64,
+        pa: P2,
+        pb: P2,
+        depth: u32,
+        flat: f64,
+        tol: f64,
+        r: &mut Ring,
+    ) {
+        let stray = [0.25, 0.5, 0.75]
+            .into_iter()
+            .map(|s| seg_dist2(&at(ta + (tb - ta) * s), &pa, &pb))
+            .fold(0.0, f64::max);
         if stray > flat && depth < 10 {
             let tm = 0.5 * (ta + tb);
             let pm = at(tm);
@@ -1662,7 +1979,10 @@ fn flatten_ref(pc: &Curve, t0: f64, t1: f64, scale: (f64, f64), flat: f64, tol: 
     }
     const N0: usize = 4;
     for i in 0..N0 {
-        let (ta, tb) = (t0 + (t1 - t0) * i as f64 / N0 as f64, t0 + (t1 - t0) * (i + 1) as f64 / N0 as f64);
+        let (ta, tb) = (
+            t0 + (t1 - t0) * i as f64 / N0 as f64,
+            t0 + (t1 - t0) * (i + 1) as f64 / N0 as f64,
+        );
         split(&at, ta, tb, at(ta), at(tb), 0, flat, tol, r);
     }
 }
@@ -1689,7 +2009,15 @@ fn loop_crossings(rings: &[Ring]) -> Vec<(usize, usize, P2)> {
         }
         for i in 0..r.pts.len() {
             let (a, b) = r.seg(i);
-            segs.push(Seg { a, b, lp, i, tol: r.tol[i], lo: P2::new(a.x.min(b.x), a.y.min(b.y)), hi: P2::new(a.x.max(b.x), a.y.max(b.y)) });
+            segs.push(Seg {
+                a,
+                b,
+                lp,
+                i,
+                tol: r.tol[i],
+                lo: P2::new(a.x.min(b.x), a.y.min(b.y)),
+                hi: P2::new(a.x.max(b.x), a.y.max(b.y)),
+            });
         }
     }
     let mut found: Vec<(usize, usize, P2)> = Vec::new();
@@ -1703,7 +2031,10 @@ fn loop_crossings(rings: &[Ring]) -> Vec<(usize, usize, P2)> {
     }
     let g = ((segs.len() as f64).sqrt().ceil() as usize).clamp(1, 512);
     let (w, h) = ((hi.x - lo.x).max(tol::TINY), (hi.y - lo.y).max(tol::TINY));
-    let cell = |x: f64, y: f64| (((x - lo.x) / w * g as f64) as usize).min(g - 1) + g * (((y - lo.y) / h * g as f64) as usize).min(g - 1);
+    let cell = |x: f64, y: f64| {
+        (((x - lo.x) / w * g as f64) as usize).min(g - 1)
+            + g * (((y - lo.y) / h * g as f64) as usize).min(g - 1)
+    };
     let mut bins: Vec<Vec<usize>> = vec![Vec::new(); g * g];
     for (k, s) in segs.iter().enumerate() {
         let (c0, c1) = (cell(s.lo.x, s.lo.y), cell(s.hi.x, s.hi.y));
@@ -1719,7 +2050,12 @@ fn loop_crossings(rings: &[Ring]) -> Vec<(usize, usize, P2)> {
             for &k in &bin[..n] {
                 let sk = &segs[k];
                 let (pair_a, pair_b) = (sk.lp.min(sj.lp), sk.lp.max(sj.lp));
-                if sk.hi.x < sj.lo.x || sj.hi.x < sk.lo.x || sk.hi.y < sj.lo.y || sj.hi.y < sk.lo.y || found.iter().any(|&(a, b, _)| (a, b) == (pair_a, pair_b)) {
+                if sk.hi.x < sj.lo.x
+                    || sj.hi.x < sk.lo.x
+                    || sk.hi.y < sj.lo.y
+                    || sj.hi.y < sk.lo.y
+                    || found.iter().any(|&(a, b, _)| (a, b) == (pair_a, pair_b))
+                {
                     continue;
                 }
                 if sk.lp == sj.lp {
@@ -1740,11 +2076,19 @@ fn loop_crossings(rings: &[Ring]) -> Vec<(usize, usize, P2)> {
 /// Whether segments a–b and c–d cross properly, each pair of ends lying more than `tol` to
 /// either side of the other segment's line. The sides come from [`orient2d`]'s exact sign.
 fn crosses(a: &P2, b: &P2, c: &P2, d: &P2, tol: f64) -> bool {
-    let (o1, o2, o3, o4) = (orient2d(a, b, c), orient2d(a, b, d), orient2d(c, d, a), orient2d(c, d, b));
+    let (o1, o2, o3, o4) = (
+        orient2d(a, b, c),
+        orient2d(a, b, d),
+        orient2d(c, d, a),
+        orient2d(c, d, b),
+    );
     if o1 * o2 >= 0 || o3 * o4 >= 0 {
         return false;
     }
-    let side = |p: &P2, q: &P2, r: &P2| ((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x)).abs() / (q - p).norm().max(tol::TINY);
+    let side = |p: &P2, q: &P2, r: &P2| {
+        ((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x)).abs()
+            / (q - p).norm().max(tol::TINY)
+    };
     side(a, b, c) > tol && side(a, b, d) > tol && side(c, d, a) > tol && side(c, d, b) > tol
 }
 
@@ -1763,7 +2107,14 @@ fn orient2d(a: &P2, b: &P2, c: &P2) -> i32 {
     // (ax − cx)(by − cy) − (ay − cy)(bx − cx) expanded into six products, each split exactly
     // into a product and its rounding error, summed into a non-overlapping expansion whose
     // largest (last non-zero) component carries the sign.
-    let terms = [(a.x, b.y), (-a.x, c.y), (-c.x, b.y), (-a.y, b.x), (a.y, c.x), (b.x, c.y)];
+    let terms = [
+        (a.x, b.y),
+        (-a.x, c.y),
+        (-c.x, b.y),
+        (-a.y, b.x),
+        (a.y, c.x),
+        (b.x, c.y),
+    ];
     let mut e: Vec<f64> = Vec::with_capacity(24);
     for (x, y) in terms {
         let p = x * y;
@@ -1808,13 +2159,24 @@ fn self_crossing(p: &[P2]) -> Option<(usize, usize)> {
                 continue;
             }
             let (c, d) = (p[j], p[(j + 1) % n]);
-            if a.x.max(b.x) < c.x.min(d.x) - eps || c.x.max(d.x) < a.x.min(b.x) - eps || a.y.max(b.y) < c.y.min(d.y) - eps || c.y.max(d.y) < a.y.min(b.y) - eps {
+            if a.x.max(b.x) < c.x.min(d.x) - eps
+                || c.x.max(d.x) < a.x.min(b.x) - eps
+                || a.y.max(b.y) < c.y.min(d.y) - eps
+                || c.y.max(d.y) < a.y.min(b.y) - eps
+            {
                 continue;
             }
-            let (d1, d2, d3, d4) = (cross(&a, &b, &c), cross(&a, &b, &d), cross(&c, &d, &a), cross(&c, &d, &b));
+            let (d1, d2, d3, d4) = (
+                cross(&a, &b, &c),
+                cross(&a, &b, &d),
+                cross(&c, &d, &a),
+                cross(&c, &d, &b),
+            );
             let l1 = (b - a).norm() * eps.max(tol::TINY);
             let l2 = (d - c).norm() * eps.max(tol::TINY);
-            if ((d1 > l1 && d2 < -l1) || (d1 < -l1 && d2 > l1)) && ((d3 > l2 && d4 < -l2) || (d3 < -l2 && d4 > l2)) {
+            if ((d1 > l1 && d2 < -l1) || (d1 < -l1 && d2 > l1))
+                && ((d3 > l2 && d4 < -l2) || (d3 < -l2 && d4 > l2))
+            {
                 return Some((i, j));
             }
         }
@@ -1825,11 +2187,12 @@ fn self_crossing(p: &[P2]) -> Option<(usize, usize)> {
 /// The exact orientation predicate of the full check.
 #[cfg(test)]
 mod predicate_tests {
-    use super::{crosses, orient2d, P2};
+    use super::{P2, crosses, orient2d};
 
     /// The exact sign of the orientation determinant of integer points (as i128).
     fn exact(a: (i64, i64), b: (i64, i64), c: (i64, i64)) -> i32 {
-        let d = (a.0 as i128 - c.0 as i128) * (b.1 as i128 - c.1 as i128) - (a.1 as i128 - c.1 as i128) * (b.0 as i128 - c.0 as i128);
+        let d = (a.0 as i128 - c.0 as i128) * (b.1 as i128 - c.1 as i128)
+            - (a.1 as i128 - c.1 as i128) * (b.0 as i128 - c.0 as i128);
         d.signum() as i32
     }
 
@@ -1851,27 +2214,58 @@ mod predicate_tests {
             let (dx, dy) = ((next() % 1000) as i64 + 1, (next() % 1000) as i64 + 1);
             let k = (next() % (1 << 39)) as i64 + 1;
             let b = (a.0 + dx * k, a.1 + dy * k);
-            let c = (a.0 + dx * 2 * k + (next() % 7) as i64 - 3, a.1 + dy * 2 * k + (next() % 7) as i64 - 3);
+            let c = (
+                a.0 + dx * 2 * k + (next() % 7) as i64 - 3,
+                a.1 + dy * 2 * k + (next() % 7) as i64 - 3,
+            );
             let f = |q: (i64, i64)| P2::new(q.0 as f64, q.1 as f64);
             let want = exact(a, b, c);
             assert_eq!(orient2d(&f(a), &f(b), &f(c)), want, "{a:?} {b:?} {c:?}");
-            let naive = (f(a).x - f(c).x) * (f(b).y - f(c).y) - (f(a).y - f(c).y) * (f(b).x - f(c).x);
+            let naive =
+                (f(a).x - f(c).x) * (f(b).y - f(c).y) - (f(a).y - f(c).y) * (f(b).x - f(c).x);
             if (naive > 0.0) as i32 - ((naive < 0.0) as i32) != want {
                 wrong_naive += 1;
             }
         }
         assert!(wrong_naive > 0, "the cases never needed the exact fallback");
-        assert_eq!(orient2d(&P2::new(0.0, 0.0), &P2::new(1.0, 1.0), &P2::new(2.0, 2.0)), 0);
+        assert_eq!(
+            orient2d(&P2::new(0.0, 0.0), &P2::new(1.0, 1.0), &P2::new(2.0, 2.0)),
+            0
+        );
     }
 
     #[test]
     fn crossings_at_tolerance() {
         let p = P2::new;
         // An X crosses; a touch at an end, or a crossing shallower than the tolerance, doesn't.
-        assert!(crosses(&p(0.0, 0.0), &p(2.0, 2.0), &p(0.0, 2.0), &p(2.0, 0.0), 1e-6));
-        assert!(!crosses(&p(0.0, 0.0), &p(2.0, 0.0), &p(1.0, 0.0), &p(1.0, 1.0), 1e-6));
-        assert!(!crosses(&p(0.0, 0.0), &p(2.0, 0.0), &p(1.0, -1e-7), &p(1.0, 1.0), 1e-6));
-        assert!(crosses(&p(0.0, 0.0), &p(2.0, 0.0), &p(1.0, -1e-5), &p(1.0, 1.0), 1e-6));
+        assert!(crosses(
+            &p(0.0, 0.0),
+            &p(2.0, 2.0),
+            &p(0.0, 2.0),
+            &p(2.0, 0.0),
+            1e-6
+        ));
+        assert!(!crosses(
+            &p(0.0, 0.0),
+            &p(2.0, 0.0),
+            &p(1.0, 0.0),
+            &p(1.0, 1.0),
+            1e-6
+        ));
+        assert!(!crosses(
+            &p(0.0, 0.0),
+            &p(2.0, 0.0),
+            &p(1.0, -1e-7),
+            &p(1.0, 1.0),
+            1e-6
+        ));
+        assert!(crosses(
+            &p(0.0, 0.0),
+            &p(2.0, 0.0),
+            &p(1.0, -1e-5),
+            &p(1.0, 1.0),
+            1e-6
+        ));
     }
 }
 
@@ -1894,7 +2288,14 @@ mod kind_tests {
     }
 
     fn line(a: [f64; 2], b: [f64; 2]) -> PathCurve {
-        PathCurve::Sketch { plane: Plane::top(), curve: Curve2::Line { a: Point2::new(a[0], a[1]), b: Point2::new(b[0], b[1]), source: None } }
+        PathCurve::Sketch {
+            plane: Plane::top(),
+            curve: Curve2::Line {
+                a: Point2::new(a[0], a[1]),
+                b: Point2::new(b[0], b[1]),
+                source: None,
+            },
+        }
     }
 
     /// A closed 10 × 10 square wire in the top plane.
@@ -1917,11 +2318,19 @@ mod kind_tests {
     fn round_trips(k: &mut NativeKernel, id: BodyId) -> Vec<BodyId> {
         let bytes = k.write_body(id).unwrap();
         let back = k.read_body(&bytes).unwrap();
-        assert_eq!(body(k, back), body(k, id), "the body format changed the body");
+        assert_eq!(
+            body(k, back),
+            body(k, id),
+            "the body format changed the body"
+        );
         let mut out = vec![back];
         for format in [ExchangeFormat::Step, ExchangeFormat::Iges] {
-            let file = k.export_model(format, "kinds", &[(id, "part".into())], &[]).unwrap();
-            let m = k.import_model(format, &file).unwrap_or_else(|e| panic!("{format:?}: {e}"));
+            let file = k
+                .export_model(format, "kinds", &[(id, "part".into())], &[])
+                .unwrap();
+            let m = k
+                .import_model(format, &file)
+                .unwrap_or_else(|e| panic!("{format:?}: {e}"));
             assert_eq!(m.parts.len(), 1, "{format:?}");
             out.push(m.parts[0].body);
         }
@@ -1931,7 +2340,10 @@ mod kind_tests {
     #[test]
     fn point_bodies() {
         let mut k = NativeKernel::new();
-        let id = k.create_points(&[Point3::new(1.0, 2.0, 3.0), Point3::new(3.0, 4.0, 5.0)]).unwrap().bodies[0];
+        let id = k
+            .create_points(&[Point3::new(1.0, 2.0, 3.0), Point3::new(3.0, 4.0, 5.0)])
+            .unwrap()
+            .bodies[0];
         assert_eq!(k.body_class(id).unwrap(), BodyClass::Point);
         valid(&k, id);
         let m = k.mass_properties(id).unwrap();
@@ -1945,12 +2357,22 @@ mod kind_tests {
         for b in round_trips(&mut k, id) {
             assert_eq!(k.body_class(b).unwrap(), BodyClass::Point);
             valid(&k, b);
-            let pts: Vec<Point3<f64>> = body(&k, b).points.iter().map(|&v| body(&k, b).verts[v].p).collect();
+            let pts: Vec<Point3<f64>> = body(&k, b)
+                .points
+                .iter()
+                .map(|&v| body(&k, b).verts[v].p)
+                .collect();
             assert_eq!(pts.len(), 2);
             assert!((pts[1] - Point3::new(3.0, 4.0, 5.0)).norm() < 1e-9);
         }
-        assert!(matches!(k.create_points(&[]), Err(KernelError::InvalidParameter(_))));
-        assert!(matches!(k.create_points(&[Point3::new(f64::NAN, 0.0, 0.0)]), Err(KernelError::InvalidInput(_))));
+        assert!(matches!(
+            k.create_points(&[]),
+            Err(KernelError::InvalidParameter(_))
+        ));
+        assert!(matches!(
+            k.create_points(&[Point3::new(f64::NAN, 0.0, 0.0)]),
+            Err(KernelError::InvalidInput(_))
+        ));
     }
 
     #[test]
@@ -1973,8 +2395,20 @@ mod kind_tests {
         assert!(es.iter().all(|e| e.faces == [None, None]));
         assert_eq!(k.vertices(id).unwrap().len(), 4);
         // An open wire with an arc: a quarter circle of radius 5, then a line of 3.
-        let arc = PathCurve::Sketch { plane: Plane::top(), curve: Curve2::Arc { center: Point2::origin(), radius: 5.0, start_angle: 0.0, sweep: PI / 2.0, source: None } };
-        let open = k.create_wire(&[line([0.0, 5.0], [-3.0, 5.0]), arc]).unwrap().bodies[0];
+        let arc = PathCurve::Sketch {
+            plane: Plane::top(),
+            curve: Curve2::Arc {
+                center: Point2::origin(),
+                radius: 5.0,
+                start_angle: 0.0,
+                sweep: PI / 2.0,
+                source: None,
+            },
+        };
+        let open = k
+            .create_wire(&[line([0.0, 5.0], [-3.0, 5.0]), arc])
+            .unwrap()
+            .bodies[0];
         valid(&k, open);
         let ob = body(&k, open);
         assert!(!ob.wire_closed(&ob.wires[0]));
@@ -1989,10 +2423,17 @@ mod kind_tests {
         }
         for b in round_trips(&mut k, open) {
             valid(&k, b);
-            assert!(near(k.mass_properties(b).unwrap().length, want, 1e-9), "{}", k.mass_properties(b).unwrap().length);
+            assert!(
+                near(k.mass_properties(b).unwrap().length, want, 1e-9),
+                "{}",
+                k.mass_properties(b).unwrap().length
+            );
         }
         // Curves that don't join are refused.
-        assert!(k.create_wire(&[line([0.0, 0.0], [1.0, 0.0]), line([5.0, 5.0], [6.0, 5.0])]).is_err());
+        assert!(
+            k.create_wire(&[line([0.0, 0.0], [1.0, 0.0]), line([5.0, 5.0], [6.0, 5.0])])
+                .is_err()
+        );
     }
 
     #[test]
@@ -2003,14 +2444,24 @@ mod kind_tests {
         // A wire whose edges don't meet.
         let mut b = good.clone();
         b.wires[0].edges.swap(1, 2);
-        assert!(b.check().iter().any(|i| i.contains("doesn't meet")), "{:?}", b.check());
+        assert!(
+            b.check().iter().any(|i| i.contains("doesn't meet")),
+            "{:?}",
+            b.check()
+        );
         // A free edge left out of the wires.
         let mut b = good.clone();
         b.wires[0].edges.pop();
-        assert!(b.check().iter().any(|i| i.contains("in no wire")), "{:?}", b.check());
+        assert!(
+            b.check().iter().any(|i| i.contains("in no wire")),
+            "{:?}",
+            b.check()
+        );
         // An edge in two wires; a wire edge out of range.
         let mut b = good.clone();
-        b.wires.push(super::Wire { edges: vec![b.wires[0].edges[0]] });
+        b.wires.push(super::Wire {
+            edges: vec![b.wires[0].edges[0]],
+        });
         assert!(b.check().iter().any(|i| i.contains("in wires 2 times")));
         let mut b = good.clone();
         b.wires[0].edges.push((99, true));
@@ -2019,16 +2470,46 @@ mod kind_tests {
         let mut b = good.clone();
         b.points = vec![0, 0];
         let issues = b.check();
-        assert!(issues.iter().any(|i| i.contains("end of an edge")) && issues.iter().any(|i| i.contains("twice")), "{issues:?}");
+        assert!(
+            issues.iter().any(|i| i.contains("end of an edge"))
+                && issues.iter().any(|i| i.contains("twice")),
+            "{issues:?}"
+        );
         // A sheet whose edge three faces use (non-manifold).
-        let sheet = k.sweep_body(id, &BodySweep::Translate(Vector3::new(0.0, 0.0, 5.0))).unwrap().bodies[0];
+        let sheet = k
+            .sweep_body(id, &BodySweep::Translate(Vector3::new(0.0, 0.0, 5.0)))
+            .unwrap()
+            .bodies[0];
         let mut b = body(&k, sheet).clone();
         valid(&k, sheet);
         b.faces.push(b.faces[0].clone());
         b.shells[0].faces.push(b.faces.len() - 1);
-        assert!(b.check().iter().any(|i| i.contains("manifold")), "{:?}", b.check());
+        assert!(
+            b.check().iter().any(|i| i.contains("manifold")),
+            "{:?}",
+            b.check()
+        );
         // A solid whose shell isn't closed.
-        let mut c = k.extrude(&Profile::new(Plane::top(), vec![Region { outer: Loop { curves: vec![Curve2::Circle { center: Point2::origin(), radius: 1.0, source: None }] }, holes: vec![], source: None }]), Extent::Blind(1.0)).map(|r| body(&k, r.bodies[0]).clone()).unwrap();
+        let mut c = k
+            .extrude(
+                &Profile::new(
+                    Plane::top(),
+                    vec![Region {
+                        outer: Loop {
+                            curves: vec![Curve2::Circle {
+                                center: Point2::origin(),
+                                radius: 1.0,
+                                source: None,
+                            }],
+                        },
+                        holes: vec![],
+                        source: None,
+                    }],
+                ),
+                Extent::Blind(1.0),
+            )
+            .map(|r| body(&k, r.bodies[0]).clone())
+            .unwrap();
         c.shells[0].closed = false;
         assert!(c.check().iter().any(|i| i.contains("is open")));
     }
@@ -2037,57 +2518,198 @@ mod kind_tests {
     fn sweeps_one_kind_higher() {
         let mut k = NativeKernel::new();
         // Points into a wire, straight and turned (part and whole).
-        let p = k.create_points(&[Point3::new(5.0, 0.0, 0.0)]).unwrap().bodies[0];
-        let w = k.sweep_body(p, &BodySweep::Translate(Vector3::new(0.0, 3.0, 4.0))).unwrap().bodies[0];
+        let p = k
+            .create_points(&[Point3::new(5.0, 0.0, 0.0)])
+            .unwrap()
+            .bodies[0];
+        let w = k
+            .sweep_body(p, &BodySweep::Translate(Vector3::new(0.0, 3.0, 4.0)))
+            .unwrap()
+            .bodies[0];
         assert_eq!(k.body_class(w).unwrap(), BodyClass::Wire);
         assert!(near(k.mass_properties(w).unwrap().length, 5.0, 1e-12));
-        let z = Axis { origin: Point3::origin(), dir: Vector3::z_axis() };
-        let arc = k.sweep_body(p, &BodySweep::Rotate { axis: z, angle: PI / 2.0 }).unwrap().bodies[0];
+        let z = Axis {
+            origin: Point3::origin(),
+            dir: Vector3::z_axis(),
+        };
+        let arc = k
+            .sweep_body(
+                p,
+                &BodySweep::Rotate {
+                    axis: z,
+                    angle: PI / 2.0,
+                },
+            )
+            .unwrap()
+            .bodies[0];
         valid(&k, arc);
-        assert!(near(k.mass_properties(arc).unwrap().length, 2.5 * PI, 1e-12));
-        let ring = k.sweep_body(p, &BodySweep::Rotate { axis: z, angle: -TAU }).unwrap().bodies[0];
+        assert!(near(
+            k.mass_properties(arc).unwrap().length,
+            2.5 * PI,
+            1e-12
+        ));
+        let ring = k
+            .sweep_body(
+                p,
+                &BodySweep::Rotate {
+                    axis: z,
+                    angle: -TAU,
+                },
+            )
+            .unwrap()
+            .bodies[0];
         valid(&k, ring);
         assert!(body(&k, ring).edges[0].closed());
-        assert!(near(k.mass_properties(ring).unwrap().length, 10.0 * PI, 1e-12));
+        assert!(near(
+            k.mass_properties(ring).unwrap().length,
+            10.0 * PI,
+            1e-12
+        ));
         // A point on the axis sweeps nothing.
-        let o = k.create_points(&[Point3::new(0.0, 0.0, 2.0)]).unwrap().bodies[0];
-        assert!(k.sweep_body(o, &BodySweep::Rotate { axis: z, angle: 1.0 }).is_err());
+        let o = k
+            .create_points(&[Point3::new(0.0, 0.0, 2.0)])
+            .unwrap()
+            .bodies[0];
+        assert!(
+            k.sweep_body(
+                o,
+                &BodySweep::Rotate {
+                    axis: z,
+                    angle: 1.0
+                }
+            )
+            .is_err()
+        );
         // A wire into a sheet: the square's walls.
         let sq = square(&mut k);
-        let walls = k.sweep_body(sq, &BodySweep::Translate(Vector3::new(0.0, 0.0, 5.0))).unwrap();
+        let walls = k
+            .sweep_body(sq, &BodySweep::Translate(Vector3::new(0.0, 0.0, 5.0)))
+            .unwrap();
         let wb = walls.bodies[0];
         valid(&k, wb);
         assert_eq!(k.body_class(wb).unwrap(), BodyClass::Sheet);
-        assert!(near(k.mass_properties(wb).unwrap().surface_area, 200.0, 1e-12));
+        assert!(near(
+            k.mass_properties(wb).unwrap().surface_area,
+            200.0,
+            1e-12
+        ));
         assert_eq!(walls.history.generated.len(), 4);
-        assert!(walls.history.generated.iter().all(|(_, o)| matches!(o, Origin::FromEdge { body, .. } if *body == sq)));
+        assert!(
+            walls
+                .history
+                .generated
+                .iter()
+                .all(|(_, o)| matches!(o, Origin::FromEdge { body, .. } if *body == sq))
+        );
         // A segment into a flat sheet, then that into a box.
-        let seg = k.create_wire(&[line([0.0, 0.0], [10.0, 0.0])]).unwrap().bodies[0];
-        let flat = k.sweep_body(seg, &BodySweep::Translate(Vector3::new(0.0, 10.0, 0.0))).unwrap().bodies[0];
+        let seg = k
+            .create_wire(&[line([0.0, 0.0], [10.0, 0.0])])
+            .unwrap()
+            .bodies[0];
+        let flat = k
+            .sweep_body(seg, &BodySweep::Translate(Vector3::new(0.0, 10.0, 0.0)))
+            .unwrap()
+            .bodies[0];
         valid(&k, flat);
-        assert!(near(k.mass_properties(flat).unwrap().surface_area, 100.0, 1e-12));
-        let boxed = k.sweep_body(flat, &BodySweep::Translate(Vector3::new(0.0, 0.0, -5.0))).unwrap().bodies[0];
+        assert!(near(
+            k.mass_properties(flat).unwrap().surface_area,
+            100.0,
+            1e-12
+        ));
+        let boxed = k
+            .sweep_body(flat, &BodySweep::Translate(Vector3::new(0.0, 0.0, -5.0)))
+            .unwrap()
+            .bodies[0];
         valid(&k, boxed);
         assert_eq!(k.body_class(boxed).unwrap(), BodyClass::Solid);
         let m = k.mass_properties(boxed).unwrap();
-        assert!(near(m.volume, 500.0, 1e-12) && near(m.surface_area, 400.0, 1e-12), "{m:?}");
+        assert!(
+            near(m.volume, 500.0, 1e-12) && near(m.surface_area, 400.0, 1e-12),
+            "{m:?}"
+        );
         // A sheet swept along itself makes no solid.
-        assert!(matches!(k.sweep_body(flat, &BodySweep::Translate(Vector3::new(1.0, 0.0, 0.0))), Err(KernelError::InvalidParameter(_))));
+        assert!(matches!(
+            k.sweep_body(flat, &BodySweep::Translate(Vector3::new(1.0, 0.0, 0.0))),
+            Err(KernelError::InvalidParameter(_))
+        ));
         // Turned: a segment parallel to the axis into a cylinder, its rectangle into a tube.
-        let up = k.create_wire(&[PathCurve::Bezier3 { poles: vec![Point3::new(5.0, 0.0, 0.0), Point3::new(5.0, 0.0, 4.0)], weights: vec![] }]).unwrap().bodies[0];
-        let cyl = k.sweep_body(up, &BodySweep::Rotate { axis: z, angle: TAU }).unwrap().bodies[0];
+        let up = k
+            .create_wire(&[PathCurve::Bezier3 {
+                poles: vec![Point3::new(5.0, 0.0, 0.0), Point3::new(5.0, 0.0, 4.0)],
+                weights: vec![],
+            }])
+            .unwrap()
+            .bodies[0];
+        let cyl = k
+            .sweep_body(
+                up,
+                &BodySweep::Rotate {
+                    axis: z,
+                    angle: TAU,
+                },
+            )
+            .unwrap()
+            .bodies[0];
         valid(&k, cyl);
-        assert!(near(k.mass_properties(cyl).unwrap().surface_area, 40.0 * PI, 1e-9));
-        let rect = k.sweep_body(up, &BodySweep::Translate(Vector3::new(2.0, 0.0, 0.0))).unwrap().bodies[0];
-        let tube = k.sweep_body(rect, &BodySweep::Rotate { axis: z, angle: TAU }).unwrap().bodies[0];
+        assert!(near(
+            k.mass_properties(cyl).unwrap().surface_area,
+            40.0 * PI,
+            1e-9
+        ));
+        let rect = k
+            .sweep_body(up, &BodySweep::Translate(Vector3::new(2.0, 0.0, 0.0)))
+            .unwrap()
+            .bodies[0];
+        let tube = k
+            .sweep_body(
+                rect,
+                &BodySweep::Rotate {
+                    axis: z,
+                    angle: TAU,
+                },
+            )
+            .unwrap()
+            .bodies[0];
         valid(&k, tube);
-        assert!(near(k.mass_properties(tube).unwrap().volume, PI * 24.0 * 4.0, 1e-9));
-        let quarter = k.sweep_body(rect, &BodySweep::Rotate { axis: z, angle: PI / 2.0 }).unwrap().bodies[0];
+        assert!(near(
+            k.mass_properties(tube).unwrap().volume,
+            PI * 24.0 * 4.0,
+            1e-9
+        ));
+        let quarter = k
+            .sweep_body(
+                rect,
+                &BodySweep::Rotate {
+                    axis: z,
+                    angle: PI / 2.0,
+                },
+            )
+            .unwrap()
+            .bodies[0];
         valid(&k, quarter);
-        assert!(near(k.mass_properties(quarter).unwrap().volume, PI * 24.0, 1e-9));
+        assert!(near(
+            k.mass_properties(quarter).unwrap().volume,
+            PI * 24.0,
+            1e-9
+        ));
         // A segment skew to the axis turned: a hyperboloid; area 2π ∫ ρ √(ρ'² + h'²) dt.
-        let skew = k.create_wire(&[PathCurve::Bezier3 { poles: vec![Point3::new(5.0, -1.0, 0.0), Point3::new(5.0, 1.0, 3.0)], weights: vec![] }]).unwrap().bodies[0];
-        let hyp = k.sweep_body(skew, &BodySweep::Rotate { axis: z, angle: TAU }).unwrap().bodies[0];
+        let skew = k
+            .create_wire(&[PathCurve::Bezier3 {
+                poles: vec![Point3::new(5.0, -1.0, 0.0), Point3::new(5.0, 1.0, 3.0)],
+                weights: vec![],
+            }])
+            .unwrap()
+            .bodies[0];
+        let hyp = k
+            .sweep_body(
+                skew,
+                &BodySweep::Rotate {
+                    axis: z,
+                    angle: TAU,
+                },
+            )
+            .unwrap()
+            .bodies[0];
         valid(&k, hyp);
         let n = 20000;
         let want: f64 = (0..n)
@@ -2098,7 +2720,11 @@ mod kind_tests {
                 TAU * rho * ((y * dy / rho).powi(2) + 9.0).sqrt() / n as f64
             })
             .sum();
-        assert!(near(k.mass_properties(hyp).unwrap().surface_area, want, 1e-6), "{} vs {want}", k.mass_properties(hyp).unwrap().surface_area);
+        assert!(
+            near(k.mass_properties(hyp).unwrap().surface_area, want, 1e-6),
+            "{} vs {want}",
+            k.mass_properties(hyp).unwrap().surface_area
+        );
         for b in round_trips(&mut k, hyp) {
             assert!(near(k.mass_properties(b).unwrap().surface_area, want, 1e-6));
         }
@@ -2107,21 +2733,60 @@ mod kind_tests {
     #[test]
     fn cylindrical_box() {
         let mut k = NativeKernel::new();
-        let spec = |len: f64, ri: f64, ro: f64, a0: f64, a1: f64| CylindricalBox { frame: Plane::top(), length: len, inner_radius: ri, outer_radius: ro, start_angle: a0.to_radians(), end_angle: a1.to_radians() };
-        let id = k.cylindrical_box(&spec(10.0, 2.0, 5.0, 30.0, 120.0)).unwrap().bodies[0];
+        let spec = |len: f64, ri: f64, ro: f64, a0: f64, a1: f64| CylindricalBox {
+            frame: Plane::top(),
+            length: len,
+            inner_radius: ri,
+            outer_radius: ro,
+            start_angle: a0.to_radians(),
+            end_angle: a1.to_radians(),
+        };
+        let id = k
+            .cylindrical_box(&spec(10.0, 2.0, 5.0, 30.0, 120.0))
+            .unwrap()
+            .bodies[0];
         valid(&k, id);
         let m = k.mass_properties(id).unwrap();
         let th = PI / 2.0;
         assert!(near(m.volume, th / 2.0 * 21.0 * 10.0, 1e-9));
-        assert!(near(m.surface_area, th * 21.0 + th * 7.0 * 10.0 + 2.0 * 3.0 * 10.0, 1e-9));
+        assert!(near(
+            m.surface_area,
+            th * 21.0 + th * 7.0 * 10.0 + 2.0 * 3.0 * 10.0,
+            1e-9
+        ));
         // It starts at 30°: its centroid lies at 75°.
         let c = m.center_of_mass;
         assert!((c.y.atan2(c.x) - 75f64.to_radians()).abs() < 1e-9);
-        let tube = k.cylindrical_box(&spec(1.0, 1.0, 2.0, 0.0, 360.0)).unwrap().bodies[0];
+        let tube = k
+            .cylindrical_box(&spec(1.0, 1.0, 2.0, 0.0, 360.0))
+            .unwrap()
+            .bodies[0];
         valid(&k, tube);
-        assert!(near(k.mass_properties(tube).unwrap().volume, 3.0 * PI, 1e-9));
-        for bad in [spec(0.0, 2.0, 5.0, 0.0, 90.0), spec(-1.0, 2.0, 5.0, 0.0, 90.0), spec(10.0, 0.0, 5.0, 0.0, 90.0), spec(10.0, 5.0, 2.0, 0.0, 90.0), spec(10.0, 5.0, 5.0, 0.0, 90.0), spec(10.0, 2.0, 5.0, 400.0, 450.0), spec(10.0, 2.0, 5.0, -10.0, 50.0), spec(10.0, 2.0, 5.0, 90.0, 10.0), spec(10.0, 2.0, 5.0, 0.0, 400.0), spec(f64::NAN, 2.0, 5.0, 0.0, 90.0), spec(10.0, 2.0, f64::INFINITY, 0.0, 90.0)] {
-            assert!(matches!(k.cylindrical_box(&bad), Err(KernelError::InvalidParameter(_))), "{bad:?}");
+        assert!(near(
+            k.mass_properties(tube).unwrap().volume,
+            3.0 * PI,
+            1e-9
+        ));
+        for bad in [
+            spec(0.0, 2.0, 5.0, 0.0, 90.0),
+            spec(-1.0, 2.0, 5.0, 0.0, 90.0),
+            spec(10.0, 0.0, 5.0, 0.0, 90.0),
+            spec(10.0, 5.0, 2.0, 0.0, 90.0),
+            spec(10.0, 5.0, 5.0, 0.0, 90.0),
+            spec(10.0, 2.0, 5.0, 400.0, 450.0),
+            spec(10.0, 2.0, 5.0, -10.0, 50.0),
+            spec(10.0, 2.0, 5.0, 90.0, 10.0),
+            spec(10.0, 2.0, 5.0, 0.0, 400.0),
+            spec(f64::NAN, 2.0, 5.0, 0.0, 90.0),
+            spec(10.0, 2.0, f64::INFINITY, 0.0, 90.0),
+        ] {
+            assert!(
+                matches!(
+                    k.cylindrical_box(&bad),
+                    Err(KernelError::InvalidParameter(_))
+                ),
+                "{bad:?}"
+            );
         }
     }
 
@@ -2130,27 +2795,68 @@ mod kind_tests {
         let mut k = NativeKernel::new();
         // The square [1, 2] × [0, 1] of the top plane about the y-parallel axis one below it:
         // swept volume θ ∫ x dA = 1.5 θ (each point leaves the plane at speed x).
-        let sq = Region { outer: Loop { curves: [[1.0, 0.0], [2.0, 0.0], [2.0, 1.0], [1.0, 1.0]].iter().zip([[2.0, 0.0], [2.0, 1.0], [1.0, 1.0], [1.0, 0.0]]).map(|(a, b)| Curve2::Line { a: Point2::new(a[0], a[1]), b: Point2::new(b[0], b[1]), source: None }).collect() }, holes: vec![], source: None };
+        let sq = Region {
+            outer: Loop {
+                curves: [[1.0, 0.0], [2.0, 0.0], [2.0, 1.0], [1.0, 1.0]]
+                    .iter()
+                    .zip([[2.0, 0.0], [2.0, 1.0], [1.0, 1.0], [1.0, 0.0]])
+                    .map(|(a, b)| Curve2::Line {
+                        a: Point2::new(a[0], a[1]),
+                        b: Point2::new(b[0], b[1]),
+                        source: None,
+                    })
+                    .collect(),
+            },
+            holes: vec![],
+            source: None,
+        };
         let p = Profile::new(Plane::top(), vec![sq]);
-        let axis = Axis { origin: Point3::new(0.0, 0.0, -1.0), dir: Vector3::y_axis() };
+        let axis = Axis {
+            origin: Point3::new(0.0, 0.0, -1.0),
+            dir: Vector3::y_axis(),
+        };
         for (angle, vol) in [(PI / 2.0, 0.75 * PI), (TAU, 3.0 * PI)] {
             let id = k.revolve(&p, axis, angle).unwrap().bodies[0];
             valid(&k, id);
-            assert!(near(k.mass_properties(id).unwrap().volume, vol, 1e-9), "{angle}: {}", k.mass_properties(id).unwrap().volume);
+            assert!(
+                near(k.mass_properties(id).unwrap().volume, vol, 1e-9),
+                "{angle}: {}",
+                k.mass_properties(id).unwrap().volume
+            );
         }
         // A skew axis (SMLib sweep 31's kind): valid, and volume θ ∫ (z × r)·n dA.
-        let skew = Axis { origin: Point3::new(4.0, 2.0, -3.0), dir: Unit::new_normalize(Vector3::new(-2.0, 5.0, 1.0)) };
+        let skew = Axis {
+            origin: Point3::new(4.0, 2.0, -3.0),
+            dir: Unit::new_normalize(Vector3::new(-2.0, 5.0, 1.0)),
+        };
         let id = k.revolve(&p, skew, 1.0).unwrap().bodies[0];
         valid(&k, id);
         let (z, o) = (skew.dir.into_inner(), skew.origin);
         let speed = |x: f64, y: f64| z.cross(&(Point3::new(x, y, 0.0) - o)).z.abs();
         let n = 200;
-        let want: f64 = (0..n * n).map(|i| speed(1.0 + ((i % n) as f64 + 0.5) / n as f64, ((i / n) as f64 + 0.5) / n as f64) / (n * n) as f64).sum();
-        assert!(near(k.mass_properties(id).unwrap().volume, want, 1e-6), "{} vs {want}", k.mass_properties(id).unwrap().volume);
+        let want: f64 = (0..n * n)
+            .map(|i| {
+                speed(
+                    1.0 + ((i % n) as f64 + 0.5) / n as f64,
+                    ((i / n) as f64 + 0.5) / n as f64,
+                ) / (n * n) as f64
+            })
+            .sum();
+        assert!(
+            near(k.mass_properties(id).unwrap().volume, want, 1e-6),
+            "{} vs {want}",
+            k.mass_properties(id).unwrap().volume
+        );
         // An axis square to the plane, or one the profile straddles, is refused.
-        let normal = Axis { origin: Point3::new(0.0, 0.0, -1.0), dir: Vector3::z_axis() };
+        let normal = Axis {
+            origin: Point3::new(0.0, 0.0, -1.0),
+            dir: Vector3::z_axis(),
+        };
         assert!(k.revolve(&p, normal, 1.0).is_err());
-        let across = Axis { origin: Point3::new(1.5, 0.0, -1.0), dir: Vector3::y_axis() };
+        let across = Axis {
+            origin: Point3::new(1.5, 0.0, -1.0),
+            dir: Vector3::y_axis(),
+        };
         assert!(k.revolve(&p, across, 1.0).is_err());
     }
 }
@@ -2165,7 +2871,9 @@ mod tests {
     #[test]
     fn an_inside_out_solid_is_reported_with_its_volume() {
         let mut k = NativeKernel::new();
-        let Shape::Body(id) = k.box_(10.0, 20.0, 30.0).unwrap() else { unreachable!() };
+        let Shape::Body(id) = k.box_(10.0, 20.0, 30.0).unwrap() else {
+            unreachable!()
+        };
         let mut b = (**k.get(id).unwrap()).clone();
         assert_eq!(b.check(), Vec::<String>::new());
         for f in &mut b.faces {
@@ -2177,6 +2885,9 @@ mod tests {
                 }
             }
         }
-        assert_eq!(b.check(), vec!["solid 0 encloses a volume of -6.000e3 (its faces point in)".to_string()]);
+        assert_eq!(
+            b.check(),
+            vec!["solid 0 encloses a volume of -6.000e3 (its faces point in)".to_string()]
+        );
     }
 }

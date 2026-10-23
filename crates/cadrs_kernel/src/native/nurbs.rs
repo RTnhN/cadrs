@@ -3,8 +3,8 @@
 //! Control points are stored homogeneous: `[w·x, w·y, w·z, w]`. 2D curves (p-curves) use z = 0.
 
 use super::math::*;
-use nalgebra::{DMatrix, DVector, Vector4};
 use super::tol;
+use nalgebra::{DMatrix, DVector, Vector4};
 
 pub type H = Vector4<f64>;
 
@@ -61,7 +61,11 @@ pub fn basis_ders(span: usize, u: f64, p: usize, d: usize, knots: &[f64]) -> Vec
         let mut saved = 0.0;
         for r in 0..j {
             ndu[j][r] = right[r + 1] + left[j - r];
-            let temp = if ndu[j][r] == 0.0 { 0.0 } else { ndu[r][j - 1] / ndu[j][r] };
+            let temp = if ndu[j][r] == 0.0 {
+                0.0
+            } else {
+                ndu[r][j - 1] / ndu[j][r]
+            };
             ndu[r][j] = saved + right[r + 1] * temp;
             saved = left[j - r] * temp;
         }
@@ -157,7 +161,12 @@ fn basis_ders_wide(span: usize, u: f64, p: usize, d: usize, knots: &[f64]) -> Wi
 }
 
 /// A2.3 for degree `N - 1`, into rows `W` wide (`W >= N`).
-fn basis_ders_n<const N: usize, const W: usize>(span: usize, u: f64, d: usize, knots: &[f64]) -> [[f64; W]; MAXD + 1] {
+fn basis_ders_n<const N: usize, const W: usize>(
+    span: usize,
+    u: f64,
+    d: usize,
+    knots: &[f64],
+) -> [[f64; W]; MAXD + 1] {
     let p = N - 1;
     let mut ndu = [[0.0; N]; N];
     let mut left = [0.0; N];
@@ -169,7 +178,11 @@ fn basis_ders_n<const N: usize, const W: usize>(span: usize, u: f64, d: usize, k
         let mut saved = 0.0;
         for r in 0..j {
             ndu[j][r] = right[r + 1] + left[j - r];
-            let temp = if ndu[j][r] == 0.0 { 0.0 } else { ndu[r][j - 1] / ndu[j][r] };
+            let temp = if ndu[j][r] == 0.0 {
+                0.0
+            } else {
+                ndu[r][j - 1] / ndu[j][r]
+            };
             ndu[r][j] = saved + right[r + 1] * temp;
             saved = left[j - r] * temp;
         }
@@ -253,13 +266,20 @@ fn basis1_n<const N: usize>(span: usize, u: f64, deriv: bool, knots: &[f64]) -> 
         let mut saved = 0.0;
         for r in 0..j {
             ndu[j][r] = right[r + 1] + left[j - r];
-            let temp = if ndu[j][r] == 0.0 { 0.0 } else { ndu[r][j - 1] / ndu[j][r] };
+            let temp = if ndu[j][r] == 0.0 {
+                0.0
+            } else {
+                ndu[r][j - 1] / ndu[j][r]
+            };
             ndu[r][j] = saved + right[r + 1] * temp;
             saved = left[j - r] * temp;
         }
         ndu[j][j] = saved;
     }
-    let mut out = B1 { v: [0.0; MAXP + 1], d: [0.0; MAXP + 1] };
+    let mut out = B1 {
+        v: [0.0; MAXP + 1],
+        d: [0.0; MAXP + 1],
+    };
     for j in 0..=p {
         out.v[j] = ndu[j][p];
     }
@@ -359,10 +379,17 @@ fn knots_issue(p: usize, knots: &[f64], cps: &[H]) -> Option<String> {
         return Some("a B-spline needs degree 1 or more".into());
     }
     if n <= p {
-        return Some(format!("a degree {p} B-spline needs at least {} control points, not {n}", p + 1));
+        return Some(format!(
+            "a degree {p} B-spline needs at least {} control points, not {n}",
+            p + 1
+        ));
     }
     if knots.len() != n + p + 1 {
-        return Some(format!("{n} control points of degree {p} need {} knots, not {}", n + p + 1, knots.len()));
+        return Some(format!(
+            "{n} control points of degree {p} need {} knots, not {}",
+            n + p + 1,
+            knots.len()
+        ));
     }
     if knots.iter().any(|k| !k.is_finite()) {
         return Some("a knot isn't a finite number".into());
@@ -405,7 +432,11 @@ impl NurbsCurve {
     /// poles, as many weights, all finite and the weights positive.
     pub fn try_bezier(poles: &[P3], weights: &[f64]) -> crate::Result<Self> {
         if poles.len() < 2 || weights.len() != poles.len() {
-            return Err(crate::KernelError::InvalidInput(format!("a Bézier curve needs two or more poles and a weight for each ({} poles, {} weights)", poles.len(), weights.len())));
+            return Err(crate::KernelError::InvalidInput(format!(
+                "a Bézier curve needs two or more poles and a weight for each ({} poles, {} weights)",
+                poles.len(),
+                weights.len()
+            )));
         }
         let c = Self::bezier(poles, weights);
         c.validate()?;
@@ -418,11 +449,18 @@ impl NurbsCurve {
     /// # Panics
     /// With no poles, or fewer weights than poles.
     pub fn bezier(poles: &[P3], weights: &[f64]) -> Self {
-        assert!(!poles.is_empty() && weights.len() >= poles.len(), "a Bézier curve needs poles and a weight for each");
+        assert!(
+            !poles.is_empty() && weights.len() >= poles.len(),
+            "a Bézier curve needs poles and a weight for each"
+        );
         let p = poles.len() - 1;
         let mut knots = vec![0.0; p + 1];
         knots.extend(vec![1.0; p + 1]);
-        Self { degree: p, knots, cps: poles.iter().zip(weights).map(|(q, w)| hom(q, *w)).collect() }
+        Self {
+            degree: p,
+            knots,
+            cps: poles.iter().zip(weights).map(|(q, w)| hom(q, *w)).collect(),
+        }
     }
 
     /// The parameter range: the knots `[p]` and `[n]` (n the number of control points).
@@ -511,7 +549,11 @@ impl NurbsCurve {
         Self {
             degree: self.degree,
             knots: self.knots.clone(),
-            cps: self.cps.iter().map(|c| hom(&m.point(&dehom(c)), c.w)).collect(),
+            cps: self
+                .cps
+                .iter()
+                .map(|c| hom(&m.point(&dehom(c)), c.w))
+                .collect(),
         }
     }
 
@@ -544,7 +586,11 @@ impl NurbsCurve {
     pub fn reparam(&self, a: f64, b: f64) -> Self {
         let (a0, b0) = self.range();
         let s = (b - a) / (b0 - a0);
-        Self { degree: self.degree, knots: self.knots.iter().map(|k| a + (k - a0) * s).collect(), cps: self.cps.clone() }
+        Self {
+            degree: self.degree,
+            knots: self.knots.iter().map(|k| a + (k - a0) * s).collect(),
+            cps: self.cps.clone(),
+        }
     }
 
     /// Global interpolation (A9.1) of degree `p` through `pts` at parameters `params`, with
@@ -566,7 +612,9 @@ impl NurbsCurve {
             params[r] + q as f64 * period
         };
         let ncp = m + 2 * p;
-        let knots: Vec<f64> = (0..ncp + p + 1).map(|i| t(i as isize - p as isize)).collect();
+        let knots: Vec<f64> = (0..ncp + p + 1)
+            .map(|i| t(i as isize - p as isize))
+            .collect();
         let mut a = DMatrix::<f64>::zeros(m, m);
         for k in 0..m {
             let span = find_span(ncp - 1, p, params[k], &knots);
@@ -576,13 +624,23 @@ impl NurbsCurve {
             }
         }
         let lu = a.lu();
-        let mut sol = [DVector::<f64>::zeros(m), DVector::<f64>::zeros(m), DVector::<f64>::zeros(m)];
+        let mut sol = [
+            DVector::<f64>::zeros(m),
+            DVector::<f64>::zeros(m),
+            DVector::<f64>::zeros(m),
+        ];
         for (c, out) in sol.iter_mut().enumerate() {
             let b = DVector::from_iterator(m, pts.iter().map(|q| q[c]));
             *out = lu.solve(&b)?;
         }
-        let cps: Vec<H> = (0..ncp).map(|i| H::new(sol[0][i % m], sol[1][i % m], sol[2][i % m], 1.0)).collect();
-        let mut c = Self { degree: p, knots, cps };
+        let cps: Vec<H> = (0..ncp)
+            .map(|i| H::new(sol[0][i % m], sol[1][i % m], sol[2][i % m], 1.0))
+            .collect();
+        let mut c = Self {
+            degree: p,
+            knots,
+            cps,
+        };
         // Clamp: knots of multiplicity p at both ends of the period, then cut.
         let (lo, hi) = (params[0], params[m]);
         let eps = tol::REL_FINE * (1.0 + period.abs());
@@ -599,16 +657,29 @@ impl NurbsCurve {
         knots.extend(c.knots[a..=b].iter().map(|k| k.clamp(lo, hi)));
         knots.push(hi);
         let cps = c.cps[a - 1..=b - p].to_vec();
-        Some(Self { degree: p, knots, cps })
+        Some(Self {
+            degree: p,
+            knots,
+            cps,
+        })
     }
 
     /// The degree-`p` curve through `pts` at `params` (increasing; repeats are dropped), with the
     /// end derivatives `d0` and `d1` when given; degree one when that system can't be solved.
-    pub fn interpolate(pts: &[P3], params: &[f64], p: usize, d0: Option<V3>, d1: Option<V3>) -> Self {
+    pub fn interpolate(
+        pts: &[P3],
+        params: &[f64],
+        p: usize,
+        d0: Option<V3>,
+        d1: Option<V3>,
+    ) -> Self {
         // Parameters must increase strictly: drop points whose parameter repeats.
         let mut keep: Vec<usize> = Vec::with_capacity(pts.len());
         for i in 0..pts.len() {
-            if keep.last().is_none_or(|&j| params[i] > params[j] + 1e-14 * (1.0 + params[j].abs())) {
+            if keep
+                .last()
+                .is_none_or(|&j| params[i] > params[j] + 1e-14 * (1.0 + params[j].abs()))
+            {
                 keep.push(i);
             }
         }
@@ -618,22 +689,38 @@ impl NurbsCurve {
             return Self::interpolate(&pts2, &par2, p, d0, d1);
         }
         if pts.len() == 1 {
-            return Self { degree: 1, knots: vec![params[0], params[0], params[0] + 1.0, params[0] + 1.0], cps: vec![hom(&pts[0], 1.0), hom(&pts[0], 1.0)] };
+            return Self {
+                degree: 1,
+                knots: vec![params[0], params[0], params[0] + 1.0, params[0] + 1.0],
+                cps: vec![hom(&pts[0], 1.0), hom(&pts[0], 1.0)],
+            };
         }
         match Self::try_interpolate(pts, params, p, d0, d1) {
             Some(c) => c,
-            None if p > 1 || d0.is_some() || d1.is_some() => Self::interpolate(pts, params, 1, None, None),
+            None if p > 1 || d0.is_some() || d1.is_some() => {
+                Self::interpolate(pts, params, 1, None, None)
+            }
             None => {
                 // Degree one through the points always works.
                 let mut knots = vec![params[0]];
                 knots.extend_from_slice(params);
                 knots.push(*params.last().unwrap());
-                Self { degree: 1, knots, cps: pts.iter().map(|q| hom(q, 1.0)).collect() }
+                Self {
+                    degree: 1,
+                    knots,
+                    cps: pts.iter().map(|q| hom(q, 1.0)).collect(),
+                }
             }
         }
     }
 
-    fn try_interpolate(pts: &[P3], params: &[f64], p: usize, d0: Option<V3>, d1: Option<V3>) -> Option<Self> {
+    fn try_interpolate(
+        pts: &[P3],
+        params: &[f64],
+        p: usize,
+        d0: Option<V3>,
+        d1: Option<V3>,
+    ) -> Option<Self> {
         let n_pts = pts.len();
         let extra = d0.is_some() as usize + d1.is_some() as usize;
         let n = n_pts + extra; // number of control points
@@ -682,21 +769,23 @@ impl NurbsCurve {
             rhs[(row, 2)] = q.z;
             row += 1;
             if i == 0
-                && let Some(d) = d0 {
-                    put(&mut a, row, params[0], 1);
-                    rhs[(row, 0)] = d.x;
-                    rhs[(row, 1)] = d.y;
-                    rhs[(row, 2)] = d.z;
-                    row += 1;
-                }
+                && let Some(d) = d0
+            {
+                put(&mut a, row, params[0], 1);
+                rhs[(row, 0)] = d.x;
+                rhs[(row, 1)] = d.y;
+                rhs[(row, 2)] = d.z;
+                row += 1;
+            }
             if i == n_pts - 1
-                && let Some(d) = d1 {
-                    put(&mut a, row, params[n_pts - 1], 1);
-                    rhs[(row, 0)] = d.x;
-                    rhs[(row, 1)] = d.y;
-                    rhs[(row, 2)] = d.z;
-                    row += 1;
-                }
+                && let Some(d) = d1
+            {
+                put(&mut a, row, params[n_pts - 1], 1);
+                rhs[(row, 0)] = d.x;
+                rhs[(row, 1)] = d.y;
+                rhs[(row, 2)] = d.z;
+                row += 1;
+            }
         }
         drop(put);
         let sol = if banded {
@@ -710,13 +799,25 @@ impl NurbsCurve {
         if sol.iter().any(|x| !x.is_finite()) {
             return None;
         }
-        let cps = (0..n).map(|i| H::new(sol[(i, 0)], sol[(i, 1)], sol[(i, 2)], 1.0)).collect();
-        Some(Self { degree: p, knots, cps })
+        let cps = (0..n)
+            .map(|i| H::new(sol[(i, 0)], sol[(i, 1)], sol[(i, 2)], 1.0))
+            .collect();
+        Some(Self {
+            degree: p,
+            knots,
+            cps,
+        })
     }
 
     /// Interpolation (degree `p`) through points at parameters, with optional first and second
     /// derivatives at both ends. Non-rational. Falls back to fewer conditions when singular.
-    pub fn interpolate_ext(pts: &[P3], params: &[f64], p: usize, d1: [Option<V3>; 2], d2: [Option<V3>; 2]) -> Self {
+    pub fn interpolate_ext(
+        pts: &[P3],
+        params: &[f64],
+        p: usize,
+        d1: [Option<V3>; 2],
+        d2: [Option<V3>; 2],
+    ) -> Self {
         if d2[0].is_none() && d2[1].is_none() {
             return Self::interpolate(pts, params, p, d1[0], d1[1]);
         }
@@ -787,8 +888,14 @@ impl NurbsCurve {
         };
         match sol {
             Some(sol) if sol.iter().all(|x| x.is_finite()) => {
-                let cps = (0..n).map(|i| H::new(sol[(i, 0)], sol[(i, 1)], sol[(i, 2)], 1.0)).collect();
-                Self { degree: p, knots, cps }
+                let cps = (0..n)
+                    .map(|i| H::new(sol[(i, 0)], sol[(i, 1)], sol[(i, 2)], 1.0))
+                    .collect();
+                Self {
+                    degree: p,
+                    knots,
+                    cps,
+                }
             }
             _ => Self::interpolate(pts, params, p, d1[0], d1[1]),
         }
@@ -812,7 +919,11 @@ impl NurbsCurve {
     /// as a corrupt file's curves can give).
     pub fn split(&self, u: f64) -> crate::Result<(Self, Self)> {
         let (a, b) = self.range();
-        let outside = || crate::KernelError::InvalidParameter(format!("a B-spline split at {u}, outside its range {a}..{b}"));
+        let outside = || {
+            crate::KernelError::InvalidParameter(format!(
+                "a B-spline split at {u}, outside its range {a}..{b}"
+            ))
+        };
         if !(u > a && u < b) {
             return Err(outside());
         }
@@ -822,11 +933,23 @@ impl NurbsCurve {
         for _ in mult..p + 1 {
             c = c.insert_knot(u);
         }
-        let idx = c.knots.iter().position(|k| (*k - u).abs() < 1e-14).ok_or_else(outside)?;
+        let idx = c
+            .knots
+            .iter()
+            .position(|k| (*k - u).abs() < 1e-14)
+            .ok_or_else(outside)?;
         // knots[idx..idx+p+1] == u: the left curve's poles end at idx − 1, the right's start at
         // idx (both the point at u).
-        let left = Self { degree: p, knots: c.knots[..idx + p + 1].to_vec(), cps: c.cps[..idx].to_vec() };
-        let right = Self { degree: p, knots: c.knots[idx..].to_vec(), cps: c.cps[idx..].to_vec() };
+        let left = Self {
+            degree: p,
+            knots: c.knots[..idx + p + 1].to_vec(),
+            cps: c.cps[..idx].to_vec(),
+        };
+        let right = Self {
+            degree: p,
+            knots: c.knots[idx..].to_vec(),
+            cps: c.cps[idx..].to_vec(),
+        };
         Ok((left, right))
     }
 
@@ -842,7 +965,11 @@ impl NurbsCurve {
         knots.extend(next.knots[p + 1..].iter().map(|k| k - start + end));
         let mut cps = self.cps.clone();
         cps.extend(next.cps[1..].iter().map(|c| c * s));
-        Self { degree: p, knots, cps }
+        Self {
+            degree: p,
+            knots,
+            cps,
+        }
     }
 
     /// A closed curve restarted at `u`: from `u` to its end, then from its start back to `u`.
@@ -852,7 +979,9 @@ impl NurbsCurve {
     pub fn restarted(&self, u: f64) -> crate::Result<Self> {
         let (a, b) = self.range();
         if !u.is_finite() {
-            return Err(crate::KernelError::InvalidParameter(format!("a closed B-spline restarted at {u}")));
+            return Err(crate::KernelError::InvalidParameter(format!(
+                "a closed B-spline restarted at {u}"
+            )));
         }
         // (A start a rounding error from an end is that end: splitting there leaves an empty
         // piece.)
@@ -885,7 +1014,11 @@ impl NurbsCurve {
                 cps.push(self.cps[i] * a + self.cps[i - 1] * (1.0 - a));
             }
         }
-        Self { degree: p, knots, cps }
+        Self {
+            degree: p,
+            knots,
+            cps,
+        }
     }
 
     /// The same curve one degree higher (exact): each span raised as a Bézier segment, the
@@ -913,13 +1046,23 @@ impl NurbsCurve {
         let starts: Vec<f64> = std::iter::once(a).chain(inner.iter().copied()).collect();
         let mut cps: Vec<H> = Vec::new();
         for (sgi, &u) in starts.iter().enumerate() {
-            let r = c.knots.iter().rposition(|k| (*k - u).abs() <= eps).unwrap_or(p).min(c.cps.len() - 1).max(p);
+            let r = c
+                .knots
+                .iter()
+                .rposition(|k| (*k - u).abs() <= eps)
+                .unwrap_or(p)
+                .min(c.cps.len() - 1)
+                .max(p);
             let seg = &c.cps[r - p..=r];
             let up: Vec<H> = (0..=p + 1)
                 .map(|i| {
                     let t = i as f64 / (p + 1) as f64;
                     let prev = if i > 0 { seg[i - 1] * t } else { H::zeros() };
-                    let cur = if i <= p { seg[i] * (1.0 - t) } else { H::zeros() };
+                    let cur = if i <= p {
+                        seg[i] * (1.0 - t)
+                    } else {
+                        H::zeros()
+                    };
                     prev + cur
                 })
                 .collect();
@@ -930,7 +1073,11 @@ impl NurbsCurve {
             knots.extend(std::iter::repeat_n(u, p + 1));
         }
         knots.extend(std::iter::repeat_n(b, p + 2));
-        Self { degree: p + 1, knots, cps }
+        Self {
+            degree: p + 1,
+            knots,
+            cps,
+        }
     }
 
     /// Degree elevation by repeated knot refinement is not needed yet; this raises the degree of
@@ -949,7 +1096,11 @@ impl NurbsCurve {
         let (a, b) = self.range();
         let mut knots = vec![a; p + 2];
         knots.extend(vec![b; p + 2]);
-        Self { degree: p + 1, knots, cps: out }
+        Self {
+            degree: p + 1,
+            knots,
+            cps: out,
+        }
     }
 }
 
@@ -975,12 +1126,14 @@ impl NurbsCurve {
         let (lo, hi) = self.range();
         let (a, b) = (a.max(lo), b.min(hi));
         let mut c = self.clone();
-        if a > lo && a < hi
+        if a > lo
+            && a < hi
             && let Ok((_, r)) = c.split(a)
         {
             c = r;
         }
-        if b < hi && b > a
+        if b < hi
+            && b > a
             && let Ok((l, _)) = c.split(b)
         {
             c = l;
@@ -991,8 +1144,20 @@ impl NurbsCurve {
 
 impl NurbsSurface {
     /// A B-spline surface checked to be well formed (see [`NurbsSurface::validate`]).
-    pub fn new(du: usize, dv: usize, ku: Vec<f64>, kv: Vec<f64>, cps: Vec<Vec<H>>) -> crate::Result<Self> {
-        let s = Self { du, dv, ku, kv, cps };
+    pub fn new(
+        du: usize,
+        dv: usize,
+        ku: Vec<f64>,
+        kv: Vec<f64>,
+        cps: Vec<Vec<H>>,
+    ) -> crate::Result<Self> {
+        let s = Self {
+            du,
+            dv,
+            ku,
+            kv,
+            cps,
+        };
         s.validate()?;
         Ok(s)
     }
@@ -1001,7 +1166,9 @@ impl NurbsSurface {
     /// make a B-spline (as [`NurbsCurve::validate`]).
     pub fn validate(&self) -> crate::Result<()> {
         let bad = |why: String| Err(crate::KernelError::InvalidInput(why));
-        let Some(first) = self.cps.first().filter(|r| !r.is_empty()) else { return bad("a B-spline surface needs control points".into()) };
+        let Some(first) = self.cps.first().filter(|r| !r.is_empty()) else {
+            return bad("a B-spline surface needs control points".into());
+        };
         if self.cps.iter().any(|r| r.len() != first.len()) {
             return bad("the B-spline surface's rows of control points differ in length".into());
         }
@@ -1020,9 +1187,31 @@ impl NurbsSurface {
     /// The control net of the patch over u × v (each row's and then each column's curve cut
     /// there): its points' hull holds that part of the surface.
     pub fn sub_net(&self, u: (f64, f64), v: (f64, f64)) -> Vec<Vec<H>> {
-        let rows: Vec<Vec<H>> = self.cps.iter().map(|r| NurbsCurve { degree: self.dv, knots: self.kv.clone(), cps: r.clone() }.restricted(v.0, v.1).cps).collect();
+        let rows: Vec<Vec<H>> = self
+            .cps
+            .iter()
+            .map(|r| {
+                NurbsCurve {
+                    degree: self.dv,
+                    knots: self.kv.clone(),
+                    cps: r.clone(),
+                }
+                .restricted(v.0, v.1)
+                .cps
+            })
+            .collect();
         let nv = rows[0].len();
-        let cols: Vec<Vec<H>> = (0..nv).map(|j| NurbsCurve { degree: self.du, knots: self.ku.clone(), cps: rows.iter().map(|r| r[j]).collect() }.restricted(u.0, u.1).cps).collect();
+        let cols: Vec<Vec<H>> = (0..nv)
+            .map(|j| {
+                NurbsCurve {
+                    degree: self.du,
+                    knots: self.ku.clone(),
+                    cps: rows.iter().map(|r| r[j]).collect(),
+                }
+                .restricted(u.0, u.1)
+                .cps
+            })
+            .collect();
         cols
     }
 
@@ -1030,7 +1219,10 @@ impl NurbsSurface {
     pub fn range(&self) -> ((f64, f64), (f64, f64)) {
         let nu = self.cps.len();
         let nv = self.cps[0].len();
-        ((self.ku[self.du], self.ku[nu]), (self.kv[self.dv], self.kv[nv]))
+        (
+            (self.ku[self.du], self.ku[nu]),
+            (self.kv[self.dv], self.kv[nv]),
+        )
     }
 
     /// Point and first and second derivatives: [S, Su, Sv, Suu, Suv, Svv] (A4.4).
@@ -1062,7 +1254,13 @@ impl NurbsSurface {
     }
 
     /// The homogeneous derivatives A_kl for k + l <= N (A4.4's first half).
-    fn homogeneous<const N: usize>(&self, su: usize, sv: usize, bu: &impl BasisAt, bv: &impl BasisAt) -> [[H; 3]; 3] {
+    fn homogeneous<const N: usize>(
+        &self,
+        su: usize,
+        sv: usize,
+        bu: &impl BasisAt,
+        bv: &impl BasisAt,
+    ) -> [[H; 3]; 3] {
         // Homogeneous derivatives A[k][l].
         let mut a = [[H::zeros(); 3]; 3];
         let mut fixed = [H::zeros(); MAXP + 1];
@@ -1142,7 +1340,13 @@ impl NurbsSurface {
             q.push(h);
             qv.push(hv);
         }
-        IsoV { s: self, v, lo, q, qv }
+        IsoV {
+            s: self,
+            v,
+            lo,
+            q,
+            qv,
+        }
     }
 
     /// The surface moved by `m`.
@@ -1152,7 +1356,11 @@ impl NurbsSurface {
             dv: self.dv,
             ku: self.ku.clone(),
             kv: self.kv.clone(),
-            cps: self.cps.iter().map(|row| row.iter().map(|c| hom(&m.point(&dehom(c)), c.w)).collect()).collect(),
+            cps: self
+                .cps
+                .iter()
+                .map(|row| row.iter().map(|c| hom(&m.point(&dehom(c)), c.w)).collect())
+                .collect(),
         }
     }
 
@@ -1176,7 +1384,13 @@ impl NurbsSurface {
 
     /// A ruled or interpolated surface through compatible curves (same degree and knots), the
     /// curves along u, interpolated along v at `params` with degree `q` (lofts).
-    pub fn through_curves(curves: &[NurbsCurve], params: &[f64], q: usize, d0: Option<Vec<V3>>, d1: Option<Vec<V3>>) -> Self {
+    pub fn through_curves(
+        curves: &[NurbsCurve],
+        params: &[f64],
+        q: usize,
+        d0: Option<Vec<V3>>,
+        d1: Option<Vec<V3>>,
+    ) -> Self {
         let ncp = curves[0].cps.len();
         let mut cols: Vec<NurbsCurve> = Vec::new();
         for i in 0..ncp {
@@ -1186,7 +1400,13 @@ impl NurbsSurface {
             cols.push(NurbsCurve::interpolate(&pts, params, q, a, b));
         }
         let cps: Vec<Vec<H>> = (0..ncp).map(|i| cols[i].cps.clone()).collect();
-        Self { du: curves[0].degree, dv: cols[0].degree, ku: curves[0].knots.clone(), kv: cols[0].knots.clone(), cps }
+        Self {
+            du: curves[0].degree,
+            dv: cols[0].degree,
+            ku: curves[0].knots.clone(),
+            kv: cols[0].knots.clone(),
+            cps,
+        }
     }
 }
 
@@ -1221,7 +1441,11 @@ pub struct Band {
 
 impl Band {
     pub fn new(n: usize, bw: usize) -> Self {
-        Self { n, bw, band: vec![0.0; n * (3 * bw + 1)] }
+        Self {
+            n,
+            bw,
+            band: vec![0.0; n * (3 * bw + 1)],
+        }
     }
     fn at(&self, i: usize, j: usize) -> Option<usize> {
         let w = 3 * self.bw + 1;
@@ -1242,74 +1466,80 @@ impl Band {
     pub fn solve(self, b: DMatrix<f64>) -> Option<DMatrix<f64>> {
         let (n, bw) = (self.n, self.bw);
         let m = b.ncols();
-        let Band { band: mut band_v, .. } = self;
-        let me = Band { n, bw, band: Vec::new() };
+        let Band {
+            band: mut band_v, ..
+        } = self;
+        let me = Band {
+            n,
+            bw,
+            band: Vec::new(),
+        };
         let at = |i: usize, j: usize| me.at(i, j);
         let band = &mut band_v;
-    let mut x = b.clone();
-    for c in 0..n {
-        // Pivot among rows c..c+bw.
-        let last = (c + bw + 1).min(n);
-        let mut piv = c;
-        let mut best = 0.0;
-        for r in c..last {
-            let v = at(r, c).map(|k| band[k].abs()).unwrap_or(0.0);
-            if v > best {
-                best = v;
-                piv = r;
+        let mut x = b.clone();
+        for c in 0..n {
+            // Pivot among rows c..c+bw.
+            let last = (c + bw + 1).min(n);
+            let mut piv = c;
+            let mut best = 0.0;
+            for r in c..last {
+                let v = at(r, c).map(|k| band[k].abs()).unwrap_or(0.0);
+                if v > best {
+                    best = v;
+                    piv = r;
+                }
             }
-        }
-        if best < tol::TINY {
-            return None;
-        }
-        if piv != c {
-            for j in c.saturating_sub(bw)..(c + 2 * bw + 1).min(n) {
-                let (ka, kb) = (at(c, j), at(piv, j));
-                match (ka, kb) {
-                    (Some(ka), Some(kb)) => band.swap(ka, kb),
-                    (Some(ka), None) => band[ka] = 0.0,
-                    (None, Some(kb)) => {
-                        if band[kb] != 0.0 {
-                            return None;
+            if best < tol::TINY {
+                return None;
+            }
+            if piv != c {
+                for j in c.saturating_sub(bw)..(c + 2 * bw + 1).min(n) {
+                    let (ka, kb) = (at(c, j), at(piv, j));
+                    match (ka, kb) {
+                        (Some(ka), Some(kb)) => band.swap(ka, kb),
+                        (Some(ka), None) => band[ka] = 0.0,
+                        (None, Some(kb)) => {
+                            if band[kb] != 0.0 {
+                                return None;
+                            }
                         }
+                        (None, None) => {}
                     }
-                    (None, None) => {}
+                }
+                x.swap_rows(c, piv);
+            }
+            let d = band[at(c, c).unwrap()];
+            for r in c + 1..last {
+                let Some(krc) = at(r, c) else { continue };
+                let f = band[krc] / d;
+                if f == 0.0 {
+                    continue;
+                }
+                for j in c..(c + 2 * bw + 1).min(n) {
+                    if let (Some(kr), Some(kc)) = (at(r, j), at(c, j)) {
+                        band[kr] -= f * band[kc];
+                    }
+                }
+                for col in 0..m {
+                    let v = x[(c, col)];
+                    x[(r, col)] -= f * v;
                 }
             }
-            x.swap_rows(c, piv);
         }
-        let d = band[at(c, c).unwrap()];
-        for r in c + 1..last {
-            let Some(krc) = at(r, c) else { continue };
-            let f = band[krc] / d;
-            if f == 0.0 {
-                continue;
-            }
-            for j in c..(c + 2 * bw + 1).min(n) {
-                if let (Some(kr), Some(kc)) = (at(r, j), at(c, j)) {
-                    band[kr] -= f * band[kc];
-                }
-            }
+        // Back substitution.
+        for c in (0..n).rev() {
+            let d = band[at(c, c).unwrap()];
             for col in 0..m {
-                let v = x[(c, col)];
-                x[(r, col)] -= f * v;
-            }
-        }
-    }
-    // Back substitution.
-    for c in (0..n).rev() {
-        let d = band[at(c, c).unwrap()];
-        for col in 0..m {
-            let mut s = x[(c, col)];
-            for j in c + 1..(c + 2 * bw + 1).min(n) {
-                if let Some(k) = at(c, j) {
-                    s -= band[k] * x[(j, col)];
+                let mut s = x[(c, col)];
+                for j in c + 1..(c + 2 * bw + 1).min(n) {
+                    if let Some(k) = at(c, j) {
+                        s -= band[k] * x[(j, col)];
+                    }
                 }
+                x[(c, col)] = s / d;
             }
-            x[(c, col)] = s / d;
         }
-    }
-    Some(x)
+        Some(x)
     }
 }
 
@@ -1419,13 +1649,29 @@ mod tests {
         for (du, dv) in [(2, 3), (3, 1), (13, 2), (2, 12), (17, 9)] {
             let (nu, nv) = (du + 4, dv + 3);
             let cps: Vec<Vec<H>> = (0..nu)
-                .map(|i| (0..nv).map(|j| {
-                    let w = 1.0 + 0.3 * ((i * 7 + j * 3) % 5) as f64;
-                    hom(&P3::new(i as f64, j as f64, ((i * j) as f64).sin()), w)
-                }).collect())
+                .map(|i| {
+                    (0..nv)
+                        .map(|j| {
+                            let w = 1.0 + 0.3 * ((i * 7 + j * 3) % 5) as f64;
+                            hom(&P3::new(i as f64, j as f64, ((i * j) as f64).sin()), w)
+                        })
+                        .collect()
+                })
                 .collect();
-            let s = NurbsSurface { du, dv, ku: clamped(du, &[0.2, 0.55, 0.7]), kv: clamped(dv, &[0.4, 0.6]), cps };
-            for (u, v) in [(0.0, 0.0), (0.13, 0.77), (0.55, 0.4), (0.91, 0.05), (1.0, 1.0)] {
+            let s = NurbsSurface {
+                du,
+                dv,
+                ku: clamped(du, &[0.2, 0.55, 0.7]),
+                kv: clamped(dv, &[0.4, 0.6]),
+                cps,
+            };
+            for (u, v) in [
+                (0.0, 0.0),
+                (0.13, 0.77),
+                (0.55, 0.4),
+                (0.91, 0.05),
+                (1.0, 1.0),
+            ] {
                 let r = reference(&s, u, v);
                 assert_eq!(s.ders2(u, v), r);
                 assert_eq!(s.ders1(u, v), (P3::from(r[0]), r[1], r[2]));
@@ -1436,10 +1682,17 @@ mod tests {
                     let (p, du, dv) = iso.d1(uu);
                     let (q, qu, qv) = s.ders1(uu, v);
                     let tol = |a: &V3, b: &V3| (a - b).norm() <= 1e-12 * (1.0 + b.norm());
-                    assert!(tol(&p.coords, &q.coords) && tol(&du, &qu) && tol(&dv, &qv), "{du} vs {qu}");
+                    assert!(
+                        tol(&p.coords, &q.coords) && tol(&du, &qu) && tol(&dv, &qv),
+                        "{du} vs {qu}"
+                    );
                 }
             }
-            let c = NurbsCurve { degree: du, knots: clamped(du, &[0.2, 0.55, 0.7]), cps: s.cps.iter().map(|row| row[1]).collect() };
+            let c = NurbsCurve {
+                degree: du,
+                knots: clamped(du, &[0.2, 0.55, 0.7]),
+                cps: s.cps.iter().map(|row| row[1]).collect(),
+            };
             for t in [0.0, 0.3, 0.55, 0.99, 1.0] {
                 // A3.2 with the vectors, then A4.2.
                 let span = find_span(c.cps.len() - 1, c.degree, t, &c.knots);
@@ -1452,7 +1705,8 @@ mod tests {
                 }
                 let c0 = h[0].xyz() / h[0].w;
                 let c1 = (h[1].xyz() - c0 * (binom(1, 1) * h[1].w)) / h[0].w;
-                let c2 = (h[2].xyz() - c1 * (binom(2, 1) * h[1].w) - c0 * (binom(2, 2) * h[2].w)) / h[0].w;
+                let c2 = (h[2].xyz() - c1 * (binom(2, 1) * h[1].w) - c0 * (binom(2, 2) * h[2].w))
+                    / h[0].w;
                 assert_eq!(c.ders2(t), (P3::from(c0), c1, c2));
                 assert_eq!(c.ders(t, 2), vec![c0, c1, c2]);
                 assert_eq!(c.point(t), dehom(&h[0]));
@@ -1462,7 +1716,19 @@ mod tests {
 
     #[test]
     fn split_halves_are_valid_curves() {
-        let c = NurbsCurve::interpolate(&[P3::new(0.0, 0.0, 0.0), P3::new(1.0, 2.0, 0.0), P3::new(3.0, 1.0, 1.0), P3::new(4.0, 3.0, 0.0), P3::new(6.0, 0.0, 2.0)], &[0.0, 0.2, 0.5, 0.7, 1.0], 3, None, None);
+        let c = NurbsCurve::interpolate(
+            &[
+                P3::new(0.0, 0.0, 0.0),
+                P3::new(1.0, 2.0, 0.0),
+                P3::new(3.0, 1.0, 1.0),
+                P3::new(4.0, 3.0, 0.0),
+                P3::new(6.0, 0.0, 2.0),
+            ],
+            &[0.0, 0.2, 0.5, 0.7, 1.0],
+            3,
+            None,
+            None,
+        );
         for u in [0.3, 0.5] {
             let (l, r) = c.split(u).unwrap();
             for h in [&l, &r] {
@@ -1480,9 +1746,28 @@ mod tests {
 
     #[test]
     fn elevation_keeps_the_curve() {
-        let c = NurbsCurve::interpolate(&[P3::new(0.0, 0.0, 0.0), P3::new(1.0, 2.0, 0.0), P3::new(3.0, 1.0, 1.0), P3::new(4.0, 3.0, 0.0), P3::new(6.0, 0.0, 2.0)], &[0.0, 0.2, 0.5, 0.7, 1.0], 2, None, None);
+        let c = NurbsCurve::interpolate(
+            &[
+                P3::new(0.0, 0.0, 0.0),
+                P3::new(1.0, 2.0, 0.0),
+                P3::new(3.0, 1.0, 1.0),
+                P3::new(4.0, 3.0, 0.0),
+                P3::new(6.0, 0.0, 2.0),
+            ],
+            &[0.0, 0.2, 0.5, 0.7, 1.0],
+            2,
+            None,
+            None,
+        );
         let w = std::f64::consts::FRAC_1_SQRT_2;
-        let arc = NurbsCurve::bezier(&[P3::new(1.0, 0.0, 0.0), P3::new(1.0, 1.0, 0.0), P3::new(0.0, 1.0, 0.0)], &[1.0, w, 1.0]);
+        let arc = NurbsCurve::bezier(
+            &[
+                P3::new(1.0, 0.0, 0.0),
+                P3::new(1.0, 1.0, 0.0),
+                P3::new(0.0, 1.0, 0.0),
+            ],
+            &[1.0, w, 1.0],
+        );
         for c in [c, arc] {
             let e = c.elevated();
             assert_eq!(e.degree, c.degree + 1);
@@ -1496,7 +1781,12 @@ mod tests {
 
     #[test]
     fn periodic_interpolation_closes_smoothly() {
-        let pts = [P3::new(1.0, 0.0, 0.0), P3::new(0.0, 2.0, 0.5), P3::new(-1.5, 0.0, 0.0), P3::new(0.0, -1.0, -0.5)];
+        let pts = [
+            P3::new(1.0, 0.0, 0.0),
+            P3::new(0.0, 2.0, 0.5),
+            P3::new(-1.5, 0.0, 0.0),
+            P3::new(0.0, -1.0, -0.5),
+        ];
         let params = [0.0, 0.2, 0.55, 0.8, 1.0];
         let c = NurbsCurve::interpolate_periodic(&pts, &params, 3).unwrap();
         assert_eq!(c.range(), (0.0, 1.0));
@@ -1505,13 +1795,23 @@ mod tests {
         }
         assert!((c.point(1.0) - pts[0]).norm() < 1e-9);
         let (d0, d1) = (c.ders(0.0, 2), c.ders(1.0, 2));
-        assert!((d0[1] - d1[1]).norm() < 1e-8 && (d0[2] - d1[2]).norm() < 1e-7, "{d0:?} {d1:?}");
+        assert!(
+            (d0[1] - d1[1]).norm() < 1e-8 && (d0[2] - d1[2]).norm() < 1e-7,
+            "{d0:?} {d1:?}"
+        );
     }
 
     #[test]
     fn quarter_circle_is_exact() {
         let w = std::f64::consts::FRAC_1_SQRT_2;
-        let c = NurbsCurve::bezier(&[P3::new(1.0, 0.0, 0.0), P3::new(1.0, 1.0, 0.0), P3::new(0.0, 1.0, 0.0)], &[1.0, w, 1.0]);
+        let c = NurbsCurve::bezier(
+            &[
+                P3::new(1.0, 0.0, 0.0),
+                P3::new(1.0, 1.0, 0.0),
+                P3::new(0.0, 1.0, 0.0),
+            ],
+            &[1.0, w, 1.0],
+        );
         for i in 0..=10 {
             let p = c.point(i as f64 / 10.0);
             assert!((p.coords.norm() - 1.0).abs() < 1e-14);
@@ -1522,7 +1822,9 @@ mod tests {
 
     #[test]
     fn interpolation_passes_through_points() {
-        let pts: Vec<P3> = (0..7).map(|i| P3::new(i as f64, (i as f64).sin(), 0.0)).collect();
+        let pts: Vec<P3> = (0..7)
+            .map(|i| P3::new(i as f64, (i as f64).sin(), 0.0))
+            .collect();
         let t = NurbsCurve::chord_params(&pts);
         let c = NurbsCurve::interpolate(&pts, &t, 3, None, None);
         for (p, u) in pts.iter().zip(&t) {
@@ -1537,9 +1839,24 @@ mod tests {
 
     #[test]
     fn a_sub_net_holds_its_patch() {
-        let pts: Vec<Vec<P3>> = (0..5).map(|i| (0..4).map(|j| P3::new(i as f64, j as f64, ((i * 7 + j * 3) % 5) as f64)).collect()).collect();
-        let cps: Vec<Vec<H>> = pts.iter().map(|r| r.iter().map(|p| H::new(p.x, p.y, p.z, 1.0)).collect()).collect();
-        let s = NurbsSurface { du: 3, dv: 2, ku: vec![0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0], kv: vec![0.0, 0.0, 0.0, 0.4, 1.0, 1.0, 1.0], cps };
+        let pts: Vec<Vec<P3>> = (0..5)
+            .map(|i| {
+                (0..4)
+                    .map(|j| P3::new(i as f64, j as f64, ((i * 7 + j * 3) % 5) as f64))
+                    .collect()
+            })
+            .collect();
+        let cps: Vec<Vec<H>> = pts
+            .iter()
+            .map(|r| r.iter().map(|p| H::new(p.x, p.y, p.z, 1.0)).collect())
+            .collect();
+        let s = NurbsSurface {
+            du: 3,
+            dv: 2,
+            ku: vec![0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0],
+            kv: vec![0.0, 0.0, 0.0, 0.4, 1.0, 1.0, 1.0],
+            cps,
+        };
         let (u, v) = ((0.2, 0.7), (0.1, 0.55));
         let net = s.sub_net(u, v);
         let mut lo = V3::repeat(f64::MAX);
@@ -1549,11 +1866,23 @@ mod tests {
             lo = lo.inf(&p);
             hi = hi.sup(&p);
         }
-        let whole: f64 = (0..5).map(|i| pts[i].iter().map(|p| p.z).fold(f64::MIN, f64::max)).fold(f64::MIN, f64::max);
+        let whole: f64 = (0..5)
+            .map(|i| pts[i].iter().map(|p| p.z).fold(f64::MIN, f64::max))
+            .fold(f64::MIN, f64::max);
         for i in 0..=20 {
             for j in 0..=20 {
-                let q = s.ders2(u.0 + (u.1 - u.0) * i as f64 / 20.0, v.0 + (v.1 - v.0) * j as f64 / 20.0)[0];
-                assert!(q.x >= lo.x - 1e-12 && q.x <= hi.x + 1e-12 && q.y >= lo.y - 1e-12 && q.y <= hi.y + 1e-12 && q.z >= lo.z - 1e-12 && q.z <= hi.z + 1e-12);
+                let q = s.ders2(
+                    u.0 + (u.1 - u.0) * i as f64 / 20.0,
+                    v.0 + (v.1 - v.0) * j as f64 / 20.0,
+                )[0];
+                assert!(
+                    q.x >= lo.x - 1e-12
+                        && q.x <= hi.x + 1e-12
+                        && q.y >= lo.y - 1e-12
+                        && q.y <= hi.y + 1e-12
+                        && q.z >= lo.z - 1e-12
+                        && q.z <= hi.z + 1e-12
+                );
             }
         }
         // Tighter than the whole net.
@@ -1564,8 +1893,25 @@ mod tests {
     fn restarting_a_closed_curve_keeps_its_points() {
         // A closed rational quadratic: the unit circle as four quarter arcs.
         let r = std::f64::consts::FRAC_1_SQRT_2;
-        let pts = [(1.0, 0.0, 1.0), (1.0, 1.0, r), (0.0, 1.0, 1.0), (-1.0, 1.0, r), (-1.0, 0.0, 1.0), (-1.0, -1.0, r), (0.0, -1.0, 1.0), (1.0, -1.0, r), (1.0, 0.0, 1.0)];
-        let c = NurbsCurve { degree: 2, knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 4.0], cps: pts.iter().map(|&(x, y, w)| H::new(x * w, y * w, 0.0, w)).collect() };
+        let pts = [
+            (1.0, 0.0, 1.0),
+            (1.0, 1.0, r),
+            (0.0, 1.0, 1.0),
+            (-1.0, 1.0, r),
+            (-1.0, 0.0, 1.0),
+            (-1.0, -1.0, r),
+            (0.0, -1.0, 1.0),
+            (1.0, -1.0, r),
+            (1.0, 0.0, 1.0),
+        ];
+        let c = NurbsCurve {
+            degree: 2,
+            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 4.0],
+            cps: pts
+                .iter()
+                .map(|&(x, y, w)| H::new(x * w, y * w, 0.0, w))
+                .collect(),
+        };
         let d = c.restarted(1.3).unwrap();
         assert_eq!(d.knots.len(), d.cps.len() + d.degree + 1);
         assert_eq!(d.range(), (1.3, 5.3));
@@ -1574,14 +1920,26 @@ mod tests {
             let t = 1.3 + 4.0 * i as f64 / 40.0;
             let q = d.point(t);
             assert!((q.coords.norm() - 1.0).abs() < 1e-12);
-            let want = if t <= 4.0 { c.point(t) } else { c.point(t - 4.0) };
+            let want = if t <= 4.0 {
+                c.point(t)
+            } else {
+                c.point(t - 4.0)
+            };
             assert!((q - want).norm() < 1e-12, "{t}");
         }
     }
 
     #[test]
     fn split_keeps_shape() {
-        let c = NurbsCurve::bezier(&[P3::new(0.0, 0.0, 0.0), P3::new(0.0, 10.0, 0.0), P3::new(20.0, 10.0, 0.0), P3::new(20.0, 0.0, 0.0)], &[1.0; 4]);
+        let c = NurbsCurve::bezier(
+            &[
+                P3::new(0.0, 0.0, 0.0),
+                P3::new(0.0, 10.0, 0.0),
+                P3::new(20.0, 10.0, 0.0),
+                P3::new(20.0, 0.0, 0.0),
+            ],
+            &[1.0; 4],
+        );
         let (a, b) = c.split(0.3).unwrap();
         assert!((a.point(0.15) - c.point(0.15)).norm() < 1e-12);
         assert!((b.point(0.8) - c.point(0.8)).norm() < 1e-12);
@@ -1595,8 +1953,14 @@ mod tests {
             ku: vec![0.0, 0.0, 1.0, 1.0],
             kv: vec![0.0, 0.0, 1.0, 1.0],
             cps: vec![
-                vec![hom(&P3::new(0.0, 0.0, 0.0), 1.0), hom(&P3::new(0.0, 1.0, 0.0), 1.0)],
-                vec![hom(&P3::new(1.0, 0.0, 0.0), 1.0), hom(&P3::new(1.0, 1.0, 1.0), 1.0)],
+                vec![
+                    hom(&P3::new(0.0, 0.0, 0.0), 1.0),
+                    hom(&P3::new(0.0, 1.0, 0.0), 1.0),
+                ],
+                vec![
+                    hom(&P3::new(1.0, 0.0, 0.0), 1.0),
+                    hom(&P3::new(1.0, 1.0, 1.0), 1.0),
+                ],
             ],
         };
         let d = s.ders2(0.5, 0.5);
@@ -1610,7 +1974,11 @@ mod tests {
     /// underflowed on no poles).
     #[test]
     fn checked_constructors_refuse_malformed_splines() {
-        let cps = |n: usize| (0..n).map(|i| H::new(i as f64, 0.0, 0.0, 1.0)).collect::<Vec<_>>();
+        let cps = |n: usize| {
+            (0..n)
+                .map(|i| H::new(i as f64, 0.0, 0.0, 1.0))
+                .collect::<Vec<_>>()
+        };
         assert!(NurbsCurve::new(2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], cps(3)).is_ok());
         // OCCT blend complex_e7: as many knots as poles.
         assert!(NurbsCurve::new(2, vec![0.0, 0.0, 1.0, 1.0], cps(4)).is_err());
@@ -1627,8 +1995,14 @@ mod tests {
         assert!(NurbsCurve::try_bezier(&[], &[]).is_err());
         assert!(NurbsCurve::try_bezier(&[P3::origin()], &[1.0]).is_err());
         assert!(NurbsCurve::try_bezier(&[P3::origin(), P3::new(1.0, 0.0, 0.0)], &[1.0]).is_err());
-        assert!(NurbsCurve::try_bezier(&[P3::origin(), P3::new(1.0, 0.0, 0.0)], &[1.0, -1.0]).is_err());
-        assert_eq!(NurbsCurve::try_bezier(&[P3::origin(), P3::new(1.0, 0.0, 0.0)], &[1.0, 1.0]).map(|c| c.range()), Ok((0.0, 1.0)));
+        assert!(
+            NurbsCurve::try_bezier(&[P3::origin(), P3::new(1.0, 0.0, 0.0)], &[1.0, -1.0]).is_err()
+        );
+        assert_eq!(
+            NurbsCurve::try_bezier(&[P3::origin(), P3::new(1.0, 0.0, 0.0)], &[1.0, 1.0])
+                .map(|c| c.range()),
+            Ok((0.0, 1.0))
+        );
         let k = vec![0.0, 0.0, 1.0, 1.0];
         assert!(NurbsSurface::new(1, 1, k.clone(), k.clone(), vec![cps(2), cps(2)]).is_ok());
         assert!(NurbsSurface::new(1, 1, k.clone(), k.clone(), vec![cps(2), cps(3)]).is_err());

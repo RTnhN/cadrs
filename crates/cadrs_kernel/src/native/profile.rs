@@ -7,8 +7,8 @@ use std::sync::Arc;
 use super::curve::Curve;
 use super::math::*;
 use super::nurbs::NurbsCurve;
-use crate::{unsourced_curve, Curve2, KernelError, Profile, Result};
 use super::tol;
+use crate::{Curve2, KernelError, Profile, Result, unsourced_curve};
 
 /// A piece of a loop: the curve (z = 0) between `t0 < t1`, run backwards when `rev`.
 #[derive(Debug, Clone, PartialEq)]
@@ -35,7 +35,10 @@ impl Src {
     pub fn origin(&self) -> crate::Origin {
         match *self {
             Src::Curve { region, curve } => crate::Origin::ProfileCurve { region, curve },
-            Src::Edge { body, edge } => crate::Origin::FromEdge { body: crate::BodyId(body), edge: crate::EdgeId(edge) },
+            Src::Edge { body, edge } => crate::Origin::FromEdge {
+                body: crate::BodyId(body),
+                edge: crate::EdgeId(edge),
+            },
         }
     }
     pub fn region(&self) -> Option<u64> {
@@ -79,7 +82,10 @@ impl Piece {
         self.c.length(self.t0, self.t1)
     }
     pub fn reversed(&self) -> Piece {
-        Piece { rev: !self.rev, ..self.clone() }
+        Piece {
+            rev: !self.rev,
+            ..self.clone()
+        }
     }
     /// ∮ x dy along the direction of travel (Green: the signed area of a closed loop).
     pub fn x_dy(&self) -> f64 {
@@ -96,10 +102,13 @@ impl Piece {
     /// Points along the piece (both ends included), at most `defl` from it.
     pub fn sample(&self, defl: f64) -> Vec<P2> {
         let ts = self.c.sample_params(self.t0, self.t1, defl, 0.2);
-        let mut pts: Vec<P2> = ts.iter().map(|&t| {
-            let p = self.c.point(t);
-            P2::new(p.x, p.y)
-        }).collect();
+        let mut pts: Vec<P2> = ts
+            .iter()
+            .map(|&t| {
+                let p = self.c.point(t);
+                P2::new(p.x, p.y)
+            })
+            .collect();
         if self.rev {
             pts.reverse();
         }
@@ -116,7 +125,9 @@ impl Piece {
                 let w = b - a;
                 (w.x * da.y - w.y * da.x).abs() < tol
             }
-            (Curve::Circle { c: a, r: ra, .. }, Curve::Circle { c: b, r: rb, .. }) => (a - b).norm() < tol && (ra - rb).abs() < tol,
+            (Curve::Circle { c: a, r: ra, .. }, Curve::Circle { c: b, r: rb, .. }) => {
+                (a - b).norm() < tol && (ra - rb).abs() < tol
+            }
             (a, b) => a == b,
         }
     }
@@ -144,7 +155,14 @@ impl Piece {
         let mut bounds = vec![self.t0];
         bounds.extend(ts);
         bounds.push(self.t1);
-        let mut out: Vec<Piece> = bounds.windows(2).map(|w| Piece { t0: w[0], t1: w[1], ..self.clone() }).collect();
+        let mut out: Vec<Piece> = bounds
+            .windows(2)
+            .map(|w| Piece {
+                t0: w[0],
+                t1: w[1],
+                ..self.clone()
+            })
+            .collect();
         if self.rev {
             out.reverse();
         }
@@ -199,52 +217,150 @@ pub fn piece_of(c: &Curve2, src: Src) -> Result<Piece> {
     let p3 = |p: P2| P3::new(p.x, p.y, 0.0);
     let arc = |c: Curve, start: f64, sweep: f64| {
         if sweep >= 0.0 {
-            Piece { c, t0: start, t1: start + sweep, rev: false, src, more: vec![] }
+            Piece {
+                c,
+                t0: start,
+                t1: start + sweep,
+                rev: false,
+                src,
+                more: vec![],
+            }
         } else {
-            Piece { c, t0: start + sweep, t1: start, rev: true, src, more: vec![] }
+            Piece {
+                c,
+                t0: start + sweep,
+                t1: start,
+                rev: true,
+                src,
+                more: vec![],
+            }
         }
     };
     let ellipse = |center: P2, major: f64, minor: f64, rotation: f64| {
         let (s, co) = rotation.sin_cos();
         let x = V2::new(co, s) * major.signum();
         let y = V2::new(-s, co) * minor.signum();
-        Curve::Ellipse { c: p3(center), x: e2(x), y: e2(y), a: major.abs(), b: minor.abs() }
+        Curve::Ellipse {
+            c: p3(center),
+            x: e2(x),
+            y: e2(y),
+            a: major.abs(),
+            b: minor.abs(),
+        }
     };
     let piece = match *c {
         Curve2::Line { a, b, .. } => {
             let d = b - a;
             let l = d.norm();
             if l < TOL {
-                return Err(KernelError::InvalidProfile("a line shorter than the modelling tolerance".into()));
+                return Err(KernelError::InvalidProfile(
+                    "a line shorter than the modelling tolerance".into(),
+                ));
             }
-            Piece { c: Curve::Line { o: p3(a), d: e2(d / l) }, t0: 0.0, t1: l, rev: false, src, more: vec![] }
+            Piece {
+                c: Curve::Line {
+                    o: p3(a),
+                    d: e2(d / l),
+                },
+                t0: 0.0,
+                t1: l,
+                rev: false,
+                src,
+                more: vec![],
+            }
         }
-        Curve2::Arc { center, radius, start_angle, sweep, .. } => {
+        Curve2::Arc {
+            center,
+            radius,
+            start_angle,
+            sweep,
+            ..
+        } => {
             if radius < TOL || (radius * sweep).abs() < TOL {
                 return Err(KernelError::InvalidProfile("a degenerate arc".into()));
             }
-            arc(Curve::Circle { c: p3(center), x: V3::x(), y: V3::y(), r: radius }, start_angle, sweep)
+            arc(
+                Curve::Circle {
+                    c: p3(center),
+                    x: V3::x(),
+                    y: V3::y(),
+                    r: radius,
+                },
+                start_angle,
+                sweep,
+            )
         }
         Curve2::Circle { center, radius, .. } => {
             // A negative radius runs clockwise.
             if radius.abs() < TOL {
                 return Err(KernelError::InvalidProfile("a degenerate circle".into()));
             }
-            Piece { c: Curve::Circle { c: p3(center), x: V3::x(), y: V3::y(), r: radius.abs() }, t0: 0.0, t1: TAU, rev: radius < 0.0, src, more: vec![] }
+            Piece {
+                c: Curve::Circle {
+                    c: p3(center),
+                    x: V3::x(),
+                    y: V3::y(),
+                    r: radius.abs(),
+                },
+                t0: 0.0,
+                t1: TAU,
+                rev: radius < 0.0,
+                src,
+                more: vec![],
+            }
         }
-        Curve2::Ellipse { center, major_radius, minor_radius, rotation, .. } => {
+        Curve2::Ellipse {
+            center,
+            major_radius,
+            minor_radius,
+            rotation,
+            ..
+        } => {
             if major_radius.abs() < TOL || minor_radius.abs() < TOL {
                 return Err(KernelError::InvalidProfile("a degenerate ellipse".into()));
             }
-            Piece { c: ellipse(center, major_radius, minor_radius, rotation), t0: 0.0, t1: TAU, rev: false, src, more: vec![] }
-        }
-        Curve2::EllipseArc { center, major_radius, minor_radius, rotation, start, sweep, .. } => {
-            if major_radius.abs() < TOL || minor_radius.abs() < TOL || sweep.abs() < tol::ROUNDOFF_FINE {
-                return Err(KernelError::InvalidProfile("a degenerate ellipse arc".into()));
+            Piece {
+                c: ellipse(center, major_radius, minor_radius, rotation),
+                t0: 0.0,
+                t1: TAU,
+                rev: false,
+                src,
+                more: vec![],
             }
-            arc(ellipse(center, major_radius, minor_radius, rotation), start, sweep)
         }
-        Curve2::OffsetEllipseArc { center, major_radius, minor_radius, rotation, start, sweep, offset, .. } => {
+        Curve2::EllipseArc {
+            center,
+            major_radius,
+            minor_radius,
+            rotation,
+            start,
+            sweep,
+            ..
+        } => {
+            if major_radius.abs() < TOL
+                || minor_radius.abs() < TOL
+                || sweep.abs() < tol::ROUNDOFF_FINE
+            {
+                return Err(KernelError::InvalidProfile(
+                    "a degenerate ellipse arc".into(),
+                ));
+            }
+            arc(
+                ellipse(center, major_radius, minor_radius, rotation),
+                start,
+                sweep,
+            )
+        }
+        Curve2::OffsetEllipseArc {
+            center,
+            major_radius,
+            minor_radius,
+            rotation,
+            start,
+            sweep,
+            offset,
+            ..
+        } => {
             let (a, b) = (major_radius.abs(), minor_radius.abs());
             let rmin = a.min(b).powi(2) / a.max(b);
             if offset <= -rmin + tol::ROUNDOFF {
@@ -253,16 +369,45 @@ pub fn piece_of(c: &Curve2, src: Src) -> Result<Piece> {
                     -offset, rmin
                 )));
             }
-            let n = offset_ellipse_nurbs(center, major_radius, minor_radius, rotation, start, sweep, offset);
+            let n = offset_ellipse_nurbs(
+                center,
+                major_radius,
+                minor_radius,
+                rotation,
+                start,
+                sweep,
+                offset,
+            );
             if sweep >= 0.0 {
-                Piece { c: Curve::Nurbs(Arc::new(n)), t0: start, t1: start + sweep, rev: false, src, more: vec![] }
+                Piece {
+                    c: Curve::Nurbs(Arc::new(n)),
+                    t0: start,
+                    t1: start + sweep,
+                    rev: false,
+                    src,
+                    more: vec![],
+                }
             } else {
-                Piece { c: Curve::Nurbs(Arc::new(n)), t0: start + sweep, t1: start, rev: true, src, more: vec![] }
+                Piece {
+                    c: Curve::Nurbs(Arc::new(n)),
+                    t0: start + sweep,
+                    t1: start,
+                    rev: true,
+                    src,
+                    more: vec![],
+                }
             }
         }
         Curve2::Bezier { poles, .. } => {
             let n = NurbsCurve::bezier(&poles.map(p3), &[1.0; 4]);
-            Piece { c: Curve::Nurbs(Arc::new(n)), t0: 0.0, t1: 1.0, rev: false, src, more: vec![] }
+            Piece {
+                c: Curve::Nurbs(Arc::new(n)),
+                t0: 0.0,
+                t1: 1.0,
+                rev: false,
+                src,
+                more: vec![],
+            }
         }
     };
     Ok(piece)
@@ -270,10 +415,24 @@ pub fn piece_of(c: &Curve2, src: Src) -> Result<Piece> {
 
 /// The offset ellipse as a C2 cubic B-spline interpolating the exact curve at the ellipse
 /// parameter (the knots are the ellipse angles, so the B-spline's t is the ellipse's).
-fn offset_ellipse_nurbs(center: P2, major: f64, minor: f64, rotation: f64, start: f64, sweep: f64, offset: f64) -> NurbsCurve {
-    let (lo, hi) = if sweep >= 0.0 { (start, start + sweep) } else { (start + sweep, start) };
+fn offset_ellipse_nurbs(
+    center: P2,
+    major: f64,
+    minor: f64,
+    rotation: f64,
+    start: f64,
+    sweep: f64,
+    offset: f64,
+) -> NurbsCurve {
+    let (lo, hi) = if sweep >= 0.0 {
+        (start, start + sweep)
+    } else {
+        (start + sweep, start)
+    };
     let n = ((hi - lo).abs() / TAU * 1024.0).ceil().max(16.0) as usize;
-    let ts: Vec<f64> = (0..=n).map(|i| lo + (hi - lo) * i as f64 / n as f64).collect();
+    let ts: Vec<f64> = (0..=n)
+        .map(|i| lo + (hi - lo) * i as f64 / n as f64)
+        .collect();
     let pts: Vec<P3> = ts
         .iter()
         .map(|&t| {
@@ -302,7 +461,13 @@ pub fn regions(profile: &Profile) -> Result<Vec<Region2>> {
             let mut pieces = Vec::new();
             for (ci, c) in l.curves.iter().enumerate() {
                 let cs = c.source().unwrap_or(unsourced_curve(li, ci));
-                pieces.push(piece_of(c, Src::Curve { region: source, curve: cs })?);
+                pieces.push(piece_of(
+                    c,
+                    Src::Curve {
+                        region: source,
+                        curve: cs,
+                    },
+                )?);
             }
             closed_loop(pieces, snap)
         };
@@ -327,8 +492,15 @@ pub fn regions(profile: &Profile) -> Result<Vec<Region2>> {
             holes.push(h);
         }
         let outer = outer.iter().map(along_travel).collect();
-        let holes = holes.iter().map(|h| h.iter().map(along_travel).collect()).collect();
-        out.push(Region2 { outer, holes, source });
+        let holes = holes
+            .iter()
+            .map(|h| h.iter().map(along_travel).collect())
+            .collect();
+        out.push(Region2 {
+            outer,
+            holes,
+            source,
+        });
     }
     Ok(out)
 }
@@ -342,7 +514,13 @@ fn along_travel(p: &Piece) -> Piece {
     }
     let (s, e) = (p.start(), p.end());
     let (c, l) = Curve::line(P3::new(s.x, s.y, 0.0), P3::new(e.x, e.y, 0.0));
-    Piece { c, t0: 0.0, t1: l, rev: false, ..p.clone() }
+    Piece {
+        c,
+        t0: 0.0,
+        t1: l,
+        rev: false,
+        ..p.clone()
+    }
 }
 
 /// Joints within this distance count as joined.
@@ -370,13 +548,20 @@ const MEET_REACH: f64 = 4.0;
 fn profile_snap(profile: &Profile) -> f64 {
     let mut bb = Bbox::empty();
     for r in &profile.regions {
-        for c in std::iter::once(&r.outer).chain(r.holes.iter()).flat_map(|l| l.curves.iter()) {
+        for c in std::iter::once(&r.outer)
+            .chain(r.holes.iter())
+            .flat_map(|l| l.curves.iter())
+        {
             for p in [c.start(), c.end()] {
                 bb.add(&P3::new(p.x, p.y, 0.0));
             }
         }
     }
-    let size = if bb.min.x <= bb.max.x { bb.diagonal() } else { 0.0 };
+    let size = if bb.min.x <= bb.max.x {
+        bb.diagonal()
+    } else {
+        0.0
+    };
     SNAP.max(SKETCH_REL * size)
 }
 
@@ -476,7 +661,11 @@ fn meet(a: &Piece, b: &Piece, gap: f64) -> Option<(Piece, Piece)> {
 fn with_end(p: &Piece, at_start: bool, u: f64) -> Option<Piece> {
     let mut q = p.clone();
     // The start of travel is t1 for a reversed piece.
-    if at_start != p.rev { q.t0 = u } else { q.t1 = u }
+    if at_start != p.rev {
+        q.t0 = u
+    } else {
+        q.t1 = u
+    }
     if q.t1 - q.t0 <= tol::ROUNDOFF || p.c.is_periodic() && q.t1 - q.t0 > TAU + tol::ANGULAR {
         return None;
     }
@@ -492,12 +681,22 @@ fn with_end(p: &Piece, at_start: bool, u: f64) -> Option<Piece> {
 /// and `to`, a circular arc through its other end, its middle and `to`, or a clamped B-spline
 /// with its end pole moved. None for other curves, or an arc that would turn the other way.
 fn moved_end(p: &Piece, at_start: bool, to: P2) -> Option<Piece> {
-    let (s, e) = if at_start { (to, p.end()) } else { (p.start(), to) };
+    let (s, e) = if at_start {
+        (to, p.end())
+    } else {
+        (p.start(), to)
+    };
     let p3 = |q: P2| P3::new(q.x, q.y, 0.0);
     match &p.c {
         Curve::Line { .. } => {
             let (c, l) = Curve::line(p3(s), p3(e));
-            (l > tol::ROUNDOFF).then(|| Piece { c, t0: 0.0, t1: l, rev: false, ..p.clone() })
+            (l > tol::ROUNDOFF).then(|| Piece {
+                c,
+                t0: 0.0,
+                t1: l,
+                rev: false,
+                ..p.clone()
+            })
         }
         Curve::Circle { .. } => {
             let m = p.at(0.5);
@@ -513,27 +712,49 @@ fn moved_end(p: &Piece, at_start: bool, to: P2) -> Option<Piece> {
             let ang = |q: P2| (q.y - c.y).atan2(q.x - c.x);
             // Counter-clockwise when the turn from s through m to e is to the left.
             let ccw = den > 0.0;
-            let (a0, a1) = if ccw { (ang(s), ang(e)) } else { (ang(e), ang(s)) };
+            let (a0, a1) = if ccw {
+                (ang(s), ang(e))
+            } else {
+                (ang(e), ang(s))
+            };
             let sweep = (a1 - a0).rem_euclid(TAU);
             let sweep = if sweep <= tol::ANGULAR { TAU } else { sweep };
             if (sweep - (p.t1 - p.t0)).abs() > SNAP_SHARE {
                 return None;
             }
-            let c = Curve::Circle { c: p3(c), x: V3::x(), y: V3::y(), r };
-            Some(Piece { c, t0: a0, t1: a0 + sweep, rev: !ccw, ..p.clone() })
+            let c = Curve::Circle {
+                c: p3(c),
+                x: V3::x(),
+                y: V3::y(),
+                r,
+            };
+            Some(Piece {
+                c,
+                t0: a0,
+                t1: a0 + sweep,
+                rev: !ccw,
+                ..p.clone()
+            })
         }
         Curve::Nurbs(n) => {
             let (lo, hi) = n.range();
             let first = at_start != p.rev;
             let k = if first { 0 } else { n.cps.len() - 1 };
-            let clamped = if first { p.t0 == lo && n.knots[0] == lo } else { p.t1 == hi && n.knots[n.knots.len() - 1] == hi };
+            let clamped = if first {
+                p.t0 == lo && n.knots[0] == lo
+            } else {
+                p.t1 == hi && n.knots[n.knots.len() - 1] == hi
+            };
             if !clamped {
                 return None;
             }
             let mut m = (**n).clone();
             let w = m.cps[k].w;
             m.cps[k] = super::nurbs::H::new(to.x * w, to.y * w, 0.0, w);
-            Some(Piece { c: Curve::Nurbs(Arc::new(m)), ..p.clone() })
+            Some(Piece {
+                c: Curve::Nurbs(Arc::new(m)),
+                ..p.clone()
+            })
         }
         Curve::Ellipse { .. } => None,
     }
@@ -551,9 +772,19 @@ pub fn closed_gap(profile: &Profile) -> f64 {
                 .curves
                 .iter()
                 .enumerate()
-                .map(|(ci, c)| piece_of(c, Src::Curve { region: source, curve: c.source().unwrap_or(unsourced_curve(li, ci)) }))
+                .map(|(ci, c)| {
+                    piece_of(
+                        c,
+                        Src::Curve {
+                            region: source,
+                            curve: c.source().unwrap_or(unsourced_curve(li, ci)),
+                        },
+                    )
+                })
                 .collect();
-            let Ok(chain) = pieces.and_then(|p| chain_loop_within(p, snap)) else { continue };
+            let Ok(chain) = pieces.and_then(|p| chain_loop_within(p, snap)) else {
+                continue;
+            };
             for (k, a) in chain.iter().enumerate() {
                 let gap = (a.end() - chain[(k + 1) % chain.len()].start()).norm();
                 if gap <= snap {
@@ -608,7 +839,9 @@ fn chain_loop_within(mut pieces: Vec<Piece>, snap: f64) -> Result<Loop2> {
     let mut out = vec![pieces.remove(0)];
     // The first piece's direction: keep it unless its end meets nothing but its start does.
     while !pieces.is_empty() {
-        let Some(end) = out.last().map(Piece::end) else { break };
+        let Some(end) = out.last().map(Piece::end) else {
+            break;
+        };
         let mut found = None;
         for (i, p) in pieces.iter().enumerate() {
             if (p.start() - end).norm() < JOIN {
@@ -651,7 +884,12 @@ fn nearest_end(pieces: &[Piece], p: &P2, within: f64) -> Option<(usize, bool)> {
     pieces
         .iter()
         .enumerate()
-        .flat_map(|(i, q)| [((q.start() - p).norm(), (i, false)), ((q.end() - p).norm(), (i, true))])
+        .flat_map(|(i, q)| {
+            [
+                ((q.start() - p).norm(), (i, false)),
+                ((q.end() - p).norm(), (i, true)),
+            ]
+        })
         .filter(|(d, _)| *d < within)
         .min_by(|a, b| a.0.total_cmp(&b.0))
         .map(|(_, f)| f)
@@ -660,7 +898,14 @@ fn nearest_end(pieces: &[Piece], p: &P2, within: f64) -> Option<(usize, bool)> {
 /// Merges regions that share boundary pieces into faces (one cap per connected group).
 pub fn merge_regions(regions: &[Region2]) -> Result<Vec<MergedFace>> {
     let separate = || -> Vec<MergedFace> {
-        regions.iter().map(|r| MergedFace { outer: r.outer.clone(), holes: r.holes.clone(), regions: vec![r.source] }).collect()
+        regions
+            .iter()
+            .map(|r| MergedFace {
+                outer: r.outer.clone(),
+                holes: r.holes.clone(),
+                regions: vec![r.source],
+            })
+            .collect()
     };
     if regions.len() < 2 {
         return Ok(separate());
@@ -688,7 +933,11 @@ pub fn merge_regions(regions: &[Region2]) -> Result<Vec<MergedFace>> {
     };
     let tol = JOIN.max(size * 1e-10);
     // Split every piece at the vertices of other loops lying on it.
-    let verts: Vec<(usize, P2)> = loops.iter().enumerate().flat_map(|(li, l)| l.iter().map(move |p| (li, p.start()))).collect();
+    let verts: Vec<(usize, P2)> = loops
+        .iter()
+        .enumerate()
+        .flat_map(|(li, l)| l.iter().map(move |p| (li, p.start())))
+        .collect();
     let mut pieces: Vec<(usize, Piece)> = Vec::new();
     for (li, l) in loops.iter().enumerate() {
         for p in l {
@@ -722,7 +971,11 @@ pub fn merge_regions(regions: &[Region2]) -> Result<Vec<MergedFace>> {
                 continue;
             }
             let (a, b) = (&pieces[i].1, &pieces[j].1);
-            if (a.start() - b.end()).norm() < tol && (a.end() - b.start()).norm() < tol && (a.at(0.5) - b.at(0.5)).norm() < tol && a.same_carrier(b, tol) {
+            if (a.start() - b.end()).norm() < tol
+                && (a.end() - b.start()).norm() < tol
+                && (a.at(0.5) - b.at(0.5)).norm() < tol
+                && a.same_carrier(b, tol)
+            {
                 dead[i] = true;
                 dead[j] = true;
                 any = true;
@@ -733,7 +986,12 @@ pub fn merge_regions(regions: &[Region2]) -> Result<Vec<MergedFace>> {
     if !any {
         return Ok(separate());
     }
-    let live: Vec<Piece> = pieces.into_iter().zip(dead).filter(|(_, d)| !d).map(|((_, p), _)| p).collect();
+    let live: Vec<Piece> = pieces
+        .into_iter()
+        .zip(dead)
+        .filter(|(_, d)| !d)
+        .map(|((_, p), _)| p)
+        .collect();
     // Trace loops, turning as far left as possible at junctions.
     let mut used = vec![false; live.len()];
     let mut traced: Vec<Loop2> = Vec::new();
@@ -767,11 +1025,15 @@ pub fn merge_regions(regions: &[Region2]) -> Result<Vec<MergedFace>> {
                     lp.push(live[k].clone());
                 }
                 None => {
-                    return Err(KernelError::InvalidProfile("the regions' boundaries don't close after merging".into()));
+                    return Err(KernelError::InvalidProfile(
+                        "the regions' boundaries don't close after merging".into(),
+                    ));
                 }
             }
             if lp.len() > live.len() {
-                return Err(KernelError::InvalidProfile("the regions' boundaries don't close after merging".into()));
+                return Err(KernelError::InvalidProfile(
+                    "the regions' boundaries don't close after merging".into(),
+                ));
             }
         }
         traced.push(fuse_pieces(lp, tol, false));
@@ -788,18 +1050,29 @@ pub fn merge_regions(regions: &[Region2]) -> Result<Vec<MergedFace>> {
             holes.push(l);
         }
     }
-    let mut faces: Vec<MergedFace> = outers.iter().map(|(l, _, _)| MergedFace { outer: l.clone(), holes: vec![], regions: vec![] }).collect();
+    let mut faces: Vec<MergedFace> = outers
+        .iter()
+        .map(|(l, _, _)| MergedFace {
+            outer: l.clone(),
+            holes: vec![],
+            regions: vec![],
+        })
+        .collect();
     for h in holes {
         let q = h[0].at(0.5);
         let best = outers
             .iter()
             .enumerate()
             .filter(|(_, (_, poly, _))| point_in_polygon(&q, poly))
-            .min_by(|a, b| a.1 .2.total_cmp(&b.1 .2))
+            .min_by(|a, b| a.1.2.total_cmp(&b.1.2))
             .map(|(i, _)| i);
         match best {
             Some(i) => faces[i].holes.push(h),
-            None => return Err(KernelError::InvalidProfile("a hole outside every region".into())),
+            None => {
+                return Err(KernelError::InvalidProfile(
+                    "a hole outside every region".into(),
+                ));
+            }
         }
     }
     // Which face each region went into: a point just inside its outer loop.
@@ -811,7 +1084,10 @@ pub fn merge_regions(regions: &[Region2]) -> Result<Vec<MergedFace>> {
         let mut found = None;
         for (i, (_, poly, _)) in outers.iter().enumerate() {
             if point_in_polygon(&q, poly) {
-                let in_hole = faces[i].holes.iter().any(|h| point_in_polygon(&q, &loop_polygon(h, size * 1e-4)));
+                let in_hole = faces[i]
+                    .holes
+                    .iter()
+                    .any(|h| point_in_polygon(&q, &loop_polygon(h, size * 1e-4)));
                 if !in_hole {
                     found = Some(i);
                     break;
@@ -832,7 +1108,11 @@ pub fn fuse_sides(faces: Vec<MergedFace>) -> Vec<MergedFace> {
         .into_iter()
         .map(|f| MergedFace {
             outer: fuse_pieces(f.outer, JOIN, true),
-            holes: f.holes.into_iter().map(|h| fuse_pieces(h, JOIN, true)).collect(),
+            holes: f
+                .holes
+                .into_iter()
+                .map(|h| fuse_pieces(h, JOIN, true))
+                .collect(),
             regions: f.regions,
         })
         .collect()
@@ -851,7 +1131,11 @@ fn fuse_pieces(mut lp: Loop2, tol: f64, lines_only: bool) -> Loop2 {
             let j = (i + 1) % n;
             let (a, b) = (&lp[i], &lp[j]);
             // A feature's lines of one region (`lines_only`), else pieces of touching regions.
-            let apart = if lines_only { a.src == b.src || !matches!(a.c, Curve::Line { .. }) } else { a.src.region() == b.src.region() };
+            let apart = if lines_only {
+                a.src == b.src || !matches!(a.c, Curve::Line { .. })
+            } else {
+                a.src.region() == b.src.region()
+            };
             if apart || !a.same_carrier(b, tol) || a.rev != b.rev {
                 continue;
             }
@@ -869,15 +1153,36 @@ fn fuse_pieces(mut lp: Loop2, tol: f64, lines_only: bool) -> Loop2 {
                     let (s, e) = (a.start(), b.end());
                     let d = e - s;
                     let l = d.norm();
-                    Piece { c: Curve::Line { o: P3::new(s.x, s.y, 0.0), d: V3::new(d.x / l, d.y / l, 0.0) }, t0: 0.0, t1: l, rev: false, src: a.src, more }
+                    Piece {
+                        c: Curve::Line {
+                            o: P3::new(s.x, s.y, 0.0),
+                            d: V3::new(d.x / l, d.y / l, 0.0),
+                        },
+                        t0: 0.0,
+                        t1: l,
+                        rev: false,
+                        src: a.src,
+                        more,
+                    }
                 }
                 Curve::Circle { .. } => {
                     let span = b.t1 - b.t0;
-                    let (t0, t1) = if a.rev { (a.t0 - span, a.t1) } else { (a.t0, a.t1 + span) };
+                    let (t0, t1) = if a.rev {
+                        (a.t0 - span, a.t1)
+                    } else {
+                        (a.t0, a.t1 + span)
+                    };
                     if t1 - t0 > TAU + tol::ANGULAR {
                         continue;
                     }
-                    Piece { c: a.c.clone(), t0, t1, rev: a.rev, src: a.src, more }
+                    Piece {
+                        c: a.c.clone(),
+                        t0,
+                        t1,
+                        rev: a.rev,
+                        src: a.src,
+                        more,
+                    }
                 }
                 _ => continue,
             };
@@ -899,7 +1204,11 @@ pub fn chain_loop_open(mut pieces: Vec<Piece>) -> Result<Loop2> {
         return Ok(pieces);
     }
     // Start from a piece end that touches no other piece.
-    let touches = |p: &P2, pieces: &[Piece], skip: usize| pieces.iter().enumerate().any(|(i, q)| i != skip && ((q.start() - p).norm() < JOIN || (q.end() - p).norm() < JOIN));
+    let touches = |p: &P2, pieces: &[Piece], skip: usize| {
+        pieces.iter().enumerate().any(|(i, q)| {
+            i != skip && ((q.start() - p).norm() < JOIN || (q.end() - p).norm() < JOIN)
+        })
+    };
     let mut first = 0;
     let mut flip = false;
     for (i, p) in pieces.iter().enumerate() {
@@ -916,12 +1225,23 @@ pub fn chain_loop_open(mut pieces: Vec<Piece>) -> Result<Loop2> {
     let p = pieces.remove(first);
     let mut out = vec![if flip { p.reversed() } else { p }];
     while !pieces.is_empty() {
-        let Some(end) = out.last().map(Piece::end) else { break };
-        let Some(i) = pieces.iter().position(|q| (q.start() - end).norm() < JOIN || (q.end() - end).norm() < JOIN) else {
-            return Err(KernelError::InvalidProfile("the chain's curves are not connected".into()));
+        let Some(end) = out.last().map(Piece::end) else {
+            break;
+        };
+        let Some(i) = pieces
+            .iter()
+            .position(|q| (q.start() - end).norm() < JOIN || (q.end() - end).norm() < JOIN)
+        else {
+            return Err(KernelError::InvalidProfile(
+                "the chain's curves are not connected".into(),
+            ));
         };
         let q = pieces.remove(i);
-        out.push(if (q.start() - end).norm() < JOIN { q } else { q.reversed() });
+        out.push(if (q.start() - end).norm() < JOIN {
+            q
+        } else {
+            q.reversed()
+        });
     }
     Ok(out)
 }
@@ -986,7 +1306,9 @@ pub fn in_loop(l: &[Piece], q: &P2) -> bool {
 /// Whether the interiors of any two regions overlap (points just inside one region's boundary
 /// lie inside another).
 pub fn regions_overlap(regions: &[Region2]) -> bool {
-    let inside = |q: &P2, j: usize| in_loop(&regions[j].outer, q) && !regions[j].holes.iter().any(|h| in_loop(h, q));
+    let inside = |q: &P2, j: usize| {
+        in_loop(&regions[j].outer, q) && !regions[j].holes.iter().any(|h| in_loop(h, q))
+    };
     for (i, r) in regions.iter().enumerate() {
         for l in std::iter::once(&r.outer).chain(r.holes.iter()) {
             for p in l {

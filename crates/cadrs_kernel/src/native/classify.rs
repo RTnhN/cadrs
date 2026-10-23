@@ -2,8 +2,8 @@
 
 use super::math::*;
 use super::surface::Surface;
-use super::topo::{co_range, Body, Face};
 use super::tol;
+use super::topo::{Body, Face, co_range};
 
 /// Where a (u, v) point lies relative to a face's trimmed domain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,7 +62,11 @@ pub fn in_face(polys: &[Vec<P2>], surf: &Surface, uv: P2, tol: f64) -> InFace {
             inside = !inside;
         }
     }
-    if inside { InFace::Inside } else { InFace::Outside }
+    if inside {
+        InFace::Inside
+    } else {
+        InFace::Outside
+    }
 }
 
 /// A face's polygons with their boxes, for [`in_face`] on many points: in (u, v) and in the
@@ -110,7 +114,12 @@ pub fn poly_boxes(polys: &[Vec<P2>], surf: &Surface) -> PolyBoxes {
     polys
         .iter()
         .map(|p| {
-            let mut b = [f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY];
+            let mut b = [
+                f64::INFINITY,
+                f64::NEG_INFINITY,
+                f64::INFINITY,
+                f64::NEG_INFINITY,
+            ];
             let mut m = b;
             for q in p {
                 b = [b[0].min(q.x), b[1].max(q.x), b[2].min(q.y), b[3].max(q.y)];
@@ -120,7 +129,11 @@ pub fn poly_boxes(polys: &[Vec<P2>], surf: &Surface) -> PolyBoxes {
             let n = p.len();
             let rows = (n > 64 && b[3] > b[2]).then(|| {
                 let count = (n / 8).clamp(1, 256);
-                let mut r = Rows { y0: b[2], dy: (b[3] - b[2]) / count as f64, sides: vec![Vec::new(); count] };
+                let mut r = Rows {
+                    y0: b[2],
+                    dy: (b[3] - b[2]) / count as f64,
+                    sides: vec![Vec::new(); count],
+                };
                 for i in 0..n {
                     let (a, c) = (p[i], p[(i + 1) % n]);
                     for k in r.span(a.y.min(c.y), a.y.max(c.y)) {
@@ -139,15 +152,28 @@ pub fn poly_boxes(polys: &[Vec<P2>], surf: &Surface) -> PolyBoxes {
 /// outside, where the crossings to its right are even) can neither hold it on its boundary nor
 /// flip its parity, and is skipped; of a long polygon only the sides in the point's rows (those
 /// that come within `tol` of it, and those that cross its v) are looked at.
-pub fn in_face_boxed(polys: &[Vec<P2>], boxes: &[PolyBox], surf: &Surface, uv: P2, tol: f64) -> InFace {
+pub fn in_face_boxed(
+    polys: &[Vec<P2>],
+    boxes: &[PolyBox],
+    surf: &Surface,
+    uv: P2,
+    tol: f64,
+) -> InFace {
     let (mu, mv) = surf.metric();
     let mut inside = false;
     for (p, pb) in polys.iter().zip(boxes) {
         let (b, m) = (&pb.b, &pb.m);
         let uv = shifted_into(surf, uv, (b[0], b[1]), (b[2], b[3]));
         let q = P2::new(uv.x * mu, uv.y * mv);
-        let gm = tol * (1.0 + tol::REL) + tol::REL_FINE * (1.0 + q.x.abs().max(q.y.abs()) + m[1].abs().max(m[0].abs()).max(m[3].abs()).max(m[2].abs()));
-        let gb = tol::REL_FINE * (1.0 + uv.x.abs().max(uv.y.abs()) + b[1].abs().max(b[0].abs()).max(b[3].abs()).max(b[2].abs()));
+        let gm = tol * (1.0 + tol::REL)
+            + tol::REL_FINE
+                * (1.0
+                    + q.x.abs().max(q.y.abs())
+                    + m[1].abs().max(m[0].abs()).max(m[3].abs()).max(m[2].abs()));
+        let gb = tol::REL_FINE
+            * (1.0
+                + uv.x.abs().max(uv.y.abs())
+                + b[1].abs().max(b[0].abs()).max(b[3].abs()).max(b[2].abs()));
         let far_m = q.x < m[0] - gm || q.x > m[1] + gm || q.y < m[2] - gm || q.y > m[3] + gm;
         let far_b = uv.x < b[0] - gb || uv.x > b[1] + gb || uv.y < b[2] - gb || uv.y > b[3] + gb;
         if far_m && far_b {
@@ -198,12 +224,20 @@ pub fn in_face_boxed(polys: &[Vec<P2>], boxes: &[PolyBox], surf: &Surface, uv: P
             inside = !inside;
         }
     }
-    if inside { InFace::Inside } else { InFace::Outside }
+    if inside {
+        InFace::Inside
+    } else {
+        InFace::Outside
+    }
 }
 
 impl<'a> FacePolys<'a> {
     pub fn new(polys: &'a [Vec<P2>], surf: &Surface) -> Self {
-        FacePolys { polys, boxes: poly_boxes(polys, surf), range: uv_range(polys) }
+        FacePolys {
+            polys,
+            boxes: poly_boxes(polys, surf),
+            range: uv_range(polys),
+        }
     }
 
     /// [`periodic_candidates`] for these polygons.
@@ -232,7 +266,11 @@ pub fn ray_surface(s: &Surface, o: &P3, d: &V3, tmin: f64, tmax: f64) -> Vec<(f6
         Surface::Cylinder { f, r } => {
             let l = f.local(o);
             let ld = V3::new(d.dot(&f.x), d.dot(&f.y), d.dot(&f.z));
-            ts = quadratic(ld.x * ld.x + ld.y * ld.y, 2.0 * (l.x * ld.x + l.y * ld.y), l.x * l.x + l.y * l.y - r * r);
+            ts = quadratic(
+                ld.x * ld.x + ld.y * ld.y,
+                2.0 * (l.x * ld.x + l.y * ld.y),
+                l.x * l.x + l.y * l.y - r * r,
+            );
             if ld.x * ld.x + ld.y * ld.y < 1e-24 {
                 ts.clear();
             }
@@ -345,7 +383,12 @@ fn ray_parametric(s: &Surface, o: &P3, d: &V3) -> Vec<(f64, f64, f64)> {
         _ => s.param_box(),
     };
     let n = 32;
-    let at = |i: usize, j: usize| (u0 + (u1 - u0) * i as f64 / n as f64, v0 + (v1 - v0) * j as f64 / n as f64);
+    let at = |i: usize, j: usize| {
+        (
+            u0 + (u1 - u0) * i as f64 / n as f64,
+            v0 + (v1 - v0) * j as f64 / n as f64,
+        )
+    };
     let mut grid = vec![P3::origin(); (n + 1) * (n + 1)];
     for i in 0..=n {
         for j in 0..=n {
@@ -375,13 +418,24 @@ fn ray_parametric(s: &Surface, o: &P3, d: &V3) -> Vec<(f64, f64, f64)> {
     };
     for i in 0..n {
         for j in 0..n {
-            let (p00, p10, p01, p11) = (grid[i * (n + 1) + j], grid[(i + 1) * (n + 1) + j], grid[i * (n + 1) + j + 1], grid[(i + 1) * (n + 1) + j + 1]);
+            let (p00, p10, p01, p11) = (
+                grid[i * (n + 1) + j],
+                grid[(i + 1) * (n + 1) + j],
+                grid[i * (n + 1) + j + 1],
+                grid[(i + 1) * (n + 1) + j + 1],
+            );
             let (ua, va) = at(i, j);
             let (ub, vb) = at(i + 1, j + 1);
             for (k, (a, b, c)) in [(p00, p10, p11), (p00, p11, p01)].into_iter().enumerate() {
-                let Some((t, bu, bv)) = tri(&a, &b, &c) else { continue };
+                let Some((t, bu, bv)) = tri(&a, &b, &c) else {
+                    continue;
+                };
                 // Seed (u, v) inside the cell.
-                let (mut u, mut v) = if k == 0 { (ua + (ub - ua) * (bu + bv), va + (vb - va) * bv) } else { (ua + (ub - ua) * bu, va + (vb - va) * (bu + bv)) };
+                let (mut u, mut v) = if k == 0 {
+                    (ua + (ub - ua) * (bu + bv), va + (vb - va) * bv)
+                } else {
+                    (ua + (ub - ua) * bu, va + (vb - va) * (bu + bv))
+                };
                 let mut tt = t;
                 let mut ok = false;
                 for _ in 0..30 {
@@ -424,7 +478,14 @@ pub fn ray_hits(body: &Body, polys: &[Vec<Vec<P2>>], o: &P3, d: &V3) -> Vec<(f64
 
 /// [`ray_hits`] with the faces `among` only, each skipped where the line keeps off its box
 /// (`boxes`, the faces' [`Body::face_bbox`]es by face index, when given).
-pub fn ray_hits_among(body: &Body, polys: &[Vec<Vec<P2>>], among: &[usize], boxes: Option<&[Bbox]>, o: &P3, d: &V3) -> Vec<(f64, usize, P3)> {
+pub fn ray_hits_among(
+    body: &Body,
+    polys: &[Vec<Vec<P2>>],
+    among: &[usize],
+    boxes: Option<&[Bbox]>,
+    o: &P3,
+    d: &V3,
+) -> Vec<(f64, usize, P3)> {
     RAYS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let bb = body.bbox().grow(1.0);
     let span = bb.diagonal() + (bb.center() - o).norm();
@@ -484,9 +545,15 @@ pub fn periodic_candidates(s: &Surface, u: f64, v: f64, polys: &[Vec<P2>]) -> Ve
 /// [`periodic_candidates`] for the polygons of `boxes` ([`poly_boxes`]): their range from
 /// their boxes (the same as from their points, for none of the points' passes).
 pub fn periodic_candidates_boxed(s: &Surface, u: f64, v: f64, boxes: &[PolyBox]) -> Vec<P2> {
-    let mut r = ((f64::INFINITY, f64::NEG_INFINITY), (f64::INFINITY, f64::NEG_INFINITY));
+    let mut r = (
+        (f64::INFINITY, f64::NEG_INFINITY),
+        (f64::INFINITY, f64::NEG_INFINITY),
+    );
     for pb in boxes {
-        r = ((r.0.0.min(pb.b[0]), r.0.1.max(pb.b[1])), (r.1.0.min(pb.b[2]), r.1.1.max(pb.b[3])));
+        r = (
+            (r.0.0.min(pb.b[0]), r.0.1.max(pb.b[1])),
+            (r.1.0.min(pb.b[2]), r.1.1.max(pb.b[3])),
+        );
     }
     periodic_candidates_in(s, u, v, r)
 }
@@ -501,9 +568,15 @@ fn shifted_into(s: &Surface, uv: P2, (ulo, uhi): (f64, f64), (vlo, vhi): (f64, f
         if !periodic || (x >= lo - tol::ROUNDOFF && x <= hi + tol::ROUNDOFF) {
             return x;
         }
-        (-2..=2).map(|k| x + TAU * k as f64).find(|y| *y >= lo - tol::ROUNDOFF && *y <= hi + tol::ROUNDOFF).unwrap_or(x)
+        (-2..=2)
+            .map(|k| x + TAU * k as f64)
+            .find(|y| *y >= lo - tol::ROUNDOFF && *y <= hi + tol::ROUNDOFF)
+            .unwrap_or(x)
     };
-    P2::new(fit(uv.x, ulo, uhi, s.u_periodic()), fit(uv.y, vlo, vhi, s.v_periodic()))
+    P2::new(
+        fit(uv.x, ulo, uhi, s.u_periodic()),
+        fit(uv.y, vlo, vhi, s.v_periodic()),
+    )
 }
 
 /// The (u, v) ranges the polygons span.
@@ -520,7 +593,12 @@ fn uv_range(polys: &[Vec<P2>]) -> ((f64, f64), (f64, f64)) {
 }
 
 /// [`periodic_candidates`] with the polygons' (u, v) ranges known.
-fn periodic_candidates_in(s: &Surface, u: f64, v: f64, (ub, vb): ((f64, f64), (f64, f64))) -> Vec<P2> {
+fn periodic_candidates_in(
+    s: &Surface,
+    u: f64,
+    v: f64,
+    (ub, vb): ((f64, f64), (f64, f64)),
+) -> Vec<P2> {
     let us: Vec<f64> = if s.u_periodic() {
         let mut v = Vec::new();
         for k in -2..=2 {
@@ -599,12 +677,24 @@ impl<'a> Classifier<'a> {
             .iter()
             .map(|ps| {
                 let mut uv = Bbox::empty();
-                ps.iter().flatten().for_each(|q| uv.add(&P3::new(q.x, q.y, 0.0)));
+                ps.iter()
+                    .flatten()
+                    .for_each(|q| uv.add(&P3::new(q.x, q.y, 0.0)));
                 (!uv.is_empty()).then(|| (uv.center().x, uv.center().y))
             })
             .collect();
-        let polys = polys.iter().zip(&body.faces).map(|(p, f)| FacePolys::new(p, &f.surf)).collect();
-        Classifier { body, polys, boxes, bbox, starts }
+        let polys = polys
+            .iter()
+            .zip(&body.faces)
+            .map(|(p, f)| FacePolys::new(p, &f.surf))
+            .collect();
+        Classifier {
+            body,
+            polys,
+            boxes,
+            bbox,
+            starts,
+        }
     }
 
     /// The (u, v) on face `fi`'s surface nearest `p`: from the face's start, and from the
@@ -637,12 +727,19 @@ impl<'a> Classifier<'a> {
                 }
             }
         }
-        if self.parity_inside(p) { crate::PointClass::Inside } else { crate::PointClass::Outside }
+        if self.parity_inside(p) {
+            crate::PointClass::Inside
+        } else {
+            crate::PointClass::Outside
+        }
     }
 
     /// Ray parity, by the majority of a few rays (two that agree, else the first side to
     /// three), with retries in other directions when a ray grazes an edge or a face.
-    #[allow(clippy::approx_constant, reason = "ray directions picked off the axes and diagonals, not constants")]
+    #[allow(
+        clippy::approx_constant,
+        reason = "ray directions picked off the axes and diagonals, not constants"
+    )]
     pub fn parity_inside(&self, p: &P3) -> bool {
         // Five fixed directions, then 32 more spread over the sphere (a golden-angle spiral)
         // while every ray so far grazed a face or ran through an edge.
@@ -710,7 +807,8 @@ impl<'a> Classifier<'a> {
             // Two rays that agree, else the first side to three: a ray can miss a crossing
             // (near the boundary of a face's polygon, nearly along a B-spline face) and so count
             // the wrong parity.
-            if (votes.0.min(votes.1) == 0 && votes.0.max(votes.1) >= 2) || votes.0.max(votes.1) >= 3 {
+            if (votes.0.min(votes.1) == 0 && votes.0.max(votes.1) >= 2) || votes.0.max(votes.1) >= 3
+            {
                 break;
             }
         }
@@ -768,24 +866,35 @@ mod tests {
     /// boundary of an outer polygon with a hole, on a plane and a (scaled) cylinder.
     #[test]
     fn boxed_polygons_match_in_face() {
-        let outer: Vec<P2> = (0..40).map(|i| {
-            let a = i as f64 * TAU / 40.0;
-            P2::new(2.0 + 1.5 * a.cos() * (1.0 + 0.3 * (3.0 * a).sin()), 0.5 + a.sin())
-        }).collect();
-        let hole: Vec<P2> = (0..12).map(|i| {
-            let a = -(i as f64) * TAU / 12.0;
-            P2::new(2.2 + 0.3 * a.cos(), 0.6 + 0.2 * a.sin())
-        }).collect();
+        let outer: Vec<P2> = (0..40)
+            .map(|i| {
+                let a = i as f64 * TAU / 40.0;
+                P2::new(
+                    2.0 + 1.5 * a.cos() * (1.0 + 0.3 * (3.0 * a).sin()),
+                    0.5 + a.sin(),
+                )
+            })
+            .collect();
+        let hole: Vec<P2> = (0..12)
+            .map(|i| {
+                let a = -(i as f64) * TAU / 12.0;
+                P2::new(2.2 + 0.3 * a.cos(), 0.6 + 0.2 * a.sin())
+            })
+            .collect();
         let polys = vec![outer, hole];
         let f = Frame::world();
         for surf in [Surface::Plane { f }, Surface::Cylinder { f, r: 7.0 }] {
             let fp = FacePolys::new(&polys, &surf);
             let mut seed = 12345u64;
             let mut rnd = || {
-                seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                seed = seed
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
                 (seed >> 11) as f64 / (1u64 << 53) as f64
             };
-            let mut pts: Vec<P2> = (0..4000).map(|_| P2::new(-1.0 + 6.0 * rnd(), -2.0 + 5.0 * rnd())).collect();
+            let mut pts: Vec<P2> = (0..4000)
+                .map(|_| P2::new(-1.0 + 6.0 * rnd(), -2.0 + 5.0 * rnd()))
+                .collect();
             // On and just off the polygons' corners and sides.
             for p in &polys {
                 for w in p.windows(2) {
@@ -795,9 +904,16 @@ mod tests {
             }
             for uv in pts {
                 for tol in [1e-7, 1e-3] {
-                    assert_eq!(fp.in_face(&surf, uv, tol), in_face(&polys, &surf, uv, tol), "{uv:?} tol {tol}");
+                    assert_eq!(
+                        fp.in_face(&surf, uv, tol),
+                        in_face(&polys, &surf, uv, tol),
+                        "{uv:?} tol {tol}"
+                    );
                 }
-                assert_eq!(fp.candidates(&surf, uv.x, uv.y), periodic_candidates(&surf, uv.x, uv.y, &polys));
+                assert_eq!(
+                    fp.candidates(&surf, uv.x, uv.y),
+                    periodic_candidates(&surf, uv.x, uv.y, &polys)
+                );
             }
         }
     }
@@ -807,12 +923,31 @@ mod tests {
     /// are outside the face, by either in-face test; points away from it inside.
     #[test]
     fn hole_across_the_seam() {
-        let surf = Surface::Cylinder { f: Frame::world(), r: 1.0 };
-        let outer = vec![P2::new(0.0, 0.0), P2::new(TAU, 0.0), P2::new(TAU, 1.0), P2::new(0.0, 1.0)];
-        let hole = vec![P2::new(-0.5, 0.4), P2::new(-0.5, 0.6), P2::new(0.5, 0.6), P2::new(0.5, 0.4)];
+        let surf = Surface::Cylinder {
+            f: Frame::world(),
+            r: 1.0,
+        };
+        let outer = vec![
+            P2::new(0.0, 0.0),
+            P2::new(TAU, 0.0),
+            P2::new(TAU, 1.0),
+            P2::new(0.0, 1.0),
+        ];
+        let hole = vec![
+            P2::new(-0.5, 0.4),
+            P2::new(-0.5, 0.6),
+            P2::new(0.5, 0.6),
+            P2::new(0.5, 0.4),
+        ];
         let polys = vec![outer, hole];
         let fp = FacePolys::new(&polys, &surf);
-        for (uv, want) in [((0.2, 0.5), InFace::Outside), ((TAU - 0.2, 0.5), InFace::Outside), ((PI, 0.5), InFace::Inside), ((0.2, 0.2), InFace::Inside), ((TAU - 0.2, 0.8), InFace::Inside)] {
+        for (uv, want) in [
+            ((0.2, 0.5), InFace::Outside),
+            ((TAU - 0.2, 0.5), InFace::Outside),
+            ((PI, 0.5), InFace::Inside),
+            ((0.2, 0.2), InFace::Inside),
+            ((TAU - 0.2, 0.8), InFace::Inside),
+        ] {
             let uv = P2::new(uv.0, uv.1);
             assert_eq!(in_face(&polys, &surf, uv, 1e-9), want, "{uv:?}");
             assert_eq!(fp.in_face(&surf, uv, 1e-9), want, "{uv:?}");
@@ -830,21 +965,50 @@ mod boxed_tests {
     #[test]
     fn boxed_in_face_matches_in_face() {
         let s = Surface::Plane { f: Frame::world() };
-        let outer: Vec<P2> = (0..2000).map(|i| { let a = TAU * i as f64 / 2000.0; let r = 10.0 + 0.5 * (7.0 * a).sin(); P2::new(r * a.cos(), r * a.sin()) }).collect();
+        let outer: Vec<P2> = (0..2000)
+            .map(|i| {
+                let a = TAU * i as f64 / 2000.0;
+                let r = 10.0 + 0.5 * (7.0 * a).sin();
+                P2::new(r * a.cos(), r * a.sin())
+            })
+            .collect();
         let mut polys = vec![outer];
         for k in 0..6 {
             let c = P2::new(-6.0 + 2.4 * k as f64, 0.5);
-            polys.push((0..100).rev().map(|i| { let a = TAU * i as f64 / 100.0; P2::new(c.x + 0.8 * a.cos(), c.y + 0.8 * a.sin()) }).collect());
+            polys.push(
+                (0..100)
+                    .rev()
+                    .map(|i| {
+                        let a = TAU * i as f64 / 100.0;
+                        P2::new(c.x + 0.8 * a.cos(), c.y + 0.8 * a.sin())
+                    })
+                    .collect(),
+            );
         }
         let boxes = poly_boxes(&polys, &s);
         let mut seed = 12345u64;
-        let mut rnd = || { seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); (seed >> 11) as f64 / (1u64 << 53) as f64 };
-        let mut pts: Vec<P2> = (0..4000).map(|_| P2::new(-13.0 + 26.0 * rnd(), -13.0 + 26.0 * rnd())).collect();
+        let mut rnd = || {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let mut pts: Vec<P2> = (0..4000)
+            .map(|_| P2::new(-13.0 + 26.0 * rnd(), -13.0 + 26.0 * rnd()))
+            .collect();
         // On and a hair off the sides.
-        pts.extend(polys.iter().flat_map(|p| p.iter().step_by(37).flat_map(|q| [*q, P2::new(q.x + 1e-8, q.y), P2::new(q.x, q.y - 3e-7)])));
+        pts.extend(polys.iter().flat_map(|p| {
+            p.iter()
+                .step_by(37)
+                .flat_map(|q| [*q, P2::new(q.x + 1e-8, q.y), P2::new(q.x, q.y - 3e-7)])
+        }));
         for q in pts {
             for tol in [1e-7, 1e-3] {
-                assert_eq!(in_face_boxed(&polys, &boxes, &s, q, tol), in_face(&polys, &s, q, tol), "at {q:?}, tol {tol}");
+                assert_eq!(
+                    in_face_boxed(&polys, &boxes, &s, q, tol),
+                    in_face(&polys, &s, q, tol),
+                    "at {q:?}, tol {tol}"
+                );
             }
         }
     }

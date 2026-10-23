@@ -12,7 +12,10 @@ pub const CLOSEST_SAMPLES: usize = 64;
 
 /// An exact curve with its parametrization `t ↦ point`; an edge uses it over `[t0, t1]`.
 #[derive(Debug, Clone, PartialEq)]
-#[allow(missing_docs, reason = "the fields are the symbols of each variant's formula")]
+#[allow(
+    missing_docs,
+    reason = "the fields are the symbols of each variant's formula"
+)]
 pub enum Curve {
     /// `o + t·d` (`d` a unit vector for an edge's line, so t is a length).
     Line { o: P3, d: V3 },
@@ -53,11 +56,19 @@ impl Curve {
             Curve::Line { o, d } => (o + d * t, *d, V3::zeros()),
             Curve::Circle { c, x, y, r } => {
                 let (s, co) = t.sin_cos();
-                (c + (x * co + y * s) * *r, (y * co - x * s) * *r, -(x * co + y * s) * *r)
+                (
+                    c + (x * co + y * s) * *r,
+                    (y * co - x * s) * *r,
+                    -(x * co + y * s) * *r,
+                )
             }
             Curve::Ellipse { c, x, y, a, b } => {
                 let (s, co) = t.sin_cos();
-                (c + x * (a * co) + y * (b * s), y * (b * co) - x * (a * s), -(x * (a * co) + y * (b * s)))
+                (
+                    c + x * (a * co) + y * (b * s),
+                    y * (b * co) - x * (a * s),
+                    -(x * (a * co) + y * (b * s)),
+                )
             }
             Curve::Nurbs(n) => n.ders2(t),
         }
@@ -86,15 +97,29 @@ impl Curve {
         match self {
             Curve::Line { o, d } => {
                 let dd = m.vector(d);
-                Curve::Line { o: m.point(o), d: dd }
+                Curve::Line {
+                    o: m.point(o),
+                    d: dd,
+                }
             }
             Curve::Circle { c, x, y, r } => {
                 let s = m.scale();
-                Curve::Circle { c: m.point(c), x: m.vector(x) / s, y: m.vector(y) / s, r: r * s }
+                Curve::Circle {
+                    c: m.point(c),
+                    x: m.vector(x) / s,
+                    y: m.vector(y) / s,
+                    r: r * s,
+                }
             }
             Curve::Ellipse { c, x, y, a, b } => {
                 let s = m.scale();
-                Curve::Ellipse { c: m.point(c), x: m.vector(x) / s, y: m.vector(y) / s, a: a * s, b: b * s }
+                Curve::Ellipse {
+                    c: m.point(c),
+                    x: m.vector(x) / s,
+                    y: m.vector(y) / s,
+                    a: a * s,
+                    b: b * s,
+                }
             }
             Curve::Nurbs(n) => Curve::Nurbs(Arc::new(n.transformed(m))),
         }
@@ -232,7 +257,9 @@ impl Curve {
             Curve::Circle { r, .. } => {
                 let step = arc_step(*r, defl, ang);
                 let n = ((t1 - t0).abs() / step).ceil().max(1.0) as usize;
-                (0..=n).map(|i| t0 + (t1 - t0) * i as f64 / n as f64).collect()
+                (0..=n)
+                    .map(|i| t0 + (t1 - t0) * i as f64 / n as f64)
+                    .collect()
             }
             _ => {
                 // Bound the curvature on each piece by sampling.
@@ -274,12 +301,35 @@ impl Curve {
     pub fn reversed(&self, t0: f64, t1: f64) -> (Curve, f64, f64) {
         match self {
             Curve::Line { o, d } => (Curve::Line { o: *o, d: -d }, -t1, -t0),
-            Curve::Circle { c, x, y, r } => (Curve::Circle { c: *c, x: *x, y: -y, r: *r }, -t1, -t0),
-            Curve::Ellipse { c, x, y, a, b } => (Curve::Ellipse { c: *c, x: *x, y: -y, a: *a, b: *b }, -t1, -t0),
+            Curve::Circle { c, x, y, r } => (
+                Curve::Circle {
+                    c: *c,
+                    x: *x,
+                    y: -y,
+                    r: *r,
+                },
+                -t1,
+                -t0,
+            ),
+            Curve::Ellipse { c, x, y, a, b } => (
+                Curve::Ellipse {
+                    c: *c,
+                    x: *x,
+                    y: -y,
+                    a: *a,
+                    b: *b,
+                },
+                -t1,
+                -t0,
+            ),
             Curve::Nurbs(n) => {
                 let k0 = n.knots[0];
                 let k1 = n.knots[n.knots.len() - 1];
-                (Curve::Nurbs(Arc::new(n.reversed())), k0 + k1 - t1, k0 + k1 - t0)
+                (
+                    Curve::Nurbs(Arc::new(n.reversed())),
+                    k0 + k1 - t1,
+                    k0 + k1 - t0,
+                )
             }
         }
     }
@@ -288,7 +338,9 @@ impl Curve {
     /// rational quadratics), parametrized on [t0, t1] (not arc-length equivalent for conics).
     pub fn to_nurbs(&self, t0: f64, t1: f64) -> NurbsCurve {
         match self {
-            Curve::Line { .. } => NurbsCurve::bezier(&[self.point(t0), self.point(t1)], &[1.0, 1.0]).reparam(t0, t1),
+            Curve::Line { .. } => {
+                NurbsCurve::bezier(&[self.point(t0), self.point(t1)], &[1.0, 1.0]).reparam(t0, t1)
+            }
             Curve::Circle { c, x, y, r } => conic_nurbs(*c, x * *r, y * *r, t0, t1),
             Curve::Ellipse { c, x, y, a, b } => conic_nurbs(*c, x * *a, y * *b, t0, t1),
             Curve::Nurbs(n) => {
@@ -329,7 +381,11 @@ fn adaptive_len(c: &Curve, a: f64, b: f64, depth: usize) -> f64 {
 /// The angle step along an arc of radius r: within `defl` of it, and the chords turning by at
 /// most half of `ang` (the mesh's area then stays within ~3e-4 of the exact one at 5°).
 pub fn arc_step(r: f64, defl: f64, ang: f64) -> f64 {
-    let d = if defl < r { 2.0 * (1.0 - defl / r).acos() } else { PI / 2.0 };
+    let d = if defl < r {
+        2.0 * (1.0 - defl / r).acos()
+    } else {
+        PI / 2.0
+    };
     d.min(ang * 0.5).max(1e-3)
 }
 
@@ -371,7 +427,11 @@ pub(crate) fn conic_nurbs(c: P3, x: V3, y: V3, t0: f64, t1: f64) -> NurbsCurve {
         }
     }
     knots.extend([t1; 3]);
-    NurbsCurve { degree: 2, knots, cps }
+    NurbsCurve {
+        degree: 2,
+        knots,
+        cps,
+    }
 }
 
 #[cfg(test)]
@@ -382,21 +442,55 @@ mod tests {
     /// of [`Curve::longer_than`] as the length, on a wavy B-spline, an ellipse and a line.
     #[test]
     fn presampled_closest_and_length_bound_match() {
-        let poles: Vec<P3> = (0..9).map(|i| P3::new(i as f64, (i as f64 * 1.3).sin() * 2.0, (i as f64 * 0.7).cos())).collect();
+        let poles: Vec<P3> = (0..9)
+            .map(|i| {
+                P3::new(
+                    i as f64,
+                    (i as f64 * 1.3).sin() * 2.0,
+                    (i as f64 * 0.7).cos(),
+                )
+            })
+            .collect();
         let curves = [
-            Curve::nurbs(NurbsCurve::interpolate(&poles, &(0..9).map(|i| i as f64 / 8.0).collect::<Vec<_>>(), 3, None, None)),
-            Curve::Ellipse { c: P3::new(1.0, 2.0, 3.0), x: V3::x(), y: V3::z(), a: 5.0, b: 2.0 },
-            Curve::Line { o: P3::origin(), d: V3::new(0.6, 0.8, 0.0) },
+            Curve::nurbs(NurbsCurve::interpolate(
+                &poles,
+                &(0..9).map(|i| i as f64 / 8.0).collect::<Vec<_>>(),
+                3,
+                None,
+                None,
+            )),
+            Curve::Ellipse {
+                c: P3::new(1.0, 2.0, 3.0),
+                x: V3::x(),
+                y: V3::z(),
+                a: 5.0,
+                b: 2.0,
+            },
+            Curve::Line {
+                o: P3::origin(),
+                d: V3::new(0.6, 0.8, 0.0),
+            },
         ];
         for c in &curves {
             for (t0, t1) in [(0.0, 1.0), (0.2, 0.65), (0.0, 0.001)] {
                 let samples = c.closest_samples(t0, t1);
                 for k in 0..50 {
-                    let p = P3::new(-2.0 + 0.23 * k as f64, 3.0 - 0.17 * k as f64, (k as f64).sin());
-                    assert_eq!(c.closest(&p, t0, t1).to_bits(), c.closest_from(&p, t0, t1, &samples).to_bits());
+                    let p = P3::new(
+                        -2.0 + 0.23 * k as f64,
+                        3.0 - 0.17 * k as f64,
+                        (k as f64).sin(),
+                    );
+                    assert_eq!(
+                        c.closest(&p, t0, t1).to_bits(),
+                        c.closest_from(&p, t0, t1, &samples).to_bits()
+                    );
                 }
                 for l in [1e-4, 1e-3, 0.5, 3.0, 50.0] {
-                    assert_eq!(c.longer_than(t0, t1, l), c.length(t0, t1) > l, "{c:?} {t0} {t1} {l}");
+                    assert_eq!(
+                        c.longer_than(t0, t1, l),
+                        c.length(t0, t1) > l,
+                        "{c:?} {t0} {t1} {l}"
+                    );
                 }
             }
         }
@@ -404,7 +498,12 @@ mod tests {
 
     #[test]
     fn circle_length_and_closest() {
-        let c = Curve::Circle { c: P3::origin(), x: V3::x(), y: V3::y(), r: 10.0 };
+        let c = Curve::Circle {
+            c: P3::origin(),
+            x: V3::x(),
+            y: V3::y(),
+            r: 10.0,
+        };
         assert!((c.length(0.0, TAU) - TAU * 10.0).abs() < 1e-12);
         let t = c.closest(&P3::new(0.0, -5.0, 1.0), 0.0, TAU);
         assert!((t - 1.5 * PI).abs() < 1e-12);
@@ -412,7 +511,13 @@ mod tests {
 
     #[test]
     fn ellipse_length() {
-        let e = Curve::Ellipse { c: P3::origin(), x: V3::x(), y: V3::y(), a: 30.0, b: 20.0 };
+        let e = Curve::Ellipse {
+            c: P3::origin(),
+            x: V3::x(),
+            y: V3::y(),
+            a: 30.0,
+            b: 20.0,
+        };
         // Ramanujan II approximation is accurate to ~1e-9 relative here.
         let (a, b) = (30.0f64, 20.0f64);
         let h = ((a - b) / (a + b)).powi(2);
@@ -422,7 +527,12 @@ mod tests {
 
     #[test]
     fn conic_nurbs_matches() {
-        let c = Curve::Circle { c: P3::new(1.0, 2.0, 3.0), x: V3::x(), y: V3::z(), r: 4.0 };
+        let c = Curve::Circle {
+            c: P3::new(1.0, 2.0, 3.0),
+            x: V3::x(),
+            y: V3::z(),
+            r: 4.0,
+        };
         let n = c.to_nurbs(0.3, 5.0);
         for i in 0..=20 {
             let t = 0.3 + 4.7 * i as f64 / 20.0;

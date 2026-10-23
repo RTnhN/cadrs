@@ -56,10 +56,18 @@ pub fn split_cells(k: &mut NativeKernel, start: BodyId, regions: &[BodyId]) -> R
 
 /// The cells of `args` inside the arguments `spec` marks true and outside those it marks false
 /// (the others either way). Cells outside every argument don't count.
-pub fn select_cells(k: &mut NativeKernel, args: &[BodyId], spec: &[(usize, bool)]) -> Result<Vec<BodyId>> {
-    let free: Vec<usize> = (0..args.len()).filter(|i| !spec.iter().any(|(j, _)| j == i)).collect();
+pub fn select_cells(
+    k: &mut NativeKernel,
+    args: &[BodyId],
+    spec: &[(usize, bool)],
+) -> Result<Vec<BodyId>> {
+    let free: Vec<usize> = (0..args.len())
+        .filter(|i| !spec.iter().any(|(j, _)| j == i))
+        .collect();
     if free.len() > 12 {
-        return Err(KernelError::Unsupported("cells of more than twelve free arguments"));
+        return Err(KernelError::Unsupported(
+            "cells of more than twelve free arguments",
+        ));
     }
     let mut out = Vec::new();
     for mask in 0u32..(1 << free.len()) {
@@ -72,7 +80,9 @@ pub fn select_cells(k: &mut NativeKernel, args: &[BodyId], spec: &[(usize, bool)
                 outside.push(i);
             }
         }
-        let Some((&first, rest)) = inside.split_first() else { continue };
+        let Some((&first, rest)) = inside.split_first() else {
+            continue;
+        };
         let mut cell = Some(args[first]);
         for &i in rest {
             cell = match cell {
@@ -95,7 +105,12 @@ pub fn select_cells(k: &mut NativeKernel, args: &[BodyId], spec: &[(usize, bool)
 
 /// The cells of `cells` that stay clear of the box `outer`'s faces (by `margin`): the bounded
 /// ones when `outer` stands for all of space.
-pub fn bounded(k: &NativeKernel, cells: &[BodyId], outer: &Aabb, margin: f64) -> Result<Vec<BodyId>> {
+pub fn bounded(
+    k: &NativeKernel,
+    cells: &[BodyId],
+    outer: &Aabb,
+    margin: f64,
+) -> Result<Vec<BodyId>> {
     let mut out = Vec::new();
     for &c in cells {
         let bb = crate::Kernel::bounding_box(k, c)?;
@@ -120,7 +135,14 @@ pub fn split_by(k: &mut NativeKernel, objects: &[BodyId], tools: &[BodyId]) -> R
                     next.extend(split_cells(k, p, &[t])?);
                 } else {
                     // A one-face sheet splits as that face.
-                    let tool = if k.get(t)?.faces.len() == 1 { SplitTool::Face { body: t, face: FaceId(0) } } else { SplitTool::Body(t) };
+                    let tool = if k.get(t)?.faces.len() == 1 {
+                        SplitTool::Face {
+                            body: t,
+                            face: FaceId(0),
+                        }
+                    } else {
+                        SplitTool::Body(t)
+                    };
                     match crate::Kernel::split(k, p, &tool, 0) {
                         Ok(r) if !r.bodies.is_empty() => {
                             for b in r.bodies {
@@ -145,9 +167,27 @@ mod tests {
     use crate::*;
 
     fn block(k: &mut super::NativeKernel, x0: f64, x1: f64) -> BodyId {
-        let c = [nalgebra::Point2::new(x0, 0.0), nalgebra::Point2::new(x1, 0.0), nalgebra::Point2::new(x1, 10.0), nalgebra::Point2::new(x0, 10.0)];
-        let curves = (0..4).map(|i| Curve2::Line { a: c[i], b: c[(i + 1) % 4], source: None }).collect();
-        let profile = Profile::new(Plane::top(), vec![Region { outer: Loop { curves }, holes: vec![], source: None }]);
+        let c = [
+            nalgebra::Point2::new(x0, 0.0),
+            nalgebra::Point2::new(x1, 0.0),
+            nalgebra::Point2::new(x1, 10.0),
+            nalgebra::Point2::new(x0, 10.0),
+        ];
+        let curves = (0..4)
+            .map(|i| Curve2::Line {
+                a: c[i],
+                b: c[(i + 1) % 4],
+                source: None,
+            })
+            .collect();
+        let profile = Profile::new(
+            Plane::top(),
+            vec![Region {
+                outer: Loop { curves },
+                holes: vec![],
+                source: None,
+            }],
+        );
         k.extrude(&profile, Extent::Blind(10.0)).unwrap().bodies[0]
     }
 
@@ -158,16 +198,27 @@ mod tests {
         let mut k = super::NativeKernel::new();
         let (a, b) = (block(&mut k, 0.0, 10.0), block(&mut k, 4.0, 14.0));
         let vols = |k: &super::NativeKernel, cells: &[BodyId]| {
-            let mut v: Vec<f64> = cells.iter().map(|&c| k.mass_properties(c).unwrap().volume).collect();
+            let mut v: Vec<f64> = cells
+                .iter()
+                .map(|&c| k.mass_properties(c).unwrap().volume)
+                .collect();
             v.sort_by(f64::total_cmp);
             v
         };
         let all = k.cells(&[a, b], &[]).unwrap();
         let v = vols(&k, &all);
         assert_eq!(v.len(), 3);
-        assert!((v[0] - 400.0).abs() < 1e-9 && (v[1] - 400.0).abs() < 1e-9 && (v[2] - 600.0).abs() < 1e-9, "{v:?}");
+        assert!(
+            (v[0] - 400.0).abs() < 1e-9
+                && (v[1] - 400.0).abs() < 1e-9
+                && (v[2] - 600.0).abs() < 1e-9,
+            "{v:?}"
+        );
         let both = k.cells(&[a, b], &[(0, true), (1, true)]).unwrap();
         assert!((vols(&k, &both)[0] - 600.0).abs() < 1e-9);
-        assert!(matches!(k.cells(&[a, b], &[(2, true)]), Err(KernelError::InvalidParameter(_))));
+        assert!(matches!(
+            k.cells(&[a, b], &[(2, true)]),
+            Err(KernelError::InvalidParameter(_))
+        ));
     }
 }

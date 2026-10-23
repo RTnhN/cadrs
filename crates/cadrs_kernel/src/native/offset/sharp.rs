@@ -8,9 +8,9 @@ use crate::native::kernel::NativeKernel;
 use crate::native::math::*;
 use crate::native::nurbs::NurbsCurve;
 use crate::native::surface::Surface;
+use crate::native::tol;
 use crate::native::topo::{Body, Coedge};
 use crate::*;
-use crate::native::tol;
 
 use crate::native::local::replace_surfaces;
 
@@ -31,7 +31,12 @@ pub fn offset_surface(s: &Surface, sense: bool, d: f64) -> Option<Surface> {
     Some(match s {
         Surface::Plane { f } => {
             let n = f.x.cross(&f.y);
-            Surface::Plane { f: Frame { o: f.o + n * d, ..*f } }
+            Surface::Plane {
+                f: Frame {
+                    o: f.o + n * d,
+                    ..*f
+                },
+            }
         }
         Surface::Cylinder { f, r } => {
             let r2 = r + d * if f.right_handed() { 1.0 } else { -1.0 };
@@ -52,12 +57,23 @@ pub fn offset_surface(s: &Surface, sense: bool, d: f64) -> Option<Surface> {
             if r2 <= tol::ROUNDOFF {
                 return None;
             }
-            Surface::Torus { f: *f, rmaj: *rmaj, rmin: r2 }
+            Surface::Torus {
+                f: *f,
+                rmaj: *rmaj,
+                rmin: r2,
+            }
         }
         Surface::Cone { f, r, a } => {
             // Moving along the normal (cos a, −sin a) in the (ρ, h) meridian.
             let k = d * if f.right_handed() { 1.0 } else { -1.0 };
-            Surface::Cone { f: Frame { o: f.o - f.z * (k * a.sin()), ..*f }, r: r + k * a.cos(), a: *a }
+            Surface::Cone {
+                f: Frame {
+                    o: f.o - f.z * (k * a.sin()),
+                    ..*f
+                },
+                r: r + k * a.cos(),
+                a: *a,
+            }
         }
         // An extrusion: its curve moved square to the direction (the normal is), extruded the
         // same way.
@@ -80,12 +96,20 @@ pub fn offset_surface(s: &Surface, sense: bool, d: f64) -> Option<Surface> {
             // `GetCreateExtendedSurface`). Not past a side the surface closes up across, nor
             // past a pole (a side collapsed to a point).
             let ((a0, a1), (b0, b1)) = n.range();
-            let size = 1.0 + n.cps.iter().flatten().map(|h| (h.xyz() / h.w).norm()).fold(0.0, f64::max);
+            let size = 1.0
+                + n.cps
+                    .iter()
+                    .flatten()
+                    .map(|h| (h.xyz() / h.w).norm())
+                    .fold(0.0, f64::max);
             // Points along each side: u = a0, u = a1, v = b0, v = b1.
             let side = |k: usize| -> Vec<P3> {
                 (0..=4)
                     .map(|j| {
-                        let (fu, fv) = (a0 + (a1 - a0) * j as f64 / 4.0, b0 + (b1 - b0) * j as f64 / 4.0);
+                        let (fu, fv) = (
+                            a0 + (a1 - a0) * j as f64 / 4.0,
+                            b0 + (b1 - b0) * j as f64 / 4.0,
+                        );
                         match k {
                             0 => s.eval(a0, fv),
                             1 => s.eval(a1, fv),
@@ -101,20 +125,29 @@ pub fn offset_surface(s: &Surface, sense: bool, d: f64) -> Option<Surface> {
             let pole = |k: usize| sides[k].iter().all(|p| same(p, &sides[k][0]));
             // (Nor a rational one: past its domain its weights can reach zero.)
             let w0 = n.cps[0][0].w;
-            let rational = n.cps.iter().flatten().any(|h| (h.w - w0).abs() > tol::REL_FINE * w0.abs());
+            let rational = n
+                .cps
+                .iter()
+                .flatten()
+                .any(|h| (h.w - w0).abs() > tol::REL_FINE * w0.abs());
             let grow = |(a, b): (f64, f64), k: usize| {
                 if rational {
                     return (a, b);
                 }
                 let w = 0.2 * (b - a);
-                (if closed(k) || pole(k) { a } else { a - w }, if closed(k) || pole(k + 1) { b } else { b + w })
+                (
+                    if closed(k) || pole(k) { a } else { a - w },
+                    if closed(k) || pole(k + 1) { b } else { b + w },
+                )
             };
             let ((u0, u1), (v0, v1)) = (grow((a0, a1), 0), grow((b0, b1), 2));
             // At a pole the normal is the limit from inside the domain.
             let (uc, vc) = ((a0 + a1) / 2.0, (b0 + b1) / 2.0);
             let normal = |u: f64, v: f64| {
                 let dd = s.d2(u, v);
-                if dd[1].cross(&dd[2]).norm() > tol::REL_FINE * (dd[1].norm_squared() + dd[2].norm_squared()) {
+                if dd[1].cross(&dd[2]).norm()
+                    > tol::REL_FINE * (dd[1].norm_squared() + dd[2].norm_squared())
+                {
                     return s.normal(u, v);
                 }
                 s.normal(u + (uc - u) * tol::DIFF_STEP, v + (vc - v) * tol::DIFF_STEP)
@@ -141,12 +174,19 @@ pub fn offset_surface(s: &Surface, sense: bool, d: f64) -> Option<Surface> {
                     })
                     .collect();
                 let mean = ns.iter().fold(V3::zeros(), |m, n| m + n).normalize();
-                ns.iter().all(|n| (n - mean).norm() < 1e-4).then(|| sides[k][0] + mean * d)
+                ns.iter()
+                    .all(|n| (n - mean).norm() < 1e-4)
+                    .then(|| sides[k][0] + mean * d)
             };
             let poles: Vec<Option<P3>> = (0..4).map(pole_point).collect();
             let at = |u: f64, v: f64| {
                 let (eu, ev) = (tol::REL_FINE * (a1 - a0), tol::REL_FINE * (b1 - b0));
-                let on = [(u - a0).abs() <= eu, (u - a1).abs() <= eu, (v - b0).abs() <= ev, (v - b1).abs() <= ev];
+                let on = [
+                    (u - a0).abs() <= eu,
+                    (u - a1).abs() <= eu,
+                    (v - b0).abs() <= ev,
+                    (v - b1).abs() <= ev,
+                ];
                 match (0..4).find_map(|k| if on[k] { poles[k] } else { None }) {
                     Some(q) => q,
                     None => s.eval(u, v) + normal(u, v) * d,
@@ -154,8 +194,12 @@ pub fn offset_surface(s: &Surface, sense: bool, d: f64) -> Option<Surface> {
             };
             let mut k = 32;
             loop {
-                let us: Vec<f64> = (0..=k).map(|i| u0 + (u1 - u0) * i as f64 / k as f64).collect();
-                let vs: Vec<f64> = (0..=k).map(|j| v0 + (v1 - v0) * j as f64 / k as f64).collect();
+                let us: Vec<f64> = (0..=k)
+                    .map(|i| u0 + (u1 - u0) * i as f64 / k as f64)
+                    .collect();
+                let vs: Vec<f64> = (0..=k)
+                    .map(|j| v0 + (v1 - v0) * j as f64 / k as f64)
+                    .collect();
                 let rows: Vec<NurbsCurve> = us
                     .iter()
                     .map(|&u| {
@@ -163,14 +207,26 @@ pub fn offset_surface(s: &Surface, sense: bool, d: f64) -> Option<Surface> {
                         NurbsCurve::interpolate(&pts, &vs, 3, None, None)
                     })
                     .collect();
-                let surf = crate::native::nurbs::NurbsSurface::through_curves(&rows, &us, 3, None, None);
+                let surf =
+                    crate::native::nurbs::NurbsSurface::through_curves(&rows, &us, 3, None, None);
                 // through_curves runs its rows along v and interpolates them along u: transpose
                 // to keep the parameters' roles.
-                let cps: Vec<Vec<crate::native::nurbs::H>> = (0..surf.cps[0].len()).map(|j| surf.cps.iter().map(|r| r[j]).collect()).collect();
-                let off = Surface::Nurbs(std::sync::Arc::new(crate::native::nurbs::NurbsSurface { du: surf.dv, dv: surf.du, ku: surf.kv.clone(), kv: surf.ku.clone(), cps }));
+                let cps: Vec<Vec<crate::native::nurbs::H>> = (0..surf.cps[0].len())
+                    .map(|j| surf.cps.iter().map(|r| r[j]).collect())
+                    .collect();
+                let off = Surface::Nurbs(std::sync::Arc::new(crate::native::nurbs::NurbsSurface {
+                    du: surf.dv,
+                    dv: surf.du,
+                    ku: surf.kv.clone(),
+                    kv: surf.ku.clone(),
+                    cps,
+                }));
                 let err = us
                     .windows(2)
-                    .flat_map(|a| vs.windows(2).map(move |b| (0.5 * (a[0] + a[1]), 0.5 * (b[0] + b[1]))))
+                    .flat_map(|a| {
+                        vs.windows(2)
+                            .map(move |b| (0.5 * (a[0] + a[1]), 0.5 * (b[0] + b[1])))
+                    })
                     .map(|(u, v)| (off.eval(u, v) - at(u, v)).norm())
                     .fold(0.0, f64::max);
                 if err < OFFSET_FIT * (1.0 + d.abs()) * 1e3 || k >= 32 {
@@ -194,7 +250,10 @@ fn offset_curve_along(c: &Curve, n: &dyn Fn(f64) -> V3, d: f64) -> Option<Curve>
         Curve::Line { o, d: dir } => {
             let (a, b) = (n(t0), n(t1));
             if (a - b).norm() < tol::ROUNDOFF {
-                return Some(Curve::Line { o: o + a * d, d: *dir });
+                return Some(Curve::Line {
+                    o: o + a * d,
+                    d: *dir,
+                });
             }
         }
         Curve::Circle { c: cc, x, y, r } => {
@@ -205,12 +264,22 @@ fn offset_curve_along(c: &Curve, n: &dyn Fn(f64) -> V3, d: f64) -> Option<Curve>
             let along = nn.dot(&radial);
             if (along.abs() - 1.0).abs() < tol::ANGULAR {
                 let r2 = r + d * along;
-                return (r2 > tol::ROUNDOFF).then_some(Curve::Circle { c: *cc, x: *x, y: *y, r: r2 });
+                return (r2 > tol::ROUNDOFF).then_some(Curve::Circle {
+                    c: *cc,
+                    x: *x,
+                    y: *y,
+                    r: r2,
+                });
             }
             // Normal across the plane: the circle moved along it.
             let z = x.cross(y);
             if (nn.dot(&z).abs() - 1.0).abs() < tol::ANGULAR {
-                return Some(Curve::Circle { c: cc + nn * d, x: *x, y: *y, r: *r });
+                return Some(Curve::Circle {
+                    c: cc + nn * d,
+                    x: *x,
+                    y: *y,
+                    r: *r,
+                });
             }
         }
         _ => {}
@@ -220,10 +289,17 @@ fn offset_curve_along(c: &Curve, n: &dyn Fn(f64) -> V3, d: f64) -> Option<Curve>
     let at = |t: f64| c.point(t) + n(t) * d;
     let mut k = 64;
     loop {
-        let ts: Vec<f64> = (0..=k).map(|i| t0 + (t1 - t0) * i as f64 / k as f64).collect();
+        let ts: Vec<f64> = (0..=k)
+            .map(|i| t0 + (t1 - t0) * i as f64 / k as f64)
+            .collect();
         let pts: Vec<P3> = ts.iter().map(|&t| at(t)).collect();
-        let fit = Curve::Nurbs(std::sync::Arc::new(NurbsCurve::interpolate(&pts, &ts, 3, None, None)));
-        let err = ts.windows(2).map(|w| (fit.point(0.5 * (w[0] + w[1])) - at(0.5 * (w[0] + w[1]))).norm()).fold(0.0, f64::max);
+        let fit = Curve::Nurbs(std::sync::Arc::new(NurbsCurve::interpolate(
+            &pts, &ts, 3, None, None,
+        )));
+        let err = ts
+            .windows(2)
+            .map(|w| (fit.point(0.5 * (w[0] + w[1])) - at(0.5 * (w[0] + w[1]))).norm())
+            .fold(0.0, f64::max);
         if err < OFFSET_FIT * (1.0 + d.abs()) || k >= 1024 {
             return Some(fit);
         }
@@ -241,7 +317,13 @@ pub fn offset_sharp(b: &Body, dist: &[f64]) -> Result<Body> {
         .faces
         .iter()
         .zip(dist)
-        .map(|(f, d)| if *d == 0.0 { Some(f.surf.clone()) } else { offset_surface(&f.surf, f.sense, *d) })
+        .map(|(f, d)| {
+            if *d == 0.0 {
+                Some(f.surf.clone())
+            } else {
+                offset_surface(&f.surf, f.sense, *d)
+            }
+        })
         .collect::<Option<Vec<_>>>()
         .ok_or(KernelError::Unsupported("offsetting this kind of face"))?;
     if let Some(r) = prism_offset(b, dist) {
@@ -268,7 +350,9 @@ pub fn offset_sharp(b: &Body, dist: &[f64]) -> Result<Body> {
 fn crossed_face(b: &Body, out: &Body) -> Option<(usize, usize)> {
     let ef = b.edge_faces();
     let line = |body: &Body, e: usize| match body.edges[e].curve {
-        Curve::Line { o, d } if !body.edges[e].degenerate => d.try_normalize(tol::DEGENERATE).map(|d| (o, d)),
+        Curve::Line { o, d } if !body.edges[e].degenerate => {
+            d.try_normalize(tol::DEGENERATE).map(|d| (o, d))
+        }
         _ => None,
     };
     // The part of q − o square to d.
@@ -279,12 +363,19 @@ fn crossed_face(b: &Body, out: &Body) -> Option<(usize, usize)> {
     let mut worst: Option<(f64, usize, usize)> = None;
     for (fi, f) in b.faces.iter().enumerate() {
         let [l] = f.loops.as_slice() else { continue };
-        if l.len() != 4 || l.iter().any(|c| ef[c.edge].len() != 2 || ef[c.edge][0] == ef[c.edge][1]) {
+        if l.len() != 4
+            || l.iter()
+                .any(|c| ef[c.edge].len() != 2 || ef[c.edge][0] == ef[c.edge][1])
+        {
             continue;
         }
         for k in 0..2 {
             let (ea, eb) = (l[k].edge, l[k + 2].edge);
-            let (Some((oa, da)), Some((ob, db)), Some((na, nda)), Some((nb, _))) = (line(b, ea), line(b, eb), line(out, ea), line(out, eb)) else { continue };
+            let (Some((oa, da)), Some((ob, db)), Some((na, nda)), Some((nb, _))) =
+                (line(b, ea), line(b, eb), line(out, ea), line(out, eb))
+            else {
+                continue;
+            };
             if da.cross(&db).norm() > tol::ANGULAR {
                 continue;
             }
@@ -324,7 +415,11 @@ fn collapse_face(b: &Body, dist: &[f64], f: usize, k: usize) -> (Body, Vec<f64>)
             for c in lp.iter_mut().filter(|c| c.edge == eb) {
                 // The face beyond `cb` runs along it the way `ca` runs in `f`.
                 let e = &b.edges[ea];
-                *c = Coedge { edge: ea, fwd: ca.fwd, pc: crate::native::pcurve::pcurve(&surf, &e.curve, e.t[0], e.t[1], None) };
+                *c = Coedge {
+                    edge: ea,
+                    fwd: ca.fwd,
+                    pc: crate::native::pcurve::pcurve(&surf, &e.curve, e.t[0], e.t[1], None),
+                };
             }
         }
     }
@@ -346,7 +441,9 @@ fn collapse_face(b: &Body, dist: &[f64], f: usize, k: usize) -> (Body, Vec<f64>)
 /// A planar face's outward normal.
 fn plane_normal(b: &Body, f: usize) -> Option<V3> {
     let face = &b.faces[f];
-    let Surface::Plane { f: fr } = &face.surf else { return None };
+    let Surface::Plane { f: fr } = &face.surf else {
+        return None;
+    };
     Some(fr.x.cross(&fr.y).normalize() * if face.sense { 1.0 } else { -1.0 })
 }
 
@@ -355,12 +452,25 @@ fn plane_normal(b: &Body, f: usize) -> Option<V3> {
 /// the loop (which may cross itself where the moves close a slot or make a side vanish) taken
 /// as the region it winds round at least once; extruded between the moved caps.
 #[allow(clippy::too_many_arguments)]
-fn union_offset(b: &Body, dist: &[f64], bot: usize, top: usize, sides: &[(V2, f64, f64)], corners: &[P2], o: P3, fr: &Frame, n: V3) -> Result<Body> {
+fn union_offset(
+    b: &Body,
+    dist: &[f64],
+    bot: usize,
+    top: usize,
+    sides: &[(V2, f64, f64)],
+    corners: &[P2],
+    o: P3,
+    fr: &Frame,
+    n: V3,
+) -> Result<Body> {
     let k = sides.len();
     let meet = |a: &(V2, f64, f64), c: &(V2, f64, f64)| -> P2 {
         let det = a.0.perp(&c.0);
         let (ca, cc) = (a.1 + a.2, c.1 + c.2);
-        P2::new((ca * c.0.y - cc * a.0.y) / det, (a.0.x * cc - c.0.x * ca) / det)
+        P2::new(
+            (ca * c.0.y - cc * a.0.y) / det,
+            (a.0.x * cc - c.0.x * ca) / det,
+        )
     };
     let mut raw: Vec<P2> = Vec::new();
     for i in 0..k {
@@ -380,26 +490,63 @@ fn union_offset(b: &Body, dist: &[f64], bot: usize, top: usize, sides: &[(V2, f6
     }
     let loops = positive_region(&raw, tol);
     if loops.is_empty() {
-        return Err(KernelError::OperationFailed("the offset profile vanishes".into()));
+        return Err(KernelError::OperationFailed(
+            "the offset profile vanishes".into(),
+        ));
     }
     // Outer loops (counter-clockwise) with the holes (clockwise) inside them.
-    let signed = |l: &[P2]| (0..l.len()).map(|i| l[i].coords.perp(&l[(i + 1) % l.len()].coords)).sum::<f64>() * 0.5;
+    let signed = |l: &[P2]| {
+        (0..l.len())
+            .map(|i| l[i].coords.perp(&l[(i + 1) % l.len()].coords))
+            .sum::<f64>()
+            * 0.5
+    };
     let inside = |q: &P2, l: &[P2]| winding(l, q) != 0;
-    let to_loop = |l: &[P2]| Loop { curves: (0..l.len()).map(|i| Curve2::Line { a: l[i], b: l[(i + 1) % l.len()], source: None }).collect() };
-    let (outers, holes): (Vec<&Vec<P2>>, Vec<&Vec<P2>>) = loops.iter().partition(|l| signed(l) > 0.0);
+    let to_loop = |l: &[P2]| Loop {
+        curves: (0..l.len())
+            .map(|i| Curve2::Line {
+                a: l[i],
+                b: l[(i + 1) % l.len()],
+                source: None,
+            })
+            .collect(),
+    };
+    let (outers, holes): (Vec<&Vec<P2>>, Vec<&Vec<P2>>) =
+        loops.iter().partition(|l| signed(l) > 0.0);
     let regions: Vec<Region> = outers
         .iter()
-        .map(|ol| Region { outer: to_loop(ol), holes: holes.iter().filter(|h| inside(&h[0], ol)).map(|h| to_loop(h)).collect(), source: None })
+        .map(|ol| Region {
+            outer: to_loop(ol),
+            holes: holes
+                .iter()
+                .filter(|h| inside(&h[0], ol))
+                .map(|h| to_loop(h))
+                .collect(),
+            source: None,
+        })
         .collect();
-    let (z0, z1) = (-dist[bot], (b.verts[b.edges[b.faces[top].loops[0][0].edge].v[0]].p - o).dot(&n) + dist[top]);
+    let (z0, z1) = (
+        -dist[bot],
+        (b.verts[b.edges[b.faces[top].loops[0][0].edge].v[0]].p - o).dot(&n) + dist[top],
+    );
     if z1 - z0 <= tol::ROUNDOFF {
-        return Err(KernelError::OperationFailed("the offset prism has no height".into()));
+        return Err(KernelError::OperationFailed(
+            "the offset prism has no height".into(),
+        ));
     }
-    let plane = Plane { origin: o + n * z0, x_dir: nalgebra::Unit::new_normalize(fr.x), normal: nalgebra::Unit::new_normalize(n) };
+    let plane = Plane {
+        origin: o + n * z0,
+        x_dir: nalgebra::Unit::new_normalize(fr.x),
+        normal: nalgebra::Unit::new_normalize(n),
+    };
     let prof = Profile::new(plane, regions);
     let mut kk = NativeKernel::new();
     let r = crate::Kernel::extrude(&mut kk, &prof, Extent::Blind(z1 - z0))?;
-    let [id] = r.bodies[..] else { return Err(KernelError::Unsupported("an offset that splits the profile in pieces")) };
+    let [id] = r.bodies[..] else {
+        return Err(KernelError::Unsupported(
+            "an offset that splits the profile in pieces",
+        ));
+    };
     Ok((**kk.get(id)?).clone())
 }
 
@@ -445,7 +592,10 @@ fn positive_region(raw: &[P2], tol: f64) -> Vec<Vec<P2>> {
             if den.abs() > 1e-15 * len2.sqrt() * e.norm().max(1e-300) {
                 let t = (p - a).perp(&e) / den;
                 let s = (p - a).perp(&d) / den;
-                if t > 0.0 && t < 1.0 && (-tol::ROUNDOFF_FINE..=1.0 + tol::ROUNDOFF_FINE).contains(&s) {
+                if t > 0.0
+                    && t < 1.0
+                    && (-tol::ROUNDOFF_FINE..=1.0 + tol::ROUNDOFF_FINE).contains(&s)
+                {
                     ts.push(t);
                 }
             } else {
@@ -485,7 +635,13 @@ fn positive_region(raw: &[P2], tol: f64) -> Vec<Vec<P2>> {
         let mut lp = vec![pieces[s].0];
         let mut end = pieces[s].1;
         while (end - lp[0]).norm() > tol * 10.0 {
-            let Some(j) = (0..pieces.len()).filter(|&j| !used[j]).min_by(|&x, &y| (pieces[x].0 - end).norm().total_cmp(&(pieces[y].0 - end).norm())) else { break };
+            let Some(j) = (0..pieces.len()).filter(|&j| !used[j]).min_by(|&x, &y| {
+                (pieces[x].0 - end)
+                    .norm()
+                    .total_cmp(&(pieces[y].0 - end).norm())
+            }) else {
+                break;
+            };
             if (pieces[j].0 - end).norm() > tol * 10.0 {
                 break;
             }
@@ -524,9 +680,15 @@ fn prism_offset(b: &Body, dist: &[f64]) -> Option<Result<Body>> {
         return None;
     }
     let normals: Vec<V3> = normals.into_iter().flatten().collect();
-    let (bot, top) = (0..b.faces.len()).flat_map(|i| (0..b.faces.len()).map(move |j| (i, j))).find(|&(i, j)| {
-        i != j && normals[i].dot(&normals[j]) < -1.0 + tol::ANGULAR_FINE && (0..b.faces.len()).all(|k| k == i || k == j || normals[k].dot(&normals[i]).abs() < tol::ANGULAR_FINE)
-    })?;
+    let (bot, top) = (0..b.faces.len())
+        .flat_map(|i| (0..b.faces.len()).map(move |j| (i, j)))
+        .find(|&(i, j)| {
+            i != j
+                && normals[i].dot(&normals[j]) < -1.0 + tol::ANGULAR_FINE
+                && (0..b.faces.len()).all(|k| {
+                    k == i || k == j || normals[k].dot(&normals[i]).abs() < tol::ANGULAR_FINE
+                })
+        })?;
     if b.faces[bot].loops.len() != 1 || b.faces[top].loops.len() != 1 {
         return None;
     }
@@ -551,7 +713,9 @@ fn prism_offset(b: &Body, dist: &[f64]) -> Option<Result<Body>> {
         pts.push(p);
     }
     // Counter-clockwise about n. Each side's end corner (the start of the next).
-    let area: f64 = (0..pts.len()).map(|i| pts[i].coords.perp(&pts[(i + 1) % pts.len()].coords)).sum();
+    let area: f64 = (0..pts.len())
+        .map(|i| pts[i].coords.perp(&pts[(i + 1) % pts.len()].coords))
+        .sum();
     let k = sides.len();
     let mut corners: Vec<P2> = (0..k).map(|i| pts[(i + 1) % k]).collect();
     if area < 0.0 {
@@ -576,14 +740,20 @@ fn prism_offset(b: &Body, dist: &[f64]) -> Option<Result<Body>> {
             return None;
         }
         let (ca, cb) = (a.1 + a.2, b.1 + b.2);
-        Some(P2::new((ca * b.0.y - cb * a.0.y) / det, (a.0.x * cb - b.0.x * ca) / det))
+        Some(P2::new(
+            (ca * b.0.y - cb * a.0.y) / det,
+            (a.0.x * cb - b.0.x * ca) / det,
+        ))
     };
     let mut live: Vec<(V2, f64, f64)> = sides.clone();
     let mut removed = false;
     loop {
         let n_live = live.len();
         if n_live < 3 {
-            return Some(Err(KernelError::TooLarge { op: "offset", why: "the offset profile vanishes".into() }));
+            return Some(Err(KernelError::TooLarge {
+                op: "offset",
+                why: "the offset profile vanishes".into(),
+            }));
         }
         // Adjacent parallel sides: the one moved past the other vanishes.
         let mut drop: Option<usize> = None;
@@ -593,7 +763,11 @@ fn prism_offset(b: &Body, dist: &[f64]) -> Option<Result<Body>> {
                 if a.0.dot(&c.0) < 0.0 {
                     return Some(union_offset(b, dist, bot, top, &sides, &corners, o, &fr, n));
                 }
-                drop = Some(if a.1 + a.2 < c.1 + c.2 { i } else { (i + 1) % n_live });
+                drop = Some(if a.1 + a.2 < c.1 + c.2 {
+                    i
+                } else {
+                    (i + 1) % n_live
+                });
                 break;
             }
         }
@@ -601,7 +775,10 @@ fn prism_offset(b: &Body, dist: &[f64]) -> Option<Result<Body>> {
         if drop.is_none() {
             let mut worst = (0.0, None);
             for i in 0..n_live {
-                let (p, q) = (meet(&live[(i + n_live - 1) % n_live], &live[i])?, meet(&live[i], &live[(i + 1) % n_live])?);
+                let (p, q) = (
+                    meet(&live[(i + n_live - 1) % n_live], &live[i])?,
+                    meet(&live[i], &live[(i + 1) % n_live])?,
+                );
                 let along = (q - p).dot(&dir(&live[i].0));
                 if along < worst.0 - tol::ROUNDOFF {
                     worst = (along, Some(i));
@@ -621,9 +798,14 @@ fn prism_offset(b: &Body, dist: &[f64]) -> Option<Result<Body>> {
         return None;
     }
     let n_live = live.len();
-    let poly: Vec<P2> = (0..n_live).filter_map(|i| meet(&live[(i + n_live - 1) % n_live], &live[i])).collect();
+    let poly: Vec<P2> = (0..n_live)
+        .filter_map(|i| meet(&live[(i + n_live - 1) % n_live], &live[i]))
+        .collect();
     if poly.len() != n_live {
-        return Some(Err(KernelError::InvalidGeometry { op: "offset", why: "the offset profile doesn't close".into() }));
+        return Some(Err(KernelError::InvalidGeometry {
+            op: "offset",
+            why: "the offset profile doesn't close".into(),
+        }));
     }
     // Sides that shrank to nothing exactly (three or more meeting at one point): their
     // corners are one.
@@ -635,19 +817,51 @@ fn prism_offset(b: &Body, dist: &[f64]) -> Option<Result<Body>> {
     }
     let n_live = poly.len();
     if n_live < 3 {
-        return Some(Err(KernelError::TooLarge { op: "offset", why: "the offset profile vanishes".into() }));
+        return Some(Err(KernelError::TooLarge {
+            op: "offset",
+            why: "the offset profile vanishes".into(),
+        }));
     }
-    let (z0, z1) = (-dist[bot], (b.verts[b.edges[b.faces[top].loops[0][0].edge].v[0]].p - o).dot(&n) + dist[top]);
+    let (z0, z1) = (
+        -dist[bot],
+        (b.verts[b.edges[b.faces[top].loops[0][0].edge].v[0]].p - o).dot(&n) + dist[top],
+    );
     if z1 - z0 <= tol::ROUNDOFF {
-        return Some(Err(KernelError::TooLarge { op: "offset", why: "the offset prism has no height".into() }));
+        return Some(Err(KernelError::TooLarge {
+            op: "offset",
+            why: "the offset prism has no height".into(),
+        }));
     }
-    let plane = Plane { origin: o + n * z0, x_dir: nalgebra::Unit::new_normalize(fr.x), normal: nalgebra::Unit::new_normalize(n) };
-    let curves = (0..n_live).map(|i| Curve2::Line { a: poly[i], b: poly[(i + 1) % n_live], source: None }).collect();
-    let prof = Profile::new(plane, vec![Region { outer: Loop { curves }, holes: vec![], source: None }]);
+    let plane = Plane {
+        origin: o + n * z0,
+        x_dir: nalgebra::Unit::new_normalize(fr.x),
+        normal: nalgebra::Unit::new_normalize(n),
+    };
+    let curves = (0..n_live)
+        .map(|i| Curve2::Line {
+            a: poly[i],
+            b: poly[(i + 1) % n_live],
+            source: None,
+        })
+        .collect();
+    let prof = Profile::new(
+        plane,
+        vec![Region {
+            outer: Loop { curves },
+            holes: vec![],
+            source: None,
+        }],
+    );
     let mut kk = NativeKernel::new();
-    Some(crate::Kernel::extrude(&mut kk, &prof, Extent::Blind(z1 - z0)).and_then(|r| {
-        let [id] = r.bodies[..] else { return Err(KernelError::InvalidResult { op: "offset", why: "the offset prism isn't one body".into() }) };
-        Ok((**kk.get(id)?).clone())
-    }))
+    Some(
+        crate::Kernel::extrude(&mut kk, &prof, Extent::Blind(z1 - z0)).and_then(|r| {
+            let [id] = r.bodies[..] else {
+                return Err(KernelError::InvalidResult {
+                    op: "offset",
+                    why: "the offset prism isn't one body".into(),
+                });
+            };
+            Ok((**kk.get(id)?).clone())
+        }),
+    )
 }
-

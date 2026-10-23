@@ -34,7 +34,11 @@ impl Arc {
         P2::new(p.x, p.y)
     }
     pub fn twin(&self) -> Arc {
-        Arc { fwd: !self.fwd, v: [self.v[1], self.v[0]], ..self.clone() }
+        Arc {
+            fwd: !self.fwd,
+            v: [self.v[1], self.v[0]],
+            ..self.clone()
+        }
     }
 }
 
@@ -43,12 +47,18 @@ fn shifted(a: &Arc, du: f64, dv: f64) -> Arc {
     if du == 0.0 && dv == 0.0 {
         return a.clone();
     }
-    Arc { pc: a.pc.transformed(&Affine::translation(V3::new(du, dv, 0.0))), ..a.clone() }
+    Arc {
+        pc: a.pc.transformed(&Affine::translation(V3::new(du, dv, 0.0))),
+        ..a.clone()
+    }
 }
 
 /// The box of arcs' p-curves in (u, v), from a few points of each.
 fn uv_box(arcs: &[Arc]) -> (P2, P2) {
-    let (mut lo, mut hi) = (P2::new(f64::INFINITY, f64::INFINITY), P2::new(f64::NEG_INFINITY, f64::NEG_INFINITY));
+    let (mut lo, mut hi) = (
+        P2::new(f64::INFINITY, f64::INFINITY),
+        P2::new(f64::NEG_INFINITY, f64::NEG_INFINITY),
+    );
     for a in arcs {
         for i in 0..=8 {
             let q = a.uv_at(i as f64 / 8.0);
@@ -65,7 +75,10 @@ fn uv_box(arcs: &[Arc]) -> (P2, P2) {
 /// loops lying outside the outer loop's range in a periodic direction are moved into it; a cut
 /// goes where its ends meet the boundary's vertices at the same (u, v), else into the range.
 fn one_chart(surf: &Surface, boundary: &[Vec<Arc>], cuts: &[Arc]) -> (Vec<Vec<Arc>>, Vec<Arc>) {
-    let periods = [surf.u_periodic().then_some(TAU), surf.v_periodic().then_some(TAU)];
+    let periods = [
+        surf.u_periodic().then_some(TAU),
+        surf.v_periodic().then_some(TAU),
+    ];
     if periods == [None, None] || boundary.is_empty() {
         return (boundary.to_vec(), cuts.to_vec());
     }
@@ -78,7 +91,10 @@ fn one_chart(surf: &Surface, boundary: &[Vec<Arc>], cuts: &[Arc]) -> (Vec<Vec<Ar
             Some(p) if x < a - tol::ROUNDOFF || x > b + tol::ROUNDOFF => ((mm - x) / p).round() * p,
             _ => 0.0,
         };
-        (step(c.x, lo.x, hi.x, m.x, periods[0]), step(c.y, lo.y, hi.y, m.y, periods[1]))
+        (
+            step(c.x, lo.x, hi.x, m.x, periods[0]),
+            step(c.y, lo.y, hi.y, m.y, periods[1]),
+        )
     };
     let mut loops: Vec<Vec<Arc>> = vec![boundary[0].clone()];
     for l in &boundary[1..] {
@@ -87,7 +103,11 @@ fn one_chart(surf: &Surface, boundary: &[Vec<Arc>], cuts: &[Arc]) -> (Vec<Vec<Ar
         loops.push(l.iter().map(|x| shifted(x, du, dv)).collect());
     }
     // Where the boundary's vertices are.
-    let ends: Vec<(usize, P2)> = loops.iter().flatten().flat_map(|a| [(a.v[0], a.uv_at(0.0)), (a.v[1], a.uv_at(1.0))]).collect();
+    let ends: Vec<(usize, P2)> = loops
+        .iter()
+        .flatten()
+        .flat_map(|a| [(a.v[0], a.uv_at(0.0)), (a.v[1], a.uv_at(1.0))])
+        .collect();
     let tol = tol::REL_POINT * (1.0 + (hi - lo).norm());
     let meets = |v: usize, q: P2| ends.iter().any(|(w, p)| *w == v && (p - q).norm() <= tol);
     let out_cuts = cuts
@@ -95,8 +115,16 @@ fn one_chart(surf: &Surface, boundary: &[Vec<Arc>], cuts: &[Arc]) -> (Vec<Vec<Ar
         .map(|c| {
             let (s, e) = (c.uv_at(0.0), c.uv_at(1.0));
             let mut best: Option<(usize, f64, f64)> = None;
-            let ku: &[f64] = if periods[0].is_some() { &[0.0, -1.0, 1.0, -2.0, 2.0] } else { &[0.0] };
-            let kv: &[f64] = if periods[1].is_some() { &[0.0, -1.0, 1.0, -2.0, 2.0] } else { &[0.0] };
+            let ku: &[f64] = if periods[0].is_some() {
+                &[0.0, -1.0, 1.0, -2.0, 2.0]
+            } else {
+                &[0.0]
+            };
+            let kv: &[f64] = if periods[1].is_some() {
+                &[0.0, -1.0, 1.0, -2.0, 2.0]
+            } else {
+                &[0.0]
+            };
             for &i in ku {
                 for &j in kv {
                     let d = V2::new(i * TAU, j * TAU);
@@ -134,7 +162,10 @@ pub fn split_face(surf: &Surface, flip: bool, boundary: &[Vec<Arc>], cuts: &[Arc
     let o = |p: P2| P2::new(p.x * mu, p.y * mv * sgn);
     let mut arcs: Vec<Arc> = Vec::new();
     // Degenerate boundary arcs are split where cuts arrive on them (a cut ending at a pole).
-    let cut_ends: Vec<(usize, P2)> = cuts.iter().flat_map(|c| [(c.v[0], c.uv_at(0.0)), (c.v[1], c.uv_at(1.0))]).collect();
+    let cut_ends: Vec<(usize, P2)> = cuts
+        .iter()
+        .flat_map(|c| [(c.v[0], c.uv_at(0.0)), (c.v[1], c.uv_at(1.0))])
+        .collect();
     for a in boundary.iter().flatten() {
         if !a.deg {
             arcs.push(a.clone());
@@ -151,7 +182,8 @@ pub fn split_face(surf: &Surface, flip: bool, boundary: &[Vec<Arc>], cuts: &[Arc
                 }
                 let s = (q - u0).dot(&(u1 - u0)) / (span * span);
                 let off = (u0 + (u1 - u0) * s - q).norm();
-                (s > tol::REL && s < 1.0 - tol::REL && off < tol::REL_POINT * (1.0 + span)).then_some(s)
+                (s > tol::REL && s < 1.0 - tol::REL && off < tol::REL_POINT * (1.0 + span))
+                    .then_some(s)
             })
             .collect();
         fr.sort_by(f64::total_cmp);
@@ -160,18 +192,31 @@ pub fn split_face(surf: &Surface, flip: bool, boundary: &[Vec<Arc>], cuts: &[Arc
             arcs.push(a.clone());
             continue;
         }
-        let (ts, te) = if a.fwd { (a.t[0], a.t[1]) } else { (a.t[1], a.t[0]) };
+        let (ts, te) = if a.fwd {
+            (a.t[0], a.t[1])
+        } else {
+            (a.t[1], a.t[0])
+        };
         let mut bounds = vec![ts];
         bounds.extend(fr.iter().map(|s| ts + (te - ts) * s));
         bounds.push(te);
         for w in bounds.windows(2) {
             let (lo, hi) = if a.fwd { (w[0], w[1]) } else { (w[1], w[0]) };
-            arcs.push(Arc { t: [lo, hi], ..a.clone() });
+            arcs.push(Arc {
+                t: [lo, hi],
+                ..a.clone()
+            });
         }
     }
     for c in cuts {
-        arcs.push(Arc { cut: true, ..c.clone() });
-        arcs.push(Arc { cut: true, ..c.twin() });
+        arcs.push(Arc {
+            cut: true,
+            ..c.clone()
+        });
+        arcs.push(Arc {
+            cut: true,
+            ..c.twin()
+        });
     }
     // Nodes: (vertex, uv).
     let size = {
@@ -190,9 +235,16 @@ pub fn split_face(surf: &Surface, flip: bool, boundary: &[Vec<Arc>], cuts: &[Arc
     // apex's ends arcs at many u, however close in the face's metric.
     let loose = (size * 1e-3).max(ntol * 100.0);
     let (pu, pv) = (surf.u_periodic(), surf.v_periodic());
-    let near = |a: &P2, b: &P2| (a - b).norm() < loose && (!pu || (a.x - b.x).abs() < 1e-3 * mu) && (!pv || (a.y - b.y).abs() < 1e-3 * mv);
+    let near = |a: &P2, b: &P2| {
+        (a - b).norm() < loose
+            && (!pu || (a.x - b.x).abs() < 1e-3 * mu)
+            && (!pv || (a.y - b.y).abs() < 1e-3 * mv)
+    };
     let node_of = |v: usize, p: P2, nodes: &mut Vec<(usize, P2)>| -> usize {
-        if let Some(i) = nodes.iter().position(|(nv, np)| *nv == v && (np - p).norm() < ntol * 100.0) {
+        if let Some(i) = nodes
+            .iter()
+            .position(|(nv, np)| *nv == v && (np - p).norm() < ntol * 100.0)
+        {
             return i;
         }
         nodes.push((v, p));
@@ -214,8 +266,12 @@ pub fn split_face(surf: &Surface, flip: bool, boundary: &[Vec<Arc>], cuts: &[Arc
         }
         i
     }
-    let joined: std::collections::HashSet<(usize, usize)> = ends.iter().map(|e| (e[0].min(e[1]), e[0].max(e[1]))).collect();
-    let mut by_vertex: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
+    let joined: std::collections::HashSet<(usize, usize)> = ends
+        .iter()
+        .map(|e| (e[0].min(e[1]), e[0].max(e[1])))
+        .collect();
+    let mut by_vertex: std::collections::HashMap<usize, Vec<usize>> =
+        std::collections::HashMap::new();
     for (i, n) in nodes.iter().enumerate() {
         by_vertex.entry(n.0).or_default().push(i);
     }
@@ -262,14 +318,27 @@ pub fn split_face(surf: &Surface, flip: bool, boundary: &[Vec<Arc>], cuts: &[Arc
     }
     if std::env::var("CADRS_SPLIT_DEBUG").is_ok() {
         for (k, a) in arcs.iter().enumerate() {
-            eprintln!("arc {k}: edge {} fwd {} cut {} alive {} nodes {:?} uv {:?} -> {:?}", a.edge, a.fwd, a.cut, alive[k], ends[k], a.uv_at(0.0), a.uv_at(1.0));
+            eprintln!(
+                "arc {k}: edge {} fwd {} cut {} alive {} nodes {:?} uv {:?} -> {:?}",
+                a.edge,
+                a.fwd,
+                a.cut,
+                alive[k],
+                ends[k],
+                a.uv_at(0.0),
+                a.uv_at(1.0)
+            );
         }
     }
     // Departure direction of each arc at its start, and arrival direction at its end: towards
     // its point a set distance along it, the same for every arc at the node (a small part of the
     // shortest there), so that arcs leaving tangent to each other are told apart by how they
     // curve, not by how long they are (a cut leaving along a long boundary arc it touches).
-    let length = |a: &Arc| -> f64 { (1..=16).map(|i| (o(a.uv_at(i as f64 / 16.0)) - o(a.uv_at((i - 1) as f64 / 16.0))).norm()).sum() };
+    let length = |a: &Arc| -> f64 {
+        (1..=16)
+            .map(|i| (o(a.uv_at(i as f64 / 16.0)) - o(a.uv_at((i - 1) as f64 / 16.0))).norm())
+            .sum()
+    };
     let mut scale = vec![f64::INFINITY; nodes.len()];
     for (k, a) in arcs.iter().enumerate() {
         if alive[k] {
@@ -297,7 +366,11 @@ pub fn split_face(surf: &Surface, flip: bool, boundary: &[Vec<Arc>], cuts: &[Arc
         }
         for _ in 0..50 {
             let m = 0.5 * (lo + hi);
-            if (o(at(m)) - p0).norm() < d { lo = m } else { hi = m }
+            if (o(at(m)) - p0).norm() < d {
+                lo = m
+            } else {
+                hi = m
+            }
         }
         let m = 0.5 * (lo + hi);
         if back { 1.0 - m } else { m }
@@ -305,16 +378,34 @@ pub fn split_face(surf: &Surface, flip: bool, boundary: &[Vec<Arc>], cuts: &[Arc
     let dir_at = |a: &Arc, s: f64, node: usize, frac: f64| -> V2 {
         let p0 = o(a.uv_at(s));
         let d = scale[node] * frac;
-        let s1 = if d.is_finite() && d > ntol { at_dist(a, s > 0.5, d) } else if s < 0.5 { 1e-4 } else { 1.0 - 1e-4 };
+        let s1 = if d.is_finite() && d > ntol {
+            at_dist(a, s > 0.5, d)
+        } else if s < 0.5 {
+            1e-4
+        } else {
+            1.0 - 1e-4
+        };
         let p1 = o(a.uv_at(s1));
         let d = p1 - p0;
         let l = d.norm();
         if l > 0.0 { d / l } else { d }
     };
-    let dep: Vec<V2> = arcs.iter().enumerate().map(|(k, a)| dir_at(a, 0.0, ends[k][0], 1e-3)).collect();
-    let arr: Vec<V2> = arcs.iter().enumerate().map(|(k, a)| -dir_at(a, 1.0, ends[k][1], 1e-3)).collect();
+    let dep: Vec<V2> = arcs
+        .iter()
+        .enumerate()
+        .map(|(k, a)| dir_at(a, 0.0, ends[k][0], 1e-3))
+        .collect();
+    let arr: Vec<V2> = arcs
+        .iter()
+        .enumerate()
+        .map(|(k, a)| -dir_at(a, 1.0, ends[k][1], 1e-3))
+        .collect();
     // Secondary directions (further along) for ties.
-    let dep2: Vec<V2> = arcs.iter().enumerate().map(|(k, a)| dir_at(a, 0.0, ends[k][0], 0.05)).collect();
+    let dep2: Vec<V2> = arcs
+        .iter()
+        .enumerate()
+        .map(|(k, a)| dir_at(a, 0.0, ends[k][0], 0.05))
+        .collect();
     let mut out_at: Vec<Vec<usize>> = vec![Vec::new(); nodes.len()];
     for k in 0..arcs.len() {
         if alive[k] {
@@ -339,12 +430,16 @@ pub fn split_face(surf: &Surface, flip: bool, boundary: &[Vec<Arc>], cuts: &[Arc
             if ang.abs() > PI - TANGENT {
                 ang = PI.copysign(ang2);
             }
-            let is_twin = arcs[c].edge == arcs[k].edge && arcs[c].fwd != arcs[k].fwd && ends[c][1] == ends[k][0];
+            let is_twin = arcs[c].edge == arcs[k].edge
+                && arcs[c].fwd != arcs[k].fwd
+                && ends[c][1] == ends[k][0];
             if is_twin {
                 ang = -10.0; // only if nothing else
             }
             let key = (ang, ang2);
-            if best.is_none_or(|(a, b, _)| key.0 > a + TANGENT || ((key.0 - a).abs() <= TANGENT && key.1 > b)) {
+            if best.is_none_or(|(a, b, _)| {
+                key.0 > a + TANGENT || ((key.0 - a).abs() <= TANGENT && key.1 > b)
+            }) {
                 best = Some((key.0, key.1, c));
             }
         }
@@ -413,7 +508,10 @@ pub fn split_face(surf: &Surface, flip: bool, boundary: &[Vec<Arc>], cuts: &[Arc
             holes.push((lp, pts));
         }
     }
-    let mut faces: Vec<Vec<Vec<Arc>>> = outers.iter().map(|(lp, _, _)| vec![lp.iter().map(|&k| arcs[k].clone()).collect()]).collect();
+    let mut faces: Vec<Vec<Vec<Arc>>> = outers
+        .iter()
+        .map(|(lp, _, _)| vec![lp.iter().map(|&k| arcs[k].clone()).collect()])
+        .collect();
     for (lp, pts) in holes {
         // A point just beside the hole, on its material side (left of its direction).
         let a0 = &arcs[lp[0]];
@@ -435,7 +533,12 @@ pub fn split_face(surf: &Surface, flip: bool, boundary: &[Vec<Arc>], cuts: &[Arc
     }
     if std::env::var("CADRS_SPLIT_DEBUG").is_ok() {
         for (i, f) in faces.iter().enumerate() {
-            eprintln!("split face {i}: {:?}", f.iter().map(|l| l.iter().map(|a| (a.edge, a.fwd, a.cut)).collect::<Vec<_>>()).collect::<Vec<_>>());
+            eprintln!(
+                "split face {i}: {:?}",
+                f.iter()
+                    .map(|l| l.iter().map(|a| (a.edge, a.fwd, a.cut)).collect::<Vec<_>>())
+                    .collect::<Vec<_>>()
+            );
         }
     }
     SplitResult { faces }
@@ -446,7 +549,10 @@ mod tests {
     use super::*;
 
     fn line(o: (f64, f64), d: (f64, f64)) -> Curve {
-        Curve::Line { o: P3::new(o.0, o.1, 0.0), d: V3::new(d.0, d.1, 0.0) }
+        Curve::Line {
+            o: P3::new(o.0, o.1, 0.0),
+            d: V3::new(d.0, d.1, 0.0),
+        }
     }
 
     /// A cylinder band whose loop runs in u ∈ [−2π, 0], cut by a small closed curve whose
@@ -454,16 +560,40 @@ mod tests {
     /// stayed outside the loop's chart, the band lost its hole).
     #[test]
     fn cut_in_another_chart() {
-        let surf = Surface::Cylinder { f: Frame::from_z(P3::origin(), V3::z()), r: 1.0 };
-        let arc = |edge, fwd, pc, t: [f64; 2], v: [usize; 2]| Arc { edge, fwd, pc, t, v, cut: false, deg: false };
+        let surf = Surface::Cylinder {
+            f: Frame::from_z(P3::origin(), V3::z()),
+            r: 1.0,
+        };
+        let arc = |edge, fwd, pc, t: [f64; 2], v: [usize; 2]| Arc {
+            edge,
+            fwd,
+            pc,
+            t,
+            v,
+            cut: false,
+            deg: false,
+        };
         let boundary = vec![vec![
             arc(0, true, line((-TAU, 0.0), (1.0, 0.0)), [0.0, TAU], [0, 0]),
             arc(1, true, line((0.0, 0.0), (0.0, 1.0)), [0.0, 1.0], [0, 2]),
             arc(2, false, line((-TAU, 1.0), (1.0, 0.0)), [0.0, TAU], [2, 2]),
             arc(1, false, line((-TAU, 0.0), (0.0, 1.0)), [0.0, 1.0], [2, 0]),
         ]];
-        let circle = Curve::Circle { c: P3::new(1.0, 0.5, 0.0), x: V3::x(), y: V3::y(), r: 0.2 };
-        let cut = Arc { edge: 3, fwd: true, pc: circle, t: [0.0, TAU], v: [3, 3], cut: true, deg: false };
+        let circle = Curve::Circle {
+            c: P3::new(1.0, 0.5, 0.0),
+            x: V3::x(),
+            y: V3::y(),
+            r: 0.2,
+        };
+        let cut = Arc {
+            edge: 3,
+            fwd: true,
+            pc: circle,
+            t: [0.0, TAU],
+            v: [3, 3],
+            cut: true,
+            deg: false,
+        };
         let r = split_face(&surf, false, &boundary, &[cut]);
         let mut loops: Vec<usize> = r.faces.iter().map(|f| f.len()).collect();
         loops.sort();
@@ -475,8 +605,18 @@ mod tests {
     /// cut still splits the face (offset_12's tube union: the face left whole, and dropped).
     #[test]
     fn vertex_pcurves_a_hair_apart() {
-        let surf = Surface::Plane { f: Frame::from_z(P3::origin(), V3::z()) };
-        let arc = |edge, pc, v: [usize; 2]| Arc { edge, fwd: true, pc, t: [0.0, 1.0], v, cut: false, deg: false };
+        let surf = Surface::Plane {
+            f: Frame::from_z(P3::origin(), V3::z()),
+        };
+        let arc = |edge, pc, v: [usize; 2]| Arc {
+            edge,
+            fwd: true,
+            pc,
+            t: [0.0, 1.0],
+            v,
+            cut: false,
+            deg: false,
+        };
         let boundary = vec![vec![
             arc(0, line((0.0, 0.0), (5.0, 0.0)), [0, 4]),
             arc(1, line((5.0, 0.0), (5.0, 0.0)), [4, 1]),
@@ -485,8 +625,21 @@ mod tests {
             arc(4, line((5.0, 10.0), (-5.0, 0.0)), [5, 3]),
             arc(5, line((0.0, 10.0), (0.0, -10.0)), [3, 0]),
         ]];
-        let cut = Arc { edge: 6, fwd: true, pc: line((5.0, 0.0), (0.0, 10.0)), t: [0.0, 1.0], v: [4, 5], cut: true, deg: false };
+        let cut = Arc {
+            edge: 6,
+            fwd: true,
+            pc: line((5.0, 0.0), (0.0, 10.0)),
+            t: [0.0, 1.0],
+            v: [4, 5],
+            cut: true,
+            deg: false,
+        };
         let r = split_face(&surf, false, &boundary, &[cut]);
-        assert_eq!(r.faces.len(), 2, "{:?}", r.faces.iter().map(|f| f.len()).collect::<Vec<_>>());
+        assert_eq!(
+            r.faces.len(),
+            2,
+            "{:?}",
+            r.faces.iter().map(|f| f.len()).collect::<Vec<_>>()
+        );
     }
 }
