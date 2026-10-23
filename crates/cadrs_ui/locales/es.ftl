@@ -1818,12 +1818,14 @@ model-measure-empty = Seleccione entidades para medir
 
 ## crates/cadrs_app/src/mass_props.rs
 model-mass-override = Sustituir
+model-mass-override-tip = Usar una masa introducida en lugar de la de los materiales
 model-mass-inertia-heading = Momentos de inercia de masa ({ $units })
 model-mass-title = Propiedades físicas y de sección
 model-mass-faces = Caras que medir
 model-mass-centroid = Centroide
 model-mass-reference-frame = Conector de relación para el sistema de referencia
 model-mass-show-variance = Mostrar la variación del cálculo
+model-mass-variance-unsupported = El núcleo aún no lo admite
 model-mass = Masa
 model-mass-unit = Unidad de masa
 model-mass-volume = Volumen

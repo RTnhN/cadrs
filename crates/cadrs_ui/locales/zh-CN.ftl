@@ -1818,12 +1818,14 @@ model-measure-empty = 选择要测量的图元
 
 ## crates/cadrs_app/src/mass_props.rs
 model-mass-override = 覆盖
+model-mass-override-tip = 使用输入的质量而不是材料的质量
 model-mass-inertia-heading = 质量惯性矩（{ $units }）
 model-mass-title = 质量和截面属性
 model-mass-faces = 要测量的面
 model-mass-centroid = 形心
 model-mass-reference-frame = 参考坐标系的配合连接器
 model-mass-show-variance = 显示计算偏差
+model-mass-variance-unsupported = 内核尚不支持
 model-mass = 质量
 model-mass-unit = 质量单位
 model-mass-volume = 体积

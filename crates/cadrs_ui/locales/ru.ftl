@@ -1818,12 +1818,14 @@ model-measure-empty = Выберите объекты для измерения
 
 ## crates/cadrs_app/src/mass_props.rs
 model-mass-override = Переопределить
+model-mass-override-tip = Использовать введённую массу вместо массы материалов
 model-mass-inertia-heading = Моменты инерции ({ $units })
 model-mass-title = Массовые характеристики и свойства сечения
 model-mass-faces = Грани для измерения
 model-mass-centroid = Центроид
 model-mass-reference-frame = Соединитель сопряжения для системы координат
 model-mass-show-variance = Показать погрешность расчета
+model-mass-variance-unsupported = Пока не поддерживается ядром
 model-mass = Масса
 model-mass-unit = Единица массы
 model-mass-volume = Объем

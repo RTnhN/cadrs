@@ -1818,12 +1818,14 @@ model-measure-empty = Elemente zum Messen auswählen
 
 ## crates/cadrs_app/src/mass_props.rs
 model-mass-override = Überschreiben
+model-mass-override-tip = Eine eingegebene Masse statt der aus den Materialien verwenden
 model-mass-inertia-heading = Massenträgheitsmomente ({ $units })
 model-mass-title = Masse- und Schnitteigenschaften
 model-mass-faces = Zu messende Flächen
 model-mass-centroid = Flächenschwerpunkt
 model-mass-reference-frame = Verknüpfungskonnektor als Bezugssystem
 model-mass-show-variance = Berechnungsabweichung anzeigen
+model-mass-variance-unsupported = Vom Kernel noch nicht unterstützt
 model-mass = Masse
 model-mass-unit = Masseeinheit
 model-mass-volume = Volumen

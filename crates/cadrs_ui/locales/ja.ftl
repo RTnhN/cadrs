@@ -1818,12 +1818,14 @@ model-measure-empty = 測定するエンティティを選択してください
 
 ## crates/cadrs_app/src/mass_props.rs
 model-mass-override = 上書き
+model-mass-override-tip = 材料の代わりに入力した質量を使用
 model-mass-inertia-heading = 慣性モーメント ({ $units })
 model-mass-title = 質量特性と断面特性
 model-mass-faces = 測定する面
 model-mass-centroid = 図心
 model-mass-reference-frame = 基準座標系の合致コネクタ
 model-mass-show-variance = 計算の誤差を表示
+model-mass-variance-unsupported = カーネルはまだ対応していません
 model-mass = 質量
 model-mass-unit = 質量の単位
 model-mass-volume = 体積

@@ -1818,12 +1818,14 @@ model-measure-empty = 측정할 요소를 선택하세요
 
 ## crates/cadrs_app/src/mass_props.rs
 model-mass-override = 재정의
+model-mass-override-tip = 재료 대신 입력한 질량 사용
 model-mass-inertia-heading = 질량 관성 모멘트 ({ $units })
 model-mass-title = 질량 및 단면 속성
 model-mass-faces = 측정할 면
 model-mass-centroid = 도심
 model-mass-reference-frame = 기준 좌표계용 메이트 커넥터
 model-mass-show-variance = 계산 편차 표시
+model-mass-variance-unsupported = 커널에서 아직 지원하지 않음
 model-mass = 질량
 model-mass-unit = 질량 단위
 model-mass-volume = 부피

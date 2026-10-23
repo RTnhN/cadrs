@@ -2525,6 +2525,7 @@ model-measure-empty = Select entities to measure
 ## crates/cadrs_app/src/mass_props.rs
 # A checkbox: a value typed in is used instead of the computed one.
 model-mass-override = Override
+model-mass-override-tip = Use a typed mass instead of the materials'
 # { $units } are the units of the values ("kg mm²").
 model-mass-inertia-heading = Mass moments of inertia ({ $units })
 model-mass-title = Mass and section properties
@@ -2533,6 +2534,7 @@ model-mass-faces = Faces to measure
 model-mass-centroid = Centroid
 model-mass-reference-frame = Mate connector for reference frame
 model-mass-show-variance = Show calculation variance
+model-mass-variance-unsupported = Not supported by the kernel yet
 model-mass = Mass
 model-mass-unit = Mass unit
 model-mass-volume = Volume
