@@ -1,9 +1,9 @@
 //! Frame rate: the real time between frames over the last couple of seconds ([`FrameStats`]),
 //! shown at the bottom left of the 3D view with where the frame's time goes
 //! ([`crate::frame_profile`]): the main thread's schedules as one bar, the slowest systems and
-//! the slowest GPU passes as bars of the frame. F12 steps through the whole panel, the
-//! "60 fps · 16.7 ms" line alone, and nothing. The MCP tool `get_frame_stats` ([`crate::mcp`])
-//! returns the same, so a slow view can be measured at any time.
+//! the slowest GPU passes as bars of the frame. Hidden at first; F12 steps through the whole
+//! panel, the "60 fps · 16.7 ms" line alone, and nothing. The MCP tool `get_frame_stats`
+//! ([`crate::mcp`]) returns the same, so a slow view can be measured at any time.
 
 use std::collections::VecDeque;
 
@@ -22,8 +22,9 @@ use crate::frame_profile::{FrameProfile, Row, short_name};
 const WINDOW_SECS: f64 = 2.0;
 /// How often the panel changes (a number that changes every frame can't be read).
 const LABEL_EVERY_SECS: f32 = 0.5;
-/// The panel's bars at a whole frame (px).
-const BAR_PX: f32 = 260.0;
+/// The panel's bars at a whole frame (px); also how wide the panel is, so the longest system
+/// names fit on a line.
+const BAR_PX: f32 = 520.0;
 /// The system and GPU rows shown.
 const SYSTEM_ROWS: usize = 8;
 const GPU_ROWS: usize = 4;
@@ -47,10 +48,10 @@ impl Plugin for FrameStatsPlugin {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PanelMode {
     /// The frame rate and where the frame's time goes.
-    #[default]
     Profile,
     /// The frame rate line alone.
     Fps,
+    #[default]
     Hidden,
 }
 
@@ -158,6 +159,7 @@ pub fn spawn_frame_stats(p: &mut ChildSpawnerCommands, t: &Theme) {
             padding: UiRect::axes(Val::Px(t.space[2]), Val::Px(t.space[1])),
             border_radius: BorderRadius::all(Val::Px(t.radius_lg)),
             max_width: Val::Px(BAR_PX + 2.0 * t.space[2]),
+            overflow: Overflow::clip(),
             display: Display::None,
             ..default()
         },
@@ -317,6 +319,7 @@ fn sync_panel(
                     Node {
                         width: Val::Px(BAR_PX * 0.7),
                         height: Val::Px(6.0),
+                        flex_shrink: 0.0,
                         ..default()
                     },
                     BackgroundColor(t.secondary),
