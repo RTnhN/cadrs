@@ -1001,7 +1001,7 @@ fn chamfer_plane(b: &Body, c: usize, v: usize, d1: f64, d2: f64) -> Option<(P3, 
 
 /// Whether edge `e` is convex (the material's corner between its faces is under 180°), at
 /// its middle.
-fn edge_convex(b: &Body, e: usize) -> Option<bool> {
+pub(crate) fn edge_convex(b: &Body, e: usize) -> Option<bool> {
     let ed = &b.edges[e];
     if ed.degenerate {
         return None;
