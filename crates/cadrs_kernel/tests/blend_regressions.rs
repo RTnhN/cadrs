@@ -1537,3 +1537,103 @@ fn fillet_round_a_window_by_a_moved_seam() {
     assert_eq!(o.check_with(topo::CheckLevel::Full), Vec::<String>::new());
     assert_eq!(o.solids.len(), 1);
 }
+
+/// Both ends of a hole through a plate as thick as twice the chamfer (3030 2020 connect,
+/// Chamfer 1): the two closed strips' rails meet round the hole's middle and take its wall
+/// whole, one rail the edge of both strips (its way round settled by the loop that closes).
+/// By local trimming alone; a plate 4 thick less a hole of radius 3, both rims chamfered 2.
+#[test]
+fn chamfers_from_both_ends_take_a_hole_whole() {
+    let mut k = NativeKernel::new();
+    let p = k.box_(20.0, 20.0, 4.0).unwrap();
+    let c = k.pcylinder(3.0, 10.0).unwrap();
+    let c = k.ttranslate(&c, 10.0, 10.0, -3.0).unwrap();
+    let draw::Shape::Body(b) = k.bcut(&p, &c).unwrap() else {
+        panic!("not a body")
+    };
+    let es = k.edges(b).unwrap();
+    let rims: Vec<EdgeId> = [0.0, 4.0]
+        .iter()
+        .flat_map(|&z| foot_circle(&es, 3.0, z))
+        .collect();
+    let out = blend::chamfer_local(&mut k, b, &rims, 2.0).unwrap().bodies[0];
+    let o = k.get(out).unwrap();
+    assert_eq!(o.check_with(topo::CheckLevel::Full), Vec::<String>::new());
+    assert!(
+        !o.faces
+            .iter()
+            .any(|f| matches!(f.surf, surface::Surface::Cylinder { .. })),
+        "the hole's wall stays"
+    );
+    // The plate less two cones meeting at the middle: 20·20·4 − 2 · π/3 · 2 · (3² + 3·5 + 5²).
+    let v = mass::body_mass(o).volume;
+    let want = 1600.0 - 2.0 * std::f64::consts::PI / 3.0 * 2.0 * (9.0 + 15.0 + 25.0);
+    assert!((v - want).abs() < 1e-6 * want, "volume {v}, want {want}");
+}
+
+/// The same from the document (3030 2020 connect, Chamfer 1), its input outside the repo.
+#[test]
+fn doc_3030_2020_connect_chamfer1() {
+    let Ok(dir) = std::env::var("CADRS_DOC_FIXTURES") else {
+        return;
+    };
+    let b =
+        bodyio::read(&std::fs::read(format!("{dir}/c3030_2020_connect_chamfer1.body")).unwrap())
+            .unwrap();
+    let mut k = NativeKernel::new();
+    let id = k.insert(b);
+    let edges: Vec<EdgeId> = [21u64, 19, 18, 16, 0, 5, 14, 10, 1, 6, 4, 11]
+        .iter()
+        .map(|&e| EdgeId(e))
+        .collect();
+    let out = blend::chamfer_local(&mut k, id, &edges, 2.0)
+        .unwrap()
+        .bodies[0];
+    assert_eq!(
+        k.get(out).unwrap().check_with(topo::CheckLevel::Full),
+        Vec::<String>::new()
+    );
+}
+
+/// pibox, speaker, Chamfer 1 (its input outside the repo): 7 mm chamfers along a plate whose
+/// face has two slits in it (an edge out and a coincident one back), the trimming's split losing
+/// the piece they are in; the chamfers' ends cross onto round faces, their cuts there the
+/// chamfer's plane meeting the face in closed form (a fitted cut swung off the plane).
+#[test]
+fn doc_pibox_speaker_chamfer1() {
+    let Ok(dir) = std::env::var("CADRS_DOC_FIXTURES") else {
+        return;
+    };
+    let b = bodyio::read(&std::fs::read(format!("{dir}/pibox_speaker_chamfer1.body")).unwrap())
+        .unwrap();
+    let mut k = NativeKernel::new();
+    let id = k.insert(b);
+    let out = blend::chamfer_local(&mut k, id, &[EdgeId(55), EdgeId(9)], 7.0)
+        .unwrap()
+        .bodies[0];
+    assert_eq!(
+        k.get(out).unwrap().check_with(topo::CheckLevel::Full),
+        Vec::<String>::new()
+    );
+}
+
+/// racingrigrumble, Chamfer 1 (its input outside the repo): a chamfer along tangent edges
+/// whose radii from the faces' angles at each come out 2·10⁻⁶ apart, so their end balls at the
+/// shared vertex miss each other by as much: one ball for both.
+#[test]
+fn doc_racingrigrumble_chamfer1() {
+    let Ok(dir) = std::env::var("CADRS_DOC_FIXTURES") else {
+        return;
+    };
+    let b = bodyio::read(&std::fs::read(format!("{dir}/racingrigrumble_chamfer1.body")).unwrap())
+        .unwrap();
+    let mut k = NativeKernel::new();
+    let id = k.insert(b);
+    let out = blend::chamfer_local(&mut k, id, &[EdgeId(3), EdgeId(6), EdgeId(7)], 1.0)
+        .unwrap()
+        .bodies[0];
+    assert_eq!(
+        k.get(out).unwrap().check_with(topo::CheckLevel::Full),
+        Vec::<String>::new()
+    );
+}

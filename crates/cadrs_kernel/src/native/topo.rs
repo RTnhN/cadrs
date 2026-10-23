@@ -892,9 +892,11 @@ impl Body {
         if full {
             errs.extend(self.check_ends_on_faces(&fully));
             errs.extend(self.check_shells());
-            for fi in (0..self.faces.len()).filter(|&fi| fully(fi)) {
-                errs.extend(self.check_face_domain(fi));
-            }
+            // (Each face's on its own, in parallel; their problems in face order.)
+            use rayon::prelude::*;
+            let one = |fi: usize| if fully(fi) { self.check_face_domain(fi) } else { Vec::new() };
+            let domain: Vec<Vec<String>> = if super::fillet::parallel(self.faces.len()) { (0..self.faces.len()).into_par_iter().map(one).collect() } else { (0..self.faces.len()).map(one).collect() };
+            errs.extend(domain.into_iter().flatten());
             if errs.is_empty() {
                 let marked = |f: usize| only.is_none_or(|c| c.get(f).copied().unwrap_or(true));
                 errs.extend(super::check_faces::face_crossings_in(self, &|i, j| marked(i) || marked(j), &mut polys));

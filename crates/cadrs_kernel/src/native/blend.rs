@@ -2262,6 +2262,30 @@ pub fn fillet_laws_local(k: &mut NativeKernel, body: BodyId, laws: &[FilletLaw])
     Ok(Tracked { body: out, src }.into_result(k, body))
 }
 
+/// Chamfers of equal distance `d` (offsets along the faces) on `edges` by local trimming alone
+/// (no tool and boolean), as [`chamfer`] makes them first.
+pub fn chamfer_local(k: &mut NativeKernel, body: BodyId, edges: &[EdgeId], d: f64) -> Result<OpResult> {
+    let b = (**k.get(body)?).clone();
+    let edges = &real_edges(&b, edges)?[..];
+    let sharp = sharp_edges(&b, edges)?;
+    let laws: Option<Vec<super::fillet::RadiusLaw>> = sharp
+        .iter()
+        .map(|e| {
+            let e = e.0 as usize;
+            match super::fillet::chamfer_radius(&b, e, d) {
+                Some(r) => Some((e, vec![(0.0, r), (1.0, r)])),
+                None => Some((e, super::fillet::chamfer_law(&b, e, d)?)),
+            }
+        })
+        .collect();
+    let laws = laws.ok_or(KernelError::Unsupported("a chamfer whose faces' angle can't be followed along its edge"))?;
+    let (out, src) = super::fillet::fillet_edges_laws(&b, body, &laws, true)?;
+    if let Some(e) = local_problem(&b, &out) {
+        return Err(KernelError::InvalidResult { op: "chamfer", why: format!("the local chamfer isn't valid: {e}") });
+    }
+    Ok(Tracked { body: out, src }.into_result(k, body))
+}
+
 /// A variable fillet: circular sections whose radius follows a law along each edge, lofted
 /// through sections at the law's points (and past the edge's ends).
 pub fn fillet_variable(k: &mut NativeKernel, body: BodyId, laws: &[FilletLaw], _allow_overflow: bool) -> Result<OpResult> {

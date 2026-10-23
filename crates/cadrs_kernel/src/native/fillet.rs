@@ -37,6 +37,7 @@ use super::split::{split_face, Arc};
 use super::surface::Surface;
 use super::topo::{Body, CheckLevel, Coedge, Face, Shell};
 use crate::*;
+use rayon::prelude::*;
 use std::collections::HashMap;
 use super::tol;
 
@@ -54,7 +55,7 @@ fn debug(what: impl FnOnce() -> String) {
 /// much is reported, never left running. Counted, not timed, so the same input always gets the
 /// same answer whatever the machine's load.
 #[derive(Clone, Debug)]
-struct Budget(std::rc::Rc<std::cell::Cell<u64>>);
+struct Budget(std::sync::Arc<std::sync::atomic::AtomicU64>);
 
 /// Ball solves a fillet may take: seven times the most a fillet that's built takes (1.4·10⁵,
 /// OCCT blend complex_g1; SMLib's fillets under 9·10⁴).
@@ -62,17 +63,33 @@ const BALL_SOLVES: u64 = 1_000_000;
 
 impl Budget {
     fn new(solves: u64) -> Budget {
-        Budget(std::rc::Rc::new(std::cell::Cell::new(solves)))
+        Budget(std::sync::Arc::new(std::sync::atomic::AtomicU64::new(solves)))
     }
-    /// Takes one solve; false when none are left.
+    /// Takes one solve; false when none are left. (Shared by the strips planned in parallel: a
+    /// load and a store, not an exchange, as a cap on the work it needn't count every solve of
+    /// two threads exactly.)
     fn spend(&self) -> bool {
-        let left = self.0.get();
-        self.0.set(left.saturating_sub(1));
-        left > 0
+        use std::sync::atomic::Ordering::Relaxed;
+        let left = self.0.load(Relaxed);
+        if left == 0 {
+            return false;
+        }
+        self.0.store(left - 1, Relaxed);
+        true
     }
     fn spent(&self) -> bool {
-        self.0.get() == 0
+        self.left() == 0
     }
+    fn left(&self) -> u64 {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+/// Whether `n` independent pieces of work go to rayon's threads: only with more than one piece
+/// and more than one thread (on one, the hand-over to its worker and back costs more than it
+/// saves on small fillets).
+pub(crate) fn parallel(n: usize) -> bool {
+    n > 1 && rayon::current_num_threads() > 1
 }
 
 fn unsupported(why: &'static str) -> KernelError {
@@ -2314,6 +2331,18 @@ fn pieces_of(b: &Body, e: usize, law: &[(f64, f64)], flat: bool, ratio: f64, bud
     Ok(out)
 }
 
+/// Strip `ef`'s contacts on its own faces at the points of `q` (in its order of faces): their
+/// feet there, from `q`'s (u, v), or afresh where that lands elsewhere on the surface.
+fn own_contacts(b: &Body, ef: &EdgeFillet, q: &[Contact; 2]) -> [Contact; 2] {
+    std::array::from_fn(|k| {
+        let g = &b.faces[ef.faces[k]];
+        let p = &q[k].p;
+        let at = |hint: Option<P2>| geom::contact(g, geom::foot(g, p, hint));
+        let c = at(Some(q[k].uv));
+        if (c.p - p).norm() <= tol::REL_POINT * (1.0 + ef.r()) { c } else { [c, at(None)].into_iter().min_by(|x, y| (x.p - p).norm().total_cmp(&(y.p - p).norm())).unwrap_or(c) }
+    })
+}
+
 fn clone_fillet(f: &EdgeFillet) -> EdgeFillet {
     EdgeFillet { e: f.e, faces: f.faces, k: f.k, law: f.law.clone(), flat: f.flat, ratio: f.ratio, spine: f.spine.clone(), exact: f.exact, mid: f.mid, tm: f.tm, closed: f.closed, at_vertex: f.at_vertex, budget: f.budget.clone(), reach: f.reach }
 }
@@ -2327,13 +2356,25 @@ fn plan(b: &Body, edges: &[RadiusLaw], ratios: &[f64], flat: bool, budget: &Budg
     let mut efs: Vec<EdgeFillet> = Vec::new();
     let mut rolls: Vec<Ball> = Vec::new();
     let mut roll_ends: Vec<(usize, usize, usize)> = Vec::new(); // (strip, end, roll)
-    for ((e, law), &ratio) in edges.iter().zip(ratios) {
+    // Each edge's strips on their own (in parallel), then in the edges' order, their rolls
+    // numbered on from the edges' before.
+    type Pieces = Vec<(EdgeFillet, [Option<usize>; 2])>;
+    let one = |((e, law), &ratio): (&RadiusLaw, &f64)| -> Result<(Pieces, Vec<Ball>)> {
         let e = *e;
         debug(|| format!("edge {e}: strips"));
-        for (f, rs) in pieces_of(b, e, law, flat, ratio, budget, &mut rolls)? {
+        let mut own = Vec::new();
+        let pieces = pieces_of(b, e, law, flat, ratio, budget, &mut own)?;
+        Ok((pieces, own))
+    };
+    let each: Vec<Result<(Pieces, Vec<Ball>)>> = if parallel(edges.len()) { edges.par_iter().zip(ratios).map(one).collect() } else { edges.iter().zip(ratios).map(one).collect() };
+    for r in each {
+        let (pieces, own) = r?;
+        let base = rolls.len();
+        rolls.extend(own);
+        for (f, rs) in pieces {
             for (j, x) in rs.iter().enumerate() {
                 if let Some(id) = x {
-                    roll_ends.push((efs.len(), j, *id));
+                    roll_ends.push((efs.len(), j, base + *id));
                 }
             }
             efs.push(f);
@@ -2525,6 +2566,23 @@ fn plan(b: &Body, edges: &[RadiusLaw], ratios: &[f64], flat: bool, budget: &Budg
                         debug(|| format!("vertex {v}: edges {} and {} meet in the plane square to their mean direction", ea.e, eb.e));
                         (ta, tb) = (ea.spine.param_of(&x.c, ta), eb.spine.param_of(&y.c, tb));
                         (ba, bb) = (Ball { flat: ea.flat, ..x }, Ball { flat: eb.flat, ..y });
+                    }
+                }
+                // Balls a hair apart (edges tangent only within the angular tolerance, or a
+                // chamfer's radii from the faces' angles at each edge a hair different): `ea`'s
+                // ball, both strips ending in it, where it touches `eb`'s faces too (the same
+                // two, or one of them in place of a face it joins smoothly there).
+                let hair = 1e-5 * (1.0 + ea.r());
+                if !near(&ba, &bb) && (ba.c - bb.c).norm() <= hair && (ea.radius_at(ta) - eb.radius_at(tb)).abs() <= hair {
+                    let q: [Contact; 2] = std::array::from_fn(|k| match ea.faces.iter().position(|&f| f == eb.faces[k]) {
+                        Some(i) => ba.q[i],
+                        None => ba.q[ea.faces.iter().position(|f| !eb.faces.contains(f)).unwrap_or(k)],
+                    });
+                    let own = own_contacts(b, eb, &q);
+                    if (0..2).all(|k| (own[k].p - q[k].p).norm() <= hair && own[k].n.dot(&q[k].n) >= 1.0 - tol::ANGULAR_POINT) {
+                        debug(|| format!("vertex {v}: edges {} and {} meet in one ball ({:.3e} apart)", ea.e, eb.e, (ba.c - bb.c).norm()));
+                        tb = eb.spine.param_of(&ba.c, tb);
+                        bb = Ball { c: ba.c, q: own, flat: eb.flat };
                     }
                 }
                 if !near(&ba, &bb) {
@@ -3256,8 +3314,24 @@ fn split(b: &Body, f: &Face, cuts: &[usize], given: &dyn Fn(usize) -> Option<Cur
         let (p, q) = (a.uv_at(0.0), a.uv_at(1.0));
         a.v[0] == a.v[1] && (p - q).norm() <= tol::REL_POINT * (1.0 + p.coords.abs().max()) && (e.point(e.t[0]) - e.point(e.mid_t())).norm() <= e.tol.max(tol::POINT) && (e.point(e.t[1]) - e.point(e.mid_t())).norm() <= e.tol.max(tol::POINT)
     };
+    // So is a slit into the face: an arc out to a vertex and the next straight back along it (a
+    // face a read or built model left with a crack), where no cut ends at its tip: the tracing
+    // can lose the piece it is in. Both are taken out and put back the same way.
+    let tip_cut = |v: usize| cut_arcs.iter().any(|c| c.v.contains(&v));
+    let slit = |l: &[Arc], i: usize| -> bool {
+        let n = l.len();
+        if n < 3 {
+            return false;
+        }
+        let (a, c) = (&l[i], &l[(i + 1) % n]);
+        // (An arc's vertices run the way it is travelled.)
+        a.edge != c.edge && a.v[0] == c.v[1] && a.v[1] == c.v[0] && !tip_cut(a.v[1]) && [0.25, 0.5, 0.75].iter().all(|&s| {
+            let (p, q) = (a.uv_at(s), c.uv_at(1.0 - s));
+            (p - q).norm() <= tol::REL_POINT * (1.0 + p.coords.abs().max())
+        })
+    };
     let mut slivers: Vec<((usize, bool), Arc)> = Vec::new();
-    let mut trimmed = if boundary.iter().any(|l| l.len() > 1 && l.iter().any(&tiny)) { boundary.clone() } else { Vec::new() };
+    let mut trimmed = if boundary.iter().any(|l| l.len() > 1 && (l.iter().any(&tiny) || (0..l.len()).any(|i| slit(l, i)))) { boundary.clone() } else { Vec::new() };
     for l in trimmed.iter_mut() {
         let mut i = 0;
         while l.len() > 1 && i < l.len() {
@@ -3265,6 +3339,15 @@ fn split(b: &Body, f: &Face, cuts: &[usize], given: &dyn Fn(usize) -> Option<Cur
                 let prev = &l[(i + l.len() - 1) % l.len()];
                 let key = (prev.edge, prev.fwd);
                 slivers.push((key, l.remove(i)));
+            } else if slit(l, i) && i + 1 < l.len() {
+                let prev = &l[(i + l.len() - 1) % l.len()];
+                let key = (prev.edge, prev.fwd);
+                let a = l.remove(i);
+                let c = l.remove(i);
+                // (Put back in the reverse order taken: the way back after the key, then the
+                // way out between them.)
+                slivers.push((key, a));
+                slivers.push((key, c));
             } else {
                 i += 1;
             }
@@ -5081,6 +5164,29 @@ fn closed_strip(b: &Body, nb: &mut Body, ef: &EdgeFillet, fit_tol: f64, out: &mu
             }
         };
         if events[k].is_empty() {
+            // Along another closed strip's rail on the same face (two strips' rails meeting
+            // round a band they take whole, as chamfers from both ends of a short cylinder do):
+            // that rail is both strips' edge, and the face goes.
+            let fi = ef.faces[k];
+            let rail_at = |s: f64| st.rails[k].point(t0 + period * s);
+            let shared = out.cuts.get(&fi).and_then(|cs| {
+                cs.iter().copied().find(|&c| {
+                    let ce = &nb.edges[c];
+                    ce.v[0] == ce.v[1] && ce.v[0] == rv[k] && [0.17, 0.5, 0.83].iter().all(|&s| {
+                        let p = rail_at(s);
+                        (ce.point(ce.curve.closest(&p, ce.t[0], ce.t[1])) - p).norm() <= tol.max(ce.tol)
+                    })
+                })
+            });
+            if let Some(c) = shared {
+                debug(|| format!("edge {}: rail {k} runs along edge {c}, another strip's rail on face {fi}: the strips take the face", ef.e));
+                if let Some(cs) = out.cuts.get_mut(&fi) {
+                    cs.retain(|&x| x != c);
+                }
+                out.consumed.insert(fi);
+                fe.push(c);
+                continue;
+            }
             let rail = nb.add_edge(st.rails[k].clone(), t0, t0 + period, rv[k], rv[k]);
             out.cuts.entry(ef.faces[k]).or_default().push(rail);
             on_face(rail, t0, t0 + period, out);
@@ -5635,7 +5741,8 @@ fn local_blend(b: &Body, input: BodyId, edges: &[RadiusLaw], ratios: &[f64], fla
     // Rails running off their faces mid-strip are cut by the faces beyond; where that fails,
     // the strips as they are (the rail may only graze an edge).
     let build = |p: &Plan| {
-        trim(b, input, p, size, fit_tol, vtol, true).or_else(|e| {
+        let pre = prepare(b, p, fit_tol);
+        trim(b, input, p, &pre, size, fit_tol, vtol, true).or_else(|e| {
             if budget.spent() {
                 return Err(out_of_work());
             }
@@ -5643,7 +5750,7 @@ fn local_blend(b: &Body, input: BodyId, edges: &[RadiusLaw], ratios: &[f64], fla
             // Only where the rails really stay on their faces: a rail across one of the face's
             // loops (a hole crossing the strip) leaves loops crossing, which only the full check
             // sees.
-            let (out, src) = trim(b, input, p, size, fit_tol, vtol, false).map_err(|e| if budget.spent() { out_of_work() } else { e })?;
+            let (out, src) = trim(b, input, p, &pre, size, fit_tol, vtol, false).map_err(|e| if budget.spent() { out_of_work() } else { e })?;
             // (The input checked only when the result fails the full check: its own defects carry
             // over, and then the fast check is what holds.)
             let problem = match out.check_with(CheckLevel::Full).into_iter().next() {
@@ -5673,20 +5780,21 @@ fn local_blend(b: &Body, input: BodyId, edges: &[RadiusLaw], ratios: &[f64], fla
         let p = plan(b, edges, ratios, flat, &budget, true).map_err(|_| e.clone())?;
         build(&p).map_err(|_| e)
     });
-    debug(|| format!("ball solves: {}", BALL_SOLVES - budget.0.get()));
+    debug(|| format!("ball solves: {}", BALL_SOLVES - budget.left()));
     r
 }
 
-/// The strips, ends and corners of plan `p` put into `b`'s faces (`cliffs`: rails running off
-/// their faces mid-strip cut by the faces beyond).
-#[allow(clippy::too_many_arguments)]
-fn trim(b: &Body, input: BodyId, p: &Plan, size: f64, fit_tol: f64, vtol: f64, cliffs: bool) -> Result<(Body, Vec<Vec<FaceSrc>>)> {
-    let mut nb = b.clone();
-    let mut out = Pieces::default();
-    for (i, ef) in p.efs.iter().enumerate() {
-        if p.inside[i] {
-            continue;
-        }
+/// An open strip of a plan made ready to put into the body: the spine parameters it covers, its
+/// pinched ends' sections, its marched end curves and the strip.
+type Pre = (Vec<f64>, Vec<(f64, Ball)>, [Option<Vec<(f64, P3)>>; 2], Strip);
+
+/// Each open strip of plan `p` ([`Pre`]), from the input and the plan alone: in parallel, and
+/// once for both of [`trim`]'s tries (with cliffs and without).
+fn prepare(b: &Body, p: &Plan, fit_tol: f64) -> Vec<Option<Result<Pre>>> {
+    // Each open strip's spine parameters to cover, pinched ends' sections, marched end curves
+    // and the strip itself, from the input and the plan alone: all in parallel, then the strips
+    // put into the body in order.
+    let prep = |i: usize, ef: &EdgeFillet| -> Result<Pre> {
         // The spine parameters the strip must cover and, where an end face isn't met in closed
         // form, the marched end curves.
         let mut cover = Vec::new();
@@ -5741,11 +5849,28 @@ fn trim(b: &Body, input: BodyId, p: &Plan, size: f64, fit_tol: f64, vtol: f64, c
                 None => {}
             }
         }
+        let st = build_strip(b, ef, &cover, &pinned, fit_tol)?;
+        Ok((cover, pinned, marched, st))
+    };
+    let open = |(i, ef): (usize, &EdgeFillet)| (!p.inside[i] && !ef.closed).then(|| prep(i, ef));
+    if parallel(p.efs.len()) { p.efs.par_iter().enumerate().map(open).collect() } else { p.efs.iter().enumerate().map(open).collect() }
+}
+
+/// The strips, ends and corners of plan `p` put into `b`'s faces (`cliffs`: rails running off
+/// their faces mid-strip cut by the faces beyond).
+#[allow(clippy::too_many_arguments)]
+fn trim(b: &Body, input: BodyId, p: &Plan, pre: &[Option<Result<Pre>>], size: f64, fit_tol: f64, vtol: f64, cliffs: bool) -> Result<(Body, Vec<Vec<FaceSrc>>)> {
+    let mut nb = b.clone();
+    let mut out = Pieces::default();
+    for (i, ef) in p.efs.iter().enumerate() {
+        if p.inside[i] {
+            continue;
+        }
         if ef.closed {
             closed_strip(b, &mut nb, ef, fit_tol, &mut out, input)?;
             continue;
         }
-        let mut st = build_strip(b, ef, &cover, &pinned, fit_tol)?;
+        let (cover, pinned, marched, mut st) = pre.get(i).cloned().flatten().ok_or_else(|| failed("trimming", "a strip not prepared"))??;
         debug(|| format!("edge {}: {:?} strip, ends {:?}", ef.e, st.kind, p.ends[i].iter().map(|e| e.as_ref().map(|e| matches!(e, End::Free { .. }))).collect::<Vec<_>>()));
         // Each end: the rails' end vertices and the edge(s) across the strip.
         let mut rv = [[0usize; 2]; 2]; // [end][side]
@@ -5918,10 +6043,18 @@ fn trim(b: &Body, input: BodyId, p: &Plan, size: f64, fit_tol: f64, vtol: f64, c
                         let last = xs.len() - 1;
                         xs[0] = nb.verts[*va].p;
                         xs[last] = nb.verts[*vz].p;
-                        let ca = (ma.w == 0.0).then_some(ma.ball.c);
-                        let cz = (mz.w == 1.0).then_some(mz.ball.c);
-                        let (c, c0, c1) = fit_cut(&xs, Some(&b.faces[*g]), [ca, cz]);
-                        let ee = add_edge(&mut nb, c, c0, c1, *va, *vz);
+                        // The strip's surface and the face's meeting in closed form (a chamfer's
+                        // plane across a planar or round face) where they do, else the marched
+                        // points fitted.
+                        let ee = match exact_end_curve(&st.surf, &b.faces[*g].surf, &xs[0], &xs[last], &xs[last / 2]) {
+                            Some((c, c0, c1)) => add_edge(&mut nb, c, c0, c1, *va, *vz),
+                            None => {
+                                let ca = (ma.w == 0.0).then_some(ma.ball.c);
+                                let cz = (mz.w == 1.0).then_some(mz.ball.c);
+                                let (c, c0, c1) = fit_cut(&xs, Some(&b.faces[*g]), [ca, cz]);
+                                add_edge(&mut nb, c, c0, c1, *va, *vz)
+                            }
+                        };
                         cuts.push((*g, ee));
                         across.push(ee);
                     }
@@ -6900,7 +7033,6 @@ fn assemble(mut nb: Body, out: &Pieces, picked: &[usize], size: f64) -> Result<(
     let mut pieces: Vec<(usize, Face)> = Vec::new(); // (input face, piece)
     // Each cut face split on its own (in parallel: the faces are independent), taken in order.
     let splits: Vec<Option<Vec<Face>>> = {
-        use rayon::prelude::*;
         let nb = &nb;
         (0..nb.faces.len()).into_par_iter().map(|fi| out.cuts.get(&fi).map(|cs| split(nb, &nb.faces[fi], cs, &|e| out.on_face.get(&(e, fi)).cloned()))).collect()
     };
@@ -7013,9 +7145,9 @@ fn assemble(mut nb: Body, out: &Pieces, picked: &[usize], size: f64) -> Result<(
     for nf in &out.new_faces {
         let es: Vec<(usize, Option<bool>)> = nf.edges.iter().map(|&e| (e, kept_dir.get(&e).map(|f| !f).or_else(|| new_dir.get(&e).map(|f| !f)))).collect();
         let lp = chain(&nb, &es)?;
-        for &(e, fwd) in &lp {
-            new_dir.entry(e).or_insert(fwd);
-        }
+        // (The closed edges whose way round the chain only guessed: no kept piece or earlier
+        // new face uses them, as a rail shared by two strips round a face they take whole.)
+        let guessed: Vec<usize> = es.iter().filter(|x| x.1.is_none() && nb.edges[x.0].v[0] == nb.edges[x.0].v[1] && !nb.edges[x.0].degenerate).map(|x| x.0).collect();
         let mut coedges: Vec<Coedge> = lp
             .iter()
             .map(|&(ei, fwd)| {
@@ -7052,7 +7184,10 @@ fn assemble(mut nb: Body, out: &Pieces, picked: &[usize], size: f64) -> Result<(
         };
         if !closes(&coedges) {
             for i in 0..coedges.len() {
-                if !nb.edges[coedges[i].edge].degenerate || !nf.pcurves.iter().any(|x| x.0 == coedges[i].edge) {
+                // A degenerate edge's given p-curve, or a closed edge run the way the chain
+                // guessed.
+                let degenerate = nb.edges[coedges[i].edge].degenerate && nf.pcurves.iter().any(|x| x.0 == coedges[i].edge);
+                if !degenerate && !guessed.contains(&coedges[i].edge) {
                     continue;
                 }
                 let mut l = coedges.clone();
@@ -7063,6 +7198,9 @@ fn assemble(mut nb: Body, out: &Pieces, picked: &[usize], size: f64) -> Result<(
                     break;
                 }
             }
+        }
+        for c in &coedges {
+            new_dir.entry(c.edge).or_insert(c.fwd);
         }
         put(nf.beside, faces.len(), &mut shells);
         faces.push(Face { surf: nf.surf.clone(), sense: true, loops: vec![coedges] });
@@ -7590,7 +7728,7 @@ mod tests {
         let p = plan(&b, &laws, &[1.0, 1.0], false, &budget, true).unwrap();
         assert_eq!(p.tris.len(), 1);
         let size = b.bbox().diagonal();
-        let (out, _) = trim(&b, id, &p, size, 1e-5 * (1.0 + size), tol::REL_POINT * 2.0, true).unwrap();
+        let (out, _) = trim(&b, id, &p, &prepare(&b, &p, 1e-5 * (1.0 + size)), size, 1e-5 * (1.0 + size), tol::REL_POINT * 2.0, true).unwrap();
         assert_eq!(out.check_with(CheckLevel::Full), Vec::<String>::new());
         assert!(out.faces.iter().any(|f| matches!(f.surf, Surface::Revolution { .. })));
         assert_eq!(out.faces.len(), 11);
