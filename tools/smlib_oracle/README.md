@@ -47,6 +47,7 @@ stderr (SMLib's error callback, per-face areas, and per-command details).
 | `pproject surf k` | `my_test_parallel_projection` (smSurfaceTest.cpp:761) | quadratic circles of radius i/k of half the box's larger width about the middle of the box's top, `CreateParallelProjectionCurves` along −z; per circle its centre, radius and curves |
 | `ptsolve surf min\|max\|normalize nx ny nz` | `my_test_surface_point_extrema` (smSurfaceTest.cpp:404) | `GlobalPointSolve` (`SM_SR_ALL`, `SM_ZONE_TOL_3D`) from each point of the nx × ny × nz grid over the box, stepped as the test steps it; per target its solutions' uv, point and distance. `--move=x,y,z` transforms the surface first by `SetCanonical((x,y,z), +x, +z)` (`my_test_sp_nurb`) |
 | `closest surf x y z ...` | `my_test_surface_closest_point` (smSurfaceTest.cpp:632) | `GlobalPointSolve` `SM_SO_MINIMIZE`, `SM_SR_SINGLE`, tolerance 1e-6, natural domain, no drop distance; per point the nearest point and distance |
+| `tgrid in n` | `my_test_tsurface_point_classify`, `my_test_tsurface_point_intersect` (smTopoTest.cpp:2672, 2411) | per face its `GetUVDomain` and, of the n × n points of it, how many `SmFace::PointClassify` puts inside the face and how many of their surface points `SmTopologySolver::BrepPointSolve` (`SM_SO_INTERSECT`, `SM_ZONE_TOL_3D`) finds on the B-rep |
 
 The surface commands take a bare B-spline surface, `surf`: a `.sms` or `.srf` file
 (`SmBSplineSurface::ReadFromFile`), or `grid:tx:ty:tz:nu:nv:du:dv:x0:y0:z0:...`

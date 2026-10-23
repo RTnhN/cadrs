@@ -14,6 +14,11 @@ SMLib's test makes of trimmed faces it builds, as closed forms.
   (`SmTopologyIntersector::IntersectInsertRelate`). Here the plane (the top face of a slab:
   sections take solids) cut through the quarter cylinder (`boolean::section`): the section's
   edges on the cylinder are a quarter circle, π long.
+- `my_test_tsurface_regression` 25, `ellips_ts2.smb` (a trimmed ellipsoid patch): the nearest
+  point to the benchmark point of `my_test_tsurface_point_extrema` (its distance as SMLib's run
+  prints it), and the points of a 33 × 33 grid of the face's uv domain inside the face and on the
+  body (`my_test_tsurface_point_classify`, `my_test_tsurface_point_intersect`) against SMLib's
+  counts (the oracle's `tgrid`).
 - The distance solves (`my_test_tsurface_tsurface_solve`, `SmTopologySolver::BrepBrepSolve`)
   with `SM_SO_MINIMIZE` and `SM_SO_MAXIMIZE` on `ss_plane_sph1` (a band of a sphere r 2 at
   (10, 2, 2) bounded by four half circles, and the square x = 5, 0 ≤ y, z ≤ 5),
@@ -24,8 +29,10 @@ SMLib's test makes of trimmed faces it builds, as closed forms.
   count its sampled solutions along degenerate sets; the values are what both agree on.
 """
 import math
+import sys
 
 from smlib_to_rust import Case, Fixture, rust_f64
+from smlib._oracle import oracle_run
 
 SOURCE = "smAdvancedTest.cpp, smTopoTest.cpp"
 TITLE = "trimmed-surface"
@@ -43,7 +50,7 @@ PRELUDE = r'''
 use cadrs_kernel::native::classify;
 use cadrs_kernel::native::draw::Shape;
 use cadrs_kernel::native::mass;
-use cadrs_kernel::native::math::P3;
+use cadrs_kernel::native::math::{P2, P3};
 use cadrs_kernel::native::surface::Surface;
 use cadrs_kernel::native::topo::Body;
 use cadrs_kernel::native::smb;
@@ -171,6 +178,54 @@ fn solve(file: &str, max: bool, want: f64, tol: f64) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// `my_test_tsurface_regression` 25 (smAdvancedTest.cpp:2094) on `ellips_ts2.smb`: the
+/// benchmark point solve of `my_test_tsurface_point_extrema` (smTopoTest.cpp:2255), whose
+/// distance SMLib's run prints (`Distance = 2870.476090`, to 6 decimals).
+fn ellips_benchmark(want: f64) -> Result<(), String> {
+    let bytes = std::fs::read(data(SUITE, "ellips_ts2.smb")).map_err(e)?;
+    let (body, _) = smb::read(&bytes)?;
+    let mut k = NativeKernel::new();
+    let id = k.insert(body);
+    let p = P3::new(2811.4739500810206, 590.21281639457879, 145.44695932094584);
+    let r = k.min_distance(&DistanceTarget::Point(p), &DistanceTarget::Body(id)).map_err(e)?;
+    if (r.distance - want).abs() > 5e-7 {
+        return Err(format!("distance {:.7}, SMLib prints {want:.6}", r.distance));
+    }
+    Ok(())
+}
+
+/// `my_test_tsurface_point_classify` and `my_test_tsurface_point_intersect` (smTopoTest.cpp:2672,
+/// 2411) on `ellips_ts2.smb` (one face): of the n × n points of the face's uv domain `dom`
+/// (SMLib's `GetUVDomain`, u0 v0 u1 v1), those inside the face (its uv polygons; `in_3d`: those
+/// whose surface point lies on the body, within 1e-5), as many as SMLib finds.
+fn ellips_grid(n: usize, dom: [f64; 4], in_3d: bool, want: usize) -> Result<(), String> {
+    let bytes = std::fs::read(data(SUITE, "ellips_ts2.smb")).map_err(e)?;
+    let (body, _) = smb::read(&bytes)?;
+    let mut k = NativeKernel::new();
+    let id = k.insert(body.clone());
+    let mut count = 0;
+    for f in &body.faces {
+        let polys = classify::face_polygons(&body, f);
+        let [u0, v0, u1, v1] = dom;
+        for i in 0..n {
+            for j in 0..n {
+                let (u, v) = (u0 + (u1 - u0) * i as f64 / (n - 1) as f64, v0 + (v1 - v0) * j as f64 / (n - 1) as f64);
+                let hit = if in_3d {
+                    let p = f.surf.eval(u, v);
+                    k.min_distance(&DistanceTarget::Point(p), &DistanceTarget::Body(id)).map_err(e)?.distance <= 1e-5
+                } else {
+                    matches!(classify::in_face(&polys, &f.surf, P2::new(u, v), 1e-9), classify::InFace::Inside)
+                };
+                count += hit as usize;
+            }
+        }
+    }
+    if count != want {
+        return Err(format!("{count} of the grid's points, SMLib finds {want}"));
+    }
+    Ok(())
+}
 '''
 
 # my_test_tsurf_creation's face: the L (100 − 25), less the triangle (1,5)-(1,8)-(4,5) and the
@@ -219,7 +274,22 @@ def extract(ctx):
         ((7.5, 2.5), "OnBoundary"),
     ]
     plist = ", ".join("([%s, %s], PointClass::%s)" % (rust_f64(x), rust_f64(y), c) for (x, y), c in pts)
-    return [
+    ellips = Fixture("TestFiles/pt_TestFiles/ellips_ts2.smb")
+    grid = []
+    r = oracle_run(["tgrid", ctx.path(ellips.rel), 33])
+    if r is None:
+        print("trimmed_surfaces: no oracle: the ellips_ts2 grid cases left out", file=sys.stderr)
+    elif not r.get("ok") or len(r["faces"]) != 1:
+        raise SystemExit("trimmed_surfaces: the oracle's tgrid fails (%s): rebuild it from tools/smlib_oracle" % r.get("status"))
+    else:
+        dom = "[%s]" % ", ".join(rust_f64(x) for x in r["faces"][0]["uv"])
+        grid = [
+            Case("tsurf_25_ellips_point_classify", "SMLib trimmed surfaces 25 (`ellips_ts2.smb`, `my_test_tsurface_point_classify`): of a 33 × 33 grid of the face's uv domain, %d inside it (the test asserts 389)." % r["inside"],
+                 "ellips_grid(33, %s, false, %d)" % (dom, r["inside"]), [ellips]),
+            Case("tsurf_25_ellips_point_intersect", "SMLib trimmed surfaces 25 (`ellips_ts2.smb`, `my_test_tsurface_point_intersect`): of the surface points of that grid, %d on the body (the test asserts 389)." % r["found"],
+                 "ellips_grid(33, %s, true, %d)" % (dom, r["found"]), [ellips]),
+        ]
+    return grid + [
         Case("tsurf_cone_patch_area", "SMLib trimmed surfaces: `CreateConePatch` r 1, h 1, full turn: its area 2π.",
              "cone_patch_area(%s)" % rust_f64(2 * math.pi)),
         Case("tsurf_creation_volume_area", "SMLib trimmed surfaces: `my_test_tsurf_creation`'s face (area 70.5 − 2.25π) extruded by 1: volume and area.",
@@ -238,6 +308,8 @@ def extract(ctx):
              'solve("ss_2adj_planes.smp", false, %s, 1e-9)' % rust_f64(0.0), [Fixture("TestFiles/pt_TestFiles/ss_2adj_planes.smp")]),
         Case("tsurf_solve_2adj_planes_max", "SMLib trimmed surfaces: `ss_2adj_planes` maximize: corners (5, 5, z) and (0, 0, 5 − z), √75 apart.",
              'solve("ss_2adj_planes.smp", true, %s, 1e-9)' % rust_f64(math.sqrt(75.0)), [Fixture("TestFiles/pt_TestFiles/ss_2adj_planes.smp")]),
+        Case("tsurf_25_ellips_benchmark_distance", "SMLib trimmed surfaces 25 (`ellips_ts2.smb`): the nearest point of the body to (2811.47, 590.21, 145.45) is 2870.476090 away, as SMLib's run prints.",
+             "ellips_benchmark(2870.47609)", [Fixture("TestFiles/pt_TestFiles/ellips_ts2.smb")]),
         Case("tsurf_analytic_section", "SMLib trimmed surfaces: `my_test_analytic_tsurf_creation`, a plane through a quarter cylinder r 2: a quarter circle π long.",
              "analytic_tsurf_section(%s)" % rust_f64(math.pi)),
     ]

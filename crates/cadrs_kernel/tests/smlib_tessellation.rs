@@ -4,7 +4,7 @@
 //! must still fail.
 //!
 //! Not converted:
-//! - face/normal tables, poly solvers 1–4, CreateTriStripFaces, SimpleMerge, STL and .pbp input/output, ray firing, decimation, poly booleans (tests 1–4, 9–16): SMLib's polygon library (SmPolyBrep), which the kernel has no counterpart of
+//! - face/normal tables, poly solvers 1–4, CreateTriStripFaces, SimpleMerge, STL and .pbp input/output, ray firing, decimation (its meshing converted), poly booleans (the smlib_poly_booleans suite) (tests 1–4, 9–16): SMLib's polygon library (SmPolyBrep), which the kernel has no counterpart of
 #![allow(clippy::all)]
 
 mod smlib_common;
@@ -84,7 +84,13 @@ fn tess(
         return Err(format!("face {f} has no triangles"));
     }
     let check = tess::check_faces(&faces);
-    if !check.is_watertight() {
+    // A sheet's mesh is open along the sheet's border only.
+    let sheet = !body.is_solid();
+    if if sheet {
+        check.bad > 0
+    } else {
+        !check.is_watertight()
+    } {
         return Err(format!(
             "not watertight: of {} mesh edges {} are open and {} have more than two triangles or two the same way round",
             check.edges, check.open, check.bad
@@ -230,4 +236,91 @@ fn tess_stitched_fillet_ts() {
         Some(905.154091053),
     )
     .unwrap();
+}
+
+/// SMLib decimation test 1, its meshing: `nurb_fillet.smb` stitched at 1e-5, chord 0, curve angle 10°, surface angle 25° (SMLib: the mesh is made, its volume 1209.49 at the surface angle). The kernel meshes at one angle, the surface one; chord 0 (angle only) at 0.1 mm.
+#[test]
+fn tess_decimation_1_nurb_fillet() {
+    tess(
+        "nurb_fillet.smb",
+        &[1e-5],
+        0.0,
+        25.0,
+        0.0,
+        0.0,
+        Some(1209.489269),
+    )
+    .unwrap();
+}
+
+/// SMLib decimation test 2, its meshing: `nurb_fillet.smb` stitched at 1e-5, chord 0, curve angle 10°, surface angle 40° (SMLib: the mesh is made, its volume 1192.87 at the surface angle). The kernel meshes at one angle, the surface one; chord 0 (angle only) at 0.1 mm.
+#[test]
+fn tess_decimation_2_nurb_fillet() {
+    tess(
+        "nurb_fillet.smb",
+        &[1e-5],
+        0.0,
+        40.0,
+        0.0,
+        0.0,
+        Some(1192.87345897),
+    )
+    .unwrap();
+}
+
+/// SMLib decimation test 3, its meshing: `sphere.smb` stitched at 1e-5, chord 0, curve angle 15°, surface angle 30° (SMLib: the mesh is made, its volume 490.545 at the surface angle). The kernel meshes at one angle, the surface one; chord 0 (angle only) at 0.1 mm.
+#[test]
+fn tess_decimation_3_sphere() {
+    tess(
+        "sphere.smb",
+        &[1e-5],
+        0.0,
+        30.0,
+        0.0,
+        0.0,
+        Some(490.544975681),
+    )
+    .unwrap();
+}
+
+/// SMLib decimation test 4, its meshing: `sphere.smb` stitched at 1e-5, chord 0, curve angle 15°, surface angle 40° (SMLib: the mesh is made, its volume 490.545 at the surface angle). The kernel meshes at one angle, the surface one; chord 0 (angle only) at 0.1 mm.
+#[test]
+fn tess_decimation_4_sphere() {
+    tess(
+        "sphere.smb",
+        &[1e-5],
+        0.0,
+        40.0,
+        0.0,
+        0.0,
+        Some(490.544975681),
+    )
+    .unwrap();
+}
+
+/// SMLib decimation test 5, its meshing: `nurby_box_cyl_sphere.smb` stitched at 1e-5, chord 0, curve angle 15°, surface angle 40° (also its test 6; SMLib: the mesh is made, its volume 2723.74 at the surface angle). The kernel meshes at one angle, the surface one; chord 0 (angle only) at 0.1 mm.
+#[test]
+fn tess_decimation_5_nurby_box_cyl_sphere() {
+    tess(
+        "nurby_box_cyl_sphere.smb",
+        &[1e-5],
+        0.0,
+        40.0,
+        0.0,
+        0.0,
+        Some(2723.74438236),
+    )
+    .unwrap();
+}
+
+/// SMLib decimation test 7, its meshing: `ellips_ts2.smb` stitched at 1e-5, chord 0.01, curve angle 5°, surface angle 25° (SMLib: the mesh is made; a sheet, its mesh open along its border). The kernel meshes at one angle, the surface one.
+#[test]
+fn tess_decimation_7_ellips_ts2() {
+    tess("ellips_ts2.smb", &[], 0.01, 25.0, 0.0, 0.0, None).unwrap();
+}
+
+/// SMLib decimation test 8, its meshing: `ellips_ts2.smb` stitched at 1e-5, chord 0.01, curve angle 5°, surface angle 30° (SMLib: the mesh is made; a sheet, its mesh open along its border). The kernel meshes at one angle, the surface one.
+#[test]
+fn tess_decimation_8_ellips_ts2() {
+    tess("ellips_ts2.smb", &[], 0.01, 30.0, 0.0, 0.0, None).unwrap();
 }

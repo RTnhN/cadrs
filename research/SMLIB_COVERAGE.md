@@ -79,6 +79,9 @@ The tables further down are as audited. These conversions came after them and ta
 | smSurfaceTest `my_test_section` (5 surfaces) | smlib_surfaces: `section_*` (5) | per plane: none/some, total length, SMLib's samples (new oracle `psection`) |
 | smSurfaceTest `my_test_projection` (3 surfaces) | smlib_surfaces: `projection_*` (3) | per circle, as the sections (new oracle `pproject`) |
 | smSurfaceTest `my_test_analytic_surfaces` (9 of 10 surfaces), `my_test_sp_analy` (live block) | smlib_surfaces: `analytic_*` (9, [1]), `sp_analy_revolution` (1) | grid points found again within 1e-6 |
+| smTessTest `my_poly_boolean_regression` tests 1–3, 5 (`my_box_box_stress` 6 steps, L prism − box, cube ∪ cube, `box_cyl_grid.smp` 25 differences less 3 non-manifold) | smlib_poly_booleans (30) | valid solids; closed-form volumes (snapping below the point tolerance allowed); SMLib's B-rep difference (volume, area) for the grid |
+| smTessTest `my_test_decimation_regression` (8 tests, their meshing; 5 and 6 the same) | smlib_tessellation: `tess_decimation_*` (7) | mesh watertight (a sheet's open only on its border), within chord, SMLib's mesh volume |
+| smAdvancedTest `my_test_tsurface_regression` 25 (`ellips_ts2.smb`): benchmark point solve, point classify, point intersect | smlib_trimmed_surfaces: `tsurf_25_*` (3) | distance 2870.476090 as SMLib's run prints; 389 grid points inside / on the face (new oracle `tgrid`) |
 
 Feature gaps found on the way: no parabola or hyperbola curves (`my_test_analytic_curves`,
 `my_test_analytic_surfaces`); no "every foot of the normal" point solve (SM_SO_NORMALIZE counts of

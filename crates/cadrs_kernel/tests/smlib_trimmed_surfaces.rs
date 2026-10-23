@@ -17,7 +17,7 @@ use cadrs_kernel::native::NativeKernel;
 use cadrs_kernel::native::classify;
 use cadrs_kernel::native::draw::Shape;
 use cadrs_kernel::native::mass;
-use cadrs_kernel::native::math::P3;
+use cadrs_kernel::native::math::{P2, P3};
 use cadrs_kernel::native::smb;
 use cadrs_kernel::native::surface::Surface;
 use cadrs_kernel::native::topo::Body;
@@ -193,6 +193,80 @@ fn solve(file: &str, max: bool, want: f64, tol: f64) -> Result<(), String> {
     Ok(())
 }
 
+/// `my_test_tsurface_regression` 25 (smAdvancedTest.cpp:2094) on `ellips_ts2.smb`: the
+/// benchmark point solve of `my_test_tsurface_point_extrema` (smTopoTest.cpp:2255), whose
+/// distance SMLib's run prints (`Distance = 2870.476090`, to 6 decimals).
+fn ellips_benchmark(want: f64) -> Result<(), String> {
+    let bytes = std::fs::read(data(SUITE, "ellips_ts2.smb")).map_err(e)?;
+    let (body, _) = smb::read(&bytes)?;
+    let mut k = NativeKernel::new();
+    let id = k.insert(body);
+    let p = P3::new(2811.4739500810206, 590.21281639457879, 145.44695932094584);
+    let r = k
+        .min_distance(&DistanceTarget::Point(p), &DistanceTarget::Body(id))
+        .map_err(e)?;
+    if (r.distance - want).abs() > 5e-7 {
+        return Err(format!(
+            "distance {:.7}, SMLib prints {want:.6}",
+            r.distance
+        ));
+    }
+    Ok(())
+}
+
+/// `my_test_tsurface_point_classify` and `my_test_tsurface_point_intersect` (smTopoTest.cpp:2672,
+/// 2411) on `ellips_ts2.smb` (one face): of the n × n points of the face's uv domain `dom`
+/// (SMLib's `GetUVDomain`, u0 v0 u1 v1), those inside the face (its uv polygons; `in_3d`: those
+/// whose surface point lies on the body, within 1e-5), as many as SMLib finds.
+fn ellips_grid(n: usize, dom: [f64; 4], in_3d: bool, want: usize) -> Result<(), String> {
+    let bytes = std::fs::read(data(SUITE, "ellips_ts2.smb")).map_err(e)?;
+    let (body, _) = smb::read(&bytes)?;
+    let mut k = NativeKernel::new();
+    let id = k.insert(body.clone());
+    let mut count = 0;
+    for f in &body.faces {
+        let polys = classify::face_polygons(&body, f);
+        let [u0, v0, u1, v1] = dom;
+        for i in 0..n {
+            for j in 0..n {
+                let (u, v) = (
+                    u0 + (u1 - u0) * i as f64 / (n - 1) as f64,
+                    v0 + (v1 - v0) * j as f64 / (n - 1) as f64,
+                );
+                let hit = if in_3d {
+                    let p = f.surf.eval(u, v);
+                    k.min_distance(&DistanceTarget::Point(p), &DistanceTarget::Body(id))
+                        .map_err(e)?
+                        .distance
+                        <= 1e-5
+                } else {
+                    matches!(
+                        classify::in_face(&polys, &f.surf, P2::new(u, v), 1e-9),
+                        classify::InFace::Inside
+                    )
+                };
+                count += hit as usize;
+            }
+        }
+    }
+    if count != want {
+        return Err(format!("{count} of the grid's points, SMLib finds {want}"));
+    }
+    Ok(())
+}
+
+/// SMLib trimmed surfaces 25 (`ellips_ts2.smb`, `my_test_tsurface_point_classify`): of a 33 × 33 grid of the face's uv domain, 389 inside it (the test asserts 389).
+#[test]
+fn tsurf_25_ellips_point_classify() {
+    ellips_grid(33, [0.0, 0.0, 20.7377339153, 18.987358035], false, 389).unwrap();
+}
+
+/// SMLib trimmed surfaces 25 (`ellips_ts2.smb`, `my_test_tsurface_point_intersect`): of the surface points of that grid, 389 on the body (the test asserts 389).
+#[test]
+fn tsurf_25_ellips_point_intersect() {
+    ellips_grid(33, [0.0, 0.0, 20.7377339153, 18.987358035], true, 389).unwrap();
+}
+
 /// SMLib trimmed surfaces: `CreateConePatch` r 1, h 1, full turn: its area 2π.
 #[test]
 fn tsurf_cone_patch_area() {
@@ -256,6 +330,12 @@ fn tsurf_solve_2adj_planes_min() {
 #[test]
 fn tsurf_solve_2adj_planes_max() {
     solve("ss_2adj_planes.smp", true, 8.660254037844387, 1e-9).unwrap();
+}
+
+/// SMLib trimmed surfaces 25 (`ellips_ts2.smb`): the nearest point of the body to (2811.47, 590.21, 145.45) is 2870.476090 away, as SMLib's run prints.
+#[test]
+fn tsurf_25_ellips_benchmark_distance() {
+    ellips_benchmark(2870.47609).unwrap();
 }
 
 /// SMLib trimmed surfaces: `my_test_analytic_tsurf_creation`, a plane through a quarter cylinder r 2: a quarter circle π long.

@@ -21,6 +21,7 @@
 //   smlib_oracle pproject   surf k                                 (--dom=a,b,c,d)
 //   smlib_oracle ptsolve    surf min|max|normalize nx ny nz        (--dom=a,b,c,d, --move=x,y,z)
 //   smlib_oracle closest    surf x y z [x y z ...]
+//   smlib_oracle tgrid      in n                                   (--move=x,y,z)
 //
 // A `surf` (smSurfaceTest.cpp's commands) is a bare B-spline surface: a .sms or .srf file, or
 // `grid:tx:ty:tz:nu:nv:du:dv:x0:y0:z0:...` (my_create_nurb_surf: nu × nv points, v fastest).
@@ -58,6 +59,8 @@
 #include <SmTess.h>
 #include <SmTol.h>
 #include <SmTopologySweep.h>
+#include <SmTopologySolver.h>
+#include <SmPointClass.h>
 #include <SmTransSweepGeometry.h>
 #include <cctype>
 #include <cmath>
@@ -1077,6 +1080,45 @@ int main(int argc0, char** argv0) {
             out += std::string(i > 3 ? ", " : "") + e + "}";
         }
         std::printf("{\"ok\": true, \"status\": \"ok\", \"points\": [%s]}\n", out.c_str());
+        return 0;
+    }
+
+    // tgrid in n: per face, its uv domain and how many of the n × n points of it
+    // SmFace::PointClassify puts inside the face (my_test_tsurface_point_classify,
+    // smTopoTest.cpp:2672) and how many of their surface points BrepPointSolve finds on the
+    // B-rep (my_test_tsurface_point_intersect, smTopoTest.cpp:2411).
+    if (cmd == "tgrid" && argc == 4) {
+        SmBrep* b = moved(load(argv[2], rebuild));
+        long n = std::atol(argv[3]);
+        if (n < 2) usage();
+        SmTArray<SmFace*> faces;
+        b->GetFaces(faces);
+        std::string out;
+        ULONG inside = 0, found = 0;
+        for (ULONG f = 0; f < faces.GetSize(); ++f) {
+            const SmFace* face = faces[f];
+            const SmSurface& surf = *face->GetSurface();
+            SmExtent2d dom = face->GetUVDomain();
+            SmZoneTol3d tol = SmTol::GetZoneTol3d(face);
+            ULONG fi = 0, ff = 0;
+            for (long i = 0; i < n; ++i) {
+                for (long j = 0; j < n; ++j) {
+                    SmPoint2d uv = dom.Evaluate(i / (n - 1.0), j / (n - 1.0));
+                    SmPointClassification pc(tol, b->GetContext());
+                    if (face->PointClassify(uv, tol, FALSE, TRUE, pc) == SM_SUCCESS && pc.GetPointClass() == SM_PC_FACE) ++fi;
+                    SmPoint3d p;
+                    surf.EvaluatePoint(uv, p);
+                    SmSolutionArray sols;
+                    double best = 0.0;
+                    if (SmTopologySolver::BrepPointSolve(b, p, SM_SO_INTERSECT, SM_SR_ALL, SM_ZONE_TOL_3D, best, NULL, sols) == SM_SUCCESS && sols.GetSize() != 0) ++ff;
+                }
+            }
+            inside += fi;
+            found += ff;
+            out += std::string(f ? ", " : "") + "{\"uv\": [" + num(dom.GetMin().x) + ", " + num(dom.GetMin().y) + ", " + num(dom.GetMax().x) + ", " +
+                   num(dom.GetMax().y) + "], \"inside\": " + std::to_string(fi) + ", \"found\": " + std::to_string(ff) + "}";
+        }
+        std::printf("{\"ok\": true, \"status\": \"ok\", \"inside\": %lu, \"found\": %lu, \"faces\": [%s]}\n", (unsigned long)inside, (unsigned long)found, out.c_str());
         return 0;
     }
 
