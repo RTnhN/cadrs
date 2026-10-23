@@ -1,9 +1,5 @@
 # cadrs
-
-[![CI](https://github.com/rvdende/cadrs/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/rvdende/cadrs/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
-[![Rust](https://img.shields.io/badge/rust-stable%20%C2%B7%20edition%202024-orange.svg)](https://www.rust-lang.org)
-[![Bevy](https://img.shields.io/badge/bevy-0.19-232326.svg)](https://bevyengine.org)
 
 **A parametric, feature-based CAD app written in Rust**, with a Bevy UI and its own pure-Rust
 B-rep modeling kernel. Its workflow follows Onshape's: sketch on a plane, constrain and dimension,
