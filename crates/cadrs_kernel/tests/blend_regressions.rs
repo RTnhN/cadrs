@@ -207,6 +207,67 @@ fn cross_hole_fillet() {
     assert!((1880.0..2040.0).contains(&removed), "{removed}");
 }
 
+/// The rims of an outward shell's opening filleted 3.25 mm (a user's document: a 30 mm cube
+/// with every edge rounded 5, shelled 6.5 outward with its top, two top rounds and their corner
+/// taken away). Five of the rounds run into the inside corners of the opening and end at a
+/// pole of a corner sphere, where the faces past their rails (the top, the sphere) only touch:
+/// each end is capped on the surface of the round the shell took away there, the local fillet
+/// covering them all (the blend tool's flat ends stood out of the outer wall).
+#[test]
+fn shell_opening_rounds() {
+    let mut k = NativeKernel::new();
+    let b = k.insert(bodyio::read(include_bytes!("data/docs/shell_opening_rounds.body")).unwrap());
+    let v0 = k.mass_properties(b).unwrap().volume;
+    let laws: Vec<FilletLaw> = [3, 1, 10, 16, 19, 49, 43]
+        .map(|e| FilletLaw {
+            edge: EdgeId(e),
+            radii: vec![(0.0, 3.25), (1.0, 3.25)],
+        })
+        .to_vec();
+    let out = blend::fillet_laws_local(&mut k, b, &laws).unwrap().bodies[0];
+    assert!(k.get(out).unwrap().check().is_empty());
+    // Five inside rounds of 6.5 mm or so add (1 − π/4)·3.25² a mm each, two outside ones take
+    // as much off.
+    let added = k.mass_properties(out).unwrap().volume - v0;
+    assert!((44.3..44.5).contains(&added), "{added}");
+}
+
+/// The same opening's two inside rounds either side of the pie-shaped face where the shell
+/// stopped taking a round away (a quarter annulus, 5 to 11.5 from its centre, its walls square
+/// to each other and to it): past about 3.54 their rails would cross on it, so they weld,
+/// meeting along its middle where the ball touches all three faces (its radius the distance
+/// from the pie's centre: a cone), each round its full radius again past where they part.
+/// Past 11.5 the radius is nowhere: too large, as a fillet past the full round is.
+#[test]
+fn shell_opening_rounds_weld_across_the_pie() {
+    let mut k = NativeKernel::new();
+    let b = k.insert(bodyio::read(include_bytes!("data/docs/shell_opening_rounds.body")).unwrap());
+    let v0 = k.mass_properties(b).unwrap().volume;
+    let fillet = |k: &mut NativeKernel, r: f64| {
+        let laws: Vec<FilletLaw> = [10, 16]
+            .map(|e| FilletLaw {
+                edge: EdgeId(e),
+                radii: vec![(0.0, r), (1.0, r)],
+            })
+            .to_vec();
+        blend::fillet_laws_local(k, b, &laws).map(|r| r.bodies[0])
+    };
+    let added = |k: &mut NativeKernel, r: f64| {
+        let out = fillet(k, r).unwrap();
+        assert!(k.get(out).unwrap().check().is_empty(), "r {r}");
+        k.mass_properties(out).unwrap().volume - v0
+    };
+    // Apart: two exact rounds.
+    let apart = added(&mut k, 3.25);
+    assert!((29.6..29.8).contains(&apart), "{apart}");
+    // Welded near the pie's inner arc, parting on it; nearly all along.
+    let some = added(&mut k, 6.0);
+    assert!((97.5..97.8).contains(&some), "{some}");
+    let most = added(&mut k, 11.0);
+    assert!((179.7..180.0).contains(&most), "{most}");
+    assert!(fillet(&mut k, 12.0).is_err());
+}
+
 /// A degenerate edge among the picked ones (OCCT's `explode` lists a cone's apex; blend
 /// encoderegularity_a5 picks two pole edges) is passed over, as OCCT's blend does.
 #[test]
