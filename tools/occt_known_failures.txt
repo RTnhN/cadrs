@@ -317,7 +317,6 @@ feat featprism_g8
 # feat: unsupported: a limit face on a surface other than a plane, cylinder, cone or sphere (its side's solid isn't built).
 feat featprism_m1
 # feat: the result is invalid (checkshape).
-feat featprism_l9
 # feat: a boolean of the feature fails (open shell).
 feat featrevol_a6
 feat featrevol_j6

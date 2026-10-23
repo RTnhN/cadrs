@@ -716,10 +716,10 @@ fn boxes_touching_along_an_edge() {
 }
 
 /// Two spheres, one turned (soak seed 16150658447098336548 case 2323): the union and the
-/// difference fail: a sphere face's intersection loop crosses its outer loop in (u, v) at the
-/// seam near the pole (an error from the validity stage; they were handed back invalid).
+/// difference came back invalid, a sphere face's intersection loop crossing its outer loop in
+/// (u, v) at the seam near the pole: the seam's crossings of the other sphere, close together
+/// there, fell between two samples of the edge–face search.
 #[test]
-#[ignore = "known failure: two spheres: the union's sphere face has loops crossing at the seam near a pole"]
 fn spheres_loops_cross_at_seam() {
     pinned(
         Placed {

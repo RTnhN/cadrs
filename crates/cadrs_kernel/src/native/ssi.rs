@@ -1306,6 +1306,45 @@ pub fn curve_surface(c: &Curve, t0: f64, t1: f64, s: &Surface) -> Vec<f64> {
         vals.push((t, v));
         hints.push(h);
     }
+    // On an exact distance (1-Lipschitz in space), two samples of one sign can still have a
+    // crossing pair between them where the curve runs no farther between them than their
+    // distances add up to: the samples refined there, halving, until that is ruled out (a
+    // sphere's meridian 50 long through a cylinder of radius 1.25 it barely clips: two
+    // crossings 1.4 apart, between samples 4.9 apart).
+    if implicit {
+        let mut refined: Vec<(f64, f64)> = Vec::with_capacity(vals.len());
+        // (Intervals to look into: their end samples (t, distance) and depth.)
+        type Sample = (f64, f64);
+        let mut stack: Vec<(Sample, Sample, u32)> = Vec::new();
+        // (A budget: a curve along the surface is near it everywhere, its stretches found below.)
+        let mut budget = 4096usize;
+        for w in vals.windows(2) {
+            refined.push(w[0]);
+            stack.push((w[0], w[1], 0));
+            let mut extra: Vec<(f64, f64)> = Vec::new();
+            while let Some((a, b, depth)) = stack.pop() {
+                let reach = (c.point(b.0) - c.point(a.0)).norm() * 1.1;
+                // (Not near a touch: both samples well off the surface; a midpoint that comes
+                // near it is the touching search's below.)
+                let near = 1e-6 * (1.0 + c.point(a.0).coords.norm());
+                if budget == 0 || a.1.signum() != b.1.signum() || a.1.abs() + b.1.abs() > reach || a.1.abs().min(b.1.abs()) < near || depth >= 24 || reach < tol::ROUNDOFF {
+                    continue;
+                }
+                budget -= 1;
+                let m = 0.5 * (a.0 + b.0);
+                let mid = (m, sdist(s, &c.point(m)));
+                extra.push(mid);
+                stack.push((a, mid, depth + 1));
+                stack.push((mid, b, depth + 1));
+            }
+            extra.sort_by(|x, y| x.0.total_cmp(&y.0));
+            refined.extend(extra);
+        }
+        if let Some(&last) = vals.last() {
+            refined.push(last);
+        }
+        vals = refined;
+    }
     let mut prev: (f64, f64);
     let f = |t: f64| -> f64 {
         // Hinted from the nearest sample.
@@ -1617,6 +1656,22 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    /// A sphere's meridian (radius 50) through a cylinder of radius 1.25 it barely clips: the
+    /// two crossings 1.4 apart lie between samples 4.9 apart, of one sign (nightlight sphere: the
+    /// sphere's seam edge was left whole through a hole the cylinder cut, and the hole's loop
+    /// crossed the face's outer loop in (u, v)).
+    #[test]
+    fn circle_clipping_a_thin_cylinder() {
+        let c = Curve::Circle { c: P3::new(0.0, 0.0, 34.0), x: V3::new(1.0, 0.0, 0.0), y: V3::new(0.0, 0.0, 1.0), r: 50.0 };
+        let (x, z) = (V3::new(0.6156614753256583, 0.0, -0.788010753606722), V3::new(-0.788010753606722, 0.0, -0.6156614753256583));
+        let cyl = Surface::Cylinder { f: Frame { o: P3::new(44.71834918036447, -1.0471735180964408, 59.600854680724225), x, y: V3::new(0.0, -1.0, 0.0), z }, r: 1.25 };
+        let ts = curve_surface(&c, 0.0, PI / 2.0, &cyl);
+        assert_eq!(ts.len(), 2, "{ts:?}");
+        for t in ts {
+            assert!(cyl.distance(&c.point(t)) < 1e-9, "{t}: {:e} off", cyl.distance(&c.point(t)));
         }
     }
 
