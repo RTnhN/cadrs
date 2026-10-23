@@ -1150,8 +1150,54 @@ fn fixture_current(name: &str, doc: Document) {
     if std::env::var("CADRS_WRITE_FIXTURES").is_ok() {
         std::fs::write(&path, &text).unwrap();
     }
-    let stored = cadrs_core::Store::load_path(&path).expect("the fixture loads");
-    assert_eq!(stored.document, doc, "fixtures/{name}.cadrs is out of date");
+    cadrs_core::Store::load_path(&path).expect("the fixture loads");
+    // The solved poses and kernel-derived connector frames differ in the last bits between
+    // debug and release builds, so floats are compared to 1e-9 mm, not exactly.
+    let stored = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        rounded_floats(&stored) == rounded_floats(&text),
+        "fixtures/{name}.cadrs is out of date"
+    );
+}
+
+/// `text` with every float literal outside strings rounded to 9 decimals (and -0 as 0).
+fn rounded_floats(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    let mut in_string = false;
+    let mut prev = ' ';
+    while let Some(c) = chars.next() {
+        if in_string {
+            out.push(c);
+            if c == '\\' {
+                out.extend(chars.next());
+            } else if c == '"' {
+                in_string = false;
+            }
+        } else if c == '"' {
+            in_string = true;
+            out.push(c);
+        } else if (c.is_ascii_digit() || c == '-') && !(prev.is_alphanumeric() || prev == '_') {
+            let mut literal = String::from(c);
+            while let Some(&n) = chars.peek() {
+                if !(n.is_ascii_digit() || matches!(n, '.' | 'e' | 'E' | '+' | '-')) {
+                    break;
+                }
+                literal.push(n);
+                chars.next();
+            }
+            match literal.parse::<f64>() {
+                Ok(v) if literal.contains(['.', 'e', 'E']) => {
+                    out.push_str(&format!("{}", (v * 1e9).round() / 1e9 + 0.0));
+                }
+                _ => out.push_str(&literal),
+            }
+        } else {
+            out.push(c);
+        }
+        prev = out.chars().last().unwrap_or(' ');
+    }
+    out
 }
 
 #[test]

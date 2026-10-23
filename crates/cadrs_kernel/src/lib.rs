@@ -519,7 +519,7 @@ pub trait Kernel {
     /// let s = [(0.0, 0.0), (5.0, 0.0), (5.0, 3.0), (0.0, 3.0)];
     /// let square = Region { outer: Loop { curves: (0..4).map(|i| line(s[i], s[(i + 1) % 4])).collect() }, holes: vec![], source: None };
     /// let mut k = DefaultKernel::new();
-    /// let r = k.evolved(&spine, &[square])?;
+    /// let r = Kernel::evolved(&mut k, &spine, &[square])?;
     /// // Four prisms along the sides and four quarter turns at the corners: h (2w(a + b) + πw²).
     /// let want = 3.0 * (2.0 * 5.0 * 60.0 + std::f64::consts::PI * 25.0);
     /// assert!((k.mass_properties(r.bodies[0])?.volume - want).abs() < 1e-6 * want);
