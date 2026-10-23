@@ -152,6 +152,19 @@ pub struct Screenshot {
     /// Omitted: the view as it is.
     #[serde(default)]
     pub view: Option<String>,
+    /// Look from an eye point at a target instead (ignores `view`), for close-ups.
+    #[serde(default)]
+    pub camera: Option<ShotCamera>,
+}
+
+/// A camera placed by eye and target, in model millimetres (Z up).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ShotCamera {
+    /// Where the eye is: [x, y, z].
+    pub eye: [f32; 3],
+    /// The point centred in the view: [x, y, z]. The view is about as wide as a 50 degree lens
+    /// at the eye would see at the target (0.93 x the eye's distance).
+    pub target: [f32; 3],
 }
 
 /// Renames a feature of the active (or named) Part Studio.
