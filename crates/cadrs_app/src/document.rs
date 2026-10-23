@@ -98,6 +98,8 @@ impl Plugin for DocumentPlugin {
             .add_observer(on_error_icon_click)
             .add_observer(on_feature_menu_action)
             .add_observer(on_plane_eye)
+            .add_observer(on_plane_context_menu)
+            .add_observer(on_plane_menu_action)
             .add_observer(on_sketch_eye)
             .add_observer(restore_name_button::<InlineEditCommit>)
             .add_observer(restore_name_button::<cadrs_ui::InlineEditCancel>)
@@ -2404,6 +2406,7 @@ fn feature_list(p: &mut ChildSpawnerCommands, t: &Theme, element: ElementId, hei
                                             )
                                             .build(t),
                                             PickRow(Pick::Plane(k)),
+                                            ContextMenuTarget,
                                         ));
                                     }
                                 });
@@ -4135,9 +4138,9 @@ fn rebuild_feature_rows(
                 }
             }
             let edited = editing == Some(*id);
-            // P3I.9: a Form hidden with its eye is greyed out too (`form-12.png`).
+            // P3I.9: a Form hidden with its eye is greyed out too (`form-12.png`), as is a plane.
             let consumed = *kind == RowKind::ConsumedSketch
-                || (*kind == RowKind::Sm9("sheet-metal-form") && !*shown);
+                || (matches!(*kind, RowKind::Sm9("sheet-metal-form") | RowKind::Plane) && !*shown);
             let fg = if inactive {
                 // Rolled back or suppressed (P3.9): grey, whatever else it is.
                 crate::feature_list::ROLLED_BACK_FG
@@ -4193,8 +4196,7 @@ fn rebuild_feature_rows(
                 // P3G.4 (DV3.5): the chevron opens what it brought in.
                 item = item.disclosure(Some(*open));
             }
-            // P3I.9 (SM20, `form-10.png`): a Form's eye shows or hides its sketch on the flat view,
-            // and a Plane's the plane (#66).
+            // P3I.9 (SM20, `form-10.png`): a Form's eye shows or hides its sketch on the flat view.
             if kind.is_sketch()
                 || matches!(*kind, RowKind::Sm9("sheet-metal-form") | RowKind::Plane)
             {
@@ -4775,10 +4777,11 @@ fn on_feature_context_menu(
             .map(|f| (f.sketch().is_some(), f.is_part_feature()))
     });
     let is_sketch = kind.is_some_and(|k| k.0);
-    let is_plane = doc
-        .as_ref()
-        .and_then(|d| d.active_element()?.feature(row.0))
-        .is_some_and(|f| matches!(f.kind, cadrs_core::FeatureKind::Plane(_)));
+    let is_plane = doc.as_ref().is_some_and(|d| {
+        d.active_element()
+            .and_then(|el| el.feature(row.0))
+            .is_some_and(|f| matches!(f.kind, cadrs_core::FeatureKind::Plane(_)))
+    });
     let appearance = match kind {
         Some((true, _)) => Some(
             MenuItem::new(
@@ -4814,7 +4817,7 @@ fn on_feature_context_menu(
     });
     let in_dialog = session.is_some() || extrude.is_some();
     let shown = if is_plane {
-        el.is_some_and(|el| el.sketch_visibility(row.0) != Some(false))
+        el.is_none_or(|el| crate::feature_menu::plane_shown(el, row.0))
     } else {
         !cache.hidden_sketches.contains(&row.0)
     };
@@ -4995,11 +4998,26 @@ fn on_feature_context_menu(
             MenuItem::new("feature-show", tr("common-show")).icon("visible")
         });
     }
-    menu = menu
+    menu = if is_plane {
+        menu.item(MenuItem::new(
+            "feature-show-all-planes",
+            tr("shell-doc-show-all-planes"),
+        ))
         .item(MenuItem::new(
+            "feature-hide-all-planes",
+            tr("shell-doc-hide-all-planes"),
+        ))
+    } else {
+        menu.item(MenuItem::new(
             "feature-show-all-sketches",
             tr("shell-doc-show-all-sketches"),
         ))
+        .item(MenuItem::new(
+            "feature-hide-all-sketches",
+            tr("shell-doc-hide-all-sketches"),
+        ))
+    };
+    menu = menu
         .separator()
         .item(
             MenuItem::new(
@@ -5142,6 +5160,12 @@ fn on_feature_menu_action(
             crate::feature_menu::set_sketch_visible(world, id, false)
         }),
         "feature-show-all-sketches" => commands.queue(crate::feature_menu::show_all_sketches),
+        "feature-hide-all-sketches" => commands
+            .queue(|world: &mut World| crate::feature_menu::set_all_sketches_visible(world, false)),
+        "feature-show-all-planes" => commands
+            .queue(|world: &mut World| crate::feature_menu::set_all_planes_visible(world, true)),
+        "feature-hide-all-planes" => commands
+            .queue(|world: &mut World| crate::feature_menu::set_all_planes_visible(world, false)),
         "feature-zoom-to" => {
             commands.queue(move |world: &mut World| crate::feature_menu::zoom_to_feature(world, id))
         }
@@ -5292,27 +5316,16 @@ pub fn rename_feature(world: &mut World, id: FeatureId) {
     world.flush();
 }
 
-/// The eye on a sketch's row shows or hides the sketch (PS1.5), and on a Plane's the plane
-/// (#66), as an undoable step.
+/// The eye on a sketch's or a Plane feature's row shows or hides it (PS1.5), as an undoable
+/// step.
 fn on_sketch_eye(ev: On<cadrs_ui::TreeRowToggled>, q: Query<&FeatureRow>, mut commands: Commands) {
     let Ok(row) = q.get(ev.entity) else {
         return;
     };
-    let sketch = row.0;
+    let id = row.0;
     commands.queue(move |world: &mut World| {
-        let shown = crate::feature_menu::sketch_shown(world, sketch);
-        let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
-            return;
-        };
-        let Some(el) = doc.active_element() else {
-            return;
-        };
-        let element = el.id;
-        let _ = doc.execute(&cadrs_core::commands::SetSketchVisibility {
-            element,
-            sketch,
-            visible: Some(!shown),
-        });
+        let shown = crate::feature_menu::sketch_shown(world, id);
+        crate::feature_menu::set_sketch_visible(world, id, !shown);
     });
 }
 
@@ -5325,6 +5338,64 @@ fn on_plane_eye(
     if let Ok(PickRow(Pick::Plane(k))) = q.get(ev.entity) {
         let shown = planes.shows(*k);
         planes.set(*k, !shown);
+    }
+}
+
+/// The default plane a context menu is open for.
+#[derive(Component)]
+struct PlaneMenuFor(PlaneKind);
+
+/// Right-clicking a default plane's row: Hide / Show it, Show all planes, Hide all planes.
+fn on_plane_context_menu(
+    ev: On<ContextMenuRequested>,
+    q: Query<&PickRow>,
+    planes: Res<crate::viewport::PlanesVisible>,
+    theme: Res<Theme>,
+    mut commands: Commands,
+) {
+    let Ok(PickRow(Pick::Plane(k))) = q.get(ev.entity) else {
+        return;
+    };
+    let menu = Menu::new("plane-context-menu")
+        .min_width(160.0)
+        .item_height(22.0)
+        .icon_size(14.0)
+        .item(if planes.shows(*k) {
+            MenuItem::new("plane-hide", tr("common-hide")).icon("hidden")
+        } else {
+            MenuItem::new("plane-show", tr("common-show")).icon("visible")
+        })
+        .item(MenuItem::new(
+            "plane-show-all",
+            tr("shell-doc-show-all-planes"),
+        ))
+        .item(MenuItem::new(
+            "plane-hide-all",
+            tr("shell-doc-hide-all-planes"),
+        ));
+    let anchor = open_context_menu(&mut commands, ev.position, menu.build(&theme));
+    commands
+        .entity(anchor)
+        .insert((PlaneMenuFor(*k), DespawnOnExit(AppState::Document)));
+}
+
+fn on_plane_menu_action(
+    ev: On<MenuAction>,
+    q_anchor: Query<&PlaneMenuFor, With<ContextMenuAnchor>>,
+    mut planes: ResMut<crate::viewport::PlanesVisible>,
+    mut commands: Commands,
+) {
+    let Ok(PlaneMenuFor(k)) = q_anchor.get(ev.entity) else {
+        return;
+    };
+    match ev.item.as_str() {
+        "plane-show" => planes.set(*k, true),
+        "plane-hide" => planes.set(*k, false),
+        "plane-show-all" => commands
+            .queue(|world: &mut World| crate::feature_menu::set_all_planes_visible(world, true)),
+        "plane-hide-all" => commands
+            .queue(|world: &mut World| crate::feature_menu::set_all_planes_visible(world, false)),
+        _ => {}
     }
 }
 

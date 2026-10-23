@@ -1081,6 +1081,9 @@ shell-doc-flat-sketch = New sketch on flat pattern
 shell-doc-flat-export = Export DXF/DWG of flat pattern…
 shell-doc-add-to-folder = Add selection to folder…
 shell-doc-show-all-sketches = Show all sketches
+shell-doc-hide-all-sketches = Hide all sketches
+shell-doc-show-all-planes = Show all planes
+shell-doc-hide-all-planes = Hide all planes
 shell-doc-section-view-ellipsis = Section view…
 # Suppression that follows a variable or a configuration.
 shell-doc-dynamic-suppression = Dynamic suppression
