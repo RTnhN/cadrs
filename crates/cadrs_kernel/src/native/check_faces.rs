@@ -38,8 +38,13 @@ pub fn face_crossings(b: &Body) -> Vec<String> {
 
 /// [`face_crossings`] of the pairs with a face `changed` marks (all pairs for `None`).
 pub fn face_crossings_of(b: &Body, changed: Option<&[bool]>) -> Vec<String> {
-    let n = b.faces.len();
     let marked = |f: usize| changed.is_none_or(|c| c.get(f).copied().unwrap_or(true));
+    face_crossings_where(b, &|i, j| marked(i) || marked(j))
+}
+
+/// [`face_crossings`] of the pairs `(i, j)`, `i < j`, that `wanted` takes.
+pub fn face_crossings_where(b: &Body, wanted: &(dyn Fn(usize, usize) -> bool + Sync)) -> Vec<String> {
+    let n = b.faces.len();
     if n < 2 || b.shells.is_empty() {
         return Vec::new();
     }
@@ -72,7 +77,7 @@ pub fn face_crossings_of(b: &Body, changed: Option<&[bool]>) -> Vec<String> {
     let mut pairs: Vec<(usize, usize)> = bvh
         .pairs(&bvh)
         .into_iter()
-        .filter(|&(i, j)| i < j && shell_of[i] == shell_of[j] && (marked(i) || marked(j)) && edges[i].is_disjoint(&edges[j]))
+        .filter(|&(i, j)| i < j && shell_of[i] == shell_of[j] && wanted(i, j) && edges[i].is_disjoint(&edges[j]))
         .collect();
     if pairs.is_empty() {
         return Vec::new();

@@ -193,12 +193,10 @@ fn cube_and_tiny_rotations() {
 }
 
 /// Tilts of 1e-6 and 1e-5 (the cube's corners move 1e-5 to 1e-4): the boolean takes the
-/// near-coincident faces as one and returns the cube itself, tolerance 1e-7, in both tool
-/// orders, so the union misses ~500·angle of volume and the common part has it extra, with
-/// faces up to ~9e-5 from where they are and no tolerance that covers it. (A result within
-/// tolerance would do: the faces' true slivers, or the cube with its tolerances raised.)
+/// near-coincident faces as one and returns the cube itself, in both tool orders, the union
+/// ~500·angle of volume short and the common part as much over; its faces are up to ~9e-5 from
+/// where the inputs had them, and its tolerances must say so (they were left at 1e-7).
 #[test]
-#[ignore = "known failure: near-coincident faces (tilt 1e-6..1e-5) give the input cube back with tolerance 1e-7, volume off by 500·angle"]
 fn cube_tilted_into_coincidence() {
     tiny_rotations(&[1e-6, 1e-5], 0);
 }
@@ -455,10 +453,10 @@ fn drill_chain() {
 }
 
 /// A tilt of about 1e-5 about a skew axis (the cube's corners move ~1e-4, about the edges'
-/// tolerance band): the union and the common part leave open shells (found by the soak; the
-/// other failing tilts, 1.1e-5 to 1.5e-5, are like it, some with an edge used by three faces).
+/// tolerance band): the union and the common part left open shells at every tolerance of the
+/// ladder (found by the soak; the tilts 1.1e-5 to 1.5e-5, some with an edge used by three
+/// faces), the faces' gap above the tolerance in places and below it in others.
 #[test]
-#[ignore = "known failure: a cube with a copy tilted by ~1e-5 about a skew axis leaves an open shell"]
 fn cube_tilted_near_tolerance() {
     let bad = tiny_rotation(
         [0.5976071051500398, 0.511301556512727, -0.5102939961996196],
@@ -469,10 +467,9 @@ fn cube_tilted_near_tolerance() {
 }
 
 /// A tilt of 1.2e-6 about a skew axis (soak): with the turned cube first, the union and the
-/// common part are the turned cube itself, tolerance 1e-7, 9e-4 off the first-order volumes;
-/// with the cube first they are one merged cube of tolerance 1e-5 (within its band).
+/// common part were the turned cube itself, tolerance 1e-7, 9e-4 off the first-order volumes
+/// (with the cube first, one merged cube of tolerance 1e-5, within its band).
 #[test]
-#[ignore = "known failure: near-coincident faces (tilt 1.2e-6, skew axis) give an input back with tolerance 1e-7, volume off by 9e-4"]
 fn cube_tilted_volume_sum() {
     let bad = tiny_rotation(
         [0.4700611935019128, -0.9620889946033548, -0.8509348303880513],

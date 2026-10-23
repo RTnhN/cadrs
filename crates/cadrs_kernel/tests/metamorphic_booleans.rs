@@ -468,10 +468,10 @@ fn pinned(a: Placed, b: Placed) {
     assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
 
-/// Two cylinders crossing at skew angles (seed 12345 case 2): every boolean of the pair leaves
-/// an open shell.
+/// Two cylinders crossing at skew angles (seed 12345 case 2): every boolean of the pair left
+/// an open shell (the small cylinder's cap box, from samples of its rim, fell short of the rim
+/// where the cylinders' curve leaves it, and the cap's own curve lost its end there).
 #[test]
-#[ignore = "known failure: booleans of two skew cylinders leave an open shell"]
 fn skew_cylinders() {
     pinned(
         Placed {
@@ -503,9 +503,9 @@ fn skew_cylinders() {
     );
 }
 
-/// A tilted box and a tilted cylinder (seed 12345 case 75): every boolean leaves an open shell.
+/// A tilted box and a tilted cylinder (seed 12345 case 75): every boolean left an open shell
+/// (as [`skew_cylinders`]).
 #[test]
-#[ignore = "known failure: booleans of a tilted box and a tilted cylinder leave an open shell"]
 fn tilted_box_and_cylinder() {
     pinned(
         Placed {
@@ -558,10 +558,10 @@ fn step_round_trip_seamed_cylinder() {
 }
 
 /// A box cut by a cylinder along x that touches the box's bottom face along a line (soak seed
-/// 6060224037237635290 case 49): the difference comes back as a body whose faces cross away from
-/// their edges, with no error.
+/// 6060224037237635290 case 49): the difference's faces cross away from their edges (an error
+/// from the boolean's validity stage; it was handed back as a body, with none).
 #[test]
-#[ignore = "known failure: a box less a cylinder tangent to its face is invalid (faces cross away from their edges)"]
+#[ignore = "known failure: a box less a cylinder tangent to its face fails (its faces cross away from their edges)"]
 fn cylinder_tangent_to_box_face() {
     pinned(
         Placed::fixed(Shape::Box {
@@ -573,6 +573,60 @@ fn cylinder_tangent_to_box_face() {
             base: [8.0, 6.9670406723616765, 4.0],
             r: 2.0,
             len: 5.0,
+        }),
+    );
+}
+
+/// Every boolean of `x` and `y` (both ways round) that succeeds gives a valid body: one the
+/// boolean can't get right is an error (strictly, as the helper takes it: a result handed back
+/// flagged as having crossing faces is one), never an unflagged invalid result.
+fn never_invalid(x: Placed, y: Placed) {
+    let mut k = NativeKernel::new();
+    let a = build(&mut k, &x).unwrap();
+    let b = build(&mut k, &y).unwrap();
+    let mut bad = Vec::new();
+    for (p, q, order) in [(a, b, ""), (b, a, " (B first)")] {
+        for op in [BoolOp::Union, BoolOp::Intersect, BoolOp::Subtract] {
+            if let Ok(r) = boolean(&mut k, op, p, &[q])
+                && let Some(why) = invalid(&k, &r)
+            {
+                bad.push(format!("{op:?}{order}: {why}"));
+            }
+        }
+    }
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+}
+
+/// [`cylinder_tangent_to_box_face`] and [`spheres_loops_cross_at_seam`]: until they are
+/// computed right, flagged (the boolean finds the faces crossing, the loops crossing in
+/// (u, v)), never invalid bodies handed back as sound.
+#[test]
+fn known_failures_are_never_invalid() {
+    never_invalid(
+        Placed::fixed(Shape::Box {
+            min: [4.0, 4.923492988846983, 2.0],
+            size: [4.610421114922351, 4.0648740291358285, 3.0],
+        }),
+        Placed::fixed(Shape::Cyl {
+            axis: 0,
+            base: [8.0, 6.9670406723616765, 4.0],
+            r: 2.0,
+            len: 5.0,
+        }),
+    );
+    never_invalid(
+        Placed {
+            shape: Shape::Sphere {
+                c: [7.0, 6.62966283372091, 0.9659503482469911],
+                r: 4.0,
+            },
+            axis: [0.7765431131320071, 0.5361794883583875, 0.5889070314711073],
+            angle: -0.3773634823933971,
+            about: [5.0; 3],
+        },
+        Placed::fixed(Shape::Sphere {
+            c: [7.0, 4.0, 9.0],
+            r: 4.532638031669147,
         }),
     );
 }
@@ -607,10 +661,10 @@ fn step_round_trip_conic_edge() {
 }
 
 /// Four boxes united in turn (an extrude sequence of the soak, minimised): the first two touch
-/// along an edge only (x = 4.5, z = 5.5), the third bridges them, and the fourth's union leaves
-/// an open shell.
+/// along an edge only (x = 4.5, z = 5.5), the third bridges them, and the fourth's union left
+/// an open shell: the model keeps the two boxes' corners there as two vertices (and the edge as
+/// two), which the boolean pooled for the tool (by position) but not for the target.
 #[test]
-#[ignore = "known failure: uniting a box into boxes that touch along an edge leaves an open shell"]
 fn boxes_touching_along_an_edge() {
     let bx = |x: [f64; 2], y: [f64; 2], z: [f64; 2]| Step {
         op: BoolOp::Union,
@@ -662,10 +716,10 @@ fn boxes_touching_along_an_edge() {
 }
 
 /// Two spheres, one turned (soak seed 16150658447098336548 case 2323): the union and the
-/// difference come back without an error but invalid: a sphere face's intersection loop crosses
-/// its outer loop in (u, v) at the seam near the pole.
+/// difference fail: a sphere face's intersection loop crosses its outer loop in (u, v) at the
+/// seam near the pole (an error from the validity stage; they were handed back invalid).
 #[test]
-#[ignore = "known failure: two spheres: the union's sphere face has loops crossing at the seam near a pole (invalid, no error)"]
+#[ignore = "known failure: two spheres: the union's sphere face has loops crossing at the seam near a pole"]
 fn spheres_loops_cross_at_seam() {
     pinned(
         Placed {

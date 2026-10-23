@@ -43,7 +43,6 @@ case_223_vase3 slow
 case_224_0311
 case_226_blade_hub slow
 case_227_fillet1018 slow
-case_228_crown
 case_229_loft_brick
 case_231_box_extrusion2 slow
 case_234_nurb_cone

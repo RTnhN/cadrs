@@ -100,6 +100,7 @@ pub mod draw;
 #[cfg(any(test, feature = "testkit"))]
 pub mod oracle;
 
+pub use boolean::take_invalid_results;
 pub use curve::Curve;
 pub use kernel::NativeKernel;
 pub use math::{Affine, Frame, P3, V3};

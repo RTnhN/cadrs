@@ -13,7 +13,7 @@
 //! 6. The kept faces are assembled into shells and solids; a union merges faces of the two
 //!    inputs that lie on the same surface and meet along an edge.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use rayon::prelude::*;
 
@@ -124,6 +124,30 @@ struct RunOpts {
     flush: bool,
     merge_coplanar: bool,
     work_budget: u64,
+    /// Whether a result whose new faces cross (each other, or their own loops in (u, v)) is
+    /// refused ([`CROSSING`]).
+    check_crossings: bool,
+}
+
+/// The stage of a run's refusal of a result whose new faces cross.
+const CROSSING: &str = "crossing";
+
+thread_local! {
+    /// How many booleans taking an input one solid at a time this thread is within.
+    static PER_SOLID: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// The result a run on this thread just refused for crossing faces (and nothing else),
+    /// for [`ladder`] to fall back on.
+    static REFUSED: std::cell::RefCell<Option<BoolOut>> = const { std::cell::RefCell::new(None) };
+    /// Booleans on this thread that handed back a result with crossing faces (no run of the
+    /// ladder gave one without): see [`take_invalid_results`].
+    static INVALID_RESULTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many booleans on this thread handed back a result with crossing faces since the last
+/// call (a run refused it and no retry did better, so it came back as it was). With
+/// `CADRS_BOOL_STRICT` set, such a boolean fails instead.
+pub fn take_invalid_results() -> usize {
+    INVALID_RESULTS.with(|c| c.replace(0))
 }
 
 /// A run's work so far against its budget ([`BoolOptions::work_budget`]).
@@ -145,7 +169,7 @@ impl Work {
 
 impl RunOpts {
     /// Section and imprint runs: a boolean's defaults.
-    const PLAIN: RunOpts = RunOpts { tol: VTOL, flush: false, merge_coplanar: true, work_budget: DEFAULT_WORK_BUDGET };
+    const PLAIN: RunOpts = RunOpts { tol: VTOL, flush: false, merge_coplanar: true, work_budget: DEFAULT_WORK_BUDGET, check_crossings: false };
 }
 
 #[derive(Debug, Clone)]
@@ -334,7 +358,19 @@ pub fn curve_bbox(c: &Curve, t0: f64, t1: f64) -> Bbox {
 fn import(pool: &mut Pool, faces: &mut Vec<WFace>, b: &Body, owner: usize, merge: bool) {
     // Exact inputs carry no tolerance of their own (the run's applies).
     let own = |t: f64| if t > super::topo::TOL_MIN { t } else { 0.0 };
-    let vmap: Vec<usize> = b.verts.iter().map(|v| if merge { pool.vertex_tol(v.p, own(v.tol)) } else { pool.new_vertex_tol(v.p, own(v.tol)) }).collect();
+    // (Without `merge`, only the body's own vertices at one point exactly are one: a body
+    // touching itself along an edge, two blocks' corners there as two vertices.)
+    let mut same: HashMap<[u64; 3], usize> = HashMap::new();
+    let vmap: Vec<usize> = b
+        .verts
+        .iter()
+        .map(|v| {
+            if merge {
+                return pool.vertex_tol(v.p, own(v.tol));
+            }
+            *same.entry([(v.p.x + 0.0).to_bits(), (v.p.y + 0.0).to_bits(), (v.p.z + 0.0).to_bits()]).or_insert_with(|| pool.new_vertex_tol(v.p, own(v.tol)))
+        })
+        .collect();
     let e0 = pool.edges.len();
     for e in &b.edges {
         pool.edges.push(WEdge { curve: e.curve.clone(), t: e.t, v: [vmap[e.v[0]], vmap[e.v[1]]], degenerate: e.degenerate, tol: own(e.tol), splits: Vec::new(), pcs: None });
@@ -354,7 +390,11 @@ fn import(pool: &mut Pool, faces: &mut Vec<WFace>, b: &Body, owner: usize, merge
             for c in l {
                 let e = &b.edges[c.edge];
                 bb.add(&b.verts[e.v[0]].p);
-                if !e.degenerate {
+                // (A conic's own box: samples along an arc miss its extremes by up to
+                // r·(1 − cos(π/16)), and a pair of faces then misses a crossing near there.)
+                if !e.degenerate && matches!(e.curve, Curve::Line { .. } | Curve::Circle { .. } | Curve::Ellipse { .. }) {
+                    bb.union(&curve_bbox(&e.curve, e.t[0], e.t[1]));
+                } else if !e.degenerate {
                     for i in 0..=16 {
                         bb.add(&e.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 16.0));
                     }
@@ -678,6 +718,27 @@ pub fn boolean_bodies_with(a: &Body, b: &Body, op: BoolOp, opts: BoolOptions) ->
 
 /// [`boolean_bodies_with`] (counted with `CADRS_PROFILE`).
 fn boolean_bodies_counted(a: &Body, b: &Body, op: BoolOp, opts: BoolOptions) -> Result<BoolOut> {
+    ladder(a, b, op, opts)
+}
+
+/// The runs of a boolean: at the default tolerance, then the ways round a broken result. A
+/// result with crossing faces is refused ([`RunOpts::check_crossings`]): the first run's is
+/// handed back flagged ([`hand_back`]); a later run's is kept, should no run after it do
+/// better.
+fn ladder(a: &Body, b: &Body, op: BoolOp, opts: BoolOptions) -> Result<BoolOut> {
+    // The first result refused for crossing faces, made over as an accepted one would be.
+    let mut refused: Option<BoolOut> = None;
+    // A run's result: `Ok` when sound, else the refused one (with `clean` false) or the error.
+    let attempt = |r: Result<BoolOut>| -> std::result::Result<(BoolOut, bool), KernelError> {
+        match r {
+            Ok(r) => Ok((r, true)),
+            Err(KernelError::BooleanFailed { stage, why }) if stage == CROSSING => match REFUSED.with(|c| c.borrow_mut().take()) {
+                Some(r) => Ok((r, false)),
+                None => Err(KernelError::BooleanFailed { stage, why }),
+            },
+            Err(e) => Err(e),
+        }
+    };
     // At the default tolerance first; when that leaves the result broken (near-coincident
     // geometry the tolerance splits into slivers or gaps: a surface through a corner within
     // 1e-5), again at growing tolerances, as OCCT grows its entities' tolerances.
@@ -689,8 +750,14 @@ fn boolean_bodies_counted(a: &Body, b: &Body, op: BoolOp, opts: BoolOptions) -> 
         Some((x, y)) => (x, y),
         None => (a, b),
     };
-    let at = |tol: f64| RunOpts { tol, flush: opts.flush, merge_coplanar: opts.merge_coplanar, work_budget: opts.work_budget };
-    let first = run(a, b, Mode::Bool(op), at(opts.tol.point));
+    let at = |tol: f64| RunOpts { tol, flush: opts.flush, merge_coplanar: opts.merge_coplanar, work_budget: opts.work_budget, check_crossings: true };
+    let first = match attempt(run(a, b, Mode::Bool(op), at(opts.tol.point))) {
+        Ok((r, true)) => Ok(r),
+        // Refused only for crossing faces: no retry has been seen to do better (on the
+        // documents, the soak), and the whole ladder costs as much again: handed back now.
+        Ok((r, false)) => return hand_back(r),
+        Err(e) => Err(e),
+    };
     // (Retried: an open shell, a face that doesn't close, an invalid result: `BooleanFailed`, and
     // the failures of the steps a run calls that say so.)
     let broken = |m: &str| ["open shell", "left", "doesn't close", "is invalid"].iter().any(|w| m.contains(w));
@@ -699,18 +766,21 @@ fn boolean_bodies_counted(a: &Body, b: &Body, op: BoolOp, opts: BoolOptions) -> 
     }
     // Within the fuzzy value: faces a gap off the other input's surfaces moved onto them, and
     // the slivers that leaves collapsed.
-    if let Some((fa, fb, keep_a, keep_b)) = fuzzy_merge(a, b, fuzzy, opts.tol.point) {
+    if let Some((fa, fb, keep_a, keep_b)) = fuzzy_merge(a, b, fuzzy, opts.tol.point, false) {
         if std::env::var_os("CADRS_BOOL_DEBUG").is_some() {
             eprintln!("fuzzy merge ({fuzzy:e}): faces {} -> {}, {} -> {}; check {:?} {:?}", a.faces.len(), fa.faces.len(), b.faces.len(), fb.faces.len(), fa.check(), fb.check());
         }
-        match run(&fa, &fb, Mode::Bool(op), at(opts.tol.point)) {
-            Ok(mut r) => {
+        match attempt(run(&fa, &fb, Mode::Bool(op), at(opts.tol.point))) {
+            Ok((mut r, clean)) => {
                 for srcs in &mut r.from {
                     for (o, f) in srcs.iter_mut() {
                         *f = if *o == 0 { keep_a[*f] } else { keep_b[*f] };
                     }
                 }
-                return Ok(r);
+                if clean {
+                    return Ok(r);
+                }
+                refused.get_or_insert(r);
             }
             Err(e) => {
                 if std::env::var_os("CADRS_BOOL_DEBUG").is_some() {
@@ -721,8 +791,16 @@ fn boolean_bodies_counted(a: &Body, b: &Body, op: BoolOp, opts: BoolOptions) -> 
     }
     // Inputs of several solids (an extrude of regions that share an edge, solids touching face
     // to face or along an edge): one solid at a time.
-    if let Some(Ok(r)) = per_target_solid(a, b, op, opts).or_else(|| per_tool_solid(a, b, op, opts)) {
-        return Ok(r);
+    // (Not again from within such a split: a piece's boolean that fails would split the other
+    // input in turn, and so on down, one level per solid: hundreds of parts overflow the
+    // stack.)
+    if PER_SOLID.with(|c| c.get()) < 2 {
+        PER_SOLID.with(|c| c.set(c.get() + 1));
+        let r = per_target_solid(a, b, op, opts).or_else(|| per_tool_solid(a, b, op, opts));
+        PER_SOLID.with(|c| c.set(c.get() - 1));
+        if let Some(Ok(r)) = r {
+            return Ok(r);
+        }
     }
     // A ring whose start and end caps touch (a blend swept all the way round): closed up, and
     // run again at each tolerance.
@@ -731,7 +809,10 @@ fn boolean_bodies_counted(a: &Body, b: &Body, op: BoolOp, opts: BoolOptions) -> 
         let (a2, b2) = (ga.as_ref().map_or(a, |g| &g.0), gb.as_ref().map_or(b, |g| &g.0));
         let retries = opts.tol.retries.into_iter().filter(|_| std::env::var_os("CADRS_DEBUG_NO_RETRY").is_none());
         for t in std::iter::once(opts.tol.point).chain(retries) {
-            if let Ok(mut r) = run(a2, b2, Mode::Bool(op), at(t)) {
+            if let Ok((mut r, clean)) = attempt(run(a2, b2, Mode::Bool(op), at(t))) {
+                if t > opts.tol.point {
+                    cover_absorbed_faces(&mut r, a2, b2, t);
+                }
                 // Back to the inputs' face numbers.
                 for srcs in &mut r.from {
                     for (o, f) in srcs.iter_mut() {
@@ -740,16 +821,118 @@ fn boolean_bodies_counted(a: &Body, b: &Body, op: BoolOp, opts: BoolOptions) -> 
                         }
                     }
                 }
-                return Ok(r);
+                if clean {
+                    return Ok(r);
+                }
+                refused.get_or_insert(r);
             }
         }
     }
     for t in opts.tol.retries.into_iter().filter(|_| std::env::var_os("CADRS_DEBUG_NO_RETRY").is_none()) {
-        if let Ok(r) = run(a, b, Mode::Bool(op), at(t)) {
-            return Ok(r);
+        if let Ok((mut r, clean)) = attempt(run(a, b, Mode::Bool(op), at(t))) {
+            cover_absorbed_faces(&mut r, a, b, t);
+            if clean {
+                return Ok(r);
+            }
+            refused.get_or_insert(r);
         }
     }
-    first
+    // Faces near-coincident by more than the run's tolerance at some places and less at others
+    // (a cube and its copy turned 1.2e-5 about a skew axis: the faces part by up to 1e-4), which
+    // no tolerance of the ladder takes as one throughout: each moved onto the other input's
+    // surface of its own kind within the largest, its edges given the distance as tolerance,
+    // and run again.
+    for wide in [opts.tol.retries[1], 10.0 * opts.tol.retries[1]] {
+        if wide <= fuzzy || std::env::var_os("CADRS_DEBUG_NO_RETRY").is_some() {
+            continue;
+        }
+        let Some((fa, fb, keep_a, keep_b)) = fuzzy_merge(a, b, wide, opts.tol.point, true) else { continue };
+        // (At the ladder's largest tolerance only: the moved faces lie within it of the others.)
+        let t = opts.tol.retries[1];
+        if let Ok((mut r, clean)) = attempt(run(&fa, &fb, Mode::Bool(op), at(t))) {
+            for srcs in &mut r.from {
+                for (o, f) in srcs.iter_mut() {
+                    *f = if *o == 0 { keep_a[*f] } else { keep_b[*f] };
+                }
+            }
+            cover_absorbed_faces(&mut r, a, b, t.max(wide));
+            if clean {
+                return Ok(r);
+            }
+            refused.get_or_insert(r);
+        }
+    }
+    match refused {
+        Some(r) => hand_back(r),
+        None => first,
+    }
+}
+
+/// A result refused for crossing faces handed back after all (as before the check), counted
+/// on this thread ([`take_invalid_results`]); under `CADRS_BOOL_STRICT` the boolean fails.
+fn hand_back(r: BoolOut) -> Result<BoolOut> {
+    if std::env::var_os("CADRS_BOOL_STRICT").is_some() {
+        return Err(KernelError::BooleanFailed { stage: CROSSING, why: "the boolean's result is invalid: its faces cross".into() });
+    }
+    INVALID_RESULTS.with(|c| c.set(c.get() + 1));
+    if std::env::var_os("CADRS_BOOL_DEBUG").is_some() {
+        eprintln!("boolean: handed back a result with crossing faces");
+    }
+    Ok(r)
+}
+
+/// A run at a raised tolerance `t` takes faces of the two inputs that lie within it of one
+/// another as one, and keeps one input's surface: each face of the result lying within `t` of
+/// an input face's surface (over the result face's boundary, the boxes overlapping) gets the
+/// distance as its edges' and vertices' tolerance (with margin), so the result says how far its
+/// faces may be from where the inputs had them (a cube and its copy turned by 1e-5: faces up to
+/// 9e-5 apart, the volume off by area × that).
+fn cover_absorbed_faces(r: &mut BoolOut, a: &Body, b: &Body, t: f64) {
+    let body = &mut r.body;
+    let inputs: Vec<(&Surface, Bbox)> = [a, b].iter().flat_map(|x| (0..x.faces.len()).map(move |f| (&x.faces[f].surf, x.face_bbox(f)))).collect();
+    for fi in 0..body.faces.len() {
+        let edges: Vec<usize> = body.faces[fi].loops.iter().flatten().map(|c| c.edge).collect();
+        // A point inside the face first (off the surfaces of the faces it meets at its edges,
+        // which it is then quick to give up), and its boundary.
+        let f = &body.faces[fi];
+        let inner = interior_of_polys(&classify::face_polygons(body, f)).map(|uv| f.surf.eval(uv.x, uv.y));
+        let pts: Vec<P3> = inner
+            .into_iter()
+            .chain(edges.iter().flat_map(|&e| {
+                let ed = &body.edges[e];
+                (0..=8).map(move |i| ed.point(ed.t[0] + (ed.t[1] - ed.t[0]) * i as f64 / 8.0))
+            }))
+            .collect();
+        let bx = body.face_bbox(fi).grow(t);
+        // (Each surface given up at its first point farther than `t`, most at once; a surface
+        // without a closed-form distance, first at any point off its face's box, before the
+        // projection.)
+        let within = |s: &Surface, ib: &Bbox| {
+            let exact = s.signed_distance(&pts[0]).is_some();
+            let ib = ib.grow(t);
+            pts.iter().try_fold(0.0, |g: f64, p| {
+                if !exact && !ib.contains(p) {
+                    return None;
+                }
+                let d = s.distance(p);
+                (d <= t).then_some(g.max(d))
+            })
+        };
+        // (Not the face's own surface: nothing to cover there.)
+        let own = &body.faces[fi].surf;
+        let gap = inputs.iter().filter(|(s, ib)| ib.overlaps(&bx) && *s != own).filter_map(|(s, ib)| within(s, ib)).fold(0.0, f64::max);
+        let want = 1.1 * gap;
+        for e in edges {
+            if body.edges[e].tol < want {
+                body.edges[e].tol = want;
+            }
+            for v in body.edges[e].v {
+                if body.verts[v].tol < want {
+                    body.verts[v].tol = want;
+                }
+            }
+        }
+    }
 }
 
 /// `a op b` with `a` taken one solid at a time: `b` united with each in turn; each one's
@@ -1188,14 +1371,14 @@ fn seam_side(s: &Surface, c: &Curve, t: [f64; 2], pc: Curve, near: P2) -> Curve 
 /// input left a fuzzy width wide (two long edges side by side, the rest no longer than the
 /// width) are collapsed onto one of their long edges. None when nothing moved; else the two
 /// bodies and, for each, its faces' indices in the input.
-fn fuzzy_merge(a: &Body, b: &Body, fuzzy: f64, tol: f64) -> Option<(Body, Body, Vec<usize>, Vec<usize>)> {
+fn fuzzy_merge(a: &Body, b: &Body, fuzzy: f64, tol: f64, alike: bool) -> Option<(Body, Body, Vec<usize>, Vec<usize>)> {
     let lim = 1.5 * fuzzy;
     if fuzzy <= tol {
         return None;
     }
     let (mut a2, mut b2) = (a.clone(), b.clone());
-    let moved_a = snap_within(&mut a2, b, lim, tol);
-    let moved_b = snap_within(&mut b2, &a2, lim, tol);
+    let moved_a = snap_within(&mut a2, b, lim, tol, alike);
+    let moved_b = snap_within(&mut b2, &a2, lim, tol, alike);
     if moved_a.is_empty() && moved_b.is_empty() {
         return None;
     }
@@ -1205,8 +1388,9 @@ fn fuzzy_merge(a: &Body, b: &Body, fuzzy: f64, tol: f64) -> Option<(Body, Body, 
     (a2.check().is_empty() && b2.check().is_empty()).then_some((a2, b2, keep_a, keep_b))
 }
 
-/// [`fuzzy_merge`]'s first step on `x` against `other`: the faces moved.
-fn snap_within(x: &mut Body, other: &Body, lim: f64, tol: f64) -> Vec<usize> {
+/// [`fuzzy_merge`]'s first step on `x` against `other`: the faces moved (with `alike`, only
+/// onto a surface of their own kind: a plane onto a plane, near-coincident faces).
+fn snap_within(x: &mut Body, other: &Body, lim: f64, tol: f64, alike: bool) -> Vec<usize> {
     let analytic = |s: &Surface| matches!(s, Surface::Plane { .. } | Surface::Cylinder { .. } | Surface::Cone { .. } | Surface::Sphere { .. } | Surface::Torus { .. });
     let targets: Vec<(usize, Bbox)> = (0..other.faces.len())
         .filter(|&g| analytic(&other.faces[g].surf))
@@ -1229,7 +1413,7 @@ fn snap_within(x: &mut Body, other: &Body, lim: f64, tol: f64) -> Vec<usize> {
         }
         for &(g, ref gb) in &targets {
             let t = &other.faces[g].surf;
-            if !gb.overlaps(&fb) || f.surf.same_domain(t, tol).is_some() {
+            if !gb.overlaps(&fb) || f.surf.same_domain(t, tol).is_some() || (alike && std::mem::discriminant(&f.surf) != std::mem::discriminant(t)) {
                 continue;
             }
             let dev = pts.iter().map(|p| t.distance(p)).fold(0.0, f64::max);
@@ -1472,7 +1656,7 @@ pub fn imprint(a: &Body, b: &Body, faces: Option<Vec<usize>>) -> Result<BoolOut>
 /// One run of the boolean.
 fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
     RUNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let RunOpts { tol: run_tol, flush, merge_coplanar, work_budget } = opts;
+    let RunOpts { tol: run_tol, flush, merge_coplanar, work_budget, check_crossings } = opts;
     // The work done so far, against the budget.
     let mut work = Work { done: 0, budget: work_budget };
     // B-spline faces lying on an analytic face of the other body (within the tolerance:
@@ -2292,6 +2476,8 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
         out
     };
     let mut subs: Vec<(usize, Vec<Vec<Arc>>)> = Vec::new(); // (face, loops)
+    // The input faces no cut runs across (by owner and face): kept whole, if at all.
+    let whole: HashSet<(usize, usize)> = faces.iter().enumerate().filter(|(fi, _)| cuts[*fi].is_empty()).map(|(_, f)| (f.owner, f.orig)).collect();
     for (fi, f) in faces.iter().enumerate() {
         let boundary: Vec<Vec<Arc>> = f.loops.iter().map(|l| l.iter().flat_map(|(e, fwd, pc)| arcs_of(&pool, f, *e, *fwd, pc)).collect()).collect();
         if cuts[fi].is_empty() {
@@ -2630,6 +2816,7 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
     }
     // Nor any other invalid body ([`Body::check`]; the volumes of the solids that hold faces on
     // one surface known from above, the others' shells oriented by ray parity).
+    let mut crossing = None;
     if matches!(mode, Mode::Bool(_)) {
         let why = out.check_structure().into_iter().next().or_else(|| {
             let (si, v) = volumes.iter().enumerate().find_map(|(si, v)| v.filter(|v| !(*v > 0.0)).map(|v| (si, v)))?;
@@ -2638,13 +2825,47 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
         if let Some(why) = why {
             return Err(KernelError::BooleanFailed { stage: "validity", why: format!("the boolean's result is invalid: {why}") });
         }
+        // Faces crossing each other away from their edges (a cylinder tangent to a box's face:
+        // two pieces of the result passing through each other); and the new faces' loops in
+        // (u, v), none crossing another. A refusal the ladder retries; when no retry passes,
+        // [`ladder`] hands back this result after all, flagged.
+        prof.mark("checks");
+        if check_crossings {
+            let whole_of = |f: usize| match from.get(f).map(|s| s.as_slice()) {
+                Some(&[(o, g)]) if whole.contains(&(o, g)) => Some(o),
+                _ => None,
+            };
+            let whole_of: Vec<Option<usize>> = (0..out.faces.len()).map(whole_of).collect();
+            // (Faces of one input don't cross each other, cut or not: only pairs from the two
+            // inputs, or with a face merged from both.)
+            let owner_of: Vec<Option<usize>> = (0..out.faces.len())
+                .map(|f| match from.get(f).map(|s| s.as_slice()) {
+                    Some(&[(o, _)]) => Some(o),
+                    _ => None,
+                })
+                .collect();
+            // (Loops in (u, v) only where they wrap: new faces of several loops on periodic
+            // surfaces, a loop running over the seam; flattening every face's loops costs as
+            // much as the rest of the run.)
+            let wraps = |f: usize| out.faces[f].loops.len() > 1 && (out.faces[f].surf.u_periodic() || out.faces[f].surf.v_periodic());
+            let why = (0..out.faces.len())
+                .filter(|&f| whole_of[f].is_none() && wraps(f))
+                .find_map(|f| out.check_face_domain(f).into_iter().next())
+                .or_else(|| super::check_faces::face_crossings_where(&out, &|i, j| owner_of[i].is_none() || owner_of[i] != owner_of[j]).into_iter().next());
+            crossing = why;
+        }
     }
     // Solids in, faces out but no solid: some piece went missing.
     if !a.solids.is_empty() && !b.solids.is_empty() && !out.faces.is_empty() && out.solids.is_empty() {
         return Err(KernelError::OpenResult("the boolean left an open shell".into()));
     }
-    prof.mark("checks");
+    prof.mark("crossings");
     prof.report(&format!("{op:?} {}×{} faces", a.faces.len(), b.faces.len()));
+    if let Some(why) = crossing {
+        // (The result kept for the ladder, should no other run do better.)
+        REFUSED.with(|c| *c.borrow_mut() = Some(BoolOut { body: out, from }));
+        return Err(KernelError::BooleanFailed { stage: CROSSING, why: format!("the boolean's result is invalid: {why}") });
+    }
     Ok(BoolOut { body: out, from })
 }
 
@@ -3231,7 +3452,7 @@ mod tests {
         }
         assert!(uv_gap(&a).is_some());
         // (One run at the default tolerance: the retries at coarser ones would hide it.)
-        let opts = RunOpts { tol: tol::POINT, flush: false, merge_coplanar: true, work_budget: DEFAULT_WORK_BUDGET };
+        let opts = RunOpts { tol: tol::POINT, flush: false, merge_coplanar: true, work_budget: DEFAULT_WORK_BUDGET, check_crossings: false };
         let r = run(&a, &b, Mode::Bool(BoolOp::Union), opts).unwrap();
         assert_eq!(r.body.solids.len(), 1);
         assert!(uv_gap(&r.body).is_none());

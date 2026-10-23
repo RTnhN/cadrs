@@ -495,19 +495,38 @@ fn analytic(a: &Surface, b: &Surface, bb: &Bbox, run_tol: f64) -> Option<Vec<Int
                 let c = fc.o + fc.z * h;
                 return Some(vec![IntCurve { c: Curve::Circle { c, x: fc.x, y: fc.y, r: rr }, t0: 0.0, t1: TAU, closed: true, pcs: None }]);
             }
-            // Through the apex and containing the axis: two rulings.
-            let apex = fc.o - fc.z * (r / ang.tan());
-            if cz.abs() < tol::ANGULAR_FINE && (apex - fp.o).dot(&n).abs() < tol::ROUNDOFF {
-                let w = fc.z.cross(&n).normalize();
-                // The sheet opens the way its radius grows (r + z tan a): up the axis when
-                // tan a > 0, down it otherwise (a negative half angle, or one past 90°: a nearly
-                // flat cone).
-                let open = if ang.tan() > 0.0 { fc.z } else { -fc.z };
-                let k = ang.tan().abs();
+            // Through the apex: the rulings in the plane, none (the apex alone), one (the plane
+            // tangent along it) or two. A ruling at angle u runs from the apex along
+            // (x cos u + y sin u) sin a + z cos a (the way the radius r + v sin a grows), in the
+            // plane where sin a (n·x cos u + n·y sin u) + cos a (n·z) = 0. (The general conic
+            // below has no curve here, and the marcher takes long over a tangent ruling.)
+            let (s, k) = ang.sin_cos();
+            let nl = V3::new(n.dot(&fc.x), n.dot(&fc.y), cz);
+            let c = n.dot(&(fp.o - fc.o));
+            if (r * nl.z * k + s * c).abs() < tol::REL * (1.0 + r.abs() + c.abs()) && s.abs() > tol::ANGULAR_FINE {
+                let apex = fc.o - fc.z * (r * k / s);
+                let m = nl.x.hypot(nl.y);
+                let g = -k * nl.z / s;
+                let rulings: Vec<f64> = if m < tol::ANGULAR_FINE {
+                    vec![]
+                } else {
+                    let phi = nl.y.atan2(nl.x);
+                    let x = g / m;
+                    if (x.abs() - 1.0).abs() < 1e-9 {
+                        vec![if x > 0.0 { phi } else { phi + PI }]
+                    } else if x.abs() < 1.0 {
+                        let w = x.acos();
+                        vec![phi + w, phi - w]
+                    } else {
+                        vec![]
+                    }
+                };
+                // (Along a ruling the radius grows as v does when sin a > 0, else as it falls.)
+                let sense = if s > 0.0 { 1.0 } else { -1.0 };
                 let mut out = Vec::new();
-                for s in [1.0, -1.0] {
-                    let d = (open + w * (k * s)).normalize();
-                    if let Some(mut l) = bound_line(apex, d, &bbig) {
+                for u in rulings {
+                    let d = ((fc.x * u.cos() + fc.y * u.sin()) * s + fc.z * k) * sense;
+                    if let Some(mut l) = bound_line(apex, d.normalize(), &bbig) {
                         l.t0 = l.t0.max(0.0);
                         if l.t1 > l.t0 + tol::ROUNDOFF {
                             out.push(l);
@@ -1572,6 +1591,34 @@ fn curve_curve_closed(a: &Curve, a0: f64, a1: f64, b: &Curve, b0: f64, b1: f64, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Planes through a cone's apex: tangent along a ruling (one line), through two rulings, and
+    /// meeting it at the apex alone, for a cone opening up (45°) and one past 90° (−135°, as an
+    /// exporter writes a countersink); the lines on both surfaces, found in closed form (the
+    /// marcher took ~40 ms over the tangent one).
+    #[test]
+    fn plane_through_a_cone_apex() {
+        let bb = Bbox { min: P3::new(-10.0, -10.0, -10.0), max: P3::new(10.0, 10.0, 10.0) };
+        for ang in [PI / 4.0, -3.0 * PI / 4.0] {
+            // Radius 2 at the frame's origin: the apex 2 along the axis the way the radius falls.
+            let cone = Surface::Cone { f: Frame::world(), r: 2.0, a: ang };
+            let apex = P3::new(0.0, 0.0, -2.0 * ang.cos() / ang.sin());
+            for (tilt, want) in [(PI / 4.0, 1), (0.0, 2), (0.3, 2), (1.2, 0)] {
+                let n = V3::new(tilt.cos(), 0.0, tilt.sin());
+                let plane = Surface::Plane { f: Frame::from_z(apex, n) };
+                let r = surface_surface_tol(&plane, ((-20.0, 20.0), (-20.0, 20.0)), &cone, ((0.0, TAU), (-20.0, 20.0)), &bb, tol::POINT);
+                let curves: Vec<&IntCurve> = r.curves.iter().chain(&r.tangent).collect();
+                assert_eq!(curves.len(), want, "angle {ang}, tilt {tilt}: {} curves", curves.len());
+                assert_eq!(r.work, 1, "angle {ang}, tilt {tilt}: marched");
+                for c in curves {
+                    for i in 0..=8 {
+                        let p = c.c.point(c.t0 + (c.t1 - c.t0) * i as f64 / 8.0);
+                        assert!(plane.distance(&p) < 1e-9 && cone.distance(&p) < 1e-9, "angle {ang}, tilt {tilt}: {p:?} off");
+                    }
+                }
+            }
+        }
+    }
 
     /// A spline band running 7e-5 off a cylinder all along (a thread's root on its tube, the
     /// sweep's approximation a hair inside): no intersection, found without cutting the pair

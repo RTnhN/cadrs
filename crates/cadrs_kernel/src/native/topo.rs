@@ -1295,7 +1295,7 @@ impl Body {
     /// Face `fi`'s loops in (u, v): none crosses itself or another, the first is the outer one
     /// (counter-clockwise about the outward normal), the others holes inside it running the
     /// other way, and no hole lies inside another.
-    fn check_face_domain(&self, fi: usize) -> Vec<String> {
+    pub(crate) fn check_face_domain(&self, fi: usize) -> Vec<String> {
         let f = &self.faces[fi];
         let errs = Vec::new();
         // The loops as polylines in (u, v) scaled to lengths on the surface, each point with its

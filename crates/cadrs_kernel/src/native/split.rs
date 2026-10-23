@@ -184,6 +184,13 @@ pub fn split_face(surf: &Surface, flip: bool, boundary: &[Vec<Arc>], cuts: &[Arc
     };
     let ntol = (size * 1e-7).max(1e-7);
     let mut nodes: Vec<(usize, P2)> = Vec::new();
+    // One vertex's arcs meet in one node within a part in 10³ of the face in (u, v), their
+    // p-curves ending a vertex tolerance apart (a face handed on by an earlier operation), but
+    // not across a period: a vertex on a seam is twice, a period apart, and a pole's or an
+    // apex's ends arcs at many u, however close in the face's metric.
+    let loose = (size * 1e-3).max(ntol * 100.0);
+    let (pu, pv) = (surf.u_periodic(), surf.v_periodic());
+    let near = |a: &P2, b: &P2| (a - b).norm() < loose && (!pu || (a.x - b.x).abs() < 1e-3 * mu) && (!pv || (a.y - b.y).abs() < 1e-3 * mv);
     let node_of = |v: usize, p: P2, nodes: &mut Vec<(usize, P2)>| -> usize {
         if let Some(i) = nodes.iter().position(|(nv, np)| *nv == v && (np - p).norm() < ntol * 100.0) {
             return i;
@@ -196,6 +203,36 @@ pub fn split_face(surf: &Surface, flip: bool, boundary: &[Vec<Arc>], cuts: &[Arc
         let s = node_of(a.v[0], o(a.uv_at(0.0)), &mut nodes);
         let e = node_of(a.v[1], o(a.uv_at(1.0)), &mut nodes);
         ends.push([s, e]);
+    }
+    // Then nodes of one vertex `near` each other are one, unless an arc runs between them (an
+    // edge shorter than the tolerance, both its ends one vertex, still has two).
+    let mut root: Vec<usize> = (0..nodes.len()).collect();
+    fn find(root: &mut [usize], mut i: usize) -> usize {
+        while root[i] != i {
+            root[i] = root[root[i]];
+            i = root[i];
+        }
+        i
+    }
+    let joined: std::collections::HashSet<(usize, usize)> = ends.iter().map(|e| (e[0].min(e[1]), e[0].max(e[1]))).collect();
+    let mut by_vertex: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
+    for (i, n) in nodes.iter().enumerate() {
+        by_vertex.entry(n.0).or_default().push(i);
+    }
+    let mut groups: Vec<&Vec<usize>> = by_vertex.values().filter(|g| g.len() > 1).collect();
+    groups.sort();
+    for g in groups {
+        for (k, &i) in g.iter().enumerate() {
+            for &j in &g[k + 1..] {
+                if near(&nodes[i].1, &nodes[j].1) && !joined.contains(&(i.min(j), i.max(j))) {
+                    let (ri, rj) = (find(&mut root, i), find(&mut root, j));
+                    root[rj] = ri;
+                }
+            }
+        }
+    }
+    for e in &mut ends {
+        *e = [find(&mut root, e[0]), find(&mut root, e[1])];
     }
     // Prune dangling cut arcs (a cut end touching nothing else) repeatedly.
     let mut alive = vec![true; arcs.len()];
@@ -431,5 +468,25 @@ mod tests {
         let mut loops: Vec<usize> = r.faces.iter().map(|f| f.len()).collect();
         loops.sort();
         assert_eq!(loops, vec![1, 2]);
+    }
+
+    /// One vertex's p-curves ending a hair apart in (u, v) (within the vertex's tolerance, as a
+    /// face handed on by an earlier operation has them, 1e-4 off on a torus): one node, and the
+    /// cut still splits the face (offset_12's tube union: the face left whole, and dropped).
+    #[test]
+    fn vertex_pcurves_a_hair_apart() {
+        let surf = Surface::Plane { f: Frame::from_z(P3::origin(), V3::z()) };
+        let arc = |edge, pc, v: [usize; 2]| Arc { edge, fwd: true, pc, t: [0.0, 1.0], v, cut: false, deg: false };
+        let boundary = vec![vec![
+            arc(0, line((0.0, 0.0), (5.0, 0.0)), [0, 4]),
+            arc(1, line((5.0, 0.0), (5.0, 0.0)), [4, 1]),
+            arc(2, line((10.0, 0.002), (0.0, 9.998)), [1, 2]),
+            arc(3, line((10.0, 10.0), (-5.0, 0.0)), [2, 5]),
+            arc(4, line((5.0, 10.0), (-5.0, 0.0)), [5, 3]),
+            arc(5, line((0.0, 10.0), (0.0, -10.0)), [3, 0]),
+        ]];
+        let cut = Arc { edge: 6, fwd: true, pc: line((5.0, 0.0), (0.0, 10.0)), t: [0.0, 1.0], v: [4, 5], cut: true, deg: false };
+        let r = split_face(&surf, false, &boundary, &[cut]);
+        assert_eq!(r.faces.len(), 2, "{:?}", r.faces.iter().map(|f| f.len()).collect::<Vec<_>>());
     }
 }

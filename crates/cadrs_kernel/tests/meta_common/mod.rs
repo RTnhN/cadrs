@@ -401,9 +401,18 @@ pub fn band(k: &NativeKernel, bodies: &[BodyId]) -> f64 {
     area * max_tol(k, bodies)
 }
 
-/// A boolean's bodies, an empty result as no bodies.
+/// A boolean's bodies, an empty result as no bodies. Strict: a result the boolean flags as
+/// having crossing faces ([`cadrs_kernel::native::take_invalid_results`]) is an error.
 pub fn boolean(k: &mut NativeKernel, op: BoolOp, a: BodyId, b: &[BodyId]) -> Result<Vec<BodyId>> {
-    match k.boolean(op, a, b) {
+    cadrs_kernel::native::take_invalid_results();
+    let r = k.boolean(op, a, b);
+    if cadrs_kernel::native::take_invalid_results() > 0 {
+        return Err(KernelError::BooleanFailed {
+            stage: "crossing",
+            why: "the boolean handed back a result with crossing faces".into(),
+        });
+    }
+    match r {
         Ok(r) => Ok(r.bodies),
         Err(KernelError::EmptyResult(_)) => Ok(Vec::new()),
         Err(e) => Err(e),
