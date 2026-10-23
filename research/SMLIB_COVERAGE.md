@@ -63,6 +63,27 @@ Corrections to the generators' NOT_CONVERTED notes, found by the audit:
 - ssi_advanced.py resolves `#ifdef USE_ANALYTICS` as undefined, but SmConfig.h:262 defines it. This
   affects only the alternate counts, which are compared as none against some.
 
+## Converted since the audit
+
+The tables further down are as audited. These conversions came after them and take precedence
+(new tests, of which known failures in brackets):
+
+| Source items | Suite: tests | Checks |
+|---|---|---|
+| smCurveTest `my_test_cci_tol` (5 asserts) | smlib_cci: `cci_tol_*` (5, [1]) | distinct points (closer than 10 tol counted once) as SMLib's counts, seam duplicates aside (8 → 4) |
+| smCurveTest `my_test_analytic_curves` (line, circle, ellipse) | smlib_cci: `cci_point_solve_*` (3) | 11 points per curve found again within tol |
+| smCurveTest `my_test_curve_properties` (circle × plane) | smlib_cci: `cci_circle_near_tangent_plane` (1) | 2 points |
+| smSurfaceTest `my_test_csi_tangency` (44 steps) | smlib_cci: `csi_tangency_{circles,lines}_{crossing,near_miss}` (4, [2]) | 2 points while crossing, 1 near miss within 1.0001e-3 |
+| smSurfaceTest `my_test_csi_tol` (40 steps) | smlib_cci: `csi_tol_seam`, `csi_tol_knot` (2) | 1 point per step |
+| smSurfaceTest `my_test_sp_nurb` (point intersect ×4, MINIMIZE ×2, 15 closest points) | smlib_surfaces: `sp_nurb_*` (7) | points found again; nearest points no farther than SMLib's (new oracle `ptsolve`, `closest`) |
+| smSurfaceTest `my_test_section` (5 surfaces) | smlib_surfaces: `section_*` (5) | per plane: none/some, total length, SMLib's samples (new oracle `psection`) |
+| smSurfaceTest `my_test_projection` (3 surfaces) | smlib_surfaces: `projection_*` (3) | per circle, as the sections (new oracle `pproject`) |
+| smSurfaceTest `my_test_analytic_surfaces` (9 of 10 surfaces), `my_test_sp_analy` (live block) | smlib_surfaces: `analytic_*` (9, [1]), `sp_analy_revolution` (1) | grid points found again within 1e-6 |
+
+Feature gaps found on the way: no parabola or hyperbola curves (`my_test_analytic_curves`,
+`my_test_analytic_surfaces`); no "every foot of the normal" point solve (SM_SO_NORMALIZE counts of
+`my_test_sp_nurb`).
+
 ## Feature gaps (operations SMLib tests that the kernel lacks)
 
 Grouped by area, with the sources that exercise them:

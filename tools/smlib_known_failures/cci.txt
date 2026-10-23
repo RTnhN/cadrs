@@ -6,3 +6,12 @@
 # Coincident curves (overlapping lines, the same circle): no points at all.
 
 # Crossings of cubic B-spline zigzags missed (13 of 16, 5 of 8; checked independently).
+
+# Near misses of a curve and a surface within the tolerance (here up to 9e-4 clear, tolerance
+# 1.0001e-3): ssi::curve_surface takes no tolerance and finds no point.
+csi_tangency_circles_near_miss
+csi_tangency_lines_near_miss
+
+# Two crossings 1.6e-3 apart with the curves within 1e-6 of each other between them:
+# ssi::curve_curve adds the near-tangent middle as a third point (SMLib keeps the two crossings).
+cci_tol_circle_over_ellipse

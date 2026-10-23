@@ -17,6 +17,13 @@
 //   smlib_oracle silhouette in vx vy vz                            (--persp, --tol=1e-3, --move=x,y,z)
 //   smlib_oracle tess       in chord angleDeg [maxEdge [maxAspect]]
 //   smlib_oracle cci        file.smp                               (--tol=SM_ZONE_TOL_3D)
+//   smlib_oracle psection   surf nx ny nz k                        (--dom=a,b,c,d)
+//   smlib_oracle pproject   surf k                                 (--dom=a,b,c,d)
+//   smlib_oracle ptsolve    surf min|max|normalize nx ny nz        (--dom=a,b,c,d, --move=x,y,z)
+//   smlib_oracle closest    surf x y z [x y z ...]
+//
+// A `surf` (smSurfaceTest.cpp's commands) is a bare B-spline surface: a .sms or .srf file, or
+// `grid:tx:ty:tz:nu:nv:du:dv:x0:y0:z0:...` (my_create_nurb_surf: nu × nv points, v fastest).
 //
 // An input is a .smb file, `file.smp#i` (the i-th brep of a part file, default 0), or for
 // `sweep` a built-in primitive: `sphere:r:cx:cy:cz` (SmPrimitiveCreation::CreateSphere, as
@@ -353,9 +360,81 @@ public:
     }
 };
 
+
+// A bare B-spline surface: a file (.sms, .srf: SmBSplineSurface::ReadFromFile, as
+// my_surface_from_file in smSurfaceTest.cpp), or
+//   grid:tx:ty:tz:nu:nv:du:dv:x0:y0:z0:x1:...   (my_create_nurb_surf: nu × nv points, u fastest,
+//   moved by t, clamped uniform knots i/(n − d) inside).
+static SmBSplineSurface* load_surface(const std::string& spec) {
+    SmBSplineSurface* s = NULL;
+    if (spec.rfind("grid:", 0) == 0) {
+        std::vector<double> a = nums_after(spec, 5);
+        if (a.size() < 7) fail("bad surface " + spec);
+        ULONG nu = (ULONG)a[3], nv = (ULONG)a[4], du = (ULONG)a[5], dv = (ULONG)a[6];
+        if (nu <= du || nv <= dv || a.size() != 7 + 3 * nu * nv) fail("bad surface " + spec);
+        SmTArray<SmPoint3d> pts;
+        for (ULONG i = 0; i < nu * nv; ++i) pts.Add(SmPoint3d(a[7 + 3 * i] + a[0], a[8 + 3 * i] + a[1], a[9 + 3 * i] + a[2]));
+        auto knots = [](ULONG n, ULONG d, SmTArray<ULONG>& mult, SmTArray<double>& k) {
+            ULONG nk = n - d + 1;
+            mult.Add(d + 1);
+            k.Add(0.0);
+            for (ULONG i = 1; i < nk - 1; ++i) {
+                k.Add((double)i / (nk - 1));
+                mult.Add(1);
+            }
+            mult.Add(d + 1);
+            k.Add(1.0);
+        };
+        SmTArray<ULONG> um, vm;
+        SmTArray<double> uk, vk;
+        knots(nu, du, um, uk);
+        knots(nv, dv, vm, vk);
+        if (SmBSplineSurface::CreateCanonical(ctx(), du, dv, pts, SM_SF_UNSPECIFIED, um, vm, uk, vk, SM_KT_UNSPECIFIED, NULL, NULL, s) != SM_SUCCESS || !s)
+            fail("can't make surface " + spec);
+        return s;
+    }
+    if (SmBSplineSurface::ReadFromFile(ctx(), spec.c_str(), s) != SM_SUCCESS || !s) fail("can't read surface " + spec);
+    return s;
+}
+
+// The bounding box SMLib's surface tests sample (CalculateBoundingBox, grown by the zone
+// tolerance as they get it).
+static SmExtent3d surface_box(const SmSurface* s, const SmExtent2d& dom) {
+    SmExtent3d box;
+    if (s->CalculateBoundingBox(dom, &box, NULL) != SM_SUCCESS) fail("no bounding box");
+    return box;
+}
+
+static std::string curves_json(SmTArray<SmCurve*>& c3) {
+    std::string out;
+    int n = 0;
+    for (ULONG j = 0; j < c3.GetSize(); ++j)
+        if (c3[j]) out += (n++ ? ", " : "") + curve_json(c3[j]);
+    return "[" + out + "]";
+}
+
+// A surface's uv domain: --dom=a,b,c,d as fractions of its natural one (0.1,0.1,0.9,0.9 for
+// my_test_sp_nurb's trimmed case), else the natural one.
+static SmExtent2d surface_dom(const SmSurface* s) {
+    SmExtent2d d = s->GetNaturalUVDomain();
+    if (has_opt("dom")) {
+        std::vector<double> f;
+        std::string v = g_opts["dom"];
+        for (size_t i = 0; i <= v.size();) {
+            size_t j = v.find(',', i);
+            if (j == std::string::npos) j = v.size();
+            f.push_back(std::atof(v.substr(i, j - i).c_str()));
+            i = j + 1;
+        }
+        if (f.size() != 4) fail("bad --dom");
+        d.SetMinMax(d.Evaluate(f[0], f[1]), d.Evaluate(f[2], f[3]));
+    }
+    return d;
+}
+
 [[noreturn]] static void usage() {
     std::fprintf(stderr,
-                 "usage: smlib_oracle props|fillet|boolean|offset|shell|replace|chamfer|sweep|stitch|ssi|section|silhouette|tess|cci ...\n"
+                 "usage: smlib_oracle props|fillet|boolean|offset|shell|replace|chamfer|sweep|stitch|ssi|section|silhouette|tess|cci|psection|pproject|ptsolve|closest ...\n"
                  "  (see the comment at the top of oracle.cpp or README.md)\n");
     std::exit(2);
 }
@@ -866,6 +945,138 @@ int main(int argc0, char** argv0) {
         }
         std::printf("{\"ok\": true, \"status\": \"ok\", \"curves\": %lu, \"count\": %lu, \"points\": [%s]}\n", (unsigned long)p->curves.GetSize(),
                     (unsigned long)total, pts.c_str());
+        return 0;
+    }
+
+    // psection surf nx ny nz k: SmSurface::CreatePlanarSectionCurves at k planes through the
+    // surface's bounding box diagonal (my_test_planar_section, smSurfaceTest.cpp:667).
+    if (cmd == "psection" && argc == 7) {
+        SmBSplineSurface* s = load_surface(argv[2]);
+        SmExtent2d dom = surface_dom(s);
+        SmVector3d n(std::atof(argv[3]), std::atof(argv[4]), std::atof(argv[5]));
+        long k = std::atol(argv[6]);
+        if (k < 2) usage();
+        SmExtent3d box = surface_box(s, dom);
+        std::string planes;
+        ULONG total = 0;
+        for (long i = 0; i < k; ++i) {
+            double t = i / (k - 1.0);
+            SmPoint3d p = box.Evaluate(t, t, t);
+            SmTArray<SmCurve*> c3, uv;
+            SmStatus st = s->CreatePlanarSectionCurves(ctx(), dom, p, n, NULL, NULL, &c3, &uv);
+            total += c3.GetSize();
+            planes += std::string(i ? ", " : "") + "{\"point\": " + pt(p) + ", \"status\": " + std::to_string((int)st) +
+                      ", \"count\": " + std::to_string(c3.GetSize()) + ", \"curves\": " + curves_json(c3) + "}";
+        }
+        std::printf("{\"ok\": true, \"status\": \"ok\", \"count\": %lu, \"planes\": [%s]}\n", (unsigned long)total, planes.c_str());
+        return 0;
+    }
+
+    // pproject surf k: circles of radius i/k of half the box's larger width (i = 1..k) about the
+    // middle of the box's top, projected down -z (CreateParallelProjectionCurves;
+    // my_test_parallel_projection, smSurfaceTest.cpp:761).
+    if (cmd == "pproject" && argc == 4) {
+        SmBSplineSurface* s = load_surface(argv[2]);
+        SmExtent2d dom = surface_dom(s);
+        long k = std::atol(argv[3]);
+        if (k < 1) usage();
+        SmExtent3d box = surface_box(s, dom);
+        SmPoint3d c = box.Evaluate(0.5, 0.5, 1.0);
+        SmVector3d w = box.Evaluate(1, 1, 1) - box.Evaluate(0, 0, 1);
+        double rmax = std::max(w.x, w.y);
+        std::string circles;
+        ULONG total = 0;
+        for (long i = 1; i <= k; ++i) {
+            double r = i * 1.0 / k * (rmax / 2.0);
+            SmAxis2Placement a;
+            a.SetCanonical(c, SmVector3d(1, 0, 0), SmVector3d(0, 1, 0));
+            SmBSplineCurve* circ = NULL;
+            if (SmBSplineCurve::CreateCircleSegment(ctx(), 3, a, r, 0.0, 360.0, SM_CO_QUADRATIC, circ) != SM_SUCCESS || !circ) fail("no circle");
+            SmTArray<SmCurve*> c3, uv;
+            SmStatus st = s->CreateParallelProjectionCurves(ctx(), dom, *circ, SmVector3d(0, 0, -1), NULL, NULL, NULL, &c3, &uv);
+            total += c3.GetSize();
+            circles += std::string(i > 1 ? ", " : "") + "{\"centre\": " + pt(c) + ", \"radius\": " + num(r) + ", \"status\": " +
+                       std::to_string((int)st) + ", \"count\": " + std::to_string(c3.GetSize()) + ", \"curves\": " + curves_json(c3) + "}";
+        }
+        std::printf("{\"ok\": true, \"status\": \"ok\", \"count\": %lu, \"circles\": [%s]}\n", (unsigned long)total, circles.c_str());
+        return 0;
+    }
+
+    // ptsolve surf min|max|normalize nx ny nz [--move=x,y,z (SmAxis2Placement origin, x along
+    // +x, y along +z: my_test_sp_nurb's sA2P2)]: GlobalPointSolve (SM_SR_ALL) from each point of
+    // an nx × ny × nz grid over the surface's box (my_test_surface_point_extrema,
+    // smSurfaceTest.cpp:404); each solution's uv, point and distance.
+    if (cmd == "ptsolve" && argc == 7) {
+        SmBSplineSurface* s = load_surface(argv[2]);
+        if (has_opt("move")) {
+            std::string v = g_opts["move"];
+            double x = 0, y = 0, z = 0;
+            if (std::sscanf(v.c_str(), "%lf,%lf,%lf", &x, &y, &z) != 3) fail("bad --move");
+            SmAxis2Placement a;
+            a.SetCanonical(SmPoint3d(x, y, z), SmVector3d(1, 0, 0), SmVector3d(0, 0, 1));
+            s->Transform(a);
+        }
+        SmExtent2d dom = surface_dom(s);
+        std::string op = argv[3];
+        SmSolverOperationType so = op == "min" ? SM_SO_MINIMIZE : op == "max" ? SM_SO_MAXIMIZE : op == "normalize" ? SM_SO_NORMALIZE : SM_SO_INTERSECT;
+        if (so == SM_SO_INTERSECT) usage();
+        long n[3] = {std::atol(argv[4]), std::atol(argv[5]), std::atol(argv[6])};
+        SmExtent3d box = surface_box(s, dom);
+        const double E = SM_EFF_ZERO;
+        std::string out;
+        ULONG total = 0, targets = 0;
+        // (The grid exactly as the test steps it, including its i = n jump for a flat box.)
+        double size[3] = {box.GetMax().x - box.GetMin().x, box.GetMax().y - box.GetMin().y, box.GetMax().z - box.GetMin().z};
+        double d[3];
+        for (int a = 0; a < 3; ++a) d[a] = n[a] < 2 ? 0.0 : size[a] / (n[a] - 1 + E);
+        for (long i = 0; i < n[0]; ++i) {
+            if (size[0] / (n[0] - 1 + E) < E) i = n[0];
+            for (long j = 0; j < n[1]; ++j) {
+                if (size[1] / (n[1] - 1 + E) < E) j = n[1];
+                for (long k = 0; k < n[2]; ++k) {
+                    if (size[2] / (n[2] - 1 + E) < E) k = n[2];
+                    SmPoint3d p(box.GetMin().x + i * d[0], box.GetMin().y + j * d[1], box.GetMin().z + k * d[2]);
+                    SmSolutionArray sols;
+                    SmStatus st = s->GlobalPointSolve(dom, so, p, SM_ZONE_TOL_3D, NULL, SM_SR_ALL, sols);
+                    std::string e;
+                    for (ULONG q = 0; q < sols.GetSize(); ++q) {
+                        SmPoint2d uv(sols[q].m_vStart[0], sols[q].m_vStart[1]);
+                        SmPoint3d f;
+                        s->EvaluatePoint(uv, f);
+                        e += std::string(q ? ", " : "") + "{\"uv\": [" + num(uv.x) + ", " + num(uv.y) + "], \"point\": " + pt(f) +
+                             ", \"distance\": " + num(f.DistanceBetween(p)) + "}";
+                    }
+                    total += sols.GetSize();
+                    out += std::string(targets++ ? ", " : "") + "{\"target\": " + pt(p) + ", \"status\": " + std::to_string((int)st) +
+                           ", \"solutions\": [" + e + "]}";
+                }
+            }
+        }
+        std::printf("{\"ok\": true, \"status\": \"ok\", \"count\": %lu, \"targets\": [%s]}\n", (unsigned long)total, out.c_str());
+        return 0;
+    }
+
+    // closest surf x y z [x y z ...]: GlobalPointSolve SM_SO_MINIMIZE, SM_SR_SINGLE, tolerance
+    // 1e-6, over the natural domain (my_test_surface_closest_point, smSurfaceTest.cpp:632; no
+    // drop distance, so the nearest point is reported however far).
+    if (cmd == "closest" && argc >= 6 && (argc - 3) % 3 == 0) {
+        SmBSplineSurface* s = load_surface(argv[2]);
+        SmExtent2d dom = s->GetNaturalUVDomain();
+        std::string out;
+        for (int i = 3; i + 2 < argc; i += 3) {
+            SmPoint3d p(std::atof(argv[i]), std::atof(argv[i + 1]), std::atof(argv[i + 2]));
+            SmSolutionArray sols;
+            SmStatus st = s->GlobalPointSolve(dom, SM_SO_MINIMIZE, p, 1e-6, NULL, SM_SR_SINGLE, sols);
+            std::string e = "{\"target\": " + pt(p) + ", \"status\": " + std::to_string((int)st);
+            if (sols.GetSize() > 0) {
+                SmPoint2d uv(sols[0].m_vStart[0], sols[0].m_vStart[1]);
+                SmPoint3d f;
+                s->EvaluatePoint(uv, f);
+                e += ", \"point\": " + pt(f) + ", \"distance\": " + num(f.DistanceBetween(p));
+            }
+            out += std::string(i > 3 ? ", " : "") + e + "}";
+        }
+        std::printf("{\"ok\": true, \"status\": \"ok\", \"points\": [%s]}\n", out.c_str());
         return 0;
     }
 

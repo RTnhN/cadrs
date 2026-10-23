@@ -43,6 +43,15 @@ stderr (SMLib's error callback, per-face areas, and per-command details).
 | `silhouette in vx vy vz` | `my_test_tsurf_silhouette` (smTopoTest.cpp) | per face `CreateSilhouetteCurves` on the face UV domain then `SmFace::CreateCurvesByTrimming` (`bDoTrim`); approx tol 1e-3, angle 20°; parallel view unless `--persp` (then the vector is the eye point; the tests use `--persp`); `--move` |
 | `tess in chord angleDeg [maxEdge [maxAspect]]` | `my_test_one_tess` (smTessTest.cpp:82) | `SmCurveTessDriver(0, chord, angle)`, `SmSurfaceTessDriver(chord, angle, maxEdge, 0.0, 0.001, maxAspect)`, on a copy of the brep; maxEdge < 0 = fraction of the box size as in the test; triangles collected through an `SmPolygonOutputCallback` (`SM_PO_TRIANGLES`) |
 | `cci file.smp` | `my_test_cci_adv` / `my_test_GlobalCC_intersect` | every pair of the part's curves over their natural intervals, tol `SM_ZONE_TOL_3D` (`--tol`) |
+| `psection surf nx ny nz k` | `my_test_planar_section` (smSurfaceTest.cpp:667) | `SmSurface::CreatePlanarSectionCurves` at k planes through `box.Evaluate(t,t,t)`, t = i/(k−1), of the surface's `CalculateBoundingBox` (its control hull, grown by the zone tolerance); default tolerances; per plane its point and curves |
+| `pproject surf k` | `my_test_parallel_projection` (smSurfaceTest.cpp:761) | quadratic circles of radius i/k of half the box's larger width about the middle of the box's top, `CreateParallelProjectionCurves` along −z; per circle its centre, radius and curves |
+| `ptsolve surf min\|max\|normalize nx ny nz` | `my_test_surface_point_extrema` (smSurfaceTest.cpp:404) | `GlobalPointSolve` (`SM_SR_ALL`, `SM_ZONE_TOL_3D`) from each point of the nx × ny × nz grid over the box, stepped as the test steps it; per target its solutions' uv, point and distance. `--move=x,y,z` transforms the surface first by `SetCanonical((x,y,z), +x, +z)` (`my_test_sp_nurb`) |
+| `closest surf x y z ...` | `my_test_surface_closest_point` (smSurfaceTest.cpp:632) | `GlobalPointSolve` `SM_SO_MINIMIZE`, `SM_SR_SINGLE`, tolerance 1e-6, natural domain, no drop distance; per point the nearest point and distance |
+
+The surface commands take a bare B-spline surface, `surf`: a `.sms` or `.srf` file
+(`SmBSplineSurface::ReadFromFile`), or `grid:tx:ty:tz:nu:nv:du:dv:x0:y0:z0:...`
+(`my_create_nurb_surf`: nu × nv control points, v fastest, moved by t, clamped uniform knots);
+`--dom=a,b,c,d` restricts it to the fractions (a, b) to (c, d) of its natural uv domain.
 
 Outputs (`ssi` curves have their length, ends and 8 samples evenly in the parameter, ends
 included; `type` is `SmTsectCurveType`; SMLib statuses are `1000` for success):

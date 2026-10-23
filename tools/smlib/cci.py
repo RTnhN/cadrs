@@ -1,7 +1,9 @@
 """SMLib's curve–curve and curve–surface intersection tests: the `cci-advanced` suite
 (smAdvancedTest.cpp, `my_test_cci_adv`: the two curves of `cci_bug_rhino1.smp`) and the unit
 tests it sits beside (`my_test_cci_analy`, `my_test_cci_tangent`, `my_test_cci_coincidence`,
-`my_test_cci_nurb` in smCurveTest.cpp; `my_test_csi_analy` in smSurfaceTest.cpp), all through
+`my_test_cci_nurb`, `my_test_cci_tol`, `my_test_analytic_curves` and the plane crossing of
+`my_test_curve_properties` in smCurveTest.cpp; `my_test_csi_analy`, `my_test_csi_tangency` and
+`my_test_csi_tol` in smSurfaceTest.cpp), all through
 `GlobalCurveIntersect` at `SM_ZONE_TOL_3D` (1e-5): a near miss within it is an intersection.
 
 Ported by hand (the `PRELUDE`): SMLib's B-spline lines, circles and ellipses (`my_create_line`,
@@ -26,7 +28,8 @@ TITLE = "curve-curve and curve-surface intersection"
 
 NOT_CONVERTED = [
     ("my_test_cci_analy 1", "times 100000 `GlobalPointSolve` calls: a benchmark, no assert"),
-    ("my_test_cci_tol (smCurveTest.cpp)", "not run by SMLib's suites"),
+    ("my_test_analytic_curves: the parabola and the hyperbola", "the kernel has no parabola or hyperbola curve"),
+    ("my_test_csi_coincidence (smSurfaceTest.cpp:1283)", "curves lying on the surface: `ssi::curve_surface` returns no overlap ranges"),
     ("my_test_csi_nurb (smSurfaceTest.cpp:3874)",
      "its surface comes from `my_create_crease_surf` over the `my_load_surf1_pts` data with creases, not ported"),
     ("my_test_csi_analy counts", "SMLib's line grid comes from its B-spline's bounding box (the control hull) and its counts include seam duplicates: only none against some is compared"),
@@ -346,6 +349,135 @@ fn csi(p: &Patch, nx: usize, ny: usize, any: bool) -> Result<(), String> {
     }
     Ok(())
 }
+/// `my_test_cci_tol`: `a` and `b` meet within TOL at `n` points, points closer than 10 TOL
+/// counted once (SMLib keeps a near tangency's two points when they are more than its tolerance
+/// apart, and counts a closed curve's seam duplicates, which this doesn't).
+fn expect_near(a: &C, b: &C, n: usize) -> Result<(), String> {
+    let pts = cci(a, b)?;
+    let d = intersect::distinct(&pts, 10.0 * TOL);
+    if d.len() != n {
+        return Err(format!("{} points apart ({} in all), SMLib finds {n}", d.len(), pts.len()));
+    }
+    Ok(())
+}
+
+/// The case of `my_test_cci_tol` (smCurveTest.cpp:4054).
+fn tol_case(case: &str) -> Result<(), String> {
+    let line = line([1.0, -2.0, 0.0], [3.0, -2.0, 0.0]);
+    let ell = ellipse(1.0, 0.5, [-2.0, -2.0, 0.0]);
+    match case {
+        "circle_over_line" => expect_near(&circle(0.500005, [2.5, -1.5, 0.0]), &line, 2),
+        "line_near_circle" => expect_near(&line, &circle(0.499999, [1.5, -1.5, 0.0]), 1),
+        "circle_in_ellipse" => expect_near(&circle(0.499999, [-2.0, -2.0, 0.0]), &ell, 2),
+        "circle_over_ellipse" => expect_near(&circle(0.999999, [-2.0, -2.0, 0.0]), &ell, 4),
+        "nurbs_near_miss" => {
+            let lift = |p: &[[f64; 3]; 7]| p.map(|q| [q[0], q[1], 5e-6]);
+            const B: [[f64; 3]; 7] = [[0.0, 0.0, 0.0], [0.2, 0.2, 0.0], [0.4, 0.3, 0.0], [0.6, -0.4, 0.0], [1.0, 0.0, 0.0], [1.1, 0.1, 0.0], [1.0, 0.3, 0.0]];
+            expect_near(&nurb([-0.5, -2.0, 0.0], &NURB_A, 3), &nurb([-0.5, -2.0, 0.0], &lift(&B), 3), 3)
+        }
+        _ => Err(format!("{case} isn't ported")),
+    }
+}
+
+/// `my_test_GlobalCSI` (smSurfaceTest.cpp:961): where `c` meets the patch, each point checked
+/// on the surface and the curve; the points `tol` or more apart.
+fn csi_curve(p: &Patch, c: &C, tol: f64) -> Result<usize, String> {
+    let mut pts = Vec::new();
+    for t in ssi::curve_surface(&c.c, c.t0, c.t1, &p.surf) {
+        let q = c.c.point(t);
+        if !p.contains(&q) {
+            continue;
+        }
+        let d = dist(&p.surf, &q);
+        if d > tol {
+            return Err(format!("{q:?} is {d:.1e} off the surface"));
+        }
+        pts.push(q);
+    }
+    Ok(intersect::distinct(&pts, tol).len())
+}
+
+/// `my_test_csi_tangency` (smSurfaceTest.cpp:1100): the unit cylinder about z against unit
+/// circles (`circles`) moved out past touching it, or lines y = c moved out past its side, in
+/// 22 steps of 2e-3/22 through tangency at heights i/21, at a tolerance of 1.0001e-3. SMLib finds
+/// 2 points while the curve crosses (`crossing`) and 1 near miss after (the step at tangency
+/// itself skipped).
+fn tangency(circles: bool, crossing: bool) -> Result<(), String> {
+    let tol = 1.0001e-3;
+    let cyl = cone_patch([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], 1.0, 1.0, 0.0, 360.0, 1.0);
+    let dyd = 2.0e-3 / 22.0;
+    let (mut y, mut yc) = (1.0 - 1.0e-3, -2.0 + 1.0e-3);
+    let mut errs = Vec::new();
+    for i in 0..=21 {
+        let z = i as f64 / 21.0;
+        // How far past tangency: > 0 while crossing.
+        let over = if circles { yc + 2.0 } else { 1.0 - y };
+        let c = if circles { circle(1.0, [0.0, yc, z]) } else { line([-1.0, y, z], [1.0, y, z]) };
+        y += dyd;
+        yc -= dyd;
+        if over.abs() < 0.05 * dyd || (over > 0.0) != crossing {
+            continue;
+        }
+        let want = if crossing { 2 } else { 1 };
+        match csi_curve(&cyl, &c, tol) {
+            Ok(n) if n != want => errs.push(format!("step {i} ({over:+.1e} past tangency): {n} points, SMLib finds {want}")),
+            Ok(_) => {}
+            Err(e) => errs.push(format!("step {i}: {e}")),
+        }
+    }
+    if errs.is_empty() { Ok(()) } else { Err(errs.join("; ")) }
+}
+
+/// `my_test_csi_tol` (smSurfaceTest.cpp:1171): lines from (0, y, 0.5 + y) to (2.5, y, 0.5 + y),
+/// y stepped by 1.0001e-6 from 0, against a unit cylinder about z through the origin, crossing
+/// it at its seam (`seam`), or through (2.5, 0, 0), crossing it at a knot of its B-spline: one
+/// point each (SMLib's two at y = 0 are the seam's two sides, one point).
+fn csi_tol(seam: bool) -> Result<(), String> {
+    let cyl = cone_patch([if seam { 0.0 } else { 2.5 }, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], 1.0, 1.0, 0.0, 360.0, 1.0);
+    let mut y = 0.0;
+    for i in 0..20 {
+        let n = csi_curve(&cyl, &line([0.0, y, 0.5 + y], [2.5, y, 0.5 + y]), TOL).map_err(|e| format!("step {i}: {e}"))?;
+        if n != 1 {
+            return Err(format!("step {i} (y = {y:.1e}): {n} points, SMLib finds 1"));
+        }
+        y += 1.0001 * TOL / 10.0;
+    }
+    Ok(())
+}
+
+/// `my_test_curve_properties`' first block (smCurveTest.cpp:7999): the unit circle against the
+/// plane y = 0.99999, which it crosses at two points 9e-3 apart (SMLib: 2).
+fn circle_near_tangent_plane() -> Result<(), String> {
+    let c = circle(1.0, [0.0; 3]);
+    let f = Frame { o: P3::new(0.0, 0.99999, 0.0), x: V3::x(), y: V3::z(), z: -V3::y() };
+    let ts = ssi::curve_surface(&c.c, c.t0, c.t1, &Surface::Plane { f });
+    let pts: Vec<P3> = ts.iter().map(|t| c.c.point(*t)).collect();
+    for q in &pts {
+        if (q.y - 0.99999).abs() > 1e-9 {
+            return Err(format!("{q:?} is off the plane"));
+        }
+    }
+    let n = intersect::distinct(&pts, TOL).len();
+    if n != 2 {
+        return Err(format!("{n} points, SMLib finds 2"));
+    }
+    Ok(())
+}
+
+/// `my_test_analytic_curve` (smCurveTest.cpp:4824): 11 points evenly along the curve's range,
+/// each found again (`Curve::closest`) to within TOL.
+fn point_solve(c: &C) -> Result<(), String> {
+    for i in 0..=10 {
+        let t = if i == 10 { c.t1 } else { c.t0 + (c.t1 - c.t0) * i as f64 / 10.0 };
+        let p = c.c.point(t);
+        let s = c.c.closest(&p, c.t0, c.t1);
+        let d = (c.c.point(s) - p).norm();
+        if d > TOL || s < c.t0 - 1e-12 || s > c.t1 + 1e-12 {
+            return Err(format!("the point at t = {t}: found at t = {s}, {d:.1e} away"));
+        }
+    }
+    Ok(())
+}
 '''
 
 # (name, call, doc)
@@ -401,11 +533,35 @@ CSI = [
 ]
 
 
+TOL_CASES = [
+    ("circle_over_line", "a circle of radius 0.500005 dipping 5e-6 below a line: two crossings 4.5e-3 apart (2)"),
+    ("line_near_circle", "a line 1e-6 clear of a circle of radius 0.499999: a near miss (1)"),
+    ("circle_in_ellipse", "a circle of radius 0.499999 inside a 1 × 0.5 ellipse, 1e-6 clear of it at both ends of its minor axis (2)"),
+    ("circle_over_ellipse", "a circle of radius 0.999999 round the same ellipse, crossing it twice near each end of its major axis (SMLib: 8, the 4 crossings and its seam's end points)"),
+    ("nurbs_near_miss", "two cubic B-splines 5e-6 apart in z, crossing in plan (3)"),
+]
+
+CSI_MORE = [
+    ("csi_tangency_circles_crossing", "tangency(true, true)", "unit circles crossing the unit cylinder ever less deeply up to tangency (2 each)"),
+    ("csi_tangency_circles_near_miss", "tangency(true, false)", "unit circles clear of the unit cylinder by up to 9e-4, within the 1.0001e-3 tolerance (1 each)"),
+    ("csi_tangency_lines_crossing", "tangency(false, true)", "lines crossing the unit cylinder ever closer to its side up to tangency (2 each)"),
+    ("csi_tangency_lines_near_miss", "tangency(false, false)", "lines clear of the unit cylinder by up to 9e-4, within the 1.0001e-3 tolerance (1 each)"),
+]
+
+POINT_SOLVE = [
+    ("line", "C { c: Curve::Line { o: P3::new(1.0, 0.0, 0.0), d: V3::z() }, t0: -1.0, t1: 2.0 }", "a line along z over [-1, 2]"),
+    ("circle", "C { c: Curve::Circle { c: P3::new(1.0, 0.0, 0.0), x: V3::x(), y: V3::z(), r: 0.5 }, t0: 0.0, t1: std::f64::consts::FRAC_PI_2 }", "a quarter circle of radius 0.5 in the xz plane"),
+    ("ellipse", "C { c: Curve::Ellipse { c: P3::new(1.0, 0.0, 0.0), x: V3::x(), y: V3::z(), a: 1.0, b: 0.5 }, t0: 0.0, t1: 1.5 * std::f64::consts::PI }", "three quarters of a 1 × 0.5 ellipse in the xz plane"),
+]
+
+
 def extract(ctx):
     cur = ctx.source("smCurveTest.cpp")
-    for f in ("my_test_cci_analy", "my_test_cci_tangent", "my_test_cci_coincidence", "my_test_cci_nurb"):
+    for f in ("my_test_cci_analy", "my_test_cci_tangent", "my_test_cci_coincidence", "my_test_cci_nurb", "my_test_cci_tol", "my_test_analytic_curves", "my_test_curve_properties"):
         assert "PT_EXPORT SmStatus %s" % f in cur, f
-    assert "my_test_csi_analy" in ctx.source("smSurfaceTest.cpp")
+    srf = ctx.source("smSurfaceTest.cpp")
+    for f in ("my_test_csi_analy", "my_test_csi_tangency", "my_test_csi_tol"):
+        assert "PT_EXPORT SmStatus %s" % f in srf, f
     cases = []
     rhino = Fixture("TestFiles/pt_TestFiles/cci_bug_rhino1.smp")
     r = oracle_run(["cci", ctx.path(rhino.rel)])
@@ -421,4 +577,13 @@ def extract(ctx):
     for name, make, grid, count, what in CSI:
         cases.append(Case("csi_" + name, "SMLib `my_test_csi_analy`: %s against a %d × %d grid of lines along z (SMLib: %d points)." % (what, grid, grid, count),
                           "csi(&%s, %d, %d, true)" % (make, grid, grid)))
+    for name, what in TOL_CASES:
+        cases.append(Case("cci_tol_" + name, "SMLib `my_test_cci_tol`: %s." % what, 'tol_case("%s")' % name))
+    for name, call, what in CSI_MORE:
+        cases.append(Case(name, "SMLib `my_test_csi_tangency`: %s." % what, call))
+    cases.append(Case("csi_tol_seam", "SMLib `my_test_csi_tol`: lines crossing a unit cylinder at its seam, moved off it in steps of 1e-6 (1 each; SMLib's 2 on the seam are its two sides).", "csi_tol(true)"))
+    cases.append(Case("csi_tol_knot", "SMLib `my_test_csi_tol`: the same lines crossing a unit cylinder at a knot of its B-spline (1 each).", "csi_tol(false)"))
+    cases.append(Case("cci_circle_near_tangent_plane", "SMLib `my_test_curve_properties`: the unit circle crossing the plane y = 0.99999 (2).", "circle_near_tangent_plane()"))
+    for name, make, what in POINT_SOLVE:
+        cases.append(Case("cci_point_solve_" + name, "SMLib `my_test_analytic_curves`: 11 points along %s found again on it." % what, "point_solve(&%s)" % make))
     return cases
