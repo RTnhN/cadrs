@@ -644,3 +644,104 @@ fn two_overlapping_cubes_united() {
         },
     );
 }
+
+// ---------------------------------------------------------------------------------------------
+// Threads
+
+#[test]
+fn a_thread_wound_twice_round_a_cylinder_joins_it() {
+    // A trapezoid (2.4 high at x = R, 1.4 high at x = R + 1.425) in the XZ plane swept along two
+    // turns of a helix of radius R and pitch P (cubic Bézier pieces, sixteen a turn), its inner
+    // side on the cylinder of radius R it winds round. The cylinder's face round the thread
+    // wraps it twice, so no seam runs from its bottom to its top clear of the thread: the
+    // union must keep that face in pieces instead of merging them into an invalid face.
+    //
+    // The thread only touches the cylinder, so the union's volume is the sum of the two. By
+    // Pappus (a screw motion), the thread's is the profile's area 2.7075 × 2π × its centroid's
+    // x, 19.025, × 2 turns (the Bézier helix is within 1e-8 of it). The area loses the contact
+    // twice: a band 2.4 wide wound twice, 2.4 × 2πR × 2, less its corner below z = 0, where the
+    // band's lower edge z = −1.2 + P u / 2π is under the cylinder's bottom (u < u₀ = 2.4π / P):
+    // R (1.2 u₀ − P u₀² / 4π).
+    use std::f64::consts::TAU;
+    let (r, pitch, per) = (18.375, 4.125, 16usize);
+    let th = TAU / per as f64;
+    let kk = 4.0 / 3.0 * (th / 4.0).tan();
+    let pt = |a: f64| Point3::new(r * a.cos(), r * a.sin(), pitch * a / TAU);
+    let tan = |a: f64| nalgebra::Vector3::new(-r * a.sin(), r * a.cos(), pitch / TAU);
+    let path: Vec<PathCurve> = (0..2 * per)
+        .map(|i| {
+            let (a0, a1) = (th * i as f64, th * (i + 1) as f64);
+            PathCurve::Bezier3 {
+                poles: vec![pt(a0), pt(a0) + tan(a0) * kk, pt(a1) - tan(a1) * kk, pt(a1)],
+                weights: vec![],
+            }
+        })
+        .collect();
+    let front = Plane {
+        origin: Point3::origin(),
+        x_dir: nalgebra::Vector3::x_axis(),
+        normal: -nalgebra::Vector3::y_axis(),
+    };
+    let pts = [(r, -1.2), (19.8, -0.7), (19.8, 0.7), (r, 1.2)];
+    let outer = Loop {
+        curves: (0..4)
+            .map(|i| Curve2::Line {
+                a: Point2::new(pts[i].0, pts[i].1),
+                b: Point2::new(pts[(i + 1) % 4].0, pts[(i + 1) % 4].1),
+                source: None,
+            })
+            .collect(),
+    };
+    let profile = Profile::new(
+        front,
+        vec![Region {
+            outer,
+            holes: vec![],
+            source: None,
+        }],
+    );
+    let mut k = NativeKernel::new();
+    let thread = k
+        .sweep_with(
+            &profile,
+            &SweepSpec {
+                body: BodyKind::Solid,
+                path,
+                control: SweepControl::None,
+                faces: vec![],
+            },
+        )
+        .unwrap()
+        .bodies[0];
+    let cyl = extrude(&mut k, circle(0.0, 0.0, r), vec![], 10.0);
+    let (mt, mc) = (
+        k.mass_properties(thread).unwrap(),
+        k.mass_properties(cyl).unwrap(),
+    );
+    let pappus = 2.7075 * TAU * 19.025 * 2.0;
+    assert!(
+        (mt.volume - pappus).abs() < 1e-8 * pappus,
+        "thread volume {} against Pappus {pappus}",
+        mt.volume
+    );
+    let u0 = 2.4 * PI / pitch;
+    let contact = 2.4 * TAU * r * 2.0 - r * (1.2 * u0 - pitch * u0 * u0 / (2.0 * TAU));
+    let b = k.boolean(BoolOp::Union, cyl, &[thread]).unwrap().bodies[0];
+    let issues = k.get(b).unwrap().check_with(CheckLevel::Full);
+    assert!(issues.is_empty(), "invalid body: {issues:?}");
+    let m = k.mass_properties(b).unwrap();
+    let (vol, area) = (
+        mc.volume + mt.volume,
+        mc.surface_area + mt.surface_area - 2.0 * contact,
+    );
+    assert!(
+        (m.volume - vol).abs() < 1e-8 * vol,
+        "volume {} against {vol}",
+        m.volume
+    );
+    assert!(
+        (m.surface_area - area).abs() < 1e-8 * area,
+        "area {} against {area}",
+        m.surface_area
+    );
+}
