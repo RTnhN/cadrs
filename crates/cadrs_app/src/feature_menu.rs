@@ -6,7 +6,9 @@
 //!   pointer when it is over the sketch plane.
 //! - **Show dimensions** / **Hide dimensions**: a sketch that isn't being edited shows its
 //!   dimensions in the view.
-//! - **Show** / **Hide** a sketch (as its row's eye), **Show all sketches** (one undo step).
+//! - **Show** / **Hide** a sketch or a Plane feature (as its row's eye), **Show all sketches** /
+//!   **Hide all sketches** and, on a plane's row (a default plane's too), **Show all planes** /
+//!   **Hide all planes** (each one undo step; the default planes are view state, not undone).
 //! - **Zoom to selection**: fits the view to what the feature made (its faces), or to the
 //!   sketch.
 //! - **Dynamic suppression ▸**: suppression driven by a variable or a configuration; cadrs has
@@ -149,23 +151,36 @@ pub fn toggle_dimensions(world: &mut World, id: FeatureId) {
     }
 }
 
-/// Show or hide a sketch (one undo step), as its row's eye does.
+/// Show or hide a sketch or a Plane feature (one undo step), as its row's eye does.
 pub fn set_sketch_visible(world: &mut World, id: FeatureId, visible: bool) {
     let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
         return;
     };
-    let Some(element) = doc.active_element().map(|e| e.id) else {
+    let Some(el) = doc.active_element() else {
         return;
     };
+    let element = el.id;
+    let plane = el
+        .feature(id)
+        .is_some_and(|f| matches!(f.kind, cadrs_core::FeatureKind::Plane(_)));
+    let mark = doc.history.undo_len();
     let _ = doc.execute(&SetSketchVisibility {
         element,
         sketch: id,
         visible: Some(visible),
     });
+    if plane {
+        doc.squash_element_since(
+            mark,
+            element,
+            if visible { "Show plane" } else { "Hide plane" },
+        );
+    }
 }
 
-/// Show all sketches: every hidden sketch of the Part Studio shown, as one undo step.
-pub fn show_all_sketches(world: &mut World) {
+/// Show all sketches / Hide all sketches: every hidden (shown) sketch of the Part Studio shown
+/// (hidden), as one undo step.
+pub fn set_all_sketches_visible(world: &mut World, visible: bool) {
     let hidden: Vec<FeatureId> = world
         .resource::<crate::parts::PartCache>()
         .hidden_sketches
@@ -187,7 +202,10 @@ pub fn show_all_sketches(world: &mut World) {
         .iter()
         .enumerate()
         .filter(|(i, f)| {
-            f.sketch().is_some() && *i < bar && hidden.contains(&f.id) && !off.contains(&f.id)
+            f.sketch().is_some()
+                && *i < bar
+                && hidden.contains(&f.id) != visible
+                && !off.contains(&f.id)
         })
         .map(|(_, f)| f.id)
         .collect();
@@ -199,10 +217,62 @@ pub fn show_all_sketches(world: &mut World) {
         let _ = doc.execute(&SetSketchVisibility {
             element,
             sketch,
-            visible: Some(true),
+            visible: Some(visible),
         });
     }
-    doc.squash_element_since(mark, element, "Show all sketches");
+    let label = if visible {
+        "Show all sketches"
+    } else {
+        "Hide all sketches"
+    };
+    doc.squash_element_since(mark, element, label);
+}
+
+/// Show all sketches.
+pub fn show_all_sketches(world: &mut World) {
+    set_all_sketches_visible(world, true);
+}
+
+/// Show all planes / Hide all planes: the default planes and every Plane feature (one undo
+/// step for the features; the default planes are view state).
+pub fn set_all_planes_visible(world: &mut World, visible: bool) {
+    world.resource_mut::<crate::viewport::PlanesVisible>().0 = [visible; 3];
+    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+        return;
+    };
+    let Some(el) = doc.active_element() else {
+        return;
+    };
+    let element = el.id;
+    let ids: Vec<FeatureId> = el
+        .features()
+        .iter()
+        .filter(|f| matches!(f.kind, cadrs_core::FeatureKind::Plane(_)))
+        .filter(|f| plane_shown(el, f.id) != visible)
+        .map(|f| f.id)
+        .collect();
+    if ids.is_empty() {
+        return;
+    }
+    let mark = doc.history.undo_len();
+    for sketch in ids {
+        let _ = doc.execute(&SetSketchVisibility {
+            element,
+            sketch,
+            visible: Some(visible),
+        });
+    }
+    let label = if visible {
+        "Show all planes"
+    } else {
+        "Hide all planes"
+    };
+    doc.squash_element_since(mark, element, label);
+}
+
+/// Whether a Plane feature is shown in the view (not hidden with its eye).
+pub fn plane_shown(el: &cadrs_core::Element, id: FeatureId) -> bool {
+    el.sketch_visibility(id) != Some(false)
 }
 
 /// Whether a sketch is shown in the view.
