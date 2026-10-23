@@ -240,6 +240,10 @@ pub struct PartOverride {
     /// The extrude whose dialog is open: its part is a translucent preview and its sketches are
     /// not consumed yet.
     pub editing: Option<FeatureId>,
+    /// The edited feature's stage is drawn over its result rather than over the parts before
+    /// it: a Shell's finished walls opaque, the material they add or take out faint over them,
+    /// and its picked faces (gone from the result) in yellow over everything.
+    pub over_result: bool,
     /// Leaves out this feature and the ones after it while set: the dialog's before/after
     /// slider is on "before" (P3.9, PS13.2).
     pub before: Option<FeatureId>,
@@ -313,10 +317,18 @@ fn ghosted_bases(
         }
     }
     if let Some(c) = cache.xray(part) {
-        bases = vec![c.base(); part.solid.faces.len()];
+        let mut base = c.base();
+        if cache.faint {
+            base.alpha = FAINT_CHANGE_ALPHA;
+        }
+        bases = vec![base; part.solid.faces.len()];
     }
     bases
 }
+
+/// The opacity of a change drawn over the result ([`PartCache::faint`]): the result reads
+/// through it.
+const FAINT_CHANGE_ALPHA: f32 = 0.25;
 
 /// What an extrude's (or revolve's) preview shows over the parts, through their walls (x-ray).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -567,6 +579,8 @@ pub struct PartCache {
     /// The Extrude dialog edits an Add or a Remove: [`Self::tool`] is the body it adds or the
     /// material it takes out, drawn over the parts through their walls.
     pub change: Option<Change>,
+    /// [`Self::tool`] is drawn faint over the result ([`PartOverride::over_result`]).
+    pub faint: bool,
     /// While a Sheet metal model's edges are picked on the parts before it (`PartOverride::staged`):
     /// the parts it makes, which the Parts list shows (`t0101.0.png`) though the view shows
     /// the parts before it. Empty otherwise.
@@ -1005,12 +1019,14 @@ impl PartCache {
     }
 
     /// Takes a finished rebuild's parts and errors. While `editing` is an Add extrude (the
-    /// last part feature), the parts are the ones before it and [`Self::tool`] its new body.
+    /// last part feature), the parts are the ones before it and [`Self::tool`] its new body
+    /// (`over_result`: the parts are the result, the body faint over them).
     fn apply(
         &mut self,
         build: &cadrs_core::rebuild::Build,
         editing: Option<FeatureId>,
         staged: bool,
+        over_result: bool,
     ) {
         let stage = build.stage.as_ref().filter(|(f, _)| Some(*f) == editing);
         let staged_parts = if staged && stage.is_some() {
@@ -1029,6 +1045,7 @@ impl PartCache {
         }
         self.staged_parts = staged_parts;
         let (parts, tool) = match stage {
+            Some((f, st)) if over_result => (build.parts.clone(), stage_bodies(*f, st, u32::MAX)),
             Some((f, st)) => (st.before.clone(), stage_bodies(*f, st, u32::MAX)),
             None => (build.parts.clone(), Vec::new()),
         };
@@ -1054,8 +1071,10 @@ impl PartCache {
                 Change::Add
             }
         });
-        if self.change != change {
+        let faint = over_result && change.is_some();
+        if self.change != change || self.faint != faint {
             self.change = change;
+            self.faint = faint;
             self.generation += 1;
         }
         self.tool = tool;
@@ -1360,6 +1379,7 @@ fn update_part_cache(
                     &build,
                     stage_feature(features, &over),
                     over.staged.is_some(),
+                    over.over_result,
                 );
             }
         } else if cache.superseded.is_some()
@@ -1375,6 +1395,7 @@ fn update_part_cache(
                     &build,
                     stage_feature(features, &over),
                     over.staged.is_some(),
+                    over.over_result,
                 );
                 cache.rebuilding = true;
             }
@@ -1412,6 +1433,7 @@ fn update_part_cache(
                 &build,
                 stage_feature(features, &over),
                 over.staged.is_some(),
+                over.over_result,
             );
             cache.pending = None;
             cache.superseded = None;
@@ -2179,19 +2201,24 @@ const GHOST_PART_ALPHA: f32 = 0.18;
 #[allow(clippy::too_many_arguments)]
 fn sync_ghost_meshes(
     cache: Res<PartCache>,
+    over: Res<PartOverride>,
     faces: Res<FaceSelection>,
     highlight: Res<PlaneHighlight>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<PartShading>>,
     mut mat: Local<Option<Handle<PartShading>>>,
     q: Query<Entity, With<GhostMesh>>,
-    mut last: Local<Option<(u64, Vec<Pick>, Option<Pick>)>>,
+    mut last: Local<Option<(u64, Vec<Pick>, Option<Pick>, bool)>>,
+    mut over_mat: Local<Option<Handle<PartShading>>>,
     mut commands: Commands,
 ) {
     // The selected faces filled in a subtle yellow, the hovered one lighter: picks land on the
-    // ghost, so it shows them.
+    // ghost, so it shows them. Over a result ([`PartOverride::over_result`]) only those, over
+    // everything (the faces a shell removes are gone from it), and nothing else of the ghost
+    // (it would lie on the result's own faces, fighting them for depth).
     let hovered = highlight.viewport.filter(|p| matches!(p, Pick::Face(..)));
-    let key = (cache.ghost_generation, faces.0.clone(), hovered);
+    let only_picks = over.over_result;
+    let key = (cache.ghost_generation, faces.0.clone(), hovered, only_picks);
     if last.as_ref() == Some(&key) {
         return;
     }
@@ -2199,13 +2226,25 @@ fn sync_ghost_meshes(
     for e in &q {
         commands.entity(e).try_despawn();
     }
-    let mat = mat
-        .get_or_insert_with(|| materials.add(PartShading::new(true, true)))
-        .clone();
+    let mat = if only_picks {
+        over_mat.get_or_insert_with(|| {
+            materials.add(PartShading {
+                bias: 1.0e7,
+                ..PartShading::new(true, true)
+            })
+        })
+    } else {
+        mat.get_or_insert_with(|| materials.add(PartShading::new(true, true)))
+    }
+    .clone();
     for part in &cache.ghost {
         let mut bases = cache.bases(part);
         for (fi, b) in bases.iter_mut().enumerate() {
-            b.alpha = b.alpha.min(GHOST_PART_ALPHA);
+            b.alpha = if only_picks {
+                0.0
+            } else {
+                b.alpha.min(GHOST_PART_ALPHA)
+            };
             let pick = part
                 .solid
                 .faces
@@ -2214,7 +2253,11 @@ fn sync_ghost_meshes(
             if pick.is_some_and(|p| faces.0.contains(&p)) {
                 *b = FaceBase {
                     rgb: SELECTED_BASE,
-                    alpha: if pick == hovered { 0.6 } else { 0.42 },
+                    alpha: if pick == hovered || only_picks {
+                        0.6
+                    } else {
+                        0.42
+                    },
                 };
             } else if pick.is_some() && pick == hovered {
                 *b = FaceBase {
@@ -2223,8 +2266,11 @@ fn sync_ghost_meshes(
                 };
             }
         }
+        if only_picks && bases.iter().all(|b| b.alpha == 0.0) {
+            continue;
+        }
         let mesh = meshes.add(part_base_mesh(part, true, &bases));
-        commands.spawn((
+        let mut e = commands.spawn((
             Name::new(format!(
                 "ghost-{}",
                 part.name.to_lowercase().replace(' ', "-")
@@ -2235,6 +2281,9 @@ fn sync_ghost_meshes(
             Transform::IDENTITY,
             DespawnOnExit(AppState::Document),
         ));
+        if only_picks {
+            e.insert(RenderLayers::layer(crate::viewport::OVERLAY_LAYER));
+        }
     }
 }
 
@@ -2489,7 +2538,11 @@ fn draw_part_edges(
                     &mut change_edges,
                     clip,
                     e.points.iter().map(|p| v3(*p)),
-                    c.edge(),
+                    if cache.faint {
+                        c.edge().with_alpha(FAINT_CHANGE_ALPHA)
+                    } else {
+                        c.edge()
+                    },
                 );
             }
         } else if preview {

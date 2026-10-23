@@ -1,0 +1,30 @@
+// The Shell dialog's preview on a 30 mm cube with every edge rounded 5 (the "extrude test"
+// document), its top's flat and four rounds removed, 2 mm: the result opaque as it will be, the
+// material the shell takes out (inward) or adds (outward) faint over it, the removed faces
+// yellow over everything, and the thickness arrow on the first of them.
+// 01 inward.
+// 02 the arrow dragged along itself: thicker walls, live.
+// 03 outward (the walls round over the cube's rounds as Onshape's do; the removed rounds' slabs
+//    go straight through).
+Scenario(
+    start: Some("document"),
+    steps: [
+        Custom("fixture rounded_cube_shell"),
+        Key("P"),
+        Key("F"),
+        DoubleClick(ui("feature-shell-1")),
+        WaitFor("shell-dialog"),
+        WaitFor("shell-thickness-arrow"),
+        MoveTo(1420, 900),
+        Wait(5),
+        Screenshot("01-inward-preview"),
+        Drag(ui("shell-thickness-arrow"), ui_at("shell-thickness-arrow", 0.5, 2.5)),
+        MoveTo(1420, 900),
+        Wait(5),
+        Screenshot("02-arrow-dragged"),
+        Click(ui("shell-thickness-flip")),
+        MoveTo(1420, 900),
+        Wait(5),
+        Screenshot("03-outward-preview"),
+    ],
+)

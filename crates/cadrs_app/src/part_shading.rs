@@ -38,6 +38,9 @@ pub struct PartShading {
     pub translucent: bool,
     /// The material of the parts a section leaves whole (its Exclude / Include items).
     pub unclipped: bool,
+    /// Added to a blended mesh's view depth when the see-through meshes are sorted (mm; more
+    /// positive draws later, over the rest): the Shell dialog's picked faces over its x-ray.
+    pub bias: f32,
     #[uniform(0)]
     pub params: PartShadingParams,
 }
@@ -50,6 +53,7 @@ impl PartShading {
             cap: false,
             translucent: false,
             unclipped: false,
+            bias: 0.0,
             params: PartShadingParams::default(),
         }
     }
@@ -110,6 +114,10 @@ impl Material for PartShading {
         } else {
             AlphaMode::Opaque
         }
+    }
+
+    fn depth_bias(&self) -> f32 {
+        self.bias
     }
 
     fn enable_prepass() -> bool {

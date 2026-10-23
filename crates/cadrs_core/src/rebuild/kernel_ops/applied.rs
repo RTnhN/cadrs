@@ -585,6 +585,7 @@ impl Rebuilder {
         let faces: Vec<Vec<cadrs_kernel::FaceId>> = groups.iter().map(|g| g.2.clone()).collect();
         let bodies = groups.iter().map(|g| (g.0, g.1)).collect();
         let (t, outward, hollow) = (x.thickness, x.outward, x.hollow);
+        let shelled: Vec<PartId> = groups.iter().map(|g| g.0).collect();
         self.per_part(id, "Shell", state, bodies, |this, i, body| {
             let spec = ShellSpec {
                 remove: faces[i].clone(),
@@ -594,6 +595,68 @@ impl Rebuilder {
                 sharp: false,
             };
             this.kernel.shell_with(body, &spec)
+        })
+        .map(|mut o| {
+            if self.stage_for == Some(id) {
+                o.stage = self.shell_stage(id, state, &o.state, &shelled, outward);
+            }
+            o
+        })
+    }
+
+    /// The Shell dialog's preview over the parts as they were, as an extrude's: outward, the
+    /// walls it adds (green); inward, the cavity it takes out (red: each part less what is left
+    /// of it). (Outward it also takes out the body the walls wrap, but that is the part on
+    /// screen, kept opaque inside its walls.)
+    fn shell_stage(
+        &mut self,
+        id: FeatureId,
+        before: &State,
+        after: &State,
+        shelled: &[PartId],
+        outward: bool,
+    ) -> Option<Stage> {
+        let after_parts: Vec<&PartState> = after
+            .parts
+            .iter()
+            .filter(|p| p.part.features.last() == Some(&id))
+            .collect();
+        let mut change: Vec<Arc<crate::solid::Solid>> = if outward {
+            after_parts.iter().map(|p| p.part.solid.clone()).collect()
+        } else {
+            let walls: Vec<BodyId> = after_parts.iter().filter_map(|p| p.body).collect();
+            let mut cavity = Vec::new();
+            for p in shelled.iter().filter_map(|p| before.part(*p)) {
+                let Some(body) = p.body else { continue };
+                let Ok(r) = self.kernel.boolean(BoolOp::Subtract, body, &walls) else {
+                    continue;
+                };
+                let inputs = [(body, &*p.names)];
+                for b in r.bodies {
+                    let solid = naming::name_body(&self.kernel, b, id.0, &r.history, &inputs)
+                        .map_err(|e| e.to_string())
+                        .and_then(|names| {
+                            crate::brep::solid_of(&self.kernel, b, &names, &after.geoms, Some(id.0))
+                        });
+                    if let Ok(s) = solid
+                        && !s.faces.is_empty()
+                    {
+                        cavity.push(Arc::new(s));
+                    }
+                    self.kernel.release(b);
+                }
+            }
+            cavity
+        };
+        if change.is_empty() {
+            return None;
+        }
+        let tool = change.remove(0);
+        Some(Stage {
+            before: before.parts.iter().map(|p| p.part.clone()).collect(),
+            tool,
+            more: change,
+            remove: !outward,
         })
     }
 
