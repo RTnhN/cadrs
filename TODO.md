@@ -5,16 +5,16 @@ Rust, no OpenCASCADE). New features wait until the release blockers are done.
 
 ## 1. Release blockers: correctness
 
-### Real documents rebuild at least as well as on main (OCCT)
+### Real documents rebuild at least as well as on main (the old OpenCASCADE-based release)
 
-All 149 stored documents (173 Part Studios) are rebuilt headlessly with kernel-10 and with main's
-OCCT kernel and compared per feature. Neither crashes or hangs.
+All 149 stored documents (173 Part Studios) are rebuilt headlessly with kernel-10 and with main
+(the old OpenCASCADE-based release) and compared per feature. Neither crashes or hangs.
 
 | | Feature errors | New vs main |
 |---|---|---|
 | kernel-10 at `bdf82f3` (first run) | 140 | 63 in 28 Part Studios |
 | kernel-10 at `dc8d23f` | ~84 | 4 |
-| main (OCCT) | 106 | — |
+| main (old release) | 106 | — |
 
 Done when no Part Studio has an error that main doesn't also have, and none rebuilds much slower.
 Rebuild a single document with `cadrs --document "<name>" --check`.
@@ -23,16 +23,20 @@ Fixed (dropped from the list): open sketch loops (d4 desk device v2/v3, d4_desk_
 squish's profile), the open-shell and 3-face booleans, plant_pot's extrude direction, the stroller,
 pvc and rianatest blends, Dr Browns cap's Fillet 1 (rounds round a window across the dome's seam)
 and the cable organizer's Fillet 2 (full rounds meeting at a corner), references (mate connectors, pibox thicken, t20, trimmer's unnamed
-faces), mirror_test's mesh import.
+faces), mirror_test's mesh import, squish's Extrude 6 (the fuzzy boolean) and the kids cart and
+trimmer.
 
 Still new against main:
+- [ ] Dr Browns: the cap's seam through a window (fb11, blocked; see Kernel correctness).
+- [ ] Flagged boolean results: volumemaker_f5, shape_type_a_a1, nightlight's Boolean 7.
 
 Differences without errors, still to check:
 - [ ] Part counts that differ from main (garbage_cabinet 7 vs 3, TubeAdapter 3 vs 1 from chamfer
   slivers, racingrigrumble 10 vs 8, and others in compare runs).
 - [ ] Small volume differences (pibox mount 1802.4 vs 1800.1 mm³, stroller chamfer 1429 vs 762 mm³).
-- [ ] Rebuild time: 896 s locally against main's 423 s on gray. pico2, nightlight_sphere,
-  ekgpulse, squish and trimmer are still 2–5× slower.
+- [ ] Rebuild time: 896 s locally against main's 423 s on gray, before the speed passes of
+  2026-10-22/23 (their commit messages: the user documents 358 s to 295 s). Measure again
+  against main. pico2, nightlight_sphere, ekgpulse, squish and trimmer were 2–5× slower.
 - [ ] Add a document check to the release process. A small headless runner rebuilds every
   document and compares against a saved result. Private documents stay out of the repo; only
   minimal dumped bodies go in as regression fixtures.
@@ -40,39 +44,41 @@ Differences without errors, still to check:
 ### Kernel correctness (independent review 4, 7.45/10 at `b589424`)
 
 - [ ] Fillets and blends:
-  - occt_blend: 96 known failures (most "area differs" ones pick another edge than OCCT's
-    explode order, and five expect OCCT's own failure);
-  - SMLib fillets: 42/100 pass (the sheet inputs' results compared as sheets, on their area);
-    the tangent-chain cases whose face pair changes at a vertex (group A: 116, 226, 231, 234,
-    237, 401, 410, 411, 412, 421) each stop on another limit past the junction (a fillet larger
-    than the round it runs over, a rail running off a face, a crease of 1° taken as tangent);
-  - no passing occt_blend or SMLib case needs the tool-and-boolean fallback any more.
-- [ ] Booleans: 166 occt_boolean known failures (section lengths, sub-shape counts, open shells, areas).
-- [ ] Offsets: 193 occt_offset known failures (101 of them B-spline wire offsets); smlib_offset 23/29.
-- [ ] A merged face's new seam can run through one of its holes. The boolean merges the
-  pieces of one face back (`unify::merge_group`) and gives the merged face a seam at a vertex of
-  its boundary chain. In Dr Browns cap that put the seam at u = 0, inside the span of a window
-  across the dome's seam. The fillet then can't place its cuts; `fillet::open_seam_holes` works
-  around it. Three fixes each fixed the cap, or broke `smlib_offset offset_12_offset_bracket2`
-  ("open shell") on the Ryzen box, where it still passes on gray:
-  (a) cutting the seam at the hole afterwards (`cut_seams_at_holes` on the merged face or the
-  boolean's output) fixed the cap but broke offset_12;
-  (b) choosing a seam vertex clear of the holes kept offset_12, but the cap's chain has no such
-  vertex;
-  (c) splitting the chain at a clear u fixed the cap but broke offset_12 again.
-  The inputs are in `doc_fixtures/drbrowns_window_{target,tool}.body` (private, outside the
-  repository).
-- [ ] `explode` should list degenerated edges as OCCT's does. That would turn 13 blend topology
-  mismatches into real comparisons.
-- [ ] The BRep reader:
-  - 5 dataset files that OCCT reads;
-  - CFI_5_b12fgg.rle edge count;
-  - loose edges and vertices next to faces;
-  - wire-only files.
-- [ ] STEP/IGES: 128 of OCCT's 389 dataset files don't read clean (`tests/exchange_corpus.rs`).
-- [ ] Fillet speed: 1.11× OCCT on occt_blend and 1.17× on smlib_fillet (CPU times, each case run
-  by both in turn: the shared machine's load moves either side alone by tens of percent); the
-  goal is at or below OCCT. The result's check is about 40% of a local fillet's time.
+  - occt_blend: 89 known failures (most "area differs" ones pick another edge than the script's
+    explode order, and five expect the reference kernel's own failure);
+  - SMLib fillets: 43/100 pass (the sheet inputs' results compared as sheets, on their area);
+    group A, the tangent-chain cases whose face pair changes at a vertex (10 cases: 116, 226,
+    231, 234, 237, 401, 410, 411, 412, 421), each stops on another limit past the junction (a
+    fillet larger than the round it runs over, a rail running off a face, a crease of 1° taken as
+    tangent); groups E, G and C are still open;
+  - no occt_blend case falls back to the tool-and-boolean blend any more; fillets take about
+    1.1× OCCT's time on occt_blend and 1.2× on smlib_fillets.
+- [ ] Booleans: 59 occt_boolean known failures (section lengths, sub-shape counts, open shells, areas).
+  A boolean now checks that its result's faces don't cross and flags a result that does
+  (`take_invalid_results`; `CADRS_BOOL_STRICT=1` makes it an error). Three booleans still
+  return a flagged result: volumemaker_f5, shape_type_a_a1 and nightlight's Boolean 7.
+- [ ] Offsets: 133 occt_offset known failures; smlib_offset has 4 (offset_04, 05, 07, 08).
+- [ ] Remaining known failures: about 486 in all (`tools/occt_known_failures.txt`,
+  `tools/smlib_known_failures/`); besides the above they are in feat (47), pipe (27), sewing
+  (20), heal (12), thrusection (10), the SMLib ssi suites and a few others.
+- [ ] Dr Browns cap: a merged face's new seam can run through one of its holes. The boolean
+  merges the pieces of one face back (`unify::merge_group`) and gives the merged face a seam at a
+  vertex of its boundary chain; in the cap that put the seam at u = 0, inside the span of a
+  window across the dome's seam, and the fillet can't place its cuts (`fillet::open_seam_holes`
+  works around it). The seam fix (fb11) makes the cap pass, but it breaks
+  `smlib_offset offset_12_offset_bracket2` ("open shell"): offset_12 has a near-tangent
+  cylinder, and the tube `offset/round.rs` builds there has a radius 1.6e-3 off. Fix the tube
+  first, then land fb11. Earlier tries: cutting the seam at the hole afterwards
+  (`cut_seams_at_holes`) and splitting the chain at a clear u each broke offset_12; no seam vertex
+  clear of the holes exists in the cap's chain. The inputs are in
+  `doc_fixtures/drbrowns_window_{target,tool}.body` (private, outside the repository).
+- [ ] `explode` in the test harness should list degenerated edges in the scripts' order. That
+  would turn 13 blend topology mismatches into real comparisons.
+- [ ] The BRep-text reader: 5 dataset files the reference reads; CFI_5_b12fgg.rle edge count.
+- [ ] STEP/IGES: 52 of the 389 dataset files don't read clean (`tests/exchange_corpus.rs`).
+- [ ] Fillet speed: 1.11× the reference on occt_blend and 1.17× on smlib_fillet (CPU times, each
+  case run by both in turn: the shared machine's load moves either side alone by tens of
+  percent); the goal is at or below it. The result's check is about 40% of a local fillet's time.
 
 ### Release mechanics
 
@@ -86,7 +92,7 @@ Differences without errors, still to check:
   strip's radius to one vertex sphere's (Dahl §3.5.2) instead of the patched C0 corner (18° kink
   on a box with radii 1/2/3). Built and parked (`h3_corners.patch` in agent A's scratchpad): it
   makes each eased strip a B-spline, 2–5× slower on complex_e3/d2, with areas a little further
-  from OCCT's, so it stays out of the default path.
+  from the reference's, so it stays out of the default path.
 
 - [ ] Native B-rep threads: external and internal, multi-start, taper, partial length, run-outs.
   Built from exact helix curves and ruled surfaces. The Pali Ijo kernel's design
@@ -108,8 +114,6 @@ Differences without errors, still to check:
     avoid over-subdividing cubic spans.
   - Measurement: sphericity, next to volume, area, centre of mass and bounds.
 - [ ] Feature gaps from review 4:
-  - OCCT form features between non-planar faces;
   - draft on freeform faces;
-  - Move face by translate and rotate;
   - an N-argument cell decomposition;
   - booleans of mixed body kinds.

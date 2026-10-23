@@ -20,9 +20,10 @@ crates/cadrs_kernel/
   src/native/          # the B-rep kernel (see "The native kernel" below)
   src/backend/mod.rs   # `backend::native::NativeKernel` (also `cadrs_kernel::DefaultKernel`)
   tests/conformance.rs # the conformance suite, 84 cases
-  tests/occt_*.rs, smlib_*.rs # suites generated from OCCT's and SMLib's tests (see "Tests")
+  tests/occt_*.rs, smlib_*.rs # generated gate suites (see "Tests")
+  tests/metamorphic_booleans.rs, stress_booleans.rs, fingerprint.rs # gates that need no reference kernel
   tests/fuzz_readers.rs # property tests: no input panics a reader or a B-spline constructor
-  tests/exchange_corpus.rs # OCCT's dataset STEP and IGES files read and checked (needs the dataset)
+  tests/exchange_corpus.rs # a public dataset's STEP and IGES files read and checked (needs the dataset)
   tests/native_debug.rs # reproductions and timings (several replay CADRS_DUMP_DIR dumps)
 ```
 There's no Bevy dependency. `cadrs_core` depends on `cadrs_kernel`, and features rebuild through it
@@ -106,7 +107,7 @@ tests turn on through their dev-dependency) makes every module `pub` again and a
 `surfacing`, ...). The tests still name them as `native::<module>`, which keeps working under
 `testkit`; they move to `testkit::` one file at a time (the generators, `tools/occt_to_rust.py`
 and the SMLib ones, switch their `use` lines in the same change), after which the `native::`
-paths can be sealed. Without `testkit`, what only the DRAW harness reaches (the OCCT BRep and
+paths can be sealed. Without `testkit`, what only the DRAW harness reaches (the BRep-text and
 SMLib readers, 2D offsets, wire tails, faces from loose edges, area splits) is unused code.
 `cargo check -p cadrs_kernel` (no features) and `cargo check -p cadrs_core` are the gate.
 
@@ -159,9 +160,7 @@ geometric fallback; a removed region is a lost reference; a version 3 document l
 ## The native kernel
 `cadrs_kernel::native` is a B-rep kernel written for cadrs in Rust: exact geometry, boundary
 representation, booleans, features, tessellation, mass properties, hidden-line removal and
-STEP/IGES exchange. It replaced the OpenCASCADE backend (removed after the native kernel passed
-the conformance suite and the `cadrs_core` tests; OCCT had passed all 83 cases in 0.84 s, after a
-7 min 54 s cold build).
+STEP/IGES exchange.
 
 **Geometry.** Curves (`curve.rs`): lines, circles, ellipses and rational B-splines (`nurbs.rs`,
 homogeneous control points; banded B-spline interpolation, so large fits are O(n)). Surfaces
@@ -199,7 +198,7 @@ orientation (`build::fix_senses`). Periodic faces have seams (an edge used twice
 
 **Tolerances** (`native::tol`). One model, three levels ten times apart (mm):
 - `CONFUSION` 1e-7: exact geometry; points closer are one point, and no entity's own tolerance is
-  smaller (`topo::TOL_MIN`, OCCT's `Precision::Confusion`).
+  smaller (`topo::TOL_MIN`).
 - `POINT` 1e-6: what an operation merges. A boolean pools vertices closer than this
   (`boolean::VTOL`); `Body::check` allows an edge end or a p-curve this far off when the entity's
   own tolerance is smaller.
@@ -221,15 +220,19 @@ difference or of a nudge off a point). Bare literals of these values are left on
 where a constant names them already.
 
 Above these, vertices and edges carry their own tolerance (a read or healed body's gaps,
-`Body::fit_tolerances`, as OCCT), and operations take the larger of their own and the entities'.
+`Body::fit_tolerances`), and operations take the larger of their own and the entities'.
 The values an operation runs with are a `tol::Tolerances` carried by the session
 (`NativeKernel::tolerances`, `set_tolerances`; the default is the model above) and passed
 explicitly: `boolean::boolean_bodies_with(a, b, op, BoolOptions { tol, .. })`. A boolean whose
 first run leaves an open shell runs again at `Tolerances::retries` (1e-5, then 1e-4). A run
 passes its merge distance down to its helpers and the intersections it calls as an argument
 (no thread-local or global state); `BoolOptions` also says whether faces on one surface are
-merged afterwards (`merge_coplanar`, off for the DRAW harness, as OCCT). A boolean never returns
-an invalid body: a result that fails `Body::check` is an error, retried at the larger tolerances.
+merged afterwards (`merge_coplanar`, off for the DRAW harness). A result that fails `Body::check` is an error,
+retried at the larger tolerances. A boolean also checks that no two faces of its result cross
+(across the inputs, and loops crossing in (u, v) on new periodic faces): a result whose only
+fault is crossing faces is returned flagged, not failed, and `native::take_invalid_results()`
+counts such results on the thread; with `CADRS_BOOL_STRICT=1` it is a `BooleanFailed` error
+instead (the tests run strict).
 
 **Errors.** Every operation returns `Result<_, KernelError>`, with a message in words for the
 user. The variant says what a caller can do: `EmptyResult` (an Intersect of bodies that don't
@@ -240,7 +243,7 @@ size box), `InvalidParameter` and `InvalidProfile` (the caller's values), `Unsup
 `UnknownBody`. When an algorithm gives up (`KernelError::is_failure`), the variant says where:
 `TooLarge { op }` (a radius, distance or thickness the geometry can't hold: a smaller one may
 work), `InvalidGeometry { op }` (tangent faces at a blended edge, a degenerate section, faces
-that no longer meet), `BooleanFailed { stage }` (`"face closure"`, `"validity"`, `"sheet
+that no longer meet), `BooleanFailed { stage }` (`"face closure"`, `"validity"`, `"crossing"`, `"sheet
 union"`), `BlendFailed { stage }` (a local fillet or chamfer that gave up: `"rolling ball"`,
 `"corner"`, `"end"`, `"surface"`, `"trimming"`), `BudgetExhausted { stage }` (a boolean's or a
 blend's deterministic work budget ran out), `InvalidResult { op }` (a built body failed its check and was not returned), and
@@ -289,10 +292,12 @@ otherwise):
 - `CADRS_NO_RECOG_S=1`, `CADRS_NO_RECOG_C=1` (`xbuild.rs`): imported B-spline surfaces and
   curves are kept as B-splines instead of being recognised as planes, cylinders, cones, spheres,
   tori and extrusions, lines and circles.
-- `CADRS_OCCT_REBUILD=1` (`brep_occt.rs`): an OCCT BRep file's faces are always rebuilt from
+- `CADRS_BOOL_STRICT=1` (`boolean.rs`): a boolean whose result has crossing faces fails
+  instead of returning the result flagged (`take_invalid_results`). The tests set it.
+- `CADRS_OCCT_REBUILD=1` (`brep_occt.rs`): a text BRep file's faces are always rebuilt from
   their edges instead of being read directly.
 
-Test harness (tests only): `CADRS_OCCT_DATA` (OCCT's dataset for the generated OCCT suites,
+Test harness (tests only): `CADRS_OCCT_DATA` (the dataset of the generated suites,
 default `../occt-dataset/opencascade-dataset-7.8.0` beside the checkout), `CADRS_SMLIB_ORACLE`
 (the SMLib oracle binary), `CADRS_USD_BREP` (a usd-brep checkout, for the ignored
 `smb::every_ssi_part_reads`, which skips without it),
@@ -301,16 +306,18 @@ default `../occt-dataset/opencascade-dataset-7.8.0` beside the checkout), `CADRS
 inputs of `tests/native_debug.rs`'s replays.
 
 **Status.** All 84 conformance cases pass (`cargo test -r -p cadrs_kernel --test conformance`,
-about 3 s). The measured state of every suite is the gate's: `tools/kernel_gate.sh` (below).
+about 3 s). The measured state of every suite is the gate's: `tools/kernel_gate.sh` (below). At
+the last full gate (2026-10-23) about 6550 cases passed and about 486 were known failures
+(each listed with its reason). No occt_blend case falls back to the tool-and-boolean blend (`blend`) any more.
 `python3 -I tools/kernel_scoreboard.py` shows its last results per test binary (cases run,
 passing, known failures, stale ones, regressions, hangs, and why the rest don't run yet); with no
 results, or with `--static`, it falls back to reading the suites' source, which runs nothing.
 
 **Tests.**
 - Unit tests in the modules (`cargo test -r -p cadrs_kernel --lib`), the conformance suite, and
-  the suites generated from OCCT's DRAW scripts (`tests/occt_*.rs`, `tools/occt_to_rust.py`) and
-  SMLib's tests (`tests/smlib_*.rs`). A generated case listed in `tools/occt_known_failures.txt`
-  or `tools/smlib_known_failures*` asserts that it still fails, and that it fails by returning
+  the suites generated from SMLib's tests (`tests/smlib_*.rs`) and from OpenCASCADE's public test
+  scripts (`tests/occt_*.rs`, `tools/occt_to_rust.py`), which serve as a reference test corpus. A generated case listed in
+  `tools/occt_known_failures.txt` or `tools/smlib_known_failures*` asserts that it still fails, and that it fails by returning
   its error: a panic (an index out of bounds in the test code, an unwrap) fails the test, and
   the gate calls it a PANIC. When it passes, remove the line and regenerate the file. Every line
   of `tools/occt_known_failures.txt` gives its reason, inline (`group case  # why`) or in the
@@ -318,11 +325,20 @@ results, or with `--static`, it falls back to reading the suites' source, which 
   line without one, copies the reason above the generated case, and warns about lines that
   aren't a converted case. A reason holding `[panic: text]` lets the case panic with that text.
   The DRAW harness reports a script's sub-shape past the end of an `explode` as a "topology
-  mismatch" failure (`draw::sub`): the shape exploded has other topology than OCCT's.
+  mismatch" failure (`draw::sub`): the shape exploded has other topology than the script expects.
+- Gates that need no reference kernel: `tests/metamorphic_booleans.rs` (on random boxes,
+  cylinders and spheres, some rotated: vol(A ∪ B) + vol(A ∩ B) = vol(A) + vol(B), tool-order
+  invariance, A − A = ∅, A ∪ A = A, a STEP round trip of the union, and random extrude sequences
+  of join, cut and intersect steps checked after each step against the exact volume of the model
+  so far), `tests/stress_booleans.rs` (a cube united with copies rotated by tiny angles across
+  the tolerance, 12 iterated unions checked for volume and tolerance drift, an iterated
+  drill-bit cut chain) and `tests/fingerprint.rs` (a hash of each result's body for a sample of
+  booleans and offsets on 1 and 4 rayon threads, which must agree). `CADRS_META_SEED`,
+  `CADRS_META_CASES`, `CADRS_STRESS_*` and `CADRS_FINGERPRINT_*` set seeds, sizes and output.
 - The generated suites run on a DRAW-style harness (`native::draw`) and the SMLib oracle's body
   writer (`native::oracle`): test code, built only for tests and with the `testkit` feature
   (the crate's own tests turn it on through a dev-dependency on itself), not kernel API.
-- `tests/fuzz_readers.rs`: property tests (proptest) that feed the STEP, IGES, OCCT BRep, SMLib
+- `tests/fuzz_readers.rs`: property tests (proptest) that feed the STEP, IGES, BRep-text, SMLib
   and body readers edited files (numbers swapped for extreme ones, bytes flipped, cut short) and
   random bytes, and the B-spline constructors random knots, degrees, weights and points; nothing
   may panic. `PROPTEST_CASES=<n>` runs more cases, `FUZZ_TRACE=1` prints each, and the ignored
@@ -333,13 +349,13 @@ results, or with `--static`, it falls back to reading the suites' source, which 
   touches and the conformance suite.
 - The gate, `tools/kernel_gate.sh`, makes "HEAD is green" a measured fact. It exports a clean
   tree (`git archive HEAD`, or `--rev`; `--tree DIR` tests a tree as it is) and regenerates the
-  gitignored OCCT suites there (`OCCT_TESTS`: OCCT 7.8.1's `tests/`; `CADRS_OCCT_DATA`). It
+  gitignored generated suites there (`OCCT_TESTS`: the test scripts' `tests/` directory; `CADRS_OCCT_DATA`). It
   checks that the library builds without features (`cargo check -p cadrs_kernel`: every test
   turns `testkit` on), that `cargo check -p cadrs_core`, the kernel's consumer, passes, and that
   `tools/kernel_clippy.sh` is clean. Then
   it builds with `--profile kernel` and runs every test binary, `RUST_TEST_THREADS` (3) at a
   time, with every kind of ignored test that can run: the known failures, `slow`, and the ones
-  ignored with a reason (not the OCCT suites' cases waiting for a command, whose bodies are
+  ignored with a reason (not the generated suites' cases waiting for a command, whose bodies are
   comments, nor debugging tools and tests that need a file, a checkout or the SMLib oracle they
   aren't given). Each case is a pass, a known failure still failing, STALE (a listed known
   failure that passes: take it off the list), STALE-IGNORE (an ignored test that passes:
@@ -357,7 +373,7 @@ results, or with `--static`, it falls back to reading the suites' source, which 
   occt_blend,smlib_fillets` builds and runs some binaries; `--sample occt_boolean=4` runs every
   4th case of a binary. CI runs the checks, clippy and a fast subset of the gate on every push
   and pull request (the merge requirement: the unit tests, conformance, smlib_booleans,
-  validity, determinism and every 4th runnable case of the OCCT boolean suite, generated
+  validity, determinism and every 4th runnable case of the occt_boolean suite, generated
   without the dataset), and the whole gate nightly on main and kernel-10 against the branch's
   last passing run (delete its `kernel-gate-baseline-<branch>-*` Actions cache to accept a
   slowdown).
@@ -372,20 +388,20 @@ cargo-gpu --version 0.11.0 --locked`).
 
 ## Performance
 
-`tools/kernel_perf.py` times the kernel against OCCT 7.8 on the same operations and inputs and
-writes `PERF.md` (per case, per category, the 20 worst ratios). Both sides read one
-DRAW-like case file: `examples/kernel_bench.rs` runs it on the native kernel, `tools/occt_bench`
-(C++, a static OCCT) on OCCT. The cases are OCCT's own boolean, blend, offset, pipe and draft
-cases that pass here, SMLib's fillet, boolean and offset cases, meshes and mass properties of the
-largest SMLib models, and STEP files of OCCT's dataset; plus the conformance suite against its
-former OCCT backend's times. Time is CPU time on one thread (the machine is shared). Geometric
-mean of native / OCCT per category, 2026-10-21:
+Speed is benchmarked against OpenCASCADE 7.8: `tools/kernel_perf.py` times both on the same
+operations and inputs and writes `PERF.md` (per case, per category, the 20 worst ratios). Both
+sides read one DRAW-like case file (`examples/kernel_bench.rs` runs it on the native kernel). The
+cases are the generated suites' boolean, blend, offset, pipe and draft cases that pass here,
+SMLib's fillet, boolean and offset cases, meshes and mass properties of the largest SMLib
+models, and STEP files of the public dataset; plus the conformance suite against the earlier
+times recorded for it. Time is CPU time on one thread (the machine is shared). Geometric mean of
+native / reference per category (2026-10-21; fillets 2026-10-23, after the fillet passes):
 
-| Faster than OCCT | About even | Slower |
+| Faster | About even | Slower |
 |---|---|---|
-| booleans 0.48 (OCCT cases), 0.17 (SMLib); 2D offsets and offset shapes 0.17; STEP export 0.16; mass properties 0.52 against OCCT's adaptive integration to 1e-9; conformance 0.36 | meshing 0.97 | fillets 9.2 (OCCT blend), 10.3 (SMLib); sweeps 2.4; drafts 1.9; STEP import 1.9; mass properties 11 against OCCT's fixed Gauss rules (1e-3 off on the blade hubs) |
+| booleans 0.48 (occt_boolean), 0.17 (SMLib); 2D offsets and offset shapes 0.17; STEP export 0.16; mass properties 0.52 against adaptive integration to 1e-9; conformance 0.36 | meshing 0.97 | fillets about 1.1 (occt_blend) and 1.2 (SMLib), CPU times of each case run by both in turn; sweeps 2.4; drafts 1.9; STEP import 1.9; mass properties 11 against fixed Gauss rules (1e-3 off on the blade hubs) |
 
-All 648 cases: 0.65; `PERF.md` lists the slowest. B-spline evaluation (`native::nurbs`) is
+All 660 cases: 0.55; `PERF.md` lists the slowest. B-spline evaluation (`native::nurbs`) is
 allocation-free up to degree 7, and mass properties contract a B-spline face along v once per
 inner integral (`NurbsSurface::iso_v`).
 
@@ -461,20 +477,17 @@ one STEP file with their product names), used by `assembly::interference::{check
 
 The native reader and writer are `native::step` and `native::iges`, sharing `native::xbuild`,
 which rebuilds the files' faces into valid bodies (p-curves fitted where a file has none; faces
-sewn by their edges). `tests/exchange_corpus.rs` reads every STEP and IGES file of OCCT's public
-dataset (389: OCCT's samples and its bug-report files, many broken on purpose) and checks each
-part (valid topology within the file's own tolerance, each solid's volume positive, equal to its
-tessellation's within 1 % and unchanged by a move, no face dropped): 315 read clean, 198 of them
-with solids. The other 74 are listed in the test with the first problem each hits (the commonest:
-p-curves off their edges by more than a ten-thousandth of the model, loops that don't close,
-files with no geometry of their own), and the
-test fails when a listed file reads clean or an unlisted one doesn't. The gate runs it (it needs
-the dataset, so CI's per-push subset doesn't). An earlier count, 624 of 638 files from OCCT's
-samples, Onshape, FreeCAD and KiCad, was taken on a corpus that isn't in the repository; it is
-superseded by this one. FreeCAD reads
-our STEP and IGES exports as valid solids with the same volume and area to about 1e-14.
+sewn by their edges). `tests/exchange_corpus.rs` reads every STEP and IGES file of the public dataset the generated suites use
+(389 files: samples and bug-report files, many broken on purpose) and checks each part (valid
+topology within the file's own tolerance, each solid's volume positive, equal to its
+tessellation's within 1 % and unchanged by a move, no face dropped): 337 read clean. The other
+52 are listed in the test with the first problem each hits (the commonest: p-curves off their
+edges by more than a ten-thousandth of the model, loops that don't close, files with no geometry
+of their own), and the test fails when a listed file reads clean or an unlisted one doesn't. The
+gate runs it (it needs the dataset, so CI's per-push subset doesn't). FreeCAD reads our STEP and
+IGES exports as valid solids with the same volume and area to about 1e-14.
 
-**Mesh files are ours**, not a backend's: `exchange::write_stl_binary`, `write_stl_ascii` and
+**Mesh files** are written by the kernel: `exchange::write_stl_binary`, `write_stl_ascii` and
 `write_obj` write the `TriMesh` of `tessellate` at the asked chord and angle tolerance.
 `mesh_volume` gives the divergence-theorem volume Σ a·(b×c)/6, and there are readers for tests.
 
@@ -607,10 +620,7 @@ extrude's `draft: Option<ExtrudeDraft>` (serde default):
   (all their edges but seams), resolved by name, else the edge nearest the stored point; the
   kernel op runs per part and the result keeps the part's id (its largest piece). Chamfer tangent
   propagation lists each edge's `tangent_chain`. With **Tangent propagation off** (fillet or
-  chamfer), a pick whose tangent chain has edges not picked fails ("Without tangent propagation
-  the fillet would stop part-way along a smooth edge chain (N tangent edges not picked), which
-  OpenCascade cannot do; …"): OCCT's fillet and chamfer contours always run on along G1 edges, so
-  the only honest results are the whole chain or an error. A **Full round** (`FilletType::FullRound`,
+  chamfer), only the picked edges are blended (`FilletSpec::propagate` false). A **Full round** (`FilletType::FullRound`,
   one side face, the center face, the other side face, on one part) calls `Kernel::full_round`;
   Conic and Curvature pass `FilletProfile` to `fillet_with`.
 - Shell faces (`FaceRef`) or, Hollow, parts.
@@ -726,7 +736,7 @@ gives two parts totalling 368 749.7048 mm³.
 **Windows.** `cargo build --release --target x86_64-pc-windows-gnu` cross-compiles the app with
 MinGW; the kernel needs no C++ toolchain or runtime DLLs.
 
-Conformance history (the cases as they were added; first run on the OCCT backend): all 77 cases pass (Final: `bezier_profiles` and `fillet_smooth_corner`
+Conformance history (the cases as they were added): all 77 cases pass (Final: `bezier_profiles` and `fillet_smooth_corner`
 added to 75). Before: all 71 cases pass (the phase3c merge of main's P3.10/P3.11, 69 cases, with
 3C's `project_view` and `section_cut`). P3C.8 added `section_cut` (see "Drawing-view projection").
 P3C.2 added `project_view` (a 20 mm cube with a
@@ -753,8 +763,8 @@ faces give its 1000 mm³ tool, classified outside and cut again mirrored; a boss
 hole's cylinder and cone; a single face refused), `classify_points` and `split_faces_by_plane` (the
 box's top face split by x = 5: two 100 mm² faces continuing it, 7 faces, V 6000; a plane that misses
 is an error). Before P3.8: all 57 cases pass. P3.7 added `offset_ellipse_profiles` (a
-region bounded by an ellipse's offset: the prism's volume to 5e-5 relative, OCCT integrating the
-B-spline bounded faces at a fixed order; the rim's edge length L − 2πd to 1e-7),
+region bounded by an ellipse's offset: the prism's volume to 5e-5 relative, the
+rim's edge length L − 2πd to 1e-7),
 `sweep_along_paths` (a Ø10 circle along an L of 100 and 80 with an R50 bend: π·25·(100 + 80 +
 π/2·50) exactly; the profile partway along sweeping both ways; Thin; Keep profile orientation
 along a straight path; a slot's top edges as the path of a bead, joined to the slot by a
@@ -781,8 +791,7 @@ refused with overflow off; away from the hole it isn't), `chamfer_options` (2 ×
 per mm; two distances flipped trade faces; an override flips one edge; Tangent equals Offset on
 planes), `shell_options` (100 × 60 × 40, bottom open: 100·60·40 −
 92·52·36 = 67 776; outward with rounded edges and corners; hollow 240 000 − 92·52·32; 35 mm walls
-refused), `shell_around_a_counterbore` (OCCT's thick solid fails; the region shell matches the
-closed form) and `edge_face_radius`. Before P3.6: all 44 cases pass. P3.5 added `inertia_tensor` (above). Before P3.5:
+refused), `shell_around_a_counterbore` (the region shell matches the closed form) and `edge_face_radius`. Before P3.6: all 44 cases pass. P3.5 added `inertia_tensor` (above). Before P3.5:
 all 43 cases pass. P3.4 added `revolve_a_face` (a body's face turned a
 quarter: π·75·5/4, sides from the body's edges), `revolve_torus` (2π²Rr², 4π²Rr, one
 toroidal face with its axis), `revolve_types` (Full, 90°, flipped, Symmetric, 90° + 45°; more than a
@@ -837,8 +846,7 @@ area 50 179.7110 mm² (expected 368 749.705 and 50 179.71).
   a quarter: V 6000, centroid (0, 0, 85), every face `modified` from its original).
 
 ## The kernel in its own process (`cadrs_core::rebuild::process`)
-A kernel bug can take the process down (with OpenCASCADE, a segfault no `catch_unwind` stopped
-did). The app therefore runs the kernel in a **process of its own**, its
+A kernel bug can take the process down (a stack overflow, say). The app therefore runs the kernel in a **process of its own**, its
 own executable started with `--kernel-process <port> <token>`; a crash there costs a rebuild,
 not the app. `CADRS_KERNEL=thread` keeps the kernel on a thread of the app (for debugging), and
 tests and tools (`rebuild::build` without `process::use_process`) always do.
