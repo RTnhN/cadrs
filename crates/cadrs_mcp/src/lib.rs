@@ -59,6 +59,9 @@ pub enum Call {
     ListFaces(PartStudio),
     ListEdges(PartStudio),
     Undo,
+    CreateVersion(CreateVersion),
+    ListVersions,
+    RestoreVersion(VersionName),
     ImportStep(ImportStep),
     ExportStep(ExportStep),
     RunScenario(RunScenario),
@@ -485,6 +488,33 @@ impl Cadrs {
     }
 
     #[tool(
+        description = "Make a named version of the open document as it is now, to go back to later with restore_version."
+    )]
+    async fn create_version(
+        &self,
+        Parameters(p): Parameters<CreateVersion>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.call(Call::CreateVersion(p)).await
+    }
+
+    #[tool(
+        description = "List the open document's versions (name, description, history entry, time)."
+    )]
+    async fn list_versions(&self) -> Result<CallToolResult, ErrorData> {
+        self.call(Call::ListVersions).await
+    }
+
+    #[tool(
+        description = "Put the whole open document back as it was at a version (one undoable step; the history and later versions are kept). Answers like get_document once the Part Studio has rebuilt."
+    )]
+    async fn restore_version(
+        &self,
+        Parameters(p): Parameters<VersionName>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.call(Call::RestoreVersion(p)).await
+    }
+
+    #[tool(
         description = "Import a STEP file as a new document (its parts in a Part Studio) and open it."
     )]
     async fn import_step(
@@ -672,6 +702,7 @@ mod tests {
                 .call(Call::Screenshot(Screenshot {
                     max_size: None,
                     view: None,
+                    camera: None,
                 }))
                 .await
         });

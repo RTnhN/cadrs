@@ -220,7 +220,12 @@ fn run_calls(world: &mut World) {
         }
         if let Call::Screenshot(p) = &req.call {
             let max = p.max_size.unwrap_or(1600).clamp(64, 8192);
-            if let Some(v) = &p.view {
+            if let Some(c) = &p.camera {
+                if let Err(e) = aim_camera(world, c) {
+                    req.reply(Err(e));
+                    continue;
+                }
+            } else if let Some(v) = &p.view {
                 if let Err(e) = turn_view(world, v) {
                     req.reply(Err(e));
                     continue;
@@ -304,6 +309,9 @@ fn run(world: &mut World, call: &Call) -> Result<Value, String> {
             let what = d.undo().ok_or("nothing to undo")?;
             Ok(json!({ "undone": what }))
         }
+        Call::CreateVersion(p) => create_version(world, p),
+        Call::ListVersions => list_versions(world),
+        Call::RestoreVersion(p) => restore_version(world, p),
         Call::ImportStep(p) => import_step(world, &p.path),
         Call::ExportStep(p) => export_step(world, p),
         Call::CreateDrawing(p) => create_drawing(world, p),
@@ -691,6 +699,41 @@ fn turn_view(world: &mut World, name: &str) -> Result<(), String> {
     let to = view.target().oriented(s);
     view.animate_to(to);
     crate::viewport::zoom_to_fit(world);
+    Ok(())
+}
+
+/// Points the view from `c.eye` at `c.target`, framed at the target.
+fn aim_camera(world: &mut World, c: &tools::ShotCamera) -> Result<(), String> {
+    let (eye, target) = (Vec3::from(c.eye), Vec3::from(c.target));
+    let d = eye - target;
+    let dist = d.length();
+    if !dist.is_finite() || dist < 1.0 {
+        return Err("the eye must be at least 1 mm from the target".into());
+    }
+    let back = d / dist;
+    let width = world
+        .resource::<crate::viewport::ViewportRect>()
+        .0
+        .size()
+        .x
+        .max(1.0);
+    let mut view = world.resource_mut::<crate::viewport::ViewportView>();
+    // In perspective the eye sits FOCAL_PX x scale in front of the focus; in orthographic the
+    // viewport spans what a 50 degree lens would see at the target.
+    let scale = if view.view.perspective {
+        dist / crate::camera::FOCAL_PX
+    } else {
+        dist * 0.93 / width
+    };
+    let to = crate::camera::ViewState {
+        azimuth: back.x.atan2(-back.y).to_degrees(),
+        elevation: back.z.clamp(-1.0, 1.0).asin().to_degrees(),
+        roll: 0.0,
+        focus: target,
+        scale,
+        ..view.target()
+    };
+    view.animate_to(to);
     Ok(())
 }
 
@@ -1552,6 +1595,61 @@ fn delete_feature(world: &mut World, p: &tools::FeatureName) -> Result<Value, St
         label: format!("Delete {}", f.name),
     })
     .map_err(|e| e.to_string())?;
+    describe(world)
+}
+
+/// Makes a named version of the document as it is (committed changes only).
+fn create_version(world: &mut World, p: &tools::CreateVersion) -> Result<Value, String> {
+    doc(world)?;
+    if world
+        .get_resource::<crate::history_panel::DocLog>()
+        .and_then(|l| l.log.as_ref())
+        .is_none()
+    {
+        return Err("the open document keeps no history".into());
+    }
+    let before = versions(world).len();
+    crate::history_panel::create_version(world, &p.name, p.description.as_deref().unwrap_or(""));
+    if versions(world).len() == before {
+        return Err("no version was made: finish the open dialog or edit first".into());
+    }
+    list_versions(world)
+}
+
+fn versions(world: &World) -> Vec<cadrs_core::history_log::Version> {
+    world
+        .get_resource::<crate::history_panel::DocLog>()
+        .and_then(|l| l.log.as_ref())
+        .map(|l| l.versions().to_vec())
+        .unwrap_or_default()
+}
+
+fn list_versions(world: &mut World) -> Result<Value, String> {
+    doc(world)?;
+    let entries = world
+        .get_resource::<crate::history_panel::DocLog>()
+        .and_then(|l| l.log.as_ref())
+        .map_or(0, |l| l.len());
+    let list: Vec<Value> = versions(world)
+        .iter()
+        .map(|v| {
+            json!({ "name": v.name(), "description": v.description(), "entry": v.entry(),
+                    "time": v.time() })
+        })
+        .collect();
+    Ok(json!({ "versions": list, "history_entries": entries }))
+}
+
+/// Restores the whole document to a version's entry (one undoable step), then answers like
+/// get_document once the active Part Studio has rebuilt.
+fn restore_version(world: &mut World, p: &tools::VersionName) -> Result<Value, String> {
+    doc(world)?;
+    let v = versions(world)
+        .into_iter()
+        .rev()
+        .find(|v| v.name() == p.name)
+        .ok_or_else(|| format!("no version named {:?}", p.name))?;
+    crate::history_panel::restore(world, v.entry());
     describe(world)
 }
 
