@@ -427,3 +427,101 @@ fn smb_reader_regressions() {
         }
     }
 }
+
+/// The STEP seed with the first `kind` record's parameter `arg` (0-based, top level) pointed at a
+/// new record `#id = body` (the body may name `#id` itself: a reference cycle).
+fn step_with(kind: &str, arg: usize, body: &str) -> Vec<u8> {
+    let text = String::from_utf8(step_file()).unwrap();
+    let id = 999_999;
+    let mut out = String::new();
+    let mut done = false;
+    for line in text.lines() {
+        let at = line.find(&format!("={kind}("));
+        if let (false, Some(at)) = (done, at) {
+            let open = at + kind.len() + 2;
+            let close = line.rfind(')').unwrap();
+            // The top-level parameters.
+            let (mut parts, mut depth, mut start) = (Vec::new(), 0, open);
+            for (i, c) in line[open..close].char_indices() {
+                match c {
+                    '(' => depth += 1,
+                    ')' => depth -= 1,
+                    ',' if depth == 0 => {
+                        parts.push(&line[start..open + i]);
+                        start = open + i + 1;
+                    }
+                    _ => {}
+                }
+            }
+            parts.push(&line[start..close]);
+            let new = format!("#{id}");
+            let parts: Vec<&str> = parts
+                .iter()
+                .enumerate()
+                .map(|(k, p)| if k == arg { new.as_str() } else { p })
+                .collect();
+            out.push_str(&format!(
+                "{}{}{}\n",
+                &line[..open],
+                parts.join(","),
+                &line[close..]
+            ));
+            out.push_str(&format!("#{id}={body};\n"));
+            done = true;
+        } else {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    assert!(done, "no {kind} record in the seed");
+    out.into_bytes()
+}
+
+/// Damaged STEP files the soak found overflowing the stack (the build box's
+/// fuzz-bc94d587c2): references that lead back to themselves, and parentheses nested
+/// without end. Each must read to an error or a body, never recurse for ever.
+#[test]
+fn step_reader_regressions() {
+    let id = 999_999;
+    let cases = vec![
+        // A trimmed curve whose basis is itself.
+        step_with(
+            "EDGE_CURVE",
+            3,
+            &format!(
+                "TRIMMED_CURVE('',#{id},(PARAMETER_VALUE(0.)),(PARAMETER_VALUE(1.)),.T.,.PARAMETER.)"
+            ),
+        ),
+        // A surface curve through a seam curve back to itself.
+        step_with(
+            "EDGE_CURVE",
+            3,
+            &format!("SURFACE_CURVE('',#{id},(),.CURVE_3D.)"),
+        ),
+        // A trimmed surface whose basis is itself.
+        step_with(
+            "ADVANCED_FACE",
+            2,
+            &format!("RECTANGULAR_TRIMMED_SURFACE('',#{id},0.,1.,0.,1.,.T.,.T.)"),
+        ),
+        // A vertex whose point is itself.
+        step_with("EDGE_CURVE", 1, &format!("VERTEX_POINT('',#{id})")),
+        // An oriented edge of itself.
+        step_with(
+            "ORIENTED_EDGE",
+            3,
+            &format!("ORIENTED_EDGE('',*,*,#{id},.T.)"),
+        ),
+        // Parentheses nested 100 000 deep.
+        step_with(
+            "EDGE_CURVE",
+            3,
+            &format!("LINE('',{}0.{})", "(".repeat(100_000), ")".repeat(100_000)),
+        ),
+    ];
+    for bytes in cases {
+        if let Ok(m) = step::read(&bytes) {
+            m.parts.into_iter().for_each(|p| use_body(p.body));
+        }
+    }
+}
