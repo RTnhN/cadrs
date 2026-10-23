@@ -4780,6 +4780,17 @@ impl NativeKernel {
     }
 
     fn bop(&mut self, op: BoolOp, a: &Shape, b: &Shape) -> Result<Shape> {
+        // An empty operand (an empty result, an empty compound): A − ∅ = A ∪ ∅ = A, ∅ ∪ B = B,
+        // and the rest empty.
+        let empty = |s: &Shape| {
+            matches!(s, Shape::Empty) || matches!(s, Shape::Compound(v) if v.is_empty())
+        };
+        match (empty(a), empty(b), op) {
+            (false, true, BoolOp::Subtract | BoolOp::Union) => return Ok(a.clone()),
+            (true, false, BoolOp::Union) => return Ok(b.clone()),
+            (true, _, _) | (_, true, _) => return Ok(Shape::Empty),
+            _ => {}
+        }
         if Self::edges_of(a).is_some() || Self::edges_of(b).is_some() {
             return self.edge_bop(op, a, b);
         }

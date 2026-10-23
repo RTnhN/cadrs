@@ -764,18 +764,15 @@ fn boolean_2d_squares_disjoint_difference() {
 /// SMLib Python `test_boolean_2d_disjoint_rectangle_operation_areas` (test_omni_solid.py:2300): exclusive or of two squares, area 200.
 #[test]
 fn boolean_2d_squares_disjoint_exclusive_or() {
-    known_failure(
-        boolean_2d(
-            ([0.0, 0.0], [10.0, 10.0]),
-            ([15.0, 0.0], [10.0, 10.0]),
-            false,
-            3,
-            200.0,
-            Some(([-5.0, -5.0], [20.0, 5.0])),
-        ),
-        "python",
-        "boolean_2d_squares_disjoint_exclusive_or",
-    );
+    boolean_2d(
+        ([0.0, 0.0], [10.0, 10.0]),
+        ([15.0, 0.0], [10.0, 10.0]),
+        false,
+        3,
+        200.0,
+        Some(([-5.0, -5.0], [20.0, 5.0])),
+    )
+    .unwrap();
 }
 
 /// SMLib Python `test_boolean_2d_first_rectangle_is_proper_subset_operation_areas` (test_omni_solid.py:2310): union of two squares, area 100.

@@ -397,3 +397,24 @@ fn drbrowns_window_across_a_torus_seam() {
     );
     assert!(!hole_across_seam(b), "a hole straddles its face's seam");
 }
+
+/// Booleans with an empty operand (SMLib's 2D exclusive or of disjoint squares: the union less
+/// their empty common part): A − ∅ = A ∪ ∅ = ∅ ∪ A = A, A ∩ ∅ = ∅ − A = ∅.
+#[test]
+fn empty_operands() {
+    use cadrs_kernel::native::draw::Shape;
+    let mut k = NativeKernel::new();
+    let a = k.box_at(0.0, 0.0, 0.0, 1.0, 1.0, 1.0).unwrap();
+    let Shape::Body(id) = a else { panic!("a box") };
+    for r in [
+        k.bcut(&a, &Shape::Empty),
+        k.bfuse(&a, &Shape::Empty),
+        k.bfuse(&Shape::Empty, &a),
+        k.bcut(&a, &Shape::Compound(vec![])),
+    ] {
+        assert!(matches!(r, Ok(Shape::Body(b)) if b == id), "{r:?}");
+    }
+    for r in [k.bcommon(&a, &Shape::Empty), k.bcut(&Shape::Empty, &a)] {
+        assert!(matches!(r, Ok(Shape::Empty)), "{r:?}");
+    }
+}

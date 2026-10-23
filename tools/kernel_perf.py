@@ -387,6 +387,37 @@ NOTES = [
 ]
 
 
+# Measurements by hand (profiles of the documents and of single operations), kept as written.
+BY_HAND = [
+    '## Measured by hand',
+    '',
+    'Not generated: profiles of the documents and of single operations, measured on 2026-10-22/23',
+    "with `CADRS_PROFILE` timers (`perf` can't sample on the build boxes), the documents being the",
+    '173 Part Studios of the private test corpus run by the `checkall` example on gray (i9-13900KF).',
+    '',
+    '- **Where document time goes.** Booleans are ~38% of it (90 s of 239 s over 126 documents).',
+    "  Within the booleans' runs (65 s over all documents, kernel-perf 1665ac2): face–face 20%,",
+    '  classify 14%, edge–face 13%, shells 11%, import 10%, unify 8%, the crossing checks 7%,',
+    '  edge–edge 5%, empty solids 4%, split 4%. One document (a gridfinity holder) spends 2.7 s in',
+    '  `curve_curve` between two branches of one intersection that run together over 5 µm.',
+    '- **Multi-tool booleans** (several tools at once) are 2.6% of document time (6.2 s); the parity',
+    "  rays' per-face box loop is at most 0.6% of the worst document. Neither is worth a change yet.",
+    '- **Surface intersections** are 22 s over the documents: B-spline pairs 17 s (Other×Other 8.6 s,',
+    '  Cylinder×Other 5.4 s, Other×Plane 3.1 s); quadric pairs left to the marcher 3.9 s (Cylinder×',
+    '  Sphere 1.4, Cylinder×Cylinder 1.0, Cylinder×Torus 0.5); Plane×Plane 86 590 calls, 0.1 s.',
+    "  The 22 marched Cone×Plane calls (~40 ms each, planes tangent along a countersink's ruling)",
+    '  now have a closed form.',
+    '- **Sweeps.** Sections per sweep went from 1013 / 412 to 111 / 43 (graded density, exact frames).',
+    '- **STEP import** (trj6): 1.6 s orienting faces by volume and ~0.4 s fitting p-curves before the',
+    '  per-face parity orientation and parallel fits.',
+    '- **Booleans sampled** (231): all finish in one run; a median of 9 face pairs intersected; 2.2',
+    '  rays per classified point; p-curve fits 14% of the time; the empty-solid volume dominated two.',
+    "- **SSI culls** (helical B-splines): a squish bottle's 4×50 union 3.2 s → 90 ms, edge–face",
+    '  2.5 → 0.8 s, shells 553 → 86 ms.',
+    '',
+]
+
+
 def report(R, path):
     rows, cats, known = [], {}, []
     for name, ours in R["cadrs_1t"].items():
@@ -453,6 +484,7 @@ def report(R, path):
     L.append("backend (`bench/occt_conformance_times.txt`, wall times to 1 ms). They include the tests'")
     L.append("own checks (mass properties and meshes at 0.01 mm), not only the modelling operations.")
     L.append("")
+    L.extend(BY_HAND)
     worst = sorted([r for r in rows + conf_rows if r[5] is not None], key=lambda r: -r[5])[:20]
     L.append("## The 20 worst ratios")
     L.append("")

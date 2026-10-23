@@ -9,7 +9,3 @@ skin_turning_squares
 # tube in three), SMLib 4.
 sweep_closed_square
 
-# The exclusive or of disjoint squares, (A ∪ B) − (A ∩ B): the common part is empty, and a
-# difference by an empty shape is Unsupported ("booleans of shapes other than solids") instead
-# of the union itself.
-boolean_2d_squares_disjoint_exclusive_or

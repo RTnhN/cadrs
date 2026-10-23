@@ -1272,6 +1272,7 @@ pub fn curve_surface(c: &Curve, t0: f64, t1: f64, s: &Surface) -> Vec<f64> {
             }
         }
         out.sort_by(f64::total_cmp);
+        drop_seam_twin(c, t0, t1, &mut out);
         return out;
     }
     // Exact cases.
@@ -1438,7 +1439,18 @@ pub fn curve_surface(c: &Curve, t0: f64, t1: f64, s: &Surface) -> Vec<f64> {
     }
     out.sort_by(f64::total_cmp);
     out.dedup_by(|a, b| (*a - *b).abs() < tol::ROUNDOFF);
+    drop_seam_twin(c, t0, t1, &mut out);
     out
+}
+
+/// On a curve closed over [t0, t1] (a full circle), a crossing at its seam is one point: found
+/// at both t0 and t1, the copy at t1 goes.
+fn drop_seam_twin(c: &Curve, t0: f64, t1: f64, out: &mut Vec<f64>) {
+    let (Some(&first), Some(&last)) = (out.first(), out.last()) else { return };
+    let span = (t1 - t0).abs();
+    if out.len() > 1 && (first - t0).abs() <= tol::ROUNDOFF * (1.0 + span) && (last - t1).abs() <= tol::ROUNDOFF * (1.0 + span) && (c.point(t0) - c.point(t1)).norm() <= tol::ROUNDOFF * (1.0 + c.point(t0).coords.norm()) {
+        out.pop();
+    }
 }
 
 /// A root `t` of a line meeting a surface, polished where the line touches it: a double root of
@@ -1673,6 +1685,18 @@ mod tests {
         for t in ts {
             assert!(cyl.distance(&c.point(t)) < 1e-9, "{t}: {:e} off", cyl.distance(&c.point(t)));
         }
+    }
+
+    /// A full circle crossing a plane at its seam (t = 0 and t = 2π, one point): one root, in
+    /// closed form and by the search (a cylinder through the seam).
+    #[test]
+    fn full_circle_crossing_at_its_seam() {
+        let c = Curve::Circle { c: P3::origin(), x: V3::x(), y: V3::y(), r: 2.0 };
+        let plane = Surface::Plane { f: Frame::from_z(P3::new(2.0, 0.0, 0.0), V3::x()) };
+        assert_eq!(curve_surface(&c, 0.0, TAU, &plane), vec![0.0]);
+        let cyl = Surface::Cylinder { f: Frame::from_z(P3::new(2.0, 0.0, 0.0), V3::z()), r: 0.5 };
+        let ts = curve_surface(&c, 0.0, TAU, &cyl);
+        assert_eq!(ts.len(), 2, "{ts:?}");
     }
 
     /// A spline band running 7e-5 off a cylinder all along (a thread's root on its tube, the
