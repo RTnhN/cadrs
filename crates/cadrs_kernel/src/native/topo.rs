@@ -47,7 +47,11 @@ pub(crate) fn points_in(shell: &Body) -> bool {
 /// when every one says the opposite, else `None` (a thin wall or grazing rays: the volume
 /// decides).
 fn parity_orientation(shell: &Body) -> Option<bool> {
-    let polys: Vec<Vec<Vec<P2>>> = shell.faces.iter().map(|f| super::classify::face_polygons(shell, f)).collect();
+    parity_orientation_with(shell, shell.faces.iter().map(|f| super::classify::face_polygons(shell, f)).collect())
+}
+
+/// [`parity_orientation`] with the faces' polygons made already.
+fn parity_orientation_with(shell: &Body, polys: Vec<Vec<Vec<P2>>>) -> Option<bool> {
     let cls = super::classify::Classifier::new(shell, &polys);
     let size = shell.bbox().diagonal();
     let mut verdict: Option<bool> = None;
@@ -764,6 +768,8 @@ impl Body {
             return refs;
         }
         let mut errs = Vec::new();
+        // The faces' polygons, as the crossings' test makes them: the orientation's again.
+        let mut polys: Vec<Option<Vec<Vec<P2>>>> = vec![None; self.faces.len()];
         for (fi, f) in self.faces.iter().enumerate() {
             for (li, l) in f.loops.iter().enumerate() {
                 for k in 0..l.len() {
@@ -890,7 +896,8 @@ impl Body {
                 errs.extend(self.check_face_domain(fi));
             }
             if errs.is_empty() {
-                errs.extend(super::check_faces::face_crossings_of(self, only));
+                let marked = |f: usize| only.is_none_or(|c| c.get(f).copied().unwrap_or(true));
+                errs.extend(super::check_faces::face_crossings_in(self, &|i, j| marked(i) || marked(j), &mut polys));
             }
         }
         // Solids enclose a positive volume (their faces point out).
@@ -898,8 +905,16 @@ impl Body {
             for si in 0..self.solids.len() {
                 let faces = self.solid_faces(si);
                 let sub = super::kernel::subset(self, &faces, true);
+                // (The subset's faces are the solid's, with their edges as they are: their
+                // polygons the same.)
+                let sp: Vec<Vec<Vec<P2>>> = faces.iter().zip(&sub.faces).map(|(&fi, f)| polys.get_mut(fi).and_then(Option::take).unwrap_or_else(|| super::classify::face_polygons(&sub, f))).collect();
+                if check_compare() {
+                    for (k, f) in sub.faces.iter().enumerate() {
+                        assert_eq!(sp[k], super::classify::face_polygons(&sub, f), "solid {si}: face {k}'s polygons differ from the subset's");
+                    }
+                }
                 // Ray parity settles the orientation where it can; else the exact volume.
-                if parity_orientation(&sub) == Some(true) {
+                if parity_orientation_with(&sub, sp) == Some(true) {
                     continue;
                 }
                 let v = super::mass::body_volume(&sub);

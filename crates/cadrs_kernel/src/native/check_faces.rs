@@ -44,6 +44,13 @@ pub fn face_crossings_of(b: &Body, changed: Option<&[bool]>) -> Vec<String> {
 
 /// [`face_crossings`] of the pairs `(i, j)`, `i < j`, that `wanted` takes.
 pub fn face_crossings_where(b: &Body, wanted: &(dyn Fn(usize, usize) -> bool + Sync)) -> Vec<String> {
+    face_crossings_in(b, wanted, &mut vec![None; b.faces.len()])
+}
+
+/// [`face_crossings_where`] with the faces' polygons ([`face_polygons`]) kept in `polys` (one
+/// per face, those it has already used, the others made as needed): for the check's later
+/// tests.
+pub(crate) fn face_crossings_in(b: &Body, wanted: &(dyn Fn(usize, usize) -> bool + Sync), polys: &mut [Option<Vec<Vec<P2>>>]) -> Vec<String> {
     let n = b.faces.len();
     if n < 2 || b.shells.is_empty() {
         return Vec::new();
@@ -89,14 +96,22 @@ pub fn face_crossings_where(b: &Body, wanted: &(dyn Fn(usize, usize) -> bool + S
         paired[i] = true;
         paired[j] = true;
     }
-    let polys: Vec<Vec<Vec<P2>>> = b.faces.iter().enumerate().map(|(fi, f)| if paired[fi] { face_polygons(b, f) } else { Vec::new() }).collect();
+    for (fi, f) in b.faces.iter().enumerate() {
+        if paired[fi] && fi < polys.len() && polys[fi].is_none() {
+            polys[fi] = Some(face_polygons(b, f));
+        }
+    }
+    let polys: &[Option<Vec<Vec<P2>>>] = polys;
+    // Edge `e` against face `y`'s surface over [t0, t1] comes up from each of e's faces paired
+    // with y: its roots once.
+    let roots: Roots = std::sync::Mutex::new(std::collections::HashMap::new());
     pairs
         .par_iter()
         .filter_map(|&(i, j)| {
             let ov = Bbox { min: boxes[i].min.sup(&boxes[j].min), max: boxes[i].max.inf(&boxes[j].max) };
             // Clear of the boundaries by the faces' tolerances, and by a part in 10⁶ of the body.
             let margin = 2.0 * tol[i].max(tol[j]) + tol::REL_POINT * size;
-            let p = crossing(b, &polys, (i, j), &ov, margin)?;
+            let p = crossing(b, polys, (i, j), &ov, margin, &roots)?;
             Some(format!("faces {i} and {j} cross away from their edges near ({:.6}, {:.6}, {:.6})", p.x, p.y, p.z))
         })
         .collect()
@@ -186,7 +201,12 @@ fn sided_roots(e: &super::topo::Edge, t0: f64, t1: f64, s: &Surface) -> Vec<f64>
 }
 
 /// A point where faces `i` and `j` cross (see the module docs), if any.
-fn crossing(b: &Body, polys: &[Vec<Vec<P2>>], (i, j): (usize, usize), ov: &Bbox, margin: f64) -> Option<P3> {
+/// Roots of an edge on a face's surface over a range of the edge's parameter, by (edge, face, the
+/// range's bits).
+type Roots = std::sync::Mutex<std::collections::HashMap<(usize, usize, u64, u64), Vec<f64>>>;
+
+fn crossing(b: &Body, polys: &[Option<Vec<Vec<P2>>>], (i, j): (usize, usize), ov: &Bbox, margin: f64, cache: &Roots) -> Option<P3> {
+    let polys = |f: usize| polys.get(f).and_then(|p| p.as_deref()).unwrap_or(&[]);
     let region = ov.grow(margin);
     // Edges of one face piercing the other.
     for (x, y) in [(i, j), (j, i)] {
@@ -197,14 +217,31 @@ fn crossing(b: &Body, polys: &[Vec<Vec<P2>>], (i, j): (usize, usize), ov: &Bbox,
                 continue;
             }
             let Some((t0, t1)) = near_stretch(e, &region, &fy.surf) else { continue };
-            let roots = if elementary(&fy.surf) { super::ssi::curve_surface(&e.curve, t0, t1, &fy.surf) } else { sided_roots(e, t0, t1, &fy.surf) };
+            let roots = if elementary(&fy.surf) {
+                super::ssi::curve_surface(&e.curve, t0, t1, &fy.surf)
+            } else {
+                let key = (c.edge, y, t0.to_bits(), t1.to_bits());
+                let known = cache.lock().ok().and_then(|m| m.get(&key).cloned());
+                if let Some(k) = &known
+                    && super::topo::check_compare()
+                {
+                    assert_eq!(*k, sided_roots(e, t0, t1, &fy.surf), "edge {} on face {y}: the roots kept differ from the roots found again", c.edge);
+                }
+                known.unwrap_or_else(|| {
+                    let r = sided_roots(e, t0, t1, &fy.surf);
+                    if let Ok(mut m) = cache.lock() {
+                        m.insert(key, r.clone());
+                    }
+                    r
+                })
+            };
             for t in roots {
                 let p = e.point(t);
                 // (An edge ending on the other face touches it there, as where a wall ends
                 // on a face it doesn't split: a crossing pierces the face with the edge's
                 // middle.)
                 let at_end = e.v.iter().any(|&v| (b.verts[v].p - p).norm() <= margin + b.verts[v].tol);
-                if at_end || !region.contains(&p) || !inside(b, &polys[y], y, &p, margin) {
+                if at_end || !region.contains(&p) || !inside(b, polys(y), y, &p, margin) {
                     continue;
                 }
                 // Crossing the surface, not touching it.
@@ -220,7 +257,7 @@ fn crossing(b: &Body, polys: &[Vec<Vec<P2>>], (i, j): (usize, usize), ov: &Bbox,
     if !(elementary(&fa.surf) && elementary(&fb.surf)) {
         return None;
     }
-    let (ua, ub) = (uv_box(&polys[i])?, uv_box(&polys[j])?);
+    let (ua, ub) = (uv_box(polys(i))?, uv_box(polys(j))?);
     let ssi = super::ssi::surface_surface_full(&fa.surf, ua, &fb.surf, ub, ov);
     for c in &ssi.curves {
         if !(c.t1 > c.t0) {
@@ -229,7 +266,7 @@ fn crossing(b: &Body, polys: &[Vec<Vec<P2>>], (i, j): (usize, usize), ov: &Bbox,
         for k in 0..SAMPLES {
             let t = c.t0 + (c.t1 - c.t0) * (k as f64 + 0.5) / SAMPLES as f64;
             let p = c.c.point(t);
-            if region.contains(&p) && inside(b, &polys[i], i, &p, margin) && inside(b, &polys[j], j, &p, margin) {
+            if region.contains(&p) && inside(b, polys(i), i, &p, margin) && inside(b, polys(j), j, &p, margin) {
                 return Some(p);
             }
         }
