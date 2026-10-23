@@ -4,16 +4,22 @@ name: Release
 # archives, as tools/release/build.sh does locally, and publishes them as a GitHub release with
 # SHA256SUMS.txt. The release notes are tools/release/notes/<tag>.md (GitHub's generated notes
 # when there is none); a tag with a `-` in it (v0.1.7-beta.1) is a pre-release. Then the site is
-# redeployed so its download links point at the new release.
+# redeployed so its download links point at the new release. Running it by hand with a tag
+# (Actions › Release › Run workflow) releases the chosen branch's head and creates the tag.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The tag to create and release, such as v0.1.6"
+        required: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref_name }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -104,9 +110,15 @@ jobs:
       actions: write
     env:
       GH_TOKEN: ${{ github.token }}
-      TAG: ${{ github.ref_name }}
+      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
+
+      # The archives are named after Cargo.toml's version, so the tag has to match it.
+      - name: Check the tag
+        run: |
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          [[ "$TAG" == "v$version" ]] || { echo "tag $TAG doesn't match Cargo.toml's version $version"; exit 1; }
 
       - uses: actions/download-artifact@v4
         with:
@@ -119,7 +131,9 @@ jobs:
       - name: Create the release
         run: |
           set -euo pipefail
-          args=(--title "cadrs $TAG" --verify-tag)
+          # A tag push has its tag; a run by hand creates it on the commit it built.
+          args=(--title "cadrs $TAG")
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then args+=(--verify-tag); else args+=(--target "$GITHUB_SHA"); fi
           notes="tools/release/notes/$TAG.md"
           if [[ -f "$notes" ]]; then args+=(--notes-file "$notes"); else args+=(--generate-notes); fi
           if [[ "$TAG" == *-* ]]; then args+=(--prerelease); fi
@@ -128,5 +142,5 @@ jobs:
       # A release made with the workflow's token doesn't trigger other workflows' `release`
       # events, but a dispatch does.
       - name: Redeploy the site
-        if: ${{ !contains(github.ref_name, '-') }}
+        if: ${{ !contains(inputs.tag || github.ref_name, '-') }}
         run: gh workflow run pages.yml --ref main
