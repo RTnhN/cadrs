@@ -423,7 +423,6 @@ boolean cells_test_j1
 boolean volumemaker_d8
 # boolean: cells, splits and mkvolume whose booleans fail (open shell).
 boolean volumemaker_a2
-boolean volumemaker_a4
 boolean volumemaker_a8
 boolean volumemaker_e6
 boolean volumemaker_f1

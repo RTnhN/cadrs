@@ -2116,6 +2116,32 @@ fn run(a: &Body, b: &Body, mode: Mode, opts: RunOpts) -> Result<BoolOut> {
                     }
                 }
             }
+            // An open curve left with no end to run to (fewer than two vertices on it): a
+            // vertex within 1.5 times its own tolerance of it, and within that of both
+            // surfaces, ends it too. The edge-face stage makes such a vertex where an edge a
+            // tolerance off its face meets a surface it grazes: the crossing lands up to the
+            // tolerance over the angle along the curve (a slab's rim 7e-4 off its cylinder
+            // meeting a plane at a glancing angle, 1.6e-3 off the plane's line on it). Its
+            // tolerance then covers the gap.
+            if !ic.closed && ps.len() < 2 {
+                for &v in &cand {
+                    let p = pool.verts[v];
+                    let vt = pool.vtols[v];
+                    if ps.iter().any(|&(_, w)| w == v) || !ob.grow(tf * 10.0 + vt).contains(&p) {
+                        continue;
+                    }
+                    let t = param_on(&ic.c, ic.t0, ic.t1, &p);
+                    let gap = (ic.c.point(t) - p).norm();
+                    // (Only where the tolerance is what the gap comes of, a tenth of it or more: a
+                    // vertex a hair off a curve with no ends is no crossing of it.)
+                    if gap < 1.5 * vt && gap > 0.1 * vt && faces[fa].surf.distance(&p) <= vt && faces[fb].surf.distance(&p) <= vt {
+                        if gap > vt {
+                            pool.vtols[v] = 1.5 * gap;
+                        }
+                        ps.push((t, v));
+                    }
+                }
+            }
             // Sections only (booleans rely on the edge–face stage's crossings): where the curve
             // leaves either face (a crossing that stage missed, as on a B-spline face),
             // found by sampling the in-face status along it and bisecting each change, and

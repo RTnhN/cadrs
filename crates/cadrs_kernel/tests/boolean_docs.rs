@@ -314,3 +314,32 @@ fn post_through_a_spindle_torus_wall() {
     );
     run("drbrowns_cap", &["drbrowns_post"], BoolOp::Union, v);
 }
+
+/// A slab from offsetting SMLib's `offset_bracket2.smb` (its face 27, a cylinder, by 3.5): the
+/// bracket's edge there is a cubic 7e-4 off its cylinder (tolerance 1.4e-3), so the slab's rim
+/// is too. A box whose face y = 0 cuts the slab's outer cylinder at a glancing angle: the
+/// rim's crossing of that face lies 1.6e-3 along it from the plane–cylinder line, within the
+/// vertex's tolerance but past the run's; the line has to end there all the same (it had no
+/// end at that crossing and left the shell open).
+#[test]
+fn glancing_cut_at_a_rim_off_its_cylinder() {
+    let slab =
+        cadrs_kernel::native::bodyio::read(include_bytes!("data/offset_slab_spline_rim.body"))
+            .unwrap();
+    for op in [BoolOp::Union, BoolOp::Subtract, BoolOp::Intersect] {
+        let mut k = NativeKernel::new();
+        let a = k.insert(slab.clone());
+        let cadrs_kernel::native::draw::Shape::Body(b) =
+            k.box_at(-16.0, -3.0, 5.0, 12.0, 3.0, 3.0).unwrap()
+        else {
+            panic!("a box");
+        };
+        let r = k
+            .boolean(op, a, &[b])
+            .unwrap_or_else(|e| panic!("{op:?}: {e}"));
+        for id in r.bodies {
+            let body = k.get(id).unwrap();
+            assert!(body.check().is_empty(), "{op:?}: {:?}", body.check());
+        }
+    }
+}
