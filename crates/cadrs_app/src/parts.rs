@@ -85,6 +85,7 @@ impl Plugin for PartsPlugin {
                     update_part_cache,
                     crate::assembly::in_context::sync_context_parts,
                     sync_part_meshes,
+                    place_moved_parts,
                     sync_ghost_meshes,
                     draw_ghost_edges,
                     shade_parts,
@@ -559,6 +560,10 @@ pub struct PartCache {
     names: Vec<(PartId, String)>,
     /// The Assembly tab whose instances are shown (P3B.1), if one is active.
     pub assembly: Option<ElementId>,
+    /// Parts drawn moved from where their solids are (a drag or an animation in an assembly,
+    /// [`crate::assembly::AssemblyParts::live`]): their meshes by their transform, their edges
+    /// moved as drawn, so the solids aren't placed again every frame.
+    pub moved: HashMap<PartId, Mat4>,
     /// While the Extrude dialog edits an Add: the body it adds, drawn as the translucent
     /// preview over the parts as they were before it (`ex1-step4.png`). Not a part: it is not
     /// listed, measured or picked.
@@ -1283,6 +1288,9 @@ fn update_part_cache(
         crate::assembly::update_assembly_parts(&doc, el, &mut cache, &mut asm, budget.0);
         return;
     }
+    if !cache.moved.is_empty() {
+        cache.moved.clear();
+    }
     let features = el.features();
     // Renames and hidden parts (and a change of element ends an isolation).
     if cache.props.as_slice() != el.part_props() {
@@ -1857,8 +1865,14 @@ pub fn part_lines(part: &Part, view: &ViewState) -> Vec<Vec<Vec3>> {
 /// flat faces that both face away from the viewer lies behind the solid's own material, but the
 /// lines' depth bias pulled its ends through the corner it meets.
 pub fn part_lines_culled(part: &Part, view: &ViewState, cull: bool) -> Vec<Vec<Vec3>> {
+    part_lines_from(part, view.back(), view.scale, cull)
+}
+
+/// [`part_lines_culled`] seen from the direction `back` (toward the viewer) at `scale` mm per
+/// pixel: a part drawn turned ([`PartCache::moved`]) is seen from the view's direction turned
+/// back into its solid's frame.
+fn part_lines_from(part: &Part, back: Vec3, scale: f32, cull: bool) -> Vec<Vec<Vec3>> {
     let s = &part.solid;
-    let back = view.back();
     let cull = cull && part.kind == cadrs_core::PartKind::Solid;
     // The mesh's normal, not the plane frame's: a face a cut left keeps its tool's frame, whose
     // normal points into the material (the U-joint flange's pockets lost visible edges).
@@ -1899,7 +1913,7 @@ pub fn part_lines_culled(part: &Part, view: &ViewState, cull: bool) -> Vec<Vec<V
     // How far outside the surface a silhouette is drawn: a third of a pixel, so it stays in
     // front of the facets it outlines, but never more than the mesh's own tolerance (0.05 mm):
     // a fixed 0.05 mm floated the line pixels off a close-up's cylinder.
-    let lift = (view.scale * 0.33).min(0.05);
+    let lift = (scale * 0.33).min(0.05);
     for w in s.rulings.windows(2) {
         let (a, b) = (w[0], w[1]);
         if a.face != b.face || a.run != b.run {
@@ -1919,7 +1933,7 @@ pub fn part_lines_culled(part: &Part, view: &ViewState, cull: bool) -> Vec<Vec<V
     // Doubly curved faces (a revolve's torus): their grids' silhouettes, a little outside
     // (between grid points the line runs inside the true surface and would dip behind the
     // facets it outlines: P3.4, a torus's silhouette drew dotted).
-    let grid_lift = (view.scale * 1.5).min(0.05);
+    let grid_lift = (scale * 1.5).min(0.05);
     for g in &s.grids {
         for [(p0, n0), (p1, n1)] in g.silhouette([back.x as f64, back.y as f64, back.z as f64]) {
             out.push(vec![
@@ -2151,6 +2165,26 @@ fn sync_part_meshes(
         if crate::assembly::standard::is_ghost(part.id) || cache.xray(part).is_some() {
             e.insert(RenderLayers::layer(crate::viewport::OVERLAY_LAYER));
         }
+    }
+}
+
+/// Puts the part meshes (and their hidden lines) where [`PartCache::moved`] draws them.
+fn place_moved_parts(
+    cache: Res<PartCache>,
+    mut q: Query<(&PartMesh, &mut Transform)>,
+    mut q_hidden: Query<(&crate::hidden_edges::HiddenLines, &mut Transform), Without<PartMesh>>,
+) {
+    let want = |id: &PartId| {
+        cache
+            .moved
+            .get(id)
+            .map_or(Transform::IDENTITY, |m| Transform::from_matrix(*m))
+    };
+    for (pm, mut t) in &mut q {
+        t.set_if_neq(want(&pm.id));
+    }
+    for (h, mut t) in &mut q_hidden {
+        t.set_if_neq(want(&h.0));
     }
 }
 
@@ -2433,6 +2467,14 @@ fn draw_part_edges(
         _ => None,
     };
     for part in cache.shown().chain(cache.tool.iter()) {
+        // A part drawn moved: its points moved as drawn; seen turned, its lines are worked out
+        // for the view's direction turned back into its solid's frame (not kept: they change
+        // as it turns).
+        let moved = cache.moved.get(&part.id).copied();
+        let xf = |p: Vec3| moved.map_or(p, |m| m.transform_point3(p));
+        let turned_back = moved
+            .map(|m| m.inverse().transform_vector3(back).normalize_or_zero())
+            .filter(|b| b.distance(back) > 1e-5);
         // The section's cut, none for the parts it leaves whole.
         let clip = section.clip_for(part.id);
         let preview = over.previews(part);
@@ -2462,7 +2504,7 @@ fn draw_part_edges(
                 strip(
                     &mut change_edges,
                     clip,
-                    e.points.iter().map(|p| v3(*p)),
+                    e.points.iter().map(|p| xf(v3(*p))),
                     c.edge(),
                 );
             }
@@ -2506,7 +2548,7 @@ fn draw_part_edges(
                 strip(
                     &mut preview_edges,
                     clip,
-                    e.points.iter().map(|p| v3(*p)),
+                    e.points.iter().map(|p| xf(v3(*p))),
                     color,
                 );
             }
@@ -2522,8 +2564,13 @@ fn draw_part_edges(
                 || part_selected
                 || (failed_parts.contains(&part.id) && failed.2.is_empty());
             if !outlined && mode.edges() {
-                for line in lines_of(part, &v, opaque && !mode.translucent()).iter() {
-                    strip(&mut edges, clip, line.iter().copied(), edge_color);
+                let cull = opaque && !mode.translucent();
+                let lines = match turned_back {
+                    Some(b) => std::sync::Arc::new(part_lines_from(part, b, v.scale, cull)),
+                    None => lines_of(part, &v, cull),
+                };
+                for line in lines.iter() {
+                    strip(&mut edges, clip, line.iter().map(|p| xf(*p)), edge_color);
                 }
             }
             for e in part
@@ -2535,7 +2582,7 @@ fn draw_part_edges(
                 strip(
                     &mut free_edges,
                     clip,
-                    e.points.iter().map(|p| v3(*p)),
+                    e.points.iter().map(|p| xf(v3(*p))),
                     edge_color,
                 );
             }
@@ -2562,7 +2609,7 @@ fn draw_part_edges(
                 continue;
             }
             for l in &face.loops {
-                let mut pts: Vec<Vec3> = l.iter().map(|p| v3(*p)).collect();
+                let mut pts: Vec<Vec3> = l.iter().map(|p| xf(v3(*p))).collect();
                 if let Some(first) = pts.first().copied() {
                     pts.push(first);
                 }
@@ -2597,7 +2644,7 @@ fn draw_part_edges(
                 .filter(|f| failed.2.contains(&f.name.op))
             {
                 for l in &face.loops {
-                    let mut pts: Vec<Vec3> = l.iter().map(|p| v3(*p)).collect();
+                    let mut pts: Vec<Vec3> = l.iter().map(|p| xf(v3(*p))).collect();
                     if let Some(first) = pts.first().copied() {
                         pts.push(first);
                     }
@@ -2618,8 +2665,12 @@ fn draw_part_edges(
             let opaque = !ghosts.faded(part.id)
                 && !cache.transparent.contains(&part.id)
                 && cache.tints.get(&part.id).is_none_or(|t| t.alpha >= 1.0);
-            for line in lines_of(part, &v, opaque).iter() {
-                strip(&mut outline_edges, clip, line.iter().copied(), color);
+            let lines = match turned_back {
+                Some(b) => std::sync::Arc::new(part_lines_from(part, b, v.scale, opaque)),
+                None => lines_of(part, &v, opaque),
+            };
+            for line in lines.iter() {
+                strip(&mut outline_edges, clip, line.iter().map(|p| xf(*p)), color);
             }
         }
         // Edges: hovered or selected.
@@ -2638,14 +2689,14 @@ fn draw_part_edges(
             strip(
                 &mut highlight_edges,
                 clip,
-                e.points.iter().map(|p| v3(*p)),
+                e.points.iter().map(|p| xf(v3(*p))),
                 color,
             );
             if dialog.is_some() && selection.contains(pick) {
                 strip(
                     &mut reference_edges,
                     clip,
-                    e.points.iter().map(|p| v3(*p)),
+                    e.points.iter().map(|p| xf(v3(*p))),
                     SELECTED_PART_EDGE,
                 );
             }
@@ -2653,7 +2704,8 @@ fn draw_part_edges(
         // Vertices: a dot about 9 px across, facing the viewer.
         let rot = Quat::from_rotation_arc(Vec3::Z, v.back());
         for vx in &hp.solid.vertices {
-            if clip.is_some_and(|c| c.removes(v3(vx.point))) {
+            let at = xf(v3(vx.point));
+            if clip.is_some_and(|c| c.removes(at)) {
                 continue;
             }
             let pick = Pick::Vertex(part.id, vx.name);
@@ -2666,7 +2718,7 @@ fn draw_part_edges(
             };
             for r in [0.8, 1.6, 2.4, 3.2, 4.2] {
                 vertices
-                    .circle(Isometry3d::new(v3(vx.point), rot), r * v.scale, color)
+                    .circle(Isometry3d::new(at, rot), r * v.scale, color)
                     .resolution(20);
             }
         }

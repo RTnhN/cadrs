@@ -1499,7 +1499,15 @@ fn draw_silhouettes(
             if cache.is_hidden_part(part.id) {
                 continue;
             }
-            for [a, b] in contour(part, back) {
+            // Drawn moved (a drag, `PartCache::moved`): seen from the view turned back into its
+            // solid's frame, its outline moved as drawn.
+            let moved = cache.moved.get(&part.id).copied();
+            let seen = moved.map_or(back, |m| {
+                m.inverse().transform_vector3(back).normalize_or_zero()
+            });
+            let xf = |p: Vec3| moved.map_or(p, |m| m.transform_point3(p));
+            for [a, b] in contour(part, seen) {
+                let (a, b) = (xf(a), xf(b));
                 // P3E.3a: cut by a section view.
                 match section.plane {
                     None => gizmos.line(a, b, OUTLINE),
