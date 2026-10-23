@@ -1000,7 +1000,7 @@ fn tool_picks(
                     continue;
                 }
                 let (Some(w), Some((pose, _))) = (
-                    world_frame(&doc, &mut parts, &c),
+                    world_frame(&doc, parts.bypass_change_detection(), &c),
                     solid_of(&doc, &mut parts, instance),
                 ) else {
                     continue;
@@ -1230,7 +1230,8 @@ fn draw_explicit_connectors(
     }
     let v = view.view;
     if shown.0 {
-        let list = explicit_connectors(&doc, &mut parts, &cache);
+        // (A cache fill: getting the instances' builds doesn't change what the assembly shows.)
+        let list = explicit_connectors(&doc, parts.bypass_change_detection(), &cache);
         let picking = mate
             .as_ref()
             .is_some_and(|m| m.connectors.len() < 2 && m.mate_type.uses_connectors());
@@ -1260,7 +1261,7 @@ fn draw_explicit_connectors(
     }
     // P3B.7 judge: the Part Studio connector row hovered in the Instances list (even with K).
     if let Some((instance, feature)) = list_hover.0 {
-        for (c, f) in explicit_connectors(&doc, &mut parts, &cache) {
+        for (c, f) in explicit_connectors(&doc, parts.bypass_change_detection(), &cache) {
             if c.instance == instance
                 && matches!(c.anchor, ConnectorAnchor::Explicit { feature: x } if x == feature)
             {
@@ -1278,7 +1279,7 @@ fn draw_explicit_connectors(
                 .nth(index)
                 .copied()
         })
-        && let Some(f) = world_frame(&doc, &mut parts, &c)
+        && let Some(f) = world_frame(&doc, parts.bypass_change_detection(), &c)
     {
         connectors::draw_glyph(&mut line, &mut halo, &v, &f, crate::parts::HOVER);
         // Its geometry too (A23.1).
@@ -1327,7 +1328,7 @@ fn draw_session(
                 outline(&mut edges, &part.solid, e, crate::parts::SELECTED);
             }
         }
-        if let Some(f) = world_frame(&doc, &mut parts, &c) {
+        if let Some(f) = world_frame(&doc, parts.bypass_change_detection(), &c) {
             connectors::draw_glyph(&mut line, &mut halo, &v, &f, crate::parts::SELECTED);
         }
     }

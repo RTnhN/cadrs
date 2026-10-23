@@ -120,10 +120,19 @@ pub fn refresh_ref_states(world: &mut World, mut last: Local<Option<(u64, f64)>>
         return;
     }
     *last = Some((key, now));
-    // Borrowed in place: cloning a big document every few seconds stalled frames.
+    // Borrowed in place: cloning a big document every few seconds stalled frames. Taking it out
+    // and putting it back marks it changed, though it is only read: its change tick is put back,
+    // or everything that follows the document would work again every few seconds (a large
+    // assembly's mate check alone took a fifth of a second).
+    let ticks = world.get_resource_change_ticks::<ActiveDocument>();
     world.resource_scope(|world, active: Mut<ActiveDocument>| {
         update_ref_states(world, &active.doc, &uses)
     });
+    if let Some(ticks) = ticks
+        && let Some(mut active) = world.get_resource_mut::<ActiveDocument>()
+    {
+        active.set_last_changed(ticks.changed);
+    }
 }
 
 /// [`refresh_ref_states`]' work, for `doc` (taken out of the world meanwhile).
