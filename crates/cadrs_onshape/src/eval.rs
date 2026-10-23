@@ -1014,21 +1014,66 @@ impl Model<'_> {
                     let originals = d.get("originals").map(Value::items).unwrap_or_default();
                     let curves = self.original_curves(originals);
                     let region = self.original_region(originals);
+                    // A side face's curve id is its sketch's own: a name with one of the curves'
+                    // ids says the face was swept from one of them only when its extrude swept
+                    // their sketch (a face merged with another extrude's, of another sketch's
+                    // curve with the same id, holds that name too).
+                    let sketches: HashSet<FeatureId> = originals
+                        .iter()
+                        .filter_map(|o| o.get("operationId").and_then(Value::as_str))
+                        .filter_map(|o| self.sketches.get(op_feature(o)))
+                        .map(|(m, _)| m.feature)
+                        .collect();
+                    let swept_theirs =
+                        |op| match self.doc.iter().find(|f| f.id.0 == op).map(|f| &f.kind) {
+                            Some(cadrs_core::document::FeatureKind::Extrude(x)) => {
+                                let swept = x.sketches();
+                                swept.is_empty() || swept.iter().any(|s| sketches.contains(s))
+                            }
+                            _ => true,
+                        };
+                    let from_curve = |n: &FaceName| {
+                        matches!(n.origin, FaceOrigin::Side { curve, .. } if curves.contains(&curve))
+                            && swept_theirs(n.op)
+                    };
                     // A face an extrude of faces made from an edge (`FromEdge`): the edge is made
-                    // from these curves when a side face along it is.
-                    let from_curves: HashSet<u64> = self
+                    // from these curves when a side face along it is. The edge may be gone since
+                    // (its faces merged with others): its name is the pair of face names, which
+                    // the merged faces keep as aliases.
+                    let mut from_curves: HashSet<u64> = self
                         .all_edges()
-                        .filter(|e| self.adjacent(*e).iter().filter_map(|f| self.face_name(*f)).any(|n| matches!(n.origin, FaceOrigin::Side { curve, .. } if curves.contains(&curve))))
+                        .filter(|e| {
+                            self.adjacent(*e)
+                                .iter()
+                                .filter_map(|f| self.face_name(*f))
+                                .any(|n| from_curve(&n))
+                        })
                         .filter_map(|e| self.edge_hash(e))
                         .collect();
-                    let by_name = |e: Ent| {
+                    let names: Vec<FaceName> =
+                        self.all_faces().flat_map(|f| self.face_names(f)).collect();
+                    for a in names.iter().filter(|n| from_curve(n)) {
+                        for b in names.iter().filter(|b| *b != a) {
+                            for index in 0..4 {
+                                from_curves.insert(cadrs_kernel::naming::edge_hash(
+                                    &cadrs_kernel::naming::EdgeName::new(*a, *b, index),
+                                ));
+                            }
+                        }
+                    }
+                    // `strict`: a side name only from an extrude of the curves' own sketch;
+                    // else any with one of their ids (when no candidate has a strict name: the
+                    // face it means may keep only another feature's name for the curve).
+                    let named = |e: Ent, strict: bool| {
                         self.face_names(e).iter().any(|n| match n.origin {
-                            FaceOrigin::Side { curve, .. } => curves.contains(&curve),
+                            FaceOrigin::Side { curve, .. } if !strict => curves.contains(&curve),
+                            FaceOrigin::Side { .. } => from_curve(n),
                             FaceOrigin::Cap { region: r, .. } => region.is_some_and(|x| x == r),
                             FaceOrigin::FromEdge { edge } => from_curves.contains(&edge),
                             _ => false,
                         })
                     };
+                    let by_name = |e: Ent| named(e, false);
                     // Curves of a sketch the extrude didn't sweep (another sketch's edges imprinted
                     // on its profile's plane): their ids are that sketch's, so a face named after
                     // the same id is another curve's. Found by where the curve swept to.
@@ -1106,8 +1151,11 @@ impl Model<'_> {
                         cands = own;
                         continue;
                     }
+                    let strict = cands
+                        .iter()
+                        .any(|e| matches!(e, Ent::Face(..)) && named(*e, true));
                     cands = narrow(cands, &|e| match e {
-                        Ent::Face(..) => by_name(e),
+                        Ent::Face(..) => named(e, strict),
                         // An edge made from these curves: a side face of it is made from one.
                         Ent::Edge(..) => self
                             .adjacent(e)
