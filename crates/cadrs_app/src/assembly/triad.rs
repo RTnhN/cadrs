@@ -1437,12 +1437,17 @@ fn contour(part: &Part, back: Vec3) -> Vec<[Vec3; 2]> {
             .min_by(|a, b| a.0.distance_squared(p).total_cmp(&b.0.distance_squared(p)))
             .is_some_and(|(_, n)| n.dot(back) > 0.0)
     };
+    // The faces by name from one pass (a scan of the faces per edge cost a big part dearly).
+    let index: std::collections::HashMap<_, usize> = s
+        .faces
+        .iter()
+        .enumerate()
+        .map(|(i, f)| (f.name, i))
+        .collect();
     let mut out = Vec::new();
     for e in &s.edges {
-        let (Some(fa), Some(fb)) = (
-            s.faces.iter().position(|f| f.name == e.name.faces[0]),
-            s.faces.iter().position(|f| f.name == e.name.faces[1]),
-        ) else {
+        let (Some(&fa), Some(&fb)) = (index.get(&e.name.faces[0]), index.get(&e.name.faces[1]))
+        else {
             continue;
         };
         for w in e.points.windows(2) {
@@ -1470,6 +1475,20 @@ fn contour(part: &Part, back: Vec3) -> Vec<[Vec3; 2]> {
     out
 }
 
+/// The outlines [`draw_silhouettes`] drew, by part: each for its solid and the direction it was
+/// seen from, kept while neither changes (working them out every frame cost a selected
+/// subassembly most of its frame). The solid is kept so its address isn't reused meanwhile.
+/// A part's outline: its solid, the direction it was seen from and its lines.
+type Contour = (
+    std::sync::Arc<cadrs_core::Solid>,
+    Vec3,
+    std::sync::Arc<Vec<[Vec3; 2]>>,
+);
+
+#[derive(Default)]
+struct Contours(std::collections::HashMap<cadrs_core::PartId, Contour>);
+
+#[allow(clippy::too_many_arguments)]
 fn draw_silhouettes(
     triad: Res<Triad>,
     selection: Res<Selection>,
@@ -1478,6 +1497,7 @@ fn draw_silhouettes(
     view: Res<ViewportView>,
     mut gizmos: Gizmos<SilhouetteGizmos>,
     section: Res<crate::section_view::SectionClip>,
+    mut contours: Local<Contours>,
 ) {
     let Some(doc) = doc else { return };
     if super::active_assembly(&doc).is_none() {
@@ -1490,6 +1510,7 @@ fn draw_silhouettes(
     ids.sort();
     ids.dedup();
     let back = view.view.back();
+    let mut drawn = std::collections::HashSet::new();
     for id in ids {
         // A subassembly: each of its parts.
         for pid in super::view_parts(&cache, &[id]) {
@@ -1506,7 +1527,20 @@ fn draw_silhouettes(
                 m.inverse().transform_vector3(back).normalize_or_zero()
             });
             let xf = |p: Vec3| moved.map_or(p, |m| m.transform_point3(p));
-            for [a, b] in contour(part, seen) {
+            drawn.insert(part.id);
+            let lines = match contours.0.get(&part.id) {
+                Some((s, at, lines)) if std::sync::Arc::ptr_eq(s, &part.solid) && *at == seen => {
+                    lines.clone()
+                }
+                _ => {
+                    let lines = std::sync::Arc::new(contour(part, seen));
+                    contours
+                        .0
+                        .insert(part.id, (part.solid.clone(), seen, lines.clone()));
+                    lines
+                }
+            };
+            for &[a, b] in lines.iter() {
                 let (a, b) = (xf(a), xf(b));
                 // P3E.3a: cut by a section view.
                 match section.plane {
@@ -1520,6 +1554,7 @@ fn draw_silhouettes(
             }
         }
     }
+    contours.0.retain(|p, _| drawn.contains(p));
 }
 
 /// The editable value box after a drag (A3.4, P3B.1 judge): a quick-dimension box with the
