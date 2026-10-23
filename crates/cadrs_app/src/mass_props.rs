@@ -24,6 +24,9 @@
 //!   `cadrs_core::parts::mass_report`).
 //! - Values are selectable text (drag, double-click, Ctrl+C), and a copy icon beside each,
 //!   shown on hover, copies it with its unit (`cadrs_ui::SelectableText`, #67).
+//! - Only the mass has an Override (Onshape's centre of mass and inertia Overrides did nothing
+//!   here, so they are left out). **Show calculation variance** stays off: the kernel gives no
+//!   error bounds for its mass properties.
 //! - ✕ (or Esc) closes it; ✓ stays greyed, as in Onshape (there is nothing to accept).
 //! - While it shows a mass, the **centre of mass** is marked in the view with the quartered
 //!   circle (P3.6, `ex4-step18.png`, `ex3-step10.png`).
@@ -213,11 +216,6 @@ enum Value {
     /// The inertia tensor's entry (row, column).
     Inertia(usize, usize),
 }
-
-/// An Override that is unavailable (filled grey) until there is a mass (`ex1-step6.png`: the
-/// Center of mass and inertia Overrides without a material).
-#[derive(Component)]
-struct NeedsMass;
 
 /// The panel's heading for the inertia grid.
 #[derive(Component)]
@@ -732,7 +730,7 @@ fn axis_row(
     });
 }
 
-fn heading(p: &mut ChildSpawner, t: &Theme, label: &str, override_box: bool) {
+fn heading(p: &mut ChildSpawner, t: &Theme, label: &str) {
     p.spawn(Node {
         height: Val::Px(24.0),
         align_items: AlignItems::Center,
@@ -743,20 +741,6 @@ fn heading(p: &mut ChildSpawner, t: &Theme, label: &str, override_box: bool) {
         let mut text = r.spawn(t.text(label.to_string(), 11.5, FontWeight::MEDIUM, t.foreground));
         if label.starts_with("Mass moments") {
             text.insert((InertiaHeading, Name::new("mass-inertia-heading")));
-        }
-        if override_box {
-            let name = if label.starts_with("Mass moments") {
-                "mass-inertia-override".to_string()
-            } else {
-                format!("mass-{}-override", label.to_lowercase().replace(' ', "-"))
-            };
-            r.spawn((
-                Checkbox::new(name)
-                    .label("Override")
-                    .disabled(true)
-                    .build(t),
-                NeedsMass,
-            ));
         }
     });
 }
@@ -838,7 +822,7 @@ fn mass_dialog(
                                 .build(t),
                         ));
                         face_row(c, t, "Area", t.foreground, FaceValue::Area);
-                        heading(c, t, "Centroid", false);
+                        heading(c, t, "Centroid");
                         face_row(c, t, "X", Color::srgb_u8(0xd0, 0x30, 0x30), FaceValue::X);
                         face_row(c, t, "Y", Color::srgb_u8(0x2e, 0x9e, 0x3e), FaceValue::Y);
                         face_row(c, t, "Z", Color::srgb_u8(0x2b, 0x64, 0xc0), FaceValue::Z);
@@ -877,7 +861,8 @@ fn mass_dialog(
                             .label("Show calculation variance")
                             .disabled(true)
                             .build(t),
-                    );
+                    )
+                    .insert(Tooltip::new("Not supported by the kernel yet"));
                     c.spawn(Node {
                         height: Val::Px(24.0),
                         align_items: AlignItems::Center,
@@ -891,7 +876,8 @@ fn mass_dialog(
                                 .label("Override")
                                 .checked(layout.overridden)
                                 .build(t),
-                        );
+                        )
+                        .insert(Tooltip::new("Use a typed mass instead of the materials'"));
                         if layout.overridden {
                             // P3.10 (X7): the overriding mass, typed.
                             r.spawn((
@@ -931,7 +917,7 @@ fn mass_dialog(
                     });
                     value_row(c, t, "Volume", t.foreground, Some(Value::Volume));
                     value_row(c, t, "Surface area", t.foreground, Some(Value::Area));
-                    heading(c, t, "Center of mass", true);
+                    heading(c, t, "Center of mass");
                     axis_row(
                         c,
                         t,
@@ -956,7 +942,7 @@ fn mass_dialog(
                         Color::srgb_u8(0x2b, 0x64, 0xc0),
                         Value::Z,
                     );
-                    heading(c, t, &inertia, true);
+                    heading(c, t, &inertia);
                     for row in [
                         ["Lxx", "Lxy", "Lxz"],
                         ["Lyx", "Lyy", "Lyz"],
@@ -1016,7 +1002,6 @@ fn sync_mass_panel(
     mut q_field: Query<&mut SelectionListState, With<PartsField>>,
     mut q_values: Query<(&Value, &mut SelectableValue)>,
     mut q_heading: Query<&mut Text, With<InertiaHeading>>,
-    mut q_needs_mass: Query<&mut cadrs_ui::CheckboxState, With<NeedsMass>>,
     (mut q_override, focus, q_edit): (
         Query<(Entity, &mut cadrs_ui::NumberFieldState), With<OverrideValue>>,
         Res<bevy::input_focus::InputFocus>,
@@ -1195,12 +1180,6 @@ fn sync_mass_panel(
         };
         if text.0 != *want {
             text.0 = want.clone();
-        }
-    }
-    let unavailable = r.mass.is_empty();
-    for mut c in &mut q_needs_mass {
-        if c.unavailable != unavailable {
-            c.unavailable = unavailable;
         }
     }
     let heading = inertia_heading(&units.0);
