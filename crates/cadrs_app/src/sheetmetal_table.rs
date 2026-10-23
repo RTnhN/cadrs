@@ -179,6 +179,9 @@ fn kept_inputs_translucent(
     )>,
 ) {
     let Some(doc) = doc else { return };
+    if !doc.is_changed() {
+        return;
+    }
     let Some(el) = doc.active_element() else {
         return;
     };

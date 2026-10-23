@@ -328,7 +328,18 @@ fn note_healthy(
     errors: Res<crate::sketch_constrain::SketchErrors>,
     store: Res<DocumentStore>,
     mut log: ResMut<DocLog>,
+    mut waiting: Local<bool>,
 ) {
+    // Only when the document, the parts or the sketch errors changed, or a note is still waiting
+    // for the history to catch up (comparing every feature each frame cost a big Part Studio).
+    let changed = doc.as_ref().is_some_and(|d| d.is_changed())
+        || cache.is_changed()
+        || errors.is_changed()
+        || log.is_changed();
+    if !changed && !*waiting {
+        return;
+    }
+    *waiting = false;
     let (Some(doc), Some((element, features, over))) = (doc, cache.settled()) else {
         return;
     };
@@ -339,11 +350,12 @@ fn note_healthy(
         return;
     }
     let generation = cache.generation;
+    // Read without flagging the log changed (the history panel follows its changes).
     let DocLog {
         log: Some(l),
         noted,
         ..
-    } = &mut *log
+    } = log.bypass_change_detection()
     else {
         return;
     };
@@ -352,6 +364,8 @@ fn note_healthy(
         return;
     }
     if l.head() != &doc.doc {
+        // The history hasn't recorded this state yet: look again next frame.
+        *waiting = true;
         return;
     }
     *noted = Some(key);
@@ -364,8 +378,11 @@ fn note_healthy(
         .collect();
     let before = l.healthy.clone();
     l.note_healthy(element, ok);
-    if l.healthy != before && doc.meta.is_some() {
-        l.save_in_background(&store.0);
+    if l.healthy != before {
+        if doc.meta.is_some() {
+            l.save_in_background(&store.0);
+        }
+        log.set_changed();
     }
 }
 

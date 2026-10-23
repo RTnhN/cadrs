@@ -1298,13 +1298,17 @@ fn compute_caps(
     // Always drain the one outstanding job, even when the section was closed or changed.
     // Dropping its receiver would not cancel work already on the shared kernel thread.
     let mut done = Vec::new();
-    clip.pending.retain(|(key, job)| match job.poll() {
-        Some(result) => {
-            done.push((*key, Arc::new(result.unwrap_or_default())));
-            false
-        }
-        None => true,
-    });
+    // (Only touched mutably when there is something to change: the parts and the section follow
+    // these resources' changes.)
+    if !clip.pending.is_empty() {
+        clip.pending.retain(|(key, job)| match job.poll() {
+            Some(result) => {
+                done.push((*key, Arc::new(result.unwrap_or_default())));
+                false
+            }
+            None => true,
+        });
+    }
     for (key, caps) in done {
         clip.cache.retain(|(k, _)| k.0 != key.0 || k.1 == key.1);
         clip.cache.push((key, caps));
@@ -1329,10 +1333,14 @@ fn compute_caps(
         if !clip.caps.is_empty() {
             clip.caps = Arc::default();
         }
-        clip.key = None;
-        clip.displayed = None;
-        clip.preview_cache.clear();
-        cache.section = None;
+        if clip.key.is_some() || clip.displayed.is_some() || !clip.preview_cache.is_empty() {
+            clip.key = None;
+            clip.displayed = None;
+            clip.preview_cache.clear();
+        }
+        if cache.section.is_some() {
+            cache.section = None;
+        }
         return;
     };
     let (Some(doc), Some(el)) = (doc, el) else {

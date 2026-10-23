@@ -59,23 +59,38 @@ fn sync_readout(
     q_area: Query<Entity, With<ViewportArea>>,
     q_card: Query<Entity, With<SelectionReadout>>,
     mut last: Local<Option<Vec<(Pick, String)>>>,
+    mut last_sessions: Local<(bool, bool)>,
     mut commands: Commands,
 ) {
+    let inputs_changed = selection.is_changed()
+        || cache.is_changed()
+        || kind.is_changed()
+        || theme.is_changed()
+        || enabled.is_changed()
+        || doc.as_ref().is_some_and(|d| d.is_changed())
+        || sessions.0.as_ref().is_some_and(|s| s.is_changed())
+        || sessions.1.as_ref().is_some_and(|s| s.is_changed())
+        || sessions.0.is_some() != last_sessions.0
+        || sessions.1.is_some() != last_sessions.1;
+    *last_sessions = (sessions.0.is_some(), sessions.1.is_some());
+    if !inputs_changed && last.is_some() {
+        return;
+    }
     let modeling = enabled.0
         && sessions.0.is_none()
         && sessions.1.is_none()
         && *kind == ActiveKind::PartStudio;
-    let features = doc
+    let features: &[cadrs_core::Feature] = doc
         .as_deref()
         .and_then(|d| d.active_element())
-        .map(|e| e.features().to_vec())
-        .unwrap_or_default();
+        .map(|e| e.features())
+        .unwrap_or(&[]);
     let items: Vec<(Pick, String)> = if modeling {
         selection
             .0
             .iter()
             .filter(|p| p.part().is_some())
-            .filter_map(|p| Some((*p, pick_label(&features, &cache, *p)?)))
+            .filter_map(|p| Some((*p, pick_label(features, &cache, *p)?)))
             .collect()
     } else {
         Vec::new()
