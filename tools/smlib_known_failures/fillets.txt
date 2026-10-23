@@ -11,7 +11,6 @@ case_110_nurb_box slow
 case_111_box_on_box
 case_112_letter_g
 case_113_box_on_box
-case_115_filleted_box
 case_116_filleted_box
 case_118_l_shaped_box
 case_119_l_shaped_box
@@ -36,7 +35,6 @@ case_214_cap1
 case_215_cap1 slow
 case_216_caps_coons slow
 case_217_caps_nside slow
-case_218_fillet1010
 case_219_fillet0227 slow
 case_221_vase1
 case_223_vase3 slow

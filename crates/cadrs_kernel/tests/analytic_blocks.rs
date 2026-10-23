@@ -777,3 +777,129 @@ fn a_tangent_chain_stops_where_its_corner_turns_convex() {
         v0 + 5.0
     );
 }
+
+#[test]
+fn two_chamfers_under_a_lid_mitre_round_a_post() {
+    // A lid [0, 20]² × [10, 13] on a post [10, 20]² × [0, 10]: the post's walls x = 10 and
+    // y = 10 meet the lid's underside in two inside corners, L = 10 long, which meet at
+    // (10, 10, 10) round the post's outside corner. Chamfered d, each fills a prism ½d² L; past
+    // the corner they run on and meet (as Onshape's do) where the fill is as thick as the
+    // thinner of the two, d − max(u, w) at u, w from the walls: a pyramid d³/3. Area: each
+    // chamfer takes a d × L strip off the lid and off its wall and adds √2 d L; the corner takes
+    // a d × d square off the lid and adds two triangles √2 d²/2; each fill's far end adds its
+    // section, d²/2, to the outer face it ends flush with.
+    let (l, d) = (10.0, 2.0);
+    let mut k = NativeKernel::new();
+    let lid = extrude(&mut k, rect(0.0, 0.0, 20.0, 20.0), vec![], 3.0);
+    let lid = k
+        .transform(lid, &Transform::translation(0.0, 0.0, 10.0))
+        .unwrap()
+        .bodies[0];
+    let post = extrude(&mut k, rect(10.0, 10.0, 20.0, 20.0), vec![], 10.0);
+    let b = k.boolean(BoolOp::Union, lid, &[post]).unwrap().bodies[0];
+    let m0 = k.mass_properties(b).unwrap();
+    assert!((m0.volume - (1200.0 + 1000.0)).abs() < 1e-9 * m0.volume);
+    let inside = edges(&k, b, |m| {
+        near(m.z, 10.0) && ((near(m.x, 10.0) && m.y > 10.0) || (near(m.y, 10.0) && m.x > 10.0))
+    });
+    assert_eq!(inside.len(), 2);
+    let dv = 2.0 * 0.5 * d * d * l + d * d * d / 3.0;
+    let da = 2.0 * (SQRT_2 - 2.0) * d * l + (SQRT_2 - 1.0) * d * d + 2.0 * 0.5 * d * d;
+    // The local chamfer (what `chamfer` takes here) and the blend tool (its fallback, for ends it
+    // can't trim) both.
+    let local = k
+        .chamfer(b, &inside, ChamferSpec::EqualDistance(d))
+        .unwrap()
+        .bodies[0];
+    type Section = Box<dyn Fn(f64) -> cadrs_kernel::native::blend::SectionKind>;
+    let list: Vec<(EdgeId, Section, bool)> = inside
+        .iter()
+        .map(|e| {
+            let s: Section = Box::new(move |_| cadrs_kernel::native::blend::SectionKind::Chamfer {
+                d1: d,
+                d2: d,
+            });
+            (*e, s, false)
+        })
+        .collect();
+    let tool = cadrs_kernel::native::blend::blend(&mut k, b, &list, false)
+        .unwrap()
+        .bodies[0];
+    for (how, c) in [("local", local), ("blend tool", tool)] {
+        let issues = k.get(c).unwrap().check_with(CheckLevel::Full);
+        assert!(issues.is_empty(), "{how}: invalid body: {issues:?}");
+        let m = k.mass_properties(c).unwrap();
+        assert!(
+            (m.volume - (m0.volume + dv)).abs() < REL * m.volume,
+            "{how}: volume {} want {}",
+            m.volume,
+            m0.volume + dv
+        );
+        assert!(
+            (m.surface_area - (m0.surface_area + da)).abs() < REL * m.surface_area,
+            "{how}: area {} want {}",
+            m.surface_area,
+            m0.surface_area + da
+        );
+    }
+}
+
+#[test]
+fn chamfers_either_side_of_a_thin_rib_dont_overlap() {
+    // A rib [13, 17] × [3, 7] × [2, 10] on a plate [0, 30] × [0, 10] × [0, 2] (the plate's top one
+    // face round the rib's foot): the rib's long foot corners are 4 apart on that face, closer
+    // than the chamfers' setbacks on it (3 each), but the chamfers run away from each other,
+    // onto the plate either side: no overlap, each a prism ½ · 3² · 4. Area: each takes a 3 × 4
+    // strip off the plate and off the rib's side and adds √2 · 3 × 4; each fill's two ends stand
+    // in the open beside the rib's ends, a new triangle 9/2 each.
+    let (l, d) = (4.0, 3.0);
+    let mut k = NativeKernel::new();
+    let plate = extrude(&mut k, rect(0.0, 0.0, 30.0, 10.0), vec![], 2.0);
+    let rib = extrude(&mut k, rect(13.0, 3.0, 17.0, 7.0), vec![], 8.0);
+    let rib = k
+        .transform(rib, &Transform::translation(0.0, 0.0, 2.0))
+        .unwrap()
+        .bodies[0];
+    let b = k.boolean(BoolOp::Union, plate, &[rib]).unwrap().bodies[0];
+    let m0 = k.mass_properties(b).unwrap();
+    let feet = edges(&k, b, |m| {
+        near(m.z, 2.0) && (near(m.x, 13.0) || near(m.x, 17.0))
+    });
+    assert_eq!(feet.len(), 2);
+    let dv = 2.0 * 0.5 * d * d * l;
+    let da = 2.0 * (SQRT_2 - 2.0) * d * l + 4.0 * 0.5 * d * d;
+    let local = k
+        .chamfer(b, &feet, ChamferSpec::EqualDistance(d))
+        .unwrap()
+        .bodies[0];
+    type Section = Box<dyn Fn(f64) -> cadrs_kernel::native::blend::SectionKind>;
+    let list: Vec<(EdgeId, Section, bool)> =
+        feet.iter()
+            .map(|e| {
+                let s: Section = Box::new(move |_| {
+                    cadrs_kernel::native::blend::SectionKind::Chamfer { d1: d, d2: d }
+                });
+                (*e, s, false)
+            })
+            .collect();
+    let tool = cadrs_kernel::native::blend::blend(&mut k, b, &list, false)
+        .unwrap()
+        .bodies[0];
+    for (how, c) in [("local", local), ("blend tool", tool)] {
+        let issues = k.get(c).unwrap().check_with(CheckLevel::Full);
+        assert!(issues.is_empty(), "{how}: invalid body: {issues:?}");
+        let m = k.mass_properties(c).unwrap();
+        assert!(
+            (m.volume - (m0.volume + dv)).abs() < REL * m.volume,
+            "{how}: volume {} want {}",
+            m.volume,
+            m0.volume + dv
+        );
+        assert!(
+            (m.surface_area - (m0.surface_area + da)).abs() < REL * m.surface_area,
+            "{how}: area {} want {}",
+            m.surface_area,
+            m0.surface_area + da
+        );
+    }
+}
