@@ -702,6 +702,7 @@ mod tests {
                 .call(Call::Screenshot(Screenshot {
                     max_size: None,
                     view: None,
+                    camera: None,
                 }))
                 .await
         });
