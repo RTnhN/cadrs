@@ -293,7 +293,9 @@ otherwise):
   curves are kept as B-splines instead of being recognised as planes, cylinders, cones, spheres,
   tori and extrusions, lines and circles.
 - `CADRS_BOOL_STRICT=1` (`boolean.rs`): a boolean whose result has crossing faces fails
-  instead of returning the result flagged (`take_invalid_results`). The tests set it.
+  instead of returning the result flagged (`take_invalid_results`). The metamorphic and
+  stress tests don't set it; their helper (`tests/meta_common`) treats a flagged result as an
+  error instead.
 - `CADRS_OCCT_REBUILD=1` (`brep_occt.rs`): a text BRep file's faces are always rebuilt from
   their edges instead of being read directly.
 
