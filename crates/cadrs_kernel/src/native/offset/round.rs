@@ -407,7 +407,7 @@ pub fn offset_rounded(b: &Body, dist: &[f64]) -> Result<Body> {
             "rounded offsets with different distances per face",
         ));
     }
-    grown_except(b, d, &[])
+    grown_except(&merged(b), d, &[], &[])
 }
 
 /// A face's outward normal at a point on it.
@@ -423,10 +423,10 @@ fn outward_normal(b: &Body, fi: usize, p: &P3) -> V3 {
 /// other face doesn't point below the plane, and the ball at a vertex of one whose faces don't
 /// (the points within d of those lie beyond the plane or within d of a face's middle, in its
 /// slab). Rounds there are the costliest pieces to unite (a tube round a spline touches its
-/// faces' slabs along their offsets) and are cut away whole.
-fn grown_except(b: &Body, d: f64, cut: &[(P3, V3)]) -> Result<Body> {
-    let merged = merged(b);
-    let b = &merged;
+/// faces' slabs along their offsets) and are cut away whole. Nor the slabs of the faces
+/// `skip` (an outward shell's curved removed faces, whose slabs the caller cuts away). `b` is
+/// [`merged`] already.
+fn grown_except(b: &Body, d: f64, cut: &[(P3, V3)], skip: &[usize]) -> Result<Body> {
     let size = 1.0 + b.bbox().diagonal();
     let ef = b.edge_faces();
     // The cut plane each face lies on.
@@ -447,7 +447,7 @@ fn grown_except(b: &Body, d: f64, cut: &[(P3, V3)]) -> Result<Body> {
     let above = |fi: usize, m: &V3, p: &P3| outward_normal(b, fi, p).dot(m) >= -tol::ANGULAR;
     let mut pieces: Vec<(Body, String)> = Vec::new();
     for fi in 0..b.faces.len() {
-        if on_cut[fi].is_none() {
+        if on_cut[fi].is_none() && !skip.contains(&fi) {
             pieces.push((
                 face_slab(b, fi, d)?,
                 format!("the slab of face {fi} ({:?})", b.faces[fi].surf.kind()),
@@ -688,31 +688,67 @@ pub fn shell(k: &mut NativeKernel, body: BodyId, spec: &ShellSpec) -> Result<OpR
     } else {
         // Outward: the body grown by a ball, less the body, cut back at the removed faces.
         let rounded = || -> Result<Tracked> {
+            let mb = merged(&b);
+            let remove: Vec<usize> = remove
+                .iter()
+                .map(|&f| face_in(&b, f, &mb))
+                .collect::<Option<_>>()
+                .ok_or(KernelError::Unsupported(
+                    "a removed face merged with its neighbour in an outward shell",
+                ))?;
+            // A curved face is cut away with its slab, which ends square to its edges: where
+            // they are smooth, as the neighbours' walls do (an opening across a fillet).
+            let curved: Vec<usize> = remove
+                .iter()
+                .copied()
+                .filter(|&f| !matches!(mb.faces[f].surf, Surface::Plane { .. }))
+                .collect();
+            let sharp_edge = curved.iter().any(|&f| {
+                mb.faces[f].loops.iter().flatten().any(|c| {
+                    !mb.edges[c.edge].degenerate && dihedral(&mb, c.edge) != Dihedral::Smooth
+                })
+            });
+            if sharp_edge {
+                return Err(KernelError::Unsupported(
+                    "removing a curved face with a sharp edge from an outward shell",
+                ));
+            }
             // (Not the rounds beyond the removed faces, which are cut away.)
             let cut: Vec<(P3, V3)> = remove
                 .iter()
-                .filter_map(|&f| match &b.faces[f].surf {
+                .filter_map(|&f| match &mb.faces[f].surf {
                     Surface::Plane { f: fr } => Some((
                         fr.o,
-                        fr.x.cross(&fr.y).normalize() * if b.faces[f].sense { 1.0 } else { -1.0 },
+                        fr.x.cross(&fr.y).normalize() * if mb.faces[f].sense { 1.0 } else { -1.0 },
                     )),
                     _ => None,
                 })
                 .collect();
-            let grown = grown_except(&b, t, &cut)?;
+            let grown = grown_except(&mb, t, &cut, &curved)?;
             let mut walls = Tracked {
                 src: vec![Vec::new(); grown.faces.len()],
                 body: grown,
             };
             for &f in &remove {
-                let face = &b.faces[f];
+                let face = &mb.faces[f];
                 let Surface::Plane { f: fr } = &face.surf else {
-                    return Err(KernelError::Unsupported(
-                        "removing a curved face from an outward shell",
-                    ));
+                    // Its slab, past the walls (whatever else reaches over it).
+                    let slab = face_slab(&mb, f, 2.0 * t)?;
+                    walls = walls.apply(
+                        &slab,
+                        &vec![Vec::new(); slab.faces.len()],
+                        BoolOp::Subtract,
+                    )?;
+                    continue;
                 };
                 let n = fr.x.cross(&fr.y) * if face.sense { 1.0 } else { -1.0 };
-                let hs = half_space(fr.o, n, size * 4.0 + t * 4.0 + 10.0)?;
+                let mut hs = half_space(fr.o, n, size * 4.0 + t * 4.0 + 10.0)?;
+                // The walls over faces tangent to the removed one round over its plane as
+                // everywhere else (a filleted rim): only the opening goes straight through.
+                let keep = tangent_slabs_beyond(&mb, t, fr.o, n.normalize(), &remove)?;
+                if !keep.is_empty() {
+                    hs = combine_all(hs, keep, BoolOp::Subtract)?;
+                }
                 walls = walls.apply(&hs, &vec![Vec::new(); hs.faces.len()], BoolOp::Subtract)?;
             }
             // walls − body: the body's faces bound the inside.
@@ -938,6 +974,114 @@ pub fn offset_sources(
             steps(f)
         })
         .collect()
+}
+
+/// The face of `mb` (`b` [`merged`]) that face `fi` of `b` is, or lies in: on its surface,
+/// its vertices within the face's box.
+fn face_in(b: &Body, fi: usize, mb: &Body) -> Option<usize> {
+    if mb.faces.len() == b.faces.len() {
+        return Some(fi);
+    }
+    let f = &b.faces[fi];
+    let pts: Vec<P3> = f
+        .loops
+        .iter()
+        .flatten()
+        .flat_map(|c| b.edges[c.edge].v)
+        .map(|v| b.verts[v].p)
+        .collect();
+    let size = 1.0 + b.bbox().diagonal();
+    (0..mb.faces.len()).find(|&g| {
+        let h = &mb.faces[g];
+        if h.surf.kind() != f.surf.kind() || h.sense != f.sense {
+            return false;
+        }
+        let bb = crate::native::kernel::subset(mb, &[g], false)
+            .bbox()
+            .grow(tol::REL * size);
+        pts.iter().all(|p| {
+            let (u, v) = h.surf.project(p, None);
+            (h.surf.eval(u, v) - p).norm() < tol::REL * size && bb.contains(p)
+        })
+    })
+}
+
+/// The slabs (by `d`) of the faces that reach beyond the plane through `o` along `m` (a removed
+/// face's, of an outward shell) and are tangent to the faces on it: those joined to them
+/// through smooth edges, but for any with a sharp edge on them. Beyond the plane an outward
+/// shell's walls stop flush at a sharp edge of the opening (the removed face's plane extended)
+/// but round over a tangent one (the face's offset carried on): the cut there keeps these,
+/// but for the faces `removed` (other openings: the chain runs on through them). `b` is
+/// [`merged`] already.
+fn tangent_slabs_beyond(
+    b: &Body,
+    d: f64,
+    o: P3,
+    m: V3,
+    removed: &[usize],
+) -> Result<Vec<(Body, String)>> {
+    let size = 1.0 + b.bbox().diagonal();
+    let on_plane: Vec<bool> = (0..b.faces.len())
+        .map(|fi| {
+            let Surface::Plane { f: fr } = &b.faces[fi].surf else {
+                return false;
+            };
+            let n = fr.x.cross(&fr.y).normalize() * if b.faces[fi].sense { 1.0 } else { -1.0 };
+            n.dot(&m) > 1.0 - tol::ANGULAR && (fr.o - o).dot(&m).abs() < tol::REL * size
+        })
+        .collect();
+    let ef = b.edge_faces();
+    let kinds: Vec<Dihedral> = (0..b.edges.len()).map(|e| dihedral(b, e)).collect();
+    // Faces with a sharp edge on the plane's faces stop flush there.
+    let mut sharp_to_plane = vec![false; b.faces.len()];
+    for (e, fs) in ef.iter().enumerate() {
+        if kinds[e] != Dihedral::Smooth && fs.iter().any(|&f| on_plane[f]) {
+            for &f in fs {
+                sharp_to_plane[f] = true;
+            }
+        }
+    }
+    let mut tangent = vec![false; b.faces.len()];
+    let mut todo: Vec<usize> = (0..b.faces.len()).filter(|&f| on_plane[f]).collect();
+    while let Some(f) = todo.pop() {
+        for (e, fs) in ef.iter().enumerate() {
+            if kinds[e] != Dihedral::Smooth || !fs.contains(&f) {
+                continue;
+            }
+            for &g in fs {
+                if !on_plane[g] && !tangent[g] {
+                    tangent[g] = true;
+                    todo.push(g);
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for fi in 0..b.faces.len() {
+        if !tangent[fi] || sharp_to_plane[fi] || removed.contains(&fi) {
+            continue;
+        }
+        let bb = crate::native::kernel::subset(b, &[fi], false)
+            .bbox()
+            .grow(d);
+        let reach = (0..8)
+            .map(|i| {
+                let c = P3::new(
+                    if i & 1 == 0 { bb.min.x } else { bb.max.x },
+                    if i & 2 == 0 { bb.min.y } else { bb.max.y },
+                    if i & 4 == 0 { bb.min.z } else { bb.max.z },
+                );
+                (c - o).dot(&m)
+            })
+            .fold(f64::NEG_INFINITY, f64::max);
+        if reach > tol::REL * size {
+            out.push((
+                face_slab(b, fi, d)?,
+                format!("the slab of face {fi}, tangent to the opening"),
+            ));
+        }
+    }
+    Ok(out)
 }
 
 /// A large box beyond the plane through `o` along the normal `n`.

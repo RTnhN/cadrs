@@ -1607,3 +1607,103 @@ fn sharp_offset_of_a_sphere_keeps_its_seam() {
     let cap = PI * (rr - h).powi(2) * (3.0 * rr - (rr - h)) / 3.0;
     close(volume(&k, r), 4.0 / 3.0 * PI * rr.powi(3) - cap, 1e-6);
 }
+
+/// The "extrude test" document: a 30 mm cube with every edge filleted 5, shelled 5 outward with
+/// its top's flat removed. The cube is a 20 mm cube grown by a ball of 5, so its outward walls
+/// are the 20 mm cube grown by 10 less it, less the opening: the top's 20 × 20 flat carried
+/// straight up through the 5 mm wall (the top's rounds are tangent to it, so the walls round
+/// over them as everywhere else, as Onshape's do; they were cut off flat at the top's plane).
+#[test]
+fn outward_shell_of_a_rounded_cube_keeps_its_rounds_round_the_opening() {
+    let mut k = NativeKernel::new();
+    let cube = prism(
+        &mut k,
+        polygon(&[(-15.0, -15.0), (15.0, -15.0), (15.0, 15.0), (-15.0, 15.0)]),
+        vec![],
+        30.0,
+    );
+    let edges: Vec<EdgeId> = k.edges(cube).unwrap().iter().map(|e| e.id).collect();
+    let b = one(k.fillet(cube, &edges, 5.0).unwrap());
+    let top = face_at(&k, b, Vector3::z(), 30.0);
+    let spec = ShellSpec {
+        remove: vec![top],
+        thickness: 5.0,
+        outward: true,
+        hollow: false,
+        sharp: false,
+    };
+    let out = one(k.shell_with(b, &spec).unwrap());
+    // A cube of side a grown by a ball of r: a³ + 6a²r + 3πar² + 4πr³/3.
+    let grown = |a: f64, r: f64| {
+        a.powi(3) + 6.0 * a * a * r + 3.0 * PI * a * r * r + 4.0 / 3.0 * PI * r.powi(3)
+    };
+    close(
+        volume(&k, out),
+        grown(20.0, 10.0) - grown(20.0, 5.0) - 20.0 * 20.0 * 5.0,
+        1e-6,
+    );
+    let bb = k.bounding_box(out).unwrap();
+    assert!((bb.max.z - 35.0).abs() < 1e-6, "top at {}", bb.max.z);
+    // No flat at the top's plane facing up (the rounds cut off there).
+    assert!(!k.faces(out).unwrap().iter().any(|f| {
+        f.plane.is_some_and(|p| p.normal.z > 1.0 - 1e-9) && (f.center.z - 30.0).abs() < 1e-6
+    }));
+}
+
+/// The rounded cube of [`outward_shell_of_a_rounded_cube_keeps_its_rounds_round_the_opening`]
+/// with one of its top's rounds removed too, then alone (a curved face, its edges all smooth: "removing a
+/// curved face from an outward shell is not supported"): the round's opening is its slab, the
+/// quarter of the annulus from 5 to 10 round its axis, 20 long, carried straight out.
+#[test]
+fn outward_shell_removes_a_round_with_its_flat() {
+    let mut k = NativeKernel::new();
+    let cube = prism(
+        &mut k,
+        polygon(&[(-15.0, -15.0), (15.0, -15.0), (15.0, 15.0), (-15.0, 15.0)]),
+        vec![],
+        30.0,
+    );
+    let edges: Vec<EdgeId> = k.edges(cube).unwrap().iter().map(|e| e.id).collect();
+    let b = one(k.fillet(cube, &edges, 5.0).unwrap());
+    let top = face_at(&k, b, Vector3::z(), 30.0);
+    // The round along x between the top and the side at y = 15.
+    let round = k
+        .faces(b)
+        .unwrap()
+        .into_iter()
+        .find(|f| {
+            f.kind == SurfaceKind::Cylinder
+                && f.center.x.abs() < 1e-6
+                && f.center.y > 10.0
+                && f.center.z > 25.0
+        })
+        .expect("no such round")
+        .id;
+    let spec = ShellSpec {
+        remove: vec![top, round],
+        thickness: 5.0,
+        outward: true,
+        hollow: false,
+        sharp: false,
+    };
+    let out = one(k.shell_with(b, &spec).unwrap());
+    let grown = |a: f64, r: f64| {
+        a.powi(3) + 6.0 * a * a * r + 3.0 * PI * a * r * r + 4.0 / 3.0 * PI * r.powi(3)
+    };
+    close(
+        volume(&k, out),
+        grown(20.0, 10.0) - grown(20.0, 5.0) - 20.0 * 20.0 * 5.0 - PI / 4.0 * 75.0 * 20.0,
+        1e-6,
+    );
+    // The round alone: its slab is the only opening.
+    let spec = ShellSpec {
+        remove: vec![round],
+        ..spec
+    };
+    let out = one(k.shell_with(b, &spec).unwrap());
+    close(
+        volume(&k, out),
+        grown(20.0, 10.0) - grown(20.0, 5.0) - PI / 4.0 * 75.0 * 20.0,
+        1e-6,
+    );
+}

@@ -1382,6 +1382,10 @@ fn roll_back_to_edited(
         if over.editing != editing {
             over.editing = editing;
         }
+        let over_result = s.kind == AppliedKind::Shell;
+        if over.over_result != over_result {
+            over.over_result = over_result;
+        }
     }
     let want = session.zip(doc).and_then(|(s, d)| {
         let el = d.doc.element(s.element)?;
@@ -1503,6 +1507,9 @@ fn show_references(
     let mut want: Vec<Pick> = Vec::new();
     match &f.kind {
         FeatureKind::Shell(x) if x.hollow => want.extend(x.parts.iter().map(|p| Pick::Part(*p))),
+        // The faces to remove, filled in yellow on the parts before it (they are gone from
+        // the result the dialog shows).
+        FeatureKind::Shell(x) => want.extend(x.faces.iter().map(|g| Pick::Face(g.part, g.face))),
         // The points (the merge scope's parts stay as they are, `ex3-step5.png`).
         FeatureKind::Hole(x) => {
             want.extend(
@@ -1878,6 +1885,7 @@ fn arrow_size(k: &FeatureKind) -> Option<f64> {
         {
             Some(x.distance)
         }
+        FeatureKind::Shell(x) => Some(x.thickness),
         _ => None,
     }
 }
@@ -1906,6 +1914,10 @@ fn set_arrow_size(k: &mut FeatureKind, v: f64, expr: String) {
             x.distance = v;
             x.distance_expr = expr;
         }
+        FeatureKind::Shell(x) => {
+            x.thickness = v;
+            x.thickness_expr = expr;
+        }
         _ => {}
     }
 }
@@ -1931,7 +1943,7 @@ fn radius_arrow_pointer(
     let Some(s) = session.filter(|s| {
         matches!(
             s.kind,
-            AppliedKind::Fillet | AppliedKind::Plane | AppliedKind::SheetMetal
+            AppliedKind::Fillet | AppliedKind::Plane | AppliedKind::SheetMetal | AppliedKind::Shell
         ) || s.kind == move_face
     }) else {
         inputs.clear();
@@ -2020,6 +2032,7 @@ fn radius_arrow_pointer(
                             FeatureKind::Fillet(_) => "Drag radius",
                             FeatureKind::SheetMetalModel(_) => "Drag depth",
                             FeatureKind::DirectEdit(_) => "Drag distance",
+                            FeatureKind::Shell(_) => "Drag thickness",
                             _ => "Drag offset",
                         };
                         set(world, d.kind, label);
@@ -2196,8 +2209,48 @@ fn place_radius_arrow(
                 dir,
             ))
         });
-    let target = target.or(sm_target).or(face_target);
-    let arrow_name = if plane_target.is_some() {
+    // Shell: on the first face it removes (a hollow shell's: its first part's first face),
+    // standing off it by the thickness, out along its normal for outward walls, else in.
+    let shell_target = session
+        .as_ref()
+        .filter(|s| s.kind == AppliedKind::Shell)
+        .and_then(|s| {
+            let FeatureKind::Shell(x) = &doc
+                .as_ref()?
+                .doc
+                .element(s.element)?
+                .feature(s.feature)?
+                .kind
+            else {
+                return None;
+            };
+            let (solid, i) = if x.hollow {
+                let part = before
+                    .parts
+                    .iter()
+                    .find(|p| Some(&p.id) == x.parts.first())?;
+                (&part.solid, 0)
+            } else {
+                let first = x.faces.first()?;
+                let solid = &before.parts.iter().find(|p| p.id == first.part)?.solid;
+                (
+                    solid,
+                    solid.faces.iter().position(|f| f.name == first.face)?,
+                )
+            };
+            let (p, n) = (solid.face_point(i)?, solid.face_normal(i)?);
+            let normal = Vec3::new(n[0] as f32, n[1] as f32, n[2] as f32).normalize_or_zero();
+            let dir = if x.outward { normal } else { -normal };
+            let t = dragged.unwrap_or(x.thickness) as f32;
+            Some((
+                Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32) + dir * t,
+                dir,
+            ))
+        });
+    let target = target.or(sm_target).or(face_target).or(shell_target);
+    let arrow_name = if shell_target.is_some() {
+        "shell-thickness-arrow"
+    } else if plane_target.is_some() {
         "plane-offset-arrow"
     } else if sm_target.is_some() {
         "sm-depth-arrow"
