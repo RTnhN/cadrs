@@ -313,6 +313,8 @@ pub struct AssemblyParts {
     /// P3G.1: the copies of the linked source the Insert dialog shows (another document, or this
     /// one at a version), for its tree, thumbnails and ghosts before they are inserted.
     pub linked_extra: Vec<cadrs_core::external::LinkedElement>,
+    /// The instances' solids as last placed: a drag makes new ones only for what it moves.
+    placed_solids: cadrs_core::assembly::PlacedSolids,
 }
 
 type AssemblyKey = (
@@ -538,8 +540,12 @@ pub fn update_assembly_parts(
     let (parts, props) = match asm.placed.get(&el.id) {
         Some((k, parts, props)) if *k == key => (parts.clone(), props.clone()),
         _ => {
-            let (parts, props) =
-                cadrs_core::assembly::instance_parts(d, &view, |e| builds.get(&e).cloned());
+            let (parts, props) = cadrs_core::assembly::instance_parts_placed(
+                d,
+                &view,
+                |e| builds.get(&e).cloned(),
+                &mut asm.placed_solids,
+            );
             asm.placed.retain(|e, _| doc.doc.element(*e).is_some());
             asm.placed
                 .insert(el.id, (key.clone(), parts.clone(), props.clone()));
