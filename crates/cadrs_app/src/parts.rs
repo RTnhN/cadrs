@@ -1281,7 +1281,28 @@ fn update_part_cache(
     };
     // An Assembly tab: its instances, as parts in assembly coordinates (P3B.1).
     if el.assembly_model().is_some() {
-        crate::assembly::update_assembly_parts(&doc, el, &mut cache, &mut asm, budget.0);
+        // Nothing new while the document and the assembly's previews are as they were and no
+        // source studio is still building (working the instances out again each frame compared
+        // every source feature, and touching the cache mutably woke everything after it).
+        if !doc.is_changed()
+            && !asm.is_changed()
+            && cache.assembly == Some(el.id)
+            && !cache.rebuilding
+        {
+            return;
+        }
+        let before = (cache.generation, cache.rebuilding, cache.assembly);
+        crate::assembly::update_assembly_parts(
+            &doc,
+            el,
+            cache.bypass_change_detection(),
+            asm.bypass_change_detection(),
+            budget.0,
+        );
+        if (cache.generation, cache.rebuilding, cache.assembly) != before {
+            cache.set_changed();
+            asm.set_changed();
+        }
         return;
     }
     // Nothing to look at while the document and the overrides are as they were and no rebuild

@@ -229,6 +229,35 @@ fn hover_parts(
 
 const GLYPH: Color = Color::srgb(0.55, 0.58, 0.62);
 
+/// The active assembly flattened for the solver, kept until the document changes.
+#[derive(Default)]
+struct FlatCache(
+    Option<(
+        bevy::ecs::change_detection::Tick,
+        std::sync::Arc<cadrs_core::assembly::Assembly>,
+    )>,
+);
+
+/// [`cadrs_core::assembly::structure::solver_model`], made again only when the document changed
+/// (every frame it cost a large assembly a millisecond or two per system that drew from it).
+fn flat_model(
+    doc: &Res<ActiveDocument>,
+    model: &cadrs_core::assembly::Assembly,
+    cache: &mut FlatCache,
+) -> std::sync::Arc<cadrs_core::assembly::Assembly> {
+    let tick = doc.last_changed();
+    if let Some((t, flat)) = &cache.0
+        && *t == tick
+    {
+        return flat.clone();
+    }
+    let flat = std::sync::Arc::new(cadrs_core::assembly::structure::solver_model(
+        &doc.doc, model,
+    ));
+    cache.0 = Some((tick, flat.clone()));
+    flat
+}
+
 #[allow(clippy::too_many_arguments)]
 fn draw_mates(
     doc: Option<Res<ActiveDocument>>,
@@ -240,14 +269,19 @@ fn draw_mates(
     view: Res<ViewportView>,
     mut line: Gizmos<ConnectorGizmos>,
     mut halo: Gizmos<ConnectorHaloGizmos>,
+    mut flat_cache: Local<FlatCache>,
 ) {
     let Some(doc) = doc else { return };
     let Some(model) = doc.active_element().and_then(|e| e.assembly_model()) else {
         return;
     };
+    let ids = visible(model, &d, &h, &hover);
+    if ids.is_empty() {
+        return;
+    }
     // Connectors name parts at any depth (P3B.4).
-    let flat = cadrs_core::assembly::structure::solver_model(&doc.doc, model);
-    for id in visible(model, &d, &h, &hover) {
+    let flat = flat_model(&doc, model, &mut flat_cache);
+    for id in ids {
         let Some(f) = model.mate(id) else { continue };
         let Some(frame) = mate_frame(&flat, &asm.preview, f) else {
             continue;
@@ -289,19 +323,23 @@ fn place_badges(
         &mut BorderColor,
     )>,
     mut commands: Commands,
+    mut flat_cache: Local<FlatCache>,
 ) {
     let model = doc
         .as_ref()
         .and_then(|d| d.active_element()?.assembly_model());
-    let flat = doc
-        .as_ref()
-        .zip(model)
-        .map(|(d, m)| cadrs_core::assembly::structure::solver_model(&d.doc, m))
+    let ids = model
+        .map(|m| visible(m, &d, &h, &hover))
         .unwrap_or_default();
+    // The flattened model only when a badge shows (it is worked out again only when the
+    // document changes).
+    let flat = match (&doc, model) {
+        (Some(doc), Some(m)) if !ids.is_empty() => flat_model(doc, m, &mut flat_cache),
+        _ => std::sync::Arc::default(),
+    };
     let spots: Vec<(MateId, usize, Vec2, &'static str)> = model
         .map(|model| {
-            visible(model, &d, &h, &hover)
-                .into_iter()
+            ids.into_iter()
                 .filter_map(|id| {
                     let k = model.mates.iter().position(|f| f.id == id)?;
                     let f = &model.mates[k];

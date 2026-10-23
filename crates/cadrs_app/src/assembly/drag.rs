@@ -304,8 +304,13 @@ fn instance_drag(
     };
     let Some(element) = super::active_assembly(&doc) else {
         inputs.clear();
-        *state = InstanceDrag::default();
-        parts.preview.clear();
+        // (Only written when set: not an assembly tab every frame.)
+        if state.press.is_some() || state.active.is_some() {
+            *state = InstanceDrag::default();
+        }
+        if !parts.preview.is_empty() {
+            parts.preview.clear();
+        }
         return;
     };
     if state.active.as_ref().is_some_and(|a| a.element != element) {
