@@ -163,6 +163,83 @@ fn tess(
     Ok(())
 }
 
+/// `my_test_cone_face_normal_table` (smTessTest.cpp:2322): a cone (radius 1 to 2, height 10)
+/// over `start`..`end` degrees meshed at 10° (SMLib's `ConvertToPolyBrep`, chord 0 here 0.01):
+/// every vertex of every face's mesh carries its face's outward normal (unit, the surface's
+/// normal at the vertex's (u, v), turned by the face's sense), and the mesh is watertight.
+fn cone_normals(start: f64, end: f64) -> Result<(), String> {
+    use cadrs_kernel::native::draw::{Ax3, Shape};
+    use cadrs_kernel::native::math::V3;
+    let mut k = NativeKernel::new();
+    let a = start.to_radians();
+    let ax = Ax3 {
+        origin: P3::origin(),
+        z: V3::z(),
+        x: V3::new(a.cos(), a.sin(), 0.0),
+    };
+    let Shape::Body(b) = k
+        .pcone_a(Some(&ax), 1.0, 2.0, 10.0, end - start)
+        .map_err(|e| format!("{e:?}"))?
+    else {
+        return Err("the cone isn't a body".into());
+    };
+    let body: Body = (**k.get(b).map_err(|e| format!("{e:?}"))?).clone();
+    let params = tess::TessParams::new(0.01, 10f64.to_radians()).map_err(|e| e.to_string())?;
+    let (faces, _) = tess::mesh(&body, &params).map_err(|e| e.to_string())?;
+    if !tess::check_faces(&faces).is_watertight() {
+        return Err("not watertight".into());
+    }
+    for (fi, m) in faces.iter().enumerate() {
+        let f = &body.faces[fi];
+        if m.normals.len() != m.positions.len() || m.uvs.len() != m.positions.len() {
+            return Err(format!(
+                "face {fi}: {} normals, {} uvs for {} vertices",
+                m.normals.len(),
+                m.uvs.len(),
+                m.positions.len()
+            ));
+        }
+        for (i, n) in m.normals.iter().enumerate() {
+            let q = m.uvs[i];
+            let want = f.surf.normal(q.x, q.y) * if f.sense { 1.0 } else { -1.0 };
+            if (n.norm() - 1.0).abs() > 1e-9 || (n - want).norm() > 1e-6 {
+                return Err(format!(
+                    "face {fi} vertex {i}: normal {n:?}, the face's {want:?}"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `my_test_tess` test 3 (smTessTest.cpp:2442): `BoxFillet.stl` (ASCII) read and its triangles
+/// welded into a valid closed solid (`meshsolid::mesh_solid`, at the kernel's point tolerance:
+/// SMLib's merge tolerance of 1 would move vertices) whose volume is the file's triangles' signed
+/// volume.
+fn read_stl() -> Result<(), String> {
+    let text = std::fs::read_to_string(data(SUITE, "BoxFillet.stl")).map_err(|e| e.to_string())?;
+    let tris = cadrs_kernel::exchange::read_stl_ascii(&text);
+    if tris.is_empty() {
+        return Err("no triangles".into());
+    }
+    let want: f64 = tris
+        .iter()
+        .map(|[a, b, c]| a.coords.dot(&b.coords.cross(&c.coords)) / 6.0)
+        .sum();
+    let body = cadrs_kernel::native::meshsolid::mesh_solid(&tris, 0.0)?;
+    if let Some(bad) = invalid(&body) {
+        return Err(bad);
+    }
+    if !body.is_solid() {
+        return Err("not a solid".into());
+    }
+    let v = cadrs_kernel::native::mass::body_mass(&body).volume;
+    if (v - want.abs()).abs() > 1e-9 * want.abs() {
+        return Err(format!("volume {v}, the triangles' {want}"));
+    }
+    Ok(())
+}
+
 /// SMLib tessellation 1: `nurb_fillet.smb`, chord 0, angle 30°, max edge 0, max aspect 0 (SMLib: no failed faces, mesh volume 1208.6). Chord 0 (angle only) meshes at 0.1 mm.
 #[test]
 fn tess_1_nurb_fillet() {
@@ -323,4 +400,22 @@ fn tess_decimation_7_ellips_ts2() {
 #[test]
 fn tess_decimation_8_ellips_ts2() {
     tess("ellips_ts2.smb", &[], 0.01, 30.0, 0.0, 0.0, None).unwrap();
+}
+
+/// SMLib `my_test_cone_face_normal_table(0, 360)`: a cone meshed, every vertex with its face's outward normal.
+#[test]
+fn cone_normals_0_360() {
+    cone_normals(0.0, 360.0).unwrap();
+}
+
+/// SMLib `my_test_cone_face_normal_table(30, 180)`: a cone meshed, every vertex with its face's outward normal.
+#[test]
+fn cone_normals_30_180() {
+    cone_normals(30.0, 180.0).unwrap();
+}
+
+/// SMLib `my_test_tess` test 3: `BoxFillet.stl` read and welded into a valid solid of the triangles' volume.
+#[test]
+fn stl_box_fillet() {
+    read_stl().unwrap();
 }

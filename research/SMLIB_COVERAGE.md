@@ -66,8 +66,8 @@ Corrections to the generators' NOT_CONVERTED notes, found by the audit:
 ## Converted since the audit
 
 The tables further down are as audited. These conversions came after them and take precedence
-(new tests, of which known failures in brackets). In all: 198 new tests (16 → 20 SMLib suites,
-442 → 640 tests), 10 of them known failures, each asserting the right value with its reason in
+(new tests, of which known failures in brackets). In all: 201 new tests (16 → 20 SMLib suites,
+442 → 643 tests), 10 of them known failures, each asserting the right value with its reason in
 `tools/smlib_known_failures/`.
 
 | Source items | Suite: tests | Checks |
@@ -83,6 +83,7 @@ The tables further down are as audited. These conversions came after them and ta
 | smSurfaceTest `my_test_analytic_surfaces` (9 of 10 surfaces), `my_test_sp_analy` (live block) | smlib_surfaces: `analytic_*` (9, [1]), `sp_analy_revolution` (1) | grid points found again within 1e-6 |
 | smTessTest `my_poly_boolean_regression` tests 1–3, 5 (`my_box_box_stress` 6 steps, L prism − box, cube ∪ cube, `box_cyl_grid.smp` 25 differences less 3 non-manifold) | smlib_poly_booleans (30) | valid solids; closed-form volumes (snapping below the point tolerance allowed); SMLib's B-rep difference (volume, area) for the grid |
 | smTessTest `my_test_decimation_regression` (8 tests, their meshing; 5 and 6 the same) | smlib_tessellation: `tess_decimation_*` (7) | mesh watertight (a sheet's open only on its border), within chord, SMLib's mesh volume |
+| smTessTest `my_test_cone_face_normal_table` (2), `my_test_tess` test 3 (STL read) | smlib_tessellation: `cone_normals_*` (2), `stl_box_fillet` (1) | every mesh vertex's normal the face's outward normal; the STL welded into a valid solid of the triangles' volume |
 | smAdvancedTest `my_test_tsurface_regression` 25 (`ellips_ts2.smb`): benchmark point solve, point classify, point intersect | smlib_trimmed_surfaces: `tsurf_25_*` (3) | distance 2870.476090 as SMLib's run prints; 389 grid points inside / on the face (new oracle `tgrid`) |
 | SM_API_test: `TestSmMergeBreps` (5), `TestSmShellBrepFull` (4), `TestSmMassProperties` (2), `TestSmPrecisePropertySelection` (4), `TestSmBrepDistance` (4), `TestSmGetClosestPoint`/`FindEdge`/`FindFaces`/`GetFaces`/`GetEdges` (1), `TestSmIntersectCurveSurface`/`CurveFace`/`CurveBrep` (5), `TestSmBooleanBoundsExample`, `TestSmBooleanWithOptions`, `TestSmNonManifoldBoolean`, `TestSmPiecewiseMerge`/`BooleanLists` (4), `TestSmSweepAlongPlanarPath` (3), `TestSmCurveSweep`, `TestSmCreateLinearSweep*`/`RotationalSweep` (4), `TestSmCircularFillet`, `TestSmCreateOffsetSurface` (2), `TestSmHealBrep`, `TestSmImportExport`, `TestSmTessellateBoundaries`, `TestSmOffsetBrepFull`, `TestSmCreateSurfaceRevolution*` (4), `TestSmCut`/`TestSmIntersectBrepWithPlane` | smlib_sm_api (49) | SMLib's asserted values (merge, shell, mass, areas, distances, points) or, where it asserts only success, the closed form |
 | test_omni_solid.py: `TestBooleans` planar booleans (16 squares, 4 discs), `TestOffsetShell` (4 box shells, 2 cylinder shells), `TestSkinPrimitiveGeometry`, `TestSweeps` (4), `TestQueries` relationships (5) and values (7), `TestTransforms` reflections (4) | smlib_python (48, [3]) | the test's literal tables and closed forms; its merges and distances are SM_API_test's (smlib_sm_api) |
